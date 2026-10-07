@@ -1,0 +1,781 @@
+import { createI18n } from 'vue-i18n'
+
+export const SUPPORTED_LOCALES = ['zh-Hans', 'zh-Hant', 'en'] as const
+export type AppLocale = (typeof SUPPORTED_LOCALES)[number]
+
+const STORAGE_KEY = 'consense-language'
+
+export const LOCALE_LABELS: Record<AppLocale, string> = {
+  'zh-Hans': '简体中文',
+  'zh-Hant': '繁體中文',
+  en: 'English'
+}
+
+const zhHans = {
+  llm: { source: '模型来源', local: '本地模型', minimax: 'MiniMax 国内 Token Plan', model: '模型', configured: '配置已就绪', notConfigured: '未配置', missingKey: '未配置 API 密钥', disabled: '已停用', loading: '正在读取模型配置…', unavailable: '模型配置暂时无法读取', newOperations: '切换仅影响新任务；配置就绪不代表连接或额度已验证。', recordedModel: '记录的模型', identityUnknown: '没有保存模型标识', identityNote: '标识来自所选配置；尚无供应商对实际执行模型的独立证明。' },
+  app: { name: 'ConSense', tagline: 'CAC Solution · 本地部署' },
+  nav: { drafting: 'Drafting 起草', vetting: 'Vetting 审查', advice: 'Advice 咨询', skills: 'Skills 配置', prompts: 'Prompts 提示词', collapse: '收起导航' },
+  screen: {
+    drafting: 'Drafting 起草',
+    vetting: 'Vetting 审查',
+    advice: 'Advice 咨询',
+    prompts: 'Prompts 提示词'
+  },
+  topbar: {
+    project: '项目', language: '语言', offline: '本地部署', scenario: '提案场景',
+    newProject: '新建项目', renameProject: '重命名项目', deleteProject: '删除项目',
+    projectName: '项目名称', projectContract: '合约编号', projectNamePlaceholder: '例如：示例房屋重建项目',
+    createHint: '新建后自动切换到该项目；项目数据相互隔离，需在第 1 步重新上传标准模板与项目资料。',
+    renameHint: '重命名只修改项目名称，不影响已上传的资料、变量与生成结果。',
+    deleteGuard: '至少保留一个项目',
+    deleteConfirm: '确认删除项目「{name}」？该操作不可恢复。',
+    deleteHint: '将一并删除该项目的标准模板、证据、变量、生成文稿、审查问题与问答记录。',
+    projectCreated: '项目已创建', projectDeleted: '项目已删除'
+  },
+  common: {
+    save: '保存', cancel: '取消', close: '关闭', confirm: '确认', back: '上一步', next: '下一步',
+    upload: '上传', download: '下载', search: '搜索', refresh: '刷新', delete: '删除', add: '新增',
+    reset: '恢复默认', all: '全部', loading: '处理中…', done: '完成', empty: '暂无数据', confirmAll: '确认全部',
+    status: '状态', type: '类型', scope: '范围', file: '文件', page: '页码', actions: '操作', detail: '详情',
+    generated: '已生成', pending: '待生成', confirmed: '已确认', unconfirmed: '待确认', saved: '已保存'
+  },
+  drafting: {
+    title: '按标准模板与项目证据生成 NTT / SCT / SCC',
+    subtitle: '先读取资料，再逐个确认变量，最后生成整份文稿。所有取值都必须有原文依据。',
+    wizard: {
+      inputs: { title: '1. 读取资料', desc: '标准模板与项目沟通证据', done: '资料已就绪' },
+      base: { title: '2. 基础变量', desc: '全项目通用取值', done: '全部已确认' },
+      files: { title: '3. 分文件变量', desc: '按 NTT / SCT / SCC 复核并生成', done: '已生成文稿' }
+    },
+    templates: { title: '1. 标准模板', desc: 'NTT / SCT / SCC 模板集，起草与变量推理的基准。', upload: '上传并解析', replace: '替换',
+      blank: '下载空白模板草稿', blankHint: '下载带 {{key}} 占位符的 NTT 模板草稿，可在原 PDF 上加占位符后重新上传',
+      blankDownloaded: '空白模板草稿已下载 — 按文件中的 {{key}} 占位符改写 NTT 后重新上传',
+    },
+    inputs: { title: '2. 项目沟通证据', desc: '邮件、会议纪要、备忘录与澄清记录，仅用于起草 NTT / SCT / SCC。', upload: '上传起草证据' },
+    variables: {
+      baseTitle: '基础变量', fileTitle: '分文件变量', extract: '识别变量', extracting: '本地模型正在识别变量…',
+      source: '依据', affects: '影响文件', result: '处理方式', options: '选项', value: '取值', note: '模型依据',
+      empty: '尚无变量，请先上传资料后点击「识别变量」，由本地模型自动识别变量并给出建议值。',
+      emptyReady: '资料已就绪，点击上方「识别变量」，由本地模型自动识别变量并给出建议值。',
+      extractHint: '变量识别不依赖预置清单：模型会通读已解析的模板与证据，自行识别需要决策的变量、取值与依据。',
+      traceButton: '查看识别过程',
+      traceTitle: '模型识别过程',
+      traceModel: '模型',
+      traceAt: '完成时间',
+      traceSystem: '① 系统提示词（角色与规则）',
+      traceUser: '② 发送给模型的材料（模板 + 项目证据）',
+      traceRaw: '③ 模型原始返回（每个变量的取值、依据原文与思路）',
+      traceEmpty: '尚未进行变量识别，先点击「识别变量」。',
+      addVariable: '+ 新增变量',
+      addVariableTitle: '新增 FILE 变量',
+      addVariableHint: '模型未识别到的 Guidance Note / 编辑目标，可由 QS 手工补录。',
+      addVariableKey: '变量 key（英文标识，仅字母数字下划线短横线）',
+      addVariableFile: '作用文件',
+      addVariableLabel: '标签',
+      addVariableLabelZhHant: '繁體中文標籤（可選）',
+      addVariableLabelEn: 'English label（可選）',
+      addVariableAction: '处理方式',
+      addVariableOptions: '选项（仅 choice 型需要，逗号或换行分隔）',
+      addVariableAffects: '影响文件（NTT,SCT,SCC）',
+      addVariableValue: '取值',
+      addVariableSourceQuote: '原文依据片段',
+      addVariableReason: '依据说明',
+      addVariableConfidence: '置信度 0~1',
+      addVariableSaved: '已新增变量',
+      addVariableKeyInvalid: '仅允许英文 / 数字 / 下划线 / 短横线'
+    },
+    files: {
+      tab: '文件', matrix: '变量影响关系图', generate: '一键生成文稿', generating: '正在生成文稿…',
+      download: '下载模板', preview: '文稿预览',
+      focusMode: '专注模式', exitFocus: '退出专注',
+      confirmFileAll: '确认本文件全部变量',
+      confirmFileDone: '@FILE@ 全部变量已确认',
+      previewMode: '预览模式', modeReview: '审阅模式', modeFinal: '最终预览',
+      downloadPdfHint: '下载生成稿 PDF；未生成时下载标准模板 PDF',
+      downloadTemplateHint: '该文件尚未生成，将下载标准模板 PDF',
+      varChecklist: '变量确认',
+      headerTitle: '标准模板',
+      reviewToggleHint: '打开 / 关闭本文件变量调整点抽屉',
+      reviewToggle: '审阅调整点', reviewPaneTitle: '审阅区 · 调整点', reviewPaneHint: '默认列出本文件未确认的变量；点击任意条目会选中左侧对应变量卡并高亮闪烁，便于在 PDF 中定位该条款。', noPoints: '暂无调整点',
+      valueLabel: '取值', resultLabel: '处理结果', sourceLabel: '来源', noteLabel: '模型依据',
+      aiDraft: 'AI 建议稿', reedit: '重新编辑',
+      impactPoint: '影响点', sharedWith: '同时影响',
+      previewFailed: 'PDF 预览加载失败，请稍后重试。',
+      pdfDiag: 'PDF 识别到 @TOKENS@ 个 {{KEY}}，其中 @MATCHED@ 个命中变量（共 @VARS@ 条）',
+      ocrLoading: 'OCR 模型加载中（首次约 10MB）…',
+      ocrRunning: 'OCR 识别中 @CURRENT@/@TOTAL@ 页…',
+      ocrError: 'OCR 失败（PDF 仍可查看，token 高亮不可用）',
+      listItems: '项', listHint: '清单型变量 — 请在第 2 步基础变量中逐行编辑。',
+      noAnchor: '（未定位到模板锚点）',
+      matrixHint: '基础变量影响全部三份文件；FILE 变量按 fileKey 归属。点击单元格查看变量详情。',
+      sankeySearch: '搜索变量名称 / key…',
+      sankeyClear: '清除选择', sankeyFullscreen: '全屏',
+      viewGraph: '图形视图', viewTable: '表格视图',
+      sankeyVars: '变量', sankeyActions: '改写动作', sankeyFiles: '文件落点',
+      sankeyEmpty: '暂无变量：先在第 1 步上传标准模板并抽取变量。',
+      sankeyLegend: '变量 → 改写动作 → 文件落点；点击变量节点高亮链路，点击文件节点筛选落点，Esc 退出全屏。',
+      sankeyGotoFile: '前往确认'
+    },
+    actions: {
+      delete: '删除（含编号）', notused: 'Not used（保留编号）', choice: '二选一', rewrite: '整段重写', fill: '填空'
+    },
+    gates: {
+      needInputs: '请先上传至少一份标准模板或项目证据。',
+      needBase: '基础变量尚未全部确认，无法进入下一步。',
+      needAll: '仍有变量未确认，请先确认全部变量。'
+    }
+  },
+  vetting: {
+    title: '审查整份招标文件，按问题类型输出可复核的审查报告',
+    subtitle: '分段核对审查源集，展示覆盖范围与证据出处；所有发现均需人工复核。',
+    metrics: {
+      reference: '条款引用错误', referenceDetail: '引用不存在 / 编号错误 / 空白未定稿 / 版本引用',
+      conflict: '内容冲突', conflictDetail: '范围 / 付款 / 工期 / 违约金 / 保函不一致',
+      language: '语言与用词', languageDetail: '语法、拼写、英式 / 美式英语、表达不清',
+      risk: '主观风险条款', riskDetail: '易引发合约争议 / 表述不清晰，需 QS 专业判断'
+    },
+    actions: {
+      source: '审查源集', upload: '上传整份招标文件材料', run: '运行审查', running: '正在审查…', export: '导出审查报告', exportStarted: '{format} 审查报告已生成并发起下载'
+    },
+    uploadRole: { label: '上传文件用途', auto: '自动识别', tender: '招标文件', standard: '标准依据', project_fact: '项目资料', package_manifest: '文件目录' },
+    toolbar: { searchPlaceholder: '搜索条款、文件或问题', allTypes: '全部类型', allScopes: '全部范围', intra: '文件内', inter: '跨文件' },
+    locator: { file: '1. 文件', page: '2. 页码', variable: '2. 变量', errorClass: '2. 错误类别', all: '全部' },
+    list: { empty: '没有符合条件的审查发现。' },
+    drawer: {
+      title: '审查详情', subtitle: '证据、理由与人工处置。',
+      type: '问题类型', scope: '范围', reference: '引用', status: '状态', pattern: '检测模式',
+      location: '落点', expected: '应为', comment: '审查评语', reason: '风险与理由', suggestion: '建议处理',
+      openSource: '打开来源', openOriginal: '打开原始文件（PDF 按物理页打开，其他格式下载）', markHandled: '标记已处理', assign: '分派给 QS',
+      evidence: '证据原文', located: '已定位原文', unverified: '未能定位原文',
+      locating: '正在回溯原文…',
+      notLocated: '未能在该文件原文中逐字定位到这条内容，请人工复核。',
+      evidenceFailed: '证据加载失败，可以重试。'
+    },
+    job: {
+      title: '审查任务', resume: '重新获取进度', failed: '审查任务失败',
+      background: '任务在后台运行；重新打开本项目后可以继续查看进度。',
+      connectionPaused: '暂时无法获取进度，后台任务可能仍在运行。恢复连接后重新获取进度。',
+      progressLabel: '执行进度',
+      executionCompleteNote: '任务执行结束不代表审查范围已完整覆盖。未提交、超预算及来源未知仍须处理；请查看下方覆盖记录。',
+      status: { QUEUED: '等待运行', RUNNING: '审查中', COMPLETED: '任务执行结束', FAILED: '运行失败' }
+    },
+    coverage: {
+      title: '文档覆盖与解析提示', documents: '份文档已处理', warnings: '提示与限制',
+      parse: '解析状态', segments: '已处理 / 总片段', characters: '已处理 / 可用字符',
+      callLedger: '语义调用记录（局部窗口）', callLedgerNote: '这里只记录实际提交、模型判断与证据校验。调用完成或没有采纳发现，都不能据此认定全文无问题。',
+      projectReference: '项目资料对照', callTopic: '主题', callStatus: '调用结果', callSubmitted: '全局输入片段 / 字符', callAssessments: '问题 / 一致 / 上下文不足', callFindings: '采纳 / 证据剔除', callContext: '预算略过 / 部分上下文 / 限定未知',
+      callStates: { not_submitted: '未提交', completed: '已返回并校验', completed_empty: '返回空结果', completed_with_rejections: '有记录未通过证据校验', failed: '调用或结构校验失败' , not_submitted_over_budget: "未提交：完整输入超预算", not_submitted_budget_unknown: "未提交：完整输入预算未知", unknown: "调用状态未知" },
+      reviewScope: "审查来源范围",
+      sourceRequests: "来源请求",
+      pendingRequests: "未处理 / 总请求",
+      extraPackets: "额外材料包",
+      packetFailures: "失败 / 未提交包",
+      packetDetails: "查看材料包记录",
+      actualSubmission: "实际提交",
+      submitted: "已提交",
+      notSubmitted: "未提交",
+      tokenCounts: "输入 + 输出预留 / 上下文 token",
+      failureReason: "未完成原因",
+      packetIdentity: "查看来源身份",
+      fullInputPacket: "完整输入包 ID",
+      sourceObservationPacket: "来源观察包 ID",
+      packetSnapshot: "来源包快照",
+      requestDetails: "查看来源请求状态",
+      requiredMembers: "必需片段",
+      missingMembers: "缺少片段",
+      pendingScopeNote: "未提交、超预算、来源未知及包数上限略过的请求仍待处理。一致判断或空数组仅记录该包返回，不确认主题或合同已完整审查。",
+      candidateScopeNote: "发现仍需人工复核。原文已定位只说明引文位置；处理状态及报告须对应各条证据的来源包快照。",
+      legacyPacketUnknown: "未提供来源包身份（旧记录或规则发现）；不能推断来自当前输入包。",
+      transportStates: {"already_global": "仅全局来源已存在", "transported_extra_pack": "已安排额外来源包", "oversized": "待处理：完整请求过长", "omitted_pack_cap": "待处理：来源包数量上限", "unknown": "待处理：来源未知", "budget_unknown": "待处理：预算未知", "over_budget": "待处理：超出预算"},
+      requestStates: {"decoded": "仅已解码，范围仍未知", "decoded_provider_estimate": "已解码（供应商估算）；范围仍未知", "decoded_with_rejections": "已解码，有证据被剔除；范围仍未知", "decoded_provider_estimate_with_rejections": "已解码（供应商估算），有证据被剔除；范围仍未知", "over_budget": "待处理：超出预算", "not_submitted_over_budget": "未提交：超预算", "not_submitted_budget_unknown": "未提交：预算未知", "not_submitted_oversized": "未提交：完整请求过长", "not_submitted_omitted_pack_cap": "未提交：来源包数量上限", "not_submitted_unknown": "未提交：来源未知", "failed": "执行失败，待处理", "not_submitted": "尚未提交"},
+      globalCall: "全局调用",
+      unknownCount: "未知",
+      aggregateStates: {"failed": "审查执行失败", "not_submitted": "尚未提交审查", "partial": "部分来源未审查", "observed_requests_decoded_scope_unknown": "观察范围已处理，完整性未知", "unknown": "覆盖未知（无分包记录）"},
+      budgetStates: {"budget_unknown": "完整输入 token 预算未知", "over_budget": "完整输入超过 token 预算", "observed_tokens": "完整输入 token 已计数", "provider_estimated_fit": "供应商估算：完整输入预算可用"},
+      explanation: '覆盖信息对应最近一次任务的源文件快照。片段已处理表示已完成审查步骤，不代表不存在问题；扫描件、未解析文件和缺少材料会限制结论。'
+    },
+    verification: { verified: '证据已定位', partial: '证据部分已定位', unverified: '证据待定位' },
+    findingSource: { rule: '规则检查', model: '模型建议' },
+    evidenceSides: { source: '问题原文', target: '对照原文', baseline: '标准模板', reference: '参考依据', left: '证据 A', right: '证据 B' },
+    review: { OPEN: '待处理', HANDLED: '已处理', ASSIGNED: '已分派', reopen: '重新打开', retained: '同一问题再次检出时保留已处理或已分派状态；新问题仍需人工复核。', team: '项目团队复核', remarks: '项目团队回复', actionTaken: '实际处理说明', addendum: '是否需纳入招标补遗', undecided: '待决定', required: '需要', notRequired: '不需要', save: '保存复核记录', discard: '放弃本次编辑', saved: '复核记录已保存', savedAt: '上次保存：', unsaved: '有未保存的编辑', unsavedExport: '请先保存或放弃以下审查项的复核编辑，再导出报告或重新审查：', saveFailed: '保存失败，编辑内容仍保留。请重试。' },
+    report: { format: '审查报告格式' },
+    run: { empty: '尚未运行审查', started: '正在执行审查任务…', finished: '任务执行结束，返回 {count} 条待复核发现' }
+  },
+  advice: {
+    title: '基于选定合约文件包进行提问',
+    subtitle: '回答必须带合同条款或摘录；找不到依据时返回 I don\'t know，不补全。',
+    scopeNote: '范围：整份招标文件；回答只引用包内条款，找不到依据时返回 I don\'t know',
+    scope: { fullset: '选定合约条件', tender: '仅招标文件', contract: '仅合约条件' },
+    actions: { refreshIndex: '刷新证据索引', ask: '提问', precedence: '优先次序依据', clear: '清空对话' },
+    placeholder: '输入合约问题，例如：SCC4.1 下的文件优先次序是什么？',
+    evidenceMode: '证据模式已开启',
+    indexing: '正在重建证据索引…',
+    chat: { title: '合约咨询对话', user: 'QS 用户', assistant: 'ConSense · 回答' },
+    citation: {
+      title: '引用文件内容', subtitle: '点击引用查看来源文件原文，命中段落高亮显示。',
+      empty: '暂无引用，提问后展示来源原文。', emptySource: '右侧区域展示引用文件原文，并高亮命中段落。',
+      footer: '证据模式已开启 · 不超出选定文件包进行推断。'
+    },
+    quick: '快速问题',
+    unknown: {
+      title: 'I don\'t know',
+      fullset: '在选定范围（选定合约条件）内未找到充分条款依据。系统不会超出合约包进行推断。',
+      tender: '在选定范围（仅招标文件）内未找到充分条款依据。系统不会超出合约包进行推断。',
+      contract: '在选定范围（仅合约条件）内未找到充分条款依据。系统不会超出合约包进行推断。'
+    },
+    indexReady: '索引就绪，共 {count} 个切片'
+  },
+  skills: {
+    title: 'Skills · 配置', edit: '编辑', preview: '预览', save: '保存修改', restore: '恢复默认',
+    steps: 'How it decides', rules: 'Detection rules', output: '输出什么', guardrails: '不做什么（边界）',
+    hint: '改动仅作用于此语言版本。'
+  },
+  system: {
+    title: '本地依赖', llm: '大模型', ocr: 'OCR 解析', vector: '向量库',
+    ready: '就绪', notReady: '未连接', healthy: '本地依赖就绪', degraded: '部分本地依赖未连接'
+  },
+  prompts: {
+    title: '提示词配置',
+    subtitle: '直接编辑驱动本地模型的提示词，保存后立即对后续调用生效，无需重新打包或重启服务。',
+    systemLabel: 'System Prompt（角色与规则）',
+    userLabel: 'User Prompt 模板',
+    placeholders: '运行时占位符',
+    customized: '已自定义',
+    builtin: '出厂默认',
+    save: '保存提示词',
+    saving: '保存中…',
+    saved: '提示词已保存',
+    reset: '恢复出厂默认',
+    resetDone: '已恢复出厂默认',
+    reverting: '恢复中…',
+    groupDrafting: 'Drafting 起草',
+    groupVetting: 'Vetting 审查',
+    groupAdvice: 'Advice 咨询',
+    empty: '暂无提示词配置',
+    pick: '从左侧选择一条提示词查看并编辑',
+    placeholderHint: '这条 User 模板需要 {count} 个 %s 占位符，运行时按顺序填入项目数据；请勿增删或改动占位符数量。',
+    noPlaceholderHint: '这条提示词没有运行时占位符，内容会原样送入模型。',
+    updatedAt: '最近更新',
+    unsaved: '有未保存的改动',
+    unsavedConfirm: '当前有未保存的改动，切换后将被丢弃，确定继续？',
+    resetConfirm: '确定恢复这条提示词的出厂默认内容？当前修改将丢失。'
+  }
+}
+
+const zhHant: typeof zhHans = {
+  llm: { source: '模型來源', local: '本地模型', minimax: 'MiniMax 國內 Token Plan', model: '模型', configured: '配置已就緒', notConfigured: '未配置', missingKey: '未配置 API 金鑰', disabled: '已停用', loading: '正在讀取模型配置…', unavailable: '模型配置暫時無法讀取', newOperations: '切換僅影響新任務；配置就緒不代表連線或額度已驗證。', recordedModel: '記錄的模型', identityUnknown: '沒有儲存模型標識', identityNote: '標識來自所選配置；尚無供應商對實際執行模型的獨立證明。' },
+  app: { name: 'ConSense', tagline: 'CAC Solution · 本地部署' },
+  nav: { drafting: 'Drafting 起草', vetting: 'Vetting 審查', advice: 'Advice 諮詢', skills: 'Skills 配置', prompts: 'Prompts 提示詞', collapse: '收起導航' },
+  screen: { drafting: 'Drafting 起草', vetting: 'Vetting 審查', advice: 'Advice 諮詢', prompts: 'Prompts 提示詞' },
+  topbar: {
+    project: '項目', language: '語言', offline: '本地部署', scenario: '提案場景',
+    newProject: '新增項目', renameProject: '重新命名項目', deleteProject: '刪除項目',
+    projectName: '項目名稱', projectContract: '合約編號', projectNamePlaceholder: '例如：示例房屋重建項目',
+    createHint: '新增後自動切換至該項目；項目資料相互隔離，需在第 1 步重新上傳標準模板與項目資料。',
+    renameHint: '重新命名只修改項目名稱，不影響已上傳的資料、變量與生成結果。',
+    deleteGuard: '至少保留一個項目',
+    deleteConfirm: '確認刪除項目「{name}」？該操作不可復原。',
+    deleteHint: '將一併刪除該項目的標準模板、證據、變量、生成文稿、審查問題與問答記錄。',
+    projectCreated: '項目已建立', projectDeleted: '項目已刪除'
+  },
+  common: {
+    save: '儲存', cancel: '取消', close: '關閉', confirm: '確認', back: '上一步', next: '下一步',
+    upload: '上傳', download: '下載', search: '搜尋', refresh: '重新整理', delete: '刪除', add: '新增',
+    reset: '恢復預設', all: '全部', loading: '處理中…', done: '完成', empty: '暫無資料', confirmAll: '確認全部',
+    status: '狀態', type: '類型', scope: '範圍', file: '文件', page: '頁碼', actions: '操作', detail: '詳情',
+    generated: '已生成', pending: '待生成', confirmed: '已確認', unconfirmed: '待確認', saved: '已儲存'
+  },
+  drafting: {
+    title: '按標準模板與項目證據生成 NTT / SCT / SCC',
+    subtitle: '先讀取資料，再逐個確認變量，最後生成整份文稿。所有取值都必須有原文依據。',
+    wizard: {
+      inputs: { title: '1. 讀取資料', desc: '標準模板與項目溝通證據', done: '資料已就緒' },
+      base: { title: '2. 基礎變量', desc: '全項目通用取值', done: '全部已確認' },
+      files: { title: '3. 分文件變量', desc: '按 NTT / SCT / SCC 覆核並生成', done: '已生成文稿' }
+    },
+    templates: { title: '1. 標準模板', desc: 'NTT / SCT / SCC 模板集，起草與變量推理的基準。', upload: '上傳並解析', replace: '替換',
+      blank: '下載空白模板草稿', blankHint: '下載帶 {{key}} 佔位符的 NTT 模板草稿，可在原 PDF 上加佔位符後重新上傳',
+      blankDownloaded: '空白模板草稿已下載 — 按文件中的 {{key}} 佔位符改寫 NTT 後重新上傳',
+    },
+    inputs: { title: '2. 項目溝通證據', desc: '郵件、會議紀要、備忘錄與澄清記錄，僅用於起草 NTT / SCT / SCC。', upload: '上傳起草證據' },
+    variables: {
+      baseTitle: '基礎變量', fileTitle: '分文件變量', extract: '識別變量', extracting: '本地模型正在識別變量…',
+      source: '依據', affects: '影響文件', result: '處理方式', options: '選項', value: '取值', note: '模型依據',
+      empty: '尚無變量，請先上傳資料後點擊「識別變量」，由本地模型自動識別變量並給出建議值。',
+      emptyReady: '資料已就緒，點擊上方「識別變量」，由本地模型自動識別變量並給出建議值。',
+      extractHint: '變量識別不依賴預置清單：模型會通讀已解析的模板與證據，自行識別需要決策的變量、取值與依據。',
+      traceButton: '查看識別過程',
+      traceTitle: '模型識別過程',
+      traceModel: '模型',
+      traceAt: '完成時間',
+      traceSystem: '① 系統提示詞（角色與規則）',
+      traceUser: '② 發送給模型的材料（模板 + 項目證據）',
+      traceRaw: '③ 模型原始返回（每個變量的取值、依據原文與思路）',
+      traceEmpty: '尚未進行變量識別，先點擊「識別變量」。',
+      addVariable: '+ 新增變量',
+      addVariableTitle: '新增 FILE 變量',
+      addVariableHint: '模型未識別到的 Guidance Note / 編輯目標，可由 QS 手工補錄。',
+      addVariableKey: '變量 key（英文標識，僅字母數字下劃線短橫線）',
+      addVariableFile: '作用檔案',
+      addVariableLabel: '標籤',
+      addVariableLabelZhHant: '簡體中文標籤（可選）',
+      addVariableLabelEn: 'English label（可選）',
+      addVariableAction: '處理方式',
+      addVariableOptions: '選項（僅 choice 型需要，逗號或換行分隔）',
+      addVariableAffects: '影響檔案（NTT,SCT,SCC）',
+      addVariableValue: '取值',
+      addVariableSourceQuote: '原文依據片段',
+      addVariableReason: '依據說明',
+      addVariableConfidence: '置信度 0~1',
+      addVariableSaved: '已新增變量',
+      addVariableKeyInvalid: '僅允許英文 / 數字 / 下劃線 / 短橫線'
+    },
+    files: {
+      tab: '文件', matrix: '變量影響關係圖', generate: '一鍵生成文稿', generating: '正在生成文稿…',
+      download: '下載模板', preview: '文稿預覽',
+      focusMode: '專注模式', exitFocus: '退出專注',
+      confirmFileAll: '確認本文件全部變量',
+      confirmFileDone: '@FILE@ 全部變量已確認',
+      previewMode: '預覽模式', modeReview: '審閱模式', modeFinal: '最終預覽',
+      downloadPdfHint: '下載生成稿 PDF；未生成時下載標準模板 PDF',
+      downloadTemplateHint: '該文件尚未生成，將下載標準模板 PDF',
+      varChecklist: '變量確認',
+      headerTitle: '標準模板',
+      reviewToggleHint: '打開 / 關閉本文件變量調整點抽屜',
+      reviewToggle: '審閱調整點', reviewPaneTitle: '審閱區 · 調整點', reviewPaneHint: '預設列出本文件未確認的變量；點擊任意條目會選中左側對應變量卡並高亮閃爍，便於在 PDF 中定位該條款。', noPoints: '暫無調整點',
+      valueLabel: '取值', resultLabel: '處理結果', sourceLabel: '來源', noteLabel: '模型依據',
+      aiDraft: 'AI 建議稿', reedit: '重新編輯',
+      impactPoint: '影響點', sharedWith: '同時影響',
+      previewFailed: 'PDF 預覽載入失敗，請稍後重試。',
+      pdfDiag: 'PDF 識別到 @TOKENS@ 個 {{KEY}}，其中 @MATCHED@ 個命中變量（共 @VARS@ 條）',
+      ocrLoading: 'OCR 模型載入中（首次約 10MB）…',
+      ocrRunning: 'OCR 識別中 @CURRENT@/@TOTAL@ 頁…',
+      ocrError: 'OCR 失敗（PDF 仍可查看，token 高亮不可用）',
+      listItems: '項', listHint: '清單型變量 — 請在第 2 步基礎變量中逐行編輯。',
+      noAnchor: '（未定位到模板錨點）',
+      matrixHint: '基礎變量影響全部三份文件；FILE 變量按 fileKey 歸屬。點擊單元格查看變量詳情。',
+      sankeySearch: '搜尋變量名稱 / key…',
+      sankeyClear: '清除選擇', sankeyFullscreen: '全螢幕',
+      viewGraph: '圖形視圖', viewTable: '表格視圖',
+      sankeyVars: '變量', sankeyActions: '改寫動作', sankeyFiles: '文件落點',
+      sankeyEmpty: '暫無變量：先在第 1 步上傳標準模板並抽取變量。',
+      sankeyLegend: '變量 → 改寫動作 → 文件落點；點擊變量節點高亮鏈路，點擊文件節點篩選落點，Esc 退出全螢幕。',
+      sankeyGotoFile: '前往確認'
+    },
+    actions: {
+      delete: '刪除（含編號）', notused: 'Not used（保留編號）', choice: '二選一', rewrite: '整段重寫', fill: '填空'
+    },
+    gates: {
+      needInputs: '請先上傳至少一份標準模板或項目證據。',
+      needBase: '基礎變量尚未全部確認，無法進入下一步。',
+      needAll: '仍有變量未確認，請先確認全部變量。'
+    }
+  },
+  vetting: {
+    title: '審查整份招標文件，按問題類型輸出可覆核的審查報告',
+    subtitle: '分段核對審查源集，展示覆蓋範圍與證據出處；所有發現均需人工覆核。',
+    metrics: {
+      reference: '條款引用錯誤', referenceDetail: '引用不存在 / 編號錯誤 / 空白未定稿 / 版本引用',
+      conflict: '內容衝突', conflictDetail: '範圍 / 付款 / 工期 / 違約金 / 保函不一致',
+      language: '語言與用詞', languageDetail: '語法、拼寫、英式 / 美式英語、表達不清',
+      risk: '主觀風險條款', riskDetail: '易引發合約爭議 / 表述不清晰，需 QS 專業判斷'
+    },
+    actions: {
+      source: '審查源集', upload: '上傳整份招標文件材料', run: '執行審查', running: '正在審查…', export: '匯出審查報告', exportStarted: '{format} 審查報告已產生並開始下載'
+    },
+    uploadRole: { label: '上傳文件用途', auto: '自動識別', tender: '招標文件', standard: '標準依據', project_fact: '項目資料', package_manifest: '文件目錄' },
+    toolbar: { searchPlaceholder: '搜尋條款、文件或問題', allTypes: '全部類型', allScopes: '全部範圍', intra: '文件內', inter: '跨文件' },
+    locator: { file: '1. 文件', page: '2. 頁碼', variable: '2. 變量', errorClass: '2. 錯誤類別', all: '全部' },
+    list: { empty: '沒有符合條件的審查發現。' },
+    drawer: {
+      title: '審查詳情', subtitle: '證據、理由與人工處置。',
+      type: '問題類型', scope: '範圍', reference: '引用', status: '狀態', pattern: '檢測模式',
+      location: '落點', expected: '應為', comment: '審查評語', reason: '風險與理由', suggestion: '建議處理',
+      openSource: '開啟來源', openOriginal: '開啟原始文件（PDF 按實體頁開啟，其他格式下載）', markHandled: '標記已處理', assign: '分派給 QS',
+      evidence: '證據原文', located: '已定位原文', unverified: '未能定位原文',
+      locating: '正在回溯原文…',
+      notLocated: '未能在該文件原文中逐字定位到這條內容，請人工覆核。',
+      evidenceFailed: '證據載入失敗，可以重試。'
+    },
+    job: {
+      title: '審查任務', resume: '重新取得進度', failed: '審查任務失敗',
+      background: '任務在背景執行；重新開啟本項目後可以繼續查看進度。',
+      connectionPaused: '暫時無法取得進度，背景任務可能仍在執行。恢復連線後重新取得進度。',
+      progressLabel: '執行進度',
+      executionCompleteNote: '任務執行結束不代表審查範圍已完整覆蓋。未提交、超預算及來源未知仍須處理；請查看下方覆蓋記錄。',
+      status: { QUEUED: '等待執行', RUNNING: '審查中', COMPLETED: '任務執行結束', FAILED: '執行失敗' }
+    },
+    coverage: {
+      title: '文件覆蓋與解析提示', documents: '份文件已處理', warnings: '提示與限制',
+      parse: '解析狀態', segments: '已處理 / 總片段', characters: '已處理 / 可用字元',
+      callLedger: '語義調用記錄（局部窗口）', callLedgerNote: '這裡只記錄實際提交、模型判斷與證據校驗。調用完成或沒有採納發現，都不能據此認定全文無問題。',
+      projectReference: '項目資料對照', callTopic: '主題', callStatus: '調用結果', callSubmitted: '全局輸入片段 / 字符', callAssessments: '問題 / 一致 / 上下文不足', callFindings: '採納 / 證據剔除', callContext: '預算略過 / 部分上下文 / 限定未知',
+      callStates: { not_submitted: '未提交', completed: '已返回並校驗', completed_empty: '返回空結果', completed_with_rejections: '有記錄未通過證據校驗', failed: '調用或結構校驗失敗' , not_submitted_over_budget: "未提交：完整輸入超預算", not_submitted_budget_unknown: "未提交：完整輸入預算未知", unknown: "呼叫狀態未知" },
+      reviewScope: "審查來源範圍",
+      sourceRequests: "來源請求",
+      pendingRequests: "未處理 / 總請求",
+      extraPackets: "額外材料包",
+      packetFailures: "失敗 / 未提交包",
+      packetDetails: "查看材料包記錄",
+      actualSubmission: "實際提交",
+      submitted: "已提交",
+      notSubmitted: "未提交",
+      tokenCounts: "輸入 + 輸出預留 / 上下文 token",
+      failureReason: "未完成原因",
+      packetIdentity: "查看來源身份",
+      fullInputPacket: "完整輸入包 ID",
+      sourceObservationPacket: "來源觀察包 ID",
+      packetSnapshot: "來源包快照",
+      requestDetails: "查看來源請求狀態",
+      requiredMembers: "必需片段",
+      missingMembers: "缺少片段",
+      pendingScopeNote: "未提交、超預算、來源未知及包數上限略過的請求仍待處理。一致判斷或空陣列僅記錄該包返回，不確認主題或合同已完整審查。",
+      candidateScopeNote: "發現仍需人工覆核。原文已定位只說明引文位置；處理狀態及報告須對應各條證據的來源包快照。",
+      legacyPacketUnknown: "未提供來源包身份（舊記錄或規則發現）；不能推斷來自目前輸入包。",
+      transportStates: {"already_global": "僅全局來源已存在", "transported_extra_pack": "已安排額外來源包", "oversized": "待處理：完整請求過長", "omitted_pack_cap": "待處理：來源包數量上限", "unknown": "待處理：來源未知", "budget_unknown": "待處理：預算未知", "over_budget": "待處理：超出預算"},
+      requestStates: {"decoded": "僅已解碼，範圍仍未知", "decoded_provider_estimate": "已解碼（供應商估算）；範圍仍未知", "decoded_with_rejections": "已解碼，有證據被剔除；範圍仍未知", "decoded_provider_estimate_with_rejections": "已解碼（供應商估算），有證據被剔除；範圍仍未知", "over_budget": "待處理：超出預算", "not_submitted_over_budget": "未提交：超預算", "not_submitted_budget_unknown": "未提交：預算未知", "not_submitted_oversized": "未提交：完整請求過長", "not_submitted_omitted_pack_cap": "未提交：來源包數量上限", "not_submitted_unknown": "未提交：來源未知", "failed": "執行失敗，待處理", "not_submitted": "尚未提交"},
+      globalCall: "全局調用",
+      unknownCount: "未知",
+      aggregateStates: {"failed": "審查執行失敗", "not_submitted": "尚未提交審查", "partial": "部分來源未審查", "observed_requests_decoded_scope_unknown": "觀察範圍已處理，完整性未知", "unknown": "覆蓋未知（無分包記錄）"},
+      budgetStates: {"budget_unknown": "完整輸入 token 預算未知", "over_budget": "完整輸入超過 token 預算", "observed_tokens": "完整輸入 token 已計數", "provider_estimated_fit": "供應商估算：完整輸入預算可用"},
+      explanation: '覆蓋資訊對應最近一次任務的源文件快照。片段已處理表示已完成審查步驟，不代表不存在問題；掃描件、未解析文件和缺少材料會限制結論。'
+    },
+    verification: { verified: '證據已定位', partial: '證據部分已定位', unverified: '證據待定位' },
+    findingSource: { rule: '規則檢查', model: '模型建議' },
+    evidenceSides: { source: '問題原文', target: '對照原文', baseline: '標準模板', reference: '參考依據', left: '證據 A', right: '證據 B' },
+    review: { OPEN: '待處理', HANDLED: '已處理', ASSIGNED: '已分派', reopen: '重新開啟', retained: '同一問題再次檢出時保留已處理或已分派狀態；新問題仍需人工覆核。', team: '項目團隊覆核', remarks: '項目團隊回覆', actionTaken: '實際處理說明', addendum: '是否需納入招標補遺', undecided: '待決定', required: '需要', notRequired: '不需要', save: '儲存覆核記錄', discard: '放棄本次編輯', saved: '覆核記錄已儲存', savedAt: '上次儲存：', unsaved: '有未儲存的編輯', unsavedExport: '請先儲存或放棄以下審查項的覆核編輯，再匯出報告或重新審查：', saveFailed: '儲存失敗，編輯內容仍保留。請重試。' },
+    report: { format: '審查報告格式' },
+    run: { empty: '尚未執行審查', started: '正在執行審查任務…', finished: '任務執行結束，返回 {count} 條待覆核發現' }
+  },
+  advice: {
+    title: '基於選定合約文件包進行提問',
+    subtitle: '回答必須帶合約條款或摘錄；找不到依據時返回 I don\'t know，不補全。',
+    scopeNote: '範圍：整份招標文件；回答只引用包內條款，找不到依據時返回 I don\'t know',
+    scope: { fullset: '選定合約條件', tender: '僅招標文件', contract: '僅合約條件' },
+    actions: { refreshIndex: '重新整理證據索引', ask: '提問', precedence: '優先次序依據', clear: '清空對話' },
+    placeholder: '輸入合約問題，例如：SCC4.1 下的文件優先次序是什麼？',
+    evidenceMode: '證據模式已開啟',
+    indexing: '正在重建證據索引…',
+    chat: { title: '合約諮詢對話', user: 'QS 用戶', assistant: 'ConSense · 回答' },
+    citation: {
+      title: '引用文件內容', subtitle: '點擊引用查看來源文件原文，命中段落高亮顯示。',
+      empty: '暫無引用，提問後展示來源原文。', emptySource: '右側區域展示引用文件原文，並高亮命中段落。',
+      footer: '證據模式已開啟 · 不超出選定文件包進行推斷。'
+    },
+    quick: '快速問題',
+    unknown: {
+      title: 'I don\'t know',
+      fullset: '在選定範圍（選定合約條件）內未找到充分條款依據。系統不會超出合約包進行推斷。',
+      tender: '在選定範圍（僅招標文件）內未找到充分條款依據。系統不會超出合約包進行推斷。',
+      contract: '在選定範圍（僅合約條件）內未找到充分條款依據。系統不會超出合約包進行推斷。'
+    },
+    indexReady: '索引就緒，共 {count} 個切片'
+  },
+  skills: {
+    title: 'Skills · 配置', edit: '編輯', preview: '預覽', save: '儲存修改', restore: '恢復預設',
+    steps: 'How it decides', rules: 'Detection rules', output: '輸出什麼', guardrails: '不做什麼（邊界）',
+    hint: '改動僅作用於此語言版本。'
+  },
+  system: {
+    title: '本地依賴', llm: '大模型', ocr: 'OCR 解析', vector: '向量庫',
+    ready: '就緒', notReady: '未連接', healthy: '本地依賴就緒', degraded: '部分本地依賴未連接'
+  },
+  prompts: {
+    title: '提示詞配置',
+    subtitle: '直接編輯驅動本地模型的提示詞，儲存後立即對後續調用生效，無需重新打包或重啟服務。',
+    systemLabel: 'System Prompt（角色與規則）',
+    userLabel: 'User Prompt 模板',
+    placeholders: '執行時佔位符',
+    customized: '已自訂',
+    builtin: '出廠預設',
+    save: '儲存提示詞',
+    saving: '儲存中…',
+    saved: '提示詞已儲存',
+    reset: '恢復出廠預設',
+    resetDone: '已恢復出廠預設',
+    reverting: '恢復中…',
+    groupDrafting: 'Drafting 起草',
+    groupVetting: 'Vetting 審查',
+    groupAdvice: 'Advice 諮詢',
+    empty: '暫無提示詞配置',
+    pick: '從左側選擇一條提示詞查看並編輯',
+    placeholderHint: '這條 User 模板需要 {count} 個 %s 佔位符，執行時按順序填入項目資料；請勿增刪或改動佔位符數量。',
+    noPlaceholderHint: '這條提示詞沒有執行時佔位符，內容會原樣送入模型。',
+    updatedAt: '最近更新',
+    unsaved: '有未儲存的改動',
+    unsavedConfirm: '當前有未儲存的改動，切換後將被捨棄，確定繼續？',
+    resetConfirm: '確定恢復這條提示詞的出廠預設內容？當前修改將遺失。'
+  }
+}
+
+const en: typeof zhHans = {
+  llm: { source: 'LLM source', local: 'Local model', minimax: 'MiniMax China Token Plan', model: 'Model', configured: 'Configuration ready', notConfigured: 'Not configured', missingKey: 'API key not configured', disabled: 'Disabled', loading: 'Loading model configuration…', unavailable: 'Model configuration could not be loaded', newOperations: 'Changes apply to new operations; configuration readiness does not verify connectivity or quota.', recordedModel: 'Recorded model', identityUnknown: 'No saved model identity', identityNote: 'Configured profile; provider execution is not independently attested.' },
+  app: { name: 'ConSense', tagline: 'CAC Solution · on-premise' },
+  nav: { drafting: 'Drafting', vetting: 'Vetting', advice: 'Advice', skills: 'Skills configuration', prompts: 'Prompts', collapse: 'Collapse' },
+  screen: { drafting: 'Drafting', vetting: 'Vetting', advice: 'Advice', prompts: 'Prompts' },
+  topbar: {
+    project: 'Project', language: 'Language', offline: 'On-premise', scenario: 'Proposal scenario',
+    newProject: 'New project', renameProject: 'Rename project', deleteProject: 'Delete project',
+    projectName: 'Project name', projectContract: 'Contract no.', projectNamePlaceholder: 'e.g. Sample Housing Redevelopment',
+    createHint: 'Switches to the new project automatically. Project data is isolated — upload standard templates and project evidence again in step 1.',
+    renameHint: 'Renaming only changes the project name; uploaded evidence, variables and generated documents are unaffected.',
+    deleteGuard: 'At least one project must remain',
+    deleteConfirm: 'Delete project "{name}"? This cannot be undone.',
+    deleteHint: 'Its templates, evidence, variables, generated documents, vetting findings and chat history will be removed as well.',
+    projectCreated: 'Project created', projectDeleted: 'Project deleted'
+  },
+  common: {
+    save: 'Save', cancel: 'Cancel', close: 'Close', confirm: 'Confirm', back: 'Back', next: 'Next',
+    upload: 'Upload', download: 'Download', search: 'Search', refresh: 'Refresh', delete: 'Delete', add: 'Add',
+    reset: 'Restore defaults', all: 'All', loading: 'Working…', done: 'Done', empty: 'No data yet', confirmAll: 'Confirm all',
+    status: 'Status', type: 'Type', scope: 'Scope', file: 'File', page: 'Page', actions: 'Actions', detail: 'Detail',
+    generated: 'Generated', pending: 'Draft pending', confirmed: 'Confirmed', unconfirmed: 'Pending', saved: 'Saved'
+  },
+  drafting: {
+    title: 'Draft NTT / SCT / SCC from standard templates and project evidence',
+    subtitle: 'Read the sources, confirm every variable, then generate the documents. Every value must trace back to source text.',
+    wizard: {
+      inputs: { title: '1. Read the sources', desc: 'Standard templates and project evidence', done: 'Sources ready' },
+      base: { title: '2. Base variables', desc: 'Package-wide values', done: 'All confirmed' },
+      files: { title: '3. Per-file variables', desc: 'Review by NTT / SCT / SCC and generate', done: 'Documents generated' }
+    },
+    templates: { title: '1. Standard templates', desc: 'NTT / SCT / SCC template set used for drafting output.', upload: 'Upload and parse', replace: 'Replace',
+      blank: 'Download blank template draft', blankHint: 'Download an NTT draft with {{key}} placeholders to edit and re-upload',
+      blankDownloaded: 'Blank template draft downloaded — rewrite NTT with the listed {{key}} placeholders and re-upload',
+    },
+    inputs: { title: '2. Project communication evidence', desc: 'Email, meeting minutes, memo and clarification records used only to draft NTT / SCT / SCC.', upload: 'Upload drafting evidence' },
+    variables: {
+      baseTitle: 'Base variables', fileTitle: 'Per-file variables', extract: 'Discover variables', extracting: 'Local model is discovering variables…',
+      source: 'Basis', affects: 'Affects', result: 'How it is handled', options: 'Options', value: 'Value', note: 'Model basis',
+      empty: 'No variables yet — upload sources and click “Discover variables”: the local model identifies variables, values and evidence on its own.',
+      emptyReady: 'Sources are ready — click “Discover variables” above and the local model will identify variables, values and evidence on its own.',
+      extractHint: 'Discovery relies on no predefined list: the model reads the parsed templates and evidence, and identifies the decision variables, values and quotes itself.',
+      traceButton: 'View AI process',
+      traceTitle: 'Model extraction trace',
+      traceModel: 'Model',
+      traceAt: 'Finished at',
+      traceSystem: '① System prompt (role and rules)',
+      traceUser: '② Materials sent to the model (templates + project evidence)',
+      traceRaw: '③ Raw model output (value, source quote and reasoning per variable)',
+      traceEmpty: 'No extraction yet — click "Extract variables" first.',
+      addVariable: '+ Add variable',
+      addVariableTitle: 'Add FILE variable',
+      addVariableHint: 'For Guidance Notes / edit points the model missed — QS can fill in manually.',
+      addVariableKey: 'Variable key (English identifier, letters/digits/_/- only)',
+      addVariableFile: 'Target file',
+      addVariableLabel: 'Label',
+      addVariableLabelZhHant: 'Traditional Chinese label (optional)',
+      addVariableLabelEn: 'English label (optional)',
+      addVariableAction: 'Action',
+      addVariableOptions: 'Options (choice only; comma or newline separated)',
+      addVariableAffects: 'Affects files (NTT,SCT,SCC)',
+      addVariableValue: 'Value',
+      addVariableSourceQuote: 'Source quote',
+      addVariableReason: 'Reason',
+      addVariableConfidence: 'Confidence 0~1',
+      addVariableSaved: 'Variable added',
+      addVariableKeyInvalid: 'Only letters, digits, underscore and hyphen are allowed'
+    },
+    files: {
+      tab: 'Files', matrix: 'Variable impact graph', generate: 'Generate all documents', generating: 'Generating documents…',
+      download: 'Download template', preview: 'Preview',
+      focusMode: 'Focus mode', exitFocus: 'Exit focus',
+      confirmFileAll: 'Confirm all variables in this file',
+      confirmFileDone: 'All variables of @FILE@ confirmed',
+      previewMode: 'Preview mode', modeReview: 'Review mode', modeFinal: 'Final preview',
+      downloadPdfHint: 'Download the generated document as PDF; falls back to the standard template PDF before generation',
+      downloadTemplateHint: 'This document is not generated yet — the standard template PDF will be downloaded',
+      varChecklist: 'variable confirmation',
+      headerTitle: 'Standard template',
+      reviewToggleHint: 'Open / close the adjustment points drawer for this file',
+      reviewToggle: 'Adjustment points', reviewPaneTitle: 'Review pane · adjustment points', reviewPaneHint: 'Lists unconfirmed variables in this file by default. Click any item to highlight the matching variable card on the left and briefly flash it, helping you locate the clause in the PDF.', noPoints: 'No adjustment points yet',
+      valueLabel: 'Value', resultLabel: 'Result', sourceLabel: 'Source', noteLabel: 'Model basis',
+      aiDraft: 'AI draft', reedit: 'Edit again',
+      impactPoint: 'Impact point', sharedWith: 'Shared with',
+      previewFailed: 'Failed to load the PDF preview. Please retry.',
+      pdfDiag: 'PDF detected @TOKENS@ {{KEY}} placeholders, @MATCHED@ matched variables (@VARS@ total)',
+      ocrLoading: 'OCR model loading (~10MB on first run)…',
+      ocrRunning: 'OCR @CURRENT@/@TOTAL@ pages…',
+      ocrError: 'OCR failed (PDF still viewable; token highlight unavailable)',
+      listItems: 'items', listHint: 'List variable — edit the rows in step 2 (base variables).',
+      noAnchor: '(no template anchor located)',
+      matrixHint: 'Base variables affect all three files; FILE variables belong to their fileKey. Click a cell for details.',
+      sankeySearch: 'Search variable name / key…',
+      sankeyClear: 'Clear selection', sankeyFullscreen: 'Fullscreen',
+      viewGraph: 'Graph view', viewTable: 'Table view',
+      sankeyVars: 'Variables', sankeyActions: 'Rewrite actions', sankeyFiles: 'File targets',
+      sankeyEmpty: 'No variables yet — upload standard templates in step 1 and extract variables first.',
+      sankeyLegend: 'Variables → rewrite actions → file targets. Click a variable node to trace its links, click a file node to filter targets, Esc exits fullscreen.',
+      sankeyGotoFile: 'Go to confirmation'
+    },
+    actions: {
+      delete: 'Delete (with clause number)', notused: 'Not used (keep clause number)', choice: 'Keep one alternative', rewrite: 'Rewrite whole paragraph', fill: 'Fill value'
+    },
+    gates: {
+      needInputs: 'Upload at least one standard template or piece of evidence first.',
+      needBase: 'Base variables are not all confirmed yet.',
+      needAll: 'Some variables are still unconfirmed — confirm all of them first.'
+    }
+  },
+  vetting: {
+    title: 'Vet the assembled tender package and report reviewable findings by type',
+    subtitle: 'Review source documents in segments with coverage and evidence locations shown. All findings require human review.',
+    metrics: {
+      reference: 'Clause reference error', referenceDetail: 'Missing / wrong number / blank placeholder / version reference',
+      conflict: 'Content conflict', conflictDetail: 'Scope / payment / programme / liquidated damages / security mismatch',
+      language: 'Language and wording', languageDetail: 'Grammar, spelling, British vs American English, ambiguity',
+      risk: 'Subjective risk clause', riskDetail: 'Dispute-prone or unclear wording — requires QS judgement'
+    },
+    actions: {
+      source: 'Review source set', upload: 'Upload tender package', run: 'Run vetting', running: 'Vetting…', export: 'Export report', exportStarted: '{format} review report generated and download started'
+    },
+    uploadRole: { label: 'Upload purpose', auto: 'Auto detect', tender: 'Tender documents', standard: 'Standard references', project_fact: 'Project information', package_manifest: 'Document inventory' },
+    toolbar: { searchPlaceholder: 'Search clause, document or issue', allTypes: 'All types', allScopes: 'All scopes', intra: 'Intra-file', inter: 'Cross-file' },
+    locator: { file: '1. File', page: '2. Page', variable: '2. Variable', errorClass: '2. Error class', all: 'All' },
+    list: { empty: 'No findings match the current filters.' },
+    drawer: {
+      title: 'Finding detail', subtitle: 'Evidence, reason and human disposition.',
+      type: 'Type', scope: 'Scope', reference: 'Reference', status: 'Status', pattern: 'Detection pattern',
+      location: 'Location', expected: 'Expected basis', comment: 'Vetting comment', reason: 'Reason', suggestion: 'Suggested action',
+      openSource: 'Open source', openOriginal: 'Open original (PDF physical page; other formats download)', markHandled: 'Mark handled', assign: 'Assign to QS',
+      evidence: 'Source evidence', located: 'Located in source', unverified: 'Not located in source',
+      locating: 'Tracing back to the source…',
+      notLocated: 'This content could not be located verbatim in the source file — please review this finding manually.',
+      evidenceFailed: 'Evidence could not be loaded. Please retry.'
+    },
+    job: {
+      title: 'Vetting task', resume: 'Refresh progress', failed: 'Vetting task failed',
+      background: 'The task runs in the background. Reopen this project to continue viewing its progress.',
+      connectionPaused: 'Progress is currently unavailable. The background task may still be running. Refresh progress when the connection returns.',
+      progressLabel: 'Execution progress',
+      executionCompleteNote: 'Task execution ending does not establish complete review coverage. Requests not submitted, over budget or with unknown sources still need handling; see the coverage records below.',
+      status: { QUEUED: 'Queued', RUNNING: 'Running', COMPLETED: 'Task execution ended', FAILED: 'Failed' }
+    },
+    coverage: {
+      title: 'Document coverage and parsing notes', documents: 'documents processed', warnings: 'Notes and limitations',
+      parse: 'Parse status', segments: 'Processed / total segments', characters: 'Processed / available characters',
+      callLedger: 'Semantic call ledger (local windows)', callLedgerNote: 'This records actual submissions, model assessments and evidence checks. Completed calls or zero accepted findings do not establish that the full documents are free of issues.',
+      projectReference: 'Project information comparison', callTopic: 'Topic', callStatus: 'Call result', callSubmitted: 'Global input segments / characters', callAssessments: 'Issue / consistent / incomplete context', callFindings: 'Accepted / evidence rejected', callContext: 'Budget omitted / partial context / unknown qualifiers',
+      callStates: { not_submitted: 'Not submitted', completed: 'Returned and checked', completed_empty: 'Empty result returned', completed_with_rejections: 'Some evidence rejected', failed: 'Call or schema failed' , not_submitted_over_budget: "Not submitted: complete input over budget", not_submitted_budget_unknown: "Not submitted: complete input budget unknown", unknown: "Call state unknown" },
+      reviewScope: "Review source scope",
+      sourceRequests: "Source requests",
+      pendingRequests: "Unprocessed / total",
+      extraPackets: "Extra source packets",
+      packetFailures: "Failed / unsubmitted packets",
+      packetDetails: "View packet records",
+      actualSubmission: "Actual submission",
+      submitted: "Submitted",
+      notSubmitted: "Not submitted",
+      tokenCounts: "Input + output reserve / context tokens",
+      failureReason: "Reason not completed",
+      packetIdentity: "Show source identity",
+      fullInputPacket: "Complete input packet ID",
+      sourceObservationPacket: "Source observation packet ID",
+      packetSnapshot: "Source packet snapshot",
+      requestDetails: "Show source request states",
+      requiredMembers: "Required segments",
+      missingMembers: "Missing segments",
+      pendingScopeNote: "Unsubmitted, over-budget, unknown-source and packet-cap omitted requests remain pending. A consistent declaration or empty array records only that packet response; it does not establish complete topic or contract review.",
+      candidateScopeNote: "Findings still need human review. A located quote proves its source position only; disposition and reports must refer to each evidence item’s source packet snapshot.",
+      legacyPacketUnknown: "No source packet identity supplied (legacy record or rule finding); its current input-packet origin cannot be inferred.",
+      transportStates: {"already_global": "Present in global source only", "transported_extra_pack": "Extra source packet planned", "oversized": "Pending: whole request too large", "omitted_pack_cap": "Pending: source packet cap", "unknown": "Pending: source unknown", "budget_unknown": "Pending: token budget unknown", "over_budget": "Pending: over budget"},
+      requestStates: {"decoded": "Decoded only; scope still unknown", "decoded_provider_estimate": "Decoded (provider estimate); scope still unknown", "decoded_with_rejections": "Decoded with evidence rejected; scope still unknown", "decoded_provider_estimate_with_rejections": "Decoded (provider estimate) with evidence rejected; scope still unknown", "over_budget": "Pending: over budget", "not_submitted_over_budget": "Not submitted: over budget", "not_submitted_budget_unknown": "Not submitted: budget unknown", "not_submitted_oversized": "Not submitted: whole request too large", "not_submitted_omitted_pack_cap": "Not submitted: source packet cap", "not_submitted_unknown": "Not submitted: source unknown", "failed": "Execution failed; pending", "not_submitted": "Not yet submitted"},
+      globalCall: "Global call",
+      unknownCount: "Unknown",
+      aggregateStates: {"failed": "Review execution failed", "not_submitted": "Not submitted for review", "partial": "Some source requests unreviewed", "observed_requests_decoded_scope_unknown": "Observed requests processed; completeness unknown", "unknown": "Coverage unknown (no packet record)"},
+      budgetStates: {"budget_unknown": "Full input token budget unknown", "over_budget": "Full input exceeds token budget", "observed_tokens": "Full input tokens counted", "provider_estimated_fit": "Provider estimate: complete input within budget"},
+      explanation: 'Coverage describes the source snapshot for the latest task. A processed segment has completed the review steps; it is not assurance of no issues. Scans, unparsed files and missing materials limit the findings.'
+    },
+    verification: { verified: 'Evidence located', partial: 'Evidence partly located', unverified: 'Evidence awaiting location' },
+    findingSource: { rule: 'Rule check', model: 'Model suggestion' },
+    evidenceSides: { source: 'Issue text', target: 'Comparison text', baseline: 'Standard template', reference: 'Reference basis', left: 'Evidence A', right: 'Evidence B' },
+    review: { OPEN: 'Open', HANDLED: 'Handled', ASSIGNED: 'Assigned', reopen: 'Reopen', retained: 'Previously handled or assigned findings retain their review status when detected again. New findings still require review.', team: 'Project team review', remarks: 'Remarks by project team', actionTaken: 'Action taken', addendum: 'Include in tender addendum', undecided: 'Undecided', required: 'Required', notRequired: 'Not required', save: 'Save review record', discard: 'Discard edits', saved: 'Review record saved', savedAt: 'Last saved:', unsaved: 'Unsaved edits', unsavedExport: 'Save or discard review edits for these findings before exporting or starting another review:', saveFailed: 'Save failed. Your edits are retained; please retry.' },
+    report: { format: 'Report format' },
+    run: { empty: 'Vetting has not been run yet', started: 'Running the vetting task…', finished: 'Task execution ended with {count} findings for review' }
+  },
+  advice: {
+    title: 'Ask questions against the selected contract package',
+    subtitle: 'Answers must carry a clause or excerpt; when no basis is found the system returns I don\'t know.',
+    scopeNote: 'Scope: the complete tender document package; answers cite in-package clauses only.',
+    scope: { fullset: 'Selected package conditions', tender: 'Tender documents only', contract: 'Conditions of Contract only' },
+    actions: { refreshIndex: 'Refresh evidence index', ask: 'Ask', precedence: 'Precedence basis', clear: 'Clear chat' },
+    placeholder: 'Ask a contract question, e.g. What is the order of precedence under SCC4.1?',
+    evidenceMode: 'Evidence mode on',
+    indexing: 'Rebuilding the evidence index…',
+    chat: { title: 'Contract advice chat', user: 'QS user', assistant: 'ConSense · Answer' },
+    citation: {
+      title: 'Cited document content', subtitle: 'Click a citation to view the source text with the matched passage highlighted.',
+      empty: 'No citations yet — ask a question to see the source text.', emptySource: 'The source text appears here with the matched passage highlighted.',
+      footer: 'Evidence mode on · no inference beyond the selected package.'
+    },
+    quick: 'Quick questions',
+    unknown: {
+      title: 'I don\'t know',
+      fullset: 'No sufficient provision was found in the selected scope (selected package conditions). The system will not infer beyond the contract package.',
+      tender: 'No sufficient provision was found in the selected scope (tender documents only). The system will not infer beyond the contract package.',
+      contract: 'No sufficient provision was found in the selected scope (conditions of contract only). The system will not infer beyond the contract package.'
+    },
+    indexReady: '{count} chunks indexed and ready'
+  },
+  skills: {
+    title: 'Skills · configuration', edit: 'Edit', preview: 'Preview', save: 'Save changes', restore: 'Restore defaults',
+    steps: 'How it decides', rules: 'Detection rules', output: 'Output', guardrails: 'Guardrails',
+    hint: 'Changes apply to this language version only.'
+  },
+  system: {
+    title: 'Local dependencies', llm: 'Language model', ocr: 'OCR', vector: 'Vector store',
+    ready: 'Ready', notReady: 'Not connected', healthy: 'Local dependencies ready', degraded: 'Some local dependencies are not connected'
+  },
+  prompts: {
+    title: 'Prompt configuration',
+    subtitle: 'Edit the prompts that drive the local model. Changes apply to the very next model call — no repackage or restart needed.',
+    systemLabel: 'System prompt (role and rules)',
+    userLabel: 'User prompt template',
+    placeholders: 'Runtime placeholders',
+    customized: 'Customised',
+    builtin: 'Factory default',
+    save: 'Save prompt',
+    saving: 'Saving…',
+    saved: 'Prompt saved',
+    reset: 'Restore factory default',
+    resetDone: 'Factory default restored',
+    reverting: 'Restoring…',
+    groupDrafting: 'Drafting',
+    groupVetting: 'Vetting',
+    groupAdvice: 'Advice',
+    empty: 'No prompt configuration yet',
+    pick: 'Pick a prompt on the left to view and edit it',
+    placeholderHint: 'This user template needs {count} %s placeholder(s); project data is injected in order at runtime — keep the placeholder count unchanged.',
+    noPlaceholderHint: 'This prompt has no runtime placeholder; the text is sent to the model as-is.',
+    updatedAt: 'Last updated',
+    unsaved: 'Unsaved changes',
+    unsavedConfirm: 'You have unsaved changes. Switching will discard them. Continue?',
+    resetConfirm: 'Restore the factory default for this prompt? Your current edits will be lost.'
+  }
+}
+
+function resolveInitialLocale(): AppLocale {
+  const stored = localStorage.getItem(STORAGE_KEY)
+  if (stored && (SUPPORTED_LOCALES as readonly string[]).includes(stored)) {
+    return stored as AppLocale
+  }
+  return 'zh-Hans'
+}
+
+export const i18n = createI18n({
+  legacy: false,
+  globalInjection: true,
+  locale: resolveInitialLocale(),
+  fallbackLocale: 'zh-Hans',
+  messages: { 'zh-Hans': zhHans, 'zh-Hant': zhHant, en }
+})
+
+export function setLocale(locale: AppLocale) {
+  i18n.global.locale.value = locale
+  localStorage.setItem(STORAGE_KEY, locale)
+  document.documentElement.lang = locale
+}
+
+export function currentLocale(): AppLocale {
+  return i18n.global.locale.value as AppLocale
+}

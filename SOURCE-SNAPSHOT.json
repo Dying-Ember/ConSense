@@ -1,0 +1,42 @@
+{
+  "formatVersion": 1,
+  "createdAtUtc": "2026-10-07T15:29:44.0962396Z",
+  "purpose": "Private monorepo source snapshot of the current reviewed frontend and service",
+  "includesSourceHistory": false,
+  "sourceRevisions": {
+    "ai_consense_web": "629ef98d197cd83e4e7128e468b292492e4443f2",
+    "ai_consense_service": "67ceb7081d42204aa17b12b149f52081e348da71"
+  },
+  "sourceWorktreesUnchanged": true,
+  "publicationOnlyChanges": [
+    "Portable exact historical frontend scope baseline",
+    "Exclude local/private data and runtime capture artifacts",
+    "Replace machine-specific service configuration with environment placeholders",
+    "Clear project/demo seeds while preserving generic skills",
+    "Retain external-fixture Java tests outside the default Maven test source set",
+    "Document external provider, rendering and fixture requirements"
+  ],
+  "businessLogicChangedForPublication": false,
+  "frontendVerification": {
+    "typecheck": "passed",
+    "viteBuild": "passed",
+    "commonJsCheckFilesPassed": 35,
+    "workspaceScopeViewCheckFilesPassed": 3,
+    "dependencies": "Existing local dependencies reused; fresh npm ci not performed",
+    "externalOcrReplay": "Not run: original runtime fixture excluded"
+  },
+  "serviceVerification": {
+    "mavenPackage": "passed",
+    "businessRuleTestsPassed": 13,
+    "nativeLayoutGuardTestsSkipped": 4,
+    "realProviderRequestsMade": false,
+    "externalFixtures": "Private original/captured fixtures excluded; affected tests retained separately",
+    "dependencies": "Existing Maven cache used"
+  },
+  "limits": [
+    "No fresh external provider readiness certification",
+    "No native Word/PDF layout certification from this publication check",
+    "Historical evidence documents are not new acceptance receipts",
+    "Original competition/private documents and model weights supplied separately"
+  ]
+}

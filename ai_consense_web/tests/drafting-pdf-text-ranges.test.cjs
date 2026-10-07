@@ -1,0 +1,43 @@
+/* Pure display geometry checks with synthetic text; no business state or PDF bytes are changed. */
+const assert = require('node:assert/strict')
+const path = require('node:path')
+const { loadTypeScript } = require('./helpers/load-typescript.cjs')
+const { findPdfTextMatches, selectPdfTextRange } = loadTypeScript(path.join(__dirname, '../src/drafting/pdf-text-ranges.ts'))
+const plain = value => JSON.parse(JSON.stringify(value))
+const match = () => ({ spans: [{ itemIndex: 0, start: 0, end: 8 }] })
+const candidate = (x, y, width = 150, height = 12) => ({ match: match(), rectangles: [{ x, y, width, height }] })
+const page = { width: 612, height: 792 }
+
+assert.deepEqual(plain(findPdfTextMatches(['prefix saved contract', 'paragraph. suffix'], 'saved contract\nparagraph.')), [{ spans: [{ itemIndex: 0, start: 7, end: 21 }, { itemIndex: 1, start: 0, end: 10 }] }])
+assert.deepEqual(plain(findPdfTextMatches(['oﬃce\u00a0', 'con\u00adtract'], 'office contract')), [{ spans: [{ itemIndex: 0, start: 0, end: 4 }, { itemIndex: 1, start: 0, end: 9 }] }])
+assert.deepEqual(plain(findPdfTextMatches(['🙂 契約條款'], '契約條款')), [{ spans: [{ itemIndex: 0, start: 3, end: 7 }] }], 'Range offsets count UTF-16 units even after a supplementary Unicode character')
+assert.equal(findPdfTextMatches(['ﬃ'], 'fi').length, 0, 'A range cannot highlight part of a single printed ligature')
+assert.equal(findPdfTextMatches(['Saved Contract.'], 'saved contract.').length, 0, 'Case changes remain mismatches')
+assert.equal(findPdfTextMatches(['saved contract!'], 'saved contract.').length, 0, 'Punctuation changes remain mismatches')
+assert.equal(findPdfTextMatches(['con-tract'], 'contract').length, 0, 'A visible hyphen must not disappear')
+assert.equal(findPdfTextMatches(['saved'], 'saved paragraph').length, 0, 'A page containing only part of the paragraph cannot become a complete range')
+assert.equal(findPdfTextMatches(['saved contract'], '  \n').length, 0)
+console.log('PASS: full text matching retains exact original span offsets without changing saved wording')
+
+const repeated = findPdfTextMatches(['same target / same target'], 'same target')
+assert.equal(repeated.length, 2)
+const selected = selectPdfTextRange([candidate(80, 80), candidate(80, 198)], { x: 80, y: 200 }, page)
+assert.equal(selected.rectangles[0].y, 198, 'Repeated text is disambiguated using the verified bookmark point')
+assert.equal(selectPdfTextRange([candidate(80, 198), candidate(81, 199)], { x: 80, y: 200 }, page), undefined, 'Two equally near matches are ambiguous')
+assert.equal(selectPdfTextRange([candidate(80, 400)], { x: 80, y: 200 }, page), undefined, 'A distant occurrence cannot borrow the paragraph anchor')
+assert.equal(selectPdfTextRange([{ match: match(), rectangles: [] }], { x: 80, y: 200 }, page), undefined, 'Missing browser rectangles never become fabricated geometry')
+assert.equal(selectPdfTextRange([candidate(80, 198, Number.NaN)], { x: 80, y: 200 }, page), undefined)
+assert.equal(selectPdfTextRange([candidate(80, 198, 700)], { x: 80, y: 200 }, page), undefined)
+assert.equal(selectPdfTextRange([candidate(80, 198)], { x: -1, y: 200 }, page), undefined)
+assert.equal(selectPdfTextRange([{ match: match(), rectangles: [{ x: 80, y: 198, width: 150, height: 12 }, { x: 300, y: 650, width: 100, height: 12 }] }], { x: 80, y: 200 }, page), undefined, 'A distant paragraph cannot supply the missing remainder of a nearby text match')
+assert.equal(selectPdfTextRange([{ match: match(), rectangles: [{ x: 80, y: 198, width: 50, height: 12 }, { x: 300, y: 198, width: 100, height: 12 }] }], { x: 80, y: 200 }, page), undefined, 'A different column cannot supply the remainder of a nearby text match')
+assert.equal(selectPdfTextRange([{ match: match(), rectangles: [{ x: 80, y: 198, width: 150, height: 12 }, { x: 500, y: 214, width: 50, height: 12 }] }], { x: 80, y: 200 }, page), undefined, 'A nearby next line in a distant column cannot supply the paragraph remainder')
+assert.equal(selectPdfTextRange([{ match: match(), rectangles: [{ x: 80, y: 214, width: 150, height: 12 }, { x: 80, y: 198, width: 100, height: 12 }] }], { x: 80, y: 214 }, page), undefined, 'Backward page-order fragments cannot form a forward paragraph range')
+console.log('PASS: ambiguity, incomplete measurement, different physical locations and invalid boxes remain unavailable')
+
+const multiline = { match: { spans: [{ itemIndex: 0, start: 3, end: 14 }, { itemIndex: 1, start: 0, end: 10 }] }, rectangles: [{ x: 80, y: 198, width: 175.25, height: 12 }, { x: 80, y: 214, width: 96.5, height: 12 }] }
+assert.deepEqual(plain(selectPdfTextRange([multiline], { x: 80, y: 200 }, page)), multiline, 'Every measured line fragment survives; widths are not proportional slices of item widths')
+const wrapped = { match: match(), rectangles: [{ x: 80, y: 198, width: 300, height: 12 }, { x: 380, y: 198, width: 140, height: 12 }, { x: 80, y: 214, width: 100, height: 12 }] }
+assert.deepEqual(plain(selectPdfTextRange([wrapped], { x: 80, y: 200 }, page)), wrapped, 'A normal wrapped line returns to the prior line extent even when its final run was far to the right')
+assert.deepEqual(plain(multiline.rectangles), [{ x: 80, y: 198, width: 175.25, height: 12 }, { x: 80, y: 214, width: 96.5, height: 12 }], 'Inputs remain unchanged')
+console.log('PASS: complete multi-line ranges retain the browser-measured rectangles and immutable inputs')

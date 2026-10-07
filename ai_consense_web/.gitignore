@@ -1,0 +1,46 @@
+# dependencies
+node_modules/
+
+# build outputs
+dist/
+dist-ssr/
+*.local
+
+# vite / vue cache
+.vite/
+.eslintcache
+.cache/
+
+# logs & runtime
+*.log
+*.err.log
+*.out.log
+dev.err.log
+dev.out.log
+backend.err.log
+backend.out.log
+ollama-serve.err.log
+ollama-serve.log
+verify-db.err.log
+verify-db.log
+pip-install.log
+
+# OCR model files (大文件，按需单独存)
+eng.traineddata
+
+# editor
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db
+
+# env
+.env
+.env.local
+.env.*.local
+
+# misc
+*.bak
+*.tmp
+*.ps1

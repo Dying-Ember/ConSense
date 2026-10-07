@@ -1,0 +1,31 @@
+# Drafting independent-review correction task graph
+
+Spec: [drafting-independent-review-fixes.md](drafting-independent-review-fixes.md).
+Integration: feature/drafting-a-business-rules-20261005.
+Local tracker governed by [docs/agents/issue-tracker.md](../agents/issue-tracker.md).
+Review baseline: service ded0b86 / web ca332aa.
+Each repository has independent commit lineage; no remote issues/PR closure configured.
+
+| Ticket | Result | Depends | Status |
+|---|---|---|---|
+| REVIEW-F1 | Reject contradicted/requested/unsupported direct candidates and swapped Bill identities at public extraction API; preserve positive suggestions/repair/manual edits | Spec checkpoint | Done: production `af3170c`, Bill-request follow-up `e10c022`; [public RED/GREEN record](<LOCAL_PATH_REDACTED>`aa220423` |
+| REVIEW-F2 | Surface conflicting complete trade sets at public APIs and rendered conflict controls while preserving additive facts, manual edits and provenance | Spec checkpoint | Done: backend `3997000`, web follow-up `c7de743`; [seven API cases](<LOCAL_PATH_REDACTED>
+| REVIEW-F3 | Structurally apply SCC20.303/.304 explicit delete/not_used with native formulas preserved outside removed scope | Spec checkpoint | Done: production `0b3b8a7`, source integration `88ab61c`; [actual-source evidence](<LOCAL_PATH_REDACTED>
+| REVIEW-F4 | Bind SCC14.305(1) singular references and synchronize adopted specialist set | F3 shared compiler integration | Done: source integration `88ab61c`; [retained/reduced reference cases](<LOCAL_PATH_REDACTED>
+| REVIEW-F5 | Align direct NTT9 negative mapping with ordinary WTO input, preserve actions and numbered Not used without editing mark | F3 shared rules integration | Done: initial source `0b3b8a7`, marker follow-up `4c0c164`, final integration `aa220423`; [public source record](<LOCAL_PATH_REDACTED>
+| REVIEW-INTEGRATE | Merge all corrections and verify dedicated package/runtime/model/source/PDF/browser acceptance | F1/F2/F3/F4/F5 | Done: frozen production service `aa220423` / web `c7de743`; [measured verification report](<LOCAL_PATH_REDACTED>
+| REVIEW-REVIEW | Independent Standards and Spec review since baseline; correct actionable findings | REVIEW-INTEGRATE implementation | Done: [joint fixed-pin reports](<LOCAL_PATH_REDACTED>
+| REVIEW-CLOSE | Record bounded acceptance and commit links, preserve failures, remove clean temporary implementer checkouts | REVIEW-REVIEW and acceptance gates | Done: measured report and synchronized local spec/task graph/tracker recorded; [clean integrated worktree removal](<LOCAL_PATH_REDACTED>
+
+## Measured acceptance closure
+
+The final production and review pins are service `aa22042363e57e9374be5e60f27289814532a02c` / web `c7de743b80d4562533e9d094f4ad1aea06494a5b`. Closure commits affect only the correction spec, this task graph and the local tracker. [verification-report.md](<LOCAL_PATH_REDACTED>
+
+- Controlled-model HTTP tests use actual project upload/parser/extraction/variables/history/adoption/source-generation/export interfaces with isolated H2. The earlier integrated package ran 83 cases with no failures/errors/skips; the final marker patch ran eight actual-source/artifact cases with no failures/errors/skips. Final package03 compiled with tests skipped after the latter run. The broad package01 converter-path error and legacy optional skip remain separate from the short-root actual-template recheck. Web rendered controls passed nine existing CJS test files and typecheck.
+- Real M3 `simulated-01` retained the eight prior sourced suggestions from eight TEST ONLY documents, unadopted. `original-01` remains failed for omitted architect phone/date raw `[]`; `conflict-01` remains failed for two omitted generic-trade raw `[]` responses. The separate single-request `provider-arch-only-01` and `provider-conflict-explicit-01` passed their recorded sourced positives and Electrical/none conflict. Omitted outputs were not candidate-rejection/merge coverage, and the positive follow-ups do not erase those failures.
+- Actual public generation-02 applied all four corrected targets in three variants. Its normalized audit passed 39/39, including strict native `9.` without the star, native OMML/package preservation, exact surviving references and distinct delete/not_used. Actual PDF visual review covered NTT page 12 and SCC pages 55/70 from two exported PDFs. Generation-01 failures, comparator corrections and actual old star remain preserved; universal Word layout, cached field refresh and uninspected pages remain outside acceptance.
+- Root's actual browser observation reopened F2 for a missing-before-conflict label/filter defect; the new web commit, rendered RED/GREEN and real IAB recheck now retain the group, both candidate sources and individual adoption controls without adoption. Source QA reopened F5 for `*9. Not used`; its separate RED/GREEN and new-generation strict check close that defect. Both reopening observations remain distinct from the final passing reports.
+- The original independent reviewers rechecked both new pinned diffs plus complete baseline/spec interactions at 0 / 0 actionable findings. The earlier `86efb31` Bill-request finding, public RED, correction and `ea6098d` review remain immutable. Code review uses source/test evidence, independently from provider/runtime/render/browser acceptance.
+- Final browser state returned to the original demo profile, zh-Hans and edit step; after-02 confirms user inputs/variables/trace/frozen bytes and primary sources retained. Three clean fully integrated implementer worktrees were removed with required evidence outside them. Cleanup's initial long-path failure and uncertain ignored-residue enumeration difference remain in the observation record; branches and commits remain available.
+
+Historical DRAFT-A-09 native IAB download completion and dependent DRAFT-A-06 final closure retain their previously recorded pending state. This bounded correction closes its own tickets and does not certify universal model coverage, complete unanswered test drafts or global Word/PDF visual quality. Failed observations and successful rechecks remain separate.

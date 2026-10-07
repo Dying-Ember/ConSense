@@ -1,0 +1,53 @@
+const assert = require('node:assert/strict')
+const path = require('node:path')
+const { loadTypeScript } = require('./helpers/load-typescript.cjs')
+const runtime = loadTypeScript(path.join(__dirname, '../src/drafting/bill-distribution.ts'), {})
+const { billDistribution } = runtime
+const rows = [
+  { id: 'b1', number: '1', description: 'Preliminaries', type: 'BQ', purpose: null },
+  { id: 'b2', number: '2', description: 'Preambles', type: 'BQ', purpose: null },
+  { id: 'b3', number: '3', description: 'Building Works', type: 'BQ' },
+  { id: 's4', number: '4', description: 'Electrical Works — exact formal name', type: 'SOR' }
+]
+const frozen = JSON.stringify(rows)
+const ids = (view, placement) => (view.groups.find(group => group.placement === placement)?.rows ?? []).map(row => row.id).join(',')
+const l10 = billDistribution({ electronicTendering: 'L10Pro', billNos: rows })
+assert.equal(ids(l10, 'discA'), 'b1,b2')
+assert.equal(ids(l10, 'discB'), 'b1,b2,b3')
+assert.equal(ids(l10, 'pending'), 's4')
+assert.equal(l10.groups.find(group => group.placement === 'discA').rows[0].portion, 'bodyWithoutTotals')
+assert.equal(l10.groups.find(group => group.placement === 'discB').rows[0].portion, 'totalsOnly')
+const paper = billDistribution({ electronicTendering: 'Hardcopy', billNos: rows })
+assert.equal(ids(paper, 'discA'), 'b2')
+assert.equal(ids(paper, 'hardcopy'), 'b1,b3')
+assert.equal(ids(paper, 'discC'), 'b1,b3')
+assert.equal(ids(paper, 'pending'), 's4')
+assert.equal(JSON.stringify(rows), frozen)
+const unknown = billDistribution({ electronicTendering: null, billNos: rows })
+assert.equal(ids(unknown, 'pending'), 'b1,b2,b3,s4')
+assert.equal(unknown.groups.some(group => group.placement === 'hardcopy'), false)
+const customText = 'Disc A on first issue; paper addenda. Exact adopted wording.'
+const override = billDistribution({ electronicTendering: 'L10Pro', billNos: [{ ...rows[3], placement: 'custom', placementText: customText }, { ...rows[2], placement: 'Hardcopy' }] })
+assert.equal(ids(override, 'custom'), 's4')
+assert.equal(override.groups.find(group => group.placement === 'custom').rows[0].exactText, customText)
+assert.equal(ids(override, 'hardcopy'), 'b3')
+assert.equal(override.groups.find(group => group.placement === 'hardcopy').rows[0].sourceAmendmentRequired, true)
+assert.equal(override.groups.find(group => group.placement === 'hardcopy').rows[0].reviewReason, 'l10HardcopyReview')
+assert.equal(override.groups.find(group => group.placement === 'custom').rows[0].reviewReason, 'customPlacementReview')
+const sor7 = [{ id: 'sor7', number: '7', description: 'Building Services — formal SOR description', type: 'SOR', placement: 'DiscB', placementText: '' }]
+const sor7Raw = JSON.stringify(sor7)
+const sor7L10 = billDistribution({ electronicTendering: 'L10Pro', billNos: sor7 })
+assert.equal(sor7L10.groups.find(group => group.placement === 'discB').rows[0].sourceAmendmentRequired, false)
+const sor7Paper = billDistribution({ electronicTendering: 'Hardcopy', billNos: sor7 })
+assert.equal(ids(sor7Paper, 'discB'), 'sor7')
+assert.equal(sor7Paper.groups.find(group => group.placement === 'discB').rows[0].sourceAmendmentRequired, true)
+assert.equal(sor7Paper.groups.find(group => group.placement === 'discB').rows[0].reviewReason, 'hardcopyDiscBReview')
+assert.equal(sor7Paper.groups.find(group => group.placement === 'discB').rows[0].description, sor7[0].description)
+assert.equal(JSON.stringify(sor7), sor7Raw)
+const sorStandard = billDistribution({ electronicTendering: 'Hardcopy', billNos: [{ ...rows[3], placement: 'standard' }] })
+assert.equal(ids(sorStandard, 'pending'), 's4')
+const falseRole = billDistribution({ electronicTendering: 'L10Pro', billNos: [{ ...rows[0], description: 'Not Preliminaries' }] })
+assert.equal(falseRole.groups[0].rows[0].rolePending, true)
+const noType = billDistribution({ electronicTendering: 'L10Pro', billNos: [{ ...rows[3], type: '' }] })
+assert.equal(noType.groups[0].rows[0].portion, 'pricingTypePending')
+console.log('PASS: changing L10Pro / Hardcopy changes derived Bill placements without changing shared rows; unknown remains unknown; SOR and custom arrangements stay independent; substring labels do not establish standard roles')

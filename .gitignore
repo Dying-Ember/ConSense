@@ -1,0 +1,41 @@
+# Installed dependencies and build artifacts
+**/node_modules/
+**/dist/
+**/dist-ssr/
+**/target/
+**/build/
+**/.vite/
+**/.cache/
+**/.venv/
+**/__pycache__/
+*.pyc
+*.class
+
+# Local application data, uploads, diagnostics and credentials
+**/data/
+**/uploads/
+**/output/
+**/logs/
+**/tmp/
+*.db
+*.log
+*.tmp
+*.bak
+.env*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+
+# Optional private external fixtures and model assets
+**/tests/external-fixtures/private-resources/
+**/tools/vetting_eval/models/
+
+# Editor and operating-system metadata
+**/.idea/
+**/.vscode/
+.DS_Store
+Thumbs.db
