@@ -243,7 +243,8 @@ async function saveInput(field: DraftField) {
 }
 async function adopt(field: DraftField, candidateIndex?: number) {
   await action(w('saving'), async (id, token) => {
-    const patch = adoptionPatch(encode(field, values[field.key]), baseline[field.key] ?? '', !!variableMap.value.get(field.key)?.reviewRequired, candidateIndex)
+    const variable = variableMap.value.get(field.key)
+    const patch = adoptionPatch(encode(field, values[field.key]), baseline[field.key] ?? '', !!variable?.reviewRequired, candidateIndex, variable)
     await saveField(id, token, field, patch)
     if (current(id, token)) await refresh(id, token)
   })

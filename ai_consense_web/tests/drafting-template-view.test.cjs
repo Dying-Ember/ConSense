@@ -101,6 +101,7 @@ function harness({ failRemoval = false, duration, missingTemplates = [], templat
   assert.equal(candidate.writes.length, 1, 'Existing explicit adoption remains available')
   assert.equal(candidate.writes[0][1], 'billNos')
   assert.equal(candidate.writes[0][2].candidateIndex, 0, 'The existing candidate-index adoption contract is retained')
+  assert.deepEqual(JSON.parse(JSON.stringify(candidate.writes[0][2].candidateSnapshot)), { value: JSON.stringify(billCandidateRows), sourceDocumentId: null, sourceHash: null, sourceQuote: 'Bill 9 | Electrical Works | Schedule of Rates.' }, 'The selected displayed value and source are bound along with the position')
   candidate.dispose()
   console.log('PASS: the main input evidence candidate uses readable exact Bill rows with source evidence intact and retains explicit candidate adoption')
 

@@ -139,12 +139,26 @@ check('source application failures lead to the exact original action, not an unr
   assert.equal(actionForUnresolved({ id: 'missing-source', kind: 'SourceTarget' }, [action]), undefined)
 })
 check('adopting an untouched suggestion preserves its provenance instead of rewriting it as manual', () => {
-  assert.deepEqual(plain(adoptionPatch('true', 'true', false)), { confirmed: true })
+  const displayed = { source: 'Source quote.', candidates: [{ value: 'true', sourceDocumentId: 7, sourceHash: 'hash', sourceQuote: 'Source quote.' }] }
+  assert.deepEqual(plain(adoptionPatch('true', 'true', false, undefined, displayed)), { confirmed: true, suggestionSnapshot: { value: 'true', source: 'Source quote.', candidates: displayed.candidates, reviewRequired: false } })
   assert.deepEqual(plain(adoptionPatch('false', 'true', false)), { value: 'false', reviewed: true })
-  assert.deepEqual(plain(adoptionPatch('false', 'true', true, 0)), { candidateIndex: 0 })
+  assert.deepEqual(plain(adoptionPatch('false', 'true', true, 0, displayed)), { candidateIndex: 0, candidateSnapshot: displayed.candidates[0] })
+  assert.throws(() => adoptionPatch('true', 'true', false), /Refresh/)
+  assert.throws(() => adoptionPatch('true', 'true', false, 0, { candidates: [] }), /Refresh/)
 })
 check('reviewing an existing value adopts it for this draft and does not alter unrelated fields', () => {
-  assert.deepEqual(plain(adoptionPatch('2026-10-12', '2026-10-12', true)), { reviewed: true, confirmed: true })
+  assert.deepEqual(plain(adoptionPatch('2026-10-12', '2026-10-12', true, undefined, { source: null, candidates: [] })), { reviewed: true, confirmed: true, suggestionSnapshot: { value: '2026-10-12', source: null, candidates: [], reviewRequired: true } })
+})
+check('adoption binds a copy of the shown source identity before later local metadata changes', () => {
+  const shown = { source: 'Original source.', candidates: [{ value: 'A', sourceDocumentId: 7, sourceHash: 'hash-a', sourceQuote: 'Original source.' }] }
+  const candidate = adoptionPatch('A', 'A', false, 0, shown)
+  const suggestion = adoptionPatch('A', 'A', false, undefined, shown)
+  shown.candidates[0].value = 'B'; shown.candidates[0].sourceHash = 'hash-b'; shown.source = 'Replacement source.'
+  assert.equal(candidate.candidateSnapshot.value, 'A')
+  assert.equal(candidate.candidateSnapshot.sourceHash, 'hash-a')
+  assert.equal(suggestion.suggestionSnapshot.value, 'A')
+  assert.equal(suggestion.suggestionSnapshot.source, 'Original source.')
+  assert.equal(suggestion.suggestionSnapshot.candidates[0].sourceHash, 'hash-a')
 })
 check('cached inactive entries survive parent switching and remain independently dirty', () => {
   const fields = [field('subcontractArrangement'), field('subcontractors', 'multiselect')]

@@ -196,6 +196,15 @@ export interface DraftVariablePatch {
   result?: string
   reviewed?: boolean
   candidateIndex?: number
+  candidateSnapshot?: DraftCandidateIdentity
+  suggestionSnapshot?: { value: string; source: string | null; candidates: DraftCandidateIdentity[]; reviewRequired: boolean }
+}
+
+export interface DraftCandidateIdentity {
+  value: string
+  sourceDocumentId: string | number | null
+  sourceHash: string | null
+  sourceQuote: string | null
 }
 
 /** 手工新增 FILE 变量的请求体 */
