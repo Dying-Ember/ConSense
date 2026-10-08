@@ -34,9 +34,9 @@ function item(str, x, y, advances) { return { str, x, y, advances: advances ?? A
 const firstRun = item('preface — saved contract', 20, 198, [...Array(10).fill(6), ...Array(14).fill(11)])
 const secondRun = item('paragraph. tail', 80, 214, [...Array(10).fill(9), ...Array(5).fill(6)])
 const pageText = page => page === 1 ? [firstRun, secondRun] : page === 2 ? [item('same target', 80, 198), item('same target', 81, 199)] : [item('different saved paragraph.', 80, 198)]
-class TextLayer {
-  constructor({ textContentSource, container, viewport }) {
-    Object.assign(this, { textContentSource, container, viewport, textDivs: [], textContentItemsStr: [], cancelled: false }); layers.push(this)
+class SyntheticTextLayer {
+  constructor({ textContentSource, container, viewport, textDivs, textContentItemsStr }) {
+    Object.assign(this, { textContentSource, container, viewport, textDivs, textContentItemsStr, cancelled: false }); layers.push(this)
   }
   async render() {
     if (this.textContentSource.failLayer) throw new Error('Synthetic text-layer failure')
@@ -48,10 +48,14 @@ class TextLayer {
   }
   cancel() { this.cancelled = true }
 }
+function renderTextLayer(options) {
+  const layer = new SyntheticTextLayer(options)
+  return { promise: layer.render(), cancel() { layer.cancel() } }
+}
 const loaded = loadVue(path.join(__dirname, '../src/components/DraftingPdfPreview.vue'), {
   globals: { window }, boundaries: {
     'pdfjs-dist/build/pdf.worker.min.mjs?url': { default: 'synthetic-worker' },
-    'pdfjs-dist': { GlobalWorkerOptions: {}, TextLayer, getDocument({ url }) { return {
+    'pdfjs-dist': { GlobalWorkerOptions: {}, renderTextLayer, getDocument({ url }) { return {
       promise: Promise.resolve({ numPages: 3, async destroy() {}, async getPage(page) { return {
         rotate: 0,
         getViewport({ scale }) { return { width: 612 * scale, height: 792 * scale, scale } },

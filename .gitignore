@@ -12,6 +12,8 @@
 *.class
 
 # Local application data, uploads, diagnostics and credentials
+/.local/
+/Ref/
 **/data/
 **/uploads/
 **/output/
