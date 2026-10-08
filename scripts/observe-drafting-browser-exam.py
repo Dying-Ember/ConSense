@@ -2,9 +2,24 @@
 import argparse
 import importlib.util
 import json
+import re
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
+
+
+def instant_nanoseconds(value):
+    """Compare RFC3339 instants without losing the Java trace's nanoseconds."""
+    match = re.fullmatch(
+        r"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d{1,9}))?(Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)", value
+    ) if isinstance(value, str) else None
+    if match is None:
+        raise ValueError("Require a timestamp with an explicit timezone and up to nine fractional digits.")
+    whole, fraction, offset = match.groups()
+    whole = datetime.fromisoformat(whole + offset.replace("Z", "+00:00"))
+    delta = whole.astimezone(timezone.utc) - datetime(1970, 1, 1, tzinfo=timezone.utc)
+    return (delta.days * 86400 + delta.seconds) * 1_000_000_000 + int((fraction or "0").ljust(9, "0"))
+
 
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location("exam_runner", ROOT / "scripts/run-drafting-exam.py")
@@ -44,7 +59,12 @@ try:
         if current and current.get("runId"):
             trace = current
             if current.get("status") in {"completed", "failed"}:
-                assert current["startedAt"] >= manifest["observationStartedAt"], "Reject a prior run."
+                trace_started_ns = instant_nanoseconds(current["startedAt"])
+                trace_finished_ns = instant_nanoseconds(current["finishedAt"])
+                if trace_started_ns < instant_nanoseconds(manifest["observationStartedAt"]):
+                    raise ValueError("Reject a prior run.")
+                if trace_finished_ns < trace_started_ns:
+                    raise ValueError("Reject a trace finished before it started.")
                 assert args.expected_harness_version == current["harnessVersion"], "Unexpected deployed harness version."
                 runner.save(out / "trace.json", response["body"])
                 break
@@ -54,7 +74,7 @@ try:
         raise TimeoutError("Browser exam did not finish within observation timeout.")
     manifest.update(status="completed" if trace["status"] == "completed" else "extraction_failed",
                     runId=trace["runId"], extractionStartedAt=trace["startedAt"], extractionFinishedAt=trace["finishedAt"],
-                    elapsedSeconds=(datetime.fromisoformat(trace["finishedAt"].replace("Z", "+00:00")) - datetime.fromisoformat(trace["startedAt"].replace("Z", "+00:00"))).total_seconds())
+                    elapsedSeconds=(trace_finished_ns - trace_started_ns) / 1_000_000_000)
     for name, route in [("variables", "/variables"), ("trace", "/variables/extract-trace"),
                         ("plan", "/plan"), ("progress", "/progress")]:
         result = runner.request(prefix + route)

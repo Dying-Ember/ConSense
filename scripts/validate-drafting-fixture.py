@@ -102,6 +102,8 @@ def equivalent(actual, expected, key: str) -> bool:
             # Core Bill identity is graded here. Optional placement/trade/purpose
             # metadata is preserved and separately reported for the usage oracle.
             a = {k: a[k] for k in expected if k in a}
+        if key == "sections" and {"designation", "workTypes", "location"}.issubset(expected) and "id" not in expected:
+            a.pop("id", None)
         if set(a) != set(expected):
             return False
         return all(
@@ -179,7 +181,7 @@ def semantic_diagnostic(key: str, value, quote: str, evidence: dict, name: str, 
     distinctive_values = literal_values and (
         isinstance(value, (dict, list)) and bool(terms) and not has_boolean(value)
         or isinstance(value, str) and len(canonical(value)) >= 12
-        # A 31-month BASE or ceiling is not an adopted exact draft period.
+        # A base period or ceiling is not an adopted exact draft period.
         # Exact period must use the curated adoption statement or manual review.
         or isinstance(value, (int, float)) and not isinstance(value, bool) and key != "contractPeriodMonths" and numeric_scope_cue and len(canonical(quote)) >= 20
     )
@@ -197,11 +199,66 @@ def semantic_diagnostic(key: str, value, quote: str, evidence: dict, name: str, 
 
 
 def native_paragraphs(path: Path) -> list[str]:
+    return native_evidence(path)["legacyParagraphs"]
+
+
+def native_evidence(path: Path) -> dict:
     with zipfile.ZipFile(path) as doc:
-        body = ET.fromstring(doc.read("word/document.xml"))
+        document = ET.fromstring(doc.read("word/document.xml"))
     # Native ordinal includes table-cell paragraphs, matching this fixture's
     # nativeParagraph anchors; top-level python-docx paragraphs omit them.
-    return ["".join(t.text or "" for t in p.findall(".//w:t", NS)) for p in body.findall(".//w:body//w:p", NS)]
+    # OOXML stores an explicit line break or tab between w:t nodes. Preserve
+    # those separators: concatenating only w:t fuses adjacent words and makes
+    # literal quotations from a valid multi-line paragraph appear absent.
+    tokens = {
+        f"{{{NS['w']}}}br": "\n",
+        f"{{{NS['w']}}}cr": "\n",
+        f"{{{NS['w']}}}tab": "\t",
+    }
+    def paragraph_text(paragraph):
+        return "".join(node.text or "" if node.tag == f"{{{NS['w']}}}t" else tokens.get(node.tag, "") for node in paragraph.iter())
+    body = document.find("w:body", NS)
+    if body is None:
+        raise ValueError("DOCX is missing its native document body")
+    legacy = [paragraph_text(p) for p in body.findall(".//w:p", NS)]
+    paragraphs, tables, projection = [], [], []
+    for element in body:
+        if element.tag == f"{{{NS['w']}}}p":
+            text = paragraph_text(element)
+            paragraphs.append(text)
+            projection.append(text)
+        elif element.tag == f"{{{NS['w']}}}tbl":
+            rows = [["\n".join(paragraph_text(p) for p in cell.findall("w:p", NS))
+                     for cell in row.findall("w:tc", NS)]
+                    for row in element.findall("w:tr", NS)]
+            tables.append(rows)
+            projection.extend(" | ".join(row) for row in rows)
+    return {"legacyParagraphs": legacy, "paragraphs": paragraphs,
+            "tables": tables, "projection": projection}
+
+
+def reference_evidence_verified(evidence: dict, native: dict, file_hash: str) -> bool:
+    """Verify declared OOXML anchors, preserving legacy all-paragraph ordinals."""
+    if file_hash != evidence.get("sha256"):
+        return False
+    table = evidence.get("sourceKind") == "table"
+    if table:
+        ordinal = evidence.get("nativeTable")
+        tables = native.get("tables", [])
+        if "nativeParagraph" in evidence or type(ordinal) is not int or not 1 <= ordinal <= len(tables):
+            return False
+        actual = tables[ordinal - 1]
+        expected = [evidence.get("headers")] + (evidence.get("rows") or [])
+        if not actual or any(not isinstance(row, list) or any(not isinstance(cell, str) for cell in row) for row in expected):
+            return False
+        if [[canonical(cell) for cell in row] for row in actual] != [[canonical(cell) for cell in row] for row in expected]:
+            return False
+        return canonical("\n".join(" | ".join(row) for row in actual)) == canonical(evidence.get("quote", ""))
+    if "nativeTable" in evidence or evidence.get("sourceKind") not in (None, "paragraph"):
+        return False
+    paragraphs = native.get("paragraphs" if evidence.get("sourceKind") == "paragraph" else "legacyParagraphs", [])
+    ordinal = evidence.get("nativeParagraph")
+    return type(ordinal) is int and 1 <= ordinal <= len(paragraphs) and canonical(paragraphs[ordinal - 1]) == canonical(evidence.get("quote", ""))
 
 
 def sha(path: Path) -> str:
@@ -211,6 +268,36 @@ def sha(path: Path) -> str:
 def local_optional(run: Path, name: str, default):
     path = run / name
     return unwrap(path) if path.is_file() else default
+
+
+def fixture_presentation(expected_doc: dict, expected: dict) -> dict:
+    """Use offline fixture metadata for labels, never for scoring decisions.
+
+    The fixed catalogue/evidence checks below still grade every expected input.
+    A new fixture may have different Bill identities and business boundaries;
+    those facts must not inherit the original exam's Bill 9/10/11 assumptions.
+    """
+    metadata = expected_doc.get("gradingMetadata", {})
+    if not isinstance(metadata, dict):
+        raise ValueError("gradingMetadata must be an object")
+    text_defaults = {
+        "examTitle": "Drafting 79 项缺失证据考题",
+        "candidateExamScope": "Real saved Drafting candidate identification on the missing-evidence 15-DOCX exam; no adoption or document generation acceptance.",
+        "additionalBusinessBoundary": "Candidate identification does not establish correct Bill distribution or usage, safety component links, effective standard terms or duplicate-free generated wording. Any additional business oracle below belongs to this fixture and remains unevaluated.",
+    }
+    result = {}
+    for key, default in text_defaults.items():
+        value = metadata.get(key, default)
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError(f"gradingMetadata.{key} must be a nonempty string")
+        result[key] = value
+    notes = metadata.get("additionalBusinessNotes", [])
+    if not isinstance(notes, list) or any(not isinstance(note, str) or not note.strip() for note in notes):
+        raise ValueError("gradingMetadata.additionalBusinessNotes must be a list of nonempty strings")
+    result["additionalBusinessNotes"] = notes
+    bills = expected.get("billNos", {}).get("value")
+    result["billCount"] = len(bills) if isinstance(bills, list) else None
+    return result
 
 
 def grade(args) -> tuple[dict, int]:
@@ -252,6 +339,7 @@ def grade(args) -> tuple[dict, int]:
             truth["status"] = "not_yet_disclosed"
         elif stage_number < 15 and truth["status"] == "not_applicable" and truth["applicability"] == "prerequisite_unknown":
             truth["status"] = "prerequisite_unknown"
+    presentation = fixture_presentation(expected_doc, expected)
     catalog = local_optional(run, "catalog.json", {})
     if not catalog:
         raise ValueError("catalog.json API snapshot is required; the raw resource ruleVersion may differ from the running Java/API catalogue version")
@@ -279,7 +367,8 @@ def grade(args) -> tuple[dict, int]:
     expected_files = dict(sorted(all_fixture_files.items())[:stage_number])
     manifests = {entry.get("name") or Path(entry["path"]).name: entry for entry in manifest.get("inputFiles", [])}
     file_hashes = {name: sha(path) for name, path in all_fixture_files.items()}
-    paragraphs = {name: native_paragraphs(path) for name, path in all_fixture_files.items()}
+    native = {name: native_evidence(path) for name, path in all_fixture_files.items()}
+    paragraphs = {name: structure["projection"] for name, structure in native.items()}
     global_failures = []
     boundary = {
         "exact_15_fixture_docx": len(all_fixture_files) == 15,
@@ -310,13 +399,7 @@ def grade(args) -> tuple[dict, int]:
         evidence = truth.get("inputEvidence") or {}
         ref_ok = True
         if evidence:
-            ps = paragraphs.get(evidence["file"], [])
-            ordinal = evidence.get("nativeParagraph", 0)
-            ref_ok = (
-                file_hashes.get(evidence["file"]) == evidence.get("sha256")
-                and 1 <= ordinal <= len(ps)
-                and canonical(ps[ordinal - 1]) == canonical(evidence.get("quote", ""))
-            )
+            ref_ok = reference_evidence_verified(evidence, native.get(evidence["file"], {}), file_hashes.get(evidence["file"]))
         candidates = []
         covered = []
         correct_full = False
@@ -444,7 +527,8 @@ def grade(args) -> tuple[dict, int]:
     verdict = "FAIL" if counts["FAIL"] or global_failures else "REVIEW" if counts["REVIEW"] else "PASS"
     report = {
         "schemaVersion": 1, "gradedAtUtc": datetime.now(timezone.utc).isoformat(),
-        "verdict": verdict, "scope": "Real saved Drafting candidate identification on the missing-evidence 15-DOCX exam; no adoption or document generation acceptance.",
+        "verdict": verdict, "scope": presentation["candidateExamScope"],
+        "fixtureDisplayTitle": presentation["examTitle"],
         "referenceNeverSentToModelByThisScorer": True,
         "actualPath": str(args.actual.resolve()), "fixturePath": str(fixture),
         "expectedFileSha256": sha(expected_path), "projectId": manifest.get("projectId"),
@@ -472,14 +556,16 @@ def grade(args) -> tuple[dict, int]:
             "Candidate sets may contain list fragments; correctly grounded fragments may jointly cover an expected list. Generated billNos IDs and harmless list order are ignored; substantive fields are retained.",
             "Wrong candidates in the authoritative reference file fail. Wrong candidates from a different supplied source remain separately visible and require review, even if a correct candidate was found.",
             "Missing, intentionally unknown, conditionally inactive and optional unchanged inputs retain their distinct expected statuses. Empty lists are answers requiring grounded evidence.",
-            "The parent Bill core compares all thirteen number/type/formal-description records. Optional Bill metadata is retained separately; usage, safety component links, generated inspection-text duplication and final drafting remain unaccepted by this scorer.",
+            f"The Bill core compares all {presentation['billCount']} number/type/formal-description records in this stage's fixture answer." if presentation["billCount"] is not None else "This stage has no disclosed Bill list to compare.",
+            "Optional Bill metadata is retained separately; usage, safety component links, generated inspection-text duplication and final drafting remain unaccepted by this scorer.",
         ],
         "additionalBusinessAcceptance": {
             "verdict": "NOT_EVALUATED",
             "billDistributionAndUsageOracle": expected_doc.get("billDistributionAndUsageOracle"),
             "knownRepresentationLimitations": expected_doc.get("knownRepresentationLimitations"),
             "effectiveTermsNotOptionalOverrides": expected_doc.get("effectiveTerms"),
-            "boundary": "A PASS in the 79-item candidate exam does not establish correct Bill 9/10/11 distribution, trade safety 12.2/12.3/12.4 links, preserved standard repayment terms or duplicate-free generated site-inspection wording.",
+            "boundary": presentation["additionalBusinessBoundary"],
+            "fixtureNotes": presentation["additionalBusinessNotes"],
         },
         "ledger": ledger,
     }
@@ -489,7 +575,7 @@ def grade(args) -> tuple[dict, int]:
 def markdown(report: dict) -> str:
     s = report["summary"]
     lines = [
-        f"# Drafting 79 项缺失证据考题：{report['verdict']}", "",
+        f"# {report.get('fixtureDisplayTitle', 'Drafting 79 项缺失证据考题')}：{report['verdict']}", "",
         f"项目 `{report.get('projectId')}`，识别运行 `{report.get('runId')}`，阶段 `{report.get('stage')}`。", "",
         f"有确定值的 {s['requiredValueInputs']} 项中检出正确且有出处的 {s['correctGroundedValueInputsRecognized']} 项；"
         f"应留空的 {s['nullStateInputs']} 项中正确留空 {s['correctlyUnfilledInputs']} 项；四项刻意缺失通过 {s['withheldPass']}/4。", "",
@@ -509,12 +595,20 @@ def markdown(report: dict) -> str:
         lines += ["", f"### {r['key']} — {r['outcome']}", "", f"状态 `{r['expectedStatus']}`，适用性 `{r['expectedApplicability']}`，来源类别 `{r['expectedOrigin']}`。", "", "期望值：", "", "```json", json.dumps(r["expectedValue"], ensure_ascii=False, indent=2), "```", "", "当前显示建议值：", "", "```json", json.dumps(r["observedValue"], ensure_ascii=False, indent=2), "```"]
         ref = r["expectedEvidence"]
         if ref:
-            lines += ["", f"参考来源 `{ref['recordId']}` / `{ref['file']}` 第 {ref['nativeParagraph']} 个原生段落，字节 SHA-256 `{ref['sha256']}`。", "", "> " + ref["quote"].replace("\n", "\n> ")]
+            anchor = f"第 {ref.get('nativeTable')} 个原生表格" if ref.get("sourceKind") == "table" else f"第 {ref.get('nativeParagraph')} 个原生段落"
+            lines += ["", f"参考来源 `{ref['recordId']}` / `{ref['file']}` {anchor}，字节 SHA-256 `{ref['sha256']}`。", "", "> " + ref["quote"].replace("\n", "\n> ")]
         if r["failures"] or r["warnings"]:
             lines += ["", "判定原因：" + "; ".join(r["failures"] + r["warnings"])]
         for c in r["candidates"]:
             lines += ["", f"候选 {c['index']}：`{c['classification']}`，文件 `{c['fileName']}`，文档 ID `{c['sourceDocumentId']}`，当前项目 sourceHash `{c['sourceHash']}`。", "", "```json", json.dumps(c["value"], ensure_ascii=False, indent=2), "```", "", "> " + c["sourceQuote"].replace("\n", "\n> "), "", "来源核验：" + ", ".join(f"{k}={v}" for k, v in c["groundingChecks"].items())]
-    lines += ["", "## 附加业务验收尚未完成", "", report["additionalBusinessAcceptance"]["boundary"], "", "Bill 9/10/11 的细项 SOR：原 tender 为 Disc A 电子 PDF/reference only，addenda 为原始 hard copy，排除 Master Collection 与 Summary Pages。Electrical/Fire services and water pump/Lift 的安全子项分别为 12.2/12.3/12.4（Lift 为剩余成员推断）；正式父 Bill 仍为 No.12，不创造第十四个父 Bill。", "", "optional_unchanged 的还款月数和首张还款证书输入保持留空。2b 案例的有效条款 6/7 并不是对现行 2a 标准模板的项目 override。", "", "## 评分限制", ""] + ["- " + text for text in report["gradingNotes"]]
+    acceptance = report["additionalBusinessAcceptance"]
+    lines += ["", "## 附加业务验收尚未完成", "", acceptance["boundary"]]
+    for note in acceptance.get("fixtureNotes", []):
+        lines += ["", note]
+    business_data = {key: acceptance[key] for key in ("billDistributionAndUsageOracle", "knownRepresentationLimitations", "effectiveTermsNotOptionalOverrides") if acceptance.get(key) is not None}
+    if business_data:
+        lines += ["", "本考题参考数据中的附加业务要求（本评分器未验证）：", "", "```json", json.dumps(business_data, ensure_ascii=False, indent=2), "```"]
+    lines += ["", "## 评分限制", ""] + ["- " + text for text in report["gradingNotes"]]
     return "\n".join(lines) + "\n"
 
 
@@ -523,7 +617,7 @@ def main() -> None:
     parser.add_argument("--actual", type=Path, required=True, help="saved variables.json (full ApiResponse or VariableVO array)")
     parser.add_argument("--trace", type=Path)
     parser.add_argument("--plan", type=Path)
-    parser.add_argument("--fixture", type=Path, required=True, help="03_missing_evidence_test directory or its 02_reference_do_not_upload directory")
+    parser.add_argument("--fixture", type=Path, required=True, help="79-input / 15-DOCX fixture directory or its 02_reference_do_not_upload directory")
     parser.add_argument("--stage", help="SIM01..SIM15 or 1..15; defaults to manifest.stage, then SIM15")
     parser.add_argument("--out-dir", type=Path, required=True)
     args = parser.parse_args()

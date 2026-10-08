@@ -101,6 +101,47 @@ def bill_rows(quote):
     return rows
 
 
+def bill_identity_keys(value, quoted):
+    """Allow a type namespace only when it is literal in that Bill's own row.
+
+    Missing types retain number-only identity for unambiguous singleton numbers.
+    A repeated number cannot be disambiguated by descriptions or a guessed type.
+    """
+    if not isinstance(value, list) or any(not isinstance(row, dict) for row in value):
+        return None
+    source_numbers = Counter(row["number"] for row in quoted)
+    candidate_numbers = Counter(str(row.get("number")) for row in value)
+    keys = []
+    for row in value:
+        number = str(row.get("number"))
+        pricing_type = row.get("type")
+        if pricing_type is not None and not isinstance(pricing_type, str):
+            return None
+        if pricing_type:
+            if not isinstance(pricing_type, str) or pricing_type.upper() not in {"BQ", "SOR"}:
+                return None
+            if not any(number == source["number"]
+                       and identity(str(row.get("description"))) == identity(source["description"])
+                       and pricing_type.casefold() == source["typeCell"].casefold()
+                       for source in quoted):
+                return None
+            keys.append((pricing_type.upper(), number))
+        else:
+            if source_numbers[number] != 1 or candidate_numbers[number] != 1:
+                return None
+            keys.append(("untyped", number))
+    return keys
+
+
+def bill_types_by_identity(value):
+    if not isinstance(value, list) or any(not isinstance(row, dict) for row in value):
+        return None
+    # Preserve a missing type versus an explicit null or string. No type may be
+    # manufactured or rewritten between raw model output and normalized value.
+    return Counter((str(row.get("number")), identity(str(row.get("description"))),
+                    "type" in row, json.dumps(row.get("type"), ensure_ascii=False, sort_keys=True)) for row in value)
+
+
 def audit(trace):
     if not isinstance(trace, dict) or trace.get("status") != "completed" or not trace.get("runId"):
         raise ValueError("a completed trace with runId is required")
@@ -165,9 +206,13 @@ def audit(trace):
                 value = json.loads(normalized)
                 quoted = bill_rows(decision.get("sourceQuote") or "")
                 checks["bill_rows_match_complete_quoted_table"] = isinstance(value, list) and bool(quoted) and Counter((str(row.get("number")), identity(str(row.get("description")))) for row in value) == Counter((row["number"], identity(row["description"])) for row in quoted)
-                checks["bill_number_identity_is_unique"] = isinstance(value, list) and len({str(row.get("number")) for row in value}) == len(value)
+                bill_keys = bill_identity_keys(value, quoted)
+                checks["bill_identity_is_unique_in_literal_source_type_namespace"] = bill_keys is not None and len(set(bill_keys)) == len(bill_keys)
                 checks["bill_raw_identities_unchanged"] = isinstance(raw, list) and isinstance(value, list) and Counter((str(row.get("number")), identity(str(row.get("description")))) for row in raw) == Counter((str(row.get("number")), identity(str(row.get("description")))) for row in value)
+                raw_types, normalized_types = bill_types_by_identity(raw), bill_types_by_identity(value)
+                checks["bill_raw_types_unchanged"] = raw_types is not None and raw_types == normalized_types
                 checks["retained_bill_types_literal_in_own_table_row"] = isinstance(value, list) and all(not row.get("type") or any(str(row.get("number")) == source["number"] and identity(str(row.get("description"))) == identity(source["description"]) and str(row["type"]).casefold() == source["typeCell"].casefold() for source in quoted) for row in value)
+                row["billLiteralIdentityKeys"] = bill_keys
                 notes.append("Bill optional metadata roles, source supersession and prose identity statements are not semantically certified.")
             elif isinstance(normalized, str) and isinstance(raw, str):
                 normalized_items, raw_items = numbered_items(normalized), numbered_items(raw, RAW_MARKER)

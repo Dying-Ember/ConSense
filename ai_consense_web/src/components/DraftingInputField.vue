@@ -3,6 +3,7 @@ import { computed } from 'vue'
 import type { DraftField, ExtractTrace } from '@/api/types'
 import DraftingFieldDiagnostics from './DraftingFieldDiagnostics.vue'
 import { applicability, clone, type DraftValue } from '@/drafting/state'
+import { presentationRowKeys } from '@/drafting/presentation-row-keys'
 import { isObjectKind, isRecordCollectionKind } from '@/drafting/field-kinds'
 import { draftWord, localized, type DraftWord } from '@/drafting/words'
 import type { AppLocale } from '@/i18n'
@@ -19,6 +20,7 @@ const multilineTextKeys = new Set([
 ])
 const multiline = computed(() => ['textarea', 'longtext'].includes(props.field.kind) || (props.field.kind === 'text' && (multilineTextKeys.has(props.field.key) || (typeof props.value === 'string' && /[\r\n]/.test(props.value)))))
 const rows = computed(() => Array.isArray(props.value) ? props.value : [])
+const rowKeys = computed(() => presentationRowKeys(rows.value))
 const object = computed(() => props.value && typeof props.value === 'object' && !Array.isArray(props.value) ? props.value : {})
 const collection = computed(() => isRecordCollectionKind(props.field.kind))
 const objectKind = computed(() => isObjectKind(props.field.kind))
@@ -45,7 +47,6 @@ function addRow() {
 }
 function removeRow(index: number) { const next = clone(rows.value); next.splice(index, 1); emit('update', next) }
 function rowValue(row: DraftValue, key: string): DraftValue { return row && typeof row === 'object' && !Array.isArray(row) ? row[key] ?? null : null }
-function rowKey(row: DraftValue, index: number): string | number { return row && typeof row === 'object' && !Array.isArray(row) && row.id ? String(row.id) : index }
 function toggle(value: string | boolean | number, event: Event) {
   const selected = clone(rows.value)
   emit('update', (event.target as HTMLInputElement).checked ? [...selected.filter(item => item !== value), value] : selected.filter(item => item !== value))
@@ -65,7 +66,7 @@ function toggle(value: string | boolean | number, event: Event) {
       <div class="list-controls"><button type="button" class="btn soft" :disabled="disabled" @click="emit('update', [])">{{ w('noItems') }}</button><button type="button" class="btn" :disabled="disabled" @click="emit('update', null)">{{ w('resetUnknown') }}</button></div>
     </div>
     <div v-else-if="collection" :id="id" class="collection-editor">
-      <div v-if="rows.length" class="table-scroll"><table><thead><tr><template v-if="columns.length"><th v-for="column in columns" :key="column.key">{{ l(column.label) }} <small v-if="showOptional(column)">({{ w('optional') }})</small></th></template><th v-else>{{ w('columns') }}</th><th></th></tr></thead><tbody><tr v-for="(row, index) in rows" :key="rowKey(row, index)"><template v-if="columns.length"><td v-for="column in columns" :key="column.key"><DraftingInputField v-if="applicability(column.condition, { ...values, ...(row && typeof row === 'object' && !Array.isArray(row) ? row : {}) }) !== 'no'" :field="column" :value="rowValue(row, column.key)" :values="{ ...values, ...(row && typeof row === 'object' && !Array.isArray(row) ? row : {}) }" :locale="locale" :disabled="disabled" :id-prefix="`${id}-${index + 1}`" compact hide-label @update="updateRow(index, $event, column.key)" /></td></template><td v-else><textarea :value="typeof row === 'string' ? row : JSON.stringify(row)" :disabled="disabled" :aria-label="`${l(field.label)} ${index + 1}`" rows="2" @input="updateRow(index, ($event.target as HTMLTextAreaElement).value)" /></td><td class="row-action"><button type="button" class="btn" :disabled="disabled" :aria-label="`${w('remove')} ${index + 1}`" @click="removeRow(index)">×</button></td></tr></tbody></table></div>
+      <div v-if="rows.length" class="table-scroll"><table><thead><tr><template v-if="columns.length"><th v-for="column in columns" :key="column.key">{{ l(column.label) }} <small v-if="showOptional(column)">({{ w('optional') }})</small></th></template><th v-else>{{ w('columns') }}</th><th></th></tr></thead><tbody><tr v-for="(row, index) in rows" :key="rowKeys[index]"><template v-if="columns.length"><td v-for="column in columns" :key="column.key"><DraftingInputField v-if="applicability(column.condition, { ...values, ...(row && typeof row === 'object' && !Array.isArray(row) ? row : {}) }) !== 'no'" :field="column" :value="rowValue(row, column.key)" :values="{ ...values, ...(row && typeof row === 'object' && !Array.isArray(row) ? row : {}) }" :locale="locale" :disabled="disabled" :id-prefix="`${id}-${index + 1}`" compact hide-label @update="updateRow(index, $event, column.key)" /></td></template><td v-else><textarea :value="typeof row === 'string' ? row : JSON.stringify(row)" :disabled="disabled" :aria-label="`${l(field.label)} ${index + 1}`" rows="2" @input="updateRow(index, ($event.target as HTMLTextAreaElement).value)" /></td><td class="row-action"><button type="button" class="btn" :disabled="disabled" :aria-label="`${w('remove')} ${index + 1}`" @click="removeRow(index)">×</button></td></tr></tbody></table></div>
       <p v-if="Array.isArray(value) && !value.length" class="hint">{{ w('emptyConfirmed') }}</p>
       <div class="list-controls"><button type="button" class="btn" :disabled="disabled" @click="addRow">+ {{ w('addRow') }}</button><button type="button" class="btn soft" :disabled="disabled" @click="emit('update', [])">{{ w('noItems') }}</button><button type="button" class="btn" :disabled="disabled" @click="emit('update', null)">{{ w('resetUnknown') }}</button></div>
     </div>

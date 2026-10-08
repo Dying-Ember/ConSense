@@ -85,6 +85,16 @@ store.switchProject('SYNTHETIC-P1')
 const app = vue.createApp(loaded.default); app.use(pinia); app.use(loaded.loadLocal(path.join(__dirname, '../src/i18n/index.ts')).i18n)
 function button(title, within = document) { return [...within.querySelectorAll('button')].find(node => node.textContent.trim() === title) }
 async function settled() { await settle(); await new Promise(resolve => setTimeout(resolve, 35)); await settle() }
+async function waitFor(description, condition) {
+  const deadline = performance.now() + 2000
+  while (performance.now() < deadline) {
+    await settle()
+    if (condition()) return
+    await new Promise(resolve => setTimeout(resolve, 5))
+  }
+  const statuses = [...(workspace()?.querySelectorAll('[role="status"], [role="alert"]') ?? [])].map(node => node.textContent).join(' | ')
+  assert.ok(condition(), `Timed out waiting for ${description}; visible status: ${statuses || 'none'}`)
+}
 async function click(title, within = document) { const target = button(title, within); assert.ok(target, `Visible control: ${title}`); assert.equal(target.disabled, false, `Enabled control: ${title}`); target.click(); await settled() }
 function input(element, value) { assert.ok(element, 'Visible input'); element.value = value; element.dispatchEvent(new window.Event('input', { bubbles: true })) }
 function escape() { window.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true })) }
@@ -96,6 +106,7 @@ const workspace = () => document.querySelector('[data-document-workspace]')
   baseDocument.blocks[0].id = nativePath
   servers.clear()
   app.mount('#app'); await settled(); await click('3. Preview and export')
+  await waitFor('the actual complete DOCX in the primary view', () => workspace()?.querySelector('[data-document-paper]')?.textContent.includes('SYNTHETIC complete document heading'))
   const paper = workspace().querySelector('[data-document-paper]'), loadCount = loads.length
   assert.ok(paper?.textContent.includes('SYNTHETIC complete document heading'), 'The primary view loads the actual full DOCX')
   assert.equal(document.querySelector('canvas'), null, 'PDF rendering is an explicit optional layout check')
@@ -147,6 +158,7 @@ const workspace = () => document.querySelector('[data-document-workspace]')
   store.switchProject('SYNTHETIC-P2'); await settled()
   assert.equal(workspace(), null, 'Switching projects closes immersive view and does not show the prior project workspace')
   store.switchProject('SYNTHETIC-P1'); await settled()
+  await waitFor('the restored pending body after returning to its project', () => workspace()?.textContent.includes(revised))
   assert.ok(workspace().textContent.includes(revised), 'Returning to the project restores the pending body')
   assert.ok(workspace().textContent.includes('Pending body changes'))
   assert.equal(writes.length, 0, 'Exiting and switching projects do not save or discard body edits')
@@ -162,6 +174,10 @@ const workspace = () => document.querySelector('[data-document-workspace]')
   assert.ok(!workspace().textContent.includes('Pending body changes'))
   assert.ok(workspace().textContent.includes(server('SYNTHETIC-P1').docxSha256)); assert.ok(workspace().textContent.includes('SYNTHETIC-pdf-2')); assert.ok(workspace().textContent.includes('SYNTHETIC-profile'))
   assert.equal(previews.length, 0, 'Saving does not silently request an optional PDF')
+  await waitFor('the returned saved DOCX ready for reading', () => {
+    const control = workspace()?.querySelector('[data-review-mode="saved"]')
+    return control && !control.disabled
+  })
   const savedMode = workspace().querySelector('[data-review-mode="saved"]')
   assert.ok(savedMode && !savedMode.disabled); savedMode.click(); await settled()
   assert.ok(workspace().querySelector('[data-document-paper]').textContent.includes('Pending exact'), 'Successful save reads the returned DOCX revision')

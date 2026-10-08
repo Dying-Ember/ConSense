@@ -1,4 +1,4 @@
-import type { DraftCondition, DraftDocument, DraftField, DraftPlanAction, DraftTargetOverride, DraftUnresolved, DraftVariable, DraftVariablePatch } from '@/api/types'
+import type { DraftCandidate, DraftCandidateIdentity, DraftCondition, DraftDocument, DraftField, DraftPlanAction, DraftTargetOverride, DraftUnresolved, DraftVariable, DraftVariablePatch } from '@/api/types'
 import { isCollectionKind, isObjectKind } from './field-kinds'
 import type { BodyDraft } from './body-edit'
 
@@ -141,10 +141,19 @@ export function actionForUnresolved(issue: DraftUnresolved, actions: DraftPlanAc
   return actions.find(action => action.id === actionId)
 }
 
-export function adoptionPatch(raw: string, baseline: string, reviewRequired: boolean, candidateIndex?: number): DraftVariablePatch {
-  if (candidateIndex !== undefined) return { candidateIndex }
+function candidateIdentity(candidate: DraftCandidate): DraftCandidateIdentity {
+  return { value: candidate.value, sourceDocumentId: candidate.sourceDocumentId ?? null, sourceHash: candidate.sourceHash ?? null, sourceQuote: candidate.sourceQuote ?? null }
+}
+export function adoptionPatch(raw: string, baseline: string, reviewRequired: boolean, candidateIndex?: number, displayed?: Pick<DraftVariable, 'source' | 'candidates'>): DraftVariablePatch {
+  if (candidateIndex !== undefined) {
+    const candidate = displayed?.candidates?.[candidateIndex]
+    if (!candidate) throw new Error('Candidate no longer exists. Refresh the input before adopting it.')
+    return { candidateIndex, candidateSnapshot: candidateIdentity(candidate) }
+  }
   if (raw !== baseline) return { value: raw, reviewed: true }
-  return reviewRequired ? { reviewed: true, confirmed: true } : { confirmed: true }
+  if (!displayed) throw new Error('Suggestion evidence is unavailable. Refresh the input before adopting it.')
+  const suggestionSnapshot = { value: baseline, source: displayed.source ?? null, candidates: (displayed.candidates ?? []).map(candidateIdentity), reviewRequired }
+  return reviewRequired ? { reviewed: true, confirmed: true, suggestionSnapshot } : { confirmed: true, suggestionSnapshot }
 }
 
 /** Re-adopting one target binds that target to the current source; other targets retain their source revisions. */
