@@ -83,7 +83,9 @@ export const draftingApi = {
     api.upload<UploadResult>(`/drafting/${projectId}/inputs/upload`, files),
 
   variables: (projectId: string) => api.get<DraftVariable[]>(`/drafting/${projectId}/variables`),
-  extract: (projectId: string, llmSelection?: LlmSelection) => api.post<DraftVariable[]>(`/drafting/${projectId}/variables/extract`, undefined, { llmSelection }),
+  extract: (projectId: string, llmSelection?: LlmSelection) =>
+    // Local reasoning can take over an hour across a full correspondence pack.
+    api.post<DraftVariable[]>(`/drafting/${projectId}/variables/extract`, undefined, { timeout: 7200000, llmSelection }),
   extractTrace: (projectId: string) =>
     api.get<ExtractTrace | null>(`/drafting/${projectId}/variables/extract-trace`),
   extractTraces: (projectId: string, limit = 20) =>

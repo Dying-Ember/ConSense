@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, shallowRef, useId, watch } from 'vue'
-import { getDocument, GlobalWorkerOptions, TextLayer, type PDFDocumentProxy } from 'pdfjs-dist'
+import { getDocument, GlobalWorkerOptions, renderTextLayer, type PDFDocumentProxy } from 'pdfjs-dist'
 import type { TextContent } from 'pdfjs-dist/types/src/display/api'
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import { createPdfPreview, type PdfPreviewState } from '@/drafting/pdf-preview'
@@ -16,10 +16,11 @@ const canvas = ref<HTMLCanvasElement>()
 const surface = ref<HTMLElement>()
 const paper = ref<HTMLElement>()
 const textLayerHost = ref<HTMLElement>()
-const renderedText = shallowRef<{ layer: TextLayer; page: number; scale: number }>()
+type PdfTextLayer = { textDivs: HTMLElement[]; textContentItemsStr: string[]; cancel(): void }
+const renderedText = shallowRef<{ layer: PdfTextLayer; page: number; scale: number }>()
 const textRanges = ref<Record<string, PdfTextRectangle[]>>({})
 let textContentCache = new Map<number, Promise<TextContent>>()
-let activeTextLayer: TextLayer | undefined
+let activeTextLayer: PdfTextLayer | undefined
 let rangeVersion = 0
 const state = reactive<PdfPreviewState>({ status: 'idle', page: 1, pages: 0, error: '' })
 const requestedPage = ref<number | string>(1)
@@ -66,9 +67,9 @@ const preview = createPdfPreview<PDFDocumentProxy>({
     const host = textLayerHost.value
     host?.replaceChildren()
     const rendering = page.render({ canvasContext: context, viewport, transform: pixelRatio === 1 ? undefined : [pixelRatio, 0, 0, pixelRatio, 0, 0], background: '#ffffff' })
-    let cancelled = false, layer: TextLayer | undefined
+    let cancelled = false, layer: PdfTextLayer | undefined
     async function prepareTextLayer() {
-      if (!host || typeof TextLayer !== 'function' || typeof page.getTextContent !== 'function') return
+      if (!host || typeof renderTextLayer !== 'function' || typeof page.getTextContent !== 'function') return
       const cache = textContentCache
       let content = cache.get(pageNumber)
       if (!content) {
@@ -80,9 +81,11 @@ const preview = createPdfPreview<PDFDocumentProxy>({
       try { text = await content } catch { if (cache.get(pageNumber) === content) cache.delete(pageNumber); return }
       if (cancelled || !current()) return
       try {
-        layer = new TextLayer({ textContentSource: text, container: host, viewport })
+        const textDivs: HTMLElement[] = [], textContentItemsStr: string[] = []
+        const task = renderTextLayer({ textContentSource: text, container: host, viewport, textDivs, textContentItemsStr })
+        layer = { textDivs, textContentItemsStr, cancel: () => task.cancel() }
         activeTextLayer = layer
-        await layer.render()
+        await task.promise
       } catch { return }
       if (!cancelled && current()) renderedText.value = { layer, page: pageNumber, scale }
     }
@@ -96,7 +99,7 @@ const preview = createPdfPreview<PDFDocumentProxy>({
   }
 }, state)
 
-function measuredRectangles(match: PdfTextMatch, layer: TextLayer, scale: number): PdfTextRectangle[] {
+function measuredRectangles(match: PdfTextMatch, layer: PdfTextLayer, scale: number): PdfTextRectangle[] {
   const box = paper.value?.getBoundingClientRect()
   if (!box || !scale) return []
   const rectangles: PdfTextRectangle[] = []
