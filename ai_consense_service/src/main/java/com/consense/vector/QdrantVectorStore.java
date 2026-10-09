@@ -83,6 +83,12 @@ public class QdrantVectorStore implements VectorStore {
 
     @Override
     public List<SearchHit> search(String projectId, float[] query, int topK, double scoreThreshold) {
+        return search(projectId,null,query,topK,scoreThreshold);
+    }
+
+    @Override
+    public List<SearchHit> search(String projectId, java.util.Set<String> documentIds, float[] query, int topK, double scoreThreshold) {
+        if(documentIds!=null&&documentIds.isEmpty())return java.util.Collections.emptyList();
         ensureCollection();
         ObjectNode body = JsonUtils.mapper().createObjectNode();
         ArrayNode vector = body.putArray("vector");
@@ -97,6 +103,11 @@ public class QdrantVectorStore implements VectorStore {
         ObjectNode match = must.addObject();
         match.put("key", "projectId");
         match.putObject("match").put("value", projectId);
+        if(documentIds!=null) {
+            ObjectNode allowed=must.addObject();allowed.put("key","documentId");
+            ArrayNode any=allowed.putObject("match").putArray("any");
+            documentIds.stream().sorted().forEach(any::add);
+        }
 
         String raw = http.postJson(base() + "/collections/" + cfg.getCollection() + "/points/search",
                 JsonUtils.write(body), cfg.getTimeoutMs());

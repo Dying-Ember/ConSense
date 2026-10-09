@@ -1,0 +1,2 @@
+# Preserve the captured UTF-8 source identity used by the native DOCX regression.
+ai_consense_service/src/test/resources/drafting/harness/ordered-list/SIM11-novel-round1-source.txt text eol=lf

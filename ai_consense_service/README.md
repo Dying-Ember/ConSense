@@ -1,10 +1,11 @@
-# Service publication snapshot: configuration and verification
+# Service: configuration, integration and verification
 
-Source: 67ceb7081d42204aa17b12b149f52081e348da71  
+Initial import source: 67ceb7081d42204aa17b12b149f52081e348da71
+Current integration: remote drafting baseline `2e75126` plus local vetting/advisory `67ceb708..82ea3d9`; see repository-root `SOURCE-INTEGRATION.json`.
 Module: ai_consense_service  
 This is a fresh source snapshot. Existing projects, uploaded files, database rows, actual model/runtime captures, old Git history, model caches, and secrets are absent.
 
-The three runtime drafting registries and eleven Flyway migration files are retained. The skills seed is retained byte-for-byte as the generic definition. projects.json, vetting-files.json, and findings.json are empty arrays, so a new installation starts without demo projects, source rows, or findings. guidance-compiler-bindings.json differs only in its three originalSourceDocuments.*.sourcePath strings; all binding rules, source/text hashes, inventory hash, and other bytes are retained.
+The three runtime drafting registries and thirteen Flyway migration files (including V12/V13) are retained. The skills seed is retained byte-for-byte as the generic definition. projects.json, vetting-files.json, and findings.json are empty arrays, so a new installation starts without demo projects, source rows, or findings. guidance-compiler-bindings.json differs only in its three originalSourceDocuments.*.sourcePath strings; all binding rules, source/text hashes, inventory hash, and other bytes are retained.
 
 ## Build and local checks
 
@@ -15,7 +16,11 @@ Commands:
     mvn -Dtest=DraftBusinessRulesTest,DocxNativeLayoutGuardTest test
     mvn -DskipTests package
 
-The selected invocation performed no real provider calls: DraftBusinessRulesTest reported 13 passing tests; DocxNativeLayoutGuardTest reported four skipped cases. The native guard suite is not claimed as passed. Eight tests that require excluded external fixtures, including the transitive VettingStrictHybridTest helper users, are preserved under tests/external-fixtures/java with their original package paths. See tests/external-fixtures/README.md. They are outside Maven's default test source root. Default full-suite acceptance has not been rerun for this publication snapshot; no old acceptance result is presented as new deployment acceptance.
+The Oct 9 integration was checked with JDK 17.0.20.1 and Maven 3.9.16 using `mvn -B -Dconsense.test.python=<prepared-interpreter> clean package`. The default suite reported 1,618 tests: 1,550 passed, 68 skipped, zero failures/errors; the executable JAR was built. No real model provider, neural forward, tokenizer load, vector database or OCR operation was performed by the protocol fixtures.
+
+Five test files require private originals, real runtime captures or actual templates/renderers and are preserved under `tests/external-fixtures/java`, outside the default source root. The five vetting protocol/helper test files are back in the default source root with a frozen non-secret metadata fixture. They require a Python environment with the documented dependencies; set `-Dconsense.test.python=<interpreter>` or `CONSENSE_TEST_PYTHON`, or use the service `.venv`. See `tests/external-fixtures/README.md`. Skipped and external cases are not counted as passed.
+
+The 13 passing rule tests and four skipped native guard cases were initial-import checks, not the current integration totals.
 
 Compiled output under target/ is ignored and must not be committed. Build/test receipts are stored outside the publication tree.
 
@@ -60,14 +65,12 @@ Original NTT/SCT/SCC documents and correspondence must be uploaded through the a
 
 ## Optional Python OCR/retrieval tools
 
-tools/vetting_eval contains the implementation and pinned requirements. Torch/CUDA and model weights/cache are provisioned separately. samples.json retains embedding/reranker settings but has empty source_directory, documents, ocr_cases and queries. The server imports this model-config structure; supply deployment model/runtime settings and authorized external sources when required.
+tools/vetting_eval contains the implementation and pinned requirements. Torch/CUDA and model weights/cache are provisioned separately. samples.json preserves historical sample evaluation settings: eight source entries, five OCR cases and eight queries. It contains relative references and sample needles, not the required original files or a fresh accuracy result. The server imports this model-config structure; supply deployment model/runtime settings and authorized external sources when required.
 
-The local case inventories, historical queries, probe text, model/runtime traces and outputs are excluded. Evaluation scripts that use those inputs require external data and are not claimed to run against the empty publication snapshot.
+Source-identity inventories are preserved in `tests/external-fixtures/manifests/`; they contain relative filenames, hashes and metadata, not document bodies. Absolute-path historical query replays, real source excerpt corpora, model/runtime traces and outputs remain external. An old prompt probe is retained as an explicitly historical document under `docs/archive`. Evaluation scripts still need authorized external originals and configured models.
 
 ## Verification boundary
 
-The manifest records every fixed-HEAD path as unchanged, sanitized, excluded, or preserved external-fixture test. No source Java implementation or POM changed. The source repository stayed at the reviewed pin with a clean worktree.
+The initial packaging checks remain in `SOURCE-SNAPSHOT.json`. Current integration sources, tests and limits are recorded in repository-root `SOURCE-INTEGRATION.json`. V12/V13, scope/checklist/report source changes, paired frontend APIs, test fixtures and historical documents were integrated while preserving remote drafting PR #3.
 
-The export verification checks file hashes, three registry sourcePath replacements only, unchanged skills/input/native registries/migrations, empty demo seeds and samples inventories, excluded data/captures/secret documents, preserved external tests, and no credential-pattern matches in publication text or synthetic DOCX XML.
-
-This verifies the source packaging boundary, compilation, 13 passing rule tests and four skipped native guard cases. It does not verify live deployment, provider capacity, real model output quality, OCR/retrieval quality, or final PDF layout.
+Source compatibility and default-suite/build checks passed. Live provider capacity, real OCR/retrieval precision, real MySQL/Flyway deployment and final original-document PDF layout remain separate acceptance tasks. No historical or synthetic result is presented as new business acceptance.

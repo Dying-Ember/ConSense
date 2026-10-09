@@ -1,0 +1,102 @@
+{
+  "formatVersion": 1,
+  "integrationId": "20261009-local-vetting-advisory",
+  "createdAtUtc": "2026-10-09T07:25:15.589432+00:00",
+  "privateRepository": "Dying-Ember/ConSense",
+  "remoteBaseline": "2e75126617cd4e58000bac2ace36512eeb0f3fd3",
+  "initialImportManifest": "SOURCE-SNAPSHOT.json",
+  "sourceDeltas": [
+    {
+      "component": "ai_consense_service",
+      "base": "67ceb7081d42204aa17b12b149f52081e348da71",
+      "head": "82ea3d90babebaacf2693ad8dc577f3a4f1baa8e",
+      "deltaPaths": 45
+    },
+    {
+      "component": "ai_consense_web",
+      "base": "629ef98d197cd83e4e7128e468b292492e4443f2",
+      "head": "4e8ec5e47a693e91d17bdba98edc7cf968a2747e",
+      "deltaPaths": 7
+    }
+  ],
+  "retainedRemoteChanges": "All prior main commits, including drafting PR #3; candidate/suggestion snapshots and native-table grounding retained.",
+  "currentOcrEmbeddingRerankDecisionDocument": "ai_consense_service/docs/HANDOFF-ocr-embedding-rerank-20261008.md",
+  "scope": [
+    "shared vetting/advice source boundary",
+    "embedding availability preflight",
+    "source-snapshot export guard",
+    "69-item manual countercheck",
+    "competition-format reports",
+    "advice evidence/scope/history contract"
+  ],
+  "additionalPublicationRepairs": [
+    "self-contained TEST ONLY mock provider configuration",
+    "restore five vetting protocol tests and frozen non-secret metadata fixture",
+    "preserve actual-template tests under external-fixtures",
+    "SHA-bound text fixture LF checkout rule",
+    "npm lock peer-dependency consistency"
+  ],
+  "documentation": {
+    "localMissingOrUpdatedMarkdown": 51,
+    "archivedTeamDocuments": 6,
+    "historicalGoalsLabelled": true,
+    "priorSevenDiscussionDocsPreserved": true
+  },
+  "verification": {
+    "backend": {
+      "command": "mvn -B -Dconsense.test.python=<prepared-python-interpreter> clean package",
+      "jdk": "17.0.20.1",
+      "maven": "3.9.16",
+      "suites": 162,
+      "tests": 1618,
+      "passed": 1550,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 68,
+      "jarBuilt": true,
+      "externalTestFilesNotExecuted": 5
+    },
+    "frontend": {
+      "freshNpmCi": true,
+      "typecheck": true,
+      "productionBuild": true,
+      "commonJsFiles": 37,
+      "commonJsPassed": 36,
+      "commonJsFailed": 0,
+      "commonJsSkipped": 1,
+      "viewWorkspaceScriptsPassed": 4,
+      "ocrDiagnosticsReplay": "not_run_missing_recorded_external_fixture",
+      "optionalOriginalDocumentReading": "not_run_missing_external_fixture_directory"
+    },
+    "pythonWire": {
+      "realLoopbackHttpProcess": true,
+      "neuralForward": 0,
+      "tokenizerLoads": 0,
+      "vectorDatabaseOperations": 0,
+      "ocrOperations": 0,
+      "meaning": "Protocol/mechanical checks, not neural retrieval or OCR quality."
+    },
+    "independentCompatibilityReview": "no blocking source/API/migration incompatibility found",
+    "independentPublicationReview": "no source/fixture blocker; historical/current README contradictions corrected"
+  },
+  "externalPrerequisites": [
+    "deployment database and real MySQL/Flyway validation",
+    "separately prepared Python dependencies and torch build",
+    "model weights, OCR and retrieval services",
+    "authorized original documents and renderer assets"
+  ],
+  "excludedFromCurrentProduct": [
+    "local databases and uploads",
+    "model weights and installed dependencies",
+    "private original documents and real runtime output fixtures",
+    "absolute-path historical query replays",
+    "two explicitly experimental drafting prototype source branches",
+    "scratch files and older weakened duplicate tests"
+  ],
+  "acceptance": {
+    "sourceIntegrationVerified": true,
+    "realModelQualityAccepted": false,
+    "ocrEmbeddingRerankQualityAccepted": false,
+    "fullCaseSemanticQualityAccepted": false
+  }
+}

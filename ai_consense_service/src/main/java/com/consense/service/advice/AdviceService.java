@@ -15,6 +15,8 @@ import com.consense.repository.ChatMessageRepository;
 import com.consense.repository.EvidenceChunkRepository;
 import com.consense.repository.SourceDocumentRepository;
 import com.consense.service.ProjectService;
+import com.consense.service.sources.ProjectDocumentScope;
+import com.consense.service.vetting.VettingCorpus;
 import com.consense.service.prompt.PromptCatalog;
 import com.consense.service.prompt.PromptService;
 import com.consense.vector.VectorStore;
@@ -35,6 +37,8 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.Objects;
 import java.util.stream.Collectors;
 
 /**
@@ -64,41 +68,46 @@ public class AdviceService {
     @Transactional
     public IndexStatusVO rebuildIndex(String projectId) {
         projectService.require(projectId);
-        List<SourceDocument> documents = sourceDocumentRepository.findByProjectIdOrderByIdAsc(projectId).stream()
-                .filter(d -> !JsonUtils.isBlankText(d.getTextContent()))
+        List<SourceDocument> documents = selectedDocuments(projectId,"fullset").stream()
+                .filter(ProjectDocumentScope::parseUsable)
                 .collect(Collectors.toList());
         if (documents.isEmpty()) {
-            throw new BizException(4200, "该项目还没有可索引的文档，请先上传模板、证据或招标文件");
+            throw new BizException(4200, "No parsed documents in the current review package. Upload the tender/contract package in Vetting first.");
         }
         if (!vectorStore.available()) {
             throw new BizException(4201, "向量库不可用（" + props.getVector().getBaseUrl()
                     + "）。请启动 Qdrant，或把 consense.vector.provider 改为 memory 先跑通流程。");
         }
 
+        if(!ai.embeddingAvailable())throw new BizException(4201,"Deployment embedding model "+ai.embedModel()+" is unavailable. Restore that model before refreshing the advice evidence index.");
         vectorStore.deleteByProject(projectId);
         chunkRepository.deleteByProjectId(projectId);
 
-        int chunkSize = props.getVector().getChunkSize();
-        int overlap = props.getVector().getChunkOverlap();
         int total = 0;
         int index = 0;
 
         for (SourceDocument document : documents) {
-            List<String> pieces = split(document.getTextContent(), chunkSize, overlap);
+            List<VettingCorpus.Chunk> nativeChunks=VettingCorpus.chunks(Collections.singletonList(document));
+            List<String> pieces = nativeChunks.stream().map(VettingCorpus.Chunk::getContent).collect(Collectors.toList());
             if (pieces.isEmpty()) {
                 continue;
             }
             List<float[]> vectors = ai.embed(pieces);
+            if(vectors.size()!=pieces.size()||vectors.stream().anyMatch(v->v==null||v.length==0))throw new BizException(4201,"Embedding adapter did not index every permitted source passage.");
+            String documentHash=VettingCorpus.sourceHash(document),documentRole=VettingCorpus.sourceRole(document);
             List<EvidenceChunk> chunks = new ArrayList<>();
             List<VectorStore.VectorPoint> points = new ArrayList<>();
             for (int i = 0; i < pieces.size(); i++) {
                 EvidenceChunk chunk = new EvidenceChunk();
                 chunk.setProjectId(projectId);
                 chunk.setDocumentId(document.getId());
+                chunk.setSourceHash(documentHash);
+                chunk.setSourceRole(documentRole);
                 chunk.setChunkIndex(index++);
                 chunk.setFileLabel(nvl(document.getFileKey()) + " · " + nvl(document.getFileName()));
-                chunk.setPageNo(pageOf(document, i, pieces.size()));
-                chunk.setAnchor(anchorOf(pieces.get(i)));
+                chunk.setPageNo(nativeChunks.get(i).getPageNo());
+                String anchor=nativeChunks.get(i).getAnchor();
+                chunk.setAnchor(anchor==null?null:anchor.substring(0,Math.min(anchor.length(),255)));
                 chunk.setContent(pieces.get(i));
                 chunk.setCreatedAt(Instant.now());
                 chunkRepository.save(chunk);
@@ -108,12 +117,14 @@ public class AdviceService {
                 Map<String, Object> payload = new LinkedHashMap<>();
                 payload.put("projectId", projectId);
                 payload.put("documentId", String.valueOf(document.getId()));
+                payload.put("sourceHash",chunk.getSourceHash());
+                payload.put("sourceRole",chunk.getSourceRole());
                 payload.put("fileLabel", chunk.getFileLabel());
                 payload.put("pageNo", chunk.getPageNo());
                 payload.put("anchor", nvl(chunk.getAnchor()));
                 payload.put("content", pieces.get(i));
                 points.add(new VectorStore.VectorPoint(pointId,
-                        i < vectors.size() ? vectors.get(i) : new float[0], payload));
+                        vectors.get(i), payload));
                 chunks.add(chunk);
             }
             chunkRepository.saveAll(chunks);
@@ -128,17 +139,25 @@ public class AdviceService {
 
     public IndexStatusVO status(String projectId) {
         projectService.require(projectId);
-        int chunks = chunkRepository.findByProjectIdOrderByChunkIndexAsc(projectId).size();
+        List<EvidenceChunk> records=chunkRepository.findByProjectIdOrderByChunkIndexAsc(projectId);
+        int chunks = records.size();
+        List<SourceDocument> documents=selectedDocuments(projectId,"fullset").stream().filter(ProjectDocumentScope::parseUsable).collect(Collectors.toList());
+        boolean stale=chunks>0&&!freshIndex(records,documents);
         boolean vectorReady = vectorStore.available();
         int indexed = vectorReady ? vectorStore.count(projectId) : 0;
         boolean llmReady = ai.available();
+        boolean embeddingReady=ai.embeddingAvailable();
         boolean ocrReady = props.getOcr().isEnabled() && ocrClient.available();
 
         LocalizedText message;
-        if (chunks == 0) {
+        if(!embeddingReady) {
+            message=LocalizedText.of("部署的向量模型 "+ai.embedModel()+" 不可用。请恢复该模型后再刷新咨询依据索引。","部署的向量模型 "+ai.embedModel()+" 不可用。請恢復該模型後再刷新諮詢依據索引。","Deployment embedding model "+ai.embedModel()+" is unavailable. Restore that model before refreshing the advice evidence index.");
+        } else if (chunks == 0) {
             message = LocalizedText.of("尚未建立证据索引，请先点击「刷新证据索引」。",
                     "尚未建立證據索引，請先點擊「刷新證據索引」。",
                     "No evidence index yet — click 'Refresh evidence index' to build one.");
+        } else if(stale) {
+            message=LocalizedText.of("审查文件包或资料版本已变化；请刷新咨询依据索引，旧索引不可用于新的回答。","審查文件包或資料版本已變化；請刷新諮詢依據索引，舊索引不可用於新的回答。","The review package or source revision changed. Refresh the advice evidence index before asking.");
         } else if (!vectorReady) {
             message = LocalizedText.of("向量库不可达，检索将无法工作。",
                     "向量庫不可達，檢索將無法工作。",
@@ -150,7 +169,7 @@ public class AdviceService {
         }
         return new IndexStatusVO(chunks, indexed,
                 props.getVector().getProvider(), props.getVector().getCollection(),
-                ai.embedModel(), ai.chatModel(), llmReady, vectorReady, ocrReady, message);
+                ai.embedModel(), ai.chatModel(), llmReady, vectorReady, ocrReady, message,stale,documents.size(),(int)records.stream().map(EvidenceChunk::getDocumentId).distinct().count(),embeddingReady);
     }
 
     // ------------------------------------------------------------ 问答
@@ -162,21 +181,25 @@ public class AdviceService {
         if (question.isEmpty()) {
             throw new BizException(4202, "请先输入问题");
         }
-        String scope = JsonUtils.isBlankText(request.getScope()) ? "fullset" : request.getScope();
+        String scope = ProjectDocumentScope.normalizeScope(request.getScope());
+        QuestionContext questionContext=clarificationContext(projectId,scope,request.getReplyToMessageId(),question);
 
         // Configuration errors are model-action errors even when no index has been built.
         if (ai.explicitProfileSelected() && ai.capture().getUnavailableReason() != null) {
             ai.requireAvailable();
         }
 
-        saveMessage(projectId, ChatMessage.ROLE_USER, null, question, null, null, null, null);
+        ChatMessage user=saveMessage(projectId, ChatMessage.ROLE_USER, null, question, null, null, null, null);
+        user.setReplyToMessageId(request.getReplyToMessageId());user.setSourceScope(scope);user.setOriginalQuestion(questionContext.originalQuestion);user.setUserBackgroundJson(JsonUtils.write(questionContext.background));chatMessageRepository.save(user);
 
-        List<VectorStore.SearchHit> hits = retrieve(projectId, question);
-        List<CitationVO> sources = hits.stream().map(this::toCitation).collect(Collectors.toList());
+        String retrievalQuestion=questionContext.originalQuestion+(questionContext.background.isEmpty()?"":"\nUser supplied clarification: "+String.join("\n",questionContext.background));
+        List<VectorStore.SearchHit> hits = withIncorporationContext(projectId,scope,retrieve(projectId, scope, retrievalQuestion));
+        List<CitationVO> sources = new ArrayList<>();
+        for(int i=0;i<hits.size();i++){CitationVO source=toCitation(hits.get(i));source.setEvidenceId("["+(i+1)+"]");sources.add(source);}
 
         if (hits.isEmpty()) {
             AskResponseVO response = unknown(projectId, scope, sources, Collections.<String>emptyList(), false);
-            persistAssistant(projectId, response);
+            persistAssistant(projectId, response,user.getId());
             return response;
         }
 
@@ -186,7 +209,9 @@ public class AdviceService {
 
         String excerpts = renderExcerpts(hits);
         String userPrompt = PromptService.format(promptService.userTemplate(PromptCatalog.KEY_ADVICE),
-                scopeLabel(scope), excerpts, question);
+                scopeLabel(scope), excerpts, questionContext.originalQuestion);
+        if(!questionContext.background.isEmpty())userPrompt+="\n\nuser-supplied-background (clarification replies, not contractual evidence):\n"+String.join("\n",questionContext.background)
+                +"\nAnswer the original question in light of these user-stated assumptions. Do not cite this background as a contract document or established contractual fact.";
 
         AnswerRecord answer;
         try {
@@ -200,18 +225,21 @@ public class AdviceService {
                     + " failed; the operation was not rerouted.");
         }
 
-        if (answer == null || !answer.isGrounded() || JsonUtils.isBlankText(answer.getAnswer())) {
+        List<String> clarifications=answer==null?Collections.emptyList():cleanClarifications(answer.getClarifications());
+        List<String> citations=validatedCitations(answer==null?null:answer.getCitations(),sources);
+        String basisScope=answer!=null&&"reference_only".equals(nvl(answer.getBasisScope()).trim().toLowerCase(java.util.Locale.ROOT))?"reference_only":"project_contract";
+        boolean basisSupported=incorporationSupported(basisScope,citations,sources);
+        if(!basisSupported){clarifications=new ArrayList<>(clarifications);clarifications.add("Please provide or identify the adopted contractual provisions, including standard incorporation, applicable editions and any project amendments where relevant. Project correspondence and a document list alone do not establish a contractual requirement.");}
+        if (answer == null || !answer.isGrounded() || !clarifications.isEmpty() || JsonUtils.isBlankText(answer.getAnswer())||citations.isEmpty()||!basisSupported) {
             List<String> extra = answer != null && answer.getMissingReason() != null
                     ? Arrays.asList(answer.getMissingReason())
                     : Collections.<String>emptyList();
             AskResponseVO response = unknown(projectId, scope, sources, extra, true);
-            persistAssistant(projectId, response);
+            response.setClarifications(clarifications);
+            response.setBasisScope("insufficient");
+            persistAssistant(projectId, response,user.getId());
             return response;
         }
-
-        List<String> citations = answer.getCitations() == null || answer.getCitations().isEmpty()
-                ? sources.stream().map(CitationVO::getFileLabel).distinct().limit(3).collect(Collectors.toList())
-                : answer.getCitations();
 
         AskResponseVO response = new AskResponseVO(true,
                 LocalizedText.of("带依据的回答", "帶依據的回答", "Answer with basis"),
@@ -221,7 +249,9 @@ public class AdviceService {
                 evidenceIdOf(sources),
                 sources,
                 ai.chatModel(), ai.modelIdentity());
-        persistAssistant(projectId, response);
+        response.setClarifications(clarifications);response.setSourceScope(scope);
+        response.setBasisScope(basisScope);
+        persistAssistant(projectId, response,user.getId());
         log.info("项目 {} 问答完成，命中 {} 条证据", projectId, hits.size());
         return response;
     }
@@ -233,11 +263,17 @@ public class AdviceService {
      *  2) 证据量大 → 向量检索，topK 提到 retrieveTopKFloor（默认 20）扩大召回，
      *     弱化"检索没捞到导致模型看不到"的问题。
      */
-    private List<VectorStore.SearchHit> retrieve(String projectId, String question) {
+    private List<VectorStore.SearchHit> retrieve(String projectId, String scope, String question) {
         List<EvidenceChunk> chunks = chunkRepository.findByProjectIdOrderByChunkIndexAsc(projectId);
         if (chunks.isEmpty()) {
             throw new BizException(4204, "该项目尚未建立证据索引，请先在咨询页点击「刷新证据索引」");
         }
+        List<SourceDocument> current=selectedDocuments(projectId,"fullset").stream().filter(ProjectDocumentScope::parseUsable).collect(Collectors.toList());
+        if(!freshIndex(chunks,current))
+            throw new BizException(4204,"The review package or source revision changed. Refresh the advice evidence index before asking.");
+        Set<String> allowedIds=selectedDocuments(projectId,scope).stream().filter(ProjectDocumentScope::parseUsable).map(d->String.valueOf(d.getId())).collect(Collectors.toSet());
+        chunks=chunks.stream().filter(c->allowedIds.contains(String.valueOf(c.getDocumentId()))).collect(Collectors.toList());
+        if(chunks.isEmpty())return Collections.emptyList();
 
         int totalChars = 0;
         for (EvidenceChunk chunk : chunks) {
@@ -265,7 +301,17 @@ public class AdviceService {
             return Collections.emptyList();
         }
         int topK = Math.max(props.getVector().getTopK(), props.getVector().getRetrieveTopKFloor());
-        return vectorStore.search(projectId, vectors.get(0), topK, props.getVector().getScoreThreshold());
+        List<VectorStore.SearchHit> hits=vectorStore.search(projectId,allowedIds,vectors.get(0),topK,props.getVector().getScoreThreshold());
+        // Validate external payloads against the current persisted chunk; never trust provider text or scope labels.
+        Map<String,EvidenceChunk> byPoint=new LinkedHashMap<>();for(EvidenceChunk c:chunks){byPoint.put(nvl(c.getPointId()),c);byPoint.put(java.util.UUID.nameUUIDFromBytes(nvl(c.getPointId()).getBytes(java.nio.charset.StandardCharsets.UTF_8)).toString(),c);}
+        List<VectorStore.SearchHit> verified=new ArrayList<>();
+        for(VectorStore.SearchHit hit:hits){Map<String,Object> payload=hit.getPayload();if(payload==null)continue;
+            if(!projectId.equals(String.valueOf(payload.get("projectId"))))continue;
+            String documentId=String.valueOf(payload.get("documentId"));if(!allowedIds.contains(documentId))continue;
+            EvidenceChunk stored=byPoint.get(hit.getId());
+            if(stored==null||!documentId.equals(String.valueOf(stored.getDocumentId()))||!Objects.equals(stored.getSourceHash(),String.valueOf(payload.get("sourceHash"))))continue;
+            VectorStore.SearchHit canonical=chunkToHit(stored);verified.add(new VectorStore.SearchHit(hit.getId(),hit.getScore(),canonical.getPayload()));
+        }return verified;
     }
 
     /** EvidenceChunk → SearchHit（stuffing 模式构造全量命中，score 置 1.0） */
@@ -273,6 +319,7 @@ public class AdviceService {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("projectId", chunk.getProjectId());
         payload.put("documentId", String.valueOf(chunk.getDocumentId()));
+        payload.put("sourceHash",chunk.getSourceHash());payload.put("sourceRole",chunk.getSourceRole());
         payload.put("fileLabel", nvl(chunk.getFileLabel()));
         payload.put("pageNo", chunk.getPageNo());
         payload.put("anchor", nvl(chunk.getAnchor()));
@@ -289,7 +336,7 @@ public class AdviceService {
             sources.stream().map(CitationVO::getFileLabel).distinct().limit(3).forEach(citations::add);
         }
         citations.addAll(extraReasons);
-        return new AskResponseVO(false,
+        AskResponseVO response=new AskResponseVO(false,
                 LocalizedText.of("I don't know", "I don't know", "I don't know"),
                 LocalizedText.empty(),
                 scope,
@@ -297,6 +344,7 @@ public class AdviceService {
                 evidenceIdOf(sources),
                 sources,
                 chatDispatched ? ai.chatModel() : null, chatDispatched ? ai.modelIdentity() : null);
+        response.setSourceScope(scope);response.setClarifications(Collections.emptyList());response.setBasisScope("insufficient");return response;
     }
 
     /**
@@ -322,23 +370,34 @@ public class AdviceService {
 
     private String renderExcerpts(List<VectorStore.SearchHit> hits) {
         StringBuilder builder = new StringBuilder();
+        builder.append("Selected source excerpts for this question. These excerpts do not establish that the entire standard/library or project package is complete. ")
+                .append("A passage omitted from these excerpts does not prove that its document or clause is absent from the supplied files. ")
+                .append("Project wording on adopting or amending standards, if included below, states only what those passages say about incorporation; ")
+                .append("it does not guarantee that the underlying standard text or every amendment has been supplied or reviewed.\n\n");
         int index = 1;
         for (VectorStore.SearchHit hit : hits) {
             builder.append("[").append(index++).append("] ")
                     .append(hit.fileLabel())
-                    .append("  ").append(hit.pageNo())
-                    .append("  ").append(hit.anchor())
+                    .append(" | documentId=").append(hit.getPayload().get("documentId"))
+                    .append(" | role=").append(hit.getPayload().get("sourceRole"))
+                    .append(" | sourceRevision=").append(hit.getPayload().get("sourceHash"))
+                    .append(" | physicalPage=").append(hit.pageNo().isEmpty()?"not available":hit.pageNo())
+                    .append(" | location=").append(hit.anchor())
                     .append("\n").append(hit.text()).append("\n\n");
         }
         return builder.toString().trim();
     }
 
     private CitationVO toCitation(VectorStore.SearchHit hit) {
-        return new CitationVO(hit.fileLabel(), hit.pageNo(), hit.anchor(), hit.text(), hit.getScore());
+        Map<String,Object> payload=hit.getPayload();
+        Object page=payload.get("pageNo");
+        return new CitationVO(hit.fileLabel(), page==null?null:String.valueOf(page), hit.anchor(), hit.text(), hit.getScore(),null,
+                String.valueOf(payload.get("documentId")),String.valueOf(payload.get("sourceHash")),String.valueOf(payload.get("sourceRole")),
+                payload.get("applicabilityContextComplete") instanceof Boolean?(Boolean)payload.get("applicabilityContextComplete"):null);
     }
 
     private String evidenceIdOf(List<CitationVO> sources) {
-        return sources.isEmpty() ? null : "chunk:" + sources.get(0).getFileLabel();
+        return sources.isEmpty() ? null : "document:" + sources.get(0).getDocumentId();
     }
 
     // ------------------------------------------------------------ 历史
@@ -357,9 +416,10 @@ public class AdviceService {
                     message.getUnknownScope(),
                     citations,
                     message.getEvidenceId(),
-                    Collections.<CitationVO>emptyList(),
+                    safeSources(message.getSourcesJson()),
                     message.getModelIdentityJson() == null ? null
-                            : JsonUtils.read(message.getModelIdentityJson(), ModelIdentity.class)));
+                            : JsonUtils.read(message.getModelIdentityJson(), ModelIdentity.class),
+                    message.getClarificationsJson()==null?Collections.emptyList():safeList(message.getClarificationsJson()),message.getSourceScope(),message.getBasisScope()));
         }
         return result;
     }
@@ -396,7 +456,7 @@ public class AdviceService {
 
     // ------------------------------------------------------------ 内部
 
-    private void saveMessage(String projectId, String role, String title, String content,
+    private ChatMessage saveMessage(String projectId, String role, String title, String content,
                              String unknownScope, List<String> citations, String evidenceId, ModelIdentity modelIdentity) {
         ChatMessage message = new ChatMessage();
         message.setProjectId(projectId);
@@ -408,19 +468,20 @@ public class AdviceService {
         message.setEvidenceId(evidenceId);
         message.setModelIdentityJson(modelIdentity == null ? null : JsonUtils.write(modelIdentity));
         message.setCreatedAt(Instant.now());
-        chatMessageRepository.save(message);
+        return chatMessageRepository.save(message);
     }
 
-    private void persistAssistant(String projectId, AskResponseVO response) {
+    private void persistAssistant(String projectId, AskResponseVO response,Long questionMessageId) {
         String content = response.isGrounded()
                 ? (response.getContent() == null ? "" : response.getContent().getZhHans())
                 : null;
-        saveMessage(projectId, ChatMessage.ROLE_ASSISTANT,
+        ChatMessage message=saveMessage(projectId, ChatMessage.ROLE_ASSISTANT,
                 response.getTitle() == null ? null : response.getTitle().getZhHans(),
                 content,
                 response.getUnknownScope(),
                 response.getCitations(),
                 response.getEvidenceId(), response.getModelIdentity());
+        message.setSourcesJson(JsonUtils.write(response.getSources()));message.setClarificationsJson(JsonUtils.write(response.getClarifications()));message.setSourceScope(response.getSourceScope());message.setBasisScope(response.getBasisScope());message.setQuestionMessageId(questionMessageId);chatMessageRepository.save(message);response.setMessageId(message.getId());
     }
 
     private List<String> safeList(String json) {
@@ -429,64 +490,6 @@ public class AdviceService {
         } catch (Exception e) {
             return Collections.emptyList();
         }
-    }
-
-    /** 按段落切块，超长段落再按字符切，保留 overlap 重叠 */
-    private List<String> split(String text, int chunkSize, int overlap) {
-        List<String> chunks = new ArrayList<>();
-        if (JsonUtils.isBlankText(text)) {
-            return chunks;
-        }
-        String[] paragraphs = text.split("\\n{2,}");
-        StringBuilder current = new StringBuilder();
-        for (String paragraph : paragraphs) {
-            String block = paragraph.trim();
-            if (block.isEmpty()) {
-                continue;
-            }
-            if (block.length() > chunkSize) {
-                if (current.length() > 0) {
-                    chunks.add(current.toString().trim());
-                    current.setLength(0);
-                }
-                for (int i = 0; i < block.length(); i += Math.max(1, chunkSize - overlap)) {
-                    chunks.add(block.substring(i, Math.min(block.length(), i + chunkSize)));
-                    if (i + chunkSize >= block.length()) {
-                        break;
-                    }
-                }
-                continue;
-            }
-            if (current.length() + block.length() + 2 > chunkSize) {
-                chunks.add(current.toString().trim());
-                String tail = current.length() > overlap
-                        ? current.substring(current.length() - overlap)
-                        : current.toString();
-                current.setLength(0);
-                current.append(tail).append("\n\n");
-            }
-            current.append(block).append("\n\n");
-        }
-        if (current.length() > 0) {
-            chunks.add(current.toString().trim());
-        }
-        return chunks.stream().filter(c -> !c.trim().isEmpty()).collect(Collectors.toList());
-    }
-
-    private String pageOf(SourceDocument document, int index, int total) {
-        if (document.getPageCount() != null && document.getPageCount() > 1 && total > 0) {
-            int page = (int) Math.round((index + 1.0) / total * document.getPageCount());
-            return "P" + Math.max(1, page);
-        }
-        return "P1";
-    }
-
-    /** 抽取切片里像条款编号的锚点，如 SCC4.1 / NTT3(b) */
-    private String anchorOf(String content) {
-        java.util.regex.Matcher matcher = java.util.regex.Pattern
-                .compile("\\b((?:NTT|SCT|SCC|GCT|GCC|FT|AA|SL|PRE)\\s?\\d+(?:\\.\\d+)*(?:\\([a-z0-9]+\\))*)")
-                .matcher(content);
-        return matcher.find() ? matcher.group(1) : null;
     }
 
     private String nvl(String value) {
@@ -503,5 +506,77 @@ public class AdviceService {
         private String answer;
         private List<String> citations;
         private String missingReason;
+        private List<String> clarifications;
+        private String basisScope;
+        public AnswerRecord(boolean grounded,String answer,List<String> citations,String missingReason){this(grounded,answer,citations,missingReason,null,null);}
+        public AnswerRecord(boolean grounded,String answer,List<String> citations,String missingReason,List<String> clarifications){this(grounded,answer,citations,missingReason,clarifications,null);}
     }
+
+    public List<AdviceSourceVO> sources(String projectId,String scope) {
+        projectService.require(projectId);String normalized=ProjectDocumentScope.normalizeScope(scope);
+        return ProjectDocumentScope.currentCatalog(projectId,sourceDocumentRepository.findByProjectIdOrderByIdAsc(projectId)).stream().map(d->{String exclusion=ProjectDocumentScope.exclusionReason(d,normalized);
+            return new AdviceSourceVO(String.valueOf(d.getId()),d.getFileKey(),d.getFileName(),VettingCorpus.sourceRole(d),d.getDocumentScope(),d.getParseStatus(),VettingCorpus.sourceHash(d),exclusion==null,exclusion);}).collect(Collectors.toList());
+    }
+    private List<SourceDocument> selectedDocuments(String projectId,String scope){return ProjectDocumentScope.selected(projectId,sourceDocumentRepository.findByProjectIdOrderByIdAsc(projectId),scope);}
+    private boolean freshIndex(List<EvidenceChunk> chunks,List<SourceDocument> documents) {
+        Map<String,String> hashes=new LinkedHashMap<>(),roles=new LinkedHashMap<>();
+        for(SourceDocument d:documents){String id=String.valueOf(d.getId());hashes.put(id,VettingCorpus.sourceHash(d));roles.put(id,VettingCorpus.sourceRole(d));}
+        if(!chunks.stream().map(c->String.valueOf(c.getDocumentId())).collect(Collectors.toSet()).equals(hashes.keySet()))return false;
+        return chunks.stream().allMatch(c->Objects.equals(c.getSourceHash(),hashes.get(String.valueOf(c.getDocumentId())))&&Objects.equals(c.getSourceRole(),roles.get(String.valueOf(c.getDocumentId()))));
+    }
+    private List<CitationVO> safeSources(String json){if(JsonUtils.isBlankText(json))return Collections.emptyList();try{return JsonUtils.readList(json,CitationVO.class);}catch(Exception e){return Collections.emptyList();}}
+    private List<String> cleanClarifications(List<String> questions){if(questions==null)return Collections.emptyList();return questions.stream().filter(Objects::nonNull).map(String::trim).filter(s->!s.isEmpty()).distinct().limit(12).collect(Collectors.toList());}
+    private List<String> validatedCitations(List<String> requested,List<CitationVO> submitted) {
+        if(requested==null||requested.isEmpty())return Collections.emptyList();List<String> accepted=new ArrayList<>();
+        for(String citation:requested){String value=nvl(citation).trim();List<CitationVO> matches=submitted.stream().filter(s->value.equals(s.getEvidenceId())||value.equals(s.getFileLabel())).collect(Collectors.toList());
+            if(matches.size()!=1)return Collections.emptyList();String id=matches.get(0).getEvidenceId();if(!accepted.contains(id))accepted.add(id);
+        }return accepted;
+    }
+    /** Library retrieval must also show current incorporation/edition/override provisions, if available. */
+    private List<VectorStore.SearchHit> withIncorporationContext(String projectId,String scope,List<VectorStore.SearchHit> hits) {
+        List<VectorStore.SearchHit> libraries=hits.stream().filter(h->"standard".equals(String.valueOf(h.getPayload().get("sourceRole")))).collect(Collectors.toList());
+        if(libraries.isEmpty())return hits;
+        List<SourceDocument> selected=selectedDocuments(projectId,scope).stream().filter(ProjectDocumentScope::parseUsable).collect(Collectors.toList());
+        Set<String> allowedIds=selected.stream().map(d->String.valueOf(d.getId())).collect(Collectors.toSet());
+        Set<String> compositionIds=selected.stream().filter(d->{String name=nvl(d.getFileName()).toLowerCase(java.util.Locale.ROOT).replace('_',' ').replace('-',' ');return "tender".equals(VettingCorpus.sourceRole(d))&&(name.contains("the specification")||name.contains("specification composition"));}).map(d->String.valueOf(d.getId())).collect(Collectors.toSet());
+        List<VectorStore.SearchHit> result=new ArrayList<>(hits);Set<String> present=result.stream().map(this::evidenceIdentity).collect(Collectors.toSet());int chars=0;
+        List<EvidenceChunk> ordered=chunkRepository.findByProjectIdOrderByChunkIndexAsc(projectId);
+        ordered.sort(java.util.Comparator.comparingInt(c->compositionIds.contains(String.valueOf(c.getDocumentId()))?0:1));
+        for(EvidenceChunk chunk:ordered){
+            if(!allowedIds.contains(String.valueOf(chunk.getDocumentId()))||!"tender".equals(chunk.getSourceRole()))continue;
+            boolean relevant=compositionIds.contains(String.valueOf(chunk.getDocumentId()))||libraries.stream().anyMatch(h->referenceMention(chunk.getContent(),h.fileLabel()));
+            if(!relevant||chars+nvl(chunk.getContent()).length()>12000)continue;
+            VectorStore.SearchHit context=chunkToHit(chunk);if(present.add(evidenceIdentity(context))){result.add(context);chars+=nvl(chunk.getContent()).length();}
+        }
+        boolean complete=ordered.stream().filter(c->compositionIds.contains(String.valueOf(c.getDocumentId()))).map(this::chunkToHit).map(this::evidenceIdentity).allMatch(present::contains);
+        List<VectorStore.SearchHit> annotated=new ArrayList<>();for(VectorStore.SearchHit hit:result){Map<String,Object> payload=new LinkedHashMap<>(hit.getPayload());if("standard".equals(payload.get("sourceRole")))payload.put("applicabilityContextComplete",complete);annotated.add(new VectorStore.SearchHit(hit.getId(),hit.getScore(),payload));}return annotated;
+    }
+    private boolean incorporationSupported(String basisScope,List<String> citations,List<CitationVO> sources) {
+        if("reference_only".equals(basisScope))return true;
+        List<CitationVO> cited=sources.stream().filter(s->citations.contains(s.getEvidenceId())).collect(Collectors.toList());
+        if(cited.stream().noneMatch(s->"tender".equals(s.getSourceRole())))return false;
+        for(CitationVO reference:cited)if("standard".equals(reference.getSourceRole())
+                &&(Boolean.FALSE.equals(reference.getApplicabilityContextComplete())||cited.stream().noneMatch(s->"tender".equals(s.getSourceRole())&&referenceMention(s.getContent(),reference.getFileLabel()))))return false;
+        return true;
+    }
+    private boolean referenceMention(String passage,String referenceLabel) {
+        String text=nvl(passage).toLowerCase(java.util.Locale.ROOT),label=nvl(referenceLabel).toLowerCase(java.util.Locale.ROOT);
+        if(label.startsWith("sl ")||label.contains("specification library")||label.contains("general specification"))
+            return text.contains("specification library")||text.contains("general specification")||text.matches("(?s).*\\b(?:sl[ -]?20\\d\\d|gscew\\d*|gs[ -]?20\\d\\d)\\b.*");
+        if(label.startsWith("gcc ")||label.contains("general conditions of contract"))return text.contains("general conditions of contract")||text.matches("(?s).*\\bgcc\\b.*");
+        String key=label.split("[ ·]",2)[0];return !key.isEmpty()&&text.matches("(?s).*\\b"+java.util.regex.Pattern.quote(key)+"\\b.*");
+    }
+    private String evidenceIdentity(VectorStore.SearchHit hit){return hit.getPayload().get("documentId")+"|"+hit.anchor()+"|"+VettingCorpus.hash(hit.text());}
+    private QuestionContext clarificationContext(String projectId,String scope,Long replyTo,String text) {
+        if(replyTo==null)return new QuestionContext(text,Collections.emptyList());
+        ChatMessage parent=chatMessageRepository.findById(replyTo).filter(m->projectId.equals(m.getProjectId())&&ChatMessage.ROLE_ASSISTANT.equals(m.getRole())
+                &&scope.equals(m.getSourceScope())&&"insufficient".equals(m.getBasisScope())&&m.getQuestionMessageId()!=null&&!safeList(nvl(m.getClarificationsJson())).isEmpty())
+                .orElseThrow(()->new BizException(4202,"Reply target must be an unanswered clarification in the same project and evidence scope."));
+        ChatMessage original=chatMessageRepository.findById(parent.getQuestionMessageId()).filter(m->projectId.equals(m.getProjectId())&&ChatMessage.ROLE_USER.equals(m.getRole())&&scope.equals(m.getSourceScope()))
+                .orElseThrow(()->new BizException(4202,"The clarification's original question is no longer available. Start a new question."));
+        List<String> background=new ArrayList<>(safeList(nvl(original.getUserBackgroundJson())));background.add(text);
+        if(background.size()>5||background.stream().mapToInt(String::length).sum()>6000)throw new BizException(4202,"This clarification thread exceeds the bounded context. Start a new question with the relevant facts.");
+        return new QuestionContext(JsonUtils.isBlankText(original.getOriginalQuestion())?original.getContent():original.getOriginalQuestion(),background);
+    }
+    private static final class QuestionContext {final String originalQuestion;final List<String> background;QuestionContext(String question,List<String> background){this.originalQuestion=question;this.background=background;}}
 }

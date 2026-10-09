@@ -2,17 +2,17 @@
 
 2026-10-07. This is an additive renderer adapter for the existing exact-DOCX conversion, source/result preview, revision-bound binding and PDF export interface. LibreOffice remains the default. Deployment requires an explicit operator choice; neither discovery nor fallback selects another engine.
 
-The scoped Windows probe used the official ONLYOFFICE Desktop Editors 9.4.0 portable release, `converter/x2t.exe` version **9.4.0.129**, without GUI launch, global installation, font installation, paid flags or license files. The official archive was 598,575,987 bytes, with release digest `22ae48a7813954e5079bff1ea211c6583aba67f34f2d0dbcb2431d4a20e94dfc`. This establishes the tested binary's identity and observed behavior; it does not establish a general supported headless server product or unrestricted commercial redistribution rights. Review the [release](http<LOCAL_PATH_REDACTED>
+The scoped Windows probe used the official ONLYOFFICE Desktop Editors 9.4.0 portable release, `converter/x2t.exe` version **9.4.0.129**, without GUI launch, global installation, font installation, paid flags or license files. The official archive was 598,575,987 bytes, with release digest `22ae48a7813954e5079bff1ea211c6583aba67f34f2d0dbcb2431d4a20e94dfc`. This establishes the tested binary's identity and observed behavior; it does not establish a general supported headless server product or unrestricted commercial redistribution rights. Review the [release](https://github.com/ONLYOFFICE/DesktopEditors/releases/tag/v9.4.0), [tagged Desktop Editors license](https://raw.githubusercontent.com/ONLYOFFICE/DesktopEditors/v9.4.0/LICENSE) and [converter core license](https://github.com/ONLYOFFICE/core/blob/master/LICENSE), including their AGPL and additional terms, for the intended distribution/deployment. No evaluation restriction is removed by this adapter. Licensed Builder is a distinct route and is not used.
 
 ## Explicit setup
 
 Provide the complete extracted runtime tree and a separately prepared immutable font cache. Use the bundled converter's scoped font-cache command, with a new output directory and explicitly chosen font directory:
 
 ```powershell
-& '<LOCAL_PATH_REDACTED>
+& 'C:\scoped\desktop\converter\x2t.exe' -create-allfonts 'C:\scoped\font-cache' 'C:\scoped\desktop\fonts'
 ```
 
-Verify `AllFonts.js` and nonempty `font_selection.bin`. The cache's `__fonts_files` paths must be absolute and continue to identify the selected font files. The application parses the two documented/generated array assignments as data and does not execute the JavaScript. This command is setup, not an automatic application download/install step. The historical [x2t testing instructions](http<LOCAL_PATH_REDACTED>
+Verify `AllFonts.js` and nonempty `font_selection.bin`. The cache's `__fonts_files` paths must be absolute and continue to identify the selected font files. The application parses the two documented/generated array assignments as data and does not execute the JavaScript. This command is setup, not an automatic application download/install step. The historical [x2t testing instructions](https://github.com/ONLYOFFICE-QA/x2t-testing/blob/master/README.md) and actual [converter entry point](https://github.com/ONLYOFFICE/core/blob/master/X2tConverter/src/main.cpp) explain the conversion/XML interface; the public Desktop product does not itself promise this application's server workflow.
 
 Use deployment-local properties or command-line/environment equivalents, without changing repository defaults:
 
@@ -20,10 +20,10 @@ Use deployment-local properties or command-line/environment equivalents, without
 consense:
   drafting:
     renderer-kind: desktop-x2t
-    renderer-executable: <LOCAL_PATH_REDACTED>
-    renderer-asset-root: <LOCAL_PATH_REDACTED>
-    renderer-font-cache: <LOCAL_PATH_REDACTED>
-    renderer-work-root: <LOCAL_PATH_REDACTED>
+    renderer-executable: C:/scoped/desktop/converter/x2t.exe
+    renderer-asset-root: C:/scoped/desktop
+    renderer-font-cache: C:/scoped/font-cache
+    renderer-work-root: C:/scoped/private-render-work
     renderer-timeout-ms: 120000
 ```
 

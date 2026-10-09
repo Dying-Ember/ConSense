@@ -130,7 +130,7 @@ public class ConsenseProperties {
         private long retrievalTimeoutMs = 180_000;
         /** First-time corpus embedding/indexing can take much longer than one query. */
         private long retrievalIndexTimeoutMs = 1_800_000;
-        private int semanticTopics = 16;
+        private int semanticTopics = 17;
         private int semanticContextChars = 10000;
         /** Optional bounded literal-reference expansion; does not imply full contract coverage. */
         private int semanticContextExpansionChars = 20000;

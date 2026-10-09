@@ -1,0 +1,15 @@
+{
+  "description": "Explicit original-source allowlist for the ten-document vetting case run. Evaluation comments, checklists and Q&A are excluded.",
+  "documents": [
+    {"key": "NTT", "role": "tender", "path": "2b_Tender documents/03 - NTT.docx"},
+    {"key": "SCT", "role": "tender", "path": "2b_Tender documents/05 - SCT.docx"},
+    {"key": "SCC", "role": "tender", "path": "2b_Tender documents/10 - SCC.docx"},
+    {"key": "PRE", "role": "tender", "path": "2b_Tender documents/25 - Specification - PRE (base tender).docx"},
+    {"key": "GCC", "role": "standard", "path": "2a_Standard documents/09_General Conditions of Contract.pdf"},
+    {"key": "FT", "role": "tender", "path": "2b_Tender documents/06 - FoT (scan).pdf"},
+    {"key": "AA", "role": "tender", "path": "2b_Tender documents/08 - AoA (scan).pdf"},
+    {"key": "APL", "role": "tender", "path": "2b_Tender documents/APL_List of BS Subcon.pdf"},
+    {"key": "SP", "role": "tender", "path": "2b_Tender documents/24 - The Specification.docx"},
+    {"key": "INDEX", "role": "package_manifest", "path": "00_List of info CAC (after shortlist)_r1.docx"}
+  ]
+}

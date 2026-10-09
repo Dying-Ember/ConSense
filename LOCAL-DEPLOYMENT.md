@@ -1,3 +1,5 @@
+> 这是另一部署环境的历史记录，保留当时的路径、模型版本和验收边界。本仓库当前整合来源和检查结果见 `SOURCE-INTEGRATION.json`，不能把下文旧 runtime 版本视为当前源码版本。
+
 # ConSense 本机部署记录
 
 部署日期：2026-10-08，Asia/Shanghai。目录：`D:\R&D\ConSense`。远端：<https://github.com/Dying-Ember/ConSense>。拉取基线为 `main` 的 `b4c7339e1871fc7eba92b32edd2b76cd52d734e8`。本记录随兼容修复、部署脚本和研究文档一同纳入版本控制；`.local/` 的运行配置、工具、权重、数据库及验收产物和 `Ref/` 的外部原始资料仅保留在本机，不随代码提交。文中 `.local/` 链接是本机证据路径，其他 checkout 需要自行准备对应依赖和参考资料。

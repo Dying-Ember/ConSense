@@ -1,14 +1,73 @@
 {
-  "source_directory": "",
-  "embedding": {
-    "name": "BAAI/bge-m3",
-    "revision": "5617a9f61b028005a4858fdac845db406aefb181"
-  },
-  "reranker": {
-    "name": "BAAI/bge-reranker-v2-m3",
-    "revision": "953dc6f6f85a1b2dbfca4c34a2796e7dde08d41e"
-  },
-  "documents": [],
-  "ocr_cases": [],
-  "queries": []
+  "source_directory": "2026-09-04_Documents to Shortlisted Candidates (Contract Advisory)",
+  "embedding": {"name": "BAAI/bge-m3", "revision": "5617a9f61b028005a4858fdac845db406aefb181"},
+  "reranker": {"name": "BAAI/bge-reranker-v2-m3", "revision": "953dc6f6f85a1b2dbfca4c34a2796e7dde08d41e"},
+  "documents": [
+    {"key": "NTT", "role": "tender", "path": "2b_Tender documents/03 - NTT.docx"},
+    {"key": "SCT", "role": "tender", "path": "2b_Tender documents/05 - SCT.docx"},
+    {"key": "SCC", "role": "tender", "path": "2b_Tender documents/10 - SCC.docx"},
+    {"key": "PRE", "role": "tender", "path": "2b_Tender documents/25 - Specification - PRE (base tender).docx"},
+    {"key": "GCC", "role": "standard", "path": "2a_Standard documents/09_General Conditions of Contract.pdf"},
+    {"key": "FT", "role": "tender", "path": "2b_Tender documents/06 - FoT (scan).pdf"},
+    {"key": "AA", "role": "tender", "path": "2b_Tender documents/08 - AoA (scan).pdf"},
+    {"key": "APL", "role": "tender", "path": "2b_Tender documents/APL_List of BS Subcon.pdf"}
+  ],
+  "ocr_cases": [
+    {"key": "FT", "page": 2, "needles": ["FORM OF TENDER", "20250101", "TUNG CHUNG AREA 98", "180", "FT/1"]},
+    {"key": "FT", "page": 7, "needles": ["sole proprietorship", "Residential address", "20250101", "FT/6"]},
+    {"key": "AA", "page": 1, "needles": ["ARTICLES OF AGREEMENT", "20250101", "Final Contract Sum", "AA/1"]},
+    {"key": "AA", "page": 2, "needles": ["SIGNED", "SEALED", "DELIVERED", "COMMON SEAL", "AA/2"]},
+    {"key": "APL", "page": 3, "needles": ["ELECTRICAL SPECIALIST", "FIRE SERVICES AND WATER PUMP", "LIFT SPECIALIST", "APL/2"]}
+  ],
+  "queries": [
+    {
+      "id": "payment_two_sides", "role": "tender",
+      "query": "Find the amendment deleting the minimum interim payment under GCC 14.2(4) and any PRE quick-reference entry still listing that minimum payment.",
+      "expected": [
+        {"key": "SCC", "contains": ["14.2(4)", "deleted and replaced"]},
+        {"key": "PRE", "contains": ["14.2(4)", "Minimum payment for interim certificates"]}
+      ]
+    },
+    {
+      "id": "aqcc_two_sides", "role": "tender",
+      "query": "Compare the required number of Architectural Quality Control Coordinators (AQCC) in the Contractor's Management Team and the Quality Control System.",
+      "expected": [
+        {"key": "PRE", "contains": ["Architectural Quality Control Coordinator (AQCC) total 2"]},
+        {"key": "PRE", "contains": ["One (1) Number of Architectural Quality Control Coordinator"]}
+      ]
+    },
+    {
+      "id": "bsi_two_sides", "role": "tender",
+      "query": "Find the definitions of Site Staff and Building Services Inspector, including whether the inspector assists the Contract Manager or is a CM's Representative.",
+      "expected": [
+        {"key": "PRE", "contains": ["The words", "Site Staff", "to assist"]},
+        {"key": "PRE", "contains": ["Building Services Inspector", "officer duly appointed", "Representative"]}
+      ]
+    },
+    {
+      "id": "sct_existing_note", "role": "tender", "kind": "regression_context_not_conflict_verdict",
+      "query": "Find the existing SCT explanation that Bills 9 to 11 electronic schedules of rates are for reference only and hard copies are issued in tender addenda.",
+      "expected": [{"key": "SCT", "contains": ["tender addendum/addenda", "reference only"]}]
+    },
+    {
+      "id": "services_packages", "role": "tender",
+      "query": "Which building services Specialist Sub-contract Works are collectively defined in the PRE Specification?",
+      "expected": [{"key": "PRE", "contains": ["fire services and water pump", "lift Specialist", "collectively"]}]
+    },
+    {
+      "id": "prime_cost", "role": "tender",
+      "query": "Find the NTT Lump Sum tender adjustment provisions for Prime Cost Sums, Provisional Sums and Contingency Sum.",
+      "expected": [{"key": "NTT", "contains": ["Prime Cost Sums", "Contingency Sum"]}]
+    },
+    {
+      "id": "homes_hardcopy_exception", "role": "tender",
+      "query": "Find the HOMES electronic communication exception requiring the Contractor's interim statement and the Surveyor's certificate to be delivered in hardcopy.",
+      "expected": [{"key": "SCC", "contains": ["interim statement shall be delivered", "hardcopy"]}]
+    },
+    {
+      "id": "mic_transport_plan", "role": "tender",
+      "query": "When must the Contractor submit the detailed fabrication and transport arrangement for MiC-BK, and how often is the plan updated?",
+      "expected": [{"key": "PRE", "contains": ["within 30 days", "fabrication and transport", "quarterly"]}]
+    }
+  ]
 }

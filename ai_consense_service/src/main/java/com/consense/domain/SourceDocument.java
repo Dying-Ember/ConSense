@@ -42,6 +42,10 @@ public class SourceDocument {
     @Column(name = "review_role", length = 32)
     private String reviewRole;
 
+    /** Package boundary, independent of semantic role: package / works_pss / pricing / example; null is inferred. */
+    @Column(name = "document_scope", length = 32)
+    private String documentScope;
+
     @Column(name = "file_name", length = 512, nullable = false)
     private String fileName;
 

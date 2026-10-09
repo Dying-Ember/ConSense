@@ -8,7 +8,9 @@ Private source snapshot of the current ConSense application: contract drafting, 
 | --- | --- |
 | `ai_consense_web/` | Vue 3 / TypeScript / Vite application, three-language UI, drafting review and document comparison, business relationship graph, frontend checks |
 | `ai_consense_service/` | Spring Boot service, extraction/evidence harness, business registries, DOCX generation, document rendering adapters, vetting/retrieval tools and service tests |
-| `SOURCE-SNAPSHOT.json` | Source revisions, publication-only changes and verification summary |
+| `SOURCE-SNAPSHOT.json` | Historical Oct 7 initial-import revisions and packaging checks |
+| `SOURCE-INTEGRATION.json` | Oct 9 integration sources, current checks and unresolved acceptance |
+| `docs/PRIVATE-REPOSITORY-SYNC.md` | Code synchronization procedure and source boundaries |
 
 This is a new repository with a clean initial history. It does not import the original repositories' history, local databases, uploaded documents, private correspondence, model weights, credentials or generated runtime outputs. Authored synthetic fixtures remain explicitly test-only. Existing verification documents describe historical local observations; a fresh clone must establish its own runtime and business-output acceptance.
 
@@ -48,11 +50,17 @@ OCR, embeddings, reranking and vector retrieval have separate runtime dependenci
 
 ## Verification
 
+The 2026-10-09 integration preserves drafting PR #3 and adds the complete local vetting/advisory delta. A fresh frontend `npm ci`, typecheck and production build passed. The backend `clean package` ran 1,618 tests: 1,550 passed, 68 skipped, zero failures/errors. Frontend CommonJS checks reported 36 passed and one externally dependent test skipped; four view/workspace scripts passed. Five actual-document/runtime test files remain outside the default Maven source root. Prepared Python dependencies are required for loopback protocol checks. These checks do not certify real model, OCR, retrieval, MySQL deployment or original-document layout quality. See [SOURCE-INTEGRATION.json](SOURCE-INTEGRATION.json) and [the synchronization record](docs/PRIVATE-REPOSITORY-SYNC.md).
+
+The following figures describe the initial Oct 7 import only:
+
 The exported frontend passed type checking, a Vite production build, 35 CommonJS checks and three workspace/scope/view checks. The exported service passed Maven packaging and 13 business-rule tests without calling a real model provider. Four native-layout guard cases were skipped because their external runtime was not supplied. These checks used existing local dependency caches; they do not establish a fresh dependency installation, external service readiness, native PDF layout or business acceptance of a new deployment.
 
 Run the frontend checks described in its README and the service checks described in its README. Tests that require excluded private originals or actual runtime captures are identified separately under `ai_consense_service/tests/external-fixtures/`; their Java source is retained, but they are outside the default Maven test source set until authorised fixtures are restored. The optional frontend OCR diagnostics replay also requires an external fixture. Missing original evidence must not be replaced with an unlabelled synthetic result.
 
-## Snapshot provenance
+## Initial snapshot provenance
+
+Later integrations are recorded separately in `SOURCE-INTEGRATION.json`; the revisions below describe the initial import.
 
 | Component | Source revision |
 | --- | --- |

@@ -15,6 +15,12 @@ public class AdviceController {
 
     private final AdviceService adviceService;
 
+    @GetMapping("/sources")
+    public ApiResponse<List<AdviceSourceVO>> sources(@PathVariable String projectId,
+                                                    @RequestParam(defaultValue = "fullset") String scope) {
+        return ApiResponse.ok(adviceService.sources(projectId,scope));
+    }
+
     @PostMapping("/index/rebuild")
     public ApiResponse<IndexStatusVO> rebuild(@PathVariable String projectId) {
         return ApiResponse.ok(adviceService.rebuildIndex(projectId));

@@ -24,4 +24,5 @@ public class VettingRun {
     @Lob @Column(name = "result_json", columnDefinition = "LONGTEXT") private String resultJson;
     @Lob @Column(name = "coverage_json", columnDefinition = "LONGTEXT") private String coverageJson;
     @Lob @Column(name = "model_identity_json", columnDefinition = "LONGTEXT") private String modelIdentityJson;
+    @Column(name = "source_snapshot_sha256", length = 64) private String sourceSnapshotSha256;
 }

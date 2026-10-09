@@ -90,6 +90,30 @@ class VettingWorkflowTest {
     }
 
     @Test
+    void replacedReviewPackageCannotExportThePreviousCompletedRunAsTheCurrentReport() throws Exception {
+        String projectId = project("Review source replacement");
+        source(projectId, SourceDocument.CATEGORY_VETTING_PACKAGE, "NTT", "NTT.txt",
+                "NTT 1.1 Tenderers shall provide the original form.");
+        complete(projectId, service.startRun(projectId, "en"));
+        assertTrue(service.exportJson(projectId, "en").length > 0);
+        source(projectId, SourceDocument.CATEGORY_VETTING_PACKAGE, "NTT", "NTT.txt",
+                "NTT 1.1 Tenderers shall provide two signed original forms.");
+        BizException failure = assertThrows(BizException.class, () -> service.exportJson(projectId, "en"));
+        assertEquals(4104, failure.getCode());
+    }
+
+    @Test
+    void competitionExcludesPricingDocumentsWithoutReportingTheirAbsenceAsMissingReviewEvidence() throws Exception {
+        String projectId = project("Competition document boundary");
+        source(projectId, SourceDocument.CATEGORY_VETTING_PACKAGE, "NTT", "NTT.txt",
+                "NTT 1.1 Tenderers shall provide the original form with the stated source condition.");
+        VettingJobVO run = complete(projectId, service.startRun(projectId, "en"));
+        assertFalse(run.getCoverage().getWarnings().stream().anyMatch(w ->
+                w.contains("未提供可解析的 Bills of Quantities") || w.contains("未提供可解析的 General Summary")),
+                "Excluded pricing files are outside the competition review scope, not missing mandatory evidence");
+    }
+
+    @Test
     void everyReportFormatObservesActualRunPayloadAndExactReturnedBytesWithoutChangingJson() throws Exception {
         String projectId=project("Report operation observation");
         source(projectId,SourceDocument.CATEGORY_VETTING_PACKAGE,"NTT","NTT.txt","NTT 1.1 Tenderers shall provide the original form with the stated source condition.");
@@ -488,13 +512,13 @@ class VettingWorkflowTest {
         service.uploadPackage(projectId, Collections.singletonList(upload("GCC discussion.eml", "message/rfc822", mail)));
         List<SourceDocument> uploaded = documents.findByProjectIdAndCategoryOrderByIdAsc(projectId, SourceDocument.CATEGORY_VETTING_PACKAGE);
         assertEquals(5, uploaded.size());
-        assertEquals("tender", uploaded.stream().filter(d -> "SCC.docx".equals(d.getFileName())).findFirst().get().getReviewRole());
+        assertNull(uploaded.stream().filter(d -> "SCC.docx".equals(d.getFileName())).findFirst().get().getReviewRole(), "Automatic roles remain inferred, not persisted as an explicit user choice");
         assertEquals("project_fact", uploaded.stream().filter(d -> "PRE meeting.docx".equals(d.getFileName())).findFirst().get().getReviewRole());
         SourceDocument manifest = uploaded.stream().filter(d -> "directory.docx".equals(d.getFileName())).findFirst().get();
         assertEquals("package_manifest", manifest.getReviewRole());
         assertEquals("INDEX", manifest.getFileKey());
-        assertEquals("standard", uploaded.stream().filter(d -> "GCC.docx".equals(d.getFileName())).findFirst().get().getReviewRole());
-        assertEquals("project_fact", uploaded.stream().filter(d -> "GCC discussion.eml".equals(d.getFileName())).findFirst().get().getReviewRole());
+        assertNull(uploaded.stream().filter(d -> "GCC.docx".equals(d.getFileName())).findFirst().get().getReviewRole(), "Automatic roles remain inferred, not persisted as an explicit user choice");
+        assertNull(uploaded.stream().filter(d -> "GCC discussion.eml".equals(d.getFileName())).findFirst().get().getReviewRole(), "Automatic roles remain inferred, not persisted as an explicit user choice");
         assertThrows(BizException.class, () -> service.uploadPackage(projectId,
                 Collections.singletonList(upload("invalid.txt", "text/plain", REFERENCE.getBytes(StandardCharsets.UTF_8))), "answer"));
         assertEquals(5, documents.findByProjectIdAndCategoryOrderByIdAsc(projectId, SourceDocument.CATEGORY_VETTING_PACKAGE).size());
@@ -502,7 +526,7 @@ class VettingWorkflowTest {
         assertTrue(list(projectId).isEmpty(), "Fact emails and manifests may quote provisions without activating them");
         assertEquals(5, job.getCoverage().getTotalDocuments());
         for (SourceDocument d : uploaded) {
-            if (Arrays.asList("project_fact", "package_manifest").contains(d.getReviewRole())) {
+            if (Arrays.asList("project_fact", "package_manifest").contains(VettingCorpus.sourceRole(d))) {
                 DocumentCoverageVO c = coverage(job, d);
                 assertTrue(c.getWarnings().stream().anyMatch(w -> w.contains("不作为有效合同条款")));
                 assertFalse(c.getWarnings().stream().anyMatch(w -> w.contains("规则已扫描全部")));
@@ -510,7 +534,7 @@ class VettingWorkflowTest {
         }
         assertEquals("Project facts", service.listFiles(projectId).stream().filter(f -> "GCC discussion.eml".equals(f.getFileName())).findFirst().get().getRole().getEn());
         for (SourceDocument d : uploaded) {
-            assertEquals(d.getReviewRole(), service.listFiles(projectId).stream()
+            assertEquals(VettingCorpus.sourceRole(d), service.listFiles(projectId).stream()
                     .filter(f -> d.getFileName().equals(f.getFileName())).findFirst().get().getSourceRole());
         }
     }

@@ -32,8 +32,9 @@ public class VettingController {
     @PostMapping("/package/upload")
     public ApiResponse<UploadResultVO> upload(@PathVariable String projectId,
                                               @RequestParam("files") List<MultipartFile> files,
-                                              @RequestParam(required = false) String sourceRole) {
-        return ApiResponse.ok(vettingService.uploadPackage(projectId, files, sourceRole));
+                                              @RequestParam(required = false) String sourceRole,
+                                              @RequestParam(required = false) String documentScope) {
+        return ApiResponse.ok(vettingService.uploadPackage(projectId, files, sourceRole,documentScope));
     }
 
     @PostMapping("/run")

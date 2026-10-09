@@ -647,6 +647,8 @@ export interface VettingSourceRequestAudit {
 }
 
 export interface VettingJob {
+  sourceSnapshotSha256?: string | null
+  sourceSetStale?: boolean
   modelIdentity?: ModelIdentity | null
   id: string
   status: 'QUEUED' | 'RUNNING' | 'COMPLETED' | 'FAILED' | string
@@ -692,6 +694,10 @@ export interface EvidenceBundle {
 /* ------------------------------------------------------------ 咨询 */
 
 export interface Citation {
+  evidenceId?: string
+  documentId?: string
+  sourceHash?: string
+  sourceRole?: string
   fileLabel: string
   pageNo: string
   anchor: string
@@ -700,6 +706,9 @@ export interface Citation {
 }
 
 export interface ChatMessage {
+  basisScope?: 'project_contract' | 'reference_only' | 'insufficient'
+  clarifications?: string[]
+  sourceScope?: string
   modelIdentity?: ModelIdentity | null
   model?: string | null
   id: number | null
@@ -713,6 +722,10 @@ export interface ChatMessage {
 }
 
 export interface AskResponse {
+  messageId?: number
+  basisScope?: 'project_contract' | 'reference_only' | 'insufficient'
+  clarifications?: string[]
+  sourceScope?: string
   modelIdentity?: ModelIdentity | null
   grounded: boolean
   title: LocalizedText
@@ -725,6 +738,10 @@ export interface AskResponse {
 }
 
 export interface IndexStatus {
+  embeddingReady?: boolean
+  stale?: boolean
+  eligibleDocuments?: number
+  indexedDocuments?: number
   chunks: number
   indexed: number
   vectorProvider: string
@@ -735,6 +752,40 @@ export interface IndexStatus {
   vectorReady: boolean
   ocrReady: boolean
   message: LocalizedText
+}
+
+export type DocumentScope = 'auto' | 'package' | 'works_pss' | 'pricing' | 'example'
+
+export interface AdviceSourceDocument {
+  documentId: string
+  fileKey: string
+  fileName: string
+  sourceRole: string
+  parseStatus: string
+  included: boolean
+  exclusionReason: string | null
+}
+
+export interface VettingChecklist {
+  projectId: string
+  runId: string
+  runSnapshotSha256: string
+  writable: boolean
+  items: VettingChecklistItem[]
+}
+
+export interface VettingChecklistItem {
+  reviewScope?: 'in_scope' | 'mixed_contract_pricing' | 'pricing_document_excluded'
+  scopeNote?: string
+  scopeNoteText?: LocalizedText
+  id: string
+  section: string
+  clause: string
+  description: string
+  templatePage: number
+  status: 'unchecked' | 'fulfilled' | 'not_applicable'
+  remarks: string
+  updatedAt?: string
 }
 
 export interface QuickQuestion {

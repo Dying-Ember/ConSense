@@ -24,7 +24,10 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 @SpringBootTest(properties={"spring.jpa.hibernate.ddl-auto=create-drop","spring.flyway.enabled=false",
-        "consense.ocr.enabled=false","consense.vector.provider=memory","consense.minimax-cn.api-key=test-only-placeholder",
+        "consense.ocr.enabled=false","consense.vector.provider=memory",
+        "consense.llm.enabled=true","consense.llm.base-url=https://local-llm-test.invalid",
+        "consense.minimax-cn.enabled=true","consense.minimax-cn.base-url=https://minimax-test.invalid",
+        "consense.minimax-cn.api-key=test-only-placeholder",
         "consense.vetting.semantic-topics=1","consense.vetting.project-reference-comparisons=0",
         "consense.vetting.responses.enabled=true","consense.vetting.responses.api-key="})
 @ActiveProfiles("h2") @AutoConfigureMockMvc

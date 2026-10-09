@@ -15,9 +15,9 @@ Status: implemented and accepted for bounded routing/persistence/UI scope, 2026-
 ## Profiles
 
 - `local`: current `consense.llm` chat settings and adapter, unchanged (the owned preview currently uses Ollama `qwen2.5:7b-instruct-q4_K_M`). The default deployment continues to own embeddings.
-- `minimax-cn`: separate server-owned configuration, OpenAI-compatible adapter, default endpoint root `http<LOCAL_PATH_REDACTED>`, default model `MiniMax-M3`; dedicated key `${MiniMaxCN_Token_Plan_API_Key:}` only, without pay-as-you-go credential fallback. Configuration fields must be separate from the legacy Llm bean to avoid recursive initialization or mutable singleton switching. Keep reasoning separate from answer content; use documented `reasoning_split=true` and disabled thinking for structured extraction. Model/endpoint remain deployment-configurable. Do not serialize secrets or include them in command lines, client errors, traces or configuration fingerprints.
+- `minimax-cn`: separate server-owned configuration, OpenAI-compatible adapter, default endpoint root `https://api.minimax.cn`, default model `MiniMax-M3`; dedicated key `${MiniMaxCN_Token_Plan_API_Key:}` only, without pay-as-you-go credential fallback. Configuration fields must be separate from the legacy Llm bean to avoid recursive initialization or mutable singleton switching. Keep reasoning separate from answer content; use documented `reasoning_split=true` and disabled thinking for structured extraction. Model/endpoint remain deployment-configurable. Do not serialize secrets or include them in command lines, client errors, traces or configuration fingerprints.
 
-Official protocol references verified 2026-10-06: http<LOCAL_PATH_REDACTED>`/v1/chat/completions`, so store the endpoint root without `/v1`. A configured key alone does not prove active subscription/quota.
+Official protocol references verified 2026-10-06: https://platform.minimax.cn/docs/api-reference/text-openai-api and https://platform.minimax.cn/docs/token-plan/intro. The adapter appends `/v1/chat/completions`, so store the endpoint root without `/v1`. A configured key alone does not prove active subscription/quota.
 
 ## Implementation and acceptance
 

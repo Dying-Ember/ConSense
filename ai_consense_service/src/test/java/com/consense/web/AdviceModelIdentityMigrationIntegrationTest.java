@@ -32,7 +32,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 /** Exact SQL upgrade of a populated H2 fixture; public HTTP assertions, not a Flyway/MySQL runtime claim. */
 @SpringBootTest(properties={"spring.jpa.hibernate.ddl-auto=none","spring.flyway.enabled=false",
-        "consense.ocr.enabled=false","consense.vector.provider=memory","consense.minimax-cn.api-key=migration-test-only"})
+        "consense.ocr.enabled=false","consense.vector.provider=memory",
+        "consense.minimax-cn.enabled=true","consense.minimax-cn.base-url=https://minimax-test.invalid",
+        "consense.minimax-cn.api-key=migration-test-only"})
 @ActiveProfiles("h2") @AutoConfigureMockMvc
 class AdviceModelIdentityMigrationIntegrationTest {
     private static final String URL="jdbc:h2:mem:advice_migration_"+UUID.randomUUID()+";MODE=MySQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE";
@@ -48,6 +50,7 @@ class AdviceModelIdentityMigrationIntegrationTest {
             sql.executeUpdate("INSERT INTO project(id,name_zh_hans,created_at,updated_at) VALUES ('"+PROJECT+"','LEGACY TEST ONLY',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)");
             sql.executeUpdate("INSERT INTO chat_message(project_id,role,title,content,created_at) VALUES ('"+PROJECT+"','assistant','Legacy answer','Legacy text TEST ONLY',CURRENT_TIMESTAMP)");
             migrationSql("V10__advice_model_identity.sql").populate(connection);
+            migrationSql("V13__project_document_scope_and_advice_evidence.sql").populate(connection);
         } catch(Exception error) {throw new IllegalStateException("Cannot seed pre-identity fixture",error);}
         r.add("spring.datasource.url",()->URL);
         r.add("consense.storage-root",()->java.nio.file.Paths.get("target","advice-migration-uploads").toAbsolutePath().toString());
@@ -74,8 +77,8 @@ class AdviceModelIdentityMigrationIntegrationTest {
         assertTrue(old.get(0).path("modelIdentity").isMissingNode());
         when(local.available()).thenReturn(true);when(local.embed(anyList())).thenReturn(Collections.singletonList(new float[]{1,0}));
         when(miniMax.available()).thenReturn(true);
-        when(miniMax.chat(anyList())).thenReturn("{\"grounded\":true,\"answer\":\"Post-migration answer TEST ONLY\"}");
-        mvc.perform(multipart("/api/drafting/{id}/inputs/upload",PROJECT).file(new MockMultipartFile("files",
+        when(miniMax.chat(anyList())).thenReturn("{\"grounded\":true,\"answer\":\"Post-migration answer TEST ONLY\",\"citations\":[\"[1]\"]}");
+        mvc.perform(multipart("/api/vetting/{id}/package/upload",PROJECT).file(new MockMultipartFile("files",
                 "MIGRATION-TEST-ONLY.txt","text/plain","TEST ONLY. SCC4.1 is a synthetic basis.".getBytes(StandardCharsets.UTF_8))))
                 .andExpect(jsonPath("$.data.parsed").value(1));
         mvc.perform(post("/api/advice/{id}/index/rebuild",PROJECT)).andExpect(jsonPath("$.code").value(0));
