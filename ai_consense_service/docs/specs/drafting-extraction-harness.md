@@ -4,7 +4,7 @@ Date: 2026-10-06. User instruction: “先把harness部分修好”. Integration
 
 ## Problem and evidence
 
-The actual eight-source 7B run retained in `<LOCAL_PATH_REDACTED>` completed decoding but was not semantically accepted. Its effective system prompt is 22,211 characters, includes both a plain catalogue and structured catalogue, and repeats the full input contract. The user prompt repeats that contract again. It asks for JSON serialized inside strings despite A10 already accepting native values.
+The actual eight-source 7B run retained in `C:/Coding/ConSense/output/drafting-a-implementation-20261005/a10-json-value-20261006/live-7b-20261006-080757/` completed decoding but was not semantically accepted. Its effective system prompt is 22,211 characters, includes both a plain catalogue and structured catalogue, and repeats the full input contract. The user prompt repeats that contract again. It asks for JSON serialized inside strings despite A10 already accepting native values.
 
 179 returned items became 17 candidates in seven fields. Invalid shapes and quotes are silently discarded, so a recognized-but-rejected contract title looks like absent source information. L10Pro/Hardcopy disagreement is a model candidate conflict, not a demonstrated conflict between original documents. A request is treated as an answer, pending foundation classification becomes true, and a Bill reference causes invented rows to be merged with the real 13 rows. A successful transport or decoder is not an accuracy verdict.
 

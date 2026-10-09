@@ -26,6 +26,15 @@ public final class AdviceDtos {
         private String evidenceId;
         private List<CitationVO> sources;
         private ModelIdentity modelIdentity;
+        private List<String> clarifications;
+        private String sourceScope;
+        private String basisScope;
+        public ChatMessageVO(Long id,String role,LocalizedText title,LocalizedText content,String unknownScope,List<String> citations,String evidenceId,List<CitationVO> sources,ModelIdentity modelIdentity) {
+            this(id,role,title,content,unknownScope,citations,evidenceId,sources,modelIdentity,null,null,null);
+        }
+        public ChatMessageVO(Long id,String role,LocalizedText title,LocalizedText content,String unknownScope,List<String> citations,String evidenceId,List<CitationVO> sources,ModelIdentity modelIdentity,List<String> clarifications,String sourceScope) {
+            this(id,role,title,content,unknownScope,citations,evidenceId,sources,modelIdentity,clarifications,sourceScope,null);
+        }
     }
 
     @Data
@@ -37,6 +46,14 @@ public final class AdviceDtos {
         private String anchor;
         private String content;
         private double score;
+        private String evidenceId;
+        private String documentId;
+        private String sourceHash;
+        private String sourceRole;
+        private Boolean applicabilityContextComplete;
+        public CitationVO(String fileLabel,String pageNo,String anchor,String content,double score) {
+            this(fileLabel,pageNo,anchor,content,score,null,null,null,null,null);
+        }
     }
 
     @Data
@@ -45,6 +62,8 @@ public final class AdviceDtos {
     public static class AskRequest {
         private String question;
         private String scope;
+        private Long replyToMessageId;
+        public AskRequest(String question,String scope){this(question,scope,null);}
     }
 
     @Data
@@ -60,6 +79,26 @@ public final class AdviceDtos {
         private List<CitationVO> sources;
         private String model;
         private ModelIdentity modelIdentity;
+        private List<String> clarifications;
+        private String sourceScope;
+        private String basisScope;
+        private Long messageId;
+        public AskResponseVO(boolean grounded,LocalizedText title,LocalizedText content,String unknownScope,List<String> citations,String evidenceId,List<CitationVO> sources,String model,ModelIdentity modelIdentity) {
+            this(grounded,title,content,unknownScope,citations,evidenceId,sources,model,modelIdentity,null,null,null,null);
+        }
+    }
+
+    @Data @NoArgsConstructor @AllArgsConstructor
+    public static class AdviceSourceVO {
+        private String documentId;
+        private String fileKey;
+        private String fileName;
+        private String sourceRole;
+        private String documentScope;
+        private String parseStatus;
+        private String sourceHash;
+        private boolean included;
+        private String exclusionReason;
     }
 
     @Data
@@ -76,6 +115,16 @@ public final class AdviceDtos {
         private boolean vectorReady;
         private boolean ocrReady;
         private LocalizedText message;
+        private boolean stale;
+        private int eligibleDocuments;
+        private int indexedDocuments;
+        private boolean embeddingReady;
+        public IndexStatusVO(int chunks,int indexed,String vectorProvider,String collection,String embedModel,String llmModel,boolean llmReady,boolean vectorReady,boolean ocrReady,LocalizedText message,boolean stale,int eligibleDocuments,int indexedDocuments) {
+            this(chunks,indexed,vectorProvider,collection,embedModel,llmModel,llmReady,vectorReady,ocrReady,message,stale,eligibleDocuments,indexedDocuments,false);
+        }
+        public IndexStatusVO(int chunks,int indexed,String vectorProvider,String collection,String embedModel,String llmModel,boolean llmReady,boolean vectorReady,boolean ocrReady,LocalizedText message) {
+            this(chunks,indexed,vectorProvider,collection,embedModel,llmModel,llmReady,vectorReady,ocrReady,message,false,0,0);
+        }
     }
 
     @Data

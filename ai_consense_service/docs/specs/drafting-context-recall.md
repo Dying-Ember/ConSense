@@ -2,7 +2,7 @@
 
 2026-10-06. Authorized by the user after diagnosis: preserve logical context and look before/after a missed input, without guessing missing values. This extends the existing extraction harness spec and its agreed public upload/extract/variables/trace interfaces. Current catalogue, adoption, DOCX generation, provider selection and other modules retain their existing behavior.
 
-Diagnostic baseline: `<LOCAL_PATH_REDACTED>`. Captured run `0b9ae48b-0310-44c3-9969-3eb6b66a272a` split the NTT13 title/instruction into part 87:1 and the complete answer into 87:2. No nonblank nsc candidate reached intake. A configured MiniMax-M3 pair recovered the entire answer when only the preceding original title/instruction was restored. This is a source organization failure and bounded semantic observation, not an overall model acceptance result.
+Diagnostic baseline: `C:/Coding/ConSense/output/drafting-a-implementation-20261005/nsc-text-diagnosis-20261006/diagnosis.md`. Captured run `0b9ae48b-0310-44c3-9969-3eb6b66a272a` split the NTT13 title/instruction into part 87:1 and the complete answer into 87:2. No nonblank nsc candidate reached intake. A configured MiniMax-M3 pair recovered the entire answer when only the preceding original title/instruction was restored. This is a source organization failure and bounded semantic observation, not an overall model acceptance result.
 
 ## Required behavior
 

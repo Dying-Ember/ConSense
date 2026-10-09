@@ -53,6 +53,9 @@ public class VettingService {
     private final VettingReportWriter reportWriter;
     private final PlatformTransactionManager transactionManager;
     private final com.consense.ai.LlmProfiles llmProfiles;
+    private VettingChecklistService checklistService;
+    @org.springframework.beans.factory.annotation.Autowired
+    public void setChecklistService(VettingChecklistService service) { this.checklistService = service; }
     private final ConcurrentMap<String,Object> locks = new ConcurrentHashMap<>();
     private final ConcurrentMap<String,CompletableFuture<RunResultVO>> completions = new ConcurrentHashMap<>();
     private final ConcurrentMap<String,VettingServiceProbe> serviceProbes = new ConcurrentHashMap<>();
@@ -97,16 +100,22 @@ public class VettingService {
         return uploadPackage(projectId, files, null);
     }
     public UploadResultVO uploadPackage(String projectId,List<MultipartFile> files,String sourceRole) {
+        return uploadPackage(projectId,files,sourceRole,null);
+    }
+    public UploadResultVO uploadPackage(String projectId,List<MultipartFile> files,String sourceRole,String documentScope) {
         projectService.require(projectId);
         if (!projectId.matches("[A-Za-z0-9_-]+")) throw new BizException(4101,"项目编号含无效路径字符");
         String role = validatedRole(sourceRole);
+        String boundary=com.consense.service.sources.ProjectDocumentScope.normalizeDocumentScope(documentScope);
         int accepted=0,parsed=0,failed=0; List<String> messages=new ArrayList<>();
         for (MultipartFile file : files) {
             if (file==null || file.isEmpty()) continue; accepted++;
             StorageService.StoredFile stored=storageService.store(projectId,SourceDocument.CATEGORY_VETTING_PACKAGE,file);
             SourceDocument d=new SourceDocument(); d.setProjectId(projectId); d.setCategory(SourceDocument.CATEGORY_VETTING_PACKAGE); d.setFileKey(matchFileKey(stored.getOriginalName()));
             d.setFileName(stored.getOriginalName()); d.setContentType(stored.getContentType()); d.setSizeBytes(stored.getSize()); d.setStoragePath(stored.getPath()); d.setCreatedAt(Instant.now()); d.setParseStatus("PARSING");
-            d.setReviewRole(role == null ? VettingCorpus.sourceRole(d) : role);
+            // Preserve only an explicit choice; auto inference remains distinguishable and can improve safely.
+            d.setReviewRole(role);
+            d.setDocumentScope(boundary);
             if ("package_manifest".equals(d.getReviewRole()) && "OTHER".equals(d.getFileKey())) d.setFileKey("INDEX");
             sourceDocumentRepository.saveAndFlush(d);
             String parseJobId=null,rawSha256=null;
@@ -137,6 +146,7 @@ public class VettingService {
             List<SourceDocument> snapshot=sourceSet(projectId);
             if(snapshot.stream().noneMatch(this::reviewable)) throw new BizException(4101,"审查源集没有可用正文，请上传并检查解析状态");
             VettingRun run=new VettingRun(); run.setId(UUID.randomUUID().toString()); run.setProjectId(projectId); run.setLang(normalizeLang(lang)); run.setStartedAt(Instant.now());
+            run.setSourceSnapshotSha256(sourceSetHash(snapshot));
             if(operation.isExplicit()||!props.getVetting().getResponses().isEnabled())run.setModelIdentityJson(JsonUtils.write(operation.getIdentity()));
             run.setStatus("QUEUED"); run.setPhase("queued"); run.setTotalUnits(topicCount()+2); run.setMessage("审查已排队，人工处置按问题指纹保留。");
             run.setCoverageJson(JsonUtils.write(coverage(snapshot,Collections.emptyList(),Collections.emptySet(),Collections.emptyList(),false)));
@@ -185,8 +195,8 @@ public class VettingService {
             stage="corpus_and_semantic_review";stageStarted=System.nanoTime();stageOverhead=probe.overheadNanos();
             List<Chunk> chunks=VettingCorpusConstructionProbe.chunks(props,id,projectId,docs);
             VettingSemanticReview.Result semanticResult=JsonUtils.isBlankText(props.getVetting().getProbeDirectory())
-                    ? semantic.reviewWithProgress(projectId,chunks,lang,(count,total,message) -> progress(id,count+1,total+2,"semantic",message))
-                    : semantic.reviewWithProgress(id,projectId,chunks,lang,(count,total,message) -> progress(id,count+1,total+2,"semantic",message));
+                    ? semantic.reviewWithProgress(projectId,chunks,"en",(count,total,message) -> progress(id,count+1,total+2,"semantic",message))
+                    : semantic.reviewWithProgress(id,projectId,chunks,"en",(count,total,message) -> progress(id,count+1,total+2,"semantic",message));
             probe.elapsed(stage,stageStarted,stageOverhead,"Original corpus and SemanticReview call, inclusive of its independent probes; not pure model latency",true);
             probe.observe("semantic_result_raw_candidates",()->VettingServiceProbe.map("result",semanticResult,
                     "boundary","Actual returned candidates, warnings, reviewed IDs and topic audits before service sorting/source normalization"));
@@ -375,8 +385,6 @@ public class VettingService {
     }
     private CoverageVO coverage(List<SourceDocument> snapshot,List<Chunk> chunks,Set<String> reviewed,List<String> extra,boolean rulesScanned) {
         List<String> warnings=new ArrayList<>(extra); List<DocumentCoverageVO> documents=new ArrayList<>(); int processed=0;
-        if(snapshot.stream().noneMatch(d -> "BQ".equals(fileKey(d)) && reviewable(d) && contractSource(d))) warnings.add("未提供可解析的 Bills of Quantities，不能确认数量、提交范围及金额协调。");
-        if(snapshot.stream().noneMatch(d -> "GS".equals(fileKey(d)) && reviewable(d) && contractSource(d))) warnings.add("未提供可解析的 General Summary，无法核对汇总金额。");
         warnings.add(rulesScanned?"规则扫描全部可解析招标合同条款；标准文件仅作参考对照，项目事实和文件目录仅作上下文，均未当作实际合同执行规则检查。语义覆盖仅计实际成功的模型片段，未检索片段不代表完成语义审查。":"任务尚未完成规则和语义审查，当前覆盖仅反映源文件解析状态。");
         if(props.getVetting().isDiffAgainstBaseline()) warnings.add("本次未执行标准模板差异过滤，不能解读为只审查项目改动内容。");
         for(SourceDocument d:snapshot) {
@@ -426,12 +434,9 @@ public class VettingService {
         } return total;
     }
     private List<SourceDocument> sourceSet(String projectId) {
-        Map<String,SourceDocument> latest=new LinkedHashMap<>();
-        for(SourceDocument d:sourceDocumentRepository.findByProjectIdOrderByIdAsc(projectId)) {
-            if(!SourceDocument.CATEGORY_VETTING_PACKAGE.equals(d.getCategory()) && !SourceDocument.CATEGORY_VETTING_SUPPLEMENT.equals(d.getCategory())) continue;
-            if(JsonUtils.isBlankText(d.getFileKey())) d.setFileKey(matchFileKey(d.getFileName())); latest.put(d.getCategory()+"|"+nvl(d.getFileName()).toLowerCase(Locale.ROOT),d);
-        }
-        List<SourceDocument> out=new ArrayList<>(latest.values()); out.sort(Comparator.comparingInt(d -> {int at=FILE_ORDER.indexOf(fileKey(d));return at<0?FILE_ORDER.size():at;})); return out;
+        List<SourceDocument> documents=sourceDocumentRepository.findByProjectIdOrderByIdAsc(projectId);
+        for(SourceDocument d:documents)if(JsonUtils.isBlankText(d.getFileKey()))d.setFileKey(matchFileKey(d.getFileName()));
+        return com.consense.service.sources.ProjectDocumentScope.selected(projectId,documents,"fullset");
     }
     private boolean reviewable(SourceDocument d) { return ("PARSED".equals(d.getParseStatus())||"PARTIAL".equals(d.getParseStatus())) && !JsonUtils.isBlankText(d.getTextContent()) && !excluded(d.getFileName()); }
     private boolean contractSource(SourceDocument d) { return "tender".equals(VettingCorpus.sourceRole(d)); }
@@ -529,13 +534,19 @@ public class VettingService {
             probe.event("report_context_lookup_elapsed",DocumentParseProbe.map("wallNanos",contextElapsed,"seconds",contextElapsed/1_000_000_000.0,
                     "boundary","Actual unchanged reportContext lookup and payload DTO construction, measured before probe I/O"));
             probe.event("report_payload",DocumentParseProbe.map("project",c.project,"job",c.job,"findings",c.findings));
+            List<VettingChecklistCatalog.Result> checklist = checklistService == null ? Collections.emptyList()
+                    : checklistService.resultsForRun(projectId,c.job.getId());
             byte[] bytes;
-            if("pdf".equals(format))bytes=probe.enabled()?reportWriter.pdf(c.project,c.findings,c.job,lang,probe):reportWriter.pdf(c.project,c.findings,c.job,lang);
-            else if("docx".equals(format))bytes=probe.enabled()?reportWriter.docx(c.project,c.findings,c.job,lang,probe):reportWriter.docx(c.project,c.findings,c.job,lang);
+            if("pdf".equals(format))bytes=reportWriter.pdf(c.project,c.findings,c.job,"en",probe.enabled()?probe:null,checklist);
+            else if("docx".equals(format))bytes=reportWriter.docx(c.project,c.findings,c.job,"en",probe.enabled()?probe:null,checklist);
             else {
                 Map<String,Object> out;
                 try(VettingExportProbe.Timer timer=probe.measure("report_json_payload_construction","Original JSON report DTO/map construction")){
                     out=new LinkedHashMap<>();out.put("schemaVersion","1.0");out.put("language",normalizeLang(lang));out.put("project",projectService.toVO(c.project));out.put("job",c.job);out.put("findings",c.findings);
+                    out.put("reportStructureVersion","competition-comments-and-checklist-v1");out.put("reportLanguage","en");
+                    out.put("commentsTables",VettingReportPresentation.comments(c.findings,c.job.getCoverage()));
+                    out.put("checklistTables",VettingReportPresentation.checklist(checklist));out.put("checklistResults",checklist);
+                    out.put("evidenceIndex",VettingReportPresentation.evidenceIndex(c.findings,c.job.getCoverage()));
                 }
                 try(VettingExportProbe.Timer timer=probe.measure("report_json_serialization","Original JsonUtils.write and UTF8 encoding of returned JSON report")){bytes=JsonUtils.write(out).getBytes(StandardCharsets.UTF_8);}
             }
@@ -547,13 +558,29 @@ public class VettingService {
         projectService.require(projectId); synchronized(lock(projectId)) { return tx().execute(status -> {
             Project p=projectService.require(projectId); VettingRun run=runRepository.findFirstByProjectIdOrderByStartedAtDesc(projectId).orElseThrow(() -> new BizException(4103,"尚未完成审查，无法导出报告"));
             if(!"COMPLETED".equals(run.getStatus())) throw new BizException(4103,"最近审查任务尚未成功完成，请等待或重新运行");
+            if(sourceSetStale(run)) throw new BizException(4104,"审查文件包或资料版本已变化，请重新审查后导出本次报告；原审查及人工核对记录仍保留。");
             List<FindingVO> findings=activeFindings(projectId).stream().filter(f -> run.getId().equals(f.getRunId())).map(this::toVO).collect(Collectors.toList()); return new ReportContext(p,jobVO(run),findings);
         }); }
     }
     public String pdfFileName(String id) { return reportFileName(id,"pdf"); }
     public String reportFileName(String id,String format) { return "ConSense_Vetting_Report_"+nvl(projectService.require(id).getContractNo()).replaceAll("[\\\\/:*?\"<>|]","_")+"."+format; }
     private static final class ReportContext { final Project project; final VettingJobVO job; final List<FindingVO> findings; ReportContext(Project p,VettingJobVO j,List<FindingVO> f){project=p;job=j;findings=f;} }
-    private VettingJobVO jobVO(VettingRun r) { VettingJobVO job=new VettingJobVO(r.getId(),r.getStatus(),r.getPhase(),r.getCompletedUnits(),r.getTotalUnits(),r.getMessage(),r.getStartedAt(),r.getFinishedAt(),JsonUtils.read(r.getResultJson(),RunResultVO.class),r.getError(),JsonUtils.read(r.getCoverageJson(),CoverageVO.class));job.setModelIdentity(JsonUtils.read(r.getModelIdentityJson(),com.consense.ai.ModelIdentity.class));return job; }
+    private VettingJobVO jobVO(VettingRun r) { VettingJobVO job=new VettingJobVO(r.getId(),r.getStatus(),r.getPhase(),r.getCompletedUnits(),r.getTotalUnits(),r.getMessage(),r.getStartedAt(),r.getFinishedAt(),JsonUtils.read(r.getResultJson(),RunResultVO.class),r.getError(),JsonUtils.read(r.getCoverageJson(),CoverageVO.class));job.setModelIdentity(JsonUtils.read(r.getModelIdentityJson(),com.consense.ai.ModelIdentity.class));job.setSourceSnapshotSha256(r.getSourceSnapshotSha256());job.setSourceSetStale(sourceSetStale(r));return job; }
+    private static String sourceSetHash(List<SourceDocument> documents) {
+        List<String> records = documents.stream().map(d -> JsonUtils.write(Arrays.asList(d.getId(),d.getFileName(),d.getFileKey(),
+                VettingCorpus.sourceRole(d),d.getDocumentScope(),d.getParseStatus(),VettingCorpus.sourceHash(d))))
+                .sorted().collect(Collectors.toList());
+        return VettingCorpus.hash("competition-review-package-v1\n"+JsonUtils.write(records));
+    }
+    private boolean sourceSetStale(VettingRun run) {
+        List<SourceDocument> current=sourceSet(run.getProjectId());
+        if(!JsonUtils.isBlankText(run.getSourceSnapshotSha256()))return !run.getSourceSnapshotSha256().equals(sourceSetHash(current));
+        // Legacy runs have no content hash. At least reject replacement/new document identities.
+        CoverageVO recorded=JsonUtils.read(run.getCoverageJson(),CoverageVO.class);
+        Set<String> recordedIds=recorded==null||recorded.getDocuments()==null?Collections.emptySet():recorded.getDocuments().stream()
+                .map(DocumentCoverageVO::getDocumentId).collect(Collectors.toSet());
+        return !recordedIds.equals(current.stream().map(d->String.valueOf(d.getId())).collect(Collectors.toSet()));
+    }
     private List<VettingFinding> activeFindings(String id) { return findingRepository.findByProjectIdOrderByCodeAsc(id).stream().filter(f -> !Boolean.FALSE.equals(f.getActive())).collect(Collectors.toList()); }
     private List<FindingEvidence> readEvidence(VettingFinding f) { try{return JsonUtils.readList(f.getEvidenceJson(),FindingEvidence.class);}catch(Exception e){log.warn("发现 {} 证据快照不可读",f.getCode());return Collections.emptyList();} }
     private FindingVO toVO(VettingFinding f) {

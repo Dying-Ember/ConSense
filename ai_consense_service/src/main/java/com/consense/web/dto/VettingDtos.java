@@ -253,6 +253,8 @@ public final class VettingDtos {
         private String error;
         private CoverageVO coverage;
         private com.consense.ai.ModelIdentity modelIdentity;
+        private String sourceSnapshotSha256;
+        private boolean sourceSetStale;
         public VettingJobVO(String id,String status,String phase,int completedUnits,int totalUnits,String message,Instant startedAt,Instant finishedAt,RunResultVO result,String error,CoverageVO coverage){this.id=id;this.status=status;this.phase=phase;this.completedUnits=completedUnits;this.totalUnits=totalUnits;this.message=message;this.startedAt=startedAt;this.finishedAt=finishedAt;this.result=result;this.error=error;this.coverage=coverage;}
     }
 }

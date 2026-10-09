@@ -86,7 +86,11 @@ public final class VettingCorpus {
         if (SourceDocument.CATEGORY_STANDARD_TEMPLATE.equals(d.getCategory())) return "standard";
         String filename = nvl(d.getFileName()).toLowerCase(Locale.ROOT);
         if (SourceDocument.CATEGORY_PROJECT_INPUT.equals(d.getCategory())
-                || filename.endsWith(".msg") || filename.endsWith(".eml") || filename.endsWith(".emlx")) return "project_fact";
+                || filename.endsWith(".msg") || filename.endsWith(".eml") || filename.endsWith(".emlx")
+                || filename.matches(".*(?:^|[ _-])from[ _-].*(?:^|[ _-])to[ _-].*\\.(?:docx?|pdf|txt)$")
+                || filename.matches(".*(?:[ _-]email[ _-]|[ _-]minutes[ _-]).*\\.(?:docx?|pdf|txt)$")) return "project_fact";
+        // The case's CoC is its contract-specific adoption sheet, not the GCC standard text.
+        if (filename.matches(".*(?:^|[ _-])coc(?:[ ._-]|$).*") && SourceDocument.CATEGORY_VETTING_PACKAGE.equals(d.getCategory())) return "tender";
         if (Arrays.asList("GCC", "SL").contains(nvl(d.getFileKey()).toUpperCase(Locale.ROOT))) return "standard";
         return "tender";
     }

@@ -14,7 +14,8 @@ const setup = new Function('deps', `
   ${compiled}
   return { job, files, findings, running, exportDisabled, pollingPaused, selectedFinding, evidenceItems, reportFormat,
     uploadRole, uploadPackage, runVetting, restoreJob, retryPolling, openFinding, closeDrawer, updateStatus, exportReport,
-    reviewDraft, reviewDirty, reviewSaving, reviewFailed, hasUnsavedReview, saveReview, discardReview };
+    reviewDraft, reviewDirty, reviewSaving, reviewFailed, hasUnsavedReview, saveReview, discardReview,
+    uploadDocumentScope, checklist, checklistDirty, openChecklist, saveCheck, checkDirty, restoreCheck };
 `)
 
 const metrics = { total: 1, reference: 1, conflict: 0, language: 0, risk: 0, crossFile: 0 }
@@ -35,6 +36,11 @@ function harness(overrides = {}) {
     updateStatus: async (_project, code, status) => finding(code, status),
     updateReview: async (_project, code, review) => ({ ...finding(code), ...review, reviewUpdatedAt: '2026-10-02T03:00:00Z' }),
     uploadPackage: async (...args) => { uploads.push(args); return { messages: [] } },
+    checklist: async (_project, runId) => ({ runId, runSnapshotSha256: 'snapshot', writable: true, items: [
+      { id: 'APP-I-001', clause: 'PRE.B2', status: 'unchecked', remarks: '' },
+      { id: 'APP-I-002', clause: 'PRE.B3', status: 'unchecked', remarks: '' }
+    ] }),
+    saveChecklist: async (_project, runId, runSnapshotSha256, items) => ({ runId, runSnapshotSha256, writable: true, items }),
     exportReport: async (...args) => downloads.push(args), ...overrides
   }
   const scope = vue.effectScope()
@@ -84,6 +90,10 @@ function harness(overrides = {}) {
   assert.equal(h.view.exportDisabled.value, false, 'completed zero-finding task permits export')
   await h.view.exportReport()
   assert.equal(h.downloads.length, 1)
+  h.view.job.value.sourceSetStale = true
+  assert.equal(h.view.exportDisabled.value, true, 'restoring a completed old source run does not re-enable current report export')
+  await h.view.exportReport()
+  assert.equal(h.downloads.length, 1)
   h.view.job.value = { ...active(), status: 'FAILED' }
   assert.equal(h.view.exportDisabled.value, true, 'failed latest task cannot export a previous report')
   h.dispose()
@@ -96,11 +106,38 @@ function harness(overrides = {}) {
   await h.view.uploadPackage({ target: { files } })
   assert.equal(h.uploads[0][2], undefined, 'auto role keeps server inference available')
   h.view.uploadRole.value = 'standard'
+  h.view.uploadDocumentScope.value = 'example'
   await h.view.uploadPackage({ target: { files } })
   assert.equal(h.uploads[1][2], 'standard', 'explicit upload purpose reaches the API')
+  assert.equal(h.uploads[1][3], 'example', 'scope exclusion is independent of source role')
   h.store.activeProjectId = 'B'
   await settle()
   assert.equal(h.view.uploadRole.value, 'auto', 'project change resets the next upload purpose')
+  assert.equal(h.view.uploadDocumentScope.value, 'auto')
+  h.dispose()
+}
+
+{
+  const h = harness(); await h.mount()
+  h.view.job.value = completed(); await settle()
+  await h.view.openChecklist({ target: { open: true } })
+  const [first, second] = h.view.checklist.value.items
+  first.status = 'fulfilled'; second.remarks = 'Separate pending check'
+  assert.equal(h.view.checklistDirty.value, true)
+  let discardedRunAttempts = 0
+  h.api.startRun = async () => { discardedRunAttempts++; return active('should-not-start') }
+  await h.view.runVetting()
+  assert.equal(discardedRunAttempts, 0, 'a new run cannot discard unsaved manual checklist judgments')
+  await h.view.uploadPackage({ target: { files: [{ name: 'replacement.docx' }] } })
+  assert.equal(h.uploads.length, 0, 'a source replacement cannot discard unsaved manual judgments')
+  assert.equal(h.view.exportDisabled.value, true, 'unsaved checklist must not silently disappear from report')
+  await h.view.saveCheck(first)
+  assert.equal(h.view.checkDirty(first), false)
+  assert.equal(h.view.checkDirty(second), true, 'saving a row preserves another row draft')
+  h.view.restoreCheck(second)
+  assert.equal(h.view.exportDisabled.value, false)
+  h.view.job.value = completed('new-run'); await settle()
+  assert.equal(h.view.checklist.value, null, 'old human checks do not cross into a new run')
   h.dispose()
 }
 

@@ -1,6 +1,6 @@
 # ConSense web — current source snapshot
 
-This frontend is exported from source commit `629ef98d197cd83e4e7128e468b292492e4443f2` into a new repository without the source repository's old Git history. Application source, business rules, model-control tests, dependency manifest and lockfile are unchanged. Only the historical scope-check baseline lookup has been made portable; the exact old baseline is included as a test fixture.
+This frontend is exported from source commit `629ef98d197cd83e4e7128e468b292492e4443f2` into a new repository without the source repository's old Git history. That initial source was subsequently updated by remote drafting PRs and the Oct 9 local vetting/advice integration. The npm lockfile was repaired for its jsdom/canvas optional peer dependency and tested with fresh npm ci. See repository-root SOURCE-INTEGRATION.json for the current sources and verification. Only the historical scope-check baseline lookup has been made portable; the exact old baseline is included as a test fixture.
 
 ## Install, start and build
 
@@ -31,9 +31,14 @@ Get-ChildItem -LiteralPath ./tests -Filter '*.test.cjs' | ForEach-Object {
 node scripts/test-drafting-step3-scope.mjs
 node scripts/test-drafting-step3-workspace.mjs
 node scripts/test-vetting-view.mjs
+node scripts/test-advice-scope-view.mjs
 ```
 
 `tests/fixtures/template-reading.synthetic.docx` is authored synthetic test data. `tests/fixtures/drafting-step12-baseline.vue` is a byte-for-byte copy of `src/views/DraftingView.vue` at original source revision `aaa0e928`. It exists solely to reproduce the original first/second-step template scope check without importing old Git history; it is not a new business rule or a competition document. The scope script reads this relative fixture instead of running `git show` on an unavailable old commit.
+
+## Current checks
+
+On 2026-10-09, fresh npm ci, typecheck and build passed. CommonJS checks reported 36 passed, zero failed and one skipped actual-template navigation test; all four view/workspace scripts passed. The optional actual-document reading branch and OCR diagnostics replay require excluded external evidence and were not run.
 
 ## External diagnostics fixture and historical records
 

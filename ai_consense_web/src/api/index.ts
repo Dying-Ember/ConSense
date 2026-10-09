@@ -1,6 +1,10 @@
 import { api } from './client'
 import type {
   AskResponse,
+  AdviceSourceDocument,
+  DocumentScope,
+  VettingChecklist,
+  VettingChecklistItem,
   ChatMessage,
   DraftDocument,
   DraftDocumentBindings,
@@ -125,8 +129,12 @@ export const draftingApi = {
 
 export const vettingApi = {
   files: (projectId: string) => api.get<VettingFile[]>(`/vetting/${projectId}/files`),
-  uploadPackage: (projectId: string, files: File[], sourceRole?: VettingSourceRole) =>
-    api.upload<UploadResult>(`/vetting/${projectId}/package/upload${sourceRole ? `?sourceRole=${encodeURIComponent(sourceRole)}` : ''}`, files),
+  uploadPackage: (projectId: string, files: File[], sourceRole?: VettingSourceRole, documentScope?: DocumentScope) => {
+    const params = new URLSearchParams()
+    if (sourceRole) params.set('sourceRole', sourceRole)
+    if (documentScope && documentScope !== 'auto') params.set('documentScope', documentScope)
+    return api.upload<UploadResult>(`/vetting/${projectId}/package/upload${params.size ? `?${params}` : ''}`, files)
+  },
   run: (projectId: string, lang: string) =>
     api.post<VettingRunResult>(`/vetting/${projectId}/run?lang=${encodeURIComponent(lang)}`),
   startRun: (projectId: string, lang: string, llmSelection?: LlmSelection) =>
@@ -153,6 +161,10 @@ export const vettingApi = {
     api.put<Finding>(`/vetting/${encodeURIComponent(projectId)}/findings/${encodeURIComponent(code)}/review`, review),
   evidence: (projectId: string, code: string) =>
     api.get<EvidenceBundle>(`/vetting/${projectId}/findings/${code}/evidence`),
+  checklist: (projectId: string, runId: string) =>
+    api.get<VettingChecklist>(`/vetting/${encodeURIComponent(projectId)}/runs/${encodeURIComponent(runId)}/checklist`),
+  saveChecklist: (projectId: string, runId: string, runSnapshotSha256: string, items: Pick<VettingChecklistItem, 'id' | 'status' | 'remarks'>[]) =>
+    api.put<VettingChecklist>(`/vetting/${encodeURIComponent(projectId)}/runs/${encodeURIComponent(runId)}/checklist`, { runSnapshotSha256, items }),
   exportReport: (projectId: string, lang: string, fallbackName: string, format: VettingReportFormat = 'pdf') =>
     api.download(`/vetting/${projectId}/report.${format}?lang=${encodeURIComponent(lang)}`, fallbackName)
 }
@@ -160,12 +172,14 @@ export const vettingApi = {
 /* ------------------------------------------------------------ 咨询 */
 
 export const adviceApi = {
+  sources: (projectId: string, scope: string) =>
+    api.get<AdviceSourceDocument[]>(`/advice/${encodeURIComponent(projectId)}/sources?scope=${encodeURIComponent(scope)}`),
   rebuildIndex: (projectId: string) => api.post<IndexStatus>(`/advice/${projectId}/index/rebuild`),
   indexStatus: (projectId: string) => api.get<IndexStatus>(`/advice/${projectId}/index/status`),
   messages: (projectId: string) => api.get<ChatMessage[]>(`/advice/${projectId}/messages`),
   clearMessages: (projectId: string) => api.delete<void>(`/advice/${projectId}/messages`),
-  ask: (projectId: string, question: string, scope: string, llmSelection?: LlmSelection) =>
-    api.post<AskResponse>(`/advice/${projectId}/ask`, { question, scope }, { llmSelection }),
+  ask: (projectId: string, question: string, scope: string, llmSelection?: LlmSelection, replyToMessageId?: number) =>
+    api.post<AskResponse>(`/advice/${projectId}/ask`, { question, scope, replyToMessageId }, { llmSelection }),
   quickQuestions: (projectId: string) => api.get<QuickQuestion[]>(`/advice/${projectId}/quick-questions`)
 }
 

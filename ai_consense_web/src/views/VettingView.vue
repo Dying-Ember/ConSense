@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { vettingApi } from '@/api'
-import type { EvidenceBundle, Finding, FindingEvidence, VettingFile, VettingJob, VettingMetrics, VettingReportFormat, VettingSemanticTopic, VettingSourceRole } from '@/api/types'
+import type { EvidenceBundle, Finding, FindingEvidence, VettingFile, VettingJob, VettingMetrics, VettingReportFormat, VettingSemanticTopic, VettingSourceRole, DocumentScope, VettingChecklist, VettingChecklistItem } from '@/api/types'
 import { useAppStore } from '@/stores/app'
 import { useLocalized } from '@/composables/useLocalized'
 import AppIcon from '@/components/AppIcon.vue'
@@ -58,6 +58,13 @@ const exporting = ref(false)
 const pollingPaused = ref(false)
 const reportFormat = ref<VettingReportFormat>('pdf')
 const uploadRole = ref<'auto' | VettingSourceRole>('auto')
+const uploadDocumentScope = ref<DocumentScope>('auto')
+const checklist = ref<VettingChecklist | null>(null)
+const checklistBaseline = ref<VettingChecklistItem[]>([])
+const checklistLoading = ref(false)
+const checklistSaving = ref<string | null>(null)
+let checklistSequence = 0
+const checklistDirty = computed(() => checklist.value !== null && JSON.stringify(checklist.value.items) !== JSON.stringify(checklistBaseline.value))
 const loading = ref(false)
 const selectedDetail = ref<Finding | null>(null)
 const evidenceLoading = ref(false)
@@ -117,7 +124,7 @@ const selectedFinding = computed(() => selectedDetail.value)
 const running = computed(() => starting.value || isActiveJob(job.value))
 const jobModelIdentity = computed(() => job.value?.modelIdentity ?? job.value?.result?.modelIdentity)
 const recordedJobModel = computed(() => jobModelIdentity.value?.model || job.value?.result?.model)
-const exportDisabled = computed(() => running.value || uploading.value || exporting.value || statusSaving.value || reviewSaving.value || hasUnsavedReview.value || job.value?.status !== 'COMPLETED')
+const exportDisabled = computed(() => running.value || uploading.value || exporting.value || statusSaving.value || reviewSaving.value || hasUnsavedReview.value || checklistDirty.value || checklistSaving.value !== null || job.value?.sourceSetStale === true || job.value?.status !== 'COMPLETED')
 const coverage = computed(() => job.value?.coverage ?? job.value?.result?.coverage ?? null)
 const jobPercent = computed(() => {
   if (!job.value?.totalUnits) return null
@@ -289,6 +296,12 @@ watch(projectId, () => {
   starting.value = false
   uploading.value = false
   uploadRole.value = 'auto'
+  uploadDocumentScope.value = 'auto'
+  checklist.value = null
+  checklistBaseline.value = []
+  checklistSequence++
+  checklistSaving.value = null
+  checklistLoading.value = false
   statusSaving.value = false
   reviewSaving.value = false
   reviewFailed.value = false
@@ -452,7 +465,7 @@ async function saveReview() {
 }
 
 async function runVetting() {
-  if (running.value || uploading.value || reviewSaving.value || statusSaving.value || hasUnsavedReview.value || !projectId.value) return
+  if (running.value || uploading.value || reviewSaving.value || statusSaving.value || hasUnsavedReview.value || checklistDirty.value || checklistSaving.value !== null || !projectId.value) return
   const llmSelection = store.captureLlmSelection()
   const id = projectId.value
   const epoch = viewEpoch
@@ -468,6 +481,10 @@ async function runVetting() {
 
 async function uploadPackage(event: Event) {
   const selected = Array.from((event.target as HTMLInputElement).files ?? [])
+  if (hasUnsavedReview.value || reviewSaving.value || checklistDirty.value || checklistSaving.value !== null) {
+    (event.target as HTMLInputElement).value = ''
+    return
+  }
   if (!selected.length || running.value || uploading.value) return
   const id = projectId.value
   const epoch = viewEpoch
@@ -476,7 +493,7 @@ async function uploadPackage(event: Event) {
   uploading.value = true
   store.setBusy(t('common.loading'))
   try {
-    const result = await vettingApi.uploadPackage(id, selected, sourceRole)
+    const result = await vettingApi.uploadPackage(id, selected, sourceRole, uploadDocumentScope.value)
     if (epoch !== viewEpoch || id !== projectId.value) return
     store.notify(result.messages.join('\n') || t('common.done'), 5000)
     await reload()
@@ -503,6 +520,59 @@ async function exportReport() {
     }
   } finally {
     exporting.value = false
+  }
+}
+
+watch(() => job.value?.id, () => {
+  checklistSequence++
+  checklist.value = null
+  checklistBaseline.value = []
+  checklistLoading.value = false
+  checklistSaving.value = null
+})
+
+async function openChecklist(event: Event) {
+  if (!(event.target as HTMLDetailsElement).open || checklist.value || job.value?.status !== 'COMPLETED') return
+  const id = projectId.value, runId = job.value.id, epoch = viewEpoch, sequence = ++checklistSequence
+  checklistLoading.value = true
+  try {
+    const value = await vettingApi.checklist(id, runId)
+    if (disposed || epoch !== viewEpoch || runId !== job.value?.id || sequence !== checklistSequence) return
+    checklist.value = value
+    checklistBaseline.value = structuredClone(value.items)
+  } finally {
+    if (epoch === viewEpoch && sequence === checklistSequence) checklistLoading.value = false
+  }
+}
+
+function checkDirty(item: VettingChecklistItem) {
+  const saved = checklistBaseline.value.find(row => row.id === item.id)
+  return !saved || item.status !== saved.status || item.remarks !== saved.remarks
+}
+
+function restoreCheck(item: VettingChecklistItem) {
+  const saved = checklistBaseline.value.find(row => row.id === item.id)
+  if (saved) Object.assign(item, saved)
+}
+
+async function saveCheck(item: VettingChecklistItem) {
+  if (!checklist.value?.writable || checklistSaving.value || !checkDirty(item)) return
+  const id = projectId.value, runId = checklist.value.runId, epoch = viewEpoch
+  const submitted = { id: item.id, status: item.status, remarks: item.remarks }
+  checklistSaving.value = item.id
+  try {
+    const saved = await vettingApi.saveChecklist(id, runId, checklist.value.runSnapshotSha256, [submitted])
+    if (disposed || epoch !== viewEpoch || runId !== job.value?.id) return
+    const savedRow = saved.items.find(row => row.id === item.id)
+    if (savedRow) {
+      const original = checklistBaseline.value.find(row => row.id === item.id)
+      if (original) Object.assign(original, savedRow)
+      // A further edit while the request was in flight remains unsaved.
+      if (item.status === submitted.status && item.remarks === submitted.remarks) Object.assign(item, savedRow)
+    }
+    store.notify(t('vetting.checklist.saved'))
+  } finally {
+    if (epoch === viewEpoch) checklistSaving.value = null
   }
 }
 
@@ -547,10 +617,16 @@ function tagClass(group: string) {
             <option value="package_manifest">{{ t('vetting.uploadRole.package_manifest') }}</option>
           </select>
         </label>
-        <button class="btn" type="button" :disabled="running || uploading" @click="packageInput?.click()">
+        <label class="upload-role">
+          <span>{{ t('vetting.documentScope.label') }}</span>
+          <select v-model="uploadDocumentScope" :disabled="running || uploading">
+            <option v-for="value in ['auto', 'package', 'works_pss', 'pricing', 'example']" :key="value" :value="value">{{ t(`vetting.documentScope.${value}`) }}</option>
+          </select>
+        </label>
+        <button class="btn" type="button" :disabled="running || uploading || hasUnsavedReview || reviewSaving || checklistDirty || checklistSaving !== null" @click="packageInput?.click()">
           <AppIcon name="upload" :size="15" />{{ t('vetting.actions.upload') }}
         </button>
-        <button class="btn primary" type="button" :disabled="running || uploading || reviewSaving || statusSaving || hasUnsavedReview || !files.some(file => file.parsed)" @click="runVetting">
+        <button class="btn primary" type="button" :disabled="running || uploading || reviewSaving || statusSaving || hasUnsavedReview || checklistDirty || checklistSaving !== null || !files.some(file => file.parsed)" @click="runVetting">
           <AppIcon name="play" :size="15" />
           {{ running ? t('vetting.actions.running') : t('vetting.actions.run') }}
         </button>
@@ -566,6 +642,30 @@ function tagClass(group: string) {
     </div>
 
     <p v-if="hasUnsavedReview" class="warning-note" role="status">{{ t('vetting.review.unsavedExport') }} {{ unsavedReviewCodes.join(' · ') }}</p>
+    <p v-if="checklistDirty" class="warning-note" role="status">{{ t('vetting.checklist.dirty') }}</p>
+    <p v-if="job?.sourceSetStale" class="warning-note" role="status">{{ t('vetting.sourceSetStale') }}</p>
+
+    <details v-if="job?.status === 'COMPLETED'" class="surface checklist-panel section-gap" @toggle="openChecklist">
+      <summary>{{ t('vetting.checklist.title') }}</summary>
+      <p class="muted small">{{ t('vetting.checklist.note') }}</p>
+      <p v-if="checklistLoading">{{ t('common.loading') }}</p>
+      <div v-if="checklist" class="table-wrap checklist-table">
+        <table>
+          <thead><tr><th>PSS Clause</th><th>Description</th><th>{{ t('common.status') }}</th><th>{{ t('vetting.checklist.remarks') }}</th></tr></thead>
+          <tbody><tr v-for="item in checklist.items" :key="item.id">
+            <td>{{ item.clause }}<div class="muted small">{{ item.section }}</div></td>
+            <td>{{ item.description }}<p v-if="item.scopeNote" class="warning-note small">{{ item.scopeNoteText ? pick(item.scopeNoteText) : item.scopeNote }}</p></td>
+            <td><select v-model="item.status" :disabled="!checklist.writable || checklistSaving === item.id">
+              <option v-for="status in ['unchecked', 'fulfilled', 'not_applicable']" :key="status" :value="status">{{ t(`vetting.checklist.${status}`) }}</option>
+            </select></td>
+            <td><textarea v-model="item.remarks" :aria-label="`${item.clause} ${t('vetting.checklist.remarks')}`" maxlength="4000" :disabled="!checklist.writable || checklistSaving === item.id" />
+              <div class="row"><button class="btn" type="button" :disabled="!checklist.writable || !!checklistSaving || !checkDirty(item)" @click="saveCheck(item)">{{ t('vetting.checklist.save') }}</button>
+              <button v-if="checkDirty(item)" class="btn ghost" type="button" :disabled="checklistSaving === item.id" @click="restoreCheck(item)">{{ t('vetting.checklist.reset') }}</button></div>
+            </td>
+          </tr></tbody>
+        </table>
+      </div>
+    </details>
 
     <div v-if="job || pollingPaused" class="surface section-gap vetting-run-panel" aria-live="polite">
       <div class="surface-body">
@@ -1042,6 +1142,12 @@ function tagClass(group: string) {
 .report-format { width: auto; min-width: 112px; }
 .upload-role { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
 .upload-role select { width: auto; min-width: 150px; }
+.checklist-panel { padding: 16px; }
+.checklist-panel summary { cursor: pointer; font-weight: 700; }
+.checklist-table { max-height: 520px; overflow: auto; }
+.checklist-table th { position: sticky; top: 0; background: var(--surface, #fff); z-index: 1; }
+.checklist-table td:nth-child(2) { min-width: 280px; }
+.checklist-table textarea { min-width: 260px; min-height: 70px; }
 .vetting-run-panel p { margin: 10px 0 0; }
 .vetting-progress { width: 100%; height: 9px; margin-top: 10px; accent-color: var(--accent); }
 .coverage-panel summary { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; padding: 14px 18px; cursor: pointer; }

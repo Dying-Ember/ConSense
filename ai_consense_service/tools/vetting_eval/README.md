@@ -1,3 +1,5 @@
+> Historical development and evaluation notes. Old 3B reviewer and port examples below describe earlier runs. Current OCR/embedding/rerank decisions are in `../../docs/HANDOFF-ocr-embedding-rerank-20261008.md`; model quality remains unaccepted. Source manifests are now under `../../tests/external-fixtures/manifests/`, and original documents remain external.
+
 # Local vetting validation and runtime
 
 These tools provide an RTX 4060 8 GB baseline for parsing, OCR, retrieval and reranking,
@@ -14,13 +16,13 @@ actual execution and independent source-semantic audits below.
 
 | Component | Pilot implementation | Address or data |
 | --- | --- | --- |
-| OCR | RapidOCR 3.9.2, CPU ONNX Runtime | `POST htt<LOCAL_PATH_REDACTED>` |
+| OCR | RapidOCR 3.9.2, CPU ONNX Runtime | `POST http://127.0.0.1:8868/ocr` |
 | Embedding | BGE-M3, CUDA FP16, 1024 dimensions | Python model service |
 | Hybrid retrieval | Qdrant Python local mode, BM25 and RRF | Workspace `tmp/vetting_server/` |
-| Reranking | BGE reranker v2 M3, CUDA FP16 | `POST htt<LOCAL_PATH_REDACTED>` |
-| Review model | Ollama `qwen2.5:3b` | `htt<LOCAL_PATH_REDACTED>` |
-| Java API | Profiles `h2,vetting-local` | `htt<LOCAL_PATH_REDACTED>` |
-| Web UI | Vue/Vite with API proxy | `htt<LOCAL_PATH_REDACTED>` |
+| Reranking | BGE reranker v2 M3, CUDA FP16 | `POST http://127.0.0.1:8868/retrieve` |
+| Review model | Ollama `qwen2.5:3b` | `http://127.0.0.1:11434` |
+| Java API | Profiles `h2,vetting-local` | `http://127.0.0.1:18080/api` |
+| Web UI | Vue/Vite with API proxy | `http://localhost:5173/#/vetting` |
 
 The CLI stages load embedding and reranking in separate processes. The HTTP model
 service loads lazily and keeps models resident; it serializes model calls and Qdrant
@@ -68,9 +70,9 @@ configuration, not a run completed here:
 ```powershell
 # First establish the 512-token / embedding-batch-two baseline in a new --out.
 # Only after that comparison, change the embedding cap to 1024; reranker stays 512.
-$taskPython = '<LOCAL_PATH_REDACTED>
-$taskEval = '<LOCAL_PATH_REDACTED>
-& $taskPython $taskEval --offline --embed-max-tokens 1024 --embed-batch-size 2 --rerank-max-tokens 512 --rerank-batch-size 4 --out '<LOCAL_PATH_REDACTED>
+$taskPython = 'C:\Coding\ConSense\tmp\vetting_eval_env\Scripts\python.exe'
+$taskEval = 'C:\Coding\ConSense\ai_consense_service\tools\vetting_eval\eval.py'
+& $taskPython $taskEval --offline --embed-max-tokens 1024 --embed-batch-size 2 --rerank-max-tokens 512 --rerank-batch-size 4 --out 'C:\Coding\ConSense\tmp\planned_embed_1024_batch2' index
 ```
 
 CLI index metadata and retrieval reports include independent runtime identities.
@@ -545,17 +547,17 @@ application deployment or H800 result is established.
 
 ## Environment and caches
 
-Commands below run from `<LOCAL_PATH_REDACTED>`. Use Python 3.12 and
+Commands below run from `C:\Coding\ConSense\ai_consense_service`. Use Python 3.12 and
 a compatible NVIDIA driver. The tested host has RTX 4060 Laptop GPU 8188 MiB VRAM,
 32 GB RAM and 24 logical CPU threads. Allow several tens of GB for the environment,
 downloads and caches, and keep them outside Git.
 
 ```powershell
 python -m venv ..\tmp\vetting_eval_env
-$taskPython = '<LOCAL_PATH_REDACTED>
-& $taskPython -m pip install torch==2.7.1 --index-url http<LOCAL_PATH_REDACTED>
+$taskPython = 'C:\Coding\ConSense\tmp\vetting_eval_env\Scripts\python.exe'
+& $taskPython -m pip install torch==2.7.1 --index-url https://download.pytorch.org/whl/cu118
 & $taskPython -m pip install -r tools/vetting_eval/requirements.txt
-$env:HF_HOME = '<LOCAL_PATH_REDACTED>
+$env:HF_HOME = 'C:\Coding\ConSense\tmp\vetting_models'
 $env:HF_HUB_DISABLE_XET = '1'
 $env:HF_HUB_DOWNLOAD_TIMEOUT = '120'
 $env:PYTHONIOENCODING = 'utf-8'
@@ -581,10 +583,10 @@ Microsoft-signed DLLs bundled with the Codex Poppler runtime without changing sy
 files. An equivalent trusted directory may be set on another Windows host:
 
 ```powershell
-$env:CONSENSE_VC_RUNTIME_DIR = '<LOCAL_PATH_REDACTED>
+$env:CONSENSE_VC_RUNTIME_DIR = 'C:\Users\Murph\.cache\codex-runtimes\codex-primary-runtime\dependencies\native\poppler\Library\bin'
 ```
 
-Alternatively use the [official runtime required by ONNX Runtime](http<LOCAL_PATH_REDACTED>
+Alternatively use the [official runtime required by ONNX Runtime](https://onnxruntime.ai/docs/install/).
 Linux does not use this Windows override.
 
 ## Independent benchmark
@@ -595,7 +597,7 @@ comments, checklist and questions/answers are excluded. `vetting_cases.json` con
 evaluation labels and is never uploaded as a contract source.
 
 ```powershell
-$taskEval = '<LOCAL_PATH_REDACTED>
+$taskEval = 'C:\Coding\ConSense\ai_consense_service\tools\vetting_eval\eval.py'
 & $taskPython $taskEval probe
 & $taskPython $taskEval ocr
 & $taskPython $taskEval parse
@@ -606,7 +608,7 @@ $taskEval = '<LOCAL_PATH_REDACTED>
 Global options precede the stage name:
 
 ```powershell
-& $taskPython $taskEval --source-root '<LOCAL_PATH_REDACTED>
+& $taskPython $taskEval --source-root 'D:\reference-documents' --offline --batch-size 2 --rerank-batch 2 evaluate
 ```
 
 `ocr` processes five selected scan pages. `parse` combines native text and those cached
@@ -638,7 +640,7 @@ In a dedicated terminal with the Python/cache variables above:
 $env:CONSENSE_MODEL_DEVICE = 'cuda'
 $env:CONSENSE_MODEL_OFFLINE = '1'
 $env:HF_HUB_OFFLINE = '1'
-$env:CONSENSE_RETRIEVAL_DATA = '<LOCAL_PATH_REDACTED>
+$env:CONSENSE_RETRIEVAL_DATA = 'C:\Coding\ConSense\tmp\vetting_server'
 & $taskPython tools/vetting_eval/server.py --host 127.0.0.1 --port 8868
 ```
 
@@ -665,11 +667,11 @@ behavior, so it is not the local default.
 
 ```powershell
 $env:OLLAMA_HOST = '127.0.0.1:11434'
-$env:OLLAMA_MODELS = '<LOCAL_PATH_REDACTED>
+$env:OLLAMA_MODELS = 'C:\Coding\ConSense\tmp\ollama_models'
 $env:OLLAMA_NO_CLOUD = '1'
 $env:OLLAMA_NUM_PARALLEL = '1'
 $env:OLLAMA_KEEP_ALIVE = '0'
-& '<LOCAL_PATH_REDACTED>
+& 'C:\Coding\ConSense\tmp\ollama_portable\ollama.exe' serve
 ```
 
 In another terminal run `ollama pull qwen2.5:3b` with the same host/model path.
@@ -682,7 +684,7 @@ Package tests run before the executable jar is produced:
 
 ```powershell
 mvn --no-transfer-progress package
-$taskRuntime = '<LOCAL_PATH_REDACTED>
+$taskRuntime = 'C:\Coding\ConSense\tmp\vetting_runtime'
 New-Item -ItemType Directory -Force -Path $taskRuntime | Out-Null
 $taskJar = Join-Path $taskRuntime ('consense-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '.jar')
 Copy-Item -LiteralPath 'target\consense-service-1.0.0.jar' -Destination $taskJar
@@ -699,7 +701,7 @@ From the web repository, use a separate terminal:
 
 ```powershell
 pnpm install --frozen-lockfile
-$env:CONSENSE_API_TARGET = 'htt<LOCAL_PATH_REDACTED>
+$env:CONSENSE_API_TARGET = 'http://127.0.0.1:18080'
 pnpm dev
 ```
 
@@ -751,9 +753,9 @@ persisted task, independently checks located quotes, downloads all report format
 exercises a human status update. Optional rerun verifies stable identity/manual status.
 
 ```powershell
-& $taskPython tools/vetting_eval/integration.py --base-url htt<LOCAL_PATH_REDACTED>
-& $taskPython tools/vetting_eval/integration.py --base-url htt<LOCAL_PATH_REDACTED>
-& $taskPython tools/vetting_eval/integration.py --base-url htt<LOCAL_PATH_REDACTED>
+& $taskPython tools/vetting_eval/integration.py --base-url http://127.0.0.1:18080
+& $taskPython tools/vetting_eval/integration.py --base-url http://127.0.0.1:18080 --rerun
+& $taskPython tools/vetting_eval/integration.py --base-url http://127.0.0.1:18080 --documents-manifest tests/external-fixtures/manifests/case_sources.json
 ```
 
 `--documents-manifest <json>` broadens the explicit source list; `--source-root` locates
@@ -771,7 +773,7 @@ JSON must preserve the actual current finding codes/statuses. See `--help` for o
 Large original packages can separate upload/parsing from review:
 
 ```powershell
-& $taskPython tools/vetting_eval/integration.py --upload-only --documents-manifest tools/vetting_eval/full_case_sources.json --project-id <new-project-id> --out ../tmp/vetting_full_case
+& $taskPython tools/vetting_eval/integration.py --upload-only --documents-manifest tests/external-fixtures/manifests/full_case_sources.json --project-id <new-project-id> --out ../tmp/vetting_full_case
 & $taskPython tools/vetting_eval/integration.py --review-existing --project-id <same-project-id> --out ../tmp/vetting_full_case
 ```
 
@@ -925,7 +927,7 @@ were present in submitted contexts, showing a model-judgment limitation as well 
 retrieval/context limitations in other topics.
 
 For a model control, the official
-[qwen2.5:7b-instruct-q4_K_M tag](http<LOCAL_PATH_REDACTED>
+[qwen2.5:7b-instruct-q4_K_M tag](https://ollama.com/library/qwen2.5:7b-instruct-q4_K_M)
 was cached separately. Three unchanged production inputs took 23.98, 21.66 and 17.50
 seconds. Ollama reported 100% GPU placement at context 8192 with BGE/reranking still
 resident; observed total GPU memory reached 7919/8188 MiB in the payment probe. Responses

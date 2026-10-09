@@ -49,6 +49,31 @@ public class ChatMessage {
     @Column(name = "model_identity_json", columnDefinition = "LONGTEXT")
     private String modelIdentityJson;
 
+    /** Immutable submitted evidence snapshot; historical answers never relink to current text. */
+    @Lob @Column(name = "sources_json", columnDefinition = "LONGTEXT")
+    private String sourcesJson;
+
+    @Lob @Column(name = "clarifications_json", columnDefinition = "LONGTEXT")
+    private String clarificationsJson;
+
+    @Column(name = "source_scope", length = 32)
+    private String sourceScope;
+
+    @Column(name = "basis_scope", length = 32)
+    private String basisScope;
+
+    @Column(name = "reply_to_message_id")
+    private Long replyToMessageId;
+
+    @Column(name = "question_message_id")
+    private Long questionMessageId;
+
+    @Lob @Column(name = "original_question", columnDefinition = "LONGTEXT")
+    private String originalQuestion;
+
+    @Lob @Column(name = "user_background_json", columnDefinition = "LONGTEXT")
+    private String userBackgroundJson;
+
     @Column(name = "created_at", nullable = false)
     private Instant createdAt = Instant.now();
 }
