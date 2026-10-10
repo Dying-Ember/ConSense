@@ -547,12 +547,13 @@ public class DocumentParser {
         block.setWordNumbering(text.numbering);
         block.setWordSymbols(text.symbols);
         block.setWordWarnings(text.warnings);
+        block.setWordCells(text.cells);
         return block;
     }
 
     private boolean hasContent(DocumentBlock block) {
         return !JsonUtils.isBlankText(block.getOriginalText()) || !block.getWordNumbering().isEmpty()
-                || !block.getWordSymbols().isEmpty() || !block.getWordWarnings().isEmpty();
+                || !block.getWordSymbols().isEmpty() || !block.getWordWarnings().isEmpty() || !block.getWordCells().isEmpty();
     }
 
     /** Traverse OOXML so deleted runs do not enter the effective contract text. */
@@ -561,6 +562,30 @@ public class DocumentParser {
         String name = node.getLocalName();
         boolean isDeleted = deleted || "del".equals(name) || "moveFrom".equals(name);
         boolean isStruck = struck;
+        if ("tc".equals(name)) {
+            WordText cell = new WordText(); int childIndex = 0;
+            for (Node child = node.getFirstChild(); child != null; child = child.getNextSibling())
+                collectWordText(child, isDeleted, isStruck, cell, numbering, location + "/node/" + childIndex++);
+            DocumentBlock.WordCell metadata = new DocumentBlock.WordCell();
+            metadata.setLocation(location); metadata.setTableLocation(wordDomLocation(node.getParentNode().getParentNode()));
+            metadata.setRowIndex(previousWordSiblings(node.getParentNode(), "tr"));
+            metadata.setCellIndex(previousWordSiblings(node, "tc"));
+            metadata.setColumnSpan(wordGridSpan(node)); metadata.setGridColumn(wordGridColumn(node));
+            metadata.setVerticalMerge(wordVerticalMerge(node));
+            metadata.setHorizontalMerge(wordMerge(node, "hMerge"));
+            metadata.setGridSpanRaw(wordValue(wordChild(wordChild(node, "tcPr"), "gridSpan")));
+            metadata.setGridBeforeRaw(wordValue(wordChild(wordChild(node.getParentNode(), "trPr"), "gridBefore")));
+            metadata.setRowSpan("restart".equals(metadata.getVerticalMerge()) ? wordRowSpan(node)
+                    : "continue".equals(metadata.getVerticalMerge()) ? null : 1);
+            boolean unresolved = metadata.getColumnSpan() == null || metadata.getGridColumn() == null
+                    || "unknown".equals(metadata.getVerticalMerge()) || !"none".equals(metadata.getHorizontalMerge());
+            metadata.setTopologyStatus(unresolved ? "native_ooxml_topology_unresolved" : "native_ooxml_unrendered");
+            if (unresolved) { metadata.getLimitations().add("Malformed or legacy merge topology retained without guessing rendered cell membership.");
+                cell.warnings.add("Unresolved native Word table topology at " + location); }
+            metadata.setText(normalize(cell.effective.toString())); metadata.setOriginalText(normalize(cell.original.toString()));
+            metadata.setDeletedText(normalize(cell.deleted.toString())); metadata.setStrikeText(normalize(cell.struck.toString()));
+            cell.cells.add(0, metadata); out.add(cell); return;
+        }
         if ("txbxContent".equals(name)) {
             numbering = numbering.newStory();
         }
@@ -654,6 +679,63 @@ public class DocumentParser {
         if (!deleted && !struck) out.effective.append(text);
     }
 
+    private static Node wordChild(Node node, String name) {
+        if (node == null) return null;
+        for (Node child = node.getFirstChild(); child != null; child = child.getNextSibling())
+            if (name.equals(child.getLocalName())) return child;
+        return null;
+    }
+    private static String wordValue(Node node) {
+        if (node == null || node.getAttributes() == null) return null;
+        Node val = node.getAttributes().getNamedItemNS("http://schemas.openxmlformats.org/wordprocessingml/2006/main", "val");
+        return val == null ? null : val.getNodeValue();
+    }
+    private static Integer wordPositiveValue(Node node, int fallback) {
+        if (node == null) return fallback;
+        try { int value = Integer.parseInt(wordValue(node)); return value > 0 ? value : null; }
+        catch (RuntimeException malformed) { return null; }
+    }
+    private static Integer wordGridSpan(Node cell) { return wordPositiveValue(wordChild(wordChild(cell, "tcPr"), "gridSpan"), 1); }
+    private static String wordVerticalMerge(Node cell) { return wordMerge(cell, "vMerge"); }
+    private static String wordMerge(Node cell, String name) {
+        Node merge = wordChild(wordChild(cell, "tcPr"), name);
+        if (merge == null) return "none";
+        String value = wordValue(merge);
+        return value == null || "continue".equals(value) ? "continue" : "restart".equals(value) ? "restart" : "unknown";
+    }
+    private static int previousWordSiblings(Node node, String name) {
+        int count = 0;
+        for (Node previous = node.getPreviousSibling(); previous != null; previous = previous.getPreviousSibling())
+            if (name.equals(previous.getLocalName())) count++;
+        return count;
+    }
+    private static Integer wordGridColumn(Node cell) {
+        int column = 0;
+        Node before = wordChild(wordChild(cell.getParentNode(), "trPr"), "gridBefore");
+        if (before != null) try { column = Integer.parseInt(wordValue(before)); if (column < 0) return null; }
+        catch (RuntimeException malformed) { return null; }
+        for (Node previous = cell.getPreviousSibling(); previous != null; previous = previous.getPreviousSibling())
+            if ("tc".equals(previous.getLocalName())) { Integer span = wordGridSpan(previous); if (span == null) return null; column += span; }
+        return column;
+    }
+    private static Integer wordRowSpan(Node cell) {
+        int span = 1; Integer column = wordGridColumn(cell), width = wordGridSpan(cell);
+        if (column == null || width == null) return null;
+        for (Node row = cell.getParentNode().getNextSibling(); row != null; row = row.getNextSibling()) {
+            if (!"tr".equals(row.getLocalName())) continue;
+            Node continuation = null;
+            for (Node candidate = row.getFirstChild(); candidate != null; candidate = candidate.getNextSibling())
+                if ("tc".equals(candidate.getLocalName()) && column.equals(wordGridColumn(candidate))) { continuation = candidate; break; }
+            if (continuation == null || !width.equals(wordGridSpan(continuation)) || !"continue".equals(wordVerticalMerge(continuation))) break;
+            span++;
+        }
+        return span;
+    }
+    private static String wordDomLocation(Node node) {
+        if (node == null || node.getNodeType() == Node.DOCUMENT_NODE) return "word";
+        return wordDomLocation(node.getParentNode()) + "/" + node.getLocalName() + "[" + previousWordSiblings(node, node.getLocalName()) + "]";
+    }
+
     private String nodeText(Node node) {
         StringBuilder text = new StringBuilder();
         for (Node child = node.getFirstChild(); child != null; child = child.getNextSibling()) {
@@ -704,11 +786,13 @@ public class DocumentParser {
         private final List<DocumentBlock.WordNumbering> numbering = new ArrayList<>();
         private final List<DocumentBlock.WordSymbol> symbols = new ArrayList<>();
         private final List<String> warnings = new ArrayList<>();
+        private final List<DocumentBlock.WordCell> cells = new ArrayList<>();
         private void add(WordText other) {
             effective.append(other.effective); original.append(other.original);
             deleted.append(other.deleted); struck.append(other.struck);
             numbering.addAll(other.numbering); symbols.addAll(other.symbols);
             warnings.addAll(other.warnings);
+            cells.addAll(other.cells);
         }
     }
 

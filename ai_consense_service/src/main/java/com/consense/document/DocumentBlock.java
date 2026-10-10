@@ -35,6 +35,18 @@ public class DocumentBlock {
     @JsonInclude(JsonInclude.Include.NON_EMPTY)
     private List<String> wordWarnings = new ArrayList<>();
 
+    @JsonInclude(JsonInclude.Include.NON_EMPTY)
+    private List<WordCell> wordCells = new ArrayList<>();
+
+    /** Native OOXML topology. Physical layout and cell images require rendering separately. */
+    @Data public static class WordCell {
+        private String location, tableLocation, verticalMerge, horizontalMerge, topologyStatus;
+        private String gridSpanRaw, gridBeforeRaw;
+        private Integer rowIndex, cellIndex, gridColumn, columnSpan, rowSpan;
+        private String text, originalText, deletedText, strikeText;
+        private List<String> limitations = new ArrayList<>();
+    }
+
     @Data public static class WordNumbering {
         private String location, numId, abstractNumId, format, levelText, label, suffix, resolutionStatus, reason, source;
         private Integer level;

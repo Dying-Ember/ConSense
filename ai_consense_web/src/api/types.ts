@@ -436,6 +436,7 @@ export interface DraftDocumentBinding {
   actionIds: string[]
   appliedActionIds?: string[]
   operationIds: string[]
+  editorialOperationIds?: string[]
   bodyOperationIds?: string[]
   applicationStatus: 'applied' | 'unapplied' | 'unchanged' | 'body_edited' | 'body_added' | 'generated_added'
   documentEditStatus?: 'applied' | 'unchanged'
