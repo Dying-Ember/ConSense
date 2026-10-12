@@ -2,6 +2,8 @@
 
 本轮是 NEXT-02 的有界实现。独立 CPU 候选可以正常处理完整原件、保存双 Camelot 输出和既有有线表输出、暴露源成员残差；现有 native PDF 投影新增显式来源审阅的完整表格组和完整原页资产。**不关闭 NEXT-02／AC02–AC05，不宣称原件整表、所有 Notes／父条件或最终解析质量已通过。** Local05、活动索引、原件、模型、Drafting 和运行服务保持原有身份。
 
+最新共享逻辑修复与实际完整源组评分见末节；下方首轮记录及未评分状态保留当时含义。
+
 ## 入口与依赖
 
 - 候选命令：`tools/vetting_eval/native_pdf_table_candidate.py --sources <完整来源manifest> --output <新目录>`。输出目录必须尚不存在，源文件 SHA／字节数／实际页数须与 manifest 一致，运行前后重新核 SHA。`originalPages` 只保存已封来源页映射，不用来选择实验页或调参数。
@@ -50,3 +52,25 @@
 上述为 `native-table-actual-audit.json` 从完整 JSONL 复算的残差库存，不是正确率；库间表候选／格分母不同，不能直接比较质量。三路线完整源组接受数都为 0（未做新的独立原件整组评分）。历史严格完整五目标表 0/5 保留，不用 641/642 字面 anchor 或候选数量将它覆盖。
 
 未做新权重训练、模型／GPU调用、blind、新来源留出、完整 form／math／特殊 Word 内容、实际业务引用浏览器或 H800 验收；尚需独立完整源审阅、Notes／父条件／跨页归属判断，以及所需全范围源质量门。
+
+## 02:05 增量：主表逻辑恢复已源评，完整业务组保持失败
+
+新增同一 provider 的可逆逻辑 grid 提案：唯一编号列定位数据行，取其之前最近的完整多列表头并合并同列表头续行；连续编号续行保留完整原格 ID／glyph，caption、尾正文和 Notes 等被移出 grid 的原格仍在全 provider 输出。编号语法允许数字、单字母及罗马序号，不将多字母括号缩写当序号；没有 `(NA)` 特化、固定页／bbox／列数／行号偏移、字面修补或 provider 融合。该提案仍不自称完整来源组。
+
+原候选全 226 页均重放新版源中立逻辑，三个原始 provider 输出及来源观察的实际 SHA 先核验。独立 scorer 复用 2026-10-12 密封参考、分母、原页／源 SHA、source-anchor midpoint、格位／跨度／字面和完整单表规则；开发已暴露，非 blind。首轮无此逻辑恢复的原始五表 0/5 记录保留。
+
+| 原件目标 | 单表格数 | Network 新逻辑结构／完整字面 | Stream 新逻辑结构／完整字面 | 组外必需成员 | 必需 typed 关系 | 完整业务组 |
+|---|---:|---:|---:|---:|---:|---:|
+| Façade 1312 | 132 | 132/132 | 132/132 | 2 | 17 | 0/1 |
+| Window 1316＋1317 | 132 | 132/132 | 132/132 | 3 | 19 | 0/1 |
+| Timber 1321 | 132 | 132/132 | 132/132 | 2 | 16 | 0/1 |
+| Gateset 1326 | 132 | 110/132 | 132/132 | 2 | 15 | 0/1 |
+| Volumetric 1330 | 144 | 144/144 | 144/144 | 3 | 20 | 0/1 |
+
+每项格数、关系、成员身份与逐格／逐关系原因可在 `native-table-whole-group-01/full-group-source-score.json` 和对应 `scoring/*.logical-02-same-domain-source-score.json` 复算。Stream 五主表为 672/672 格和 5/5 完整主表；Network 650/672 和 4/5，Gateset 最后列的 22 个源 anchor 落在 Network 右边界之外，未用参考扩 bbox 补过门。这是主表独立域，不等于带 Notes 的完整业务组。
+
+13 个表外成员的完整文字可由同版本 native 来源观察在审阅 source bbox 内回取；继承参考的 `sourceCharIndices` 是 PDFium character 身份（含 CR/LF），**不能冒称 pdfplumber glyph ID**。新评分使用同页已审来源 bbox 的 glyph center 映射再独立比较已封视觉字面，没有向 generator 回传监督。候选尚未产出完整 owned 表外成员与 typed 关系，因此 owned 成员 0/13、typed 关系 0/87、Window Note9 续页关系 0/1；页输出被捕获不能代替页组归属。继承参考未标父条完整分母，父条门为 unknown，不能写成通过或零漏失。
+
+旧有线路线保存输出与旧正确源项逐项保持：结构旧正确 333/333、字面旧正确 331/331；主有线完整结构 25/26、字面 24/26，与原独立库源评一致。原未知／失败不合并成新综合准确率。
+
+收据根为外部 `native-table-whole-group-01/`：`logical-replay-02/terminal.json`（代码 SHA／原 capture SHA／3×226 页）、`scoring/`（密封同域 raw／新逻辑结果）、`full-group-source-score.json`（完整五目标及失败）。代码控制见 `native-table-logical-grid-final-tests.log`；没有新 parser／模型／训练调用，未发布新 generation，NEXT-02／AC04 保持未完成。
