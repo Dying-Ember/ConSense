@@ -16,8 +16,10 @@ class VettingStandardLanguageBoundaryTest {
     @Test void unchangedStandardGrammarDoesNotBecomeAProjectLanguageFinding() {
         assertTrue(review("The Contractor are responsible for the Works.", "language").getCandidates().isEmpty());
     }
-    @Test void userAddedWordingStillReceivesLanguageReview() {
-        assertEquals(1, review("The Contractor are responsible for the additional harbour inspections.", "language").getCandidates().size());
+    @Test void differentStandardFragmentDoesNotConfirmProjectAddedWording() {
+        VettingSemanticReview.Result result=review("The Contractor are responsible for the additional harbour inspections.", "language");
+        assertTrue(result.getCandidates().isEmpty());
+        assertTrue(result.getWarnings().stream().anyMatch(s->s.contains("项目新增或改写未确认")));
     }
     @Test void standardWordingDoesNotSuppressSubstantiveRiskReview() {
         assertEquals(1, review("The Contractor are responsible for the Works.", "risk").getCandidates().size());

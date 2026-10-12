@@ -442,6 +442,12 @@ public class VettingSemanticReview {
                         gateReasons.add("unchanged_standard_wording_not_project_language_issue");
                         valid = false;
                     }
+                    // Current source identity and located quotes do not establish project authorship or amendment.
+                    if (valid && "issue".equals(r.getAssessment()) && "language".equals(type)) {
+                        gateReasons.add("project_wording_origin_unconfirmed");
+                        result.getWarnings().add("主题 " + topicIndex + " 的语言记录：项目新增或改写未确认，待核对；其他可靠记录继续。");
+                        valid = false;
+                    }
                     // LLM reference issues need a located comparison, not an inference from a missing local target.
                     // This conservative gate may omit single-passage formatting issues; quotations alone do not prove validity.
                     boolean comparisonRequired = "conflict".equals(type) || ("issue".equals(r.getAssessment()) && "reference".equals(type));
