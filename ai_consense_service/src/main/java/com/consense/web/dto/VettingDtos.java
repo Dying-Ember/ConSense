@@ -281,6 +281,14 @@ public final class VettingDtos {
         private com.consense.ai.ModelIdentity modelIdentity;
         private List<com.fasterxml.jackson.databind.JsonNode> fixedBaselineEvidence=new java.util.ArrayList<>();
         private List<VerifiedAssessmentVO> verifiedAssessments=new java.util.ArrayList<>();
+        /** Durable consumption ledger; a started attempt may have an unknown outcome after restart. */
+        private List<SemanticAttemptVO> attempts=new java.util.ArrayList<>();
+    }
+    @Data @NoArgsConstructor
+    public static class SemanticAttemptVO {
+        private int ordinal;
+        private String status="started",validationReason,rawResponseSha256,rawResponse;
+        private com.fasterxml.jackson.databind.JsonNode input,inputBudget;
     }
     @Data @NoArgsConstructor @AllArgsConstructor
     public static class VerifiedAssessmentVO {

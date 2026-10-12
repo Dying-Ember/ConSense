@@ -22,6 +22,7 @@ import java.util.stream.Collectors;
 @Service @RequiredArgsConstructor
 public class VettingCheckpointService {
     static final long LEASE_SECONDS=120;
+    static final int MAX_MODEL_ATTEMPTS=2;
     private final VettingRunRepository runs;
     private final VettingPacketCheckpointRepository packets;
     private final PlatformTransactionManager transactionManager;
@@ -51,11 +52,22 @@ public class VettingCheckpointService {
             return tx().execute(status->{owned(runId,owner);String observation=observation(packet);
                 VettingPacketCheckpoint row=packets.findByRunIdAndObservationSha256(runId,observation).orElse(null);
                 if(row!=null){compatible(row,packet);if("SAVED".equals(row.getStatus()))return verified(row);
+                    if(row.getResultJson()!=null){SemanticPacketVO history=payload(row).getPacket();packet.setAttempts(history.getAttempts());packet.setActualGatewayCallStarted(history.isActualGatewayCallStarted());}
                     packet.setCheckpointStatus("retrying_uncertain_packet");
                 }else{row=new VettingPacketCheckpoint();row.setId(UUID.randomUUID().toString());row.setRunId(runId);row.setObservationSha256(observation);
                     row.setPacketId(packet.getPacketId());row.setSourceSnapshotSha256(packet.getSourceSnapshotSha256());row.setPromptEnvelopeSha256(packet.getPromptEnvelopeSha256());packet.setCheckpointStatus("new_packet");}
                 row.setStatus("CALLING");row.setUpdatedAt(Instant.now());packets.saveAndFlush(row);return null;});
         }
+        /** Commit consumption before entering the gateway; a crash cannot restore the allowance. */
+        public void reserveAttempt(SemanticPacketVO packet) {
+            assertSourcesCurrent.run();
+            tx().execute(status->{owned(runId,owner);
+                VettingPacketCheckpoint row=packets.findByRunIdAndObservationSha256(runId,observation(packet)).orElseThrow(()->new BizException(4101,"审查检查点不存在"));
+                compatible(row,packet);int consumed=row.getResultJson()==null?0:payload(row).getPacket().getAttempts().size();
+                if("SAVED".equals(row.getStatus())||consumed>=MAX_MODEL_ATTEMPTS||packet.getAttempts().size()!=consumed+1)throw new BizException(4101,"审查来源包模型尝试次数已耗尽或不兼容");
+                Saved saved=new Saved();saved.setPacket(packet);String json=JsonUtils.write(saved);row.setResultJson(json);row.setResultSha256(VettingCorpus.hash(json));row.setStatus("CALLING");row.setUpdatedAt(Instant.now());packets.saveAndFlush(row);return null;});
+        }
+        public void saveAttempt(SemanticPacketVO packet) {Saved saved=new Saved();saved.setPacket(packet);save(saved);}
         public void save(Saved saved) {
             assertSourcesCurrent.run();
             tx().execute(status->{owned(runId,owner);SemanticPacketVO packet=saved.getPacket();
@@ -69,9 +81,16 @@ public class VettingCheckpointService {
         return packets.findByRunIdOrderByUpdatedAtAsc(runId).stream().filter(row->"SAVED".equals(row.getStatus())).map(row->{Saved saved=verified(row);
             ReliablePacketVO out=new ReliablePacketVO();out.setPacket(saved.getPacket());out.setCandidates(saved.getCandidates());out.setWarnings(saved.getWarnings());out.setSavedAt(row.getUpdatedAt());out.setResultSha256(row.getResultSha256());return out;}).collect(Collectors.toList());
     }
-    private static Saved verified(VettingPacketCheckpoint row){
+    private static Saved payload(VettingPacketCheckpoint row){
         if(row.getResultJson()==null||!VettingCorpus.hash(row.getResultJson()).equals(row.getResultSha256()))throw new BizException(4101,"审查检查点校验失败，需要重新运行");
         Saved saved=JsonUtils.read(row.getResultJson(),Saved.class);compatible(row,saved.getPacket());
+        List<com.consense.web.dto.VettingDtos.SemanticAttemptVO> attempts=saved.getPacket().getAttempts();
+        if(attempts==null||attempts.size()>MAX_MODEL_ATTEMPTS)throw new BizException(4101,"审查尝试账本无效，需要重新运行");
+        for(int i=0;i<attempts.size();i++)if(attempts.get(i)==null||attempts.get(i).getOrdinal()!=i+1)throw new BizException(4101,"审查尝试顺序无效，需要重新运行");
+        return saved;
+    }
+    private static Saved verified(VettingPacketCheckpoint row){
+        Saved saved=payload(row);
         if(!completed(saved.getPacket()))throw new BizException(4101,"审查检查点未完成，需要重新运行");return saved;
     }
     private static boolean active(VettingRun run){return "QUEUED".equals(run.getStatus())||"RUNNING".equals(run.getStatus());}

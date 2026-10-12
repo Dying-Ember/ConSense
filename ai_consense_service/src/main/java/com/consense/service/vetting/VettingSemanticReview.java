@@ -375,15 +375,51 @@ public class VettingSemanticReview {
                     }
                     if("retrying_uncertain_packet".equals(packet.getCheckpointStatus()))result.getWarnings().add("上次调用结果未确认，当前执行者显式重试来源包 "+packet.getSourceObservationPacketId()+"；已保存包不会重复发布。");
                 }
-                Map<String,Long> gatewayPhaseWallNanos=new LinkedHashMap<>();
-                try (VettingReviewProbe.Timer timer=topicProbe.measure("ai_gateway_call","Whole gateway including provider call, logging, and structured JSON parsing; nested gateway phase values must not be summed with this total")) {
-                    packet.setActualGatewayCallStarted(true);result.setActualGatewayCallCount(result.getActualGatewayCallCount()+1);
-                    if(responsesPacket)records=operation().getResponses().complete(fullInput,inputBudget,actualSystem,actualUser,actualSchema,Record.class,rawResponses,gatewayPhaseWallNanos);
-                    else records=topicProbe.enabled()?ai.completeStructuredJsonList(actualSystem,actualUser,Record.class,actualSchema,rawResponses,gatewayPhaseWallNanos)
-                            :ai.completeStructuredJsonList(actualSystem,actualUser,Record.class,actualSchema,rawResponses);
-                } finally {
-                    topicProbe.event("ai_gateway_phase_timings",VettingReviewProbe.map("phaseWallNanos",gatewayPhaseWallNanos,
-                            "boundary","Provider client call includes its HTTP serialization and response decoding; parse_list measures strict whole-JSON/schema/DTO decoding with nested phase timings. Native TCP phases require the independent proxy."));
+                records=null;
+                if(packet.getAttempts().size()>=VettingCheckpointService.MAX_MODEL_ATTEMPTS)throw new IllegalStateException("Model attempt allowance exhausted; uncertain responses require a new run");
+                while(packet.getAttempts().size()<VettingCheckpointService.MAX_MODEL_ATTEMPTS) {
+                    if(!packet.getAttempts().isEmpty()) {
+                        com.consense.web.dto.VettingDtos.SemanticAttemptVO previous=packet.getAttempts().get(packet.getAttempts().size()-1);
+                        if("failed".equals(previous.getStatus())||"structured_output_invalid".equals(previous.getStatus())
+                                &&!Arrays.asList("INVALID_JSON","SCHEMA_MISMATCH").contains(previous.getValidationReason()))throw new IllegalStateException("Previous model failure is not eligible for structured retry");
+                        VettingInputBudget.Result retryBudget=VettingInputBudget.check(fullInput,packetObserver);
+                        if(!VettingTokenAwareRequestPacks.sameFinalObservation(inputBudget,retryBudget)||!retryBudget.isExtraDispatchPermitted()
+                                ||retryBudget.getObservation().getEffectiveContextTokens()<262144||responsesPacket!=responsesEnabled()
+                                ||!responsesPacket&&nativeProfileFailure(retryBudget)!=null) {
+                            if(!"over_budget".equals(retryBudget.getStatus())){retryBudget.setStatus("budget_unknown");retryBudget.setReason("retry_complete_input_budget_or_profile_changed");}
+                            retryBudget.setExtraDispatchPermitted(false);packet.setInputBudgetStatus(retryBudget.getStatus());packet.setInputBudgetMetadata(JsonUtils.parse(JsonUtils.write(retryBudget)));
+                            audit.setFailureKind("over_budget".equals(retryBudget.getStatus())?"input_context_over_budget":"input_budget_unknown");
+                            topicProbe.event("model_retry_not_dispatched",VettingReviewProbe.map("inputBudget",retryBudget,"consumedAttempts",packet.getAttempts().size(),"actualGatewayCallStarted",false));
+                            throw new IllegalStateException("Retry complete input budget or captured profile changed");
+                        }
+                        inputBudget=retryBudget;
+                    }
+                    if(OerBusinessEvidence.canonicalCorpus(suppliedCorpus))oer.assertCurrent(OerBusinessEvidence.session(suppliedCorpus));
+                    fixedReferences.assertCurrent(submitted);
+                    com.consense.web.dto.VettingDtos.SemanticAttemptVO attempt=new com.consense.web.dto.VettingDtos.SemanticAttemptVO();
+                    attempt.setOrdinal(packet.getAttempts().size()+1);attempt.setInput(JsonUtils.parse(JsonUtils.write(fullInput)));attempt.setInputBudget(JsonUtils.parse(JsonUtils.write(inputBudget)));
+                    packet.getAttempts().add(attempt);if(durable!=null)durable.reserveAttempt(packet);
+                    int rawStart=rawResponses.size();Map<String,Long> gatewayPhaseWallNanos=new LinkedHashMap<>();boolean retry=false;
+                    try (VettingReviewProbe.Timer timer=topicProbe.measure("ai_gateway_call","One complete gateway attempt; generation attempts are accounted independently")) {
+                        packet.setActualGatewayCallStarted(true);result.setActualGatewayCallCount(result.getActualGatewayCallCount()+1);
+                        if(responsesPacket)records=operation().getResponses().complete(fullInput,inputBudget,actualSystem,actualUser,actualSchema,Record.class,rawResponses,gatewayPhaseWallNanos);
+                        else records=topicProbe.enabled()?ai.completeStructuredJsonList(actualSystem,actualUser,Record.class,actualSchema,rawResponses,gatewayPhaseWallNanos)
+                                :ai.completeStructuredJsonList(actualSystem,actualUser,Record.class,actualSchema,rawResponses);
+                        attempt.setStatus("decoded");
+                    } catch(com.consense.ai.StructuredOutputValidationException invalid) {
+                        attempt.setStatus("structured_output_invalid");attempt.setValidationReason(invalid.getReason().name());
+                        retry=packet.getAttempts().size()<VettingCheckpointService.MAX_MODEL_ATTEMPTS
+                                &&(invalid.getReason()==com.consense.ai.StructuredOutputValidationException.Reason.INVALID_JSON||invalid.getReason()==com.consense.ai.StructuredOutputValidationException.Reason.SCHEMA_MISMATCH);
+                        if(!retry)throw invalid;
+                    } catch(Exception failure) {attempt.setStatus("failed");throw failure;}
+                    finally {
+                        if(rawResponses.size()>rawStart){String raw=rawResponses.get(rawResponses.size()-1);attempt.setRawResponse(raw);attempt.setRawResponseSha256(VettingCorpus.hash(raw));}
+                        if(durable!=null)durable.saveAttempt(packet);
+                        topicProbe.event("model_attempt_finished",VettingReviewProbe.map("attempt",attempt,"retryScheduled",retry,"formalAnswerAccepted",false));
+                        topicProbe.event("ai_gateway_phase_timings",VettingReviewProbe.map("attemptOrdinal",attempt.getOrdinal(),"phaseWallNanos",gatewayPhaseWallNanos,
+                                "boundary","Gateway timings for this attempt; provider TCP/usage is not independently observed"));
+                    }
+                    if(!retry)break;
                 }
                 topicProbe.event("model_parsed_records", VettingReviewProbe.map("records", records, "rawResponseCount", rawResponses.size(),
                         "boundary", "Parsed model declarations are not source-verified conclusions"));
@@ -523,9 +559,10 @@ public class VettingSemanticReview {
                             incomplete.getRawResponse());
                 } else if (e instanceof com.consense.ai.StructuredOutputValidationException) {
                     audit.setFailureKind("structured_output_invalid");
-                } else audit.setFailureKind("review_processing_failure");
+                } else if(audit.getFailureKind()==null) audit.setFailureKind("review_processing_failure");
                 topicProbe.event("model_parse_schema_or_probe_failure",VettingReviewProbe.map("errorClass",e.getClass().getName(),"error",e.toString(),"topicAudit",audit));}
-            finally {if(!rawResponses.isEmpty())audit.setRawResponseSha256(VettingCorpus.hash(rawResponses.get(0)));
+            finally {if(!rawResponses.isEmpty())audit.setRawResponseSha256(VettingCorpus.hash(rawResponses.get(rawResponses.size()-1)));
+                else for(com.consense.web.dto.VettingDtos.SemanticAttemptVO attempt:packet.getAttempts())if(attempt.getRawResponseSha256()!=null)audit.setRawResponseSha256(attempt.getRawResponseSha256());
                 for (int rawIndex=0;rawIndex<rawResponses.size();rawIndex++) topicProbe.text("model_raw_response",VettingReviewProbe.map("rawResponseIndex",rawIndex,
                         "boundary","Exact AiGateway raw content string, not independently observed provider TCP response/reasoning/usage"),rawResponses.get(rawIndex));
                 VettingPacketCoverage.callResult(audit,packet);
