@@ -53,6 +53,7 @@ class AdviceModelIdentityMigrationIntegrationTest {
             migrationSql("V13__project_document_scope_and_advice_evidence.sql").populate(connection);
             migrationSql("V14__canonical_source_bindings.sql").populate(connection);
             migrationSql("V16__advice_sessions.sql").populate(connection);
+            migrationSql("V17__vetting_recovery_and_report_snapshots.sql").populate(connection);
         } catch(Exception error) {throw new IllegalStateException("Cannot seed pre-identity fixture",error);}
         r.add("spring.datasource.url",()->URL);
         r.add("consense.storage-root",()->java.nio.file.Paths.get("target","advice-migration-uploads").toAbsolutePath().toString());

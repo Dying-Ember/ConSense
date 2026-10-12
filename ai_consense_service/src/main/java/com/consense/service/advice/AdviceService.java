@@ -20,6 +20,7 @@ import com.consense.repository.AdviceSessionRepository;
 import com.consense.repository.EvidenceChunkRepository;
 import com.consense.repository.SourceDocumentRepository;
 import com.consense.service.ProjectService;
+import com.consense.service.StorageService;
 import com.consense.service.sources.ProjectDocumentScope;
 import com.consense.service.vetting.VettingCorpus;
 import com.consense.service.vetting.OerBusinessEvidence;
@@ -93,6 +94,8 @@ public class AdviceService {
     private AdviceModelProperties adviceSettings;
     @org.springframework.beans.factory.annotation.Autowired
     private VettingTokenBudgetCliObserver tokenObserver;
+    @org.springframework.beans.factory.annotation.Autowired(required=false)
+    private StorageService storageService;
 
     /** Character admission guard for whole fixed groups; never a text truncation limit. */
     private static final int FIXED_REFERENCE_MATERIAL_CHARACTERS=200000;
@@ -258,7 +261,7 @@ public class AdviceService {
 
         String retrievalQuestion=questionContext.originalQuestion+(questionContext.background.isEmpty()?"":"\nUser supplied clarification: "+String.join("\n",questionContext.background));
         OerBusinessEvidence.Session session=!fixedReferenceOnly&&canonical.enabled()?canonicalSession(projectId,scope):null;
-        final String sourceSnapshot=conversation==null?null:conversationSourceIdentity(projectId,scope,fixedReferenceOnly,session);
+        final String sourceSnapshot=conversation!=null||(!fixedReferenceOnly&&session==null)?conversationSourceIdentity(projectId,scope,fixedReferenceOnly,session):null;
         List<VectorStore.SearchHit> hits;
         if(fixedReferenceOnly) {
             hits=fixedReferenceHits(retrievalQuestion);
@@ -277,7 +280,8 @@ public class AdviceService {
         final Runnable currentGuard=()->{
             if(session!=null)assertCurrentSelection(session,scope);
             assertFixedReferencesCurrent(selectedFixedHits,fixedSourceIdentity);
-            if(conversation!=null){assertConversationCurrent(conversation);assertConversationSources(projectId,scope,fixedReferenceOnly,session,sourceSnapshot);
+            if(sourceSnapshot!=null)assertConversationSources(projectId,scope,fixedReferenceOnly,session,sourceSnapshot);
+            if(conversation!=null){assertConversationCurrent(conversation);
                 if(responsesOperation==null)assertSessionProfile(selectedOperation);}
         };
         currentGuard.run();
@@ -315,7 +319,7 @@ public class AdviceService {
                 if(session==null&&fixedSourceIdentity==null)throw new AdviceResponsesTransport.RequestFailure("budget_unknown","current_source_identity_required",null);
                 String requestSourceIdentity=fixedSourceIdentity==null?session.identitySha256():VettingCorpus.hash((session==null?"explicit-reference-only":session.identitySha256())+"|fixed-baseline|"+fixedSourceIdentity);
                 answer=responsesOperation.completeJson(systemPrompt,userPrompt,requestSourceIdentity,AnswerRecord.class,currentGuard).value;
-            }else answer = conversation==null?ai.completeJson(systemPrompt,userPrompt,AnswerRecord.class)
+            }else answer = conversation==null?(session==null&&!fixedReferenceOnly?completeGuardedLegacyChat(systemPrompt,userPrompt,selectedOperation,currentGuard):ai.completeJson(systemPrompt,userPrompt,AnswerRecord.class))
                     :completeSessionChat(systemPrompt,userPrompt,selectedOperation,sourceSnapshot,currentGuard);
         } catch (AdviceResponsesTransport.RequestFailure bounded) {
             throw bounded;
@@ -719,8 +723,13 @@ public class AdviceService {
         Map<String,Object> binding=new LinkedHashMap<>();binding.put("projectId",projectId);binding.put("scope",scope);binding.put("referenceOnly",referenceOnly);
         if(!referenceOnly) {
             if(selected!=null){assertCurrentSelection(selected,scope);binding.put("canonical",selected.identitySha256());}
-            else binding.put("documents",freshSelectedDocuments(projectId,scope).stream().map(d->Arrays.asList(String.valueOf(d.getId()),d.getSourceSha256(),VettingCorpus.sourceHash(d),VettingCorpus.sourceRole(d),d.getParseStatus()))
-                    .sorted(java.util.Comparator.comparing(row->row.get(0))).collect(Collectors.toList()));
+            else {
+                List<SourceDocument> documents=freshSelectedDocuments(projectId,scope);
+                for(SourceDocument document:documents)if(storageService==null||!storageService.matchesStoredBytes(document.getStoragePath(),document.getSourceSha256()))
+                    throw new BizException(4204,"A selected advice original is missing or its bytes changed. Restore and review the current sources before asking; no answer was published.");
+                binding.put("documents",documents.stream().map(d->Arrays.asList(String.valueOf(d.getId()),d.getSourceSha256(),VettingCorpus.sourceHash(d),VettingCorpus.sourceRole(d),d.getParseStatus()))
+                        .sorted(java.util.Comparator.comparing(row->row.get(0))).collect(Collectors.toList()));
+            }
         }
         binding.put("fixedBaseline",fixedBaselineEnabled()?fixedBaseline.frozenManifest():null);
         return VettingCorpus.hash(JsonUtils.write(binding));
@@ -768,9 +777,19 @@ public class AdviceService {
         for(int attempt=0;attempt<2;attempt++) {
             List<LlmClient.ChatTurn> turns=sessionTurns(system,user,attempt);guard.run();sessionBudget(operation,turns,sourceSnapshot);guard.run();
             if(operation.getClient()==null||!operation.getClient().available())throw new BizException(4203,"The captured advice model is unavailable; no alternate model was used.");
-            String raw=operation.getClient().chatStructured(turns,schema);guard.run();
+            guard.run();String raw=operation.getClient().chatStructured(turns,schema);guard.run();
             try{return JsonUtils.read(JsonUtils.extractJson(raw),AnswerRecord.class);}
             catch(Exception invalid){if(attempt==1)throw new BizException(4205,"Advice output_invalid: JSON parsing failed after one freshly admitted retry. No answer was published.");}
+        }
+        throw new IllegalStateException("Advice JSON attempts exhausted");
+    }
+    private AnswerRecord completeGuardedLegacyChat(String system,String user,LlmOperation operation,Runnable guard) {
+        for(int attempt=0;attempt<2;attempt++) {
+            guard.run();
+            if(operation==null||operation.getClient()==null||!operation.getClient().available())throw new BizException(4203,"The captured advice model is unavailable; no alternate model was used.");
+            guard.run();String raw=operation.getClient().chat(sessionTurns(system,user,attempt));guard.run();
+            try{return JsonUtils.read(JsonUtils.extractJson(raw),AnswerRecord.class);}
+            catch(Exception invalid){if(attempt==1)throw new BizException(4205,"Advice output_invalid: JSON parsing failed after one source-checked retry. No answer was published.");}
         }
         throw new IllegalStateException("Advice JSON attempts exhausted");
     }
@@ -869,8 +888,10 @@ public class AdviceService {
                                  AskResponseVO response,OerBusinessEvidence.Session session,List<VectorStore.SearchHit> fixedHits,String fixedIdentity,AdviceSession conversation,String sourceSnapshot) {
         if(session!=null)assertCurrentSelection(session,scope);
         assertFixedReferencesCurrent(fixedHits,fixedIdentity);
+        if(session==null&&sourceSnapshot!=null)assertConversationSources(projectId,scope,"reference_only".equals(request.getBasisScope()),null,sourceSnapshot);
         TransactionTemplate transaction=new TransactionTemplate(transactionManager);
         transaction.executeWithoutResult(status->{
+            if(session==null&&sourceSnapshot!=null)assertConversationSources(projectId,scope,"reference_only".equals(request.getBasisScope()),null,sourceSnapshot);
             if(conversation!=null) {
                 AdviceSession current=lockConversation(projectId,conversation.getId());
                 if(current.getRevision()!=conversation.getRevision())throw new BizException(4202,"The advice session changed while this answer was running; no late answer was published.");
