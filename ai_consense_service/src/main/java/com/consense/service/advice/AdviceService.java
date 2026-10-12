@@ -308,7 +308,7 @@ public class AdviceService {
         if(fixedReferenceOnly)userPrompt+="\n\nExplicit answer scope: reference_only. Explain only the cited standard text in this frozen development baseline. Do not assert that this standard, edition or requirement is adopted by the project, and do not return project_contract. Parsing, legal ownership and completeness limitations remain unverified.";
         if(!questionContext.background.isEmpty())userPrompt+="\n\nuser-supplied-background (clarification replies, not contractual evidence):\n"+String.join("\n",questionContext.background)
                 +"\nAnswer the original question in light of these user-stated assumptions. Do not cite this background as a contract document or established contractual fact.";
-        String systemPrompt=promptService.system(PromptCatalog.KEY_ADVICE);
+        String systemPrompt=promptService.system(PromptCatalog.KEY_ADVICE)+"\n\nOnly when a flowchart is requested, use a fenced ```mermaid block with flowchart TD or flowchart LR, simple alphanumeric node IDs, and short double-quoted labels for every node and decision; encode internal quotes as #quot;. Preserve only evidence-supported steps and citations; no HTML, links, directives or styling.";
         if(responsesOperation!=null&&responsesOperation.getConfiguredContextTokens()<262144)
             throw new BizException(4205,"Advice budget_unknown: generation requires at least 256K configured tokens.");
         if(conversation!=null)userPrompt+=boundedHistory(conversation,sourceSnapshot,capturedIdentity,selectedOperation,responsesOperation,currentGuard);
