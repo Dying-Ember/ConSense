@@ -23,6 +23,7 @@ import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.test.context.*;
 import org.springframework.test.web.servlet.MockMvc;
 import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Paths;
 import java.nio.file.Files;
@@ -162,6 +163,26 @@ class VettingRecoveryWorkflowTest {
         http.perform(get(url).param("sourceHash",revision).param("originalSourceSha256","wrong original")).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.code").value(4104));
         Path file=Paths.get(source.getStoragePath());java.nio.file.attribute.FileTime time=Files.getLastModifiedTime(file);byte[] replacement=before.clone();replacement[replacement.length-1]^=1;Files.write(file,replacement);Files.setLastModifiedTime(file,time);
         org.springframework.mock.web.MockHttpServletResponse rejected=http.perform(get(url).param("sourceHash",revision).param("originalSourceSha256",raw)).andReturn().getResponse();assertEquals(4104,JsonUtils.parse(rejected.getContentAsString()).path("code").asInt());assertNull(rejected.getHeader("Content-Disposition"));assertFalse(Arrays.equals(replacement,rejected.getContentAsByteArray()));
+    }
+    @Test void uploadedRuleFindingReturnsItsCapturedOriginalThroughPublicHttp()throws Exception{
+        String project=project();documents.deleteAll(documents.findByProjectIdOrderByIdAsc(project));when(ai.available()).thenReturn(false);
+        byte[] uploaded;try(XWPFDocument doc=new XWPFDocument();ByteArrayOutputStream out=new ByteArrayOutputStream()){
+            doc.createParagraph().createRun().setText("SCC 9.1 Clause 25.2(4) of the General Conditions of Contract is deleted.");
+            doc.createParagraph().createRun().setText("SCC 18.1 The contractor shall comply with GCC25.2(4) when applying for interim payment.");
+            doc.write(out);uploaded=out.toByteArray();
+        }
+        http.perform(multipart("/api/vetting/"+project+"/package/upload").file(new org.springframework.mock.web.MockMultipartFile("files","SCC.docx","application/vnd.openxmlformats-officedocument.wordprocessingml.document",uploaded)))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.code").value(0));
+        String run=start(project);await(project,run,"COMPLETED");
+        JsonNode listed=JsonUtils.parse(http.perform(get("/api/vetting/"+project+"/findings")).andReturn().getResponse().getContentAsString()).path("data");assertEquals(1,listed.size());JsonNode finding=listed.get(0);assertEquals("rule",finding.path("source").asText());
+        JsonNode evidence=JsonUtils.parse(http.perform(get("/api/vetting/"+project+"/findings/"+finding.path("code").asText()+"/evidence")).andReturn().getResponse().getContentAsString()).path("data").path("items");assertFalse(evidence.isEmpty());
+        String raw=com.consense.service.sources.OerSourceMetadata.originalSha256(uploaded);SourceDocument source=documents.findByProjectIdOrderByIdAsc(project).get(0);
+        for(JsonNode item:evidence){assertEquals(String.valueOf(source.getId()),item.path("documentId").asText());assertEquals(VettingCorpus.sourceHash(source),item.path("sourceHash").asText());assertEquals(raw,item.path("originalSourceSha256").asText());}
+        JsonNode item=evidence.get(0);String url="/api/vetting/"+project+"/sources/"+item.path("documentId").asText()+"/original";
+        org.springframework.mock.web.MockHttpServletResponse original=http.perform(get(url).param("sourceHash",item.path("sourceHash").asText()).param("originalSourceSha256",item.path("originalSourceSha256").asText())).andReturn().getResponse();assertEquals(200,original.getStatus());assertNotNull(original.getHeader("Content-Disposition"));assertArrayEquals(uploaded,original.getContentAsByteArray());
+        Path file=Paths.get(source.getStoragePath());java.nio.file.attribute.FileTime timestamp=Files.getLastModifiedTime(file);byte[] replaced=uploaded.clone();replaced[replaced.length-1]^=1;Files.write(file,replaced);Files.setLastModifiedTime(file,timestamp);
+        org.springframework.mock.web.MockHttpServletResponse rejected=http.perform(get(url).param("sourceHash",item.path("sourceHash").asText()).param("originalSourceSha256",item.path("originalSourceSha256").asText())).andReturn().getResponse();assertEquals(4104,JsonUtils.parse(rejected.getContentAsString()).path("code").asInt());assertNull(rejected.getHeader("Content-Disposition"));
+        verify(ai,never()).completeStructuredJsonList(anyString(),anyString(),eq(VettingSemanticReview.Record.class),any(),anyList());
     }
     private SourceDocument bindOriginal(String project)throws Exception{SourceDocument source=documents.findByProjectIdOrderByIdAsc(project).get(0);Path file=Paths.get(props.getStorageRoot(),project,"SCC.txt");Files.createDirectories(file.getParent());byte[] bytes=source.getTextContent().getBytes(StandardCharsets.UTF_8);Files.write(file,bytes);source.setStoragePath(file.toString());source.setSourceSha256(com.consense.service.sources.OerSourceMetadata.originalSha256(bytes));return documents.saveAndFlush(source);}
     private static String reviewBody(JsonNode loaded,String remarks){return JsonUtils.write(Map.of("expectedRunId",loaded.path("runId").asText(),"expectedGeneratedRevisionSha256",loaded.path("generatedRevisionSha256").asText(),"expectedSourceSnapshotSha256",loaded.path("sourceSnapshotSha256").asText(),"reviewRemarks",remarks,"actionTaken","reviewed","addendumRequired",true));}
