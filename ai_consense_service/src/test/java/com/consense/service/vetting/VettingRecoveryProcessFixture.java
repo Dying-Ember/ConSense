@@ -43,7 +43,7 @@ public final class VettingRecoveryProcessFixture {
             if("QUEUED".equals(mode)){
                 // Test-only saturation of this fixture's actual worker; the run still enters through HTTP.
                 java.lang.reflect.Field executor=VettingService.class.getDeclaredField("worker");executor.setAccessible(true);
-                ((java.util.concurrent.ThreadPoolExecutor)executor.get(context.getBean(VettingService.class))).execute(()->block("owned fixture worker occupied; run queued"));
+                ((java.util.concurrent.ThreadPoolExecutor)executor.get(org.springframework.test.util.AopTestUtils.getUltimateTargetObject(context.getBean(VettingService.class)))).execute(()->block("owned fixture worker occupied; run queued"));
             }
             running.set(true);
             if(!"RESUME".equals(mode))request(base+"/api/vetting/"+project+"/runs","POST");
@@ -68,6 +68,10 @@ public final class VettingRecoveryProcessFixture {
         @Bean org.springframework.boot.web.embedded.tomcat.TomcatServletWebServerFactory fixtureServer(){org.springframework.boot.web.embedded.tomcat.TomcatServletWebServerFactory server=new org.springframework.boot.web.embedded.tomcat.TomcatServletWebServerFactory();server.setProtocol("org.apache.coyote.http11.Http11Nio2Protocol");return server;}
         @Bean @Primary AiGateway fixtureGateway(){AiGateway ai=mock(AiGateway.class);when(ai.available()).thenReturn(true);when(ai.chatModel()).thenReturn("fixture-only");
             when(ai.completeStructuredJsonList(anyString(),anyString(),eq(VettingSemanticReview.Record.class),any(),anyList())).thenAnswer(call->{int ordinal=calls.incrementAndGet();String prompt=call.getArgument(1);Files.write(root.resolve("calls.log"),(prompt.substring(0,prompt.indexOf('\n'))+"\n").getBytes(StandardCharsets.UTF_8),StandardOpenOption.CREATE,StandardOpenOption.APPEND);
+                if("SCHEMA_RETRY_RESERVED".equals(mode)) {
+                    if(ordinal==1){((List<String>)call.getArgument(4)).add("[]}");throw new com.consense.ai.StructuredOutputValidationException(com.consense.ai.StructuredOutputValidationException.Reason.INVALID_JSON);}
+                    if(ordinal==2)block("first invalid result saved; second attempt durably consumed before return");
+                }
                 if("BEFORE_CALL".equals(mode)&&ordinal==1)block("before first result");if("AFTER_PACKET".equals(mode)&&ordinal==2)block("first packet saved; second call uncertain");
                 VettingCorpus.Chunk source=corpus.get().stream().filter(c->"tender".equals(c.getRole())).findFirst().orElseThrow(IllegalStateException::new);
                 VettingSemanticReview.Record record="BEFORE_SAVE".equals(mode)&&ordinal==1?new VettingSemanticReview.Record(){@Override public String getSuggestion(){block("result decoded; before verified checkpoint save");return "fixture suggestion";}}:new VettingSemanticReview.Record();

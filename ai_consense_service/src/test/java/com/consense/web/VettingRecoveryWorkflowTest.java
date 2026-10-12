@@ -103,7 +103,7 @@ class VettingRecoveryWorkflowTest {
             assertThrows(BizException.class,()->checkpoints.renew(id,oldOwner));release.countDown();Thread.sleep(100);assertEquals("COMPLETED",runs.findById(id).orElseThrow(AssertionError::new).getStatus());assertEquals(2,findings.findByProjectIdOrderByCodeAsc(project).size());
         }finally{release.countDown();restarted.stopWorker();}
     }
-    @ParameterizedTest @ValueSource(strings={"source","recipe","retrieval_recipe","model","legacy_language_recipe"})
+    @ParameterizedTest @ValueSource(strings={"source","recipe","retrieval_recipe","model","legacy_language_recipe","legacy_attempt_recipe"})
     void incompatibleInputsRequireRerunAndRetainVerifiedPackets(String changed)throws Exception{
         String project=project();AtomicInteger calls=new AtomicInteger();CountDownLatch waiting=new CountDownLatch(1),release=new CountDownLatch(1);
         when(ai.completeStructuredJsonList(anyString(),anyString(),eq(VettingSemanticReview.Record.class),any(),anyList())).thenAnswer(call->{if(calls.incrementAndGet()==2){waiting.countDown();assertTrue(release.await(20,TimeUnit.SECONDS));}return records("issue");});
@@ -111,11 +111,12 @@ class VettingRecoveryWorkflowTest {
         VettingRun saved=runs.findById(id).orElseThrow(AssertionError::new);saved.setLeaseUntil(Instant.now().minusSeconds(1));
         if("recipe".equals(changed))saved.setRecoveryContractSha256("incompatible-recipe");
         String legacyPacket=null;
-        if("legacy_language_recipe".equals(changed)) {
-            saved.setRecoveryContractSha256(previousLanguageRecipe());
+        if("legacy_language_recipe".equals(changed)||"legacy_attempt_recipe".equals(changed)) {
+            saved.setRecoveryContractSha256(previousRecipe("legacy_language_recipe".equals(changed)?"vetting-checkpoint-v4-bound-native-profile-minimum-256k":"vetting-checkpoint-v5-bound-native-profile-minimum-256k-language-origin-gate"));
             VettingPacketCheckpoint old=packets.findByRunIdOrderByUpdatedAtAsc(id).get(0);
             VettingCheckpointService.Saved accepted=JsonUtils.read(old.getResultJson(),VettingCheckpointService.Saved.class);
-            accepted.getCandidates().get(0).setType("language");accepted.getCandidates().get(0).setRuleId("semantic-language");
+            if("legacy_language_recipe".equals(changed)){accepted.getCandidates().get(0).setType("language");accepted.getCandidates().get(0).setRuleId("semantic-language");}
+            else accepted.getPacket().getAttempts().clear();
             legacyPacket=JsonUtils.write(accepted);old.setResultJson(legacyPacket);old.setResultSha256(VettingCorpus.hash(legacyPacket));packets.saveAndFlush(old);
         }
         if("model".equals(changed))saved.setModelIdentityJson(JsonUtils.write(new ModelIdentity("fixture","fixture","different fixture model",null,"test_only")));
@@ -124,11 +125,11 @@ class VettingRecoveryWorkflowTest {
         if("source".equals(changed)){SourceDocument source=documents.findByProjectIdOrderByIdAsc(project).get(0);source.setTextContent(source.getTextContent()+" changed");documents.saveAndFlush(source);}
         VettingService restarted=new VettingService(projectService,storage,parser,props,documents,findings,runs,semantic,writer,transactions,profiles);restarted.setCheckpoints(checkpoints);restarted.setReportSnapshots(snapshots);restarted.setChecklistService(checklist);
         try{restarted.recoverInterruptedRuns();JsonNode failed=await(project,id,"FAILED");assertEquals("NEEDS_RERUN",failed.path("recoveryStatus").asText());assertEquals(1,failed.path("reliablePackets").size());assertEquals(2,calls.get(),"No incompatible model call may resume");
-            if(legacyPacket!=null){assertEquals(legacyPacket,packets.findByRunIdOrderByUpdatedAtAsc(id).get(0).getResultJson());assertEquals("language",failed.path("reliablePackets").get(0).path("candidates").get(0).path("type").asText());}}
+            if(legacyPacket!=null){assertEquals(legacyPacket,packets.findByRunIdOrderByUpdatedAtAsc(id).get(0).getResultJson());assertEquals("legacy_language_recipe".equals(changed)?"language":"risk",failed.path("reliablePackets").get(0).path("candidates").get(0).path("type").asText());}}
         finally{release.countDown();restarted.stopWorker();props.getVetting().setExpectedRetrievalRecipeFingerprint(previousRecipe);}
     }
     /** Exact v4 recipe: retain its checkpoint as historical evidence, never restore it under the origin gate. */
-    private String previousLanguageRecipe(){ConsenseProperties.Vetting v=props.getVetting();return VettingCorpus.hash("vetting-checkpoint-v4-bound-native-profile-minimum-256k\n"+JsonUtils.write(Arrays.asList(
+    private String previousRecipe(String prefix){ConsenseProperties.Vetting v=props.getVetting();return VettingCorpus.hash(prefix+"\n"+JsonUtils.write(Arrays.asList(
             v.isSemanticEnabled(),v.getSemanticTopics(),v.getSemanticContextChars(),v.getSemanticContextExpansionChars(),v.getProjectReferenceComparisons(),v.getProjectReferenceContextChars(),
             v.getCandidateLimit(),v.getTopK(),v.isDiffAgainstBaseline(),v.isRequireHybridRetrieval(),v.getRetrievalUrl(),v.getExpectedRetrievalContract(),v.getExpectedRetrievalSignatureVersion(),v.getExpectedRetrievalGranularity(),
             v.getExpectedEmbeddingWindowMaxTokens(),v.getExpectedRerankWindowMaxTokens(),v.getExpectedWindowOverlapTokens(),v.getExpectedStructuralEmbeddingMaxTokens(),v.getExpectedStructuralRerankMaxTokens(),v.isExpectedStructuralRerankStrict(),

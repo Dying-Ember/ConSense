@@ -14,6 +14,19 @@ import static org.mockito.ArgumentMatchers.*;
 
 /** Actual Java review orchestration with fake HTTP, original source packaging and strict Gateway. */
 class VettingResponsesSemanticHarnessTest {
+    @Test void strictRetryCountsGatewayInvocationsWithoutChangingPlannedPacketDenominator() {
+        List<Chunk> cs=Collections.singletonList(corpus().get(0));
+        VettingResponsesTransportTest.Http h=new VettingResponsesTransportTest.Http() {
+            int generations;
+            @Override public VettingResponsesTransport.Response post(String endpoint,String body,long timeout,int cap,String authorization) {
+                if(endpoint.endsWith("/responses"))generation=VettingResponsesTransportTest.completed(++generations==1?"[]}":"[]");
+                return super.post(endpoint,body,timeout,cap,authorization);
+            }
+        };
+        VettingSemanticReview.Result r=review(cs,props(cs),h,mock(LlmClient.class));
+        assertEquals(1,r.getPlannedCallCount());assertEquals(2,r.getActualGatewayCallCount());assertNull(r.getModelFailure());
+        SemanticPacketVO packet=r.getTopicAudits().get(0).getPacketAudits().get(0);assertEquals(2,packet.getAttempts().size());assertEquals(VettingCorpus.hash("[]"),packet.getRawResponseSha256());
+    }
     private Chunk c(String id,String doc,String clause,String text) {
         Chunk c=new Chunk();c.setId(id);c.setDocumentId(doc);c.setFileName(doc+".docx");c.setRole("tender");c.setSourceHash(VettingCorpus.hash(doc));c.setFileKey(clause==null?"OTHER":"AAA");c.setClauseId(clause);c.setClauseHeadingLocation(clause==null?null:"body/heading/"+clause);c.setContent(text);c.setAnchor("body/"+id+"/paragraph");c.setMetadataVersion(VettingCorpus.METADATA_VERSION);c.setSegmentationVersion(VettingCorpus.SEGMENTATION_VERSION);c.setNativeTableMetadataVersion(VettingCorpus.NATIVE_TABLE_METADATA_VERSION);
         VettingSourceQuality.Info q=new VettingSourceQuality.Info();q.setParseStatus("PARSED");q.setOcrQualityStatus("not_observed");q.setCoverageMetadataSha256(VettingCorpus.hash("synthetic-parser-declaration"));c.setSourceQuality(q);c.setSourceQualityHash(VettingSourceQuality.hash(q));c.setSourceQualityMetadataVersion(VettingSourceQuality.VERSION);

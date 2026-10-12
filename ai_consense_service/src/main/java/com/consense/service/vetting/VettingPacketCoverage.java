@@ -22,6 +22,7 @@ final class VettingPacketCoverage {
         p.setCheckState(checkState(p));call.setCheckState(p.getCheckState());
     }
     static void restore(SemanticPacketVO saved,SemanticTopicVO call,SemanticPacketVO packet) {
+        packet.setAttempts(saved.getAttempts());
         call.setStatus(saved.getStatus());call.setFailureKind(saved.getFailureKind());call.setError(saved.getError());call.setModelResponseMetadata(saved.getModelResponseMetadata());call.setRawResponseSha256(saved.getRawResponseSha256());
         call.setReturnedAssessments(saved.getReturnedAssessments());call.setIssueAssessments(saved.getIssueAssessments());call.setConsistentAssessments(saved.getConsistentAssessments());call.setInsufficientContextAssessments(saved.getInsufficientContextAssessments());call.setAcceptedFindings(saved.getAcceptedFindings());call.setRejectedRecords(saved.getRejectedRecords());
         call.setVerifiedConsistentAssessments(saved.getVerifiedConsistentAssessments());call.setVerifiedInsufficientContextAssessments(saved.getVerifiedInsufficientContextAssessments());call.setVerifiedNotApplicableAssessments(saved.getVerifiedNotApplicableAssessments());packet.setVerifiedAssessments(saved.getVerifiedAssessments());packet.setActualGatewayCallStarted(saved.isActualGatewayCallStarted());callResult(call,packet);
