@@ -49,9 +49,29 @@ python ai_consense_service/tools/vetting_eval/migrate_qdrant_server.py `
 
 正常 SIGINT 停止自有 Server，再以相同新 storage/config 冷启动，调用既有 `verify_reuse()` 对候选 metadata 的完整点／payload／seal 再校验。冷启动收据 SHA 为 `a06b4eb3c1c181d51f0fe33220fea51397840c516e4297b83093157479ecff87`，驱动与日志保存在同一外部目录。本轮仅停止自有二进制／config 对应的精确 PID；Local05 未停止。正常停启不等同主机掉电、损坏恢复或 PVC 验收。
 
+## 03:00 补充：真实自然语言 CPU 查询，保留召回限制
+
+复用上述 Server 1.19.2、config、storage 和 `oer_server_baseline05_20261013_02`，只恢复自有候选；没有新建／修改 collection 或连接 Local05 数据库。独立分支源码基于 `429c6b7`，查询驱动和运行证据保存在外部 `C:/Users/Administrator/Documents/Codex/consense-implementation-20261013/qdrant-semantic-query-02/`，不新增业务代码或依赖。
+
+实际运行使用已核82包的 Linux venv `/home/ocr/.local/share/consense-oer/retrieval-offline-strict-20261013/venv`，Python 3.12.3、Torch 2.11.0＋cu128、Transformers 4.57.6、Sentence Transformers 5.2.0、Qdrant client 1.19.1。相同冻结 BGE-M3 publication SHA `13c9d08ae6e1d3d73fb6d284d473f493446c4a276c864cf5a02338ded3552a15` 的完整实际文件、tokenizer backend 与原索引身份核验通过；调用现有 `server.encode_embeddings()`，CPU FP32、batch 1、512 token cap、无隐式截断、归一化1024维。原索引的 CUDA FP16／batch16 身份保留，不能把本次 CPU 查询当作原运行配方兼容证明。
+
+三个问题在模型调用前写入 `query-plan.json`，没有 gold、目标父／页／结果提示。通过正常 `query_points()` 提交真实 query embedding；每题窗口50→100、最多50个父候选，复用现有父最大值聚合与 observed source-unit 选择。每题返回10个完整父记录及完整观察单元、Parts／来源／质量状态；dense score 不代表条款正确、适用性或缺陷概率。本轮没有 BM25、reranker 或 LLM 调用，也没有调用 Java 业务原文 GET。
+
+| 实际自然问题 | 完整输入 tokens | 实际 dense 结果及限制 | 完整结果证据 |
+| --- | --- | --- | --- |
+| 意外现场条件延误后如何申请工期延长 | 21 | Top1 GCC 8.4，原件P38；返回GCC／SL。可观察到相关条款，未作gold评分 | `query-1-full-readback.json`，SHA `46232ca8379bf16994c3be8e8d0abed82cf17bf47c84315cfd3070a683b37365` |
+| 接受承包商投标前检查哪些提交文件和资格 | 24 | GCT原件P1提交清单rank5；Top1为SL电气提交要求P2845，排序混入不同业务语境 | `query-2-full-readback.json`，SHA `8cba003bd8db54aeaf4384b2de97881a4417a0e72645bb7a1036180e55c9866e` |
+| 批准真空污水管安装和测试前检查什么 | 17 | Top1为DEM2石棉处理定义P2624，偏题；排水测试P1898／1896／1938在rank3／5／7。不能称完整技术条件／整表语义召回通过 | `query-3-full-readback.json`，SHA `7a61abe80a2655205d191a63039ce31f582026af72bbb8b030e78df2769a496d` |
+
+全量19,371父／20,700窗口身份与原冻结corpus／window manifest匹配；真实查询每次完整窗口payload与冻结记录精确相等，返回30个完整父／观察单元的原件路径与SHA匹配。查询前后再次全量读取实际20,700点／payload／float32，`pointsSha256`均为 `970c8e0e6ef36f57a4fbe5a26106e6225a3df5fd9b87d10afd9c001883c112a5`；不是仅count或sample核验。三份原始PDF和两份已采用逻辑表JSON的实际全文件SHA也与冻结声明相等；后两份是资产完整性回取，不宣称本次问题命中它们。来源完整性和 `complete_observed_unit` 不改变源质量、条件／Notes／法律适用的unknown。
+
+实际完整收据 `natural-query-readback-receipt.json` SHA为 `aa3f1a273ba0356724da5809493c66487e3a188e34a9cc1af9bf48fb2c29fd57`；含query vectors、每题完整输出descriptor、模型publication／实际加载事件、软件／包／CPU与原CUDA配方、前后全seal及五项原件／表资产SHA。实际 wall 76.153123637秒，包含完整校验／模型装载／查询及文件读回，不作查询性能基准。loopback连接178，外联尝试0、GPU context0、模型下载0；此次允许加载既有BGE实际CPU权重。
+
+自有启动／停止identity位于相邻 `qdrant-semantic-query-01/`：精确确认二进制／config的PID1683227后SIGINT正常停止，16333无监听，未向其他PID发信号。`protected-before.json`／`protected-after.json`记录8876 Local05 owner79196、18868 retrieval child40200、18083 backend owner110356的身份保持，Local05 health为ok；活动客户端配置SHA前后相同。首轮驱动错误地把Local seal直接用于目标metadata，在模型／查询前被拒绝；其失败收据与原驱动保留于 `qdrant-semantic-query-01/`。第二轮明确验证迁移收据中的目标seal，并按迁移仅变更collection与seal的事实检查原始来源身份，不修改冻结manifest。
+
 ## 尚未过门与回滚
 
-`semanticModelQueryAccepted=false`、`targetAdopted=false`、`businessAccepted=false`、`H800Accepted=false` 保持真实状态。实际语义问题编码、现有检索／rerank／完整父证据输出兼容、业务原文回取路由及目标 PVC 冷启持久性未由此测试证明，**AC08 尚未整体关闭**。
+`semanticModelQueryExecuted=true`仅指上述三个实际CPU自然问题；`semanticModelQueryAccepted=false`、`runtimeCompatibilityVerified=false`、`targetAdopted=false`、`businessAccepted=false`、`H800Accepted=false` 保持真实状态。dense召回已观察到偏题；现有完整BM25／rerank检索链、运行配方兼容、业务原文回取路由、完整语义质量及目标 PVC 冷启持久性未由此测试证明，**AC08 尚未整体关闭**。
 
 WSL `/mnt/c` 启动明确警告文件系统不可确认数据安全；这是本机存储兼容试验，不能充当 PVC／生产耐久性验收。正式部署保持一个副本、一个 storage owner，Pod 更新应确保旧 owner 退出后新 owner 再启动；RWO 本身不保证进程唯一。
 
