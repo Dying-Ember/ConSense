@@ -261,7 +261,7 @@ public class AdviceService {
 
         String retrievalQuestion=questionContext.originalQuestion+(questionContext.background.isEmpty()?"":"\nUser supplied clarification: "+String.join("\n",questionContext.background));
         OerBusinessEvidence.Session session=!fixedReferenceOnly&&canonical.enabled()?canonicalSession(projectId,scope):null;
-        final String sourceSnapshot=conversation!=null||(!fixedReferenceOnly&&session==null)?conversationSourceIdentity(projectId,scope,fixedReferenceOnly,session):null;
+        final String sourceSnapshot=conversationSourceIdentity(projectId,scope,fixedReferenceOnly,session);
         List<VectorStore.SearchHit> hits;
         if(fixedReferenceOnly) {
             hits=fixedReferenceHits(retrievalQuestion);
@@ -281,8 +281,8 @@ public class AdviceService {
             if(session!=null)assertCurrentSelection(session,scope);
             assertFixedReferencesCurrent(selectedFixedHits,fixedSourceIdentity);
             if(sourceSnapshot!=null)assertConversationSources(projectId,scope,fixedReferenceOnly,session,sourceSnapshot);
-            if(conversation!=null){assertConversationCurrent(conversation);
-                if(responsesOperation==null)assertSessionProfile(selectedOperation);}
+            if(conversation!=null)assertConversationCurrent(conversation);
+            if(responsesOperation==null)assertCapturedChatIdentity(capturedIdentity);
         };
         currentGuard.run();
         if(conversation!=null&&request.getReplyToMessageId()!=null&&!chatMessageRepository.findById(request.getReplyToMessageId())
@@ -309,8 +309,8 @@ public class AdviceService {
         if(!questionContext.background.isEmpty())userPrompt+="\n\nuser-supplied-background (clarification replies, not contractual evidence):\n"+String.join("\n",questionContext.background)
                 +"\nAnswer the original question in light of these user-stated assumptions. Do not cite this background as a contract document or established contractual fact.";
         String systemPrompt=promptService.system(PromptCatalog.KEY_ADVICE);
-        if(conversation!=null&&responsesOperation!=null&&responsesOperation.getConfiguredContextTokens()<262144)
-            throw new BizException(4205,"Advice budget_unknown: explicit sessions require at least 256K configured tokens.");
+        if(responsesOperation!=null&&responsesOperation.getConfiguredContextTokens()<262144)
+            throw new BizException(4205,"Advice budget_unknown: generation requires at least 256K configured tokens.");
         if(conversation!=null)userPrompt+=boundedHistory(conversation,sourceSnapshot,capturedIdentity,selectedOperation,responsesOperation,currentGuard);
 
         AnswerRecord answer;
@@ -319,8 +319,7 @@ public class AdviceService {
                 if(session==null&&fixedSourceIdentity==null)throw new AdviceResponsesTransport.RequestFailure("budget_unknown","current_source_identity_required",null);
                 String requestSourceIdentity=fixedSourceIdentity==null?session.identitySha256():VettingCorpus.hash((session==null?"explicit-reference-only":session.identitySha256())+"|fixed-baseline|"+fixedSourceIdentity);
                 answer=responsesOperation.completeJson(systemPrompt,userPrompt,requestSourceIdentity,AnswerRecord.class,currentGuard).value;
-            }else answer = conversation==null?(session==null&&!fixedReferenceOnly?completeGuardedLegacyChat(systemPrompt,userPrompt,selectedOperation,currentGuard):ai.completeJson(systemPrompt,userPrompt,AnswerRecord.class))
-                    :completeSessionChat(systemPrompt,userPrompt,selectedOperation,sourceSnapshot,currentGuard);
+            }else answer=completeSessionChat(systemPrompt,userPrompt,selectedOperation,sourceSnapshot,currentGuard);
         } catch (AdviceResponsesTransport.RequestFailure bounded) {
             throw bounded;
         } catch (IncompleteModelResponseException incomplete) {
@@ -751,7 +750,7 @@ public class AdviceService {
         VettingInputBudget.Result budget=VettingInputBudget.check(input,tokenObserver);
         if(!budget.isExtraDispatchPermitted())throw new BizException(4205,"Advice "+budget.getStatus()+": "+budget.getReason()+". No model request was submitted.");
         if(budget.getObservation().getEffectiveContextTokens()<262144)
-            throw new BizException(4205,"Advice budget_unknown: explicit sessions require a verified context of at least 256K tokens.");
+            throw new BizException(4205,"Advice budget_unknown: generation requires a verified context of at least 256K tokens.");
         if("ollama".equals(identity.getProvider())&&operation.getNumCtx()!=budget.getObservation().getEffectiveContextTokens())
             throw new BizException(4205,"Advice budget_unknown: observed_context_differs_from_configured_ollama_context.");
         return budget;
@@ -780,16 +779,6 @@ public class AdviceService {
             guard.run();String raw=operation.getClient().chatStructured(turns,schema);guard.run();
             try{return JsonUtils.read(JsonUtils.extractJson(raw),AnswerRecord.class);}
             catch(Exception invalid){if(attempt==1)throw new BizException(4205,"Advice output_invalid: JSON parsing failed after one freshly admitted retry. No answer was published.");}
-        }
-        throw new IllegalStateException("Advice JSON attempts exhausted");
-    }
-    private AnswerRecord completeGuardedLegacyChat(String system,String user,LlmOperation operation,Runnable guard) {
-        for(int attempt=0;attempt<2;attempt++) {
-            guard.run();
-            if(operation==null||operation.getClient()==null||!operation.getClient().available())throw new BizException(4203,"The captured advice model is unavailable; no alternate model was used.");
-            guard.run();String raw=operation.getClient().chat(sessionTurns(system,user,attempt));guard.run();
-            try{return JsonUtils.read(JsonUtils.extractJson(raw),AnswerRecord.class);}
-            catch(Exception invalid){if(attempt==1)throw new BizException(4205,"Advice output_invalid: JSON parsing failed after one source-checked retry. No answer was published.");}
         }
         throw new IllegalStateException("Advice JSON attempts exhausted");
     }

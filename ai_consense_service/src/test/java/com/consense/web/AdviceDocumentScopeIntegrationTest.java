@@ -32,6 +32,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @SpringBootTest(properties={"spring.jpa.hibernate.ddl-auto=create-drop","spring.flyway.enabled=false",
         "consense.ocr.enabled=false","consense.vector.provider=memory","consense.vector.stuffing-limit=1",
         "consense.vector.top-k=1","consense.vector.retrieve-top-k-floor=1",
+        "consense.llm.num-ctx=262144","consense.llm.structured-thinking=false",
         "consense.llm.chat-model=scope-test-chat","consense.llm.embed-model=scope-test-embedding"})
 @ActiveProfiles("h2") @AutoConfigureMockMvc
 class AdviceDocumentScopeIntegrationTest {
@@ -44,9 +45,11 @@ class AdviceDocumentScopeIntegrationTest {
     @Autowired SourceDocumentRepository sources;
     @Autowired StorageService storage;
     @MockBean(name="llmClient") LlmClient local;
+    @MockBean com.consense.service.vetting.VettingTokenBudgetCliObserver counter;
     private final List<String> prompts=new ArrayList<>();
 
     @BeforeEach void adapters() {
+        com.consense.service.advice.AdviceBudgetFixture.bind(counter,local);
         prompts.clear();
         when(local.available()).thenReturn(true);
         when(local.chatModel()).thenReturn("scope-test-chat");

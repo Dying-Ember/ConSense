@@ -197,10 +197,10 @@ class AdviceSessionIntegrationTest {
     @Test void changingTheModelProfileDuringCountingCannotDispatchAgainstTheOldIdentity() throws Exception {
         String project=project();source(project,"CURRENT BASIS TEST ONLY");rebuild(project);String session=session(project,"contract","project_contract");
         int outputReserve=properties.getLlm().getStructuredMaxTokens();
-        try {
+        for(String selectedSession:new String[]{session,null})try {
             doAnswer(call->{properties.getLlm().setStructuredMaxTokens(outputReserve+1);return observation(call.getArgument(0));}).when(counter).observe(any());
-            mvc.perform(askRequest(project,session,"contract","project_contract","MODEL CHANGE DURING COUNT TEST ONLY")).andExpect(jsonPath("$.code").value(4205));
-            verify(local,never()).chatStructured(anyList(),any());assertTrue(history(project,session).isEmpty());
+            mvc.perform(askRequest(project,selectedSession,"contract","project_contract","MODEL CHANGE DURING COUNT TEST ONLY")).andExpect(jsonPath("$.code").value(4205));
+            verify(local,never()).chatStructured(anyList(),any());assertTrue(history(project,session).isEmpty());assertTrue(data(get("/api/advice/{id}/messages",project)).isEmpty());
         } finally {properties.getLlm().setStructuredMaxTokens(outputReserve);}
     }
 
@@ -219,12 +219,12 @@ class AdviceSessionIntegrationTest {
             JsonNode before=explicit?history(project,session):data(get("/api/advice/{id}/messages",project));clearInvocations(local);
             java.nio.file.Path path=java.nio.file.Paths.get(original.getStoragePath());long size=java.nio.file.Files.size(path);java.nio.file.attribute.FileTime timestamp=java.nio.file.Files.getLastModifiedTime(path);
             org.mockito.stubbing.Answer<String> changed=call->{byte[] bytes=java.nio.file.Files.readAllBytes(path);bytes[0]^=1;java.nio.file.Files.write(path,bytes);java.nio.file.Files.setLastModifiedTime(path,timestamp);return answer;};
-            if(explicit)doAnswer(changed).when(local).chatStructured(anyList(),any());else doAnswer(changed).when(local).chat(anyList());
+            doAnswer(changed).when(local).chatStructured(anyList(),any());
             mvc.perform(askRequest(project,session,"contract","project_contract","MUTATION DURING ANSWER TEST ONLY")).andExpect(jsonPath("$.code").value(4204));
             assertEquals(size,java.nio.file.Files.size(path));assertEquals(timestamp,java.nio.file.Files.getLastModifiedTime(path));
             assertEquals(original.getSourceSha256(),sources.findById(original.getId()).get().getSourceSha256(),"The database identity stays unchanged; actual bytes must be rechecked");
             assertEquals(before,explicit?history(project,session):data(get("/api/advice/{id}/messages",project)));
-            if(explicit)verify(local,times(1)).chatStructured(anyList(),any());else verify(local,times(1)).chat(anyList());
+            verify(local,times(1)).chatStructured(anyList(),any());verify(local,never()).chat(anyList());
         }
     }
 
@@ -236,14 +236,14 @@ class AdviceSessionIntegrationTest {
         mvc.perform(askRequest(project,null,"contract","project_contract","LEGACY CHANGED BEFORE SENDING TEST ONLY")).andExpect(jsonPath("$.code").value(4204));
         verify(local,never()).chatStructured(anyList(),any());verify(local,never()).chat(anyList());assertTrue(history(project,session).isEmpty());
         java.nio.file.Files.write(path,bytes);
-        doAnswer(call->{java.nio.file.Files.write(path,changed);return "TEST ONLY invalid JSON";}).when(local).chat(anyList());
+        doAnswer(call->{java.nio.file.Files.write(path,changed);return "TEST ONLY invalid JSON";}).when(local).chatStructured(anyList(),any());
         mvc.perform(askRequest(project,null,"contract","project_contract","INVALID JSON WITH CHANGED BYTES TEST ONLY")).andExpect(jsonPath("$.code").value(4204));
-        verify(local,times(1)).chat(anyList());assertTrue(data(get("/api/advice/{id}/messages",project)).isEmpty());
+        verify(local,times(1)).chatStructured(anyList(),any());verify(local,never()).chat(anyList());assertTrue(data(get("/api/advice/{id}/messages",project)).isEmpty());
     }
 
     @Test void unchangedLegacySourcesAllowOneJsonRetryWithTheOriginalPromptLiterals() throws Exception {
         String project=project();source(project,"ORIGINAL BYTES TEST ONLY");rebuild(project);List<List<LlmClient.ChatTurn>> sent=new ArrayList<>();
-        doAnswer(call->{sent.add(call.getArgument(0));return sent.size()==1?"TEST ONLY invalid JSON":answer;}).when(local).chat(anyList());
+        doAnswer(call->{sent.add(call.getArgument(0));return sent.size()==1?"TEST ONLY invalid JSON":answer;}).when(local).chatStructured(anyList(),any());
         assertTrue(data(askRequest(project,null,"contract","project_contract","LEGACY RETRY TEST ONLY")).path("grounded").asBoolean());
         assertEquals(2,sent.size());assertEquals(sent.get(0).get(0).getContent(),sent.get(1).get(0).getContent());
         assertTrue(sent.get(0).get(0).getContent().endsWith("\n\n【输出要求】只输出一个合法的 JSON，不要 Markdown 代码块，不要任何解释文字。"));
@@ -255,7 +255,25 @@ class AdviceSessionIntegrationTest {
         String project=project();SourceDocument original=source(project,"ORIGINAL BYTES TEST ONLY");rebuild(project);
         doAnswer(call->{java.nio.file.Path path=java.nio.file.Paths.get(original.getStoragePath());byte[] bytes=java.nio.file.Files.readAllBytes(path);bytes[0]^=1;java.nio.file.Files.write(path,bytes);return true;}).when(local).available();
         mvc.perform(askRequest(project,null,"contract","project_contract","AVAILABILITY MUTATION TEST ONLY")).andExpect(jsonPath("$.code").value(4204));
-        verify(local,never()).chat(anyList());assertTrue(data(get("/api/advice/{id}/messages",project)).isEmpty());
+        verify(local,never()).chat(anyList());verify(local,never()).chatStructured(anyList(),any());assertTrue(data(get("/api/advice/{id}/messages",project)).isEmpty());
+    }
+
+    @Test void bareAskCannotBypassUnknownOverBudgetOrSub256KAdmissionAndBoundRequestsKeepSingleQuestionSemantics() throws Exception {
+        String project=project();source(project,"ORIGINAL BYTES TEST ONLY");rebuild(project);
+        doReturn(null).when(counter).observe(any());
+        mvc.perform(askRequest(project,null,"contract","project_contract","BARE UNKNOWN BUDGET TEST ONLY")).andExpect(jsonPath("$.code").value(4205));
+        adapters();overrideTokens.set(262144);
+        mvc.perform(askRequest(project,null,"contract","project_contract","BARE OVER BUDGET TEST ONLY")).andExpect(jsonPath("$.code").value(4205));
+        doAnswer(call->{VettingInputBudget.Observation result=observation(call.getArgument(0));result.setInputTokens(1000);result.setEffectiveContextTokens(131072);return result;}).when(counter).observe(any());
+        mvc.perform(askRequest(project,null,"contract","project_contract","BARE SHORT CONTEXT TEST ONLY")).andExpect(jsonPath("$.code").value(4205));
+        verify(local,never()).chatStructured(anyList(),any());verify(local,never()).chat(anyList());assertTrue(data(get("/api/advice/{id}/messages",project)).isEmpty());
+        adapters();List<VettingInputBudget.Input> counted=new ArrayList<>();List<List<LlmClient.ChatTurn>> sent=new ArrayList<>();
+        doAnswer(call->{VettingInputBudget.Input input=call.getArgument(0);counted.add(input);return observation(input);}).when(counter).observe(any());
+        doAnswer(call->{sent.add(call.getArgument(0));return answer;}).when(local).chatStructured(anyList(),any());
+        assertTrue(data(askRequest(project,null,"contract","project_contract","BARE BOUND 256K TEST ONLY")).path("grounded").asBoolean());
+        assertEquals(1,counted.size());assertEquals(1,sent.size());assertEquals(JsonUtils.write(counted.get(0).getMessages()),JsonUtils.write(sent.get(0)));
+        assertTrue(counted.get(0).getSourceSnapshotSha256().matches("[a-f0-9]{64}"));assertEquals(2,data(get("/api/advice/{id}/messages",project)).size());
+        assertTrue(data(get("/api/advice/{id}/sessions",project)).isEmpty(),"Admission must not require silently creating a session");
     }
 
     private VettingInputBudget.Observation observation(VettingInputBudget.Input input) {
