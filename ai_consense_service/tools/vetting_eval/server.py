@@ -103,6 +103,7 @@ OFFLINE = True  # Isolated window recipe never downloads model artifacts.
 LOCK = threading.RLock()
 _embedding = _reranker = _ocr = _database = None
 _projects = {}
+_migrated_index = None
 _selected_device = None
 app = FastAPI(title='ConSense local vetting models', version='1.0.0')
 
@@ -230,7 +231,7 @@ def retrieval_settings(*, observe_tokenizer_identity=True):
                      **{key: parameters[key].default for key in ('k1', 'b', 'epsilon')}},
             'tokenPattern': TOKEN_PATTERN, 'tokenizerAlgorithm': TOKENIZER_ALGORITHM,
             'latinTokenPattern': LATIN_TOKEN_PATTERN, 'roleFilter': True,
-            'storage': 'Qdrant Python local', 'workers': 1,
+            'storage': 'Qdrant Server' if os.environ.get('CONSENSE_QDRANT_URL') else 'Qdrant Python local', 'workers': 1,
             'sourceWindows': (window_runtime().retrieval_recipe()if observe_tokenizer_identity
                               else window_runtime().retrieval_recipe(observe_tokenizer_identity=False))}
 
@@ -300,6 +301,15 @@ def signature(chunks):
 
 
 def read_project(key):
+    global _migrated_index
+    from migrated_qdrant_index import MigratedIndex, configured
+    if configured(os.environ) or _migrated_index is not None:
+        try:
+            if _migrated_index is None:
+                _migrated_index = MigratedIndex(os.environ)
+            return _migrated_index.read(key, window_runtime(), database)
+        except WindowError as error:
+            raise HTTPException(409, {'kind':error.kind, 'message':str(error), 'metadata':error.metadata}) from error
     stored = _projects.get(key)
     if stored is None:
         path = metadata_path(key)
@@ -336,7 +346,7 @@ def validate_corpus(chunks):
 @app.get('/health')
 def health():
     import torch
-    return {'status': 'ok', 'mode': 'local', 'device': device(), 'offline': OFFLINE,
+    return {'status': 'ok', 'mode': 'server' if os.environ.get('CONSENSE_QDRANT_URL') else 'local', 'device': device(), 'offline': OFFLINE,
         'models': MODELS, 'maxTokens': MODEL_SETTINGS['embedding']['maxTokens'],
         'batchSize': MODEL_SETTINGS['embedding']['batchSize'],
         'runtime': {kind: model_runtime(kind) for kind in ('embedding', 'reranker')},
@@ -348,7 +358,7 @@ def health():
         'limitations': ['OCR does not interpret table cells or deletion state',
             'Source-bound windows count query/special tokens; oversized queries fail without silent clipping',
             'Legacy maxTokens/batchSize health fields describe embedding only',
-            'Run one server worker with Qdrant local persistence']}
+            'Run one server worker with one Qdrant storage owner']}
 
 
 @app.post('/ocr')
@@ -389,6 +399,9 @@ def ocr(file: UploadFile = File(...)):
 
 @app.post('/index')
 def index(request: IndexRequest):
+    from migrated_qdrant_index import configured
+    if configured(os.environ) or _migrated_index is not None:
+        raise HTTPException(409, 'Pinned migrated Server index is read-only')
     try:
         return window_runtime().index(request)
     except WindowError as error:
@@ -397,7 +410,14 @@ def index(request: IndexRequest):
 
 @app.post('/retrieve')
 def retrieve(request: RetrieveRequest):
-    return window_runtime().retrieve(request)
+    result = window_runtime().retrieve(request)
+    if _migrated_index is not None:
+        observed = _migrated_index.last_observation
+        result['indexAccess'] = {'mode':'pinned-migrated-server-read-only', 'readOnly':True,
+                                'migrationReceiptSha256':observed['receipt']['sha256'],
+                                'runtimeCompatibilityVerified':False,
+                                **{name:observed[name] for name in ('queryRuntimeSignature','queryIdentity','queryRecipe','target','fullVectorIntegrity')}}
+    return result
 
 
 if __name__ == '__main__':

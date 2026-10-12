@@ -17,6 +17,15 @@ public class FixedBaselineProperties {
     private int candidates = 50;
     private int maxResponseBytes = 16777216;
     private int maxRecordBytes = 16777216;
+    private String migrationReceiptPath, migrationReceiptSha256, queryRuntimePath, queryRuntimeSha256;
+    public String getMigrationReceiptPath() { return migrationReceiptPath; }
+    public void setMigrationReceiptPath(String v) { migrationReceiptPath = v; }
+    public String getMigrationReceiptSha256() { return migrationReceiptSha256; }
+    public void setMigrationReceiptSha256(String v) { migrationReceiptSha256 = v; }
+    public String getQueryRuntimePath() { return queryRuntimePath; }
+    public void setQueryRuntimePath(String v) { queryRuntimePath = v; }
+    public String getQueryRuntimeSha256() { return queryRuntimeSha256; }
+    public void setQueryRuntimeSha256(String v) { queryRuntimeSha256 = v; }
     public boolean isEnabled() { return enabled; }
     public void setEnabled(boolean v) { enabled = v; }
     public String getManifestPath() { return manifestPath; }
