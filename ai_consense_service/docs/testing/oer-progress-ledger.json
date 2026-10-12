@@ -1,50 +1,64 @@
 {
   "schema": "consense.oer-progress-ledger.v1",
   "snapshot": {
-    "asOf": "2026-10-12 20:55",
+    "asOf": "2026-10-13 02:40",
     "staticSnapshot": true,
-    "headline": "两张完整文字表已并入固定开发库；05实际入库和冻结完成",
-    "intro": "全部所需3250页保持，19371观察父和20700向量点已实际持久保存；新增两完整HTML文字表，旧04全部19369父原字节保持。八真实来源/整表查询结果：原六来源top1 6/6；新整表TopK召回/完整父/artifact各2/2（1312 rank5、1330 rank2）；完整观察父/来源定位8/8，05开发基准已冻结，04保底保留。",
-    "blocker": "这次只有两完整表在开发baseline采用；另外三无框表失败仍保留，cell geometry/legal/notes/续接及normal worker资格未过。Vetting/Advisory业务接通与官方题/结构化报告待执行；最终解析/完整检索/业务/H800门仍未过。",
+    "headline": "两业务最小实现已集成；真实咨询有限样本闭合，质量与全回归继续收口",
+    "intro": "Ponytail hooks在开发前安装/激活并验证。固定05保持19371父/20700向量；新增原生Stream主网格672/672与4/5源监督组、Server存储冷seal、真实M3多轮SQL/引用/原页、Linux82包离线导入。既有113轮/746证据/41卡/438指标和失败全部保留。",
+    "blocker": "全Java两轮仍exit1（首2631/25fail/103error/123skip，第二2701/1/86/111）；真实Vetting尚待run。Window续注/父条法律范围unknown；全官方业务、Word分页、Server语义/PVC、OCI扫描与H800未过门。",
     "summaries": [
       {
-        "label": "固定05开发库实际完成",
-        "value": "3,250页 · 20,700持久向量",
-        "detail": "19,371观察父＝18,615native＋754物理整表＋2逻辑整表；04原字节前缀完整保持，计数不等源准确率。"
+        "label": "原生完整源组候选",
+        "value": "Stream主表5/5 · 源监督组4/5",
+        "detail": "672/672主格、11/12外成员、86/87关系；Window跨页/父条unknown、未正式采用。"
       },
       {
-        "label": "新完整视觉无框有限源分",
-        "value": "结构654/672 · 字面418/672",
-        "detail": "完整HTML文字2/5（原1312/1330）；cell geometry/legal/外注/续接未知，formal normal失败保持；旧几何域独立保留。"
+        "label": "真实M3咨询有限样本",
+        "value": "首问＋跟问 · SQL/引用/原页实核",
+        "detail": "reference_only；85字evidenceId/两条历史逐字保持，物理17页canvas可见；exactTemplateObserved=false。"
       },
       {
-        "label": "实际六来源＋两整表回取",
-        "value": "原六来源top1 6/6；新整表TopK召回/完整父/artifact各2/2（1312 rank5、1330 rank2）；完整观察父/来源定位8/8",
-        "detail": "05八真实查询；saved-normal与源定位有限域，非原件gold/LLM答案/业务验收。"
+        "label": "代码与全回归状态",
+        "value": "Vue126/126＋build · Java仍失败",
+        "detail": "两轮Java失败均保留；公开mjs12/12仅软件边界，不等业务/源质量。"
       },
       {
-        "label": "05开发基准实际冻结",
-        "value": "05已冻 · 04保底保留",
-        "detail": "两whole表仅开发采用；原formal失败、geometry/legal/外注/续接unknown及最终门全部保持。"
+        "label": "Linux/Server候选",
+        "value": "82包离线安装 · 20700点冷seal",
+        "detail": "新CPU smoke构造模型/DB/GPU/OCR均0；初版已误下载3内嵌ONNX并拒绝。语义/PVC/OCI/扫描/H800未过。"
       }
     ],
-    "roundCaption": "R113实际追加2whole逻辑文字表，独立保存核查/真实CUDA入库/八有限来源查询/05开发冻结分别闭合；旧112轮、438指标和训练失败全保留。",
-    "footer": "最新21:00截止优先：冻结可追溯开发基准、实际向量入库，再推进Vetting/Advisory。最终解析质量/全库质量/业务/H800验收尚未过，开发baseline不冒称这些门完成。Drafting冻结、范围排除、旧训练/失败保持。",
+    "roundCaption": "追加R114–R119：软件/制品/有限业务用engineering轮，完整226源评用parsing轮；旧113轮及438文档质量指标逐项原样保留。",
+    "footer": "北京时间今天08:30冻结本地代码，09:00由用户提交GitHub。最小实现与已核局部证据不关闭未验门；Drafting冻结、图纸排除、Local05与既有原件/模型/失败保全，不push或切活动服务。",
     "goal": {
       "status": "blocked",
       "createdAt": 1791724559,
       "evidence": "deadline-current-goal-blocked-2044",
       "workResumedByUser": true,
-      "evidenceHistorical": false,
-      "rootLatestToolReadback": "2026-10-12 20:44 blocked；旧active evidence为历史，实际工作依用户授权继续"
+      "evidenceHistorical": true,
+      "rootLatestToolReadback": "2026-10-12 20:44 blocked；旧active evidence为历史，实际工作依用户授权继续；本次02:40报告未重新调用Goal工具，该状态保留为20:44历史收据，不推定当前状态。"
+    },
+    "reportBuild": {
+      "sourceRoot": "C:\\Users\\Administrator\\.codex\\worktrees\\oer-progress-delivery\\ConSense",
+      "evidenceRoot": "D:\\R&D\\ConSense",
+      "rendererRootOverride": "ROOT is explicitly bound to evidenceRoot/ai_consense_service; template and renderer code come from sourceRoot",
+      "sourceRevision": "7b541dd",
+      "liveQueries": 0,
+      "modelsOrDBOpened": 0,
+      "preservedHistory": {
+        "rounds": 113,
+        "evidence": 746,
+        "documentScorecards": 41,
+        "documentQualityMetrics": 438
+      }
     }
   },
   "milestones": [
     {
       "title": "原件完整解析质量",
-      "status": "全范围正常基线已齐；最终原件质量仍未通过",
+      "status": "原生候选源监督组4/5；全范围最终源质量仍待",
       "state": "warn",
-      "detail": "18任务家族完整基线已齐；COM55新恢复HTML整表有限收益，但全SL文字、geometry、完整组和条件归属仍未全部通过。",
+      "detail": "18家族已有正常基线；新完整226候选Stream主网格5/5与4/5源监督组，Window续注/父条unknown，正式候选未采用。旧正确333/333与331/331保持。",
       "gates": [
         {
           "label": "全范围原件核验",
@@ -62,14 +76,15 @@
       "evidence": [
         "sl-mineru",
         "paddle-fit",
-        "sl-normal"
+        "sl-normal",
+        "next-native-conditions-source"
       ]
     },
     {
       "title": "固定文件向量库质量",
-      "status": "05开发基准已实际入库并冻；最终质量待",
+      "status": "Local05保持；Server全量存储候选闭合",
       "state": "warn",
-      "detail": "19371观察父/20700持久点；独立前缀保全与八有限来源回取原六来源top1 6/6；新整表TopK召回/完整父/artifact各2/2（1312 rank5、1330 rank2）；完整观察父/来源定位8/8。最终原件/必要证据完整召回与业务未过。",
+      "detail": "Local05 19371父/20700点保持；新Server20700点完整payload/float32seal与cold一致。3次self-vector不是自然语言语义/必要证据召回；PVC/H800未验。",
       "gates": [
         {
           "label": "完整合格固定 corpus",
@@ -87,14 +102,16 @@
       "evidence": [
         "deadline-fixed-index-actual05",
         "deadline-fixed-eight-query-compact05",
-        "deadline-fixed-freeze05-receipt"
+        "deadline-fixed-freeze05-receipt",
+        "next-server-migration",
+        "next-server-cold"
       ]
     },
     {
       "title": "项目接入与业务验收",
-      "status": "基准冻结后立即推进",
+      "status": "真实Advisory有限两轮闭合；Vetting待run",
       "state": "warn",
-      "detail": "先打通Vetting/Advisory共用fixed baseline入口，再验收官方问题、结构化报告与真实来源回取；未完成的来源/业务门不假称通过。",
+      "detail": "GCC2.1首问/跟问原样SQL保存、有界history逐字、逐答案引用与物理17页画布实核。SCC tender已上传799位置/186855字符；真实Vetting/官方全套/三格式导出尚待。",
       "gates": [
         {
           "label": "项目来源接入",
@@ -109,13 +126,17 @@
           "done": false
         }
       ],
-      "evidence": []
+      "evidence": [
+        "next-advice-followup-proof",
+        "next-advice-page17-pixels",
+        "next-scc-upload"
+      ]
     },
     {
       "title": "冻结与 H800 验收",
-      "status": "05开发基准已冻；最终链/K8s/H800后续",
+      "status": "Linux82包严格离线导入；最终制品/扫描/H800未过",
       "state": "warn",
-      "detail": "05实际freeze完成，04immutable fallback保留；完整最终质量、K8s镜像与H800推理仍未验收。",
+      "detail": "新Linux独立venv hash离线安装/pip check/CPU smoke通过；旧94包误含3内嵌ONNX候选拒绝保留。最终OCI digest、扫描、字体/PVC/单H800资源恢复仍待。",
       "gates": [
         {
           "label": "完整质量已过",
@@ -132,7 +153,9 @@
       ],
       "evidence": [
         "deadline-fixed-freeze05-manifest",
-        "deadline-fixed-freeze05-receipt"
+        "deadline-fixed-freeze05-receipt",
+        "next-linux82-smoke-hash-fix",
+        "next-linux-ocr-rejected"
       ]
     }
   ],
@@ -2566,6 +2589,133 @@
         "deadline-fixed-freeze05-manifest",
         "deadline-fixed-freeze05-receipt"
       ]
+    },
+    {
+      "id": "R114",
+      "date": "10-13",
+      "kind": "engineering",
+      "title": "Ponytail先激活；共同身份、两业务与Vue本地实现进入实际回归",
+      "status": "前端126/126＋构建通过；全Java两轮仍失败",
+      "state": "warn",
+      "scope": "隔离codex/oer-vetting-advisory-20261013；本轮比较起点46206d4。Drafting、活动Local05、原件/模型/密钥和脏主工作区保持。",
+      "change": "先安装并信任Ponytail5.1.0三个准确hash hooks；独立SessionStart与UserPromptSubmit实际完成。集成session/历史、SHA回取、Vetting owner/lease/checksum/coverage/snapshot、显示版本与最低256K准入。",
+      "result": "共同Python49项、规则原件真实HTTP54项、Vue126/126与vue-tsc/Vite构建通过；三份旧mjs harness修复后12/12。Java首全跑2631 tests/25 failures/103 errors/123 skips；第二全跑2701/1/86/111，均exit1。",
+      "adoption": "代码/软件控制，不计原件或模型准确率。首Java收据结束时HEAD为69693b9，Java实际编译34c1975；第二编译de4a603。旧失败/外部OCR actual fixture缺席保留。SubagentStart只有配置确认，当前桌面回合未重启，不宣称hook热加载。",
+      "next": "按已保存失败归因修复并做最终全量回归；继续真实Vetting和导出，08:30冻结；不push。",
+      "evidence": [
+        "next-hooks-lifecycle",
+        "next-software-closure49",
+        "next-rule-original-http54",
+        "next-web126-receipt",
+        "next-web126-tests",
+        "next-web-build",
+        "next-web-mjs-first-failure",
+        "next-web-mjs12",
+        "next-java-full-first",
+        "next-java-full-first-log",
+        "next-java-full-second",
+        "next-java-full-second-log"
+      ]
+    },
+    {
+      "id": "R115",
+      "date": "10-13",
+      "kind": "parsing",
+      "title": "原生候选主网格恢复；首轮完整业务组0/5仍保留",
+      "status": "Stream主网格672/672、5/5；完整组0/5",
+      "state": "candidate",
+      "scope": "COM11 55＋PIL1 87＋GIN84＝226完整页；沿用密封同域来源评分，非blind。",
+      "change": "动态定位唯一编号列，合并同provider多列表头/同编号续行；保原格、excluded成员与可逆映射；不按目标页/坐标或参考字面修候选。",
+      "result": "Stream主网格结构/完整格文672/672、5/5；Network650/672、4/5。首完整业务组各0/5，外成员owned0/12、typed0/87、Window跨页0/1；lines旧正确结构333/333、格文331/331保持。",
+      "adoption": "主网格正确不等于Notes/星号/续页完整。首轮0/5失败保留；早先人工13外成员加总更正为该源域12，不改原评分文件/expected。未正式采用，不切05。",
+      "next": "在相同完整来源上验证共享明确Notes/星号关系，无法唯一确定的跨页/父条继续unknown。",
+      "evidence": [
+        "next-native-first-source",
+        "next-native-first-terminal"
+      ]
+    },
+    {
+      "id": "R116",
+      "date": "10-13",
+      "kind": "parsing",
+      "title": "完整226页Notes/星号条件组同域复验：4/5源监督组",
+      "status": "Stream4/5；Window跨页与法律父条仍unknown",
+      "state": "candidate",
+      "scope": "同三章226完整输入；条件02密封源监督域：672主格、12表外成员、87 typed关系、5源监督组。",
+      "change": "用完整原生同页锚保Notes、可选条件、标题、星号成员和唯一明确引用；无需参考答案入候选。不扩大bbox吞末列，不为断页构造owner。",
+      "result": "Stream结构/格文672/672、主表5/5、表外11/12、typed86/87、完整源监督组4/5；Network650/672、4/5、11/12、74/87、3/5；lines同域0/5，旧正确333/333与331/331保持。",
+      "adoption": "4/5仅completeAnnotatedSourceGroup；wholeBusinessScopeAccepted=false、legalScopeQualityAccepted=false、candidateAdopted=false。Window续注缺属，父条未被继承参考标注；不能写成法律整组或完整比赛通过。首轮完整组0/5独立保留。0模型/权重更新，非blind。",
+      "next": "保源质量门，继续共享归属验证；对未解组和当前05已知缺陷向业务消费者如实传unknown。",
+      "evidence": [
+        "next-native-conditions-source",
+        "next-native-conditions-terminal",
+        "next-native-conditions-seal",
+        "next-native-conditions-controls"
+      ]
+    },
+    {
+      "id": "R117",
+      "date": "10-13",
+      "kind": "engineering",
+      "title": "Qdrant Server候选全量读回与冷启seal闭合",
+      "status": "20700点完整seal相等；语义/PVC/H800未过",
+      "state": "candidate",
+      "scope": "Local05准确字节副本→独立Server1.19.2新collection；19371 parents、20700 vectors、1024维Cosine。",
+      "change": "全点payload/float32向量hash及parent readback，记录回滚配置；重启自有Server后重新全量seal，不开第二活动Local05 client。",
+      "result": "全部20700源/目标/cold点seal＝970c8e0e6ef36f57a4fbe5a26106e6225a3df5fd9b87d10afd9c001883c112a5；3次self-vector存储查询、3PDF与2表JSON按原SHA回取通过。",
+      "adoption": "仅存储迁移与有限来源定位，非自然语言语义/召回/排序质量；targetAdopted=false、semanticModelQueryAccepted=false、PVCdurabilityAccepted=false、H800Accepted=false。Local05配置及持久字节保持。",
+      "next": "用真实文本query/实际BGE和同池证据验证Server；最终PVC持久/恢复与H800后置。",
+      "evidence": [
+        "next-server-migration",
+        "next-server-cold",
+        "next-server-self-vector"
+      ]
+    },
+    {
+      "id": "R118",
+      "date": "10-13",
+      "kind": "engineering",
+      "title": "真实M3咨询两轮SQL保存、逐答案引用与物理原页回取",
+      "status": "GCC2.1有限样本已实核；全套业务未通过",
+      "state": "candidate",
+      "scope": "隔离project proj_mv5ivmvna502、reference_only session 8c94dd87-7184-4eea-972c-2e16250b7c0b；固定05，非官方题/非blind。",
+      "change": "先保首次85字evidenceId SQL长度失败，再在隔离H2实际执行V18；GCC2.1首问/跟问通过原wire、SQL、HTTP和浏览器验证。",
+      "result": "两轮assistant原样存85字evidenceId；跟问最终wire两条历史question/answer与SQL逐字相等。input16866/output339/total17205；262144窗口+16384输出+32768margin预算总66018。第一轮[2]仍回13–16页，session往返后身份保持；SHA核原PDF，实际canvas显示物理17页/印刷2。真实SCC tender上传PARSED：799原生位置、186855字符、OCR=false。",
+      "adoption": "provider_estimated_fit且exactTemplateObserved=false；有限回答保授权书面/签署/范围/送达生效、非批准不妨碍否定与义务不解除。项目采用未确认。首口头指示问缺证/SQL失败保持。Vetting尚未run，Word物理页/三格式导出与全套官方业务未验。",
+      "next": "基于现已上传SCC跑真实Vetting、人工记录、原件与三格式导出；继续官方样本和独立质量评分。",
+      "evidence": [
+        "next-advice-followup-proof",
+        "next-advice-first-history",
+        "next-advice-followup-history",
+        "next-advice-session-dom",
+        "next-advice-page17-pixels",
+        "next-advice-budget-first",
+        "next-advice-budget-followup",
+        "next-advice-sql-v18",
+        "next-scc-upload"
+      ]
+    },
+    {
+      "id": "R119",
+      "date": "10-13",
+      "kind": "engineering",
+      "title": "Linux retrieval严格82包离线安装与CPU导入；旧误下载拒绝保留",
+      "status": "82包实际离线安装；OCI/扫描/H800未过",
+      "state": "candidate",
+      "scope": "独立WSL Linux x86_64/CPython3.12、cu128轮组；既有BGE两publication身份保持，未复制模型权重到报告。",
+      "change": "初版继承OCR依赖下载94包，其中RapidOCR3.9.2 wheel内嵌3ONNX权重，明确拒绝并保偏差；缩小为真实retrieval/API依赖，82包4066465995 bytes。",
+      "result": "新venv --no-index --require-hashes实际安装、pip check、CPU tensor/BM25/server和10主包导入通过；逐包来源/版本/hash绑定修复后含python -O的边界复验。两份BGE原publicationSHA保持。",
+      "adoption": "严格新候选模型构造0、vectorDB构造0、GPU context0、OCR0、显式模型下载0；该事实不覆盖旧候选已下载3内嵌权重。modelQualityAccepted/targetOfflineBootAccepted/OCIscanAccepted/H800Accepted均false；普通依赖轮组不是最终OCI交付。",
+      "next": "准备最终OCI digest、字体/全部目标制品和漏洞/license扫描，再按实际K8s单H800/PVC做离线启动与资源交接。",
+      "evidence": [
+        "next-linux-ocr-rejected",
+        "next-linux82-offline-install",
+        "next-linux82-pipcheck",
+        "next-linux82-smoke",
+        "next-linux82-smoke-hash-fix",
+        "next-linux82-boundary",
+        "next-linux-model-manifests"
+      ]
     }
   ],
   "comparisons": [
@@ -2887,6 +3037,82 @@
       "evidence": [
         "deadline-fixed-eight-query-compact05",
         "deadline-fixed-eight-query-terminal05"
+      ]
+    },
+    {
+      "title": "Native条件02 · 三章226完整页 · 独立同域源分",
+      "scope": "COM11五目标源监督组；数据格/主网格/表外成员/typed关系各用独立分母。条件02三provider同域，首轮0/5另保。",
+      "series": [
+        "pdfplumber lines",
+        "Camelot Network",
+        "Camelot Stream"
+      ],
+      "shortSeries": [
+        "lines",
+        "Network",
+        "Stream"
+      ],
+      "metrics": [
+        {
+          "label": "主网格origin拓扑",
+          "denominator": 672,
+          "values": [
+            0,
+            650,
+            672
+          ]
+        },
+        {
+          "label": "主网格完整格文字面",
+          "denominator": 672,
+          "values": [
+            0,
+            650,
+            672
+          ]
+        },
+        {
+          "label": "完整主网格",
+          "denominator": 5,
+          "values": [
+            0,
+            4,
+            5
+          ]
+        },
+        {
+          "label": "表外完整成员",
+          "denominator": 12,
+          "values": [
+            0,
+            11,
+            11
+          ]
+        },
+        {
+          "label": "源显式typed关系",
+          "denominator": 87,
+          "values": [
+            0,
+            74,
+            86
+          ]
+        },
+        {
+          "label": "完整源监督组；非法律作用验收",
+          "denominator": 5,
+          "values": [
+            0,
+            3,
+            4
+          ]
+        }
+      ],
+      "note": "Stream源监督组4/5，法律/父条/Window跨页未知，非blind、未正式采用、0权重更新。12成员及87关系不拼为同一准确率，不与历史geometry/HTML异域分数连曲线。软件测试、入库点数与真实咨询不计解析准确率。",
+      "evidence": [
+        "next-native-conditions-source",
+        "next-native-conditions-terminal",
+        "next-native-conditions-seal"
       ]
     }
   ],
@@ -3252,32 +3478,32 @@
   ],
   "next": [
     {
-      "title": "21:00开发基准已准备完成：进入Vetting/Advisory",
+      "title": "08:30之前闭合本地交付",
       "items": [
         {
-          "title": "复用已冻05及04保底",
-          "detail": "不重复解析/重建同库；新逻辑表仅整表开发采用，已知缺陷/unknown继续可见。"
+          "title": "修真实失败与最小回归",
+          "detail": "按Java两次全跑保存失败归因；不伪造OCR actual fixture、不用focused控制代替全跑。"
         },
         {
-          "title": "共用固定标准入口",
-          "detail": "Vetting/Advisory固定依据与项目事实分开，再核项目适用性和修订；LLM只拿选定完整文字与定位，审计原料不整包灌入。"
+          "title": "跑已上传SCC的真实Vetting",
+          "detail": "模型/覆盖/五状态、人工保存、来源版本守卫与JSON/PDF/DOCX；每个门实际结果独立记录。"
         },
         {
-          "title": "官方题及结构化报告",
-          "detail": "真实模型调用、来源回取和前端业务验收分别记录；最终解析、完整检索、业务/H800门不由冻结追认。"
+          "title": "最终独立审查与冻结",
+          "detail": "复核所有生成至少256K、原件SHA回取、旧checkpoint拒复用、显示binding；07:00停止非必要扩展，08:30冻结本地分支，不push。"
         }
       ]
     },
     {
-      "title": "基准冻结后：Vetting / Advisory",
+      "title": "保持未通过的源与目标环境门",
       "items": [
         {
-          "title": "共用fixed provider与项目资料组合",
-          "detail": "独立库真实入库和业务代码接通分别记录；冻结后实现两模块共用固定标准入口，保项目适用性/真实来源/known gaps，不改变Drafting。"
+          "title": "共享完整关系与官方业务",
+          "detail": "Window续注/父条unknown不造owner；4/5源监督组不升级为法律质量或全源采用。官方题/新来源/完整解析仍需真实独立评分。"
         },
         {
-          "title": "最终质量持续提高",
-          "detail": "开发baseline允许已知缺陷；最终解析、检索、业务及H800验收继续按实际结果记录，不以本次计数和冻结宣称通过。"
+          "title": "Server与Linux最终交付",
+          "detail": "真实文本+BGE语义/排序、PVC/cold恢复、最终OCI digest绑定扫描/字体、单H800所有权与峰值分别验收。"
         }
       ]
     }
@@ -7060,6 +7286,191 @@
       "path": ".local/state/oer-deadline-baseline-20261012/report-actual-update-2055/evidence/deadline-fixed-freeze05-receipt.json",
       "sha256": "a9df6001a17e5d0c56ba22d92baa2d0d51c21d945be020c55db1e7772b87b9df",
       "label": "05真实冻结exit0，最终解析/业务/H800未过"
+    },
+    "next-hooks-lifecycle": {
+      "label": "Ponytail 5.1.0 独立真实 hook 生命周期",
+      "path": ".local/state/oer-next-implementation-20261013/report-evidence/ponytail-lifecycle-events.json",
+      "sha256": "bb951ea21ac347a027669ca0abebbab3381b0d1b621064ae828eabee372c0d7d"
+    },
+    "next-software-closure49": {
+      "label": "共同软件身份闭合49项回归",
+      "path": ".local/state/oer-next-implementation-20261013/report-evidence/software-closure-final-tests-04.log",
+      "sha256": "23651a92461747fdb08f7b19b49dab8b814ec5ae78ddba3d6d9c07ed13b0a8eb"
+    },
+    "next-web126-receipt": {
+      "label": "前端126项契约与vue-tsc/Vite构建收据",
+      "path": ".local/state/oer-next-implementation-20261013/report-evidence/integrated-web-f5ee146-receipt.json",
+      "sha256": "edd2901d37d8463fa400fdc09f8c6292ca9bb84091fd0c4d9ab766b7b790538b"
+    },
+    "next-web126-tests": {
+      "label": "前端126项契约实际日志",
+      "path": ".local/state/oer-next-implementation-20261013/report-evidence/integrated-web-f5ee146-tests.log",
+      "sha256": "7d670a1ead836e1484fb7c91efcf6b79ab10669ad61c8f27dc870c03cd4463f5"
+    },
+    "next-web-build": {
+      "label": "vue-tsc与Vite实际构建日志",
+      "path": ".local/state/oer-next-implementation-20261013/report-evidence/integrated-web-f5ee146-build.log",
+      "sha256": "f56a6caa99a2427c0285c41ab81928b518eef41a219a1e905e6c4fd39afbde69"
+    },
+    "next-web-mjs-first-failure": {
+      "label": "公开mjs脚本首跑失败保留",
+      "path": ".local/state/oer-next-implementation-20261013/report-evidence/integrated-web-scripts-34c1975.log",
+      "sha256": "b1a92f74b87bf228a5aa2fe4ea2288599eea90c4ae61d7cdac0f86b87dc5c136"
+    },
+    "next-web-mjs12": {
+      "label": "公开mjs harness修复后12项执行通过",
+      "path": ".local/state/oer-next-implementation-20261013/report-evidence/integrated-web-script-fix-final.log",
+      "sha256": "6787e57e89766f4325761f8d68a94d509e2aff39c61d06c9090c17314a9fc151"
+    },
+    "next-java-full-first": {
+      "label": "全Maven首跑失败收据（编译34c1975）",
+      "path": ".local/state/oer-next-implementation-20261013/report-evidence/integrated-java-34c1975-receipt.json",
+      "sha256": "9ca365619cfaba7688d1f623022a9c92f7dc4f3c23f8941590f1fa1d90fb36c3"
+    },
+    "next-java-full-first-log": {
+      "label": "全Maven首跑实际失败日志",
+      "path": ".local/state/oer-next-implementation-20261013/report-evidence/integrated-java-34c1975-full.log",
+      "sha256": "ed34ee6f8c3a0e0ab461e691d572721c7bf023d2e6761d66a97f818da89e8e02"
+    },
+    "next-java-full-second": {
+      "label": "全Maven第二跑失败收据（编译de4a603）",
+      "path": ".local/state/oer-next-implementation-20261013/report-evidence/integrated-java-de4a603-receipt.json",
+      "sha256": "cb0a81f914757fffa734cd6fc87a38cd147a9ef44aea27032185b21bacf2f68e"
+    },
+    "next-java-full-second-log": {
+      "label": "全Maven第二跑实际失败日志",
+      "path": ".local/state/oer-next-implementation-20261013/report-evidence/integrated-java-de4a603-full.log",
+      "sha256": "0b4b9bc0fb579151a7ea08c39793fb7659488313cdd09c9de350f60bb66c569d"
+    },
+    "next-rule-original-http54": {
+      "label": "真实HTTP上传→规则finding→SHA守卫原件54项",
+      "path": ".local/state/oer-next-implementation-20261013/report-evidence/vetting-rule-original-receipt.json",
+      "sha256": "6d2756bbfa4c31a012f479065343a0f86dae669b5f136bc271cf514ff55365f9"
+    },
+    "next-native-first-source": {
+      "label": "完整226页候选首轮源组0/5保留",
+      "path": ".local/state/oer-next-implementation-20261013/report-evidence/native-table-whole-group-01/full-group-source-score.json",
+      "sha256": "0189c43ec5b95864456e861a4d3c1e1dc1269d313e60ec1e6601bcd60cde39d6"
+    },
+    "next-native-first-terminal": {
+      "label": "完整226页原生候选首轮真实运行终态",
+      "path": ".local/state/oer-next-implementation-20261013/report-evidence/native-table-actual-full226-01/terminal.json",
+      "sha256": "42bc658284fb2c026897687be127a44dbe1d56f77f3c1aaf30b9fef8ed3b7ce6"
+    },
+    "next-native-conditions-source": {
+      "label": "完整226页同域条件组源评分02",
+      "path": ".local/state/oer-next-implementation-20261013/report-evidence/native-table-whole-group-conditions-02/complete-condition-group-score.json",
+      "sha256": "8fedf149e3858450fb8b4c3c5aa602e99a5c2ded20193a987dc138bdf9716977"
+    },
+    "next-native-conditions-terminal": {
+      "label": "完整226页条件组正常运行终态02",
+      "path": ".local/state/oer-next-implementation-20261013/report-evidence/native-table-actual-full226-conditions-02/terminal.json",
+      "sha256": "24f3602e1c01ce1de41724991597e9bd5e1086d0d965f95c0769528b98b971c8"
+    },
+    "next-native-conditions-seal": {
+      "label": "条件组主网格既有同域scorer封存",
+      "path": ".local/state/oer-next-implementation-20261013/report-evidence/native-table-whole-group-conditions-02/scoring/scorer-seal.json",
+      "sha256": "3cbf344dd06a0e0cdd29876fa9a8978103093aacae6b93a840c3044fdd71ee72"
+    },
+    "next-native-conditions-controls": {
+      "label": "Notes与星号共享机制软件回归",
+      "path": ".local/state/oer-next-implementation-20261013/report-evidence/native-table-condition-marker-list-tests.log",
+      "sha256": "6d0b30bbf6603731bc06f39b198c40997109d10f4bf75006bdda37613be1f635"
+    },
+    "next-server-migration": {
+      "label": "Qdrant Server 20700点全量迁移读回候选",
+      "path": ".local/state/oer-next-implementation-20261013/report-evidence/qdrant-server-migration-01/actual-02/migration-receipt.json",
+      "sha256": "453ae069936cd32bc0b8350ad24e70e691007d0140c13c0726d3141843d66443"
+    },
+    "next-server-cold": {
+      "label": "Qdrant Server冷启全量seal复验",
+      "path": ".local/state/oer-next-implementation-20261013/report-evidence/qdrant-server-migration-01/cold-server-readback-receipt.json",
+      "sha256": "a06b4eb3c1c181d51f0fe33220fea51397840c516e4297b83093157479ecff87"
+    },
+    "next-server-self-vector": {
+      "label": "三次self-vector存储查询有限探针",
+      "path": ".local/state/oer-next-implementation-20261013/report-evidence/qdrant-server-migration-01/actual-02/storage-query-probes.json",
+      "sha256": "e2a824b0daed4c52a874cdfbf11cbd185c3bfd0eaed0380fedb9abf8c9daf7b5"
+    },
+    "next-advice-followup-proof": {
+      "label": "真实M3 GCC2.1跟问、历史逐字与原页证明",
+      "path": ".local/state/oer-next-implementation-20261013/report-evidence/isolated-browser-01/clause21-followup-proof.json",
+      "sha256": "fce278ce64132209c70773b0c5931f4d0b7baa72549c65b1693ce8c0ee377df1"
+    },
+    "next-advice-first-history": {
+      "label": "真实M3 GCC2.1首问SQL保存后回读",
+      "path": ".local/state/oer-next-implementation-20261013/report-evidence/isolated-browser-01/clause21-persisted-history.json",
+      "sha256": "964586890803f18e39984cc796184606f74832d5cdcf7e35d8bf0c818152d797"
+    },
+    "next-advice-followup-history": {
+      "label": "真实M3两轮session完整SQL历史回读",
+      "path": ".local/state/oer-next-implementation-20261013/report-evidence/isolated-browser-01/clause21-followup-history.json",
+      "sha256": "c00d4e99be7cfebd70b6723e342dcd35d3dfbf26aa2d905abb050a06dfec2e6f"
+    },
+    "next-advice-session-dom": {
+      "label": "会话往返与第一轮引用身份DOM实核",
+      "path": ".local/state/oer-next-implementation-20261013/report-evidence/isolated-browser-01/advice-session-roundtrip-dom.txt",
+      "sha256": "24fde05c6399cf8ef125d092c8f3e265de893fe7393b464cb77daf8c2e8e58a0"
+    },
+    "next-advice-page17-pixels": {
+      "label": "GCC物理17页真实可见canvas截图",
+      "path": ".local/state/oer-next-implementation-20261013/report-evidence/isolated-browser-01/advice-clause21-page17-pixels.png",
+      "sha256": "8eac981c9b12419e53180c0ab531935ec89051870719ee62cfdb2dbdb8d57bd2"
+    },
+    "next-advice-budget-first": {
+      "label": "真实M3首问完整预算准入收据",
+      "path": ".local/state/oer-next-implementation-20261013/report-evidence/isolated-browser-01/advice-wire/1e5225eb-82ae-4530-a94c-c9d07cfd4bd8/budget-receipt.json",
+      "sha256": "cd280af67982f15bcdd98ca681505949dcd2694b4d6cd5eab6eb45bc298d7efd"
+    },
+    "next-advice-budget-followup": {
+      "label": "真实M3跟问完整预算准入收据",
+      "path": ".local/state/oer-next-implementation-20261013/report-evidence/isolated-browser-01/advice-wire/63619358-8769-442e-bf63-bf92d4830f30/budget-receipt.json",
+      "sha256": "baaff763c78358ba9fd3d164930a638a8407643a8e29e49953eb1effab38988c"
+    },
+    "next-advice-sql-v18": {
+      "label": "隔离H2实际V18升级日志",
+      "path": ".local/state/oer-next-implementation-20261013/report-evidence/isolated-browser-01/v18-actual-isolated-upgrade.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "next-scc-upload": {
+      "label": "真实浏览器SCC tender上传与799原生位置",
+      "path": ".local/state/oer-next-implementation-20261013/report-evidence/isolated-browser-01/real-scc-upload-files.json",
+      "sha256": "a1dbb13542a83ad3d5e0a790df1e3800beae7683fd350beae8eaae96d018f96d"
+    },
+    "next-linux-ocr-rejected": {
+      "label": "初版94包RapidOCR内嵌3ONNX下载偏差：拒绝候选",
+      "path": ".local/state/oer-next-implementation-20261013/report-evidence/retrieval-linux-artifacts-01/candidate-admission.json",
+      "sha256": "f8ae170437aa5f283107aff7d9dbf14d0ad20d5cd3b0a73b392ba60c613c2312"
+    },
+    "next-linux82-offline-install": {
+      "label": "82 Linux wheels实际hash离线安装报告",
+      "path": ".local/state/oer-next-implementation-20261013/report-evidence/retrieval-linux-artifacts-03/offline-install-report.json",
+      "sha256": "d57f9c7958793275eff4cabccf45255a878d10fca7963c66bd79b4a7ac9d2a2e"
+    },
+    "next-linux82-pipcheck": {
+      "label": "Linux独立venv pip check实际通过",
+      "path": ".local/state/oer-next-implementation-20261013/report-evidence/retrieval-linux-artifacts-03/pip-check.log",
+      "sha256": "9261363b733079a641c2e4cc9bc46ffa1d8336945a87f807b6cf68847dbc9b09"
+    },
+    "next-linux82-smoke": {
+      "label": "Linux82包原始CPU导入与无模型构造收据",
+      "path": ".local/state/oer-next-implementation-20261013/report-evidence/retrieval-linux-artifacts-03/offline-artifact-smoke-receipt.json",
+      "sha256": "695b893604ba6ca903e8e4641e80e008fbc65bf9cdf113ee2fd6b27f4050e225"
+    },
+    "next-linux82-smoke-hash-fix": {
+      "label": "逐包hash绑定校验修复后实际CPU导入收据",
+      "path": ".local/state/oer-next-implementation-20261013/report-evidence/retrieval-verifier-fix-01/offline-artifact-optimized-smoke-receipt.json",
+      "sha256": "5c4bcd4927ac2681979047d3bc5a8b6c59cd2626cb7d06879fef82afd3142931"
+    },
+    "next-linux82-boundary": {
+      "label": "逐包hash绑定与优化模式边界软件回归",
+      "path": ".local/state/oer-next-implementation-20261013/report-evidence/retrieval-verifier-fix-01/boundary-optimized-green.log",
+      "sha256": "a89ee182489da9605c9e4416360722df019b7c2e47a29f7cb948ccc740670055"
+    },
+    "next-linux-model-manifests": {
+      "label": "既有BGE两publication与license库存；未复制模型权重",
+      "path": ".local/state/oer-next-implementation-20261013/report-evidence/retrieval-linux-artifacts-03/model-publications/model-publication-license-inventory.json",
+      "sha256": "2d112abd4052ce5e33b36ce16257bdfcc755bd22e46c8b43ba17d5af5ed9e5b4"
     }
   },
   "documentCatalogue": {
