@@ -6,6 +6,6 @@ The final `FixedBaselineRetrievalClientTest` Surefire XML reports **8 tests, 0 f
 
 The surrounding Advice/fixed-source selection ran **32 tests, 0 failures/errors/skips** before the final selected-row tightening; the final eight-case run covers that additional change. These overlapping runs are not summed. Project-upload byte guards are separately implemented through the existing storage service.
 
-The first integrated web run recorded **117 cases, 116 pass, 1 fail** while the fixed panel was still waiting for WebCrypto hashing. The test now waits for the actual bounded observed state instead of assuming ten event-loop turns complete a native asynchronous digest. The final focused panel run passes all eight cases without changing the production hash guard or accepting a loading state. A full integrated rerun is still required after all implementation commits are combined.
+The first integrated web run recorded **117 cases, 116 pass, 1 fail** while the fixed panel was still waiting for WebCrypto hashing. The test now waits for the actual bounded observed state instead of assuming ten event-loop turns complete a native asynchronous digest. The final focused panel run passes all six cases without changing the production hash guard or accepting a loading state. A full integrated rerun is still required after all implementation commits are combined.
 
 No real model, source-quality, active Local05 storage or H800 acceptance is claimed by these tests.
