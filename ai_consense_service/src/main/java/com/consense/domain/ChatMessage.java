@@ -47,7 +47,7 @@ public class ChatMessage {
     @Column(name = "citations_json", columnDefinition = "TEXT")
     private String citationsJson;
 
-    @Column(name = "evidence_id", length = 64)
+    @Column(name = "evidence_id", length = 256)
     private String evidenceId;
 
     /** Frozen configured chat identity; absent for legacy and deterministic no-basis messages. */
