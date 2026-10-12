@@ -52,6 +52,7 @@ class AdviceModelIdentityMigrationIntegrationTest {
             migrationSql("V10__advice_model_identity.sql").populate(connection);
             migrationSql("V13__project_document_scope_and_advice_evidence.sql").populate(connection);
             migrationSql("V14__canonical_source_bindings.sql").populate(connection);
+            migrationSql("V16__advice_sessions.sql").populate(connection);
         } catch(Exception error) {throw new IllegalStateException("Cannot seed pre-identity fixture",error);}
         r.add("spring.datasource.url",()->URL);
         r.add("consense.storage-root",()->java.nio.file.Paths.get("target","advice-migration-uploads").toAbsolutePath().toString());
@@ -91,6 +92,12 @@ class AdviceModelIdentityMigrationIntegrationTest {
         assertTrue(after.get(0).path("modelIdentity").isMissingNode());
         assertEquals("minimax-cn",after.get(2).path("modelIdentity").path("profileId").asText());
         assertEquals(answer.path("modelIdentity"),after.get(2).path("modelIdentity"));
+        JsonNode session=JsonUtils.parse(mvc.perform(post("/api/advice/{id}/sessions",PROJECT).contentType(MediaType.APPLICATION_JSON)
+                .content("{\"scope\":\"contract\",\"basisScope\":\"project_contract\"}"))
+                .andExpect(jsonPath("$.code").value(0)).andReturn().getResponse().getContentAsString()).path("data");
+        mvc.perform(get("/api/advice/{id}/sessions",PROJECT)).andExpect(jsonPath("$.data[0].id").value(session.path("id").asText()));
+        mvc.perform(get("/api/advice/{id}/messages",PROJECT).param("sessionId",session.path("id").asText())).andExpect(jsonPath("$.data").isEmpty());
+        assertEquals(after,history(),"Session migration and creation must preserve legacy answer snapshots");
     }
     private JsonNode history() throws Exception {
         return JsonUtils.parse(mvc.perform(get("/api/advice/{id}/messages",PROJECT).header("X-ConSense-Llm-Profile","local"))

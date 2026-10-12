@@ -15,6 +15,16 @@ public class AdviceController {
 
     private final AdviceService adviceService;
 
+    @GetMapping("/sessions")
+    public ApiResponse<List<SessionVO>> sessions(@PathVariable String projectId) {
+        return ApiResponse.ok(adviceService.sessions(projectId));
+    }
+
+    @PostMapping("/sessions")
+    public ApiResponse<SessionVO> createSession(@PathVariable String projectId, @RequestBody SessionRequest request) {
+        return ApiResponse.ok(adviceService.createSession(projectId, request));
+    }
+
     @GetMapping("/sources")
     public ApiResponse<List<AdviceSourceVO>> sources(@PathVariable String projectId,
                                                     @RequestParam(defaultValue = "fullset") String scope) {
@@ -34,13 +44,15 @@ public class AdviceController {
     }
 
     @GetMapping("/messages")
-    public ApiResponse<List<ChatMessageVO>> messages(@PathVariable String projectId) {
-        return ApiResponse.ok(adviceService.history(projectId));
+    public ApiResponse<List<ChatMessageVO>> messages(@PathVariable String projectId,
+                                                    @RequestParam(required = false) String sessionId) {
+        return ApiResponse.ok(adviceService.history(projectId, sessionId));
     }
 
     @DeleteMapping("/messages")
-    public ApiResponse<Void> clear(@PathVariable String projectId) {
-        adviceService.clearHistory(projectId);
+    public ApiResponse<Void> clear(@PathVariable String projectId,
+                                   @RequestParam(required = false) String sessionId) {
+        adviceService.clearHistory(projectId, sessionId);
         return ApiResponse.ok();
     }
 
