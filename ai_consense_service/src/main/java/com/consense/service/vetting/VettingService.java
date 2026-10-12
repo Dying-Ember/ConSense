@@ -22,6 +22,7 @@ import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.multipart.MultipartFile;
 import javax.annotation.PreDestroy;
@@ -571,6 +572,7 @@ public class VettingService {
         if(!"PARSED".equals(d.getParseStatus())&&!"PARTIAL".equals(d.getParseStatus())) out.add("没有可用的已解析正文："+nvl(d.getParseMessage())); return out;
     }
 
+    @Transactional(readOnly=true)
     public List<FindingVO> listFindings(String projectId,String search,String group,String scope,String fileKey,String page) {
         projectService.require(projectId); String keyword=nvl(search).trim().toLowerCase(Locale.ROOT);
         return activeFindings(projectId).stream().filter(f -> filter(group,f.getGroupKey())).filter(f -> filter(scope,f.getScope()))
