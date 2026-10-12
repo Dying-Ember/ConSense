@@ -1,4 +1,5 @@
 import type { FindingEvidence, LocalizedText } from '@/api/types'
+import { fixedEvidencePath } from '@/api/fixedBaselineEvidence'
 
 const STORAGE_KEY = 'consense:advice:review-handoff:v1'
 const SCHEMA = 'consense.review-advice-handoff.v1'
@@ -51,6 +52,10 @@ function localized(value: unknown): value is LocalizedText {
   return object(value) && text(value.zhHans) && text(value.zhHant) && text(value.en)
 }
 function evidenceValid(value: unknown): value is FindingEvidence {
+  if (object(value) && value.fixedBaselineEvidence != null) {
+    try { fixedEvidencePath(value.fixedBaselineEvidence as NonNullable<FindingEvidence['fixedBaselineEvidence']>, 'evidence') }
+    catch { return false }
+  }
   return object(value) && text(value.side) && text(value.fileKey) && text(value.fileName) && text(value.quote)
     && typeof value.located === 'boolean'
     && (value.documentId == null || text(value.documentId) || typeof value.documentId === 'number' && Number.isFinite(value.documentId))
@@ -73,7 +78,8 @@ export function createReviewHandoff(input: {
     title: { ...input.title }, description: { ...input.description }, sourceSetStale: input.sourceSetStale,
     evidence: input.evidence.map(item => ({
       side: item.side, documentId: item.documentId, fileKey: item.fileKey, fileName: item.fileName,
-      pageNo: item.pageNo, anchor: item.anchor, quote: item.quote, located: item.located, sourceHash: item.sourceHash
+      pageNo: item.pageNo, anchor: item.anchor, quote: item.quote, located: item.located, sourceHash: item.sourceHash,
+      ...(item.fixedBaselineEvidence ? { fixedBaselineEvidence: { ...item.fixedBaselineEvidence } } : {})
     }))
   }
   if (!valid(handoff)) throw new Error('invalid_review_handoff')
@@ -121,7 +127,7 @@ export function reviewQuestion(handoff: ReviewHandoff, pick: (value: LocalizedTe
   lines.push('', pick(reviewHandoffCopy.unverified))
   handoff.evidence.forEach((item, index) => {
     lines.push('', `${pick(reviewHandoffCopy.quotation)} ${index + 1}: ${[item.fileKey, item.fileName, item.pageNo, item.anchor].filter(Boolean).join(' · ')}`,
-      `${pick(reviewHandoffCopy.identity)}: ${JSON.stringify({ documentId: item.documentId ?? null, sourceHash: item.sourceHash ?? null })}`, item.quote)
+      `${pick(reviewHandoffCopy.identity)}: ${JSON.stringify({ documentId: item.documentId ?? null, sourceHash: item.sourceHash ?? null, ...(item.fixedBaselineEvidence ? { fixedBaselineEvidence: item.fixedBaselineEvidence } : {}) })}`, item.quote)
   })
   // Keep the last quotation's literal trailing whitespace inside the draft even when the composer trims its envelope.
   lines.push('', pick(reviewHandoffCopy.request))
@@ -133,6 +139,7 @@ export function handoffSourceWarnings(handoff: ReviewHandoff, documents: { docum
   let unverified = handoff.evidence.length === 0
   let stale = handoff.sourceSetStale
   for (const item of handoff.evidence) {
+    if (item.fixedBaselineEvidence) { unverified = true; continue }
     const current = documents.find(document => item.documentId != null && document.documentId === String(item.documentId))
     if (loaded && (!current || !current.included)) unavailable = true
     if (!item.sourceHash || !current?.sourceHash) unverified = true

@@ -140,8 +140,9 @@ async function harness({ stored = new Map(), metadata = profiles, metadataError 
   console.log('PASS: rendered generation retains operation-entry profile across plan await and preserves full generation timeout')
   const advice = await harness({ metadata: available, view: 'AdviceView', respond: request => {
     if (request.url === '/projects') return [{ id: 'Q', name: field.label }]
+    if (request.url.endsWith('/sessions') && request.method === 'post') return { id: 'session-Q', projectId: 'Q', scope: request.body.scope, basisScope: request.body.basisScope, createdAt: '2026-10-13T00:01:00Z' }
     if (request.url.includes('/index/status?')) return { chunks: 0 }
-    if (request.url.endsWith('/ask')) return { grounded: true, title: field.label, content: { en: 'Answer', zhHans: 'Answer', zhHant: 'Answer' }, citations: [], sources: [], modelIdentity: { profileId: 'local', provider: 'ollama', model: 'captured-local-model', configurationSha256: 'a'.repeat(64), identityScope: 'configured_profile' } }
+    if (request.url.endsWith('/ask')) return { sessionId: request.body.sessionId, grounded: true, title: field.label, content: { en: 'Answer', zhHans: 'Answer', zhHant: 'Answer' }, citations: [], sources: [], modelIdentity: { profileId: 'local', provider: 'ollama', model: 'captured-local-model', configurationSha256: 'a'.repeat(64), identityScope: 'configured_profile' } }
     return []
   } })
   find(advice.root, node => node.tag === 'textarea').props['onUpdate:modelValue']('A question'); await settle()

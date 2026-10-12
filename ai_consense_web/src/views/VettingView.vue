@@ -9,6 +9,7 @@ import { useLocalized } from '@/composables/useLocalized'
 import AppIcon from '@/components/AppIcon.vue'
 import AppModal from '@/components/AppModal.vue'
 import CanonicalEvidencePanel from '@/components/CanonicalEvidencePanel.vue'
+import FixedBaselineEvidencePanel from '@/components/FixedBaselineEvidencePanel.vue'
 import { createReviewHandoff, newReviewHandoffToken, removeReviewHandoff, reviewHandoffCopy, storeReviewHandoff } from '@/advice/reviewHandoff'
 
 const { t } = useI18n()
@@ -36,6 +37,7 @@ function requestStateLabel(status: string, kind: 'transportStates' | 'requestSta
 function packetBudgetStatus(status?: string): string {
   return status && ['budget_unknown', 'over_budget', 'observed_tokens', 'provider_estimated_fit'].includes(status) ? status : 'budget_unknown'
 }
+function checkStateLabel(status?: string): string { return t(`vetting.checkStates.${status && ['checked_pass', 'issue', 'insufficient_evidence', 'not_completed', 'not_applicable'].includes(status) ? status : 'not_completed'}`) }
 
 const files = ref<VettingFile[]>([])
 const findings = ref<Finding[]>([])
@@ -149,7 +151,7 @@ const evidenceItems = computed<FindingEvidence[]>(() => {
       pageNo: item.pageNo, anchor: item.anchor, quote: item.quote ?? item.text,
       located: item.located ?? evidence.value!.located, sourceHash: item.sourceHash, bbox: item.bbox,
       packetId: item.packetId, packetSourceSnapshotSha256: item.packetSourceSnapshotSha256,
-      canonicalEvidence: item.canonicalEvidence
+      canonicalEvidence: item.canonicalEvidence, fixedBaselineEvidence: item.fixedBaselineEvidence
     }))
   }
   return selectedFinding.value?.evidence ?? []
@@ -170,6 +172,7 @@ function evidenceSide(side: string) {
 }
 
 function originalSourceUrl(item: FindingEvidence) {
+  if (item.fixedBaselineEvidence || /^(?:fixed:|fixed-baseline:|fixed_reference:)/.test(String(item.documentId ?? ''))) return null
   if (!projectId.value || !item.documentId || !item.sourceHash) return null
   const page = /^P(\d+)$/i.exec(item.pageNo ?? '')
   const fragment = page && item.fileName.toLowerCase().endsWith('.pdf') ? `#page=${page[1]}` : ''
@@ -701,7 +704,7 @@ function tagClass(group: string) {
         <label class="upload-role">
           <span>{{ t('vetting.documentScope.label') }}</span>
           <select v-model="uploadDocumentScope" :disabled="running || uploading">
-            <option v-for="value in ['auto', 'package', 'works_pss', 'pricing', 'example']" :key="value" :value="value">{{ t(`vetting.documentScope.${value}`) }}</option>
+            <option v-for="value in ['auto', 'package', 'works_pss', 'pricing', 'example', 'drawing']" :key="value" :value="value">{{ t(`vetting.documentScope.${value}`) }}</option>
           </select>
         </label>
         <button class="btn" type="button" :disabled="running || uploading || hasUnsavedReview || reviewSaving || checklistDirty || checklistSaving !== null" @click="packageInput?.click()">
@@ -763,6 +766,11 @@ function tagClass(group: string) {
         </div>
         <p v-if="job?.status === 'COMPLETED' && !jobDetailsPending" class="warning-note">{{ t('vetting.job.executionCompleteNote') }}</p>
         <p v-if="job?.message" class="small">{{ job.message }}</p>
+        <p v-if="job?.recoveryStatus" class="small">{{ t(`vetting.recovery.${job.recoveryStatus}`) }}</p>
+        <p v-if="job?.reportSnapshotId" class="mono small">{{ t('vetting.report.snapshot') }}: {{ job.reportSnapshotId }}</p>
+        <details v-if="job?.reliablePackets?.length"><summary>{{ t('vetting.recovery.reliablePackets') }} · {{ job.reliablePackets.length }}</summary>
+          <div v-for="saved in job.reliablePackets" :key="saved.packet.packetId" class="small section-gap"><strong>{{ checkStateLabel(saved.packet.checkState) }}</strong> · {{ saved.packet.status }}<p class="mono" style="overflow-wrap:anywhere">{{ saved.packet.packetId }} · {{ saved.packet.sourceSnapshotSha256 }}</p><p v-for="warning in saved.warnings" :key="warning" class="warning-note">{{ warning }}</p><details><summary>{{ t('vetting.drawer.evidence') }}</summary><pre>{{ JSON.stringify(saved, null, 2) }}</pre></details></div>
+        </details>
         <p v-if="job" class="muted small">{{ recordedJobModel ? `${t('llm.recordedModel')}: ${recordedJobModel}` : t('llm.identityUnknown') }}<template v-if="jobModelIdentity"> · {{ jobModelIdentity.profileId }} · {{ jobModelIdentity.provider }}</template></p>
         <p v-if="jobModelIdentity" class="muted small">{{ t('llm.identityNote') }}</p>
         <progress v-if="running && jobPercent !== null" class="vetting-progress" :value="jobPercent" max="100" :aria-label="t('vetting.job.title')" />
@@ -817,6 +825,7 @@ function tagClass(group: string) {
               <tr v-for="(topic, topicRow) in coverage.semanticTopics" :key="`${topic.reviewKind ?? 'topic'}:${topic.topicIndex}:${topicRow}`">
                 <td><strong>#{{ topic.topicIndex }}</strong><span v-if="topic.reviewKind === 'project_reference'" class="tag neutral">{{ t('vetting.coverage.projectReference') }}</span><div class="small muted">{{ topic.topic }}</div><div v-if="topic.referenceIds?.length" class="small">{{ topic.referenceIds.join(' · ') }}</div></td>
                 <td>
+                  <strong>{{ checkStateLabel(topic.checkState) }}</strong>
                   <span class="tag" :class="['failed', 'partial', 'not_submitted'].includes(reviewScopeStatus(topic)) ? 'warn' : 'neutral'">{{ t(`vetting.coverage.aggregateStates.${reviewScopeStatus(topic)}`) }}</span>
                   <div class="small muted">{{ t('vetting.coverage.globalCall') }}: {{ callStatusLabel(topic.globalCallStatus ?? topic.status) }}</div>
                   <div v-if="topic.error" class="warning-note">{{ topic.error }}</div>
@@ -829,6 +838,7 @@ function tagClass(group: string) {
                     <summary class="small">{{ t('vetting.coverage.packetDetails') }}</summary>
                     <div v-for="packet in topic.packetAudits" :key="packet.packetId" class="small section-gap">
                       <strong>#{{ packet.packetIndex }}</strong> {{ callStatusLabel(packet.status) }}
+                      <div>{{ checkStateLabel(packet.checkState) }}</div>
                       <div class="muted">{{ t(`vetting.coverage.budgetStates.${packetBudgetStatus(packet.inputBudgetStatus)}`) }}</div>
                       <div>{{ t('vetting.coverage.actualSubmission') }}: {{ packet.actualGatewayCallStarted === true ? t('vetting.coverage.submitted') : packet.actualGatewayCallStarted === false ? t('vetting.coverage.notSubmitted') : t('vetting.coverage.unknownCount') }}</div>
                       <div v-if="packet.inputBudgetMetadata?.observation">{{ t('vetting.coverage.tokenCounts') }}: {{ packet.inputBudgetMetadata.observation.inputTokens ?? t('vetting.coverage.unknownCount') }} + {{ packet.inputBudgetMetadata.observation.outputReserveTokens ?? t('vetting.coverage.unknownCount') }} / {{ packet.inputBudgetMetadata.observation.effectiveContextTokens ?? t('vetting.coverage.unknownCount') }}</div>
@@ -1111,7 +1121,8 @@ function tagClass(group: string) {
                   <span class="tag" :class="item.located ? 'ok' : 'warn'">{{ item.located ? t('vetting.drawer.located') : t('vetting.drawer.unverified') }}</span>
                 </div>
                 <div class="quote">{{ item.quote }}</div>
-                <CanonicalEvidencePanel v-if="item.canonicalEvidence" :pointer="item.canonicalEvidence" :locale="store.locale" />
+                <FixedBaselineEvidencePanel v-if="item.fixedBaselineEvidence" :pointer="item.fixedBaselineEvidence" :locale="store.locale" />
+                <CanonicalEvidencePanel v-else-if="item.canonicalEvidence" :pointer="item.canonicalEvidence" :locale="store.locale" />
                 <div v-if="item.packetId || item.packetSourceSnapshotSha256" class="small">
                   <div class="mono" style="overflow-wrap:anywhere">{{ t('vetting.coverage.fullInputPacket') }}: {{ item.packetId ?? t('vetting.coverage.unknownCount') }}</div>
                   <div class="mono" style="overflow-wrap:anywhere">{{ t('vetting.coverage.packetSnapshot') }}: {{ item.packetSourceSnapshotSha256 ?? t('vetting.coverage.unknownCount') }}</div>
@@ -1207,6 +1218,8 @@ function tagClass(group: string) {
               <td>{{ pick(file.role) }}</td>
               <td>
                 <span class="tag" :class="file.parsed ? 'ok' : 'warn'">{{ file.status }}</span>
+                <p v-if="file.documentScope === 'drawing'" class="small">{{ t('vetting.documentScope.drawing') }}</p>
+                <p v-if="file.exclusionReason" class="small">{{ t(`advice.sourceScope.reasons.${file.exclusionReason}`) }}</p>
               </td>
               <td>{{ file.pageCount || '—' }}</td>
               <td><div class="small">{{ file.parseMessage }}</div><div v-for="(warning, index) in file.warnings" :key="index" class="warning-note">{{ warning }}</div><span v-if="!file.parseMessage && !file.warnings?.length">—</span></td>

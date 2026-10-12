@@ -53,7 +53,7 @@ async function harness({ stale = false, currentSources = [source], sourceGate, e
   const respond = (method, url, body, config) => {
     requests.push({ method, url, body, config })
     const override = respondOverride?.({ method, url, body, config })
-    if (override !== undefined) return Promise.resolve(override).then(data => ({ data: { code: 0, data } }))
+    if (override !== undefined) return Promise.resolve(override).then(data => ({ data: data?.code === 4205 ? data : { code: 0, data } }))
     let data
     if (url.includes('/findings/F001/evidence')) data = evidenceGate ? evidenceGate.promise : currentEvidence
     else if (url.includes('/findings')) data = [finding]
@@ -61,11 +61,12 @@ async function harness({ stale = false, currentSources = [source], sourceGate, e
     else if (url.endsWith('/metrics')) data = { reference: 0, conflict: 0, risk: 1, language: 0, ocrReady: true, message: localized('') }
     else if (url.endsWith('/runs/latest')) data = stale ? { id: 'run-1', status: 'COMPLETED', sourceSetStale: true } : null
     else if (url.includes('/sources?')) data = sourceGate ? sourceGate.promise : currentSources
-    else if (url.endsWith('/messages')) data = adviceMessages
+    else if (url.endsWith('/sessions')) data = method === 'get' ? [] : { id: 'session-1', projectId: url.split('/')[2], scope: body.scope, basisScope: body.basisScope, createdAt: '2026-10-13T00:01:00Z' }
+    else if (/\/messages(?:\?|$)/.test(url)) data = method === 'get' ? (url.includes('sessionId=') ? [] : adviceMessages) : null
     else if (url.endsWith('/quick-questions')) data = []
     else if (url.includes('/index/status?')) data = { chunks: 1, message: localized('Ready') }
     else if (url.includes('/index/rebuild?')) data = { chunks: 1, message: localized('Rebuilt') }
-    else if (url.endsWith('/ask')) data = { grounded: true, content: localized('Independent reply'), title: localized('Reply'), citations: [], sources: [], unknownScope: null, evidenceId: null }
+    else if (url.endsWith('/ask')) data = { sessionId: body.sessionId, grounded: true, content: localized('Independent reply'), title: localized('Reply'), citations: [], sources: [], unknownScope: null, evidenceId: null }
     else throw new Error(`Unexpected API request: ${method} ${url}`)
     return Promise.resolve(data).then(data => ({ data: { code: 0, data } }))
   }
@@ -95,7 +96,7 @@ async function harness({ stale = false, currentSources = [source], sourceGate, e
   const axios = { create: () => ({ get: (url, config) => respond('get', url, undefined, config), post: (url, body, config) => respond('post', url, body, config), put: (url, body, config) => respond('put', url, body, config), delete: (url, config) => respond('delete', url, undefined, config) }), isAxiosError: () => false }
   const loaded = loadVue(path.join(__dirname, '../src/views/VettingView.vue'), {
     boundaries: { axios: { default: axios }, pinia, 'vue-router': routerRuntime, 'vue-i18n': require('vue-i18n'), '@noble/hashes/sha256': require('@noble/hashes/sha256'), ...answerRendererBoundaries },
-    globals: { sessionStorage, crypto: browserCrypto, Uint8Array, ArrayBuffer, URLSearchParams, URL: EvidenceURL, Blob, AbortController, fetch,
+    globals: { sessionStorage, crypto: browserCrypto, Uint8Array, ArrayBuffer, URLSearchParams, URL: EvidenceURL, Blob, FormData, File, AbortController, fetch,
       localStorage: { getItem: () => null, setItem() {} }, document: { documentElement: { lang: '' }, getElementById: () => null },
       window: { setTimeout(callback, ms) { const timer = setTimeout(callback, ms); timer.unref(); return timer }, clearTimeout }, console }
   })
@@ -490,6 +491,125 @@ test('real Advice view displays a fenced flowchart, retains prose and citations,
     assert.match(text(h.root), /Before \[1\]/); assert.match(text(h.root), /After \[1\]/)
     assert.equal(renders, 1)
     assert.ok(find(h.root, node => node.tag === 'button' && node.props.class === 'citation' && text(node) === '[1]'))
+    assert.equal(h.requests.some(request => request.method !== 'get'), false)
+  } finally { h.dispose() }
+})
+
+const sessions = [
+  { id: 'session-A', projectId: 'project-A', scope: 'fullset', basisScope: 'project_contract', createdAt: '2026-10-13T00:01:00Z' },
+  { id: 'session-B', projectId: 'project-A', scope: 'contract', basisScope: 'reference_only', createdAt: '2026-10-13T00:02:00Z' }
+]
+function sessionSelect(h) { return find(h.root, node => node.tag === 'select' && find(node, option => option.tag === 'option' && option.props.value === 'session-A')) }
+
+test('explicit session switch binds scope/basis and isolates late answer and history without submitting a model call', async () => {
+  const oldMessages = deferred(), oldAsk = deferred()
+  let messageReads = 0
+  const h = await harness({ initialView: 'advice', respondOverride: ({ url }) => {
+    if (url.endsWith('/sessions')) return sessions
+    if (url.endsWith('/messages?sessionId=session-A')) return ++messageReads === 1 ? [] : oldMessages.promise
+    if (url.endsWith('/messages?sessionId=session-B')) return [{ sessionId: 'session-B', role: 'assistant', id: 20, title: localized('B title'), content: localized('B current answer'), citations: [], sources: [], basisScope: 'reference_only' }]
+    if (url.endsWith('/ask')) return oldAsk.promise
+  } })
+  try {
+    assert.equal(h.requests.some(request => request.method !== 'get'), false)
+    sessionSelect(h).props['onUpdate:modelValue']('session-A'); await settle()
+    find(h.root, node => node.tag === 'textarea').props['onUpdate:modelValue']('Question for A'); await settle()
+    const asking = button(h, 'Ask').props.onClick(); await settle()
+    assert.equal(h.requests.find(request => request.url.endsWith('/ask')).body.sessionId, 'session-A')
+    sessionSelect(h).props['onUpdate:modelValue']('session-B'); await settle()
+    assert.match(text(h.root), /B current answer/)
+    assert.match(text(h.root), /Adoption of this edition/)
+    const scopeControl = find(h.root, node => node.tag === 'select' && node.props['aria-label'] === 'Documents in this advice scope')
+    assert.equal(scopeControl.props.disabled, true)
+    assert.equal(h.requests.filter(request => request.url.includes('/sources?')).at(-1).url, '/advice/project-A/sources?scope=contract')
+    oldAsk.resolve({ sessionId: 'session-A', grounded: true, title: localized('A title'), content: localized('A late answer'), sources: [], citations: [] }); await asking; await settle()
+    assert.doesNotMatch(text(h.root), /A late answer/)
+    sessionSelect(h).props['onUpdate:modelValue']('session-A'); await settle()
+    sessionSelect(h).props['onUpdate:modelValue']('session-B'); await settle()
+    oldMessages.resolve([{ id: 99, role: 'assistant', content: localized('A obsolete history'), citations: [], sources: [] }]); await settle()
+    assert.doesNotMatch(text(h.root), /A obsolete history/)
+    assert.equal(h.requests.filter(request => request.url.endsWith('/ask')).length, 1)
+    assert.equal(h.requests.some(request => /\/findings\/.+\/(review|status)/.test(request.url) && request.method !== 'get'), false)
+  } finally { h.dispose() }
+})
+
+test('new session and reference-only question preserve click-time purpose; budget failure preserves the editable question', async () => {
+  const h = await harness({ initialView: 'advice', respondOverride: ({ url }) => url.endsWith('/ask') ? { code: 4205, message: 'budget_unknown: final wire counter unavailable', data: null } : undefined })
+  try {
+    const basis = find(h.root, node => node.tag === 'select' && find(node, option => option.tag === 'option' && option.props.value === 'reference_only'))
+    basis.props['onUpdate:modelValue']('reference_only'); await settle()
+    find(h.root, node => node.tag === 'textarea').props['onUpdate:modelValue']('Explain this fixed standard'); await settle()
+    await button(h, 'Ask').props.onClick(); await settle()
+    const created = h.requests.find(request => request.url.endsWith('/sessions') && request.method === 'post')
+    assert.equal(created.body.basisScope, 'reference_only')
+    const submitted = h.requests.find(request => request.url.endsWith('/ask'))
+    assert.equal(submitted.body.sessionId, 'session-1'); assert.equal(submitted.body.basisScope, 'reference_only')
+    assert.equal(find(h.root, node => node.tag === 'textarea').value, 'Explain this fixed standard')
+    assert.match(text(h.root), /budget_unknown/)
+    assert.equal(button(h, 'Ask').props.disabled, false)
+  } finally { h.dispose() }
+})
+
+test('clear current session invalidates an in-flight response and leaves other sessions untouched', async () => {
+  const pending = deferred(), h = await harness({ initialView: 'advice', respondOverride: ({ url }) => {
+    if (url.endsWith('/sessions')) return sessions
+    if (url.endsWith('/ask')) return pending.promise
+  } })
+  try {
+    sessionSelect(h).props['onUpdate:modelValue']('session-A'); await settle()
+    find(h.root, node => node.tag === 'textarea').props['onUpdate:modelValue']('Old question'); await settle()
+    const asking = button(h, 'Ask').props.onClick(); await settle()
+    await button(h, 'Clear chat').props.onClick(); await settle()
+    assert.equal(h.requests.find(request => request.method === 'delete').url, '/advice/project-A/messages?sessionId=session-A')
+    pending.resolve({ sessionId: 'session-A', grounded: true, title: localized('Late'), content: localized('CLEARED ANSWER'), sources: [], citations: [] }); await asking; await settle()
+    assert.doesNotMatch(text(h.root), /CLEARED ANSWER|Old question/)
+  } finally { h.dispose() }
+})
+
+test('drawing upload sends explicit identity-only scope and source list retains excluded original identity', async () => {
+  const drawing = { key: 'DRAWING', fileName: 'drawing.pdf', role: localized('Drawing identity'), status: 'EXCLUDED', parsed: false, documentScope: 'drawing', exclusionReason: 'drawing_outside_scope', parseStatus: 'EXCLUDED', parseMessage: 'Identity only; original retained', pageCount: 0 }
+  const h = await harness({ respondOverride: ({ url }) => {
+    if (url.endsWith('/files')) return [drawing]
+    if (url.includes('/package/upload')) return { accepted: 1, parsed: 0, failed: 0, messages: ['Drawing excluded from parsing'] }
+  } })
+  try {
+    const selector = find(h.root, node => node.tag === 'select' && find(node, option => option.tag === 'option' && option.props.value === 'drawing'))
+    assert.ok(find(selector, node => node.tag === 'option' && node.props.value === 'drawing'))
+    selector.props['onUpdate:modelValue']('drawing'); await settle()
+    const upload = find(h.root, node => node.tag === 'input' && node.props.type === 'file')
+    await upload.props.onChange({ target: { files: [new File(['%PDF fixture'], 'drawing.pdf')], value: '' } }); await settle()
+    const request = h.requests.find(request => request.url.includes('/package/upload'))
+    assert.equal(request.url, '/vetting/project-A/package/upload?documentScope=drawing')
+    assert.equal(request.body.getAll('files')[0].name, 'drawing.pdf')
+    assert.match(text(h.root), /drawing\.pdf/); assert.match(text(h.root), /EXCLUDED/)
+    assert.match(text(h.root), /Drawing identity only; excluded from parsing and advice/)
+    assert.equal(button(h, 'Run vetting').props.disabled, true)
+    assert.equal(h.requests.some(request => /\/runs$|\/ask$/.test(request.url)), false)
+  } finally { h.dispose() }
+})
+
+test('historical fixed answer retains its own source lane after a later project answer with a colliding document ID', async () => {
+  const project = canonicalPointer('advisory'), fixed = { evidenceBackend: 'fixed_development_baseline', parentId: '11', manifestSha256: 'a'.repeat(64), baselineVersion: '05', sourceFamily: 'GCC', sourceRole: 'standard', originalSourceSha256: 'b'.repeat(64), pageNo: 4, originalPageNos: [4], projectApplicability: 'unconfirmed', qualifiersComplete: 'unknown', sourceQualityAccepted: false }
+  const fixedCitation = { fileLabel: 'ANSWER A FIXED', pageNo: '4', anchor: 'A1', content: 'Fixed source A literal', score: .8, documentId: '11', fixedBaselineEvidence: fixed, canonicalEvidence: [project] }
+  const projectCitation = { fileLabel: 'ANSWER B PROJECT', pageNo: '3', anchor: 'B1', content: 'Project source B literal', score: .9, documentId: '11', canonicalEvidence: [project] }
+  const messages = [fixedCitation, projectCitation].map((citation, index) => ({ id: index + 1, role: 'assistant', title: localized('Saved answer'), content: localized('Saved answer with its original sources'), sources: [citation], citations: [citation.fileLabel] }))
+  const h = await harness({ initialView: 'advice', adviceMessages: messages, canonicalRespond: async url => {
+    if (url.startsWith('/api/oer/fixed-baseline/evidence?')) return new Response(JSON.stringify({ code: 0, data: { id: '11', content: fixedCitation.content, fileLabel: 'GCC standard', sourceFamily: 'GCC', payload: { fixedBaselineManifestSha256: fixed.manifestSha256, fixedBaselineVersion: '05', sourceRole: 'standard', originalSourceSha256: fixed.originalSourceSha256 }, sourceUnit: null, tableArtifact: null } }), { headers: { 'Content-Type': 'application/json' } })
+    if (url.includes('/units/')) return new Response(JSON.stringify({ code: 0, data: project }), { headers: { 'Content-Type': 'application/json' } })
+    const asset = project.assetRefs.find(asset => url.includes(encodeURIComponent(asset.assetId)))
+    assert.ok(asset)
+    return new Response(fs.readFileSync(path.join(canonicalFixtureRoot, asset.artifactName)), { headers: { 'Content-Type': asset.mediaType, ETag: `"${asset.sha256}"`, 'X-Source-Sha256': project.originalSourceSha256, 'X-Projection-Sha256': project.projectionSha256 } })
+  } })
+  try {
+    button(h, 'ANSWER B PROJECT').props.onClick(); await flushCanonical()
+    assert.equal(findAll(h.root, node => node.tag === 'img').length, 3)
+    const count = h.canonicalRequests.length
+    button(h, 'ANSWER A FIXED').props.onClick(); await flushCanonical()
+    assert.equal(findAll(h.root, node => node.tag === 'img').length, 0)
+    assert.equal(h.canonicalRequests.length, count + 1)
+    assert.equal(h.canonicalRequests.at(-1).url, '/api/oer/fixed-baseline/evidence?id=11')
+    assert.match(text(h.root), /project adoption is unconfirmed/)
+    assert.match(text(h.root), /Fixed source A literal/)
     assert.equal(h.requests.some(request => request.method !== 'get'), false)
   } finally { h.dispose() }
 })

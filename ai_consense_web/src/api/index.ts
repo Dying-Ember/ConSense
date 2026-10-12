@@ -2,6 +2,8 @@ import { api } from './client'
 import type {
   AskResponse,
   AdviceSourceDocument,
+  AdviceSession,
+  AdviceBasisScope,
   DocumentScope,
   VettingChecklist,
   VettingChecklistItem,
@@ -186,14 +188,17 @@ export const vettingApi = {
 /* ------------------------------------------------------------ 咨询 */
 
 export const adviceApi = {
+  sessions: (projectId: string) => api.get<AdviceSession[]>(`/advice/${encodeURIComponent(projectId)}/sessions`),
+  createSession: (projectId: string, scope: string, basisScope: AdviceBasisScope) =>
+    api.post<AdviceSession>(`/advice/${encodeURIComponent(projectId)}/sessions`, { scope, basisScope }),
   sources: (projectId: string, scope: string) =>
     api.get<AdviceSourceDocument[]>(`/advice/${encodeURIComponent(projectId)}/sources?scope=${encodeURIComponent(scope)}`),
   rebuildIndex: (projectId: string, scope = 'fullset') => api.post<IndexStatus>(`/advice/${encodeURIComponent(projectId)}/index/rebuild?scope=${encodeURIComponent(scope)}`, undefined, { reportError: false }),
   indexStatus: (projectId: string, scope = 'fullset') => api.get<IndexStatus>(`/advice/${encodeURIComponent(projectId)}/index/status?scope=${encodeURIComponent(scope)}`, { reportError: false }),
-  messages: (projectId: string) => api.get<ChatMessage[]>(`/advice/${projectId}/messages`),
-  clearMessages: (projectId: string) => api.delete<void>(`/advice/${projectId}/messages`),
-  ask: (projectId: string, question: string, scope: string, llmSelection?: LlmSelection, replyToMessageId?: number) =>
-    api.post<AskResponse>(`/advice/${projectId}/ask`, { question, scope, replyToMessageId }, { llmSelection }),
+  messages: (projectId: string, sessionId?: string) => api.get<ChatMessage[]>(`/advice/${projectId}/messages${sessionId ? '?sessionId=' + encodeURIComponent(sessionId) : ''}`),
+  clearMessages: (projectId: string, sessionId?: string) => api.delete<void>(`/advice/${projectId}/messages${sessionId ? '?sessionId=' + encodeURIComponent(sessionId) : ''}`),
+  ask: (projectId: string, question: string, scope: string, llmSelection?: LlmSelection, replyToMessageId?: number, sessionId?: string, basisScope?: AdviceBasisScope) =>
+    api.post<AskResponse>(`/advice/${projectId}/ask`, { question, scope, replyToMessageId, sessionId, basisScope }, { llmSelection }),
   quickQuestions: (projectId: string) => api.get<QuickQuestion[]>(`/advice/${projectId}/quick-questions`)
 }
 
