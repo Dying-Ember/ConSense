@@ -13,7 +13,7 @@ const address = { evidenceBackend: 'fixed_development_baseline', parentId: 'same
 const table = { id: address.parentId, originalSourceSha256: address.originalSourceSha256, observedCells: [{ text: 'Full note <script>bad()</script>' }], sourceQualityAccepted: false }
 const tableBytes = Buffer.from(JSON.stringify(table))
 const evidence = () => ({ id: address.parentId, fileLabel: 'GCC fixed reference', sourceFamily: 'GCC', content: 'Literal complete standard\nException remains.', pageNo: 3, sourceUnit: null, tableArtifact: table,
-  payload: { fixedBaselineManifestSha256: address.manifestSha256, fixedBaselineVersion: address.baselineVersion, originalSourceSha256: address.originalSourceSha256, sourceRole: 'standard', tableArtifact: { sha256: hash(tableBytes), bytes: tableBytes.length }, sourceQuality: { finalQualityAccepted: false }, unknowns: ['condition relation unknown'] } })
+  payload: { fixedBaselineManifestSha256: address.manifestSha256, fixedBaselineVersion: address.baselineVersion, originalSourceSha256: address.originalSourceSha256, sourceRole: 'standard', role: 'standard', documentId: 'GCC:fixture', sourceHash: 'c'.repeat(64), tableArtifact: { sha256: hash(tableBytes), bytes: tableBytes.length }, sourceQuality: { finalQualityAccepted: false }, unknowns: ['condition relation unknown'] } })
 const envelope = data => new Response(JSON.stringify({ code: 0, data }), { headers: { 'Content-Type': 'application/json' } })
 const globals = { Blob, Response, AbortController, Uint8Array, ArrayBuffer, TextDecoder, Error, crypto: crypto.webcrypto }
 function api(fetch) {
@@ -79,4 +79,46 @@ test('late fixed evidence cannot replace a newly selected source and aborts befo
   assert.equal(calls[0].options.signal.aborted, true); assert.equal(calls.length, 2)
   assert.match(text(rendered.root), /cited source is unavailable/); assert.doesNotMatch(text(rendered.root), /Literal complete standard/)
   app.unmount()
+})
+
+test('whole fixed group verifies every required member against its saved source identity and keeps reliable members when another is missing', async () => {
+  const unit = { requiredMemberIds: [address.parentId, 'qualifier', 'missing', 'wrong-source'], sourceIdentity: { documentId: 'GCC:fixture', sourceHash: 'c'.repeat(64), role: 'standard' }, qualifiersComplete: 'unknown', semanticScopeVerified: false }
+  const calls = [], client = api(async url => {
+    calls.push(url)
+    const id = new URL(url, 'http://local').searchParams.get('id')
+    if (id === 'missing') return new Response('', { status: 404 })
+    if (url.includes('/table?')) return new Response(tableBytes, { headers: { 'Content-Type': 'application/json', 'X-Source-SHA256': hash(tableBytes) } })
+    const member = evidence(); member.id = id
+    if (id !== address.parentId) { member.tableArtifact = null; delete member.payload.tableArtifact }
+    if (id === 'qualifier') { member.content = 'Complete exception and condition'; member.payload.originalSourceSha256 = 'd'.repeat(64); delete member.payload.sourceRole }
+    if (id === 'wrong-source') member.payload.sourceHash = 'e'.repeat(64)
+    return envelope(member)
+  })
+  const result = await client.fetchFixedEvidenceGroup(address, unit)
+  assert.deepEqual(Array.from(result.members, member => member.evidence.id), [address.parentId, 'qualifier'])
+  assert.deepEqual(Array.from(result.missingMemberIds), ['missing', 'wrong-source'])
+  assert.equal(result.members[1].evidence.payload.originalSourceSha256, 'd'.repeat(64), 'Member bytes retain their own returned source SHA; the origin hash is not substituted')
+  assert.equal(result.members[0].table.originalSourceSha256, address.originalSourceSha256)
+  assert.ok(unit.requiredMemberIds.every(id => calls.includes('/api/oer/fixed-baseline/evidence?id=' + encodeURIComponent(id))))
+})
+
+test('saved pointer supplies complete group when read-only parent response has no sourceUnit and marks unavailable conditions', async () => {
+  const unit = { requiredMemberIds: [address.parentId, 'condition', 'missing'], sourceIdentity: { documentId: 'GCC:fixture', sourceHash: 'c'.repeat(64), role: 'standard' }, presentMemberIds: [address.parentId, 'condition'], missingMemberIds: [], unknown: ['qualifier relation'], qualifiersComplete: 'unknown', semanticScopeVerified: false }
+  const calls = []
+  const loaded = loadVue(path.join(__dirname, '../src/components/FixedBaselineEvidencePanel.vue'), { globals: { ...globals, URL: { revokeObjectURL() {} }, fetch: async url => {
+    calls.push(url); const id = new URL(url, 'http://local').searchParams.get('id')
+    if (id === 'missing') return new Response('', { status: 404 })
+    const data = evidence(); data.id = id; data.tableArtifact = null; delete data.payload.tableArtifact
+    if (id === 'condition') data.content = 'A complete required exception on another page'
+    return envelope(data)
+  } }, boundaries: { '@noble/hashes/sha256': require('@noble/hashes/sha256') } })
+  const rendered = renderer(), app = rendered.createApp({ render: () => vue.h(loaded.default, { pointer: { ...address, sourceUnit: unit }, locale: 'en' }) })
+  app.mount(rendered.root); await flush()
+  try {
+    assert.equal(calls.length, 4)
+    assert.match(text(rendered.root), /A complete required exception on another page/)
+    assert.match(text(rendered.root), /Missing members \/ assets: missing/)
+    assert.match(text(rendered.root), /relations remain unverified/)
+    assert.equal(calls.some(url => /\/ask|\/projects/.test(url)), false)
+  } finally { app.unmount() }
 })

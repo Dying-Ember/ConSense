@@ -14,6 +14,15 @@ export interface FixedBaselineEvidenceAddress {
   qualifiersComplete: string
   sourceQualityAccepted: boolean
   tableUrl?: string
+  sourceUnit?: FixedBaselineSourceUnit | null
+}
+export interface FixedBaselineSourceUnit {
+  requiredMemberIds: string[]
+  sourceIdentity: Record<string, unknown>
+  status?: string
+  qualifiersComplete?: string
+  semanticScopeVerified?: boolean
+  [key: string]: unknown
 }
 export interface FixedBaselineEvidence {
   id: string
@@ -43,17 +52,39 @@ async function get(address: FixedBaselineEvidenceAddress, kind: 'evidence' | 'or
   requireValue(response.ok, response.status === 409 ? 'FIXED_EVIDENCE_STALE' : response.status === 404 ? 'FIXED_EVIDENCE_UNAVAILABLE' : `HTTP_${response.status}`)
   return response
 }
-export async function fetchFixedEvidence(address: FixedBaselineEvidenceAddress, signal?: AbortSignal): Promise<FixedBaselineEvidence> {
+export async function fetchFixedEvidence(address: FixedBaselineEvidenceAddress, signal?: AbortSignal, sourceIdentity?: Record<string, unknown>): Promise<FixedBaselineEvidence> {
   const response = await get(address, 'evidence', signal)
   const envelope = object(await response.json())
   requireValue(envelope.code === 0, 'FIXED_EVIDENCE_REJECTED')
   const data = object(envelope.data), payload = object(data.payload)
   const original = payload.originalSourceSha256 ?? payload.sourceHash
   requireValue(data.id === address.parentId && payload.fixedBaselineManifestSha256 === address.manifestSha256
-    && payload.fixedBaselineVersion === address.baselineVersion && original === address.originalSourceSha256
-    && payload.sourceRole === 'standard' && data.sourceFamily === address.sourceFamily, 'FIXED_EVIDENCE_IDENTITY_MISMATCH')
+    && payload.fixedBaselineVersion === address.baselineVersion && (sourceIdentity ? sha(original) && matchesSource(payload, sourceIdentity) : original === address.originalSourceSha256)
+    && (payload.sourceRole ?? payload.role) === 'standard' && data.sourceFamily === address.sourceFamily, 'FIXED_EVIDENCE_IDENTITY_MISMATCH')
   requireValue(typeof data.content === 'string' && typeof data.fileLabel === 'string', 'FIXED_EVIDENCE_INVALID')
   return data as unknown as FixedBaselineEvidence
+}
+function matchesSource(payload: Record<string, unknown>, identity: Record<string, unknown>) {
+  return typeof identity.documentId === 'string' && sha(identity.sourceHash) && identity.role === 'standard'
+    && Object.entries(identity).every(([key, value]) => JSON.stringify(payload[key]) === JSON.stringify(value))
+}
+export async function fetchFixedEvidenceGroup(address: FixedBaselineEvidenceAddress, unit: FixedBaselineSourceUnit, signal?: AbortSignal) {
+  requireValue(Array.isArray(unit.requiredMemberIds) && unit.requiredMemberIds.every(id => typeof id === 'string' && id.length > 0)
+    && new Set(unit.requiredMemberIds).size === unit.requiredMemberIds.length && unit.sourceIdentity && typeof unit.sourceIdentity === 'object', 'FIXED_SOURCE_UNIT_INVALID')
+  const members: { evidence: FixedBaselineEvidence; table: unknown | null }[] = [], missingMemberIds: string[] = [], missingAssetIds: string[] = []
+  for (const id of unit.requiredMemberIds) {
+    if (signal?.aborted) throw new Error('FIXED_GROUP_ABORTED')
+    try {
+      const evidence = await fetchFixedEvidence({ ...address, parentId: id }, signal, unit.sourceIdentity)
+      const member = { evidence, table: null as unknown | null }; members.push(member)
+      if (evidence.tableArtifact) {
+        const memberAddress = { ...address, parentId: id, originalSourceSha256: String(evidence.payload.originalSourceSha256 ?? evidence.payload.sourceHash) }
+        try { member.table = await fetchFixedTable(memberAddress, object(evidence.payload.tableArtifact), signal) }
+        catch { missingAssetIds.push(id) }
+      }
+    } catch { missingMemberIds.push(id) }
+  }
+  return { members, missingMemberIds, missingAssetIds }
 }
 export async function fetchFixedOriginal(address: FixedBaselineEvidenceAddress, signal?: AbortSignal): Promise<Blob> {
   const response = await get(address, 'original', signal)
