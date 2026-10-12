@@ -63,6 +63,7 @@ public final class VettingRecoveryProcessFixture {
     static String request(String url,String method)throws Exception{java.net.HttpURLConnection connection=(java.net.HttpURLConnection)new java.net.URL(url).openConnection();connection.setRequestMethod(method);connection.setConnectTimeout(5000);connection.setReadTimeout(5000);try(java.io.InputStream in=connection.getInputStream()){return new String(in.readAllBytes(),StandardCharsets.UTF_8);}finally{connection.disconnect();}}
     @TestConfiguration
     public static class Fixture {
+        @Bean @Primary VettingInputBudget.Observer fixtureTokens(){return VettingTokenFixture::observe;}
         @Bean org.springframework.boot.web.embedded.tomcat.TomcatServletWebServerFactory fixtureServer(){org.springframework.boot.web.embedded.tomcat.TomcatServletWebServerFactory server=new org.springframework.boot.web.embedded.tomcat.TomcatServletWebServerFactory();server.setProtocol("org.apache.coyote.http11.Http11Nio2Protocol");return server;}
         @Bean @Primary AiGateway fixtureGateway(){AiGateway ai=mock(AiGateway.class);when(ai.available()).thenReturn(true);when(ai.chatModel()).thenReturn("fixture-only");
             when(ai.completeStructuredJsonList(anyString(),anyString(),eq(VettingSemanticReview.Record.class),any(),anyList())).thenAnswer(call->{int ordinal=calls.incrementAndGet();String prompt=call.getArgument(1);Files.write(root.resolve("calls.log"),(prompt.substring(0,prompt.indexOf('\n'))+"\n").getBytes(StandardCharsets.UTF_8),StandardOpenOption.CREATE,StandardOpenOption.APPEND);

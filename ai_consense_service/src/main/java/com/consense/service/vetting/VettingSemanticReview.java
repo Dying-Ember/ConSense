@@ -344,6 +344,9 @@ public class VettingSemanticReview {
                 VettingInputBudget.Observer packetObserver=selectedObserver();
                 VettingInputBudget.Result inputBudget=VettingInputBudget.check(fullInput,packetObserver);
                 boolean previewChanged=previewBudget!=null&&!VettingTokenAwareRequestPacks.sameFinalObservation(previewBudget,inputBudget);
+                if(inputBudget.isExtraDispatchPermitted()&&inputBudget.getObservation().getEffectiveContextTokens()<262144) {
+                    inputBudget.setStatus("budget_unknown");inputBudget.setReason("effective_context_below_256k");inputBudget.setExtraDispatchPermitted(false);
+                }
                 if(previewChanged) {inputBudget.setStatus("budget_unknown");inputBudget.setReason("token_preview_final_observation_changed");inputBudget.setExtraDispatchPermitted(false);}
                 boolean providerModeChanged=responsesPacket!=responsesEnabled();
                 if(providerModeChanged) {inputBudget.setStatus("budget_unknown");inputBudget.setReason("packet_provider_mode_changed");inputBudget.setExtraDispatchPermitted(false);}
@@ -353,7 +356,7 @@ public class VettingSemanticReview {
                 packet.setFixedBaselineEvidence(submitted.stream().filter(FixedVettingReferences::isFixed).map(c->fixedReferences.pointer(c.getId())).collect(Collectors.toList()));
                 topicProbe.text("packet_complete_serialized_input",VettingReviewProbe.map("packetId",packet.getPacketId(),"provider",fullInput.getProvider(),"model",fullInput.getModel(),"sourceSnapshotSha256",packet.getSourceSnapshotSha256(),"boundary","Complete gateway-envelope messages/schema/output reserve for actual bound token observation; no prompt truncation"),JsonUtils.write(fullInput));
                 topicProbe.event("packet_input_budget",VettingReviewProbe.map("packetId",packet.getPacketId(),"sourceObservationPacketId",packet.getSourceObservationPacketId(),"inputBudget",inputBudget,"extraDispatchRequiredKnownTokens",true));
-                if(providerModeChanged||previewChanged||"over_budget".equals(inputBudget.getStatus())||((responsesPacket||packet.getPacketIndex()>0)&&!inputBudget.isExtraDispatchPermitted())) {
+                if(providerModeChanged||previewChanged||!inputBudget.isExtraDispatchPermitted()) {
                     audit.setStatus("not_submitted_"+inputBudget.getStatus());audit.setFailureKind("over_budget".equals(inputBudget.getStatus())?"input_context_over_budget":"input_budget_unknown");audit.setError(inputBudget.getReason());
                     topicProbe.event("packet_not_submitted",VettingReviewProbe.map("packetId",packet.getPacketId(),"reason",audit.getFailureKind(),"actualGatewayCallStarted",false));return;
                 }

@@ -77,11 +77,13 @@ class VettingWorkflowTest {
     @Autowired private VettingFindingRepository findings;
     @Autowired private VettingRunRepository runs;
     @Autowired private ConsenseProperties props;
+    @Autowired private VettingSemanticReview semantic;
     @MockBean private AiGateway ai;
     @MockBean private VettingRetrievalClient retrieval;
 
     @BeforeEach
     void offlineModel() {
+        semantic.setInputBudgetObserver(VettingTokenFixture::observe);
         props.getDocument().setProbeDirectory(null);
         props.getVetting().setExportProbeDirectory(null);
         props.getVetting().setRequireHybridRetrieval(false);props.getVetting().setProbeDirectory(null);

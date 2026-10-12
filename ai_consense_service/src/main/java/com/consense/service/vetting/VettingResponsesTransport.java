@@ -140,7 +140,7 @@ public final class VettingResponsesTransport {
             Map<String,Object> cp=new LinkedHashMap<>();cp.put("policy",policy);cp.put("configuredContextTokens",context);cp.put("safetyMarginTokens",margin);cp.put("outputReserveTokens",output);cp.put("contextEvidenceScope","configured_operation_limit_not_measured_provider_maximum");policySha=hash(JsonUtils.write(cp));
             Map<String,Object> p=new LinkedHashMap<>();p.put("wire",WIRE);p.put("counterContract",COUNTER);p.put("baseUrl",base);p.put("model",model);p.put("temperature",temperature);p.put("maxOutputTokens",output);p.put("reasoningEffort",effort);p.put("counterTimeoutMs",counterTimeout);p.put("generationTimeoutMs",generationTimeout);p.put("counterMaxResponseBytes",counterCap);p.put("generationMaxResponseBytes",generationCap);p.put("contextPolicySha256",policySha);p.put("retries",0);p.put("stream",false);sha=hash(JsonUtils.write(p));
         }
-        boolean knownPolicy(){return POLICY.equals(policy)&&context>0&&context>=output&&margin<=context-output;}
+        boolean knownPolicy(){return POLICY.equals(policy)&&context>=262144&&context>=output&&margin<=context-output;}
         String authorization(){if(JsonUtils.isBlankText(key))throw new IllegalStateException("Responses credential unavailable");return "Bearer "+key;}
     }
     public static final class PreparedRequest {
@@ -210,7 +210,7 @@ public final class VettingResponsesTransport {
                 ||!Objects.equals(in.getProviderConfigurationSha256(),w.getProfileSha256())||!isSha(w.getProfileSha256())||!isSha(w.getGenerationEntitySha256())||!isSha(w.getCounterProjectionSha256())||!isSha(w.getContextPolicySha256())
                 ||!WIRE.equals(e.getWireProtocol())||!COUNTER.equals(e.getCounterContract())||!Objects.equals(w.getProfileSha256(),e.getProfileSha256())||!Objects.equals(w.getGenerationEntitySha256(),e.getGenerationEntitySha256())||!Objects.equals(w.getCounterProjectionSha256(),e.getCounterProjectionSha256())||!Objects.equals(w.getContextPolicySha256(),e.getContextPolicySha256())||!isSha(e.getCounterResponseSha256())
                 ||!POLICY.equals(w.getEstimatePolicy())||!Objects.equals(w.getEstimatePolicy(),e.getEstimatePolicy())||!"configured_operation_limit_not_measured_provider_maximum".equals(w.getContextEvidenceScope())||!Objects.equals(w.getContextEvidenceScope(),e.getContextEvidenceScope())||!"request_declared".equals(e.getModelIdentityScope())
-                ||w.getConfiguredContextTokens()<=0||w.getSafetyMarginTokens()<0||w.getConfiguredContextTokens()!=e.getConfiguredContextTokens()||w.getSafetyMarginTokens()!=e.getSafetyMarginTokens()
+                ||w.getConfiguredContextTokens()<262144||w.getSafetyMarginTokens()<0||w.getConfiguredContextTokens()!=e.getConfiguredContextTokens()||w.getSafetyMarginTokens()!=e.getSafetyMarginTokens()
                 ||o.getInputTokens()<=0||o.getEffectiveContextTokens()!=w.getConfiguredContextTokens()||o.getOutputReserveTokens()!=in.getOutputReserveTokens()||in.getOutputReserveTokens()<=0) {result.setReason("provider_estimate_identity_or_policy_unknown");return result;}
         long available=w.getConfiguredContextTokens()-in.getOutputReserveTokens();
         if(available<0||w.getSafetyMarginTokens()>available||o.getInputTokens()>available-w.getSafetyMarginTokens()){result.setStatus("over_budget");result.setReason("provider_estimate_output_and_absolute_margin_exceed_configured_limit");return result;}

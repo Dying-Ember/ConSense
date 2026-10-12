@@ -48,7 +48,7 @@ class CanonicalRecheckAdviceRealSeamTest {
     static final String PROJECT="authored-recheck-project", POLICY=repeat('a'), INPUT="canonical-source-chunks-upstream-scope-and-parser-projection-v1";
     static final String SIGNATURE=VettingCorpus.hash("SYNTHETIC RECHECK INDEX FIXTURE");
     static final String DB=UUID.randomUUID().toString();
-    @DynamicPropertySource static void database(DynamicPropertyRegistry r){r.add("spring.datasource.url",()->"jdbc:h2:mem:recheck_"+DB+";MODE=MySQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE");r.add("consense.storage-root",()->Paths.get(System.getProperty("maven.multiModuleProjectDirectory"),"target","authored-recheck-storage",DB).toAbsolutePath().toString());}
+    @DynamicPropertySource static void database(DynamicPropertyRegistry r){r.add("spring.datasource.url",()->"jdbc:h2:mem:recheck_"+DB+";MODE=MySQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE");r.add("consense.storage-root",()->Paths.get(System.getProperty("maven.multiModuleProjectDirectory",System.getProperty("user.dir")),"target","authored-recheck-storage",DB).toAbsolutePath().toString());}
     @Autowired AdviceService advice;
     @Autowired ConsenseProperties props;
     @Autowired CanonicalEvidenceProperties canonicalProps;
@@ -62,6 +62,7 @@ class CanonicalRecheckAdviceRealSeamTest {
     @SpyBean CanonicalCurrentSourceReader reader;
     @SpyBean OerBusinessEvidence business;
     @MockBean(name="llmClient") LlmClient llm;
+    @MockBean VettingTokenBudgetCliObserver tokenObserver;
     @TempDir Path temporary;
     HttpServer server;ExecutorService httpWorkers;
     final Map<Long,ObjectNode> snapshots=new LinkedHashMap<>();
@@ -79,6 +80,7 @@ class CanonicalRecheckAdviceRealSeamTest {
     ObjectNode health;
 
     @BeforeEach void setup() throws Exception {
+        when(tokenObserver.observe(any())).thenAnswer(call->VettingTokenFixture.observe(call.getArgument(0)));
         snapshots.clear();rawSnapshots.clear();originals.clear();casTamperTargets.clear();casLedgers.clear();events.clear();perDocumentSnapshotReads.clear();healthMutation.set(null);
         indexMutation.set(null);retrieveMutation.set(null);snapshotMutation.set(null);chatMutation.set(null);
         indexRequest.set(null);canonicalProps.getSourcePageRenderEvidenceIdentities().clear();
