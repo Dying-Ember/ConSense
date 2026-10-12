@@ -22,6 +22,12 @@ public class ChatMessage {
     @Column(name = "project_id", length = 64, nullable = false)
     private String projectId;
 
+    @Column(name = "session_id", length = 64)
+    private String sessionId;
+
+    @Column(name = "source_snapshot_sha256", length = 64)
+    private String sourceSnapshotSha256;
+
     @Column(length = 16, nullable = false)
     private String role;
 

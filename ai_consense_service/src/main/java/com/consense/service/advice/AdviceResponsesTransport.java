@@ -153,6 +153,7 @@ public final class AdviceResponsesTransport {
         private final LlmOperation selection; private final Profile profile; private final ModelIdentity identity;
         Operation(LlmOperation s,Profile p){selection=s;profile=p;identity=new ModelIdentity("minimax-cn",WIRE,p.model,p.sha,"configured_advice_responses_wire");}
         public ModelIdentity getIdentity(){return identity;}
+        public long getConfiguredContextTokens(){return profile.context;}
         public PreparedRequest prepare(String system,String user,String sourceSha,int attempt){
             assertProfile();PreparedRequest request=new PreparedRequest(profile,system,user,sourceSha,attempt);
             if(observation!=null)request.observation=observation.begin(request,observationConfiguration(profile),profile.key,http instanceof NativeHttp);

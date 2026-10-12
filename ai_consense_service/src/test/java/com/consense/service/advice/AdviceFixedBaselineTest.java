@@ -62,7 +62,8 @@ class AdviceFixedBaselineTest {
         when(fixed.enabled()).thenReturn(true);when(fixed.frozenManifest()).thenReturn(JsonUtils.parse("{\"version\":\"AUTHORED-FROZEN-05\",\"developmentBaseline\":true}"));
         JsonNode payload=JsonUtils.parse("{\"id\":\"fixed:authored\",\"content\":\"AUTHORED complete standard text including the exception.\",\"fileLabel\":\"GCC authored standard\",\"fileKey\":\"GCC\",\"pageNo\":42,\"originalPageNos\":[42],\"anchor\":\"AUTHORED clause\",\"sourceHash\":\"AUTHORED-SOURCE-SHA\",\"originalSourceSha256\":\"AUTHORED-SOURCE-SHA\",\"sourceRole\":\"standard\",\"sourceQuality\":{\"family\":\"GCC\",\"finalQualityAccepted\":false},\"fixedDevelopmentBaseline\":true,\"fixedBaselineManifestSha256\":\"AUTHORED-MANIFEST-SHA\",\"fixedBaselineVersion\":\"05\",\"rawAudit\":\"RAW_AUDIT_SENTINEL\"}");
         Constructor<FixedReferenceEvidence> constructor=FixedReferenceEvidence.class.getDeclaredConstructor(String.class,double.class,JsonNode.class,JsonNode.class,JsonNode.class);constructor.setAccessible(true);
-        evidence=constructor.newInstance("fixed:authored",0.9,payload,null,null);standard=evidence.asHit();
+        JsonNode unit=JsonUtils.parse("{\"status\":\"complete_observed_unit\",\"requiredMemberIds\":[\"fixed:authored\"],\"presentMemberIds\":[\"fixed:authored\"],\"missingMemberIds\":[],\"qualifiersComplete\":\"unknown\"}");
+        evidence=constructor.newInstance("fixed:authored",0.9,payload,null,unit);standard=evidence.asHit();
         when(fixed.search(eq("advisory"),anyString(),eq(10))).thenReturn(Collections.singletonList(standard));
         when(fixed.evidence(any())).thenReturn(evidence);when(fixed.toModelMaterial(anyList(),eq(200000))).thenReturn("{\"role\":\"standard\",\"reference_only\":true,\"id\":\"fixed:authored\",\"content\":\"AUTHORED complete standard text including the exception.\"}");
         when(ai.completeJson(anyString(),anyString(),eq(AdviceService.AnswerRecord.class))).thenReturn(answer("reference_only"));
@@ -83,6 +84,8 @@ class AdviceFixedBaselineTest {
         assertEquals(2,saved.size());assertEquals("reference_only",saved.get(0).getBasisScope());
         CitationVO restored=JsonUtils.readList(saved.get(1).getSourcesJson(),CitationVO.class).get(0);
         assertEquals(source.getFixedBaselineEvidence(),restored.getFixedBaselineEvidence());
+        assertEquals(evidence.getSourceUnit(),restored.getFixedBaselineEvidence().path("sourceUnit"));
+        assertEquals("unknown",restored.getFixedBaselineEvidence().path("sourceUnit").path("qualifiersComplete").asText());
     }
     @Test void modelCannotUpgradeAnExplicitStandardExplanationToAProjectContractConclusion() {
         when(ai.completeJson(anyString(),anyString(),eq(AdviceService.AnswerRecord.class))).thenReturn(answer("project_contract"));
