@@ -102,6 +102,7 @@ STATE = Path(os.environ.get('CONSENSE_RETRIEVAL_DATA', str(WORKSPACE / 'tmp/vett
 OFFLINE = True  # Isolated window recipe never downloads model artifacts.
 LOCK = threading.RLock()
 _embedding = _reranker = _ocr = _database = None
+_database_configuration = None
 _projects = {}
 _migrated_index = None
 _selected_device = None
@@ -285,10 +286,17 @@ def rerank_candidates(query, candidates):
 
 
 def database():
-    global _database
+    global _database, _database_configuration
+    from migrated_qdrant_index import configured
+    from token_windows import fail
+    current = (str(STATE), os.environ.get('CONSENSE_QDRANT_URL'), os.environ.get('CONSENSE_QDRANT_API_KEY'))
     if _database is None:
         from qdrant_backend import connect
         _database = connect(STATE, os.environ)
+        _database_configuration = current
+    else:
+        fail(_database_configuration == current or (_database_configuration is None and not configured(os.environ)),
+             'QDRANT_BACKEND_CONFIG_CHANGED', 'Cached Qdrant backend configuration differs; start a new runtime')
     return _database
 
 

@@ -101,7 +101,7 @@ class FixedBaselineRetrievalClientTest {
             ObjectNode query=JsonUtils.mapper().createObjectNode();query.put("schema","consense.migrated-server-query-runtime.v1");query.put("migrationReceiptSha256",p.getMigrationReceiptSha256());query.put("queryApiBaseUrl",p.getBaseUrl());
             query.put("indexSignature",SIGNATURE);query.put("readOnly",true);query.put("runtimeCompatibilityVerified",false);query.set("target",migration.path("target"));query.set("fullVectorIntegrity",persisted);
             query.set("queryIdentity",identity);query.set("queryRecipe",recipe);query.set("health",health.deepCopy());
-            java.lang.reflect.Method digest=FixedBaselineRetrievalClient.class.getDeclaredMethod("normalizedDigest",JsonNode.class);digest.setAccessible(true);query.put("queryRuntimeSignature",(String)digest.invoke(null,identity));
+            java.lang.reflect.Method digest=FixedBaselineRetrievalClient.class.getDeclaredMethod("queryDigest",JsonNode.class);digest.setAccessible(true);query.put("queryRuntimeSignature",(String)digest.invoke(null,identity));
             Path qp=temp.resolve("query.json");write(qp,query);p.setQueryRuntimePath(qp.toString());p.setQueryRuntimeSha256(sha(Files.readAllBytes(qp)));
             ObjectNode access=response.putObject("indexAccess");access.put("mode","pinned-migrated-server-read-only");access.put("readOnly",true);access.put("runtimeCompatibilityVerified",false);access.put("migrationReceiptSha256",p.getMigrationReceiptSha256());
             for(String field:Arrays.asList("target","queryIdentity","queryRecipe","queryRuntimeSignature","fullVectorIntegrity"))access.set(field,query.path(field).deepCopy());
@@ -149,6 +149,20 @@ class FixedBaselineRetrievalClientTest {
     }
     @Test void defaultLocalGuardStillRejectsServerHealth() throws Exception {
         Fixture f=new Fixture(false);f.health.put("mode","server");assertThrows(IllegalStateException.class,f::search);verify(f.http,never()).postJson(anyString(),anyString(),anyLong());
+    }
+    @Test void querySignatureMatchesActualPythonIntegerJsonGolden() throws Exception {
+        JsonNode value=JsonUtils.parse("{\"modelMaxLength\":1000000000000000019884624838656,\"files\":[{\"bytes\":10}]}");
+        java.lang.reflect.Method digest=FixedBaselineRetrievalClient.class.getDeclaredMethod("queryDigest",JsonNode.class);digest.setAccessible(true);
+        assertEquals("1f9b27100148c6e0e18d728e25673b67120895fb703d61ac59c390ed2b963b49",digest.invoke(null,value));
+    }
+    @Test void repinnedWrongOriginalColdOrTargetVectorSealFailsBeforeHttp() throws Exception {
+        for(String kind:Arrays.asList("sourceVectorIntegrity","targetVectorIntegrity")) {
+            Fixture f=new Fixture(false);f.enableMigration();Path path=Paths.get(f.p.getMigrationReceiptPath());
+            ObjectNode receipt=(ObjectNode)JsonUtils.parse(new String(Files.readAllBytes(path),StandardCharsets.UTF_8));
+            ((ObjectNode)receipt.path(kind)).put("pointsSha256",sha("same count wrong vector"));write(path,receipt);
+            f.p.setMigrationReceiptSha256(sha(Files.readAllBytes(path)));
+            assertTrue(assertThrows(IllegalStateException.class,f::search).getMessage().contains("migration_original_persisted_vectors_changed"));verifyNoInteractions(f.http);
+        }
     }
     @Test void tableNullAndEmptyRemainDistinctAndBodyIsNotRepeated() throws Exception {
         Fixture f=new Fixture(true);List<VectorStore.SearchHit> hits=f.search();JsonNode material=JsonUtils.parse(f.client.toModelMaterial(hits,100000));
