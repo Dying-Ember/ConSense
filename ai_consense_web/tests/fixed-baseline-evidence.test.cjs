@@ -21,6 +21,11 @@ function api(fetch) {
   return loadTypeScript(path.join(__dirname, '../src/api/fixedBaselineEvidence.ts'), { globals: { ...globals, fetch }, dependencies: { './sha256Bytes': sha } })
 }
 async function flush() { for (let i = 0; i < 10; i++) { await new Promise(resolve => setImmediate(resolve)); await settle() } }
+async function waitFor(predicate) {
+  const deadline = Date.now() + 5000
+  while (!predicate() && Date.now() < deadline) { await new Promise(resolve => setTimeout(resolve, 10)); await settle() }
+  assert.ok(predicate(), 'The observed async panel state did not complete within five seconds')
+}
 
 test('fixed source paths ignore supplied URLs and pin original/manifest/version/source kind despite ID collisions', async () => {
   const calls = [], client = api(async url => { calls.push(url); return envelope(evidence()) })
@@ -62,7 +67,8 @@ test('rendered fixed panel displays full table and unknown adoption, only reads 
     assert.match(text(rendered.root), /project adoption is unconfirmed/)
     assert.match(text(rendered.root), /Exception remains/); assert.match(text(rendered.root), /Full note/)
     assert.equal(find(rendered.root, node => node.tag === 'script'), undefined)
-    find(rendered.root, node => node.tag === 'button' && text(node) === 'Read the complete original PDF').props.onClick(); await flush()
+    find(rendered.root, node => node.tag === 'button' && text(node) === 'Read the complete original PDF').props.onClick()
+    await waitFor(() => /byte SHA-256 verified/.test(text(rendered.root)))
     assert.match(text(rendered.root), /byte SHA-256 verified/); assert.equal(urls.length, 1)
     props.pointer = { ...address, parentId: 'unavailable-source' }; await flush()
     assert.equal(revoked.length, 1); assert.match(text(rendered.root), /fixed baseline or original changed/)

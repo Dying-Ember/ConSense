@@ -103,7 +103,9 @@ public class FixedBaselineRetrievalClient {
             require(required.equals(members)&&members.containsAll(stringSet(unit.path("originIds"))),"source_unit_required_members_incomplete");
             verifiedSourceUnits.add(normalizedDigest(compact));
         }
-        require(origins.equals(seedPayload.keySet()),"source_unit_seeds_not_complete");checkCurrent(c);
+        require(origins.equals(seedPayload.keySet()),"source_unit_seeds_not_complete");
+        List<JsonNode> selected=new ArrayList<>();for(FixedReferenceEvidence item:all.values())selected.add(item.getPayload());
+        assertOriginals(c,selected);checkCurrent(c);
         return new ArrayList<>(all.values());
     }
     public FixedReferenceEvidence evidence(VectorStore.SearchHit hit) {
@@ -111,20 +113,25 @@ public class FixedBaselineRetrievalClient {
         JsonNode p=JSON.valueToTree(hit.getPayload());
         require(properties.getManifestSha256().equals(p.path("fixedBaselineManifestSha256").asText())&&c.manifest.path("version").asText().equals(p.path("fixedBaselineVersion").asText()),"fixed_reference_hit_pin_mismatch");
         ObjectNode original=((ObjectNode)p).deepCopy();for(String key:LOCAL_FIELDS) original.remove(key);
-        validateParent(c,hit.getId(),original);
+        validateParent(c,hit.getId(),original);readParent(c,hit.getId());
         JsonNode unit=p.get("fixedReferenceSourceUnit");
         if(unit!=null) require(unit.path("requiredMemberIds").isArray()&&(stringSet(unit.path("requiredMemberIds")).contains(hit.getId())
                 ||"unknown".equals(unit.path("status").asText())&&unit.path("requiredMemberIds").size()==0&&stringSet(unit.path("originIds")).contains(hit.getId()))
                 &&verifiedSourceUnits.contains(normalizedDigest(unit)),"fixed_reference_group_missing_or_changed");
         return makeEvidence(c,hit.getId(),hit.getScore(),original,unit,p.path("fixedReferenceOrigin").asBoolean());
     }
-    public void assertCurrent(List<VectorStore.SearchHit> hits) { Catalog c=ready();checkCurrent(c);for(VectorStore.SearchHit h:hits)evidence(h); }
+    public void assertCurrent(List<VectorStore.SearchHit> hits) {
+        Catalog c=ready();checkCurrent(c);List<JsonNode> selected=new ArrayList<>();
+        for(VectorStore.SearchHit h:hits)selected.add(evidence(h).getPayload());
+        assertOriginals(c,selected);checkCurrent(c);
+    }
     public String toModelMaterial(List<VectorStore.SearchHit> hits,int maxCharacters) {
+        assertCurrent(hits);
         List<FixedReferenceEvidence> rows=new ArrayList<>();for(VectorStore.SearchHit h:hits)rows.add(evidence(h));
         return FixedBaselineModelMaterial.render(rows,maxCharacters);
     }
     public VectorStore.SearchHit readOnlyHitById(String id) {
-        Catalog c=ready();checkCurrent(c);JsonNode p=readParent(c,id);
+        Catalog c=ready();checkCurrent(c);JsonNode p=readParent(c,id);assertOriginals(c,Collections.singletonList(p));checkCurrent(c);
         return makeEvidence(c,id,0,p,null,false).asHit();
     }
     private FixedReferenceEvidence makeEvidence(Catalog c,String id,double score,JsonNode original,JsonNode unit,boolean origin) {
@@ -196,6 +203,29 @@ public class FixedBaselineRetrievalClient {
     private void checkCurrent(Catalog c) {
         require(c.configIdentity.equals(configIdentity()),"fixed_reference_configuration_changed");
         try{c.manifestPin.current();c.corpusPin.current();}catch(IOException e){throw new IllegalStateException("fixed_reference_frozen_files_unavailable",e);}
+    }
+    /** Re-hash only selected source originals; metadata timestamps cannot attest byte identity. */
+    private void assertOriginals(Catalog c,Collection<JsonNode> selected) {
+        Set<String> checked=new HashSet<>();
+        for(JsonNode parent:selected) {
+            readParent(c,parent.path("id").asText());
+            String expected=parent.path("originalSourceSha256").asText();if(!checked.add(expected))continue;
+            JsonNode descriptor=null;
+            for(JsonNode source:c.manifest.path("originalSources"))if(expected.equals(source.path("sha256").asText())) {
+                require(descriptor==null,"fixed_original_descriptor_ambiguous");descriptor=source;
+            }
+            require(descriptor!=null&&text(descriptor.path("path"))&&descriptor.path("bytes").isIntegralNumber()
+                    &&descriptor.path("bytes").asLong()>0&&shaText(expected),"fixed_original_descriptor_invalid");
+            try {
+                Path path=Paths.get(descriptor.path("path").asText()).toAbsolutePath().normalize();Pin before=new Pin(path);
+                require(Files.isRegularFile(path)&&before.bytes==descriptor.path("bytes").asLong(),"fixed_original_size_changed");
+                MessageDigest digest=sha();long count=0;byte[] buffer=new byte[65536];
+                try(InputStream input=new BufferedInputStream(Files.newInputStream(path))) {
+                    int n;while((n=input.read(buffer))!=-1){digest.update(buffer,0,n);count+=n;}
+                }
+                before.current();require(count==before.bytes&&expected.equals(hex(digest.digest())),"fixed_original_sha_changed");
+            }catch(IOException e){throw new IllegalStateException("fixed_reference_original_unavailable",e);}
+        }
     }
     private void validateHealth(Catalog c,JsonNode h) {
         JsonNode signature=c.plan.path("signature"),w=h.path("retrieval").path("sourceWindows");

@@ -26,6 +26,7 @@ class FixedBaselineRetrievalClientTest {
         final ObjectNode first=parent("parent-a","1.1 Authored complete condition",1), second=parent("parent-b","Exception: authored qualifier",2);
         final ObjectNode health=JsonUtils.mapper().createObjectNode(), response=JsonUtils.mapper().createObjectNode();
         final Path corpus=temp.resolve("corpus.jsonl");
+        final Path original=temp.resolve("original.pdf");
         final FixedBaselineRetrievalClient client;
         Fixture(boolean table) throws Exception {
             if(table) {
@@ -49,7 +50,8 @@ class FixedBaselineRetrievalClientTest {
             Path planPath=temp.resolve("plan.json");write(planPath,plan);
             ObjectNode manifest=JsonUtils.mapper().createObjectNode();manifest.put("schema","consense.frozen-fixed-development-baseline.v1");manifest.put("developmentBaseline",true);
             manifest.put("finalParsingAccepted",false);manifest.put("businessAccepted",false);manifest.put("version","authored-freeze-05");manifest.put("indexSignature",SIGNATURE);
-            manifest.putArray("scope").add("GCC").add("GCT").add("all-applicable-SL-technical");manifest.putObject("originalSources").putObject("gccSource").put("sha256",ORIGINAL);
+            Files.write(original,"authored source".getBytes(StandardCharsets.UTF_8));
+            manifest.putArray("scope").add("GCC").add("GCT").add("all-applicable-SL-technical");manifest.putObject("originalSources").set("gccSource",descriptor(original));
             manifest.set("runtimePlan",descriptor(planPath));manifest.set("corpus",descriptor(corpus));manifest.putObject("coverage").put("totalParents",2);
             Path manifestPath=temp.resolve("manifest.json");write(manifestPath,manifest);
             p.setEnabled(true);p.setManifestPath(manifestPath.toString());p.setManifestSha256(sha(Files.readAllBytes(manifestPath)));p.setProjectId("authored-fixed");p.setIndexSignature(SIGNATURE);
@@ -100,6 +102,26 @@ class FixedBaselineRetrievalClientTest {
     @Test void rejectsCorpusOrConfigurationChangeAfterCatalog() throws Exception {
         Fixture f=new Fixture(false);List<VectorStore.SearchHit> hits=f.search();f.p.setIndexSignature(sha("new signature"));assertThrows(IllegalStateException.class,()->f.client.assertCurrent(hits));
         f.p.setIndexSignature(SIGNATURE);Files.write(f.corpus,"extra".getBytes(StandardCharsets.UTF_8),StandardOpenOption.APPEND);assertThrows(IllegalStateException.class,()->f.client.frozenManifest());
+    }
+    @Test void rejectsSameSizeOriginalReplacementEvenWithRestoredTimestamp() throws Exception {
+        Fixture f=new Fixture(false);List<VectorStore.SearchHit> hits=f.search();
+        java.nio.file.attribute.FileTime before=Files.getLastModifiedTime(f.original);
+        Files.write(f.original,"modified source".getBytes(StandardCharsets.UTF_8));Files.setLastModifiedTime(f.original,before);
+        assertEquals(15,Files.size(f.original));
+        assertThrows(IllegalStateException.class,f::search);
+        assertThrows(IllegalStateException.class,()->f.client.assertCurrent(hits));
+        assertThrows(IllegalStateException.class,()->f.client.toModelMaterial(hits,100000));
+        assertThrows(IllegalStateException.class,()->f.client.readOnlyHitById("parent-a"));
+    }
+    @Test void rejectsSameSizeSelectedCorpusReplacementWithRestoredTimestamp() throws Exception {
+        Fixture f=new Fixture(false);List<VectorStore.SearchHit> hits=f.search();
+        java.nio.file.attribute.FileTime before=Files.getLastModifiedTime(f.corpus);
+        String content=new String(Files.readAllBytes(f.corpus),StandardCharsets.UTF_8);
+        Files.write(f.corpus,content.replace("Authored complete","Altered complete").getBytes(StandardCharsets.UTF_8));
+        Files.setLastModifiedTime(f.corpus,before);
+        assertThrows(IllegalStateException.class,f::search);
+        assertThrows(IllegalStateException.class,()->f.client.assertCurrent(hits));
+        assertThrows(IllegalStateException.class,()->f.client.readOnlyHitById("parent-a"));
     }
     private static ObjectNode parent(String id,String text,int page) {
         ObjectNode p=JsonUtils.mapper().createObjectNode();p.put("id",id);p.put("content",text);p.put("role","standard");p.put("fileKey","GCC");p.put("documentId","GCC:GCC");p.put("anchor","GCC/P"+page);p.put("pageNo",page);
