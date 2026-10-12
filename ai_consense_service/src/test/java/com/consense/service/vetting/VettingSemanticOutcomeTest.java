@@ -68,7 +68,10 @@ class VettingSemanticOutcomeTest {
         assertEquals("failed",result.getTopicAudits().get(0).getStatus());
         assertEquals("structured_output_invalid",result.getTopicAudits().get(0).getFailureKind());
         assertTrue(result.getReviewedChunkIds().isEmpty()); assertTrue(result.getCandidates().isEmpty());
-        verify(http,times(1)).postJson(anyString(),anyString(),anyLong(),isNull(),eq(0));
+        com.consense.web.dto.VettingDtos.SemanticPacketVO packet=result.getTopicAudits().get(0).getPacketAudits().get(0);
+        assertEquals(2,packet.getAttempts().size());assertTrue(packet.getAttempts().stream().allMatch(a->"structured_output_invalid".equals(a.getStatus())&&"SCHEMA_MISMATCH".equals(a.getValidationReason())));
+        assertEquals(2,result.getActualGatewayCallCount());
+        verify(http,times(2)).postJson(anyString(),anyString(),anyLong(),isNull(),eq(0));
     }
 
     @Test void theProductionReviewUsesExpandedWindowAndKeepsUnknownSubclauseScope() {
