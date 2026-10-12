@@ -15,10 +15,11 @@ const finding = {
   impact: localized(''), suggestion: localized('SUGGESTED ANSWER NOT TO TRANSFER'), types: ['risk'], group: 'risk',
   scope: 'intra', severity: 'medium', status: 'Open', pattern: null, refs: 'A1', location: 'P4', expected: null,
   evidenceId: 'E1', fileKey: 'SCC', pageNo: 'P4', bucketKey: null, verification: 'partial',
+  runId: 'run-1', generatedRevisionSha256: '6'.repeat(64), sourceSnapshotSha256: '7'.repeat(64),
   reviewRemarks: 'TEAM REMARKS NOT TO TRANSFER', actionTaken: '', addendumRequired: null
 }
 const source = { documentId: '12', fileKey: 'SCC', fileName: 'actual SCC.pdf', sourceRole: 'tender', parseStatus: 'PARSED', included: true, exclusionReason: null, sourceHash: 'source-v1' }
-const evidence = { title: 'Original source', located: true, items: [{ code: 'E1', side: 'source', documentId: '12', fileKey: 'SCC', fileName: 'actual SCC.pdf', pageNo: 'P4', anchor: 'A1', sourceHash: 'source-v1', located: true, quote: literalQuote, text: literalQuote }] }
+const evidence = { title: 'Original source', located: true, items: [{ code: 'E1', side: 'source', documentId: '12', fileKey: 'SCC', fileName: 'actual SCC.pdf', pageNo: 'P4', anchor: 'A1', sourceHash: 'source-v1', originalSourceSha256: '8'.repeat(64), located: true, quote: literalQuote, text: literalQuote }] }
 const canonicalFixtureRoot = path.resolve(__dirname, '../../ai_consense_service/src/test/resources/oer/canonical')
 const canonicalProjection = JSON.parse(fs.readFileSync(path.join(canonicalFixtureRoot, 'authored-three-page-projection.json'), 'utf8'))
 function canonicalPointer(module, unitId = 'table') {
@@ -44,7 +45,7 @@ async function harness({ stale = false, currentSources = [source], sourceGate, e
   const requests = [], stored = new Map(), canonicalRequests = [], createdUrls = [], revokedUrls = []
   const currentEvidence = canonicalEvidence ? { ...evidence, items: evidence.items.map(item => ({ ...item,
     documentId: String(canonicalEvidence.documentId), fileName: canonicalEvidence.sourceFilename,
-    sourceHash: canonicalEvidence.javaParsedSourceHash, canonicalEvidence })) } : evidence
+    sourceHash: canonicalEvidence.javaParsedSourceHash, originalSourceSha256: canonicalEvidence.originalSourceSha256, canonicalEvidence })) } : evidence
   const sessionStorage = {
     getItem: key => stored.get(key) ?? null,
     setItem: (key, value) => { if (storageDenied) throw new Error('Storage denied'); stored.set(key, value) },
@@ -53,7 +54,7 @@ async function harness({ stale = false, currentSources = [source], sourceGate, e
   const respond = (method, url, body, config) => {
     requests.push({ method, url, body, config })
     const override = respondOverride?.({ method, url, body, config })
-    if (override !== undefined) return Promise.resolve(override).then(data => ({ data: data?.code === 4205 ? data : { code: 0, data } }))
+    if (override !== undefined) return Promise.resolve(override).then(data => ({ data: typeof data?.code === 'number' ? data : { code: 0, data } }))
     let data
     if (url.includes('/findings/F001/evidence')) data = evidenceGate ? evidenceGate.promise : currentEvidence
     else if (url.includes('/findings')) data = [finding]
@@ -96,7 +97,7 @@ async function harness({ stale = false, currentSources = [source], sourceGate, e
   const axios = { create: () => ({ get: (url, config) => respond('get', url, undefined, config), post: (url, body, config) => respond('post', url, body, config), put: (url, body, config) => respond('put', url, body, config), delete: (url, config) => respond('delete', url, undefined, config) }), isAxiosError: () => false }
   const loaded = loadVue(path.join(__dirname, '../src/views/VettingView.vue'), {
     boundaries: { axios: { default: axios }, pinia, 'vue-router': routerRuntime, 'vue-i18n': require('vue-i18n'), '@noble/hashes/sha256': require('@noble/hashes/sha256'), ...answerRendererBoundaries },
-    globals: { sessionStorage, crypto: browserCrypto, Uint8Array, ArrayBuffer, URLSearchParams, URL: EvidenceURL, Blob, FormData, File, AbortController, fetch,
+    globals: { sessionStorage, crypto: browserCrypto, Uint8Array, ArrayBuffer, URLSearchParams, URL: EvidenceURL, Blob, FormData, File, AbortController, fetch, structuredClone,
       localStorage: { getItem: () => null, setItem() {} }, document: { documentElement: { lang: '' }, getElementById: () => null },
       window: { setTimeout(callback, ms) { const timer = setTimeout(callback, ms); timer.unref(); return timer }, clearTimeout }, console }
   })
@@ -252,6 +253,7 @@ test('real Vetting evidence mapping retains the optional canonical pointer and o
     const original = find(h.root, node => node.tag === 'a' && node.props.href?.includes('/original?'))
     assert.ok(original)
     assert.ok(original.props.href.includes(`sourceHash=${bound.javaParsedSourceHash}`))
+    assert.ok(original.props.href.includes(`originalSourceSha256=${bound.originalSourceSha256}`))
     assert.equal(original.props.href.includes(bound.canonicalSourceHash), false)
     assert.equal(h.requests.some(request => request.method !== 'get'), false)
     assert.equal(h.requests.some(request => request.url.endsWith('/ask')), false)
@@ -516,12 +518,15 @@ test('explicit session switch binds scope/basis and isolates late answer and his
     find(h.root, node => node.tag === 'textarea').props['onUpdate:modelValue']('Question for A'); await settle()
     const asking = button(h, 'Ask').props.onClick(); await settle()
     assert.equal(h.requests.find(request => request.url.endsWith('/ask')).body.sessionId, 'session-A')
+    const projectReads = h.requests.filter(request => /\/(?:sources|index\/status)\?/.test(request.url)).length
     sessionSelect(h).props['onUpdate:modelValue']('session-B'); await settle()
     assert.match(text(h.root), /B current answer/)
     assert.match(text(h.root), /Adoption of this edition/)
     const scopeControl = find(h.root, node => node.tag === 'select' && node.props['aria-label'] === 'Documents in this advice scope')
     assert.equal(scopeControl.props.disabled, true)
-    assert.equal(h.requests.filter(request => request.url.includes('/sources?')).at(-1).url, '/advice/project-A/sources?scope=contract')
+    assert.equal(h.requests.filter(request => /\/(?:sources|index\/status)\?/.test(request.url)).length, projectReads)
+    assert.equal(button(h, 'Refresh evidence index'), undefined)
+    assert.match(text(h.root), /fixed standards only[\s\S]*has not confirmed fixed retrieval readiness/)
     oldAsk.resolve({ sessionId: 'session-A', grounded: true, title: localized('A title'), content: localized('A late answer'), sources: [], citations: [] }); await asking; await settle()
     assert.doesNotMatch(text(h.root), /A late answer/)
     sessionSelect(h).props['onUpdate:modelValue']('session-A'); await settle()
@@ -611,5 +616,214 @@ test('historical fixed answer retains its own source lane after a later project 
     assert.match(text(h.root), /project adoption is unconfirmed/)
     assert.match(text(h.root), /Fixed source A literal/)
     assert.equal(h.requests.some(request => request.method !== 'get'), false)
+  } finally { h.dispose() }
+})
+
+function reviewRemarks(h) { return find(h.root, node => node.tag === 'textarea' && node.props.rows === '3') }
+const expectedFindingBinding = value => ({ expectedRunId: value.runId,
+  expectedGeneratedRevisionSha256: value.generatedRevisionSha256, expectedSourceSnapshotSha256: value.sourceSnapshotSha256 })
+
+test('Vetting manual status and review writes bind the displayed finding revision and source snapshot', async () => {
+  let current = { ...finding }
+  const h = await harness({ respondOverride: ({ method, url, body }) => {
+    if (method === 'post' && url.includes('/status?')) return current = { ...current, status: 'Handled' }
+    if (method === 'put' && url.endsWith('/review')) return current = { ...current, ...body }
+    if (url.includes('/findings') && !url.endsWith('/evidence')) return [current]
+  } })
+  try {
+    await openFinding(h)
+    await button(h, 'Mark handled').props.onClick(); await settle()
+    const status = h.requests.find(request => request.url.includes('/status?'))
+    const query = new URL(status.url, 'http://localhost').searchParams
+    assert.equal(query.get('status'), 'Handled')
+    for (const [key, value] of Object.entries(expectedFindingBinding(finding))) assert.equal(query.get(key), value)
+    reviewRemarks(h).props['onUpdate:modelValue']('Reviewed the current exception'); await settle()
+    await button(h, 'Save review record').props.onClick(); await settle()
+    const review = h.requests.find(request => request.method === 'put' && request.url.endsWith('/review'))
+    assert.deepEqual(JSON.parse(JSON.stringify(review.body)), { ...expectedFindingBinding(finding), reviewRemarks: 'Reviewed the current exception', actionTaken: '', addendumRequired: null })
+    assert.equal(button(h, 'Save review record').props.disabled, true)
+    assert.equal(reviewRemarks(h).value, 'Reviewed the current exception')
+    assert.match(h.store.toast.message, /Review record saved/)
+  } finally { h.dispose() }
+})
+
+test('4104 preserves manual drafts and refresh loads the new version without applying a draft with the same finding code', async () => {
+  let current = { ...finding }
+  const h = await harness({ respondOverride: ({ method, url }) => {
+    if (method === 'put' && url.endsWith('/review')) return { code: 4104, message: 'SOURCE_SNAPSHOT_CHANGED', data: null }
+    if (url.includes('/findings') && !url.endsWith('/evidence')) return [current]
+  } })
+  try {
+    await openFinding(h)
+    reviewRemarks(h).props['onUpdate:modelValue']('Keep my old-version draft'); await settle()
+    await button(h, 'Save review record').props.onClick(); await settle()
+    assert.equal(reviewRemarks(h).value, 'Keep my old-version draft')
+    assert.match(text(h.root), /report or source version changed[\s\S]*draft is retained/i)
+    assert.equal(button(h, 'Save review record').props.disabled, true)
+    assert.equal(button(h, 'Mark handled').props.disabled, true)
+    current = { ...finding, runId: 'run-2', generatedRevisionSha256: '9'.repeat(64), sourceSnapshotSha256: 'a'.repeat(64), reviewRemarks: 'Current report remarks' }
+    await button(h, 'Refresh current version').props.onClick(); await settle()
+    assert.equal(reviewRemarks(h).value, 'Current report remarks')
+    assert.match(text(h.root), /Retained draft from an earlier version[\s\S]*Keep my old-version draft/)
+    assert.equal(h.requests.filter(request => request.method === 'put').length, 1)
+    reviewRemarks(h).props['onUpdate:modelValue']('New version reviewed explicitly'); await settle()
+    await button(h, 'Save review record').props.onClick(); await settle()
+    const last = h.requests.filter(request => request.method === 'put').at(-1)
+    assert.equal(last.body.expectedRunId, 'run-2')
+    assert.equal(last.body.expectedGeneratedRevisionSha256, '9'.repeat(64))
+    assert.equal(last.body.expectedSourceSnapshotSha256, 'a'.repeat(64))
+    assert.equal(last.body.reviewRemarks, 'New version reviewed explicitly')
+  } finally { h.dispose() }
+})
+
+test('late successful review cannot replace a newer report or remove the retained draft', async () => {
+  let current = { ...finding }
+  const pending = deferred()
+  const h = await harness({ respondOverride: ({ method, url }) => {
+    if (method === 'put' && url.endsWith('/review')) return pending.promise
+    if (url.includes('/findings') && !url.endsWith('/evidence')) return [current]
+  } })
+  try {
+    await openFinding(h)
+    reviewRemarks(h).props['onUpdate:modelValue']('Draft still under review'); await settle()
+    const saving = button(h, 'Save review record').props.onClick(); await settle()
+    current = { ...finding, runId: 'run-2', generatedRevisionSha256: 'b'.repeat(64), reviewRemarks: 'New report has its own remarks' }
+    find(h.root, node => node.tag === 'input' && node.props.type === 'search').props['onUpdate:modelValue']('A1')
+    await settle(); await new Promise(resolve => setTimeout(resolve, 260)); await settle()
+    assert.match(text(h.root), /report or source version changed/i)
+    pending.resolve({ ...finding, reviewRemarks: 'Draft still under review' }); await saving; await settle()
+    assert.equal(reviewRemarks(h).value, 'Draft still under review')
+    assert.equal(button(h, 'Save review record').props.disabled, true)
+    assert.doesNotMatch(h.store.toast.message, /Review record saved/)
+    await button(h, 'Refresh current version').props.onClick(); await settle()
+    assert.equal(reviewRemarks(h).value, 'New report has its own remarks')
+    assert.match(text(h.root), /Retained draft from an earlier version[\s\S]*Draft still under review/)
+  } finally { h.dispose() }
+})
+
+test('late status success cannot overwrite the currently selected newer report', async () => {
+  let current = { ...finding }
+  const pending = deferred()
+  const h = await harness({ respondOverride: ({ method, url }) => {
+    if (method === 'post' && url.includes('/status?')) return pending.promise
+    if (url.includes('/findings') && !url.endsWith('/evidence')) return [current]
+  } })
+  try {
+    await openFinding(h)
+    const saving = button(h, 'Mark handled').props.onClick(); await settle()
+    current = { ...finding, runId: 'run-2', generatedRevisionSha256: 'c'.repeat(64), title: localized('New report finding') }
+    find(h.root, node => node.tag === 'input' && node.props.type === 'search').props['onUpdate:modelValue']('A1')
+    await settle(); await new Promise(resolve => setTimeout(resolve, 260)); await settle()
+    await openFinding(h)
+    pending.resolve({ ...finding, status: 'Handled' }); await saving; await settle()
+    assert.match(text(h.root), /New report finding/)
+    assert.equal(button(h, 'Mark handled').props.disabled, false)
+    assert.doesNotMatch(h.store.toast.message, /F001 · Handled/)
+  } finally { h.dispose() }
+})
+
+const checklistFixture = { projectId: 'project-A', runId: 'run-1', runSnapshotSha256: 'd'.repeat(64), sourceSnapshotSha256: finding.sourceSnapshotSha256, writable: true,
+  items: [{ id: 'pre-1', section: 'PRE', clause: 'PSS A1', description: 'Verify exception', templatePage: 1, status: 'unchecked', remarks: '' }] }
+async function expandChecklist(h) {
+  const panel = find(h.root, node => node.tag === 'details' && node.props.class?.includes('checklist-panel'))
+  assert.ok(panel)
+  await panel.props.onToggle({ target: { open: true } }); await settle()
+}
+function checklistRemarks(h) { return find(h.root, node => node.tag === 'textarea' && node.props['aria-label'] === 'PSS A1 Remarks by Contract Team') }
+
+test('checklist writes bind the loaded snapshot; 4104 retains the row and refresh archives it without carrying values forward', async () => {
+  let current = JSON.parse(JSON.stringify(checklistFixture))
+  const h = await harness({ respondOverride: ({ method, url }) => {
+    if (url.endsWith('/runs/latest/progress') || url.endsWith('/runs/run-1')) return { id: 'run-1', status: 'COMPLETED', sourceSnapshotSha256: finding.sourceSnapshotSha256 }
+    if (url.endsWith('/checklist')) return method === 'put' ? { code: 4104, message: 'CHECKLIST_SNAPSHOT_CHANGED', data: null } : current
+  } })
+  try {
+    await expandChecklist(h)
+    checklistRemarks(h).props['onUpdate:modelValue']('Do not lose the old checklist note'); await settle()
+    await button(h, 'Save this check').props.onClick(); await settle()
+    const write = h.requests.find(request => request.method === 'put' && request.url.endsWith('/checklist'))
+    assert.deepEqual(JSON.parse(JSON.stringify(write.body)), { expectedRunId: 'run-1', expectedSourceSnapshotSha256: finding.sourceSnapshotSha256,
+      runSnapshotSha256: checklistFixture.runSnapshotSha256, items: [{ id: 'pre-1', status: 'unchecked', remarks: 'Do not lose the old checklist note' }] })
+    assert.equal(checklistRemarks(h).value, 'Do not lose the old checklist note')
+    assert.equal(button(h, 'Save this check').props.disabled, true)
+    assert.match(text(h.root), /report or source version changed/i)
+    current = { ...current, runSnapshotSha256: 'e'.repeat(64), sourceSnapshotSha256: 'f'.repeat(64), items: [{ ...current.items[0], remarks: 'Fresh checklist baseline' }] }
+    await button(h, 'Refresh current version').props.onClick(); await settle()
+    assert.equal(checklistRemarks(h).value, 'Fresh checklist baseline')
+    assert.match(text(h.root), /Retained draft from an earlier version[\s\S]*Do not lose the old checklist note/)
+    assert.equal(h.requests.filter(request => request.method === 'put').length, 1)
+  } finally { h.dispose() }
+})
+
+test('project original link requires the saved raw byte SHA and never substitutes the current job snapshot', async () => {
+  const h = await harness({ respondOverride: ({ url }) => url.endsWith('/evidence')
+    ? { ...evidence, items: evidence.items.map(item => ({ ...item, originalSourceSha256: null })) } : undefined })
+  try {
+    await openFinding(h)
+    assert.equal(find(h.root, node => node.tag === 'a' && node.props.href?.includes('/sources/12/original?')), undefined)
+    assert.match(text(h.root), /Clause A1: shall NOT apply/)
+    assert.equal(h.requests.some(request => request.method !== 'get'), false)
+  } finally { h.dispose() }
+})
+
+test('checklist late success after project ABA cannot alter the freshly loaded checklist or erase its new edits', async () => {
+  const pending = deferred()
+  let current = JSON.parse(JSON.stringify(checklistFixture))
+  const h = await harness({ respondOverride: ({ method, url }) => {
+    if (url.endsWith('/runs/latest/progress') || url.endsWith('/runs/run-1')) return { id: 'run-1', status: 'COMPLETED', sourceSnapshotSha256: finding.sourceSnapshotSha256 }
+    if (url.endsWith('/checklist')) return method === 'put' ? pending.promise : current
+  } })
+  try {
+    await expandChecklist(h)
+    checklistRemarks(h).props['onUpdate:modelValue']('Submitted old checklist'); await settle()
+    const saving = button(h, 'Save this check').props.onClick(); await settle()
+    await h.store.switchProject('project-B'); await settle()
+    current = { ...checklistFixture, runSnapshotSha256: '2'.repeat(64), sourceSnapshotSha256: '3'.repeat(64), items: [{ ...checklistFixture.items[0], remarks: 'Fresh loaded checklist' }] }
+    await h.store.switchProject('project-A'); await settle(); await expandChecklist(h)
+    checklistRemarks(h).props['onUpdate:modelValue']('Fresh unsaved checklist note'); await settle()
+    pending.resolve({ ...checklistFixture, items: [{ ...checklistFixture.items[0], remarks: 'Submitted old checklist' }] }); await saving; await settle()
+    assert.equal(checklistRemarks(h).value, 'Fresh unsaved checklist note')
+    assert.equal(button(h, 'Save this check').props.disabled, false)
+    assert.doesNotMatch(h.store.toast.message, /Check saved/)
+    await button(h, 'Restore saved value').props.onClick(); await settle()
+    assert.equal(checklistRemarks(h).value, 'Fresh loaded checklist')
+  } finally { h.dispose() }
+})
+
+test('4104 status rejection preserves existing unsaved review remarks and blocks reapplication to a stale report', async () => {
+  const h = await harness({ respondOverride: ({ method, url }) => method === 'post' && url.includes('/status?')
+    ? { code: 4104, message: 'GENERATED_REVISION_CHANGED', data: null } : undefined })
+  try {
+    await openFinding(h)
+    reviewRemarks(h).props['onUpdate:modelValue']('Unsaved draft before status change'); await settle()
+    await button(h, 'Mark handled').props.onClick(); await settle()
+    assert.equal(reviewRemarks(h).value, 'Unsaved draft before status change')
+    assert.equal(button(h, 'Mark handled').props.disabled, true)
+    assert.equal(button(h, 'Save review record').props.disabled, true)
+    assert.match(text(h.root), /report or source version changed[\s\S]*draft is retained/i)
+    assert.equal(h.requests.filter(request => request.method === 'post').length, 1)
+  } finally { h.dispose() }
+})
+
+test('reference-only session skips project index reads and late project failures cannot contaminate its readiness message', async () => {
+  const oldStatus = deferred()
+  const h = await harness({ initialView: 'advice', respondOverride: ({ url }) => {
+    if (url.endsWith('/sessions')) return sessions
+    if (url.includes('/index/status?')) return oldStatus.promise
+    if (url.endsWith('/ask')) return { code: 4205, message: 'fixed final-wire budget unavailable', data: null }
+  } })
+  try {
+    const reads = h.requests.filter(request => /\/(?:sources|index\/status)\?/.test(request.url)).length
+    sessionSelect(h).props['onUpdate:modelValue']('session-B'); await settle()
+    assert.equal(h.requests.filter(request => /\/(?:sources|index\/status)\?/.test(request.url)).length, reads)
+    assert.equal(button(h, 'Refresh evidence index'), undefined)
+    oldStatus.resolve({ code: 4104, message: 'BGE-M3 unavailable', data: null }); await settle()
+    assert.doesNotMatch(text(h.root), /BGE-M3|could not be loaded|Ready|Index ready/)
+    assert.match(text(h.root), /fixed standards only[\s\S]*has not confirmed fixed retrieval readiness/)
+    find(h.root, node => node.tag === 'textarea').props['onUpdate:modelValue']('Verify the fixed provision'); await settle()
+    await button(h, 'Ask').props.onClick(); await settle()
+    assert.match(text(h.root), /fixed final-wire budget unavailable/)
+    assert.equal(find(h.root, node => node.tag === 'textarea').value, 'Verify the fixed provision')
+    assert.equal(h.requests.find(request => request.url.endsWith('/ask')).body.basisScope, 'reference_only')
   } finally { h.dispose() }
 })

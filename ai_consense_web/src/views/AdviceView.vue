@@ -50,6 +50,7 @@ let askSequence = 0
 let activeRebuildBusy: { sequence: number; message: string } | null = null
 
 const evidenceCopy = {
+  referenceScope: { zhHans: '本次仅查询固定标准；每次咨询会核验来源与版本。当前界面尚未确认固定检索就绪。', zhHant: '本次僅查詢固定標準；每次諮詢會核驗來源與版本。目前介面尚未確認固定檢索就緒。', en: 'This session queries fixed standards only. Each question verifies its sources and versions; this view has not confirmed fixed retrieval readiness.' },
   session: { zhHans: '咨询会话', zhHant: '諮詢會話', en: 'Advisory session' },
   legacy: { zhHans: '历史对话／新会话范围', zhHant: '歷史對話／新會話範圍', en: 'Legacy history / new session scope' },
   newSession: { zhHans: '建立新会话', zhHant: '建立新會話', en: 'Create new session' },
@@ -105,7 +106,7 @@ const SCOPES = [
   { value: 'contract', label: () => t('advice.scope.contract') }
 ]
 
-const scopeNote = computed(() => t('advice.scopeNote'))
+const scopeNote = computed(() => basisScope.value === 'reference_only' ? pick(evidenceCopy.referenceScope) : t('advice.scopeNote'))
 
 function sourceParseLabel(document: AdviceSourceDocument) {
   if (document.parseStatus === 'PARSED') return t('advice.sourceScope.parsed')
@@ -114,6 +115,7 @@ function sourceParseLabel(document: AdviceSourceDocument) {
 }
 
 const indexHint = computed(() => {
+  if (basisScope.value === 'reference_only') return ''
   const status = indexStatus.value
   if (!status) return ''
   if (status.indexReason && Object.prototype.hasOwnProperty.call(evidenceCopy, status.indexReason)) return pick(evidenceCopy[status.indexReason as keyof typeof evidenceCopy])
@@ -138,7 +140,7 @@ function resetScopedState() {
 async function reloadIndexStatus() {
   const id = projectId.value, selectedScope = scope.value, epoch = viewEpoch, sequence = ++indexSequence
   indexStatus.value = null; indexError.value = ''
-  if (!id) return
+  if (!id || basisScope.value === 'reference_only') return
   const current = () => epoch === viewEpoch && id === projectId.value && selectedScope === scope.value && sequence === indexSequence
   try {
     const status = await adviceApi.indexStatus(id, selectedScope)
@@ -197,7 +199,7 @@ async function reloadScope() {
   const id = projectId.value, selectedScope = scope.value, sequence = ++scopeSequence
   scopeLoaded.value = false
   scopeDocuments.value = []
-  if (!id) { scopeDocuments.value = []; return }
+  if (!id || basisScope.value === 'reference_only') { scopeDocuments.value = []; return }
   const documents = await adviceApi.sources(id, selectedScope)
   if (id === projectId.value && selectedScope === scope.value && sequence === scopeSequence) {
     scopeDocuments.value = documents
@@ -296,7 +298,7 @@ async function ask(text?: string) {
 }
 
 async function refreshIndex() {
-  if (indexing.value || !projectId.value) return
+  if (indexing.value || !projectId.value || basisScope.value === 'reference_only') return
   const id = projectId.value, selectedScope = scope.value, epoch = viewEpoch, selectedScopeEpoch = scopeEpoch, sequence = ++rebuildSequence
   ++indexSequence // A pending status read must not overwrite the newer rebuild result.
   indexError.value = ''
@@ -426,7 +428,7 @@ async function askPrecedence() {
       </div>
       <div class="row">
         <span class="tag ok">{{ t('advice.evidenceMode') }}</span>
-        <button class="btn" type="button" :disabled="indexing" @click="refreshIndex">
+        <button v-if="basisScope !== 'reference_only'" class="btn" type="button" :disabled="indexing" @click="refreshIndex">
           <AppIcon name="refresh" :size="15" />{{ t('advice.actions.refreshIndex') }}
         </button>
         <!-- FR-A-03 / 原型 Precedence basis：直接以快捷问题形式查询合约文件优先次序（SCC 4.1） -->
@@ -439,7 +441,7 @@ async function askPrecedence() {
       </div>
     </div>
 
-    <details class="surface source-scope section-gap">
+    <details v-if="basisScope !== 'reference_only'" class="surface source-scope section-gap">
       <summary>{{ t('advice.sourceScope.title') }} · {{ scopeDocuments.filter(item => item.included).length }}</summary>
       <p>{{ t('advice.sourceScope.note') }}</p>
       <div class="table-wrap">

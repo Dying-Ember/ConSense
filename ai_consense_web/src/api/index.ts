@@ -22,6 +22,7 @@ import type {
   ExtractRunSummary,
   Finding,
   FindingReviewUpdate,
+  FindingWriteBinding,
   IndexStatus,
   Project,
   PromptSaveRequest,
@@ -162,16 +163,19 @@ export const vettingApi = {
     return api.get<Finding[]>(`/vetting/${projectId}/findings${query ? `?${query}` : ''}`)
   },
   metrics: (projectId: string) => api.get<VettingMetrics>(`/vetting/${projectId}/metrics`),
-  updateStatus: (projectId: string, code: string, status: string) =>
-    api.post<Finding>(`/vetting/${projectId}/findings/${code}/status?status=${encodeURIComponent(status)}`),
+  updateStatus: (projectId: string, code: string, status: string, binding: FindingWriteBinding) =>
+    api.post<Finding>(`/vetting/${encodeURIComponent(projectId)}/findings/${encodeURIComponent(code)}/status?${new URLSearchParams({ status, ...binding })}`),
   updateReview: (projectId: string, code: string, review: FindingReviewUpdate) =>
     api.put<Finding>(`/vetting/${encodeURIComponent(projectId)}/findings/${encodeURIComponent(code)}/review`, review),
   evidence: (projectId: string, code: string) =>
     api.get<EvidenceBundle>(`/vetting/${projectId}/findings/${code}/evidence`),
   checklist: (projectId: string, runId: string) =>
     api.get<VettingChecklist>(`/vetting/${encodeURIComponent(projectId)}/runs/${encodeURIComponent(runId)}/checklist`),
-  saveChecklist: (projectId: string, runId: string, runSnapshotSha256: string, items: Pick<VettingChecklistItem, 'id' | 'status' | 'remarks'>[]) =>
-    api.put<VettingChecklist>(`/vetting/${encodeURIComponent(projectId)}/runs/${encodeURIComponent(runId)}/checklist`, { runSnapshotSha256, items }),
+  saveChecklist: (projectId: string, binding: Pick<VettingChecklist, 'runId' | 'runSnapshotSha256' | 'sourceSnapshotSha256'>, items: Pick<VettingChecklistItem, 'id' | 'status' | 'remarks'>[]) =>
+    api.put<VettingChecklist>(`/vetting/${encodeURIComponent(projectId)}/runs/${encodeURIComponent(binding.runId)}/checklist`, {
+      expectedRunId: binding.runId, expectedSourceSnapshotSha256: binding.sourceSnapshotSha256,
+      runSnapshotSha256: binding.runSnapshotSha256, items
+    }),
   exportReport: (projectId: string, lang: string, fallbackName: string, format: VettingReportFormat = 'pdf') =>
     api.download(`/vetting/${projectId}/report.${format}?lang=${encodeURIComponent(lang)}`, fallbackName,
       format === 'json' ? { jsonDocument: value => {
