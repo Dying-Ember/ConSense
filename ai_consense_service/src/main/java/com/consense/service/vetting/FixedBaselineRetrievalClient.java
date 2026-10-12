@@ -287,7 +287,8 @@ public class FixedBaselineRetrievalClient {
                     &&m.path("sourceVectorIntegrity").path(field).equals(c.manifest.path("vectorIntegrity").path(field)),"migration_vector_seal_changed:"+field);
         // Local warm cosine values and cold stored float32 values have separately recorded exact hashes.
         require(shaText(c.manifest.path("vectorIntegrity").path("persistedPointsSha256").asText())
-                &&m.path("sourceVectorIntegrity").path("pointsSha256").equals(c.manifest.path("vectorIntegrity").path("persistedPointsSha256")),"migration_original_persisted_vectors_changed");
+                &&m.path("sourceVectorIntegrity").path("pointsSha256").equals(c.manifest.path("vectorIntegrity").path("persistedPointsSha256"))
+                &&m.path("targetVectorIntegrity").equals(m.path("sourceVectorIntegrity")),"migration_original_persisted_vectors_changed");
         require("consense.migrated-server-query-runtime.v1".equals(q.path("schema").asText())
                 &&properties.getMigrationReceiptSha256().equals(q.path("migrationReceiptSha256").asText())
                 &&baseUrl().equals(q.path("queryApiBaseUrl").asText())&&q.path("target").equals(m.path("target"))
@@ -311,7 +312,7 @@ public class FixedBaselineRetrievalClient {
         }
         for(String name:Arrays.asList("server.py","window_runtime.py","migrated_qdrant_index.py","migrate_qdrant_server.py","fixed_development_baseline_runtime.py","verify_retrieval_offline.py","token_windows.py","index_integrity.py","retrieval_source_units.py","checkpoint_publication.py","fixed_vector_cache.py","qdrant_backend.py","workspace_root.py","embedding_compatibility.py","structural_retrieval.py","preparation_cache.py","checkpoint_identity.py"))
             require(shaText(recipe.path("algorithms").path(name).asText()),"migration_query_software_closure_missing:"+name);
-        require(normalizedDigest(identity).equals(q.path("queryRuntimeSignature").asText()),"migration_query_signature_changed");
+        require(queryDigest(identity).equals(q.path("queryRuntimeSignature").asText()),"migration_query_signature_changed");
         verifyArtifact(m.path("candidateMetadata"));return q;
     }
     private void validateMigratedHealth(Catalog c,JsonNode actual) {
@@ -342,6 +343,13 @@ public class FixedBaselineRetrievalClient {
     private static JsonNode parse(byte[] bytes){try{return READER.readValue(bytes);}catch(IOException e){throw new IllegalStateException("fixed_json_invalid",e);}}
     private static ObjectNode normalizeParent(JsonNode p){require(p.isObject(),"fixed_parent_not_object");ObjectNode r=((ObjectNode)p).deepCopy();List<String> nulls=new ArrayList<>();r.fields().forEachRemaining(e->{if(e.getValue().isNull())nulls.add(e.getKey());});nulls.forEach(r::remove);return r;}
     private static String normalizedDigest(JsonNode n){return hash(write(sorted(n)).getBytes(StandardCharsets.UTF_8));}
+    /** Python query signatures retain integer JSON encoding, including large tokenizer limits. */
+    private static String queryDigest(JsonNode n){return hash(write(signatureJson(n)).getBytes(StandardCharsets.UTF_8));}
+    private static JsonNode signatureJson(JsonNode n) {
+        if(n.isObject()){ObjectNode o=JSON.createObjectNode();TreeMap<String,JsonNode> fields=new TreeMap<>();n.fields().forEachRemaining(e->fields.put(e.getKey(),e.getValue()));fields.forEach((k,v)->o.set(k,signatureJson(v)));return o;}
+        if(n.isArray()){ArrayNode a=JSON.createArrayNode();n.forEach(v->a.add(signatureJson(v)));return a;}
+        require(!n.isFloatingPointNumber(),"migration_query_signature_noninteger");return n;
+    }
     private static JsonNode sorted(JsonNode n){if(n.isObject()){ObjectNode o=JSON.createObjectNode();TreeMap<String,JsonNode> map=new TreeMap<>();n.fields().forEachRemaining(e->map.put(e.getKey(),e.getValue()));map.forEach((k,v)->o.set(k,sorted(v)));return o;}if(n.isArray()){ArrayNode a=JSON.createArrayNode();n.forEach(v->a.add(sorted(v)));return a;}if(n.isNumber())return DecimalNode.valueOf(n.decimalValue().stripTrailingZeros());return n;}
     private static Set<String> stringSet(JsonNode array){require(array.isArray(),"fixed_identity_array_missing");Set<String>s=new HashSet<>();for(JsonNode v:array){require(text(v)&&s.add(v.asText()),"fixed_identity_array_duplicate_or_invalid");}return s;}
     private static boolean text(JsonNode n){return n.isTextual()&&!n.asText().trim().isEmpty();}

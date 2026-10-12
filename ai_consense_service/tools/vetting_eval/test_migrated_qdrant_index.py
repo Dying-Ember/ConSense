@@ -1,8 +1,10 @@
 """Pinned migration trust boundaries with actual in-memory point ledgers."""
 import copy
 import json
+import importlib.util
 from pathlib import Path
 import unittest
+import sys
 from unittest.mock import patch
 
 from index_integrity import inspect_points
@@ -55,7 +57,7 @@ class MigratedIndexTests(unittest.TestCase):
                         'activeConfigurationChanged':False, 'allOriginalPersistentStateBytesUnchanged':True,
                         'frozenManifest':descriptor(self.freeze_file), 'candidateMetadata':descriptor(self.metadata_file),
                         'indexSignature':frozen['indexSignature'], 'parentCount':1, 'vectorWindowCount':len(meta['windows']),
-                        'targetVectorIntegrity':actual}
+                        'targetVectorIntegrity':actual, 'sourceVectorIntegrity':copy.deepcopy(actual)}
         self.receipt_file = self.root/'migration.json'; self.receipt_file.write_text(json.dumps(self.receipt))
         self.environ = {ENV:str(self.receipt_file), ENV+'_SHA256':descriptor(self.receipt_file)['sha256'],
                         'CONSENSE_QDRANT_URL':self.receipt['target']['url']}
@@ -88,6 +90,14 @@ class MigratedIndexTests(unittest.TestCase):
         for key,value in (('CONSENSE_QDRANT_URL',''), ('CONSENSE_QDRANT_URL','http://127.0.0.1:9999'), (ENV+'_SHA256','0'*64)):
             changed = {**self.environ,key:value}
             with self.assertRaises(WindowError):MigratedIndex(changed)
+        self.assertEqual(self.database_calls,0)
+
+    def test_re_pinned_wrong_source_or_target_full_vector_identity_refused_before_database(self):
+        for kind in ('sourceVectorIntegrity','targetVectorIntegrity'):
+            changed=copy.deepcopy(self.receipt); changed[kind]['pointsSha256']='0'*64
+            self.receipt_file.write_text(json.dumps(changed))
+            self.environ[ENV+'_SHA256']=descriptor(self.receipt_file)['sha256']
+            with self.assertRaises(WindowError):MigratedIndex(self.environ)
         self.assertEqual(self.database_calls,0)
 
     def test_changed_metadata_and_freeze_refused_even_after_cached_read(self):
@@ -137,6 +147,30 @@ class MigratedIndexTests(unittest.TestCase):
         with patch.dict(s.os.environ,{ENV:str(self.receipt_file)},clear=True), patch.object(s,'database') as db:
             with self.assertRaises(s.HTTPException) as error:s.read_project('one')
             self.assertEqual(error.exception.status_code,409); db.assert_not_called()
+
+
+class BackendConfigurationTests(unittest.TestCase):
+    def test_cached_database_rejects_url_and_key_switch_without_reconnect_or_close(self):
+        spec=importlib.util.spec_from_file_location('migration_backend_config_test',Path(__file__).with_name('server.py'))
+        module=importlib.util.module_from_spec(spec);sys.modules[spec.name]=module;spec.loader.exec_module(module)
+        db=object()
+        with patch.dict(module.os.environ,{'CONSENSE_QDRANT_URL':'http://127.0.0.1:16333'},clear=True), patch('qdrant_backend.connect',return_value=db) as connect:
+            self.assertIs(module.database(),db)
+            module.os.environ['CONSENSE_QDRANT_URL']='http://127.0.0.1:16334'
+            with self.assertRaises(WindowError):module.database()
+            module.os.environ['CONSENSE_QDRANT_URL']='http://127.0.0.1:16333'
+            module.os.environ['CONSENSE_QDRANT_API_KEY']='new-key'
+            with self.assertRaises(WindowError):module.database()
+            self.assertEqual(connect.call_count,1)
+            self.assertIs(module._database,db)
+
+    def test_unknown_cached_backend_cannot_claim_a_migration_url(self):
+        spec=importlib.util.spec_from_file_location('migration_unknown_backend_test',Path(__file__).with_name('server.py'))
+        module=importlib.util.module_from_spec(spec);sys.modules[spec.name]=module;spec.loader.exec_module(module)
+        module._database=object()
+        with patch.dict(module.os.environ,{ENV:'explicit-pin','CONSENSE_QDRANT_URL':'http://127.0.0.1:16333'},clear=True), patch('qdrant_backend.connect') as connect:
+            with self.assertRaises(WindowError):module.database()
+            connect.assert_not_called()
 
 
 if __name__ == '__main__':

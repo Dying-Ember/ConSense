@@ -54,6 +54,10 @@ class MigratedIndex:
         self.frozen = json.loads(bound(r['frozenManifest']).read_bytes())
         self.metadata = json.loads(bound(r['candidateMetadata']).read_bytes())
         f, m = self.frozen, self.metadata
+        source = {name:f['vectorIntegrity'][name] for name in ('schema','dimension','dtype','pointCount','embeddingSignatureSha256')}
+        source['pointsSha256'] = f['vectorIntegrity']['persistedPointsSha256']
+        fail(r.get('sourceVectorIntegrity') == source and r['targetVectorIntegrity'] == source,
+             'MIGRATED_INDEX_SOURCE_VECTOR_CHANGED', 'Source cold persisted vectors and target full vector seal must equal the original recorded bytes')
         seal = {**r['targetVectorIntegrity'], 'persistedPointsSha256':r['targetVectorIntegrity']['pointsSha256']}
         seal['sealSha256'] = digest(seal)
         fail(f['schema'] == 'consense.frozen-fixed-development-baseline.v1'
