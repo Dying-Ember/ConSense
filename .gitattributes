@@ -4,3 +4,5 @@ ai_consense_service/src/test/resources/drafting/harness/ordered-list/SIM11-novel
 ai_consense_service/src/test/resources/oer/native-pdf-producer-v1/** -text
 # The authored original is byte-bound despite its UTF-8 fixture content.
 ai_consense_service/src/test/resources/oer/canonical/authored-source.pdf -text
+# Recheck CAS filenames and ledgers bind the original byte digest.
+ai_consense_service/src/test/resources/oer/recheck/**/*.blob -text
