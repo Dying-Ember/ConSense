@@ -126,6 +126,14 @@ public class VettingService {
             try {
                 byte[] sourceBytes=storageService.read(stored.getPath());
                 d.setSourceSha256(com.consense.service.sources.OerSourceMetadata.originalSha256(sourceBytes));
+                if (com.consense.document.OerSourceRouting.isDrawing(boundary,d.getFileName(),sourceBytes)) {
+                    com.consense.service.sources.OerSourceMetadata.captureDrawing(d,sourceBytes);
+                    d.setParseStatus("EXCLUDED"); d.setParseMessage("图纸文件仅识别身份，已排除解析和业务取证。");
+                    d.setPageCount(0); d.setOcrUsed(false); d.setTextContent(""); d.setStructuredContentJson("[]");
+                    sourceDocumentRepository.saveAndFlush(d);
+                    messages.add(d.getFileName()+" · EXCLUDED · "+d.getParseMessage());
+                    continue;
+                }
                 DocumentParser.ParsedDocument p;
                 if(DocumentParseProbe.configured(props)) {
                     rawSha256=DocumentParseProbe.sha256(sourceBytes);
@@ -480,7 +488,10 @@ public class VettingService {
             if(JsonUtils.isBlankText(d.getFileKey()))d.setFileKey(matchFileKey(d.getFileName()));
             documents.add(d);
         }
-        return com.consense.service.sources.ProjectDocumentScope.selected(projectId,documents,"fullset");
+        return com.consense.service.sources.ProjectDocumentScope.currentCatalog(projectId,documents).stream()
+                .filter(d -> "DRAWING".equals(d.getFileKey())
+                        || com.consense.service.sources.ProjectDocumentScope.exclusionReason(d,"fullset")==null)
+                .collect(Collectors.toList());
     }
     private boolean reviewable(SourceDocument d) { return ("PARSED".equals(d.getParseStatus())||"PARTIAL".equals(d.getParseStatus())) && !JsonUtils.isBlankText(d.getTextContent()) && !excluded(d.getFileName()); }
     private boolean contractSource(SourceDocument d) { return "tender".equals(VettingCorpus.sourceRole(d)); }

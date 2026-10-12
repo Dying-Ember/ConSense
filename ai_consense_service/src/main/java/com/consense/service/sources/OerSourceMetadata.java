@@ -44,6 +44,22 @@ public final class OerSourceMetadata {
         capture(document, parsed, originalBytes, FixedRegistry.ROUTER);
     }
 
+    /** Retain the uploaded original and its exclusion identity without producing parser evidence. */
+    public static void captureDrawing(SourceDocument document, byte[] originalBytes) {
+        String digest = originalSha256(originalBytes);
+        if (document.getSourceSha256() != null && !digest.equals(document.getSourceSha256()))
+            throw new IllegalArgumentException("Drawing source bytes changed before identity was persisted");
+        OerDocumentIdentity identity = new OerDocumentIdentity();
+        identity.setSourceSha256(digest); identity.setKind("DRAWING"); identity.setSourcePurpose("drawing");
+        identity.setIdentityStatus("drawing".equals(document.getDocumentScope()) ? "explicit_scope" : "format_supported");
+        identity.setEligibleModules(java.util.Collections.emptyList());
+        identity.getIdentityEvidence().add(new OerDocumentIdentity.Evidence(
+                "drawing".equals(document.getDocumentScope()) ? "upload_document_scope" : "native_format_or_metadata",
+                null, "Drawing file is outside parsing and business evidence scope; no detail parser was called"));
+        document.setSourceSha256(digest); document.setFileKey("DRAWING");
+        document.setOerIdentityJson(JsonUtils.write(identity));
+    }
+
     /** The parser binds its own input bytes; legacy mock results cannot inherit old upload identities. */
     public static void captureParsed(SourceDocument document, DocumentParser.ParsedDocument parsed) {
         String digest=parsed==null?null:parsed.getSourceSha256();

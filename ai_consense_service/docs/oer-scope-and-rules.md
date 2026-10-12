@@ -1,5 +1,7 @@
 # OER 已确认范围与执行规则
 
+**2026-10-13 当前实施授权与截止：** 用户调用 `implement-spec` 要求实现[下一轮规格](./specs/oer-vetting-advisory-next-development-20261012.md)，使用最小完整代码，并明确先安装 Ponytail、激活 hooks 再开发。安装与 hooks 信任 / 实际生命周期验证已完成后开始隔离实施；本次覆盖下方 2026-10-12 的 spec-only 限制。截止已纠正为**今天北京时间 08:30 准备好本地代码，09:00 由用户提交 GitHub**。沿用固定05开发基准、图纸排除、Drafting冻结与既有失败；实现、契约、源质量、真实模型、浏览器和H800分别报告。当前分支、时间预算和实际证据见[实施状态](./specs/oer-next-implementation-status-20261013.md)，不将实施授权等同于活动服务 / 数据库切换或远端发布。
+
 **下一轮开发 spec 入口（仅编制，尚未开工）：** 用户指定 to-spec，要求将整体技术栈、新 demo、OER／Vetting／Advisory 写入下一次开发规格，并明确“先别开发，就写 spec”。[主规格](./specs/oer-vetting-advisory-next-development-20261012.md)及[本地任务图](./specs/oer-vetting-advisory-next-development-tickets-20261012.md)已按 ready-for-agent 编制；用户确认主验收链为真实上传→固定／项目取证→Vetting报告或Advisory答案→对应原文回取，离线解析与H800制品另验。图纸排除、Drafting冻结、05开发基准及已知缺陷保持；候选版本经验证后采用。本轮不启动代码、安装、训练、模型、迁移或部署，不创建远端issue。
 
 **2026-10-12 新demo HTML须共同纳入整体技术栈评估：** 用户再次明确`Ref/communications`的新demo也要考虑。当前目录已核为`ConSense-CAC-Proposal-DemoV2.0.html`，SHA与已审版一致。demo的Vetting底稿／导航／裁决／报告、Advisory咨询／引用，以及现有代码的交接展示，与实际代码、源证据和既定范围共同作为[交付评估第3.5节](./delivery-stack-decision-20261012.md#35-新demo-html也是交付评估依据交互要求到真实依赖的映射)输入；不把demo固定答案、无finding默认pass、localStorage状态、已排除材料或已撤回风险上限自动采纳。整体含OER＋Vetting＋Advisory＋共用推理／检索／部署，解析子调查的限定不缩小整体范围。图纸排除、Drafting冻结保持，本条不宣称demo浏览器验收或功能实现完成。

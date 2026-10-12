@@ -4,10 +4,12 @@ status: ready-for-agent
 labels: [ready-for-agent]
 date: 2026-10-12
 authority: 用户已讨论的范围与技术栈结论、communications V2.0、新一轮规格编制要求及已确认的业务验收流程
-execution: spec-only; implementation-not-started
+execution: implementation-in-progress; authorized-2026-10-13
 ---
 
 ## Problem Statement
+
+**执行状态增量（2026-10-13）：** 用户已调用 implement-spec 授权本规格实现，要求先安装 Ponytail / 激活 hooks，再以最小完整代码推进；硬截止为今天北京时间08:30本地提交准备，09:00用户提交GitHub。[实施状态和实际证据](./oer-next-implementation-status-20261013.md)是当前执行入口。以下“本轮仅编制 / 不启动实现”描述2026-10-12编制阶段的历史授权，不再限制本次已授权实现；范围、候选采用与各真实验收门仍适用。
 
 QS 需要用真实项目合约和适用标准完成合同审查与咨询，看到实际检查范围、问题、裁决及原文依据。当前已有解析、固定资料开发基准、检索、审查和咨询代码，但固定参考与项目证据的引用接缝未完全接通，长任务恢复和咨询会话仍有缺口。新 demo 展示了较完整的底稿、导航、裁决与咨询流程，其固定答案、无问题默认通过和本地示例状态不能成为正式系统的业务结果。
 

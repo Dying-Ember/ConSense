@@ -3,10 +3,12 @@ title: ConSense 下一轮 OER／Vetting／Advisory 本地任务图
 status: ready-for-agent
 labels: [ready-for-agent]
 date: 2026-10-12
-execution: spec-only; implementation-not-started
+execution: implementation-in-progress; authorized-2026-10-13
 ---
 
 # 下一轮开发任务图
+
+**2026-10-13 执行增量：** 用户已授权 implement-spec 实现，截止今天北京时间08:30准备本地代码，09:00由用户提交GitHub。Ponytail安装和hooks启用验证在代码修改前完成；当前在隔离工作区并行实施。下方“未开工”表为2026-10-12发布快照，当前逐任务提交与分门证据以[实施状态](./oer-next-implementation-status-20261013.md)为准；未验收任务不提前关闭。
 
 规格：[OER、Vetting、Advisory 与超算交付](./oer-vetting-advisory-next-development-20261012.md)。本图为仓库现有 Markdown tracker 惯例的新增独立任务，不修改历史 Drafting ticket 或关闭记录。未配置本轮远端 issue tracker，未发布远端 issue。
 

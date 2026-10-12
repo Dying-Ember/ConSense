@@ -1,5 +1,7 @@
 # Handoff：OCR、Embedding、Rerank 实施与验收
 
+**2026-10-13 已授权开始下一轮实现，今日08:30本地交付：** 用户已调用 implement-spec，要求最小代码实现，并要求先安装 Ponytail / 激活 hooks。官方5.1.0已安装，三个原生hooks已精确信任，独立只读生命周期中SessionStart / UserPromptSubmit实际完成；当前采用full规则开始隔离分支实施。截止纠正为今天08:30，09:00用户提交GitHub。前述“只写spec / 实施未启动”是2026-10-12历史状态，已被本次授权覆盖；图纸排除、Drafting冻结、05与失败保全不变。当前源码基线、工作区、任务与实际验证入口见[实施状态](./specs/oer-next-implementation-status-20261013.md)，未通过的源质量、模型、浏览器、H800门保持未通过。
+
 **下一轮规格已发布到本地任务图，实施未启动：** 用户调用 to-spec 并明确只写 spec。新增[完整规格](./specs/oer-vetting-advisory-next-development-20261012.md)与[依赖任务图](./specs/oer-vetting-advisory-next-development-tickets-20261012.md)，覆盖49条用户故事、共同证据／解析／两业务模块／demo／单H800交付，以及20类验收场景；用户已确认主业务验收链。规格为ready-for-agent，全部任务未开工；候选采用、契约、原件、真实模型、浏览器和目标制品分开验收。仅新增文档与入口，未修改业务代码、安装、训练、模型调用、服务或数据库；05、旧成果、失败与Drafting保持。
 
 **2026-10-12 新demo与完整两业务模块一起评估：** 用户要求新的demo HTML纳入技术栈。Root重核communications目录仅当前V2.0，SHA与已审版相同；新增[第3.5节产品交互／依赖映射](./delivery-stack-decision-20261012.md#35-新demo-html也是交付评估依据交互要求到真实依赖的映射)，覆盖Vetting核对底稿／裁决／团队备注／报告、Advisory逐答案引用／会话／审查交接／图表。演示固定答案／最后回答引用／无finding默认pass不替代正式语义，当前范围排除优先。以源证据、实际代码和demo共同形成整体交付建议；本次仍只静态源核和文档增补，未执行demo、浏览器或新业务验收，未改代码／模型／服务／05。
