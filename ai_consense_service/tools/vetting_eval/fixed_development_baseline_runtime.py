@@ -113,7 +113,7 @@ def prepare(args):
         'maximumWindowTokens':max(r['fullModelTokens'] for r in windows),
         'windowTokensHistogram':dict(Counter((r['fullModelTokens']//64)*64 for r in windows)),
         'software':{name:desc(Path(__file__).with_name(name)) for name in
-          ('fixed_development_baseline_runtime.py','server.py','window_runtime.py','token_windows.py',
+          ('fixed_development_baseline_runtime.py','server.py','qdrant_backend.py','window_runtime.py','token_windows.py',
            'retrieval_source_units.py','index_integrity.py','samples.json')},
         'finalQualityAccepted':False, 'canonicalRegistryPublished':False,
         'GPUModelLoads':0, 'databaseOpens':0, 'preparedAtUtc':datetime.now(timezone.utc).isoformat()}

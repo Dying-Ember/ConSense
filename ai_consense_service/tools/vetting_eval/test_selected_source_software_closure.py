@@ -20,7 +20,7 @@ from unified_source_registry import UnifiedCanonicalSourceRegistry
 
 OWNED = Path(__file__).resolve().parents[2] / 'src/test/resources/oer/native-pdf-producer-v1'
 SELECTED_READERS = ('pdf_selected_source.py', 'selected_source_raster.py')
-RUNTIME_READERS = ('parser_capture.py', *SELECTED_READERS)
+RUNTIME_READERS = ('parser_capture.py', 'native_pdf_table_projection.py', *SELECTED_READERS)
 
 
 class SelectedSourceSoftwareClosureContracts(unittest.TestCase):
@@ -85,6 +85,22 @@ class SelectedSourceSoftwareClosureContracts(unittest.TestCase):
 
     def test_warm_derived_cache_rejects_actual_selected_source_raster_change(self):
         self._warm_request_then_modify_actual_candidate_file('selected_source_raster.py')
+
+    def test_warm_derived_cache_rejects_changed_table_reader(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = ArtifactStore(Path(directory) / 'cas'); internal = self.produce(store)
+            public = publish_native_pdf_transport(internal, artifact_store=store)
+            registry = UnifiedCanonicalSourceRegistry(Path(directory) / 'registry', store); registry.publish(public)
+            runtime = self.runtime(registry); original = Path.read_bytes; state = {'changed': False}
+            def changed(path):
+                raw = original(path)
+                return raw + b'\n# authored changed table reader\n' if state['changed'] and path.name == 'native_pdf_table_projection.py' else raw
+            with patch.object(Path, 'read_bytes', changed), self.assertRaises(WindowError) as error:
+                with registry.validation_frame(software_guard=runtime.algorithms):
+                    self.assertEqual(public, registry.load(public['projectionSha256']))
+                    state['changed'] = True
+                    registry.load(public['projectionSha256'])
+            self.assertEqual('SOFTWARE_CHANGED_SINCE_IMPORT', error.exception.kind)
 
     def test_new_derived_revision_changes_for_each_actual_selected_dependency(self):
         with tempfile.TemporaryDirectory() as directory:

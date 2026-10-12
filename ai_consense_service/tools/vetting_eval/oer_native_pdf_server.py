@@ -24,7 +24,7 @@ from workspace_root import resolve_workspace
 HERE = Path(__file__).resolve().parent
 MAX_MESSAGE_BYTES = MAX_SNAPSHOT_BYTES
 NATIVE_PDF_ALGORITHMS = ('native_pdf_source_registry.py', 'oer_native_pdf_server.py',
-    'native_pdf_canonical_projection.py', 'native_pdf_projection_transport.py', 'native_pdf_observation.py',
+    'native_pdf_canonical_projection.py', 'native_pdf_table_projection.py', 'native_pdf_projection_transport.py', 'native_pdf_observation.py',
     'parser_capture.py', 'pdf_selected_source.py', 'selected_source_raster.py')
 _NATIVE_PDF_HASHES = {name: hashlib.sha256((HERE / name).read_bytes()).hexdigest() for name in NATIVE_PDF_ALGORITHMS}
 NATIVE_PDF_CAPABILITY = {'schema': SCHEMA, 'producerKind': 'native_pdf', 'projectionVersion': VERSION,

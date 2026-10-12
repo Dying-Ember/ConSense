@@ -26,7 +26,7 @@ REVISION_KIND = 'derived_same_original_component_set'
 MAX_COMPONENTS = 16
 _HERE = Path(__file__).resolve().parent
 _DEPENDENCIES = ('native_pdf_source_family.py', 'native_pdf_projection_transport.py',
-    'native_pdf_canonical_projection.py', 'artifact_store.py', 'canonical_projection.py',
+    'native_pdf_canonical_projection.py', 'native_pdf_table_projection.py', 'artifact_store.py', 'canonical_projection.py',
     'competition_scope.py', 'native_pdf_observation.py', 'source_reference.py',
     'structured_parser_evidence.py', 'token_windows.py', 'parser_capture.py')
 _IMPORTED_BYTES = {name: (_HERE / name).read_bytes() for name in _DEPENDENCIES}
