@@ -74,7 +74,7 @@ class VettingSemanticReviewTest {
         assertEquals("completed_with_rejections",result.getTopicAudits().get(0).getStatus());
         assertEquals(new HashSet<>(Arrays.asList("origin","other")),result.getReviewedChunkIds());
     }
-    @Test void nonIssueReferenceAssessmentsKeepTheirCountsDespiteSingleQuoteAndKnownIncompleteContext() {
+    @Test void nonIssueDeclarationsKeepTransportCountsButRejectPassOnKnownMissingMembers() {
         AiGateway ai=mock(AiGateway.class);when(ai.available()).thenReturn(true);when(ai.chatModel()).thenReturn("test");
         ConsenseProperties props=new ConsenseProperties();props.getVetting().setSemanticTopics(1);
         VettingRetrievalClient retrieval=mock(VettingRetrievalClient.class);
@@ -87,7 +87,8 @@ class VettingSemanticReviewTest {
         assertTrue(result.getTopicAudits().get(0).getUnresolvedChunkIds().contains("origin"));
         assertTrue(result.getCandidates().isEmpty());assertEquals(0,result.getTopicAudits().get(0).getIssueAssessments());
         assertEquals(1,result.getTopicAudits().get(0).getConsistentAssessments());assertEquals(1,result.getTopicAudits().get(0).getInsufficientContextAssessments());
-        assertEquals(0,result.getTopicAudits().get(0).getRejectedRecords());assertEquals("completed",result.getTopicAudits().get(0).getStatus());
+        assertEquals(1,result.getTopicAudits().get(0).getRejectedRecords());assertEquals("completed_with_rejections",result.getTopicAudits().get(0).getStatus());
+        assertEquals(0,result.getTopicAudits().get(0).getVerifiedConsistentAssessments());assertEquals(1,result.getTopicAudits().get(0).getVerifiedInsufficientContextAssessments());assertEquals("insufficient_evidence",result.getTopicAudits().get(0).getCheckState());
         assertEquals(Collections.singleton("origin"),result.getReviewedChunkIds());
     }
     @Test void includesLabelledStandardAndProjectContextWithoutInventingTenderRole() {

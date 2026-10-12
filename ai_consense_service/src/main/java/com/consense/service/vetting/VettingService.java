@@ -557,9 +557,12 @@ public class VettingService {
     }
     public MetricsVO metrics(String projectId) { projectService.require(projectId); return metricsOf(activeFindings(projectId)); }
     public FindingVO updateStatus(String projectId,String code,String status) {
+        return updateStatus(projectId,code,status,null,null,null);
+    }
+    public FindingVO updateStatus(String projectId,String code,String status,String expectedRunId,String expectedGeneratedRevisionSha256,String expectedSourceSnapshotSha256) {
         projectService.require(projectId); String normalized;
         if("open".equalsIgnoreCase(status)) normalized=VettingFinding.STATUS_OPEN; else if("handled".equalsIgnoreCase(status)) normalized=VettingFinding.STATUS_HANDLED; else if("assigned".equalsIgnoreCase(status)) normalized=VettingFinding.STATUS_ASSIGNED; else throw new BizException(4102,"状态必须为 Open、Handled 或 Assigned");
-        synchronized(lock(projectId)) { return tx().execute(tx -> { VettingFinding f=findingRepository.findByProjectIdAndCode(projectId,code).orElseThrow(() -> new BizException(4102,"审查发现不存在")); f.setStatus(normalized); findingRepository.saveAndFlush(f); return toVO(f); }); }
+        synchronized(lock(projectId)) { return tx().execute(tx -> {VettingFinding f=editableFinding(projectId,code,expectedRunId,expectedGeneratedRevisionSha256,expectedSourceSnapshotSha256); f.setStatus(normalized); findingRepository.saveAndFlush(f); return toVO(f); }); }
     }
     public FindingVO updateReview(String projectId,String code,ReviewUpdateRequest request) {
         projectService.require(projectId);
@@ -572,8 +575,7 @@ public class VettingService {
         if(action!=null && action.length()>4000)
             throw new BizException(4102,"实际处理记录不能超过 4000 字符");
         synchronized(lock(projectId)) { return tx().execute(tx -> {
-            VettingFinding finding=findingRepository.findByProjectIdAndCode(projectId,code)
-                    .orElseThrow(() -> new BizException(4102,"审查发现不存在"));
+            VettingFinding finding=editableFinding(projectId,code,request.getExpectedRunId(),request.getExpectedGeneratedRevisionSha256(),request.getExpectedSourceSnapshotSha256());
             finding.setReviewRemarks(remarks);
             finding.setActionTaken(action);
             finding.setAddendumRequired(decision);
@@ -582,14 +584,30 @@ public class VettingService {
             return toVO(finding);
         }); }
     }
+    private VettingFinding editableFinding(String projectId,String code,String runId,String generatedSha,String sourceSha){
+        requireCurrentReviewRun(projectId,runId,sourceSha);
+        VettingFinding finding=findingRepository.lockByProjectIdAndCode(projectId,code).orElseThrow(()->new BizException(4102,"审查发现不存在"));
+        if(!Boolean.TRUE.equals(finding.getActive())||!Objects.equals(runId,finding.getRunId())||JsonUtils.isBlankText(generatedSha)||!generatedRevision(finding).equals(generatedSha))
+            throw new BizException(4104,"审查发现版本已变化，请刷新后保存；原人工记录保持不变。");return finding;
+    }
+    /** Caller holds its write transaction; the same run lock also serializes final publication and export. */
+    public VettingRun requireCurrentReviewRun(String projectId,String runId,String sourceSha){
+        if(JsonUtils.isBlankText(runId)||JsonUtils.isBlankText(sourceSha))throw new BizException(4104,"保存人工记录必须提供当前审查与来源版本。");
+        VettingRun run=runRepository.lockById(runId).filter(r->projectId.equals(r.getProjectId())).orElseThrow(()->new BizException(4104,"审查版本不可用，请刷新后保存。"));
+        if(!currentReviewRun(run)||!sourceSha.equals(run.getSourceSnapshotSha256()))throw new BizException(4104,"审查或原件版本已变化，请刷新后保存；原人工记录保持不变。");return run;
+    }
+    public boolean currentReviewRun(VettingRun run){return "COMPLETED".equals(run.getStatus())&&runRepository.findFirstByProjectIdOrderByStartedAtDesc(run.getProjectId()).map(latest->run.getId().equals(latest.getId())).orElse(false)&&!sourceSetStale(run);}
     public EvidenceVO evidence(String projectId,String code) {
         projectService.require(projectId); VettingFinding f=findingRepository.findByProjectIdAndCode(projectId,code).orElseThrow(() -> new BizException(4102,"审查发现不存在"));
         List<FindingEvidence> saved=readEvidence(f); List<EvidenceItemVO> items=new ArrayList<>();
-        for(FindingEvidence e:saved) items.add(new EvidenceItemVO(nvl(e.getFileKey())+" · "+nvl(e.getFileName()),e.getPageNo(),e.getQuote(),e.getSide(),e.getDocumentId(),e.getFileKey(),e.getFileName(),e.getAnchor(),e.getQuote(),e.isLocated(),e.getSourceHash(),e.getBbox(),e.getPacketId(),e.getPacketSourceSnapshotSha256(),e.getCanonicalEvidence(),e.getFixedBaselineEvidence()));
+        for(FindingEvidence e:saved) items.add(new EvidenceItemVO(nvl(e.getFileKey())+" · "+nvl(e.getFileName()),e.getPageNo(),e.getQuote(),e.getSide(),e.getDocumentId(),e.getFileKey(),e.getFileName(),e.getAnchor(),e.getQuote(),e.isLocated(),e.getSourceHash(),e.getBbox(),e.getPacketId(),e.getPacketSourceSnapshotSha256(),e.getCanonicalEvidence(),e.getFixedBaselineEvidence(),e.getOriginalSourceSha256()));
         return new EvidenceVO(code+" · "+nvl(f.getRefs()),!saved.isEmpty()&&saved.stream().allMatch(FindingEvidence::isLocated),items);
     }
     /** Original upload for visual review. A parsed source revision is distinct from the raw file digest. */
     public OriginalSource originalSource(String projectId,long documentId,String expectedSourceHash) {
+        return originalSource(projectId,documentId,expectedSourceHash,null);
+    }
+    public OriginalSource originalSource(String projectId,long documentId,String expectedSourceHash,String expectedOriginalSourceSha256) {
         projectService.require(projectId);
         SourceDocument d=sourceDocumentRepository.findById(documentId).filter(source -> projectId.equals(source.getProjectId())
                 && (SourceDocument.CATEGORY_VETTING_PACKAGE.equals(source.getCategory()) || SourceDocument.CATEGORY_VETTING_SUPPLEMENT.equals(source.getCategory())))
@@ -598,6 +616,8 @@ public class VettingService {
         if(JsonUtils.isBlankText(expectedSourceHash)||!revision.equals(expectedSourceHash))
             throw new BizException(4102,"原文版本与证据快照不一致，请刷新审查结果");
         if(JsonUtils.isBlankText(d.getStoragePath())) throw new BizException(4102,"审查原始文件不可用");
+        if(JsonUtils.isBlankText(expectedOriginalSourceSha256)||!Objects.equals(d.getSourceSha256(),expectedOriginalSourceSha256)
+                ||!storageService.matchesStoredBytes(d.getStoragePath(),expectedOriginalSourceSha256))throw new BizException(4104,"原件字节与证据版本不一致，不能回取当前替换文件。");
         try {
             Path root=Paths.get(props.getStorageRoot()).toAbsolutePath().normalize().toRealPath();
             Path path=Paths.get(d.getStoragePath()).toAbsolutePath().normalize().toRealPath();
@@ -718,7 +738,7 @@ public class VettingService {
     private List<FindingEvidence> readEvidence(VettingFinding f) { try{return JsonUtils.readList(f.getEvidenceJson(),FindingEvidence.class);}catch(Exception e){log.warn("发现 {} 证据快照不可读",f.getCode());return Collections.emptyList();} }
     private FindingVO toVO(VettingFinding f) {
         List<FindingEvidence> e=readEvidence(f); long located=e.stream().filter(FindingEvidence::isLocated).count(); String v=e.isEmpty()||located==0?"unverified":located==e.size()?"verified":"partial";
-        return new FindingVO(f.getCode(),JsonUtils.isBlankText(f.getTypes())?Collections.emptyList():Arrays.asList(f.getTypes().split(",")),f.getGroupKey(),f.getScope(),f.getSeverity(),f.getStatus(),LocalizedText.of(f.getTitleZhHans(),f.getTitleZhHant(),f.getTitleEn()),LocalizedText.of(f.getBodyZhHans(),f.getBodyZhHant(),f.getBodyEn()),LocalizedText.of(f.getImpactZhHans(),f.getImpactZhHant(),f.getImpactEn()),LocalizedText.of(f.getSuggestionZhHans(),f.getSuggestionZhHant(),f.getSuggestionEn()),f.getPatternText(),f.getRefs(),f.getLocation(),f.getExpected(),"verified".equals(v)?f.getEvidenceId():EVIDENCE_UNVERIFIED,f.getFileKey(),f.getPageNo(),f.getBucketKey(),f.getFingerprint(),f.getRunId(),f.getSource(),v,e,f.getReviewRemarks(),f.getActionTaken(),f.getAddendumRequired(),f.getReviewUpdatedAt());
+        return new FindingVO(f.getCode(),JsonUtils.isBlankText(f.getTypes())?Collections.emptyList():Arrays.asList(f.getTypes().split(",")),f.getGroupKey(),f.getScope(),f.getSeverity(),f.getStatus(),LocalizedText.of(f.getTitleZhHans(),f.getTitleZhHant(),f.getTitleEn()),LocalizedText.of(f.getBodyZhHans(),f.getBodyZhHant(),f.getBodyEn()),LocalizedText.of(f.getImpactZhHans(),f.getImpactZhHant(),f.getImpactEn()),LocalizedText.of(f.getSuggestionZhHans(),f.getSuggestionZhHant(),f.getSuggestionEn()),f.getPatternText(),f.getRefs(),f.getLocation(),f.getExpected(),"verified".equals(v)?f.getEvidenceId():EVIDENCE_UNVERIFIED,f.getFileKey(),f.getPageNo(),f.getBucketKey(),f.getFingerprint(),f.getRunId(),f.getSource(),v,e,f.getReviewRemarks(),f.getActionTaken(),f.getAddendumRequired(),f.getReviewUpdatedAt(),generatedRevision(f),f.getRunId()==null?null:runRepository.findById(f.getRunId()).map(VettingRun::getSourceSnapshotSha256).orElse(null));
     }
     private MetricsVO metricsOf(List<VettingFinding> f){return new MetricsVO(count(f,"reference"),count(f,"conflict"),count(f,"language"),count(f,"risk"),f.size(),(int)f.stream().filter(v -> "inter".equals(v.getScope())).count());}
     private int count(List<VettingFinding> f,String group){return (int)f.stream().filter(v -> group.equals(v.getGroupKey())).count();}

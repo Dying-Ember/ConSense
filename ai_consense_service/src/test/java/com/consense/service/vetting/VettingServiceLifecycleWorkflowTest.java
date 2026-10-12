@@ -49,8 +49,8 @@ class VettingServiceLifecycleWorkflowTest {
         Path root=probeRoot(project);RunResultVO baseline=service.run(project,"en");assertFalse(Files.exists(root));
         List<VettingFinding> original=findings.findByProjectIdOrderByCodeAsc(project).stream().filter(VettingFinding::getActive).collect(Collectors.toList());
         assertTrue(original.size()>=2);VettingFinding human=original.get(0);
-        service.updateStatus(project,human.getCode(),"Handled");
-        FindingVO manual=service.updateReview(project,human.getCode(),new ReviewUpdateRequest(" 原文\nreview "," action\n保留 ",false));
+        VettingHumanReviewFixture.updateStatus(service,project,human.getCode(),"Handled");
+        FindingVO manual=VettingHumanReviewFixture.updateReview(service,project,human.getCode(),new ReviewUpdateRequest(" 原文\nreview "," action\n保留 ",false));
         props.getVetting().setServiceProbeDirectory(root.toString());RunResultVO observed=service.run(project,"en");
         assertEquals(baseline.getTotal(),observed.getTotal());assertEquals(original.stream().map(VettingFinding::getFingerprint).collect(Collectors.toList()),
                 findings.findByProjectIdOrderByCodeAsc(project).stream().filter(VettingFinding::getActive).map(VettingFinding::getFingerprint).collect(Collectors.toList()));
@@ -104,7 +104,7 @@ class VettingServiceLifecycleWorkflowTest {
     @Test void originalPersistenceFailureRollsBackRecordsAndHasNoFalseCommitEvent() throws Exception {
         String project=project();SourceDocument doc=source(project,"NTT","NTT.txt","NTT 1.1 Source identity and existing human records are retained.");
         when(semantic.reviewWithProgress(eq(project),anyList(),eq("en"),any(ReviewProgress.class))).thenAnswer(call->result(doc,false));service.run(project,"en");
-        FindingVO before=service.listFindings(project,null,null,null,null,null).get(0);service.updateReview(project,before.getCode(),new ReviewUpdateRequest("original manual","done",true));
+        FindingVO before=service.listFindings(project,null,null,null,null,null).get(0);VettingHumanReviewFixture.updateReview(service,project,before.getCode(),new ReviewUpdateRequest("original manual","done",true));
         List<VettingFinding> previous=findings.findByProjectIdOrderByCodeAsc(project);String previousRun=previous.get(0).getRunId();
         doThrow(new IllegalStateException("fixture saveAll rejected",new java.io.IOException("storage fixture cause"))).when(findings).saveAll(any());
         Path root=probeRoot(project);props.getVetting().setServiceProbeDirectory(root.toString());assertThrows(BizException.class,()->service.run(project,"en"));

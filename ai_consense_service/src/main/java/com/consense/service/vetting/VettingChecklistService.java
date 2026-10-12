@@ -30,6 +30,8 @@ public class VettingChecklistService {
     private final ProjectService projectService;
     private final VettingRunRepository runRepository;
     private final VettingChecklistReviewRepository reviewRepository;
+    @org.springframework.beans.factory.annotation.Autowired @org.springframework.context.annotation.Lazy
+    private VettingService vetting;
 
     public ChecklistVO get(String projectId,String runId) {
         VettingRun run=requireRun(projectId,runId);
@@ -43,13 +45,14 @@ public class VettingChecklistService {
                     item.getReviewScope(),item.getScopeNote(),item.getScopeNoteText(),
                     review==null?"unchecked":review.getStatus(),review==null?"":review.getRemarks(),review==null?null:review.getUpdatedAt());
         }).collect(Collectors.toList());
-        return new ChecklistVO(projectId,runId,binding,"COMPLETED".equals(run.getStatus()),items);
+        return new ChecklistVO(projectId,runId,binding,vetting.currentReviewRun(run),items,run.getSourceSnapshotSha256());
     }
 
     @Transactional
     public ChecklistVO update(String projectId,String runId,UpdateRequest request) {
-        VettingRun run=requireRun(projectId,runId);
-        if(!"COMPLETED".equals(run.getStatus())) throw new BizException(4122,"Only a completed review run can be counterchecked");
+        projectService.require(projectId);
+        if(request==null||!runId.equals(request.getExpectedRunId()))throw new BizException(4104,"Checklist run binding is missing or changed; reload before saving");
+        VettingRun run=vetting.requireCurrentReviewRun(projectId,runId,request.getExpectedSourceSnapshotSha256());
         String binding=snapshot(run);
         if(request==null||!binding.equals(request.getRunSnapshotSha256()))
             throw new BizException(4123,"Review run or checklist requirements changed; reload before saving");
