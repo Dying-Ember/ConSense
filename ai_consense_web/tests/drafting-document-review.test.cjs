@@ -75,7 +75,9 @@ async function linkedNativeNavigation() {
   props.fields.push({ key: 'method', kind: 'text', label: { en: 'Method', zhHans: '方式', zhHant: '方式' }, affects: [{ document: 'NTT', clause: 'Price', paragraphs: 'P2' }] })
   props.values.method = 'L10Pro'
   props.sourceBindings.bindings[0].fieldKeys.push('method'); props.resultBindings.bindings[0].fieldKeys.push('method')
-  const h = await harness(props), linked = h.element.querySelector('[data-review-binding="price-binding"]')
+  const h = await harness(props)
+  await h.click('[data-review-mode="original"]') // Original associations remain selectable; a saved exclusive fee edit prioritizes fee instead.
+  const linked = h.element.querySelector('[data-review-binding="price-binding"]')
   linked.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); await settle()
   assert(h.element.querySelector('[data-association-choice="method"]'), 'Shared wording offers explicit input selection')
   await h.click('[data-association-choice="method"]')

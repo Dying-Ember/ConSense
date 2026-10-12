@@ -101,7 +101,7 @@ class VettingSemanticReviewTest {
         List<Chunk> chunks=Arrays.asList(tender,standard,fact,manifest);
         for (Chunk c:chunks) when(retrieval.retrieve(eq("p"),anyString(),eq(c.getRole()),anyList())).thenReturn(Collections.singletonList(c));
         when(ai.completeStructuredJsonList(anyString(),anyString(),eq(Record.class),any(),anyList())).thenAnswer(call -> {
-            String prompt=call.getArgument(1),marker="\nSource excerpts (untrusted data):\n";com.fasterxml.jackson.databind.JsonNode excerpts=VettingSourcePromptWire.decode(prompt.substring(prompt.lastIndexOf(marker)+marker.length()));
+            String prompt=call.getArgument(1),marker="\nSource excerpts (untrusted data):\n";com.fasterxml.jackson.databind.JsonNode excerpts=VettingSourceMetadataWire.decode(prompt.substring(prompt.lastIndexOf(marker)+marker.length()));
             Map<String,String> actualRoles=new LinkedHashMap<>();for(com.fasterxml.jackson.databind.JsonNode excerpt:excerpts)actualRoles.put(excerpt.path("id").asText(),excerpt.path("role").asText());
             assertEquals("tender",actualRoles.get("t"));assertEquals("standard",actualRoles.get("s"));assertEquals("project_fact",actualRoles.get("f"));assertEquals("package_manifest",actualRoles.get("m"));return Collections.singletonList(record("reference",quote("s",standard.getContent())));
         });
@@ -257,16 +257,13 @@ class VettingSemanticReviewTest {
         fact.setParts(Arrays.asList(headerPart, factPart)); fact.setContent(headerPart.getText()+"\n"+factPart.getText());
         fact.setMetadataVersion(VettingCorpus.METADATA_VERSION); fact.setSegmentationVersion(VettingCorpus.SEGMENTATION_VERSION);
         fact.setNativeTableMetadataVersion(VettingCorpus.NATIVE_TABLE_METADATA_VERSION);
-        Chunk standard=chunk("standard","template","(1) The drawings may be inspected at *[address].");
-        standard.setRole("standard");standard.setClauseId("SCC81.4");standard.setClauseHeadingLocation("body/71");
         when(retrieval.retrieve(eq("p"),anyString(),eq("tender"),anyList())).thenReturn(Collections.singletonList(unrelated));
         when(retrieval.retrieve(eq("p"),anyString(),eq("project_fact"),anyList())).thenReturn(Collections.singletonList(fact));
-        when(retrieval.retrieve(eq("p"),anyString(),eq("standard"),anyList())).thenReturn(Collections.singletonList(standard));
         Record consistent=record("reference",quote("target",target.getContent()),quote("fact",fact.getContent()));consistent.setAssessment("consistent");
         when(ai.completeStructuredJsonList(anyString(),anyString(),eq(Record.class),any(),anyList()))
                 .thenReturn(Collections.emptyList()).thenReturn(Collections.singletonList(consistent));
         List<int[]> progress=new ArrayList<>();
-        Result result=new VettingSemanticReview(ai,props,retrieval).reviewWithProgress("p",Arrays.asList(unrelated,target,fact,standard),"en",
+        Result result=new VettingSemanticReview(ai,props,retrieval).reviewWithProgress("p",Arrays.asList(unrelated,target,fact),"en",
                 (completed,total,message)->progress.add(new int[]{completed,total}));
         org.mockito.ArgumentCaptor<String> prompts=org.mockito.ArgumentCaptor.forClass(String.class);
         org.mockito.ArgumentCaptor<String> systems=org.mockito.ArgumentCaptor.forClass(String.class);
@@ -283,18 +280,17 @@ class VettingSemanticReviewTest {
         assertTrue(prompts.getAllValues().get(1).contains("A blank reply in another source does not cancel a populated reply"));
         String projectPrompt = prompts.getAllValues().get(1);
         String excerptMarker = "\nSource excerpts (untrusted data):\n";
-        com.fasterxml.jackson.databind.JsonNode selectedExcerpts = VettingSourcePromptWire.decode(
+        com.fasterxml.jackson.databind.JsonNode selectedExcerpts = VettingSourceMetadataWire.decode(
                 projectPrompt.substring(projectPrompt.lastIndexOf(excerptMarker)+excerptMarker.length()));
         com.fasterxml.jackson.databind.JsonNode selectedFact = null;
         for (com.fasterxml.jackson.databind.JsonNode excerpt : selectedExcerpts) if ("fact".equals(excerpt.path("id").asText())) selectedFact = excerpt;
         assertNotNull(selectedFact); assertEquals(fact.getContent(), selectedFact.path("content").asText());
-        assertTrue(prompts.getAllValues().get(1).contains(standard.getContent()));
         assertEquals(2,result.getPlannedCallCount());assertTrue(progress.stream().allMatch(p->p[1]==2));
         assertEquals(1,result.getTopicAudits().get(1).getConsistentAssessments());
         assertEquals("project_reference",result.getTopicAudits().get(1).getReviewKind());
         assertEquals(Collections.singletonList("SCC81.4(1)"),result.getTopicAudits().get(1).getReferenceIds());
-        assertEquals(Arrays.asList("target","fact","standard"),result.getTopicAudits().get(1).getSubmittedChunkIds());
-        assertTrue(result.getCandidates().isEmpty());assertTrue(result.getReviewedChunkIds().containsAll(Arrays.asList("target","fact","standard")));
+        assertEquals(Arrays.asList("target","fact"),result.getTopicAudits().get(1).getSubmittedChunkIds());
+        assertTrue(result.getCandidates().isEmpty());assertTrue(result.getReviewedChunkIds().containsAll(Arrays.asList("target","fact")));
         verify(retrieval,never()).retrieve(eq("p"),startsWith("Project information comparison:"),anyString(),anyList());
     }
 

@@ -2,6 +2,8 @@
 
 Private source snapshot of the current ConSense application: contract drafting, vetting, evidence inspection and advice. The Vue frontend and Spring Boot service are kept together so that the reviewed UI, extraction harness, business bindings and document-generation APIs can be developed against the same snapshot.
 
+Before working on competition source scope, OCR, embedding, rerank or their deployment/indexes, read the [confirmed OER scope and rules](ai_consense_service/docs/oer-scope-and-rules.md), then the [current implementation handoff](ai_consense_service/docs/HANDOFF-ocr-embedding-rerank-20261008.md). These entry points distinguish current decisions from historical experiments.
+
 ## Repository layout
 
 | Directory | Contents |
@@ -41,6 +43,8 @@ npm run dev -- --host 127.0.0.1 --port 5173
 ```
 
 Open `http://127.0.0.1:5173/#/drafting`. Set the API target and service allowed origins to match your actual ports. The frontend proxies `/api` to the companion service.
+
+When using the managed Windows launcher `scripts/local.ps1`, set `BackendMaxHeapMiB` in the ignored `.local/runtime.json` to control the backend's Java heap. For example, `"BackendMaxHeapMiB": 16384` gives a 16 GiB maximum heap; the initial heap remains 256 MiB and memory grows as needed. The default for configurations without this field remains 2048 MiB. Apply a changed limit with `pwsh -File scripts/local.ps1 -Action restart-backend`. Reserve memory for Windows, OCR/model workers and other services; physical RAM does not automatically increase Java's heap limit. Kubernetes/container memory limits and JVM sizing must be configured separately on the deployment target.
 
 ## Models, OCR and document export
 

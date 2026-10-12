@@ -198,6 +198,7 @@ public class DraftingService {
                 document.setTextContent(result.getText());
                 document.setStructuredContentJson(JsonUtils.write(result.getBlocks()));
                 document.setParseCoverageJson(JsonUtils.write(result.getCoverage()));
+                com.consense.service.sources.OerSourceMetadata.captureParsed(document,result);
                 if ("FAILED".equals(result.getParseStatus())) throw new BizException(4003, result.getMessage());
                 parsed++;
                 messages.add(fileKey + " ← " + stored.getOriginalName() + " 已解析（"
@@ -277,6 +278,7 @@ public class DraftingService {
             document.setTextContent(result.getText());
             document.setStructuredContentJson(JsonUtils.write(result.getBlocks()));
             document.setParseCoverageJson(JsonUtils.write(result.getCoverage()));
+            com.consense.service.sources.OerSourceMetadata.captureParsed(document,result);
             if ("FAILED".equals(result.getParseStatus())) throw new BizException(4003, result.getMessage());
             parsed = 1;
             failed = 0;
@@ -327,6 +329,7 @@ public class DraftingService {
                 document.setTextContent(result.getText());
                 document.setStructuredContentJson(JsonUtils.write(result.getBlocks()));
                 document.setParseCoverageJson(JsonUtils.write(result.getCoverage()));
+                com.consense.service.sources.OerSourceMetadata.captureParsed(document,result);
                 if ("FAILED".equals(result.getParseStatus())) throw new BizException(4003, result.getMessage());
                 parsed++;
                 messages.add(stored.getOriginalName() + "：" + result.getMessage());
@@ -1213,6 +1216,7 @@ public class DraftingService {
                 template.setOcrUsed(result.isOcrUsed());
                 template.setStructuredContentJson(JsonUtils.write(result.getBlocks()));
                 template.setParseCoverageJson(JsonUtils.write(result.getCoverage()));
+                com.consense.service.sources.OerSourceMetadata.captureParsed(template,result);
                 sourceDocumentRepository.save(template);
             } catch (Exception failure) {
                 template.setParseStatus("FAILED");

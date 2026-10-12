@@ -36,14 +36,17 @@ export function associatedReviewFields(binding: DraftDocumentBinding, fields: Dr
   for (const action of actions.filter(item => binding.actionIds.includes(item.id))) for (const key of action.inputKeys ?? action.fieldKeys ?? []) keys.add(key)
   return fields.filter(field => keys.has(field.key)).map(field => field.key)
 }
+const matchesReviewOperation = (operation: string, actionId: string) => operation === actionId || operation.startsWith(`${actionId}-`)
+function appliedReviewActions(binding: DraftDocumentBinding, actions: DraftPlanAction[], fileKey: string) {
+  return actions.filter(action => action.document === fileKey && binding.actionIds.includes(action.id) && binding.appliedActionIds?.includes(action.id) && binding.operationIds.some(operation => matchesReviewOperation(operation, action.id)))
+}
 function changeAttribution(binding: DraftDocumentBinding, actions: DraftPlanAction[], fileKey: string, selectedKey: string) {
   if (binding.bodyOperationIds?.length || ['body_edited', 'body_added'].includes(binding.applicationStatus)) return 'manualSharedChange'
-  const matches = (operation: string, actionId: string) => operation === actionId || operation.startsWith(`${actionId}-`)
-  const applied = actions.filter(action => action.document === fileKey && binding.actionIds.includes(action.id) && binding.appliedActionIds?.includes(action.id) && binding.operationIds.some(operation => matches(operation, action.id)))
+  const applied = appliedReviewActions(binding, actions, fileKey)
   // Independent compiler cleanup has its own recorded identity. It is not an
   // applied business action and must never be inferred from an arbitrary ID.
   const editorial = new Set(binding.documentEditStatus === 'applied' ? binding.editorialOperationIds ?? [] : [])
-  if (!binding.operationIds.length || [...editorial].some(operation => !binding.operationIds.includes(operation)) || binding.operationIds.some(operation => !editorial.has(operation) && !applied.some(action => matches(operation, action.id)))) return 'diffUnverified'
+  if (!binding.operationIds.length || [...editorial].some(operation => !binding.operationIds.includes(operation)) || binding.operationIds.some(operation => !editorial.has(operation) && !applied.some(action => matchesReviewOperation(operation, action.id)))) return 'diffUnverified'
   if (!applied.length) return editorial.size ? 'editorialCleanup' : 'diffUnverified'
   const keys = new Set(applied.flatMap(action => action.inputKeys ?? action.fieldKeys ?? []))
   if (!keys.has(selectedKey)) return 'unrelatedSharedChange'
@@ -181,12 +184,12 @@ export function prepareDocumentReview(options: { fileKey: string; document?: Dra
   }).map(binding => binding.bindingId)
   if (options.mode === 'review' && resultIdentity && results.length && sources.some(binding => associatedReviewFields(binding, options.fields, options.actions).includes(options.selectedKey) && !savedBindingIds.includes(binding.bindingId))) notices.add('selectedMappingUnavailable')
   const bindingIds = new Set<string>()
-  function interactive(element: HTMLElement, binding: DraftDocumentBinding) {
+  function interactive(element: HTMLElement, binding: DraftDocumentBinding, savedChange = false) {
     const fieldKeys = associatedReviewFields(binding, options.fields, options.actions)
-    if (!fieldKeys.length) return
+    if (!fieldKeys.length && !savedChange) return
     element.dataset.reviewBinding = binding.bindingId; element.dataset.reviewFields = fieldKeys.join(' ')
     element.setAttribute('tabindex', '0'); element.setAttribute('role', 'button')
-    element.setAttribute('aria-label', fieldKeys.map(key => localized(options.fields.find(field => field.key === key)?.label, options.locale ?? 'en') || key).join(' / '))
+    element.setAttribute('aria-label', fieldKeys.length ? fieldKeys.map(key => localized(options.fields.find(field => field.key === key)?.label, options.locale ?? 'en') || key).join(' / ') : localized({ en: 'Saved document change', zhHans: '已保存的文稿修改', zhHant: '已儲存的文稿修改' }, options.locale ?? 'en'))
     if (fieldKeys.includes(options.selectedKey)) element.classList.add('review-associated')
     bindingIds.add(binding.bindingId)
   }
@@ -204,10 +207,13 @@ export function prepareDocumentReview(options: { fileKey: string; document?: Dra
   if (options.mode !== 'review' || !sourceIndex || !resultIndex || !resultIdentity) return { html: host.innerHTML, notices: [...notices], bindingIds: [...bindingIds], savedBindingIds, changes }
   function registerChange(element: HTMLElement, binding: DraftDocumentBinding, attribution: ReturnType<typeof changeAttribution>) {
     const kind: SavedReviewChange['kind'] = attribution === 'jointRangeAttribution' ? 'joint' : attribution === 'unrelatedSharedChange' ? 'other' : attribution === 'editorialCleanup' ? 'editorial' : attribution === 'manualSharedChange' ? 'manual' : 'input'
-    const appliedActions = options.actions.filter(action => action.document === fileKey && binding.appliedActionIds?.includes(action.id))
+    const appliedActions = appliedReviewActions(binding, options.actions, fileKey)
     const fieldKeys = [...new Set(appliedActions.flatMap(action => action.inputKeys ?? action.fieldKeys ?? []))]
     element.dataset.reviewChangeKind = kind
     changes.push({ bindingId: binding.bindingId, kind, fieldKeys })
+    // Independent editorial/manual edits have no business input, but remain
+    // inspectable so the reader can show their recorded origin explicitly.
+    interactive(element, binding, true)
     if (attribution === 'jointRangeAttribution' || attribution === 'manualSharedChange') notices.add(attribution)
   }
   for (const binding of results) {

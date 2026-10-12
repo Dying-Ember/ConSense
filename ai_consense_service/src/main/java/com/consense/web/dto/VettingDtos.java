@@ -132,6 +132,12 @@ public final class VettingDtos {
         private String packetId;
         @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
         private String packetSourceSnapshotSha256;
+        @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+        private CanonicalEvidenceDtos.EvidencePointer canonicalEvidence;
+        public EvidenceItemVO(String code,String pageNo,String text,String side,String documentId,String fileKey,String fileName,String anchor,String quote,boolean located,String sourceHash,List<Double> bbox,String packetId,String packetSourceSnapshotSha256) {
+            this(code,pageNo,text,side,documentId,fileKey,fileName,anchor,quote,located,sourceHash,bbox);
+            this.packetId=packetId;this.packetSourceSnapshotSha256=packetSourceSnapshotSha256;
+        }
         /** Preserve the legacy source-dialog twelve-argument constructor. */
         public EvidenceItemVO(String code,String pageNo,String text,String side,String documentId,String fileKey,String fileName,String anchor,String quote,boolean located,String sourceHash,List<Double> bbox) {
             this.code=code;this.pageNo=pageNo;this.text=text;this.side=side;this.documentId=documentId;this.fileKey=fileKey;this.fileName=fileName;this.anchor=anchor;this.quote=quote;this.located=located;this.sourceHash=sourceHash;this.bbox=bbox;
@@ -164,6 +170,12 @@ public final class VettingDtos {
         private String packetId;
         @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
         private String packetSourceSnapshotSha256;
+        @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+        private CanonicalEvidenceDtos.EvidencePointer canonicalEvidence;
+        public FindingEvidence(String side,String documentId,String fileKey,String fileName,String pageNo,String anchor,String quote,boolean located,String sourceHash,List<Double> bbox,String packetId,String packetSourceSnapshotSha256) {
+            this(side,documentId,fileKey,fileName,pageNo,anchor,quote,located,sourceHash,bbox);
+            this.packetId=packetId;this.packetSourceSnapshotSha256=packetSourceSnapshotSha256;
+        }
         /** Preserve legacy/rule ten-argument construction and serialization. */
         public FindingEvidence(String side,String documentId,String fileKey,String fileName,String pageNo,String anchor,String quote,boolean located,String sourceHash,List<Double> bbox) {
             this.side=side;this.documentId=documentId;this.fileKey=fileKey;this.fileName=fileName;this.pageNo=pageNo;this.anchor=anchor;this.quote=quote;this.located=located;this.sourceHash=sourceHash;this.bbox=bbox;
@@ -190,6 +202,11 @@ public final class VettingDtos {
         private List<DocumentCoverageVO> documents;
         private List<String> warnings;
         private List<SemanticTopicVO> semanticTopics = new java.util.ArrayList<>();
+        @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+        private String canonicalCorpusIdentitySha256;
+        public CoverageVO(int totalDocuments,int reviewedDocuments,List<DocumentCoverageVO> documents,List<String> warnings,List<SemanticTopicVO> semanticTopics){
+            this(totalDocuments,reviewedDocuments,documents,warnings);this.semanticTopics=semanticTopics;
+        }
         public CoverageVO(int totalDocuments,int reviewedDocuments,List<DocumentCoverageVO> documents,List<String> warnings) {
             this.totalDocuments=totalDocuments;this.reviewedDocuments=reviewedDocuments;this.documents=documents;this.warnings=warnings;
         }
@@ -237,6 +254,24 @@ public final class VettingDtos {
         private com.fasterxml.jackson.databind.JsonNode sourceTrace,originObservation;
         private String applicability = "unknown",qualifiersComplete = "unknown";
         private boolean semanticScopeVerified;
+    }
+
+    /** Progress is saved state only; freshness is checked by detail/report/evidence operations. */
+    @lombok.Getter @AllArgsConstructor
+    @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.ALWAYS)
+    public static class VettingProgressVO {
+        private final String id;
+        private final String status;
+        private final String phase;
+        private final int completedUnits;
+        private final int totalUnits;
+        private final String message;
+        private final String error;
+        private final Instant startedAt;
+        private final Instant finishedAt;
+        private final String sourceSnapshotSha256;
+        private final com.consense.ai.ModelIdentity modelIdentity;
+        public String getSourceVerification() { return "NOT_CHECKED"; }
     }
 
     @Data @NoArgsConstructor @AllArgsConstructor

@@ -249,7 +249,7 @@ def embedding_model():
         from sentence_transformers import SentenceTransformer
         selected, options = model_options()
         loaded = SentenceTransformer(model_path(MODELS['embedding']), device=selected, model_kwargs=options, local_files_only=True)
-        loaded.max_seq_length = MODEL_SETTINGS['embedding']['maxTokens']
+        loaded.max_seq_length = window_runtime().inference_cap('embedding')
         if loaded[0].do_lower_case or getattr(loaded, 'default_prompt_name', None):
             raise WindowError('EMBEDDING_PREPROCESSING_MISMATCH', 'Recipe requires strip/no lower case/no implicit prompt')
         loaded[0].tokenizer = window_runtime().guard(loaded[0].tokenizer, 'embedding')
@@ -267,7 +267,7 @@ def rerank_model():
         from sentence_transformers import CrossEncoder
         selected, options = model_options()
         loaded = CrossEncoder(model_path(MODELS['reranker']), device=selected, model_kwargs=options,
-            max_length=MODEL_SETTINGS['reranker']['maxTokens'], local_files_only=True)
+            max_length=window_runtime().inference_cap('reranker'), local_files_only=True)
         loaded.tokenizer = window_runtime().guard(loaded.tokenizer, 'reranker')
         verify_loaded_model(loaded, 'reranker')
         _reranker = loaded

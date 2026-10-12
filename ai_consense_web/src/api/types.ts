@@ -1,3 +1,5 @@
+import type { CanonicalEvidenceAddress } from './canonicalEvidence'
+
 /** 后端统一返回的三语文案对象 */
 export interface LocalizedText {
   zhHans: string
@@ -484,6 +486,7 @@ export interface VettingFile {
 }
 
 export interface FindingEvidence {
+  canonicalEvidence?: CanonicalEvidenceAddress | null
   side: string
   documentId?: string | number | null
   fileKey: string
@@ -664,10 +667,27 @@ export interface VettingJob {
   coverage?: VettingCoverage | null
 }
 
+/** Progress observes the worker only. It does not verify the current source set. */
+export interface VettingProgress {
+  id: string
+  status: VettingJob['status']
+  phase: string
+  completedUnits: number
+  totalUnits: number
+  message: string
+  error?: string | null
+  startedAt?: string | null
+  finishedAt?: string | null
+  sourceSnapshotSha256?: string | null
+  modelIdentity?: ModelIdentity | null
+  sourceVerification: 'NOT_CHECKED'
+}
+
 export type VettingReportFormat = 'pdf' | 'docx' | 'json'
 export type VettingSourceRole = 'tender' | 'standard' | 'project_fact' | 'package_manifest'
 
 export interface EvidenceSnippet {
+  canonicalEvidence?: CanonicalEvidenceAddress | null
   code: string
   /** 原文中该片段所在页码，由正文 --- Pn --- 标记反推 */
   pageNo: string | null
@@ -695,6 +715,9 @@ export interface EvidenceBundle {
 /* ------------------------------------------------------------ 咨询 */
 
 export interface Citation {
+  canonicalEvidence?: CanonicalEvidenceAddress[] | null
+  canonicalSourceUnit?: Record<string, unknown> | null
+  scoreMeaning?: 'actual_reranked_seed' | 'unranked_context' | string | null
   evidenceId?: string
   documentId?: string
   sourceHash?: string
@@ -739,6 +762,11 @@ export interface AskResponse {
 }
 
 export interface IndexStatus {
+  evidenceBackend?: string
+  sourceScope?: string
+  indexKey?: string
+  indexSignature?: string
+  indexReason?: string | null
   embeddingReady?: boolean
   stale?: boolean
   eligibleDocuments?: number
@@ -759,6 +787,7 @@ export type DocumentScope = 'auto' | 'package' | 'works_pss' | 'pricing' | 'exam
 
 export interface AdviceSourceDocument {
   documentId: string
+  sourceHash?: string | null
   fileKey: string
   fileName: string
   sourceRole: string

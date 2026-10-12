@@ -34,9 +34,14 @@ public class DocumentBlock {
     private List<WordSymbol> wordSymbols = new ArrayList<>();
     @JsonInclude(JsonInclude.Include.NON_EMPTY)
     private List<String> wordWarnings = new ArrayList<>();
-
     @JsonInclude(JsonInclude.Include.NON_EMPTY)
     private List<WordCell> wordCells = new ArrayList<>();
+    @JsonInclude(JsonInclude.Include.NON_EMPTY)
+    private List<PdfPageEvidence.PdfGlyph> pdfGlyphs = new ArrayList<>();
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private PdfPageEvidence.PdfFormField pdfFormField;
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private String nativeVisibilityStatus;
 
     /** Native OOXML topology. Physical layout and cell images require rendering separately. */
     @Data public static class WordCell {

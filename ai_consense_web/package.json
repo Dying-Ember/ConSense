@@ -11,10 +11,12 @@
     "typecheck": "vue-tsc --noEmit"
   },
   "dependencies": {
+    "@noble/hashes": "1.8.0",
     "axios": "^1.7.7",
     "dompurify": "3.4.16",
     "jszip": "3.10.2",
     "mammoth": "1.13.0",
+    "mermaid": "11.15.0",
     "pdf-parse": "^1.1.1",
     "pdfjs-dist": "^4.0.379",
     "pinia": "^2.2.6",
