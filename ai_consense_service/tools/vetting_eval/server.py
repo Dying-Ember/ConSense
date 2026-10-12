@@ -286,9 +286,8 @@ def rerank_candidates(query, candidates):
 def database():
     global _database
     if _database is None:
-        from qdrant_client import QdrantClient
-        STATE.mkdir(parents=True, exist_ok=True)
-        _database = QdrantClient(path=str(STATE / 'qdrant'))
+        from qdrant_backend import connect
+        _database = connect(STATE, os.environ)
     return _database
 
 
