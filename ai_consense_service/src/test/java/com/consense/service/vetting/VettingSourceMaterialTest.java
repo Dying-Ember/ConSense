@@ -164,7 +164,10 @@ class VettingSourceMaterialTest {
             JsonNode observation=excerpt.path("selectedPartExtractionObservations").get(0);
             assertEquals("",excerpt.path("content").asText());
             assertEquals("observed_selected_original_widget",observation.path("formObservationStatus").asText());
-            assertEquals(JsonUtils.write(p.getPdfFormField()),JsonUtils.write(observation.path("pdfFormField")));
+            com.fasterxml.jackson.databind.node.ObjectNode expected=JsonUtils.mapper().valueToTree(p.getPdfFormField());
+            expected.remove(Arrays.asList("annotationFlags","bbox","rectanglePdf","appearanceBbox","appearanceMatrix","appearanceRawStreamBytesBase64","appearanceDecodedStreamBytesBase64","appearanceGlyphs"));
+            assertEquals(JsonUtils.write(expected),JsonUtils.write(observation.path("pdfFormField")));
+            assertEquals(VettingSourceMaterial.formSourceSha256(JsonUtils.mapper().valueToTree(p.getPdfFormField())),observation.path("pdfFormFieldSourceSha256").asText());
             assertTrue(observation.path("formInterpretation").asText().contains("remain unknown"));
             assertEquals(before,JsonUtils.write(c));
         }
@@ -176,6 +179,21 @@ class VettingSourceMaterialTest {
         assertEquals(text,c.getParts().get(0).getPdfFormField().getAppearanceValue());
         assertEquals(text.length(),c.getParts().get(0).getEndOffset());
         assertEquals("observed_selected_original_widget",formObservation(c).path("formObservationStatus").asText());
+    }
+    @Test void formSourceHashUsesTheSharedScientificBinary64ShaWithoutChangingSourceValues() {
+        JsonNode source=JsonUtils.parse("{\"z\":[1e-7,1e20,0.0,1.0],\"a\":{\"blank\":\"\",\"count\":1,\"truth\":true,\"nothing\":null,\"text\":\"Original 中文 😀\"}}");
+        String before=JsonUtils.write(source);
+        assertEquals("714f894e3f33c75c769a04d969b14e005f8e6fc221a588af5984a00f3b30f565",VettingSourceMaterial.formSourceSha256(source));
+        assertEquals(before,JsonUtils.write(source));
+        assertEquals(VettingSourceMaterial.formSourceSha256(JsonUtils.parse("{\"z\":1.0,\"a\":2}")),VettingSourceMaterial.formSourceSha256(JsonUtils.parse("{\"a\":2,\"z\":1.0}")));
+        assertNotEquals(VettingSourceMaterial.formSourceSha256(JsonUtils.parse("[1]")),VettingSourceMaterial.formSourceSha256(JsonUtils.parse("[1.0]")));
+        assertNotEquals(VettingSourceMaterial.formSourceSha256(JsonUtils.parse("[0.0]")),VettingSourceMaterial.formSourceSha256(JsonUtils.parse("[-0.0]")));
+    }
+    @Test void formSourceHashRejectsNonFiniteOriginalCoordinates() {
+        for(double value:new double[]{Double.NaN,Double.POSITIVE_INFINITY,Double.NEGATIVE_INFINITY}) {
+            Chunk c=formChunk("","appearance_missing");c.getParts().get(0).getPdfFormField().setAppearanceMatrix(new double[]{value});
+            assertThrows(IllegalArgumentException.class,()->VettingSourceMaterial.project(Collections.singletonList(c)));
+        }
     }
 
     @Test void formMetadataWithPartialMismatchedOrAmbiguousSourcePartsRemainsUnknown() {
@@ -213,11 +231,17 @@ class VettingSourceMaterialTest {
         assertFalse(actualUser(Collections.singletonList(selected),null).contains("UNSELECTED_FIELD_SECRET"));
     }
 
-    @Test void completeLongAppearanceBytesStayInTheExactInputAndAnOverBudgetObservationCannotTruncateThem() throws Exception {
-        Chunk c=formChunk("","empty_or_non_text_appearance");
+    @Test void rawAppearanceBytesStayInTheSourceAndWholeReadableTextIsRefusedWithoutTruncationOverBudget() throws Exception {
+        String text="Original readable AP text. ".repeat(1000)+"VISIBLE_LITERAL_TAIL";
+        Chunk c=formChunk(text,"appearance_text_unverified");
         String ap=Base64.getEncoder().encodeToString(("Original AP operators ".repeat(1000)+"ACTUAL_STREAM_TAIL").getBytes(java.nio.charset.StandardCharsets.UTF_8));
         c.getParts().get(0).getPdfFormField().setAppearanceRawStreamBytesBase64(ap);
-        String user=actualUser(Collections.singletonList(c),null); assertTrue(user.contains(ap));
+        c.getParts().get(0).getPdfFormField().setAppearanceDecodedStreamBytesBase64(ap);
+        String original=JsonUtils.write(c),user=actualUser(Collections.singletonList(c),null);
+        assertFalse(user.contains(ap));assertFalse(user.contains("appearanceRawStreamBytesBase64"));assertFalse(user.contains("appearanceDecodedStreamBytesBase64"));assertFalse(user.contains("appearanceGlyphs"));
+        JsonNode excerpt=actualExcerpts(Collections.singletonList(c)).get(0);assertEquals(text,excerpt.path("content").asText());
+        assertEquals(text,excerpt.path("selectedPartExtractionObservations").get(0).path("pdfFormField").path("appearanceValue").asText());
+        assertEquals(original,JsonUtils.write(c));assertEquals(ap,c.getParts().get(0).getPdfFormField().getAppearanceRawStreamBytesBase64());
         VettingInputBudget.Input in=VettingInputBudget.input("fixture-provider","fixture-model","Exact system",user,JsonUtils.parse("{\"type\":\"array\"}"),100,VettingCorpus.hash(JsonUtils.write(c)));
         String before=JsonUtils.write(in);
         VettingInputBudget.Result denied=VettingInputBudget.check(in,supplied->{

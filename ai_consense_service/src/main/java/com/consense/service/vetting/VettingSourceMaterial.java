@@ -11,7 +11,7 @@ import java.util.stream.Collectors;
 
 /** Source-bound observations from selected chunks only. Never an inferred header, grid or adoption assertion. */
 public final class VettingSourceMaterial {
-    public static final String PROJECTION_VERSION="selected-native-source-material-form-observations-v5";
+    public static final String PROJECTION_VERSION="selected-native-source-material-form-observations-v6";
     private static final Pattern ROW_ANCHOR=Pattern.compile("body/(\\d+)/table-row/(\\d+)(?: @(\\d+))?");
     private VettingSourceMaterial() { }
 
@@ -48,9 +48,10 @@ public final class VettingSourceMaterial {
                     if(p.getPdfFormField()!=null) {
                         boolean bound=formMatchesPart(c,p,bodyBound,blocks);
                         method.put("formObservationStatus",bound?"observed_selected_original_widget":"unknown_part_binding");
-                        method.put("pdfFormField",bound?JsonUtils.parse(JsonUtils.write(p.getPdfFormField())):null);
+                        method.put("pdfFormField",bound?formObservation(p):null);
+                        method.put("pdfFormFieldSourceSha256",bound?formSourceSha256(JsonUtils.mapper().valueToTree(p.getPdfFormField())):null);
                         method.put("nativeVisibilityStatus",bound?p.getNativeVisibilityStatus():"unknown");
-                        method.put("formInterpretation","Stored value, selected appearance, blank/nontext and conflict are observations only; blank meaning, raster visibility, parent-child selection and legal OR applicability remain unknown.");
+                        method.put("formInterpretation","Stored value, selected appearance, blank/nontext and conflict are observations only; blank meaning, raster visibility, parent-child selection and legal OR applicability remain unknown. Raw streams, glyph coordinates and audit fields remain in source storage identified by pdfFormFieldSourceSha256.");
                     }
                     methods.add(method);
                 }
@@ -144,6 +145,31 @@ public final class VettingSourceMaterial {
         return c.getContent()!=null&&c.getParts()!=null&&!c.getParts().isEmpty()
                 &&c.getParts().stream().allMatch(p->p!=null&&p.getText()!=null)
                 &&c.getContent().equals(c.getParts().stream().map(Part::getText).collect(Collectors.joining("\n")));
+    }
+    private static com.fasterxml.jackson.databind.node.ObjectNode formObservation(Part p) {
+        com.fasterxml.jackson.databind.node.ObjectNode source=JsonUtils.mapper().valueToTree(p.getPdfFormField()),out=JsonUtils.mapper().createObjectNode();
+        for(String name:Arrays.asList("id","fieldName","fieldType","fieldValue","appearanceValue","appearanceState","visibilityStatus","valueStatus","pageNo","needAppearances","appearancePresent","conflict","appearanceStreamObservationStatus","appearanceGlyphObservationStatus","limitations"))
+            if(source.has(name))out.set(name,source.get(name).deepCopy());
+        return out;
+    }
+    /** Hash-only binary64 values avoid Java/Python decimal spelling differences without changing source fields. */
+    static String formSourceSha256(com.fasterxml.jackson.databind.JsonNode source) {
+        return VettingCorpus.hash(JsonUtils.write(formSourceHashValue(source)));
+    }
+    private static com.fasterxml.jackson.databind.JsonNode formSourceHashValue(com.fasterxml.jackson.databind.JsonNode source) {
+        if(source.isFloatingPointNumber()) {
+            double value=source.doubleValue();
+            if(!Double.isFinite(value))throw new IllegalArgumentException("Non-finite form source number");
+            return JsonUtils.mapper().createObjectNode().put("$binary64",String.format(Locale.ROOT,"%016x",Double.doubleToRawLongBits(value)));
+        }
+        if(source.isObject()) {
+            com.fasterxml.jackson.databind.node.ObjectNode out=JsonUtils.mapper().createObjectNode();TreeMap<String,com.fasterxml.jackson.databind.JsonNode> fields=new TreeMap<>();
+            source.fields().forEachRemaining(e->fields.put(e.getKey(),e.getValue()));fields.forEach((key,value)->out.set(key,formSourceHashValue(value)));return out;
+        }
+        if(source.isArray()) {
+            com.fasterxml.jackson.databind.node.ArrayNode out=JsonUtils.mapper().createArrayNode();source.forEach(value->out.add(formSourceHashValue(value)));return out;
+        }
+        return source;
     }
     private static boolean formMatchesPart(Chunk c,Part p,boolean bodyBound,Map<List<String>,Integer> blocks) {
         com.consense.document.PdfPageEvidence.PdfFormField f=p.getPdfFormField();
