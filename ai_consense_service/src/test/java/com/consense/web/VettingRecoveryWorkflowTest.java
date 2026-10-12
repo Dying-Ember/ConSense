@@ -66,6 +66,7 @@ class VettingRecoveryWorkflowTest {
     @MockBean VettingRetrievalClient retrieval;
     private final AtomicReference<List<VettingCorpus.Chunk>> corpus=new AtomicReference<>();
     @BeforeEach void fixture(){
+        semantic.setInputBudgetObserver(VettingTokenFixture::observe);
         props.getVetting().setSemanticTopics(2);props.getVetting().setProjectReferenceComparisons(0);props.getVetting().setProbeDirectory(null);
         when(ai.available()).thenReturn(true);when(ai.chatModel()).thenReturn("fixture-only");
         doAnswer(call->{corpus.set(call.getArgument(1));return null;}).when(retrieval).index(anyString(),anyList());

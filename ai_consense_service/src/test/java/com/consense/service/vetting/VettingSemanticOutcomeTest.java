@@ -163,7 +163,7 @@ class VettingSemanticOutcomeTest {
     private static Result review(AiGateway ai, ConsenseProperties props,List<Chunk> corpus,List<Chunk> ranked) {
         VettingRetrievalClient retrieval = mock(VettingRetrievalClient.class);
         when(retrieval.retrieve(anyString(),anyString(),eq("tender"),anyList())).thenReturn(ranked);
-        Result result = new VettingSemanticReview(ai,props,retrieval).review("fixture",corpus,"en",(n,s)->{});
+        Result result = VettingTokenFixture.review(ai,props,retrieval).review("fixture",corpus,"en",(n,s)->{});
         verify(retrieval,times(1)).index("fixture",corpus);
         verify(retrieval,times(1)).retrieve(eq("fixture"),anyString(),eq("tender"),eq(corpus));
         return result;

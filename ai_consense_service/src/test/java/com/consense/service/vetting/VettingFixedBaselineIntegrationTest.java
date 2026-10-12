@@ -57,7 +57,7 @@ class VettingFixedBaselineIntegrationTest {
             Record context=record("insufficient_context","risk",quote(tender),quote(fixture.standard));
             return Arrays.asList(standardOnly,unconfirmedConflict,context);
         });
-        VettingSemanticReview review=new VettingSemanticReview(ai,props,retrieval);review.setFixedBaselineRetrievalClient(fixture.client);
+        VettingSemanticReview review=VettingTokenFixture.review(ai,props,retrieval);review.setFixedBaselineRetrievalClient(fixture.client);
         VettingSemanticReview.Result result=review.review("project",Collections.singletonList(tender),"en",(n,s)->{});
         assertTrue(result.getCandidates().isEmpty(),"Fixed references alone and unconfirmed project adoption cannot establish a project defect");
         assertEquals(1,result.getActualGatewayCallCount());
@@ -75,7 +75,7 @@ class VettingFixedBaselineIntegrationTest {
     @Test void configuredCanonicalProjectFailureCannotBeBypassedByTheFixedReferenceLane() {
         Fixture fixture=new Fixture();
         OerBusinessEvidence oer=mock(OerBusinessEvidence.class);when(oer.enabled()).thenReturn(true);
-        VettingSemanticReview review=new VettingSemanticReview(mock(AiGateway.class),new ConsenseProperties(),mock(VettingRetrievalClient.class));
+        VettingSemanticReview review=VettingTokenFixture.review(mock(AiGateway.class),new ConsenseProperties(),mock(VettingRetrievalClient.class));
         review.setOerBusinessEvidence(oer);review.setFixedBaselineRetrievalClient(fixture.client);
         assertThrows(IllegalStateException.class,()->review.review("project",Collections.singletonList(chunk("p","tender","SCT","SCT1","The project source shall be verified before any model operation.")),"en",(n,s)->{}));
         verify(fixture.client,never()).search(anyString(),anyString(),anyInt());

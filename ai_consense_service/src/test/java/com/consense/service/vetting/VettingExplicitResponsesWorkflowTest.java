@@ -33,7 +33,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
     "consense.minimax-cn.base-url=http://relay-fixture.invalid","consense.minimax-cn.api-key=",
     "consense.vetting.semantic-topics=1","consense.vetting.project-reference-comparisons=0",
     "consense.vetting.minimax-cn-wire=responses","consense.vetting.responses.enabled=true",
-    "consense.vetting.responses.api-key=RESPONSES_FAKE_ONLY","consense.vetting.responses.configured-context-tokens=50000",
+    "consense.vetting.responses.api-key=RESPONSES_FAKE_ONLY","consense.vetting.responses.configured-context-tokens=262144",
     "consense.vetting.responses.safety-margin-tokens=500","consense.vetting.responses.estimate-policy=bound_provider_estimate_with_absolute_margin_v1"})
 @ActiveProfiles("h2") @AutoConfigureMockMvc @Import(VettingExplicitResponsesWorkflowTest.Fixture.class)
 class VettingExplicitResponsesWorkflowTest {
@@ -62,9 +62,11 @@ class VettingExplicitResponsesWorkflowTest {
         @Bean @Primary VettingResponsesTransport nativeTransport(ConsenseProperties props,FakeWire wire){return new VettingResponsesTransport(props,wire);}
     }
     @Autowired MockMvc mvc;@Autowired ConsenseProperties props;@Autowired FakeWire wire;
+    @Autowired VettingSemanticReview semantic;
     @MockBean(name="llmClient") LlmClient local;@MockBean(name="miniMaxChatClient") LlmClient miniMax;
     @MockBean HttpSupport http;
     @BeforeEach void reset() {
+        semantic.setInputBudgetObserver(VettingTokenFixture::observe);
         wire.reset();props.getVetting().setMinimaxCnWire("responses");props.getVetting().getResponses().setEstimatePolicy(VettingResponsesTransport.POLICY);
         when(http.postJson(anyString(),anyString(),anyLong())).thenThrow(new IllegalStateException("fixture retrieval unavailable"));
     }
@@ -98,7 +100,7 @@ class VettingExplicitResponsesWorkflowTest {
         }finally{release.countDown();}
     }
     @Test void counterOverBudgetPersistsUnsubmittedPacketWithoutGenerationOrChatFallback()throws Exception {
-        wire.count=50000;String id=project();upload(id);JsonNode queued=postData(id,"minimax-cn"),saved=await(id,queued.path("id").asText());
+        wire.count=262144;String id=project();upload(id);JsonNode queued=postData(id,"minimax-cn"),saved=await(id,queued.path("id").asText());
         JsonNode packet=saved.path("coverage").path("semanticTopics").get(0).path("packetAudits").get(0);
         assertEquals("over_budget",packet.path("inputBudgetStatus").asText());assertFalse(packet.path("actualGatewayCallStarted").asBoolean());
         assertTrue(wire.endpoints.stream().noneMatch(x->x.endsWith("/v1/responses")));verifyNoInteractions(local,miniMax);

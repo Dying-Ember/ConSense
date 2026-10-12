@@ -99,7 +99,7 @@ class OerTypedHierarchyBusinessTest {
             return Collections.emptyList();
         });
         ConsenseProperties config=VettingDualStructureHealthTest.expected();config.getVetting().setSemanticTopics(1);config.getVetting().setProjectReferenceComparisons(0);config.getVetting().setSemanticContextChars(50000);config.getVetting().setSemanticContextExpansionChars(50000);
-        VettingRetrievalClient legacy=mock(VettingRetrievalClient.class);VettingSemanticReview review=new VettingSemanticReview(model,config,legacy);review.setOerBusinessEvidence(w.service);VettingSemanticReview.Result result=review.review(w.source.getProjectId(),session.chunks(),"en",(n,s)->{});
+        VettingRetrievalClient legacy=mock(VettingRetrievalClient.class);VettingSemanticReview review=VettingTokenFixture.review(model,config,legacy);review.setOerBusinessEvidence(w.service);VettingSemanticReview.Result result=review.review(w.source.getProjectId(),session.chunks(),"en",(n,s)->{});
         assertEquals(1,calls.get());assertEquals(1,result.getActualGatewayCallCount());verifyNoInteractions(legacy);
     }
 }
