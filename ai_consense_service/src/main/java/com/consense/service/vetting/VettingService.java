@@ -269,6 +269,7 @@ public class VettingService {
             probe.observe("rule_engine_raw_outputs",()->VettingServiceProbe.map("outputs",rawRules));
             List<Candidate> candidates=new ArrayList<>(); for(VettingRuleEngine.Output o:rawRules) candidates.add(ruleCandidate(o));
             if(canonicalSession!=null)for(Candidate c:candidates)oer.bindRuleEvidence(canonicalSession,c.getEvidence());
+            bindRuleOriginalSources(candidates,snapshot);
             progress(id,1,"semantic","规则检查完成，开始按主题检索语义审查片段。");
             stage="corpus_and_semantic_review";stageStarted=System.nanoTime();stageOverhead=probe.overheadNanos();
             List<Chunk> chunks=canonicalSession!=null?canonicalSession.chunks():VettingCorpusConstructionProbe.chunks(props,id,projectId,docs);
@@ -422,6 +423,17 @@ public class VettingService {
         List<FindingEvidence> sides=new ArrayList<>(); int index=0;
         for(VettingRuleEngine.Evidence e:output.getEvidence()) sides.add(new FindingEvidence(index++==0?"source":"reference",e.getDocumentId(),e.getFileKey(),e.getFileName(),e.getPageNo()==null?null:"P"+e.getPageNo(),available(e.getAnchor(),e.getLocation()),e.getQuote(),true,e.getSourceHash(),e.getBbox()==null?null:Arrays.stream(e.getBbox()).boxed().collect(Collectors.toList())));
         c.setEvidence(sides); return c;
+    }
+    /** Rule quotes inherit raw identity only from the verified inputs captured for this run. */
+    static void bindRuleOriginalSources(List<Candidate> candidates,List<SourceDocument> snapshot) {
+        Map<String,SourceDocument> sources=snapshot.stream().collect(Collectors.toMap(d->String.valueOf(d.getId()),d->d));
+        for(Candidate candidate:candidates)for(FindingEvidence quote:candidate.getEvidence()) {
+            SourceDocument source=sources.get(quote.getDocumentId());
+            if(source==null||!Objects.equals(VettingCorpus.sourceHash(source),quote.getSourceHash())
+                    ||!JsonUtils.isBlankText(quote.getOriginalSourceSha256())&&!Objects.equals(source.getSourceSha256(),quote.getOriginalSourceSha256()))
+                throw new IllegalStateException("Rule evidence differs from captured source identity");
+            quote.setOriginalSourceSha256(JsonUtils.isBlankText(source.getSourceSha256())?null:source.getSourceSha256());
+        }
     }
     private void apply(VettingFinding f,Candidate c) {
         // Refresh generated observations only. Human review records are owned by updateReview.

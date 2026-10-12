@@ -289,10 +289,10 @@ public class OerBusinessEvidence {
     /** Rebind a literal rule quote to its accepted part; ambiguous locations do not receive a pointer. */
     public void bindRuleEvidence(Session session,List<com.consense.web.dto.VettingDtos.FindingEvidence> quotes){
         current(session);for(com.consense.web.dto.VettingDtos.FindingEvidence e:quotes){
-            List<Chunk> matches=session.chunks.stream().filter(c->c.getDocumentId().equals(e.getDocumentId())&&c.getParts().stream()
+            List<Chunk> matches=session.chunks.stream().filter(c->c.getDocumentId().equals(e.getDocumentId())&&Objects.equals(c.getCanonicalEvidence().getJavaParsedSourceHash(),e.getSourceHash())&&c.getParts().stream()
                     .anyMatch(p->(Objects.equals(p.getAnchor(),e.getAnchor())||Objects.equals(c.getClauseId(),e.getAnchor()))
                             &&e.getQuote()!=null&&!e.getQuote().trim().isEmpty()&&VettingCorpus.normalize(p.getText()).contains(VettingCorpus.normalize(e.getQuote())))).collect(Collectors.toList());
-            if(matches.size()==1){EvidencePointer p=matches.get(0).getCanonicalEvidence();e.setCanonicalEvidence(JsonUtils.read(JsonUtils.write(p),EvidencePointer.class));e.setSourceHash(p.getJavaParsedSourceHash());}
+            if(matches.size()==1){EvidencePointer p=matches.get(0).getCanonicalEvidence();e.setCanonicalEvidence(JsonUtils.read(JsonUtils.write(p),EvidencePointer.class));e.setSourceHash(p.getJavaParsedSourceHash());e.setOriginalSourceSha256(p.getOriginalSourceSha256());}
             else {e.setLocated(false);e.setCanonicalEvidence(null);}
         }
     }
