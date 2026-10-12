@@ -438,8 +438,16 @@ def main():
               "mlEnabled": False, "modelDownloads": False,
               "oldCandidatesRead": False, "referenceAnswersRead": False,
               "logicalRecipe": file_identity(Path(__file__).with_name("native_pdf_table_logic.py")),
+              "conditionRecipe": file_identity(Path(__file__).with_name("native_pdf_table_conditions.py")),
               "projectionContract": "source-reviewed whole table groups only; candidates cannot self-adopt",
               "implementationOrigin": "source-preserving observer reused from isolated run-2112-01"}
+    code_directory = output / "source-code"
+    code_directory.mkdir()
+    recipe["retainedRecipeCode"] = {}
+    for name in (Path(__file__).name, "native_pdf_table_logic.py", "native_pdf_table_conditions.py"):
+        retained = code_directory / name
+        retained.write_bytes(Path(__file__).with_name(name).read_bytes())
+        recipe["retainedRecipeCode"][name] = file_identity(retained)
     write_json(output / "run-recipe.json", recipe)
     method_files = {method: (output / f"{method}.pages.jsonl").open(
         "x", encoding="utf-8", newline="\n") for method in METHODS}

@@ -8,6 +8,8 @@ from __future__ import annotations
 import copy
 import re
 
+from native_pdf_table_conditions import observe_groups
+
 
 SCHEMA = 'consense.native-pdf-table-candidate.v1'
 ITEM = re.compile(r'^\s*(\d+(?:\.\d+)*[.)]?|\((?:\d+|[A-Za-z]|[ivxlcdmIVXLCDM]+)\))\s*$')
@@ -183,8 +185,9 @@ def recover_page(tables, observation):
             candidates.append({'text': literal, 'glyphIds': [g['glyphId'] for g in ordered],
                                'role': 'condition_line_proposal', 'owner': 'unknown',
                                'lineAssembly': 'geometry_proposal_original_glyphs_retained'})
+    logical_tables = [proposal['logicalTable'] for proposal in proposals if proposal['logicalTable'] is not None]
     return {'schema': SCHEMA, 'tables': proposals,
-            'logicalTables': [proposal['logicalTable'] for proposal in proposals if proposal['logicalTable'] is not None],
+            'logicalTables': logical_tables, 'observationGroups': observe_groups(logical_tables, observation),
             'conditionCandidates': candidates,
             'unassignedSourceGlyphIds': sorted(outside), 'completeSourceGroupAccepted': False,
             'quality': 'unknown_not_independently_source_scored'}

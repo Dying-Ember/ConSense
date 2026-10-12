@@ -69,8 +69,30 @@
 
 每项格数、关系、成员身份与逐格／逐关系原因可在 `native-table-whole-group-01/full-group-source-score.json` 和对应 `scoring/*.logical-02-same-domain-source-score.json` 复算。Stream 五主表为 672/672 格和 5/5 完整主表；Network 650/672 和 4/5，Gateset 最后列的 22 个源 anchor 落在 Network 右边界之外，未用参考扩 bbox 补过门。这是主表独立域，不等于带 Notes 的完整业务组。
 
-13 个表外成员的完整文字可由同版本 native 来源观察在审阅 source bbox 内回取；继承参考的 `sourceCharIndices` 是 PDFium character 身份（含 CR/LF），**不能冒称 pdfplumber glyph ID**。新评分使用同页已审来源 bbox 的 glyph center 映射再独立比较已封视觉字面，没有向 generator 回传监督。候选尚未产出完整 owned 表外成员与 typed 关系，因此 owned 成员 0/13、typed 关系 0/87、Window Note9 续页关系 0/1；页输出被捕获不能代替页组归属。继承参考未标父条完整分母，父条门为 unknown，不能写成通过或零漏失。
+12 个表外成员（2＋3＋2＋2＋3）的完整文字可由同版本 native 来源观察在审阅 source bbox 内回取；继承参考的 `sourceCharIndices` 是 PDFium character 身份（含 CR/LF），**不能冒称 pdfplumber glyph ID**。新评分使用同页已审来源 bbox 的 glyph center 映射再独立比较已封视觉字面，没有向 generator 回传监督。候选尚未产出完整 owned 表外成员与 typed 关系，因此 owned 成员 0/12、typed 关系 0/87、Window Note9 续页关系 0/1；页输出被捕获不能代替页组归属。继承参考未标父条完整分母，父条门为 unknown，不能写成通过或零漏失。初版总数13为加总错误，本表逐目标分母与来源记录未改。
 
 旧有线路线保存输出与旧正确源项逐项保持：结构旧正确 333/333、字面旧正确 331/331；主有线完整结构 25/26、字面 24/26，与原独立库源评一致。原未知／失败不合并成新综合准确率。
 
 收据根为外部 `native-table-whole-group-01/`：`logical-replay-02/terminal.json`（代码 SHA／原 capture SHA／3×226 页）、`scoring/`（密封同域 raw／新逻辑结果）、`full-group-source-score.json`（完整五目标及失败）。代码控制见 `native-table-logical-grid-final-tests.log`；没有新 parser／模型／训练调用，未发布新 generation，NEXT-02／AC04 保持未完成。
+
+## 02:30 增量：单页明确 Notes／星号恢复；续页和法律范围仍未知
+
+新增 `native_pdf_table_conditions.py`，仅在同页唯一逻辑表时形成可逆观察组：保原 glyph／完整原文行，提取相邻 caption／明确 Notes 标题的完整上下文，按显式编号／逗号列表／唯一星号定义保存同源关联。原标记表达式保留，不推断 AND／OR 的法律意义；不同字号后的内容留在完整未分配清单。多表、重复定义、缺定义、无明确 Notes 标题和跨页不猜 owner。所有 group 的 self acceptance 仍 false，`cross_page_members/legal_applicability/source_pixel_visibility` 保持 unknown。
+
+再次正常读取原三章全部 226 页，Network／Stream／lines 各 226/226 实际完成，零路线错误；本次 cold start／缓存状态未经控制，82.525 秒不是速度排名。三来源 SHA 前后不变，完整 raw／逻辑／观察组共同保存。输出目录 `native-table-actual-full226-conditions-02/` 新增 `source-code/`，实际运行配方代码三份按字节保全并列 SHA，后续 worktree 清理不丢失 recipe。
+
+| 完整监督源组 | Network 外成员／关系 | Network 完整已标源组 | Stream 外成员／关系 | Stream 完整已标源组 |
+|---|---:|---:|---:|---:|
+| Façade | 2/2；17/17 | 1/1 | 2/2；17/17 | 1/1 |
+| Window 含 1317 | 2/3；18/19 | 0/1 | 2/3；18/19 | 0/1 |
+| Timber | 2/2；16/16 | 1/1 | 2/2；16/16 | 1/1 |
+| Gateset | 2/2；3/15 | 0/1 | 2/2；15/15 | 1/1 |
+| Volumetric 含星号 | 3/3；20/20 | 1/1 | 3/3；20/20 | 1/1 |
+
+Stream 完整已标源组 4/5，必需外成员 11/12、typed 关系 86/87；主表 672/672 和 5/5 保持。Network 完整已标源组 3/5；Gateset 的最后列 source anchor 问题保持，不能只因文字存在就改源格匹配。Window 的 Note9 缩写成员续至 1317，未有可证明的单页显式回链，下一页全部原生 glyph 仍保存为 unassigned；不因页邻近或只有一个 table 就造 continuation。
+
+该完整组分数限定为继承的已封监督定义：主表、12 个必要 caption／Notes／条件成员、87 条已标关系及已标页组。每个候选成员须以同页源 bbox 的**非空白原 glyph 身份完整相等**匹配，再独立比较原视觉字面；字段与表的关系还须匹配 source origin／标号／类型，不凭文字相似选结果。原字面、空栏与未分配原 glyph 均保全，不逐格融合。源中的空白行 glyph 不被当作内容缺失，原始观察中仍完整保留。
+
+`native-table-whole-group-conditions-02/complete-condition-group-score.json` 保存逐目标、逐成员、逐关系的匹配／失败，以及独立主表评分路径；parser 没有读取监督或答案。首轮条件观察 1/5（逗号列表尚缺）、初始完整组 0/5、旧原始主表 0/5 均保留在各自带配方的收据目录，不覆盖成最终质量。
+
+完整已标源组 4/5 **不是 AC04 或最终来源质量已通过**：Window 续页仍缺，父条完整分母未在继承参考标注、法律适用／像素 visibility／独立留出仍 unknown，未采用／发布或改变 Local05。正常实际完整运行与软件控制分开：最终 `native-table-final-condition-tests.log` 为 85/85 tests，通过重复定义、多表归属、无标题、列表原表达式、源码重放／CAS／registry／HTTP 等契约检查，不计源正确率。
