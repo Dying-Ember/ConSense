@@ -4,6 +4,8 @@ import com.consense.ai.LlmClient;
 import com.consense.common.JsonUtils;
 import com.consense.domain.SourceDocument;
 import com.consense.repository.SourceDocumentRepository;
+import com.consense.service.StorageService;
+import com.consense.service.sources.OerSourceMetadata;
 import com.fasterxml.jackson.databind.JsonNode;
 import java.nio.file.Paths;
 import java.time.Instant;
@@ -40,6 +42,7 @@ class AdviceDocumentScopeIntegrationTest {
     }
     @Autowired MockMvc mvc;
     @Autowired SourceDocumentRepository sources;
+    @Autowired StorageService storage;
     @MockBean(name="llmClient") LlmClient local;
     private final List<String> prompts=new ArrayList<>();
 
@@ -216,5 +219,7 @@ class AdviceDocumentScopeIntegrationTest {
     private JsonNode ask(String id,String scope)throws Exception{return data(post("/api/advice/{id}/ask",id).contentType(MediaType.APPLICATION_JSON).content("{\"question\":\"TEST ONLY question?\",\"scope\":\""+scope+"\"}"));}
     private JsonNode data(org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder request)throws Exception{return JsonUtils.parse(mvc.perform(request).andExpect(jsonPath("$.code").value(0)).andReturn().getResponse().getContentAsString()).path("data");}
     private String project()throws Exception{String id="scope-test-"+UUID.randomUUID();data(post("/api/projects").contentType(MediaType.APPLICATION_JSON).content("{\"id\":\""+id+"\",\"nameZhHans\":\"SCOPE TEST ONLY\"}"));return id;}
-    private SourceDocument source(String id,String key,String name,String category,String role,String text){SourceDocument s=new SourceDocument();s.setProjectId(id);s.setFileKey(key);s.setFileName(name);s.setCategory(category);s.setReviewRole(role);s.setTextContent(text);s.setParseStatus("PARSED");s.setPageCount(25);s.setCreatedAt(Instant.now());return sources.saveAndFlush(s);}
+    private SourceDocument source(String id,String key,String name,String category,String role,String text){SourceDocument s=new SourceDocument();s.setProjectId(id);s.setFileKey(key);s.setFileName(name);s.setCategory(category);s.setReviewRole(role);s.setTextContent(text);s.setParseStatus("PARSED");s.setPageCount(25);s.setCreatedAt(Instant.now());
+        byte[] bytes=text.getBytes(java.nio.charset.StandardCharsets.UTF_8);StorageService.StoredFile original=storage.store(id,category,new MockMultipartFile("files",name,"text/plain",bytes));
+        s.setStoragePath(original.getPath());s.setSourceSha256(OerSourceMetadata.originalSha256(bytes));return sources.saveAndFlush(s);}
 }

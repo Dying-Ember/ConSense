@@ -7,6 +7,8 @@ import com.consense.config.ConsenseProperties;
 import com.consense.domain.SourceDocument;
 import com.consense.repository.ChatMessageRepository;
 import com.consense.repository.SourceDocumentRepository;
+import com.consense.service.StorageService;
+import com.consense.service.sources.OerSourceMetadata;
 import com.consense.service.vetting.VettingInputBudget;
 import com.consense.service.vetting.VettingTokenBudgetCliObserver;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -50,6 +52,7 @@ class AdviceSessionIntegrationTest {
     @Autowired SourceDocumentRepository sources;
     @Autowired ChatMessageRepository messages;
     @Autowired ConsenseProperties properties;
+    @Autowired StorageService storage;
     @MockBean(name="llmClient") LlmClient local;
     @MockBean(name="miniMaxChatClient") LlmClient miniMax;
     @MockBean VettingTokenBudgetCliObserver counter;
@@ -62,11 +65,11 @@ class AdviceSessionIntegrationTest {
         answer="{\"grounded\":true,\"answer\":\"TEST ONLY supported session answer\",\"citations\":[\"[1]\"]}";
         when(local.available()).thenReturn(true);when(miniMax.available()).thenReturn(true);
         when(local.chatModel()).thenReturn("session-test-chat");when(local.embedModel()).thenReturn("session-test-embedding");
-        when(local.embed(anyList())).thenAnswer(call->{List<float[]> out=new ArrayList<>();for(Object ignored:call.<List<?>>getArgument(0))out.add(new float[]{1,0});return out;});
-        when(local.chat(anyList())).thenReturn(answer);
-        when(local.chatStructured(anyList(),any())).thenAnswer(call->{prompts.add(JsonUtils.write(call.getArgument(0)));return answer;});
-        when(miniMax.chatStructured(anyList(),any())).thenAnswer(call->{prompts.add(JsonUtils.write(call.getArgument(0)));return answer;});
-        when(counter.observe(any())).thenAnswer(call->observation(call.getArgument(0)));
+        doAnswer(call->{List<float[]> out=new ArrayList<>();for(Object ignored:call.<List<?>>getArgument(0))out.add(new float[]{1,0});return out;}).when(local).embed(anyList());
+        doAnswer(call->answer).when(local).chat(anyList());
+        doAnswer(call->{prompts.add(JsonUtils.write(call.getArgument(0)));return answer;}).when(local).chatStructured(anyList(),any());
+        doAnswer(call->{prompts.add(JsonUtils.write(call.getArgument(0)));return answer;}).when(miniMax).chatStructured(anyList(),any());
+        doAnswer(call->observation(call.getArgument(0))).when(counter).observe(any());
     }
 
     @Test void sessionsPersistProjectAndImmutableScopeAndRejectOtherProjectsBeforeRetrieval() throws Exception {
@@ -208,6 +211,53 @@ class AdviceSessionIntegrationTest {
         assertTrue(history(project,session).isEmpty());
     }
 
+    @Test void sameSizeAndRestoredTimestampByteMutationRejectsSessionAndLegacyAnswersWithoutChangingHistory() throws Exception {
+        for(boolean explicit:new boolean[]{true,false}) {
+            adapters();String project=project();SourceDocument original=source(project,"ORIGINAL BYTES TEST ONLY");rebuild(project);
+            String session=explicit?session(project,"contract","project_contract"):null;
+            data(askRequest(project,session,"contract","project_contract","FIRST ACCEPTED ANSWER TEST ONLY"));
+            JsonNode before=explicit?history(project,session):data(get("/api/advice/{id}/messages",project));clearInvocations(local);
+            java.nio.file.Path path=java.nio.file.Paths.get(original.getStoragePath());long size=java.nio.file.Files.size(path);java.nio.file.attribute.FileTime timestamp=java.nio.file.Files.getLastModifiedTime(path);
+            org.mockito.stubbing.Answer<String> changed=call->{byte[] bytes=java.nio.file.Files.readAllBytes(path);bytes[0]^=1;java.nio.file.Files.write(path,bytes);java.nio.file.Files.setLastModifiedTime(path,timestamp);return answer;};
+            if(explicit)doAnswer(changed).when(local).chatStructured(anyList(),any());else doAnswer(changed).when(local).chat(anyList());
+            mvc.perform(askRequest(project,session,"contract","project_contract","MUTATION DURING ANSWER TEST ONLY")).andExpect(jsonPath("$.code").value(4204));
+            assertEquals(size,java.nio.file.Files.size(path));assertEquals(timestamp,java.nio.file.Files.getLastModifiedTime(path));
+            assertEquals(original.getSourceSha256(),sources.findById(original.getId()).get().getSourceSha256(),"The database identity stays unchanged; actual bytes must be rechecked");
+            assertEquals(before,explicit?history(project,session):data(get("/api/advice/{id}/messages",project)));
+            if(explicit)verify(local,times(1)).chatStructured(anyList(),any());else verify(local,times(1)).chat(anyList());
+        }
+    }
+
+    @Test void changedBytesBeforeSendingAreRejectedWithoutDispatchAndAnInvalidAnswerCannotCauseAnUnsafeRetry() throws Exception {
+        String project=project();SourceDocument original=source(project,"ORIGINAL BYTES TEST ONLY");rebuild(project);String session=session(project,"contract","project_contract");
+        java.nio.file.Path path=java.nio.file.Paths.get(original.getStoragePath());byte[] bytes=java.nio.file.Files.readAllBytes(path),changed=bytes.clone();changed[0]^=1;
+        java.nio.file.Files.write(path,changed);
+        mvc.perform(askRequest(project,session,"contract","project_contract","CHANGED BEFORE SENDING TEST ONLY")).andExpect(jsonPath("$.code").value(4204));
+        mvc.perform(askRequest(project,null,"contract","project_contract","LEGACY CHANGED BEFORE SENDING TEST ONLY")).andExpect(jsonPath("$.code").value(4204));
+        verify(local,never()).chatStructured(anyList(),any());verify(local,never()).chat(anyList());assertTrue(history(project,session).isEmpty());
+        java.nio.file.Files.write(path,bytes);
+        doAnswer(call->{java.nio.file.Files.write(path,changed);return "TEST ONLY invalid JSON";}).when(local).chat(anyList());
+        mvc.perform(askRequest(project,null,"contract","project_contract","INVALID JSON WITH CHANGED BYTES TEST ONLY")).andExpect(jsonPath("$.code").value(4204));
+        verify(local,times(1)).chat(anyList());assertTrue(data(get("/api/advice/{id}/messages",project)).isEmpty());
+    }
+
+    @Test void unchangedLegacySourcesAllowOneJsonRetryWithTheOriginalPromptLiterals() throws Exception {
+        String project=project();source(project,"ORIGINAL BYTES TEST ONLY");rebuild(project);List<List<LlmClient.ChatTurn>> sent=new ArrayList<>();
+        doAnswer(call->{sent.add(call.getArgument(0));return sent.size()==1?"TEST ONLY invalid JSON":answer;}).when(local).chat(anyList());
+        assertTrue(data(askRequest(project,null,"contract","project_contract","LEGACY RETRY TEST ONLY")).path("grounded").asBoolean());
+        assertEquals(2,sent.size());assertEquals(sent.get(0).get(0).getContent(),sent.get(1).get(0).getContent());
+        assertTrue(sent.get(0).get(0).getContent().endsWith("\n\n【输出要求】只输出一个合法的 JSON，不要 Markdown 代码块，不要任何解释文字。"));
+        assertEquals(sent.get(0).get(1).getContent()+"\n\n重要：上一次输出不是合法 JSON。请严格只输出 JSON。",sent.get(1).get(1).getContent());
+        assertEquals(2,data(get("/api/advice/{id}/messages",project)).size());
+    }
+
+    @Test void bytesChangedByTheLegacyAvailabilityProbePreventActualDispatch() throws Exception {
+        String project=project();SourceDocument original=source(project,"ORIGINAL BYTES TEST ONLY");rebuild(project);
+        doAnswer(call->{java.nio.file.Path path=java.nio.file.Paths.get(original.getStoragePath());byte[] bytes=java.nio.file.Files.readAllBytes(path);bytes[0]^=1;java.nio.file.Files.write(path,bytes);return true;}).when(local).available();
+        mvc.perform(askRequest(project,null,"contract","project_contract","AVAILABILITY MUTATION TEST ONLY")).andExpect(jsonPath("$.code").value(4204));
+        verify(local,never()).chat(anyList());assertTrue(data(get("/api/advice/{id}/messages",project)).isEmpty());
+    }
+
     private VettingInputBudget.Observation observation(VettingInputBudget.Input input) {
         VettingInputBudget.Observation result=new VettingInputBudget.Observation();result.setModel(input.getModel());result.setSerializedInputSha256(input.getSerializedInputSha256());
         result.setTokenizerIdentitySha256(hash('a'));result.setChatTemplateIdentitySha256(hash('b'));result.setEffectiveContextIdentitySha256(hash('c'));
@@ -229,6 +279,8 @@ class AdviceSessionIntegrationTest {
     private JsonNode data(MockHttpServletRequestBuilder request)throws Exception{return JsonUtils.parse(mvc.perform(request).andExpect(jsonPath("$.code").value(0)).andReturn().getResponse().getContentAsString()).path("data");}
     private String project()throws Exception{String id="session-"+UUID.randomUUID();data(post("/api/projects").contentType(MediaType.APPLICATION_JSON).content("{\"id\":\""+id+"\",\"nameZhHans\":\"SESSION TEST ONLY\"}"));return id;}
     private void rebuild(String project)throws Exception{data(post("/api/advice/{id}/index/rebuild",project));}
-    private SourceDocument source(String project,String text){SourceDocument source=new SourceDocument();source.setProjectId(project);source.setCategory(SourceDocument.CATEGORY_VETTING_PACKAGE);source.setFileKey("SCC");source.setFileName("SCC session fixture.txt");source.setReviewRole("tender");source.setTextContent(text);source.setParseStatus("PARSED");return sources.saveAndFlush(source);}
+    private SourceDocument source(String project,String text){SourceDocument source=new SourceDocument();source.setProjectId(project);source.setCategory(SourceDocument.CATEGORY_VETTING_PACKAGE);source.setFileKey("SCC");source.setFileName("SCC session fixture.txt");source.setReviewRole("tender");source.setTextContent(text);source.setParseStatus("PARSED");
+        byte[] bytes=text.getBytes(java.nio.charset.StandardCharsets.UTF_8);StorageService.StoredFile original=storage.store(project,SourceDocument.CATEGORY_VETTING_PACKAGE,new org.springframework.mock.web.MockMultipartFile("files",source.getFileName(),"text/plain",bytes));
+        source.setStoragePath(original.getPath());source.setSourceSha256(OerSourceMetadata.originalSha256(bytes));return sources.saveAndFlush(source);}
     private static String hash(char value){char[] chars=new char[64];Arrays.fill(chars,value);return new String(chars);}
 }
