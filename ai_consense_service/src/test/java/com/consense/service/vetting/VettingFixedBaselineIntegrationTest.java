@@ -69,7 +69,8 @@ class VettingFixedBaselineIntegrationTest {
         assertFalse(savedPointer.toString().contains("secret-raw-layout-audit"));
         verify(retrieval).index(eq("project"),argThat(chunks->chunks.size()==1&&"tender".equals(chunks.get(0).getRole())));
         verify(fixture.client).search(eq("vetting"),anyString(),eq(props.getVetting().getTopK()));
-        verify(fixture.client,times(2)).assertCurrent(argThat(hits->hits.size()==1&&fixture.hit.getId().equals(hits.get(0).getId())));
+        // First attempt checks fixed sources before checkpoint access, immediately before dispatch, and after decoding.
+        verify(fixture.client,times(3)).assertCurrent(argThat(hits->hits.size()==1&&fixture.hit.getId().equals(hits.get(0).getId())));
     }
 
     @Test void configuredCanonicalProjectFailureCannotBeBypassedByTheFixedReferenceLane() {
