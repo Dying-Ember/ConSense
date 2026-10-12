@@ -500,6 +500,7 @@ export interface FindingEvidence {
   quote: string
   located: boolean
   sourceHash?: string
+  originalSourceSha256?: string | null
   bbox?: number[] | null
   packetId?: string | null
   packetSourceSnapshotSha256?: string | null
@@ -526,6 +527,8 @@ export interface Finding {
   bucketKey: string | null
   fingerprint?: string
   runId?: string
+  generatedRevisionSha256?: string
+  sourceSnapshotSha256?: string
   source?: 'rule' | 'model' | string
   verification?: 'verified' | 'partial' | 'unverified'
   confidence?: number | null
@@ -536,7 +539,13 @@ export interface Finding {
   reviewUpdatedAt?: string | null
 }
 
-export interface FindingReviewUpdate {
+export interface FindingWriteBinding {
+  expectedRunId: string
+  expectedGeneratedRevisionSha256: string
+  expectedSourceSnapshotSha256: string
+}
+
+export interface FindingReviewUpdate extends FindingWriteBinding {
   reviewRemarks: string
   actionTaken: string
   addendumRequired: boolean | null
@@ -711,6 +720,7 @@ export interface EvidenceSnippet {
   quote?: string
   located?: boolean
   sourceHash?: string
+  originalSourceSha256?: string | null
   bbox?: number[] | null
   packetId?: string | null
   packetSourceSnapshotSha256?: string | null
@@ -824,6 +834,7 @@ export interface VettingChecklist {
   projectId: string
   runId: string
   runSnapshotSha256: string
+  sourceSnapshotSha256: string
   writable: boolean
   items: VettingChecklistItem[]
 }

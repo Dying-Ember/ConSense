@@ -3,7 +3,8 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { vettingApi } from '@/api'
-import type { EvidenceBundle, Finding, FindingEvidence, VettingFile, VettingJob, VettingProgress, VettingMetrics, VettingReportFormat, VettingSemanticTopic, VettingSourceRole, DocumentScope, VettingChecklist, VettingChecklistItem } from '@/api/types'
+import { ApiError } from '@/api/client'
+import type { EvidenceBundle, Finding, FindingWriteBinding, FindingEvidence, VettingFile, VettingJob, VettingProgress, VettingMetrics, VettingReportFormat, VettingSemanticTopic, VettingSourceRole, DocumentScope, VettingChecklist, VettingChecklistItem } from '@/api/types'
 import { useAppStore } from '@/stores/app'
 import { useLocalized } from '@/composables/useLocalized'
 import AppIcon from '@/components/AppIcon.vue'
@@ -54,13 +55,22 @@ const emptyReview = (): ReviewDraft => ({ reviewRemarks: '', actionTaken: '', ad
 const reviewDraft = ref<ReviewDraft>(emptyReview())
 const reviewBaseline = ref<ReviewDraft>(emptyReview())
 const reviewCode = ref<string | null>(null)
-const reviewDrafts = ref(new Map<string, ReviewDraft>())
+const reviewVersion = ref<string | null>(null)
+const reviewChanged = ref(false)
+const reviewDrafts = ref(new Map<string, { code: string; draft: ReviewDraft }>())
 const reviewDirty = computed(() => JSON.stringify(reviewDraft.value) !== JSON.stringify(reviewBaseline.value))
-const hasUnsavedReview = computed(() => reviewDirty.value || [...reviewDrafts.value.keys()].some(code => code !== reviewCode.value))
+const hasUnsavedReview = computed(() => reviewDirty.value || [...reviewDrafts.value.keys()].some(key => key !== reviewVersion.value))
+const retainedReviews = computed(() => [...reviewDrafts.value.entries()].filter(([key]) => key !== reviewVersion.value).map(([key, saved]) => ({ key, ...saved })))
 const unsavedReviewCodes = computed(() => [...new Set([
-  ...[...reviewDrafts.value.keys()].filter(code => code !== reviewCode.value),
+  ...[...reviewDrafts.value.entries()].filter(([key]) => key !== reviewVersion.value).map(([, saved]) => saved.code),
   ...(reviewDirty.value && reviewCode.value ? [reviewCode.value] : [])
 ])])
+const versionCopy = {
+  changed: { zhHans: '报告或来源版本已变化。草稿已保留，请刷新并核对当前版本后再填写；旧草稿不会自动写入新报告。', zhHant: '報告或來源版本已變化。草稿已保留，請刷新並核對目前版本後再填寫；舊草稿不會自動寫入新報告。', en: 'The report or source version changed. Your draft is retained. Refresh and review the current version before editing; old drafts are not applied to the new report.' },
+  refresh: { zhHans: '刷新当前版本', zhHant: '刷新目前版本', en: 'Refresh current version' },
+  retained: { zhHans: '保留的旧版本草稿', zhHant: '保留的舊版本草稿', en: 'Retained draft from an earlier version' },
+  discard: { zhHans: '丢弃保留草稿', zhHant: '捨棄保留草稿', en: 'Discard retained drafts' }
+}
 const exporting = ref(false)
 const pollingPaused = ref(false)
 const reportFormat = ref<VettingReportFormat>('pdf')
@@ -71,7 +81,11 @@ const checklistBaseline = ref<VettingChecklistItem[]>([])
 const checklistLoading = ref(false)
 const checklistSaving = ref<string | null>(null)
 let checklistSequence = 0
-const checklistDirty = computed(() => checklist.value !== null && JSON.stringify(checklist.value.items) !== JSON.stringify(checklistBaseline.value))
+const retainedChecklists = ref<VettingChecklist[]>([])
+const checklistChanged = ref(false)
+const currentChecklistDirty = computed(() => checklist.value !== null && JSON.stringify(checklist.value.items) !== JSON.stringify(checklistBaseline.value))
+const checklistDirty = computed(() => currentChecklistDirty.value || retainedChecklists.value.length > 0)
+const checklistWritable = computed(() => checklist.value?.writable && !checklistChanged.value && checklist.value.runId === job.value?.id)
 const loading = ref(false)
 const selectedDetail = ref<Finding | null>(null)
 const evidenceLoading = ref(false)
@@ -149,7 +163,7 @@ const evidenceItems = computed<FindingEvidence[]>(() => {
       side: item.side ?? 'source', documentId: item.documentId,
       fileKey: item.fileKey ?? item.code, fileName: item.fileName ?? '',
       pageNo: item.pageNo, anchor: item.anchor, quote: item.quote ?? item.text,
-      located: item.located ?? evidence.value!.located, sourceHash: item.sourceHash, bbox: item.bbox,
+      located: item.located ?? evidence.value!.located, sourceHash: item.sourceHash, originalSourceSha256: item.originalSourceSha256, bbox: item.bbox,
       packetId: item.packetId, packetSourceSnapshotSha256: item.packetSourceSnapshotSha256,
       canonicalEvidence: item.canonicalEvidence, fixedBaselineEvidence: item.fixedBaselineEvidence
     }))
@@ -173,10 +187,10 @@ function evidenceSide(side: string) {
 
 function originalSourceUrl(item: FindingEvidence) {
   if (item.fixedBaselineEvidence || /^(?:fixed:|fixed-baseline:|fixed_reference:)/.test(String(item.documentId ?? ''))) return null
-  if (!projectId.value || !item.documentId || !item.sourceHash) return null
+  if (!projectId.value || !item.documentId || !item.sourceHash || !item.originalSourceSha256) return null
   const page = /^P(\d+)$/i.exec(item.pageNo ?? '')
   const fragment = page && item.fileName.toLowerCase().endsWith('.pdf') ? `#page=${page[1]}` : ''
-  return `/api/vetting/${encodeURIComponent(projectId.value)}/sources/${encodeURIComponent(String(item.documentId))}/original?sourceHash=${encodeURIComponent(item.sourceHash)}${fragment}`
+  return `/api/vetting/${encodeURIComponent(projectId.value)}/sources/${encodeURIComponent(String(item.documentId))}/original?${new URLSearchParams({ sourceHash: item.sourceHash, originalSourceSha256: item.originalSourceSha256 })}${fragment}`
 }
 
 async function consultFinding() {
@@ -245,7 +259,18 @@ async function reload(owner?: { sequence: number; runId: string }) {
     findings.value = findingList
     metrics.value = metricData
     const refreshed = findingList.find((item) => item.code === selectedCode.value)
-    if (refreshed) selectedDetail.value = refreshed
+    if (refreshed && selectedDetail.value) {
+      if (findingVersion(refreshed) !== findingVersion(selectedDetail.value) && (reviewDirty.value || reviewSaving.value || statusSaving.value)) {
+        rememberReviewDraft()
+        reviewChanged.value = true
+      } else {
+        if (findingVersion(refreshed) !== findingVersion(selectedDetail.value)) openFinding(refreshed)
+        else {
+          selectedDetail.value = refreshed
+          if (!reviewDirty.value && !reviewSaving.value) loadReviewDraft(refreshed)
+        }
+      }
+    }
   } finally {
     if (seq === reloadSequence && epoch === viewEpoch) loading.value = false
   }
@@ -279,10 +304,12 @@ async function acceptJob(value: VettingJob, id: string, epoch: number, sequence:
       store.notify(t('vetting.run.finished', { count: value.result?.total ?? 0 }))
       await reload({ sequence, runId: value.id })
       if (!ownsJob(id, epoch, sequence, value.id)) return
-      selectedCode.value = null
-      selectedDetail.value = null
-      drawerOpen.value = false
-      evidence.value = null
+      if (!hasUnsavedReview.value && !reviewSaving.value && !statusSaving.value) {
+        selectedCode.value = null
+        selectedDetail.value = null
+        drawerOpen.value = false
+        evidence.value = null
+      }
     }
     if (notifyCompletion && value.status === 'FAILED') store.notify(value.error || value.message || t('vetting.job.failed'), 6000)
   }
@@ -383,10 +410,14 @@ watch(projectId, () => {
   checklistSequence++
   checklistSaving.value = null
   checklistLoading.value = false
+  checklistChanged.value = false
+  retainedChecklists.value = []
   statusSaving.value = false
   reviewSaving.value = false
   reviewFailed.value = false
   reviewCode.value = null
+  reviewVersion.value = null
+  reviewChanged.value = false
   reviewDrafts.value.clear()
   reviewDraft.value = emptyReview()
   reviewBaseline.value = emptyReview()
@@ -478,30 +509,50 @@ function closeDrawer() {
 }
 
 async function updateStatus(status: string) {
-  if (!selectedFinding.value || statusSaving.value || reviewSaving.value || running.value) return
+  if (!selectedFinding.value || statusSaving.value || reviewSaving.value || running.value || reviewChanged.value) return
   const id = projectId.value
-  const code = selectedFinding.value.code
+  const shown = selectedFinding.value, code = shown.code, version = findingVersion(shown), binding = findingBinding(shown)
+  if (!binding) { reviewChanged.value = true; return }
   const epoch = viewEpoch
   statusSaving.value = true
   try {
-    const updated = await vettingApi.updateStatus(id, code, status)
-    if (epoch !== viewEpoch || id !== projectId.value) return
-    const index = findings.value.findIndex((item) => item.code === updated.code)
+    const updated = await vettingApi.updateStatus(id, code, status, binding)
+    if (disposed || epoch !== viewEpoch || id !== projectId.value) return
+    const index = findings.value.findIndex((item) => findingVersion(item) === version)
+    if (index < 0 || findingVersion(updated) !== version) { retainChangedReview(version); return }
     if (index >= 0) findings.value.splice(index, 1, updated)
-    if (selectedCode.value === code) {
+    if (selectedDetail.value && findingVersion(selectedDetail.value) === version && !reviewChanged.value) {
       selectedDetail.value = updated
       if (!reviewDirty.value) loadReviewDraft(updated)
     }
     store.notify(`${updated.code} · ${statusLabel(updated.status)}`)
+  } catch (error) {
+    if (epoch === viewEpoch && id === projectId.value && error instanceof ApiError && error.code === 4104) retainChangedReview(version)
   } finally {
     if (epoch === viewEpoch) statusSaving.value = false
   }
 }
 
+function findingVersion(finding: Finding) {
+  return JSON.stringify([finding.code, finding.runId, finding.generatedRevisionSha256, finding.sourceSnapshotSha256])
+}
+
+function findingBinding(finding: Finding): FindingWriteBinding | null {
+  return finding.runId && finding.generatedRevisionSha256 && finding.sourceSnapshotSha256 ? {
+    expectedRunId: finding.runId, expectedGeneratedRevisionSha256: finding.generatedRevisionSha256,
+    expectedSourceSnapshotSha256: finding.sourceSnapshotSha256
+  } : null
+}
+
+function retainChangedReview(version: string) {
+  if (reviewVersion.value === version) { rememberReviewDraft(); reviewChanged.value = true }
+  store.notify(pick(versionCopy.changed), 6000)
+}
+
 function rememberReviewDraft() {
-  if (!reviewCode.value) return
-  if (reviewDirty.value) reviewDrafts.value.set(reviewCode.value, { ...reviewDraft.value })
-  else reviewDrafts.value.delete(reviewCode.value)
+  if (!reviewCode.value || !reviewVersion.value) return
+  if (reviewDirty.value) reviewDrafts.value.set(reviewVersion.value, { code: reviewCode.value, draft: { ...reviewDraft.value } })
+  else reviewDrafts.value.delete(reviewVersion.value)
 }
 
 function loadReviewDraft(finding: Finding) {
@@ -510,36 +561,60 @@ function loadReviewDraft(finding: Finding) {
     addendum: finding.addendumRequired === true ? 'required' : finding.addendumRequired === false ? 'notRequired' : 'undecided'
   }
   reviewCode.value = finding.code
+  reviewVersion.value = findingVersion(finding)
   reviewBaseline.value = { ...saved }
-  reviewDraft.value = { ...(reviewDrafts.value.get(finding.code) ?? saved) }
+  reviewDraft.value = { ...(reviewDrafts.value.get(reviewVersion.value)?.draft ?? saved) }
   reviewFailed.value = false
+  reviewChanged.value = !findingBinding(finding)
 }
 
 function discardReview() {
   if (!selectedFinding.value || reviewSaving.value) return
-  reviewDrafts.value.delete(selectedFinding.value.code)
+  reviewDrafts.value.delete(findingVersion(selectedFinding.value))
   loadReviewDraft(selectedFinding.value)
 }
 
+function discardRetainedReviews() {
+  for (const saved of retainedReviews.value) reviewDrafts.value.delete(saved.key)
+}
+
+async function refreshFinding() {
+  if (reviewSaving.value || statusSaving.value) return
+  rememberReviewDraft()
+  const id = projectId.value, code = selectedCode.value, epoch = viewEpoch
+  await reload()
+  if (disposed || epoch !== viewEpoch || id !== projectId.value || code !== selectedCode.value) return
+  const current = findings.value.find(item => item.code === code)
+  if (current) openFinding(current)
+}
+
 async function saveReview() {
-  if (!selectedFinding.value || reviewSaving.value || statusSaving.value || running.value || !reviewDirty.value) return
+  if (!selectedFinding.value || reviewSaving.value || statusSaving.value || running.value || !reviewDirty.value || reviewChanged.value) return
   const id = projectId.value, code = selectedFinding.value.code, epoch = viewEpoch
+  const version = findingVersion(selectedFinding.value), binding = findingBinding(selectedFinding.value)
+  if (!binding) { reviewChanged.value = true; return }
   const draft = { ...reviewDraft.value }
+  rememberReviewDraft()
   reviewSaving.value = true
   reviewFailed.value = false
   try {
     const updated = await vettingApi.updateReview(id, code, {
+      ...binding,
       reviewRemarks: draft.reviewRemarks, actionTaken: draft.actionTaken,
       addendumRequired: draft.addendum === 'undecided' ? null : draft.addendum === 'required'
     })
     if (disposed || epoch !== viewEpoch || id !== projectId.value) return
-    reviewDrafts.value.delete(code)
-    const index = findings.value.findIndex(item => item.code === code)
+    const index = findings.value.findIndex(item => findingVersion(item) === version)
+    if (index < 0 || findingVersion(updated) !== version) { retainChangedReview(version); return }
+    reviewDrafts.value.delete(version)
     if (index >= 0) findings.value.splice(index, 1, updated)
-    if (selectedCode.value === code) { selectedDetail.value = updated; loadReviewDraft(updated) }
+    if (selectedDetail.value && findingVersion(selectedDetail.value) === version && !reviewChanged.value) { selectedDetail.value = updated; loadReviewDraft(updated) }
     store.notify(t('vetting.review.saved'))
-  } catch {
-    if (epoch === viewEpoch && id === projectId.value) reviewFailed.value = true
+  } catch (error) {
+    if (epoch === viewEpoch && id === projectId.value) {
+      if (error instanceof ApiError && error.code === 4104) retainChangedReview(version)
+      else if (reviewVersion.value === version) reviewFailed.value = true
+    }
   } finally {
     if (epoch === viewEpoch) reviewSaving.value = false
   }
@@ -609,14 +684,14 @@ async function exportReport() {
 
 watch(() => job.value?.id, () => {
   checklistSequence++
-  checklist.value = null
-  checklistBaseline.value = []
+  if (currentChecklistDirty.value || checklistSaving.value) checklistChanged.value = true
+  else { checklist.value = null; checklistBaseline.value = []; checklistChanged.value = false }
   checklistLoading.value = false
   checklistSaving.value = null
 })
 
-async function openChecklist(event: Event) {
-  if (!(event.target as HTMLDetailsElement).open || checklist.value || job.value?.status !== 'COMPLETED' || job.value?.sourceVerification === 'NOT_CHECKED') return
+async function openChecklist(event?: Event) {
+  if ((event && !(event.target as HTMLDetailsElement).open) || checklist.value || job.value?.status !== 'COMPLETED' || job.value?.sourceVerification === 'NOT_CHECKED') return
   const id = projectId.value, runId = job.value.id, epoch = viewEpoch, sequence = ++checklistSequence
   checklistLoading.value = true
   try {
@@ -624,9 +699,18 @@ async function openChecklist(event: Event) {
     if (disposed || epoch !== viewEpoch || runId !== job.value?.id || sequence !== checklistSequence) return
     checklist.value = value
     checklistBaseline.value = structuredClone(value.items)
+    checklistChanged.value = !value.sourceSnapshotSha256 || value.runId !== runId
   } finally {
     if (epoch === viewEpoch && sequence === checklistSequence) checklistLoading.value = false
   }
+}
+
+async function refreshChecklist() {
+  if (checklistSaving.value || checklistLoading.value) return
+  if (checklist.value && currentChecklistDirty.value) retainedChecklists.value.push(JSON.parse(JSON.stringify(checklist.value)))
+  checklist.value = null
+  checklistBaseline.value = []
+  await openChecklist()
 }
 
 function checkDirty(item: VettingChecklistItem) {
@@ -640,13 +724,16 @@ function restoreCheck(item: VettingChecklistItem) {
 }
 
 async function saveCheck(item: VettingChecklistItem) {
-  if (!checklist.value?.writable || checklistSaving.value || !checkDirty(item)) return
-  const id = projectId.value, runId = checklist.value.runId, epoch = viewEpoch
+  if (!checklist.value || !checklistWritable.value || checklistSaving.value || !checkDirty(item)) return
+  const id = projectId.value, loaded = checklist.value, epoch = viewEpoch, sequence = checklistSequence
+  const binding = { runId: loaded.runId, runSnapshotSha256: loaded.runSnapshotSha256, sourceSnapshotSha256: loaded.sourceSnapshotSha256 }
   const submitted = { id: item.id, status: item.status, remarks: item.remarks }
   checklistSaving.value = item.id
   try {
-    const saved = await vettingApi.saveChecklist(id, runId, checklist.value.runSnapshotSha256, [submitted])
-    if (disposed || epoch !== viewEpoch || runId !== job.value?.id) return
+    const saved = await vettingApi.saveChecklist(id, binding, [submitted])
+    if (disposed || epoch !== viewEpoch || id !== projectId.value || sequence !== checklistSequence || checklist.value !== loaded
+      || binding.runId !== job.value?.id || saved.runId !== binding.runId || saved.runSnapshotSha256 !== binding.runSnapshotSha256
+      || saved.sourceSnapshotSha256 !== binding.sourceSnapshotSha256) return
     const savedRow = saved.items.find(row => row.id === item.id)
     if (savedRow) {
       const original = checklistBaseline.value.find(row => row.id === item.id)
@@ -655,8 +742,13 @@ async function saveCheck(item: VettingChecklistItem) {
       if (item.status === submitted.status && item.remarks === submitted.remarks) Object.assign(item, savedRow)
     }
     store.notify(t('vetting.checklist.saved'))
+  } catch (error) {
+    if (epoch === viewEpoch && id === projectId.value && checklist.value === loaded && error instanceof ApiError && error.code === 4104) {
+      checklistChanged.value = true
+      store.notify(pick(versionCopy.changed), 6000)
+    }
   } finally {
-    if (epoch === viewEpoch) checklistSaving.value = null
+    if (epoch === viewEpoch && sequence === checklistSequence) checklistSaving.value = null
   }
 }
 
@@ -728,10 +820,27 @@ function tagClass(group: string) {
     <p v-if="hasUnsavedReview" class="warning-note" role="status">{{ t('vetting.review.unsavedExport') }} {{ unsavedReviewCodes.join(' · ') }}</p>
     <p v-if="checklistDirty" class="warning-note" role="status">{{ t('vetting.checklist.dirty') }}</p>
     <p v-if="job?.sourceSetStale" class="warning-note" role="status">{{ t('vetting.sourceSetStale') }}</p>
+    <details v-if="retainedReviews.length" class="surface section-gap">
+      <summary>{{ pick(versionCopy.retained) }}</summary>
+      <div v-for="saved in retainedReviews" :key="saved.key">
+        <strong>{{ saved.code }}</strong><pre>{{ saved.draft.reviewRemarks }}{{ '\n' }}{{ saved.draft.actionTaken }}{{ '\n' }}{{ saved.draft.addendum }}</pre>
+      </div>
+      <button class="btn" type="button" @click="discardRetainedReviews">{{ pick(versionCopy.discard) }}</button>
+    </details>
+    <details v-if="retainedChecklists.length" class="surface section-gap">
+      <summary>{{ pick(versionCopy.retained) }}</summary>
+      <div v-for="saved in retainedChecklists" :key="saved.runId + saved.runSnapshotSha256">
+        <strong>{{ saved.runId }}</strong><pre v-for="item in saved.items" :key="item.id">{{ item.clause }} · {{ item.status }}{{ '\n' }}{{ item.remarks }}</pre>
+      </div>
+      <button class="btn" type="button" @click="retainedChecklists = []">{{ pick(versionCopy.discard) }}</button>
+    </details>
 
     <details v-if="job?.status === 'COMPLETED' && !jobDetailsPending" class="surface checklist-panel section-gap" @toggle="openChecklist">
       <summary>{{ t('vetting.checklist.title') }}</summary>
       <p class="muted small">{{ t('vetting.checklist.note') }}</p>
+      <p v-if="checklistChanged" class="warning-note" role="alert">{{ pick(versionCopy.changed) }}
+        <button class="btn" type="button" :disabled="!!checklistSaving || checklistLoading" @click="refreshChecklist">{{ pick(versionCopy.refresh) }}</button>
+      </p>
       <p v-if="checklistLoading">{{ t('common.loading') }}</p>
       <div v-if="checklist" class="table-wrap checklist-table">
         <table>
@@ -739,11 +848,11 @@ function tagClass(group: string) {
           <tbody><tr v-for="item in checklist.items" :key="item.id">
             <td>{{ item.clause }}<div class="muted small">{{ item.section }}</div></td>
             <td>{{ item.description }}<p v-if="item.scopeNote" class="warning-note small">{{ item.scopeNoteText ? pick(item.scopeNoteText) : item.scopeNote }}</p></td>
-            <td><select v-model="item.status" :disabled="!checklist.writable || checklistSaving === item.id">
+            <td><select v-model="item.status" :disabled="!checklistWritable || checklistSaving === item.id">
               <option v-for="status in ['unchecked', 'fulfilled', 'not_applicable']" :key="status" :value="status">{{ t(`vetting.checklist.${status}`) }}</option>
             </select></td>
-            <td><textarea v-model="item.remarks" :aria-label="`${item.clause} ${t('vetting.checklist.remarks')}`" maxlength="4000" :disabled="!checklist.writable || checklistSaving === item.id" />
-              <div class="row"><button class="btn" type="button" :disabled="!checklist.writable || !!checklistSaving || !checkDirty(item)" @click="saveCheck(item)">{{ t('vetting.checklist.save') }}</button>
+            <td><textarea v-model="item.remarks" :aria-label="`${item.clause} ${t('vetting.checklist.remarks')}`" maxlength="4000" :disabled="!checklistWritable || checklistSaving === item.id" />
+              <div class="row"><button class="btn" type="button" :disabled="!checklistWritable || !!checklistSaving || !checkDirty(item)" @click="saveCheck(item)">{{ t('vetting.checklist.save') }}</button>
               <button v-if="checkDirty(item)" class="btn ghost" type="button" :disabled="checklistSaving === item.id" @click="restoreCheck(item)">{{ t('vetting.checklist.reset') }}</button></div>
             </td>
           </tr></tbody>
@@ -1166,8 +1275,11 @@ function tagClass(group: string) {
               </label>
               <p v-if="selectedFinding.reviewUpdatedAt" class="small muted">{{ t('vetting.review.savedAt') }} {{ new Date(selectedFinding.reviewUpdatedAt).toLocaleString() }}</p>
               <p v-if="reviewFailed" class="warning-note" role="alert">{{ t('vetting.review.saveFailed') }}</p>
+              <p v-if="reviewChanged" class="warning-note" role="alert">{{ pick(versionCopy.changed) }}
+                <button class="btn" type="button" :disabled="reviewSaving || statusSaving" @click="refreshFinding">{{ pick(versionCopy.refresh) }}</button>
+              </p>
               <div class="row">
-                <button class="btn primary" type="button" :disabled="reviewSaving || statusSaving || running || !reviewDirty" @click="saveReview">{{ t('vetting.review.save') }}</button>
+                <button class="btn primary" type="button" :disabled="reviewSaving || statusSaving || running || reviewChanged || !reviewDirty" @click="saveReview">{{ t('vetting.review.save') }}</button>
                 <button class="btn" type="button" :disabled="reviewSaving || !reviewDirty" @click="discardReview">{{ t('vetting.review.discard') }}</button>
                 <span v-if="reviewDirty" class="small muted">{{ t('vetting.review.unsaved') }}</span>
               </div>
@@ -1175,7 +1287,7 @@ function tagClass(group: string) {
             <button
               class="btn success"
               type="button"
-              :disabled="statusSaving || reviewSaving || running || selectedFinding.status.toUpperCase() === 'HANDLED'"
+              :disabled="statusSaving || reviewSaving || running || reviewChanged || selectedFinding.status.toUpperCase() === 'HANDLED'"
               @click="updateStatus('Handled')"
             >
               <AppIcon name="check" :size="15" />{{ t('vetting.drawer.markHandled') }}
@@ -1183,12 +1295,12 @@ function tagClass(group: string) {
             <button
               class="btn"
               type="button"
-              :disabled="statusSaving || reviewSaving || running || selectedFinding.status.toUpperCase() === 'ASSIGNED'"
+              :disabled="statusSaving || reviewSaving || running || reviewChanged || selectedFinding.status.toUpperCase() === 'ASSIGNED'"
               @click="updateStatus('Assigned')"
             >
               <AppIcon name="external" :size="15" />{{ t('vetting.drawer.assign') }}
             </button>
-            <button class="btn" type="button" :disabled="statusSaving || reviewSaving || running || selectedFinding.status.toUpperCase() === 'OPEN'" @click="updateStatus('Open')">
+            <button class="btn" type="button" :disabled="statusSaving || reviewSaving || running || reviewChanged || selectedFinding.status.toUpperCase() === 'OPEN'" @click="updateStatus('Open')">
               {{ t('vetting.review.reopen') }}
             </button>
           </div>
