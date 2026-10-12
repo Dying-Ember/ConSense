@@ -11,7 +11,7 @@ import java.util.stream.Collectors;
 
 /** Source-bound observations from selected chunks only. Never an inferred header, grid or adoption assertion. */
 public final class VettingSourceMaterial {
-    public static final String PROJECTION_VERSION="selected-native-source-material-portable-cell-slices-v4";
+    public static final String PROJECTION_VERSION="selected-native-source-material-form-observations-v5";
     private static final Pattern ROW_ANCHOR=Pattern.compile("body/(\\d+)/table-row/(\\d+)(?: @(\\d+))?");
     private VettingSourceMaterial() { }
 
@@ -42,8 +42,18 @@ public final class VettingSourceMaterial {
             if(c.getParts()==null||c.getParts().isEmpty())unknown.add(map("reason","source_parts_unavailable"));
             else for(Part p:c.getParts()) {
                 int length=p==null||p.getText()==null?0:p.getText().length();
-                if(p!=null)methods.add(map("partAnchor",p.getAnchor(),"blockId",p.getBlockId(),"startOffset",p.getStartOffset(),"endOffset",p.getEndOffset(),
-                        "extractionSource",bodyBound&&present(p.getExtractionSource())?p.getExtractionSource():"unknown"));
+                if(p!=null) {
+                    Map<String,Object> method=map("partAnchor",p.getAnchor(),"blockId",p.getBlockId(),"startOffset",p.getStartOffset(),"endOffset",p.getEndOffset(),
+                            "extractionSource",bodyBound&&present(p.getExtractionSource())?p.getExtractionSource():"unknown");
+                    if(p.getPdfFormField()!=null) {
+                        boolean bound=formMatchesPart(c,p,bodyBound,blocks);
+                        method.put("formObservationStatus",bound?"observed_selected_original_widget":"unknown_part_binding");
+                        method.put("pdfFormField",bound?JsonUtils.parse(JsonUtils.write(p.getPdfFormField())):null);
+                        method.put("nativeVisibilityStatus",bound?p.getNativeVisibilityStatus():"unknown");
+                        method.put("formInterpretation","Stored value, selected appearance, blank/nontext and conflict are observations only; blank meaning, raster visibility, parent-child selection and legal OR applicability remain unknown.");
+                    }
+                    methods.add(method);
+                }
                 if(p!=null&&looksLikeRow(p)) {
                     String reason=unknownReason(c,p,bodyBound,blocks,positions);
                     if(reason==null) {
@@ -134,6 +144,22 @@ public final class VettingSourceMaterial {
         return c.getContent()!=null&&c.getParts()!=null&&!c.getParts().isEmpty()
                 &&c.getParts().stream().allMatch(p->p!=null&&p.getText()!=null)
                 &&c.getContent().equals(c.getParts().stream().map(Part::getText).collect(Collectors.joining("\n")));
+    }
+    private static boolean formMatchesPart(Chunk c,Part p,boolean bodyBound,Map<List<String>,Integer> blocks) {
+        com.consense.document.PdfPageEvidence.PdfFormField f=p.getPdfFormField();
+        String prefix=present(c.getClauseId())?c.getClauseId()+" · ":"";
+        return bodyBound&&present(c.getDocumentId())&&present(c.getSourceHash())
+                &&VettingCorpus.METADATA_VERSION.equals(c.getMetadataVersion())&&VettingCorpus.SEGMENTATION_VERSION.equals(c.getSegmentationVersion())
+                &&Arrays.asList("tender","standard","project_fact","package_manifest").contains(c.getRole())
+                &&"native_form".equals(p.getExtractionSource())&&present(f.getId())
+                &&p.getStartOffset()==0&&p.getEndOffset()==p.getText().length()
+                &&f.getId().replace('/',':').equals(p.getBlockId())&&Objects.equals(prefix+f.getId(),p.getAnchor())
+                &&Objects.equals(f.getPageNo()==null?null:"P"+f.getPageNo(),p.getPageNo())
+                &&Objects.equals(f.getBbox()==null?null:Arrays.stream(f.getBbox()).boxed().collect(Collectors.toList()),p.getBbox())
+                &&Objects.equals(f.getVisibilityStatus(),p.getNativeVisibilityStatus())
+                &&(p.getText().isEmpty()||!f.isConflict()&&"appearance_text_unverified".equals(f.getValueStatus())
+                    &&"operator_visible_unverified".equals(f.getVisibilityStatus())&&Objects.equals(p.getText(),f.getAppearanceValue()))
+                &&Integer.valueOf(1).equals(blocks.get(key(c,p.getBlockId())));
     }
     private static String position(Chunk c,Part p) {
         if(!present(p.getAnchor())||!present(p.getBlockId()))return null;

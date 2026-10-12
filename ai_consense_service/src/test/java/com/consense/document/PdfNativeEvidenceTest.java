@@ -1,6 +1,7 @@
 package com.consense.document;
 
 import com.consense.config.ConsenseProperties;
+import com.consense.common.JsonUtils;
 import com.consense.ocr.OcrClient;
 import org.apache.pdfbox.cos.COSName;
 import org.apache.pdfbox.cos.COSDictionary;
@@ -140,6 +141,52 @@ class PdfNativeEvidenceTest {
         assertFalse(field.isAppearancePresent()); assertEquals("Stored but not drawn",field.getFieldValue());
         assertTrue(parsed.getText().isEmpty()); assertEquals("blank",parsed.getPages().get(0).getStatus());
         assertTrue(parsed.getCoverage().getNeedsReviewPages().contains(1)); verifyNoInteractions(ocr);
+    }
+    @Test void successfulOcrKeepsBlankConflictingMissingMatchingAndNontextWidgetsAsOriginalObservations() throws Exception {
+        List<byte[]> fixtures = Arrays.asList(formPdf("Stored value","Visible value",false,true),
+                formPdf("Matching value","Matching value",false,true),
+                formPdf("Stored but not drawn","unused",false,false), formPdf("","",false,true), checkboxPdf());
+        List<String> statuses = Arrays.asList("field_appearance_conflict","appearance_text_unverified",
+                "appearance_missing","empty_or_non_text_appearance","empty_or_non_text_appearance");
+        for (int i = 0; i < fixtures.size(); i++) {
+            byte[] bytes=fixtures.get(i); String originalHash=DocumentParseProbe.sha256(bytes);
+            ConsenseProperties props=new ConsenseProperties(); props.getOcr().setTextLayerMinChars(1000);
+            OcrClient ocr=mock(OcrClient.class); when(ocr.available()).thenReturn(true);
+            when(ocr.recognize(any())).thenReturn(new OcrClient.OcrResult("Selected OCR output",.9,Collections.emptyList()));
+            DocumentParser.ParsedDocument parsed=new DocumentParser(props,ocr).parse("form-scan.pdf",bytes);
+            assertEquals("ocr",parsed.getPages().get(0).getStatus()); assertEquals("Selected OCR output",parsed.getPages().get(0).getText());
+            assertEquals(Collections.singletonList(1),parsed.getCoverage().getNeedsReviewPages());
+            List<DocumentBlock> widgets=new ArrayList<>();
+            for(DocumentBlock b:parsed.getBlocks())if("pdf_form_widget".equals(b.getKind()))widgets.add(b);
+            assertEquals(1,widgets.size(),"OCR must preserve each existing widget exactly once");
+            PdfPageEvidence.PdfFormField raw=parsed.getNativePdfEvidence().get(0).getFormFields().get(0);
+            DocumentBlock widget=widgets.get(0); assertEquals(JsonUtils.write(raw),JsonUtils.write(widget.getPdfFormField()));
+            assertEquals(statuses.get(i),raw.getValueStatus()); assertEquals("native_form",widget.getSource());
+            assertEquals(raw.getVisibilityStatus(),widget.getNativeVisibilityStatus()); assertArrayEquals(raw.getBbox(),widget.getBbox());
+            assertEquals(i==1?"Matching value":"",widget.getText());
+            assertEquals(raw.getAppearanceValue()==null?"":raw.getAppearanceValue(),widget.getOriginalText());
+            assertEquals(1,parsed.getNativePdfEvidence().get(0).getNativeBlocks().stream().filter(b->"pdf_form_widget".equals(b.getKind())).count());
+            assertEquals(originalHash,parsed.getSourceSha256()); assertEquals(originalHash,DocumentParseProbe.sha256(bytes));
+            if(i==4) { assertEquals("Btn",raw.getFieldType()); assertEquals("Yes",raw.getAppearanceState());
+                assertEquals("Yes",raw.getFieldValue()); assertTrue(raw.isAppearancePresent()); assertTrue(raw.getAppearanceGlyphs().isEmpty());
+                assertNotNull(raw.getAppearanceRawStreamBytesBase64()); }
+            verify(ocr).recognize(any());
+        }
+    }
+    private static byte[] checkboxPdf() throws Exception {
+        try(PDDocument document=new PDDocument()) {
+            PDPage page=new PDPage(); document.addPage(page);
+            try(PDPageContentStream stream=new PDPageContentStream(document,page)) { text(stream,"VISIBLE BODY CONTRACT TEXT",RenderingMode.FILL,30,700); }
+            PDAcroForm acro=new PDAcroForm(document); document.getDocumentCatalog().setAcroForm(acro);
+            PDCheckBox field=new PDCheckBox(acro); field.setPartialName("ExistingChoice"); field.getCOSObject().setName(COSName.V,"Yes"); acro.getFields().add(field);
+            PDAnnotationWidget widget=field.getWidgets().get(0); widget.setPage(page); widget.setRectangle(new PDRectangle(30,600,20,20));
+            widget.setAppearanceState("Yes"); page.getAnnotations().add(widget);
+            PDAppearanceStream ap=new PDAppearanceStream(document); ap.setBBox(new PDRectangle(20,20)); ap.setResources(new PDResources());
+            try(PDPageContentStream stream=new PDPageContentStream(document,ap)) { stream.addRect(3,3,10,10); stream.fill(); }
+            COSDictionary states=new COSDictionary(); states.setItem(COSName.getPDFName("Yes"),ap);
+            PDAppearanceDictionary appearances=new PDAppearanceDictionary(); appearances.getCOSObject().setItem(COSName.N,states); widget.setAppearance(appearances);
+            return save(document);
+        }
     }
     private static byte[] formPdf(String stored,String visible,boolean hidden,boolean appearance) throws Exception {
         return formPdf(stored,visible,hidden,appearance,true);

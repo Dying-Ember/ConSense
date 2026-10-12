@@ -151,10 +151,9 @@ public class DocumentParser {
                 String text;
                 List<DocumentBlock> pageBlocks;
                 boolean requiresOcr;
+                List<DocumentBlock> formBlocks = new ArrayList<>();
+                StringBuilder effectiveForms = new StringBuilder();
                 try (DocumentParseProbe.Timer timer=probe.measure("pdf_native_extraction_and_heuristic",pageNo,"Actual native extraction and original short-circuit OCR selection")) {
-                    String nativeExtractedText=stripper.getText(document);
-                    pageBlocks = stripper.blocks;
-                    StringBuilder effectiveForms = new StringBuilder();
                     for (PdfPageEvidence.PdfFormField field : pageEvidence.getFormFields()) {
                         DocumentBlock formBlock = block("pdf_form_widget", field.getId(), pageNo, "", "native_form");
                         formBlock.setPdfFormField(field); formBlock.setBbox(field.getBbox());
@@ -169,8 +168,11 @@ public class DocumentParser {
                             if (!coverage.getNeedsReviewPages().contains(pageNo)) coverage.getNeedsReviewPages().add(pageNo);
                             coverage.getLimitations().add("Page " + pageNo + " form " + field.getId() + ": " + field.getValueStatus() + "; stored and appearance values retained separately.");
                         }
-                        pageBlocks.add(formBlock);
+                        formBlocks.add(formBlock);
                     }
+                    String nativeExtractedText=stripper.getText(document);
+                    pageBlocks = new ArrayList<>(stripper.blocks);
+                    pageBlocks.addAll(formBlocks);
                     pageEvidence.setNativeBlocks(new ArrayList<>(pageBlocks));
                     // Preserve native paragraph/line separators; block separation is not document typography.
                     text = normalize(nativeExtractedText + effectiveForms);
@@ -180,9 +182,10 @@ public class DocumentParser {
                 } catch (Exception e) {
                     if(e instanceof DocumentParseProbe.Failure)throw e;
                     probe.event("pdf_native_extraction_failure",pageNo,DocumentParseProbe.map("failureChain",DocumentParseProbe.failures(e),"nativeBlocksBeforeDiscard",stripper.blocks));
-                    pageEvidence.setNativeBlocks(new ArrayList<>(stripper.blocks));
+                    List<DocumentBlock> nativeBlocks = new ArrayList<>(stripper.blocks);
+                    nativeBlocks.addAll(formBlocks); pageEvidence.setNativeBlocks(nativeBlocks);
                     text = "";
-                    pageBlocks = new ArrayList<>();
+                    pageBlocks = new ArrayList<>(formBlocks);
                     requiresOcr = true;
                     coverage.getLimitations().add("Page " + pageNo + " native extraction failed: "
                             + abbreviate(e.getMessage(), 120));
@@ -215,9 +218,11 @@ public class DocumentParser {
                             if (result == null || result.isEmpty()) throw new IOException("OCR returned no text");
                             text = normalize(result.getText());
                             pageBlocks = ocrBlocks(result, pageNo, image.getWidth(), image.getHeight());
+                            // These are independent original widget observations, not OCR text or a proved reading order.
+                            pageBlocks.addAll(formBlocks);
                             coverage.setOcrPages(coverage.getOcrPages() + 1);
                             coverage.setOcrQualityStatus("needs_review");
-                            coverage.getNeedsReviewPages().add(pageNo);
+                            if (!coverage.getNeedsReviewPages().contains(pageNo)) coverage.getNeedsReviewPages().add(pageNo);
                             status = "ocr";
                         }
                     } catch (Exception e) {

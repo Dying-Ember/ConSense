@@ -2,6 +2,7 @@ package com.consense.service.vetting;
 
 import com.consense.common.JsonUtils;
 import com.consense.document.DocumentBlock;
+import com.consense.document.PdfPageEvidence;
 import com.consense.domain.SourceDocument;
 import com.consense.service.vetting.VettingCorpus.Chunk;
 import com.consense.service.vetting.VettingCorpus.Part;
@@ -150,6 +151,103 @@ class VettingSourceMaterialTest {
         cells.set(0,"Output mutation");VettingSourceInventory.compact(Collections.singletonList(c));
         VettingSourceMaterial.projectFactRows(Collections.singletonList(c),null);
         assertEquals(before,JsonUtils.write(c));assertEquals(copy.getContent(),c.getContent());
+    }
+
+    @Test void blankMissingNontextAndConflictingFormObservationsReachTheActualModelExcerptWithoutInventedText() throws Exception {
+        for(String status:Arrays.asList("appearance_missing","empty_or_non_text_appearance","field_appearance_conflict")) {
+            Chunk c=formChunk("",status); String before=JsonUtils.write(c);
+            assertEquals("",c.getContent()); assertEquals(1,c.getParts().size());
+            Part p=c.getParts().get(0); assertEquals(0,p.getStartOffset()); assertEquals(0,p.getEndOffset());
+            assertNotNull(p.getPdfFormField()); assertEquals(status,p.getPdfFormField().getValueStatus());
+            assertEquals("a".repeat(64),c.getOriginalSourceSha256());
+            JsonNode excerpt=actualExcerpts(Collections.singletonList(c)).get(0);
+            JsonNode observation=excerpt.path("selectedPartExtractionObservations").get(0);
+            assertEquals("",excerpt.path("content").asText());
+            assertEquals("observed_selected_original_widget",observation.path("formObservationStatus").asText());
+            assertEquals(JsonUtils.write(p.getPdfFormField()),JsonUtils.write(observation.path("pdfFormField")));
+            assertTrue(observation.path("formInterpretation").asText().contains("remain unknown"));
+            assertEquals(before,JsonUtils.write(c));
+        }
+    }
+
+    @Test void aLongFormAppearanceRemainsOneWholeObservationWithItsOriginalMetadata() {
+        String text="Original appearance text. ".repeat(100); Chunk c=formChunk(text,"appearance_text_unverified");
+        assertEquals(text,c.getContent()); assertEquals(1,c.getParts().size());
+        assertEquals(text,c.getParts().get(0).getPdfFormField().getAppearanceValue());
+        assertEquals(text.length(),c.getParts().get(0).getEndOffset());
+        assertEquals("observed_selected_original_widget",formObservation(c).path("formObservationStatus").asText());
+    }
+
+    @Test void formMetadataWithPartialMismatchedOrAmbiguousSourcePartsRemainsUnknown() {
+        for(String mutation:Arrays.asList("body","source","fieldId","anchor","page","bbox","offset","version","visibility","hash","document","role","duplicate","text")) {
+            Chunk c=formChunk("","empty_or_non_text_appearance"); Part p=c.getParts().get(0); List<Chunk> selected=new ArrayList<>(Collections.singletonList(c));
+            if("body".equals(mutation))c.setContent("Undeclared text");
+            if("source".equals(mutation))p.setExtractionSource("ocr");
+            if("fieldId".equals(mutation))p.getPdfFormField().setId("pdf-form/99/widget/0");
+            if("anchor".equals(mutation))p.setAnchor("pdf-form/99/widget/0");
+            if("page".equals(mutation))p.setPageNo("P9");
+            if("bbox".equals(mutation))p.setBbox(Arrays.asList(.1,.2,.3,.9));
+            if("offset".equals(mutation))p.setStartOffset(1);
+            if("version".equals(mutation))c.setSegmentationVersion("unknown-version");
+            if("visibility".equals(mutation))p.setNativeVisibilityStatus("hidden_widget");
+            if("hash".equals(mutation))c.setSourceHash(null);
+            if("document".equals(mutation))c.setDocumentId(null);
+            if("role".equals(mutation))c.setRole("unknown");
+            if("text".equals(mutation)) {p.setText("Invented visible text");p.setEndOffset(p.getText().length());c.setContent(p.getText());}
+            if("duplicate".equals(mutation)) { Chunk repeated=JsonUtils.read(JsonUtils.write(c),Chunk.class); repeated.setId("different-chunk-same-widget"); selected.add(repeated); }
+            for(Map<String,Object> excerpt:VettingSourceMaterial.project(selected)) {
+                JsonNode observation=JsonUtils.parse(JsonUtils.write(excerpt)).path("selectedPartExtractionObservations").get(0);
+                assertEquals("unknown_part_binding",observation.path("formObservationStatus").asText(),mutation);
+                assertTrue(observation.path("pdfFormField").isNull(),mutation);
+            }
+        }
+    }
+
+    @Test void projectedFormMetadataIsDetachedAndUnselectedFieldsStayOutOfTheModelExcerpt() throws Exception {
+        Chunk selected=formChunk("","appearance_missing"),other=formChunk("","appearance_missing");
+        other.setId("unselected-chunk"); other.getParts().get(0).getPdfFormField().setFieldName("UNSELECTED_FIELD_SECRET");
+        String before=JsonUtils.write(selected); Map<String,Object> excerpt=VettingSourceMaterial.project(Collections.singletonList(selected)).get(0);
+        Map<?,?> projection=(Map<?,?>)((List<?>)excerpt.get("selectedPartExtractionObservations")).get(0);
+        ((com.fasterxml.jackson.databind.node.ObjectNode)projection.get("pdfFormField")).put("fieldValue","Output mutation");
+        assertEquals(before,JsonUtils.write(selected));
+        assertFalse(actualUser(Collections.singletonList(selected),null).contains("UNSELECTED_FIELD_SECRET"));
+    }
+
+    @Test void completeLongAppearanceBytesStayInTheExactInputAndAnOverBudgetObservationCannotTruncateThem() throws Exception {
+        Chunk c=formChunk("","empty_or_non_text_appearance");
+        String ap=Base64.getEncoder().encodeToString(("Original AP operators ".repeat(1000)+"ACTUAL_STREAM_TAIL").getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        c.getParts().get(0).getPdfFormField().setAppearanceRawStreamBytesBase64(ap);
+        String user=actualUser(Collections.singletonList(c),null); assertTrue(user.contains(ap));
+        VettingInputBudget.Input in=VettingInputBudget.input("fixture-provider","fixture-model","Exact system",user,JsonUtils.parse("{\"type\":\"array\"}"),100,VettingCorpus.hash(JsonUtils.write(c)));
+        String before=JsonUtils.write(in);
+        VettingInputBudget.Result denied=VettingInputBudget.check(in,supplied->{
+            assertEquals(user,supplied.getMessages().get(1).getContent());
+            VettingInputBudget.Observation observation=VettingInputBudgetTest.fixtureObservation(supplied);
+            observation.setInputTokens(200);observation.setEffectiveContextTokens(250);return observation;
+        });
+        assertEquals("over_budget",denied.getStatus());assertFalse(denied.isExtraDispatchPermitted());assertEquals(before,JsonUtils.write(in));
+        c.getParts().get(0).getPdfFormField().setAppearanceRawStreamBytesBase64(ap+"changed");
+        VettingInputBudget.Input changed=VettingInputBudget.input("fixture-provider","fixture-model","Exact system",actualUser(Collections.singletonList(c),null),in.getSchema(),100,VettingCorpus.hash(JsonUtils.write(c)));
+        assertNotEquals(in.getSerializedInputSha256(),changed.getSerializedInputSha256());
+    }
+
+    private static JsonNode formObservation(Chunk c) {
+        Map<String,Object> excerpt=VettingSourceMaterial.project(Collections.singletonList(c)).get(0);
+        return JsonUtils.parse(JsonUtils.write(excerpt)).path("selectedPartExtractionObservations").get(0);
+    }
+    private static Chunk formChunk(String text,String status) {
+        PdfPageEvidence.PdfFormField field=new PdfPageEvidence.PdfFormField(); field.setId("pdf-form/0/widget/0");
+        field.setFieldName("OriginalField"); field.setFieldType("Tx"); field.setPageNo(1); field.setFieldValue("appearance_text_unverified".equals(status)?text:"");
+        field.setAppearanceValue("field_appearance_conflict".equals(status)?"Original conflicting appearance":text); field.setConflict("field_appearance_conflict".equals(status));
+        field.setValueStatus(status); field.setVisibilityStatus("operator_visible_unverified"); field.setAppearancePresent(!"appearance_missing".equals(status));
+        field.setAppearanceState("ExistingState"); field.setBbox(new double[]{.1,.2,.3,.1});
+        if(field.isAppearancePresent())field.setAppearanceRawStreamBytesBase64("T3JpZ2luYWwgQVAgYnl0ZXM="); field.getLimitations().add("Existing source declaration; raster visibility and blank meaning unknown.");
+        DocumentBlock b=new DocumentBlock(); b.setId(field.getId().replace('/',':')); b.setLocation(field.getId()); b.setKind("pdf_form_widget");
+        b.setPageNo(1); b.setSource("native_form"); b.setText(text); b.setOriginalText(field.getAppearanceValue()); b.setPdfFormField(field);
+        b.setBbox(field.getBbox()); b.setNativeVisibilityStatus(field.getVisibilityStatus());
+        SourceDocument d=new SourceDocument(); d.setId(151L); d.setFileKey("OTHER"); d.setFileName("form.pdf"); d.setReviewRole("tender");
+        d.setSourceSha256("a".repeat(64)); d.setStructuredContentJson(JsonUtils.write(Collections.singletonList(b))); d.setTextContent(text);
+        return VettingCorpus.chunks(Collections.singletonList(d)).get(0);
     }
 
     private static JsonNode actualExcerpts(List<Chunk> chunks)throws Exception {
