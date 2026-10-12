@@ -15,7 +15,7 @@ const props = defineProps<{ projectId: string; fileKey: string; document?: Draft
 const emit = defineEmits<{ input: [key: string]; file: [fileKey: string]; retry: []; pdf: [view: 'source' | 'result'] }>()
 const mode = ref<'original' | 'review' | 'saved'>('review')
 const selected = ref(props.selectedKey ?? props.fields[0]?.key ?? '')
-const activeBindingId = ref(''), choices = ref<string[]>([]), navigationNotice = ref('')
+const activeBindingId = ref(''), inspectedBindingId = ref(''), choices = ref<string[]>([]), navigationNotice = ref('')
 const paper = ref<HTMLElement>(), scroll = ref<HTMLElement>(), inspector = ref<HTMLElement>()
 const pendingLocation = ref<DocumentReviewLocation>()
 let handledGraphNavigation = ''
@@ -36,6 +36,23 @@ const currentBinding = computed(() => allBindings.value.find(binding => binding.
 const currentSavedBinding = computed(() => prepared.value.savedBindingIds.includes(activeBindingId.value) ? props.resultBindings?.bindings.find(binding => binding.bindingId === activeBindingId.value) : undefined)
 const currentChange = computed(() => prepared.value.changes.find(change => change.bindingId === activeBindingId.value))
 const changeDescription = computed(() => currentChange.value?.kind === 'joint' ? t('Joint saved change. Related inputs:', '共同处理的已保存修改，关联输入：', '共同處理的已儲存修改，關聯輸入：') + currentChange.value.fieldKeys.map(key => l(props.fields.find(item => item.key === key)?.label) || key).join(' / ') : currentChange.value?.kind === 'editorial' ? t('Verified template instruction cleanup.', '已核对的模板编辑指引清理。', '已核對的模板編輯指引清理。') : currentChange.value?.kind === 'manual' ? t('Saved manual document change; it is not assigned to an input.', '已保存的人工正文修改，未归因于某项输入。', '已儲存的人工正文修改，未歸因於某項輸入。') : '')
+const inspectedBinding = computed(() => inspectedBindingId.value === activeBindingId.value && prepared.value.bindingIds.includes(inspectedBindingId.value) ? currentBinding.value : undefined)
+const inspectionKind = computed(() => {
+  if (!inspectedBinding.value) return undefined
+  if (currentChange.value?.kind === 'manual' || currentChange.value?.kind === 'editorial') return currentChange.value.kind
+  if (currentChange.value) return 'saved'
+  const binding = currentSavedBinding.value
+  const normalized = (text: string | null | undefined) => (text ?? '').replace(/\s+/gu, ' ').trim()
+  if (mode.value === 'review' && binding && (binding.locationStatus === 'removed' || normalized(binding.sourceText) !== normalized(binding.text))) return 'unverified'
+  return 'registered'
+})
+const inspectionKeys = computed(() => !inspectedBinding.value || ['manual', 'editorial', 'unverified'].includes(inspectionKind.value ?? '') ? [] : currentChange.value ? currentChange.value.fieldKeys : associatedReviewFields(inspectedBinding.value, props.fields, props.actions))
+const inspectionInputs = computed(() => inspectionKeys.value.map(key => {
+  const variable = props.variables.find(item => item.key === key)
+  return { key, field: props.fields.find(item => item.key === key), variable, candidates: (variable?.candidates ?? []).map(candidate => ({ candidate, context: reviewEvidenceContext(props.trace, key, candidate) })) }
+}))
+const inspectionActions = computed(() => inspectionKind.value === 'saved' ? props.actions.filter(action => action.document === props.fileKey && currentSavedBinding.value?.actionIds.includes(action.id) && currentSavedBinding.value.appliedActionIds?.includes(action.id) && currentSavedBinding.value.operationIds.some(operation => operation === action.id || operation.startsWith(`${action.id}-`))) : [])
+const inspectionDescription = computed(() => inspectionKind.value === 'editorial' ? t('Verified template instruction cleanup. It does not establish a business-variable change.', '已核对的模板编辑指引清理，不据此归因于业务变量修改。', '已核對的模板編輯指引清理，不據此歸因於業務變數修改。') : inspectionKind.value === 'manual' ? t('Saved manual document change; it is not assigned to an input.', '已保存的人工正文修改，未归因于某项输入。', '已儲存的人工正文修改，未歸因於某項輸入。') : inspectionKind.value === 'unverified' ? t('This difference cannot be attributed to a verified saved action. Its cause remains unverified.', '此处差异尚无法对应已核对的保存动作，修改原因待核。', '此處差異尚無法對應已核對的儲存動作，修改原因待核。') : inspectionKind.value === 'registered' ? t('Registered related inputs. This view does not attribute a saved edit to them.', '以下为登记的关联输入，当前视图不将其认定为已保存修改的原因。', '以下為登記的關聯輸入，目前視圖不將其認定為已儲存修改的原因。') : inspectionKeys.value.length > 1 || currentChange.value?.kind === 'joint' ? t('Joint saved change. All related input evidence is shown below; individual words are not assigned to one input.', '共同处理的已保存修改，相关输入的证据全部显示如下，不将个别文字单独归因于一项输入。', '共同處理的已儲存修改，相關輸入的證據全部顯示如下，不將個別文字單獨歸因於一項輸入。') : t('Saved change linked to this input. Its recorded source evidence is shown below.', '此已保存修改关联以下输入，其登记来源依据显示如下。', '此已儲存修改關聯以下輸入，其登記來源依據顯示如下。'))
 const relatedActions = computed(() => props.actions.filter(action => (action.inputKeys ?? action.fieldKeys ?? []).includes(selected.value)))
 const locations = computed<DocumentReviewLocation[]>(() => {
   const locations: DocumentReviewLocation[] = []
@@ -96,8 +113,8 @@ async function focusBinding(move = true) {
 }
 function chooseField(key: string, keepLocation = false) {
   if (blocked.value) return
-  selected.value = key; choices.value = []
-  if (!keepLocation) activeBindingId.value = locations.value.find(item => item.fileKey === props.fileKey && prepared.value.bindingIds.includes(item.bindingId ?? ''))?.bindingId ?? ''
+  selected.value = key
+  if (!keepLocation) { inspectedBindingId.value = ''; choices.value = []; activeBindingId.value = locations.value.find(item => item.fileKey === props.fileKey && prepared.value.bindingIds.includes(item.bindingId ?? ''))?.bindingId ?? '' }
   void focusBinding()
 }
 function inspect(event: MouseEvent | KeyboardEvent) {
@@ -106,15 +123,16 @@ function inspect(event: MouseEvent | KeyboardEvent) {
   const node = (event.target as Element)?.closest<HTMLElement>('[data-review-binding]')
   const binding = allBindings.value.find(item => item.bindingId === node?.dataset.reviewBinding)
   if (!binding || !prepared.value.bindingIds.includes(binding.bindingId)) return
-  event.preventDefault(); activeBindingId.value = binding.bindingId
-  const linked = associatedReviewFields(binding, props.fields, props.actions)
-  if (linked.length > 1) choices.value = linked
-  else if (linked[0]) chooseField(linked[0], true)
-  void nextTick(() => inspector.value?.focus({ preventScroll: true }))
+  event.preventDefault(); activeBindingId.value = binding.bindingId; inspectedBindingId.value = binding.bindingId; pendingLocation.value = undefined
+  const linked = inspectionKeys.value.filter(key => props.fields.some(field => field.key === key))
+  selected.value = linked.length === 1 ? linked[0]! : linked.includes(selected.value) ? selected.value : ''
+  choices.value = linked.length > 1 ? linked : []
+  void focusBinding(false)
+  void nextTick(() => { inspector.value?.scrollTo({ top: 0, behavior: 'auto' }); inspector.value?.focus({ preventScroll: true }) })
 }
 async function locate(location: DocumentReviewLocation) {
   if (blocked.value) return
-  choices.value = []
+  choices.value = []; inspectedBindingId.value = ''
   if (location.fileKey !== props.fileKey) { pendingLocation.value = location; emit('file', location.fileKey); return }
   activeBindingId.value = location.bindingId ?? ''
   if (mode.value === 'saved' && currentBinding.value?.locationStatus === 'removed') mode.value = 'review'
@@ -125,7 +143,7 @@ function applyGraphNavigation() {
   if (!request || request.projectId !== props.projectId || request.fileKey !== props.fileKey || !props.fields.some(field => field.key === request.fieldKey)) return false
   if (handledGraphNavigation === `${request.projectId}:${request.sequence}`) return true
   if (blocked.value || !props.original || !props.sourceBindings) return true
-  selected.value = request.fieldKey; mode.value = 'original'; choices.value = []; pendingLocation.value = undefined
+  selected.value = request.fieldKey; mode.value = 'original'; choices.value = []; inspectedBindingId.value = ''; pendingLocation.value = undefined
   const actionIds = request.actionId ? [request.actionId] : props.actions.filter(action => action.document === request.fileKey && action.clause === request.clause && (action.inputKeys ?? action.fieldKeys ?? []).includes(request.fieldKey)).map(action => action.id)
   const target = (request.actionId || actionIds.length === 1) ? props.sourceBindings.bindings.find(binding => binding.actionIds.some(id => actionIds.includes(id)) && associatedReviewFields(binding, props.fields, props.actions).includes(request.fieldKey) && prepared.value.bindingIds.includes(binding.bindingId)) : undefined
   activeBindingId.value = target?.bindingId ?? ''
@@ -135,8 +153,9 @@ function applyGraphNavigation() {
   return true
 }
 watch(() => props.selectedKey, key => { if (key && props.fields.some(item => item.key === key)) chooseField(key) })
-watch(() => props.projectId, () => { selected.value = props.selectedKey ?? props.fields[0]?.key ?? ''; activeBindingId.value = ''; choices.value = []; pendingLocation.value = undefined; navigationNotice.value = '' })
-watch(() => [props.fileKey, props.loading, props.original, props.sourceBindings, props.result, props.resultBindings], () => {
+watch(() => props.projectId, () => { selected.value = props.selectedKey ?? props.fields[0]?.key ?? ''; activeBindingId.value = ''; inspectedBindingId.value = ''; choices.value = []; pendingLocation.value = undefined; navigationNotice.value = '' })
+watch(() => [props.fileKey, props.loading, props.original, props.sourceBindings, props.result, props.resultBindings, props.document?.revisionId, props.document?.docxSha256, props.document?.sourceSha256], () => {
+  inspectedBindingId.value = ''
   if (props.loading) return
   if (applyGraphNavigation()) return
   const pending = pendingLocation.value
@@ -152,7 +171,8 @@ watch(() => [props.fileKey, props.loading, props.original, props.sourceBindings,
 }, { immediate: true })
 watch(() => [props.graphNavigation, props.disabled, props.editing], () => { applyGraphNavigation() }, { immediate: true })
 watch(() => html.value, () => { void focusBinding(false) })
-watch(() => [mode.value, props.immersive], () => { void focusBinding() })
+watch(() => mode.value, () => { inspectedBindingId.value = ''; choices.value = []; void focusBinding() })
+watch(() => props.immersive, () => { void focusBinding() })
 </script>
 <template>
   <section class="document-review" :class="{ immersive }">
@@ -171,12 +191,37 @@ watch(() => [mode.value, props.immersive], () => { void focusBinding() })
         <template v-else><div v-if="warnings.length" class="reading-warnings"><p v-for="warning in warnings" :key="warning" class="review-notice" role="status">{{ warning }}</p></div><details v-if="diagnostics.length" class="conversion-diagnostics"><summary>{{ t('Conversion diagnostics', '转换诊断记录', '轉換診斷記錄') }} · {{ diagnostics.length }}</summary><ul><li v-for="diagnostic in diagnostics" :key="diagnostic">{{ diagnostic }}</li></ul></details><p v-if="navigationNotice" class="navigation-notice" role="status">{{ navigationNotice }}</p><div ref="scroll" class="document-scroll"><article ref="paper" data-document-paper class="document-paper" :class="mode" lang="en" @click="inspect" @keydown="inspect" v-html="html" /></div></template>
       </main>
       <aside ref="inspector" tabindex="-1" class="review-inspector" :aria-label="t('Current input', '当前输入', '目前輸入')">
-        <section v-if="choices.length" class="association-choices"><h4>{{ t('This wording relates to multiple inputs. Choose one.', '此正文关联多个输入，请选择一项。', '此正文關聯多個輸入，請選擇一項。') }}</h4><button v-for="key in choices" :key="key" type="button" :data-association-choice="key" :disabled="blocked" @click="chooseField(key, true)">{{ l(fields.find(item => item.key === key)?.label) }}</button></section>
-        <select :value="selected" :aria-label="t('Select input', '选择输入', '選擇輸入')" :disabled="blocked" @change="chooseField(($event.target as HTMLSelectElement).value)"><option v-for="item in fields" :key="item.key" :value="item.key">{{ l(item.label) }}</option></select>
+        <section v-if="inspectedBinding" data-change-context class="change-context review-evidence">
+          <h3>{{ t('Selected change and evidence', '选中修改与来源依据', '選中修改與來源依據') }}</h3>
+          <p data-change-context-description role="status" aria-live="polite">{{ inspectionDescription }}</p>
+          <p v-if="inspectionInputs.length" data-change-input-summary><strong>{{ inspectionInputs.map(item => l(item.field?.label) || item.key).join(' / ') }}</strong></p>
+          <p v-if="document?.stale || dirtyKeys.length" class="review-notice">{{ t('Values and source records below are current input details. They do not verify the values used by this saved revision.', '以下取值和来源记录是当前输入详情，不能据此核对本保存版本生成时的取值。', '以下取值和來源記錄是目前輸入詳情，不能據此核對本儲存版本產生時的取值。') }}</p>
+          <article v-for="action in inspectionActions" :key="action.id" :data-change-action="action.id"><strong>{{ action.document }} · {{ action.clause }}</strong><p>{{ draftWord((action.action === 'fill' ? 'amend' : action.action) as DraftWord, locale) }}</p><p v-if="!document?.stale && !dirtyKeys.length">{{ l(action.detail) }}</p></article>
+          <article v-for="item in inspectionInputs" :key="item.key" :data-change-variable="item.key" class="change-variable">
+            <h4>{{ l(item.field?.label) || item.key }}</h4>
+            <template v-if="item.field"><p class="input-state">{{ t('Current value · read only', '当前取值 · 此处只读', '目前取值 · 此處唯讀') }}</p><div data-change-current-value><DraftingValueDisplay :field="item.field" :value="values[item.key]" :locale="locale" /></div></template>
+            <p v-else class="review-notice">{{ t('This recorded input has no current field definition.', '此登记输入暂无对应的当前字段定义。', '此登記輸入暫無對應的目前欄位定義。') }}</p>
+            <p v-if="item.variable?.reviewRequired" class="review-notice">{{ t('Adopted value requires review.', '采用值需要复核。', '採用值需要覆核。') }}</p>
+            <p v-if="item.variable?.manuallyEdited" class="review-notice">{{ t('The current value was manually edited; recorded model candidates may differ.', '当前取值经人工修改，登记的模型候选可能与其不同。', '目前取值經人工修改，登記的模型候選可能與其不同。') }}</p>
+            <h4>{{ t('Recorded source evidence', '登记的来源依据', '登記的來源依據') }}</h4>
+            <p v-if="item.variable?.source" class="source-reference">{{ item.variable.source }}</p>
+            <p v-if="!item.variable?.source && !item.variable?.candidates?.some(candidate => candidate.sourceQuote)">{{ t('No source quotation is recorded for this input.', '此输入尚未登记来源引文。', '此輸入尚未登記來源引文。') }}</p>
+            <article v-for="({ candidate, context }, index) in item.candidates" :key="index">
+              <strong v-if="candidate.fileName">{{ candidate.fileName }}</strong>
+              <p>{{ t('Recorded candidate value', '登记的候选值', '登記的候選值') }}: {{ candidate.value }}</p>
+              <blockquote v-if="candidate.sourceQuote">{{ candidate.sourceQuote }}</blockquote>
+              <details v-if="context" data-evidence-context><summary>{{ t('Expand recorded source context', '展开登记的来源上下文', '展開登記的來源上下文') }}</summary><p v-if="trace?.stale" class="review-notice">{{ t('This historical extraction record is stale; it does not verify the latest source.', '此历史识别记录已过期，不能据此核对最新来源。', '此歷史識別記錄已過期，不能據此核對最新來源。') }}</p><pre data-evidence-context-text>{{ context.sourceText }}</pre></details>
+              <p v-else-if="candidate.sourceQuote" data-evidence-context-unavailable class="review-notice">{{ t('No unique matching source-context record is available for this quotation.', '此引文尚无唯一匹配的来源上下文记录。', '此引文尚無唯一匹配的來源上下文記錄。') }}</p>
+              <p v-if="candidate.reason">{{ t('Recorded explanation', '登记的识别说明', '登記的識別說明') }}: {{ candidate.reason }}</p>
+            </article><p v-if="item.variable?.note">{{ item.variable.note }}</p>
+          </article>
+        </section>
+        <section v-if="choices.length" class="association-choices"><h4>{{ t('Related input evidence is shown above. Select an input for more detail.', '相关输入的证据已在上方显示，可选择一项查看更多详情。', '相關輸入的證據已在上方顯示，可選擇一項查看更多詳情。') }}</h4><button v-for="key in choices" :key="key" type="button" :data-association-choice="key" :aria-pressed="selected === key" :disabled="blocked" @click="chooseField(key, true)">{{ l(fields.find(item => item.key === key)?.label) }}</button></section>
+        <select :value="selected" :aria-label="t('Select input', '选择输入', '選擇輸入')" :disabled="blocked" @change="chooseField(($event.target as HTMLSelectElement).value, !!inspectedBinding && inspectionKeys.includes(($event.target as HTMLSelectElement).value))"><option v-if="!selected" value="" disabled>{{ t('Select input details', '选择输入详情', '選擇輸入詳情') }}</option><option v-for="item in fields" :key="item.key" :value="item.key">{{ l(item.label) }}</option></select>
         <template v-if="field"><h3>{{ l(field.label) }}</h3><h4>{{ t('Current value · read only', '当前取值 · 此处只读', '目前取值 · 此處唯讀') }}</h4><div data-current-value><DraftingValueDisplay :field="field" :value="values[field.key]" :locale="locale" /></div><p class="input-state">{{ inputState }}</p><p v-if="variable?.reviewRequired" class="review-notice">{{ t('Adopted value requires review.', '采用值需要复核。', '採用值需要覆核。') }}</p><button type="button" data-return-input :disabled="blocked" @click="returnInput">{{ t('Return to input', '返回输入修改', '返回輸入修改') }}</button>
           <section class="linked-locations"><h4>{{ t('All linked locations', '全部关联位置', '全部關聯位置') }} · {{ locations.length }}</h4><p v-if="!locations.length">{{ t('No registered location for this input.', '此输入尚无登记位置。', '此輸入尚無登記位置。') }}</p><button v-for="location in locations" :key="location.id" type="button" :data-review-location="location.bindingId ?? location.id" :data-review-location-file="location.fileKey" :aria-pressed="location.bindingId === activeBindingId && location.fileKey === fileKey" :disabled="blocked" @click="locate(location)"><strong>{{ location.fileKey }} · {{ location.clause }}</strong><small v-if="location.paragraph">P{{ location.paragraph }}</small><small v-if="location.status === 'removed'">{{ t('Removed in saved document', '已从文稿删除', '已從文稿刪除') }}</small></button></section>
           <section v-if="currentBinding" class="binding-status"><p v-if="changeDescription" data-review-change-description>{{ changeDescription }}</p><h4>{{ t('Selected paragraph / registered group', '选中段落／登记范围', '選中段落／登記範圍') }}</h4><p v-if="!currentBinding.sourceParagraphId">{{ t('Saved row registered as added; no verified one-to-one original mapping.', '文稿行登记为新增，尚无可靠的一对一原文映射。', '文稿行登記為新增，尚無可靠的一對一原文映射。') }}</p><p v-if="!currentSavedBinding">{{ t('A source location is registered, but its saved change status cannot be verified.', '已登记原文位置，但尚无法核对其已保存修改状态。', '已登記原文位置，但尚無法核對其已儲存修改狀態。') }}</p><p v-else>{{ currentSavedBinding.locationStatus === 'removed' ? t('This paragraph was removed.', '此段落已删除。', '此段落已刪除。') : currentSavedBinding.operationIds.length || currentSavedBinding.bodyOperationIds?.length ? t('The saved ledger records an applied document edit.', '已保存记录登记了文稿修改。', '已儲存記錄登記了文稿修改。') : currentSavedBinding.sourceText === currentSavedBinding.text ? t('Related wording is unchanged in the saved document.', '关联正文在已保存文稿中未改动。', '關聯正文在已儲存文稿中未改動。') : t('The saved wording differs, but an applied edit record is unavailable.', '已保存正文存在差异，但尚无可靠已应用修改记录。', '已儲存正文存在差異，但尚無可靠已套用修改記錄。') }}</p></section>
-          <section class="review-evidence"><h4>{{ t('Source evidence', '来源依据', '來源依據') }}</h4><p v-if="variable?.source" class="source-reference">{{ variable.source }}</p><p v-if="!variable?.source && !variable?.candidates?.some(candidate => candidate.sourceQuote)">{{ t('No source quotation is recorded for this input.', '此输入尚未登记来源引文。', '此輸入尚未登記來源引文。') }}</p><article v-for="({ candidate, context }, index) in evidenceCandidates" :key="index"><strong v-if="candidate.fileName">{{ candidate.fileName }}</strong><blockquote v-if="candidate.sourceQuote">{{ candidate.sourceQuote }}</blockquote><details v-if="context" data-evidence-context><summary>{{ t('Expand recorded source context', '展开登记的来源上下文', '展開登記的來源上下文') }}</summary><p v-if="trace?.stale" class="review-notice">{{ t('This historical extraction record is stale; it does not verify the latest source.', '此历史识别记录已过期，不能据此核对最新来源。', '此歷史識別記錄已過期，不能據此核對最新來源。') }}</p><pre data-evidence-context-text>{{ context.sourceText }}</pre></details><p v-else-if="candidate.sourceQuote" data-evidence-context-unavailable class="review-notice">{{ t('No unique matching source-context record is available for this quotation.', '此引文尚无唯一匹配的来源上下文记录。', '此引文尚無唯一匹配的來源上下文記錄。') }}</p><p v-if="candidate.reason">{{ t('Recorded explanation', '登记的识别说明', '登記的識別說明') }}: {{ candidate.reason }}</p></article><p v-if="variable?.note">{{ variable.note }}</p></section>
+          <section v-if="!inspectedBinding || !inspectionKeys.includes(field.key)" class="review-evidence"><h4>{{ t('Source evidence', '来源依据', '來源依據') }}</h4><p v-if="variable?.source" class="source-reference">{{ variable.source }}</p><p v-if="!variable?.source && !variable?.candidates?.some(candidate => candidate.sourceQuote)">{{ t('No source quotation is recorded for this input.', '此输入尚未登记来源引文。', '此輸入尚未登記來源引文。') }}</p><article v-for="({ candidate, context }, index) in evidenceCandidates" :key="index"><strong v-if="candidate.fileName">{{ candidate.fileName }}</strong><blockquote v-if="candidate.sourceQuote">{{ candidate.sourceQuote }}</blockquote><details v-if="context" data-evidence-context><summary>{{ t('Expand recorded source context', '展开登记的来源上下文', '展開登記的來源上下文') }}</summary><p v-if="trace?.stale" class="review-notice">{{ t('This historical extraction record is stale; it does not verify the latest source.', '此历史识别记录已过期，不能据此核对最新来源。', '此歷史識別記錄已過期，不能據此核對最新來源。') }}</p><pre data-evidence-context-text>{{ context.sourceText }}</pre></details><p v-else-if="candidate.sourceQuote" data-evidence-context-unavailable class="review-notice">{{ t('No unique matching source-context record is available for this quotation.', '此引文尚无唯一匹配的来源上下文记录。', '此引文尚無唯一匹配的來源上下文記錄。') }}</p><p v-if="candidate.reason">{{ t('Recorded explanation', '登记的识别说明', '登記的識別說明') }}: {{ candidate.reason }}</p></article><p v-if="variable?.note">{{ variable.note }}</p></section>
           <section class="review-actions"><h4>{{ document?.stale || dirtyKeys.length ? t('Current pending plan actions', '当前待应用的处理方案', '目前待套用的處理方案') : t('Related clause treatments', '关联条款处理', '關聯條款處理') }}</h4><article v-for="action in relatedActions" :key="action.id"><strong>{{ action.document }} · {{ action.clause }}</strong><p>{{ l(action.detail) }}</p><p v-if="action.sourceWarning" class="review-notice">{{ l(action.sourceWarning) }}</p></article></section>
         </template>
       </aside>
@@ -195,6 +240,7 @@ watch(() => [mode.value, props.immersive], () => { void focusBinding() })
 .document-paper :deep(.review-deleted-text) { color: #993f47; background: #fbe9eb; text-decoration: line-through; }.document-paper :deep(.review-inserted-text) { color: #276344; background: #e8f4ec; text-decoration: none; }.document-paper :deep(.review-retained) { border-left: 3px solid #2f8c82; padding-left: 9px; }.document-paper :deep(.review-removed) { border-left: 3px solid #b7454b; padding-left: 9px; color: #983f46; background: #fbedef; text-decoration: line-through; }.document-paper :deep(.review-guidance) { border-left: 3px dotted #aaa095; padding-left: 9px; color: #827970; background: #f3eee8; text-decoration: line-through; }.document-paper :deep(.review-added) { border-left: 3px solid #4c8c60; padding-left: 9px; color: #276344; background: #eaf5ed; }.document-paper :deep(.review-added)::before { content: attr(data-review-addition-label); display: block; margin-bottom: 4px; font: 10px/1.4 var(--font-ui,sans-serif); color: #4a7056; }
 .immersive .review-fields { display: none; }.immersive .review-inspector { overscroll-behavior: contain; }.document-scroll { overscroll-behavior: contain; }.body-editor-slot { min-height: 0; flex: 1; overflow: auto; }
 .review-evidence summary { cursor: pointer; font-size: 12px; padding: 5px 0; }.review-evidence pre { max-height: 320px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.6 var(--font-mono,monospace); }
+.review-inspector .change-context { margin-top: 0; padding-top: 0; border-top: 0; }.change-context > h3 { margin-top: 0; }.change-variable { padding: 12px 0; border-top: 1px solid var(--line, #d5ded9); }.change-variable > h4 { margin-top: 10px; }
 .document-paper :deep(p:empty) { margin: 0; min-height: 0; }.document-paper :deep(table), .document-paper :deep(td), .document-paper :deep(th), .document-paper :deep(li) { font: inherit; }
 @media(max-width:650px){.immersive .review-workspace { grid-template-rows: minmax(0,1fr) minmax(0,.55fr); }.immersive .review-inspector { max-height: none; }.document-scroll { padding: 9px; }.document-paper { font-size: 14px; }.document-paper :deep(td), .document-paper :deep(th) { padding: 4px; }}
 </style>
