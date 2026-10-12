@@ -18,7 +18,7 @@ class ArtifactProvenance(unittest.TestCase):
             archive.writestr('sample_pkg-1.0.dist-info/licenses/LICENSE', 'authored test license')
         self.sha = audit.descriptor(self.wheel)['sha256']
         self.lock = self.root/'lock.txt'; self.lock.write_text('sample-pkg==1.0 \\\n    --hash=sha256:'+self.sha+'\n')
-        self.source = {'install': [{'metadata': {'name': 'sample-pkg'}, 'download_info': {
+        self.source = {'install': [{'metadata': {'name': 'sample-pkg', 'version': '1.0'}, 'download_info': {
             'url': 'https://files.pythonhosted.org/sample.whl', 'archive_info': {'hashes': {'sha256': self.sha}}}}]}
         self.report = self.root/'report.json'
 
@@ -43,6 +43,38 @@ class ArtifactProvenance(unittest.TestCase):
     def test_forged_download_source_hash_rejected(self):
         self.source['install'][0]['download_info']['archive_info']['hashes']['sha256'] = '0'*64
         with self.assertRaises(ValueError):
+            self.inventory()
+
+    def test_hashes_are_bound_to_their_package_stanza(self):
+        second = self.wheels/'second-1.0-py3-none-any.whl'
+        with zipfile.ZipFile(second, 'w') as archive:
+            archive.writestr('second-1.0.dist-info/METADATA', 'Name: second\nVersion: 1.0\n')
+        second_sha = audit.descriptor(second)['sha256']
+        self.source['install'].append({'metadata': {'name': 'second', 'version': '1.0'}, 'download_info': {
+            'url': 'https://files.pythonhosted.org/second.whl', 'archive_info': {'hashes': {'sha256': second_sha}}}})
+        self.lock.write_text('sample-pkg==1.0 \\\n    --hash=sha256:'+self.sha+'\nsecond==1.0 --hash=sha256:'+second_sha+'\n')
+        self.assertEqual(len(self.inventory()), 2)
+        self.lock.write_text('sample-pkg==1.0 \\\n    --hash=sha256:'+second_sha+'\nsecond==1.0 --hash=sha256:'+self.sha+'\n')
+        with self.assertRaisesRegex(ValueError, 'locked hash'):
+            self.inventory()
+
+    def test_duplicate_normalized_lock_entry_rejected(self):
+        for version in ('1.0', '2.0'):
+            self.lock.write_text('SAMPLE_pkg=='+version+' --hash=sha256:'+self.sha+'\n'
+                                 'sample-pkg==1.0 --hash=sha256:'+self.sha+'\n')
+            with self.assertRaisesRegex(ValueError, 'Duplicate normalized lock package'):
+                self.inventory()
+
+    def test_duplicate_normalized_source_entry_rejected(self):
+        duplicate = json.loads(json.dumps(self.source['install'][0]))
+        duplicate['metadata']['name'] = 'SAMPLE_pkg'
+        self.source['install'].append(duplicate)
+        with self.assertRaisesRegex(ValueError, 'Duplicate normalized source package'):
+            self.inventory()
+
+    def test_source_report_version_must_match_lock(self):
+        self.source['install'][0]['metadata']['version'] = '2.0'
+        with self.assertRaisesRegex(ValueError, 'Source package/version differs from lock'):
             self.inventory()
 
     def test_missing_package_or_wrong_locked_hash_rejected(self):

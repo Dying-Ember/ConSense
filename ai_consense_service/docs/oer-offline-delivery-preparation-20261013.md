@@ -40,6 +40,10 @@ MinerU 原锁 SHA256 `f37a6e916dfc1ec7e7a77e2c90506112f3625b43bd160d2ed55140a7bf
 
 [校验入口](../tools/vetting_eval/verify_retrieval_offline.py) 校验精确包／版本／官方来源／锁 hash，拒绝 wheel 中的 ONNX、safetensors、Torch checkpoint 等权重文件；NVIDIA wheel 内的根目录小型 Python startup `.pth` 是命名空间启动脚本，与序列化 tensor checkpoint 分开检查。CPU selfcheck 设置离线模型标志、禁用可见GPU并禁止模型／GPU初始化／向量DB构造。它不是断网目标机、GPU前向、源质量或业务测试。
 
+**独立审查后的校验器修复：** 旧入口只检查 hash 出现在整个 lock 中，两个包交换各自锁 hash 仍被接受。新增真实两 wheel 反例先复现失败，再按每个归一化包名／版本的 requirement stanza 绑定允许 hash；重复归一化 lock／source-report 条目和 source 版本不符也拒绝。13 个边界测试在正常 Python 与 `python -O` 下均通过，原 9 项及实际 82 包 `pip --require-hashes` 安装证据保留。CPU smoke 改用不能被 `-O` 删除的 `require`；错误 embedding revision 的进程内反例在 `-O` 下实际被拒绝。
+
+复核仅使用既有 82 wheels 和新严格环境，不重复下载／安装。新 `python -O` 制品／CPU收据为外部 `retrieval-verifier-fix-01/offline-artifact-optimized-smoke-receipt.json`，SHA256 `5c4bcd4927ac2681979047d3bc5a8b6c59cd2626cb7d06879fef82afd3142931`；同目录保留 `boundary-red.log`、`boundary-green.log`、`boundary-optimized-green.log` 和 `optimized-smoke-counterexample.py/log`。旧收据不覆盖，模型／业务／OCI／H800门保持未验。
+
 两个原模型 publication 清单的 SHA与冻结05相同：embedding `13c9d08ae6e1d3d73fb6d284d473f493446c4a276c864cf5a02338ded3552a15`，reranker `70d656dfe6639100b1c42d01e202f022c14f06378f09685e37ecb21596c0a80b`。按各自固定 revision 只读取 README：BGE-M3 的声明为 MIT，README SHA `0b81ccf9134e5874d620a86e6905062ea999e779c34eb1a7e65eaeb7fe00e450`；reranker 的声明为 Apache-2.0，README SHA `c887aa6dd2598f908bf0582ca7068cc816585c7a1b6a07df305b631ede0cb174`。这两个 revision 的独立 LICENSE 请求均实际404，缺失状态保留，不补造文件。`model-publications/model-publication-license-inventory.json` SHA为 `2d112abd4052ce5e33b36ce16257bdfcc755bd22e46c8b43ba17d5af5ed9e5b4`，含完整原清单、实际URL和HTTP状态；未重新下载或装载 BGE／reranker 权重，许可审查未关闭。
 
 **范围偏差与失败保留：** 初版输入继承完整旧 `requirements.txt`，得到94包，其中 RapidOCR 3.9.2 wheel内嵌3个ONNX权重，随依赖已下载但没有装载或调用。该94包候选明确未采用，原日志／锁／`candidate-admission.json`在 `retrieval-linux-artifacts-01/` 保留。随后拆出严格 retrieval 输入，从已取得的普通运行时 wheels建立上述82包新候选，未再下载模型权重。初次制品校验还遇到 wheel内vendor metadata及 `.pth` 命名歧义，已按顶层 package身份和启动脚本内容区分并添加测试；失败日志保留。不能将这些旧尝试写成0权重下载或已通过CPU运行。
