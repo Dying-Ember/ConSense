@@ -33,6 +33,12 @@ public class VettingSemanticReview {
     @org.springframework.beans.factory.annotation.Autowired(required=false)
     public void setResponsesTransport(VettingResponsesTransport transport){this.responsesTransport=transport;}
     private final ThreadLocal<VettingLlmOperation> activeOperation=new ThreadLocal<>();
+    private final ThreadLocal<VettingCheckpointService.Session> checkpoint=new ThreadLocal<>();
+    public CheckpointScope bindCheckpoint(VettingCheckpointService.Session session){VettingCheckpointService.Session previous=checkpoint.get();checkpoint.set(session);return new CheckpointScope(previous);}
+    public final class CheckpointScope implements AutoCloseable {
+        private final VettingCheckpointService.Session previous;private CheckpointScope(VettingCheckpointService.Session previous){this.previous=previous;}
+        @Override public void close(){if(previous==null)checkpoint.remove();else checkpoint.set(previous);}
+    }
     public VettingLlmOperation captureOperation(com.consense.ai.LlmOperation chat){return VettingLlmOperation.capture(chat,props,responsesTransport);}
     public OperationScope bindOperation(VettingLlmOperation operation){VettingLlmOperation previous=activeOperation.get();activeOperation.set(operation);return new OperationScope(previous);}
     public final class OperationScope implements AutoCloseable {
@@ -110,6 +116,9 @@ public class VettingSemanticReview {
         if(!responsesEnabled()&&ai.explicitProfileSelected()&&props.getVetting().isSemanticEnabled())ai.requireAvailable();
         if (!props.getVetting().isSemanticEnabled() || (responsesEnabled()?responsesTransport==null:!ai.available())) {
             probe.call(0,null,null).event("semantic_not_run",VettingReviewProbe.map("reason","model_unavailable_or_semantic_disabled","semanticQualityAccepted",null));
+            for(int i=0;i<Math.min(TOPICS.length,Math.max(0,props.getVetting().getSemanticTopics()));i++){
+                SemanticTopicVO audit=new SemanticTopicVO();audit.setTopicIndex(i+1);audit.setTopic(TOPICS[i]);audit.setStatus("not_run");audit.setGlobalCallStatus("not_submitted");audit.setAggregateReviewStatus("not_submitted");result.getTopicAudits().add(audit);
+            }
             result.getWarnings().add("语义审查未运行：本地 LLM 未启用或不可用；报告仅包含规则检查结果。"); returnedNormally=true;return result;
         }
         int count = Math.min(TOPICS.length, Math.max(0, props.getVetting().getSemanticTopics()));
@@ -313,6 +322,8 @@ public class VettingSemanticReview {
             Map<String,Chunk> byId = submitted.stream().collect(Collectors.toMap(Chunk::getId, c -> c,
                     (a,b) -> { throw new IllegalArgumentException("Duplicate submitted chunk ID"); }, LinkedHashMap::new));
             List<String> rawResponses=new ArrayList<>();
+            VettingCheckpointService.Session durable=checkpoint.get();boolean checkpointBegun=false,reused=false;
+            int candidateStart=result.getCandidates().size(),warningStart=result.getWarnings().size();
             try {
                 String actualSystem,actualUser;
                 com.fasterxml.jackson.databind.JsonNode actualSchema;
@@ -338,6 +349,8 @@ public class VettingSemanticReview {
                 if(providerModeChanged) {inputBudget.setStatus("budget_unknown");inputBudget.setReason("packet_provider_mode_changed");inputBudget.setExtraDispatchPermitted(false);}
                 packet.setPacketId("topic-"+topicIndex+"-packet-"+packet.getPacketIndex()+"-input-"+fullInput.getSerializedInputSha256()+"-source-"+packet.getSourceSnapshotSha256());
                 packet.setPromptEnvelopeSha256(fullInput.getSerializedInputSha256());packet.setInputBudgetStatus(inputBudget.getStatus());packet.setInputBudgetMetadata(JsonUtils.parse(JsonUtils.write(inputBudget)));
+                packet.setModelIdentity(operation().getIdentity());
+                packet.setFixedBaselineEvidence(submitted.stream().filter(FixedVettingReferences::isFixed).map(c->fixedReferences.pointer(c.getId())).collect(Collectors.toList()));
                 topicProbe.text("packet_complete_serialized_input",VettingReviewProbe.map("packetId",packet.getPacketId(),"provider",fullInput.getProvider(),"model",fullInput.getModel(),"sourceSnapshotSha256",packet.getSourceSnapshotSha256(),"boundary","Complete gateway-envelope messages/schema/output reserve for actual bound token observation; no prompt truncation"),JsonUtils.write(fullInput));
                 topicProbe.event("packet_input_budget",VettingReviewProbe.map("packetId",packet.getPacketId(),"sourceObservationPacketId",packet.getSourceObservationPacketId(),"inputBudget",inputBudget,"extraDispatchRequiredKnownTokens",true));
                 if(providerModeChanged||previewChanged||"over_budget".equals(inputBudget.getStatus())||((responsesPacket||packet.getPacketIndex()>0)&&!inputBudget.isExtraDispatchPermitted())) {
@@ -347,6 +360,14 @@ public class VettingSemanticReview {
                 List<Record> records;
                 if(OerBusinessEvidence.canonicalCorpus(suppliedCorpus))oer.assertCurrent(OerBusinessEvidence.session(suppliedCorpus));
                 fixedReferences.assertCurrent(submitted);
+                if(durable!=null) {
+                    VettingCheckpointService.Saved saved=durable.loadOrBegin(packet);checkpointBegun=true;
+                    if(saved!=null) {
+                        VettingPacketCoverage.restore(saved.getPacket(),audit,packet);packet.setCheckpointStatus("resumed_verified_packet");reused=true;
+                        result.getCandidates().addAll(saved.getCandidates());result.getWarnings().addAll(saved.getWarnings());result.getReviewedChunkIds().addAll(saved.getReviewedChunkIds());return;
+                    }
+                    if("retrying_uncertain_packet".equals(packet.getCheckpointStatus()))result.getWarnings().add("上次调用结果未确认，当前执行者显式重试来源包 "+packet.getSourceObservationPacketId()+"；已保存包不会重复发布。");
+                }
                 Map<String,Long> gatewayPhaseWallNanos=new LinkedHashMap<>();
                 try (VettingReviewProbe.Timer timer=topicProbe.measure("ai_gateway_call","Whole gateway including provider call, logging, and structured JSON parsing; nested gateway phase values must not be summed with this total")) {
                     packet.setActualGatewayCallStarted(true);result.setActualGatewayCallCount(result.getActualGatewayCallCount()+1);
@@ -374,7 +395,7 @@ public class VettingSemanticReview {
                     Record record=records.get(recordIndex); List<String> reasons=new ArrayList<>();
                     if (record==null) reasons.add("null_record");
                     else {
-                        if (!Arrays.asList("issue", "consistent", "insufficient_context").contains(record.getAssessment())) reasons.add("invalid_assessment");
+                        if (!Arrays.asList("issue", "consistent", "insufficient_context", "not_applicable").contains(record.getAssessment())) reasons.add("invalid_assessment");
                         if (JsonUtils.isBlankText(record.getTitle())) reasons.add("empty_title");
                         if (JsonUtils.isBlankText(record.getComment())) reasons.add("empty_comment");
                         if (record.getEvidence()==null||record.getEvidence().isEmpty()) reasons.add("missing_evidence");
@@ -384,7 +405,7 @@ public class VettingSemanticReview {
                 }
                 topicProbe.event("schema_gate", VettingReviewProbe.map("valid", schemaReasons.isEmpty(), "reasons", schemaReasons,
                         "wholeTopicRejection", !schemaReasons.isEmpty()));
-                if(records==null||records.stream().anyMatch(r -> r==null||!Arrays.asList("issue", "consistent", "insufficient_context").contains(r.getAssessment())
+                if(records==null||records.stream().anyMatch(r -> r==null||!Arrays.asList("issue", "consistent", "insufficient_context", "not_applicable").contains(r.getAssessment())
                         ||JsonUtils.isBlankText(r.getTitle())||JsonUtils.isBlankText(r.getComment())
                         ||r.getEvidence()==null||r.getEvidence().isEmpty()||r.getEvidence().stream().anyMatch(Objects::isNull)))
                     throw new IllegalArgumentException("Model response schema invalid: each nonempty record requires title, comment and evidence");
@@ -402,6 +423,7 @@ public class VettingSemanticReview {
                             valid = false; break;
                         }
                         FindingEvidence e = VettingCorpus.evidence(c, q.getSide(), q.getQuote());
+                        if(FixedVettingReferences.isFixed(c))e.setFixedBaselineEvidence(fixedReferences.pointer(c.getId()));
                         quoteChecks.add(VettingReviewProbe.map("quote",q,"sourceChunkId",c.getId(),"sourceHash",c.getSourceHash(),
                                 "documentId",c.getDocumentId(),"sourceRole",c.getRole(),"evidence",e,"status",e.isLocated()?"located":"rejected"));
                         if (!e.isLocated()) { gateReasons.add("quote_not_located_by_current_evidence_policy");valid = false; break; } evidence.add(e);
@@ -440,6 +462,9 @@ public class VettingSemanticReview {
                     if (comparisonRequired && !quotedUnresolved.isEmpty()) {gateReasons.add("quoted_chunk_known_unresolved");valid = false;}
                     Boolean comparisonBasis=null;
                     if (valid && comparisonRequired) {comparisonBasis=hasComparisonBasis(type, r.getEvidence(), evidence, byId);if(!comparisonBasis){gateReasons.add("current_role_comparison_basis_not_satisfied");valid=false;}}
+                    if("not_applicable".equals(r.getAssessment())&&(!substantiveTenderEvidence||evidence.stream().anyMatch(e->JsonUtils.isBlankText(e.getDocumentId())||JsonUtils.isBlankText(e.getSourceHash())))){
+                        gateReasons.add("not_applicable_requires_located_scope_and_source_identity");valid=false;
+                    }
                     long gateNanos=System.nanoTime()-gateStarted;
                     topicProbe.event("record_evidence_applicability_gate", VettingReviewProbe.map("recordIndex",recordIndex++,"rawRecord",r,
                             "status",valid ? "mechanically_accepted" : "rejected", "candidateEligible",valid && "issue".equals(r.getAssessment()),
@@ -449,12 +474,16 @@ public class VettingSemanticReview {
                             "comparisonBasisEvaluated",comparisonBasis!=null,"comparisonBasis",comparisonBasis,"semanticQualityAccepted",null,
                             "wallNanos",gateNanos,"seconds",gateNanos/1_000_000_000.0));
                     if (!valid) { audit.setRejectedRecords(audit.getRejectedRecords()+1);result.getWarnings().add("主题 " + topicIndex + " 的一条模型记录未通过证据或适用性校验，未采纳。"); continue; }
+                    if("consistent".equals(r.getAssessment()))audit.setVerifiedConsistentAssessments(audit.getVerifiedConsistentAssessments()+1);
+                    if("insufficient_context".equals(r.getAssessment()))audit.setVerifiedInsufficientContextAssessments(audit.getVerifiedInsufficientContextAssessments()+1);
+                    if("not_applicable".equals(r.getAssessment()))audit.setVerifiedNotApplicableAssessments(audit.getVerifiedNotApplicableAssessments()+1);
+                    for(FindingEvidence located:evidence){located.setPacketId(packet.getPacketId());located.setPacketSourceSnapshotSha256(packet.getSourceSnapshotSha256());}
+                    if(!"issue".equals(r.getAssessment()))packet.getVerifiedAssessments().add(new com.consense.web.dto.VettingDtos.VerifiedAssessmentVO(r.getAssessment(),r.getTitle(),r.getComment(),evidence));
                     if (!"issue".equals(r.getAssessment())) continue;
                     for(int primary=0;primary<evidence.size();primary++) if("tender".equals(byId.get(r.getEvidence().get(primary).getChunkId()).getRole())) {
                         if(primary>0)evidence.add(0,evidence.remove(primary));break;
                     }
                     Candidate c = new Candidate(); c.setRuleId("semantic-" + type); c.setType(type); c.setSeverity(r.getSeverity());
-                    for(FindingEvidence located:evidence){located.setPacketId(packet.getPacketId());located.setPacketSourceSnapshotSha256(packet.getSourceSnapshotSha256());}
                     c.setTitle(r.getTitle()); c.setComment(r.getComment()); c.setImpact(r.getImpact()); c.setSuggestion(r.getSuggestion());
                     c.setSource("llm");c.setPacketId(packet.getPacketId());c.setSourceSnapshotSha256(packet.getSourceSnapshotSha256()); c.setEvidence(evidence); topicCandidates.add(c);
                     }
@@ -462,7 +491,7 @@ public class VettingSemanticReview {
                 result.getCandidates().addAll(topicCandidates);result.getReviewedChunkIds().addAll(byId.keySet());
                 audit.setAcceptedFindings(topicCandidates.size());audit.setStatus(records.isEmpty()?"completed_empty":audit.getRejectedRecords()>0?"completed_with_rejections":"completed");
             } catch (Exception e) {if(e instanceof VettingReviewProbe.Failure)throw e;
-                if(OerBusinessEvidence.canonicalCorpus(suppliedCorpus)||(ai.explicitProfileSelected()&&packet.isActualGatewayCallStarted()))result.setModelFailure(brief(e));
+                result.setModelFailure(brief(e));
                 audit.setStatus("failed");audit.setError(brief(e)); result.getWarnings().add("主题 " + topicIndex + " 未完成语义检查：" + brief(e));
                 if(e instanceof VettingResponsesTransport.TypedTransportException) {
                     VettingResponsesTransport.TypedTransportException transportFailure=(VettingResponsesTransport.TypedTransportException)e;
@@ -487,6 +516,13 @@ public class VettingSemanticReview {
                 for (int rawIndex=0;rawIndex<rawResponses.size();rawIndex++) topicProbe.text("model_raw_response",VettingReviewProbe.map("rawResponseIndex",rawIndex,
                         "boundary","Exact AiGateway raw content string, not independently observed provider TCP response/reasoning/usage"),rawResponses.get(rawIndex));
                 VettingPacketCoverage.callResult(audit,packet);
+                if(durable!=null&&checkpointBegun&&!reused){
+                    VettingCheckpointService.Saved saved=new VettingCheckpointService.Saved();saved.setPacket(packet);
+                    saved.setCandidates(new ArrayList<>(result.getCandidates().subList(candidateStart,result.getCandidates().size())));
+                    saved.setWarnings(new ArrayList<>(result.getWarnings().subList(warningStart,result.getWarnings().size())));
+                    if(Arrays.asList("completed","completed_empty","completed_with_rejections").contains(packet.getStatus()))saved.setReviewedChunkIds(new LinkedHashSet<>(byId.keySet()));
+                    packet.setCheckpointStatus(Arrays.asList("completed","completed_empty","completed_with_rejections").contains(packet.getStatus())?"saved_verified_packet":"saved_failed_attempt");durable.save(saved);
+                }
                 topicProbe.event("packet_finished",VettingReviewProbe.map("packetAudit",packet,"callDecodeAudit",audit));}
     }
     private static VettingContextBuilder.Selection packetSelection(VettingSourceRequestPacks.Result plan,VettingSourceRequestPacks.Pack pack,VettingContextBuilder.Selection global) {
@@ -642,7 +678,8 @@ public class VettingSemanticReview {
             + "For conflicts cite both different provisions verbatim, each at least 12 characters and sufficiently long to substantiate the point. "
             + "For reference errors cite the offending reference and the target provision when supplied. "
             + "Return [] if there is no concrete issue. If you include a consistency or incomplete-context assessment, label it accordingly; it will not become a finding. "
-            + "Return at most 3 items in a JSON array, with keys assessment(issue|consistent|insufficient_context), type(reference|conflict|language|risk), "
+            + "Use not_applicable only for an explicit applicable-scope exclusion supported by substantive project tender quotations and a stated reason; absence, missing evidence or unknown applicability cannot establish it. "
+            + "Return all supported assessments in a JSON array; do not cap finding counts. Use keys assessment(issue|consistent|insufficient_context|not_applicable), type(reference|conflict|language|risk), "
             + "severity(high|medium|low), title, comment, impact, suggestion, evidence:[{chunkId,side,quote}]. "
             + "Use supplied chunk IDs and exact source quotes; all prose in " + ("en".equals(lang) ? "English" : "Chinese") + ". "
             + "Emit a bare JSON array only. Its first non-whitespace character must be [ and its last must be ]. "

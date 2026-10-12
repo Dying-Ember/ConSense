@@ -220,6 +220,7 @@ public class VettingReportWriter {
         blocks.add(new Block(0, tr(lang, "合约编号", "合約編號", "Contract number") + ": " + available(project.getContractNo(), lang)));
         blocks.add(new Block(0, tr(lang, "项目编号", "項目編號", "Project ID") + ": " + nvl(project.getId())));
         blocks.add(new Block(0, tr(lang, "任务编号", "任務編號", "Run ID") + ": " + (job == null ? available(null, lang) : nvl(job.getId()))));
+        if(job!=null&&job.getReportSnapshotId()!=null)blocks.add(new Block(0,"Report snapshot: "+job.getReportSnapshotId()));
         blocks.add(new Block(0, tr(lang, "模型", "模型", "Model") + ": " + (job == null || job.getResult() == null ? available(null, lang) : available(job.getResult().getModel(), lang))));
         blocks.add(new Block(0, tr(lang, "任务完成时间", "任務完成時間", "Run completed") + ": "
                 + (job == null || job.getFinishedAt() == null ? available(null, lang) : DATE.format(job.getFinishedAt()))));
@@ -254,8 +255,19 @@ public class VettingReportWriter {
             String aggregate=JsonUtils.isBlankText(topic.getAggregateReviewStatus())?"scope_unknown_legacy":topic.getAggregateReviewStatus();
             blocks.add(compact(new Block(1,tr(lang,"主题","主題","Topic")+" "+topic.getTopicIndex()+": "+nvl(topic.getTopic()))));
             blocks.add(compact(new Block(0,tr(lang,"来源范围状态","來源範圍狀態","Source scope status")+": "+aggregate+"    "+tr(lang,"全局调用状态（仅调用及解析）","全局呼叫狀態（僅呼叫及解析）","Global call status (call/decode only)")+": "+nvl(JsonUtils.isBlankText(topic.getGlobalCallStatus())?topic.getStatus():topic.getGlobalCallStatus()))));
+            blocks.add(compact(new Block(0,"Check state (observed scope): "+topic.getCheckState()+"; overall completeness: "+coverage.getReviewCompleteness())));
             blocks.add(compact(new Block(0,tr(lang,"待处理来源请求","待處理來源請求","Pending source requests")+": "+topic.getPendingSourceRequestCount()+" / "+topic.getSourceRequestCount()+"    "+tr(lang,"额外来源包","額外來源包","Extra source packets")+": "+topic.getExtraPacketCount()+"    "+tr(lang,"失败包","失敗包","Failed packets")+": "+topic.getFailedPacketCount()+"    "+tr(lang,"未提交包","未提交包","Packets not submitted")+": "+topic.getNotSubmittedPacketCount())));
-            for(SemanticPacketVO packet:safe(topic.getPacketAudits()))if(packet!=null)blocks.add(compact(new Block(0,tr(lang,"来源包","來源包","Source packet")+" "+packet.getPacketIndex()+": "+nvl(packet.getStatus())+"    "+tr(lang,"输入预算","輸入預算","Input budget")+": "+nvl(packet.getInputBudgetStatus())+(JsonUtils.isBlankText(packet.getFailureKind())?"":"    "+tr(lang,"失败类型","失敗類型","Failure kind")+": "+packet.getFailureKind()))));
+            for(SemanticPacketVO packet:safe(topic.getPacketAudits()))if(packet!=null){
+                blocks.add(compact(new Block(0,tr(lang,"来源包","來源包","Source packet")+" "+packet.getPacketIndex()+": "+nvl(packet.getStatus())+"; check state: "+packet.getCheckState()+"    "+tr(lang,"输入预算","輸入預算","Input budget")+": "+nvl(packet.getInputBudgetStatus())+(JsonUtils.isBlankText(packet.getFailureKind())?"":"    "+tr(lang,"失败类型","失敗類型","Failure kind")+": "+packet.getFailureKind()))));
+                for(com.fasterxml.jackson.databind.JsonNode reference:safe(packet.getFixedBaselineEvidence()))fixedReferenceBlocks(blocks,reference);
+                for(VerifiedAssessmentVO assessment:safe(packet.getVerifiedAssessments())){
+                    blocks.add(compact(new Block(0,"Assessment (observed scope): "+assessment.getAssessment()+"; "+assessment.getTitle()+"; "+assessment.getComment())));
+                    for(FindingEvidence evidence:safe(assessment.getEvidence())){
+                        blocks.add(compact(new Block(0,"Assessment source: "+evidence.getDocumentId()+"; revision: "+evidence.getSourceHash()+"; "+evidence.getAnchor())));
+                        Block quote=new Block(0,nvl(evidence.getQuote()));quote.quote=true;blocks.add(quote);
+                    }
+                }
+            }
         }
         blocks.add(new Block(0,tr(lang,"来源范围状态记录已观察请求的运输、调用及解析；模型的 consistent 或空数组不确认合同无问题，未知限定及遗漏仍须人工核对。","來源範圍狀態記錄已觀察請求的運輸、呼叫及解析；模型的 consistent 或空陣列不確認合同無問題，未知限定及遺漏仍須人工核對。","Source scope status records transport, calls and decoding of observed requests. A model's consistent declaration or empty array does not confirm the contract has no issues; unknown qualifiers and omitted requests still require human review.")));
 
@@ -305,6 +317,7 @@ public class VettingReportWriter {
                             + (evidence.isLocated() ? tr(lang, "已定位原文", "已定位原文", "Located in source") : tr(lang, "未定位原文", "未定位原文", "Not located in source")));
                     label.keepWithNextOpening = true; blocks.add(label);
                     Block quote = new Block(0, nvl(evidence.getQuote())); quote.quote = true; blocks.add(quote);
+                    if(evidence.getFixedBaselineEvidence()!=null)fixedReferenceBlocks(blocks,evidence.getFixedBaselineEvidence());
                 }
             }
         }
@@ -323,6 +336,12 @@ public class VettingReportWriter {
         }
         if (!hasWarning) blocks.add(new Block(0, tr(lang, "任务没有记录额外材料缺口；这不构成对未提供文件的完整性确认。", "任務沒有記錄額外材料缺口；這不構成對未提供文件的完整性確認。", "No additional material gaps were recorded. This is not confirmation that documents absent from the source set are complete.")));
         return blocks;
+    }
+
+    private static void fixedReferenceBlocks(List<Block> blocks,com.fasterxml.jackson.databind.JsonNode reference){
+        blocks.add(compact(new Block(0,"Fixed development reference: "+reference.path("parentId").asText()+"; version: "+reference.path("baselineVersion").asText()+"; manifest: "+reference.path("manifestSha256").asText())));
+        blocks.add(compact(new Block(0,"Original source: "+reference.path("originalSourceSha256").asText()+"; page: "+reference.path("pageNo").asText()+"; family: "+reference.path("sourceFamily").asText()+"; project applicability: "+reference.path("projectApplicability").asText("unconfirmed")+"; qualifiers: "+reference.path("qualifiersComplete").asText("unknown"))));
+        com.fasterxml.jackson.databind.JsonNode group=reference.get("sourceUnit");if(group!=null)blocks.add(compact(new Block(0,"Observed source group: "+group.path("unitId").asText()+"; status: "+group.path("status").asText("unknown")+"; required members: "+group.path("requiredMemberIds")+"; missing members: "+group.path("missingMemberIds")+"; unknown: "+group.path("unknown"))));
     }
 
     private void setupWord(XWPFDocument document) {
