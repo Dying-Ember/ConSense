@@ -1,3 +1,4 @@
+import copy
 import tempfile
 import unittest
 from pathlib import Path
@@ -111,6 +112,31 @@ class NativeRangeGuards(unittest.TestCase):
     def test_material_cannot_silently_drop_tail_part_observation(self):
         p=parent();row=dict(p);row["selectedPartExtractionObservations"]=[]
         with self.assertRaises(ValueError):_canonical_checks(row,p,material=True)
+
+    def test_material_form_values_blanks_conflicts_and_appearance_bytes_require_the_complete_v5_observation(self):
+        p=parent("");part=p["parts"][0]
+        part.update(anchor="pdf-form/0/widget/0",blockId="pdf-form:0:widget:0",extractionSource="native_form",
+                    nativeVisibilityStatus="operator_visible_unverified",
+                    pdfFormField={"id":"pdf-form/0/widget/0","fieldValue":"","appearanceValue":"Existing AP text",
+                                  "valueStatus":"field_appearance_conflict","conflict":True,"appearanceState":"ExistingState",
+                                  "appearanceRawStreamBytesBase64":"T3JpZ2luYWwgQVAgYnl0ZXM="})
+        observation={"partAnchor":part["anchor"],"blockId":part["blockId"],"startOffset":0,"endOffset":0,
+                     "extractionSource":"native_form","formObservationStatus":"observed_selected_original_widget",
+                     "pdfFormField":copy.deepcopy(part["pdfFormField"]),"nativeVisibilityStatus":part["nativeVisibilityStatus"],
+                     "formInterpretation":"Stored value, selected appearance, blank/nontext and conflict are observations only; blank meaning, raster visibility, parent-child selection and legal OR applicability remain unknown."}
+        row={**p,"projectionVersion":"selected-native-source-material-form-observations-v5",
+             "selectedPartExtractionObservations":[observation]}
+        _canonical_checks(row,p,material=True)
+        for mutation in ("drop","stored","appearance","bytes","status","meaning","version"):
+            changed=copy.deepcopy(row);observed=changed["selectedPartExtractionObservations"][0]
+            if mutation=="drop":observed.pop("pdfFormField")
+            if mutation=="stored":observed["pdfFormField"]["fieldValue"]="No"
+            if mutation=="appearance":observed["pdfFormField"]["appearanceValue"]=""
+            if mutation=="bytes":observed["pdfFormField"]["appearanceRawStreamBytesBase64"]="changed"
+            if mutation=="status":observed["formObservationStatus"]="accepted"
+            if mutation=="meaning":observed["formInterpretation"]="Blank means not applicable"
+            if mutation=="version":changed["projectionVersion"]="selected-native-source-material-portable-cell-slices-v4"
+            with self.subTest(mutation=mutation), self.assertRaises(ValueError):_canonical_checks(changed,p,material=True)
 
     def test_material_quality_adds_only_declared_unverified_scope(self):
         p=parent();p["sourceQuality"]={"textAccuracy":"unverified","needsReviewPages":[]}

@@ -207,9 +207,18 @@ def _canonical_checks(row, parent, *, material=False):
             require(observed.pop("observationScope",None)=="stored_parser_declarations_only; textAccuracy_unverified; legalCoverage_unknown","material quality observation scope mismatch")
         require(_without_nulls(observed) == _without_nulls(parent.get(name)), f"canonical returned/selected payload mismatch: {name}")
     if material:
-        expected = [{"partAnchor":p.get("anchor"),"blockId":p.get("blockId"),
-                     "startOffset":p.get("startOffset"),"endOffset":p.get("endOffset"),
-                     "extractionSource":p.get("extractionSource")} for p in parent.get("parts", [])]
+        expected = []
+        for p in parent.get("parts", []):
+            observation = {"partAnchor":p.get("anchor"),"blockId":p.get("blockId"),
+                           "startOffset":p.get("startOffset"),"endOffset":p.get("endOffset"),
+                           "extractionSource":p.get("extractionSource")}
+            if p.get("pdfFormField") is not None:
+                require(row.get("projectionVersion") == "selected-native-source-material-form-observations-v5",
+                        "material form observation projection version mismatch")
+                observation.update(formObservationStatus="observed_selected_original_widget",
+                                   pdfFormField=p["pdfFormField"], nativeVisibilityStatus=p.get("nativeVisibilityStatus"),
+                                   formInterpretation="Stored value, selected appearance, blank/nontext and conflict are observations only; blank meaning, raster visibility, parent-child selection and legal OR applicability remain unknown.")
+            expected.append(observation)
         require(row.get("selectedPartExtractionObservations") == expected, "material source part observations mismatch")
 
 
