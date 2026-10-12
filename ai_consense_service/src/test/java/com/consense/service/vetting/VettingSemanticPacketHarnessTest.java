@@ -113,4 +113,52 @@ class VettingSemanticPacketHarnessTest {
         verify(provider,never()).chatStructured(anyList(),any());assertEquals(0,r.getActualGatewayCallCount());assertTrue(seen.values().stream().allMatch(n->n==2),"Each admitted preview must be freshly counted before dispatch");assertTrue(r.getTopicAudits().get(0).getPacketAudits().stream().allMatch(p->"not_submitted_budget_unknown".equals(p.getStatus())&&"token_preview_final_observation_changed".equals(p.getError())));assertTrue(r.getTopicAudits().get(0).getPendingSourceRequestCount()>0);assertEquals("not_submitted",r.getTopicAudits().get(0).getAggregateReviewStatus());
     }
 
+    private Result configuredNativeReview(LlmClient provider,int configuredContext,Boolean thinking,boolean explicit) {
+        return configuredNativeReview(provider,configuredContext,thinking,explicit,p->{},null);
+    }
+    private VettingCheckpointService.Session forbiddenCheckpoint() {
+        return new VettingCheckpointService(null,null,null).session("fixture","owner",()->fail("Rejected native profile must not load or reuse a checkpoint"));
+    }
+    private Result configuredNativeReview(LlmClient provider,int configuredContext,Boolean thinking,boolean explicit,java.util.function.Consumer<ConsenseProperties> afterCapture,VettingCheckpointService.Session checkpoint) {
+        List<Chunk> chunks=corpus();ConsenseProperties configured=props(chunks.get(0));
+        configured.getLlm().setNumCtx(configuredContext);configured.getLlm().setStructuredThinking(thinking);
+        when(provider.available()).thenReturn(true);when(provider.chatModel()).thenReturn(configured.getLlm().getChatModel());
+        LlmProfiles profiles=new LlmProfiles(configured,provider,mock(LlmClient.class));
+        VettingRetrievalClient retrieval=mock(VettingRetrievalClient.class);
+        when(retrieval.retrieve(anyString(),anyString(),eq("tender"),anyList())).thenReturn(Collections.singletonList(chunks.get(0)));
+        VettingSemanticReview semantic=new VettingSemanticReview(new AiGateway(provider,profiles),configured,retrieval);
+        semantic.setInputBudgetObserver(VettingTokenFixture::observe);
+        afterCapture.accept(configured);
+        try(LlmProfiles.Scope ignored=profiles.bind(profiles.resolve(explicit?"local":null));VettingSemanticReview.CheckpointScope durable=semantic.bindCheckpoint(checkpoint)){
+            return semantic.review("configured-native-fixture",chunks,"en",(n,message)->{});
+        }
+    }
+    @Test void capturedNativeContextCannotBorrowAnObserversLargerWindow() {
+        for(boolean explicit:Arrays.asList(false,true)){
+            LlmClient provider=emptyProvider();Result result=configuredNativeReview(provider,131072,false,explicit,p->{},forbiddenCheckpoint());
+            verify(provider,never()).chatStructured(anyList(),any());assertEquals(0,result.getActualGatewayCallCount());assertTrue(result.getReviewedChunkIds().isEmpty());
+            assertTrue(result.getTopicAudits().get(0).getPacketAudits().stream().allMatch(packet->"not_submitted_budget_unknown".equals(packet.getStatus())&&"observed_context_differs_from_configured_ollama_context".equals(packet.getError())));
+        }
+    }
+    @Test void capturedNativeCounterContractRequiresExplicitThinkingFalse() {
+        for(Boolean thinking:Arrays.asList(null,true)){
+            LlmClient provider=emptyProvider();Result result=configuredNativeReview(provider,524288,thinking,true,p->{},forbiddenCheckpoint());
+            verify(provider,never()).chatStructured(anyList(),any());assertEquals(0,result.getActualGatewayCallCount());assertTrue(result.getReviewedChunkIds().isEmpty());
+            assertTrue(result.getTopicAudits().get(0).getPacketAudits().stream().allMatch(packet->"not_submitted_budget_unknown".equals(packet.getStatus())&&"native_chat_observer_requires_thinking_false".equals(packet.getError())));
+        }
+    }
+    @Test void capturedNativeMatchingContextAndThinkingKeepBoundGeneration() {
+        for(boolean explicit:Arrays.asList(false,true)){
+            LlmClient provider=emptyProvider();Result result=configuredNativeReview(provider,524288,false,explicit);
+            verify(provider,times(2)).chatStructured(anyList(),any());assertEquals(2,result.getActualGatewayCallCount());
+        }
+    }
+    @Test void capturedNativeConfigurationDriftNeverLoadsCheckpointOrDispatches() {
+        for(boolean explicit:Arrays.asList(false,true)){
+            LlmClient provider=emptyProvider();Result result=configuredNativeReview(provider,524288,false,explicit,p->p.getLlm().setTemperature(0.333),forbiddenCheckpoint());
+            verify(provider,never()).chatStructured(anyList(),any());assertEquals(0,result.getActualGatewayCallCount());assertTrue(result.getReviewedChunkIds().isEmpty());
+            assertTrue(result.getTopicAudits().get(0).getPacketAudits().stream().allMatch(packet->"not_submitted_budget_unknown".equals(packet.getStatus())&&"captured_model_configuration_changed".equals(packet.getError())));
+        }
+    }
+
 }

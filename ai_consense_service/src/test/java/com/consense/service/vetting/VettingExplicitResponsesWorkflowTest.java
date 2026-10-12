@@ -29,6 +29,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 /** Real MVC/profile/async/H2 persistence with an in-memory native wire. No socket/model calls. */
 @SpringBootTest(properties={"spring.jpa.hibernate.ddl-auto=create-drop","spring.flyway.enabled=false",
     "consense.ocr.enabled=false","consense.vector.provider=memory","consense.llm.enabled=true",
+    "consense.llm.num-ctx=524288","consense.llm.structured-thinking=false",
     "consense.llm.base-url=https://local-fixture.invalid","consense.minimax-cn.enabled=true",
     "consense.minimax-cn.base-url=http://relay-fixture.invalid","consense.minimax-cn.api-key=",
     "consense.vetting.semantic-topics=1","consense.vetting.project-reference-comparisons=0",

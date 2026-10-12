@@ -27,6 +27,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @SpringBootTest(properties={"spring.jpa.hibernate.ddl-auto=create-drop","spring.flyway.enabled=false",
         "consense.ocr.enabled=false","consense.vector.provider=memory",
         "consense.llm.enabled=true","consense.llm.base-url=https://local-llm-test.invalid",
+        "consense.llm.num-ctx=524288","consense.llm.structured-thinking=false",
         "consense.minimax-cn.enabled=true","consense.minimax-cn.base-url=https://minimax-test.invalid",
         "consense.minimax-cn.api-key=test-only-placeholder",
         "consense.vetting.semantic-topics=1","consense.vetting.project-reference-comparisons=0",

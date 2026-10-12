@@ -33,6 +33,7 @@ public final class VettingRecoveryProcessFixture {
                 "--spring.profiles.active=h2","--server.address=127.0.0.1","--server.port=0","--spring.datasource.url="+url,
                 "--spring.jpa.hibernate.ddl-auto=update","--spring.flyway.enabled=false","--consense.storage-root="+root.resolve("uploads"),
                 "--consense.llm.enabled=false","--consense.minimax-cn.enabled=false","--consense.ocr.enabled=false","--consense.vector.provider=memory",
+                "--consense.llm.num-ctx=524288","--consense.llm.structured-thinking=false",
                 "--consense.fixed-baseline.enabled=false","--consense.oer.enabled=false","--consense.vetting.semantic-topics=2","--consense.vetting.project-reference-comparisons=0",
                 "--logging.level.root=WARN","--logging.level.com.consense=WARN")) {
             String project="process-recovery-fixture";ProjectRepository projects=context.getBean(ProjectRepository.class);
