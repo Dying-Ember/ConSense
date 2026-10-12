@@ -25,6 +25,35 @@ def authored():
 
 
 class NativePdfTableLogicTest(unittest.TestCase):
+    def test_parenthesized_acronym_is_not_a_second_numbering_column(self):
+        table, source = authored()
+        table['origins'][4]['text'] = '(NA)'
+        table['origins'][10]['text'] = '(NA)'
+        result = recover_table(table, source)
+        self.assertEqual(0, result['numberingColumnProposal'])
+        self.assertEqual('(NA)', result['cells'][4]['text'])
+        self.assertIsNotNone(result['logicalTable'])
+
+    def test_multiline_header_is_one_reversible_row_and_caption_notes_stay_outside(self):
+        table, source = authored()
+        for cell in table['origins']: cell['row'] += 3
+        prefix = []
+        for row, values in enumerate([['Caption', '', ''], ['Index', 'Requirement', 'Stored in'], ['', '', 'the'], ['', '', 'database']]):
+            if row == 1: continue  # Existing authored complete header is the anchor.
+            for col, text in enumerate(values):
+                prefix.append({'row': row, 'col': col, 'rowSpan': 1, 'colSpan': 1, 'text': text,
+                               'bbox': [col * 100, row * 20 - 60, (col + 1) * 100, row * 20 - 40],
+                               'glyphIds': [], 'glyphOverlapIds': [], 'spanKnown': True})
+        # Put the existing complete header before two sparse continuations.
+        for cell in table['origins'][:3]: cell['row'] = 1
+        table['origins'] = prefix + table['origins']
+        result = recover_table(table, source)['logicalTable']
+        self.assertEqual([[1, 2, 3], [4, 5], [6]], result['physicalRows'])
+        self.assertEqual('Value\nthe\ndatabase', result['origins'][2]['text'])
+        self.assertEqual(3, len(result['excludedPhysicalCellIds']))
+        self.assertEqual(3, len(result['origins'][2]['physicalCellIds']))
+        self.assertFalse(result['completeTableGroupAccepted'])
+
     def test_numbered_continuation_header_blank_no_na_and_conditions_stay_distinct(self):
         table, source = authored(); saved = copy.deepcopy(table)
         candidate = recover_page([table], source); result = candidate['tables'][0]

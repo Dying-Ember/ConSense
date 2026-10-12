@@ -10,7 +10,7 @@ import re
 
 
 SCHEMA = 'consense.native-pdf-table-candidate.v1'
-ITEM = re.compile(r'^\s*((?:\d+(?:\.\d+)*[.)]?)|(?:\([A-Za-z0-9]+\)))\s*$')
+ITEM = re.compile(r'^\s*(\d+(?:\.\d+)*[.)]?|\((?:\d+|[A-Za-z]|[ivxlcdmIVXLCDM]+)\))\s*$')
 CONDITION = re.compile(r'^\s*(?:notes?\s*[:.]|\*|abbreviations?\s*[:.]|where\b|provided\b)', re.I)
 
 
@@ -25,6 +25,58 @@ def _overlaps(a, b):
 def _words(value):
     # Diagnostic only; original strings and glyphs remain untouched.
     return ''.join(_literal(value).split())
+
+
+def _numbered_grid(table, rows, logical_rows, numbering_col):
+    """One-provider header/body proposal, with no source-driven crop or repair."""
+    if numbering_col is None or any(cell['rowSpan'] != 1 or cell['colSpan'] != 1 for row in rows.values() for cell in row):
+        return None
+    columns = sorted({cell['col'] for row in rows.values() for cell in row})
+    body = [row for row in logical_rows if row['role'] == 'numbered_row_proposal']
+    if len(columns) < 2 or len(body) < 2:
+        return None
+    first = body[0]['physicalRows'][0]
+    headers = [index for index, row in rows.items() if index < first
+               and [cell['col'] for cell in row] == columns and all(_literal(cell.get('text')).strip() for cell in row)]
+    if not headers:
+        return None
+    header_start = max(headers)
+    header = list(range(header_start, first))
+    if any(index not in rows for index in header):
+        return None
+    selected, previous = [], first - 1
+    for row in body:
+        if row['physicalRows'][0] != previous + 1:
+            break
+        selected.append(row); previous = row['physicalRows'][-1]
+    if len(selected) < 2:
+        return None
+    groups = [header, *[row['physicalRows'] for row in selected]]
+    origins, used = [], set()
+    for row_index, members in enumerate(groups):
+        for col in columns:
+            source = [next((cell for cell in rows[index] if cell['col'] == col), None) for index in members]
+            if any(cell is None or cell.get('bbox') is None for cell in source):
+                return None
+            ids = [cell['physicalCellId'] for cell in source]; used.update(ids)
+            boxes = [cell['bbox'] for cell in source]
+            known = all(isinstance(cell.get('text'), str) and cell.get('spanKnown') for cell in source)
+            origins.append({'row': row_index, 'col': columns.index(col), 'rowSpan': 1, 'colSpan': 1,
+                'text': '\n'.join(cell['text'] for cell in source) if known else None,
+                'bbox': [min(b[0] for b in boxes), min(b[1] for b in boxes), max(b[2] for b in boxes), max(b[3] for b in boxes)],
+                'spanKnown': known, 'physicalCellIds': ids,
+                'glyphIds': [gid for cell in source for gid in cell.get('glyphIds', [])],
+                'transform': 'same_provider_column_preserving_physical_row_group',
+                'sourceMembershipStatus': 'proposal_not_source_reviewed'})
+    return {'tableId': table['tableId'] + ':numbered-logical', 'rowCount': len(groups), 'colCount': len(columns),
+            'bbox': [min(cell['bbox'][0] for cell in origins), min(cell['bbox'][1] for cell in origins),
+                     max(cell['bbox'][2] for cell in origins), max(cell['bbox'][3] for cell in origins)],
+            'origins': origins, 'physicalRows': groups, 'numberingColumn': numbering_col,
+            'providerTableId': table['tableId'],
+            'excludedPhysicalCellIds': [cell['physicalCellId'] for row in rows.values() for cell in row if cell['physicalCellId'] not in used],
+            'excludedMembership': 'preserved_in_whole_provider_output_unknown_role',
+            'textTransform': 'original_cell_literals_with_explicit_row_separators_no_repair',
+            'completeTableGroupAccepted': False}
 
 
 def recover_table(table, observation):
@@ -94,7 +146,9 @@ def recover_table(table, observation):
     for row in logical:
         if all(r in header_rows for r in row['physicalRows']):
             row['role'] = 'header_proposal'
+    grid = _numbered_grid(table, rows, logical, numbering_col)
     return {'schema': SCHEMA, 'tableId': table['tableId'], 'cells': cells, 'logicalRows': logical,
+            'logicalTable': grid,
             'headerRows': header_rows, 'numberingColumnProposal': numbering_col,
             'coverage': {'required': sorted(inside), 'present': sorted(set(owned) & inside),
                          'missing': missing, 'duplicate': duplicate,
@@ -129,6 +183,8 @@ def recover_page(tables, observation):
             candidates.append({'text': literal, 'glyphIds': [g['glyphId'] for g in ordered],
                                'role': 'condition_line_proposal', 'owner': 'unknown',
                                'lineAssembly': 'geometry_proposal_original_glyphs_retained'})
-    return {'schema': SCHEMA, 'tables': proposals, 'conditionCandidates': candidates,
+    return {'schema': SCHEMA, 'tables': proposals,
+            'logicalTables': [proposal['logicalTable'] for proposal in proposals if proposal['logicalTable'] is not None],
+            'conditionCandidates': candidates,
             'unassignedSourceGlyphIds': sorted(outside), 'completeSourceGroupAccepted': False,
             'quality': 'unknown_not_independently_source_scored'}
