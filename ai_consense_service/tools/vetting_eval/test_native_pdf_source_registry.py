@@ -55,7 +55,14 @@ class NativePdfRegistryTest(unittest.TestCase):
         with self.assertRaises(ValueError): self.registry.validate_native_chunks(self.public['chunks'])
 
     def test_legacy_scan_and_actual_cas_docx_keep_their_existing_validators(self):
-        bundle, adoption, _ = asset_fixture(self.store)
+        # The cold source gate reads the declared five-page PDF, so the old
+        # authored wire string is no longer a valid source-identity fixture.
+        from io import BytesIO
+        from pypdf import PdfWriter
+        writer = PdfWriter()
+        for _ in range(5): writer.add_blank_page(width=300, height=600)
+        source = BytesIO(); writer.write(source)
+        bundle, adoption, _ = asset_fixture(self.store, source_bytes=source.getvalue())
         scanned = project_canonical(bundle, adoption, artifact_store=self.store)
         bundle, adoption = docx_fixture(self.store)
         docx = publish_native_transport(produce_native(bundle, adoption, artifact_store=self.store), artifact_store=self.store)
