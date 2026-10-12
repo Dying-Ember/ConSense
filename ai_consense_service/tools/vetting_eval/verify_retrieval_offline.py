@@ -49,10 +49,24 @@ def bundled_weights(archive):
 
 def wheel_inventory(lock, source_report, wheelhouse):
     text = Path(lock).read_text()
-    expected = {normalized(name): version for name, version in
-                re.findall(r'^([A-Za-z0-9._-]+)==([^\s\\;]+)', text, re.M)}
+    expected = {}
+    for stanza in re.sub(r'\\[ \t]*\n', ' ', text).splitlines():
+        stanza = stanza.strip()
+        if not stanza or stanza.startswith('#'):
+            continue
+        entry = re.fullmatch(r'([A-Za-z0-9._-]+)==([^\s\\;]+)((?:\s+--hash=sha256:[0-9a-f]{64})+)', stanza)
+        require(entry, 'Exact package/version with SHA256 hashes required in each lock stanza')
+        name, version, hashes = entry.groups(); name = normalized(name)
+        require(name not in expected, 'Duplicate normalized lock package: '+name)
+        expected[name] = {'version': version, 'hashes': set(re.findall(r'--hash=sha256:([0-9a-f]{64})', hashes))}
     require(expected, 'Nonempty complete hash lock required')
-    sources = {normalized(row['metadata']['name']): row for row in json.loads(Path(source_report).read_bytes())['install']}
+    sources = {}
+    for row in json.loads(Path(source_report).read_bytes())['install']:
+        name = normalized(row['metadata']['name'])
+        require(name not in sources, 'Duplicate normalized source package: '+name)
+        require(name in expected and row['metadata'].get('version') == expected[name]['version'],
+                'Source package/version differs from lock')
+        sources[name] = row
     require(set(sources) == set(expected), 'Source report must cover the complete lock exactly')
     wheels = {}
     for path in sorted(Path(wheelhouse).glob('*.whl')):
@@ -65,13 +79,13 @@ def wheel_inventory(lock, source_report, wheelhouse):
             require(len(metadata) == 1, 'Wheel requires one package METADATA')
             fields = BytesParser(policy=default).parsebytes(archive.read(metadata[0]))
             name, version = normalized(fields['Name']), fields['Version']
-            require(name in expected and name not in wheels and version == expected[name], 'Wheel package/version differs from lock')
+            require(name in expected and name not in wheels and version == expected[name]['version'], 'Wheel package/version differs from lock')
             source = sources[name]['download_info']
             remote = urlsplit(source['url'])
             require(remote.scheme == 'https' and remote.hostname in ('files.pythonhosted.org', 'download.pytorch.org', 'download-r2.pytorch.org', 'pypi.nvidia.com')
                     and not remote.username and not remote.password, 'Official credential-free wheel source required')
             require(file['sha256'] == source['archive_info']['hashes']['sha256']
-                    and '--hash=sha256:'+file['sha256'] in text, 'Wheel differs from download source or locked hash')
+                    and file['sha256'] in expected[name]['hashes'], 'Wheel differs from download source or locked hash')
             license_names = [member for member in names
                              if ('/licenses/' in member or Path(member).name.upper().startswith(('LICENSE', 'COPYING', 'NOTICE')))
                              and not member.endswith('/')]
@@ -103,12 +117,13 @@ def smoke():
     sentence_transformers.SentenceTransformer.__init__ = forbidden
     transformers.AutoModel.from_pretrained = transformers.AutoTokenizer.from_pretrained = classmethod(forbidden)
     import server
-    assert all(getattr(server, name) is None for name in ('_embedding', '_reranker', '_ocr', '_database'))
-    assert not torch.cuda.is_initialized()
-    assert torch.tensor([1., 2.], device='cpu').sum().item() == 3.
-    assert len(BM25Okapi([['contract', 'notice'], ['rain', 'water']]).get_scores(['notice'])) == 2
-    assert server.MODELS['embedding']['revision'] == '5617a9f61b028005a4858fdac845db406aefb181'
-    assert server.MODELS['reranker']['revision'] == '953dc6f6f85a1b2dbfca4c34a2796e7dde08d41e'
+    require(all(getattr(server, name) is None for name in ('_embedding', '_reranker', '_ocr', '_database')),
+            'Server import must not initialize models or vector databases')
+    require(not torch.cuda.is_initialized(), 'Offline smoke must not initialize CUDA')
+    require(torch.tensor([1., 2.], device='cpu').sum().item() == 3., 'CPU tensor check failed')
+    require(len(BM25Okapi([['contract', 'notice'], ['rain', 'water']]).get_scores(['notice'])) == 2, 'BM25 check failed')
+    require(server.MODELS['embedding']['revision'] == '5617a9f61b028005a4858fdac845db406aefb181', 'Embedding revision differs')
+    require(server.MODELS['reranker']['revision'] == '953dc6f6f85a1b2dbfca4c34a2796e7dde08d41e', 'Reranker revision differs')
     return {'CPUtensorCheck': True, 'BM25Check': True, 'serverImport': True,
             'primaryPackageImports': ['torch', 'transformers', 'sentence_transformers', 'qdrant_client',
                                       'rank_bm25', 'fastapi', 'uvicorn', 'pypdf', 'pypdfium2', 'docx'],
