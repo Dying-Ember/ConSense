@@ -469,6 +469,9 @@ export interface UploadResult {
 /* ------------------------------------------------------------ 审查 */
 
 export interface VettingFile {
+  documentScope?: DocumentScope
+  exclusionReason?: string | null
+  excluded?: boolean
   key: string
   role: LocalizedText
   sourceRole?: VettingSourceRole
@@ -486,6 +489,7 @@ export interface VettingFile {
 }
 
 export interface FindingEvidence {
+  fixedBaselineEvidence?: import('./fixedBaselineEvidence').FixedBaselineEvidenceAddress | null
   canonicalEvidence?: CanonicalEvidenceAddress | null
   side: string
   documentId?: string | number | null
@@ -576,6 +580,7 @@ export interface VettingCoverage {
 }
 
 export interface VettingSemanticTopic {
+  checkState?: VettingCheckState
   topicIndex: number
   topic: string
   reviewKind?: 'topic' | 'project_reference'
@@ -609,6 +614,8 @@ export interface VettingSemanticTopic {
 }
 
 export interface VettingSemanticPacket {
+  checkState?: VettingCheckState
+  checkpointStatus?: 'new_packet' | 'retrying_uncertain_packet' | 'resumed_verified_packet' | 'saved_verified_packet'
   packetId: string
   sourceObservationPacketId?: string | null
   sourceSnapshotSha256?: string | null
@@ -651,6 +658,9 @@ export interface VettingSourceRequestAudit {
 }
 
 export interface VettingJob {
+  recoveryStatus?: 'NEW' | 'RESUMING' | 'NEEDS_RERUN' | 'COMPLETED'
+  reportSnapshotId?: string | null
+  reliablePackets?: { packet: VettingSemanticPacket; candidates: Record<string, unknown>[]; warnings: string[]; savedAt: string; resultSha256: string }[]
   sourceSnapshotSha256?: string | null
   sourceSetStale?: boolean
   modelIdentity?: ModelIdentity | null
@@ -687,6 +697,7 @@ export type VettingReportFormat = 'pdf' | 'docx' | 'json'
 export type VettingSourceRole = 'tender' | 'standard' | 'project_fact' | 'package_manifest'
 
 export interface EvidenceSnippet {
+  fixedBaselineEvidence?: import('./fixedBaselineEvidence').FixedBaselineEvidenceAddress | null
   canonicalEvidence?: CanonicalEvidenceAddress | null
   code: string
   /** 原文中该片段所在页码，由正文 --- Pn --- 标记反推 */
@@ -715,6 +726,7 @@ export interface EvidenceBundle {
 /* ------------------------------------------------------------ 咨询 */
 
 export interface Citation {
+  fixedBaselineEvidence?: import('./fixedBaselineEvidence').FixedBaselineEvidenceAddress | null
   canonicalEvidence?: CanonicalEvidenceAddress[] | null
   canonicalSourceUnit?: Record<string, unknown> | null
   scoreMeaning?: 'actual_reranked_seed' | 'unranked_context' | string | null
@@ -730,6 +742,7 @@ export interface Citation {
 }
 
 export interface ChatMessage {
+  sessionId?: string | null
   basisScope?: 'project_contract' | 'reference_only' | 'insufficient'
   clarifications?: string[]
   sourceScope?: string
@@ -746,6 +759,7 @@ export interface ChatMessage {
 }
 
 export interface AskResponse {
+  sessionId?: string | null
   messageId?: number
   basisScope?: 'project_contract' | 'reference_only' | 'insufficient'
   clarifications?: string[]
@@ -783,9 +797,19 @@ export interface IndexStatus {
   message: LocalizedText
 }
 
-export type DocumentScope = 'auto' | 'package' | 'works_pss' | 'pricing' | 'example'
+export type DocumentScope = 'auto' | 'package' | 'works_pss' | 'pricing' | 'example' | 'drawing'
+export type VettingCheckState = 'checked_pass' | 'issue' | 'insufficient_evidence' | 'not_completed' | 'not_applicable'
+export type AdviceBasisScope = 'project_contract' | 'reference_only'
+export interface AdviceSession {
+  id: string
+  projectId: string
+  scope: string
+  basisScope: AdviceBasisScope
+  createdAt: string
+}
 
 export interface AdviceSourceDocument {
+  documentScope?: DocumentScope
   documentId: string
   sourceHash?: string | null
   fileKey: string
