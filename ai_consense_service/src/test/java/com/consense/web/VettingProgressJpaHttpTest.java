@@ -48,6 +48,7 @@ class VettingProgressJpaHttpTest {
     @Autowired MockMvc mvc;
     @Autowired ProjectRepository projects;
     @Autowired VettingRunRepository runs;
+    @Autowired VettingFindingRepository findings;
     @Autowired SourceDocumentRepository documents;
     @Autowired EntityManagerFactory emf;
     @Autowired JdbcTemplate jdbc;
@@ -56,7 +57,7 @@ class VettingProgressJpaHttpTest {
     @SpyBean OerBusinessEvidence actualOer;
 
     @BeforeEach void seed(){
-        jdbc.update("DELETE FROM vetting_run");jdbc.update("DELETE FROM source_document");jdbc.update("DELETE FROM project");
+        jdbc.update("DELETE FROM vetting_finding");jdbc.update("DELETE FROM vetting_run");jdbc.update("DELETE FROM source_document");jdbc.update("DELETE FROM project");
         jdbc.execute("ALTER TABLE source_document ALTER COLUMN id RESTART WITH 101");
         Project p=new Project();p.setId(PROJECT);p.setNameEn("Authored progress test");projects.saveAndFlush(p);
         SourceDocument d=new SourceDocument();d.setProjectId(PROJECT);d.setCategory(SourceDocument.CATEGORY_VETTING_PACKAGE);
@@ -67,6 +68,27 @@ class VettingProgressJpaHttpTest {
         r.setMessage("Authored running state");r.setStartedAt(Instant.parse("2026-10-10T00:00:00Z"));r.setSourceSnapshotSha256(String.join("",Collections.nCopies(64,"a")));
         r.setCoverageJson("{}");r.setResultJson(null);r.setModelIdentityJson("{\"profileId\":\"authored\",\"provider\":\"minimax\",\"model\":\"MiniMax-M3\",\"configurationSha256\":\"authored-configuration\",\"identityScope\":\"captured\"}");runs.saveAndFlush(r);
         clearFeedback();
+    }
+
+    @Test void findingListLoadsSharedRunOncePerRequestWithoutCrossRequestCache()throws Exception {
+        for(int i=1;i<=3;i++) {
+            VettingFinding f=new VettingFinding();f.setProjectId(PROJECT);f.setCode("AUTHORED-"+i);
+            f.setGroupKey("risk");f.setRunId(RUN);f.setEvidenceJson("[]");findings.saveAndFlush(f);
+        }
+        for(char snapshot: new char[]{'a','b'}) {
+            String expected=String.join("",Collections.nCopies(64,String.valueOf(snapshot)));
+            jdbc.update("UPDATE vetting_run SET source_snapshot_sha256=? WHERE id=?",expected,RUN);
+            clearFeedback();JsonNode response=call("/findings");assertEquals(0,response.path("code").asInt(),response.toString());
+            assertEquals(3,response.path("data").size());
+            for(JsonNode finding:response.path("data")) {
+                assertEquals(RUN,finding.path("runId").asText());
+                assertEquals(expected,finding.path("sourceSnapshotSha256").asText());
+            }
+            List<String> sql=selects("vetting_run");long runLoads=loads(VettingRun.class);
+            System.out.println("FINDING_LIST_RUN_SQL "+JsonUtils.write(sql)+" ENTITY_LOADS="+runLoads);
+            assertEquals(1,sql.size(),"Findings sharing a run need one actual SELECT per independent HTTP request");
+            assertEquals(1,runLoads,"The request transaction may reuse its managed run, never a cross-request cache");
+        }
     }
 
     @Test void sameSavedRunLegacyReadsSourceAndParsesItsHashWhileProgressDoesNeither() throws Exception {
