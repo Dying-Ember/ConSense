@@ -27,3 +27,9 @@ For native Chat, reuse `consense.vetting.token-budget-observer-enabled`, `token-
 - `git diff --check` passed. Java used the verified JDK17 alias and existing Maven3.9.11; tests used isolated H2 and fixture model/counter adapters. No remote model, production database, active vector owner or browser was used.
 
 The known `CanonicalPageExcerptTest` baseline failure was outside this focused selection and was not deleted, skipped or reclassified. Real M3/native counter integration, original byte/source quality, business answers, frontend acceptance, live MySQL migration and H800 remain unverified. No new dependencies, session deletion/renaming platform, global memory service or Drafting change was added.
+
+## Integrated contract correction
+
+The earlier excerpt failure remains recorded above. The integrated test now decodes the actual lossless model-material dictionary and follows ordered member references, asserting both complete source parts and physical-page bindings. It no longer assumes the superseded inline excerpt layout; no production text was weakened or truncated.
+
+The delivery worktree's `integrated-shared-advice-tests.log` records an exit-zero run of **75 tests, 0 failures/errors/skips**: CanonicalPageExcerptTest (8), DrawingUploadHttpTest (3), AdviceSessionIntegrationTest (14), AdviceCanonicalIntegrationTest (19), AdviceFixedBaselineTest (7), AdviceDocumentScopeIntegrationTest (15), FixedBaselineRetrievalClientTest (6) and FixedBaselineSourceControllerTest (3). Individual Surefire XML files are the count source. These overlap previous runs and are not added to them. This confirms local contracts, not a real model or browser result.
