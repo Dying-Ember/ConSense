@@ -537,7 +537,8 @@ public class VettingSemanticReview {
         if(identity==null||!"configured_profile".equals(identity.getIdentityScope()))return null;
         ConsenseProperties.Llm configured="minimax-cn".equals(identity.getProfileId())?props.getMinimaxCn():props.getLlm();
         if(!Objects.equals(identity.getConfigurationSha256(),com.consense.ai.LlmProfiles.configurationSha256(configured)))return "captured_model_configuration_changed";
-        if("ollama".equals(identity.getProvider())) {
+        if(!"ollama".equalsIgnoreCase(identity.getProvider())&&!"openai".equalsIgnoreCase(identity.getProvider()))return "native_chat_provider_unknown";
+        if("ollama".equalsIgnoreCase(identity.getProvider())) {
             if(!Boolean.FALSE.equals(configured.getStructuredThinking()))return "native_chat_observer_requires_thinking_false";
             if(configured.getNumCtx()!=budget.getObservation().getEffectiveContextTokens())return "observed_context_differs_from_configured_ollama_context";
         }
