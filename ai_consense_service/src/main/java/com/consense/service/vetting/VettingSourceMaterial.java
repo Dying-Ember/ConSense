@@ -16,6 +16,10 @@ public final class VettingSourceMaterial {
     private VettingSourceMaterial() { }
 
     public static List<Map<String,Object>> project(List<Chunk> selected) {
+        return project(selected,FixedVettingReferences.empty());
+    }
+
+    static List<Map<String,Object>> project(List<Chunk> selected,FixedVettingReferences fixedReferences) {
         Objects.requireNonNull(selected,"Selected source chunks are required");
         Set<String> ids=new HashSet<>();Map<List<String>,Integer> blocks=new HashMap<>(),positions=new HashMap<>();
         for(Chunk c:selected) {
@@ -27,8 +31,12 @@ public final class VettingSourceMaterial {
             }
         }
         VettingNativeCellSlices.Observation cellObservations=VettingNativeCellSlices.observe(selected);
+        OerModelMaterial.Request modelMaterial=new OerModelMaterial.Request();
+        Map<String,Map<String,Object>> fixedExcerpts=fixedReferences.modelExcerpts(selected);
         List<Map<String,Object>> excerpts=new ArrayList<>();
         for(Chunk c:selected) {
+            if(FixedVettingReferences.isFixed(c)){excerpts.add(fixedExcerpts.get(c.getId()));continue;}
+            if(c.getCanonicalPayload()!=null||c.getCanonicalEvidence()!=null){excerpts.add(canonical(c,modelMaterial));continue;}
             List<Map<String,Object>> rows=new ArrayList<>(),unknown=new ArrayList<>(),methods=new ArrayList<>();
             boolean bodyBound=bodyMatchesParts(c);int cursor=0;
             if(c.getParts()==null||c.getParts().isEmpty())unknown.add(map("reason","source_parts_unavailable"));
@@ -63,6 +71,22 @@ public final class VettingSourceMaterial {
                     "tableInterpretation", "selected complete row parts only; headers, merged grid, full table and contractual adoption unknown"));
         }
         return excerpts;
+    }
+
+    private static Map<String,Object> canonical(Chunk c,OerModelMaterial.Request modelMaterial){
+        String rejected=OerBusinessEvidence.canonicalViewStatus(c);if(rejected!=null)throw new IllegalArgumentException(rejected);
+        com.fasterxml.jackson.databind.JsonNode raw=c.getCanonicalPayload();
+        com.fasterxml.jackson.databind.node.ObjectNode structure=modelMaterial.project(c.getCanonicalEvidence(),raw,c.getRole());
+        structure.set("canonicalScope",raw.path("canonicalScope").deepCopy());
+        return map("id",c.getId(),"file",nvl(c.getFileKey())+" · "+nvl(c.getFileName()),"documentId",c.getDocumentId(),"sourceHash",c.getSourceHash(),
+                "role",c.getRole(),"metadataVersion",c.getMetadataVersion(),"segmentationVersion",c.getSegmentationVersion(),
+                "nativeTableMetadataVersion",c.getNativeTableMetadataVersion(),"sourceQualityMetadataVersion",c.getSourceQualityMetadataVersion(),
+                "sourceQualityHash",c.getSourceQualityHash(),"sourceQuality",raw.path("sourceQuality").deepCopy(),
+                "anchor",c.getAnchor(),"clauseId",c.getClauseId(),"clauseHeadingLocation",c.getClauseHeadingLocation(),"content",c.getContent(),
+                "projectionVersion",OerModelMaterial.VERSION,"canonicalStructure",structure,
+                "nativeRows",Collections.emptyList(),"unresolvedNativeRowParts",Collections.emptyList(),"nativeCellSlices",Collections.emptyList(),
+                "reconstructedNativeRows",Collections.emptyList(),"unresolvedNativeCellSlices",Collections.emptyList(),
+                "nativeRowsStatus","not_applicable_to_canonical_structure","tableInterpretation","adopted whole-unit observations; edit state, blank meaning, applicability and semantic coverage remain declared unknown");
     }
 
     /** Keeps the existing project-fact interpretation only when its row and header text are both selected. */

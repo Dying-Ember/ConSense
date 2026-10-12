@@ -2,6 +2,10 @@
 
 Approved design: prototype A at commit 4fa7dab. User clarification on 2026-10-07: preview and comparison belong only to Drafting step 3. Steps 1 (upload/parse) and 2 (extraction/confirmation) must remain as implemented.
 
+### Latest interaction clarification (2026-10-12)
+
+The user explicitly requested a direct hotfix: clicking a changed block must immediately show the inputs, values and recorded source evidence associated with its verified saved action. A previous unrelated input must not remain visible as the cause of the clicked change. A single input is selected automatically. Joint saved actions show all contributing inputs and their evidence immediately; choosing one is optional detail navigation. Broad paragraph associations must not override the verified applied-action input keys. Manual edits, independent template cleanup and unverified differences state their attribution limits and must not borrow the previously selected input's evidence. Verified manual/cleanup blocks can be clicked even when they have no business input. This clarification replaces the mandatory selection flow in historical acceptance items 3–5 below. Complete saved-revision red/green/grey changes remain visible when input focus changes. Extraction, adoption, values, generation, saved document content and layout stay unchanged.
+
 ## Scope and invariants
 
 Replace step 3's PDF-first location interface with a continuous, structured reading of the actual original and saved DOCX. Keep business inputs, catalogue, conditions, evidence intake, adoption, plan, generation, body-save and revision-bound export contracts unchanged. Do not import prototype inputs, six-variable fixtures, trial substitutions or frozen results. Current user values do not rewrite a saved document: stale/pending states remain visible until existing generation/save succeeds.

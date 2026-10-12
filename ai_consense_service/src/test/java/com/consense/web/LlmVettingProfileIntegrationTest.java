@@ -51,13 +51,17 @@ class LlmVettingProfileIntegrationTest {
         verify(miniMax,times(1)).chatStructured(anyList(),any());verifyNoInteractions(local);
     }
 
-    @Test void absentHeaderRetainsLegacyResponsesBudgetAndLeavesConfiguredProfileIdentityUnknown() throws Exception {
+    @Test void absentHeaderCapturesConfiguredLegacyResponsesIdentityWithoutClaimingProviderExecution() throws Exception {
         when(http.postJson(anyString(),anyString(),anyLong())).thenThrow(new IllegalStateException("External retrieval fixture unavailable"));
         String id=project();upload(id);
         JsonNode queued=JsonUtils.parse(mvc.perform(post("/api/vetting/"+id+"/runs")).andExpect(jsonPath("$.code").value(0)).andReturn().getResponse().getContentAsString()).path("data");
-        assertTrue(queued.path("modelIdentity").isMissingNode());JsonNode saved=await(id,queued.path("id").asText());
-        assertEquals("COMPLETED",saved.path("status").asText());assertTrue(saved.path("modelIdentity").isMissingNode());
-        assertTrue(saved.path("result").path("modelIdentity").isMissingNode());assertEquals("MiniMax-M3",saved.path("result").path("model").asText());
+        assertEquals("vetting-responses",queued.path("modelIdentity").path("profileId").asText());
+        assertEquals(com.consense.service.vetting.VettingResponsesTransport.WIRE,queued.path("modelIdentity").path("provider").asText());
+        assertEquals("configured_vetting_wire",queued.path("modelIdentity").path("identityScope").asText());
+        assertTrue(queued.path("modelIdentity").path("configurationSha256").asText().matches("[a-f0-9]{64}"));
+        JsonNode saved=await(id,queued.path("id").asText());
+        assertEquals("COMPLETED",saved.path("status").asText());assertEquals(queued.path("modelIdentity"),saved.path("modelIdentity"));
+        assertEquals(queued.path("modelIdentity"),saved.path("result").path("modelIdentity"));assertEquals("MiniMax-M3",saved.path("result").path("model").asText());
         JsonNode packet=saved.path("coverage").path("semanticTopics").get(0).path("packetAudits").get(0);
         assertEquals("budget_unknown",packet.path("inputBudgetStatus").asText());assertFalse(packet.path("actualGatewayCallStarted").asBoolean());
         verifyNoInteractions(local,miniMax);

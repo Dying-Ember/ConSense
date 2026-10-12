@@ -23,7 +23,6 @@ import zipfile
 
 
 REPO = Path(__file__).resolve().parent.parent
-WITHHELD = {"photocopyRateAboveA3", "projectArchitectPhone", "siteInspectionEndDate", "quotationBeforeVariation"}
 NS = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
 
 
@@ -300,6 +299,28 @@ def fixture_presentation(expected_doc: dict, expected: dict) -> dict:
     return result
 
 
+def fixture_holdouts(expected: dict, catalog: dict) -> set[str]:
+    """Validate this exam's declared holdouts without fixing their identities.
+
+    The saved API catalogue fixes the 79 input keys. A new exam may disclose
+    an old holdout and withhold another active input; null/unknown and the
+    four-item boundary remain mandatory.
+    """
+    keys = [field["key"] for group in catalog.get("groups", []) for field in group.get("fields", [])]
+    if (not isinstance(expected, dict) or len(expected) != 79
+            or len(keys) != 79 or len(set(keys)) != 79 or set(expected) != set(keys)):
+        raise ValueError("Reference must contain exactly the 79 catalogue inputs, with unique catalogue keys")
+    if any(not isinstance(truth, dict) for truth in expected.values()):
+        raise ValueError("Reference input declarations must be objects")
+    withheld = {key for key, truth in expected.items() if truth.get("origin") == "deliberately_withheld"}
+    if len(withheld) != 4:
+        raise ValueError("Reference must declare exactly four deliberately withheld inputs")
+    if any(expected[key].get("status") != "unknown" or expected[key].get("applicability") != "active"
+           or "value" not in expected[key] or expected[key]["value"] is not None for key in withheld):
+        raise ValueError("Declared holdouts must be active unknown null inputs")
+    return withheld
+
+
 def grade(args) -> tuple[dict, int]:
     fixture = args.fixture.resolve()
     reference = fixture / "02_reference_do_not_upload" if (fixture / "02_reference_do_not_upload").is_dir() else fixture
@@ -307,18 +328,20 @@ def grade(args) -> tuple[dict, int]:
     expected_path = reference / "expected_values.json"
     expected_doc = read(expected_path)
     expected = expected_doc["expectedInputs"]
-    if len(expected) != 79 or set(k for k, v in expected.items() if v.get("origin") == "deliberately_withheld") != WITHHELD:
-        raise ValueError("Reference does not contain this exact 79-item / four-withheld exam")
+    run = args.actual.resolve().parent
+    catalog = local_optional(run, "catalog.json", {})
+    if not catalog:
+        raise ValueError("catalog.json API snapshot is required; the raw resource ruleVersion may differ from the running Java/API catalogue version")
+    withheld = fixture_holdouts(expected, catalog)
     # Read the incremental ledger solely to verify withheld answers never leak
     # into any staged answer; this grader evaluates the final 15-document state.
     incremental = read(reference / "incremental_expected_states.json")
     if len(incremental) != 15 or any(
         k in stage.get("newAnswers", {}) or stage.get("cumulativeValues", {}).get(k) is not None
-        for stage in incremental for k in WITHHELD
+        for stage in incremental for k in withheld
     ):
         raise ValueError("Reference incremental states violate the missing-evidence boundary")
 
-    run = args.actual.resolve().parent
     variables = unwrap(args.actual)
     trace = unwrap(args.trace) if args.trace else local_optional(run, "trace.json", {})
     plan = unwrap(args.plan) if args.plan else local_optional(run, "plan.json", {})
@@ -340,9 +363,6 @@ def grade(args) -> tuple[dict, int]:
         elif stage_number < 15 and truth["status"] == "not_applicable" and truth["applicability"] == "prerequisite_unknown":
             truth["status"] = "prerequisite_unknown"
     presentation = fixture_presentation(expected_doc, expected)
-    catalog = local_optional(run, "catalog.json", {})
-    if not catalog:
-        raise ValueError("catalog.json API snapshot is required; the raw resource ruleVersion may differ from the running Java/API catalogue version")
     if not isinstance(variables, list) or not isinstance(trace, dict) or not isinstance(plan, dict):
         raise ValueError("variables must be a VariableVO list; trace and plan must be objects")
     by_key = {v.get("key"): v for v in variables}
@@ -479,7 +499,7 @@ def grade(args) -> tuple[dict, int]:
                 failures.append("expected_unfilled_input_has_value")
             if nonempty_candidates:
                 failures.append("expected_unfilled_input_has_filled_candidate")
-            if key in WITHHELD and v and v.get("adoptionState") != "missing":
+            if key in withheld and v and v.get("adoptionState") != "missing":
                 failures.append("withheld_input_not_editable_missing_state")
             recognized = not failures
         else:
@@ -543,7 +563,7 @@ def grade(args) -> tuple[dict, int]:
             "nullStateInputs": sum(v["value"] is None for v in expected.values()),
             "correctlyUnfilledInputs": sum(r["recognizedCorrectGroundedAnswer"] and r["expectedValue"] is None for r in ledger),
             "pass": counts["PASS"], "review": counts["REVIEW"], "fail": counts["FAIL"],
-            "withheldPass": sum(r["key"] in WITHHELD and r["outcome"] == "PASS" for r in ledger),
+            "withheldPass": sum(r["key"] in withheld and r["outcome"] == "PASS" for r in ledger),
             "wrongLatestCandidates": sum(r["wrongLatestCandidateCount"] for r in ledger),
             "historicalOrOtherSourceConflictCandidates": sum(r["historicalOrOtherSourceConflictCount"] for r in ledger),
             "ungroundedCandidates": sum(r["ungroundedCandidateCount"] for r in ledger),

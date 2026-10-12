@@ -14,13 +14,13 @@ import static org.mockito.Mockito.*;
 import static org.mockito.ArgumentMatchers.*;
 
 class VettingRetrievalSourceUnitsTest {
-    private Chunk c(String id,String doc,String role,String clause,String block,String text){
+    Chunk c(String id,String doc,String role,String clause,String block,String text){
         Chunk c=new Chunk();c.setId(id);c.setDocumentId(doc);c.setSourceHash(VettingCorpus.hash(doc));c.setRole(role);c.setFileKey("AAA");c.setClauseId(clause);c.setClauseHeadingLocation(clause==null?null:"body/1");c.setContent(text);c.setAnchor(block.replace(':','/'));
         c.setMetadataVersion(VettingCorpus.METADATA_VERSION);c.setSegmentationVersion(VettingCorpus.SEGMENTATION_VERSION);c.setNativeTableMetadataVersion(VettingCorpus.NATIVE_TABLE_METADATA_VERSION);
         VettingSourceQuality.Info q=new VettingSourceQuality.Info();q.setParseStatus("PARSED");q.setOcrQualityStatus("not_observed");q.setCoverageMetadataSha256(VettingCorpus.hash("synthetic-source-provenance"));c.setSourceQuality(q);c.setSourceQualityHash(VettingSourceQuality.hash(q));c.setSourceQualityMetadataVersion(VettingSourceQuality.VERSION);
         Part p=new Part();p.setText(text);p.setBlockId(block);p.setAnchor(c.getAnchor());p.setStartOffset(0);p.setEndOffset(text.length());p.setExtractionSource("word");c.setParts(Collections.singletonList(p));return c;
     }
-    private JsonNode response(Chunk seed,List<Chunk> members) {
+    JsonNode response(Chunk seed,List<Chunk> members) {
         ObjectNode identity=JsonUtils.mapper().createObjectNode();JsonNode raw=JsonUtils.mapper().valueToTree(seed);for(String f:VettingRetrievalSourceUnits.FIELDS)identity.set(f,raw.path(f));
         List<Chunk> sorted=new ArrayList<>(members);sorted.sort(Comparator.comparing(Chunk::getId));List<Map<String,Object>> ranges=new ArrayList<>();
         sorted.stream().flatMap(c->c.getParts().stream()).sorted(Comparator.comparing(Part::getBlockId)).forEach(p->ranges.add(VettingReviewProbe.map("blockId",p.getBlockId(),"startUtf16",0,"endUtf16",p.getEndOffset(),"status","observed_canonical_ranges_zero_gap","sourceBlockComplete",null)));
@@ -39,6 +39,8 @@ class VettingRetrievalSourceUnitsTest {
         VettingSourceRequestPacks.Result plan=new VettingSourceRequestPacks(all).planForCompleteInputBudget("record",ranked,global,VettingRetrievalSourceUnits.attached(ranked));
         assertEquals(Collections.singletonList(head.getId()),plan.getOriginalRankedIds());assertEquals(Collections.singletonList(head.getId()),plan.getOriginalRetrievedIds());
         VettingSourceRequestPacks.Request unit=plan.getRequests().stream().filter(r->"retrieved_structural_unit".equals(r.getKind())).findFirst().get();assertEquals(Arrays.asList("a-head","a-tail"),unit.getRequiredChunkIds());
+        assertEquals(VettingRetrievalSourceUnits.POLICY,unit.getSourceTrace().get("selectionPolicy"));
+        assertEquals(VettingRetrievalSourceUnits.POLICY,unit.getOriginObservation().get("selectionPolicy"));
         List<VettingInputBudget.Input> seen=new ArrayList<>();VettingTokenAwareRequestPacks.Plan tokens=new VettingTokenAwareRequestPacks(all).repack(plan,global,factory(),in->{seen.add(in);VettingInputBudget.Observation o=VettingInputBudgetTest.fixtureObservation(in);o.setEffectiveContextTokens(100000);return o;});
         assertTrue(tokens.getSourcePlan().getExtraPacks().stream().anyMatch(p->p.getChunks().containsAll(Arrays.asList(head,tail))));assertTrue(seen.stream().anyMatch(in->in.getMessages().get(1).getContent().contains("Unless dormant")));
         assertTrue(tokens.getSourcePlan().getRequests().stream().noneMatch(r->r.getEligibleOriginIds().contains(tail.getId())));assertTrue(tokens.getSourcePlan().getExtraPacks().stream().flatMap(p->p.getChunks().stream()).noneMatch(c->other.getId().equals(c.getId())));

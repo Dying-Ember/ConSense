@@ -51,6 +51,22 @@ public final class AdviceDtos {
         private String sourceHash;
         private String sourceRole;
         private Boolean applicabilityContextComplete;
+        @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+        private List<CanonicalEvidenceDtos.EvidencePointer> canonicalEvidence;
+        @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+        private com.fasterxml.jackson.databind.JsonNode canonicalSourceUnit;
+        @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+        private String scoreMeaning;
+        @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+        private com.fasterxml.jackson.databind.JsonNode fixedBaselineEvidence;
+        public CitationVO(String fileLabel,String pageNo,String anchor,String content,double score,String evidenceId,String documentId,String sourceHash,String sourceRole,Boolean applicabilityContextComplete,List<CanonicalEvidenceDtos.EvidencePointer> canonicalEvidence,com.fasterxml.jackson.databind.JsonNode canonicalSourceUnit,String scoreMeaning) {
+            this(fileLabel,pageNo,anchor,content,score,evidenceId,documentId,sourceHash,sourceRole,applicabilityContextComplete);
+            this.canonicalEvidence=canonicalEvidence;this.canonicalSourceUnit=canonicalSourceUnit;this.scoreMeaning=scoreMeaning;
+        }
+        public CitationVO(String fileLabel,String pageNo,String anchor,String content,double score,String evidenceId,String documentId,String sourceHash,String sourceRole,Boolean applicabilityContextComplete) {
+            this.fileLabel=fileLabel;this.pageNo=pageNo;this.anchor=anchor;this.content=content;this.score=score;this.evidenceId=evidenceId;
+            this.documentId=documentId;this.sourceHash=sourceHash;this.sourceRole=sourceRole;this.applicabilityContextComplete=applicabilityContextComplete;
+        }
         public CitationVO(String fileLabel,String pageNo,String anchor,String content,double score) {
             this(fileLabel,pageNo,anchor,content,score,null,null,null,null,null);
         }
@@ -63,6 +79,9 @@ public final class AdviceDtos {
         private String question;
         private String scope;
         private Long replyToMessageId;
+        /** Explicit standard interpretation only; absent retains the project-contract route. */
+        private String basisScope;
+        public AskRequest(String question,String scope,Long replyToMessageId){this(question,scope,replyToMessageId,null);}
         public AskRequest(String question,String scope){this(question,scope,null);}
     }
 
@@ -119,6 +138,21 @@ public final class AdviceDtos {
         private int eligibleDocuments;
         private int indexedDocuments;
         private boolean embeddingReady;
+        @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+        private String evidenceBackend;
+        @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+        private String sourceScope;
+        @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+        private String indexKey;
+        @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+        private String indexSignature;
+        @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+        private String indexReason;
+        public IndexStatusVO(int chunks,int indexed,String vectorProvider,String collection,String embedModel,String llmModel,boolean llmReady,boolean vectorReady,boolean ocrReady,LocalizedText message,boolean stale,int eligibleDocuments,int indexedDocuments,boolean embeddingReady) {
+            this.chunks=chunks;this.indexed=indexed;this.vectorProvider=vectorProvider;this.collection=collection;this.embedModel=embedModel;this.llmModel=llmModel;
+            this.llmReady=llmReady;this.vectorReady=vectorReady;this.ocrReady=ocrReady;this.message=message;this.stale=stale;
+            this.eligibleDocuments=eligibleDocuments;this.indexedDocuments=indexedDocuments;this.embeddingReady=embeddingReady;
+        }
         public IndexStatusVO(int chunks,int indexed,String vectorProvider,String collection,String embedModel,String llmModel,boolean llmReady,boolean vectorReady,boolean ocrReady,LocalizedText message,boolean stale,int eligibleDocuments,int indexedDocuments) {
             this(chunks,indexed,vectorProvider,collection,embedModel,llmModel,llmReady,vectorReady,ocrReady,message,stale,eligibleDocuments,indexedDocuments,false);
         }

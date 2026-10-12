@@ -59,6 +59,16 @@ public class VettingController {
         return ApiResponse.ok(vettingService.getRun(projectId, id));
     }
 
+    @GetMapping("/runs/latest/progress")
+    public ApiResponse<VettingProgressVO> latestProgress(@PathVariable String projectId) {
+        return ApiResponse.ok(vettingService.latestProgress(projectId));
+    }
+
+    @GetMapping("/runs/{id}/progress")
+    public ApiResponse<VettingProgressVO> getProgress(@PathVariable String projectId, @PathVariable String id) {
+        return ApiResponse.ok(vettingService.getProgress(projectId,id));
+    }
+
     @GetMapping("/findings")
     public ApiResponse<List<FindingVO>> findings(@PathVariable String projectId,
                                                  @RequestParam(required = false) String search,

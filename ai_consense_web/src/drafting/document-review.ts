@@ -7,7 +7,8 @@ import { localized } from './words'
 
 export type DocumentReviewMode = 'original' | 'review' | 'saved'
 export interface DocumentReviewLocation { id: string; fileKey: string; bindingId?: string; actionId?: string; clause: string; paragraph?: number; status?: string }
-export interface PreparedDocumentReview { html: string; notices: string[]; bindingIds: string[]; savedBindingIds: string[] }
+export interface SavedReviewChange { bindingId: string; kind: 'input' | 'joint' | 'other' | 'editorial' | 'manual'; fieldKeys: string[] }
+export interface PreparedDocumentReview { html: string; notices: string[]; bindingIds: string[]; savedBindingIds: string[]; changes: SavedReviewChange[] }
 export interface ReviewEvidenceContext { partId: string; attemptIndex?: number; sourceText: string; context?: ExtractContext }
 const normalized = (text: string | null | undefined) => (text ?? '').replace(/\s+/gu, ' ').trim()
 
@@ -35,16 +36,23 @@ export function associatedReviewFields(binding: DraftDocumentBinding, fields: Dr
   for (const action of actions.filter(item => binding.actionIds.includes(item.id))) for (const key of action.inputKeys ?? action.fieldKeys ?? []) keys.add(key)
   return fields.filter(field => keys.has(field.key)).map(field => field.key)
 }
+const matchesReviewOperation = (operation: string, actionId: string) => operation === actionId || operation.startsWith(`${actionId}-`)
+function appliedReviewActions(binding: DraftDocumentBinding, actions: DraftPlanAction[], fileKey: string) {
+  return actions.filter(action => action.document === fileKey && binding.actionIds.includes(action.id) && binding.appliedActionIds?.includes(action.id) && binding.operationIds.some(operation => matchesReviewOperation(operation, action.id)))
+}
 function changeAttribution(binding: DraftDocumentBinding, actions: DraftPlanAction[], fileKey: string, selectedKey: string) {
   if (binding.bodyOperationIds?.length || ['body_edited', 'body_added'].includes(binding.applicationStatus)) return 'manualSharedChange'
-  const matches = (operation: string, actionId: string) => operation === actionId || operation.startsWith(`${actionId}-`)
-  const applied = actions.filter(action => action.document === fileKey && binding.actionIds.includes(action.id) && binding.appliedActionIds?.includes(action.id) && binding.operationIds.some(operation => matches(operation, action.id)))
-  if (!applied.length || binding.operationIds.some(operation => !applied.some(action => matches(operation, action.id)))) return 'diffUnverified'
+  const applied = appliedReviewActions(binding, actions, fileKey)
+  // Independent compiler cleanup has its own recorded identity. It is not an
+  // applied business action and must never be inferred from an arbitrary ID.
+  const editorial = new Set(binding.documentEditStatus === 'applied' ? binding.editorialOperationIds ?? [] : [])
+  if (!binding.operationIds.length || [...editorial].some(operation => !binding.operationIds.includes(operation)) || binding.operationIds.some(operation => !editorial.has(operation) && !applied.some(action => matchesReviewOperation(operation, action.id)))) return 'diffUnverified'
+  if (!applied.length) return editorial.size ? 'editorialCleanup' : 'diffUnverified'
   const keys = new Set(applied.flatMap(action => action.inputKeys ?? action.fieldKeys ?? []))
   if (!keys.has(selectedKey)) return 'unrelatedSharedChange'
-  // The paragraph ledger has operation membership, not per-action character
-  // ranges. Diffing a jointly amended paragraph would misattribute its tokens.
-  return keys.size === 1 ? 'selected' : 'jointRangeAttribution'
+  // The complete saved change is observable. Its individual tokens cannot be
+  // assigned to one input of a joint action; label the whole change as joint.
+  return keys.size === 1 && !editorial.size ? 'selected' : 'jointRangeAttribution'
 }
 
 interface TextPosition { node: Node; offset: number; endNode: Node; endOffset: number }
@@ -147,6 +155,7 @@ function matchedElement(index: ReturnType<typeof verifiedIndex>, path: string | 
  * have no place in this API: they cannot rewrite a revision-bound document. */
 export function prepareDocumentReview(options: { fileKey: string; document?: DraftDocument; original?: DocumentReading; result?: DocumentReading; sourceBindings?: DraftDocumentBindings; resultBindings?: DraftDocumentBindings; fields: DraftField[]; actions: DraftPlanAction[]; selectedKey: string; mode: DocumentReviewMode; planCurrent?: boolean; locale?: AppLocale }): PreparedDocumentReview {
   const { fileKey, original, result, sourceBindings, resultBindings, document: revision } = options
+  const changes: SavedReviewChange[] = []
   const notices = new Set<string>(), sourceHost = document.createElement('div'), resultHost = document.createElement('div')
   const sanitize = (html: string) => DOMPurify.sanitize(html, { ADD_TAGS: ['math', 'mrow', 'mi', 'mn', 'mo', 'mfrac', 'msup', 'msub', 'msubsup', 'msqrt', 'mroot', 'mtable', 'mtr', 'mtd', 'mtext'] })
   sourceHost.innerHTML = sanitize(original?.html ?? ''); resultHost.innerHTML = sanitize(result?.html ?? '')
@@ -157,12 +166,12 @@ export function prepareDocumentReview(options: { fileKey: string; document?: Dra
     if (importedAnnotation) { element.removeAttribute('tabindex'); element.removeAttribute('role') }
   }
   const host = options.mode === 'saved' ? resultHost : sourceHost
-  if (!original && options.mode !== 'saved' || !result && options.mode === 'saved') return { html: '', notices: ['unavailable'], bindingIds: [], savedBindingIds: [] }
+  if (!original && options.mode !== 'saved' || !result && options.mode === 'saved') return { html: '', notices: ['unavailable'], bindingIds: [], savedBindingIds: [], changes }
   // A stale saved revision can refer to an older template. The current source
   // remains readable against its own verified source receipt, independently.
   const sourceIdentity = !!original && !!sourceBindings && sourceBindings.fileKey === fileKey && original.docxSha256 === sourceBindings.sourceSha256 && (revision?.stale || !revision?.sourceSha256 || original.docxSha256 === revision.sourceSha256)
   const resultIdentity = !!result && !!resultBindings && resultBindings.fileKey === fileKey && result.docxSha256 === resultBindings.docxSha256 && (!revision?.docxSha256 || result.docxSha256 === revision.docxSha256) && (!revision?.revisionId || revision.revisionId === resultBindings.revisionId) && (!original || resultBindings.sourceSha256 === original.docxSha256)
-  if ((options.mode !== 'saved' && sourceBindings && !sourceIdentity) || (options.mode === 'saved' && resultBindings && !resultIdentity)) return { html: '', notices: ['identityMismatch'], bindingIds: [], savedBindingIds: [] }
+  if ((options.mode !== 'saved' && sourceBindings && !sourceIdentity) || (options.mode === 'saved' && resultBindings && !resultIdentity)) return { html: '', notices: ['identityMismatch'], bindingIds: [], savedBindingIds: [], changes }
   if (options.mode === 'review' && (!resultIdentity || !resultBindings?.bindings.length)) notices.add('reviewUnavailable')
   const sourceIndex = original ? verifiedIndex(sourceHost, original) : undefined, resultIndex = result ? verifiedIndex(resultHost, result) : undefined
   const sources = sourceIdentity ? sourceBindings!.bindings : [], results = resultIdentity ? resultBindings!.bindings : []
@@ -175,12 +184,12 @@ export function prepareDocumentReview(options: { fileKey: string; document?: Dra
   }).map(binding => binding.bindingId)
   if (options.mode === 'review' && resultIdentity && results.length && sources.some(binding => associatedReviewFields(binding, options.fields, options.actions).includes(options.selectedKey) && !savedBindingIds.includes(binding.bindingId))) notices.add('selectedMappingUnavailable')
   const bindingIds = new Set<string>()
-  function interactive(element: HTMLElement, binding: DraftDocumentBinding) {
+  function interactive(element: HTMLElement, binding: DraftDocumentBinding, savedChange = false) {
     const fieldKeys = associatedReviewFields(binding, options.fields, options.actions)
-    if (!fieldKeys.length) return
+    if (!fieldKeys.length && !savedChange) return
     element.dataset.reviewBinding = binding.bindingId; element.dataset.reviewFields = fieldKeys.join(' ')
     element.setAttribute('tabindex', '0'); element.setAttribute('role', 'button')
-    element.setAttribute('aria-label', fieldKeys.map(key => localized(options.fields.find(field => field.key === key)?.label, options.locale ?? 'en') || key).join(' / '))
+    element.setAttribute('aria-label', fieldKeys.length ? fieldKeys.map(key => localized(options.fields.find(field => field.key === key)?.label, options.locale ?? 'en') || key).join(' / ') : localized({ en: 'Saved document change', zhHans: '已保存的文稿修改', zhHant: '已儲存的文稿修改' }, options.locale ?? 'en'))
     if (fieldKeys.includes(options.selectedKey)) element.classList.add('review-associated')
     bindingIds.add(binding.bindingId)
   }
@@ -195,9 +204,19 @@ export function prepareDocumentReview(options: { fileKey: string; document?: Dra
     if (element) interactive(element, binding)
     else if (associatedReviewFields(binding, options.fields, options.actions).includes(options.selectedKey)) notices.add('mappingUnavailable')
   }
-  if (options.mode !== 'review' || !sourceIndex || !resultIndex || !resultIdentity) return { html: host.innerHTML, notices: [...notices], bindingIds: [...bindingIds], savedBindingIds }
+  if (options.mode !== 'review' || !sourceIndex || !resultIndex || !resultIdentity) return { html: host.innerHTML, notices: [...notices], bindingIds: [...bindingIds], savedBindingIds, changes }
+  function registerChange(element: HTMLElement, binding: DraftDocumentBinding, attribution: ReturnType<typeof changeAttribution>) {
+    const kind: SavedReviewChange['kind'] = attribution === 'jointRangeAttribution' ? 'joint' : attribution === 'unrelatedSharedChange' ? 'other' : attribution === 'editorialCleanup' ? 'editorial' : attribution === 'manualSharedChange' ? 'manual' : 'input'
+    const appliedActions = appliedReviewActions(binding, options.actions, fileKey)
+    const fieldKeys = [...new Set(appliedActions.flatMap(action => action.inputKeys ?? action.fieldKeys ?? []))]
+    element.dataset.reviewChangeKind = kind
+    changes.push({ bindingId: binding.bindingId, kind, fieldKeys })
+    // Independent editorial/manual edits have no business input, but remain
+    // inspectable so the reader can show their recorded origin explicitly.
+    interactive(element, binding, true)
+    if (attribution === 'jointRangeAttribution' || attribution === 'manualSharedChange') notices.add(attribution)
+  }
   for (const binding of results) {
-    if (!associatedReviewFields(binding, options.fields, options.actions).includes(options.selectedKey)) continue
     const source = sourceById.get(binding.bindingId)
     if (!source || binding.sourceParagraphId !== source.sourceParagraphId) continue
     const element = matchedElement(sourceIndex, source.sourceParagraphId, source.sourceText)
@@ -206,8 +225,9 @@ export function prepareDocumentReview(options: { fileKey: string; document?: Dra
     const guidance = actions.some(action => /guidance/i.test(action.id) || scopes((action.paragraphs ?? '').split(/;\s*guidance\s*/i)[1] ?? '').has(source.sourceParagraphOrdinal ?? -1))
     if (binding.locationStatus === 'removed' && binding.operationIds.length) {
       const attribution = changeAttribution(binding, options.actions, fileKey, options.selectedKey)
-      if (attribution !== 'selected') { notices.add(attribution); continue }
-      element.classList.add(guidance ? 'review-guidance' : 'review-removed')
+      if (attribution === 'diffUnverified') { notices.add(attribution); continue }
+      registerChange(element, binding, attribution)
+      element.classList.add(guidance || attribution === 'editorialCleanup' ? 'review-guidance' : 'review-removed')
       if (!guidance && actions.some(action => /alternative/i.test(action.clause) && binding.appliedActionIds?.includes(action.id))) element.classList.add('review-alternative-removed')
       continue
     }
@@ -216,26 +236,27 @@ export function prepareDocumentReview(options: { fileKey: string; document?: Dra
     if (!after) { notices.add('mappingUnavailable'); continue }
     if (normalized(documentParagraphText(element)) !== normalized(documentParagraphText(after))) {
       const attribution = changeAttribution(binding, options.actions, fileKey, options.selectedKey)
-      if (attribution === 'selected') {
-        if (!markActualDiff(element, after.cloneNode(true) as HTMLElement)) notices.add('diffUnavailable')
-      } else notices.add(attribution)
+      if (attribution === 'diffUnverified') notices.add(attribution)
+      else if (markActualDiff(element, after.cloneNode(true) as HTMLElement)) registerChange(element, binding, attribution)
+      else notices.add('diffUnavailable')
     }
     if (options.planCurrent && actions.some(action => action.action === 'retain' && scopes((action.paragraphs ?? '').split(';')[0] ?? '').has(source.sourceParagraphOrdinal ?? -1))) element.classList.add('review-retained')
   }
   const tails = new Map<string, HTMLElement>()
   for (const binding of results) {
-    if (binding.sourceParagraphId || !binding.parentBindingId || binding.locationStatus !== 'exact' || !['generated_added', 'body_added'].includes(binding.applicationStatus) || !associatedReviewFields(binding, options.fields, options.actions).includes(options.selectedKey)) continue
+    if (binding.sourceParagraphId || !binding.parentBindingId || binding.locationStatus !== 'exact' || !['generated_added', 'body_added'].includes(binding.applicationStatus)) continue
     const attribution = changeAttribution(binding, options.actions, fileKey, options.selectedKey)
-    if (attribution !== 'selected') { notices.add(attribution); continue }
+    if (attribution === 'diffUnverified') { notices.add(attribution); continue }
     const parent = sourceById.get(binding.parentBindingId), anchor = parent && matchedElement(sourceIndex, parent.sourceParagraphId, parent.sourceText), resultElement = matchedElement(resultIndex, binding.resultParagraphId, binding.text)
     if (!anchor || !resultElement) { notices.add('additionUnmapped'); continue }
     const clone = resultElement.cloneNode(true) as HTMLElement
     clone.removeAttribute('data-native-paragraph'); clone.removeAttribute('data-native-ordinal')
     clone.dataset.reviewAdded = 'true'; clone.classList.add('review-added')
+    registerChange(clone, binding, attribution)
     const additionLabel = options.locale === 'zh-Hans' ? '文稿行登记为新增，尚无可靠的一对一原文映射。' : options.locale === 'zh-Hant' ? '文稿行登記為新增，尚無可靠的一對一原文映射。' : 'Saved row registered as added; no verified one-to-one original mapping.'
     clone.dataset.reviewAdditionLabel = additionLabel; clone.setAttribute('aria-description', additionLabel)
     interactive(clone, binding)
     const tail = tails.get(binding.parentBindingId) ?? anchor; tail.after(clone); tails.set(binding.parentBindingId, clone)
   }
-  return { html: host.innerHTML, notices: [...notices], bindingIds: [...bindingIds], savedBindingIds }
+  return { html: host.innerHTML, notices: [...notices], bindingIds: [...bindingIds], savedBindingIds, changes }
 }

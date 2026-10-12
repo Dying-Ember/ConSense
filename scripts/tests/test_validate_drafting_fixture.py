@@ -17,6 +17,7 @@ SCRIPT = Path(__file__).resolve().parents[1] / "validate-drafting-fixture.py"
 SPEC = importlib.util.spec_from_file_location("validate_drafting_fixture", SCRIPT)
 SCORER = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(SCORER)
+ORIGINAL_HOLDOUTS = {"photocopyRateAboveA3", "projectArchitectPhone", "siteInspectionEndDate", "quotationBeforeVariation"}
 
 
 class AlternateFixtureScorerTests(unittest.TestCase):
@@ -60,13 +61,13 @@ class AlternateFixtureScorerTests(unittest.TestCase):
             with zipfile.ZipFile(path, "w") as archive:
                 archive.writestr("word/document.xml", xml)
             self.files.append(path)
-        keys = sorted(SCORER.WITHHELD) + ["billNos", "contractPeriodMonths", "otherWaterproofingSpecificationAreas", "conditionallyInactive"]
+        keys = sorted(ORIGINAL_HOLDOUTS) + ["billNos", "contractPeriodMonths", "otherWaterproofingSpecificationAreas", "conditionallyInactive", "epoxyCastIronPipeWarrantyRequired"]
         keys += [f"field{index:02d}" for index in range(79 - len(keys))]
         self.expected = {
             key: {
-                "value": None, "status": "unknown" if key in SCORER.WITHHELD else "not_applicable",
-                "origin": "deliberately_withheld" if key in SCORER.WITHHELD else "conditional_test",
-                "applicability": "active" if key in SCORER.WITHHELD else "inactive",
+                "value": None, "status": "unknown" if key in ORIGINAL_HOLDOUTS else "not_applicable",
+                "origin": "deliberately_withheld" if key in ORIGINAL_HOLDOUTS else "conditional_test",
+                "applicability": "active" if key in ORIGINAL_HOLDOUTS else "inactive",
             } for key in keys
         }
         values = {
@@ -110,13 +111,104 @@ class AlternateFixtureScorerTests(unittest.TestCase):
     def grade(self):
         self.write(self.reference / "expected_values.json", self.expected_doc)
         cumulative = {key: value["value"] for key, value in self.expected.items()}
-        self.write(self.reference / "incremental_expected_states.json", [{"cumulativeValues": cumulative, "newAnswers": {}} for _ in range(15)])
+        self.write(self.reference / "incremental_expected_states.json", getattr(self, "incremental", [{"cumulativeValues": cumulative, "newAnswers": {}} for _ in range(15)]))
         for name, value in (("variables", self.variables), ("trace", self.trace), ("plan", self.plan), ("inputs", self.inputs), ("catalog", self.catalog), ("manifest", self.manifest)):
             self.write(self.run / f"{name}.json", value)
         return SCORER.grade(SimpleNamespace(fixture=self.fixture, actual=self.run / "variables.json", trace=self.run / "trace.json", plan=self.run / "plan.json", stage="SIM15"))
 
     def row(self, report, key):
         return next(row for row in report["ledger"] if row["key"] == key)
+
+    def change_phone_holdout_to_epoxy(self):
+        # A legitimate new exam discloses the phone but withholds a different
+        # catalogue field. Exercise the real grading seam with grounded evidence.
+        phone = "3123 4567"
+        quote = "The appointed Project Architect telephone number is " + phone + "."
+        self.paragraphs.append(quote)
+        path = self.files[0]
+        xml = '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>'
+        xml += ''.join('<w:p><w:r><w:t>' + escape(text) + '</w:t></w:r></w:p>' for text in self.paragraphs)
+        xml += '</w:body></w:document>'
+        with zipfile.ZipFile(path, 'w') as archive:
+            archive.writestr('word/document.xml', xml)
+        digest = SCORER.sha(path)
+        self.manifest['inputFiles'][0]['sha256'] = digest
+        for truth in self.expected.values():
+            if truth.get('inputEvidence'):
+                truth['inputEvidence']['sha256'] = digest
+        self.expected['projectArchitectPhone'] = {
+            'value': phone, 'status': 'provided', 'origin': 'synthetic_correspondence', 'applicability': 'active',
+            'inputEvidence': {'recordId': 'SIM01', 'file': path.name, 'nativeParagraph': 4, 'quote': quote, 'sha256': digest},
+        }
+        self.expected['epoxyCastIronPipeWarrantyRequired'].update(status='unknown', origin='deliberately_withheld', applicability='active')
+        variable = next(v for v in self.variables if v['key'] == 'projectArchitectPhone')
+        variable.update(value=phone, adoptionState='suggested', candidates=[{
+            'value': phone, 'sourceDocumentId': '1', 'sourceHash': 'project-hash-1', 'fileName': path.name, 'sourceQuote': quote,
+        }])
+        self.trace['parts'][0]['sourceText'] = '\n'.join(self.paragraphs)
+
+    def test_changed_four_holdout_membership_grades_known_phone_and_unknown_epoxy(self):
+        self.change_phone_holdout_to_epoxy()
+        report, code = self.grade()
+        self.assertEqual(0, code)
+        self.assertEqual(4, report['summary']['withheldPass'])
+        self.assertTrue(self.row(report, 'projectArchitectPhone')['correctFullCandidate'])
+        self.assertEqual('PASS', self.row(report, 'epoxyCastIronPipeWarrantyRequired')['outcome'])
+
+    def test_changed_holdout_requires_editable_missing_state(self):
+        self.change_phone_holdout_to_epoxy()
+        variable = next(v for v in self.variables if v['key'] == 'epoxyCastIronPipeWarrantyRequired')
+        variable['adoptionState'] = 'inactive'
+        report, code = self.grade()
+        self.assertEqual(1, code)
+        self.assertEqual(3, report['summary']['withheldPass'])
+        self.assertIn('withheld_input_not_editable_missing_state', self.row(report, variable['key'])['failures'])
+
+    def test_malformed_declared_holdout_fails_closed(self):
+        for property_name, value in (('status', 'provided'), ('applicability', 'inactive'), ('value', False), ('value', 0), ('value', [])):
+            with self.subTest(property_name=property_name, value=value):
+                original = deepcopy(self.expected['projectArchitectPhone'])
+                self.expected['projectArchitectPhone'][property_name] = value
+                with self.assertRaisesRegex(ValueError, 'active unknown null'):
+                    self.grade()
+                self.expected['projectArchitectPhone'] = original
+
+    def test_fifth_or_missing_declared_holdout_fails_closed(self):
+        for key, origin in (('epoxyCastIronPipeWarrantyRequired', 'deliberately_withheld'), ('projectArchitectPhone', 'conditional_test')):
+            with self.subTest(key=key):
+                original = self.expected[key]['origin']
+                self.expected[key]['origin'] = origin
+                with self.assertRaisesRegex(ValueError, 'exactly four'):
+                    self.grade()
+                self.expected[key]['origin'] = original
+
+    def test_reference_key_set_and_unique_79_catalogue_fields_required(self):
+        original = deepcopy(self.expected)
+        for mutation in ('extra', 'missing', 'replacement'):
+            with self.subTest(mutation=mutation):
+                self.expected.clear()
+                self.expected.update(deepcopy(original))
+                if mutation != 'extra':
+                    self.expected.pop('field00')
+                if mutation != 'missing':
+                    self.expected['extraNonCatalogueField'] = deepcopy(original['field00'])
+                with self.assertRaisesRegex(ValueError, '79 catalogue inputs'):
+                    self.grade()
+        self.expected.clear()
+        self.expected.update(original)
+        self.catalog['groups'][0]['fields'].append(deepcopy(self.catalog['groups'][0]['fields'][0]))
+        with self.assertRaisesRegex(ValueError, '79 catalogue inputs'):
+            self.grade()
+
+    def test_changed_holdout_cannot_leak_into_incremental_ledger(self):
+        self.change_phone_holdout_to_epoxy()
+        cumulative = {key: truth['value'] for key, truth in self.expected.items()}
+        for target in ('newAnswers', 'cumulativeValues'):
+            with self.subTest(target=target):
+                self.incremental = [{'cumulativeValues': dict(cumulative), 'newAnswers': {}} for _ in range(15)]
+                self.incremental[2][target]['epoxyCastIronPipeWarrantyRequired'] = False
+                with self.assertRaisesRegex(ValueError, 'missing-evidence boundary'):
+                    self.grade()
 
     def test_seven_bills_nine_water_43_months_use_only_alternate_oracle(self):
         report, code = self.grade()
