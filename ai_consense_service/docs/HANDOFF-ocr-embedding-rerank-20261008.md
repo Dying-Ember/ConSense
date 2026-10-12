@@ -97,7 +97,11 @@ Root从01小source score提纯226页default canonical SHA保全参考，62KB SHA
 同日先前只读确认私仓PR #6已由外部合并，源码提交`0a91afbd009ff4f34796928570f38fec6f5454f7`；后续文档`f7693a7845bad66d9c7fe78308c504a4917966cc`在远端工作分支，未据此宣称也已进入main。下方“PR6保留草稿/226未跑”是发布时历史快照，本段覆盖当前状态；未借此pull/reset或部署在线服务。
 
 
-## 2026-10-12 全量源码快照已推送私仓，PR #6 保留草稿状态
+## 2026-10-12 PR #6 已合并，保留合并前发布与验证快照
+
+[PR #6](https://github.com/Dying-Ember/ConSense/pull/6) 已于2026-10-12 18:13:56（Asia/Shanghai）合并到main，squash提交为 `0d0380d98e65fb45e4e3fe73c768ac0b72351c2d`。PR #7沿用原发布分支补记下方验证与存储记录；本次同步main并保留这些记录，源码内容与已合并快照一致。下面的draft／未合并及“不自动合并”描述均属于PR #6合并前状态，当前用户已明确授权修复PR #7冲突后继续合并。已记录的测试失败、OER未完成门和运行／发布边界保持，不由Git合并追认通过或部署。
+
+### PR #6 合并前的全量源码发布与验证记录
 
 完整分支 `codex/all-local-updates-20261012` 基于私仓最新 main `c46793b`（PR #5 已合并），源码提交 `0a91afbd009ff4f34796928570f38fec6f5454f7`，619 个实际差异文件。push 已成功，`git ls-remote` 读回同一 SHA；[私仓 PR #6](https://github.com/Dying-Ember/ConSense/pull/6) 已创建为 draft，未合并。点击联动已包含，不把旧提交 `2407663` 说成已追加到关闭的 PR #5。原件、模型、密钥、实际 relay env、DB 和 raw 证据继续忽略；新增二进制 fixture 为已核合成契约样例。发布文件与 root 逐文件相同，Git 仅规范化行尾，未替换在线 jar、模型或服务。
 
