@@ -30,7 +30,7 @@ _NATIVE_PDF_HASHES = {name: hashlib.sha256((HERE / name).read_bytes()).hexdigest
 NATIVE_PDF_CAPABILITY = {'schema': SCHEMA, 'producerKind': 'native_pdf', 'projectionVersion': VERSION,
     'storageShape': STORAGE_SHAPE, 'projectionEndpoint': '/project/native-pdf',
     'projectionInputs': 'actual-cas-three-descriptors-only', 'artifactReadValidation': 'actual-cas-every-read',
-    'maximumMessageBytes': MAX_SNAPSHOT_BYTES, 'tableAndAppearanceText': 'unsupported',
+    'maximumMessageBytes': MAX_SNAPSHOT_BYTES, 'tableAndAppearanceText': 'source_reviewed_whole_table_groups; appearance_text_unsupported',
     'visualReturnStatus': 'not_published_by_native_pdf_transport'}
 
 
@@ -128,7 +128,7 @@ def create_native_pdf_app(policy, *, backend=None, artifact_store=None, target_m
     def health():
         result = old_endpoint()
         result['oer']['nativePdfCanonical'] = {**NATIVE_PDF_CAPABILITY, 'maximumMessageBytes': maximum}
-        result['oer']['limitations'].append('PDF native prose preserves unknown visibility; table/AP adoption and visual serving remain unsupported')
+        result['oer']['limitations'].append('PDF native text preserves unknown visibility; whole-table groups require complete source review and AP text remains unsupported')
         return result
     app.get('/health')(health)
 
