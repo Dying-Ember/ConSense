@@ -2,6 +2,19 @@
 
 更新日期：2026-10-12（Asia/Shanghai）。用途：交接已确认规则、实际实现状态及尚未完成的验收。旧日期表格与运行记录保留当时快照；最新实施状态以本文顶部增量为准。当前只有 OER 一个持续实施任务，Drafting 保持冻结及已部署状态。
 
+
+## 2026-10-12 全量源码快照已推送私仓，PR #6 保留草稿状态
+
+完整分支 `codex/all-local-updates-20261012` 基于私仓最新 main `c46793b`（PR #5 已合并），源码提交 `0a91afbd009ff4f34796928570f38fec6f5454f7`，619 个实际差异文件。push 已成功，`git ls-remote` 读回同一 SHA；[私仓 PR #6](https://github.com/Dying-Ember/ConSense/pull/6) 已创建为 draft，未合并。点击联动已包含，不把旧提交 `2407663` 说成已追加到关闭的 PR #5。原件、模型、密钥、实际 relay env、DB 和 raw 证据继续忽略；新增二进制 fixture 为已核合成契约样例。发布文件与 root 逐文件相同，Git 仅规范化行尾，未替换在线 jar、模型或服务。
+
+隔离前端 typecheck/build 与45/45 CJS程序通过；node:test明确75/75，自定义PASS消息另计。额外6离线脚本4通过/2失败：旧Advice harness缺useRoute，OCR诊断需要未发布的本地actual fixture。旧Drafting location测试只更新已授权点击联动期望：实际保存动作仅采用foundationIncluded，点击立即展示该来源；广泛登记的periodAtLeast39Months不冒称修改原因，仍可普通导航查看Unknown。原dirty、保存、晚到响应及source/revision guards保留，6组重跑通过，识别harness未改。
+
+Java生产/测试源码编译及`-DskipTests package`通过；完整测试终态为2552 tests、2202 pass、13 failures、214 errors、123 skipped，exit1。首轮Surefire因R&D路径启动失败，随后使用独立JDK junction才实际执行全套；失败保留。仅MiniMax HTTP类使用IPv4/短tmpdir窄环境重跑，33/33通过，不追认全套通过。Python training contracts15/15、relay34/34通过。完整后端回归及OER采用门未过，PR保持草稿，不自动合并，不借同步重开后置工程。审计在忽略的`.local/state/private-sync-all-20261012/`，含原始全套日志、窄重跑、前端收据、stage凭据/身份扫描及push读回。
+
+用户发现D近满后已只读核对：C/D是磁盘0 Kingston NVMe SSD的不同分区，E是独立磁盘1 HGST SATA HDD；当次D余2.78GiB、C余约144GiB、E余约7296GiB。未迁移/清理或改在线路径。新自有实验大产物放C盘owned目录，D原件只读。generic logical表候选已有小源码与作者合成controls，独审尚未结束，完整三章226页未实际运行；139页仅无框目标频道，不称完整输入。OER Goal保持active，原件质量、固定库、业务/H800门仍未过，R106成绩保持。
+
+以下为全量提交前的授权/准备快照，保留当时状态：
+
 **同日最新授权与目标状态：** 用户恢复同一OER Goal，工具实际读回`active`、createdAt=1791724559、updatedAt=1791793307，前述blocked为历史快照。继续原件解析质量提高，当前优先无边框logical表共享结构缺口；原件质量、固定库、业务与H800最终门均未过。用户随后明确“目前的所有更新提交修改都commit push到私仓”，允许发布当前代码、文档和契约测试快照；原件、模型、密钥和运行证据继续本地忽略，提交不等于新的服务部署、原件质量采用或业务验收。点击联动窄修已在发布worktree实际typecheck/build及24组回归通过并形成提交`2407663`，已push旧Drafting分支；私仓main最新`c46793b`是PR#5于2026-10-12合并的结果，旧PR#4此前已合并。全量更新以此最新main建立独立发布worktree，保留在线root及未完成实验状态；最终提交和push结果另以Git远端读回确认。
 
 ## 2026-10-12 审阅点击证据热修已部署，冻结业务数据保持
