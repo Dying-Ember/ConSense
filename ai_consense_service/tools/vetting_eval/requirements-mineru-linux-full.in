@@ -1,0 +1,5 @@
+# Independent Linux NVIDIA candidate environment for the H800 deployment path.
+# Direct dependency input; transitive versions and wheels are not yet validated.
+mineru[full]==4.0.10
+# Official full adds Torch extras and Linux vLLM. Table ONNX execution is
+# validated separately; this input does not assert a CUDA table provider.

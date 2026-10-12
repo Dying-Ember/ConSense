@@ -20,21 +20,32 @@ public class VettingSemanticReview {
     private final AiGateway ai;
     private final ConsenseProperties props;
     private final VettingRetrievalClient retrieval;
+    private OerBusinessEvidence oer;
+    @org.springframework.beans.factory.annotation.Autowired
+    public void setOerBusinessEvidence(OerBusinessEvidence service){this.oer=service;}
     private VettingInputBudget.Observer inputBudgetObserver;
     @org.springframework.beans.factory.annotation.Autowired(required=false)
     public void setInputBudgetObserver(VettingInputBudget.Observer observer) { this.inputBudgetObserver=observer; }
     private VettingResponsesTransport responsesTransport;
     @org.springframework.beans.factory.annotation.Autowired(required=false)
     public void setResponsesTransport(VettingResponsesTransport transport){this.responsesTransport=transport;}
-    private boolean responsesEnabled(){return !ai.explicitProfileSelected()&&props.getVetting().getResponses().isEnabled();}
-    private String selectedModel(){return responsesEnabled()?props.getVetting().getResponses().getModel():ai.chatModel();}
+    private final ThreadLocal<VettingLlmOperation> activeOperation=new ThreadLocal<>();
+    public VettingLlmOperation captureOperation(com.consense.ai.LlmOperation chat){return VettingLlmOperation.capture(chat,props,responsesTransport);}
+    public OperationScope bindOperation(VettingLlmOperation operation){VettingLlmOperation previous=activeOperation.get();activeOperation.set(operation);return new OperationScope(previous);}
+    public final class OperationScope implements AutoCloseable {
+        private final VettingLlmOperation previous;private OperationScope(VettingLlmOperation previous){this.previous=previous;}
+        @Override public void close(){if(previous==null)activeOperation.remove();else activeOperation.set(previous);}
+    }
+    private VettingLlmOperation operation(){VettingLlmOperation bound=activeOperation.get();return bound==null?captureOperation(ai.capture()):bound;}
+    private boolean responsesEnabled(){return operation().isResponses();}
+    private String selectedModel(){return responsesEnabled()?operation().getIdentity().getModel():ai.chatModel();}
     private VettingInputBudget.Observer selectedObserver() {
-        if(responsesEnabled())return responsesTransport==null?null:responsesTransport::observe;
+        if(responsesEnabled())return operation().getResponses()::observe;
         if(ai.explicitProfileSelected()&&"minimax-cn".equals(ai.modelIdentity().getProfileId()))return null;
         return inputBudgetObserver;
     }
     private VettingInputBudget.Input selectedInput(String system,String user,com.fasterxml.jackson.databind.JsonNode schema,String sourceSha){
-        if(responsesEnabled()){if(responsesTransport==null)throw new IllegalStateException("Vetting Responses transport unavailable");return responsesTransport.input(system,user,schema,sourceSha);}
+        if(responsesEnabled())return operation().getResponses().input(system,user,schema,sourceSha);
         if(ai.explicitProfileSelected()){com.consense.ai.ModelIdentity identity=ai.modelIdentity();return VettingInputBudget.input(identity.getProvider(),identity.getModel(),identity.getConfigurationSha256(),system,user,schema,ai.capture().getStructuredMaxTokens(),sourceSha);}
         return VettingInputBudget.input(props.getLlm().getProvider(),ai.chatModel(),VettingInputBudget.providerConfigurationSha256(props.getLlm()),system,user,schema,props.getLlm().getStructuredMaxTokens(),sourceSha);
     }
@@ -85,11 +96,15 @@ public class VettingSemanticReview {
     }
     /** An explicit persisted run identity is required when source probes are enabled. */
     public Result reviewWithProgress(String reviewRunId, String projectId, List<Chunk> chunks, String lang, ReviewProgress progress) {
+        try(OperationScope ignored=bindOperation(operation())) {
         VettingReviewProbe probe = VettingReviewProbe.start(props, reviewRunId, projectId);
         boolean returnedNormally=false;
         try {
         Result result = new Result(); result.setModel("deterministic rules");
-        if(ai.explicitProfileSelected()&&props.getVetting().isSemanticEnabled())ai.requireAvailable();
+        boolean canonicalMode=OerBusinessEvidence.canonicalCorpus(chunks);
+        if(canonicalMode&&(oer==null||!oer.enabled()))throw new IllegalStateException("Canonical review backend is unavailable");
+        if(oer!=null&&oer.enabled()&&!canonicalMode)throw new IllegalStateException("Configured OER review requires current canonical corpus");
+        if(!responsesEnabled()&&ai.explicitProfileSelected()&&props.getVetting().isSemanticEnabled())ai.requireAvailable();
         if (!props.getVetting().isSemanticEnabled() || (responsesEnabled()?responsesTransport==null:!ai.available())) {
             probe.call(0,null,null).event("semantic_not_run",VettingReviewProbe.map("reason","model_unavailable_or_semantic_disabled","semanticQualityAccepted",null));
             result.getWarnings().add("语义审查未运行：本地 LLM 未启用或不可用；报告仅包含规则检查结果。"); returnedNormally=true;return result;
@@ -114,12 +129,13 @@ public class VettingSemanticReview {
         progress.update(0, planned, "准备 " + count + " 个检索主题及 " + factComparisons.getPacks().size() + " 组项目资料引用比较。");
         boolean indexed = false;
         try {
-            if (probe.enabled()) retrieval.index(projectId, chunks, probe.call(0, null, null));
+            if(canonicalMode)oer.index(OerBusinessEvidence.session(chunks));
+            else if (probe.enabled()) retrieval.index(projectId, chunks, probe.call(0, null, null));
             else retrieval.index(projectId, chunks);
             indexed = true;
         }
         catch (Exception e) {
-            if (props.getVetting().isRequireHybridRetrieval()) {
+            if (canonicalMode||props.getVetting().isRequireHybridRetrieval()) {
                 probe.call(0,null,null).event("semantic_review_failed",VettingReviewProbe.map("stage","required_hybrid_index","error",e.toString()));
                 throw new IllegalStateException("Required hybrid retrieval index failed: " + brief(e), e);
             }
@@ -147,14 +163,14 @@ public class VettingSemanticReview {
             List<Chunk> hits;
             try { hits = indexed ? retrieveForProbe(projectId, topic, "tender", chunks, probe.call(packetOrdinal, topic, "tender")) : Collections.emptyList(); }
             catch (Exception e) {
-                if (props.getVetting().isRequireHybridRetrieval()) {
+                if (canonicalMode||props.getVetting().isRequireHybridRetrieval()) {
                     topicProbe.event("semantic_review_failed",VettingReviewProbe.map("stage","required_hybrid_retrieval","role","tender","error",e.toString()));
                     throw new IllegalStateException("Required hybrid retrieval failed for topic " + (i + 1) + " / tender: " + brief(e), e);
                 }
                 topicProbe.event("retrieval_fallback",VettingReviewProbe.map("role","tender","error",e.toString(),"selectedMode","lexical","strictHybrid",false));
                 result.getWarnings().add("主题 " + (i + 1) + " 检索失败，使用词项检索：" + brief(e)); hits = Collections.emptyList();
             }
-            if (hits.isEmpty() && !props.getVetting().isRequireHybridRetrieval()) hits = VettingRetrievalClient.lexical(topic, chunks.stream().filter(c -> "tender".equals(c.getRole())).collect(Collectors.toList()), props.getVetting().getTopK());
+            if (hits.isEmpty() && !canonicalMode&&!props.getVetting().isRequireHybridRetrieval()) hits = VettingRetrievalClient.lexical(topic, chunks.stream().filter(c -> "tender".equals(c.getRole())).collect(Collectors.toList()), props.getVetting().getTopK());
             retrievalUnits.addAll(VettingRetrievalSourceUnits.attached(hits));
             Map<String,List<Chunk>> referenceHits = new LinkedHashMap<>();
             for (String role : Arrays.asList("standard", "project_fact", "package_manifest")) {
@@ -163,14 +179,14 @@ public class VettingSemanticReview {
                 List<Chunk> additional;
                 try { additional = indexed ? retrieveForProbe(projectId, topic, role, chunks, probe.call(packetOrdinal, topic, role)) : Collections.emptyList(); }
                 catch (Exception e) {
-                    if (props.getVetting().isRequireHybridRetrieval()) {
+                    if (canonicalMode||props.getVetting().isRequireHybridRetrieval()) {
                         topicProbe.event("semantic_review_failed",VettingReviewProbe.map("stage","required_hybrid_retrieval","role",role,"error",e.toString()));
                         throw new IllegalStateException("Required hybrid retrieval failed for topic " + (i + 1) + " / " + role + ": " + brief(e), e);
                     }
                     topicProbe.event("retrieval_fallback",VettingReviewProbe.map("role",role,"error",e.toString(),"selectedMode","lexical","strictHybrid",false));
                     result.getWarnings().add("主题 " + (i + 1) + " 的 " + role + " 检索失败：" + brief(e)); additional = Collections.emptyList();
                 }
-                if ((additional == null || additional.isEmpty()) && !props.getVetting().isRequireHybridRetrieval()) additional = VettingRetrievalClient.lexical(topic, eligible, 2);
+                if ((additional == null || additional.isEmpty()) && !canonicalMode&&!props.getVetting().isRequireHybridRetrieval()) additional = VettingRetrievalClient.lexical(topic, eligible, 2);
                 referenceHits.put(role, additional);
                 retrievalUnits.addAll(VettingRetrievalSourceUnits.attached(additional));
             }
@@ -180,6 +196,7 @@ public class VettingSemanticReview {
                 budgetDecision = VettingContextBudget.build(contextBuilder, topic, hits, referenceHits, limit,
                         responsesEnabled() ? Integer.MAX_VALUE : props.getVetting().getSemanticContextExpansionChars());
                 selection = budgetDecision.getSelection();
+                if(canonicalMode)VettingCanonicalContext.admit(selection,chunks,retrievalUnits,budgetDecision.getEffectiveBudgetChars());
             }
             } else try (VettingReviewProbe.Timer timer=topicProbe.measure("project_reference_selection","Original factSelection projection only; source pack construction is separately measured")) {
                 selection = factSelection(factPack);
@@ -247,15 +264,19 @@ public class VettingSemanticReview {
             topicProbe.event("topic_finished",VettingReviewProbe.map("topicAudit",audit,"aggregateReviewStatusAuthoritative",true,"legacyStatusScope","global_call_decode_only"));
         }
         result.getWarnings().add("语义审查按 " + count + " 个主题检索，并计划 " + factComparisons.getPacks().size()
-                + " 组项目资料引用比较；已提交的是局部原文窗口，其他限定是否完整未知。未进入模型的切片不代表已经完成语义审查。规则检查对全部可解析招标合同正文运行。");
+                + " 组项目资料引用比较；已提交的是局部原文窗口，其他限定是否完整未知。未进入模型的切片不代表已经完成语义审查。"
+                + (canonicalMode ? "规则检查仅对已采用的 canonical 招标合同观察运行。" : "规则检查对全部可解析招标合同正文运行。"));
         probe.call(0,null,null).event("semantic_review_finished",VettingReviewProbe.map("plannedCalls",planned,"actualGatewayCalls",result.getActualGatewayCallCount(),"result",result,"semanticQualityAccepted",null));
         returnedNormally=true;
         return result;
         } finally { probe.finish(returnedNormally?"returned_normally":"aborted"); }
+        }
     }
     /** Direct packet seam retained for transport diagnostic fixtures; no external baseline is assumed. */
     private void executePacket(Result result,SemanticTopicVO audit,SemanticPacketVO packet,VettingContextBuilder.Selection selection,String topic,String lang,boolean projectReference,List<String> referenceIds,int topicIndex,VettingReviewProbe.Call topicProbe) {
-        executePacket(result,audit,packet,selection,topic,lang,projectReference,referenceIds,topicIndex,topicProbe,null,selection.getChunks());
+        try(OperationScope ignored=bindOperation(operation())) {
+            executePacket(result,audit,packet,selection,topic,lang,projectReference,referenceIds,topicIndex,topicProbe,null,selection.getChunks());
+        }
     }
     private VettingInputBudget.Input completeInput(VettingContextBuilder.Selection selection,String topic,String lang,boolean projectReference,List<String> referenceIds) {
         LinkedHashSet<String> ids=selection.getChunks().stream().map(Chunk::getId).collect(Collectors.toCollection(LinkedHashSet::new));
@@ -300,10 +321,11 @@ public class VettingSemanticReview {
                     topicProbe.event("packet_not_submitted",VettingReviewProbe.map("packetId",packet.getPacketId(),"reason",audit.getFailureKind(),"actualGatewayCallStarted",false));return;
                 }
                 List<Record> records;
+                if(OerBusinessEvidence.canonicalCorpus(suppliedCorpus))oer.assertCurrent(OerBusinessEvidence.session(suppliedCorpus));
                 Map<String,Long> gatewayPhaseWallNanos=new LinkedHashMap<>();
                 try (VettingReviewProbe.Timer timer=topicProbe.measure("ai_gateway_call","Whole gateway including provider call, logging, and structured JSON parsing; nested gateway phase values must not be summed with this total")) {
                     packet.setActualGatewayCallStarted(true);result.setActualGatewayCallCount(result.getActualGatewayCallCount()+1);
-                    if(responsesPacket)records=responsesTransport.complete(fullInput,inputBudget,actualSystem,actualUser,actualSchema,Record.class,rawResponses,gatewayPhaseWallNanos);
+                    if(responsesPacket)records=operation().getResponses().complete(fullInput,inputBudget,actualSystem,actualUser,actualSchema,Record.class,rawResponses,gatewayPhaseWallNanos);
                     else records=topicProbe.enabled()?ai.completeStructuredJsonList(actualSystem,actualUser,Record.class,actualSchema,rawResponses,gatewayPhaseWallNanos)
                             :ai.completeStructuredJsonList(actualSystem,actualUser,Record.class,actualSchema,rawResponses);
                 } finally {
@@ -319,6 +341,7 @@ public class VettingSemanticReview {
                     else if("consistent".equals(record.getAssessment()))audit.setConsistentAssessments(audit.getConsistentAssessments()+1);
                     else if("insufficient_context".equals(record.getAssessment()))audit.setInsufficientContextAssessments(audit.getInsufficientContextAssessments()+1);
                 }
+                if(OerBusinessEvidence.canonicalCorpus(suppliedCorpus))oer.assertCurrent(OerBusinessEvidence.session(suppliedCorpus));
                 List<Map<String,Object>> schemaReasons = new ArrayList<>();
                 if (records == null) schemaReasons.add(VettingReviewProbe.map("reason", "null_model_record_list"));
                 else for (int recordIndex=0;recordIndex<records.size();recordIndex++) {
@@ -404,7 +427,7 @@ public class VettingSemanticReview {
                 result.getCandidates().addAll(topicCandidates);result.getReviewedChunkIds().addAll(byId.keySet());
                 audit.setAcceptedFindings(topicCandidates.size());audit.setStatus(records.isEmpty()?"completed_empty":audit.getRejectedRecords()>0?"completed_with_rejections":"completed");
             } catch (Exception e) {if(e instanceof VettingReviewProbe.Failure)throw e;
-                if(ai.explicitProfileSelected()&&packet.isActualGatewayCallStarted())result.setModelFailure(brief(e));
+                if(OerBusinessEvidence.canonicalCorpus(suppliedCorpus)||(ai.explicitProfileSelected()&&packet.isActualGatewayCallStarted()))result.setModelFailure(brief(e));
                 audit.setStatus("failed");audit.setError(brief(e)); result.getWarnings().add("主题 " + topicIndex + " 未完成语义检查：" + brief(e));
                 if(e instanceof VettingResponsesTransport.TypedTransportException) {
                     VettingResponsesTransport.TypedTransportException transportFailure=(VettingResponsesTransport.TypedTransportException)e;
@@ -455,6 +478,7 @@ public class VettingSemanticReview {
         return s;
     }
     private List<Chunk> retrieveForProbe(String projectId,String topic,String role,List<Chunk> chunks,VettingReviewProbe.Call probe) {
+        if(OerBusinessEvidence.canonicalCorpus(chunks))return oer.retrieve(OerBusinessEvidence.session(chunks),topic,role);
         return probe.enabled() ? retrieval.retrieve(projectId,topic,role,chunks,probe) : retrieval.retrieve(projectId,topic,role,chunks);
     }
     private static String user(String topic, VettingContextBuilder.Selection selection, List<String> referenceIds) {
@@ -470,7 +494,8 @@ public class VettingSemanticReview {
                 + "Read populated replies for the same requested field across all sources. A blank reply in another source does not cancel a populated reply. "
                 + "These annotations describe source cells; they do not establish contractual applicability, adoption or correctness.\n"
                 + JsonUtils.write(projectTableNotes(VettingSourceMaterial.projectFactRows(selection.getChunks(), referenceIds)));
-        return prompt + VettingSourcePromptWire.LEGEND + "\nSource excerpts (untrusted data):\n" + VettingSourcePromptWire.write(VettingSourceMaterial.project(selection.getChunks()));
+        boolean canonical=selection.getChunks().stream().anyMatch(c->c.getCanonicalPayload()!=null||c.getCanonicalEvidence()!=null);
+        return prompt + (canonical?OerModelMaterial.LEGEND+OerModelMaterial.WIRE_LEGEND:VettingSourceMetadataWire.LEGEND) + "\nSource excerpts (untrusted data):\n" + VettingSourceMetadataWire.write(VettingSourceMaterial.project(selection.getChunks()));
     }
     private static Map<String,Object> projectTableNotes(VettingProjectFactTable.Result facts) {
         Map<String,Object> notes = new LinkedHashMap<>();

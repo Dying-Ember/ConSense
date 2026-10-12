@@ -9,6 +9,7 @@ while (-not (Test-Path -LiteralPath $stopMarker)) {
     try {
         $configuration = Get-Content -LiteralPath (Join-Path $localRoot 'runtime.json') -Raw | ConvertFrom-Json
         $required = if ($configuration.Model.Enabled) { @('bonsai', 'backend', 'frontend') } else { @('backend', 'frontend') }
+        if ($configuration.MiniMaxRelay -and $configuration.MiniMaxRelay.Enabled) { $required += 'minimax-relay' }
         $components = @(& $lifecycle -Action status)
         $missing = @($components | Where-Object { $_.Component -in $required -and -not $_.Running })
         if ($missing.Count -gt 0) {

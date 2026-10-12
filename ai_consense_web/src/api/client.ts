@@ -74,11 +74,23 @@ function toMessage(error: unknown): string {
   return error instanceof Error ? error.message : '未知错误'
 }
 
-/** Business errors use a JSON envelope even on binary endpoints (HTTP 200). */
-async function requireBinary(blob: Blob): Promise<Blob> {
+type DownloadOptions = { jsonDocument?: (value: unknown) => boolean }
+
+/** JSON files require an explicit document validator; business envelopes remain errors. */
+async function requireBinary(blob: Blob, options: DownloadOptions = {}): Promise<Blob> {
   if (blob.type.toLowerCase().includes('json')) {
-    const result = JSON.parse(await blob.text()) as ApiEnvelope<unknown>
-    throw new ApiError(result.code || -1, result.message || '服务器返回错误信息，未生成文件')
+    let result: unknown
+    try { result = JSON.parse(await blob.text()) } catch {
+      throw new ApiError(-1, '服务器返回无效 JSON，未生成报告文件')
+    }
+    if (result && typeof result === 'object' && Object.prototype.hasOwnProperty.call(result, 'code')) {
+      const envelope = result as Partial<ApiEnvelope<unknown>>
+      throw new ApiError(typeof envelope.code === 'number' && envelope.code !== 0 ? envelope.code : -1,
+        typeof envelope.message === 'string' && envelope.message ? envelope.message : '服务器返回错误信息，未生成文件')
+    }
+    if (!options.jsonDocument?.(result)) throw new ApiError(-1, '服务器返回的 JSON 不是当前请求的报告，未生成文件')
+  } else if (options.jsonDocument) {
+    throw new ApiError(-1, '服务器未返回 JSON 报告，未生成文件')
   }
   return blob
 }
@@ -100,10 +112,10 @@ export const api = {
     return unwrap<T>(http.post(url, form, profileConfig({ headers: { 'Content-Type': 'multipart/form-data' } })))
   },
   /** 下载二进制（文稿 / 审查报告） */
-  download: async (url: string, fallbackName: string) => {
+  download: async (url: string, fallbackName: string, options: DownloadOptions = {}) => {
     try {
       const response = await http.get(url, profileConfig({ responseType: 'blob', timeout: 300000 }))
-      const content = await requireBinary(response.data as Blob)
+      const content = await requireBinary(response.data as Blob, options)
       const disposition = String(response.headers['content-disposition'] || '')
       const match = /filename\*=UTF-8''([^;]+)/i.exec(disposition)
       const name = match ? decodeURIComponent(match[1]) : fallbackName

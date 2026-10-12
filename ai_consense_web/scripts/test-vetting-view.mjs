@@ -10,7 +10,7 @@ const source = await readFile(new URL('../src/views/VettingView.vue', import.met
 const script = parse(source).descriptor.scriptSetup.content.replace(/^import .*\r?\n/gm, '')
 const compiled = ts.transpileModule(script, { compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.None } }).outputText
 const setup = new Function('deps', `
-  const { computed, ref, watch, onMounted, onBeforeUnmount, useI18n, useAppStore, useLocalized, vettingApi, window } = deps;
+  const { computed, ref, watch, onMounted, onBeforeUnmount, useI18n, useRouter, useAppStore, useLocalized, vettingApi, window } = deps;
   ${compiled}
   return { job, files, findings, running, exportDisabled, pollingPaused, selectedFinding, evidenceItems, reportFormat,
     uploadRole, uploadPackage, runVetting, restoreJob, retryPolling, openFinding, closeDrawer, updateStatus, exportReport,
@@ -31,7 +31,7 @@ function harness(overrides = {}) {
   const store = vue.reactive({ activeProjectId: 'A', locale: 'en', notify: text => notifications.push(text), setBusy() {}, clearBusy() {}, captureLlmSelection: () => ({ profileId: null }) })
   const api = {
     files: async () => [{ key: 'NTT', parsed: true }], findings: async () => [finding('F1', 'Handled')], metrics: async () => metrics,
-    latestRun: async () => null, startRun: async () => active(), getRun: async () => completed(),
+    latestRunProgress: async () => null, startRun: async () => active(), getRunProgress: async () => completed(), getRun: async (_project, id) => completed(id),
     evidence: async () => ({ title: 'Evidence', located: true, items: [] }),
     updateStatus: async (_project, code, status) => finding(code, status),
     updateReview: async (_project, code, review) => ({ ...finding(code), ...review, reviewUpdatedAt: '2026-10-02T03:00:00Z' }),
@@ -47,7 +47,7 @@ function harness(overrides = {}) {
   const view = scope.run(() => setup({
     computed: vue.computed, ref: vue.ref, watch: vue.watch,
     onMounted: fn => mounted.push(fn), onBeforeUnmount: fn => unmounted.push(fn),
-    useI18n: () => ({ t: key => key }), useAppStore: () => store,
+    useI18n: () => ({ t: key => key }), useRouter: () => ({ push: async () => undefined }), useAppStore: () => store,
     useLocalized: () => ({ pick: value => value, currentKey: vue.ref('en') }), vettingApi: api,
     window: { setTimeout: (fn, delay) => { const id = ++timerId; timers.set(id, { fn, delay }); return id }, clearTimeout: id => timers.delete(id) }
   }))
@@ -158,7 +158,7 @@ function harness(overrides = {}) {
 
 {
   const pending = deferred()
-  const h = harness({ latestRun: () => pending.promise })
+  const h = harness({ latestRunProgress: () => pending.promise })
   await h.mount()
   await h.view.uploadPackage({ target: { files: [{ name: 'updated.docx' }] } })
   pending.resolve(completed('old-snapshot'))
@@ -169,7 +169,7 @@ function harness(overrides = {}) {
 }
 
 {
-  const h = harness({ latestRun: async () => active('restored') })
+  const h = harness({ latestRunProgress: async () => active('restored') })
   await h.mount()
   assert.equal(h.view.job.value.id, 'restored', 'active task restored on open')
   h.dispose()
@@ -178,10 +178,10 @@ function harness(overrides = {}) {
 
 {
   const pending = deferred()
-  const h = harness({ latestRun: async () => active('old'), getRun: () => pending.promise })
+  const h = harness({ latestRunProgress: async () => active('old'), getRunProgress: () => pending.promise })
   await h.mount()
   await h.fire(2000)
-  h.api.latestRun = async () => completed('new')
+  h.api.latestRunProgress = async () => completed('new')
   h.store.activeProjectId = 'B'
   await settle()
   pending.resolve(completed('old'))
@@ -208,12 +208,12 @@ function harness(overrides = {}) {
 }
 
 {
-  const h = harness({ getRun: async () => { throw new Error('offline') } })
+  const h = harness({ getRunProgress: async () => { throw new Error('offline') } })
   await h.view.runVetting()
   await h.fire(2000)
   assert.equal(h.view.pollingPaused.value, true)
   assert.equal(h.view.job.value.status, 'RUNNING', 'network failure is not job failure')
-  h.api.getRun = async () => completed()
+  h.api.getRunProgress = async () => completed()
   h.view.retryPolling()
   await settle()
   assert.equal(h.view.job.value.status, 'COMPLETED')

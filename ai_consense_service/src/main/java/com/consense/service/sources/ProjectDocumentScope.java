@@ -34,14 +34,22 @@ public final class ProjectDocumentScope {
         return result;
     }
     public static List<SourceDocument> selected(String projectId,List<SourceDocument> documents,String scope) {
+        return selected(projectId,documents,scope,"vetting");
+    }
+    public static List<SourceDocument> selected(String projectId,List<SourceDocument> documents,String scope,String module) {
         String normalized=normalizeScope(scope);
-        return currentCatalog(projectId,documents).stream().filter(d->exclusionReason(d,normalized)==null).collect(Collectors.toList());
+        return currentCatalog(projectId,documents).stream().filter(d->exclusionReason(d,normalized,module)==null).collect(Collectors.toList());
     }
     public static boolean reviewCategory(SourceDocument document) {
         return SourceDocument.CATEGORY_VETTING_PACKAGE.equals(document.getCategory())||SourceDocument.CATEGORY_VETTING_SUPPLEMENT.equals(document.getCategory());
     }
     public static String exclusionReason(SourceDocument d,String scope) {
+        return exclusionReason(d,scope,"vetting");
+    }
+    public static String exclusionReason(SourceDocument d,String scope,String module) {
         if(!reviewCategory(d))return "not_review_package";
+        String moduleExclusion=OerSourceMetadata.moduleExclusion(d,module);
+        if(moduleExclusion!=null)return moduleExclusion;
         String filename=nvl(d.getFileName()).toLowerCase(Locale.ROOT).replace('_',' ').replace('-',' ');
         String explicit=nvl(d.getDocumentScope()).toLowerCase(Locale.ROOT);
         // Recognisable answer keys remain held out even when accidentally labelled as package provisions.

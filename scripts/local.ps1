@@ -1,7 +1,7 @@
 #Requires -Version 7.4
 [CmdletBinding()]
 param(
-    [ValidateSet('start', 'start-model', 'restart-backend', 'deploy-backend', 'stop', 'status')][string]$Action = 'status',
+    [ValidateSet('start', 'start-model', 'restart-backend', 'restart-web', 'restart-minimax-relay', 'deploy-backend', 'stop', 'status')][string]$Action = 'status',
     [string]$BackendArtifact,
     [string]$ExpectedBackendSha256
 )
@@ -12,6 +12,13 @@ $localRoot = Join-Path $projectRoot '.local'
 $configPath = Join-Path $localRoot 'runtime.json'
 if (-not (Test-Path -LiteralPath $configPath)) { throw "Missing deployment configuration: $configPath" }
 $config = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
+$backendMaxHeapMiB = 2048
+if ($null -ne $config.BackendMaxHeapMiB) {
+    if (-not [int]::TryParse([string]$config.BackendMaxHeapMiB, [ref]$backendMaxHeapMiB) -or
+        $backendMaxHeapMiB -lt 256) {
+        throw 'BackendMaxHeapMiB must be an integer of at least 256 MiB.'
+    }
+}
 $stateRoot = Join-Path $localRoot 'state'
 $logRoot = Join-Path $localRoot 'logs'
 New-Item -ItemType Directory -Force -Path $stateRoot, $logRoot | Out-Null
@@ -72,7 +79,7 @@ function Get-OwnedProcess([string]$Name) {
     $receipt = Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json
     $candidate = Get-CimInstance Win32_Process -Filter "ProcessId=$($receipt.ProcessId)" -ErrorAction SilentlyContinue
     if (-not $candidate) { return $null }
-    if ($candidate.ExecutablePath -ine $receipt.Executable -or
+    if ([IO.Path]::GetFullPath($candidate.ExecutablePath) -ine [IO.Path]::GetFullPath([string]$receipt.Executable) -or
         $candidate.CreationDate.ToUniversalTime().Ticks -ne ([datetime]$receipt.CreatedUtc).ToUniversalTime().Ticks -or
         -not $candidate.CommandLine.Contains($receipt.Marker)) {
         throw "PID $($receipt.ProcessId) no longer belongs to ConSense $Name; refusing to operate on it."
@@ -88,6 +95,7 @@ function Test-Endpoint([string]$Url) {
 function Start-Component([string]$Name, [string]$Executable, [string[]]$Arguments,
                          [string]$Directory, [hashtable]$Environment, [string]$Marker,
                          [int]$Port, [string]$ReadyUrl, [int]$TimeoutSeconds = 120) {
+    $Executable = [IO.Path]::GetFullPath($Executable)
     $existing = Get-OwnedProcess $Name
     if ($existing) {
         if (-not (Test-Endpoint $ReadyUrl)) { throw "ConSense $Name is running but is not ready; inspect its logs." }
@@ -137,21 +145,50 @@ function Stop-Component([string]$Name) {
     if (Test-Path -LiteralPath $statePath) { Remove-Item -LiteralPath $statePath }
 }
 
-function Wait-BackendPortReleased {
+function Wait-PortReleased([int]$Port, [string]$Name) {
     $deadline = [DateTime]::UtcNow.AddSeconds(30)
     while ($true) {
-        $listeners = @(Get-NetTCPConnection -LocalPort $config.BackendPort -State Listen -ErrorAction SilentlyContinue)
+        $listeners = @(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue)
         if (-not $listeners.Count) { return }
         if ([DateTime]::UtcNow -ge $deadline) {
             $details = ($listeners | ForEach-Object { "$($_.LocalAddress):$($_.LocalPort) (PID $($_.OwningProcess))" }) -join ', '
-            throw "Backend port did not release within 30 seconds: $details. No listener process was killed."
+            throw "$Name port did not release within 30 seconds: $details. No listener process was killed."
         }
         Start-Sleep -Milliseconds 250
     }
 }
 
+function Start-MiniMaxRelay([switch]$Restart) {
+    if (-not $config.MiniMaxRelay -or -not $config.MiniMaxRelay.Enabled) {
+        if ($Restart) { throw 'MiniMaxRelay is not enabled in runtime.json.' }
+        return
+    }
+    $relayScript = Join-Path $PSScriptRoot 'minimax-relay.py'
+    if (-not (Test-Path -LiteralPath $relayScript -PathType Leaf)) { throw 'Missing MiniMax relay script.' }
+    if ($Restart) {
+        Stop-Component 'minimax-relay'
+        Wait-PortReleased -Port $config.MiniMaxRelay.Port -Name 'MiniMax relay'
+    }
+    Start-Component -Name 'minimax-relay' -Executable $config.MiniMaxRelay.PythonExecutable `
+        -Arguments @($relayScript, '--host', [string]$config.MiniMaxRelay.BindAddress,
+            '--port', [string]$config.MiniMaxRelay.Port, '--model', [string]$config.MiniMaxRelay.Model,
+            '--api-key-env', [string]$config.MiniMaxRelay.ApiKeyEnvironmentVariable,
+            '--access-token-env', [string]$config.MiniMaxRelay.AccessTokenEnvironmentVariable) `
+        -Directory $projectRoot -Environment @{} -Marker $relayScript -Port $config.MiniMaxRelay.Port `
+        -ReadyUrl "http://127.0.0.1:$($config.MiniMaxRelay.Port)/health"
+}
+
 $backendUrl = "http://127.0.0.1:$($config.BackendPort)"
 $frontendUrl = "http://127.0.0.1:$($config.FrontendPort)"
+$webBindAddress = if ([string]::IsNullOrWhiteSpace([string]$config.WebBindAddress)) { '127.0.0.1' } else { [string]$config.WebBindAddress }
+$parsedWebAddress = $null
+if (-not [Net.IPAddress]::TryParse($webBindAddress, [ref]$parsedWebAddress)) {
+    throw 'WebBindAddress must be an IP address.'
+}
+$frontendOrigins = @($frontendUrl, "http://localhost:$($config.FrontendPort)") + @(
+    $config.FrontendAllowedOrigins | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) }
+)
+$frontendOrigins = @($frontendOrigins | Select-Object -Unique)
 $canonicalRoot = [IO.Path]::GetFullPath($projectRoot).ToUpperInvariant()
 $mutexName = 'Global\ConSense-' + [Convert]::ToHexString(
     [System.Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($canonicalRoot))).Substring(0, 16)
@@ -166,11 +203,13 @@ try {
         if ($localTask -and $localTask.Actions.Arguments.Contains((Join-Path $PSScriptRoot 'watch-local.ps1'))) {
             Stop-ScheduledTask -TaskName 'ConSense-Local' -ErrorAction SilentlyContinue
         }
-        'frontend', 'backend', 'bonsai' | ForEach-Object { Stop-Component $_ }
+        'frontend', 'backend', 'minimax-relay', 'bonsai' | ForEach-Object { Stop-Component $_ }
         return
     }
     if ($Action -eq 'status') {
-        foreach ($name in @('bonsai', 'backend', 'frontend')) {
+        $componentNames = @('bonsai', 'backend', 'frontend')
+        if ($config.MiniMaxRelay -and $config.MiniMaxRelay.Enabled) { $componentNames += 'minimax-relay' }
+        foreach ($name in $componentNames) {
             $owned = Get-OwnedProcess $name
             $receiptPath = Join-Path $stateRoot "$name.json"
             $receipt = if (Test-Path -LiteralPath $receiptPath) { Get-Content -LiteralPath $receiptPath -Raw | ConvertFrom-Json }
@@ -181,8 +220,18 @@ try {
         }
         return
     }
+    if ($Action -eq 'restart-minimax-relay') {
+        Start-MiniMaxRelay -Restart
+        return
+    }
     $jar = Join-Path $projectRoot 'ai_consense_service\target\consense-service-1.0.0.jar'
     $releaseBackup = $null
+    if ($Action -eq 'restart-web' -and $config.Model.Enabled) {
+        $slots = @(Invoke-RestMethod -Uri "http://127.0.0.1:$($config.Model.Port)/slots" -TimeoutSec 5)
+        if ($slots | Where-Object { $_.is_processing }) {
+            throw 'Model is serving an active request; web restart was not started.'
+        }
+    }
     if ($Action -eq 'deploy-backend') {
         if (-not $BackendArtifact -or $ExpectedBackendSha256 -notmatch '^[A-Fa-f0-9]{64}$') {
             throw 'deploy-backend requires BackendArtifact and its exact ExpectedBackendSha256.'
@@ -209,7 +258,7 @@ try {
             throw 'Staged backend hash changed; backend was not stopped.'
         }
     }
-    $rendererArguments = if ($Action -in @('start', 'restart-backend', 'deploy-backend')) {
+    $rendererArguments = if ($Action -in @('start', 'restart-backend', 'restart-web', 'deploy-backend')) {
         @(Get-DraftingRendererArguments -Renderer $config.DraftingRenderer -LocalDirectory $localRoot)
     } else { @() }
     $stopMarker = Join-Path $stateRoot 'stopped'
@@ -230,21 +279,54 @@ try {
         SPRING_PROFILES_ACTIVE = 'h2'
         CONSENSE_H2_JDBC_URL = "jdbc:h2:file:$databasePath;MODE=MySQL;DATABASE_TO_LOWER=TRUE;CASE_INSENSITIVE_IDENTIFIERS=TRUE"
         CONSENSE_STORAGE_ROOT = (Join-Path $localRoot 'data\uploads')
-        CONSENSE_ALLOWED_ORIGINS = "$frontendUrl,http://localhost:$($config.FrontendPort)"
+        CONSENSE_ALLOWED_ORIGINS = $frontendOrigins -join ','
         CONSENSE_LLM_ENABLED = $config.Model.Enabled.ToString().ToLower()
         CONSENSE_MINIMAX_ENABLED = 'false'
         CONSENSE_OCR_ENABLED = 'false'
+    }
+    if ($config.MiniMaxCn -and $config.MiniMaxCn.Enabled) {
+        $miniMaxKeyVariable = [string]$config.MiniMaxCn.ApiKeyEnvironmentVariable
+        if ([string]::IsNullOrWhiteSpace($miniMaxKeyVariable) -or
+            [string]::IsNullOrWhiteSpace([string]$config.MiniMaxCn.BaseUrl)) {
+            throw 'MiniMaxCn requires BaseUrl and ApiKeyEnvironmentVariable.'
+        }
+        # Read the current persisted value, including variables added after this shell started.
+        $miniMaxCredential = [Environment]::GetEnvironmentVariable($miniMaxKeyVariable, 'Machine')
+        if ([string]::IsNullOrWhiteSpace($miniMaxCredential)) {
+            $miniMaxCredential = [Environment]::GetEnvironmentVariable($miniMaxKeyVariable, 'User')
+        }
+        if ([string]::IsNullOrWhiteSpace($miniMaxCredential)) {
+            $miniMaxCredential = [Environment]::GetEnvironmentVariable($miniMaxKeyVariable, 'Process')
+        }
+        if ([string]::IsNullOrWhiteSpace($miniMaxCredential)) {
+            throw "MiniMax credential environment variable '$miniMaxKeyVariable' is not configured."
+        }
+        $backendEnvironment['CONSENSE_MINIMAX_ENABLED'] = 'true'
+        $backendEnvironment['CONSENSE_MINIMAX_BASE_URL'] = [string]$config.MiniMaxCn.BaseUrl
+        $backendEnvironment['MiniMaxCN_Token_Plan_API_Key'] = $miniMaxCredential.Trim()
+        $miniMaxCredential = $null
     }
     # This Windows host rejects JDK AF_UNIX connect. An absent per-deployment
     # socket directory selects PipeImpl's built-in loopback TCP fallback.
     if (Test-Path -LiteralPath $config.JavaUnixSocketFallbackPath) {
         throw 'The NIO TCP fallback path must remain absent; inspect runtime.json.'
     }
-    $backendArguments = @('-Xms256m', '-Xmx2g', '-Dfile.encoding=UTF-8',
+    $backendArguments = @('-Xms256m', "-Xmx${backendMaxHeapMiB}m", '-Dfile.encoding=UTF-8',
         '-Dsun.stdout.encoding=UTF-8', '-Dsun.stderr.encoding=UTF-8',
         "-Djdk.net.unixdomain.tmpdir=$($config.JavaUnixSocketFallbackPath)", '-jar', $jar,
-        '--server.address=127.0.0.1', "--server.port=$($config.BackendPort)",
+        "--server.address=$webBindAddress", "--server.port=$($config.BackendPort)",
         '--consense.vector.provider=memory')
+    # Optional local OER configuration stays outside tracked code and can carry
+    # reviewed publication/source identities without reparsing fixed references.
+    if (-not [string]::IsNullOrWhiteSpace([string]$config.BackendAdditionalConfig)) {
+        $additionalConfig = [IO.Path]::GetFullPath([string]$config.BackendAdditionalConfig, $projectRoot)
+        $additionalBoundary = [IO.Path]::GetFullPath($localRoot) + [IO.Path]::DirectorySeparatorChar
+        if (-not $additionalConfig.StartsWith($additionalBoundary, [StringComparison]::OrdinalIgnoreCase) -or
+            -not (Test-Path -LiteralPath $additionalConfig -PathType Leaf)) {
+            throw 'BackendAdditionalConfig must be a saved file inside this project .local.'
+        }
+        $backendArguments += "--spring.config.additional-location=$([Uri]::new($additionalConfig).AbsoluteUri)"
+    }
     if ($config.Model.Enabled) {
         $backendEnvironment['CONSENSE_LLM_BASE_URL'] = "http://127.0.0.1:$($config.Model.Port)"
         $backendArguments += @('--consense.llm.provider=openai', "--consense.llm.chat-model=$($config.Model.Id)",
@@ -252,12 +334,13 @@ try {
             "--consense.llm.structured-max-tokens=$($config.Model.MaxOutputTokens)")
     }
     $backendArguments += $rendererArguments
+    Start-MiniMaxRelay -Restart:($Action -eq 'restart-web')
     $backendDeploymentStarted = $false
     try {
-        if ($Action -in @('restart-backend', 'deploy-backend')) {
+        if ($Action -in @('restart-backend', 'restart-web', 'deploy-backend')) {
             $backendDeploymentStarted = $true
             Stop-Component 'backend'
-            Wait-BackendPortReleased
+            Wait-PortReleased -Port $config.BackendPort -Name 'Backend'
             if ($Action -eq 'deploy-backend') {
                 Copy-Item -LiteralPath $releaseArtifact -Destination $jar
                 if ((Get-FileHash -LiteralPath $jar -Algorithm SHA256).Hash -ine $ExpectedBackendSha256) {
@@ -272,7 +355,7 @@ try {
     } catch {
         if ($releaseBackup -and $backendDeploymentStarted) {
             Stop-Component 'backend'
-            Wait-BackendPortReleased
+            Wait-PortReleased -Port $config.BackendPort -Name 'Backend'
             Copy-Item -LiteralPath $releaseBackup -Destination $jar
             if ((Get-FileHash -LiteralPath $jar -Algorithm SHA256).Hash -ine
                 (Get-FileHash -LiteralPath $releaseBackup -Algorithm SHA256).Hash) {
@@ -290,8 +373,12 @@ try {
     $webRoot = Join-Path $projectRoot 'ai_consense_web'
     if (-not (Test-Path -LiteralPath (Join-Path $webRoot 'dist\index.html'))) { throw 'Build the frontend first.' }
     $viteEntry = Join-Path $webRoot 'node_modules\vite\bin\vite.js'
+    if ($Action -eq 'restart-web') {
+        Stop-Component 'frontend'
+        Wait-PortReleased -Port $config.FrontendPort -Name 'Frontend'
+    }
     Start-Component -Name 'frontend' -Executable $config.NodePath `
-        -Arguments @($viteEntry, 'preview', '--host', '127.0.0.1', '--port', "$($config.FrontendPort)", '--strictPort') `
+        -Arguments @($viteEntry, 'preview', '--host', $webBindAddress, '--port', "$($config.FrontendPort)", '--strictPort') `
         -Directory $webRoot -Environment @{ CONSENSE_API_TARGET = $backendUrl } `
         -Marker $viteEntry -Port $config.FrontendPort -ReadyUrl $frontendUrl
     Write-Host "Open $frontendUrl/#/drafting"

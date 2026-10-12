@@ -41,3 +41,8 @@
 **/.vscode/
 .DS_Store
 Thumbs.db
+
+# Local visual and workbook audit evidence (report source/HTML may be versioned)
+/outputs/review-audit-*/
+/outputs/oer-progress/*.png
+/outputs/oer-progress/*.jpg
