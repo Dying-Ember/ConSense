@@ -115,7 +115,7 @@ consense:
 
   # ---------------- 业务规则 ----------------
   vetting:
-    # 主观风险条款每次产出上限（对应设计稿 Skill 3 规则 7）
+    # Legacy configuration is accepted for compatibility; findings are no longer capped.
     max-risk-findings: 10
     # 只审查相对标准模板基线改动过的内容
     diff-against-baseline: true

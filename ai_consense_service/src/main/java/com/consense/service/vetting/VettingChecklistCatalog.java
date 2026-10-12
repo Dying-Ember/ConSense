@@ -60,7 +60,8 @@ public final class VettingChecklistCatalog {
     /** Only persisted human decisions may populate this object. No finding implies fulfilment. */
     public static final class Result {
         private final String id, status, remarks;
-        public Result(String id, String status, String remarks) { this.id=id; this.status=status; this.remarks=remarks; }
+        @com.fasterxml.jackson.annotation.JsonCreator
+        public Result(@com.fasterxml.jackson.annotation.JsonProperty("id") String id,@com.fasterxml.jackson.annotation.JsonProperty("status") String status,@com.fasterxml.jackson.annotation.JsonProperty("remarks") String remarks) { this.id=id; this.status=status; this.remarks=remarks; }
         public String getId() { return id; }
         public String getStatus() { return status; }
         public String getRemarks() { return remarks; }

@@ -62,9 +62,10 @@ class VettingServiceLifecycleWorkflowTest {
         assertEquals(2,one(events,"rule_sources_constructed").path("observations").path("sources").size());
         assertFalse(one(events,"rule_engine_raw_outputs").path("observations").path("outputs").isEmpty());
         assertEquals(4,one(events,"semantic_result_raw_candidates").path("observations").path("result").path("candidates").size());
-        List<JsonNode> decisions=phase(events,"candidate_filter_decision");assertEquals(original.size()+3,decisions.size());
+        List<JsonNode> decisions=phase(events,"candidate_filter_decision");assertEquals(original.size()+1,decisions.size());
         assertEquals(1,decisions.stream().filter(e->"duplicate_fingerprint".equals(e.path("observations").path("reason").asText())).count());
-        assertEquals(2,decisions.stream().filter(e->"risk_cap".equals(e.path("observations").path("reason").asText())).count());
+        assertEquals(0,decisions.stream().filter(e->"risk_cap".equals(e.path("observations").path("reason").asText())).count());
+        assertEquals(3,original.stream().filter(f->"risk".equals(f.getGroupKey())).count(),"The withdrawn risk count cap must not discard valid unique findings");
         assertEquals(observed.getTotal(),one(events,"final_selected_candidates").path("observations").path("candidatesByFingerprint").size());
         JsonNode records=one(events,"merge_pending_commit_records").path("observations");assertFalse(records.path("committed").asBoolean());assertEquals(observed.getTotal(),records.path("findingVos").size());
         assertTrue(one(events,"merge_and_complete_transaction_returned").path("observations").path("committed").asBoolean());

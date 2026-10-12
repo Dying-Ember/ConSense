@@ -127,6 +127,7 @@ public class ConsenseProperties {
         private Responses responses = new Responses();
         /** Explicit minimax-cn selection uses Chat unless this Vetting-only wire is responses. */
         private String minimaxCnWire = "chat-completions";
+        /** Legacy binding only; the withdrawn finding cap is never applied. */
         private int maxRiskFindings = 10;
         private boolean diffAgainstBaseline = true;
         private boolean semanticEnabled = true;
