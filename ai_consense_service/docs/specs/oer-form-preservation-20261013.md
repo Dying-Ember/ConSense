@@ -32,3 +32,11 @@ v5 是保留的历史补丁结果：完整 PdfFormField 曾进入模型材料，
 生成原件包括冲突／匹配文字外观、缺失外观、空白外观，以及实际 PDFBox checkbox 的非文字 `/AP` 和已有 `/V`／`/AS`。v6 中完整可读外观仍进入实际 user excerpt，长原流只经来源摘要绑定；来源原流保持完整且未修改。合成完整 token 观察超预算时拒绝整包，正文与来源原流均未截断。此 token 用例是契约验证，未调用真实 tokenizer／模型。
 
 AC02 整体仍未通过：真实原件表单显著成员分母、扁平／扫描表单、像素外观、父子选择组与法律 OR 关系、独立留出、实际模型及浏览器业务验收未完成。原件、生产服务、活动索引、Local05 均未改动。
+
+## 有限真实 GCT 保全复验
+
+对同 SHA 的两页真实 GCT 原件执行新的完整 native 解析，并实际查看 Poppler 150 dpi 的两张完整原页，核对已有的 8 个可见文字出现处和 3 个空控件区域。11/11 物理 widget 按原页、完整名及源 rectangle 唯一映射；canonical field 分母仍为 10，两者不混用。可见名及原逻辑 `/V` 为 8/8；可读 AP 严格 raw 比较为 7/8，Clause 10 源转录末空格没有进入提取文字，仅空白投影比较为 8/8。原 normal AP 的 raw／decoded 字节各 8/8 完全一致。3/3 空控件在 parsed blocks 和 native evidence blocks 各保存一次完整元数据，AP missing 为 3；此原件没有非文字已有 AP。
+
+运行为 PARSED，OCR availability／recognize 和模型调用均 0；原件在解析、渲染前后 SHA 相同。用独立工作树既有 parser classes 的外部冻结副本运行，parser 两源文件与根集成版本一致；全部冻结 class／依赖 jar 在运行后仍同 SHA，未写 root target。逐成员来源、页码／区域、原始输出及像素 SHA 在外部 `gct-form-native-real-01/` 保存；总收据 `gct-limited-real-native-verification-final-receipt.json` SHA 为 `f7afb25e8e394565d8ef22186f61cd408fda84309f5377ac7e52d317fa4824a3`，短说明 `GCT-fresh-native-verification.md` SHA 为 `a52517208e725e4567f0b251b403b20ce8d63230d6d4d15fe8ee085373b41be3`。
+
+Java 空 fieldValue 不能直接区分 COS `/V` 缺席和显式空；完整原件与独立源观察保留该差别。blank 意义、owner、父子组及法律 OR 仍 unknown，没有复评正文 CER／完整条组、扫描／扁平表单或独立留出；像素检查是有限执行者抽核，未获得独立真人验收。AC02 与固定 corpus 整体仍未通过。
