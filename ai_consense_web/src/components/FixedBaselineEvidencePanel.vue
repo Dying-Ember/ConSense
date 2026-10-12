@@ -90,7 +90,7 @@ onBeforeUnmount(() => { ++epoch; cleanup() })
       <details><summary>{{ label('structure') }}</summary><pre>{{ JSON.stringify({ sourceUnit, sourceQuality: evidence.payload.sourceQuality, unknowns: evidence.payload.unknowns, projectApplicability: pointer.projectApplicability, qualifiersComplete: pointer.qualifiersComplete }, null, 2) }}</pre></details>
       <button type="button" class="btn" :disabled="originalLoading" @click="openOriginal">{{ originalLoading ? label('loading') : label('original') }}</button>
       <p v-if="assetError" role="alert">{{ assetError }}</p>
-      <template v-if="original"><p>{{ label('verified') }}</p><a class="btn" :href="`${original}#page=${pointer.originalPageNos?.[0] || pointer.pageNo}`" target="_blank" rel="noopener noreferrer">{{ label('originalPage') }}</a><PdfPreview :source="original" :title="evidence.fileLabel" :locale="locale" /></template>
+      <template v-if="original"><p>{{ label('verified') }}</p><a class="btn" :href="`${original}#page=${pointer.originalPageNos?.[0] || pointer.pageNo}`" target="_blank" rel="noopener noreferrer">{{ label('originalPage') }}</a><PdfPreview :source="original" :initial-page="pointer.originalPageNos?.[0] || pointer.pageNo" :title="evidence.fileLabel" :locale="locale" /></template>
     </template>
   </section>
 </template>

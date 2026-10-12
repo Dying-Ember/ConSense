@@ -59,7 +59,7 @@ test('rendered fixed panel displays full table and unknown adoption, only reads 
     fetch: async url => { calls.push(url); return url.includes('/evidence?') ? envelope(evidence()) : url.includes('/table?')
       ? new Response(tableBytes, { headers: { 'Content-Type': 'application/json', 'X-Source-SHA256': hash(tableBytes) } })
       : new Response(pdf, { headers: { 'Content-Type': 'application/pdf', 'X-Source-SHA256': address.originalSourceSha256 } }) }
-  }, boundaries: { '@noble/hashes/sha256': require('@noble/hashes/sha256'), '@/components/DraftingPdfPreview.vue': { __esModule: true, default: { props: ['source'], render() { return vue.h('div', `Existing PDF.js viewer: ${this.source}`) } } } } })
+  }, boundaries: { '@noble/hashes/sha256': require('@noble/hashes/sha256'), '@/components/DraftingPdfPreview.vue': { __esModule: true, default: { props: ['source', 'initialPage'], render() { return vue.h('div', `Existing PDF.js viewer: ${this.source} page ${this.initialPage}`) } } } } })
   const rendered = renderer(), props = vue.reactive({ pointer: { ...address }, locale: 'en' }), app = rendered.createApp({ render: () => vue.h(loaded.default, props) })
   app.mount(rendered.root); await flush()
   try {
@@ -70,6 +70,7 @@ test('rendered fixed panel displays full table and unknown adoption, only reads 
     find(rendered.root, node => node.tag === 'button' && text(node) === 'Read the complete original PDF').props.onClick()
     await waitFor(() => /byte SHA-256 verified/.test(text(rendered.root)))
     assert.match(text(rendered.root), /byte SHA-256 verified/); assert.equal(urls.length, 1)
+    await waitFor(() => /Existing PDF.js viewer: blob:fixed-source page 3/.test(text(rendered.root)))
     props.pointer = { ...address, parentId: 'unavailable-source' }; await flush()
     assert.equal(revoked.length, 1); assert.match(text(rendered.root), /fixed baseline or original changed/)
     assert.equal(urls.length, 1)
