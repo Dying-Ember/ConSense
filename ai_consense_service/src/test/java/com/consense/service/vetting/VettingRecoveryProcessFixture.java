@@ -43,7 +43,7 @@ public final class VettingRecoveryProcessFixture {
             if("QUEUED".equals(mode)){
                 // Test-only saturation of this fixture's actual worker; the run still enters through HTTP.
                 java.lang.reflect.Field executor=VettingService.class.getDeclaredField("worker");executor.setAccessible(true);
-                ((java.util.concurrent.ThreadPoolExecutor)executor.get(context.getBean(VettingService.class))).execute(()->block("owned fixture worker occupied; run queued"));
+                ((java.util.concurrent.ThreadPoolExecutor)executor.get(org.springframework.test.util.AopTestUtils.getUltimateTargetObject(context.getBean(VettingService.class)))).execute(()->block("owned fixture worker occupied; run queued"));
             }
             running.set(true);
             if(!"RESUME".equals(mode))request(base+"/api/vetting/"+project+"/runs","POST");
