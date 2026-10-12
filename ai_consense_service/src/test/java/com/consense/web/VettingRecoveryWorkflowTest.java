@@ -39,7 +39,7 @@ import static org.mockito.Mockito.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 
 /** Public HTTP, durable H2 records and real bounded worker; model/retrieval are local fixtures. */
-@SpringBootTest(properties={"spring.jpa.hibernate.ddl-auto=create-drop","spring.flyway.enabled=false","consense.llm.enabled=false","consense.ocr.enabled=false","consense.vector.provider=memory","consense.vetting.semantic-topics=2","consense.vetting.project-reference-comparisons=0"})
+@SpringBootTest(properties={"spring.jpa.hibernate.ddl-auto=create-drop","spring.flyway.enabled=false","consense.llm.enabled=false","consense.llm.num-ctx=524288","consense.llm.structured-thinking=false","consense.ocr.enabled=false","consense.vector.provider=memory","consense.vetting.semantic-topics=2","consense.vetting.project-reference-comparisons=0"})
 @AutoConfigureMockMvc @ActiveProfiles("h2")
 class VettingRecoveryWorkflowTest {
     private static final String ID=UUID.randomUUID().toString();

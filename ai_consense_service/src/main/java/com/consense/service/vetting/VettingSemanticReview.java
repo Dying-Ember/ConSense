@@ -347,6 +347,10 @@ public class VettingSemanticReview {
                 if(inputBudget.isExtraDispatchPermitted()&&inputBudget.getObservation().getEffectiveContextTokens()<262144) {
                     inputBudget.setStatus("budget_unknown");inputBudget.setReason("effective_context_below_256k");inputBudget.setExtraDispatchPermitted(false);
                 }
+                if(inputBudget.isExtraDispatchPermitted()&&!responsesPacket) {
+                    String profileFailure=nativeProfileFailure(inputBudget);
+                    if(profileFailure!=null){inputBudget.setStatus("budget_unknown");inputBudget.setReason(profileFailure);inputBudget.setExtraDispatchPermitted(false);}
+                }
                 if(previewChanged) {inputBudget.setStatus("budget_unknown");inputBudget.setReason("token_preview_final_observation_changed");inputBudget.setExtraDispatchPermitted(false);}
                 boolean providerModeChanged=responsesPacket!=responsesEnabled();
                 if(providerModeChanged) {inputBudget.setStatus("budget_unknown");inputBudget.setReason("packet_provider_mode_changed");inputBudget.setExtraDispatchPermitted(false);}
@@ -527,6 +531,17 @@ public class VettingSemanticReview {
                     packet.setCheckpointStatus(Arrays.asList("completed","completed_empty","completed_with_rejections").contains(packet.getStatus())?"saved_verified_packet":"saved_failed_attempt");durable.save(saved);
                 }
                 topicProbe.event("packet_finished",VettingReviewProbe.map("packetAudit",packet,"callDecodeAudit",audit));}
+    }
+    private String nativeProfileFailure(VettingInputBudget.Result budget) {
+        com.consense.ai.ModelIdentity identity=operation().getIdentity();
+        if(identity==null||!"configured_profile".equals(identity.getIdentityScope()))return null;
+        ConsenseProperties.Llm configured="minimax-cn".equals(identity.getProfileId())?props.getMinimaxCn():props.getLlm();
+        if(!Objects.equals(identity.getConfigurationSha256(),com.consense.ai.LlmProfiles.configurationSha256(configured)))return "captured_model_configuration_changed";
+        if("ollama".equals(identity.getProvider())) {
+            if(!Boolean.FALSE.equals(configured.getStructuredThinking()))return "native_chat_observer_requires_thinking_false";
+            if(configured.getNumCtx()!=budget.getObservation().getEffectiveContextTokens())return "observed_context_differs_from_configured_ollama_context";
+        }
+        return null;
     }
     private static VettingContextBuilder.Selection packetSelection(VettingSourceRequestPacks.Result plan,VettingSourceRequestPacks.Pack pack,VettingContextBuilder.Selection global) {
         VettingContextBuilder.Selection s=new VettingContextBuilder.Selection();s.setChunks(pack.getChunks());s.setContentChars(pack.getContentChars());
