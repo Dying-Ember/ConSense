@@ -52,6 +52,8 @@ import static org.mockito.ArgumentMatchers.*;
         "spring.jpa.hibernate.ddl-auto=create-drop",
         "spring.flyway.enabled=false",
         "consense.llm.enabled=false",
+        "consense.llm.num-ctx=524288",
+        "consense.llm.structured-thinking=false",
         "consense.ocr.enabled=false",
         "consense.vector.provider=memory",
         "consense.vetting.semantic-enabled=true",
