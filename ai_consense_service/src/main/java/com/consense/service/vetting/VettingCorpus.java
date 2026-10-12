@@ -362,7 +362,7 @@ public final class VettingCorpus {
         }
         FindingEvidence evidence=new FindingEvidence(side, c.getDocumentId(), c.getFileKey(), c.getFileName(), page, anchor, quote, located,
                 c.getCanonicalEvidence()==null?c.getSourceHash():c.getCanonicalEvidence().getJavaParsedSourceHash(), bbox);
-        evidence.setCanonicalEvidence(c.getCanonicalEvidence());return evidence;
+        evidence.setCanonicalEvidence(c.getCanonicalEvidence());evidence.setOriginalSourceSha256(c.getOriginalSourceSha256());return evidence;
     }
     public static String normalize(String text) { return nvl(text).replaceAll("[\\s\\p{Z}]+", " ").trim(); }
     public static String hash(String text) {

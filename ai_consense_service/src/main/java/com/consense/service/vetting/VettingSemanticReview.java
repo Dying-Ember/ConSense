@@ -459,7 +459,7 @@ public class VettingSemanticReview {
                     }
                     List<String> quotedUnresolved=r.getEvidence().stream().map(Quote::getChunkId)
                             .filter(selection.getUnresolvedComparisonIds()::contains).collect(Collectors.toList());
-                    if (comparisonRequired && !quotedUnresolved.isEmpty()) {gateReasons.add("quoted_chunk_known_unresolved");valid = false;}
+                    if ((comparisonRequired||Arrays.asList("consistent","not_applicable").contains(r.getAssessment()))&&!quotedUnresolved.isEmpty()) {gateReasons.add("quoted_chunk_known_unresolved");valid = false;}
                     Boolean comparisonBasis=null;
                     if (valid && comparisonRequired) {comparisonBasis=hasComparisonBasis(type, r.getEvidence(), evidence, byId);if(!comparisonBasis){gateReasons.add("current_role_comparison_basis_not_satisfied");valid=false;}}
                     if("not_applicable".equals(r.getAssessment())&&(!substantiveTenderEvidence||evidence.stream().anyMatch(e->JsonUtils.isBlankText(e.getDocumentId())||JsonUtils.isBlankText(e.getSourceHash())))){

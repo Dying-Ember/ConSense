@@ -71,6 +71,8 @@ public final class VettingDtos {
         private Boolean addendumRequired;
         /** Server-owned timestamp; not accepted by ReviewUpdateRequest. */
         private Instant reviewUpdatedAt;
+        private String generatedRevisionSha256;
+        private String sourceSnapshotSha256;
     }
 
     /** Full replacement of human review records, independent of finding status. */
@@ -83,6 +85,10 @@ public final class VettingDtos {
         @Size(max = 4000, message = "must not exceed 4000 characters")
         private String actionTaken;
         private Boolean addendumRequired;
+        private String expectedRunId;
+        private String expectedGeneratedRevisionSha256;
+        private String expectedSourceSnapshotSha256;
+        public ReviewUpdateRequest(String remarks,String action,Boolean addendum){this.reviewRemarks=remarks;this.actionTaken=action;this.addendumRequired=addendum;}
     }
 
     /** 四类问题计数 */
@@ -138,6 +144,11 @@ public final class VettingDtos {
         private CanonicalEvidenceDtos.EvidencePointer canonicalEvidence;
         @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
         private com.fasterxml.jackson.databind.JsonNode fixedBaselineEvidence;
+        @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+        private String originalSourceSha256;
+        public EvidenceItemVO(String code,String pageNo,String text,String side,String documentId,String fileKey,String fileName,String anchor,String quote,boolean located,String sourceHash,List<Double> bbox,String packetId,String packetSourceSnapshotSha256,CanonicalEvidenceDtos.EvidencePointer canonicalEvidence,com.fasterxml.jackson.databind.JsonNode fixedBaselineEvidence) {
+            this(code,pageNo,text,side,documentId,fileKey,fileName,anchor,quote,located,sourceHash,bbox,packetId,packetSourceSnapshotSha256,canonicalEvidence);this.fixedBaselineEvidence=fixedBaselineEvidence;
+        }
         public EvidenceItemVO(String code,String pageNo,String text,String side,String documentId,String fileKey,String fileName,String anchor,String quote,boolean located,String sourceHash,List<Double> bbox,String packetId,String packetSourceSnapshotSha256,CanonicalEvidenceDtos.EvidencePointer canonicalEvidence) {
             this(code,pageNo,text,side,documentId,fileKey,fileName,anchor,quote,located,sourceHash,bbox,packetId,packetSourceSnapshotSha256);this.canonicalEvidence=canonicalEvidence;
         }
@@ -181,6 +192,11 @@ public final class VettingDtos {
         private CanonicalEvidenceDtos.EvidencePointer canonicalEvidence;
         @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
         private com.fasterxml.jackson.databind.JsonNode fixedBaselineEvidence;
+        @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+        private String originalSourceSha256;
+        public FindingEvidence(String side,String documentId,String fileKey,String fileName,String pageNo,String anchor,String quote,boolean located,String sourceHash,List<Double> bbox,String packetId,String packetSourceSnapshotSha256,CanonicalEvidenceDtos.EvidencePointer canonicalEvidence,com.fasterxml.jackson.databind.JsonNode fixedBaselineEvidence) {
+            this(side,documentId,fileKey,fileName,pageNo,anchor,quote,located,sourceHash,bbox,packetId,packetSourceSnapshotSha256,canonicalEvidence);this.fixedBaselineEvidence=fixedBaselineEvidence;
+        }
         public FindingEvidence(String side,String documentId,String fileKey,String fileName,String pageNo,String anchor,String quote,boolean located,String sourceHash,List<Double> bbox,String packetId,String packetSourceSnapshotSha256,CanonicalEvidenceDtos.EvidencePointer canonicalEvidence) {
             this(side,documentId,fileKey,fileName,pageNo,anchor,quote,located,sourceHash,bbox,packetId,packetSourceSnapshotSha256);this.canonicalEvidence=canonicalEvidence;
         }

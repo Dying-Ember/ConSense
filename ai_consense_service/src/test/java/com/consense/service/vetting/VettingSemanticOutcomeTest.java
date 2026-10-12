@@ -11,6 +11,20 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 class VettingSemanticOutcomeTest {
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({"risk,consistent","language,consistent","risk,not_applicable","language,not_applicable"})
+    void aMissingNecessaryMemberRejectsOnlyItsDependentAssessment(String type,String assessment){
+        Chunk affected=VettingContextBudgetTest.chunk("affected","XYZ1","Except as specified in XYZ99(2), interim payment shall not apply to this contract.",150);
+        Chunk reliable=VettingContextBudgetTest.chunk("reliable","XYZ2","The contractor shall keep the performance security valid throughout the contract.",150);
+        VettingSemanticReview.Record dependent=reference(affected,affected);dependent.setType(type);dependent.setAssessment(assessment);dependent.setComment("This scoped provision is consistent or explicitly excluded, subject to its referenced exception.");
+        VettingSemanticReview.Record independent=reference(reliable,reliable);independent.setType("risk");independent.setComment("Reliable independent scope requires business review.");
+        AiGateway ai=response(dependent);when(ai.completeStructuredJsonList(anyString(),anyString(),eq(VettingSemanticReview.Record.class),any(),anyList())).thenReturn(Arrays.asList(dependent,independent));
+        List<Chunk> chunks=Arrays.asList(affected,reliable);Result result=review(ai,properties(),chunks,chunks);
+        com.consense.web.dto.VettingDtos.SemanticPacketVO packet=result.getTopicAudits().get(0).getPacketAudits().get(0);
+        assertEquals(1,packet.getRejectedRecords());assertEquals(0,packet.getVerifiedConsistentAssessments());assertEquals(0,packet.getVerifiedNotApplicableAssessments());assertTrue(packet.getVerifiedAssessments().isEmpty());
+        assertEquals(1,result.getCandidates().size());assertEquals(reliable.getContent().trim(),result.getCandidates().get(0).getEvidence().get(0).getQuote());
+        assertEquals("issue",packet.getCheckState(),"An unrelated reliable assessment continues despite the missing member in A");
+    }
     @Test void outputBudgetExhaustionHasItsOwnOutcomeAndNeverClaimsReviewedCoverage() {
         HttpSupport http = mock(HttpSupport.class);
         when(http.get(anyString(),anyLong())).thenReturn("{\"data\":[]}");
