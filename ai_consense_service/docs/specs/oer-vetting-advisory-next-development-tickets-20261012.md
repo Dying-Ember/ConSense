@@ -14,6 +14,25 @@ execution: implementation-in-progress; authorized-2026-10-13
 
 2026-10-12发布时用户仅要求写spec、任务为ready-for-agent。2026-10-13实现授权已覆盖该历史状态；下表按02:40实际收据更新，不把既有实验、软件测试次数或局部有限样本当本轮整任务完成。
 
+## 2026-10-13 06:31 当前实施状态（任务未提前关闭）
+
+代码69c3e091e5e2c9ac7c467d8ecb2032a5a4600ad6。源码69c3e09完整Maven275 suites／2736 tests／0 failure／0 error／111 skipped、实际exit0；新jar79426422bytes、SHA9048035d6bff4aaf6a12ed139fa6f4f5ccad79c91dfb1777a610a9c305072fc5，mtime06:11:23。后续报告文档HEAD不冒重新编译。源码bdf真实SCC run05 bec47b60完成34/34、32可靠包及2发现；34raw/attempt含2retry，26有效record中21被拒、5机械接受，仅1candidateEligible；17主题全部partial。代码69完整构建已通过，本轮完成本地提交准备；具体冻结HEAD与时间以外置final pack manifest为准。目标今天08:30准备本地代码，09:00由用户提交GitHub，未push。现有HTML与ledger追加R120–R152，152轮／908证据／41文档卡／438旧指标；旧119轮／783证据定义／41卡／438指标及全部documentCatalogue、comparisons、training和失败逐项保持。仅准确非密钥收据逐SHA复制到忽略的report-evidence目录，不搬原件、模型、密钥或运行DB。 下方02:40表格保留历史语境，当前状态见本表及[实施状态](./oer-next-implementation-status-20261013.md)、[handoff](../HANDOFF-ocr-embedding-rerank-20261008.md)、[ledger](../testing/oer-progress-ledger.json)。
+
+| 任务 | 已保存的实际增量 | 当前未通过门与采用边界 |
+| --- | --- | --- |
+| NEXT-00／09 | Linux82 hash离线CPU导入；本轮无新依赖 | 最终OCI/字体/license/漏洞扫描/PVC/H800未过 |
+| NEXT-01／03 | D4 v6 compact/binary64、native262144/provider/thinking fail closed、69完整2736/0/0/111 | 全源/必要证据/actual native exact-template未认证；111skip保留 |
+| NEXT-02 | 226Stream主672/672、源监督4/5；GCT visible8/8/blank3/3/strictAP7/8 | AC02=false；Window续注/父条legal/flat/scanned unknown、候选未正式采用 |
+| NEXT-04 | Serverformal05 LF207闭合/3Java问/full20700seal、Local复制输入10行 | 09d201exact/6CRLF closure=false；题3跨专业，semantic/PVC/H800未过、未采用 |
+| NEXT-05 | SCC源码bdf34/34、32可靠包/2发现；UI/reload/restart/stale两门真实验证 | 26records仅1eligible，17topics partial；人工非QS，prepared/reservation/outcome未独证 |
+| NEXT-06／07 | 原GCC有限两轮/原引用canvas；69新实际图/history8旧6逐字/2generation含1retry | reference_only/采用未确认；完整官方业务/新来源/Q10/legal未过 |
+| NEXT-08 | 同manual export56e16三格式/222cells/PDF47overview/36fullsize，原件SHA回取 | jobSnapshot07a1分列；opaque人工复核、Word NOT_RENDERED，QS/source/legal未过 |
+| NEXT-10 | 准确69完整build、有限两轴0open、旧119/783/41/438及失败精确保存 | 不认证整spec；默认CRLF exit2保留/policy exit0；准确冻结身份见外置final pack manifest |
+
+真实UI备注/核对/复开及新runtime回读保持；actionTaken实际空字符串、addendumRequired=null，不作QS裁决。过严handled-reload null断言失败保raw，随后按实际blank serialization verified；4104/4123拒写0accepted，前后findings/checklist各自SHA相同；重启run字段变化不称全run byteexact。 独立账本1361原文件SHA manifest/248textArtifact相符，194uniqueSCCchunks、975项目selected-content occurrences/170fixed projections完整保留；语义194/229块、174617/186855字符来自terminal，enriched content176564不同分母不混算。9comparison generation requests与run32distinct generationEntityHashes匹配0；reservation/prepared/generation outcome未独证，不推算网络次数。17topics partial/qualifiersunknown，VT002专业结论unknown，language trusted origin未证明；预算只provider estimate，非exact template/H800峰值。 完整源/gold、Window续注/父条法律范围、flat/scanned forms、官方整套业务/QS法律裁决、Word物理分页/视觉、opaque建议人工条款复核、Server语义gold/最新working-byte运行闭合、PVC、最终OCI/字体/license/漏洞扫描及单H800交接恢复仍未通过。主脏worktree/图纸排除/Drafting冻结/05原plan/原件/模型/密钥保护，未push/远端issue/PR/生产部署；所有NEXT保持In progress。
+
+**末次独立复核：** 26图文件SHA、旧6完整history、两实际wire的系统append与counter核心、275XML及JAR904803…已再核。代码默认diff-check340提示全部新增CR行，16000新增行真实末尾space/tab0；显式Windows CR-at-EOL等policy通过，默认exit2日志保持，不改EOL。累计23既有收据/18修补或后续账目（并非18finding）核69 ancestry；已审代码范围Standards/Spec 0open，不扩大为整spec认证，所有真实剩余门保持。
+
 ## 状态与关闭规则
 
 - `Ready`：规格明确且依赖已满足，仍未启动；`Waiting`：依赖尚未交付；`In progress`：已实际开始，仍有规定子门未通过；`Verified`：规定验收有真实证据；`Closed`：依赖和对应验收通过并绑定集成提交／交付身份。
