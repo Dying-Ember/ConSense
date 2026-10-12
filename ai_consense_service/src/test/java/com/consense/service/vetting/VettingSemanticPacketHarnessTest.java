@@ -120,7 +120,11 @@ class VettingSemanticPacketHarnessTest {
         return new VettingCheckpointService(null,null,null).session("fixture","owner",()->fail("Rejected native profile must not load or reuse a checkpoint"));
     }
     private Result configuredNativeReview(LlmClient provider,int configuredContext,Boolean thinking,boolean explicit,java.util.function.Consumer<ConsenseProperties> afterCapture,VettingCheckpointService.Session checkpoint) {
+        return configuredNativeReview(provider,configuredContext,thinking,explicit,afterCapture,checkpoint,"ollama");
+    }
+    private Result configuredNativeReview(LlmClient provider,int configuredContext,Boolean thinking,boolean explicit,java.util.function.Consumer<ConsenseProperties> afterCapture,VettingCheckpointService.Session checkpoint,String providerName) {
         List<Chunk> chunks=corpus();ConsenseProperties configured=props(chunks.get(0));
+        configured.getLlm().setProvider(providerName);
         configured.getLlm().setNumCtx(configuredContext);configured.getLlm().setStructuredThinking(thinking);
         when(provider.available()).thenReturn(true);when(provider.chatModel()).thenReturn(configured.getLlm().getChatModel());
         LlmProfiles profiles=new LlmProfiles(configured,provider,mock(LlmClient.class));
@@ -158,6 +162,21 @@ class VettingSemanticPacketHarnessTest {
             LlmClient provider=emptyProvider();Result result=configuredNativeReview(provider,524288,false,explicit,p->p.getLlm().setTemperature(0.333),forbiddenCheckpoint());
             verify(provider,never()).chatStructured(anyList(),any());assertEquals(0,result.getActualGatewayCallCount());assertTrue(result.getReviewedChunkIds().isEmpty());
             assertTrue(result.getTopicAudits().get(0).getPacketAudits().stream().allMatch(packet->"not_submitted_budget_unknown".equals(packet.getStatus())&&"captured_model_configuration_changed".equals(packet.getError())));
+        }
+    }
+    @Test void capturedNativeProviderCaseCannotBypassContextOrThinking() {
+        for(String providerName:Arrays.asList("OLLAMA","Ollama"))for(boolean thinking:Arrays.asList(false,true)){
+            LlmClient provider=emptyProvider();Result result=configuredNativeReview(provider,131072,thinking,true,p->{},forbiddenCheckpoint(),providerName);
+            verify(provider,never()).chatStructured(anyList(),any());assertEquals(0,result.getActualGatewayCallCount());assertTrue(result.getReviewedChunkIds().isEmpty());
+            String reason=thinking?"native_chat_observer_requires_thinking_false":"observed_context_differs_from_configured_ollama_context";
+            assertTrue(result.getTopicAudits().get(0).getPacketAudits().stream().allMatch(packet->"not_submitted_budget_unknown".equals(packet.getStatus())&&reason.equals(packet.getError())));
+        }
+    }
+    @Test void capturedUnknownNativeProviderNeverLoadsCheckpointOrDispatches() {
+        for(String providerName:Arrays.asList("","unsupported"," openai ")){
+            LlmClient provider=emptyProvider();Result result=configuredNativeReview(provider,524288,false,true,p->{},forbiddenCheckpoint(),providerName);
+            verify(provider,never()).chatStructured(anyList(),any());assertEquals(0,result.getActualGatewayCallCount());assertTrue(result.getReviewedChunkIds().isEmpty());
+            assertTrue(result.getTopicAudits().get(0).getPacketAudits().stream().allMatch(packet->"not_submitted_budget_unknown".equals(packet.getStatus())&&"native_chat_provider_unknown".equals(packet.getError())));
         }
     }
 
