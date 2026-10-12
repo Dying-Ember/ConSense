@@ -101,7 +101,7 @@ class VettingRecoveryWorkflowTest {
             assertThrows(BizException.class,()->checkpoints.renew(id,oldOwner));release.countDown();Thread.sleep(100);assertEquals("COMPLETED",runs.findById(id).orElseThrow(AssertionError::new).getStatus());assertEquals(2,findings.findByProjectIdOrderByCodeAsc(project).size());
         }finally{release.countDown();restarted.stopWorker();}
     }
-    @ParameterizedTest @ValueSource(strings={"source","recipe","model"})
+    @ParameterizedTest @ValueSource(strings={"source","recipe","retrieval_recipe","model"})
     void incompatibleInputsRequireRerunAndRetainVerifiedPackets(String changed)throws Exception{
         String project=project();AtomicInteger calls=new AtomicInteger();CountDownLatch waiting=new CountDownLatch(1),release=new CountDownLatch(1);
         when(ai.completeStructuredJsonList(anyString(),anyString(),eq(VettingSemanticReview.Record.class),any(),anyList())).thenAnswer(call->{if(calls.incrementAndGet()==2){waiting.countDown();assertTrue(release.await(20,TimeUnit.SECONDS));}return records("issue");});
@@ -109,11 +109,12 @@ class VettingRecoveryWorkflowTest {
         VettingRun saved=runs.findById(id).orElseThrow(AssertionError::new);saved.setLeaseUntil(Instant.now().minusSeconds(1));
         if("recipe".equals(changed))saved.setRecoveryContractSha256("incompatible-recipe");
         if("model".equals(changed))saved.setModelIdentityJson(JsonUtils.write(new ModelIdentity("fixture","fixture","different fixture model",null,"test_only")));
-        runs.saveAndFlush(saved);
+        runs.saveAndFlush(saved);String previousRecipe=props.getVetting().getExpectedRetrievalRecipeFingerprint();
+        if("retrieval_recipe".equals(changed))props.getVetting().setExpectedRetrievalRecipeFingerprint("changed-retrieval-recipe");
         if("source".equals(changed)){SourceDocument source=documents.findByProjectIdOrderByIdAsc(project).get(0);source.setTextContent(source.getTextContent()+" changed");documents.saveAndFlush(source);}
         VettingService restarted=new VettingService(projectService,storage,parser,props,documents,findings,runs,semantic,writer,transactions,profiles);restarted.setCheckpoints(checkpoints);restarted.setReportSnapshots(snapshots);restarted.setChecklistService(checklist);
         try{restarted.recoverInterruptedRuns();JsonNode failed=await(project,id,"FAILED");assertEquals("NEEDS_RERUN",failed.path("recoveryStatus").asText());assertEquals(1,failed.path("reliablePackets").size());assertEquals(2,calls.get(),"No incompatible model call may resume");}
-        finally{release.countDown();restarted.stopWorker();}
+        finally{release.countDown();restarted.stopWorker();props.getVetting().setExpectedRetrievalRecipeFingerprint(previousRecipe);}
     }
     @Test void corruptCheckpointCannotSupplyReliableOrFormalResults()throws Exception{
         String project=project();String id=start(project);await(project,id,"COMPLETED");VettingPacketCheckpoint corrupt=packets.findByRunIdOrderByUpdatedAtAsc(id).get(0);corrupt.setResultJson(corrupt.getResultJson()+" ");packets.saveAndFlush(corrupt);
