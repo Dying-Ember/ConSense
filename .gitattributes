@@ -6,3 +6,5 @@ ai_consense_service/src/test/resources/oer/native-pdf-producer-v1/** -text
 ai_consense_service/src/test/resources/oer/canonical/authored-source.pdf -text
 # Recheck CAS filenames and ledgers bind the original byte digest.
 ai_consense_service/src/test/resources/oer/recheck/**/*.blob -text
+# The release manifest is hash-bound and must retain its bytes on Windows checkout.
+artifacts/oer-freeze-20261012/manifest.json -text
