@@ -1,5 +1,7 @@
 # OER / Vetting / Advisory 实施状态 — 2026-10-13
 
+**2026-10-13 提交前复核补充（新构建08:58:15，记录2026-10-13T09:00:14.748084+08:00）：** 固定参考原件变更后旧人工写入仍可保存的P1已由最小修补 `a0c7334f5b45fe2fba7fdae876424051efcfbbea` 解决：复用共享来源守卫，status／review／checklist均拒绝4104，原人工记录保留、checklist writable=false；无新依赖或迁移。新HTTP回归1、Service7、Checklist8通过；首聚合34项出现1 failure／1 error（Recovery），原失败保留，随后未改代码或fixture独立Recovery整类18／0／0／0、exit0，不追认首轮全绿或归因。新源码a0实际 `mvn -DskipTests package` exit0，JAR 79426537 bytes／SHA 1289ad775fdac61258bb9589c470b21a8887cf06a5b34f0875b2e02bf2f711fb；本次package跳过测试，旧69完整2736／0／0／111仅属于旧版本。有限Standards修补独审0 open，Spec P1已闭合；未重跑真实模型／浏览器或切换服务。冻结DOCX已用既有portable LibreOffice26.2.6.3成功渲染46页并逐页查看，内容核对292段、页面外字符0，未见丢字／裁切／重叠；仅P3短尾续页与稀疏页，Microsoft Word实际引擎未验；原Java PDF47页属于另一引擎，不要求页数相同。旧Word NOT_RENDERED为历史，现口径为LibreOffice已实渲染、Microsoft Word未实测。VT002不透明来源建议仍需人工核对。未发现根级GitHub Actions workflow，当前green来自本地；未push。原件／QS完整业务、Server采用／OCI／PVC／H800门仍未通过。准确日志、XML、分页与新制品收据位于外置 `prepush-20261013/`，新final pack取代旧96提交包；旧报告和冻结证据保持。
+
 用户于北京时间 2026-10-13 凌晨调用 `implement-spec`，授权实现 [主规格](./oer-vetting-advisory-next-development-20261012.md)，要求最小完整代码，并纠正截止为 **今天 08:30 准备好本地代码，09:00 由用户提交 GitHub**。这覆盖此前的 spec-only 授权状态；原件质量、真实模型、浏览器及 H800 门仍分别验收。
 
 ## 06:31 当前本地交付与未通过门
