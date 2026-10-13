@@ -1,8 +1,42 @@
 # OER 已确认范围与执行规则
 
+**2026-10-13 私仓PR与冻结制品授权：** 用户明确要求将代码PR到私仓，并包含冻结模型权重和数据库，覆盖此前本轮仅本地交付/模型与数据库只留本地的上传限制。目标已核为PRIVATE `Dying-Ember/ConSense`，PR #8；大制品使用同一私仓Release `oer-frozen-20261012-05-20261013`，源码附[制品清单与恢复说明](../../artifacts/oer-freeze-20261012/README.md)。包含固定05绑定BGE两模型、Paddle/MinerU静态历史快照、05独立向量库副本和完整来源descriptor闭包；原冻结原字节/SHA、历史recipe pin及未通过门保留。已全量核文件/分卷并在全新目录恢复字节，恢复不等于新主机服务或业务验收；原C/D绝对路径只输出映射，不改写冻结库。活动Local05、H2、模型服务、Drafting与主dirty工作区不切换；密钥与运行日志不上传。准确manifest SHA为 `0ce643f66a9208338e827c063f77254d20bfc8aba6e7f1d1f23f53a24e616950`；实际远端上传结果以本次Release及外置上传收据为准。
+
+**2026-10-13 提交前复核补充（新构建08:58:15，记录2026-10-13T09:00:14.748084+08:00）：** 固定参考原件变更后旧人工写入仍可保存的P1已由最小修补 `a0c7334f5b45fe2fba7fdae876424051efcfbbea` 解决：复用共享来源守卫，status／review／checklist均拒绝4104，原人工记录保留、checklist writable=false；无新依赖或迁移。新HTTP回归1、Service7、Checklist8通过；首聚合34项出现1 failure／1 error（Recovery），原失败保留，随后未改代码或fixture独立Recovery整类18／0／0／0、exit0，不追认首轮全绿或归因。新源码a0实际 `mvn -DskipTests package` exit0，JAR 79426537 bytes／SHA 1289ad775fdac61258bb9589c470b21a8887cf06a5b34f0875b2e02bf2f711fb；本次package跳过测试，旧69完整2736／0／0／111仅属于旧版本。有限Standards修补独审0 open，Spec P1已闭合；未重跑真实模型／浏览器或切换服务。冻结DOCX已用既有portable LibreOffice26.2.6.3成功渲染46页并逐页查看，内容核对292段、页面外字符0，未见丢字／裁切／重叠；仅P3短尾续页与稀疏页，Microsoft Word实际引擎未验；原Java PDF47页属于另一引擎，不要求页数相同。旧Word NOT_RENDERED为历史，现口径为LibreOffice已实渲染、Microsoft Word未实测。VT002不透明来源建议仍需人工核对。未发现根级GitHub Actions workflow，当前green来自本地；未push。原件／QS完整业务、Server采用／OCI／PVC／H800门仍未通过。准确日志、XML、分页与新制品收据位于外置 `prepush-20261013/`，新final pack取代旧96提交包；旧报告和冻结证据保持。
+
+**2026-10-13 当前实施授权与截止：** 用户调用 `implement-spec` 要求实现[下一轮规格](./specs/oer-vetting-advisory-next-development-20261012.md)，使用最小完整代码，并明确先安装 Ponytail、激活 hooks 再开发。安装与 hooks 信任 / 实际生命周期验证已完成后开始隔离实施；本次覆盖下方 2026-10-12 的 spec-only 限制。截止已纠正为**今天北京时间 08:30 准备好本地代码，09:00 由用户提交 GitHub**。沿用固定05开发基准、图纸排除、Drafting冻结与既有失败；实现、契约、源质量、真实模型、浏览器和H800分别报告。当前分支、时间预算和实际证据见[实施状态](./specs/oer-next-implementation-status-20261013.md)，不将实施授权等同于活动服务 / 数据库切换或远端发布。
+
+**2026-10-13 06:31 当前实施结果（服务观察06:21:45，账本复核06:27）：** 源码69c3e09完整Maven275 suites／2736 tests／0 failure／0 error／111 skipped、实际exit0；新jar79426422bytes、SHA9048035d6bff4aaf6a12ed139fa6f4f5ccad79c91dfb1777a610a9c305072fc5，mtime06:11:23。后续报告文档HEAD不冒重新编译。源码bdf真实SCC run05 bec47b60完成34/34、32可靠包及2发现；34raw/attempt含2retry，26有效record中21被拒、5机械接受，仅1candidateEligible；17主题全部partial。真实UI备注/核对/复开及新runtime回读保持；actionTaken实际空字符串、addendumRequired=null，不作QS裁决。过严handled-reload null断言失败保raw，随后按实际blank serialization verified；4104/4123拒写0accepted，前后findings/checklist各自SHA相同；重启run字段变化不称全run byteexact。 模型基础jobSnapshot07a1d224与含manual的actual export56e16b6b0b4ae4d5a25751d98800790e74fa79702a5e030d0e1ca0c382660094分列；JSON/PDF/DOCX同56e16保222nonemptycells、人工sentinels，PDF47页/嵌字体/全部footer/offpage0，DOCX20tables/19repeatheaders。原件真实浏览器下载214154bytes/SHA8ba80d18...匹配，初wait timeout保留。PDF150dpi47overview/36fullsize含22business pages记录覆盖内无观察版式缺陷；PDF46页opaque prefix0b2a5f47建议需人工来源复核，不猜替换或改冻结raw；Word NOT_RENDERED。 旧message8真实Mermaid PS失败/raw保留，quote变体只syntaxpass；共同有效prompt仅1生产行/既有wire断言、作者85/0/0/0、有限两轴0open，无新依赖/迁移。69新runtime23232/message10真实图显示，8history/旧6逐字/保存答案等actual，2generation含1schema retry、首INVALID_JSON保留。prepared-only wire无response/outcome不算第3调用；provider_estimated_fit、exactTemplateObserved=false/providerMaximumMeasured=false，reference_only/项目采用及完整业务/legal/source-member未确认。 完整源/gold、Window续注/父条法律范围、flat/scanned forms、官方整套业务/QS法律裁决、Word物理分页/视觉、opaque建议人工条款复核、Server语义gold/最新working-byte运行闭合、PVC、最终OCI/字体/license/漏洞扫描及单H800交接恢复仍未通过。现有HTML与ledger追加R120–R152，152轮／908证据／41文档卡／438旧指标；旧119轮／783证据定义／41卡／438指标及全部documentCatalogue、comparisons、training和失败逐项保持。仅准确非密钥收据逐SHA复制到忽略的report-evidence目录，不搬原件、模型、密钥或运行DB。 代码69完整构建已通过，本轮完成本地提交准备；具体冻结HEAD与时间以外置final pack manifest为准。目标今天08:30准备本地代码，09:00由用户提交GitHub，未push；NEXT仍In progress。
+
+**末次独立复核：** 26图文件SHA、旧6完整history、两实际wire的系统append与counter核心、275XML及JAR904803…已再核。代码默认diff-check340提示全部新增CR行，16000新增行真实末尾space/tab0；显式Windows CR-at-EOL等policy通过，默认exit2日志保持，不改EOL。累计23既有收据/18修补或后续账目（并非18finding）核69 ancestry；已审代码范围Standards/Spec 0open，不扩大为整spec认证，所有真实剩余门保持。
+
+**2026-10-13 02:40 实际进度与采用边界：** [现有离线报告](../../outputs/oer-progress/index.html)已追加R114–R119：119轮、783份逐SHA验证证据、41文档卡、438既有独立文档质量指标；旧113轮／746证据／全部438指标、训练与失败逐项保留。完整226页原生候选Stream主网格672/672、5/5，完整**源监督组**4/5、表外11/12、显式关系86/87；Window续注、父条及法律作用范围仍unknown，未正式采用、不切05，首轮完整组0/5另保。真实M3 GCC2.1首问与同session跟问已SQL保存、历史逐字、逐答案引用和物理17页canvas实核，范围仍reference_only；SCC仅已真实上传，Vetting run／全套官方业务和三格式导出尚待。Linux82包已实际hash离线安装及CPU导入；旧94包误下载RapidOCR内嵌3ONNX的候选已拒绝并保留，不能说本轮0权重下载。Server20700点全量／cold存储seal闭合，语义查询、PVC、最终OCI／扫描与H800未过。Java首全跑2631／25failure／103error／123skip与第二2701／1／86／111均exit1；修复后补跑终态另记，不用前端126/126、build或focused控制替代全回归。报告源码根为隔离worktree，证据根明确绑定主目录历史证据；仅复制准确非密钥收据，未镜像模型／运行数据库。当前门与任务状态见[本地任务图](./specs/oer-vetting-advisory-next-development-tickets-20261012.md)和handoff顶部。
+
+**2026-10-12 历史规格发布快照（已由10-13实施授权覆盖）：** 用户指定 to-spec，要求将整体技术栈、新 demo、OER／Vetting／Advisory 写入下一次开发规格，并明确“先别开发，就写 spec”。[主规格](./specs/oer-vetting-advisory-next-development-20261012.md)及[本地任务图](./specs/oer-vetting-advisory-next-development-tickets-20261012.md)已按 ready-for-agent 编制；用户确认主验收链为真实上传→固定／项目取证→Vetting报告或Advisory答案→对应原文回取，离线解析与H800制品另验。图纸排除、Drafting冻结、05开发基准及已知缺陷保持；候选版本经验证后采用。该历史编制回合未启动代码、安装、训练、模型、迁移或部署，未创建远端issue。
+
+**2026-10-12 新demo HTML须共同纳入整体技术栈评估：** 用户再次明确`Ref/communications`的新demo也要考虑。当前目录已核为`ConSense-CAC-Proposal-DemoV2.0.html`，SHA与已审版一致。demo的Vetting底稿／导航／裁决／报告、Advisory咨询／引用，以及现有代码的交接展示，与实际代码、源证据和既定范围共同作为[交付评估第3.5节](./delivery-stack-decision-20261012.md#35-新demo-html也是交付评估依据交互要求到真实依赖的映射)输入；不把demo固定答案、无finding默认pass、localStorage状态、已排除材料或已撤回风险上限自动采纳。整体含OER＋Vetting＋Advisory＋共用推理／检索／部署，解析子调查的限定不缩小整体范围。图纸排除、Drafting冻结保持，本条不宣称demo浏览器验收或功能实现完成。
+
+**2026-10-12 整体交付技术栈必须包含Vetting和Advisory：** 用户再次明确两模块必须纳入评估。前述“仅解析质量”的范围限制只适用于原件残差子调查，不排除整体技术栈中的检索／证据／业务LLM／任务、会话、引用、报告与部署。整体模块及共用服务的依赖与源码缺口见[交付技术栈评估第3.4节](./delivery-stack-decision-20261012.md#34-完整交付范围vettingadvisory及共用服务的技术栈判断)。这是技术评估范围澄清，不表示所有功能已实现、已采用候选或已通过业务／H800验收；Drafting冻结与图纸文件排除保持。
+
+**2026-10-12 本次解析技术栈评估的优先级：** 用户按内容漏失严重程度与影响范围要求优先处理表单、复杂正文，原第三项中的图纸文件随后被明确完全排除。范围内规范插图／流程示意的保全沿用原范围，后续有线复杂表、公式、扫描／隐藏OCR及Word特殊内容按原件残差处理；不将embedding、召回、排序和业务界面缺口混入解析清单。三路源证据／官方能力研究的统一结论见[技术栈评估第2.3节](./delivery-stack-decision-20261012.md#23-其他解析残差与用户最新优先级先补引擎图纸只识别身份)：先补表单结构、正文层级／读序、区域覆盖和导出保全引擎，当前没有新增第三套OCR／IDP框架的必要性证据；未宣称现有模型质量已通过，未据评估提问启动实施或切换活动库。
+
+**2026-10-12 最新明确排除：图纸文件不参与解析。** 用户严肃明确“图纸文件不在解析之列，完全不在”，并补充“不要在图纸的细节解析上下功夫，知道它是图纸就行”。上传文件身份／路由层仅识别并标记其为图纸，然后从解析任务排除；不开展图纸正文OCR、尺寸／轴线／符号／图例精读、CAD／矢量结构或工程关系解析，不为图纸增加模型、训练或依赖。图纸以PDF、扫描图像等格式提供也仍排除，不能因格式可解析而纳入。本条覆盖旧文档中把图纸列入项目解析范围的表述；既有原件和历史记录保留。范围内合同／规范／清单中提及图纸的文字不等于图纸文件，仍按其已确认文件身份处理。
+
+**2026-10-12 无框表之外调查的范围澄清：** 用户明确本次只问原件解析质量；embedding、召回和排序问题由后续Vetting／Advisory模块调整，不纳入本次解析改进清单。本次核查限定为完整输入／区域覆盖、正常parser文字与导出保全、读序／条款层级／源注释归属、完整图像裁切、公式／表单控件／空白／修订可见态和旧正确项回归。原件内结构归属属于解析，项目采用／法律适用判断、模型入包、业务覆盖与引用UI另行评价。补充记录见[源解析质量审计](../../.local/state/oer-beyond-borderless-review-20261012/source-quality.md)；同目录RAG／业务及封存工程调查作为后续参考，不作为本次解析残差。本澄清只限定本次调查，不更改21:00开发基准冻结后的既有安排；未启动新的解析、模型或业务作业。
+
+**2026-10-12 Camelot评估问题澄清：** 用户询问的是“直接读取原生PDF文字层、恢复表格候选结构，再加代码解析引擎”的接入价值，不是全局provider替换。评估结论及当前代码接缝见[交付技术栈评估第2.2节](./delivery-stack-decision-20261012.md#22-用户澄清camelot文字层恢复代码解析引擎的接入价值)：该分支值得接入验证，逻辑表／Notes条件组装和native PDF表格投影仍待实现；未将用户的评估提问作为已采用、实施或活动索引切换授权。
+
 更新：2026-10-12，Asia/Shanghai。本文是 OCR → embedding → rerank（OER）的当前范围与规则入口。准备资料、安装模型、解析、标注、切块、索引、评价或接入服务前先读取本文。规则来自用户明确指示、已采纳的 Q1–Q8、用户纠正后的 Q9、已采纳的 Q10=A、限定为轻量入口的 Q11=B、赛方范围核对记录和本轮原件核验；实现进度单独记在 [handoff](./HANDOFF-ocr-embedding-rerank-20261008.md)，通过规则讨论不等于通过实验验收。
 
 用户后续明确更改某条规则时，在本文更新该条及依据，并同步相关文档的入口或历史说明。已确认规则继续有效；技术参数、可查证的文件事实和常规实现选择由执行者核验解决，不重复把它们交给用户决定。
+
+**2026-10-12 今晚交付技术栈评估入口：** 用户要求结合[无框表隔离调查](./oer-borderless-table-isolated-investigation-20261012.md)、communications原型及Vetting／Advisory共同评估，尽快确定超算依赖范围以减少安全扫描变动，并说明同事尚未搭好环境。统一结论见[交付技术栈评估与锁定建议](./delivery-stack-decision-20261012.md)。这是研究与部署建议，尚未采纳／安装／扫描／部署：主体框架保持，建议独立Camelot传统候选与服务式Qdrant目标；原件质量、当前05、Drafting冻结与Q10=A边界不因该评估改变。实际镜像／Linux依赖／模型／字体制品和扫描状态不得用候选名称替代。
+
+
+**2026-10-12 19:40 最新硬截止安排：北京时间21:00冻结开发基准并实际入库，随后推进Vetting与Advisory。** 用户明确“到晚上九点的时候不论效果如何，都冻结一套作为基准，并写入向量数据库”，并要求在剩余约一个半小时内最大化整体质量。此安排覆盖本文和旧Goal中“全部解析最终门通过后才做固定库/业务”的阶段顺序：21:00使用当前最佳已完成正常解析结果，允许带明确已知缺陷/unknown的开发baseline入库；不把该开发基准称为最终质量采用、blind或完整比赛验收。原最终质量标准保留为后续提高目标。范围排除、原件/版本/定位保全及Drafting冻结保持。
+
+截止前优先有共享收益的输入/路由/整表缺口，不再做逐字符精修、盲目SFT或无收益参数轮。计划19:40–20:15执行有界完整原件解析改进并并行准备固定GCC/GCT/全部适用SL技术资料manifest与切块；20:15停止追加解析试验并把GPU交给实际CUDA embedding，20:40前准备持久向量库；20:40–21:00冻结/读回/来源回取和交接。时间为任务预算，不是已完成事实；每段实际终态在handoff和HTML记录。新provider只按完整表组比较、保native正文和旧正确项；未完成/无收益候选不替换旧完整结果、不推迟截止。使用新独立baseline Qdrant目录或collection，避免与现有Local DB锁并写；冻结记录源码/解析配方/模型制品、来源身份、覆盖/切块/实际向量计数与已知缺陷。开发baseline供Vetting/Advisory开始测试和修改，不复用未填2a模板。
+
 
 ## 授权与比赛任务
 
@@ -170,7 +204,7 @@ APZ 等已提供文件中的未提供页只记录具体覆盖事实；有明确�
 | --- | --- |
 | 2a 的 NTT／SCT／SCC 标准模板 | 按准确 SHA／版次预解析、精修、切块和嵌入，仅供 Drafting；不进入 Vetting／Advisory 的对象、候选池或上下文。 |
 | GCC、SL 技术范围，以及 2b 的 GCT | 按准确 SHA／版次预解析、精修、切块和嵌入，Vetting／Advisory 按项目实际采用及范围共用。GCT 保留 tender 角色；SL 是经过章节选择的容器。固定表示缓存生命周期，不表示本项目自动采用所有条款。 |
-| 2b 的范围内项目文件、附录、Specification／项目 PRE、图纸或清单，2c 的项目邮件／纪要 | 每个比赛项目读取实际原件、实际采用声明和实际内容；不得继承上一项目的取值、条款采用决定或样板答案。 |
+| 2b 的范围内项目文件、附录、Specification／项目 PRE及清单，2c 的项目邮件／纪要；图纸文件排除 | 每个比赛项目读取实际原件、实际采用声明和实际内容；不得继承上一项目的取值、条款采用决定或样板答案。图纸文件只做身份识别后排除，不解析其细节。 |
 | 封面、资料目录、flysheet | 组成与身份元数据；不能当作合约义务正文或缺文件的唯一判断。 |
 | 2d 样板审查意见／countercheck、2e 咨询答案／flowchart | 保持对应题目答案隔离；只供格式参考、原件理解和独立评价，不混入生产条款检索、同题模型输入或 OCR 监督目标。 |
 

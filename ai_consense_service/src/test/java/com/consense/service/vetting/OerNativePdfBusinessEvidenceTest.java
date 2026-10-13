@@ -93,7 +93,7 @@ class OerNativePdfBusinessEvidenceTest {
         Wire w=new Wire();OerBusinessEvidence.Session session=w.load("advisory");List<VectorStore.SearchHit> hits=w.service.sourceHits(session,Collections.singletonList(session.chunks().get(0).getId()));
         assertEquals(1,hits.size());assertEquals("P1, P2",hits.get(0).getPayload().get("pageNo"));
         AdviceService advice=mock(AdviceService.class,CALLS_REAL_METHODS);Method render=AdviceService.class.getDeclaredMethod("renderExcerpts",List.class);render.setAccessible(true);
-        String text=(String)render.invoke(advice,hits);assertTrue(text.contains("Native PDF position:"));assertTrue(text.contains("pdf_native_source_reviewed_region"));
+        String text=(String)render.invoke(advice,hits);assertTrue(text.contains("Native PDF source-reviewed regions:"));assertTrue(text.contains("pdf_native_source_reviewed_region"));
         assertTrue(text.contains("effective visibility and whole-source semantics remain unknown"));assertTrue(text.contains(NativePdfCanonicalContract.VISUAL));assertFalse(text.contains("capturedSelectedPhysicalPages"));assertFalse(text.contains("captureCompleteness"));
         assertFalse(text.contains("Native DOCX observations:"));verify(w.retrieval).sourceUnitPolicy(anyString(),anyString(),anyList());verifyNoMoreInteractions(w.retrieval);
     }

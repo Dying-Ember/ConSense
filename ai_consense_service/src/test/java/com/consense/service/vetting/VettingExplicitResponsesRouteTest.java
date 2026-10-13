@@ -113,7 +113,7 @@ class VettingExplicitResponsesRouteTest {
             ConsenseProperties p=VettingResponsesTransportTest.props();route(p,"responses");LlmProfiles profiles=profiles(p);
             VettingResponsesTransportTest.Http wire=new VettingResponsesTransportTest.Http();
             if(variant==0)p.getVetting().getResponses().setEstimatePolicy(null);
-            if(variant==1)wire.count=50000;
+            if(variant==1)wire.count=262144;
             if(variant==2)wire.counterOverride="{\"object\":\"response.input_tokens\",\"input_tokens\":100.5}";
             VettingSemanticReview review=review(gateway(profiles),p,new VettingResponsesTransport(p,wire));
             try(LlmProfiles.Scope ignored=profiles.bind(profiles.resolve("minimax-cn"))) {

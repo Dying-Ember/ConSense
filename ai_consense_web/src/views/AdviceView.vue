@@ -3,11 +3,12 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import { adviceApi } from '@/api'
-import type { ChatMessage, Citation, IndexStatus, QuickQuestion, AdviceSourceDocument } from '@/api/types'
+import type { ChatMessage, Citation, IndexStatus, QuickQuestion, AdviceSourceDocument, AdviceSession, AdviceBasisScope } from '@/api/types'
 import { useAppStore } from '@/stores/app'
 import { useLocalized } from '@/composables/useLocalized'
 import AppIcon from '@/components/AppIcon.vue'
 import CanonicalEvidencePanel from '@/components/CanonicalEvidencePanel.vue'
+import FixedBaselineEvidencePanel from '@/components/FixedBaselineEvidencePanel.vue'
 import AdviceAnswer from '@/components/AdviceAnswer.vue'
 import { claimReviewHandoff, handoffSourceWarnings, reviewHandoffCopy, reviewQuestion, type ReviewHandoff } from '@/advice/reviewHandoff'
 
@@ -22,6 +23,12 @@ const quickQuestions = ref<QuickQuestion[]>([])
 const indexStatus = ref<IndexStatus | null>(null)
 const question = ref('')
 const scope = ref('fullset')
+const basisScope = ref<AdviceBasisScope>('project_contract')
+const sessions = ref<AdviceSession[]>([])
+const sessionId = ref('')
+const sessionCreating = ref(false)
+const sessionError = ref('')
+let sessionSequence = 0
 const asking = ref(false)
 const indexing = ref(false)
 const activeCitation = ref<Citation | null>(null)
@@ -43,6 +50,15 @@ let askSequence = 0
 let activeRebuildBusy: { sequence: number; message: string } | null = null
 
 const evidenceCopy = {
+  referenceScope: { zhHans: '本次仅查询固定标准；每次咨询会核验来源与版本。当前界面尚未确认固定检索就绪。', zhHant: '本次僅查詢固定標準；每次諮詢會核驗來源與版本。目前介面尚未確認固定檢索就緒。', en: 'This session queries fixed standards only. Each question verifies its sources and versions; this view has not confirmed fixed retrieval readiness.' },
+  session: { zhHans: '咨询会话', zhHant: '諮詢會話', en: 'Advisory session' },
+  legacy: { zhHans: '历史对话／新会话范围', zhHant: '歷史對話／新會話範圍', en: 'Legacy history / new session scope' },
+  newSession: { zhHans: '建立新会话', zhHant: '建立新會話', en: 'Create new session' },
+  project: { zhHans: '项目', zhHant: '項目', en: 'Project' },
+  basis: { zhHans: '证据用途', zhHant: '證據用途', en: 'Evidence basis' },
+  projectBasis: { zhHans: '本项目合同咨询', zhHant: '本項目合約諮詢', en: 'Project contract advice' },
+  referenceBasis: { zhHans: '仅解释固定标准（未确认项目采用）', zhHant: '僅解釋固定標準（未確認項目採用）', en: 'Fixed standard interpretation (adoption unconfirmed)' },
+  binding: { zhHans: '会话固定绑定范围；更改用途请建立新会话。切换会话不会自动提问。', zhHant: '會話固定綁定範圍；更改用途請建立新會話。切換會話不會自動提問。', en: 'Session scope is fixed. Create a new session to change its purpose. Switching sessions does not submit a question.' },
   indexFailed: { zhHans: '当前范围的索引请求失败。请检查后端配置后刷新索引。', zhHant: '目前範圍的索引請求失敗。請檢查後端設定後重新整理索引。', en: 'The index request for this scope failed. Check backend configuration and refresh the index.' },
   canonical_index_receipt_missing: { zhHans: '当前范围尚未建立可验证索引，请刷新索引。', zhHant: '目前範圍尚未建立可驗證索引，請重新整理索引。', en: 'No verified index receipt exists for this scope. Refresh the index.' },
   canonical_index_unavailable: { zhHans: '当前范围的索引或检索配置未通过核验，请检查后端配置后刷新索引。', zhHant: '目前範圍的索引或檢索設定未通過核驗，請檢查後端設定後重新整理索引。', en: 'Index or retrieval configuration verification failed for this scope. Check backend configuration and refresh the index.' },
@@ -73,6 +89,7 @@ function claimImportedDraft() {
     handoff.value = result.handoff
     handoffError.value = null
     scope.value = 'fullset'
+    sessionId.value = ''; basisScope.value = 'project_contract'
     clarificationReply.value = null
     question.value = reviewQuestion(result.handoff, value => pick(value))
   } else {
@@ -89,7 +106,7 @@ const SCOPES = [
   { value: 'contract', label: () => t('advice.scope.contract') }
 ]
 
-const scopeNote = computed(() => t('advice.scopeNote'))
+const scopeNote = computed(() => basisScope.value === 'reference_only' ? pick(evidenceCopy.referenceScope) : t('advice.scopeNote'))
 
 function sourceParseLabel(document: AdviceSourceDocument) {
   if (document.parseStatus === 'PARSED') return t('advice.sourceScope.parsed')
@@ -98,6 +115,7 @@ function sourceParseLabel(document: AdviceSourceDocument) {
 }
 
 const indexHint = computed(() => {
+  if (basisScope.value === 'reference_only') return ''
   const status = indexStatus.value
   if (!status) return ''
   if (status.indexReason && Object.prototype.hasOwnProperty.call(evidenceCopy, status.indexReason)) return pick(evidenceCopy[status.indexReason as keyof typeof evidenceCopy])
@@ -111,8 +129,9 @@ function clearRebuildBusy(sequence?: number) {
 }
 
 function resetScopedState() {
-  ++scopeEpoch; ++indexSequence; ++rebuildSequence; ++askSequence
+  ++scopeEpoch; ++indexSequence; ++rebuildSequence; ++askSequence; ++reloadSequence
   indexStatus.value = null; indexError.value = ''
+  sessionError.value = ''
   activeSources.value = []; activeCitation.value = null; clarificationReply.value = null
   asking.value = false; indexing.value = false
   clearRebuildBusy()
@@ -121,7 +140,7 @@ function resetScopedState() {
 async function reloadIndexStatus() {
   const id = projectId.value, selectedScope = scope.value, epoch = viewEpoch, sequence = ++indexSequence
   indexStatus.value = null; indexError.value = ''
-  if (!id) return
+  if (!id || basisScope.value === 'reference_only') return
   const current = () => epoch === viewEpoch && id === projectId.value && selectedScope === scope.value && sequence === indexSequence
   try {
     const status = await adviceApi.indexStatus(id, selectedScope)
@@ -135,14 +154,15 @@ async function reloadIndexStatus() {
 
 async function reload() {
   const id = projectId.value
+  const selectedSession = sessionId.value, selectedScopeEpoch = scopeEpoch
   const epoch = viewEpoch
   const sequence = ++reloadSequence
   if (!id) return
   const [messageList, quickList] = await Promise.all([
-    adviceApi.messages(id),
+    adviceApi.messages(id, selectedSession || undefined),
     adviceApi.quickQuestions(id)
   ])
-  if (epoch !== viewEpoch || sequence !== reloadSequence || id !== projectId.value) return
+  if (epoch !== viewEpoch || sequence !== reloadSequence || id !== projectId.value || selectedSession !== sessionId.value || selectedScopeEpoch !== scopeEpoch) return
   messages.value = messageList
   quickQuestions.value = quickList
   activeSources.value = []
@@ -150,11 +170,36 @@ async function reload() {
   await scrollToBottom()
 }
 
+async function reloadSessions() {
+  const id = projectId.value, epoch = viewEpoch, sequence = ++sessionSequence
+  sessions.value = []; sessionError.value = ''
+  if (!id) return
+  try {
+    const list = await adviceApi.sessions(id)
+    if (epoch === viewEpoch && id === projectId.value && sequence === sessionSequence) sessions.value = list.filter(item => item.projectId === id)
+  } catch (caught) { if (epoch === viewEpoch && sequence === sessionSequence) sessionError.value = caught instanceof Error ? caught.message : String(caught) }
+}
+
+async function createSession() {
+  if (sessionCreating.value || !projectId.value) return false
+  const id = projectId.value, selectedScope = scope.value, basis = basisScope.value, epoch = viewEpoch, selectedScopeEpoch = scopeEpoch
+  sessionCreating.value = true; sessionError.value = ''
+  try {
+    const created = await adviceApi.createSession(id, selectedScope, basis)
+    if (epoch !== viewEpoch || id !== projectId.value || selectedScopeEpoch !== scopeEpoch) return false
+    if (created.projectId !== id || created.scope !== selectedScope || created.basisScope !== basis || !created.id) throw new Error('ADVICE_SESSION_IDENTITY_MISMATCH')
+    sessions.value.push(created); sessionId.value = created.id
+    await nextTick()
+    return true
+  } catch (caught) { if (epoch === viewEpoch) sessionError.value = caught instanceof Error ? caught.message : String(caught); return false }
+  finally { if (epoch === viewEpoch) sessionCreating.value = false }
+}
+
 async function reloadScope() {
   const id = projectId.value, selectedScope = scope.value, sequence = ++scopeSequence
   scopeLoaded.value = false
   scopeDocuments.value = []
-  if (!id) { scopeDocuments.value = []; return }
+  if (!id || basisScope.value === 'reference_only') { scopeDocuments.value = []; return }
   const documents = await adviceApi.sources(id, selectedScope)
   if (id === projectId.value && selectedScope === scope.value && sequence === scopeSequence) {
     scopeDocuments.value = documents
@@ -162,17 +207,24 @@ async function reloadScope() {
   }
 }
 
-onMounted(() => { void reload(); void reloadScope(); void reloadIndexStatus() })
+onMounted(() => { void reload(); void reloadSessions(); void reloadScope(); void reloadIndexStatus() })
 watch(projectId, () => {
   viewEpoch++
+  ++sessionSequence; sessions.value = []; sessionId.value = ''; sessionCreating.value = false; sessionError.value = ''
   resetScopedState()
   if (handoff.value || handoffError.value) clearImportedDraft()
   scopeLoaded.value = false
   messages.value = []; scopeDocuments.value = []; activeSources.value = []; activeCitation.value = null; clarificationReply.value = null
-  void reload(); void reloadScope(); void reloadIndexStatus()
+  void reload(); void reloadSessions(); void reloadScope(); void reloadIndexStatus()
 })
 watch(() => [projectId.value, route.query.review], claimImportedDraft, { immediate: true })
-watch(scope, () => { resetScopedState(); void reloadScope(); void reloadIndexStatus() })
+watch(() => [scope.value, basisScope.value], () => { resetScopedState(); messages.value = []; void reload(); void reloadScope(); void reloadIndexStatus() })
+watch(sessionId, () => {
+  resetScopedState(); messages.value = []
+  const selected = sessions.value.find(item => item.id === sessionId.value)
+  if (selected) { scope.value = selected.scope; basisScope.value = selected.basisScope }
+  void reload(); void reloadScope(); void reloadIndexStatus()
+})
 watch(() => messages.value.length, scrollToBottom)
 onBeforeUnmount(() => { ++viewEpoch; ++scopeSequence; resetScopedState() })
 
@@ -185,15 +237,18 @@ async function scrollToBottom() {
 
 async function ask(text?: string) {
   const content = (text ?? question.value).trim()
-  if (!content || asking.value) return
+  if (!content || asking.value || sessionCreating.value) return
   const llmSelection = store.captureLlmSelection()
-  const id = projectId.value, selectedScope = scope.value, epoch = viewEpoch, selectedScopeEpoch = scopeEpoch, sequence = ++askSequence
+  if (!sessionId.value && !await createSession()) return
+  const id = projectId.value, selectedSession = sessionId.value, selectedScope = scope.value, selectedBasis = basisScope.value, epoch = viewEpoch, selectedScopeEpoch = scopeEpoch, sequence = ++askSequence
   const replyToMessageId = clarificationReply.value?.id ?? undefined
+  ++reloadSequence
   asking.value = true
   handoff.value = null
   handoffError.value = null
   question.value = ''
   messages.value.push({
+    sessionId: selectedSession,
     id: null,
     role: 'user',
     title: null,
@@ -206,9 +261,11 @@ async function ask(text?: string) {
   await scrollToBottom()
 
   try {
-    const response = await adviceApi.ask(id, content, selectedScope, llmSelection, replyToMessageId)
-    if (epoch !== viewEpoch || id !== projectId.value || selectedScopeEpoch !== scopeEpoch || sequence !== askSequence) return
+    const response = await adviceApi.ask(id, content, selectedScope, llmSelection, replyToMessageId, selectedSession, selectedBasis)
+    if (epoch !== viewEpoch || id !== projectId.value || selectedScopeEpoch !== scopeEpoch || sequence !== askSequence || selectedSession !== sessionId.value) return
+    if (response.sessionId !== selectedSession) throw new Error('ADVICE_SESSION_RESPONSE_MISMATCH')
     messages.value.push({
+      sessionId: response.sessionId,
       id: response.messageId ?? null,
       role: 'assistant',
       modelIdentity: response.modelIdentity,
@@ -230,13 +287,18 @@ async function ask(text?: string) {
       store.notify(t('advice.unknown.title'))
     }
     await scrollToBottom()
+  } catch (caught) {
+    if (epoch === viewEpoch && selectedScopeEpoch === scopeEpoch && sequence === askSequence && selectedSession === sessionId.value) {
+      if (!question.value) question.value = content
+      sessionError.value = caught instanceof Error ? caught.message : String(caught)
+    }
   } finally {
     if (epoch === viewEpoch && sequence === askSequence) asking.value = false
   }
 }
 
 async function refreshIndex() {
-  if (indexing.value || !projectId.value) return
+  if (indexing.value || !projectId.value || basisScope.value === 'reference_only') return
   const id = projectId.value, selectedScope = scope.value, epoch = viewEpoch, selectedScopeEpoch = scopeEpoch, sequence = ++rebuildSequence
   ++indexSequence // A pending status read must not overwrite the newer rebuild result.
   indexError.value = ''
@@ -260,10 +322,11 @@ async function refreshIndex() {
 }
 
 async function clearChat() {
-  const id = projectId.value, epoch = viewEpoch
+  const id = projectId.value, epoch = viewEpoch, selectedSession = sessionId.value, selectedScopeEpoch = scopeEpoch
+  ++askSequence; ++reloadSequence; asking.value = false
   try {
-    await adviceApi.clearMessages(id)
-    if (epoch !== viewEpoch || id !== projectId.value) return
+    await adviceApi.clearMessages(id, selectedSession || undefined)
+    if (epoch !== viewEpoch || id !== projectId.value || selectedSession !== sessionId.value || selectedScopeEpoch !== scopeEpoch) return
     messages.value = []
     clarificationReply.value = null
     activeSources.value = []
@@ -276,7 +339,7 @@ async function clearChat() {
 }
 
 function replyToClarification(message: ChatMessage) {
-  if (message.id === null || message.basisScope !== 'insufficient' || !message.clarifications?.length || message.sourceScope !== scope.value) return
+  if (message.id === null || message.basisScope !== 'insufficient' || !message.clarifications?.length || message.sourceScope !== scope.value || message.sessionId !== sessionId.value) return
   clarificationReply.value = message
 }
 
@@ -365,7 +428,7 @@ async function askPrecedence() {
       </div>
       <div class="row">
         <span class="tag ok">{{ t('advice.evidenceMode') }}</span>
-        <button class="btn" type="button" :disabled="indexing" @click="refreshIndex">
+        <button v-if="basisScope !== 'reference_only'" class="btn" type="button" :disabled="indexing" @click="refreshIndex">
           <AppIcon name="refresh" :size="15" />{{ t('advice.actions.refreshIndex') }}
         </button>
         <!-- FR-A-03 / 原型 Precedence basis：直接以快捷问题形式查询合约文件优先次序（SCC 4.1） -->
@@ -378,7 +441,7 @@ async function askPrecedence() {
       </div>
     </div>
 
-    <details class="surface source-scope section-gap">
+    <details v-if="basisScope !== 'reference_only'" class="surface source-scope section-gap">
       <summary>{{ t('advice.sourceScope.title') }} · {{ scopeDocuments.filter(item => item.included).length }}</summary>
       <p>{{ t('advice.sourceScope.note') }}</p>
       <div class="table-wrap">
@@ -403,13 +466,33 @@ async function askPrecedence() {
           <div class="chat-header">
             <div>
               <h4>{{ t('advice.chat.title') }}</h4>
+              <div class="muted small">{{ pick(evidenceCopy.project) }}: {{ projectId }} · {{ pick(evidenceCopy.session) }}: {{ sessionId || pick(evidenceCopy.legacy) }}</div>
               <div class="muted small">{{ scopeNote }} · {{ indexHint }}</div>
               <p v-if="indexError" class="warning-note" role="alert">{{ indexError }}</p>
               <div v-if="indexStatus?.evidenceBackend" class="muted small">{{ indexStatus.evidenceBackend }} · {{ indexStatus.sourceScope || scope }}</div>
             </div>
-            <select v-model="scope" style="width: auto; min-width: 170px">
+            <select v-model="scope" :aria-label="t('advice.sourceScope.title')" :disabled="!!sessionId || sessionCreating" style="width: auto; min-width: 170px">
               <option v-for="item in SCOPES" :key="item.value" :value="item.value">{{ item.label() }}</option>
             </select>
+          </div>
+
+          <div class="session-controls">
+            <label>{{ pick(evidenceCopy.session) }}
+              <select v-model="sessionId" :disabled="sessionCreating">
+                <option value="">{{ pick(evidenceCopy.legacy) }}</option>
+                <option v-for="item in sessions" :key="item.id" :value="item.id">{{ item.createdAt }} · {{ item.scope }} · {{ item.basisScope }}</option>
+              </select>
+            </label>
+            <label>{{ pick(evidenceCopy.basis) }}
+              <select v-model="basisScope" :disabled="!!sessionId || sessionCreating">
+                <option value="project_contract">{{ pick(evidenceCopy.projectBasis) }}</option>
+                <option value="reference_only">{{ pick(evidenceCopy.referenceBasis) }}</option>
+              </select>
+            </label>
+            <button class="btn" type="button" :disabled="sessionCreating || asking" @click="createSession">{{ pick(evidenceCopy.newSession) }}</button>
+            <p class="muted small">{{ pick(evidenceCopy.binding) }}</p>
+            <p v-if="sessionError" class="warning-note" role="alert">{{ sessionError }}</p>
+            <p v-if="basisScope === 'reference_only'" class="warning-note">{{ t('advice.referenceOnly') }}</p>
           </div>
 
           <div ref="historyEl" class="chat-history">
@@ -439,7 +522,7 @@ async function askPrecedence() {
                 <div v-if="message.clarifications?.length" class="clarifications">
                   <strong>{{ t('advice.clarifications') }}</strong>
                   <ul><li v-for="item in message.clarifications" :key="item">{{ item }}</li></ul>
-                  <button v-if="message.basisScope === 'insufficient'" class="btn" type="button" :disabled="asking || message.id === null || message.sourceScope !== scope" @click="replyToClarification(message)">{{ t('advice.replyClarification') }}</button>
+                  <button v-if="message.basisScope === 'insufficient'" class="btn" type="button" :disabled="asking || message.id === null || message.sourceScope !== scope || message.sessionId !== sessionId" @click="replyToClarification(message)">{{ t('advice.replyClarification') }}</button>
                 </div>
 
                 <div v-if="message.citations?.length" class="citation-row">
@@ -486,7 +569,7 @@ async function askPrecedence() {
               :placeholder="t('advice.placeholder')"
               @keydown.enter.exact.prevent="submit"
             />
-            <button class="btn primary" type="button" :disabled="asking || !question.trim()" @click="submit">
+            <button class="btn primary" type="button" :disabled="asking || sessionCreating || !question.trim()" @click="submit">
               <AppIcon name="advice" :size="15" />
               {{ asking ? t('common.loading') : t('advice.actions.ask') }}
             </button>
@@ -536,11 +619,12 @@ async function askPrecedence() {
               <div class="sv-file">{{ activeCitation.fileLabel }} · {{ activeCitation.pageNo }}</div>
               <div class="sv-para" v-html="highlightHtml(activeCitation.content)" />
               <CanonicalEvidencePanel
-                v-for="(address, index) in activeCitation.canonicalEvidence ?? []"
+                v-for="(address, index) in activeCitation.fixedBaselineEvidence ? [] : activeCitation.canonicalEvidence ?? []"
                 :key="`${address.projectionSha256}:${address.canonicalChunkId}:${index}`"
                 :pointer="address"
                 :locale="store.locale"
               />
+              <FixedBaselineEvidencePanel v-if="activeCitation.fixedBaselineEvidence" :pointer="activeCitation.fixedBaselineEvidence" :locale="store.locale" />
               <div class="sv-meta">
                 {{ t('advice.citation.footer') }}
                 <span v-if="activeCitation.scoreMeaning === 'unranked_context'"> · {{ pick(evidenceCopy.context) }}</span>
@@ -562,6 +646,8 @@ async function askPrecedence() {
 
 <style scoped>
 .source-scope { padding: 14px 18px; margin-bottom: 18px; }
+.session-controls { padding: 12px; border-bottom: 1px solid var(--line); display: flex; flex-wrap: wrap; gap: 10px; }
+.session-controls label { flex: 1; min-width: 180px; }.session-controls p { width: 100%; margin: 0; }
 .source-scope summary { cursor: pointer; font-weight: 700; }
 .source-scope p { color: var(--muted); }
 .scope-excluded { color: var(--muted); }

@@ -154,7 +154,8 @@ public final class VettingCorpus {
                     "^(" + Pattern.quote(owner) + "(?:\\.[A-Z]+)?\\s*\\.?\\s*" + NUMBER
                             + "(?:\\.[A-Z]+" + NUMBER + ")*(?:\\.\\s*[A-Z](?=\\s|$))?)(?=\\s|\\.[A-Z]|[A-Z\\p{IsHan}]|$)", Pattern.CASE_INSENSITIVE);
             for (DocumentBlock b : sourceBlocks) {
-                if (nvl(b.getText()).trim().isEmpty()) continue;
+                // A blank widget still carries /V, /AP, /AS and unknown/conflict observations.
+                if (nvl(b.getText()).trim().isEmpty() && b.getPdfFormField() == null) continue;
                 String detected = heading(b, owner, ownedHeading);
                 boolean supplementary = Arrays.asList("header", "footer", "footnote", "endnote").contains(b.getKind());
                 String nextClause = supplementary ? "" : detected != null ? detected : clause;
@@ -167,7 +168,7 @@ public final class VettingCorpus {
                 clause = nextClause;
                 if (headingChanged) headingLocation = clause.isEmpty() ? null : b.getLocation();
                 // Very long tables/pages are split with offsets into the same source block.
-                if (b.getText().length() > 1400) {
+                if (b.getText().length() > 1400 && b.getPdfFormField() == null) {
                     if (!group.isEmpty()) { emit(out, d, digest, clause, headingLocation, group, nativeTables, quality); group.clear(); length = 0; }
                     for (int step = 0; step < b.getText().length(); step += 1200) {
                         int start = step, end = Math.min(start + 1400, b.getText().length());
@@ -362,7 +363,7 @@ public final class VettingCorpus {
         }
         FindingEvidence evidence=new FindingEvidence(side, c.getDocumentId(), c.getFileKey(), c.getFileName(), page, anchor, quote, located,
                 c.getCanonicalEvidence()==null?c.getSourceHash():c.getCanonicalEvidence().getJavaParsedSourceHash(), bbox);
-        evidence.setCanonicalEvidence(c.getCanonicalEvidence());return evidence;
+        evidence.setCanonicalEvidence(c.getCanonicalEvidence());evidence.setOriginalSourceSha256(c.getOriginalSourceSha256());return evidence;
     }
     public static String normalize(String text) { return nvl(text).replaceAll("[\\s\\p{Z}]+", " ").trim(); }
     public static String hash(String text) {

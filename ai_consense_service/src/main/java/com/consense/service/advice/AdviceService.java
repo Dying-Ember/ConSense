@@ -3,23 +3,32 @@ package com.consense.service.advice;
 import com.consense.ai.AiGateway;
 import com.consense.ai.ModelIdentity;
 import com.consense.ai.LlmOperation;
+import com.consense.ai.LlmClient;
+import com.consense.ai.IncompleteModelResponseException;
 import com.consense.common.BizException;
 import com.consense.common.JsonUtils;
 import com.consense.common.LocalizedText;
 import com.consense.config.ConsenseProperties;
 import com.consense.domain.ChatMessage;
+import com.consense.domain.AdviceSession;
 import com.consense.domain.EvidenceChunk;
 import com.consense.domain.Project;
 import com.consense.domain.SourceDocument;
 import com.consense.ocr.OcrClient;
 import com.consense.repository.ChatMessageRepository;
+import com.consense.repository.AdviceSessionRepository;
 import com.consense.repository.EvidenceChunkRepository;
 import com.consense.repository.SourceDocumentRepository;
 import com.consense.service.ProjectService;
+import com.consense.service.StorageService;
 import com.consense.service.sources.ProjectDocumentScope;
 import com.consense.service.vetting.VettingCorpus;
 import com.consense.service.vetting.OerBusinessEvidence;
 import com.consense.service.vetting.OerCanonicalRetrievalClient;
+import com.consense.service.vetting.FixedBaselineRetrievalClient;
+import com.consense.service.vetting.FixedReferenceEvidence;
+import com.consense.service.vetting.VettingInputBudget;
+import com.consense.service.vetting.VettingTokenBudgetCliObserver;
 import com.consense.service.prompt.PromptCatalog;
 import com.consense.service.prompt.PromptService;
 import com.consense.vector.VectorStore;
@@ -77,6 +86,19 @@ public class AdviceService {
     @PersistenceContext private EntityManager entityManager;
     @org.springframework.beans.factory.annotation.Autowired(required=false)
     private AdviceResponsesTransport adviceResponses;
+    @org.springframework.beans.factory.annotation.Autowired(required=false)
+    private FixedBaselineRetrievalClient fixedBaseline;
+    @org.springframework.beans.factory.annotation.Autowired
+    private AdviceSessionRepository adviceSessions;
+    @org.springframework.beans.factory.annotation.Autowired
+    private AdviceModelProperties adviceSettings;
+    @org.springframework.beans.factory.annotation.Autowired
+    private VettingTokenBudgetCliObserver tokenObserver;
+    @org.springframework.beans.factory.annotation.Autowired(required=false)
+    private StorageService storageService;
+
+    /** Character admission guard for whole fixed groups; never a text truncation limit. */
+    private static final int FIXED_REFERENCE_MATERIAL_CHARACTERS=200000;
 
     // ------------------------------------------------------------ 索引
 
@@ -222,7 +244,15 @@ public class AdviceService {
         final AdviceResponsesTransport.Operation responsesOperation=adviceResponses!=null&&adviceResponses.selected(selectedOperation)
                 ?adviceResponses.capture(selectedOperation):null;
         String scope = ProjectDocumentScope.normalizeScope(request.getScope());
-        QuestionContext questionContext=clarificationContext(projectId,scope,request.getReplyToMessageId(),question);
+        String requestedBasis=requestedBasisScope(request);
+        request=new AskRequest(question,scope,request.getReplyToMessageId(),requestedBasis,request.getSessionId());
+        final AdviceSession conversation=request.getSessionId()==null?null:requireConversation(projectId,request.getSessionId());
+        if(conversation!=null)request.setSessionId(conversation.getId());
+        if(conversation!=null&&(!scope.equals(conversation.getScope())||!requestedBasis.equals(conversation.getBasisScope())))
+            throw new BizException(4202,"Advice scope and basisScope must match the selected session. Create a separate session to change scope.");
+        boolean fixedReferenceOnly="reference_only".equals(requestedBasis);
+        if(fixedReferenceOnly&&!fixedBaselineEnabled())throw new BizException(4204,"Fixed standard-reference retrieval is not enabled. Configure a reviewed development baseline before asking an explicit reference-only question.");
+        QuestionContext questionContext=clarificationContext(projectId,scope,request.getReplyToMessageId(),question,requestedBasis,request.getSessionId());
 
         // Configuration errors are model-action errors even when no index has been built.
         if (responsesOperation==null&&ai.explicitProfileSelected() && ai.capture().getUnavailableReason() != null) {
@@ -230,21 +260,41 @@ public class AdviceService {
         }
 
         String retrievalQuestion=questionContext.originalQuestion+(questionContext.background.isEmpty()?"":"\nUser supplied clarification: "+String.join("\n",questionContext.background));
-        OerBusinessEvidence.Session session=canonical.enabled()?canonicalSession(projectId,scope):null;
+        OerBusinessEvidence.Session session=!fixedReferenceOnly&&canonical.enabled()?canonicalSession(projectId,scope):null;
+        final String sourceSnapshot=conversationSourceIdentity(projectId,scope,fixedReferenceOnly,session);
         List<VectorStore.SearchHit> hits;
-        if(session!=null) {
+        if(fixedReferenceOnly) {
+            hits=fixedReferenceHits(retrievalQuestion);
+        } else if(session!=null) {
             try {
                 canonical.ensureIndex(session);
-                hits=withCanonicalIncorporationContext(session,canonical.adviceHits(session,retrievalQuestion));
+                hits=new ArrayList<>(canonical.adviceHits(session,retrievalQuestion));
             }catch(RuntimeException rejected){throw new BizException(4204,"Canonical advice retrieval failed. Refresh the selected scope and verify current source bindings and advisory retrieval; no legacy evidence was used.");}
             assertCurrentSelection(session,scope);
+            if(fixedBaselineEnabled())hits.addAll(fixedReferenceHits(retrievalQuestion));
+            hits=withCanonicalIncorporationContext(session,hits);
         } else hits=withIncorporationContext(projectId,scope,retrieve(projectId,scope,retrievalQuestion));
+        final List<VectorStore.SearchHit> selectedFixedHits=hits.stream().filter(this::fixedBaselineHit).collect(Collectors.toList());
+        final String fixedSourceIdentity=selectedFixedHits.isEmpty()?null:fixedSourceIdentity(selectedFixedHits);
+        final ModelIdentity capturedIdentity=responsesOperation!=null?responsesOperation.getIdentity():selectedOperation==null?null:selectedOperation.getIdentity();
+        final Runnable currentGuard=()->{
+            if(session!=null)assertCurrentSelection(session,scope);
+            assertFixedReferencesCurrent(selectedFixedHits,fixedSourceIdentity);
+            if(sourceSnapshot!=null)assertConversationSources(projectId,scope,fixedReferenceOnly,session,sourceSnapshot);
+            if(conversation!=null)assertConversationCurrent(conversation);
+            if(responsesOperation==null)assertCapturedChatIdentity(capturedIdentity);
+        };
+        currentGuard.run();
+        if(conversation!=null&&request.getReplyToMessageId()!=null&&!chatMessageRepository.findById(request.getReplyToMessageId())
+                .filter(m->Objects.equals(sourceSnapshot,m.getSourceSnapshotSha256())).isPresent())
+            throw new BizException(4204,"The clarification was issued against a different source version. Start a new question against the current evidence.");
+        assertFixedReferencesCurrent(selectedFixedHits,fixedSourceIdentity);
         List<CitationVO> sources = new ArrayList<>();
         for(int i=0;i<hits.size();i++){CitationVO source=toCitation(hits.get(i));source.setEvidenceId("["+(i+1)+"]");sources.add(source);}
 
         if (hits.isEmpty()) {
             AskResponseVO response = unknown(projectId, scope, sources, Collections.<String>emptyList(), false);
-            persistExchange(projectId,scope,question,request,questionContext,response,session);
+            persistExchange(projectId,scope,question,request,questionContext,response,session,selectedFixedHits,fixedSourceIdentity,conversation,sourceSnapshot);
             return response;
         }
 
@@ -254,23 +304,30 @@ public class AdviceService {
 
         String excerpts = renderExcerpts(hits);
         String userPrompt = PromptService.format(promptService.userTemplate(PromptCatalog.KEY_ADVICE),
-                scopeLabel(scope), excerpts, questionContext.originalQuestion);
+                fixedReferenceOnly?"Fixed standard reference only / 固定标准参考解释":scopeLabel(scope), excerpts, questionContext.originalQuestion);
+        if(fixedReferenceOnly)userPrompt+="\n\nExplicit answer scope: reference_only. Explain only the cited standard text in this frozen development baseline. Do not assert that this standard, edition or requirement is adopted by the project, and do not return project_contract. Parsing, legal ownership and completeness limitations remain unverified.";
         if(!questionContext.background.isEmpty())userPrompt+="\n\nuser-supplied-background (clarification replies, not contractual evidence):\n"+String.join("\n",questionContext.background)
                 +"\nAnswer the original question in light of these user-stated assumptions. Do not cite this background as a contract document or established contractual fact.";
+        String systemPrompt=promptService.system(PromptCatalog.KEY_ADVICE)+"\n\nOnly when a flowchart is requested, use a fenced ```mermaid block with flowchart TD or flowchart LR, simple alphanumeric node IDs, and short double-quoted labels for every node and decision; encode internal quotes as #quot;. Preserve only evidence-supported steps and citations; no HTML, links, directives or styling.";
+        if(responsesOperation!=null&&responsesOperation.getConfiguredContextTokens()<262144)
+            throw new BizException(4205,"Advice budget_unknown: generation requires at least 256K configured tokens.");
+        if(conversation!=null)userPrompt+=boundedHistory(conversation,sourceSnapshot,capturedIdentity,selectedOperation,responsesOperation,currentGuard);
 
         AnswerRecord answer;
         try {
             if(responsesOperation!=null){
-                if(session==null)throw new AdviceResponsesTransport.RequestFailure("budget_unknown","canonical_current_source_session_required",null);
-                answer=responsesOperation.completeJson(promptService.system(PromptCatalog.KEY_ADVICE),userPrompt,session.identitySha256(),AnswerRecord.class,
-                        ()->assertCurrentSelection(session,scope)).value;
-            }else answer = ai.completeJson(promptService.system(PromptCatalog.KEY_ADVICE), userPrompt, AnswerRecord.class);
+                if(session==null&&fixedSourceIdentity==null)throw new AdviceResponsesTransport.RequestFailure("budget_unknown","current_source_identity_required",null);
+                String requestSourceIdentity=fixedSourceIdentity==null?session.identitySha256():VettingCorpus.hash((session==null?"explicit-reference-only":session.identitySha256())+"|fixed-baseline|"+fixedSourceIdentity);
+                answer=responsesOperation.completeJson(systemPrompt,userPrompt,requestSourceIdentity,AnswerRecord.class,currentGuard).value;
+            }else answer=completeSessionChat(systemPrompt,userPrompt,selectedOperation,sourceSnapshot,currentGuard);
         } catch (AdviceResponsesTransport.RequestFailure bounded) {
             throw bounded;
+        } catch (IncompleteModelResponseException incomplete) {
+            throw new BizException(4205,"Advice output_incomplete: "+incomplete.getFailureKind().name().toLowerCase(java.util.Locale.ROOT)+". No answer was published; retry the question.");
         } catch (Exception e) {
             // Responses checks current sources around counting and generation inside this call.
             // Preserve that safe source failure; it is not a provider/model failure.
-            if(responsesOperation!=null&&e instanceof BizException&&((BizException)e).getCode()==4204)throw (BizException)e;
+            if(e instanceof BizException&&Arrays.asList(4202,4204,4205).contains(((BizException)e).getCode()))throw (BizException)e;
             // External exception text may contain credentials; retain only the safe failure type/profile.
             log.warn("Advice model call failed ({}).", e.getClass().getSimpleName());
             ModelIdentity selected = ai.modelIdentity();
@@ -279,10 +336,12 @@ public class AdviceService {
                     + " failed; the operation was not rerouted.");
         }
         if(session!=null)assertCurrentSelection(session,scope);
+        assertFixedReferencesCurrent(selectedFixedHits,fixedSourceIdentity);
 
         List<String> clarifications=answer==null?Collections.emptyList():cleanClarifications(answer.getClarifications());
         List<String> citations=validatedCitations(answer==null?null:answer.getCitations(),sources);
-        String basisScope=answer!=null&&"reference_only".equals(nvl(answer.getBasisScope()).trim().toLowerCase(java.util.Locale.ROOT))?"reference_only":"project_contract";
+        String basisScope=fixedReferenceOnly?"reference_only":answer!=null&&"reference_only".equals(nvl(answer.getBasisScope()).trim().toLowerCase(java.util.Locale.ROOT))?"reference_only":"project_contract";
+        if(fixedReferenceOnly&&answer!=null&&!nvl(answer.getBasisScope()).trim().isEmpty()&&!"reference_only".equals(nvl(answer.getBasisScope()).trim().toLowerCase(java.util.Locale.ROOT))){clarifications=new ArrayList<>(clarifications);clarifications.add("The requested standard explanation does not establish project adoption, applicable edition or project amendments.");}
         boolean basisSupported=incorporationSupported(basisScope,citations,sources);
         if(!basisSupported){clarifications=new ArrayList<>(clarifications);clarifications.add("Please provide or identify the adopted contractual provisions, including standard incorporation, applicable editions and any project amendments where relevant. Project correspondence and a document list alone do not establish a contractual requirement.");}
         if (answer == null || !answer.isGrounded() || !clarifications.isEmpty() || JsonUtils.isBlankText(answer.getAnswer())||citations.isEmpty()||!basisSupported) {
@@ -292,8 +351,8 @@ public class AdviceService {
             AskResponseVO response = unknown(projectId, scope, sources, extra, true);
             response.setClarifications(clarifications);
             response.setBasisScope("insufficient");
-            if(responsesOperation!=null){response.setModel(responsesOperation.getIdentity().getModel());response.setModelIdentity(responsesOperation.getIdentity());}
-            persistExchange(projectId,scope,question,request,questionContext,response,session);
+            if(capturedIdentity!=null){response.setModel(capturedIdentity.getModel());response.setModelIdentity(capturedIdentity);}
+            persistExchange(projectId,scope,question,request,questionContext,response,session,selectedFixedHits,fixedSourceIdentity,conversation,sourceSnapshot);
             return response;
         }
 
@@ -304,11 +363,11 @@ public class AdviceService {
                 citations,
                 evidenceIdOf(sources),
                 sources,
-                responsesOperation==null?ai.chatModel():responsesOperation.getIdentity().getModel(),
-                responsesOperation==null?ai.modelIdentity():responsesOperation.getIdentity());
+                capturedIdentity==null?ai.chatModel():capturedIdentity.getModel(),
+                capturedIdentity==null?ai.modelIdentity():capturedIdentity);
         response.setClarifications(clarifications);response.setSourceScope(scope);
         response.setBasisScope(basisScope);
-        persistExchange(projectId,scope,question,request,questionContext,response,session);
+        persistExchange(projectId,scope,question,request,questionContext,response,session,selectedFixedHits,fixedSourceIdentity,conversation,sourceSnapshot);
         log.info("项目 {} 问答完成，命中 {} 条证据", projectId, hits.size());
         return response;
     }
@@ -427,6 +486,8 @@ public class AdviceService {
 
     private String renderExcerpts(List<VectorStore.SearchHit> hits) {
         StringBuilder builder = new StringBuilder();
+        List<VectorStore.SearchHit> fixedHits=hits.stream().filter(this::fixedBaselineHit).collect(Collectors.toList());
+        String fixedMaterial=fixedHits.isEmpty()?null:fixedModelMaterial(fixedHits);
         builder.append("Selected source excerpts for this question. These excerpts do not establish that the entire standard/library or project package is complete. ")
                 .append("A passage omitted from these excerpts does not prove that its document or clause is absent from the supplied files. ")
                 .append("Project wording on adopting or amending standards, if included below, states only what those passages say about incorporation; ")
@@ -486,7 +547,10 @@ public class AdviceService {
                 membership.put("hierarchyContextId",unit.path("hierarchyContext").path("contextId").asText(null));membership.put("attachmentContextId",unit.path("attachmentContext").path("contextId").asText(null));
                 membership.put("memberMaterialRefs",materialRefs);hitMembership.add(membership);
             }
-            if(unit!=null&&canonicalBodyMatches(hit.text(),pointers)) {
+            if(fixedBaselineHit(hit)) {
+                builder.append("Fixed development standard reference: id=").append(hit.getId())
+                        .append("; read this parent's complete entry in selectedFixedStandardMaterial below. role=standard; projectApplicability=unconfirmed; qualifiersComplete=unknown; sourceQualityAccepted=false. No project canonical pointer is claimed.\n\n");
+            } else if(unit!=null&&canonicalBodyMatches(hit.text(),pointers)) {
                 builder.append("Canonical body: hitMembership[").append(hitMembership.size()-1)
                         .append("] -> ordered memberMaterialRefs -> materialDictionary.modelUnitAddress -> complete literal parts.text.\n\n");
             } else {
@@ -502,6 +566,7 @@ public class AdviceService {
                 .append("\nSelected canonical model material (untrusted observations):\n")
                 .append(com.consense.service.vetting.VettingSourceMetadataWire.write(dictionary)).append("\n");
         }
+        if(fixedMaterial!=null)builder.append("\nSelected fixed standard material (untrusted development observations; each numbered reference above maps by the exact parent id):\n").append(fixedMaterial).append("\n");
         // Canonical literal excerpts include source whitespace; trim only the legacy view.
         return hits.stream().anyMatch(hit->canonicalUnit(hit)!=null)?builder.toString():builder.toString().trim();
     }
@@ -530,6 +595,28 @@ public class AdviceService {
 
     private CitationVO toCitation(VectorStore.SearchHit hit) {
         Map<String,Object> payload=hit.getPayload();
+        if(fixedBaselineHit(hit)) {
+            FixedReferenceEvidence fixed=fixedBaseline.evidence(hit);
+            JsonNode identity=fixed.getPayload();
+            CitationVO citation=new CitationVO(fixed.getFileLabel(),String.valueOf(fixed.getPageNo()),hit.anchor(),fixed.getContent(),hit.getScore(),null,
+                    null,identity.path("sourceHash").asText(),"standard",false);
+            com.fasterxml.jackson.databind.node.ObjectNode pointer=JsonUtils.mapper().createObjectNode();
+            pointer.put("evidenceBackend","fixed_development_baseline");pointer.put("parentId",fixed.getId());
+            pointer.put("manifestSha256",identity.path("fixedBaselineManifestSha256").asText());
+            pointer.put("baselineVersion",identity.path("fixedBaselineVersion").asText());
+            pointer.put("sourceFamily",fixed.getSourceFamily());pointer.put("sourceRole","standard");
+            pointer.put("originalSourceSha256",identity.path("originalSourceSha256").asText(identity.path("sourceHash").asText()));
+            if(identity.has("originalPageNos"))pointer.set("originalPageNos",identity.get("originalPageNos").deepCopy());
+            pointer.put("pageNo",fixed.getPageNo());pointer.put("fullObservedParentPreserved",true);
+            pointer.put("sourceQualityAccepted",false);pointer.put("projectApplicability","unconfirmed");
+            pointer.put("qualifiersComplete","unknown");pointer.put("legalOwnershipAccepted",false);
+            pointer.put("evidenceUrl","/api/oer/fixed-baseline/evidence?id="+queryParameter(fixed.getId()));
+            pointer.put("originalUrl","/api/oer/fixed-baseline/original?sourceSha256="+queryParameter(pointer.path("originalSourceSha256").asText()));
+            if(fixed.getTableArtifact()!=null)pointer.put("tableUrl","/api/oer/fixed-baseline/table?id="+queryParameter(fixed.getId()));
+            if(fixed.getSourceUnit()!=null)pointer.set("sourceUnit",fixed.getSourceUnit());
+            citation.setFixedBaselineEvidence(pointer);citation.setScoreMeaning("actual_reranked_fixed_development_reference");
+            return citation;
+        }
         Object page=payload.get("pageNo");
         CitationVO citation=new CitationVO(hit.fileLabel(), page==null?null:String.valueOf(page), hit.anchor(), hit.text(), hit.getScore(),null,
                 String.valueOf(payload.get("documentId")),String.valueOf(payload.get("sourceHash")),String.valueOf(payload.get("sourceRole")),
@@ -552,15 +639,22 @@ public class AdviceService {
     }
 
     private String evidenceIdOf(List<CitationVO> sources) {
-        return sources.isEmpty() ? null : "document:" + sources.get(0).getDocumentId();
+        if(sources.isEmpty())return null;
+        CitationVO first=sources.get(0);
+        return first.getFixedBaselineEvidence()==null?"document:"+first.getDocumentId():"fixed-baseline:"+first.getFixedBaselineEvidence().path("parentId").asText();
     }
 
     // ------------------------------------------------------------ 历史
 
-    public List<ChatMessageVO> history(String projectId) {
+    public List<ChatMessageVO> history(String projectId) {return history(projectId,null);}
+
+    public List<ChatMessageVO> history(String projectId,String sessionId) {
         projectService.require(projectId);
+        if(sessionId!=null)requireConversation(projectId,sessionId);
         List<ChatMessageVO> result = new ArrayList<>();
-        for (ChatMessage message : chatMessageRepository.findByProjectIdOrderByIdAsc(projectId)) {
+        List<ChatMessage> messages=sessionId==null?chatMessageRepository.findByProjectIdAndSessionIdIsNullOrderByIdAsc(projectId)
+                :chatMessageRepository.findByProjectIdAndSessionIdOrderByIdAsc(projectId,sessionId);
+        for (ChatMessage message : messages) {
             List<String> citations = message.getCitationsJson() == null
                     ? Collections.<String>emptyList()
                     : safeList(message.getCitationsJson());
@@ -574,15 +668,153 @@ public class AdviceService {
                     safeSources(message.getSourcesJson()),
                     message.getModelIdentityJson() == null ? null
                             : JsonUtils.read(message.getModelIdentityJson(), ModelIdentity.class),
-                    message.getClarificationsJson()==null?Collections.emptyList():safeList(message.getClarificationsJson()),message.getSourceScope(),message.getBasisScope()));
+                    message.getClarificationsJson()==null?Collections.emptyList():safeList(message.getClarificationsJson()),message.getSourceScope(),message.getBasisScope(),message.getSessionId()));
         }
         return result;
     }
 
     @Transactional
-    public void clearHistory(String projectId) {
+    public void clearHistory(String projectId) {clearHistory(projectId,null);}
+
+    @Transactional
+    public void clearHistory(String projectId,String sessionId) {
         projectService.require(projectId);
-        chatMessageRepository.deleteByProjectId(projectId);
+        if(sessionId==null)chatMessageRepository.deleteLegacyByProjectId(projectId);
+        else {
+            AdviceSession session=lockConversation(projectId,sessionId);
+            chatMessageRepository.deleteBySession(projectId,sessionId);
+            session.setRevision(session.getRevision()+1);adviceSessions.save(session);
+        }
+    }
+
+    public List<SessionVO> sessions(String projectId) {
+        projectService.require(projectId);
+        return adviceSessions.findByProjectIdOrderByCreatedAtAscIdAsc(projectId).stream().map(this::sessionVO).collect(Collectors.toList());
+    }
+
+    @Transactional
+    public SessionVO createSession(String projectId,SessionRequest request) {
+        projectService.require(projectId);
+        if(request==null)throw new BizException(4202,"Advice session scope is required.");
+        AdviceSession session=new AdviceSession();session.setId(java.util.UUID.randomUUID().toString());session.setProjectId(projectId);
+        session.setScope(ProjectDocumentScope.normalizeScope(request.getScope()));
+        session.setBasisScope(requestedBasisScope(new AskRequest(null,null,null,request.getBasisScope())));
+        return sessionVO(adviceSessions.save(session));
+    }
+
+    private SessionVO sessionVO(AdviceSession session){return new SessionVO(session.getId(),session.getProjectId(),session.getScope(),session.getBasisScope(),session.getCreatedAt());}
+    private AdviceSession requireConversation(String projectId,String sessionId) {
+        if(sessionId==null||sessionId.trim().isEmpty()||sessionId.length()>64)throw new BizException(4202,"A valid advice sessionId is required.");
+        TransactionTemplate read=new TransactionTemplate(transactionManager);read.setReadOnly(true);read.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        return read.execute(status->{entityManager.clear();return adviceSessions.findById(sessionId).filter(s->projectId.equals(s.getProjectId()))
+                .orElseThrow(()->new BizException(4202,"Advice session does not belong to this project."));});
+    }
+    private AdviceSession lockConversation(String projectId,String sessionId) {
+        entityManager.clear();
+        return adviceSessions.lockSession(projectId,sessionId).orElseThrow(()->new BizException(4202,"Advice session does not belong to this project."));
+    }
+    private void assertConversationCurrent(AdviceSession expected) {
+        AdviceSession current=requireConversation(expected.getProjectId(),expected.getId());
+        if(current.getRevision()!=expected.getRevision())throw new BizException(4202,"This advice session changed or was cleared while the question was running. No late answer was published; submit again in the current session.");
+    }
+
+    private String conversationSourceIdentity(String projectId,String scope,boolean referenceOnly,OerBusinessEvidence.Session selected) {
+        Map<String,Object> binding=new LinkedHashMap<>();binding.put("projectId",projectId);binding.put("scope",scope);binding.put("referenceOnly",referenceOnly);
+        if(!referenceOnly) {
+            if(selected!=null){assertCurrentSelection(selected,scope);binding.put("canonical",selected.identitySha256());}
+            else {
+                List<SourceDocument> documents=freshSelectedDocuments(projectId,scope);
+                for(SourceDocument document:documents)if(storageService==null||!storageService.matchesStoredBytes(document.getStoragePath(),document.getSourceSha256()))
+                    throw new BizException(4204,"A selected advice original is missing or its bytes changed. Restore and review the current sources before asking; no answer was published.");
+                binding.put("documents",documents.stream().map(d->Arrays.asList(String.valueOf(d.getId()),d.getSourceSha256(),VettingCorpus.sourceHash(d),VettingCorpus.sourceRole(d),d.getParseStatus()))
+                        .sorted(java.util.Comparator.comparing(row->row.get(0))).collect(Collectors.toList()));
+            }
+        }
+        binding.put("fixedBaseline",fixedBaselineEnabled()?fixedBaseline.frozenManifest():null);
+        return VettingCorpus.hash(JsonUtils.write(binding));
+    }
+    private void assertConversationSources(String projectId,String scope,boolean referenceOnly,OerBusinessEvidence.Session selected,String expected) {
+        if(!Objects.equals(expected,conversationSourceIdentity(projectId,scope,referenceOnly,selected)))
+            throw new BizException(4204,"The advice source version changed during this question. No answer was published; refresh and ask again.");
+    }
+
+    private static final String SESSION_JSON_INSTRUCTION="\n\n【输出要求】只输出一个合法的 JSON，不要 Markdown 代码块，不要任何解释文字。";
+    private static final String SESSION_JSON_RETRY="\n\n重要：上一次输出不是合法 JSON。请严格只输出 JSON。";
+    private List<LlmClient.ChatTurn> sessionTurns(String system,String user,int attempt) {
+        return Arrays.asList(LlmClient.ChatTurn.system(system+SESSION_JSON_INSTRUCTION),LlmClient.ChatTurn.user(user+(attempt==0?"":SESSION_JSON_RETRY)));
+    }
+    private VettingInputBudget.Result sessionBudget(LlmOperation operation,List<LlmClient.ChatTurn> turns,String sourceSnapshot) {
+        assertSessionProfile(operation);
+        ModelIdentity identity=operation.getIdentity();
+        VettingInputBudget.Input input=VettingInputBudget.chatInput(identity.getProvider(),identity.getModel(),identity.getConfigurationSha256(),turns,operation.getStructuredMaxTokens(),sourceSnapshot);
+        VettingInputBudget.Result budget=VettingInputBudget.check(input,tokenObserver);
+        if(!budget.isExtraDispatchPermitted())throw new BizException(4205,"Advice "+budget.getStatus()+": "+budget.getReason()+". No model request was submitted.");
+        if(budget.getObservation().getEffectiveContextTokens()<262144)
+            throw new BizException(4205,"Advice budget_unknown: generation requires a verified context of at least 256K tokens.");
+        if("ollama".equals(identity.getProvider())&&operation.getNumCtx()!=budget.getObservation().getEffectiveContextTokens())
+            throw new BizException(4205,"Advice budget_unknown: observed_context_differs_from_configured_ollama_context.");
+        return budget;
+    }
+    private void assertSessionProfile(LlmOperation operation) {
+        if(operation==null||operation.getIdentity()==null||operation.getUnavailableReason()!=null)
+            throw new BizException(4205,"Advice budget_unknown: captured_model_profile_required.");
+        ModelIdentity identity=operation.getIdentity();
+        assertCapturedChatIdentity(identity);
+        ConsenseProperties.Llm configured="minimax-cn".equals(identity.getProfileId())?props.getMinimaxCn():props.getLlm();
+        if("ollama".equals(identity.getProvider())&&!Boolean.FALSE.equals(configured.getStructuredThinking()))
+            throw new BizException(4205,"Advice budget_unknown: the bound native Chat observer requires explicit thinking=false.");
+    }
+    private void assertCapturedChatIdentity(ModelIdentity identity) {
+        if(identity!=null&&"configured_profile".equals(identity.getIdentityScope())) {
+            ConsenseProperties.Llm configured="minimax-cn".equals(identity.getProfileId())?props.getMinimaxCn():props.getLlm();
+            if(!Objects.equals(identity.getConfigurationSha256(),com.consense.ai.LlmProfiles.configurationSha256(configured)))
+                throw new BizException(4205,"Advice budget_unknown: captured_model_configuration_changed.");
+        }
+    }
+    private AnswerRecord completeSessionChat(String system,String user,LlmOperation operation,String sourceSnapshot,Runnable guard) {
+        JsonNode schema=JsonUtils.mapper().createObjectNode();
+        for(int attempt=0;attempt<2;attempt++) {
+            List<LlmClient.ChatTurn> turns=sessionTurns(system,user,attempt);guard.run();sessionBudget(operation,turns,sourceSnapshot);guard.run();
+            if(operation.getClient()==null||!operation.getClient().available())throw new BizException(4203,"The captured advice model is unavailable; no alternate model was used.");
+            guard.run();String raw=operation.getClient().chatStructured(turns,schema);guard.run();
+            try{return JsonUtils.read(JsonUtils.extractJson(raw),AnswerRecord.class);}
+            catch(Exception invalid){if(attempt==1)throw new BizException(4205,"Advice output_invalid: JSON parsing failed after one freshly admitted retry. No answer was published.");}
+        }
+        throw new IllegalStateException("Advice JSON attempts exhausted");
+    }
+    private String boundedHistory(AdviceSession conversation,String sourceSnapshot,ModelIdentity identity,LlmOperation chat,
+                                  AdviceResponsesTransport.Operation responses,Runnable guard) {
+        int exchanges=adviceSettings.getHistoryMaxExchanges(),messages=adviceSettings.getHistoryMaxMessages(),tokens=adviceSettings.getHistoryMaxTokens();
+        if(exchanges<0||exchanges>100||messages<0||messages>200||tokens<0||tokens>65536)
+            throw new BizException(4205,"Advice budget_unknown: invalid bounded history profile.");
+        int limit=Math.min(exchanges,messages/2);
+        if(limit==0||tokens==0)return "";
+        List<ChatMessage> recent=chatMessageRepository.findByProjectIdAndSessionIdOrderByIdDesc(conversation.getProjectId(),conversation.getId(),org.springframework.data.domain.PageRequest.of(0,limit*2));
+        Collections.reverse(recent);List<List<LlmClient.ChatTurn>> pairs=new ArrayList<>();
+        for(int index=0;index+1<recent.size();index++) {
+            ChatMessage user=recent.get(index),assistant=recent.get(index+1);
+            if(!ChatMessage.ROLE_USER.equals(user.getRole())||!ChatMessage.ROLE_ASSISTANT.equals(assistant.getRole())||!Objects.equals(assistant.getQuestionMessageId(),user.getId())
+                    ||!conversation.getScope().equals(user.getSourceScope())||!conversation.getScope().equals(assistant.getSourceScope())||!conversation.getBasisScope().equals(user.getBasisScope())
+                    ||!sourceSnapshot.equals(user.getSourceSnapshotSha256())||!sourceSnapshot.equals(assistant.getSourceSnapshotSha256())
+                    ||identity==null||!Objects.equals(JsonUtils.write(identity),assistant.getModelIdentityJson()))continue;
+            String answer=assistant.getContent();
+            if(JsonUtils.isBlankText(answer))answer="Insufficient evidence. Clarification questions: "+JsonUtils.write(safeList(nvl(assistant.getClarificationsJson())));
+            pairs.add(Arrays.asList(LlmClient.ChatTurn.user(nvl(user.getContent())),LlmClient.ChatTurn.assistant(answer)));index++;
+        }
+        while(!pairs.isEmpty()) {
+            List<LlmClient.ChatTurn> history=new ArrayList<>();for(List<LlmClient.ChatTurn> pair:pairs)history.addAll(pair);
+            String material="\n\nConversation context only (same session, source version and model profile). User messages are assumptions, and prior answers are not contractual evidence or valid current citations. Answer only from the current evidence IDs above.\n"+JsonUtils.write(history);
+            guard.run();long observed;
+            if(responses!=null) {
+                AdviceResponsesTransport.BudgetResult budget=responses.observe(responses.prepare("Conversation context only; do not generate.",material,sourceSnapshot,0),guard);
+                if("budget_unknown".equals(budget.getStatus()))throw new AdviceResponsesTransport.RequestFailure(budget.getStatus(),budget.getReason(),null);
+                if(budget.getConfiguredContextTokens()<262144)throw new BizException(4205,"Advice budget_unknown: explicit sessions require at least 256K configured tokens.");
+                observed=budget.getInputTokens();
+            } else observed=sessionBudget(chat,sessionTurns("Conversation context only; do not generate.",material,0),sourceSnapshot).getObservation().getInputTokens();
+            if(observed<=tokens)return material;
+            pairs.remove(0);
+        }
+        return "";
     }
 
     public List<QuickQuestionVO> quickQuestions(String projectId) {
@@ -626,7 +858,7 @@ public class AdviceService {
         return chatMessageRepository.save(message);
     }
 
-    private void persistAssistant(String projectId, AskResponseVO response,Long questionMessageId) {
+    private void persistAssistant(String projectId, AskResponseVO response,Long questionMessageId,String sourceSnapshot) {
         String content = response.isGrounded()
                 ? (response.getContent() == null ? "" : response.getContent().getZhHans())
                 : null;
@@ -636,19 +868,32 @@ public class AdviceService {
                 response.getUnknownScope(),
                 response.getCitations(),
                 response.getEvidenceId(), response.getModelIdentity());
+        message.setSessionId(response.getSessionId());message.setSourceSnapshotSha256(sourceSnapshot);
         message.setSourcesJson(JsonUtils.write(response.getSources()));message.setClarificationsJson(JsonUtils.write(response.getClarifications()));message.setSourceScope(response.getSourceScope());message.setBasisScope(response.getBasisScope());message.setQuestionMessageId(questionMessageId);chatMessageRepository.save(message);response.setMessageId(message.getId());
     }
 
     /** Remote retrieval/chat completes before this short, atomic history write. */
     private void persistExchange(String projectId,String scope,String question,AskRequest request,QuestionContext context,
-                                 AskResponseVO response,OerBusinessEvidence.Session session) {
+                                 AskResponseVO response,OerBusinessEvidence.Session session,List<VectorStore.SearchHit> fixedHits,String fixedIdentity,AdviceSession conversation,String sourceSnapshot) {
         if(session!=null)assertCurrentSelection(session,scope);
+        assertFixedReferencesCurrent(fixedHits,fixedIdentity);
+        if(session==null&&sourceSnapshot!=null)assertConversationSources(projectId,scope,"reference_only".equals(request.getBasisScope()),null,sourceSnapshot);
         TransactionTemplate transaction=new TransactionTemplate(transactionManager);
         transaction.executeWithoutResult(status->{
+            if(session==null&&sourceSnapshot!=null)assertConversationSources(projectId,scope,"reference_only".equals(request.getBasisScope()),null,sourceSnapshot);
+            if(conversation!=null) {
+                AdviceSession current=lockConversation(projectId,conversation.getId());
+                if(current.getRevision()!=conversation.getRevision())throw new BizException(4202,"The advice session changed while this answer was running; no late answer was published.");
+                assertConversationSources(projectId,scope,"reference_only".equals(request.getBasisScope()),session,sourceSnapshot);
+                assertCapturedChatIdentity(response.getModelIdentity());
+                current.setRevision(current.getRevision()+1);adviceSessions.save(current);response.setSessionId(conversation.getId());
+            }
             ChatMessage user=saveMessage(projectId,ChatMessage.ROLE_USER,null,question,null,null,null,null);
+            user.setSessionId(request.getSessionId());user.setSourceSnapshotSha256(sourceSnapshot);
             user.setReplyToMessageId(request.getReplyToMessageId());user.setSourceScope(scope);
+            user.setBasisScope(requestedBasisScope(request));
             user.setOriginalQuestion(context.originalQuestion);user.setUserBackgroundJson(JsonUtils.write(context.background));
-            chatMessageRepository.save(user);persistAssistant(projectId,response,user.getId());
+            chatMessageRepository.save(user);persistAssistant(projectId,response,user.getId(),sourceSnapshot);
         });
     }
 
@@ -775,7 +1020,7 @@ public class AdviceService {
         List<VectorStore.SearchHit> annotated=new ArrayList<>();
         for(VectorStore.SearchHit hit:result) {
             Map<String,Object> payload=new LinkedHashMap<>(hit.getPayload());
-            if("standard".equals(payload.get("sourceRole")))payload.put("applicabilityContextComplete",complete);
+            if("standard".equals(payload.get("sourceRole"))&&!fixedBaselineHit(hit))payload.put("applicabilityContextComplete",complete);
             annotated.add(new VectorStore.SearchHit(hit.getId(),hit.getScore(),payload));
         }
         return annotated;
@@ -821,16 +1066,58 @@ public class AdviceService {
         String key=label.split("[ ·]",2)[0];return !key.isEmpty()&&text.matches("(?s).*\\b"+java.util.regex.Pattern.quote(key)+"\\b.*");
     }
     private String evidenceIdentity(VectorStore.SearchHit hit){return hit.getPayload().get("documentId")+"|"+hit.anchor()+"|"+VettingCorpus.hash(hit.text());}
-    private QuestionContext clarificationContext(String projectId,String scope,Long replyTo,String text) {
+    private QuestionContext clarificationContext(String projectId,String scope,Long replyTo,String text,String requestedBasis,String sessionId) {
         if(replyTo==null)return new QuestionContext(text,Collections.emptyList());
         ChatMessage parent=chatMessageRepository.findById(replyTo).filter(m->projectId.equals(m.getProjectId())&&ChatMessage.ROLE_ASSISTANT.equals(m.getRole())
-                &&scope.equals(m.getSourceScope())&&"insufficient".equals(m.getBasisScope())&&m.getQuestionMessageId()!=null&&!safeList(nvl(m.getClarificationsJson())).isEmpty())
+                &&Objects.equals(sessionId,m.getSessionId())&&scope.equals(m.getSourceScope())&&"insufficient".equals(m.getBasisScope())&&m.getQuestionMessageId()!=null&&!safeList(nvl(m.getClarificationsJson())).isEmpty())
                 .orElseThrow(()->new BizException(4202,"Reply target must be an unanswered clarification in the same project and evidence scope."));
-        ChatMessage original=chatMessageRepository.findById(parent.getQuestionMessageId()).filter(m->projectId.equals(m.getProjectId())&&ChatMessage.ROLE_USER.equals(m.getRole())&&scope.equals(m.getSourceScope()))
+        ChatMessage original=chatMessageRepository.findById(parent.getQuestionMessageId()).filter(m->projectId.equals(m.getProjectId())&&Objects.equals(sessionId,m.getSessionId())&&ChatMessage.ROLE_USER.equals(m.getRole())&&scope.equals(m.getSourceScope()))
                 .orElseThrow(()->new BizException(4202,"The clarification's original question is no longer available. Start a new question."));
+        String originalBasis=JsonUtils.isBlankText(original.getBasisScope())?"project_contract":original.getBasisScope();
+        if(!Objects.equals(originalBasis,requestedBasis))throw new BizException(4202,"A clarification reply must retain the original project-contract or reference-only basis scope.");
         List<String> background=new ArrayList<>(safeList(nvl(original.getUserBackgroundJson())));background.add(text);
         if(background.size()>5||background.stream().mapToInt(String::length).sum()>6000)throw new BizException(4202,"This clarification thread exceeds the bounded context. Start a new question with the relevant facts.");
         return new QuestionContext(JsonUtils.isBlankText(original.getOriginalQuestion())?original.getContent():original.getOriginalQuestion(),background);
     }
     private static final class QuestionContext {final String originalQuestion;final List<String> background;QuestionContext(String question,List<String> background){this.originalQuestion=question;this.background=background;}}
+
+    private boolean fixedBaselineEnabled(){return fixedBaseline!=null&&fixedBaseline.enabled();}
+    private boolean fixedBaselineHit(VectorStore.SearchHit hit){return hit!=null&&hit.getPayload()!=null&&Boolean.TRUE.equals(hit.getPayload().get("fixedDevelopmentBaseline"));}
+    private String requestedBasisScope(AskRequest request){
+        String value=request==null?"":nvl(request.getBasisScope()).trim().toLowerCase(java.util.Locale.ROOT);
+        if(value.isEmpty())return "project_contract";
+        if("project_contract".equals(value)||"reference_only".equals(value))return value;
+        throw new BizException(4202,"Advice basisScope must be project_contract or reference_only.");
+    }
+    private List<VectorStore.SearchHit> fixedReferenceHits(String question){
+        try {
+            List<VectorStore.SearchHit> hits=fixedBaseline.search("advisory",question,10);
+            if(hits==null)throw new IllegalStateException("fixed_reference_result_missing");
+            for(VectorStore.SearchHit hit:hits)if(!fixedBaselineHit(hit))throw new IllegalStateException("fixed_reference_identity_missing");
+            fixedBaseline.assertCurrent(hits);return hits;
+        }catch(RuntimeException unavailable){throw new BizException(4204,"The selected fixed standard-reference baseline is unavailable or changed. No project or legacy evidence fallback was used.");}
+    }
+    private String fixedSourceIdentity(List<VectorStore.SearchHit> hits){
+        try {
+            Map<String,Object> identity=new LinkedHashMap<>();identity.put("backend","fixed_development_baseline");
+            identity.put("manifest",fixedBaseline.frozenManifest());identity.put("selectedParents",hits.stream().map(VectorStore.SearchHit::getId).collect(Collectors.toList()));
+            return VettingCorpus.hash(JsonUtils.write(identity));
+        }catch(RuntimeException changed){throw new BizException(4204,"The selected fixed standard-reference baseline identity changed; ask again with the current frozen baseline.");}
+    }
+    private String fixedModelMaterial(List<VectorStore.SearchHit> hits){
+        try{return fixedBaseline.toModelMaterial(hits,FIXED_REFERENCE_MATERIAL_CHARACTERS);}
+        catch(RuntimeException incomplete){throw new BizException(4204,"The selected fixed standard groups cannot be submitted completely within this question's material budget. Narrow the question or restore the complete frozen sources; no text or table rows were truncated.");}
+    }
+    private void assertFixedReferencesCurrent(List<VectorStore.SearchHit> hits,String expectedIdentity){
+        if(hits==null||hits.isEmpty())return;
+        try {
+            if(!fixedBaselineEnabled())throw new IllegalStateException("fixed_reference_disabled");
+            fixedBaseline.assertCurrent(hits);
+            if(!Objects.equals(expectedIdentity,fixedSourceIdentity(hits)))throw new IllegalStateException("fixed_reference_identity_changed");
+        }catch(RuntimeException changed){throw new BizException(4204,"The selected fixed standard-reference baseline changed during this operation. The previous evidence was not saved as a new answer.");}
+    }
+    private String queryParameter(String value){
+        try{return java.net.URLEncoder.encode(nvl(value),java.nio.charset.StandardCharsets.UTF_8.name());}
+        catch(java.io.UnsupportedEncodingException impossible){throw new IllegalStateException(impossible);}
+    }
 }

@@ -68,7 +68,7 @@ class VettingChecklistWorkflowTest {
         VettingRun run=completedRun("{\"total\":0}");
         JsonNode initial=read(run);
         String remarks="  Reviewed by the Contract Team.\r\nNot an issued addendum.  ";
-        Map<String,Object> update=new LinkedHashMap<>();update.put("runSnapshotSha256",initial.path("runSnapshotSha256").asText());
+        Map<String,Object> update=new LinkedHashMap<>();update.put("runSnapshotSha256",initial.path("runSnapshotSha256").asText());update.put("expectedRunId",run.getId());update.put("expectedSourceSnapshotSha256",initial.path("sourceSnapshotSha256").asText());
         Map<String,Object> item=new LinkedHashMap<>();item.put("id","APP-I-001");item.put("status","fulfilled");item.put("remarks",remarks);
         update.put("items",Arrays.asList(item));
         mvc.perform(put(url(run)).contentType(MediaType.APPLICATION_JSON).content(JsonUtils.write(update)))
@@ -109,7 +109,7 @@ class VettingChecklistWorkflowTest {
         run.setStatus("RUNNING");runs.saveAndFlush(run);
         assertFalse(read(run).path("writable").asBoolean());
         save(run,read(run).path("runSnapshotSha256").asText(),Collections.singletonList(row("APP-I-001","fulfilled","Premature")))
-                .andExpect(jsonPath("$.code").value(4122));
+                .andExpect(jsonPath("$.code").value(4104));
         assertEquals("unchecked",read(run).path("items").get(0).path("status").asText());
     }
 
@@ -193,7 +193,7 @@ class VettingChecklistWorkflowTest {
     }
 
     private org.springframework.test.web.servlet.ResultActions save(VettingRun run,String binding,java.util.List<Map<String,Object>> items) throws Exception {
-        Map<String,Object> body=new LinkedHashMap<>();body.put("runSnapshotSha256",binding);body.put("items",items);
+        Map<String,Object> body=new LinkedHashMap<>();body.put("runSnapshotSha256",binding);body.put("items",items);body.put("expectedRunId",run.getId());body.put("expectedSourceSnapshotSha256",run.getSourceSnapshotSha256());
         return mvc.perform(put(url(run)).contentType(MediaType.APPLICATION_JSON).content(JsonUtils.write(body))).andExpect(status().isOk());
     }
     private Map<String,Object> row(String id,String state,String remarks) {
@@ -214,7 +214,7 @@ class VettingChecklistWorkflowTest {
     private VettingRun newRun(String projectId,String result) {
         VettingRun run=new VettingRun();run.setId(UUID.randomUUID().toString());run.setProjectId(projectId);
         run.setStatus("COMPLETED");run.setStartedAt(Instant.now());run.setFinishedAt(Instant.now());
-        run.setCoverageJson("{\"documents\":[]}");run.setResultJson(result);runs.saveAndFlush(run);return run;
+        run.setCoverageJson("{\"documents\":[]}");run.setSourceSnapshotSha256(com.consense.service.vetting.VettingCorpus.hash("competition-review-package-v1\n[]"));run.setResultJson(result);runs.saveAndFlush(run);return run;
     }
     private String url(VettingRun run) {return "/api/vetting/"+run.getProjectId()+"/runs/"+run.getId()+"/checklist";}
 }

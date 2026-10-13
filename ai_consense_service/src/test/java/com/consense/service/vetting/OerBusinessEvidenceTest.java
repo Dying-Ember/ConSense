@@ -137,6 +137,14 @@ class OerBusinessEvidenceTest {
         verify(w.registry,never()).pointer(anyString(),anyLong(),anyString(),anyString(),anyString());
     }
 
+    @Test void ruleQuoteRetainsCanonicalOriginalIdentityOnlyForItsParsedRevision() throws Exception {
+        Wire w=new Wire();OerBusinessEvidence.Session session=w.load();Chunk chunk=session.chunks().get(0);VettingCorpus.Part part=chunk.getParts().get(0);
+        com.consense.web.dto.VettingDtos.FindingEvidence quote=new com.consense.web.dto.VettingDtos.FindingEvidence("source",chunk.getDocumentId(),chunk.getFileKey(),chunk.getFileName(),part.getPageNo(),part.getAnchor(),part.getText(),true,w.binding.getJavaParsedSourceHash(),null);
+        w.service.bindRuleEvidence(session,Collections.singletonList(quote));assertNotNull(quote.getCanonicalEvidence());assertEquals(w.binding.getOriginalSourceSha256(),quote.getOriginalSourceSha256());
+        com.consense.web.dto.VettingDtos.FindingEvidence stale=new com.consense.web.dto.VettingDtos.FindingEvidence("source",chunk.getDocumentId(),chunk.getFileKey(),chunk.getFileName(),part.getPageNo(),part.getAnchor(),part.getText(),true,VettingCorpus.hash("another parsed revision"),null);
+        w.service.bindRuleEvidence(session,Collections.singletonList(stale));assertNull(stale.getCanonicalEvidence());assertNull(stale.getOriginalSourceSha256());assertFalse(stale.isLocated());
+    }
+
     @Test void reviewedSourceRenderConfigurationRequiresTheTypedValidator() throws Exception {
         Wire w=new Wire();w.config.getSourcePageRenderEvidenceIdentities().put(w.binding.getProjectionSha256(),VettingCorpus.hash("authored composite"));
         assertTrue(assertThrows(IllegalStateException.class,w::load).getMessage().contains("source page validator required"));

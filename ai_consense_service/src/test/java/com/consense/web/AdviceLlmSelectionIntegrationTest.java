@@ -29,6 +29,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         "consense.ocr.enabled=false","consense.vector.provider=memory","consense.vector.stuffing-limit=1",
         "consense.llm.enabled=true","consense.llm.base-url=https://local-llm-test.invalid",
         "consense.llm.chat-model=local-test-chat","consense.llm.embed-model=fixed-test-embedding",
+        "consense.llm.num-ctx=262144","consense.llm.structured-thinking=false",
         "consense.minimax-cn.enabled=true","consense.minimax-cn.base-url=https://minimax-test.invalid",
         "consense.minimax-cn.api-key=advice-test-only-canary"})
 @ActiveProfiles("h2") @AutoConfigureMockMvc
@@ -41,8 +42,10 @@ class AdviceLlmSelectionIntegrationTest {
     @Autowired MockMvc mvc;
     @MockBean(name="llmClient") LlmClient local;
     @MockBean(name="miniMaxChatClient") LlmClient miniMax;
+    @MockBean com.consense.service.vetting.VettingTokenBudgetCliObserver counter;
 
     @BeforeEach void adapters() {
+        com.consense.service.advice.AdviceBudgetFixture.bind(counter,local,miniMax);
         when(local.available()).thenReturn(true);
         when(local.chatModel()).thenReturn("local-test-chat");
         when(local.embedModel()).thenReturn("fixed-test-embedding");

@@ -8,6 +8,9 @@ import com.consense.service.sources.CanonicalEvidenceService;
 import com.consense.web.dto.CanonicalEvidenceDtos.EvidencePointer;
 import com.consense.vector.VectorStore;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.fasterxml.jackson.databind.node.TextNode;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Assumptions;
 import java.lang.reflect.Method;
@@ -68,7 +71,35 @@ class OerActualQ16ModelMaterialTest {
         byte[] frozenBytes=Files.readAllBytes(FIXTURES.resolve("baseline-excerpts.txt"));
         assertEquals("6ee19a5ff0a92568300f109cf3a8f49733e8dbba9fa90b1da6423df1b0a41d00",java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest(frozenBytes)));
         String frozen=new String(frozenBytes,StandardCharsets.UTF_8);
-        assertEquals(frozen.substring(frozen.lastIndexOf(marker)+marker.length()),prompt.substring(prompt.lastIndexOf(marker)+marker.length()),"Entire ordered model wire must stay byte-exact while presentation repeats are removed");
+        assertTrue(frozen.contains(marker));assertTrue(prompt.contains(marker));
+        ObjectNode normalizedFrozen=VettingSourceMetadataWire.decode(frozen.substring(frozen.lastIndexOf(marker)+marker.length()).trim()).deepCopy();
+        // Complete-pointer serialization can change opaque addresses; only their bijection may differ.
+        JsonNode frozenMaterial=normalizedFrozen.path("materialDictionary"),currentMaterial=envelope.path("materialDictionary");
+        assertTrue(frozenMaterial.isArray());assertTrue(currentMaterial.isArray());assertEquals(57,frozenMaterial.size());assertEquals(57,currentMaterial.size());
+        Map<String,String> aliases=new LinkedHashMap<>();Set<String> currentAddresses=new HashSet<>();
+        for(int i=0;i<frozenMaterial.size();i++){
+            JsonNode before=frozenMaterial.get(i).path("modelUnitAddress"),after=currentMaterial.get(i).path("modelUnitAddress");
+            assertTrue(before.isTextual());assertTrue(after.isTextual());
+            assertTrue(before.asText().matches("model-unit:[0-9a-f]{64}"));assertTrue(after.asText().matches("model-unit:[0-9a-f]{64}"));
+            assertNull(aliases.put(before.asText(),after.asText()),"Frozen model addresses must be unique");assertTrue(currentAddresses.add(after.asText()),"Current model addresses must be unique");
+            ((ObjectNode)frozenMaterial.get(i)).put("modelUnitAddress",after.asText());
+        }
+        JsonNode frozenMembership=normalizedFrozen.path("hitMembership"),currentMembership=envelope.path("hitMembership");
+        assertTrue(frozenMembership.isArray());assertTrue(currentMembership.isArray());assertEquals(10,frozenMembership.size());assertEquals(10,currentMembership.size());
+        int normalizedRefs=0;
+        for(int i=0;i<frozenMembership.size();i++){
+            JsonNode before=frozenMembership.get(i).path("memberMaterialRefs"),after=currentMembership.get(i).path("memberMaterialRefs");
+            assertTrue(before.isArray());assertTrue(after.isArray());assertEquals(before.size(),after.size());
+            for(int j=0;j<before.size();j++){
+                assertTrue(before.get(j).isTextual());assertTrue(after.get(j).isTextual());
+                String replacement=aliases.get(before.get(j).asText());assertNotNull(replacement,"Frozen membership must resolve in its dictionary");
+                assertTrue(currentAddresses.contains(after.get(j).asText()),"Current membership must resolve in its dictionary");
+                assertEquals(replacement,after.get(j).asText(),"Ordered membership must retain the same dictionary member");
+                ((ArrayNode)before).set(j,TextNode.valueOf(replacement));normalizedRefs++;
+            }
+        }
+        assertEquals(109,normalizedRefs);
+        assertEquals(JsonUtils.write(normalizedFrozen),JsonUtils.write(envelope),"Every ordered decoded source field, body, unknown, version and membership must stay byte-exact after address bijection");
         assertEquals(OerModelMaterial.DICTIONARY_VERSION,envelope.path("dictionaryVersion").asText());JsonNode material=envelope.path("materialDictionary");assertEquals(57,material.size());
         JsonNode membership=envelope.path("hitMembership");assertEquals(10,membership.size());
         Map<String,JsonNode> byAddress=new LinkedHashMap<>();for(JsonNode row:material)assertNull(byAddress.put(row.path("modelUnitAddress").asText(),row));

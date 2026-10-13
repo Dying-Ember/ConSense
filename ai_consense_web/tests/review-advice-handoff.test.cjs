@@ -2,7 +2,9 @@ const assert = require('node:assert/strict')
 const path = require('node:path')
 const { test } = require('node:test')
 const { loadTypeScript } = require('./helpers/load-typescript.cjs')
-const helper = loadTypeScript(path.join(__dirname, '../src/advice/reviewHandoff.ts'), { globals: { crypto: require('node:crypto').webcrypto, Uint8Array } })
+const sha = loadTypeScript(path.join(__dirname, '../src/api/sha256Bytes.ts'), { dependencies: { '@noble/hashes/sha256': require('@noble/hashes/sha256') } })
+const fixed = loadTypeScript(path.join(__dirname, '../src/api/fixedBaselineEvidence.ts'), { dependencies: { './sha256Bytes': sha } })
+const helper = loadTypeScript(path.join(__dirname, '../src/advice/reviewHandoff.ts'), { globals: { crypto: require('node:crypto').webcrypto, Uint8Array }, dependencies: { '@/api/fixedBaselineEvidence': fixed } })
 
 const token = '0123456789abcdef0123456789abcdef'
 const label = { zhHans: '核对条件', zhHant: '核對條件', en: 'Check conditions' }
@@ -34,6 +36,18 @@ test('claim applies once with exact literal quotations and only the authorized h
   assert.equal(result.handoff.report, undefined)
   assert.equal(port.data.size, 0)
   assert.equal(helper.claimReviewHandoff(port, token, 'project-A', 2000).status, 'missing')
+})
+
+test('fixed standard handoff retains baseline/source identity without matching its ID to project files', () => {
+  const value = input(), pointer = { evidenceBackend: 'fixed_development_baseline', parentId: '12', manifestSha256: 'a'.repeat(64), baselineVersion: '05', sourceFamily: 'GCC', sourceRole: 'standard', originalSourceSha256: 'b'.repeat(64), pageNo: 4, projectApplicability: 'unconfirmed', qualifiersComplete: 'unknown', sourceQualityAccepted: false }
+  value.evidence[0].fixedBaselineEvidence = pointer
+  const handoff = helper.createReviewHandoff(value, token, 1000)
+  assert.equal(handoff.evidence[0].fixedBaselineEvidence.manifestSha256, pointer.manifestSha256)
+  assert.match(helper.reviewQuestion(handoff, value => value.en), /fixed_development_baseline/)
+  assert.equal(helper.handoffSourceWarnings(handoff, [{ documentId: '12', included: true, sourceHash: 'new-project-hash' }], true).stale, false)
+  assert.equal(helper.handoffSourceWarnings(handoff, [], true).unverified, true)
+  pointer.manifestSha256 = 'invalid'
+  assert.throws(() => helper.createReviewHandoff(value, token, 1000), /invalid_review_handoff/)
 })
 
 test('wrong project rejects and consumes the draft instead of leaking it on a later project switch', () => {

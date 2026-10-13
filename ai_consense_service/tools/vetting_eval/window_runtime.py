@@ -26,7 +26,7 @@ from index_integrity import inspect_points, verify_reuse, vector_sha256, PROTOCO
 CONTRACT = "source-bound-window-points-full-parent-results-v1"
 SIGNATURE_VERSION = 3
 _loaded_source_hashes = {name:hashlib.sha256(Path(__file__).with_name(name).read_bytes()).hexdigest()
-                        for name in ('window_runtime.py','token_windows.py','fixed_vector_cache.py','server.py','workspace_root.py','retrieval_source_units.py','embedding_compatibility.py','structural_retrieval.py','preparation_cache.py','checkpoint_identity.py','checkpoint_publication.py','index_integrity.py')}
+                        for name in ('window_runtime.py','token_windows.py','fixed_vector_cache.py','server.py','qdrant_backend.py','workspace_root.py','retrieval_source_units.py','embedding_compatibility.py','structural_retrieval.py','preparation_cache.py','checkpoint_identity.py','checkpoint_publication.py','index_integrity.py','migrated_qdrant_index.py','migrate_qdrant_server.py','fixed_development_baseline_runtime.py','verify_retrieval_offline.py')}
 
 
 def file_identity(path):

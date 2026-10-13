@@ -13,5 +13,8 @@ public class AdviceModelProperties {
     private String minimaxWire="chat";
     /** Advice-only exact HTTP entity recording; blank disables it. Existing owned absolute directory required. */
     private String wireObservationRoot;
+    private int historyMaxExchanges=5;
+    private int historyMaxMessages=10;
+    private int historyMaxTokens=6000;
     private ConsenseProperties.Responses responses=new ConsenseProperties.Responses();
 }

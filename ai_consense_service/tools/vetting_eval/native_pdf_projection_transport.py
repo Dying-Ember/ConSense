@@ -4,7 +4,8 @@ Full operators, styles, AP channels, both parser outputs, source review and
 adoption remain actual CAS bytes. Public text is the validated literal channel;
 large glyph membership/span inventories use typed pointers to the complete
 internal snapshot. Every read cold-validates and reconstructs that snapshot.
-This wire does not register sources, certify pixels or publish table/AP text.
+This wire does not register sources or certify pixels; reviewed table topology
+uses complete snapshot pointers. AP text remains unsupported.
 """
 from __future__ import annotations
 
@@ -14,10 +15,11 @@ from pathlib import Path
 
 from artifact_store import ArtifactStore, DESCRIPTOR_SCHEMA
 from canonical_projection import CanonicalProjectionError, _bytes, _fail, _hash
-from native_pdf_canonical_projection import SCHEMA, _json, validate_native_pdf_projection
+from native_pdf_canonical_projection import SCHEMA, TABLE_PROJECTION_VERSION, _json, validate_native_pdf_projection
 
 STORAGE_SHAPE = 'cas-native-pdf-joint-adopted-public-v1'
 VERSION = 'source-reviewed-native-pdf-cas-public-projection-v1'
+TABLE_VERSION = 'source-reviewed-native-pdf-cas-public-projection-v2'
 COMMITMENTS_VERSION = 'native-pdf-public-whole-prose-commitments-v1'
 MAX_SNAPSHOT_BYTES = 16777216
 
@@ -79,8 +81,9 @@ def _part(part, internal, descriptor, pointer):
 def _body(chunk, ordinal, internal, descriptor, code_sha):
     excluded = {'id', 'sourceHash', 'projectionRevisionSha256', 'parts', 'sourceSpans'}
     body = {key: copy.deepcopy(value) for key, value in chunk.items() if key not in excluded}
+    version = TABLE_VERSION if internal['projectionIdentity']['projectionVersion'] == TABLE_PROJECTION_VERSION else VERSION
     body.update(producerKind='native_pdf', storageShape=STORAGE_SHAPE,
-                projectionVersion=VERSION, metadataVersion=VERSION, projectionCodeSha256=code_sha,
+                projectionVersion=version, metadataVersion=version, projectionCodeSha256=code_sha,
                 internalProjectionVersion=internal['projectionIdentity']['projectionVersion'],
                 internalProjectionCodeSha256=internal['projectionIdentity']['projectionCodeSha256'])
     body['parts'] = [_part(part, internal, descriptor, '/chunks/' + str(ordinal) + '/parts/' + str(index))
@@ -88,6 +91,15 @@ def _body(chunk, ordinal, internal, descriptor, code_sha):
     body['sourceSpans'] = [{key: copy.deepcopy(part[key]) for key in
                            ('blockId', 'startOffset', 'endOffset', 'sourcePosition', 'nativeTextSpansRef')}
                           for part in body['parts']]
+    if chunk.get('nativeTables'):
+        body.pop('nativeTables', None)
+        body['adoption'].pop('nativeTables', None)
+        body['nativeTableGroupsRef'] = _ref(descriptor, '/chunks/' + str(ordinal) + '/nativeTables',
+                                          chunk['nativeTables'], internal, 'native_pdf_whole_table_groups')
+        body['nativeTableSummary'] = [{'tableGroupId': group['tableGroupId'],
+            'physicalPages': sorted({fragment['physicalPageNo'] for fragment in group['fragments']}),
+            'logicalRowCount': len(group['logicalRows']), 'completeness': copy.deepcopy(group['completeness'])}
+            for group in chunk['nativeTables']]
     return body
 
 
@@ -100,9 +112,10 @@ def _assemble(internal, store, code_ref, *, capture):
     canonical = {'version': COMMITMENTS_VERSION, 'units': [
         {'unitId': body['unitId'], 'scope': body['canonicalScope'], 'partsSha256': _hash(body['parts']),
          'adoptionSha256': _hash(body['adoption']), 'chunkPreIdentitySha256': _hash(body)} for body in bodies],
-        'relations': copy.deepcopy(internal['canonical']['relations']), 'assetRefs': []}
+        'relations': copy.deepcopy(internal['canonical']['relations']), 'assetRefs': copy.deepcopy(internal['assetRefs'])}
     identity = copy.deepcopy(internal['projectionIdentity'])
-    identity.update(projectionVersion=VERSION, storageShape=STORAGE_SHAPE,
+    version = TABLE_VERSION if internal['projectionIdentity']['projectionVersion'] == TABLE_PROJECTION_VERSION else VERSION
+    identity.update(projectionVersion=version, storageShape=STORAGE_SHAPE,
                     projectionCodeSha256=code_ref['sha256'], internalProjectionSha256=internal['projectionSha256'],
                     internalProjectionVersion=internal['projectionIdentity']['projectionVersion'],
                     internalProjectionCodeSha256=internal['projectionIdentity']['projectionCodeSha256'],
@@ -131,7 +144,7 @@ def _assemble(internal, store, code_ref, *, capture):
               'observerIdentity': copy.deepcopy(native['observation']['observerIdentity']),
               'sourceReferenceRef': {**copy.deepcopy(internal['manifest']['reference']), 'humanConfirmed': False,
                                      'sourceMediaType': 'application/pdf'},
-              'canonical': canonical, 'chunks': chunks, 'assetRefs': [],
+              'canonical': canonical, 'chunks': chunks, 'assetRefs': copy.deepcopy(internal['assetRefs']),
               'unadoptedGlyphsRef': _ref(descriptor, '/unadoptedGlyphs', internal['unadoptedGlyphs'],
                                         internal, 'native_pdf_unadopted_unknown_inventory'),
               'unadoptedGlyphSummary': [{'physicalPageNo': row['physicalPageNo'], 'glyphCount': len(row['glyphIds']),
@@ -144,7 +157,8 @@ def _assemble(internal, store, code_ref, *, capture):
               'limitations': copy.deepcopy(internal['limitations']),
               'transportValidation': {'mode': 'cold_full_cas_and_internal_reconstruction',
                                       'derivedValidationCache': 'not_implemented', 'qualityCertified': False}}
-    result['limitations'].append('Public prose wire retains actual raster descriptors; image serving, table/AP adoption and business integration remain unverified')
+    result['limitations'].append('Public wire retains original-page asset descriptors; AP adoption and business integration remain unverified'
+                                if version == TABLE_VERSION else 'Public prose wire retains actual raster descriptors; image serving, table/AP adoption and business integration remain unverified')
     result['projectionSha256'] = _hash(result)
     return result
 
@@ -171,7 +185,7 @@ def hydrate_native_pdf_transport(public_projection, *, artifact_store, max_snaps
         _fail(public_projection.get('projectionSha256') == _hash({key: value for key, value in public_projection.items()
                                                                 if key != 'projectionSha256'}), 'native_pdf_public_seal_mismatch')
         identity = public_projection['projectionIdentity']
-        _fail(identity.get('projectionVersion') == VERSION and identity.get('storageShape') == STORAGE_SHAPE,
+        _fail(identity.get('projectionVersion') in {VERSION, TABLE_VERSION} and identity.get('storageShape') == STORAGE_SHAPE,
               'unsupported_native_pdf_public_projection_version')
         code_ref = public_projection['transportCodeRef']
         code = artifact_store.read_asset(code_ref)

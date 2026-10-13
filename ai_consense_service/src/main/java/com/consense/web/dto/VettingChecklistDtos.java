@@ -23,6 +23,7 @@ public final class VettingChecklistDtos {
         private String runSnapshotSha256;
         private boolean writable;
         private List<ItemVO> items;
+        private String sourceSnapshotSha256;
     }
 
     @Data @NoArgsConstructor @AllArgsConstructor
@@ -47,6 +48,9 @@ public final class VettingChecklistDtos {
         /** Updates only these rows; unrelated human counterchecks remain unchanged. */
         @NotNull @Size(min=1,max=100) @Valid
         private List<UpdateItem> items;
+        private String expectedRunId;
+        private String expectedSourceSnapshotSha256;
+        public UpdateRequest(String binding,List<UpdateItem> items){this.runSnapshotSha256=binding;this.items=items;}
     }
 
     @Data @NoArgsConstructor @AllArgsConstructor

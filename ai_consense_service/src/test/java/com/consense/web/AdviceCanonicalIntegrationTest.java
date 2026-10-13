@@ -49,6 +49,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * Private Session/IndexState constructors build authored test carriers only; this is not a seal/parser acceptance test. */
 @SpringBootTest(properties={"spring.jpa.hibernate.ddl-auto=create-drop","spring.flyway.enabled=false",
         "consense.ocr.enabled=false","consense.vector.provider=memory","consense.llm.chat-model=canonical-test-chat",
+        "consense.llm.num-ctx=262144","consense.llm.structured-thinking=false",
         "consense.minimax-cn.api-key=AUTHORED-responses-no-real-key","consense.minimax-cn.base-url=https://api.minimax.cn",
         "consense.minimax-cn.chat-model=MiniMax-M3","consense.minimax-cn.temperature=0.2",
         "consense.minimax-cn.structured-max-tokens=16384","consense.minimax-cn.structured-open-ai-thinking-mode=disabled"})
@@ -71,11 +72,13 @@ class AdviceCanonicalIntegrationTest {
     @MockBean EvidenceChunkRepository legacyChunks;
     @MockBean(name="llmClient") LlmClient local;
     @MockBean(name="miniMaxChatClient") LlmClient miniMaxChat;
+    @MockBean com.consense.service.vetting.VettingTokenBudgetCliObserver counter;
     private final List<String> prompts=new ArrayList<>();
     private List<VectorStore.SearchHit> selectedHits,contextHits;
     private OerBusinessEvidence.Session loaded;
 
     @BeforeEach void doubles() throws Exception {
+        com.consense.service.advice.AdviceBudgetFixture.bind(counter,local);
         prompts.clear();selectedHits=new ArrayList<>();contextHits=new ArrayList<>();loaded=null;
         adviceModel.setMinimaxWire("chat");
         ReflectionTestUtils.setField(advice,"adviceResponses",originalResponses);
@@ -280,26 +283,32 @@ class AdviceCanonicalIntegrationTest {
     private MockHttpServletRequestBuilder responsesAsk(String p){return ask(p,"contract").header("X-ConSense-Llm-Profile","minimax-cn");}
     @Test void responsesSourceAddedDuringCounterKeepsSourceErrorAndSavesNoExchange() throws Exception {
         String p=project();SourceDocument d=source(p,"SCC","SCC.txt","tender","TEST");selectedHits=Collections.singletonList(hit(d,"tender","TEST","complete_observed_unit",null,"ranked"));
-        ResponsesHttp http=responses(32768);http.afterCounter=()->source(p,"PRE","new PRE.txt","tender","NEW CURRENT SOURCE");
+        ResponsesHttp http=responses(262144);http.afterCounter=()->source(p,"PRE","new PRE.txt","tender","NEW CURRENT SOURCE");
         mvc.perform(responsesAsk(p)).andExpect(jsonPath("$.code").value(4204));assertEquals(1,http.bodies.size());assertEquals(0,data(get("/api/advice/{p}/messages",p)).size());verifyNoInteractions(miniMaxChat);verify(local,never()).chat(anyList());
     }
     @Test void responsesSourceRevisionDuringGenerationKeepsSourceErrorAndSavesNoExchange() throws Exception {
         String p=project();SourceDocument d=source(p,"SCC","SCC.txt","tender","TEST");selectedHits=Collections.singletonList(hit(d,"tender","TEST","complete_observed_unit",null,"ranked"));
-        ResponsesHttp http=responses(32768);http.afterGeneration=()->jdbc.update("update source_document set text_content=? where id=?","NEW DATABASE REVISION",d.getId());
+        ResponsesHttp http=responses(262144);http.afterGeneration=()->jdbc.update("update source_document set text_content=? where id=?","NEW DATABASE REVISION",d.getId());
         mvc.perform(responsesAsk(p)).andExpect(jsonPath("$.code").value(4204));assertEquals(2,http.bodies.size());assertEquals(0,data(get("/api/advice/{p}/messages",p)).size());verifyNoInteractions(miniMaxChat);verify(local,never()).chat(anyList());
     }
     @Test void responsesUnknownBudgetDoesNotDispatchOrCreateOrphanMessages() throws Exception {
         String p=project();SourceDocument d=source(p,"SCC","SCC.txt","tender","TEST");selectedHits=Collections.singletonList(hit(d,"tender","TEST","complete_observed_unit",null,"ranked"));ResponsesHttp http=responses(0);
         mvc.perform(responsesAsk(p)).andExpect(jsonPath("$.code").value(4205));assertTrue(http.bodies.isEmpty());assertEquals(0,data(get("/api/advice/{p}/messages",p)).size());verifyNoInteractions(miniMaxChat);verify(local,never()).chat(anyList());
     }
+    @Test void bareResponsesAskWithSub256KContextCannotDispatchCounterOrGeneration() throws Exception {
+        String p=project();SourceDocument d=source(p,"SCC","SCC.txt","tender","TEST");selectedHits=Collections.singletonList(hit(d,"tender","TEST","complete_observed_unit",null,"ranked"));ResponsesHttp http=responses(32768);
+        mvc.perform(responsesAsk(p)).andExpect(jsonPath("$.code").value(4205)).andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("256K")));
+        assertTrue(http.bodies.isEmpty());assertEquals(0,data(get("/api/advice/{p}/messages",p)).size());verifyNoInteractions(miniMaxChat);verify(local,never()).chatStructured(anyList(),any());
+    }
     @Test void responsesCompletionUsesSameProjectionAndReportsItsRealRouteIdentity() throws Exception {
-        String p=project();SourceDocument d=source(p,"SCC","SCC.txt","tender","COMPLETE RESPONSE MATERIAL");selectedHits=Collections.singletonList(hit(d,"tender",d.getTextContent(),"complete_observed_unit",null,"ranked"));ResponsesHttp http=responses(32768);
+        String p=project();SourceDocument d=source(p,"SCC","SCC.txt","tender","COMPLETE RESPONSE MATERIAL");selectedHits=Collections.singletonList(hit(d,"tender",d.getTextContent(),"complete_observed_unit",null,"ranked"));ResponsesHttp http=responses(262144);
         JsonNode result=data(responsesAsk(p));assertTrue(result.path("grounded").asBoolean());assertEquals("MiniMax-M3",result.path("model").asText());assertEquals(AdviceResponsesTransport.WIRE,result.path("modelIdentity").path("provider").asText());
         assertEquals(2,http.bodies.size());JsonNode counter=JsonUtils.parse(http.bodies.get(0)),generation=JsonUtils.parse(http.bodies.get(1));for(String field:Arrays.asList("model","instructions","input","reasoning"))assertEquals(counter.get(field),generation.get(field));
+        String instructions=counter.path("instructions").asText();assertTrue(instructions.contains("```mermaid")&&instructions.contains("flowchart TD or flowchart LR")&&instructions.contains("double-quoted labels for every node and decision")&&instructions.contains("#quot;")&&instructions.contains("evidence-supported steps and citations")&&instructions.contains("no HTML, links, directives or styling"),"The final counted and generated system input constrains Mermaid syntax without adding unsupported steps");
         assertTrue(generation.path("input").get(0).path("content").asText().contains("COMPLETE RESPONSE MATERIAL"));assertEquals(2,data(get("/api/advice/{p}/messages",p)).size());verifyNoInteractions(miniMaxChat);verify(local,never()).chat(anyList());
     }
     @Test void responsesMalformedJsonRetryRecountsCompleteMaterialsBeforeSecondGeneration() throws Exception {
-        String p=project();SourceDocument d=source(p,"SCC","SCC.txt","tender","COMPLETE RETRY MATERIAL");selectedHits=Collections.singletonList(hit(d,"tender",d.getTextContent(),"complete_observed_unit",null,"ranked"));ResponsesHttp http=responses(32768);http.generations.add("not JSON");
+        String p=project();SourceDocument d=source(p,"SCC","SCC.txt","tender","COMPLETE RETRY MATERIAL");selectedHits=Collections.singletonList(hit(d,"tender",d.getTextContent(),"complete_observed_unit",null,"ranked"));ResponsesHttp http=responses(262144);http.generations.add("not JSON");
         assertTrue(data(responsesAsk(p)).path("grounded").asBoolean());assertEquals(4,http.bodies.size());JsonNode first=JsonUtils.parse(http.bodies.get(1)),retryCounter=JsonUtils.parse(http.bodies.get(2)),retryGeneration=JsonUtils.parse(http.bodies.get(3));
         assertEquals(first.path("input").get(0).path("content").asText()+AdviceResponsesTransport.RETRY_INSTRUCTION,retryGeneration.path("input").get(0).path("content").asText());for(String field:Arrays.asList("model","instructions","input","reasoning"))assertEquals(retryCounter.get(field),retryGeneration.get(field));assertEquals(2,data(get("/api/advice/{p}/messages",p)).size());verifyNoInteractions(miniMaxChat);verify(local,never()).chat(anyList());
     }

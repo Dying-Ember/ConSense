@@ -1,2 +1,10 @@
 # Preserve the captured UTF-8 source identity used by the native DOCX regression.
 ai_consense_service/src/test/resources/drafting/harness/ordered-list/SIM11-novel-round1-source.txt text eol=lf
+# Captured historical CAS/producer bytes are hash-bound and must survive checkout exactly.
+ai_consense_service/src/test/resources/oer/native-pdf-producer-v1/** -text
+# The authored original is byte-bound despite its UTF-8 fixture content.
+ai_consense_service/src/test/resources/oer/canonical/authored-source.pdf -text
+# Recheck CAS filenames and ledgers bind the original byte digest.
+ai_consense_service/src/test/resources/oer/recheck/**/*.blob -text
+# The release manifest is hash-bound and must retain its bytes on Windows checkout.
+artifacts/oer-freeze-20261012/manifest.json -text

@@ -65,7 +65,7 @@ class VettingProbeTimingTest {
         when(http.postJson(anyString(),anyString(),anyLong())).thenThrow(new IllegalStateException("Synthetic cache miss"));
         AiGateway ai=mock(AiGateway.class);when(ai.available()).thenReturn(true);
         Chunk source=VettingStrictHybridTest.source("one","tender","Literal source clause for required hybrid retrieval.");
-        assertThrows(IllegalStateException.class,()->new VettingSemanticReview(ai,props,new VettingRetrievalClient(http,props))
+        assertThrows(IllegalStateException.class,()->VettingTokenFixture.review(ai,props,new VettingRetrievalClient(http,props))
             .reviewWithProgress("run-failed","p",Collections.singletonList(source),"en",(a,b,c)->{}));
         List<JsonNode> events=events(temp.resolve("run-failed"));
         assertTrue(events.stream().anyMatch(e->"phase_timing".equals(e.path("phase").asText())&&"index_http".equals(e.path("observations").path("stage").asText())));
@@ -103,7 +103,7 @@ class VettingProbeTimingTest {
         VettingStrictHybridTest.retrieveResponse(http,VettingStrictHybridTest.response(source));
         LlmClient provider=mock(LlmClient.class);when(provider.available()).thenReturn(true);when(provider.chatModel()).thenReturn("synthetic-only");
         when(provider.chatStructured(anyList(),any())).thenReturn("[]");
-        VettingSemanticReview.Result result=new VettingSemanticReview(new AiGateway(provider),props,new VettingRetrievalClient(http,props))
+        VettingSemanticReview.Result result=VettingTokenFixture.review(new AiGateway(provider),props,new VettingRetrievalClient(http,props))
             .reviewWithProgress("run-success","p",Collections.singletonList(source),"en",(a,b,c)->{});
         assertEquals("completed_empty",result.getTopicAudits().get(0).getStatus());
         List<JsonNode> events=events(temp.resolve("run-success"));

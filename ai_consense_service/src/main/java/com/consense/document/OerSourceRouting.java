@@ -27,6 +27,27 @@ public final class OerSourceRouting {
         }
     }
 
+    /** Identity only: a drawing label or native format must precede every detail parser. */
+    public static boolean isDrawing(String documentScope, String fileName, byte[] bytes) {
+        if ("drawing".equals(documentScope)) return true;
+        String name = fileName == null ? "" : fileName.toLowerCase(Locale.ROOT);
+        String header = new String(bytes, 0, Math.min(bytes.length, 64), java.nio.charset.StandardCharsets.US_ASCII);
+        if (name.endsWith(".dwg") && header.matches("(?s)^AC10[0-9]{2}.*")) return true;
+        if (name.endsWith(".dxf") && (header.startsWith("AutoCAD Binary DXF")
+                || header.matches("(?s)^\\s*0\\s+SECTION\\s+.*"))) return true;
+        if (header.startsWith("%PDF-")) {
+            try (org.apache.pdfbox.pdmodel.PDDocument pdf = org.apache.pdfbox.pdmodel.PDDocument.load(bytes)) {
+                org.apache.pdfbox.pdmodel.PDDocumentInformation info = pdf.getDocumentInformation();
+                return drawingLabel(info.getTitle()) || drawingLabel(info.getSubject());
+            } catch (java.io.IOException invalidPdf) { return false; }
+        }
+        return false;
+    }
+
+    private static boolean drawingLabel(String label) {
+        return label != null && label.trim().matches("(?i)(?:engineering |technical |施工)?(?:drawings?|图纸|圖紙)");
+    }
+
     public OerDocumentIdentity route(String fileName, String sourceSha256, DocumentParser.ParsedDocument parsed) {
         OerDocumentIdentity result = new OerDocumentIdentity();
         String sha = validSha(sourceSha256); result.setSourceSha256(sha);
