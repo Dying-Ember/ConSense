@@ -223,6 +223,14 @@
       }
     ]
   },
-  "remoteUpload": "In progress; final remote digest verification is reported in the PR and release completion receipt.",
+  "remoteUpload": {
+    "status": "completed",
+    "checkedAt": "2026-10-13T09:57:23.993500+08:00",
+    "receipt": "remote-verification.json",
+    "assetCount": 11,
+    "allRemoteSizesAndNativeDigestsMatch": true,
+    "manifestDownloadedAndHashMatched": true,
+    "boundary": "All remote bytes verified by GitHub native SHA256; manifest actually downloaded. Full archive restored locally. No full remote archive download or runtime/semantic/H800 certification."
+  },
   "boundary": "Byte identity, full file restore and restored-copy SQLite checks only; no new model, retrieval, business, OCI or H800 acceptance."
 }
