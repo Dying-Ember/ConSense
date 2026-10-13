@@ -621,7 +621,11 @@ public class VettingService {
         VettingRun run=runRepository.lockById(runId).filter(r->projectId.equals(r.getProjectId())).orElseThrow(()->new BizException(4104,"审查版本不可用，请刷新后保存。"));
         if(!currentReviewRun(run)||!sourceSha.equals(run.getSourceSnapshotSha256()))throw new BizException(4104,"审查或原件版本已变化，请刷新后保存；原人工记录保持不变。");return run;
     }
-    public boolean currentReviewRun(VettingRun run){return "COMPLETED".equals(run.getStatus())&&runRepository.findFirstByProjectIdOrderByStartedAtDesc(run.getProjectId()).map(latest->run.getId().equals(latest.getId())).orElse(false)&&!sourceSetStale(run);}
+    public boolean currentReviewRun(VettingRun run){
+        if(!"COMPLETED".equals(run.getStatus())||!runRepository.findFirstByProjectIdOrderByStartedAtDesc(run.getProjectId()).map(latest->run.getId().equals(latest.getId())).orElse(false)||sourceSetStale(run))return false;
+        try{assertFixedReferencesCurrent(run,activeFindings(run.getProjectId()).stream().filter(f->run.getId().equals(f.getRunId())).map(this::toVO).collect(Collectors.toList()));return true;}
+        catch(BizException stale){if(stale.getCode()!=4104)throw stale;return false;}
+    }
     public EvidenceVO evidence(String projectId,String code) {
         projectService.require(projectId); VettingFinding f=findingRepository.findByProjectIdAndCode(projectId,code).orElseThrow(() -> new BizException(4102,"审查发现不存在"));
         List<FindingEvidence> saved=readEvidence(f); List<EvidenceItemVO> items=new ArrayList<>();
