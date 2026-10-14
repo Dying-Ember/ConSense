@@ -46,6 +46,7 @@ class AdviceDocumentScopeIntegrationTest {
     @Autowired StorageService storage;
     @Autowired com.consense.repository.ChatMessageRepository messages;
     @Autowired com.consense.service.advice.AdviceService advice;
+    @Autowired com.consense.config.ConsenseProperties properties;
     @MockBean(name="llmClient") LlmClient local;
     @MockBean com.consense.service.vetting.VettingTokenBudgetCliObserver counter;
     private final List<String> prompts=new ArrayList<>();
@@ -286,7 +287,7 @@ class AdviceDocumentScopeIntegrationTest {
         com.fasterxml.jackson.databind.node.ObjectNode valid=(com.fasterxml.jackson.databind.node.ObjectNode)JsonUtils.parse(com.consense.service.advice.AdviceBudgetFixture.contract("{\"grounded\":true,\"answer\":\"AUTHORED protocol answer [1]\",\"citations\":[\"[1]\"]}"));
         com.fasterxml.jackson.databind.node.ObjectNode invalid=valid.deepCopy();((com.fasterxml.jackson.databind.node.ObjectNode)invalid.path("sections").get(0)).remove("checks");
         java.util.concurrent.atomic.AtomicInteger calls=new java.util.concurrent.atomic.AtomicInteger();
-        doAnswer(call->{String prompt=JsonUtils.write(call.getArgument(0));assertTrue(prompt.contains("Public citation alias=[1]"));assertTrue(prompt.contains("Application output reserve: 16384 tokens."));
+        doAnswer(call->{String prompt=JsonUtils.write(call.getArgument(0));assertTrue(prompt.contains("Public citation alias=[1]"));assertTrue(prompt.contains("Application output reserve: "+properties.getLlm().getStructuredMaxTokens()+" tokens."));
             if(calls.getAndIncrement()>0)assertTrue(prompt.contains("Application rejected: answer.sections[0].checks: required field is missing"));
             JsonNode schema=call.getArgument(1);assertEquals(JsonUtils.parse("[\"[1]\"]"),schema.path("properties").path("sections").path("items").path("properties").path("citations").path("items").path("enum"));
             return JsonUtils.write(calls.get()==1?invalid:valid);}).when(local).chatStructured(anyList(),any());
