@@ -33,13 +33,13 @@ class AdviceObservedOutputReplayTest {
         assertTrue(rawFailure.getMessage().contains("answer.sections[0].checks[0].citations[0]"));
         ObjectNode projected=structural.deepCopy();projectAliases(projected,aliases);AdvisoryHarness.shape(projected,AdvisoryHarness.schema(sources));
         AdvisoryHarness.Section opening=JsonUtils.mapper().convertValue(projected.path("sections").get(0),AdvisoryHarness.Section.class);
-        assertEquals("Self-check evidence is outside the section",assertThrows(IllegalArgumentException.class,()->AdvisoryHarness.validate(opening,sources,true,(b,r)->true)).getMessage());
+        assertTrue(assertThrows(IllegalArgumentException.class,()->AdvisoryHarness.validate(opening,sources,true,(b,r)->true)).getMessage().contains("section.checks[0].citations: every alias must also be in section.citations"));
         opening.getChecks().forEach(check->check.setCitations(Collections.emptyList()));
-        assertEquals("Applicable substantive self-check lacks evidence",assertThrows(IllegalArgumentException.class,()->AdvisoryHarness.validate(opening,sources,true,(b,r)->true)).getMessage());
+        assertTrue(assertThrows(IllegalArgumentException.class,()->AdvisoryHarness.validate(opening,sources,true,(b,r)->true)).getMessage().contains("applicable substantive pass requires evidence"));
         assertEquals("analysis",answer.path("sections").get(1).path("kind").asText());assertTrue(answer.path("sections").get(1).has("flowchartPlan"));
         AdvisoryHarness.Section analysis=JsonUtils.mapper().convertValue(JsonUtils.parse(AdviceBudgetFixture.contract("{\"grounded\":true,\"basisScope\":\"reference_only\",\"answer\":\"AUTHORED kind diagnostic [1]\",\"citations\":[\"[1]\"]}")).path("sections").get(1),AdvisoryHarness.Section.class);
         analysis.setFlowchartPlan(new AdvisoryHarness.GraphPlan());
-        assertEquals("Graph plan belongs only to a flowchart section",assertThrows(IllegalArgumentException.class,()->AdvisoryHarness.validate(analysis,sources,true,(b,r)->true)).getMessage());
+        assertTrue(assertThrows(IllegalArgumentException.class,()->AdvisoryHarness.validate(analysis,sources,true,(b,r)->true)).getMessage().contains("section.flowchartPlan: graph plan belongs only to a flowchart section"));
         assertArrayEquals(original,Files.readAllBytes(path));
     }
     private void projectAliases(JsonNode node,Map<String,String> aliases) {

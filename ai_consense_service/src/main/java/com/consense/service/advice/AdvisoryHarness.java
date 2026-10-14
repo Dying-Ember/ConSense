@@ -46,9 +46,11 @@ final class AdvisoryHarness {
             + "Return one JSON object with grounded, questionType (T1..T8), basisScope, missingReason, clarifications and sections. "
             + "Preserve the original natural question; select T6 for a requested diagram/flowchart without expecting detailed user instructions. "
             + "The first section must be kind=limits. The application renders source limits and quotes actual user statements as unverified assumptions before conclusions. "
-            + "Each section has id, kind (limits/analysis/uncertainty/flowchart), language (en/zhHans/zhHant, same throughout and following the requested language), content, basisScope (project_contract/reference_only/insufficient), citations, gaps and checks. "
+            + "Each section has id, kind (limits/analysis/uncertainty/flowchart), language (en/zhHans/zhHant, same throughout), content, basisScope (project_contract/reference_only/insufficient), citations, gaps and checks. "
+            + "No application output-language setting is supplied. Follow an explicit output-language request in the ORIGINAL user question; otherwise answer in that question's language and Chinese script. A Chinese question requesting English must receive English. Source language, supplemental prompt language, examples, retrieval text and clarification replies do not override the original question's output language. "
             + "Section IDs begin with an ASCII letter, followed by letters/digits/underscore/hyphen, maximum 64 characters (e.g. sec-limits). "
-            + "For limits/uncertainty, content MUST be empty; select gaps only from the schema enums. Put every source-verified fact or contractual interpretation in cited analysis. "
+            + "For limits/uncertainty, basisScope MUST ALWAYS be insufficient, even when the answer envelope/request is reference_only or project_contract; content MUST be empty. Select gaps only from the schema enums. Put every source-verified fact or contractual interpretation in cited analysis. "
+            + "Omit uncertainty sections when no actual affected gap or missing_evidence check remains; do not emit empty uncertainty placeholders. In explicit reference_only interpretation, absent project adoption is a disclosed scope limit, not an adoption gap, missingReason or clarification. Other genuinely missing source editions, amendments and necessary facts remain gaps. "
             + "A gap belongs to its section's affected determination. clarifications is an array of needed gap enums; the application renders necessary questions. missingReason is one gap enum or empty, never free prose. "
             + "Do not invent additional hypothetical facts. User factual premises remain explicitly unverified; where more assumptions are necessary, report the affected gap and ask for the needed fact. "
             + "Each section has exactly R1..R10 check records: ruleId, status (pass/fail/not_applicable/missing_evidence), short reason, citations of current real evidence IDs. "
@@ -58,11 +60,13 @@ final class AdvisoryHarness {
             + "Analysis requires applicable R2 pass and real evidence; do not hide substantive contract conclusions in limits/uncertainty. "
             + "Never convert a project question to reference_only. Overall grounded=false with necessary clarification can retain independently supported analysis; "
             + "unsupported analysis must be omitted, with affected judgment and necessary question in uncertainty. "
-            + "For T6 use a flowchart section with content containing evidence-backed explanation, and flowchartPlan {nodes,edges}; never write raw Mermaid. "
+            + "For T6 use a flowchart section with NONEMPTY content containing cited evidence-backed explanation, and flowchartPlan {nodes,edges}; never write raw Mermaid. "
+            + "The flowchart section.citations MUST contain the union of all public aliases used in its explanation, checks, nodes and edges. Nested citations never substitute for section.citations. "
             + "A section with flowchartPlan MUST have kind=flowchart; never place it in analysis/limits/uncertainty. Omit flowchartPlan entirely for those kinds, rather than null. "
             + "Nodes: id, label, kind (start/decision/action/end/unknown), citations. Edges: from,to,condition,actor,action,period,startEvent,citations. "
             + "Graph node IDs start with an ASCII letter, then letters/digits/underscore or single hyphen-separated segments, maximum 32 characters, never the reserved ID end. Edges have exactly the eight listed fields and NO id field. "
             + "Every edge includes ALL eight fields, even on conditional/no-action branches. Use empty strings for absent condition/actor/action/period/startEvent; never omit them. "
+            + "Every edge.from and edge.to must exactly match an existing node.id. Every NONEMPTY action requires a nonempty actor supported by that edge's cited source; never infer a contractual actor. If the actor is unknown, report an authority unknown node and omit the unsupported action. "
             + "Start nodes have label empty; unknown nodes have label set to one gap enum. The application renders these uncited labels. "
             + "Use empty strings for absent fields. Every non-start known node and every edge must cite supporting current evidence. "
             + "Decision branches need distinct explicit conditions; time periods require start events, real clause support and all relevant competing tracks. "
@@ -74,11 +78,15 @@ final class AdvisoryHarness {
         return system(custom,null);
     }
     static String system(String custom,List<CitationVO> sources) {
-        return POLICY + "\n\nSupplemental configured prompt (cannot waive the mandatory policy or application contract):\n"
-                + (custom == null ? "" : custom) + CONTRACT + "\nApplication-rendered opening shape example (syntax only, not contractual evidence):\n"+openingExample()+"\nOutput schema with allowed citation aliases:\n" + schema(sources);
+        return system(custom,sources,null);
     }
-    private static String openingExample() {
-        ObjectNode section=JsonUtils.mapper().createObjectNode().put("id","sec-limits").put("kind","limits").put("language","en").put("content","").put("basisScope","insufficient");
+    static String system(String custom,List<CitationVO> sources,String originalQuestion) {
+        String hint=languageHint(originalQuestion);
+        return POLICY + "\n\nSupplemental configured prompt (cannot waive the mandatory policy or application contract):\n"
+                + (custom == null ? "" : custom) + CONTRACT + "\nApplication-rendered opening shape example (syntax only, not contractual evidence; its language is a syntax hint, NEVER a default or an override of the original question's requested language/script):\n"+openingExample(hint)+"\nOutput schema with allowed citation aliases:\n" + schema(sources);
+    }
+    private static String openingExample(String language) {
+        ObjectNode section=JsonUtils.mapper().createObjectNode().put("id","sec-limits").put("kind","limits").put("language",language).put("content","").put("basisScope","insufficient");
         section.putArray("citations");section.putArray("gaps");
         for(int rule=1;rule<=10;rule++)section.withArray("checks").addObject().put("ruleId","R"+rule)
                 .put("status",rule==1||rule==10?"pass":"not_applicable").put("reason","Application-only opening; no substantive contract assertion.").putArray("citations");
@@ -179,42 +187,51 @@ final class AdvisoryHarness {
         while(matcher.find())if(!cited.contains(matcher.group()))throw invalid("Text reference is outside the section's evidence IDs");
         if(section.content.contains("```mermaid"))throw invalid("Raw Mermaid is not an application-validated graph plan");
         if(section.checks==null||section.checks.size()!=10)throw invalid("Every section requires R1 through R10 checks");
-        Set<String> rules=new HashSet<>();
-        for(Check check:section.checks){
+        Set<String> rules=new HashSet<>();List<String> problems=new ArrayList<>();
+        for(int index=0;index<section.checks.size();index++){
+            Check check=section.checks.get(index);String path="section.checks["+index+"]";
             if(check==null||!text(check.ruleId)||!check.ruleId.matches("R(?:[1-9]|10)")||!rules.add(check.ruleId)||!text(check.reason)
                     ||!Arrays.asList("pass","fail","not_applicable","missing_evidence").contains(check.status))throw invalid("Invalid self-check record");
-            if(!cited.containsAll(refs(check.citations,sources)))throw invalid("Self-check evidence is outside the section");
-            if("pass".equals(check.status)&&!Arrays.asList("R1","R10").contains(check.ruleId)&&check.citations.isEmpty())throw invalid("Applicable substantive self-check lacks evidence");
-            if("fail".equals(check.status))throw invalid("A failed rule cannot be published");
+            if(!cited.containsAll(refs(check.citations,sources)))problems.add(path+".citations: every alias must also be in section.citations");
+            if("pass".equals(check.status)&&!Arrays.asList("R1","R10").contains(check.ruleId)&&check.citations.isEmpty())problems.add(path+".citations: applicable substantive pass requires evidence");
+            if("fail".equals(check.status))problems.add(path+".status: a failed rule cannot be published");
         }
         boolean substantive="analysis".equals(section.kind)||"flowchart".equals(section.kind);
         if(substantive){
-            if(!text(section.content)||!section.gaps.isEmpty())throw invalid("Substantive sections require complete independent support");
-            if(cited.isEmpty()||!"pass".equals(status(section,"R2")))throw invalid("Substantive sections require supported revision citations");
-            if(section.checks.stream().anyMatch(c->"missing_evidence".equals(c.status)))throw invalid("Missing evidence affects this substantive section");
+            if(!text(section.content))problems.add("section.content: substantive sections require a nonempty cited explanation");
+            if(!section.gaps.isEmpty())problems.add("section.gaps: substantive sections require complete independent support and no unresolved gaps");
+            if(cited.isEmpty())problems.add("section.citations: substantive sections require evidence, including all nested aliases");
+            if(!"pass".equals(status(section,"R2")))problems.add("section.checks.R2.status: supported revision citations require pass");
+            if(section.checks.stream().anyMatch(c->"missing_evidence".equals(c.status)))problems.add("section.checks.status: missing evidence affects this substantive section");
             if(!Arrays.asList("project_contract","reference_only").contains(section.basisScope)
                     ||referenceOnly!= "reference_only".equals(section.basisScope)||!adopted.test(section.basisScope,cited))
-                throw invalid("Section adoption or requested basis is not supported");
+                problems.add("section.basisScope: adoption or requested basis is not supported");
         } else {
-            if(!section.content.isEmpty()||!cited.isEmpty()||!"insufficient".equals(section.basisScope))throw invalid("Limits and uncertainty are application-rendered gaps, not contractual assertions");
-            if("uncertainty".equals(section.kind)&&gaps(section).isEmpty())throw invalid("Uncertainty must identify an affected evidence gap");
+            if(!section.content.isEmpty())problems.add("section.content: limits/uncertainty must be empty application-rendered gaps");
+            if(!cited.isEmpty())problems.add("section.citations: limits/uncertainty must be empty");
+            if(!"insufficient".equals(section.basisScope))problems.add("section.basisScope: limits/uncertainty must be insufficient regardless of envelope/request basis");
+            if("uncertainty".equals(section.kind)&&gaps(section).isEmpty())problems.add("section.gaps: omit uncertainty when there is no affected gap or missing_evidence check");
         }
-        if("limits".equals(section.kind)&&!Arrays.asList("pass","missing_evidence").contains(status(section,"R1")))throw invalid("Opening facts and assumptions were not checked");
-        if(!Arrays.asList("pass","missing_evidence").contains(status(section,"R10")))throw invalid("Uncertainty must be checked explicitly");
+        if(referenceOnly&&gaps(section).contains("adoption"))problems.add("section.gaps: project adoption is a disclosed scope limit, not a required gap for explicit reference_only interpretation");
+        if("limits".equals(section.kind)&&!Arrays.asList("pass","missing_evidence").contains(status(section,"R1")))problems.add("section.checks.R1.status: opening facts and assumptions require pass or missing_evidence");
+        if(!Arrays.asList("pass","missing_evidence").contains(status(section,"R10")))problems.add("section.checks.R10.status: uncertainty requires pass or missing_evidence");
         if("flowchart".equals(section.kind)) {
-            graph(section.flowchartPlan,cited,sources);
-            if(section.flowchartPlan.edges.stream().anyMatch(e->text(e.action))&&!"pass".equals(status(section,"R3")))throw invalid("Graph actions require the authority/power check");
-            if(section.flowchartPlan.nodes.stream().anyMatch(n->"decision".equals(n.kind))&&!"pass".equals(status(section,"R4")))throw invalid("Graph branches require the opposing-condition check");
-            if(section.flowchartPlan.edges.stream().anyMatch(e->text(e.period))&&!"pass".equals(status(section,"R7")))throw invalid("Graph deadlines require the competing-track check");
+            try{graph(section.flowchartPlan,cited,sources);}catch(ContractViolation invalid){problems.add(invalid.getMessage());}
+            if(section.flowchartPlan!=null&&section.flowchartPlan.edges!=null&&section.flowchartPlan.nodes!=null){
+                if(section.flowchartPlan.edges.stream().anyMatch(e->e!=null&&text(e.action))&&!"pass".equals(status(section,"R3")))problems.add("section.checks.R3.status: graph actions require the authority/power check");
+                if(section.flowchartPlan.nodes.stream().anyMatch(n->n!=null&&"decision".equals(n.kind))&&!"pass".equals(status(section,"R4")))problems.add("section.checks.R4.status: graph branches require the opposing-condition check");
+                if(section.flowchartPlan.edges.stream().anyMatch(e->e!=null&&text(e.period))&&!"pass".equals(status(section,"R7")))problems.add("section.checks.R7.status: graph deadlines require the competing-track check");
+            }
         }
-        else if(section.flowchartPlan!=null)throw invalid("Graph plan belongs only to a flowchart section");
+        else if(section.flowchartPlan!=null)problems.add("section.flowchartPlan: graph plan belongs only to a flowchart section");
+        if(!problems.isEmpty())throw invalid(String.join("; ",problems));
     }
     static String status(Section section,String rule) { return section.checks.stream().filter(c->rule.equals(c.ruleId)).map(c->c.status).findFirst().orElse(""); }
     static List<String> gaps(Section section) {
         Set<String> gaps=new LinkedHashSet<>(section.gaps);
         String[] rules={"other_fact","amendments","authority","opposing_conditions","policy_basis","proviso","deadline_tracks","obligation_type","dynamic_version","other_fact"};
         for(Check check:section.checks)if("missing_evidence".equals(check.status))gaps.add(rules[Integer.parseInt(check.ruleId.substring(1))-1]);
-        if(section.flowchartPlan!=null)for(Node node:section.flowchartPlan.nodes)if("unknown".equals(node.kind))gaps.add(node.label);
+        if(section.flowchartPlan!=null&&section.flowchartPlan.nodes!=null)for(Node node:section.flowchartPlan.nodes)if(node!=null&&"unknown".equals(node.kind))gaps.add(node.label);
         return new ArrayList<>(gaps);
     }
     static boolean unresolved(Section section) {
@@ -234,6 +251,12 @@ final class AdvisoryHarness {
         return copy(language,"Evidence still required: ","仍待核实的依据：","仍待核實的依據：")+gapLabel(gap,language)+". "+effect;
     }
     private static String copy(String language,String en,String hans,String hant){return "en".equals(language)?en:"zhHant".equals(language)?hant:hans;}
+    static String languageHint(String question){return question!=null&&question.matches("(?s).*\\p{IsHan}.*")?"zhHans":"en";}
+    static String rejectionClarification(String language) {
+        return copy(language,"Some requested conclusions or the flowchart could not be verified. Confirm the applicable provisions, amendments, dates and missing facts before relying on them.",
+                "部分所问结论或流程图尚无法核实。请先确认适用条文、修订、日期和缺失事实，再据此作判断。",
+                "部分所問結論或流程圖尚無法核實。請先確認適用條文、修訂、日期和缺失事實，再據此作判斷。");
+    }
     private static String gapLabel(String gap,String language) {
         String label=GAPS.get(gap);if(label==null)throw invalid("Unknown evidence gap");
         if("en".equals(language))return label.split(" / ")[1];
@@ -268,23 +291,19 @@ final class AdvisoryHarness {
     }
     static String graph(GraphPlan graph,List<String> cited,List<CitationVO> sources,String language) {
         if(graph==null||graph.nodes==null||graph.edges==null||graph.nodes.size()<2||graph.nodes.size()>64||graph.edges.isEmpty()||graph.edges.size()>128)throw invalid("Incomplete graph plan");
+        // Report independent field errors together so the one admitted repair can correct all of them.
+        graphFields(graph,cited,sources);
         Map<String,Node> nodes=new LinkedHashMap<>();Map<String,String> renderedIds=new HashMap<>();StringBuilder out=new StringBuilder("```mermaid\nflowchart TD\n");
         for(Node node:graph.nodes){
-            if(node==null||!text(node.id)||node.id.length()>32||!node.id.matches(NODE_ID)||"end".equals(node.id)||nodes.put(node.id,node)!=null
-                ||node.label==null||!Arrays.asList("start","decision","action","end","unknown").contains(node.kind))throw invalid("Invalid graph node");
-            if("start".equals(node.kind)?!node.label.isEmpty():"unknown".equals(node.kind)?!GAPS.containsKey(node.label):!text(node.label))throw invalid("Uncited graph labels must be application-rendered");
-            List<String> nr=refs(node.citations,sources);if(!cited.containsAll(nr)||(!"start".equals(node.kind)&&!"unknown".equals(node.kind)&&nr.isEmpty()))throw invalid("Graph node lacks section evidence");
+            nodes.put(node.id,node);List<String> nr=node.citations;
             String label=("start".equals(node.kind)?copy(language,"Start","开始","開始"):"unknown".equals(node.kind)?copy(language,"Unconfirmed: ","待核：","待核：")+gapLabel(node.label,language):node.label)+(nr.isEmpty()?"":" "+String.join(" ",nr));
             renderedIds.put(node.id,"n"+renderedIds.size()); // Model IDs can collide with Mermaid keywords even when bounded.
             out.append("  ").append(renderedIds.get(node.id)).append("decision".equals(node.kind)?"{\"":"[\"").append(label(label)).append("decision".equals(node.kind)?"\"}\n":"\"]\n");
         }
         Set<String> seen=new HashSet<>();Map<String,List<Edge>> outgoing=new HashMap<>();
         for(Edge edge:graph.edges){
-            if(edge==null||!nodes.containsKey(edge.from)||!nodes.containsKey(edge.to)||edge.from.equals(edge.to)
-                    ||!seen.add(edge.from+"|"+edge.to+"|"+edge.condition))throw invalid("Invalid graph endpoint or duplicate edge");
-            List<String> er=refs(edge.citations,sources);if(er.isEmpty()||!cited.containsAll(er))throw invalid("Graph edge lacks section evidence");
-            if(text(edge.period)&&!text(edge.startEvent))throw invalid("Graph deadline lacks a start event");
-            if(text(edge.action)&&!text(edge.actor))throw invalid("Graph action lacks an actor");
+            if(!seen.add(edge.from+"|"+edge.to+"|"+edge.condition))throw invalid("flowchartPlan.edges: duplicate endpoint/condition tuple");
+            List<String> er=edge.citations;
             outgoing.computeIfAbsent(edge.from,k->new ArrayList<>()).add(edge);
             List<String> parts=Arrays.asList(edge.condition,edge.actor,edge.action,edge.period,text(edge.startEvent)?copy(language,"from: ","起算：","起算：")+edge.startEvent:"",String.join(" ",er));
             out.append("  ").append(renderedIds.get(edge.from)).append(" -->|\"").append(label(parts.stream().filter(AdvisoryHarness::text).collect(Collectors.joining("; ")))).append("\"| ").append(renderedIds.get(edge.to)).append('\n');
@@ -300,6 +319,34 @@ final class AdvisoryHarness {
             if(!"end".equals(node.kind)&&!"unknown".equals(node.kind)&&edges.isEmpty())throw invalid("Nonterminal graph node has no outcome");
         }
         return out.append("```").toString();
+    }
+    private static void graphFields(GraphPlan graph,List<String> cited,List<CitationVO> sources) {
+        List<String> problems=new ArrayList<>();Set<String> ids=new HashSet<>();
+        for(int i=0;i<graph.nodes.size();i++) {
+            Node node=graph.nodes.get(i);String path="flowchartPlan.nodes["+i+"]";
+            if(node==null){problems.add(path+": node is required");continue;}
+            if(!text(node.id)||node.id.length()>32||!node.id.matches(NODE_ID)||"end".equals(node.id)||!ids.add(node.id))problems.add(path+".id: expected a unique bounded nonreserved node ID");
+            if(!Arrays.asList("start","decision","action","end","unknown").contains(node.kind))problems.add(path+".kind: unsupported node kind");
+            if(node.label==null||("start".equals(node.kind)?!node.label.isEmpty():"unknown".equals(node.kind)?!GAPS.containsKey(node.label):!text(node.label)))problems.add(path+".label: start must be empty, unknown must be a gap enum, known nodes require supported text");
+            try {List<String> refs=refs(node.citations,sources);
+                if(!cited.containsAll(refs))problems.add(path+".citations: every alias must also be in section.citations");
+                if(!"start".equals(node.kind)&&!"unknown".equals(node.kind)&&refs.isEmpty())problems.add(path+".citations: known nodes require source evidence");
+            }catch(ContractViolation invalid){problems.add(path+".citations: "+invalid.getMessage());}
+        }
+        for(int i=0;i<graph.edges.size();i++) {
+            Edge edge=graph.edges.get(i);String path="flowchartPlan.edges["+i+"]";
+            if(edge==null){problems.add(path+": edge is required");continue;}
+            if(!ids.contains(edge.from))problems.add(path+".from: must exactly match an existing node.id");
+            if(!ids.contains(edge.to))problems.add(path+".to: must exactly match an existing node.id");
+            if(edge.from!=null&&edge.from.equals(edge.to))problems.add(path+".from/to: self edges cannot be published");
+            try {List<String> refs=refs(edge.citations,sources);
+                if(refs.isEmpty())problems.add(path+".citations: edges require source evidence");
+                if(!cited.containsAll(refs))problems.add(path+".citations: every alias must also be in section.citations");
+            }catch(ContractViolation invalid){problems.add(path+".citations: "+invalid.getMessage());}
+            if(text(edge.period)&&!text(edge.startEvent))problems.add(path+".startEvent: every nonempty period requires a source-supported start event");
+            if(text(edge.action)&&!text(edge.actor))problems.add(path+".actor: every nonempty action requires its source-supported actor; otherwise omit the unsupported action and use an authority unknown node");
+        }
+        if(!problems.isEmpty())throw invalid(String.join("; ",problems));
     }
     private static String label(String value) {
         if(value.length()>1200||value.matches("(?s).*(?:[<>`]|%%|#(?:quot|[0-9]+);|click\\s|https?://).*"))throw invalid("Unsafe or oversized graph label");

@@ -16,6 +16,28 @@ class AdvisoryHarnessTest {
         assertTrue(system.contains("Mandatory application contract"));assertEquals("ec23c7a665f803598a82d8aaf41ace65df1e431ac5e4ab24610e61d11ccf0470",AdvisoryHarness.POLICY_SHA);
     }
     @Test void sectionCanPassItsOwnEvidenceAndAdoptionGate(){assertDoesNotThrow(()->AdvisoryHarness.validate(analysis(),sources,false,(basis,refs)->refs.equals(Collections.singletonList("[1]"))));}
+    private AdvisoryHarness.Section opening(){return JsonUtils.mapper().convertValue(JsonUtils.parse(AdviceBudgetFixture.contract("{\"grounded\":true,\"answer\":\"AUTHORED [1]\",\"citations\":[\"[1]\"]}")).path("sections").get(0),AdvisoryHarness.Section.class);}
+    @Test void nonSubstantiveBasisAndEmptyUncertaintyHaveExactRepairGuidanceWithoutCoercion(){
+        AdvisoryHarness.Section section=opening();section.setBasisScope("reference_only");
+        String before=JsonUtils.write(section);String diagnosis=assertThrows(IllegalArgumentException.class,()->AdvisoryHarness.validate(section,sources,true,(b,r)->true)).getMessage();
+        assertTrue(diagnosis.contains("section.basisScope: limits/uncertainty must be insufficient regardless of envelope/request basis"));assertEquals(before,JsonUtils.write(section));
+        section.setBasisScope("insufficient");assertDoesNotThrow(()->AdvisoryHarness.validate(section,sources,true,(b,r)->true));
+        section.setKind("uncertainty");assertTrue(assertThrows(IllegalArgumentException.class,()->AdvisoryHarness.validate(section,sources,true,(b,r)->true)).getMessage().contains("omit uncertainty when there is no affected gap"));
+    }
+    @Test void referenceInterpretationRejectsProjectAdoptionGapButRetainsRealEditionGap(){
+        AdvisoryHarness.Section section=opening();section.setKind("uncertainty");section.setGaps(Collections.singletonList("adoption"));
+        String before=JsonUtils.write(section);assertTrue(assertThrows(IllegalArgumentException.class,()->AdvisoryHarness.validate(section,sources,true,(b,r)->true)).getMessage().contains("project adoption is a disclosed scope limit"));assertEquals(before,JsonUtils.write(section));
+        assertDoesNotThrow(()->AdvisoryHarness.validate(section,sources,false,(b,r)->true));
+        section.setGaps(Collections.singletonList("edition"));assertDoesNotThrow(()->AdvisoryHarness.validate(section,sources,true,(b,r)->true));
+    }
+    @Test void questionLanguageWinsOverSyntaxHintAndChineseMayExplicitlyRequestEnglish(){
+        String chinese=AdvisoryHarness.system("AUTHORED supplemental English",sources,"请画个流程图");
+        String english=AdvisoryHarness.system("AUTHORED supplemental 中文",sources,"Draw a flowchart.");
+        assertTrue(chinese.contains("\"language\":\"zhHans\""));assertTrue(english.contains("\"language\":\"en\""));
+        assertTrue(chinese.contains("No application output-language setting is supplied"));assertTrue(chinese.contains("Source language, supplemental prompt language, examples, retrieval text and clarification replies do not override"));
+        String explicit=AdvisoryHarness.system("AUTHORED supplemental",sources,"请画个流程图，请用英语回答");
+        assertTrue(explicit.contains("A Chinese question requesting English must receive English"));assertTrue(explicit.contains("NEVER a default or an override"));
+    }
     @Test void requestSchemaBindsEveryCitationArrayToPublicAliasesAndAcceptsBoundedHyphenIds(){
         JsonNode schema=AdvisoryHarness.schema(sources),sectionSchema=schema.path("properties").path("sections").path("items");
         for(JsonNode references:Arrays.asList(sectionSchema.path("properties").path("citations"),sectionSchema.path("properties").path("checks").path("items").path("properties").path("citations"),
@@ -75,5 +97,12 @@ class AdvisoryHarnessTest {
         AdvisoryHarness.GraphPlan deadline=plan();deadline.getEdges().get(0).setPeriod("28 days");assertThrows(IllegalArgumentException.class,()->AdvisoryHarness.graph(deadline,Collections.singletonList("[1]"),sources));
         AdvisoryHarness.GraphPlan unsafe=plan();unsafe.getNodes().get(1).setLabel("<script>click x https://evil</script>");assertThrows(IllegalArgumentException.class,()->AdvisoryHarness.graph(unsafe,Collections.singletonList("[1]"),sources));
         AdvisoryHarness.GraphPlan hidden=plan();hidden.getNodes().get(3).setLabel("Unconditional payment entitlement");assertThrows(IllegalArgumentException.class,()->AdvisoryHarness.graph(hidden,Collections.singletonList("[1]"),sources));
+    }
+    @Test void graphRepairNamesAllIndependentAliasEndpointAndActorFailures(){
+        AdvisoryHarness.Section section=analysis();section.setKind("flowchart");section.setContent("");section.setCitations(Collections.emptyList());section.setFlowchartPlan(plan());
+        section.getFlowchartPlan().getEdges().get(0).setActor("");section.getFlowchartPlan().getEdges().get(1).setTo("absent-authored-node");
+        String original=JsonUtils.write(section),diagnosis=assertThrows(IllegalArgumentException.class,()->AdvisoryHarness.validate(section,sources,false,(b,r)->true)).getMessage();
+        for(String path:Arrays.asList("section.content","section.citations","section.checks[1].citations","flowchartPlan.nodes[1].citations","flowchartPlan.edges[0].citations","flowchartPlan.edges[0].actor","flowchartPlan.edges[1].to"))assertTrue(diagnosis.contains(path),path);
+        assertFalse(diagnosis.contains("absent-authored-node"));assertEquals(original,JsonUtils.write(section));
     }
 }
