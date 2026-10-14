@@ -315,6 +315,19 @@ class AdviceDocumentScopeIntegrationTest {
             for(String language:Arrays.asList("zhHans","zhHant","en"))assertEquals(legacy,restored.path(language).asText());
         }
     }
+    @Test void chineseQuestionRejectionCopyUsesAcceptedLanguageAndABoundedHintWhenNoUnitPublishes() throws Exception {
+        String id=project();source(id,"SCC","SCC.txt","VETTING_PACKAGE","tender","AUTHORED provision");mvc.perform(post("/api/advice/{id}/index/rebuild",id)).andExpect(jsonPath("$.code").value(0));
+        com.fasterxml.jackson.databind.node.ObjectNode answer=(com.fasterxml.jackson.databind.node.ObjectNode)JsonUtils.parse(com.consense.service.advice.AdviceBudgetFixture.contract("{\"grounded\":true,\"answer\":\"AUTHORED 已有依据的说明 [1]\",\"citations\":[\"[1]\"]}"));
+        for(JsonNode section:answer.path("sections"))((com.fasterxml.jackson.databind.node.ObjectNode)section).put("language","zhHans");
+        for(boolean invalidOpening:Arrays.asList(false,true)) {
+            if(invalidOpening)((com.fasterxml.jackson.databind.node.ObjectNode)answer.path("sections").get(0)).put("basisScope","project_contract");
+            doReturn(JsonUtils.write(answer)).when(local).chatStructured(anyList(),any());
+            JsonNode result=data(post("/api/advice/{id}/ask",id).contentType(MediaType.APPLICATION_JSON).content("{\"question\":\"请画个流程图\",\"scope\":\"contract\"}"));
+            assertFalse(result.path("grounded").asBoolean());assertTrue(result.path("clarifications").get(0).asText().startsWith("部分所问结论或流程图尚无法核实"));
+            assertFalse(result.path("clarifications").toString().contains("Some requested conclusions"));
+            if(!invalidOpening)assertTrue(result.path("content").path("zhHans").asText().contains("资料界限与假设"));
+        }
+    }
     @Test void naturalFlowchartQuestionUsesApplicationHarnessAndGraphRepairSharesTheTotalBudget() throws Exception {
         String id=project();source(id,"SCC","SCC.txt","VETTING_PACKAGE","tender","AUTHORED Contractor submits notice; evidence review follows.");mvc.perform(post("/api/advice/{id}/index/rebuild",id)).andExpect(jsonPath("$.code").value(0));
         com.fasterxml.jackson.databind.node.ObjectNode answer=(com.fasterxml.jackson.databind.node.ObjectNode)JsonUtils.parse(com.consense.service.advice.AdviceBudgetFixture.contract("{\"grounded\":true,\"answer\":\"AUTHORED notice procedure [1]\",\"citations\":[\"[1]\"]}"));answer.put("questionType","T6");

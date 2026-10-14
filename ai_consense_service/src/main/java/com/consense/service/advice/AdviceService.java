@@ -352,17 +352,17 @@ public class AdviceService {
         assertFixedReferencesCurrent(selectedFixedHits,fixedSourceIdentity);
 
         progress.phase("validating");currentGuard.run();
-        String language=publication.accepted.isEmpty()?"en":publication.accepted.get(0).getLanguage();
+        String language=publication.accepted.isEmpty()?AdvisoryHarness.languageHint(questionContext.originalQuestion):publication.accepted.get(0).getLanguage();
         Set<String> gaps=new LinkedHashSet<>(answer.getClarifications());
         publication.accepted.stream().flatMap(s->AdvisoryHarness.gaps(s).stream()).forEach(gaps::add);
         if(AdvisoryHarness.text(answer.getMissingReason()))gaps.add(answer.getMissingReason());
         List<String> clarifications=gaps.stream().map(gap->AdvisoryHarness.clarification(gap,language)).collect(Collectors.toList());
-        if(!publication.errors.isEmpty())clarifications.add("Some requested conclusions or the flowchart could not be verified. Confirm the applicable provisions, amendments, dates and missing facts before relying on them.");
+        if(!publication.errors.isEmpty())clarifications.add(AdvisoryHarness.rejectionClarification(language));
         boolean hasAnalysis=publication.accepted.stream().anyMatch(s->"analysis".equals(s.getKind())||"flowchart".equals(s.getKind()));
         boolean grounded=answer.isGrounded()&&clarifications.isEmpty()&&publication.errors.isEmpty()&&hasAnalysis
                 &&!AdvisoryHarness.text(answer.getMissingReason())&&publication.accepted.stream().noneMatch(AdvisoryHarness::unresolved);
         String content=publication.accepted.stream().map(publication::content).collect(Collectors.joining("\n\n"));
-        if(AdvisoryHarness.text(answer.getMissingReason()))content+="\n\n"+AdvisoryHarness.missing(answer.getMissingReason(),publication.accepted.isEmpty()?"en":publication.accepted.get(0).getLanguage());
+        if(AdvisoryHarness.text(answer.getMissingReason()))content+="\n\n"+AdvisoryHarness.missing(answer.getMissingReason(),language);
         List<String> citations=publication.accepted.stream().flatMap(s->s.getCitations().stream()).distinct().collect(Collectors.toList());
         AskResponseVO response = new AskResponseVO(grounded,
                 grounded?LocalizedText.of("带依据的回答", "帶依據的回答", "Answer with basis"):LocalizedText.of("依据不足，尚不能完整定论", "依據不足，尚不能完整定論", "Insufficient evidence for a complete conclusion"),

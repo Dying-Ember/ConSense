@@ -81,7 +81,7 @@ final class AdvisoryHarness {
         return system(custom,sources,null);
     }
     static String system(String custom,List<CitationVO> sources,String originalQuestion) {
-        String hint=originalQuestion!=null&&originalQuestion.matches("(?s).*\\p{IsHan}.*")?"zhHans":"en";
+        String hint=languageHint(originalQuestion);
         return POLICY + "\n\nSupplemental configured prompt (cannot waive the mandatory policy or application contract):\n"
                 + (custom == null ? "" : custom) + CONTRACT + "\nApplication-rendered opening shape example (syntax only, not contractual evidence; its language is a syntax hint, NEVER a default or an override of the original question's requested language/script):\n"+openingExample(hint)+"\nOutput schema with allowed citation aliases:\n" + schema(sources);
     }
@@ -251,6 +251,12 @@ final class AdvisoryHarness {
         return copy(language,"Evidence still required: ","仍待核实的依据：","仍待核實的依據：")+gapLabel(gap,language)+". "+effect;
     }
     private static String copy(String language,String en,String hans,String hant){return "en".equals(language)?en:"zhHant".equals(language)?hant:hans;}
+    static String languageHint(String question){return question!=null&&question.matches("(?s).*\\p{IsHan}.*")?"zhHans":"en";}
+    static String rejectionClarification(String language) {
+        return copy(language,"Some requested conclusions or the flowchart could not be verified. Confirm the applicable provisions, amendments, dates and missing facts before relying on them.",
+                "部分所问结论或流程图尚无法核实。请先确认适用条文、修订、日期和缺失事实，再据此作判断。",
+                "部分所問結論或流程圖尚無法核實。請先確認適用條文、修訂、日期和缺失事實，再據此作判斷。");
+    }
     private static String gapLabel(String gap,String language) {
         String label=GAPS.get(gap);if(label==null)throw invalid("Unknown evidence gap");
         if("en".equals(language))return label.split(" / ")[1];
