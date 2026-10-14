@@ -215,6 +215,7 @@ public final class AdviceResponsesTransport {
             return request;
         }
         private void assertProfile(){if(!profile.sha.equals(new Profile(selection).sha))throw failure("budget_unknown","captured_responses_profile_changed",null);}
+        public void assertCurrent(){assertProfile();}
         private void assertPrepared(PreparedRequest request){assertProfile();if(request==null||request.profile!=profile||!new PreparedRequest(profile,request.system,request.user,request.sourceSha,request.attempt,request.stream).bindingSha.equals(request.bindingSha))throw failure("budget_unknown","prepared_request_binding_changed",null);}
         public BudgetResult observe(PreparedRequest request,Runnable currentSourceGuard){
             return observe(request,currentSourceGuard,null);

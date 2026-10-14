@@ -76,7 +76,7 @@ class AdviceFixedBaselineTest {
         when(fixed.evidence(any())).thenReturn(evidence);when(fixed.toModelMaterial(anyList(),eq(200000))).thenReturn("{\"role\":\"standard\",\"reference_only\":true,\"id\":\"fixed:authored\",\"content\":\"AUTHORED complete standard text including the exception.\"}");
         when(llm.chat(anyList())).thenReturn(JsonUtils.write(answer("reference_only")));
     }
-    private AdviceService.AnswerRecord answer(String basis){return new AdviceService.AnswerRecord(true,"AUTHORED explanation",Collections.singletonList("[1]"),null,Collections.emptyList(),basis);}
+    private AdviceService.AnswerRecord answer(String basis){return JsonUtils.read(AdviceBudgetFixture.contract("{\"grounded\":true,\"answer\":\"AUTHORED explanation\",\"citations\":[\"[1]\"],\"basisScope\":"+JsonUtils.write(basis)+"}"),AdviceService.AnswerRecord.class);}
     private AskRequest reference(){AskRequest request=new AskRequest("Explain the authored standard.","fullset");request.setBasisScope("reference_only");return request;}
 
     @Test void explicitReferenceOnlyUsesFixedStandardsWithoutInventingAProjectCanonicalSession() {
