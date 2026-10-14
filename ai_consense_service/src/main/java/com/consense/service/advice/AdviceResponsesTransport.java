@@ -31,7 +31,7 @@ public final class AdviceResponsesTransport {
     /** Public M3 model context, not a measurement of the current account/hosted deployment. */
     public static final long PUBLIC_M3_CONTEXT_BOUND=1000000L;
     public static final String JSON_INSTRUCTION="\n\n【输出要求】只输出一个合法的 JSON，不要 Markdown 代码块，不要任何解释文字。";
-    public static final String RETRY_INSTRUCTION="\n\n重要：上一次输出不是合法 JSON。请严格只输出 JSON。";
+    public static final String RETRY_INSTRUCTION="\n\nThe previous response did not satisfy the application contract. Correct the reported violations and return one complete JSON object with every required field and check record.";
     private final ConsenseProperties deployment;
     private final AdviceModelProperties settings;
     private final WireHttp http;

@@ -759,7 +759,7 @@ public class AdviceService {
     }
 
     private static final String SESSION_JSON_INSTRUCTION="\n\n【输出要求】只输出一个合法的 JSON，不要 Markdown 代码块，不要任何解释文字。";
-    private static final String SESSION_JSON_RETRY="\n\n重要：上一次输出不是合法 JSON。请严格只输出 JSON。";
+    private static final String SESSION_JSON_RETRY=AdviceResponsesTransport.RETRY_INSTRUCTION;
     private List<LlmClient.ChatTurn> sessionTurns(String system,String user,int attempt) {
         return Arrays.asList(LlmClient.ChatTurn.system(system+SESSION_JSON_INSTRUCTION),LlmClient.ChatTurn.user(user+(attempt==0?"":SESSION_JSON_RETRY)));
     }
@@ -799,6 +799,11 @@ public class AdviceService {
         for(int attempt=0;attempt<2;attempt++) {
             guard.run();publication.beginAttempt(streaming);publication.progress.phase("budget");
             com.consense.ai.StructuredJsonSections units=streaming?new com.consense.ai.StructuredJsonSections(publication::acceptNode):null;
+            com.consense.ai.StructuredJsonSections.InvalidJsonException[] syntaxFailure={null};
+            java.util.function.Consumer<String> onDelta=delta->{
+                if(syntaxFailure[0]==null)try{units.accept(delta);}
+                catch(com.consense.ai.StructuredJsonSections.InvalidJsonException invalid){syntaxFailure[0]=invalid;}
+            };
             String raw;
             try {
             if(responses!=null) {
@@ -806,13 +811,14 @@ public class AdviceService {
                 AdviceResponsesTransport.BudgetResult budget=responses.observe(request,guard,publication.progress::onCancel);
                 if(!budget.isGenerationPermitted())throw new AdviceResponsesTransport.RequestFailure(budget.getStatus(),budget.getReason(),null);
                 guard.run();publication.progress.phase("generating");
-                raw=streaming?responses.generateStream(request,budget,guard,units::accept,publication.progress::onCancel):responses.generate(request,budget,guard);
+                raw=streaming?responses.generateStream(request,budget,guard,onDelta,publication.progress::onCancel):responses.generate(request,budget,guard);
             } else {
                 List<LlmClient.ChatTurn> turns=sessionTurns(system,user+repair,attempt);sessionBudget(chat,turns,sourceIdentity);guard.run();
                 if(chat.getClient()==null||!chat.getClient().available())throw new BizException(4203,"The captured advice model is unavailable; no alternate model was used.");
                 guard.run();publication.progress.phase("generating");
-                raw=streaming?chat.getClient().chatStructuredStream(turns,publication.schema,units::accept,publication.progress::onCancel):chat.getClient().chatStructured(turns,publication.schema);
+                raw=streaming?chat.getClient().chatStructuredStream(turns,publication.schema,onDelta,publication.progress::onCancel):chat.getClient().chatStructured(turns,publication.schema);
             }
+            if(syntaxFailure[0]!=null)throw syntaxFailure[0];
             } catch(IllegalArgumentException invalidStream) {
                 String diagnosis=AdvisoryHarness.diagnostic(invalidStream);publication.errors.add(diagnosis);
                 log.warn("Advice application contract rejected attempt {}: {}",attempt,diagnosis);

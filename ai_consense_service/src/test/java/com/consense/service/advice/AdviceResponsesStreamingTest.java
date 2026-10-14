@@ -10,17 +10,22 @@ import com.sun.net.httpserver.HttpServer;
 import java.io.*;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.*;
+import java.lang.reflect.Constructor;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import org.springframework.test.util.ReflectionTestUtils;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 /** Responses framing over real local HTTP; official endpoint policy remains fixed in the Operation. */
 class AdviceResponsesStreamingTest {
+    @TempDir Path observationRoot;
     private HttpServer server;
     private AdviceResponsesTransport.Operation operation;
     private String events;
@@ -50,7 +55,7 @@ class AdviceResponsesStreamingTest {
         AdviceModelProperties settings=new AdviceModelProperties();settings.setMinimaxWire("responses");
         settings.getResponses().setEnabled(true);settings.getResponses().setConfiguredContextTokens(32768);settings.getResponses().setSafetyMarginTokens(1024);settings.getResponses().setEstimatePolicy(AdviceResponsesTransport.POLICY);
         LlmProfiles profiles=new LlmProfiles(props,mock(LlmClient.class),mock(LlmClient.class));
-        operation=new AdviceResponsesTransport(props,settings,wire).capture(profiles.resolve("minimax-cn"));
+        operation=new AdviceResponsesTransport(props,settings,wire,new AdviceWireObservation(observationRoot.toAbsolutePath())).capture(profiles.resolve("minimax-cn"));
         events=stream("{\"sections\":[{\"content\":\"中文 🐴\"}]}");
     }
     @AfterEach void close(){server.stop(0);Thread.interrupted();}
@@ -115,5 +120,43 @@ class AdviceResponsesStreamingTest {
         AdviceResponsesTransport.RequestFailure failure=assertThrows(AdviceResponsesTransport.RequestFailure.class,
                 ()->operation.generateStream(request,budget,()->{},deltas::add,r->{}));
         assertEquals("stream_content_identity_invalid",failure.getReason());assertTrue(deltas.isEmpty());assertEquals(2,calls.get());
+    }
+    private Object publication(AdviceService service,AdviceProgress progress,Runnable guard)throws Exception {
+        Class<?> question=Class.forName(AdviceService.class.getName()+"$QuestionContext");Constructor<?> context=question.getDeclaredConstructor(String.class,List.class);context.setAccessible(true);
+        Class<?> publication=Class.forName(AdviceService.class.getName()+"$Publication");Constructor<?> constructor=publication.getDeclaredConstructor(AdviceService.class,List.class,boolean.class,AdviceProgress.class,Runnable.class,question);constructor.setAccessible(true);
+        return constructor.newInstance(service,Collections.emptyList(),true,progress,guard,context.newInstance("AUTHORED question",Collections.emptyList()));
+    }
+    @Test void applicationSyntaxFailureRetainsExactBoundedWireAndGuardsWithoutPublishingLaterUnitsOrExtraRetry()throws Exception {
+        JsonNode valid=JsonUtils.parse(AdviceBudgetFixture.contract("{\"grounded\":true,\"basisScope\":\"reference_only\",\"answer\":\"AUTHORED later unit [1]\",\"citations\":[\"[1]\"]}"));
+        String malformed="{\"sections\":["+valid.path("sections").get(0)+",{\"content\":invalid},"+valid.path("sections").get(1)+"]}";events=stream(malformed);
+        AdviceService service=new AdviceService(null,null,null,null,null,null,null,null,null,null,null);AtomicInteger guards=new AtomicInteger();List<String> published=new ArrayList<>();
+        AdviceProgress progress=new AdviceProgress(){public boolean streaming(){return true;}public void section(String content,List<String> refs,List<com.consense.web.dto.AdviceDtos.CitationVO> sources){published.add(content);}};
+        Object publication=publication(service,progress,guards::incrementAndGet);
+        com.consense.common.BizException rejected=assertThrows(com.consense.common.BizException.class,()->ReflectionTestUtils.invokeMethod(service,"completeAdvice","AUTHORED rules","AUTHORED material",null,operation,SOURCE,(Runnable)guards::incrementAndGet,publication,"AUTHORED question"));
+        assertEquals(4205,rejected.getCode());assertTrue(rejected.getMessage().contains("after one admitted repair"));assertEquals(4,calls.get());assertEquals(15,guards.get());assertEquals(1,published.size());assertFalse(published.get(0).contains("later unit"));
+        try(java.util.stream.Stream<Path> directories=Files.list(observationRoot)){
+            List<Path> attempts=directories.filter(Files::isDirectory).collect(java.util.stream.Collectors.toList());assertEquals(2,attempts.size());
+            for(Path attempt:attempts){assertArrayEquals(events.getBytes(StandardCharsets.UTF_8),Files.readAllBytes(attempt.resolve("generation-response.utf8.json")));
+                JsonNode receipt=JsonUtils.parse(Files.readString(attempt.resolve("generation-response-receipt.json")));assertEquals("native_http_entity_bytes",receipt.path("responseEntityProvenance").asText());assertFalse(receipt.path("providerRawObserved").asBoolean());
+                assertEquals("provider_stream_envelope_validated_source_guards_passed_answer_json_not_yet_parsed",JsonUtils.parse(Files.readString(attempt.resolve("generation-outcome.json"))).path("status").asText());}
+        }
+        String repair=JsonUtils.parse(bodies.get(3)).path("input").get(0).path("content").asText();assertTrue(repair.contains("did not satisfy the application contract"));assertFalse(repair.contains("上一次输出不是合法 JSON"));
+    }
+    @Test void businessCancellationFromClosedUnitIsNeverDeferredIntoAnotherProviderAttempt()throws Exception {
+        JsonNode valid=JsonUtils.parse(AdviceBudgetFixture.contract("{\"grounded\":false,\"basisScope\":\"reference_only\",\"answer\":\"AUTHORED later unit [1]\",\"citations\":[\"[1]\"]}"));events=stream(JsonUtils.write(valid));
+        AdviceService service=new AdviceService(null,null,null,null,null,null,null,null,null,null,null);IllegalStateException stopped=new IllegalStateException("AUTHORED stopped");
+        AdviceProgress progress=new AdviceProgress(){public boolean streaming(){return true;}public void section(String content,List<String> refs,List<com.consense.web.dto.AdviceDtos.CitationVO> sources){throw stopped;}};
+        Object publication=publication(service,progress,()->{});
+        assertSame(stopped,assertThrows(IllegalStateException.class,()->ReflectionTestUtils.invokeMethod(service,"completeAdvice","rules","material",null,operation,SOURCE,(Runnable)()->{},publication,"AUTHORED question")));
+        assertEquals(2,calls.get());try(java.util.stream.Stream<Path> directories=Files.list(observationRoot)){Path attempt=directories.filter(Files::isDirectory).findFirst().orElseThrow();assertFalse(Files.exists(attempt.resolve("generation-response.utf8.json")));}
+    }
+    @Test void sourceChangeAfterMalformedStreamStillFailsBeforeRepairInsteadOfYieldingToStoredSyntaxError()throws Exception {
+        events=stream("{\"sections\":[{\"content\":invalid}]}");AdviceService service=new AdviceService(null,null,null,null,null,null,null,null,null,null,null);
+        AtomicInteger checked=new AtomicInteger();IllegalStateException changed=new IllegalStateException("AUTHORED source changed");
+        Runnable guard=()->{if(checked.incrementAndGet()==6)throw changed;};AdviceProgress progress=new AdviceProgress(){public boolean streaming(){return true;}};Object publication=publication(service,progress,guard);
+        assertSame(changed,assertThrows(IllegalStateException.class,()->ReflectionTestUtils.invokeMethod(service,"completeAdvice","rules","material",null,operation,SOURCE,guard,publication,"AUTHORED question")));
+        assertEquals(2,calls.get());assertEquals(6,checked.get());try(java.util.stream.Stream<Path> directories=Files.list(observationRoot)){
+            Path attempt=directories.filter(Files::isDirectory).findFirst().orElseThrow();assertArrayEquals(events.getBytes(StandardCharsets.UTF_8),Files.readAllBytes(attempt.resolve("generation-response.utf8.json")));
+            assertEquals("failed_before_answer_acceptance",JsonUtils.parse(Files.readString(attempt.resolve("generation-outcome.json"))).path("status").asText());}
     }
 }

@@ -13,6 +13,10 @@ import java.util.function.Consumer;
 
 /** Only closed objects directly inside the root sections array become candidates for business validation. */
 public final class StructuredJsonSections {
+    /** Grammar failures may be held until the bounded provider entity is recorded; business failures may not. */
+    public static final class InvalidJsonException extends IllegalArgumentException {
+        private InvalidJsonException(String message, Throwable cause) { super(message, cause); }
+    }
     private static final int MAX_CHARS = 4 * 1024 * 1024;
     private final StringBuilder raw = new StringBuilder();
     private final JsonParser parser;
@@ -46,13 +50,13 @@ public final class StructuredJsonSections {
             char c = input.charAt(i);
             if (Character.isHighSurrogate(c)) {
                 if (++i >= input.length() || !Character.isLowSurrogate(input.charAt(i)))
-                    throw new IllegalArgumentException("Invalid Unicode in structured stream");
-            } else if (Character.isLowSurrogate(c)) throw new IllegalArgumentException("Invalid Unicode in structured stream");
+                    throw new InvalidJsonException("Invalid Unicode in structured stream", null);
+            } else if (Character.isLowSurrogate(c)) throw new InvalidJsonException("Invalid Unicode in structured stream", null);
         }
         if (input.isEmpty()) return;
         byte[] bytes = input.getBytes(StandardCharsets.UTF_8);
         try { feeder.feedInput(bytes, 0, bytes.length); drain(); }
-        catch (IOException invalid) { throw new IllegalArgumentException("Invalid incremental answer JSON", invalid); }
+        catch (IOException invalid) { throw new InvalidJsonException("Invalid incremental answer JSON", invalid); }
     }
 
     private void drain() throws IOException {
@@ -82,7 +86,8 @@ public final class StructuredJsonSections {
     }
 
     public JsonNode finish() {
-        if (ended || pendingSurrogate != 0) throw new IllegalArgumentException("Structured stream is already ended or has incomplete Unicode");
+        if (ended) throw new IllegalArgumentException("Structured stream is already ended");
+        if (pendingSurrogate != 0) throw new InvalidJsonException("Structured stream has incomplete Unicode", null);
         ended = true;
         try {
             feeder.endOfInput(); drain(); parser.close();
@@ -94,6 +99,6 @@ public final class StructuredJsonSections {
                 for (JsonNode value : root.path("sections")) if (!value.isObject()) throw new IOException("Section must be an object");
                 return root;
             }
-        } catch (IOException invalid) { throw new IllegalArgumentException("Incomplete or invalid final answer JSON", invalid); }
+        } catch (IOException invalid) { throw new InvalidJsonException("Incomplete or invalid final answer JSON", invalid); }
     }
 }
