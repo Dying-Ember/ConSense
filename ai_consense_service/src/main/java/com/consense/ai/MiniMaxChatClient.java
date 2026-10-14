@@ -5,6 +5,7 @@ import com.consense.config.ConsenseProperties;
 import com.fasterxml.jackson.databind.JsonNode;
 import java.util.List;
 import java.util.function.Supplier;
+import java.util.function.Consumer;
 
 /** China Token Plan chat adapter. Reasoning is separated and structured thinking disabled. */
 public final class MiniMaxChatClient implements LlmClient {
@@ -14,6 +15,12 @@ public final class MiniMaxChatClient implements LlmClient {
     public MiniMaxChatClient(ConsenseProperties.Llm cfg,HttpSupport http){this.cfg=cfg;this.http=http;delegate=new OpenAiLlmClient(cfg,http,true);}
     @Override public String chat(List<ChatTurn> turns){return safeCall(()->delegate.chatStructured(turns,JsonUtils.mapper().createObjectNode()));}
     @Override public String chatStructured(List<ChatTurn> turns,JsonNode schema){return safeCall(()->delegate.chatStructured(turns,schema));}
+    @Override public boolean supportsStreaming(){return delegate.supportsStreaming();}
+    @Override public String chatStructuredStream(List<ChatTurn> turns,JsonNode schema,Consumer<String> onDelta,Consumer<Runnable> onCancel){
+        ProviderStreamReader.SafeDelta safe=new ProviderStreamReader.SafeDelta(cfg.getApiKey(),onDelta);
+        String result=safeCall(()->delegate.chatStructuredStream(turns,schema,safe,onCancel));
+        safe.finish();return result;
+    }
     @Override public List<float[]> embed(List<String> texts){throw new BizException(5001,"MiniMax chat selection does not provide deployment embeddings.");}
     @Override public boolean available(){
         if(!cfg.isEnabled()||JsonUtils.isBlankText(cfg.getApiKey()))return false;
