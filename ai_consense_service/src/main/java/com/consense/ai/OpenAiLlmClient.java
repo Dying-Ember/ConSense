@@ -191,7 +191,8 @@ public class OpenAiLlmClient implements LlmClient {
             JsonNode choices = last.path("choices");
             if (choices.isArray() && choices.isEmpty() && stopped && last.path("usage").isObject()) return;
             if (!choices.isArray() || choices.size() != 1 || !choices.get(0).isObject()
-                    || !choices.get(0).path("index").isIntegralNumber() || choices.get(0).path("index").asInt(-1) != 0)
+                    || !choices.get(0).path("index").isIntegralNumber() || !choices.get(0).path("index").canConvertToInt()
+                    || choices.get(0).path("index").intValue() != 0)
                 reject("Streaming model must return exactly one indexed choice", IncompleteModelResponseException.FailureKind.INVALID_CHOICE_COUNT);
             JsonNode choice = choices.get(0), chunk = choice.path("delta");
             if (!chunk.isObject() || stopped) reject("Streaming choice is incomplete or already stopped", IncompleteModelResponseException.FailureKind.INCOMPLETE_FINISH);
