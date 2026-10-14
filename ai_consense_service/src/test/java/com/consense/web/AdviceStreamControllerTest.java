@@ -1,0 +1,74 @@
+package com.consense.web;
+
+import com.consense.ai.LlmClient;
+import com.consense.ai.LlmOperation;
+import com.consense.ai.LlmProfiles;
+import com.consense.config.ConsenseProperties;
+import com.consense.service.advice.AdviceProgress;
+import com.consense.service.advice.AdviceService;
+import com.consense.web.dto.AdviceDtos.AskRequest;
+import com.consense.web.dto.AdviceDtos.AskResponseVO;
+import org.junit.jupiter.api.Test;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+
+import java.util.Collections;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
+
+class AdviceStreamControllerTest {
+    private static final String ID = "0123456789abcdef0123456789abcdef";
+    private static final String BODY = "{\"question\":\"Which clause applies?\",\"scope\":\"contract\",\"basisScope\":\"project_contract\",\"sessionId\":\"session-A\"}";
+    private LlmProfiles profiles() { return new LlmProfiles(new ConsenseProperties(), mock(LlmClient.class), mock(LlmClient.class)); }
+
+    @Test void eventsUseCapturedModelAndOnlyCompleteAfterServiceCommitReturns() throws Exception {
+        AdviceService advice = mock(AdviceService.class); LlmProfiles profiles = profiles();
+        LlmOperation selected = profiles.resolve("minimax-cn");
+        AtomicBoolean returned = new AtomicBoolean();
+        doAnswer(call -> {
+            assertSame(selected, profiles.capture());
+            AdviceProgress progress = call.getArgument(2); progress.phase("retrieving"); progress.section("Supported [1]", Collections.singletonList("[1]"), Collections.emptyList());
+            AskResponseVO response = new AskResponseVO(); response.setSessionId("session-A"); response.setCitations(Collections.singletonList("[1]")); response.setSources(Collections.emptyList()); response.setGrounded(false);
+            returned.set(true); return response;
+        }).when(advice).ask(eq("project-A"), any(AskRequest.class), any(AdviceProgress.class));
+        AdviceStreamController controller = new AdviceStreamController(advice, profiles);
+        MockMvc mvc = MockMvcBuilders.standaloneSetup(controller).build();
+        try {
+            MvcResult result;
+            try (LlmProfiles.Scope ignored = profiles.bind(selected)) {
+                result = mvc.perform(post("/api/advice/project-A/ask/stream").header("X-ConSense-Advice-Request", ID).contentType("application/json").content(BODY)).andExpect(request().asyncStarted()).andReturn();
+            }
+            String wire = mvc.perform(asyncDispatch(result)).andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+            assertTrue(returned.get()); assertTrue(wire.contains("event:phase")); assertTrue(wire.contains("event:section")); assertTrue(wire.contains("event:complete"));
+            assertTrue(wire.indexOf("event:section") < wire.indexOf("event:complete")); assertTrue(wire.contains(ID)); assertTrue(wire.contains("\"grounded\":false"));
+            assertNotSame(selected, profiles.capture());
+        } finally { controller.shutdown(); }
+    }
+
+    @Test void stopCallsProviderCancellationAndReleasesSessionForAnotherRequest() throws Exception {
+        AdviceService advice = mock(AdviceService.class); LlmProfiles profiles = profiles();
+        CountDownLatch entered = new CountDownLatch(1), cancelled = new CountDownLatch(1);
+        doAnswer(call -> {
+            AdviceProgress progress = call.getArgument(2); progress.onCancel(cancelled::countDown); entered.countDown();
+            try { new CountDownLatch(1).await(5, TimeUnit.SECONDS); } catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); }
+            progress.checkCancelled(); return null;
+        }).when(advice).ask(anyString(), any(AskRequest.class), any(AdviceProgress.class));
+        AdviceStreamController controller = new AdviceStreamController(advice, profiles);
+        MockMvc mvc = MockMvcBuilders.standaloneSetup(controller).build();
+        try {
+            mvc.perform(post("/api/advice/project-A/ask/stream").header("X-ConSense-Advice-Request", ID).contentType("application/json").content(BODY)).andExpect(request().asyncStarted());
+            assertTrue(entered.await(3, TimeUnit.SECONDS));
+            mvc.perform(post("/api/advice/project-A/ask/stream/" + ID + "/stop").param("sessionId", "session-A")).andExpect(status().isOk());
+            assertTrue(cancelled.await(1, TimeUnit.SECONDS));
+            mvc.perform(post("/api/advice/project-A/ask/stream").header("X-ConSense-Advice-Request", ID + "2").contentType("application/json").content(BODY)).andExpect(request().asyncStarted());
+        } finally { controller.shutdown(); }
+    }
+}

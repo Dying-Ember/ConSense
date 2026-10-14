@@ -736,6 +736,7 @@ export interface EvidenceBundle {
 /* ------------------------------------------------------------ 咨询 */
 
 export interface Citation {
+  originalSourceSha256?: string | null
   fixedBaselineEvidence?: import('./fixedBaselineEvidence').FixedBaselineEvidenceAddress | null
   canonicalEvidence?: CanonicalEvidenceAddress[] | null
   canonicalSourceUnit?: Record<string, unknown> | null
@@ -752,6 +753,8 @@ export interface Citation {
 }
 
 export interface ChatMessage {
+  /** Transient stream state; committed history retains the existing response contract. */
+  deliveryState?: 'processing' | 'complete' | 'failed' | 'stopped'
   sessionId?: string | null
   basisScope?: 'project_contract' | 'reference_only' | 'insufficient'
   clarifications?: string[]

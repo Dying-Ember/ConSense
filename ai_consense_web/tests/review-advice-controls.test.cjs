@@ -7,6 +7,7 @@ const pinia = require('pinia')
 const routerRuntime = require('vue-router')
 const { loadVue } = require('./helpers/load-vue.cjs')
 const { text, find, settle, deferred, renderer } = require('./helpers/render-controls.cjs')
+const readingWindow = new (require('jsdom').JSDOM)('').window
 
 const literalQuote = '  Clause A1: shall NOT apply.\nHK$M 1.20; COMPLTION 😀\n'
 const localized = value => ({ zhHans: value, zhHant: value, en: value })
@@ -67,14 +68,29 @@ async function harness({ stale = false, currentSources = [source], sourceGate, e
     else if (url.endsWith('/quick-questions')) data = []
     else if (url.includes('/index/status?')) data = { chunks: 1, message: localized('Ready') }
     else if (url.includes('/index/rebuild?')) data = { chunks: 1, message: localized('Rebuilt') }
-    else if (url.endsWith('/ask')) data = { sessionId: body.sessionId, grounded: true, content: localized('Independent reply'), title: localized('Reply'), citations: [], sources: [], unknownScope: null, evidenceId: null }
+    else if (url.endsWith('/ask/stream')) data = { sessionId: body.sessionId, grounded: true, content: localized('Independent reply'), title: localized('Reply'), citations: [], sources: [], unknownScope: null, evidenceId: null }
     else throw new Error(`Unexpected API request: ${method} ${url}`)
     return Promise.resolve(data).then(data => ({ data: { code: 0, data } }))
   }
   const fetch = async (url, options) => {
+    if (url.includes('/ask/stream') && options?.method === 'POST') {
+      const body = options.body ? JSON.parse(options.body) : undefined
+      if (url.includes('/stop?')) { requests.push({ method: 'post', url: url.slice(4), body, config: { headers: options.headers } }); return new Response(JSON.stringify({ code: 0 }), { headers: { 'Content-Type': 'application/json' } }) }
+      const response = await respond('post', url.slice(4), body, { headers: options.headers })
+      if (response.data.code !== 0) return new Response(JSON.stringify(response.data), { headers: { 'Content-Type': 'application/json' } })
+      return new Response(`event: complete\ndata: ${JSON.stringify({ requestId: options.headers['X-ConSense-Advice-Request'], response: response.data.data })}\n\n`, { headers: { 'Content-Type': 'text/event-stream' } })
+    }
     canonicalRequests.push({ url, options })
     if (canonicalRespond) return canonicalRespond(url, options)
     const request = new URL(url, 'http://127.0.0.1:5173')
+    if (request.pathname.includes('/original')) {
+      const bound = adviceMessages.flatMap(message => message.sources ?? []).flatMap(citation => citation.canonicalEvidence ?? []).find(pointer => String(pointer.documentId) === request.pathname.split('/').at(-2))
+      assert.ok(bound, `Unexpected original source ${url}`)
+      return new Response(fs.readFileSync(path.join(canonicalFixtureRoot, 'authored-source.pdf')), { headers: {
+        'Content-Type': 'application/pdf', 'Content-Disposition': 'inline; filename="authored.pdf"',
+        'X-Source-Sha256': bound.originalSourceSha256, 'X-Source-Revision': bound.javaParsedSourceHash
+      } })
+    }
     const id = decodeURIComponent(request.pathname.split('/').at(-1))
     const candidates = [canonicalEvidence, ...adviceMessages.flatMap(message => message.sources ?? []).flatMap(citation => citation.canonicalEvidence ?? [])].filter(Boolean)
     if (request.pathname.includes('/units/')) {
@@ -96,8 +112,13 @@ async function harness({ stale = false, currentSources = [source], sourceGate, e
   }
   const axios = { create: () => ({ get: (url, config) => respond('get', url, undefined, config), post: (url, body, config) => respond('post', url, body, config), put: (url, body, config) => respond('put', url, body, config), delete: (url, config) => respond('delete', url, undefined, config) }), isAxiosError: () => false }
   const loaded = loadVue(path.join(__dirname, '../src/views/VettingView.vue'), {
-    boundaries: { axios: { default: axios }, pinia, 'vue-router': routerRuntime, 'vue-i18n': require('vue-i18n'), '@noble/hashes/sha256': require('@noble/hashes/sha256'), ...answerRendererBoundaries },
-    globals: { sessionStorage, crypto: browserCrypto, Uint8Array, ArrayBuffer, URLSearchParams, URL: EvidenceURL, Blob, FormData, File, AbortController, fetch, structuredClone,
+    boundaries: { axios: { default: axios }, pinia, 'vue-router': routerRuntime, 'vue-i18n': require('vue-i18n'), '@noble/hashes/sha256': require('@noble/hashes/sha256'),
+      'jszip': { default: require('jszip') }, 'mammoth/mammoth.browser.min.js': { default: require('mammoth/mammoth.browser.min.js') },
+      'dompurify': { default: require('dompurify')(readingWindow) },
+      'pdfjs-dist': { GlobalWorkerOptions: {}, getDocument: () => ({ promise: Promise.reject(new Error('Real PDF rendering is outside this control fixture')), destroy: async () => {} }) },
+      'pdfjs-dist/build/pdf.worker.min.mjs?url': { default: 'fixture-worker' }, ...answerRendererBoundaries },
+    globals: { sessionStorage, crypto: browserCrypto, Uint8Array, ArrayBuffer, URLSearchParams, URL: EvidenceURL, Blob, FormData, File, AbortController, TextDecoder, DOMException, fetch, structuredClone,
+      DOMParser: readingWindow.DOMParser, XMLSerializer: readingWindow.XMLSerializer, NodeFilter: readingWindow.NodeFilter, Element: readingWindow.Element, HTMLElement: readingWindow.HTMLElement, Node: readingWindow.Node,
       localStorage: { getItem: () => null, setItem() {} }, document: { documentElement: { lang: '' }, getElementById: () => null },
       window: { setTimeout(callback, ms) { const timer = setTimeout(callback, ms); timer.unref(); return timer }, clearTimeout }, console }
   })
@@ -151,9 +172,9 @@ test('real Vetting entry hands off literal sources to editable Advice, localizes
     assert.equal(h.requests.some(request => /index\/rebuild|\/ask$/.test(request.url)), false)
     textarea.props['onUpdate:modelValue']('Edited question: verify current clause A1'); await settle()
     await button(h, 'Ask').props.onClick(); await settle()
-    const asks = h.requests.filter(request => request.url.endsWith('/ask'))
+    const asks = h.requests.filter(request => request.url.endsWith('/ask/stream'))
     assert.equal(asks.length, 1)
-    assert.equal(asks[0].url, '/advice/project-A/ask')
+    assert.equal(asks[0].url, '/advice/project-A/ask/stream')
     assert.equal(asks[0].body.question, 'Edited question: verify current clause A1')
     assert.equal(asks[0].body.scope, 'fullset')
     assert.match(text(h.root), /Independent reply/)
@@ -189,7 +210,7 @@ test('stale review and changed current source hashes produce explicit warnings; 
     scope.props['onUpdate:modelValue']('contract'); await settle()
     assert.ok(h.requests.some(request => request.url === '/advice/project-A/sources?scope=contract'))
     assert.match(text(h.root), /Sources changed after this review/)
-    assert.equal(h.requests.some(request => request.url.endsWith('/ask')), false)
+    assert.equal(h.requests.some(request => request.url.endsWith('/ask/stream')), false)
     h.store.changeLocale('zh-Hant'); await settle()
     assert.match(text(h.root), /審查時的來源已變化/)
     h.store.changeLocale('zh-Hans'); await settle()
@@ -205,7 +226,7 @@ test('unloaded or excluded current sources stay unverified or unavailable and ne
     gate.resolve([{ ...source, included: false, exclusionReason: 'outside_contract_scope', sourceHash: null }]); await settle()
     assert.match(text(h.root), /Quotation versions have not been verified/)
     assert.match(text(h.root), /Some quoted sources are outside/)
-    assert.equal(h.requests.some(request => request.url.endsWith('/ask')), false)
+    assert.equal(h.requests.some(request => request.url.endsWith('/ask/stream')), false)
   } finally { h.dispose() }
 })
 
@@ -227,7 +248,7 @@ test('wrong-project, replay, and later project switch cannot apply old contract 
     await h.router.push({ name: 'advice', query: { review: oldToken } }); await settle()
     assert.match(text(h.root), /already used, expired, or cannot be read/)
     assert.equal(find(h.root, node => node.tag === 'textarea').value, '')
-    assert.equal(h.requests.some(request => request.url.endsWith('/ask')), false)
+    assert.equal(h.requests.some(request => request.url.endsWith('/ask/stream')), false)
   } finally { h.dispose() }
 })
 
@@ -256,7 +277,7 @@ test('real Vetting evidence mapping retains the optional canonical pointer and o
     assert.ok(original.props.href.includes(`originalSourceSha256=${bound.originalSourceSha256}`))
     assert.equal(original.props.href.includes(bound.canonicalSourceHash), false)
     assert.equal(h.requests.some(request => request.method !== 'get'), false)
-    assert.equal(h.requests.some(request => request.url.endsWith('/ask')), false)
+    assert.equal(h.requests.some(request => request.url.endsWith('/ask/stream')), false)
     assert.match(text(h.root), /Not human-confirmed/)
     await h.store.switchProject('project-B'); await flushCanonical()
     assert.equal(findAll(h.root, node => node.tag === 'img').length, 0)
@@ -277,15 +298,16 @@ test('real Advice citation displays every explicit canonical member and complete
     assert.equal(h.canonicalRequests.length, 0, 'No selected citation means no image requests')
     const chip = find(h.root, node => node.tag === 'button' && node.props.class === 'citation')
     assert.ok(chip); chip.props.onClick(); await flushCanonical()
+    assert.ok(h.canonicalRequests.some(request => request.url.includes('/original?')), 'Citation loads its entire bound source before auxiliary images')
+    await button(h, 'Show related original images / tables').props.onClick(); await flushCanonical()
     assert.equal(findAll(h.root, node => node.props?.class === 'canonical-evidence-panel').length, 2)
-    assert.equal(h.canonicalRequests.length, 5)
-    assert.deepEqual(h.canonicalRequests.filter(request => request.url.includes('/units/')).map(request => decodeURIComponent(new URL(request.url, 'http://127.0.0.1').pathname.split('/').at(-1))), ['table', 'heading'])
-    assert.ok(h.canonicalRequests.every(request => request.options.method === 'GET' && request.url.includes('?module=advisory')))
+    assert.deepEqual([...new Set(h.canonicalRequests.filter(request => request.url.includes('/units/')).map(request => decodeURIComponent(new URL(request.url, 'http://127.0.0.1').pathname.split('/').at(-1))))], ['table', 'heading'])
+    assert.ok(h.canonicalRequests.every(request => request.options.method === 'GET' && (request.url.includes('?module=advisory') || request.url.includes('/api/advice/project-A/sources/11/original?'))))
     assert.equal(findAll(h.root, node => node.tag === 'img').length, 3)
     assert.equal(findAll(h.root, node => node.props?.['data-sha-implementation'] === 'portable').length, 3)
     assert.match(text(h.root), /No image assets are bound/)
     assert.equal(h.requests.some(request => request.method !== 'get'), false)
-    assert.equal(h.requests.some(request => request.url.endsWith('/ask')), false)
+    assert.equal(h.requests.some(request => request.url.endsWith('/ask/stream')), false)
   } finally { h.dispose() }
   assert.deepEqual(h.revokedUrls.sort(), h.createdUrls.sort())
 })
@@ -416,7 +438,7 @@ test('scope switch releases selected citation images and late ask cannot restore
   const bound = canonicalPointer('advisory'), askGate = deferred()
   const citation = { fileLabel: 'OLD CITATION', pageNo: 'P3', anchor: 'A1', content: literalQuote, score: 0.9, canonicalEvidence: [bound] }
   const message = { id: 7, role: 'assistant', title: localized('Reply'), content: localized('Inspect evidence'), unknownScope: null, citations: [citation.fileLabel], evidenceId: 'E1', sources: [citation] }
-  const h = await harness({ initialView: 'advice', adviceMessages: [message], respondOverride: ({ url }) => url.endsWith('/ask') ? askGate.promise : undefined })
+  const h = await harness({ initialView: 'advice', adviceMessages: [message], respondOverride: ({ url }) => url.endsWith('/ask/stream') ? askGate.promise : undefined })
   try {
     find(h.root, node => node.tag === 'button' && node.props.class === 'citation').props.onClick(); await flushCanonical()
     assert.equal(h.createdUrls.length, 3)
@@ -470,7 +492,7 @@ test('a historical Advice citation keeps its saved pointer when current source v
     assert.equal(h.createdUrls.length, 0)
     assert.ok(h.canonicalRequests[0].url.includes(bound.projectionSha256))
     assert.deepEqual(message.sources[0].canonicalEvidence[0], bound)
-    assert.equal(h.requests.some(request => request.url.endsWith('/ask') || request.url.includes('/index/rebuild')), false)
+    assert.equal(h.requests.some(request => request.url.endsWith('/ask/stream') || request.url.includes('/index/rebuild')), false)
   } finally { h.dispose() }
 })
 
@@ -510,14 +532,14 @@ test('explicit session switch binds scope/basis and isolates late answer and his
     if (url.endsWith('/sessions')) return sessions
     if (url.endsWith('/messages?sessionId=session-A')) return ++messageReads === 1 ? [] : oldMessages.promise
     if (url.endsWith('/messages?sessionId=session-B')) return [{ sessionId: 'session-B', role: 'assistant', id: 20, title: localized('B title'), content: localized('B current answer'), citations: [], sources: [], basisScope: 'reference_only' }]
-    if (url.endsWith('/ask')) return oldAsk.promise
+    if (url.endsWith('/ask/stream')) return oldAsk.promise
   } })
   try {
     assert.equal(h.requests.some(request => request.method !== 'get'), false)
     sessionSelect(h).props['onUpdate:modelValue']('session-A'); await settle()
     find(h.root, node => node.tag === 'textarea').props['onUpdate:modelValue']('Question for A'); await settle()
     const asking = button(h, 'Ask').props.onClick(); await settle()
-    assert.equal(h.requests.find(request => request.url.endsWith('/ask')).body.sessionId, 'session-A')
+    assert.equal(h.requests.find(request => request.url.endsWith('/ask/stream')).body.sessionId, 'session-A')
     const projectReads = h.requests.filter(request => /\/(?:sources|index\/status)\?/.test(request.url)).length
     sessionSelect(h).props['onUpdate:modelValue']('session-B'); await settle()
     assert.match(text(h.root), /B current answer/)
@@ -533,13 +555,13 @@ test('explicit session switch binds scope/basis and isolates late answer and his
     sessionSelect(h).props['onUpdate:modelValue']('session-B'); await settle()
     oldMessages.resolve([{ id: 99, role: 'assistant', content: localized('A obsolete history'), citations: [], sources: [] }]); await settle()
     assert.doesNotMatch(text(h.root), /A obsolete history/)
-    assert.equal(h.requests.filter(request => request.url.endsWith('/ask')).length, 1)
+    assert.equal(h.requests.filter(request => request.url.endsWith('/ask/stream')).length, 1)
     assert.equal(h.requests.some(request => /\/findings\/.+\/(review|status)/.test(request.url) && request.method !== 'get'), false)
   } finally { h.dispose() }
 })
 
 test('new session and reference-only question preserve click-time purpose; budget failure preserves the editable question', async () => {
-  const h = await harness({ initialView: 'advice', respondOverride: ({ url }) => url.endsWith('/ask') ? { code: 4205, message: 'budget_unknown: final wire counter unavailable', data: null } : undefined })
+  const h = await harness({ initialView: 'advice', respondOverride: ({ url }) => url.endsWith('/ask/stream') ? { code: 4205, message: 'budget_unknown: final wire counter unavailable', data: null } : undefined })
   try {
     const basis = find(h.root, node => node.tag === 'select' && find(node, option => option.tag === 'option' && option.props.value === 'reference_only'))
     basis.props['onUpdate:modelValue']('reference_only'); await settle()
@@ -547,7 +569,7 @@ test('new session and reference-only question preserve click-time purpose; budge
     await button(h, 'Ask').props.onClick(); await settle()
     const created = h.requests.find(request => request.url.endsWith('/sessions') && request.method === 'post')
     assert.equal(created.body.basisScope, 'reference_only')
-    const submitted = h.requests.find(request => request.url.endsWith('/ask'))
+    const submitted = h.requests.find(request => request.url.endsWith('/ask/stream'))
     assert.equal(submitted.body.sessionId, 'session-1'); assert.equal(submitted.body.basisScope, 'reference_only')
     assert.equal(find(h.root, node => node.tag === 'textarea').value, 'Explain this fixed standard')
     assert.match(text(h.root), /budget_unknown/)
@@ -558,7 +580,7 @@ test('new session and reference-only question preserve click-time purpose; budge
 test('clear current session invalidates an in-flight response and leaves other sessions untouched', async () => {
   const pending = deferred(), h = await harness({ initialView: 'advice', respondOverride: ({ url }) => {
     if (url.endsWith('/sessions')) return sessions
-    if (url.endsWith('/ask')) return pending.promise
+    if (url.endsWith('/ask/stream')) return pending.promise
   } })
   try {
     sessionSelect(h).props['onUpdate:modelValue']('session-A'); await settle()
@@ -810,7 +832,7 @@ test('reference-only session skips project index reads and late project failures
   const h = await harness({ initialView: 'advice', respondOverride: ({ url }) => {
     if (url.endsWith('/sessions')) return sessions
     if (url.includes('/index/status?')) return oldStatus.promise
-    if (url.endsWith('/ask')) return { code: 4205, message: 'fixed final-wire budget unavailable', data: null }
+    if (url.endsWith('/ask/stream')) return { code: 4205, message: 'fixed final-wire budget unavailable', data: null }
   } })
   try {
     const reads = h.requests.filter(request => /\/(?:sources|index\/status)\?/.test(request.url)).length
@@ -824,6 +846,6 @@ test('reference-only session skips project index reads and late project failures
     await button(h, 'Ask').props.onClick(); await settle()
     assert.match(text(h.root), /fixed final-wire budget unavailable/)
     assert.equal(find(h.root, node => node.tag === 'textarea').value, 'Verify the fixed provision')
-    assert.equal(h.requests.find(request => request.url.endsWith('/ask')).body.basisScope, 'reference_only')
+    assert.equal(h.requests.find(request => request.url.endsWith('/ask/stream')).body.basisScope, 'reference_only')
   } finally { h.dispose() }
 })
