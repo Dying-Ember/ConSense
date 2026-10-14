@@ -315,7 +315,7 @@ class AdviceDocumentScopeIntegrationTest {
             for(String language:Arrays.asList("zhHans","zhHant","en"))assertEquals(legacy,restored.path(language).asText());
         }
     }
-    @Test void chineseQuestionRejectionCopyUsesAcceptedLanguageAndABoundedHintWhenNoUnitPublishes() throws Exception {
+    @Test void chineseQuestionRejectionCopyUsesAcceptedOrConsistentDeclaredLanguage() throws Exception {
         String id=project();source(id,"SCC","SCC.txt","VETTING_PACKAGE","tender","AUTHORED provision");mvc.perform(post("/api/advice/{id}/index/rebuild",id)).andExpect(jsonPath("$.code").value(0));
         com.fasterxml.jackson.databind.node.ObjectNode answer=(com.fasterxml.jackson.databind.node.ObjectNode)JsonUtils.parse(com.consense.service.advice.AdviceBudgetFixture.contract("{\"grounded\":true,\"answer\":\"AUTHORED 已有依据的说明 [1]\",\"citations\":[\"[1]\"]}"));
         for(JsonNode section:answer.path("sections"))((com.fasterxml.jackson.databind.node.ObjectNode)section).put("language","zhHans");
@@ -327,6 +327,33 @@ class AdviceDocumentScopeIntegrationTest {
             assertFalse(result.path("clarifications").toString().contains("Some requested conclusions"));
             if(!invalidOpening)assertTrue(result.path("content").path("zhHans").asText().contains("资料界限与假设"));
         }
+    }
+    @Test void noAcceptedUnitsUseDeclaredTraditionalChineseOrEnglishInsteadOfHanSyntaxHint() throws Exception {
+        String id=project();source(id,"SCC","SCC.txt","VETTING_PACKAGE","tender","AUTHORED provision");mvc.perform(post("/api/advice/{id}/index/rebuild",id)).andExpect(jsonPath("$.code").value(0));
+        String[][] cases={{"請以繁體中文回答","zhHant","部分所問結論或流程圖尚無法核實","請提供","不能確定最後期限"},{"请用英语回答","en","Some requested conclusions or the flowchart could not be verified","Please provide","The final deadline cannot be determined"}};
+        for(String[] value:cases) {
+            com.fasterxml.jackson.databind.node.ObjectNode answer=(com.fasterxml.jackson.databind.node.ObjectNode)JsonUtils.parse(com.consense.service.advice.AdviceBudgetFixture.contract("{\"grounded\":true,\"answer\":\"AUTHORED unsupported due to invalid opening [1]\",\"citations\":[\"[1]\"]}"));
+            for(JsonNode section:answer.path("sections"))((com.fasterxml.jackson.databind.node.ObjectNode)section).put("language",value[1]);
+            ((com.fasterxml.jackson.databind.node.ObjectNode)answer.path("sections").get(0)).put("basisScope","project_contract");answer.put("missingReason","notice_dates");
+            doReturn(JsonUtils.write(answer)).when(local).chatStructured(anyList(),any());
+            JsonNode request=JsonUtils.parse("{\"question\":\"\",\"scope\":\"contract\"}");((com.fasterxml.jackson.databind.node.ObjectNode)request).put("question",value[0]);
+            JsonNode result=data(post("/api/advice/{id}/ask",id).contentType(MediaType.APPLICATION_JSON).content(JsonUtils.write(request)));
+            assertFalse(result.path("grounded").asBoolean());assertTrue(result.path("citations").isEmpty());assertTrue(result.path("clarifications").get(0).asText().startsWith(value[3]));assertTrue(result.path("clarifications").get(1).asText().startsWith(value[2]));
+            assertTrue(result.path("content").path("en").asText().contains(value[4]));assertFalse(result.path("content").path("en").asText().contains("AUTHORED unsupported"));
+            JsonNode checks=JsonUtils.parse(messages.findById(result.path("messageId").asLong()).get().getAdviceChecksJson());assertTrue(checks.path("publishedSectionIds").isEmpty());assertEquals(2,checks.path("attempts").size());
+        }
+        verify(local,times(4)).chatStructured(anyList(),any());
+    }
+    @Test void mixedOrUnsupportedEnvelopeLanguagesCannotSelectFailureCopyOrSaveAnAnswer() throws Exception {
+        String id=project();source(id,"SCC","SCC.txt","VETTING_PACKAGE","tender","AUTHORED provision");mvc.perform(post("/api/advice/{id}/index/rebuild",id)).andExpect(jsonPath("$.code").value(0));
+        for(String language:Arrays.asList("en","fr")) {
+            com.fasterxml.jackson.databind.node.ObjectNode answer=(com.fasterxml.jackson.databind.node.ObjectNode)JsonUtils.parse(com.consense.service.advice.AdviceBudgetFixture.contract("{\"grounded\":true,\"answer\":\"AUTHORED unsupported [1]\",\"citations\":[\"[1]\"]}"));
+            ((com.fasterxml.jackson.databind.node.ObjectNode)answer.path("sections").get(0)).put("basisScope","project_contract").put("language","zhHant");
+            ((com.fasterxml.jackson.databind.node.ObjectNode)answer.path("sections").get(1)).put("language",language);doReturn(JsonUtils.write(answer)).when(local).chatStructured(anyList(),any());
+            mvc.perform(post("/api/advice/{id}/ask",id).contentType(MediaType.APPLICATION_JSON).content("{\"question\":\"請以繁體中文回答\",\"scope\":\"contract\"}")).andExpect(jsonPath("$.code").value(4205));
+            assertTrue(data(get("/api/advice/{id}/messages",id)).isEmpty());
+        }
+        verify(local,times(4)).chatStructured(anyList(),any());
     }
     @Test void naturalFlowchartQuestionUsesApplicationHarnessAndGraphRepairSharesTheTotalBudget() throws Exception {
         String id=project();source(id,"SCC","SCC.txt","VETTING_PACKAGE","tender","AUTHORED Contractor submits notice; evidence review follows.");mvc.perform(post("/api/advice/{id}/index/rebuild",id)).andExpect(jsonPath("$.code").value(0));

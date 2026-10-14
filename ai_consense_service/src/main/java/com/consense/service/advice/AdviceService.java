@@ -352,7 +352,7 @@ public class AdviceService {
         assertFixedReferencesCurrent(selectedFixedHits,fixedSourceIdentity);
 
         progress.phase("validating");currentGuard.run();
-        String language=publication.accepted.isEmpty()?AdvisoryHarness.languageHint(questionContext.originalQuestion):publication.accepted.get(0).getLanguage();
+        String language=publication.accepted.isEmpty()?declaredLanguage(answer):publication.accepted.get(0).getLanguage();
         Set<String> gaps=new LinkedHashSet<>(answer.getClarifications());
         publication.accepted.stream().flatMap(s->AdvisoryHarness.gaps(s).stream()).forEach(gaps::add);
         if(AdvisoryHarness.text(answer.getMissingReason()))gaps.add(answer.getMissingReason());
@@ -849,6 +849,14 @@ public class AdviceService {
             return value;
         }catch(java.io.IOException invalid){throw new IllegalArgumentException("Invalid Advisory JSON",invalid);}
     }
+    private static String declaredLanguage(AnswerRecord answer) {
+        if(answer==null||answer.getSections()==null||answer.getSections().isEmpty()||answer.getSections().get(0)==null)
+            throw AdvisoryHarness.invalid("answer.sections.language: a declared answer language is required");
+        String language=answer.getSections().get(0).getLanguage();
+        if(!Arrays.asList("en","zhHans","zhHant").contains(language)||answer.getSections().stream().anyMatch(s->s==null||!Objects.equals(language,s.getLanguage())))
+            throw AdvisoryHarness.invalid("answer.sections.language: every section must declare the same allowed language (en/zhHans/zhHant)");
+        return language;
+    }
     private final class Publication {
         private final List<CitationVO> sources;
         private final boolean referenceOnly;
@@ -891,6 +899,7 @@ public class AdviceService {
         void finish(AnswerRecord answer,String question,boolean streamed){
             if(answer==null||answer.getQuestionType()==null||!answer.getQuestionType().matches("T[1-8]")||answer.getSections()==null||answer.getSections().isEmpty())
                 throw AdvisoryHarness.invalid("Missing question type, opening section or self-check records");
+            declaredLanguage(answer);
             if(!streamed)for(AdvisoryHarness.Section section:answer.getSections())accept(section);
             if(!JsonUtils.write(proposed).equals(JsonUtils.write(answer.getSections())))throw AdvisoryHarness.invalid("Streamed sections differ from the final envelope");
             if(accepted.stream().anyMatch(s->answer.getSections().stream().noneMatch(p->JsonUtils.write(s).equals(JsonUtils.write(p)))))
