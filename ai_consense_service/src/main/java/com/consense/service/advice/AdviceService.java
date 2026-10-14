@@ -879,9 +879,11 @@ public class AdviceService {
         Publication(List<CitationVO> sources,boolean referenceOnly,AdviceProgress progress,Runnable guard,QuestionContext question){this.sources=sources;this.referenceOnly=referenceOnly;this.progress=progress;this.guard=guard;this.question=question;this.schema=AdvisoryHarness.schema(sources);}
         String content(AdvisoryHarness.Section section){return AdvisoryHarness.content(section,sources,referenceOnly,question.originalQuestion,question.background);}
         void beginAttempt(boolean streaming,boolean repairing){live=streaming;if(!streaming)accepted.clear();repairPrefix=repairing?new ArrayList<>(accepted):Collections.emptyList();opening=!repairPrefix.isEmpty();errors.clear();proposed.clear();}
-        String repairInstruction(){return "\n\nUse the one admitted repair for the unpublished units and envelope metadata. Application rejected: "+JsonUtils.write(errors)
-                +". Application-owned accepted prefix (context only; omit every one of these IDs from repair sections): "+JsonUtils.write(live?accepted:Collections.emptyList())
-                +". Preserve the original question, requested basis, language and supplied public citation aliases. Return all required envelope fields with only new/unpublished sections, or sections=[] if only metadata needs correction.";}
+        String repairInstruction(){return "\n\nUse the one admitted repair. Application rejected: "+JsonUtils.write(errors)
+                +". Preserve the original question, requested basis, language and supplied public citation aliases. "
+                +(live&&!accepted.isEmpty()?"Application-owned accepted prefix (context only; omit every one of these IDs from repair sections): "+JsonUtils.write(accepted)
+                +". Return all required envelope fields with only new/unpublished sections, or sections=[] if only metadata needs correction."
+                :"No units were published. Return one full complete answer with all required envelope fields and ALL sections beginning with kind=limits. Do not return sections=[].");}
         void recordAttempt(int number,AnswerRecord answer){Map<String,Object> observation=new LinkedHashMap<>();observation.put("attempt",number);observation.put("sections",answer==null?null:answer.getSections());observation.put("rejections",new ArrayList<>(errors));observation.put("contractParsed",answer!=null);attempts.add(observation);}
         void acceptNode(JsonNode node){
             assertUnpublishedId(node.path("id").asText());
