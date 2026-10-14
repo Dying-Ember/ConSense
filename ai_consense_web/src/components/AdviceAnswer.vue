@@ -2,8 +2,10 @@
 import { onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { answerParts, renderAnswerFlowchart } from '@/advice/answerFlowchart'
+import { renderAdviceMarkdown } from '@/advice/answerMarkdown'
 
-const props = defineProps<{ content: string }>()
+const props = defineProps<{ content: string; citationIds?: string[] }>()
+const emit = defineEmits<{ citation: [id: string] }>()
 const { locale } = useI18n()
 const parts = ref<{ kind: 'text' | 'flowchart'; source: string; svg?: string; failed?: boolean }[]>([])
 let epoch = 0
@@ -28,12 +30,17 @@ onBeforeUnmount(() => { ++epoch })
 function copy(en: string, hans: string, hant: string) {
   return locale.value.startsWith('en') ? en : locale.value === 'zh-Hant' ? hant : hans
 }
+function openCitation(event: MouseEvent) {
+  const button = (event.target as Element | null)?.closest?.('[data-advice-citation]')
+  const id = button?.getAttribute('data-advice-citation')
+  if (id && props.citationIds?.includes(id)) emit('citation', id)
+}
 </script>
 
 <template>
-  <div class="advice-answer">
+  <div class="advice-answer" @click="openCitation">
     <template v-for="(part, index) in parts" :key="index">
-      <p v-if="part.kind === 'text'">{{ part.source }}</p>
+      <div v-if="part.kind === 'text'" class="answer-markdown" v-html="renderAdviceMarkdown(part.source, citationIds)"></div>
       <figure v-else class="answer-flowchart">
         <div v-if="part.svg" class="flowchart-graphic" role="img"
           :aria-label="copy('Answer flowchart', '回答流程图', '回答流程圖')" v-html="part.svg"></div>
@@ -50,7 +57,11 @@ function copy(en: string, hans: string, hant: string) {
 
 <style scoped>
 .advice-answer { min-width: 0; }
-.advice-answer > p { white-space: pre-wrap; overflow-wrap: anywhere; }
+.answer-markdown { overflow-wrap: anywhere; overflow-x: auto; }
+.answer-markdown :deep(p), .answer-markdown :deep(pre) { white-space: pre-wrap; }
+.answer-markdown :deep(table) { border-collapse: collapse; width: 100%; margin: 12px 0; }
+.answer-markdown :deep(th), .answer-markdown :deep(td) { border: 1px solid var(--line, #cbd5e1); padding: 7px 10px; text-align: start; vertical-align: top; }
+.answer-markdown :deep(.answer-citation) { color: var(--accent-dark, #1d4ed8); background: var(--accent-soft, #eff6ff); border: 0; border-radius: 4px; padding: 1px 4px; font: inherit; cursor: pointer; }
 .answer-flowchart { margin: 12px 0; }
 .flowchart-graphic { overflow: auto; max-width: 100%; background: #fff; color: #172b4d; padding: 10px; border: 1px solid #cbd5e1; border-radius: 6px; }
 .flowchart-graphic :deep(svg) { display: block; min-width: 360px; max-width: 100%; height: auto; font: 14px sans-serif; }
