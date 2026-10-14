@@ -13,6 +13,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Consumer;
 
 /**
  * 业务层统一入口：负责提示词拼装、JSON 结构化输出与解析容错、可用性缓存。
@@ -98,6 +99,14 @@ public class AiGateway {
     public String chat(List<LlmClient.ChatTurn> turns) {
         requireAvailable();
         return selectedClient().chat(turns);
+    }
+
+    public boolean supportsStreaming() { return selectedClient().supportsStreaming(); }
+
+    public String chatStructuredStream(List<LlmClient.ChatTurn> turns, JsonNode schema,
+                                       Consumer<String> onDelta, Consumer<Runnable> onCancel) {
+        requireAvailable();
+        return selectedClient().chatStructuredStream(turns, schema, onDelta, onCancel);
     }
 
     /**
