@@ -1,6 +1,10 @@
 # Advisory 能力对齐：访谈、现状与实施输入
 
-日期：2026-10-14，Asia/Shanghai。状态：**ready-for-agent；用户已确认共同理解并调用 implement-spec，实施中**。任务图见 [实施 tickets](advisory-capability-alignment-tickets-20261014.md)。
+日期：2026-10-14，Asia/Shanghai。状态：**A1–A4源码与相关契约已实现；用户已停止本轮测试，A5未通过，远端PR已合并，合并不授业务接受**。任务图见 [实施 tickets](advisory-capability-alignment-tickets-20261014.md)，当前提交与分层结果见 [验收记录](../testing/advisory-capability-alignment-validation-20261014.md)。
+
+当前代码 `363096b76f1921ac5f0e43c9f470f3e94c45ba6d` 已推送私仓 [PR #10](https://github.com/Dying-Ember/ConSense/pull/10)，远端记录于2026-10-14 21:08:04（北京时间；13:08:04Z）由Dying-Ember合并为 `85dc5efe720dafbe465b674cef637f37f7c6c49b`，本任务未执行合并。有界 Standards／Spec 审查已闭合；实际模型尚无接受的最终图／答案，DOCX、新图原件、项目缺条件与专家语义等门未完成。用户要求先提交并停止测试，未追加调用、预算或后续开发；下列访谈原状和源码阅读按原阶段读取，不追认为本轮验收。
+
+2026-10-14用户补充：优先让普通问题稳定生成并实际显示流程图，同时确保已知例题合同路径正确；还须考虑另一类自然问题的图。三个业务门分别未通过，不增加GCC17.1／题号固定答案或将官方答案、私有评价纠错放入同题生成。已批准204,800总窗的MiniMax-M2.7短任务对照，不改变至少256K主模型守卫／M3 Responses 1M契约；本轮结果与停止状态见验收记录。
 
 用户明确纠正，本轮目标是 **Advisory 合同问询模块**；产品经理确认的 v1.3 合同咨询提示词也仅属于本轮 Advisory 输入。此前 [Vetting 核查稿](vetting-capability-alignment-20261014.md) 保留为历史参考，其待决问题作废，不将问答模板、运行提示词或本轮能力改动套到 Vetting。
 

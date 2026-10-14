@@ -336,3 +336,11 @@ DOCX 的 XML table 可能承载条款排版、表单、目录或真正数据表�
 4. 方案确定后继续用独立运行环境与新索引验证范围内真实资料；依据原件标注分别评价解析、候选召回和同池排序，完整保留双输出、实际输入、引用映射和失败，并更新 handoff 后进行必要接入。
 
 本文件持久化规则，不自行授权对外发送题包、推送代码、合并或切换比赛生产环境；这些动作仍按用户在会话中的明确授权执行。
+
+<!-- advisory-capability-alignment-20261014:start -->
+## 2026-10-14 Advisory 提交与停止测试状态
+
+用户确认稿及本轮能力均属于 Advisory。A0完成，A1–A4源码及相关契约已实现；代码 `363096b76f1921ac5f0e43c9f470f3e94c45ba6d` 已推送私仓 [PR #10](https://github.com/Dying-Ember/ConSense/pull/10)，远端记录于2026-10-14 21:08:04（北京时间；13:08:04Z）由Dying-Ember合并为 `85dc5efe720dafbe465b674cef637f37f7c6c49b`，本任务未执行合并。已合入应用持有发布前缀、同步完整修复和有界MiniMax-only协议兼容；最新两轴无发现，backend精确被测tree继承291项／290通过／1原optional skip，frontend未变tree继承112项，最新构建成功。实际模型仍无接受的最终图／答案；用户要求先提交并停止本轮测试，A5未通过，A6有界审查闭合；最新远端PR已合并，本任务未执行合并，不追加测试／模型／浏览器或开发。已批准204.8K的M2.7短任务对照没有改变256K主模型守卫／M3 Responses 1M契约。
+
+通用图渲染、例题合同路径、另一类自然图、项目缺条件、DOCX与专家语义等开放门及各层证据见 [分层验收](./testing/advisory-capability-alignment-validation-20261014.md)。旧真实历史PDF完整原件／物理页／邻文阅读只授该sample观察，不代替新图／DOCX通过。活动服务／数据库、fixed05、共享模型、Drafting／Vetting与并行OER保持；本段不覆盖文首OER进度／质量Goal或历史状态。
+<!-- advisory-capability-alignment-20261014:end -->
