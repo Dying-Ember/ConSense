@@ -12,6 +12,8 @@ import java.util.concurrent.*;
 import java.util.concurrent.atomic.*;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import static org.junit.jupiter.api.Assertions.*;
 
 /** Real local HTTP streaming with finite synthetic provider responses; no model or business acceptance. */
@@ -115,5 +117,46 @@ class ProviderStreamingTest {
         StringBuilder emitted=new StringBuilder();ProviderStreamReader.SafeDelta safe=new ProviderStreamReader.SafeDelta("synthetic-key",emitted::append);
         safe.accept("begin synthetic-");safe.accept("key end");safe.finish();
         assertEquals("begin [REDACTED] end",emitted.toString());
+    }
+    @Test void miniMaxAcceptsExplicitStopAtCleanEofWhileGenericOpenAiStillRequiresDone()throws Exception {
+        String first="{\"sections\":[",last="]}";firstDelta=new CountDownLatch(1);waitAfterBytes=sse(first,null).getBytes(StandardCharsets.UTF_8).length;
+        ConsenseProperties.Llm cfg=serve("/v1/chat/completions",sse(first,null)+sse(last,"stop"),1);List<String> deltas=new ArrayList<>();
+        assertEquals(first+last,new MiniMaxChatClient(cfg,new HttpSupport()).chatStructuredStream(turns,schema,p->{deltas.add(p);firstDelta.countDown();},r->{}));assertEquals(Arrays.asList(first,last),deltas);
+        assertThrows(IncompleteModelResponseException.class,()->new OpenAiLlmClient(cfg,new HttpSupport()).chatStructuredStream(turns,schema,p->{},r->{}));assertEquals(2,requests.get());
+    }
+    @Test void miniMaxEmptyAssistantHeaderIsNonterminalAndDoesNotBecomeAnswerText()throws Exception {
+        String header="data: {\"choices\":[{\"finish_reason\":\"\",\"index\":0,\"delta\":{\"role\":\"assistant\"}}]}\n\n";
+        ConsenseProperties.Llm cfg=serve("/v1/chat/completions",header+sse("{}","stop")+"data: [DONE]\n\n",1);List<String> deltas=new ArrayList<>();
+        assertEquals("{}",new MiniMaxChatClient(cfg,new HttpSupport()).chatStructuredStream(turns,schema,deltas::add,r->{}));assertEquals(Collections.singletonList("{}"),deltas);
+        assertThrows(IncompleteModelResponseException.class,()->new OpenAiLlmClient(cfg,new HttpSupport()).chatStructuredStream(turns,schema,p->{},r->{}));assertEquals(2,requests.get());
+    }
+    @ParameterizedTest @ValueSource(strings={"no_stop","length","tool","refusal","error","late","late_done","nontext_finish","malformed"})
+    void miniMaxCompatibilityDoesNotTurnFailedOrLateProviderEventsIntoCompletion(String defect)throws Exception {
+        String body=sse("{}","stop");
+        if("no_stop".equals(defect))body=sse("{}","")+"data: [DONE]\n\n";
+        if("length".equals(defect))body=sse("{}","length");
+        if("tool".equals(defect))body=body.replace("\"delta\":{","\"delta\":{\"tool_calls\":[{}],");
+        if("refusal".equals(defect))body=body.replace("\"delta\":{","\"delta\":{\"refusal\":\"AUTHORED refusal\",");
+        if("error".equals(defect))body="data: {\"error\":{\"message\":\"AUTHORED failure\"}}\n\n";
+        if("late".equals(defect))body+=sse("late",null);
+        if("late_done".equals(defect))body+="data: [DONE]\n\n"+sse("late",null);
+        if("nontext_finish".equals(defect))body=body.replace("\"finish_reason\":\"stop\"","\"finish_reason\":{}");
+        if("malformed".equals(defect))body="data: {\"choices\":[\n\n";
+        ConsenseProperties.Llm cfg=serve("/v1/chat/completions",body,2);IncompleteModelResponseException invalid=assertThrows(IncompleteModelResponseException.class,()->new MiniMaxChatClient(cfg,new HttpSupport()).chatStructuredStream(turns,schema,p->{},r->{}));assertEquals(1,requests.get());
+        if("length".equals(defect))assertEquals(IncompleteModelResponseException.FailureKind.OUTPUT_BUDGET_EXHAUSTED,invalid.getFailureKind());
+        if("tool".equals(defect))assertEquals(IncompleteModelResponseException.FailureKind.TOOL_CALLS,invalid.getFailureKind());
+        if("refusal".equals(defect))assertEquals(IncompleteModelResponseException.FailureKind.REFUSAL,invalid.getFailureKind());
+        if("error".equals(defect))assertEquals(IncompleteModelResponseException.FailureKind.PROVIDER_ERROR,invalid.getFailureKind());
+    }
+    @Test void miniMaxNormalProviderStopDoesNotInventTheMissingAnswerJsonBoundary()throws Exception {
+        ConsenseProperties.Llm cfg=serve("/v1/chat/completions",sse("{\"sections\":[","stop"),1);List<com.fasterxml.jackson.databind.JsonNode> closed=new ArrayList<>();StructuredJsonSections sections=new StructuredJsonSections(closed::add);
+        assertEquals("{\"sections\":[",new MiniMaxChatClient(cfg,new HttpSupport()).chatStructuredStream(turns,schema,sections::accept,r->{}));
+        assertThrows(StructuredJsonSections.InvalidJsonException.class,sections::finish);assertTrue(closed.isEmpty());assertEquals(1,requests.get());
+    }
+    @Test void miniMaxCompatibilityRetainsPreDispatchAndInFlightCancellation()throws Exception {
+        String first=sse("{\"sections\":[",null);firstDelta=new CountDownLatch(1);waitAfterBytes=first.getBytes(StandardCharsets.UTF_8).length;
+        ConsenseProperties.Llm cfg=serve("/v1/chat/completions",first+sse("]}","stop"),1);MiniMaxChatClient client=new MiniMaxChatClient(cfg,new HttpSupport());
+        assertThrows(BizException.class,()->client.chatStructuredStream(turns,schema,p->{},Runnable::run));assertEquals(0,requests.get());AtomicReference<Runnable> cancel=new AtomicReference<>();
+        assertThrows(BizException.class,()->client.chatStructuredStream(turns,schema,p->{cancel.get().run();firstDelta.countDown();},cancel::set));assertEquals(1,requests.get());
     }
 }
