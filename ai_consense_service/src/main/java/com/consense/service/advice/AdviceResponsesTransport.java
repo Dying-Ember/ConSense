@@ -3,6 +3,7 @@ package com.consense.service.advice;
 import com.consense.ai.LlmOperation;
 import com.consense.ai.LlmProfiles;
 import com.consense.ai.ModelIdentity;
+import com.consense.ai.ProviderStreamReader;
 import com.consense.common.BizException;
 import com.consense.common.JsonUtils;
 import com.consense.config.ConsenseProperties;
@@ -19,6 +20,7 @@ import java.net.Proxy;
 import java.nio.charset.*;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 
 /** Advice single-object Responses counter/generation, isolated from the shared Drafting Chat gateway. */
 @Component
@@ -50,7 +52,17 @@ public final class AdviceResponsesTransport {
         if(!selected(operation))throw failure("budget_unknown","advice_responses_not_selected",null);
         return new Operation(operation,new Profile(operation));
     }
-    public interface WireHttp { Response post(String endpoint,String body,long timeoutMs,int cap,String authorization); }
+    public interface WireHttp {
+        Response post(String endpoint,String body,long timeoutMs,int cap,String authorization);
+        default Response postCancelable(String endpoint,String body,long timeoutMs,int cap,String authorization,Consumer<Runnable> onCancel){
+            return post(endpoint,body,timeoutMs,cap,authorization);
+        }
+        default boolean supportsStreaming(){return false;}
+        default Response postStream(String endpoint,String body,long timeoutMs,int cap,String authorization,
+                                    Consumer<String> event,Consumer<Runnable> onCancel){
+            throw failure("transport_failed","responses_streaming_unsupported",null);
+        }
+    }
     public static final class Response {
         public final int status; public final String body; private final byte[] nativeEntity;
         public Response(int s,String b){this(s,b,null);}
@@ -69,7 +81,34 @@ public final class AdviceResponsesTransport {
     /** Bounded one-shot/no-redirect/no-replay transport; no prompt/body/auth logging. */
     public static final class NativeHttp implements WireHttp {
         private final OkHttpClient base=new OkHttpClient.Builder().proxy(Proxy.NO_PROXY).retryOnConnectionFailure(false).followRedirects(false).followSslRedirects(false).build();
+        public boolean supportsStreaming(){return true;}
+        public Response postStream(String endpoint,String body,long timeoutMs,int cap,String authorization,
+                                   Consumer<String> event,Consumer<Runnable> onCancel){
+            final RequestBody delegate=RequestBody.create(body,MediaType.get("application/json; charset=utf-8"));
+            RequestBody oneShot=new RequestBody(){
+                public MediaType contentType(){return delegate.contentType();}
+                public long contentLength()throws IOException{return delegate.contentLength();}
+                public void writeTo(okio.BufferedSink sink)throws IOException{delegate.writeTo(sink);}
+                public boolean isOneShot(){return true;}
+            };
+            OkHttpClient client=base.newBuilder().connectTimeout(timeoutMs,TimeUnit.MILLISECONDS).readTimeout(timeoutMs,TimeUnit.MILLISECONDS)
+                    .writeTimeout(timeoutMs,TimeUnit.MILLISECONDS).callTimeout(timeoutMs,TimeUnit.MILLISECONDS).build();
+            Call call=client.newCall(new Request.Builder().url(endpoint).header("Authorization",authorization)
+                    .header("Accept","text/event-stream").post(oneShot).build());
+            if(onCancel!=null)onCancel.accept(call::cancel);
+            if(Thread.currentThread().isInterrupted())call.cancel();
+            try(okhttp3.Response response=call.execute()){
+                if(response.code()!=200)throw failure("provider_failed","generation_provider_rejected",response.code());
+                if(response.body()==null)throw failure("transport_failed","response_body_missing",response.code());
+                String raw=ProviderStreamReader.read(response.body().byteStream(),cap,true,event);
+                return new Response(response.code(),raw,raw.getBytes(StandardCharsets.UTF_8));
+            }catch(IOException error){throw failure("transport_failed",call.isCanceled()?"http_cancelled":"http_"+error.getClass().getSimpleName(),null);}
+            finally{call.cancel();}
+        }
         public Response post(String endpoint,String body,long timeoutMs,int cap,String authorization){
+            return postCancelable(endpoint,body,timeoutMs,cap,authorization,null);
+        }
+        public Response postCancelable(String endpoint,String body,long timeoutMs,int cap,String authorization,Consumer<Runnable> onCancel){
             try {
                 final RequestBody delegate=RequestBody.create(body,MediaType.get("application/json; charset=utf-8"));
                 RequestBody oneShot=new RequestBody(){
@@ -80,14 +119,17 @@ public final class AdviceResponsesTransport {
                 };
                 OkHttpClient client=base.newBuilder().connectTimeout(timeoutMs,TimeUnit.MILLISECONDS).readTimeout(timeoutMs,TimeUnit.MILLISECONDS).writeTimeout(timeoutMs,TimeUnit.MILLISECONDS).callTimeout(timeoutMs,TimeUnit.MILLISECONDS).build();
                 Request request=new Request.Builder().url(endpoint).header("Authorization",authorization).post(oneShot).build();
-                try(okhttp3.Response response=client.newCall(request).execute()){
+                Call call=client.newCall(request);
+                if(onCancel!=null)onCancel.accept(call::cancel);
+                if(Thread.currentThread().isInterrupted())call.cancel();
+                try(okhttp3.Response response=call.execute()){
                     ByteArrayOutputStream bytes=new ByteArrayOutputStream();
                     if(response.body()!=null)try(InputStream stream=response.body().byteStream()){
                         byte[] buffer=new byte[8192];int n;while((n=stream.read(buffer))!=-1){if(n>cap-bytes.size())throw failure("transport_failed","response_cap_exceeded",response.code());bytes.write(buffer,0,n);}
                     }
                     String decoded=StandardCharsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPORT).onUnmappableCharacter(CodingErrorAction.REPORT).decode(java.nio.ByteBuffer.wrap(bytes.toByteArray())).toString();
                     return new Response(response.code(),decoded,bytes.toByteArray());
-                }
+                }finally{call.cancel();}
             }catch(RequestFailure typed){throw typed;}
             catch(Exception error){throw failure("transport_failed","http_"+error.getClass().getSimpleName(),null);}
         }
@@ -119,13 +161,17 @@ public final class AdviceResponsesTransport {
     }
     public static final class PreparedRequest {
         private final String generationJson,counterJson,bindingSha,sourceSha,system,user;
-        private final Profile profile; private final int attempt; private AdviceWireObservation.Attempt observation;
+        private final Profile profile; private final int attempt; private final boolean stream; private AdviceWireObservation.Attempt observation;
         PreparedRequest(Profile p,String s,String u,String source,int number){
-            profile=p;system=s;user=u;sourceSha=source;attempt=number;
+            this(p,s,u,source,number,false);
+        }
+        PreparedRequest(Profile p,String s,String u,String source,int number,boolean streaming){
+            profile=p;system=s;user=u;sourceSha=source;attempt=number;stream=streaming;
             if(s==null||u==null||!isSha(source)||(number!=0&&number!=1))throw failure("budget_unknown","complete_request_source_binding_required",null);
             ObjectNode body=JsonUtils.mapper().createObjectNode();body.put("model",p.model);body.put("instructions",s+JSON_INSTRUCTION);
             body.putArray("input").addObject().put("type","message").put("role","user").put("content",u+(number==1?RETRY_INSTRUCTION:""));
-            body.putObject("reasoning").put("effort",p.effort);body.put("temperature",p.temperature);body.put("stream",false);body.put("max_output_tokens",p.output);
+            body.putObject("reasoning").put("effort",p.effort);body.put("temperature",p.temperature);body.put("stream",stream);body.put("max_output_tokens",p.output);
+            if(stream)body.put("truncation","disabled");
             generationJson=JsonUtils.write(body);ObjectNode count=JsonUtils.mapper().createObjectNode();
             for(String field:Arrays.asList("model","instructions","input","reasoning"))count.set(field,body.get(field).deepCopy());counterJson=JsonUtils.write(count);
             bindingSha=hash(JsonUtils.write(Arrays.asList(WIRE,p.sha,p.policySha,hash(generationJson),hash(counterJson),source,number)));
@@ -153,22 +199,34 @@ public final class AdviceResponsesTransport {
         private final LlmOperation selection; private final Profile profile; private final ModelIdentity identity;
         Operation(LlmOperation s,Profile p){selection=s;profile=p;identity=new ModelIdentity("minimax-cn",WIRE,p.model,p.sha,"configured_advice_responses_wire");}
         public ModelIdentity getIdentity(){return identity;}
+        public boolean supportsStreaming(){return http.supportsStreaming();}
         public long getConfiguredContextTokens(){return profile.context;}
         public PreparedRequest prepare(String system,String user,String sourceSha,int attempt){
-            assertProfile();PreparedRequest request=new PreparedRequest(profile,system,user,sourceSha,attempt);
-            if(observation!=null)request.observation=observation.begin(request,observationConfiguration(profile),profile.key,http instanceof NativeHttp);
+            return prepare(system,user,sourceSha,attempt,false);
+        }
+        public PreparedRequest prepareStream(String system,String user,String sourceSha,int attempt){
+            if(!supportsStreaming())throw failure("transport_failed","responses_streaming_unsupported",null);
+            return prepare(system,user,sourceSha,attempt,true);
+        }
+        private PreparedRequest prepare(String system,String user,String sourceSha,int attempt,boolean stream){
+            assertProfile();PreparedRequest request=new PreparedRequest(profile,system,user,sourceSha,attempt,stream);
+            Map<String,Object> configuration=observationConfiguration(profile);configuration.put("stream",stream);
+            if(observation!=null)request.observation=observation.begin(request,configuration,profile.key,http instanceof NativeHttp);
             return request;
         }
         private void assertProfile(){if(!profile.sha.equals(new Profile(selection).sha))throw failure("budget_unknown","captured_responses_profile_changed",null);}
-        private void assertPrepared(PreparedRequest request){assertProfile();if(request==null||request.profile!=profile||!new PreparedRequest(profile,request.system,request.user,request.sourceSha,request.attempt).bindingSha.equals(request.bindingSha))throw failure("budget_unknown","prepared_request_binding_changed",null);}
+        private void assertPrepared(PreparedRequest request){assertProfile();if(request==null||request.profile!=profile||!new PreparedRequest(profile,request.system,request.user,request.sourceSha,request.attempt,request.stream).bindingSha.equals(request.bindingSha))throw failure("budget_unknown","prepared_request_binding_changed",null);}
         public BudgetResult observe(PreparedRequest request,Runnable currentSourceGuard){
-            try{BudgetResult result=observeBound(request,currentSourceGuard);if(request.observation!=null){request.observation.budget(result);request.observation.outcome("counter",result.getStatus());}return result;}
+            return observe(request,currentSourceGuard,null);
+        }
+        public BudgetResult observe(PreparedRequest request,Runnable currentSourceGuard,Consumer<Runnable> onCancel){
+            try{BudgetResult result=observeBound(request,currentSourceGuard,onCancel);if(request.observation!=null){request.observation.budget(result);request.observation.outcome("counter",result.getStatus());}return result;}
             catch(RuntimeException error){if(request!=null&&request.observation!=null)request.observation.outcome("counter","failed_before_budget_acceptance");throw error;}
         }
-        private BudgetResult observeBound(PreparedRequest request,Runnable currentSourceGuard){
+        private BudgetResult observeBound(PreparedRequest request,Runnable currentSourceGuard,Consumer<Runnable> onCancel){
             assertPrepared(request);if(currentSourceGuard==null)throw failure("budget_unknown","fresh_source_guard_required",null);
             if(!profile.knownPolicy())return new BudgetResult(request,"budget_unknown","explicit_estimate_context_margin_policy_required",null,0);
-            currentSourceGuard.run();Response response=post(profile.base+"/v1/responses/input_tokens",request.counterJson,profile.counterTimeout,profile.counterCap,profile,request,"counter");
+            currentSourceGuard.run();Response response=post(profile.base+"/v1/responses/input_tokens",request.counterJson,profile.counterTimeout,profile.counterCap,profile,request,"counter",onCancel);
             assertProfile();currentSourceGuard.run();
             if(response.status!=200)throw failure("budget_unknown","counter_provider_rejected",response.status);
             JsonNode raw=strictObject(response.body,"budget_unknown");Set<String> fields=new HashSet<>(Arrays.asList("object","input_tokens","model"));Iterator<String> names=raw.fieldNames();while(names.hasNext())if(!fields.contains(names.next()))throw failure("budget_unknown","counter_envelope_unknown",null);
@@ -178,10 +236,30 @@ public final class AdviceResponsesTransport {
         }
         public String generate(PreparedRequest request,BudgetResult budget,Runnable currentSourceGuard){
             assertPrepared(request);if(budget==null||budget.request!=request||!budget.isGenerationPermitted()||!profile.knownPolicy()||budget.inputTokens<=0||budget.inputTokens>profile.context-profile.output-profile.margin)throw failure(budget==null?"budget_unknown":budget.status,"bound_provider_estimated_fit_required",null);
+            if(request.stream)throw failure("budget_unknown","stream_request_requires_stream_transport",null);
             if(currentSourceGuard==null)throw failure("budget_unknown","fresh_source_guard_required",null);
             try{
                 currentSourceGuard.run();Response response=post(profile.base+"/v1/responses",request.generationJson,profile.generationTimeout,profile.generationCap,profile,request,"generation");assertProfile();currentSourceGuard.run();
                 String decoded=decode(response,profile);if(request.observation!=null)request.observation.outcome("generation","provider_envelope_validated_source_guards_passed_answer_json_not_yet_parsed");return decoded;
+            }catch(RuntimeException error){if(request.observation!=null)request.observation.outcome("generation","failed_before_answer_acceptance");throw error;}
+        }
+        public String generateStream(PreparedRequest request,BudgetResult budget,Runnable currentSourceGuard,
+                                     Consumer<String> onDelta,Consumer<Runnable> onCancel){
+            assertPrepared(request);
+            if(!request.stream||!http.supportsStreaming())throw failure("transport_failed","responses_streaming_unsupported_or_not_bound",null);
+            if(budget==null||budget.request!=request||!budget.isGenerationPermitted()||!profile.knownPolicy()||budget.inputTokens<=0||budget.inputTokens>profile.context-profile.output-profile.margin)
+                throw failure(budget==null?"budget_unknown":budget.status,"bound_provider_estimated_fit_required",null);
+            if(currentSourceGuard==null)throw failure("budget_unknown","fresh_source_guard_required",null);
+            ResponseStream output=new ResponseStream(profile,onDelta);
+            String endpoint=profile.base+"/v1/responses";long started=System.nanoTime();
+            try{
+                currentSourceGuard.run();
+                Response response=http.postStream(endpoint,request.generationJson,profile.generationTimeout,profile.generationCap,profile.authorization(),output::event,onCancel);
+                if(response==null||response.body==null||response.body.getBytes(StandardCharsets.UTF_8).length>profile.generationCap)throw failure("transport_failed","response_bound_exceeded",null);
+                if(request.observation!=null)request.observation.response("generation",endpoint,response,System.nanoTime()-started);
+                assertProfile();currentSourceGuard.run();String result=output.finish();
+                if(request.observation!=null)request.observation.outcome("generation","provider_stream_envelope_validated_source_guards_passed_answer_json_not_yet_parsed");
+                return result;
             }catch(RuntimeException error){if(request.observation!=null)request.observation.outcome("generation","failed_before_answer_acceptance");throw error;}
         }
         /** Same single-object suffix/retry as completeJson, but each request is freshly counted. */
@@ -196,6 +274,20 @@ public final class AdviceResponsesTransport {
             }
             throw failure("output_invalid","single_object_json_parse_failed",null);
         }
+        /** Convenience API; the Advisory harness uses prepareStream/generateStream to own its shared repair budget. */
+        public <T> Completion<T> completeJsonStream(String system,String user,String sourceSha,Class<T> type,Runnable guard,
+                                                   Consumer<String> onDelta,Consumer<Runnable> onCancel){
+            List<BudgetResult> results=new ArrayList<>();
+            for(int attempt=0;attempt<2;attempt++){
+                PreparedRequest request=prepareStream(system,user,sourceSha,attempt);
+                BudgetResult budget=observe(request,guard,onCancel);results.add(budget);
+                if(!budget.isGenerationPermitted())throw failure(budget.status,budget.reason,null);
+                String raw=generateStream(request,budget,guard,onDelta,onCancel);
+                try{return new Completion<>(JsonUtils.mapper().treeToValue(strictObject(raw,"output_invalid"),type),identity,results);}
+                catch(Exception invalid){if(attempt==1)throw failure("output_invalid","single_object_json_parse_failed_after_rebudgeted_retry",null);}
+            }
+            throw failure("output_invalid","single_object_json_parse_failed",null);
+        }
     }
     private static Map<String,Object> observationConfiguration(Profile p){
         Map<String,Object> value=new LinkedHashMap<>();value.put("wire",WIRE);value.put("route","responses");value.put("baseUrl",p.base);value.put("model",p.model);value.put("reasoningEffort",p.effort);value.put("temperature",p.temperature);
@@ -203,12 +295,80 @@ public final class AdviceResponsesTransport {
         value.put("counterTimeoutMs",p.counterTimeout);value.put("generationTimeoutMs",p.generationTimeout);value.put("counterMaxResponseBytes",p.counterCap);value.put("generationMaxResponseBytes",p.generationCap);value.put("transportRetries",0);value.put("maximumJsonParsingAttempts",2);value.put("stream",false);value.put("responsesEnabled",p.enabled);value.put("selectedChatConfigurationSha256",p.selectedSha);return value;
     }
     private Response post(String endpoint,String body,long timeout,int cap,Profile p,PreparedRequest request,String phase){
+        return post(endpoint,body,timeout,cap,p,request,phase,null);
+    }
+    private Response post(String endpoint,String body,long timeout,int cap,Profile p,PreparedRequest request,String phase,Consumer<Runnable> onCancel){
         Response response;long started=System.nanoTime();
-        try{response=http.post(endpoint,body,timeout,cap,p.authorization());}
+        try{response=http.postCancelable(endpoint,body,timeout,cap,p.authorization(),onCancel);}
         catch(RequestFailure safe){throw safe;}catch(RuntimeException unknown){throw failure("transport_failed","http_"+unknown.getClass().getSimpleName(),null);}
         if(response==null||response.body==null||response.body.getBytes(StandardCharsets.UTF_8).length>cap)throw failure("transport_failed","response_bound_exceeded",response==null?null:response.status);
         if(request.observation!=null)request.observation.response(phase,endpoint,response,System.nanoTime()-started);
         return response;
+    }
+    private static final class ResponseStream {
+        private final Profile profile;
+        private final StringBuilder text=new StringBuilder();
+        private final ProviderStreamReader.SafeDelta delta;
+        private String responseId,messageId,result;
+        private int messageIndex=-1;
+        private boolean complete,done;
+        ResponseStream(Profile p,Consumer<String> output){profile=p;delta=new ProviderStreamReader.SafeDelta(p.key,output);}
+        void event(String data){
+            if("[DONE]".equals(data)){if(!complete||done)throw failure("output_incomplete","stream_completion_out_of_order",null);done=true;return;}
+            if(complete)throw failure("output_invalid","event_after_response_completion",null);
+            JsonNode event=strictObject(data,"output_invalid");String type=event.path("type").asText();
+            if(event.hasNonNull("error")||"error".equals(type)||"response.failed".equals(type))throw failure("provider_failed","generation_provider_error",null);
+            if("response.incomplete".equals(type))throw failure("output_incomplete","generation_did_not_complete",null);
+            if("response.created".equals(type)||"response.in_progress".equals(type)){
+                JsonNode response=event.path("response");
+                if(!response.isObject()||!"response".equals(response.path("object").asText())||!profile.model.equals(response.path("model").asText())
+                        ||!response.path("id").isTextual()||response.path("id").asText().isEmpty())throw failure("output_invalid","generation_response_identity_invalid",null);
+                if(responseId!=null&&!responseId.equals(response.path("id").asText()))throw failure("output_invalid","stream_response_identity_changed",null);
+                responseId=response.path("id").asText();return;
+            }
+            if("response.output_item.added".equals(type)||"response.output_item.done".equals(type)){
+                JsonNode item=event.path("item");String kind=item.path("type").asText();
+                if("reasoning".equals(kind))return;
+                if(!item.isObject()||!"message".equals(kind)||!"assistant".equals(item.path("role").asText())||!item.path("id").isTextual()
+                        ||!event.path("output_index").isIntegralNumber()||event.path("output_index").asInt(-1)<0)
+                    throw failure("output_invalid","generation_message_or_tool_invalid",null);
+                if("response.output_item.added".equals(type)){
+                    if(messageId!=null)throw failure("output_invalid","stream_multiple_messages",null);
+                    messageId=item.path("id").textValue();messageIndex=event.path("output_index").asInt();
+                }else if(!Objects.equals(messageId,item.path("id").textValue())||messageIndex!=event.path("output_index").asInt()
+                        ||!"completed".equals(item.path("status").asText()))throw failure("output_incomplete","stream_message_not_completed",null);
+                return;
+            }
+            if("response.output_text.delta".equals(type)||"response.output_text.done".equals(type)
+                    ||"response.content_part.added".equals(type)||"response.content_part.done".equals(type)){
+                if(messageId==null||!messageId.equals(event.path("item_id").asText())||!event.path("output_index").isIntegralNumber()
+                        ||messageIndex!=event.path("output_index").asInt()||!event.path("content_index").isIntegralNumber()||event.path("content_index").asInt()!=0)
+                    throw failure("output_invalid","stream_content_identity_invalid",null);
+                if(type.startsWith("response.content_part.")){
+                    if(!"output_text".equals(event.path("part").path("type").asText()))throw failure("output_invalid","generation_text_or_refusal_invalid",null);
+                    return;
+                }
+                if("response.output_text.done".equals(type)){
+                    if(!event.path("text").isTextual()||!text.toString().equals(event.path("text").textValue()))throw failure("output_invalid","stream_final_text_differs",null);
+                    return;
+                }
+                if(!event.path("delta").isTextual())throw failure("output_invalid","stream_delta_not_text",null);
+                String part=event.path("delta").textValue();
+                if(part.length()>profile.generationCap-text.length())throw failure("output_incomplete","stream_output_cap_exceeded",null);
+                text.append(part);if(!part.isEmpty())delta.accept(part);return;
+            }
+            if("response.completed".equals(type)){
+                JsonNode response=event.path("response");
+                if(responseId==null||!responseId.equals(response.path("id").asText()))throw failure("output_invalid","stream_response_identity_changed",null);
+                result=decode(new Response(200,response.toString()),profile);
+                String expected=JsonUtils.isBlankText(profile.key)?text.toString():text.toString().replace(profile.key,"[REDACTED]");
+                if(messageId==null||!result.equals(expected))throw failure("output_invalid","stream_final_text_differs",null);
+                complete=true;return;
+            }
+            if(type.startsWith("response.reasoning_")||"response.queued".equals(type))return;
+            throw failure("output_invalid","stream_event_type_unsupported",null);
+        }
+        String finish(){if(!complete)throw failure("output_incomplete","generation_stream_completion_missing",null);delta.finish();return result;}
     }
     private static String decode(Response response,Profile p){
         if(response.status!=200)throw failure("provider_failed","generation_provider_rejected",response.status);

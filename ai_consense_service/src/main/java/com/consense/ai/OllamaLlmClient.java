@@ -13,6 +13,9 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Consumer;
+import java.io.IOException;
+import com.fasterxml.jackson.core.JsonParser;
 
 /**
  * Ollama 原生协议客户端：
@@ -41,13 +44,13 @@ public class OllamaLlmClient implements LlmClient, EmbeddingAvailability {
         return chat(turns, schema);
     }
 
-    private String chat(List<ChatTurn> turns, JsonNode schema) {
+    private ObjectNode request(List<ChatTurn> turns, JsonNode schema, boolean stream) {
         if (schema != null && cfg.getStructuredMaxTokens() <= 0) {
             throw new IllegalArgumentException("Structured output budget must be positive");
         }
         ObjectNode body = JsonUtils.mapper().createObjectNode();
         body.put("model", cfg.getChatModel());
-        body.put("stream", false);
+        body.put("stream", stream);
         ArrayNode messages = body.putArray("messages");
         for (ChatTurn turn : turns) {
             ObjectNode node = messages.addObject();
@@ -64,7 +67,11 @@ public class OllamaLlmClient implements LlmClient, EmbeddingAvailability {
             // Vetting must fail visibly rather than generate an unbounded quotation/list loop.
             options.put("num_predict", cfg.getStructuredMaxTokens());
         }
+        return body;
+    }
 
+    private String chat(List<ChatTurn> turns, JsonNode schema) {
+        ObjectNode body = request(turns, schema, false);
         String raw = http.postJson(trim(cfg.getBaseUrl()) + "/api/chat",
                 JsonUtils.write(body), cfg.getTimeoutMs(), null, schema == null ? cfg.getMaxRetry() : 0);
 
@@ -78,6 +85,49 @@ public class OllamaLlmClient implements LlmClient, EmbeddingAvailability {
             throw new BizException("Ollama 未返回内容，请确认模型 " + cfg.getChatModel() + " 已 pull");
         }
         return content.asText();
+    }
+
+    @Override public boolean supportsStreaming() { return true; }
+
+    @Override public String chatStructuredStream(List<ChatTurn> turns, JsonNode schema,
+                                                 Consumer<String> onDelta, Consumer<Runnable> onCancel) {
+        if (schema == null || !schema.isObject()) throw new IllegalArgumentException("A JSON schema object is required");
+        java.util.Objects.requireNonNull(onDelta);
+        StringBuilder content = new StringBuilder();
+        boolean[] done = {false};
+        http.postJsonStream(trim(cfg.getBaseUrl()) + "/api/chat", JsonUtils.write(request(turns, schema, true)),
+                cfg.getTimeoutMs(), null, 16 * 1024 * 1024, false, value -> {
+            JsonNode root;
+            try (JsonParser parser = JsonUtils.mapper().getFactory().createParser(value)) {
+                parser.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
+                root = JsonUtils.mapper().readTree(parser);
+                if (root == null || !root.isObject() || parser.nextToken() != null) throw new IOException();
+            } catch (IOException invalid) { throw new IncompleteModelResponseException("Invalid Ollama streaming envelope", "", null,
+                    IncompleteModelResponseException.FailureKind.INVALID_RESPONSE_ENVELOPE, null); }
+            if (root.hasNonNull("error")) throw new IncompleteModelResponseException("Ollama streaming provider error", root.toString(), null,
+                    IncompleteModelResponseException.FailureKind.PROVIDER_ERROR, root);
+            if (done[0] || !root.path("done").isBoolean() || !root.path("message").isObject()
+                    || !root.path("message").path("content").isTextual()
+                    || !"assistant".equals(root.path("message").path("role").asText())
+                    || root.path("message").hasNonNull("tool_calls")
+                    && !(root.path("message").path("tool_calls").isArray() && root.path("message").path("tool_calls").isEmpty()))
+                throw new IncompleteModelResponseException("Incomplete Ollama streaming message", root.toString(), null,
+                        IncompleteModelResponseException.FailureKind.INVALID_RESPONSE_ENVELOPE, root);
+            String part = root.path("message").path("content").textValue();
+            if (part.length() > 4 * 1024 * 1024 - content.length()) throw new IncompleteModelResponseException("Ollama streaming output bound exceeded", "", null,
+                    IncompleteModelResponseException.FailureKind.OUTPUT_BUDGET_EXHAUSTED, root);
+            content.append(part); if (!part.isEmpty()) onDelta.accept(part);
+            if (root.path("done").booleanValue()) {
+                String reason = root.path("done_reason").asText();
+                if (!"stop".equals(reason)) throw new IncompleteModelResponseException("Ollama streaming response did not stop normally", root.toString(),
+                        JsonUtils.mapper().getNodeFactory().textNode(content.toString()), "length".equals(reason)
+                        ? IncompleteModelResponseException.FailureKind.OUTPUT_BUDGET_EXHAUSTED : IncompleteModelResponseException.FailureKind.INCOMPLETE_FINISH, root);
+                done[0] = true;
+            }
+        }, onCancel);
+        if (!done[0] || JsonUtils.isBlankText(content.toString())) throw new IncompleteModelResponseException("Ollama stream ended without completed text", "",
+                JsonUtils.mapper().getNodeFactory().textNode(content.toString()), IncompleteModelResponseException.FailureKind.INCOMPLETE_FINISH, null);
+        return content.toString();
     }
 
     @Override
