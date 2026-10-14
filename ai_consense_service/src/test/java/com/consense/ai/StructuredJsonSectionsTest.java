@@ -30,4 +30,13 @@ class StructuredJsonSectionsTest {
         }
     }
     @Test void rejectsUnboundedOutput(){StructuredJsonSections parser=new StructuredJsonSections(s->{});char[] large=new char[4*1024*1024+1];Arrays.fill(large,' ');assertThrows(IllegalArgumentException.class,()->parser.accept(new String(large)));}
+    @Test void onlyJsonGrammarFailuresHaveTheDeferrableType(){
+        StructuredJsonSections parser=new StructuredJsonSections(s->{});
+        assertThrows(StructuredJsonSections.InvalidJsonException.class,()->parser.accept("{\"sections\":[{\"content\":invalid}]}"));
+        IllegalStateException cancellation=new IllegalStateException("AUTHORED cancellation");
+        StructuredJsonSections callback=new StructuredJsonSections(s->{throw cancellation;});
+        assertSame(cancellation,assertThrows(IllegalStateException.class,()->callback.accept("{\"sections\":[{}]}")));
+        StructuredJsonSections bounded=new StructuredJsonSections(s->{});char[] huge=new char[4*1024*1024+1];
+        assertFalse(assertThrows(IllegalArgumentException.class,()->bounded.accept(new String(huge))) instanceof StructuredJsonSections.InvalidJsonException);
+    }
 }

@@ -53,7 +53,7 @@ final class AdvisoryHarness {
             + "Omit uncertainty sections when no actual affected gap or missing_evidence check remains; do not emit empty uncertainty placeholders. In explicit reference_only interpretation, absent project adoption is a disclosed scope limit, not an adoption gap, missingReason or clarification. Other genuinely missing source editions, amendments and necessary facts remain gaps. "
             + "A gap belongs to its section's affected determination. clarifications is an array of needed gap enums; the application renders necessary questions. missingReason is one gap enum or empty, never free prose. "
             + "Do not invent additional hypothetical facts. User factual premises remain explicitly unverified; where more assumptions are necessary, report the affected gap and ask for the needed fact. "
-            + "Each section has exactly R1..R10 check records: ruleId, status (pass/fail/not_applicable/missing_evidence), short reason, citations of current real evidence IDs. "
+            + "EVERY section, including each analysis, flowchart and uncertainty section after the opening, has its OWN required checks array with exactly R1..R10 records: ruleId, status (pass/fail/not_applicable/missing_evidence), short reason, citations of current real evidence IDs. Never rely on the opening section's checks for later sections. "
             + "Checks apply to this section; explain every not_applicable and localize each missing_evidence. "
             + "For limits/uncertainty ALL citations arrays, including every check.citations, MUST be empty. R1/R10 may pass or report missing_evidence; R2..R9 must be not_applicable or missing_evidence, never unsupported pass. "
             + "Every citations array in analysis, checks, graph nodes and graph edges uses ONLY the exact allowed public aliases [1], [2], etc in this request's schema. Internal fixed IDs, parent IDs, hashes, model-unit addresses and document IDs are lookup metadata, NEVER output citation IDs. "
@@ -130,28 +130,30 @@ final class AdvisoryHarness {
 
     /** Validate this fixed contract before Jackson mapping can coerce strings, nulls or unknown fields. */
     static void shape(JsonNode value,JsonNode schema) {
-        shape(value,schema,"answer");
+        List<String> problems=new ArrayList<>();shape(value,schema,"answer",problems);
+        if(!problems.isEmpty())throw invalid(String.join("; ",problems));
     }
-    private static void shape(JsonNode value,JsonNode schema,String path) {
+    private static void shape(JsonNode value,JsonNode schema,String path,List<String> problems) {
+        if(problems.size()>=64)return;
         String type=schema.path("type").asText();
-        if(value==null||value.isNull())throw invalid(path+": value is required and cannot be null");
+        if(value==null||value.isNull()){problems.add(path+": value is required and cannot be null");return;}
         if("object".equals(type)) {
-            if(!value.isObject())throw invalid(path+": expected an object");
-            for(JsonNode required:schema.path("required"))if(!value.has(required.asText()))throw invalid(path+"."+required.asText()+": required field is missing");
+            if(!value.isObject()){problems.add(path+": expected an object");return;}
+            for(JsonNode required:schema.path("required"))if(!value.has(required.asText())&&problems.size()<64)problems.add(path+"."+required.asText()+": required field is missing");
             Iterator<Map.Entry<String,JsonNode>> fields=value.fields();
-            while(fields.hasNext()){Map.Entry<String,JsonNode> field=fields.next();JsonNode child=schema.path("properties").get(field.getKey());
-                if(child==null){List<String> allowed=new ArrayList<>();schema.path("properties").fieldNames().forEachRemaining(allowed::add);throw invalid(path+": fields must be only "+JsonUtils.write(allowed));}
-                shape(field.getValue(),child,path+"."+field.getKey());}
+            while(fields.hasNext()&&problems.size()<64){Map.Entry<String,JsonNode> field=fields.next();JsonNode child=schema.path("properties").get(field.getKey());
+                if(child==null){List<String> allowed=new ArrayList<>();schema.path("properties").fieldNames().forEachRemaining(allowed::add);problems.add(path+": fields must be only "+JsonUtils.write(allowed));}
+                else shape(field.getValue(),child,path+"."+field.getKey(),problems);}
         } else if("array".equals(type)) {
-            if(!value.isArray()||value.size()>256)throw invalid(path+": expected an array of at most 256 items");
-            int index=0;for(JsonNode item:value)shape(item,schema.path("items"),path+"["+(index++)+"]");
+            if(!value.isArray()||value.size()>256){problems.add(path+": expected an array of at most 256 items");return;}
+            int index=0;for(JsonNode item:value)shape(item,schema.path("items"),path+"["+(index++)+"]",problems);
         } else if("boolean".equals(type)) {
-            if(!value.isBoolean())throw invalid(path+": expected a boolean");
+            if(!value.isBoolean())problems.add(path+": expected a boolean");
         } else if("string".equals(type)) {
-            if(!value.isTextual()||value.textValue().length()>schema.path("maxLength").asInt(1048576))throw invalid(path+": expected bounded text");
-            if(schema.has("pattern")&&!value.textValue().matches(schema.path("pattern").asText()))throw invalid(path+": text must match "+schema.path("pattern").asText());
+            if(!value.isTextual()||value.textValue().length()>schema.path("maxLength").asInt(1048576)){problems.add(path+": expected bounded text");return;}
+            if(schema.has("pattern")&&!value.textValue().matches(schema.path("pattern").asText()))problems.add(path+": text must match "+schema.path("pattern").asText());
             if(schema.has("enum")){boolean allowed=false;for(JsonNode choice:schema.path("enum"))if(choice.equals(value))allowed=true;
-                if(!allowed)throw invalid(path+": value must be one of "+schema.path("enum"));}
+                if(!allowed&&problems.size()<64)problems.add(path+": value must be one of "+schema.path("enum"));}
         } else throw new IllegalStateException("Unknown fixed Advisory schema type");
     }
 
