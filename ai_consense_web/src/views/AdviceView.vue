@@ -388,7 +388,10 @@ async function refreshIndex() {
 
 async function clearChat() {
   const id = projectId.value, epoch = viewEpoch, selectedSession = sessionId.value, selectedScopeEpoch = scopeEpoch
-  ++askSequence; ++reloadSequence; asking.value = false
+  const stopped = stopCurrentRequest()
+  ++askSequence; ++reloadSequence; asking.value = true
+  await stopped
+  if (epoch !== viewEpoch || id !== projectId.value || selectedSession !== sessionId.value || selectedScopeEpoch !== scopeEpoch) return
   try {
     await adviceApi.clearMessages(id, selectedSession || undefined)
     if (epoch !== viewEpoch || id !== projectId.value || selectedSession !== sessionId.value || selectedScopeEpoch !== scopeEpoch) return
@@ -400,6 +403,8 @@ async function clearChat() {
     // 全局 reporter 已经 toast 出 message；这里把堆栈打 console 方便排查
     console.error('[clearChat] failed', error)
     throw error
+  } finally {
+    if (epoch === viewEpoch && id === projectId.value && selectedSession === sessionId.value && selectedScopeEpoch === scopeEpoch) asking.value = false
   }
 }
 

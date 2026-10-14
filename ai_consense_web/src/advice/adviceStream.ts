@@ -72,7 +72,7 @@ export async function streamAdvice(projectId: string, request: AdviceStreamReque
       if (pending.length > 16 * 1024 * 1024) throw new Error('ADVICE_STREAM_FRAME_TOO_LARGE')
     }
     if (pending.trim()) throw new Error('ADVICE_STREAM_INCOMPLETE_FRAME')
-    if (!completed) throw new Error('The consultation connection ended before the answer was saved. Please retry.')
+    if (!completed) throw new Error('The consultation connection ended without a completion confirmation. Check the session history before retrying; the answer may already have been saved.')
     return completed
   } finally { options.signal.removeEventListener('abort', abort); await reader.cancel().catch(() => undefined); reader.releaseLock() }
 }

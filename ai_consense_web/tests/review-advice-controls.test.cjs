@@ -580,9 +580,10 @@ test('new session and reference-only question preserve click-time purpose; budge
 })
 
 test('clear current session invalidates an in-flight response and leaves other sessions untouched', async () => {
-  const pending = deferred(), h = await harness({ initialView: 'advice', respondOverride: ({ url }) => {
+  let asks = 0
+  const pending = deferred(), h = await harness({ initialView: 'advice', respondOverride: ({ url, body }) => {
     if (url.endsWith('/sessions')) return sessions
-    if (url.endsWith('/ask/stream')) return pending.promise
+    if (url.endsWith('/ask/stream')) return ++asks === 1 ? pending.promise : { sessionId: body.sessionId, grounded: true, title: localized('New'), content: localized('NEW ANSWER'), sources: [], citations: [] }
   } })
   try {
     sessionSelect(h).props['onUpdate:modelValue']('session-A'); await settle()
@@ -590,6 +591,11 @@ test('clear current session invalidates an in-flight response and leaves other s
     const asking = button(h, 'Ask').props.onClick(); await settle()
     await button(h, 'Clear chat').props.onClick(); await settle()
     assert.equal(h.requests.find(request => request.method === 'delete').url, '/advice/project-A/messages?sessionId=session-A')
+    const stop = h.requests.find(request => request.url.includes('/stop?'))
+    assert.ok(stop); assert.match(stop.url, /sessionId=session-A$/)
+    assert.ok(h.requests.indexOf(stop) < h.requests.findIndex(request => request.method === 'delete'))
+    find(h.root, node => node.tag === 'textarea').props['onUpdate:modelValue']('New question'); await settle()
+    await button(h, 'Ask').props.onClick(); await settle(); assert.equal(asks, 2); assert.match(text(h.root), /NEW ANSWER/)
     pending.resolve({ sessionId: 'session-A', grounded: true, title: localized('Late'), content: localized('CLEARED ANSWER'), sources: [], citations: [] }); await asking; await settle()
     assert.doesNotMatch(text(h.root), /CLEARED ANSWER|Old question/)
   } finally { h.dispose() }

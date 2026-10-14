@@ -24,15 +24,16 @@ public final class AdviceBudgetFixture {
         try{old=JsonUtils.parse(raw);if(!old.isObject()||old.hasNonNull("sections")||!old.path("grounded").isBoolean())return raw;}
         catch(RuntimeException invalid){return raw;}
         ObjectNode answer=JsonUtils.mapper().createObjectNode();answer.put("grounded",old.path("grounded").asBoolean());answer.put("questionType","T5");
-        String basis=old.path("basisScope").asText("project_contract");answer.put("basisScope",basis);answer.put("missingReason",old.path("missingReason").asText(""));
-        answer.set("clarifications",old.hasNonNull("clarifications")?old.path("clarifications"):JsonUtils.mapper().createArrayNode());ArrayNode sections=answer.putArray("sections");
-        sections.add(section("limits","limits","AUTHORED facts, assumptions and evidence limits TEST ONLY","insufficient",JsonUtils.mapper().createArrayNode()));
+        String basis=old.path("basisScope").asText("project_contract");answer.put("basisScope",basis);answer.put("missingReason",old.path("missingReason").asText("").isEmpty()?"":"other_fact");
+        if(old.path("clarifications").isArray()&&!old.path("clarifications").isEmpty())answer.putArray("clarifications").add("procedure");else answer.putArray("clarifications");ArrayNode sections=answer.putArray("sections");
+        sections.add(section("limits","limits","","insufficient",JsonUtils.mapper().createArrayNode()));
         if(!old.path("answer").asText("").isEmpty())sections.add(section("analysis","analysis",old.path("answer").asText(),basis,old.has("citations")?old.path("citations"):JsonUtils.mapper().createArrayNode()));
-        if(!old.path("missingReason").asText("").isEmpty())sections.add(section("unknown","uncertainty",old.path("missingReason").asText(),"insufficient",JsonUtils.mapper().createArrayNode()));
+        if(!old.path("missingReason").asText("").isEmpty()){ObjectNode unknown=section("unknown","uncertainty","","insufficient",JsonUtils.mapper().createArrayNode());unknown.withArray("gaps").add("other_fact");sections.add(unknown);}
         return JsonUtils.write(answer);
     }
     private static ObjectNode section(String id,String kind,String text,String basis,JsonNode refs){
-        ObjectNode section=JsonUtils.mapper().createObjectNode();section.put("id",id);section.put("kind",kind);section.put("content",text);section.put("basisScope",basis);section.set("citations",refs);
+        ObjectNode section=JsonUtils.mapper().createObjectNode();section.put("id",id);section.put("kind",kind);section.put("language","en");section.put("content",text);section.put("basisScope",basis);section.set("citations",refs);
+        section.putArray("gaps");
         ArrayNode checks=section.putArray("checks");for(int i=1;i<=10;i++){
             ObjectNode check=checks.addObject();check.put("ruleId","R"+i);check.put("status",i==1||i==10||("analysis".equals(kind)&&i==2)?"pass":"not_applicable");
             check.put("reason","AUTHORED isolated protocol check TEST ONLY; no model or legal acceptance");check.set("citations",("analysis".equals(kind)&&i==2)?refs:JsonUtils.mapper().createArrayNode());}

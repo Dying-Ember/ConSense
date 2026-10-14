@@ -107,7 +107,7 @@ class AdviceDocumentScopeIntegrationTest {
         mvc.perform(post("/api/advice/{id}/index/rebuild",id)).andExpect(jsonPath("$.code").value(0));
         when(local.chat(anyList())).thenReturn("{\"grounded\":true,\"answer\":\"TEST ONLY fabricated\",\"citations\":[\"outside-file SCC999\"],\"clarifications\":[\"What stage is this contract at?\"]}");
         JsonNode rejected=ask(id,"fullset");assertFalse(rejected.path("grounded").asBoolean());
-        assertEquals("What stage is this contract at?",rejected.path("clarifications").get(0).asText());
+        assertTrue(rejected.path("clarifications").get(0).asText().contains("applicable procedure and regime"));
         when(local.chat(anyList())).thenReturn("{\"grounded\":true,\"answer\":\"TEST ONLY accepted\",\"citations\":[\"[1]\"]}");
         JsonNode accepted=ask(id,"fullset");assertTrue(accepted.path("grounded").asBoolean());
         original.setTextContent("MUTATED CONTENT TEST ONLY");sources.saveAndFlush(original);
@@ -207,7 +207,7 @@ class AdviceDocumentScopeIntegrationTest {
         String id=project();source(id,"SCC","10 - SCC.txt","VETTING_PACKAGE","tender","SCC4.1 TEST ONLY adopted contractual condition");
         mvc.perform(post("/api/advice/{id}/index/rebuild",id)).andExpect(jsonPath("$.code").value(0));
         when(local.chat(anyList())).thenReturn("{\"grounded\":true,\"answer\":\"TEST ONLY tentative conclusion\",\"citations\":[\"[1]\"],\"clarifications\":[\"Is this pre-contract or post-contract?\"]}");
-        JsonNode pending=ask(id,"contract");assertFalse(pending.path("grounded").asBoolean());assertEquals("insufficient",pending.path("basisScope").asText());assertEquals("Is this pre-contract or post-contract?",pending.path("clarifications").get(0).asText());
+        JsonNode pending=ask(id,"contract");assertFalse(pending.path("grounded").asBoolean());assertEquals("insufficient",pending.path("basisScope").asText());assertTrue(pending.path("clarifications").get(0).asText().contains("applicable procedure and regime"));
         when(local.chat(anyList())).thenReturn("{\"grounded\":true,\"answer\":\"TEST ONLY conditional conclusion following user background\",\"citations\":[\"[1]\"]}");
         JsonNode completed=data(post("/api/advice/{id}/ask",id).contentType(MediaType.APPLICATION_JSON).content("{\"question\":\"TEST ONLY post-contract\",\"scope\":\"contract\",\"replyToMessageId\":"+pending.path("messageId").asLong()+"}"));assertTrue(completed.path("grounded").asBoolean());
     }
@@ -232,6 +232,25 @@ class AdviceDocumentScopeIntegrationTest {
         com.consense.domain.ChatMessage row=messages.findById(result.path("messageId").asLong()).get();JsonNode checks=JsonUtils.parse(row.getAdviceChecksJson());
         assertEquals("ec23c7a665f803598a82d8aaf41ace65df1e431ac5e4ab24610e61d11ccf0470",checks.path("policySha256").asText());assertEquals(3,checks.path("publishedSectionIds").size());
         assertTrue(checks.path("applicationRejections").isEmpty());assertTrue(checks.path("sections").get(1).path("checks").isArray());assertEquals(result.path("sources").get(0).path("sourceHash"),JsonUtils.parse(row.getSourcesJson()).get(0).path("sourceHash"));
+    }
+    @Test void explicitMissingReasonCannotBeUpgradedByModelGroundedAndRemainsVisibleWithQuestions() throws Exception {
+        String id=project();source(id,"SCC","SCC.txt","VETTING_PACKAGE","tender","AUTHORED procedural provision");
+        mvc.perform(post("/api/advice/{id}/index/rebuild",id)).andExpect(jsonPath("$.code").value(0));
+        com.fasterxml.jackson.databind.node.ObjectNode envelope=(com.fasterxml.jackson.databind.node.ObjectNode)JsonUtils.parse(com.consense.service.advice.AdviceBudgetFixture.contract("{\"grounded\":true,\"answer\":\"AUTHORED supported procedure [1]\",\"citations\":[\"[1]\"]}"));
+        envelope.put("missingReason","notice_dates");doReturn(JsonUtils.write(envelope)).when(local).chatStructured(anyList(),any());
+        JsonNode result=ask(id,"contract");assertFalse(result.path("grounded").asBoolean());assertEquals("insufficient",result.path("basisScope").asText());
+        assertTrue(result.path("content").path("en").asText().contains("supported procedure [1]"));assertTrue(result.path("content").path("en").asText().contains("final deadline cannot be determined"));
+        assertTrue(result.path("clarifications").get(0).asText().contains("notice, receipt and event dates"));
+        JsonNode history=data(get("/api/advice/{id}/messages",id));assertEquals(result.path("content"),history.get(1).path("content"));assertEquals("insufficient",history.get(1).path("basisScope").asText());
+    }
+    @Test void acceptedMissingEvidenceCheckKeepsWholeAnswerInsufficientWithoutDroppingSupportedAnalysis() throws Exception {
+        String id=project();source(id,"SCC","SCC.txt","VETTING_PACKAGE","tender","AUTHORED procedural provision");
+        mvc.perform(post("/api/advice/{id}/index/rebuild",id)).andExpect(jsonPath("$.code").value(0));
+        com.fasterxml.jackson.databind.node.ObjectNode envelope=(com.fasterxml.jackson.databind.node.ObjectNode)JsonUtils.parse(com.consense.service.advice.AdviceBudgetFixture.contract("{\"grounded\":true,\"answer\":\"AUTHORED independent procedure [1]\",\"citations\":[\"[1]\"]}"));
+        ((com.fasterxml.jackson.databind.node.ObjectNode)envelope.path("sections").get(0).path("checks").get(0)).put("status","missing_evidence");
+        doReturn(JsonUtils.write(envelope)).when(local).chatStructured(anyList(),any());JsonNode result=ask(id,"contract");
+        assertFalse(result.path("grounded").asBoolean());assertEquals("insufficient",result.path("basisScope").asText());assertTrue(result.path("content").path("en").asText().contains("independent procedure [1]"));
+        assertTrue(result.path("content").path("en").asText().contains("affected requested determination remains unresolved"));assertFalse(result.path("clarifications").isEmpty());
     }
     @Test void unrecordedChecksAreRejectedRatherThanInventedForNewAnswers() throws Exception {
         String id=project();source(id,"SCC","SCC.txt","VETTING_PACKAGE","tender","AUTHORED provision");mvc.perform(post("/api/advice/{id}/index/rebuild",id)).andExpect(jsonPath("$.code").value(0));
@@ -266,7 +285,8 @@ class AdviceDocumentScopeIntegrationTest {
         String id=project();source(id,"SCC","SCC.txt","VETTING_PACKAGE","tender","AUTHORED Contractor submits notice; evidence review follows.");mvc.perform(post("/api/advice/{id}/index/rebuild",id)).andExpect(jsonPath("$.code").value(0));
         com.fasterxml.jackson.databind.node.ObjectNode answer=(com.fasterxml.jackson.databind.node.ObjectNode)JsonUtils.parse(com.consense.service.advice.AdviceBudgetFixture.contract("{\"grounded\":true,\"answer\":\"AUTHORED notice procedure [1]\",\"citations\":[\"[1]\"]}"));answer.put("questionType","T6");
         com.fasterxml.jackson.databind.node.ObjectNode graph=(com.fasterxml.jackson.databind.node.ObjectNode)answer.path("sections").get(1);graph.put("kind","flowchart");
-        graph.set("flowchartPlan",JsonUtils.parse("{\"nodes\":[{\"id\":\"s\",\"label\":\"Start\",\"kind\":\"start\",\"citations\":[]},{\"id\":\"f\",\"label\":\"Review evidence\",\"kind\":\"end\",\"citations\":[\"[1]\"]}],\"edges\":[{\"from\":\"s\",\"to\":\"f\",\"condition\":\"\",\"actor\":\"Contractor\",\"action\":\"Submit notice\",\"period\":\"\",\"startEvent\":\"\",\"citations\":[\"[1]\"]}]}"));
+        ((com.fasterxml.jackson.databind.node.ObjectNode)graph.path("checks").get(2)).put("status","pass").set("citations",graph.path("citations"));
+        graph.set("flowchartPlan",JsonUtils.parse("{\"nodes\":[{\"id\":\"s\",\"label\":\"\",\"kind\":\"start\",\"citations\":[]},{\"id\":\"f\",\"label\":\"Review evidence\",\"kind\":\"end\",\"citations\":[\"[1]\"]}],\"edges\":[{\"from\":\"s\",\"to\":\"f\",\"condition\":\"\",\"actor\":\"Contractor\",\"action\":\"Submit notice\",\"period\":\"\",\"startEvent\":\"\",\"citations\":[\"[1]\"]}]}"));
         com.fasterxml.jackson.databind.node.ObjectNode invalid=answer.deepCopy();((com.fasterxml.jackson.databind.node.ObjectNode)invalid.path("sections").get(1).path("flowchartPlan").path("edges").get(0)).put("period","28 days");
         java.util.concurrent.atomic.AtomicInteger calls=new java.util.concurrent.atomic.AtomicInteger();doAnswer(call->{String prompt=JsonUtils.write(call.getArgument(0));assertTrue(prompt.contains("Application task selection: T6"));assertTrue(prompt.contains("请画个处理流程图"));return JsonUtils.write(calls.getAndIncrement()==0?invalid:answer);}).when(local).chatStructured(anyList(),any());
         JsonNode result=data(post("/api/advice/{id}/ask",id).contentType(MediaType.APPLICATION_JSON).content("{\"question\":\"请画个处理流程图\",\"scope\":\"contract\"}"));assertTrue(result.path("grounded").asBoolean());assertEquals(2,calls.get());verify(counter,times(2)).observe(any());

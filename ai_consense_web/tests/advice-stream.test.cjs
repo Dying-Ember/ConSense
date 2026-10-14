@@ -41,7 +41,7 @@ test('actual fragmented response delivers phase and validated unit before commit
 
 test('EOF after a checked unit does not report completion', async () => {
   const api = client(async () => new Response(event('section', { content: 'Supported [1]', citations: ['[1]'], sources: [] }), { headers: { 'Content-Type': 'text/event-stream' } }))
-  await assert.rejects(api.streamAdvice('project-A', request, options()), /ended before the answer was saved/)
+  await assert.rejects(api.streamAdvice('project-A', request, options()), /Check the session history before retrying; the answer may already have been saved/)
 })
 
 test('request/session mismatch, invalid section and error event reject the stream', async () => {
