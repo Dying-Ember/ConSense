@@ -186,6 +186,13 @@ class AdviceSessionIntegrationTest {
         assertFalse(dispatched.get(0).get(1).getContent().equals(dispatched.get(1).get(1).getContent()));
         assertFalse(counted.get(0).getSerializedInputSha256().equals(counted.get(1).getSerializedInputSha256()));assertEquals(2,history(project,session).size());
     }
+    @Test void invalidRepairNeverCreatesACompletedHistoryExchange() throws Exception {
+        String project=project();source(project,"CURRENT BASIS TEST ONLY");rebuild(project);String session=session(project,"contract","project_contract");
+        com.fasterxml.jackson.databind.node.ObjectNode first=(com.fasterxml.jackson.databind.node.ObjectNode)JsonUtils.parse(com.consense.service.advice.AdviceBudgetFixture.contract(answer));first.put("basisScope","reference_only");
+        when(local.chatStructured(anyList(),any())).thenReturn(JsonUtils.write(first),"{\"sections\":[invalid]}");
+        mvc.perform(askRequest(project,session,"contract","project_contract","AUTHORED invalid repair")).andExpect(jsonPath("$.code").value(4205));
+        verify(local,times(2)).chatStructured(anyList(),any());assertTrue(history(project,session).isEmpty());
+    }
 
     @Test void sourceMutationInsideTokenCountingPreventsModelDispatch() throws Exception {
         String project=project();SourceDocument original=source(project,"CURRENT BASIS TEST ONLY");rebuild(project);String session=session(project,"contract","project_contract");
@@ -247,7 +254,7 @@ class AdviceSessionIntegrationTest {
         assertTrue(data(askRequest(project,null,"contract","project_contract","LEGACY RETRY TEST ONLY")).path("grounded").asBoolean());
         assertEquals(2,sent.size());assertEquals(sent.get(0).get(0).getContent(),sent.get(1).get(0).getContent());
         assertTrue(sent.get(0).get(0).getContent().endsWith("\n\n【输出要求】只输出一个合法的 JSON，不要 Markdown 代码块，不要任何解释文字。"));
-        assertTrue(sent.get(1).get(1).getContent().startsWith(sent.get(0).get(1).getContent()));assertTrue(sent.get(1).get(1).getContent().contains("Repair the same answer once"));
+        assertTrue(sent.get(1).get(1).getContent().startsWith(sent.get(0).get(1).getContent()));assertTrue(sent.get(1).get(1).getContent().contains("one admitted repair"));
         assertEquals(2,data(get("/api/advice/{id}/messages",project)).size());
     }
 

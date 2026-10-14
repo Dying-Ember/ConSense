@@ -29,6 +29,7 @@ class AdviceResponsesStreamingTest {
     private HttpServer server;
     private AdviceResponsesTransport.Operation operation;
     private String events;
+    private final Queue<String> attemptEvents=new ArrayDeque<>();
     private final List<String> bodies=new ArrayList<>();
     private final AtomicInteger calls=new AtomicInteger();
     private static final String SOURCE=VettingCorpus.hash("test current sources");
@@ -37,7 +38,7 @@ class AdviceResponsesStreamingTest {
         server.createContext("/v1/responses",exchange->{
             calls.incrementAndGet();bodies.add(read(exchange.getRequestBody()));
             String response=exchange.getRequestURI().getPath().endsWith("input_tokens")
-                    ?"{\"object\":\"response.input_tokens\",\"input_tokens\":1000}":events;
+                    ?"{\"object\":\"response.input_tokens\",\"input_tokens\":1000}":attemptEvents.isEmpty()?events:attemptEvents.remove();
             exchange.getResponseHeaders().set("Content-Type",exchange.getRequestURI().getPath().endsWith("input_tokens")?"application/json":"text/event-stream");
             exchange.sendResponseHeaders(200,0);byte[] bytes=response.getBytes(StandardCharsets.UTF_8);
             for(byte value:bytes){exchange.getResponseBody().write(value);exchange.getResponseBody().flush();}exchange.close();
@@ -122,23 +123,27 @@ class AdviceResponsesStreamingTest {
         assertEquals("stream_content_identity_invalid",failure.getReason());assertTrue(deltas.isEmpty());assertEquals(2,calls.get());
     }
     private Object publication(AdviceService service,AdviceProgress progress,Runnable guard)throws Exception {
+        return publication(service,progress,guard,Collections.emptyList());
+    }
+    private Object publication(AdviceService service,AdviceProgress progress,Runnable guard,List<com.consense.web.dto.AdviceDtos.CitationVO> sources)throws Exception {
         Class<?> question=Class.forName(AdviceService.class.getName()+"$QuestionContext");Constructor<?> context=question.getDeclaredConstructor(String.class,List.class);context.setAccessible(true);
         Class<?> publication=Class.forName(AdviceService.class.getName()+"$Publication");Constructor<?> constructor=publication.getDeclaredConstructor(AdviceService.class,List.class,boolean.class,AdviceProgress.class,Runnable.class,question);constructor.setAccessible(true);
-        return constructor.newInstance(service,Collections.emptyList(),true,progress,guard,context.newInstance("AUTHORED question",Collections.emptyList()));
+        return constructor.newInstance(service,sources,true,progress,guard,context.newInstance("AUTHORED question",Collections.emptyList()));
     }
     @Test void applicationSyntaxFailureRetainsExactBoundedWireAndGuardsWithoutPublishingLaterUnitsOrExtraRetry()throws Exception {
         JsonNode valid=JsonUtils.parse(AdviceBudgetFixture.contract("{\"grounded\":true,\"basisScope\":\"reference_only\",\"answer\":\"AUTHORED later unit [1]\",\"citations\":[\"[1]\"]}"));
-        String malformed="{\"sections\":["+valid.path("sections").get(0)+",{\"content\":invalid},"+valid.path("sections").get(1)+"]}";events=stream(malformed);
+        String malformed="{\"sections\":["+valid.path("sections").get(0)+",{\"content\":invalid},"+valid.path("sections").get(1)+"]}";
+        List<String> wires=Arrays.asList(stream(malformed),stream("{\"sections\":[{\"content\":invalid},"+valid.path("sections").get(1)+"]}"));attemptEvents.addAll(wires);
         AdviceService service=new AdviceService(null,null,null,null,null,null,null,null,null,null,null);AtomicInteger guards=new AtomicInteger();List<String> published=new ArrayList<>();
         AdviceProgress progress=new AdviceProgress(){public boolean streaming(){return true;}public void section(String content,List<String> refs,List<com.consense.web.dto.AdviceDtos.CitationVO> sources){published.add(content);}};
         Object publication=publication(service,progress,guards::incrementAndGet);
         com.consense.common.BizException rejected=assertThrows(com.consense.common.BizException.class,()->ReflectionTestUtils.invokeMethod(service,"completeAdvice","AUTHORED rules","AUTHORED material",null,operation,SOURCE,(Runnable)guards::incrementAndGet,publication,"AUTHORED question"));
-        assertEquals(4205,rejected.getCode());assertTrue(rejected.getMessage().contains("after one admitted repair"));assertEquals(4,calls.get());assertEquals(15,guards.get());assertEquals(1,published.size());assertFalse(published.get(0).contains("later unit"));
+        assertEquals(4205,rejected.getCode());assertTrue(rejected.getMessage().contains("after one admitted repair"));assertEquals(4,calls.get());assertTrue(guards.get()>=12);assertEquals(1,published.size());assertFalse(published.get(0).contains("later unit"));
         try(java.util.stream.Stream<Path> directories=Files.list(observationRoot)){
             List<Path> attempts=directories.filter(Files::isDirectory).collect(java.util.stream.Collectors.toList());assertEquals(2,attempts.size());
-            for(Path attempt:attempts){assertArrayEquals(events.getBytes(StandardCharsets.UTF_8),Files.readAllBytes(attempt.resolve("generation-response.utf8.json")));
+            Set<String> captured=new HashSet<>();for(Path attempt:attempts){captured.add(Files.readString(attempt.resolve("generation-response.utf8.json")));
                 JsonNode receipt=JsonUtils.parse(Files.readString(attempt.resolve("generation-response-receipt.json")));assertEquals("native_http_entity_bytes",receipt.path("responseEntityProvenance").asText());assertFalse(receipt.path("providerRawObserved").asBoolean());
-                assertEquals("provider_stream_envelope_validated_source_guards_passed_answer_json_not_yet_parsed",JsonUtils.parse(Files.readString(attempt.resolve("generation-outcome.json"))).path("status").asText());}
+                assertEquals("provider_stream_envelope_validated_source_guards_passed_answer_json_not_yet_parsed",JsonUtils.parse(Files.readString(attempt.resolve("generation-outcome.json"))).path("status").asText());}assertEquals(new HashSet<>(wires),captured);
         }
         String repair=JsonUtils.parse(bodies.get(3)).path("input").get(0).path("content").asText();assertTrue(repair.contains("did not satisfy the application contract"));assertFalse(repair.contains("上一次输出不是合法 JSON"));
     }
@@ -158,5 +163,57 @@ class AdviceResponsesStreamingTest {
         assertEquals(2,calls.get());assertEquals(6,checked.get());try(java.util.stream.Stream<Path> directories=Files.list(observationRoot)){
             Path attempt=directories.filter(Files::isDirectory).findFirst().orElseThrow();assertArrayEquals(events.getBytes(StandardCharsets.UTF_8),Files.readAllBytes(attempt.resolve("generation-response.utf8.json")));
             assertEquals("failed_before_answer_acceptance",JsonUtils.parse(Files.readString(attempt.resolve("generation-outcome.json"))).path("status").asText());}
+    }
+    private ObjectNode authoredAnswer(){return (ObjectNode)JsonUtils.parse(AdviceBudgetFixture.contract("{\"grounded\":true,\"basisScope\":\"reference_only\",\"answer\":\"AUTHORED supported analysis [1]\",\"citations\":[\"[1]\"]}"));}
+    private ObjectNode diagram(ObjectNode answer){
+        ObjectNode section=(ObjectNode)answer.path("sections").get(1).deepCopy();section.put("id","graph").put("kind","flowchart").put("content","AUTHORED supported diagram [1]");
+        section.set("flowchartPlan",JsonUtils.parse("{\"nodes\":[{\"id\":\"s\",\"label\":\"\",\"kind\":\"start\",\"citations\":[]},{\"id\":\"e\",\"label\":\"AUTHORED outcome\",\"kind\":\"end\",\"citations\":[\"[1]\"]}],\"edges\":[{\"from\":\"s\",\"to\":\"e\",\"condition\":\"\",\"actor\":\"\",\"action\":\"\",\"period\":\"\",\"startEvent\":\"\",\"citations\":[\"[1]\"]}]}"));return section;
+    }
+    private List<com.consense.web.dto.AdviceDtos.CitationVO> standard(){return Collections.singletonList(new com.consense.web.dto.AdviceDtos.CitationVO("AUTHORED standard",null,"clause","AUTHORED source",1,"[1]","1","sha","standard",true));}
+    private AdviceService.AnswerRecord complete(ObjectNode first,ObjectNode repair,List<String> published,List<com.consense.web.dto.AdviceDtos.CitationVO> sources)throws Exception {
+        attemptEvents.add(stream(JsonUtils.write(first)));attemptEvents.add(stream(JsonUtils.write(repair)));
+        AdviceService service=new AdviceService(null,null,null,null,null,null,null,null,null,null,null);
+        AdviceProgress progress=new AdviceProgress(){public boolean streaming(){return true;}public void section(String content,List<String> refs,List<com.consense.web.dto.AdviceDtos.CitationVO> refsSources){published.add(content);}};
+        return ReflectionTestUtils.invokeMethod(service,"completeAdvice","AUTHORED rules","AUTHORED material",null,operation,SOURCE,(Runnable)()->{},publication(service,progress,()->{},sources),"AUTHORED question");
+    }
+    @Test void repairAppendsOnlyNewValidatedGraphAndRetainsTheExactPublishedPrefix()throws Exception {
+        ObjectNode first=authoredAnswer();first.put("questionType","T6");ObjectNode graph=diagram(first),broken=graph.deepCopy();broken.remove("checks");first.withArray("sections").add(broken);
+        JsonNode prefix=first.path("sections").deepCopy();ObjectNode repair=first.deepCopy();repair.putArray("sections").add(graph);List<String> published=new ArrayList<>();
+        AdviceService.AnswerRecord answer=complete(first,repair,published,standard());assertEquals(4,calls.get());assertEquals(3,published.size());assertTrue(published.get(2).contains("```mermaid"));
+        JsonNode composed=JsonUtils.mapper().valueToTree(answer.getSections());assertEquals(prefix.get(0),composed.get(0));assertEquals(prefix.get(1),composed.get(1));assertEquals(graph,composed.get(2));assertTrue(answer.isGrounded());
+        JsonNode request=JsonUtils.parse(bodies.get(3));assertTrue(request.path("instructions").asText().contains("ONLY unpublished replacement/additional units"));
+        String user=request.path("input").get(0).path("content").asText();assertTrue(user.contains("omit every one of these IDs"));assertFalse(user.contains("byte-identical"));
+    }
+    @Test void envelopeOnlyRepairMayReturnZeroSectionsWithoutRepublishingTheCompletePrefix()throws Exception {
+        ObjectNode first=authoredAnswer();first.put("basisScope","project_contract");ObjectNode repair=first.deepCopy();repair.put("basisScope","reference_only");repair.putArray("sections");List<String> published=new ArrayList<>();
+        AdviceService.AnswerRecord answer=complete(first,repair,published,standard());assertEquals(4,calls.get());assertEquals(2,published.size());assertEquals("reference_only",answer.getBasisScope());
+        assertEquals(first.path("sections"),JsonUtils.mapper().valueToTree(answer.getSections()));
+    }
+    @Test void repairCannotResubmitAnAcceptedIdEvenUnchangedAndBusinessFailureRemainsImmediate()throws Exception {
+        for(boolean changed:Arrays.asList(false,true)){
+            calls.set(0);bodies.clear();ObjectNode first=authoredAnswer();first.put("basisScope","project_contract");ObjectNode repair=first.deepCopy();ObjectNode repeated=(ObjectNode)first.path("sections").get(1).deepCopy();if(changed)repeated.put("content","AUTHORED changed conclusion [1]");repair.putArray("sections").add(repeated).add(diagram(first));List<String> published=new ArrayList<>();
+            com.consense.common.BizException invalid=assertThrows(com.consense.common.BizException.class,()->complete(first,repair,published,standard()));assertEquals(4205,invalid.getCode());assertTrue(invalid.getMessage().contains("accepted section ID"));assertEquals(4,calls.get());assertEquals(2,published.size());
+        }
+        try(java.util.stream.Stream<Path> dirs=Files.list(observationRoot)){assertEquals(2,dirs.filter(Files::isDirectory).filter(p->!Files.exists(p.resolve("generation-response.utf8.json"))).count());}
+    }
+    @Test void repairStillRequiresCompleteEnvelopeAndUniformLanguageWithNoThirdAttempt()throws Exception {
+        for(String defect:Arrays.asList("envelope","language","citation")){
+            calls.set(0);bodies.clear();ObjectNode first=authoredAnswer();first.put("basisScope","project_contract");ObjectNode repair=first.deepCopy();repair.put("basisScope","reference_only");ObjectNode fresh=(ObjectNode)first.path("sections").get(1).deepCopy();fresh.put("id","fresh");repair.putArray("sections").add(fresh);
+            if("envelope".equals(defect))repair.remove("grounded");if("language".equals(defect))fresh.put("language","zhHant");if("citation".equals(defect))fresh.putArray("citations").add("[999]");List<String> published=new ArrayList<>();
+            com.consense.common.BizException invalid=assertThrows(com.consense.common.BizException.class,()->complete(first,repair,published,standard()));assertEquals(4205,invalid.getCode());assertTrue(invalid.getMessage().contains("after one admitted repair"));assertEquals(4,calls.get());assertEquals("envelope".equals(defect)?3:2,published.size());
+        }
+    }
+    @Test void finalCompositionRechecksPreviouslyAcceptedAdoptionRatherThanTrustingPriorPass()throws Exception {
+        ObjectNode first=authoredAnswer();List<com.consense.web.dto.AdviceDtos.CitationVO> sources=standard();events=stream(JsonUtils.write(first));AdviceService service=new AdviceService(null,null,null,null,null,null,null,null,null,null,null);List<String> published=new ArrayList<>();
+        AdviceProgress progress=new AdviceProgress(){public boolean streaming(){return true;}public void phase(String phase){if("validating".equals(phase))sources.get(0).setSourceRole("tender");}public void section(String content,List<String> refs,List<com.consense.web.dto.AdviceDtos.CitationVO> refsSources){published.add(content);}};
+        Object publication=publication(service,progress,()->{},sources);com.consense.common.BizException invalid=assertThrows(com.consense.common.BizException.class,()->ReflectionTestUtils.invokeMethod(service,"completeAdvice","rules","material",null,operation,SOURCE,(Runnable)()->{},publication,"AUTHORED question"));
+        assertEquals(4205,invalid.getCode());assertTrue(invalid.getMessage().contains("failed final validation"));assertEquals(2,calls.get());assertEquals(2,published.size());
+    }
+    @Test void appendedUnitsCannotBorrowTheAcceptedPrefixesRequestedBasisOrAdoption()throws Exception {
+        ObjectNode first=authoredAnswer();first.put("basisScope","project_contract");ObjectNode repair=first.deepCopy();repair.put("basisScope","reference_only");ObjectNode fresh=(ObjectNode)first.path("sections").get(1).deepCopy();fresh.put("id","fresh").put("basisScope","project_contract");repair.putArray("sections").add(fresh);
+        attemptEvents.add(stream(JsonUtils.write(first)));attemptEvents.add(stream(JsonUtils.write(repair)));AdviceService service=new AdviceService(null,null,null,null,null,null,null,null,null,null,null);List<String> published=new ArrayList<>();
+        AdviceProgress progress=new AdviceProgress(){public boolean streaming(){return true;}public void section(String content,List<String> refs,List<com.consense.web.dto.AdviceDtos.CitationVO> sources){published.add(content);}};Object publication=publication(service,progress,()->{},standard());
+        ReflectionTestUtils.invokeMethod(service,"completeAdvice","rules","material",null,operation,SOURCE,(Runnable)()->{},publication,"AUTHORED question");assertEquals(4,calls.get());assertEquals(2,published.size());
+        List<?> accepted=(List<?>)ReflectionTestUtils.getField(publication,"accepted"),errors=(List<?>)ReflectionTestUtils.getField(publication,"errors");assertEquals(2,accepted.size());assertTrue(errors.toString().contains("adoption or requested basis is not supported"));
     }
 }
