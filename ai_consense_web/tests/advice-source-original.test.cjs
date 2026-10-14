@@ -12,7 +12,7 @@ function helper({ fetch, fixed, pointer, actualHash = digest } = {}) {
   } })
 }
 function citation() {
-  return { documentId: '11', sourceHash: parsed, fileLabel: 'same-name.pdf', canonicalEvidence: [{ addressKind: 'canonical_adoption_unit', projectId: 'project-a', documentId: '11', module: 'advisory',
+  return { documentId: '11', sourceHash: parsed, sourceRole: 'tender', fileLabel: 'same-name.pdf', canonicalEvidence: [{ addressKind: 'canonical_adoption_unit', projectId: 'project-a', documentId: '11', module: 'advisory',
     originalSourceSha256: digest, javaParsedSourceHash: parsed, projectionSha256: projection, unitId: 'native-unit', sourceFilename: 'original-SCC.pdf' }] }
 }
 test('project original binds precise project, module, parsed/raw digests and canonical unit rather than filename', async () => {
@@ -23,6 +23,7 @@ test('project original binds precise project, module, parsed/raw digests and can
   const url = new URL(seen.url, 'http://local.test')
   assert.equal(url.pathname, '/api/advice/project-a/sources/11/original')
   assert.equal(url.searchParams.get('scope'), 'contract'); assert.equal(url.searchParams.get('originalSourceSha256'), digest)
+  assert.equal(url.searchParams.get('sourceRole'), 'tender')
   assert.equal(url.searchParams.get('projectionSha256'), projection); assert.equal(url.searchParams.get('unitId'), 'native-unit')
   assert.equal(seen.options.redirect, 'error'); assert.equal(seen.options.cache, 'no-store')
 })
@@ -55,7 +56,7 @@ test('server staleness and mismatched raw bytes reject without silently reading 
 test('legacy sources require a distinct original digest and never guess it from parsed hash', async () => {
   let seen
   const { loadAdviceOriginal } = helper({ fetch: async url => { seen = url; return new Response(pdf, { headers: { 'Content-Type': 'application/pdf', 'X-Source-SHA256': digest, 'X-Source-Revision': parsed } }) } })
-  const legacy = { documentId: '11', sourceHash: parsed, pageNo: '17', fileLabel: 'original.pdf' }
+  const legacy = { documentId: '11', sourceHash: parsed, sourceRole: 'tender', pageNo: '17', fileLabel: 'original.pdf' }
   await assert.rejects(loadAdviceOriginal('project-a', legacy, 'fullset'), /IDENTITY_UNAVAILABLE/)
   const original = await loadAdviceOriginal('project-a', { ...legacy, originalSourceSha256: digest }, 'fullset')
   assert.deepEqual([...original.pages], [17]); assert.doesNotMatch(seen, /projectionSha256/)
