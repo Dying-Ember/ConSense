@@ -321,7 +321,7 @@ public class AdviceService {
                 +"\nAnswer the original question in light of these user-stated assumptions. Do not cite this background as a contract document or established contractual fact.";
         if(AdvisoryHarness.flowchartRequested(questionContext.originalQuestion))userPrompt+="\n\nApplication task selection: T6. The user requested a flowchart. Supply the evidence-backed graph plan under the mandatory application contract; detailed instructions need not come from the user.";
         if(selectedOperation!=null)userPrompt+="\n\nApplication output reserve: "+selectedOperation.getStructuredMaxTokens()+" tokens. Return compact complete JSON: few independent sections, brief check reasons and concise graph labels. Avoid duplicating the same narrative in both the diagram and prose. Keep necessary branches, qualifiers, competing deadlines, start events and citations; if a complete validated graph cannot be supplied, report the affected gap and retain supported text. Do not truncate JSON or output an unfinished graph.";
-        String systemPrompt=AdvisoryHarness.system(promptService.system(PromptCatalog.KEY_ADVICE),sources);
+        String systemPrompt=AdvisoryHarness.system(promptService.system(PromptCatalog.KEY_ADVICE),sources,questionContext.originalQuestion);
         if(responsesOperation!=null&&responsesOperation.getConfiguredContextTokens()<262144)
             throw new BizException(4205,"Advice budget_unknown: generation requires at least 256K configured tokens.");
         if(conversation!=null)userPrompt+=boundedHistory(conversation,sourceSnapshot,capturedIdentity,selectedOperation,responsesOperation,currentGuard,progress);
@@ -680,7 +680,7 @@ public class AdviceService {
                     : safeList(message.getCitationsJson());
             result.add(new ChatMessageVO(message.getId(),
                     message.getRole(),
-                    message.getTitle() == null ? null : LocalizedText.same(message.getTitle()),
+                    localizedTitle(message.getTitle()),
                     message.getContent() == null ? null : LocalizedText.same(message.getContent()),
                     message.getUnknownScope(),
                     citations,
@@ -899,6 +899,8 @@ public class AdviceService {
             if(!JsonUtils.write(accepted).equals(JsonUtils.write(finalPublished)))throw new BizException(4205,"Advice repair reordered published sections; this answer is invalidated. Retry the question.");
             if(answer.isGrounded()&&!Objects.equals(answer.getBasisScope(),referenceOnly?"reference_only":"project_contract"))errors.add("A complete answer must retain the requested basis");
             if(referenceOnly?!"reference_only".equals(answer.getBasisScope()):"reference_only".equals(answer.getBasisScope()))errors.add("Requested basis must not be switched automatically");
+            if(referenceOnly&&"adoption".equals(answer.getMissingReason()))errors.add("answer.missingReason: project adoption is a disclosed scope limit, not a required gap for explicit reference_only interpretation");
+            if(referenceOnly&&answer.getClarifications().contains("adoption"))errors.add("answer.clarifications: do not require project adoption for explicit reference_only interpretation");
             boolean graphRequested="T6".equals(answer.getQuestionType())||AdvisoryHarness.flowchartRequested(question);
             if(AdvisoryHarness.flowchartRequested(question)&&!"T6".equals(answer.getQuestionType()))errors.add("The requested flowchart requires template T6");
             if(graphRequested&&accepted.stream().noneMatch(s->"flowchart".equals(s.getKind())))errors.add("Requested flowchart could not be validated; reliable text remains limited analysis");
@@ -980,10 +982,20 @@ public class AdviceService {
         return chatMessageRepository.save(message);
     }
 
+    private static LocalizedText localizedTitle(String stored) {
+        if(stored==null)return null;
+        if(stored.trim().startsWith("{"))try {
+            JsonNode value=JsonUtils.parse(stored);
+            if(value.isObject()&&value.size()==3&&value.path("zhHans").isTextual()&&value.path("zhHant").isTextual()&&value.path("en").isTextual())
+                return JsonUtils.read(stored,LocalizedText.class);
+        }catch(RuntimeException invalid){/* Old plain titles remain readable, including text beginning with a brace. */}
+        return LocalizedText.same(stored);
+    }
+
     private void persistAssistant(String projectId, AskResponseVO response,Long questionMessageId,String sourceSnapshot,String checks) {
         String content=response.getContent()==null?null:response.getContent().getZhHans();
         ChatMessage message=saveMessage(projectId, ChatMessage.ROLE_ASSISTANT,
-                response.getTitle() == null ? null : response.getTitle().getZhHans(),
+                response.getTitle() == null ? null : JsonUtils.write(response.getTitle()),
                 content,
                 response.getUnknownScope(),
                 response.getCitations(),

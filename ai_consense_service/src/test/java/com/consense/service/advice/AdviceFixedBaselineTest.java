@@ -101,6 +101,20 @@ class AdviceFixedBaselineTest {
         assertFalse(response.isGrounded());assertEquals("insufficient",response.getBasisScope());assertFalse(response.getClarifications().isEmpty());
         verifyNoInteractions(canonical,documents,legacy,vectors);
     }
+    @Test void referenceOnlySpuriousProjectAdoptionRecordsAreRejectedAndPreserved() {
+        for(String field:Arrays.asList("sections","missingReason","clarifications")) {
+            com.fasterxml.jackson.databind.node.ObjectNode envelope=(com.fasterxml.jackson.databind.node.ObjectNode)JsonUtils.mapper().valueToTree(answer("reference_only"));
+            if("sections".equals(field))((com.fasterxml.jackson.databind.node.ObjectNode)envelope.path("sections").get(0)).withArray("gaps").add("adoption");
+            else if("missingReason".equals(field))envelope.put(field,"adoption");else envelope.withArray(field).add("adoption");
+            doReturn(JsonUtils.write(envelope)).when(llm).chatStructured(anyList(),any());
+            AskResponseVO result=advice.ask("authored-project",reference());assertFalse(result.isGrounded());assertEquals("insufficient",result.getBasisScope());
+            JsonNode checks=JsonUtils.parse(saved.get(saved.size()-1).getAdviceChecksJson());assertEquals(2,checks.path("attempts").size());
+            assertTrue(checks.path("applicationRejections").toString().contains("project adoption"));
+            if("sections".equals(field))assertEquals("adoption",checks.path("sections").get(0).path("gaps").get(0).asText());
+            else {assertTrue(result.getContent().getEn().contains("AUTHORED explanation"));assertEquals(envelope.path(field),checks.path("missingReason".equals(field)?field:"clarificationGaps"));}
+        }
+        verify(llm,times(6)).chatStructured(anyList(),any());
+    }
     @Test void fixedOnlyCannotPretendThatTheProjectAdoptedTheStandard() throws Exception {
         AskResponseVO reference=advice.ask("authored-project",reference());
         Method gate=AdviceService.class.getDeclaredMethod("incorporationSupported",String.class,List.class,List.class);gate.setAccessible(true);

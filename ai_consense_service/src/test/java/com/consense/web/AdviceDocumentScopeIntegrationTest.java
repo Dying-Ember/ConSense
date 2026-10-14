@@ -229,7 +229,7 @@ class AdviceDocumentScopeIntegrationTest {
         JsonNode result=ask(id,"contract");assertFalse(result.path("grounded").asBoolean());assertEquals("insufficient",result.path("basisScope").asText());
         assertTrue(result.path("content").path("en").asText().contains("supported procedure [1]"));assertEquals("[1]",result.path("citations").get(0).asText());
         JsonNode history=data(get("/api/advice/{id}/messages",id));JsonNode assistant=history.get(history.size()-1);
-        assertEquals(result.path("content"),assistant.path("content"));assertEquals(result.path("citations"),assistant.path("citations"));assertEquals("insufficient",assistant.path("basisScope").asText());
+        assertEquals(result.path("content"),assistant.path("content"));assertEquals(result.path("title"),assistant.path("title"));assertEquals(result.path("citations"),assistant.path("citations"));assertEquals("insufficient",assistant.path("basisScope").asText());
         com.consense.domain.ChatMessage row=messages.findById(result.path("messageId").asLong()).get();JsonNode checks=JsonUtils.parse(row.getAdviceChecksJson());
         assertEquals("ec23c7a665f803598a82d8aaf41ace65df1e431ac5e4ab24610e61d11ccf0470",checks.path("policySha256").asText());assertEquals(3,checks.path("publishedSectionIds").size());
         assertTrue(checks.path("applicationRejections").isEmpty());assertTrue(checks.path("sections").get(1).path("checks").isArray());assertEquals(result.path("sources").get(0).path("sourceHash"),JsonUtils.parse(row.getSourcesJson()).get(0).path("sourceHash"));
@@ -293,6 +293,27 @@ class AdviceDocumentScopeIntegrationTest {
             return JsonUtils.write(calls.get()==1?invalid:valid);}).when(local).chatStructured(anyList(),any());
         assertTrue(ask(id,"contract").path("grounded").asBoolean());assertEquals(2,calls.get());verify(counter,times(2)).observe(any());
         JsonNode checks=JsonUtils.parse(messages.findByProjectIdOrderByIdAsc(id).get(1).getAdviceChecksJson());assertTrue(checks.path("attempts").get(0).path("rejections").get(0).asText().contains("answer.sections[0].checks"));
+    }
+    @Test void oneSemanticRepairCorrectsTheOpeningBeforeIndependentAnalysisCanPublish() throws Exception {
+        String id=project();source(id,"SCC","SCC.txt","VETTING_PACKAGE","tender","AUTHORED provision");mvc.perform(post("/api/advice/{id}/index/rebuild",id)).andExpect(jsonPath("$.code").value(0));
+        com.fasterxml.jackson.databind.node.ObjectNode valid=(com.fasterxml.jackson.databind.node.ObjectNode)JsonUtils.parse(com.consense.service.advice.AdviceBudgetFixture.contract("{\"grounded\":true,\"answer\":\"AUTHORED independent analysis [1]\",\"citations\":[\"[1]\"]}"));
+        com.fasterxml.jackson.databind.node.ObjectNode invalid=valid.deepCopy();((com.fasterxml.jackson.databind.node.ObjectNode)invalid.path("sections").get(0)).put("basisScope","project_contract");
+        java.util.concurrent.atomic.AtomicInteger calls=new java.util.concurrent.atomic.AtomicInteger();doAnswer(call->{
+            if(calls.getAndIncrement()>0)assertTrue(JsonUtils.write(call.getArgument(0)).contains("section.basisScope: limits/uncertainty must be insufficient regardless of envelope/request basis"));
+            return JsonUtils.write(calls.get()==1?invalid:valid);}).when(local).chatStructured(anyList(),any());
+        JsonNode result=ask(id,"contract");assertTrue(result.path("grounded").asBoolean());assertTrue(result.path("content").path("en").asText().contains("independent analysis [1]"));assertEquals(2,calls.get());verify(counter,times(2)).observe(any());
+        JsonNode checks=JsonUtils.parse(messages.findByProjectIdOrderByIdAsc(id).get(1).getAdviceChecksJson());
+        assertEquals("project_contract",checks.path("attempts").get(0).path("sections").get(0).path("basisScope").asText());
+        assertTrue(checks.path("attempts").get(0).path("rejections").toString().contains("Opening facts and limitations were not validated"));
+    }
+    @Test void fixedLocalizedTitlesRoundTripAndOldPlainTitlesStayReadable() throws Exception {
+        String id=project();source(id,"SCC","SCC.txt","VETTING_PACKAGE","tender","AUTHORED provision");mvc.perform(post("/api/advice/{id}/index/rebuild",id)).andExpect(jsonPath("$.code").value(0));
+        JsonNode result=ask(id,"contract"),history=data(get("/api/advice/{id}/messages",id));assertEquals(result.path("title"),history.get(1).path("title"));
+        com.consense.domain.ChatMessage row=messages.findById(result.path("messageId").asLong()).get();assertTrue(row.getTitle().length()<=255);
+        for(String legacy:Arrays.asList("AUTHORED legacy title","{AUTHORED plain title","{\"other\":\"AUTHORED plain object\"}")) {
+            row.setTitle(legacy);messages.saveAndFlush(row);JsonNode restored=data(get("/api/advice/{id}/messages",id)).get(1).path("title");
+            for(String language:Arrays.asList("zhHans","zhHant","en"))assertEquals(legacy,restored.path(language).asText());
+        }
     }
     @Test void naturalFlowchartQuestionUsesApplicationHarnessAndGraphRepairSharesTheTotalBudget() throws Exception {
         String id=project();source(id,"SCC","SCC.txt","VETTING_PACKAGE","tender","AUTHORED Contractor submits notice; evidence review follows.");mvc.perform(post("/api/advice/{id}/index/rebuild",id)).andExpect(jsonPath("$.code").value(0));
