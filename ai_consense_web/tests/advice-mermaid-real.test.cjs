@@ -23,6 +23,11 @@ test('installed Mermaid really parses/renders a cited branching graph; invalid s
   assert.match(document.documentElement.textContent, /Confirm missing facts/)
   assert.ok(document.querySelectorAll('.flowchart-link').length >= 3)
   assert.equal(document.querySelector('script,a,image,foreignObject'), null)
+  await assert.rejects(renderAnswerFlowchart('flowchart TD\nstart["Start"] --> n-step["Authored example step [1]"]\nn-step --> end-resolved["Complete [1]"]'), /Parse|parse|syntax/i)
+  const hyphenIds = await renderAnswerFlowchart('flowchart TD\nn0["Start"] --> n1["Authored example step [1]"]\nn1 --> n2["Complete [1]"]')
+  const hyphenDocument = new JSDOM(hyphenIds, { contentType: 'image/svg+xml' }).window.document
+  assert.equal(hyphenDocument.querySelectorAll('.flowchart-link').length, 2)
+  assert.match(hyphenDocument.documentElement.textContent, /Authored example step/)
   await assert.rejects(renderAnswerFlowchart('flowchart TD\nA["unclosed label'), /Parse|parse|syntax/i)
   dom.window.close()
 })

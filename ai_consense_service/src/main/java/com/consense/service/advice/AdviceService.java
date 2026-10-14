@@ -316,11 +316,12 @@ public class AdviceService {
         String excerpts = renderExcerpts(hits);
         String userPrompt = PromptService.format(promptService.userTemplate(PromptCatalog.KEY_ADVICE),
                 fixedReferenceOnly?"Fixed standard reference only / 固定标准参考解释":scopeLabel(scope), excerpts, questionContext.originalQuestion);
-        if(fixedReferenceOnly)userPrompt+="\n\nExplicit answer scope: reference_only. Explain only the cited standard text in this frozen development baseline. Do not assert that this standard, edition or requirement is adopted by the project, and do not return project_contract. Parsing, legal ownership and completeness limitations remain unverified.";
+        if(fixedReferenceOnly)userPrompt+="\n\nExplicit answer scope: reference_only. Explain only the cited standard text in this frozen development baseline. Do not assert that this standard, edition or requirement is adopted by the project, and do not return project_contract. Parsing, legal ownership and completeness limitations remain unverified. Lack of project incorporation alone is a disclosed scope limit, not a necessary clarification for this standard-reference explanation. Request only missing facts or source provisions that prevent the requested standard interpretation.";
         if(!questionContext.background.isEmpty())userPrompt+="\n\nuser-supplied-background (clarification replies, not contractual evidence):\n"+String.join("\n",questionContext.background)
                 +"\nAnswer the original question in light of these user-stated assumptions. Do not cite this background as a contract document or established contractual fact.";
         if(AdvisoryHarness.flowchartRequested(questionContext.originalQuestion))userPrompt+="\n\nApplication task selection: T6. The user requested a flowchart. Supply the evidence-backed graph plan under the mandatory application contract; detailed instructions need not come from the user.";
-        String systemPrompt=AdvisoryHarness.system(promptService.system(PromptCatalog.KEY_ADVICE));
+        if(selectedOperation!=null)userPrompt+="\n\nApplication output reserve: "+selectedOperation.getStructuredMaxTokens()+" tokens. Return compact complete JSON: few independent sections, brief check reasons and concise graph labels. Avoid duplicating the same narrative in both the diagram and prose. Keep necessary branches, qualifiers, competing deadlines, start events and citations; if a complete validated graph cannot be supplied, report the affected gap and retain supported text. Do not truncate JSON or output an unfinished graph.";
+        String systemPrompt=AdvisoryHarness.system(promptService.system(PromptCatalog.KEY_ADVICE),sources);
         if(responsesOperation!=null&&responsesOperation.getConfiguredContextTokens()<262144)
             throw new BizException(4205,"Advice budget_unknown: generation requires at least 256K configured tokens.");
         if(conversation!=null)userPrompt+=boundedHistory(conversation,sourceSnapshot,capturedIdentity,selectedOperation,responsesOperation,currentGuard,progress);
@@ -496,7 +497,9 @@ public class AdviceService {
         builder.append("Selected source excerpts for this question. These excerpts do not establish that the entire standard/library or project package is complete. ")
                 .append("A passage omitted from these excerpts does not prove that its document or clause is absent from the supplied files. ")
                 .append("Project wording on adopting or amending standards, if included below, states only what those passages say about incorporation; ")
-                .append("it does not guarantee that the underlying standard text or every amendment has been supplied or reviewed.\n\n");
+                .append("it does not guarantee that the underlying standard text or every amendment has been supplied or reviewed.\n\n")
+                .append("Output citation contract: cite ONLY the public aliases [1], [2], etc shown at each numbered excerpt header. ")
+                .append("Internal retrieval IDs, fixed parent IDs, document IDs and model-unit addresses below are lookup/provenance metadata and MUST NOT be used as output citation IDs.\n\n");
         int index = 1;
         com.consense.service.vetting.OerModelMaterial.Request modelMaterial=new com.consense.service.vetting.OerModelMaterial.Request();
         if(hits.stream().anyMatch(hit->canonicalUnit(hit)!=null))builder.append(com.consense.service.vetting.OerModelMaterial.LEGEND);
@@ -504,14 +507,15 @@ public class AdviceService {
         List<Map<String,Object>> hitMembership=new ArrayList<>();
         Set<List<String>> nativeLimits=new LinkedHashSet<>();
         for (VectorStore.SearchHit hit : hits) {
-            builder.append("[").append(index++).append("] ")
+            String alias="["+(index++)+"]";
+            builder.append(alias).append(" ")
                     .append(hit.fileLabel())
                     .append(" | documentId=").append(hit.getPayload().get("documentId"))
                     .append(" | role=").append(hit.getPayload().get("sourceRole"))
                     .append(" | sourceRevision=").append(hit.getPayload().get("sourceHash"))
                     .append(" | physicalPage=").append(hit.pageNo().isEmpty()?"not available":hit.pageNo())
                     .append(" | location=").append(hit.anchor())
-                    .append("\n");
+                    .append("\nPublic citation alias=").append(alias).append(" | internalLookupId=").append(hit.getId()).append("\n");
             JsonNode unit=canonicalUnit(hit);
             List<com.consense.web.dto.CanonicalEvidenceDtos.EvidencePointer> pointers=unit==null?Collections.emptyList():canonicalPointers(hit);
             if(unit!=null) {
@@ -548,7 +552,7 @@ public class AdviceService {
                                 .append(pointer.getVisualReturnStatus()).append("\n");
                     }
                 }
-                Map<String,Object> membership=new LinkedHashMap<>();membership.put("hitOrdinal",index-1);membership.put("rankedSeedId",hit.getId());membership.put("sourceUnitId",unit.path("unitId").asText());
+                Map<String,Object> membership=new LinkedHashMap<>();membership.put("hitOrdinal",index-1);membership.put("publicCitationAlias",alias);membership.put("rankedSeedId",hit.getId());membership.put("sourceUnitId",unit.path("unitId").asText());
                 membership.put("hierarchyContextId",unit.path("hierarchyContext").path("contextId").asText(null));membership.put("attachmentContextId",unit.path("attachmentContext").path("contextId").asText(null));
                 membership.put("memberMaterialRefs",materialRefs);hitMembership.add(membership);
             }
@@ -807,12 +811,14 @@ public class AdviceService {
                 List<LlmClient.ChatTurn> turns=sessionTurns(system,user+repair,attempt);sessionBudget(chat,turns,sourceIdentity);guard.run();
                 if(chat.getClient()==null||!chat.getClient().available())throw new BizException(4203,"The captured advice model is unavailable; no alternate model was used.");
                 guard.run();publication.progress.phase("generating");
-                raw=streaming?chat.getClient().chatStructuredStream(turns,AdvisoryHarness.schema(),units::accept,publication.progress::onCancel):chat.getClient().chatStructured(turns,AdvisoryHarness.schema());
+                raw=streaming?chat.getClient().chatStructuredStream(turns,publication.schema,units::accept,publication.progress::onCancel):chat.getClient().chatStructured(turns,publication.schema);
             }
             } catch(IllegalArgumentException invalidStream) {
+                String diagnosis=AdvisoryHarness.diagnostic(invalidStream);publication.errors.add(diagnosis);
+                log.warn("Advice application contract rejected attempt {}: {}",attempt,diagnosis);
                 publication.recordAttempt(attempt,null);
                 if(attempt==1)throw new BizException(4205,"Advice output_invalid: the structured stream remained invalid after one admitted repair. No completed answer was saved.");
-                repair="\n\nRepair the same complete answer once: structured JSON could not be parsed. Keep already-published sections byte-identical: "+JsonUtils.write(publication.accepted)+". Retain the same supplied evidence and requested basis.";
+                repair="\n\nRepair the same complete answer once. Application rejected: "+diagnosis+". Keep already-published sections byte-identical: "+JsonUtils.write(publication.accepted)+". Retain the same supplied public citation aliases and requested basis.";
                 continue;
             }
             guard.run();publication.progress.phase("validating");
@@ -826,9 +832,11 @@ public class AdviceService {
                 repair="\n\nRepair the same complete answer once. Application rejected: "+JsonUtils.write(publication.errors)
                         +". Keep already-published sections byte-identical: "+JsonUtils.write(publication.accepted)+". Do not introduce evidence IDs outside the supplied material.";
             } catch(java.io.IOException|IllegalArgumentException invalid) {
+                String diagnosis=AdvisoryHarness.diagnostic(invalid);publication.errors.add(diagnosis);
+                log.warn("Advice application contract rejected attempt {}: {}",attempt,diagnosis);
                 publication.recordAttempt(attempt,null);
                 if(attempt==1)throw new BizException(4205,"Advice output_invalid: the answer contract remained invalid after one admitted repair. No completed answer was saved.");
-                repair="\n\nRepair the same answer once: return a complete legal JSON object conforming to the application schema and checks. Preserve the same facts, source IDs and requested basis. Keep already-published sections byte-identical: "+JsonUtils.write(publication.accepted);
+                repair="\n\nRepair the same answer once. Application rejected: "+diagnosis+". Return one complete JSON object conforming to the exact schema and checks. Preserve facts, allowed public citation aliases and requested basis. Keep already-published sections byte-identical: "+JsonUtils.write(publication.accepted);
             }
         }
         return result;
@@ -847,12 +855,13 @@ public class AdviceService {
         private final AdviceProgress progress;
         private final Runnable guard;
         private final QuestionContext question;
+        private final JsonNode schema;
         private final List<AdvisoryHarness.Section> accepted=new ArrayList<>();
         private final List<String> errors=new ArrayList<>();
         private final List<AdvisoryHarness.Section> proposed=new ArrayList<>();
         private final List<Map<String,Object>> attempts=new ArrayList<>();
         private boolean live,opening;
-        Publication(List<CitationVO> sources,boolean referenceOnly,AdviceProgress progress,Runnable guard,QuestionContext question){this.sources=sources;this.referenceOnly=referenceOnly;this.progress=progress;this.guard=guard;this.question=question;}
+        Publication(List<CitationVO> sources,boolean referenceOnly,AdviceProgress progress,Runnable guard,QuestionContext question){this.sources=sources;this.referenceOnly=referenceOnly;this.progress=progress;this.guard=guard;this.question=question;this.schema=AdvisoryHarness.schema(sources);}
         String content(AdvisoryHarness.Section section){return AdvisoryHarness.content(section,sources,referenceOnly,question.originalQuestion,question.background);}
         void beginAttempt(boolean streaming){live=streaming;opening=false;errors.clear();proposed.clear();if(!streaming)accepted.clear();}
         void recordAttempt(int number,AnswerRecord answer){Map<String,Object> observation=new LinkedHashMap<>();observation.put("attempt",number);observation.put("sections",answer==null?null:answer.getSections());observation.put("rejections",new ArrayList<>(errors));observation.put("contractParsed",answer!=null);attempts.add(observation);}
@@ -866,6 +875,8 @@ public class AdviceService {
                 if(proposed.size()>64)throw AdvisoryHarness.invalid("Answer has too many sections");
                 if(proposed.size()==1&&!"limits".equals(section.getKind()))throw AdvisoryHarness.invalid("Facts, assumptions and limits must precede conclusions");
                 if(proposed.stream().filter(s->Objects.equals(s.getId(),section.getId())).count()!=1)throw AdvisoryHarness.invalid("Duplicate section ID");
+                // Alias violations reject this unit; independently valid units can still be retained.
+                AdvisoryHarness.shape(JsonUtils.mapper().valueToTree(section),schema.path("properties").path("sections").path("items"));
                 AdvisoryHarness.validate(section,sources,referenceOnly,(basis,refs)->incorporationSupported(basis,refs,sources));
                 if(!accepted.isEmpty()&&!Objects.equals(accepted.get(0).getLanguage(),section.getLanguage()))throw AdvisoryHarness.invalid("Answer units must retain one requested language");
                 if(proposed.size()==1)opening=true;

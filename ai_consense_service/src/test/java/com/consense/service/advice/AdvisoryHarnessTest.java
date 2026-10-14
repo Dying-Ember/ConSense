@@ -16,6 +16,17 @@ class AdvisoryHarnessTest {
         assertTrue(system.contains("Mandatory application contract"));assertEquals("ec23c7a665f803598a82d8aaf41ace65df1e431ac5e4ab24610e61d11ccf0470",AdvisoryHarness.POLICY_SHA);
     }
     @Test void sectionCanPassItsOwnEvidenceAndAdoptionGate(){assertDoesNotThrow(()->AdvisoryHarness.validate(analysis(),sources,false,(basis,refs)->refs.equals(Collections.singletonList("[1]"))));}
+    @Test void requestSchemaBindsEveryCitationArrayToPublicAliasesAndAcceptsBoundedHyphenIds(){
+        JsonNode schema=AdvisoryHarness.schema(sources),sectionSchema=schema.path("properties").path("sections").path("items");
+        for(JsonNode references:Arrays.asList(sectionSchema.path("properties").path("citations"),sectionSchema.path("properties").path("checks").path("items").path("properties").path("citations"),
+                sectionSchema.path("properties").path("flowchartPlan").path("properties").path("nodes").path("items").path("properties").path("citations"),sectionSchema.path("properties").path("flowchartPlan").path("properties").path("edges").path("items").path("properties").path("citations")))
+            assertEquals(JsonUtils.parse("[\"[1]\"]"),references.path("items").path("enum"));
+        ObjectNode node=JsonUtils.mapper().valueToTree(analysis());node.put("id","sec-analysis");assertDoesNotThrow(()->AdvisoryHarness.shape(node,sectionSchema));
+        node.putArray("citations").add("fixed:AUTHORED_INTERNAL_ID");String diagnosis=AdvisoryHarness.diagnostic(assertThrows(IllegalArgumentException.class,()->AdvisoryHarness.shape(node,sectionSchema)));
+        assertTrue(diagnosis.contains("answer.citations[0]"));assertFalse(diagnosis.contains("AUTHORED_INTERNAL_ID"));
+        node.putArray("citations").add("[2]");assertTrue(assertThrows(IllegalArgumentException.class,()->AdvisoryHarness.shape(node,sectionSchema)).getMessage().contains("value must be one of [\"[1]\"]"));
+        assertTrue(AdvisoryHarness.system("CUSTOM",sources).contains("ALL citations arrays, including every check.citations, MUST be empty"));
+    }
     @Test void partialStatusDoesNotBypassAdoptionOrReferenceIdentity(){
         assertThrows(IllegalArgumentException.class,()->AdvisoryHarness.validate(analysis(),sources,false,(b,r)->false));
         AdvisoryHarness.Section section=analysis();section.setContent("False citation [2]");assertThrows(IllegalArgumentException.class,()->AdvisoryHarness.validate(section,sources,false,(b,r)->true));
@@ -55,7 +66,8 @@ class AdvisoryHarnessTest {
     private AdvisoryHarness.GraphPlan plan(){return JsonUtils.read("{\"nodes\":[{\"id\":\"s\",\"label\":\"\",\"kind\":\"start\",\"citations\":[]},{\"id\":\"d\",\"label\":\"Notice delivered?\",\"kind\":\"decision\",\"citations\":[\"[1]\"]},{\"id\":\"e\",\"label\":\"Documented result\",\"kind\":\"end\",\"citations\":[\"[1]\"]},{\"id\":\"u\",\"label\":\"notice_dates\",\"kind\":\"unknown\",\"citations\":[]}],\"edges\":[{\"from\":\"s\",\"to\":\"d\",\"condition\":\"\",\"actor\":\"Contractor\",\"action\":\"give notice\",\"period\":\"\",\"startEvent\":\"\",\"citations\":[\"[1]\"]},{\"from\":\"d\",\"to\":\"e\",\"condition\":\"Yes\",\"actor\":\"\",\"action\":\"\",\"period\":\"\",\"startEvent\":\"\",\"citations\":[\"[1]\"]},{\"from\":\"d\",\"to\":\"u\",\"condition\":\"Unknown\",\"actor\":\"\",\"action\":\"\",\"period\":\"\",\"startEvent\":\"\",\"citations\":[\"[1]\"]}]}",AdvisoryHarness.GraphPlan.class);}
     @Test void graphIsDeterministicIncludesEvidenceAndExplicitUnknownAndHasNoRawMermaidEscape(){
         AdvisoryHarness.GraphPlan graph=plan();String rendered=AdvisoryHarness.graph(graph,Collections.singletonList("[1]"),sources);assertEquals(rendered,AdvisoryHarness.graph(graph,Collections.singletonList("[1]"),sources));
-        assertTrue(rendered.startsWith("```mermaid\nflowchart TD\n"));assertTrue(rendered.contains("Unconfirmed: notice, receipt and event dates"));assertTrue(rendered.contains("[1]"));assertTrue(rendered.contains("d -->|\"Yes; [1]\"| e"));
+        assertTrue(rendered.startsWith("```mermaid\nflowchart TD\n"));assertTrue(rendered.contains("Unconfirmed: notice, receipt and event dates"));assertTrue(rendered.contains("[1]"));assertTrue(rendered.contains("n1 -->|\"Yes; [1]\"| n2"));
+        graph.getNodes().get(2).setId("end-resolved");graph.getEdges().get(1).setTo("end-resolved");assertEquals(rendered,AdvisoryHarness.graph(graph,Collections.singletonList("[1]"),sources));
     }
     @Test void graphRejectsMissingBranchEvidenceUnsafeLabelsAndDeadlinesWithoutStart(){
         AdvisoryHarness.GraphPlan missing=plan();missing.getEdges().get(0).setCitations(Collections.emptyList());assertThrows(IllegalArgumentException.class,()->AdvisoryHarness.graph(missing,Collections.singletonList("[1]"),sources));
