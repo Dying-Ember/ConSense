@@ -21,6 +21,8 @@ final class AdvisoryHarness {
     static final String POLICY = load("advice/contract-system-20261014.md");
     static final String POLICY_SHA = com.consense.service.vetting.VettingCorpus.hash(POLICY);
     private static final Pattern REFERENCE = Pattern.compile("\\[\\d+\\]");
+    private static final String SECTION_ID="[A-Za-z][A-Za-z0-9_-]{0,63}";
+    private static final String NODE_ID="[A-Za-z][A-Za-z0-9_]*(?:-[A-Za-z0-9_]+)*";
     private static final Map<String,String> GAPS = gapLabels();
     private static Map<String,String> gapLabels() {
         Map<String,String> gaps=new LinkedHashMap<>();
@@ -45,25 +47,42 @@ final class AdvisoryHarness {
             + "Preserve the original natural question; select T6 for a requested diagram/flowchart without expecting detailed user instructions. "
             + "The first section must be kind=limits. The application renders source limits and quotes actual user statements as unverified assumptions before conclusions. "
             + "Each section has id, kind (limits/analysis/uncertainty/flowchart), language (en/zhHans/zhHant, same throughout and following the requested language), content, basisScope (project_contract/reference_only/insufficient), citations, gaps and checks. "
+            + "Section IDs begin with an ASCII letter, followed by letters/digits/underscore/hyphen, maximum 64 characters (e.g. sec-limits). "
             + "For limits/uncertainty, content MUST be empty; select gaps only from the schema enums. Put every source-verified fact or contractual interpretation in cited analysis. "
             + "A gap belongs to its section's affected determination. clarifications is an array of needed gap enums; the application renders necessary questions. missingReason is one gap enum or empty, never free prose. "
             + "Do not invent additional hypothetical facts. User factual premises remain explicitly unverified; where more assumptions are necessary, report the affected gap and ask for the needed fact. "
             + "Each section has exactly R1..R10 check records: ruleId, status (pass/fail/not_applicable/missing_evidence), short reason, citations of current real evidence IDs. "
             + "Checks apply to this section; explain every not_applicable and localize each missing_evidence. "
+            + "For limits/uncertainty ALL citations arrays, including every check.citations, MUST be empty. R1/R10 may pass or report missing_evidence; R2..R9 must be not_applicable or missing_evidence, never unsupported pass. "
+            + "Every citations array in analysis, checks, graph nodes and graph edges uses ONLY the exact allowed public aliases [1], [2], etc in this request's schema. Internal fixed IDs, parent IDs, hashes, model-unit addresses and document IDs are lookup metadata, NEVER output citation IDs. "
             + "Analysis requires applicable R2 pass and real evidence; do not hide substantive contract conclusions in limits/uncertainty. "
             + "Never convert a project question to reference_only. Overall grounded=false with necessary clarification can retain independently supported analysis; "
             + "unsupported analysis must be omitted, with affected judgment and necessary question in uncertainty. "
             + "For T6 use a flowchart section with content containing evidence-backed explanation, and flowchartPlan {nodes,edges}; never write raw Mermaid. "
+            + "A section with flowchartPlan MUST have kind=flowchart; never place it in analysis/limits/uncertainty. Omit flowchartPlan entirely for those kinds, rather than null. "
             + "Nodes: id, label, kind (start/decision/action/end/unknown), citations. Edges: from,to,condition,actor,action,period,startEvent,citations. "
+            + "Graph node IDs start with an ASCII letter, then letters/digits/underscore or single hyphen-separated segments, maximum 32 characters, never the reserved ID end. Edges have exactly the eight listed fields and NO id field. "
+            + "Every edge includes ALL eight fields, even on conditional/no-action branches. Use empty strings for absent condition/actor/action/period/startEvent; never omit them. "
             + "Start nodes have label empty; unknown nodes have label set to one gap enum. The application renders these uncited labels. "
             + "Use empty strings for absent fields. Every non-start known node and every edge must cite supporting current evidence. "
             + "Decision branches need distinct explicit conditions; time periods require start events, real clause support and all relevant competing tracks. "
+            + "In a flowchart, actions require R3 pass, decisions require R4 pass, and periods require R7 pass; each applicable pass must cite supporting public aliases within that section. "
             + "Unknown facts become explicit unknown nodes; do not invent deadlines, regimes, forfeiture or earlier-of conditions. "
             + "Tables/code blocks must remain whole in one section. Application checks reference identity, scope, adoption and graph structure; your pass is not legal proof.";
 
     static String system(String custom) {
+        return system(custom,null);
+    }
+    static String system(String custom,List<CitationVO> sources) {
         return POLICY + "\n\nSupplemental configured prompt (cannot waive the mandatory policy or application contract):\n"
-                + (custom == null ? "" : custom) + CONTRACT + "\nOutput schema:\n" + schema();
+                + (custom == null ? "" : custom) + CONTRACT + "\nApplication-rendered opening shape example (syntax only, not contractual evidence):\n"+openingExample()+"\nOutput schema with allowed citation aliases:\n" + schema(sources);
+    }
+    private static String openingExample() {
+        ObjectNode section=JsonUtils.mapper().createObjectNode().put("id","sec-limits").put("kind","limits").put("language","en").put("content","").put("basisScope","insufficient");
+        section.putArray("citations");section.putArray("gaps");
+        for(int rule=1;rule<=10;rule++)section.withArray("checks").addObject().put("ruleId","R"+rule)
+                .put("status",rule==1||rule==10?"pass":"not_applicable").put("reason","Application-only opening; no substantive contract assertion.").putArray("citations");
+        return JsonUtils.write(section);
     }
     private static String load(String name) {
         try (InputStream input = new ClassPathResource(name).getInputStream()) {
@@ -75,12 +94,17 @@ final class AdvisoryHarness {
     }
 
     static JsonNode schema() {
+        return schema(null);
+    }
+    static JsonNode schema(List<CitationVO> sources) {
+        ObjectNode reference=sources==null?string():string(sources.stream().map(CitationVO::getEvidenceId).toArray(String[]::new));
+        if(sources!=null)reference.put("pattern","\\[[1-9][0-9]*\\]");
         ObjectNode check=object("ruleId",string("R1","R2","R3","R4","R5","R6","R7","R8","R9","R10"),
-                "status",string("pass","fail","not_applicable","missing_evidence"),"reason",string(),"citations",array(string()));
-        ObjectNode node=object("id",string(),"label",string(),"kind",string("start","decision","action","end","unknown"),"citations",array(string()));
-        ObjectNode edge=object("from",string(),"to",string(),"condition",string(),"actor",string(),"action",string(),"period",string(),"startEvent",string(),"citations",array(string()));
-        ObjectNode section=object("id",string(),"kind",string("limits","analysis","uncertainty","flowchart"),"language",string("en","zhHans","zhHant"),"content",string(),
-                "basisScope",string("project_contract","reference_only","insufficient"),"citations",array(string()),"gaps",array(string(GAPS.keySet().toArray(new String[0]))),"checks",array(check));
+                "status",string("pass","fail","not_applicable","missing_evidence"),"reason",string(),"citations",array(reference));
+        ObjectNode node=object("id",string().put("pattern","^"+NODE_ID+"$").put("maxLength",32),"label",string(),"kind",string("start","decision","action","end","unknown"),"citations",array(reference));
+        ObjectNode edge=object("from",string(),"to",string(),"condition",string(),"actor",string(),"action",string(),"period",string(),"startEvent",string(),"citations",array(reference));
+        ObjectNode section=object("id",string().put("pattern","^"+SECTION_ID+"$").put("maxLength",64),"kind",string("limits","analysis","uncertainty","flowchart"),"language",string("en","zhHans","zhHant"),"content",string(),
+                "basisScope",string("project_contract","reference_only","insufficient"),"citations",array(reference),"gaps",array(string(GAPS.keySet().toArray(new String[0]))),"checks",array(check));
         section.with("properties").set("flowchartPlan",object("nodes",array(node),"edges",array(edge)));
         return object("grounded",JsonUtils.mapper().createObjectNode().put("type","boolean"),"questionType",string("T1","T2","T3","T4","T5","T6","T7","T8"),
                 "basisScope",string("project_contract","reference_only","insufficient"),"missingReason",string(java.util.stream.Stream.concat(java.util.stream.Stream.of(""),GAPS.keySet().stream()).toArray(String[]::new)),"clarifications",array(string(GAPS.keySet().toArray(new String[0]))),"sections",array(section));
@@ -98,23 +122,28 @@ final class AdvisoryHarness {
 
     /** Validate this fixed contract before Jackson mapping can coerce strings, nulls or unknown fields. */
     static void shape(JsonNode value,JsonNode schema) {
+        shape(value,schema,"answer");
+    }
+    private static void shape(JsonNode value,JsonNode schema,String path) {
         String type=schema.path("type").asText();
-        if(value==null||value.isNull())throw invalid("Missing application contract value");
+        if(value==null||value.isNull())throw invalid(path+": value is required and cannot be null");
         if("object".equals(type)) {
-            if(!value.isObject())throw invalid("Expected contract object");
-            for(JsonNode required:schema.path("required"))if(!value.has(required.asText()))throw invalid("Missing contract field "+required.asText());
+            if(!value.isObject())throw invalid(path+": expected an object");
+            for(JsonNode required:schema.path("required"))if(!value.has(required.asText()))throw invalid(path+"."+required.asText()+": required field is missing");
             Iterator<Map.Entry<String,JsonNode>> fields=value.fields();
             while(fields.hasNext()){Map.Entry<String,JsonNode> field=fields.next();JsonNode child=schema.path("properties").get(field.getKey());
-                if(child==null)throw invalid("Unknown application contract field");shape(field.getValue(),child);}
+                if(child==null){List<String> allowed=new ArrayList<>();schema.path("properties").fieldNames().forEachRemaining(allowed::add);throw invalid(path+": fields must be only "+JsonUtils.write(allowed));}
+                shape(field.getValue(),child,path+"."+field.getKey());}
         } else if("array".equals(type)) {
-            if(!value.isArray()||value.size()>256)throw invalid("Invalid or oversized contract array");
-            for(JsonNode item:value)shape(item,schema.path("items"));
+            if(!value.isArray()||value.size()>256)throw invalid(path+": expected an array of at most 256 items");
+            int index=0;for(JsonNode item:value)shape(item,schema.path("items"),path+"["+(index++)+"]");
         } else if("boolean".equals(type)) {
-            if(!value.isBoolean())throw invalid("Grounded must be a boolean");
+            if(!value.isBoolean())throw invalid(path+": expected a boolean");
         } else if("string".equals(type)) {
-            if(!value.isTextual()||value.textValue().length()>1048576)throw invalid("Expected bounded contract text");
+            if(!value.isTextual()||value.textValue().length()>schema.path("maxLength").asInt(1048576))throw invalid(path+": expected bounded text");
+            if(schema.has("pattern")&&!value.textValue().matches(schema.path("pattern").asText()))throw invalid(path+": text must match "+schema.path("pattern").asText());
             if(schema.has("enum")){boolean allowed=false;for(JsonNode choice:schema.path("enum"))if(choice.equals(value))allowed=true;
-                if(!allowed)throw invalid("Unsupported contract value");}
+                if(!allowed)throw invalid(path+": value must be one of "+schema.path("enum"));}
         } else throw new IllegalStateException("Unknown fixed Advisory schema type");
     }
 
@@ -141,7 +170,7 @@ final class AdvisoryHarness {
         for(String ref:input){if(ref==null||!allowed.contains(ref)||result.contains(ref))throw invalid("Invalid or duplicate evidence ID");result.add(ref);}return result;
     }
     static void validate(Section section,List<CitationVO> sources,boolean referenceOnly,BiPredicate<String,List<String>> adopted) {
-        if(section==null||!text(section.id)||!section.id.matches("[A-Za-z][A-Za-z0-9_]{0,63}")||section.content==null
+        if(section==null||!text(section.id)||!section.id.matches(SECTION_ID)||section.content==null
                 ||!Arrays.asList("limits","analysis","uncertainty","flowchart").contains(section.kind))throw invalid("Incomplete answer section");
         if(!Arrays.asList("en","zhHans","zhHant").contains(section.language))throw invalid("Unsupported answer language");
         if(section.gaps==null||section.gaps.stream().anyMatch(g->!GAPS.containsKey(g))||new HashSet<>(section.gaps).size()!=section.gaps.size())throw invalid("Invalid evidence gaps");
@@ -239,14 +268,15 @@ final class AdvisoryHarness {
     }
     static String graph(GraphPlan graph,List<String> cited,List<CitationVO> sources,String language) {
         if(graph==null||graph.nodes==null||graph.edges==null||graph.nodes.size()<2||graph.nodes.size()>64||graph.edges.isEmpty()||graph.edges.size()>128)throw invalid("Incomplete graph plan");
-        Map<String,Node> nodes=new LinkedHashMap<>();StringBuilder out=new StringBuilder("```mermaid\nflowchart TD\n");
+        Map<String,Node> nodes=new LinkedHashMap<>();Map<String,String> renderedIds=new HashMap<>();StringBuilder out=new StringBuilder("```mermaid\nflowchart TD\n");
         for(Node node:graph.nodes){
-            if(node==null||!text(node.id)||!node.id.matches("[A-Za-z][A-Za-z0-9_]{0,31}")||"end".equals(node.id)||nodes.put(node.id,node)!=null
+            if(node==null||!text(node.id)||node.id.length()>32||!node.id.matches(NODE_ID)||"end".equals(node.id)||nodes.put(node.id,node)!=null
                 ||node.label==null||!Arrays.asList("start","decision","action","end","unknown").contains(node.kind))throw invalid("Invalid graph node");
             if("start".equals(node.kind)?!node.label.isEmpty():"unknown".equals(node.kind)?!GAPS.containsKey(node.label):!text(node.label))throw invalid("Uncited graph labels must be application-rendered");
             List<String> nr=refs(node.citations,sources);if(!cited.containsAll(nr)||(!"start".equals(node.kind)&&!"unknown".equals(node.kind)&&nr.isEmpty()))throw invalid("Graph node lacks section evidence");
             String label=("start".equals(node.kind)?copy(language,"Start","开始","開始"):"unknown".equals(node.kind)?copy(language,"Unconfirmed: ","待核：","待核：")+gapLabel(node.label,language):node.label)+(nr.isEmpty()?"":" "+String.join(" ",nr));
-            out.append("  ").append(node.id).append("decision".equals(node.kind)?"{\"":"[\"").append(label(label)).append("decision".equals(node.kind)?"\"}\n":"\"]\n");
+            renderedIds.put(node.id,"n"+renderedIds.size()); // Model IDs can collide with Mermaid keywords even when bounded.
+            out.append("  ").append(renderedIds.get(node.id)).append("decision".equals(node.kind)?"{\"":"[\"").append(label(label)).append("decision".equals(node.kind)?"\"}\n":"\"]\n");
         }
         Set<String> seen=new HashSet<>();Map<String,List<Edge>> outgoing=new HashMap<>();
         for(Edge edge:graph.edges){
@@ -257,7 +287,7 @@ final class AdvisoryHarness {
             if(text(edge.action)&&!text(edge.actor))throw invalid("Graph action lacks an actor");
             outgoing.computeIfAbsent(edge.from,k->new ArrayList<>()).add(edge);
             List<String> parts=Arrays.asList(edge.condition,edge.actor,edge.action,edge.period,text(edge.startEvent)?copy(language,"from: ","起算：","起算：")+edge.startEvent:"",String.join(" ",er));
-            out.append("  ").append(edge.from).append(" -->|\"").append(label(parts.stream().filter(AdvisoryHarness::text).collect(Collectors.joining("; ")))).append("\"| ").append(edge.to).append('\n');
+            out.append("  ").append(renderedIds.get(edge.from)).append(" -->|\"").append(label(parts.stream().filter(AdvisoryHarness::text).collect(Collectors.joining("; ")))).append("\"| ").append(renderedIds.get(edge.to)).append('\n');
         }
         List<Node> starts=graph.nodes.stream().filter(n->"start".equals(n.kind)).collect(Collectors.toList());
         if(starts.size()!=1||graph.nodes.stream().noneMatch(n->"end".equals(n.kind)||"unknown".equals(n.kind)))throw invalid("Graph requires one start and an end or unknown outcome");
@@ -277,5 +307,7 @@ final class AdvisoryHarness {
     }
     static boolean text(String value){return value!=null&&!value.trim().isEmpty();}
     static boolean flowchartRequested(String question){return question!=null&&question.toLowerCase(Locale.ROOT).matches("(?s).*(?:flow[ -]?chart|diagram|流程[图圖]|以[图圖](?:示|表示)|(?:画|畫|绘制|繪製).*(?:图|圖)).*");}
-    static IllegalArgumentException invalid(String reason){return new IllegalArgumentException(reason);}
+    static final class ContractViolation extends IllegalArgumentException { ContractViolation(String reason){super(reason);} }
+    static String diagnostic(Throwable error){return error instanceof ContractViolation?error.getMessage():"The structured response was not one complete valid JSON object.";}
+    static ContractViolation invalid(String reason){return new ContractViolation(reason);}
 }

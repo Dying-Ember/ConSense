@@ -281,6 +281,18 @@ class AdviceDocumentScopeIntegrationTest {
         assertTrue(advice.ask(id,new com.consense.web.dto.AdviceDtos.AskRequest("Explain","contract"),progress).isGrounded());assertEquals(2,calls.get());verify(counter,times(2)).observe(any());
         JsonNode checks=JsonUtils.parse(messages.findByProjectIdOrderByIdAsc(id).get(1).getAdviceChecksJson());assertEquals(2,checks.path("attempts").size());assertFalse(checks.path("attempts").get(0).path("contractParsed").asBoolean());
     }
+    @Test void singleRepairNamesTheSafeMissingContractFieldAndKeepsExactPublicAliases() throws Exception {
+        String id=project();source(id,"SCC","SCC.txt","VETTING_PACKAGE","tender","AUTHORED provision");mvc.perform(post("/api/advice/{id}/index/rebuild",id)).andExpect(jsonPath("$.code").value(0));
+        com.fasterxml.jackson.databind.node.ObjectNode valid=(com.fasterxml.jackson.databind.node.ObjectNode)JsonUtils.parse(com.consense.service.advice.AdviceBudgetFixture.contract("{\"grounded\":true,\"answer\":\"AUTHORED protocol answer [1]\",\"citations\":[\"[1]\"]}"));
+        com.fasterxml.jackson.databind.node.ObjectNode invalid=valid.deepCopy();((com.fasterxml.jackson.databind.node.ObjectNode)invalid.path("sections").get(0)).remove("checks");
+        java.util.concurrent.atomic.AtomicInteger calls=new java.util.concurrent.atomic.AtomicInteger();
+        doAnswer(call->{String prompt=JsonUtils.write(call.getArgument(0));assertTrue(prompt.contains("Public citation alias=[1]"));assertTrue(prompt.contains("Application output reserve: 16384 tokens."));
+            if(calls.getAndIncrement()>0)assertTrue(prompt.contains("Application rejected: answer.sections[0].checks: required field is missing"));
+            JsonNode schema=call.getArgument(1);assertEquals(JsonUtils.parse("[\"[1]\"]"),schema.path("properties").path("sections").path("items").path("properties").path("citations").path("items").path("enum"));
+            return JsonUtils.write(calls.get()==1?invalid:valid);}).when(local).chatStructured(anyList(),any());
+        assertTrue(ask(id,"contract").path("grounded").asBoolean());assertEquals(2,calls.get());verify(counter,times(2)).observe(any());
+        JsonNode checks=JsonUtils.parse(messages.findByProjectIdOrderByIdAsc(id).get(1).getAdviceChecksJson());assertTrue(checks.path("attempts").get(0).path("rejections").get(0).asText().contains("answer.sections[0].checks"));
+    }
     @Test void naturalFlowchartQuestionUsesApplicationHarnessAndGraphRepairSharesTheTotalBudget() throws Exception {
         String id=project();source(id,"SCC","SCC.txt","VETTING_PACKAGE","tender","AUTHORED Contractor submits notice; evidence review follows.");mvc.perform(post("/api/advice/{id}/index/rebuild",id)).andExpect(jsonPath("$.code").value(0));
         com.fasterxml.jackson.databind.node.ObjectNode answer=(com.fasterxml.jackson.databind.node.ObjectNode)JsonUtils.parse(com.consense.service.advice.AdviceBudgetFixture.contract("{\"grounded\":true,\"answer\":\"AUTHORED notice procedure [1]\",\"citations\":[\"[1]\"]}"));answer.put("questionType","T6");

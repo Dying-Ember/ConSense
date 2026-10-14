@@ -601,6 +601,24 @@ test('clear current session invalidates an in-flight response and leaves other s
   } finally { h.dispose() }
 })
 
+test('stopping before an answer has only the stopped state, without a completed unknown answer or model placeholder', async () => {
+  const pending = deferred(), h = await harness({ initialView: 'advice', respondOverride: ({ url }) => {
+    if (url.endsWith('/sessions')) return sessions
+    if (url.endsWith('/ask/stream')) return pending.promise
+  } })
+  try {
+    sessionSelect(h).props['onUpdate:modelValue']('session-A'); await settle()
+    find(h.root, node => node.tag === 'textarea').props['onUpdate:modelValue']('Question to stop'); await settle()
+    const asking = button(h, 'Ask').props.onClick(); await settle()
+    await button(h, 'Stop').props.onClick(); await settle()
+    const stopped = find(h.root, node => node.tag === 'div' && node.props.class?.includes('bubble') && text(node).includes('Stopped.'))
+    assert.ok(stopped); assert.match(text(stopped), /Stopped\. Any displayed portions are not a completed answer/)
+    assert.doesNotMatch(text(stopped), /I don.t know|No saved model identity|No model identity|没有保存模型标识/)
+    pending.resolve({ sessionId: 'session-A', grounded: true, title: localized('Late'), content: localized('LATE STOPPED ANSWER'), sources: [], citations: [] }); await asking; await settle()
+    assert.doesNotMatch(text(h.root), /LATE STOPPED ANSWER/); assert.doesNotMatch(text(stopped), /I don.t know|No saved model identity/)
+  } finally { h.dispose() }
+})
+
 test('drawing upload sends explicit identity-only scope and source list retains excluded original identity', async () => {
   const drawing = { key: 'DRAWING', fileName: 'drawing.pdf', role: localized('Drawing identity'), status: 'EXCLUDED', parsed: false, documentScope: 'drawing', exclusionReason: 'drawing_outside_scope', parseStatus: 'EXCLUDED', parseMessage: 'Identity only; original retained', pageCount: 0 }
   const h = await harness({ respondOverride: ({ url }) => {
