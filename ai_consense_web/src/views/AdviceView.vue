@@ -747,6 +747,7 @@ async function askPrecedence() {
 .advice-progress { color: var(--muted); padding: 4px 0 10px; }
 .progress-dot { display: inline-block; width: 7px; height: 7px; margin-right: 6px; border-radius: 50%; background: currentColor; animation: advice-pulse 1.4s ease-in-out infinite; }
 .latest-message { margin: 6px 18px; }
+.source-view { max-height: none; }
 .source-context { margin-top: 12px; }
 .source-context summary { cursor: pointer; }
 @keyframes advice-pulse { 50% { opacity: .35; } }
