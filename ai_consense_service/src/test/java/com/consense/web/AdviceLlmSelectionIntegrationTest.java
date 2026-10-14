@@ -81,13 +81,13 @@ class AdviceLlmSelectionIntegrationTest {
         java.util.concurrent.atomic.AtomicInteger calls=new java.util.concurrent.atomic.AtomicInteger();
         when(miniMax.chat(anyList())).thenAnswer(invocation->{
             if(calls.getAndIncrement()==0) {
-                ask(other,"local").andExpect(jsonPath("$.data.content.en").value("Local answer TEST ONLY"));
+                ask(other,"local").andExpect(jsonPath("$.data.content.en").value(org.hamcrest.Matchers.containsString("Local answer TEST ONLY")));
                 return "{\"grounded\":";
             }
             return "{\"grounded\":true,\"answer\":\"MiniMax answer TEST ONLY\",\"citations\":[\"[1]\"]}";
         });
         JsonNode answer=JsonUtils.parse(ask(id,"minimax-cn").andExpect(jsonPath("$.code").value(0))
-                .andExpect(jsonPath("$.data.content.en").value("MiniMax answer TEST ONLY"))
+                .andExpect(jsonPath("$.data.content.en").value(org.hamcrest.Matchers.containsString("MiniMax answer TEST ONLY")))
                 .andExpect(jsonPath("$.data.modelIdentity.profileId").value("minimax-cn"))
                 .andReturn().getResponse().getContentAsString()).path("data");
         assertEquals(2,calls.get());assertEquals("MiniMax-M3",answer.path("model").asText());
@@ -151,7 +151,7 @@ class AdviceLlmSelectionIntegrationTest {
         mvc.perform(post("/api/advice/{id}/ask",id).contentType(MediaType.APPLICATION_JSON)
                 .content("{\"question\":\"What is the synthetic clause?\"}"))
                 .andExpect(jsonPath("$.code").value(0))
-                .andExpect(jsonPath("$.data.content.en").value("Legacy deployment answer TEST ONLY"))
+                .andExpect(jsonPath("$.data.content.en").value(org.hamcrest.Matchers.containsString("Legacy deployment answer TEST ONLY")))
                 .andExpect(jsonPath("$.data.model").value("local-test-chat"));
         mvc.perform(get("/api/advice/{id}/index/status",id).header("X-ConSense-Llm-Profile","minimax-cn"))
                 .andExpect(jsonPath("$.data.embedModel").value("fixed-test-embedding"))

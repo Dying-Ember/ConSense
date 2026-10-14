@@ -67,8 +67,8 @@ class AdviceSessionIntegrationTest {
         when(local.chatModel()).thenReturn("session-test-chat");when(local.embedModel()).thenReturn("session-test-embedding");
         doAnswer(call->{List<float[]> out=new ArrayList<>();for(Object ignored:call.<List<?>>getArgument(0))out.add(new float[]{1,0});return out;}).when(local).embed(anyList());
         doAnswer(call->answer).when(local).chat(anyList());
-        doAnswer(call->{prompts.add(JsonUtils.write(call.getArgument(0)));return answer;}).when(local).chatStructured(anyList(),any());
-        doAnswer(call->{prompts.add(JsonUtils.write(call.getArgument(0)));return answer;}).when(miniMax).chatStructured(anyList(),any());
+        doAnswer(call->{prompts.add(JsonUtils.write(call.getArgument(0)));return com.consense.service.advice.AdviceBudgetFixture.contract(answer);}).when(local).chatStructured(anyList(),any());
+        doAnswer(call->{prompts.add(JsonUtils.write(call.getArgument(0)));return com.consense.service.advice.AdviceBudgetFixture.contract(answer);}).when(miniMax).chatStructured(anyList(),any());
         doAnswer(call->observation(call.getArgument(0))).when(counter).observe(any());
     }
 
@@ -119,7 +119,7 @@ class AdviceSessionIntegrationTest {
 
     @Test void clearDuringModelGenerationRejectsLatePublicationAndLeavesHistoryEmpty() throws Exception {
         String project=project();source(project,"CURRENT BASIS TEST ONLY");rebuild(project);String session=session(project,"contract","project_contract");
-        when(local.chatStructured(anyList(),any())).thenAnswer(call->{data(delete("/api/advice/{id}/messages",project).param("sessionId",session));return answer;});
+        when(local.chatStructured(anyList(),any())).thenAnswer(call->{data(delete("/api/advice/{id}/messages",project).param("sessionId",session));return com.consense.service.advice.AdviceBudgetFixture.contract(answer);});
         mvc.perform(askRequest(project,session,"contract","project_contract","LATE ANSWER TEST ONLY")).andExpect(jsonPath("$.code").value(4202));
         assertTrue(history(project,session).isEmpty());
     }
@@ -127,7 +127,7 @@ class AdviceSessionIntegrationTest {
     @Test void concurrentQuestionsCannotPublishAgainstTheSameSessionRevision() throws Exception {
         String project=project();source(project,"CURRENT BASIS TEST ONLY");rebuild(project);String session=session(project,"contract","project_contract");
         CountDownLatch entered=new CountDownLatch(2),release=new CountDownLatch(1);
-        when(local.chatStructured(anyList(),any())).thenAnswer(call->{entered.countDown();assertTrue(release.await(10,TimeUnit.SECONDS));return answer;});
+        when(local.chatStructured(anyList(),any())).thenAnswer(call->{entered.countDown();assertTrue(release.await(10,TimeUnit.SECONDS));return com.consense.service.advice.AdviceBudgetFixture.contract(answer);});
         ExecutorService executor=Executors.newFixedThreadPool(2);
         try {
             Callable<Integer> call=()->JsonUtils.parse(mvc.perform(askRequest(project,session,"contract","project_contract","CONCURRENT QUESTION TEST ONLY")).andReturn().getResponse().getContentAsString()).path("code").asInt();
@@ -139,7 +139,7 @@ class AdviceSessionIntegrationTest {
 
     @Test void changedSourcesDuringGenerationRejectTheNewExchange() throws Exception {
         String project=project();SourceDocument source=source(project,"CURRENT BASIS TEST ONLY");rebuild(project);String session=session(project,"contract","project_contract");
-        when(local.chatStructured(anyList(),any())).thenAnswer(call->{source.setTextContent("SOURCE CHANGED WHILE CALLING TEST ONLY");sources.saveAndFlush(source);return answer;});
+        when(local.chatStructured(anyList(),any())).thenAnswer(call->{source.setTextContent("SOURCE CHANGED WHILE CALLING TEST ONLY");sources.saveAndFlush(source);return com.consense.service.advice.AdviceBudgetFixture.contract(answer);});
         mvc.perform(askRequest(project,session,"contract","project_contract","SOURCE CHANGE TEST ONLY")).andExpect(jsonPath("$.code").value(4204));assertTrue(history(project,session).isEmpty());
     }
 
@@ -180,7 +180,7 @@ class AdviceSessionIntegrationTest {
         String project=project();source(project,"CURRENT BASIS TEST ONLY");rebuild(project);String session=session(project,"contract","project_contract");
         List<List<LlmClient.ChatTurn>> dispatched=new ArrayList<>();List<VettingInputBudget.Input> counted=new ArrayList<>();
         doAnswer(call->{VettingInputBudget.Input input=call.getArgument(0);counted.add(input);return observation(input);}).when(counter).observe(any());
-        doAnswer(call->{dispatched.add(call.getArgument(0));return dispatched.size()==1?"TEST ONLY invalid JSON":answer;}).when(local).chatStructured(anyList(),any());
+        doAnswer(call->{dispatched.add(call.getArgument(0));return dispatched.size()==1?"TEST ONLY invalid JSON":com.consense.service.advice.AdviceBudgetFixture.contract(answer);}).when(local).chatStructured(anyList(),any());
         assertTrue(ask(project,session,"RETRY QUESTION TEST ONLY").path("grounded").asBoolean());assertEquals(2,counted.size());assertEquals(2,dispatched.size());
         for(int index=0;index<2;index++)assertEquals(JsonUtils.write(counted.get(index).getMessages()),JsonUtils.write(dispatched.get(index)));
         assertFalse(dispatched.get(0).get(1).getContent().equals(dispatched.get(1).get(1).getContent()));
@@ -206,7 +206,7 @@ class AdviceSessionIntegrationTest {
 
     @Test void originalSourceIdentityChangeRejectsPublicationEvenWhenParsedTextIsUnchanged() throws Exception {
         String project=project();SourceDocument original=source(project,"UNCHANGED PARSED TEXT TEST ONLY");rebuild(project);String session=session(project,"contract","project_contract");
-        doAnswer(call->{original.setSourceSha256(hash('d'));sources.saveAndFlush(original);return answer;}).when(local).chatStructured(anyList(),any());
+        doAnswer(call->{original.setSourceSha256(hash('d'));sources.saveAndFlush(original);return com.consense.service.advice.AdviceBudgetFixture.contract(answer);}).when(local).chatStructured(anyList(),any());
         mvc.perform(askRequest(project,session,"contract","project_contract","CHANGED ORIGINAL IDENTITY TEST ONLY")).andExpect(jsonPath("$.code").value(4204));
         assertTrue(history(project,session).isEmpty());
     }
@@ -218,7 +218,7 @@ class AdviceSessionIntegrationTest {
             data(askRequest(project,session,"contract","project_contract","FIRST ACCEPTED ANSWER TEST ONLY"));
             JsonNode before=explicit?history(project,session):data(get("/api/advice/{id}/messages",project));clearInvocations(local);
             java.nio.file.Path path=java.nio.file.Paths.get(original.getStoragePath());long size=java.nio.file.Files.size(path);java.nio.file.attribute.FileTime timestamp=java.nio.file.Files.getLastModifiedTime(path);
-            org.mockito.stubbing.Answer<String> changed=call->{byte[] bytes=java.nio.file.Files.readAllBytes(path);bytes[0]^=1;java.nio.file.Files.write(path,bytes);java.nio.file.Files.setLastModifiedTime(path,timestamp);return answer;};
+            org.mockito.stubbing.Answer<String> changed=call->{byte[] bytes=java.nio.file.Files.readAllBytes(path);bytes[0]^=1;java.nio.file.Files.write(path,bytes);java.nio.file.Files.setLastModifiedTime(path,timestamp);return com.consense.service.advice.AdviceBudgetFixture.contract(answer);};
             doAnswer(changed).when(local).chatStructured(anyList(),any());
             mvc.perform(askRequest(project,session,"contract","project_contract","MUTATION DURING ANSWER TEST ONLY")).andExpect(jsonPath("$.code").value(4204));
             assertEquals(size,java.nio.file.Files.size(path));assertEquals(timestamp,java.nio.file.Files.getLastModifiedTime(path));
@@ -243,11 +243,11 @@ class AdviceSessionIntegrationTest {
 
     @Test void unchangedLegacySourcesAllowOneJsonRetryWithTheOriginalPromptLiterals() throws Exception {
         String project=project();source(project,"ORIGINAL BYTES TEST ONLY");rebuild(project);List<List<LlmClient.ChatTurn>> sent=new ArrayList<>();
-        doAnswer(call->{sent.add(call.getArgument(0));return sent.size()==1?"TEST ONLY invalid JSON":answer;}).when(local).chatStructured(anyList(),any());
+        doAnswer(call->{sent.add(call.getArgument(0));return sent.size()==1?"TEST ONLY invalid JSON":com.consense.service.advice.AdviceBudgetFixture.contract(answer);}).when(local).chatStructured(anyList(),any());
         assertTrue(data(askRequest(project,null,"contract","project_contract","LEGACY RETRY TEST ONLY")).path("grounded").asBoolean());
         assertEquals(2,sent.size());assertEquals(sent.get(0).get(0).getContent(),sent.get(1).get(0).getContent());
         assertTrue(sent.get(0).get(0).getContent().endsWith("\n\n【输出要求】只输出一个合法的 JSON，不要 Markdown 代码块，不要任何解释文字。"));
-        assertEquals(sent.get(0).get(1).getContent()+"\n\n重要：上一次输出不是合法 JSON。请严格只输出 JSON。",sent.get(1).get(1).getContent());
+        assertTrue(sent.get(1).get(1).getContent().startsWith(sent.get(0).get(1).getContent()));assertTrue(sent.get(1).get(1).getContent().contains("Repair the same answer once"));
         assertEquals(2,data(get("/api/advice/{id}/messages",project)).size());
     }
 
@@ -269,7 +269,7 @@ class AdviceSessionIntegrationTest {
         verify(local,never()).chatStructured(anyList(),any());verify(local,never()).chat(anyList());assertTrue(data(get("/api/advice/{id}/messages",project)).isEmpty());
         adapters();List<VettingInputBudget.Input> counted=new ArrayList<>();List<List<LlmClient.ChatTurn>> sent=new ArrayList<>();
         doAnswer(call->{VettingInputBudget.Input input=call.getArgument(0);counted.add(input);return observation(input);}).when(counter).observe(any());
-        doAnswer(call->{sent.add(call.getArgument(0));return answer;}).when(local).chatStructured(anyList(),any());
+        doAnswer(call->{sent.add(call.getArgument(0));return com.consense.service.advice.AdviceBudgetFixture.contract(answer);}).when(local).chatStructured(anyList(),any());
         assertTrue(data(askRequest(project,null,"contract","project_contract","BARE BOUND 256K TEST ONLY")).path("grounded").asBoolean());
         assertEquals(1,counted.size());assertEquals(1,sent.size());assertEquals(JsonUtils.write(counted.get(0).getMessages()),JsonUtils.write(sent.get(0)));
         assertTrue(counted.get(0).getSourceSnapshotSha256().matches("[a-f0-9]{64}"));assertEquals(2,data(get("/api/advice/{id}/messages",project)).size());
