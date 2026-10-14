@@ -92,6 +92,21 @@ class ProviderStreamingTest {
         assertThrows(BizException.class,()->new OpenAiLlmClient(cfg,new HttpSupport()).chatStructuredStream(turns,schema,p->{},Runnable::run));
         assertEquals(0,requests.get());
     }
+    @Test void cancellationDuringProviderGenerationClosesTheCurrentSocket()throws Exception {
+        String first=sse("{\"sections\":[{}",null);
+        firstDelta=new CountDownLatch(1);waitAfterBytes=first.getBytes(StandardCharsets.UTF_8).length;
+        ConsenseProperties.Llm cfg=serve("/v1/chat/completions",first+sse("]}","stop")+"data: [DONE]\n\n",1);
+        AtomicReference<Runnable> cancel=new AtomicReference<>();
+        assertThrows(BizException.class,()->new OpenAiLlmClient(cfg,new HttpSupport()).chatStructuredStream(turns,schema,p->{cancel.get().run();firstDelta.countDown();},cancel::set));
+        assertEquals(1,requests.get());
+    }
+    @Test void overflowedChoiceIndexAndProviderErrorsAreRejectedWithoutReplay()throws Exception {
+        String invalid=sse("{}","stop").replace("\"index\":0","\"index\":4294967296");
+        ConsenseProperties.Llm cfg=serve("/v1/chat/completions",invalid+"data: [DONE]\n\n",2);
+        IncompleteModelResponseException error=assertThrows(IncompleteModelResponseException.class,
+                ()->new OpenAiLlmClient(cfg,new HttpSupport()).chatStructuredStream(turns,schema,p->{},r->{}));
+        assertEquals(IncompleteModelResponseException.FailureKind.INVALID_CHOICE_COUNT,error.getFailureKind());assertEquals(1,requests.get());
+    }
     @Test void readerRejectsByteCapAndMalformedUtf8() {
         assertThrows(IOException.class,()->ProviderStreamReader.read(new ByteArrayInputStream("data: x\n\n".getBytes(StandardCharsets.UTF_8)),3,true,p->{}));
         assertThrows(IOException.class,()->ProviderStreamReader.read(new ByteArrayInputStream(new byte[]{(byte)0xc3,0x28}),20,true,p->{}));

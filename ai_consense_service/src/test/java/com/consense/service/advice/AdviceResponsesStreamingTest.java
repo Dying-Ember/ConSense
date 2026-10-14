@@ -108,4 +108,12 @@ class AdviceResponsesStreamingTest {
         assertThrows(IllegalStateException.class,()->operation.generateStream(request,budget,()->{if(guards.incrementAndGet()==2)throw new IllegalStateException("source changed");},d->{},r->{}));
         assertEquals(2,calls.get());
     }
+    @Test void overflowedContentIndexCannotWrapIntoValidZero(){
+        events=events.replace("\"content_index\":0","\"content_index\":4294967296");
+        AdviceResponsesTransport.PreparedRequest request=operation.prepareStream("s","u",SOURCE,0);
+        AdviceResponsesTransport.BudgetResult budget=operation.observe(request,()->{});List<String> deltas=new ArrayList<>();
+        AdviceResponsesTransport.RequestFailure failure=assertThrows(AdviceResponsesTransport.RequestFailure.class,
+                ()->operation.generateStream(request,budget,()->{},deltas::add,r->{}));
+        assertEquals("stream_content_identity_invalid",failure.getReason());assertTrue(deltas.isEmpty());assertEquals(2,calls.get());
+    }
 }

@@ -329,8 +329,8 @@ public final class AdviceResponsesTransport {
             if("response.output_item.added".equals(type)||"response.output_item.done".equals(type)){
                 JsonNode item=event.path("item");String kind=item.path("type").asText();
                 if("reasoning".equals(kind))return;
-                if(!item.isObject()||!"message".equals(kind)||!"assistant".equals(item.path("role").asText())||!item.path("id").isTextual()
-                        ||!event.path("output_index").isIntegralNumber()||event.path("output_index").asInt(-1)<0)
+                if(!item.isObject()||!"message".equals(kind)||!"assistant".equals(item.path("role").asText())||!item.path("id").isTextual()||item.path("id").asText().isEmpty()
+                        ||!event.path("output_index").isIntegralNumber()||!event.path("output_index").canConvertToInt()||event.path("output_index").asInt(-1)<0)
                     throw failure("output_invalid","generation_message_or_tool_invalid",null);
                 if("response.output_item.added".equals(type)){
                     if(messageId!=null)throw failure("output_invalid","stream_multiple_messages",null);
@@ -342,7 +342,8 @@ public final class AdviceResponsesTransport {
             if("response.output_text.delta".equals(type)||"response.output_text.done".equals(type)
                     ||"response.content_part.added".equals(type)||"response.content_part.done".equals(type)){
                 if(messageId==null||!messageId.equals(event.path("item_id").asText())||!event.path("output_index").isIntegralNumber()
-                        ||messageIndex!=event.path("output_index").asInt()||!event.path("content_index").isIntegralNumber()||event.path("content_index").asInt()!=0)
+                        ||!event.path("output_index").canConvertToInt()||messageIndex!=event.path("output_index").asInt()
+                        ||!event.path("content_index").isIntegralNumber()||!event.path("content_index").canConvertToInt()||event.path("content_index").asInt()!=0)
                     throw failure("output_invalid","stream_content_identity_invalid",null);
                 if(type.startsWith("response.content_part.")){
                     if(!"output_text".equals(event.path("part").path("type").asText()))throw failure("output_invalid","generation_text_or_refusal_invalid",null);
