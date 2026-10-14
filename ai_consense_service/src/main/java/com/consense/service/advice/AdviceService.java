@@ -797,7 +797,8 @@ public class AdviceService {
         boolean streaming=publication.progress.streaming()&&(responses!=null?responses.supportsStreaming():chat.getClient().supportsStreaming());
         if(publication.progress.streaming()&&!streaming)publication.progress.phase("stream_unavailable");
         for(int attempt=0;attempt<2;attempt++) {
-            guard.run();publication.beginAttempt(streaming);publication.progress.phase("budget");
+            guard.run();publication.beginAttempt(streaming,attempt==1);publication.progress.phase("budget");
+            String attemptSystem=attempt==0||!streaming?system:system+"\n\nRepair response contract: retain the same required envelope fields and section schema. The sections array now contains ONLY unpublished replacement/additional units; never return an application-owned accepted section ID. The application prepends its immutable accepted prefix. If that prefix is nonempty, do not regenerate its opening limits unit; sections may be empty for an envelope-only repair. If no units were accepted, return the full answer beginning with limits. The composed full answer must satisfy every original source, scope, language, check and graph requirement.";
             com.consense.ai.StructuredJsonSections units=streaming?new com.consense.ai.StructuredJsonSections(publication::acceptNode):null;
             com.consense.ai.StructuredJsonSections.InvalidJsonException[] syntaxFailure={null};
             java.util.function.Consumer<String> onDelta=delta->{
@@ -807,13 +808,13 @@ public class AdviceService {
             String raw;
             try {
             if(responses!=null) {
-                AdviceResponsesTransport.PreparedRequest request=streaming?responses.prepareStream(system,user+repair,sourceIdentity,attempt):responses.prepare(system,user+repair,sourceIdentity,attempt);
+                AdviceResponsesTransport.PreparedRequest request=streaming?responses.prepareStream(attemptSystem,user+repair,sourceIdentity,attempt):responses.prepare(attemptSystem,user+repair,sourceIdentity,attempt);
                 AdviceResponsesTransport.BudgetResult budget=responses.observe(request,guard,publication.progress::onCancel);
                 if(!budget.isGenerationPermitted())throw new AdviceResponsesTransport.RequestFailure(budget.getStatus(),budget.getReason(),null);
                 guard.run();publication.progress.phase("generating");
                 raw=streaming?responses.generateStream(request,budget,guard,onDelta,publication.progress::onCancel):responses.generate(request,budget,guard);
             } else {
-                List<LlmClient.ChatTurn> turns=sessionTurns(system,user+repair,attempt);sessionBudget(chat,turns,sourceIdentity);guard.run();
+                List<LlmClient.ChatTurn> turns=sessionTurns(attemptSystem,user+repair,attempt);sessionBudget(chat,turns,sourceIdentity);guard.run();
                 if(chat.getClient()==null||!chat.getClient().available())throw new BizException(4203,"The captured advice model is unavailable; no alternate model was used.");
                 guard.run();publication.progress.phase("generating");
                 raw=streaming?chat.getClient().chatStructuredStream(turns,publication.schema,onDelta,publication.progress::onCancel):chat.getClient().chatStructured(turns,publication.schema);
@@ -824,7 +825,7 @@ public class AdviceService {
                 log.warn("Advice application contract rejected attempt {}: {}",attempt,diagnosis);
                 publication.recordAttempt(attempt,null);
                 if(attempt==1)throw new BizException(4205,"Advice output_invalid: the structured stream remained invalid after one admitted repair. No completed answer was saved.");
-                repair="\n\nRepair the same complete answer once. Application rejected: "+diagnosis+". Keep already-published sections byte-identical: "+JsonUtils.write(publication.accepted)+". Retain the same supplied public citation aliases and requested basis.";
+                repair=publication.repairInstruction();
                 continue;
             }
             guard.run();publication.progress.phase("validating");
@@ -835,14 +836,13 @@ public class AdviceService {
                 publication.finish(result,originalQuestion,streaming);
                 publication.recordAttempt(attempt,result);
                 if(publication.errors.isEmpty())return result;
-                repair="\n\nRepair the same complete answer once. Application rejected: "+JsonUtils.write(publication.errors)
-                        +". Keep already-published sections byte-identical: "+JsonUtils.write(publication.accepted)+". Do not introduce evidence IDs outside the supplied material.";
+                repair=publication.repairInstruction();
             } catch(java.io.IOException|IllegalArgumentException invalid) {
                 String diagnosis=AdvisoryHarness.diagnostic(invalid);publication.errors.add(diagnosis);
                 log.warn("Advice application contract rejected attempt {}: {}",attempt,diagnosis);
                 publication.recordAttempt(attempt,null);
                 if(attempt==1)throw new BizException(4205,"Advice output_invalid: the answer contract remained invalid after one admitted repair. No completed answer was saved.");
-                repair="\n\nRepair the same answer once. Application rejected: "+diagnosis+". Return one complete JSON object conforming to the exact schema and checks. Preserve facts, allowed public citation aliases and requested basis. Keep already-published sections byte-identical: "+JsonUtils.write(publication.accepted);
+                repair=publication.repairInstruction();
             }
         }
         return result;
@@ -873,21 +873,29 @@ public class AdviceService {
         private final List<AdvisoryHarness.Section> accepted=new ArrayList<>();
         private final List<String> errors=new ArrayList<>();
         private final List<AdvisoryHarness.Section> proposed=new ArrayList<>();
+        private List<AdvisoryHarness.Section> repairPrefix=Collections.emptyList();
         private final List<Map<String,Object>> attempts=new ArrayList<>();
         private boolean live,opening;
         Publication(List<CitationVO> sources,boolean referenceOnly,AdviceProgress progress,Runnable guard,QuestionContext question){this.sources=sources;this.referenceOnly=referenceOnly;this.progress=progress;this.guard=guard;this.question=question;this.schema=AdvisoryHarness.schema(sources);}
         String content(AdvisoryHarness.Section section){return AdvisoryHarness.content(section,sources,referenceOnly,question.originalQuestion,question.background);}
-        void beginAttempt(boolean streaming){live=streaming;opening=false;errors.clear();proposed.clear();if(!streaming)accepted.clear();}
+        void beginAttempt(boolean streaming,boolean repairing){live=streaming;if(!streaming)accepted.clear();repairPrefix=repairing?new ArrayList<>(accepted):Collections.emptyList();opening=!repairPrefix.isEmpty();errors.clear();proposed.clear();}
+        String repairInstruction(){return "\n\nUse the one admitted repair for the unpublished units and envelope metadata. Application rejected: "+JsonUtils.write(errors)
+                +". Application-owned accepted prefix (context only; omit every one of these IDs from repair sections): "+JsonUtils.write(live?accepted:Collections.emptyList())
+                +". Preserve the original question, requested basis, language and supplied public citation aliases. Return all required envelope fields with only new/unpublished sections, or sections=[] if only metadata needs correction.";}
         void recordAttempt(int number,AnswerRecord answer){Map<String,Object> observation=new LinkedHashMap<>();observation.put("attempt",number);observation.put("sections",answer==null?null:answer.getSections());observation.put("rejections",new ArrayList<>(errors));observation.put("contractParsed",answer!=null);attempts.add(observation);}
         void acceptNode(JsonNode node){
+            assertUnpublishedId(node.path("id").asText());
             try{AdvisoryHarness.shape(node,AdvisoryHarness.schema().path("properties").path("sections").path("items"));accept(JsonUtils.mapper().convertValue(node,AdvisoryHarness.Section.class));}
             catch(IllegalArgumentException invalid){errors.add("Incomplete streamed answer unit: "+invalid.getMessage());}
         }
+        void assertUnpublishedId(String id){if(repairPrefix.stream().anyMatch(s->Objects.equals(s.getId(),id)))
+            throw new BizException(4205,"Advice repair resubmitted an application-owned accepted section ID; this answer is invalidated. Retry the question.");}
         void accept(AdvisoryHarness.Section section){
             guard.run();proposed.add(section);
+            assertUnpublishedId(section.getId());
             try {
-                if(proposed.size()>64)throw AdvisoryHarness.invalid("Answer has too many sections");
-                if(proposed.size()==1&&!"limits".equals(section.getKind()))throw AdvisoryHarness.invalid("Facts, assumptions and limits must precede conclusions");
+                if(repairPrefix.size()+proposed.size()>64)throw AdvisoryHarness.invalid("Answer has too many sections");
+                if(repairPrefix.isEmpty()&&proposed.size()==1&&!"limits".equals(section.getKind()))throw AdvisoryHarness.invalid("Facts, assumptions and limits must precede conclusions");
                 if(proposed.stream().filter(s->Objects.equals(s.getId(),section.getId())).count()!=1)throw AdvisoryHarness.invalid("Duplicate section ID");
                 // Alias violations reject this unit; independently valid units can still be retained.
                 AdvisoryHarness.shape(JsonUtils.mapper().valueToTree(section),schema.path("properties").path("sections").path("items"));
@@ -895,19 +903,21 @@ public class AdviceService {
                 if(!accepted.isEmpty()&&!Objects.equals(accepted.get(0).getLanguage(),section.getLanguage()))throw AdvisoryHarness.invalid("Answer units must retain one requested language");
                 if(proposed.size()==1)opening=true;
                 if(!opening)throw AdvisoryHarness.invalid("Opening facts and limitations were not validated");
-                int existing=-1;for(int i=0;i<accepted.size();i++)if(accepted.get(i).getId().equals(section.getId()))existing=i;
-                if(existing>=0){if(!JsonUtils.write(accepted.get(existing)).equals(JsonUtils.write(section)))throw new BizException(4205,"Advice repair changed a section already published; this answer is invalidated. Retry the question.");return;}
                 accepted.add(section);
                 if(live){guard.run();List<CitationVO> refs=sources.stream().filter(s->section.getCitations().contains(s.getEvidenceId())).collect(Collectors.toList());
                     progress.section((accepted.size()==1?"":"\n\n")+content(section),section.getCitations(),refs);}
             }catch(IllegalArgumentException rejected){errors.add((section==null?"unknown":section.getId())+": "+rejected.getMessage());}
         }
         void finish(AnswerRecord answer,String question,boolean streamed){
-            if(answer==null||answer.getQuestionType()==null||!answer.getQuestionType().matches("T[1-8]")||answer.getSections()==null||answer.getSections().isEmpty())
+            if(answer==null||answer.getQuestionType()==null||!answer.getQuestionType().matches("T[1-8]")||answer.getSections()==null)
                 throw AdvisoryHarness.invalid("Missing question type, opening section or self-check records");
-            declaredLanguage(answer);
             if(!streamed)for(AdvisoryHarness.Section section:answer.getSections())accept(section);
             if(!JsonUtils.write(proposed).equals(JsonUtils.write(answer.getSections())))throw AdvisoryHarness.invalid("Streamed sections differ from the final envelope");
+            List<AdvisoryHarness.Section> composed=new ArrayList<>(repairPrefix);composed.addAll(answer.getSections());answer.setSections(composed);
+            AdvisoryHarness.shape(JsonUtils.mapper().valueToTree(answer),schema);declaredLanguage(answer);
+            for(AdvisoryHarness.Section section:composed){guard.run();try{AdvisoryHarness.validate(section,sources,referenceOnly,(basis,refs)->incorporationSupported(basis,refs,sources));}
+                catch(IllegalArgumentException invalid){if(accepted.stream().anyMatch(s->Objects.equals(s.getId(),section.getId())))
+                    throw new BizException(4205,"Advice accepted section failed final validation; this answer is invalidated. Retry the question.");errors.add(section.getId()+": "+invalid.getMessage());}}
             if(accepted.stream().anyMatch(s->answer.getSections().stream().noneMatch(p->JsonUtils.write(s).equals(JsonUtils.write(p)))))
                 throw new BizException(4205,"Advice final envelope changed a published section; this answer is invalidated. Retry the question.");
             List<AdvisoryHarness.Section> finalPublished=answer.getSections().stream().filter(s->accepted.stream().anyMatch(a->a.getId().equals(s.getId()))).collect(Collectors.toList());
