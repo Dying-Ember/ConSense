@@ -25,17 +25,17 @@ public class OpenAiLlmClient implements LlmClient {
 
     private final ConsenseProperties.Llm cfg;
     private final HttpSupport http;
-    private final boolean retryExplicitOverload;
+    private final boolean miniMax;
 
     public OpenAiLlmClient(ConsenseProperties.Llm cfg, HttpSupport http) {
         this(cfg, http, false);
     }
 
-    /** Package-local opt-in for the separate MiniMax adapter; ordinary deployments retain their policy. */
-    OpenAiLlmClient(ConsenseProperties.Llm cfg, HttpSupport http, boolean retryExplicitOverload) {
+    /** MiniMax framing and overload policy opt-in; ordinary deployments retain their policy. */
+    OpenAiLlmClient(ConsenseProperties.Llm cfg, HttpSupport http, boolean miniMax) {
         this.cfg = cfg;
         this.http = http;
-        this.retryExplicitOverload = retryExplicitOverload;
+        this.miniMax = miniMax;
     }
 
     @Override
@@ -87,7 +87,7 @@ public class OpenAiLlmClient implements LlmClient {
         ObjectNode body = request(turns, structured, false);
         String url = trim(cfg.getBaseUrl()) + "/v1/chat/completions";
         String requestJson = JsonUtils.write(body);
-        String raw = retryExplicitOverload
+        String raw = miniMax
                 ? (cfg.isOverloadRetryEnabled()
                     ? http.postJsonWithOverloadBackoff(url, requestJson, cfg.getTimeoutMs(), authHeader())
                     : http.postJsonWithoutReplay(url, requestJson, cfg.getTimeoutMs(), authHeader()))
@@ -157,7 +157,7 @@ public class OpenAiLlmClient implements LlmClient {
     @Override public String chatStructuredStream(List<ChatTurn> turns, JsonNode schema,
                                                  Consumer<String> onDelta, Consumer<Runnable> onCancel) {
         validateStructured(schema);
-        StreamContent output = new StreamContent(onDelta);
+        StreamContent output = new StreamContent(onDelta, miniMax);
         http.postJsonStream(trim(cfg.getBaseUrl()) + "/v1/chat/completions",
                 JsonUtils.write(request(turns, true, true)), cfg.getTimeoutMs(), authHeader(),
                 16 * 1024 * 1024, true, output::event, onCancel);
@@ -167,9 +167,10 @@ public class OpenAiLlmClient implements LlmClient {
     private static final class StreamContent {
         private final StringBuilder content = new StringBuilder();
         private final Consumer<String> delta;
+        private final boolean miniMax;
         private boolean stopped, done;
         private JsonNode last;
-        StreamContent(Consumer<String> d) { delta = java.util.Objects.requireNonNull(d); }
+        StreamContent(Consumer<String> d, boolean miniMax) { delta = java.util.Objects.requireNonNull(d); this.miniMax = miniMax; }
         private void reject(String message, IncompleteModelResponseException.FailureKind kind) {
             throw new IncompleteModelResponseException(message, last == null ? "" : last.toString(),
                     JsonUtils.mapper().getNodeFactory().textNode(content.toString()), kind, last);
@@ -210,7 +211,7 @@ public class OpenAiLlmClient implements LlmClient {
                 content.append(part);
                 if (!part.isEmpty()) delta.accept(part);
             }
-            if (choice.hasNonNull("finish_reason")) {
+            if (choice.hasNonNull("finish_reason") && !(miniMax && choice.path("finish_reason").isTextual() && choice.path("finish_reason").textValue().isEmpty())) {
                 String reason = choice.path("finish_reason").asText();
                 if (!"stop".equals(reason)) reject("Streaming model did not stop normally",
                         "length".equals(reason) ? IncompleteModelResponseException.FailureKind.OUTPUT_BUDGET_EXHAUSTED
@@ -220,7 +221,7 @@ public class OpenAiLlmClient implements LlmClient {
             }
         }
         String finish() {
-            if (!done || !stopped) reject("Streaming model completion marker is missing", IncompleteModelResponseException.FailureKind.INCOMPLETE_FINISH);
+            if (!stopped || (!done && !miniMax)) reject("Streaming model completion marker is missing", IncompleteModelResponseException.FailureKind.INCOMPLETE_FINISH);
             if (JsonUtils.isBlankText(content.toString())) reject("Streaming model returned no text", IncompleteModelResponseException.FailureKind.MISSING_TEXT);
             return content.toString();
         }
