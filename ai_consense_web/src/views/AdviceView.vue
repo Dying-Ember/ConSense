@@ -41,7 +41,7 @@ const followLatest = ref(true)
 const streamPhase = ref('')
 const elapsedSeconds = ref(0)
 const sourceDetails = ref(false)
-let elapsedTimer: ReturnType<typeof window.setTimeout> | undefined
+let elapsedTimer: number | undefined
 let activeRequest: { projectId: string; sessionId: string; requestId: string; selection: LlmSelection; controller: AbortController; message: ChatMessage } | null = null
 const scopeDocuments = ref<AdviceSourceDocument[]>([])
 const clarificationReply = ref<ChatMessage | null>(null)
@@ -692,6 +692,7 @@ async function askPrecedence() {
 
             <div v-if="activeCitation" class="source-view">
               <div class="sv-file">{{ activeCitation.fileLabel }} · {{ activeCitation.pageNo }}</div>
+              <p v-if="activeCitation.fixedBaselineEvidence" class="warning-note">{{ streamCopy('This is a fixed standard original. Its source identity does not establish project adoption.', '这是固定标准原件，其来源身份本身不证明本项目采用。', '這是固定標準原件，其來源身份本身不證明本項目採用。') }}</p>
               <AdviceSourceReader :project-id="projectId" :citation="activeCitation" :scope="activeSourceScope" />
               <details class="source-context"><summary>{{ streamCopy('Quoted excerpt and related original images', '引用摘录及关联原图', '引用摘錄及關聯原圖') }}</summary>
               <div class="sv-para" v-html="highlightHtml(activeCitation.content)" />

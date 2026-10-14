@@ -32,6 +32,8 @@ export async function streamAdvice(projectId: string, request: AdviceStreamReque
     throw new ApiError(failure?.code ?? response.status, failure?.message ?? 'Unable to start the consultation stream.')
   }
   const reader = response.body.getReader(), decoder = new TextDecoder('utf-8', { fatal: true })
+  const abort = () => { void reader.cancel().catch(() => undefined) }
+  options.signal.addEventListener('abort', abort, { once: true })
   let pending = '', bytes = 0, completed: AskResponse | undefined
   const frame = (block: string) => {
     const lines = block.split(/\r?\n/)
@@ -58,6 +60,7 @@ export async function streamAdvice(projectId: string, request: AdviceStreamReque
     while (true) {
       if (options.signal.aborted) throw new DOMException('Consultation stopped', 'AbortError')
       const next = await reader.read()
+      if (options.signal.aborted) throw new DOMException('Consultation stopped', 'AbortError')
       if (next.done) { pending += decoder.decode(); break }
       bytes += next.value.byteLength
       if (bytes > 32 * 1024 * 1024) throw new Error('ADVICE_STREAM_TOO_LARGE')
@@ -71,7 +74,7 @@ export async function streamAdvice(projectId: string, request: AdviceStreamReque
     if (pending.trim()) throw new Error('ADVICE_STREAM_INCOMPLETE_FRAME')
     if (!completed) throw new Error('The consultation connection ended before the answer was saved. Please retry.')
     return completed
-  } finally { await reader.cancel().catch(() => undefined); reader.releaseLock() }
+  } finally { options.signal.removeEventListener('abort', abort); await reader.cancel().catch(() => undefined); reader.releaseLock() }
 }
 
 export async function stopAdvice(projectId: string, requestId: string, sessionId: string, selection?: LlmSelection): Promise<void> {

@@ -49,6 +49,6 @@ test('late PDF preflight cannot replace the next citation, and out-of-range phys
 })
 test('stale original shows a clear error and never an excerpt masquerading as a file', async () => {
   const h = await component(async () => { throw new Error('SOURCE_DOCUMENT_SUPERSEDED') })
-  try { assert.match(text(h.root), /identity has changed/); assert.match(text(h.root), /SOURCE_DOCUMENT_SUPERSEDED/); assert.equal(h.created.length, 0) }
+  try { assert.match(text(h.root), /identity has changed/); assert.match(text(h.root), /source file or its registered identity changed/); assert.equal(h.created.length, 0) }
   finally { h.dispose() }
 })

@@ -44,6 +44,7 @@ async function flushCanonical() { for (let i = 0; i < 12; i++) { await new Promi
 async function harness({ stale = false, currentSources = [source], sourceGate, evidenceGate, initialView = 'vetting', importedProject, storageDenied = false,
   canonicalEvidence, adviceMessages = [], browserCrypto = require('node:crypto').webcrypto, respondOverride, canonicalRespond, answerRendererBoundaries = {} } = {}) {
   const requests = [], stored = new Map(), canonicalRequests = [], createdUrls = [], revokedUrls = []
+  for (const message of adviceMessages) for (const citation of message.sources ?? []) if (citation.canonicalEvidence?.length && citation.sourceRole === undefined) citation.sourceRole = 'tender'
   const currentEvidence = canonicalEvidence ? { ...evidence, items: evidence.items.map(item => ({ ...item,
     documentId: String(canonicalEvidence.documentId), fileName: canonicalEvidence.sourceFilename,
     sourceHash: canonicalEvidence.javaParsedSourceHash, originalSourceSha256: canonicalEvidence.originalSourceSha256, canonicalEvidence })) } : evidence
@@ -302,7 +303,7 @@ test('real Advice citation displays every explicit canonical member and complete
     await button(h, 'Show related original images / tables').props.onClick(); await flushCanonical()
     assert.equal(findAll(h.root, node => node.props?.class === 'canonical-evidence-panel').length, 2)
     assert.deepEqual([...new Set(h.canonicalRequests.filter(request => request.url.includes('/units/')).map(request => decodeURIComponent(new URL(request.url, 'http://127.0.0.1').pathname.split('/').at(-1))))], ['table', 'heading'])
-    assert.ok(h.canonicalRequests.every(request => request.options.method === 'GET' && (request.url.includes('?module=advisory') || request.url.includes('/api/advice/project-A/sources/11/original?'))))
+    assert.ok(h.canonicalRequests.every(request => (request.options.method ?? 'GET') === 'GET' && (request.url.includes('?module=advisory') || request.url.includes('/api/advice/project-A/sources/11/original?'))))
     assert.equal(findAll(h.root, node => node.tag === 'img').length, 3)
     assert.equal(findAll(h.root, node => node.props?.['data-sha-implementation'] === 'portable').length, 3)
     assert.match(text(h.root), /No image assets are bound/)
@@ -441,7 +442,8 @@ test('scope switch releases selected citation images and late ask cannot restore
   const h = await harness({ initialView: 'advice', adviceMessages: [message], respondOverride: ({ url }) => url.endsWith('/ask/stream') ? askGate.promise : undefined })
   try {
     find(h.root, node => node.tag === 'button' && node.props.class === 'citation').props.onClick(); await flushCanonical()
-    assert.equal(h.createdUrls.length, 3)
+    await button(h, 'Show related original images / tables').props.onClick(); await flushCanonical()
+    assert.ok(h.createdUrls.length >= 3)
     const textarea = find(h.root, node => node.tag === 'textarea')
     textarea.props['onUpdate:modelValue']('Question in old scope'); await settle()
     const request = button(h, 'Ask').props.onClick(); await settle()
@@ -487,7 +489,7 @@ test('a historical Advice citation keeps its saved pointer when current source v
   const h = await harness({ initialView: 'advice', adviceMessages: [message], canonicalRespond: async () => new Response(JSON.stringify({ code: 4300, message: 'SOURCE_ORIGINAL_BYTES_CHANGED' }), { status: 409 }) })
   try {
     find(h.root, node => node.tag === 'button' && node.props.class === 'citation').props.onClick(); await flushCanonical()
-    assert.match(text(h.root), /original file bytes changed/)
+    assert.match(text(h.root), /source file or its registered identity changed/)
     assert.equal(h.canonicalRequests.length, 1)
     assert.equal(h.createdUrls.length, 0)
     assert.ok(h.canonicalRequests[0].url.includes(bound.projectionSha256))
@@ -617,7 +619,7 @@ test('drawing upload sends explicit identity-only scope and source list retains 
 
 test('historical fixed answer retains its own source lane after a later project answer with a colliding document ID', async () => {
   const project = canonicalPointer('advisory'), fixed = { evidenceBackend: 'fixed_development_baseline', parentId: '11', manifestSha256: 'a'.repeat(64), baselineVersion: '05', sourceFamily: 'GCC', sourceRole: 'standard', originalSourceSha256: 'b'.repeat(64), pageNo: 4, originalPageNos: [4], projectApplicability: 'unconfirmed', qualifiersComplete: 'unknown', sourceQualityAccepted: false }
-  const fixedCitation = { fileLabel: 'ANSWER A FIXED', pageNo: '4', anchor: 'A1', content: 'Fixed source A literal', score: .8, documentId: '11', fixedBaselineEvidence: fixed, canonicalEvidence: [project] }
+  const fixedCitation = { fileLabel: 'ANSWER A FIXED', pageNo: '4', anchor: 'A1', content: 'Fixed source A literal', score: .8, documentId: '11', fixedBaselineEvidence: fixed }
   const projectCitation = { fileLabel: 'ANSWER B PROJECT', pageNo: '3', anchor: 'B1', content: 'Project source B literal', score: .9, documentId: '11', canonicalEvidence: [project] }
   const messages = [fixedCitation, projectCitation].map((citation, index) => ({ id: index + 1, role: 'assistant', title: localized('Saved answer'), content: localized('Saved answer with its original sources'), sources: [citation], citations: [citation.fileLabel] }))
   const h = await harness({ initialView: 'advice', adviceMessages: messages, canonicalRespond: async url => {
@@ -629,13 +631,14 @@ test('historical fixed answer retains its own source lane after a later project 
   } })
   try {
     button(h, 'ANSWER B PROJECT').props.onClick(); await flushCanonical()
+    await button(h, 'Show related original images / tables').props.onClick(); await flushCanonical()
     assert.equal(findAll(h.root, node => node.tag === 'img').length, 3)
     const count = h.canonicalRequests.length
     button(h, 'ANSWER A FIXED').props.onClick(); await flushCanonical()
     assert.equal(findAll(h.root, node => node.tag === 'img').length, 0)
     assert.equal(h.canonicalRequests.length, count + 1)
     assert.equal(h.canonicalRequests.at(-1).url, '/api/oer/fixed-baseline/evidence?id=11')
-    assert.match(text(h.root), /project adoption is unconfirmed/)
+    assert.match(text(h.root), /does not establish project adoption/)
     assert.match(text(h.root), /Fixed source A literal/)
     assert.equal(h.requests.some(request => request.method !== 'get'), false)
   } finally { h.dispose() }

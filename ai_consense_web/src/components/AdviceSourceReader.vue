@@ -24,6 +24,12 @@ function release() {
   if (sourceUrl.value) URL.revokeObjectURL(sourceUrl.value)
   sourceUrl.value = ''; html.value = ''; pages.value = []; warnings.value = []; error.value = ''
 }
+function failureText(failure: unknown) {
+  const reason = failure instanceof Error ? failure.message : String(failure)
+  if (/SOURCE_ORIGINAL_BYTES_CHANGED|SOURCE_STALE|SUPERSEDED|REVISION|ROLE_CHANGED|BINDING.*CHANGED/.test(reason)) return copy('The source file or its registered identity changed or was superseded. This historical location cannot open a newer source; query the current source again.', '源文件或登记身份已变化或被替代；不能用这个历史位置打开新版，请按当前来源重新查询。', '原始檔案或登記身份已變更或被替代；不能用此歷史位置開啟新版，請按目前來源重新查詢。')
+  if (/IDENTITY|ROLE_UNCONFIRMED|ADDRESS|HEADER|BYTES_MISMATCH/.test(reason)) return copy('The source identity or file bytes could not be verified. Check the document registration before retrying.', '未能核实来源身份或文件字节，请核对文件登记后重试。', '未能核實來源身份或檔案位元組，請核對檔案登記後重試。')
+  return copy('The complete original could not be loaded. Check source availability and retry; the citation has been retained.', '未能加载完整原件，请核对来源是否可用后重试；原引用已保留。', '未能載入完整原件，請核對來源是否可用後重試；原引用已保留。')
+}
 async function load() {
   const current = ++epoch; revision.value++
   release(); status.value = 'loading'; abort = new AbortController()
@@ -62,7 +68,7 @@ async function load() {
     if (current === epoch) status.value = 'ready'
   } catch (caught) {
     if (current !== epoch) return
-    error.value = caught instanceof Error ? caught.message : String(caught); status.value = 'error'
+    error.value = failureText(caught); status.value = 'error'
     if (sourceUrl.value) URL.revokeObjectURL(sourceUrl.value)
     sourceUrl.value = ''
   }

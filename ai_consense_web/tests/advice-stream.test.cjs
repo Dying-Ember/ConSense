@@ -79,3 +79,13 @@ test('aborted stream cancels its reader and never accepts completion', async () 
   await assert.rejects(api.streamAdvice('project-A', request, options({ signal: cancellation.signal, phase() { cancellation.abort() } })), /Consultation stopped/)
   assert.equal(readerCancelled, true)
 })
+
+test('stopping while waiting for the next network bytes closes the reader immediately', async () => {
+  const cancellation = new AbortController()
+  let readerCancelled = false
+  const api = client(async () => new Response(new ReadableStream({ cancel() { readerCancelled = true } }), { headers: { 'Content-Type': 'text/event-stream' } }))
+  const waiting = api.streamAdvice('project-A', request, options({ signal: cancellation.signal }))
+  await new Promise(resolve => setImmediate(resolve)); cancellation.abort()
+  await assert.rejects(waiting, /Consultation stopped/)
+  assert.equal(readerCancelled, true)
+})
