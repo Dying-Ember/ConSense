@@ -193,6 +193,15 @@ class AdviceSessionIntegrationTest {
         mvc.perform(askRequest(project,session,"contract","project_contract","AUTHORED invalid repair")).andExpect(jsonPath("$.code").value(4205));
         verify(local,times(2)).chatStructured(anyList(),any());assertTrue(history(project,session).isEmpty());
     }
+    @Test void synchronousEnvelopeRepairRequiresAndCommitsTheFullAnswerWithoutAPublishedPrefix() throws Exception {
+        String project=project();source(project,"CURRENT BASIS TEST ONLY");rebuild(project);String session=session(project,"contract","project_contract");
+        String full=com.consense.service.advice.AdviceBudgetFixture.contract(answer);com.fasterxml.jackson.databind.node.ObjectNode first=(com.fasterxml.jackson.databind.node.ObjectNode)JsonUtils.parse(full);first.put("basisScope","reference_only");List<List<LlmClient.ChatTurn>> sent=new ArrayList<>();
+        when(local.chatStructured(anyList(),any())).thenAnswer(call->{List<LlmClient.ChatTurn> turns=call.getArgument(0);sent.add(turns);if(sent.size()==1)return JsonUtils.write(first);
+            String repair=turns.get(1).getContent();assertTrue(repair.contains("No units were published"));assertTrue(repair.contains("ALL sections beginning with kind=limits"));assertFalse(repair.contains("or sections=[]"));return full;});
+        JsonNode result=ask(project,session,"AUTHORED synchronous envelope repair");assertTrue(result.path("grounded").asBoolean());assertEquals("project_contract",result.path("basisScope").asText());assertEquals(2,sent.size());assertEquals(sent.get(0).get(0).getContent(),sent.get(1).get(0).getContent());
+        JsonNode history=history(project,session);assertEquals(2,history.size());assertEquals(result.path("content"),history.get(1).path("content"));
+        JsonNode checks=JsonUtils.parse(messages.findById(result.path("messageId").asLong()).get().getAdviceChecksJson());assertEquals(2,checks.path("attempts").size());assertEquals(JsonUtils.parse(full).path("sections"),checks.path("sections"));
+    }
 
     @Test void sourceMutationInsideTokenCountingPreventsModelDispatch() throws Exception {
         String project=project();SourceDocument original=source(project,"CURRENT BASIS TEST ONLY");rebuild(project);String session=session(project,"contract","project_contract");
