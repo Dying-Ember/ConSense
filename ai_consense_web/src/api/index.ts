@@ -37,6 +37,7 @@ import type {
   VettingMetrics,
   VettingRunResult,
   VettingJob,
+  VettingProgress,
   VettingReportFormat,
   VettingSourceRole
 } from './types'
@@ -143,6 +144,10 @@ export const vettingApi = {
     api.get<VettingJob | null>(`/vetting/${projectId}/runs/latest`, { timeout: 15000 }),
   getRun: (projectId: string, id: string) =>
     api.get<VettingJob>(`/vetting/${projectId}/runs/${encodeURIComponent(id)}`, { timeout: 15000 }),
+  latestRunProgress: (projectId: string) =>
+    api.get<VettingProgress | null>(`/vetting/${projectId}/runs/latest/progress`, { timeout: 15000 }),
+  getRunProgress: (projectId: string, id: string) =>
+    api.get<VettingProgress>(`/vetting/${projectId}/runs/${encodeURIComponent(id)}/progress`, { timeout: 15000 }),
   findings: (
     projectId: string,
     filters: { search?: string; group?: string; scope?: string; fileKey?: string; page?: string }
@@ -166,7 +171,16 @@ export const vettingApi = {
   saveChecklist: (projectId: string, runId: string, runSnapshotSha256: string, items: Pick<VettingChecklistItem, 'id' | 'status' | 'remarks'>[]) =>
     api.put<VettingChecklist>(`/vetting/${encodeURIComponent(projectId)}/runs/${encodeURIComponent(runId)}/checklist`, { runSnapshotSha256, items }),
   exportReport: (projectId: string, lang: string, fallbackName: string, format: VettingReportFormat = 'pdf') =>
-    api.download(`/vetting/${projectId}/report.${format}?lang=${encodeURIComponent(lang)}`, fallbackName)
+    api.download(`/vetting/${projectId}/report.${format}?lang=${encodeURIComponent(lang)}`, fallbackName,
+      format === 'json' ? { jsonDocument: value => {
+        if (!value || typeof value !== 'object') return false
+        const report = value as Record<string, unknown>
+        const project = report.project as { id?: unknown } | null
+        const job = report.job as { id?: unknown; status?: unknown } | null
+        return report.schemaVersion === '1.0' && report.reportStructureVersion === 'competition-comments-and-checklist-v1'
+          && project?.id === projectId && typeof job?.id === 'string' && job.id.length > 0 && job.status === 'COMPLETED'
+          && ['findings', 'commentsTables', 'checklistTables', 'checklistResults'].every(key => Array.isArray(report[key]))
+      } } : undefined)
 }
 
 /* ------------------------------------------------------------ 咨询 */
@@ -174,8 +188,8 @@ export const vettingApi = {
 export const adviceApi = {
   sources: (projectId: string, scope: string) =>
     api.get<AdviceSourceDocument[]>(`/advice/${encodeURIComponent(projectId)}/sources?scope=${encodeURIComponent(scope)}`),
-  rebuildIndex: (projectId: string) => api.post<IndexStatus>(`/advice/${projectId}/index/rebuild`),
-  indexStatus: (projectId: string) => api.get<IndexStatus>(`/advice/${projectId}/index/status`),
+  rebuildIndex: (projectId: string, scope = 'fullset') => api.post<IndexStatus>(`/advice/${encodeURIComponent(projectId)}/index/rebuild?scope=${encodeURIComponent(scope)}`, undefined, { reportError: false }),
+  indexStatus: (projectId: string, scope = 'fullset') => api.get<IndexStatus>(`/advice/${encodeURIComponent(projectId)}/index/status?scope=${encodeURIComponent(scope)}`, { reportError: false }),
   messages: (projectId: string) => api.get<ChatMessage[]>(`/advice/${projectId}/messages`),
   clearMessages: (projectId: string) => api.delete<void>(`/advice/${projectId}/messages`),
   ask: (projectId: string, question: string, scope: string, llmSelection?: LlmSelection, replyToMessageId?: number) =>

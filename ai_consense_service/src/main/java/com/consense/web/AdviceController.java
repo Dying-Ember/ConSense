@@ -22,13 +22,15 @@ public class AdviceController {
     }
 
     @PostMapping("/index/rebuild")
-    public ApiResponse<IndexStatusVO> rebuild(@PathVariable String projectId) {
-        return ApiResponse.ok(adviceService.rebuildIndex(projectId));
+    public ApiResponse<IndexStatusVO> rebuild(@PathVariable String projectId,
+                                             @RequestParam(defaultValue = "fullset") String scope) {
+        return ApiResponse.ok(adviceService.rebuildIndex(projectId,scope));
     }
 
     @GetMapping("/index/status")
-    public ApiResponse<IndexStatusVO> status(@PathVariable String projectId) {
-        return ApiResponse.ok(adviceService.status(projectId));
+    public ApiResponse<IndexStatusVO> status(@PathVariable String projectId,
+                                            @RequestParam(defaultValue = "fullset") String scope) {
+        return ApiResponse.ok(adviceService.status(projectId,scope));
     }
 
     @GetMapping("/messages")

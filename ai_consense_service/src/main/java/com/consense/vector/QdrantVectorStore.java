@@ -91,9 +91,9 @@ public class QdrantVectorStore implements VectorStore {
         if(documentIds!=null&&documentIds.isEmpty())return java.util.Collections.emptyList();
         ensureCollection();
         ObjectNode body = JsonUtils.mapper().createObjectNode();
-        ArrayNode vector = body.putArray("vector");
+        ArrayNode queryVec = body.putArray("query");
         for (float value : query) {
-            vector.add(value);
+            queryVec.add(value);
         }
         body.put("limit", topK);
         body.put("with_payload", true);
@@ -109,9 +109,9 @@ public class QdrantVectorStore implements VectorStore {
             documentIds.stream().sorted().forEach(any::add);
         }
 
-        String raw = http.postJson(base() + "/collections/" + cfg.getCollection() + "/points/search",
+        String raw = http.postJson(base() + "/collections/" + cfg.getCollection() + "/points/query",
                 JsonUtils.write(body), cfg.getTimeoutMs());
-        JsonNode result = JsonUtils.parse(raw).path("result");
+        JsonNode result = JsonUtils.parse(raw).path("result").path("points");
         List<SearchHit> hits = new ArrayList<>();
         for (JsonNode node : result) {
             Map<String, Object> payload = new LinkedHashMap<>();

@@ -142,7 +142,7 @@ class VettingCorpusTest {
     @Test void parsedTableClauseIdentifiersAllowTheProductionSelectorToBringInSourceLinkedProjectFacts() {
         DocumentBlock title = block("table-title", "JKV31 Submission inspection particulars", null); title.setKind("table_row");
         DocumentBlock body = block("table-body", "The officer shall arrange the inspection of submitted documents.", null); body.setKind("table_row");
-        SourceDocument tender = doc(8L, "JKV", title, body);
+        SourceDocument tender = doc(8L, "JKV", title, body);tender.setReviewRole("tender");
         SourceDocument fact = doc(9L, "OTHER", block("email-body", "The project email confirms that JKV31 uses the west inspection office.", null));
         fact.setReviewRole("project_fact");
         List<Chunk> corpus = VettingCorpus.chunks(Arrays.asList(tender, fact));
@@ -228,19 +228,19 @@ class VettingCorpusTest {
         assertEquals(Arrays.asList("XYZ1.23","XYZ1.24","XYZ1.25"),
                 Arrays.asList(chunks.get(0).getClauseId(),chunks.get(1).getClauseId(),chunks.get(2).getClauseId()));
     }
-    @Test void explicitRolesOverrideInferenceAndLegacyMailNeverBecomesTenderOrStandard() {
+    @Test void explicitRolesOverrideCandidatesAndUnknownMailNeverBecomesTenderOrStandard() {
         SourceDocument gcc = doc(1L,"GCC",block("p1","Standard payment provision.",null));
-        assertEquals("standard", VettingCorpus.sourceRole(gcc));
+        assertEquals("unknown", VettingCorpus.sourceRole(gcc));
         gcc.setReviewRole(" project_fact ");
         assertEquals("project_fact", VettingCorpus.sourceRole(gcc));
         assertEquals("project_fact", VettingCorpus.chunks(Collections.singletonList(gcc)).get(0).getRole());
         gcc.setReviewRole(null); gcc.setFileName("GCC discussion.eml");
-        assertEquals("project_fact", VettingCorpus.sourceRole(gcc));
+        assertEquals("unknown", VettingCorpus.sourceRole(gcc));
         SourceDocument manifest = doc(2L,"PRE",block("p1","Tender package directory only.",null));
         manifest.setReviewRole("package_manifest");
         assertEquals("package_manifest", VettingCorpus.chunks(Collections.singletonList(manifest)).get(0).getRole());
         manifest.setReviewRole("unsupported-untrusted-value");
-        assertEquals("tender", VettingCorpus.sourceRole(manifest));
+        assertEquals("unknown", VettingCorpus.sourceRole(manifest));
         manifest.setCategory(SourceDocument.CATEGORY_PROJECT_INPUT);
         assertEquals("project_fact", VettingCorpus.sourceRole(manifest));
         manifest.setCategory(SourceDocument.CATEGORY_STANDARD_TEMPLATE);

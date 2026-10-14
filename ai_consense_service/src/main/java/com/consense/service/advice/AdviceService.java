@@ -2,6 +2,7 @@ package com.consense.service.advice;
 
 import com.consense.ai.AiGateway;
 import com.consense.ai.ModelIdentity;
+import com.consense.ai.LlmOperation;
 import com.consense.common.BizException;
 import com.consense.common.JsonUtils;
 import com.consense.common.LocalizedText;
@@ -17,11 +18,16 @@ import com.consense.repository.SourceDocumentRepository;
 import com.consense.service.ProjectService;
 import com.consense.service.sources.ProjectDocumentScope;
 import com.consense.service.vetting.VettingCorpus;
+import com.consense.service.vetting.OerBusinessEvidence;
+import com.consense.service.vetting.OerCanonicalRetrievalClient;
+import com.consense.service.vetting.FixedBaselineRetrievalClient;
+import com.consense.service.vetting.FixedReferenceEvidence;
 import com.consense.service.prompt.PromptCatalog;
 import com.consense.service.prompt.PromptService;
 import com.consense.vector.VectorStore;
 import com.consense.web.dto.AdviceDtos.*;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.databind.JsonNode;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -29,12 +35,18 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.Instant;
+import javax.persistence.EntityManager;
+import javax.persistence.PersistenceContext;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -62,12 +74,32 @@ public class AdviceService {
     private final ChatMessageRepository chatMessageRepository;
     /** 提示词从数据库取（支持前端在线编辑），DB 无值时回退出厂默认 */
     private final PromptService promptService;
+    private final OerBusinessEvidence canonical;
+    private final PlatformTransactionManager transactionManager;
+    @PersistenceContext private EntityManager entityManager;
+    @org.springframework.beans.factory.annotation.Autowired(required=false)
+    private AdviceResponsesTransport adviceResponses;
+    @org.springframework.beans.factory.annotation.Autowired(required=false)
+    private FixedBaselineRetrievalClient fixedBaseline;
+
+    /** Character admission guard for whole fixed groups; never a text truncation limit. */
+    private static final int FIXED_REFERENCE_MATERIAL_CHARACTERS=200000;
 
     // ------------------------------------------------------------ 索引
 
-    @Transactional
     public IndexStatusVO rebuildIndex(String projectId) {
+        return rebuildIndex(projectId,"fullset");
+    }
+
+    public IndexStatusVO rebuildIndex(String projectId,String scope) {
         projectService.require(projectId);
+        String normalized=ProjectDocumentScope.normalizeScope(scope);
+        if(canonical.enabled()) {
+            OerBusinessEvidence.Session session=canonicalSession(projectId,normalized);
+            try{canonical.index(session);}catch(RuntimeException rejected){throw new BizException(4201,"Canonical advice indexing failed. Verify the current source bindings and advisory retrieval service; no legacy index was used.");}
+            // canonicalStatus checks the fresh selected scope before and after its remote status read.
+            return canonicalStatus(projectId,normalized,session);
+        }
         List<SourceDocument> documents = selectedDocuments(projectId,"fullset").stream()
                 .filter(ProjectDocumentScope::parseUsable)
                 .collect(Collectors.toList());
@@ -81,7 +113,7 @@ public class AdviceService {
 
         if(!ai.embeddingAvailable())throw new BizException(4201,"Deployment embedding model "+ai.embedModel()+" is unavailable. Restore that model before refreshing the advice evidence index.");
         vectorStore.deleteByProject(projectId);
-        chunkRepository.deleteByProjectId(projectId);
+        new TransactionTemplate(transactionManager).executeWithoutResult(status->chunkRepository.deleteByProjectId(projectId));
 
         int total = 0;
         int index = 0;
@@ -138,7 +170,20 @@ public class AdviceService {
     }
 
     public IndexStatusVO status(String projectId) {
+        return status(projectId,"fullset");
+    }
+
+    public IndexStatusVO status(String projectId,String scope) {
         projectService.require(projectId);
+        String normalized=ProjectDocumentScope.normalizeScope(scope);
+        if(canonical.enabled()) {
+            try{return canonicalStatus(projectId,normalized);}
+            catch(RuntimeException unavailable){
+                IndexStatusVO result=canonicalUnavailable(normalized);
+                result.setEligibleDocuments(freshSelectedDocuments(projectId,normalized).size());
+                return result;
+            }
+        }
         List<EvidenceChunk> records=chunkRepository.findByProjectIdOrderByChunkIndexAsc(projectId);
         int chunks = records.size();
         List<SourceDocument> documents=selectedDocuments(projectId,"fullset").stream().filter(ProjectDocumentScope::parseUsable).collect(Collectors.toList());
@@ -174,49 +219,77 @@ public class AdviceService {
 
     // ------------------------------------------------------------ 问答
 
-    @Transactional
     public AskResponseVO ask(String projectId, AskRequest request) {
         Project project = projectService.require(projectId);
         String question = request == null ? "" : nvl(request.getQuestion()).trim();
         if (question.isEmpty()) {
             throw new BizException(4202, "请先输入问题");
         }
+        LlmOperation selectedOperation=ai.capture();
+        final AdviceResponsesTransport.Operation responsesOperation=adviceResponses!=null&&adviceResponses.selected(selectedOperation)
+                ?adviceResponses.capture(selectedOperation):null;
         String scope = ProjectDocumentScope.normalizeScope(request.getScope());
-        QuestionContext questionContext=clarificationContext(projectId,scope,request.getReplyToMessageId(),question);
+        String requestedBasis=requestedBasisScope(request);
+        boolean fixedReferenceOnly="reference_only".equals(requestedBasis);
+        if(fixedReferenceOnly&&!fixedBaselineEnabled())throw new BizException(4204,"Fixed standard-reference retrieval is not enabled. Configure a reviewed development baseline before asking an explicit reference-only question.");
+        QuestionContext questionContext=clarificationContext(projectId,scope,request.getReplyToMessageId(),question,requestedBasis);
 
         // Configuration errors are model-action errors even when no index has been built.
-        if (ai.explicitProfileSelected() && ai.capture().getUnavailableReason() != null) {
+        if (responsesOperation==null&&ai.explicitProfileSelected() && ai.capture().getUnavailableReason() != null) {
             ai.requireAvailable();
         }
 
-        ChatMessage user=saveMessage(projectId, ChatMessage.ROLE_USER, null, question, null, null, null, null);
-        user.setReplyToMessageId(request.getReplyToMessageId());user.setSourceScope(scope);user.setOriginalQuestion(questionContext.originalQuestion);user.setUserBackgroundJson(JsonUtils.write(questionContext.background));chatMessageRepository.save(user);
-
         String retrievalQuestion=questionContext.originalQuestion+(questionContext.background.isEmpty()?"":"\nUser supplied clarification: "+String.join("\n",questionContext.background));
-        List<VectorStore.SearchHit> hits = withIncorporationContext(projectId,scope,retrieve(projectId, scope, retrievalQuestion));
+        OerBusinessEvidence.Session session=!fixedReferenceOnly&&canonical.enabled()?canonicalSession(projectId,scope):null;
+        List<VectorStore.SearchHit> hits;
+        if(fixedReferenceOnly) {
+            hits=fixedReferenceHits(retrievalQuestion);
+        } else if(session!=null) {
+            try {
+                canonical.ensureIndex(session);
+                hits=new ArrayList<>(canonical.adviceHits(session,retrievalQuestion));
+            }catch(RuntimeException rejected){throw new BizException(4204,"Canonical advice retrieval failed. Refresh the selected scope and verify current source bindings and advisory retrieval; no legacy evidence was used.");}
+            assertCurrentSelection(session,scope);
+            if(fixedBaselineEnabled())hits.addAll(fixedReferenceHits(retrievalQuestion));
+            hits=withCanonicalIncorporationContext(session,hits);
+        } else hits=withIncorporationContext(projectId,scope,retrieve(projectId,scope,retrievalQuestion));
+        final List<VectorStore.SearchHit> selectedFixedHits=hits.stream().filter(this::fixedBaselineHit).collect(Collectors.toList());
+        final String fixedSourceIdentity=selectedFixedHits.isEmpty()?null:fixedSourceIdentity(selectedFixedHits);
+        assertFixedReferencesCurrent(selectedFixedHits,fixedSourceIdentity);
         List<CitationVO> sources = new ArrayList<>();
         for(int i=0;i<hits.size();i++){CitationVO source=toCitation(hits.get(i));source.setEvidenceId("["+(i+1)+"]");sources.add(source);}
 
         if (hits.isEmpty()) {
             AskResponseVO response = unknown(projectId, scope, sources, Collections.<String>emptyList(), false);
-            persistAssistant(projectId, response,user.getId());
+            persistExchange(projectId,scope,question,request,questionContext,response,session,selectedFixedHits,fixedSourceIdentity);
             return response;
         }
 
-        if (ai.explicitProfileSelected()) {
+        if (responsesOperation==null&&ai.explicitProfileSelected()) {
             ai.requireAvailable();
         }
 
         String excerpts = renderExcerpts(hits);
         String userPrompt = PromptService.format(promptService.userTemplate(PromptCatalog.KEY_ADVICE),
-                scopeLabel(scope), excerpts, questionContext.originalQuestion);
+                fixedReferenceOnly?"Fixed standard reference only / 固定标准参考解释":scopeLabel(scope), excerpts, questionContext.originalQuestion);
+        if(fixedReferenceOnly)userPrompt+="\n\nExplicit answer scope: reference_only. Explain only the cited standard text in this frozen development baseline. Do not assert that this standard, edition or requirement is adopted by the project, and do not return project_contract. Parsing, legal ownership and completeness limitations remain unverified.";
         if(!questionContext.background.isEmpty())userPrompt+="\n\nuser-supplied-background (clarification replies, not contractual evidence):\n"+String.join("\n",questionContext.background)
                 +"\nAnswer the original question in light of these user-stated assumptions. Do not cite this background as a contract document or established contractual fact.";
 
         AnswerRecord answer;
         try {
-            answer = ai.completeJson(promptService.system(PromptCatalog.KEY_ADVICE), userPrompt, AnswerRecord.class);
+            if(responsesOperation!=null){
+                if(session==null&&fixedSourceIdentity==null)throw new AdviceResponsesTransport.RequestFailure("budget_unknown","current_source_identity_required",null);
+                String requestSourceIdentity=fixedSourceIdentity==null?session.identitySha256():VettingCorpus.hash((session==null?"explicit-reference-only":session.identitySha256())+"|fixed-baseline|"+fixedSourceIdentity);
+                answer=responsesOperation.completeJson(promptService.system(PromptCatalog.KEY_ADVICE),userPrompt,requestSourceIdentity,AnswerRecord.class,
+                        ()->{if(session!=null)assertCurrentSelection(session,scope);assertFixedReferencesCurrent(selectedFixedHits,fixedSourceIdentity);}).value;
+            }else answer = ai.completeJson(promptService.system(PromptCatalog.KEY_ADVICE), userPrompt, AnswerRecord.class);
+        } catch (AdviceResponsesTransport.RequestFailure bounded) {
+            throw bounded;
         } catch (Exception e) {
+            // Responses checks current sources around counting and generation inside this call.
+            // Preserve that safe source failure; it is not a provider/model failure.
+            if(responsesOperation!=null&&e instanceof BizException&&((BizException)e).getCode()==4204)throw (BizException)e;
             // External exception text may contain credentials; retain only the safe failure type/profile.
             log.warn("Advice model call failed ({}).", e.getClass().getSimpleName());
             ModelIdentity selected = ai.modelIdentity();
@@ -224,10 +297,13 @@ public class AdviceService {
                     + (selected == null ? "legacy deployment" : selected.getProfileId())
                     + " failed; the operation was not rerouted.");
         }
+        if(session!=null)assertCurrentSelection(session,scope);
+        assertFixedReferencesCurrent(selectedFixedHits,fixedSourceIdentity);
 
         List<String> clarifications=answer==null?Collections.emptyList():cleanClarifications(answer.getClarifications());
         List<String> citations=validatedCitations(answer==null?null:answer.getCitations(),sources);
-        String basisScope=answer!=null&&"reference_only".equals(nvl(answer.getBasisScope()).trim().toLowerCase(java.util.Locale.ROOT))?"reference_only":"project_contract";
+        String basisScope=fixedReferenceOnly?"reference_only":answer!=null&&"reference_only".equals(nvl(answer.getBasisScope()).trim().toLowerCase(java.util.Locale.ROOT))?"reference_only":"project_contract";
+        if(fixedReferenceOnly&&answer!=null&&!nvl(answer.getBasisScope()).trim().isEmpty()&&!"reference_only".equals(nvl(answer.getBasisScope()).trim().toLowerCase(java.util.Locale.ROOT))){clarifications=new ArrayList<>(clarifications);clarifications.add("The requested standard explanation does not establish project adoption, applicable edition or project amendments.");}
         boolean basisSupported=incorporationSupported(basisScope,citations,sources);
         if(!basisSupported){clarifications=new ArrayList<>(clarifications);clarifications.add("Please provide or identify the adopted contractual provisions, including standard incorporation, applicable editions and any project amendments where relevant. Project correspondence and a document list alone do not establish a contractual requirement.");}
         if (answer == null || !answer.isGrounded() || !clarifications.isEmpty() || JsonUtils.isBlankText(answer.getAnswer())||citations.isEmpty()||!basisSupported) {
@@ -237,7 +313,8 @@ public class AdviceService {
             AskResponseVO response = unknown(projectId, scope, sources, extra, true);
             response.setClarifications(clarifications);
             response.setBasisScope("insufficient");
-            persistAssistant(projectId, response,user.getId());
+            if(responsesOperation!=null){response.setModel(responsesOperation.getIdentity().getModel());response.setModelIdentity(responsesOperation.getIdentity());}
+            persistExchange(projectId,scope,question,request,questionContext,response,session,selectedFixedHits,fixedSourceIdentity);
             return response;
         }
 
@@ -248,10 +325,11 @@ public class AdviceService {
                 citations,
                 evidenceIdOf(sources),
                 sources,
-                ai.chatModel(), ai.modelIdentity());
+                responsesOperation==null?ai.chatModel():responsesOperation.getIdentity().getModel(),
+                responsesOperation==null?ai.modelIdentity():responsesOperation.getIdentity());
         response.setClarifications(clarifications);response.setSourceScope(scope);
         response.setBasisScope(basisScope);
-        persistAssistant(projectId, response,user.getId());
+        persistExchange(projectId,scope,question,request,questionContext,response,session,selectedFixedHits,fixedSourceIdentity);
         log.info("项目 {} 问答完成，命中 {} 条证据", projectId, hits.size());
         return response;
     }
@@ -370,11 +448,18 @@ public class AdviceService {
 
     private String renderExcerpts(List<VectorStore.SearchHit> hits) {
         StringBuilder builder = new StringBuilder();
+        List<VectorStore.SearchHit> fixedHits=hits.stream().filter(this::fixedBaselineHit).collect(Collectors.toList());
+        String fixedMaterial=fixedHits.isEmpty()?null:fixedModelMaterial(fixedHits);
         builder.append("Selected source excerpts for this question. These excerpts do not establish that the entire standard/library or project package is complete. ")
                 .append("A passage omitted from these excerpts does not prove that its document or clause is absent from the supplied files. ")
                 .append("Project wording on adopting or amending standards, if included below, states only what those passages say about incorporation; ")
                 .append("it does not guarantee that the underlying standard text or every amendment has been supplied or reviewed.\n\n");
         int index = 1;
+        com.consense.service.vetting.OerModelMaterial.Request modelMaterial=new com.consense.service.vetting.OerModelMaterial.Request();
+        if(hits.stream().anyMatch(hit->canonicalUnit(hit)!=null))builder.append(com.consense.service.vetting.OerModelMaterial.LEGEND);
+        List<JsonNode> modelStructures=new ArrayList<>();
+        List<Map<String,Object>> hitMembership=new ArrayList<>();
+        Set<List<String>> nativeLimits=new LinkedHashSet<>();
         for (VectorStore.SearchHit hit : hits) {
             builder.append("[").append(index++).append("] ")
                     .append(hit.fileLabel())
@@ -383,21 +468,141 @@ public class AdviceService {
                     .append(" | sourceRevision=").append(hit.getPayload().get("sourceHash"))
                     .append(" | physicalPage=").append(hit.pageNo().isEmpty()?"not available":hit.pageNo())
                     .append(" | location=").append(hit.anchor())
-                    .append("\n").append(hit.text()).append("\n\n");
+                    .append("\n");
+            JsonNode unit=canonicalUnit(hit);
+            List<com.consense.web.dto.CanonicalEvidenceDtos.EvidencePointer> pointers=unit==null?Collections.emptyList():canonicalPointers(hit);
+            if(unit!=null) {
+                builder.append("Observed source unit: ").append(unit.path("status").asText("unknown"))
+                        .append("; qualifiersComplete=").append(unit.path("qualifiersComplete").asText("unknown"))
+                        .append("; semanticScopeVerified=false; this is observed structure, not whole-source or applicability acceptance.\n");
+                if(unit.path("reason").isTextual())builder.append("Unresolved structure: ").append(unit.path("reason").asText()).append("\n");
+                JsonNode hierarchy=unit.path("hierarchyContext");
+                if(hierarchy.isObject()){
+                    builder.append("Declared same-source hierarchy context: ").append(hierarchy.path("status").asText("unknown"))
+                            .append("; contextId=").append(hierarchy.path("contextId").asText())
+                            .append("; qualifiersComplete=unknown; legalClosureVerified=false; descendants are unranked source context, not independent relevance hits.\n");
+                    if(hierarchy.path("reason").isTextual())builder.append("Unresolved hierarchy: ").append(hierarchy.path("reason").asText()).append("\n");
+                }
+                builder.append("Evidence selection: ").append(String.valueOf(hit.getPayload().get("scoreKind"))).append("; a relevance score is not contractual validity.\n");
+                JsonNode attachment=unit.path("attachmentContext");if(attachment.isObject()){
+                    builder.append("Declared direct margin/sidebar context: ").append(attachment.path("status").asText("unknown"))
+                            .append("; contextId=").append(attachment.path("contextId").asText())
+                            .append("; qualifiersComplete=unknown; legalClosureVerified=false; attachment members are unranked source context.\n");
+                    if(attachment.path("reason").isTextual())builder.append("Unresolved attachment: ").append(attachment.path("reason").asText()).append("\n");
+                }
+                List<String> materialRefs=new ArrayList<>();int memberOrdinal=0;
+                JsonNode canonicalMembers=JsonUtils.mapper().valueToTree(hit.getPayload().get("canonicalMembers"));
+                for(com.consense.web.dto.CanonicalEvidenceDtos.EvidencePointer pointer:pointers) {
+                    JsonNode projected=modelMaterial.project(pointer,canonicalMembers.isArray()&&memberOrdinal<canonicalMembers.size()?canonicalMembers.get(memberOrdinal):null,String.valueOf(hit.getPayload().get("sourceRole")));
+                    memberOrdinal++;
+                    if(projected.has("modelUnitAddress")){modelStructures.add(projected);materialRefs.add(projected.path("modelUnitAddress").asText());}
+                    else materialRefs.add(projected.path("modelUnitRef").asText());
+                    boolean firstLimits=nativeLimits.add(Arrays.asList(pointer.getProducerKind(),pointer.getVisualReturnStatus()));
+                    if(firstLimits&&"native_docx".equals(pointer.getProducerKind()))builder.append("Native DOCX observations: original physical pages and PDF boxes are not defined; visualReturnStatus=")
+                            .append(pointer.getVisualReturnStatus()).append("; editing state and applicability remain unknown.\n");
+                    if(firstLimits&&"native_pdf".equals(pointer.getProducerKind())){
+                        builder.append("Native PDF source-reviewed regions: geometry and raster mapping remain declared; effective visibility and whole-source semantics remain unknown; visualReturnStatus=")
+                                .append(pointer.getVisualReturnStatus()).append("\n");
+                    }
+                }
+                Map<String,Object> membership=new LinkedHashMap<>();membership.put("hitOrdinal",index-1);membership.put("rankedSeedId",hit.getId());membership.put("sourceUnitId",unit.path("unitId").asText());
+                membership.put("hierarchyContextId",unit.path("hierarchyContext").path("contextId").asText(null));membership.put("attachmentContextId",unit.path("attachmentContext").path("contextId").asText(null));
+                membership.put("memberMaterialRefs",materialRefs);hitMembership.add(membership);
+            }
+            if(fixedBaselineHit(hit)) {
+                builder.append("Fixed development standard reference: id=").append(hit.getId())
+                        .append("; read this parent's complete entry in selectedFixedStandardMaterial below. role=standard; projectApplicability=unconfirmed; qualifiersComplete=unknown; sourceQualityAccepted=false. No project canonical pointer is claimed.\n\n");
+            } else if(unit!=null&&canonicalBodyMatches(hit.text(),pointers)) {
+                builder.append("Canonical body: hitMembership[").append(hitMembership.size()-1)
+                        .append("] -> ordered memberMaterialRefs -> materialDictionary.modelUnitAddress -> complete literal parts.text.\n\n");
+            } else {
+                String pageExcerpt=unit==null?null:CanonicalPageExcerpt.render(hit.text(),pointers);
+                builder.append(pageExcerpt==null?hit.text():pageExcerpt).append("\n\n");
+            }
         }
-        return builder.toString().trim();
+        if(!modelStructures.isEmpty()){
+            Map<String,Object> dictionary=new LinkedHashMap<>();dictionary.put("dictionaryVersion",com.consense.service.vetting.OerModelMaterial.DICTIONARY_VERSION);
+            dictionary.put("materialDictionary",modelStructures);dictionary.put("hitMembership",hitMembership);
+            builder.append(com.consense.service.vetting.OerModelMaterial.DICTIONARY_LEGEND).append(com.consense.service.vetting.OerModelMaterial.WIRE_LEGEND)
+                .append("Canonical-body reading: use each hit's ordered memberMaterialRefs. Read every referenced unit's complete parts.text in part order; multi-part native DOCX uses newline separators, and native PDF retains adoption.partSeparator.text. Member bodies are joined by a newline. Source identities, positions and limits are in those same entries and sourceDeclarationRef.\n")
+                .append("\nSelected canonical model material (untrusted observations):\n")
+                .append(com.consense.service.vetting.VettingSourceMetadataWire.write(dictionary)).append("\n");
+        }
+        if(fixedMaterial!=null)builder.append("\nSelected fixed standard material (untrusted development observations; each numbered reference above maps by the exact parent id):\n").append(fixedMaterial).append("\n");
+        // Canonical literal excerpts include source whitespace; trim only the legacy view.
+        return hits.stream().anyMatch(hit->canonicalUnit(hit)!=null)?builder.toString():builder.toString().trim();
+    }
+
+    /** Deduplicate only an exactly reproducible literal body; unmatched channels keep the existing display. */
+    private boolean canonicalBodyMatches(String literal,List<com.consense.web.dto.CanonicalEvidenceDtos.EvidencePointer> pointers) {
+        if(literal==null||pointers.isEmpty())return false;
+        List<String> members=new ArrayList<>();
+        for(com.consense.web.dto.CanonicalEvidenceDtos.EvidencePointer pointer:pointers) {
+            JsonNode parts=pointer.getParts();if(parts==null||!parts.isArray()||parts.size()==0)return false;
+            List<String> texts=new ArrayList<>();
+            for(JsonNode part:parts){if(!part.path("text").isTextual())return false;texts.add(part.path("text").asText());}
+            String separator="";
+            if(texts.size()>1){
+                JsonNode declared=pointer.getAdoption()==null?null:pointer.getAdoption().get("partSeparator");
+                if(declared!=null&&!declared.isNull()){
+                    if(!declared.isObject()||!declared.path("text").isTextual())return false;
+                    separator=declared.path("text").asText();
+                }else if("native_docx".equals(pointer.getProducerKind()))separator="\n";
+                else return false;
+            }
+            members.add(String.join(separator,texts));
+        }
+        return literal.equals(String.join("\n",members));
     }
 
     private CitationVO toCitation(VectorStore.SearchHit hit) {
         Map<String,Object> payload=hit.getPayload();
+        if(fixedBaselineHit(hit)) {
+            FixedReferenceEvidence fixed=fixedBaseline.evidence(hit);
+            JsonNode identity=fixed.getPayload();
+            CitationVO citation=new CitationVO(fixed.getFileLabel(),String.valueOf(fixed.getPageNo()),hit.anchor(),fixed.getContent(),hit.getScore(),null,
+                    null,identity.path("sourceHash").asText(),"standard",false);
+            com.fasterxml.jackson.databind.node.ObjectNode pointer=JsonUtils.mapper().createObjectNode();
+            pointer.put("evidenceBackend","fixed_development_baseline");pointer.put("parentId",fixed.getId());
+            pointer.put("manifestSha256",identity.path("fixedBaselineManifestSha256").asText());
+            pointer.put("baselineVersion",identity.path("fixedBaselineVersion").asText());
+            pointer.put("sourceFamily",fixed.getSourceFamily());pointer.put("sourceRole","standard");
+            pointer.put("originalSourceSha256",identity.path("originalSourceSha256").asText(identity.path("sourceHash").asText()));
+            if(identity.has("originalPageNos"))pointer.set("originalPageNos",identity.get("originalPageNos").deepCopy());
+            pointer.put("pageNo",fixed.getPageNo());pointer.put("fullObservedParentPreserved",true);
+            pointer.put("sourceQualityAccepted",false);pointer.put("projectApplicability","unconfirmed");
+            pointer.put("qualifiersComplete","unknown");pointer.put("legalOwnershipAccepted",false);
+            pointer.put("evidenceUrl","/api/oer/fixed-baseline/evidence?id="+queryParameter(fixed.getId()));
+            pointer.put("originalUrl","/api/oer/fixed-baseline/original?sourceSha256="+queryParameter(pointer.path("originalSourceSha256").asText()));
+            if(fixed.getTableArtifact()!=null)pointer.put("tableUrl","/api/oer/fixed-baseline/table?id="+queryParameter(fixed.getId()));
+            citation.setFixedBaselineEvidence(pointer);citation.setScoreMeaning("actual_reranked_fixed_development_reference");
+            return citation;
+        }
         Object page=payload.get("pageNo");
-        return new CitationVO(hit.fileLabel(), page==null?null:String.valueOf(page), hit.anchor(), hit.text(), hit.getScore(),null,
+        CitationVO citation=new CitationVO(hit.fileLabel(), page==null?null:String.valueOf(page), hit.anchor(), hit.text(), hit.getScore(),null,
                 String.valueOf(payload.get("documentId")),String.valueOf(payload.get("sourceHash")),String.valueOf(payload.get("sourceRole")),
                 payload.get("applicabilityContextComplete") instanceof Boolean?(Boolean)payload.get("applicabilityContextComplete"):null);
+        if(canonicalUnit(hit)!=null) {
+            citation.setCanonicalEvidence(canonicalPointers(hit));
+            citation.setCanonicalSourceUnit(canonicalUnit(hit).deepCopy());
+            citation.setScoreMeaning(String.valueOf(payload.get("scoreKind")));
+        }
+        return citation;
+    }
+
+    private JsonNode canonicalUnit(VectorStore.SearchHit hit) {
+        Object unit=hit.getPayload().get("canonicalSourceUnit");
+        return unit instanceof JsonNode?(JsonNode)unit:unit==null?null:JsonUtils.mapper().valueToTree(unit);
+    }
+    private List<com.consense.web.dto.CanonicalEvidenceDtos.EvidencePointer> canonicalPointers(VectorStore.SearchHit hit) {
+        Object pointers=hit.getPayload().get("canonicalEvidence");
+        return pointers==null?Collections.emptyList():JsonUtils.readList(JsonUtils.write(pointers),com.consense.web.dto.CanonicalEvidenceDtos.EvidencePointer.class);
     }
 
     private String evidenceIdOf(List<CitationVO> sources) {
-        return sources.isEmpty() ? null : "document:" + sources.get(0).getDocumentId();
+        if(sources.isEmpty())return null;
+        CitationVO first=sources.get(0);
+        return first.getFixedBaselineEvidence()==null?"document:"+first.getDocumentId():"fixed-baseline:"+first.getFixedBaselineEvidence().path("parentId").asText();
     }
 
     // ------------------------------------------------------------ 历史
@@ -484,6 +689,21 @@ public class AdviceService {
         message.setSourcesJson(JsonUtils.write(response.getSources()));message.setClarificationsJson(JsonUtils.write(response.getClarifications()));message.setSourceScope(response.getSourceScope());message.setBasisScope(response.getBasisScope());message.setQuestionMessageId(questionMessageId);chatMessageRepository.save(message);response.setMessageId(message.getId());
     }
 
+    /** Remote retrieval/chat completes before this short, atomic history write. */
+    private void persistExchange(String projectId,String scope,String question,AskRequest request,QuestionContext context,
+                                 AskResponseVO response,OerBusinessEvidence.Session session,List<VectorStore.SearchHit> fixedHits,String fixedIdentity) {
+        if(session!=null)assertCurrentSelection(session,scope);
+        assertFixedReferencesCurrent(fixedHits,fixedIdentity);
+        TransactionTemplate transaction=new TransactionTemplate(transactionManager);
+        transaction.executeWithoutResult(status->{
+            ChatMessage user=saveMessage(projectId,ChatMessage.ROLE_USER,null,question,null,null,null,null);
+            user.setReplyToMessageId(request.getReplyToMessageId());user.setSourceScope(scope);
+            user.setBasisScope(requestedBasisScope(request));
+            user.setOriginalQuestion(context.originalQuestion);user.setUserBackgroundJson(JsonUtils.write(context.background));
+            chatMessageRepository.save(user);persistAssistant(projectId,response,user.getId());
+        });
+    }
+
     private List<String> safeList(String json) {
         try {
             return JsonUtils.readList(json, String.class);
@@ -514,10 +734,57 @@ public class AdviceService {
 
     public List<AdviceSourceVO> sources(String projectId,String scope) {
         projectService.require(projectId);String normalized=ProjectDocumentScope.normalizeScope(scope);
-        return ProjectDocumentScope.currentCatalog(projectId,sourceDocumentRepository.findByProjectIdOrderByIdAsc(projectId)).stream().map(d->{String exclusion=ProjectDocumentScope.exclusionReason(d,normalized);
+        return ProjectDocumentScope.currentCatalog(projectId,sourceDocumentRepository.findBusinessSourcesByProjectId(projectId)).stream().map(d->{String exclusion=ProjectDocumentScope.exclusionReason(d,normalized,"advisory");
             return new AdviceSourceVO(String.valueOf(d.getId()),d.getFileKey(),d.getFileName(),VettingCorpus.sourceRole(d),d.getDocumentScope(),d.getParseStatus(),VettingCorpus.sourceHash(d),exclusion==null,exclusion);}).collect(Collectors.toList());
     }
-    private List<SourceDocument> selectedDocuments(String projectId,String scope){return ProjectDocumentScope.selected(projectId,sourceDocumentRepository.findByProjectIdOrderByIdAsc(projectId),scope);}
+    private List<SourceDocument> selectedDocuments(String projectId,String scope){return ProjectDocumentScope.selected(projectId,sourceDocumentRepository.findBusinessSourcesByProjectId(projectId),scope,"advisory");}
+    private List<SourceDocument> freshSelectedDocuments(String projectId,String scope) {
+        TransactionTemplate transaction=new TransactionTemplate(transactionManager);
+        transaction.setReadOnly(true);transaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        return transaction.execute(status->{
+            // OpenEntityManagerInView may otherwise retain an old source entity across separate reads.
+            entityManager.clear();return selectedDocuments(projectId,scope);
+        });
+    }
+    private OerBusinessEvidence.Session canonicalSession(String projectId,String scope) {
+        List<SourceDocument> selected=freshSelectedDocuments(projectId,scope);
+        if(selected.isEmpty())throw new BizException(4200,"No permitted documents in the selected advice scope.");
+        try{return canonical.load(projectId,"advisory",selected);}
+        catch(RuntimeException unavailable){throw new BizException(4204,"Current canonical source bindings are unavailable for the selected advice scope. Complete source review and registration before asking.");}
+    }
+    private void assertCurrentSelection(OerBusinessEvidence.Session session,String scope) {
+        try {
+            canonical.assertSelected(session,freshSelectedDocuments(session.projectId,scope));
+            // assertSelected already checks current bindings and the immutable views.
+        }catch(RuntimeException changed){throw new BizException(4204,"The selected advice source package changed during this operation. Refresh the scope and ask again; the previous evidence was not saved as a new answer.");}
+    }
+    private IndexStatusVO canonicalStatus(String projectId,String scope) {
+        OerBusinessEvidence.CurrentIndexStatus current=canonical.currentIndexStatus(projectId,"advisory",()->freshSelectedDocuments(projectId,scope));
+        return canonicalStatusResult(scope,current.indexKey,current.chunks,current.documentCount,current.state);
+    }
+    private IndexStatusVO canonicalStatus(String projectId,String scope,OerBusinessEvidence.Session session) {
+        OerCanonicalRetrievalClient.IndexState state;
+        try{state=canonical.indexStatusSelected(session,freshSelectedDocuments(session.projectId,scope));
+            canonical.assertSelectedScope(session,freshSelectedDocuments(session.projectId,scope));}
+        catch(RuntimeException changed){throw new BizException(4204,"The selected advice source package changed during this operation. Refresh the scope and ask again; the previous evidence was not saved as a new answer.");}
+        return canonicalStatusResult(scope,session.indexKey,session.chunkCount(),session.documentIds.size(),state);
+    }
+    private IndexStatusVO canonicalStatusResult(String scope,String indexKey,int chunks,int documentCount,OerCanonicalRetrievalClient.IndexState state) {
+        boolean ready=state.ready;
+        String reason=ready?null:"canonical_index_receipt_missing".equals(state.reason)?state.reason:"canonical_index_unavailable";
+        LocalizedText message=ready?LocalizedText.of("当前范围的规范证据索引就绪，共 "+state.chunkCount+" 个来源切片。","當前範圍的規範證據索引就緒，共 "+state.chunkCount+" 個來源切片。","Canonical evidence index ready for the selected scope: "+state.chunkCount+" chunks.")
+                :LocalizedText.of("当前范围的规范证据索引未就绪，请刷新索引并核对来源及检索服务。","當前範圍的規範證據索引未就緒，請刷新索引並核對來源及檢索服務。","Canonical evidence index is not ready for the selected scope. Refresh it and check current source bindings and the retrieval service.");
+        IndexStatusVO result=new IndexStatusVO(chunks,ready?state.chunkCount:0,"canonical-oer",indexKey,
+                "BAAI/bge-m3",ai.chatModel(),ai.available(),ready,false,message,!ready&&!"canonical_index_receipt_missing".equals(reason),
+                documentCount,ready?documentCount:0,ready);
+        result.setEvidenceBackend("canonical");result.setSourceScope(scope);result.setIndexKey(indexKey);
+        result.setIndexSignature(state.signature);result.setIndexReason(reason);return result;
+    }
+    private IndexStatusVO canonicalUnavailable(String scope) {
+        IndexStatusVO result=new IndexStatusVO(0,0,"canonical-oer",null,"BAAI/bge-m3",ai.chatModel(),ai.available(),false,false,
+                LocalizedText.of("当前范围的规范来源绑定不可用；请完成来源解析、核验及登记后再刷新索引。","當前範圍的規範來源綁定不可用；請完成來源解析、核驗及登記後再刷新索引。","Current canonical source bindings are unavailable for this scope. Complete source parsing, review and registration before refreshing the index."),true,0,0,false);
+        result.setEvidenceBackend("canonical");result.setSourceScope(scope);result.setIndexReason("current_sources_unavailable");return result;
+    }
     private boolean freshIndex(List<EvidenceChunk> chunks,List<SourceDocument> documents) {
         Map<String,String> hashes=new LinkedHashMap<>(),roles=new LinkedHashMap<>();
         for(SourceDocument d:documents){String id=String.valueOf(d.getId());hashes.put(id,VettingCorpus.sourceHash(d));roles.put(id,VettingCorpus.sourceRole(d));}
@@ -533,6 +800,44 @@ public class AdviceService {
         }return accepted;
     }
     /** Library retrieval must also show current incorporation/edition/override provisions, if available. */
+    private List<VectorStore.SearchHit> withCanonicalIncorporationContext(OerBusinessEvidence.Session session,List<VectorStore.SearchHit> hits) {
+        List<VectorStore.SearchHit> libraries=hits.stream().filter(h->"standard".equals(String.valueOf(h.getPayload().get("sourceRole")))).collect(Collectors.toList());
+        if(libraries.isEmpty())return hits;
+        List<String> origins=new ArrayList<>();
+        for(VettingCorpus.Chunk chunk:session.chunks()) {
+            if(!"tender".equals(chunk.getRole()))continue;
+            String name=nvl(chunk.getFileName()).toLowerCase(java.util.Locale.ROOT).replace('_',' ').replace('-',' ');
+            boolean composition=name.contains("the specification")||name.contains("specification composition");
+            if(composition||libraries.stream().anyMatch(h->referenceMention(chunk.getContent(),h.fileLabel())))origins.add(chunk.getId());
+        }
+        List<VectorStore.SearchHit> contexts=origins.isEmpty()?Collections.emptyList():canonical.sourceHits(session,origins);
+        List<VectorStore.SearchHit> result=new ArrayList<>(hits);Set<String> units=new LinkedHashSet<>(),representedOrigins=new LinkedHashSet<>();
+        for(VectorStore.SearchHit hit:hits){JsonNode unit=canonicalUnit(hit);if(unit!=null){units.add(unit.path("unitId").asText());recordCompleteMembers(unit,representedOrigins);}}
+        boolean complete=!origins.isEmpty();int contextChars=0;
+        for(VectorStore.SearchHit context:contexts) {
+            JsonNode unit=canonicalUnit(context);
+            if(unit==null||!"complete_observed_unit".equals(unit.path("status").asText()))complete=false;
+            String unitId=unit==null?context.getId():unit.path("unitId").asText();
+            if(units.contains(unitId))continue;
+            if(contextChars+context.text().length()>12000){complete=false;continue;}
+            units.add(unitId);result.add(context);contextChars+=context.text().length();recordCompleteMembers(unit,representedOrigins);
+        }
+        complete=complete&&representedOrigins.containsAll(origins);
+        // This flag concerns the bounded observed context only, never standard adoption or whole-source quality.
+        List<VectorStore.SearchHit> annotated=new ArrayList<>();
+        for(VectorStore.SearchHit hit:result) {
+            Map<String,Object> payload=new LinkedHashMap<>(hit.getPayload());
+            if("standard".equals(payload.get("sourceRole"))&&!fixedBaselineHit(hit))payload.put("applicabilityContextComplete",complete);
+            annotated.add(new VectorStore.SearchHit(hit.getId(),hit.getScore(),payload));
+        }
+        return annotated;
+    }
+
+    private void recordCompleteMembers(JsonNode unit,Set<String> representedOrigins) {
+        if(unit!=null&&"complete_observed_unit".equals(unit.path("status").asText()))
+            for(JsonNode member:unit.path("requiredMemberIds"))representedOrigins.add(member.asText());
+    }
+
     private List<VectorStore.SearchHit> withIncorporationContext(String projectId,String scope,List<VectorStore.SearchHit> hits) {
         List<VectorStore.SearchHit> libraries=hits.stream().filter(h->"standard".equals(String.valueOf(h.getPayload().get("sourceRole")))).collect(Collectors.toList());
         if(libraries.isEmpty())return hits;
@@ -548,15 +853,16 @@ public class AdviceService {
             if(!relevant||chars+nvl(chunk.getContent()).length()>12000)continue;
             VectorStore.SearchHit context=chunkToHit(chunk);if(present.add(evidenceIdentity(context))){result.add(context);chars+=nvl(chunk.getContent()).length();}
         }
-        boolean complete=ordered.stream().filter(c->compositionIds.contains(String.valueOf(c.getDocumentId()))).map(this::chunkToHit).map(this::evidenceIdentity).allMatch(present::contains);
+        boolean complete=!compositionIds.isEmpty()&&ordered.stream().filter(c->compositionIds.contains(String.valueOf(c.getDocumentId()))).map(this::chunkToHit).map(this::evidenceIdentity).allMatch(present::contains);
         List<VectorStore.SearchHit> annotated=new ArrayList<>();for(VectorStore.SearchHit hit:result){Map<String,Object> payload=new LinkedHashMap<>(hit.getPayload());if("standard".equals(payload.get("sourceRole")))payload.put("applicabilityContextComplete",complete);annotated.add(new VectorStore.SearchHit(hit.getId(),hit.getScore(),payload));}return annotated;
     }
     private boolean incorporationSupported(String basisScope,List<String> citations,List<CitationVO> sources) {
-        if("reference_only".equals(basisScope))return true;
         List<CitationVO> cited=sources.stream().filter(s->citations.contains(s.getEvidenceId())).collect(Collectors.toList());
+        if(cited.stream().anyMatch(s->s.getCanonicalSourceUnit()!=null&&!"complete_observed_unit".equals(s.getCanonicalSourceUnit().path("status").asText())))return false;
+        if("reference_only".equals(basisScope))return cited.stream().anyMatch(s->"standard".equals(s.getSourceRole()));
         if(cited.stream().noneMatch(s->"tender".equals(s.getSourceRole())))return false;
         for(CitationVO reference:cited)if("standard".equals(reference.getSourceRole())
-                &&(Boolean.FALSE.equals(reference.getApplicabilityContextComplete())||cited.stream().noneMatch(s->"tender".equals(s.getSourceRole())&&referenceMention(s.getContent(),reference.getFileLabel()))))return false;
+                &&(!Boolean.TRUE.equals(reference.getApplicabilityContextComplete())||cited.stream().noneMatch(s->"tender".equals(s.getSourceRole())&&referenceMention(s.getContent(),reference.getFileLabel()))))return false;
         return true;
     }
     private boolean referenceMention(String passage,String referenceLabel) {
@@ -567,16 +873,58 @@ public class AdviceService {
         String key=label.split("[ ·]",2)[0];return !key.isEmpty()&&text.matches("(?s).*\\b"+java.util.regex.Pattern.quote(key)+"\\b.*");
     }
     private String evidenceIdentity(VectorStore.SearchHit hit){return hit.getPayload().get("documentId")+"|"+hit.anchor()+"|"+VettingCorpus.hash(hit.text());}
-    private QuestionContext clarificationContext(String projectId,String scope,Long replyTo,String text) {
+    private QuestionContext clarificationContext(String projectId,String scope,Long replyTo,String text,String requestedBasis) {
         if(replyTo==null)return new QuestionContext(text,Collections.emptyList());
         ChatMessage parent=chatMessageRepository.findById(replyTo).filter(m->projectId.equals(m.getProjectId())&&ChatMessage.ROLE_ASSISTANT.equals(m.getRole())
                 &&scope.equals(m.getSourceScope())&&"insufficient".equals(m.getBasisScope())&&m.getQuestionMessageId()!=null&&!safeList(nvl(m.getClarificationsJson())).isEmpty())
                 .orElseThrow(()->new BizException(4202,"Reply target must be an unanswered clarification in the same project and evidence scope."));
         ChatMessage original=chatMessageRepository.findById(parent.getQuestionMessageId()).filter(m->projectId.equals(m.getProjectId())&&ChatMessage.ROLE_USER.equals(m.getRole())&&scope.equals(m.getSourceScope()))
                 .orElseThrow(()->new BizException(4202,"The clarification's original question is no longer available. Start a new question."));
+        String originalBasis=JsonUtils.isBlankText(original.getBasisScope())?"project_contract":original.getBasisScope();
+        if(!Objects.equals(originalBasis,requestedBasis))throw new BizException(4202,"A clarification reply must retain the original project-contract or reference-only basis scope.");
         List<String> background=new ArrayList<>(safeList(nvl(original.getUserBackgroundJson())));background.add(text);
         if(background.size()>5||background.stream().mapToInt(String::length).sum()>6000)throw new BizException(4202,"This clarification thread exceeds the bounded context. Start a new question with the relevant facts.");
         return new QuestionContext(JsonUtils.isBlankText(original.getOriginalQuestion())?original.getContent():original.getOriginalQuestion(),background);
     }
     private static final class QuestionContext {final String originalQuestion;final List<String> background;QuestionContext(String question,List<String> background){this.originalQuestion=question;this.background=background;}}
+
+    private boolean fixedBaselineEnabled(){return fixedBaseline!=null&&fixedBaseline.enabled();}
+    private boolean fixedBaselineHit(VectorStore.SearchHit hit){return hit!=null&&hit.getPayload()!=null&&Boolean.TRUE.equals(hit.getPayload().get("fixedDevelopmentBaseline"));}
+    private String requestedBasisScope(AskRequest request){
+        String value=request==null?"":nvl(request.getBasisScope()).trim().toLowerCase(java.util.Locale.ROOT);
+        if(value.isEmpty())return "project_contract";
+        if("project_contract".equals(value)||"reference_only".equals(value))return value;
+        throw new BizException(4202,"Advice basisScope must be project_contract or reference_only.");
+    }
+    private List<VectorStore.SearchHit> fixedReferenceHits(String question){
+        try {
+            List<VectorStore.SearchHit> hits=fixedBaseline.search("advisory",question,10);
+            if(hits==null)throw new IllegalStateException("fixed_reference_result_missing");
+            for(VectorStore.SearchHit hit:hits)if(!fixedBaselineHit(hit))throw new IllegalStateException("fixed_reference_identity_missing");
+            fixedBaseline.assertCurrent(hits);return hits;
+        }catch(RuntimeException unavailable){throw new BizException(4204,"The selected fixed standard-reference baseline is unavailable or changed. No project or legacy evidence fallback was used.");}
+    }
+    private String fixedSourceIdentity(List<VectorStore.SearchHit> hits){
+        try {
+            Map<String,Object> identity=new LinkedHashMap<>();identity.put("backend","fixed_development_baseline");
+            identity.put("manifest",fixedBaseline.frozenManifest());identity.put("selectedParents",hits.stream().map(VectorStore.SearchHit::getId).collect(Collectors.toList()));
+            return VettingCorpus.hash(JsonUtils.write(identity));
+        }catch(RuntimeException changed){throw new BizException(4204,"The selected fixed standard-reference baseline identity changed; ask again with the current frozen baseline.");}
+    }
+    private String fixedModelMaterial(List<VectorStore.SearchHit> hits){
+        try{return fixedBaseline.toModelMaterial(hits,FIXED_REFERENCE_MATERIAL_CHARACTERS);}
+        catch(RuntimeException incomplete){throw new BizException(4204,"The selected fixed standard groups cannot be submitted completely within this question's material budget. Narrow the question or restore the complete frozen sources; no text or table rows were truncated.");}
+    }
+    private void assertFixedReferencesCurrent(List<VectorStore.SearchHit> hits,String expectedIdentity){
+        if(hits==null||hits.isEmpty())return;
+        try {
+            if(!fixedBaselineEnabled())throw new IllegalStateException("fixed_reference_disabled");
+            fixedBaseline.assertCurrent(hits);
+            if(!Objects.equals(expectedIdentity,fixedSourceIdentity(hits)))throw new IllegalStateException("fixed_reference_identity_changed");
+        }catch(RuntimeException changed){throw new BizException(4204,"The selected fixed standard-reference baseline changed during this operation. The previous evidence was not saved as a new answer.");}
+    }
+    private String queryParameter(String value){
+        try{return java.net.URLEncoder.encode(nvl(value),java.nio.charset.StandardCharsets.UTF_8.name());}
+        catch(java.io.UnsupportedEncodingException impossible){throw new IllegalStateException(impossible);}
+    }
 }

@@ -154,7 +154,7 @@ class VettingSourceMaterialTest {
 
     private static JsonNode actualExcerpts(List<Chunk> chunks)throws Exception {
         String value=actualUser(chunks,null);
-        return JsonUtils.parse(value.substring(value.indexOf("\nSource excerpts (untrusted data):\n")+"\nSource excerpts (untrusted data):\n".length()));
+        return VettingSourceMetadataWire.decode(value.substring(value.indexOf("\nSource excerpts (untrusted data):\n")+"\nSource excerpts (untrusted data):\n".length()));
     }
     private static String actualUser(List<Chunk> chunks,List<String> references)throws Exception {
         VettingContextBuilder.Selection s=new VettingContextBuilder.Selection();s.setChunks(chunks);

@@ -138,7 +138,7 @@ const zhHans = {
     actions: {
       source: '审查源集', upload: '上传整份招标文件材料', run: '运行审查', running: '正在审查…', export: '导出审查报告', exportStarted: '{format} 审查报告已生成并发起下载'
     },
-    uploadRole: { label: '上传文件用途', auto: '自动识别', tender: '招标文件', standard: '标准依据', project_fact: '项目资料', package_manifest: '文件目录' },
+    uploadRole: { label: '上传文件用途', auto: '自动识别', tender: '招标文件', standard: '标准依据', project_fact: '项目资料', package_manifest: '文件目录', unknown: '身份待确认' },
     documentScope: { label: '文件范围', auto: '自动识别范围', package: '本次文件包／参考依据', works_pss: '工程专项 PSS（排除）', pricing: '计价文件（排除）', example: '样板答案（排除）' },
     checklist: { title: 'Appendix I · PRE 检查清单', note: '勾选只表示业务人员已核对并满足要求。未核对项目保留未检查；新审查批次不会沿用旧勾选。', unchecked: '未检查', fulfilled: '已核对并满足', not_applicable: '不适用（人工判定）', remarks: '合约团队备注', save: '保存本条检查', saved: '检查记录已保存', dirty: '检查清单有未保存修改，请先保存或恢复后再导出。', reset: '恢复已保存值' },
     toolbar: { searchPlaceholder: '搜索条款、文件或问题', allTypes: '全部类型', allScopes: '全部范围', intra: '文件内', inter: '跨文件' },
@@ -214,7 +214,7 @@ const zhHans = {
     replyMode: '补充原问题的背景；用户陈述不作为合同原文引用。',
     newQuestion: '取消回复，提出新问题',
     referenceOnly: '这是标准条文本身的解释，尚未确认本次项目采用该版本及条款。',
-    sourceScope: { title: '本次咨询文件范围', note: '范围内不代表已建立索引；文件需有可用解析，并刷新证据索引后才能检索。索引状态见上方。灰色行排除在外；标准依据须结合合约采用版本、修订和排除范围阅读。', role: '资料用途', included: '在本次范围内', parsed: '已解析', partiallyParsed: '部分解析', parseUnavailable: '暂无可用解析', reasons: { example_answer: '样板答案，仅作对照', pricing_document: '计价文件，超出比赛范围', project_works_specification: '工程专项 PSS，超出比赛范围', outside_tender_scope: '不在招标子范围', outside_contract_scope: '不在合约子范围' } },
+    sourceScope: { title: '本次咨询文件范围', note: '范围内不代表已建立索引；文件需有可用解析，并刷新证据索引后才能检索。索引状态见上方。灰色行排除在外；标准依据须结合合约采用版本、修订和排除范围阅读。', role: '资料用途', included: '在本次范围内', parsed: '已解析', partiallyParsed: '部分解析', parseUnavailable: '暂无可用解析', reasons: { source_identity_unresolved: '身份待确认，暂未纳入业务来源', example_answer: '样板答案，仅作对照', pricing_document: '计价文件，超出比赛范围', project_works_specification: '工程专项 PSS，超出比赛范围', outside_tender_scope: '不在招标子范围', outside_contract_scope: '不在合约子范围' } },
     actions: { refreshIndex: '刷新证据索引', ask: '提问', precedence: '优先次序依据', clear: '清空对话' },
     placeholder: '输入合约问题，例如：SCC4.1 下的文件优先次序是什么？',
     evidenceMode: '证据模式已开启',
@@ -393,7 +393,7 @@ const zhHant: typeof zhHans = {
     actions: {
       source: '審查源集', upload: '上傳整份招標文件材料', run: '執行審查', running: '正在審查…', export: '匯出審查報告', exportStarted: '{format} 審查報告已產生並開始下載'
     },
-    uploadRole: { label: '上傳文件用途', auto: '自動識別', tender: '招標文件', standard: '標準依據', project_fact: '項目資料', package_manifest: '文件目錄' },
+    uploadRole: { label: '上傳文件用途', auto: '自動識別', tender: '招標文件', standard: '標準依據', project_fact: '項目資料', package_manifest: '文件目錄', unknown: '身份待確認' },
     documentScope: { label: '文件範圍', auto: '自動識別範圍', package: '本次文件包／參考依據', works_pss: '工程專項 PSS（排除）', pricing: '計價文件（排除）', example: '樣板答案（排除）' },
     checklist: { title: 'Appendix I · PRE 檢查清單', note: '勾選只表示業務人員已核對並滿足要求。未核對項目保留未檢查；新審查批次不會沿用舊勾選。', unchecked: '未檢查', fulfilled: '已核對並滿足', not_applicable: '不適用（人工判定）', remarks: '合約團隊備註', save: '儲存本條檢查', saved: '檢查記錄已儲存', dirty: '檢查清單有未儲存修改，請先儲存或恢復後再匯出。', reset: '恢復已儲存值' },
     toolbar: { searchPlaceholder: '搜尋條款、文件或問題', allTypes: '全部類型', allScopes: '全部範圍', intra: '文件內', inter: '跨文件' },
@@ -469,7 +469,7 @@ const zhHant: typeof zhHans = {
     replyMode: '補充原問題的背景；用戶陳述不作為合約原文引用。',
     newQuestion: '取消回覆，提出新問題',
     referenceOnly: '這是標準條文本身的解釋，尚未確認本次項目採用該版本及條款。',
-    sourceScope: { title: '本次諮詢文件範圍', note: '範圍內不代表已建立索引；文件需有可用解析，並重新整理證據索引後才能檢索。索引狀態見上方。灰色行排除在外；標準依據須結合合約採用版本、修訂和排除範圍閱讀。', role: '資料用途', included: '在本次範圍內', parsed: '已解析', partiallyParsed: '部分解析', parseUnavailable: '暫無可用解析', reasons: { example_answer: '樣板答案，只作對照', pricing_document: '計價文件，超出比賽範圍', project_works_specification: '工程專項 PSS，超出比賽範圍', outside_tender_scope: '不在招標子範圍', outside_contract_scope: '不在合約子範圍' } },
+    sourceScope: { title: '本次諮詢文件範圍', note: '範圍內不代表已建立索引；文件需有可用解析，並重新整理證據索引後才能檢索。索引狀態見上方。灰色行排除在外；標準依據須結合合約採用版本、修訂和排除範圍閱讀。', role: '資料用途', included: '在本次範圍內', parsed: '已解析', partiallyParsed: '部分解析', parseUnavailable: '暫無可用解析', reasons: { source_identity_unresolved: '身份待確認，暫未納入業務來源', example_answer: '樣板答案，只作對照', pricing_document: '計價文件，超出比賽範圍', project_works_specification: '工程專項 PSS，超出比賽範圍', outside_tender_scope: '不在招標子範圍', outside_contract_scope: '不在合約子範圍' } },
     actions: { refreshIndex: '重新整理證據索引', ask: '提問', precedence: '優先次序依據', clear: '清空對話' },
     placeholder: '輸入合約問題，例如：SCC4.1 下的文件優先次序是什麼？',
     evidenceMode: '證據模式已開啟',
@@ -648,7 +648,7 @@ const en: typeof zhHans = {
     actions: {
       source: 'Review source set', upload: 'Upload tender package', run: 'Run vetting', running: 'Vetting…', export: 'Export report', exportStarted: '{format} review report generated and download started'
     },
-    uploadRole: { label: 'Upload purpose', auto: 'Auto detect', tender: 'Tender documents', standard: 'Standard references', project_fact: 'Project information', package_manifest: 'Document inventory' },
+    uploadRole: { label: 'Upload purpose', auto: 'Auto detect', tender: 'Tender documents', standard: 'Standard references', project_fact: 'Project information', package_manifest: 'Document inventory', unknown: 'Identity pending confirmation' },
     documentScope: { label: 'Document scope', auto: 'Auto detect scope', package: 'Selected package / references', works_pss: 'Works-related PSS (excluded)', pricing: 'Pricing documents (excluded)', example: 'Sample answers (excluded)' },
     checklist: { title: 'Appendix I · PRE checklist', note: 'Mark fulfilled only after the business reviewer has checked compliance. Unassessed items remain unchecked; a new review run starts a new checklist.', unchecked: 'Unchecked', fulfilled: 'Checked and fulfilled', not_applicable: 'Not applicable (human decision)', remarks: 'Remarks by Contract Team', save: 'Save this check', saved: 'Check saved', dirty: 'Checklist changes are unsaved. Save or restore them before exporting.', reset: 'Restore saved value' },
     toolbar: { searchPlaceholder: 'Search clause, document or issue', allTypes: 'All types', allScopes: 'All scopes', intra: 'Intra-file', inter: 'Cross-file' },
@@ -724,7 +724,7 @@ const en: typeof zhHans = {
     replyMode: 'Add background to the original question. User statements are not contract citations.',
     newQuestion: 'Cancel reply and ask a new question',
     referenceOnly: 'Reference provision explanation only. Adoption of this edition and provision by the selected project has not been confirmed.',
-    sourceScope: { title: 'Documents in this advice scope', note: 'In scope does not mean indexed. Retrieval requires usable parsed content and a refreshed evidence index; see the index status above. Grey rows are excluded. Read library provisions with the contract edition, amendments and exclusions.', role: 'Source role', included: 'In this scope', parsed: 'Parsed', partiallyParsed: 'Partially parsed', parseUnavailable: 'No usable parsing yet', reasons: { example_answer: 'Sample answer, comparison only', pricing_document: 'Pricing document, outside competition scope', project_works_specification: 'Works-related PSS, outside competition scope', outside_tender_scope: 'Outside tender subset', outside_contract_scope: 'Outside contract subset' } },
+    sourceScope: { title: 'Documents in this advice scope', note: 'In scope does not mean indexed. Retrieval requires usable parsed content and a refreshed evidence index; see the index status above. Grey rows are excluded. Read library provisions with the contract edition, amendments and exclusions.', role: 'Source role', included: 'In this scope', parsed: 'Parsed', partiallyParsed: 'Partially parsed', parseUnavailable: 'No usable parsing yet', reasons: { source_identity_unresolved: 'Identity pending confirmation; not included as a business source yet.', example_answer: 'Sample answer, comparison only', pricing_document: 'Pricing document, outside competition scope', project_works_specification: 'Works-related PSS, outside competition scope', outside_tender_scope: 'Outside tender subset', outside_contract_scope: 'Outside contract subset' } },
     actions: { refreshIndex: 'Refresh evidence index', ask: 'Ask', precedence: 'Precedence basis', clear: 'Clear chat' },
     placeholder: 'Ask a contract question, e.g. What is the order of precedence under SCC4.1?',
     evidenceMode: 'Evidence mode on',

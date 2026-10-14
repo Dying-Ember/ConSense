@@ -24,7 +24,7 @@ async function harness({ stored = new Map(), metadata = profiles, metadataError 
   }
   const axios = { create: () => ({ get: (url, config) => transport('get', url, undefined, config), post: (url, body, config) => transport('post', url, body, config), put: (url, body, config) => transport('put', url, body, config), delete: (url, config) => transport('delete', url, undefined, config) }), isAxiosError: () => false }
   const loaded = loadVue(path.join(__dirname, '../src/components/AppTopbar.vue'), { boundaries: {
-    axios: { default: axios }, pinia: piniaRuntime, 'vue-i18n': require('vue-i18n'), 'vue-router': routerRuntime,
+    axios: { default: axios }, pinia: piniaRuntime, 'vue-i18n': require('vue-i18n'), 'vue-router': routerRuntime, '@noble/hashes/sha256': require('@noble/hashes/sha256'),
     'pdfjs-dist': { GlobalWorkerOptions: {}, getDocument() { throw new Error('PDF renderer is outside the source-selection test') } },
     'pdfjs-dist/build/pdf.worker.min.mjs?url': { default: 'external-pdf-worker' },
     jszip: { default: require('jszip') }, 'mammoth/mammoth.browser.min.js': { default: require('mammoth/mammoth.browser.min.js') }, dompurify: { default: require('dompurify')(nativeWindow) }
@@ -140,7 +140,7 @@ async function harness({ stored = new Map(), metadata = profiles, metadataError 
   console.log('PASS: rendered generation retains operation-entry profile across plan await and preserves full generation timeout')
   const advice = await harness({ metadata: available, view: 'AdviceView', respond: request => {
     if (request.url === '/projects') return [{ id: 'Q', name: field.label }]
-    if (request.url.endsWith('/index/status')) return { chunks: 0 }
+    if (request.url.includes('/index/status?')) return { chunks: 0 }
     if (request.url.endsWith('/ask')) return { grounded: true, title: field.label, content: { en: 'Answer', zhHans: 'Answer', zhHant: 'Answer' }, citations: [], sources: [], modelIdentity: { profileId: 'local', provider: 'ollama', model: 'captured-local-model', configurationSha256: 'a'.repeat(64), identityScope: 'configured_profile' } }
     return []
   } })

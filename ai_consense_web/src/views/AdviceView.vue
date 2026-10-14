@@ -1,14 +1,20 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRoute, useRouter } from 'vue-router'
 import { adviceApi } from '@/api'
 import type { ChatMessage, Citation, IndexStatus, QuickQuestion, AdviceSourceDocument } from '@/api/types'
 import { useAppStore } from '@/stores/app'
 import { useLocalized } from '@/composables/useLocalized'
 import AppIcon from '@/components/AppIcon.vue'
+import CanonicalEvidencePanel from '@/components/CanonicalEvidencePanel.vue'
+import AdviceAnswer from '@/components/AdviceAnswer.vue'
+import { claimReviewHandoff, handoffSourceWarnings, reviewHandoffCopy, reviewQuestion, type ReviewHandoff } from '@/advice/reviewHandoff'
 
 const { t } = useI18n()
 const store = useAppStore()
+const route = useRoute()
+const router = useRouter()
 const { pick } = useLocalized()
 
 const messages = ref<ChatMessage[]>([])
@@ -23,11 +29,59 @@ const activeSources = ref<Citation[]>([])
 const historyEl = ref<HTMLElement | null>(null)
 const scopeDocuments = ref<AdviceSourceDocument[]>([])
 const clarificationReply = ref<ChatMessage | null>(null)
+const handoff = ref<ReviewHandoff | null>(null)
+const handoffError = ref<'invalid' | 'wrongProject' | null>(null)
+const scopeLoaded = ref(false)
+const indexError = ref('')
 let viewEpoch = 0
 let reloadSequence = 0
 let scopeSequence = 0
+let indexSequence = 0
+let rebuildSequence = 0
+let scopeEpoch = 0
+let askSequence = 0
+let activeRebuildBusy: { sequence: number; message: string } | null = null
+
+const evidenceCopy = {
+  indexFailed: { zhHans: '当前范围的索引请求失败。请检查后端配置后刷新索引。', zhHant: '目前範圍的索引請求失敗。請檢查後端設定後重新整理索引。', en: 'The index request for this scope failed. Check backend configuration and refresh the index.' },
+  canonical_index_receipt_missing: { zhHans: '当前范围尚未建立可验证索引，请刷新索引。', zhHant: '目前範圍尚未建立可驗證索引，請重新整理索引。', en: 'No verified index receipt exists for this scope. Refresh the index.' },
+  canonical_index_unavailable: { zhHans: '当前范围的索引或检索配置未通过核验，请检查后端配置后刷新索引。', zhHant: '目前範圍的索引或檢索設定未通過核驗，請檢查後端設定後重新整理索引。', en: 'Index or retrieval configuration verification failed for this scope. Check backend configuration and refresh the index.' },
+  current_sources_unavailable: { zhHans: '当前范围的来源尚未就绪，请核对来源登记与解析状态。', zhHant: '目前範圍的來源尚未就緒，請核對來源登記與解析狀態。', en: 'Current sources for this scope are unavailable. Check source registration and parsing status.' },
+  unit: { zhHans: '结构证据单元与未确认项', zhHant: '結構證據單元與未確認項', en: 'Structural evidence unit and unresolved items' },
+  observed: { zhHans: '已返回观测到的完整结构单元；语义适用范围与限定条件完整性仍未确认。', zhHant: '已返回觀測到的完整結構單元；語義適用範圍與限定條件完整性仍未確認。', en: 'The complete observed structural unit was returned. Semantic applicability and qualifier completeness remain unverified.' },
+  unknown: { zhHans: '结构证据状态未确认，请核对原件及 unknown 属性。', zhHant: '結構證據狀態未確認，請核對原件及 unknown 屬性。', en: 'Structural evidence status is unresolved. Check the source and unknown attributes.' },
+  context: { zhHans: '关联上下文，未独立重排评分。', zhHant: '關聯上下文，未獨立重排評分。', en: 'Related context; no independent rerank score.' },
+  rerank: { zhHans: '重排分数', zhHant: '重排分數', en: 'Rerank score' }
+}
 
 const projectId = computed(() => store.activeProjectId)
+const handoffWarnings = computed(() => handoff.value ? handoffSourceWarnings(handoff.value, scopeDocuments.value, scopeLoaded.value) : null)
+
+function clearImportedDraft() {
+  handoff.value = null
+  handoffError.value = null
+  question.value = ''
+}
+
+function claimImportedDraft() {
+  const token = route.query.review
+  if (token === undefined || !projectId.value) return
+  let result: ReturnType<typeof claimReviewHandoff>
+  try { result = claimReviewHandoff(sessionStorage, token, projectId.value) }
+  catch { result = { status: 'storage_unavailable' } }
+  if (result.status === 'claimed') {
+    handoff.value = result.handoff
+    handoffError.value = null
+    scope.value = 'fullset'
+    clarificationReply.value = null
+    question.value = reviewQuestion(result.handoff, value => pick(value))
+  } else {
+    handoffError.value = result.status === 'project_mismatch' ? 'wrongProject' : 'invalid'
+  }
+  const query = { ...route.query }
+  delete query.review
+  void router.replace({ query }).catch(() => undefined)
+}
 
 const SCOPES = [
   { value: 'fullset', label: () => t('advice.scope.fullset') },
@@ -46,45 +100,81 @@ function sourceParseLabel(document: AdviceSourceDocument) {
 const indexHint = computed(() => {
   const status = indexStatus.value
   if (!status) return ''
+  if (status.indexReason && Object.prototype.hasOwnProperty.call(evidenceCopy, status.indexReason)) return pick(evidenceCopy[status.indexReason as keyof typeof evidenceCopy])
   return pick(status.message) || t('advice.indexReady', { count: status.chunks })
 })
+
+function clearRebuildBusy(sequence?: number) {
+  if (!activeRebuildBusy || (sequence !== undefined && activeRebuildBusy.sequence !== sequence)) return
+  if (store.busyMessage === activeRebuildBusy.message) store.clearBusy()
+  activeRebuildBusy = null
+}
+
+function resetScopedState() {
+  ++scopeEpoch; ++indexSequence; ++rebuildSequence; ++askSequence
+  indexStatus.value = null; indexError.value = ''
+  activeSources.value = []; activeCitation.value = null; clarificationReply.value = null
+  asking.value = false; indexing.value = false
+  clearRebuildBusy()
+}
+
+async function reloadIndexStatus() {
+  const id = projectId.value, selectedScope = scope.value, epoch = viewEpoch, sequence = ++indexSequence
+  indexStatus.value = null; indexError.value = ''
+  if (!id) return
+  const current = () => epoch === viewEpoch && id === projectId.value && selectedScope === scope.value && sequence === indexSequence
+  try {
+    const status = await adviceApi.indexStatus(id, selectedScope)
+    if (!current()) return
+    if (status.sourceScope && status.sourceScope !== selectedScope) throw new Error('INDEX_SCOPE_MISMATCH')
+    indexStatus.value = status
+  } catch {
+    if (current()) indexError.value = pick(evidenceCopy.indexFailed)
+  }
+}
 
 async function reload() {
   const id = projectId.value
   const epoch = viewEpoch
   const sequence = ++reloadSequence
   if (!id) return
-  const [messageList, quickList, status] = await Promise.all([
+  const [messageList, quickList] = await Promise.all([
     adviceApi.messages(id),
-    adviceApi.quickQuestions(id),
-    adviceApi.indexStatus(id)
+    adviceApi.quickQuestions(id)
   ])
   if (epoch !== viewEpoch || sequence !== reloadSequence || id !== projectId.value) return
   messages.value = messageList
   quickQuestions.value = quickList
-  indexStatus.value = status
   activeSources.value = []
   activeCitation.value = null
   await scrollToBottom()
-  await reloadScope()
 }
 
 async function reloadScope() {
   const id = projectId.value, selectedScope = scope.value, sequence = ++scopeSequence
+  scopeLoaded.value = false
+  scopeDocuments.value = []
   if (!id) { scopeDocuments.value = []; return }
   const documents = await adviceApi.sources(id, selectedScope)
-  if (id === projectId.value && selectedScope === scope.value && sequence === scopeSequence) scopeDocuments.value = documents
+  if (id === projectId.value && selectedScope === scope.value && sequence === scopeSequence) {
+    scopeDocuments.value = documents
+    scopeLoaded.value = true
+  }
 }
 
-onMounted(reload)
+onMounted(() => { void reload(); void reloadScope(); void reloadIndexStatus() })
 watch(projectId, () => {
   viewEpoch++
+  resetScopedState()
+  if (handoff.value || handoffError.value) clearImportedDraft()
+  scopeLoaded.value = false
   messages.value = []; scopeDocuments.value = []; activeSources.value = []; activeCitation.value = null; clarificationReply.value = null
-  asking.value = false; indexing.value = false
-  reload()
+  void reload(); void reloadScope(); void reloadIndexStatus()
 })
-watch(scope, () => { clarificationReply.value = null; reloadScope() })
+watch(() => [projectId.value, route.query.review], claimImportedDraft, { immediate: true })
+watch(scope, () => { resetScopedState(); void reloadScope(); void reloadIndexStatus() })
 watch(() => messages.value.length, scrollToBottom)
+onBeforeUnmount(() => { ++viewEpoch; ++scopeSequence; resetScopedState() })
 
 async function scrollToBottom() {
   await nextTick()
@@ -97,9 +187,11 @@ async function ask(text?: string) {
   const content = (text ?? question.value).trim()
   if (!content || asking.value) return
   const llmSelection = store.captureLlmSelection()
-  const id = projectId.value, selectedScope = scope.value, epoch = viewEpoch
+  const id = projectId.value, selectedScope = scope.value, epoch = viewEpoch, selectedScopeEpoch = scopeEpoch, sequence = ++askSequence
   const replyToMessageId = clarificationReply.value?.id ?? undefined
   asking.value = true
+  handoff.value = null
+  handoffError.value = null
   question.value = ''
   messages.value.push({
     id: null,
@@ -115,7 +207,7 @@ async function ask(text?: string) {
 
   try {
     const response = await adviceApi.ask(id, content, selectedScope, llmSelection, replyToMessageId)
-    if (epoch !== viewEpoch || id !== projectId.value) return
+    if (epoch !== viewEpoch || id !== projectId.value || selectedScopeEpoch !== scopeEpoch || sequence !== askSequence) return
     messages.value.push({
       id: response.messageId ?? null,
       role: 'assistant',
@@ -139,23 +231,31 @@ async function ask(text?: string) {
     }
     await scrollToBottom()
   } finally {
-    if (epoch === viewEpoch) asking.value = false
+    if (epoch === viewEpoch && sequence === askSequence) asking.value = false
   }
 }
 
 async function refreshIndex() {
-  const id = projectId.value, epoch = viewEpoch
+  if (indexing.value || !projectId.value) return
+  const id = projectId.value, selectedScope = scope.value, epoch = viewEpoch, selectedScopeEpoch = scopeEpoch, sequence = ++rebuildSequence
+  ++indexSequence // A pending status read must not overwrite the newer rebuild result.
+  indexError.value = ''
   indexing.value = true
-  store.setBusy(t('advice.indexing'))
+  activeRebuildBusy = { sequence, message: t('advice.indexing') }
+  store.setBusy(activeRebuildBusy.message)
+  const current = () => epoch === viewEpoch && id === projectId.value && selectedScopeEpoch === scopeEpoch && selectedScope === scope.value && sequence === rebuildSequence
   try {
-    const status = await adviceApi.rebuildIndex(id)
-    if (epoch !== viewEpoch || id !== projectId.value) return
+    const status = await adviceApi.rebuildIndex(id, selectedScope)
+    if (!current()) return
+    if (status.sourceScope && status.sourceScope !== selectedScope) throw new Error('INDEX_SCOPE_MISMATCH')
     indexStatus.value = status
     await reloadScope()
-    store.notify(indexHint.value || t('common.done'))
+    if (current()) store.notify(indexHint.value || t('common.done'))
+  } catch {
+    if (current()) { indexStatus.value = null; indexError.value = pick(evidenceCopy.indexFailed) }
   } finally {
-    if (epoch === viewEpoch) indexing.value = false
-    store.clearBusy()
+    if (current()) indexing.value = false
+    clearRebuildBusy(sequence)
   }
 }
 
@@ -304,6 +404,8 @@ async function askPrecedence() {
             <div>
               <h4>{{ t('advice.chat.title') }}</h4>
               <div class="muted small">{{ scopeNote }} · {{ indexHint }}</div>
+              <p v-if="indexError" class="warning-note" role="alert">{{ indexError }}</p>
+              <div v-if="indexStatus?.evidenceBackend" class="muted small">{{ indexStatus.evidenceBackend }} · {{ indexStatus.sourceScope || scope }}</div>
             </div>
             <select v-model="scope" style="width: auto; min-width: 170px">
               <option v-for="item in SCOPES" :key="item.value" :value="item.value">{{ item.label() }}</option>
@@ -332,7 +434,7 @@ async function askPrecedence() {
                 <p v-if="message.modelIdentity" class="muted small">{{ t('llm.identityNote') }}</p>
                 <strong>{{ message.content ? pick(message.title) : t('advice.unknown.title') }}</strong>
                 <p v-if="message.basisScope === 'reference_only'" class="warning-note">{{ t('advice.referenceOnly') }}</p>
-                <p v-if="message.content">{{ pick(message.content) }}</p>
+                <AdviceAnswer v-if="message.content" :content="pick(message.content)" />
                 <p v-else>{{ unknownText(message.unknownScope) }}</p>
                 <div v-if="message.clarifications?.length" class="clarifications">
                   <strong>{{ t('advice.clarifications') }}</strong>
@@ -359,6 +461,24 @@ async function askPrecedence() {
             <strong>{{ t('advice.replyMode') }}</strong>
             <ul><li v-for="item in clarificationReply.clarifications" :key="item">{{ item }}</li></ul>
             <button class="btn" type="button" :disabled="asking" @click="clarificationReply = null">{{ t('advice.newQuestion') }}</button>
+          </div>
+          <div v-if="handoffError" class="review-handoff warning-note" role="alert">
+            {{ pick(reviewHandoffCopy[handoffError]) }}
+            <button class="btn" type="button" @click="clearImportedDraft">{{ t('common.close') }}</button>
+          </div>
+          <div v-if="handoff" class="review-handoff" role="status">
+            <strong>{{ pick(reviewHandoffCopy.draft) }} · {{ handoff.findingCode }}</strong>
+            <p>{{ pick(reviewHandoffCopy.draftNote) }}</p>
+            <p v-if="handoffWarnings?.stale" class="warning-note">{{ pick(reviewHandoffCopy.stale) }}</p>
+            <p v-if="handoffWarnings?.unverified" class="warning-note">{{ pick(reviewHandoffCopy.unverified) }}</p>
+            <p v-if="handoffWarnings?.unavailable" class="warning-note">{{ pick(reviewHandoffCopy.sourceUnavailable) }}</p>
+            <p v-if="!handoff.evidence.length" class="warning-note">{{ pick(reviewHandoffCopy.noQuotes) }}</p>
+            <ul v-if="handoff.evidence.length" class="small">
+              <li v-for="(item, index) in handoff.evidence" :key="index">
+                {{ item.fileKey }} · {{ item.fileName }} <span v-if="item.pageNo"> · {{ item.pageNo }}</span><span v-if="item.anchor"> · {{ item.anchor }}</span>
+              </li>
+            </ul>
+            <button class="btn" type="button" :disabled="asking" @click="clearImportedDraft">{{ pick(reviewHandoffCopy.remove) }}</button>
           </div>
           <div class="composer">
             <textarea
@@ -415,10 +535,23 @@ async function askPrecedence() {
             <div v-if="activeCitation" class="source-view">
               <div class="sv-file">{{ activeCitation.fileLabel }} · {{ activeCitation.pageNo }}</div>
               <div class="sv-para" v-html="highlightHtml(activeCitation.content)" />
+              <CanonicalEvidencePanel
+                v-for="(address, index) in activeCitation.canonicalEvidence ?? []"
+                :key="`${address.projectionSha256}:${address.canonicalChunkId}:${index}`"
+                :pointer="address"
+                :locale="store.locale"
+              />
               <div class="sv-meta">
                 {{ t('advice.citation.footer') }}
-                <span class="mono"> · score {{ activeCitation.score.toFixed(3) }}</span>
+                <span v-if="activeCitation.scoreMeaning === 'unranked_context'"> · {{ pick(evidenceCopy.context) }}</span>
+                <span v-else-if="activeCitation.scoreMeaning === 'actual_reranked_seed'" class="mono"> · {{ pick(evidenceCopy.rerank) }} {{ activeCitation.score.toFixed(3) }}</span>
+                <span v-else-if="!activeCitation.scoreMeaning" class="mono"> · score {{ activeCitation.score.toFixed(3) }}</span>
               </div>
+              <details v-if="activeCitation.canonicalSourceUnit" class="source-unit">
+                <summary>{{ pick(evidenceCopy.unit) }}</summary>
+                <p>{{ pick(activeCitation.canonicalSourceUnit.status === 'complete_observed_unit' ? evidenceCopy.observed : evidenceCopy.unknown) }}</p>
+                <pre>{{ JSON.stringify(activeCitation.canonicalSourceUnit, null, 2) }}</pre>
+              </details>
             </div>
           </div>
         </div>
@@ -434,4 +567,8 @@ async function askPrecedence() {
 .scope-excluded { color: var(--muted); }
 .source-scope .table-wrap { max-height: 280px; overflow: auto; }
 .clarifications { margin-top: 12px; }
+.review-handoff { padding: 12px; margin-top: 12px; border: 1px solid var(--line); border-radius: 8px; overflow-wrap: anywhere; }
+.review-handoff p { margin: 8px 0; }
+.source-unit { margin-top: 12px; }
+.source-unit pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 24rem; overflow: auto; }
 </style>

@@ -34,34 +34,39 @@ public final class ProjectDocumentScope {
         return result;
     }
     public static List<SourceDocument> selected(String projectId,List<SourceDocument> documents,String scope) {
+        return selected(projectId,documents,scope,"vetting");
+    }
+    public static List<SourceDocument> selected(String projectId,List<SourceDocument> documents,String scope,String module) {
         String normalized=normalizeScope(scope);
-        return currentCatalog(projectId,documents).stream().filter(d->exclusionReason(d,normalized)==null).collect(Collectors.toList());
+        return currentCatalog(projectId,documents).stream().filter(d->exclusionReason(d,normalized,module)==null).collect(Collectors.toList());
     }
     public static boolean reviewCategory(SourceDocument document) {
         return SourceDocument.CATEGORY_VETTING_PACKAGE.equals(document.getCategory())||SourceDocument.CATEGORY_VETTING_SUPPLEMENT.equals(document.getCategory());
     }
     public static String exclusionReason(SourceDocument d,String scope) {
+        return exclusionReason(d,scope,"vetting");
+    }
+    public static String exclusionReason(SourceDocument d,String scope,String module) {
         if(!reviewCategory(d))return "not_review_package";
-        String filename=nvl(d.getFileName()).toLowerCase(Locale.ROOT).replace('_',' ').replace('-',' ');
+        String moduleExclusion=OerSourceMetadata.moduleExclusion(d,module);
+        if(moduleExclusion!=null)return moduleExclusion;
         String explicit=nvl(d.getDocumentScope()).toLowerCase(Locale.ROOT);
-        // Recognisable answer keys remain held out even when accidentally labelled as package provisions.
-        if("example".equals(explicit)||filename.contains("vetting comment")||filename.contains("checklist")||filename.contains("q&a")
-                ||filename.contains("q & a")||filename.contains("contractual advice")||filename.contains("answer sheet")
-                ||filename.contains("questions and answers")||filename.matches(".*\\bappendix\\s+flowchart\\b.*"))return "example_answer";
+        if("example".equals(explicit))return "example_answer";
         if("pricing".equals(explicit))return "pricing_document";
         if("works_pss".equals(explicit))return "project_works_specification";
-        boolean technicalStandard="standard".equals(VettingCorpus.sourceRole(d))&&("GS".equals(key(d))||filename.contains("specification library")||filename.contains("general specification"));
-        if(Arrays.asList("BQ","SOR").contains(key(d))||("GS".equals(key(d))&&!technicalStandard)||filename.contains("bill of quantities")||filename.contains("bills of quantities")
-                ||filename.contains("schedule of rates")||filename.contains("general summary"))return "pricing_document";
-        // Package labels cannot override fixed competition exclusions. Standard SL/GS, project PRE and composition remain available.
-        boolean projectPss=filename.contains("pss")||filename.contains("project specific specification")||filename.contains("project specification");
-        if(projectPss&&!"PRE".equals(key(d))&&!filename.contains("preliminar")&&!filename.matches(".*\\bpre\\b.*")
-                &&!"standard".equals(VettingCorpus.sourceRole(d))&&!"SL".equals(key(d)))return "project_works_specification";
+        if("IDENTITY_PENDING".equals(d.getParseStatus()))return "source_identity_unresolved";
+        com.consense.document.OerDocumentIdentity identity=OerSourceMetadata.identity(d);
+        String kind=identity==null?"UNKNOWN":nvl(identity.getKind()).toUpperCase(Locale.ROOT);
+        if(Arrays.asList("BQ","SOR","GENERAL_SUMMARY").contains(kind))return "pricing_document";
+        if("WORKS_PSS".equals(kind))return "project_works_specification";
+        if("DRAWING".equals(kind))return "drawing_outside_scope";
+        String role=VettingCorpus.sourceRole(d);
+        if("unknown".equals(role))return "source_identity_unresolved";
         String normalized=normalizeScope(scope);
         if("fullset".equals(normalized))return null;
-        String role=VettingCorpus.sourceRole(d);
         if("project_fact".equals(role)||"package_manifest".equals(role))return null;
-        boolean tender=TENDER_KEYS.contains(key(d))||filename.contains("marking scheme")||filename.contains("tenderer")||filename.contains("restriction to award tender");
+        if("UNKNOWN".equals(kind)||kind.isEmpty())return "source_identity_unresolved";
+        boolean tender=TENDER_KEYS.contains(kind);
         if("tender".equals(normalized)&&!tender)return "outside_tender_scope";
         if("contract".equals(normalized)&&tender)return "outside_contract_scope";
         return null;

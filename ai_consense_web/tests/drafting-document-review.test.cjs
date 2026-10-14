@@ -75,7 +75,9 @@ async function linkedNativeNavigation() {
   props.fields.push({ key: 'method', kind: 'text', label: { en: 'Method', zhHans: '方式', zhHant: '方式' }, affects: [{ document: 'NTT', clause: 'Price', paragraphs: 'P2' }] })
   props.values.method = 'L10Pro'
   props.sourceBindings.bindings[0].fieldKeys.push('method'); props.resultBindings.bindings[0].fieldKeys.push('method')
-  const h = await harness(props), linked = h.element.querySelector('[data-review-binding="price-binding"]')
+  const h = await harness(props)
+  await h.click('[data-review-mode="original"]') // Original associations remain selectable; a saved exclusive fee edit prioritizes fee instead.
+  const linked = h.element.querySelector('[data-review-binding="price-binding"]')
   linked.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); await settle()
   assert(h.element.querySelector('[data-association-choice="method"]'), 'Shared wording offers explicit input selection')
   await h.click('[data-association-choice="method"]')
@@ -159,17 +161,18 @@ async function appliedSharedParagraphAttribution() {
   const h = await harness(props), paper = () => h.element.querySelector('[data-document-paper]')
   assert.equal(paper().querySelector('ins').textContent, '100', 'An exclusively attributed saved fee operation can show its exact token diff')
   await h.click('[data-review-field="method"]')
-  assert.equal(paper().querySelectorAll('del,ins').length, 0, 'Related retained input must not claim another action\'s applied fee edit')
-  assert.match(h.element.textContent, /saved change.*another input/i)
+  assert.equal(paper().querySelector('ins').textContent, '100', 'Changing the focused input keeps the complete saved revision visible')
+  assert(paper().querySelector('[data-review-change-kind="other"]'), 'A different input does not claim the applied fee edit')
   h.props.actions[0].inputKeys = ['fee', 'method']; await h.click('[data-review-field="fee"]')
-  assert.equal(paper().querySelectorAll('del,ins').length, 0, 'A joint action without per-edit ranges cannot claim selected-input-only token changes')
-  assert.match(h.element.textContent, /joint.*cannot.*isolat/i)
+  assert.equal(paper().querySelector('ins').textContent, '100', 'A joint action displays the complete actual revision')
+  assert(paper().querySelector('[data-review-change-kind="joint"]'), 'A joint action cannot claim selected-input-only token ranges')
+  assert.match(h.element.textContent, /Joint changes.*Individual character ranges/s)
   await h.click('[data-review-mode="saved"]'); assert.match(paper().textContent, /Pay 100 dollars\./)
   await h.click('[data-review-mode="review"]'); h.props.actions[0].inputKeys = ['fee']; h.props.resultBindings.bindings[0].appliedActionIds = []; await settle()
   assert.equal(paper().querySelectorAll('del,ins').length, 0, 'Operation membership alone cannot invent an applied action')
   h.props.resultBindings.bindings[0].appliedActionIds = ['price']; h.props.resultBindings.bindings[0].operationIds = ['price-other-prefix-is-valid']; h.props.resultBindings.bindings[0].bodyOperationIds = ['body-edit-1']; await settle()
-  assert.equal(paper().querySelectorAll('del,ins').length, 0); assert.match(h.element.textContent, /manual.*cannot.*attribut/i)
-  h.dispose(); console.log('PASS: exact applied actions attribute sole-field edits while unrelated, joint and manual shared changes remain explicit')
+  assert.equal(paper().querySelector('ins').textContent, '100'); assert(paper().querySelector('[data-review-change-kind="manual"]')); assert.match(h.element.textContent, /manual.*cannot.*attribut/i)
+  h.dispose(); console.log('PASS: complete saved action changes remain visible with explicit sole-input, other-input, joint and manual provenance')
 }
 async function unavailableSavedLedger() {
   const props = base(); props.sourceBindings.bindings[0].operationIds = []; props.sourceBindings.bindings[0].appliedActionIds = []
@@ -200,4 +203,40 @@ async function missingCrossFileTargetDoesNotFallback() {
   await h.click('[data-review-location="other-sct"]'); assert(h.element.querySelector('[data-review-binding="other-sct"]').classList.contains('review-focused'), 'Explicitly choosing another registered location remains available')
   h.dispose(); console.log('PASS: missing requested cross-file target reports unavailable without undefined-ID matching or first-location fallback')
 }
-;(async () => { await completeDocumentModes(); await selectedActualTokenDiff(); await nativeLineBreakTokenDiff(); await linkedNativeNavigation(); await branchGuidanceAndAddedMapping(); await verifiedReadingGuardsAndLocales(); await replacedTemplateKeepsCurrentOriginal(); await recordedEvidenceContext(); await appliedSharedParagraphAttribution(); await unavailableSavedLedger(); await missingCrossFileTargetDoesNotFallback() })().catch(error => { console.error(error); process.exitCode = 1 })
+async function completeSavedRevisionChanges() {
+  const props = base(); props.dirtyKeys = []
+  props.fields.push({ key: 'method', kind: 'text', label: { en: 'Method' } })
+  props.values.method = 'Electronic'; props.actions[0].inputKeys.push('method')
+  for (const row of [props.sourceBindings.bindings[0], props.resultBindings.bindings[0]]) row.fieldKeys.push('method')
+  props.original.paragraphs.push({ id: sourcePath(4), path: sourcePath(4), ordinal: 4, text: 'Remove this editor instruction', htmlText: 'Remove this editor instruction' })
+  props.original.html += `<p data-native-paragraph="${sourcePath(4)}" data-native-ordinal="4">Remove this editor instruction</p>`
+  props.sourceBindings.bindings.push(binding('cleanup', 4, 'Remove this editor instruction', 'Remove this editor instruction', { fieldKeys: [], actionIds: [], appliedActionIds: [], operationIds: [] }))
+  props.resultBindings.bindings.push(binding('cleanup', 4, 'Remove this editor instruction', '', { fieldKeys: [], actionIds: [], appliedActionIds: [], operationIds: ['NTT-editorial-note-01-P4'], editorialOperationIds: ['NTT-editorial-note-01-P4'], documentEditStatus: 'applied', locationStatus: 'removed' }))
+  const h = await harness(props), paper = () => h.element.querySelector('[data-document-paper]')
+  assert.equal(paper().querySelector('ins')?.textContent, '100', 'Joint saved action must display the actual document change')
+  assert(paper().querySelector('[data-review-change-kind="joint"]'), 'Joint changes declare group attribution rather than selected-input-only ranges')
+  assert(paper().querySelector('.review-guidance')?.textContent.includes('editor instruction'), 'Unlinked verified editorial removal must remain visible in the complete revision')
+  await h.click('[data-review-field="method"]'); assert.equal(paper().querySelector('ins')?.textContent, '100', 'Changing input focus does not hide shared saved changes')
+  await h.click('[data-review-mode="saved"]'); assert.equal(paper().querySelectorAll('del,ins,.review-guidance').length, 0)
+  assert.doesNotMatch(paper().textContent, /editor instruction/, 'Saved mode shows actual final content')
+  await h.click('[data-review-mode="review"]')
+  h.props.resultBindings.bindings[1].editorialOperationIds = ['NTT-editorial-note-01-P999']; await settle()
+  assert.equal(paper().querySelector('.review-guidance'), null, 'A cleanup category cannot authorize a different operation')
+  assert.match(h.element.textContent, /cannot be attributed|unverified/i)
+  h.dispose(); console.log('PASS: complete saved revision displays joint changes and independently verified editorial cleanup without inventing per-input ranges')
+}
+async function warningSourceLabels() {
+  const mixedProps = base(); mixedProps.dirtyKeys = []
+  Object.assign(mixedProps.resultBindings.bindings[0], { documentEditStatus: 'applied', operationIds: ['price-fill', 'NTT-editorial-note-01-P2'], editorialOperationIds: ['NTT-editorial-note-01-P2'] })
+  const mixed = await harness(mixedProps)
+  assert.equal(mixed.element.querySelector('ins')?.textContent, '100')
+  assert(mixed.element.querySelector('[data-review-change-kind="joint"]'), 'A paragraph with both business and editorial operations cannot assign all changed tokens to the sole business input')
+  mixed.dispose(); console.log('PASS: mixed business and editorial changes preserve the real diff with shared paragraph attribution')
+  const props = base(); props.original.warnings = ['Native numbering labels and continuation sequence are not verified in this reading (22 numbered paragraph(s)). Check the PDF layout for the original list markers.']; props.result.warnings = ['Native numbering labels and continuation sequence are not verified in this reading (15 numbered paragraph(s)). Check the PDF layout for the original list markers.']
+  const h = await harness(props)
+  assert.match(h.element.querySelector('.reading-warnings').textContent, /Original.*22/s)
+  assert.match(h.element.querySelector('.reading-warnings').textContent, /Saved result.*15/s)
+  await h.click('[data-review-mode="saved"]'); assert.doesNotMatch(h.element.querySelector('.reading-warnings').textContent, /Original/)
+  h.dispose(); console.log('PASS: reading warnings identify original and saved carriers independently')
+}
+;(async () => { await completeSavedRevisionChanges(); await warningSourceLabels(); await completeDocumentModes(); await selectedActualTokenDiff(); await nativeLineBreakTokenDiff(); await linkedNativeNavigation(); await branchGuidanceAndAddedMapping(); await verifiedReadingGuardsAndLocales(); await replacedTemplateKeepsCurrentOriginal(); await recordedEvidenceContext(); await appliedSharedParagraphAttribution(); await unavailableSavedLedger(); await missingCrossFileTargetDoesNotFallback() })().catch(error => { console.error(error); process.exitCode = 1 })

@@ -1,15 +1,19 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRouter } from 'vue-router'
 import { vettingApi } from '@/api'
-import type { EvidenceBundle, Finding, FindingEvidence, VettingFile, VettingJob, VettingMetrics, VettingReportFormat, VettingSemanticTopic, VettingSourceRole, DocumentScope, VettingChecklist, VettingChecklistItem } from '@/api/types'
+import type { EvidenceBundle, Finding, FindingEvidence, VettingFile, VettingJob, VettingProgress, VettingMetrics, VettingReportFormat, VettingSemanticTopic, VettingSourceRole, DocumentScope, VettingChecklist, VettingChecklistItem } from '@/api/types'
 import { useAppStore } from '@/stores/app'
 import { useLocalized } from '@/composables/useLocalized'
 import AppIcon from '@/components/AppIcon.vue'
 import AppModal from '@/components/AppModal.vue'
+import CanonicalEvidencePanel from '@/components/CanonicalEvidencePanel.vue'
+import { createReviewHandoff, newReviewHandoffToken, removeReviewHandoff, reviewHandoffCopy, storeReviewHandoff } from '@/advice/reviewHandoff'
 
 const { t } = useI18n()
 const store = useAppStore()
+const router = useRouter()
 const { pick, currentKey } = useLocalized()
 
 function reviewScopeStatus(topic: VettingSemanticTopic): string {
@@ -36,7 +40,8 @@ function packetBudgetStatus(status?: string): string {
 const files = ref<VettingFile[]>([])
 const findings = ref<Finding[]>([])
 const metrics = ref<VettingMetrics | null>(null)
-const job = ref<VettingJob | null>(null)
+type ObservedJob = VettingJob & { sourceVerification?: 'NOT_CHECKED' }
+const job = ref<ObservedJob | null>(null)
 const starting = ref(false)
 const uploading = ref(false)
 const statusSaving = ref(false)
@@ -75,6 +80,8 @@ let viewEpoch = 0
 let reloadSequence = 0
 let evidenceSequence = 0
 let jobSequence = 0
+let jobReadSequence = 0
+let pendingJobRead: { projectId: string; epoch: number; sequence: number; runId?: string; readSequence: number } | null = null
 let disposed = false
 const packageInput = ref<HTMLInputElement | null>(null)
 const sourceOpen = ref(false)
@@ -121,10 +128,13 @@ const BUCKET_LABELS: Record<string, { zhHans: string; zhHant: string; en: string
 }
 
 const selectedFinding = computed(() => selectedDetail.value)
-const running = computed(() => starting.value || isActiveJob(job.value))
+const handoffOpening = ref(false)
+const handoffDisabled = computed(() => !projectId.value || !selectedFinding.value || handoffOpening.value || evidenceLoading.value || running.value || uploading.value || reviewSaving.value || statusSaving.value || hasUnsavedReview.value || checklistDirty.value || checklistSaving.value !== null)
+const jobDetailsPending = computed(() => job.value?.sourceVerification === 'NOT_CHECKED' && !isActiveJob(job.value))
+const running = computed(() => starting.value || isActiveJob(job.value) || jobDetailsPending.value)
 const jobModelIdentity = computed(() => job.value?.modelIdentity ?? job.value?.result?.modelIdentity)
 const recordedJobModel = computed(() => jobModelIdentity.value?.model || job.value?.result?.model)
-const exportDisabled = computed(() => running.value || uploading.value || exporting.value || statusSaving.value || reviewSaving.value || hasUnsavedReview.value || checklistDirty.value || checklistSaving.value !== null || job.value?.sourceSetStale === true || job.value?.status !== 'COMPLETED')
+const exportDisabled = computed(() => running.value || uploading.value || exporting.value || statusSaving.value || reviewSaving.value || hasUnsavedReview.value || checklistDirty.value || checklistSaving.value !== null || job.value?.sourceSetStale === true || job.value?.status !== 'COMPLETED' || job.value?.sourceVerification === 'NOT_CHECKED')
 const coverage = computed(() => job.value?.coverage ?? job.value?.result?.coverage ?? null)
 const jobPercent = computed(() => {
   if (!job.value?.totalUnits) return null
@@ -138,7 +148,8 @@ const evidenceItems = computed<FindingEvidence[]>(() => {
       fileKey: item.fileKey ?? item.code, fileName: item.fileName ?? '',
       pageNo: item.pageNo, anchor: item.anchor, quote: item.quote ?? item.text,
       located: item.located ?? evidence.value!.located, sourceHash: item.sourceHash, bbox: item.bbox,
-      packetId: item.packetId, packetSourceSnapshotSha256: item.packetSourceSnapshotSha256
+      packetId: item.packetId, packetSourceSnapshotSha256: item.packetSourceSnapshotSha256,
+      canonicalEvidence: item.canonicalEvidence
     }))
   }
   return selectedFinding.value?.evidence ?? []
@@ -163,6 +174,27 @@ function originalSourceUrl(item: FindingEvidence) {
   const page = /^P(\d+)$/i.exec(item.pageNo ?? '')
   const fragment = page && item.fileName.toLowerCase().endsWith('.pdf') ? `#page=${page[1]}` : ''
   return `/api/vetting/${encodeURIComponent(projectId.value)}/sources/${encodeURIComponent(String(item.documentId))}/original?sourceHash=${encodeURIComponent(item.sourceHash)}${fragment}`
+}
+
+async function consultFinding() {
+  if (handoffDisabled.value || !selectedFinding.value) return
+  const finding = selectedFinding.value
+  let token: string | undefined
+  let draftStorage: Storage | undefined
+  handoffOpening.value = true
+  try {
+    token = newReviewHandoffToken()
+    draftStorage = sessionStorage
+    storeReviewHandoff(draftStorage, createReviewHandoff({
+      projectId: projectId.value, findingCode: finding.code, title: finding.title, description: finding.body,
+      evidence: evidenceItems.value, sourceSetStale: job.value?.sourceSetStale === true
+    }, token))
+    const failure = await router.push({ name: 'advice', query: { review: token } })
+    if (failure) throw new Error('review_handoff_navigation_failed')
+  } catch {
+    if (token && draftStorage) removeReviewHandoff(draftStorage, token)
+    store.notify(pick(reviewHandoffCopy.transferFailed))
+  } finally { handoffOpening.value = false }
 }
 
 const canUseBuckets = computed(() => filters.value.group === 'conflict')
@@ -195,7 +227,7 @@ function bucketLabel(key: string) {
   return labels[currentKey.value] || labels.zhHans
 }
 
-async function reload() {
+async function reload(owner?: { sequence: number; runId: string }) {
   const id = projectId.value
   const epoch = viewEpoch
   const seq = ++reloadSequence
@@ -205,7 +237,7 @@ async function reload() {
     const [fileList, findingList, metricData] = await Promise.all([
       vettingApi.files(id), vettingApi.findings(id, { ...filters.value }), vettingApi.metrics(id)
     ])
-    if (disposed || epoch !== viewEpoch || seq !== reloadSequence || id !== projectId.value) return
+    if (disposed || epoch !== viewEpoch || seq !== reloadSequence || id !== projectId.value || (owner && !ownsJob(id, epoch, owner.sequence, owner.runId))) return
     files.value = fileList
     findings.value = findingList
     metrics.value = metricData
@@ -221,25 +253,29 @@ function stopPolling() {
   pollTimer = undefined
 }
 
-function schedulePoll(id: string, runId: string, epoch: number) {
-  stopPolling()
-  if (disposed || epoch !== viewEpoch || id !== projectId.value) return
-  pollTimer = window.setTimeout(() => { void pollRun(id, runId, epoch) }, 2000)
+function ownsJob(id: string, epoch: number, sequence: number, runId?: string) {
+  return !disposed && epoch === viewEpoch && id === projectId.value && sequence === jobSequence
+    && (!runId || runId === job.value?.id)
 }
 
-async function acceptJob(value: VettingJob, id: string, epoch: number, notifyCompletion = false) {
-  if (disposed || epoch !== viewEpoch || id !== projectId.value) return
+function schedulePoll(id: string, runId: string, epoch: number, sequence: number) {
+  stopPolling()
+  if (!ownsJob(id, epoch, sequence, runId)) return
+  pollTimer = window.setTimeout(() => { void pollRun(id, runId, epoch, sequence) }, 2000)
+}
+
+async function acceptJob(value: VettingJob, id: string, epoch: number, sequence: number, notifyCompletion = false) {
+  if (!ownsJob(id, epoch, sequence)) return
   job.value = value
   pollingPaused.value = false
   if (isActiveJob(value)) {
-    schedulePoll(id, value.id, epoch)
+    schedulePoll(id, value.id, epoch, sequence)
   } else {
     stopPolling()
     if (notifyCompletion && value.status === 'COMPLETED') {
       store.notify(t('vetting.run.finished', { count: value.result?.total ?? 0 }))
-      await reload()
-      if (disposed || epoch !== viewEpoch || id !== projectId.value) return
-      // Findings may have acquired new codes. Close a detail from the previous run.
+      await reload({ sequence, runId: value.id })
+      if (!ownsJob(id, epoch, sequence, value.id)) return
       selectedCode.value = null
       selectedDetail.value = null
       drawerOpen.value = false
@@ -249,34 +285,76 @@ async function acceptJob(value: VettingJob, id: string, epoch: number, notifyCom
   }
 }
 
-async function pollRun(id: string, runId: string, epoch: number) {
-  if (disposed || epoch !== viewEpoch || id !== projectId.value) return
+async function acceptProgress(value: VettingProgress, id: string, epoch: number, sequence: number, readSequence: number, notifyCompletion = false) {
+  if (!ownsJob(id, epoch, sequence) || readSequence !== jobReadSequence) return
+  const previous = job.value?.id === value.id ? job.value : null
+  // Copy only progress fields. A previous successful source check is not a current one.
+  job.value = {
+    id: value.id, status: value.status, phase: value.phase, completedUnits: value.completedUnits,
+    totalUnits: value.totalUnits, message: value.message, error: value.error,
+    startedAt: value.startedAt, finishedAt: value.finishedAt, sourceSnapshotSha256: value.sourceSnapshotSha256,
+    modelIdentity: value.modelIdentity, sourceVerification: 'NOT_CHECKED',
+    ...(previous?.sourceSetStale === true ? { sourceSetStale: true } : {})
+  }
+  pollingPaused.value = false
+  if (isActiveJob(value)) {
+    schedulePoll(id, value.id, epoch, sequence)
+    return
+  }
+  stopPolling()
+  const detail = await vettingApi.getRun(id, value.id)
+  if (!ownsJob(id, epoch, sequence, value.id) || readSequence !== jobReadSequence) return
+  if (detail.id !== value.id) throw new Error('Vetting detail belongs to another run')
+  await acceptJob(detail, id, epoch, sequence, notifyCompletion)
+  if (!ownsJob(id, epoch, sequence, value.id) || readSequence !== jobReadSequence) return
+}
+
+async function pollRun(id: string, runId: string, epoch: number, sequence = jobSequence) {
+  if (!ownsJob(id, epoch, sequence, runId)) return
+  if (pendingJobRead?.projectId === id && pendingJobRead.epoch === epoch && pendingJobRead.sequence === sequence) return
+  const owner = { projectId: id, epoch, sequence, runId, readSequence: ++jobReadSequence }
+  pendingJobRead = owner
+  stopPolling()
   try {
-    const value = await vettingApi.getRun(id, runId)
-    if (job.value?.id !== runId) return
-    await acceptJob(value, id, epoch, true)
+    const value = await vettingApi.getRunProgress(id, runId)
+    if (!ownsJob(id, epoch, sequence, runId) || owner.readSequence !== jobReadSequence) return
+    if (value.id !== runId) throw new Error('Vetting progress belongs to another run')
+    await acceptProgress(value, id, epoch, sequence, owner.readSequence, true)
+    if (!ownsJob(id, epoch, sequence, runId) || owner.readSequence !== jobReadSequence) return
   } catch {
-    if (epoch === viewEpoch && id === projectId.value) pollingPaused.value = true
+    if (ownsJob(id, epoch, sequence, runId) && owner.readSequence === jobReadSequence) pollingPaused.value = true
+  } finally {
+    if (pendingJobRead === owner) pendingJobRead = null
   }
 }
 
 async function restoreJob() {
   const id = projectId.value
   const epoch = viewEpoch
-  const seq = ++jobSequence
-  if (!id) return
+  if (!id || disposed || starting.value) return
+  if (pendingJobRead?.projectId === id && pendingJobRead.epoch === epoch && pendingJobRead.sequence === jobSequence) return
+  const sequence = ++jobSequence
+  const owner = { projectId: id, epoch, sequence, readSequence: ++jobReadSequence }
+  pendingJobRead = owner
+  stopPolling()
   try {
-    const value = await vettingApi.latestRun(id)
-    if (seq !== jobSequence) return
-    if (value) await acceptJob(value, id, epoch)
+    const value = await vettingApi.latestRunProgress(id)
+    if (!ownsJob(id, epoch, sequence) || owner.readSequence !== jobReadSequence) return
+    if (value) {
+      await acceptProgress(value, id, epoch, sequence, owner.readSequence)
+      if (!ownsJob(id, epoch, sequence, value.id) || owner.readSequence !== jobReadSequence) return
+    }
   } catch {
-    if (epoch === viewEpoch && id === projectId.value) pollingPaused.value = true
+    if (ownsJob(id, epoch, sequence) && owner.readSequence === jobReadSequence) pollingPaused.value = true
+  } finally {
+    if (pendingJobRead === owner) pendingJobRead = null
   }
 }
 
 function retryPolling() {
+  if (pendingJobRead?.projectId === projectId.value && pendingJobRead.epoch === viewEpoch && pendingJobRead.sequence === jobSequence) return
   pollingPaused.value = false
-  if (job.value && isActiveJob(job.value)) void pollRun(projectId.value, job.value.id, viewEpoch)
+  if (job.value) void pollRun(projectId.value, job.value.id, viewEpoch)
   else void restoreJob()
 }
 
@@ -469,13 +547,16 @@ async function runVetting() {
   const llmSelection = store.captureLlmSelection()
   const id = projectId.value
   const epoch = viewEpoch
-  jobSequence++
+  const sequence = ++jobSequence
+  stopPolling()
   starting.value = true
   try {
     const value = await vettingApi.startRun(id, store.locale, llmSelection)
-    await acceptJob(value, id, epoch, true)
+    if (!ownsJob(id, epoch, sequence)) return
+    await acceptJob(value, id, epoch, sequence, true)
+    if (!ownsJob(id, epoch, sequence, value.id)) return
   } finally {
-    if (epoch === viewEpoch) starting.value = false
+    if (ownsJob(id, epoch, sequence)) starting.value = false
   }
 }
 
@@ -532,7 +613,7 @@ watch(() => job.value?.id, () => {
 })
 
 async function openChecklist(event: Event) {
-  if (!(event.target as HTMLDetailsElement).open || checklist.value || job.value?.status !== 'COMPLETED') return
+  if (!(event.target as HTMLDetailsElement).open || checklist.value || job.value?.status !== 'COMPLETED' || job.value?.sourceVerification === 'NOT_CHECKED') return
   const id = projectId.value, runId = job.value.id, epoch = viewEpoch, sequence = ++checklistSequence
   checklistLoading.value = true
   try {
@@ -645,7 +726,7 @@ function tagClass(group: string) {
     <p v-if="checklistDirty" class="warning-note" role="status">{{ t('vetting.checklist.dirty') }}</p>
     <p v-if="job?.sourceSetStale" class="warning-note" role="status">{{ t('vetting.sourceSetStale') }}</p>
 
-    <details v-if="job?.status === 'COMPLETED'" class="surface checklist-panel section-gap" @toggle="openChecklist">
+    <details v-if="job?.status === 'COMPLETED' && !jobDetailsPending" class="surface checklist-panel section-gap" @toggle="openChecklist">
       <summary>{{ t('vetting.checklist.title') }}</summary>
       <p class="muted small">{{ t('vetting.checklist.note') }}</p>
       <p v-if="checklistLoading">{{ t('common.loading') }}</p>
@@ -672,7 +753,7 @@ function tagClass(group: string) {
         <div class="row">
           <strong>{{ t('vetting.job.title') }}</strong>
           <span v-if="job" class="tag" :class="job.status === 'FAILED' ? 'danger' : 'info'">
-            {{ t(`vetting.job.status.${job.status}`) }}
+            {{ jobDetailsPending ? t('common.loading') : t(`vetting.job.status.${job.status}`) }}
           </span>
           <span v-if="job?.totalUnits" class="mono muted small">{{ t('vetting.job.progressLabel') }}: {{ job.completedUnits }} / {{ job.totalUnits }}</span>
           <span class="spacer" />
@@ -680,7 +761,7 @@ function tagClass(group: string) {
             <AppIcon name="refresh" :size="14" />{{ t('vetting.job.resume') }}
           </button>
         </div>
-        <p v-if="job?.status === 'COMPLETED'" class="warning-note">{{ t('vetting.job.executionCompleteNote') }}</p>
+        <p v-if="job?.status === 'COMPLETED' && !jobDetailsPending" class="warning-note">{{ t('vetting.job.executionCompleteNote') }}</p>
         <p v-if="job?.message" class="small">{{ job.message }}</p>
         <p v-if="job" class="muted small">{{ recordedJobModel ? `${t('llm.recordedModel')}: ${recordedJobModel}` : t('llm.identityUnknown') }}<template v-if="jobModelIdentity"> · {{ jobModelIdentity.profileId }} · {{ jobModelIdentity.provider }}</template></p>
         <p v-if="jobModelIdentity" class="muted small">{{ t('llm.identityNote') }}</p>
@@ -688,7 +769,7 @@ function tagClass(group: string) {
         <p v-if="job?.status === 'FAILED' && job.error" class="run-error">{{ job.error }}</p>
         <p v-if="pollingPaused" class="warning-note">{{ t('vetting.job.connectionPaused') }}</p>
         <p v-else-if="running" class="muted small">{{ t('vetting.job.background') }}</p>
-        <p v-if="job?.status === 'COMPLETED'" class="muted small">{{ t('vetting.review.retained') }}</p>
+        <p v-if="job?.status === 'COMPLETED' && !jobDetailsPending" class="muted small">{{ t('vetting.review.retained') }}</p>
       </div>
     </div>
 
@@ -824,7 +905,7 @@ function tagClass(group: string) {
           </select>
           <span class="spacer" />
           <span class="muted small">{{ findings.length }} / {{ metrics?.total ?? 0 }}</span>
-          <button class="btn" type="button" :disabled="loading" @click="reload">
+          <button class="btn" type="button" :disabled="loading" @click="reload()">
             <AppIcon name="refresh" :size="15" />{{ t('common.refresh') }}
           </button>
         </div>
@@ -1030,6 +1111,7 @@ function tagClass(group: string) {
                   <span class="tag" :class="item.located ? 'ok' : 'warn'">{{ item.located ? t('vetting.drawer.located') : t('vetting.drawer.unverified') }}</span>
                 </div>
                 <div class="quote">{{ item.quote }}</div>
+                <CanonicalEvidencePanel v-if="item.canonicalEvidence" :pointer="item.canonicalEvidence" :locale="store.locale" />
                 <div v-if="item.packetId || item.packetSourceSnapshotSha256" class="small">
                   <div class="mono" style="overflow-wrap:anywhere">{{ t('vetting.coverage.fullInputPacket') }}: {{ item.packetId ?? t('vetting.coverage.unknownCount') }}</div>
                   <div class="mono" style="overflow-wrap:anywhere">{{ t('vetting.coverage.packetSnapshot') }}: {{ item.packetSourceSnapshotSha256 ?? t('vetting.coverage.unknownCount') }}</div>
@@ -1043,6 +1125,13 @@ function tagClass(group: string) {
               <AppIcon name="alert" :size="14" />
               <span>{{ t('vetting.drawer.notLocated') }}</span>
             </div>
+            <div class="row" style="margin-top: 12px">
+              <button class="btn" type="button" :disabled="handoffDisabled" @click="consultFinding">
+                <AppIcon name="advice" :size="15" />{{ pick(reviewHandoffCopy.consult) }}
+              </button>
+            </div>
+            <p class="muted small">{{ pick(reviewHandoffCopy.entryNote) }}</p>
+            <p v-if="hasUnsavedReview || checklistDirty" class="warning-note" role="status">{{ pick(reviewHandoffCopy.saveFirst) }}</p>
           </div>
 
           <div class="detail-actions">
@@ -1115,7 +1204,7 @@ function tagClass(group: string) {
                 <strong class="mono">{{ file.key }}</strong>
                 <div class="muted small">{{ file.fileName }}</div>
               </td>
-              <td>{{ pick(file.role) }}</td>
+              <td>{{ file.sourceRole === 'unknown' ? t('vetting.uploadRole.unknown') : pick(file.role) }}</td>
               <td>
                 <span class="tag" :class="file.parsed ? 'ok' : 'warn'">{{ file.status }}</span>
               </td>
