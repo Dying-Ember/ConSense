@@ -122,6 +122,23 @@ class OfficialCaptureTests(unittest.TestCase):
         self.assertEqual("present_unvalidated", receipt["questions"][0]["graphOutputStatus"])
         self.assertEqual("not_scored", receipt["qualityAssessment"])
 
+    def test_delivered_localized_body_mermaid_is_present_without_render_or_legal_acceptance(self):
+        response = copy.deepcopy(self.response)
+        response["content"] = {"en": 'Explanation [1]\n\n```mermaid\nflowchart TD\n  a["Start"] --> b["End"]\n```'}
+        receipt, _ = self.run_with(self.args(), self.advice_responses(response))
+        row = receipt["questions"][0]
+        self.assertEqual("present_unvalidated", row["graphOutputStatus"])
+        self.assertEqual(["body_mermaid"], row["graphPresenceProtocols"])
+        self.assertEqual("not_observed", row["graphRenderStatus"])
+        self.assertEqual("not_scored", row["graphAssessment"])
+
+    def test_graph_plan_protocol_is_present_but_incomplete_mermaid_is_not(self):
+        response = copy.deepcopy(self.response)
+        response["flowchartPlan"] = {"nodes": [], "edges": []}
+        response["content"] = {"en": "```mermaid\nflowchart TD\na --> b"}
+        receipt, _ = self.run_with(self.args(), self.advice_responses(response))
+        self.assertEqual(["graph_plan"], receipt["questions"][0]["graphPresenceProtocols"])
+
     def test_single_source_freeze_rejects_before_any_transport(self):
         self.manifest["documents"] = self.manifest["documents"][:1]
         args = self.args()

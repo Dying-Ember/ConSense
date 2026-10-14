@@ -203,7 +203,7 @@ class AdviceCanonicalIntegrationTest {
         assertFalse(data(ask(p,"fullset")).path("grounded").asBoolean());
         SourceDocument library=source(p,"SL","Specification Library SL2022.txt","standard","LIBRARY TEST");
         selectedHits=Collections.singletonList(hit(library,"standard","LIBRARY TEST","complete_observed_unit",null,"ranked"));
-        assertTrue(data(ask(p,"fullset")).path("grounded").asBoolean());
+        assertFalse(data(ask(p,"fullset")).path("grounded").asBoolean(),"Model-only reference scope cannot replace the requested project scope");
     }
 
     @Test void anOversizedContextUnitIsOmittedAsAWholeAndCannotPassTheAdoptionGate() throws Exception {
@@ -272,6 +272,7 @@ class AdviceCanonicalIntegrationTest {
             assertEquals("https://api.minimax.cn/v1/responses",endpoint);
             if(afterGeneration!=null)afterGeneration.run();
             String answer=generations.isEmpty()?"{\"grounded\":true,\"answer\":\"AUTHORED supported Responses answer\",\"citations\":[\"[1]\"]}":generations.removeFirst();
+            answer=com.consense.service.advice.AdviceBudgetFixture.contract(answer);
             return new AdviceResponsesTransport.Response(200,"{\"object\":\"response\",\"model\":\"MiniMax-M3\",\"status\":\"completed\",\"truncation\":\"disabled\",\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"status\":\"completed\",\"content\":[{\"type\":\"output_text\",\"text\":"+JsonUtils.write(answer)+"}]}]}");
         }
     }
@@ -304,13 +305,13 @@ class AdviceCanonicalIntegrationTest {
         String p=project();SourceDocument d=source(p,"SCC","SCC.txt","tender","COMPLETE RESPONSE MATERIAL");selectedHits=Collections.singletonList(hit(d,"tender",d.getTextContent(),"complete_observed_unit",null,"ranked"));ResponsesHttp http=responses(262144);
         JsonNode result=data(responsesAsk(p));assertTrue(result.path("grounded").asBoolean());assertEquals("MiniMax-M3",result.path("model").asText());assertEquals(AdviceResponsesTransport.WIRE,result.path("modelIdentity").path("provider").asText());
         assertEquals(2,http.bodies.size());JsonNode counter=JsonUtils.parse(http.bodies.get(0)),generation=JsonUtils.parse(http.bodies.get(1));for(String field:Arrays.asList("model","instructions","input","reasoning"))assertEquals(counter.get(field),generation.get(field));
-        String instructions=counter.path("instructions").asText();assertTrue(instructions.contains("```mermaid")&&instructions.contains("flowchart TD or flowchart LR")&&instructions.contains("double-quoted labels for every node and decision")&&instructions.contains("#quot;")&&instructions.contains("evidence-supported steps and citations")&&instructions.contains("no HTML, links, directives or styling"),"The final counted and generated system input constrains Mermaid syntax without adding unsupported steps");
+        String instructions=counter.path("instructions").asText();assertTrue(instructions.contains("flowchartPlan")&&instructions.contains("never write raw Mermaid")&&instructions.contains("startEvent")&&instructions.contains("R1..R10"),"The counted and generated input uses the mandatory graph plan and independently checked section contract");
         assertTrue(generation.path("input").get(0).path("content").asText().contains("COMPLETE RESPONSE MATERIAL"));assertEquals(2,data(get("/api/advice/{p}/messages",p)).size());verifyNoInteractions(miniMaxChat);verify(local,never()).chat(anyList());
     }
     @Test void responsesMalformedJsonRetryRecountsCompleteMaterialsBeforeSecondGeneration() throws Exception {
         String p=project();SourceDocument d=source(p,"SCC","SCC.txt","tender","COMPLETE RETRY MATERIAL");selectedHits=Collections.singletonList(hit(d,"tender",d.getTextContent(),"complete_observed_unit",null,"ranked"));ResponsesHttp http=responses(262144);http.generations.add("not JSON");
         assertTrue(data(responsesAsk(p)).path("grounded").asBoolean());assertEquals(4,http.bodies.size());JsonNode first=JsonUtils.parse(http.bodies.get(1)),retryCounter=JsonUtils.parse(http.bodies.get(2)),retryGeneration=JsonUtils.parse(http.bodies.get(3));
-        assertEquals(first.path("input").get(0).path("content").asText()+AdviceResponsesTransport.RETRY_INSTRUCTION,retryGeneration.path("input").get(0).path("content").asText());for(String field:Arrays.asList("model","instructions","input","reasoning"))assertEquals(retryCounter.get(field),retryGeneration.get(field));assertEquals(2,data(get("/api/advice/{p}/messages",p)).size());verifyNoInteractions(miniMaxChat);verify(local,never()).chat(anyList());
+        String repair=retryGeneration.path("input").get(0).path("content").asText();assertTrue(repair.startsWith(first.path("input").get(0).path("content").asText()));assertTrue(repair.contains("one admitted repair"));assertTrue(repair.contains("No units were published"));assertTrue(repair.contains("ALL sections beginning with kind=limits"));for(String field:Arrays.asList("model","instructions","input","reasoning"))assertEquals(retryCounter.get(field),retryGeneration.get(field));assertEquals(2,data(get("/api/advice/{p}/messages",p)).size());verifyNoInteractions(miniMaxChat);verify(local,never()).chat(anyList());
     }
     private String project() throws Exception {String p="canonical-advice-"+UUID.randomUUID();mvc.perform(post("/api/projects").contentType(MediaType.APPLICATION_JSON).content("{\"id\":\""+p+"\",\"nameZhHans\":\"AUTHORED ADVICE TEST\"}")).andExpect(jsonPath("$.code").value(0));return p;}
     private SourceDocument source(String p,String key,String name,String role,String text){return source(p,key,name,role,text,"VETTING_PACKAGE");}

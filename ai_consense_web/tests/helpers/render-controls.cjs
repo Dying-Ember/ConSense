@@ -3,7 +3,11 @@ const vue = require('vue')
 globalThis.Document ??= class Document {}
 globalThis.ShadowRoot ??= class ShadowRoot {}
 
-const text = node => node.text || (node.children ?? []).map(text).join(' ')
+const htmlText = new (require('jsdom').JSDOM)('').window.document.createElement('div')
+const text = node => {
+  if (typeof node.props?.innerHTML === 'string') { htmlText.innerHTML = node.props.innerHTML; return htmlText.textContent }
+  return node.text || (node.children ?? []).map(text).join(' ')
+}
 const find = (node, predicate) => predicate(node) ? node : (node.children ?? []).map(child => find(child, predicate)).find(Boolean)
 const settle = async () => { for (let i = 0; i < 25; i++) await Promise.resolve(); await vue.nextTick() }
 const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done }); return { promise, resolve } }

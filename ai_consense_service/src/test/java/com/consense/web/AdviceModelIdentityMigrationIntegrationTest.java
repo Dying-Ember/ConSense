@@ -56,6 +56,7 @@ class AdviceModelIdentityMigrationIntegrationTest {
             migrationSql("V16__advice_sessions.sql").populate(connection);
             migrationSql("V17__vetting_recovery_and_report_snapshots.sql").populate(connection);
             migrationSql("V18__advice_full_evidence_identity.sql").populate(connection);
+            migrationSql("V19__advice_internal_checks.sql").populate(connection);
         } catch(Exception error) {throw new IllegalStateException("Cannot seed pre-identity fixture",error);}
         r.add("spring.datasource.url",()->URL);
         r.add("consense.storage-root",()->java.nio.file.Paths.get("target","advice-migration-uploads").toAbsolutePath().toString());
@@ -83,6 +84,7 @@ class AdviceModelIdentityMigrationIntegrationTest {
         JsonNode old=history();assertEquals(1,old.size());
         assertEquals("Legacy text TEST ONLY",old.get(0).path("content").path("en").asText());
         assertTrue(old.get(0).path("modelIdentity").isMissingNode());
+        assertNull(jdbc.queryForObject("SELECT advice_checks_json FROM chat_message WHERE project_id=?",String.class,PROJECT),"Legacy null means no recorded checks; it must not become pass");
         when(local.available()).thenReturn(true);when(local.embed(anyList())).thenReturn(Collections.singletonList(new float[]{1,0}));
         when(miniMax.available()).thenReturn(true);
         when(miniMax.chat(anyList())).thenReturn("{\"grounded\":true,\"answer\":\"Post-migration answer TEST ONLY\",\"citations\":[\"[1]\"]}");

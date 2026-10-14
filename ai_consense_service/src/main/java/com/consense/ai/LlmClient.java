@@ -2,6 +2,7 @@ package com.consense.ai;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import java.util.List;
+import java.util.function.Consumer;
 
 /**
  * 大模型客户端抽象：默认接本机 Ollama，也可切到任意 OpenAI 兼容端点。
@@ -14,6 +15,14 @@ public interface LlmClient {
     /** Optional structured decoding. Providers without schema support keep prompt-based decoding. */
     default String chatStructured(List<ChatTurn> turns, JsonNode schema) {
         return chat(turns);
+    }
+
+    default boolean supportsStreaming() { return false; }
+
+    /** Provider content deltas only; the caller validates complete units before publishing them. */
+    default String chatStructuredStream(List<ChatTurn> turns, JsonNode schema,
+                                        Consumer<String> onDelta, Consumer<Runnable> onCancel) {
+        throw new UnsupportedOperationException("Selected model client does not support streaming");
     }
 
     /** 文本向量化 */

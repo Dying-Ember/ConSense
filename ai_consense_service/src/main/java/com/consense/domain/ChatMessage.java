@@ -80,6 +80,10 @@ public class ChatMessage {
     @Lob @Column(name = "user_background_json", columnDefinition = "LONGTEXT")
     private String userBackgroundJson;
 
+    /** Model checks and application publication results; null means not recorded on legacy messages. */
+    @Lob @Column(name = "advice_checks_json", columnDefinition = "LONGTEXT")
+    private String adviceChecksJson;
+
     @Column(name = "created_at", nullable = false)
     private Instant createdAt = Instant.now();
 }

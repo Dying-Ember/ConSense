@@ -37,6 +37,28 @@ def digest(data):
     return hashlib.sha256(data).hexdigest()
 
 
+def graph_presence(response):
+    """Presence only; a captured graph has not been rendered or legally assessed."""
+    protocols = []
+    if isinstance(response.get("flowchart"), dict):
+        protocols.append("flowchart_object")
+    plans = [response.get("flowchartPlan")]
+    sections = response.get("sections")
+    plans.extend(section.get("flowchartPlan") for section in (sections if isinstance(sections, list) else [])
+                 if isinstance(section, dict))
+    if any(isinstance(plan, dict) and isinstance(plan.get("nodes"), list)
+           and isinstance(plan.get("edges"), list) for plan in plans):
+        protocols.append("graph_plan")
+    content = response.get("content", "")
+    texts = list(content.values()) if isinstance(content, dict) else [content]
+    if any(isinstance(text, str) and any(block.strip() for block in re.findall(r"```mermaid[ \t]*\r?\n([\s\S]*?)\r?\n```", text))
+           for text in texts):
+        protocols.append("body_mermaid")
+    return {"graphOutputStatus": "present_unvalidated" if protocols else "unsupported",
+            "graphPresenceProtocols": protocols, "graphRenderStatus": "not_observed",
+            "graphAssessment": "not_scored"}
+
+
 def utc():
     return datetime.now(timezone.utc).isoformat()
 
@@ -263,9 +285,7 @@ class Capture:
                    "modelIdentity": identity, "grounded": response.get("grounded"),
                    "messageId": response.get("messageId"), "textAssessment": "not_scored"}
             if question.get("expectedOutputKind") == "flowchart":
-                row["graphOutputStatus"] = ("present_unvalidated" if isinstance(response.get("flowchart"), dict)
-                                            else "unsupported")
-                row["graphAssessment"] = "not_scored"
+                row.update(graph_presence(response))
             self.receipt["questions"].append(row)
             self.save()
             self.sources("sources-after-" + qid)

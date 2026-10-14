@@ -3,13 +3,15 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import { adviceApi } from '@/api'
-import type { ChatMessage, Citation, IndexStatus, QuickQuestion, AdviceSourceDocument, AdviceSession, AdviceBasisScope } from '@/api/types'
+import type { ChatMessage, Citation, IndexStatus, QuickQuestion, AdviceSourceDocument, AdviceSession, AdviceBasisScope, LlmSelection } from '@/api/types'
 import { useAppStore } from '@/stores/app'
 import { useLocalized } from '@/composables/useLocalized'
 import AppIcon from '@/components/AppIcon.vue'
 import CanonicalEvidencePanel from '@/components/CanonicalEvidencePanel.vue'
 import FixedBaselineEvidencePanel from '@/components/FixedBaselineEvidencePanel.vue'
 import AdviceAnswer from '@/components/AdviceAnswer.vue'
+import AdviceSourceReader from '@/components/AdviceSourceReader.vue'
+import { streamAdvice, stopAdvice } from '@/advice/adviceStream'
 import { claimReviewHandoff, handoffSourceWarnings, reviewHandoffCopy, reviewQuestion, type ReviewHandoff } from '@/advice/reviewHandoff'
 
 const { t } = useI18n()
@@ -33,7 +35,14 @@ const asking = ref(false)
 const indexing = ref(false)
 const activeCitation = ref<Citation | null>(null)
 const activeSources = ref<Citation[]>([])
+const activeSourceScope = ref('fullset')
 const historyEl = ref<HTMLElement | null>(null)
+const followLatest = ref(true)
+const streamPhase = ref('')
+const elapsedSeconds = ref(0)
+const sourceDetails = ref(false)
+let elapsedTimer: number | undefined
+let activeRequest: { projectId: string; sessionId: string; requestId: string; selection: LlmSelection; controller: AbortController; message: ChatMessage } | null = null
 const scopeDocuments = ref<AdviceSourceDocument[]>([])
 const clarificationReply = ref<ChatMessage | null>(null)
 const handoff = ref<ReviewHandoff | null>(null)
@@ -129,6 +138,7 @@ function clearRebuildBusy(sequence?: number) {
 }
 
 function resetScopedState() {
+  void stopCurrentRequest()
   ++scopeEpoch; ++indexSequence; ++rebuildSequence; ++askSequence; ++reloadSequence
   indexStatus.value = null; indexError.value = ''
   sessionError.value = ''
@@ -225,14 +235,45 @@ watch(sessionId, () => {
   if (selected) { scope.value = selected.scope; basisScope.value = selected.basisScope }
   void reload(); void reloadScope(); void reloadIndexStatus()
 })
-watch(() => messages.value.length, scrollToBottom)
+watch(() => messages.value.length, () => void scrollToBottom())
 onBeforeUnmount(() => { ++viewEpoch; ++scopeSequence; resetScopedState() })
 
-async function scrollToBottom() {
+async function scrollToBottom(force = false) {
+  if (force) followLatest.value = true
+  if (!followLatest.value) return
   await nextTick()
   if (historyEl.value) {
     historyEl.value.scrollTop = historyEl.value.scrollHeight
   }
+}
+
+function onHistoryScroll() {
+  const element = historyEl.value
+  if (element) followLatest.value = element.scrollHeight - element.scrollTop - element.clientHeight < 96
+}
+
+function streamCopy(en: string, zhHans: string, zhHant = zhHans) { return pick({ en, zhHans, zhHant }) }
+function phaseLabel(phase: string) {
+  const labels: Record<string, [string, string, string?]> = {
+    received: ['Question received', '已收到问题', '已收到問題'], queued: ['Waiting to process', '等待处理', '等待處理'],
+    sources: ['Confirming source scope', '正在确认来源范围', '正在確認來源範圍'], retrieving: ['Retrieving contract evidence', '正在检索合同依据', '正在檢索合約依據'],
+    context: ['Organizing evidence and context', '正在组织依据和上下文', '正在組織依據和上下文'], budget: ['Checking model input budget', '正在核对模型输入预算', '正在核對模型輸入預算'],
+    generating: ['Generating the answer', '正在生成回答', '正在生成回答'], validating: ['Checking references and answer conditions', '正在核对引用和答复条件', '正在核對引用和答覆條件'],
+    saving: ['Saving the answer', '正在保存答复', '正在儲存答覆'], stream_unavailable: ['This model provides status events and a final answer; early answer streaming is unavailable.', '此模型提供实时状态与最终答复，暂不支持提前分段输出正文。', '此模型提供即時狀態與最終答覆，暫不支援提前分段輸出正文。']
+  }
+  const label = labels[phase] ?? ['Processing', '正在处理', '正在處理']
+  return streamCopy(label[0], label[1], label[2])
+}
+
+async function stopCurrentRequest() {
+  const pending = activeRequest
+  if (!pending) return
+  activeRequest = null
+  pending.message.deliveryState = 'stopped'
+  pending.controller.abort()
+  if (elapsedTimer !== undefined) window.clearTimeout(elapsedTimer)
+  try { await stopAdvice(pending.projectId, pending.requestId, pending.sessionId, pending.selection) }
+  catch { if (pending.projectId === projectId.value && pending.sessionId === sessionId.value) sessionError.value = streamCopy('The display stopped; remote cancellation could not be confirmed.', '已停止显示，尚未确认远端取消成功。', '已停止顯示，尚未確認遠端取消成功。') }
 }
 
 async function ask(text?: string) {
@@ -258,13 +299,36 @@ async function ask(text?: string) {
     evidenceId: null,
     sources: []
   })
-  await scrollToBottom()
+  const pendingMessage: ChatMessage = { sessionId: selectedSession, id: null, role: 'assistant', title: null, content: null,
+    unknownScope: null, citations: [], evidenceId: null, sources: [], sourceScope: selectedScope, deliveryState: 'processing' }
+  messages.value.push(pendingMessage)
+  const message = messages.value[messages.value.length - 1]
+  const controller = new AbortController()
+  const requestId = Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, '0')).join('')
+  activeRequest = { projectId: id, sessionId: selectedSession, requestId, selection: llmSelection, controller, message }
+  const current = () => epoch === viewEpoch && id === projectId.value && selectedScopeEpoch === scopeEpoch && sequence === askSequence && selectedSession === sessionId.value
+  const started = Date.now()
+  streamPhase.value = 'received'; elapsedSeconds.value = 0
+  const tick = () => { if (current() && asking.value) { elapsedSeconds.value = Math.floor((Date.now() - started) / 1000); elapsedTimer = window.setTimeout(tick, 1000) } }
+  tick()
+  await scrollToBottom(true)
 
   try {
-    const response = await adviceApi.ask(id, content, selectedScope, llmSelection, replyToMessageId, selectedSession, selectedBasis)
-    if (epoch !== viewEpoch || id !== projectId.value || selectedScopeEpoch !== scopeEpoch || sequence !== askSequence || selectedSession !== sessionId.value) return
+    const response = await streamAdvice(id, { question: content, scope: selectedScope, sessionId: selectedSession, basisScope: selectedBasis, replyToMessageId }, {
+      requestId, signal: controller.signal, llmSelection,
+      phase(phase) { if (current()) streamPhase.value = phase },
+      section(part) {
+        if (!current() || controller.signal.aborted) return
+        const text = [message.content?.en, part.content].filter(Boolean).join('\n\n')
+        message.content = { en: text, zhHans: text, zhHant: text }
+        message.citations = [...new Set([...message.citations, ...part.citations])]
+        for (const source of part.sources) if (!message.sources.some(existing => existing.evidenceId === source.evidenceId)) message.sources.push(source)
+        void scrollToBottom()
+      }
+    })
+    if (!current() || controller.signal.aborted) return
     if (response.sessionId !== selectedSession) throw new Error('ADVICE_SESSION_RESPONSE_MISMATCH')
-    messages.value.push({
+    Object.assign(message, {
       sessionId: response.sessionId,
       id: response.messageId ?? null,
       role: 'assistant',
@@ -274,26 +338,27 @@ async function ask(text?: string) {
       basisScope: response.basisScope,
       clarifications: response.clarifications,
       title: response.title,
-      content: response.grounded ? response.content : null,
+      content: response.content,
       unknownScope: response.unknownScope,
       citations: response.citations,
       evidenceId: response.evidenceId,
-      sources: response.sources
+      sources: response.sources,
+      deliveryState: 'complete'
     })
-    activeSources.value = response.sources ?? []
+    if (!activeCitation.value) { activeSources.value = response.sources ?? []; activeSourceScope.value = response.sourceScope ?? selectedScope; activeCitation.value = response.sources?.[0] ?? null }
     clarificationReply.value = null
-    activeCitation.value = response.sources?.[0] ?? null
     if (!response.grounded) {
       store.notify(t('advice.unknown.title'))
     }
     await scrollToBottom()
   } catch (caught) {
-    if (epoch === viewEpoch && selectedScopeEpoch === scopeEpoch && sequence === askSequence && selectedSession === sessionId.value) {
+    if (current()) {
+      message.deliveryState = controller.signal.aborted ? 'stopped' : 'failed'
       if (!question.value) question.value = content
-      sessionError.value = caught instanceof Error ? caught.message : String(caught)
+      if (!controller.signal.aborted) sessionError.value = caught instanceof Error ? caught.message : String(caught)
     }
   } finally {
-    if (epoch === viewEpoch && sequence === askSequence) asking.value = false
+    if (current()) { asking.value = false; if (elapsedTimer !== undefined) window.clearTimeout(elapsedTimer); if (activeRequest?.requestId === requestId) activeRequest = null }
   }
 }
 
@@ -323,7 +388,10 @@ async function refreshIndex() {
 
 async function clearChat() {
   const id = projectId.value, epoch = viewEpoch, selectedSession = sessionId.value, selectedScopeEpoch = scopeEpoch
-  ++askSequence; ++reloadSequence; asking.value = false
+  const stopped = stopCurrentRequest()
+  ++askSequence; ++reloadSequence; asking.value = true
+  await stopped
+  if (epoch !== viewEpoch || id !== projectId.value || selectedSession !== sessionId.value || selectedScopeEpoch !== scopeEpoch) return
   try {
     await adviceApi.clearMessages(id, selectedSession || undefined)
     if (epoch !== viewEpoch || id !== projectId.value || selectedSession !== sessionId.value || selectedScopeEpoch !== scopeEpoch) return
@@ -335,6 +403,8 @@ async function clearChat() {
     // 全局 reporter 已经 toast 出 message；这里把堆栈打 console 方便排查
     console.error('[clearChat] failed', error)
     throw error
+  } finally {
+    if (epoch === viewEpoch && id === projectId.value && selectedSession === sessionId.value && selectedScopeEpoch === scopeEpoch) asking.value = false
   }
 }
 
@@ -352,10 +422,11 @@ function openMessageSources(message: ChatMessage, citationText?: string) {
   activeSources.value = message.sources
   // 若点的是具体引用按钮（citationText 非空），按 fileLabel 找到对应的 source 并联动到它；
   // 否则默认联动到第一个 source（向后兼容）。
-  const matched = citationText
-    ? message.sources.find((source) => source.fileLabel === citationText || source.evidenceId === citationText)
-    : undefined
-  activeCitation.value = matched ?? message.sources[0]
+  const matches = citationText ? message.sources.filter(source => source.fileLabel === citationText || source.evidenceId === citationText) : []
+  if (citationText && matches.length !== 1) return
+  activeSourceScope.value = message.sourceScope ?? scope.value
+  activeCitation.value = matches[0] ?? message.sources[0]
+  sourceDetails.value = false
 }
 
 function unknownText(scopeKey: string | null) {
@@ -495,7 +566,7 @@ async function askPrecedence() {
             <p v-if="basisScope === 'reference_only'" class="warning-note">{{ t('advice.referenceOnly') }}</p>
           </div>
 
-          <div ref="historyEl" class="chat-history">
+          <div ref="historyEl" class="chat-history" @scroll="onHistoryScroll">
             <div v-if="!messages.length" class="empty-state">{{ t('advice.citation.empty') }}</div>
 
             <div
@@ -513,12 +584,18 @@ async function askPrecedence() {
               </template>
 
               <template v-else>
-                <p class="muted small">{{ message.modelIdentity?.model || message.model ? `${t('llm.recordedModel')}: ${message.modelIdentity?.model || message.model}` : t('llm.identityUnknown') }}<template v-if="message.modelIdentity"> · {{ message.modelIdentity.profileId }} · {{ message.modelIdentity.provider }}</template></p>
-                <p v-if="message.modelIdentity" class="muted small">{{ t('llm.identityNote') }}</p>
-                <strong>{{ message.content ? pick(message.title) : t('advice.unknown.title') }}</strong>
+                <div v-if="message.deliveryState === 'processing'" class="advice-progress" role="status" aria-live="polite">
+                  <span class="progress-dot" aria-hidden="true" /> {{ phaseLabel(streamPhase) }} · {{ elapsedSeconds }}s
+                  <p v-if="message.content" class="muted small">{{ streamCopy('The answer is continuing; the complete result has not been saved yet.', '答复正在继续，完整结果尚未保存。', '答覆正在繼續，完整結果尚未儲存。') }}</p>
+                </div>
+                <p v-if="message.deliveryState === 'failed' || message.deliveryState === 'stopped'" class="warning-note" role="alert">{{ message.deliveryState === 'stopped' ? streamCopy('Stopped. Any displayed portions are not a completed answer.', '已停止，已显示的部分不构成完整答复。', '已停止，已顯示的部分不構成完整答覆。') : streamCopy('This request failed before completion. Any displayed portions are not a completed answer.', '本次请求未完成，已显示的部分不构成完整答复。', '本次請求未完成，已顯示的部分不構成完整答覆。') }}</p>
+                <p v-if="!message.deliveryState || message.deliveryState === 'complete'" class="muted small">{{ message.modelIdentity?.model || message.model ? `${t('llm.recordedModel')}: ${message.modelIdentity?.model || message.model}` : t('llm.identityUnknown') }}<template v-if="message.modelIdentity"> · {{ message.modelIdentity.profileId }} · {{ message.modelIdentity.provider }}</template></p>
+                <p v-if="message.modelIdentity && (!message.deliveryState || message.deliveryState === 'complete')" class="muted small">{{ t('llm.identityNote') }}</p>
+                <strong v-if="!message.deliveryState || message.deliveryState === 'complete'">{{ message.content ? pick(message.title) : t('advice.unknown.title') }}</strong>
                 <p v-if="message.basisScope === 'reference_only'" class="warning-note">{{ t('advice.referenceOnly') }}</p>
-                <AdviceAnswer v-if="message.content" :content="pick(message.content)" />
-                <p v-else>{{ unknownText(message.unknownScope) }}</p>
+                <p v-if="message.basisScope === 'insufficient'" class="warning-note">{{ streamCopy('Evidence is insufficient for the complete requested conclusion. The following analysis is limited.', '现有依据不足以支持所请求的完整结论，以下为有限分析。', '現有依據不足以支持所請求的完整結論，以下為有限分析。') }}</p>
+                <AdviceAnswer v-if="message.content" :content="pick(message.content)" :citation-ids="message.citations" @citation="id => openMessageSources(message, id)" />
+                <p v-else-if="!message.deliveryState || message.deliveryState === 'complete'">{{ unknownText(message.unknownScope) }}</p>
                 <div v-if="message.clarifications?.length" class="clarifications">
                   <strong>{{ t('advice.clarifications') }}</strong>
                   <ul><li v-for="item in message.clarifications" :key="item">{{ item }}</li></ul>
@@ -539,6 +616,8 @@ async function askPrecedence() {
               </template>
             </div>
           </div>
+
+          <button v-if="!followLatest" type="button" class="btn latest-message" @click="scrollToBottom(true)">{{ streamCopy('Return to latest', '回到最新内容', '回到最新內容') }}</button>
 
           <div v-if="clarificationReply" class="clarifications" role="status">
             <strong>{{ t('advice.replyMode') }}</strong>
@@ -573,6 +652,7 @@ async function askPrecedence() {
               <AppIcon name="advice" :size="15" />
               {{ asking ? t('common.loading') : t('advice.actions.ask') }}
             </button>
+            <button v-if="asking" class="btn" type="button" @click="stopCurrentRequest">{{ streamCopy('Stop', '停止', '停止') }}</button>
           </div>
         </div>
 
@@ -617,7 +697,12 @@ async function askPrecedence() {
 
             <div v-if="activeCitation" class="source-view">
               <div class="sv-file">{{ activeCitation.fileLabel }} · {{ activeCitation.pageNo }}</div>
+              <p v-if="activeCitation.fixedBaselineEvidence" class="warning-note">{{ streamCopy('This is a fixed standard original. Its source identity does not establish project adoption.', '这是固定标准原件，其来源身份本身不证明本项目采用。', '這是固定標準原件，其來源身份本身不證明本項目採用。') }}</p>
+              <AdviceSourceReader :project-id="projectId" :citation="activeCitation" :scope="activeSourceScope" />
+              <details class="source-context"><summary>{{ streamCopy('Quoted excerpt and related original images', '引用摘录及关联原图', '引用摘錄及關聯原圖') }}</summary>
               <div class="sv-para" v-html="highlightHtml(activeCitation.content)" />
+              <button class="btn" type="button" @click="sourceDetails = !sourceDetails">{{ streamCopy('Show related original images / tables', '查看关联原图／整表', '查看關聯原圖／整表') }}</button>
+              <template v-if="sourceDetails">
               <CanonicalEvidencePanel
                 v-for="(address, index) in activeCitation.fixedBaselineEvidence ? [] : activeCitation.canonicalEvidence ?? []"
                 :key="`${address.projectionSha256}:${address.canonicalChunkId}:${index}`"
@@ -625,6 +710,8 @@ async function askPrecedence() {
                 :locale="store.locale"
               />
               <FixedBaselineEvidencePanel v-if="activeCitation.fixedBaselineEvidence" :pointer="activeCitation.fixedBaselineEvidence" :locale="store.locale" />
+              </template>
+              </details>
               <div class="sv-meta">
                 {{ t('advice.citation.footer') }}
                 <span v-if="activeCitation.scoreMeaning === 'unranked_context'"> · {{ pick(evidenceCopy.context) }}</span>
@@ -657,4 +744,12 @@ async function askPrecedence() {
 .review-handoff p { margin: 8px 0; }
 .source-unit { margin-top: 12px; }
 .source-unit pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 24rem; overflow: auto; }
+.advice-progress { color: var(--muted); padding: 4px 0 10px; }
+.progress-dot { display: inline-block; width: 7px; height: 7px; margin-right: 6px; border-radius: 50%; background: currentColor; animation: advice-pulse 1.4s ease-in-out infinite; }
+.latest-message { margin: 6px 18px; }
+.source-view { max-height: none; }
+.source-context { margin-top: 12px; }
+.source-context summary { cursor: pointer; }
+@keyframes advice-pulse { 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { .progress-dot { animation: none; } }
 </style>

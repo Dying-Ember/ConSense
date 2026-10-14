@@ -63,6 +63,8 @@ public final class AdviceDtos {
         private String scoreMeaning;
         @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
         private com.fasterxml.jackson.databind.JsonNode fixedBaselineEvidence;
+        @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+        private String originalSourceSha256;
         public CitationVO(String fileLabel,String pageNo,String anchor,String content,double score,String evidenceId,String documentId,String sourceHash,String sourceRole,Boolean applicabilityContextComplete,List<CanonicalEvidenceDtos.EvidencePointer> canonicalEvidence,com.fasterxml.jackson.databind.JsonNode canonicalSourceUnit,String scoreMeaning) {
             this(fileLabel,pageNo,anchor,content,score,evidenceId,documentId,sourceHash,sourceRole,applicabilityContextComplete);
             this.canonicalEvidence=canonicalEvidence;this.canonicalSourceUnit=canonicalSourceUnit;this.scoreMeaning=scoreMeaning;

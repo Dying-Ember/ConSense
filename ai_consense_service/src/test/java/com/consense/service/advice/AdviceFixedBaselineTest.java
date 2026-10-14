@@ -76,7 +76,7 @@ class AdviceFixedBaselineTest {
         when(fixed.evidence(any())).thenReturn(evidence);when(fixed.toModelMaterial(anyList(),eq(200000))).thenReturn("{\"role\":\"standard\",\"reference_only\":true,\"id\":\"fixed:authored\",\"content\":\"AUTHORED complete standard text including the exception.\"}");
         when(llm.chat(anyList())).thenReturn(JsonUtils.write(answer("reference_only")));
     }
-    private AdviceService.AnswerRecord answer(String basis){return new AdviceService.AnswerRecord(true,"AUTHORED explanation",Collections.singletonList("[1]"),null,Collections.emptyList(),basis);}
+    private AdviceService.AnswerRecord answer(String basis){return JsonUtils.read(AdviceBudgetFixture.contract("{\"grounded\":true,\"answer\":\"AUTHORED explanation\",\"citations\":[\"[1]\"],\"basisScope\":"+JsonUtils.write(basis)+"}"),AdviceService.AnswerRecord.class);}
     private AskRequest reference(){AskRequest request=new AskRequest("Explain the authored standard.","fullset");request.setBasisScope("reference_only");return request;}
 
     @Test void explicitReferenceOnlyUsesFixedStandardsWithoutInventingAProjectCanonicalSession() {
@@ -100,6 +100,20 @@ class AdviceFixedBaselineTest {
         AskResponseVO response=advice.ask("authored-project",reference());
         assertFalse(response.isGrounded());assertEquals("insufficient",response.getBasisScope());assertFalse(response.getClarifications().isEmpty());
         verifyNoInteractions(canonical,documents,legacy,vectors);
+    }
+    @Test void referenceOnlySpuriousProjectAdoptionRecordsAreRejectedAndPreserved() {
+        for(String field:Arrays.asList("sections","missingReason","clarifications")) {
+            com.fasterxml.jackson.databind.node.ObjectNode envelope=(com.fasterxml.jackson.databind.node.ObjectNode)JsonUtils.mapper().valueToTree(answer("reference_only"));
+            if("sections".equals(field))((com.fasterxml.jackson.databind.node.ObjectNode)envelope.path("sections").get(0)).withArray("gaps").add("adoption");
+            else if("missingReason".equals(field))envelope.put(field,"adoption");else envelope.withArray(field).add("adoption");
+            doReturn(JsonUtils.write(envelope)).when(llm).chatStructured(anyList(),any());
+            AskResponseVO result=advice.ask("authored-project",reference());assertFalse(result.isGrounded());assertEquals("insufficient",result.getBasisScope());
+            JsonNode checks=JsonUtils.parse(saved.get(saved.size()-1).getAdviceChecksJson());assertEquals(2,checks.path("attempts").size());
+            assertTrue(checks.path("applicationRejections").toString().contains("project adoption"));
+            if("sections".equals(field))assertEquals("adoption",checks.path("sections").get(0).path("gaps").get(0).asText());
+            else {assertTrue(result.getContent().getEn().contains("AUTHORED explanation"));assertEquals(envelope.path(field),checks.path("missingReason".equals(field)?field:"clarificationGaps"));}
+        }
+        verify(llm,times(6)).chatStructured(anyList(),any());
     }
     @Test void fixedOnlyCannotPretendThatTheProjectAdoptedTheStandard() throws Exception {
         AskResponseVO reference=advice.ask("authored-project",reference());

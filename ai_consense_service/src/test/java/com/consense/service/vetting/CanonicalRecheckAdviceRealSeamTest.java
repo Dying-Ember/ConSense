@@ -139,7 +139,7 @@ class CanonicalRecheckAdviceRealSeamTest {
         org.mockito.stubbing.Answer<?> repositoryDelegate=mockingDetails(history).getMockCreationSettings().getDefaultAnswer();
         doAnswer(call->{ChatMessage message=call.getArgument(0);String event="persist-"+message.getRole();events.add(event+":start");Object result=repositoryDelegate.answer(call);events.add(event+":end");return result;}).when(history).save(any(ChatMessage.class));
         when(llm.chat(anyList())).thenAnswer(call->{assertFalse(TransactionSynchronizationManager.isActualTransactionActive());chatCalls.incrementAndGet();events.add("llm:start");runOnce(chatMutation);events.add("llm:end");return "{\"grounded\":true,\"answer\":\"AUTHORED supported literal\",\"citations\":[\"[1]\"]}";});
-        when(llm.chatStructured(anyList(),any())).thenAnswer(call->llm.chat(call.getArgument(0)));
+        when(llm.chatStructured(anyList(),any())).thenAnswer(call->com.consense.service.advice.AdviceBudgetFixture.contract(llm.chat(call.getArgument(0))));
         resetCounters();
     }
     @AfterEach void stop(){if(server!=null)server.stop(0);if(httpWorkers!=null)httpWorkers.shutdownNow();}

@@ -235,6 +235,12 @@ public class AdviceService {
     // ------------------------------------------------------------ 问答
 
     public AskResponseVO ask(String projectId, AskRequest request) {
+        return ask(projectId, request, AdviceProgress.NONE);
+    }
+
+    public AskResponseVO ask(String projectId, AskRequest request, AdviceProgress progress) {
+        Objects.requireNonNull(progress, "Advice progress is required");
+        progress.checkCancelled();progress.phase("sources");
         Project project = projectService.require(projectId);
         String question = request == null ? "" : nvl(request.getQuestion()).trim();
         if (question.isEmpty()) {
@@ -261,6 +267,7 @@ public class AdviceService {
 
         String retrievalQuestion=questionContext.originalQuestion+(questionContext.background.isEmpty()?"":"\nUser supplied clarification: "+String.join("\n",questionContext.background));
         OerBusinessEvidence.Session session=!fixedReferenceOnly&&canonical.enabled()?canonicalSession(projectId,scope):null;
+        progress.checkCancelled();progress.phase("retrieving");
         final String sourceSnapshot=conversationSourceIdentity(projectId,scope,fixedReferenceOnly,session);
         List<VectorStore.SearchHit> hits;
         if(fixedReferenceOnly) {
@@ -278,11 +285,13 @@ public class AdviceService {
         final String fixedSourceIdentity=selectedFixedHits.isEmpty()?null:fixedSourceIdentity(selectedFixedHits);
         final ModelIdentity capturedIdentity=responsesOperation!=null?responsesOperation.getIdentity():selectedOperation==null?null:selectedOperation.getIdentity();
         final Runnable currentGuard=()->{
+            progress.checkCancelled();
             if(session!=null)assertCurrentSelection(session,scope);
             assertFixedReferencesCurrent(selectedFixedHits,fixedSourceIdentity);
             if(sourceSnapshot!=null)assertConversationSources(projectId,scope,fixedReferenceOnly,session,sourceSnapshot);
             if(conversation!=null)assertConversationCurrent(conversation);
             if(responsesOperation==null)assertCapturedChatIdentity(capturedIdentity);
+            else responsesOperation.assertCurrent();
         };
         currentGuard.run();
         if(conversation!=null&&request.getReplyToMessageId()!=null&&!chatMessageRepository.findById(request.getReplyToMessageId())
@@ -294,7 +303,8 @@ public class AdviceService {
 
         if (hits.isEmpty()) {
             AskResponseVO response = unknown(projectId, scope, sources, Collections.<String>emptyList(), false);
-            persistExchange(projectId,scope,question,request,questionContext,response,session,selectedFixedHits,fixedSourceIdentity,conversation,sourceSnapshot);
+            currentGuard.run();progress.phase("saving");
+            persistExchange(projectId,scope,question,request,questionContext,response,session,selectedFixedHits,fixedSourceIdentity,conversation,sourceSnapshot,null,progress::checkCancelled);
             return response;
         }
 
@@ -302,29 +312,32 @@ public class AdviceService {
             ai.requireAvailable();
         }
 
+        progress.phase("context");
         String excerpts = renderExcerpts(hits);
         String userPrompt = PromptService.format(promptService.userTemplate(PromptCatalog.KEY_ADVICE),
                 fixedReferenceOnly?"Fixed standard reference only / 固定标准参考解释":scopeLabel(scope), excerpts, questionContext.originalQuestion);
-        if(fixedReferenceOnly)userPrompt+="\n\nExplicit answer scope: reference_only. Explain only the cited standard text in this frozen development baseline. Do not assert that this standard, edition or requirement is adopted by the project, and do not return project_contract. Parsing, legal ownership and completeness limitations remain unverified.";
+        if(fixedReferenceOnly)userPrompt+="\n\nExplicit answer scope: reference_only. Explain only the cited standard text in this frozen development baseline. Do not assert that this standard, edition or requirement is adopted by the project, and do not return project_contract. Parsing, legal ownership and completeness limitations remain unverified. Lack of project incorporation alone is a disclosed scope limit, not a necessary clarification for this standard-reference explanation. Request only missing facts or source provisions that prevent the requested standard interpretation.";
         if(!questionContext.background.isEmpty())userPrompt+="\n\nuser-supplied-background (clarification replies, not contractual evidence):\n"+String.join("\n",questionContext.background)
                 +"\nAnswer the original question in light of these user-stated assumptions. Do not cite this background as a contract document or established contractual fact.";
-        String systemPrompt=promptService.system(PromptCatalog.KEY_ADVICE)+"\n\nOnly when a flowchart is requested, use a fenced ```mermaid block with flowchart TD or flowchart LR, simple alphanumeric node IDs, and short double-quoted labels for every node and decision; encode internal quotes as #quot;. Preserve only evidence-supported steps and citations; no HTML, links, directives or styling.";
+        if(AdvisoryHarness.flowchartRequested(questionContext.originalQuestion))userPrompt+="\n\nApplication task selection: T6. The user requested a flowchart. Supply the evidence-backed graph plan under the mandatory application contract; detailed instructions need not come from the user.";
+        if(selectedOperation!=null)userPrompt+="\n\nApplication output reserve: "+selectedOperation.getStructuredMaxTokens()+" tokens. Return compact complete JSON: few independent sections, brief check reasons and concise graph labels. Avoid duplicating the same narrative in both the diagram and prose. Keep necessary branches, qualifiers, competing deadlines, start events and citations; if a complete validated graph cannot be supplied, report the affected gap and retain supported text. Do not truncate JSON or output an unfinished graph.";
+        String systemPrompt=AdvisoryHarness.system(promptService.system(PromptCatalog.KEY_ADVICE),sources,questionContext.originalQuestion);
         if(responsesOperation!=null&&responsesOperation.getConfiguredContextTokens()<262144)
             throw new BizException(4205,"Advice budget_unknown: generation requires at least 256K configured tokens.");
-        if(conversation!=null)userPrompt+=boundedHistory(conversation,sourceSnapshot,capturedIdentity,selectedOperation,responsesOperation,currentGuard);
+        if(conversation!=null)userPrompt+=boundedHistory(conversation,sourceSnapshot,capturedIdentity,selectedOperation,responsesOperation,currentGuard,progress);
 
+        Publication publication=new Publication(sources,fixedReferenceOnly,progress,currentGuard,questionContext);
         AnswerRecord answer;
         try {
-            if(responsesOperation!=null){
-                if(session==null&&fixedSourceIdentity==null)throw new AdviceResponsesTransport.RequestFailure("budget_unknown","current_source_identity_required",null);
-                String requestSourceIdentity=fixedSourceIdentity==null?session.identitySha256():VettingCorpus.hash((session==null?"explicit-reference-only":session.identitySha256())+"|fixed-baseline|"+fixedSourceIdentity);
-                answer=responsesOperation.completeJson(systemPrompt,userPrompt,requestSourceIdentity,AnswerRecord.class,currentGuard).value;
-            }else answer=completeSessionChat(systemPrompt,userPrompt,selectedOperation,sourceSnapshot,currentGuard);
+            if(responsesOperation!=null&&session==null&&fixedSourceIdentity==null)throw new AdviceResponsesTransport.RequestFailure("budget_unknown","current_source_identity_required",null);
+            String requestSourceIdentity=responsesOperation==null?sourceSnapshot:fixedSourceIdentity==null?session.identitySha256():VettingCorpus.hash((session==null?"explicit-reference-only":session.identitySha256())+"|fixed-baseline|"+fixedSourceIdentity);
+            answer=completeAdvice(systemPrompt,userPrompt,selectedOperation,responsesOperation,requestSourceIdentity,currentGuard,publication,questionContext.originalQuestion);
         } catch (AdviceResponsesTransport.RequestFailure bounded) {
             throw bounded;
         } catch (IncompleteModelResponseException incomplete) {
             throw new BizException(4205,"Advice output_incomplete: "+incomplete.getFailureKind().name().toLowerCase(java.util.Locale.ROOT)+". No answer was published; retry the question.");
         } catch (Exception e) {
+            if(e instanceof java.util.concurrent.CancellationException)throw (java.util.concurrent.CancellationException)e;
             // Responses checks current sources around counting and generation inside this call.
             // Preserve that safe source failure; it is not a provider/model failure.
             if(e instanceof BizException&&Arrays.asList(4202,4204,4205).contains(((BizException)e).getCode()))throw (BizException)e;
@@ -338,36 +351,35 @@ public class AdviceService {
         if(session!=null)assertCurrentSelection(session,scope);
         assertFixedReferencesCurrent(selectedFixedHits,fixedSourceIdentity);
 
-        List<String> clarifications=answer==null?Collections.emptyList():cleanClarifications(answer.getClarifications());
-        List<String> citations=validatedCitations(answer==null?null:answer.getCitations(),sources);
-        String basisScope=fixedReferenceOnly?"reference_only":answer!=null&&"reference_only".equals(nvl(answer.getBasisScope()).trim().toLowerCase(java.util.Locale.ROOT))?"reference_only":"project_contract";
-        if(fixedReferenceOnly&&answer!=null&&!nvl(answer.getBasisScope()).trim().isEmpty()&&!"reference_only".equals(nvl(answer.getBasisScope()).trim().toLowerCase(java.util.Locale.ROOT))){clarifications=new ArrayList<>(clarifications);clarifications.add("The requested standard explanation does not establish project adoption, applicable edition or project amendments.");}
-        boolean basisSupported=incorporationSupported(basisScope,citations,sources);
-        if(!basisSupported){clarifications=new ArrayList<>(clarifications);clarifications.add("Please provide or identify the adopted contractual provisions, including standard incorporation, applicable editions and any project amendments where relevant. Project correspondence and a document list alone do not establish a contractual requirement.");}
-        if (answer == null || !answer.isGrounded() || !clarifications.isEmpty() || JsonUtils.isBlankText(answer.getAnswer())||citations.isEmpty()||!basisSupported) {
-            List<String> extra = answer != null && answer.getMissingReason() != null
-                    ? Arrays.asList(answer.getMissingReason())
-                    : Collections.<String>emptyList();
-            AskResponseVO response = unknown(projectId, scope, sources, extra, true);
-            response.setClarifications(clarifications);
-            response.setBasisScope("insufficient");
-            if(capturedIdentity!=null){response.setModel(capturedIdentity.getModel());response.setModelIdentity(capturedIdentity);}
-            persistExchange(projectId,scope,question,request,questionContext,response,session,selectedFixedHits,fixedSourceIdentity,conversation,sourceSnapshot);
-            return response;
-        }
-
-        AskResponseVO response = new AskResponseVO(true,
-                LocalizedText.of("带依据的回答", "帶依據的回答", "Answer with basis"),
-                LocalizedText.same(answer.getAnswer()),
-                null,
+        progress.phase("validating");currentGuard.run();
+        String language=publication.accepted.isEmpty()?declaredLanguage(answer):publication.accepted.get(0).getLanguage();
+        Set<String> gaps=new LinkedHashSet<>(answer.getClarifications());
+        publication.accepted.stream().flatMap(s->AdvisoryHarness.gaps(s).stream()).forEach(gaps::add);
+        if(AdvisoryHarness.text(answer.getMissingReason()))gaps.add(answer.getMissingReason());
+        List<String> clarifications=gaps.stream().map(gap->AdvisoryHarness.clarification(gap,language)).collect(Collectors.toList());
+        if(!publication.errors.isEmpty())clarifications.add(AdvisoryHarness.rejectionClarification(language));
+        boolean hasAnalysis=publication.accepted.stream().anyMatch(s->"analysis".equals(s.getKind())||"flowchart".equals(s.getKind()));
+        boolean grounded=answer.isGrounded()&&clarifications.isEmpty()&&publication.errors.isEmpty()&&hasAnalysis
+                &&!AdvisoryHarness.text(answer.getMissingReason())&&publication.accepted.stream().noneMatch(AdvisoryHarness::unresolved);
+        String content=publication.accepted.stream().map(publication::content).collect(Collectors.joining("\n\n"));
+        if(AdvisoryHarness.text(answer.getMissingReason()))content+="\n\n"+AdvisoryHarness.missing(answer.getMissingReason(),language);
+        List<String> citations=publication.accepted.stream().flatMap(s->s.getCitations().stream()).distinct().collect(Collectors.toList());
+        AskResponseVO response = new AskResponseVO(grounded,
+                grounded?LocalizedText.of("带依据的回答", "帶依據的回答", "Answer with basis"):LocalizedText.of("依据不足，尚不能完整定论", "依據不足，尚不能完整定論", "Insufficient evidence for a complete conclusion"),
+                LocalizedText.same(content),
+                grounded?null:scope,
                 citations,
                 evidenceIdOf(sources),
                 sources,
                 capturedIdentity==null?ai.chatModel():capturedIdentity.getModel(),
                 capturedIdentity==null?ai.modelIdentity():capturedIdentity);
         response.setClarifications(clarifications);response.setSourceScope(scope);
-        response.setBasisScope(basisScope);
-        persistExchange(projectId,scope,question,request,questionContext,response,session,selectedFixedHits,fixedSourceIdentity,conversation,sourceSnapshot);
+        response.setBasisScope(grounded?(fixedReferenceOnly?"reference_only":"project_contract"):"insufficient");
+        Map<String,Object> checks=new LinkedHashMap<>();checks.put("policySha256",AdvisoryHarness.POLICY_SHA);checks.put("effectiveSystemSha256",VettingCorpus.hash(systemPrompt+SESSION_JSON_INSTRUCTION));checks.put("sourceSnapshotSha256",sourceSnapshot);
+        checks.put("modelIdentity",capturedIdentity);checks.put("questionType",answer.getQuestionType());checks.put("sections",answer.getSections());checks.put("publishedSectionIds",publication.accepted.stream().map(AdvisoryHarness.Section::getId).collect(Collectors.toList()));
+        checks.put("applicationRejections",publication.errors);checks.put("attempts",publication.attempts);checks.put("missingReason",answer.getMissingReason());checks.put("clarificationGaps",answer.getClarifications());checks.put("meaning","Model self-checks plus application structural/identity/adoption checks; not independent legal acceptance");
+        currentGuard.run();progress.phase("saving");
+        persistExchange(projectId,scope,question,request,questionContext,response,session,selectedFixedHits,fixedSourceIdentity,conversation,sourceSnapshot,JsonUtils.write(checks),progress::checkCancelled);
         log.info("项目 {} 问答完成，命中 {} 条证据", projectId, hits.size());
         return response;
     }
@@ -445,13 +457,7 @@ public class AdviceService {
 
     private AskResponseVO unknown(String projectId, String scope, List<CitationVO> sources,
                                   List<String> extraReasons, boolean chatDispatched) {
-        List<String> citations = new ArrayList<>();
-        if (sources.isEmpty()) {
-            citations.add("Searched selected scope · no basis");
-        } else {
-            sources.stream().map(CitationVO::getFileLabel).distinct().limit(3).forEach(citations::add);
-        }
-        citations.addAll(extraReasons);
+        List<String> citations = Collections.emptyList();
         AskResponseVO response=new AskResponseVO(false,
                 LocalizedText.of("I don't know", "I don't know", "I don't know"),
                 LocalizedText.empty(),
@@ -491,7 +497,9 @@ public class AdviceService {
         builder.append("Selected source excerpts for this question. These excerpts do not establish that the entire standard/library or project package is complete. ")
                 .append("A passage omitted from these excerpts does not prove that its document or clause is absent from the supplied files. ")
                 .append("Project wording on adopting or amending standards, if included below, states only what those passages say about incorporation; ")
-                .append("it does not guarantee that the underlying standard text or every amendment has been supplied or reviewed.\n\n");
+                .append("it does not guarantee that the underlying standard text or every amendment has been supplied or reviewed.\n\n")
+                .append("Output citation contract: cite ONLY the public aliases [1], [2], etc shown at each numbered excerpt header. ")
+                .append("Internal retrieval IDs, fixed parent IDs, document IDs and model-unit addresses below are lookup/provenance metadata and MUST NOT be used as output citation IDs.\n\n");
         int index = 1;
         com.consense.service.vetting.OerModelMaterial.Request modelMaterial=new com.consense.service.vetting.OerModelMaterial.Request();
         if(hits.stream().anyMatch(hit->canonicalUnit(hit)!=null))builder.append(com.consense.service.vetting.OerModelMaterial.LEGEND);
@@ -499,14 +507,15 @@ public class AdviceService {
         List<Map<String,Object>> hitMembership=new ArrayList<>();
         Set<List<String>> nativeLimits=new LinkedHashSet<>();
         for (VectorStore.SearchHit hit : hits) {
-            builder.append("[").append(index++).append("] ")
+            String alias="["+(index++)+"]";
+            builder.append(alias).append(" ")
                     .append(hit.fileLabel())
                     .append(" | documentId=").append(hit.getPayload().get("documentId"))
                     .append(" | role=").append(hit.getPayload().get("sourceRole"))
                     .append(" | sourceRevision=").append(hit.getPayload().get("sourceHash"))
                     .append(" | physicalPage=").append(hit.pageNo().isEmpty()?"not available":hit.pageNo())
                     .append(" | location=").append(hit.anchor())
-                    .append("\n");
+                    .append("\nPublic citation alias=").append(alias).append(" | internalLookupId=").append(hit.getId()).append("\n");
             JsonNode unit=canonicalUnit(hit);
             List<com.consense.web.dto.CanonicalEvidenceDtos.EvidencePointer> pointers=unit==null?Collections.emptyList():canonicalPointers(hit);
             if(unit!=null) {
@@ -543,7 +552,7 @@ public class AdviceService {
                                 .append(pointer.getVisualReturnStatus()).append("\n");
                     }
                 }
-                Map<String,Object> membership=new LinkedHashMap<>();membership.put("hitOrdinal",index-1);membership.put("rankedSeedId",hit.getId());membership.put("sourceUnitId",unit.path("unitId").asText());
+                Map<String,Object> membership=new LinkedHashMap<>();membership.put("hitOrdinal",index-1);membership.put("publicCitationAlias",alias);membership.put("rankedSeedId",hit.getId());membership.put("sourceUnitId",unit.path("unitId").asText());
                 membership.put("hierarchyContextId",unit.path("hierarchyContext").path("contextId").asText(null));membership.put("attachmentContextId",unit.path("attachmentContext").path("contextId").asText(null));
                 membership.put("memberMaterialRefs",materialRefs);hitMembership.add(membership);
             }
@@ -621,6 +630,17 @@ public class AdviceService {
         CitationVO citation=new CitationVO(hit.fileLabel(), page==null?null:String.valueOf(page), hit.anchor(), hit.text(), hit.getScore(),null,
                 String.valueOf(payload.get("documentId")),String.valueOf(payload.get("sourceHash")),String.valueOf(payload.get("sourceRole")),
                 payload.get("applicabilityContextComplete") instanceof Boolean?(Boolean)payload.get("applicabilityContextComplete"):null);
+        if(canonicalUnit(hit)==null&&storageService!=null) {
+            try {
+                sourceDocumentRepository.findById(Long.valueOf(citation.getDocumentId()))
+                        .filter(d->Objects.equals(VettingCorpus.sourceHash(d),citation.getSourceHash())
+                                &&Objects.equals(d.getProjectId(),payload.get("projectId"))
+                                &&Objects.equals(VettingCorpus.sourceRole(d),citation.getSourceRole())
+                                &&d.getSourceSha256()!=null&&d.getSourceSha256().matches("[a-f0-9]{64}")
+                                &&storageService.matchesStoredBytes(d.getStoragePath(),d.getSourceSha256()))
+                        .ifPresent(d->citation.setOriginalSourceSha256(d.getSourceSha256()));
+            }catch(NumberFormatException ignored){ /* Legacy nonnumeric source identity has no original locator. */ }
+        }
         if(canonicalUnit(hit)!=null) {
             citation.setCanonicalEvidence(canonicalPointers(hit));
             citation.setCanonicalSourceUnit(canonicalUnit(hit).deepCopy());
@@ -660,7 +680,7 @@ public class AdviceService {
                     : safeList(message.getCitationsJson());
             result.add(new ChatMessageVO(message.getId(),
                     message.getRole(),
-                    message.getTitle() == null ? null : LocalizedText.same(message.getTitle()),
+                    localizedTitle(message.getTitle()),
                     message.getContent() == null ? null : LocalizedText.same(message.getContent()),
                     message.getUnknownScope(),
                     citations,
@@ -739,7 +759,7 @@ public class AdviceService {
     }
 
     private static final String SESSION_JSON_INSTRUCTION="\n\n【输出要求】只输出一个合法的 JSON，不要 Markdown 代码块，不要任何解释文字。";
-    private static final String SESSION_JSON_RETRY="\n\n重要：上一次输出不是合法 JSON。请严格只输出 JSON。";
+    private static final String SESSION_JSON_RETRY=AdviceResponsesTransport.RETRY_INSTRUCTION;
     private List<LlmClient.ChatTurn> sessionTurns(String system,String user,int attempt) {
         return Arrays.asList(LlmClient.ChatTurn.system(system+SESSION_JSON_INSTRUCTION),LlmClient.ChatTurn.user(user+(attempt==0?"":SESSION_JSON_RETRY)));
     }
@@ -771,19 +791,150 @@ public class AdviceService {
                 throw new BizException(4205,"Advice budget_unknown: captured_model_configuration_changed.");
         }
     }
-    private AnswerRecord completeSessionChat(String system,String user,LlmOperation operation,String sourceSnapshot,Runnable guard) {
-        JsonNode schema=JsonUtils.mapper().createObjectNode();
+    private AnswerRecord completeAdvice(String system,String user,LlmOperation chat,AdviceResponsesTransport.Operation responses,
+                                       String sourceIdentity,Runnable guard,Publication publication,String originalQuestion) {
+        String repair="";AnswerRecord result=null;
+        boolean streaming=publication.progress.streaming()&&(responses!=null?responses.supportsStreaming():chat.getClient().supportsStreaming());
+        if(publication.progress.streaming()&&!streaming)publication.progress.phase("stream_unavailable");
         for(int attempt=0;attempt<2;attempt++) {
-            List<LlmClient.ChatTurn> turns=sessionTurns(system,user,attempt);guard.run();sessionBudget(operation,turns,sourceSnapshot);guard.run();
-            if(operation.getClient()==null||!operation.getClient().available())throw new BizException(4203,"The captured advice model is unavailable; no alternate model was used.");
-            guard.run();String raw=operation.getClient().chatStructured(turns,schema);guard.run();
-            try{return JsonUtils.read(JsonUtils.extractJson(raw),AnswerRecord.class);}
-            catch(Exception invalid){if(attempt==1)throw new BizException(4205,"Advice output_invalid: JSON parsing failed after one freshly admitted retry. No answer was published.");}
+            guard.run();publication.beginAttempt(streaming,attempt==1);publication.progress.phase("budget");
+            String attemptSystem=attempt==0||!streaming?system:system+"\n\nRepair response contract: retain the same required envelope fields and section schema. The sections array now contains ONLY unpublished replacement/additional units; never return an application-owned accepted section ID. The application prepends its immutable accepted prefix. If that prefix is nonempty, do not regenerate its opening limits unit; sections may be empty for an envelope-only repair. If no units were accepted, return the full answer beginning with limits. The composed full answer must satisfy every original source, scope, language, check and graph requirement.";
+            com.consense.ai.StructuredJsonSections units=streaming?new com.consense.ai.StructuredJsonSections(publication::acceptNode):null;
+            com.consense.ai.StructuredJsonSections.InvalidJsonException[] syntaxFailure={null};
+            java.util.function.Consumer<String> onDelta=delta->{
+                if(syntaxFailure[0]==null)try{units.accept(delta);}
+                catch(com.consense.ai.StructuredJsonSections.InvalidJsonException invalid){syntaxFailure[0]=invalid;}
+            };
+            String raw;
+            try {
+            if(responses!=null) {
+                AdviceResponsesTransport.PreparedRequest request=streaming?responses.prepareStream(attemptSystem,user+repair,sourceIdentity,attempt):responses.prepare(attemptSystem,user+repair,sourceIdentity,attempt);
+                AdviceResponsesTransport.BudgetResult budget=responses.observe(request,guard,publication.progress::onCancel);
+                if(!budget.isGenerationPermitted())throw new AdviceResponsesTransport.RequestFailure(budget.getStatus(),budget.getReason(),null);
+                guard.run();publication.progress.phase("generating");
+                raw=streaming?responses.generateStream(request,budget,guard,onDelta,publication.progress::onCancel):responses.generate(request,budget,guard);
+            } else {
+                List<LlmClient.ChatTurn> turns=sessionTurns(attemptSystem,user+repair,attempt);sessionBudget(chat,turns,sourceIdentity);guard.run();
+                if(chat.getClient()==null||!chat.getClient().available())throw new BizException(4203,"The captured advice model is unavailable; no alternate model was used.");
+                guard.run();publication.progress.phase("generating");
+                raw=streaming?chat.getClient().chatStructuredStream(turns,publication.schema,onDelta,publication.progress::onCancel):chat.getClient().chatStructured(turns,publication.schema);
+            }
+            if(syntaxFailure[0]!=null)throw syntaxFailure[0];
+            } catch(IllegalArgumentException invalidStream) {
+                String diagnosis=AdvisoryHarness.diagnostic(invalidStream);publication.errors.add(diagnosis);
+                log.warn("Advice application contract rejected attempt {}: {}",attempt,diagnosis);
+                publication.recordAttempt(attempt,null);
+                if(attempt==1)throw new BizException(4205,"Advice output_invalid: the structured stream remained invalid after one admitted repair. No completed answer was saved.");
+                repair=publication.repairInstruction();
+                continue;
+            }
+            guard.run();publication.progress.phase("validating");
+            try {
+                JsonNode envelope=streaming?units.finish():strictAdviceObject(raw);
+                AdvisoryHarness.shape(envelope,AdvisoryHarness.schema());
+                result=JsonUtils.mapper().treeToValue(envelope,AnswerRecord.class);
+                publication.finish(result,originalQuestion,streaming);
+                publication.recordAttempt(attempt,result);
+                if(publication.errors.isEmpty())return result;
+                repair=publication.repairInstruction();
+            } catch(java.io.IOException|IllegalArgumentException invalid) {
+                String diagnosis=AdvisoryHarness.diagnostic(invalid);publication.errors.add(diagnosis);
+                log.warn("Advice application contract rejected attempt {}: {}",attempt,diagnosis);
+                publication.recordAttempt(attempt,null);
+                if(attempt==1)throw new BizException(4205,"Advice output_invalid: the answer contract remained invalid after one admitted repair. No completed answer was saved.");
+                repair=publication.repairInstruction();
+            }
         }
-        throw new IllegalStateException("Advice JSON attempts exhausted");
+        return result;
+    }
+    private static JsonNode strictAdviceObject(String raw) {
+        try(com.fasterxml.jackson.core.JsonParser parser=JsonUtils.mapper().getFactory().createParser(raw)){
+            parser.enable(com.fasterxml.jackson.core.JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
+            JsonNode value=JsonUtils.mapper().readTree(parser);
+            if(value==null||!value.isObject()||parser.nextToken()!=null)throw new IllegalArgumentException("Advice requires one strict JSON object");
+            return value;
+        }catch(java.io.IOException invalid){throw new IllegalArgumentException("Invalid Advisory JSON",invalid);}
+    }
+    private static String declaredLanguage(AnswerRecord answer) {
+        if(answer==null||answer.getSections()==null||answer.getSections().isEmpty()||answer.getSections().get(0)==null)
+            throw AdvisoryHarness.invalid("answer.sections.language: a declared answer language is required");
+        String language=answer.getSections().get(0).getLanguage();
+        if(!Arrays.asList("en","zhHans","zhHant").contains(language)||answer.getSections().stream().anyMatch(s->s==null||!Objects.equals(language,s.getLanguage())))
+            throw AdvisoryHarness.invalid("answer.sections.language: every section must declare the same allowed language (en/zhHans/zhHant)");
+        return language;
+    }
+    private final class Publication {
+        private final List<CitationVO> sources;
+        private final boolean referenceOnly;
+        private final AdviceProgress progress;
+        private final Runnable guard;
+        private final QuestionContext question;
+        private final JsonNode schema;
+        private final List<AdvisoryHarness.Section> accepted=new ArrayList<>();
+        private final List<String> errors=new ArrayList<>();
+        private final List<AdvisoryHarness.Section> proposed=new ArrayList<>();
+        private List<AdvisoryHarness.Section> repairPrefix=Collections.emptyList();
+        private final List<Map<String,Object>> attempts=new ArrayList<>();
+        private boolean live,opening;
+        Publication(List<CitationVO> sources,boolean referenceOnly,AdviceProgress progress,Runnable guard,QuestionContext question){this.sources=sources;this.referenceOnly=referenceOnly;this.progress=progress;this.guard=guard;this.question=question;this.schema=AdvisoryHarness.schema(sources);}
+        String content(AdvisoryHarness.Section section){return AdvisoryHarness.content(section,sources,referenceOnly,question.originalQuestion,question.background);}
+        void beginAttempt(boolean streaming,boolean repairing){live=streaming;if(!streaming)accepted.clear();repairPrefix=repairing?new ArrayList<>(accepted):Collections.emptyList();opening=!repairPrefix.isEmpty();errors.clear();proposed.clear();}
+        String repairInstruction(){return "\n\nUse the one admitted repair. Application rejected: "+JsonUtils.write(errors)
+                +". Preserve the original question, requested basis, language and supplied public citation aliases. "
+                +(live&&!accepted.isEmpty()?"Application-owned accepted prefix (context only; omit every one of these IDs from repair sections): "+JsonUtils.write(accepted)
+                +". Return all required envelope fields with only new/unpublished sections, or sections=[] if only metadata needs correction."
+                :"No units were published. Return one full complete answer with all required envelope fields and ALL sections beginning with kind=limits. Do not return sections=[].");}
+        void recordAttempt(int number,AnswerRecord answer){Map<String,Object> observation=new LinkedHashMap<>();observation.put("attempt",number);observation.put("sections",answer==null?null:answer.getSections());observation.put("rejections",new ArrayList<>(errors));observation.put("contractParsed",answer!=null);attempts.add(observation);}
+        void acceptNode(JsonNode node){
+            assertUnpublishedId(node.path("id").asText());
+            try{AdvisoryHarness.shape(node,AdvisoryHarness.schema().path("properties").path("sections").path("items"));accept(JsonUtils.mapper().convertValue(node,AdvisoryHarness.Section.class));}
+            catch(IllegalArgumentException invalid){errors.add("Incomplete streamed answer unit: "+invalid.getMessage());}
+        }
+        void assertUnpublishedId(String id){if(repairPrefix.stream().anyMatch(s->Objects.equals(s.getId(),id)))
+            throw new BizException(4205,"Advice repair resubmitted an application-owned accepted section ID; this answer is invalidated. Retry the question.");}
+        void accept(AdvisoryHarness.Section section){
+            guard.run();proposed.add(section);
+            assertUnpublishedId(section.getId());
+            try {
+                if(repairPrefix.size()+proposed.size()>64)throw AdvisoryHarness.invalid("Answer has too many sections");
+                if(repairPrefix.isEmpty()&&proposed.size()==1&&!"limits".equals(section.getKind()))throw AdvisoryHarness.invalid("Facts, assumptions and limits must precede conclusions");
+                if(proposed.stream().filter(s->Objects.equals(s.getId(),section.getId())).count()!=1)throw AdvisoryHarness.invalid("Duplicate section ID");
+                // Alias violations reject this unit; independently valid units can still be retained.
+                AdvisoryHarness.shape(JsonUtils.mapper().valueToTree(section),schema.path("properties").path("sections").path("items"));
+                AdvisoryHarness.validate(section,sources,referenceOnly,(basis,refs)->incorporationSupported(basis,refs,sources));
+                if(!accepted.isEmpty()&&!Objects.equals(accepted.get(0).getLanguage(),section.getLanguage()))throw AdvisoryHarness.invalid("Answer units must retain one requested language");
+                if(proposed.size()==1)opening=true;
+                if(!opening)throw AdvisoryHarness.invalid("Opening facts and limitations were not validated");
+                accepted.add(section);
+                if(live){guard.run();List<CitationVO> refs=sources.stream().filter(s->section.getCitations().contains(s.getEvidenceId())).collect(Collectors.toList());
+                    progress.section((accepted.size()==1?"":"\n\n")+content(section),section.getCitations(),refs);}
+            }catch(IllegalArgumentException rejected){errors.add((section==null?"unknown":section.getId())+": "+rejected.getMessage());}
+        }
+        void finish(AnswerRecord answer,String question,boolean streamed){
+            if(answer==null||answer.getQuestionType()==null||!answer.getQuestionType().matches("T[1-8]")||answer.getSections()==null)
+                throw AdvisoryHarness.invalid("Missing question type, opening section or self-check records");
+            if(!streamed)for(AdvisoryHarness.Section section:answer.getSections())accept(section);
+            if(!JsonUtils.write(proposed).equals(JsonUtils.write(answer.getSections())))throw AdvisoryHarness.invalid("Streamed sections differ from the final envelope");
+            List<AdvisoryHarness.Section> composed=new ArrayList<>(repairPrefix);composed.addAll(answer.getSections());answer.setSections(composed);
+            AdvisoryHarness.shape(JsonUtils.mapper().valueToTree(answer),AdvisoryHarness.schema());declaredLanguage(answer);
+            for(AdvisoryHarness.Section section:composed){guard.run();try{AdvisoryHarness.shape(JsonUtils.mapper().valueToTree(section),schema.path("properties").path("sections").path("items"));AdvisoryHarness.validate(section,sources,referenceOnly,(basis,refs)->incorporationSupported(basis,refs,sources));}
+                catch(IllegalArgumentException invalid){if(accepted.stream().anyMatch(s->Objects.equals(s.getId(),section.getId())))
+                    throw new BizException(4205,"Advice accepted section failed final validation; this answer is invalidated. Retry the question.");errors.add(section.getId()+": "+invalid.getMessage());}}
+            if(accepted.stream().anyMatch(s->answer.getSections().stream().noneMatch(p->JsonUtils.write(s).equals(JsonUtils.write(p)))))
+                throw new BizException(4205,"Advice final envelope changed a published section; this answer is invalidated. Retry the question.");
+            List<AdvisoryHarness.Section> finalPublished=answer.getSections().stream().filter(s->accepted.stream().anyMatch(a->a.getId().equals(s.getId()))).collect(Collectors.toList());
+            if(!JsonUtils.write(accepted).equals(JsonUtils.write(finalPublished)))throw new BizException(4205,"Advice repair reordered published sections; this answer is invalidated. Retry the question.");
+            if(answer.isGrounded()&&!Objects.equals(answer.getBasisScope(),referenceOnly?"reference_only":"project_contract"))errors.add("A complete answer must retain the requested basis");
+            if(referenceOnly?!"reference_only".equals(answer.getBasisScope()):"reference_only".equals(answer.getBasisScope()))errors.add("Requested basis must not be switched automatically");
+            if(referenceOnly&&"adoption".equals(answer.getMissingReason()))errors.add("answer.missingReason: project adoption is a disclosed scope limit, not a required gap for explicit reference_only interpretation");
+            if(referenceOnly&&answer.getClarifications().contains("adoption"))errors.add("answer.clarifications: do not require project adoption for explicit reference_only interpretation");
+            boolean graphRequested="T6".equals(answer.getQuestionType())||AdvisoryHarness.flowchartRequested(question);
+            if(AdvisoryHarness.flowchartRequested(question)&&!"T6".equals(answer.getQuestionType()))errors.add("The requested flowchart requires template T6");
+            if(graphRequested&&accepted.stream().noneMatch(s->"flowchart".equals(s.getKind())))errors.add("Requested flowchart could not be validated; reliable text remains limited analysis");
+        }
     }
     private String boundedHistory(AdviceSession conversation,String sourceSnapshot,ModelIdentity identity,LlmOperation chat,
-                                  AdviceResponsesTransport.Operation responses,Runnable guard) {
+                                  AdviceResponsesTransport.Operation responses,Runnable guard,AdviceProgress progress) {
         int exchanges=adviceSettings.getHistoryMaxExchanges(),messages=adviceSettings.getHistoryMaxMessages(),tokens=adviceSettings.getHistoryMaxTokens();
         if(exchanges<0||exchanges>100||messages<0||messages>200||tokens<0||tokens>65536)
             throw new BizException(4205,"Advice budget_unknown: invalid bounded history profile.");
@@ -806,7 +957,7 @@ public class AdviceService {
             String material="\n\nConversation context only (same session, source version and model profile). User messages are assumptions, and prior answers are not contractual evidence or valid current citations. Answer only from the current evidence IDs above.\n"+JsonUtils.write(history);
             guard.run();long observed;
             if(responses!=null) {
-                AdviceResponsesTransport.BudgetResult budget=responses.observe(responses.prepare("Conversation context only; do not generate.",material,sourceSnapshot,0),guard);
+                AdviceResponsesTransport.BudgetResult budget=responses.observe(responses.prepare("Conversation context only; do not generate.",material,sourceSnapshot,0),guard,progress::onCancel);
                 if("budget_unknown".equals(budget.getStatus()))throw new AdviceResponsesTransport.RequestFailure(budget.getStatus(),budget.getReason(),null);
                 if(budget.getConfiguredContextTokens()<262144)throw new BizException(4205,"Advice budget_unknown: explicit sessions require at least 256K configured tokens.");
                 observed=budget.getInputTokens();
@@ -858,28 +1009,43 @@ public class AdviceService {
         return chatMessageRepository.save(message);
     }
 
-    private void persistAssistant(String projectId, AskResponseVO response,Long questionMessageId,String sourceSnapshot) {
-        String content = response.isGrounded()
-                ? (response.getContent() == null ? "" : response.getContent().getZhHans())
-                : null;
+    private static LocalizedText localizedTitle(String stored) {
+        if(stored==null)return null;
+        if(stored.trim().startsWith("{"))try {
+            JsonNode value=JsonUtils.parse(stored);
+            if(value.isObject()&&value.size()==3&&value.path("zhHans").isTextual()&&value.path("zhHant").isTextual()&&value.path("en").isTextual())
+                return JsonUtils.read(stored,LocalizedText.class);
+        }catch(RuntimeException invalid){/* Old plain titles remain readable, including text beginning with a brace. */}
+        return LocalizedText.same(stored);
+    }
+
+    private void persistAssistant(String projectId, AskResponseVO response,Long questionMessageId,String sourceSnapshot,String checks) {
+        String content=response.getContent()==null?null:response.getContent().getZhHans();
         ChatMessage message=saveMessage(projectId, ChatMessage.ROLE_ASSISTANT,
-                response.getTitle() == null ? null : response.getTitle().getZhHans(),
+                response.getTitle() == null ? null : JsonUtils.write(response.getTitle()),
                 content,
                 response.getUnknownScope(),
                 response.getCitations(),
                 response.getEvidenceId(), response.getModelIdentity());
         message.setSessionId(response.getSessionId());message.setSourceSnapshotSha256(sourceSnapshot);
+        message.setAdviceChecksJson(checks);
         message.setSourcesJson(JsonUtils.write(response.getSources()));message.setClarificationsJson(JsonUtils.write(response.getClarifications()));message.setSourceScope(response.getSourceScope());message.setBasisScope(response.getBasisScope());message.setQuestionMessageId(questionMessageId);chatMessageRepository.save(message);response.setMessageId(message.getId());
     }
 
     /** Remote retrieval/chat completes before this short, atomic history write. */
     private void persistExchange(String projectId,String scope,String question,AskRequest request,QuestionContext context,
                                  AskResponseVO response,OerBusinessEvidence.Session session,List<VectorStore.SearchHit> fixedHits,String fixedIdentity,AdviceSession conversation,String sourceSnapshot) {
+        persistExchange(projectId,scope,question,request,context,response,session,fixedHits,fixedIdentity,conversation,sourceSnapshot,null,()->{});
+    }
+    private void persistExchange(String projectId,String scope,String question,AskRequest request,QuestionContext context,
+                                 AskResponseVO response,OerBusinessEvidence.Session session,List<VectorStore.SearchHit> fixedHits,String fixedIdentity,AdviceSession conversation,String sourceSnapshot,String checks,Runnable cancellation) {
+        cancellation.run();
         if(session!=null)assertCurrentSelection(session,scope);
         assertFixedReferencesCurrent(fixedHits,fixedIdentity);
         if(session==null&&sourceSnapshot!=null)assertConversationSources(projectId,scope,"reference_only".equals(request.getBasisScope()),null,sourceSnapshot);
         TransactionTemplate transaction=new TransactionTemplate(transactionManager);
         transaction.executeWithoutResult(status->{
+            cancellation.run();
             if(session==null&&sourceSnapshot!=null)assertConversationSources(projectId,scope,"reference_only".equals(request.getBasisScope()),null,sourceSnapshot);
             if(conversation!=null) {
                 AdviceSession current=lockConversation(projectId,conversation.getId());
@@ -888,12 +1054,13 @@ public class AdviceService {
                 assertCapturedChatIdentity(response.getModelIdentity());
                 current.setRevision(current.getRevision()+1);adviceSessions.save(current);response.setSessionId(conversation.getId());
             }
+            assertCapturedChatIdentity(response.getModelIdentity());
             ChatMessage user=saveMessage(projectId,ChatMessage.ROLE_USER,null,question,null,null,null,null);
             user.setSessionId(request.getSessionId());user.setSourceSnapshotSha256(sourceSnapshot);
             user.setReplyToMessageId(request.getReplyToMessageId());user.setSourceScope(scope);
             user.setBasisScope(requestedBasisScope(request));
             user.setOriginalQuestion(context.originalQuestion);user.setUserBackgroundJson(JsonUtils.write(context.background));
-            chatMessageRepository.save(user);persistAssistant(projectId,response,user.getId(),sourceSnapshot);
+            cancellation.run();chatMessageRepository.save(user);persistAssistant(projectId,response,user.getId(),sourceSnapshot,checks);cancellation.run();
         });
     }
 
@@ -916,13 +1083,11 @@ public class AdviceService {
     @JsonIgnoreProperties(ignoreUnknown = true)
     public static class AnswerRecord {
         private boolean grounded;
-        private String answer;
-        private List<String> citations;
         private String missingReason;
         private List<String> clarifications;
         private String basisScope;
-        public AnswerRecord(boolean grounded,String answer,List<String> citations,String missingReason){this(grounded,answer,citations,missingReason,null,null);}
-        public AnswerRecord(boolean grounded,String answer,List<String> citations,String missingReason,List<String> clarifications){this(grounded,answer,citations,missingReason,clarifications,null);}
+        private String questionType;
+        private List<AdvisoryHarness.Section> sections;
     }
 
     public List<AdviceSourceVO> sources(String projectId,String scope) {
@@ -985,13 +1150,6 @@ public class AdviceService {
         return chunks.stream().allMatch(c->Objects.equals(c.getSourceHash(),hashes.get(String.valueOf(c.getDocumentId())))&&Objects.equals(c.getSourceRole(),roles.get(String.valueOf(c.getDocumentId()))));
     }
     private List<CitationVO> safeSources(String json){if(JsonUtils.isBlankText(json))return Collections.emptyList();try{return JsonUtils.readList(json,CitationVO.class);}catch(Exception e){return Collections.emptyList();}}
-    private List<String> cleanClarifications(List<String> questions){if(questions==null)return Collections.emptyList();return questions.stream().filter(Objects::nonNull).map(String::trim).filter(s->!s.isEmpty()).distinct().limit(12).collect(Collectors.toList());}
-    private List<String> validatedCitations(List<String> requested,List<CitationVO> submitted) {
-        if(requested==null||requested.isEmpty())return Collections.emptyList();List<String> accepted=new ArrayList<>();
-        for(String citation:requested){String value=nvl(citation).trim();List<CitationVO> matches=submitted.stream().filter(s->value.equals(s.getEvidenceId())||value.equals(s.getFileLabel())).collect(Collectors.toList());
-            if(matches.size()!=1)return Collections.emptyList();String id=matches.get(0).getEvidenceId();if(!accepted.contains(id))accepted.add(id);
-        }return accepted;
-    }
     /** Library retrieval must also show current incorporation/edition/override provisions, if available. */
     private List<VectorStore.SearchHit> withCanonicalIncorporationContext(OerBusinessEvidence.Session session,List<VectorStore.SearchHit> hits) {
         List<VectorStore.SearchHit> libraries=hits.stream().filter(h->"standard".equals(String.valueOf(h.getPayload().get("sourceRole")))).collect(Collectors.toList());

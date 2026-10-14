@@ -8,7 +8,7 @@ const source = await readFile(new URL('../src/views/AdviceView.vue', import.meta
 const script = parse(source).descriptor.scriptSetup.content.replace(/^import .*\r?\n/gm, '')
 const compiled = ts.transpileModule(script, { compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.None } }).outputText
 const setup = new Function('deps', `
-  const { computed, nextTick, ref, watch, onMounted, onBeforeUnmount, useI18n, useRoute, useRouter, useAppStore, useLocalized, adviceApi } = deps;
+  const { computed, nextTick, ref, watch, onMounted, onBeforeUnmount, useI18n, useRoute, useRouter, useAppStore, useLocalized, adviceApi, streamAdvice, stopAdvice, window } = deps;
   ${compiled}
   return { messages, scope, scopeDocuments, ask, askQuick, askPrecedence, activeCitation, openMessageSources, asking, clarificationReply, replyToClarification, clearChat };
 `)
@@ -29,7 +29,9 @@ function harness(overrides = {}) {
   const view = effects.run(() => setup({ computed: vue.computed, nextTick: vue.nextTick, ref: vue.ref, watch: vue.watch,
     onMounted: fn => mounted.push(fn), onBeforeUnmount() {}, useI18n: () => ({ t: key => key }),
     useRoute: () => ({ query: {} }), useRouter: () => ({ replace: async () => undefined }), useAppStore: () => store,
-    useLocalized: () => ({ pick: value => value }), adviceApi: api }))
+    useLocalized: () => ({ pick: value => value }), adviceApi: api,
+    streamAdvice: (id, request, options) => api.ask(id, request.question, request.scope, options.llmSelection, request.replyToMessageId, request.sessionId, request.basisScope),
+    stopAdvice: async () => {}, window: { setTimeout: (fn, ms) => { const timer = setTimeout(fn, ms); timer.unref(); return timer }, clearTimeout } }))
   return { view, store, scopeCalls, asks, mount: async () => { mounted.forEach(fn => fn()); await settle() }, dispose: () => effects.stop() }
 }
 {
