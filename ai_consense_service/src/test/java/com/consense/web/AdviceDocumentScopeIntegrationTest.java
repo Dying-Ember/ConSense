@@ -109,6 +109,7 @@ class AdviceDocumentScopeIntegrationTest {
         when(local.chat(anyList())).thenReturn("{\"grounded\":true,\"answer\":\"TEST ONLY fabricated\",\"citations\":[\"outside-file SCC999\"],\"clarifications\":[\"What stage is this contract at?\"]}");
         JsonNode rejected=ask(id,"fullset");assertFalse(rejected.path("grounded").asBoolean());
         assertTrue(rejected.path("clarifications").get(0).asText().contains("applicable procedure and regime"));
+        assertTrue(rejected.path("citations").isEmpty());assertFalse(rejected.path("content").toString().contains("fabricated"));
         when(local.chat(anyList())).thenReturn("{\"grounded\":true,\"answer\":\"TEST ONLY accepted\",\"citations\":[\"[1]\"]}");
         JsonNode accepted=ask(id,"fullset");assertTrue(accepted.path("grounded").asBoolean());
         original.setTextContent("MUTATED CONTENT TEST ONLY");sources.saveAndFlush(original);
@@ -288,7 +289,7 @@ class AdviceDocumentScopeIntegrationTest {
         com.fasterxml.jackson.databind.node.ObjectNode invalid=valid.deepCopy();((com.fasterxml.jackson.databind.node.ObjectNode)invalid.path("sections").get(0)).remove("checks");
         java.util.concurrent.atomic.AtomicInteger calls=new java.util.concurrent.atomic.AtomicInteger();
         doAnswer(call->{String prompt=JsonUtils.write(call.getArgument(0));assertTrue(prompt.contains("Public citation alias=[1]"));assertTrue(prompt.contains("Application output reserve: "+properties.getLlm().getStructuredMaxTokens()+" tokens."));
-            if(calls.getAndIncrement()>0)assertTrue(prompt.contains("Application rejected: answer.sections[0].checks: required field is missing"));
+            if(calls.getAndIncrement()>0){assertTrue(prompt.contains("Application rejected: "));assertTrue(prompt.contains("answer.sections[0].checks: required field is missing"));assertTrue(prompt.contains("ALL sections beginning with kind=limits"));}
             JsonNode schema=call.getArgument(1);assertEquals(JsonUtils.parse("[\"[1]\"]"),schema.path("properties").path("sections").path("items").path("properties").path("citations").path("items").path("enum"));
             return JsonUtils.write(calls.get()==1?invalid:valid);}).when(local).chatStructured(anyList(),any());
         assertTrue(ask(id,"contract").path("grounded").asBoolean());assertEquals(2,calls.get());verify(counter,times(2)).observe(any());

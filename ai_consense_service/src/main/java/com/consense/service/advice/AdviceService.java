@@ -916,8 +916,8 @@ public class AdviceService {
             if(!streamed)for(AdvisoryHarness.Section section:answer.getSections())accept(section);
             if(!JsonUtils.write(proposed).equals(JsonUtils.write(answer.getSections())))throw AdvisoryHarness.invalid("Streamed sections differ from the final envelope");
             List<AdvisoryHarness.Section> composed=new ArrayList<>(repairPrefix);composed.addAll(answer.getSections());answer.setSections(composed);
-            AdvisoryHarness.shape(JsonUtils.mapper().valueToTree(answer),schema);declaredLanguage(answer);
-            for(AdvisoryHarness.Section section:composed){guard.run();try{AdvisoryHarness.validate(section,sources,referenceOnly,(basis,refs)->incorporationSupported(basis,refs,sources));}
+            AdvisoryHarness.shape(JsonUtils.mapper().valueToTree(answer),AdvisoryHarness.schema());declaredLanguage(answer);
+            for(AdvisoryHarness.Section section:composed){guard.run();try{AdvisoryHarness.shape(JsonUtils.mapper().valueToTree(section),schema.path("properties").path("sections").path("items"));AdvisoryHarness.validate(section,sources,referenceOnly,(basis,refs)->incorporationSupported(basis,refs,sources));}
                 catch(IllegalArgumentException invalid){if(accepted.stream().anyMatch(s->Objects.equals(s.getId(),section.getId())))
                     throw new BizException(4205,"Advice accepted section failed final validation; this answer is invalidated. Retry the question.");errors.add(section.getId()+": "+invalid.getMessage());}}
             if(accepted.stream().anyMatch(s->answer.getSections().stream().noneMatch(p->JsonUtils.write(s).equals(JsonUtils.write(p)))))

@@ -197,9 +197,9 @@ class AdviceResponsesStreamingTest {
         try(java.util.stream.Stream<Path> dirs=Files.list(observationRoot)){assertEquals(2,dirs.filter(Files::isDirectory).filter(p->!Files.exists(p.resolve("generation-response.utf8.json"))).count());}
     }
     @Test void repairStillRequiresCompleteEnvelopeAndUniformLanguageWithNoThirdAttempt()throws Exception {
-        for(String defect:Arrays.asList("envelope","language","citation")){
+        for(String defect:Arrays.asList("envelope","language")){
             calls.set(0);bodies.clear();ObjectNode first=authoredAnswer();first.put("basisScope","project_contract");ObjectNode repair=first.deepCopy();repair.put("basisScope","reference_only");ObjectNode fresh=(ObjectNode)first.path("sections").get(1).deepCopy();fresh.put("id","fresh");repair.putArray("sections").add(fresh);
-            if("envelope".equals(defect))repair.remove("grounded");if("language".equals(defect))fresh.put("language","zhHant");if("citation".equals(defect))fresh.putArray("citations").add("[999]");List<String> published=new ArrayList<>();
+            if("envelope".equals(defect))repair.remove("grounded");if("language".equals(defect))fresh.put("language","zhHant");List<String> published=new ArrayList<>();
             com.consense.common.BizException invalid=assertThrows(com.consense.common.BizException.class,()->complete(first,repair,published,standard()));assertEquals(4205,invalid.getCode());assertTrue(invalid.getMessage().contains("after one admitted repair"));assertEquals(4,calls.get());assertEquals("envelope".equals(defect)?3:2,published.size());
         }
     }
@@ -215,5 +215,12 @@ class AdviceResponsesStreamingTest {
         AdviceProgress progress=new AdviceProgress(){public boolean streaming(){return true;}public void section(String content,List<String> refs,List<com.consense.web.dto.AdviceDtos.CitationVO> sources){published.add(content);}};Object publication=publication(service,progress,()->{},standard());
         ReflectionTestUtils.invokeMethod(service,"completeAdvice","rules","material",null,operation,SOURCE,(Runnable)()->{},publication,"AUTHORED question");assertEquals(4,calls.get());assertEquals(2,published.size());
         List<?> accepted=(List<?>)ReflectionTestUtils.getField(publication,"accepted"),errors=(List<?>)ReflectionTestUtils.getField(publication,"errors");assertEquals(2,accepted.size());assertTrue(errors.toString().contains("adoption or requested basis is not supported"));
+    }
+    @Test void appendedInventedCitationRejectsThatUnitWithoutDiscardingTheVerifiedPrefix()throws Exception {
+        ObjectNode first=authoredAnswer();first.put("basisScope","project_contract");ObjectNode repair=first.deepCopy();repair.put("basisScope","reference_only");ObjectNode fake=(ObjectNode)first.path("sections").get(1).deepCopy();fake.put("id","fake").put("content","AUTHORED invented assertion [999]");fake.putArray("citations").add("[999]");repair.putArray("sections").add(fake);
+        attemptEvents.add(stream(JsonUtils.write(first)));attemptEvents.add(stream(JsonUtils.write(repair)));AdviceService service=new AdviceService(null,null,null,null,null,null,null,null,null,null,null);List<String> published=new ArrayList<>();
+        AdviceProgress progress=new AdviceProgress(){public boolean streaming(){return true;}public void section(String content,List<String> refs,List<com.consense.web.dto.AdviceDtos.CitationVO> sources){published.add(content);}};Object publication=publication(service,progress,()->{},standard());
+        ReflectionTestUtils.invokeMethod(service,"completeAdvice","rules","material",null,operation,SOURCE,(Runnable)()->{},publication,"AUTHORED question");assertEquals(4,calls.get());assertEquals(2,published.size());assertTrue(published.stream().noneMatch(s->s.contains("invented assertion")));
+        List<?> accepted=(List<?>)ReflectionTestUtils.getField(publication,"accepted"),errors=(List<?>)ReflectionTestUtils.getField(publication,"errors");assertEquals(2,accepted.size());assertTrue(errors.toString().contains("value must be one of [\"[1]\"]"));assertEquals(first.path("sections"),JsonUtils.mapper().valueToTree(accepted));
     }
 }
