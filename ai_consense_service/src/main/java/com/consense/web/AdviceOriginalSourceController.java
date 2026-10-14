@@ -14,10 +14,10 @@ public class AdviceOriginalSourceController {
     private final AdviceOriginalSourceService sources;
     @GetMapping
     public ResponseEntity<byte[]> original(@PathVariable String projectId,@PathVariable long documentId,
-            @RequestParam String sourceHash,@RequestParam String originalSourceSha256,
+            @RequestParam String sourceHash,@RequestParam String originalSourceSha256,@RequestParam String sourceRole,
             @RequestParam(defaultValue="fullset") String scope,@RequestParam(required=false) String projectionSha256,
             @RequestParam(required=false) String unitId){
-        AdviceOriginalSourceService.OriginalSource source=sources.original(projectId,documentId,sourceHash,originalSourceSha256,scope,projectionSha256,unitId);
+        AdviceOriginalSourceService.OriginalSource source=sources.original(projectId,documentId,sourceHash,originalSourceSha256,scope,projectionSha256,unitId,sourceRole);
         String filename=source.getFileName().toLowerCase(Locale.ROOT);
         MediaType type=filename.endsWith(".pdf")?MediaType.APPLICATION_PDF:filename.endsWith(".docx")
                 ?MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.wordprocessingml.document"):MediaType.APPLICATION_OCTET_STREAM;

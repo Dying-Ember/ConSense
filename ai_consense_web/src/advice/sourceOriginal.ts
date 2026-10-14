@@ -33,7 +33,8 @@ export async function loadAdviceOriginal(projectId: string, citation: Citation, 
   const digest = first?.originalSourceSha256 ?? (citation as Citation & { originalSourceSha256?: string }).originalSourceSha256
   const sourceHash = first?.javaParsedSourceHash ?? citation.sourceHash
   const documentId = first?.documentId ?? citation.documentId
-  requireValue(sha(digest) && sha(sourceHash) && /^[1-9][0-9]*$/.test(String(documentId)), 'ADVICE_ORIGINAL_IDENTITY_UNAVAILABLE')
+  requireValue(sha(digest) && sha(sourceHash) && /^[1-9][0-9]*$/.test(String(documentId))
+    && ['tender', 'standard', 'project_fact', 'package_manifest'].includes(citation.sourceRole ?? ''), 'ADVICE_ORIGINAL_IDENTITY_UNAVAILABLE')
   requireValue(!first || (first.projectId === projectId && first.module === 'advisory'
     && (!citation.documentId || String(first.documentId) === String(citation.documentId))
     && (!citation.sourceHash || first.javaParsedSourceHash === citation.sourceHash)), 'ADVICE_ORIGINAL_ADDRESS_MISMATCH')
@@ -42,7 +43,7 @@ export async function loadAdviceOriginal(projectId: string, citation: Citation, 
     && address.javaParsedSourceHash === sourceHash && address.projectionSha256 === first.projectionSha256), 'ADVICE_ORIGINAL_ADDRESS_MISMATCH')
   const pointers: CanonicalEvidencePointer[] = []
   for (const address of addresses) pointers.push(await fetchCanonicalPointer(address, signal))
-  const query = new URLSearchParams({ scope, sourceHash, originalSourceSha256: digest })
+  const query = new URLSearchParams({ scope, sourceHash, originalSourceSha256: digest, sourceRole: citation.sourceRole! })
   if (first) { query.set('projectionSha256', first.projectionSha256); query.set('unitId', first.unitId) }
   const response = await fetch(`/api/advice/${encodeURIComponent(projectId)}/sources/${encodeURIComponent(String(documentId))}/original?${query}`, {
     credentials: 'same-origin', redirect: 'error', cache: 'no-store', signal
