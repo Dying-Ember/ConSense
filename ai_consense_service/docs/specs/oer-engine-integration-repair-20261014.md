@@ -9,6 +9,10 @@ execution: spec-only; first-identity-fix-recorded; remaining-work-not-started-by
 tracker: local-markdown
 ---
 
+<!-- implementation-progress-20261015:start -->
+> **2026-10-15 当前实施状态：** 统一实现与适用代码/本机环境自动化已收口，实际通过、123 条件 skipped、历史排除及九项 retired 见[统一实施记录](../testing/consense-integrated-implementation-20261015.md)。原 D1–D10／EAC01–22／ENG-00–10 完整保留；正常原件前后效果和独立来源质量未验收，按用户最新要求不开始，ENG-10 后置。原 08:30 目标未达，完整目标未 complete，下方 `spec-only` 和旧进度按历史语境读取。
+<!-- implementation-progress-20261015:end -->
+
 <!-- unified-spec-entry-20261014:start -->
 > **2026-10-14 当前总体实施入口：** [统一实施与验收 spec](consense-oer-vetting-advisory-integrated-20261014.md)及[统一任务图](consense-oer-vetting-advisory-integrated-tickets-20261014.md)。OER 原 D1–D10／EAC01–22／ENG-00–10 按[受保护引擎子规格](oer-engine-integration-repair-20261014.md)完整保留；产品问题 PRD01–08 与旧总 AC01–20 在统一入口逐项承接，业务成功不关闭 OER 来源质量门。下方原正文与状态保留原语境，已实现起点不重列未修，未验收／失败不追认通过。本次只调整规格与导航，Advisory 已停止测试保持，不启动实现、模型、训练、索引、自动 Goal 或部署。
 <!-- unified-spec-entry-20261014:end -->

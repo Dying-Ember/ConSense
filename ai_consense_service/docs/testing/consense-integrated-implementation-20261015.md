@@ -1,12 +1,37 @@
 # ConSense 统一实施进度与未验收门（2026-10-15）
 
-本记录是实施进度，不是来源质量或整体验收结论。统一规格与原 OER D1–D10、EAC01–22、ENG-00–10 全部保留。原北京时间 08:30 目标未达；完整 Goal 继续，截止提醒已停用。
+本记录是实施进度，不是来源质量或整体验收结论。统一规格与原 OER D1–D10、EAC01–22、ENG-00–10 全部保留。原北京时间 08:30 目标未达；当前代码/环境自动化阶段已收口，完整质量目标未完成，截止提醒保持 PAUSED。按用户要求停在代码验证阶段，不自动进入效果验证；本次 Goal 工具查询返回无活动目标，未调用 complete。
 
 **最新用户执行边界：环境和代码实现自动化必须继续完成并要求绿灯，效果验证暂不开始。** 赛方原件前后对照、真实解析效果评分、SL 版本对比及后续业务效果验收均保持未执行。前后端本地隔离预览已恢复，HTTP 页面、后端项目列表及前端代理均 200；预览使用此前已验证构建，不把可打开页面视作业务验收。
 
+**用户随后授权退役历史生成数据资产依赖，并要求合并所有代码分支统一测试。** 本地实现提交为 `a79c552bbe7e6a505f46f86bc14a7b3c2ff45368`；当前轻量 progress 等待测试提交 `7ef93e99e2019dab1f2f119571c9adb07ebcbf42`；分支统一提交 `5b870139069c224a09d7a03246ce95b7923b75f9` 覆盖全部 50 个本地/已获取远端引用，合并前后代码树相同。逐分支 patch/content 及独立审查确认独有意图已在当前实现中，保留较新修复，避免自动合并重复 WordCell、重复测试或恢复旧角色绕过。主目录源码相对受保护 overlay 无新增变动；其他工作区、活动服务/DB 未切换。
+
+当前测试契约提交 `1536fed649ce22c59349743f08e93337d9aaf6aa` 明确退役 8 个旧 receipt/core 重放与 1 个 64-query capture 重放；这 9 项原错误仍保留，**retired 不计 passed 或 skipped**。相关历史资产缺失，没有声称本轮删掉不存在文件；手写 legacy/source 快照及生产 helper 保留。新 15 个兼容安全契约和 8 个 CJK 用例定向 23/23 通过，保留三条原英文 literal、当前源码和身份失效、receipt/descriptor/AST 拒绝边界。110 个非测试 Python 文件前后 SHA 全同；最终 recovery06 全量 1,636/1,636 通过，0 失败/错误/跳过/未处理资源异常/运行中源码漂移。
+
+Java full08 保留实际 2,829 reported、2,705 通过、1 失败、0 errors、123 既有条件 skipped：AFTER_PACKET 进程恢复用例的同一行数量断言失败。停止后的隔离 DB 为 COMPLETED/2 包/2 findings，三轮有限单边界复现通过，尚未证明原失败的具体字段或根因。只增加首次终态 HTTP JSON 落盘和断言诊断，未改变 2 包/2 findings、25 秒、报告或幂等断言；最终 full09 已通过，包括全部 6 项进程恢复及 18 项工作流测试。不能把新轮通过或诊断增强称为原失败根因已修复。以下旧轮保留历史语境。
+
+## 当前最终自动化终态
+
+以下为合并全部现有代码分支后，对 `1536fed649ce22c59349743f08e93337d9aaf6aa` 生产/测试代码的最终验证。之后仅整理本记录及文档入口；不能将 overlapping focused 切片重复相加。
+
+| 检查 | 实际结果 | 忽略目录中的来源证据 |
+| --- | --- | --- |
+| Java full09 | Maven exit 0 / BUILD SUCCESS；289 suites，2,829 reported，2,706 通过，0 failures/errors，123 既有外部条件 skipped。 | `.local/state/java-final-integration-20261015/final-recovery04/full-attempt09/receipt.json`、`full-attempt09-terminal.json` 及同目录全量日志。 |
+| Python recovery06 | 1,636 run/1,636 passed，0 failures/errors/skipped/unexpectedSuccesses/unraisable；244 个源码文件无运行中或最终 SHA 漂移。 | `.local/python-full-validation-recovery06-20261015/receipt.json` 及同名全量日志。 |
+| 独立归档恢复检查 | 6/6 通过；不在上述 Python discovery 内。 | `.local/python-frozen-restore-recovery01.log`、`.local/code-environment-validation-recovery05.json`。 |
+| 前端 final09 | 166/166 通过，0 failure/skip/cancelled；5 个独立脚本各 exit 0；`vue-tsc --noEmit && vite build` exit 0。 | `.local/web-consolidated-final09-tests.log`、`web-consolidated-final09-standalone.json`、`web-consolidated-final09-build.log`。 |
+| 本机依赖/编译 | retrieval Python 的 `pip check`、两工具目录 `compileall` 及 `npm ls --depth=0` 均 exit 0。 | `.local/code-environment-validation-recovery05.json`。 |
+| 独立代码审查 | Standards/Spec 恢复差异及最终 3 测试差量均 0 开放代码必修；分支覆盖和 Python/前端终态另经只读复核。 | `.local/final-spec-delta-20261015/review.json`、`.local/consolidated-spec-review-20261015.json`、`.local/consolidated-spec-closeout-review-20261015.json` 及既有两轴报告。 |
+
+Java 123 项未执行的逐项名称及原始条件保存在 `externalSkippedCases`：需要真实 standards/sourceDir、原始捕获重放、模板/renderer/layout runtime 等外部输入，没有追认为通过。另明确排除 `OerAttachmentPythonDifferentialTest`、`OerSharedNoteAuthorDifferentialTest` 两整类，以及 `OerSharedNoteBusinessPolicyAuthorTest` 的 `everyActualSharedSeedUsesV4PolicyAtRealContextOnlyBusinessCall`、`oldV3AndUnknownPoliciesCannotUseV4SharedMembership` 两方法；它们依赖精确历史生成输出/捕获，未在本轮静默删除或放宽。这与用户已授权退役的 Python 九项分别记账。17 项 specification 身份/JPA 检查仍使用原件 SHA 绑定字节及人工 parsed-state，已执行通过；没有 fresh parse/OCR/效果评分。
+
+全部 50 个本地/已获取远端 refs 均为统一分支祖先；其中 1 个为 `origin/HEAD` 符号引用，实际分支引用为 49。分支合并收据为 `.local/branch-consolidation-20261015/merge-receipt.json`。代码提交、构建和当前预览分别固定身份；后端 JAR 为 79,604,696 bytes，SHA-256 `71454151c4fe8a3c6fc13065846834680ac1339f884e6e3c9e0376664634bc56`，其 609 main classes/39 resources 与最终已测生产字节相同。
+
+本机代码/环境检查通过不授予 Linux/断网/MySQL/K8s/H800 目标环境接受。原 08:30 截止未达、full07/full08 失败、九项退役及未执行门完整保留；本轮不宣告完整 Goal 或 OER 质量通过。
+
 本轮代码收尾已修 Vetting 普通原件角色绑定、Word 移动修订、嵌套单元格跨度及纵向合并续格开头的原生行定位。XML 回退中无法验证的合并保留原始格路径和合并值，并明确 unknown 与下载提示。最终前端 recovery08 为 **166/166 通过、0 失败、0 跳过，类型检查与 Vite 构建 exit 0**。独立 Standards 与 Spec 恢复差异终审均 0 开放代码必修，绑定工作字节清单 `266e26f197ce5f80d31c247c18a6c140f14c7a735ae79be99212f42798a9a447`；分别深入核查 33 和 31 文件，不冒称对所有历史整合内容逐行重审。下方旧轮状态保留历史语境，后续 Java/Python 实际终态另附。
 
-隔离分支为 `codex/consense-integrated-20261015`，实施固定起点为 `d2b280a5e17b2cba4ad373cc47fae50288e3bb6d`，交付整合起点为 `55fa448e965fab7f292d53fb63477bde7b2dfee6`。用户要求的 spec 本地提交已完成：`5f0b6eb38c2a1a78e23e6779b301f146b54d15b5`。实现整合仍在验证，不能把该文档提交称为代码完成。
+隔离分支为 `codex/consense-integrated-20261015`，实施固定起点为 `d2b280a5e17b2cba4ad373cc47fae50288e3bb6d`，交付整合起点为 `55fa448e965fab7f292d53fb63477bde7b2dfee6`。用户要求的 spec 本地提交为 `5f0b6eb38c2a1a78e23e6779b301f146b54d15b5`，不能将该文档提交当实现提交；实现、分支统一与最终测试提交见上方。
 
 ## 代码与检查
 
@@ -21,7 +46,7 @@
 
 以上检查存在继承和切片重叠，不能相加作唯一总数。
 
-## 完整自动化与审查的实际状态
+## 历史自动化与审查轮次（当前终态以上表为准）
 
 恢复后的最新 Java full06：289 类、2,818 reported、2,691 实际执行通过、0 failures/errors、127 既有条件 skipped，Maven BUILD SUCCESS。比旧轮多 4 个条件组未运行，是未传 `consense.test.specification-source`；这些测试使用精确原件字节及人工 parsed-state，只验证身份/持久化，不做 fresh parse 或质量评分。正在恢复旧轮同一精确字节参数重跑 full07，不能把这 4 组额外 skipped 当完成。默认系统 Python 缺 FastAPI 导致的 full05 失败保留，full06 已指定现有测试虚拟环境。Java full04 的 native malloc 中断与 Python 重启中断均无完整通过终态。
 
@@ -37,7 +62,7 @@ Standards 独立审查发现的全源平方级读取已修复；同一实际源�
 
 ## 真实验证顺序与边界
 
-继续完成代码、必要自动化与两轴审查后，首个真实验收是赛方 GCT、AoA 扫描件、SCC 等已登记原件，从正常上传、解析、持久化到原件回取，按完整同范围/同分母比较修复前后和旧正确保持。准备文件、人工 parsed-state、CAS 元数据和契约替身均不能替代该链。
+用户最新指示暂停全部效果验证，代码阶段收口后停手。只有用户恢复该阶段后，首个真实验收才是赛方 GCT、AoA 扫描件、SCC 等已登记原件，从正常上传、解析、持久化到原件回取，按完整同范围/同分母比较修复前后和旧正确保持。准备文件、人工 parsed-state、CAS 元数据和契约替身均不能替代该链。
 
 三份完整原件的独立 source-only 参考已准备完成；GCT/AoA 全六页已逐页查看，SCC 全部 native story/文字/表格/公式保留；CER 仍 null，未作人工确认或质量采用。隔离基线 archive 和只读持久化 CLOB 回读工具已准备，后者仅在 authored 内存 H2 自检。原件前后对照尚未执行，本轮实际模型调用为零，不能判断是否显著提升。只有明确改善后才做后续非端到端验收；SL 多版本比较最后处理。活动服务/数据库、fixed05/Local05、Drafting、gold、原件和权重未切换或发布，无自动 push/PR。
 

@@ -1,9 +1,15 @@
+<!-- current-consolidation-and-retirement-20261015:start -->
+**当前交接：适用代码/本机环境自动化已完成，停在效果验证之前。** Java full09 为 2,706 通过/0 failures/errors/123 既有外部条件 skipped，另有两历史重放类及两方法显式排除；Python recovery06 1,636/1,636、独立归档恢复 6/6，前端 166/166、五脚本、类型检查、构建及本机依赖检查通过。50 个 refs 包含 49 个分支引用及 `origin/HEAD`，均已覆盖。九项 retired 不计 passed/skipped；旧失败和原 OER 质量门保持。按用户要求到此停手；真实模型/原件/SL、端到端和实际目标验收不自动开始，完整目标未 complete。最终收据与范围见[实施记录](testing/consense-integrated-implementation-20261015.md)。
+
+**2026-10-15 最新执行口径：合并各代码分支、先收当前环境和代码自动化绿灯；不启动效果验证。** 用户授权清理历史生成数据资产，本轮据此退役旧兼容证明 8 项及 64-query capture 1 项的历史重放依赖；它们记为 retired，不追认通过或跳过，原红回执保留。相关旧资产原本不存在，未虚报删除文件；手写运行码、生产 opt-in helper 和当前拒绝守卫保持。当前统一分支 `codex/consense-integrated-20261015` 已覆盖 50 个本地/远端代码引用；功能先前已纳入者保留较新实现，不重复加旧字段或测试。最新完整自动化终态见 [统一实施记录](testing/consense-integrated-implementation-20261015.md)。真实原件/模型/SL 效果、端到端与实际部署门继续开放且暂缓。
+<!-- current-consolidation-and-retirement-20261015:end -->
+
 <!-- automated-validation-only-20261015:start -->
 **2026-10-15 最新用户边界：环境与代码实现自动化继续完成并要求绿灯，效果验证暂不开始。** 保留全部代码回归、类型检查、构建和两轴审查；赛方原件前后效果、实际模型效果评分、SL 对比及后续业务效果验收暂停。完整质量门保持未验收；缺资产或失败不能用删除断言、skip 或替造历史 receipt 换绿。当前进度与每轮实际终态见 [统一实施进度](testing/consense-integrated-implementation-20261015.md)及本地执行账本。
 <!-- automated-validation-only-20261015:end -->
 
 <!-- integrated-implementation-authorized-20261015:start -->
-**2026-10-15 用户已明确授权统一 spec 代码实现及自动化测试，目标北京时间今日 08:30。** 新指示覆盖下方本次规格编制期间的 spec-only／不启动 Goal 表述；原 08:30 目标已错过，当前聊天 Goal 继续 active；原截止 heartbeat 已 PAUSED，不再按过期截止唤醒。按统一 spec 与原 ENG 子规格完成全部代码及自动化，之后首要真实核验为赛方示例原件的正常 OER 修复前后效果（同范围／同分母／旧正确）；只有显著提升再做后续验收，有时间才做不同版本 SL 对比。端到端／浏览器验收先略过，不追认为已过。实际部署／活动服务或 DB／fixed05／Drafting／gold／权重发布边界保持。开发隔离分支为 codex/consense-integrated-20261015，既有状态、失败与未过门保留；详细当前进度在本地 .local/state/consense-implementation-20261015/execution-state.json，代码／契约与真实来源分开。
+**2026-10-15 用户已明确授权统一 spec 代码实现及自动化测试，目标北京时间今日 08:30。** 新指示覆盖下方本次规格编制期间的 spec-only／不启动 Goal 表述；原 08:30 目标已错过，原截止 heartbeat 已 PAUSED。本轮适用代码/本机环境自动化完成后按用户要求停手，效果阶段不自动开始；完整目标未 complete，本次 Goal 工具返回无活动目标。原计划的首要真实核验仍为赛方示例原件正常 OER 修复前后效果（同范围／同分母／旧正确），须待用户恢复效果验证后才执行；只有显著提升再做后续验收，SL 对比后置。端到端／浏览器验收先略过，不追认为已过。实际部署／活动服务或 DB／fixed05／Drafting／gold／权重发布边界保持。开发隔离分支为 codex/consense-integrated-20261015，既有状态、失败与未过门保留；详细当前进度在本地 .local/state/consense-implementation-20261015/execution-state.json，代码／契约与真实来源分开。
 <!-- integrated-implementation-authorized-20261015:end -->
 
 <!-- unified-spec-entry-20261014:start -->

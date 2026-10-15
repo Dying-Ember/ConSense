@@ -1,9 +1,15 @@
+<!-- current-consolidation-and-retirement-20261015:start -->
+**当前代码/本机环境阶段已收口，按用户要求停止在效果验证之前。** 最终 Java full09 为 2,706 通过/0 failures/errors/123 既有外部条件 skipped，另有两历史重放类及两方法显式排除；Python recovery06 为 1,636/1,636、独立归档恢复 6/6；前端 166/166、五脚本、类型检查、构建及本机依赖检查通过。50 个 refs（49 个分支引用及 `origin/HEAD`）全部已覆盖。九项退役不计通过/跳过；旧失败与未执行门保持，详情见[最终实施记录](testing/consense-integrated-implementation-20261015.md)。不自动开展真实模型、原件、SL、端到端或目标部署验收，完整质量目标未 complete。
+
+**2026-10-15 最新补充：先完成当前环境/代码自动化，统一代码分支，退役旧生成数据重放依赖；效果验证仍不开始。** 用户已确认未手工保存旧资产，并要求清理历史生成数据。旧兼容 receipt/core 回放 8 项及历史 64-query capture 回放 1 项已按此新指示明确退役，不计 passed 或 skipped；原失败紧凑记录保留。缺失资产没有实体可删，手写源码及生产可选兼容校验没有删除或放宽，当前自足的身份/SHA/AST/缓存失效保护继续验证。全部本地及已获取远端代码分支现统一到 `codex/consense-integrated-20261015`；逐分支核对后保留已有较新实现并补齐合并关系。赛方原件/gold/固定基线、活动服务和数据库不因分支整合切换；完整 OER 质量门仍未验收。
+<!-- current-consolidation-and-retirement-20261015:end -->
+
 <!-- automated-validation-only-20261015:start -->
 **2026-10-15 最新用户边界：环境与代码实现的自动化测试继续完成并要求绿灯，效果验证暂不开始。** 包括本地代码回归、类型检查、构建及独立代码审查；赛方原件正常流程前后效果对照、模型效果评分、SL 版本比较及其后的业务效果验收全部暂缓。失败、缺精确历史资产和中断原样保留，不删断言或 skip 换绿。该指示覆盖下方“自动化后立即进入原件效果验证”的执行时序，不缩减原 OER 规格、完整目标或质量门。
 <!-- automated-validation-only-20261015:end -->
 
 <!-- integrated-implementation-authorized-20261015:start -->
-**2026-10-15 用户已明确授权统一 spec 代码实现及自动化测试，目标北京时间今日 08:30。** 新指示覆盖下方本次规格编制期间的 spec-only／不启动 Goal 表述；原 08:30 目标已错过，当前聊天 Goal 继续 active；原截止 heartbeat 已 PAUSED，不再按过期截止唤醒。按统一 spec 与原 ENG 子规格完成全部代码及自动化，之后首要真实核验为赛方示例原件的正常 OER 修复前后效果（同范围／同分母／旧正确）；只有显著提升再做后续验收，有时间才做不同版本 SL 对比。端到端／浏览器验收先略过，不追认为已过。实际部署／活动服务或 DB／fixed05／Drafting／gold／权重发布边界保持。开发隔离分支为 codex/consense-integrated-20261015，既有状态、失败与未过门保留；详细当前进度在本地 .local/state/consense-implementation-20261015/execution-state.json，代码／契约与真实来源分开。
+**2026-10-15 用户已明确授权统一 spec 代码实现及自动化测试，目标北京时间今日 08:30。** 新指示覆盖下方本次规格编制期间的 spec-only／不启动 Goal 表述；原 08:30 目标已错过，原截止 heartbeat 已 PAUSED。本轮适用代码/本机环境自动化完成后按用户要求停手，效果阶段不自动开始；完整目标未 complete，本次 Goal 工具返回无活动目标。原计划的首要真实核验仍为赛方示例原件正常 OER 修复前后效果（同范围／同分母／旧正确），须待用户恢复效果验证后才执行；只有显著提升再做后续验收，SL 对比后置。端到端／浏览器验收先略过，不追认为已过。实际部署／活动服务或 DB／fixed05／Drafting／gold／权重发布边界保持。开发隔离分支为 codex/consense-integrated-20261015，既有状态、失败与未过门保留；详细当前进度在本地 .local/state/consense-implementation-20261015/execution-state.json，代码／契约与真实来源分开。
 <!-- integrated-implementation-authorized-20261015:end -->
 
 <!-- unified-spec-entry-20261014:start -->
