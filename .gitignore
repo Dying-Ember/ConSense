@@ -49,3 +49,7 @@ Thumbs.db
 
 # Local fixture HTTP captures are runtime evidence, not source fixtures
 /ai_consense_service/tools/vetting_eval/fixture_evidence/
+
+# Generated local progress evidence is archived separately from source.
+/outputs/oer-progress/index.html
+/outputs/oer-progress/progress-ledger.json

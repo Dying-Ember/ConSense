@@ -1,3 +1,7 @@
+<!-- main-canonical-20261015:start -->
+**2026-10-15 当前开发入口已按用户要求统一到主目录 main。** 已验证的统一提交 `4108497` 已快进合入，其他本地分支按可恢复引用/bundle/未提交字节快照归档；原工作区和忽略资产保留，当前归档状态与恢复入口见[main 统一与归档记录](testing/main-consolidation-20261015.md)。下方隔离分支名称按开发历史读取。代码/环境与真实效果分开，效果验证仍暂停，原 OER 要求不缩减。
+<!-- main-canonical-20261015:end -->
+
 <!-- current-consolidation-and-retirement-20261015:start -->
 **当前代码/本机环境阶段已收口，按用户要求停止在效果验证之前。** 最终 Java full09 为 2,706 通过/0 failures/errors/123 既有外部条件 skipped，另有两历史重放类及两方法显式排除；Python recovery06 为 1,636/1,636、独立归档恢复 6/6；前端 166/166、五脚本、类型检查、构建及本机依赖检查通过。50 个 refs（49 个分支引用及 `origin/HEAD`）全部已覆盖。九项退役不计通过/跳过；旧失败与未执行门保持，详情见[最终实施记录](testing/consense-integrated-implementation-20261015.md)。不自动开展真实模型、原件、SL、端到端或目标部署验收，完整质量目标未 complete。
 

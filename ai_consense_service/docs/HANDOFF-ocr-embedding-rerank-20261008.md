@@ -1,3 +1,7 @@
+<!-- main-canonical-20261015:start -->
+**2026-10-15 当前交接：后续开发使用 `D:\R&D\ConSense` 的 main。** 通过既有适用自动化的统一提交 `4108497` 已快进合入，其他分支可恢复归档，旧工作区目录和运行证据保留。归档清单、原未提交内容及恢复边界见[main 统一与归档记录](testing/main-consolidation-20261015.md)。下方隔离分支和历史状态不再作为当前开发入口；真实模型/原件/SL、端到端和实际部署验收继续暂停。
+<!-- main-canonical-20261015:end -->
+
 <!-- current-consolidation-and-retirement-20261015:start -->
 **当前交接：适用代码/本机环境自动化已完成，停在效果验证之前。** Java full09 为 2,706 通过/0 failures/errors/123 既有外部条件 skipped，另有两历史重放类及两方法显式排除；Python recovery06 1,636/1,636、独立归档恢复 6/6，前端 166/166、五脚本、类型检查、构建及本机依赖检查通过。50 个 refs 包含 49 个分支引用及 `origin/HEAD`，均已覆盖。九项 retired 不计 passed/skipped；旧失败和原 OER 质量门保持。按用户要求到此停手；真实模型/原件/SL、端到端和实际目标验收不自动开始，完整目标未 complete。最终收据与范围见[实施记录](testing/consense-integrated-implementation-20261015.md)。
 
