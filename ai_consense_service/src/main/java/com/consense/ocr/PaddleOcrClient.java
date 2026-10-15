@@ -16,6 +16,11 @@ import okhttp3.RequestBody;
 import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
+import java.io.FilterOutputStream;
+import java.io.IOException;
+import java.io.OutputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.Base64;
@@ -25,6 +30,8 @@ import java.util.Map;
 import java.util.Set;
 import java.util.HashSet;
 import java.util.Arrays;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 
 /**
  * PaddleOCR / PP-Structure 客户端。
@@ -86,33 +93,254 @@ public class PaddleOcrClient implements OcrClient {
     }
     @Override public JsonNode observeNativePdf(byte[] originalPdf, Map<String,Object> nativeContext) {
         if(!"local".equalsIgnoreCase(cfg.getMode()))return null;
-        JsonNode context=JsonUtils.mapper().valueToTree(nativeContext),source=context.path("source");
+        if(nativeContext==null)throw new BizException("Native PDF request original identity or scope differs");
+        JsonNode source=JsonUtils.mapper().valueToTree(nativeContext.get("source"));
+        JsonNode selected=JsonUtils.mapper().valueToTree(nativeContext.get("selectedPhysicalPages"));
         if(originalPdf==null || originalPdf.length<5 || !new String(originalPdf,0,5,java.nio.charset.StandardCharsets.US_ASCII).equals("%PDF-")
                 || !inputSha256(originalPdf).equals(source.path("sourceSha256").asText())
                 || source.path("sourceFilename").asText().trim().isEmpty() || !"application/pdf".equals(source.path("mediaType").asText())
                 || !source.path("pageCount").isIntegralNumber() || source.path("pageCount").asInt()<=0
-                || !context.path("selectedPhysicalPages").isArray() || context.path("selectedPhysicalPages").isEmpty())
+                || !selected.isArray() || selected.isEmpty())
             throw new BizException("Native PDF request original identity or scope differs");
-        Set<Integer> required=new HashSet<>();
-        for(JsonNode page:context.path("selectedPhysicalPages"))if(!page.isIntegralNumber() || page.asInt()<1
+        Set<Integer> required=new LinkedHashSet<>();
+        for(JsonNode page:selected)if(!page.isIntegralNumber() || page.asInt()<1
                 || page.asInt()>source.path("pageCount").asInt() || !required.add(page.asInt()))
             throw new BizException("Native PDF request physical-page scope differs");
-        MultipartBody body=new MultipartBody.Builder().setType(MultipartBody.FORM)
-                .addFormDataPart("file",source.path("sourceFilename").asText(),RequestBody.create(originalPdf,MediaType.get("application/pdf")))
-                .addFormDataPart("nativeContext",JsonUtils.write(context)).build();
-        JsonNode response=JsonUtils.parse(http.postMultipart(trim(cfg.getBaseUrl())+"/native-pdf/table-candidates",body,cfg.getTimeoutMs()));
+        Object evidence=nativeContext.get("javaNativeEvidence");
+        if(evidence!=null && !(evidence instanceof List<?>))throw new BizException("Native PDF Java evidence must retain its page list");
+        if(evidence!=null)for(Object page:(List<?>)evidence)if(!required.contains(nativeEvidencePage(page)))
+            throw new BizException("Native PDF Java evidence physical-page scope differs");
+        NativePdfBatches batches=new NativePdfBatches(originalPdf,nativeContext,source,new ArrayList<>(required));
+        List<Integer> pages=new ArrayList<>(required);
+        for(int start=0;start<pages.size();start+=NATIVE_PAGE_CAP)batches.observe(pages.subList(start,Math.min(start+NATIVE_PAGE_CAP,pages.size())));
+        return batches.result();
+    }
+
+    private static final int NATIVE_PAGE_CAP=64, NATIVE_CONTEXT_CAP=32*1024*1024, NATIVE_RESPONSE_CAP=8*1024*1024;
+    private static final String NATIVE_BATCH_SCHEMA="consense.native-pdf-batch-transport.v1";
+
+    private static int nativeEvidencePage(Object evidence) {
+        Object page=evidence instanceof com.consense.document.PdfPageEvidence?((com.consense.document.PdfPageEvidence)evidence).getPageNo()
+                :evidence instanceof Map<?,?>?((Map<?,?>)evidence).get("pageNo")
+                :evidence instanceof JsonNode?((JsonNode)evidence).path("pageNo"):null;
+        JsonNode number=JsonUtils.mapper().valueToTree(page);
+        if(!number.isIntegralNumber() || !number.canConvertToInt())throw new BizException("Native PDF Java evidence page number differs");
+        return number.asInt();
+    }
+
+    private final class NativePdfBatches {
+        private final byte[] original;
+        private final Map<String,Object> context;
+        private final JsonNode source;
+        private final List<Integer> selected;
+        private final ArrayNode records=JsonUtils.mapper().createArrayNode(),pages=JsonUtils.mapper().createArrayNode(),refs=JsonUtils.mapper().createArrayNode();
+        private JsonNode singleResponse;
+        private BizException firstFailure;
+        private boolean stopped,cleanupFailed;
+
+        private NativePdfBatches(byte[] original,Map<String,Object> context,JsonNode source,List<Integer> selected) {
+            this.original=original;this.context=context;this.source=source;this.selected=selected;
+        }
+
+        private void observe(List<Integer> batch) {
+            if(stopped){recordFailure(batch,"not_executed",null,null);return;}
+            Map<String,Object> scoped=new LinkedHashMap<>(context);scoped.put("selectedPhysicalPages",batch);
+            if(context.get("javaNativeEvidence") instanceof List<?>) {
+                List<Object> evidence=new ArrayList<>();
+                for(Object page:(List<?>)context.get("javaNativeEvidence"))if(batch.contains(nativeEvidencePage(page)))evidence.add(page);
+                scoped.put("javaNativeEvidence",evidence);
+            }
+            Path file=null;JsonNode response=null;ObjectNode record=null;
+            try {
+                file=Files.createTempFile("consense-native-context-",".json");
+                if(!writeNativeContext(file,scoped)) {
+                    boolean cleaned=cleanupNativeContext(file,batch,null);file=null;if(!cleaned)return;
+                    if(batch.size()==1)throw new BizException("Native PDF single-page context exceeds 33554432 bytes; complete evidence was not truncated");
+                    int middle=batch.size()/2;observe(batch.subList(0,middle));observe(batch.subList(middle,batch.size()));return;
+                }
+                MultipartBody body=new MultipartBody.Builder().setType(MultipartBody.FORM)
+                        .addFormDataPart("file",source.path("sourceFilename").asText(),RequestBody.create(original,MediaType.get("application/pdf")))
+                        .addFormDataPart("nativeContext","native-context.json",nativeContextBody(file)).build();
+                String raw=http.postMultipart(trim(cfg.getBaseUrl())+"/native-pdf/table-candidates",body,cfg.getTimeoutMs(),Collections.emptyMap(),NATIVE_RESPONSE_CAP);
+                if(raw==null)throw new BizException("Native PDF response is absent; no candidate was accepted");
+                response=JsonUtils.parse(raw);validateNativePdfResponse(response,source,batch);
+                singleResponse=response;
+                record=((ObjectNode)response).deepCopy();record.remove("pages");record.put("batchIndex",records.size());records.add(record);
+                ArrayNode observed=record.putArray("responseObservedPhysicalPages");for(JsonNode page:response.path("pages"))observed.add(page.path("physicalPageNo"));
+                refs.add(response.path("bundleRef"));
+                for(JsonNode page:response.path("pages")) {
+                    ObjectNode bound=((ObjectNode)page).deepCopy();bound.set("bundleRef",response.path("bundleRef"));
+                    if(!bound.has("coverage") && response.has("coverage"))bound.set("coverage",response.path("coverage"));
+                    pages.add(bound);
+                }
+                if("failed".equals(response.path("status").asText()) && response.path("pages").isEmpty())stopped=true;
+            } catch(Exception failure) {
+                BizException actual=failure instanceof BizException?(BizException)failure:new BizException("Native PDF batch transport failed: "+failure.getMessage());
+                if(firstFailure==null)firstFailure=actual;
+                record=recordFailure(batch,"failed",actual,response);stopped=true;
+            } finally {
+                if(file!=null)cleanupNativeContext(file,batch,record);
+            }
+        }
+
+        private ObjectNode recordFailure(List<Integer> batch,String status,BizException failure,JsonNode invalid) {
+            ObjectNode record=records.addObject();record.put("batchIndex",records.size()-1);record.put("status",status);
+            record.set("source",source);record.set("selectedPhysicalPages",JsonUtils.mapper().valueToTree(batch));
+            record.putArray("responseObservedPhysicalPages");
+            ObjectNode reason=record.putObject("failure");reason.put("type",failure==null?"NotExecutedAfterBatchFailure":"NativePdfBatchTransportFailure");
+            reason.put("message",failure==null?"An earlier batch failed; this batch was not dispatched":failure.getMessage());
+            if(invalid!=null)record.set("invalidResponse",invalid);
+            return record;
+        }
+
+        private boolean cleanupNativeContext(Path file,List<Integer> batch,ObjectNode record) {
+            try{Files.deleteIfExists(file);return true;}catch(IOException failure) {
+                if(record==null) {
+                    BizException actual=new BizException("Native PDF temporary context cleanup failed before dispatch: "+failure.getMessage());
+                    record=recordFailure(batch,"failed",actual,null);if(firstFailure==null)firstFailure=actual;
+                }
+                ObjectNode cleanup=record.putObject("transportCleanupFailure");cleanup.put("path",file.toAbsolutePath().toString());
+                cleanup.put("type",failure.getClass().getSimpleName());cleanup.put("message",failure.getMessage());cleanup.put("cleanupStatus","not_cleaned");
+                stopped=true;cleanupFailed=true;return false;
+            }
+        }
+
+        private JsonNode result() {
+            if(records.size()==1 && !cleanupFailed) {
+                if(firstFailure!=null)throw firstFailure;
+                return singleResponse;
+            }
+            ObjectNode result=JsonUtils.mapper().createObjectNode();result.put("schema","consense.native-pdf-candidates.v1");
+            result.put("transportSchema",NATIVE_BATCH_SCHEMA);result.set("source",source);
+            result.set("selectedPhysicalPages",JsonUtils.mapper().valueToTree(selected));result.set("pages",pages);result.set("batchResults",records);
+            ObjectNode bundle=result.putObject("bundleRef");bundle.put("schema","consense.native-pdf-batch-bundle-refs.v1");bundle.set("batchBundleRefs",refs);
+            ArrayNode cleanup=result.putArray("transportCleanupFailures");for(JsonNode record:records)if(record.has("transportCleanupFailure"))cleanup.add(record.path("transportCleanupFailure"));
+            Set<Integer> observed=new HashSet<>();int successes=0,failures=0;
+            for(JsonNode page:pages) {
+                observed.add(page.path("physicalPageNo").asInt());
+                for(JsonNode method:page.path("methods"))if("failed".equals(method.path("status").asText()))failures++;else successes++;
+            }
+            ArrayNode missing=result.putArray("unobservedPhysicalPages");for(Integer page:selected)if(!observed.contains(page))missing.add(page);
+            result.put("status",successes==0?"failed":failures>0 || !missing.isEmpty() || !cleanup.isEmpty()?"partial":"candidate_observed");
+            result.put("sourceQualityAccepted",false);result.put("canonicalAdopted",false);
+            if(!missing.isEmpty())result.putObject("failure").put("type","NativePdfBatchIncomplete").put("message","Complete requested denominator retained; unobserved pages are unknown");
+            else if(!cleanup.isEmpty())result.putObject("failure").put("type","NativePdfContextCleanupFailure").put("message","Actual candidates retained; temporary native context was not cleaned");
+            validateNativePdfCandidateResponse(result,source,selected);
+            return result;
+        }
+    }
+
+    private static boolean writeNativeContext(Path path,Map<String,Object> context) throws IOException {
+        try(CappedNativeContext output=new CappedNativeContext(Files.newOutputStream(path))) {
+            try{JsonUtils.mapper().writeValue(output,context);return true;}catch(IOException failure){if(output.exceeded)return false;throw failure;}
+        }
+    }
+
+    private static RequestBody nativeContextBody(Path path) {
+        RequestBody file=RequestBody.create(path.toFile(),MediaType.get("application/json"));
+        return new RequestBody() {
+            @Override public MediaType contentType(){return file.contentType();}
+            @Override public long contentLength() throws IOException{return file.contentLength();}
+            @Override public void writeTo(okio.BufferedSink sink) throws IOException{file.writeTo(sink);}
+            @Override public boolean isOneShot(){return true;}
+        };
+    }
+
+    private static final class CappedNativeContext extends FilterOutputStream {
+        private long count;private boolean exceeded;
+        private CappedNativeContext(OutputStream output){super(output);}
+        private void reserve(int bytes) throws IOException {if(count+bytes>NATIVE_CONTEXT_CAP){exceeded=true;throw new IOException("Native PDF context byte cap exceeded");}count+=bytes;}
+        @Override public void write(int value) throws IOException {reserve(1);out.write(value);}
+        @Override public void write(byte[] value,int offset,int length) throws IOException {reserve(length);out.write(value,offset,length);}
+    }
+
+    /** Both real and alternate OCR clients must preserve the same complete source/batch contract. */
+    public static void validateNativePdfCandidateResponse(JsonNode response,JsonNode source,List<Integer> selected) {
+        if(!response.has("transportSchema")){validateNativePdfResponse(response,source,selected);return;}
+        if(!NATIVE_BATCH_SCHEMA.equals(response.path("transportSchema").asText())
+                || !"consense.native-pdf-candidates.v1".equals(response.path("schema").asText())
+                || !response.path("source").equals(source) || !response.path("selectedPhysicalPages").equals(JsonUtils.mapper().valueToTree(selected))
+                || !response.path("pages").isArray() || !response.path("batchResults").isArray() || response.path("batchResults").isEmpty()
+                || !"consense.native-pdf-batch-bundle-refs.v1".equals(response.path("bundleRef").path("schema").asText())
+                || !response.path("bundleRef").path("batchBundleRefs").isArray()
+                || !response.path("sourceQualityAccepted").isBoolean() || response.path("sourceQualityAccepted").asBoolean()
+                || !response.path("canonicalAdopted").isBoolean() || response.path("canonicalAdopted").asBoolean())
+            throw new BizException("Native PDF aggregate source or explicit transport contract differs");
+        Map<Integer,JsonNode> observed=new LinkedHashMap<>();
+        for(JsonNode page:response.path("pages"))if(!page.isObject() || !page.path("physicalPageNo").isIntegralNumber()
+                || !selected.contains(page.path("physicalPageNo").asInt()) || observed.put(page.path("physicalPageNo").asInt(),page)!=null)
+            throw new BizException("Native PDF aggregate physical-page binding differs");
+        List<Integer> requested=new ArrayList<>();Set<Integer> accounted=new HashSet<>();ArrayNode refs=JsonUtils.mapper().createArrayNode(),cleanup=JsonUtils.mapper().createArrayNode();
+        boolean priorFailure=false;int index=0,successes=0,failures=0;
+        for(JsonNode batch:response.path("batchResults")) {
+            if(!batch.isObject() || !batch.path("source").equals(source) || !batch.path("batchIndex").isIntegralNumber()
+                    || batch.path("batchIndex").asInt()!=index++ || !batch.path("selectedPhysicalPages").isArray()
+                    || batch.path("selectedPhysicalPages").isEmpty() || batch.path("selectedPhysicalPages").size()>NATIVE_PAGE_CAP
+                    || !batch.path("responseObservedPhysicalPages").isArray())
+                throw new BizException("Native PDF aggregate batch identity or scope differs");
+            List<Integer> scope=new ArrayList<>(),actual=new ArrayList<>();
+            for(JsonNode page:batch.path("selectedPhysicalPages")) {
+                if(!page.isIntegralNumber() || !selected.contains(page.asInt()) || requested.contains(page.asInt()))
+                    throw new BizException("Native PDF aggregate duplicated or borrowed a requested page");
+                scope.add(page.asInt());requested.add(page.asInt());
+            }
+            ArrayNode batchPages=JsonUtils.mapper().createArrayNode();
+            for(JsonNode page:batch.path("responseObservedPhysicalPages")) {
+                if(!page.isIntegralNumber() || !scope.contains(page.asInt()) || !accounted.add(page.asInt()) || !observed.containsKey(page.asInt()))
+                    throw new BizException("Native PDF aggregate observed page is unbound or duplicated");
+                JsonNode bound=observed.get(page.asInt());
+                if(!bound.path("bundleRef").equals(batch.path("bundleRef")))throw new BizException("Native PDF aggregate page borrowed another batch bundle");
+                actual.add(page.asInt());batchPages.add(bound);
+            }
+            String status=batch.path("status").asText();
+            if(batch.path("bundleRef").isObject()) {
+                if(priorFailure)throw new BizException("Native PDF aggregate observed a batch after an earlier transport failure");
+                ObjectNode wire=((ObjectNode)batch).deepCopy();wire.set("pages",batchPages);validateNativePdfResponse(wire,source,scope);refs.add(batch.path("bundleRef"));
+                if(actual.isEmpty())priorFailure=true;
+                for(JsonNode page:batchPages)for(JsonNode method:page.path("methods"))if("failed".equals(method.path("status").asText()))failures++;else successes++;
+            } else {
+                if(!actual.isEmpty() || !batch.path("failure").isObject()
+                        || !("failed".equals(status) && "NativePdfBatchTransportFailure".equals(batch.path("failure").path("type").asText())
+                        || "not_executed".equals(status) && priorFailure && "NotExecutedAfterBatchFailure".equals(batch.path("failure").path("type").asText())))
+                    throw new BizException("Native PDF aggregate missing page has no actual failure or unexecuted basis");
+                priorFailure=true;
+            }
+            if(batch.has("transportCleanupFailure")) {
+                JsonNode failure=batch.path("transportCleanupFailure");
+                if("not_executed".equals(status) || !failure.isObject() || !"not_cleaned".equals(failure.path("cleanupStatus").asText())
+                        || failure.path("type").asText().isEmpty() || failure.path("path").asText().isEmpty() || !Path.of(failure.path("path").asText()).isAbsolute())
+                    throw new BizException("Native PDF aggregate cleanup failure lost its exact residual path or state");
+                cleanup.add(failure);priorFailure=true;
+            }
+        }
+        ArrayNode missing=JsonUtils.mapper().createArrayNode();for(Integer page:selected)if(!observed.containsKey(page))missing.add(page);
+        String terminal=successes==0?"failed":failures>0 || !missing.isEmpty() || !cleanup.isEmpty()?"partial":"candidate_observed";
+        if(!requested.equals(selected) || !accounted.equals(observed.keySet()) || !missing.equals(response.path("unobservedPhysicalPages"))
+                || !refs.equals(response.path("bundleRef").path("batchBundleRefs")) || !terminal.equals(response.path("status").asText())
+                || response.has("transportCleanupFailures") && !cleanup.equals(response.path("transportCleanupFailures"))
+                || !response.has("transportCleanupFailures") && !cleanup.isEmpty() || response.path("batchResults").size()==1 && cleanup.isEmpty()
+                || !missing.isEmpty() && !"NativePdfBatchIncomplete".equals(response.path("failure").path("type").asText())
+                || missing.isEmpty() && !cleanup.isEmpty() && !"NativePdfContextCleanupFailure".equals(response.path("failure").path("type").asText()))
+            throw new BizException("Native PDF aggregate full denominator, bundle references or terminal differs");
+    }
+
+    private static void validateNativePdfResponse(JsonNode response,JsonNode source,List<Integer> selected) {
+        Set<Integer> required=new HashSet<>(selected);
         if(!response.isObject() || !"consense.native-pdf-candidates.v1".equals(response.path("schema").asText())
                 || !Arrays.asList("candidate_observed","partial","failed").contains(response.path("status").asText())
                 || !response.path("source").path("sourceSha256").equals(source.path("sourceSha256"))
                 || !response.path("pages").isArray() || !response.path("bundleRef").isObject()
+                || response.has("transportSchema")
+                || "consense.native-pdf-batch-bundle-refs.v1".equals(response.path("bundleRef").path("schema").asText())
                 || response.path("sourceQualityAccepted").asBoolean() || response.path("canonicalAdopted").asBoolean())
             throw new BizException("Native PDF candidate response source, task or protocol differs");
-        if("failed".equals(response.path("status").asText()) && response.path("pages").isEmpty() && response.path("failure").isObject())return response;
         if(!response.path("source").path("pageCount").isIntegralNumber()
                 || response.path("source").path("pageCount").asInt(-1)!=source.path("pageCount").asInt(-2)
                 || !response.path("source").path("sourceFilename").equals(source.path("sourceFilename"))
-                || !response.path("selectedPhysicalPages").equals(context.path("selectedPhysicalPages")))
+                || !response.path("source").path("mediaType").equals(source.path("mediaType"))
+                || !response.path("selectedPhysicalPages").equals(JsonUtils.mapper().valueToTree(selected)))
             throw new BizException("Native PDF candidate response original page-count or task differs");
+        if("failed".equals(response.path("status").asText()) && response.path("pages").isEmpty() && response.path("failure").isObject())return;
         Set<Integer> actual=new HashSet<>();int successes=0,failures=0;
         for(JsonNode page:response.path("pages")) {
             if(!page.path("physicalPageNo").isIntegralNumber() || !required.contains(page.path("physicalPageNo").asInt())
@@ -135,7 +363,6 @@ public class PaddleOcrClient implements OcrClient {
         String terminal=successes==0?"failed":failures>0?"partial":"candidate_observed";
         if(!terminal.equals(response.path("status").asText()))
             throw new BizException("Native PDF candidate terminal differs from actual method failures");
-        return response;
     }
 
     @Override

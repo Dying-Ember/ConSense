@@ -139,7 +139,10 @@ public class HttpSupport {
     }
 
     private RequestBody oneShotJson(String json) {
-        final RequestBody body = RequestBody.create(json, JSON);
+        return oneShotBody(RequestBody.create(json, JSON));
+    }
+
+    private RequestBody oneShotBody(RequestBody body) {
         return new RequestBody() {
             @Override public MediaType contentType() { return body.contentType(); }
             @Override public long contentLength() throws IOException { return body.contentLength(); }
@@ -165,9 +168,17 @@ public class HttpSupport {
     }
 
     public String postMultipart(String url, MultipartBody body, long timeoutMs, Map<String,String> headers) {
-        Request.Builder request = new Request.Builder().url(url).post(body);
+        return postMultipart(url, body, timeoutMs, headers, 0);
+    }
+
+    /** A positive byte cap applies to the decoded response stream; existing calls remain unchanged. */
+    public String postMultipart(String url, MultipartBody body, long timeoutMs, Map<String,String> headers, int maxResponseBytes) {
+        if (maxResponseBytes < 0 || maxResponseBytes == Integer.MAX_VALUE) throw new IllegalArgumentException("Invalid HTTP response byte cap");
+        // OkHttp 4.12 MultipartBody does not propagate a part's one-shot flag.
+        RequestBody actual = body.parts().stream().anyMatch(part -> part.body().isOneShot()) ? oneShotBody(body) : body;
+        Request.Builder request = new Request.Builder().url(url).post(actual);
         headers.forEach(request::header);
-        return execute(request.build(), timeoutMs, 0);
+        return execute(request.build(), timeoutMs, 0, maxResponseBytes);
     }
 
     public String putJson(String url, String json, long timeoutMs) {
@@ -187,16 +198,25 @@ public class HttpSupport {
     }
 
     private String execute(Request request, long timeoutMs, int maxRetry) {
+        return execute(request, timeoutMs, maxRetry, 0);
+    }
+
+    private String execute(Request request, long timeoutMs, int maxRetry, int maxResponseBytes) {
         int attempts = Math.max(1, maxRetry + 1);
         IOException last = null;
         for (int i = 1; i <= attempts; i++) {
-            OkHttpClient client = shared.newBuilder()
+            OkHttpClient.Builder clientBuilder = shared.newBuilder()
                     .readTimeout(timeoutMs, TimeUnit.MILLISECONDS)
                     .writeTimeout(timeoutMs, TimeUnit.MILLISECONDS)
-                    .callTimeout(timeoutMs + 5_000, TimeUnit.MILLISECONDS)
-                    .build();
-            try (Response response = client.newCall(request).execute()) {
-                String body = response.body() == null ? "" : response.body().string();
+                    .callTimeout(timeoutMs + 5_000, TimeUnit.MILLISECONDS);
+            if (request.body() != null && request.body().isOneShot()) {
+                clientBuilder.retryOnConnectionFailure(false).followRedirects(false).followSslRedirects(false);
+            }
+            OkHttpClient client = clientBuilder.build();
+            Call call = client.newCall(request);
+            try (Response response = call.execute()) {
+                String body = maxResponseBytes > 0 ? boundedResponse(response, maxResponseBytes, call)
+                        : response.body() == null ? "" : response.body().string();
                 if (!response.isSuccessful()) {
                     throw new BizException("调用 " + request.url().encodedPath()
                             + " 失败: HTTP " + response.code() + " " + truncate(body));
@@ -209,6 +229,15 @@ public class HttpSupport {
         }
         throw new BizException("无法连接 " + request.url().host() + ":" + request.url().port()
                 + "，请确认本地服务已启动（" + (last == null ? "unknown" : last.getMessage()) + "）");
+    }
+
+    private static String boundedResponse(Response response, int cap, Call call) throws IOException {
+        ResponseBody body = response.body();
+        if (body == null) return "";
+        if (body.contentLength() > cap) { call.cancel(); throw new BizException("HTTP response exceeds " + cap + " bytes"); }
+        byte[] bytes = body.byteStream().readNBytes(cap + 1);
+        if (bytes.length > cap) { call.cancel(); throw new BizException("HTTP response exceeds " + cap + " bytes"); }
+        try (ResponseBody bounded = ResponseBody.create(bytes, body.contentType())) { return bounded.string(); }
     }
 
     private String truncate(String text) {

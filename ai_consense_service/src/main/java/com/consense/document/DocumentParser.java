@@ -4,6 +4,7 @@ import com.consense.common.BizException;
 import com.consense.common.JsonUtils;
 import com.consense.config.ConsenseProperties;
 import com.consense.ocr.OcrClient;
+import com.consense.ocr.PaddleOcrClient;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.RequiredArgsConstructor;
@@ -428,22 +429,27 @@ public class DocumentParser {
         if(!plan.confirmedNonDrawing()){state.put("status","not_executed_identity_unbound");return;}
         Map<String,Object> context=DocumentParseProbe.map("source",DocumentParseProbe.map("sourceFilename",fileName,"sourceSha256",sha,
                 "mediaType","application/pdf","pageCount",pageCount),"selectedPhysicalPages",selected,"readingPlan",plan.metadata(),"javaNativeEvidence",observations);
-        try(DocumentParseProbe.Timer timer=probe.measure("native_pdf_table_candidates",null,"Single original-byte CPU candidate task for actual observed native gaps; no adoption or Java reparse")) {
-            probe.binary("native_pdf_actual_input",null,DocumentParseProbe.map("nativeContext",context,"boundary","Exact original PDF supplied once; Java and provider glyph namespaces are independent"),original,"pdf");
+        try(DocumentParseProbe.Timer timer=probe.measure("native_pdf_table_candidates",null,"Original-byte CPU candidate task in bounded complete-page batches; no adoption or Java reparse")) {
+            probe.binary("native_pdf_actual_input",null,DocumentParseProbe.map("nativeContext",context,"boundary","Each transport batch receives the same exact complete original PDF; Java and provider glyph namespaces are independent"),original,"pdf");
             JsonNode response=ocrClient.observeNativePdf(original,context);
             if(response==null){state.put("status","not_executed_legacy_or_unsupported_client");return;}
+            PaddleOcrClient.validateNativePdfCandidateResponse(response,JsonUtils.mapper().valueToTree(context.get("source")),selected);
             if(!response.isObject() || !"consense.native-pdf-candidates.v1".equals(response.path("schema").asText())
                     || !java.util.Arrays.asList("candidate_observed","partial","failed").contains(response.path("status").asText())
                     || !sha.equals(response.path("source").path("sourceSha256").asText()) || !response.path("pages").isArray())
                 throw new IOException("Native table candidate original source or selected physical-page bindings differ");
             boolean fatal="failed".equals(response.path("status").asText()) && response.path("pages").isEmpty() && response.path("failure").isObject();
-            if(!fatal && (response.path("source").path("pageCount").asInt()!=pageCount
+            boolean batched="consense.native-pdf-batch-transport.v1".equals(response.path("transportSchema").asText());
+            if(!fatal && !batched && (response.path("source").path("pageCount").asInt()!=pageCount
                     || !response.path("selectedPhysicalPages").equals(JsonUtils.mapper().valueToTree(selected)) || response.path("pages").size()!=selected.size()))
                 throw new IOException("Native table candidate original page-count or task differs");
             state.setAll((ObjectNode)response.deepCopy());state.put("sourcePageCount",pageCount);
             state.put("sourceQualityAccepted",false);state.put("canonicalAdopted",false);
             state.set("requestedPhysicalPages",JsonUtils.mapper().valueToTree(selected));
             state.set("unselectedPhysicalPages",JsonUtils.mapper().valueToTree(unselected));state.put("unselectedNativeTableStatus","unknown");
+            if(batched && !response.path("unobservedPhysicalPages").isEmpty())coverage.getLimitations().add("Native table candidates were not observed for physical pages "
+                    +response.path("unobservedPhysicalPages")+"; complete requested scope and per-batch failure/unexecuted evidence are retained as unknown.");
+            if(batched && !response.path("transportCleanupFailures").isEmpty())coverage.getLimitations().add("Native table temporary context cleanup failed; exact residual paths and reasons are retained in the transport cleanup ledger.");
             java.util.Set<Integer> observedPages=new java.util.HashSet<>();
             for(JsonNode page:response.path("pages"))if(!selected.contains(page.path("physicalPageNo").asInt())
                     || !observedPages.add(page.path("physicalPageNo").asInt()) || !page.path("methods").isArray() || page.path("methods").size()!=3)
@@ -452,7 +458,8 @@ public class DocumentParser {
                 int physical=page.path("physicalPageNo").asInt();DocumentBlock candidate=block("native_table_candidate",
                         "pdf-page/"+physical+"/native-table-method/"+method.path("method").asText(),physical,"","native_table_candidate");
                 ObjectNode observed=((ObjectNode)method).deepCopy();observed.put("physicalPageNo",physical);observed.set("frame",page.path("frame").deepCopy());
-                observed.set("coverage",(page.has("coverage")?page.path("coverage"):response.path("coverage")).deepCopy());observed.set("bundleRef",response.path("bundleRef").deepCopy());
+                observed.set("coverage",(page.has("coverage")?page.path("coverage"):response.path("coverage")).deepCopy());
+                observed.set("bundleRef",(batched?page.path("bundleRef"):response.path("bundleRef")).deepCopy());
                 observed.set("sourceObservationRef",page.path("sourceObservationRef").deepCopy());
                 observed.set("nativeGlyphNamespace",page.path("nativeGlyphNamespace").deepCopy());observed.put("sourceSha256",sha);
                 observed.put("semanticStatus","candidate_unverified");candidate.setNativeTableCandidate(observed);blocks.add(candidate);

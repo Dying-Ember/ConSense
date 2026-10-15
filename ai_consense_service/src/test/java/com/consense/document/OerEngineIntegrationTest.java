@@ -124,7 +124,7 @@ class OerEngineIntegrationTest {
                         "sourceSha256",DocumentParseProbe.sha256(bytes),"documentFamily","GCC","identityStatus","content_supported"),
                 "javaNativeEvidence",Collections.emptyList());
         ConsenseProperties.Ocr cfg=new ConsenseProperties().getOcr();cfg.setMode("local");HttpSupport http=mock(HttpSupport.class);
-        when(http.postMultipart(endsWith("/native-pdf/table-candidates"),any(),anyLong())).thenAnswer(invocation->{
+        when(http.postMultipart(endsWith("/native-pdf/table-candidates"),any(),anyLong(),anyMap(),eq(8*1024*1024))).thenAnswer(invocation->{
             okhttp3.MultipartBody body=invocation.getArgument(1);assertEquals(2,body.parts().size());
             okio.Buffer actual=new okio.Buffer();body.part(0).body().writeTo(actual);assertArrayEquals(bytes,actual.readByteArray());
             assertTrue(body.part(0).headers().get("Content-Disposition").contains("native-source.pdf"));
@@ -135,13 +135,13 @@ class OerEngineIntegrationTest {
         PaddleOcrClient client=new PaddleOcrClient(cfg,http);assertEquals("partial",client.observeNativePdf(bytes,context).path("status").asText());
         com.fasterxml.jackson.databind.node.ObjectNode wrong=nativeTableReply(context);
         ((com.fasterxml.jackson.databind.node.ObjectNode)wrong.path("pages").get(0)).put("physicalPageNo",2);
-        doReturn(JsonUtils.write(wrong)).when(http).postMultipart(anyString(),any(),anyLong());
+        doReturn(JsonUtils.write(wrong)).when(http).postMultipart(anyString(),any(),anyLong(),anyMap(),eq(8*1024*1024));
         assertThrows(com.consense.common.BizException.class,()->client.observeNativePdf(bytes,context));
         wrong=nativeTableReply(context);((com.fasterxml.jackson.databind.node.ArrayNode)wrong.path("pages").get(0).path("methods")).remove(1);
-        doReturn(JsonUtils.write(wrong)).when(http).postMultipart(anyString(),any(),anyLong());
+        doReturn(JsonUtils.write(wrong)).when(http).postMultipart(anyString(),any(),anyLong(),anyMap(),eq(8*1024*1024));
         assertThrows(com.consense.common.BizException.class,()->client.observeNativePdf(bytes,context));
         wrong=nativeTableReply(context);wrong.put("status","failed");wrong.putArray("pages");wrong.set("failure",JsonUtils.parse("{\"type\":\"ReplyByteCapExceeded\",\"message\":\"whole raw bundle retained\"}"));
-        doReturn(JsonUtils.write(wrong)).when(http).postMultipart(anyString(),any(),anyLong());
+        doReturn(JsonUtils.write(wrong)).when(http).postMultipart(anyString(),any(),anyLong(),anyMap(),eq(8*1024*1024));
         assertEquals("failed",client.observeNativePdf(bytes,context).path("status").asText());
         cfg.setMode("classic");assertNull(client.observeNativePdf(bytes,context));
     }

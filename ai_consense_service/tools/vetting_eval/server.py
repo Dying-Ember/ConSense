@@ -467,17 +467,18 @@ def ocr(file: UploadFile = File(...), purpose: Annotated[str | None, Header(alia
 
 
 @app.post('/native-pdf/table-candidates')
-def native_pdf_table_candidates(file: UploadFile = File(...),
-        native_context: Annotated[str, Form(alias='nativeContext')] = ...):
+def native_pdf_table_candidates(file: Annotated[UploadFile, File()],
+        native_context: Annotated[UploadFile | str, File(alias='nativeContext')]):
     from artifact_store import ArtifactStore
     from native_pdf_candidates import capture_native_pdf_candidates, MAX_PDF_BYTES, MAX_CONTEXT_BYTES
     raw = file.file.read(MAX_PDF_BYTES + 1)
     if len(raw) > MAX_PDF_BYTES:
         raise HTTPException(413, 'Original PDF exceeds 64 MiB')
-    if len(native_context.encode('utf-8')) > MAX_CONTEXT_BYTES:
+    context = native_context.encode('utf-8') if isinstance(native_context, str) else native_context.file.read(MAX_CONTEXT_BYTES + 1)
+    if len(context) > MAX_CONTEXT_BYTES:
         raise HTTPException(413, 'Native context exceeds the configured complete byte limit')
     with LOCK:
-        return capture_native_pdf_candidates(raw, native_context,
+        return capture_native_pdf_candidates(raw, context,
             artifact_store=ArtifactStore(STATE / 'native-pdf-candidates'))
 
 
