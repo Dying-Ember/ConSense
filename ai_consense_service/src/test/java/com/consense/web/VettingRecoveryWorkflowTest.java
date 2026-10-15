@@ -46,6 +46,7 @@ class VettingRecoveryWorkflowTest {
     @DynamicPropertySource static void isolation(DynamicPropertyRegistry r){r.add("spring.datasource.url",()->"jdbc:h2:mem:recovery_"+ID+";MODE=MySQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE");r.add("consense.storage-root",()->Paths.get("target","recovery-uploads",ID).toAbsolutePath().toString());}
     @Autowired MockMvc http;
     @Autowired VettingService service;
+    @Autowired com.consense.service.prompt.PromptService promptService;
     @Autowired ConsenseProperties props;
     @Autowired ProjectRepository projects;
     @Autowired SourceDocumentRepository documents;
@@ -66,6 +67,7 @@ class VettingRecoveryWorkflowTest {
     @MockBean VettingRetrievalClient retrieval;
     private final AtomicReference<List<VettingCorpus.Chunk>> corpus=new AtomicReference<>();
     @BeforeEach void fixture(){
+        promptService.reset(com.consense.service.prompt.PromptCatalog.KEY_VETTING);
         semantic.setInputBudgetObserver(VettingTokenFixture::observe);
         props.getVetting().setSemanticTopics(2);props.getVetting().setProjectReferenceComparisons(0);props.getVetting().setProbeDirectory(null);
         when(ai.available()).thenReturn(true);when(ai.chatModel()).thenReturn("fixture-only");
@@ -73,6 +75,25 @@ class VettingRecoveryWorkflowTest {
         when(retrieval.retrieve(anyString(),anyString(),anyString(),anyList())).thenAnswer(call->((List<VettingCorpus.Chunk>)call.getArgument(3)).stream().filter(c->call.getArgument(2).equals(c.getRole())).collect(Collectors.toList()));
         when(ai.completeStructuredJsonList(anyString(),anyString(),eq(VettingSemanticReview.Record.class),any(),anyList())).thenAnswer(call->records("issue"));
     }
+    @Test void persistedSupplementIsFrozenForEveryPacketAndBindsTheNextGeneratedRevision() throws Exception {
+        String key=com.consense.service.prompt.PromptCatalog.KEY_VETTING;
+        String first="AUTHORED_SUPPLEMENT_A: keep the fixture register.",second="AUTHORED_SUPPLEMENT_B: retain the fixture register.";
+        promptService.save(key,first,promptService.userTemplate(key));
+        CountDownLatch entered=new CountDownLatch(1),release=new CountDownLatch(1);List<String> systems=new CopyOnWriteArrayList<>();AtomicInteger ordinal=new AtomicInteger();
+        when(ai.completeStructuredJsonList(anyString(),anyString(),eq(VettingSemanticReview.Record.class),any(),anyList())).thenAnswer(call->{
+            systems.add(call.getArgument(0));if(ordinal.incrementAndGet()==1){entered.countDown();assertTrue(release.await(10,TimeUnit.SECONDS));}return records("issue");
+        });
+        String project=project(),run=start(project);
+        assertTrue(entered.await(10,TimeUnit.SECONDS));try{promptService.save(key,second,promptService.userTemplate(key));}finally{release.countDown();}
+        JsonNode completed=await(project,run,"COMPLETED");assertEquals(VettingPromptPolicy.supplementSha256(first),completed.path("result").path("promptPolicy").path("supplementSha256").asText());
+        assertTrue(systems.size()>=2);for(String system:systems){assertTrue(system.contains(first));assertFalse(system.contains(second));assertTrue(system.indexOf(first)<system.indexOf("R1"),"Mandatory policy follows supplementary configuration");}
+        FindingVO original=service.listFindings(project,null,null,null,null,null).get(0);int previous=systems.size();
+        promptService.save(key,second,promptService.userTemplate(key)+"\nAUTHORED_USER_TEMPLATE_EXTRA");String effective=promptService.vettingSupplement();
+        String next=start(project);JsonNode changed=await(project,next,"COMPLETED");assertEquals(VettingPromptPolicy.supplementSha256(effective),changed.path("result").path("promptPolicy").path("supplementSha256").asText());
+        assertTrue(systems.subList(previous,systems.size()).stream().allMatch(system->system.contains(second)&&system.contains("AUTHORED_USER_TEMPLATE_EXTRA")&&!system.contains(first)));
+        FindingVO current=service.listFindings(project,null,null,null,null,null).get(0);assertNotEquals(original.getFingerprint(),current.getFingerprint());assertNotEquals(original.getCode(),current.getCode());
+    }
+
     @Test void aFailedSecondPacketKeepsTheVerifiedFirstPacketAndRejectsEveryFormalExport() throws Exception {
         String project=project();AtomicInteger calls=new AtomicInteger();
         when(ai.completeStructuredJsonList(anyString(),anyString(),eq(VettingSemanticReview.Record.class),any(),anyList())).thenAnswer(call->{if(calls.incrementAndGet()==2)throw new IllegalStateException("fixture model interrupted");return records("issue");});
@@ -145,7 +166,7 @@ class VettingRecoveryWorkflowTest {
         for(String format:Arrays.asList("json","pdf","docx")){org.springframework.mock.web.MockHttpServletResponse response=http.perform(get("/api/vetting/"+project+"/report."+format)).andReturn().getResponse();assertNull(response.getHeader("Content-Disposition"));assertNotEquals(0,JsonUtils.parse(response.getContentAsString()).path("code").asInt());}
         assertThrows(BizException.class,()->service.startRun(project,"en"));assertEquals(2,checkpoints.reliable(id).size());
     }
-    private List<VettingSemanticReview.Record> records(String assessment){VettingCorpus.Chunk source=corpus.get().stream().filter(c->"tender".equals(c.getRole())).findFirst().orElseThrow(AssertionError::new);VettingSemanticReview.Record r=new VettingSemanticReview.Record();r.setAssessment(assessment);r.setType("risk");r.setSeverity("medium");r.setTitle("Fixture assessment");r.setComment("Fixture record; no live model quality claim");VettingSemanticReview.Quote q=new VettingSemanticReview.Quote();q.setChunkId(source.getId());q.setSide("source");q.setQuote(source.getContent().trim());r.setEvidence(Collections.singletonList(q));return Collections.singletonList(r);}
+    private List<VettingSemanticReview.Record> records(String assessment){VettingCorpus.Chunk source=corpus.get().stream().filter(c->"tender".equals(c.getRole())).findFirst().orElseThrow(AssertionError::new);VettingSemanticReview.Record r=new VettingSemanticReview.Record();com.consense.service.vetting.VettingCompetitionFixture.details(r);r.setAssessment(assessment);r.setType("risk");r.setSeverity("medium");r.setTitle("Fixture assessment");r.setComment("Fixture record; no live model quality claim");VettingSemanticReview.Quote q=new VettingSemanticReview.Quote();q.setChunkId(source.getId());q.setSide("source");q.setQuote(source.getContent().trim());r.setEvidence(Collections.singletonList(q));return Collections.singletonList(r);}
     @ParameterizedTest @ValueSource(strings={"new_run","parsed_source","raw_bytes","generated_revision","missing_binding"})
     void obsoleteScreenWritesAreRejectedAtomicallyAndKeepHumanHistory(String change)throws Exception{
         String project=project();SourceDocument source=bindOriginal(project);String firstRun=start(project);await(project,firstRun,"COMPLETED");
@@ -196,8 +217,13 @@ class VettingRecoveryWorkflowTest {
         }
         http.perform(multipart("/api/vetting/"+project+"/package/upload").file(new org.springframework.mock.web.MockMultipartFile("files","SCC.docx","application/vnd.openxmlformats-officedocument.wordprocessingml.document",uploaded)))
                 .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.code").value(0));
-        String run=start(project);await(project,run,"COMPLETED");
+        String run=start(project);JsonNode completed=await(project,run,"COMPLETED");
         JsonNode listed=JsonUtils.parse(http.perform(get("/api/vetting/"+project+"/findings")).andReturn().getResponse().getContentAsString()).path("data");assertEquals(1,listed.size());JsonNode finding=listed.get(0);assertEquals("rule",finding.path("source").asText());
+        assertEquals(VettingPromptPolicy.supplementSha256(""),completed.path("result").path("promptPolicy").path("supplementSha256").asText());
+        JsonNode details=finding.path("businessDetails");assertTrue(details.isObject());assertFalse(details.path("factBasis").asText().trim().isEmpty());
+        assertEquals("review",details.path("suggestedAction").asText());assertFalse(details.path("pendingFacts").isEmpty());
+        List<String> legacySides=new ArrayList<>();for(JsonNode side:finding.path("evidence"))legacySides.add(side.path("fileName").asText().toLowerCase(Locale.ROOT)+"|"+side.path("sourceHash").asText()+"|"+side.path("anchor").asText()+"|"+VettingCorpus.normalize(side.path("quote").asText()));
+        Collections.sort(legacySides);assertNotEquals(VettingCorpus.hash("deleted_clause_reference\n"+String.join("\n",legacySides)),finding.path("fingerprint").asText(),"Current rule candidates cannot reuse the old evidence-only identity");
         JsonNode evidence=JsonUtils.parse(http.perform(get("/api/vetting/"+project+"/findings/"+finding.path("code").asText()+"/evidence")).andReturn().getResponse().getContentAsString()).path("data").path("items");assertFalse(evidence.isEmpty());
         String raw=com.consense.service.sources.OerSourceMetadata.originalSha256(uploaded);SourceDocument source=documents.findByProjectIdOrderByIdAsc(project).get(0);
         for(JsonNode item:evidence){assertEquals(String.valueOf(source.getId()),item.path("documentId").asText());assertEquals(VettingCorpus.sourceHash(source),item.path("sourceHash").asText());assertEquals(raw,item.path("originalSourceSha256").asText());

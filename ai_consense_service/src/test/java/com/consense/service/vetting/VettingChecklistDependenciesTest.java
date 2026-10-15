@@ -16,9 +16,12 @@ class VettingChecklistDependenciesTest {
         com.consense.domain.VettingRun first=run(a,derive(a,scopes,JsonUtils.parse("{}")),b,derive(b,scopes,JsonUtils.parse("{}")));
         com.consense.domain.VettingRun next=run(a,derive(a,updated,JsonUtils.parse("{}")),b,derive(b,updated,JsonUtils.parse("{}")));
         next.setSourceSnapshotSha256(VettingCorpus.hash("actual changed overall source generation"));next.setResultJson("{\"total\":4}");
-        java.lang.reflect.Method basis=VettingChecklistService.class.getDeclaredMethod("basis",com.consense.domain.VettingRun.class,VettingChecklistCatalog.Item.class);basis.setAccessible(true);
-        assertNotEquals(basis.invoke(null,first,a),basis.invoke(null,next,a));assertEquals(basis.invoke(null,first,b),basis.invoke(null,next,b));
-        next.setModelIdentityJson(next.getModelIdentityJson().replace("authored-model","changed-authored-model"));assertNotEquals(basis.invoke(null,first,b),basis.invoke(null,next,b));
+        java.lang.reflect.Method basis=VettingChecklistService.class.getDeclaredMethod("basis",com.consense.domain.VettingRun.class,VettingChecklistCatalog.Item.class,JsonNode.class,boolean.class);basis.setAccessible(true);
+        assertNotEquals(basis.invoke(null,first,a,null,false),basis.invoke(null,next,a,null,false));assertEquals(basis.invoke(null,first,b,null,false),basis.invoke(null,next,b,null,false));
+        next.setModelIdentityJson(next.getModelIdentityJson().replace("authored-model","changed-authored-model"));assertNotEquals(basis.invoke(null,first,b,null,false),basis.invoke(null,next,b,null,false));
+        JsonNode automatic=JsonUtils.parse("{\"status\":\"fulfilled\",\"evidence\":[\"authored original\"]}");
+        assertNotEquals(basis.invoke(null,first,b,automatic,true),basis.invoke(null,first,b,JsonUtils.parse("{\"status\":\"not_fulfilled\"}"),true));
+        assertNotEquals(basis.invoke(null,first,b,automatic,true),basis.invoke(null,first,b,null,true),"Unknown automatic scope cannot use a closed member-only basis");
         assertNull(VettingChecklistDependencies.itemLedger(first.getCoverageJson(),"different-project",b));
     }
     @Test void currentCanonicalSessionActuallyProducesScopedLedgerAndChangedUnknownProofFallsBack() throws Exception {

@@ -110,23 +110,26 @@ public class VettingService {
             com.consense.ai.LlmOperation chat=Boolean.TRUE.equals(saved.getModelProfileExplicit())&&identity!=null?llmProfiles.resolve(identity.getProfileId()):llmProfiles.resolve(null);
             VettingLlmOperation selected=semantic.captureOperation(chat);
             List<SourceDocument> snapshot=freshSourceSet(saved.getProjectId());
-            if(chat==null||!recoveryContract().equals(saved.getRecoveryContractSha256())||!Objects.equals(saved.getSourceSnapshotSha256(),sourceSetHash(snapshot))
+            String supplement=semantic.configuredSupplement();
+            if(chat==null||!recoveryContract(supplement).equals(saved.getRecoveryContractSha256())||!Objects.equals(saved.getSourceSnapshotSha256(),sourceSetHash(snapshot))
                     ||!Objects.equals(saved.getModelIdentityJson(),JsonUtils.write(selected==null?chat.getIdentity():selected.getIdentity()))||sourceSetStale(saved))
                 throw new BizException(4101,"来源、模型或审查配方与检查点不兼容，需要重新运行；可靠包和人工记录已保留。");
             tx().execute(status->{VettingRun run=checkpoints.owned(saved.getId(),executionOwner);run.setRecoveryStatus("RESUMING");run.setPhase("recovering");run.setMessage("恢复已核验的来源包；结果不明的包将显式重试。");runRepository.saveAndFlush(run);return null;});
             completions.put(saved.getId(),done);if(probe.enabled())serviceProbes.put(saved.getId(),probe);
-            dispatch(saved,snapshot,chat,selected,done,probe);
+            dispatch(saved,snapshot,chat,selected,done,probe,supplement);
         }catch(Exception e){failRun(saved.getId(),brief(e),done,probe);}
     }
     @org.springframework.scheduling.annotation.Scheduled(fixedDelay=20000,initialDelay=20000)
     public void renewLeases(){if(checkpoints!=null)for(String id:completions.keySet())try{checkpoints.renew(id,executionOwner);}catch(RuntimeException lost){log.warn("审查 {} 执行租约无法续期：{}",id,brief(lost));}}
-    private String recoveryContract(){ConsenseProperties.Vetting v=props.getVetting();return VettingCorpus.hash("vetting-checkpoint-v6-bound-native-profile-minimum-256k-language-origin-gate-bounded-schema-attempts\n"+JsonUtils.write(Arrays.asList(
+    private String recoveryContract(String supplement){ConsenseProperties.Vetting v=props.getVetting();return VettingCorpus.hash("vetting-checkpoint-v7-competition-policy-seven-classes\n"+JsonUtils.write(Arrays.asList(
+            VettingPromptPolicy.metadata(supplement),VettingOutputSchema.contractSha256(),VettingSemanticReview.policyContractSha256(),
             v.isSemanticEnabled(),v.getSemanticTopics(),v.getSemanticContextChars(),v.getSemanticContextExpansionChars(),v.getProjectReferenceComparisons(),v.getProjectReferenceContextChars(),
             v.getCandidateLimit(),v.getTopK(),v.isDiffAgainstBaseline(),v.isRequireHybridRetrieval(),v.getRetrievalUrl(),v.getExpectedRetrievalContract(),v.getExpectedRetrievalSignatureVersion(),v.getExpectedRetrievalGranularity(),
             v.getExpectedEmbeddingWindowMaxTokens(),v.getExpectedRerankWindowMaxTokens(),v.getExpectedWindowOverlapTokens(),v.getExpectedStructuralEmbeddingMaxTokens(),v.getExpectedStructuralRerankMaxTokens(),v.isExpectedStructuralRerankStrict(),
             v.getExpectedRetrievalRecipeFingerprint(),v.getExpectedRetrievalSignature(),v.isTokenBudgetObserverEnabled(),v.getTokenBudgetObserverRecipeSha256(),v.getMinimaxCnWire())));}
-    private void dispatch(VettingRun run,List<SourceDocument> snapshot,com.consense.ai.LlmOperation chat,VettingLlmOperation selected,CompletableFuture<RunResultVO> done,VettingServiceProbe probe){
+    private void dispatch(VettingRun run,List<SourceDocument> snapshot,com.consense.ai.LlmOperation chat,VettingLlmOperation selected,CompletableFuture<RunResultVO> done,VettingServiceProbe probe,String supplement){
         worker.execute(()->{try(com.consense.ai.LlmProfiles.Scope ignored=llmProfiles.bind(chat);VettingSemanticReview.OperationScope operation=semantic.bindOperation(selected);
+                VettingSemanticReview.SupplementScope supplemental=semantic.bindSupplement(supplement);
                 VettingSemanticReview.CheckpointScope durable=semantic.bindCheckpoint(checkpoints==null?null:checkpoints.session(run.getId(),executionOwner,()->assertRunSourcesCurrent(run)))){executeRun(run.getId(),run.getProjectId(),run.getLang(),snapshot,done,probe);}});
     }
     @PreDestroy public void stopWorker() {
@@ -224,12 +227,13 @@ public class VettingService {
             if(latest!=null && ACTIVE_STATES.contains(latest.getStatus())) return jobVO(latest);
             com.consense.ai.LlmOperation operation=llmProfiles.capture();
             VettingLlmOperation vettingOperation=semantic.captureOperation(operation);
+            String supplement=semantic.configuredSupplement();
             List<SourceDocument> snapshot=sourceSet(projectId);
             if(!originalSourcesCurrent(snapshot))throw new BizException(4104,"审查原件字节与已保存版本不一致，请重新上传和解析后审查。");
             if(snapshot.isEmpty()||(!canonicalEnabled()&&snapshot.stream().noneMatch(this::reviewable))) throw new BizException(4101,"审查源集没有可用正文，请上传并检查解析状态");
             VettingRun run=new VettingRun(); run.setId(UUID.randomUUID().toString()); run.setProjectId(projectId); run.setLang(normalizeLang(lang)); run.setStartedAt(Instant.now());
             run.setSourceSnapshotSha256(sourceSetHash(snapshot));
-            run.setRecoveryContractSha256(recoveryContract());run.setModelProfileExplicit(operation.isExplicit());run.setRecoveryStatus("NEW");
+            run.setRecoveryContractSha256(recoveryContract(supplement));run.setModelProfileExplicit(operation.isExplicit());run.setRecoveryStatus("NEW");
             if(checkpoints!=null){run.setExecutionOwner(executionOwner);run.setLeaseUntil(Instant.now().plusSeconds(VettingCheckpointService.LEASE_SECONDS));}
             run.setModelIdentityJson(JsonUtils.write(vettingOperation==null?operation.getIdentity():vettingOperation.getIdentity()));
             run.setStatus("QUEUED"); run.setPhase("queued"); run.setTotalUnits(topicCount()+2); run.setMessage("审查已排队，人工处置按问题指纹保留。");
@@ -241,7 +245,7 @@ public class VettingService {
             if(lifecycle.enabled())serviceProbes.put(run.getId(),lifecycle);
             lifecycle.observe("queued_transaction_returned",()->VettingServiceProbe.returnedTransaction("run",run,"sourceSnapshot",sourceMetadata(snapshot),
                     "boundary","Original REQUIRED queued insert returned; outer transaction commit can remain unknown. Snapshots do not enter corpus/prompts"));
-            try { dispatch(run,snapshot,operation,vettingOperation,done,lifecycle); }
+            try { dispatch(run,snapshot,operation,vettingOperation,done,lifecycle,supplement); }
             catch(RejectedExecutionException e) {
                 lifecycle.originalFailure("worker_dispatch_rejected",e);
                 try{failRun(run.getId(),"审查队列已满，请稍后重试。",done,lifecycle);}finally{lifecycle.finish("queue_rejected",e);serviceProbes.remove(run.getId(),lifecycle);}
@@ -314,6 +318,7 @@ public class VettingService {
             List<String> warnings=new ArrayList<>(semanticResult.getWarnings()); Map<String,Candidate> unique=new LinkedHashMap<>(); int risk=0,skipped=0;
             int sortedOrdinal=0;
             for(Candidate c:candidates) {
+                c.setPromptSupplementSha256(VettingPromptPolicy.supplementSha256(semantic.currentSupplement()));
                 final int ordinal=sortedOrdinal++;final String sourceBefore=c.getSource();
                 c.setSource("rule".equalsIgnoreCase(c.getSource())?"rule":"model"); String fingerprint=fingerprint(c);
                 final int riskBefore=risk;
@@ -409,6 +414,7 @@ public class VettingService {
         }
         findingRepository.saveAll(previous); findingRepository.saveAll(current);
         RunResultVO result=new RunResultVO(current.size(),metricsOf(current),coverage.getWarnings(),model);
+        result.setPromptPolicy(VettingPromptPolicy.metadata(semantic.currentSupplement()));
         result.setModelIdentity(JsonUtils.read(run.getModelIdentityJson(),com.consense.ai.ModelIdentity.class));
         run.setStatus("COMPLETED"); run.setPhase("completed"); run.setCompletedUnits(run.getTotalUnits()); run.setFinishedAt(Instant.now()); run.setMessage("审查完成，共 "+current.size()+" 条发现；覆盖与限制见报告。");
         run.setResultJson(JsonUtils.write(result)); run.setCoverageJson(JsonUtils.write(coverage));
@@ -460,6 +466,8 @@ public class VettingService {
     }
     private Candidate ruleCandidate(VettingRuleEngine.Output output,Map<String,Map<String,JsonNode>> nativePositions) {
         Candidate c=new Candidate(); c.setRuleId(output.getRuleId()); c.setType(output.getType()); c.setTitle(output.getTitle()); c.setComment(output.getSummary()); c.setSuggestion(output.getRecommendation()); c.setSeverity(output.getRisk()); c.setSource("rule");
+        c.setBusinessDetails(new BusinessDetailsVO(truncate(output.getTitle(),160),truncate(output.getSummary(),1200),
+                Collections.singletonList("Confirm the project fact baseline and applicability of the quoted clauses before adopting this rule observation."),"review"));
         List<FindingEvidence> sides=new ArrayList<>(); int index=0;
         for(VettingRuleEngine.Evidence e:output.getEvidence()) {
             FindingEvidence side=new FindingEvidence(index++==0?"source":"reference",e.getDocumentId(),e.getFileKey(),e.getFileName(),e.getPageNo()==null?null:"P"+e.getPageNo(),available(e.getAnchor(),e.getLocation()),e.getQuote(),true,e.getSourceHash(),e.getBbox()==null?null:Arrays.stream(e.getBbox()).boxed().collect(Collectors.toList()));
@@ -489,15 +497,21 @@ public class VettingService {
         String group=group(c.getType()); f.setGroupKey(group); f.setTypes(typeCode(c.getType())); f.setSeverity(normalizeSeverity(c.getSeverity())); f.setScope(sides.stream().map(FindingEvidence::getDocumentId).filter(Objects::nonNull).distinct().count()>1?"inter":"intra");
         f.setTitleZhHans(c.getTitle()); f.setTitleZhHant(c.getTitle()); f.setTitleEn(c.getTitle()); f.setBodyZhHans(c.getComment()); f.setBodyZhHant(c.getComment()); f.setBodyEn(c.getComment());
         f.setImpactZhHans(c.getImpact()); f.setImpactZhHant(c.getImpact()); f.setImpactEn(c.getImpact()); f.setSuggestionZhHans(c.getSuggestion()); f.setSuggestionZhHant(c.getSuggestion()); f.setSuggestionEn(c.getSuggestion());
+        f.setBusinessDetailsJson(c.getBusinessDetails()==null?null:JsonUtils.write(c.getBusinessDetails()));
         f.setSource(c.getSource()); f.setEvidenceJson(JsonUtils.write(sides)); long located=sides.stream().filter(FindingEvidence::isLocated).count();
         f.setVerification(sides.isEmpty()||located==0?"unverified":located==sides.size()?"verified":"partial"); f.setEvidenceId("verified".equals(f.getVerification())?"snapshot:"+nvl(primary.getDocumentId()):EVIDENCE_UNVERIFIED);
         f.setFileKey(primary==null?"OTHER":truncate(available(primary.getFileKey(),"OTHER"),16)); f.setPageNo(primary==null?null:truncate(primary.getPageNo(),16)); f.setPatternText(primary==null?null:truncate(primary.getQuote(),512));
-        f.setRefs(truncate(sides.stream().map(FindingEvidence::getAnchor).filter(Objects::nonNull).distinct().collect(Collectors.joining(" / ")),512));
+        f.setRefs(truncate(sides.stream().map(e->JsonUtils.isBlankText(e.getClauseId())?e.getAnchor():e.getClauseId()).filter(Objects::nonNull).distinct().collect(Collectors.joining(" / ")),512));
         f.setLocation(truncate(sides.stream().map(e -> e.getFileName()+" · "+available(e.getPageNo(),nvl(e.getAnchor()))).collect(Collectors.joining("; ")),512)); f.setExpected(null); f.setBucketKey("reference".equals(group)?"missing":"language".equals(group)?"grammar":"particulars");
     }
     static String fingerprint(Candidate c) {
         List<String> sides=(c.getEvidence()==null?Collections.<FindingEvidence>emptyList():c.getEvidence()).stream().map(e -> nvl(e.getFileName()).toLowerCase(Locale.ROOT)+"|"+nvl(e.getSourceHash())+"|"+nvl(e.getAnchor())+"|"+VettingCorpus.normalize(e.getQuote())).sorted().collect(Collectors.toList());
         String legacy=nvl(c.getRuleId())+"\n"+String.join("\n",sides);
+        // Historical candidates have neither contract field; every current run binds the supplement before fingerprinting.
+        if(c.getBusinessDetails()!=null||!JsonUtils.isBlankText(c.getPromptSupplementSha256())) {
+            String supplement=JsonUtils.isBlankText(c.getPromptSupplementSha256())?VettingPromptPolicy.supplementSha256(""):c.getPromptSupplementSha256();
+            legacy=VettingPromptPolicy.sha256()+"\n"+VettingSemanticReview.policyContractSha256()+"\n"+supplement+"\n"+JsonUtils.write(c.getBusinessDetails())+"\n"+legacy;
+        }
         if("rule".equalsIgnoreCase(c.getSource()))return VettingCorpus.hash(legacy);
         boolean anyPacket=!JsonUtils.isBlankText(c.getPacketId())||!JsonUtils.isBlankText(c.getSourceSnapshotSha256())
                 ||(c.getEvidence()!=null&&c.getEvidence().stream().anyMatch(e->!JsonUtils.isBlankText(e.getPacketId())||!JsonUtils.isBlankText(e.getPacketSourceSnapshotSha256())));
@@ -512,7 +526,7 @@ public class VettingService {
                 f.getTitleZhHans(),f.getTitleZhHant(),f.getTitleEn(),f.getBodyZhHans(),f.getBodyZhHant(),f.getBodyEn(),
                 f.getImpactZhHans(),f.getImpactZhHant(),f.getImpactEn(),f.getSuggestionZhHans(),f.getSuggestionZhHant(),f.getSuggestionEn(),
                 f.getSource(),f.getEvidenceJson(),f.getVerification(),f.getEvidenceId(),f.getFileKey(),f.getPageNo(),f.getPatternText(),
-                f.getRefs(),f.getLocation(),f.getExpected(),f.getBucketKey())));
+                f.getRefs(),f.getLocation(),f.getExpected(),f.getBucketKey(),f.getBusinessDetailsJson())));
     }
     private static boolean preferExistingFinding(VettingFinding candidate,VettingFinding existing) {
         boolean candidateActive=Boolean.TRUE.equals(candidate.getActive()),existingActive=Boolean.TRUE.equals(existing.getActive());
@@ -750,8 +764,11 @@ public class VettingService {
                     out=new LinkedHashMap<>();out.put("schemaVersion","1.0");out.put("language",normalizeLang(lang));out.put("project",projectService.toVO(c.project));out.put("job",c.job);out.put("findings",c.findings);
                     out.put("reportSnapshotId",c.job.getReportSnapshotId());
                     out.put("reportStructureVersion","competition-comments-and-checklist-v1");out.put("reportLanguage","en");
+                    out.put("promptPolicy",c.job.getResult()==null?null:c.job.getResult().getPromptPolicy());
                     out.put("commentsTables",VettingReportPresentation.comments(c.findings,c.job.getCoverage()));
-                    out.put("checklistTables",VettingReportPresentation.checklist(checklist));out.put("checklistResults",checklist);
+                    out.put("sectionSummaries",VettingReportPresentation.sectionSummaries(c.findings,c.job.getCoverage()));
+                    List<com.consense.web.dto.VettingChecklistDtos.AutomaticGroupVO> automatic=VettingChecklistAutomaticResults.aggregate(c.job.getStatus(),JsonUtils.mapper().valueToTree(c.job.getCoverage()),JsonUtils.mapper().valueToTree(c.job.getResult()));
+                    out.put("automaticChecklistResults",automatic);out.put("checklistTables",VettingReportPresentation.checklist(checklist,automatic));out.put("checklistResults",checklist);
                     out.put("evidenceIndex",VettingReportPresentation.evidenceIndex(c.findings,c.job.getCoverage()));
                 }
                 try(VettingExportProbe.Timer timer=probe.measure("report_json_serialization","Original JsonUtils.write and UTF8 encoding of returned JSON report")){bytes=JsonUtils.write(out).getBytes(StandardCharsets.UTF_8);}
@@ -838,9 +855,9 @@ public class VettingService {
     private List<FindingEvidence> readEvidence(VettingFinding f) { try{return JsonUtils.readList(f.getEvidenceJson(),FindingEvidence.class);}catch(Exception e){log.warn("发现 {} 证据快照不可读",f.getCode());return Collections.emptyList();} }
     private FindingVO toVO(VettingFinding f) {
         List<FindingEvidence> e=readEvidence(f); long located=e.stream().filter(FindingEvidence::isLocated).count(); String v=e.isEmpty()||located==0?"unverified":located==e.size()?"verified":"partial";
-        return new FindingVO(f.getCode(),JsonUtils.isBlankText(f.getTypes())?Collections.emptyList():Arrays.asList(f.getTypes().split(",")),f.getGroupKey(),f.getScope(),f.getSeverity(),f.getStatus(),LocalizedText.of(f.getTitleZhHans(),f.getTitleZhHant(),f.getTitleEn()),LocalizedText.of(f.getBodyZhHans(),f.getBodyZhHant(),f.getBodyEn()),LocalizedText.of(f.getImpactZhHans(),f.getImpactZhHant(),f.getImpactEn()),LocalizedText.of(f.getSuggestionZhHans(),f.getSuggestionZhHant(),f.getSuggestionEn()),f.getPatternText(),f.getRefs(),f.getLocation(),f.getExpected(),"verified".equals(v)?f.getEvidenceId():EVIDENCE_UNVERIFIED,f.getFileKey(),f.getPageNo(),f.getBucketKey(),f.getFingerprint(),f.getRunId(),f.getSource(),v,e,f.getReviewRemarks(),f.getActionTaken(),f.getAddendumRequired(),f.getReviewUpdatedAt(),generatedRevision(f),f.getRunId()==null?null:runRepository.findById(f.getRunId()).map(VettingRun::getSourceSnapshotSha256).orElse(null));
+        return new FindingVO(f.getCode(),JsonUtils.isBlankText(f.getTypes())?Collections.emptyList():Arrays.asList(f.getTypes().split(",")),f.getGroupKey(),f.getScope(),f.getSeverity(),f.getStatus(),LocalizedText.of(f.getTitleZhHans(),f.getTitleZhHant(),f.getTitleEn()),LocalizedText.of(f.getBodyZhHans(),f.getBodyZhHant(),f.getBodyEn()),LocalizedText.of(f.getImpactZhHans(),f.getImpactZhHant(),f.getImpactEn()),LocalizedText.of(f.getSuggestionZhHans(),f.getSuggestionZhHant(),f.getSuggestionEn()),f.getPatternText(),f.getRefs(),f.getLocation(),f.getExpected(),"verified".equals(v)?f.getEvidenceId():EVIDENCE_UNVERIFIED,f.getFileKey(),f.getPageNo(),f.getBucketKey(),f.getFingerprint(),f.getRunId(),f.getSource(),v,e,f.getReviewRemarks(),f.getActionTaken(),f.getAddendumRequired(),f.getReviewUpdatedAt(),generatedRevision(f),f.getRunId()==null?null:runRepository.findById(f.getRunId()).map(VettingRun::getSourceSnapshotSha256).orElse(null),JsonUtils.isBlankText(f.getBusinessDetailsJson())?null:JsonUtils.read(f.getBusinessDetailsJson(),BusinessDetailsVO.class));
     }
-    private MetricsVO metricsOf(List<VettingFinding> f){return new MetricsVO(count(f,"reference"),count(f,"conflict"),count(f,"language"),count(f,"risk"),f.size(),(int)f.stream().filter(v -> "inter".equals(v.getScope())).count());}
+    private MetricsVO metricsOf(List<VettingFinding> f){return new MetricsVO(count(f,"reference"),count(f,"conflict"),count(f,"language"),count(f,"risk"),count(f,"gap"),count(f,"substantive"),count(f,"requirement"),f.size(),(int)f.stream().filter(v -> "inter".equals(v.getScope())).count());}
     private int count(List<VettingFinding> f,String group){return (int)f.stream().filter(v -> group.equals(v.getGroupKey())).count();}
     private String searchable(VettingFinding f){return Stream.of(f.getCode(),f.getTitleZhHans(),f.getTitleEn(),f.getBodyZhHans(),f.getBodyEn(),f.getRefs(),f.getLocation(),f.getPatternText(),f.getEvidenceJson()).filter(Objects::nonNull).collect(Collectors.joining(" "));}
     private boolean filter(String v,String a){return JsonUtils.isBlankText(v)||"all".equalsIgnoreCase(v)||v.equalsIgnoreCase(nvl(a));}
@@ -853,8 +870,8 @@ public class VettingService {
         return read.execute(status->sourceSet(projectId));}
     private int topicCount(){return Math.min(VettingSemanticReview.maxTopics(),Math.max(0,props.getVetting().getSemanticTopics()));}
     private String normalizeLang(String lang){return "en".equalsIgnoreCase(lang)?"en":"zh-Hant".equalsIgnoreCase(lang)?"zh-Hant":"zh-Hans";}
-    private String group(String type){if(Arrays.asList("reference","conflict","language","risk").contains(type))return type;if("f2-iii".equals(type)||"f2-iv".equals(type))return "reference";if(Arrays.asList("f2-i","f2-vi","f2-viii").contains(type))return "conflict";if("f2-v".equals(type)||"f2-ix".equals(type))return "language";return "risk";}
-    private String typeCode(String type){return nvl(type).startsWith("f2-")?type:"reference".equals(type)?"f2-iii":"conflict".equals(type)?"f2-viii":"language".equals(type)?"f2-ix":"f2-ii";}
+    private String group(String type){return VettingIssueType.require(type).getGroup();}
+    private String typeCode(String type){return VettingIssueType.storedType(type);}
     private int severityRank(String value){String s=normalizeSeverity(value);return "high".equals(s)?0:"medium".equals(s)?1:2;}
     private String normalizeSeverity(String s){String v=nvl(s).toLowerCase(Locale.ROOT);return Arrays.asList("high","medium","low").contains(v)?v:"medium";}
     private String fileKey(SourceDocument d){return JsonUtils.isBlankText(d.getFileKey())?matchFileKey(d.getFileName()):d.getFileKey();}

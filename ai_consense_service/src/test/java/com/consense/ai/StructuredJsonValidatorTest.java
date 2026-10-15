@@ -30,7 +30,9 @@ class StructuredJsonValidatorTest {
     }
 
     private static ObjectNode issue() {
-        return (ObjectNode)JsonUtils.parse("{\"assessment\":\"issue\",\"type\":\"reference\",\"severity\":\"medium\",\"title\":\"Synthetic schema test\",\"comment\":\"Synthetic fixture, no contract-quality claim\",\"impact\":\"Fixture impact\",\"suggestion\":\"Fixture suggestion\",\"evidence\":[{\"chunkId\":\"submitted-1\",\"side\":\"source\",\"quote\":\"Twelve source characters\"}]}");
+        ObjectNode row=(ObjectNode)JsonUtils.parse("{\"assessment\":\"issue\",\"type\":\"reference\",\"severity\":\"medium\",\"title\":\"Synthetic schema test\",\"comment\":\"Synthetic fixture, no contract-quality claim\",\"impact\":\"Fixture impact\",\"suggestion\":\"Fixture suggestion\",\"evidence\":[{\"chunkId\":\"submitted-1\",\"side\":\"source\",\"quote\":\"Twelve source characters\"}]}");
+        row.put("subDimension","Authored schema reference check").put("factBasis","Synthetic source evidence; no project applicability claim.").put("suggestedAction","review");
+        row.putArray("pendingFacts");row.putArray("checklistAssessments");return row;
     }
 
     private static ObjectNode evidence(ObjectNode issue) { return (ObjectNode)issue.path("evidence").get(0); }
@@ -55,6 +57,7 @@ class StructuredJsonValidatorTest {
         assertEquals(1,parsed.size()); assertEquals("issue",parsed.get(0).assessment);
         assertEquals("submitted-1",parsed.get(0).evidence.get(0).chunkId);
         assertEquals("Twelve source characters",parsed.get(0).evidence.get(0).quote);
+        assertEquals("review",parsed.get(0).suggestedAction);assertTrue(parsed.get(0).pendingFacts.isEmpty());assertTrue(parsed.get(0).checklistAssessments.isEmpty());
         verify(provider,times(1)).chatStructured(anyList(),any());verify(provider,never()).chat(anyList());
     }
 
@@ -80,10 +83,10 @@ class StructuredJsonValidatorTest {
 
     static Stream<Arguments> schemaViolations() {
         List<Arguments> cases=new ArrayList<>();
-        for(String field:Arrays.asList("assessment","type","severity")) {
+        for(String field:Arrays.asList("assessment","type","severity","suggestedAction")) {
             ObjectNode item=issue();item.put(field,"invalid");cases.add(Arguments.of("enum_"+field,array(item)));
         }
-        for(String field:Arrays.asList("assessment","type","severity","title","comment","impact","suggestion","evidence")) {
+        for(String field:Arrays.asList("assessment","type","severity","title","comment","impact","suggestion","evidence","subDimension","factBasis","pendingFacts","suggestedAction","checklistAssessments")) {
             ObjectNode missing=issue();missing.remove(field);cases.add(Arguments.of("missing_"+field,array(missing)));
             ObjectNode nil=issue();nil.putNull(field);cases.add(Arguments.of("null_"+field,array(nil)));
         }
@@ -270,8 +273,10 @@ class StructuredJsonValidatorTest {
     }
 
     public static class DecodedIssue {
-        public String assessment,type,severity,title,comment,impact,suggestion;
+        public String assessment,type,severity,title,comment,impact,suggestion,subDimension,factBasis,suggestedAction;
         public List<DecodedQuote> evidence;
+        public List<String> pendingFacts;
+        public List<JsonNode> checklistAssessments;
     }
     public static class DecodedQuote { public String chunkId,side,quote; }
 }

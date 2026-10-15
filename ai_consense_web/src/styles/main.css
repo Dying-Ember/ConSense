@@ -214,6 +214,12 @@ button.metric:hover { box-shadow: var(--shadow); transform: translateY(-1px); }
 .metric.type-lang .value { color: #854f0b; }
 .metric.type-risk { border-left-color: #534ab7; }
 .metric.type-risk .value { color: #534ab7; }
+.metric.type-gap { border-left-color: #946200; }
+.metric.type-gap .value { color: #946200; }
+.metric.type-substantive { border-left-color: #087268; }
+.metric.type-substantive .value { color: #087268; }
+.metric.type-requirement { border-left-color: #9b3973; }
+.metric.type-requirement .value { color: #9b3973; }
 .metric.active { box-shadow: var(--focus); }
 
 .toolbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }

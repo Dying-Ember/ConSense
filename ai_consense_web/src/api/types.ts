@@ -489,6 +489,7 @@ export interface VettingFile {
 }
 
 export interface FindingEvidence {
+  clauseId?: string | null
   nativePositions?: import('./canonicalEvidence').NativeDocxPosition[] | null
   sourceRole?: string
   fixedBaselineEvidence?: import('./fixedBaselineEvidence').FixedBaselineEvidenceAddress | null
@@ -512,6 +513,14 @@ export interface Finding {
   code: string
   types: string[]
   group: string
+  issueTypeCode?: 'REF' | 'CONF' | 'LANG' | 'RISK' | 'GAP' | 'SUB' | 'REQ' | null
+  businessDetails?: {
+    subDimension: string
+    factBasis: string
+    pendingFacts: string[]
+    suggestedAction: 'delete' | 'amend' | 'insert' | 'review'
+    checklistItemIds?: string[]
+  } | null
   scope: string
   severity: 'high' | 'medium' | 'low' | string
   status: string
@@ -558,11 +567,15 @@ export interface VettingMetrics {
   conflict: number
   language: number
   risk: number
+  gap?: number
+  substantive?: number
+  requirement?: number
   total: number
   crossFile: number
 }
 
 export interface VettingRunResult {
+  promptPolicy?: Record<string, string> | null
   modelIdentity?: ModelIdentity | null
   total: number
   metrics: VettingMetrics
@@ -625,6 +638,7 @@ export interface VettingSemanticTopic {
 }
 
 export interface VettingSemanticPacket {
+  checklistAssessments?: VettingChecklistAssessment[]
   checkState?: VettingCheckState
   checkpointStatus?: 'new_packet' | 'retrying_uncertain_packet' | 'resumed_verified_packet' | 'saved_verified_packet'
   packetId: string
@@ -708,6 +722,7 @@ export type VettingReportFormat = 'pdf' | 'docx' | 'json'
 export type VettingSourceRole = 'tender' | 'standard' | 'project_fact' | 'package_manifest'
 
 export interface EvidenceSnippet {
+  clauseId?: string | null
   nativePositions?: import('./canonicalEvidence').NativeDocxPosition[] | null
   sourceRole?: string
   fixedBaselineEvidence?: import('./fixedBaselineEvidence').FixedBaselineEvidenceAddress | null
@@ -845,6 +860,39 @@ export interface VettingChecklist {
   sourceSnapshotSha256: string
   writable: boolean
   items: VettingChecklistItem[]
+  logicalGroups?: { id: string; section: string; clause: string; sourceItemIds: string[] }[]
+  annexItemIds?: string[]
+  automaticResults?: VettingAutomaticChecklistGroup[]
+}
+
+export type VettingAutomaticChecklistStatus = 'fulfilled' | 'not_fulfilled' | 'insufficient_evidence' | 'not_assessed' | 'out_of_scope' | 'not_applicable'
+
+export interface VettingChecklistAssessment {
+  issueTypeCode?: Finding['issueTypeCode']
+  producerVersion: string
+  itemId: string
+  status: VettingAutomaticChecklistStatus
+  reason: string
+  policySha256: string
+  packetId: string
+  sourceSnapshotSha256: string
+  evidence: FindingEvidence[]
+  evidenceChunkIds: string[]
+}
+
+export interface VettingAutomaticChecklistGroup {
+  id: string
+  status: VettingAutomaticChecklistStatus
+  symbol: string
+  reason: string
+  complete: boolean
+  sourceItemIds: string[]
+  subItemAssessments: {
+    itemId: string
+    status: VettingAutomaticChecklistStatus
+    reason: string
+    assessments: VettingChecklistAssessment[]
+  }[]
 }
 
 export interface VettingChecklistItem {
@@ -856,7 +904,7 @@ export interface VettingChecklistItem {
   clause: string
   description: string
   templatePage: number
-  status: 'unchecked' | 'fulfilled' | 'not_applicable'
+  status: 'unchecked' | 'fulfilled' | 'not_fulfilled' | 'not_applicable'
   remarks: string
   updatedAt?: string
   reviewedRunId?: string | null

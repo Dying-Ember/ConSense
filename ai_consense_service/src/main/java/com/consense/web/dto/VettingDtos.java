@@ -73,6 +73,36 @@ public final class VettingDtos {
         private Instant reviewUpdatedAt;
         private String generatedRevisionSha256;
         private String sourceSnapshotSha256;
+        private BusinessDetailsVO businessDetails;
+        public FindingVO(String code,List<String> types,String group,String scope,String severity,String status,LocalizedText title,LocalizedText body,LocalizedText impact,LocalizedText suggestion,String pattern,String refs,String location,String expected,String evidenceId,String fileKey,String pageNo,String bucketKey,String fingerprint,String runId,String source,String verification,List<FindingEvidence> evidence,String reviewRemarks,String actionTaken,Boolean addendumRequired,Instant reviewUpdatedAt,String generatedRevisionSha256,String sourceSnapshotSha256) {
+            this(code,types,group,scope,severity,status,title,body,impact,suggestion,pattern,refs,location,expected,evidenceId,fileKey,pageNo,bucketKey,fingerprint,runId,source,verification,evidence,reviewRemarks,actionTaken,addendumRequired,reviewUpdatedAt,generatedRevisionSha256,sourceSnapshotSha256,null);
+        }
+        /** System classification only; the official comments table has no type column. */
+        @com.fasterxml.jackson.annotation.JsonProperty(access=com.fasterxml.jackson.annotation.JsonProperty.Access.READ_ONLY)
+        public String getIssueTypeCode() {
+            com.consense.service.vetting.VettingIssueType type=com.consense.service.vetting.VettingIssueType.fromGroup(group);
+            return type==null?null:type.getCode();
+        }
+    }
+
+    @Data @NoArgsConstructor @AllArgsConstructor
+    @com.fasterxml.jackson.annotation.JsonPropertyOrder({"subDimension","factBasis","pendingFacts","suggestedAction","checklistItemIds"})
+    public static class BusinessDetailsVO {
+        private String subDimension,factBasis;
+        private List<String> pendingFacts;
+        private String suggestedAction;
+        private List<String> checklistItemIds=new java.util.ArrayList<>();
+        public BusinessDetailsVO(String subDimension,String factBasis,List<String> pendingFacts,String suggestedAction) {
+            this(subDimension,factBasis,pendingFacts,suggestedAction,new java.util.ArrayList<>());
+        }
+    }
+
+    /** Server-produced checklist assessment; source chunk IDs correspond to the located evidence in order. */
+    @Data @NoArgsConstructor
+    public static class ChecklistAssessmentVO {
+        private String producerVersion="pm-checklist-packet-v1",itemId,status,reason,policySha256,packetId,sourceSnapshotSha256,issueTypeCode;
+        private List<FindingEvidence> evidence=new java.util.ArrayList<>();
+        private List<String> evidenceChunkIds=new java.util.ArrayList<>();
     }
 
     /** Full replacement of human review records, independent of finding status. */
@@ -91,7 +121,7 @@ public final class VettingDtos {
         public ReviewUpdateRequest(String remarks,String action,Boolean addendum){this.reviewRemarks=remarks;this.actionTaken=action;this.addendumRequired=addendum;}
     }
 
-    /** 四类问题计数 */
+    /** Seven internal competition classes, retaining the original four metric keys. */
     @Data
     @NoArgsConstructor
     @AllArgsConstructor
@@ -100,8 +130,14 @@ public final class VettingDtos {
         private int conflict;
         private int language;
         private int risk;
+        private int gap;
+        private int substantive;
+        private int requirement;
         private int total;
         private int crossFile;
+        public MetricsVO(int reference,int conflict,int language,int risk,int total,int crossFile) {
+            this(reference,conflict,language,risk,0,0,0,total,crossFile);
+        }
     }
 
     /** 审查运行结果 */
@@ -114,7 +150,9 @@ public final class VettingDtos {
         private List<String> messages;
         private String model;
         private com.consense.ai.ModelIdentity modelIdentity;
-        public RunResultVO(int total,MetricsVO metrics,List<String> messages,String model){this.total=total;this.metrics=metrics;this.messages=messages;this.model=model;}
+        private java.util.Map<String,String> promptPolicy;
+        public RunResultVO(int total,MetricsVO metrics,List<String> messages,String model){this(total,metrics,messages,model,null,null);}
+        public RunResultVO(int total,MetricsVO metrics,List<String> messages,String model,com.consense.ai.ModelIdentity identity){this(total,metrics,messages,model,identity,null);}
     }
 
     /** 简单 K/V 证据条目，用于建议弹窗与来源弹窗 */
@@ -187,6 +225,8 @@ public final class VettingDtos {
         private String fileName;
         private String pageNo;
         private String anchor;
+        @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+        private String clauseId;
         private String quote;
         private boolean located;
         private String sourceHash;
@@ -298,6 +338,7 @@ public final class VettingDtos {
         private com.consense.ai.ModelIdentity modelIdentity;
         private List<com.fasterxml.jackson.databind.JsonNode> fixedBaselineEvidence=new java.util.ArrayList<>();
         private List<VerifiedAssessmentVO> verifiedAssessments=new java.util.ArrayList<>();
+        private List<ChecklistAssessmentVO> checklistAssessments=new java.util.ArrayList<>();
         /** Durable consumption ledger; a started attempt may have an unknown outcome after restart. */
         private List<SemanticAttemptVO> attempts=new java.util.ArrayList<>();
         @com.fasterxml.jackson.annotation.JsonProperty(access=com.fasterxml.jackson.annotation.JsonProperty.Access.READ_ONLY)

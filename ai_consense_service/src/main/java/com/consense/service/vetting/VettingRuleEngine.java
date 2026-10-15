@@ -157,7 +157,7 @@ public final class VettingRuleEngine {
                                 + " within the same identified source scope " + a.scopeLabel
                                 + ". Confirm the intended meaning and whether qualifications distinguish these definitions. Different expansions alone do not establish conflicting contract obligations.",
                         "Review both original definitions in this scope. Where the intended meanings differ, use distinct short forms or an explicit qualification; retain separate scoped definitions where their context resolves the distinction.",
-                        "medium", "language", unique(evidence)));
+                        "medium", "requirement", unique(evidence)));
             }
         }
     }
@@ -413,7 +413,7 @@ public final class VettingRuleEngine {
                 output.add(new Output("definition_coordination", "Definitions of " + a.term + " require coordination",
                         "The same named term has different definition text. The difference may be intentional or limited to a particular scope; it requires confirmation.",
                         "Confirm the intended role and scope in both provisions. Clarify the distinction or align the definitions where one meaning is intended.",
-                        "medium", "language", unique(evidence)));
+                        "medium", "requirement", unique(evidence)));
             }
         }
     }

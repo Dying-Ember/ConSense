@@ -25,6 +25,9 @@ class VettingSemanticReviewTest {
         when(ai.completeStructuredJsonList(anyString(),anyString(),eq(Record.class),any(),anyList())).thenReturn(Arrays.asList(bad,oneSided,good));
         Result result = VettingTokenFixture.review(ai,props,retrieval).review("project",Arrays.asList(a,b),"en",(n,s)->{});
         assertEquals(1,result.getCandidates().size()); assertEquals(2,result.getCandidates().get(0).getEvidence().size());
+        Candidate accepted=result.getCandidates().get(0);assertNotNull(accepted.getBusinessDetails());
+        assertFalse(accepted.getBusinessDetails().getFactBasis().trim().isEmpty());
+        assertEquals(VettingPromptPolicy.supplementSha256(""),accepted.getPromptSupplementSha256(),"Current model candidates carry the frozen policy binding before persistence");
         assertEquals(2,result.getReviewedChunkIds().size()); assertEquals(3,result.getWarnings().size());
         assertEquals(3,result.getTopicAudits().get(0).getReturnedAssessments());
         assertEquals(2,result.getTopicAudits().get(0).getRejectedRecords());assertEquals(1,result.getTopicAudits().get(0).getAcceptedFindings());
@@ -365,7 +368,7 @@ class VettingSemanticReviewTest {
         });
         return VettingTokenFixture.review(ai, props, retrieval).review("p", Arrays.asList(tender, standard, fact), "en", (n,s) -> {});
     }
-    private static Record record(String type,Quote... quotes) { Record r=new Record(); r.setAssessment("issue"); r.setType(type); r.setTitle("Reference issue"); r.setComment("Review the two provisions."); r.setEvidence(Arrays.asList(quotes)); return r; }
+    private static Record record(String type,Quote... quotes) { Record r=new Record();com.consense.service.vetting.VettingCompetitionFixture.details(r); r.setAssessment("issue"); r.setType(type); r.setTitle("Reference issue"); r.setComment("Review the two provisions."); r.setEvidence(Arrays.asList(quotes)); return r; }
     private static Quote quote(String id,String text) { Quote q=new Quote(); q.setChunkId(id); q.setSide(id); q.setQuote(text); return q; }
     private static Chunk chunk(String id,String doc,String text) { Chunk c=new Chunk(); c.setId(id); c.setDocumentId(doc); c.setFileName(doc+".docx"); c.setFileKey("SCC"); c.setContent(text); c.setRole("tender"); c.setAnchor("paragraph"); c.setSourceHash("abc"); return c; }
 }

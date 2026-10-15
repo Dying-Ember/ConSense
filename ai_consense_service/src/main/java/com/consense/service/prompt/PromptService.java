@@ -130,6 +130,17 @@ public class PromptService {
 
     // ------------------------------------------------------------ 消费方读取
 
+    /** Capture both editable Vetting fields in one database read; required runtime policy stays separate. */
+    public String vettingSupplement() {
+        PromptCatalog.Spec spec=PromptCatalog.find(PromptCatalog.KEY_VETTING);
+        PromptTemplate entity=repository.findById(PromptCatalog.KEY_VETTING).orElse(null);
+        if(entity==null)return "";
+        String system=JsonUtils.isBlankText(entity.getSystemText())||Objects.equals(spec.defaultSystem,entity.getSystemText())?"":entity.getSystemText();
+        String user=JsonUtils.isBlankText(entity.getUserTemplate())||Objects.equals(spec.defaultUserTemplate,entity.getUserTemplate())?"":entity.getUserTemplate();
+        if(user.isEmpty())return system;
+        return system+"\n\nSupplementary configured user template (placeholders are inert; the runtime supplies the authoritative source packet and schema):\n"+user;
+    }
+
     /** 取生效的 system prompt；DB 无值则回退出厂默认 */
     public String system(String key) {
         PromptTemplate entity = repository.findById(key).orElse(null);

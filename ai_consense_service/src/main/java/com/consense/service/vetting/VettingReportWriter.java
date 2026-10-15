@@ -132,11 +132,11 @@ public class VettingReportWriter {
                 try (PDPageContentStream stream = new PDPageContentStream(document, document.getPage(i), PDPageContentStream.AppendMode.APPEND, true)) {
                     stream.beginText(); stream.setFont(font, 8); stream.setNonStrokingColor(100, 110, 120);
                     String footerLabel=tr(lang, "第 ", "第 ", "Page ") + (i + 1) + ("en".equalsIgnoreCase(lang)?" of ":" / ") + document.getNumberOfPages();
-                    stream.newLineAtOffset((PDRectangle.A4.getWidth()-font.getStringWidth(footerLabel)/1000*8)/2, 27);
-                    stream.showText(footerLabel);
+                    stream.newLineAtOffset((PDRectangle.A4.getWidth()-pdfWidth(font,footerLabel)/1000*8)/2, 27);
+                    pdfShowText(stream,font,footerLabel,8);
                     stream.endText();
                     stream.beginText();stream.setFont(font,9);stream.newLineAtOffset(MARGIN,PDRectangle.A4.getHeight()-27);
-                    stream.showText("Contract No. "+available(project.getContractNo(),"en"));stream.endText();
+                    pdfShowText(stream,font,"Contract No. "+available(project.getContractNo(),"en"),9);stream.endText();
                 }
             }
             document.getDocumentInformation().setTitle(tr(lang, "招标文件审查报告", "招標文件審查報告", "Tender Document Vetting Report"));
@@ -152,7 +152,11 @@ public class VettingReportWriter {
 
     private List<VettingReportPresentation.Table> businessTables(List<FindingVO> findings,VettingJobVO job,List<VettingChecklistCatalog.Result> checklist) {
         List<VettingReportPresentation.Table> tables=new ArrayList<>(VettingReportPresentation.comments(findings,job==null?null:job.getCoverage()));
-        tables.addAll(VettingReportPresentation.checklist(checklist));return tables;
+        tables.addAll(VettingReportPresentation.checklist(checklist,automaticChecklist(job)));return tables;
+    }
+    private List<com.consense.web.dto.VettingChecklistDtos.AutomaticGroupVO> automaticChecklist(VettingJobVO job) {
+        return job==null?Collections.emptyList():VettingChecklistAutomaticResults.aggregate(job.getStatus(),
+                com.consense.common.JsonUtils.mapper().valueToTree(job.getCoverage()),com.consense.common.JsonUtils.mapper().valueToTree(job.getResult()));
     }
     private void writeBusinessWord(XWPFDocument document,Project project,List<FindingVO> findings,VettingJobVO job,List<VettingChecklistCatalog.Result> checklist) {
         wordLine(document,"Comments on Tender Documentation","Title",false);
@@ -166,9 +170,9 @@ public class VettingReportWriter {
         wordLine(document,"The project team may record whether an amendment is required for incorporation into a tender addendum in the remarks column.","Normal",false);
         wordLine(document,"APPENDIX I","Heading1",true);
         wordLine(document,"Checklist for the Contract Team for Counterchecking Various PSS Clauses of PRE Worksection and Bills No. 1 and 2","Heading2",false);
-        wordLine(document,"Only a saved project team decision marks an item as checked and fulfilled or not applicable. Unchecked items remain unknown; no findings or a handled comment does not confirm fulfilment.","Normal",false);
+        wordLine(document,"Automatic suggestions are separate from saved human counterchecks. A saved human decision may be fulfilled, not fulfilled with a reason, or not applicable. Unchecked items remain unknown; no findings or a handled comment does not confirm fulfilment.","Normal",false);
         wordLine(document,"Pricing-document counterchecks are retained from the sample for structure only and do not expand the competition review scope; automated review excludes pricing documents and works-related project-specific specifications.","Normal",false);
-        for(VettingReportPresentation.Table table:VettingReportPresentation.checklist(checklist))wordTable(document,table);
+        for(VettingReportPresentation.Table table:VettingReportPresentation.checklist(checklist,automaticChecklist(job)))wordTable(document,table);
     }
     private void wordLine(XWPFDocument document,String text,String style,boolean pageBreak) {
         XWPFParagraph p=document.createParagraph();p.setStyle(style);p.setPageBreak(pageBreak);
@@ -207,9 +211,9 @@ public class VettingReportWriter {
         cursor.block(new Block(0,"The project team may record whether an amendment is required for incorporation into a tender addendum in the remarks column."),null);
         cursor.newPage();cursor.block(new Block(2,"APPENDIX I"),null);
         cursor.block(new Block(1,"Checklist for the Contract Team for Counterchecking Various PSS Clauses of PRE Worksection and Bills No. 1 and 2"),null);
-        cursor.block(new Block(0,"Only a saved project team decision marks an item as checked and fulfilled or not applicable. Unchecked items remain unknown; no findings or a handled comment does not confirm fulfilment."),null);
+        cursor.block(new Block(0,"Automatic suggestions are separate from saved human counterchecks. A saved human decision may be fulfilled, not fulfilled with a reason, or not applicable. Unchecked items remain unknown; no findings or a handled comment does not confirm fulfilment."),null);
         cursor.block(new Block(0,"Pricing-document counterchecks are retained from the sample for structure only and do not expand the competition review scope; automated review excludes pricing documents and works-related project-specific specifications."),null);
-        for(VettingReportPresentation.Table table:VettingReportPresentation.checklist(checklist))cursor.table(table);
+        for(VettingReportPresentation.Table table:VettingReportPresentation.checklist(checklist,automaticChecklist(job)))cursor.table(table);
     }
 
     private List<Block> outline(Project project, List<FindingVO> findings, VettingJobVO job, String lang) {
@@ -285,7 +289,7 @@ public class VettingReportWriter {
                 blocks.add(new Block(1, nvl(finding.getCode()) + "  " + available(finding.getRefs(), lang)));
                 safe(finding.getEvidence()).stream().filter(e->!JsonUtils.isBlankText(e.getPacketId())).map(e->e.getPacketId()+" / "+nvl(e.getPacketSourceSnapshotSha256())).distinct().forEach(identity->blocks.add(compact(new Block(0,tr(lang,"发现的来源包快照","發現的來源包快照","Finding source packet snapshot")+": "+identity))));
                 blocks.add(new Block(0, pick(finding.getTitle(), lang)));
-                blocks.add(new Block(0, tr(lang, "分类", "分類", "Type") + ": " + String.join(", ", safe(finding.getTypes()))
+                blocks.add(new Block(0, tr(lang, "分类", "分類", "Type") + ": " + nvl(finding.getIssueTypeCode())+" / "+String.join(", ", safe(finding.getTypes()))
                         + "    " + tr(lang, "人工状态", "人工狀態", "Review status") + ": " + status(finding.getStatus(), lang)
                         + "    " + tr(lang, "证据定位", "證據定位", "Evidence location") + ": " + verification(finding.getVerification(), lang)));
                 blocks.add(new Block(0, tr(lang, "范围", "範圍", "Scope") + ": " + scope(finding.getScope(), lang)
@@ -296,6 +300,12 @@ public class VettingReportWriter {
                 detail(blocks, tr(lang, "理由与影响", "理由與影響", "Reason and impact"), pick(finding.getImpact(), lang));
                 detail(blocks, tr(lang, "对照要求", "對照要求", "Expected basis"), finding.getExpected());
                 detail(blocks, tr(lang, "建议", "建議", "Recommendation"), pick(finding.getSuggestion(), lang));
+                BusinessDetailsVO business=finding.getBusinessDetails();
+                if(business!=null) {
+                    detail(blocks,"Sub-dimension",business.getSubDimension());detail(blocks,"Fact basis",business.getFactBasis());
+                    detail(blocks,"Facts pending confirmation",String.join("; ",safe(business.getPendingFacts())));detail(blocks,"Suggested action",business.getSuggestedAction());
+                    detail(blocks,"Checklist connection",VettingReportPresentation.checklistLinks(business.getChecklistItemIds()));
+                }
                 blocks.add(new Block(1, tr(lang, "项目团队复核", "項目團隊覆核", "Project team review")));
                 detail(blocks, tr(lang, "项目团队回复", "項目團隊回覆", "Remarks by project team"),
                         JsonUtils.isBlankText(finding.getReviewRemarks()) ? tr(lang, "未记录", "未記錄", "Not recorded") : finding.getReviewRemarks());
@@ -387,9 +397,26 @@ public class VettingReportWriter {
 
     private boolean canEncode(PDFont font, List<Block> blocks) throws IOException {
         try {
-            for (Block block : blocks) for (String line : block.text.split("\n", -1)) font.getStringWidth(line);
+            for (Block block : blocks) for (String line : block.text.split("\n", -1)) pdfWidth(font,line);
             return true;
         } catch (IllegalArgumentException e) { return false; }
+    }
+
+    // The standard Dingbats font contains both required marks; common CJK fonts do not.
+    private static PDFont markFont(PDFont font,String run) {
+        return "\u2713".equals(run)||"\u2717".equals(run)?PDType1Font.ZAPF_DINGBATS:font;
+    }
+    private static boolean hasMarks(String text) {return text.indexOf('\u2713')>=0||text.indexOf('\u2717')>=0;}
+    private static float pdfWidth(PDFont font,String text) throws IOException {
+        if(!hasMarks(text))return font.getStringWidth(text);
+        float width=0;for(String run:text.split("(?=[\u2713\u2717])|(?<=[\u2713\u2717])"))width+=markFont(font,run).getStringWidth(run);
+        return width;
+    }
+    private static void pdfShowText(PDPageContentStream stream,PDFont font,String text,float size) throws IOException {
+        if(!hasMarks(text)){stream.setFont(font,size);stream.showText(text);return;}
+        for(String run:text.split("(?=[\u2713\u2717])|(?<=[\u2713\u2717])"))if(!run.isEmpty()) {
+            stream.setFont(markFont(font,run),size);stream.showText(run);
+        }
     }
 
     private static final class Block {
@@ -406,9 +433,9 @@ public class VettingReportWriter {
             stream = new PDPageContentStream(document, page); y = PDRectangle.A4.getHeight() - MARGIN;
         }
         void centeredTitle(String text) throws IOException {
-            float w=font.getStringWidth(text)/1000*12,x=(PDRectangle.A4.getWidth()-w)/2;
+            float w=pdfWidth(font,text)/1000*12,x=(PDRectangle.A4.getWidth()-w)/2;
             y-=12;stream.beginText();stream.setFont(font,12);stream.setNonStrokingColor(0,0,0);
-            stream.newLineAtOffset(x,y);stream.showText(text);stream.endText();
+            stream.newLineAtOffset(x,y);pdfShowText(stream,font,text,12);stream.endText();
             stream.setStrokingColor(0,0,0);stream.setLineWidth(0.5f);stream.moveTo(x,y-2);stream.lineTo(x+w,y-2);stream.stroke();y-=32;
         }
         void metadata(String label,String value) throws IOException {
@@ -421,7 +448,7 @@ public class VettingReportWriter {
         }
         void textAt(float x,float baseline,float size,String text) throws IOException {
             stream.beginText();stream.setFont(font,size);stream.setNonStrokingColor(0,0,0);
-            stream.newLineAtOffset(x,baseline);stream.showText(text);stream.endText();
+            stream.newLineAtOffset(x,baseline);pdfShowText(stream,font,text,size);stream.endText();
         }
         void table(VettingReportPresentation.Table table) throws IOException {
             List<List<String>> header=cellLines(table.getHeadings(),table.getWidths());
@@ -466,7 +493,7 @@ public class VettingReportWriter {
                 float w=WIDTH*widths[i]/100;stream.addRect(x,y-h,w,h);stream.stroke();
                 for(int n=0;n<count;n++)if(offset+n<cells.get(i).size()) {
                     stream.beginText();stream.setFont(font,12);stream.setNonStrokingColor(25,25,25);
-                    stream.newLineAtOffset(x+4,y-15-n*14.4f);stream.showText(cells.get(i).get(offset+n));stream.endText();
+                    stream.newLineAtOffset(x+4,y-15-n*14.4f);pdfShowText(stream,font,cells.get(i).get(offset+n),12);stream.endText();
                 }
                 x+=w;
             }
@@ -497,7 +524,7 @@ public class VettingReportWriter {
                 if (y - lineHeight < MARGIN) newPage();
                 stream.beginText(); stream.setFont(font, size);
                 stream.setNonStrokingColor(25, 25, 25);
-                stream.newLineAtOffset(MARGIN + indent, y); stream.showText(line); stream.endText();
+                stream.newLineAtOffset(MARGIN + indent, y); pdfShowText(stream,font,line,size); stream.endText();
                 y -= lineHeight;
             }
             y -= block.compact ? block.kind > 0 ? 1 : 0 : 4;
@@ -508,12 +535,12 @@ public class VettingReportWriter {
             int lastSpace = -1;
             for (int at = 0; at < text.length();) {
                 int cp = text.codePointAt(at); String ch = new String(Character.toChars(cp));
-                float charWidth = font.getStringWidth(ch) / 1000 * size;
+                float charWidth = pdfWidth(font,ch) / 1000 * size;
                 if (used + charWidth > width && line.length() > 0) {
                     if (lastSpace > 0) {
                         lines.add(line.substring(0, lastSpace));
                         String remainder = line.substring(lastSpace + 1); line.setLength(0); line.append(remainder);
-                        used = font.getStringWidth(remainder) / 1000 * size;
+                        used = pdfWidth(font,remainder) / 1000 * size;
                     } else { lines.add(line.toString()); line.setLength(0); used = 0; }
                     lastSpace = line.lastIndexOf(" ");
                 }

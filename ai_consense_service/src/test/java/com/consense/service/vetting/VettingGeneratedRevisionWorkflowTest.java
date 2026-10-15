@@ -43,6 +43,45 @@ class VettingGeneratedRevisionWorkflowTest {
     @MockBean VettingSemanticReview semantic;
     @BeforeEach void resetFixture() {props.getVetting().setServiceProbeDirectory(null);props.getVetting().setProbeDirectory(null);props.getVetting().setExportProbeDirectory(null);props.getVetting().setMaxRiskFindings(20);}
 
+    @Test void sevenClassesPersistFilterCountAndExportAsInternalMetadata() throws Exception {
+        SourceDocument doc=source();String project=doc.getProjectId();
+        when(semantic.reviewWithProgress(eq(project),anyList(),eq("en"),any(ReviewProgress.class))).thenAnswer(call->{
+            Result all=new Result();all.setModel("fixture-only");
+            for(VettingIssueType type:VettingIssueType.values()) {
+                Candidate c=result(doc,"").getCandidates().get(0);c.setRuleId("fixture-"+type.getGroup());c.setType(type.getGroup());all.getCandidates().add(c);
+            }
+            return all;
+        });
+        RunResultVO result=service.run(project,"en");assertEquals(7,result.getTotal());
+        MetricsVO metrics=result.getMetrics();assertEquals(7,metrics.getReference()+metrics.getConflict()+metrics.getLanguage()+metrics.getRisk()+metrics.getGap()+metrics.getSubstantive()+metrics.getRequirement());
+        assertEquals(1,metrics.getGap());assertEquals(1,metrics.getSubstantive());assertEquals(1,metrics.getRequirement());
+        for(VettingIssueType type:VettingIssueType.values()) {
+            List<FindingVO> filtered=service.listFindings(project,null,type.getGroup(),null,null,null);assertEquals(1,filtered.size());
+            assertEquals(type.getCode(),filtered.get(0).getIssueTypeCode());assertEquals(Collections.singletonList(type.getStoredType()),filtered.get(0).getTypes());
+        }
+        assertEquals(VettingPromptPolicy.metadata(),result.getPromptPolicy());
+        com.fasterxml.jackson.databind.JsonNode report=JsonUtils.parse(new String(service.exportJson(project,"en"),StandardCharsets.UTF_8));
+        assertEquals(VettingPromptPolicy.sha256(),report.path("promptPolicy").path("sha256").asText());
+        assertEquals(5,report.path("commentsTables").get(0).path("headings").size(),"Seven classes must not add an official report column");
+        Set<String> codes=new HashSet<>();report.path("findings").forEach(f->codes.add(f.path("issueTypeCode").asText()));assertEquals(7,codes.size());
+        assertEquals("Authored source review",report.path("findings").get(0).path("businessDetails").path("subDimension").asText());
+        assertEquals(44,report.path("automaticChecklistResults").size());
+    }
+
+    @ParameterizedTest @ValueSource(strings={"subDimension","factBasis","pendingFacts","suggestedAction","checklistItemIds"})
+    void changedCompetitionRationaleCannotInheritAnEarlierHumanDecision(String field) throws Exception {
+        SourceDocument doc=source();String project=doc.getProjectId();AtomicReference<Boolean> changed=new AtomicReference<>(false);
+        when(semantic.reviewWithProgress(eq(project),anyList(),eq("en"),any(ReviewProgress.class))).thenAnswer(call->{
+            Result value=result(doc,"");BusinessDetailsVO business=value.getCandidates().get(0).getBusinessDetails();
+            if(changed.get())switch(field){case "subDimension":business.setSubDimension("Changed authored dimension");break;case "factBasis":business.setFactBasis("Changed authored source rationale");break;case "pendingFacts":business.setPendingFacts(Collections.singletonList("Confirm authored scope"));break;case "suggestedAction":business.setSuggestedAction("amend");break;default:business.setChecklistItemIds(Collections.singletonList("APP-I-026"));}
+            return value;
+        });
+        FindingVO original=run(project);VettingHumanReviewFixture.updateStatus(service,project,original.getCode(),"Handled");
+        changed.set(true);FindingVO current=run(project);assertNotEquals(original.getCode(),current.getCode());assertNotEquals(original.getFingerprint(),current.getFingerprint());
+        assertNotEquals(original.getGeneratedRevisionSha256(),current.getGeneratedRevisionSha256());assertEquals("Open",current.getStatus());assertNull(current.getReviewRemarks());
+        assertEquals("Handled",findings.findByProjectIdAndCode(project,original.getCode()).orElseThrow(AssertionError::new).getStatus());
+    }
+
     @ParameterizedTest
     @ValueSource(strings={"comment","title","impact","suggestion","severity","type"})
     void changedGeneratedObservationDoesNotInheritAnEarlierHumanDecision(String changedField) throws Exception {
@@ -111,6 +150,7 @@ class VettingGeneratedRevisionWorkflowTest {
     private static Result result(SourceDocument doc,String changedField) {
         Candidate c=new Candidate();c.setRuleId("fixture-stable-evidence");c.setType("risk");c.setSeverity("high");c.setTitle("Fixture original title");
         c.setComment("Fixture original observation");c.setImpact("Fixture original impact");c.setSuggestion("Fixture original suggestion");c.setSource("model");
+        c.setBusinessDetails(new BusinessDetailsVO("Authored source review","Authored fixture source rationale; no project fact is inferred.",Collections.emptyList(),"review"));
         c.setEvidence(Collections.singletonList(new FindingEvidence("source",String.valueOf(doc.getId()),doc.getFileKey(),doc.getFileName(),null,"body fixture",doc.getTextContent(),true,VettingCorpus.sourceHash(doc),null)));
         switch(changedField) {
             case "comment":c.setComment("Fixture changed observation");break;

@@ -7,7 +7,7 @@ import lombok.Setter;
 import java.time.Instant;
 
 /**
- * 审查发现（finding）。归入四类分组：reference / conflict / language / risk。
+ * 审查发现（finding）。七类分组与旧 F2 记录兼容，分类不是官方报告列。
  */
 @Getter
 @Setter
@@ -20,6 +20,9 @@ public class VettingFinding {
     public static final String GROUP_CONFLICT = "conflict";
     public static final String GROUP_LANGUAGE = "language";
     public static final String GROUP_RISK = "risk";
+    public static final String GROUP_GAP = "gap";
+    public static final String GROUP_SUBSTANTIVE = "substantive";
+    public static final String GROUP_REQUIREMENT = "requirement";
 
     public static final String STATUS_OPEN = "Open";
     public static final String STATUS_HANDLED = "Handled";
@@ -35,7 +38,7 @@ public class VettingFinding {
     @Column(length = 32, nullable = false)
     private String code;
 
-    /** 底层 F2 类别，逗号分隔，如 "f2-v,f2-viii" */
+    /** Existing F2 codes or an independent gap/substantive/requirement code. */
     @Column(length = 160)
     private String types;
 
@@ -61,6 +64,11 @@ public class VettingFinding {
     @Lob
     @Column(name = "action_taken", columnDefinition = "TEXT")
     private String actionTaken;
+
+    /** Generated competition rationale; null on legacy records without these assertions. */
+    @Lob
+    @Column(name = "business_details_json", columnDefinition = "LONGTEXT")
+    private String businessDetailsJson;
 
     /** null: not decided; true: amendment required; false: amendment not required. */
     @Column(name = "addendum_required")

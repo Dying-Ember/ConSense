@@ -24,6 +24,34 @@ public final class VettingChecklistDtos {
         private boolean writable;
         private List<ItemVO> items;
         private String sourceSnapshotSha256;
+        private List<LogicalGroupVO> logicalGroups;
+        private List<String> annexItemIds;
+        /** Model suggestions are independent of the saved human rows in items. */
+        private List<AutomaticGroupVO> automaticResults;
+        public ChecklistVO(String projectId,String runId,String binding,boolean writable,List<ItemVO> items,String sourceSnapshotSha256) {
+            this(projectId,runId,binding,writable,items,sourceSnapshotSha256,null,null,null);
+        }
+    }
+
+    @Data @NoArgsConstructor @AllArgsConstructor
+    public static class LogicalGroupVO {
+        private String id,section,clause;
+        private List<String> sourceItemIds;
+    }
+
+    @Data @NoArgsConstructor @AllArgsConstructor
+    public static class AutomaticGroupVO {
+        private String id,status,symbol,reason;
+        private boolean complete;
+        private List<String> sourceItemIds;
+        private List<AutomaticItemVO> subItemAssessments;
+    }
+
+    @Data @NoArgsConstructor @AllArgsConstructor
+    public static class AutomaticItemVO {
+        private String itemId,status,reason;
+        /** Preserve every accepted packet record; contradictory decisions are never overwritten. */
+        private List<com.fasterxml.jackson.databind.JsonNode> assessments;
     }
 
     @Data @NoArgsConstructor @AllArgsConstructor
@@ -74,7 +102,7 @@ public final class VettingChecklistDtos {
     public static class UpdateItem {
         @NotBlank @Size(max=64)
         private String id;
-        @NotBlank @Pattern(regexp="unchecked|fulfilled|not_applicable")
+        @NotBlank @Pattern(regexp="unchecked|fulfilled|not_fulfilled|not_applicable")
         private String status;
         @Size(max=4000)
         private String remarks;

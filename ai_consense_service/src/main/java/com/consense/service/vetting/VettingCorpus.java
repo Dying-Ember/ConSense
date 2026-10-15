@@ -389,6 +389,7 @@ public final class VettingCorpus {
         FindingEvidence evidence=new FindingEvidence(side, c.getDocumentId(), c.getFileKey(), c.getFileName(), page, anchor, quote, located,
                 c.getCanonicalEvidence()==null?c.getSourceHash():c.getCanonicalEvidence().getJavaParsedSourceHash(), bbox);
         evidence.setCanonicalEvidence(c.getCanonicalEvidence());evidence.setOriginalSourceSha256(c.getOriginalSourceSha256());evidence.setSourceRole(c.getRole());
+        evidence.setClauseId(c.getClauseId());
         JsonNode position=occurrence==null||c.getCanonicalEvidence()!=null?null:nativePosition(occurrence.getSourcePosition(),c.getOriginalSourceSha256());
         if(position!=null)evidence.setNativePositions(Collections.singletonList(position));
         return evidence;

@@ -66,6 +66,16 @@ class VettingMigrationTest {
                     assertTrue(row.next());assertEquals("Handled",row.getString("status"));assertEquals(remarks,row.getString("review_remarks"));assertEquals(action,row.getString("action_taken"));assertFalse(row.getBoolean("addendum_required"));assertEquals(reviewTime,row.getTimestamp("review_updated_at"));
                 }
             }
+            execute(connection,"db/migration/V22__vetting_competition_business_details.sql");
+            try(Statement stmt=connection.createStatement();ResultSet row=stmt.executeQuery("select status,review_remarks,business_details_json from vetting_finding where code='VT-001'")) {
+                assertTrue(row.next());assertEquals("Handled",row.getString("status"));assertEquals(remarks,row.getString("review_remarks"));
+                assertNull(row.getString("business_details_json"),"Legacy records do not acquire invented competition assertions.");
+            }
+            String details="{\"subDimension\":\"Authored source review\",\"factBasis\":\"Original fixture clause\",\"pendingFacts\":[\"Confirm scope\"],\"suggestedAction\":\"review\"}";
+            try(PreparedStatement write=connection.prepareStatement("update vetting_finding set business_details_json=? where code='VT-001'")) {write.setString(1,details);assertEquals(1,write.executeUpdate());}
+            try(Statement stmt=connection.createStatement();ResultSet row=stmt.executeQuery("select status,review_remarks,business_details_json from vetting_finding where code='VT-001'")) {
+                assertTrue(row.next());assertEquals("Handled",row.getString("status"));assertEquals(remarks,row.getString("review_remarks"));assertEquals(details,row.getString("business_details_json"));
+            }
         }
     }
 

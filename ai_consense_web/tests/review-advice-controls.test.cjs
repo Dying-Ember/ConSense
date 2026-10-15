@@ -151,6 +151,53 @@ async function openFinding(h) {
   item.props.onClick(); await settle()
 }
 
+test('PM seven classes, business facts and automatic checklist remain visible apart from human counterchecks', async () => {
+  const details = { subDimension: 'Required attachment', factBasis: 'Adopted PRE requires Appendix X', pendingFacts: ['Confirm whether Appendix X was issued'], suggestedAction: 'review', checklistItemIds: ['APP-I-026'] }
+  const rows = [{ id: 'APP-I-026', clause: 'PRE.B6.590', section: 'PRE.B6', description: 'Authored checklist requirement', status: 'unchecked', remarks: '' }]
+  const group = { id: 'CK-019', status: 'insufficient_evidence', symbol: '', complete: false, reason: 'Required source was not checked', sourceItemIds: ['APP-I-026'],
+    subItemAssessments: [{ itemId: 'APP-I-026', status: 'insufficient_evidence', reason: 'No complete evidence', assessments: [] }] }
+  const failure = { id: 'CK-020', status: 'not_fulfilled', symbol: '✗', complete: true, reason: 'Duty holder not specified', sourceItemIds: ['APP-I-027'],
+    subItemAssessments: [{ itemId: 'APP-I-027', status: 'not_fulfilled', reason: 'Duty holder not specified', assessments: [
+      { issueTypeCode: 'REQ', status: 'not_fulfilled', reason: 'Duty holder not specified', evidence: [] }
+    ] }] }
+  const h = await harness({ respondOverride: ({ url }) => {
+    if (url.endsWith('/findings/F001/evidence')) return { ...evidence, items: evidence.items.map(item => ({ ...item, clauseId: 'PRE.B6.590(1)' })) }
+    if (/\/findings(?:\?|$)/.test(url)) return [{ ...finding, group: 'gap', types: ['gap'], businessDetails: details }]
+    if (url.endsWith('/metrics')) return { total: 3, reference: 0, conflict: 0, language: 0, risk: 0, gap: 1, substantive: 1, requirement: 1, crossFile: 0 }
+    if (/\/runs\/(latest\/progress|run-1)$/.test(url)) return { id: 'run-1', status: 'COMPLETED', completedUnits: 1, totalUnits: 1 }
+    if (url.endsWith('/checklist')) return { projectId: 'project-A', runId: 'run-1', runSnapshotSha256: 'snapshot', sourceSnapshotSha256: 'source', writable: true, items: rows,
+      logicalGroups: [{ id: 'CK-019', section: 'PRE.B6', clause: 'PRE.B6.590', sourceItemIds: ['APP-I-026'] }], automaticResults: [group, failure] }
+  } })
+  try {
+    await openFinding(h)
+    assert.match(text(h.root), /Required attachment/)
+    assert.match(text(h.root), /Adopted PRE requires Appendix X/)
+    assert.match(text(h.root), /Confirm whether Appendix X was issued/)
+    assert.match(text(h.root), /APP-I-026/)
+    assert.match(text(h.root), /PRE\.B6\.590\(1\)/, 'actual evidence clause survives API normalization and rendering')
+    const checklist = find(h.root, node => node.tag === 'details' && String(node.props?.class).includes('checklist-panel'))
+    assert.ok(checklist)
+    await checklist.props.onToggle({ target: { open: true } }); await settle()
+    assert.match(text(h.root), /CK-019/)
+    assert.match(text(h.root), /Required source was not checked/)
+    assert.match(text(h.root), /REQ[\s\S]*Duty holder not specified/, 'an automatic failure retains its PM class as well as its reason')
+    const manual = find(h.root, node => node.tag === 'select' && node.children?.some(child => child.props?.value === 'not_fulfilled'))
+    assert.ok(manual, 'human failure remains a separate choice')
+    assert.equal(typeof manual.props['onUpdate:modelValue'], 'function')
+    assert.equal(manual.options[manual.selectedIndex].props.value, 'unchecked', 'automatic incomplete assessment does not write a human decision')
+    for (const [locale, labels] of [
+      ['zh-Hans', ['齐备性与范围', '实质性与适用性', '要求缺失与不明']],
+      ['zh-Hant', ['齊備性與範圍', '實質性與適用性', '要求缺失與不明']],
+      ['en', ['Completeness and scope', 'Substance and applicability', 'Missing or unclear requirements']]
+    ]) {
+      h.store.changeLocale(locale); await settle()
+      for (const label of labels) assert.ok(text(h.root).includes(label), `${locale}: ${label}`)
+      assert.doesNotMatch(text(h.root), /vetting\.(metrics|drawer|checklist|actions)\./)
+    }
+    assert.equal(h.requests.some(request => request.method !== 'get'), false)
+  } finally { h.dispose() }
+})
+
 test('real Vetting entry hands off literal sources to editable Advice, localizes controls, and never auto-asks', async () => {
   const h = await harness()
   try {

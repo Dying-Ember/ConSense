@@ -45,6 +45,49 @@ class VettingSampleReportAlignmentTest {
         assertTrue(tables.get(0).getTitle().contains("10 - SCC.docx"));
         assertFalse(tables.get(0).getTitle().contains("06_Standard"));
     }
+    @Test void officialCommentsKeepBusinessDetailsAndOnlyExplicitChecklistLinksWithoutAddingAColumn() {
+        FindingVO finding=finding("PRE","Project PRE.docx","PRE.B6.590","P1");finding.setGroup("requirement");
+        BusinessDetailsVO details=new BusinessDetailsVO("obligation_holder_unspecified","The source clause names no responsible party.",
+                Collections.singletonList("Confirm the intended specialist."),"amend",Collections.singletonList("APP-I-026"));
+        finding.setBusinessDetails(details);
+        VettingReportPresentation.Table table=VettingReportPresentation.comments(Collections.singletonList(finding),null).get(0);
+        assertEquals(5,table.getHeadings().size());String comment=table.getRows().get(0).get(3);
+        assertTrue(comment.contains("REQ"));assertTrue(comment.contains(details.getSubDimension()));assertTrue(comment.contains(details.getFactBasis()));
+        assertTrue(comment.contains(details.getPendingFacts().get(0)));assertTrue(comment.contains("amend"));assertTrue(comment.contains("CK-019 / APP-I-026"));
+        assertTrue(comment.indexOf(details.getFactBasis())<comment.indexOf("Please clarify this provision."));
+        details.setChecklistItemIds(Collections.emptyList());
+        comment=VettingReportPresentation.comments(Collections.singletonList(finding),null).get(0).getRows().get(0).get(3);
+        assertFalse(comment.contains("CK-019"),"A matching clause or title cannot invent an unrecorded checklist association");
+        finding.setBusinessDetails(null);
+        assertTrue(VettingReportPresentation.comments(Collections.singletonList(finding),null).get(0).getRows().get(0).get(3).startsWith("Project fact basis: Not recorded; review required"));
+    }
+    @Test void everyActualCoverageDocumentHasASummaryAndZeroFindingsNeverProveNoComment() throws Exception {
+        CoverageVO coverage=new CoverageVO(4,2,Arrays.asList(
+                new DocumentCoverageVO("doc-1","NTT","Actual NTT.docx","PARSED",100,0,5,0,Collections.singletonList("Not submitted")),
+                new DocumentCoverageVO("doc-2","GCT","Actual GCT.docx","PARSED",100,60,5,3,Collections.singletonList("Two segments remain")),
+                new DocumentCoverageVO("doc-3","SCT","Actual SCT.docx","PARSED",100,100,5,5,Collections.emptyList()),
+                new DocumentCoverageVO("doc-4","PRE","Actual PRE.docx","PLACEHOLDER",0,0,0,0,Collections.singletonList("Numbered placeholder recorded"))),Collections.emptyList());
+        coverage.setReviewCompleteness("complete");
+        List<VettingReportPresentation.SectionSummary> summaries=VettingReportPresentation.sectionSummaries(Collections.emptyList(),coverage);
+        assertEquals(Arrays.asList("not_covered","not_completed","full_countercheck_unproven","numbered_placeholder"),
+                summaries.stream().map(VettingReportPresentation.SectionSummary::getReviewState).collect(Collectors.toList()));
+        List<VettingReportPresentation.Table> tables=VettingReportPresentation.comments(Collections.emptyList(),coverage);
+        assertEquals(4,tables.size());assertTrue(tables.stream().allMatch(t->t.getHeadings().size()==5));
+        String rows=tables.stream().map(t->t.getTitle()+t.getRows()).collect(Collectors.joining("\n"));
+        assertTrue(rows.contains("Actual NTT.docx"));assertTrue(rows.contains("Actual SCT.docx"));
+        assertTrue(rows.contains("doc-3"));assertTrue(rows.contains("full_countercheck_unproven"));
+        assertFalse(rows.contains("checked with no comments"));
+        FindingVO issue=finding("NTT","Actual NTT.docx","1","P1");issue.getEvidence().get(0).setDocumentId("doc-1");
+        assertEquals(1,VettingReportPresentation.sectionSummaries(Collections.singletonList(issue),coverage).get(0).getFindingCount());
+        VettingJobVO job=new VettingJobVO();job.setStatus("COMPLETED");job.setCoverage(coverage);
+        VettingReportWriter writer=new VettingReportWriter();
+        try(XWPFDocument word=new XWPFDocument(new ByteArrayInputStream(writer.docx(project(),Collections.emptyList(),job,"en")))) {
+            assertTrue(word.getTables().stream().anyMatch(t->t.getText().contains("full_countercheck_unproven")));
+        }
+        try(PDDocument pdf=PDDocument.load(writer.pdf(project(),Collections.emptyList(),job,"en"))) {
+            assertTrue(new PDFTextStripper().getText(pdf).contains("full_countercheck_unproven"));
+        }
+    }
     @Test void checklistNeverMarksAbsentFindingsAsFulfilledAndRetainsAllTemplateRequirements() {
         List<VettingReportPresentation.Table> tables=VettingReportPresentation.checklist(Collections.emptyList());
         assertEquals(69,tables.stream().mapToInt(t->t.getRows().size()).sum());

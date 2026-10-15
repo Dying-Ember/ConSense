@@ -5,6 +5,7 @@ import com.consense.document.DocumentBlock;
 import com.consense.domain.SourceDocument;
 import com.consense.service.vetting.VettingCorpus.Chunk;
 import com.consense.service.vetting.VettingSemanticReview.Candidate;
+import com.consense.web.dto.VettingDtos.BusinessDetailsVO;
 import com.consense.web.dto.VettingDtos.FindingEvidence;
 import org.junit.jupiter.api.Test;
 import java.util.*;
@@ -79,6 +80,22 @@ class VettingServiceTest {
         assertNotEquals(original,VettingService.fingerprint(first));
         a.setSourceHash("digest-1"); a.setQuote("Clause 7.2 is deleted.");
         assertNotEquals(original,VettingService.fingerprint(first));
+    }
+
+    @Test void currentFingerprintBindsPolicySupplementAndBusinessDetailsWithoutReusingLegacyIdentity() {
+        Candidate c=candidate(evidence("SCC.docx","digest-1","paragraph 9","Clause 7.1 is deleted."));
+        String historical=VettingService.fingerprint(c);
+        c.setPromptSupplementSha256(VettingPromptPolicy.supplementSha256(""));
+        String current=VettingService.fingerprint(c);
+        assertNotEquals(historical,current,"Even an empty current supplement marks the current policy contract");
+        c.setPromptSupplementSha256(VettingPromptPolicy.supplementSha256("Project review supplement"));
+        assertNotEquals(current,VettingService.fingerprint(c),"Changed configured instructions must not inherit an earlier human decision");
+        c.setPromptSupplementSha256(VettingPromptPolicy.supplementSha256(""));
+        c.setBusinessDetails(new BusinessDetailsVO("Reference validity","The same quoted clause is deleted.",Collections.emptyList(),"review"));
+        String withDetails=VettingService.fingerprint(c);
+        assertNotEquals(current,withDetails);
+        c.setBusinessDetails(new BusinessDetailsVO("Reference validity","The same quoted clause is deleted.",Collections.singletonList("Confirm the applicable project clause."),"review"));
+        assertNotEquals(withDetails,VettingService.fingerprint(c),"Changed factual prerequisites must not inherit the old generated conclusion");
     }
 
     @Test void countsUnionOfModelRangesRatherThanDuplicateOverlappingCharacters() {

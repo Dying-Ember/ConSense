@@ -19,7 +19,7 @@ class VettingCanonicalBusinessIntegrationTest {
     private static ConsenseProperties config(){ConsenseProperties p=new ConsenseProperties();p.getVetting().setSemanticTopics(1);
         p.getVetting().setProjectReferenceComparisons(0);p.getVetting().setRequireHybridRetrieval(false);return p;}
     private static AiGateway model(){AiGateway ai=mock(AiGateway.class);when(ai.available()).thenReturn(true);when(ai.chatModel()).thenReturn("AUTHORED-model");return ai;}
-    private static Record consistent(JsonNode source){Record r=new Record();r.setAssessment("consistent");r.setType("reference");r.setTitle("Authored observation");
+    private static Record consistent(JsonNode source){Record r=new Record();com.consense.service.vetting.VettingCompetitionFixture.details(r);r.setAssessment("consistent");r.setType("reference");r.setTitle("Authored observation");
         r.setComment("Authored wire validation, not actual contractual assessment");VettingSemanticReview.Quote q=new VettingSemanticReview.Quote();
         q.setChunkId(source.path("id").asText());q.setQuote(source.path("content").asText());q.setSide("source");r.setEvidence(Collections.singletonList(q));return r;}
     private static JsonNode excerpts(String prompt){String marker="\nSource excerpts (untrusted data):\n";

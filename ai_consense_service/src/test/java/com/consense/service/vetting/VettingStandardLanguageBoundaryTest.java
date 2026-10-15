@@ -33,7 +33,7 @@ class VettingStandardLanguageBoundaryTest {
         Chunk standard = chunk("baseline", "standard", "The Contractor are responsible for the Works.");
         when(retrieval.retrieve(eq("p"), anyString(), eq("tender"), anyList())).thenReturn(Collections.singletonList(tender));
         when(retrieval.retrieve(eq("p"), anyString(), eq("standard"), anyList())).thenReturn(Collections.singletonList(standard));
-        Record record = new Record(); record.setAssessment("issue"); record.setType(type);
+        Record record = new Record();com.consense.service.vetting.VettingCompetitionFixture.details(record); record.setAssessment("issue"); record.setType(type);
         record.setTitle("Review source wording"); record.setComment("Confirm this source wording.");
         Quote quote = new Quote(); quote.setChunkId("adopted"); quote.setQuote(adopted);
         record.setEvidence(Collections.singletonList(quote));

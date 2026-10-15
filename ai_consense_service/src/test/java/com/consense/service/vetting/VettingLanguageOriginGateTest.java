@@ -25,6 +25,15 @@ class VettingLanguageOriginGateTest {
     @TempDir Path probes;
     private List<JsonNode> gates;
 
+    @Test void explicitSameClauseAmendmentAllowsProjectLanguageButWrongClauseOrUnknownRawIdentityDoesNot()throws Exception {
+        Chunk tender=chunk("amended","tender","SCC81.4 is amended by substituting: The Contractor are responsible for the additional harbour inspections.");
+        tender.setSourceHash(VettingCorpus.hash("AUTHORED parsed amendment"));tender.setOriginalSourceSha256(VettingCorpus.hash("AUTHORED original amendment bytes"));
+        Result accepted=review(Collections.singletonList(tender),record("language",tender));
+        assertEquals(1,accepted.getCandidates().size());assertEquals("language",accepted.getCandidates().get(0).getType());
+        tender.setClauseId("SCC99.2");assertHeld(review(Collections.singletonList(tender),record("language",tender)));
+        tender.setClauseId("SCC81.4");tender.setOriginalSourceSha256(null);assertHeld(review(Collections.singletonList(tender),record("language",tender)));
+    }
+
     @Test void modelClaimWithoutBaselineCannotCertifyProjectAddedWording()throws Exception {
         Chunk tender=chunk("authored","tender","The Contractor are responsible for the additional harbour inspections.");
         assertHeld(review(Collections.singletonList(tender),record("language",tender)));
@@ -96,7 +105,7 @@ class VettingLanguageOriginGateTest {
     }
 
     private static Record record(String type,Chunk... sources) {
-        Record r=new Record();r.setAssessment("issue");r.setType(type);r.setSeverity("low");r.setTitle("Authored observation");r.setComment("The model claims this is project-added prose.");
+        Record r=new Record();com.consense.service.vetting.VettingCompetitionFixture.details(r);r.setAssessment("issue");r.setType(type);r.setSeverity("low");r.setTitle("Authored observation");r.setComment("The model claims this is project-added prose.");
         List<Quote> quotes=new ArrayList<>();for(Chunk c:sources){Quote q=new Quote();q.setChunkId(c.getId());q.setSide("source");q.setQuote(c.getContent());quotes.add(q);}r.setEvidence(quotes);return r;
     }
 

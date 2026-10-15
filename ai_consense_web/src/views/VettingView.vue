@@ -111,20 +111,26 @@ const sourceCitation = ref<Citation | null>(null)
 
 const projectId = computed(() => store.activeProjectId)
 
-const GROUPS = ['reference', 'conflict', 'language', 'risk'] as const
+const GROUPS = ['reference', 'conflict', 'language', 'risk', 'gap', 'substantive', 'requirement'] as const
 
 const GROUP_CLASS: Record<string, string> = {
   reference: 'type-ref',
   conflict: 'type-conflict',
   language: 'type-lang',
-  risk: 'type-risk'
+  risk: 'type-risk',
+  gap: 'type-gap',
+  substantive: 'type-substantive',
+  requirement: 'type-requirement'
 }
 
 const GROUP_TAG: Record<string, string> = {
   reference: 'info',
   conflict: 'danger',
   language: 'warn',
-  risk: 'demo'
+  risk: 'demo',
+  gap: 'warn',
+  substantive: 'info',
+  requirement: 'danger'
 }
 
 /** 三栏定位器第二栏的标签（变量 / 错误类别） */
@@ -164,6 +170,7 @@ const evidenceItems = computed<FindingEvidence[]>(() => {
     return evidence.value.items.map((item) => ({
       side: item.side ?? 'source', documentId: item.documentId,
       fileKey: item.fileKey ?? item.code, fileName: item.fileName ?? '',
+      clauseId: item.clauseId,
       pageNo: item.pageNo, anchor: item.anchor, quote: item.quote ?? item.text,
       located: item.located ?? evidence.value!.located, sourceHash: item.sourceHash, originalSourceSha256: item.originalSourceSha256, sourceRole: item.sourceRole, nativePositions: item.nativePositions, bbox: item.bbox,
       packetId: item.packetId, packetSourceSnapshotSha256: item.packetSourceSnapshotSha256,
@@ -746,6 +753,10 @@ function restoreCheck(item: VettingChecklistItem) {
 
 async function saveCheck(item: VettingChecklistItem) {
   if (!checklist.value || !checklistWritable.value || checklistSaving.value || !checkDirty(item)) return
+  if (item.status === 'not_fulfilled' && !item.remarks.trim()) {
+    store.notify(t('vetting.checklist.reasonRequired'))
+    return
+  }
   const id = projectId.value, loaded = checklist.value, epoch = viewEpoch, sequence = checklistSequence
   const binding = { runId: loaded.runId, runSnapshotSha256: loaded.runSnapshotSha256, sourceSnapshotSha256: loaded.sourceSnapshotSha256 }
   const submitted = { id: item.id, status: item.status, remarks: item.remarks }
@@ -775,12 +786,7 @@ async function saveCheck(item: VettingChecklistItem) {
 
 function metricCards() {
   const data = metrics.value
-  return [
-    { group: 'reference', label: t('vetting.metrics.reference'), detail: t('vetting.metrics.referenceDetail'), value: data?.reference ?? 0 },
-    { group: 'conflict', label: t('vetting.metrics.conflict'), detail: t('vetting.metrics.conflictDetail'), value: data?.conflict ?? 0 },
-    { group: 'language', label: t('vetting.metrics.language'), detail: t('vetting.metrics.languageDetail'), value: data?.language ?? 0 },
-    { group: 'risk', label: t('vetting.metrics.risk'), detail: t('vetting.metrics.riskDetail'), value: data?.risk ?? 0 }
-  ]
+  return GROUPS.map(group => ({ group, label: t(`vetting.metrics.${group}`), detail: t(`vetting.metrics.${group}Detail`), value: data?.[group] ?? 0 }))
 }
 
 const severityClass = (finding: Finding) => finding.severity || 'low'
@@ -864,6 +870,31 @@ function tagClass(group: string) {
         <button class="btn" type="button" :disabled="!!checklistSaving || checklistLoading" @click="refreshChecklist">{{ pick(versionCopy.refresh) }}</button>
       </p>
       <p v-if="checklistLoading">{{ t('common.loading') }}</p>
+      <section v-if="checklist?.automaticResults?.length" class="automatic-checklist">
+        <h4>{{ t('vetting.checklist.automaticTitle') }}</h4>
+        <p class="muted small">{{ t('vetting.checklist.automaticNote') }}</p>
+        <details v-for="group in checklist.automaticResults" :key="group.id">
+          <summary>{{ group.id }} · {{ checklist.logicalGroups?.find(item => item.id === group.id)?.clause }}
+            <span class="tag" :class="group.status === 'not_fulfilled' ? 'danger' : group.status === 'fulfilled' ? 'ok' : 'neutral'">{{ group.symbol }} {{ t(`vetting.checklist.automaticStates.${group.status}`) }}</span>
+          </summary>
+          <p>{{ group.reason }}</p>
+          <div v-for="item in group.subItemAssessments" :key="item.itemId" class="automatic-checklist-item">
+            <strong>{{ item.itemId }} · {{ t(`vetting.checklist.automaticStates.${item.status}`) }}</strong>
+            <p>{{ checklist.items.find(row => row.id === item.itemId)?.description }}</p>
+            <p>{{ item.reason }}</p>
+            <div v-for="(assessment, index) in item.assessments" :key="index">
+              <p><span v-if="assessment.issueTypeCode" class="mono">{{ assessment.issueTypeCode }} · </span>{{ t(`vetting.checklist.automaticStates.${assessment.status}`) }} · {{ assessment.reason }}</p>
+              <div v-for="(evidenceItem, evidenceIndex) in assessment.evidence" :key="evidenceIndex" class="evidence-item">
+                <p>{{ evidenceItem.fileName }} · {{ evidenceItem.pageNo }} · {{ evidenceItem.clauseId }} · {{ evidenceItem.anchor }}</p>
+                <div class="quote">{{ evidenceItem.quote }}</div>
+                <FixedBaselineEvidencePanel v-if="evidenceItem.fixedBaselineEvidence" :pointer="evidenceItem.fixedBaselineEvidence" :locale="store.locale" />
+                <CanonicalEvidencePanel v-else-if="evidenceItem.canonicalEvidence" :pointer="evidenceItem.canonicalEvidence" :locale="store.locale" />
+              </div>
+            </div>
+          </div>
+        </details>
+      </section>
+      <h4 v-if="checklist">{{ t('vetting.checklist.manualTitle') }}</h4>
       <div v-if="checklist" class="table-wrap checklist-table">
         <table>
           <thead><tr><th>PSS Clause</th><th>Description</th><th>{{ t('common.status') }}</th><th>{{ t('vetting.checklist.remarks') }}</th></tr></thead>
@@ -874,16 +905,17 @@ function tagClass(group: string) {
               <p v-else-if="item.reuseScope === 'exact_whole_generation'" class="muted small">{{ t('vetting.checklist.scopeWhole') }}</p>
             </td>
             <td><select v-model="item.status" :disabled="!checklistWritable || checklistSaving === item.id">
-              <option v-for="status in ['unchecked', 'fulfilled', 'not_applicable']" :key="status" :value="status">{{ t(`vetting.checklist.${status}`) }}</option>
+              <option v-for="status in ['unchecked', 'fulfilled', 'not_fulfilled', 'not_applicable']" :key="status" :value="status">{{ t(`vetting.checklist.${status}`) }}</option>
             </select><p v-if="item.reuseStatus === 'matched_exact_required_material_members'" class="muted small">{{ t('vetting.checklist.reusedMembers') }} {{ item.reviewedRunId }}</p>
             <p v-else-if="item.reuseStatus === 'matched_exact_whole_generation'" class="muted small">{{ t('vetting.checklist.reusedWhole') }} {{ item.reviewedRunId }}</p></td>
             <td><textarea v-model="item.remarks" :aria-label="`${item.clause} ${t('vetting.checklist.remarks')}`" maxlength="4000" :disabled="!checklistWritable || checklistSaving === item.id" />
+              <p v-if="item.status === 'not_fulfilled' && !item.remarks.trim()" class="warning-note small">{{ t('vetting.checklist.reasonRequired') }}</p>
               <details v-if="item.previousDecisionStatus" class="small">
                 <summary>{{ t('vetting.checklist.previous') }}</summary>
                 <p>{{ t(`vetting.checklist.${item.previousDecisionStatus}`) }} · {{ item.previousReviewedRunId }}</p>
                 <pre v-if="item.previousRemarks">{{ item.previousRemarks }}</pre>
               </details>
-              <div class="row"><button class="btn" type="button" :disabled="!checklistWritable || !!checklistSaving || !checkDirty(item)" @click="saveCheck(item)">{{ t('vetting.checklist.save') }}</button>
+              <div class="row"><button class="btn" type="button" :disabled="!checklistWritable || !!checklistSaving || !checkDirty(item) || (item.status === 'not_fulfilled' && !item.remarks.trim())" @click="saveCheck(item)">{{ t('vetting.checklist.save') }}</button>
               <button v-if="checkDirty(item)" class="btn ghost" type="button" :disabled="checklistSaving === item.id" @click="restoreCheck(item)">{{ t('vetting.checklist.reset') }}</button></div>
             </td>
           </tr></tbody>
@@ -1039,10 +1071,7 @@ function tagClass(group: string) {
           />
           <select v-model="filters.group">
             <option value="all">{{ t('vetting.toolbar.allTypes') }}</option>
-            <option value="reference">{{ t('vetting.metrics.reference') }}</option>
-            <option value="conflict">{{ t('vetting.metrics.conflict') }}</option>
-            <option value="language">{{ t('vetting.metrics.language') }}</option>
-            <option value="risk">{{ t('vetting.metrics.risk') }}</option>
+            <option v-for="group in GROUPS" :key="group" :value="group">{{ t(`vetting.metrics.${group}`) }}</option>
           </select>
           <select v-model="filters.scope">
             <option value="all">{{ t('vetting.toolbar.allScopes') }}</option>
@@ -1228,6 +1257,20 @@ function tagClass(group: string) {
             <p>{{ pick(selectedFinding.impact) }}</p>
           </div>
 
+          <div v-if="selectedFinding.businessDetails" class="detail-block">
+            <h5>{{ t('vetting.drawer.businessDetails') }}</h5>
+            <dl class="business-details">
+              <dt>{{ t('vetting.drawer.subDimension') }}</dt><dd>{{ selectedFinding.businessDetails.subDimension }}</dd>
+              <dt>{{ t('vetting.drawer.factBasis') }}</dt><dd>{{ selectedFinding.businessDetails.factBasis }}</dd>
+              <dt>{{ t('vetting.drawer.suggestedAction') }}</dt><dd>{{ t(`vetting.actions.${selectedFinding.businessDetails.suggestedAction}`) }}</dd>
+            </dl>
+            <p v-if="selectedFinding.businessDetails.checklistItemIds?.length" class="mono">{{ selectedFinding.businessDetails.checklistItemIds.join(' · ') }}</p>
+            <template v-if="selectedFinding.businessDetails.pendingFacts.length">
+              <h5>{{ t('vetting.drawer.pendingFacts') }}</h5>
+              <ul><li v-for="fact in selectedFinding.businessDetails.pendingFacts" :key="fact">{{ fact }}</li></ul>
+            </template>
+          </div>
+
           <div class="detail-block">
             <h5>{{ t('vetting.drawer.suggestion') }}</h5>
             <p>{{ pick(selectedFinding.suggestion) }}</p>
@@ -1257,6 +1300,7 @@ function tagClass(group: string) {
                   <code>{{ item.fileKey }}</code>
                   <span>{{ item.fileName }}</span>
                   <span v-if="item.pageNo" class="tag neutral mono">{{ item.pageNo }}</span>
+                  <span v-if="item.clauseId" class="mono">{{ item.clauseId }}</span>
                   <span v-if="item.anchor" class="mono muted small">{{ item.anchor }}</span>
                   <span class="tag" :class="item.located ? 'ok' : 'warn'">{{ item.located ? t('vetting.drawer.located') : t('vetting.drawer.unverified') }}</span>
                 </div>
@@ -1394,6 +1438,11 @@ function tagClass(group: string) {
 .upload-role select { width: auto; min-width: 150px; }
 .checklist-panel { padding: 16px; }
 .checklist-panel summary { cursor: pointer; font-weight: 700; }
+.automatic-checklist { margin-block: 16px; }
+.automatic-checklist details { padding-block: 8px; border-bottom: 1px solid var(--border); }
+.automatic-checklist-item { margin: 12px 0 12px 16px; }
+.business-details dt { font-weight: 600; margin-top: 10px; }
+.business-details dd { margin: 4px 0 0; white-space: pre-wrap; }
 .checklist-table { max-height: 520px; overflow: auto; }
 .checklist-table th { position: sticky; top: 0; background: var(--surface, #fff); z-index: 1; }
 .checklist-table td:nth-child(2) { min-width: 280px; }

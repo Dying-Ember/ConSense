@@ -15,7 +15,7 @@ const setup = new Function('deps', `
   return { job, files, findings, running, exportDisabled, pollingPaused, selectedFinding, evidenceItems, reportFormat,
     uploadRole, uploadPackage, runVetting, restoreJob, retryPolling, openFinding, closeDrawer, updateStatus, exportReport,
     reviewDraft, reviewDirty, reviewSaving, reviewFailed, hasUnsavedReview, saveReview, discardReview,
-    uploadDocumentScope, checklist, checklistDirty, openChecklist, saveCheck, checkDirty, restoreCheck };
+    uploadDocumentScope, checklist, checklistDirty, openChecklist, saveCheck, checkDirty, restoreCheck, GROUPS, metricCards };
 `)
 
 const metrics = { total: 1, reference: 1, conflict: 0, language: 0, risk: 0, crossFile: 0 }
@@ -296,4 +296,36 @@ function harness(overrides = {}) {
   h.dispose()
 }
 
-console.log('Vetting view regressions passed: completion, restore, project/evidence/review races, review status and team replies, tri-state addendum, draft retention, exports, upload purpose, reconnect and cleanup.')
+{
+  const seven = { ...metrics, gap: 3, substantive: 4, requirement: 5 }
+  const h = harness({ metrics: async () => seven })
+  await h.mount()
+  assert.deepEqual(h.view.GROUPS, ['reference', 'conflict', 'language', 'risk', 'gap', 'substantive', 'requirement'])
+  const cards = h.view.metricCards()
+  assert.equal(cards.length, 7)
+  assert.deepEqual(cards.slice(4).map(card => card.value), [3, 4, 5], 'PM extension types retain their own counts instead of falling into risk')
+  assert.equal(cards.find(card => card.group === 'risk').value, 0)
+  h.dispose()
+}
+
+{
+  const saved = []
+  const h = harness({ saveChecklist: async (_project, binding, items) => { saved.push(items); return { ...binding, writable: true, items } } })
+  await h.mount()
+  h.view.job.value = completed(); await settle()
+  await h.view.openChecklist({ target: { open: true } })
+  const item = h.view.checklist.value.items[0]
+  item.status = 'not_fulfilled'; item.remarks = ' \n '
+  await h.view.saveCheck(item)
+  assert.equal(saved.length, 0, 'a failed human countercheck requires a substantive reason')
+  assert.ok(h.notifications.includes('vetting.checklist.reasonRequired'))
+  assert.equal(h.view.checkDirty(item), true, 'invalid submission retains the human draft')
+  item.remarks = 'Required clause is absent from the checked adopted PRE.'
+  await h.view.saveCheck(item)
+  assert.equal(saved.length, 1)
+  assert.equal(saved[0][0].status, 'not_fulfilled')
+  assert.equal(h.view.checkDirty(item), false)
+  h.dispose()
+}
+
+console.log('Vetting view regressions passed: completion, restore, project/evidence/review races, review status and team replies, tri-state addendum, draft retention, exports, upload purpose, reconnect, cleanup and seven independent issue types.')

@@ -2,6 +2,8 @@ package com.consense.service.vetting;
 
 import com.consense.common.LocalizedText;
 import com.consense.web.dto.VettingDtos.*;
+import com.consense.web.dto.VettingChecklistDtos.AutomaticGroupVO;
+import com.consense.web.dto.VettingChecklistDtos.AutomaticItemVO;
 import java.util.*;
 
 /** One business table model for Word, PDF and the online report; audit data stays separate. */
@@ -20,6 +22,39 @@ public final class VettingReportPresentation {
         public List<List<String>> getRows() { return Collections.unmodifiableList(rows); }
         public List<String> getFindingCodes() { return Collections.unmodifiableList(findingCodes); }
         void row(String... values) { rows.add(Collections.unmodifiableList(Arrays.asList(values))); }
+    }
+    @lombok.Getter @lombok.AllArgsConstructor
+    public static final class SectionSummary {
+        private final String documentId,fileKey,fileName,parseStatus,reviewState,summary;
+        private final int findingCount,totalSegments,reviewedSegments,totalChars,reviewedChars;
+        private final List<String> warnings;
+    }
+    public static List<SectionSummary> sectionSummaries(List<FindingVO> findings,CoverageVO coverage) {
+        List<SectionSummary> summaries=new ArrayList<>();
+        if(coverage==null)return summaries;
+        for(DocumentCoverageVO document:safe(coverage.getDocuments()))if(document!=null) {
+            int count=0;
+            for(FindingVO finding:safe(findings))if(finding!=null) {
+                FindingEvidence source=primary(finding);
+                String sourceId=source==null?"":str(source.getDocumentId());
+                String key=nonblank(source==null?null:source.getFileKey(),finding.getFileKey());
+                if(!sourceId.isEmpty()?sourceId.equals(document.getDocumentId()):!key.isEmpty()&&key.equals(document.getFileKey())
+                        &&safe(coverage.getDocuments()).stream().filter(d->d!=null&&key.equals(d.getFileKey())).count()==1)count++;
+            }
+            String state="PLACEHOLDER".equalsIgnoreCase(document.getParseStatus())?"numbered_placeholder"
+                    :!"PARSED".equals(document.getParseStatus())||document.getTotalSegments()<=0||document.getTextChars()<=0?"insufficient_evidence"
+                    :document.getReviewedSegments()<=0&&document.getReviewedChars()<=0?"not_covered"
+                    :document.getReviewedSegments()<document.getTotalSegments()||document.getReviewedChars()<document.getTextChars()?"not_completed"
+                    :"full_countercheck_unproven";
+            String summary="Document ID: "+nonblank(document.getDocumentId(),"Not recorded")+". Parse status: "+nonblank(document.getParseStatus(),"Not recorded")
+                    +". Findings recorded: "+count+". Review state: "+state+". Recorded segments: "+document.getReviewedSegments()+"/"+document.getTotalSegments()
+                    +"; characters: "+document.getReviewedChars()+"/"+document.getTextChars()+". Complete source and substantive countercheck have not been established.";
+            if("numbered_placeholder".equals(state))summary+=" Numbered placeholder is recorded; substantive content is not recorded as expanded.";
+            if(!safe(document.getWarnings()).isEmpty())summary+=" Recorded limitations: "+String.join("; ",document.getWarnings());
+            summaries.add(new SectionSummary(document.getDocumentId(),document.getFileKey(),document.getFileName(),document.getParseStatus(),state,summary,
+                    count,document.getTotalSegments(),document.getReviewedSegments(),document.getTextChars(),document.getReviewedChars(),safe(document.getWarnings())));
+        }
+        return summaries;
     }
     public static List<Table> comments(List<FindingVO> findings, CoverageVO coverage) {
         Map<String,Group> groups=new LinkedHashMap<>();
@@ -40,6 +75,12 @@ public final class VettingReportPresentation {
             if(group==null) { group=new Group(key,filename);groups.put(identity,group); }
             group.findings.add(f);
         }
+        for(SectionSummary summary:sectionSummaries(findings,coverage)) {
+            String identity=str(summary.getDocumentId()).isEmpty()?str(summary.getFileKey())+"|"+str(summary.getFileName()):"id:"+summary.getDocumentId();
+            Group group=groups.get(identity);
+            if(group==null){group=new Group(str(summary.getFileKey()),str(summary.getFileName()));groups.put(identity,group);}
+            group.summary=summary;
+        }
         List<Group> ordered=new ArrayList<>(groups.values());
         ordered.sort(Comparator.comparingInt((Group g)->rank(g.key,g.filename)).thenComparing(g->g.filename));
         List<Table> tables=new ArrayList<>();int[] sectionCounts=new int[9];
@@ -55,12 +96,21 @@ public final class VettingReportPresentation {
                 if(!english(f.getImpact()).isEmpty())comment+="\nReason and impact: "+english(f.getImpact());
                 if(!str(f.getExpected()).isEmpty())comment+="\nExpected basis: "+f.getExpected();
                 if(!english(f.getSuggestion()).isEmpty())comment+="\nSuggested action: "+english(f.getSuggestion());
+                BusinessDetailsVO business=f.getBusinessDetails();
+                String facts=business==null?"Not recorded; review required":nonblank(business.getFactBasis(),"Not recorded; review required");
+                String pending=business==null?"Not recorded":nonblank(String.join("; ",safe(business.getPendingFacts())),"Not recorded");
+                comment="Project fact basis: "+facts+"\nFacts pending confirmation: "+pending+"\n"+comment;
+                if(business!=null)comment+="\nIssue class: "+nonblank(f.getIssueTypeCode(),"Not recorded")
+                        +"\nSub-dimension: "+nonblank(business.getSubDimension(),"Not recorded")
+                        +"\nAction: "+nonblank(business.getSuggestedAction(),"Not recorded; review required")
+                        +"\nChecklist connection: "+checklistLinks(business.getChecklistItemIds());
                 String remarks=str(f.getReviewRemarks());
                 if(!str(f.getActionTaken()).isEmpty())remarks+=(remarks.isEmpty()?"":"\n")+"Action taken: "+f.getActionTaken();
                 if(f.getAddendumRequired()!=null)remarks+=(remarks.isEmpty()?"":"\n")+"Include in tender addendum: "+(f.getAddendumRequired()?"Required":"Not required");
                 table.row(section+"."+(++sectionCounts[section]),page.isEmpty()?"Not located":page,clause.isEmpty()?"Not located":clause,comment,remarks);
                 table.findingCodes.add(str(f.getCode()));
             }
+            if(g.summary!=null)table.row(section+".summary","-","Review summary",g.summary.getSummary(),"");
             tables.add(table);
         }
         if(tables.isEmpty()) {
@@ -69,6 +119,16 @@ public final class VettingReportPresentation {
         }
         return tables;
     }
+    static String checklistLinks(List<String> itemIds) {
+        List<String> links=new ArrayList<>();
+        for(String id:safe(itemIds)) {
+            VettingChecklistCatalog.LogicalGroup group=VettingChecklistCatalog.logicalGroups().stream()
+                    .filter(g->g.getSourceItemIds().contains(id)).findFirst().orElse(null);
+            links.add(group!=null?group.getId()+" / "+id:VettingChecklistCatalog.annexItemIds().contains(id)
+                    ?id+" (supplementary annex)":id+" (logical link not recorded)");
+        }
+        return links.isEmpty()?"Not recorded":String.join("; ",links);
+    }
     public static Table evidenceIndex(List<FindingVO> findings,CoverageVO coverage) {
         Table index=new Table("Comment and evidence index",Arrays.asList("Comment","Evidence record","Document / Clause"),12,28,60);
         for(Table table:comments(findings,coverage))for(int i=0;i<table.findingCodes.size();i++)
@@ -76,8 +136,13 @@ public final class VettingReportPresentation {
         return index;
     }
     public static List<Table> checklist(List<VettingChecklistCatalog.Result> results) {
+        return checklist(results,Collections.emptyList());
+    }
+    public static List<Table> checklist(List<VettingChecklistCatalog.Result> results,List<AutomaticGroupVO> automatic) {
         Map<String,VettingChecklistCatalog.Result> manual=new HashMap<>();
         for(VettingChecklistCatalog.Result r:safe(results))if(r!=null)manual.put(r.getId(),r);
+        Map<String,AutomaticItemVO> suggestions=new HashMap<>();
+        for(AutomaticGroupVO group:safe(automatic))for(AutomaticItemVO item:safe(group.getSubItemAssessments()))suggestions.put(item.getItemId(),item);
         List<Table> tables=new ArrayList<>();String section=null;Table table=null;
         for(VettingChecklistCatalog.Item item:VettingChecklistCatalog.items()) {
             if(!item.getSection().equals(section)) {
@@ -89,10 +154,16 @@ public final class VettingReportPresentation {
             }
             VettingChecklistCatalog.Result r=manual.get(item.getId());
             String status=r==null?"unchecked":str(r.getStatus());
-            String remarks="fulfilled".equals(status)?"Checked and fulfilled":"not_applicable".equals(status)?"Not applicable":"Not checked - human confirmation required";
+            String remarks="fulfilled".equals(status)?"Checked and fulfilled \u2713":"not_fulfilled".equals(status)?"Checked and not fulfilled \u2717"
+                    :"not_applicable".equals(status)?"Not applicable":"Not checked - human confirmation required";
             String scopeNote=reportScopeNote(item);
             if(!scopeNote.isEmpty())remarks+="\n"+scopeNote;
             if(r!=null&&!str(r.getRemarks()).isEmpty())remarks+="\n"+r.getRemarks();
+            AutomaticItemVO suggestion=suggestions.get(item.getId());
+            if(suggestion!=null) {
+                String mark="fulfilled".equals(suggestion.getStatus())?" \u2713":"not_fulfilled".equals(suggestion.getStatus())?" \u2717":"";
+                remarks="Human countercheck: "+remarks+"\nAutomatic suggestion: "+suggestion.getStatus()+mark+"\n"+suggestion.getReason();
+            }
             if(item.getTemplatePage()==14) {
                 String[] parts=item.getDescription().split(" Suggested actions: ",2);
                 table.row(item.getClause(),parts[0],(parts.length>1?parts[1]+"\n":"")+"Contract team confirmation: "+remarks);
@@ -130,5 +201,5 @@ public final class VettingReportPresentation {
     private static String nonblank(String a,String b) { return str(a).isEmpty()?str(b):str(a); }
     private static String str(String s) { return s==null?"":s.trim(); }
     private static <T> List<T> safe(List<T> list) { return list==null?Collections.emptyList():list; }
-    private static final class Group { final String key,filename;final List<FindingVO> findings=new ArrayList<>();Group(String key,String filename){this.key=key;this.filename=filename;} }
+    private static final class Group { final String key,filename;final List<FindingVO> findings=new ArrayList<>();SectionSummary summary;Group(String key,String filename){this.key=key;this.filename=filename;} }
 }

@@ -1,0 +1,389 @@
+{
+  "version": "vetting-checklist-logical-groups-v1",
+  "sourceTemplate": "checklist-template.json",
+  "sourceTemplateSha256": "84ac8a0c561b3c7b2b200a4d36fb33276e7414e5ac3a7b6cd67bf1ddbc08efd6",
+  "sourceDocument": "02_App I - Checklist_20250101.pdf",
+  "sourceDocumentSha256": "dfdef3f92a810e9c88ebf20f260d2d1a292d778689421c714b0d05d68e60c86c",
+  "sourceVersion": "Version as at 5/1/2024",
+  "groups": [
+    {
+      "id": "CK-001",
+      "section": "THE SPECIFICATION (PAGE SP/1)",
+      "clause": "1. Item 1",
+      "sourceItemIds": [
+        "APP-I-001"
+      ]
+    },
+    {
+      "id": "CK-002",
+      "section": "GENERALLY",
+      "clause": "1. All clauses",
+      "sourceItemIds": [
+        "APP-I-002",
+        "APP-I-003",
+        "APP-I-004",
+        "APP-I-005",
+        "APP-I-006"
+      ]
+    },
+    {
+      "id": "CK-003",
+      "section": "GENERALLY",
+      "clause": "2. All clauses",
+      "sourceItemIds": [
+        "APP-I-007"
+      ]
+    },
+    {
+      "id": "CK-004",
+      "section": "GENERALLY",
+      "clause": "3. All appendices",
+      "sourceItemIds": [
+        "APP-I-008"
+      ]
+    },
+    {
+      "id": "CK-005",
+      "section": "PRE.B2",
+      "clause": "1. PRE.B2.010",
+      "sourceItemIds": [
+        "APP-I-009"
+      ]
+    },
+    {
+      "id": "CK-006",
+      "section": "PRE.B3",
+      "clause": "1. PRE.B3.020",
+      "sourceItemIds": [
+        "APP-I-010"
+      ]
+    },
+    {
+      "id": "CK-007",
+      "section": "PRE.B3",
+      "clause": "2. PRE.B3.040",
+      "sourceItemIds": [
+        "APP-I-011"
+      ]
+    },
+    {
+      "id": "CK-008",
+      "section": "PRE.B4",
+      "clause": "1. PRE.B4.030 sub-clause 1",
+      "sourceItemIds": [
+        "APP-I-012"
+      ]
+    },
+    {
+      "id": "CK-009",
+      "section": "PRE.B4",
+      "clause": "2. PRE.B4.035 sub-clause 1",
+      "sourceItemIds": [
+        "APP-I-013"
+      ]
+    },
+    {
+      "id": "CK-010",
+      "section": "PRE.B4",
+      "clause": "3. PRE.B4.035 sub-clause 3, PRE.B6.085 sub-clause 3(c)",
+      "sourceItemIds": [
+        "APP-I-014"
+      ]
+    },
+    {
+      "id": "CK-011",
+      "section": "PRE.B4",
+      "clause": "4. PRE.B4.085 sub-clause 1(b)(i)",
+      "sourceItemIds": [
+        "APP-I-015"
+      ]
+    },
+    {
+      "id": "CK-012",
+      "section": "PRE.B6",
+      "clause": "1. PRE.B6.035 sub-clause 10 and PRE.B9.210",
+      "sourceItemIds": [
+        "APP-I-016"
+      ]
+    },
+    {
+      "id": "CK-013",
+      "section": "PRE.B6",
+      "clause": "2. PRE.B6.050",
+      "sourceItemIds": [
+        "APP-I-017"
+      ]
+    },
+    {
+      "id": "CK-014",
+      "section": "PRE.B6",
+      "clause": "3. PRE.B6.060 sub-clause 1",
+      "sourceItemIds": [
+        "APP-I-018"
+      ]
+    },
+    {
+      "id": "CK-015",
+      "section": "PRE.B6",
+      "clause": "4. PRE.B6.060 sub-clauses 4 and 5 and PRE.B8.1425 sub-clause 3",
+      "sourceItemIds": [
+        "APP-I-019"
+      ]
+    },
+    {
+      "id": "CK-016",
+      "section": "PRE.B6",
+      "clause": "5. PRE.B6.060 sub-clauses 33 and 35",
+      "sourceItemIds": [
+        "APP-I-020"
+      ]
+    },
+    {
+      "id": "CK-017",
+      "section": "PRE.B6",
+      "clause": "6. PRE.B6.085 sub-clauses 1(e) and 1(f)",
+      "sourceItemIds": [
+        "APP-I-021",
+        "APP-I-022",
+        "APP-I-023",
+        "APP-I-024"
+      ]
+    },
+    {
+      "id": "CK-018",
+      "section": "PRE.B6",
+      "clause": "7. PRE.B6.300",
+      "sourceItemIds": [
+        "APP-I-025"
+      ]
+    },
+    {
+      "id": "CK-019",
+      "section": "PRE.B6",
+      "clause": "8. PRE.B6.590",
+      "sourceItemIds": [
+        "APP-I-026"
+      ]
+    },
+    {
+      "id": "CK-020",
+      "section": "PRE.B6",
+      "clause": "9. PRE.B6.650",
+      "sourceItemIds": [
+        "APP-I-027"
+      ]
+    },
+    {
+      "id": "CK-021",
+      "section": "PRE.B6",
+      "clause": "10. PRE.B6.810 sub-clause 1",
+      "sourceItemIds": [
+        "APP-I-028"
+      ]
+    },
+    {
+      "id": "CK-022",
+      "section": "PRE.B6",
+      "clause": "11. PRE.B6.APPEND5",
+      "sourceItemIds": [
+        "APP-I-029",
+        "APP-I-030",
+        "APP-I-031"
+      ]
+    },
+    {
+      "id": "CK-023",
+      "section": "PRE.B7",
+      "clause": "1. PRE.B7.070",
+      "sourceItemIds": [
+        "APP-I-032",
+        "APP-I-033"
+      ]
+    },
+    {
+      "id": "CK-024",
+      "section": "PRE.B8",
+      "clause": "1. PRE.B8.241 sub-clauses 1, 8 and 10, PRE.B8.APPEND10 and PRE.B8.APPEND11",
+      "sourceItemIds": [
+        "APP-I-034"
+      ]
+    },
+    {
+      "id": "CK-025",
+      "section": "PRE.B8",
+      "clause": "2. PRE.B8.510, PRE.B8.520, PRE.B8.610, PRE.B8.892, PRE.B8.1995, PRE.B8.2810, PRE.B8.2820, PRE.B8.4030 and PRE.B8.APPEND9",
+      "sourceItemIds": [
+        "APP-I-035",
+        "APP-I-036",
+        "APP-I-037"
+      ]
+    },
+    {
+      "id": "CK-026",
+      "section": "PRE.B8",
+      "clause": "3. PRE.B8.2540",
+      "sourceItemIds": [
+        "APP-I-038"
+      ]
+    },
+    {
+      "id": "CK-027",
+      "section": "PRE.B8",
+      "clause": "4. PRE.B8.2710 to PRE.B8.2740",
+      "sourceItemIds": [
+        "APP-I-039"
+      ]
+    },
+    {
+      "id": "CK-028",
+      "section": "PRE.B8",
+      "clause": "5. PRE.B8.4030 sub-clause 2(c)(ii)",
+      "sourceItemIds": [
+        "APP-I-040"
+      ]
+    },
+    {
+      "id": "CK-029",
+      "section": "PRE.B8",
+      "clause": "6. PRE.B8.APPEND12",
+      "sourceItemIds": [
+        "APP-I-041"
+      ]
+    },
+    {
+      "id": "CK-030",
+      "section": "PRE.B9",
+      "clause": "1. PRE.B9.116",
+      "sourceItemIds": [
+        "APP-I-042"
+      ]
+    },
+    {
+      "id": "CK-031",
+      "section": "PRE.B9",
+      "clause": "2. PRE.B9.530 and PRE.B11.010 sub-clause 3",
+      "sourceItemIds": [
+        "APP-I-043"
+      ]
+    },
+    {
+      "id": "CK-032",
+      "section": "PRE.B10",
+      "clause": "1. PRE.B10.580 to PRE.B10.586",
+      "sourceItemIds": [
+        "APP-I-044"
+      ]
+    },
+    {
+      "id": "CK-033",
+      "section": "PRE.B10",
+      "clause": "2. PRE.B10.710 and PRE.B10.720",
+      "sourceItemIds": [
+        "APP-I-045",
+        "APP-I-046"
+      ]
+    },
+    {
+      "id": "CK-034",
+      "section": "PRE.B10",
+      "clause": "3. PRE.B10.710 sub-clauses 13 and 14, PRE.B10.720 sub-clause 3",
+      "sourceItemIds": [
+        "APP-I-047"
+      ]
+    },
+    {
+      "id": "CK-035",
+      "section": "PRE.B10",
+      "clause": "4. PRE.B10.1110",
+      "sourceItemIds": [
+        "APP-I-048"
+      ]
+    },
+    {
+      "id": "CK-036",
+      "section": "PRE.B11",
+      "clause": "1. PRE.B11.010 and PRE.B12",
+      "sourceItemIds": [
+        "APP-I-049",
+        "APP-I-050",
+        "APP-I-051"
+      ]
+    },
+    {
+      "id": "CK-037",
+      "section": "PRE.B12",
+      "clause": "1. PRE.B12.720",
+      "sourceItemIds": [
+        "APP-I-052"
+      ]
+    },
+    {
+      "id": "CK-038",
+      "section": "PRE.B12",
+      "clause": "2. PRE.B12.730",
+      "sourceItemIds": [
+        "APP-I-053"
+      ]
+    },
+    {
+      "id": "CK-039",
+      "section": "PRE.B12",
+      "clause": "3. PRE.B12.920",
+      "sourceItemIds": [
+        "APP-I-054"
+      ]
+    },
+    {
+      "id": "CK-040",
+      "section": "PRE.B12",
+      "clause": "4. Builder’s works for building services installations mentioned in PRE.B12 (See Annex 1 to this Appendix)",
+      "sourceItemIds": [
+        "APP-I-055"
+      ]
+    },
+    {
+      "id": "CK-041",
+      "section": "APPENDIX B TO SPECIFICATION",
+      "clause": "1. APB.A010 List of Contract Drawings",
+      "sourceItemIds": [
+        "APP-I-056"
+      ]
+    },
+    {
+      "id": "CK-042",
+      "section": "APPENDIX U TO SPECIFICATION",
+      "clause": "1. APU.A010 List of Reference Drawings / Documents",
+      "sourceItemIds": [
+        "APP-I-057"
+      ]
+    },
+    {
+      "id": "CK-043",
+      "section": "BILL NO. 1 –",
+      "clause": "PRELIMINARIES 1. Generally",
+      "sourceItemIds": [
+        "APP-I-058",
+        "APP-I-059",
+        "APP-I-060",
+        "APP-I-061",
+        "APP-I-062"
+      ]
+    },
+    {
+      "id": "CK-044",
+      "section": "BILL NO. 2 - PREAMBLES",
+      "clause": "1. Generally",
+      "sourceItemIds": [
+        "APP-I-063",
+        "APP-I-064",
+        "APP-I-065",
+        "APP-I-066",
+        "APP-I-067"
+      ]
+    }
+  ],
+  "annexItemIds": [
+    "APP-I-068",
+    "APP-I-069"
+  ]
+}

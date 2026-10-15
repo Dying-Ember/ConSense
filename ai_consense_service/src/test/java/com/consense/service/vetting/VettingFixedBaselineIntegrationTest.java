@@ -136,5 +136,5 @@ class VettingFixedBaselineIntegrationTest {
         c.setParts(Collections.singletonList(p));return c;
     }
     private static Quote quote(Chunk chunk){Quote q=new Quote();q.setChunkId(chunk.getId());q.setSide(chunk.getRole());q.setQuote(chunk.getContent());return q;}
-    private static Record record(String assessment,String type,Quote... quotes){Record r=new Record();r.setAssessment(assessment);r.setType(type);r.setSeverity("medium");r.setTitle("Review supporting provisions");r.setComment("Compare the supplied project source and preserve unresolved adoption.");r.setEvidence(Arrays.asList(quotes));return r;}
+    private static Record record(String assessment,String type,Quote... quotes){Record r=new Record();com.consense.service.vetting.VettingCompetitionFixture.details(r);r.setAssessment(assessment);r.setType(type);r.setSeverity("medium");r.setTitle("Review supporting provisions");r.setComment("Compare the supplied project source and preserve unresolved adoption.");r.setEvidence(Arrays.asList(quotes));return r;}
 }

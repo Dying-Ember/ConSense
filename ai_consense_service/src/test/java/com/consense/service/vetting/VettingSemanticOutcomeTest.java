@@ -1,6 +1,7 @@
 package com.consense.service.vetting;
 
 import com.consense.ai.*;
+import com.consense.common.JsonUtils;
 import com.consense.config.ConsenseProperties;
 import com.consense.service.vetting.VettingCorpus.Chunk;
 import com.consense.service.vetting.VettingSemanticReview.Result;
@@ -11,6 +12,108 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 class VettingSemanticOutcomeTest {
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({"subDimension,160","factBasis,1200","pendingFacts,600","reason,1200"})
+    void businessMetadataLimitsCountUnicodeCodePointsLikeTheProductionSchema(String field,int limit) {
+        Chunk source=VettingContextBudgetTest.chunk("source","PRE.B6.590","The contractor shall retain the maintenance record for this contract.",120);
+        source.setOriginalSourceSha256(VettingCorpus.hash("AUTHORED original fixture bytes"));
+        VettingSemanticReview.Record record=reference(source,source);record.setType("requirement");
+        VettingSemanticReview.ChecklistAssessment check=new VettingSemanticReview.ChecklistAssessment();check.setItemId("APP-I-026");check.setStatus("not_fulfilled");
+        for(int extra=0;extra<=1;extra++) {
+            String value=String.join("",Collections.nCopies(limit+extra,"\uD83D\uDE00"));
+            switch(field) {
+                case "subDimension":record.setSubDimension(value);break;
+                case "factBasis":record.setFactBasis(value);break;
+                case "pendingFacts":record.setPendingFacts(Collections.singletonList(value));break;
+                default:check.setReason(value);record.setChecklistAssessments(Collections.singletonList(check));
+            }
+            Result result=review(response(record),properties(),Collections.singletonList(source),Collections.singletonList(source));
+            assertEquals(extra==0?1:0,result.getCandidates().size(),field+" at "+(limit+extra)+" Unicode code points");
+            if("reason".equals(field))assertEquals(extra==0?1:0,result.getTopicAudits().get(0).getPacketAudits().get(0).getChecklistAssessments().size());
+            if(extra==1)assertEquals("failed",result.getTopicAudits().get(0).getStatus());
+        }
+    }
+
+    @Test void issueBusinessDetailsRemainTypedAndUnknownFactsOnlyPermitReview() {
+        Chunk source=VettingContextBudgetTest.chunk("source","XYZ1","The contractor shall provide the named maintenance staff throughout the contract.",120);
+        VettingSemanticReview.Record record=reference(source,source);record.setType("requirement");record.setSubDimension("Obligation owner unclear");
+        record.setFactBasis("The supplied tender names maintenance staff without a confirmed provider.");record.setPendingFacts(Collections.singletonList("Confirm the responsible specialist subcontractor."));record.setSuggestedAction("review");
+        Result result=review(response(record),properties(),Collections.singletonList(source),Collections.singletonList(source));
+        assertEquals(1,result.getCandidates().size());assertEquals(record.getPendingFacts(),result.getCandidates().get(0).getBusinessDetails().getPendingFacts());
+        assertEquals(record.getSubDimension(),result.getCandidates().get(0).getBusinessDetails().getSubDimension());assertEquals(record.getFactBasis(),result.getCandidates().get(0).getBusinessDetails().getFactBasis());
+        record.setSuggestedAction("delete");Result invalid=review(response(record),properties(),Collections.singletonList(source),Collections.singletonList(source));
+        assertTrue(invalid.getCandidates().isEmpty());assertEquals("failed",invalid.getTopicAudits().get(0).getStatus());
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings={"subDimension","factBasis","pendingFacts","suggestedAction"})
+    void missingRequiredIssueMetadataCannotCreateAFormalFinding(String field) {
+        Chunk source=VettingContextBudgetTest.chunk("source","XYZ1","The contractor shall provide the named maintenance staff throughout the contract.",120);
+        VettingSemanticReview.Record record=reference(source,source);record.setType("gap");
+        switch(field){case "subDimension":record.setSubDimension(" ");break;case "factBasis":record.setFactBasis(null);break;case "pendingFacts":record.setPendingFacts(null);break;default:record.setSuggestedAction("ignore");}
+        Result invalid=review(response(record),properties(),Collections.singletonList(source),Collections.singletonList(source));
+        assertTrue(invalid.getCandidates().isEmpty());assertEquals("failed",invalid.getTopicAudits().get(0).getStatus());
+    }
+
+    @Test void checklistProducerKeepsOnlyLocatedRecordEvidenceAndBindsNormalChunkIdentity() {
+        Chunk source=VettingContextBudgetTest.chunk("source","PRE.B6.590","The contractor shall retain the maintenance record for this contract.",120);
+        source.setOriginalSourceSha256(VettingCorpus.hash("AUTHORED original fixture bytes"));
+        VettingSemanticReview.Record record=reference(source,source);record.setType("requirement");
+        VettingSemanticReview.ChecklistAssessment check=new VettingSemanticReview.ChecklistAssessment();check.setItemId("APP-I-026");check.setStatus("not_fulfilled");check.setReason("Authored fixture requires confirmation of the named requirement.");record.setChecklistAssessments(Collections.singletonList(check));
+        Result result=review(response(record),properties(),Collections.singletonList(source),Collections.singletonList(source));
+        com.consense.web.dto.VettingDtos.SemanticPacketVO packet=result.getTopicAudits().get(0).getPacketAudits().get(0);
+        assertEquals(1,packet.getChecklistAssessments().size());com.consense.web.dto.VettingDtos.ChecklistAssessmentVO saved=packet.getChecklistAssessments().get(0);
+        assertEquals(Arrays.asList("source","source"),saved.getEvidenceChunkIds());assertEquals(packet.getPacketId(),saved.getPacketId());assertEquals(packet.getSourceSnapshotSha256(),saved.getSourceSnapshotSha256());
+        assertEquals(VettingPromptPolicy.sha256(),saved.getPolicySha256());assertEquals(source.getOriginalSourceSha256(),saved.getEvidence().get(0).getOriginalSourceSha256());
+        assertEquals("REQ",saved.getIssueTypeCode());
+        assertEquals(source.getClauseId(),saved.getEvidence().get(0).getClauseId());assertEquals(source.getAnchor(),saved.getEvidence().get(0).getAnchor());
+        assertEquals(Collections.singletonList("APP-I-026"),result.getCandidates().get(0).getBusinessDetails().getChecklistItemIds());
+        com.consense.web.dto.VettingDtos.SemanticPacketVO restored=new com.consense.web.dto.VettingDtos.SemanticPacketVO();VettingPacketCoverage.restore(packet,new com.consense.web.dto.VettingDtos.SemanticTopicVO(),restored);
+        assertEquals(JsonUtils.write(packet.getChecklistAssessments()),JsonUtils.write(restored.getChecklistAssessments()));
+        record.getEvidence().get(0).setQuote("This quotation is not present in the supplied tender.");
+        Result rejected=review(response(record),properties(),Collections.singletonList(source),Collections.singletonList(source));
+        assertTrue(rejected.getTopicAudits().get(0).getPacketAudits().get(0).getChecklistAssessments().isEmpty());assertTrue(rejected.getCandidates().isEmpty());
+    }
+
+    @Test void checklistPassedAndNoOpinionStatesAreNeverInferredFromAnIssueOrAnEmptyResult() {
+        Chunk source=VettingContextBudgetTest.chunk("source","PRE.B6.590","The contractor shall retain the maintenance record for this contract.",120);
+        VettingSemanticReview.Record record=reference(source,source);record.setType("risk");
+        VettingSemanticReview.ChecklistAssessment check=new VettingSemanticReview.ChecklistAssessment();check.setItemId("APP-I-026");check.setStatus("fulfilled");check.setReason("Authored fixture statement.");record.setChecklistAssessments(Collections.singletonList(check));
+        Result mismatch=review(response(record),properties(),Collections.singletonList(source),Collections.singletonList(source));assertTrue(mismatch.getCandidates().isEmpty());assertEquals("failed",mismatch.getTopicAudits().get(0).getStatus());
+        record.setAssessment("consistent");Result explicit=review(response(record),properties(),Collections.singletonList(source),Collections.singletonList(source));
+        assertTrue(explicit.getCandidates().isEmpty());assertEquals(1,explicit.getTopicAudits().get(0).getPacketAudits().get(0).getChecklistAssessments().size());
+        check.setItemId("APP-I-068");Result annex=review(response(record),properties(),Collections.singletonList(source),Collections.singletonList(source));assertTrue(annex.getTopicAudits().get(0).getPacketAudits().get(0).getChecklistAssessments().isEmpty());
+    }
+
+    @Test void unresolvedApplicabilityKeepsTheReviewFindingWithoutIssuingAFailedCountercheck() {
+        Chunk source=VettingContextBudgetTest.chunk("source","PRE.B6.590","The contractor shall retain the maintenance record for this contract.",120);
+        VettingSemanticReview.Record record=reference(source,source);record.setType("requirement");record.setPendingFacts(Collections.singletonList("Confirm whether this requirement applies to this project."));
+        VettingSemanticReview.ChecklistAssessment check=new VettingSemanticReview.ChecklistAssessment();check.setItemId("APP-I-026");check.setStatus("not_fulfilled");check.setReason("Applicability still needs confirmation.");record.setChecklistAssessments(Collections.singletonList(check));
+        Result result=review(response(record),properties(),Collections.singletonList(source),Collections.singletonList(source));
+        assertEquals(1,result.getCandidates().size());assertEquals("review",result.getCandidates().get(0).getBusinessDetails().getSuggestedAction());
+        assertTrue(result.getTopicAudits().get(0).getPacketAudits().get(0).getChecklistAssessments().isEmpty(),"Unconfirmed applicability cannot produce a cross.");
+        assertTrue(result.getCandidates().get(0).getBusinessDetails().getChecklistItemIds().isEmpty());
+    }
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings={"gap","substantive","requirement"})
+    void extendedClassesSurviveTheLocatedEvidenceGateWithoutBecomingRisk(String type) {
+        Chunk source=VettingContextBudgetTest.chunk("source","XYZ1","The contractor shall provide the named maintenance staff throughout the contract.",120);
+        VettingSemanticReview.Record record=reference(source,source);record.setType(type);
+        Result result=review(response(record),properties(),Collections.singletonList(source),Collections.singletonList(source));
+        assertEquals(1,result.getCandidates().size());assertEquals(type,result.getCandidates().get(0).getType());
+        assertEquals("semantic-"+type,result.getCandidates().get(0).getRuleId());
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings={"unknown","REF","f2-iii",""})
+    void unknownModelTypeCannotSilentlyCreateARiskFinding(String type) {
+        Chunk source=VettingContextBudgetTest.chunk("source","XYZ1","The contractor shall provide the named maintenance staff throughout the contract.",120);
+        VettingSemanticReview.Record record=reference(source,source);record.setType(type);
+        Result result=review(response(record),properties(),Collections.singletonList(source),Collections.singletonList(source));
+        assertTrue(result.getCandidates().isEmpty());assertEquals("failed",result.getTopicAudits().get(0).getStatus());
+        assertEquals("not_completed",result.getTopicAudits().get(0).getCheckState());
+    }
+
     @org.junit.jupiter.params.ParameterizedTest
     @org.junit.jupiter.params.provider.CsvSource({"risk,consistent","language,consistent","risk,not_applicable","language,not_applicable"})
     void aMissingNecessaryMemberRejectsOnlyItsDependentAssessment(String type,String assessment){
@@ -153,7 +256,7 @@ class VettingSemanticOutcomeTest {
         return ai;
     }
     private static VettingSemanticReview.Record reference(Chunk first,Chunk second) {
-        VettingSemanticReview.Record r=new VettingSemanticReview.Record();r.setAssessment("issue");r.setType("reference");r.setSeverity("medium");
+        VettingSemanticReview.Record r=new VettingSemanticReview.Record();com.consense.service.vetting.VettingCompetitionFixture.details(r);r.setAssessment("issue");r.setType("reference");r.setSeverity("medium");
         r.setTitle("Check reference");r.setComment("The quoted reference requires source verification.");
         List<VettingSemanticReview.Quote> quotes=new ArrayList<>();
         for(Chunk c:Arrays.asList(first,second)){VettingSemanticReview.Quote q=new VettingSemanticReview.Quote();q.setChunkId(c.getId());q.setSide("source");q.setQuote(c.getContent().trim());quotes.add(q);}

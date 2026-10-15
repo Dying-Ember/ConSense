@@ -5,7 +5,7 @@ import lombok.Setter;
 import javax.persistence.*;
 import java.time.Instant;
 
-/** A manual countercheck applies only to one run and its captured requirement/source binding. */
+/** Human unchecked/fulfilled/not_fulfilled/not_applicable decisions retain their exact run/source binding. */
 @Getter @Setter
 @Entity
 @Table(name="vetting_checklist_review",uniqueConstraints=@UniqueConstraint(columnNames={"run_id","item_id"}))

@@ -130,24 +130,32 @@ const zhHans = {
     title: '审查整份招标文件，按问题类型输出可复核的审查报告',
     subtitle: '分段核对审查源集，展示覆盖范围与证据出处；所有发现均需人工复核。',
     metrics: {
-      reference: '条款引用错误', referenceDetail: '引用不存在 / 编号错误 / 空白未定稿 / 版本引用',
+      reference: '条款引用错误', referenceDetail: '已核引用不存在 / 编号错误 / 版本不对',
       conflict: '内容冲突', conflictDetail: '范围 / 付款 / 工期 / 违约金 / 保函不一致',
       language: '语言与用词', languageDetail: '语法、拼写、英式 / 美式英语、表达不清',
-      risk: '主观风险条款', riskDetail: '易引发合约争议 / 表述不清晰，需 QS 专业判断'
+      risk: '主观风险条款', riskDetail: '易引发合约争议 / 表述不清晰，需 QS 专业判断',
+      gap: '齐备性与范围', gapDetail: '应写未写 / 应列未全 / 适用范围 / 文件随附，须有应有依据',
+      substantive: '实质性与适用性', substantiveDetail: '本合约不适用应删 / 应移至其他文件 / 偏离惯例须复检',
+      requirement: '要求缺失与不明', requirementDetail: '义务主体未写明 / 义务内容未展开 / 两种合理解读'
     },
     actions: {
-      source: '审查源集', upload: '上传整份招标文件材料', run: '运行审查', running: '正在审查…', export: '导出审查报告', exportStarted: '{format} 审查报告已生成并发起下载'
+      source: '审查源集', upload: '上传整份招标文件材料', run: '运行审查', running: '正在审查…', export: '导出审查报告', exportStarted: '{format} 审查报告已生成并发起下载',
+      delete: '删除', amend: '修改', insert: '补入', review: '复检'
     },
     uploadRole: { label: '上传文件用途', auto: '自动识别', tender: '招标文件', standard: '标准依据', project_fact: '项目资料', package_manifest: '文件目录', unknown: '身份待确认' },
     documentScope: { label: '文件范围', auto: '自动识别范围', package: '本次文件包／参考依据', works_pss: '工程专项 PSS（排除）', pricing: '计价文件（排除）', example: '样板答案（排除）', drawing: '图纸（仅识别身份，排除解析）' },
     checkStates: { checked_pass: '已执行并通过', issue: '有问题', insufficient_evidence: '依据不足', not_completed: '未完成／状态未知', not_applicable: '不适用' },
     recovery: { NEW: '新审查', RESUMING: '正在从已核验检查点恢复', NEEDS_RERUN: '无法安全恢复，需重新审查', COMPLETED: '执行已完成', reliablePackets: '已保存的可靠检查包' },
-    checklist: { title: 'Appendix I · PRE 检查清单', note: '勾选只表示业务人员已核对并满足要求。按每条显示的复用范围核对当前版本；所需资料或审查配置变更时重新检查，历史记录保留供对照。', dependencyUnknown: '本条检查所需的来源成员尚未核实，暂不能判定哪些变更不影响此项。请核对当前版本；历史决定仅供参考。', previous: '历史决定（仅供参考）', scopeMembers: '本条必需资料范围已确定；范围内资料与审查配置完全相符时可复用已保存人工核对，范围外变更不自动清除此项。', scopeWhole: '本条复用要求整套资料、审查结果及模型配置完全相符。', reusedMembers: '本条必需资料与审查配置相符，复用记录：', reusedWhole: '整次审查完全相符，复用记录：', unchecked: '未检查', fulfilled: '已核对并满足', not_applicable: '不适用（人工判定）', remarks: '合约团队备注', save: '保存本条检查', saved: '检查记录已保存', dirty: '检查清单有未保存修改，请先保存或恢复后再导出。', reset: '恢复已保存值' },
+    checklist: { title: 'Appendix I · PRE 检查清单',
+      manualTitle: '人工核对记录 · 原细项', not_fulfilled: '已核对但未满足', reasonRequired: '标记未满足时，必须填写原因。',
+      automaticTitle: '自动核对建议 · 44 项', automaticNote: '以下是当前审查运行的自动核对建议，不是人工结论。未覆盖、依据不足及范围外的部分不会判为满足；原细项人工记录独立保留。',
+      automaticStates: { fulfilled: '自动检查满足（待人工核对）', not_fulfilled: '自动发现未满足（待人工核对）', insufficient_evidence: '依据不足，不能判定', not_assessed: '尚未评估', out_of_scope: '比赛范围外（未自动核对）', not_applicable: '有据不适用（待人工确认）' }, note: '勾选只表示业务人员已核对并满足要求。按每条显示的复用范围核对当前版本；所需资料或审查配置变更时重新检查，历史记录保留供对照。', dependencyUnknown: '本条检查所需的来源成员尚未核实，暂不能判定哪些变更不影响此项。请核对当前版本；历史决定仅供参考。', previous: '历史决定（仅供参考）', scopeMembers: '本条必需资料范围已确定；范围内资料与审查配置完全相符时可复用已保存人工核对，范围外变更不自动清除此项。', scopeWhole: '本条复用要求整套资料、审查结果及模型配置完全相符。', reusedMembers: '本条必需资料与审查配置相符，复用记录：', reusedWhole: '整次审查完全相符，复用记录：', unchecked: '未检查', fulfilled: '已核对并满足', not_applicable: '不适用（人工判定）', remarks: '合约团队备注', save: '保存本条检查', saved: '检查记录已保存', dirty: '检查清单有未保存修改，请先保存或恢复后再导出。', reset: '恢复已保存值' },
     toolbar: { searchPlaceholder: '搜索条款、文件或问题', allTypes: '全部类型', allScopes: '全部范围', intra: '文件内', inter: '跨文件' },
     locator: { file: '1. 文件', page: '2. 页码', variable: '2. 变量', errorClass: '2. 错误类别', all: '全部' },
     list: { empty: '没有符合条件的审查发现。' },
     drawer: {
       title: '审查详情', subtitle: '证据、理由与人工处置。',
+      businessDetails: '业务判断底稿', subDimension: '子维度', factBasis: '事实基线与依据', pendingFacts: '待确认事实', suggestedAction: '建议动作',
       type: '问题类型', scope: '范围', reference: '引用', status: '状态', pattern: '检测模式',
       location: '落点', expected: '应为', comment: '审查评语', reason: '风险与理由', suggestion: '建议处理',
       openSource: '打开来源', openOriginal: '打开原始文件（PDF 按物理页打开，其他格式下载）', markHandled: '标记已处理', assign: '分派给 QS',
@@ -387,24 +395,32 @@ const zhHant: typeof zhHans = {
     title: '審查整份招標文件，按問題類型輸出可覆核的審查報告',
     subtitle: '分段核對審查源集，展示覆蓋範圍與證據出處；所有發現均需人工覆核。',
     metrics: {
-      reference: '條款引用錯誤', referenceDetail: '引用不存在 / 編號錯誤 / 空白未定稿 / 版本引用',
+      reference: '條款引用錯誤', referenceDetail: '已核引用不存在 / 編號錯誤 / 版本不對',
       conflict: '內容衝突', conflictDetail: '範圍 / 付款 / 工期 / 違約金 / 保函不一致',
       language: '語言與用詞', languageDetail: '語法、拼寫、英式 / 美式英語、表達不清',
-      risk: '主觀風險條款', riskDetail: '易引發合約爭議 / 表述不清晰，需 QS 專業判斷'
+      risk: '主觀風險條款', riskDetail: '易引發合約爭議 / 表述不清晰，需 QS 專業判斷',
+      gap: '齊備性與範圍', gapDetail: '應寫未寫 / 應列未全 / 適用範圍 / 文件隨附，須有應有依據',
+      substantive: '實質性與適用性', substantiveDetail: '本合約不適用應刪 / 應移至其他文件 / 偏離慣例須覆檢',
+      requirement: '要求缺失與不明', requirementDetail: '義務主體未寫明 / 義務內容未展開 / 兩種合理解讀'
     },
     actions: {
-      source: '審查源集', upload: '上傳整份招標文件材料', run: '執行審查', running: '正在審查…', export: '匯出審查報告', exportStarted: '{format} 審查報告已產生並開始下載'
+      source: '審查源集', upload: '上傳整份招標文件材料', run: '執行審查', running: '正在審查…', export: '匯出審查報告', exportStarted: '{format} 審查報告已產生並開始下載',
+      delete: '刪除', amend: '修改', insert: '補入', review: '覆檢'
     },
     uploadRole: { label: '上傳文件用途', auto: '自動識別', tender: '招標文件', standard: '標準依據', project_fact: '項目資料', package_manifest: '文件目錄', unknown: '身份待確認' },
     documentScope: { label: '文件範圍', auto: '自動識別範圍', package: '本次文件包／參考依據', works_pss: '工程專項 PSS（排除）', pricing: '計價文件（排除）', example: '樣板答案（排除）', drawing: '圖紙（僅識別身分，排除解析）' },
     checkStates: { checked_pass: '已執行並通過', issue: '有問題', insufficient_evidence: '依據不足', not_completed: '未完成／狀態未知', not_applicable: '不適用' },
     recovery: { NEW: '新審查', RESUMING: '正在從已核驗檢查點恢復', NEEDS_RERUN: '無法安全恢復，需重新審查', COMPLETED: '執行已完成', reliablePackets: '已儲存的可靠檢查包' },
-    checklist: { title: 'Appendix I · PRE 檢查清單', note: '勾選只表示業務人員已核對並滿足要求。按每條顯示的複用範圍核對目前版本；所需資料或審查配置變更時重新檢查，歷史記錄保留供對照。', dependencyUnknown: '本條檢查所需的來源成員尚未核實，暫不能判定哪些變更不影響此項。請核對目前版本；歷史決定僅供參考。', previous: '歷史決定（僅供參考）', scopeMembers: '本條必需資料範圍已確定；範圍內資料與審查配置完全相符時可複用已儲存人工核對，範圍外變更不自動清除此項。', scopeWhole: '本條複用要求整套資料、審查結果及模型配置完全相符。', reusedMembers: '本條必需資料與審查配置相符，複用記錄：', reusedWhole: '整次審查完全相符，複用記錄：', unchecked: '未檢查', fulfilled: '已核對並滿足', not_applicable: '不適用（人工判定）', remarks: '合約團隊備註', save: '儲存本條檢查', saved: '檢查記錄已儲存', dirty: '檢查清單有未儲存修改，請先儲存或恢復後再匯出。', reset: '恢復已儲存值' },
+    checklist: { title: 'Appendix I · PRE 檢查清單',
+      manualTitle: '人工核對記錄 · 原細項', not_fulfilled: '已核對但未滿足', reasonRequired: '標記未滿足時，必須填寫原因。',
+      automaticTitle: '自動核對建議 · 44 項', automaticNote: '以下是目前審查執行的自動核對建議，並非人工結論。未覆蓋、依據不足及範圍外的部分不會判為滿足；原細項人工記錄獨立保留。',
+      automaticStates: { fulfilled: '自動檢查滿足（待人工核對）', not_fulfilled: '自動發現未滿足（待人工核對）', insufficient_evidence: '依據不足，不能判定', not_assessed: '尚未評估', out_of_scope: '比賽範圍外（未自動核對）', not_applicable: '有據不適用（待人工確認）' }, note: '勾選只表示業務人員已核對並滿足要求。按每條顯示的複用範圍核對目前版本；所需資料或審查配置變更時重新檢查，歷史記錄保留供對照。', dependencyUnknown: '本條檢查所需的來源成員尚未核實，暫不能判定哪些變更不影響此項。請核對目前版本；歷史決定僅供參考。', previous: '歷史決定（僅供參考）', scopeMembers: '本條必需資料範圍已確定；範圍內資料與審查配置完全相符時可複用已儲存人工核對，範圍外變更不自動清除此項。', scopeWhole: '本條複用要求整套資料、審查結果及模型配置完全相符。', reusedMembers: '本條必需資料與審查配置相符，複用記錄：', reusedWhole: '整次審查完全相符，複用記錄：', unchecked: '未檢查', fulfilled: '已核對並滿足', not_applicable: '不適用（人工判定）', remarks: '合約團隊備註', save: '儲存本條檢查', saved: '檢查記錄已儲存', dirty: '檢查清單有未儲存修改，請先儲存或恢復後再匯出。', reset: '恢復已儲存值' },
     toolbar: { searchPlaceholder: '搜尋條款、文件或問題', allTypes: '全部類型', allScopes: '全部範圍', intra: '文件內', inter: '跨文件' },
     locator: { file: '1. 文件', page: '2. 頁碼', variable: '2. 變量', errorClass: '2. 錯誤類別', all: '全部' },
     list: { empty: '沒有符合條件的審查發現。' },
     drawer: {
       title: '審查詳情', subtitle: '證據、理由與人工處置。',
+      businessDetails: '業務判斷底稿', subDimension: '子維度', factBasis: '事實基線與依據', pendingFacts: '待確認事實', suggestedAction: '建議動作',
       type: '問題類型', scope: '範圍', reference: '引用', status: '狀態', pattern: '檢測模式',
       location: '落點', expected: '應為', comment: '審查評語', reason: '風險與理由', suggestion: '建議處理',
       openSource: '開啟來源', openOriginal: '開啟原始文件（PDF 按實體頁開啟，其他格式下載）', markHandled: '標記已處理', assign: '分派給 QS',
@@ -644,24 +660,32 @@ const en: typeof zhHans = {
     title: 'Vet the assembled tender package and report reviewable findings by type',
     subtitle: 'Review source documents in segments with coverage and evidence locations shown. All findings require human review.',
     metrics: {
-      reference: 'Clause reference error', referenceDetail: 'Missing / wrong number / blank placeholder / version reference',
+      reference: 'Clause reference error', referenceDetail: 'Confirmed nonexistent target / wrong identifier / wrong edition',
       conflict: 'Content conflict', conflictDetail: 'Scope / payment / programme / liquidated damages / security mismatch',
       language: 'Language and wording', languageDetail: 'Grammar, spelling, British vs American English, ambiguity',
-      risk: 'Subjective risk clause', riskDetail: 'Dispute-prone or unclear wording — requires QS judgement'
+      risk: 'Subjective risk clause', riskDetail: 'Dispute-prone or unclear wording — requires QS judgement',
+      gap: 'Completeness and scope', gapDetail: 'Required content omitted / incomplete lists / applicable scope / required attachments; an established requirement is needed',
+      substantive: 'Substance and applicability', substantiveDetail: 'Inapplicable to this contract / belongs in another document / departure from practice requiring review',
+      requirement: 'Missing or unclear requirements', requirementDetail: 'Unstated duty holder / undeveloped obligation / two reasonable interpretations'
     },
     actions: {
-      source: 'Review source set', upload: 'Upload tender package', run: 'Run vetting', running: 'Vetting…', export: 'Export report', exportStarted: '{format} review report generated and download started'
+      source: 'Review source set', upload: 'Upload tender package', run: 'Run vetting', running: 'Vetting…', export: 'Export report', exportStarted: '{format} review report generated and download started',
+      delete: 'Delete', amend: 'Amend', insert: 'Insert', review: 'Review'
     },
     uploadRole: { label: 'Upload purpose', auto: 'Auto detect', tender: 'Tender documents', standard: 'Standard references', project_fact: 'Project information', package_manifest: 'Document inventory', unknown: 'Identity pending confirmation' },
     documentScope: { label: 'Document scope', auto: 'Auto detect scope', package: 'Selected package / references', works_pss: 'Works-related PSS (excluded)', pricing: 'Pricing documents (excluded)', example: 'Sample answers (excluded)', drawing: 'Drawings (identity only; parsing excluded)' },
     checkStates: { checked_pass: 'Executed and passed', issue: 'Issue', insufficient_evidence: 'Insufficient evidence', not_completed: 'Not completed / state unknown', not_applicable: 'Not applicable' },
     recovery: { NEW: 'New review', RESUMING: 'Resuming verified checkpoints', NEEDS_RERUN: 'Safe recovery unavailable; rerun required', COMPLETED: 'Execution completed', reliablePackets: 'Persisted reliable check packets' },
-    checklist: { title: 'Appendix I · PRE checklist', note: 'Mark fulfilled only after the business reviewer has checked compliance. Check the current version using the reuse scope shown for each item. Changes to required material or review configuration need a fresh check; previous records remain available for reference.', dependencyUnknown: 'The source members required by this item have not been verified, so unaffected changes cannot yet be identified. Check the current version; previous decisions are for reference only.', previous: 'Previous decision (reference only)', scopeMembers: 'The required material for this item has been identified. Saved human checks can be reused when that material and review configuration match; changes outside this scope do not automatically clear the item.', scopeWhole: 'Reuse requires the whole source set, review results and model configuration to match.', reusedMembers: 'Reused because this item’s required material and review configuration match:', reusedWhole: 'Reused because the whole review matches:', unchecked: 'Unchecked', fulfilled: 'Checked and fulfilled', not_applicable: 'Not applicable (human decision)', remarks: 'Remarks by Contract Team', save: 'Save this check', saved: 'Check saved', dirty: 'Checklist changes are unsaved. Save or restore them before exporting.', reset: 'Restore saved value' },
+    checklist: { title: 'Appendix I · PRE checklist',
+      manualTitle: 'Human checks · original detail rows', not_fulfilled: 'Checked and not fulfilled', reasonRequired: 'Provide a reason before marking this requirement not fulfilled.',
+      automaticTitle: 'Automated check suggestions · 44 items', automaticNote: 'These suggestions come from the current review run and are not human decisions. Uncovered, insufficiently evidenced or excluded checks are not marked fulfilled; original detail-row human records remain separate.',
+      automaticStates: { fulfilled: 'Automated check fulfilled (human review pending)', not_fulfilled: 'Automated issue found (human review pending)', insufficient_evidence: 'Insufficient evidence to decide', not_assessed: 'Not assessed', out_of_scope: 'Outside competition scope (not automatically checked)', not_applicable: 'Supported as not applicable (human confirmation pending)' }, note: 'Mark fulfilled only after the business reviewer has checked compliance. Check the current version using the reuse scope shown for each item. Changes to required material or review configuration need a fresh check; previous records remain available for reference.', dependencyUnknown: 'The source members required by this item have not been verified, so unaffected changes cannot yet be identified. Check the current version; previous decisions are for reference only.', previous: 'Previous decision (reference only)', scopeMembers: 'The required material for this item has been identified. Saved human checks can be reused when that material and review configuration match; changes outside this scope do not automatically clear the item.', scopeWhole: 'Reuse requires the whole source set, review results and model configuration to match.', reusedMembers: 'Reused because this item’s required material and review configuration match:', reusedWhole: 'Reused because the whole review matches:', unchecked: 'Unchecked', fulfilled: 'Checked and fulfilled', not_applicable: 'Not applicable (human decision)', remarks: 'Remarks by Contract Team', save: 'Save this check', saved: 'Check saved', dirty: 'Checklist changes are unsaved. Save or restore them before exporting.', reset: 'Restore saved value' },
     toolbar: { searchPlaceholder: 'Search clause, document or issue', allTypes: 'All types', allScopes: 'All scopes', intra: 'Intra-file', inter: 'Cross-file' },
     locator: { file: '1. File', page: '2. Page', variable: '2. Variable', errorClass: '2. Error class', all: 'All' },
     list: { empty: 'No findings match the current filters.' },
     drawer: {
       title: 'Finding detail', subtitle: 'Evidence, reason and human disposition.',
+      businessDetails: 'Review working record', subDimension: 'Subdimension', factBasis: 'Factual baseline and basis', pendingFacts: 'Facts pending confirmation', suggestedAction: 'Suggested action',
       type: 'Type', scope: 'Scope', reference: 'Reference', status: 'Status', pattern: 'Detection pattern',
       location: 'Location', expected: 'Expected basis', comment: 'Vetting comment', reason: 'Reason', suggestion: 'Suggested action',
       openSource: 'Open source', openOriginal: 'Open original (PDF physical page; other formats download)', markHandled: 'Mark handled', assign: 'Assign to QS',

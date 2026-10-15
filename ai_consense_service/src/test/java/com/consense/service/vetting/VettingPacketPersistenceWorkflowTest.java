@@ -43,4 +43,13 @@ class VettingPacketPersistenceWorkflowTest {
     @Test void legacyAndRuleFingerprintsAndEvidenceJsonRemainByteCompatibleButPartialScopeIsRejected() {
         SourceDocument s=source();Candidate c=candidate(s,"A");FindingEvidence e=c.getEvidence().get(0);c.setPacketId(null);c.setSourceSnapshotSha256(null);e.setPacketId(null);e.setPacketSourceSnapshotSha256(null);String legacyJson=JsonUtils.write(e);assertFalse(legacyJson.contains("packetId"));assertFalse(legacyJson.contains("packetSourceSnapshotSha256"));String side=s.getFileName().toLowerCase(Locale.ROOT)+"|"+VettingCorpus.sourceHash(s)+"|body/fixture|"+VettingCorpus.normalize(s.getTextContent());String expected=VettingCorpus.hash(c.getRuleId()+"\n"+side);assertEquals(expected,VettingService.fingerprint(c));assertEquals(legacyJson,JsonUtils.write(JsonUtils.read(legacyJson,FindingEvidence.class)));c.setSource("rule");c.setPacketId("ignored-rule-metadata");assertEquals(expected,VettingService.fingerprint(c));c.setSource("model");assertThrows(IllegalArgumentException.class,()->VettingService.fingerprint(c));
     }
+    @Test void currentRunCannotReuseLegacyFingerprintWhenAnAcceptedCandidateHasNoBusinessMetadata() {
+        SourceDocument s=source();Candidate c=candidate(s,"current-null-metadata");String historical=VettingService.fingerprint(c);
+        assertNull(c.getBusinessDetails());assertNull(c.getPromptSupplementSha256());
+        when(semantic.reviewWithProgress(eq(s.getProjectId()),anyList(),eq("en"),any(ReviewProgress.class))).thenReturn(result(c));
+        service.run(s.getProjectId(),"en");FindingVO saved=service.listFindings(s.getProjectId(),null,null,null,null,null).get(0);
+        assertEquals(VettingPromptPolicy.supplementSha256(""),c.getPromptSupplementSha256());
+        assertNotEquals(historical,saved.getFingerprint(),"A current worker always binds policy even when a legacy-shaped fixture has no business fields");
+        assertEquals(VettingService.fingerprint(c),saved.getFingerprint());
+    }
 }

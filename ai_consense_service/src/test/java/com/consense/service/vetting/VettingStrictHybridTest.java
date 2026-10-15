@@ -147,9 +147,9 @@ class VettingStrictHybridTest {
         Chunk c=source("one","tender","A supplied contract passage requiring source inspection.");
         HttpSupport http=mock(HttpSupport.class);indexResponse(http,receipt(1));retrieveResponse(http,response(c));
         AiGateway ai=mock(AiGateway.class);when(ai.available()).thenReturn(true);when(ai.chatModel()).thenReturn("synthetic-test");
-        Record rejected=new Record();rejected.setAssessment("issue");rejected.setType("risk");rejected.setTitle("Source review");rejected.setComment("Bounded test declaration.");
+        Record rejected=new Record();com.consense.service.vetting.VettingCompetitionFixture.details(rejected);rejected.setAssessment("issue");rejected.setType("risk");rejected.setTitle("Source review");rejected.setComment("Bounded test declaration.");
         VettingSemanticReview.Quote bad=new VettingSemanticReview.Quote();bad.setChunkId("one");bad.setSide("source");bad.setQuote("A fabricated source instruction never supplied.");rejected.setEvidence(Collections.singletonList(bad));
-        Record observed=new Record();observed.setAssessment("insufficient_context");observed.setType("risk");observed.setTitle("Source context");observed.setComment("Bounded test declaration.");
+        Record observed=new Record();com.consense.service.vetting.VettingCompetitionFixture.details(observed);observed.setAssessment("insufficient_context");observed.setType("risk");observed.setTitle("Source context");observed.setComment("Bounded test declaration.");
         VettingSemanticReview.Quote quote=new VettingSemanticReview.Quote();quote.setChunkId("one");quote.setSide("source");quote.setQuote(c.getContent());observed.setEvidence(Collections.singletonList(quote));
         when(ai.completeStructuredJsonList(anyString(),anyString(),any(),any(),anyList(),anyMap())).thenAnswer(call->{
             ((List<String>)call.getArgument(4)).add("synthetic raw content");return Arrays.asList(rejected,observed);});

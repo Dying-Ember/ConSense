@@ -101,7 +101,7 @@ class VettingRuleEngineTest {
             String sourceId = "s" + i;
             VettingRuleEngine.Output issue = only(engine.review(Collections.singletonList(source(sourceId, owner,
                     block("scope", clause + " Abbreviations"), name, definition))), "abbreviation_ambiguity");
-            assertEquals("language", issue.getType());
+            assertEquals("requirement", issue.getType());
             assertEquals(2, issue.getEvidence().size());
             assertTrue(issue.getEvidence().stream().anyMatch(e -> e.getQuote().equals(name.getText())));
             assertTrue(issue.getEvidence().stream().anyMatch(e -> e.getQuote().equals(definition.getText())));
@@ -287,13 +287,15 @@ class VettingRuleEngineTest {
     }
 
     @Test
-    void sameTermDifferentDefinitionsCreatesReviewHintWithBothSourcePassages() {
+    void unchangedAdoptedStandardDefinitionsRetainSubstantiveReviewWithoutClaimingProjectAuthorship() {
+        String ntt="“Project Representative” means the Employer’s site officer.",pre="“Project Representative” means the Contractor’s quality supervisor.";
         VettingRuleEngine.Output issue = only(engine.review(Arrays.asList(
-                source("a", "NTT", block("term", "“Project Representative” means the Employer’s site officer.")),
-                source("b", "PRE", block("term", "“Project Representative” means the Contractor’s quality supervisor.")))),
+                source("a", "NTT", block("term", ntt)),
+                source("b", "PRE", block("term", pre)))),
                 "definition_coordination");
-        assertEquals("language", issue.getType());
+        assertEquals("requirement", issue.getType());
         assertEquals(2, issue.getEvidence().size());
+        assertEquals(new HashSet<>(Arrays.asList(ntt,pre)),new HashSet<>(Arrays.asList(issue.getEvidence().get(0).getQuote(),issue.getEvidence().get(1).getQuote())));
         assertTrue(issue.getSummary().contains("intentional"));
     }
 

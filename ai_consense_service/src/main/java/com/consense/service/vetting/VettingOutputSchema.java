@@ -16,10 +16,20 @@ final class VettingOutputSchema {
         ObjectNode item = root.putObject("items"); item.put("type", "object"); item.put("additionalProperties", false);
         ObjectNode fields = item.putObject("properties");
         fields.set("assessment", choice("consistent", "insufficient_context", "issue", "not_applicable"));
-        fields.set("type", choice("reference", "conflict", "language", "risk"));
+        fields.set("type", choice(VettingIssueType.groups().toArray(new String[0])));
         fields.set("severity", choice("high", "medium", "low"));
         fields.set("title", text(1, 160)); fields.set("comment", text(1, 1200));
         fields.set("impact", text(1, 600)); fields.set("suggestion", text(1, 600));
+        fields.set("subDimension",text(0,160));fields.set("factBasis",text(0,1200));
+        ObjectNode pending=fields.putObject("pendingFacts");pending.put("type","array");pending.set("items",text(1,600));pending.put("maxItems",20);
+        fields.set("suggestedAction",choice("delete","amend","insert","review"));
+        ObjectNode checks=fields.putObject("checklistAssessments");checks.put("type","array");checks.put("maxItems",67);
+        ObjectNode check=checks.putObject("items");check.put("type","object");check.put("additionalProperties",false);
+        ObjectNode checkFields=check.putObject("properties");
+        checkFields.set("itemId",choice(VettingChecklistCatalog.items().stream().map(VettingChecklistCatalog.Item::getId)
+                .filter(id->!VettingChecklistCatalog.annexItemIds().contains(id)).toArray(String[]::new)));
+        checkFields.set("status",choice("fulfilled","not_fulfilled","insufficient_evidence","not_applicable"));checkFields.set("reason",text(1,1200));
+        required(check,"itemId","status","reason");
         ObjectNode evidence = fields.putObject("evidence");
         evidence.put("type", "array"); evidence.put("minItems", 1); evidence.put("maxItems", 4);
         ObjectNode quote = evidence.putObject("items"); quote.put("type", "object"); quote.put("additionalProperties", false);
@@ -27,8 +37,12 @@ final class VettingOutputSchema {
         quoteFields.set("chunkId", choice(chunkIds.toArray(new String[0])));
         quoteFields.set("side", choice("source", "reference")); quoteFields.set("quote", text(12, 1200));
         required(quote, "chunkId", "side", "quote");
-        required(item, "assessment", "type", "severity", "title", "comment", "impact", "suggestion", "evidence");
+        required(item, "assessment", "type", "severity", "title", "comment", "impact", "suggestion", "evidence","subDimension","factBasis","pendingFacts","suggestedAction","checklistAssessments");
         return root;
+    }
+
+    static String contractSha256() {
+        return VettingCorpus.hash(JsonUtils.write(forChunkIds(java.util.Collections.emptyList())));
     }
 
     private static ObjectNode text(int min, int max) {

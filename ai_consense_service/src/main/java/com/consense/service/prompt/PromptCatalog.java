@@ -74,9 +74,9 @@ public final class PromptCatalog {
             new Spec(
                     KEY_VETTING, PromptTemplate.GROUP_VETTING,
                     "招标文件审查", "招標文件審查", "Tender Document Vetting",
-                    "按 9 类 F2 规则逐条核对组装后的招标文件，产出可复核的审查发现。",
-                    "按 9 類 F2 規則逐條核對組裝後的招標文件，產出可復核的審查發現。",
-                    "Reviews the assembled tender package against the 9 F2 rule categories.",
+                    "按比赛业务规则及 REF / CONF / LANG / RISK / GAP / SUB / REQ 七类核对招标文件；分类是系统元数据。",
+                    "按比賽業務規則及 REF / CONF / LANG / RISK / GAP / SUB / REQ 七類核對招標文件；分類是系統元資料。",
+                    "Reviews tender documents using the competition policy and seven internal classes: REF / CONF / LANG / RISK / GAP / SUB / REQ.",
                     DraftPrompts.VETTING_SYSTEM, DraftPrompts.VETTING_USER_TEMPLATE, 30),
             new Spec(
                     KEY_ADVICE, PromptTemplate.GROUP_ADVICE,

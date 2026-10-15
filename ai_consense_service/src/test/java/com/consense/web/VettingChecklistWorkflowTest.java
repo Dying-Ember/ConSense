@@ -61,7 +61,12 @@ class VettingChecklistWorkflowTest {
                 .andExpect(jsonPath("$.data.writable").value(true))
                 .andExpect(jsonPath("$.data.items[0].id").value("APP-I-001"))
                 .andExpect(jsonPath("$.data.items[0].status").value("unchecked"))
-                .andExpect(jsonPath("$.data.items[0].remarks").value(""));
+                .andExpect(jsonPath("$.data.items[0].remarks").value(""))
+                .andExpect(jsonPath("$.data.logicalGroups.length()").value(44))
+                .andExpect(jsonPath("$.data.logicalGroups[18].id").value("CK-019"))
+                .andExpect(jsonPath("$.data.logicalGroups[18].sourceItemIds[0]").value("APP-I-026"))
+                .andExpect(jsonPath("$.data.annexItemIds.length()").value(2))
+                .andExpect(jsonPath("$.data.annexItemIds[0]").value("APP-I-068"));
     }
 
     @Test void explicitHumanCountercheckPersistsOnlyForItsExactCompletedRun() throws Exception {
@@ -158,12 +163,79 @@ class VettingChecklistWorkflowTest {
         assertEquals("Existing decision",read(run).path("items").get(0).path("remarks").asText());
     }
 
+    @Test void explicitHumanNonFulfilmentRequiresReasonAndNeverChangesOtherRows() throws Exception {
+        VettingRun run=completedRun("{\"total\":0}");
+        String binding=read(run).path("runSnapshotSha256").asText();
+        save(run,binding,Collections.singletonList(row("APP-I-001","fulfilled","Existing human decision")))
+                .andExpect(jsonPath("$.code").value(0));
+        for(String reason:Arrays.asList(null,""," \r\n\t ")) {
+            save(run,binding,Arrays.asList(row("APP-I-001","unchecked","Must not partially save"),
+                    row("APP-I-002","not_fulfilled",reason))).andExpect(jsonPath("$.code").value(4121));
+            assertEquals("fulfilled",read(run).path("items").get(0).path("status").asText());
+            assertEquals("unchecked",read(run).path("items").get(1).path("status").asText());
+        }
+        String reason="REQ: The reviewed clause does not identify the obligation holder.";
+        save(run,binding,Collections.singletonList(row("APP-I-002","not_fulfilled",reason)))
+                .andExpect(jsonPath("$.code").value(0));
+        JsonNode saved=read(run).path("items");
+        assertEquals("fulfilled",saved.get(0).path("status").asText());
+        assertEquals("not_fulfilled",saved.get(1).path("status").asText());
+        assertEquals(reason,saved.get(1).path("remarks").asText());
+        assertEquals("unchecked",saved.get(2).path("status").asText());
+    }
+
+    @Test void aBoundAutomaticSuggestionNeverWritesOrReusesAHumanDecision() throws Exception {
+        VettingRun run=completedRun("{\"total\":0}");
+        String policy=com.consense.service.vetting.VettingCorpus.hash("authored checklist policy");
+        String packetSource=com.consense.service.vetting.VettingCorpus.hash("authored packet snapshot");
+        com.fasterxml.jackson.databind.node.ObjectNode coverage=JsonUtils.mapper().createObjectNode();
+        com.fasterxml.jackson.databind.node.ObjectNode packet=coverage.putArray("semanticTopics").addObject().putArray("packetAudits").addObject();
+        packet.put("packetId","authored-packet").put("sourceSnapshotSha256",packetSource).put("actualGatewayCallStarted",true).put("status","completed");
+        packet.putArray("submittedChunkIds").add("authored-chunk");
+        com.fasterxml.jackson.databind.node.ObjectNode assessment=packet.putArray("checklistAssessments").addObject();
+        assessment.put("itemId","APP-I-011").put("status","fulfilled").put("reason","The supplied clause expressly fulfils this requirement.")
+                .put("producerVersion","pm-checklist-packet-v1").put("policySha256",policy).put("packetId","authored-packet").put("sourceSnapshotSha256",packetSource);
+        assessment.putArray("evidenceChunkIds").add("authored-chunk");
+        com.fasterxml.jackson.databind.node.ObjectNode quote=assessment.putArray("evidence").addObject().put("side","source").put("documentId","71").put("quote","Authored complete requirement wording.")
+                .put("located",true).put("sourceRole","tender")
+                .put("sourceHash",com.consense.service.vetting.VettingCorpus.hash("revision"))
+                .put("originalSourceSha256",com.consense.service.vetting.VettingCorpus.hash("original"))
+                .put("packetId","authored-packet").put("packetSourceSnapshotSha256",packetSource);
+        com.fasterxml.jackson.databind.node.ObjectNode pointer=quote.putObject("canonicalEvidence").put("addressKind","canonical_adoption_unit")
+                .put("projectId",run.getProjectId()).put("documentId",71).put("canonicalChunkId","authored-chunk")
+                .put("originalSourceSha256",com.consense.service.vetting.VettingCorpus.hash("original"))
+                .put("canonicalSourceHash",com.consense.service.vetting.VettingCorpus.hash("canonical revision"))
+                .put("javaParsedSourceHash",com.consense.service.vetting.VettingCorpus.hash("revision"));
+        com.fasterxml.jackson.databind.node.ObjectNode result=JsonUtils.mapper().createObjectNode();result.put("total",0).putObject("promptPolicy").put("sha256",policy);
+        com.consense.service.vetting.VettingChecklistCatalog.Item requirement=com.consense.service.vetting.VettingChecklistCatalog.items().get(10);
+        com.fasterxml.jackson.databind.node.ObjectNode dependencies=coverage.putObject("checklistDependencyLedger");
+        dependencies.put("producerVersion","checklist-current-required-material-members-v1").put("projectId",run.getProjectId());
+        com.fasterxml.jackson.databind.node.ObjectNode dependency=dependencies.putObject("items").putObject("APP-I-011").put("status","required_member_scope_closed")
+                .put("requirementSha256",com.consense.service.vetting.VettingCorpus.hash(JsonUtils.write(Arrays.asList(requirement.getId(),requirement.getSection(),requirement.getClause(),requirement.getDescription(),requirement.getReviewScope(),requirement.getScopeNote()))));
+        dependency.put("basisSha256",com.consense.service.vetting.VettingCorpus.hash("authored closed required members"));dependency.putArray("requiredMemberRefs").addArray().add(pointer.deepCopy());
+        run.setCoverageJson(coverage.toString());run.setResultJson(result.toString());runs.saveAndFlush(run);
+        JsonNode current=read(run);
+        assertEquals("fulfilled",current.path("automaticResults").get(6).path("status").asText());
+        assertEquals("\u2713",current.path("automaticResults").get(6).path("symbol").asText());
+        assertEquals("unchecked",current.path("items").get(10).path("status").asText());
+        assertFalse(current.path("items").get(10).hasNonNull("updatedAt"));
+        assessment.put("policySha256",com.consense.service.vetting.VettingCorpus.hash("another policy"));run.setCoverageJson(coverage.toString());runs.saveAndFlush(run);
+        current=read(run);
+        assertEquals("insufficient_evidence",current.path("automaticResults").get(6).path("status").asText());
+        assertEquals("",current.path("automaticResults").get(6).path("symbol").asText());
+        assertEquals("unchecked",current.path("items").get(10).path("status").asText());
+        assertEquals("required_member_scope_closed",current.path("items").get(10).path("dependencyStatus").asText());
+        assertEquals("exact_whole_generation",current.path("items").get(10).path("reuseScope").asText());
+    }
+
     @Test void downloadedReportsContainTheSameExplicitHumanChecklistDecisions() throws Exception {
         VettingRun run=completedRun("{\"total\":0}");
         String binding=read(run).path("runSnapshotSha256").asText();
         String checkedRemarks="Reviewed applicable scope with the Contract Team.";
         String excludedRemarks="Not applicable to this selected contract after manual countercheck.";
-        save(run,binding,Arrays.asList(row("APP-I-001","fulfilled",checkedRemarks),row("APP-I-002","not_applicable",excludedRemarks)))
+        String unfulfilledRemarks="REQ: Reviewed wording leaves the obligation holder unspecified.";
+        save(run,binding,Arrays.asList(row("APP-I-001","fulfilled",checkedRemarks),row("APP-I-002","not_applicable",excludedRemarks),
+                row("APP-I-004","not_fulfilled",unfulfilledRemarks)))
                 .andExpect(jsonPath("$.code").value(0));
         JsonNode report=JsonUtils.mapper().readTree(download(run,"json"));
         assertEquals(run.getId(),report.path("job").path("id").asText());
@@ -176,6 +248,9 @@ class VettingChecklistWorkflowTest {
         assertTrue(tableJson.contains("Checked and fulfilled"));
         assertTrue(tableJson.contains("Not applicable"));
         assertTrue(tableJson.contains("Not checked - human confirmation required"));
+        assertTrue(tableJson.contains("Checked and fulfilled \u2713"));
+        assertTrue(tableJson.contains("Checked and not fulfilled \u2717"));
+        assertTrue(tableJson.contains(unfulfilledRemarks));
         assertTrue(tableJson.contains(checkedRemarks));assertTrue(tableJson.contains(excludedRemarks));
         try(XWPFDocument docx=new XWPFDocument(new ByteArrayInputStream(download(run,"docx")))) {
             String tableText=docx.getTables().stream().flatMap(t->t.getRows().stream()).flatMap(r->r.getTableCells().stream())
@@ -183,12 +258,17 @@ class VettingChecklistWorkflowTest {
             assertTrue(tableText.contains(checkedRemarks));assertTrue(tableText.contains(excludedRemarks));
             assertTrue(tableText.contains("Checked and fulfilled"));
             assertTrue(tableText.contains("Not checked - human confirmation required"));
+            assertTrue(tableText.contains("Checked and not fulfilled \u2717"));
+            assertTrue(tableText.contains(unfulfilledRemarks));
         }
         try(PDDocument pdf=PDDocument.load(download(run,"pdf"))) {
             String text=new PDFTextStripper().getText(pdf).replaceAll("\\s+"," ");
             assertTrue(text.contains(checkedRemarks));assertTrue(text.contains(excludedRemarks));
             assertTrue(text.contains("Checked and fulfilled"));
             assertTrue(text.contains("Not checked - human confirmation required"));
+            assertTrue(text.contains("Checked and not fulfilled"));
+            assertTrue(text.contains("\u2713"));assertTrue(text.contains("\u2717"));
+            assertTrue(text.contains(unfulfilledRemarks));
         }
     }
 

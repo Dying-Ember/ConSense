@@ -11,3 +11,7 @@ artifacts/oer-freeze-20261012/manifest.json -text
 # The approved runtime prompt is byte-bound to the PM-confirmed input.
 ai_consense_service/docs/specs/inputs/contract-advisory-system-prompt-confirmed-20261014.md -text
 ai_consense_service/src/main/resources/advice/contract-system-20261014.md -text
+# Vetting PM input, runtime rules and logical checklist mapping are byte-bound.
+ai_consense_service/docs/specs/inputs/contract-vetting-system-prompt-product-20261015.md -text
+ai_consense_service/src/main/resources/vetting/contract-system-competition-20261015.md -text
+ai_consense_service/src/main/resources/vetting/checklist-logical-groups-v1.json -text
