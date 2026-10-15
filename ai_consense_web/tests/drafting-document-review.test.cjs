@@ -239,4 +239,17 @@ async function warningSourceLabels() {
   await h.click('[data-review-mode="saved"]'); assert.doesNotMatch(h.element.querySelector('.reading-warnings').textContent, /Original/)
   h.dispose(); console.log('PASS: reading warnings identify original and saved carriers independently')
 }
-;(async () => { await completeSavedRevisionChanges(); await warningSourceLabels(); await completeDocumentModes(); await selectedActualTokenDiff(); await nativeLineBreakTokenDiff(); await linkedNativeNavigation(); await branchGuidanceAndAddedMapping(); await verifiedReadingGuardsAndLocales(); await replacedTemplateKeepsCurrentOriginal(); await recordedEvidenceContext(); await appliedSharedParagraphAttribution(); await unavailableSavedLedger(); await missingCrossFileTargetDoesNotFallback() })().catch(error => { console.error(error); process.exitCode = 1 })
+async function compactLimitsKeepEveryRiskAndParentOwnedStaleStatus() {
+  const props = base(); props.document.stale = true; props.staleNoticePresented = true; props.result = undefined; props.resultBindings = undefined
+  props.original.warnings = ['Native numbering labels and continuation sequence are not verified in this reading (22 numbered paragraph(s)). Check the PDF layout for the original list markers.']
+  const h = await harness(props)
+  const limits = h.element.querySelector('details[data-reading-limits]')
+  assert(limits, 'Reading and binding limitations share one explicit disclosure')
+  assert.equal(limits.open, false); assert.match(limits.querySelector('summary').textContent, /Unverified reading and change mapping/)
+  assert.match(limits.textContent, /Original.*22/s); assert.match(limits.textContent, /Saved revision bindings are unavailable/)
+  assert.equal([...h.element.querySelectorAll('.review-notice')].filter(node => /Current inputs differ/.test(node.textContent)).length, 0, 'A parent-owned stale state is not repeated by its reader')
+  assert.equal(h.element.querySelector('[data-review-mode="saved"]').disabled, true)
+  assert.match(h.element.querySelector('[data-document-paper]').textContent, /Complete invitation/)
+  h.dispose(); console.log('PASS: one collapsed risk disclosure preserves numbering/binding failures while parent stale status remains singular')
+}
+;(async () => { await compactLimitsKeepEveryRiskAndParentOwnedStaleStatus(); await completeSavedRevisionChanges(); await warningSourceLabels(); await completeDocumentModes(); await selectedActualTokenDiff(); await nativeLineBreakTokenDiff(); await linkedNativeNavigation(); await branchGuidanceAndAddedMapping(); await verifiedReadingGuardsAndLocales(); await replacedTemplateKeepsCurrentOriginal(); await recordedEvidenceContext(); await appliedSharedParagraphAttribution(); await unavailableSavedLedger(); await missingCrossFileTargetDoesNotFallback() })().catch(error => { console.error(error); process.exitCode = 1 })

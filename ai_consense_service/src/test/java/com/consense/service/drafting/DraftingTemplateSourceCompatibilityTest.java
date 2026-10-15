@@ -11,6 +11,7 @@ import java.io.*;
 import java.nio.file.*;
 import java.util.*;
 import org.apache.poi.xwpf.usermodel.*;
+import org.openxmlformats.schemas.wordprocessingml.x2006.main.CTP;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -71,5 +72,25 @@ class DraftingTemplateSourceCompatibilityTest {
         BizException failure=assertThrows(BizException.class,()->service.generate(p,"en"));
         assertTrue(failure.getMessage().contains("SOURCE_TEXT_DIVERGENCE"));
         assertTrue(service.listDocuments(p).stream().noneMatch(d->d.isGenerated()));verify(model,never()).chat(anyList());
+    }
+    @Test void historicalMathCacheGeneratesButChangedFormulaPublishesNothing()throws Exception {
+        byte[] bytes;
+        try(XWPFDocument word=new XWPFDocument();ByteArrayOutputStream out=new ByteArrayOutputStream()) {
+            word.createParagraph().getCTP().set(CTP.Factory.parse("<w:p xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\" xmlns:m=\"http://schemas.openxmlformats.org/officeDocument/2006/math\"><w:r><w:t>Original condition </w:t></w:r><m:oMath><m:r><m:t>x+2</m:t></m:r></m:oMath><w:r><w:t> applies.</w:t></w:r></w:p>"));
+            word.write(out);bytes=out.toByteArray();
+        }
+        String p=project(),old="Original condition x+2 applies.";
+        List<SourceDocument> saved=new ArrayList<>();
+        for(String key:DraftBlueprint.draftFileKeys())saved.add(template(p,key,bytes,old));
+        assertEquals(3,service.generate(p,"en").size());
+        for(SourceDocument row:saved) {
+            assertEquals(old,sources.findById(row.getId()).orElseThrow().getTextContent());
+            assertArrayEquals(bytes,storage.read(row.getStoragePath()));
+        }
+        String changed=project();
+        for(String key:DraftBlueprint.draftFileKeys())template(changed,key,bytes,"SCC".equals(key)?"Original condition x+3 applies.":old);
+        assertTrue(assertThrows(BizException.class,()->service.generate(changed,"en")).getMessage().contains("SOURCE_TEXT_DIVERGENCE"));
+        assertTrue(service.listDocuments(changed).stream().noneMatch(d->d.isGenerated()));
+        verify(model,never()).chat(anyList());
     }
 }

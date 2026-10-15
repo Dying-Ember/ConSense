@@ -4,6 +4,10 @@ import com.consense.common.JsonUtils;
 import com.consense.document.DocumentBlock;
 import com.consense.document.DocumentParser;
 import com.consense.document.ParseCoverage;
+import com.consense.config.ConsenseProperties;
+import java.io.ByteArrayOutputStream;
+import org.apache.poi.xwpf.usermodel.XWPFDocument;
+import org.openxmlformats.schemas.wordprocessingml.x2006.main.CTP;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
@@ -16,6 +20,26 @@ import org.junit.jupiter.params.provider.MethodSource;
 import static org.junit.jupiter.api.Assertions.*;
 
 class DraftTemplateSourceTextTest {
+    private static byte[] mathDocx() throws Exception {
+        try (XWPFDocument doc = new XWPFDocument(); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+            doc.createParagraph().getCTP().set(CTP.Factory.parse("<w:p xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\" xmlns:m=\"http://schemas.openxmlformats.org/officeDocument/2006/math\"><w:r><w:t>Rate </w:t></w:r><m:oMath><m:r><m:t>x+2</m:t></m:r></m:oMath><w:r><w:t> applies.</w:t></w:r><w:del><m:oMath><m:r><m:t>DELETED</m:t></m:r></m:oMath></w:del><w:r><w:rPr><w:strike/></w:rPr><m:oMath><m:r><m:t>STRUCK</m:t></m:r></m:oMath></w:r></w:p>"));
+            doc.write(out); return out.toByteArray();
+        }
+    }
+    @Test void exactHistoricalMathProjectionAcceptsOnlyUnchangedSourceText() throws Exception {
+        byte[] original = mathDocx(), before = original.clone();
+        DocumentParser parser = new DocumentParser(new ConsenseProperties(), null);
+        DocumentParser.ParsedDocument fresh = parser.parse("template.docx", original);
+        String blocksBefore = JsonUtils.write(fresh.getBlocks());
+        assertEquals("Rate applies.", fresh.getText());
+        assertFalse(fresh.getBlocks().get(0).getWordNativeObjects().isEmpty());
+        assertTrue(DraftTemplateSourceText.matches("Rate x+2 applies.", fresh, parser, original));
+        for (String changed : Arrays.asList("Rate x+3 applies.", "Changed x+2 applies.",
+                "Rate x+2 x+2 applies.", "Rate x+2 applies.DELETED", "Rate x+2 applies.STRUCK"))
+            assertFalse(DraftTemplateSourceText.matches(changed, fresh, parser, original), changed);
+        assertArrayEquals(before, original); assertEquals(blocksBefore, JsonUtils.write(fresh.getBlocks()));
+        assertEquals("Rate applies.", fresh.getText());
+    }
     private static DocumentBlock paragraph(String text) {
         DocumentBlock block = new DocumentBlock(); block.setKind("paragraph"); block.setText(text); return block;
     }

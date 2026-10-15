@@ -9,6 +9,12 @@ import java.util.List;
 final class DraftTemplateSourceText {
     private DraftTemplateSourceText() { }
 
+    static boolean matches(String saved, DocumentParser.ParsedDocument fresh, DocumentParser parser, byte[] original) {
+        if (matches(saved, fresh)) return true;
+        if (saved == null || fresh == null || parser == null || original == null) return false;
+        return matches(saved, parser.projectLegacyDocxMath(original));
+    }
+
     static boolean matches(String saved, DocumentParser.ParsedDocument fresh) {
         if (saved == null || fresh == null) return false;
         if (saved.equals(fresh.getText())) return true;

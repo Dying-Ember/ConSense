@@ -908,7 +908,7 @@ public class DraftingService {
             if(template.getStoragePath()==null)throw new BizException(4012,"EDITABLE_DOCX_REQUIRED: Re-upload the original editable "+key+" DOCX.");
             byte[] original=storageService.read(template.getStoragePath());
             DocumentParser.ParsedDocument fresh=documentParser.parse(template.getFileName(),original);
-            if(!DraftTemplateSourceText.matches(template.getTextContent(),fresh))throw new BizException(4012,"SOURCE_TEXT_DIVERGENCE: "+key+" saved template text differs from the original DOCX; verify and re-upload the original editable DOCX.");
+            if(!DraftTemplateSourceText.matches(template.getTextContent(),fresh,documentParser,original))throw new BizException(4012,"SOURCE_TEXT_DIVERGENCE: "+key+" saved template text differs from the original DOCX; verify and re-upload the original editable DOCX.");
             DocxTemplateEditor.TemplateIndex sourceIndex=new DocxTemplateEditor().inspect(original);
             List<Map<String,Object>> sourceBindings=DraftDocumentBindings.source(key,sourceIndex);
             DraftDocumentBindings.associateTargets(key,sourceIndex,prepared,sourceBindings);

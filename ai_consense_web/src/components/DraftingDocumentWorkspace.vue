@@ -13,7 +13,7 @@ const props = defineProps<{
   projectId: string; fileKey: string; document?: DraftDocument; locale: AppLocale;
   fields: DraftField[]; values: Record<string, DraftValue>; variables: DraftVariable[];
   actions: DraftPlanAction[]; fieldStates: Record<string, string>; dirtyKeys: string[];
-  editing: boolean; dirty: boolean; immersive?: boolean; disabled?: boolean; trace?: ExtractTrace | null; graphNavigation?: GraphNavigation
+  editing: boolean; dirty: boolean; immersive?: boolean; disabled?: boolean; staleNoticePresented?: boolean; trace?: ExtractTrace | null; graphNavigation?: GraphNavigation
 }>()
 const emit = defineEmits<{ input: [key: string]; file: [fileKey: string] }>()
 const original = shallowRef<DocumentReading>(), result = shallowRef<DocumentReading>()
@@ -84,7 +84,7 @@ onBeforeUnmount(() => { alive = false; sequence++; closePdf(false) })
 </script>
 <template>
   <section data-document-review-workspace class="review-workspace" :class="{ immersive }">
-    <DraftingDocumentReview :project-id="projectId" :file-key="fileKey" :document="document" :original="original" :result="result" :source-bindings="sourceBindings" :result-bindings="resultBindings" :loading="loading" :error="error" :fields="fields" :values="values" :variables="variables" :actions="actions" :field-states="fieldStates" :dirty-keys="dirtyKeys" :locale="locale" :immersive="immersive" :disabled="disabled || dirty" :editing="editing" :trace="trace" :graph-navigation="graphNavigation" @input="!disabled && !dirty && emit('input', $event)" @file="!disabled && !dirty && emit('file', $event)" @retry="load" @pdf="openPdf"><slot /></DraftingDocumentReview>
+    <DraftingDocumentReview :project-id="projectId" :file-key="fileKey" :document="document" :original="original" :result="result" :source-bindings="sourceBindings" :result-bindings="resultBindings" :loading="loading" :error="error" :stale-notice-presented="staleNoticePresented" :fields="fields" :values="values" :variables="variables" :actions="actions" :field-states="fieldStates" :dirty-keys="dirtyKeys" :locale="locale" :immersive="immersive" :disabled="disabled || dirty" :editing="editing" :trace="trace" :graph-navigation="graphNavigation" @input="!disabled && !dirty && emit('input', $event)" @file="!disabled && !dirty && emit('file', $event)" @retry="load" @pdf="openPdf"><slot /></DraftingDocumentReview>
     <Teleport to="body">
       <section v-if="pdfView" class="layout-check-backdrop" @click.self="closePdf()">
         <div ref="pdfPanel" class="layout-check" role="dialog" aria-modal="true" :aria-label="t('PDF layout check', 'PDF 版式核对', 'PDF 版式核對')" tabindex="-1" @keydown="pdfKeydown">

@@ -630,6 +630,19 @@ public class DocumentParser {
     // ----------------------------------------------------------------- DOCX
 
     private ParsedDocument parseDocx(byte[] bytes,DocumentParseProbe probe) throws Exception {
+        return parseDocx(bytes, probe, false);
+    }
+
+    /** Exact pre-native-math text projection, solely for comparing saved Drafting templates. */
+    public ParsedDocument projectLegacyDocxMath(byte[] bytes) {
+        try {
+            return parseDocx(bytes, DocumentParseProbe.disabled(), true);
+        } catch (Exception e) {
+            throw new IllegalArgumentException("Cannot reconstruct original DOCX text", e);
+        }
+    }
+
+    private ParsedDocument parseDocx(byte[] bytes,DocumentParseProbe probe,boolean legacyMath) throws Exception {
         try(DocumentParseProbe.Timer timer=probe.measure("docx_zip_preflight",null,"Original bounded OOXML inflation guard")){preflightDocx(bytes);}
         List<DocumentBlock> blocks = new ArrayList<>();
         try (XWPFDocument document = new XWPFDocument(new ByteArrayInputStream(bytes))) {
@@ -643,7 +656,7 @@ public class DocumentParser {
                 if (element instanceof XWPFParagraph) {
                     XWPFParagraph paragraph = (XWPFParagraph) element;
                     DocumentBlock block = wordBlock(paragraph.getCTP().getDomNode(), "paragraph",
-                            "body/" + bodyIndex + "/paragraph", numbering);
+                            "body/" + bodyIndex + "/paragraph", numbering, legacyMath);
                     sourceNodes.put(block,paragraph.getCTP().getDomNode());
                     block.setParagraphStyle(paragraph.getStyle());
                     if (paragraph.getStyle() != null && document.getStyles() != null) {
@@ -662,7 +675,7 @@ public class DocumentParser {
                         for (XWPFTableCell cell : row.getTableCells()) {
                             WordText value = new WordText();
                             collectWordText(cell.getCTTc().getDomNode(), false, false, value, numbering,
-                                    location + "/cell/" + cellIndex++);
+                                    location + "/cell/" + cellIndex++, legacyMath);
                             values.add(normalize(value.effective.toString()));
                             rowText.add(value);
                         }
@@ -678,14 +691,14 @@ public class DocumentParser {
             int index = 0;
             for (XWPFHeader header : document.getHeaderList()) {
                 wordParts.put("header/"+index+"/",header.getPackagePart());
-                DocumentBlock block = wordBlock(header._getHdrFtr().getDomNode(), "header", "header/" + index++, numbering.newStory());
+                DocumentBlock block = wordBlock(header._getHdrFtr().getDomNode(), "header", "header/" + index++, numbering.newStory(), legacyMath);
                 sourceNodes.put(block,header._getHdrFtr().getDomNode());
                 if (hasContent(block)) blocks.add(block);
             }
             index = 0;
             for (XWPFFooter footer : document.getFooterList()) {
                 wordParts.put("footer/"+index+"/",footer.getPackagePart());
-                DocumentBlock block = wordBlock(footer._getHdrFtr().getDomNode(), "footer", "footer/" + index++, numbering.newStory());
+                DocumentBlock block = wordBlock(footer._getHdrFtr().getDomNode(), "footer", "footer/" + index++, numbering.newStory(), legacyMath);
                 sourceNodes.put(block,footer._getHdrFtr().getDomNode());
                 if (hasContent(block)) blocks.add(block);
             }
@@ -695,7 +708,7 @@ public class DocumentParser {
                 // OOXML reserves IDs -1 and 0 for separator notes, which are not contract provisions.
                 if (note.getId().signum() <= 0) continue;
                 DocumentBlock block = wordBlock(note.getCTFtnEdn().getDomNode(), "footnote",
-                        "word-footnote/" + note.getId(), footnoteNumbering);
+                        "word-footnote/" + note.getId(), footnoteNumbering, legacyMath);
                 sourceNodes.put(block,note.getCTFtnEdn().getDomNode());
                 if (hasContent(block)) blocks.add(block);
             }
@@ -704,7 +717,7 @@ public class DocumentParser {
                 wordParts.put("word-endnote/"+note.getId()+"/",note.getPart().getPackagePart());
                 if (note.getId().signum() <= 0) continue;
                 DocumentBlock block = wordBlock(note.getCTFtnEdn().getDomNode(), "endnote",
-                        "word-endnote/" + note.getId(), endnoteNumbering);
+                        "word-endnote/" + note.getId(), endnoteNumbering, legacyMath);
                 sourceNodes.put(block,note.getCTFtnEdn().getDomNode());
                 if (hasContent(block)) blocks.add(block);
             }
@@ -908,8 +921,12 @@ public class DocumentParser {
     }
 
     private DocumentBlock wordBlock(Node node, String kind, String location, DocxNumberingResolver numbering) {
+        return wordBlock(node, kind, location, numbering, false);
+    }
+
+    private DocumentBlock wordBlock(Node node, String kind, String location, DocxNumberingResolver numbering, boolean legacyMath) {
         WordText text = new WordText();
-        collectWordText(node, false, false, text, numbering, location);
+        collectWordText(node, false, false, text, numbering, location, legacyMath);
         return wordBlock(text, kind, location);
     }
 
@@ -935,7 +952,7 @@ public class DocumentParser {
 
     /** Traverse OOXML so deleted runs do not enter the effective contract text. */
     private void collectWordText(Node node, boolean deleted, boolean struck, WordText out,
-                                 DocxNumberingResolver numbering, String location) {
+                                 DocxNumberingResolver numbering, String location, boolean legacyMath) {
         String name = node.getLocalName();
         boolean isDeleted = deleted || "del".equals(name) || "moveFrom".equals(name);
         boolean isStruck = struck;
@@ -950,12 +967,12 @@ public class DocumentParser {
             catch(Exception unavailable){nativeObject.put("nativeXmlStatus","unavailable_original_package_retained");}
             wordRelationshipRefs(node,nativeObject.putArray("relationshipRefs"));
             out.nativeObjects.add(nativeObject);out.warnings.add("Unrendered native Word "+nativeObject.path("kind").asText()+" at "+location+"; source semantics remain unknown.");
-            if(math)return;
+            if(math && !legacyMath)return;
         }
         if ("tc".equals(name)) {
             WordText cell = new WordText(); int childIndex = 0;
             for (Node child = node.getFirstChild(); child != null; child = child.getNextSibling())
-                collectWordText(child, isDeleted, isStruck, cell, numbering, location + "/node/" + childIndex++);
+                collectWordText(child, isDeleted, isStruck, cell, numbering, location + "/node/" + childIndex++, legacyMath);
             DocumentBlock.WordCell metadata = new DocumentBlock.WordCell();
             metadata.setLocation(location); metadata.setTableLocation(wordDomLocation(node.getParentNode().getParentNode()));
             metadata.setRowIndex(previousWordSiblings(node.getParentNode(), "tr"));
@@ -984,7 +1001,7 @@ public class DocumentParser {
             int alternativeIndex = 0;
             for (Node child = node.getFirstChild(); child != null; child = child.getNextSibling()) {
                 collectWordText(child, isDeleted, isStruck, alternative, numbering.newStory(),
-                        location + "/alternative/" + alternativeIndex++);
+                        location + "/alternative/" + alternativeIndex++, legacyMath);
             }
             alternative.warnings.add("Unrendered OOXML AlternateContent branches at " + location);
             for (DocumentBlock.WordNumbering item : alternative.numbering) {
@@ -1000,7 +1017,7 @@ public class DocumentParser {
             WordText paragraph = new WordText();
             int childIndex = 0;
             for (Node child = node.getFirstChild(); child != null; child = child.getNextSibling()) {
-                collectWordText(child, isDeleted, isStruck, paragraph, numbering, location + "/node/" + childIndex++);
+                collectWordText(child, isDeleted, isStruck, paragraph, numbering, location + "/node/" + childIndex++, legacyMath);
             }
             if (resolved != null && resolved.isNumbered()) {
                 // Note parts are enumerated by storage order. Cross-note label order
@@ -1058,7 +1075,7 @@ public class DocumentParser {
         if ("br".equals(name) || "cr".equals(name)) appendWordText(out, "\n", isDeleted, isStruck);
         int childIndex = 0;
         for (Node child = node.getFirstChild(); child != null; child = child.getNextSibling()) {
-            collectWordText(child, isDeleted, isStruck, out, numbering, location + "/node/" + childIndex++);
+            collectWordText(child, isDeleted, isStruck, out, numbering, location + "/node/" + childIndex++, legacyMath);
         }
     }
 
