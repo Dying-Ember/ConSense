@@ -50,7 +50,12 @@ class VettingProcessRecoveryTest {
                 try(PreparedStatement expire=database.prepareStatement("UPDATE vetting_run SET lease_until=? WHERE id=?")){expire.setTimestamp(1,Timestamp.from(java.time.Instant.now().minusSeconds(1)));expire.setString(2,ready.path("runId").asText());assertEquals(1,expire.executeUpdate());}}
             int callsBefore=Files.readAllLines(root.resolve("calls.log")).size();Process resumed=launch(root,"RESUME");
             try{awaitFile(resumed,root.resolve("RESUME-ready.json"));JsonNode restarted=JsonUtils.parse(Files.readString(root.resolve("RESUME-ready.json")));String base=restarted.path("baseUrl").asText(),project=restarted.path("projectId").asText(),run=restarted.path("runId").asText();assertEquals(ready.path("runId").asText(),run);
-                JsonNode completed=awaitRun(resumed,base+"/api/vetting/"+project+"/runs/"+run);assertEquals("COMPLETED",completed.path("status").asText());assertEquals(2,completed.path("reliablePackets").size());assertEquals(2,completed.path("result").path("total").asInt());assertEquals(2-saved,Files.readAllLines(root.resolve("calls.log")).size()-callsBefore,"Saved packets must not call the gateway again at "+boundary);
+                JsonNode completed=awaitRun(resumed,base+"/api/vetting/"+project+"/runs/"+run);
+                Path response=root.resolve("RESUME-public-completed.json");Files.write(response,JsonUtils.write(completed).getBytes(StandardCharsets.UTF_8));
+                assertEquals("COMPLETED",completed.path("status").asText(),"Resumed run at "+boundary+"; response="+response);
+                assertEquals(2,completed.path("reliablePackets").size(),"Durable packets at "+boundary+"; response="+response);
+                assertEquals(2,completed.path("result").path("total").asInt(),"Published findings at "+boundary+"; response="+response);
+                assertEquals(2-saved,Files.readAllLines(root.resolve("calls.log")).size()-callsBefore,"Saved packets must not call the gateway again at "+boundary);
                 JsonNode report=JsonUtils.parse(VettingRecoveryProcessFixture.request(base+"/api/vetting/"+project+"/report.json","GET"));assertEquals(run,report.path("job").path("id").asText());assertEquals(2,report.path("findings").size());assertTrue(report.path("reportSnapshotId").asText().matches("[a-f0-9]{64}"));
                 JsonNode progress=JsonUtils.parse(VettingRecoveryProcessFixture.request(base+"/api/vetting/"+project+"/runs/"+run+"/progress","GET")).path("data");assertFalse(progress.has("coverage"));assertFalse(progress.has("reliablePackets"));assertEquals("COMPLETED",progress.path("status").asText());
             }finally{stop(resumed);}
