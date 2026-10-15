@@ -174,6 +174,10 @@ public final class AdviceDtos {
         private String indexSignature;
         @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
         private String indexReason;
+        @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+        private String sourceReason;
+        @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+        private Boolean preparable;
         public IndexStatusVO(int chunks,int indexed,String vectorProvider,String collection,String embedModel,String llmModel,boolean llmReady,boolean vectorReady,boolean ocrReady,LocalizedText message,boolean stale,int eligibleDocuments,int indexedDocuments,boolean embeddingReady) {
             this.chunks=chunks;this.indexed=indexed;this.vectorProvider=vectorProvider;this.collection=collection;this.embedModel=embedModel;this.llmModel=llmModel;
             this.llmReady=llmReady;this.vectorReady=vectorReady;this.ocrReady=ocrReady;this.message=message;this.stale=stale;
@@ -185,6 +189,18 @@ public final class AdviceDtos {
         public IndexStatusVO(int chunks,int indexed,String vectorProvider,String collection,String embedModel,String llmModel,boolean llmReady,boolean vectorReady,boolean ocrReady,LocalizedText message) {
             this(chunks,indexed,vectorProvider,collection,embedModel,llmModel,llmReady,vectorReady,ocrReady,message,false,0,0);
         }
+    }
+
+    @Data @NoArgsConstructor @AllArgsConstructor
+    public static class SourcePreparationResult {
+        private String documentId,fileName,status,reason;
+    }
+    @Data @NoArgsConstructor @AllArgsConstructor
+    public static class SourcePreparationVO {
+        private String sourceScope;
+        private int selectedDocuments,preparedDocuments;
+        private boolean complete,humanConfirmed,sourceQualityAccepted;
+        private List<SourcePreparationResult> results;
     }
 
     @Data

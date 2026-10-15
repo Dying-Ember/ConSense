@@ -31,6 +31,7 @@ public class CanonicalEvidenceService {
     private final CanonicalEvidenceBackend backend;
     private final CanonicalCurrentSourceReader sources;
     @Autowired private org.springframework.beans.factory.ObjectProvider<CanonicalEvidenceService> boundaryProxy;
+    @Autowired private NormalObservedPreparationService normalPreparation;
 
     @Autowired public CanonicalEvidenceService(CanonicalSourceBindingRepository bindings,CanonicalEvidenceBackend backend,CanonicalCurrentSourceReader sources){
         this.bindings=bindings;this.backend=backend;this.sources=sources;
@@ -43,6 +44,51 @@ public class CanonicalEvidenceService {
     private static final List<String> MODULES=Arrays.asList("drafting","vetting","advisory");
     private static final String INPUT_CONTRACT="canonical-source-chunks-upstream-scope-and-parser-projection-v1";
     private static final String ASSET_CONTRACT="source-and-projection-bound-content-addressed-assets-v1";
+
+    /** Explicit normal-parser preparation, independent of the reviewed registration authority. */
+    public boolean prepareNormalObserved(String projectId,Long documentId,String module){
+        validModule(module);
+        List<CanonicalSourceBinding> revisions=bindings.findByProjectIdAndDocumentIdOrderByIdDesc(projectId,documentId);
+        if(!revisions.isEmpty()){boundary().snapshot(projectId,documentId,revisions.get(0).getProjectionSha256(),module);return false;}
+        JsonNode graph=normalPreparation.prepare(projectId,documentId,module);
+        SourceDocument source=sources.normalDocument(projectId,documentId,module);
+        require(graph.equals(NormalObservedPreparationService.currentGraph(source)),HttpStatus.CONFLICT,"CANONICAL_SOURCE_STALE");
+        JsonNode health=parse(backend.normalHealth(module)).path("oer");NormalObservedContract.validateCapability(health);
+        require(INPUT_CONTRACT.equals(health.path("inputContract").asText())&&ASSET_CONTRACT.equals(health.path("assetReturnContract").asText()),HttpStatus.BAD_GATEWAY,"OER_CANONICAL_CAPABILITY_MISMATCH");
+        com.fasterxml.jackson.databind.node.ObjectNode sourceBinding=JsonUtils.mapper().createObjectNode();OerDocumentIdentity identity=OerSourceMetadata.identity(source);
+        sourceBinding.put("module",module);sourceBinding.set("eligibleModules",JsonUtils.mapper().valueToTree(identity.getEligibleModules()));sourceBinding.put("sourcePurpose",identity.getSourcePurpose());
+        String sourceClass=VettingCorpus.sourceClass(source);sourceBinding.put("sourceClass",sourceClass==null?identity.getKind().toLowerCase(Locale.ROOT):sourceClass);
+        sourceBinding.put("routingSha256",routingHash(source));sourceBinding.set("scopePolicySha256",health.path("scopePolicy").path("manifestSha256"));validSha(sourceBinding.path("scopePolicySha256").asText());
+        com.fasterxml.jackson.databind.node.ObjectNode request=JsonUtils.mapper().createObjectNode();request.set("candidateGraph",graph);request.set("sourceBinding",sourceBinding);
+        require(NormalObservedPreparationService.sameGeneration(source,sources.normalDocument(projectId,documentId,module)),HttpStatus.CONFLICT,"CANONICAL_SOURCE_STALE");
+        String receipt=backend.normalObserved(JsonUtils.write(request),module);String raw=CanonicalJson.field(receipt,"projection");JsonNode projection=parse(raw);
+        projection=validateSnapshot(raw,projection.path("projectionSha256").asText());
+        require(graph.equals(projection.path("manifest").path("candidateGraph"))&&sourceBinding.equals(projection.path("manifest").path("sourceBinding")),HttpStatus.CONFLICT,"NORMAL_OBSERVED_SOURCE_BINDING_MISMATCH");
+        require(parse(receipt).path("projectionSha256").equals(projection.path("projectionSha256"))&&parse(receipt).path("chunks").asInt(-1)==projection.path("chunks").size()
+                &&parse(receipt).path("immutable").asBoolean()&&!parse(receipt).path("qualityVerifiedByRegistry").asBoolean(true)&&!parse(receipt).path("sourceQualityChangedByRegistry").asBoolean(true),HttpStatus.BAD_GATEWAY,"NORMAL_OBSERVED_RECEIPT_MISMATCH");
+        CanonicalSourceBinding binding=new CanonicalSourceBinding();binding.setProjectId(projectId);binding.setDocumentId(documentId);binding.setProjectionSha256(projection.path("projectionSha256").asText());
+        binding.setOriginalSourceSha256(source.getSourceSha256());binding.setJavaParsedSourceHash(VettingCorpus.sourceHash(source));binding.setRoutingSha256(routingHash(source));
+        binding.setSourceRevisionSha256(projection.path("source").path("sourceRevisionSha256").asText());binding.setProjectionRevisionSha256(projection.path("projectionRevisionSha256").asText());binding.setCanonicalSourceHash(projection.path("sourceHash").asText());
+        binding.setScopePolicySha256(sourceBinding.path("scopePolicySha256").asText());binding.setDeclaredModule(module);binding.setEligibleModulesJson(sourceBinding.path("eligibleModules").toString());binding.setSnapshotJson(raw);binding.setSnapshotBytesSha256(CanonicalJson.sha(raw.getBytes(StandardCharsets.UTF_8)));
+        sources.assertSourceCurrent(binding,module);
+        boundary().saveNormalBinding(binding,module);return true;
+    }
+    private CanonicalEvidenceService boundary(){return boundaryProxy==null?this:boundaryProxy.getObject();}
+    @Transactional(propagation=Propagation.REQUIRES_NEW,isolation=Isolation.READ_COMMITTED)
+    public void saveNormalBinding(CanonicalSourceBinding binding,String module){
+        JsonNode snapshot=validateSnapshot(binding.getSnapshotJson(),binding.getProjectionSha256());require(NormalObservedContract.isNormal(snapshot),HttpStatus.BAD_REQUEST,"NORMAL_OBSERVED_AUTHORITY_MISMATCH");validateBindingPins(binding,snapshot);sources.assertSourceCurrent(binding,module);
+        List<CanonicalSourceBinding> latest=bindings.findByProjectIdAndDocumentIdOrderByIdDesc(binding.getProjectId(),binding.getDocumentId());
+        require(latest.isEmpty(),HttpStatus.CONFLICT,"CANONICAL_BINDING_CHANGED_DURING_PREPARATION");bindings.saveAndFlush(binding);
+        sources.assertSourceCurrent(binding,module);
+    }
+    public boolean normalPreparable(String projectId,List<Long> ids,String module){
+        NormalObservedContract.validateCapability(parse(backend.normalHealth(module)).path("oer"));
+        boolean missing=false;
+        for(Long id:ids){List<CanonicalSourceBinding> existing=bindings.findByProjectIdAndDocumentIdOrderByIdDesc(projectId,id);
+            if(!existing.isEmpty()){boundary().snapshot(projectId,id,existing.get(0).getProjectionSha256(),module);continue;}
+            SourceDocument source=sources.normalDocument(projectId,id,module);NormalObservedPreparationService.requireEvidence(source);missing=true;
+        }return missing;
+    }
 
     /** Internal implementation API only. All expectations must come from the explicit source-review handoff. */
     public static class ReviewedRegistration {
@@ -181,7 +227,7 @@ public class CanonicalEvidenceService {
         require(CanonicalJson.sha(binding.getSnapshotJson().getBytes(StandardCharsets.UTF_8)).equals(binding.getSnapshotBytesSha256()),HttpStatus.CONFLICT,"CANONICAL_STORED_BYTES_CHANGED");
         JsonNode snapshot=validateSnapshot(binding.getSnapshotJson(),binding.getProjectionSha256());validateBindingPins(binding,snapshot);
         if(!NativeDocumentCollectionContract.isCollection(snapshot)){
-            if(NativePdfSourceFamilyContract.isFamily(snapshot)||NativePdfCanonicalContract.isNativePdf(snapshot))recheckNativeSnapshot(binding,module);
+            if(NormalObservedContract.isNormal(snapshot)||NativePdfSourceFamilyContract.isFamily(snapshot)||NativePdfCanonicalContract.isNativePdf(snapshot))recheckNativeSnapshot(binding,module);
             return snapshot.path("chunks").deepCopy();
         }
         assertCurrent(binding,module);
@@ -211,7 +257,11 @@ public class CanonicalEvidenceService {
         pointer.setSourceFilename(snapshot.path("source").path(nativePdf||family?"filename":"sourceFilename").deepCopy());pointer.setSourceOrder(chunk.path("sourceOrder").deepCopy());
         boolean collection=NativeDocumentCollectionContract.isCollection(snapshot);
         pointer.setProjectionSchema(collection?NativeCanonicalContract.SCHEMA:snapshot.path("schema").asText());
-        if(family){
+        if(NormalObservedContract.isNormal(snapshot)){
+            pointer.setAddressKind("normal_observed_unit");pointer.setProducerKind(NormalObservedContract.PRODUCER);pointer.setBboxConvention(null);
+            pointer.setOriginalGeometryStatus("unknown");pointer.setVisualReturnStatus("unknown");
+            List<Integer> observedPages=new ArrayList<>();for(JsonNode page:chunk.path("physicalPages"))observedPages.add(page.asInt());pointer.setPhysicalPages(observedPages);
+        }else if(family){
             pointer.setProducerKind(NativePdfSourceFamilyContract.PRODUCER);pointer.setStorageShape(NativePdfSourceFamilyContract.STORAGE);
             pointer.setSourceRevisionKind(NativePdfSourceFamilyContract.REVISION);pointer.setFamilyCompositionSha256(binding.getFamilyCompositionSha256());pointer.setFamilyComponentSetSha256(binding.getFamilyComponentSetSha256());
             pointer.setSourceFamilyOriginRef(chunk.path("sourceFamilyOriginRef").deepCopy());pointer.setNativePdfSourceFamilyEvidence(NativePdfSourceFamilyContract.displayDeclarations(snapshot));
@@ -349,7 +399,7 @@ public class CanonicalEvidenceService {
                 .orElseThrow(()->new CanonicalEvidenceException(HttpStatus.NOT_FOUND,"CANONICAL_BINDING_UNAVAILABLE"));
         require(binding.getSnapshotJson()!=null&&CanonicalJson.sha(binding.getSnapshotJson().getBytes(StandardCharsets.UTF_8)).equals(binding.getSnapshotBytesSha256()),HttpStatus.CONFLICT,"CANONICAL_STORED_BYTES_CHANGED");
         JsonNode snapshot=validateSnapshot(binding.getSnapshotJson(),projection);validateBindingPins(binding,snapshot);boolean collection=NativeDocumentCollectionContract.isCollection(snapshot);
-        if(NativePdfSourceFamilyContract.isFamily(snapshot)||NativePdfCanonicalContract.isNativePdf(snapshot)||NativeCanonicalContract.isNative(snapshot)||NativeDocumentCollectionContract.isCollection(snapshot)){
+        if(NormalObservedContract.isNormal(snapshot)||NativePdfSourceFamilyContract.isFamily(snapshot)||NativePdfCanonicalContract.isNativePdf(snapshot)||NativeCanonicalContract.isNative(snapshot)||NativeDocumentCollectionContract.isCollection(snapshot)){
             // Native compact snapshots refer to private proof. Re-read the registry so every
             // public operation revalidates the actual CAS bytes, even for a persisted binding.
             snapshot=recheckNativeSnapshot(binding,module);
@@ -357,7 +407,7 @@ public class CanonicalEvidenceService {
         return new BindingView(binding,snapshot,collection);
     }
     private JsonNode recheckNativeSnapshot(CanonicalSourceBinding binding,String module){
-        assertCurrent(binding,module);String current=backend.snapshot(binding.getProjectionSha256(),module);JsonNode snapshot=validateSnapshot(current,binding.getProjectionSha256());
+        assertCurrent(binding,module);String current=NormalObservedContract.isNormal(parse(binding.getSnapshotJson()))?backend.normalSnapshot(binding.getProjectionSha256(),binding.getDeclaredModule()):backend.snapshot(binding.getProjectionSha256(),module);JsonNode snapshot=validateSnapshot(current,binding.getProjectionSha256());
         require(CanonicalJson.hash(current,null).equals(CanonicalJson.hash(binding.getSnapshotJson(),null)),HttpStatus.CONFLICT,"CANONICAL_STORED_BYTES_CHANGED");
         if(NativeDocumentCollectionContract.isCollection(snapshot))snapshot=NativeDocumentCollectionContract.readDocument(current,binding.getProjectionSha256(),
             ordinal->backend.batch(binding.getProjectionSha256(),ordinal,module).bytes,
@@ -369,6 +419,14 @@ public class CanonicalEvidenceService {
     static String routingHash(SourceDocument d){return CanonicalJson.sha(JsonUtils.write(Arrays.asList(d.getCategory(),d.getFileKey(),d.getReviewRole(),d.getDocumentScope(),d.getParseStatus(),d.getOerIdentityJson())).getBytes(StandardCharsets.UTF_8));}
     public static void validateBindingPins(CanonicalSourceBinding binding,JsonNode snapshot){
         JsonNode identity=snapshot.path("projectionIdentity");
+        if(NormalObservedContract.isNormal(snapshot)){
+            require(binding.getAdoptionManifestSha256()==null&&binding.getReviewReferenceSha256()==null&&binding.getFamilyCompositionSha256()==null&&binding.getFamilyComponentSetSha256()==null
+                &&Objects.equals(binding.getRoutingSha256(),identity.path("routingSha256").asText())&&Objects.equals(binding.getScopePolicySha256(),identity.path("scopePolicySha256").asText())
+                &&Objects.equals(binding.getOriginalSourceSha256(),identity.path("originalSourceSha256").asText())&&Objects.equals(binding.getJavaParsedSourceHash(),identity.path("javaParsedSourceHash").asText())
+                &&Objects.equals(binding.getCanonicalSourceHash(),snapshot.path("sourceHash").asText())&&Objects.equals(binding.getSourceRevisionSha256(),identity.path("sourceRevisionSha256").asText())
+                &&Objects.equals(binding.getProjectionRevisionSha256(),snapshot.path("projectionRevisionSha256").asText())&&Objects.equals(binding.getDeclaredModule(),identity.path("module").asText())
+                &&JsonUtils.parse(binding.getEligibleModulesJson()).equals(identity.path("eligibleModules")),HttpStatus.CONFLICT,"CANONICAL_BINDING_TYPED_PINS_CHANGED");return;
+        }
         boolean family=NativePdfSourceFamilyContract.isFamily(snapshot);
         require(family?binding.getAdoptionManifestSha256()==null&&binding.getReviewReferenceSha256()==null
                 &&Objects.equals(binding.getFamilyCompositionSha256(),identity.path("compositionSha256").asText())
@@ -400,6 +458,7 @@ public class CanonicalEvidenceService {
     public static JsonNode validateSnapshot(String raw,String address){
         require(raw!=null&&raw.getBytes(StandardCharsets.UTF_8).length<=NativePdfCanonicalContract.MAX_BYTES,HttpStatus.BAD_GATEWAY,"CANONICAL_SNAPSHOT_TOO_LARGE");
         JsonNode snapshot=parse(raw);
+        if(NormalObservedContract.isNormal(snapshot))return NormalObservedContract.validate(raw,address);
         if(NativePdfSourceFamilyContract.isFamily(snapshot))return NativePdfSourceFamilyContract.validateEnvelope(raw,address);
         if(NativePdfCanonicalContract.isNativePdf(snapshot)){
             require(address!=null&&address.equals(snapshot.path("projectionSha256").asText())&&address.equals(CanonicalJson.hash(raw,"projectionSha256")),HttpStatus.BAD_GATEWAY,"CANONICAL_SEAL_MISMATCH");

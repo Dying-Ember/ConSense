@@ -145,6 +145,27 @@ class AdviceCanonicalIntegrationTest {
         assertEquals(0,data(get("/api/advice/{p}/messages",p)).size());verify(local,never()).chat(anyList());verifyNoInteractions(vectors,legacyChunks);
     }
 
+    @Test void unregisteredAdviceSourceExposesStableReasonWithoutChangingLegacyError() throws Exception {
+        assertBindingFailureReason("CANONICAL_SELECTED_DOCUMENT_UNREGISTERED","source_unregistered");
+    }
+    @Test void unavailableAdviceBackendExposesStableReasonWithoutLeakingCause() throws Exception {
+        assertBindingFailureReason("OER_EVIDENCE_UPSTREAM_UNAVAILABLE","evidence_backend_unavailable");
+    }
+    @Test void staleAdviceSourceExposesStableReasonWithoutFallingBack() throws Exception {
+        assertBindingFailureReason("CANONICAL_SOURCE_STALE","source_stale");
+    }
+    private void assertBindingFailureReason(String upstreamReason,String publicReason) throws Exception {
+        String p=project();source(p,"SCC","SCC.txt","tender","TEST");
+        com.consense.service.sources.CanonicalEvidenceException failure=new com.consense.service.sources.CanonicalEvidenceException(org.springframework.http.HttpStatus.CONFLICT,upstreamReason);
+        failure.initCause(new IllegalStateException("AUTHORED_BACKEND_SECRET_MUST_NOT_LEAK"));
+        when(canonical.load(anyString(),eq("advisory"),anyList())).thenThrow(failure);
+        String response=mvc.perform(ask(p,"contract")).andExpect(jsonPath("$.code").value(4204))
+                .andExpect(jsonPath("$.message").value("Current canonical source bindings are unavailable for the selected advice scope. Complete source review and registration before asking."))
+                .andExpect(jsonPath("$.reason").value(publicReason)).andReturn().getResponse().getContentAsString();
+        assertFalse(response.contains("AUTHORED_BACKEND_SECRET"));
+        assertEquals(0,data(get("/api/advice/{p}/messages",p)).size());verify(local,never()).chat(anyList());verifyNoInteractions(vectors,legacyChunks);
+    }
+
     @Test void latestFailedSourceIsRetainedInCanonicalSelectionRatherThanSilentlyOmitted() throws Exception {
         String p=project();source(p,"SCC","SCC.txt","tender","old usable");SourceDocument latest=source(p,"SCC","SCC.txt","tender","");
         latest.setParseStatus("FAILED");documents.saveAndFlush(latest);

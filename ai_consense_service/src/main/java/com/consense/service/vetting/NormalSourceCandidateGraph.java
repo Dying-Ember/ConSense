@@ -21,11 +21,19 @@ public final class NormalSourceCandidateGraph {
     private NormalSourceCandidateGraph() { }
     public static void capture(SourceDocument source) { source.setNormalCandidateJson(JsonUtils.write(build(source))); }
 
+    public static JsonNode requireBound(SourceDocument source) {
+        JsonNode graph=bound(source);
+        if(graph==null||!"actual_source_candidate_generation".equals(graph.path("status").asText()))
+            throw new IllegalArgumentException("NORMAL_OBSERVED_GENERATION_STALE_OR_MISSING");
+        return graph;
+    }
+
     /** Reconstruct from the actual persisted source each time; JSON declarations alone are never a seal. */
     static JsonNode bound(SourceDocument source) {
         if(JsonUtils.isBlankText(source.getNormalCandidateJson()))return null;
         JsonNode stored=JsonUtils.parse(source.getNormalCandidateJson());
-        JsonNode current=build(source);
+        // Compare the persisted JSON representation; small Word Long values reload as IntNode.
+        JsonNode current=JsonUtils.parse(JsonUtils.write(build(source)));
         if(stored.equals(current))return current;
         ObjectNode unknown=declarations();unknown.put("status","generation_binding_unknown");unknown.putArray("units");
         unknown.putArray("unknowns").add(unknown("source_generation","unknown","saved_candidate_differs_from_current_original_identity_structure_or_coverage"));

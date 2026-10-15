@@ -6,7 +6,7 @@ const requestId = '0123456789abcdef0123456789abcdef'
 const request = { question: '画出处理流程', scope: 'contract', sessionId: 'session-A', basisScope: 'project_contract' }
 const result = { sessionId: request.sessionId, grounded: false, content: { en: 'Limited [1]', zhHans: '有限分析 [1]', zhHant: '有限分析 [1]' }, citations: ['[1]'], sources: [], basisScope: 'insufficient' }
 const event = (name, value) => `event: ${name}\ndata: ${JSON.stringify({ requestId, ...value })}\n\n`
-class ApiError extends Error { constructor(code, message) { super(message); this.code = code } }
+class ApiError extends Error { constructor(code, message, reason) { super(message); this.code = code; this.reason = reason } }
 function client(fetch) {
   return loadTypeScript(path.join(__dirname, '../src/advice/adviceStream.ts'), {
     globals: { fetch, TextDecoder, DOMException, JSON, Error },
@@ -53,6 +53,17 @@ test('request/session mismatch, invalid section and error event reject the strea
   ]) {
     const api = client(async () => new Response(wire, { headers: { 'Content-Type': 'text/event-stream' } }))
     await assert.rejects(api.streamAdvice('project-A', request, options()), /MISMATCH|INVALID|Source revision changed/)
+  }
+})
+
+test('HTTP envelopes and SSE errors preserve the precise source reason without changing code or message', async () => {
+  const failure = { code: 4204, reason: 'source_stale', message: 'Source changed' }
+  for (const response of [
+    () => new Response(JSON.stringify(failure), { status: 409, headers: { 'Content-Type': 'application/json' } }),
+    () => new Response(event('error', failure), { headers: { 'Content-Type': 'text/event-stream' } })
+  ]) {
+    const api = client(async () => response())
+    await assert.rejects(api.streamAdvice('project-A', request, options()), error => error.code === 4204 && error.reason === 'source_stale' && error.message === 'Source changed')
   }
 })
 

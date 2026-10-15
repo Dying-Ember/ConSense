@@ -66,7 +66,8 @@ public class AdviceStreamController {
                     job.error(4201, "Consultation stopped. Completion was not confirmed; check this session's history before retrying.");
                 } catch (RuntimeException failure) {
                     job.error(failure instanceof BizException ? ((BizException) failure).getCode() : 5002,
-                            failure instanceof BizException ? failure.getMessage() : "Consultation failed before completion. Please retry or check the backend logs.");
+                            failure instanceof BizException ? failure.getMessage() : "Consultation failed before completion. Please retry or check the backend logs.",
+                            failure instanceof BizException ? ((BizException) failure).getPublicReason() : null);
                 } finally { requests.remove(requestId, job); sessions.remove(sessionKey, job); }
             });
             job.future = future;
@@ -116,8 +117,12 @@ public class AdviceStreamController {
             catch (IOException | IllegalStateException disconnected) { cancel(false); throw new CancellationException("Consultation connection closed"); }
         }
         private void error(int code, String message) {
+            error(code,message,null);
+        }
+        private void error(int code,String message,String reason) {
             if (committed.get()) { emitter.complete(); return; }
             Map<String, Object> body = new LinkedHashMap<>(); body.put("code", code); body.put("message", message);
+            if(reason!=null)body.put("reason",reason);
             try { send("error", body); } catch (CancellationException ignored) { }
             emitter.complete();
         }

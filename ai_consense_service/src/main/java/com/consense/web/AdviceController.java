@@ -37,6 +37,11 @@ public class AdviceController {
         return ApiResponse.ok(adviceService.rebuildIndex(projectId,scope));
     }
 
+    @PostMapping("/sources/prepare")
+    public ApiResponse<SourcePreparationVO> prepare(@PathVariable String projectId,@RequestParam(defaultValue="fullset") String scope){
+        return ApiResponse.ok(adviceService.prepareSources(projectId,scope));
+    }
+
     @GetMapping("/index/status")
     public ApiResponse<IndexStatusVO> status(@PathVariable String projectId,
                                             @RequestParam(defaultValue = "fullset") String scope) {

@@ -12,6 +12,8 @@ const { text, find, settle, deferred, renderer } = require('./helpers/render-con
 const fixtureRoot = path.resolve(__dirname, '../../ai_consense_service/src/test/resources/oer/canonical')
 const projection = JSON.parse(fs.readFileSync(path.join(fixtureRoot, 'authored-three-page-projection.json'), 'utf8'))
 const nativeProjection = JSON.parse(fs.readFileSync(path.join(fixtureRoot, 'authored-native-public-v2.json'), 'utf8'))
+// Actual production Java EvidencePointer method + serializer, using the authored Python normal graph.
+const normalPointers = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures/authored-normal-java-pointers.json'), 'utf8'))
 const table = projection.chunks.find(chunk => chunk.unitId === 'table')
 const clone = value => JSON.parse(JSON.stringify(value))
 const baseAddress = {
@@ -41,6 +43,9 @@ function nativePointer(index = 1) {
     physicalPages: chunk.physicalPages, eligibleModules: chunk.eligibleModules, parts: chunk.parts,
     sourceSpans: chunk.sourceSpans, tableGroup: chunk.tableGroup, assetRefs: chunk.assetRefs,
     relations: chunk.relations, adoption: chunk.adoption, sourceQuality: chunk.sourceQuality, unknowns: nativeProjection.unknowns })
+}
+function normalPointer(index = 1) {
+  return clone(normalPointers[index])
 }
 const apiPath = path.resolve(__dirname, '../src/api/canonicalEvidence.ts')
 const runtime = { Blob, AbortController, Uint8Array, ArrayBuffer, crypto: crypto.webcrypto }
@@ -91,6 +96,56 @@ test('canonical address pins every identity and rejects retrieval episode IDs as
   assert.throws(() => helper.validateCanonicalPointer(baseAddress, data), rejects('CANONICAL_IDENTITY_MISMATCH:documentId'))
   assert.throws(() => helper.validateCanonicalAddress({ ...baseAddress, addressKind: 'retrieval_episode_unit' }), rejects('CANONICAL_ADOPTION_ADDRESS_REQUIRED'))
   assert.throws(() => helper.validateCanonicalPointer({ ...baseAddress, unitId: 'episode-1:source-unit-0' }, pointer()), rejects('CANONICAL_IDENTITY_MISMATCH:unitId'))
+})
+
+test('normal observed citations read complete bound Word and table units with unknown authority and no fabricated pages', async () => {
+  for (const index of [0, 1]) {
+    const data = normalPointer(index), requests = []
+    const helper = api(async (url, options) => { requests.push({ url, options }); return envelope(data) })
+    const received = await helper.fetchCanonicalPointer(data)
+    assert.deepEqual(clone(received.parts), data.parts)
+    assert.deepEqual(clone(received.sourceSpans), data.sourceSpans)
+    assert.deepEqual(clone(helper.orderedEvidenceParts(received)), data.parts)
+    assert.equal(received.humanConfirmed, false)
+    assert.equal(received.sourceQuality.sourceQualityAccepted, false)
+    assert.equal(received.originalGeometryStatus, 'unknown')
+    assert.equal(helper.evidenceCoverage(received).status, 'no_assets')
+    assert.equal(requests.length, 1)
+    assert.equal(requests[0].options.method, 'GET')
+    assert.match(requests[0].url, /\/units\/candidate-unit%3A[a-f0-9]+\?module=vetting$/)
+  }
+})
+
+test('normal citation panel retains native locations and literal text without claiming reviewed geometry or images', async () => {
+  const data = normalPointer(), h = await harness({ data, initialPointer: data })
+  try {
+    const shown = text(h.root)
+    assert.match(shown, /Normal parser observations/)
+    assert.match(shown, /body\/2/)
+    assert.ok(shown.includes(data.parts[0].text))
+    assert.match(shown, /Not human-confirmed/)
+    assert.doesNotMatch(shown, /P0|normalized xyxy position|Original PDF physical pages/)
+    assert.equal(all(h.root, node => node.tag === 'article').length, 1)
+    assert.equal(all(h.root, node => node.tag === 'img').length, 0)
+    assert.equal(h.requests.length, 1)
+  } finally { h.dispose() }
+})
+
+test('normal discriminator cannot promote review authority, invent frames, or change complete UTF16 source spans', () => {
+  const helper = api()
+  for (const mutate of [
+    data => { data.addressKind = 'canonical_adoption_unit' }, data => { data.projectionSchema = 'consense.canonical-projection.v1' },
+    data => { data.producerKind = 'native_docx' }, data => { data.adoption = {} }, data => { data.humanConfirmed = true },
+    data => { data.sourceQuality.sourceQualityAccepted = true }, data => { data.sourceQuality.semanticScopeVerified = true },
+    data => { data.sourceQuality.legalClosure = 'accepted' }, data => { data.originalGeometryStatus = 'reviewed' },
+    data => { data.bboxConvention = 'normalized_xyxy_original_page' }, data => { data.physicalPages = [0] },
+    data => { data.parts[0].physicalPageNo = 0 }, data => { data.parts[0].endOffset-- },
+    data => { data.sourceSpans[0].sourcePosition.nodePath = 'borrowed' }, data => { data.sourceSpans.pop() },
+    data => { data.sourcePageRenderRefs = [] }, data => { data.assetRefs = pointer().assetRefs }
+  ]) {
+    const data = normalPointer(); mutate(data)
+    assert.throws(() => helper.validateCanonicalPointer(data, data), error => error.name === 'CanonicalEvidenceError')
+  }
 })
 
 test('known current-binding failure reasons require the exact safe enum and matching HTTP status', async () => {

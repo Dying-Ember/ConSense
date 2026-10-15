@@ -11,6 +11,7 @@ import com.consense.service.sources.NativeDocumentCollectionContract;
 import com.consense.service.sources.NativeCanonicalContract;
 import com.consense.service.sources.NativePdfCanonicalContract;
 import com.consense.service.sources.NativePdfSourceFamilyContract;
+import com.consense.service.sources.NormalObservedContract;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -172,7 +173,7 @@ public class OerCanonicalRetrievalClient {
         final Map<String, String> sourcePageEvidence = new TreeMap<>();
         final List<LocalBindingState> localBindings=new ArrayList<>();
         String policy, fingerprint,localBindingFingerprint,localRuntimeFingerprint;
-        boolean nativeSources,collectionSources,nativePdfSources,familySources;
+        boolean nativeSources,collectionSources,nativePdfSources,familySources,normalSources;
     }
     public boolean attachmentContextEnabled(){return VettingRetrievalHealth.ATTACHMENT_STRUCTURAL_CONTRACT.equals(properties.getVetting().getExpectedRetrievalContract());}
     /** Fresh source-only capability. An existing index must still match the current source and health. */
@@ -352,7 +353,7 @@ public class OerCanonicalRetrievalClient {
 
     private Capability stageHealth(CanonicalEvidenceService.VerifiedBindingFrame frame,boolean anotherWait,String module,Corpus corpus){
         if(frame!=null)frame.beforeWait();
-        try{return health(module,corpus.policy,corpus.nativeSources,corpus.collectionSources,corpus.nativePdfSources,corpus.familySources,!corpus.sourcePageEvidence.isEmpty());}
+        try{return health(module,corpus.policy,corpus.nativeSources,corpus.collectionSources,corpus.nativePdfSources,corpus.familySources,corpus.normalSources,!corpus.sourcePageEvidence.isEmpty());}
         finally{if(frame!=null&&anotherWait)frame.revalidate();}
     }
 
@@ -375,7 +376,14 @@ public class OerCanonicalRetrievalClient {
             boolean collection=NativeDocumentCollectionContract.isCollection(snapshot);
             boolean nativeDocx=NativeCanonicalContract.isNative(snapshot)||collection;
             boolean family=NativePdfSourceFamilyContract.isFamily(snapshot),nativePdf=!family&&NativePdfCanonicalContract.isNativePdf(snapshot);
-            if(family){
+            boolean normal=NormalObservedContract.isNormal(snapshot);
+            if(normal)require(module.equals(binding.getDeclaredModule())&&module.equals(identity.path("module").asText()),"normal observed projection belongs to another independent module state");
+            if(normal){
+                CanonicalEvidenceService.validateSnapshot(binding.getSnapshotJson(),binding.getProjectionSha256());CanonicalEvidenceService.validateBindingPins(binding,snapshot);out.normalSources=true;
+                JsonNode live=frame==null?CanonicalEvidenceService.validateSnapshot(backend.normalSnapshot(binding.getProjectionSha256(),binding.getDeclaredModule()),binding.getProjectionSha256())
+                        :frame.snapshot(binding.getDocumentId(),binding.getProjectionSha256(),module);
+                require(live.equals(snapshot),"canonical stored normal observations changed");
+            }else if(family){
                 CanonicalEvidenceService.validateSnapshot(binding.getSnapshotJson(),binding.getProjectionSha256());
                 CanonicalEvidenceService.validateBindingPins(binding,snapshot);out.familySources=true;
                 JsonNode live=frame==null?CanonicalEvidenceService.validateSnapshot(backend.snapshot(binding.getProjectionSha256(),module),binding.getProjectionSha256())
@@ -401,14 +409,14 @@ public class OerCanonicalRetrievalClient {
                             ordinal->backend.envelope(binding.getProjectionSha256(),ordinal,module).bytes).publicProjection.path("chunks");
                 }
             }
-            require((family||nativePdf||nativeDocx||"consense.canonical-projection.v1".equals(snapshot.path("schema").asText()))
+            require((normal||family||nativePdf||nativeDocx||"consense.canonical-projection.v1".equals(snapshot.path("schema").asText()))
                     && binding.getProjectionSha256().equals(snapshot.path("projectionSha256").asText())
                     && String.valueOf(binding.getDocumentId()).equals(identity.path("documentId").asText())
                     && binding.getOriginalSourceSha256().equals(snapshot.path("source").path("sourceSha256").asText())
                     && binding.getCanonicalSourceHash().equals(snapshot.path("sourceHash").asText())
                     && contains(identity.path("eligibleModules"),module), "canonical envelope/source/module differs");
             require(parents.isArray() && parents.size()>0, "canonical chunks are missing");
-            String policy=snapshot.path(collection?"manifestMetadata":"manifest").path("scope").path("scopePolicySha256").asText();
+            String policy=normal?identity.path("scopePolicySha256").asText():snapshot.path(collection?"manifestMetadata":"manifest").path("scope").path("scopePolicySha256").asText();
             require(sha(policy) && (out.policy==null || out.policy.equals(policy)), "canonical sources use different scope policies"); out.policy=policy;
             for(JsonNode chunk:parents) {
                 String id=chunk.path("id").asText();
@@ -438,7 +446,7 @@ public class OerCanonicalRetrievalClient {
         if(expected.isEmpty()&&echo.isMissingNode())return;
         require(echo.isObject()&&JsonUtils.mapper().valueToTree(expected).equals(echo),"source page index evidence echo differs");
     }
-    private Capability health(String module,String policy,boolean nativeSources,boolean collectionSources,boolean nativePdfSources,boolean familySources,boolean sourcePages) {
+    private Capability health(String module,String policy,boolean nativeSources,boolean collectionSources,boolean nativePdfSources,boolean familySources,boolean normalSources,boolean sourcePages) {
         JsonNode root=JsonUtils.parse(http.get(url(module,"/health"),properties.getVetting().getRetrievalTimeoutMs()));
         VettingRetrievalHealth.Identity base=VettingRetrievalHealth.validate(root,properties.getVetting());
         JsonNode oer=root.path("oer"), window=root.path("retrieval").path("sourceWindows");
@@ -469,6 +477,7 @@ public class OerCanonicalRetrievalClient {
         if(collectionSources)NativeDocumentCollectionContract.validateCapability(oer,window.path("algorithms"));
         if(nativePdfSources){NativePdfCanonicalContract.validateCapability(oer);NativePdfCanonicalContract.validateAlgorithms(window.path("algorithms"));}
         if(familySources){NativePdfSourceFamilyContract.validateCapability(oer);NativePdfSourceFamilyContract.validateAlgorithms(window.path("algorithms"));}
+        if(normalSources){NormalObservedContract.validateCapability(oer);for(String file:Arrays.asList("normal_observed_projection.py","normal_observed_server.py","unified_source_registry.py"))require(sha(window.path("algorithms").path(file).asText()),"normal observed algorithm identity missing: "+file);}
         return new Capability(hash(base.fingerprint+JsonUtils.write(oer)),base.sourceUnitPolicy,oer.path("indexStatusContract").asText());
     }
 

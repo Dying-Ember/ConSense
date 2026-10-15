@@ -360,6 +360,40 @@ test('real Advice citation displays every explicit canonical member and complete
   assert.deepEqual(h.revokedUrls.sort(), h.createdUrls.sort())
 })
 
+test('Advice normal citation click fetches its actual Java pointer and exact authored original without review or page invention', async () => {
+  const actual = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures/authored-normal-java-pointers.json'), 'utf8'))[1]
+  const bound = { ...actual, projectId: 'project-A', module: 'advisory' }
+  const citation = { fileLabel: bound.sourceFilename, pageNo: '', anchor: 'body/2', content: bound.parts[0].text,
+    score: .9, documentId: String(bound.documentId), sourceHash: bound.javaParsedSourceHash,
+    originalSourceSha256: bound.originalSourceSha256, sourceRole: 'tender', canonicalEvidence: [bound] }
+  const message = { id: 71, role: 'assistant', title: localized('Reply'), content: localized('Inspect this observation'),
+    sources: [citation], citations: [citation.fileLabel], unknownScope: null }
+  const h = await harness({ initialView: 'advice', adviceMessages: [message], browserCrypto: null,
+    canonicalRespond: async (url, options) => {
+      assert.equal(options.method ?? 'GET', 'GET')
+      if (url.includes('/units/')) return new Response(JSON.stringify({ code: 0, data: bound }), { headers: { 'Content-Type': 'application/json' } })
+      assert.ok(url.includes('/api/advice/project-A/sources/42/original?'))
+      return new Response('authored original identity only; never a competition source', { headers: {
+        'Content-Type': 'application/octet-stream', 'X-Source-Sha256': bound.originalSourceSha256, 'X-Source-Revision': bound.javaParsedSourceHash
+      } })
+    } })
+  try {
+    assert.equal(h.canonicalRequests.length, 0)
+    find(h.root, node => node.tag === 'button' && node.props.class === 'citation').props.onClick(); await flushCanonical()
+    assert.ok(h.canonicalRequests.some(request => request.url.includes('/units/')))
+    assert.ok(h.canonicalRequests.some(request => request.url.includes('/original?')))
+    assert.ok(find(h.root, node => node.tag === 'a' && node.props.download === bound.sourceFilename))
+    await button(h, 'Show related original images / tables').props.onClick(); await flushCanonical()
+    const panel = find(h.root, node => node.props?.class === 'canonical-evidence-panel')
+    assert.ok(panel); assert.match(text(panel), /Normal parser observations/); assert.match(text(panel), /body\/2/)
+    assert.ok(text(panel).includes(bound.parts[0].text)); assert.doesNotMatch(text(panel), /P0|Original PDF physical pages|normalized xyxy position/)
+    assert.equal(findAll(panel, node => node.tag === 'img').length, 0)
+    assert.equal(h.requests.some(request => request.method !== 'get'), false)
+    assert.equal(h.requests.some(request => request.url.endsWith('/ask/stream')), false)
+  } finally { h.dispose() }
+  assert.deepEqual(h.revokedUrls.sort(), h.createdUrls.sort())
+})
+
 test('legacy source-only finding evidence remains usable without fabricated canonical addresses', async () => {
   const h = await harness()
   try {
@@ -374,6 +408,250 @@ test('legacy source-only finding evidence remains usable without fabricated cano
 function indexReply(label, scope = 'fullset') {
   return { chunks: 1, message: localized(label), evidenceBackend: 'canonical', sourceScope: scope, indexReason: null }
 }
+
+test('Advice source catalog localizes unknown identity and distinguishes inclusion from readiness', async () => {
+  const h = await harness({ initialView: 'advice', currentSources: [source, { ...source, documentId: 'pending', sourceRole: 'unknownRole', included: false, exclusionReason: 'source_identity_unresolved', parseStatus: 'IDENTITY_PENDING' }] })
+  try {
+    for (const [locale, role, count] of [
+      ['zh-Hans', '身份待确认', '纳入范围的文件：1（不代表来源已就绪）'],
+      ['zh-Hant', '身份待確認', '納入範圍的文件：1（不代表來源已就緒）'],
+      ['en', 'Identity pending confirmation', 'Included documents: 1 (source readiness is separate)']
+    ]) {
+      h.store.changeLocale(locale); await settle()
+      assert.ok(text(h.root).includes(role), locale)
+      assert.ok(text(h.root).includes(count), locale)
+      assert.doesNotMatch(text(h.root), /vetting\.uploadRole\.|advice\.sourceScope\.reasons\./)
+    }
+  } finally { h.dispose() }
+})
+
+test('Advice unavailable sources block all question entrances, preserve the draft and offer read-only recovery', async () => {
+  let available = false
+  const h = await harness({ initialView: 'advice', respondOverride: ({ url }) => {
+    if (url.endsWith('/quick-questions')) return [{ text: localized('Quick source question') }]
+    if (url.includes('/index/status?')) return { ...indexReply('Backend status'), indexReason: available ? 'canonical_index_receipt_missing' : 'current_sources_unavailable', vectorReady: false }
+  } })
+  try {
+    const input = find(h.root, node => node.tag === 'textarea')
+    input.props['onUpdate:modelValue']('Preserve this pending question'); await settle()
+    for (const send of [
+      () => button(h, 'Ask').props.onClick(),
+      () => input.props.onKeydown({ key: 'Enter', ctrlKey: false, altKey: false, shiftKey: false, metaKey: false, preventDefault() {} }),
+      () => button(h, 'Quick source question').props.onClick(),
+      () => button(h, 'Precedence basis').props.onClick()
+    ]) {
+      await send(); await settle()
+      assert.equal(h.requests.filter(request => request.method !== 'get').length, 0, 'known unavailable sources do not create a session or submit a question')
+      assert.equal(input.value, 'Preserve this pending question')
+    }
+    assert.equal(button(h, 'Ask').props.disabled, true)
+    const before = h.requests.length
+    available = true
+    await button(h, 'Recheck sources').props.onClick(); await settle()
+    const recheck = h.requests.slice(before)
+    assert.ok(recheck.some(request => request.url.includes('/sources?')))
+    assert.ok(recheck.some(request => request.url.includes('/index/status?')))
+    assert.ok(recheck.every(request => request.method === 'get'), 'recheck cannot register sources, rebuild indexes or ask')
+    assert.equal(button(h, 'Ask').props.disabled, false, 'missing index receipt still permits first-question ensureIndex')
+    await button(h, 'Ask').props.onClick(); await settle()
+    assert.equal(h.requests.filter(request => request.url.endsWith('/ask/stream')).length, 1)
+  } finally { h.dispose() }
+})
+
+test('Advice source recheck preserves a known unavailable gate and rejects stale project results and finally', async () => {
+  const oldStatus = deferred(), newStatus = deferred()
+  let aReads = 0, bReads = 0
+  const h = await harness({ initialView: 'advice', respondOverride: ({ url }) => {
+    if (url === '/advice/project-A/index/status?scope=fullset') return ++aReads === 1 ? { ...indexReply('A unavailable'), indexReason: 'current_sources_unavailable' } : oldStatus.promise
+    if (url === '/advice/project-B/index/status?scope=fullset') return ++bReads === 1 ? { ...indexReply('B unavailable'), indexReason: 'current_sources_unavailable' } : newStatus.promise
+  } })
+  try {
+    const input = find(h.root, node => node.tag === 'textarea')
+    input.props['onUpdate:modelValue']('Pending recheck question'); await settle()
+    const old = button(h, 'Recheck sources').props.onClick(); await settle()
+    assert.equal(button(h, 'Ask').props.disabled, true, 'a pending status read cannot clear the known unavailable result')
+    await button(h, 'Ask').props.onClick(); await settle()
+    assert.equal(input.value, 'Pending recheck question')
+    assert.equal(h.requests.some(request => request.method !== 'get'), false)
+    h.store.activeProjectId = 'project-B'; await settle()
+    const current = button(h, 'Recheck sources').props.onClick(); await settle()
+    oldStatus.resolve(indexReply('OLD PROJECT READY')); await old; await settle()
+    assert.equal(button(h, 'Recheck sources').props.disabled, true, 'old finally cannot clear the new project recheck')
+    assert.equal(button(h, 'Ask').props.disabled, true)
+    assert.doesNotMatch(text(h.root), /OLD PROJECT READY/)
+    newStatus.resolve(indexReply('B CURRENT READY')); await current; await settle()
+    assert.equal(button(h, 'Recheck sources').props.disabled, false)
+    assert.match(text(h.root), /B CURRENT READY/)
+  } finally { h.dispose() }
+})
+
+test('Advice unavailable source recovery opens the real Vetting page without changing project or registering automatically', async () => {
+  const h = await harness({ initialView: 'advice', respondOverride: ({ url }) => url.includes('/index/status?') ? { ...indexReply('Unavailable'), indexReason: 'current_sources_unavailable' } : undefined })
+  try {
+    await button(h, 'Review source files in Vetting').props.onClick(); await settle()
+    assert.equal(h.router.currentRoute.value.name, 'vetting')
+    assert.equal(h.store.activeProjectId, 'project-A')
+    assert.equal(h.requests.some(request => request.method !== 'get'), false)
+  } finally { h.dispose() }
+})
+
+test('Advice localizes precise source failure reasons while preserving drafts and distinguishing other 4204 errors', async () => {
+  for (const [reason, expected] of [
+    ['source_unregistered', ['当前来源尚未完成登记', '目前來源尚未完成登記', 'Current sources are not registered yet']],
+    ['evidence_backend_unavailable', ['来源证据服务暂不可用', '來源證據服務暫不可用', 'The source evidence service is unavailable']],
+    ['source_stale', ['来源版本已变更', '來源版本已變更', 'The source version has changed']]
+  ]) for (const [index, locale] of ['zh-Hans', 'zh-Hant', 'en'].entries()) {
+    const h = await harness({ initialView: 'advice', respondOverride: ({ url }) => url.endsWith('/ask/stream') ? { code: 4204, reason, message: 'RAW PROVIDER DIAGNOSTIC', data: null } : undefined })
+    try {
+      h.store.changeLocale(locale); await settle()
+      const input = find(h.root, node => node.tag === 'textarea')
+      input.props['onUpdate:modelValue']('Retain failed question'); await settle()
+      await button(h, { en: 'Ask', 'zh-Hans': '提问', 'zh-Hant': '提問' }[locale]).props.onClick(); await settle()
+      assert.ok(text(h.root).includes(expected[index]), `${locale}: ${reason}`)
+      assert.doesNotMatch(text(h.root), /RAW PROVIDER DIAGNOSTIC/)
+      assert.equal(input.value, 'Retain failed question')
+      if (reason === 'source_unregistered') {
+        const count = h.requests.filter(request => request.url.endsWith('/ask/stream')).length
+        await input.props.onKeydown({ key: 'Enter', ctrlKey: false, altKey: false, shiftKey: false, metaKey: false, preventDefault() {} }); await settle()
+        assert.equal(h.requests.filter(request => request.url.endsWith('/ask/stream')).length, count)
+      }
+    } finally { h.dispose() }
+  }
+  const h = await harness({ initialView: 'advice', respondOverride: ({ url }) => url.endsWith('/ask/stream') ? { code: 4204, message: 'Different scoped source failure', data: null } : undefined })
+  try {
+    const input = find(h.root, node => node.tag === 'textarea'); input.props['onUpdate:modelValue']('Other failure'); await settle()
+    await button(h, 'Ask').props.onClick(); await settle()
+    assert.match(text(h.root), /Different scoped source failure/)
+    assert.doesNotMatch(text(h.root), /Current sources are not registered yet/)
+  } finally { h.dispose() }
+})
+
+test('late Advice source rejection preserves newly typed input and never presents a completed assistant answer', async () => {
+  const rejection = deferred()
+  const h = await harness({ initialView: 'advice', respondOverride: ({ url }) => url.endsWith('/ask/stream') ? rejection.promise : undefined })
+  try {
+    const input = find(h.root, node => node.tag === 'textarea')
+    input.props['onUpdate:modelValue']('First question'); await settle()
+    const ask = button(h, 'Ask').props.onClick(); await settle()
+    input.props['onUpdate:modelValue']('New draft typed while waiting'); await settle()
+    rejection.resolve({ code: 4204, reason: 'source_unregistered', message: 'RAW PROVIDER DIAGNOSTIC', data: null })
+    await ask; await settle()
+    assert.equal(input.value, 'New draft typed while waiting')
+    assert.match(text(h.root), /request failed before completion/)
+    assert.doesNotMatch(text(h.root), /RAW PROVIDER DIAGNOSTIC|Independent reply/)
+    assert.equal(button(h, 'Ask').props.disabled, true)
+  } finally { h.dispose() }
+})
+
+test('Advice source preparation is an explicit single mutation followed only by current scope reads', async () => {
+  const prepared = deferred(); let registered = false
+  const h = await harness({ initialView: 'advice', currentSources: [source, { ...source, documentId: '13', fileName: 'second source.pdf' }], respondOverride: ({ url }) => {
+    if (url.includes('/index/status?')) return { ...indexReply('Scoped source status'), indexReason: registered ? 'canonical_index_receipt_missing' : 'current_sources_unavailable', sourceReason: registered ? null : 'source_unregistered', preparable: !registered, vectorReady: false }
+    if (url.includes('/sources/prepare?')) return prepared.promise
+  } })
+  try {
+    assert.equal(h.requests.some(request => request.method !== 'get'), false, 'opening Advice never prepares sources automatically')
+    const input = find(h.root, node => node.tag === 'textarea'); input.props['onUpdate:modelValue']('Keep this question during preparation'); await settle()
+    const prepare = button(h, 'Prepare advice sources')
+    assert.ok(prepare, 'only the explicit preparable source status offers preparation')
+    const before = h.requests.length, first = prepare.props.onClick(); await settle()
+    await prepare.props.onClick(); await settle()
+    assert.equal(h.requests.filter(request => request.url.includes('/sources/prepare?')).length, 1)
+    assert.equal(button(h, 'Prepare advice sources').props.disabled, true)
+    registered = true
+    prepared.resolve({ sourceScope: 'fullset', selectedDocuments: 2, preparedDocuments: 2, complete: true, sourceQualityAccepted: false, humanConfirmed: false,
+      results: [{ documentId: '12', fileName: source.fileName, status: 'prepared' }, { documentId: '13', fileName: 'second source.pdf', status: 'already_registered' }] })
+    await first; await settle()
+    const mutations = h.requests.slice(before).filter(request => request.method !== 'get')
+    assert.deepEqual(mutations.map(request => request.url), ['/advice/project-A/sources/prepare?scope=fullset'])
+    assert.ok(h.requests.slice(before).some(request => request.url === '/advice/project-A/sources?scope=fullset'))
+    assert.ok(h.requests.slice(before).some(request => request.url === '/advice/project-A/index/status?scope=fullset'))
+    assert.equal(input.value, 'Keep this question during preparation')
+    assert.equal(button(h, 'Ask').props.disabled, false, 'an absent index receipt is prepared by first-question ensureIndex')
+    assert.match(text(h.root), /2 of 2 sources registered/)
+    assert.match(text(h.root), /Source quality has not been confirmed by a person/)
+    assert.match(text(h.root), /Already registered/)
+  } finally { h.dispose() }
+})
+
+test('Advice only offers source preparation for explicit unregistered and preparable sources', async () => {
+  for (const status of [
+    { preparable: true },
+    { sourceReason: 'source_unregistered', preparable: false },
+    { sourceReason: 'evidence_backend_unavailable', preparable: true },
+    { sourceReason: 'source_stale', preparable: true }
+  ]) {
+    const h = await harness({ initialView: 'advice', respondOverride: ({ url }) => url.includes('/index/status?') ? { ...indexReply('Unavailable'), indexReason: 'current_sources_unavailable', ...status } : undefined })
+    try {
+      assert.equal(button(h, 'Prepare advice sources'), undefined)
+      assert.ok(button(h, 'Recheck sources'))
+      assert.ok(button(h, 'Review source files in Vetting'))
+      assert.equal(h.requests.some(request => request.method !== 'get'), false)
+      if (status.sourceReason === 'evidence_backend_unavailable') assert.match(text(h.root), /source evidence service is unavailable/)
+      if (status.sourceReason === 'source_stale') assert.match(text(h.root), /source version has changed/)
+    } finally { h.dispose() }
+  }
+})
+
+test('Advice partial source preparation retains failed and unexecuted files in its complete denominator', async () => {
+  let attempted = false
+  const h = await harness({ initialView: 'advice', respondOverride: ({ url }) => {
+    if (url.includes('/index/status?')) return { ...indexReply('Unavailable'), indexReason: 'current_sources_unavailable', sourceReason: attempted ? 'evidence_backend_unavailable' : 'source_unregistered', preparable: !attempted }
+    if (url.includes('/sources/prepare?')) {
+      attempted = true
+      return { sourceScope: 'fullset', selectedDocuments: 3, preparedDocuments: 1, complete: false, sourceQualityAccepted: false, humanConfirmed: false,
+        results: [{ documentId: '12', fileName: 'Prepared file.pdf', status: 'prepared' }, { documentId: '13', fileName: 'Failed file.pdf', status: 'failed', reason: 'evidence_backend_unavailable' }, { documentId: '14', fileName: 'Unexecuted file.pdf', status: 'unexecuted' }] }
+    }
+  } })
+  try {
+    await button(h, 'Prepare advice sources').props.onClick(); await settle()
+    assert.match(text(h.root), /1 of 3 sources registered/)
+    assert.match(text(h.root), /Prepared file\.pdf[\s\S]*Prepared/)
+    assert.match(text(h.root), /Failed file\.pdf[\s\S]*Failed/)
+    assert.match(text(h.root), /Unexecuted file\.pdf[\s\S]*Not executed/)
+    assert.match(text(h.root), /Source preparation is incomplete/)
+    assert.equal(button(h, 'Ask').props.disabled, true)
+    assert.equal(button(h, 'Prepare advice sources'), undefined)
+    assert.equal(h.requests.filter(request => request.method !== 'get').length, 1)
+  } finally { h.dispose() }
+})
+
+test('Advice preparation responses and finally cannot cross a project ABA or clear a new preparation', async () => {
+  const old = deferred(), current = deferred(); let attempts = 0, registered = false
+  const h = await harness({ initialView: 'advice', respondOverride: ({ url }) => {
+    if (url.includes('/index/status?')) return { ...indexReply('Current status'), indexReason: registered ? 'canonical_index_receipt_missing' : 'current_sources_unavailable', sourceReason: registered ? null : 'source_unregistered', preparable: !registered }
+    if (url.includes('/sources/prepare?')) return (++attempts === 1 ? old : current).promise
+  } })
+  const result = name => ({ sourceScope: 'fullset', selectedDocuments: 1, preparedDocuments: 1, complete: true, sourceQualityAccepted: false, humanConfirmed: false,
+    results: [{ documentId: '12', fileName: name, status: 'prepared' }] })
+  try {
+    const previous = button(h, 'Prepare advice sources').props.onClick(); await settle()
+    h.store.activeProjectId = 'project-B'; await settle(); h.store.activeProjectId = 'project-A'; await settle()
+    const latest = button(h, 'Prepare advice sources').props.onClick(); await settle()
+    old.resolve(result('OBSOLETE PREPARATION')); await previous; await settle()
+    assert.doesNotMatch(text(h.root), /OBSOLETE PREPARATION/)
+    assert.equal(button(h, 'Prepare advice sources').props.disabled, true)
+    assert.equal(button(h, 'Recheck sources').props.disabled, true)
+    registered = true; current.resolve(result('CURRENT PREPARATION')); await latest; await settle()
+    assert.match(text(h.root), /CURRENT PREPARATION/)
+    assert.equal(button(h, 'Recheck sources').props.disabled, false)
+    assert.equal(h.requests.filter(request => request.method !== 'get').length, 2)
+  } finally { h.dispose() }
+})
+
+test('Advice rejects a preparation summary that overstates its actual registered files', async () => {
+  const h = await harness({ initialView: 'advice', respondOverride: ({ url }) => {
+    if (url.includes('/index/status?')) return { ...indexReply('Unavailable'), indexReason: 'current_sources_unavailable', sourceReason: 'source_unregistered', preparable: true }
+    if (url.includes('/sources/prepare?')) return { sourceScope: 'fullset', selectedDocuments: 1, preparedDocuments: 1, complete: true, sourceQualityAccepted: false, humanConfirmed: false,
+      results: [{ documentId: '12', fileName: 'FAILED FILE', status: 'failed' }] }
+  } })
+  try {
+    await button(h, 'Prepare advice sources').props.onClick(); await settle()
+    assert.match(text(h.root), /Source preparation is incomplete/)
+    assert.doesNotMatch(text(h.root), /1 of 1 sources registered|FAILED FILE|SOURCE_PREPARATION_RESPONSE_MISMATCH/)
+    assert.equal(button(h, 'Ask').props.disabled, true)
+  } finally { h.dispose() }
+})
 async function selectScope(h, value) {
   find(h.root, node => node.tag === 'select').props['onUpdate:modelValue'](value)
   await settle()

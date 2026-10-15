@@ -9,6 +9,26 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
 class NormalSourceCandidateGraphTest {
+    @Test void persistedWordNumberingBindsToTheSameCompleteJsonGeneration(){
+        SourceDocument source=numberedSource();NormalSourceCandidateGraph.capture(source);String raw=source.getNormalCandidateJson();JsonNode expected=JsonUtils.parse(raw);
+        JsonNode current=assertDoesNotThrow(()->NormalSourceCandidateGraph.requireBound(source));
+        assertEquals(expected,current);assertEquals(raw,source.getNormalCandidateJson());
+        assertEquals(1,current.path("units").get(0).path("parts").get(0).path("wordNumbering").get(0).path("value").asLong());
+        assertFalse(current.path("humanConfirmed").asBoolean());assertFalse(current.path("sourceQualityAccepted").asBoolean());
+    }
+    @Test void numberStorageNormalizationStillRejectsBooleanStringFloatingAndChangedIntegerValues(){
+        SourceDocument source=numberedSource();NormalSourceCandidateGraph.capture(source);String raw=source.getNormalCandidateJson();
+        for(JsonNode replacement:Arrays.asList(com.fasterxml.jackson.databind.node.BooleanNode.TRUE,com.fasterxml.jackson.databind.node.TextNode.valueOf("1"),com.fasterxml.jackson.databind.node.DoubleNode.valueOf(1.0),com.fasterxml.jackson.databind.node.IntNode.valueOf(2))){
+            com.fasterxml.jackson.databind.node.ObjectNode changed=(com.fasterxml.jackson.databind.node.ObjectNode)JsonUtils.parse(raw);
+            ((com.fasterxml.jackson.databind.node.ObjectNode)changed.path("units").get(0).path("parts").get(0).path("wordNumbering").get(0)).set("value",replacement);
+            source.setNormalCandidateJson(JsonUtils.write(changed));assertThrows(IllegalArgumentException.class,()->NormalSourceCandidateGraph.requireBound(source),replacement.getClass().getSimpleName());
+        }
+    }
+    private SourceDocument numberedSource(){
+        SourceDocument source=source();DocumentBlock block=new DocumentBlock();block.setId("body/0/paragraph");block.setLocation("body/0/paragraph");block.setSource("native");block.setText("1. AUTHORED numbered obligation");
+        DocumentBlock.WordNumbering numbering=new DocumentBlock.WordNumbering();numbering.setValue(1L);numbering.setLabel("1.");numbering.setAppliedToEffectiveText(true);numbering.setResolutionStatus("observed");block.setWordNumbering(Collections.singletonList(numbering));
+        source.setTextContent(block.getText());source.setStructuredContentJson(JsonUtils.write(Collections.singletonList(block)));return source;
+    }
     @Test void zeroTextWordMathAndImageRemainWholeUnknownObjectsWithoutRawXmlInModelInput() {
         SourceDocument source=source();DocumentBlock object=new DocumentBlock();object.setId("body:7:paragraph");
         object.setLocation("body/7/paragraph");object.setKind("paragraph");object.setSource("docx");object.setWordStructureVersion("docx-numbering-symbol-v1");

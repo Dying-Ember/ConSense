@@ -814,6 +814,8 @@ export interface IndexStatus {
   indexKey?: string
   indexSignature?: string
   indexReason?: string | null
+  sourceReason?: 'source_unregistered' | 'evidence_backend_unavailable' | 'source_stale' | null
+  preparable?: boolean
   embeddingReady?: boolean
   stale?: boolean
   eligibleDocuments?: number
@@ -851,6 +853,16 @@ export interface AdviceSourceDocument {
   parseStatus: string
   included: boolean
   exclusionReason: string | null
+}
+
+export interface AdviceSourcePreparation {
+  sourceScope: string
+  selectedDocuments: number
+  preparedDocuments: number
+  complete: boolean
+  sourceQualityAccepted: false
+  humanConfirmed: false
+  results: { documentId: string; fileName: string; status: 'prepared' | 'already_registered' | 'failed' | 'unexecuted'; reason?: IndexStatus['sourceReason'] }[]
 }
 
 export interface VettingChecklist {

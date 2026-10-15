@@ -3,7 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import { adviceApi } from '@/api'
-import type { ChatMessage, Citation, IndexStatus, QuickQuestion, AdviceSourceDocument, AdviceSession, AdviceBasisScope, LlmSelection } from '@/api/types'
+import type { ChatMessage, Citation, IndexStatus, QuickQuestion, AdviceSourceDocument, AdviceSourcePreparation, AdviceSession, AdviceBasisScope, LlmSelection } from '@/api/types'
 import { useAppStore } from '@/stores/app'
 import { useLocalized } from '@/composables/useLocalized'
 import AppIcon from '@/components/AppIcon.vue'
@@ -49,6 +49,10 @@ const handoff = ref<ReviewHandoff | null>(null)
 const handoffError = ref<'invalid' | 'wrongProject' | null>(null)
 const scopeLoaded = ref(false)
 const indexError = ref('')
+const sourceChecking = ref(false)
+const preparingSources = ref(false)
+const preparation = ref<AdviceSourcePreparation | null>(null)
+const sourceErrorReason = ref<string | null>(null)
 let viewEpoch = 0
 let reloadSequence = 0
 let scopeSequence = 0
@@ -56,6 +60,8 @@ let indexSequence = 0
 let rebuildSequence = 0
 let scopeEpoch = 0
 let askSequence = 0
+let sourceCheckSequence = 0
+let preparationSequence = 0
 let activeRebuildBusy: { sequence: number; message: string } | null = null
 
 const evidenceCopy = {
@@ -72,6 +78,20 @@ const evidenceCopy = {
   canonical_index_receipt_missing: { zhHans: '当前范围尚未建立可验证索引，请刷新索引。', zhHant: '目前範圍尚未建立可驗證索引，請重新整理索引。', en: 'No verified index receipt exists for this scope. Refresh the index.' },
   canonical_index_unavailable: { zhHans: '当前范围的索引或检索配置未通过核验，请检查后端配置后刷新索引。', zhHant: '目前範圍的索引或檢索設定未通過核驗，請檢查後端設定後重新整理索引。', en: 'Index or retrieval configuration verification failed for this scope. Check backend configuration and refresh the index.' },
   current_sources_unavailable: { zhHans: '当前范围的来源尚未就绪，请核对来源登记与解析状态。', zhHant: '目前範圍的來源尚未就緒，請核對來源登記與解析狀態。', en: 'Current sources for this scope are unavailable. Check source registration and parsing status.' },
+  recheck: { zhHans: '重新检查来源', zhHant: '重新檢查來源', en: 'Recheck sources' },
+  reviewSources: { zhHans: '前往审查页核对文件', zhHant: '前往審查頁核對文件', en: 'Review source files in Vetting' },
+  prepare: { zhHans: '准备咨询资料', zhHant: '準備諮詢資料', en: 'Prepare advice sources' },
+  preparing: { zhHans: '正在准备咨询资料，问题草稿已保留。', zhHant: '正在準備諮詢資料，問題草稿已保留。', en: 'Preparing advice sources. Your question draft is retained.' },
+  preparationNote: { zhHans: '此操作仅核对已有解析并准备来源登记，不会重新解析文件或生成答复。', zhHant: '此操作僅核對已有解析並準備來源登記，不會重新解析文件或產生答覆。', en: 'This checks existing parsed material and prepares its source registration. It does not reparse files or generate an answer.' },
+  preparationUnverified: { zhHans: '来源质量尚未由人工确认。', zhHant: '來源品質尚未由人工確認。', en: 'Source quality has not been confirmed by a person.' },
+  preparationIncomplete: { zhHans: '资料准备尚未完成，请核对以下逐文件结果后重新检查来源。', zhHant: '資料準備尚未完成，請核對以下逐文件結果後重新檢查來源。', en: 'Source preparation is incomplete. Review each file result, then recheck sources.' },
+  prepared: { zhHans: '已准备登记', zhHant: '已準備登記', en: 'Prepared' },
+  already_registered: { zhHans: '已登记并核对', zhHant: '已登記並核對', en: 'Already registered' },
+  failed: { zhHans: '失败', zhHant: '失敗', en: 'Failed' },
+  unexecuted: { zhHans: '未执行', zhHant: '未執行', en: 'Not executed' },
+  source_unregistered: { zhHans: '当前来源尚未完成登记，请前往审查页核对文件后重新检查来源。', zhHant: '目前來源尚未完成登記，請前往審查頁核對文件後重新檢查來源。', en: 'Current sources are not registered yet. Review the files in Vetting, then recheck sources.' },
+  evidence_backend_unavailable: { zhHans: '来源证据服务暂不可用，请稍后重新检查；问题持续时请联系维护人员。', zhHant: '來源證據服務暫不可用，請稍後重新檢查；問題持續時請聯絡維護人員。', en: 'The source evidence service is unavailable. Recheck later; contact the maintainer if the problem persists.' },
+  source_stale: { zhHans: '来源版本已变更，请核对当前文件后重新检查来源。', zhHant: '來源版本已變更，請核對目前文件後重新檢查來源。', en: 'The source version has changed. Review the current files, then recheck sources.' },
   unit: { zhHans: '结构证据单元与未确认项', zhHant: '結構證據單元與未確認項', en: 'Structural evidence unit and unresolved items' },
   observed: { zhHans: '已返回观测到的完整结构单元；语义适用范围与限定条件完整性仍未确认。', zhHant: '已返回觀測到的完整結構單元；語義適用範圍與限定條件完整性仍未確認。', en: 'The complete observed structural unit was returned. Semantic applicability and qualifier completeness remain unverified.' },
   unknown: { zhHans: '结构证据状态未确认，请核对原件及 unknown 属性。', zhHant: '結構證據狀態未確認，請核對原件及 unknown 屬性。', en: 'Structural evidence status is unresolved. Check the source and unknown attributes.' },
@@ -80,6 +100,10 @@ const evidenceCopy = {
 }
 
 const projectId = computed(() => store.activeProjectId)
+const sourcesUnavailable = computed(() => basisScope.value !== 'reference_only' && (indexStatus.value?.indexReason === 'current_sources_unavailable' || sourceErrorReason.value === 'source_unregistered'))
+const sourceProblemReason = computed(() => sourceErrorReason.value ?? indexStatus.value?.sourceReason ?? null)
+const sourcePreparationAvailable = computed(() => basisScope.value !== 'reference_only' && sourceProblemReason.value === 'source_unregistered'
+  && indexStatus.value?.sourceReason === 'source_unregistered' && indexStatus.value.preparable === true)
 const handoffWarnings = computed(() => handoff.value ? handoffSourceWarnings(handoff.value, scopeDocuments.value, scopeLoaded.value) : null)
 
 function clearImportedDraft() {
@@ -123,10 +147,37 @@ function sourceParseLabel(document: AdviceSourceDocument) {
   return t('advice.sourceScope.parseUnavailable')
 }
 
+function sourceRoleLabel(document: AdviceSourceDocument) {
+  const role = ['tender', 'standard', 'project_fact', 'package_manifest'].includes(document.sourceRole) ? document.sourceRole : 'unknown'
+  return t(`vetting.uploadRole.${role}`)
+}
+
+function sourceFailureReason(error: unknown): 'source_unregistered' | 'evidence_backend_unavailable' | 'source_stale' | null {
+  if (error && typeof error === 'object' && 'reason' in error
+      && (error.reason === 'source_unregistered' || error.reason === 'evidence_backend_unavailable' || error.reason === 'source_stale')) return error.reason
+  if (error instanceof Error && error.message === 'Current canonical source bindings are unavailable for the selected advice scope. Complete source review and registration before asking.') return 'source_unregistered'
+  return null
+}
+
+function adviceError(error: unknown) {
+  const reason = sourceFailureReason(error)
+  return reason ? pick(evidenceCopy[reason]) : error instanceof Error ? error.message : String(error)
+}
+
+function sourceProblemText(reason: unknown) {
+  const known = sourceFailureReason({ reason })
+  return known ? pick(evidenceCopy[known]) : pick(evidenceCopy.current_sources_unavailable)
+}
+
+function preparationStatus(status: AdviceSourcePreparation['results'][number]['status']) {
+  return ['prepared', 'already_registered', 'failed', 'unexecuted'].includes(status) ? pick(evidenceCopy[status]) : pick(evidenceCopy.failed)
+}
+
 const indexHint = computed(() => {
   if (basisScope.value === 'reference_only') return ''
   const status = indexStatus.value
   if (!status) return ''
+  if (status.sourceReason) return sourceProblemText(status.sourceReason)
   if (status.indexReason && Object.prototype.hasOwnProperty.call(evidenceCopy, status.indexReason)) return pick(evidenceCopy[status.indexReason as keyof typeof evidenceCopy])
   return pick(status.message) || t('advice.indexReady', { count: status.chunks })
 })
@@ -139,17 +190,19 @@ function clearRebuildBusy(sequence?: number) {
 
 function resetScopedState() {
   void stopCurrentRequest()
-  ++scopeEpoch; ++indexSequence; ++rebuildSequence; ++askSequence; ++reloadSequence
+  ++scopeEpoch; ++indexSequence; ++rebuildSequence; ++askSequence; ++reloadSequence; ++sourceCheckSequence; ++preparationSequence
   indexStatus.value = null; indexError.value = ''
+  sourceErrorReason.value = null
   sessionError.value = ''
   activeSources.value = []; activeCitation.value = null; clarificationReply.value = null
-  asking.value = false; indexing.value = false
+  asking.value = false; indexing.value = false; sourceChecking.value = false; preparingSources.value = false; preparation.value = null
   clearRebuildBusy()
 }
 
 async function reloadIndexStatus() {
   const id = projectId.value, selectedScope = scope.value, epoch = viewEpoch, sequence = ++indexSequence
-  indexStatus.value = null; indexError.value = ''
+  indexError.value = ''
+  if (indexStatus.value?.indexReason !== 'current_sources_unavailable') indexStatus.value = null
   if (!id || basisScope.value === 'reference_only') return
   const current = () => epoch === viewEpoch && id === projectId.value && selectedScope === scope.value && sequence === indexSequence
   try {
@@ -187,7 +240,7 @@ async function reloadSessions() {
   try {
     const list = await adviceApi.sessions(id)
     if (epoch === viewEpoch && id === projectId.value && sequence === sessionSequence) sessions.value = list.filter(item => item.projectId === id)
-  } catch (caught) { if (epoch === viewEpoch && sequence === sessionSequence) sessionError.value = caught instanceof Error ? caught.message : String(caught) }
+  } catch (caught) { if (epoch === viewEpoch && sequence === sessionSequence) sessionError.value = adviceError(caught) }
 }
 
 async function createSession() {
@@ -201,7 +254,7 @@ async function createSession() {
     sessions.value.push(created); sessionId.value = created.id
     await nextTick()
     return true
-  } catch (caught) { if (epoch === viewEpoch) sessionError.value = caught instanceof Error ? caught.message : String(caught); return false }
+  } catch (caught) { if (epoch === viewEpoch) sessionError.value = adviceError(caught); return false }
   finally { if (epoch === viewEpoch) sessionCreating.value = false }
 }
 
@@ -215,6 +268,42 @@ async function reloadScope() {
     scopeDocuments.value = documents
     scopeLoaded.value = true
   }
+}
+
+async function recheckSources() {
+  if (sourceChecking.value || preparingSources.value || !projectId.value || basisScope.value === 'reference_only') return
+  const id = projectId.value, epoch = viewEpoch, selectedScopeEpoch = scopeEpoch, sequence = ++sourceCheckSequence
+  const current = () => id === projectId.value && epoch === viewEpoch && selectedScopeEpoch === scopeEpoch && sequence === sourceCheckSequence
+  sourceChecking.value = true; sessionError.value = ''
+  try {
+    await Promise.all([reloadScope(), reloadIndexStatus()])
+    if (current() && !indexError.value && indexStatus.value) sourceErrorReason.value = null
+  }
+  catch { if (current()) indexError.value = pick(evidenceCopy.indexFailed) }
+  finally { if (current()) sourceChecking.value = false }
+}
+
+async function prepareSources() {
+  if (preparingSources.value || sourceChecking.value || !projectId.value || !sourcePreparationAvailable.value) return
+  const id = projectId.value, selectedScope = scope.value, epoch = viewEpoch, selectedScopeEpoch = scopeEpoch, sequence = ++preparationSequence
+  const current = () => id === projectId.value && epoch === viewEpoch && selectedScopeEpoch === scopeEpoch && sequence === preparationSequence
+  ++indexSequence; ++scopeSequence
+  preparingSources.value = true; preparation.value = null; sessionError.value = ''; indexError.value = ''
+  try {
+    const result = await adviceApi.prepareSources(id, selectedScope)
+    if (!current()) return
+    if (result.sourceScope !== selectedScope || result.sourceQualityAccepted !== false || result.humanConfirmed !== false
+        || !Number.isInteger(result.selectedDocuments) || result.selectedDocuments < 1 || !Array.isArray(result.results)
+        || result.results.length !== result.selectedDocuments || new Set(result.results.map(item => item.documentId)).size !== result.selectedDocuments
+        || result.results.some(item => !['prepared', 'already_registered', 'failed', 'unexecuted'].includes(item.status))
+        || result.preparedDocuments !== result.results.filter(item => item.status === 'prepared' || item.status === 'already_registered').length
+        || typeof result.complete !== 'boolean' || result.complete && result.preparedDocuments !== result.selectedDocuments) throw new Error('SOURCE_PREPARATION_RESPONSE_MISMATCH')
+    preparation.value = result
+    await Promise.all([reloadScope(), reloadIndexStatus()])
+    if (current() && !indexError.value) sourceErrorReason.value = null
+  } catch (caught) {
+    if (current()) { sourceErrorReason.value = sourceFailureReason(caught); indexError.value = sourceErrorReason.value ? adviceError(caught) : pick(evidenceCopy.preparationIncomplete) }
+  } finally { if (current()) preparingSources.value = false }
 }
 
 onMounted(() => { void reload(); void reloadSessions(); void reloadScope(); void reloadIndexStatus() })
@@ -279,6 +368,11 @@ async function stopCurrentRequest() {
 async function ask(text?: string) {
   const content = (text ?? question.value).trim()
   if (!content || asking.value || sessionCreating.value) return
+  if (sourcesUnavailable.value || preparingSources.value) {
+    if (!question.value.trim()) question.value = content
+    sessionError.value = preparingSources.value ? pick(evidenceCopy.preparing) : sourceProblemText(sourceProblemReason.value)
+    return
+  }
   const llmSelection = store.captureLlmSelection()
   if (!sessionId.value && !await createSession()) return
   const id = projectId.value, selectedSession = sessionId.value, selectedScope = scope.value, selectedBasis = basisScope.value, epoch = viewEpoch, selectedScopeEpoch = scopeEpoch, sequence = ++askSequence
@@ -355,7 +449,7 @@ async function ask(text?: string) {
     if (current()) {
       message.deliveryState = controller.signal.aborted ? 'stopped' : 'failed'
       if (!question.value) question.value = content
-      if (!controller.signal.aborted) sessionError.value = caught instanceof Error ? caught.message : String(caught)
+      if (!controller.signal.aborted) { sourceErrorReason.value = sourceFailureReason(caught); sessionError.value = adviceError(caught) }
     }
   } finally {
     if (current()) { asking.value = false; if (elapsedTimer !== undefined) window.clearTimeout(elapsedTimer); if (activeRequest?.requestId === requestId) activeRequest = null }
@@ -363,7 +457,7 @@ async function ask(text?: string) {
 }
 
 async function refreshIndex() {
-  if (indexing.value || !projectId.value || basisScope.value === 'reference_only') return
+  if (indexing.value || preparingSources.value || !projectId.value || basisScope.value === 'reference_only') return
   const id = projectId.value, selectedScope = scope.value, epoch = viewEpoch, selectedScopeEpoch = scopeEpoch, sequence = ++rebuildSequence
   ++indexSequence // A pending status read must not overwrite the newer rebuild result.
   indexError.value = ''
@@ -376,10 +470,15 @@ async function refreshIndex() {
     if (!current()) return
     if (status.sourceScope && status.sourceScope !== selectedScope) throw new Error('INDEX_SCOPE_MISMATCH')
     indexStatus.value = status
+    sourceErrorReason.value = null
     await reloadScope()
     if (current()) store.notify(indexHint.value || t('common.done'))
-  } catch {
-    if (current()) { indexStatus.value = null; indexError.value = pick(evidenceCopy.indexFailed) }
+  } catch (caught) {
+    if (current()) {
+      sourceErrorReason.value = sourceFailureReason(caught)
+      if (indexStatus.value?.indexReason !== 'current_sources_unavailable') indexStatus.value = null
+      indexError.value = sourceErrorReason.value ? adviceError(caught) : pick(evidenceCopy.indexFailed)
+    }
   } finally {
     if (current()) indexing.value = false
     clearRebuildBusy(sequence)
@@ -499,11 +598,14 @@ async function askPrecedence() {
       </div>
       <div class="row">
         <span class="tag ok">{{ t('advice.evidenceMode') }}</span>
-        <button v-if="basisScope !== 'reference_only'" class="btn" type="button" :disabled="indexing" @click="refreshIndex">
+        <button v-if="basisScope !== 'reference_only'" class="btn" type="button" :disabled="indexing || preparingSources" @click="refreshIndex">
           <AppIcon name="refresh" :size="15" />{{ t('advice.actions.refreshIndex') }}
         </button>
+        <button v-if="basisScope !== 'reference_only'" class="btn" type="button" :disabled="sourceChecking || preparingSources" @click="recheckSources">
+          <AppIcon name="refresh" :size="15" />{{ pick(evidenceCopy.recheck) }}
+        </button>
         <!-- FR-A-03 / 原型 Precedence basis：直接以快捷问题形式查询合约文件优先次序（SCC 4.1） -->
-        <button class="btn" type="button" :disabled="asking" @click="askPrecedence">
+        <button class="btn" type="button" :disabled="asking || sourcesUnavailable || preparingSources" @click="askPrecedence">
           <AppIcon name="info" :size="15" />{{ t('advice.actions.precedence') }}
         </button>
         <button class="btn" type="button" @click="clearChat">
@@ -513,14 +615,14 @@ async function askPrecedence() {
     </div>
 
     <details v-if="basisScope !== 'reference_only'" class="surface source-scope section-gap">
-      <summary>{{ t('advice.sourceScope.title') }} · {{ scopeDocuments.filter(item => item.included).length }}</summary>
+      <summary>{{ t('advice.sourceScope.title') }} · {{ t('advice.sourceScope.includedCount', { count: scopeDocuments.filter(item => item.included).length }) }}</summary>
       <p>{{ t('advice.sourceScope.note') }}</p>
       <div class="table-wrap">
         <table>
           <thead><tr><th>{{ t('common.file') }}</th><th>{{ t('advice.sourceScope.role') }}</th><th>{{ t('common.status') }}</th></tr></thead>
           <tbody><tr v-for="document in scopeDocuments" :key="document.documentId" :class="{ 'scope-excluded': !document.included }">
             <td>{{ document.fileName }}</td>
-            <td>{{ t(`vetting.uploadRole.${document.sourceRole}`) }}</td>
+            <td>{{ sourceRoleLabel(document) }}</td>
             <td>
               <div>{{ document.included ? t('advice.sourceScope.included') : t(`advice.sourceScope.reasons.${document.exclusionReason}`) }}</div>
               <div>{{ sourceParseLabel(document) }} · {{ document.parseStatus }}</div>
@@ -540,6 +642,19 @@ async function askPrecedence() {
               <div class="muted small">{{ pick(evidenceCopy.project) }}: {{ projectId }} · {{ pick(evidenceCopy.session) }}: {{ sessionId || pick(evidenceCopy.legacy) }}</div>
               <div class="muted small">{{ scopeNote }} · {{ indexHint }}</div>
               <p v-if="indexError" class="warning-note" role="alert">{{ indexError }}</p>
+              <div v-if="sourcesUnavailable" class="warning-note" role="alert">
+                <p>{{ sourceProblemText(sourceProblemReason) }}</p>
+                <template v-if="sourcePreparationAvailable">
+                  <p>{{ pick(evidenceCopy.preparationNote) }}</p>
+                  <button class="btn" type="button" :disabled="preparingSources || sourceChecking" @click="prepareSources">{{ pick(evidenceCopy.prepare) }}</button>
+                </template>
+                <button class="btn" type="button" @click="router.push({ name: 'vetting' })">{{ pick(evidenceCopy.reviewSources) }}</button>
+              </div>
+              <div v-if="preparation" class="muted small" role="status">
+                <p>{{ t('advice.sourceScope.preparedCount', { prepared: preparation.preparedDocuments, selected: preparation.selectedDocuments }) }} · {{ pick(evidenceCopy.preparationUnverified) }}</p>
+                <p v-if="!preparation.complete" class="warning-note">{{ pick(evidenceCopy.preparationIncomplete) }}</p>
+                <ul><li v-for="result in preparation.results" :key="result.documentId">{{ result.fileName }} · {{ preparationStatus(result.status) }}<span v-if="result.reason"> · {{ sourceProblemText(result.reason) }}</span></li></ul>
+              </div>
               <div v-if="indexStatus?.evidenceBackend" class="muted small">{{ indexStatus.evidenceBackend }} · {{ indexStatus.sourceScope || scope }}</div>
             </div>
             <select v-model="scope" :aria-label="t('advice.sourceScope.title')" :disabled="!!sessionId || sessionCreating" style="width: auto; min-width: 170px">
@@ -648,7 +763,7 @@ async function askPrecedence() {
               :placeholder="t('advice.placeholder')"
               @keydown.enter.exact.prevent="submit"
             />
-            <button class="btn primary" type="button" :disabled="asking || sessionCreating || !question.trim()" @click="submit">
+            <button class="btn primary" type="button" :disabled="asking || sessionCreating || sourcesUnavailable || preparingSources || !question.trim()" @click="submit">
               <AppIcon name="advice" :size="15" />
               {{ asking ? t('common.loading') : t('advice.actions.ask') }}
             </button>
@@ -659,7 +774,7 @@ async function askPrecedence() {
         <div class="surface-body" style="border-top: 1px solid var(--line)">
           <div class="muted small" style="margin-bottom: 8px">{{ t('advice.quick') }}</div>
           <div class="quick-list">
-            <button v-for="(item, i) in quickQuestions" :key="i" type="button" @click="askQuick(item)">
+            <button v-for="(item, i) in quickQuestions" :key="i" type="button" :disabled="asking || sourcesUnavailable || preparingSources" @click="askQuick(item)">
               {{ pick(item.text) }}
             </button>
           </div>

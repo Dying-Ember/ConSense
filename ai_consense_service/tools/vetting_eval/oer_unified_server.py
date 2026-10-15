@@ -23,17 +23,20 @@ from source_page_server import install_source_page_routes
 from source_page_index import SourcePageIndexRuntime, install_source_page_index_route
 from workspace_root import resolve_workspace
 from native_pdf_source_family_server import ENDPOINT as FAMILY_ENDPOINT, install_native_pdf_source_family_route
+from normal_observed_server import (CAPABILITY as NORMAL_OBSERVED_CAPABILITY,
+    ENDPOINT as NORMAL_OBSERVED_ENDPOINT, install_normal_observed_route)
 
 
 HERE = Path(__file__).resolve().parent
 UNIFIED_ALGORITHMS = ('unified_source_registry.py', 'oer_unified_server.py',
                       'source_page_registry.py', 'source_page_server.py', 'source_render_assets.py',
                       'source_page_index.py', 'parser_capture.py', 'native_pdf_source_family.py',
-                      'native_pdf_source_family_server.py')
+                      'native_pdf_source_family_server.py', 'normal_observed_projection.py',
+                      'normal_observed_server.py')
 _UNIFIED_HASHES = {name: hashlib.sha256((HERE / name).read_bytes()).hexdigest() for name in UNIFIED_ALGORITHMS}
 UNIFIED_CAPABILITY = {
     'version': 'actual-cas-mixed-source-registry-v1', 'registrationIdentity': 'one-source-root',
-    'sourceKinds': ['scanned_pdf', 'native_docx_snapshot', 'native_docx_collection', 'native_pdf', 'native_pdf_source_family'],
+    'sourceKinds': ['scanned_pdf', 'native_docx_snapshot', 'native_docx_collection', 'native_pdf', 'native_pdf_source_family', 'normal_observed'],
     'artifactReadValidation': 'actual-cas-unique-per-validation-session-with-exit-rehash',
     'artifactReadValidationScope': 'canonical_load', 'maximumMessageBytes': MAX_SNAPSHOT_BYTES,
     'modulePolicy': 'process-target-and-source-eligible-modules', 'semanticAcceptanceByComposition': False}
@@ -83,11 +86,13 @@ def create_unified_app(policy, *, backend=None, artifact_store=None, target_modu
     app = create_native_pdf_app(policy, backend=backend, artifact_store=artifact_store,
         target_module=target_module, source_registry=registry, runtime_factory=UnifiedOerWindowRuntime,
         app=app, maximum_message_bytes=maximum_message_bytes,
-        strict_json_paths=('/project', '/project/native', '/project/native-collection', '/project/native-pdf', FAMILY_ENDPOINT,
+        strict_json_paths=('/project', '/project/native', '/project/native-collection', '/project/native-pdf', FAMILY_ENDPOINT, NORMAL_OBSERVED_ENDPOINT,
                            '/index', '/index-canonical', '/index-canonical/status', '/retrieve'))
     install_native_pdf_source_family_route(app, registry, artifact_store, policy,
         target_module=target_module, maximum_message_bytes=maximum_message_bytes,
         software_guard=backend._windows_runtime.algorithms)
+    install_normal_observed_route(app, registry, artifact_store, policy, target_module=target_module,
+        maximum_message_bytes=maximum_message_bytes, software_guard=backend._windows_runtime.algorithms)
     install_source_page_routes(app, registry, policy, target_module=target_module)
     install_source_page_index_route(app, backend)
     old_health = next(route for route in app.routes if getattr(route, 'path', None) == '/health')
@@ -102,6 +107,7 @@ def create_unified_app(policy, *, backend=None, artifact_store=None, target_modu
                 'artifactReadValidation': UNIFIED_CAPABILITY['artifactReadValidation'],
                 'artifactReadValidationScope': UNIFIED_CAPABILITY['artifactReadValidationScope']}
         result['oer']['unifiedCanonical'] = {**UNIFIED_CAPABILITY, 'maximumMessageBytes': maximum_message_bytes}
+        result['oer']['normalObserved'] = {**NORMAL_OBSERVED_CAPABILITY, 'maximumMessageBytes': maximum_message_bytes}
         result['oer']['sourcePageRenderContract'] = 'consense.source-page-render-evidence.v1'
         result['oer']['sourcePageIndexContract'] = 'explicit-composite-index-pins-v1'
         result['oer']['nativePdfSourceFamily'] = {

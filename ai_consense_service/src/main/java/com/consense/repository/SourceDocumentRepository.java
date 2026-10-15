@@ -109,6 +109,34 @@ public interface SourceDocumentRepository extends JpaRepository<SourceDocument, 
             + "d.structuredContentJson as structuredContentJson from SourceDocument d where d.id = :id")
     Optional<VerificationMetadata> findVerificationMetadataById(@Param("id") Long id);
 
+    /** Normal observations need coverage/generation, never the separate native archive. */
+    interface NormalObservationMetadata extends VerificationMetadata {
+        String getParseCoverageJson();
+        String getNormalCandidateJson();
+    }
+    @Query("select d.id as id, d.projectId as projectId, d.category as category, "
+            + "d.fileKey as fileKey, d.fileName as fileName, d.reviewRole as reviewRole, "
+            + "d.documentScope as documentScope, d.parseStatus as parseStatus, d.oerIdentityJson as oerIdentityJson, "
+            + "d.sourceSha256 as sourceSha256, d.storagePath as storagePath, d.textContent as textContent, "
+            + "d.structuredContentJson as structuredContentJson, d.parseCoverageJson as parseCoverageJson, "
+            + "d.normalCandidateJson as normalCandidateJson from SourceDocument d where d.id = :id")
+    Optional<NormalObservationMetadata> findNormalObservationMetadataById(@Param("id") Long id);
+
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query("update SourceDocument d set d.normalCandidateJson = :candidate where d.id = :id "
+            + "and d.projectId = :project and d.sourceSha256 = :original and d.oerIdentityJson = :identity "
+            + "and d.textContent = :text and d.structuredContentJson = :structure "
+            + "and ((d.parseCoverageJson is null and :coverage is null) or d.parseCoverageJson = :coverage) "
+            + "and ((d.category is null and :category is null) or d.category = :category) "
+            + "and ((d.fileKey is null and :fileKey is null) or d.fileKey = :fileKey) "
+            + "and ((d.reviewRole is null and :role is null) or d.reviewRole = :role) "
+            + "and ((d.documentScope is null and :scope is null) or d.documentScope = :scope) "
+            + "and ((d.parseStatus is null and :status is null) or d.parseStatus = :status)")
+    int compareAndSetNormalCandidate(@Param("id") Long id,@Param("project") String project,
+            @Param("original") String original,@Param("identity") String identity,@Param("text") String text,
+            @Param("structure") String structure,@Param("coverage") String coverage,@Param("category") String category,@Param("fileKey") String fileKey,
+            @Param("role") String role,@Param("scope") String scope,@Param("status") String status,@Param("candidate") String candidate);
+
     /** Compare-and-set routing only; never merge an archive-free read snapshot into a managed entity. */
     @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Query("update SourceDocument d set d.oerIdentityJson = :identity where d.id = :id "

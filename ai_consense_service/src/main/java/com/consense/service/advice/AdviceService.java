@@ -98,6 +98,8 @@ public class AdviceService {
     private VettingTokenBudgetCliObserver tokenObserver;
     @org.springframework.beans.factory.annotation.Autowired(required=false)
     private StorageService storageService;
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.consense.service.sources.CanonicalEvidenceService evidencePreparation;
 
     /** Character admission guard for whole fixed groups; never a text truncation limit. */
     private static final int FIXED_REFERENCE_MATERIAL_CHARACTERS=200000;
@@ -113,7 +115,7 @@ public class AdviceService {
         String normalized=ProjectDocumentScope.normalizeScope(scope);
         if(canonical.enabled()) {
             OerBusinessEvidence.Session session=canonicalSession(projectId,normalized);
-            try{canonical.index(session);}catch(RuntimeException rejected){throw new BizException(4201,"Canonical advice indexing failed. Verify the current source bindings and advisory retrieval service; no legacy index was used.");}
+            try{canonical.index(session);}catch(RuntimeException rejected){throw sourceFailure(4201,"Canonical advice indexing failed. Verify the current source bindings and advisory retrieval service; no legacy index was used.",rejected,"evidence_backend_unavailable");}
             // canonicalStatus checks the fresh selected scope before and after its remote status read.
             return canonicalStatus(projectId,normalized,session);
         }
@@ -197,7 +199,11 @@ public class AdviceService {
             try{return canonicalStatus(projectId,normalized);}
             catch(RuntimeException unavailable){
                 IndexStatusVO result=canonicalUnavailable(normalized);
-                result.setEligibleDocuments(freshSelectedDocuments(projectId,normalized).size());
+                List<SourceDocument> selected=freshSelectedDocuments(projectId,normalized);result.setEligibleDocuments(selected.size());
+                String reason=sourceFailure(4204,"Sources unavailable",unavailable,"source_stale").getPublicReason();result.setSourceReason(reason);result.setPreparable(false);
+                if("source_unregistered".equals(reason)&&evidencePreparation!=null)try{
+                    result.setPreparable(evidencePreparation.normalPreparable(projectId,selected.stream().map(SourceDocument::getId).collect(Collectors.toList()),"advisory"));
+                }catch(RuntimeException rejected){result.setSourceReason(sourceFailure(4204,"Sources unavailable",rejected,"source_stale").getPublicReason());}
                 return result;
             }
         }
@@ -278,7 +284,7 @@ public class AdviceService {
             try {
                 canonical.ensureIndex(session);
                 hits=new ArrayList<>(canonical.adviceHits(session,retrievalQuestion));
-            }catch(RuntimeException rejected){throw new BizException(4204,"Canonical advice retrieval failed. Refresh the selected scope and verify current source bindings and advisory retrieval; no legacy evidence was used.");}
+            }catch(RuntimeException rejected){throw sourceFailure(4204,"Canonical advice retrieval failed. Refresh the selected scope and verify current source bindings and advisory retrieval; no legacy evidence was used.",rejected,"evidence_backend_unavailable");}
             assertCurrentSelection(session,scope);
             if(fixedBaselineEnabled())hits.addAll(fixedReferenceHits(retrievalQuestion));
             hits=withCanonicalIncorporationContext(session,hits);
@@ -1147,6 +1153,23 @@ public class AdviceService {
         return ProjectDocumentScope.currentCatalog(projectId,sourceDocumentRepository.findBusinessSourcesByProjectId(projectId)).stream().map(d->{String exclusion=ProjectDocumentScope.exclusionReason(d,normalized,"advisory");
             return new AdviceSourceVO(String.valueOf(d.getId()),d.getFileKey(),d.getFileName(),VettingCorpus.sourceRole(d),d.getDocumentScope(),d.getParseStatus(),VettingCorpus.sourceHash(d),exclusion==null,exclusion);}).collect(Collectors.toList());
     }
+    /** Preparation has a complete selected-source denominator and no retrieval or model operation. */
+    public SourcePreparationVO prepareSources(String projectId,String scope){
+        projectService.require(projectId);String normalized=ProjectDocumentScope.normalizeScope(scope);
+        List<SourceDocument> selected=freshSelectedDocuments(projectId,normalized);List<SourcePreparationResult> results=new ArrayList<>();boolean failed=false;int prepared=0;
+        for(SourceDocument document:selected){String status="unexecuted",reason=null;
+            if(!failed)try{status=evidencePreparation.prepareNormalObserved(projectId,document.getId(),"advisory")?"prepared":"already_registered";prepared++;}
+            catch(RuntimeException rejected){status="failed";failed=true;reason=sourceFailure(4204,"Source preparation failed",rejected,"source_stale").getPublicReason();}
+            results.add(new SourcePreparationResult(String.valueOf(document.getId()),document.getFileName(),status,reason));
+        }
+        boolean complete=!failed&&!selected.isEmpty();
+        if(complete)try{
+            List<SourceDocument> current=freshSelectedDocuments(projectId,normalized);
+            complete=current.size()==selected.size();for(int n=0;complete&&n<selected.size();n++)complete=Objects.equals(selected.get(n).getId(),current.get(n).getId())&&com.consense.service.sources.NormalObservedPreparationService.sameGeneration(selected.get(n),current.get(n));
+            if(complete)try(com.consense.service.sources.CanonicalEvidenceService.VerifiedBindingFrame frame=evidencePreparation.verifiedBindings(projectId,"advisory",current.stream().map(SourceDocument::getId).collect(Collectors.toList()))){frame.beforeWait();}
+        }catch(RuntimeException changed){complete=false;}
+        return new SourcePreparationVO(normalized,selected.size(),prepared,complete,false,false,results);
+    }
     private List<SourceDocument> selectedDocuments(String projectId,String scope){
         try{return ProjectDocumentScope.selected(projectId,sourceDocumentRepository.findBusinessSourcesByProjectId(projectId),scope,"advisory");}
         catch(IllegalArgumentException invalidSource){throw new BizException(4204,"An advice source identity is invalid or changed. Review the current sources before asking; no answer was published.");}
@@ -1163,7 +1186,18 @@ public class AdviceService {
         List<SourceDocument> selected=freshSelectedDocuments(projectId,scope);
         if(selected.isEmpty())throw new BizException(4200,"No permitted documents in the selected advice scope.");
         try{return canonical.load(projectId,"advisory",selected);}
-        catch(RuntimeException unavailable){throw new BizException(4204,"Current canonical source bindings are unavailable for the selected advice scope. Complete source review and registration before asking.");}
+        catch(RuntimeException unavailable){throw sourceFailure(4204,"Current canonical source bindings are unavailable for the selected advice scope. Complete source review and registration before asking.",unavailable,"source_unregistered");}
+    }
+    private static BizException sourceFailure(int code,String message,RuntimeException failure,String fallback) {
+        String reason=fallback;
+        if(failure instanceof com.consense.service.sources.CanonicalEvidenceException) {
+            String upstream=failure.getMessage();
+            if("OER_EVIDENCE_UPSTREAM_UNAVAILABLE".equals(upstream)||"OER_EVIDENCE_CONFIG_INVALID".equals(upstream)) reason="evidence_backend_unavailable";
+            else if("CANONICAL_SELECTED_DOCUMENT_UNREGISTERED".equals(upstream)||"CANONICAL_BINDING_UNAVAILABLE".equals(upstream)
+                    ||"SOURCE_MODULE_ELIGIBILITY_UNRESOLVED_OR_EXCLUDED".equals(upstream)) reason="source_unregistered";
+            else reason="source_stale";
+        }
+        return new BizException(code,message,reason,failure);
     }
     private void assertCurrentSelection(OerBusinessEvidence.Session session,String scope) {
         try {

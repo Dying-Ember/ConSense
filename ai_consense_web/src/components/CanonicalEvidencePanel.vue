@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
-import { CanonicalEvidenceError, evidenceCoverage, fetchCanonicalAsset, fetchCanonicalPointer, isNativeEvidence, orderedEvidenceAssets, orderedEvidenceParts } from '../api/canonicalEvidence'
+import { CanonicalEvidenceError, evidenceCoverage, fetchCanonicalAsset, fetchCanonicalPointer, isNativeEvidence, isNormalObservedEvidence, orderedEvidenceAssets, orderedEvidenceParts } from '../api/canonicalEvidence'
 import type { CanonicalEvidenceAddress, CanonicalEvidenceAsset, CanonicalEvidencePointer } from '../api/canonicalEvidence'
 
 const props = withDefaults(defineProps<{ pointer: CanonicalEvidenceAddress | null; locale?: 'zh-Hans' | 'zh-Hant' | 'en' }>(), { locale: 'zh-Hans' })
@@ -19,6 +19,8 @@ const copy = {
   nativeTable: ['完整原生表组观察', '完整原生表組觀察', 'Complete native table-group observation'],
   nativeBlank: ['空白文字观察，原节点仍保留。', '空白文字觀察，原節點仍保留。', 'Blank text observation; the original node is retained.'],
   nativeBoundary: ['DOCX 原件没有固定物理页或原页坐标；派生图像映射尚未核验。', 'DOCX 原件沒有固定物理頁或原頁座標；衍生圖像映射尚未核驗。', 'Native DOCX has no fixed physical page or original-page coordinates. Derived visual mapping is not verified.'],
+  normalBoundary: ['正常解析观察；来源质量、完整覆盖及坐标映射仍未核验。', '正常解析觀察；來源品質、完整覆蓋及座標映射仍未核驗。', 'Normal parser observations; source quality, whole-source coverage and geometry mapping remain unverified.'],
+  normalTable: ['原生表格观察（未核验）', '原生表格觀察（未核驗）', 'Native table observation (unverified)'],
   text: ['原结构文字（保留原文）', '原結構文字（保留原文）', 'Source structure text (literal)'],
   attributes: ['来源属性与未确认项', '來源屬性與未確認項', 'Source attributes and unresolved items'],
   assetLoading: ['图像读取中…', '圖像讀取中…', 'Loading image…'], imageError: ['图像无法读取', '圖像無法讀取', 'Image unavailable'],
@@ -38,6 +40,7 @@ type AssetView = { asset: CanonicalEvidenceAsset; url: string | null; status: 'l
 const assets = ref<AssetView[]>([])
 const parts = computed(() => resolved.value ? orderedEvidenceParts(resolved.value) : [])
 const native = computed(() => resolved.value ? isNativeEvidence(resolved.value) : false)
+const normal = computed(() => resolved.value ? isNormalObservedEvidence(resolved.value) : false)
 const nativePartNames = computed(() => [...new Set(parts.value.map(part => part.sourcePosition?.partName).filter(Boolean))])
 const coverage = computed(() => resolved.value ? evidenceCoverage(resolved.value) : null)
 const incomplete = computed(() => coverage.value?.status === 'incomplete' || assets.value.some(view => view.status === 'error'))
@@ -95,13 +98,14 @@ onBeforeUnmount(() => { ++epoch; active?.abort(); clearAssets() })
     <template v-if="resolved">
       <dl class="source-identity">
         <dt>{{ label('source') }}</dt><dd>{{ resolved.sourceFilename }}</dd>
-        <template v-if="!native"><dt>{{ label('pages') }}</dt><dd>{{ [...resolved.physicalPages].sort((a, b) => a - b).join(', ') }}</dd></template>
-        <template v-else><dt>{{ label('nativeParts') }}</dt><dd>{{ nativePartNames.join(', ') }}</dd></template>
+        <template v-if="!native && resolved.physicalPages.length"><dt>{{ label('pages') }}</dt><dd>{{ [...resolved.physicalPages].sort((a, b) => a - b).join(', ') }}</dd></template>
+        <template v-else-if="native"><dt>{{ label('nativeParts') }}</dt><dd>{{ nativePartNames.join(', ') }}</dd></template>
         <dt>SHA-256</dt><dd>{{ resolved.originalSourceSha256 }}</dd>
       </dl>
       <p class="evidence-status">{{ label('notHuman') }}</p>
       <p v-if="native" role="status">{{ label('nativeBoundary') }}</p>
-      <p v-if="resolved.tableGroup">{{ native ? label('nativeTable') : label('table') }}: {{ resolved.tableGroup.tableGroupId }}</p>
+      <p v-if="normal" role="status">{{ label('normalBoundary') }}</p>
+      <p v-if="resolved.tableGroup">{{ normal ? label('normalTable') : native ? label('nativeTable') : label('table') }}: {{ resolved.tableGroup.tableGroupId ?? resolved.tableGroup.tableLocation }}</p>
       <p v-if="coverage?.status === 'no_assets'" role="status">{{ label('noAssets') }}</p>
       <p v-if="incomplete" role="alert">{{ label('incomplete') }} {{ coverage?.missingPages.join(', ') }}</p>
       <div class="source-images">
@@ -118,7 +122,12 @@ onBeforeUnmount(() => { ++epoch; active?.abort(); clearAssets() })
       <details>
         <summary>{{ label('text') }}</summary>
         <article v-for="part in parts" :key="part.blockId" :data-block-id="part.blockId">
-          <template v-if="native">
+          <template v-if="normal">
+            <p>{{ label('nativePosition') }}:</p>
+            <pre class="native-position">{{ JSON.stringify(part.sourcePosition, null, 2) }}</pre>
+            <p>UTF-16 [{{ part.startOffset }}, {{ part.endOffset }})</p>
+          </template>
+          <template v-else-if="native">
             <p>{{ label('nativePosition') }}: {{ part.sourcePosition?.partName }}</p>
             <pre class="native-position">{{ part.sourcePosition?.nodePath }}</pre>
             <p>{{ label('nativeChannel') }}: {{ part.textTransform?.textChannel }} · UTF-16 [{{ part.textTransform?.sourceStartUtf16 }}, {{ part.textTransform?.sourceEndUtf16 }})</p>
@@ -128,8 +137,8 @@ onBeforeUnmount(() => { ++epoch; active?.abort(); clearAssets() })
           <pre>{{ part.text }}</pre>
         </article>
       </details>
-      <details v-if="native && resolved.tableGroup">
-        <summary>{{ label('nativeTable') }}</summary>
+      <details v-if="(native || normal) && resolved.tableGroup">
+        <summary>{{ normal ? label('normalTable') : label('nativeTable') }}</summary>
         <pre>{{ JSON.stringify(resolved.tableGroup, null, 2) }}</pre>
       </details>
       <details>

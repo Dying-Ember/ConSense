@@ -17,7 +17,7 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(BizException.class)
     public ApiResponse<Void> handleBiz(BizException ex) {
         log.warn("business error: {}", ex.getMessage());
-        return ApiResponse.fail(ex.getCode(), ex.getMessage());
+        return ApiResponse.fail(ex.getCode(), ex.getMessage(), ex.getPublicReason());
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)

@@ -27,6 +27,9 @@ public class CanonicalCurrentSourceReader {
     @Transactional(propagation=Propagation.REQUIRES_NEW,isolation=Isolation.READ_COMMITTED,readOnly=true)
     public SourceDocument currentDocument(String projectId,Long id,String module){return readDocument(projectId,id,module);}
 
+    @Transactional(propagation=Propagation.REQUIRES_NEW,isolation=Isolation.READ_COMMITTED,readOnly=true)
+    public SourceDocument normalDocument(String projectId,Long id,String module){return readDocument(projectId,id,module,true,true);}
+
     /** Registration has not saved its new adoption yet; verify committed source and original only. */
     @Transactional(propagation=Propagation.REQUIRES_NEW,isolation=Isolation.READ_COMMITTED,readOnly=true)
     public void assertSourceCurrent(CanonicalSourceBinding binding,String module){checkSource(binding,module);}
@@ -41,7 +44,11 @@ public class CanonicalCurrentSourceReader {
     }
 
     private void checkSource(CanonicalSourceBinding binding,String module){
-        SourceDocument document=readDocument(binding.getProjectId(),binding.getDocumentId(),module,true);
+        com.fasterxml.jackson.databind.JsonNode snapshot=binding.getSnapshotJson()==null?JsonUtils.mapper().nullNode():JsonUtils.parse(binding.getSnapshotJson());
+        boolean normal=NormalObservedContract.isNormal(snapshot);
+        if(normal)require(Objects.equals(module,binding.getDeclaredModule()),HttpStatus.CONFLICT,"NORMAL_OBSERVED_MODULE_STATE_UNAVAILABLE");
+        SourceDocument document=readDocument(binding.getProjectId(),binding.getDocumentId(),module,true,normal);
+        if(normal)require(NormalObservedPreparationService.currentGraph(document).equals(snapshot.path("manifest").path("candidateGraph")),HttpStatus.CONFLICT,"CANONICAL_SOURCE_STALE");
         require(Objects.equals(binding.getOriginalSourceSha256(),document.getSourceSha256())
                 &&Objects.equals(binding.getJavaParsedSourceHash(),VettingCorpus.sourceHash(document))
                 &&Objects.equals(binding.getRoutingSha256(),CanonicalEvidenceService.routingHash(document)),HttpStatus.CONFLICT,"CANONICAL_SOURCE_STALE");
@@ -57,10 +64,13 @@ public class CanonicalCurrentSourceReader {
         return readDocument(projectId,id,module,false);
     }
     private SourceDocument readDocument(String projectId,Long id,String module,boolean verificationOnly){
+        return readDocument(projectId,id,module,verificationOnly,false);
+    }
+    private SourceDocument readDocument(String projectId,Long id,String module,boolean verificationOnly,boolean normalObservation){
         require(Arrays.asList("drafting","vetting","advisory").contains(module),HttpStatus.BAD_REQUEST,"CANONICAL_MODULE_INVALID");
         // Vetting/advisory registration consumes the same complete verification fields.
         // Drafting keeps its ordinary entity path; native archives stay stored unchanged.
-        SourceDocument document=verificationOnly||!"drafting".equals(module)?verificationDocument(id):documents.findById(id).orElseThrow(()->new CanonicalEvidenceException(HttpStatus.NOT_FOUND,"SOURCE_DOCUMENT_UNAVAILABLE"));
+        SourceDocument document=normalObservation?normalVerificationDocument(id):verificationOnly||!"drafting".equals(module)?verificationDocument(id):documents.findById(id).orElseThrow(()->new CanonicalEvidenceException(HttpStatus.NOT_FOUND,"SOURCE_DOCUMENT_UNAVAILABLE"));
         require(Objects.equals(projectId,document.getProjectId()),HttpStatus.NOT_FOUND,"SOURCE_DOCUMENT_UNAVAILABLE");
         require(!SourceDocument.CATEGORY_STANDARD_TEMPLATE.equals(document.getCategory())||"drafting".equals(module),HttpStatus.FORBIDDEN,"SOURCE_TEMPLATE_DRAFTING_ONLY");
         OerDocumentIdentity identity;
@@ -93,6 +103,15 @@ public class CanonicalCurrentSourceReader {
         org.springframework.util.Assert.notNull(id,"The given id must not be null!");
         SourceDocumentRepository.VerificationMetadata metadata=documents.findVerificationMetadataById(id)
                 .orElseThrow(()->new CanonicalEvidenceException(HttpStatus.NOT_FOUND,"SOURCE_DOCUMENT_UNAVAILABLE"));
+        return verificationSnapshot(metadata);
+    }
+    private SourceDocument normalVerificationDocument(Long id){
+        SourceDocumentRepository.NormalObservationMetadata metadata=documents.findNormalObservationMetadataById(id)
+                .orElseThrow(()->new CanonicalEvidenceException(HttpStatus.NOT_FOUND,"SOURCE_DOCUMENT_UNAVAILABLE"));
+        SourceDocument document=verificationSnapshot(metadata);
+        document.setParseCoverageJson(metadata.getParseCoverageJson());document.setNormalCandidateJson(metadata.getNormalCandidateJson());return document;
+    }
+    private static SourceDocument verificationSnapshot(SourceDocumentRepository.VerificationMetadata metadata){
         // Detached scalar snapshot only; all shared source gates consume these exact committed fields.
         SourceDocument document=new SourceDocument();document.setId(metadata.getId());document.setProjectId(metadata.getProjectId());
         document.setCategory(metadata.getCategory());document.setFileKey(metadata.getFileKey());document.setFileName(metadata.getFileName());

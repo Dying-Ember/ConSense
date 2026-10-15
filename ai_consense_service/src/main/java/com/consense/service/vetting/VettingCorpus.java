@@ -115,6 +115,14 @@ public final class VettingCorpus {
             Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
 
     /** Only explicit upload purpose or confirmed source identity establishes a role. */
+    public static String sourceClass(SourceDocument d) {
+        com.consense.document.OerDocumentIdentity identity=com.consense.service.sources.OerSourceMetadata.identity(d);
+        if(identity==null)return null;
+        Map<String,String> classes=new HashMap<>();
+        classes.put("PRE","project_pre");classes.put("BQ","pricing_bq");classes.put("SOR","pricing_sor");
+        classes.put("GENERAL_SUMMARY","pricing_general_summary");classes.put("WORKS_PSS","works_related_pss");classes.put("SL_NON_TECHNICAL","sl_nontechnical");
+        return "standard_template".equals(identity.getSourcePurpose())?"drafting_standard_template":classes.get(identity.getKind());
+    }
     public static String sourceRole(SourceDocument d) {
         String explicit = nvl(d.getReviewRole()).trim().toLowerCase(Locale.ROOT);
         if (Arrays.asList("tender", "standard", "project_fact", "package_manifest").contains(explicit)) return explicit;
@@ -332,11 +340,7 @@ public final class VettingCorpus {
         com.consense.document.OerDocumentIdentity identity=com.consense.service.sources.OerSourceMetadata.identity(d);
         if(identity!=null) {
             c.setSourceIdentity(identity); c.setSourcePurpose(identity.getSourcePurpose()); c.setEligibleModules(identity.getEligibleModules());
-            Map<String,String> classes=new HashMap<>();
-            classes.put("PRE","project_pre"); classes.put("BQ","pricing_bq"); classes.put("SOR","pricing_sor");
-            classes.put("GENERAL_SUMMARY","pricing_general_summary"); classes.put("WORKS_PSS","works_related_pss");
-            classes.put("SL_NON_TECHNICAL","sl_nontechnical");
-            c.setSourceClass("standard_template".equals(identity.getSourcePurpose())?"drafting_standard_template":classes.get(identity.getKind()));
+            c.setSourceClass(sourceClass(d));
         }
         c.setMetadataVersion(METADATA_VERSION); c.setSegmentationVersion(SEGMENTATION_VERSION);
         c.setNativeTableMetadataVersion(NATIVE_TABLE_METADATA_VERSION);

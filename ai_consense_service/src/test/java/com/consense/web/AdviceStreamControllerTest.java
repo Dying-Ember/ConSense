@@ -29,6 +29,20 @@ class AdviceStreamControllerTest {
     private static final String BODY = "{\"question\":\"Which clause applies?\",\"scope\":\"contract\",\"basisScope\":\"project_contract\",\"sessionId\":\"session-A\"}";
     private LlmProfiles profiles() { return new LlmProfiles(new ConsenseProperties(), mock(LlmClient.class), mock(LlmClient.class)); }
 
+    @Test void sourceFailureReasonSurvivesTheSseBoundaryWithoutItsPrivateCause() throws Exception {
+        AdviceService advice=mock(AdviceService.class);LlmProfiles profiles=profiles();
+        doThrow(new com.consense.common.BizException(4204,"Current canonical source bindings are unavailable for the selected advice scope. Complete source review and registration before asking.","source_unregistered",new IllegalStateException("AUTHORED_PRIVATE_CAUSE")))
+                .when(advice).ask(anyString(),any(AskRequest.class),any(AdviceProgress.class));
+        AdviceStreamController controller=new AdviceStreamController(advice,profiles);
+        MockMvc mvc=MockMvcBuilders.standaloneSetup(controller).build();
+        try {
+            MvcResult pending=mvc.perform(post("/api/advice/project-A/ask/stream").header("X-ConSense-Advice-Request",ID).contentType("application/json").content(BODY)).andExpect(request().asyncStarted()).andReturn();
+            String wire=mvc.perform(asyncDispatch(pending)).andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+            assertTrue(wire.contains("event:error"));assertTrue(wire.contains("\"reason\":\"source_unregistered\""));assertTrue(wire.contains("\"code\":4204"));
+            assertFalse(wire.contains("AUTHORED_PRIVATE_CAUSE"));assertFalse(wire.contains("event:complete"));
+        } finally {controller.shutdown();}
+    }
+
     @Test void eventsUseCapturedModelAndOnlyCompleteAfterServiceCommitReturns() throws Exception {
         AdviceService advice = mock(AdviceService.class); LlmProfiles profiles = profiles();
         LlmOperation selected = profiles.resolve("minimax-cn");

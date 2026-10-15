@@ -134,6 +134,12 @@ def assert_canonical_scope(chunks, policy, *, module='vetting'):
     return result
 
 
+def canonical_scope_policy_sha(snapshot):
+    if snapshot.get('schema') == 'consense.normal-observed.v1':
+        return snapshot['manifest']['sourceBinding']['scopePolicySha256']
+    return snapshot['manifest']['scope']['scopePolicySha256']
+
+
 class OerWindowRuntime(WindowRuntime):
     """Scope and wrapper bytes are part of both index and health identities."""
 
@@ -326,7 +332,7 @@ def create_app(policy, *, backend=None, artifact_store=None, source_registry=Non
                 chunks = []
                 for address in request.projectionSha256:
                     snapshot = source_registry.load(address)
-                    fail(snapshot['manifest']['scope']['scopePolicySha256']
+                    fail(canonical_scope_policy_sha(snapshot)
                          == policy.policyIdentity['manifestSha256'], 'PROJECTION_SCOPE_POLICY_MISMATCH',
                          'Re-project sources reviewed against a different scope policy before indexing',
                          projectionSha256=address)
@@ -361,7 +367,7 @@ def create_app(policy, *, backend=None, artifact_store=None, source_registry=Non
                     chunks = []
                     for address in request.projectionSha256:
                         snapshot = source_registry.load(address)
-                        fail(snapshot['manifest']['scope']['scopePolicySha256'] == policy.policyIdentity['manifestSha256'],
+                        fail(canonical_scope_policy_sha(snapshot) == policy.policyIdentity['manifestSha256'],
                              'PROJECTION_SCOPE_POLICY_MISMATCH', 'Current sources must bind this exact active scope')
                         chunks.extend(source_registry.chunks(address, module=request.module))
                     assert_canonical_scope(chunks, policy, module=request.module)

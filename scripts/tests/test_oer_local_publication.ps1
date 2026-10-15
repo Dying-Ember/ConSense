@@ -8,9 +8,9 @@ $parseTokens = $null
 $parseErrors = $null
 $ast = [Management.Automation.Language.Parser]::ParseFile($sourcePath, [ref]$parseTokens, [ref]$parseErrors)
 if ($parseErrors.Count) { throw ($parseErrors | Out-String) }
-# Load only the two pure configuration gates. Never invoke the script's
+# Load only pure configuration and health gates. Never invoke the script's
 # process discovery, launch, stop, health, model or indexing entry points.
-foreach ($name in @('Resolve-OerModelPublication','Assert-OerModelPublicationReuse')) {
+foreach ($name in @('Resolve-OerModelPublication','Assert-OerModelPublicationReuse','Assert-OerCudaHealth','New-OerFrozenSource')) {
     $definition = $ast.Find({ param($node)
         $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name
     }, $false)
@@ -91,6 +91,74 @@ try {
 } finally { $env:CONSENSE_EMBEDDING_CHECKPOINT_MANIFEST = $previousHostValue }
 $childValues = Get-Content -LiteralPath $childOutput -Raw | ConvertFrom-Json
 Assert-Test (@($childValues.PSObject.Properties | Where-Object { -not [string]::IsNullOrEmpty([string]$_.Value) }).Count -eq 0) 'strict_child_environment_does_not_inherit_host_publication'
+$Component='unified-advisory'; $oerTargetModule='advisory'; $oerUnified=$true
+$actualCas=[pscustomobject]@{artifactReadValidation='actual-cas-unique-per-validation-session-with-exit-rehash';artifactReadValidationScope='canonical_load'}
+$family=[pscustomobject]@{
+    adoptedCoverage='disjoint-physical-pages-required-v1';componentContract='complete-cold-actual-cas-native-pdf-public-roots'
+    crossComponentRelations='unsupported';maximumMessageBytes=16777216;producerKind='native_pdf_source_family'
+    projectEndpoint='/project/native-pdf-family';projectionInputs='actual-cas-family-spec-only'
+    schema='consense.native-pdf-source-family.v1';semanticAcceptanceByComposition=$false;sourcePageRenderStatus='unsupported'
+    sourceRevisionKind='derived_same_original_component_set';version='same-original-complete-native-pdf-components-v1';wholeSourceAccepted=$false
+}
+$normal=[pscustomobject]@{
+    schema='consense.normal-observed.v1';version='complete-bound-normal-observations-v1';producerKind='normal_observed'
+    projectionEndpoint='/normal-observed';candidateGraphSchema='consense.canonical-candidate.v1'
+    candidateGraphVersion='actual-normal-source-unit-whole-page-observations-v2'
+    completeUnitPolicy='complete-bound-generation-all-units-in-source-order'
+    nonTextUnitPolicy='retained-in-complete-graph-not-submitted-to-model'
+    artifactReadValidation='complete-manifest-actual-cas-reconstruction-every-request'
+    originalByteVerifier='java_current_source_reader';observerActor='application'
+    sourceQualityAccepted=$false;semanticScopeVerified=$false;humanConfirmed=$false
+    adoptionStatus='candidate_unverified';maximumMessageBytes=16777216
+}
+$health=[pscustomobject]@{device='cuda';runtime=[pscustomobject]@{
+    embedding=[pscustomobject]@{device='cuda';dtype='float32';serialOffload=$true}
+    reranker=[pscustomobject]@{device='cuda';dtype='float32';serialOffload=$true}
+};oer=[pscustomobject]@{
+    recipe='scope-bound-dual2048-cuda-fp32-no-fixed-cache-v1';targetModule='advisory'
+    unifiedCanonical=[pscustomobject]@{artifactReadValidation=$actualCas.artifactReadValidation;artifactReadValidationScope='canonical_load'
+        sourceKinds=@('scanned_pdf','native_docx_snapshot','native_docx_collection','native_pdf','native_pdf_source_family','normal_observed')}
+    nativePdfSourceFamily=$family;normalObserved=$normal
+    nativeCanonical=$actualCas;nativeDocumentCollection=$actualCas;nativePdfCanonical=$actualCas
+}}
+Assert-OerCudaHealth $health
+Assert-Test $true 'normal_observed_exact_health_allows_frozen_service_restore'
+foreach($field in @('sourceQualityAccepted','semanticScopeVerified','humanConfirmed')){
+    $normal.$field=$true
+    Assert-Rejected {Assert-OerCudaHealth $health} 'normal observed capability' "normal_${field}_cannot_claim_acceptance"
+    $normal.$field=$false
+}
+$normal.maximumMessageBytes=33554432
+Assert-Rejected {Assert-OerCudaHealth $health} 'normal observed capability' 'normal_observed_message_cap_cannot_expand'
+$normal.maximumMessageBytes=16777216
+$health.oer.PSObject.Properties.Remove('normalObserved')
+Assert-Rejected {Assert-OerCudaHealth $health} 'normal observed capability' 'normal_kind_without_capability_rejected'
+$health.oer|Add-Member normalObserved $normal
+$health.oer.unifiedCanonical.sourceKinds=@('scanned_pdf','native_docx_snapshot','native_docx_collection','native_pdf','native_pdf_source_family')
+Assert-Rejected {Assert-OerCudaHealth $health} 'without its source kind' 'normal_capability_without_kind_rejected'
+$health.oer.PSObject.Properties.Remove('normalObserved')
+Assert-OerCudaHealth $health
+Assert-Test $true 'legacy_family_health_remains_supported'
+$health.oer.unifiedCanonical.sourceKinds=@('scanned_pdf','native_docx_snapshot','native_docx_collection','native_pdf')
+$health.oer.PSObject.Properties.Remove('nativePdfSourceFamily')
+Assert-OerCudaHealth $health
+Assert-Test $true 'legacy_four_kind_health_remains_supported'
+$oerToolRoot=Join-Path $testProject 'ai_consense_service/tools/vetting_eval'
+$oerScript=Join-Path $oerToolRoot 'oer_unified_server.py'
+$ScopeManifest=Join-Path $EvidenceDirectory 'authored-scope.json'
+[IO.File]::WriteAllText($ScopeManifest,'{"authored":true}')
+$frozen=New-OerFrozenSource
+$frozenCoordinator=Join-Path (Split-Path -Parent (Split-Path -Parent $frozen.Script)) 'offline_delivery'
+foreach($dependency in @('coordinator.py','delivery.py','request_stage.py','gpu_stage.py')){
+    $copied=Join-Path $frozenCoordinator $dependency
+    Assert-Test (Test-Path -LiteralPath $copied) "frozen_${dependency}_dependency_present"
+    Assert-Test ((Get-FileHash -LiteralPath $copied).Hash -ceq (Get-FileHash -LiteralPath (Join-Path $testProject ('ai_consense_service/tools/offline_delivery/'+$dependency))).Hash) "frozen_${dependency}_bytes_exact"
+}
+$importProbe=Join-Path $EvidenceDirectory 'coordinator-import.py'
+[IO.File]::WriteAllText($importProbe,"import sys, json`nsys.path.insert(0, sys.argv[1])`nimport coordinator`nprint(json.dumps({'configured':coordinator.configured({})}))`n")
+$importOutput=Join-Path $EvidenceDirectory 'coordinator-import.json'
+$importProcess=Start-Process -FilePath $testPython -ArgumentList ('"'+$importProbe+'" "'+$frozenCoordinator+'"') -WindowStyle Hidden -Wait -PassThru -RedirectStandardOutput $importOutput
+Assert-Test ($importProcess.ExitCode -eq 0 -and (Get-Content -LiteralPath $importOutput -Raw|ConvertFrom-Json).configured -eq $false) 'frozen_health_coordinator_import_without_gpu_jobs'
 $receipt = [ordered]@{ status='passed'; checks=$checks; checkCount=$checks.Count;
     sourcePath=$sourcePath; sourceSha256=(Get-FileHash -LiteralPath $sourcePath -Algorithm SHA256).Hash.ToLowerInvariant();
     evidenceDirectory=$EvidenceDirectory; modelInferenceCalls=0; servicesStarted=0; servicesStopped=0; databaseChanged=$false;

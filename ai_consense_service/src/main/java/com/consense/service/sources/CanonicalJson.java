@@ -19,12 +19,16 @@ final class CanonicalJson {
         }catch(IOException|IllegalArgumentException error){throw new CanonicalEvidenceException(org.springframework.http.HttpStatus.BAD_GATEWAY,"CANONICAL_JSON_INVALID");}
     }
     static String fieldHash(String json,String name) {
+        return sha(field(json,name).getBytes(StandardCharsets.UTF_8));
+    }
+    /** Extract a canonical subtree from a noncanonical HTTP receipt without rewriting number tokens. */
+    static String field(String json,String name) {
         try(JsonParser p=FACTORY.createParser(json)){
             if(p.nextToken()!=JsonToken.START_OBJECT)throw new IOException("Expected object");
             String found=null;
             while(p.nextToken()!=JsonToken.END_OBJECT){String key=p.getCurrentName();p.nextToken();String value=read(p,null);if(key.equals(name))found=value;}
             if(found==null||p.nextToken()!=null)throw new IOException("Missing field or trailing JSON");
-            return sha(found.getBytes(StandardCharsets.UTF_8));
+            return found;
         }catch(IOException|IllegalArgumentException error){throw new CanonicalEvidenceException(org.springframework.http.HttpStatus.BAD_GATEWAY,"CANONICAL_JSON_INVALID");}
     }
     static String sha(byte[] bytes) {

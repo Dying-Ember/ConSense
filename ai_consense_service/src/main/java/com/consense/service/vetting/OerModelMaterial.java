@@ -2,6 +2,7 @@ package com.consense.service.vetting;
 
 import com.consense.common.JsonUtils;
 import com.consense.service.sources.NativePdfSourceFamilyContract;
+import com.consense.service.sources.NormalObservedContract;
 import com.consense.web.dto.CanonicalEvidenceDtos.EvidencePointer;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -14,7 +15,7 @@ public final class OerModelMaterial {
     public static final String SOURCE_VERSION="source-and-projection-model-declaration-v1";
     public static final String DICTIONARY_VERSION="exact-source-projection-unit-model-dictionary-v1";
     public static final String LEGEND="\nModel material version="+VERSION+". sourceDeclarationRef addresses a request-local source+projection declaration emitted once, not an external source. "
-            +"Only selected complete adoption-unit observations are projected. Original evidence pointers retain the full capture, CAS and software-verification tree outside this model input. "
+            +"Only selected complete source-unit observations are projected, with reviewed and unreviewed authorities kept explicit. Original evidence pointers retain the full capture, CAS and software-verification tree outside this model input. "
             +"Selected unit unknowns stay literal; other-unit unknown locations are outside this material and their statuses/reasons are summarized in the source declaration. "
             +"Neither selection, source-reviewed relations nor model material establishes legal closure, applicability, whole-source coverage or human confirmation.\n";
     public static final String WIRE_LEGEND=VettingSourceMetadataWire.LEGEND.replace("All original source fields, whole tables, blanks, relationships and unknowns remain present", "All supplied model-material fields, whole tables, blanks, relationships and unknowns remain present");
@@ -58,10 +59,14 @@ public final class OerModelMaterial {
             structure.set("sourceOrder",copy(p.getSourceOrder()));structure.set("parts",parts(p.getParts()));
             structure.set("sourceSpans",spans(p.getSourceSpans()));structure.set("tableGroup",table(p.getTableGroup()));
             structure.set("relations",relations(p.getRelations()));structure.set("assetRefs",table(p.getAssetRefs()));
-            structure.set("sourceQuality",fields(p.getSourceQuality(),"attributes","semanticQuality","notes","reviewMeaning","parseStatus","version","humanConfirmed","wholeSourceAccepted","legalQualityAccepted","meaning","components"));
+            structure.set("sourceQuality",fields(p.getSourceQuality(),"attributes","semanticQuality","notes","reviewMeaning","parseStatus","version","humanConfirmed","wholeSourceAccepted","legalQualityAccepted","meaning","components","status","adoptionStatus","sourceQualityAccepted","semanticScopeVerified","legalClosure"));
             if(NativePdfSourceFamilyContract.PRODUCER.equals(p.getProducerKind()))structure.set("sourceFamilyOrigin",fields(p.getSourceFamilyOriginRef(),"componentOrdinal","childProjectionSha256","childChunkId","childUnitId","fullChildChunkSha256"));
-            structure.set("adoption",fields(p.getAdoption(),"scope","unitId","clause","clauseHeadingLocation","nodeId","regionIds","referenceRegionIds","physicalPages","partSeparator","textChannel","reviewStatus","reviewedAttributes","humanConfirmed","originalGeometryStatus"));
+            structure.set("adoption",NormalObservedContract.PRODUCER.equals(p.getProducerKind())?com.fasterxml.jackson.databind.node.NullNode.instance:fields(p.getAdoption(),"scope","unitId","clause","clauseHeadingLocation","nodeId","regionIds","referenceRegionIds","physicalPages","partSeparator","textChannel","reviewStatus","reviewedAttributes","humanConfirmed","originalGeometryStatus"));
             structure.set("unknowns",selected.units);
+            if(NormalObservedContract.PRODUCER.equals(p.getProducerKind())){
+                require(canonicalMember!=null&&NormalObservedContract.isNormal(canonicalMember),"normal_member_required");
+                for(String key:Arrays.asList("kind","requiredMemberBlockIds","qualifiersComplete","unknowns"))structure.set(key,copy(canonicalMember.get(key)));
+            }
             if(first){
                 ObjectNode declaration=identity.deepCopy();declaration.put("declarationVersion",SOURCE_VERSION);declaration.put("sourceDeclarationRef",ref);
                 declaration.set("sourceFilename",copy(p.getSourceFilename()));declaration.set("limits",limits);
@@ -76,6 +81,7 @@ public final class OerModelMaterial {
     private static ObjectNode sourceLimits(EvidencePointer p) {
         ObjectNode out=object();out.put("humanConfirmed",p.isHumanConfirmed());out.put("wholeSourceSemantics","unknown");
         out.put("originalGeometryStatus",p.getOriginalGeometryStatus());out.put("visualReturnStatus",p.getVisualReturnStatus());
+        if(NormalObservedContract.PRODUCER.equals(p.getProducerKind())){out.put("adoptionStatus","candidate_unverified");out.put("sourceQualityAccepted",false);out.put("semanticScopeVerified",false);out.put("legalClosure","unknown");}
         JsonNode pdf=p.getNativePdfEvidence();
         if("native_pdf".equals(p.getProducerKind())){
             com.consense.service.sources.NativePdfCanonicalContract.validateDisplayDeclarations(pdf);
@@ -94,6 +100,10 @@ public final class OerModelMaterial {
             if(part.has("sourcePosition"))p.set("sourcePosition",position(part.get("sourcePosition")));
             if(part.has("textTransform"))p.set("textTransform",fields(part.get("textTransform"),"kind","textChannel","offsetUnit","sourceChannel","normalization","status"));
             if(part.has("cells"))p.set("cells",table(part.get("cells")));
+            for(String key:Arrays.asList("wordNumbering","wordSymbols","wordWarnings","wordCells"))if(part.has(key))p.set(key,table(part.get(key)));
+            if(part.has("wordNativeObjects"))p.set("wordNativeObjects",wordNativeObjects(part.get("wordNativeObjects")));
+            if(part.has("wordObservation"))p.set("wordObservation",table(wordObservation(part.get("wordObservation"),true)));
+            for(String key:Arrays.asList("visualRegion","visualFrame","visualProvenance","readingContext","nativeTableCandidate","parserPageGroup","pdfFormField"))if(part.has(key))p.set(key,table(part.get(key)));
             out.add(p);
         }return out;
     }

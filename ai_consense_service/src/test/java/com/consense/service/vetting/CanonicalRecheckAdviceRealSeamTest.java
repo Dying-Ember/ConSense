@@ -51,6 +51,7 @@ class CanonicalRecheckAdviceRealSeamTest {
     static final String DB=UUID.randomUUID().toString();
     @DynamicPropertySource static void database(DynamicPropertyRegistry r){r.add("spring.datasource.url",()->"jdbc:h2:mem:recheck_"+DB+";MODE=MySQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE");r.add("consense.storage-root",()->Paths.get(System.getProperty("maven.multiModuleProjectDirectory",System.getProperty("user.dir")),"target","authored-recheck-storage",DB).toAbsolutePath().toString());}
     @Autowired AdviceService advice;
+    @Autowired org.springframework.web.context.WebApplicationContext web;
     @Autowired ConsenseProperties props;
     @Autowired CanonicalEvidenceProperties canonicalProps;
     @Autowired OerCanonicalRetrievalClient canonicalRetrieval;
@@ -65,7 +66,8 @@ class CanonicalRecheckAdviceRealSeamTest {
     @MockBean(name="llmClient") LlmClient llm;
     @MockBean VettingTokenBudgetCliObserver tokenObserver;
     @TempDir Path temporary;
-    HttpServer server;ExecutorService httpWorkers;
+    HttpServer server,normalServer;ExecutorService httpWorkers;
+    final Map<Long,Path> normalCasRoots=new LinkedHashMap<>();
     final Map<Long,ObjectNode> snapshots=new LinkedHashMap<>();
     final Map<Long,String> rawSnapshots=new LinkedHashMap<>();
     final Map<Long,Path> originals=new LinkedHashMap<>();
@@ -74,6 +76,7 @@ class CanonicalRecheckAdviceRealSeamTest {
     final List<String> events=Collections.synchronizedList(new ArrayList<>());
     final Map<Long,AtomicInteger> perDocumentSnapshotReads=new ConcurrentHashMap<>();
     final AtomicReference<Runnable> healthMutation=new AtomicReference<>();
+    final AtomicReference<Runnable> normalMutation=new AtomicReference<>();
     final AtomicInteger healthReads=new AtomicInteger();int healthMutationOrdinal=1;
     final AtomicInteger snapshotReads=new AtomicInteger(),indexCalls=new AtomicInteger(),retrieveCalls=new AtomicInteger(),chatCalls=new AtomicInteger();
     final AtomicReference<Runnable> indexMutation=new AtomicReference<>(),retrieveMutation=new AtomicReference<>(),snapshotMutation=new AtomicReference<>(),chatMutation=new AtomicReference<>();
@@ -83,8 +86,8 @@ class CanonicalRecheckAdviceRealSeamTest {
 
     @BeforeEach void setup() throws Exception {
         when(tokenObserver.observe(any())).thenAnswer(call->VettingTokenFixture.observe(call.getArgument(0)));
-        snapshots.clear();rawSnapshots.clear();originals.clear();casTamperTargets.clear();casLedgers.clear();events.clear();perDocumentSnapshotReads.clear();healthMutation.set(null);
-        indexMutation.set(null);retrieveMutation.set(null);snapshotMutation.set(null);chatMutation.set(null);
+        snapshots.clear();rawSnapshots.clear();originals.clear();casTamperTargets.clear();casLedgers.clear();normalCasRoots.clear();events.clear();perDocumentSnapshotReads.clear();healthMutation.set(null);
+        indexMutation.set(null);retrieveMutation.set(null);snapshotMutation.set(null);chatMutation.set(null);normalMutation.set(null);
         indexRequest.set(null);remoteIndexes.clear();canonicalProps.getSourcePageRenderEvidenceIdentities().clear();
         jdbc.update("DELETE FROM chat_message");jdbc.update("DELETE FROM canonical_source_binding");jdbc.update("DELETE FROM source_document");jdbc.update("DELETE FROM project");
         jdbc.execute("ALTER TABLE source_document ALTER COLUMN id RESTART WITH 42");jdbc.execute("ALTER TABLE chat_message ALTER COLUMN id RESTART WITH 1");
@@ -96,13 +99,25 @@ class CanonicalRecheckAdviceRealSeamTest {
         addFixture(42L,"pdf","GCC");addFixture(43L,"docx","PRE");
         health=healthFixture();
         server=HttpServer.create(new InetSocketAddress("127.0.0.1",0),0);httpWorkers=Executors.newFixedThreadPool(4);server.setExecutor(httpWorkers);
-        server.createContext("/",exchange->{
+        com.sun.net.httpserver.HttpHandler handler=exchange->{
             byte[] response;int status=200;String path=exchange.getRequestURI().getPath();
             try {
                 if("/health".equals(path)){events.add("health:start");if(healthReads.incrementAndGet()==healthMutationOrdinal)runOnce(healthMutation);response=JsonUtils.write(health).getBytes(StandardCharsets.UTF_8);events.add("health:end");}
+                else if("/normal-observed".equals(path)){
+                    if(exchange.getLocalAddress().getPort()==server.getAddress().getPort())throw new IOException("Normal publication is isolated from the snapshot base state");
+                    JsonNode request=JsonUtils.parse(new String(readAll(exchange.getRequestBody()),StandardCharsets.UTF_8));
+                    Long id=Long.valueOf(request.path("candidateGraph").path("source").path("documentId").asText());
+                    String raw=produceNormal(request);ObjectNode projection=(ObjectNode)JsonUtils.parse(raw);
+                    runOnce(normalMutation);
+                    snapshots.put(id,projection);rawSnapshots.put(id,raw);casLedgers.put(id,JsonUtils.mapper().createArrayNode());
+                    ObjectNode receipt=JsonUtils.mapper().createObjectNode();receipt.put("projectionSha256",projection.path("projectionSha256").asText());receipt.put("chunks",projection.path("chunks").size());receipt.put("assets",0);receipt.put("immutable",true);receipt.put("qualityVerifiedByRegistry",false);receipt.put("sourceQualityChangedByRegistry",false);receipt.set("projection",projection);
+                    // Preserve Python float lexemes in the real receipt transport.
+                    response=("{\"projection\":"+raw+",\"projectionSha256\":\""+projection.path("projectionSha256").asText()+"\",\"chunks\":"+projection.path("chunks").size()+",\"assets\":0,\"immutable\":true,\"qualityVerifiedByRegistry\":false,\"sourceQualityChangedByRegistry\":false}").getBytes(StandardCharsets.UTF_8);
+                }
                 else if(path.startsWith("/canonical/")){
                     snapshotReads.incrementAndGet();runOnce(snapshotMutation);
                     Long id=idForProjection(path.substring("/canonical/".length()));
+                    if(NormalObservedContract.isNormal(snapshots.get(id))!=(exchange.getLocalAddress().getPort()==normalServer.getAddress().getPort()))throw new IOException("Projection belongs to the other independent registry state");
                     perDocumentSnapshotReads.computeIfAbsent(id,key->new AtomicInteger()).incrementAndGet();events.add("cas:"+id+":start");
                     verifyActualCas(id);response=rawSnapshots.get(id).getBytes(StandardCharsets.UTF_8);events.add("cas:"+id+":end");
                 }else if("/index-canonical".equals(path)){
@@ -110,7 +125,7 @@ class CanonicalRecheckAdviceRealSeamTest {
                     JsonNode request=JsonUtils.parse(new String(readAll(exchange.getRequestBody()),StandardCharsets.UTF_8));
                     indexRequest.set(request.deepCopy());
                     events.add("index:start");runOnce(indexMutation);events.add("index:end");ObjectNode result=JsonUtils.mapper().createObjectNode();
-                    result.put("projectId",request.path("projectId").asText());result.put("indexed",4);result.put("signature",SIGNATURE);
+                    result.put("projectId",request.path("projectId").asText());result.put("indexed",snapshots.values().stream().mapToInt(s->s.path("chunks").size()).sum());result.put("signature",SIGNATURE);
                     result.put("contract",VettingRetrievalHealth.STRUCTURAL_CONTRACT);result.put("targetModule","advisory");
                     result.set("canonicalProjections",request.path("projectionSha256").deepCopy());result.set("competitionScope",scope());
                     result.set("sourcePageEvidence",request.has("sourcePageEvidence")?request.path("sourcePageEvidence").deepCopy():JsonUtils.mapper().createObjectNode());
@@ -120,7 +135,7 @@ class CanonicalRecheckAdviceRealSeamTest {
                     JsonNode request=JsonUtils.parse(new String(readAll(exchange.getRequestBody()),StandardCharsets.UTF_8));events.add("status:start");
                     ObjectNode stored=remoteIndexes.get(request.path("projectId").asText());
                     ObjectNode result=stored==null?JsonUtils.mapper().createObjectNode():stored.deepCopy();
-                    result.put("ready",stored!=null);result.put("readOnly",true);result.put("vectorPoints",stored==null?0:4);
+                    result.put("ready",stored!=null);result.put("readOnly",true);result.put("vectorPoints",stored==null?0:stored.path("indexed").asInt());
                     result.put("indexStatusContract","read-only-existing-canonical-index-v1");
                     response=JsonUtils.write(result).getBytes(StandardCharsets.UTF_8);events.add("status:end");
                 }else if("/retrieve".equals(path)){
@@ -130,7 +145,7 @@ class CanonicalRecheckAdviceRealSeamTest {
             }catch(Throwable failed){status=502;response=("{\"syntheticError\":\""+failed.getClass().getSimpleName()+"\"}").getBytes(StandardCharsets.UTF_8);}
             exchange.getResponseHeaders().set("Content-Type","application/json");exchange.sendResponseHeaders(status,response.length);
             try(OutputStream out=exchange.getResponseBody()){out.write(response);}
-        });server.start();String url="http://127.0.0.1:"+server.getAddress().getPort();canonicalProps.setBaseUrl(url);canonicalProps.setTimeoutMs(30000);canonicalProps.getRetrievalBaseUrls().put("advisory",url);
+        };server.createContext("/",handler);server.start();normalServer=HttpServer.create(new InetSocketAddress("127.0.0.1",0),0);normalServer.setExecutor(httpWorkers);normalServer.createContext("/",handler);normalServer.start();String url="http://127.0.0.1:"+server.getAddress().getPort();canonicalProps.setBaseUrl(url);canonicalProps.setTimeoutMs(30000);canonicalProps.getRetrievalBaseUrls().put("advisory","http://127.0.0.1:"+normalServer.getAddress().getPort());
         for(Long id:snapshots.keySet())register(id);
         assertTrue(AopUtils.isAopProxy(evidence));assertTrue(AopUtils.isAopProxy(reader));
         when(llm.available()).thenReturn(true);when(llm.chatModel()).thenReturn("synthetic-recheck-chat");
@@ -142,7 +157,7 @@ class CanonicalRecheckAdviceRealSeamTest {
         when(llm.chatStructured(anyList(),any())).thenAnswer(call->com.consense.service.advice.AdviceBudgetFixture.contract(llm.chat(call.getArgument(0))));
         resetCounters();
     }
-    @AfterEach void stop(){if(server!=null)server.stop(0);if(httpWorkers!=null)httpWorkers.shutdownNow();}
+    @AfterEach void stop(){if(server!=null)server.stop(0);if(normalServer!=null)normalServer.stop(0);if(httpWorkers!=null)httpWorkers.shutdownNow();}
 
     @Test void successfulRebuildRecordsFullEquivalentResponseAndActualBoundaryCounts() throws Exception {
         long started=System.nanoTime();IndexStatusVO result=advice.rebuildIndex(PROJECT,"fullset");long wall=System.nanoTime()-started;
@@ -166,6 +181,76 @@ class CanonicalRecheckAdviceRealSeamTest {
         String baseline=System.getProperty("consense.recheck.baselineResponse");
         if(baseline!=null){JsonNode old=JsonUtils.parse(new String(Files.readAllBytes(Paths.get(baseline)),StandardCharsets.UTF_8));
             assertEquals(old.path("completeStatusResponse"),receipt.path("completeStatusResponse"),"all JSON fields remain identical to old freeze");}
+    }
+
+    @Test void normalParserSourcesHaveAnExplicitProductPreparationPathBeforeAdvisory() throws Exception {
+        org.junit.jupiter.api.Assumptions.assumeTrue(System.getProperty("consense.test.python")!=null,"requires configured offline Python producer, no model");
+        CanonicalSourceBinding old=bindings.findByProjectIdAndDocumentIdOrderByIdDesc(PROJECT,43L).get(0);bindings.delete(old);bindings.flush();
+        SourceDocument source=documents.findById(43L).get();
+        com.consense.document.DocumentBlock block=new com.consense.document.DocumentBlock();block.setId("normal:body:0");block.setSource("native");block.setLocation("body/0/paragraph");block.setText("AUTHORED normal observed obligation");
+        com.consense.document.DocumentBlock.WordNumbering numbering=new com.consense.document.DocumentBlock.WordNumbering();numbering.setValue(1L);numbering.setLabel("1.");block.setWordNumbering(Collections.singletonList(numbering));
+        source.setTextContent(block.getText());source.setStructuredContentJson(JsonUtils.write(Collections.singletonList(block)));source.setParseCoverageJson("{\"complete\":true,\"failedPages\":[],\"limitations\":[]}");source.setNativePdfEvidenceJson("AUTHORED untouched retained archive marker");documents.saveAndFlush(source);
+        org.springframework.test.web.servlet.MockMvc mvc=org.springframework.test.web.servlet.setup.MockMvcBuilders.webAppContextSetup(web).build();
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/advice/{project}/sources/prepare",PROJECT).param("scope","fullset"))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isOk())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.code").value(0))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.data.complete").value(true))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.data.selectedDocuments").value(2));
+        SourceDocument prepared=documents.findById(43L).get();JsonNode graph=NormalSourceCandidateGraph.requireBound(prepared);
+        assertEquals("AUTHORED untouched retained archive marker",prepared.getNativePdfEvidenceJson());
+        assertFalse(graph.path("humanConfirmed").asBoolean());assertFalse(graph.path("sourceQualityAccepted").asBoolean());
+        assertEquals(0,chatCalls.get());assertEquals(0,history.count());
+        assertEquals(0,indexCalls.get());assertEquals(0,retrieveCalls.get());
+        CanonicalSourceBinding normal=bindings.findByProjectIdAndDocumentIdOrderByIdDesc(PROJECT,43L).get(0);
+        assertNull(normal.getAdoptionManifestSha256());assertNull(normal.getReviewReferenceSha256());assertNull(normal.getFamilyCompositionSha256());assertNull(normal.getFamilyComponentSetSha256());
+        assertEquals("normal_observed",JsonUtils.parse(normal.getSnapshotJson()).path("producerKind").asText());
+        assertEquals(2,evidence.currentBindings(PROJECT,"advisory",Arrays.asList(42L,43L)).size());
+        com.consense.web.dto.CanonicalEvidenceDtos.EvidencePointer pointer=evidence.pointers(PROJECT,43L,normal.getProjectionSha256(),"advisory").get(0);
+        assertEquals("normal_observed_unit",pointer.getAddressKind());assertTrue(pointer.getPhysicalPages().isEmpty());assertFalse(pointer.isHumanConfirmed());assertEquals("normal:body:0",pointer.getParts().get(0).path("blockId").asText());
+        assertEquals("NORMAL_OBSERVED_MODULE_STATE_UNAVAILABLE",assertThrows(CanonicalEvidenceException.class,()->evidence.snapshot(PROJECT,43L,normal.getProjectionSha256(),"vetting")).getMessage());
+        assertEquals("NORMAL_OBSERVED_MODULE_STATE_UNAVAILABLE",assertThrows(CanonicalEvidenceException.class,()->evidence.prepareNormalObserved(PROJECT,43L,"vetting")).getMessage());
+        OerBusinessEvidence.Session normalSession=assertDoesNotThrow(()->business.load(PROJECT,"advisory",documents.findBusinessSourcesByProjectId(PROJECT)));
+        IndexStatusVO indexed=advice.rebuildIndex(PROJECT,"fullset");assertTrue(indexed.isVectorReady());assertEquals(snapshots.values().stream().mapToInt(s->s.path("chunks").size()).sum(),indexed.getIndexed());assertEquals(1,indexCalls.get());
+        assertFalse(business.retrieve(normalSession,"AUTHORED obligation",null).isEmpty());assertEquals(1,retrieveCalls.get());assertEquals(0,chatCalls.get());
+        jdbc.update("UPDATE source_document SET parse_coverage_json=? WHERE id=?","{\"complete\":false,\"failedPages\":[1]}",43L);
+        CanonicalEvidenceException stale=assertThrows(CanonicalEvidenceException.class,()->evidence.currentBindings(PROJECT,"advisory",Arrays.asList(42L,43L)));assertEquals("CANONICAL_SOURCE_STALE",stale.getMessage());
+    }
+
+    @Test void explicitPreparationRetainsCompleteDenominatorWhenBackendIsUnavailable(){
+        server.stop(0);long before=bindings.count();SourcePreparationVO result=advice.prepareSources(PROJECT,"fullset");
+        assertEquals(2,result.getSelectedDocuments());assertEquals(0,result.getPreparedDocuments());assertFalse(result.isComplete());assertFalse(result.isHumanConfirmed());assertFalse(result.isSourceQualityAccepted());
+        assertEquals(2,result.getResults().size());assertEquals("failed",result.getResults().get(0).getStatus());assertEquals("evidence_backend_unavailable",result.getResults().get(0).getReason());assertEquals("unexecuted",result.getResults().get(1).getStatus());
+        assertEquals(before,bindings.count());assertEquals(0,indexCalls.get());assertEquals(0,retrieveCalls.get());assertEquals(0,chatCalls.get());assertEquals(0,history.count());
+    }
+
+    @Test void staleReviewedSourceNeverBecomesAnAutomaticNormalBinding(){
+        long before=bindings.count();jdbc.update("UPDATE source_document SET text_content=? WHERE id=?","changed synthetic source",42L);
+        SourcePreparationVO result=advice.prepareSources(PROJECT,"fullset");
+        assertFalse(result.isComplete());assertEquals(2,result.getSelectedDocuments());assertEquals("failed",result.getResults().get(0).getStatus());assertEquals("source_stale",result.getResults().get(0).getReason());assertEquals("unexecuted",result.getResults().get(1).getStatus());
+        assertEquals(before,bindings.count());assertNull(documents.findById(42L).get().getNormalCandidateJson());assertEquals(0,indexCalls.get());assertEquals(0,chatCalls.get());
+    }
+
+    @Test void missingNormalSourceStructureFailsWithoutSilentlyReducingSelectedScope(){
+        bindings.delete(bindings.findByProjectIdAndDocumentIdOrderByIdDesc(PROJECT,43L).get(0));bindings.flush();long before=bindings.count();
+        SourcePreparationVO result=advice.prepareSources(PROJECT,"fullset");
+        assertEquals(2,result.getSelectedDocuments());assertEquals(1,result.getPreparedDocuments());assertFalse(result.isComplete());assertEquals("already_registered",result.getResults().get(0).getStatus());assertEquals("failed",result.getResults().get(1).getStatus());
+        assertEquals(before,bindings.count());assertEquals(0,indexCalls.get());assertEquals(0,chatCalls.get());assertNull(documents.findById(43L).get().getNormalCandidateJson());
+    }
+
+    @ParameterizedTest @org.junit.jupiter.params.provider.ValueSource(strings={"coverage","structure","routing","original"})
+    void normalPreparationRejectsChangesDuringPublicationBeforeSavingAnyBinding(String change)throws Exception{
+        org.junit.jupiter.api.Assumptions.assumeTrue(System.getProperty("consense.test.python")!=null,"requires configured offline Python producer, no model");
+        bindings.delete(bindings.findByProjectIdAndDocumentIdOrderByIdDesc(PROJECT,43L).get(0));bindings.flush();
+        SourceDocument source=documents.findById(43L).get();com.consense.document.DocumentBlock block=new com.consense.document.DocumentBlock();block.setId("normal:body:0");block.setSource("native");block.setLocation("body/0/paragraph");block.setText("AUTHORED source observation");
+        source.setTextContent(block.getText());source.setStructuredContentJson(JsonUtils.write(Collections.singletonList(block)));source.setParseCoverageJson("{\"complete\":true}");documents.saveAndFlush(source);
+        normalMutation.set(()->{switch(change){
+            case "coverage":jdbc.update("UPDATE source_document SET parse_coverage_json=? WHERE id=?","{\"complete\":false}",43L);break;
+            case "structure":jdbc.update("UPDATE source_document SET structured_content_json=? WHERE id=?","[]",43L);break;
+            case "routing":jdbc.update("UPDATE source_document SET review_role=? WHERE id=?","standard",43L);break;
+            default:try{changeExactLengthRestoredMtime(originals.get(43L));}catch(IOException e){throw new IllegalStateException(e);}
+        }});
+        SourcePreparationVO result=advice.prepareSources(PROJECT,"fullset");assertFalse(result.isComplete());assertEquals(2,result.getSelectedDocuments());assertEquals(1,result.getPreparedDocuments());assertEquals("failed",result.getResults().get(1).getStatus());assertEquals("source_stale",result.getResults().get(1).getReason());
+        assertTrue(bindings.findByProjectIdAndDocumentIdOrderByIdDesc(PROJECT,43L).isEmpty());assertEquals(0,indexCalls.get());assertEquals(0,retrieveCalls.get());assertEquals(0,chatCalls.get());assertEquals(0,history.count());
     }
 
     @Test void explicitCompositeCrossesTheActualLocalHttpClientWithoutEnteringSealedSources(){
@@ -353,12 +438,24 @@ class CanonicalRecheckAdviceRealSeamTest {
         oer.put("inputContract",INPUT);oer.put("assetReturnContract","source-and-projection-bound-content-addressed-assets-v1");oer.put("recipe","scope-bound-dual2048-cuda-fp32-no-fixed-cache-v1");
         oer.put("targetModule","advisory");oer.put("sourceQualityVerifiedByHealth",false);oer.put("parserCandidatesAcceptedByRetrieval",false);oer.put("canonicalProjectionEndpoint","/project");oer.set("scopePolicy",scope);
         oer.put("indexStatusContract","read-only-existing-canonical-index-v1");
+        oer.set("normalObserved",JsonUtils.parse(new String(getClass().getResourceAsStream("/canonical/normal-observed/authored-health.json").readAllBytes(),StandardCharsets.UTF_8)).path("oer").path("normalObserved"));
         oer.set("nativeCanonical",NativeCanonicalFixture.capability());oer.set("nativePdfCanonical",NativePdfCanonicalFixture.capability());
         ObjectNode windows=(ObjectNode)h.path("retrieval").path("sourceWindows");windows.set("competitionScope",scope.deepCopy());windows.put("oerInputContract",INPUT);windows.put("oerTargetModule","advisory");
         ObjectNode algorithms=(ObjectNode)windows.path("algorithms");
         for(String name:Arrays.asList("oer_server.py","competition_scope.py","artifact_store.py","structured_parser_evidence.py","canonical_projection.py","oer_source_registry.py","oer_request_evidence.py"))algorithms.put(name,VettingCorpus.hash("AUTHORED health "+name));
+        for(String name:Arrays.asList("normal_observed_projection.py","normal_observed_server.py","unified_source_registry.py"))algorithms.put(name,VettingCorpus.hash("AUTHORED health "+name));
         for(String name:NativeCanonicalContract.ALGORITHMS)algorithms.put(name,VettingCorpus.hash("AUTHORED health "+name));
         algorithms.setAll(NativePdfCanonicalFixture.algorithms(snapshots.get(42L)));oer.put("sourcePageIndexContract","explicit-composite-index-pins-v1");return h;
+    }
+    String produceNormal(JsonNode request)throws Exception{
+        Path directory=Files.createTempDirectory(temporary,"normal-producer-"),input=directory.resolve("request.json"),output=directory.resolve("projection.json"),script=directory.resolve("produce.py");
+        Files.write(input,JsonUtils.write(request).getBytes(StandardCharsets.UTF_8));Files.copy(getClass().getResourceAsStream("/canonical/normal-observed/produce.py"),script);
+        Path tools=Paths.get(System.getProperty("consense.test.wireFixture")).getParent();
+        Process process=new ProcessBuilder(System.getProperty("consense.test.python"),script.toString(),tools.toString(),input.toString(),directory.resolve("cas").toString(),output.toString()).redirectErrorStream(true).redirectOutput(directory.resolve("producer.log").toFile()).start();
+        if(!process.waitFor(20,TimeUnit.SECONDS)){process.destroyForcibly();throw new IOException("Authored offline normal producer timed out");}
+        if(process.exitValue()!=0)throw new IOException("Authored offline normal producer failed: "+Files.readString(directory.resolve("producer.log")));
+        normalCasRoots.put(Long.valueOf(request.path("candidateGraph").path("source").path("documentId").asText()),directory.resolve("cas"));
+        return Files.readString(output,StandardCharsets.UTF_8);
     }
     ObjectNode scope(){ObjectNode s=JsonUtils.mapper().createObjectNode();s.put("targetModule","advisory");s.put("inputContract",INPUT);s.put("sourceQualityChanged",false);s.putObject("policyIdentity").put("manifestSha256",POLICY);return s;}
     ObjectNode retrieveFixture(String key)throws Exception{
@@ -379,7 +476,9 @@ class CanonicalRecheckAdviceRealSeamTest {
         }catch(IOException e){throw new IllegalStateException(e);}
     }
     void newScopeMember(){SourceDocument d=new SourceDocument();d.setProjectId(PROJECT);d.setCategory(SourceDocument.CATEGORY_VETTING_PACKAGE);d.setFileKey("PRE");d.setFileName("new-current-project-PRE.txt");d.setParseStatus("PARSED");d.setReviewRole("tender");d.setTextContent("NEW scope source");documents.saveAndFlush(d);}
-    void verifyActualCas(Long id)throws IOException{for(JsonNode record:casLedgers.get(id)){byte[] actual=Files.readAllBytes(temporary.resolve(record.path("relativePath").asText()));
+    void verifyActualCas(Long id)throws IOException{
+        if(normalCasRoots.containsKey(id)){JsonNode descriptor=snapshots.get(id).path("observationManifestRef");byte[] bytes=Files.readAllBytes(normalCasRoots.get(id).resolve(descriptor.path("relativePath").asText()));if(bytes.length!=descriptor.path("byteCount").asLong()||!shaBytes(bytes).equals(descriptor.path("sha256").asText()))throw new IOException("Actual normal observation CAS bytes changed");return;}
+        for(JsonNode record:casLedgers.get(id)){byte[] actual=Files.readAllBytes(temporary.resolve(record.path("relativePath").asText()));
         if(actual.length!=record.path("byteCount").asInt()||!shaBytes(actual).equals(record.path("sha256").asText()))throw new IOException("SYNTHETIC actual CAS bytes changed");}}
     Long idForProjection(String projection){return snapshots.entrySet().stream().filter(e->e.getValue().path("projectionSha256").asText().equals(projection)).map(Map.Entry::getKey).findFirst().orElseThrow(()->new IllegalArgumentException("Unknown projection"));}
     Map<String,Integer> snapshotCounts(){Map<String,Integer> result=new TreeMap<>();perDocumentSnapshotReads.forEach((id,count)->result.put(String.valueOf(id),count.get()));return result;}

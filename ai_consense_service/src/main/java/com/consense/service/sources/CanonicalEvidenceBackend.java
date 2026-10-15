@@ -27,6 +27,28 @@ public class CanonicalEvidenceBackend {
             catch(java.nio.charset.CharacterCodingException invalid){throw new CanonicalEvidenceException(HttpStatus.BAD_GATEWAY,"CANONICAL_JSON_INVALID");}}
     }
     public String health(){return get(null,null,null,null,false,null,properties.getMaxSnapshotBytes()).json();}
+    public String normalHealth(String module){return request(normalBase(module).newBuilder().addPathSegment("health").build(),Math.min(properties.getMaxSnapshotBytes(),NormalObservedPreparationService.MAX_BYTES)).json();}
+    public String normalSnapshot(String projection,String module){
+        if(projection==null||!projection.matches("[a-f0-9]{64}"))throw new CanonicalEvidenceException(HttpStatus.BAD_REQUEST,"CANONICAL_SHA_INVALID");
+        return request(normalBase(module).newBuilder().addPathSegment("canonical").addPathSegment(projection).addQueryParameter("module",module).build(),Math.min(properties.getMaxSnapshotBytes(),NormalObservedPreparationService.MAX_BYTES)).json();
+    }
+    public String normalObserved(String request,String module){
+        int maximum=Math.min(properties.getMaxSnapshotBytes(),NormalObservedPreparationService.MAX_BYTES);
+        byte[] bytes=request.getBytes(StandardCharsets.UTF_8);
+        if(bytes.length>maximum)throw new CanonicalEvidenceException(HttpStatus.BAD_REQUEST,"NORMAL_OBSERVED_TOO_LARGE");
+        HttpUrl base=normalBase(module);
+        if(maximum<=0)
+            throw new CanonicalEvidenceException(HttpStatus.SERVICE_UNAVAILABLE,"OER_EVIDENCE_CONFIG_INVALID");
+        Request wire=new Request.Builder().url(base.newBuilder().addPathSegment("normal-observed").build())
+                .post(RequestBody.create(MediaType.parse("application/json; charset=utf-8"),bytes)).build();
+        return execute(wire,maximum).json();
+    }
+    private HttpUrl normalBase(String module){
+        if(!java.util.Arrays.asList("drafting","vetting","advisory").contains(module))throw new CanonicalEvidenceException(HttpStatus.BAD_REQUEST,"CANONICAL_MODULE_INVALID");
+        String configured=properties.getRetrievalBaseUrls().getOrDefault(module,properties.getBaseUrl());HttpUrl base=HttpUrl.parse(configured==null?"":configured);
+        if(base==null||!base.username().isEmpty()||!base.password().isEmpty()||base.query()!=null||base.fragment()!=null||!base.encodedPath().equals("/")||properties.getTimeoutMs()<=0)
+            throw new CanonicalEvidenceException(HttpStatus.SERVICE_UNAVAILABLE,"OER_EVIDENCE_CONFIG_INVALID");return base;
+    }
     public String snapshot(String projection,String module){return get(projection,null,null,null,false,module,Math.min(properties.getMaxSnapshotBytes(),NativeDocumentCollectionContract.MAX_BYTES)).json();}
     /** A batch is addressed by its ordinal under one sealed document root, never by a caller CAS path. */
     public Reply batch(String projection,int ordinal,String module){
@@ -73,10 +95,13 @@ public class CanonicalEvidenceBackend {
     }
     /** Transport seam for in-process contract probes; production keeps the same bounded fixed request. */
     protected Reply request(HttpUrl url,int maximum){
-        OkHttpClient client=new OkHttpClient.Builder().followRedirects(false).followSslRedirects(false)
+        return execute(new Request.Builder().url(url).get().build(),maximum);
+    }
+    private Reply execute(Request request,int maximum){
+        OkHttpClient client=new OkHttpClient.Builder().followRedirects(false).followSslRedirects(false).retryOnConnectionFailure(false)
                 .readTimeout(properties.getTimeoutMs(),TimeUnit.MILLISECONDS)
                 .callTimeout(properties.getTimeoutMs(),TimeUnit.MILLISECONDS).build();
-        try(Response response=client.newCall(new Request.Builder().url(url).get().build()).execute()){
+        try(Response response=client.newCall(request).execute()){
             if(!response.isSuccessful()||response.body()==null)throw new CanonicalEvidenceException(HttpStatus.BAD_GATEWAY,"OER_EVIDENCE_UPSTREAM_UNAVAILABLE");
             ResponseBody body=response.body();if(body.contentLength()>maximum)throw new CanonicalEvidenceException(HttpStatus.BAD_GATEWAY,"OER_EVIDENCE_TOO_LARGE");
             ByteArrayOutputStream out=new ByteArrayOutputStream();byte[] block=new byte[8192];int n;

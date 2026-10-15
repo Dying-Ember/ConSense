@@ -29,7 +29,7 @@ export async function streamAdvice(projectId: string, request: AdviceStreamReque
   })
   if (!response.ok || !response.headers.get('Content-Type')?.includes('text/event-stream') || !response.body) {
     const failure = await response.json().catch(() => null)
-    throw new ApiError(failure?.code ?? response.status, failure?.message ?? 'Unable to start the consultation stream.')
+    throw new ApiError(failure?.code ?? response.status, failure?.message ?? 'Unable to start the consultation stream.', failure?.reason)
   }
   const reader = response.body.getReader(), decoder = new TextDecoder('utf-8', { fatal: true })
   const abort = () => { void reader.cancel().catch(() => undefined) }
@@ -53,7 +53,7 @@ export async function streamAdvice(projectId: string, request: AdviceStreamReque
       if (!value.response || value.response.sessionId !== request.sessionId || typeof value.response.grounded !== 'boolean' || !Array.isArray(value.response.citations) || !Array.isArray(value.response.sources)) throw new Error('ADVICE_STREAM_INVALID_COMMIT')
       completed = value.response
     } else if (event === 'error') {
-      throw new ApiError(typeof value.code === 'number' ? value.code : -1, typeof value.message === 'string' ? value.message : 'Consultation failed before completion.')
+      throw new ApiError(typeof value.code === 'number' ? value.code : -1, typeof value.message === 'string' ? value.message : 'Consultation failed before completion.', value.reason)
     } else throw new Error('ADVICE_STREAM_UNKNOWN_EVENT')
   }
   try {

@@ -9,6 +9,7 @@ import com.consense.service.sources.CanonicalSourcePageService;
 import com.consense.service.sources.NativeCanonicalContract;
 import com.consense.service.sources.NativePdfCanonicalContract;
 import com.consense.service.sources.NativePdfSourceFamilyContract;
+import com.consense.service.sources.NormalObservedContract;
 import com.consense.service.vetting.VettingCorpus.Chunk;
 import com.consense.service.vetting.VettingCorpus.Part;
 import com.consense.vector.VectorStore;
@@ -278,7 +279,7 @@ public class OerBusinessEvidence {
             Chunk first=chunks.get(0);List<com.consense.document.DocumentBlock> blocks=new ArrayList<>();Set<String> observed=new HashSet<>();
             for(Chunk c:chunks)for(Part p:c.getParts())if(observed.add(p.getBlockId()+"|"+p.getStartOffset()+"|"+p.getEndOffset())){
                 com.consense.document.DocumentBlock b=new com.consense.document.DocumentBlock();b.setId(p.getBlockId());b.setLocation(p.getAnchor());
-                b.setText(p.getText());b.setOriginalText(p.getText());b.setSource("source_reviewed_canonical_observation");
+                b.setText(p.getText());b.setOriginalText(p.getText());b.setSource(NormalObservedContract.isNormal(c.getCanonicalPayload())?"normal_observed_candidate":"source_reviewed_canonical_observation");
                 if(p.getPageNo()!=null)b.setPageNo(Integer.valueOf(p.getPageNo().substring(1)));
                 List<Double> box=p.getBbox();if(box!=null)b.setBbox(box.stream().mapToDouble(Double::doubleValue).toArray());blocks.add(b);
             }
@@ -361,6 +362,7 @@ public class OerBusinessEvidence {
 
     private static Chunk view(JsonNode raw,EvidencePointer pointer,SourceDocument source) {
         boolean nativeDocx=NativeCanonicalContract.SCHEMA.equals(pointer.getProjectionSchema());
+        boolean normal=NormalObservedContract.isNormal(raw);
         Chunk c=new Chunk();c.setId(raw.path("id").asText());c.setContent(raw.path("content").asText());c.setDocumentId(raw.path("documentId").asText());
         c.setRole(raw.path("role").asText());c.setFileKey(source.getFileKey()==null?"OTHER":source.getFileKey());c.setFileName(pointer.getSourceFilename().asText());
         c.setSourceHash(raw.path("sourceHash").asText());c.setOriginalSourceSha256(raw.path("originalSourceSha256").asText());c.setSourceSha256(raw.path("sourceSha256").asText());
@@ -371,27 +373,39 @@ public class OerBusinessEvidence {
         c.setMetadataVersion(raw.path("metadataVersion").asText());c.setSegmentationVersion(raw.path("segmentationVersion").asText());
         c.setNativeTableMetadataVersion(raw.path("nativeTableMetadataVersion").asText());c.setSourceQualityMetadataVersion(raw.path("sourceQualityMetadataVersion").asText());
         c.setSourceQualityHash(raw.path("sourceQualityHash").asText());
-        c.setSourceQuality(unknownQuality());
+        c.setSourceQuality(unknownQuality(normal));
         List<Part> parts=new ArrayList<>();for(JsonNode p:raw.path("parts")) {
             Part part=new Part();part.setText(p.path("text").asText());part.setAnchor(p.path("anchor").asText());part.setBlockId(p.path("blockId").asText());
             part.setStartOffset(p.path("startOffset").asInt());part.setEndOffset(p.path("endOffset").asInt());
-            part.setPageNo(nativeDocx?null:"P"+p.path("physicalPageNo").asInt());
-            part.setBbox(nativeDocx?null:xywh(p.path("bbox")));part.setExtractionSource("source_reviewed_canonical");parts.add(part);
+            part.setPageNo(nativeDocx?null:normal?normalPage(p):"P"+p.path("physicalPageNo").asInt());
+            part.setBbox(nativeDocx||normal?null:xywh(p.path("bbox")));part.setExtractionSource(normal?"normal_observed_candidate":"source_reviewed_canonical");
+            if(normal){if(p.has("sourcePosition"))part.setSourcePosition(p.get("sourcePosition").deepCopy());if(p.has("wordObservation"))part.setWordObservation(p.get("wordObservation").deepCopy());}
+            parts.add(part);
         }
         c.setParts(parts);c.setAnchor(raw.path("anchor").isTextual()?raw.path("anchor").asText():parts.get(0).getAnchor());
-        List<Integer> pages=pointer.getPhysicalPages();c.setPageNo(nativeDocx?null:pages.size()==1?"P"+pages.get(0):"P"+pages.get(0)+"–P"+pages.get(pages.size()-1));
+        List<Integer> pages=pointer.getPhysicalPages();c.setPageNo(nativeDocx||normal&&pages.isEmpty()?null:pages.size()==1?"P"+pages.get(0):"P"+pages.get(0)+"–P"+pages.get(pages.size()-1));
         c.setBbox(parts.size()==1?parts.get(0).getBbox():null);c.setCanonicalPayload(raw.deepCopy());c.setCanonicalEvidence(pointer);return c;
     }
     private static List<Double> xywh(JsonNode b){if(!b.isArray()||b.size()!=4)return null;return Arrays.asList(b.get(0).asDouble(),b.get(1).asDouble(),b.get(2).asDouble()-b.get(0).asDouble(),b.get(3).asDouble()-b.get(1).asDouble());}
+    private static String normalPage(JsonNode part){return part.path("physicalPageNo").isIntegralNumber()&&part.path("physicalPageNo").asInt()>0?"P"+part.path("physicalPageNo").asInt():null;}
     private static Chunk copy(Chunk c){require(c!=null,"ranked canonical chunk missing");return JsonUtils.read(JsonUtils.write(c),Chunk.class);}
 
     /** Checks an opaque canonical payload against the read-only model view; no legacy-version substitution. */
     static String canonicalViewStatus(Chunk c) {
         JsonNode raw=c.getCanonicalPayload();EvidencePointer p=c.getCanonicalEvidence();if(raw==null||p==null)return "canonical_view_missing";
         boolean nativeDocx=NativeCanonicalContract.SCHEMA.equals(p.getProjectionSchema());
+        boolean normal=NormalObservedContract.isNormal(raw)||NormalObservedContract.SCHEMA.equals(p.getProjectionSchema())||NormalObservedContract.PRODUCER.equals(p.getProducerKind());
         boolean family=NativePdfSourceFamilyContract.isFamily(raw)||NativePdfSourceFamilyContract.SCHEMA.equals(p.getProjectionSchema())||NativePdfSourceFamilyContract.PRODUCER.equals(p.getProducerKind());
         boolean nativePdf=!family&&(NativePdfCanonicalContract.isNativePdf(raw)||NativePdfCanonicalContract.SCHEMA.equals(p.getProjectionSchema())||NativePdfCanonicalContract.PRODUCER.equals(p.getProducerKind()));
-        if(family){
+        if(normal){
+            try{NormalObservedContract.validateChunk(raw);}catch(RuntimeException rejected){return "canonical_view_normal_contract_differs";}
+            List<Integer> pages=p.getPhysicalPages();String label=pages==null||pages.isEmpty()?null:pages.size()==1?"P"+pages.get(0):"P"+pages.get(0)+"–P"+pages.get(pages.size()-1);
+            if(!NormalObservedContract.SCHEMA.equals(p.getProjectionSchema())||!NormalObservedContract.PRODUCER.equals(p.getProducerKind())
+                    ||!NormalObservedContract.VERSION.equals(raw.path("projectionVersion").asText())||p.getStorageShape()!=null||p.getBboxConvention()!=null
+                    ||!"unknown".equals(p.getOriginalGeometryStatus())||!"unknown".equals(p.getVisualReturnStatus())
+                    ||p.getNativePdfEvidence()!=null||p.getNativePdfSourceFamilyEvidence()!=null||p.getSourceFamilyOriginRef()!=null
+                    ||!Objects.equals(label,c.getPageNo())||c.getBbox()!=null)return "canonical_view_normal_contract_differs";
+        }else if(family){
             try{NativePdfSourceFamilyContract.validateChunk(raw,c.getOriginalSourceSha256());NativePdfSourceFamilyContract.validateOriginDisplay(raw,p.getNativePdfSourceFamilyEvidence());}catch(RuntimeException rejected){return "canonical_view_native_pdf_family_contract_differs";}
             JsonNode d=p.getNativePdfSourceFamilyEvidence();JsonNode physical=raw.path("physicalPages");String pageView=physical.size()==1?"P"+physical.get(0).asInt():"P"+physical.get(0).asInt()+"–P"+physical.get(physical.size()-1).asInt();
             if(!NativePdfSourceFamilyContract.SCHEMA.equals(p.getProjectionSchema())||!NativePdfSourceFamilyContract.PRODUCER.equals(p.getProducerKind())
@@ -431,14 +445,14 @@ public class OerBusinessEvidence {
                 ||!Objects.equals(p.getProjectionRevisionSha256(),raw.path("projectionRevisionSha256").asText())||!Objects.equals(p.getUnitId(),raw.path("unitId").asText())
                 ||!Objects.equals(c.getSourcePurpose(),raw.path("sourcePurpose").asText())||!Objects.equals(c.getSourceClass(),raw.path("sourceClass").asText())
                 ||!Objects.equals(c.getClauseId(),textOrNull(raw,"clauseId"))||!Objects.equals(c.getClauseHeadingLocation(),textOrNull(raw,"clauseHeadingLocation"))
-                ||!Objects.equals(c.getSourceQuality(),unknownQuality())||!Objects.equals(c.getFileName(),p.getSourceFilename().asText())
-                ||!"canonical_adoption_unit".equals(p.getAddressKind())||(!nativeDocx&&!nativePdf&&!family&&!"normalized_xyxy_original_page".equals(p.getBboxConvention()))
+                ||!Objects.equals(c.getSourceQuality(),unknownQuality(normal))||!Objects.equals(c.getFileName(),p.getSourceFilename().asText())
+                ||!(normal?"normal_observed_unit":"canonical_adoption_unit").equals(p.getAddressKind())||(!normal&&!nativeDocx&&!nativePdf&&!family&&!"normalized_xyxy_original_page".equals(p.getBboxConvention()))
                 ||!Objects.equals(raw.path("eligibleModules"),JsonUtils.mapper().valueToTree(c.getEligibleModules()))
                 ||!Objects.equals(raw.path("physicalPages"),JsonUtils.mapper().valueToTree(p.getPhysicalPages()))
                 ||!raw.path("eligibleModules").equals(p.getEligibleModules())||!raw.path("parts").equals(p.getParts())
                 ||!raw.path("sourceSpans").equals(p.getSourceSpans())||!Objects.equals(raw.get("tableGroup"),p.getTableGroup())
                 ||!raw.path("assetRefs").equals(p.getAssetRefs())||!raw.path("relations").equals(p.getRelations())
-                ||!raw.path("adoption").equals(p.getAdoption())||!raw.path("sourceQuality").equals(p.getSourceQuality())
+                ||(normal?p.getAdoption()!=null&&!p.getAdoption().isMissingNode()&&!p.getAdoption().isNull():!raw.path("adoption").equals(p.getAdoption()))||!raw.path("sourceQuality").equals(p.getSourceQuality())
                 ||!raw.path("sourceOrder").equals(p.getSourceOrder())
                 ||p.isHumanConfirmed()||!"unknown".equals(raw.path("sourceQuality").path("semanticQuality").asText()))return "canonical_view_identity_differs";
         if(c.getParts()==null||c.getParts().size()!=raw.path("parts").size())return "canonical_view_parts_differ";
@@ -446,12 +460,13 @@ public class OerBusinessEvidence {
             if(!Objects.equals(part.getText(),original.path("text").asText())||!Objects.equals(part.getAnchor(),original.path("anchor").asText())
                     ||!Objects.equals(part.getBlockId(),original.path("blockId").asText())||part.getStartOffset()!=original.path("startOffset").asInt()
                     ||part.getEndOffset()!=original.path("endOffset").asInt()||part.getEndOffset()-part.getStartOffset()!=part.getText().length()
-                    ||!Objects.equals(part.getBbox(),nativeDocx?null:xywh(original.path("bbox")))||!Objects.equals(part.getPageNo(),nativeDocx?null:"P"+original.path("physicalPageNo").asInt())
-                    ||!"source_reviewed_canonical".equals(part.getExtractionSource()))return "canonical_view_parts_differ";
+                    ||!Objects.equals(part.getBbox(),nativeDocx||normal?null:xywh(original.path("bbox")))||!Objects.equals(part.getPageNo(),nativeDocx?null:normal?normalPage(original):"P"+original.path("physicalPageNo").asInt())
+                    ||!(normal?"normal_observed_candidate":"source_reviewed_canonical").equals(part.getExtractionSource())
+                    ||normal&&(!Objects.equals(part.getSourcePosition(),original.get("sourcePosition"))||!Objects.equals(part.getWordObservation(),original.get("wordObservation"))))return "canonical_view_parts_differ";
         }return null;
     }
     private static String textOrNull(JsonNode raw,String field){return raw.path(field).isTextual()?raw.path(field).asText():null;}
-    private static VettingSourceQuality.Info unknownQuality(){VettingSourceQuality.Info info=new VettingSourceQuality.Info();
-        info.getLimitations().add("canonical_adoption_does_not_establish_whole_source_semantics_or_coverage");return info;}
+    private static VettingSourceQuality.Info unknownQuality(boolean normal){VettingSourceQuality.Info info=new VettingSourceQuality.Info();
+        info.getLimitations().add(normal?"normal_observations_are_unreviewed_source_quality_and_whole_source_coverage_unknown":"canonical_adoption_does_not_establish_whole_source_semantics_or_coverage");return info;}
     private static void require(boolean ok,String why){if(!ok)throw new IllegalStateException("Canonical business evidence rejected: "+why);}
 }

@@ -4,15 +4,18 @@ import type { LlmProfileId, LlmSelection } from './types'
 interface ApiEnvelope<T> {
   code: number
   message: string
+  reason?: string
   data: T
 }
 
 export class ApiError extends Error {
   code: number
+  reason?: string
 
-  constructor(code: number, message: string) {
+  constructor(code: number, message: string, reason?: string) {
     super(message)
     this.code = code
+    this.reason = typeof reason === 'string' ? reason : undefined
     this.name = 'ApiError'
   }
 }
@@ -47,13 +50,15 @@ async function unwrap<T>(promise: Promise<{ data: ApiEnvelope<T> }>, reportError
     const response = await promise
     const envelope = response.data
     if (envelope.code !== 0) {
-      throw new ApiError(envelope.code, envelope.message || '请求失败')
+      throw new ApiError(envelope.code, envelope.message || '请求失败', envelope.reason)
     }
     return envelope.data
   } catch (error) {
     const message = toMessage(error)
     if (reportError) errorReporter?.(message)
-    throw error instanceof ApiError ? error : new ApiError(-1, message)
+    if (error instanceof ApiError) throw error
+    const envelope = axios.isAxiosError(error) ? error.response?.data as Partial<ApiEnvelope<unknown>> | undefined : undefined
+    throw new ApiError(typeof envelope?.code === 'number' ? envelope.code : -1, message, envelope?.reason)
   }
 }
 

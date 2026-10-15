@@ -64,12 +64,14 @@ function Assert-OerCudaHealth($Health) {
     }
     if ($oerUnified) {
         $sourceKinds = $Health.oer.unifiedCanonical.sourceKinds
-        if ($sourceKinds -isnot [System.Array] -or $sourceKinds.Count -notin @(4,5)) {
-            throw 'Unified OER source kinds must be the complete legacy or installed family set.'
+        if ($sourceKinds -isnot [System.Array] -or $sourceKinds.Count -notin @(4,5,6)) {
+            throw 'Unified OER source kinds must be the complete legacy, family or normal observed set.'
         }
         $expectedKinds = @('scanned_pdf','native_docx_snapshot','native_docx_collection','native_pdf')
-        $hasFamilyKind = $sourceKinds.Count -eq 5
+        $hasFamilyKind = $sourceKinds.Count -ge 5
+        $hasNormalKind = $sourceKinds.Count -eq 6
         if ($hasFamilyKind) { $expectedKinds += 'native_pdf_source_family' }
+        if ($hasNormalKind) { $expectedKinds += 'normal_observed' }
         $seenKinds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
         foreach ($kind in $sourceKinds) {
             if ($kind -isnot [string] -or $expectedKinds -cnotcontains $kind -or -not $seenKinds.Add($kind)) {
@@ -112,6 +114,38 @@ function Assert-OerCudaHealth($Health) {
                     ($expected -is [bool] -and ($actual -isnot [bool] -or $actual -ne $expected)) -or
                     ($expected -is [int] -and (($actual -isnot [int] -and $actual -isnot [long]) -or $actual -ne $expected))) {
                     throw 'Unified OER family capability differs from the exact installed contract.'
+                }
+            }
+        }
+        $normalAdvertised = @($Health.oer.PSObject.Properties.Name) -ccontains 'normalObserved'
+        if (-not $hasNormalKind -and $normalAdvertised) {
+            throw 'Unified OER cannot advertise a normal observed capability without its source kind.'
+        }
+        if ($hasNormalKind) {
+            $expectedNormal = [ordered]@{
+                schema='consense.normal-observed.v1';version='complete-bound-normal-observations-v1'
+                producerKind='normal_observed';projectionEndpoint='/normal-observed'
+                candidateGraphSchema='consense.canonical-candidate.v1'
+                candidateGraphVersion='actual-normal-source-unit-whole-page-observations-v2'
+                completeUnitPolicy='complete-bound-generation-all-units-in-source-order'
+                nonTextUnitPolicy='retained-in-complete-graph-not-submitted-to-model'
+                artifactReadValidation='complete-manifest-actual-cas-reconstruction-every-request'
+                originalByteVerifier='java_current_source_reader';observerActor='application'
+                sourceQualityAccepted=$false;semanticScopeVerified=$false;humanConfirmed=$false
+                adoptionStatus='candidate_unverified';maximumMessageBytes=16777216
+            }
+            $normalCapability=$Health.oer.normalObserved
+            $normalFields=@($normalCapability.PSObject.Properties.Name)
+            if (-not $normalAdvertised -or $null -eq $normalCapability -or $normalFields.Count -ne $expectedNormal.Count) {
+                throw 'Unified OER normal observed capability is absent or has unexpected fields.'
+            }
+            foreach ($name in $expectedNormal.Keys) {
+                $expected=$expectedNormal[$name];$actual=$normalCapability.$name
+                if ($normalFields -cnotcontains $name -or
+                    ($expected -is [string] -and ($actual -isnot [string] -or $actual -cne $expected)) -or
+                    ($expected -is [bool] -and ($actual -isnot [bool] -or $actual -ne $expected)) -or
+                    ($expected -is [int] -and (($actual -isnot [int] -and $actual -isnot [long]) -or $actual -ne $expected))) {
+                    throw 'Unified OER normal observed capability differs from the installed contract.'
                 }
             }
         }
@@ -192,6 +226,21 @@ function New-OerFrozenSource {
             $manifest[$file.Name] -ne (Get-FileHash -LiteralPath (Join-Path $freezeCode $file.Name) -Algorithm SHA256).Hash.ToLowerInvariant()) {
             throw 'OER source changed while freezing it; no process was started.'
         }
+    }
+    # server.py imports this sibling even when GPU Job coordination is disabled.
+    $coordinatorRoot=Join-Path (Split-Path -Parent $oerToolRoot) 'offline_delivery'
+    $frozenCoordinator=Join-Path $freezeRoot 'offline_delivery'
+    New-Item -ItemType Directory -Path $frozenCoordinator | Out-Null
+    foreach($dependency in @('coordinator.py','delivery.py','request_stage.py','gpu_stage.py')) {
+        $source=Join-Path $coordinatorRoot $dependency
+        $target=Join-Path $frozenCoordinator $dependency
+        $sha=(Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash.ToLowerInvariant()
+        Copy-Item -LiteralPath $source -Destination $target
+        if ($sha -cne (Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash.ToLowerInvariant() -or
+            $sha -cne (Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash.ToLowerInvariant()) {
+            throw 'OER coordinator dependency changed while freezing it; no process was started.'
+        }
+        $manifest['../offline_delivery/'+$dependency]=$sha
     }
     $manifestPath = Join-Path $freezeRoot 'source-manifest.json'
     $manifest | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $manifestPath -Encoding utf8

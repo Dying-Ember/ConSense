@@ -1,11 +1,11 @@
 import { sha256Bytes } from './sha256Bytes'
 
-/** Read-only canonical adoption addresses. Retrieval episode unit IDs are not addresses here. */
+/** Read-only complete source-unit addresses. Retrieval episode unit IDs are not addresses here. */
 export type CanonicalEvidenceModule = 'vetting' | 'advisory' | 'drafting'
 export type NormalizedOriginalPageBox = [number, number, number, number]
 
 export interface CanonicalEvidenceAddress {
-  addressKind: 'canonical_adoption_unit'
+  addressKind: 'canonical_adoption_unit' | 'normal_observed_unit'
   projectId: string
   documentId: string | number
   module: CanonicalEvidenceModule
@@ -19,17 +19,17 @@ export interface CanonicalEvidenceAddress {
   projectionRevisionSha256: string
   sourceFilename: string
   sourceOrder: number | null
-  sourceRenderEvidenceIdentitySha256?: string
+  sourceRenderEvidenceIdentitySha256?: string | null
 }
 
 export interface CanonicalEvidencePart extends Record<string, unknown> {
   blockId: string
   text: string
-  physicalPageNo?: number
+  physicalPageNo?: number | null
   sourceSha256: string
   bbox?: NormalizedOriginalPageBox | null
   bboxConvention?: 'normalized_xyxy_original_page'
-  sourcePosition?: NativeDocxPosition
+  sourcePosition?: NativeDocxPosition | NormalObservedPosition
   textTransform?: { textChannel: string; sourceStartUtf16: number; sourceEndUtf16: number; [key: string]: unknown }
   sourceOrder?: number | null
 }
@@ -40,6 +40,13 @@ export interface NativeDocxPosition extends Record<string, unknown> {
   partName: string
   partSha256: string
   nodePath: string
+}
+
+export interface NormalObservedPosition extends Record<string, unknown> {
+  kind: 'physical_page' | 'native_location'
+  nodePath: string
+  physicalPageNo?: number | null
+  story?: string
 }
 
 export interface CanonicalEvidenceAsset extends Record<string, unknown> {
@@ -63,9 +70,9 @@ export interface CanonicalEvidenceAsset extends Record<string, unknown> {
 }
 
 export interface CanonicalEvidencePointer extends CanonicalEvidenceAddress, Record<string, unknown> {
-  projectionSchema?: 'consense.canonical-projection.v1' | 'consense.canonical-projection.v2'
+  projectionSchema?: 'consense.canonical-projection.v1' | 'consense.canonical-projection.v2' | 'consense.normal-observed.v1'
   producerKind?: string
-  storageShape?: string
+  storageShape?: string | null
   originalGeometryStatus?: string
   visualReturnStatus?: string
   bboxConvention?: 'normalized_xyxy_original_page' | null
@@ -75,9 +82,9 @@ export interface CanonicalEvidencePointer extends CanonicalEvidenceAddress, Reco
   parts: CanonicalEvidencePart[]
   sourceSpans: Array<Record<string, unknown>>
   assetRefs: CanonicalEvidenceAsset[]
-  tableGroup: ({ tableGroupId: string; physicalPages: number[] } & Record<string, unknown>) | null
+  tableGroup: ({ tableGroupId?: string; physicalPages?: number[] } & Record<string, unknown>) | null
   relations: Array<Record<string, unknown>>
-  adoption: Record<string, unknown>
+  adoption: Record<string, unknown> | null
   sourceQuality: Record<string, unknown>
   sourcePageRenderRefs?: CanonicalEvidenceAsset[]
   sourceRenderCaptureCompleteness?: Record<string, unknown>
@@ -122,6 +129,11 @@ function box(value: unknown, reason: string) {
 
 export function isNativeEvidence(pointer: CanonicalEvidencePointer): boolean {
   return pointer.projectionSchema === nativeSchema && pointer.producerKind === 'native_docx'
+}
+
+export function isNormalObservedEvidence(pointer: CanonicalEvidencePointer): boolean {
+  return pointer.projectionSchema === 'consense.normal-observed.v1' && pointer.producerKind === 'normal_observed'
+    && pointer.addressKind === 'normal_observed_unit'
 }
 
 function nativePosition(value: unknown, sourceSha256: string): NativeDocxPosition {
@@ -202,15 +214,81 @@ function validateNativePointer(address: CanonicalEvidenceAddress, data: Record<s
   return { ...data, tableGroup } as unknown as CanonicalEvidencePointer
 }
 
+/** Normal parser observations have their own unreviewed authority and literal location contract. */
+function validateNormalObservedPointer(address: CanonicalEvidenceAddress, data: Record<string, unknown>): CanonicalEvidencePointer {
+  requireValue(address.addressKind === 'normal_observed_unit' && data.projectionSchema === 'consense.normal-observed.v1'
+    && data.producerKind === 'normal_observed' && data.storageShape == null && data.bboxConvention == null
+    && data.originalGeometryStatus === 'unknown' && data.visualReturnStatus === 'unknown'
+    && data.adoption == null, 'CANONICAL_NORMAL_DISPLAY_CONTRACT_INVALID')
+  requireValue(/^candidate-unit:[a-f0-9]{64}$/.test(address.unitId) && /^canonical:[a-f0-9]{64}$/.test(address.canonicalChunkId), 'CANONICAL_NORMAL_UNIT_INVALID')
+  for (const key of ['sourcePageRenderRefs', 'sourceRenderEvidenceIdentitySha256', 'sourceRenderCaptureCompleteness', 'sourceRenderLimitations',
+    'sourceRevisionKind', 'familyCompositionSha256', 'familyComponentSetSha256', 'sourceFamilyOriginRef', 'nativePdfSourceFamilyEvidence', 'nativePdfEvidence']) {
+    requireValue(data[key] == null, 'CANONICAL_NORMAL_AUTHORITY_INVALID')
+  }
+  requireValue(address.sourceRenderEvidenceIdentitySha256 == null && Array.isArray(data.assetRefs) && data.assetRefs.length === 0,
+    'CANONICAL_NORMAL_VISUAL_UNAVAILABLE')
+  requireValue(Array.isArray(data.physicalPages) && data.physicalPages.every(page => integer(page, 1))
+    && new Set(data.physicalPages).size === data.physicalPages.length, 'CANONICAL_PHYSICAL_PAGES_INVALID')
+  requireValue(Array.isArray(data.eligibleModules) && data.eligibleModules.includes(address.module)
+    && data.eligibleModules.every(module => modules.includes(module as string))
+    && new Set(data.eligibleModules).size === data.eligibleModules.length, 'CANONICAL_MODULE_INELIGIBLE')
+  requireValue(Array.isArray(data.parts) && data.parts.length > 0 && Array.isArray(data.sourceSpans)
+    && data.sourceSpans.length === data.parts.length, 'CANONICAL_PARTS_INVALID')
+  const blockIds: string[] = [], observedPages = new Set<number>()
+  for (let index = 0; index < data.parts.length; index++) {
+    const part = object(data.parts[index], 'CANONICAL_PART_INVALID'), span = object(data.sourceSpans[index], 'CANONICAL_SOURCE_SPAN_INVALID')
+    requireValue(typeof part.blockId === 'string' && part.blockId.length > 0 && !blockIds.includes(part.blockId), 'CANONICAL_BLOCK_ID_INVALID')
+    blockIds.push(part.blockId)
+    requireValue(part.sourceSha256 === address.originalSourceSha256 && typeof part.text === 'string'
+      && part.startOffset === 0 && part.endOffset === part.text.length && part.offsetUnit === 'utf16', 'CANONICAL_NORMAL_TEXT_SPAN_INVALID')
+    requireValue(part.physicalPageNo == null || integer(part.physicalPageNo, 1), 'CANONICAL_NORMAL_PAGE_INVALID')
+    if (typeof part.physicalPageNo === 'number') observedPages.add(part.physicalPageNo)
+    requireValue(part.pageNo == null && part.bboxConvention == null, 'CANONICAL_NORMAL_FRAME_INVALID')
+    if (part.bbox != null) requireValue(Array.isArray(part.bbox) && part.bbox.length === 4
+      && part.bbox.every(value => typeof value === 'number' && Number.isFinite(value)), 'CANONICAL_NORMAL_FRAME_INVALID')
+    const position = object(part.sourcePosition, 'CANONICAL_NORMAL_POSITION_INVALID')
+    if (position.kind === 'docx_native') {
+      nativePosition(position, address.originalSourceSha256)
+      requireValue(part.physicalPageNo == null, 'CANONICAL_NORMAL_PAGE_INVALID')
+    } else {
+      requireValue((position.kind === 'physical_page' || position.kind === 'native_location')
+        && typeof position.nodePath === 'string' && position.nodePath.length > 0
+        && (position.sourceSha256 === undefined || position.sourceSha256 === address.originalSourceSha256), 'CANONICAL_NORMAL_POSITION_INVALID')
+      requireValue(position.kind === 'physical_page'
+        ? integer(part.physicalPageNo, 1) && position.physicalPageNo === part.physicalPageNo
+        : part.physicalPageNo == null && position.physicalPageNo == null, 'CANONICAL_NORMAL_POSITION_INVALID')
+    }
+    requireValue(span.blockId === part.blockId && span.sourceSha256 === part.sourceSha256 && span.offsetUnit === 'utf16'
+      && span.startOffset === 0 && span.endOffset === part.endOffset
+      && JSON.stringify(span.sourcePosition) === JSON.stringify(position), 'CANONICAL_SOURCE_SPAN_INVALID')
+  }
+  requireValue(JSON.stringify([...observedPages].sort((a, b) => a - b)) === JSON.stringify(data.physicalPages), 'CANONICAL_NORMAL_PAGE_INVALID')
+  const tableGroup = data.tableGroup ?? null
+  if (tableGroup !== null) {
+    const group = object(tableGroup, 'CANONICAL_TABLE_GROUP_INVALID')
+    requireValue(typeof group.tableLocation === 'string' && group.tableLocation.length > 0 && group.semanticAdoption === 'unknown'
+      && group.headerMeaning === 'unknown' && Array.isArray(group.rows)
+      && JSON.stringify(group.rows.map(row => object(row, 'CANONICAL_TABLE_GROUP_INVALID').blockId)) === JSON.stringify(blockIds), 'CANONICAL_TABLE_GROUP_INVALID')
+  }
+  const quality = object(data.sourceQuality, 'CANONICAL_QUALITY_INVALID')
+  requireValue(quality.adoptionStatus === 'candidate_unverified' && quality.humanConfirmed === false
+    && quality.sourceQualityAccepted === false && quality.semanticScopeVerified === false
+    && quality.semanticQuality === 'unknown' && quality.legalClosure === 'unknown', 'CANONICAL_NORMAL_AUTHORITY_INVALID')
+  requireValue(Array.isArray(data.relations) && data.relations.every(value => object(value, 'CANONICAL_RELATION_INVALID').humanConfirmed === false)
+    && Array.isArray(data.unknowns) && data.unknowns.every(value => !!object(value, 'CANONICAL_UNKNOWN_INVALID')), 'CANONICAL_NORMAL_STRUCTURE_INVALID')
+  return { ...data, tableGroup } as unknown as CanonicalEvidencePointer
+}
+
 export function validateCanonicalAddress(value: CanonicalEvidenceAddress): void {
-  requireValue(value?.addressKind === 'canonical_adoption_unit', 'CANONICAL_ADOPTION_ADDRESS_REQUIRED')
+  requireValue(value?.addressKind === 'canonical_adoption_unit' || value?.addressKind === 'normal_observed_unit', 'CANONICAL_ADOPTION_ADDRESS_REQUIRED')
   requireValue(segment(value.projectId) && segment(value.unitId) && typeof value.canonicalChunkId === 'string' && value.canonicalChunkId.length > 0, 'CANONICAL_ADDRESS_INVALID')
   documentId(value.documentId)
   requireValue(modules.includes(value.module), 'CANONICAL_MODULE_INVALID')
   requireValue(shaFields.every(field => sha(value[field])), 'CANONICAL_IDENTITY_INVALID')
   requireValue(typeof value.sourceFilename === 'string' && value.sourceFilename.length > 0, 'CANONICAL_SOURCE_FILENAME_REQUIRED')
   requireValue(value.sourceOrder === null || integer(value.sourceOrder), 'CANONICAL_SOURCE_ORDER_INVALID')
-  requireValue(value.sourceRenderEvidenceIdentitySha256 === undefined || sha(value.sourceRenderEvidenceIdentitySha256), 'CANONICAL_SOURCE_RENDER_IDENTITY_INVALID')
+  requireValue(value.sourceRenderEvidenceIdentitySha256 === undefined || (value.addressKind === 'normal_observed_unit' && value.sourceRenderEvidenceIdentitySha256 === null)
+    || sha(value.sourceRenderEvidenceIdentitySha256), 'CANONICAL_SOURCE_RENDER_IDENTITY_INVALID')
 }
 
 /** Only this fixed relative route is used; response URL/backendUrl fields are never followed. */
@@ -230,6 +308,9 @@ export function validateCanonicalPointer(address: CanonicalEvidenceAddress, valu
   }
   requireValue(documentId(data.documentId) === documentId(address.documentId), 'CANONICAL_IDENTITY_MISMATCH:documentId')
   requireValue(data.humanConfirmed === false, 'CANONICAL_DISPLAY_CONTRACT_INVALID')
+  if (address.addressKind === 'normal_observed_unit' || data.projectionSchema === 'consense.normal-observed.v1' || data.producerKind === 'normal_observed') {
+    return validateNormalObservedPointer(address, data)
+  }
   if (data.projectionSchema === nativeSchema) {
     requireValue(data.sourcePageRenderRefs === undefined && data.sourceRenderEvidenceIdentitySha256 === undefined
       && data.sourceRenderCaptureCompleteness === undefined && data.sourceRenderLimitations === undefined
@@ -328,7 +409,7 @@ export function validateCanonicalPointer(address: CanonicalEvidenceAddress, valu
 }
 
 export function orderedEvidenceParts(pointer: CanonicalEvidencePointer): CanonicalEvidencePart[] {
-  if (isNativeEvidence(pointer)) return [...pointer.parts]
+  if (isNativeEvidence(pointer) || isNormalObservedEvidence(pointer)) return [...pointer.parts]
   return pointer.parts.map((part, index) => ({ part, index })).sort((a, b) =>
     a.part.physicalPageNo! - b.part.physicalPageNo! || (a.part.sourceOrder ?? a.index) - (b.part.sourceOrder ?? b.index)
   ).map(row => row.part)

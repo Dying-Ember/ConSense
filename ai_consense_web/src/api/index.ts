@@ -2,6 +2,7 @@ import { api } from './client'
 import type {
   AskResponse,
   AdviceSourceDocument,
+  AdviceSourcePreparation,
   AdviceSession,
   AdviceBasisScope,
   DocumentScope,
@@ -192,6 +193,8 @@ export const vettingApi = {
 /* ------------------------------------------------------------ 咨询 */
 
 export const adviceApi = {
+  prepareSources: (projectId: string, scope: string) =>
+    api.post<AdviceSourcePreparation>(`/advice/${encodeURIComponent(projectId)}/sources/prepare?scope=${encodeURIComponent(scope)}`, undefined, { reportError: false }),
   sessions: (projectId: string) => api.get<AdviceSession[]>(`/advice/${encodeURIComponent(projectId)}/sessions`),
   createSession: (projectId: string, scope: string, basisScope: AdviceBasisScope) =>
     api.post<AdviceSession>(`/advice/${encodeURIComponent(projectId)}/sessions`, { scope, basisScope }),

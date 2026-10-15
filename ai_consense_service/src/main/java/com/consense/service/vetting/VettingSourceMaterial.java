@@ -135,7 +135,7 @@ public final class VettingSourceMaterial {
                 "projectionVersion",OerModelMaterial.VERSION,"canonicalStructure",structure,
                 "nativeRows",Collections.emptyList(),"unresolvedNativeRowParts",Collections.emptyList(),"nativeCellSlices",Collections.emptyList(),
                 "reconstructedNativeRows",Collections.emptyList(),"unresolvedNativeCellSlices",Collections.emptyList(),
-                "nativeRowsStatus","not_applicable_to_canonical_structure","tableInterpretation","adopted whole-unit observations; edit state, blank meaning, applicability and semantic coverage remain declared unknown");
+                "nativeRowsStatus","not_applicable_to_canonical_structure","tableInterpretation",com.consense.service.sources.NormalObservedContract.isNormal(raw)?"unreviewed normal whole-unit observations; source quality, edit state, blank meaning, applicability and semantic coverage remain unknown":"adopted whole-unit observations; edit state, blank meaning, applicability and semantic coverage remain declared unknown");
     }
 
     /** Keeps the existing project-fact interpretation only when its row and header text are both selected. */

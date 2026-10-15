@@ -26,6 +26,8 @@ from source_page_registry import SourcePageRenderRegistry
 from native_pdf_source_family import (SCHEMA as FAMILY_SCHEMA, source_family_candidate,
     validate_native_pdf_source_family)
 from oer_source_registry import CanonicalSourceRegistry, _identity
+from normal_observed_projection import (SCHEMA as NORMAL_SCHEMA, normal_observed_candidate,
+    validate_normal_observed)
 
 
 class _DerivedResult(NamedTuple):
@@ -77,10 +79,27 @@ class UnifiedCanonicalSourceRegistry(NativeCollectionSourceRegistry):
         self.family_policy, self.family_target_module = family_policy, family_target_module
         prior_validator = self.validator
         def validate(snapshot):
+            if normal_observed_candidate(snapshot):
+                return self._validate_normal(snapshot)
             if source_family_candidate(snapshot):
                 return self._validate_family(snapshot)
             return prior_validator(snapshot)
         self.validator = validate
+
+    def _validate_normal(self, snapshot):
+        self._family_context()
+        validate_normal_observed(snapshot, artifact_store=self.artifact_store)
+        binding = snapshot['manifest']['sourceBinding']
+        if (binding['scopePolicySha256'] != self.family_policy.policyIdentity['manifestSha256']
+                or self.family_target_module not in binding['eligibleModules']):
+            raise SourceRegistryError('NORMAL_OBSERVED_POLICY_MISMATCH',
+                'Normal observations must retain the active scope policy and eligible process module')
+        return snapshot
+
+    def _normal_revision_path(self, revision):
+        path = self.root / 'normal-observed-revisions' / (_identity(revision, 'projectionRevisionSha256') + '.json')
+        self._pin_frame_file(path)
+        return path
 
     def _validate_family(self, snapshot):
         self._family_context()
@@ -94,10 +113,13 @@ class UnifiedCanonicalSourceRegistry(NativeCollectionSourceRegistry):
         return path
 
     def _validate_family_and_native_chunks(self, chunks):
-        families, pdf, ordinary = {}, [], []
+        families, normal, pdf, ordinary = {}, {}, [], []
         for chunk in chunks:
             self._object(chunk)
-            if source_family_candidate(chunk):
+            if normal_observed_candidate(chunk):
+                revision = _identity(chunk.get('projectionRevisionSha256'), 'projectionRevisionSha256')
+                normal.setdefault(revision, []).append(chunk)
+            elif source_family_candidate(chunk):
                 revision = _identity(chunk.get('projectionRevisionSha256'), 'projectionRevisionSha256')
                 families.setdefault(revision, []).append(chunk)
             elif _pdf_candidate(chunk):
@@ -106,6 +128,18 @@ class UnifiedCanonicalSourceRegistry(NativeCollectionSourceRegistry):
                 ordinary.append(chunk)
         count = super().validate_native_chunks(ordinary)
         count += self.pdf_registry.validate_native_chunks(pdf)
+        for revision, members in normal.items():
+            try:
+                locator = _strict_json(self._normal_revision_path(revision).read_bytes())
+                snapshot = self.load(locator['projectionSha256'])
+            except (OSError, ValueError, KeyError, TypeError) as error:
+                raise SourceRegistryError('NORMAL_OBSERVED_SOURCE_UNAVAILABLE',
+                    'Normal source is unregistered or its complete current observation CAS is invalid') from error
+            if (snapshot.get('schema') != NORMAL_SCHEMA or snapshot.get('projectionRevisionSha256') != revision
+                    or _serialize(locator) != _serialize(snapshot)
+                    or _serialize(members) != _serialize(snapshot['chunks'])):
+                raise SourceRegistryError('NORMAL_OBSERVED_INDEX_PARENT_MISMATCH',
+                    'Normal index must retain every complete exact observed parent in source order')
         for revision, members in families.items():
             try:
                 locator = _strict_json(self._family_revision_path(revision).read_bytes())
@@ -117,7 +151,7 @@ class UnifiedCanonicalSourceRegistry(NativeCollectionSourceRegistry):
                     or _serialize(locator) != _serialize(snapshot) or members != snapshot['chunks']):
                 raise SourceRegistryError('SOURCE_FAMILY_INDEX_PARENT_MISMATCH',
                     'Family index must retain every complete exact derived parent in declared order')
-        return count + len(families)
+        return count + len(families) + len(normal)
 
     def _derived_get(self, key):
         with self._derived_lock:
@@ -338,6 +372,17 @@ class UnifiedCanonicalSourceRegistry(NativeCollectionSourceRegistry):
         self._object(projection)
         if len(_serialize(projection)) > MAX_SNAPSHOT_BYTES:
             raise SourceRegistryError('CANONICAL_WIRE_TOO_LARGE', 'Public root exceeds the fixed 16MiB maximum')
+        if normal_observed_candidate(projection):
+            receipt = CanonicalSourceRegistry.publish(self, projection)
+            alias = self._normal_revision_path(projection['projectionRevisionSha256'])
+            alias.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                os.link(self._path(projection['projectionSha256']), alias)
+            except FileExistsError:
+                if alias.read_bytes() != self._path(projection['projectionSha256']).read_bytes():
+                    raise SourceRegistryError('NORMAL_OBSERVED_REVISION_CONFLICT',
+                        'Normal source revision already refers to different exact bytes')
+            return receipt
         # Family's nested native references cannot fall through to a child gate.
         if source_family_candidate(projection):
             receipt = CanonicalSourceRegistry.publish(self, projection)
@@ -362,8 +407,8 @@ class UnifiedCanonicalSourceRegistry(NativeCollectionSourceRegistry):
             # the current address and exact bytes. Only the expensive already
             # verified reconstruction is reused within this fresh frame.
             wire = self._wire(address)
-            family = source_family_candidate(wire)
-            family_context = self._pin_family_context(frame) if family else b''
+            policy_bound = source_family_candidate(wire) or normal_observed_candidate(wire)
+            family_context = self._pin_family_context(frame) if policy_bound else b''
             if address not in frame['values']:
                 root_sha = frame['files'][str(self._path(address).resolve())][1]
                 key = (address.encode(), root_sha.encode(), frame['softwareBytes'], family_context)
@@ -390,6 +435,9 @@ class UnifiedCanonicalSourceRegistry(NativeCollectionSourceRegistry):
 
     def _load_current(self, address):
         wire = self._wire(address)
+        if normal_observed_candidate(wire):
+            self._validate_normal(wire)
+            return wire
         if source_family_candidate(wire):
             self._validate_family(wire)
             return wire
@@ -403,6 +451,11 @@ class UnifiedCanonicalSourceRegistry(NativeCollectionSourceRegistry):
 
     def wire(self, address, *, module='vetting'):
         wire = self._wire(address)
+        if normal_observed_candidate(wire):
+            alias = self._read_frame_file(self._normal_revision_path(wire['projectionRevisionSha256']))
+            if alias != _serialize(wire):
+                raise SourceRegistryError('NORMAL_OBSERVED_REVISION_MISMATCH',
+                    'Normal wire must retain its exact registered observation revision')
         if source_family_candidate(wire):
             try:
                 alias = self._read_frame_file(self._family_revision_path(wire['projectionRevisionSha256']))

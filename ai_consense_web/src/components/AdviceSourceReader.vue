@@ -6,6 +6,7 @@ import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import DraftingPdfPreview from '@/components/DraftingPdfPreview.vue'
 import type { Citation } from '@/api/types'
 import type { AppLocale } from '@/i18n'
+import type { NativeDocxPosition } from '@/api/canonicalEvidence'
 import { loadAdviceOriginal } from '@/advice/sourceOriginal'
 import { readAdviceDocx } from '@/advice/docxSourceReading'
 
@@ -50,6 +51,7 @@ async function load() {
       await task.destroy(); if (pendingPdf === task) pendingPdf = undefined
     } else if (original.type === 'docx') {
       const positions = [...(original.nativePositions ?? []), ...original.pointers.flatMap(pointer => pointer.parts.flatMap(part => part.sourcePosition ? [part.sourcePosition] : []))]
+        .filter((position): position is NativeDocxPosition => position.kind === 'docx_native')
       const reading = await readAdviceDocx(original.bytes, original.sha256, positions)
       if (current !== epoch) return
       html.value = reading.html; warnings.value = reading.warnings
