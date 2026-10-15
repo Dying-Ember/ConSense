@@ -9,7 +9,7 @@ import type { AppLocale } from '@/i18n'
 import type { PdfBindingLocation } from '@/drafting/document-bindings'
 import { findPdfTextMatches, selectPdfTextRange, type PdfTextMatch, type PdfTextRectangle } from '@/drafting/pdf-text-ranges'
 
-const props = defineProps<{ source: string; title: string; locale: AppLocale; immersive?: boolean; locations?: PdfBindingLocation[]; selectedBindingId?: string; locationRequest?: number }>()
+const props = defineProps<{ source: string; title: string; locale: AppLocale; initialPage?: number; immersive?: boolean; locations?: PdfBindingLocation[]; selectedBindingId?: string; locationRequest?: number }>()
 const emit = defineEmits<{ binding: [id: string]; locationUnavailable: [id: string]; rangeUnavailable: [id: string]; rangeAvailable: [id: string] }>()
 const w = (key: DraftWord) => draftWord(key, props.locale)
 const canvas = ref<HTMLCanvasElement>()
@@ -186,7 +186,7 @@ function refreshWidth() {
   })
 }
 
-function retry() { void (state.pages ? preview.showPage(state.page) : preview.open(props.source)) }
+function retry() { void (state.pages ? preview.showPage(state.page) : preview.open(props.source, props.initialPage)) }
 async function locateSelected(request: string, page: number) {
   if (page !== state.page) await navigate(page)
   await nextTick()
@@ -217,7 +217,7 @@ watch(() => props.source, source => {
   zoom.value = undefined; requestedPage.value = 1
   normalZoom = undefined
   surface.value?.scrollTo({ top: 0, left: 0 })
-  void preview.open(source)
+  void preview.open(source, props.initialPage)
 }, { immediate: true })
 watch(() => props.immersive, async expanded => {
   if (expanded) { normalZoom = zoom.value; zoom.value = undefined }

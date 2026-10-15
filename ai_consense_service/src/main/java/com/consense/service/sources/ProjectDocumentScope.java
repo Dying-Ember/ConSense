@@ -20,8 +20,8 @@ public final class ProjectDocumentScope {
     public static String normalizeDocumentScope(String scope) {
         String value=nvl(scope).trim().toLowerCase(Locale.ROOT);
         if(value.isEmpty()||"auto".equals(value))return null;
-        if(Arrays.asList("package","works_pss","pricing","example").contains(value))return value;
-        throw new BizException(4101,"Document scope must be auto, package, works_pss, pricing or example.");
+        if(Arrays.asList("package","works_pss","pricing","example","drawing").contains(value))return value;
+        throw new BizException(4101,"Document scope must be auto, package, works_pss, pricing, example or drawing.");
     }
     /** Full catalog, retaining exclusions and failed/newer uploads so callers cannot silently use an older parse. */
     public static List<SourceDocument> currentCatalog(String projectId,List<SourceDocument> documents) {
@@ -48,6 +48,7 @@ public final class ProjectDocumentScope {
     }
     public static String exclusionReason(SourceDocument d,String scope,String module) {
         if(!reviewCategory(d))return "not_review_package";
+        if ("drawing".equals(d.getDocumentScope())) return "drawing_outside_scope";
         String moduleExclusion=OerSourceMetadata.moduleExclusion(d,module);
         if(moduleExclusion!=null)return moduleExclusion;
         String explicit=nvl(d.getDocumentScope()).toLowerCase(Locale.ROOT);

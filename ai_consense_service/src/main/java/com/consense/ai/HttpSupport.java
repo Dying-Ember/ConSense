@@ -12,7 +12,10 @@ import okio.BufferedSink;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
+import java.util.Collections;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 
 /**
  * 统一 HTTP 调用封装（OkHttp），本地 AI 服务全部走这里。
@@ -55,6 +58,28 @@ public class HttpSupport {
 
     public String postJson(String url, String json, long timeoutMs) {
         return postJson(url, json, timeoutMs, null, 0);
+    }
+
+    /** Streaming generations are one-shot: a disconnect may conceal generated output. */
+    public String postJsonStream(String url, String json, long timeoutMs, String authHeader,
+                                 int cap, boolean sse, Consumer<String> event, Consumer<Runnable> onCancel) {
+        Request.Builder builder = new Request.Builder().url(url).post(oneShotJson(json))
+                .header("Accept", sse ? "text/event-stream" : "application/x-ndjson");
+        if (authHeader != null) builder.header("Authorization", authHeader);
+        OkHttpClient client = shared.newBuilder().retryOnConnectionFailure(false)
+                .followRedirects(false).followSslRedirects(false)
+                .readTimeout(timeoutMs, TimeUnit.MILLISECONDS).writeTimeout(timeoutMs, TimeUnit.MILLISECONDS)
+                .callTimeout(timeoutMs + 5_000, TimeUnit.MILLISECONDS).build();
+        Call call = client.newCall(builder.build());
+        if (onCancel != null) onCancel.accept(call::cancel);
+        if (Thread.currentThread().isInterrupted()) call.cancel();
+        try (Response response = call.execute()) {
+            if (!response.isSuccessful()) throw new BizException("Streaming model HTTP " + response.code());
+            if (response.body() == null) throw new BizException("Streaming model returned no response body");
+            return ProviderStreamReader.read(response.body().byteStream(), cap, sse, event);
+        } catch (IOException error) {
+            throw new BizException("Streaming model transport failed: " + (call.isCanceled() ? "cancelled" : error.getClass().getSimpleName()));
+        } finally { call.cancel(); }
     }
 
     /** MiniMax opt-in: retry only a complete HTTP 529 overloaded_error response. */
@@ -136,8 +161,13 @@ public class HttpSupport {
     }
 
     public String postMultipart(String url, MultipartBody body, long timeoutMs) {
-        Request request = new Request.Builder().url(url).post(body).build();
-        return execute(request, timeoutMs, 0);
+        return postMultipart(url, body, timeoutMs, Collections.emptyMap());
+    }
+
+    public String postMultipart(String url, MultipartBody body, long timeoutMs, Map<String,String> headers) {
+        Request.Builder request = new Request.Builder().url(url).post(body);
+        headers.forEach(request::header);
+        return execute(request.build(), timeoutMs, 0);
     }
 
     public String putJson(String url, String json, long timeoutMs) {

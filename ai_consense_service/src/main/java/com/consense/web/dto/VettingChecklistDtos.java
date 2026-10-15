@@ -23,6 +23,7 @@ public final class VettingChecklistDtos {
         private String runSnapshotSha256;
         private boolean writable;
         private List<ItemVO> items;
+        private String sourceSnapshotSha256;
     }
 
     @Data @NoArgsConstructor @AllArgsConstructor
@@ -38,6 +39,23 @@ public final class VettingChecklistDtos {
         private String status;
         private String remarks;
         private Instant updatedAt;
+        private String reviewedRunId;
+        /** Exact whole-generation reuse is safe; unproved item source dependencies cannot imply local non-impact. */
+        private String dependencyStatus;
+        private String reuseScope;
+        private String reuseStatus;
+        private String previousDecisionStatus;
+        private String previousRemarks;
+        private String previousReviewedRunId;
+        public ItemVO(String id,String section,String clause,String description,int templatePage,String reviewScope,
+                      String scopeNote,LocalizedText scopeNoteText,String status,String remarks,Instant updatedAt,String reviewedRunId) {
+            this(id,section,clause,description,templatePage,reviewScope,scopeNote,scopeNoteText,status,remarks,updatedAt,reviewedRunId,
+                    null,null,null,null,null,null);
+        }
+        public ItemVO(String id,String section,String clause,String description,int templatePage,String reviewScope,
+                      String scopeNote,LocalizedText scopeNoteText,String status,String remarks,Instant updatedAt) {
+            this(id,section,clause,description,templatePage,reviewScope,scopeNote,scopeNoteText,status,remarks,updatedAt,null);
+        }
     }
 
     @Data @NoArgsConstructor @AllArgsConstructor
@@ -47,6 +65,9 @@ public final class VettingChecklistDtos {
         /** Updates only these rows; unrelated human counterchecks remain unchanged. */
         @NotNull @Size(min=1,max=100) @Valid
         private List<UpdateItem> items;
+        private String expectedRunId;
+        private String expectedSourceSnapshotSha256;
+        public UpdateRequest(String binding,List<UpdateItem> items){this.runSnapshotSha256=binding;this.items=items;}
     }
 
     @Data @NoArgsConstructor @AllArgsConstructor

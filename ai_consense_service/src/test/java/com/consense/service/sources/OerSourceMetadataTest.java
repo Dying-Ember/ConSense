@@ -71,6 +71,14 @@ class OerSourceMetadataTest {
         assertEquals(java.util.Arrays.asList(),OerSourceMetadata.identity(answer).getEligibleModules());
     }
 
+    @Test void trustedKnownAnswerExclusionIsPersistedBeforeAnyParserObservation() {
+        SourceDocument answer=document();answer.setReviewRole("tender");answer.setDocumentScope("package");
+        assertTrue(OerSourceMetadata.captureKnownIdentity(answer,BYTES,routing("evaluation_answer","EVALUATION_ANSWER",null)));
+        assertEquals("sha_verified",OerSourceMetadata.identity(answer).getIdentityStatus());
+        assertEquals("evaluation_answer_isolated",ProjectDocumentScope.exclusionReason(answer,"fullset"));
+        assertNull(answer.getNativePdfEvidenceJson());
+        assertEquals(SHA,answer.getSourceSha256());
+    }
     @Test void unidentified_source_keeps_unknown_eligibility_and_original_identity() {
         SourceDocument d=document(); OerSourceMetadata.capture(d,parsed(SHA),BYTES,new OerSourceRouting());
         assertEquals("unknown",OerSourceMetadata.identity(d).getSourcePurpose());

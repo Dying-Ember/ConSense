@@ -98,7 +98,7 @@ function nativeCellPositions(row: Element) {
 }
 
 /** Readable semantic formulas, independently checked because Mammoth omits Office Math. */
-function readableOfficeMath(element: Element): { fragment: DocumentFragment; unsupported: string[] } {
+export function readableOfficeMath(element: Element): { fragment: DocumentFragment; unsupported: string[] } {
   const fragment = document.createDocumentFragment()
   const unsupported = new Set<string>()
   function content(node: Element | undefined, host: Node) {

@@ -1,6 +1,7 @@
 package com.consense.document;
 
 import com.consense.ocr.OcrClient;
+import java.util.Map;
 
 /** Per-physical-page observer: delegates the exact byte[] and returns the original result object. */
 public final class ObservedOcrClient implements OcrClient {
@@ -12,9 +13,15 @@ public final class ObservedOcrClient implements OcrClient {
         catch(RuntimeException|Error e){originalFailure("ocr_availability_failure",e,started);throw e;}
     }
     @Override public OcrResult recognize(byte[] imageBytes) {
-        probe.binary("ocr_actual_input",physicalPage,DocumentParseProbe.map("boundary","Exact original byte[] passed once to OcrClient; not reconstructed historical input"),imageBytes,"png");
+        return recognize(imageBytes, null);
+    }
+    @Override public com.fasterxml.jackson.databind.JsonNode observeNativePdf(byte[] originalPdf,Map<String,Object> nativeContext) {
+        return delegate.observeNativePdf(originalPdf,nativeContext);
+    }
+    @Override public OcrResult recognize(byte[] imageBytes, Map<String,Object> sourceContext) {
+        probe.binary("ocr_actual_input",physicalPage,DocumentParseProbe.map("boundary","Exact original byte[] passed once to OcrClient; not reconstructed historical input","sourceContext",sourceContext),imageBytes,"png");
         long started=System.nanoTime();OcrResult result;
-        try{result=delegate.recognize(imageBytes);}
+        try{result=sourceContext == null ? delegate.recognize(imageBytes) : delegate.recognize(imageBytes,sourceContext);}
         catch(RuntimeException|Error e){originalFailure("ocr_actual_failure",e,started);throw e;}
         long elapsed=System.nanoTime()-started;
         probe.event("ocr_actual_result",physicalPage,DocumentParseProbe.map("wallNanos",elapsed,"seconds",elapsed/1_000_000_000.0,"result",result,

@@ -29,6 +29,10 @@ public final class AdviceDtos {
         private List<String> clarifications;
         private String sourceScope;
         private String basisScope;
+        private String sessionId;
+        public ChatMessageVO(Long id,String role,LocalizedText title,LocalizedText content,String unknownScope,List<String> citations,String evidenceId,List<CitationVO> sources,ModelIdentity modelIdentity,List<String> clarifications,String sourceScope,String basisScope) {
+            this(id,role,title,content,unknownScope,citations,evidenceId,sources,modelIdentity,clarifications,sourceScope,basisScope,null);
+        }
         public ChatMessageVO(Long id,String role,LocalizedText title,LocalizedText content,String unknownScope,List<String> citations,String evidenceId,List<CitationVO> sources,ModelIdentity modelIdentity) {
             this(id,role,title,content,unknownScope,citations,evidenceId,sources,modelIdentity,null,null,null);
         }
@@ -59,6 +63,10 @@ public final class AdviceDtos {
         private String scoreMeaning;
         @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
         private com.fasterxml.jackson.databind.JsonNode fixedBaselineEvidence;
+        @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+        private String originalSourceSha256;
+        @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_EMPTY)
+        private List<com.fasterxml.jackson.databind.JsonNode> nativePositions;
         public CitationVO(String fileLabel,String pageNo,String anchor,String content,double score,String evidenceId,String documentId,String sourceHash,String sourceRole,Boolean applicabilityContextComplete,List<CanonicalEvidenceDtos.EvidencePointer> canonicalEvidence,com.fasterxml.jackson.databind.JsonNode canonicalSourceUnit,String scoreMeaning) {
             this(fileLabel,pageNo,anchor,content,score,evidenceId,documentId,sourceHash,sourceRole,applicabilityContextComplete);
             this.canonicalEvidence=canonicalEvidence;this.canonicalSourceUnit=canonicalSourceUnit;this.scoreMeaning=scoreMeaning;
@@ -81,6 +89,8 @@ public final class AdviceDtos {
         private Long replyToMessageId;
         /** Explicit standard interpretation only; absent retains the project-contract route. */
         private String basisScope;
+        private String sessionId;
+        public AskRequest(String question,String scope,Long replyToMessageId,String basisScope){this(question,scope,replyToMessageId,basisScope,null);}
         public AskRequest(String question,String scope,Long replyToMessageId){this(question,scope,replyToMessageId,null);}
         public AskRequest(String question,String scope){this(question,scope,null);}
     }
@@ -102,9 +112,25 @@ public final class AdviceDtos {
         private String sourceScope;
         private String basisScope;
         private Long messageId;
+        private String sessionId;
         public AskResponseVO(boolean grounded,LocalizedText title,LocalizedText content,String unknownScope,List<String> citations,String evidenceId,List<CitationVO> sources,String model,ModelIdentity modelIdentity) {
-            this(grounded,title,content,unknownScope,citations,evidenceId,sources,model,modelIdentity,null,null,null,null);
+            this(grounded,title,content,unknownScope,citations,evidenceId,sources,model,modelIdentity,null,null,null,null,null);
         }
+    }
+
+    @Data @NoArgsConstructor @AllArgsConstructor
+    public static class SessionRequest {
+        private String scope;
+        private String basisScope;
+    }
+
+    @Data @NoArgsConstructor @AllArgsConstructor
+    public static class SessionVO {
+        private String id;
+        private String projectId;
+        private String scope;
+        private String basisScope;
+        private java.time.Instant createdAt;
     }
 
     @Data @NoArgsConstructor @AllArgsConstructor

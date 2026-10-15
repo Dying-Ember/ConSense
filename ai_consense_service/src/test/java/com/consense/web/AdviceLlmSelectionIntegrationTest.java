@@ -29,6 +29,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         "consense.ocr.enabled=false","consense.vector.provider=memory","consense.vector.stuffing-limit=1",
         "consense.llm.enabled=true","consense.llm.base-url=https://local-llm-test.invalid",
         "consense.llm.chat-model=local-test-chat","consense.llm.embed-model=fixed-test-embedding",
+        "consense.llm.num-ctx=262144","consense.llm.structured-thinking=false",
         "consense.minimax-cn.enabled=true","consense.minimax-cn.base-url=https://minimax-test.invalid",
         "consense.minimax-cn.api-key=advice-test-only-canary"})
 @ActiveProfiles("h2") @AutoConfigureMockMvc
@@ -41,8 +42,10 @@ class AdviceLlmSelectionIntegrationTest {
     @Autowired MockMvc mvc;
     @MockBean(name="llmClient") LlmClient local;
     @MockBean(name="miniMaxChatClient") LlmClient miniMax;
+    @MockBean com.consense.service.vetting.VettingTokenBudgetCliObserver counter;
 
     @BeforeEach void adapters() {
+        com.consense.service.advice.AdviceBudgetFixture.bind(counter,local,miniMax);
         when(local.available()).thenReturn(true);
         when(local.chatModel()).thenReturn("local-test-chat");
         when(local.embedModel()).thenReturn("fixed-test-embedding");
@@ -78,13 +81,13 @@ class AdviceLlmSelectionIntegrationTest {
         java.util.concurrent.atomic.AtomicInteger calls=new java.util.concurrent.atomic.AtomicInteger();
         when(miniMax.chat(anyList())).thenAnswer(invocation->{
             if(calls.getAndIncrement()==0) {
-                ask(other,"local").andExpect(jsonPath("$.data.content.en").value("Local answer TEST ONLY"));
+                ask(other,"local").andExpect(jsonPath("$.data.content.en").value(org.hamcrest.Matchers.containsString("Local answer TEST ONLY")));
                 return "{\"grounded\":";
             }
             return "{\"grounded\":true,\"answer\":\"MiniMax answer TEST ONLY\",\"citations\":[\"[1]\"]}";
         });
         JsonNode answer=JsonUtils.parse(ask(id,"minimax-cn").andExpect(jsonPath("$.code").value(0))
-                .andExpect(jsonPath("$.data.content.en").value("MiniMax answer TEST ONLY"))
+                .andExpect(jsonPath("$.data.content.en").value(org.hamcrest.Matchers.containsString("MiniMax answer TEST ONLY")))
                 .andExpect(jsonPath("$.data.modelIdentity.profileId").value("minimax-cn"))
                 .andReturn().getResponse().getContentAsString()).path("data");
         assertEquals(2,calls.get());assertEquals("MiniMax-M3",answer.path("model").asText());
@@ -148,7 +151,7 @@ class AdviceLlmSelectionIntegrationTest {
         mvc.perform(post("/api/advice/{id}/ask",id).contentType(MediaType.APPLICATION_JSON)
                 .content("{\"question\":\"What is the synthetic clause?\"}"))
                 .andExpect(jsonPath("$.code").value(0))
-                .andExpect(jsonPath("$.data.content.en").value("Legacy deployment answer TEST ONLY"))
+                .andExpect(jsonPath("$.data.content.en").value(org.hamcrest.Matchers.containsString("Legacy deployment answer TEST ONLY")))
                 .andExpect(jsonPath("$.data.model").value("local-test-chat"));
         mvc.perform(get("/api/advice/{id}/index/status",id).header("X-ConSense-Llm-Profile","minimax-cn"))
                 .andExpect(jsonPath("$.data.embedModel").value("fixed-test-embedding"))
@@ -176,7 +179,7 @@ class AdviceLlmSelectionIntegrationTest {
                 .content("{\"id\":\""+id+"\",\"nameZhHans\":\"ADVICE LLM SWITCH TEST ONLY\"}"))
                 .andExpect(jsonPath("$.code").value(0));
         mvc.perform(multipart("/api/vetting/{id}/package/upload",id).file(new MockMultipartFile("files",
-                "ADVICE-SYNTHETIC-TEST-ONLY.txt","text/plain","TEST ONLY. SCC4.1: synthetic order of precedence is set by this test clause.".getBytes(StandardCharsets.UTF_8))))
+                "ADVICE-SYNTHETIC-TEST-ONLY.txt","text/plain","Special Conditions of Contract\nContract No: AUTHORED-TEST-ONLY\nSCC4.1: synthetic order of precedence is set by this test clause.".getBytes(StandardCharsets.UTF_8))))
                 .andExpect(jsonPath("$.data.parsed").value(1));
         mvc.perform(post("/api/advice/{id}/index/rebuild",id)).andExpect(jsonPath("$.code").value(0));
         return id;

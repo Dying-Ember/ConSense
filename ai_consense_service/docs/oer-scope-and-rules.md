@@ -1,3 +1,11 @@
+<!-- automated-validation-only-20261015:start -->
+**2026-10-15 最新用户边界：环境与代码实现的自动化测试继续完成并要求绿灯，效果验证暂不开始。** 包括本地代码回归、类型检查、构建及独立代码审查；赛方原件正常流程前后效果对照、模型效果评分、SL 版本比较及其后的业务效果验收全部暂缓。失败、缺精确历史资产和中断原样保留，不删断言或 skip 换绿。该指示覆盖下方“自动化后立即进入原件效果验证”的执行时序，不缩减原 OER 规格、完整目标或质量门。
+<!-- automated-validation-only-20261015:end -->
+
+<!-- integrated-implementation-authorized-20261015:start -->
+**2026-10-15 用户已明确授权统一 spec 代码实现及自动化测试，目标北京时间今日 08:30。** 新指示覆盖下方本次规格编制期间的 spec-only／不启动 Goal 表述；原 08:30 目标已错过，当前聊天 Goal 继续 active；原截止 heartbeat 已 PAUSED，不再按过期截止唤醒。按统一 spec 与原 ENG 子规格完成全部代码及自动化，之后首要真实核验为赛方示例原件的正常 OER 修复前后效果（同范围／同分母／旧正确）；只有显著提升再做后续验收，有时间才做不同版本 SL 对比。端到端／浏览器验收先略过，不追认为已过。实际部署／活动服务或 DB／fixed05／Drafting／gold／权重发布边界保持。开发隔离分支为 codex/consense-integrated-20261015，既有状态、失败与未过门保留；详细当前进度在本地 .local/state/consense-implementation-20261015/execution-state.json，代码／契约与真实来源分开。
+<!-- integrated-implementation-authorized-20261015:end -->
+
 <!-- unified-spec-entry-20261014:start -->
 > **2026-10-14 当前总体实施入口：** [统一实施与验收 spec](specs/consense-oer-vetting-advisory-integrated-20261014.md)及[统一任务图](specs/consense-oer-vetting-advisory-integrated-tickets-20261014.md)。OER 原 D1–D10／EAC01–22／ENG-00–10 按[受保护引擎子规格](specs/oer-engine-integration-repair-20261014.md)完整保留；产品问题 PRD01–08 与旧总 AC01–20 在统一入口逐项承接，业务成功不关闭 OER 来源质量门。下方原正文与状态保留原语境，已实现起点不重列未修，未验收／失败不追认通过。本次只调整规格与导航，Advisory 已停止测试保持，不启动实现、模型、训练、索引、自动 Goal 或部署。
 <!-- unified-spec-entry-20261014:end -->

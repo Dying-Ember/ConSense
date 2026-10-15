@@ -9,6 +9,24 @@ import java.util.*;
 import static org.junit.jupiter.api.Assertions.*;
 
 class VettingCorpusTest {
+    @Test void semanticQuotationKeepsOnlyAnUnambiguousCapturedNativeOccurrence() {
+        String raw=String.join("",Collections.nCopies(64,"a"));
+        DocumentBlock first=block("p1","SCC 7.1 The contractor shall maintain the insured works.",null);
+        DocumentBlock second=block("p2","The contractor shall maintain the insured works.",null);
+        first.setSourcePosition(JsonUtils.parse("{\"kind\":\"docx_native\",\"sourceSha256\":\""+raw+"\",\"partName\":\"word/document.xml\",\"partSha256\":\""+raw+"\",\"nodePath\":\"/{urn:authored-word}document[1]/{urn:authored-word}p[1]\"}"));
+        second.setSourcePosition(first.getSourcePosition().deepCopy());
+        ((com.fasterxml.jackson.databind.node.ObjectNode)second.getSourcePosition()).put("nodePath","/{urn:authored-word}document[1]/{urn:authored-word}p[2]");
+        SourceDocument source=doc(81L,"SCC",first,second);source.setSourceSha256(raw);source.setReviewRole("tender");
+        Chunk chunk=VettingCorpus.chunks(Collections.singletonList(source)).get(0);
+        com.consense.web.dto.VettingDtos.FindingEvidence unique=VettingCorpus.evidence(chunk,"source",first.getText());
+        assertTrue(unique.isLocated());assertEquals("tender",unique.getSourceRole());
+        assertEquals(Collections.singletonList(first.getSourcePosition()),unique.getNativePositions());assertNull(unique.getCanonicalEvidence());assertNull(unique.getPageNo());
+        com.consense.web.dto.VettingDtos.FindingEvidence ambiguous=VettingCorpus.evidence(chunk,"source",second.getText());
+        assertTrue(ambiguous.isLocated());assertTrue(ambiguous.getNativePositions()==null||ambiguous.getNativePositions().isEmpty(),"Repeated quotations cannot choose the first identical native node");
+        chunk.setOriginalSourceSha256(String.join("",Collections.nCopies(64,"b")));
+        com.consense.web.dto.VettingDtos.FindingEvidence changed=VettingCorpus.evidence(chunk,"source",first.getText());
+        assertTrue(changed.getNativePositions()==null||changed.getNativePositions().isEmpty(),"An unbound native position cannot name replaced original bytes");
+    }
     @Test void projectFactNativeCellsRetainEmptyRepliesAndHeaderProvenanceWithoutChangingSourceTextOrIdentity() {
         DocumentBlock header = table("body/4/table-row/0", "Clause", "Required input", "Reply");
         DocumentBlock populated = table("body/4/table-row/1", "XYZ7", "Planner to provide address 🏠", "Room 8 | East Wing");

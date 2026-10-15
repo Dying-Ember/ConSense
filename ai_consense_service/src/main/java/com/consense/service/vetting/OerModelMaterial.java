@@ -105,12 +105,73 @@ public final class OerModelMaterial {
         for(JsonNode r:raw)out.add(fields(r,"type","status","scope","sameParentClause","sourceReview","basis","humanConfirmed","fromUnitId","toUnitId","fromRegionId","toRegionId","fromBlockId","toBlockId","fromCellId","toCellId","condition","qualifiers","qualifiersComplete","exceptions"));return out;}
 
     /** All table/cell/grid/merge/nesting values remain. Only known software/CAS proof expansions become artifact identities. */
+    static JsonNode visualRegion(JsonNode raw) {
+        ObjectNode selected=fields(raw,"id","kind","text","originalText","bbox","polygon","geometryStatus","channel","semanticStatus",
+                "parentId","readingOrder","fields","controls","table","relations","unknowns","assetRefs","groupId","ownerId");
+        if(raw!=null&&raw.has("originalGeometry")){
+            JsonNode geometry=raw.get("originalGeometry");ObjectNode compact=fields(geometry,"status","reason","xyxyNormalized","xyxyOriginal","polygonOriginal","transformSha256");
+            if(geometry.has("targetFrame"))compact.set("targetFrame",geometry.get("targetFrame").isNull()?geometry.get("targetFrame")
+                    :fields(geometry.get("targetFrame"),"coordinateFrame","coordinateUnit","width","height","physicalPageNo","sourceSha256"));
+            compact.put("meaning","Explicit geometry projection status; source text, semantics and original bytes remain unverified");
+            selected.set("originalGeometry",compact);
+        }
+        return table(selected);
+    }
+    static JsonNode wordObservation(JsonNode raw,boolean whole) {
+        return whole?fields(raw,"parentBlockId","nativePath","wordStructureVersion","effectiveText","parentEffectiveTextSha256",
+                "originalText","deletedText","strikeText","wordNumbering","wordSymbols","wordWarnings","wordNativeObjects")
+                :fields(raw,"parentBlockId","nativePath","wordStructureVersion","parentEffectiveTextSha256");
+    }
+    static JsonNode wordNativeObjects(JsonNode raw) {
+        ArrayNode out=JsonUtils.mapper().createArrayNode();
+        if(raw!=null&&raw.isArray())for(JsonNode object:raw){
+            ObjectNode selected=fields(object,"kind","location","status","semanticStatus","deleted","struck","sourcePart","relationshipRefs","nativeXmlStatus");
+            if(object.has("nativeXml"))selected.put("nativeXmlSha256",VettingCorpus.hash(object.path("nativeXml").asText()));
+            out.add(selected);
+        }
+        return out;
+    }
+    static JsonNode visualFrame(JsonNode raw) {
+        return table(fields(raw,"imageSha256","sourceSha256","inputSha256","width","height","coordinateUnit","bboxFormat",
+                "pageNo","sourceFrame","transform","mediaBox","cropBox","rotation","userUnit"));
+    }
+    static JsonNode visualProvenance(JsonNode raw) {
+        return fields(raw,"engine","modelRevision","configSha256","inputSha256","terminal","rawResponseSha256","rawResponseRef","limitations","sourceBindingStatus");
+    }
+    static JsonNode nativeTableCandidate(JsonNode raw) {
+        ObjectNode selected=fields(raw,"method","provider","status","failures","physicalPageNo","frame","coverage","nativeGlyphNamespace","sourceSha256","semanticStatus");
+        JsonNode candidate=raw.path("candidate");
+        if(candidate.isObject()){
+            selected.set("candidate",table(fields(candidate,"schema","tables","logicalTables","observationGroups","conditionCandidates","completeSourceGroupAccepted","quality")));
+            selected.put("unassignedSourceGlyphCount",candidate.path("unassignedSourceGlyphIds").size());
+            selected.put("unassignedSourceGlyphMeaning","Unassigned original glyph observations remain unknown in the complete source candidate; raw glyph records are not model material");
+        }else selected.putNull("candidate");
+        selected.put("candidateSourceSha256",VettingSourceMaterial.formSourceSha256(raw));
+        selected.put("meaning","Whole independent native method observation; no best-method fusion, field adoption, source-quality or complete-source acceptance");
+        return table(selected);
+    }
+
+    static JsonNode parserPageGroup(JsonNode raw) {
+        ObjectNode selected=fields(raw,"physicalPageNo","scope","source","selectionStatus","selectedParser","policySha256",
+                "sourceQualityAccepted","adoptionStatus","reason");
+        ArrayNode alternatives=selected.putArray("candidates");
+        for(JsonNode candidate:raw.path("candidates")){
+            ObjectNode alternative=fields(candidate,"parser","runId","pageId","features");
+            alternative.set("blocks",table(candidate.path("blocks")));
+            alternative.set("page",table(fields(candidate.path("page"),"pageId","physicalPageNo","parserPageIndex","width","height",
+                    "coordinateUnit","frame","mapping","providerInputPageNo","inputToOriginalMappingStatus","qualityStatus",
+                    "originalPageGeometryStatus","coverageStatus","readingOrder","relations","unknowns")));
+            alternatives.add(alternative);
+        }
+        return selected;
+    }
+
     private static JsonNode table(JsonNode raw){
         if(raw==null)return com.fasterxml.jackson.databind.node.NullNode.instance;
         if(raw.isArray()){ArrayNode a=array();for(JsonNode x:raw)a.add(table(x));return a;}
         if(!raw.isObject())return raw.deepCopy();ObjectNode out=object();Iterator<String> names=raw.fieldNames();
         while(names.hasNext()){String k=names.next();JsonNode v=raw.get(k);
-            if(Arrays.asList("observerIdentitySha256","internalProjectionSha256","transportValidation","rawNode","softwareProof","reviewActor","referenceRelationIndex").contains(k))continue;
+            if(Arrays.asList("observerIdentitySha256","internalProjectionSha256","transportValidation","rawNode","rawResponse","rawPayload","softwareProof","reviewActor","referenceRelationIndex","glyphs","rawGlyphs","glyphRecords","operators","nativeObservation","sourceContext").contains(k))continue;
             if(k.equals("sourcePosition")){out.set(k,position(v));continue;}
             if(v.isObject()&&v.has("artifactDescriptor")){out.set(k,reference(v));continue;}
             out.set(k,table(v));

@@ -13,6 +13,7 @@ import threading
 import time
 import uuid
 import sys
+from typing import Annotated
 
 HERE = Path(__file__).resolve().parent
 from workspace_root import resolve_workspace
@@ -21,7 +22,7 @@ os.environ.setdefault('HF_HOME', str(WORKSPACE / 'tmp/vetting_models'))
 os.environ.setdefault('HF_HUB_DISABLE_TELEMETRY', '1')
 os.environ.setdefault('TOKENIZERS_PARALLELISM', 'false')
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile, Request, Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from ocr_runtime import create_ocr_engine
 
@@ -102,9 +103,20 @@ STATE = Path(os.environ.get('CONSENSE_RETRIEVAL_DATA', str(WORKSPACE / 'tmp/vett
 OFFLINE = True  # Isolated window recipe never downloads model artifacts.
 LOCK = threading.RLock()
 _embedding = _reranker = _ocr = _database = None
+_ocr_recipe_sha256 = None
+_database_configuration = None
 _projects = {}
+_migrated_index = None
 _selected_device = None
 app = FastAPI(title='ConSense local vetting models', version='1.0.0')
+
+
+def gpu_coordinator():
+    path = str(HERE.parent / 'offline_delivery')
+    if path not in sys.path:
+        sys.path.insert(0, path)
+    import coordinator
+    return coordinator if coordinator.configured(os.environ) else None
 
 
 class Chunk(BaseModel):
@@ -230,7 +242,7 @@ def retrieval_settings(*, observe_tokenizer_identity=True):
                      **{key: parameters[key].default for key in ('k1', 'b', 'epsilon')}},
             'tokenPattern': TOKEN_PATTERN, 'tokenizerAlgorithm': TOKENIZER_ALGORITHM,
             'latinTokenPattern': LATIN_TOKEN_PATTERN, 'roleFilter': True,
-            'storage': 'Qdrant Python local', 'workers': 1,
+            'storage': 'Qdrant Server' if os.environ.get('CONSENSE_QDRANT_URL') else 'Qdrant Python local', 'workers': 1,
             'sourceWindows': (window_runtime().retrieval_recipe()if observe_tokenizer_identity
                               else window_runtime().retrieval_recipe(observe_tokenizer_identity=False))}
 
@@ -284,11 +296,17 @@ def rerank_candidates(query, candidates):
 
 
 def database():
-    global _database
+    global _database, _database_configuration
+    from migrated_qdrant_index import configured
+    from token_windows import fail
+    current = (str(STATE), os.environ.get('CONSENSE_QDRANT_URL'), os.environ.get('CONSENSE_QDRANT_API_KEY'))
     if _database is None:
-        from qdrant_client import QdrantClient
-        STATE.mkdir(parents=True, exist_ok=True)
-        _database = QdrantClient(path=str(STATE / 'qdrant'))
+        from qdrant_backend import connect
+        _database = connect(STATE, os.environ)
+        _database_configuration = current
+    else:
+        fail(_database_configuration == current or (_database_configuration is None and not configured(os.environ)),
+             'QDRANT_BACKEND_CONFIG_CHANGED', 'Cached Qdrant backend configuration differs; start a new runtime')
     return _database
 
 
@@ -301,6 +319,15 @@ def signature(chunks):
 
 
 def read_project(key):
+    global _migrated_index
+    from migrated_qdrant_index import MigratedIndex, configured
+    if configured(os.environ) or _migrated_index is not None:
+        try:
+            if _migrated_index is None:
+                _migrated_index = MigratedIndex(os.environ)
+            return _migrated_index.read(key, window_runtime(), database)
+        except WindowError as error:
+            raise HTTPException(409, {'kind':error.kind, 'message':str(error), 'metadata':error.metadata}) from error
     stored = _projects.get(key)
     if stored is None:
         path = metadata_path(key)
@@ -336,8 +363,11 @@ def validate_corpus(chunks):
 
 @app.get('/health')
 def health():
+    coordinator = gpu_coordinator()
+    if coordinator is not None:
+        return coordinator.health(server=sys.modules[__name__])
     import torch
-    return {'status': 'ok', 'mode': 'local', 'device': device(), 'offline': OFFLINE,
+    return {'status': 'ok', 'mode': 'server' if os.environ.get('CONSENSE_QDRANT_URL') else 'local', 'device': device(), 'offline': OFFLINE,
         'models': MODELS, 'maxTokens': MODEL_SETTINGS['embedding']['maxTokens'],
         'batchSize': MODEL_SETTINGS['embedding']['batchSize'],
         'runtime': {kind: model_runtime(kind) for kind in ('embedding', 'reranker')},
@@ -345,51 +375,123 @@ def health():
         'indexSignatureVersion': window_runtime().signature_version(),
         'loaded': {'embedding': _embedding is not None, 'reranker': _reranker is not None, 'ocr': _ocr is not None},
         'cudaAllocatedMiB': round(torch.cuda.memory_allocated()/2**20, 1) if torch.cuda.is_available() else None,
-        'ocrEngine': 'RapidOCR CPU baseline',
+        'ocrEngine': 'Complete Paddle/MinerU API candidates' if os.environ.get('CONSENSE_COMPLETE_OCR_CONFIG') else 'RapidOCR CPU baseline',
         'limitations': ['OCR does not interpret table cells or deletion state',
             'Source-bound windows count query/special tokens; oversized queries fail without silent clipping',
             'Legacy maxTokens/batchSize health fields describe embedding only',
-            'Run one server worker with Qdrant local persistence']}
+            'Run one server worker with one Qdrant storage owner']}
+
+
+@app.get('/v1/models')
+def native_business_models():
+    coordinator = gpu_coordinator()
+    if coordinator is None:
+        raise HTTPException(404, 'Native business Job coordinator is not configured')
+    try:
+        return coordinator.model_catalog()
+    except (ValueError, OSError) as failure:
+        raise HTTPException(503, 'Configured native business model catalog is unavailable') from failure
 
 
 @app.post('/ocr')
-def ocr(file: UploadFile = File(...)):
-    global _ocr
+def ocr(file: UploadFile = File(...), purpose: Annotated[str | None, Header(alias='X-Consense-Ocr-Purpose')] = None,
+        source_context: Annotated[str | None, Form(alias='sourceContext')] = None):
+    global _ocr, _ocr_recipe_sha256
+    if purpose not in (None, 'identity', 'parse'):
+        raise HTTPException(422, 'Unsupported OCR observation purpose')
     from PIL import Image, UnidentifiedImageError
     raw = file.file.read(25*1024*1024+1)
     if len(raw) > 25*1024*1024:
         raise HTTPException(413, 'Image exceeds 25 MiB')
     try:
         image = Image.open(io.BytesIO(raw))
+        image_format = image.format
         if image.width*image.height > 40000000:
             raise HTTPException(413, 'Image exceeds 40 million pixels')
         image = image.convert('RGB')
     except (UnidentifiedImageError, OSError) as error:
         raise HTTPException(422, 'Upload a readable raster page image') from error
+    if source_context is not None:
+        from complete_ocr import validate_source_context
+        try:
+            input_name = 'page.' + {'PNG': 'png', 'JPEG': 'jpg', 'TIFF': 'tiff', 'WEBP': 'webp'}[image_format]
+            source_context = validate_source_context(json.loads(source_context), raw, image.width, image.height, input_name)
+        except (ValueError, TypeError, KeyError) as error:
+            raise HTTPException(422, 'Invalid original source/raster binding: ' + str(error)) from error
     try:
         with LOCK:
+            complete_config = os.environ.get('CONSENSE_COMPLETE_OCR_CONFIG')
+            if complete_config and purpose != 'identity':
+                from artifact_store import ArtifactStore
+                from complete_ocr import recognize_complete_page, CompleteOcrError
+                config_bytes = Path(complete_config).read_bytes()
+                if hashlib.sha256(config_bytes).hexdigest() != os.environ.get('CONSENSE_COMPLETE_OCR_CONFIG_SHA256'):
+                    raise ValueError('Complete OCR configuration changed or lacks its exact SHA-256 pin')
+                try:
+                    return recognize_complete_page(raw, json.loads(config_bytes), ArtifactStore(STATE / 'ocr-observations'),
+                                                   source_context=source_context)
+                except CompleteOcrError as error:
+                    raise HTTPException(503, {'kind': 'complete_parser_failed', 'message': str(error),
+                                             'receipt': error.receipt}) from error
             if _ocr is None:
-                _ocr = create_ocr_engine()
+                from ocr_runtime import ocr_cache_recipe, local_model_paths, identity_hash
+                directory = os.environ.get('CONSENSE_OCR_MODEL_DIRECTORY', '')
+                expected_recipe = os.environ.get('CONSENSE_OCR_RECIPE_SHA256', '')
+                if not directory or not Path(directory).is_absolute() or not re.fullmatch('[a-f0-9]{64}', expected_recipe):
+                    raise ValueError('Offline identity OCR requires an explicit local model directory and exact recipe SHA-256')
+                recipe = ocr_cache_recipe(directory, require_verified_defaults=True)
+                if identity_hash(recipe) != expected_recipe:
+                    raise ValueError('Offline identity OCR recipe differs before model initialization')
+                engine = create_ocr_engine(directory, local_paths=local_model_paths(directory))
+                if ocr_cache_recipe(directory, require_verified_defaults=True) != recipe:
+                    raise ValueError('Offline identity OCR weights/configuration changed during initialization')
+                _ocr, _ocr_recipe_sha256 = engine, expected_recipe
+            elif _ocr_recipe_sha256 is not None and os.environ.get('CONSENSE_OCR_RECIPE_SHA256') != _ocr_recipe_sha256:
+                raise ValueError('Offline identity OCR configured recipe changed; restart with its reviewed local assets')
             started = time.perf_counter()
             result = _ocr(image)
-            lines = []
-            if result.txts is not None:
-                for text, score, box in zip(result.txts, result.scores, result.boxes):
-                    xs, ys = [float(p[0]) for p in box], [float(p[1]) for p in box]
-                    left, top = max(0., min(xs)), max(0., min(ys))
-                    right, bottom = min(float(image.width), max(xs)), min(float(image.height), max(ys))
-                    lines.append({'text': text, 'confidence': float(score),
-                        'bbox': [left, top, max(0., right-left), max(0., bottom-top)]})
-            return {'text': '\n'.join(line['text'] for line in lines), 'lines': lines,
-                'imageWidth': image.width, 'imageHeight': image.height,
-                'seconds': time.perf_counter()-started, 'engine': 'RapidOCR CPU baseline',
-                'limitations': ['No table-cell or deletion-state interpretation']}
+            from ocr_response import baseline_observation
+            payload = baseline_observation(result, image, raw)
+            payload['provenance']['observationPurpose'] = purpose or 'parse'
+            payload['provenance']['ocrRecipeSha256'] = _ocr_recipe_sha256
+            payload['provenance']['sourceContext'] = source_context
+            payload['provenance']['sourceBindingStatus'] = 'caller_bound_original_source_unverified_original_bytes' if source_context else 'raster_input_only'
+            payload.update(imageWidth=image.width, imageHeight=image.height,
+                seconds=time.perf_counter()-started, engine='RapidOCR CPU baseline',
+                limitations=['No table-cell or deletion-state interpretation'])
+            return payload
+    except HTTPException:
+        raise
     except Exception as error:
         raise HTTPException(503, f'OCR unavailable: {type(error).__name__}: {error}') from error
 
 
+@app.post('/native-pdf/table-candidates')
+def native_pdf_table_candidates(file: UploadFile = File(...),
+        native_context: Annotated[str, Form(alias='nativeContext')] = ...):
+    from artifact_store import ArtifactStore
+    from native_pdf_candidates import capture_native_pdf_candidates, MAX_PDF_BYTES, MAX_CONTEXT_BYTES
+    raw = file.file.read(MAX_PDF_BYTES + 1)
+    if len(raw) > MAX_PDF_BYTES:
+        raise HTTPException(413, 'Original PDF exceeds 64 MiB')
+    if len(native_context.encode('utf-8')) > MAX_CONTEXT_BYTES:
+        raise HTTPException(413, 'Native context exceeds the configured complete byte limit')
+    with LOCK:
+        return capture_native_pdf_candidates(raw, native_context,
+            artifact_store=ArtifactStore(STATE / 'native-pdf-candidates'))
+
+
 @app.post('/index')
 def index(request: IndexRequest):
+    from migrated_qdrant_index import configured
+    if configured(os.environ) or _migrated_index is not None:
+        raise HTTPException(409, 'Pinned migrated Server index is read-only')
+    coordinator = gpu_coordinator()
+    if coordinator is not None:
+        status, value = coordinator.execute('document-embedding', request.model_dump(mode='json'), server=sys.modules[__name__])
+        if status != 200:
+            raise HTTPException(status, value)
+        return value
     try:
         return window_runtime().index(request)
     except WindowError as error:
@@ -398,7 +500,44 @@ def index(request: IndexRequest):
 
 @app.post('/retrieve')
 def retrieve(request: RetrieveRequest):
-    return window_runtime().retrieve(request)
+    coordinator = gpu_coordinator()
+    if coordinator is not None:
+        status, value = coordinator.execute('query-embedding-rerank', request.model_dump(mode='json'), server=sys.modules[__name__])
+        if status != 200:
+            raise HTTPException(status, value)
+        return value
+    result = window_runtime().retrieve(request)
+    if _migrated_index is not None:
+        observed = _migrated_index.last_observation
+        result['indexAccess'] = {'mode':'pinned-migrated-server-read-only', 'readOnly':True,
+                                'migrationReceiptSha256':observed['receipt']['sha256'],
+                                'runtimeCompatibilityVerified':False,
+                                **{name:observed[name] for name in ('queryRuntimeSignature','queryIdentity','queryRecipe','target','fullVectorIntegrity')}}
+    return result
+
+
+@app.post('/v1/chat/completions')
+@app.post('/v1/responses')
+@app.post('/v1/responses/input_tokens')
+async def native_business_operation(request: Request):
+    coordinator = gpu_coordinator()
+    if coordinator is None:
+        raise HTTPException(404, 'Native business Job coordinator is not configured')
+    from request_stage import MAX_BODY
+    chunks = []; size = 0
+    async for chunk in request.stream():
+        size += len(chunk)
+        if size > MAX_BODY:
+            raise HTTPException(413, 'Complete native business wire exceeds the finite byte limit')
+        chunks.append(chunk)
+    from starlette.concurrency import run_in_threadpool
+    try:
+        status, headers, body = await run_in_threadpool(coordinator.execute_wire, request.url.path, b''.join(chunks))
+    except TimeoutError as failure:
+        raise HTTPException(504,'Native GPU operation exceeded its finite deadline; no completed result was returned') from failure
+    except (ValueError,OSError) as failure:
+        raise HTTPException(503,'Native GPU operation was not accepted or completed; its private failure ledger is retained') from failure
+    return Response(content=body,status_code=status,headers=headers)
 
 
 if __name__ == '__main__':

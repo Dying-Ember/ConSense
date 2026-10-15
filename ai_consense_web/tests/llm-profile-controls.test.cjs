@@ -23,12 +23,17 @@ async function harness({ stored = new Map(), metadata = profiles, metadataError 
     return Promise.resolve(data).then(data => ({ data: { code: 0, data } }))
   }
   const axios = { create: () => ({ get: (url, config) => transport('get', url, undefined, config), post: (url, body, config) => transport('post', url, body, config), put: (url, body, config) => transport('put', url, body, config), delete: (url, config) => transport('delete', url, undefined, config) }), isAxiosError: () => false }
+  const fetch = async (url, init) => {
+    if (url.includes('/stop?')) return new Response(JSON.stringify({ code: 0 }), { headers: { 'Content-Type': 'application/json' } })
+    const response = await transport('post', url.slice(4), JSON.parse(init.body), { headers: init.headers })
+    return new Response(`event: complete\ndata: ${JSON.stringify({ requestId: init.headers['X-ConSense-Advice-Request'], response: response.data.data })}\n\n`, { headers: { 'Content-Type': 'text/event-stream' } })
+  }
   const loaded = loadVue(path.join(__dirname, '../src/components/AppTopbar.vue'), { boundaries: {
     axios: { default: axios }, pinia: piniaRuntime, 'vue-i18n': require('vue-i18n'), 'vue-router': routerRuntime, '@noble/hashes/sha256': require('@noble/hashes/sha256'),
     'pdfjs-dist': { GlobalWorkerOptions: {}, getDocument() { throw new Error('PDF renderer is outside the source-selection test') } },
     'pdfjs-dist/build/pdf.worker.min.mjs?url': { default: 'external-pdf-worker' },
     jszip: { default: require('jszip') }, 'mammoth/mammoth.browser.min.js': { default: require('mammoth/mammoth.browser.min.js') }, dompurify: { default: require('dompurify')(nativeWindow) }
-  }, globals: { crypto: require('node:crypto').webcrypto, DOMParser: nativeWindow.DOMParser, XMLSerializer: nativeWindow.XMLSerializer, NodeFilter: nativeWindow.NodeFilter, Element: nativeWindow.Element, HTMLElement: nativeWindow.HTMLElement, Node: nativeWindow.Node, localStorage: { getItem: key => stored.get(key) ?? null, setItem: (key, value) => stored.set(key, value) }, window: { setTimeout: (callback, ms) => { const timer = setTimeout(callback, ms); timer.unref(); return timer }, clearTimeout, addEventListener() {}, removeEventListener() {} }, document: nativeWindow.document } })
+  }, globals: { crypto: require('node:crypto').webcrypto, fetch, TextDecoder, AbortController, DOMException, Uint8Array, ArrayBuffer, DOMParser: nativeWindow.DOMParser, XMLSerializer: nativeWindow.XMLSerializer, NodeFilter: nativeWindow.NodeFilter, Element: nativeWindow.Element, HTMLElement: nativeWindow.HTMLElement, Node: nativeWindow.Node, localStorage: { getItem: key => stored.get(key) ?? null, setItem: (key, value) => stored.set(key, value) }, window: { setTimeout: (callback, ms) => { const timer = setTimeout(callback, ms); timer.unref(); return timer }, clearTimeout, addEventListener() {}, removeEventListener() {} }, document: nativeWindow.document } })
   const pinia = piniaRuntime.createPinia(); piniaRuntime.setActivePinia(pinia)
   const store = loaded.loadLocal(path.join(__dirname, '../src/stores/app.ts')).useAppStore()
   store.changeLocale('en')
@@ -140,15 +145,16 @@ async function harness({ stored = new Map(), metadata = profiles, metadataError 
   console.log('PASS: rendered generation retains operation-entry profile across plan await and preserves full generation timeout')
   const advice = await harness({ metadata: available, view: 'AdviceView', respond: request => {
     if (request.url === '/projects') return [{ id: 'Q', name: field.label }]
+    if (request.url.endsWith('/sessions') && request.method === 'post') return { id: 'session-Q', projectId: 'Q', scope: request.body.scope, basisScope: request.body.basisScope, createdAt: '2026-10-13T00:01:00Z' }
     if (request.url.includes('/index/status?')) return { chunks: 0 }
-    if (request.url.endsWith('/ask')) return { grounded: true, title: field.label, content: { en: 'Answer', zhHans: 'Answer', zhHant: 'Answer' }, citations: [], sources: [], modelIdentity: { profileId: 'local', provider: 'ollama', model: 'captured-local-model', configurationSha256: 'a'.repeat(64), identityScope: 'configured_profile' } }
+    if (request.url.endsWith('/ask/stream')) return { sessionId: request.body.sessionId, grounded: true, title: field.label, content: { en: 'Answer', zhHans: 'Answer', zhHant: 'Answer' }, citations: [], sources: [], modelIdentity: { profileId: 'local', provider: 'ollama', model: 'captured-local-model', configurationSha256: 'a'.repeat(64), identityScope: 'configured_profile' } }
     return []
   } })
   find(advice.root, node => node.tag === 'textarea').props['onUpdate:modelValue']('A question'); await settle()
   const asking = find(advice.root, node => node.tag === 'button' && text(node).trim() === 'Ask').props.onClick()
   find(advice.root, node => node.tag === 'select' && node.props['aria-label'] === 'LLM source').props.onChange({ target: { value: 'minimax-cn' } })
   await asking; await settle()
-  assert.equal(advice.requests.find(request => request.url.endsWith('/ask')).config.headers['X-ConSense-Llm-Profile'], 'local')
+  assert.equal(advice.requests.find(request => request.url.endsWith('/ask/stream')).config.headers['X-ConSense-Llm-Profile'], 'local')
   assert.match(text(advice.root), /Answer/)
   assert.match(text(advice.root), /Recorded model: captured-local-model/)
   assert.match(text(advice.root), /Configured profile; provider execution is not independently attested/)

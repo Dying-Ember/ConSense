@@ -28,7 +28,7 @@ class OerNativePdfRetrievalClientTest {
             String policy=snapshot.path("manifest").path("scope").path("scopePolicySha256").asText();ObjectNode scope=JsonUtils.mapper().createObjectNode();scope.put("manifestSha256",policy);
             ObjectNode oer=health.putObject("oer");oer.put("inputContract","canonical-source-chunks-upstream-scope-and-parser-projection-v1");oer.put("assetReturnContract","source-and-projection-bound-content-addressed-assets-v1");
             oer.put("recipe","scope-bound-dual2048-cuda-fp32-no-fixed-cache-v1");oer.put("targetModule","vetting");oer.put("sourceQualityVerifiedByHealth",false);oer.put("parserCandidatesAcceptedByRetrieval",false);
-            oer.put("canonicalProjectionEndpoint","/project");oer.set("scopePolicy",scope.deepCopy());oer.set("nativePdfCanonical",NativePdfCanonicalFixture.capability());
+            oer.put("canonicalProjectionEndpoint","/project");oer.put("indexStatusContract","read-only-existing-canonical-index-v1");oer.set("scopePolicy",scope.deepCopy());oer.set("nativePdfCanonical",NativePdfCanonicalFixture.capability());
             ObjectNode windows=(ObjectNode)health.path("retrieval").path("sourceWindows");windows.set("competitionScope",scope.deepCopy());windows.put("oerInputContract","canonical-source-chunks-upstream-scope-and-parser-projection-v1");windows.put("oerTargetModule","vetting");
             ObjectNode algorithms=(ObjectNode)windows.path("algorithms");for(String name:Arrays.asList("oer_server.py","competition_scope.py","artifact_store.py","structured_parser_evidence.py","canonical_projection.py","oer_source_registry.py","oer_request_evidence.py"))algorithms.put(name,VettingCorpus.hash("authored "+name));
             algorithms.setAll(NativePdfCanonicalFixture.algorithms(snapshot));index.put("projectId","pdf-client");index.put("indexed",1);index.putArray("canonicalProjections").add(snapshot.path("projectionSha256").asText());
@@ -43,6 +43,7 @@ class OerNativePdfRetrievalClientTest {
             binding.setSnapshotJson(NativePdfCanonicalFixture.raw());binding.setSnapshotBytesSha256(NativePdfCanonicalFixture.PUBLIC_SHA);
             when(backend.snapshot(binding.getProjectionSha256(),"vetting")).thenReturn(NativePdfCanonicalFixture.raw());
             when(http.get(endsWith("/health"),anyLong())).thenAnswer(c->JsonUtils.write(health));when(http.postJson(endsWith("/index-canonical"),anyString(),anyLong())).thenAnswer(c->JsonUtils.write(index));
+            when(http.postJson(endsWith("/index-canonical/status"),anyString(),anyLong())).thenAnswer(c->{ObjectNode status=index.deepCopy();status.put("ready",true);status.put("readOnly",true);status.put("vectorPoints",status.path("indexed").asInt());status.put("indexStatusContract","read-only-existing-canonical-index-v1");return JsonUtils.write(status);});
             when(http.postJson(endsWith("/retrieve"),anyString(),anyLong())).thenAnswer(c->JsonUtils.write(response));client=new OerCanonicalRetrievalClient(http,properties,config,backend);
         }
         void index(){client.index("pdf-client","vetting",Collections.singletonList(binding));}

@@ -46,3 +46,6 @@ Thumbs.db
 /outputs/review-audit-*/
 /outputs/oer-progress/*.png
 /outputs/oer-progress/*.jpg
+
+# Local fixture HTTP captures are runtime evidence, not source fixtures
+/ai_consense_service/tools/vetting_eval/fixture_evidence/

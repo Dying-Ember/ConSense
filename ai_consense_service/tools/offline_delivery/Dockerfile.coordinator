@@ -1,0 +1,10 @@
+ARG PYTHON_RUNTIME_IMAGE
+FROM ${PYTHON_RUNTIME_IMAGE}
+WORKDIR /app
+COPY vetting_eval/ /app/vetting_eval/
+COPY offline_delivery/ /app/offline_delivery/
+COPY kubectl /usr/local/bin/kubectl
+ENV HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 CONSENSE_MODEL_OFFLINE=1
+USER 10001:10001
+EXPOSE 8868
+ENTRYPOINT ["python", "/app/vetting_eval/server.py", "--host", "0.0.0.0", "--port", "8868"]

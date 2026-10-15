@@ -1,12 +1,14 @@
 """Fake inference/vector providers only; zero real model/index/query/DB calls."""
 import copy
 import importlib.util
+import os
 from pathlib import Path
 import sys
 import tempfile
 from types import SimpleNamespace
 import unittest
 import uuid
+from unittest.mock import patch
 import numpy as np
 from test_token_windows import CharacterTokenizer,parent
 from token_windows import WindowError,windows,WindowRecipe
@@ -32,8 +34,8 @@ class FakeDb:
     def count(self,name,**kwargs):return SimpleNamespace(count=len(self.collections[name]))
     def query_points(self,name,query,limit,query_filter=None):
         self.fetch_limits.append(limit)
-        role=query_filter.must[0].match.value if query_filter else None
-        selected=[p for p in self.collections[name].values()if role is None or p.payload['role']==role]
+        conditions=query_filter.must if query_filter else []
+        selected=[p for p in self.collections[name].values()if all(p.payload.get(condition.key)==condition.match.value for condition in conditions)]
         selected=sorted(selected,key=lambda p:(-len(p.payload['content']),str(p.id)))[:limit]
         return SimpleNamespace(points=[SimpleNamespace(id=p.id,payload=copy.deepcopy(p.payload),score=len(p.payload['content'])/1000)for p in selected])
 
@@ -45,6 +47,8 @@ class FakeModel:
 
 class ServerTests(unittest.TestCase):
     def setUp(self):
+        self.environment=patch.dict(os.environ,{'CONSENSE_RETRIEVAL_GRANULARITY':'windows-v1'})
+        self.environment.start();self.addCleanup(self.environment.stop)
         self.tmp=tempfile.TemporaryDirectory();self.db=FakeDb();self.events=[];self.encodes=[];s.STATE=Path(self.tmp.name);s._projects={};s._selected_device='cpu';s.MODEL_DTYPE='float32'
         self.rt=WindowRuntime(s);self.rt.overlap=2
         self.rt.tokenizer=lambda kind:CharacterTokenizer();self.rt.identity=lambda kind:{'kind':kind,'tokenizerSha256':'test'}
@@ -54,11 +58,20 @@ class ServerTests(unittest.TestCase):
         s.encode_embeddings=encode
         self.old_settings=copy.deepcopy(s.MODEL_SETTINGS);s.MODEL_SETTINGS={'embedding':{'maxTokens':10,'batchSize':4},'reranker':{'maxTokens':10,'batchSize':4}}
         self.p=parent('abcdefghijklmnop',str(uuid.uuid4()),source_hash='a'*64)
-    def tearDown(self):s.MODEL_SETTINGS=self.old_settings;self.tmp.cleanup()
+    def tearDown(self):
+        s.MODEL_SETTINGS=self.old_settings;self.tmp.cleanup();self.environment.stop()
     def index(self,chunks=None,project='one'):return s.index(s.IndexRequest(projectId=project,chunks=[s.Chunk.model_validate(c)for c in(chunks or[self.p])]))
     def query(self,project='one',**kwargs):return s.retrieve(s.RetrieveRequest(projectId=project,query='q',limit=1,candidates=2,**kwargs))
     def test_index_points_are_windows_not_original_parents(self):
         r=self.index();self.assertGreater(r['vectorPoints'],r['indexed']);self.assertEqual(r['indexed'],1);self.assertEqual(r['contract'],CONTRACT)
+    def test_vector_fixture_applies_role_and_granularity_conditions_together(self):
+        rows=[SimpleNamespace(id=str(index),payload={'content':'authored source','role':role,'granularity':lane})
+              for index,(role,lane)in enumerate([('standard','short'),('standard','structure'),('tender','structure')])]
+        self.db.collections['fixture']={row.id:row for row in rows}
+        conditions=[SimpleNamespace(key=key,match=SimpleNamespace(value=value))
+                    for key,value in [('role','standard'),('granularity','structure')]]
+        result=self.db.query_points('fixture',query=[1.,0.],limit=10,query_filter=SimpleNamespace(must=conditions))
+        self.assertEqual([point.id for point in result.points],['1'])
     def test_query_returns_original_parent_id_content_cells(self):
         self.index();result=self.query();hit=result['hits'][0]
         self.assertEqual(hit['id'],self.p['id']);self.assertEqual(hit['payload']['content'],self.p['content']);self.assertEqual(hit['payload']['cells'],['unaltered'])

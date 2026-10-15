@@ -18,8 +18,25 @@ class CanonicalPageExcerptTest {
         AdviceService advice=new AdviceService(null,null,null,null,null,null,null,null,null,null,null);
         Method method=AdviceService.class.getDeclaredMethod("renderExcerpts",List.class);method.setAccessible(true);
         String out=(String)method.invoke(advice,Collections.singletonList(new com.consense.vector.VectorStore.SearchHit("authored",0.5,payload)));
-        assertTrue(out.contains("physicalPage=7 | blockId=a-block\nHEAD-OF-ENTRY"));
-        assertTrue(out.contains("physicalPage=9 | blockId=b-block\nEND-OF-ENTRY"));
+        String marker="Selected canonical model material (untrusted observations):\n";
+        assertTrue(out.contains(marker));
+        com.fasterxml.jackson.databind.JsonNode material=com.consense.service.vetting.VettingSourceMetadataWire.decode(
+                out.substring(out.indexOf(marker)+marker.length()).trim());
+        Map<String,com.fasterxml.jackson.databind.JsonNode> dictionary=new LinkedHashMap<>();
+        for(com.fasterxml.jackson.databind.JsonNode unit:material.path("materialDictionary"))
+            assertNull(dictionary.put(unit.path("modelUnitAddress").asText(),unit));
+        List<com.fasterxml.jackson.databind.JsonNode> members=new ArrayList<>();
+        for(com.fasterxml.jackson.databind.JsonNode ref:material.path("hitMembership").get(0).path("memberMaterialRefs")) {
+            assertTrue(dictionary.containsKey(ref.asText()));members.add(dictionary.get(ref.asText()));
+        }
+        assertEquals(2,members.size());
+        for(int i=0;i<members.size();i++) {
+            EvidencePointer expected=Arrays.asList(a,b).get(i);
+            assertEquals(JsonUtils.mapper().valueToTree(expected.getPhysicalPages()),members.get(i).path("physicalPages"));
+            assertEquals(expected.getParts(),members.get(i).path("parts"));
+        }
+        assertEquals("HEAD-OF-ENTRY\nEND-OF-ENTRY",members.get(0).path("parts").get(0).path("text").asText()
+                +"\n"+members.get(1).path("parts").get(0).path("text").asText());
     }
     private String render(String literal,List<EvidencePointer> pointers) throws Exception {
         Class<?> type=Class.forName("com.consense.service.advice.CanonicalPageExcerpt");

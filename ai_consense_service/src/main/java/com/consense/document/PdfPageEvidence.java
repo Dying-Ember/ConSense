@@ -1,6 +1,7 @@
 package com.consense.document;
 
 import lombok.Data;
+import com.fasterxml.jackson.databind.JsonNode;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -16,6 +17,9 @@ public class PdfPageEvidence {
     private List<PdfGlyph> glyphs = new ArrayList<>();
     private List<PdfFormField> formFields = new ArrayList<>();
     private List<DocumentBlock> nativeBlocks = new ArrayList<>();
+    private List<JsonNode> placedImageRegions = new ArrayList<>();
+    private List<JsonNode> vectorPathOperators = new ArrayList<>();
+    private List<JsonNode> paintedVectorRegions = new ArrayList<>();
     private List<String> limitations = new ArrayList<>();
 
     @Data public static class PdfGlyph {

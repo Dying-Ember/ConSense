@@ -119,7 +119,7 @@ class VettingStrictHybridTest {
                 when(retrieval.retrieve(eq("p"),anyString(),eq("tender"),anyList())).thenReturn(Collections.singletonList(tender));
                 when(retrieval.retrieve(eq("p"),anyString(),eq("standard"),anyList())).thenThrow(new IllegalStateException("no exact role query cache"));
             }
-            assertThrows(IllegalStateException.class,()->new VettingSemanticReview(ai,props,retrieval).review("p",Arrays.asList(tender,standard),"en",(a,b)->{}));
+            assertThrows(IllegalStateException.class,()->VettingTokenFixture.review(ai,props,retrieval).review("p",Arrays.asList(tender,standard),"en",(a,b)->{}));
             verify(ai,never()).completeStructuredJsonList(anyString(),anyString(),any(),any(),anyList());
         }
     }
@@ -130,7 +130,7 @@ class VettingStrictHybridTest {
             VettingRetrievalClient retrieval=mock(VettingRetrievalClient.class);Chunk c=source("one","tender","The payment interim certificate minimum amount is specified.");
             when(retrieval.retrieve(anyString(),anyString(),anyString(),anyList())).thenReturn(Collections.emptyList());
             when(ai.completeStructuredJsonList(anyString(),anyString(),any(),any(),anyList())).thenReturn(Collections.emptyList());
-            VettingSemanticReview.Result result=new VettingSemanticReview(ai,props,retrieval).review("p",Collections.singletonList(c),"en",(a,b)->{});
+            VettingSemanticReview.Result result=VettingTokenFixture.review(ai,props,retrieval).review("p",Collections.singletonList(c),"en",(a,b)->{});
             assertEquals(required?Collections.emptySet():Collections.singleton("one"),result.getReviewedChunkIds());
             if(required)verify(ai,never()).completeStructuredJsonList(anyString(),anyString(),any(),any(),anyList());
         }
@@ -153,7 +153,7 @@ class VettingStrictHybridTest {
         VettingSemanticReview.Quote quote=new VettingSemanticReview.Quote();quote.setChunkId("one");quote.setSide("source");quote.setQuote(c.getContent());observed.setEvidence(Collections.singletonList(quote));
         when(ai.completeStructuredJsonList(anyString(),anyString(),any(),any(),anyList(),anyMap())).thenAnswer(call->{
             ((List<String>)call.getArgument(4)).add("synthetic raw content");return Arrays.asList(rejected,observed);});
-        VettingSemanticReview.Result result=new VettingSemanticReview(ai,props,new VettingRetrievalClient(http,props))
+        VettingSemanticReview.Result result=VettingTokenFixture.review(ai,props,new VettingRetrievalClient(http,props))
             .reviewWithProgress("explicit-run","p",Collections.singletonList(c),"en",(a,b,d)->{});
         assertEquals(1,result.getTopicAudits().get(0).getRejectedRecords());
         List<JsonNode> events;

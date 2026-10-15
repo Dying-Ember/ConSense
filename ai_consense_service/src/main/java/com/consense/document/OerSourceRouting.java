@@ -27,6 +27,32 @@ public final class OerSourceRouting {
         }
     }
 
+    /** Identity only: a drawing label or native format must precede every detail parser. */
+    public static boolean isDrawing(String documentScope, String fileName, byte[] bytes) {
+        if ("drawing".equals(documentScope)) return true;
+        String header = new String(bytes, 0, Math.min(bytes.length, 64), java.nio.charset.StandardCharsets.US_ASCII);
+        if (header.matches("(?s)^AC10[0-9]{2}.*")) return true;
+        if (header.startsWith("AutoCAD Binary DXF")
+                || header.matches("(?s)^\\s*0\\s+SECTION\\s+.*")) return true;
+
+        return false;
+    }
+
+    public static List<OerDocumentIdentity.Evidence> drawingMetadata(byte[] bytes) {
+        List<OerDocumentIdentity.Evidence> hints = new java.util.ArrayList<>();
+        if (bytes == null || bytes.length < 5 || !new String(bytes, 0, 5, java.nio.charset.StandardCharsets.US_ASCII).equals("%PDF-")) return hints;
+        try (org.apache.pdfbox.pdmodel.PDDocument pdf = org.apache.pdfbox.pdmodel.PDDocument.load(bytes)) {
+            org.apache.pdfbox.pdmodel.PDDocumentInformation info = pdf.getDocumentInformation();
+            if (drawingLabel(info.getTitle())) hints.add(new OerDocumentIdentity.Evidence("pdf_metadata_candidate", "metadata/title", info.getTitle()));
+            if (drawingLabel(info.getSubject())) hints.add(new OerDocumentIdentity.Evidence("pdf_metadata_candidate", "metadata/subject", info.getSubject()));
+        } catch (java.io.IOException invalidPdf) { /* Actual parser records malformed source failures. */ }
+        return hints;
+    }
+
+    private static boolean drawingLabel(String label) {
+        return label != null && label.trim().matches("(?i)(?:engineering |technical |施工)?(?:drawings?|图纸|圖紙)");
+    }
+
     public OerDocumentIdentity route(String fileName, String sourceSha256, DocumentParser.ParsedDocument parsed) {
         OerDocumentIdentity result = new OerDocumentIdentity();
         String sha = validSha(sourceSha256); result.setSourceSha256(sha);
@@ -51,7 +77,8 @@ public final class OerSourceRouting {
             if (Arrays.asList("NTT", "SCT", "SCC").contains(titleKind)) {
                 if (projectIdentifier(content)) purpose = "project_document";
                 else result.getCandidates().add(new OerDocumentIdentity.Candidate(titleKind, "standard_template", "An unfilled title alone does not establish a standard template"));
-            } else if ("PRE".equals(titleKind) && projectIdentifier(content)) purpose = "project_document";
+            } else if (Arrays.asList("AA", "FT").contains(titleKind)) purpose = "project_document";
+            else if ("PRE".equals(titleKind) && projectIdentifier(content)) purpose = "project_document";
             else if (Arrays.asList("GCC", "GS").contains(titleKind)) purpose = "reference_standard";
             else if ("GCT".equals(titleKind) && content.matches("(?is).*\\b(?:tenderer|tender|contract)\\b.*")) purpose = "project_document";
             else if (Arrays.asList("BQ", "SOR", "GENERAL_SUMMARY").contains(titleKind)
@@ -63,6 +90,17 @@ public final class OerSourceRouting {
                 result.setRole("reference_standard".equals(purpose) ? "standard" : "tender");
                 result.setEligibleModules(eligible(titleKind, purpose));
             } else result.getCandidates().add(new OerDocumentIdentity.Candidate(titleKind, purpose, "Purpose needs actual project/standard identity evidence"));
+        }
+        if ("unknown".equals(result.getIdentityStatus()) && parsed != null && parsed.getRoutingObservation() != null) {
+            if (parsed.getRoutingObservation().path("nonDrawingFormatVerified").asBoolean()) {
+                result.setIdentityStatus("format_supported_non_drawing");
+                if (projectIdentifier(content)) {
+                    result.setSourcePurpose("project_document"); result.setRole("tender"); result.setIdentityStatus("content_supported");
+                    result.setEligibleModules(MODULES);
+                    result.getIdentityEvidence().add(new OerDocumentIdentity.Evidence("native_project_identifier", "observed_content", "Actual project identifier in a verified non-drawing textual format; project adoption remains separate"));
+                }
+            }
+            else if (titleKind != null) result.setIdentityStatus("content_supported_non_drawing");
         }
         String filenameKind = filenameCandidate(fileName);
         if (filenameKind != null && !Objects.equals(filenameKind, result.getKind()))
@@ -116,6 +154,8 @@ public final class OerSourceRouting {
     private static String titledKind(String title) {
         String value = title.toLowerCase(Locale.ROOT).replaceAll("\\s+", " ");
         value = value.trim().replaceFirst("^(?:[0-9]+[. )-]*|appendix [a-z0-9]+[. :-]*)", "").trim();
+        if (value.matches("(?:articles? of agreement|form of agreement)(?: \\(aa\\))?")) return "AA";
+        if (value.matches("form of tender(?: \\(ft\\))?")) return "FT";
         if (value.matches("notice to tenderers?(?: \\(ntt\\))?")) return "NTT";
         if (value.matches("special conditions? of tender(?: \\(sct\\))?")) return "SCT";
         if (value.matches("special conditions? of contract(?: \\(scc\\))?")) return "SCC";

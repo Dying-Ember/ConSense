@@ -17,6 +17,10 @@ server = importlib.util.module_from_spec(spec); sys.modules[spec.name] = server;
 
 
 class WorkspaceHealthTests(unittest.TestCase):
+    def setUp(self):
+        environment=patch.dict(os.environ,{'CONSENSE_RETRIEVAL_GRANULARITY':'windows-v1'})
+        environment.start();self.addCleanup(environment.stop)
+
     def test_repository_default_is_workspace_not_parent_coding_directory(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder); here = root / 'arbitrary-service/tools/vetting_eval'; here.mkdir(parents=True)
@@ -71,8 +75,12 @@ class WorkspaceHealthTests(unittest.TestCase):
                 return server.health()
 
     def test_health_uses_actual_shared_signature_version(self):
-        self.assertEqual(self.health()['indexSignatureVersion'], 3)
+        self.assertEqual(self.health()['indexSignatureVersion'], runtime_module.SIGNATURE_VERSION)
         self.assertEqual(self.health(version=9)['indexSignatureVersion'], 9)
+
+    def test_explicit_structural_recipe_reports_its_own_signature_without_loading_models(self):
+        with patch.dict(os.environ,{'CONSENSE_RETRIEVAL_GRANULARITY':'dual-structure-v1'}):
+            self.assertEqual(self.health()['indexSignatureVersion'],4)
 
     def test_health_does_not_load_tokenizer_or_neural_models(self):
         result = self.health(); windows = result['retrieval']['sourceWindows']
@@ -91,13 +99,16 @@ class WorkspaceHealthTests(unittest.TestCase):
     def test_runtime_binds_workspace_helper_and_rejects_changed_loaded_bytes(self):
         rt = WindowRuntime(server)
         self.assertIn('workspace_root.py', rt.algorithms())
+        self.assertIn('qdrant_backend.py', rt.algorithms())
         original = runtime_module.file_identity
-        def changed(path):
-            value = original(path)
-            return {**value, 'sha256': '0' * 64} if Path(path).name == 'workspace_root.py' else value
-        with patch.object(runtime_module, 'file_identity', side_effect=changed), self.assertRaises(WindowError) as error:
-            rt.algorithms()
-        self.assertEqual(error.exception.kind, 'SOFTWARE_CHANGED_SINCE_IMPORT')
+        for dependency in ('workspace_root.py', 'qdrant_backend.py'):
+            with self.subTest(dependency=dependency):
+                def changed(path):
+                    value = original(path)
+                    return {**value, 'sha256': '0' * 64} if Path(path).name == dependency else value
+                with patch.object(runtime_module, 'file_identity', side_effect=changed), self.assertRaises(WindowError) as error:
+                    rt.algorithms()
+                self.assertEqual(error.exception.kind, 'SOFTWARE_CHANGED_SINCE_IMPORT')
 
 
 if __name__ == '__main__':

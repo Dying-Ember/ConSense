@@ -1,0 +1,7 @@
+ARG NATIVE_RUNTIME_IMAGE
+FROM ${NATIVE_RUNTIME_IMAGE}
+WORKDIR /app
+COPY vetting_eval/ /app/vetting_eval/
+COPY offline_delivery/ /app/offline_delivery/
+ENV HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 CONSENSE_MODEL_OFFLINE=1
+ENTRYPOINT ["python", "/app/offline_delivery/stage_worker.py"]

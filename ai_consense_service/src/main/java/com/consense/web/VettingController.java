@@ -6,7 +6,6 @@ import com.consense.web.dto.DraftingDtos.UploadResultVO;
 import com.consense.web.dto.VettingDtos.*;
 import lombok.RequiredArgsConstructor;
 import org.springframework.core.io.ByteArrayResource;
-import org.springframework.core.io.FileSystemResource;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -87,8 +86,9 @@ public class VettingController {
     @PostMapping("/findings/{code}/status")
     public ApiResponse<FindingVO> updateStatus(@PathVariable String projectId,
                                                @PathVariable String code,
-                                               @RequestParam String status) {
-        return ApiResponse.ok(vettingService.updateStatus(projectId, code, status));
+                                               @RequestParam String status,@RequestParam(required=false) String expectedRunId,
+                                               @RequestParam(required=false) String expectedGeneratedRevisionSha256,@RequestParam(required=false) String expectedSourceSnapshotSha256) {
+        return ApiResponse.ok(vettingService.updateStatus(projectId,code,status,expectedRunId,expectedGeneratedRevisionSha256,expectedSourceSnapshotSha256));
     }
 
     @PutMapping("/findings/{code}/review")
@@ -105,15 +105,17 @@ public class VettingController {
     }
 
     @GetMapping("/sources/{documentId}/original")
-    public ResponseEntity<FileSystemResource> original(@PathVariable String projectId,@PathVariable long documentId,
-                                                       @RequestParam String sourceHash) {
-        VettingService.OriginalSource source=vettingService.originalSource(projectId,documentId,sourceHash);
+    public ResponseEntity<ByteArrayResource> original(@PathVariable String projectId,@PathVariable long documentId,
+                                                       @RequestParam String sourceHash,@RequestParam(required=false) String originalSourceSha256,@RequestParam(required=false) String sourceRole) {
+        VettingService.OriginalSource source=vettingService.originalSource(projectId,documentId,sourceHash,originalSourceSha256,sourceRole);
         boolean pdf=source.getFileName().toLowerCase(java.util.Locale.ROOT).endsWith(".pdf");
+        boolean docx=source.getFileName().toLowerCase(java.util.Locale.ROOT).endsWith(".docx");
         return ResponseEntity.ok().contentLength(source.getSize())
-                .contentType(pdf?MediaType.APPLICATION_PDF:MediaType.APPLICATION_OCTET_STREAM)
+                .contentType(pdf?MediaType.APPLICATION_PDF:docx?MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.wordprocessingml.document"):MediaType.APPLICATION_OCTET_STREAM)
                 .header(HttpHeaders.CONTENT_DISPOSITION,(pdf?"inline":"attachment")+"; filename*=UTF-8''"+urlEncode(source.getFileName()))
-                .header("X-Source-Revision",source.getSourceRevision()).header("X-Content-Type-Options","nosniff")
-                .body(new FileSystemResource(source.getPath()));
+                .header("X-Source-Revision",source.getSourceRevision()).header("X-Source-SHA256",source.getSha256())
+                .header(HttpHeaders.CACHE_CONTROL,"no-store").header("X-Content-Type-Options","nosniff")
+                .body(new ByteArrayResource(source.getBytes()));
     }
 
     @GetMapping("/report.pdf")

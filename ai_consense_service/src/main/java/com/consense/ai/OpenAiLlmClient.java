@@ -11,6 +11,9 @@ import lombok.extern.slf4j.Slf4j;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.function.Consumer;
+import com.fasterxml.jackson.core.JsonParser;
+import java.io.IOException;
 
 /**
  * OpenAI 兼容协议（vLLM / LM Studio / One-API / Xinference 等）。
@@ -22,17 +25,17 @@ public class OpenAiLlmClient implements LlmClient {
 
     private final ConsenseProperties.Llm cfg;
     private final HttpSupport http;
-    private final boolean retryExplicitOverload;
+    private final boolean miniMax;
 
     public OpenAiLlmClient(ConsenseProperties.Llm cfg, HttpSupport http) {
         this(cfg, http, false);
     }
 
-    /** Package-local opt-in for the separate MiniMax adapter; ordinary deployments retain their policy. */
-    OpenAiLlmClient(ConsenseProperties.Llm cfg, HttpSupport http, boolean retryExplicitOverload) {
+    /** MiniMax framing and overload policy opt-in; ordinary deployments retain their policy. */
+    OpenAiLlmClient(ConsenseProperties.Llm cfg, HttpSupport http, boolean miniMax) {
         this.cfg = cfg;
         this.http = http;
-        this.retryExplicitOverload = retryExplicitOverload;
+        this.miniMax = miniMax;
     }
 
     @Override
@@ -43,20 +46,24 @@ public class OpenAiLlmClient implements LlmClient {
     /** Prompt schema is supplied by AiGateway; this client does not assume native JSON grammar support. */
     @Override
     public String chatStructured(List<ChatTurn> turns, JsonNode schema) {
+        validateStructured(schema);
+        return chat(turns, true);
+    }
+
+    private void validateStructured(JsonNode schema) {
         if (schema == null || !schema.isObject()) throw new IllegalArgumentException("A JSON schema object is required");
         if (cfg.getStructuredMaxTokens() <= 0) throw new IllegalArgumentException("Structured output budget must be positive");
         String thinkingMode = cfg.getStructuredOpenAiThinkingMode();
         if (thinkingMode != null && !"adaptive".equals(thinkingMode) && !"disabled".equals(thinkingMode)) {
             throw new IllegalArgumentException("Structured OpenAI thinking mode must be adaptive, disabled, or null");
         }
-        return chat(turns, true);
     }
 
-    private String chat(List<ChatTurn> turns, boolean structured) {
+    private ObjectNode request(List<ChatTurn> turns, boolean structured, boolean stream) {
         ObjectNode body = JsonUtils.mapper().createObjectNode();
         body.put("model", cfg.getChatModel());
         body.put("temperature", cfg.getTemperature());
-        body.put("stream", false);
+        body.put("stream", stream);
         if (structured) {
             body.put("n", 1);
             body.put("max_tokens", cfg.getStructuredMaxTokens());
@@ -73,9 +80,14 @@ public class OpenAiLlmClient implements LlmClient {
             node.put("role", turn.getRole());
             node.put("content", turn.getContent());
         }
+        return body;
+    }
+
+    private String chat(List<ChatTurn> turns, boolean structured) {
+        ObjectNode body = request(turns, structured, false);
         String url = trim(cfg.getBaseUrl()) + "/v1/chat/completions";
         String requestJson = JsonUtils.write(body);
-        String raw = retryExplicitOverload
+        String raw = miniMax
                 ? (cfg.isOverloadRetryEnabled()
                     ? http.postJsonWithOverloadBackoff(url, requestJson, cfg.getTimeoutMs(), authHeader())
                     : http.postJsonWithoutReplay(url, requestJson, cfg.getTimeoutMs(), authHeader()))
@@ -138,6 +150,81 @@ public class OpenAiLlmClient implements LlmClient {
             throw new BizException("OpenAI 兼容端点未返回内容");
         }
         return content.asText();
+    }
+
+    @Override public boolean supportsStreaming() { return cfg.isBodyStreamingEnabled(); }
+
+    @Override public String chatStructuredStream(List<ChatTurn> turns, JsonNode schema,
+                                                 Consumer<String> onDelta, Consumer<Runnable> onCancel) {
+        validateStructured(schema);
+        StreamContent output = new StreamContent(onDelta, miniMax);
+        http.postJsonStream(trim(cfg.getBaseUrl()) + "/v1/chat/completions",
+                JsonUtils.write(request(turns, true, true)), cfg.getTimeoutMs(), authHeader(),
+                16 * 1024 * 1024, true, output::event, onCancel);
+        return output.finish();
+    }
+
+    private static final class StreamContent {
+        private final StringBuilder content = new StringBuilder();
+        private final Consumer<String> delta;
+        private final boolean miniMax;
+        private boolean stopped, done;
+        private JsonNode last;
+        StreamContent(Consumer<String> d, boolean miniMax) { delta = java.util.Objects.requireNonNull(d); this.miniMax = miniMax; }
+        private void reject(String message, IncompleteModelResponseException.FailureKind kind) {
+            throw new IncompleteModelResponseException(message, last == null ? "" : last.toString(),
+                    JsonUtils.mapper().getNodeFactory().textNode(content.toString()), kind, last);
+        }
+        void event(String value) {
+            if (done) { reject("Provider emitted an event after stream completion", IncompleteModelResponseException.FailureKind.INCOMPLETE_FINISH); }
+            if ("[DONE]".equals(value)) { done = true; return; }
+            try (JsonParser parser = JsonUtils.mapper().getFactory().createParser(value)) {
+                parser.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
+                last = JsonUtils.mapper().readTree(parser);
+                if (last == null || !last.isObject() || parser.nextToken() != null) throw new IOException();
+            } catch (IOException invalid) {
+                reject("Invalid streaming provider JSON envelope", IncompleteModelResponseException.FailureKind.INVALID_RESPONSE_ENVELOPE);
+            }
+            JsonNode code = last.path("base_resp").path("status_code");
+            if (last.hasNonNull("error") || (last.hasNonNull("base_resp") && !last.path("base_resp").isObject())
+                    || (!code.isMissingNode() && (!code.isIntegralNumber() || !code.canConvertToLong() || code.longValue() != 0)))
+                reject("Streaming provider reports an error", IncompleteModelResponseException.FailureKind.PROVIDER_ERROR);
+            JsonNode choices = last.path("choices");
+            if (choices.isArray() && choices.isEmpty() && stopped && last.path("usage").isObject()) return;
+            if (!choices.isArray() || choices.size() != 1 || !choices.get(0).isObject()
+                    || !choices.get(0).path("index").isIntegralNumber() || !choices.get(0).path("index").canConvertToInt()
+                    || choices.get(0).path("index").intValue() != 0)
+                reject("Streaming model must return exactly one indexed choice", IncompleteModelResponseException.FailureKind.INVALID_CHOICE_COUNT);
+            JsonNode choice = choices.get(0), chunk = choice.path("delta");
+            if (!chunk.isObject() || stopped) reject("Streaming choice is incomplete or already stopped", IncompleteModelResponseException.FailureKind.INCOMPLETE_FINISH);
+            if (chunk.hasNonNull("tool_calls") && !(chunk.path("tool_calls").isArray() && chunk.path("tool_calls").isEmpty())
+                    || chunk.hasNonNull("function_call")) reject("Streaming tool output is unsupported", IncompleteModelResponseException.FailureKind.TOOL_CALLS);
+            if (chunk.hasNonNull("refusal") && (!chunk.path("refusal").isTextual() || !chunk.path("refusal").asText().isEmpty()))
+                reject("Streaming model refused text output", IncompleteModelResponseException.FailureKind.REFUSAL);
+            if (chunk.hasNonNull("role") && !"assistant".equals(chunk.path("role").asText()))
+                reject("Streaming role is not assistant", IncompleteModelResponseException.FailureKind.INVALID_RESPONSE_ENVELOPE);
+            JsonNode text = chunk.path("content");
+            if (!text.isMissingNode() && !text.isNull()) {
+                if (!text.isTextual()) reject("Streaming content is not text", IncompleteModelResponseException.FailureKind.MISSING_TEXT);
+                String part = text.textValue();
+                if (part.length() > 4 * 1024 * 1024 - content.length()) reject("Streaming output bound exceeded", IncompleteModelResponseException.FailureKind.OUTPUT_BUDGET_EXHAUSTED);
+                content.append(part);
+                if (!part.isEmpty()) delta.accept(part);
+            }
+            if (choice.hasNonNull("finish_reason") && !(miniMax && choice.path("finish_reason").isTextual() && choice.path("finish_reason").textValue().isEmpty())) {
+                String reason = choice.path("finish_reason").asText();
+                if (!"stop".equals(reason)) reject("Streaming model did not stop normally",
+                        "length".equals(reason) ? IncompleteModelResponseException.FailureKind.OUTPUT_BUDGET_EXHAUSTED
+                                : "tool_calls".equals(reason) || "function_call".equals(reason) ? IncompleteModelResponseException.FailureKind.TOOL_CALLS
+                                : IncompleteModelResponseException.FailureKind.INCOMPLETE_FINISH);
+                stopped = true;
+            }
+        }
+        String finish() {
+            if (!stopped || (!done && !miniMax)) reject("Streaming model completion marker is missing", IncompleteModelResponseException.FailureKind.INCOMPLETE_FINISH);
+            if (JsonUtils.isBlankText(content.toString())) reject("Streaming model returned no text", IncompleteModelResponseException.FailureKind.MISSING_TEXT);
+            return content.toString();
+        }
     }
 
     private IncompleteModelResponseException incomplete(String message, String raw, JsonNode content,

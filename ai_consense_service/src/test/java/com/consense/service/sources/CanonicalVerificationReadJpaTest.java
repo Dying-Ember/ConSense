@@ -6,6 +6,7 @@ import com.consense.document.OerDocumentIdentity;
 import com.consense.domain.*;
 import com.consense.repository.*;
 import com.consense.service.vetting.VettingCorpus;
+import com.consense.service.vetting.VettingService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.sun.net.httpserver.HttpServer;
 import java.io.*;
@@ -32,6 +33,7 @@ import org.springframework.transaction.*;
 import org.springframework.transaction.annotation.*;
 import org.springframework.transaction.support.TransactionTemplate;
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.*;
 
 /** Actual SQL/JPA/fresh reader and authored local HTTP registration; no live DB/model/source-quality claim. */
 @DataJpaTest(properties={"spring.jpa.hibernate.ddl-auto=create-drop","spring.flyway.enabled=false","spring.jpa.show-sql=false","spring.jpa.properties.hibernate.generate_statistics=true"})
@@ -97,22 +99,49 @@ public class CanonicalVerificationReadJpaTest {
     @Test void assert_current_sql_keeps_adoption_check_without_loading_native_payload(){
         reader.assertCurrent(binding,"advisory");assertVerificationSql("assertCurrent");assertTrue(SqlCapture.statements.stream().anyMatch(sql->sql.contains("canonical_source_binding")));
     }
-    @Test void current_document_still_reads_all_columns_and_preserves_native_and_coverage(){
-        SourceDocument d=reader.currentDocument(PROJECT,11L,"advisory");assertEquals(nativeJson,d.getNativePdfEvidenceJson());assertEquals(originalDocument.getParseCoverageJson(),d.getParseCoverageJson());
-        assertEquals(originalDocument.getStructuredContentJson(),d.getStructuredContentJson());assertEquals(originalDocument.getTextContent(),d.getTextContent());assertEquals("application/pdf",d.getContentType());assertEquals(999L,d.getSizeBytes());
-        String sql=byIdSelects().get(0);System.out.println("CURRENT_DOCUMENT_SQL_FEEDBACK "+sql);assertEquals(21,columns(sql).size());assertTrue(columns(sql).contains("native_pdf_evidence_json"));assertEquals(1,sourceLoads());
+    @Test void current_document_reads_complete_verification_fields_and_preserves_retained_archive(){
+        SourceDocument d=reader.currentDocument(PROJECT,11L,"advisory");assertNull(d.getNativePdfEvidenceJson());assertNull(d.getParseCoverageJson());
+        assertEquals(originalDocument.getStructuredContentJson(),d.getStructuredContentJson());assertEquals(originalDocument.getTextContent(),d.getTextContent());
+        assertEquals(originalDocument.getSourceSha256(),d.getSourceSha256());assertEquals(originalDocument.getStoragePath(),d.getStoragePath());assertVerificationSql("currentDocument");
+        committed(()->{SourceDocument retained=documents.findById(11L).orElseThrow();assertEquals(nativeJson,retained.getNativePdfEvidenceJson());assertEquals(originalDocument.getParseCoverageJson(),retained.getParseCoverageJson());assertEquals("application/pdf",retained.getContentType());assertEquals(999L,retained.getSizeBytes());});
+    }
+    @Test void vetting_original_after_read_rejects_committed_role_change_despite_a_managed_old_entity(){
+        SourceDocumentRepository boundary=mock(SourceDocumentRepository.class,org.mockito.AdditionalAnswers.delegatesTo(documents));
+        java.util.concurrent.atomic.AtomicInteger reads=new java.util.concurrent.atomic.AtomicInteger();
+        doAnswer(call->{
+            Optional<SourceDocumentRepository.VerificationMetadata> captured=documents.findVerificationMetadataById(11L);
+            if(reads.incrementAndGet()==1)committed(()->jdbc.update("UPDATE source_document SET review_role=? WHERE id=11","project_fact"));
+            return captured;
+        }).when(boundary).findVerificationMetadataById(11L);
+        VettingService vetting=new VettingService(mock(com.consense.service.ProjectService.class),mock(com.consense.service.StorageService.class),
+                mock(com.consense.document.DocumentParser.class),properties,boundary,mock(VettingFindingRepository.class),mock(VettingRunRepository.class),
+                mock(com.consense.service.vetting.VettingSemanticReview.class),mock(com.consense.service.vetting.VettingReportWriter.class),transactions,mock(com.consense.ai.LlmProfiles.class));
+        TransactionTemplate outer=new TransactionTemplate(transactions);outer.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
+        outer.execute(status->{
+            SourceDocument managed=documents.findById(11L).orElseThrow();assertEquals("tender",managed.getReviewRole());
+            com.consense.common.BizException rejected=assertThrows(com.consense.common.BizException.class,()->vetting.originalSource(PROJECT,11L,
+                    VettingCorpus.sourceHash(originalDocument),originalDocument.getSourceSha256(),"tender"));
+            assertEquals(4104,rejected.getCode());assertEquals(2,reads.get());
+            assertSame(managed,documents.findById(11L).orElseThrow());assertEquals("tender",managed.getReviewRole(),"The first-level cache really retains the superseded role");
+            return null;
+        });
     }
     @Test void actual_registration_keeps_full_initial_source_read_and_verification_only_after_remote_response(){
         CanonicalSourceBinding registered=service.registerReviewed(PROJECT,11L,new CanonicalEvidenceService.ReviewedRegistration(fixture.path("projectionSha256").asText(),originalDocument.getSourceSha256(),VettingCorpus.sourceHash(originalDocument),fixture.path("source").path("sourceRevisionSha256").asText(),repeat('d'),fixture.path("projectionIdentity").path("manifestSha256").asText(),fixture.path("manifest").path("reference").path("evidenceSha256").asText(),"vetting"));
         assertEquals(raw,registered.getSnapshotJson());List<String> queries=byIdSelects();assertEquals(2,queries.size());
         System.out.println("REGISTER_FULL_SQL_FEEDBACK "+queries.get(0));System.out.println("REGISTER_POST_HTTP_SQL_FEEDBACK "+queries.get(1));
-        assertEquals(21,columns(queries.get(0)).size());assertTrue(columns(queries.get(0)).contains("native_pdf_evidence_json"));assertEquals(VERIFY_COLUMNS,columns(queries.get(1)));assertEquals(1,sourceLoads());
+        assertEquals(VERIFY_COLUMNS,columns(queries.get(0)));assertEquals(VERIFY_COLUMNS,columns(queries.get(1)));assertEquals(0,sourceLoads());
     }
-    @ParameterizedTest @CsvSource({"text_content,CANONICAL_SOURCE_STALE","structured_content_json,CANONICAL_SOURCE_STALE","parse_status,CANONICAL_SOURCE_STALE","review_role,CANONICAL_SOURCE_STALE","file_key,CANONICAL_SOURCE_STALE","document_scope,SOURCE_MODULE_EXCLUDED","category,SOURCE_TEMPLATE_DRAFTING_ONLY","file_name,SOURCE_MODULE_EXCLUDED","project_id,SOURCE_DOCUMENT_UNAVAILABLE","storage_path,SOURCE_ORIGINAL_UNAVAILABLE"})
+    @ParameterizedTest @CsvSource({"text_content,CANONICAL_SOURCE_STALE","structured_content_json,CANONICAL_SOURCE_STALE","parse_status,CANONICAL_SOURCE_STALE","review_role,CANONICAL_SOURCE_STALE","file_key,CANONICAL_SOURCE_STALE","document_scope,SOURCE_MODULE_EXCLUDED","category,SOURCE_TEMPLATE_DRAFTING_ONLY","project_id,SOURCE_DOCUMENT_UNAVAILABLE","storage_path,SOURCE_ORIGINAL_UNAVAILABLE"})
     void required_field_mutations_still_reject(String column,String reason){
         Map<String,String> changes=new HashMap<>();changes.put("text_content","AUTHORED changed 😀");changes.put("structured_content_json","[{\"text\":\"AUTHORED changed\"}]");changes.put("parse_status","FAILED");changes.put("review_role","standard");changes.put("file_key","GCC");changes.put("document_scope","pricing");changes.put("category",SourceDocument.CATEGORY_STANDARD_TEMPLATE);changes.put("file_name","authored answer sheet.pdf");changes.put("project_id","other-authored-project");changes.put("storage_path",directory.resolve("missing.pdf").toString());
         committed(()->jdbc.update("UPDATE source_document SET "+column+"=? WHERE id=11",changes.get(column)));clearFeedback();
         assertEquals(reason,assertThrows(CanonicalEvidenceException.class,()->reader.assertSourceCurrent(binding,"advisory")).getMessage());
+    }
+    @Test void changingOnlyDisplayFilenameCannotChangeConfirmedSourceEligibility() {
+        committed(() -> jdbc.update("UPDATE source_document SET file_name=? WHERE id=11", "authored answer sheet.pdf"));
+        assertDoesNotThrow(() -> reader.assertSourceCurrent(binding, "advisory"));
+        assertEquals(originalDocument.getSourceSha256(), reader.currentDocument(PROJECT, 11L, "advisory").getSourceSha256());
     }
     @Test void paragraph_style_name_normalization_remains_the_same_and_other_structure_bytes_still_matter(){
         committed(()->jdbc.update("UPDATE source_document SET structured_content_json=? WHERE id=11",originalDocument.getStructuredContentJson().replace("Heading 1","Heading 2")));assertDoesNotThrow(()->reader.assertSourceCurrent(binding,"advisory"));

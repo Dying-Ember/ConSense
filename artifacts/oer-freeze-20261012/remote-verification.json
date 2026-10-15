@@ -1,0 +1,96 @@
+{
+  "schema": "consense.frozen-artifacts-remote-verification/v1",
+  "checkedAt": "2026-10-13T09:57:23.993500+08:00",
+  "repository": {
+    "isPrivate": true,
+    "nameWithOwner": "Dying-Ember/ConSense",
+    "visibility": "PRIVATE"
+  },
+  "releaseId": 411138467,
+  "tag": "oer-frozen-20261012-05-20261013",
+  "observedDraft": true,
+  "manifestSha256": "0ce643f66a9208338e827c063f77254d20bfc8aba6e7f1d1f23f53a24e616950",
+  "assets": [
+    {
+      "name": "consense-oer-frozen-20261012.tar.gz.part001",
+      "bytes": 1073741824,
+      "sha256": "68c67d2748e9ae8b74d6532b94b9044fc4fb4843871640c8de01a9d13e1c035a",
+      "assetId": 635500075,
+      "downloadUrl": "https://github.com/Dying-Ember/ConSense/releases/download/untagged-68a21cb3e37259ba0e51/consense-oer-frozen-20261012.tar.gz.part001"
+    },
+    {
+      "name": "consense-oer-frozen-20261012.tar.gz.part002",
+      "bytes": 1073741824,
+      "sha256": "6bfcd269d8b022fd782621a57f2cce08f50edc1763f508d03e504a09ee22f01f",
+      "assetId": 635504566,
+      "downloadUrl": "https://github.com/Dying-Ember/ConSense/releases/download/untagged-68a21cb3e37259ba0e51/consense-oer-frozen-20261012.tar.gz.part002"
+    },
+    {
+      "name": "consense-oer-frozen-20261012.tar.gz.part003",
+      "bytes": 1073741824,
+      "sha256": "4aece7e29911d5b06a5c067cbb6d914db114e902e1e41797f1f0a8985e4d2406",
+      "assetId": 635504567,
+      "downloadUrl": "https://github.com/Dying-Ember/ConSense/releases/download/untagged-68a21cb3e37259ba0e51/consense-oer-frozen-20261012.tar.gz.part003"
+    },
+    {
+      "name": "consense-oer-frozen-20261012.tar.gz.part004",
+      "bytes": 1073741824,
+      "sha256": "5863f8fd20b2a7b96393fa26aa608a9e0d755567a9d39bd8f688ca21147533bd",
+      "assetId": 635526720,
+      "downloadUrl": "https://github.com/Dying-Ember/ConSense/releases/download/untagged-68a21cb3e37259ba0e51/consense-oer-frozen-20261012.tar.gz.part004"
+    },
+    {
+      "name": "consense-oer-frozen-20261012.tar.gz.part005",
+      "bytes": 1073741824,
+      "sha256": "348b138a31f35f7243854ea766de3e2f59ba0af4500b03ae4386235a94b8d4cf",
+      "assetId": 635526724,
+      "downloadUrl": "https://github.com/Dying-Ember/ConSense/releases/download/untagged-68a21cb3e37259ba0e51/consense-oer-frozen-20261012.tar.gz.part005"
+    },
+    {
+      "name": "consense-oer-frozen-20261012.tar.gz.part006",
+      "bytes": 1073741824,
+      "sha256": "c80f53072cb9625cfc32112503880540a6bc57a4d9baf27a13a533e0e4251b70",
+      "assetId": 635526715,
+      "downloadUrl": "https://github.com/Dying-Ember/ConSense/releases/download/untagged-68a21cb3e37259ba0e51/consense-oer-frozen-20261012.tar.gz.part006"
+    },
+    {
+      "name": "consense-oer-frozen-20261012.tar.gz.part007",
+      "bytes": 1073741824,
+      "sha256": "b96e1c8b346d75609c04272721ccb56f70a003bbeb11d2cca5f4935f43d21630",
+      "assetId": 635526744,
+      "downloadUrl": "https://github.com/Dying-Ember/ConSense/releases/download/untagged-68a21cb3e37259ba0e51/consense-oer-frozen-20261012.tar.gz.part007"
+    },
+    {
+      "name": "consense-oer-frozen-20261012.tar.gz.part008",
+      "bytes": 1073741824,
+      "sha256": "5c2f39f84af981d02b4864f20b0a260c9e732288340c5079417d6f33785c56a3",
+      "assetId": 635526723,
+      "downloadUrl": "https://github.com/Dying-Ember/ConSense/releases/download/untagged-68a21cb3e37259ba0e51/consense-oer-frozen-20261012.tar.gz.part008"
+    },
+    {
+      "name": "consense-oer-frozen-20261012.tar.gz.part009",
+      "bytes": 622760560,
+      "sha256": "480d5f59f60d027e67ea122940e3bfdebcfd5e8bc67d0b70318f896911336564",
+      "assetId": 635557190,
+      "downloadUrl": "https://github.com/Dying-Ember/ConSense/releases/download/untagged-68a21cb3e37259ba0e51/consense-oer-frozen-20261012.tar.gz.part009"
+    },
+    {
+      "name": "manifest.json",
+      "bytes": 1030683,
+      "sha256": "0ce643f66a9208338e827c063f77254d20bfc8aba6e7f1d1f23f53a24e616950",
+      "assetId": 635512431,
+      "downloadUrl": "https://github.com/Dying-Ember/ConSense/releases/download/untagged-68a21cb3e37259ba0e51/manifest.json"
+    },
+    {
+      "name": "README.md",
+      "bytes": 3406,
+      "sha256": "497f1c145e28f18a0baa073ff6bd4ea91a375928a8912828f76e49c77697407f",
+      "assetId": 635536426,
+      "downloadUrl": "https://github.com/Dying-Ember/ConSense/releases/download/untagged-68a21cb3e37259ba0e51/README.md"
+    }
+  ],
+  "allRemoteSizesAndNativeDigestsMatch": true,
+  "manifestDownloadedAndHashMatched": true,
+  "committedManifestBlobMatchesRelease": true,
+  "boundary": "All remote bytes verified by GitHub native SHA256; manifest actually downloaded. Full archive restored locally. No full remote archive download or runtime/semantic/H800 certification."
+}

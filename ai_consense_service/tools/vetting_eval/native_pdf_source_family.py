@@ -26,7 +26,7 @@ REVISION_KIND = 'derived_same_original_component_set'
 MAX_COMPONENTS = 16
 _HERE = Path(__file__).resolve().parent
 _DEPENDENCIES = ('native_pdf_source_family.py', 'native_pdf_projection_transport.py',
-    'native_pdf_canonical_projection.py', 'artifact_store.py', 'canonical_projection.py',
+    'native_pdf_canonical_projection.py', 'native_pdf_table_projection.py', 'artifact_store.py', 'canonical_projection.py',
     'competition_scope.py', 'native_pdf_observation.py', 'source_reference.py',
     'structured_parser_evidence.py', 'token_windows.py', 'parser_capture.py')
 _IMPORTED_BYTES = {name: (_HERE / name).read_bytes() for name in _DEPENDENCIES}
@@ -199,7 +199,7 @@ def _layout(spec, children, refs, software, *, store, capture, target_module):
     creation_module = first['projectionIdentity']['module']
     _fail(creation_module in ('vetting', 'advisory'), 'source_family_declared_module_invalid')
     _fail(creation_module in eligible, 'source_family_declared_module_excluded')
-    component_records, bodies, all_relations = [], [], []
+    component_records, bodies, all_relations, assets = [], [], [], []
     unit_ids, clause_ids, blocks, regions, adopted_pages = set(), set(), set(), set(), set()
     for ordinal, (child, ref) in enumerate(zip(children, refs)):
         actual_physical = {key: value for key, value in child['source'].items() if key != 'sourceRevisionSha256'}
@@ -231,6 +231,7 @@ def _layout(spec, children, refs, software, *, store, capture, target_module):
             'wholeOriginalSourceCoverage': child['wholeOriginalSourceCoverage'],
             'limitations': copy.deepcopy(child['limitations'])}
         component_records.append(record)
+        assets.extend(copy.deepcopy(child['assetRefs']))
         unitmap = {c['unitId']: 'family-unit:' + _hash({'component': child['projectionSha256'], 'unit': c['unitId']}) for c in chunks}
         child_relations = _relations(child, unitmap)
         all_relations += child_relations
@@ -261,6 +262,7 @@ def _layout(spec, children, refs, software, *, store, capture, target_module):
         _fail(not (blocks & local_blocks) and not (regions & local_regions), 'source_family_region_collision')
         _fail(not (adopted_pages & local_pages), 'source_family_adopted_page_overlap_requires_review')
         clause_ids |= local_clauses; blocks |= local_blocks; regions |= local_regions; adopted_pages |= local_pages
+    _fail(len({asset['assetId'] for asset in assets}) == len(assets), 'source_family_asset_identity_collision')
     quality = {'version': VERSION, 'parseStatus': 'PARSED', 'semanticQuality': 'unknown',
         'humanConfirmed': False, 'wholeSourceAccepted': False, 'legalQualityAccepted': False,
         'meaning': 'source identity composition only; unchanged component qualities retained',
@@ -284,7 +286,7 @@ def _layout(spec, children, refs, software, *, store, capture, target_module):
     canonical = {'version': VERSION, 'units': [{
         'unitId': b['unitId'], 'chunkPreIdentitySha256': _hash(b),
         'partsSha256': _hash(b['parts']), 'originRefSha256': _hash(b['sourceFamilyOriginRef'])} for b in bodies],
-        'relations': all_relations, 'assetRefs': []}
+        'relations': all_relations, 'assetRefs': assets}
     source_hash = _hash({'projectionIdentity': identity, 'canonical': canonical})
     projection_revision = _hash({'sourceHash': source_hash, 'projectionIdentity': identity})
     chunks = [{**body, 'id': 'canonical-native-pdf-family:' + _hash({'revision': projection_revision, 'unitId': body['unitId']}),
@@ -294,7 +296,7 @@ def _layout(spec, children, refs, software, *, store, capture, target_module):
         'source': {**physical, 'sourceRevisionSha256': revision, 'sourceRevisionKind': REVISION_KIND},
         'originalSourceRef': copy.deepcopy(source_ref), 'manifest': composition,
         'sourceFamilyComponents': component_records, 'canonical': canonical, 'chunks': chunks,
-        'assetRefs': [], 'humanConfirmed': False, 'semanticScopeVerified': False,
+        'assetRefs': assets, 'humanConfirmed': False, 'semanticScopeVerified': False,
         'wholeOriginalSourceCoverage': 'unknown', 'visualReturnStatus': 'not_published_by_source_family',
         'limitations': ['Same original identity composition only; no new OCR run, legal acceptance, cross-component ancestry or visual publication.',
                         'Full per-component unadopted inventories remain separate; no undocumented glyph identity migration.']}

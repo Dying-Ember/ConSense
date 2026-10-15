@@ -68,7 +68,7 @@ class VettingChecklistWorkflowTest {
         VettingRun run=completedRun("{\"total\":0}");
         JsonNode initial=read(run);
         String remarks="  Reviewed by the Contract Team.\r\nNot an issued addendum.  ";
-        Map<String,Object> update=new LinkedHashMap<>();update.put("runSnapshotSha256",initial.path("runSnapshotSha256").asText());
+        Map<String,Object> update=new LinkedHashMap<>();update.put("runSnapshotSha256",initial.path("runSnapshotSha256").asText());update.put("expectedRunId",run.getId());update.put("expectedSourceSnapshotSha256",initial.path("sourceSnapshotSha256").asText());
         Map<String,Object> item=new LinkedHashMap<>();item.put("id","APP-I-001");item.put("status","fulfilled");item.put("remarks",remarks);
         update.put("items",Arrays.asList(item));
         mvc.perform(put(url(run)).contentType(MediaType.APPLICATION_JSON).content(JsonUtils.write(update)))
@@ -83,6 +83,28 @@ class VettingChecklistWorkflowTest {
         VettingRun next=newRun(run.getProjectId(),"{\"total\":0}");
         assertEquals("unchecked",read(next).path("items").get(0).path("status").asText());
         assertNotEquals(saved.path("runSnapshotSha256").asText(),read(next).path("runSnapshotSha256").asText());
+    }
+
+    @Test void unchangedSourceAndGeneratedChecksCanReuseHumanCountercheckAcrossRuns() throws Exception {
+        VettingRun first=completedRun("{\"total\":0}");
+        first.setModelIdentityJson("{\"profileId\":\"local\",\"provider\":\"offline-contract-fixture\",\"model\":\"fixed-model\",\"configurationSha256\":\""
+                +com.consense.service.vetting.VettingCorpus.hash("fixed model configuration")+"\",\"identityScope\":\"configured-contract-fixture\"}");
+        first.setRecoveryContractSha256(com.consense.service.vetting.VettingCorpus.hash("fixed review recipe"));runs.saveAndFlush(first);
+        JsonNode initial=read(first);
+        save(first,initial.path("runSnapshotSha256").asText(),Collections.singletonList(row("APP-I-001","fulfilled","Exact version manually checked")))
+                .andExpect(jsonPath("$.code").value(0));
+        VettingRun next=newRun(first.getProjectId(),first.getResultJson());
+        next.setModelIdentityJson(first.getModelIdentityJson());next.setRecoveryContractSha256(first.getRecoveryContractSha256());runs.saveAndFlush(next);
+        JsonNode reused=read(next).path("items").get(0);
+        assertEquals("fulfilled",reused.path("status").asText());assertEquals("Exact version manually checked",reused.path("remarks").asText());
+        assertEquals(first.getId(),reused.path("reviewedRunId").asText());
+        assertEquals("required_member_dependencies_unknown",reused.path("dependencyStatus").asText());
+        assertEquals("exact_whole_generation",reused.path("reuseScope").asText());assertEquals("matched_exact_whole_generation",reused.path("reuseStatus").asText());
+        next.setCoverageJson("{\"documents\":[],\"warnings\":[\"new generated limitation\"]}");runs.saveAndFlush(next);
+        assertEquals("unchecked",read(next).path("items").get(0).path("status").asText());
+        JsonNode pending=read(next).path("items").get(0);assertEquals("history_only_dependency_or_generation_unknown",pending.path("reuseStatus").asText());
+        assertEquals("fulfilled",pending.path("previousDecisionStatus").asText());assertEquals("Exact version manually checked",pending.path("previousRemarks").asText());assertEquals(first.getId(),pending.path("previousReviewedRunId").asText());
+        assertEquals("fulfilled",read(first).path("items").get(0).path("status").asText(),"Historical human record retains its original generation");
     }
 
     @Test void staleSnapshotAndUnknownRowsCannotPartiallyReplaceHumanCounterchecks() throws Exception {
@@ -109,7 +131,7 @@ class VettingChecklistWorkflowTest {
         run.setStatus("RUNNING");runs.saveAndFlush(run);
         assertFalse(read(run).path("writable").asBoolean());
         save(run,read(run).path("runSnapshotSha256").asText(),Collections.singletonList(row("APP-I-001","fulfilled","Premature")))
-                .andExpect(jsonPath("$.code").value(4122));
+                .andExpect(jsonPath("$.code").value(4104));
         assertEquals("unchecked",read(run).path("items").get(0).path("status").asText());
     }
 
@@ -193,7 +215,7 @@ class VettingChecklistWorkflowTest {
     }
 
     private org.springframework.test.web.servlet.ResultActions save(VettingRun run,String binding,java.util.List<Map<String,Object>> items) throws Exception {
-        Map<String,Object> body=new LinkedHashMap<>();body.put("runSnapshotSha256",binding);body.put("items",items);
+        Map<String,Object> body=new LinkedHashMap<>();body.put("runSnapshotSha256",binding);body.put("items",items);body.put("expectedRunId",run.getId());body.put("expectedSourceSnapshotSha256",run.getSourceSnapshotSha256());
         return mvc.perform(put(url(run)).contentType(MediaType.APPLICATION_JSON).content(JsonUtils.write(body))).andExpect(status().isOk());
     }
     private Map<String,Object> row(String id,String state,String remarks) {
@@ -214,7 +236,7 @@ class VettingChecklistWorkflowTest {
     private VettingRun newRun(String projectId,String result) {
         VettingRun run=new VettingRun();run.setId(UUID.randomUUID().toString());run.setProjectId(projectId);
         run.setStatus("COMPLETED");run.setStartedAt(Instant.now());run.setFinishedAt(Instant.now());
-        run.setCoverageJson("{\"documents\":[]}");run.setResultJson(result);runs.saveAndFlush(run);return run;
+        run.setCoverageJson("{\"documents\":[]}");run.setSourceSnapshotSha256(com.consense.service.vetting.VettingCorpus.hash("competition-review-package-v1\n[]"));run.setResultJson(result);runs.saveAndFlush(run);return run;
     }
     private String url(VettingRun run) {return "/api/vetting/"+run.getProjectId()+"/runs/"+run.getId()+"/checklist";}
 }

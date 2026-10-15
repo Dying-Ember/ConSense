@@ -34,7 +34,7 @@ class VettingCanonicalBusinessIntegrationTest {
                 assertEquals(2,source.path("canonicalStructure").path("physicalPages").size());assertEquals("unknown",source.path("sourceQuality").path("semanticQuality").asText());
             }return Collections.singletonList(consistent(selected.get(0)));
         });
-        VettingSemanticReview review=new VettingSemanticReview(ai,config(),legacy);review.setOerBusinessEvidence(w.service);
+        VettingSemanticReview review=VettingTokenFixture.review(ai,config(),legacy);review.setOerBusinessEvidence(w.service);
         VettingSemanticReview.Result result=review.review("project",session.chunks(),"en",(n,s)->{});
         assertTrue(tableSeen.get(),"Complete table must reach the actual source prompt");assertNull(result.getModelFailure());
         assertEquals(session.chunks().stream().map(Chunk::getId).collect(Collectors.toSet()),result.getReviewedChunkIds());
@@ -45,7 +45,7 @@ class VettingCanonicalBusinessIntegrationTest {
     @Test void canonicalIndexFailureNeverFallsBackEvenWhenLegacyHybridIsOptional() throws Exception {
         OerBusinessEvidenceTest.Wire w=new OerBusinessEvidenceTest.Wire();OerBusinessEvidence.Session session=w.load();
         doThrow(new IllegalStateException("authored canonical index failure")).when(w.client).index(anyString(),anyString(),anyList());
-        AiGateway ai=model();VettingRetrievalClient legacy=mock(VettingRetrievalClient.class);VettingSemanticReview review=new VettingSemanticReview(ai,config(),legacy);review.setOerBusinessEvidence(w.service);
+        AiGateway ai=model();VettingRetrievalClient legacy=mock(VettingRetrievalClient.class);VettingSemanticReview review=VettingTokenFixture.review(ai,config(),legacy);review.setOerBusinessEvidence(w.service);
         assertThrows(IllegalStateException.class,()->review.review("project",session.chunks(),"en",(n,s)->{}));verifyNoInteractions(legacy);
         verify(ai,never()).completeStructuredJsonList(anyString(),anyString(),eq(Record.class),any(),anyList());
     }
@@ -55,7 +55,7 @@ class VettingCanonicalBusinessIntegrationTest {
         when(ai.completeStructuredJsonList(anyString(),anyString(),eq(Record.class),any(),anyList())).thenAnswer(call->{
             JsonNode selected=excerpts(call.getArgument(1));w.binding.setRoutingSha256(VettingCorpus.hash("updated while generating"));return Collections.singletonList(consistent(selected.get(0)));
         });
-        VettingSemanticReview review=new VettingSemanticReview(ai,config(),mock(VettingRetrievalClient.class));review.setOerBusinessEvidence(w.service);
+        VettingSemanticReview review=VettingTokenFixture.review(ai,config(),mock(VettingRetrievalClient.class));review.setOerBusinessEvidence(w.service);
         VettingSemanticReview.Result result=review.review("project",session.chunks(),"en",(n,s)->{});
         assertTrue(result.getReviewedChunkIds().isEmpty());assertTrue(result.getCandidates().isEmpty());assertNotNull(result.getModelFailure());
     }

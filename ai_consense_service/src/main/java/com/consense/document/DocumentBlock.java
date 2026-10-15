@@ -1,7 +1,9 @@
 package com.consense.document;
 
 import lombok.Data;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -28,6 +30,9 @@ public class DocumentBlock {
     /** Derivative parser identity; the original DOCX byte hash is recorded separately. */
     @JsonInclude(JsonInclude.Include.NON_NULL)
     private String wordStructureVersion;
+    /** Original package-part and namespace path; no rendered Word page is inferred. */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private JsonNode sourcePosition;
     @JsonInclude(JsonInclude.Include.NON_EMPTY)
     private List<WordNumbering> wordNumbering = new ArrayList<>();
     @JsonInclude(JsonInclude.Include.NON_EMPTY)
@@ -37,11 +42,29 @@ public class DocumentBlock {
     @JsonInclude(JsonInclude.Include.NON_EMPTY)
     private List<WordCell> wordCells = new ArrayList<>();
     @JsonInclude(JsonInclude.Include.NON_EMPTY)
+    private List<JsonNode> wordNativeObjects = new ArrayList<>();
+    @JsonInclude(JsonInclude.Include.NON_EMPTY)
     private List<PdfPageEvidence.PdfGlyph> pdfGlyphs = new ArrayList<>();
     @JsonInclude(JsonInclude.Include.NON_NULL)
     private PdfPageEvidence.PdfFormField pdfFormField;
     @JsonInclude(JsonInclude.Include.NON_NULL)
     private String nativeVisibilityStatus;
+    /** Provider observations remain candidates; raw text, topology and unknowns are not generated facts. */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private JsonNode visualRegion;
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private JsonNode visualFrame;
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private JsonNode visualProvenance;
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private JsonNode readingContext;
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private JsonNode nativeTableCandidate;
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private JsonNode parserPageGroup;
+    /** Complete conflicting groups remain observable; they cannot become effective quote or embedding text. */
+    @JsonIgnore public String getEffectiveText() { return "ocr_candidate".equals(source) || "native_table_candidate".equals(source)
+            || "parser_page_group_candidate".equals(source) ? "" : text; }
 
     /** Native OOXML topology. Physical layout and cell images require rendering separately. */
     @Data public static class WordCell {

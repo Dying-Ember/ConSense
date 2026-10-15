@@ -7,6 +7,8 @@ import com.consense.document.OerDocumentIdentity;
 import com.consense.service.sources.ProjectDocumentScope;
 import com.consense.service.sources.OerSourceMetadata;
 import com.consense.repository.SourceDocumentRepository;
+import com.consense.service.StorageService;
+import com.consense.service.sources.OerSourceMetadata;
 import com.fasterxml.jackson.databind.JsonNode;
 import java.nio.file.Paths;
 import java.time.Instant;
@@ -33,9 +35,34 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @SpringBootTest(properties={"spring.jpa.hibernate.ddl-auto=create-drop","spring.flyway.enabled=false",
         "consense.ocr.enabled=false","consense.vector.provider=memory","consense.vector.stuffing-limit=1",
         "consense.vector.top-k=1","consense.vector.retrieve-top-k-floor=1",
+        "consense.llm.num-ctx=262144","consense.llm.structured-thinking=false",
         "consense.llm.chat-model=scope-test-chat","consense.llm.embed-model=scope-test-embedding"})
 @ActiveProfiles("h2") @AutoConfigureMockMvc
 class AdviceDocumentScopeIntegrationTest {
+    @Test void normalUploadedDocxCitationRetainsNativePositionsAndHistoricalVersionGuards() throws Exception {
+        String id=project();byte[] original;
+        try(org.apache.poi.xwpf.usermodel.XWPFDocument doc=new org.apache.poi.xwpf.usermodel.XWPFDocument();java.io.ByteArrayOutputStream out=new java.io.ByteArrayOutputStream()){
+            doc.createParagraph().createRun().setText("Special Conditions of Contract");doc.createParagraph().createRun().setText("Contract No: AUTHORED-NATIVE-LOCATION");
+            doc.createParagraph().createRun().setText("SCC 1 Repeated source clause remains binding.");doc.createParagraph().createRun().setText("SCC 1 Repeated source clause remains binding.");
+            doc.createTable(1,2).getRow(0).getCell(0).setText("Repeated source clause remains binding.");
+            doc.createHeader(org.apache.poi.wp.usermodel.HeaderFooterType.DEFAULT).createParagraph().createRun().setText("Repeated source clause remains binding.");doc.write(out);original=out.toByteArray();
+        }
+        mvc.perform(multipart("/api/vetting/{id}/package/upload",id).file(new MockMultipartFile("files","authored.docx","application/vnd.openxmlformats-officedocument.wordprocessingml.document",original)))
+                .andExpect(jsonPath("$.code").value(0)).andExpect(jsonPath("$.data.parsed").value(1));
+        mvc.perform(post("/api/advice/{id}/index/rebuild",id)).andExpect(jsonPath("$.code").value(0));
+        JsonNode answer=ask(id,"contract"),citation=answer.path("sources").get(0),positions=citation.path("nativePositions");
+        assertTrue(positions.isArray()&&positions.size()>0,"Normal source citations must expose their actual persisted native byte positions without canonical adoption");
+        assertTrue(citation.path("canonicalEvidence").isNull()||citation.path("canonicalEvidence").isMissingNode());
+        SourceDocument stored=sources.findByProjectIdOrderByIdAsc(id).get(0);assertEquals(OerSourceMetadata.originalSha256(original),citation.path("originalSourceSha256").asText());
+        java.util.Map<String,String> parts=new java.util.HashMap<>();try(java.util.zip.ZipInputStream zip=new java.util.zip.ZipInputStream(new java.io.ByteArrayInputStream(original))){java.util.zip.ZipEntry entry;byte[] buffer=new byte[8192];while((entry=zip.getNextEntry())!=null){java.io.ByteArrayOutputStream raw=new java.io.ByteArrayOutputStream();int n;while((n=zip.read(buffer))!=-1)raw.write(buffer,0,n);parts.put(entry.getName(),OerSourceMetadata.originalSha256(raw.toByteArray()));}}
+        for(JsonNode position:positions){assertEquals("docx_native",position.path("kind").asText());assertEquals(stored.getSourceSha256(),position.path("sourceSha256").asText());assertEquals(parts.get(position.path("partName").asText()),position.path("partSha256").asText());assertTrue(position.path("nodePath").asText().startsWith("/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"));}
+        JsonNode history=data(get("/api/advice/{id}/messages",id));assertEquals(answer.path("sources"),history.get(history.size()-1).path("sources"));
+        String url="/api/advice/"+id+"/sources/"+stored.getId()+"/original";
+        assertArrayEquals(original,mvc.perform(get(url).param("scope","contract").param("sourceHash",citation.path("sourceHash").asText()).param("originalSourceSha256",stored.getSourceSha256()).param("sourceRole","tender")).andReturn().getResponse().getContentAsByteArray());
+        mvc.perform(get(url).param("scope","contract").param("sourceHash",citation.path("sourceHash").asText()).param("originalSourceSha256",String.join("",Collections.nCopies(64,"f"))).param("sourceRole","tender")).andExpect(status().isConflict()).andExpect(jsonPath("$.code").value(4300));
+        stored.setStructuredContentJson(stored.getStructuredContentJson().replace(positions.get(0).path("partSha256").asText(),String.join("",Collections.nCopies(64,"e"))));sources.saveAndFlush(stored);
+        mvc.perform(get(url).param("scope","contract").param("sourceHash",citation.path("sourceHash").asText()).param("originalSourceSha256",stored.getSourceSha256()).param("sourceRole","tender")).andExpect(status().isConflict()).andExpect(jsonPath("$.code").value(4300));
+    }
     private static final String DB=UUID.randomUUID().toString();
     @DynamicPropertySource static void resources(DynamicPropertyRegistry r) {
         r.add("spring.datasource.url",()->"jdbc:h2:mem:advice_scope_"+DB+";MODE=MySQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE");
@@ -43,10 +70,16 @@ class AdviceDocumentScopeIntegrationTest {
     }
     @Autowired MockMvc mvc;
     @Autowired SourceDocumentRepository sources;
+    @Autowired StorageService storage;
+    @Autowired com.consense.repository.ChatMessageRepository messages;
+    @Autowired com.consense.service.advice.AdviceService advice;
+    @Autowired com.consense.config.ConsenseProperties properties;
     @MockBean(name="llmClient") LlmClient local;
+    @MockBean com.consense.service.vetting.VettingTokenBudgetCliObserver counter;
     private final List<String> prompts=new ArrayList<>();
 
     @BeforeEach void adapters() {
+        com.consense.service.advice.AdviceBudgetFixture.bind(counter,local);
         prompts.clear();
         when(local.available()).thenReturn(true);
         when(local.chatModel()).thenReturn("scope-test-chat");
@@ -73,6 +106,35 @@ class AdviceDocumentScopeIntegrationTest {
         mvc.perform(post("/api/advice/{id}/index/rebuild",id)).andExpect(jsonPath("$.code").value(0)).andExpect(jsonPath("$.data.chunks").value(5));
         JsonNode listed=data(get("/api/advice/{id}/sources",id));
         assertEquals(5,listed.findValues("included").stream().filter(JsonNode::asBoolean).count());
+    }
+    @Test void normalIndexAdviceRetainsSelectedVisualAndWordObservationsWithoutSendingRawAudit() throws Exception {
+        String id=project();String effective="SCC 1 AUTHORED effective obligation.";
+        SourceDocument document=source(id,"SCC","authored-native.txt","VETTING_PACKAGE","tender",effective);
+        com.consense.document.DocumentBlock word=new com.consense.document.DocumentBlock();
+        word.setId("body:0:paragraph");word.setLocation("body/0/paragraph");word.setKind("paragraph");word.setSource("native");
+        word.setText(effective);word.setOriginalText("AUTHORED deleted obligation. "+effective);word.setDeletedText("AUTHORED deleted obligation.");word.setStrikeText("AUTHORED struck observation.");
+        word.setWordStructureVersion("docx-numbering-symbol-v1");
+        com.consense.document.DocumentBlock.WordNumbering number=new com.consense.document.DocumentBlock.WordNumbering();number.setLabel("1.");number.setAppliedToEffectiveText(true);word.setWordNumbering(Collections.singletonList(number));
+        com.consense.document.DocumentBlock.WordSymbol symbol=new com.consense.document.DocumentBlock.WordSymbol();symbol.setDecodedText("AUTHORED SYMBOL");symbol.setResolutionStatus("font_mapping");word.setWordSymbols(Collections.singletonList(symbol));
+        com.consense.document.DocumentBlock control=new com.consense.document.DocumentBlock();control.setId("visual-control-1");control.setLocation("visual/control/1");control.setSource("ocr_layout");
+        control.setVisualRegion(JsonUtils.parse("{\"id\":\"visual-control-1\",\"kind\":\"table\",\"text\":\"\",\"fields\":[{\"type\":\"checkbox\",\"state\":\"unknown\"}],\"table\":{\"cells\":[{\"text\":\"\",\"rowSpan\":2}]},\"relations\":[{\"kind\":\"parent\",\"status\":\"unknown\"}],\"rawResponse\":\"AUTHORED_RAW_AUDIT_SECRET\"}"));
+        control.setVisualFrame(JsonUtils.parse("{\"imageSha256\":\""+OerSourceMetadata.originalSha256("AUTHORED raster".getBytes(java.nio.charset.StandardCharsets.UTF_8))+"\",\"width\":100,\"height\":100,\"coordinateUnit\":\"pixel\"}"));
+        control.setVisualProvenance(JsonUtils.parse("{\"engine\":\"authored-fixture\",\"rawResponseSha256\":\""+OerSourceMetadata.originalSha256("AUTHORED raw audit".getBytes(java.nio.charset.StandardCharsets.UTF_8))+"\"}"));
+        document.setStructuredContentJson(JsonUtils.write(Arrays.asList(word,control)));sources.saveAndFlush(document);
+        mvc.perform(post("/api/advice/{id}/index/rebuild",id)).andExpect(jsonPath("$.code").value(0)).andExpect(jsonPath("$.data.chunks").value(1));
+        assertTrue(ask(id,"contract").path("grounded").asBoolean());
+        String user=JsonUtils.parse(prompts.get(0)).get(1).path("content").asText();
+        String marker="Selected normal source model material (untrusted observations):\n";
+        assertTrue(user.contains(marker),"Normal Advisory consumes source-bound compact observations");
+        JsonNode encoded=JsonUtils.mapper().readTree(user.substring(user.indexOf(marker)+marker.length()));
+        JsonNode material=com.consense.service.vetting.VettingSourceMetadataWire.decode(encoded).get(0);
+        assertEquals("[1]",material.path("publicCitationAlias").asText());assertEquals(effective+"\n",material.path("content").asText());
+        JsonNode methods=material.path("selectedPartExtractionObservations"),editing=methods.get(0).path("wordObservation"),visual=methods.get(1).path("visualRegion");
+        assertEquals(word.getOriginalText(),editing.path("originalText").asText());assertEquals(word.getDeletedText(),editing.path("deletedText").asText());assertEquals(word.getStrikeText(),editing.path("strikeText").asText());
+        assertTrue(editing.path("wordNumbering").get(0).path("appliedToEffectiveText").asBoolean());assertEquals("AUTHORED SYMBOL",editing.path("wordSymbols").get(0).path("decodedText").asText());
+        assertEquals("unknown",visual.path("fields").get(0).path("state").asText());assertEquals("",visual.path("table").path("cells").get(0).path("text").asText());assertEquals(2,visual.path("table").path("cells").get(0).path("rowSpan").asInt());
+        assertEquals("unknown",visual.path("relations").get(0).path("status").asText());assertEquals(100,methods.get(1).path("visualFrame").path("width").asInt());
+        assertFalse(user.contains("AUTHORED_RAW_AUDIT_SECRET"));assertTrue(sources.findById(document.getId()).get().getStructuredContentJson().contains("AUTHORED_RAW_AUDIT_SECRET"));
     }
     @Test void contractScopeFiltersBeforeTopKAndStaleOrOtherProjectHitsCannotEnterThePrompt() throws Exception {
         String id=project(),other=project();
@@ -102,7 +164,8 @@ class AdviceDocumentScopeIntegrationTest {
         mvc.perform(post("/api/advice/{id}/index/rebuild",id)).andExpect(jsonPath("$.code").value(0));
         when(local.chat(anyList())).thenReturn("{\"grounded\":true,\"answer\":\"TEST ONLY fabricated\",\"citations\":[\"outside-file SCC999\"],\"clarifications\":[\"What stage is this contract at?\"]}");
         JsonNode rejected=ask(id,"fullset");assertFalse(rejected.path("grounded").asBoolean());
-        assertEquals("What stage is this contract at?",rejected.path("clarifications").get(0).asText());
+        assertTrue(rejected.path("clarifications").get(0).asText().contains("applicable procedure and regime"));
+        assertTrue(rejected.path("citations").isEmpty());assertFalse(rejected.path("content").toString().contains("fabricated"));
         when(local.chat(anyList())).thenReturn("{\"grounded\":true,\"answer\":\"TEST ONLY accepted\",\"citations\":[\"[1]\"]}");
         JsonNode accepted=ask(id,"fullset");assertTrue(accepted.path("grounded").asBoolean());
         original.setTextContent("MUTATED CONTENT TEST ONLY");sources.saveAndFlush(original);
@@ -148,14 +211,14 @@ class AdviceDocumentScopeIntegrationTest {
         assertTrue(prompt.contains("do not establish that the entire standard/library or project package is complete"));
         assertTrue(prompt.contains("Project PRE replaces standard PRE"));
     }
-    @Test void standardLibraryAloneCannotEstablishAnAdoptedContractConditionButCanExplainTheReference() throws Exception {
-        String id=project();source(id,"SL","Specification Library SL2022.txt","VETTING_PACKAGE","standard","package","SL WAT1 WATERPROOFING LIBRARY REFERENCE TEST ONLY");
+    @Test void standardLibraryAloneCannotEstablishAdoptionOrSilentlySwitchTheRequestedBasis() throws Exception {
+        String id=project();source(id,"SL","Specification Library SL2022.txt","VETTING_PACKAGE","standard","SL WAT1 WATERPROOFING LIBRARY REFERENCE TEST ONLY");
         mvc.perform(post("/api/advice/{id}/index/rebuild",id)).andExpect(jsonPath("$.code").value(0));
         JsonNode unknown=ask(id,"fullset");assertFalse(unknown.path("grounded").asBoolean());assertFalse(unknown.path("clarifications").isEmpty());
         when(local.chat(anyList())).thenReturn("{\"grounded\":true,\"answer\":\"TEST ONLY standard reference explanation; project applicability remains unconfirmed\",\"citations\":[\"[1]\"],\"basisScope\":\"reference_only\"}");
         JsonNode reference=data(post("/api/advice/{id}/ask",id).contentType(MediaType.APPLICATION_JSON).content("{\"question\":\"Explain the SL WAT1 standard library reference clause.\",\"scope\":\"fullset\"}"));
-        assertTrue(reference.path("grounded").asBoolean());assertEquals("reference_only",reference.path("basisScope").asText());
-        JsonNode history=data(get("/api/advice/{id}/messages",id));assertEquals("reference_only",history.get(history.size()-1).path("basisScope").asText());
+        assertFalse(reference.path("grounded").asBoolean());assertEquals("insufficient",reference.path("basisScope").asText());
+        JsonNode history=data(get("/api/advice/{id}/messages",id));assertEquals("insufficient",history.get(history.size()-1).path("basisScope").asText());
     }
     @Test void incompleteBoundedSpecificationCompositionCannotProveProjectApplicability() throws Exception {
         String id=project();source(id,"SL","Specification Library SL2022.txt","VETTING_PACKAGE","standard","package","SL CON2.1 TECHNICAL LIBRARY TEST ONLY");
@@ -218,7 +281,7 @@ class AdviceDocumentScopeIntegrationTest {
         String id=project();source(id,"SCC","10 - SCC.txt","VETTING_PACKAGE","tender","package","SCC4.1 TEST ONLY adopted contractual condition");
         mvc.perform(post("/api/advice/{id}/index/rebuild",id)).andExpect(jsonPath("$.code").value(0));
         when(local.chat(anyList())).thenReturn("{\"grounded\":true,\"answer\":\"TEST ONLY tentative conclusion\",\"citations\":[\"[1]\"],\"clarifications\":[\"Is this pre-contract or post-contract?\"]}");
-        JsonNode pending=ask(id,"contract");assertFalse(pending.path("grounded").asBoolean());assertEquals("insufficient",pending.path("basisScope").asText());assertEquals("Is this pre-contract or post-contract?",pending.path("clarifications").get(0).asText());
+        JsonNode pending=ask(id,"contract");assertFalse(pending.path("grounded").asBoolean());assertEquals("insufficient",pending.path("basisScope").asText());assertTrue(pending.path("clarifications").get(0).asText().contains("applicable procedure and regime"));
         when(local.chat(anyList())).thenReturn("{\"grounded\":true,\"answer\":\"TEST ONLY conditional conclusion following user background\",\"citations\":[\"[1]\"]}");
         JsonNode completed=data(post("/api/advice/{id}/ask",id).contentType(MediaType.APPLICATION_JSON).content("{\"question\":\"TEST ONLY post-contract\",\"scope\":\"contract\",\"replyToMessageId\":"+pending.path("messageId").asLong()+"}"));assertTrue(completed.path("grounded").asBoolean());
     }
@@ -232,15 +295,166 @@ class AdviceDocumentScopeIntegrationTest {
         JsonNode separate=data(post("/api/advice/{id}/ask",id).contentType(MediaType.APPLICATION_JSON).content("{\"question\":\"SEPARATE NEW QUESTION TEST ONLY\",\"scope\":\"contract\"}"));
         assertTrue(separate.path("grounded").asBoolean());assertFalse(String.join("\n",prompts).contains("user-supplied-background"));
     }
+    @Test void verifiedPartialAnalysisAndChecksSurviveHistoryWithoutBecomingGrounded() throws Exception {
+        String id=project();source(id,"SCC","SCC.txt","VETTING_PACKAGE","tender","AUTHORED contractual procedural provision");
+        mvc.perform(post("/api/advice/{id}/index/rebuild",id)).andExpect(jsonPath("$.code").value(0));
+        when(local.chat(anyList())).thenReturn("{\"grounded\":false,\"answer\":\"AUTHORED supported procedure [1]; the disputed entitlement is unresolved\",\"citations\":[\"[1]\"],\"missingReason\":\"AUTHORED dates are unknown\",\"clarifications\":[\"When was the notice received?\"]}");
+        JsonNode result=ask(id,"contract");assertFalse(result.path("grounded").asBoolean());assertEquals("insufficient",result.path("basisScope").asText());
+        assertTrue(result.path("content").path("en").asText().contains("supported procedure [1]"));assertEquals("[1]",result.path("citations").get(0).asText());
+        JsonNode history=data(get("/api/advice/{id}/messages",id));JsonNode assistant=history.get(history.size()-1);
+        assertEquals(result.path("content"),assistant.path("content"));assertEquals(result.path("title"),assistant.path("title"));assertEquals(result.path("citations"),assistant.path("citations"));assertEquals("insufficient",assistant.path("basisScope").asText());
+        com.consense.domain.ChatMessage row=messages.findById(result.path("messageId").asLong()).get();JsonNode checks=JsonUtils.parse(row.getAdviceChecksJson());
+        assertEquals("ec23c7a665f803598a82d8aaf41ace65df1e431ac5e4ab24610e61d11ccf0470",checks.path("policySha256").asText());assertEquals(3,checks.path("publishedSectionIds").size());
+        assertTrue(checks.path("applicationRejections").isEmpty());assertTrue(checks.path("sections").get(1).path("checks").isArray());assertEquals(result.path("sources").get(0).path("sourceHash"),JsonUtils.parse(row.getSourcesJson()).get(0).path("sourceHash"));
+    }
+    @Test void explicitMissingReasonCannotBeUpgradedByModelGroundedAndRemainsVisibleWithQuestions() throws Exception {
+        String id=project();source(id,"SCC","SCC.txt","VETTING_PACKAGE","tender","AUTHORED procedural provision");
+        mvc.perform(post("/api/advice/{id}/index/rebuild",id)).andExpect(jsonPath("$.code").value(0));
+        com.fasterxml.jackson.databind.node.ObjectNode envelope=(com.fasterxml.jackson.databind.node.ObjectNode)JsonUtils.parse(com.consense.service.advice.AdviceBudgetFixture.contract("{\"grounded\":true,\"answer\":\"AUTHORED supported procedure [1]\",\"citations\":[\"[1]\"]}"));
+        envelope.put("missingReason","notice_dates");doReturn(JsonUtils.write(envelope)).when(local).chatStructured(anyList(),any());
+        JsonNode result=ask(id,"contract");assertFalse(result.path("grounded").asBoolean());assertEquals("insufficient",result.path("basisScope").asText());
+        assertTrue(result.path("content").path("en").asText().contains("supported procedure [1]"));assertTrue(result.path("content").path("en").asText().contains("final deadline cannot be determined"));
+        assertTrue(result.path("clarifications").get(0).asText().contains("notice, receipt and event dates"));
+        JsonNode history=data(get("/api/advice/{id}/messages",id));assertEquals(result.path("content"),history.get(1).path("content"));assertEquals("insufficient",history.get(1).path("basisScope").asText());
+    }
+    @Test void acceptedMissingEvidenceCheckKeepsWholeAnswerInsufficientWithoutDroppingSupportedAnalysis() throws Exception {
+        String id=project();source(id,"SCC","SCC.txt","VETTING_PACKAGE","tender","AUTHORED procedural provision");
+        mvc.perform(post("/api/advice/{id}/index/rebuild",id)).andExpect(jsonPath("$.code").value(0));
+        com.fasterxml.jackson.databind.node.ObjectNode envelope=(com.fasterxml.jackson.databind.node.ObjectNode)JsonUtils.parse(com.consense.service.advice.AdviceBudgetFixture.contract("{\"grounded\":true,\"answer\":\"AUTHORED independent procedure [1]\",\"citations\":[\"[1]\"]}"));
+        ((com.fasterxml.jackson.databind.node.ObjectNode)envelope.path("sections").get(0).path("checks").get(0)).put("status","missing_evidence");
+        doReturn(JsonUtils.write(envelope)).when(local).chatStructured(anyList(),any());JsonNode result=ask(id,"contract");
+        assertFalse(result.path("grounded").asBoolean());assertEquals("insufficient",result.path("basisScope").asText());assertTrue(result.path("content").path("en").asText().contains("independent procedure [1]"));
+        assertTrue(result.path("content").path("en").asText().contains("affected requested determination remains unresolved"));assertFalse(result.path("clarifications").isEmpty());
+    }
+    @Test void unrecordedChecksAreRejectedRatherThanInventedForNewAnswers() throws Exception {
+        String id=project();source(id,"SCC","SCC.txt","VETTING_PACKAGE","tender","AUTHORED provision");mvc.perform(post("/api/advice/{id}/index/rebuild",id)).andExpect(jsonPath("$.code").value(0));
+        doReturn("{\"grounded\":true,\"answer\":\"UNVERIFIED LEGACY OUTPUT\",\"citations\":[\"[1]\"]}").when(local).chatStructured(anyList(),any());
+        mvc.perform(post("/api/advice/{id}/ask",id).contentType(MediaType.APPLICATION_JSON).content("{\"question\":\"Explain this\",\"scope\":\"contract\"}")).andExpect(jsonPath("$.code").value(4205));
+        assertTrue(data(get("/api/advice/{id}/messages",id)).isEmpty());verify(local,times(2)).chatStructured(anyList(),any());
+    }
+    @Test void closedVerifiedUnitsArePublishedBeforeProviderCompletesAndCancellationSavesNoExchange() throws Exception {
+        String id=project();source(id,"SCC","SCC.txt","VETTING_PACKAGE","tender","AUTHORED provision");mvc.perform(post("/api/advice/{id}/index/rebuild",id)).andExpect(jsonPath("$.code").value(0));
+        final List<String> published=new ArrayList<>(),phases=new ArrayList<>();final boolean[] cancelled={false};
+        com.consense.service.advice.AdviceProgress progress=new com.consense.service.advice.AdviceProgress(){
+            public boolean streaming(){return true;}public void phase(String p){phases.add(p);}public void section(String text,List<String> refs,List<com.consense.web.dto.AdviceDtos.CitationVO> sources){published.add(text);}
+            public void checkCancelled(){if(cancelled[0])throw new java.util.concurrent.CancellationException("AUTHORED request stop");}
+        };
+        String output=com.consense.service.advice.AdviceBudgetFixture.contract("{\"grounded\":true,\"answer\":\"AUTHORED streamed analysis [1]\",\"citations\":[\"[1]\"]}");
+        when(local.supportsStreaming()).thenReturn(true);
+        doAnswer(call->{java.util.function.Consumer<String> delta=call.getArgument(2);for(int i=0;i<output.length();i++)delta.accept(output.substring(i,i+1));assertEquals(2,published.size());assertTrue(published.get(1).contains("analysis [1]"));assertTrue(messages.findByProjectIdOrderByIdAsc(id).isEmpty());return output;}).when(local).chatStructuredStream(anyList(),any(),any(),any());
+        assertTrue(advice.ask(id,new com.consense.web.dto.AdviceDtos.AskRequest("Explain the clause","contract"),progress).isGrounded());assertTrue(phases.contains("retrieving"));assertTrue(phases.contains("generating"));assertTrue(phases.contains("saving"));
+        String stopped=project();source(stopped,"SCC","SCC.txt","VETTING_PACKAGE","tender","AUTHORED provision");mvc.perform(post("/api/advice/{id}/index/rebuild",stopped)).andExpect(jsonPath("$.code").value(0));
+        doAnswer(call->{java.util.function.Consumer<String> delta=call.getArgument(2);cancelled[0]=true;delta.accept(output);return output;}).when(local).chatStructuredStream(anyList(),any(),any(),any());
+        assertThrows(java.util.concurrent.CancellationException.class,()->advice.ask(stopped,new com.consense.web.dto.AdviceDtos.AskRequest("Explain","contract"),progress));assertTrue(messages.findByProjectIdOrderByIdAsc(stopped).isEmpty());
+    }
+    @Test void invalidStreamUsesOnlyOneFreshlyCountedRepair() throws Exception {
+        String id=project();source(id,"SCC","SCC.txt","VETTING_PACKAGE","tender","AUTHORED provision");mvc.perform(post("/api/advice/{id}/index/rebuild",id)).andExpect(jsonPath("$.code").value(0));
+        String valid=com.consense.service.advice.AdviceBudgetFixture.contract("{\"grounded\":true,\"answer\":\"AUTHORED repaired stream [1]\",\"citations\":[\"[1]\"]}");java.util.concurrent.atomic.AtomicInteger calls=new java.util.concurrent.atomic.AtomicInteger();
+        when(local.supportsStreaming()).thenReturn(true);doAnswer(call->{java.util.function.Consumer<String> delta=call.getArgument(2);String raw=calls.getAndIncrement()==0?"@invalid":valid;delta.accept(raw);return raw;}).when(local).chatStructuredStream(anyList(),any(),any(),any());
+        com.consense.service.advice.AdviceProgress progress=new com.consense.service.advice.AdviceProgress(){public boolean streaming(){return true;}};
+        assertTrue(advice.ask(id,new com.consense.web.dto.AdviceDtos.AskRequest("Explain","contract"),progress).isGrounded());assertEquals(2,calls.get());verify(counter,times(2)).observe(any());
+        JsonNode checks=JsonUtils.parse(messages.findByProjectIdOrderByIdAsc(id).get(1).getAdviceChecksJson());assertEquals(2,checks.path("attempts").size());assertFalse(checks.path("attempts").get(0).path("contractParsed").asBoolean());
+    }
+    @Test void singleRepairNamesTheSafeMissingContractFieldAndKeepsExactPublicAliases() throws Exception {
+        String id=project();source(id,"SCC","SCC.txt","VETTING_PACKAGE","tender","AUTHORED provision");mvc.perform(post("/api/advice/{id}/index/rebuild",id)).andExpect(jsonPath("$.code").value(0));
+        com.fasterxml.jackson.databind.node.ObjectNode valid=(com.fasterxml.jackson.databind.node.ObjectNode)JsonUtils.parse(com.consense.service.advice.AdviceBudgetFixture.contract("{\"grounded\":true,\"answer\":\"AUTHORED protocol answer [1]\",\"citations\":[\"[1]\"]}"));
+        com.fasterxml.jackson.databind.node.ObjectNode invalid=valid.deepCopy();((com.fasterxml.jackson.databind.node.ObjectNode)invalid.path("sections").get(0)).remove("checks");
+        java.util.concurrent.atomic.AtomicInteger calls=new java.util.concurrent.atomic.AtomicInteger();
+        doAnswer(call->{String prompt=JsonUtils.write(call.getArgument(0));assertTrue(prompt.contains("Public citation alias=[1]"));assertTrue(prompt.contains("Application output reserve: "+properties.getLlm().getStructuredMaxTokens()+" tokens."));
+            if(calls.getAndIncrement()>0){assertTrue(prompt.contains("Application rejected: "));assertTrue(prompt.contains("answer.sections[0].checks: required field is missing"));assertTrue(prompt.contains("ALL sections beginning with kind=limits"));}
+            JsonNode schema=call.getArgument(1);assertEquals(JsonUtils.parse("[\"[1]\"]"),schema.path("properties").path("sections").path("items").path("properties").path("citations").path("items").path("enum"));
+            return JsonUtils.write(calls.get()==1?invalid:valid);}).when(local).chatStructured(anyList(),any());
+        assertTrue(ask(id,"contract").path("grounded").asBoolean());assertEquals(2,calls.get());verify(counter,times(2)).observe(any());
+        JsonNode checks=JsonUtils.parse(messages.findByProjectIdOrderByIdAsc(id).get(1).getAdviceChecksJson());assertTrue(checks.path("attempts").get(0).path("rejections").get(0).asText().contains("answer.sections[0].checks"));
+    }
+    @Test void oneSemanticRepairCorrectsTheOpeningBeforeIndependentAnalysisCanPublish() throws Exception {
+        String id=project();source(id,"SCC","SCC.txt","VETTING_PACKAGE","tender","AUTHORED provision");mvc.perform(post("/api/advice/{id}/index/rebuild",id)).andExpect(jsonPath("$.code").value(0));
+        com.fasterxml.jackson.databind.node.ObjectNode valid=(com.fasterxml.jackson.databind.node.ObjectNode)JsonUtils.parse(com.consense.service.advice.AdviceBudgetFixture.contract("{\"grounded\":true,\"answer\":\"AUTHORED independent analysis [1]\",\"citations\":[\"[1]\"]}"));
+        com.fasterxml.jackson.databind.node.ObjectNode invalid=valid.deepCopy();((com.fasterxml.jackson.databind.node.ObjectNode)invalid.path("sections").get(0)).put("basisScope","project_contract");
+        java.util.concurrent.atomic.AtomicInteger calls=new java.util.concurrent.atomic.AtomicInteger();doAnswer(call->{
+            if(calls.getAndIncrement()>0)assertTrue(JsonUtils.write(call.getArgument(0)).contains("section.basisScope: limits/uncertainty must be insufficient regardless of envelope/request basis"));
+            return JsonUtils.write(calls.get()==1?invalid:valid);}).when(local).chatStructured(anyList(),any());
+        JsonNode result=ask(id,"contract");assertTrue(result.path("grounded").asBoolean());assertTrue(result.path("content").path("en").asText().contains("independent analysis [1]"));assertEquals(2,calls.get());verify(counter,times(2)).observe(any());
+        JsonNode checks=JsonUtils.parse(messages.findByProjectIdOrderByIdAsc(id).get(1).getAdviceChecksJson());
+        assertEquals("project_contract",checks.path("attempts").get(0).path("sections").get(0).path("basisScope").asText());
+        assertTrue(checks.path("attempts").get(0).path("rejections").toString().contains("Opening facts and limitations were not validated"));
+    }
+    @Test void fixedLocalizedTitlesRoundTripAndOldPlainTitlesStayReadable() throws Exception {
+        String id=project();source(id,"SCC","SCC.txt","VETTING_PACKAGE","tender","AUTHORED provision");mvc.perform(post("/api/advice/{id}/index/rebuild",id)).andExpect(jsonPath("$.code").value(0));
+        JsonNode result=ask(id,"contract"),history=data(get("/api/advice/{id}/messages",id));assertEquals(result.path("title"),history.get(1).path("title"));
+        com.consense.domain.ChatMessage row=messages.findById(result.path("messageId").asLong()).get();assertTrue(row.getTitle().length()<=255);
+        for(String legacy:Arrays.asList("AUTHORED legacy title","{AUTHORED plain title","{\"other\":\"AUTHORED plain object\"}")) {
+            row.setTitle(legacy);messages.saveAndFlush(row);JsonNode restored=data(get("/api/advice/{id}/messages",id)).get(1).path("title");
+            for(String language:Arrays.asList("zhHans","zhHant","en"))assertEquals(legacy,restored.path(language).asText());
+        }
+    }
+    @Test void chineseQuestionRejectionCopyUsesAcceptedOrConsistentDeclaredLanguage() throws Exception {
+        String id=project();source(id,"SCC","SCC.txt","VETTING_PACKAGE","tender","AUTHORED provision");mvc.perform(post("/api/advice/{id}/index/rebuild",id)).andExpect(jsonPath("$.code").value(0));
+        com.fasterxml.jackson.databind.node.ObjectNode answer=(com.fasterxml.jackson.databind.node.ObjectNode)JsonUtils.parse(com.consense.service.advice.AdviceBudgetFixture.contract("{\"grounded\":true,\"answer\":\"AUTHORED 已有依据的说明 [1]\",\"citations\":[\"[1]\"]}"));
+        for(JsonNode section:answer.path("sections"))((com.fasterxml.jackson.databind.node.ObjectNode)section).put("language","zhHans");
+        for(boolean invalidOpening:Arrays.asList(false,true)) {
+            if(invalidOpening)((com.fasterxml.jackson.databind.node.ObjectNode)answer.path("sections").get(0)).put("basisScope","project_contract");
+            doReturn(JsonUtils.write(answer)).when(local).chatStructured(anyList(),any());
+            JsonNode result=data(post("/api/advice/{id}/ask",id).contentType(MediaType.APPLICATION_JSON).content("{\"question\":\"请画个流程图\",\"scope\":\"contract\"}"));
+            assertFalse(result.path("grounded").asBoolean());assertTrue(result.path("clarifications").get(0).asText().startsWith("部分所问结论或流程图尚无法核实"));
+            assertFalse(result.path("clarifications").toString().contains("Some requested conclusions"));
+            if(!invalidOpening)assertTrue(result.path("content").path("zhHans").asText().contains("资料界限与假设"));
+        }
+    }
+    @Test void noAcceptedUnitsUseDeclaredTraditionalChineseOrEnglishInsteadOfHanSyntaxHint() throws Exception {
+        String id=project();source(id,"SCC","SCC.txt","VETTING_PACKAGE","tender","AUTHORED provision");mvc.perform(post("/api/advice/{id}/index/rebuild",id)).andExpect(jsonPath("$.code").value(0));
+        String[][] cases={{"請以繁體中文回答","zhHant","部分所問結論或流程圖尚無法核實","請提供","不能確定最後期限"},{"请用英语回答","en","Some requested conclusions or the flowchart could not be verified","Please provide","The final deadline cannot be determined"}};
+        for(String[] value:cases) {
+            com.fasterxml.jackson.databind.node.ObjectNode answer=(com.fasterxml.jackson.databind.node.ObjectNode)JsonUtils.parse(com.consense.service.advice.AdviceBudgetFixture.contract("{\"grounded\":true,\"answer\":\"AUTHORED unsupported due to invalid opening [1]\",\"citations\":[\"[1]\"]}"));
+            for(JsonNode section:answer.path("sections"))((com.fasterxml.jackson.databind.node.ObjectNode)section).put("language",value[1]);
+            ((com.fasterxml.jackson.databind.node.ObjectNode)answer.path("sections").get(0)).put("basisScope","project_contract");answer.put("missingReason","notice_dates");
+            doReturn(JsonUtils.write(answer)).when(local).chatStructured(anyList(),any());
+            JsonNode request=JsonUtils.parse("{\"question\":\"\",\"scope\":\"contract\"}");((com.fasterxml.jackson.databind.node.ObjectNode)request).put("question",value[0]);
+            JsonNode result=data(post("/api/advice/{id}/ask",id).contentType(MediaType.APPLICATION_JSON).content(JsonUtils.write(request)));
+            assertFalse(result.path("grounded").asBoolean());assertTrue(result.path("citations").isEmpty());assertTrue(result.path("clarifications").get(0).asText().startsWith(value[3]));assertTrue(result.path("clarifications").get(1).asText().startsWith(value[2]));
+            assertTrue(result.path("content").path("en").asText().contains(value[4]));assertFalse(result.path("content").path("en").asText().contains("AUTHORED unsupported"));
+            JsonNode checks=JsonUtils.parse(messages.findById(result.path("messageId").asLong()).get().getAdviceChecksJson());assertTrue(checks.path("publishedSectionIds").isEmpty());assertEquals(2,checks.path("attempts").size());
+        }
+        verify(local,times(4)).chatStructured(anyList(),any());
+    }
+    @Test void mixedOrUnsupportedEnvelopeLanguagesCannotSelectFailureCopyOrSaveAnAnswer() throws Exception {
+        String id=project();source(id,"SCC","SCC.txt","VETTING_PACKAGE","tender","AUTHORED provision");mvc.perform(post("/api/advice/{id}/index/rebuild",id)).andExpect(jsonPath("$.code").value(0));
+        for(String language:Arrays.asList("en","fr")) {
+            com.fasterxml.jackson.databind.node.ObjectNode answer=(com.fasterxml.jackson.databind.node.ObjectNode)JsonUtils.parse(com.consense.service.advice.AdviceBudgetFixture.contract("{\"grounded\":true,\"answer\":\"AUTHORED unsupported [1]\",\"citations\":[\"[1]\"]}"));
+            ((com.fasterxml.jackson.databind.node.ObjectNode)answer.path("sections").get(0)).put("basisScope","project_contract").put("language","zhHant");
+            ((com.fasterxml.jackson.databind.node.ObjectNode)answer.path("sections").get(1)).put("language",language);doReturn(JsonUtils.write(answer)).when(local).chatStructured(anyList(),any());
+            mvc.perform(post("/api/advice/{id}/ask",id).contentType(MediaType.APPLICATION_JSON).content("{\"question\":\"請以繁體中文回答\",\"scope\":\"contract\"}")).andExpect(jsonPath("$.code").value(4205));
+            assertTrue(data(get("/api/advice/{id}/messages",id)).isEmpty());
+        }
+        verify(local,times(4)).chatStructured(anyList(),any());
+    }
+    @Test void naturalFlowchartQuestionUsesApplicationHarnessAndGraphRepairSharesTheTotalBudget() throws Exception {
+        String id=project();source(id,"SCC","SCC.txt","VETTING_PACKAGE","tender","AUTHORED Contractor submits notice; evidence review follows.");mvc.perform(post("/api/advice/{id}/index/rebuild",id)).andExpect(jsonPath("$.code").value(0));
+        com.fasterxml.jackson.databind.node.ObjectNode answer=(com.fasterxml.jackson.databind.node.ObjectNode)JsonUtils.parse(com.consense.service.advice.AdviceBudgetFixture.contract("{\"grounded\":true,\"answer\":\"AUTHORED notice procedure [1]\",\"citations\":[\"[1]\"]}"));answer.put("questionType","T6");
+        com.fasterxml.jackson.databind.node.ObjectNode graph=(com.fasterxml.jackson.databind.node.ObjectNode)answer.path("sections").get(1);graph.put("kind","flowchart");
+        ((com.fasterxml.jackson.databind.node.ObjectNode)graph.path("checks").get(2)).put("status","pass").set("citations",graph.path("citations"));
+        graph.set("flowchartPlan",JsonUtils.parse("{\"nodes\":[{\"id\":\"s\",\"label\":\"\",\"kind\":\"start\",\"citations\":[]},{\"id\":\"f\",\"label\":\"Review evidence\",\"kind\":\"end\",\"citations\":[\"[1]\"]}],\"edges\":[{\"from\":\"s\",\"to\":\"f\",\"condition\":\"\",\"actor\":\"Contractor\",\"action\":\"Submit notice\",\"period\":\"\",\"startEvent\":\"\",\"citations\":[\"[1]\"]}]}"));
+        com.fasterxml.jackson.databind.node.ObjectNode invalid=answer.deepCopy();((com.fasterxml.jackson.databind.node.ObjectNode)invalid.path("sections").get(1).path("flowchartPlan").path("edges").get(0)).put("period","28 days");
+        java.util.concurrent.atomic.AtomicInteger calls=new java.util.concurrent.atomic.AtomicInteger();doAnswer(call->{String prompt=JsonUtils.write(call.getArgument(0));assertTrue(prompt.contains("Application task selection: T6"));assertTrue(prompt.contains("请画个处理流程图"));return JsonUtils.write(calls.getAndIncrement()==0?invalid:answer);}).when(local).chatStructured(anyList(),any());
+        JsonNode result=data(post("/api/advice/{id}/ask",id).contentType(MediaType.APPLICATION_JSON).content("{\"question\":\"请画个处理流程图\",\"scope\":\"contract\"}"));assertTrue(result.path("grounded").asBoolean());assertEquals(2,calls.get());verify(counter,times(2)).observe(any());
+        String content=result.path("content").path("en").asText();assertTrue(content.contains("```mermaid\nflowchart TD"));assertTrue(content.contains("Contractor; Submit notice; [1]"));assertFalse(content.contains("28 days"));
+        JsonNode checks=JsonUtils.parse(messages.findByProjectIdOrderByIdAsc(id).get(1).getAdviceChecksJson());assertEquals("T6",checks.path("questionType").asText());assertEquals(2,checks.path("attempts").size());assertFalse(checks.path("attempts").get(0).path("rejections").isEmpty());
+        java.nio.file.Path artifact=java.nio.file.Paths.get("target/test-output/harness-authored-flowchart.md");
+        java.nio.file.Files.createDirectories(artifact.getParent());java.nio.file.Files.write(artifact,content.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    }
+    @Test void cancellationDuringAtomicSaveRollsBackMessagesAndChecksTogether() throws Exception {
+        String id=project();source(id,"SCC","SCC.txt","VETTING_PACKAGE","tender","AUTHORED provision");mvc.perform(post("/api/advice/{id}/index/rebuild",id)).andExpect(jsonPath("$.code").value(0));
+        final boolean[] saving={false};com.consense.service.advice.AdviceProgress progress=new com.consense.service.advice.AdviceProgress(){public void phase(String phase){if("saving".equals(phase))saving[0]=true;}public void checkCancelled(){if(saving[0]&&!messages.findByProjectIdOrderByIdAsc(id).isEmpty())throw new java.util.concurrent.CancellationException("AUTHORED stop before atomic commit");}};
+        assertThrows(java.util.concurrent.CancellationException.class,()->advice.ask(id,new com.consense.web.dto.AdviceDtos.AskRequest("Explain","contract"),progress));assertTrue(messages.findByProjectIdOrderByIdAsc(id).isEmpty());
+    }
     private JsonNode ask(String id,String scope)throws Exception{return data(post("/api/advice/{id}/ask",id).contentType(MediaType.APPLICATION_JSON).content("{\"question\":\"TEST ONLY question?\",\"scope\":\""+scope+"\"}"));}
     private JsonNode data(org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder request)throws Exception{return JsonUtils.parse(mvc.perform(request).andExpect(jsonPath("$.code").value(0)).andReturn().getResponse().getContentAsString()).path("data");}
     private String project()throws Exception{String id="scope-test-"+UUID.randomUUID();data(post("/api/projects").contentType(MediaType.APPLICATION_JSON).content("{\"id\":\""+id+"\",\"nameZhHans\":\"SCOPE TEST ONLY\"}"));return id;}
+    private SourceDocument source(String id,String key,String name,String category,String role,String text){return source(id,key,name,category,role,"package",text);}
     private SourceDocument source(String id,String key,String name,String category,String role,String documentScope,String text){SourceDocument s=new SourceDocument();s.setProjectId(id);s.setFileKey(key);s.setFileName(name);s.setCategory(category);s.setReviewRole(role);s.setDocumentScope(documentScope);s.setTextContent(text);s.setParseStatus("PARSED");s.setPageCount(25);s.setCreatedAt(Instant.now());
-        byte[] sourceBytes=text==null?new byte[0]:text.getBytes(java.nio.charset.StandardCharsets.UTF_8);
-        String digest=OerSourceMetadata.originalSha256(sourceBytes);s.setSourceSha256(digest);
-        OerDocumentIdentity identity=new OerDocumentIdentity();identity.setSourceSha256(digest);identity.setKind(key);
-        identity.setRole(role);identity.setSourcePurpose("standard".equals(role)?"reference_standard":"project_document");
-        identity.setIdentityStatus("authored_test_fixture");identity.setVersion("AUTHORED TEST ONLY");
-        identity.setEligibleModules(Arrays.asList("drafting","vetting","advisory"));s.setOerIdentityJson(JsonUtils.write(identity));
-        return sources.saveAndFlush(s);}
+        byte[] bytes=text.getBytes(java.nio.charset.StandardCharsets.UTF_8);StorageService.StoredFile original=storage.store(id,category,new MockMultipartFile("files",name,"text/plain",bytes));
+        String digest=OerSourceMetadata.originalSha256(bytes);s.setStoragePath(original.getPath());s.setSourceSha256(digest);
+        OerDocumentIdentity identity=new OerDocumentIdentity();identity.setSourceSha256(digest);identity.setKind(key);identity.setRole(role);
+        identity.setSourcePurpose("standard".equals(role)?"reference_standard":"project_document");identity.setIdentityStatus("authored_test_fixture");identity.setVersion("AUTHORED TEST ONLY");
+        identity.setEligibleModules(Arrays.asList("drafting","vetting","advisory"));s.setOerIdentityJson(JsonUtils.write(identity));return sources.saveAndFlush(s);}
 }

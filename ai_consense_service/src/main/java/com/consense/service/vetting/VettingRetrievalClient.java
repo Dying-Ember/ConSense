@@ -33,10 +33,14 @@ public class VettingRetrievalClient {
         // Invalidate first; a failed re-handshake must not reuse a former receipt.
         strictReceipts.remove(projectId);
         if (props.getVetting().isRequireHybridRetrieval()) requireUniqueIds(chunks);
+        List<Chunk> indexedChunks=chunks.stream().filter(c->!JsonUtils.isBlankText(c.getContent())).collect(java.util.stream.Collectors.toList());
         VettingRetrievalHealth.Identity health = props.getVetting().isRequireHybridRetrieval() ? health(probe) : null;
         String request;
         try (VettingReviewProbe.Timer timer=measure(probe,"index_request_serialization","Body construction and JsonUtils.write before HTTP; no probe artifact I/O")) {
-            Map<String,Object> body = new LinkedHashMap<>(); body.put("projectId", projectId); body.put("chunks", chunks);
+            Map<String,Object> body = new LinkedHashMap<>(); body.put("projectId", projectId); body.put("chunks", indexedChunks);
+            if(indexedChunks.size()!=chunks.size())body.put("unindexedObservations",chunks.stream().filter(c->JsonUtils.isBlankText(c.getContent()))
+                    .map(c->{Map<String,Object> row=new LinkedHashMap<>();row.put("id",c.getId());row.put("documentId",c.getDocumentId());
+                        row.put("sourceHash",c.getSourceHash());row.put("reason","no_literal_embedding_text_structure_retained_in_source");return row;}).collect(java.util.stream.Collectors.toList()));
             request = JsonUtils.write(body);
         }
         if (probe != null) probe.text("index_request", VettingReviewProbe.map("sourceChunkCount", chunks.size(), "url", url("/index")), request);
@@ -57,7 +61,7 @@ public class VettingRetrievalClient {
             receipt = JsonUtils.parse(response);
             signature = receipt.path("signature").asText();
             if (!projectId.equals(receipt.path("projectId").asText()) || !receipt.path("indexed").isIntegralNumber() || !receipt.path("indexed").canConvertToInt()
-                    || receipt.path("indexed").asInt() != chunks.size() || !signature.matches("[0-9a-f]{64}")
+                    || receipt.path("indexed").asInt() != indexedChunks.size() || !signature.matches("[0-9a-f]{64}")
                     || !health.contract.equals(receipt.path("contract").asText()))
             {
                 if (probe != null) probe.event("index_receipt_gate", VettingReviewProbe.map("status", "rejected", "reason", "project_count_or_signature_invalid", "receipt", receipt));

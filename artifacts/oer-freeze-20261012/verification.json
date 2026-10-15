@@ -1,0 +1,236 @@
+{
+  "schema": "consense.frozen-artifacts-local-verification/v1",
+  "package": {
+    "startedAt": "2026-10-13T09:20:21.826325+08:00",
+    "completedAt": "2026-10-13T09:26:46.426397+08:00",
+    "fileCount": 1751,
+    "unpackedBytes": 16614909465,
+    "archive": {
+      "name": "consense-oer-frozen-20261012.tar.gz",
+      "bytes": 9212695152,
+      "sha256": "44f08b97bbb5c73004530d4ee61786be50c0356d23b9498d44700d1bc0897f4a",
+      "parts": [
+        {
+          "name": "consense-oer-frozen-20261012.tar.gz.part001",
+          "bytes": 1073741824,
+          "sha256": "68c67d2748e9ae8b74d6532b94b9044fc4fb4843871640c8de01a9d13e1c035a"
+        },
+        {
+          "name": "consense-oer-frozen-20261012.tar.gz.part002",
+          "bytes": 1073741824,
+          "sha256": "6bfcd269d8b022fd782621a57f2cce08f50edc1763f508d03e504a09ee22f01f"
+        },
+        {
+          "name": "consense-oer-frozen-20261012.tar.gz.part003",
+          "bytes": 1073741824,
+          "sha256": "4aece7e29911d5b06a5c067cbb6d914db114e902e1e41797f1f0a8985e4d2406"
+        },
+        {
+          "name": "consense-oer-frozen-20261012.tar.gz.part004",
+          "bytes": 1073741824,
+          "sha256": "5863f8fd20b2a7b96393fa26aa608a9e0d755567a9d39bd8f688ca21147533bd"
+        },
+        {
+          "name": "consense-oer-frozen-20261012.tar.gz.part005",
+          "bytes": 1073741824,
+          "sha256": "348b138a31f35f7243854ea766de3e2f59ba0af4500b03ae4386235a94b8d4cf"
+        },
+        {
+          "name": "consense-oer-frozen-20261012.tar.gz.part006",
+          "bytes": 1073741824,
+          "sha256": "c80f53072cb9625cfc32112503880540a6bc57a4d9baf27a13a533e0e4251b70"
+        },
+        {
+          "name": "consense-oer-frozen-20261012.tar.gz.part007",
+          "bytes": 1073741824,
+          "sha256": "b96e1c8b346d75609c04272721ccb56f70a003bbeb11d2cca5f4935f43d21630"
+        },
+        {
+          "name": "consense-oer-frozen-20261012.tar.gz.part008",
+          "bytes": 1073741824,
+          "sha256": "5c2f39f84af981d02b4864f20b0a260c9e732288340c5079417d6f33785c56a3"
+        },
+        {
+          "name": "consense-oer-frozen-20261012.tar.gz.part009",
+          "bytes": 622760560,
+          "sha256": "480d5f59f60d027e67ea122940e3bfdebcfd5e8bc67d0b70318f896911336564"
+        }
+      ]
+    },
+    "manifestSha256": "0ce643f66a9208338e827c063f77254d20bfc8aba6e7f1d1f23f53a24e616950",
+    "allSourceHashesAndStatsMatched": true,
+    "additionalDuplicateSourceHashesVerified": 3,
+    "categoryCounts": {
+      "fixed05-model-publication": {
+        "files": 18,
+        "bytes": 4586560654
+      },
+      "ocr-frozen-repository-assets": {
+        "files": 50,
+        "bytes": 5285403843
+      },
+      "fixed05-static-database-copy": {
+        "files": 4,
+        "bytes": 504859034
+      },
+      "fixed05-freeze-manifest": {
+        "files": 6,
+        "bytes": 868128
+      },
+      "fixed05-corpus": {
+        "files": 2,
+        "bytes": 154948101
+      },
+      "fixed05-bound-original-source": {
+        "files": 3,
+        "bytes": 50498542
+      },
+      "fixed05-source-descriptor-closure": {
+        "files": 1668,
+        "bytes": 6031771163
+      }
+    },
+    "databaseOpens": 0,
+    "modelLoads": 0,
+    "activeStateCopied": false,
+    "credentialScan": "Three patterns on selected small text assets plus explicit source allowlist and credential-extension exclusion; not full-history certification"
+  },
+  "realRestore": {
+    "manifestSha256": "0ce643f66a9208338e827c063f77254d20bfc8aba6e7f1d1f23f53a24e616950",
+    "archiveSha256": "44f08b97bbb5c73004530d4ee61786be50c0356d23b9498d44700d1bc0897f4a",
+    "verifiedFiles": 1751,
+    "restoredTo": "D:\\R&D\\ConSense\\.local\\state\\oer-private-pr-restore-20261013-01",
+    "runtimeStarted": false,
+    "absoluteSourcePathsRewritten": false
+  },
+  "restoredDatabase": {
+    "checkedAt": "2026-10-13T09:36:58.438642+08:00",
+    "restoredDatabase": "D:\\R&D\\ConSense\\.local\\state\\oer-private-pr-restore-20261013-01\\baseline05\\state\\qdrant\\collection\\project_c18c9b7514b1c830_b0a7bc46bb241f9a\\storage.sqlite",
+    "databaseSha256": "a8747db01d9d2f6d180d00cc83cf519b6b562b1133cbee9f1d933c8cb29f5153",
+    "readOnlyUri": true,
+    "immutable": true,
+    "quickCheck": [
+      [
+        "ok"
+      ]
+    ],
+    "tables": [
+      [
+        "points"
+      ]
+    ],
+    "pointRows": 20700,
+    "metadataStructureCounts": {
+      "signature": 12,
+      "chunks": 19371,
+      "windows": 20700,
+      "vectorIntegrity": 8
+    },
+    "activeDatabaseOpened": false,
+    "newQdrantClientStarted": false,
+    "scope": "Restored static copy SQLite integrity and stored-point count only; no model, retrieval or business acceptance."
+  },
+  "restoreToolReview": {
+    "schema": "consense.restore-independent-review/v1",
+    "reviewer": "prepush restore_review independent subagent",
+    "startedAtUtc": "2026-10-13T01:22:43.763300+00:00",
+    "finishedAtUtc": "2026-10-13T01:22:43.920324+00:00",
+    "reviewedFiles": [
+      {
+        "path": "C:\\Users\\Administrator\\.codex\\worktrees\\oer-next-delivery\\ConSense\\ai_consense_service\\tools\\restore_frozen_artifacts.py",
+        "bytes": 6593,
+        "sha256": "0802e94af091cee572845000eccecab5128f8cc6782f351cbf6a2e46dc53ae90"
+      },
+      {
+        "path": "C:\\Users\\Administrator\\.codex\\worktrees\\oer-next-delivery\\ConSense\\ai_consense_service\\tools\\test_restore_frozen_artifacts.py",
+        "bytes": 5333,
+        "sha256": "294cb7aa3f963a70684fb221c3449d49958f4bf5f2a97ae0dea496d8dd1a9fb3"
+      }
+    ],
+    "scope": "Bounded static review of restore helper plus its six unit tests. Single operator restoring reviewed, SHA-pinned release into new absolute directory.",
+    "tests": {
+      "command": [
+        "C:\\Users\\Administrator\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\python.exe",
+        "-B",
+        "-m",
+        "unittest",
+        "-v",
+        "test_restore_frozen_artifacts"
+      ],
+      "cwd": "C:\\Users\\Administrator\\.codex\\worktrees\\oer-next-delivery\\ConSense\\ai_consense_service\\tools",
+      "startedAtUtc": "2026-10-13T01:25:29.817987+00:00",
+      "exitCode": 0,
+      "testCount": 6,
+      "passed": true,
+      "log": "C:\\Users\\Administrator\\Documents\\Codex\\consense-implementation-20261013\\private-pr-20261013\\restore-independent-tests-after-reserved-fix.log",
+      "logSha256": "4975108b7443a07c04478e38ce6a7922b93c4732d874d0d978b0dcf85132d604"
+    },
+    "verdict": "ship for declared byte-restore boundary",
+    "mustFix": [],
+    "checked": [
+      "CLI requires expected manifest SHA; no trust supplied by downloaded archive alone.",
+      "Manifest descriptors reject invalid sizes and hashes; duplicate/unsafe/reserved file names, file-parent conflicts and nonlocal part names rejected.",
+      "Part hashes, assembled archive hash, exact member set/type/size and every file hash verified before destination creation.",
+      "Only ordinary file members accepted; no tar extractall, symlinks or hardlinks.",
+      "Existing destination refused; output files created exclusively; no deletion code or database/model/service calls.",
+      "Original-path mapping produced separately; frozen payloads are unchanged.",
+      "Windows case-insensitive aliases of generated output names are now rejected before writes."
+    ],
+    "knownLimits": [
+      "TemporaryFile needs temporary-volume free space for full compressed archive; destination-volume needs all restored file bytes. Parts occupy their own download space.",
+      "Disk/write failure may leave a partial newly created destination. No successful RESTORED.json is written unless restore completes; existing directories remain refused.",
+      "Review assumes no concurrent local attacker mutates the new destination or its ancestors during extraction; no multi-tenant adversarial filesystem hardening was requested.",
+      "Case-insensitive archive path collisions are not preflighted, but exclusive creation refuses overwrite on Windows. Frozen release inventory must use unique paths."
+    ],
+    "notChecked": [
+      "Full real artifact restoration; parent performs separately.",
+      "Database semantic validity, model execution, automatic relocation of historical absolute paths, remote upload/download or service startup."
+    ],
+    "mutations": "Only external independent review receipts/logs written; tiny fixtures were created/cleaned. Source, real parts, frozen originals, database/model and real restore target were untouched.",
+    "followupAtUtc": "2026-10-13T01:25:30.034476+00:00",
+    "reservedCaseRegressionProbes": [
+      {
+        "name": "PATH-MAP.JSON",
+        "rejected": true,
+        "message": "Duplicate or reserved archive path",
+        "destinationExists": false
+      },
+      {
+        "name": "RESTORED.JSON",
+        "rejected": true,
+        "message": "Duplicate or reserved archive path",
+        "destinationExists": false
+      }
+    ],
+    "resolvedFindings": [
+      {
+        "priority": "P2",
+        "problem": "Reserved output name comparison previously allowed uppercase aliases that were silently overwritten on Windows.",
+        "fix": "Root component is now casefolded and existing unsafe-member test includes both uppercase aliases.",
+        "reviewResult": "Both rejected before any destination was created; all six tests pass.",
+        "originalReproduction": "C:\\Users\\Administrator\\Documents\\Codex\\consense-implementation-20261013\\private-pr-20261013\\restore-independent-reserved-case-repro.json",
+        "originalReproductionSha256": "c04f44ffaaa9e97cfbfed0d1d2986a93127c386eb6f45463eadec371243dc100"
+      }
+    ],
+    "history": [
+      {
+        "path": "C:\\Users\\Administrator\\Documents\\Codex\\consense-implementation-20261013\\private-pr-20261013\\restore-independent-review-initial.json",
+        "sha256": "4eb0dd9516e1871ac1aa8cccd158d13d645c5cb05e526172cb111f5d360ae846"
+      },
+      {
+        "path": "C:\\Users\\Administrator\\Documents\\Codex\\consense-implementation-20261013\\private-pr-20261013\\restore-independent-review-before-fix.json",
+        "sha256": "8eb2fb89f103017ed50fd3beb17373cb1b711c598b2d9d12b40f751f58138211"
+      }
+    ]
+  },
+  "remoteUpload": {
+    "status": "completed",
+    "checkedAt": "2026-10-13T09:57:23.993500+08:00",
+    "receipt": "remote-verification.json",
+    "assetCount": 11,
+    "allRemoteSizesAndNativeDigestsMatch": true,
+    "manifestDownloadedAndHashMatched": true,
+    "boundary": "All remote bytes verified by GitHub native SHA256; manifest actually downloaded. Full archive restored locally. No full remote archive download or runtime/semantic/H800 certification."
+  },
+  "boundary": "Byte identity, full file restore and restored-copy SQLite checks only; no new model, retrieval, business, OCI or H800 acceptance."
+}

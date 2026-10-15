@@ -42,13 +42,14 @@ import static org.mockito.Mockito.*;
  * local fake registry/retrieval HTTP; all neural consumers are explicit doubles. No online services. */
 @SpringBootTest(properties={"spring.jpa.hibernate.ddl-auto=create-drop","spring.flyway.enabled=false",
         "spring.jpa.show-sql=false","consense.ocr.enabled=false","consense.vector.provider=memory",
-        "consense.llm.chat-model=synthetic-recheck-chat","logging.level.org.hibernate.SQL=OFF"})
+        "consense.llm.chat-model=synthetic-recheck-chat","consense.llm.structured-thinking=false",
+        "consense.llm.num-ctx=524288","logging.level.org.hibernate.SQL=OFF"})
 @ActiveProfiles("h2")
 class CanonicalRecheckAdviceRealSeamTest {
     static final String PROJECT="authored-recheck-project", POLICY=repeat('a'), INPUT="canonical-source-chunks-upstream-scope-and-parser-projection-v1";
     static final String SIGNATURE=VettingCorpus.hash("SYNTHETIC RECHECK INDEX FIXTURE");
     static final String DB=UUID.randomUUID().toString();
-    @DynamicPropertySource static void database(DynamicPropertyRegistry r){r.add("spring.datasource.url",()->"jdbc:h2:mem:recheck_"+DB+";MODE=MySQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE");r.add("consense.storage-root",()->Paths.get(System.getProperty("maven.multiModuleProjectDirectory"),"target","authored-recheck-storage",DB).toAbsolutePath().toString());}
+    @DynamicPropertySource static void database(DynamicPropertyRegistry r){r.add("spring.datasource.url",()->"jdbc:h2:mem:recheck_"+DB+";MODE=MySQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE");r.add("consense.storage-root",()->Paths.get(System.getProperty("maven.multiModuleProjectDirectory",System.getProperty("user.dir")),"target","authored-recheck-storage",DB).toAbsolutePath().toString());}
     @Autowired AdviceService advice;
     @Autowired ConsenseProperties props;
     @Autowired CanonicalEvidenceProperties canonicalProps;
@@ -62,6 +63,7 @@ class CanonicalRecheckAdviceRealSeamTest {
     @SpyBean CanonicalCurrentSourceReader reader;
     @SpyBean OerBusinessEvidence business;
     @MockBean(name="llmClient") LlmClient llm;
+    @MockBean VettingTokenBudgetCliObserver tokenObserver;
     @TempDir Path temporary;
     HttpServer server;ExecutorService httpWorkers;
     final Map<Long,ObjectNode> snapshots=new LinkedHashMap<>();
@@ -76,12 +78,14 @@ class CanonicalRecheckAdviceRealSeamTest {
     final AtomicInteger snapshotReads=new AtomicInteger(),indexCalls=new AtomicInteger(),retrieveCalls=new AtomicInteger(),chatCalls=new AtomicInteger();
     final AtomicReference<Runnable> indexMutation=new AtomicReference<>(),retrieveMutation=new AtomicReference<>(),snapshotMutation=new AtomicReference<>(),chatMutation=new AtomicReference<>();
     final AtomicReference<JsonNode> indexRequest=new AtomicReference<>();
+    final Map<String,ObjectNode> remoteIndexes=new ConcurrentHashMap<>();
     ObjectNode health;
 
     @BeforeEach void setup() throws Exception {
+        when(tokenObserver.observe(any())).thenAnswer(call->VettingTokenFixture.observe(call.getArgument(0)));
         snapshots.clear();rawSnapshots.clear();originals.clear();casTamperTargets.clear();casLedgers.clear();events.clear();perDocumentSnapshotReads.clear();healthMutation.set(null);
         indexMutation.set(null);retrieveMutation.set(null);snapshotMutation.set(null);chatMutation.set(null);
-        indexRequest.set(null);canonicalProps.getSourcePageRenderEvidenceIdentities().clear();
+        indexRequest.set(null);remoteIndexes.clear();canonicalProps.getSourcePageRenderEvidenceIdentities().clear();
         jdbc.update("DELETE FROM chat_message");jdbc.update("DELETE FROM canonical_source_binding");jdbc.update("DELETE FROM source_document");jdbc.update("DELETE FROM project");
         jdbc.execute("ALTER TABLE source_document ALTER COLUMN id RESTART WITH 42");jdbc.execute("ALTER TABLE chat_message ALTER COLUMN id RESTART WITH 1");
         props.setStorageRoot(temporary.toString());props.getVetting().setRequireHybridRetrieval(true);
@@ -110,7 +114,15 @@ class CanonicalRecheckAdviceRealSeamTest {
                     result.put("contract",VettingRetrievalHealth.STRUCTURAL_CONTRACT);result.put("targetModule","advisory");
                     result.set("canonicalProjections",request.path("projectionSha256").deepCopy());result.set("competitionScope",scope());
                     result.set("sourcePageEvidence",request.has("sourcePageEvidence")?request.path("sourcePageEvidence").deepCopy():JsonUtils.mapper().createObjectNode());
+                    remoteIndexes.put(request.path("projectId").asText(),result.deepCopy());
                     response=JsonUtils.write(result).getBytes(StandardCharsets.UTF_8);
+                }else if("/index-canonical/status".equals(path)){
+                    JsonNode request=JsonUtils.parse(new String(readAll(exchange.getRequestBody()),StandardCharsets.UTF_8));events.add("status:start");
+                    ObjectNode stored=remoteIndexes.get(request.path("projectId").asText());
+                    ObjectNode result=stored==null?JsonUtils.mapper().createObjectNode():stored.deepCopy();
+                    result.put("ready",stored!=null);result.put("readOnly",true);result.put("vectorPoints",stored==null?0:4);
+                    result.put("indexStatusContract","read-only-existing-canonical-index-v1");
+                    response=JsonUtils.write(result).getBytes(StandardCharsets.UTF_8);events.add("status:end");
                 }else if("/retrieve".equals(path)){
                     retrieveCalls.incrementAndGet();JsonNode request=JsonUtils.parse(new String(readAll(exchange.getRequestBody()),StandardCharsets.UTF_8));
                     events.add("retrieve:start");runOnce(retrieveMutation);events.add("retrieve:end");response=JsonUtils.write(retrieveFixture(request.path("projectId").asText())).getBytes(StandardCharsets.UTF_8);
@@ -127,6 +139,7 @@ class CanonicalRecheckAdviceRealSeamTest {
         org.mockito.stubbing.Answer<?> repositoryDelegate=mockingDetails(history).getMockCreationSettings().getDefaultAnswer();
         doAnswer(call->{ChatMessage message=call.getArgument(0);String event="persist-"+message.getRole();events.add(event+":start");Object result=repositoryDelegate.answer(call);events.add(event+":end");return result;}).when(history).save(any(ChatMessage.class));
         when(llm.chat(anyList())).thenAnswer(call->{assertFalse(TransactionSynchronizationManager.isActualTransactionActive());chatCalls.incrementAndGet();events.add("llm:start");runOnce(chatMutation);events.add("llm:end");return "{\"grounded\":true,\"answer\":\"AUTHORED supported literal\",\"citations\":[\"[1]\"]}";});
+        when(llm.chatStructured(anyList(),any())).thenAnswer(call->com.consense.service.advice.AdviceBudgetFixture.contract(llm.chat(call.getArgument(0))));
         resetCounters();
     }
     @AfterEach void stop(){if(server!=null)server.stop(0);if(httpWorkers!=null)httpWorkers.shutdownNow();}
@@ -145,9 +158,9 @@ class CanonicalRecheckAdviceRealSeamTest {
         boolean optimized=Boolean.parseBoolean(System.getProperty("consense.recheck.expectOptimized","true"));
         boolean staged=Boolean.parseBoolean(System.getProperty("consense.recheck.expectStage","true"));
         assertEquals(staged?0:optimized?7:10,rounds,"real successful Advice chain currentBindings budget");
-        assertEquals(staged?14:optimized?18:24,snapshotReads.get(),"service + client real local fake registry GET count");
-        assertEquals(staged?48:optimized?32:66,gates,"actual fresh proxied reader source gate count");
-        if(staged){assertEquals(7,snapshotCounts().get("42"));assertEquals(7,snapshotCounts().get("43"));assertEquals(3,receipt.path("verifiedFrameRounds").asInt());assertWaitGuards("health");assertWaitGuards("index");}
+        assertEquals(staged?22:optimized?18:24,snapshotReads.get(),"service + client real local fake registry GET count");
+        assertEquals(staged?78:optimized?32:66,gates,"actual fresh proxied reader source gate count");
+        if(staged){assertEquals(11,snapshotCounts().get("42"));assertEquals(11,snapshotCounts().get("43"));assertEquals(3,receipt.path("verifiedFrameRounds").asInt());assertWaitGuards("health");assertWaitGuards("index");assertWaitGuards("status");}
         assertEquals(1,indexCalls.get());assertEquals(0,chatCalls.get());assertEquals(0,history.count());
         assertFalse(indexRequest.get().has("sourcePageEvidence"),"legacy unpinned request remains unchanged");
         String baseline=System.getProperty("consense.recheck.baselineResponse");
@@ -203,10 +216,10 @@ class CanonicalRecheckAdviceRealSeamTest {
         assertEquals(1,retrieveCalls.get());assertEquals(0,chatCalls.get());assertEquals(0,history.count());writeNegative("retrieve-new-selected-member");
     }
     @Test void dbRevisionImmediatelyBeforeHistoryGatePreventsAtomicHistoryWrites(){
-        advice.rebuildIndex(PROJECT,"fullset");resetCounters();AtomicInteger selections=new AtomicInteger();
-        doAnswer(call->{if(selections.incrementAndGet()==3)mutate(43L,"db_parsed");return call.callRealMethod();}).when(business).assertSelected(any(),anyList());
+        advice.rebuildIndex(PROJECT,"fullset");resetCounters();AtomicBoolean changed=new AtomicBoolean();
+        doAnswer(call->{if(chatCalls.get()==1&&changed.compareAndSet(false,true))mutate(43L,"db_parsed");return call.callRealMethod();}).when(business).assertSelected(any(),anyList());
         assertThrows(RuntimeException.class,()->advice.ask(PROJECT,new AskRequest("AUTHORED complete native unit","fullset")));
-        assertEquals(3,selections.get());assertEquals(1,chatCalls.get());assertEquals(0,history.count());writeNegative("before-history-gate-db-revision");
+        assertTrue(changed.get());assertEquals(1,chatCalls.get());assertEquals(0,history.count());writeNegative("before-history-gate-db-revision");
     }
     @Test void publicSnapshotRechecksDbRevisionAfterItsRemoteResponse(){
         snapshotMutation.set(()->mutate(43L,"db_parsed"));
@@ -239,7 +252,7 @@ class CanonicalRecheckAdviceRealSeamTest {
         receipt.set("perDocumentSnapshotReads",JsonUtils.mapper().valueToTree(snapshotCounts()));receipt.put("snapshotGetCount",snapshotReads.get());receipt.set("events",JsonUtils.mapper().valueToTree(new ArrayList<>(events)));
         receipt.set("completeStatusResponse",JsonUtils.mapper().valueToTree(result));write("independent-status.json",receipt);
         assertEquals(JsonUtils.parse("{\"chunks\":4,\"indexed\":4,\"vectorProvider\":\"canonical-oer\",\"collection\":\"authored-recheck-project::canonical::advisory::f48ae8581a939125f62e205e448c47322e921d442cd354cca04721356af0304d\",\"embedModel\":\"BAAI/bge-m3\",\"llmModel\":\"synthetic-recheck-chat\",\"llmReady\":true,\"vectorReady\":true,\"ocrReady\":false,\"message\":{\"zhHans\":\"当前范围的规范证据索引就绪，共 4 个来源切片。\",\"zhHant\":\"當前範圍的規範證據索引就緒，共 4 個來源切片。\",\"en\":\"Canonical evidence index ready for the selected scope: 4 chunks.\"},\"stale\":false,\"eligibleDocuments\":2,\"indexedDocuments\":2,\"embeddingReady\":true,\"evidenceBackend\":\"canonical\",\"sourceScope\":\"fullset\",\"indexKey\":\"authored-recheck-project::canonical::advisory::f48ae8581a939125f62e205e448c47322e921d442cd354cca04721356af0304d\",\"indexSignature\":\"48f27e00d69a2c9b34799ae48a0b32896d8ad42228df3f883d5f5d2e2d71d35d\"}"),JsonUtils.mapper().valueToTree(result),"complete stage02 ready response remains identical");
-        assertTrue(result.isVectorReady());assertEquals(4,snapshotReads.get());assertEquals(2,snapshotCounts().get("42"));assertEquals(2,snapshotCounts().get("43"));assertEquals(0,indexCalls.get());assertEquals(0,chatCalls.get());assertEquals(0,history.count());assertWaitGuards("health");
+        assertTrue(result.isVectorReady());assertEquals(8,snapshotReads.get());assertEquals(4,snapshotCounts().get("42"));assertEquals(4,snapshotCounts().get("43"));assertEquals(0,indexCalls.get());assertEquals(0,chatCalls.get());assertEquals(0,history.count());assertWaitGuards("health");assertWaitGuards("status");
     }
     @ParameterizedTest @MethodSource("sourceMutations") void persistentSourceDriftDuringHealthPreventsIndexAndHistory(Long id,String kind){
         healthMutation.set(()->mutate(id,kind));assertThrows(RuntimeException.class,()->advice.rebuildIndex(PROJECT,"fullset"));
@@ -339,6 +352,7 @@ class CanonicalRecheckAdviceRealSeamTest {
         ObjectNode h=VettingDualStructureHealthTest.health();OerCudaHealthFixtures.apply(h);ObjectNode scope=JsonUtils.mapper().createObjectNode();scope.put("manifestSha256",POLICY);ObjectNode oer=h.putObject("oer");
         oer.put("inputContract",INPUT);oer.put("assetReturnContract","source-and-projection-bound-content-addressed-assets-v1");oer.put("recipe","scope-bound-dual2048-cuda-fp32-no-fixed-cache-v1");
         oer.put("targetModule","advisory");oer.put("sourceQualityVerifiedByHealth",false);oer.put("parserCandidatesAcceptedByRetrieval",false);oer.put("canonicalProjectionEndpoint","/project");oer.set("scopePolicy",scope);
+        oer.put("indexStatusContract","read-only-existing-canonical-index-v1");
         oer.set("nativeCanonical",NativeCanonicalFixture.capability());oer.set("nativePdfCanonical",NativePdfCanonicalFixture.capability());
         ObjectNode windows=(ObjectNode)h.path("retrieval").path("sourceWindows");windows.set("competitionScope",scope.deepCopy());windows.put("oerInputContract",INPUT);windows.put("oerTargetModule","advisory");
         ObjectNode algorithms=(ObjectNode)windows.path("algorithms");
@@ -372,11 +386,17 @@ class CanonicalRecheckAdviceRealSeamTest {
     void resetCounters(){snapshotReads.set(0);indexCalls.set(0);retrieveCalls.set(0);chatCalls.set(0);healthReads.set(0);healthMutationOrdinal=1;perDocumentSnapshotReads.clear();events.clear();clearInvocations(evidence,reader,business,llm,history);}
     void assertWaitGuards(String operation){List<String> sequence=new ArrayList<>(events);boolean seen=false;
         for(int i=0;i<sequence.size();i++)if(sequence.get(i).equals(operation+":start")){seen=true;int end=sequence.subList(i+1,sequence.size()).indexOf(operation+":end");assertTrue(end>=0);end+=i+1;
-            int previous=-1;for(int j=i-1;j>=0;j--)if(sequence.get(j).equals("health:end")||sequence.get(j).equals("index:end")||sequence.get(j).equals("retrieve:end")||sequence.get(j).equals("llm:end")){previous=j;break;}
-            int next=sequence.size();for(int j=end+1;j<sequence.size();j++)if(sequence.get(j).equals("health:start")||sequence.get(j).equals("index:start")||sequence.get(j).equals("retrieve:start")||sequence.get(j).equals("llm:start")){next=j;break;}
+            int previous=-1;for(int j=i-1;j>=0;j--)if(sequence.get(j).equals("health:end")||sequence.get(j).equals("index:end")||sequence.get(j).equals("status:end")||sequence.get(j).equals("retrieve:end")||sequence.get(j).equals("llm:end")){previous=j;break;}
+            int next=sequence.size();for(int j=end+1;j<sequence.size();j++)if(sequence.get(j).equals("health:start")||sequence.get(j).equals("index:start")||sequence.get(j).equals("status:start")||sequence.get(j).equals("retrieve:start")||sequence.get(j).equals("llm:start")){next=j;break;}
+            int casEnd=next;
+            // Read-only health/status share full CAS validation before publishing the status.
+            if("health".equals(operation)&&next<sequence.size()&&sequence.get(next).equals("status:start")){
+                int statusEnd=sequence.subList(next+1,sequence.size()).indexOf("status:end");assertTrue(statusEnd>=0);statusEnd+=next+1;casEnd=sequence.size();
+                for(int j=statusEnd+1;j<sequence.size();j++)if(sequence.get(j).equals("health:start")||sequence.get(j).equals("index:start")||sequence.get(j).equals("status:start")||sequence.get(j).equals("retrieve:start")||sequence.get(j).equals("llm:start")){casEnd=j;break;}
+            }
             for(long id:new long[]{42,43}){assertTrue(sequence.subList(previous+1,i).contains("source:"+id+":end"),operation+" missing fresh original/DB pre guard for "+id);
                 assertTrue(sequence.subList(end+1,next).contains("source:"+id+":end"),operation+" missing fresh original/DB post guard for "+id);
-                assertTrue(sequence.subList(end+1,next).contains("cas:"+id+":end"),operation+" missing post full CAS for "+id);}}
+                assertTrue(sequence.subList(end+1,casEnd).contains("cas:"+id+":end"),operation+" missing post full CAS for "+id);}}
         assertTrue(seen,"missing actual external "+operation+" wait");}
 
     void writeNegative(String label){ObjectNode r=JsonUtils.mapper().createObjectNode();r.put("label",label);r.put("synthetic",true);r.put("indexCalls",indexCalls.get());r.put("retrieveCalls",retrieveCalls.get());r.put("llmDoubleCalls",chatCalls.get());r.put("neuralCalls",0);r.put("historyRows",history.count());r.put("result","rejected");write(label+".json",r);}
@@ -389,10 +409,10 @@ class CanonicalRecheckAdviceRealSeamTest {
     static String shaBytes(byte[] bytes){try{byte[] digest=java.security.MessageDigest.getInstance("SHA-256").digest(bytes);StringBuilder hex=new StringBuilder();for(byte value:digest)hex.append(String.format(Locale.ROOT,"%02x",value&255));return hex.toString();}catch(Exception error){throw new IllegalStateException(error);}}
 
     @Test @DirtiesContext(methodMode=DirtiesContext.MethodMode.BEFORE_METHOD)
-    void singleFrameMissingReceiptStatusKeepsCompleteResponseAndFreshBoundaryCounts(){
+    void singleFrameMissingRemoteIndexStatusRefusesWithFreshBoundaryCounts(){
         resetCounters();long begin=System.nanoTime();IndexStatusVO result=advice.status(PROJECT,"fullset");
-        assertFalse(result.isVectorReady());assertEquals("canonical_index_receipt_missing",result.getIndexReason());
-        assertEquals(JsonUtils.parse("{\"chunks\":4,\"indexed\":0,\"vectorProvider\":\"canonical-oer\",\"collection\":\"authored-recheck-project::canonical::advisory::f48ae8581a939125f62e205e448c47322e921d442cd354cca04721356af0304d\",\"embedModel\":\"BAAI/bge-m3\",\"llmModel\":\"synthetic-recheck-chat\",\"llmReady\":true,\"vectorReady\":false,\"ocrReady\":false,\"message\":{\"zhHans\":\"当前范围的规范证据索引未就绪，请刷新索引并核对来源及检索服务。\",\"zhHant\":\"當前範圍的規範證據索引未就緒，請刷新索引並核對來源及檢索服務。\",\"en\":\"Canonical evidence index is not ready for the selected scope. Refresh it and check current source bindings and the retrieval service.\"},\"stale\":false,\"eligibleDocuments\":2,\"indexedDocuments\":0,\"embeddingReady\":false,\"evidenceBackend\":\"canonical\",\"sourceScope\":\"fullset\",\"indexKey\":\"authored-recheck-project::canonical::advisory::f48ae8581a939125f62e205e448c47322e921d442cd354cca04721356af0304d\",\"indexReason\":\"canonical_index_receipt_missing\"}"),JsonUtils.mapper().valueToTree(result),"complete stage02 missing response remains identical");
+        assertFalse(result.isVectorReady());assertEquals("canonical_index_unavailable",result.getIndexReason());
+        assertEquals(JsonUtils.parse("{\"chunks\":4,\"indexed\":0,\"vectorProvider\":\"canonical-oer\",\"collection\":\"authored-recheck-project::canonical::advisory::f48ae8581a939125f62e205e448c47322e921d442cd354cca04721356af0304d\",\"embedModel\":\"BAAI/bge-m3\",\"llmModel\":\"synthetic-recheck-chat\",\"llmReady\":true,\"vectorReady\":false,\"ocrReady\":false,\"message\":{\"zhHans\":\"当前范围的规范证据索引未就绪，请刷新索引并核对来源及检索服务。\",\"zhHant\":\"當前範圍的規範證據索引未就緒，請刷新索引並核對來源及檢索服務。\",\"en\":\"Canonical evidence index is not ready for the selected scope. Refresh it and check current source bindings and the retrieval service.\"},\"stale\":true,\"eligibleDocuments\":2,\"indexedDocuments\":0,\"embeddingReady\":false,\"evidenceBackend\":\"canonical\",\"sourceScope\":\"fullset\",\"indexKey\":\"authored-recheck-project::canonical::advisory::f48ae8581a939125f62e205e448c47322e921d442cd354cca04721356af0304d\",\"indexReason\":\"canonical_index_unavailable\"}"),JsonUtils.mapper().valueToTree(result),"complete missing remote-index response refuses readiness");
         ObjectNode receipt=JsonUtils.mapper().createObjectNode();receipt.put("schema","consense.single-frame-status-author.v1");
         receipt.put("sourceKind","synthetic_actual_spring_h2_local_http");receipt.put("latencyIsSynthetic",true);receipt.put("wallNanos",System.nanoTime()-begin);
         receipt.set("perDocumentSnapshotReads",JsonUtils.mapper().valueToTree(snapshotCounts()));receipt.put("snapshotGetCount",snapshotReads.get());
@@ -403,7 +423,7 @@ class CanonicalRecheckAdviceRealSeamTest {
         receipt.set("events",JsonUtils.mapper().valueToTree(new ArrayList<>(events)));receipt.set("completeStatusResponse",JsonUtils.mapper().valueToTree(result));write("single-frame-missing-status.json",receipt);
         assertEquals(4,snapshotReads.get());assertEquals(Integer.valueOf(2),snapshotCounts().get("42"));assertEquals(Integer.valueOf(2),snapshotCounts().get("43"));
         assertEquals(1,healthReads.get());assertEquals(0,indexCalls.get());assertEquals(0,retrieveCalls.get());assertEquals(0,chatCalls.get());assertEquals(0,history.count());
-        assertEquals(1,receipt.path("verifiedFrameRounds").asInt());for(long count:sourceCounts.values())assertEquals(7L,count);assertWaitGuards("health");
+        assertEquals(1,receipt.path("verifiedFrameRounds").asInt());for(long count:sourceCounts.values())assertEquals(8L,count);assertWaitGuards("health");assertWaitGuards("status");
     }
     @Test void newEligibleSelectedScopeMemberDuringStatusExitCasRefusesOldReadyResponse(){
         advice.rebuildIndex(PROJECT,"fullset");resetCounters();healthMutation.set(()->snapshotMutation.set(this::newScopeMember));
@@ -422,7 +442,7 @@ class CanonicalRecheckAdviceRealSeamTest {
             assertTrue(java.lang.reflect.Modifier.isFinal(field.getModifiers()));
             assertTrue(field.getType()==String.class||field.getType()==int.class||field.getType()==OerCanonicalRetrievalClient.IndexState.class);
         }
-        advice.rebuildIndex(PROJECT,"fullset");resetCounters();assertTrue(advice.status(PROJECT,"fullset").isVectorReady());assertEquals(4,snapshotReads.get());
+        advice.rebuildIndex(PROJECT,"fullset");resetCounters();assertTrue(advice.status(PROJECT,"fullset").isVectorReady());assertEquals(8,snapshotReads.get());
         resetCounters();mutate(42L,"cas_same_length_restored_mtime");IndexStatusVO result=advice.status(PROJECT,"fullset");
         assertFalse(result.isVectorReady());assertTrue(snapshotReads.get()>0,"new request must read actual CAS again");
         assertEquals(0,healthReads.get());assertEquals(0,indexCalls.get());assertEquals(0,retrieveCalls.get());assertEquals(0,chatCalls.get());assertEquals(0,history.count());

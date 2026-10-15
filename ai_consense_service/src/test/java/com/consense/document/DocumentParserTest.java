@@ -51,7 +51,7 @@ class DocumentParserTest {
             XWPFParagraph body = document.createParagraph(); body.setStyle("84"); body.createRun().setText("XYZ.Z7.ANNEX42.N Source title");
             document.write(output);
         }
-        DocumentParser.ParsedDocument result = new DocumentParser(new ConsenseProperties(),mock(OcrClient.class)).parse("styles.docx",output.toByteArray());
+        DocumentParser.ParsedDocument result = new DocumentParser(new ConsenseProperties(),mock(OcrClient.class,CALLS_REAL_METHODS)).parse("styles.docx",output.toByteArray());
         assertEquals("73",result.getBlocks().get(0).getParagraphStyle()); assertEquals("toc 2",result.getBlocks().get(0).getParagraphStyleName());
         assertEquals("84",result.getBlocks().get(1).getParagraphStyle()); assertEquals("heading 4",result.getBlocks().get(1).getParagraphStyleName());
     }
@@ -65,7 +65,7 @@ class DocumentParserTest {
             document.save(output);
         }
         ConsenseProperties properties = new ConsenseProperties(); properties.getOcr().setEnabled(false);
-        OcrClient ocr = mock(OcrClient.class);
+        OcrClient ocr = mock(OcrClient.class,CALLS_REAL_METHODS);
         DocumentParser.ParsedDocument result = new DocumentParser(properties, ocr).parse("blank.pdf", output.toByteArray());
         assertEquals("PARSED", result.getParseStatus()); assertTrue(result.getCoverage().isComplete());
         assertEquals(2, result.getCoverage().getParsedPages()); assertEquals(java.util.Arrays.asList(1,2), result.getCoverage().getBlankPages());
@@ -86,7 +86,7 @@ class DocumentParserTest {
             document.save(output);
         }
         ConsenseProperties properties = new ConsenseProperties(); properties.getOcr().setEnabled(false);
-        OcrClient ocr = mock(OcrClient.class);
+        OcrClient ocr = mock(OcrClient.class,CALLS_REAL_METHODS);
         DocumentParser.ParsedDocument result = new DocumentParser(properties, ocr).parse("light-vector.pdf", output.toByteArray());
         assertEquals("PARTIAL", result.getParseStatus()); assertFalse(result.getCoverage().isComplete());
         assertEquals(Collections.singletonList(2), result.getCoverage().getFailedPages());
@@ -107,7 +107,7 @@ class DocumentParserTest {
             }
             document.save(output);
         }
-        OcrClient ocr = mock(OcrClient.class); when(ocr.available()).thenReturn(true);
+        OcrClient ocr = mock(OcrClient.class,CALLS_REAL_METHODS); when(ocr.available()).thenReturn(true);
         when(ocr.recognize(any())).thenReturn(new OcrClient.OcrResult("",0,Collections.emptyList()));
         DocumentParser.ParsedDocument result = new DocumentParser(new ConsenseProperties(),ocr).parse("scan.pdf",output.toByteArray());
         assertEquals("FAILED",result.getParseStatus()); assertFalse(result.getCoverage().isComplete());
@@ -127,7 +127,7 @@ class DocumentParserTest {
             document.save(output);
         }
         ConsenseProperties properties = new ConsenseProperties(); properties.getOcr().setEnabled(false);
-        DocumentParser.ParsedDocument result = new DocumentParser(properties,mock(OcrClient.class)).parse("one-digit.pdf",output.toByteArray());
+        DocumentParser.ParsedDocument result = new DocumentParser(properties,mock(OcrClient.class,CALLS_REAL_METHODS)).parse("one-digit.pdf",output.toByteArray());
         assertEquals("PARTIAL",result.getParseStatus()); assertEquals(Collections.singletonList(1),result.getCoverage().getFailedPages());
         assertTrue(result.getCoverage().getBlankPages().isEmpty()); assertTrue(result.getText().contains("1"));
     }
@@ -156,7 +156,7 @@ class DocumentParserTest {
             struck.setStrikeThrough(true);
             document.write(output);
         }
-        DocumentParser.ParsedDocument result = new DocumentParser(new ConsenseProperties(), mock(OcrClient.class))
+        DocumentParser.ParsedDocument result = new DocumentParser(new ConsenseProperties(), mock(OcrClient.class,CALLS_REAL_METHODS))
                 .parse("notes.docx", output.toByteArray());
         DocumentBlock footnote = result.getBlocks().stream().filter(b -> "footnote".equals(b.getKind())).findFirst().get();
         DocumentBlock endnote = result.getBlocks().stream().filter(b -> "endnote".equals(b.getKind())).findFirst().get();
@@ -181,7 +181,7 @@ class DocumentParserTest {
             document.getPage(0).setRotation(90);
             document.save(output);
         }
-        DocumentParser parser = new DocumentParser(new ConsenseProperties(), mock(OcrClient.class));
+        DocumentParser parser = new DocumentParser(new ConsenseProperties(), mock(OcrClient.class,CALLS_REAL_METHODS));
         double[] original = parser.parse("native.pdf", unrotated).getBlocks().get(0).getBbox();
         double[] rotated = parser.parse("native.pdf", output.toByteArray()).getBlocks().get(0).getBbox();
         assertArrayEquals(new double[]{1 - original[1] - original[3], original[0], original[3], original[2]}, rotated, .001);
@@ -209,7 +209,7 @@ class DocumentParserTest {
 
     @Test
     void mixedPdfUsesOcrOnlyOnMissingPageAndReportsFailure() throws Exception {
-        OcrClient ocr = mock(OcrClient.class);
+        OcrClient ocr = mock(OcrClient.class,CALLS_REAL_METHODS);
         when(ocr.available()).thenReturn(true);
         when(ocr.recognize(any())).thenThrow(new IllegalStateException("OCR fixture failure"));
         DocumentParser.ParsedDocument result = new DocumentParser(new ConsenseProperties(), ocr)
@@ -228,7 +228,7 @@ class DocumentParserTest {
     void scansBeyondSixtyPagesAreNotSilentlySkippedAndBoxesAreNormalized() throws Exception {
         ConsenseProperties props = new ConsenseProperties();
         props.getOcr().setMaxOcrPages(1); // Legacy cap must not make a file appear fully parsed.
-        OcrClient ocr = mock(OcrClient.class);
+        OcrClient ocr = mock(OcrClient.class,CALLS_REAL_METHODS);
         when(ocr.available()).thenReturn(true);
         when(ocr.recognize(any())).thenReturn(new OcrClient.OcrResult("Tender evidence", .9,
                 Collections.singletonList(new OcrClient.OcrLine("Tender evidence", .9, new double[]{20, 20, 80, 20}))));
@@ -249,7 +249,7 @@ class DocumentParserTest {
 
     @Test
     void unavailableOcrCannotReportEmptyScanAsComplete() throws Exception {
-        OcrClient ocr = mock(OcrClient.class);
+        OcrClient ocr = mock(OcrClient.class,CALLS_REAL_METHODS);
         when(ocr.available()).thenReturn(false);
         DocumentParser.ParsedDocument result = new DocumentParser(new ConsenseProperties(), ocr)
                 .parse("scan.pdf", pdf(2, false));
@@ -273,7 +273,7 @@ class DocumentParserTest {
             document.getTables().get(0).getRow(0).getCell(1).setText("39 months");
             document.write(output);
         }
-        DocumentParser.ParsedDocument result = new DocumentParser(new ConsenseProperties(), mock(OcrClient.class))
+        DocumentParser.ParsedDocument result = new DocumentParser(new ConsenseProperties(), mock(OcrClient.class,CALLS_REAL_METHODS))
                 .parse("tender.docx", addDeletedParagraph(output.toByteArray()));
         assertEquals("PARSED", result.getParseStatus());
         assertEquals(0, result.getPageCount());

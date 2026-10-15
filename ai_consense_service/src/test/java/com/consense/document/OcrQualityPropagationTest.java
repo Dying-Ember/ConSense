@@ -19,7 +19,7 @@ import static org.mockito.Mockito.*;
 /** Generic software fixtures; no competition source text or evaluation transcription is used. */
 class OcrQualityPropagationTest {
     private OcrClient availableOcr(String text, double score) {
-        OcrClient ocr = mock(OcrClient.class);
+        OcrClient ocr = mock(OcrClient.class,CALLS_REAL_METHODS);
         when(ocr.available()).thenReturn(true);
         when(ocr.recognize(any())).thenReturn(new OcrClient.OcrResult(text, score,
                 Collections.singletonList(new OcrClient.OcrLine(text, score, new double[]{20, 20, 80, 20}))));
@@ -88,7 +88,7 @@ class OcrQualityPropagationTest {
         assertTrue(JsonUtils.parse(JsonUtils.write(nativeResult.getCoverage())).path("ocrQualityStatus").isNull());
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         try (PDDocument pdf = new PDDocument()) { pdf.addPage(new PDPage(new PDRectangle(72, 72))); pdf.save(out); }
-        OcrClient ocr = mock(OcrClient.class);
+        OcrClient ocr = mock(OcrClient.class,CALLS_REAL_METHODS);
         DocumentParser.ParsedDocument blank = new DocumentParser(new ConsenseProperties(), ocr).parse("blank.pdf", out.toByteArray());
         assertEquals("PARSED", blank.getParseStatus());
         assertTrue(blank.getCoverage().isComplete());

@@ -5,6 +5,17 @@ import org.junit.jupiter.api.Test;import org.springframework.boot.env.YamlProper
 import org.springframework.boot.context.properties.bind.*;import org.springframework.core.env.*;import java.util.*;
 import static org.junit.jupiter.api.Assertions.*;import static org.mockito.Mockito.*;import static org.mockito.ArgumentMatchers.*;
 class VettingRetrievalHealthTest {
+ @Test void zeroTextStructuresStayInTheCorpusButCannotBecomeEmbeddingText(){
+  HttpSupport http=mock(HttpSupport.class);ConsenseProperties p=VettingStrictHybridTest.strict();
+  when(http.get(endsWith("/health"),anyLong())).thenReturn(JsonUtils.write(VettingStrictHybridTest.currentHealth()));
+  VettingStrictHybridTest.indexResponse(http,VettingStrictHybridTest.receipt(1));
+  VettingCorpus.Chunk text=VettingStrictHybridTest.source("text","tender","Actual source text");
+  VettingCorpus.Chunk control=VettingStrictHybridTest.source("control","tender","");
+  new VettingRetrievalClient(http,p).index("p",Arrays.asList(text,control));
+  verify(http).postJson(endsWith("/index"),argThat(body->{JsonNode request=JsonUtils.parse(body);
+   return request.path("chunks").size()==1&&"Actual source text".equals(request.path("chunks").get(0).path("content").asText())
+    &&"control".equals(request.path("unindexedObservations").get(0).path("id").asText());}),anyLong());
+ }
  @Test void actualLocalProfileBindsStrictCurrentContractAndWindowLimits()throws Exception{
   StandardEnvironment env=new StandardEnvironment();env.getPropertySources().remove(StandardEnvironment.SYSTEM_ENVIRONMENT_PROPERTY_SOURCE_NAME);env.getPropertySources().remove(StandardEnvironment.SYSTEM_PROPERTIES_PROPERTY_SOURCE_NAME);
   for(PropertySource<?>s:new YamlPropertySourceLoader().load("local",new ClassPathResource("application-vetting-local.yml")))env.getPropertySources().addLast(s);

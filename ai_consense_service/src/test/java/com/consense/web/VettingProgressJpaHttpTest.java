@@ -48,6 +48,7 @@ class VettingProgressJpaHttpTest {
     @Autowired MockMvc mvc;
     @Autowired ProjectRepository projects;
     @Autowired VettingRunRepository runs;
+    @Autowired VettingFindingRepository findings;
     @Autowired SourceDocumentRepository documents;
     @Autowired EntityManagerFactory emf;
     @Autowired JdbcTemplate jdbc;
@@ -56,7 +57,7 @@ class VettingProgressJpaHttpTest {
     @SpyBean OerBusinessEvidence actualOer;
 
     @BeforeEach void seed(){
-        jdbc.update("DELETE FROM vetting_run");jdbc.update("DELETE FROM source_document");jdbc.update("DELETE FROM project");
+        jdbc.update("DELETE FROM vetting_finding");jdbc.update("DELETE FROM vetting_run");jdbc.update("DELETE FROM source_document");jdbc.update("DELETE FROM project");
         jdbc.execute("ALTER TABLE source_document ALTER COLUMN id RESTART WITH 101");
         Project p=new Project();p.setId(PROJECT);p.setNameEn("Authored progress test");projects.saveAndFlush(p);
         SourceDocument d=new SourceDocument();d.setProjectId(PROJECT);d.setCategory(SourceDocument.CATEGORY_VETTING_PACKAGE);
@@ -69,9 +70,30 @@ class VettingProgressJpaHttpTest {
         clearFeedback();
     }
 
+    @Test void findingListLoadsSharedRunOncePerRequestWithoutCrossRequestCache()throws Exception {
+        for(int i=1;i<=3;i++) {
+            VettingFinding f=new VettingFinding();f.setProjectId(PROJECT);f.setCode("AUTHORED-"+i);
+            f.setGroupKey("risk");f.setRunId(RUN);f.setEvidenceJson("[]");findings.saveAndFlush(f);
+        }
+        for(char snapshot: new char[]{'a','b'}) {
+            String expected=String.join("",Collections.nCopies(64,String.valueOf(snapshot)));
+            jdbc.update("UPDATE vetting_run SET source_snapshot_sha256=? WHERE id=?",expected,RUN);
+            clearFeedback();JsonNode response=call("/findings");assertEquals(0,response.path("code").asInt(),response.toString());
+            assertEquals(3,response.path("data").size());
+            for(JsonNode finding:response.path("data")) {
+                assertEquals(RUN,finding.path("runId").asText());
+                assertEquals(expected,finding.path("sourceSnapshotSha256").asText());
+            }
+            List<String> sql=selects("vetting_run");long runLoads=loads(VettingRun.class);
+            System.out.println("FINDING_LIST_RUN_SQL "+JsonUtils.write(sql)+" ENTITY_LOADS="+runLoads);
+            assertEquals(1,sql.size(),"Findings sharing a run need one actual SELECT per independent HTTP request");
+            assertEquals(1,runLoads,"The request transaction may reuse its managed run, never a cross-request cache");
+        }
+    }
+
     @Test void sameSavedRunLegacyReadsSourceAndParsesItsHashWhileProgressDoesNeither() throws Exception {
         JsonNode legacy=call("/runs/"+RUN);assertNotEquals(0,legacy.path("code").asInt());assertTrue(legacy.path("message").asText().contains("JSON"));
-        assertTrue(selects("source_document").size()>0);assertEquals(1,loads(SourceDocument.class));
+        assertTrue(selects("source_document").size()>0);assertEquals(0,loads(SourceDocument.class),"Business sources are detached selected fields; unrelated native archives are not hydrated");
         assertTrue(columns(selects("vetting_run").get(0)).containsAll(Arrays.asList("result_json","coverage_json")));
         System.out.println("LEGACY_SAME_RUN_SQL "+JsonUtils.write(SqlCapture.statements));clearFeedback();
         JsonNode progress=call("/runs/"+RUN+"/progress");assertEquals(0,progress.path("code").asInt(),progress.toString());
@@ -86,7 +108,7 @@ class VettingProgressJpaHttpTest {
                 Arrays.asList("COMPLETED","FAILED").contains(state)?java.sql.Timestamp.from(Instant.parse("2026-10-10T00:10:00Z")):null,RUN);
         clearFeedback();JsonNode response=call("/runs/"+RUN+"/progress");assertEquals(0,response.path("code").asInt());JsonNode data=response.path("data");
         Set<String> fields=new LinkedHashSet<>();data.fieldNames().forEachRemaining(fields::add);
-        assertEquals(new LinkedHashSet<>(Arrays.asList("id","status","phase","completedUnits","totalUnits","message","error","startedAt","finishedAt","sourceSnapshotSha256","modelIdentity","sourceVerification")),fields);
+        assertEquals(new LinkedHashSet<>(Arrays.asList("id","status","phase","completedUnits","totalUnits","message","error","startedAt","finishedAt","sourceSnapshotSha256","modelIdentity","recoveryStatus","sourceVerification")),fields);
         assertEquals(state,data.path("status").asText());assertEquals("NOT_CHECKED",data.path("sourceVerification").asText());assertEquals(17,data.path("completedUnits").asInt());assertEquals(19,data.path("totalUnits").asInt());
         assertEquals("2026-10-10T00:00:00Z",data.path("startedAt").asText());assertEquals("MiniMax-M3",data.path("modelIdentity").path("model").asText());
         assertEquals("FAILED".equals(state)?"Authored model timeout":null,data.path("error").isNull()?null:data.path("error").asText());
@@ -115,13 +137,13 @@ class VettingProgressJpaHttpTest {
         jdbc.update("UPDATE source_document SET structured_content_json='[]' WHERE id=101");
         jdbc.update("UPDATE vetting_run SET status='COMPLETED',source_snapshot_sha256=? WHERE id=?","aad2c86945b557b247e1cdd61f6cf7413994706c2821092ec6bd44c60d0155cb",RUN);
         clearFeedback();long detailStart=System.nanoTime();JsonNode before=call("/runs/"+RUN);long detailNanos=System.nanoTime()-detailStart;assertEquals(0,before.path("code").asInt());assertFalse(before.path("data").path("sourceSetStale").asBoolean());
-        assertEquals(1,loads(SourceDocument.class));assertEquals(1,loads(VettingRun.class));List<String> detailSql=new ArrayList<>(SqlCapture.statements);
+        assertEquals(0,loads(SourceDocument.class));assertEquals(1,loads(VettingRun.class));List<String> detailSql=new ArrayList<>(SqlCapture.statements);
         clearFeedback();long progressStart=System.nanoTime();JsonNode same=call("/runs/"+RUN+"/progress");long progressNanos=System.nanoTime()-progressStart;assertEquals(before.path("data").path("id"),same.path("data").path("id"));assertEquals(before.path("data").path("sourceSnapshotSha256"),same.path("data").path("sourceSnapshotSha256"));assertLeanSql();
         Map<String,Object> comparison=new LinkedHashMap<>();comparison.put("runId",RUN);comparison.put("sameSourceSnapshot",same.path("data").path("sourceSnapshotSha256").asText());comparison.put("legacyWallNanos",detailNanos);comparison.put("progressWallNanos",progressNanos);comparison.put("legacySql",detailSql);comparison.put("progressSql",new ArrayList<>(SqlCapture.statements));comparison.put("boundary","Single authored small H2 request pair; no live/large-source throughput claim");System.out.println("SAME_VALID_RUN_CALLSITE_COMPARISON "+JsonUtils.write(comparison));
         jdbc.update("UPDATE source_document SET text_content='Authored SCC changed contractual obligations.' WHERE id=101");clearFeedback();
         JsonNode progress=call("/runs/"+RUN+"/progress");assertEquals("COMPLETED",progress.path("data").path("status").asText());assertEquals("NOT_CHECKED",progress.path("data").path("sourceVerification").asText());assertLeanSql();
-        clearFeedback();JsonNode after=call("/runs/"+RUN);assertEquals(0,after.path("code").asInt());assertTrue(after.path("data").path("sourceSetStale").asBoolean());assertEquals(1,loads(SourceDocument.class));
-        clearFeedback();JsonNode report=call("/report.json");assertEquals(4104,report.path("code").asInt());assertTrue(selects("source_document").size()>0);assertEquals(1,loads(SourceDocument.class));
+        clearFeedback();JsonNode after=call("/runs/"+RUN);assertEquals(0,after.path("code").asInt());assertTrue(after.path("data").path("sourceSetStale").asBoolean());assertEquals(0,loads(SourceDocument.class));
+        clearFeedback();JsonNode report=call("/report.json");assertEquals(4104,report.path("code").asInt());assertTrue(selects("source_document").size()>0);assertEquals(0,loads(SourceDocument.class));
         System.out.println("CHANGED_SOURCE_REPORT_GATE_SQL "+JsonUtils.write(SqlCapture.statements));
     }
 
@@ -133,7 +155,7 @@ class VettingProgressJpaHttpTest {
     private Set<String> columns(String sql){Set<String> out=new LinkedHashSet<>();for(String value:sql.substring(7,sql.indexOf(" from ")).split(",")){String column=value.trim().split("\\s+")[0];out.add(column.substring(column.lastIndexOf('.')+1));}return out;}
     private void assertLeanSql(){
         assertEquals(0,selects("source_document").size());assertEquals(0,loads(SourceDocument.class));assertEquals(0,loads(VettingRun.class));
-        List<String> sql=selects("vetting_run");assertEquals(1,sql.size());assertEquals(new LinkedHashSet<>(Arrays.asList("id","status","phase","completed_units","total_units","message","error","started_at","finished_at","source_snapshot_sha256","model_identity_json")),columns(sql.get(0)));
+        List<String> sql=selects("vetting_run");assertEquals(1,sql.size());assertEquals(new LinkedHashSet<>(Arrays.asList("id","status","phase","completed_units","total_units","message","error","started_at","finished_at","source_snapshot_sha256","model_identity_json","recovery_status")),columns(sql.get(0)));
         org.mockito.Mockito.verifyNoInteractions(externalLlm,actualParser,actualOer);System.out.println("LEAN_PROGRESS_SQL "+sql.get(0));
     }
 }

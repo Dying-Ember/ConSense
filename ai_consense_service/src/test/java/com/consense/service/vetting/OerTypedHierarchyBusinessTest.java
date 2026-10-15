@@ -63,7 +63,7 @@ class OerTypedHierarchyBusinessTest {
             assertEquals(member.path("originalSourceSha256"),pointer.path("originalSourceSha256"));assertEquals(member.path("projectionRevisionSha256"),pointer.path("projectionRevisionSha256"));assertFalse(pointer.path("humanConfirmed").asBoolean());
         }
         AdviceService advice=mock(AdviceService.class,CALLS_REAL_METHODS);Method render=AdviceService.class.getDeclaredMethod("renderExcerpts",List.class);render.setAccessible(true);String excerpts=(String)render.invoke(advice,hits);
-        assertTrue(excerpts.contains(body),"Advisory excerpt removed original literal tail");assertTrue(excerpts.contains("legalClosureVerified=false"),"Missing context semantic limit");assertTrue(excerpts.contains("descendants are unranked source context"),"Missing context score limit");assertFalse(hit.getPayload().containsKey("memberScores"));
+        OerAdviceDisplayDedupTest.assertCompleteBodies(hits,excerpts);assertTrue(excerpts.contains("legalClosureVerified=false"),"Missing context semantic limit");assertTrue(excerpts.contains("descendants are unranked source context"),"Missing context score limit");assertFalse(hit.getPayload().containsKey("memberScores"));
     }
     @Test void pureSourceHitsUseSameContextWhileVettingKeepsOneRankedSeedAndAdmitsCompleteGroup()throws Exception {
         Wire w=new Wire();OerBusinessEvidence.Session session=w.load("vetting");String seed=w.expected.path("originIds").get(0).asText();
@@ -99,7 +99,7 @@ class OerTypedHierarchyBusinessTest {
             return Collections.emptyList();
         });
         ConsenseProperties config=VettingDualStructureHealthTest.expected();config.getVetting().setSemanticTopics(1);config.getVetting().setProjectReferenceComparisons(0);config.getVetting().setSemanticContextChars(50000);config.getVetting().setSemanticContextExpansionChars(50000);
-        VettingRetrievalClient legacy=mock(VettingRetrievalClient.class);VettingSemanticReview review=new VettingSemanticReview(model,config,legacy);review.setOerBusinessEvidence(w.service);VettingSemanticReview.Result result=review.review(w.source.getProjectId(),session.chunks(),"en",(n,s)->{});
+        VettingRetrievalClient legacy=mock(VettingRetrievalClient.class);VettingSemanticReview review=VettingTokenFixture.review(model,config,legacy);review.setOerBusinessEvidence(w.service);VettingSemanticReview.Result result=review.review(w.source.getProjectId(),session.chunks(),"en",(n,s)->{});
         assertEquals(1,calls.get());assertEquals(1,result.getActualGatewayCallCount());verifyNoInteractions(legacy);
     }
 }

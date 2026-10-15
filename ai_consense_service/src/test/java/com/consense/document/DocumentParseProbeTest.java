@@ -46,7 +46,7 @@ class DocumentParseProbeTest {
         return out.toByteArray();
     }
     @Test void sourceIdentitySafeJobAndFreshDirectoryAreRequiredBeforeParsing()throws Exception{
-        ConsenseProperties p=observed();OcrClient ocr=mock(OcrClient.class);DocumentParser parser=new DocumentParser(p,ocr);byte[] source="Literal source".getBytes(StandardCharsets.UTF_8);
+        ConsenseProperties p=observed();OcrClient ocr=mock(OcrClient.class,CALLS_REAL_METHODS);DocumentParser parser=new DocumentParser(p,ocr);byte[] source="Literal source".getBytes(StandardCharsets.UTF_8);
         assertThrows(IllegalArgumentException.class,()->parser.parse("source.txt",source,null,null,null));
         assertThrows(IllegalArgumentException.class,()->parser.parse("source.txt",source,"../escape","12",DocumentParseProbe.sha256(source)));
         assertThrows(IllegalArgumentException.class,()->parser.parse("source.txt",source,"wrong-sha","12",String.join("",Collections.nCopies(64,"a"))));
@@ -58,7 +58,7 @@ class DocumentParseProbeTest {
         verifyNoInteractions(ocr);
     }
     @Test void legacyCallerRemainsUnobservedWithConfiguredRootAndOriginalOutputAndOcrCallCount()throws Exception{
-        OcrClient ocr=mock(OcrClient.class);when(ocr.available()).thenReturn(true);
+        OcrClient ocr=mock(OcrClient.class,CALLS_REAL_METHODS);when(ocr.available()).thenReturn(true);
         OcrClient.OcrResult result=new OcrClient.OcrResult("Original scanned requirement.",.8,Collections.emptyList());when(ocr.recognize(any())).thenReturn(result);
         byte[] original=pdf(true);DocumentParser.ParsedDocument expected=new DocumentParser(new ConsenseProperties(),ocr).parse("legacy.pdf",original);
         reset(ocr);when(ocr.available()).thenReturn(true);when(ocr.recognize(any())).thenReturn(result);
@@ -79,7 +79,7 @@ class DocumentParseProbeTest {
         assertEquals("Original cause",original.getCause().getMessage());assertArrayEquals(sentinel,Files.readAllBytes(temp.resolve("final-failure/probe_overhead_manifest.json")));
     }
     @Test void mixedPhysicalPdfObservedOutputEqualsDefaultAndActualOcrInputIsFrozen()throws Exception{
-        byte[] source=pdf(true);OcrClient ocr=mock(OcrClient.class);when(ocr.available()).thenReturn(true);
+        byte[] source=pdf(true);OcrClient ocr=mock(OcrClient.class,CALLS_REAL_METHODS);when(ocr.available()).thenReturn(true);
         OcrClient.OcrResult raw=new OcrClient.OcrResult("Explicit scanned line.",.91,Collections.singletonList(new OcrClient.OcrLine("Explicit scanned line.",.91,new double[]{10,12,50,8})));
         when(ocr.recognize(any())).thenReturn(raw);
         DocumentParser.ParsedDocument expected=new DocumentParser(new ConsenseProperties(),ocr).parse("mixed.pdf",source);
@@ -101,7 +101,7 @@ class DocumentParseProbeTest {
     }
     @Test void ocrDecoratorPassesSameInputReturnsSameObjectAndRethrowsSameException()throws Exception{
         byte[] source={1,2,3};DocumentParseProbe probe=DocumentParseProbe.start(observed(),"delegate","12",DocumentParseProbe.sha256(source),"fixture.bin",source);
-        OcrClient delegate=mock(OcrClient.class);ObservedOcrClient observed=new ObservedOcrClient(delegate,probe,7);
+        OcrClient delegate=mock(OcrClient.class,CALLS_REAL_METHODS);ObservedOcrClient observed=new ObservedOcrClient(delegate,probe,7);
         OcrClient.OcrResult original=new OcrClient.OcrResult("Raw returned text",.8,Collections.emptyList());
         when(delegate.recognize(same(source))).thenReturn(original);assertSame(original,observed.recognize(source));verify(delegate).recognize(same(source));
         IllegalStateException failure=new IllegalStateException("Actual fixture failure",new IOException("Original cause"));when(delegate.recognize(same(source))).thenThrow(failure);
@@ -113,14 +113,14 @@ class DocumentParseProbeTest {
     }
     @Test void originalOcrFailureWinsIfItsObservationWriteAlsoFails()throws Exception{
         byte[] source={1};DocumentParseProbe probe=DocumentParseProbe.start(observed(),"failure","12",DocumentParseProbe.sha256(source),"fixture.bin",source);
-        OcrClient delegate=mock(OcrClient.class);IllegalStateException original=new IllegalStateException("Original OCR failure");when(delegate.recognize(any())).thenThrow(original);
+        OcrClient delegate=mock(OcrClient.class,CALLS_REAL_METHODS);IllegalStateException original=new IllegalStateException("Original OCR failure");when(delegate.recognize(any())).thenThrow(original);
         Files.write(temp.resolve("failure/00003-ocr_actual_failure.json"),"existing evidence".getBytes(StandardCharsets.UTF_8));
         assertSame(original,assertThrows(IllegalStateException.class,()->new ObservedOcrClient(delegate,probe,1).recognize(source)));
         assertEquals(1,original.getSuppressed().length);assertTrue(original.getSuppressed()[0] instanceof DocumentParseProbe.Failure);
         assertEquals("existing evidence",new String(Files.readAllBytes(temp.resolve("failure/00003-ocr_actual_failure.json")),StandardCharsets.UTF_8));
     }
     @Test void failedOcrPageKeepsDefaultCoverageWhileRecordingOriginalFailureAndElapsed()throws Exception{
-        byte[] source=pdf(false);OcrClient delegate=mock(OcrClient.class);when(delegate.available()).thenReturn(true);when(delegate.recognize(any())).thenThrow(new IllegalStateException("Observed synthetic downstream failure"));
+        byte[] source=pdf(false);OcrClient delegate=mock(OcrClient.class,CALLS_REAL_METHODS);when(delegate.available()).thenReturn(true);when(delegate.recognize(any())).thenThrow(new IllegalStateException("Observed synthetic downstream failure"));
         DocumentParser.ParsedDocument expected=new DocumentParser(new ConsenseProperties(),delegate).parse("scan.pdf",source);
         DocumentParser.ParsedDocument actual=new DocumentParser(observed(),delegate).parse("scan.pdf",source,"ocr-failure","12",DocumentParseProbe.sha256(source));
         assertEquals(JsonUtils.write(expected),JsonUtils.write(actual));assertEquals("FAILED",actual.getParseStatus());
@@ -137,7 +137,7 @@ class DocumentParseProbeTest {
             XWPFTable table=doc.createTable(2,3);table.getRow(0).getCell(0).setText("Clause");table.getRow(0).getCell(1).setText("Required input");table.getRow(0).getCell(2).setText("Reply");
             table.getRow(1).getCell(0).setText("XYZ1");table.getRow(1).getCell(1).setText("Provide a local value");table.getRow(1).getCell(2).setText("Native value");doc.write(out);
         }
-        byte[] source=out.toByteArray();OcrClient ocr=mock(OcrClient.class);
+        byte[] source=out.toByteArray();OcrClient ocr=mock(OcrClient.class,CALLS_REAL_METHODS);
         DocumentParser.ParsedDocument expected=new DocumentParser(new ConsenseProperties(),ocr).parse("source.docx",source);
         DocumentParser.ParsedDocument actual=new DocumentParser(observed(),ocr).parse("source.docx",source,"docx","12",DocumentParseProbe.sha256(source));
         assertEquals(JsonUtils.write(expected),JsonUtils.write(actual));assertEquals(0,actual.getPageCount());
@@ -148,7 +148,7 @@ class DocumentParseProbeTest {
     }
     @Test void malformedPdfKeepsFailureChainAndSeparateObserverOverhead()throws Exception{
         byte[] source="not a pdf".getBytes(StandardCharsets.UTF_8);
-        assertThrows(RuntimeException.class,()->new DocumentParser(observed(),mock(OcrClient.class)).parse("bad.pdf",source,"bad-pdf","12",DocumentParseProbe.sha256(source)));
+        assertThrows(RuntimeException.class,()->new DocumentParser(observed(),mock(OcrClient.class,CALLS_REAL_METHODS)).parse("bad.pdf",source,"bad-pdf","12",DocumentParseProbe.sha256(source)));
         assertTrue(events("bad-pdf").stream().anyMatch(e->"parse_failure".equals(e.path("phase").asText())&&!e.path("observations").path("failureChain").isEmpty()));
         JsonNode overhead=read(temp.resolve("bad-pdf/probe_overhead_manifest.json"));assertEquals("aborted",overhead.path("status").asText());
         assertTrue(overhead.path("serializationAndHashWallNanos").asLong()>0);assertTrue(overhead.path("artifactWriteWallNanos").asLong()>0);assertFalse(overhead.path("summarySelfFlushIncluded").asBoolean());

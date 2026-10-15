@@ -7,6 +7,10 @@ tracker: local-markdown
 execution: spec-only; no-new-implementation-started
 ---
 
+<!-- implementation-progress-20261015:start -->
+> **2026-10-15 实施状态：** 用户已授权统一规格代码实现，下方原日期的 spec-only／未开工文字保留历史语境。当前代码、完整自动化及两轴审查进度见[统一实施记录](../testing/consense-integrated-implementation-20261015.md)。原 08:30 目标未达，完整 Goal 继续；赛方原件前后对照尚未执行，ENG 来源质量门均未因契约测试而关闭，ENG-10 仍后置。
+<!-- implementation-progress-20261015:end -->
+
 <!-- unified-spec-entry-20261014:start -->
 > **2026-10-14 当前总体实施入口：** [统一实施与验收 spec](consense-oer-vetting-advisory-integrated-20261014.md)及[统一任务图](consense-oer-vetting-advisory-integrated-tickets-20261014.md)。OER 原 D1–D10／EAC01–22／ENG-00–10 按[受保护引擎子规格](oer-engine-integration-repair-20261014.md)完整保留；产品问题 PRD01–08 与旧总 AC01–20 在统一入口逐项承接，业务成功不关闭 OER 来源质量门。下方原正文与状态保留原语境，已实现起点不重列未修，未验收／失败不追认通过。本次只调整规格与导航，Advisory 已停止测试保持，不启动实现、模型、训练、索引、自动 Goal 或部署。
 <!-- unified-spec-entry-20261014:end -->

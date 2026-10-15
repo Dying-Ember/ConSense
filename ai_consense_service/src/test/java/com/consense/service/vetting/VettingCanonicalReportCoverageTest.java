@@ -58,7 +58,7 @@ class VettingCanonicalReportCoverageTest {
                     record.setEvidence(Collections.singletonList(quote));
                     return Collections.singletonList(record);
                 });
-        VettingSemanticReview review = new VettingSemanticReview(model, properties, mock(VettingRetrievalClient.class));
+        VettingSemanticReview review = VettingTokenFixture.review(model, properties, mock(VettingRetrievalClient.class));
         review.setOerBusinessEvidence(wire.service);
 
         VettingSemanticReview.Result result = review.review("project", session.chunks(), "en", (n, s) -> {});

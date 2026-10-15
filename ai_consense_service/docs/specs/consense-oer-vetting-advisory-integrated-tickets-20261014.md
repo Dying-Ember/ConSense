@@ -8,6 +8,10 @@ tracker: local-markdown
 execution: spec-only; no-new-execution-started
 ---
 
+<!-- implementation-progress-20261015:start -->
+> **2026-10-15 实施状态：** 用户已授权统一规格代码实现，下方原日期的 spec-only／未开工文字保留历史语境。当前代码、完整自动化与审查进度见[统一实施记录](../testing/consense-integrated-implementation-20261015.md)。原 08:30 目标未达，完整 Goal 继续；真实模型与赛方原件效果尚未验收，UNI/ENG 均不因局部绿灯自动关闭。
+<!-- implementation-progress-20261015:end -->
+
 # 统一任务入口
 
 主规格：[ConSense OER／Vetting／Advisory 统一实施与验收](consense-oer-vetting-advisory-integrated-20261014.md)。引擎子图：[ENG-00–ENG-10](oer-engine-integration-repair-tickets-20261014.md)。产品问题：[PRD01–PRD08](consense-product-issues-agent-handoff-20261014.md)。历史完整范围：[NEXT-00–NEXT-10](oer-vetting-advisory-next-development-tickets-20261012.md)。

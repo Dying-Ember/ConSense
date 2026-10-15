@@ -11,7 +11,7 @@ import java.util.stream.Collectors;
 
 /** Source-bound observations from selected chunks only. Never an inferred header, grid or adoption assertion. */
 public final class VettingSourceMaterial {
-    public static final String PROJECTION_VERSION="selected-native-source-material-portable-cell-slices-v4";
+    public static final String PROJECTION_VERSION="selected-native-source-material-whole-page-candidates-v9";
     private static final Pattern ROW_ANCHOR=Pattern.compile("body/(\\d+)/table-row/(\\d+)(?: @(\\d+))?");
     private VettingSourceMaterial() { }
 
@@ -42,8 +42,56 @@ public final class VettingSourceMaterial {
             if(c.getParts()==null||c.getParts().isEmpty())unknown.add(map("reason","source_parts_unavailable"));
             else for(Part p:c.getParts()) {
                 int length=p==null||p.getText()==null?0:p.getText().length();
-                if(p!=null)methods.add(map("partAnchor",p.getAnchor(),"blockId",p.getBlockId(),"startOffset",p.getStartOffset(),"endOffset",p.getEndOffset(),
-                        "extractionSource",bodyBound&&present(p.getExtractionSource())?p.getExtractionSource():"unknown"));
+                if(p!=null) {
+                    Map<String,Object> method=map("partAnchor",p.getAnchor(),"blockId",p.getBlockId(),"startOffset",p.getStartOffset(),"endOffset",p.getEndOffset(),
+                            "extractionSource",bodyBound&&present(p.getExtractionSource())?p.getExtractionSource():"unknown");
+                    if(p.getPdfFormField()!=null) {
+                        boolean bound=formMatchesPart(c,p,bodyBound,blocks);
+                        method.put("formObservationStatus",bound?"observed_selected_original_widget":"unknown_part_binding");
+                        method.put("pdfFormField",bound?formObservation(p):null);
+                        method.put("pdfFormFieldSourceSha256",bound?formSourceSha256(JsonUtils.mapper().valueToTree(p.getPdfFormField())):null);
+                        method.put("nativeVisibilityStatus",bound?p.getNativeVisibilityStatus():"unknown");
+                        method.put("formInterpretation","Stored value, selected appearance, blank/nontext and conflict are observations only; blank meaning, raster visibility, parent-child selection and legal OR applicability remain unknown. Raw streams, glyph coordinates and audit fields remain in source storage identified by pdfFormFieldSourceSha256.");
+                    }
+                    if(p.getVisualRegion()!=null) {
+                        boolean bound=bodyBound&&present(c.getDocumentId())&&present(c.getSourceHash())&&p.getStartOffset()==0
+                                &&p.getEndOffset()==length&&Integer.valueOf(1).equals(blocks.get(key(c,p.getBlockId())));
+                        method.put("visualObservationStatus",bound?"retained_source_part_candidate":"unknown_part_binding");
+                        method.put("visualRegion",bound?OerModelMaterial.visualRegion(p.getVisualRegion()):null);
+                        method.put("visualFrame",bound?OerModelMaterial.visualFrame(p.getVisualFrame()):null);
+                        method.put("visualProvenance",bound?OerModelMaterial.visualProvenance(p.getVisualProvenance()):null);
+                        method.put("visualRegionSourceSha256",formSourceSha256(p.getVisualRegion()));
+                        method.put("visualInterpretation","Provider structure remains a candidate: field state, blank meaning, ownership, relations and source geometry are unverified; original audit remains in the saved source part.");
+                        if(!bound)unknown.add(map("partAnchor",p.getAnchor(),"blockId",p.getBlockId(),"reason","visual_source_part_binding_unknown"));
+                    }
+                    if(p.getNativeTableCandidate()!=null){
+                        boolean bound=bodyBound&&present(c.getDocumentId())&&present(c.getSourceHash())&&p.getStartOffset()==0&&p.getEndOffset()==length
+                                &&Integer.valueOf(1).equals(blocks.get(key(c,p.getBlockId())))&&p.getText().isEmpty();
+                        method.put("nativeTableCandidateStatus",bound?"whole_independent_source_method_candidate":"unknown_part_binding");
+                        method.put("nativeTableCandidate",bound?OerModelMaterial.nativeTableCandidate(p.getNativeTableCandidate()):null);
+                        if(!bound)unknown.add(map("partAnchor",p.getAnchor(),"blockId",p.getBlockId(),"reason","native_table_method_part_binding_unknown"));
+                    }
+                    if(p.getParserPageGroup()!=null){
+                        boolean bound=bodyBound&&present(c.getDocumentId())&&present(c.getSourceHash())&&p.getStartOffset()==0&&p.getEndOffset()==length
+                                &&Integer.valueOf(1).equals(blocks.get(key(c,p.getBlockId())))&&p.getText().isEmpty();
+                        method.put("parserPageGroupStatus",bound?"whole_independent_parser_page_candidates":"unknown_part_binding");
+                        method.put("parserPageGroup",bound?OerModelMaterial.parserPageGroup(p.getParserPageGroup()):null);
+                        if(!bound)unknown.add(map("partAnchor",p.getAnchor(),"blockId",p.getBlockId(),"reason","whole_parser_page_part_binding_unknown"));
+                    }
+                    if(p.getWordObservation()!=null) {
+                        com.fasterxml.jackson.databind.JsonNode word=p.getWordObservation();String effective=word.path("effectiveText").asText();
+                        boolean bound=bodyBound&&p.getStartOffset()>=0&&p.getEndOffset()>=p.getStartOffset()&&p.getEndOffset()<=effective.length()
+                                &&Objects.equals(effective.substring(p.getStartOffset(),p.getEndOffset()),p.getText())
+                                &&Objects.equals(word.path("parentBlockId").asText(),p.getBlockId())
+                                &&Objects.equals(word.path("parentEffectiveTextSha256").asText(),VettingCorpus.hash(effective));
+                        boolean whole=bound&&p.getStartOffset()==0&&p.getEndOffset()==effective.length()&&Objects.equals(p.getText(),effective);
+                        method.put("wordObservationStatus",!bound?"unknown_part_binding":whole?"retained_whole_native_part":"selected_effective_range_only_full_parent_retained");
+                        method.put("wordObservation",OerModelMaterial.wordObservation(word,whole));
+                        method.put("wordObservationSourceSha256",formSourceSha256(word));
+                        method.put("wordInterpretation","Only selected effective body is an obligation candidate; original, deleted, struck and numbering/symbol observations remain separate. Legal editing/adoption state is unknown. Partial ranges do not submit full unselected parent text.");
+                    }
+                    methods.add(method);
+                }
                 if(p!=null&&looksLikeRow(p)) {
                     String reason=unknownReason(c,p,bodyBound,blocks,positions);
                     if(reason==null) {
@@ -62,6 +110,7 @@ public final class VettingSourceMaterial {
                     "sourceQualityMetadataVersion",c.getSourceQualityMetadataVersion(),"sourceQualityHash",c.getSourceQualityHash(),"sourceQuality",VettingSourceQuality.project(c),
                     "selectedPartExtractionObservations",methods,
                     "partExtractionObservationScope","selected source part declarations only; text accuracy unverified",
+                    "candidateStructure",c.getCandidateStructure(),
                     "anchor",c.getAnchor(),"clauseId",c.getClauseId(),"clauseHeadingLocation",c.getClauseHeadingLocation(),"content",c.getContent(),
                     "projectionVersion",PROJECTION_VERSION,"nativeRows",rows,"unresolvedNativeRowParts",unknown,
                     "nativeCellSlices",cellObservations.slices(c.getId()),"reconstructedNativeRows",cellObservations.rows(c.getId()),
@@ -134,6 +183,47 @@ public final class VettingSourceMaterial {
         return c.getContent()!=null&&c.getParts()!=null&&!c.getParts().isEmpty()
                 &&c.getParts().stream().allMatch(p->p!=null&&p.getText()!=null)
                 &&c.getContent().equals(c.getParts().stream().map(Part::getText).collect(Collectors.joining("\n")));
+    }
+    private static com.fasterxml.jackson.databind.node.ObjectNode formObservation(Part p) {
+        com.fasterxml.jackson.databind.node.ObjectNode source=JsonUtils.mapper().valueToTree(p.getPdfFormField()),out=JsonUtils.mapper().createObjectNode();
+        for(String name:Arrays.asList("id","fieldName","fieldType","fieldValue","appearanceValue","appearanceState","visibilityStatus","valueStatus","pageNo","needAppearances","appearancePresent","conflict","appearanceStreamObservationStatus","appearanceGlyphObservationStatus","limitations"))
+            if(source.has(name))out.set(name,source.get(name).deepCopy());
+        return out;
+    }
+    /** Hash-only binary64 values avoid Java/Python decimal spelling differences without changing source fields. */
+    static String formSourceSha256(com.fasterxml.jackson.databind.JsonNode source) {
+        return VettingCorpus.hash(JsonUtils.write(formSourceHashValue(source)));
+    }
+    private static com.fasterxml.jackson.databind.JsonNode formSourceHashValue(com.fasterxml.jackson.databind.JsonNode source) {
+        if(source.isFloatingPointNumber()) {
+            double value=source.doubleValue();
+            if(!Double.isFinite(value))throw new IllegalArgumentException("Non-finite form source number");
+            return JsonUtils.mapper().createObjectNode().put("$binary64",String.format(Locale.ROOT,"%016x",Double.doubleToRawLongBits(value)));
+        }
+        if(source.isObject()) {
+            com.fasterxml.jackson.databind.node.ObjectNode out=JsonUtils.mapper().createObjectNode();TreeMap<String,com.fasterxml.jackson.databind.JsonNode> fields=new TreeMap<>();
+            source.fields().forEachRemaining(e->fields.put(e.getKey(),e.getValue()));fields.forEach((key,value)->out.set(key,formSourceHashValue(value)));return out;
+        }
+        if(source.isArray()) {
+            com.fasterxml.jackson.databind.node.ArrayNode out=JsonUtils.mapper().createArrayNode();source.forEach(value->out.add(formSourceHashValue(value)));return out;
+        }
+        return source;
+    }
+    private static boolean formMatchesPart(Chunk c,Part p,boolean bodyBound,Map<List<String>,Integer> blocks) {
+        com.consense.document.PdfPageEvidence.PdfFormField f=p.getPdfFormField();
+        String prefix=present(c.getClauseId())?c.getClauseId()+" · ":"";
+        return bodyBound&&present(c.getDocumentId())&&present(c.getSourceHash())
+                &&VettingCorpus.METADATA_VERSION.equals(c.getMetadataVersion())&&VettingCorpus.SEGMENTATION_VERSION.equals(c.getSegmentationVersion())
+                &&Arrays.asList("tender","standard","project_fact","package_manifest").contains(c.getRole())
+                &&"native_form".equals(p.getExtractionSource())&&present(f.getId())
+                &&p.getStartOffset()==0&&p.getEndOffset()==p.getText().length()
+                &&f.getId().replace('/',':').equals(p.getBlockId())&&Objects.equals(prefix+f.getId(),p.getAnchor())
+                &&Objects.equals(f.getPageNo()==null?null:"P"+f.getPageNo(),p.getPageNo())
+                &&Objects.equals(f.getBbox()==null?null:Arrays.stream(f.getBbox()).boxed().collect(Collectors.toList()),p.getBbox())
+                &&Objects.equals(f.getVisibilityStatus(),p.getNativeVisibilityStatus())
+                &&(p.getText().isEmpty()||!f.isConflict()&&"appearance_text_unverified".equals(f.getValueStatus())
+                    &&"operator_visible_unverified".equals(f.getVisibilityStatus())&&Objects.equals(p.getText(),f.getAppearanceValue()))
+                &&Integer.valueOf(1).equals(blocks.get(key(c,p.getBlockId())));
     }
     private static String position(Chunk c,Part p) {
         if(!present(p.getAnchor())||!present(p.getBlockId()))return null;

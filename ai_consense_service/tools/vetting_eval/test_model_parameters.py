@@ -9,6 +9,7 @@ import tempfile
 import types
 import unittest
 from unittest.mock import Mock, patch
+import numpy as np  # Native extensions cannot be unloaded/reimported by sys.modules stubs.
 
 import eval as pilot
 import ocr_runtime
@@ -414,7 +415,6 @@ class ModelParametersTest(unittest.TestCase):
             self.assertEqual('cpu', fake_sentence.SentenceTransformer.call_args.kwargs['device'])
 
     def test_server_encode_and_pair_rerank_preserve_sources_and_independent_batches(self):
-        import numpy as np
         from test_token_windows import CharacterTokenizer, parent
         from window_runtime import WindowRuntime
         embed, ranker = Mock(), Mock()

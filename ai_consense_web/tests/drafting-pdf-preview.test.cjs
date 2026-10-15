@@ -21,6 +21,13 @@ let checks = 0
 async function check(name, run) { await run(); checks++; console.log(`PASS: ${name}`) }
 
 ;(async () => {
+  await check('an explicitly cited physical page is the first render of its original document', async () => {
+    const h = harness(); const opened = h.preview.open('cited-original', 17)
+    h.loads.at(-1).resolve(document(74)); await tick()
+    assert.equal(h.renders.length, 1); assert.equal(h.renders[0].page, 17)
+    h.renders[0].resolve(); await opened
+    assert.equal(h.state.page, 17); assert.equal(h.state.status, 'ready'); h.preview.close()
+  })
   await check('only the requested current page becomes ready and page bounds are respected', async () => {
     const h = harness(); await ready(h, 5)
     assert.equal(h.state.status, 'ready'); assert.equal(h.state.page, 1); assert.equal(h.state.pages, 5)

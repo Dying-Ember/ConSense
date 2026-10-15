@@ -6,6 +6,8 @@ const { JSDOM } = require('jsdom')
 const sanitize = require('dompurify')(new JSDOM('').window)
 const vue = require('vue')
 const { renderer, text, find, settle, deferred } = require('./helpers/render-controls.cjs')
+const visibleText = node => node.props?.innerHTML ? new JSDOM(node.props.innerHTML).window.document.body.textContent
+  : node.text || (node.children ?? []).map(visibleText).join(' ')
 
 function load(render) {
   return loadVue(path.join(__dirname, '../src/advice/answerFlowchart.ts'), { boundaries: {
@@ -80,7 +82,7 @@ test('failed diagram displays an explicit message and the entire literal source 
     assert.match(text(h.root), /could not be displayed/)
     assert.equal(find(h.root, node => node.tag === 'pre').text, 'flowchart TD\nA-->B\n')
     assert.equal(find(h.root, node => node.tag === 'details').props.open, true)
-    assert.match(text(h.root), /Before \[1\]/); assert.match(text(h.root), /After \[1\]/)
+    assert.match(visibleText(h.root), /Before \[1\]/); assert.match(visibleText(h.root), /After \[1\]/)
   } finally { h.dispose() }
 })
 
@@ -92,9 +94,10 @@ test('late diagram result cannot overwrite a new plain answer or create page HTM
     await settle()
     pending.resolve({ svg: '<svg><text>OLD ANSWER</text></svg>' })
     for (let i = 0; i < 8; i++) { await new Promise(resolve => setImmediate(resolve)); await settle() }
-    assert.match(text(h.root), /<img src=x onerror=run\(\)> new answer \[2\]/)
-    assert.doesNotMatch(text(h.root), /OLD ANSWER/)
-    assert.equal(find(h.root, node => node.tag === 'img' || node.props?.innerHTML), undefined)
+    assert.match(visibleText(h.root), /<img src=x onerror=run\(\)> new answer \[2\]/)
+    assert.doesNotMatch(visibleText(h.root), /OLD ANSWER/)
+    const prose = find(h.root, node => node.props?.class === 'answer-markdown')
+    assert.equal(new JSDOM(prose.props.innerHTML).window.document.querySelector('img'), null)
   } finally { h.dispose() }
 })
 

@@ -1,6 +1,7 @@
 package com.consense.document;
 
 import com.consense.config.ConsenseProperties;
+import com.consense.common.JsonUtils;
 import com.consense.ocr.OcrClient;
 import org.apache.pdfbox.cos.COSName;
 import org.apache.pdfbox.cos.COSDictionary;
@@ -49,7 +50,7 @@ class PdfNativeEvidenceTest {
             }
             bytes = save(document);
         }
-        OcrClient ocr = mock(OcrClient.class); DocumentParser.ParsedDocument parsed = parser(ocr, false).parse("scan.pdf", bytes);
+        OcrClient ocr = mock(OcrClient.class,CALLS_REAL_METHODS); DocumentParser.ParsedDocument parsed = parser(ocr, false).parse("scan.pdf", bytes);
         assertEquals("FAILED", parsed.getParseStatus()); assertTrue(parsed.getText().isEmpty()); verifyNoInteractions(ocr);
         PdfPageEvidence raw = parsed.getNativePdfEvidence().get(0); assertTrue(raw.getGlyphs().size() > 200);
         assertTrue(raw.getGlyphs().stream().allMatch(g -> "hidden_rendering_mode".equals(g.getVisibilityStatus()) && !g.isEligibleForNativeText()));
@@ -65,7 +66,7 @@ class PdfNativeEvidenceTest {
             }
             bytes = save(document);
         }
-        DocumentParser.ParsedDocument parsed = parser(mock(OcrClient.class), false).parse("mixed.pdf",bytes);
+        DocumentParser.ParsedDocument parsed = parser(mock(OcrClient.class,CALLS_REAL_METHODS), false).parse("mixed.pdf",bytes);
         assertEquals("PARSED", parsed.getParseStatus()); assertTrue(parsed.getText().contains("VISIBLE CONTRACT TEXT")); assertFalse(parsed.getText().contains("INVISIBLE"));
         assertTrue(parsed.getNativePdfEvidence().get(0).getGlyphs().stream().anyMatch(g -> !g.isEligibleForNativeText()));
         assertTrue(parsed.getBlocks().stream().allMatch(b -> "operator_visible_unverified".equals(b.getNativeVisibilityStatus())));
@@ -82,7 +83,7 @@ class PdfNativeEvidenceTest {
             }
             bytes = save(document);
         }
-        DocumentParser.ParsedDocument parsed = parser(mock(OcrClient.class),false).parse("rotated.pdf",bytes); PdfPageEvidence raw = parsed.getNativePdfEvidence().get(0);
+        DocumentParser.ParsedDocument parsed = parser(mock(OcrClient.class,CALLS_REAL_METHODS),false).parse("rotated.pdf",bytes); PdfPageEvidence raw = parsed.getNativePdfEvidence().get(0);
         assertTrue(parsed.getText().contains("VISIBLE")); assertFalse(parsed.getText().contains("HIDDEN")); assertEquals(90, raw.getRotation());
         assertArrayEquals(new double[]{30,50,200,100},raw.getCropBox()); assertTrue(raw.getGlyphs().stream().anyMatch(g -> "hidden_zero_alpha".equals(g.getVisibilityStatus())));
         for (PdfPageEvidence.PdfGlyph glyph : raw.getGlyphs()) if (glyph.isEligibleForNativeText()) {
@@ -97,15 +98,16 @@ class PdfNativeEvidenceTest {
             try (PDPageContentStream stream = new PDPageContentStream(document,page)) { scannedMark(document,page,stream); text(stream,"Short native",RenderingMode.FILL,30,700); }
             bytes = save(document);
         }
-        OcrClient ocr = mock(OcrClient.class); when(ocr.available()).thenReturn(true); when(ocr.recognize(any())).thenReturn(new OcrClient.OcrResult("Selected OCR output",0.9,Collections.emptyList()));
+        OcrClient ocr = mock(OcrClient.class,CALLS_REAL_METHODS); when(ocr.available()).thenReturn(true); when(ocr.recognize(any())).thenReturn(new OcrClient.OcrResult("Selected OCR output",0.9,Collections.emptyList()));
         DocumentParser.ParsedDocument parsed = parser(ocr,true).parse("mixed-scan.pdf",bytes);
-        assertEquals("ocr", parsed.getPages().get(0).getStatus()); assertTrue(parsed.getText().contains("Selected OCR"));
+        assertEquals("ocr", parsed.getPages().get(0).getStatus()); assertTrue(parsed.getText().contains("Short native"));
+        assertTrue(parsed.getBlocks().stream().anyMatch(b -> "Selected OCR output".equals(b.getOriginalText()) && "ocr_candidate".equals(b.getSource())));
         assertTrue(parsed.getNativePdfEvidence().get(0).getNativeBlocks().stream().anyMatch(b -> b.getText().contains("Short native")));
         assertFalse(parsed.getNativePdfEvidence().get(0).getGlyphs().isEmpty());
     }
     @Test void existingFormValueAndAppearanceAreReadWithoutRegenerationAndConflictsArePreserved() throws Exception {
         byte[] bytes = formPdf("Stored value", "Visible value", false, true);
-        DocumentParser.ParsedDocument parsed = parser(mock(OcrClient.class),false).parse("form.pdf",bytes);
+        DocumentParser.ParsedDocument parsed = parser(mock(OcrClient.class,CALLS_REAL_METHODS),false).parse("form.pdf",bytes);
         PdfPageEvidence.PdfFormField field = parsed.getNativePdfEvidence().get(0).getFormFields().get(0);
         assertEquals("Stored value",field.getFieldValue()); assertEquals("Visible value",field.getAppearanceValue(),field.getLimitations().toString()); assertTrue(field.isConflict());
         assertEquals("field_appearance_conflict",field.getValueStatus()); assertEquals(Integer.valueOf(1),field.getPageNo());
@@ -120,7 +122,7 @@ class PdfNativeEvidenceTest {
     }
     @Test void matchingFormAppearanceCanEnterTextWhileMissingAndHiddenAppearancesCannot() throws Exception {
         for (int mode = 0; mode < 3; mode++) {
-            DocumentParser.ParsedDocument parsed = parser(mock(OcrClient.class),false).parse("form.pdf",formPdf("Matching value","Matching value",mode==2,mode!=1));
+            DocumentParser.ParsedDocument parsed = parser(mock(OcrClient.class,CALLS_REAL_METHODS),false).parse("form.pdf",formPdf("Matching value","Matching value",mode==2,mode!=1));
             PdfPageEvidence.PdfFormField field = parsed.getNativePdfEvidence().get(0).getFormFields().get(0);
             if (mode == 0) { assertEquals("appearance_text_unverified", field.getValueStatus()); assertTrue(parsed.getText().contains("Matching value")); }
             else { assertFalse(parsed.getText().contains("Matching value")); assertEquals(mode==1 ? "appearance_missing" : "not_visible",field.getValueStatus()); }
@@ -130,16 +132,63 @@ class PdfNativeEvidenceTest {
         DocumentParser.ParsedDocument old = new DocumentParser.ParsedDocument("old",Collections.emptyList(),0,false,"old");
         assertNull(old.getSourceSha256()); assertTrue(old.getNativePdfEvidence().isEmpty());
         byte[] first="equal visible text".getBytes(StandardCharsets.UTF_8), second="equal visible text\n".getBytes(StandardCharsets.UTF_8);
-        DocumentParser parser=parser(mock(OcrClient.class),false); DocumentParser.ParsedDocument a=parser.parse("a.txt",first), b=parser.parse("b.txt",second);
+        DocumentParser parser=parser(mock(OcrClient.class,CALLS_REAL_METHODS),false); DocumentParser.ParsedDocument a=parser.parse("a.txt",first), b=parser.parse("b.txt",second);
         assertEquals(a.getText(),b.getText()); assertNotEquals(a.getSourceSha256(),b.getSourceSha256());
     }
     @Test void missingAppearanceIsNotSynthesizedIntoTheOcrRasterFromStoredValue() throws Exception {
-        OcrClient ocr=mock(OcrClient.class);
+        OcrClient ocr=mock(OcrClient.class,CALLS_REAL_METHODS);
         DocumentParser.ParsedDocument parsed=parser(ocr,false).parse("missing-appearance.pdf",formPdf("Stored but not drawn","unused",false,false,false));
         PdfPageEvidence.PdfFormField field=parsed.getNativePdfEvidence().get(0).getFormFields().get(0);
         assertFalse(field.isAppearancePresent()); assertEquals("Stored but not drawn",field.getFieldValue());
         assertTrue(parsed.getText().isEmpty()); assertEquals("blank",parsed.getPages().get(0).getStatus());
         assertTrue(parsed.getCoverage().getNeedsReviewPages().contains(1)); verifyNoInteractions(ocr);
+    }
+    @Test void successfulOcrKeepsBlankConflictingMissingMatchingAndNontextWidgetsAsOriginalObservations() throws Exception {
+        List<byte[]> fixtures = Arrays.asList(formPdf("Stored value","Visible value",false,true),
+                formPdf("Matching value","Matching value",false,true),
+                formPdf("Stored but not drawn","unused",false,false), formPdf("","",false,true), checkboxPdf());
+        List<String> statuses = Arrays.asList("field_appearance_conflict","appearance_text_unverified",
+                "appearance_missing","empty_or_non_text_appearance","empty_or_non_text_appearance");
+        for (int i = 0; i < fixtures.size(); i++) {
+            byte[] bytes=fixtures.get(i); String originalHash=DocumentParseProbe.sha256(bytes);
+            ConsenseProperties props=new ConsenseProperties(); props.getOcr().setTextLayerMinChars(1000);
+            OcrClient ocr=mock(OcrClient.class,CALLS_REAL_METHODS); when(ocr.available()).thenReturn(true);
+            when(ocr.recognize(any())).thenReturn(new OcrClient.OcrResult("Selected OCR output",.9,Collections.emptyList()));
+            DocumentParser.ParsedDocument parsed=new DocumentParser(props,ocr).parse("form-scan.pdf",bytes);
+            assertEquals("ocr",parsed.getPages().get(0).getStatus()); assertTrue(parsed.getPages().get(0).getText().contains("VISIBLE BODY CONTRACT TEXT"));
+            assertTrue(parsed.getBlocks().stream().anyMatch(b -> "Selected OCR output".equals(b.getOriginalText()) && "ocr_candidate".equals(b.getSource())));
+            assertEquals(Collections.singletonList(1),parsed.getCoverage().getNeedsReviewPages());
+            List<DocumentBlock> widgets=new ArrayList<>();
+            for(DocumentBlock b:parsed.getBlocks())if("pdf_form_widget".equals(b.getKind()))widgets.add(b);
+            assertEquals(1,widgets.size(),"OCR must preserve each existing widget exactly once");
+            PdfPageEvidence.PdfFormField raw=parsed.getNativePdfEvidence().get(0).getFormFields().get(0);
+            DocumentBlock widget=widgets.get(0); assertEquals(JsonUtils.write(raw),JsonUtils.write(widget.getPdfFormField()));
+            assertEquals(statuses.get(i),raw.getValueStatus()); assertEquals("native_form",widget.getSource());
+            assertEquals(raw.getVisibilityStatus(),widget.getNativeVisibilityStatus()); assertArrayEquals(raw.getBbox(),widget.getBbox());
+            assertEquals(i==1?"Matching value":"",widget.getText());
+            assertEquals(raw.getAppearanceValue()==null?"":raw.getAppearanceValue(),widget.getOriginalText());
+            assertEquals(1,parsed.getNativePdfEvidence().get(0).getNativeBlocks().stream().filter(b->"pdf_form_widget".equals(b.getKind())).count());
+            assertEquals(originalHash,parsed.getSourceSha256()); assertEquals(originalHash,DocumentParseProbe.sha256(bytes));
+            if(i==4) { assertEquals("Btn",raw.getFieldType()); assertEquals("Yes",raw.getAppearanceState());
+                assertEquals("Yes",raw.getFieldValue()); assertTrue(raw.isAppearancePresent()); assertTrue(raw.getAppearanceGlyphs().isEmpty());
+                assertNotNull(raw.getAppearanceRawStreamBytesBase64()); }
+            verify(ocr).recognize(any());
+        }
+    }
+    private static byte[] checkboxPdf() throws Exception {
+        try(PDDocument document=new PDDocument()) {
+            PDPage page=new PDPage(); document.addPage(page);
+            try(PDPageContentStream stream=new PDPageContentStream(document,page)) { text(stream,"VISIBLE BODY CONTRACT TEXT",RenderingMode.FILL,30,700); }
+            PDAcroForm acro=new PDAcroForm(document); document.getDocumentCatalog().setAcroForm(acro);
+            PDCheckBox field=new PDCheckBox(acro); field.setPartialName("ExistingChoice"); field.getCOSObject().setName(COSName.V,"Yes"); acro.getFields().add(field);
+            PDAnnotationWidget widget=field.getWidgets().get(0); widget.setPage(page); widget.setRectangle(new PDRectangle(30,600,20,20));
+            widget.setAppearanceState("Yes"); page.getAnnotations().add(widget);
+            PDAppearanceStream ap=new PDAppearanceStream(document); ap.setBBox(new PDRectangle(20,20)); ap.setResources(new PDResources());
+            try(PDPageContentStream stream=new PDPageContentStream(document,ap)) { stream.addRect(3,3,10,10); stream.fill(); }
+            COSDictionary states=new COSDictionary(); states.setItem(COSName.getPDFName("Yes"),ap);
+            PDAppearanceDictionary appearances=new PDAppearanceDictionary(); appearances.getCOSObject().setItem(COSName.N,states); widget.setAppearance(appearances);
+            return save(document);
+        }
     }
     private static byte[] formPdf(String stored,String visible,boolean hidden,boolean appearance) throws Exception {
         return formPdf(stored,visible,hidden,appearance,true);

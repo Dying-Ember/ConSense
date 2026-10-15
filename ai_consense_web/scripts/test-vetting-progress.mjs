@@ -58,8 +58,11 @@ function fixture(overrides = {}) {
   const component = load(compiled.content, {
     vue, 'vue-i18n': { useI18n: () => ({ t: key => key }) }, 'vue-router': { useRouter: () => ({ push: async () => undefined }) },
     '@/api': { vettingApi }, '@/stores/app': { useAppStore: () => store },
+    '@/api/client': { ApiError: class ApiError extends Error {} },
     '@/composables/useLocalized': { useLocalized: () => ({ pick: value => typeof value === 'string' ? value : value?.en ?? '', currentKey: vue.ref('en') }) },
     '@/components/AppIcon.vue': placeholder, '@/components/AppModal.vue': placeholder, '@/components/CanonicalEvidencePanel.vue': placeholder,
+    '@/components/FixedBaselineEvidencePanel.vue': placeholder,
+    '@/components/AdviceSourceReader.vue': placeholder,
     '@/advice/reviewHandoff': { reviewHandoffCopy: {} },
   }).default
   window.setTimeout = (fn, delay) => { const id = ++timerId; timers.set(id, { fn, delay }); return id }

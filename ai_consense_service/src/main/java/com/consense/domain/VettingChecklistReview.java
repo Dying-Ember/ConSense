@@ -15,6 +15,7 @@ public class VettingChecklistReview {
     @Column(name="run_id",length=64,nullable=false) private String runId;
     @Column(name="item_id",length=64,nullable=false) private String itemId;
     @Column(name="run_snapshot_sha256",length=64,nullable=false) private String runSnapshotSha256;
+    @Column(name="basis_sha256",length=64) private String basisSha256;
     @Column(length=24,nullable=false) private String status;
     @Column(columnDefinition="TEXT") private String remarks;
     @Column(name="updated_at",nullable=false) private Instant updatedAt;

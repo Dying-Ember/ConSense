@@ -6,4 +6,5 @@ import java.util.List;
 
 public interface VettingChecklistReviewRepository extends JpaRepository<VettingChecklistReview,String> {
     List<VettingChecklistReview> findByProjectIdAndRunId(String projectId,String runId);
+    List<VettingChecklistReview> findByProjectIdOrderByUpdatedAtDesc(String projectId);
 }

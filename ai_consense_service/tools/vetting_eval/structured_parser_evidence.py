@@ -793,12 +793,8 @@ def _dual_completeness(runs, artifact_store=None, required_physical_pages=None):
             'perParser': per_run}
 
 
-def assert_complete_dual(bundle, required_physical_pages=None, *, artifact_store=None):
-    """Verify immutable bytes, identities, page sets and explicit terminal states.
-
-    This is a material/transport gate. It never approves semantic content,
-    blanks, table topology, reading order, or a reviewer supplied by the caller.
-    """
+def verify_dual_integrity(bundle, *, artifact_store=None):
+    """Reject changed identities or captured bytes, even for incomplete runs."""
     if not isinstance(bundle, dict) or bundle.get('schema') != SCHEMA or bundle.get('kind') != 'dual_parser_bundle':
         raise ParserEvidenceError('Supply a dual parser evidence bundle')
     if bundle.get('bundleSha256') != _hash({k: v for k, v in bundle.items() if k != 'bundleSha256'}):
@@ -806,10 +802,6 @@ def assert_complete_dual(bundle, required_physical_pages=None, *, artifact_store
     runs = bundle.get('runs')
     if not isinstance(runs, list) or len(runs) != 2 or {run.get('parser') for run in runs} != set(PARSERS):
         raise ParserEvidenceError('A complete dual bundle requires both parser runs')
-    if required_physical_pages is not None and (not isinstance(required_physical_pages, (list, tuple)) or
-            any(isinstance(page, bool) or not isinstance(page, int) or page < 1 for page in required_physical_pages) or
-            len(set(required_physical_pages)) != len(required_physical_pages)):
-        raise ParserEvidenceError('Required physical pages must be unique positive integers')
     for run in runs:
         if run.get('runContentSha256') != _hash({k: v for k, v in run.items() if k != 'runContentSha256'}):
             raise ParserEvidenceError('Immutable run content hash does not match')
@@ -817,6 +809,22 @@ def assert_complete_dual(bundle, required_physical_pages=None, *, artifact_store
             raise ParserEvidenceError('Dual run source identities do not match')
         if run.get('captureManifest') != _capture_manifest(run):
             raise ParserEvidenceError('Capture manifest does not bind current source/parser/config/artifacts')
+        for records in (run['rawOutputs'], run['artifacts']):
+            for record in records.values():
+                try:
+                    _verify_record(record, artifact_store)
+                except ParserEvidenceError as error:
+                    raise ParserEvidenceError('Dual evidence is not complete: captured_bytes_unavailable_or_changed; ' + str(error)) from error
+    return runs
+
+
+def assert_complete_dual(bundle, required_physical_pages=None, *, artifact_store=None):
+    """Verify material/terminal coverage; never approve source semantics."""
+    runs = verify_dual_integrity(bundle, artifact_store=artifact_store)
+    if required_physical_pages is not None and (not isinstance(required_physical_pages, (list, tuple)) or
+            any(isinstance(page, bool) or not isinstance(page, int) or page < 1 for page in required_physical_pages) or
+            len(set(required_physical_pages)) != len(required_physical_pages)):
+        raise ParserEvidenceError('Required physical pages must be unique positive integers')
     result = _dual_completeness(runs, artifact_store, required_physical_pages)
     if not result['eligibleForCanonical']:
         raise ParserEvidenceError('Dual evidence is not complete: ' + ', '.join(result['reasons']))

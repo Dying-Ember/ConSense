@@ -98,6 +98,11 @@ public class SourceDocument {
     @Column(name = "parse_coverage_json")
     private String parseCoverageJson;
 
+    /** Ordinary upload candidate graph; separate from source-reviewed accepted canonical bindings. */
+    @Lob
+    @Column(name = "normal_candidate_json")
+    private String normalCandidateJson;
+
     @Column(name = "created_at", nullable = false)
     private Instant createdAt = Instant.now();
 }

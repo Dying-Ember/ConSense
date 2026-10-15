@@ -57,21 +57,26 @@ class VettingFixedBaselineIntegrationTest {
             Record context=record("insufficient_context","risk",quote(tender),quote(fixture.standard));
             return Arrays.asList(standardOnly,unconfirmedConflict,context);
         });
-        VettingSemanticReview review=new VettingSemanticReview(ai,props,retrieval);review.setFixedBaselineRetrievalClient(fixture.client);
+        VettingSemanticReview review=VettingTokenFixture.review(ai,props,retrieval);review.setFixedBaselineRetrievalClient(fixture.client);
         VettingSemanticReview.Result result=review.review("project",Collections.singletonList(tender),"en",(n,s)->{});
         assertTrue(result.getCandidates().isEmpty(),"Fixed references alone and unconfirmed project adoption cannot establish a project defect");
         assertEquals(1,result.getActualGatewayCallCount());
         assertTrue(result.getReviewedChunkIds().contains(fixture.standard.getId()));
         assertEquals(2,result.getTopicAudits().get(0).getRejectedRecords());
+        JsonNode savedPointer=result.getTopicAudits().get(0).getPacketAudits().get(0).getFixedBaselineEvidence().get(0);
+        assertEquals("fixed_development_baseline",savedPointer.path("evidenceBackend").asText());assertEquals(fixture.standard.getId(),savedPointer.path("parentId").asText());
+        assertEquals("unconfirmed",savedPointer.path("projectApplicability").asText());assertEquals("unknown",savedPointer.path("qualifiersComplete").asText());
+        assertFalse(savedPointer.toString().contains("secret-raw-layout-audit"));
         verify(retrieval).index(eq("project"),argThat(chunks->chunks.size()==1&&"tender".equals(chunks.get(0).getRole())));
         verify(fixture.client).search(eq("vetting"),anyString(),eq(props.getVetting().getTopK()));
-        verify(fixture.client,times(2)).assertCurrent(argThat(hits->hits.size()==1&&fixture.hit.getId().equals(hits.get(0).getId())));
+        // First attempt checks fixed sources before checkpoint access, immediately before dispatch, and after decoding.
+        verify(fixture.client,times(3)).assertCurrent(argThat(hits->hits.size()==1&&fixture.hit.getId().equals(hits.get(0).getId())));
     }
 
     @Test void configuredCanonicalProjectFailureCannotBeBypassedByTheFixedReferenceLane() {
         Fixture fixture=new Fixture();
         OerBusinessEvidence oer=mock(OerBusinessEvidence.class);when(oer.enabled()).thenReturn(true);
-        VettingSemanticReview review=new VettingSemanticReview(mock(AiGateway.class),new ConsenseProperties(),mock(VettingRetrievalClient.class));
+        VettingSemanticReview review=VettingTokenFixture.review(mock(AiGateway.class),new ConsenseProperties(),mock(VettingRetrievalClient.class));
         review.setOerBusinessEvidence(oer);review.setFixedBaselineRetrievalClient(fixture.client);
         assertThrows(IllegalStateException.class,()->review.review("project",Collections.singletonList(chunk("p","tender","SCT","SCT1","The project source shall be verified before any model operation.")),"en",(n,s)->{}));
         verify(fixture.client,never()).search(anyString(),anyString(),anyInt());
@@ -105,6 +110,8 @@ class VettingFixedBaselineIntegrationTest {
         assertEquals(3,large.getChunks().size());assertTrue(large.getGroups().get(0).isFullySubmitted());
         assertEquals(second.getContent(),large.getChunks().get(2).getContent());
         assertEquals("unknown",large.getGroups().get(0).getQualifiersComplete());
+        JsonNode savedGroup=catalog.pointer(fixture.hit.getId()).path("sourceUnit");
+        assertEquals("whole-payment-unit",savedGroup.path("unitId").asText());assertEquals(2,savedGroup.path("requiredMemberIds").size());assertFalse(savedGroup.has("members"));
     }
 
     private static final class Fixture {

@@ -13,10 +13,18 @@ import okhttp3.MediaType;
 import okhttp3.MultipartBody;
 import okhttp3.RequestBody;
 
+import javax.imageio.ImageIO;
+import java.awt.image.BufferedImage;
+import java.io.ByteArrayInputStream;
+import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.HashSet;
+import java.util.Arrays;
 
 /**
  * PaddleOCR / PP-Structure 客户端。
@@ -62,6 +70,74 @@ public class PaddleOcrClient implements OcrClient {
         return new OcrResult(builder.toString().trim(), sum / lines.size(), lines);
     }
 
+    @Override public OcrResult observeIdentity(byte[] imageBytes) {
+        return "local".equalsIgnoreCase(cfg.getMode()) ? recognizeLocal(imageBytes, true) : recognize(imageBytes);
+    }
+    @Override public OcrResult recognize(byte[] imageBytes, Map<String,Object> sourceContext) {
+        return "local".equalsIgnoreCase(cfg.getMode()) && imageBytes != null && imageBytes.length > 0
+                ? recognizeLocal(imageBytes, false, sourceContext) : recognize(imageBytes);
+    }
+    @Override public OcrResult observeIdentity(byte[] imageBytes, Map<String,Object> sourceContext) {
+        return "local".equalsIgnoreCase(cfg.getMode()) && imageBytes != null && imageBytes.length > 0
+                ? recognizeLocal(imageBytes, true, sourceContext) : observeIdentity(imageBytes);
+    }
+    @Override public boolean canReuseIdentityObservation(OcrResult observation) {
+        return !"local".equalsIgnoreCase(cfg.getMode());
+    }
+    @Override public JsonNode observeNativePdf(byte[] originalPdf, Map<String,Object> nativeContext) {
+        if(!"local".equalsIgnoreCase(cfg.getMode()))return null;
+        JsonNode context=JsonUtils.mapper().valueToTree(nativeContext),source=context.path("source");
+        if(originalPdf==null || originalPdf.length<5 || !new String(originalPdf,0,5,java.nio.charset.StandardCharsets.US_ASCII).equals("%PDF-")
+                || !inputSha256(originalPdf).equals(source.path("sourceSha256").asText())
+                || source.path("sourceFilename").asText().trim().isEmpty() || !"application/pdf".equals(source.path("mediaType").asText())
+                || !source.path("pageCount").isIntegralNumber() || source.path("pageCount").asInt()<=0
+                || !context.path("selectedPhysicalPages").isArray() || context.path("selectedPhysicalPages").isEmpty())
+            throw new BizException("Native PDF request original identity or scope differs");
+        Set<Integer> required=new HashSet<>();
+        for(JsonNode page:context.path("selectedPhysicalPages"))if(!page.isIntegralNumber() || page.asInt()<1
+                || page.asInt()>source.path("pageCount").asInt() || !required.add(page.asInt()))
+            throw new BizException("Native PDF request physical-page scope differs");
+        MultipartBody body=new MultipartBody.Builder().setType(MultipartBody.FORM)
+                .addFormDataPart("file",source.path("sourceFilename").asText(),RequestBody.create(originalPdf,MediaType.get("application/pdf")))
+                .addFormDataPart("nativeContext",JsonUtils.write(context)).build();
+        JsonNode response=JsonUtils.parse(http.postMultipart(trim(cfg.getBaseUrl())+"/native-pdf/table-candidates",body,cfg.getTimeoutMs()));
+        if(!response.isObject() || !"consense.native-pdf-candidates.v1".equals(response.path("schema").asText())
+                || !Arrays.asList("candidate_observed","partial","failed").contains(response.path("status").asText())
+                || !response.path("source").path("sourceSha256").equals(source.path("sourceSha256"))
+                || !response.path("pages").isArray() || !response.path("bundleRef").isObject()
+                || response.path("sourceQualityAccepted").asBoolean() || response.path("canonicalAdopted").asBoolean())
+            throw new BizException("Native PDF candidate response source, task or protocol differs");
+        if("failed".equals(response.path("status").asText()) && response.path("pages").isEmpty() && response.path("failure").isObject())return response;
+        if(!response.path("source").path("pageCount").isIntegralNumber()
+                || response.path("source").path("pageCount").asInt(-1)!=source.path("pageCount").asInt(-2)
+                || !response.path("source").path("sourceFilename").equals(source.path("sourceFilename"))
+                || !response.path("selectedPhysicalPages").equals(context.path("selectedPhysicalPages")))
+            throw new BizException("Native PDF candidate response original page-count or task differs");
+        Set<Integer> actual=new HashSet<>();int successes=0,failures=0;
+        for(JsonNode page:response.path("pages")) {
+            if(!page.path("physicalPageNo").isIntegralNumber() || !required.contains(page.path("physicalPageNo").asInt())
+                    || !actual.add(page.path("physicalPageNo").asInt()) || !page.path("methods").isArray())throw new BizException("Native PDF physical-page bindings differ");
+            Set<String> methods=new HashSet<>();
+            for(JsonNode method:page.path("methods")) {
+                String status=method.path("status").asText();
+                if(!methods.add(method.path("method").asText()) || method.path("provider").asText().isEmpty()
+                        || !("candidate_observed".equals(status) && method.path("candidate").isObject()
+                        && "consense.native-pdf-table-candidate.v1".equals(method.path("candidate").path("schema").asText())
+                        && method.path("candidate").path("tables").isArray() && method.path("candidate").path("conditionCandidates").isArray()
+                        || "failed".equals(status) && method.path("candidate").isNull() && method.path("failure").isObject()))
+                    throw new BizException("Native PDF whole-method candidate or failure differs");
+                if("failed".equals(status))failures++;else successes++;
+            }
+            if(!methods.equals(new HashSet<>(Arrays.asList("pdfplumber_lines_lines","camelot_network","camelot_stream"))))
+                throw new BizException("Native PDF candidate response omitted or duplicated an entire method");
+        }
+        if(!required.equals(actual))throw new BizException("Native PDF candidate response omitted an entire physical page");
+        String terminal=successes==0?"failed":failures>0?"partial":"candidate_observed";
+        if(!terminal.equals(response.path("status").asText()))
+            throw new BizException("Native PDF candidate terminal differs from actual method failures");
+        return response;
+    }
+
     @Override
     public boolean available() {
         try {
@@ -92,12 +168,26 @@ public class PaddleOcrClient implements OcrClient {
                 body, cfg.getTimeoutMs());
     }
 
-    private OcrResult recognizeLocal(byte[] imageBytes) {
-        MultipartBody body = new MultipartBody.Builder().setType(MultipartBody.FORM)
+    private OcrResult recognizeLocal(byte[] imageBytes) { return recognizeLocal(imageBytes, false); }
+    private OcrResult recognizeLocal(byte[] imageBytes, boolean identityOnly) {
+        return recognizeLocal(imageBytes, identityOnly, null);
+    }
+    private OcrResult recognizeLocal(byte[] imageBytes, boolean identityOnly, Map<String,Object> sourceContext) {
+        MultipartBody.Builder builder = new MultipartBody.Builder().setType(MultipartBody.FORM)
                 .addFormDataPart("file", "page.png",
-                        RequestBody.create(imageBytes, MediaType.get("image/png"))).build();
-        JsonNode response = JsonUtils.parse(http.postMultipart(trim(cfg.getBaseUrl()) + "/ocr",
-                body, cfg.getTimeoutMs()));
+                        RequestBody.create(imageBytes, MediaType.get("image/png")));
+        if (sourceContext != null) builder.addFormDataPart("sourceContext", JsonUtils.write(sourceContext));
+        MultipartBody body = builder.build();
+        String raw = identityOnly ? http.postMultipart(trim(cfg.getBaseUrl()) + "/ocr", body, cfg.getTimeoutMs(),
+                Collections.singletonMap("X-Consense-Ocr-Purpose", "identity"))
+                : http.postMultipart(trim(cfg.getBaseUrl()) + "/ocr", body, cfg.getTimeoutMs());
+        JsonNode response = JsonUtils.parse(raw);
+        validateObservation(response, imageBytes);
+        validatePageGroups(response.get("wholePageGroups"),sourceContext);
+        JsonNode echoedContext = response.path("provenance").get("sourceContext");
+        if (echoedContext != null && !echoedContext.isNull()
+                && (sourceContext == null || !echoedContext.equals(JsonUtils.mapper().valueToTree(sourceContext))))
+            throw new BizException("OCR original source context differs from actual request");
         List<OcrLine> lines = new ArrayList<>();
         double confidence = 0;
         StringBuilder text = new StringBuilder();
@@ -108,12 +198,76 @@ public class PaddleOcrClient implements OcrClient {
                     ? new double[]{box.get(0).asDouble(), box.get(1).asDouble(),
                     box.get(2).asDouble(), box.get(3).asDouble()} : null;
             double score = line.path("confidence").asDouble(0);
-            lines.add(new OcrLine(line.path("text").asText(), score, bbox));
+            lines.add(new OcrLine(line.path("text").asText(), score, bbox, line.get("polygon")));
             text.append(line.path("text").asText()).append('\n');
             confidence += score;
         }
         String fullText = response.path("text").asText(text.toString()).trim();
-        return new OcrResult(fullText, lines.isEmpty() ? 0 : confidence / lines.size(), lines);
+        ObjectNode parserEvidence = JsonUtils.mapper().createObjectNode();
+        for (String key : new String[]{"parserRuns", "dualEvidenceRef", "adoptionStatus"})
+            if (response.has(key)) parserEvidence.set(key, response.get(key).deepCopy());
+        return new OcrResult(fullText, lines.isEmpty() ? 0 : confidence / lines.size(), lines,
+                response.get("regions"), response.get("frame"), response.get("provenance"), response.get("coverage"),
+                parserEvidence.size() == 0 ? null : parserEvidence,response.get("wholePageGroups"));
+    }
+    private static void validatePageGroups(JsonNode groups,Map<String,Object> sourceContext) {
+        if(groups==null)return;
+        if(!groups.isArray())throw new BizException("OCR whole page groups must be an array");
+        JsonNode context=JsonUtils.mapper().valueToTree(sourceContext);
+        for(JsonNode group:groups) {
+            String selected=group.path("selectedParser").isNull()?null:group.path("selectedParser").asText(),status=group.path("selectionStatus").asText();
+            if(!group.isObject() || !"whole_page".equals(group.path("scope").asText()) || !group.path("physicalPageNo").isIntegralNumber()
+                    || group.path("physicalPageNo").asInt()<1 || !"candidate_unverified".equals(group.path("adoptionStatus").asText())
+                    || !group.path("sourceQualityAccepted").isBoolean() || group.path("sourceQualityAccepted").asBoolean()
+                    || !group.path("candidates").isArray() || group.path("candidates").size()!=2
+                    || !Arrays.asList("feature_policy_selected_candidate","candidate_unverified").contains(status)
+                    || "feature_policy_selected_candidate".equals(status) && (selected==null || !group.path("policySha256").asText().matches("[a-f0-9]{64}"))
+                    || "candidate_unverified".equals(status) && selected!=null)
+                throw new BizException("OCR whole page group selection or completeness differs");
+            Set<String> parsers=new HashSet<>();
+            for(JsonNode candidate:group.path("candidates"))if(!parsers.add(candidate.path("parser").asText())
+                    || !candidate.path("blocks").isArray() || !candidate.path("page").isObject()
+                    || candidate.path("runId").asText().isEmpty() || candidate.path("pageId").asText().isEmpty())
+                throw new BizException("OCR whole page parser alternative is missing or duplicated");
+            if(!parsers.equals(new HashSet<>(Arrays.asList("mineru","paddleocr-vl"))) || selected!=null && !parsers.contains(selected))
+                throw new BizException("OCR whole page parser identities differ");
+            if(sourceContext!=null && (!group.path("source").path("sourceSha256").equals(context.path("source").path("sourceSha256"))
+                    || !group.path("physicalPageNo").equals(context.path("physicalPageNo"))))
+                throw new BizException("OCR whole page group original-source bindings differ");
+        }
+    }
+
+    private static void validateObservation(JsonNode response, byte[] input) {
+        if (!response.isObject()) throw new BizException("OCR response must be an object");
+        JsonNode regions = response.get("regions"), frame = response.get("frame"), provenance = response.get("provenance");
+        if (regions != null && !regions.isArray()) throw new BizException("OCR regions must be an array");
+        if (provenance != null && !provenance.isNull() && !provenance.isObject()) throw new BizException("OCR provenance must be an object");
+        String actualSha = inputSha256(input);
+        if (provenance != null && provenance.hasNonNull("inputSha256")
+                && !actualSha.equals(provenance.path("inputSha256").asText())) throw new BizException("OCR observation input identity differs");
+        if (frame != null && !frame.isNull()) {
+            if (!frame.isObject() || !"pixel".equals(frame.path("coordinateUnit").asText())
+                    || !"xywh".equals(frame.path("bboxFormat").asText())
+                    || !actualSha.equals(frame.path("imageSha256").asText())) throw new BizException("OCR image frame or identity differs");
+            try {
+                BufferedImage image = ImageIO.read(new ByteArrayInputStream(input));
+                if (image == null || !frame.path("width").isIntegralNumber() || !frame.path("height").isIntegralNumber()
+                        || image.getWidth() != frame.path("width").asInt() || image.getHeight() != frame.path("height").asInt())
+                    throw new BizException("OCR frame dimensions differ from actual input image");
+            } catch (java.io.IOException invalid) { throw new BizException("OCR input image frame cannot be verified"); }
+        }
+        if (regions != null) for (JsonNode region : regions) {
+            if (!region.isObject() || region.path("id").asText().trim().isEmpty() || region.path("kind").asText().trim().isEmpty())
+                throw new BizException("OCR region requires its actual id and kind");
+        }
+    }
+
+    private static String inputSha256(byte[] input) {
+        try {
+            StringBuilder result = new StringBuilder();
+            for (byte value : MessageDigest.getInstance("SHA-256").digest(input)) result.append(String.format("%02x", value & 255));
+            return result.toString();
+        } catch (java.security.NoSuchAlgorithmException impossible) { throw new IllegalStateException(impossible); }
     }
 
     /**
@@ -139,7 +293,7 @@ public class PaddleOcrClient implements OcrClient {
                     && node.get(1).size() >= 2 && node.get(1).get(0).isTextual()) {
                 ObjectNode region = JsonUtils.mapper().createObjectNode();
                 region.set("points", node.get(0));
-                out.add(new OcrLine(node.get(1).get(0).asText(), node.get(1).get(1).asDouble(), extractBbox(region)));
+                out.add(new OcrLine(node.get(1).get(0).asText(), node.get(1).get(1).asDouble(), extractBbox(region), node.get(0)));
                 return;
             }
             node.forEach(child -> walk(child, out, depth + 1));

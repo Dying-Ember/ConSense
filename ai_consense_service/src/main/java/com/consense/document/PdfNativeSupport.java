@@ -1,6 +1,9 @@
 package com.consense.document;
 
 import org.apache.pdfbox.cos.COSDictionary;
+import org.apache.pdfbox.cos.COSBase;
+import org.apache.pdfbox.cos.COSNumber;
+import org.apache.pdfbox.contentstream.operator.Operator;
 import org.apache.pdfbox.cos.COSName;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDPage;
@@ -19,10 +22,67 @@ import org.apache.pdfbox.util.Matrix;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Arrays;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.fasterxml.jackson.databind.JsonNode;
 
 /** Read existing PDF operators/appearance streams; never regenerate a form appearance. */
 final class PdfNativeSupport {
     private PdfNativeSupport() {}
+
+    /** A painted path is an observation gap, never proof of a table, control, or drawing identity. */
+    static final class PaintCollector {
+        private final PDPage page;private final PdfPageEvidence evidence;
+        private final ObjectMapper json;
+        private final List<JsonNode> path=new ArrayList<>();
+        private double left=Double.POSITIVE_INFINITY,bottom=Double.POSITIVE_INFINITY,right=Double.NEGATIVE_INFINITY,top=Double.NEGATIVE_INFINITY;
+        PaintCollector(PDPage page,PdfPageEvidence evidence,ObjectMapper json){this.page=page;this.evidence=evidence;this.json=json;}
+        static final class State {
+            final List<JsonNode> path;final double[] bounds;
+            State(List<JsonNode> path,double[] bounds){this.path=path;this.bounds=bounds;}
+        }
+        State enterChild(){State saved=new State(new ArrayList<>(path),new double[]{left,bottom,right,top});clear();return saved;}
+        void exitChild(State saved){clear();path.addAll(saved.path);left=saved.bounds[0];bottom=saved.bounds[1];right=saved.bounds[2];top=saved.bounds[3];}
+        void accept(Operator operator,List<COSBase> operands,PDGraphicsState state) {
+            String name=operator.getName();
+            if(Arrays.asList("m","l","c","v","y","re","h","W","W*").contains(name)) {
+                double[] values=new double[operands.size()];for(int index=0;index<values.length;index++) {
+                    if(!(operands.get(index) instanceof COSNumber))return;values[index]=((COSNumber)operands.get(index)).doubleValue();
+                }
+                ObjectNode command=json.createObjectNode();command.put("operator",name);command.put("id","pdf-page/"+evidence.getPageNo()+"/vector-path-operator/"+evidence.getVectorPathOperators().size());
+                command.set("operands",json.valueToTree(values));command.set("currentTransformationMatrix",json.valueToTree(matrix(state.getCurrentTransformationMatrix())));
+                path.add(command);evidence.getVectorPathOperators().add(command);
+                if("re".equals(name) && values.length==4) {
+                    point(values[0],values[1],state);point(values[0]+values[2],values[1],state);
+                    point(values[0]+values[2],values[1]+values[3],state);point(values[0],values[1]+values[3],state);
+                } else if(Arrays.asList("m","l","c","v","y").contains(name))for(int index=0;index+1<values.length;index+=2)point(values[index],values[index+1],state);
+            } else if(Arrays.asList("S","s","f","F","f*","B","B*","b","b*").contains(name)) {
+                if(!path.isEmpty() && left!=Double.POSITIVE_INFINITY) {
+                    PDRectangle crop=page.getCropBox();double[] box=rotate(new double[]{(left-crop.getLowerLeftX())/crop.getWidth(),
+                            (crop.getUpperRightY()-top)/crop.getHeight(),(right-left)/crop.getWidth(),(top-bottom)/crop.getHeight()},page.getRotation());
+                    boolean finite=true;for(double value:box)finite&=Double.isFinite(value);
+                    boolean intersects=right>=crop.getLowerLeftX() && left<=crop.getUpperRightX() && top>=crop.getLowerLeftY() && bottom<=crop.getUpperRightY();
+                    boolean stroked=Arrays.asList("S","s","B","B*","b","b*").contains(name),filled=!Arrays.asList("S","s").contains(name);
+                    boolean paintedAlpha=stroked && state.getAlphaConstant()>0 || filled && state.getNonStrokeAlphaConstant()>0;
+                    ObjectNode scope=json.createObjectNode();scope.put("id","pdf-page/"+evidence.getPageNo()+"/vector-paint/"+evidence.getPaintedVectorRegions().size());
+                    scope.put("paintOperator",name);scope.set("pathOperators",json.valueToTree(path));scope.set("bbox",finite?json.valueToTree(box):json.nullNode());
+                    scope.set("pathBoundsOriginalPdf",json.valueToTree(new double[]{left,bottom,right-left,top-bottom}));
+                    scope.put("coordinateSpace","normalized_rendered_crop_top_left");scope.put("semanticKind","unknown");
+                    scope.put("scopeMeaning","path/control-point envelope; exact curve, clipping, pixel visibility and topology unknown");
+                    scope.put("strokeAlpha",state.getAlphaConstant());scope.put("fillAlpha",state.getNonStrokeAlphaConstant());scope.put("lineWidth",state.getLineWidth());
+                    scope.put("requiresVisualObservation",!finite || intersects && paintedAlpha);scope.put("geometryStatus",finite?"observed_without_clipping":"invalid_unknown");
+                    evidence.getPaintedVectorRegions().add(scope);
+                }
+                clear();
+            } else if("n".equals(name))clear();
+        }
+        private void point(double x,double y,PDGraphicsState state) {
+            java.awt.geom.Point2D.Float p=state.getCurrentTransformationMatrix().transformPoint((float)x,(float)y);
+            left=Math.min(left,p.x);right=Math.max(right,p.x);bottom=Math.min(bottom,p.y);top=Math.max(top,p.y);
+        }
+        private void clear(){path.clear();left=bottom=Double.POSITIVE_INFINITY;right=top=Double.NEGATIVE_INFINITY;}
+    }
 
     static PdfPageEvidence page(int pageNo, PDPage page) {
         PdfPageEvidence result = new PdfPageEvidence();

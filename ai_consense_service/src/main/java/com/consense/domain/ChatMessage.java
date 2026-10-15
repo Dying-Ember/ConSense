@@ -22,6 +22,12 @@ public class ChatMessage {
     @Column(name = "project_id", length = 64, nullable = false)
     private String projectId;
 
+    @Column(name = "session_id", length = 64)
+    private String sessionId;
+
+    @Column(name = "source_snapshot_sha256", length = 64)
+    private String sourceSnapshotSha256;
+
     @Column(length = 16, nullable = false)
     private String role;
 
@@ -41,7 +47,7 @@ public class ChatMessage {
     @Column(name = "citations_json", columnDefinition = "TEXT")
     private String citationsJson;
 
-    @Column(name = "evidence_id", length = 64)
+    @Column(name = "evidence_id", length = 256)
     private String evidenceId;
 
     /** Frozen configured chat identity; absent for legacy and deterministic no-basis messages. */
@@ -73,6 +79,10 @@ public class ChatMessage {
 
     @Lob @Column(name = "user_background_json", columnDefinition = "LONGTEXT")
     private String userBackgroundJson;
+
+    /** Model checks and application publication results; null means not recorded on legacy messages. */
+    @Lob @Column(name = "advice_checks_json", columnDefinition = "LONGTEXT")
+    private String adviceChecksJson;
 
     @Column(name = "created_at", nullable = false)
     private Instant createdAt = Instant.now();

@@ -44,6 +44,47 @@ public final class OerSourceMetadata {
         capture(document, parsed, originalBytes, FixedRegistry.ROUTER);
     }
 
+    /** Retain the uploaded original and its exclusion identity without producing parser evidence. */
+    public static void captureDrawing(SourceDocument document, byte[] originalBytes) {
+        String digest = originalSha256(originalBytes);
+        if (document.getSourceSha256() != null && !digest.equals(document.getSourceSha256()))
+            throw new IllegalArgumentException("Drawing source bytes changed before identity was persisted");
+        OerDocumentIdentity identity = new OerDocumentIdentity();
+        identity.setSourceSha256(digest); identity.setKind("DRAWING"); identity.setSourcePurpose("drawing");
+        identity.setIdentityStatus("drawing".equals(document.getDocumentScope()) ? "explicit_scope" : "format_supported");
+        identity.setEligibleModules(java.util.Collections.emptyList());
+        identity.getIdentityEvidence().add(new OerDocumentIdentity.Evidence(
+                "drawing".equals(document.getDocumentScope()) ? "upload_document_scope" : "native_drawing_format",
+                null, "Drawing file is outside parsing and business evidence scope; no detail parser was called"));
+        document.setSourceSha256(digest); document.setFileKey("DRAWING");
+        document.setOerIdentityJson(JsonUtils.write(identity));
+    }
+
+    /** A trusted exact-byte exclusion must be known before any producer sees evaluation/template content. */
+    public static boolean captureKnownIdentity(SourceDocument document, byte[] originalBytes) {
+        return captureKnownIdentity(document, originalBytes, FixedRegistry.ROUTER);
+    }
+    static boolean captureKnownIdentity(SourceDocument document, byte[] originalBytes, OerSourceRouting router) {
+        capture(document, null, originalBytes, router);
+        return "sha_verified".equals(identity(document).getIdentityStatus());
+    }
+
+    /** Persist first-pass identity separately from full parser completion. */
+    public static boolean captureObservation(SourceDocument document, DocumentParser.ParsedDocument observation, byte[] originalBytes) {
+        capture(document, observation, originalBytes);
+        OerDocumentIdentity identity = identity(document);
+        List<OerDocumentIdentity.Evidence> hints = OerSourceRouting.drawingMetadata(originalBytes);
+        for (OerDocumentIdentity.Evidence hint : hints) {
+            identity.getIdentityEvidence().add(hint);
+            identity.getCandidates().add(new OerDocumentIdentity.Candidate("DRAWING", "unknown", hint.getLocation() + ": " + hint.getReason()));
+        }
+        document.setOerIdentityJson(JsonUtils.write(identity));
+        boolean readable = java.util.Arrays.asList("sha_verified", "content_supported", "content_supported_non_drawing", "format_supported_non_drawing")
+                .contains(identity.getIdentityStatus()) && !"DRAWING".equals(identity.getKind());
+        if (!readable) document.setParseStatus("IDENTITY_PENDING");
+        return readable;
+    }
+
     /** The parser binds its own input bytes; legacy mock results cannot inherit old upload identities. */
     public static void captureParsed(SourceDocument document, DocumentParser.ParsedDocument parsed) {
         String digest=parsed==null?null:parsed.getSourceSha256();
@@ -66,6 +107,15 @@ public final class OerSourceMetadata {
     private static void persist(SourceDocument document, DocumentParser.ParsedDocument parsed,
                                 String digest, OerSourceRouting router) {
         OerDocumentIdentity identity = router.route(document.getFileName(), digest, parsed);
+        OerDocumentIdentity previous = document.getOerIdentityJson() == null ? null : identity(document);
+        if (previous != null && digest.equals(previous.getSourceSha256())) {
+            for (OerDocumentIdentity.Evidence evidence : previous.getIdentityEvidence())
+                if ("pdf_metadata_candidate".equals(evidence.getBasis())) identity.getIdentityEvidence().add(evidence);
+            for (OerDocumentIdentity.Candidate candidate : previous.getCandidates())
+                if ("DRAWING".equals(candidate.getKind())) identity.getCandidates().add(candidate);
+            if ("unknown".equals(identity.getIdentityStatus()) && java.util.Arrays.asList("content_supported_non_drawing", "format_supported_non_drawing").contains(previous.getIdentityStatus()))
+                identity.setIdentityStatus(previous.getIdentityStatus());
+        }
         if ("source_identity_mismatch".equals(identity.getIdentityStatus()))
             throw new IllegalArgumentException("Parsed metadata belongs to different source bytes");
         document.setSourceSha256(digest);

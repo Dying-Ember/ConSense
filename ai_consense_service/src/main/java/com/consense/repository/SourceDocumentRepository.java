@@ -56,6 +56,7 @@ public interface SourceDocumentRepository extends JpaRepository<SourceDocument, 
 
     /** Complete business inputs; the retained native archive is not consumed by these readers. */
     interface BusinessSourceMetadata extends FileDisplayMetadata {
+        String getNormalCandidateJson();
         String getStoragePath();
         String getStructuredContentJson();
         String getContentType();
@@ -69,7 +70,7 @@ public interface SourceDocumentRepository extends JpaRepository<SourceDocument, 
             + "d.oerIdentityJson as oerIdentityJson, d.sourceSha256 as sourceSha256, "
             + "d.pageCount as pageCount, d.ocrUsed as ocrUsed, d.textContent as textContent, "
             + "d.parseCoverageJson as parseCoverageJson, d.storagePath as storagePath, "
-            + "d.structuredContentJson as structuredContentJson, d.contentType as contentType, "
+            + "d.structuredContentJson as structuredContentJson, d.normalCandidateJson as normalCandidateJson, d.contentType as contentType, "
             + "d.sizeBytes as sizeBytes, d.createdAt as createdAt from SourceDocument d "
             + "where d.projectId = :projectId order by d.id asc")
     List<BusinessSourceMetadata> findBusinessSourceMetadataByProjectId(@Param("projectId") String projectId);
@@ -83,6 +84,7 @@ public interface SourceDocumentRepository extends JpaRepository<SourceDocument, 
             d.setParseStatus(metadata.getParseStatus());d.setParseMessage(metadata.getParseMessage());d.setOerIdentityJson(metadata.getOerIdentityJson());d.setSourceSha256(metadata.getSourceSha256());
             d.setPageCount(metadata.getPageCount());d.setOcrUsed(metadata.getOcrUsed());d.setTextContent(metadata.getTextContent());d.setParseCoverageJson(metadata.getParseCoverageJson());
             d.setStoragePath(metadata.getStoragePath());d.setStructuredContentJson(metadata.getStructuredContentJson());d.setContentType(metadata.getContentType());
+            d.setNormalCandidateJson(metadata.getNormalCandidateJson());
             d.setSizeBytes(metadata.getSizeBytes());d.setCreatedAt(metadata.getCreatedAt());result.add(d);
         }
         return result;

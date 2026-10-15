@@ -37,6 +37,7 @@ final class FixedVettingReferences {
                 : new FixedVettingReferences(client, client.search("vetting", topic, limit));
     }
     boolean isEmpty() { return hits.isEmpty(); }
+    JsonNode pointer(String id) {SearchHit hit=hits.get(id);if(hit==null)throw new IllegalArgumentException("Fixed reference is outside this packet catalog");return client.evidence(hit).pointer();}
     static boolean isFixed(Chunk chunk) { return chunk != null && SOURCE_CLASS.equals(chunk.getSourceClass()); }
 
     List<Chunk> chunks() {

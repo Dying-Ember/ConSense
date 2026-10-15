@@ -1,0 +1,8 @@
+ARG JAVA_RUNTIME_IMAGE
+FROM ${JAVA_RUNTIME_IMAGE}
+WORKDIR /app
+COPY consense-service.jar /app/consense-service.jar
+COPY fonts/ /usr/local/share/fonts/consense/
+USER 10001:10001
+EXPOSE 8080
+ENTRYPOINT ["java", "-jar", "/app/consense-service.jar"]

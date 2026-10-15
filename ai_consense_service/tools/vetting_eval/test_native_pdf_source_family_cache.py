@@ -56,6 +56,16 @@ class NativePdfSourceFamilyCacheTest(unittest.TestCase):
         self.assertEqual(self.family, self.framed(parents=True))
         self.assertEqual(1, len(self.registry._derived_results))
 
+    def test_family_reader_closure_rejects_changed_table_dependency(self):
+        self.assertIn('native_pdf_table_projection.py', family_module._DEPENDENCIES)
+        self.warm(); original = Path.read_bytes
+        def changed(path):
+            raw = original(path)
+            return raw + b'\n# authored changed table reader\n' if path.name == 'native_pdf_table_projection.py' else raw
+        with patch.object(Path, 'read_bytes', changed), self.assertRaises(CanonicalProjectionError) as error:
+            family_module._software(self.store, capture=None)
+        self.assertEqual('source_family_software_changed', error.exception.code)
+
     def test_independent_advisory_registry_reads_vetting_family_without_consumer_rewrite(self):
         # setUpClass used the real authored producer and publisher under the
         # Vetting configuration. A different query on that same registry would

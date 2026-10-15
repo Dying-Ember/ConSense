@@ -21,7 +21,17 @@ from test_canonical_projection import fixture
 # A tiny authored PNG; distinct trailing authored identifiers are harmless to
 # the image container and ensure that wrong-page returns differ byte-for-byte.
 PNG = base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aJ1cAAAAASUVORK5CYII=')
-SOURCE_BYTES = b'%PDF-1.7\nAUTHORED-source-wire-not-a-parsed-original\n%%EOF\n'
+def authored_source_pdf():
+    from io import BytesIO
+    from pypdf import PdfWriter
+    writer=PdfWriter()
+    for _ in range(5):writer.add_blank_page(width=1000,height=2000)
+    writer.add_metadata({'/Title':'AUTHORED source-byte and page-closure contract only'})
+    output=BytesIO();writer.write(output)
+    return output.getvalue()
+
+
+SOURCE_BYTES = authored_source_pdf()
 
 
 def asset_fixture(store=None, *, source_bytes=SOURCE_BYTES, valid_images=True):

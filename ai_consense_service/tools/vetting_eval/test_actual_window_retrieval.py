@@ -11,19 +11,24 @@ import numpy as np
 import actual_window_retrieval as d
 import fresh_client_readback as r
 
-ROOT=Path(r'C:\Coding\ConSense\tmp\vetting_foundation_hardening\token-windows-20261003T031738809608Z')
+ROOT=Path(__file__).resolve().parent
 
 
 class PrepareGuards(unittest.TestCase):
     def setUp(self):
+        environment=patch.dict(os.environ,{'CONSENSE_RETRIEVAL_GRANULARITY':'windows-v1'})
+        environment.start();self.addCleanup(environment.stop)
         self.tmp=tempfile.TemporaryDirectory();self.root=Path(self.tmp.name)
+        self.tooling=self.root/'tooling_manifest.json'
+        d.write(self.tooling,{'protocol':'isolated-source-token-window-retrieval-tooling-v1',
+                             'software':[{'relativePath':'server.py','frozen':d.desc(ROOT/'server.py')}]})
         self.parent={'id':'p','documentId':1,'role':'tender','content':'Generic source text.','sourceHash':'a'*64,'parts':[{'blockId':'body:1:paragraph','anchor':'body/1','text':'Generic source text.','startOffset':0,'endOffset':20}]}
         self.raw=self.root/'parents.jsonl';self.raw.write_text(json.dumps(self.parent)+'\n');self.cm=self.root/'corpus.json';d.write(self.cm,{'corpus':d.desc(self.raw),'chunkCount':1})
         self.q=self.root/'queries.json';d.write(self.q,{'requests':[{'originalTopicOrdinal':6,'request':{'projectId':'historical','query':'generic contract terms','limit':10,'candidates':50}}]})
         self.embed=self.root/'5617a9f61b028005a4858fdac845db406aefb181';self.rank=self.root/'953dc6f6f85a1b2dbfca4c34a2796e7dde08d41e'
         for p in(self.embed,self.rank):p.mkdir();(p/'pytorch_model.bin').write_bytes(b'mock weights');(p/'tokenizer.json').write_text('mock tokenizer')
-        self.args=SimpleNamespace(window_tooling=str(ROOT/'tooling_manifest.json'),window_tooling_sha256=d.TOOLING_SHA,corpus_manifest=str(self.cm),corpus_manifest_sha256=d.desc(self.cm)['sha256'],
-            generic_query_plan=str(self.q),generic_query_plan_sha256=d.desc(self.q)['sha256'],embedding_snapshot=str(self.embed),rerank_snapshot=str(self.rank),project_id='new-project',workspace=r'C:\Coding\ConSense',
+        self.args=SimpleNamespace(window_tooling=str(self.tooling),window_tooling_sha256=d.desc(self.tooling)['sha256'],corpus_manifest=str(self.cm),corpus_manifest_sha256=d.desc(self.cm)['sha256'],
+            generic_query_plan=str(self.q),generic_query_plan_sha256=d.desc(self.q)['sha256'],embedding_snapshot=str(self.embed),rerank_snapshot=str(self.rank),project_id='new-project',workspace=str(self.root),
             out=str(self.root/'prepared'),candidates=50,limit=10,coverage_profile=True,signature_suite=False,fixed_cache_whitelist=None,fixed_cache_whitelist_sha256=None)
     def tearDown(self):self.tmp.cleanup()
     def prepared(self):

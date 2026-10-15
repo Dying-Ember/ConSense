@@ -145,9 +145,20 @@ public final class OerNativePdfObservation {
 
     private static final class GlyphStripper extends PDFTextStripper {
         private final PDPage page; private final PdfPageEvidence evidence; private final int pageNo;
+        private final PdfNativeSupport.PaintCollector paintCollector;
         GlyphStripper(int pageNo, PDPage page, PdfPageEvidence evidence) throws IOException {
             this.pageNo = pageNo; this.page = page; this.evidence = evidence;
+            paintCollector=new PdfNativeSupport.PaintCollector(page,evidence,JSON);
             setStartPage(pageNo); setEndPage(pageNo); setSortByPosition(false); setSuppressDuplicateOverlappingText(false);
+        }
+        @Override protected void processOperator(org.apache.pdfbox.contentstream.operator.Operator operator,List<org.apache.pdfbox.cos.COSBase> operands) throws IOException {
+            paintCollector.accept(operator,operands,getGraphicsState());
+            if("Do".equals(operator.getName()) && !operands.isEmpty() && operands.get(0) instanceof org.apache.pdfbox.cos.COSName
+                    && getResources()!=null && getResources().getXObject((org.apache.pdfbox.cos.COSName)operands.get(0)) instanceof org.apache.pdfbox.pdmodel.graphics.form.PDFormXObject) {
+                PdfNativeSupport.PaintCollector.State outer=paintCollector.enterChild();
+                try{super.processOperator(operator,operands);}finally{paintCollector.exitChild(outer);}return;
+            }
+            super.processOperator(operator,operands);
         }
         @Override protected void processTextPosition(TextPosition position) {
             evidence.getGlyphs().add(PdfNativeSupport.glyph(position, getGraphicsState(), page,

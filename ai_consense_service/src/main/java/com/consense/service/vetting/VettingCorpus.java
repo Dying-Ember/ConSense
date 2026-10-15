@@ -50,6 +50,9 @@ public final class VettingCorpus {
         private JsonNode canonicalPayload;
         @JsonInclude(JsonInclude.Include.NON_NULL)
         private com.consense.web.dto.CanonicalEvidenceDtos.EvidencePointer canonicalEvidence;
+        /** Ordinary candidate graph never follows the accepted canonical pointer path. */
+        @JsonInclude(JsonInclude.Include.NON_NULL)
+        private JsonNode candidateStructure;
     }
     @Data public static class Part {
         private String text, anchor, pageNo, blockId, extractionSource;
@@ -69,6 +72,12 @@ public final class VettingCorpus {
         private com.consense.document.PdfPageEvidence.PdfFormField pdfFormField;
         @JsonInclude(JsonInclude.Include.NON_NULL)
         private String nativeVisibilityStatus;
+        @JsonInclude(JsonInclude.Include.NON_NULL)
+        private JsonNode visualRegion, visualFrame, visualProvenance, nativeTableCandidate, parserPageGroup;
+        @JsonInclude(JsonInclude.Include.NON_NULL)
+        private JsonNode wordObservation;
+        @JsonInclude(JsonInclude.Include.NON_NULL)
+        private JsonNode sourcePosition;
     }
     @Data public static class NativeTableSlice {
         private String version, sourceIdentityHash, tableLocation, rowTextSha256, cellLayoutSha256;
@@ -137,45 +146,60 @@ public final class VettingCorpus {
     public static List<Chunk> chunks(List<SourceDocument> docs) {
         List<Chunk> out = new ArrayList<>();
         for (SourceDocument d : docs) {
+            int firstChunk=out.size();JsonNode candidate=NormalSourceCandidateGraph.bound(d);
             String clause = "", headingLocation = null; List<DocumentBlock> group = new ArrayList<>(); int length = 0;
             String digest = sourceHash(d);
             String owner = nvl(d.getFileKey()).trim().toUpperCase(Locale.ROOT);
             List<DocumentBlock> sourceBlocks = blocks(d);
+            Map<String,JsonNode> wordObservations=new HashMap<>();
+            for(DocumentBlock word:sourceBlocks)if(!JsonUtils.isBlankText(word.getWordStructureVersion())) {
+                if(wordObservations.containsKey(word.getId())){wordObservations.put(word.getId(),null);continue;}
+                ObjectNode observation=JsonUtils.mapper().createObjectNode();observation.put("parentBlockId",word.getId());observation.put("nativePath",word.getLocation());
+                observation.put("wordStructureVersion",word.getWordStructureVersion());observation.put("effectiveText",word.getEffectiveText());
+                observation.put("parentEffectiveTextSha256",hash(nvl(word.getEffectiveText())));observation.put("originalText",word.getOriginalText());
+                observation.put("deletedText",word.getDeletedText());observation.put("strikeText",word.getStrikeText());
+                observation.set("wordNumbering",JsonUtils.mapper().valueToTree(word.getWordNumbering()));observation.set("wordSymbols",JsonUtils.mapper().valueToTree(word.getWordSymbols()));
+                observation.set("wordWarnings",JsonUtils.mapper().valueToTree(word.getWordWarnings()));
+                observation.set("wordNativeObjects",OerModelMaterial.wordNativeObjects(JsonUtils.mapper().valueToTree(word.getWordNativeObjects())));wordObservations.put(word.getId(),observation);
+            }
             VettingSourceQuality.Info quality = VettingSourceQuality.from(d, sourceBlocks);
             Map<String,TableRow> nativeTables = nativeTables(sourceBlocks, "project_fact".equals(sourceRole(d)));
             Pattern ownedHeading = owner.isEmpty() || "OTHER".equals(owner) ? null : Pattern.compile(
                     "^(" + Pattern.quote(owner) + "(?:\\.[A-Z]+)?\\s*\\.?\\s*" + NUMBER
                             + "(?:\\.[A-Z]+" + NUMBER + ")*(?:\\.\\s*[A-Z](?=\\s|$))?)(?=\\s|\\.[A-Z]|[A-Z\\p{IsHan}]|$)", Pattern.CASE_INSENSITIVE);
             for (DocumentBlock b : sourceBlocks) {
-                if (nvl(b.getText()).trim().isEmpty()) continue;
+                // A blank widget still carries /V, /AP, /AS and unknown/conflict observations.
+                if (nvl(b.getEffectiveText()).trim().isEmpty() && b.getPdfFormField() == null && b.getVisualRegion() == null && b.getNativeTableCandidate() == null && b.getParserPageGroup() == null && b.getWordNativeObjects().isEmpty()) continue;
                 String detected = heading(b, owner, ownedHeading);
                 boolean supplementary = Arrays.asList("header", "footer", "footnote", "endnote").contains(b.getKind());
                 String nextClause = supplementary ? "" : detected != null ? detected : clause;
                 boolean continued = detected != null && detected.equals(clause) && continuedTitle(b);
                 boolean headingChanged = (detected != null && !continued) || supplementary;
                 boolean pageChanged = !group.isEmpty() && !Objects.equals(b.getPageNo(), group.get(0).getPageNo());
-                if (!group.isEmpty() && (length + b.getText().length() > 1400 || pageChanged || headingChanged)) {
-                    emit(out, d, digest, clause, headingLocation, group, nativeTables, quality); group = new ArrayList<>(); length = 0;
+                if (!group.isEmpty() && (length + b.getEffectiveText().length() > 1400 || pageChanged || headingChanged)) {
+                    emit(out, d, digest, clause, headingLocation, group, nativeTables, quality, wordObservations); group = new ArrayList<>(); length = 0;
                 }
                 clause = nextClause;
                 if (headingChanged) headingLocation = clause.isEmpty() ? null : b.getLocation();
                 // Very long tables/pages are split with offsets into the same source block.
-                if (b.getText().length() > 1400) {
-                    if (!group.isEmpty()) { emit(out, d, digest, clause, headingLocation, group, nativeTables, quality); group.clear(); length = 0; }
-                    for (int step = 0; step < b.getText().length(); step += 1200) {
-                        int start = step, end = Math.min(start + 1400, b.getText().length());
-                        if (start > 0 && Character.isLowSurrogate(b.getText().charAt(start))
-                                && Character.isHighSurrogate(b.getText().charAt(start - 1))) start--;
-                        if (end < b.getText().length() && Character.isHighSurrogate(b.getText().charAt(end - 1))
-                                && Character.isLowSurrogate(b.getText().charAt(end))) end--;
+                if (b.getEffectiveText().length() > 1400 && b.getPdfFormField() == null && b.getVisualRegion() == null && b.getWordNativeObjects().isEmpty()) {
+                    if (!group.isEmpty()) { emit(out, d, digest, clause, headingLocation, group, nativeTables, quality, wordObservations); group.clear(); length = 0; }
+                    for (int step = 0; step < b.getEffectiveText().length(); step += 1200) {
+                        int start = step, end = Math.min(start + 1400, b.getEffectiveText().length());
+                        if (start > 0 && Character.isLowSurrogate(b.getEffectiveText().charAt(start))
+                                && Character.isHighSurrogate(b.getEffectiveText().charAt(start - 1))) start--;
+                        if (end < b.getEffectiveText().length() && Character.isHighSurrogate(b.getEffectiveText().charAt(end - 1))
+                                && Character.isLowSurrogate(b.getEffectiveText().charAt(end))) end--;
                         DocumentBlock part = new DocumentBlock(); part.setId(b.getId() + ":" + start);
                         part.setLocation(b.getLocation() + " @" + start); part.setPageNo(b.getPageNo());
-                        part.setText(b.getText().substring(start, end)); part.setSource(b.getSource());
-                        part.setBbox(b.getBbox()); emit(out, d, digest, clause, headingLocation, Collections.singletonList(part), nativeTables, quality);
+                        part.setText(b.getEffectiveText().substring(start, end)); part.setSource(b.getSource());
+                        part.setSourcePosition(b.getSourcePosition());
+                        part.setBbox(b.getBbox()); emit(out, d, digest, clause, headingLocation, Collections.singletonList(part), nativeTables, quality, wordObservations);
                     }
-                } else { group.add(b); length += b.getText().length() + 1; }
+                } else { group.add(b); length += b.getEffectiveText().length() + 1; }
             }
-            if (!group.isEmpty()) emit(out, d, digest, clause, headingLocation, group, nativeTables, quality);
+            if (!group.isEmpty()) emit(out, d, digest, clause, headingLocation, group, nativeTables, quality, wordObservations);
+            for(int i=firstChunk;i<out.size();i++)out.get(i).setCandidateStructure(NormalSourceCandidateGraph.selected(candidate,out.get(i)));
         }
         return out;
     }
@@ -233,11 +257,11 @@ public final class VettingCorpus {
         // Historical saved native table rows may lack the source label; OCR/PDF/legacy blocks do not establish native cells.
         return "table_row".equals(block.getKind()) && (source.isEmpty() || "docx".equals(source))
                 && !nvl(block.getId()).trim().isEmpty() && cells != null && !cells.isEmpty()
-                && cells.stream().noneMatch(Objects::isNull) && String.join(" | ", cells).equals(block.getText());
+                && cells.stream().noneMatch(Objects::isNull) && String.join(" | ", cells).equals(block.getEffectiveText());
     }
     private static String heading(DocumentBlock block, String owner, Pattern ownedHeading) {
         String kind = nvl(block.getKind()), style = nvl(block.getParagraphStyleName()).isEmpty()
-                ? nvl(block.getParagraphStyle()) : block.getParagraphStyleName(), text = nvl(block.getText()).trim();
+                ? nvl(block.getParagraphStyle()) : block.getParagraphStyleName(), text = nvl(block.getEffectiveText()).trim();
         boolean paragraph = "paragraph".equals(kind);
         boolean pdf = Arrays.asList("pdf_line", "ocr_line").contains(kind);
         boolean table = "table_row".equals(kind);
@@ -292,16 +316,16 @@ public final class VettingCorpus {
     private static boolean continuedTitle(DocumentBlock block) {
         // Repeated table/paragraph titles continue the original source scope only when
         // the source explicitly marks them as continued. New headings still bound it.
-        String firstLine = nvl(block.getText()).split("\\r?\\n", 2)[0];
+        String firstLine = nvl(block.getEffectiveText()).split("\\r?\\n", 2)[0];
         return CONTINUED_TITLE.matcher(firstLine).find();
     }
 
     private static void emit(List<Chunk> out, SourceDocument d, String digest, String clause, String headingLocation, List<DocumentBlock> blocks,
-                             Map<String,TableRow> nativeTables, VettingSourceQuality.Info quality) {
+                             Map<String,TableRow> nativeTables, VettingSourceQuality.Info quality, Map<String,JsonNode> wordObservations) {
         String qualityHash = VettingSourceQuality.hash(quality);
         Chunk c = new Chunk(); DocumentBlock b = blocks.get(0);
         c.setId(UUID.nameUUIDFromBytes((METADATA_VERSION + "|" + SEGMENTATION_VERSION + "|" + NATIVE_TABLE_METADATA_VERSION + "|" + SOURCE_QUALITY_METADATA_VERSION + "|" + qualityHash + "|" + sourceRole(d) + "|" + d.getId() + "|" + digest + "|" + blocks.stream().map(DocumentBlock::getId).collect(Collectors.joining(","))).getBytes(StandardCharsets.UTF_8)).toString());
-        c.setContent(blocks.stream().map(DocumentBlock::getText).collect(Collectors.joining("\n")));
+        c.setContent(blocks.stream().map(DocumentBlock::getEffectiveText).collect(Collectors.joining("\n")));
         c.setDocumentId(String.valueOf(d.getId())); c.setFileKey(nvl(d.getFileKey())); c.setFileName(d.getFileName());
         c.setRole(sourceRole(d));
         c.setSourceSha256(d.getSourceSha256()); c.setOriginalSourceSha256(d.getSourceSha256());
@@ -325,12 +349,14 @@ public final class VettingCorpus {
         if (blocks.size() == 1 && b.getBbox() != null) c.setBbox(Arrays.stream(b.getBbox()).boxed().collect(Collectors.toList()));
         List<Part> parts = new ArrayList<>();
         for (DocumentBlock item : blocks) {
-            Part p = new Part(); p.setText(item.getText()); p.setExtractionSource(item.getSource()); p.setAnchor(prefix + nvl(item.getLocation()));
+            Part p = new Part(); p.setText(item.getEffectiveText()); p.setExtractionSource(item.getSource()); p.setAnchor(prefix + nvl(item.getLocation()));
             Matcher offset = Pattern.compile("^(.*) @(\\d+)$").matcher(nvl(item.getLocation()));
             boolean split = offset.matches();
             int start = split ? Integer.parseInt(offset.group(2)) : 0;
             p.setBlockId(split ? nvl(item.getId()).replaceFirst(":\\d+$", "") : item.getId());
-            p.setStartOffset(start); p.setEndOffset(start + nvl(item.getText()).length());
+            JsonNode word=wordObservations.get(p.getBlockId());if(word!=null)p.setWordObservation(word.deepCopy());
+            p.setStartOffset(start); p.setEndOffset(start + nvl(item.getEffectiveText()).length());
+            p.setSourcePosition(item.getSourcePosition()==null?null:item.getSourcePosition().deepCopy());
             // A split row does not expose complete cells; do not attach values outside its submitted source slice.
             if (!split) p.setTable(nativeTables.get(item.getId()));
             else if (nativeTables.get(p.getBlockId()) != null)
@@ -339,6 +365,11 @@ public final class VettingCorpus {
                 if(item.getWordCells()!=null&&!item.getWordCells().isEmpty())p.setWordCells(item.getWordCells());
                 if(item.getPdfGlyphs()!=null&&!item.getPdfGlyphs().isEmpty())p.setPdfGlyphs(item.getPdfGlyphs());
                 p.setPdfFormField(item.getPdfFormField()); p.setNativeVisibilityStatus(item.getNativeVisibilityStatus());
+                p.setVisualRegion(item.getVisualRegion()==null?null:item.getVisualRegion().deepCopy());
+                p.setVisualFrame(item.getVisualFrame()==null?null:item.getVisualFrame().deepCopy());
+                p.setVisualProvenance(item.getVisualProvenance()==null?null:item.getVisualProvenance().deepCopy());
+                p.setNativeTableCandidate(item.getNativeTableCandidate()==null?null:item.getNativeTableCandidate().deepCopy());
+                p.setParserPageGroup(item.getParserPageGroup()==null?null:item.getParserPageGroup().deepCopy());
             }
             p.setPageNo(item.getPageNo() == null ? null : "P" + item.getPageNo());
             if (item.getBbox() != null) p.setBbox(Arrays.stream(item.getBbox()).boxed().collect(Collectors.toList()));
@@ -350,12 +381,21 @@ public final class VettingCorpus {
     public static FindingEvidence evidence(Chunk c, String side, String quote) {
         boolean located = quote != null && quote.trim().length() >= 12 && normalize(c.getContent()).contains(normalize(quote));
         String anchor = c.getAnchor(), page = c.getPageNo(); List<Double> bbox = c.getBbox();
-        if (located && c.getParts() != null) for (Part part : c.getParts()) {
-            if (normalize(part.getText()).contains(normalize(quote))) { anchor = part.getAnchor(); page = part.getPageNo(); bbox = part.getBbox(); break; }
+        Part occurrence=null;
+        if (located && c.getParts() != null) {
+            List<Part> matches=c.getParts().stream().filter(part->normalize(part.getText()).contains(normalize(quote))).collect(Collectors.toList());
+            if(matches.size()==1){occurrence=matches.get(0);anchor=occurrence.getAnchor();page=occurrence.getPageNo();bbox=occurrence.getBbox();}
         }
         FindingEvidence evidence=new FindingEvidence(side, c.getDocumentId(), c.getFileKey(), c.getFileName(), page, anchor, quote, located,
                 c.getCanonicalEvidence()==null?c.getSourceHash():c.getCanonicalEvidence().getJavaParsedSourceHash(), bbox);
-        evidence.setCanonicalEvidence(c.getCanonicalEvidence());return evidence;
+        evidence.setCanonicalEvidence(c.getCanonicalEvidence());evidence.setOriginalSourceSha256(c.getOriginalSourceSha256());evidence.setSourceRole(c.getRole());
+        JsonNode position=occurrence==null||c.getCanonicalEvidence()!=null?null:nativePosition(occurrence.getSourcePosition(),c.getOriginalSourceSha256());
+        if(position!=null)evidence.setNativePositions(Collections.singletonList(position));
+        return evidence;
+    }
+    static JsonNode nativePosition(JsonNode position,String originalSha) {
+        return position!=null&&originalSha!=null&&originalSha.matches("[a-f0-9]{64}")&&"docx_native".equals(position.path("kind").asText())
+                &&originalSha.equals(position.path("sourceSha256").asText())?position.deepCopy():null;
     }
     public static String normalize(String text) { return nvl(text).replaceAll("[\\s\\p{Z}]+", " ").trim(); }
     public static String hash(String text) {

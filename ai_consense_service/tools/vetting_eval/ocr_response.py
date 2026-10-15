@@ -3,6 +3,8 @@
 The caller owns the engine lock. Candidate cells and rejected text remain
 separate from returned OCR lines and can never become trusted source content.
 """
+import hashlib
+import json
 import math
 import time
 
@@ -35,6 +37,40 @@ def result_lines(result, image, *, include_polygons=False):
             line.update(lineId='ocr-line-' + str(ordinal), inputImagePolygon=polygon)
         lines.append(line)
     return lines
+
+
+def baseline_observation(result, image, input_bytes):
+    """Carry actual line observations; RapidOCR is not a complete layout parser."""
+    observed = result_lines(result, image, include_polygons=True)
+    lines = [{key: row[key] for key in ('text', 'confidence', 'bbox')} for row in observed]
+    regions = []
+    for row in observed:
+        polygon = [[float(x), float(y)] for x, y in row['inputImagePolygon']]
+        xs, ys = [p[0] for p in polygon], [p[1] for p in polygon]
+        regions.append({'id': row['lineId'], 'kind': 'text', 'text': row['text'],
+                        'originalText': row['text'], 'confidence': row['confidence'],
+                        'polygon': polygon,
+                        'bbox': [min(xs), min(ys), max(xs)-min(xs), max(ys)-min(ys)],
+                        'geometryStatus': 'inside_input_frame' if all(
+                            0 <= x <= image.width and 0 <= y <= image.height for x, y in polygon)
+                            else 'outside_input_frame',
+                        'channel': 'rapidocr', 'semanticStatus': 'unverified'})
+    input_sha = hashlib.sha256(input_bytes).hexdigest()
+    raw_lines = json.dumps(regions, ensure_ascii=False, sort_keys=True,
+                           separators=(',', ':'), allow_nan=False).encode('utf-8')
+    return {'text': '\n'.join(row['text'] for row in lines), 'lines': lines,
+            'regions': regions,
+            'frame': {'imageSha256': input_sha, 'width': image.width, 'height': image.height,
+                      'coordinateUnit': 'pixel', 'bboxFormat': 'xywh'},
+            'provenance': {'engine': 'RapidOCR CPU baseline', 'modelRevision': None,
+                           'configSha256': None, 'inputSha256': input_sha,
+                           'terminal': 'completed',
+                           'rawResponseSha256': hashlib.sha256(raw_lines).hexdigest(),
+                           'rawIdentityScope': 'canonical_json_from_actual_line_observations',
+                           'limitations': ['Model/config identity not established by line output',
+                                           'No complete layout or dual-parser execution']},
+            'coverage': {'sourceContentStatus': 'unknown', 'structureStatus': 'unverified',
+                         'dualParserComplete': False, 'observedRegionCount': len(regions)}}
 
 
 def recognize_vetting_page(engine, image):

@@ -16,8 +16,10 @@ class VettingStandardLanguageBoundaryTest {
     @Test void unchangedStandardGrammarDoesNotBecomeAProjectLanguageFinding() {
         assertTrue(review("The Contractor are responsible for the Works.", "language").getCandidates().isEmpty());
     }
-    @Test void userAddedWordingStillReceivesLanguageReview() {
-        assertEquals(1, review("The Contractor are responsible for the additional harbour inspections.", "language").getCandidates().size());
+    @Test void differentStandardFragmentDoesNotConfirmProjectAddedWording() {
+        VettingSemanticReview.Result result=review("The Contractor are responsible for the additional harbour inspections.", "language");
+        assertTrue(result.getCandidates().isEmpty());
+        assertTrue(result.getWarnings().stream().anyMatch(s->s.contains("项目新增或改写未确认")));
     }
     @Test void standardWordingDoesNotSuppressSubstantiveRiskReview() {
         assertEquals(1, review("The Contractor are responsible for the Works.", "risk").getCandidates().size());
@@ -37,7 +39,7 @@ class VettingStandardLanguageBoundaryTest {
         record.setEvidence(Collections.singletonList(quote));
         when(ai.completeStructuredJsonList(anyString(), anyString(), eq(Record.class), any(), anyList()))
             .thenReturn(Collections.singletonList(record));
-        return new VettingSemanticReview(ai, props, retrieval).review("p", Arrays.asList(tender, standard), "en", (n,s)->{});
+        return VettingTokenFixture.review(ai, props, retrieval).review("p", Arrays.asList(tender, standard), "en", (n,s)->{});
     }
     private Chunk chunk(String id, String role, String text) {
         Chunk c = new Chunk(); c.setId(id); c.setDocumentId(id); c.setSourceHash("fixture-hash");

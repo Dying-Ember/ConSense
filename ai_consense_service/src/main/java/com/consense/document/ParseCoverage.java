@@ -1,6 +1,8 @@
 package com.consense.document;
 
 import lombok.Data;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.annotation.JsonInclude;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -21,4 +23,12 @@ public class ParseCoverage {
     /** Legacy OCR declarations may lack the individual physical-page identities. */
     private boolean ocrQualityPageScopeUnknown;
     private List<String> limitations = new ArrayList<>();
+    @JsonInclude(JsonInclude.Include.NON_EMPTY)
+    private List<JsonNode> visualCoverage = new ArrayList<>();
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private JsonNode readingPlan;
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private JsonNode nativeTableCandidates;
+    @JsonInclude(JsonInclude.Include.NON_EMPTY)
+    private List<JsonNode> wholePageGroups=new ArrayList<>();
 }

@@ -2,7 +2,8 @@
 
 This independent recipe accepts only source-reviewed whole prose units. Actual
 PDFBox glyph Unicode is the text channel; parser blocks are separate whole-block
-layout evidence. Tables and AP-to-page text are deliberately unsupported. Every
+layout evidence. Explicit whole-table groups retain reviewed glyph topology;
+AP-to-page text remains unsupported. Every
 validation cold-reads CAS and reconstructs all derived fields, not just seals.
 """
 from __future__ import annotations
@@ -18,6 +19,8 @@ from canonical_projection import (CanonicalProjectionError, MODULES, ROLES, _byt
                                   _fail, _fields, _hash, _name, _pages, _quality, _sha)
 from competition_scope import EXCLUDED_CLASSES, SOURCE_PURPOSES
 from native_pdf_observation import validate_native_pdf_bundle
+from native_pdf_table_projection import (project_page_assets, project_table_groups, table_region_ids,
+                                        VERSION as TABLE_VERSION)
 from parser_capture import rebuild_independent_capture_batch, rebuild_file_capture
 from source_reference import SCHEMA as REFERENCE_SCHEMA, read_source_reference, validate_source_reference
 from structured_parser_evidence import (assert_complete_dual, build_dual_parser_evidence,
@@ -29,12 +32,14 @@ ADOPTION_SCHEMA = 'consense.native-pdf-canonical-adoption.v1'
 REVIEW_SCHEMA = 'consense.native-pdf-region-review.v1'
 LEGACY_VERSION = 'source-reviewed-native-pdf-prose-and-visual-layout-v1'
 VERSION = 'source-reviewed-native-pdf-prose-and-visual-layout-v2'
+TABLE_PROJECTION_VERSION = 'source-reviewed-native-pdf-prose-tables-and-page-assets-v3'
 LEGACY_PROJECTION_DEPENDENCIES = ('artifact_store.py', 'canonical_projection.py', 'competition_scope.py',
                           'native_pdf_observation.py', 'parser_capture.py', 'source_reference.py',
                           'structured_parser_evidence.py', 'token_windows.py')
 PROJECTION_DEPENDENCIES = (*LEGACY_PROJECTION_DEPENDENCIES,
                            'pdf_selected_source.py', 'selected_source_raster.py')
-VERSION_DEPENDENCIES = {LEGACY_VERSION: LEGACY_PROJECTION_DEPENDENCIES, VERSION: PROJECTION_DEPENDENCIES}
+VERSION_DEPENDENCIES = {LEGACY_VERSION: LEGACY_PROJECTION_DEPENDENCIES, VERSION: PROJECTION_DEPENDENCIES,
+                       TABLE_PROJECTION_VERSION: (*PROJECTION_DEPENDENCIES, 'native_pdf_table_projection.py')}
 STORAGE_SHAPE = 'full-native-pdf-joint-internal-v1'
 RELATIONS = {'parent', 'continuation', 'qualifier', 'caption', 'header', 'sidebar', 'margin_note'}
 
@@ -124,7 +129,8 @@ def _scope(manifest, native):
     pages = _pages(manifest['scope'].get('requiredPhysicalPages'), native['source']['pageCount'], 'requiredPhysicalPages')
     _sha(manifest['scope'].get('scopePolicySha256'), 'scopePolicySha256')
     _fail(set(pages) <= set(native['observation']['selectedPhysicalPages']), 'native_page_capture_missing')
-    _fail(manifest.get('tableGroups') == [] and manifest.get('assets') == [], 'native_pdf_tables_and_custom_assets_not_supported')
+    _fail(isinstance(manifest.get('tableGroups'), list) and isinstance(manifest.get('assets'), list),
+          'native_pdf_tables_and_assets_must_be_explicit')
     return pages, _quality(manifest.get('quality'))
 
 
@@ -186,7 +192,7 @@ def _native_region_geometry(ids, glyphs, page, region, reference_page):
               'native_glyph_source_region_disjoint', glyphId=gid)
 
 
-def _layout(row, region, reference_page, dual):
+def _layout(row, region, reference_page, dual, *, allow_table=False):
     declaration = row.get('layout')
     _fields(declaration, {'selectedRunId', 'candidateBlockIds', 'rasterMappingReview'}, 'illegal_native_pdf_layout_binding')
     runs = {run['runId']: run for run in dual['runs']}
@@ -221,7 +227,7 @@ def _layout(row, region, reference_page, dual):
         for bid in ids:
             _fail(bid in blocks, 'visual_block_not_in_same_original_page')
             block = blocks[bid]
-            _fail('table' not in block and block['label'] not in {'table', 'table_body', 'table_cell'},
+            _fail(allow_table or ('table' not in block and block['label'] not in {'table', 'table_body', 'table_cell'}),
                   'native_pdf_table_branch_not_supported')
             projected = project_bbox_to_original(run, page, block['bbox'])
             _fail(projected.get('status') == 'verified', 'visual_original_geometry_unknown')
@@ -285,6 +291,8 @@ def _regions(manifest, native, dual, reference, required):
             glyphs[gid] = (glyph, span, '/pageObservations/' + str(pi) + '/nativePdfEvidence/glyphs/' + str(gi))
     ref_regions = {region['regionId']: region for region in reference['regions']}
     ref_pages = {page['pageId']: page for page in reference['pages']}
+    table_regions = table_region_ids(manifest)
+    table_members = {rid for group in manifest['tableGroups'] for rid in group['regionIds']}
     result, used = {}, set()
     rows = review.get('regions'); _fail(isinstance(rows, list) and rows, 'explicit_pdf_region_review_required')
     for row in rows:
@@ -293,8 +301,9 @@ def _regions(manifest, native, dual, reference, required):
         rid = _name(row.get('regionId'), 'regionId'); physical = row.get('physicalPageNo')
         _fail(rid in ref_regions and rid not in result and type(physical) is int and physical in required, 'reviewed_pdf_region_missing')
         region = ref_regions[rid]; anchor = region['sourceAnchor']; page = observed[physical]
-        _fail(anchor['physicalPageNo'] == physical and region.get('role') not in {'table', 'cell', 'native_table', 'table_cell'}
-              and region.get('tableId') is None, 'native_pdf_region_page_or_table_unsupported')
+        _fail(anchor['physicalPageNo'] == physical and
+              (rid in table_regions or region.get('role') not in {'table', 'cell', 'native_table', 'table_cell'})
+              and (region.get('tableId') is None or rid in table_members), 'native_pdf_region_page_or_table_unsupported')
         _box(region.get('bboxNormalized'), 'source_region_measured_geometry_required')
         ids = _ids(row.get('capturedGlyphIds'), 'complete_native_region_members_required', nonempty=True)
         _fail(all(gid in glyphs and order[gid][0] == physical and gid not in used for gid in ids)
@@ -304,7 +313,7 @@ def _regions(manifest, native, dual, reference, required):
               'source_review_attributes_required')
         _native_region_geometry(ids, glyphs, page, region, ref_pages[anchor['pageId']])
         text, spans = _native_text(row, glyphs)
-        layout = _layout(row, region, ref_pages[anchor['pageId']], dual)
+        layout = _layout(row, region, ref_pages[anchor['pageId']], dual, allow_table=rid in table_regions)
         used.update(ids)
         result[rid] = {'blockId': 'native-pdf-region:' + _hash({'bundle': native['bundleSha256'], 'regionId': rid}),
              'referenceRegionId': rid, 'physicalPageNo': physical, 'text': text, 'startOffset': 0, 'endOffset': utf16_length(text),
@@ -331,15 +340,18 @@ def _regions(manifest, native, dual, reference, required):
     return result
 
 
-def _units(manifest, parts, reference):
+def _units(manifest, parts, reference, table_groups):
     rows = manifest.get('units'); _fail(isinstance(rows, list) and rows, 'explicit_whole_text_units_required')
     positions = {rid: (page['sourceAnchor']['physicalPageNo'], index) for page in reference['pages']
                  for index, rid in enumerate(page['regionIdsInReadingOrder'])}
     units, owners = [], {}
     for row in rows:
-        _fields(row, {'unitId', 'scope', 'regionIds', 'partSeparator', 'clause'}, 'illegal_native_pdf_whole_unit')
+        _fields(row, {'unitId', 'scope', 'regionIds', 'partSeparator', 'clause', 'tableGroupId'}, 'illegal_native_pdf_whole_unit')
         uid = _name(row.get('unitId'), 'unitId'); ids = _ids(row.get('regionIds'), 'whole_unit_regions_required', nonempty=True)
-        _fail(row.get('scope') == 'whole_text_unit' and uid not in {u['unitId'] for u in units}
+        table_group = table_groups.get(row.get('tableGroupId'))
+        _fail((row.get('scope') == 'whole_text_unit' and 'tableGroupId' not in row
+               or row.get('scope') == 'whole_table_group' and table_group is not None and ids == table_group['regionIds'])
+              and uid not in {u['unitId'] for u in units}
               and all(rid in parts and rid not in owners for rid in ids), 'native_pdf_unit_membership_incomplete_or_duplicate')
         _fail(ids == sorted(ids, key=lambda rid: positions[rid]), 'whole_unit_source_region_reading_order_mismatch')
         _fail(row.get('partSeparator') == {'kind': 'reviewed_region_boundary', 'text': '\n'}, 'typed_region_separator_required')
@@ -350,8 +362,15 @@ def _units(manifest, parts, reference):
             _fail(clause.get('headingRegionId') in ids and next(r for r in reference['regions']
                   if r['regionId'] == clause['headingRegionId']).get('clauseId') == clause['clauseId'], 'native_pdf_clause_source_review_missing')
         for rid in ids: owners[rid] = uid
-        units.append({**copy.deepcopy(row), 'parts': [copy.deepcopy(parts[rid]) for rid in ids],
-                      'physicalPages': sorted({parts[rid]['physicalPageNo'] for rid in ids})})
+        unit = {**copy.deepcopy(row), 'parts': [copy.deepcopy(parts[rid]) for rid in ids],
+                'physicalPages': sorted({parts[rid]['physicalPageNo'] for rid in ids})}
+        if table_group is not None: unit['nativeTables'] = [copy.deepcopy(table_group)]
+        units.append(unit)
+    _fail({u.get('tableGroupId') for u in units if u.get('tableGroupId')} == set(table_groups),
+          'native_pdf_table_group_not_wholly_adopted')
+    table_members = {rid for group in table_groups.values() for rid in group['regionIds']}
+    _fail(all(u['scope'] == 'whole_table_group' or not table_members.intersection(u['regionIds']) for u in units),
+          'native_pdf_table_member_adopted_as_prose')
     _fail(set(owners) == set(parts), 'reviewed_native_region_not_whole_unit_adopted')
     _fail([positions[u['regionIds'][0]] for u in units] == sorted(positions[u['regionIds'][0]] for u in units), 'unit_source_order_mismatch')
     required_relations = [i for i, r in enumerate(reference.get('relations', []))
@@ -391,13 +410,17 @@ def _assemble(native, dual, manifest, descriptors, store, *, replay_identity=Non
     dual_validation = _dual(dual, native, pages, store)
     reference, reference_validation = _reference(manifest, native, pages, store)
     parts = _regions(manifest, native, dual, reference, pages)
-    units, relations = _units(manifest, parts, reference)
-    version = VERSION
+    table_groups = project_table_groups(manifest, parts, reference, native)
+    assets = project_page_assets(manifest, reference, store)
+    units, relations = _units(manifest, parts, reference, table_groups)
+    version = TABLE_PROJECTION_VERSION if table_groups or assets else VERSION
     if replay_identity is not None:
         _fail(isinstance(replay_identity, dict)
               and replay_identity.get('projectionVersion') in VERSION_DEPENDENCIES,
               'unsupported_native_pdf_retained_producer_identity')
         version = replay_identity['projectionVersion']
+        _fail(not (table_groups or assets) or version == TABLE_PROJECTION_VERSION,
+              'native_pdf_table_adoption_requires_table_recipe_version')
     dependency_names = VERSION_DEPENDENCIES[version]
     identity = {'projectionVersion': version,
         'nativeBundleSha256': native['bundleSha256'], 'dualBundleSha256': dual['bundleSha256'],
@@ -425,7 +448,7 @@ def _assemble(native, dual, manifest, descriptors, store, *, replay_identity=Non
                         projectionDependencySha256={name: _sha(dependencies[name], name)
                                                     for name in dependency_names})
         _fail(identity == replay_identity, 'native_pdf_retained_producer_identity_mismatch')
-    canonical = {'units': units, 'relations': relations, 'assetRefs': []}
+    canonical = {'units': units, 'relations': relations, 'assetRefs': assets}
     source_hash = _hash({'projectionIdentity': identity, 'canonical': canonical})
     revision = _hash({'sourceHash': source_hash, 'projectionIdentity': identity})
     chunks = []
@@ -433,21 +456,23 @@ def _assemble(native, dual, manifest, descriptors, store, *, replay_identity=Non
         chunk = {'id': 'canonical-native-pdf:' + _hash({'revision': revision, 'unitId': unit['unitId']}),
             'unitId': unit['unitId'], 'content': '\n'.join(part['text'] for part in unit['parts']),
             'parts': copy.deepcopy(unit['parts']), 'physicalPages': unit['physicalPages'], 'pageNo': unit['physicalPages'][0],
-            'anchor': unit['parts'][0]['anchor'], 'sourceOrder': ordinal, 'canonicalScope': 'whole_text_unit',
+            'anchor': unit['parts'][0]['anchor'], 'sourceOrder': ordinal, 'canonicalScope': unit['scope'],
             'sourceHash': source_hash, 'projectionRevisionSha256': revision, 'projectionVersion': version,
             'metadataVersion': version, 'segmentationVersion': 'whole-source-reviewed-pdf-region-units-v1',
-            'nativeTableMetadataVersion': 'native-pdf-no-table-adoption-v1',
+            'nativeTableMetadataVersion': TABLE_VERSION if unit.get('nativeTables') else 'native-pdf-no-table-adoption-v1',
             'sourceQualityMetadataVersion': 'native-pdf-observation-and-source-review-unknown-v1',
             'sourceQualityHash': identity['qualitySha256'], 'sourceQuality': copy.deepcopy(quality),
             'sourceSpans': [{'blockId': p['blockId'], 'startOffset': p['startOffset'], 'endOffset': p['endOffset'],
                 'sourcePosition': p['sourcePosition'], 'nativeTextSpans': p['nativeTextSpans']} for p in unit['parts']],
             'adoption': {k: copy.deepcopy(v) for k, v in unit.items() if k != 'parts'},
             'relations': [r for r in relations if unit['unitId'] in (r['fromUnitId'], r['toUnitId'])],
-            'textAssembly': copy.deepcopy(unit['partSeparator']), 'assetRefs': [], 'humanConfirmed': False,
+            'textAssembly': copy.deepcopy(unit['partSeparator']),
+            'assetRefs': [copy.deepcopy(asset) for asset in assets if asset['physicalPageNo'] in unit['physicalPages']], 'humanConfirmed': False,
             'originalSourceSha256': native['source']['sourceSha256'], **copy.deepcopy(identity)}
         if unit.get('clause'):
             chunk['clauseId'] = unit['clause']['clauseId']
             chunk['clauseHeadingLocation'] = parts[unit['clause']['headingRegionId']]['anchor']
+        if unit.get('nativeTables'): chunk['nativeTables'] = copy.deepcopy(unit['nativeTables'])
         paragraph_map(chunk); chunks.append(chunk)
     observed = native['observation']['selectedPhysicalPages']
     result = {'schema': SCHEMA, 'producerKind': 'native_pdf', 'storageShape': STORAGE_SHAPE,
@@ -459,7 +484,7 @@ def _assemble(native, dual, manifest, descriptors, store, *, replay_identity=Non
         'nativeObservationBundle': native if _validation_replay else copy.deepcopy(native),
         'dualParserBundle': dual if _validation_replay else copy.deepcopy(dual),
         'sourceReference': reference, 'manifest': copy.deepcopy(manifest), 'canonical': canonical, 'chunks': chunks,
-        'assetRefs': [], 'captureCompleteness': {'native': native_validation, 'dual': dual_validation, 'reference': reference_validation},
+        'assetRefs': assets, 'captureCompleteness': {'native': native_validation, 'dual': dual_validation, 'reference': reference_validation},
         'unadoptedGlyphs': copy.deepcopy(manifest['regionReview']['unadoptedGlyphs']),
         'unobservedOriginalPhysicalPages': [p for p in range(1, native['source']['pageCount'] + 1) if p not in observed],
         'semanticScopeVerified': False, 'humanConfirmed': False, 'wholeOriginalSourceCoverage': 'unknown',
@@ -469,6 +494,9 @@ def _assemble(native, dual, manifest, descriptors, store, *, replay_identity=Non
             'Existing forms/AP and styles remain in complete raw CAS evidence; AP-to-page text, native tables and cells are unsupported',
             'Native glyph geometry is derived from actual page frames, not independently pixel-verified raster visibility',
             'Internal full-evidence snapshot is not a public transport or a claim of deployed business acceptance']}
+    if version == TABLE_PROJECTION_VERSION:
+        result['limitations'][0] = 'Only explicitly source-reviewed whole units enter this candidate projection; unadopted regions remain unknown'
+        result['limitations'][3] = 'Table topology and blanks require complete source review; provider grids do not prove complete source coverage and AP text remains unsupported'
     result['projectionSha256'] = _hash(result)
     return result
 

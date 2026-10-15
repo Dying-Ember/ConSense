@@ -8,7 +8,7 @@ const source = await readFile(new URL('../src/views/AdviceView.vue', import.meta
 const script = parse(source).descriptor.scriptSetup.content.replace(/^import .*\r?\n/gm, '')
 const compiled = ts.transpileModule(script, { compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.None } }).outputText
 const setup = new Function('deps', `
-  const { computed, nextTick, ref, watch, onMounted, useI18n, useAppStore, useLocalized, adviceApi } = deps;
+  const { computed, nextTick, ref, watch, onMounted, onBeforeUnmount, useI18n, useRoute, useRouter, useAppStore, useLocalized, adviceApi, streamAdvice, stopAdvice, window } = deps;
   ${compiled}
   return { messages, scope, scopeDocuments, ask, askQuick, askPrecedence, activeCitation, openMessageSources, asking, clarificationReply, replyToClarification, clearChat };
 `)
@@ -18,15 +18,20 @@ function harness(overrides = {}) {
   const mounted = [], scopeCalls = [], asks = []
   const store = vue.reactive({ activeProjectId: 'A', notify() {}, setBusy() {}, clearBusy() {}, captureLlmSelection: () => ({ profileId: 'minimax-cn' }) })
   const api = {
+    sessions: async () => [],
+    createSession: async (projectId, scope, basisScope) => ({ id: `session-${projectId}-${scope}`, projectId, scope, basisScope }),
     messages: async () => [], quickQuestions: async () => [], indexStatus: async () => ({ chunks: 1 }),
     sources: async (id, scope) => { scopeCalls.push([id, scope]); return [{ documentId: id, fileName: scope, included: true }] },
-    ask: async (...args) => { asks.push(args); return { messageId: 101, basisScope: 'insufficient', grounded: false, unknownScope: args[2], citations: [], sources: [], clarifications: ['Are quantities firm?'] } },
+    ask: async (...args) => { asks.push(args); return { messageId: 101, sessionId: args[5], basisScope: 'insufficient', grounded: false, unknownScope: args[2], citations: [], sources: [], clarifications: ['Are quantities firm?'] } },
     ...overrides
   }
   const effects = vue.effectScope()
   const view = effects.run(() => setup({ computed: vue.computed, nextTick: vue.nextTick, ref: vue.ref, watch: vue.watch,
-    onMounted: fn => mounted.push(fn), useI18n: () => ({ t: key => key }), useAppStore: () => store,
-    useLocalized: () => ({ pick: value => value }), adviceApi: api }))
+    onMounted: fn => mounted.push(fn), onBeforeUnmount() {}, useI18n: () => ({ t: key => key }),
+    useRoute: () => ({ query: {} }), useRouter: () => ({ replace: async () => undefined }), useAppStore: () => store,
+    useLocalized: () => ({ pick: value => value }), adviceApi: api,
+    streamAdvice: (id, request, options) => api.ask(id, request.question, request.scope, options.llmSelection, request.replyToMessageId, request.sessionId, request.basisScope),
+    stopAdvice: async () => {}, window: { setTimeout: (fn, ms) => { const timer = setTimeout(fn, ms); timer.unref(); return timer }, clearTimeout } }))
   return { view, store, scopeCalls, asks, mount: async () => { mounted.forEach(fn => fn()); await settle() }, dispose: () => effects.stop() }
 }
 {
@@ -44,11 +49,13 @@ function harness(overrides = {}) {
   await h.view.ask('Firm quantities, already signed')
   assert.equal(h.asks[1][4], 101, 'explicit reply binds the original clarification message')
   assert.equal(h.view.clarificationReply.value, null)
-  h.view.replyToClarification(h.view.messages.value.at(-1))
+  const clarification = h.view.messages.value.at(-1)
+  h.view.replyToClarification(clarification)
   h.view.scope.value = 'tender'; await settle()
   assert.equal(h.view.clarificationReply.value, null, 'scope changes cancel clarification binding')
+  assert.equal(h.view.messages.value.length, 0, 'scope changes clear the visible history')
   h.view.scope.value = 'contract'; await settle()
-  h.view.replyToClarification(h.view.messages.value.at(-1))
+  h.view.replyToClarification(clarification)
   await h.view.askQuick({ text: 'Independent quick question' })
   assert.equal(h.asks.at(-1)[4], undefined, 'quick questions start a new question, even when a reply was selected')
   h.view.replyToClarification(h.view.messages.value.at(-1))

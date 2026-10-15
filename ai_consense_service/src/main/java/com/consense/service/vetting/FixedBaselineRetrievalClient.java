@@ -58,6 +58,7 @@ public class FixedBaselineRetrievalClient {
         ObjectNode request=JSON.createObjectNode();request.put("projectId",properties.getProjectId());request.put("query",query);
         request.put("role","standard");request.put("candidates",Math.max(limit,properties.getCandidates()));request.put("limit",limit);
         JsonNode response=parse(http.postJson(baseUrl()+"/retrieve",write(request),properties.getTimeoutMs()));
+        if(migrationConfigured()) validateMigratedResponse(c,response);
         require(properties.getProjectId().equals(response.path("projectId").asText())&&properties.getIndexSignature().equals(response.path("indexSignature").asText()),"retrieval_identity_mismatch");
         require("source-bound-window-points-full-parent-results-v1".equals(response.path("mode").asText())&&response.path("hits").isArray(),"retrieval_shape_invalid");
         Map<String,JsonNode> seedPayload=new LinkedHashMap<>();Map<String,Double> scores=new HashMap<>();
@@ -103,7 +104,9 @@ public class FixedBaselineRetrievalClient {
             require(required.equals(members)&&members.containsAll(stringSet(unit.path("originIds"))),"source_unit_required_members_incomplete");
             verifiedSourceUnits.add(normalizedDigest(compact));
         }
-        require(origins.equals(seedPayload.keySet()),"source_unit_seeds_not_complete");checkCurrent(c);
+        require(origins.equals(seedPayload.keySet()),"source_unit_seeds_not_complete");
+        List<JsonNode> selected=new ArrayList<>();for(FixedReferenceEvidence item:all.values())selected.add(item.getPayload());
+        assertOriginals(c,selected);checkCurrent(c);
         return new ArrayList<>(all.values());
     }
     public FixedReferenceEvidence evidence(VectorStore.SearchHit hit) {
@@ -111,20 +114,25 @@ public class FixedBaselineRetrievalClient {
         JsonNode p=JSON.valueToTree(hit.getPayload());
         require(properties.getManifestSha256().equals(p.path("fixedBaselineManifestSha256").asText())&&c.manifest.path("version").asText().equals(p.path("fixedBaselineVersion").asText()),"fixed_reference_hit_pin_mismatch");
         ObjectNode original=((ObjectNode)p).deepCopy();for(String key:LOCAL_FIELDS) original.remove(key);
-        validateParent(c,hit.getId(),original);
+        validateParent(c,hit.getId(),original);readParent(c,hit.getId());
         JsonNode unit=p.get("fixedReferenceSourceUnit");
         if(unit!=null) require(unit.path("requiredMemberIds").isArray()&&(stringSet(unit.path("requiredMemberIds")).contains(hit.getId())
                 ||"unknown".equals(unit.path("status").asText())&&unit.path("requiredMemberIds").size()==0&&stringSet(unit.path("originIds")).contains(hit.getId()))
                 &&verifiedSourceUnits.contains(normalizedDigest(unit)),"fixed_reference_group_missing_or_changed");
         return makeEvidence(c,hit.getId(),hit.getScore(),original,unit,p.path("fixedReferenceOrigin").asBoolean());
     }
-    public void assertCurrent(List<VectorStore.SearchHit> hits) { Catalog c=ready();checkCurrent(c);for(VectorStore.SearchHit h:hits)evidence(h); }
+    public void assertCurrent(List<VectorStore.SearchHit> hits) {
+        Catalog c=ready();checkCurrent(c);List<JsonNode> selected=new ArrayList<>();
+        for(VectorStore.SearchHit h:hits)selected.add(evidence(h).getPayload());
+        assertOriginals(c,selected);checkCurrent(c);
+    }
     public String toModelMaterial(List<VectorStore.SearchHit> hits,int maxCharacters) {
+        assertCurrent(hits);
         List<FixedReferenceEvidence> rows=new ArrayList<>();for(VectorStore.SearchHit h:hits)rows.add(evidence(h));
         return FixedBaselineModelMaterial.render(rows,maxCharacters);
     }
     public VectorStore.SearchHit readOnlyHitById(String id) {
-        Catalog c=ready();checkCurrent(c);JsonNode p=readParent(c,id);
+        Catalog c=ready();checkCurrent(c);JsonNode p=readParent(c,id);assertOriginals(c,Collections.singletonList(p));checkCurrent(c);
         return makeEvidence(c,id,0,p,null,false).asHit();
     }
     private FixedReferenceEvidence makeEvidence(Catalog c,String id,double score,JsonNode original,JsonNode unit,boolean origin) {
@@ -196,8 +204,33 @@ public class FixedBaselineRetrievalClient {
     private void checkCurrent(Catalog c) {
         require(c.configIdentity.equals(configIdentity()),"fixed_reference_configuration_changed");
         try{c.manifestPin.current();c.corpusPin.current();}catch(IOException e){throw new IllegalStateException("fixed_reference_frozen_files_unavailable",e);}
+        if(migrationConfigured()) migrationQuery(c);
+    }
+    /** Re-hash only selected source originals; metadata timestamps cannot attest byte identity. */
+    private void assertOriginals(Catalog c,Collection<JsonNode> selected) {
+        Set<String> checked=new HashSet<>();
+        for(JsonNode parent:selected) {
+            readParent(c,parent.path("id").asText());
+            String expected=parent.path("originalSourceSha256").asText();if(!checked.add(expected))continue;
+            JsonNode descriptor=null;
+            for(JsonNode source:c.manifest.path("originalSources"))if(expected.equals(source.path("sha256").asText())) {
+                require(descriptor==null,"fixed_original_descriptor_ambiguous");descriptor=source;
+            }
+            require(descriptor!=null&&text(descriptor.path("path"))&&descriptor.path("bytes").isIntegralNumber()
+                    &&descriptor.path("bytes").asLong()>0&&shaText(expected),"fixed_original_descriptor_invalid");
+            try {
+                Path path=Paths.get(descriptor.path("path").asText()).toAbsolutePath().normalize();Pin before=new Pin(path);
+                require(Files.isRegularFile(path)&&before.bytes==descriptor.path("bytes").asLong(),"fixed_original_size_changed");
+                MessageDigest digest=sha();long count=0;byte[] buffer=new byte[65536];
+                try(InputStream input=new BufferedInputStream(Files.newInputStream(path))) {
+                    int n;while((n=input.read(buffer))!=-1){digest.update(buffer,0,n);count+=n;}
+                }
+                before.current();require(count==before.bytes&&expected.equals(hex(digest.digest())),"fixed_original_sha_changed");
+            }catch(IOException e){throw new IllegalStateException("fixed_reference_original_unavailable",e);}
+        }
     }
     private void validateHealth(Catalog c,JsonNode h) {
+        if(migrationConfigured()) { validateMigratedHealth(c,h);return; }
         JsonNode signature=c.plan.path("signature"),w=h.path("retrieval").path("sourceWindows");
         require("ok".equals(h.path("status").asText())&&"local".equals(h.path("mode").asText())&&h.path("offline").asBoolean()&&"cuda".equals(h.path("device").asText())&&h.path("indexSignatureVersion").asInt()==3,"fixed_runtime_health_invalid");
         require("source-bound-window-points-full-parent-results-v1".equals(w.path("contract").asText())&&"max".equals(w.path("denseAggregation").asText())&&"max".equals(w.path("rerankAggregation").asText()),"fixed_runtime_contract_invalid");
@@ -212,12 +245,111 @@ public class FixedBaselineRetrievalClient {
         require(d.isObject()&&text(d.path("path"))&&d.path("bytes").isIntegralNumber()&&d.path("bytes").asLong()>=0&&d.path("bytes").asLong()<=maximum&&shaText(d.path("sha256").asText()),"fixed_artifact_descriptor_invalid");
         try {Path p=Paths.get(d.path("path").asText());require(Files.size(p)==d.path("bytes").asLong(),"fixed_artifact_size_changed");byte[] raw=Files.readAllBytes(p);require(hash(raw).equals(d.path("sha256").asText()),"fixed_artifact_sha_changed");return parse(raw);}catch(IOException e){throw new IllegalStateException("fixed_artifact_unavailable",e);}
     }
-    private String configIdentity(){return properties.getManifestPath()+"|"+properties.getManifestSha256()+"|"+properties.getProjectId()+"|"+properties.getIndexSignature()+"|"+baseUrl();}
+    private String configIdentity(){return properties.getManifestPath()+"|"+properties.getManifestSha256()+"|"+properties.getProjectId()+"|"+properties.getIndexSignature()+"|"+baseUrl()+"|"+properties.getMigrationReceiptPath()+"|"+properties.getMigrationReceiptSha256()+"|"+properties.getQueryRuntimePath()+"|"+properties.getQueryRuntimeSha256();}
+    private boolean migrationConfigured() {
+        return properties.getMigrationReceiptPath()!=null||properties.getMigrationReceiptSha256()!=null
+                ||properties.getQueryRuntimePath()!=null||properties.getQueryRuntimeSha256()!=null;
+    }
+    private JsonNode pinned(String path,String expected) {
+        require(path!=null&&!path.trim().isEmpty()&&shaText(expected),"migration_pin_configuration_missing");
+        try {require(Files.size(Paths.get(path))<=properties.getMaxResponseBytes(),"migration_pin_too_large");byte[] raw=Files.readAllBytes(Paths.get(path));
+            require(hash(raw).equals(expected),"migration_pin_bytes_changed");return parse(raw);
+        }catch(IOException e){throw new IllegalStateException("migration_pin_unavailable",e);}
+    }
+    private void verifyArtifact(JsonNode descriptor) {
+        require(text(descriptor.path("path"))&&descriptor.path("bytes").isIntegralNumber()&&descriptor.path("bytes").asLong()>0
+                &&shaText(descriptor.path("sha256").asText()),"migration_artifact_descriptor_invalid");
+        try {Path path=Paths.get(descriptor.path("path").asText());Pin before=new Pin(path);MessageDigest d=sha();long count=0;
+            try(InputStream stream=new BufferedInputStream(Files.newInputStream(path))) {byte[] bytes=new byte[65536];int n;while((n=stream.read(bytes))!=-1){d.update(bytes,0,n);count+=n;}}
+            before.current();require(count==descriptor.path("bytes").asLong()&&hex(d.digest()).equals(descriptor.path("sha256").asText()),"migration_artifact_changed");
+        }catch(IOException e){throw new IllegalStateException("migration_artifact_unavailable",e);}
+    }
+    /** Two externally pinned stages: historical storage migration and current query recipe. */
+    private JsonNode migrationQuery(Catalog c) {
+        JsonNode m=pinned(properties.getMigrationReceiptPath(),properties.getMigrationReceiptSha256());
+        JsonNode q=pinned(properties.getQueryRuntimePath(),properties.getQueryRuntimeSha256());
+        require("consense.qdrant-server-migration.v1".equals(m.path("schema").asText())
+                &&"completed_full_storage_readback_candidate_not_adopted".equals(m.path("status").asText())
+                &&m.path("targetAdopted").isBoolean()&&!m.path("targetAdopted").asBoolean()
+                &&m.path("activeConfigurationChanged").isBoolean()&&!m.path("activeConfigurationChanged").asBoolean()
+                &&m.path("allOriginalPersistentStateBytesUnchanged").asBoolean(),"migration_receipt_incomplete");
+        require(properties.getManifestSha256().equals(m.path("frozenManifest").path("sha256").asText())
+                &&properties.getIndexSignature().equals(m.path("indexSignature").asText())
+                &&m.path("embeddingSignature").equals(c.plan.path("signature"))
+                &&m.path("originalMetadata").equals(c.manifest.path("persistedMetadata"))
+                &&m.path("parentCount").equals(c.manifest.path("coverage").path("totalParents"))
+                &&m.path("vectorWindowCount").equals(c.manifest.path("persistedVectorCount")),"migration_source_identity_changed");
+        String collection=m.path("target").path("collection").asText(),url=m.path("target").path("url").asText();
+        require(collection.startsWith("oer_server_")&&!collection.equals(c.manifest.path("collection").asText())
+                &&url.matches("http://(127\\.0\\.0\\.1|localhost|\\[::1\\]):[0-9]+"),"migration_target_invalid");
+        for(String field:Arrays.asList("schema","dimension","dtype","pointCount","embeddingSignatureSha256"))
+            require(m.path("targetVectorIntegrity").path(field).equals(c.manifest.path("vectorIntegrity").path(field))
+                    &&m.path("sourceVectorIntegrity").path(field).equals(c.manifest.path("vectorIntegrity").path(field)),"migration_vector_seal_changed:"+field);
+        // Local warm cosine values and cold stored float32 values have separately recorded exact hashes.
+        require(shaText(c.manifest.path("vectorIntegrity").path("persistedPointsSha256").asText())
+                &&m.path("sourceVectorIntegrity").path("pointsSha256").equals(c.manifest.path("vectorIntegrity").path("persistedPointsSha256"))
+                &&m.path("targetVectorIntegrity").equals(m.path("sourceVectorIntegrity")),"migration_original_persisted_vectors_changed");
+        require("consense.migrated-server-query-runtime.v1".equals(q.path("schema").asText())
+                &&properties.getMigrationReceiptSha256().equals(q.path("migrationReceiptSha256").asText())
+                &&baseUrl().equals(q.path("queryApiBaseUrl").asText())&&q.path("target").equals(m.path("target"))
+                &&properties.getIndexSignature().equals(q.path("indexSignature").asText())
+                &&q.path("readOnly").asBoolean()&&q.path("runtimeCompatibilityVerified").isBoolean()&&!q.path("runtimeCompatibilityVerified").asBoolean()
+                &&q.path("fullVectorIntegrity").equals(m.path("targetVectorIntegrity")),"migration_query_binding_changed");
+        JsonNode identity=q.path("queryIdentity"),recipe=q.path("queryRecipe"),sig=c.plan.path("signature");
+        for(String field:Arrays.asList("contract","embedding","corpus","windowRecipe","embeddingPreprocessing","normalized","structuralSelectionPolicy","signatureVersion"))
+            require(identity.path(field).equals(sig.path(field)),"migration_query_source_recipe_changed:"+field);
+        for(String field:Arrays.asList("model","files","backendSha256","tokenizerClass","fast","modelMaxLength"))
+            require(identity.path("tokenizerAndModelFiles").path(field).equals(sig.path("tokenizerAndModelFiles").path(field)),"migration_query_model_changed:"+field);
+        for(String kind:Arrays.asList("embedding","reranker")) {
+            JsonNode tokenizer="embedding".equals(kind)?identity.path("tokenizerAndModelFiles"):recipe.path("rerankTokenizerAndModelFiles");
+            JsonNode publication=readDescriptor(c.manifest.path("modelPublications").path(kind),properties.getMaxResponseBytes());
+            require(c.manifest.path("modelPublications").path(kind).path("sha256").equals(tokenizer.path("checkpointPublication").path("manifestSha256"))
+                    &&shaText(tokenizer.path("checkpointPublication").path("manifestSha256").asText())
+                    &&publication.path("model").equals(tokenizer.path("model"))&&publication.path("files").equals(tokenizer.path("files"))
+                    &&publication.path("publicationSha256").equals(tokenizer.path("checkpointPublication").path("publicationSha256"))
+                    &&shaText(tokenizer.path("backendSha256").asText())&&text(tokenizer.path("tokenizerClass"))
+                    &&tokenizer.path("fast").asBoolean()&&tokenizer.path("modelMaxLength").isIntegralNumber(),"migration_query_publication_changed:"+kind);
+        }
+        for(String name:Arrays.asList("server.py","window_runtime.py","migrated_qdrant_index.py","migrate_qdrant_server.py","fixed_development_baseline_runtime.py","verify_retrieval_offline.py","token_windows.py","index_integrity.py","retrieval_source_units.py","checkpoint_publication.py","fixed_vector_cache.py","qdrant_backend.py","workspace_root.py","embedding_compatibility.py","structural_retrieval.py","preparation_cache.py","checkpoint_identity.py"))
+            require(shaText(recipe.path("algorithms").path(name).asText()),"migration_query_software_closure_missing:"+name);
+        require(queryDigest(identity).equals(q.path("queryRuntimeSignature").asText()),"migration_query_signature_changed");
+        verifyArtifact(m.path("candidateMetadata"));return q;
+    }
+    private void validateMigratedHealth(Catalog c,JsonNode actual) {
+        JsonNode q=migrationQuery(c),expected=q.path("health"),w=actual.path("retrieval").path("sourceWindows"),recipe=q.path("queryRecipe");
+        require("ok".equals(actual.path("status").asText())&&"server".equals(actual.path("mode").asText())&&actual.path("offline").asBoolean()
+                &&actual.path("indexSignatureVersion").asInt()==3,"migrated_runtime_health_invalid");
+        for(String field:Arrays.asList("device","models","runtime","retrieval"))
+            require(actual.path(field).equals(expected.path(field)),"migrated_runtime_health_changed:"+field);
+        require(actual.path("runtime").path("embedding").equals(q.path("queryIdentity").path("runtime"))
+                &&actual.path("runtime").path("reranker").equals(recipe.path("rerankRuntime"))
+                &&actual.path("models").path("embedding").equals(q.path("queryIdentity").path("embedding"))
+                &&actual.path("models").path("reranker").equals(recipe.path("rerankTokenizerAndModelFiles").path("model")),"migrated_runtime_profile_changed");
+        for(String field:Arrays.asList("contract","embeddingWindows","rerankWindows","denseAggregation","rerankAggregation","algorithms","structuralSelection"))
+            require(w.path(field).equals(recipe.path(field)),"migrated_runtime_recipe_changed:"+field);
+        require(w.path("embeddingWindows").equals(c.plan.path("signature").path("windowRecipe"))
+                &&w.path("rerankWindows").equals(c.plan.path("signature").path("windowRecipe")),"migrated_window_recipe_changed");
+    }
+    private void validateMigratedResponse(Catalog c,JsonNode response) {
+        JsonNode q=migrationQuery(c),access=response.path("indexAccess");
+        require("pinned-migrated-server-read-only".equals(access.path("mode").asText())&&access.path("readOnly").asBoolean()
+                &&access.path("runtimeCompatibilityVerified").isBoolean()&&!access.path("runtimeCompatibilityVerified").asBoolean()
+                &&properties.getMigrationReceiptSha256().equals(access.path("migrationReceiptSha256").asText()),"migrated_response_access_invalid");
+        for(String field:Arrays.asList("target","queryIdentity","queryRecipe","queryRuntimeSignature","fullVectorIntegrity"))
+            require(access.path(field).equals(q.path(field)),"migrated_response_identity_changed:"+field);
+    }
     private String baseUrl(){String u=properties.getBaseUrl();require(u!=null&&u.matches("https?://[^/]+/?"),"fixed_reference_base_url_invalid");return u.endsWith("/")?u.substring(0,u.length()-1):u;}
     private JsonNode parse(String text){require(text!=null&&text.getBytes(StandardCharsets.UTF_8).length<=properties.getMaxResponseBytes(),"fixed_wire_too_large");return parse(text.getBytes(StandardCharsets.UTF_8));}
     private static JsonNode parse(byte[] bytes){try{return READER.readValue(bytes);}catch(IOException e){throw new IllegalStateException("fixed_json_invalid",e);}}
     private static ObjectNode normalizeParent(JsonNode p){require(p.isObject(),"fixed_parent_not_object");ObjectNode r=((ObjectNode)p).deepCopy();List<String> nulls=new ArrayList<>();r.fields().forEachRemaining(e->{if(e.getValue().isNull())nulls.add(e.getKey());});nulls.forEach(r::remove);return r;}
     private static String normalizedDigest(JsonNode n){return hash(write(sorted(n)).getBytes(StandardCharsets.UTF_8));}
+    /** Python query signatures retain integer JSON encoding, including large tokenizer limits. */
+    private static String queryDigest(JsonNode n){return hash(write(signatureJson(n)).getBytes(StandardCharsets.UTF_8));}
+    private static JsonNode signatureJson(JsonNode n) {
+        if(n.isObject()){ObjectNode o=JSON.createObjectNode();TreeMap<String,JsonNode> fields=new TreeMap<>();n.fields().forEachRemaining(e->fields.put(e.getKey(),e.getValue()));fields.forEach((k,v)->o.set(k,signatureJson(v)));return o;}
+        if(n.isArray()){ArrayNode a=JSON.createArrayNode();n.forEach(v->a.add(signatureJson(v)));return a;}
+        require(!n.isFloatingPointNumber(),"migration_query_signature_noninteger");return n;
+    }
     private static JsonNode sorted(JsonNode n){if(n.isObject()){ObjectNode o=JSON.createObjectNode();TreeMap<String,JsonNode> map=new TreeMap<>();n.fields().forEachRemaining(e->map.put(e.getKey(),e.getValue()));map.forEach((k,v)->o.set(k,sorted(v)));return o;}if(n.isArray()){ArrayNode a=JSON.createArrayNode();n.forEach(v->a.add(sorted(v)));return a;}if(n.isNumber())return DecimalNode.valueOf(n.decimalValue().stripTrailingZeros());return n;}
     private static Set<String> stringSet(JsonNode array){require(array.isArray(),"fixed_identity_array_missing");Set<String>s=new HashSet<>();for(JsonNode v:array){require(text(v)&&s.add(v.asText()),"fixed_identity_array_duplicate_or_invalid");}return s;}
     private static boolean text(JsonNode n){return n.isTextual()&&!n.asText().trim().isEmpty();}

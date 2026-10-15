@@ -46,7 +46,7 @@ export function createPdfPreview<Document extends PdfPreviewDocument>(adapter: P
     } finally { if (current()) rendering = undefined }
   }
 
-  async function open(source: string) {
+  async function open(source: string, initialPage = 1) {
     const version = ++sourceVersion; renderVersion++; release()
     state.page = 1; state.pages = 0; state.error = ''; state.status = source ? 'loading' : 'idle'
     if (!source || closed) return
@@ -55,7 +55,7 @@ export function createPdfPreview<Document extends PdfPreviewDocument>(adapter: P
       const pdf = await task.promise
       if (closed || version !== sourceVersion) { void pdf.destroy().catch(() => {}); return }
       document = pdf; state.pages = pdf.numPages
-      await showPage(1)
+      await showPage(initialPage)
     } catch (caught) {
       if (!closed && version === sourceVersion) { state.status = 'error'; state.error = caught instanceof Error ? caught.message : String(caught) }
     }

@@ -66,6 +66,8 @@ public class ConsenseProperties {
         private int structuredMaxTokens = 2048;
         private long timeoutMs = 300_000L;
         private int maxRetry = 2;
+        /** Finite native jobs may return only a completed body; default providers retain streaming. */
+        private boolean bodyStreamingEnabled = true;
         /** MiniMax only: the direct provider owns overload retry; turn off behind a retrying relay. */
         private boolean overloadRetryEnabled = true;
         @lombok.ToString.Exclude
@@ -127,6 +129,7 @@ public class ConsenseProperties {
         private Responses responses = new Responses();
         /** Explicit minimax-cn selection uses Chat unless this Vetting-only wire is responses. */
         private String minimaxCnWire = "chat-completions";
+        /** Legacy binding only; the withdrawn finding cap is never applied. */
         private int maxRiskFindings = 10;
         private boolean diffAgainstBaseline = true;
         private boolean semanticEnabled = true;
