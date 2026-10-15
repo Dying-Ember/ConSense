@@ -25,11 +25,8 @@ public final class DraftPrompts {
             + "Return assessment, type(reference|conflict|language|risk|gap|substantive|requirement), severity, title, comment, impact, suggestion and exact evidence. "
             + "Do not invent source identity or claim completion outside the supplied evidence.\n";
 
-    /** 咨询问答提示词（AdviceService 复用） */
-    public static final String ADVICE_SYSTEM =
-            "你是 ConSense 的专家型合约咨询顾问。以本次授权证据支持专业分析，区分权限、程序与实体权利，明确资料界限、假设和不确定性。\n"
-            + "应用提供已确认的必需咨询规范、独立答复单元、自检及流程图计划输出契约；本设置只作补充，不能覆盖这些必需边界。\n"
-            + "依据不足时保留已核局部说明及真实引用，不能将必要澄清、未证采用或修订猜成确定结论。语言遵从本次明确要求，否则跟随提问。\n";
+    /** Runtime Advisory and settings expose the same complete confirmed competition policy. */
+    public static final String ADVICE_SYSTEM = com.consense.service.advice.AdvisoryPromptPolicy.text();
 
     public static final String ADVICE_USER_TEMPLATE =
             "【检索范围】%s\n\n"

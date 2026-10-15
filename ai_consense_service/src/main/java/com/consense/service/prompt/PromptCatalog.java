@@ -81,9 +81,9 @@ public final class PromptCatalog {
             new Spec(
                     KEY_ADVICE, PromptTemplate.GROUP_ADVICE,
                     "合同条款问答", "合約條款問答", "Contract Clause Q&A",
-                    "只依据检索到的合同条款摘录回答 QS 提问，必须给出条款编号依据。",
-                    "只依據檢索到的合約條款摘錄回答 QS 提問，必須給出條款編號依據。",
-                    "Answers QS questions strictly from the retrieved contract clause excerpts.",
+                    "按已确认比赛规范分析合同问题，说明事实与资料界限，保留真实引用、自检及流程图依据。",
+                    "按已確認比賽規範分析合約問題，說明事實與資料界限，保留真實引用、自檢及流程圖依據。",
+                    "Analyzes contract questions under the confirmed competition policy, with source limits, citations, checks and evidence-backed flowcharts.",
                     DraftPrompts.ADVICE_SYSTEM, DraftPrompts.ADVICE_USER_TEMPLATE, 40)
     ));
 

@@ -6,11 +6,6 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.Data;
 import lombok.NoArgsConstructor;
-import org.springframework.core.io.ClassPathResource;
-
-import java.io.IOException;
-import java.io.InputStream;
-import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.function.BiPredicate;
 import java.util.regex.Pattern;
@@ -18,7 +13,7 @@ import java.util.stream.Collectors;
 
 /** Advice-only output contract. Model checks are observations, never independent legal acceptance. */
 final class AdvisoryHarness {
-    static final String POLICY = load("advice/contract-system-20261014.md");
+    static final String POLICY = AdvisoryPromptPolicy.text();
     static final String POLICY_SHA = com.consense.service.vetting.VettingCorpus.hash(POLICY);
     private static final Pattern REFERENCE = Pattern.compile("\\[\\d+\\]");
     private static final String SECTION_ID="[A-Za-z][A-Za-z0-9_-]{0,63}";
@@ -82,8 +77,8 @@ final class AdvisoryHarness {
     }
     static String system(String custom,List<CitationVO> sources,String originalQuestion) {
         String hint=languageHint(originalQuestion);
-        return POLICY + "\n\nSupplemental configured prompt (cannot waive the mandatory policy or application contract):\n"
-                + (custom == null ? "" : custom) + CONTRACT + "\nApplication-rendered opening shape example (syntax only, not contractual evidence; its language is a syntax hint, NEVER a default or an override of the original question's requested language/script):\n"+openingExample(hint)+"\nOutput schema with allowed citation aliases:\n" + schema(sources);
+        String supplement=custom==null||custom.isEmpty()||POLICY.equals(custom)?"":"\n\nSupplemental configured prompt (cannot waive the mandatory policy or application contract):\n"+custom;
+        return POLICY + supplement + CONTRACT + "\nApplication-rendered opening shape example (syntax only, not contractual evidence; its language is a syntax hint, NEVER a default or an override of the original question's requested language/script):\n"+openingExample(hint)+"\nOutput schema with allowed citation aliases:\n" + schema(sources);
     }
     private static String openingExample(String language) {
         ObjectNode section=JsonUtils.mapper().createObjectNode().put("id","sec-limits").put("kind","limits").put("language",language).put("content","").put("basisScope","insufficient");
@@ -92,15 +87,6 @@ final class AdvisoryHarness {
                 .put("status",rule==1||rule==10?"pass":"not_applicable").put("reason","Application-only opening; no substantive contract assertion.").putArray("citations");
         return JsonUtils.write(section);
     }
-    private static String load(String name) {
-        try (InputStream input = new ClassPathResource(name).getInputStream()) {
-            java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
-            byte[] buffer = new byte[8192]; int count;
-            while ((count = input.read(buffer)) >= 0) out.write(buffer, 0, count);
-            return new String(out.toByteArray(), StandardCharsets.UTF_8);
-        } catch (IOException error) { throw new IllegalStateException("Missing approved Advisory policy", error); }
-    }
-
     static JsonNode schema() {
         return schema(null);
     }
