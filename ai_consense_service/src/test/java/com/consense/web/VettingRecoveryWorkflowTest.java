@@ -229,5 +229,23 @@ class VettingRecoveryWorkflowTest {
     private static String reviewBody(JsonNode loaded,String remarks){return JsonUtils.write(Map.of("expectedRunId",loaded.path("runId").asText(),"expectedGeneratedRevisionSha256",loaded.path("generatedRevisionSha256").asText(),"expectedSourceSnapshotSha256",loaded.path("sourceSnapshotSha256").asText(),"reviewRemarks",remarks,"actionTaken","reviewed","addendumRequired",true));}
     private String project(){Project p=new Project();p.setId("recovery-"+UUID.randomUUID());p.setNameEn("Recovery fixture");p.setContractNo("TEST");projects.saveAndFlush(p);SourceDocument d=new SourceDocument();d.setProjectId(p.getId());d.setCategory(SourceDocument.CATEGORY_VETTING_PACKAGE);d.setReviewRole("tender");d.setDocumentScope("package");d.setFileKey("SCC");d.setFileName("SCC.txt");d.setParseStatus("PARSED");d.setTextContent("SCC 9.1 The contractor shall protect the works and maintain insurance throughout the contract.");d.setOcrUsed(false);documents.saveAndFlush(d);return p.getId();}
     private String start(String project)throws Exception{return JsonUtils.parse(http.perform(post("/api/vetting/"+project+"/runs")).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.code").value(0)).andReturn().getResponse().getContentAsString()).path("data").path("id").asText();}
-    private JsonNode await(String project,String id,String status)throws Exception{long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(15);JsonNode saved;do{saved=JsonUtils.parse(http.perform(get("/api/vetting/"+project+"/runs/"+id)).andReturn().getResponse().getContentAsString()).path("data");if(status.equals(saved.path("status").asText()))return saved;Thread.sleep(20);}while(System.nanoTime()<deadline);fail("Run did not reach "+status+": "+saved);return null;}
+    private JsonNode await(String project,String id,String status)throws Exception{
+        long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(15);JsonNode progress;
+        String url="/api/vetting/"+project+"/runs/"+id;
+        do{
+            progress=JsonUtils.parse(http.perform(get(url+"/progress")).andReturn().getResponse().getContentAsString()).path("data");
+            if(status.equals(progress.path("status").asText())){
+                JsonNode saved=JsonUtils.parse(http.perform(get(url)).andReturn().getResponse().getContentAsString()).path("data");
+                assertEquals(status,saved.path("status").asText());return saved;
+            }
+            Thread.sleep(20);
+        }while(System.nanoTime()<deadline);
+        StringBuilder workers=new StringBuilder("\nWorker/lock diagnostics:");
+        for(java.lang.management.ThreadInfo thread:java.lang.management.ManagementFactory.getThreadMXBean().dumpAllThreads(true,true))
+            if(thread.getThreadName().contains("consense-vetting")||thread.getThreadName().contains("scheduling")){
+                workers.append('\n').append(thread);
+                for(StackTraceElement frame:thread.getStackTrace())workers.append("\n\tat ").append(frame);
+            }
+        fail("Run did not reach "+status+": "+progress+workers);return null;
+    }
 }
