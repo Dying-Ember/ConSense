@@ -1,5 +1,50 @@
 # 单 H800 的 OER 显存、模型生命周期与 Kubernetes 调度研究
 
+<!-- oer-qwen-colocation-20261015:start -->
+## 2026-10-15 当前共驻评估：Qwen3.8-27B、完整OER与思考预算
+
+本增量回应用户最新要求：依据[修复后识别流程](../diagrams/oer-recognition-after-repair-flow.md)，将当前OER、Qwen3.8-27B、最高思考档及参考图／原证据共同纳入单H800设计。**状态仍是proposed／离线评估，未部署或变更运行配置。** 下方2026-10-12的“OCR与LLM不会同时使用”保留历史语境；本次评估新增Qwen与当前OER阶段模型共驻，不追认为旧实现已有此能力。
+
+**推荐主案：Qwen FP8权重＋原生256K、BF16 KV常驻；Paddle、MinerU、embedding、reranker顺序复用一个辅助槽。** CPU身份OCR、POI／OOXML、pdfplumber／Camelot及证据编排在CPU侧。双完整视觉仍按同原页Paddle→保存原始CAS并释放→MinerU→保存并释放，不省第二路、不降低原件覆盖或改变BGE精度。
+
+| 规划部分 | GiB | 依据与限制 |
+| --- | ---: | --- |
+| Qwen FP8权重 | 28.744 | 固定revision元数据tensor字节；实际加载可不同 |
+| 原生256K full-attention BF16 K/V | 16.000 | 16层、4 KV heads、head_dim256的数学量；不是混合引擎池保证 |
+| Qwen混合状态、工作区、图与分配器预留 | 7.256 | 工程预算，须实测 |
+| **Qwen总槽** | **52.000** | 冻结引擎须证明总槽内可容纳完整262,144总token |
+| **OER共享辅助槽** | **16.000** | max(当前单路完整OCR预算16，当前FP32串行E/R预算8)，阶段互斥；不是所有辅助全常驻 |
+| 全局驱动、残留与安全余量 | 6.000 | 工程预算，不能另把同一安全余量重复算成可用空间 |
+| **合计** | **74.000** | 80GB十进制为74.506GiB；实际准入用设备可见byte与外部所有者占用 |
+
+此表提供待测容量目标；当前Linux BF16＋ONNX完整双视觉没有可复用的H800整链峰值。历史Windows Paddle allocated约6.125GiB、MinerU raw约12.029GiB仅作压力参考，不能替代当前Linux整卡峰值；allocated、reserved、NVML不相加。OER16GiB不足时应拒绝当前共驻profile并退到Qwen完整释放后的串行路线，保失败与完整内容，不能靠裁证据、降分辨率或漏掉辅助分支换容量。
+
+16GiB full-KV不能直接转写为vLLM的`kv_cache_memory_bytes=16GiB`并保证256K：linear state、hybrid cache groups、page对齐与prefix snapshots仍需冻结引擎核验。显式KV、chunked prefill、batch及总活跃token须在52GiB总槽内校准；Qwen和MinerU不能各按整卡默认utilization自动扩池。主案一条活跃Qwen生成、一个重GPU阶段；独立逻辑session可顺序复用同一模型进程。生成或OCR事务到可持久边界后再交GPU计算租约，不承诺任意token中途抢占。
+
+**思考档与输出长度分别控制。** 固定Qwen卡最高为`reasoning_effort=xhigh`，还支持medium/low；`preserve_thinking`默认true，历史思考计入后续输入。常规原子语义／类型建议medium；多级跨文件影响、完整分支、引用传播、默认／例外冲突、疑点调查与最终覆盖审查建议xhigh。升级依据用程序结构信号和来源缺口，不能只用模型自信；所有不确定项保留。当前尚无两档同题效果／成本对照。
+
+当前全图参考输入133,996 token已经包括27,683 token的精简旧图投影；投影中的参与关系不自动成为已核因果。按用户要求，每条参考影响链还须附逐关键关系的原证据包，保原文、出处、条件／例外、版本与核验状态；一段不足支持整链时附多份。局部任务带相关子图＋全局索引，集中复核可带完整投影和必要证据。已有全图计数不是全部新增原证据补齐后的最终请求大小。
+
+当前输入133,996＋65,536思考与最终输出预留＝199,532，原生总窗尚余62,612给指令／历史／补查。若按官方超长建议给262,144 reasoning＋131,072 final，则合计527,212，已比512K多2,924且未加新增上下文，须另用1M profile。最高思考档不要求每次耗尽这些输出额度；结束、length耗尽、失败和未决须分别记账。
+
+| 扩展模式，同一工作区／安全预留口径 | 规划GiB | 结论 |
+| --- | ---: | --- |
+| 256K BF16 KV＋共享OER | 74.000 | 主案待测，不新增KV低精度变量 |
+| 256K FP8 KV＋共享OER | 66.000 | 余量后备，数值与内核另验 |
+| 512K BF16 KV＋共享OER | 90.000 | 单卡不准入 |
+| 512K FP8 KV＋共享OER | 74.000 | 条件后备，仍放不下上述527,212场景 |
+| 1,000,000 FP8 KV＋共享OER | 88.518 | 不作为同驻留方案 |
+| 1,000,000 FP8 KV、OER CUDA进程完整退出 | 72.518 | 独占后备；YaRN、FP8 KV、完整长请求和实际峰值另验 |
+
+**反复加卸载的时间取决于频次，H800算力不能代替I/O与进程初始化。** 当前`complete_ocr.py`以一页为事务分别启动两路owned provider。P页的启停成本约为P×(Paddle启动＋释放＋MinerU启动＋释放)，之外还要加实际解析。现本地BGE相邻事件约1.758／1.571秒仅是当时小模型重构区间，不能外推27B／H800或完整OCR冷启动。27B常驻可避免日常反复大模型装载；首次cold、warm page cache、RAM热副本、sleep/wake和重新prefill仍分别测量。
+
+为控制导入成本，后续可把OCR进程寿命改成原件或有界批次，理论启停次数从2P变为2×ceil(P/B)。这是待实现的调度改造，当前代码不是该批次复用实现。必须保每页CAS、原页对应、完整双候选、取消／超时、未执行页和精确进程树释放；候选协调等待同页两路齐备。当前E/R正式入口强制FP32 serial offload，双小模型热驻留属于另一待验证profile，不直接放宽原窗口／索引身份。
+
+最多五容器的候选拓扑为App(Java＋Vue)、MySQL、Qdrant、CPU coordinator、单GPU owner。现实现仍是五个CPU容器加一个活动GPU Job，峰值六；固定worker还需真实operation／epoch／进程所有权与持久回执，不能伪造Job／Pod UID。不同原生环境分别冻结，不能混装同一Python环境。当前Java也没有完整Qwen xhigh／preserved-thinking请求与消耗接线，模型卡支持不代表产品已经支持。
+
+本地可重算依据在`.local/h800-oer-qwen-colocation-20261015/`的`inventory.json`、`runtime-fit.json`、`memory-review.json`；精确Qwen配置／权重／KV依据在`.local/drafting-typed-contract-design-20261015/context-capacity-qwen.json`，输入包见`context-budget-root.json`、`context-budget-ntt-sct.json`、`context-budget-scc.json`。模型身份、H800实际容量、每阶段整卡与host峰值、load／warm／release／prefill／decode及全请求时间须独立实测。没有运行GPU／模型／WSL、下载权重、改服务／DB／实际配置；本增量不关闭既有来源或部署验收门。
+<!-- oer-qwen-colocation-20261015:end -->
+
 日期：2026-10-12，Asia/Shanghai。状态：**研究与 proposed 配方，未部署、未采用为新规则，未测 H800**。本轮只读取本地文档／源码及公开官方资料，新增本文；没有安装、下载权重、调用模型、修改配置、停止服务或接触集群。
 
 ## 1. 当前边界与结论

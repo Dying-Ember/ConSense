@@ -5,6 +5,7 @@ import argparse
 import hashlib
 import importlib
 import os
+import re
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict
@@ -15,6 +16,7 @@ from native_pdf_canonical_projection import SCHEMA, _json, produce_native_pdf
 from native_pdf_projection_transport import (STORAGE_SHAPE, VERSION, MAX_SNAPSHOT_BYTES,
                                             publish_native_pdf_transport)
 from native_pdf_source_registry import NativePdfCanonicalSourceRegistry
+from normal_observed_projection import MAX_NORMAL_MESSAGE_BYTES
 from oer_native_server import NativeOerWindowRuntime
 from oer_server import assert_canonical_scope, configure_environment, create_app
 from token_windows import WindowError, fail
@@ -61,10 +63,13 @@ class NativePdfOerWindowRuntime(NativeOerWindowRuntime):
 
 class _WireLimits:
     """Buffer bounded envelopes so a large public reply never starts sending."""
-    def __init__(self, app, maximum, strict_json_paths=None):
+    def __init__(self, app, maximum, strict_json_paths=None, normal_maximum=None):
         fail(type(maximum) is int and 1024 <= maximum <= MAX_SNAPSHOT_BYTES,
              'NATIVE_PDF_MESSAGE_LIMIT_INVALID', 'Public message limit must stay within the hard 16MiB cap')
-        self.app, self.maximum = app, maximum
+        if normal_maximum is not None:
+            fail(type(normal_maximum) is int and 1024 <= normal_maximum <= MAX_NORMAL_MESSAGE_BYTES,
+                 'NORMAL_OBSERVED_MESSAGE_LIMIT_INVALID', 'Normal whole-message limit must stay within the finite 1GiB cap')
+        self.app, self.maximum, self.normal_maximum = app, maximum, normal_maximum
         self.strict_json_paths = frozenset(strict_json_paths or ('/project/native-pdf',))
 
     async def __call__(self, scope, receive, send):
@@ -73,12 +78,18 @@ class _WireLimits:
         async def reject(status, kind, message):
             response = JSONResponse({'detail': {'kind': kind, 'message': message}}, status_code=status)
             await response(scope, receive, send)
+        normal_post = self.normal_maximum is not None and scope['path'] == '/normal-observed'
+        request_maximum = self.normal_maximum if normal_post else self.maximum
+        # Registry schema dispatch keeps non-normal canonical roots at their original cap.
+        normal_reply = normal_post or (self.normal_maximum is not None
+            and re.fullmatch(r'/canonical/[a-f0-9]{64}', scope['path']) is not None)
+        response_maximum = self.normal_maximum if normal_reply else self.maximum
         body = bytearray()
         while True:
             event = await receive()
             if event['type'] != 'http.request': return
             incoming = event.get('body', b'')
-            if len(body) + len(incoming) > self.maximum:
+            if len(body) + len(incoming) > request_maximum:
                 return await reject(413, 'NATIVE_PDF_MESSAGE_TOO_LARGE', 'Public request exceeds the configured whole-message cap')
             body.extend(incoming)
             if not event.get('more_body', False): break
@@ -98,7 +109,7 @@ class _WireLimits:
             nonlocal size, oversized
             if event['type'] == 'http.response.body':
                 size += len(event.get('body', b''))
-                if size > self.maximum: oversized = True
+                if size > response_maximum: oversized = True
             if not oversized: events.append(event)
         await self.app(scope, replay, bounded_send)
         if oversized:
@@ -108,7 +119,7 @@ class _WireLimits:
 
 def create_native_pdf_app(policy, *, backend=None, artifact_store=None, target_module='vetting',
                           source_registry=None, runtime_factory=None, app=None,
-                          maximum_message_bytes=None, strict_json_paths=None):
+                          maximum_message_bytes=None, strict_json_paths=None, normal_maximum_message_bytes=None):
     from fastapi import HTTPException
     backend = importlib.import_module('server') if backend is None else backend
     artifact_store = artifact_store or ArtifactStore(Path(backend.STATE) / 'artifacts')
@@ -122,7 +133,8 @@ def create_native_pdf_app(policy, *, backend=None, artifact_store=None, target_m
     backend._windows_runtime = (runtime_factory or NativePdfOerWindowRuntime)(
         backend, policy, source_registry=registry, target_module=target_module)
     maximum = MAX_MESSAGE_BYTES if maximum_message_bytes is None else maximum_message_bytes
-    app.add_middleware(_WireLimits, maximum=maximum, strict_json_paths=strict_json_paths)
+    app.add_middleware(_WireLimits, maximum=maximum, strict_json_paths=strict_json_paths,
+        normal_maximum=normal_maximum_message_bytes)
     old_health = next(route for route in app.routes if getattr(route, 'path', None) == '/health')
     old_endpoint = old_health.endpoint; app.router.routes.remove(old_health)
     def health():

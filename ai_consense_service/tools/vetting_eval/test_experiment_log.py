@@ -17,6 +17,15 @@ def record(experiment_id="control", **changes):
 
 
 class ExperimentLogTest(unittest.TestCase):
+    def test_numeric_resource_count_keeps_immutable_events_renderable(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            proof = append_record(root, record(measurements={"resources": 42}), "fixture_result")
+            original = Path(proof["path"]).read_bytes()
+            self.assertEqual(1, rebuild_unlocked(root))
+            self.assertEqual(original, Path(proof["path"]).read_bytes())
+            self.assertTrue((root / "events.jsonl").is_file())
+
     def test_planned_started_completed_preserves_plan_bytes_and_call_prefix(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

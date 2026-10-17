@@ -5,6 +5,11 @@ import com.consense.common.BizException;
 import com.consense.common.JsonUtils;
 import com.consense.common.LocalizedText;
 import com.consense.document.DocumentParser;
+import com.consense.document.OerTemplateEvidence;
+import com.consense.document.OerDocumentIdentity;
+import com.consense.document.OerSourceRouting;
+import com.consense.service.sources.OerSourceMetadata;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.consense.domain.DraftDocument;
 import com.consense.domain.DraftArtifact;
 import com.consense.document.DocxTemplateEditor;
@@ -46,6 +51,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -100,6 +106,10 @@ public class DraftingService {
     private final DraftExtractionHarness extractionHarness;
     private final DraftJointEvidenceReview jointEvidenceReview;
     private final DraftExtractionRunRepository extractionRunRepository;
+    @org.springframework.beans.factory.annotation.Autowired(required=false)
+    private DraftTemplateGraphService templateGraphService;
+
+    private boolean reviewedRules(String projectId) { return templateGraphService!=null&&templateGraphService.hasConfirmed(projectId); }
 
     /** 模型识别结果（Jackson 反序列化用 Lombok POJO） */
     @Data
@@ -144,6 +154,8 @@ public class DraftingService {
         for (String key : TEMPLATE_KEYS) {
             SourceDocument document = byKey.get(key);
             boolean uploaded = document != null && "PARSED".equals(document.getParseStatus());
+            boolean partial = document != null && "PARTIAL".equals(document.getParseStatus());
+            boolean identityPending = document != null && "IDENTITY_PENDING".equals(document.getParseStatus());
             result.add(new TemplateVO(
                     key,
                     "STD-" + key,
@@ -154,66 +166,161 @@ public class DraftingService {
                             "Generation structure and clause rules only; not a source of project input values."),
                     uploaded
                             ? LocalizedText.of("已上传", "已上傳", "Uploaded")
+                            : partial ? LocalizedText.of("已解析，待复核", "已解析，待覆核", "Partially parsed; review required")
+                            : identityPending ? LocalizedText.of("身份待确认", "身份待確認", "Source identity pending")
                             : document == null ? LocalizedText.of("未上传", "未上傳", "Not uploaded") : LocalizedText.of("解析失败", "解析失敗", "Parse failed"),
-                    uploaded ? "ok" : document == null ? "missing" : "failed"));
+                    uploaded ? "ok" : partial ? "partial" : identityPending ? "identity_pending" : document == null ? "missing" : "failed"));
         }
         return result;
     }
 
-    @Transactional
     public UploadResultVO uploadTemplates(String projectId, List<MultipartFile> files) {
-        projectService.require(projectId);
-        List<String> messages = new ArrayList<>();
-        int parsed = 0;
-        int failed = 0;
-
-        for (MultipartFile file : files) {
-            if (file.isEmpty()) {
-                continue;
-            }
-            String fileKey = matchTemplateKey(file.getOriginalFilename());
-            StorageService.StoredFile stored =
-                    storageService.store(projectId, SourceDocument.CATEGORY_STANDARD_TEMPLATE, file);
-            SourceDocument document = sourceDocumentRepository
-                    .findFirstByProjectIdAndFileKeyAndCategory(projectId, fileKey, SourceDocument.CATEGORY_STANDARD_TEMPLATE)
-                    .filter(d -> SourceDocument.CATEGORY_STANDARD_TEMPLATE.equals(d.getCategory()))
-                    .orElseGet(SourceDocument::new);
-            String previousHash=document.getId()==null?null:DraftAdoption.sourceHash(document);
-            document.setProjectId(projectId);
-            document.setCategory(SourceDocument.CATEGORY_STANDARD_TEMPLATE);
-            document.setFileKey(fileKey);
-            document.setFileName(stored.getOriginalName());
-            document.setContentType(stored.getContentType());
-            document.setSizeBytes(stored.getSize());
-            document.setStoragePath(stored.getPath());
-            document.setCreatedAt(Instant.now());
-
+        projectService.require(projectId);List<String> messages=new ArrayList<>();
+        Map<String,List<DraftTemplateRouting.Upload>> groups=new LinkedHashMap<>();
+        List<DraftTemplateRouting.Upload> pdfs=new ArrayList<>(),auxiliaries=new ArrayList<>();
+        Map<DraftTemplateRouting.Upload,String> preferredWords=new IdentityHashMap<>();
+        int failed=0,parsed=0;
+        for(MultipartFile file:files) {
+            if(file==null||file.isEmpty())continue;
             try {
-                DocumentParser.ParsedDocument result =
-                        documentParser.parse(stored.getOriginalName(), storageService.read(stored.getPath()));
-                document.setParseStatus(result.getParseStatus());
-                document.setParseMessage(result.getMessage());
-                document.setPageCount(result.getPageCount());
-                document.setOcrUsed(result.isOcrUsed());
-                document.setTextContent(result.getText());
-                document.setStructuredContentJson(JsonUtils.write(result.getBlocks()));
-                document.setParseCoverageJson(JsonUtils.write(result.getCoverage()));
-                com.consense.service.sources.OerSourceMetadata.captureParsed(document,result);
-                if ("FAILED".equals(result.getParseStatus())) throw new BizException(4003, result.getMessage());
-                parsed++;
-                messages.add(fileKey + " ← " + stored.getOriginalName() + " 已解析（"
-                        + result.getText().length() + " 字符）；" + result.getMessage());
-            } catch (Exception e) {
-                document.setParseStatus("FAILED");
-                document.setParseMessage(e.getMessage());
-                failed++;
-                messages.add(stored.getOriginalName() + " 解析失败：" + e.getMessage());
-            }
-            sourceDocumentRepository.save(document);
-            if(previousHash==null||!previousHash.equals(DraftAdoption.sourceHash(document)))markTemplateReview(projectId,fileKey);
+                DraftTemplateRouting.Upload upload=new DraftTemplateRouting.Upload(file,file.getBytes());
+                preflightTemplateIdentity(upload,null);
+                if("pdf".equals(upload.format)){pdfs.add(upload);continue;}
+                parseTemplateUpload(upload,null);groups.computeIfAbsent(upload.fileKey,key->new ArrayList<>()).add(upload);
+            }catch(Exception failure){failed++;messages.add(file.getOriginalFilename()+": "+failure.getMessage());}
         }
-        invalidateDocuments(projectId);
-        return new UploadResultVO(files.size(), parsed, failed, messages);
+        for(DraftTemplateRouting.Upload pdf:pdfs) {
+            String hint=DraftTemplateRouting.filenameHint(pdf.file.getOriginalFilename());
+            String wordHash=hint==null?null:existingPreferredWordHash(projectId,hint);
+            if(wordHash==null&&hint!=null&&groups.containsKey(hint))try{DraftTemplateRouting.Upload candidate=DraftTemplateRouting.primary(groups.get(hint));if("docx".equals(candidate.format))wordHash=candidate.hash;}catch(BizException ambiguous){/* The family conflict is reported below. */}
+            if(wordHash!=null){auxiliaries.add(pdf);preferredWords.put(pdf,wordHash);continue;}
+            try{parseTemplateUpload(pdf,null);groups.computeIfAbsent(pdf.fileKey,key->new ArrayList<>()).add(pdf);}
+            catch(Exception failure){retainInitialFailedTemplate(projectId,null,pdf,failure);failed++;messages.add(pdf.file.getOriginalFilename()+": "+failure.getMessage());}
+        }
+        for(Map.Entry<String,List<DraftTemplateRouting.Upload>> group:groups.entrySet()) {
+            try {
+                DraftTemplateRouting.Upload selected=DraftTemplateRouting.primary(group.getValue());
+                SourceDocument previous=sourceDocumentRepository.findFirstByProjectIdAndFileKeyAndCategory(projectId,selected.fileKey,SourceDocument.CATEGORY_STANDARD_TEMPLATE).orElse(null);
+                String previousSourceHash=previous==null?null:currentTemplateSourceHash(previous);
+                if(previous!=null&&!selected.hash.equals(previousSourceHash))throw new BizException(4012,"TEMPLATE_REPLACEMENT_REQUIRED: "+selected.fileKey+" already has a different source. Use its explicit replace action; the existing source is retained.");
+                saveTemplateUpload(projectId,selected,false);parsed++;
+                messages.add(selected.fileKey+" ← "+selected.file.getOriginalFilename()+" parsed; source "+selected.hash+". "+selected.parsed.getMessage());
+                for(DraftTemplateRouting.Upload duplicate:group.getValue())if(duplicate!=selected)messages.add(duplicate.file.getOriginalFilename()+": duplicate source bytes; no additional primary was selected.");
+            }catch(Exception failure){failed+=group.getValue().size();messages.add(group.getKey()+": "+failure.getMessage());}
+        }
+        for(DraftTemplateRouting.Upload auxiliary:auxiliaries)try {
+            SourceDocument saved=saveAuxiliaryTemplate(projectId,auxiliary,preferredWords.get(auxiliary));
+            messages.add(auxiliary.file.getOriginalFilename()+": unselected_auxiliary_candidate; Word candidate preferred. PDF content was not parsed, family/edition equivalence is unverified; raw source "+auxiliary.hash+", retained source record "+saved.getId()+".");
+        }catch(Exception failure){failed++;messages.add(auxiliary.file.getOriginalFilename()+": auxiliary retention failed: "+failure.getMessage());}
+        invalidateDocuments(projectId);return new UploadResultVO(files.size(),parsed,failed,messages);
+    }
+
+    private void parseTemplateUpload(DraftTemplateRouting.Upload upload,String expectedKey) {
+        SourceDocument source=preflightTemplateIdentity(upload,expectedKey);OerDocumentIdentity identity=OerSourceMetadata.identity(source);
+        DocumentParser.ParsedDocument observation=null,result;
+        if("pdf".equals(upload.format)&&!"sha_verified".equals(identity.getIdentityStatus())) {
+            observation=documentParser.observe("template.pdf",upload.bytes);
+            boolean readable=OerSourceMetadata.captureObservation(source,observation,upload.bytes);
+            requireTemplateIdentity(source,expectedKey);
+            if(!readable)throw new BizException(4012,"TEMPLATE_IDENTITY_PENDING: Identity observation did not establish a non-drawing source; full parsing was not started.");
+            identity=OerSourceMetadata.identity(source);
+        }
+        if(observation!=null||"sha_verified".equals(identity.getIdentityStatus()))result=documentParser.parseTemplate(expectedKey,upload.file.getOriginalFilename(),upload.bytes,observation,identity);
+        else result=documentParser.parseTemplate(expectedKey,upload.file.getOriginalFilename(),upload.bytes);
+        DraftTemplateRouting.bind(upload,result,expectedKey);
+        OerSourceMetadata.captureParsed(source,result);requireTemplateIdentity(source,expectedKey);
+    }
+    private SourceDocument preflightTemplateIdentity(DraftTemplateRouting.Upload upload,String expectedKey) {
+        if(upload.identitySource==null)upload.identitySource=knownTemplateSource(upload);
+        requireTemplateIdentity(upload.identitySource,expectedKey);return upload.identitySource;
+    }
+    SourceDocument knownTemplateSource(DraftTemplateRouting.Upload upload) {
+        SourceDocument source=new SourceDocument();source.setFileName(upload.file.getOriginalFilename());source.setCategory(SourceDocument.CATEGORY_STANDARD_TEMPLATE);
+        if(OerSourceRouting.isDrawing(null,source.getFileName(),upload.bytes))OerSourceMetadata.captureDrawing(source,upload.bytes);
+        else OerSourceMetadata.captureKnownIdentity(source,upload.bytes);return source;
+    }
+    private void requireTemplateIdentity(SourceDocument source,String expectedKey) {
+        OerDocumentIdentity identity=OerSourceMetadata.identity(source);
+        String exclusion=OerSourceMetadata.moduleExclusion(source,"drafting");
+        if("DRAWING".equals(identity.getKind())||exclusion!=null)throw new BizException(4012,"TEMPLATE_SOURCE_EXCLUDED: "+(exclusion==null?"drawing_outside_parsing":exclusion));
+        if(!"unknown".equals(identity.getSourcePurpose())&&!"standard_template".equals(identity.getSourcePurpose()))throw new BizException(4012,"TEMPLATE_SOURCE_PURPOSE_MISMATCH: A completed project or reference source cannot become a standard template.");
+        if(expectedKey!=null&&TEMPLATE_KEYS.contains(identity.getKind())&&!expectedKey.equals(identity.getKind()))throw new BizException(4012,"TEMPLATE_FAMILY_MISMATCH: Expected "+expectedKey+" but the source identity is "+identity.getKind()+".");
+    }
+    private String existingPreferredWordHash(String projectId,String fileKey) {
+        SourceDocument source=sourceDocumentRepository.findFirstByProjectIdAndFileKeyAndCategory(projectId,fileKey,SourceDocument.CATEGORY_STANDARD_TEMPLATE).orElse(null);
+        if(source==null||"FAILED".equals(source.getParseStatus())||source.getStoragePath()==null)return null;
+        try {
+            byte[] bytes=storageService.read(source.getStoragePath());String hash=DraftTemplateRouting.sha(bytes);
+            if(!"docx".equals(DraftTemplateRouting.format(bytes))||!hash.equals(source.getSourceSha256()))return null;
+            JsonNode coverage=JsonUtils.parse(source.getParseCoverageJson());
+            JsonNode evidence=OerTemplateEvidence.requireBound(fileKey,hash,JsonUtils.parse(source.getStructuredContentJson()),coverage,coverage.path("templateEvidence"));
+            JsonNode route=evidence.path("route");
+            // A title-supported Word candidate is usable without declaring legal identity or PDF edition equivalence.
+            return fileKey.equals(route.path("profile").asText())&&fileKey.equals(route.path("titleFamilyCandidate").asText())
+                    &&"docx".equals(route.path("format").asText())&&hash.equals(coverage.path("nativeDocxParagraphs").path("sourceSha256").asText())?hash:null;
+        }catch(RuntimeException unavailable){return null;}
+    }
+    private SourceDocument saveTemplateUpload(String projectId,DraftTemplateRouting.Upload upload,boolean replacement) {
+        StorageService.StoredFile stored=storeTemplateAsset(projectId,upload);
+        return new TransactionTemplate(transactionManager).execute(status->{
+            lockTemplateProject(projectId);
+            SourceDocument previous=sourceDocumentRepository.findFirstByProjectIdAndFileKeyAndCategory(projectId,upload.fileKey,SourceDocument.CATEGORY_STANDARD_TEMPLATE).orElse(null);
+            if(previous!=null)entityManager.refresh(previous);
+            if(!replacement&&previous!=null&&!upload.hash.equals(currentTemplateSourceHash(previous)))throw new BizException(4012,"TEMPLATE_REPLACEMENT_REQUIRED: The current source changed; use its explicit replace action.");
+            String previousHash=previous==null?null:DraftAdoption.sourceHash(previous);
+            SourceDocument document=storedTemplateSource(projectId,upload.fileKey,upload,stored);
+            if(previous!=null){document.setId(previous.getId());document.setReviewRole(previous.getReviewRole());document.setDocumentScope(previous.getDocumentScope());}
+            DocumentParser.ParsedDocument result=upload.parsed;
+            document.setParseStatus(result.getParseStatus());document.setParseMessage(result.getMessage());document.setPageCount(result.getPageCount());document.setOcrUsed(result.isOcrUsed());
+            document.setTextContent(result.getText());document.setStructuredContentJson(JsonUtils.write(result.getBlocks()));document.setParseCoverageJson(JsonUtils.write(result.getCoverage()));
+            com.consense.service.sources.OerSourceMetadata.captureParsed(document,result);
+            SourceDocument saved=sourceDocumentRepository.save(document);
+            if(previousHash==null||!previousHash.equals(DraftAdoption.sourceHash(document)))markTemplateReview(projectId,upload.fileKey);return saved;
+        });
+    }
+    private void lockTemplateProject(String projectId) {
+        if(entityManager.find(Project.class,projectId,LockModeType.PESSIMISTIC_WRITE)==null)throw new BizException(4006,"Project no longer exists.");
+    }
+    private String currentTemplateSourceHash(SourceDocument source) {
+        String declared=source.getSourceSha256();
+        if(source.getStoragePath()==null)return declared;
+        String actual=DraftTemplateRouting.sha(storageService.read(source.getStoragePath()));
+        if(declared!=null&&!declared.equals(actual))throw new BizException(4012,"TEMPLATE_CURRENT_SOURCE_HASH_MISMATCH: The existing original changed; use an explicit replacement.");
+        return actual;
+    }
+    private StorageService.StoredFile storeTemplateAsset(String projectId,DraftTemplateRouting.Upload upload) {
+        StorageService.StoredFile stored=storageService.store(projectId,SourceDocument.CATEGORY_STANDARD_TEMPLATE,upload.file);
+        if(!upload.hash.equals(DraftTemplateRouting.sha(storageService.read(stored.getPath()))))throw new BizException(4012,"TEMPLATE_STORED_BYTES_CHANGED");return stored;
+    }
+    private SourceDocument storedTemplateSource(String projectId,String fileKey,DraftTemplateRouting.Upload upload,StorageService.StoredFile stored) {
+        SourceDocument source=new SourceDocument();source.setProjectId(projectId);source.setCategory(SourceDocument.CATEGORY_STANDARD_TEMPLATE);source.setFileKey(fileKey);
+        source.setFileName(stored.getOriginalName());source.setContentType(stored.getContentType());source.setSizeBytes(stored.getSize());source.setStoragePath(stored.getPath());source.setSourceSha256(upload.hash);source.setCreatedAt(Instant.now());return source;
+    }
+    private void retainInitialFailedTemplate(String projectId,String fileKey,DraftTemplateRouting.Upload upload,Exception failure) {
+        // Preserve initial unsupported/corrupt raw sources for the existing source/reading API; no analysis is fabricated.
+        boolean pending=String.valueOf(failure.getMessage()).startsWith("TEMPLATE_IDENTITY_PENDING:");
+        if(upload==null||fileKey==null&&!pending||failure instanceof BizException&&((BizException)failure).getCode()==4012&&!pending||!(pending||"unknown".equals(upload.format)||failure instanceof BizException&&((BizException)failure).getCode()==4003||String.valueOf(failure.getMessage()).startsWith("TEMPLATE_PARSE_FAILED:")))return;
+        new TransactionTemplate(transactionManager).execute(status->{
+            lockTemplateProject(projectId);
+            if(fileKey!=null&&sourceDocumentRepository.findFirstByProjectIdAndFileKeyAndCategory(projectId,fileKey,SourceDocument.CATEGORY_STANDARD_TEMPLATE).isPresent())return null;
+            if(fileKey==null)for(SourceDocument existing:sourceDocumentRepository.findByProjectIdAndCategoryOrderByIdAsc(projectId,SourceDocument.CATEGORY_STANDARD_TEMPLATE))if(existing.getFileKey()==null&&"IDENTITY_PENDING".equals(existing.getParseStatus())&&upload.hash.equals(existing.getSourceSha256()))return null;
+            SourceDocument source=storedTemplateSource(projectId,fileKey,upload,storeTemplateAsset(projectId,upload));
+            source.setParseStatus(pending?"IDENTITY_PENDING":"FAILED");source.setParseMessage(failure.getMessage());source.setPageCount(0);source.setOcrUsed(false);
+            if(pending&&upload.identitySource!=null)source.setOerIdentityJson(upload.identitySource.getOerIdentityJson());
+            source.setParseCoverageJson(JsonUtils.write(DraftBusinessRules.map("templateSelection",DraftBusinessRules.map("status",pending?"identity_pending_unanalysed_source":"failed_unanalysed_source","explicitFileKey",fileKey,"familyConfirmed",false,"sourceSha256",upload.hash))));
+            sourceDocumentRepository.save(source);return null;
+        });
+    }
+    private SourceDocument saveAuxiliaryTemplate(String projectId,DraftTemplateRouting.Upload upload,String wordHash) {
+        for(SourceDocument existing:sourceDocumentRepository.findByProjectIdAndCategoryOrderByIdAsc(projectId,SourceDocument.CATEGORY_STANDARD_TEMPLATE))
+            if(existing.getFileKey()==null&&DraftTemplateRouting.AUXILIARY_STATUS.equals(existing.getParseStatus())&&upload.hash.equals(existing.getSourceSha256())&&existing.getStoragePath()!=null&&upload.hash.equals(DraftTemplateRouting.sha(storageService.read(existing.getStoragePath()))))return existing;
+        StorageService.StoredFile stored=storageService.store(projectId,SourceDocument.CATEGORY_STANDARD_TEMPLATE,upload.file);
+        if(!upload.hash.equals(DraftTemplateRouting.sha(storageService.read(stored.getPath()))))throw new BizException(4012,"TEMPLATE_STORED_BYTES_CHANGED");
+        SourceDocument document=new SourceDocument();document.setProjectId(projectId);document.setCategory(SourceDocument.CATEGORY_STANDARD_TEMPLATE);document.setFileKey(null);
+        document.setFileName(stored.getOriginalName());document.setContentType(stored.getContentType());document.setSizeBytes(stored.getSize());document.setStoragePath(stored.getPath());document.setSourceSha256(upload.hash);
+        document.setParseStatus(DraftTemplateRouting.AUXILIARY_STATUS);document.setPageCount(0);document.setOcrUsed(false);document.setParseMessage("Word preferred; this PDF is retained without parsing or a verified family/edition relationship.");
+        document.setParseCoverageJson(JsonUtils.write(DraftBusinessRules.map("templateSelection",DraftBusinessRules.map("status","unselected_auxiliary_candidate","filenameFamilyHint",DraftTemplateRouting.filenameHint(upload.file.getOriginalFilename()),"familyConfirmed",false,"sameEditionVerified",false,"contentParsed",false,"sourceSha256",upload.hash,"preferredWordCandidateSha256",wordHash))));
+        return sourceDocumentRepository.save(document);
     }
 
     // ------------------------------------------------------------ 第 1 步：证据
@@ -225,76 +332,17 @@ public class DraftingService {
                 .stream().map(this::toEvidenceVO).collect(Collectors.toList());
     }
 
-    /**
-     * 替换指定 key 的标准模板（第 1 步「替换 NTT / SCT / SCC」按钮）：
-     * 与文件名无关，直接以调用方指定的 fileKey 覆盖已有模板并重新解析。
-     * 注意：解析（含扫描件 OCR）可能耗时数十分钟，特意不在 @Transactional 内执行，
-     * 否则长事务会占住数据库连接直到 MySQL wait_timeout 断连回滚（上传接口同风险）。
-     * 这里拆成两次 repository.save（各自短事务）：先落基础行，解析完再落解析结果。
-     */
-    public UploadResultVO replaceTemplate(String projectId, String fileKey, MultipartFile file) {
+    /** An explicit replacement may change edition; failed parsing never overwrites the current source. */
+    public UploadResultVO replaceTemplate(String projectId,String fileKey,MultipartFile file) {
         projectService.require(projectId);
-        if (!TEMPLATE_KEYS.contains(fileKey)) {
-            throw new BizException(4009, "未知模板 key: " + fileKey);
-        }
-        if (file == null || file.isEmpty()) {
-            throw new BizException(4010, "替换文件不能为空");
-        }
-        StorageService.StoredFile stored =
-                storageService.store(projectId, SourceDocument.CATEGORY_STANDARD_TEMPLATE, file);
-        SourceDocument document = sourceDocumentRepository
-                .findFirstByProjectIdAndFileKeyAndCategory(projectId, fileKey, SourceDocument.CATEGORY_STANDARD_TEMPLATE)
-                .filter(d -> SourceDocument.CATEGORY_STANDARD_TEMPLATE.equals(d.getCategory()))
-                .orElseGet(SourceDocument::new);
-        String previousHash=document.getId()==null?null:DraftAdoption.sourceHash(document);
-        document.setProjectId(projectId);
-        document.setCategory(SourceDocument.CATEGORY_STANDARD_TEMPLATE);
-        document.setFileKey(fileKey);
-        document.setFileName(stored.getOriginalName());
-        document.setContentType(stored.getContentType());
-        document.setSizeBytes(stored.getSize());
-        document.setStoragePath(stored.getPath());
-        document.setCreatedAt(Instant.now());
-        document.setParseStatus("PENDING");
-        document.setTextContent(null);
-        document.setStructuredContentJson(null);
-        document.setParseCoverageJson(null);
-        document.setPageCount(0);
-        document.setOcrUsed(false);
-        document.setParseMessage(null);
-        document.setTextContent(null);
-        sourceDocumentRepository.save(document);
-
-        List<String> messages = new ArrayList<>();
-        int parsed;
-        int failed;
+        if(!TEMPLATE_KEYS.contains(fileKey))throw new BizException(4009,"Unknown template key: "+fileKey);
+        if(file==null||file.isEmpty())throw new BizException(4010,"Replacement file is empty");
+        DraftTemplateRouting.Upload upload=null;
         try {
-            DocumentParser.ParsedDocument result =
-                    documentParser.parse(stored.getOriginalName(), storageService.read(stored.getPath()));
-            document.setParseStatus(result.getParseStatus());
-            document.setParseMessage(result.getMessage());
-            document.setPageCount(result.getPageCount());
-            document.setOcrUsed(result.isOcrUsed());
-            document.setTextContent(result.getText());
-            document.setStructuredContentJson(JsonUtils.write(result.getBlocks()));
-            document.setParseCoverageJson(JsonUtils.write(result.getCoverage()));
-            com.consense.service.sources.OerSourceMetadata.captureParsed(document,result);
-            if ("FAILED".equals(result.getParseStatus())) throw new BizException(4003, result.getMessage());
-            parsed = 1;
-            failed = 0;
-            messages.add(fileKey + " ← " + stored.getOriginalName() + " 已替换并解析（"
-                    + result.getText().length() + " 字符）；" + result.getMessage());
-        } catch (Exception e) {
-            document.setParseStatus("FAILED");
-            document.setParseMessage(e.getMessage());
-            parsed = 0;
-            failed = 1;
-            messages.add(stored.getOriginalName() + " 解析失败：" + e.getMessage());
-        }
-        sourceDocumentRepository.save(document);
-        if(previousHash==null||!previousHash.equals(DraftAdoption.sourceHash(document)))markTemplateReview(projectId,fileKey);
-        invalidateDocuments(projectId);
-        return new UploadResultVO(1, parsed, failed, messages);
+            upload=new DraftTemplateRouting.Upload(file,file.getBytes());parseTemplateUpload(upload,fileKey);
+            saveTemplateUpload(projectId,upload,true);invalidateDocuments(projectId);
+            return new UploadResultVO(1,1,0,Collections.singletonList(fileKey+" ← "+file.getOriginalFilename()+" replaced and parsed; source "+upload.hash+". "+upload.parsed.getMessage()));
+        }catch(Exception failure){retainInitialFailedTemplate(projectId,fileKey,upload,failure);return new UploadResultVO(1,0,1,Collections.singletonList(file.getOriginalFilename()+": "+failure.getMessage()+"; any previous template is retained."));}
     }
 
     @Transactional
@@ -382,6 +430,7 @@ public class DraftingService {
 
     @Transactional
     public List<VariableVO> listVariables(String projectId) {
+        if(reviewedRules(projectId))return templateGraphService.variables(projectId);
         ensureInputs(projectId);
         return inputVariables(projectId).stream().map(this::toVariableVO).collect(Collectors.toList());
     }
@@ -406,7 +455,8 @@ public class DraftingService {
 
     private ExtractTraceVO readExtractionReport(String projectId,DraftExtractionRun run) {
         ExtractTraceVO trace=JsonUtils.read(run.getTraceJson(),ExtractTraceVO.class);
-        trace.setStale(!java.util.Objects.equals(trace.getEvidenceRevision(),evidenceRevision(projectId)));return trace;
+        Map<String,Object> payload=JsonUtils.readMap(run.getTraceJson());
+        trace.setStale(payload.containsKey("graphRevisionId")?templateGraphService==null||templateGraphService.traceStale(projectId,payload):!java.util.Objects.equals(trace.getEvidenceRevision(),evidenceRevision(projectId)));return trace;
     }
 
     private void appendExtractionReport(String projectId,ExtractTraceVO trace) {
@@ -418,8 +468,8 @@ public class DraftingService {
         List<DraftVariable> inputs=inputVariables(projectId);
         Map<String,Object> currentPlan=plan(projectId,null);
         boolean ready=unresolved(currentPlan).isEmpty();
-        int groups=((List<?>)DraftBusinessRules.catalog().get("groups")).size();
-        int adopted=completedGroups(inputs,currentPlan);
+        int groups=((List<?>)catalog(projectId).get("groups")).size();
+        int adopted=reviewedRules(projectId)?(ready?groups:0):completedGroups(inputs,currentPlan);
         List<String> generated=documentRepository.findByProjectIdOrderByIdAsc(projectId).stream()
                 .filter(d -> Boolean.TRUE.equals(d.getGenerated())).map(DraftDocument::getFileKey).collect(Collectors.toList());
         int evidence=sourceDocumentRepository.findByProjectIdAndCategoryOrderByIdAsc(projectId,SourceDocument.CATEGORY_PROJECT_INPUT).size();
@@ -443,11 +493,16 @@ public class DraftingService {
     }
 
     private List<DraftVariable> inputVariables(String projectId) {
+        if(reviewedRules(projectId)) {
+            Set<String> keys=new HashSet<>();for(Map<String,Object> field:DraftReviewGraph.fields(templateGraphService.graph(projectId)))keys.add(String.valueOf(field.get("id")));
+            return variableRepository.findByProjectIdOrderBySortOrderAsc(projectId).stream().filter(v->"INPUT".equals(v.getScope())&&keys.contains(v.getVarKey())).collect(Collectors.toList());
+        }
         return variableRepository.findByProjectIdOrderBySortOrderAsc(projectId).stream()
                 .filter(v -> DraftBlueprint.isInput(v.getVarKey()) && "INPUT".equals(v.getScope())).collect(Collectors.toList());
     }
     private void ensureInputs(String projectId) {
         projectService.require(projectId);
+        if(reviewedRules(projectId)){templateGraphService.variables(projectId);return;}
         for (int i=0;i<DraftBlueprint.INPUTS.size();i++) {
             DraftBlueprint.InputSpec spec=DraftBlueprint.INPUTS.get(i);
             DraftVariable v=variableRepository.findByProjectIdAndVarKey(projectId,spec.key).orElse(null);
@@ -467,13 +522,14 @@ public class DraftingService {
             if (fresh||migration) v.setUpdatedAt(Instant.now());variableRepository.save(v);
         }
     }
-    public Map<String,Object> catalog(String projectId) { projectService.require(projectId);return DraftBusinessRules.catalog(); }
+    public Map<String,Object> catalog(String projectId) { projectService.require(projectId);return reviewedRules(projectId)?templateGraphService.catalog(projectId):DraftBusinessRules.catalog(); }
     @Transactional(readOnly=true)
     public Map<String,Object> plan(String projectId,Map<String,String> patches) {
         Map<String,Object> current=preparePlan(projectId,patches);
         return patches==null?savedGenerationPlan(projectId,current):current;
     }
     private Map<String,Object> preparePlan(String projectId,Map<String,String> patches) {
+        if(reviewedRules(projectId))return templateGraphService.plan(projectId,patches);
         projectService.require(projectId);Map<String,Object> values=decodedValues(projectId);
         Map<String,Object> visibleValues=new LinkedHashMap<>(values);
         for(DraftVariable variable:inputVariables(projectId))
@@ -513,7 +569,7 @@ public class DraftingService {
         }
         List<Object> sourceIdentities=new ArrayList<>();
         for(String category:Arrays.asList(SourceDocument.CATEGORY_STANDARD_TEMPLATE,SourceDocument.CATEGORY_PROJECT_INPUT))
-            for(SourceDocument source:sourceDocumentRepository.findByProjectIdAndCategoryOrderByIdAsc(projectId,category))sourceIdentities.add(DraftAdoption.sourceIdentity(source));
+            for(SourceDocument source:sourceDocumentRepository.findByProjectIdAndCategoryOrderByIdAsc(projectId,category))if(!DraftTemplateRouting.isUnadopted(source))sourceIdentities.add(DraftAdoption.sourceIdentity(source));
         result.put("sourceIdentities",sourceIdentities);result.put("documentLanguage","en");
         result.put("snapshotId",snapshotId(projectId,patches));result.put("savedSnapshotId",snapshotId(projectId,null));result.put("preview",patches!=null);return result;
     }
@@ -548,15 +604,18 @@ public class DraftingService {
         return result;
     }
     private Map<String,Object> decodedValues(String projectId) {
+        if(reviewedRules(projectId))return DraftReviewGraph.map(templateGraphService.plan(projectId,null).get("inputValues"));
         Map<String,Object> values=new LinkedHashMap<>();
         for (DraftVariable v:variableRepository.findByProjectIdOrderBySortOrderAsc(projectId)) if (DraftBlueprint.isInput(v.getVarKey())||"targetOverrides".equals(v.getVarKey())) values.put(v.getVarKey(),DraftAdoption.decode(DraftBlueprint.find(v.getVarKey()),v.getValueText()));
         return values;
     }
     private String snapshotId(String projectId,Map<String,String> patches) {
+        if(reviewedRules(projectId))return templateGraphService.snapshotId(projectId,patches);
         Map<String,Object> snapshot=new LinkedHashMap<>();snapshot.put("ruleVersion",DraftBusinessRules.catalog().get("ruleVersion"));
         Map<String,Object> values=decodedValues(projectId);if(patches!=null)patches.forEach((k,v)->values.put(k,DraftAdoption.decode(DraftBlueprint.find(k),v)));snapshot.put("values",values);
         List<Object> status=new ArrayList<>();for(DraftVariable v:inputVariables(projectId))status.add(Arrays.asList(v.getVarKey(),v.getManuallyEdited(),v.getReviewRequired(),v.getConfirmed(),v.getAdoptedSourcesJson()));snapshot.put("adoption",status);
         List<Object> sources=new ArrayList<>();for(String category:Arrays.asList(SourceDocument.CATEGORY_STANDARD_TEMPLATE,SourceDocument.CATEGORY_PROJECT_INPUT))for(SourceDocument source:sourceDocumentRepository.findByProjectIdAndCategoryOrderByIdAsc(projectId,category)) {
+            if(DraftTemplateRouting.isUnadopted(source))continue;
             sources.add(DraftAdoption.sourceIdentity(source));
             if(SourceDocument.CATEGORY_STANDARD_TEMPLATE.equals(category))sources.add(source.getStoragePath()==null?"EDITABLE_DOCX_MISSING":DraftPdfConverter.sha256(storageService.read(source.getStoragePath())));
         }snapshot.put("sources",sources);
@@ -579,6 +638,7 @@ public class DraftingService {
     }
 
     public List<VariableVO> extractVariables(String projectId) {
+        if(reviewedRules(projectId))return templateGraphService.extract(projectId);
         // Model calls run outside a write transaction. A user can adopt an input while extraction is in flight.
         TransactionTemplate transaction=new TransactionTemplate(transactionManager);
         transaction.execute(status->{ensureInputs(projectId);return null;});
@@ -766,6 +826,7 @@ public class DraftingService {
 
     @Transactional
     public VariableVO updateVariable(String projectId,String key,VariablePatch patch) {
+        if(reviewedRules(projectId))return templateGraphService.updateVariable(projectId,key,patch);
         projectService.require(projectId);ensureInputs(projectId);
         if("targetEdits".equals(key))key="targetOverrides";
         DraftBlueprint.InputSpec spec=DraftBlueprint.find(key);
@@ -884,6 +945,7 @@ public class DraftingService {
 
     @Transactional
     public List<VariableVO> confirmAll(String projectId,String scope,String fileKey) {
+        if(reviewedRules(projectId))return templateGraphService.confirmAll(projectId);
         ensureInputs(projectId);List<DraftVariable> inputs=inputVariables(projectId);
         for(DraftVariable v:inputs)if(DraftInputRules.valid(v)) {
             v.setConfirmed(true);v.setConfirmedFrom("INPUT");v.setReviewRequired(false);v.setAdoptedSourcesJson(JsonUtils.write(DraftAdoption.candidates(v)));v.setUpdatedAt(Instant.now());
@@ -898,8 +960,10 @@ public class DraftingService {
 
     @Transactional(isolation=Isolation.REPEATABLE_READ)
     public List<DraftDocumentVO> generate(String projectId,String lang) {
+        if(templateGraphService!=null)templateGraphService.lockForGeneration(projectId);
         ensureInputs(projectId);
         Map<String,Object> prepared=preparePlan(projectId,null);
+        if(reviewedRules(projectId)&&!unresolved(prepared).isEmpty())throw new BizException(4012,"GRAPH_PLAN_REVIEW_REQUIRED: Resolve the graph, project facts and source bindings before generation.");
         String snapshot=(String)prepared.get("snapshotId");
         Map<String,DraftArtifact> revisions=new LinkedHashMap<>();Map<String,String> contents=new LinkedHashMap<>();
         // Compile/validate every package before any current document pointer changes.
@@ -907,13 +971,14 @@ public class DraftingService {
             SourceDocument template=requireTemplate(projectId,key);
             if(template.getStoragePath()==null)throw new BizException(4012,"EDITABLE_DOCX_REQUIRED: Re-upload the original editable "+key+" DOCX.");
             byte[] original=storageService.read(template.getStoragePath());
-            DocumentParser.ParsedDocument fresh=documentParser.parse(template.getFileName(),original);
+            if(reviewedRules(projectId)&&isPdfSource(original))throw new BizException(4012,"EDITABLE_DOCX_REQUIRED: The selected "+key+" edition is PDF; it cannot borrow another edition's Word original.");
+            DocumentParser.ParsedDocument fresh=documentParser.parseTemplate(key,template.getFileName(),original);
             if(!DraftTemplateSourceText.matches(template.getTextContent(),fresh,documentParser,original))throw new BizException(4012,"SOURCE_TEXT_DIVERGENCE: "+key+" saved template text differs from the original DOCX; verify and re-upload the original editable DOCX.");
             DocxTemplateEditor.TemplateIndex sourceIndex=new DocxTemplateEditor().inspect(original);
             List<Map<String,Object>> sourceBindings=DraftDocumentBindings.source(key,sourceIndex);
             DraftDocumentBindings.associateTargets(key,sourceIndex,prepared,sourceBindings);
             DocxTemplateEditor.DocxEditResult generated;
-            try {generated=DraftFormattedRules.compile(original,key,prepared,DraftDocumentBindings.bookmarkNames(sourceBindings),DraftNativeLayout.plan(original,key,properties.getDrafting().getRendererKind()));}
+            try {generated=reviewedRules(projectId)?templateGraphService.compile(original,key,prepared,DraftDocumentBindings.bookmarkNames(sourceBindings),DraftNativeLayout.plan(original,key,properties.getDrafting().getRendererKind())):DraftFormattedRules.compile(original,key,prepared,DraftDocumentBindings.bookmarkNames(sourceBindings),DraftNativeLayout.plan(original,key,properties.getDrafting().getRendererKind()));}
             catch(DocxTemplateEditor.EditException unsafe){throw new BizException(4012,unsafe.getCode()+": "+unsafe.getOperationId());}
             DraftArtifact revision=new DraftArtifact();revision.setId(java.util.UUID.randomUUID().toString());revision.setProjectId(projectId);revision.setFileKey(key);
             revision.setSnapshotId(snapshot);revision.setSourceSha256(DraftPdfConverter.sha256(original));revision.setDocxSha256(generated.getDocxSha256());revision.setDocxBytes(generated.getDocxBytes());
@@ -1050,7 +1115,7 @@ public class DraftingService {
         if(!"application/vnd.openxmlformats-officedocument.wordprocessingml.document".equals(source.getContentType()))throw new BizException(4012,"EDITABLE_DOCX_REQUIRED: Native template bindings require DOCX.");
         DocxTemplateEditor.TemplateIndex sourceIndex=new DocxTemplateEditor().inspect(original);
         List<Map<String,Object>> rows=DraftDocumentBindings.source(fileKey,sourceIndex);
-        DraftDocumentBindings.associateTargets(fileKey,sourceIndex,DraftBusinessRules.plan(Collections.emptyMap()),rows);
+        DraftDocumentBindings.associateTargets(fileKey,sourceIndex,reviewedRules(projectId)?templateGraphService.plan(projectId,null):DraftBusinessRules.plan(Collections.emptyMap()),rows);
         DocxTemplateEditor.DocxEditResult workingResult=DraftDocumentBindings.sourceWorkingCopyResult(original,rows,DraftNativeLayout.plan(original,fileKey,properties.getDrafting().getRendererKind()));byte[] working=workingResult.getDocxBytes();
         String workingHash=DraftPdfConverter.sha256(working);
         DocumentBindingsVO result=DraftDocumentBindings.locate(DraftDocumentBindings.bundle(fileKey,"source",sourceHash,null,workingHash,DraftDocumentBindings.reconcile(rows,new DocxTemplateEditor().inspect(working),false)),currentPdfArtifact(workingHash));result.setNativeLayout(DraftNativeLayout.info(fileKey,properties.getDrafting().getRendererKind(),workingResult));return result;
@@ -1117,7 +1182,7 @@ public class DraftingService {
     @Transactional
     public byte[] previewTemplate(String projectId,String fileKey,String expectedSourceHash) {
         projectService.require(projectId);
-        SourceDocument template = sourceDocumentRepository
+        SourceDocument template = reviewedRules(projectId)?templateGraphService.selectedTemplate(projectId,fileKey):sourceDocumentRepository
                 .findFirstByProjectIdAndFileKeyAndCategory(projectId, fileKey, SourceDocument.CATEGORY_STANDARD_TEMPLATE)
                 .orElseThrow(() -> new BizException(4011, "尚未上传 " + fileKey + " 标准模板，请到第 1 步上传"));
         byte[] source=storageService.read(template.getStoragePath());
@@ -1133,6 +1198,7 @@ public class DraftingService {
     }
 
     public String previewTemplateFileName(String projectId, String fileKey) {
+        if(reviewedRules(projectId))return nvl(templateGraphService.selectedTemplate(projectId,fileKey).getFileName()).replaceFirst("\\.[^.]+$","")+".pdf";
         return sourceDocumentRepository
                 .findFirstByProjectIdAndFileKeyAndCategory(projectId, fileKey, SourceDocument.CATEGORY_STANDARD_TEMPLATE)
                 .map(source->nvl(source.getFileName()).replaceFirst("\\.[^.]+$","")+".pdf")
@@ -1143,7 +1209,7 @@ public class DraftingService {
     @Transactional(readOnly=true)
     public TemplateSourceFile templateSource(String projectId,String fileKey) {
         projectService.require(projectId);
-        SourceDocument template=sourceDocumentRepository
+        SourceDocument template=reviewedRules(projectId)?templateGraphService.selectedTemplate(projectId,fileKey):sourceDocumentRepository
                 .findFirstByProjectIdAndFileKeyAndCategory(projectId,fileKey,SourceDocument.CATEGORY_STANDARD_TEMPLATE)
                 .orElseThrow(()->new BizException(4011,"SOURCE_NOT_UPLOADED: Upload the "+fileKey+" standard template first."));
         if(JsonUtils.isBlankText(template.getStoragePath()))throw new BizException(4011,"SOURCE_UNAVAILABLE: Upload the "+fileKey+" standard template again.");
@@ -1157,6 +1223,24 @@ public class DraftingService {
             catch(DocxTemplateEditor.EditException unsupported) { /* Preserve raw evidence with a conservative MIME. */ }
         }
         return new TemplateSourceFile(bytes,template.getFileName(),mime);
+    }
+
+    /** Source-ID and byte-bound assets also cover non-primary editions and project correspondence. */
+    @Transactional(readOnly=true)
+    public TemplateSourceFile reviewSource(String projectId,Long sourceId,String expectedSha256,boolean preview) {
+        projectService.require(projectId);
+        SourceDocument source=sourceDocumentRepository.findById(sourceId).filter(item->projectId.equals(item.getProjectId())&&Arrays.asList(SourceDocument.CATEGORY_STANDARD_TEMPLATE,SourceDocument.CATEGORY_PROJECT_INPUT).contains(item.getCategory()))
+                .orElseThrow(()->new BizException(4006,"REVIEW_SOURCE_NOT_FOUND"));
+        if(expectedSha256==null||!expectedSha256.matches("[a-f0-9]{64}"))throw new BizException(4090,"REVIEW_SOURCE_IDENTITY_REQUIRED");
+        if(source.getStoragePath()==null||!storageService.matchesStoredBytes(source.getStoragePath(),expectedSha256))throw new BizException(4090,"REVIEW_SOURCE_CHANGED: Reload the current source.");
+        byte[] original=storageService.read(source.getStoragePath());
+        if(!expectedSha256.equals(DraftPdfConverter.sha256(original)))throw new BizException(4090,"REVIEW_SOURCE_CHANGED");
+        if(isPdfSource(original))return new TemplateSourceFile(original,source.getFileName(),"application/pdf");
+        if(preview) {
+            try{new DocxTemplateEditor().inspect(original);}catch(DocxTemplateEditor.EditException unsupported){throw new BizException(4012,"REVIEW_VISUAL_PREVIEW_UNAVAILABLE: The source can still be reviewed as text.");}
+            return new TemplateSourceFile(renderPdf(original),source.getFileName()+".pdf","application/pdf");
+        }
+        return new TemplateSourceFile(original,source.getFileName(),"application/octet-stream");
     }
 
     @Data @AllArgsConstructor
@@ -1191,6 +1275,21 @@ public class DraftingService {
         }
     }
 
+    /** Stored analysis is read-only and remains bound to current original bytes and parser inputs. */
+    @Transactional(readOnly=true)
+    public JsonNode templateEvidence(String projectId,String fileKey) {
+        projectService.require(projectId);
+        if(!TEMPLATE_KEYS.contains(fileKey))throw new BizException(4009,"Unknown template key: "+fileKey);
+        SourceDocument source=reviewedRules(projectId)?templateGraphService.selectedTemplate(projectId,fileKey):sourceDocumentRepository.findFirstByProjectIdAndFileKeyAndCategory(projectId,fileKey,SourceDocument.CATEGORY_STANDARD_TEMPLATE).orElseThrow(()->new BizException(4011,"SOURCE_NOT_UPLOADED: "+fileKey));
+        JsonNode coverage=JsonUtils.parse(source.getParseCoverageJson()),evidence=coverage.path("templateEvidence");
+        if(evidence.isMissingNode()||evidence.isNull())throw new BizException(4012,"TEMPLATE_EVIDENCE_MISSING: This saved template has no analysis; re-upload its original source explicitly.");
+        if(source.getStoragePath()==null)throw new BizException(4012,"TEMPLATE_SOURCE_MISSING: The original asset is unavailable.");
+        String actualHash=DraftTemplateRouting.sha(storageService.read(source.getStoragePath()));
+        if(!actualHash.equals(source.getSourceSha256()))throw new BizException(4012,"TEMPLATE_SOURCE_HASH_MISMATCH: The stored original changed.");
+        try{return OerTemplateEvidence.requireBound(fileKey,actualHash,JsonUtils.parse(source.getStructuredContentJson()),coverage,evidence);}
+        catch(IllegalArgumentException invalid){throw new BizException(4012,"TEMPLATE_EVIDENCE_INVALID: "+invalid.getMessage());}
+    }
+
     private static boolean isPdfSource(byte[] bytes) {
         return bytes.length>=5&&bytes[0]=='%'&&bytes[1]=='P'&&bytes[2]=='D'&&bytes[3]=='F'&&bytes[4]=='-';
     }
@@ -1202,12 +1301,13 @@ public class DraftingService {
     @Transactional
     public TemplateTextVO getTemplateText(String projectId, String fileKey) {
         projectService.require(projectId);
+        if(reviewedRules(projectId))return new TemplateTextVO(nvl(templateGraphService.selectedTemplate(projectId,fileKey).getTextContent()));
         SourceDocument template = sourceDocumentRepository
                 .findFirstByProjectIdAndFileKeyAndCategory(projectId, fileKey, SourceDocument.CATEGORY_STANDARD_TEMPLATE)
                 .orElseThrow(() -> new BizException(4011, "尚未上传 " + fileKey + " 标准模板，请到第 1 步上传"));
         if (JsonUtils.isBlankText(template.getTextContent()) && template.getStoragePath() != null) {
             try {
-                DocumentParser.ParsedDocument result = documentParser.parse(
+                DocumentParser.ParsedDocument result = documentParser.parseTemplate(fileKey,
                         template.getFileName(), storageService.read(template.getStoragePath()));
                 template.setTextContent(result.getText());
                 template.setParseStatus(result.getParseStatus());
@@ -1234,7 +1334,7 @@ public class DraftingService {
     @Transactional
     public TemplateTextVO updateTemplateText(String projectId, String fileKey, String text) {
         projectService.require(projectId);
-        SourceDocument template = sourceDocumentRepository
+        SourceDocument template = reviewedRules(projectId)?templateGraphService.selectedTemplate(projectId,fileKey):sourceDocumentRepository
                 .findFirstByProjectIdAndFileKeyAndCategory(projectId, fileKey, SourceDocument.CATEGORY_STANDARD_TEMPLATE)
                 .orElseThrow(() -> new BizException(4011, "尚未上传 " + fileKey + " 标准模板，请到第 1 步上传"));
         if(!nvl(template.getTextContent()).equals(nvl(text)))throw new BizException(4012,"SOURCE_TEXT_EDIT_REQUIRES_DOCX: Upload the edited source DOCX so formatting and text stay together.");
@@ -1504,6 +1604,7 @@ public class DraftingService {
     }
 
     private SourceDocument requireTemplate(String projectId, String fileKey) {
+        if(reviewedRules(projectId))return templateGraphService.selectedTemplate(projectId,fileKey);
         SourceDocument source = sourceDocumentRepository.findFirstByProjectIdAndFileKeyAndCategory(projectId, fileKey, SourceDocument.CATEGORY_STANDARD_TEMPLATE)
                 .orElseThrow(() -> new BizException(4011, "请先上传 " + fileKey + " 标准模板"));
         if (!"PARSED".equals(source.getParseStatus()) || JsonUtils.isBlankText(source.getTextContent()))
@@ -1550,25 +1651,6 @@ public class DraftingService {
     }
     private void requireRevision(DraftDocument document,String expectedRevision) {
         if(expectedRevision!=null&&!expectedRevision.equals(document.getRevisionId()))throw new BizException(4090,"ARTIFACT_REVISION_CONFLICT: Reload the current draft.");
-    }
-
-    private String matchTemplateKey(String fileName) {
-        String name = nvl(fileName).toLowerCase(Locale.ROOT);
-        for (String key : TEMPLATE_KEYS) {
-            if (name.contains(key.toLowerCase(Locale.ROOT))) {
-                return key;
-            }
-        }
-        if (name.contains("tenderers") || name.contains("notes")) {
-            return "NTT";
-        }
-        if (name.contains("special condition of tender") || name.contains("tender condition")) {
-            return "SCT";
-        }
-        if (name.contains("special condition") || name.contains("contract")) {
-            return "SCC";
-        }
-        return "NTT";
     }
 
     private String defaultTemplateFileName(String key) {

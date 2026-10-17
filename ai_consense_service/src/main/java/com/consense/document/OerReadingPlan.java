@@ -28,7 +28,7 @@ final class OerReadingPlan {
         metadata.put("ruleBasis","actual native stories, numbering, controls and layout occurrences; no source values or fixed pages");
         ArrayNode tasks=metadata.putArray("tasks");
         if("pdf".equals(format)){tasks.add("native_text_and_page_frame");tasks.add("native_widgets");tasks.add("actual_image_coverage");tasks.add("visual_gap_reading");}
-        else if("docx".equals(format)){tasks.add("native_stories");tasks.add("native_table_topology");tasks.add("native_numbering_and_revision");}
+        else if("docx".equals(format)){tasks.add("native_stories");tasks.add("native_table_topology");tasks.add("native_numbering_and_revision");tasks.add("native_document_outline");metadata.put("textAuthority","original_ooxml");metadata.put("visualRole","layout_assistance_only");}
         else tasks.add("native_text_with_declared_format_limits");
         if(formLayout)tasks.add("whole_form_layout_and_controls");
         tasks.add("occurrence_and_relationship_inventory");metadata.put("sourceQualityStatus","unverified");
@@ -105,11 +105,13 @@ final class OerReadingPlan {
     private static String role(DocumentBlock block,String text) {
         String kind=block.getKind()==null?"":block.getKind();
         if("table_row".equals(kind)||"table".equals(kind))return "table_group_member";
+        com.fasterxml.jackson.databind.JsonNode outline=block.getReadingContext()==null?null:block.getReadingContext().get("nativeDocxParagraph");
+        if(outline!=null&&"resolved".equals(outline.path("status").asText())&&outline.has("outlineLevel")&&outline.path("outlineLevel").asInt()<9)return "native_heading";
         if(Arrays.asList("writing_area","checkbox","radio","form_control","pdf_form_widget").contains(kind))return "field_or_control_observation";
         if(text.matches("(?i)^(?:notes?|remarks?)\\s*[:：]?.*"))return "note_anchor_candidate";
         if(text.matches("(?i)^OR(?:\\s.*)?$"))return "branch_anchor_candidate";
         if(text.matches("(?s)^(?:[0-9]+(?:\\.[0-9]+)*[.)]?|\\([a-zA-Z0-9]+\\))\\s+.*"))return "numbered_member_candidate";
-        if(block.getParagraphStyleName()!=null && block.getParagraphStyleName().matches("(?i).*heading.*"))return "native_heading";
+        if(outline==null && block.getParagraphStyleName()!=null && block.getParagraphStyleName().matches("(?i).*heading.*"))return "native_heading";
         return kind;
     }
     private static String story(DocumentBlock block) {

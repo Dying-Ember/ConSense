@@ -27,7 +27,7 @@ from native_pdf_source_family import (SCHEMA as FAMILY_SCHEMA, source_family_can
     validate_native_pdf_source_family)
 from oer_source_registry import CanonicalSourceRegistry, _identity
 from normal_observed_projection import (SCHEMA as NORMAL_SCHEMA, normal_observed_candidate,
-    validate_normal_observed)
+    validate_normal_observed, MAX_NORMAL_MESSAGE_BYTES)
 
 
 class _DerivedResult(NamedTuple):
@@ -61,7 +61,11 @@ class _PdfRegistry(NativePdfCanonicalSourceRegistry):
 
 class UnifiedCanonicalSourceRegistry(NativeCollectionSourceRegistry):
     def __init__(self, root, artifact_store, *, derived_cache_max_bytes=64 * 1024 * 1024,
-                 derived_cache_max_entries=8, family_policy=None, family_target_module='vetting'):
+                 derived_cache_max_entries=8, family_policy=None, family_target_module='vetting',
+                 maximum_message_bytes=MAX_NORMAL_MESSAGE_BYTES):
+        if type(maximum_message_bytes) is not int or not 1024 <= maximum_message_bytes <= MAX_NORMAL_MESSAGE_BYTES:
+            raise ValueError('Normal message limit must be an integer within the finite 1GiB maximum')
+        self.normal_maximum_bytes = maximum_message_bytes
         self._validation_frame = ContextVar('consense_unified_source_validation_frame', default=None)
         self._file_collectors = ContextVar('consense_unified_file_dependency_collectors', default=())
         if (type(derived_cache_max_bytes) is not int or derived_cache_max_bytes < 0
@@ -98,7 +102,7 @@ class UnifiedCanonicalSourceRegistry(NativeCollectionSourceRegistry):
 
     def _normal_revision_path(self, revision):
         path = self.root / 'normal-observed-revisions' / (_identity(revision, 'projectionRevisionSha256') + '.json')
-        self._pin_frame_file(path)
+        self._pin_frame_file(path, normal=True)
         return path
 
     def _validate_family(self, snapshot):
@@ -186,12 +190,12 @@ class UnifiedCanonicalSourceRegistry(NativeCollectionSourceRegistry):
         for raw in result.file_dependencies:
             dependency = json.loads(raw)
             path = Path(dependency['path'])
-            actual = self._read_frame_file(path)
+            actual = self._read_frame_file(path, normal=dependency.get('normal', False))
             if (str(path.resolve()), len(actual), hashlib.sha256(actual).hexdigest()) != (
                     dependency['resolvedPath'], dependency['byteCount'], dependency['sha256']):
                 raise SourceRegistryError('CANONICAL_FRAME_SOURCE_CHANGED',
                     'A complete reconstruction file dependency differs from its exact prior bytes or location')
-            self._pin_frame_file(path, actual)
+            self._pin_frame_file(path, actual, normal=dependency.get('normal', False))
         for raw in result.dependencies:
             self.artifact_store.read_asset(json.loads(raw))
 
@@ -240,14 +244,17 @@ class UnifiedCanonicalSourceRegistry(NativeCollectionSourceRegistry):
                 'callerOwnership': 'fresh_public_root_or_detached_collection_materialization',
                 'cachedSourceValidity': False, 'unframedReadsUseCache': False}
 
-    def _pin_frame_file(self, path, raw=None):
+    def _pin_frame_file(self, path, raw=None, *, normal=False):
         frame = self._validation_frame.get()
         if frame is None:
             return
         if raw is None:
-            raw = self._read_frame_file(path)
-        if len(raw) > MAX_SNAPSHOT_BYTES:
-            raise SourceRegistryError('CANONICAL_WIRE_TOO_LARGE', 'Public source dependency exceeds the fixed 16MiB maximum')
+            raw = self._read_frame_file(path, normal=normal)
+        maximum = self.normal_maximum_bytes if normal else MAX_SNAPSHOT_BYTES
+        if len(raw) > maximum:
+            raise SourceRegistryError('CANONICAL_WIRE_TOO_LARGE',
+                'Normal source dependency exceeds its configured maximum' if normal
+                else 'Public source dependency exceeds the fixed 16MiB maximum')
         current = (len(raw), hashlib.sha256(raw).hexdigest())
         key = str(path.resolve())
         prior = frame['files'].get(key)
@@ -260,34 +267,38 @@ class UnifiedCanonicalSourceRegistry(NativeCollectionSourceRegistry):
         locator = str(path.absolute())
         location = (key, *current)
         prior_location = frame['locations'].get(locator)
-        if prior_location is not None and prior_location != location:
+        if prior_location is not None and (prior_location != location
+                or frame['normalLocations'][locator] != normal):
             raise SourceRegistryError('CANONICAL_FRAME_SOURCE_CHANGED',
                 'Published source locator changed during this request')
         frame['locations'][locator] = location
-        dependency = {'path': locator, 'resolvedPath': key, 'byteCount': current[0], 'sha256': current[1]}
+        frame['normalLocations'][locator] = normal
+        dependency = {'path': locator, 'resolvedPath': key, 'byteCount': current[0], 'sha256': current[1],
+                      'normal': normal}
         for collector in self._file_collectors.get():
             collector[locator] = dependency
 
-    @staticmethod
-    def _read_frame_file(path):
+    def _read_frame_file(self, path, *, normal=False):
+        # Only an unclassified root gets the finite outer read bound; schema dispatch follows immediately.
+        maximum = (max(MAX_SNAPSHOT_BYTES, self.normal_maximum_bytes) if normal is None
+                   else self.normal_maximum_bytes if normal else MAX_SNAPSHOT_BYTES)
+        message = ('Normal source dependency exceeds its configured maximum' if normal
+                   else 'Public source dependency exceeds the fixed 16MiB maximum')
         try:
-            if path.stat().st_size > MAX_SNAPSHOT_BYTES:
-                raise SourceRegistryError('CANONICAL_WIRE_TOO_LARGE',
-                    'Public source dependency exceeds the fixed 16MiB maximum')
+            if path.stat().st_size > maximum:
+                raise SourceRegistryError('CANONICAL_WIRE_TOO_LARGE', message)
             raw = path.read_bytes()
-            if len(raw) > MAX_SNAPSHOT_BYTES:
-                raise SourceRegistryError('CANONICAL_WIRE_TOO_LARGE',
-                    'Public source dependency exceeds the fixed 16MiB maximum')
+            if len(raw) > maximum:
+                raise SourceRegistryError('CANONICAL_WIRE_TOO_LARGE', message)
             return raw
         except OSError as error:
             raise SourceRegistryError('CANONICAL_FRAME_SOURCE_UNAVAILABLE',
                 'Published source dependency is no longer available') from error
 
-    @staticmethod
-    def _check_frame_files(frame):
+    def _check_frame_files(self, frame):
         for filename, expected in frame['locations'].items():
             path = Path(filename)
-            raw = UnifiedCanonicalSourceRegistry._read_frame_file(path)
+            raw = self._read_frame_file(path, normal=frame['normalLocations'][filename])
             if (str(path.resolve()), len(raw), hashlib.sha256(raw).hexdigest()) != expected:
                 raise SourceRegistryError('CANONICAL_FRAME_SOURCE_CHANGED',
                     'Published root or revision binding changed during this request')
@@ -319,7 +330,7 @@ class UnifiedCanonicalSourceRegistry(NativeCollectionSourceRegistry):
         identity = software_guard()
         frame = {'files': {}, 'values': {}, 'pending': {}, 'guard': software_guard,
                  'softwareIdentity': identity, 'softwareBytes': _serialize(identity),
-                 'locations': {}, 'familyContext': None}
+                 'locations': {}, 'normalLocations': {}, 'familyContext': None}
         token = self._validation_frame.set(frame)
         try:
             with self.artifact_store.validation_session():
@@ -340,6 +351,7 @@ class UnifiedCanonicalSourceRegistry(NativeCollectionSourceRegistry):
             frame['pending'].clear()
             frame['files'].clear()
             frame['locations'].clear()
+            frame['normalLocations'].clear()
 
     def _revision_path(self, revision):
         path = super()._revision_path(revision)
@@ -354,11 +366,19 @@ class UnifiedCanonicalSourceRegistry(NativeCollectionSourceRegistry):
     def _wire(self, address):
         try:
             path = self._path(address)
-            raw = path.read_bytes()
-            if len(raw) > MAX_SNAPSHOT_BYTES:
-                raise SourceRegistryError('CANONICAL_WIRE_TOO_LARGE', 'Public root exceeds the fixed 16MiB maximum')
-            self._pin_frame_file(path, raw)
-            wire = _strict_json(raw)
+            raw = self._read_frame_file(path, normal=None)
+            try:
+                wire = _strict_json(raw)
+            except (UnicodeError, ValueError):
+                if len(raw) > MAX_SNAPSHOT_BYTES:
+                    raise SourceRegistryError('CANONICAL_WIRE_TOO_LARGE', 'Public root exceeds the fixed 16MiB maximum')
+                raise
+            maximum = self.normal_maximum_bytes if normal_observed_candidate(wire) else MAX_SNAPSHOT_BYTES
+            if len(raw) > maximum:
+                raise SourceRegistryError('CANONICAL_WIRE_TOO_LARGE',
+                    'Normal public root exceeds its configured maximum' if normal_observed_candidate(wire)
+                    else 'Public root exceeds the fixed 16MiB maximum')
+            self._pin_frame_file(path, raw, normal=normal_observed_candidate(wire))
         except (OSError, UnicodeError, ValueError) as error:
             if isinstance(error, SourceRegistryError):
                 raise
@@ -370,8 +390,11 @@ class UnifiedCanonicalSourceRegistry(NativeCollectionSourceRegistry):
 
     def publish(self, projection):
         self._object(projection)
-        if len(_serialize(projection)) > MAX_SNAPSHOT_BYTES:
-            raise SourceRegistryError('CANONICAL_WIRE_TOO_LARGE', 'Public root exceeds the fixed 16MiB maximum')
+        maximum = self.normal_maximum_bytes if normal_observed_candidate(projection) else MAX_SNAPSHOT_BYTES
+        if len(_serialize(projection)) > maximum:
+            raise SourceRegistryError('CANONICAL_WIRE_TOO_LARGE',
+                'Normal public root exceeds its configured maximum' if normal_observed_candidate(projection)
+                else 'Public root exceeds the fixed 16MiB maximum')
         if normal_observed_candidate(projection):
             receipt = CanonicalSourceRegistry.publish(self, projection)
             alias = self._normal_revision_path(projection['projectionRevisionSha256'])
@@ -452,7 +475,7 @@ class UnifiedCanonicalSourceRegistry(NativeCollectionSourceRegistry):
     def wire(self, address, *, module='vetting'):
         wire = self._wire(address)
         if normal_observed_candidate(wire):
-            alias = self._read_frame_file(self._normal_revision_path(wire['projectionRevisionSha256']))
+            alias = self._read_frame_file(self._normal_revision_path(wire['projectionRevisionSha256']), normal=True)
             if alias != _serialize(wire):
                 raise SourceRegistryError('NORMAL_OBSERVED_REVISION_MISMATCH',
                     'Normal wire must retain its exact registered observation revision')

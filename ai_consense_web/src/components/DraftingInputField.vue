@@ -8,7 +8,7 @@ import { isObjectKind, isRecordCollectionKind } from '@/drafting/field-kinds'
 import { draftWord, localized, type DraftWord } from '@/drafting/words'
 import type { AppLocale } from '@/i18n'
 
-const props = defineProps<{ field: DraftField; value: DraftValue | undefined; values: Record<string, DraftValue>; locale: AppLocale; disabled?: boolean; idPrefix?: string; compact?: boolean; hideLabel?: boolean; trace?: ExtractTrace | null }>()
+const props = defineProps<{ field: DraftField; value: DraftValue | undefined; values: Record<string, DraftValue>; locale: AppLocale; disabled?: boolean; idPrefix?: string; compact?: boolean; hideLabel?: boolean; rowIdentityKey?: 'id' | '_itemId'; trace?: ExtractTrace | null }>()
 const emit = defineEmits<{ update: [value: DraftValue] }>()
 const w = (key: DraftWord) => draftWord(key, props.locale)
 const l = (text: Parameters<typeof localized>[0]) => localized(text, props.locale)
@@ -42,7 +42,7 @@ function updateRow(index: number, value: DraftValue, key?: string) {
 function addRow() {
   const next = clone(rows.value)
   const recordId = typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : `row-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
-  next.push(columns.value.length ? { ...Object.fromEntries(columns.value.map(column => [column.key, null])), id: recordId } : '')
+  next.push(columns.value.length ? { ...Object.fromEntries(columns.value.map(column => [column.key, null])), [props.rowIdentityKey ?? 'id']: recordId } : '')
   emit('update', next)
 }
 function removeRow(index: number) { const next = clone(rows.value); next.splice(index, 1); emit('update', next) }
@@ -58,7 +58,7 @@ function toggle(value: string | boolean | number, event: Event) {
     <label v-if="!hideLabel" class="field-label" :for="id">{{ l(field.label) }} <small v-if="showOptional(field)">({{ w('optional') }})</small></label>
     <p v-if="field.description" class="field-description">{{ l(field.description) }}</p>
     <div v-if="objectKind" :id="id" class="object-fields">
-      <DraftingInputField v-for="column in columns.filter(item => applicability(item.condition, { ...values, ...object }) !== 'no')" :key="column.key" :field="column" :value="object[column.key]" :values="{ ...values, ...object }" :locale="locale" :disabled="disabled" :id-prefix="id" compact @update="updateObject(column.key, $event)" />
+      <DraftingInputField v-for="column in columns.filter(item => applicability(item.condition, { ...values, ...object }) !== 'no')" :key="column.key" :field="column" :value="object[column.key]" :values="{ ...values, ...object }" :locale="locale" :disabled="disabled" :row-identity-key="rowIdentityKey" :id-prefix="id" compact @update="updateObject(column.key, $event)" />
     </div>
     <div v-else-if="field.kind === 'multiselect'" :id="id" class="multi-options">
       <label v-for="option in options" :key="String(option.value)"><input type="checkbox" :checked="rows.includes(option.value)" :disabled="disabled" :value="option.value" @change="toggle(option.value, $event)" />{{ l(option.label) }}</label>
@@ -66,7 +66,7 @@ function toggle(value: string | boolean | number, event: Event) {
       <div class="list-controls"><button type="button" class="btn soft" :disabled="disabled" @click="emit('update', [])">{{ w('noItems') }}</button><button type="button" class="btn" :disabled="disabled" @click="emit('update', null)">{{ w('resetUnknown') }}</button></div>
     </div>
     <div v-else-if="collection" :id="id" class="collection-editor">
-      <div v-if="rows.length" class="table-scroll"><table><thead><tr><template v-if="columns.length"><th v-for="column in columns" :key="column.key">{{ l(column.label) }} <small v-if="showOptional(column)">({{ w('optional') }})</small></th></template><th v-else>{{ w('columns') }}</th><th></th></tr></thead><tbody><tr v-for="(row, index) in rows" :key="rowKeys[index]"><template v-if="columns.length"><td v-for="column in columns" :key="column.key"><DraftingInputField v-if="applicability(column.condition, { ...values, ...(row && typeof row === 'object' && !Array.isArray(row) ? row : {}) }) !== 'no'" :field="column" :value="rowValue(row, column.key)" :values="{ ...values, ...(row && typeof row === 'object' && !Array.isArray(row) ? row : {}) }" :locale="locale" :disabled="disabled" :id-prefix="`${id}-${index + 1}`" compact hide-label @update="updateRow(index, $event, column.key)" /></td></template><td v-else><textarea :value="typeof row === 'string' ? row : JSON.stringify(row)" :disabled="disabled" :aria-label="`${l(field.label)} ${index + 1}`" rows="2" @input="updateRow(index, ($event.target as HTMLTextAreaElement).value)" /></td><td class="row-action"><button type="button" class="btn" :disabled="disabled" :aria-label="`${w('remove')} ${index + 1}`" @click="removeRow(index)">×</button></td></tr></tbody></table></div>
+      <div v-if="rows.length" class="table-scroll"><table><thead><tr><template v-if="columns.length"><th v-for="column in columns" :key="column.key">{{ l(column.label) }} <small v-if="showOptional(column)">({{ w('optional') }})</small></th></template><th v-else>{{ w('columns') }}</th><th></th></tr></thead><tbody><tr v-for="(row, index) in rows" :key="rowKeys[index]"><template v-if="columns.length"><td v-for="column in columns" :key="column.key"><DraftingInputField v-if="applicability(column.condition, { ...values, ...(row && typeof row === 'object' && !Array.isArray(row) ? row : {}) }) !== 'no'" :field="column" :value="rowValue(row, column.key)" :values="{ ...values, ...(row && typeof row === 'object' && !Array.isArray(row) ? row : {}) }" :locale="locale" :disabled="disabled" :row-identity-key="rowIdentityKey" :id-prefix="`${id}-${index + 1}`" compact hide-label @update="updateRow(index, $event, column.key)" /></td></template><td v-else><textarea :value="typeof row === 'string' ? row : JSON.stringify(row)" :disabled="disabled" :aria-label="`${l(field.label)} ${index + 1}`" rows="2" @input="updateRow(index, ($event.target as HTMLTextAreaElement).value)" /></td><td class="row-action"><button type="button" class="btn" :disabled="disabled" :aria-label="`${w('remove')} ${index + 1}`" @click="removeRow(index)">×</button></td></tr></tbody></table></div>
       <p v-if="Array.isArray(value) && !value.length" class="hint">{{ w('emptyConfirmed') }}</p>
       <div class="list-controls"><button type="button" class="btn" :disabled="disabled" @click="addRow">+ {{ w('addRow') }}</button><button type="button" class="btn soft" :disabled="disabled" @click="emit('update', [])">{{ w('noItems') }}</button><button type="button" class="btn" :disabled="disabled" @click="emit('update', null)">{{ w('resetUnknown') }}</button></div>
     </div>

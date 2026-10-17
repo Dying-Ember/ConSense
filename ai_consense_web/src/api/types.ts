@@ -74,6 +74,8 @@ export interface EvidenceItem {
 }
 
 export interface DraftVariable {
+  graphRevisionId?: string | null
+  fieldDefinitionHash?: string | null
   key: string
   scope: 'INPUT' | 'BASE' | 'FILE'
   group: string
@@ -101,6 +103,10 @@ export interface DraftVariable {
 }
 
 export interface DraftCandidate {
+  graphRevisionId?: string | null
+  fieldDefinitionHash?: string | null
+  originalSha256?: string | null
+  extractionRunId?: string | null
   value: string
   sourceDocumentId?: string | number
   fileName?: string
@@ -108,6 +114,13 @@ export interface DraftCandidate {
   sourceQuote?: string
   reason?: string
   confidence?: number
+}
+export interface DraftReviewCandidates {
+  runId: string | null
+  evidenceRevision: string | null
+  graphRevisionId: string
+  stale?: boolean
+  variables: DraftVariable[]
 }
 
 export interface DraftCondition {
@@ -142,11 +155,15 @@ export interface DraftGroup {
 
 export interface DraftCatalog {
   ruleVersion: string
+  graphRevisionId?: string | null
   groups: DraftGroup[]
   systemFields?: DraftField[]
 }
 
 export interface DraftPlanAction extends DraftTarget {
+  scopeResults?: Array<{ itemId?: string | null; rowIndex: number; matches?: boolean | null }>
+  itemId?: string | null
+  scopeId?: string
   id: string
   action: string
   detail?: LocalizedText | string
@@ -191,6 +208,9 @@ export interface DraftTargetOverride {
 }
 
 export interface DraftVariablePatch {
+  explicitEmpty?: boolean
+  graphRevisionId?: string | null
+  fieldDefinitionHash?: string | null
   value?: string
   choice?: string
   confirmed?: boolean
@@ -199,10 +219,17 @@ export interface DraftVariablePatch {
   reviewed?: boolean
   candidateIndex?: number
   candidateSnapshot?: DraftCandidateIdentity
-  suggestionSnapshot?: { value: string; source: string | null; candidates: DraftCandidateIdentity[]; reviewRequired: boolean }
+  suggestionSnapshot?: { value: string; source: string | null; candidates: DraftCandidateIdentity[]; reviewRequired: boolean; graphRevisionId?: string | null; fieldDefinitionHash?: string | null }
 }
 
 export interface DraftCandidateIdentity {
+  graphRevisionId?: string | null
+  fieldDefinitionHash?: string | null
+  fileName?: string | null
+  reason?: string | null
+  confidence?: number | null
+  originalSha256?: string | null
+  extractionRunId?: string | null
   value: string
   sourceDocumentId: string | number | null
   sourceHash: string | null

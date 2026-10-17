@@ -292,11 +292,16 @@ public class AdviceService {
         final List<VectorStore.SearchHit> selectedFixedHits=hits.stream().filter(this::fixedBaselineHit).collect(Collectors.toList());
         final String fixedSourceIdentity=selectedFixedHits.isEmpty()?null:fixedSourceIdentity(selectedFixedHits);
         final ModelIdentity capturedIdentity=responsesOperation!=null?responsesOperation.getIdentity():selectedOperation==null?null:selectedOperation.getIdentity();
+        final List<SourceDocument> normalSources=new ArrayList<>();
         final Runnable currentGuard=()->{
             progress.checkCancelled();
             if(session!=null)assertCurrentSelection(session,scope);
             assertFixedReferencesCurrent(selectedFixedHits,fixedSourceIdentity);
             if(sourceSnapshot!=null)assertConversationSources(projectId,scope,fixedReferenceOnly,session,sourceSnapshot);
+            if(!normalSources.isEmpty()){
+                Set<Long> ids=normalSources.stream().map(SourceDocument::getId).collect(Collectors.toSet());
+                VettingSourceMaterial.requireCurrentDocuments(normalSources,freshSelectedDocuments(projectId,scope).stream().filter(d->ids.contains(d.getId())).collect(Collectors.toList()));
+            }
             if(conversation!=null)assertConversationCurrent(conversation);
             if(responsesOperation==null)assertCapturedChatIdentity(capturedIdentity);
             else responsesOperation.assertCurrent();
@@ -321,7 +326,7 @@ public class AdviceService {
         }
 
         progress.phase("context");
-        String excerpts = renderExcerpts(hits);
+        String excerpts = renderExcerpts(hits,normalSources);
         String userPrompt = PromptService.format(promptService.userTemplate(PromptCatalog.KEY_ADVICE),
                 fixedReferenceOnly?"Fixed standard reference only / 固定标准参考解释":scopeLabel(scope), excerpts, questionContext.originalQuestion);
         if(fixedReferenceOnly)userPrompt+="\n\nExplicit answer scope: reference_only. Explain only the cited standard text in this frozen development baseline. Do not assert that this standard, edition or requirement is adopted by the project, and do not return project_contract. Parsing, legal ownership and completeness limitations remain unverified. Lack of project incorporation alone is a disclosed scope limit, not a necessary clarification for this standard-reference explanation. Request only missing facts or source provisions that prevent the requested standard interpretation.";
@@ -499,6 +504,9 @@ public class AdviceService {
     }
 
     private String renderExcerpts(List<VectorStore.SearchHit> hits) {
+        return renderExcerpts(hits,new ArrayList<>());
+    }
+    private String renderExcerpts(List<VectorStore.SearchHit> hits,List<SourceDocument> normalSources) {
         StringBuilder builder = new StringBuilder();
         List<VectorStore.SearchHit> fixedHits=hits.stream().filter(this::fixedBaselineHit).collect(Collectors.toList());
         String fixedMaterial=fixedHits.isEmpty()?null:fixedModelMaterial(fixedHits);
@@ -583,7 +591,7 @@ public class AdviceService {
                 .append("\nSelected canonical model material (untrusted observations):\n")
                 .append(com.consense.service.vetting.VettingSourceMetadataWire.write(dictionary)).append("\n");
         }
-        List<Map<String,Object>> normalMaterial=normalModelMaterial(hits);
+        List<Map<String,Object>> normalMaterial=normalModelMaterial(hits,normalSources);
         if(!normalMaterial.isEmpty())builder.append(VettingSourceMetadataWire.LEGEND)
                 .append("\nSelected normal source model material (untrusted observations):\n")
                 .append(VettingSourceMetadataWire.write(normalMaterial)).append("\n");
@@ -593,7 +601,11 @@ public class AdviceService {
     }
 
     private List<Map<String,Object>> normalModelMaterial(List<VectorStore.SearchHit> hits) {
+        return normalModelMaterial(hits,new ArrayList<>());
+    }
+    private List<Map<String,Object>> normalModelMaterial(List<VectorStore.SearchHit> hits,List<SourceDocument> normalSources) {
         Map<String,List<VettingCorpus.Chunk>> current=new LinkedHashMap<>();
+        Map<String,SourceDocument> documents=new LinkedHashMap<>();
         List<VettingCorpus.Chunk> selected=new ArrayList<>();Map<String,String> lookupIds=new LinkedHashMap<>();
         for(int i=0;i<hits.size();i++) {
             VectorStore.SearchHit hit=hits.get(i);if(canonicalUnit(hit)!=null||fixedBaselineHit(hit))continue;
@@ -604,18 +616,21 @@ public class AdviceService {
                     SourceDocument document=sourceDocumentRepository.findById(Long.valueOf(documentId)).orElse(null);
                     if(document!=null&&Objects.equals(document.getProjectId(),hit.getPayload().get("projectId"))
                             &&document.getSourceSha256()!=null&&document.getSourceSha256().matches("[a-f0-9]{64}")
-                            &&storageService!=null&&storageService.matchesStoredBytes(document.getStoragePath(),document.getSourceSha256()))
+                            &&storageService!=null&&storageService.matchesStoredBytes(document.getStoragePath(),document.getSourceSha256())){
                         chunks=VettingCorpus.chunks(Collections.singletonList(document));
+                        documents.put(documentId,document);
+                    }
                 }catch(NumberFormatException ignored){ /* Unbound legacy sources have no native-part locator. */ }
                 current.put(documentId,chunks);
             }
             List<VettingCorpus.Chunk> matching=current.get(documentId).stream().filter(c->normalChunkMatches(c,hit)).collect(Collectors.toList());
             if(matching.size()!=1)continue;
+            if(normalSources.stream().noneMatch(d->Objects.equals(String.valueOf(d.getId()),documentId)))normalSources.add(documents.get(documentId));
             // Copy the selected current source; external vector payloads never supply native observations.
             VettingCorpus.Chunk bound=JsonUtils.read(JsonUtils.write(matching.get(0)),VettingCorpus.Chunk.class);
             String alias="["+(i+1)+"]";bound.setId(alias);selected.add(bound);lookupIds.put(alias,hit.getId());
         }
-        List<Map<String,Object>> material=VettingSourceMaterial.project(selected);
+        List<Map<String,Object>> material=VettingSourceMaterial.project(selected,normalSources);
         for(Map<String,Object> excerpt:material){excerpt.put("publicCitationAlias",excerpt.get("id"));excerpt.put("internalLookupId",lookupIds.get(excerpt.get("id")));}
         return material;
     }
@@ -804,7 +819,8 @@ public class AdviceService {
                 List<SourceDocument> documents=freshSelectedDocuments(projectId,scope);
                 for(SourceDocument document:documents)if(storageService==null||!storageService.matchesStoredBytes(document.getStoragePath(),document.getSourceSha256()))
                     throw new BizException(4204,"A selected advice original is missing or its bytes changed. Restore and review the current sources before asking; no answer was published.");
-                binding.put("documents",documents.stream().map(d->Arrays.asList(String.valueOf(d.getId()),d.getSourceSha256(),VettingCorpus.sourceHash(d),VettingCorpus.sourceRole(d),d.getParseStatus()))
+                binding.put("documents",documents.stream().map(d->Arrays.asList(String.valueOf(d.getId()),d.getSourceSha256(),VettingCorpus.sourceHash(d),VettingCorpus.sourceRole(d),d.getParseStatus(),
+                                VettingCorpus.hash(nvl(d.getParseCoverageJson())),VettingCorpus.hash(nvl(d.getNormalCandidateJson()))))
                         .sorted(java.util.Comparator.comparing(row->row.get(0))).collect(Collectors.toList()));
             }
         }

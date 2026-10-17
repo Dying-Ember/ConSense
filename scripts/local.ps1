@@ -12,7 +12,7 @@ $localRoot = Join-Path $projectRoot '.local'
 $configPath = Join-Path $localRoot 'runtime.json'
 if (-not (Test-Path -LiteralPath $configPath)) { throw "Missing deployment configuration: $configPath" }
 $config = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
-$backendMaxHeapMiB = 2048
+$backendMaxHeapMiB = 32768
 if ($null -ne $config.BackendMaxHeapMiB) {
     if (-not [int]::TryParse([string]$config.BackendMaxHeapMiB, [ref]$backendMaxHeapMiB) -or
         $backendMaxHeapMiB -lt 256) {
@@ -26,6 +26,38 @@ New-Item -ItemType Directory -Force -Path $stateRoot, $logRoot | Out-Null
 function ConvertTo-ProcessArgument([string]$Value) {
     # Quote for CreateProcess, including JSON arguments and trailing backslashes.
     '"' + [regex]::Replace([regex]::Replace($Value, '(\\*)"', '$1$1\"'), '(\\+)$', '$1$1') + '"'
+}
+
+function Get-BackendOcrEnvironment([object]$Ocr) {
+    $environment = @{ CONSENSE_OCR_ENABLED = 'false' }
+    if ($null -eq $Ocr) { return $environment }
+    if ($Ocr.Enabled -isnot [bool]) { throw 'BackendOcr.Enabled must be a boolean.' }
+    if (-not $Ocr.Enabled) { return $environment }
+    if ($Ocr.Mode -cne 'local') { throw 'BackendOcr.Mode must be local.' }
+    $endpoint = $null; $address = $null
+    $baseUrl = [string]$Ocr.BaseUrl
+    if ($baseUrl -cne $baseUrl.Trim() -or
+        -not [Uri]::TryCreate($baseUrl, [UriKind]::Absolute, [ref]$endpoint) -or
+        $endpoint.Scheme -ne 'http' -or -not [Net.IPAddress]::TryParse($endpoint.DnsSafeHost, [ref]$address) -or
+        -not [Net.IPAddress]::IsLoopback($address) -or $endpoint.Authority -notmatch ':\d+$' -or $endpoint.Port -lt 1 -or
+        $endpoint.UserInfo -or $endpoint.AbsolutePath -ne '/' -or $endpoint.Query -or $endpoint.Fragment) {
+        throw 'BackendOcr.BaseUrl must be an HTTP loopback IP authority with an explicit port and no credentials, path, query or fragment.'
+    }
+    $timeout = 0L; $minimumChars = 0
+    # HttpSupport adds 5000 ms for OkHttp's signed-int call timeout.
+    if (-not [long]::TryParse([string]$Ocr.TimeoutMs, [ref]$timeout) -or $timeout -lt 1 -or $timeout -gt 2147478647) {
+        throw 'BackendOcr.TimeoutMs must be an integer from 1 to 2147478647.'
+    }
+    if (-not [int]::TryParse([string]$Ocr.TextLayerMinChars, [ref]$minimumChars) -or $minimumChars -lt 1) {
+        throw 'BackendOcr.TextLayerMinChars must be a positive integer.'
+    }
+    $environment['CONSENSE_OCR_ENABLED'] = 'true'
+    $environment['CONSENSE_OCR_MODE'] = 'local'
+    $environment['CONSENSE_OCR_BASE_URL'] = $endpoint.GetLeftPart([UriPartial]::Authority)
+    # Spring Boot removes hyphens within each environment property segment.
+    $environment['CONSENSE_OCR_TIMEOUTMS'] = $timeout.ToString()
+    $environment['CONSENSE_OCR_TEXTLAYERMINCHARS'] = $minimumChars.ToString()
+    return $environment
 }
 
 function Get-DraftingRendererArguments([object]$Renderer, [string]$LocalDirectory) {
@@ -224,6 +256,7 @@ try {
         Start-MiniMaxRelay -Restart
         return
     }
+    $ocrEnvironment = if ($Action -eq 'start-model') { @{} } else { Get-BackendOcrEnvironment $config.BackendOcr }
     $jar = Join-Path $projectRoot 'ai_consense_service\target\consense-service-1.0.0.jar'
     $releaseBackup = $null
     if ($Action -eq 'restart-web' -and $config.Model.Enabled) {
@@ -282,8 +315,8 @@ try {
         CONSENSE_ALLOWED_ORIGINS = $frontendOrigins -join ','
         CONSENSE_LLM_ENABLED = $config.Model.Enabled.ToString().ToLower()
         CONSENSE_MINIMAX_ENABLED = 'false'
-        CONSENSE_OCR_ENABLED = 'false'
     }
+    foreach ($ocrSetting in $ocrEnvironment.GetEnumerator()) { $backendEnvironment[$ocrSetting.Key] = $ocrSetting.Value }
     if ($config.MiniMaxCn -and $config.MiniMaxCn.Enabled) {
         $miniMaxKeyVariable = [string]$config.MiniMaxCn.ApiKeyEnvironmentVariable
         if ([string]::IsNullOrWhiteSpace($miniMaxKeyVariable) -or

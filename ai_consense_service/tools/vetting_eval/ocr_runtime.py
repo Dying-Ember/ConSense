@@ -197,7 +197,7 @@ def create_ocr_engine(model_directory=None, *, max_side_len=2000, text_score=0.5
         for candidate in candidates:
             if candidate.is_dir() and (candidate / 'msvcp140.dll').is_file():
                 _DLL_HANDLES.append(os.add_dll_directory(str(candidate.resolve())))
-    import torch  # Import shared Windows runtime dependencies before pyclipper.
+        import torch  # Load shared Windows runtime dependencies before pyclipper.
     try:
         import onnxruntime
         from rapidocr import RapidOCR

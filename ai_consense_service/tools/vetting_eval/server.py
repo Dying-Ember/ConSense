@@ -207,10 +207,13 @@ def device():
     global _selected_device
     if _selected_device is not None:
         return _selected_device
-    import torch
     choice = os.environ.get('CONSENSE_MODEL_DEVICE', 'auto')
     if choice not in {'auto', 'cpu', 'cuda'}:
         raise RuntimeError('CONSENSE_MODEL_DEVICE must be auto, cpu or cuda')
+    if choice == 'cpu':
+        _selected_device = 'cpu'
+        return _selected_device
+    import torch
     if choice == 'cuda' and not torch.cuda.is_available():
         raise RuntimeError('CUDA explicitly requested but unavailable')
     torch.set_num_threads(4)
@@ -366,15 +369,19 @@ def health():
     coordinator = gpu_coordinator()
     if coordinator is not None:
         return coordinator.health(server=sys.modules[__name__])
-    import torch
-    return {'status': 'ok', 'mode': 'server' if os.environ.get('CONSENSE_QDRANT_URL') else 'local', 'device': device(), 'offline': OFFLINE,
+    selected_device = device()
+    cuda_allocated = None
+    if selected_device == 'cuda':
+        import torch
+        cuda_allocated = round(torch.cuda.memory_allocated()/2**20, 1)
+    return {'status': 'ok', 'mode': 'server' if os.environ.get('CONSENSE_QDRANT_URL') else 'local', 'device': selected_device, 'offline': OFFLINE,
         'models': MODELS, 'maxTokens': MODEL_SETTINGS['embedding']['maxTokens'],
         'batchSize': MODEL_SETTINGS['embedding']['batchSize'],
         'runtime': {kind: model_runtime(kind) for kind in ('embedding', 'reranker')},
         'retrieval': retrieval_settings(observe_tokenizer_identity=False),
         'indexSignatureVersion': window_runtime().signature_version(),
         'loaded': {'embedding': _embedding is not None, 'reranker': _reranker is not None, 'ocr': _ocr is not None},
-        'cudaAllocatedMiB': round(torch.cuda.memory_allocated()/2**20, 1) if torch.cuda.is_available() else None,
+        'cudaAllocatedMiB': cuda_allocated,
         'ocrEngine': 'Complete Paddle/MinerU API candidates' if os.environ.get('CONSENSE_COMPLETE_OCR_CONFIG') else 'RapidOCR CPU baseline',
         'limitations': ['OCR does not interpret table cells or deletion state',
             'Source-bound windows count query/special tokens; oversized queries fail without silent clipping',
@@ -393,10 +400,35 @@ def native_business_models():
         raise HTTPException(503, 'Configured native business model catalog is unavailable') from failure
 
 
+def _pinned_cpu_ocr():
+    """Reuse the existing fixed local CPU engine; caller owns LOCK."""
+    global _ocr, _ocr_recipe_sha256
+    if _ocr is None:
+        from ocr_runtime import ocr_cache_recipe, local_model_paths, identity_hash
+        directory = os.environ.get('CONSENSE_OCR_MODEL_DIRECTORY', '')
+        expected_recipe = os.environ.get('CONSENSE_OCR_RECIPE_SHA256', '')
+        if not directory or not Path(directory).is_absolute() or not re.fullmatch('[a-f0-9]{64}', expected_recipe):
+            raise ValueError('Offline identity OCR requires an explicit local model directory and exact recipe SHA-256')
+        recipe = ocr_cache_recipe(directory, require_verified_defaults=True)
+        if identity_hash(recipe) != expected_recipe:
+            raise ValueError('Offline identity OCR recipe differs before model initialization')
+        engine = create_ocr_engine(directory, local_paths=local_model_paths(directory))
+        if ocr_cache_recipe(directory, require_verified_defaults=True) != recipe:
+            raise ValueError('Offline identity OCR weights/configuration changed during initialization')
+        _ocr, _ocr_recipe_sha256 = engine, expected_recipe
+    elif _ocr_recipe_sha256 is not None and os.environ.get('CONSENSE_OCR_RECIPE_SHA256') != _ocr_recipe_sha256:
+        raise ValueError('Offline identity OCR configured recipe changed; restart with its reviewed local assets')
+    return _ocr
+
+
+def _observe_complete_cpu_lines(raw, store):
+    from ocr_layout_coverage import observe_cpu_lines
+    return observe_cpu_lines(_pinned_cpu_ocr(), raw, _ocr_recipe_sha256, store)
+
+
 @app.post('/ocr')
 def ocr(file: UploadFile = File(...), purpose: Annotated[str | None, Header(alias='X-Consense-Ocr-Purpose')] = None,
         source_context: Annotated[str | None, Form(alias='sourceContext')] = None):
-    global _ocr, _ocr_recipe_sha256
     if purpose not in (None, 'identity', 'parse'):
         raise HTTPException(422, 'Unsupported OCR observation purpose')
     from PIL import Image, UnidentifiedImageError
@@ -429,27 +461,14 @@ def ocr(file: UploadFile = File(...), purpose: Annotated[str | None, Header(alia
                     raise ValueError('Complete OCR configuration changed or lacks its exact SHA-256 pin')
                 try:
                     return recognize_complete_page(raw, json.loads(config_bytes), ArtifactStore(STATE / 'ocr-observations'),
-                                                   source_context=source_context)
+                        source_context=source_context,
+                        line_observer=_observe_complete_cpu_lines if source_context is not None else None)
                 except CompleteOcrError as error:
                     raise HTTPException(503, {'kind': 'complete_parser_failed', 'message': str(error),
                                              'receipt': error.receipt}) from error
-            if _ocr is None:
-                from ocr_runtime import ocr_cache_recipe, local_model_paths, identity_hash
-                directory = os.environ.get('CONSENSE_OCR_MODEL_DIRECTORY', '')
-                expected_recipe = os.environ.get('CONSENSE_OCR_RECIPE_SHA256', '')
-                if not directory or not Path(directory).is_absolute() or not re.fullmatch('[a-f0-9]{64}', expected_recipe):
-                    raise ValueError('Offline identity OCR requires an explicit local model directory and exact recipe SHA-256')
-                recipe = ocr_cache_recipe(directory, require_verified_defaults=True)
-                if identity_hash(recipe) != expected_recipe:
-                    raise ValueError('Offline identity OCR recipe differs before model initialization')
-                engine = create_ocr_engine(directory, local_paths=local_model_paths(directory))
-                if ocr_cache_recipe(directory, require_verified_defaults=True) != recipe:
-                    raise ValueError('Offline identity OCR weights/configuration changed during initialization')
-                _ocr, _ocr_recipe_sha256 = engine, expected_recipe
-            elif _ocr_recipe_sha256 is not None and os.environ.get('CONSENSE_OCR_RECIPE_SHA256') != _ocr_recipe_sha256:
-                raise ValueError('Offline identity OCR configured recipe changed; restart with its reviewed local assets')
+            engine = _pinned_cpu_ocr()
             started = time.perf_counter()
-            result = _ocr(image)
+            result = engine(image)
             from ocr_response import baseline_observation
             payload = baseline_observation(result, image, raw)
             payload['provenance']['observationPurpose'] = purpose or 'parse'

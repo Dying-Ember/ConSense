@@ -5,6 +5,10 @@ import { draftingApi } from '@/api'
 import type { DraftCatalog, DraftDocument, DraftField, DraftGroup, DraftPlan, DraftPlanAction, DraftTargetOverride, DraftUnresolved, DraftVariable, DraftVariablePatch, EvidenceItem, ExtractTrace, TemplateItem } from '@/api'
 import { useAppStore } from '@/stores/app'
 import AppModal from '@/components/AppModal.vue'
+import DraftingSourceReview from '@/components/DraftingSourceReview.vue'
+import DraftingCandidateReview from '@/components/DraftingCandidateReview.vue'
+import { sourceReviewDrafts, candidateReviewDrafts } from '@/drafting/source-review-state'
+import type { ReviewRevision } from '@/drafting/source-review-types'
 import DraftingInputField from '@/components/DraftingInputField.vue'
 import DraftingExtractionReport from '@/components/DraftingExtractionReport.vue'
 import DraftingBillDistribution from '@/components/DraftingBillDistribution.vue'
@@ -22,11 +26,41 @@ const DraftingBusinessGraph = defineAsyncComponent(() => import('@/components/Dr
 const store = useAppStore()
 const w = (key: DraftWord) => draftWord(key, store.locale)
 const l = (text: Parameters<typeof localized>[0]) => localized(text, store.locale)
-type Step = 'inputs' | 'variables' | 'preview'
+type Step = 'inputs' | 'identify' | 'review' | 'variables' | 'preview'
 
 
 const projectId = computed(() => store.activeProjectId)
 const step = ref<Step>('inputs')
+const phrase = (zh: string, en: string) => store.locale === 'en' ? en : zh
+const sourceReview = ref<InstanceType<typeof DraftingSourceReview>>()
+const reviewMounted = ref(false), reviewDirty = ref(false), candidateDirty = ref(false), draftRevisionId = ref(''), candidateReload = ref(0), rebuildReviewOpen = ref(false)
+const discoveryBudget = ref<string | number>(1)
+const manualNotes = reactive<Record<string, string>>({})
+const intentionalEmpty = reactive<Record<string, boolean>>({}), emptyBaseline = reactive<Record<string, boolean>>({})
+async function ensureReview() { reviewMounted.value = true; await nextTick(); await sourceReview.value?.ready(); return sourceReview.value }
+async function identifyTemplates(rebuild = false) {
+  await action(phrase('识别模板要求', 'Identifying template requirements'), async (id, token) => {
+    if (candidateDirty.value) throw Error(phrase('请先保存或取消候选调整。', 'Save or cancel the candidate edit first.'))
+    const editor = await ensureReview(); const revision = await editor?.prepareCandidates(rebuild)
+    if (revision && current(id, token)) { draftRevisionId.value = revision.id; step.value = 'review'; rebuildReviewOpen.value = false; candidateReload.value++ }
+  })
+}
+async function discoverTemplates() {
+  const maxItems = Number(discoveryBudget.value), llmSelection = store.captureLlmSelection()
+  if (!Number.isInteger(maxItems) || maxItems < 1 || maxItems > 10) { error.value = phrase('请填写1至10条的明确识别预算。', 'Choose an explicit discovery budget from 1 to 10.'); return }
+  await action(phrase('按原件识别独立要求', 'Discovering source requirements'), async (id, token) => {
+    if (candidateDirty.value) throw Error(phrase('请先保存候选调整。', 'Save candidate edits first.'))
+    const editor = await ensureReview(), revision = await editor?.prepareCandidates()
+    if (!revision || !current(id, token)) return
+    const discovered = await draftingApi.reviewDiscover(id, revision.id, editor?.currentRevisionId() ?? null, maxItems, llmSelection)
+    if (!current(id, token)) return
+    draftRevisionId.value = discovered.id; await editor?.refresh(false); candidateReload.value++; step.value = 'review'
+  })
+}
+function reviewSaved(revision: ReviewRevision) { draftRevisionId.value = revision.id; candidateReload.value++ }
+async function reviewConfirmed() { await action(w('loading'), refresh); step.value = 'variables' }
+async function locateCandidate(sourceId: string, sourceSha256?: string | null) { if (candidateDirty.value) return; step.value = 'review'; const editor = await ensureReview(); await editor?.locateSource(sourceId, sourceSha256) }
+
 const catalog = ref<DraftCatalog>({ ruleVersion: '', groups: [] })
 const templates = ref<TemplateItem[]>([])
 const inputs = ref<EvidenceItem[]>([])
@@ -85,13 +119,14 @@ const readingStates = computed(() => Object.fromEntries(readingFields.value.map(
 const readingDirtyKeys = computed(() => readingFields.value.filter(dirty).map(field => field.key))
 const readingSourceAvailable = computed(() => {
   const tag = templates.value.find(template => template.key === readingFile.value)?.tag
-  return tag === 'missing' ? false : tag === 'ok' ? true : undefined
+  return tag === 'missing' ? false : tag === 'ok' || tag === 'partial' ? true : undefined
 })
 const variableMap = computed(() => new Map(variables.value.map(variable => [variable.key, variable])))
-const steps = computed(() => [{ key: 'inputs' as Step, label: w('documents') }, { key: 'variables' as Step, label: w('inputs') }, { key: 'preview' as Step, label: w('preview') }])
+const steps = computed(() => [{ key: 'inputs' as Step, label: phrase('1 来源文件', '1 Sources') }, { key: 'identify' as Step, label: phrase('2 识别要求与候选', '2 Identify') }, { key: 'review' as Step, label: phrase('3 对着原文核对', '3 Source review') }, { key: 'variables' as Step, label: phrase('4 采用与修改方案', '4 Adopt and plan') }, { key: 'preview' as Step, label: phrase('5 预览与导出', '5 Preview and export') }])
 const allTemplates = computed(() => ['NTT', 'SCT', 'SCC'].every(key => templates.value.some(template => template.key === key && template.tag === 'ok')))
 const activeDocument = computed(() => documents.value.find(document => document.fileKey === activeFile.value))
 const documentDirty = computed(() => bodyDirty(activeDocument.value, bodyDraft.value))
+const graphMode = computed(() => !!catalog.value.graphRevisionId)
 const dirtyInputs = computed(() => fields.value.some(dirty))
 const documentAccess = computed(() => documentCapabilities(activeDocument.value, documentDirty.value))
 const canExport = computed(() => documentAccess.value.exportable)
@@ -101,8 +136,8 @@ const thresholdPresent = computed(() => values.periodAtLeast39Months !== null &&
 const durationThreshold = computed(() => String(Number(values.contractPeriodMonths) >= 39))
 const durationConflict = computed(() => durationKnown.value && values.periodAtLeast39Months !== null && values.periodAtLeast39Months !== undefined && values.periodAtLeast39Months !== '' && String(values.periodAtLeast39Months) !== durationThreshold.value)
 const actionableFields = computed(() => fields.value.filter(field => !field.hidden && applicability(field.condition, values) !== 'no'))
-const unresolvedInputCount = computed(() => actionableFields.value.filter(field => !field.optional && !['adopted', 'manual'].includes(state(field))).length)
-const adoptedCount = computed(() => actionableFields.value.filter(field => ['adopted', 'manual'].includes(state(field))).length)
+const unresolvedInputCount = computed(() => actionableFields.value.filter(field => !field.optional && (graphMode.value && dirty(field) || !['adopted', 'manual'].includes(state(field)))).length)
+const adoptedCount = computed(() => actionableFields.value.filter(field => (!graphMode.value || !dirty(field)) && ['adopted', 'manual'].includes(state(field))).length)
 const currentUnresolved = computed<DraftUnresolved[]>(() => step.value === 'preview' ? activeDocument.value?.unresolved ?? [] : plan.value?.unresolved ?? [])
 const selectedTarget = computed(() => plan.value?.actions.find(action => action.id === targetId.value))
 const targetField = computed<DraftField>(() => fields.value.find(field => ['targetOverrides', 'targetEdits'].includes(field.key)) ?? { key: 'targetOverrides', kind: 'list', hidden: true, label: { en: 'Target edits', zhHans: '目标修改', zhHant: '目標修改' } })
@@ -125,7 +160,8 @@ function previewAdoptable(field: DraftField) {
   const variable = variableMap.value.get(field.key)
   return !dirty(field) && encode(field, values[field.key]).trim() !== '' && validationIssue(field, values[field.key]) === null && !variable?.validationIssue && applicability(field.condition, values) !== 'no' && (state(field) === 'suggested' || !!variable?.reviewRequired)
 }
-function dirty(field: DraftField) { return encode(field, values[field.key]) !== (baseline[field.key] ?? '') }
+function dirty(field: DraftField) { return encode(field, values[field.key]) !== (baseline[field.key] ?? '') || !!intentionalEmpty[field.key] !== !!emptyBaseline[field.key] }
+function toggleEmpty(field: DraftField, checked: boolean) { intentionalEmpty[field.key] = checked; if (checked) values[field.key] = ''; snapshotDraft(projectId.value) }
 function inputSaveStatus(field: DraftField): DraftWord | undefined {
   const status = inputSaveStates[field.key]
   if (status === 'saving') return 'savingInput'
@@ -135,6 +171,7 @@ function inputSaveStatus(field: DraftField): DraftWord | undefined {
 function state(field: DraftField): DraftWord {
   if (applicability(field.condition, values) === 'no') return 'inactive'
   const variable = variableMap.value.get(field.key)
+  if (graphMode.value && field.kind === 'text' && intentionalEmpty[field.key] && !variable?.reviewRequired && !variable?.validationIssue) return dirty(field) || variable?.manuallyEdited ? 'manual' : 'adopted'
   const issue = validationIssue(field, values[field.key])
   if (issue === 'missing') return variable?.adoptionState === 'conflict' && !dirty(field) ? 'conflict' : 'missing'
   if (issue || variable?.reviewRequired || variable?.validationIssue || ['siteInspectionStartDate', 'siteInspectionEndDate'].includes(field.key) && reversedSiteDates(values) || ['contractPeriodMonths', 'periodAtLeast39Months'].includes(field.key) && durationConflict.value || applicability(field.condition, values) === 'unknown' && values[field.key] !== null && values[field.key] !== undefined && values[field.key] !== '') return 'needs_review'
@@ -158,11 +195,11 @@ function relatedActions(group: DraftGroup) {
 }
 function rawValues() { return dirtyPatch(fields.value, values, baseline) }
 function snapshotDraft(id: string) {
-  if (!id || !fields.value.length) return
+  if (!id || !fields.value.length && restoreViewPending) return
   const docs = clone(projectDrafts.get(id)?.documents ?? {})
   if (documentDirty.value) docs[activeFile.value] = { content: documentText.value, baseline: documentBaseline.value, body: clone(bodyDraft.value) }
   else delete docs[activeFile.value]
-  projectDrafts.set(id, { values: clone(values), baseline: clone(baseline), documents: docs, view: { step: step.value, activeFile: activeFile.value, review: { layout: reviewLayout.value, groupId: focusedGroupId.value }, reading: readingOpen.value ? { fileKey: readingFile.value, selectedKey: readingKey.value, selectedActionId: readingActionId.value } : undefined } })
+  projectDrafts.set(id, { values: clone(values), baseline: clone(baseline), notes: clone(manualNotes), intentionalEmpty: clone(intentionalEmpty), emptyBaseline: clone(emptyBaseline), documents: docs, view: { step: step.value, activeFile: activeFile.value, review: { layout: reviewLayout.value, groupId: focusedGroupId.value }, reading: readingOpen.value ? { fileKey: readingFile.value, selectedKey: readingKey.value, selectedActionId: readingActionId.value } : undefined } })
 }
 function loadDocument(preserve = true) {
   if (preserve && documentDirty.value) return
@@ -174,8 +211,10 @@ function loadDocument(preserve = true) {
   if (pending) restored.value = true
 }
 function initialize(list: DraftVariable[]) {
+  const retainedEmpty = new Set(fields.value.filter(field => !!intentionalEmpty[field.key] !== !!emptyBaseline[field.key]).map(field => field.key))
   const merged = mergeServerValues(fields.value, list, values, baseline)
   variables.value = list
+  for (const field of fields.value) { const variable = list.find(item => item.key === field.key); const adoptedEmpty = !!variable?.graphRevisionId && field.kind === 'text' && variable?.value === '' && variable.confirmed; emptyBaseline[field.key] = adoptedEmpty; if (!retainedEmpty.has(field.key)) intentionalEmpty[field.key] = adoptedEmpty }
   for (const key of Object.keys(values)) if (!(key in merged.values)) delete values[key]
   Object.assign(values, merged.values); Object.assign(baseline, merged.baseline)
 }
@@ -183,10 +222,11 @@ function update(field: DraftField, value: DraftValue) {
   if (inputDisabled(field)) return
   delete inputSaveStates[field.key]
   values[field.key] = value
+  if (value !== '' && value !== null && value !== undefined) intentionalEmpty[field.key] = false
   if (field.key === 'contractPeriodMonths' && durationKnown.value) values.periodAtLeast39Months = durationThreshold.value
   snapshotDraft(projectId.value)
 }
-function discard(group: DraftGroup) { for (const field of group.fields) values[field.key] = decode(field, baseline[field.key]); snapshotDraft(projectId.value) }
+function discard(group: DraftGroup) { for (const field of group.fields) { values[field.key] = decode(field, baseline[field.key]); intentionalEmpty[field.key] = !!emptyBaseline[field.key] }; snapshotDraft(projectId.value) }
 function current(id: string, token: number) { return alive && id === projectId.value && token === generation }
 async function action(label: string, task: (id: string, token: number) => Promise<void>) {
   if (busy.value || !projectId.value) return
@@ -199,7 +239,7 @@ async function action(label: string, task: (id: string, token: number) => Promis
 async function updatePlan() {
   if (!projectId.value || !fields.value.length) return
   const sequence = ++planGeneration, id = projectId.value, token = generation
-  try { const result = await draftingApi.plan(id, dirtyInputs.value ? rawValues() : undefined); if (sequence === planGeneration && current(id, token)) plan.value = result }
+  try { const result = await draftingApi.plan(id, !graphMode.value && dirtyInputs.value ? rawValues() : undefined); if (sequence === planGeneration && current(id, token)) plan.value = result }
   catch (caught) { if (sequence === planGeneration && current(id, token)) error.value = caught instanceof Error ? caught.message : String(caught) }
 }
 async function refresh(id: string, token: number) {
@@ -207,7 +247,7 @@ async function refresh(id: string, token: number) {
   if (!current(id, token)) return
   catalog.value = schema
   const cached = projectDrafts.get(id)
-  if (!Object.keys(values).length && cached) { Object.assign(values, clone(cached.values)); Object.assign(baseline, clone(cached.baseline)); restored.value = schema.groups.some(group => group.fields.some(field => encode(field, values[field.key]) !== (baseline[field.key] ?? ''))) }
+  if (!Object.keys(values).length && cached) { Object.assign(values, clone(cached.values)); Object.assign(baseline, clone(cached.baseline)); Object.assign(manualNotes, clone(cached.notes ?? {})); Object.assign(intentionalEmpty, clone(cached.intentionalEmpty ?? {})); Object.assign(emptyBaseline, clone(cached.emptyBaseline ?? {})); restored.value = schema.groups.some(group => group.fields.some(field => encode(field, values[field.key]) !== (baseline[field.key] ?? ''))) }
   initialize(list)
   const [ts, ins, docs, tr] = await Promise.all([draftingApi.templates(id), draftingApi.inputs(id), draftingApi.documents(id), draftingApi.extractTrace(id)])
   if (!current(id, token)) return
@@ -223,12 +263,19 @@ async function refresh(id: string, token: number) {
   await updatePlan()
 }
 async function saveField(id: string, token: number, field: DraftField, patch: DraftVariablePatch) {
-  const updated = await draftingApi.updateVariable(id, field.key, patch)
+  const variable = variableMap.value.get(field.key)
+  const bound = variable?.graphRevisionId ? { ...patch, graphRevisionId: variable.graphRevisionId, fieldDefinitionHash: variable.fieldDefinitionHash } : patch
+  if (variable?.graphRevisionId && patch.value !== undefined && (patch.value.trim() || patch.explicitEmpty) && !bound.note?.trim()) {
+    const reason = manualNotes[field.key]?.trim()
+    if (!reason) throw Error(phrase('请为此人工采用填写理由，再保存。', 'Supply a reason for adopting this manual value before saving.'))
+    bound.note = reason
+  }
+  const updated = await draftingApi.updateVariable(id, field.key, bound)
   if (!current(id, token)) return
   variables.value = [...variables.value.filter(variable => variable.key !== updated.key), updated]
-  values[field.key] = decode(field, updated.value); baseline[field.key] = updated.value ?? ''; snapshotDraft(id)
+  values[field.key] = decode(field, updated.value); baseline[field.key] = updated.value ?? ''; emptyBaseline[field.key] = !!updated.graphRevisionId && field.kind === 'text' && updated.value === '' && updated.confirmed; intentionalEmpty[field.key] = !!emptyBaseline[field.key]; snapshotDraft(id)
 }
-async function persistDirty(id: string, token: number, subset = fields.value) { for (const field of subset) { if (!current(id, token)) return; if (dirty(field)) await saveField(id, token, field, { value: encode(field, values[field.key]) }) } }
+async function persistDirty(id: string, token: number, subset = fields.value) { for (const field of subset) { if (!current(id, token)) return; if (dirty(field)) await saveField(id, token, field, { value: encode(field, values[field.key]), ...(intentionalEmpty[field.key] ? { explicitEmpty: true } : {}) }) } }
 async function saveGroup(group?: DraftGroup) { await action(w('saving'), async (id, token) => { await persistDirty(id, token, group?.fields); if (current(id, token)) await refresh(id, token) }) }
 async function saveInput(field: DraftField) {
   if (!dirty(field) || applicability(field.condition, values) === 'no') return
@@ -244,31 +291,37 @@ async function saveInput(field: DraftField) {
 async function adopt(field: DraftField, candidateIndex?: number) {
   await action(w('saving'), async (id, token) => {
     const variable = variableMap.value.get(field.key)
-    const patch = adoptionPatch(encode(field, values[field.key]), baseline[field.key] ?? '', !!variable?.reviewRequired, candidateIndex, variable)
+    const patch = candidateIndex === undefined && intentionalEmpty[field.key] && dirty(field) ? { value: '', explicitEmpty: true } : adoptionPatch(encode(field, values[field.key]), baseline[field.key] ?? '', !!variable?.reviewRequired, candidateIndex, variable)
     await saveField(id, token, field, patch)
     if (current(id, token)) await refresh(id, token)
   })
 }
 async function upload(event: Event, target: 'templates' | 'inputs', key?: string) {
+  if (reviewDirty.value || candidateDirty.value) { error.value = phrase('请先保存来源核对和候选调整，再变更来源文件。', 'Save source review and candidate edits before changing source files.'); return }
   const el = event.target as HTMLInputElement, files = Array.from(el.files ?? []); el.value = ''; if (!files.length) return
-  await action(w('uploading'), async (id, token) => { const result = key ? await draftingApi.replaceTemplate(id, key, files[0]!) : target === 'templates' ? await draftingApi.uploadTemplates(id, files) : await draftingApi.uploadInputs(id, files); if (!current(id, token)) return; store.notify(`${result.parsed}/${result.accepted} ${w('parsed')}`); await refresh(id, token); if (result.failed && current(id, token)) error.value = result.messages.join('\n') })
+  await action(w('uploading'), async (id, token) => { const result = key ? await draftingApi.replaceTemplate(id, key, files[0]!) : target === 'templates' ? await draftingApi.uploadTemplates(id, files) : await draftingApi.uploadInputs(id, files); if (!current(id, token)) return; store.notify(`${result.parsed}/${result.accepted} ${w('parsed')}`); await refresh(id, token); if (reviewMounted.value && current(id, token)) await sourceReview.value?.refresh(); if (result.failed && current(id, token)) error.value = result.messages.join('\n') })
 }
 async function removeCorrespondence() {
   const item = removalItem.value
   if (item?.id === null || item?.id === undefined) return
   await action(w('saving'), async (id, token) => {
+    if (reviewDirty.value || candidateDirty.value) throw Error(phrase('请先保存来源核对和候选调整。', 'Save source review and candidate edits first.'))
     await draftingApi.deleteInput(id, item.id!)
     if (!current(id, token)) return
     removalItem.value = null
     await refresh(id, token)
+    if (reviewMounted.value && current(id, token)) await sourceReview.value?.refresh()
   })
 }
 async function extract() {
   const llmSelection = store.captureLlmSelection()
   await action(w('extracting'), async (id, token) => {
-    await persistDirty(id, token); if (!current(id, token)) return
+    if (candidateDirty.value) throw Error(phrase('请先保存或取消候选调整。', 'Save or cancel candidate edits first.'))
+    const editor = await ensureReview(); const revision = await editor?.prepareCandidates()
+    if (!revision || !current(id, token)) return
+    draftRevisionId.value = revision.id
     const previousTrace = trace.value
-    try { await draftingApi.extract(id, llmSelection) }
+    try { await draftingApi.reviewExtract(id, revision.id, llmSelection) }
     catch (caught) {
       if (current(id, token)) {
         trace.value = null
@@ -281,11 +334,12 @@ async function extract() {
       }
       throw caught
     }
-    if (!current(id, token)) return; await refresh(id, token); if (current(id, token)) step.value = 'variables'
+    if (!current(id, token)) return; trace.value = await draftingApi.extractTrace(id); if (current(id, token)) { candidateReload.value++; step.value = 'review' }
   })
 }
 async function generate() {
   if (!allTemplates.value || documentDirty.value) return
+  if (graphMode.value && dirtyInputs.value) { error.value = phrase('请先逐项保存并采用项目事实，再生成文件。', 'Save and adopt project facts before generating documents.'); return }
   const llmSelection = store.captureLlmSelection()
   await action(w('generating'), async (id, token) => { await persistDirty(id, token); if (!current(id, token)) return; const sharedPlan = await draftingApi.plan(id); if (!current(id, token)) return; plan.value = sharedPlan; const docs = await draftingApi.generate(id, 'en', llmSelection); if (!current(id, token)) return; documents.value = docs; step.value = 'preview'; documentText.value = docs.find(document => document.fileKey === activeFile.value)?.content ?? ''; documentBaseline.value = documentText.value; bodyDraft.value = createBodyDraft(activeDocument.value); editingDocument.value = false; snapshotDraft(id) })
 }
@@ -344,7 +398,7 @@ function workspaceKeydown(event: KeyboardEvent) {
   containTab(event, documentWorkspace.value)
 }
 async function exportDocument(format: 'docx' | 'pdf') { if (canExport.value) await action(w('exporting'), id => draftingApi.exportDocument(id, activeFile.value, format, activeDocument.value?.revisionId)) }
-function move(next: Step) { if (busy.value || documentDirty.value) return; graphNavigation.value = undefined; if (next === 'preview' && !documents.value.some(document => document.generated)) { void generate(); return }; step.value = next }
+function move(next: Step) { if (busy.value || documentDirty.value) return; if (next === 'review') { void ensureReview(); }; graphNavigation.value = undefined; if (next === 'preview' && !documents.value.some(document => document.generated)) { if (graphMode.value) { error.value = phrase('先在采用与修改方案中明确生成文件，再查看预览。', 'Generate documents from the adopted values and plan before opening preview.'); return }; void generate(); return }; step.value = next }
 function goInput(key: string) {
   const id = projectId.value, token = generation
   graphNavigation.value = undefined
@@ -455,11 +509,11 @@ async function saveTarget(remove = false) {
   const field = targetField.value, id = targetId.value; if (!id || !remove && targetAction.value === 'amend' && !targetText.value.trim()) return
   const replacement: DraftTargetOverride | undefined = remove ? undefined : { actionId: id, action: targetAction.value, value: targetText.value, sourceMapping: targetSourceMapping.value, document: selectedTarget.value?.document, clause: selectedTarget.value?.clause }
   const list = replaceTargetOverride(overrides(), id, replacement)
-  await action(w('saving'), async (project, token) => { await saveField(project, token, { ...field, key: 'targetOverrides' }, { value: JSON.stringify(list) }); if (!current(project, token)) return; targetId.value = ''; await refresh(project, token) })
+  await action(w('saving'), async (project, token) => { await saveField(project, token, { ...field, key: 'targetOverrides' }, { value: JSON.stringify(list), ...(graphMode.value ? { note: targetSourceMapping.value.trim() || 'Explicitly adopted target amendment.' } : {}) }); if (!current(project, token)) return; targetId.value = ''; await refresh(project, token) })
 }
 function beforeUnload(event: BeforeUnloadEvent) {
-  const cachedChanges = [...projectDrafts.values()].some(cached => Object.keys(dirtyPatch(fields.value, cached.values, cached.baseline)).length > 0 || Object.keys(cached.documents ?? {}).length > 0)
-  if (dirtyInputs.value || documentDirty.value || cachedChanges) { event.preventDefault(); event.returnValue = w('unsavedLeave') }
+  const cachedChanges = [...projectDrafts.values()].some(cached => Object.keys(dirtyPatch(fields.value, cached.values, cached.baseline)).length > 0 || Object.keys(cached.documents ?? {}).length > 0 || Object.keys(cached.intentionalEmpty ?? {}).some(key => !!cached.intentionalEmpty?.[key] !== !!cached.emptyBaseline?.[key]))
+  if (dirtyInputs.value || documentDirty.value || reviewDirty.value || candidateDirty.value || sourceReviewDrafts.size || candidateReviewDrafts.size || cachedChanges) { event.preventDefault(); event.returnValue = w('unsavedLeave') }
 }
 window.addEventListener('beforeunload', beforeUnload)
 window.addEventListener('keydown', workspaceKeydown)
@@ -492,17 +546,20 @@ watch(projectId, (id, old) => {
   if (old) snapshotDraft(old)
   closeGraph(false)
   graphNavigation.value = undefined
-  generation++; planGeneration++; busy.value = ''; error.value = ''; step.value = 'inputs'; activeFile.value = 'NTT'; editingDocument.value = false; immersiveDocument.value = false; targetId.value = ''; restored.value = false; restoreViewPending = true; traceOpen.value = false
+  generation++; planGeneration++; busy.value = ''; error.value = ''; reviewDirty.value = false; candidateDirty.value = false; draftRevisionId.value = ''; rebuildReviewOpen.value = false; step.value = 'inputs'; activeFile.value = 'NTT'; editingDocument.value = false; immersiveDocument.value = false; targetId.value = ''; restored.value = false; restoreViewPending = true; traceOpen.value = false
   reviewLayout.value = 'list'; focusedGroupId.value = ''; search.value = ''; statusFilter.value = 'all'
   catalog.value = { ruleVersion: '', groups: [] }; templates.value = []; inputs.value = []; variables.value = []; documentText.value = ''; documentBaseline.value = ''; documents.value = []; plan.value = null; trace.value = null
   bodyDraft.value = createBodyDraft(undefined); removalItem.value = null; readingOpen.value = false; readingKey.value = ''; readingActionId.value = ''; readingFile.value = 'NTT'; previewEditKey.value = ''
   for (const key of Object.keys(values)) delete values[key]; for (const key of Object.keys(baseline)) delete baseline[key]
   for (const key of Object.keys(inputSaveStates)) delete inputSaveStates[key]
+  for (const key of Object.keys(manualNotes)) delete manualNotes[key]
+  for (const key of Object.keys(intentionalEmpty)) delete intentionalEmpty[key]
+  for (const key of Object.keys(emptyBaseline)) delete emptyBaseline[key]
   if (id) void action(w('loading'), refresh)
 }, { immediate: true })
 watch(activeFile, () => { if (graphNavigation.value?.fileKey !== activeFile.value) graphNavigation.value = undefined; loadDocument(false) })
 watch(activeDocument, () => { loadDocument() })
-watch(step, () => { if (step.value !== 'preview') { immersiveDocument.value = false; graphNavigation.value = undefined } })
+watch(step, () => { if (step.value === 'review') void ensureReview(); if (step.value !== 'preview') { immersiveDocument.value = false; graphNavigation.value = undefined } })
 onBeforeUnmount(() => { snapshotDraft(projectId.value); alive = false; generation++; planGeneration++; if (planTimer) clearTimeout(planTimer); window.removeEventListener('beforeunload', beforeUnload); window.removeEventListener('keydown', workspaceKeydown) })
 </script>
 
@@ -514,10 +571,22 @@ onBeforeUnmount(() => { snapshotDraft(projectId.value); alive = false; generatio
     <div v-if="projectId && step === 'inputs'" class="source-stack">
       <section class="flow-card"><div class="card-head"><h3>{{ w('templates') }}</h3><label class="btn" :class="{ disabled: !!busy }">{{ w('uploadTemplates') }}<input type="file" accept=".doc,.docx,.pdf,.txt,.md" multiple :disabled="!!busy" @change="upload($event, 'templates')" /></label></div><p class="hint">{{ w('templateNote') }}</p><p class="hint">{{ w('editableSource') }}</p><div v-for="key in ['NTT', 'SCT', 'SCC']" :id="`template-source-${key}`" :key="key" class="source-row"><strong>{{ key }}</strong><div><div>{{ templates.find(template => template.key === key)?.fileName || w('notUploaded') }}</div><small>{{ l(templates.find(template => template.key === key)?.status) }} · {{ l(templates.find(template => template.key === key)?.note) }}</small></div><button :id="`template-upload-button-${key}`" type="button" class="btn" :disabled="!!busy" :aria-label="`${key} · ${w('replace')}`" @click="chooseTemplate(key)">{{ w('replace') }}</button><input :id="`template-upload-${key}`" type="file" hidden accept=".doc,.docx,.pdf,.txt,.md" :disabled="!!busy" @change="upload($event, 'templates', key)" /></div></section>
       <section class="flow-card"><div class="card-head"><h3>{{ w('evidence') }}</h3><label class="btn" :class="{ disabled: !!busy }">{{ w('uploadEvidence') }}<input type="file" accept=".doc,.docx,.pdf,.txt,.md,.eml,.msg" multiple :disabled="!!busy" @change="upload($event, 'inputs')" /></label></div><p class="hint">{{ w('evidenceNote') }}</p><p v-if="!inputs.length" class="hint">{{ w('emptyEvidence') }}</p><div v-for="input in inputs" :key="input.id ?? input.code" class="evidence-row"><div class="card-head"><strong>{{ input.fileName || l(input.title) }}</strong><div class="row"><span>{{ input.status === 'PARSED' ? w('parsedStatus') : ['FAILED', 'PARSE_FAILED'].includes(input.status) ? w('failedStatus') : w('waitingStatus') }}</span><button v-if="input.id !== null && input.id !== undefined" class="btn text-link" :data-remove-input="input.id" :disabled="!!busy" @click="removalItem = input">{{ w('removeCorrespondence') }}</button></div></div><small>{{ l(input.message) }} {{ input.pageCount || '' }}</small></div></section>
-      <footer class="flow-actions"><button v-if="trace" class="btn" @click="traceOpen = true">{{ w('trace') }}</button><button class="btn" :disabled="!!busy || !catalog.groups.length" @click="move('variables')">{{ w('manualEntry') }}</button><button class="btn primary" :disabled="!!busy || !inputs.some(input => input.status === 'PARSED')" @click="extract">{{ w('extract') }}</button></footer>
+      <footer class="flow-actions"><button class="btn primary" :disabled="!!busy" @click="move('identify')">{{ phrase('下一步：识别模板要求', 'Next: identify requirements') }}</button><button v-if="trace" class="btn" @click="traceOpen = true">{{ w('trace') }}</button><button class="btn" :disabled="!!busy || !catalog.groups.length" @click="move('variables')">{{ w('manualEntry') }}</button><button class="btn primary" :disabled="!!busy || !inputs.some(input => input.status === 'PARSED')" @click="extract">{{ w('extract') }}</button></footer>
     </div>
+    <section v-if="projectId && step === 'identify'" class="flow-card" data-identify-stage>
+      <h3>{{ phrase('先识别模板要求，再识别沟通候选', 'Identify template requirements, then correspondence candidates') }}</h3>
+      <p class="hint">{{ phrase('模板里的指导说明形成待核对的问题、条件和修改位置；沟通材料只提供项目事实候选。两者都不会自动确认或采用。', 'Template guidance produces questions, conditions and amendment targets for review. Correspondence supplies candidate project facts. Neither is confirmed or adopted automatically.') }}</p>
+      <div class="flow-actions"><button class="btn" :disabled="!!busy || reviewDirty || candidateDirty" @click="identifyTemplates()">{{ phrase('建立／继续模板要求草稿', 'Prepare or continue template review') }}</button><button class="btn" :disabled="!!busy || reviewDirty || candidateDirty" @click="rebuildReviewOpen = true">{{ phrase('按现有原件新建核对版本', 'Start a new review from current sources') }}</button><label class="discovery-budget">{{ phrase('本次最多识别几条模板要求（1至10）', 'Template requirement budget for this run (1 to 10)') }}<input v-model="discoveryBudget" type="number" min="1" max="10" step="1" data-discovery-budget /></label><button class="btn" data-discover-templates :disabled="!!busy || reviewDirty || candidateDirty" @click="discoverTemplates">{{ phrase('按预算调用模型识别模板要求', 'Discover template requirements within this budget') }}</button><button class="btn primary" data-extract-draft :disabled="!!busy || candidateDirty || !inputs.some(input => input.status === 'PARSED')" @click="extract">{{ phrase('识别沟通材料候选，不采用', 'Extract correspondence candidates without adoption') }}</button><button v-if="trace" class="btn" @click="traceOpen = true">{{ w('trace') }}</button></div>
+      <p class="hint">{{ phrase('已保存的模板版本保留在历史中。新建版本不会替换已确认版本；核对完成后需明确确认。', 'Saved template versions remain in history. A new review does not replace the confirmed version until explicitly confirmed.') }}</p>
+    </section>
+    <div v-if="projectId && reviewMounted" v-show="step === 'review'" class="source-stack" data-review-stage>
+      <DraftingSourceReview ref="sourceReview" :project-id="projectId" :locale="store.locale" :active="step === 'review'" :locked="candidateDirty" @dirty="reviewDirty = $event" @saved="reviewSaved" @confirmed="reviewConfirmed" />
+      <DraftingCandidateReview v-if="draftRevisionId" :project-id="projectId" :revision-id="draftRevisionId" :locale="store.locale" :reload-key="candidateReload" @dirty="candidateDirty = $event" @locate="locateCandidate" />
+      <footer class="flow-actions"><button class="btn" :disabled="!!busy" @click="move('identify')">{{ phrase('返回识别', 'Back to identification') }}</button><button class="btn" :disabled="!!busy || reviewDirty || candidateDirty" @click="move('variables')">{{ phrase('查看已确认版本的采用与方案', 'Open adopted values and plan for the confirmed version') }}</button></footer>
+    </div>
+    <AppModal :open="rebuildReviewOpen" :title="phrase('新建模板核对版本', 'Start a new template review')" @close="rebuildReviewOpen = false"><p>{{ phrase('将根据当前上传原件重新建立待核对项目。已保存版本保留；此操作不会确认规则或采用项目事实。', 'Build pending review items from the currently uploaded originals. Saved versions remain available. This does not confirm rules or adopt project facts.') }}</p><button class="btn primary" :disabled="!!busy || reviewDirty || candidateDirty" @click="identifyTemplates(true)">{{ phrase('建立新核对草稿', 'Create a new review draft') }}</button></AppModal>
     <div v-if="projectId && step === 'variables'" class="input-stack">
-      <div class="input-intro"><p>{{ w('reviewIntro') }}</p><div class="row"><button class="btn" :disabled="!!busy" @click="openReading()">{{ w('templateReading') }}</button><button class="btn" :disabled="!!busy || !inputs.some(input => input.status === 'PARSED')" @click="extract">{{ w('extract') }}</button><button v-if="trace" class="btn" @click="traceOpen = true">{{ w('trace') }}</button></div></div>
+      <div class="input-intro"><p>{{ graphMode ? phrase('只有明确采用且无复核标记的事实进入修改方案。人工值请附理由并保存；模板确认不会代替事实采用。', 'Only explicitly adopted facts without review flags enter the plan. Supply a reason and save manual values. Template confirmation does not adopt facts.') : w('reviewIntro') }}</p><div class="row"><button class="btn" :disabled="!!busy" @click="openReading()">{{ w('templateReading') }}</button><button class="btn" :disabled="!!busy || !inputs.some(input => input.status === 'PARSED')" @click="extract">{{ w('extract') }}</button><button v-if="trace" class="btn" @click="traceOpen = true">{{ w('trace') }}</button></div></div>
       <div class="question-tools"><input v-model="search" :placeholder="w('search')" :aria-label="w('search')" /><select v-model="statusFilter" :aria-label="w('all')"><option value="all">{{ w('all') }}</option><option v-for="status in ['missing', 'suggested', 'adopted', 'manual', 'needs_review', 'conflict', 'inactive'] as DraftWord[]" :key="status" :value="status">{{ w(status) }}</option></select><button class="btn" @click="search = ''; statusFilter = 'all'">{{ w('clearFilters') }}</button></div>
       <div class="review-layout-switch" role="group" :aria-label="w('reviewLayout')"><button class="btn" :class="{ primary: reviewLayout === 'list' }" :aria-pressed="reviewLayout === 'list'" @click="changeReviewLayout('list')">{{ w('listLayout') }}</button><button class="btn" :class="{ primary: reviewLayout === 'focus' }" :aria-pressed="reviewLayout === 'focus'" @click="changeReviewLayout('focus')">{{ w('focusLayout') }}</button></div>
       <p v-if="!filteredGroups.length" class="empty-state">{{ w('noMatches') }}</p>
@@ -527,8 +596,8 @@ onBeforeUnmount(() => { snapshotDraft(projectId.value); alive = false; generatio
       <div v-if="reviewLayout === 'focus' && filteredGroups.length" class="question-navigation"><button class="btn" :disabled="focusedGroupIndex <= 0" @click="moveQuestion(-1)">{{ w('previousQuestion') }}</button><span aria-live="polite">{{ w('questionPosition') }} {{ focusedGroupIndex + 1 }} / {{ filteredGroups.length }}</span><button class="btn" :disabled="focusedGroupIndex >= filteredGroups.length - 1" @click="moveQuestion(1)">{{ w('nextQuestion') }}</button></div>
       <section v-for="group in displayedGroups" :id="`group-${group.id}`" :key="group.id" class="flow-card input-group" :data-group="group.id">
         <div class="card-head"><h3><span class="group-number">{{ groupNumber(group) }}</span>{{ l(group.label) }}</h3><span class="state" :class="groupState(group)">{{ w(groupState(group)) }}</span></div><p v-if="group.description" class="hint">{{ l(group.description) }}</p>
-        <article v-for="field in visibleFields(group)" :id="`field-${field.key}`" :key="field.key" class="variable" :class="{ 'source-selected': readingOpen && readingKey === field.key }" :data-variable="field.key"><div class="variable-head"><button class="btn text-link" :data-open-template="field.key" :disabled="!!busy" @click="openReading(field)">{{ w('locateTemplate') }}</button><span class="state" :class="state(field)">{{ dirty(field) ? w('unsaved') : w(state(field)) }}</span><button v-if="variableMap.get(field.key)?.reviewRequired" class="btn soft" :disabled="!!busy" @click="adopt(field)">{{ w('reviewed') }}</button><button v-else-if="state(field) === 'suggested'" class="btn soft" :disabled="!!busy" @click="adopt(field)">{{ w('adoptSuggested') }}</button></div><DraftingInputField :field="field" :value="values[field.key]" :values="values" :locale="store.locale" :trace="trace" :disabled="inputDisabled(field)" @update="update(field, $event)"><template #actions><div class="field-save-actions"><button type="button" class="btn primary" :data-save-input="field.key" :disabled="!!busy || !dirty(field) || applicability(field.condition, values) === 'no'" @click="saveInput(field)">{{ w('saveInput') }}</button><span v-if="inputSaveStatus(field)" class="field-save-feedback" :class="{ failed: inputSaveStates[field.key] === 'failed' }" :data-input-save-status="field.key" role="status" aria-live="polite">{{ w(inputSaveStatus(field)!) }}</span></div></template></DraftingInputField><p v-if="derivedInput(field)" class="hint">{{ w('durationDerived') }}</p><p v-if="['contractPeriodMonths', 'periodAtLeast39Months'].includes(field.key) && durationConflict" class="condition-note">{{ w('durationConflict') }}</p><p v-if="applicability(field.condition, values) === 'unknown'" class="condition-note">{{ w('prerequisite') }}</p><p v-if="validationIssue(field, values[field.key]) && validationIssue(field, values[field.key]) !== 'missing'" class="condition-note">{{ w(validationIssue(field, values[field.key])!) }}</p><p v-if="['siteInspectionStartDate', 'siteInspectionEndDate'].includes(field.key) && reversedSiteDates(values)" class="condition-note">{{ w('reversedDates') }}</p><p v-if="variableMap.get(field.key)?.validationIssue" class="condition-note">{{ variableMap.get(field.key)?.validationIssue }}</p><details class="field-evidence"><summary>{{ w('sourceDetails') }}</summary><blockquote v-if="variableMap.get(field.key)?.source">{{ variableMap.get(field.key)?.source }}</blockquote><p v-else class="hint">{{ w('noSource') }}</p><p v-if="variableMap.get(field.key)?.note" class="hint raw-text">{{ variableMap.get(field.key)?.note }}</p><div v-for="(candidate, candidateIndex) in variableMap.get(field.key)?.candidates ?? []" :key="candidateIndex" class="candidate"><strong>{{ candidate.fileName || w('candidates') }}</strong><DraftingValueDisplay :field="field" :value="candidate.value" :locale="store.locale" /><blockquote>{{ candidate.sourceQuote }}</blockquote><p class="hint raw-text">{{ candidate.reason }}</p><button class="btn" :disabled="!!busy" @click="adopt(field, candidateIndex)">{{ w('adoptCandidate') }}</button></div><p v-for="target in field.affects ?? []" :key="`${target.document}-${target.clause}`" class="hint">{{ target.document }} {{ target.clause }} · {{ target.paragraphs }}</p></details></article>
-        <DraftingBillDistribution v-if="group.id === 'bills'" :values="values" :locale="store.locale" /><p v-if="visibleFields(group).length !== group.fields.length" class="hint">{{ w('hiddenFields') }}</p><details v-if="relatedActions(group).length" class="clause-details"><summary>{{ w('affected') }}</summary><div v-for="item in relatedActions(group)" :key="item.id" class="clause-action" :data-action-id="item.id"><div class="card-head"><strong>{{ item.document }} {{ item.clause }}</strong><span class="state">{{ w((item.action in { retain: 1, amend: 1, delete: 1, not_used: 1, pending: 1, not_adopted: 1 } ? item.action : 'pending') as DraftWord) }}</span></div><p class="hint">{{ item.paragraphs }}</p><p>{{ l(item.detail) }}</p><details v-if="item.sourceWarning" class="source-warning"><summary>{{ w('sourceWarning') }}</summary><p class="condition-note">{{ l(item.sourceWarning) }}</p></details><pre v-if="item.value">{{ item.value }}</pre><button class="btn text-link" :disabled="!!busy" @click="openReading(undefined, item)">{{ w('locateTemplate') }}</button><button class="btn text-link" :disabled="!!busy" @click="openTarget(item)">{{ w('exactEdit') }}</button></div></details><footer v-if="group.fields.some(dirty)" class="flow-actions"><button class="btn" :disabled="!!busy" @click="discard(group)">{{ w('discard') }}</button><button class="btn primary" :disabled="!!busy" @click="saveGroup(group)">{{ w('save') }}</button></footer>
+        <article v-for="field in visibleFields(group)" :id="`field-${field.key}`" :key="field.key" class="variable" :class="{ 'source-selected': readingOpen && readingKey === field.key }" :data-variable="field.key"><div class="variable-head"><button class="btn text-link" :data-open-template="field.key" :disabled="!!busy" @click="openReading(field)">{{ w('locateTemplate') }}</button><span class="state" :class="state(field)">{{ dirty(field) ? w('unsaved') : w(state(field)) }}</span><button v-if="variableMap.get(field.key)?.reviewRequired" class="btn soft" :disabled="!!busy" @click="adopt(field)">{{ w('reviewed') }}</button><button v-else-if="state(field) === 'suggested'" class="btn soft" :disabled="!!busy" @click="adopt(field)">{{ w('adoptSuggested') }}</button></div><DraftingInputField :field="field" :value="values[field.key]" :values="values" :locale="store.locale" :row-identity-key="graphMode?'_itemId':'id'" :trace="trace" :disabled="inputDisabled(field)" @update="update(field, $event)"><template #actions><div class="field-save-actions"><button type="button" class="btn primary" :data-save-input="field.key" :disabled="!!busy || !dirty(field) || applicability(field.condition, values) === 'no'" @click="saveInput(field)">{{ w('saveInput') }}</button><span v-if="inputSaveStatus(field)" class="field-save-feedback" :class="{ failed: inputSaveStates[field.key] === 'failed' }" :data-input-save-status="field.key" role="status" aria-live="polite">{{ w(inputSaveStatus(field)!) }}</span></div></template></DraftingInputField><label v-if="graphMode && field.kind === 'text'" class="explicit-empty-choice"><input type="checkbox" :checked="!!intentionalEmpty[field.key]" :data-explicit-empty="field.key" :disabled="inputDisabled(field)" @change="toggleEmpty(field, ($event.target as HTMLInputElement).checked)">{{ phrase('明确留空（仍需理由并保存）', 'Intentionally blank (reason and save required)') }}</label><label v-if="variableMap.get(field.key)?.graphRevisionId && dirty(field)" class="manual-adoption-note">{{ phrase('人工采用理由', 'Reason for adopting a manual value') }}<textarea v-model="manualNotes[field.key]" :disabled="!!busy" :data-manual-note="field.key" rows="2" /></label><p v-if="derivedInput(field)" class="hint">{{ w('durationDerived') }}</p><p v-if="['contractPeriodMonths', 'periodAtLeast39Months'].includes(field.key) && durationConflict" class="condition-note">{{ w('durationConflict') }}</p><p v-if="applicability(field.condition, values) === 'unknown'" class="condition-note">{{ w('prerequisite') }}</p><p v-if="validationIssue(field, values[field.key]) && validationIssue(field, values[field.key]) !== 'missing'" class="condition-note">{{ w(validationIssue(field, values[field.key])!) }}</p><p v-if="['siteInspectionStartDate', 'siteInspectionEndDate'].includes(field.key) && reversedSiteDates(values)" class="condition-note">{{ w('reversedDates') }}</p><p v-if="variableMap.get(field.key)?.validationIssue" class="condition-note">{{ variableMap.get(field.key)?.validationIssue }}</p><details class="field-evidence"><summary>{{ w('sourceDetails') }}</summary><blockquote v-if="variableMap.get(field.key)?.source">{{ variableMap.get(field.key)?.source }}</blockquote><p v-else class="hint">{{ w('noSource') }}</p><p v-if="variableMap.get(field.key)?.note" class="hint raw-text">{{ variableMap.get(field.key)?.note }}</p><div v-for="(candidate, candidateIndex) in variableMap.get(field.key)?.candidates ?? []" :key="candidateIndex" class="candidate"><strong>{{ candidate.fileName || w('candidates') }}</strong><DraftingValueDisplay :field="field" :value="candidate.value" :locale="store.locale" /><blockquote>{{ candidate.sourceQuote }}</blockquote><p class="hint raw-text">{{ candidate.reason }}</p><button class="btn" :disabled="!!busy" @click="adopt(field, candidateIndex)">{{ w('adoptCandidate') }}</button></div><p v-for="target in field.affects ?? []" :key="`${target.document}-${target.clause}`" class="hint">{{ target.document }} {{ target.clause }} · {{ target.paragraphs }}</p></details></article>
+        <DraftingBillDistribution v-if="group.id === 'bills'" :values="values" :locale="store.locale" /><p v-if="visibleFields(group).length !== group.fields.length" class="hint">{{ w('hiddenFields') }}</p><details v-if="relatedActions(group).length" class="clause-details"><summary>{{ w('affected') }}</summary><div v-for="item in relatedActions(group)" :key="item.id" class="clause-action" :data-action-id="item.id"><div class="card-head"><strong>{{ item.document }} {{ item.clause }}</strong><span class="state">{{ w((item.action in { retain: 1, amend: 1, delete: 1, not_used: 1, pending: 1, not_adopted: 1 } ? item.action : 'pending') as DraftWord) }}</span></div><p class="hint">{{ item.paragraphs }}</p><p>{{ l(item.detail) }}</p><details v-if="item.scopeResults"><summary>{{ phrase('逐项明细的条件判断', 'Condition result for each list item') }}</summary><ol><li v-for="result in item.scopeResults" :key="result.itemId ?? result.rowIndex">{{ phrase('第', 'Item ') }} {{ result.rowIndex + 1 }} {{ result.itemId ? ' · '+result.itemId : '' }} · {{ result.matches === true ? phrase('满足条件', 'Matches') : result.matches === false ? phrase('不满足条件', 'Does not match') : phrase('仍不确定', 'Unknown') }}</li></ol></details><details v-if="item.sourceWarning" class="source-warning"><summary>{{ w('sourceWarning') }}</summary><p class="condition-note">{{ l(item.sourceWarning) }}</p></details><pre v-if="item.value">{{ item.value }}</pre><button class="btn text-link" :disabled="!!busy" @click="openReading(undefined, item)">{{ w('locateTemplate') }}</button><button class="btn text-link" :disabled="!!busy" @click="openTarget(item)">{{ w('exactEdit') }}</button></div></details><footer v-if="group.fields.some(dirty)" class="flow-actions"><button class="btn" :disabled="!!busy" @click="discard(group)">{{ w('discard') }}</button><button class="btn primary" :disabled="!!busy" @click="saveGroup(group)">{{ w('save') }}</button></footer>
       </section>
       </div></div>
       <footer class="flow-actions"><button class="btn" :disabled="!!busy" @click="move('inputs')">{{ w('backSources') }}</button><button class="btn" :disabled="!!busy || !dirtyInputs" @click="saveGroup()">{{ w('saveAll') }}</button><button class="btn primary" :disabled="!!busy || !allTemplates" @click="generate">{{ w('generate') }}</button></footer><p class="hint">{{ w('generateNote') }}</p><p v-if="!allTemplates" class="condition-note">{{ w('missingTemplates') }}</p>
@@ -558,14 +627,14 @@ onBeforeUnmount(() => { snapshotDraft(projectId.value); alive = false; generatio
       <details v-if="currentUnresolved.length" class="draft-unresolved" :open="!immersiveDocument"><summary>{{ w('unresolved') }} ({{ currentUnresolved.length }})</summary><DraftingUnresolvedItems :items="currentUnresolved" :fields="fields" :values="values" :actions="plan?.actions ?? []" :locale="store.locale" @input="goInput" @target="openTarget" /></details>
       <footer class="flow-actions"><button class="btn" :disabled="!!busy || documentDirty" @click="move('variables')">{{ w('backInputs') }}</button><p v-if="immersiveDocument" class="hint regeneration-warning">{{ w('regenerationNote') }}</p><button class="btn" :disabled="!!busy || !allTemplates || documentDirty" @click="generate">{{ w('regenerate') }}</button></footer><p v-if="!immersiveDocument" class="hint">{{ w('regenerationNote') }}</p>
     </section>
-    <footer v-if="catalog.ruleVersion" class="hint">{{ w('ruleVersion') }}: {{ catalog.ruleVersion }}</footer>
+    <footer v-if="catalog.ruleVersion" class="hint">{{ graphMode ? phrase('当前使用已确认的模板核对版本', 'Using the confirmed template review') : `${w('ruleVersion')}: ${catalog.ruleVersion}` }}</footer>
     <aside v-if="projectId && step === 'variables' && readingOpen" id="drafting-template-panel" class="template-side-panel" data-template-panel :aria-label="w('templateReading')">
       <header class="card-head"><h3>{{ w('templateReading') }}</h3><button class="btn" @click="closeReading">{{ w('close') }}</button></header>
       <DraftingTemplatePreview :project-id="projectId" :file-key="readingFile" :source-available="readingSourceAvailable" :locale="store.locale" :fields="readingFields" :values="values" :variables="variables" :actions="plan?.actions ?? []" :selected-key="readingKey" :selected-action-id="readingActionId" :field-states="readingStates" :dirty-keys="readingDirtyKeys" :disabled="!!busy" @select="selectReading" @edit="editReading" @input="selectReading" @target="readingTarget" @locate="locateReadingTarget" @file="changeReadingFile" @upload="goTemplateUpload" />
     </aside>
     <DraftingBusinessGraph v-if="graphOpen" :project-id="projectId" :catalog="catalog" :plan="plan" :values="values" :variables="variables" :field-states="readingStates" :dirty-keys="readingDirtyKeys" :locale="store.locale" :disabled="!!busy || documentDirty" @input="graphInput" @location="graphLocation" @close="closeGraph()" />
     <AppModal :open="!!previewEditField" :title="w('editPreviewValue')" @close="previewEditKey = ''">
-      <template v-if="previewEditField"><span class="state">{{ dirty(previewEditField) ? w('unsavedValue') : w(state(previewEditField)) }}</span><p class="hint">{{ w('previewEditNote') }}</p><DraftingInputField :field="previewEditField" :value="values[previewEditField.key]" :values="values" :locale="store.locale" id-prefix="preview-edit" :disabled="inputDisabled(previewEditField)" @update="update(previewEditField, $event)" /><p v-if="derivedInput(previewEditField)" class="hint">{{ w('durationDerived') }}</p><p v-if="error" class="flow-error" role="alert">{{ error }}</p><div class="flow-actions"><button class="btn" :disabled="!!busy" @click="previewEditKey = ''">{{ w('close') }}</button><button v-if="previewAdoptable(previewEditField)" class="btn" :disabled="!!busy" @click="adoptReading">{{ w('adoptSuggested') }}</button><button class="btn primary" :data-preview-save="previewEditField.key" :disabled="!!busy || !dirty(previewEditField) || applicability(previewEditField.condition, values) === 'no'" @click="saveReading">{{ w('save') }}</button></div></template>
+      <template v-if="previewEditField"><span class="state">{{ dirty(previewEditField) ? w('unsavedValue') : w(state(previewEditField)) }}</span><p class="hint">{{ w('previewEditNote') }}</p><DraftingInputField :field="previewEditField" :value="values[previewEditField.key]" :values="values" :locale="store.locale" id-prefix="preview-edit" :row-identity-key="graphMode?'_itemId':'id'" :disabled="inputDisabled(previewEditField)" @update="update(previewEditField, $event)" /><p v-if="derivedInput(previewEditField)" class="hint">{{ w('durationDerived') }}</p><p v-if="error" class="flow-error" role="alert">{{ error }}</p><div class="flow-actions"><button class="btn" :disabled="!!busy" @click="previewEditKey = ''">{{ w('close') }}</button><button v-if="previewAdoptable(previewEditField)" class="btn" :disabled="!!busy" @click="adoptReading">{{ w('adoptSuggested') }}</button><button class="btn primary" :data-preview-save="previewEditField.key" :disabled="!!busy || !dirty(previewEditField) || applicability(previewEditField.condition, values) === 'no'" @click="saveReading">{{ w('save') }}</button></div></template>
     </AppModal>
     <AppModal :open="traceOpen" :title="w('trace')" wide @close="traceOpen = false"><DraftingExtractionReport :trace="trace" :project-id="projectId" :locale="store.locale" :open="traceOpen" /></AppModal>
     <AppModal :open="!!removalItem" :title="w('removeCorrespondence')" @close="removalItem = null">
@@ -608,8 +677,13 @@ h2,h3,p { margin: 0; }
 h2 { font-size: 22px; line-height: 1.3; }
 .flow-head p { margin-top: 5px; color: var(--muted); font-size: 13px; }
 .flow-count { font-size: 11.5px; font-weight: 700; padding: 5px 10px; background: var(--accent-soft); color: var(--accent-dark); border-radius: 999px; white-space: nowrap; }
-.flow-steps { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 8px; }
+.flow-steps { display: grid; grid-template-columns: repeat(5,minmax(0,1fr)); gap: 8px; }
 .flow-steps button { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 10px 12px; min-height: 46px; text-align: left; color: var(--ink-soft); font: inherit; font-size: 12px; font-weight: 600; }
+.explicit-empty-choice { display: flex; align-items: center; gap: 6px; margin: 10px 0; font-size: 12px; }
+.manual-adoption-note { display: block; font-size: 12px; margin: 12px 0; }
+.manual-adoption-note textarea { display: block; width: 100%; box-sizing: border-box; margin-top: 6px; padding: 8px; border: 1px solid var(--line); border-radius: 5px; font: inherit; background: var(--surface); color: var(--ink); }
+.discovery-budget { display: flex; flex-direction: column; gap: 6px; font-size: 12px; max-width: 280px; }
+.discovery-budget input { width: 80px; padding: 8px; }
 .flow-steps button.active { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-dark); }
 .source-stack,.input-stack { display: flex; flex-direction: column; gap: 12px; padding: 16px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); min-width: 0; }
 .flow-card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px; min-width: 0; }
@@ -697,7 +771,7 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 }
 @container workspace (max-width: 640px) {
   .draft-flow { padding: 18px 16px 32px; }
-  .flow-steps { gap: 6px; }
+  .flow-steps { grid-template-columns: 1fr 1fr; gap: 6px; }
   .flow-steps button { padding: 9px 10px; font-size: 11.5px; }
   .flow-card,.source-stack,.input-stack { padding: 12px; }
   .source-row { grid-template-columns: 40px minmax(0,1fr); }

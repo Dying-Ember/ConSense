@@ -135,6 +135,9 @@ public class VettingSemanticReview {
     }
     /** An explicit persisted run identity is required when source probes are enabled. */
     public Result reviewWithProgress(String reviewRunId, String projectId, List<Chunk> chunks, String lang, ReviewProgress progress) {
+        return reviewWithProgress(reviewRunId,projectId,chunks,lang,progress,null,()->{});
+    }
+    public Result reviewWithProgress(String reviewRunId,String projectId,List<Chunk> chunks,String lang,ReviewProgress progress,List<com.consense.domain.SourceDocument> documents,Runnable sourceGuard) {
         try(OperationScope ignored=bindOperation(operation());SupplementScope supplemental=bindSupplement(currentSupplement())) {
         VettingReviewProbe probe = VettingReviewProbe.start(props, reviewRunId, projectId);
         boolean returnedNormally=false;
@@ -299,14 +302,14 @@ public class VettingSemanticReview {
                 VettingSourceRequestPacks.Result observedPlan=topicSourcePlanner.planForCompleteInputBudget(topic,originalRanked,selection,retrievalUnits);
                 tokenRequestPlan=topicTokenPlanner.repack(observedPlan,selection,candidate -> {
                     VettingContextBuilder.Selection inputSelection=candidate.getIndex()==0?selection:packetSelection(observedPlan,candidate,selection);
-                    return completeInput(inputSelection,topic,lang,false,null,packetFixedReferences);
+                    return completeInput(inputSelection,topic,lang,false,null,packetFixedReferences,documents,sourceGuard);
                 },selectedObserver());
                 requestPlan=tokenRequestPlan.getSourcePlan();
                 topicProbe.event("source_request_packet_plan",VettingReviewProbe.map("plan",requestPlan,"tokenPacking",tokenRequestPlan,"previewOnly",true,"finalDispatchRequiresFreshObservation",true,"semanticScopeVerified",false));
             }
             List<String> globalRequestIds=requestPlan==null?Collections.emptyList():requestPlan.getRequests().stream().filter(r->"already_global".equals(r.getStatus())).map(VettingSourceRequestPacks.Request::getId).collect(Collectors.toList());
             SemanticPacketVO globalPacket=VettingPacketCoverage.packet(i+1,0,factPack==null?"global":"project_reference",submitted,globalRequestIds);audit.getPacketAudits().add(globalPacket);
-            executePacket(result,audit,globalPacket,selection,topic,lang,factPack!=null,factPack==null?null:factPack.getReferenceIds(),i+1,topicProbe,tokenRequestPlan==null?null:tokenRequestPlan.getGlobalInputBudget(),chunks,fixedReferences);processedPackets++;
+            executePacket(result,audit,globalPacket,selection,topic,lang,factPack!=null,factPack==null?null:factPack.getReferenceIds(),i+1,topicProbe,tokenRequestPlan==null?null:tokenRequestPlan.getGlobalInputBudget(),chunks,fixedReferences,documents,sourceGuard);processedPackets++;
             if(requestPlan!=null) {
                 planned+=requestPlan.getExtraPacks().size();result.setPlannedCallCount(planned);
                 for(VettingSourceRequestPacks.Pack pack:requestPlan.getExtraPacks()) {
@@ -315,7 +318,7 @@ public class VettingSemanticReview {
                     SemanticTopicVO packetCall=new SemanticTopicVO();packetCall.setTopicIndex(i+1);packetCall.setTopic(topic);packetCall.setStatus("not_submitted");
                     VettingReviewProbe.Call packetProbe=probe.call(++packetOrdinal,topic+" / observed source request packet "+pack.getIndex(),null);
                     packetProbe.event("packet_source_selection",VettingReviewProbe.map("packetId",packet.getPacketId(),"sourceSnapshotSha256",packet.getSourceSnapshotSha256(),"selection",packetSelection,"requestIds",pack.getRequestIds(),"readBoundary","Only this packet can support quotations; no cross-packet evidence union","semanticScopeVerified",false));
-                    executePacket(result,packetCall,packet,packetSelection,topic,lang,false,null,i+1,packetProbe,tokenRequestPlan.getPackInputBudgets().get(pack.getIndex()),chunks,fixedReferences);processedPackets++;
+                    executePacket(result,packetCall,packet,packetSelection,topic,lang,false,null,i+1,packetProbe,tokenRequestPlan.getPackInputBudgets().get(pack.getIndex()),chunks,fixedReferences,documents,sourceGuard);processedPackets++;
                     progress.update(processedPackets,planned,"语义审查来源包 "+processedPackets+"/"+planned);
                 }
             }
@@ -341,14 +344,21 @@ public class VettingSemanticReview {
         return completeInput(selection,topic,lang,projectReference,referenceIds,FixedVettingReferences.empty());
     }
     private VettingInputBudget.Input completeInput(VettingContextBuilder.Selection selection,String topic,String lang,boolean projectReference,List<String> referenceIds,FixedVettingReferences fixedReferences) {
+        return completeInput(selection,topic,lang,projectReference,referenceIds,fixedReferences,null,()->{});
+    }
+    private VettingInputBudget.Input completeInput(VettingContextBuilder.Selection selection,String topic,String lang,boolean projectReference,List<String> referenceIds,FixedVettingReferences fixedReferences,List<com.consense.domain.SourceDocument> documents,Runnable sourceGuard) {
+        sourceGuard.run();
         LinkedHashSet<String> ids=selection.getChunks().stream().map(Chunk::getId).collect(Collectors.toCollection(LinkedHashSet::new));
         if(ids.size()!=selection.getChunks().size())throw new IllegalArgumentException("Duplicate complete Input source ID");
-        return selectedInput(effectiveSystem(lang,projectReference),user(topic,selection,referenceIds,fixedReferences),VettingOutputSchema.forChunkIds(ids),VettingCorpus.hash(JsonUtils.write(selection.getChunks())));
+        return selectedInput(effectiveSystem(lang,projectReference),user(topic,selection,referenceIds,fixedReferences,documents),VettingOutputSchema.forChunkIds(ids),VettingCorpus.hash(JsonUtils.write(selection.getChunks())));
     }
     private void executePacket(Result result,SemanticTopicVO audit,SemanticPacketVO packet,VettingContextBuilder.Selection selection,String topic,String lang,boolean projectReference,List<String> referenceIds,int topicIndex,VettingReviewProbe.Call topicProbe,VettingInputBudget.Result previewBudget,List<Chunk> suppliedCorpus) {
         executePacket(result,audit,packet,selection,topic,lang,projectReference,referenceIds,topicIndex,topicProbe,previewBudget,suppliedCorpus,FixedVettingReferences.empty());
     }
     private void executePacket(Result result,SemanticTopicVO audit,SemanticPacketVO packet,VettingContextBuilder.Selection selection,String topic,String lang,boolean projectReference,List<String> referenceIds,int topicIndex,VettingReviewProbe.Call topicProbe,VettingInputBudget.Result previewBudget,List<Chunk> suppliedCorpus,FixedVettingReferences fixedReferences) {
+        executePacket(result,audit,packet,selection,topic,lang,projectReference,referenceIds,topicIndex,topicProbe,previewBudget,suppliedCorpus,fixedReferences,null,()->{});
+    }
+    private void executePacket(Result result,SemanticTopicVO audit,SemanticPacketVO packet,VettingContextBuilder.Selection selection,String topic,String lang,boolean projectReference,List<String> referenceIds,int topicIndex,VettingReviewProbe.Call topicProbe,VettingInputBudget.Result previewBudget,List<Chunk> suppliedCorpus,FixedVettingReferences fixedReferences,List<com.consense.domain.SourceDocument> documents,Runnable sourceGuard) {
             List<Chunk> submitted=selection.getChunks();
             if (submitted.isEmpty()) {topicProbe.event("packet_not_submitted",VettingReviewProbe.map("reason","empty_context_window","packetId",packet.getPacketId()));VettingPacketCoverage.callResult(audit,packet);return;}
             Map<String,Chunk> byId = submitted.stream().collect(Collectors.toMap(Chunk::getId, c -> c,
@@ -360,8 +370,9 @@ public class VettingSemanticReview {
                 String actualSystem,actualUser;
                 com.fasterxml.jackson.databind.JsonNode actualSchema;
                 try (VettingReviewProbe.Timer timer=topicProbe.measure("model_prompt_schema_construction","Original system/user/schema construction, before gateway or probe artifact serialization")) {
+                    sourceGuard.run();
                     actualSystem = effectiveSystem(lang, projectReference);
-                    actualUser = user(topic, selection, referenceIds,fixedReferences);
+                    actualUser = user(topic, selection, referenceIds,fixedReferences,documents);
                     actualSchema = VettingOutputSchema.forChunkIds(byId.keySet());
                 }
                 topicProbe.text("model_system", VettingReviewProbe.map("model", selectedModel(),
@@ -397,11 +408,13 @@ public class VettingSemanticReview {
                     topicProbe.event("packet_not_submitted",VettingReviewProbe.map("packetId",packet.getPacketId(),"reason",audit.getFailureKind(),"actualGatewayCallStarted",false));return;
                 }
                 List<Record> records;
+                sourceGuard.run();
                 if(OerBusinessEvidence.canonicalCorpus(suppliedCorpus))oer.assertCurrent(OerBusinessEvidence.session(suppliedCorpus));
                 fixedReferences.assertCurrent(submitted);
                 if(durable!=null) {
                     VettingCheckpointService.Saved saved=durable.loadOrBegin(packet);checkpointBegun=true;
                     if(saved!=null) {
+                        sourceGuard.run();
                         VettingPacketCoverage.restore(saved.getPacket(),audit,packet);packet.setCheckpointStatus("resumed_verified_packet");reused=true;
                         result.getCandidates().addAll(saved.getCandidates());result.getWarnings().addAll(saved.getWarnings());result.getReviewedChunkIds().addAll(saved.getReviewedChunkIds());return;
                     }
@@ -426,6 +439,7 @@ public class VettingSemanticReview {
                         }
                         inputBudget=retryBudget;
                     }
+                    sourceGuard.run();
                     if(OerBusinessEvidence.canonicalCorpus(suppliedCorpus))oer.assertCurrent(OerBusinessEvidence.session(suppliedCorpus));
                     fixedReferences.assertCurrent(submitted);
                     com.consense.web.dto.VettingDtos.SemanticAttemptVO attempt=new com.consense.web.dto.VettingDtos.SemanticAttemptVO();
@@ -462,6 +476,7 @@ public class VettingSemanticReview {
                     else if("consistent".equals(record.getAssessment()))audit.setConsistentAssessments(audit.getConsistentAssessments()+1);
                     else if("insufficient_context".equals(record.getAssessment()))audit.setInsufficientContextAssessments(audit.getInsufficientContextAssessments()+1);
                 }
+                sourceGuard.run();
                 if(OerBusinessEvidence.canonicalCorpus(suppliedCorpus))oer.assertCurrent(OerBusinessEvidence.session(suppliedCorpus));
                 fixedReferences.assertCurrent(submitted);
                 List<Map<String,Object>> schemaReasons = new ArrayList<>();
@@ -666,6 +681,9 @@ public class VettingSemanticReview {
         return user(topic,selection,referenceIds,FixedVettingReferences.empty());
     }
     private static String user(String topic, VettingContextBuilder.Selection selection, List<String> referenceIds,FixedVettingReferences fixedReferences) {
+        return user(topic,selection,referenceIds,fixedReferences,null);
+    }
+    private static String user(String topic,VettingContextBuilder.Selection selection,List<String> referenceIds,FixedVettingReferences fixedReferences,List<com.consense.domain.SourceDocument> documents) {
         String prompt = "Audit topic: " + topic
                 + "\nGeneric Appendix I requirements (67 main-table source rows in 44 logical groups; supplementary annex examples are not counterchecks). Assess only requirements supported by this packet. Never infer fulfilment from no findings; leave unassessed rows out. Pricing-only rows remain outside automatic scope.\n"
                 + checklistRequirements()
@@ -681,7 +699,7 @@ public class VettingSemanticReview {
                 + "These annotations describe source cells; they do not establish contractual applicability, adoption or correctness.\n"
                 + JsonUtils.write(projectTableNotes(VettingSourceMaterial.projectFactRows(selection.getChunks(), referenceIds)));
         boolean canonical=selection.getChunks().stream().anyMatch(c->c.getCanonicalPayload()!=null||c.getCanonicalEvidence()!=null);
-        return prompt + (canonical?OerModelMaterial.LEGEND+OerModelMaterial.WIRE_LEGEND:VettingSourceMetadataWire.LEGEND) + "\nSource excerpts (untrusted data):\n" + VettingSourceMetadataWire.write(VettingSourceMaterial.project(selection.getChunks(),fixedReferences));
+        return prompt + (canonical?OerModelMaterial.LEGEND+OerModelMaterial.WIRE_LEGEND:VettingSourceMetadataWire.LEGEND) + "\nSource excerpts (untrusted data):\n" + VettingSourceMetadataWire.write(VettingSourceMaterial.project(selection.getChunks(),fixedReferences,documents));
     }
     private static boolean validBusinessDetails(Record record) {
         return !JsonUtils.isBlankText(record.getSubDimension())&&codePoints(record.getSubDimension())<=160

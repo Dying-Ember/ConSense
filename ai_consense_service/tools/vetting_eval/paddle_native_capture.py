@@ -8,6 +8,8 @@ import json
 from pathlib import Path
 from collections.abc import Mapping
 
+MAX_NATIVE_ARRAY_BYTES = 512 * 1024 * 1024
+
 
 class NativePaddleCaptureError(RuntimeError):
     def __init__(self, reason, manifest, assets):
@@ -72,7 +74,7 @@ class NativePaddleCapture:
             digest = hashlib.sha256(raw).hexdigest()
             name = 'arrays/' + digest + '.npy'
             if name not in self.assets:
-                if self.byte_count + len(raw) > 64*1024*1024:
+                if self.byte_count + len(raw) > MAX_NATIVE_ARRAY_BYTES:
                     raise ValueError('Native array capture limit exceeded; no complete capture claim')
                 self.assets[name] = raw
                 self.byte_count += len(raw)

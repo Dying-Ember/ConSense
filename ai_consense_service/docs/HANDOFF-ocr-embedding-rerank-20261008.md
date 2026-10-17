@@ -1,3 +1,168 @@
+<!-- drafting-template-acceptance-priority-confirmed-20261017 -->
+**2026-10-17 用户已确认验收顺序：先收口 Word 与原生 PDF 的解析质量，扫描 PDF 分阶段验证。** 当前验收不要求同步跑完 NTT/SCT 共52页扫描；已完成的NTT12页真实结果及缺陷保留，SCT40页尚未启动。每阶段分别记录实际覆盖、源质量、耗时及未完成，不以Word通过替代扫描版通过，也不由本次确认自动新增OCR、Goal或定时任务。
+
+<!-- drafting-template-router-source-adopted-20261017:start -->
+**2026-10-17 当前状态：NTT/SCT/SCC 模板专用解析 r15 已精确采纳到主源码。** Word 优先、实际字节分格式和 family/版次隔离；复用已有 OER 原生遍历，保 Guidance、完整范围、条件原文及命名通道位置。三 Word 冻结97组指导、157标记、3999原生段对应；全部63个已声明完整语义范围源核通过，新增27无局部标记填写区及1个Mr/Ms候选也逐源核验。14个Bill描述只给插入锚点，未来长度/列表基数和项目值未知；7个Word marker继续unknown，14处较广指导的直接条件依赖边未完成，原文上下文保留，不授自动编辑或完整项目条件图。
+
+最终521项＝487通过＋34既有/条件跳过，另真实三Word隔离upload/reading/evidence方法1项通过；27普通Word全parsedDocument与I29保持，三模板去仅两可选coverage域后整值保持。SCC独立PDF18指导正文及边注分开保留，但normal仍PARTIAL。NTT12页真实OCR已完成并揭示主候选漏星/公式/补括号缺陷；r15对完整保存结果仅复算证据，0新OCR且不选未验证候选，不授模型质量提高；SCT40页未跑。活动API/浏览器/真实Wordpreview/业务验收未授通过。
+
+13Java＋1Vue精确采纳，完整810后端文件等实测shadow；其他797、Python293、main target811（活动453）保持。无commit/push/部署、服务/DB/索引操作，不创建Goal/提醒；无模型部署或写操作，未执行权重逐文件before/after核验。当前说明见[模板专用路由实施文档](specs/drafting-template-source-routing-20261016.md)，本地完整凭据在`.local/drafting-template-routing-20261016`，继续一本HTML的I30。旧“实施中/未采纳”段落按历史状态阅读。
+<!-- drafting-template-router-source-adopted-20261017:end -->
+
+<!-- drafting-template-router-authorized-20261016:start -->
+**当前直接任务：NTT／SCT／SCC Drafting 模板专用路由与完整修改范围。** 最新用户明确授权实现，覆盖旧轮次“不扩 Drafting”限制。实施依据为[模板证据解析交接](HANDOFF-drafting-template-evidence-parsing-20261016.md)，隔离树及源审位于 `.local/drafting-template-routing-20261016`；当前实施／核验中，尚不授全量来源或自动编辑通过。Word 原生为主、布局辅助，兼容独立 PDF、Word 优先，不以文件名默认 NTT，不把不同 SHA／版次静默合并。逐份保 guidance、条件原文、完整目标成员／边界及局部 span；跨表／跨页不截断、非连续引用不扩大、句内末句不扩大为整条。syntax、capture、scope 与适用性分开。沿共享 parser 观察组装，不另造 OOXML／OCR 真相。
+
+继续一本 HTML 台账；原件／gold／fixed05／模型及活动服务／JAR／DB／索引保持，不创建 Goal／timer。代码、实际 parser／OCR、源审及业务／编辑能力分别报告。
+<!-- drafting-template-router-authorized-20261016:end -->
+
+<!-- oer-i28-i29-resumed-closure-20261016:start -->
+**当前源码状态：I28.1、I29 两批修复均已精确采纳，采纳后独立复核 0 Must。** 此段为最新直接修复状态；下方停止、候选与旧 Goal 状态保留历史语境。本轮 Goal 工具实查 null，不创建新 Goal 或提醒。完整范围仍为48来源位置／39解析原件／217逻辑输入，本轮实际验证27份Word；不扩展Drafting业务讨论。
+
+**I28.1：Word共性格式、字段、兼容分支与normal容量已收口。** 25个源码／测试文件精确采纳，完整1525个源码／资源／pom／Python文件等实测shadow，其他1500文件与453活动产物保持。5608个唯一格式片段、924个唯一字段均源绑定；4组非空兼容文字不再双份进入正文。实际332项Java＝326通过＋6既有跳过；本次受影响Python46项通过。完整27份保存结果的2629个切块经graph／ordinary／compact真实还原和非作者核验通过，15659个WordCell整对象保持，22个partial表行仍可取得完整单元格及注释。材料owner156.875秒、峰值31215980544字节；不是纯parse或模型耗时。此前异常JSON根类型guard疑点已撤销：原严格JSON入口已保护，不新增重复产品守卫。两次验证器误判失败保留，最终完整JSON结构及整份wire有序字节／SHA门均通过。
+
+**I29：所属标题和结束边界文字已真实传入局部材料。** 3个产品文件＋1个既有测试精确采纳，完整805个源码／资源／pom等实测I29shadow，其他801保持；720个Python文件独立保持I28采纳后状态，453活动产物保持。复用同一次段落解析的四文字通道，1187个原生标题与967个下一标题边界逐原XML源核通过；220个container_end不展开整文。去掉仅两类新增heading字段后，27份完整parsedDocument与I28逐值相同。实际选中1183个唯一heading／5768个引用完整传入材料；差4个均为空且无retainedBlockIds的源标题，normal／graph仍保留，不能将此比值当准确率。PRE缩写表89行保持，真实尾行切块携heading103的ABBREVIATIONS与原p2324的SPECIFICATION；B9续段也携原生所属标题及下一标题文字。原生层级、成员与结束位置未重写，单元格和文本框使用精确段落，不以整行替代标题。
+
+**实际验证与成本：** I29最终341项＝335通过＋6既有跳过，由原328项和修正fixture后新执行13项合并，明确为两次调用；首轮1 failure／6 errors保留，三个产品文件未为测试改动。27原件各正常parse一次，合计7.8608132秒，连保存9.9197415秒；随后全27材料owner141.406秒、峰值31153381376字节，完整wire还原及标题／成员／来源独审通过，进程均释放。普通材料raw982931082字节、wire raw157382261字节；这不是prompt/token统计，也不是速度收益对照。新增candidateStructure标题元数据会使相关真实内容指纹更新，不宣称跨代指纹相同，不改历史结果。
+
+**仍需继续的质量线：** PRE被拆分普通段body:3469:paragraph的格式映射继续明确partial_unknown_scope。B9手写6.与原生a…dd同用CLAUSE-2且后者均ilvl0，不能据样式名或编号级授业务父子；独立源查已定位direct paragraph／style／numbering三层ind、tabs、jc证据尚未序列化，原始twip与字符单位及覆盖差异不能混算。下一小步先在共享原生段落观察路径保这三层来源声明，再复用可靠docx_rendition文字坐标辅助核歧义，仍有需要才走既有局部OCR布局路线。SCT无原生纲要、NTT跨单元格及实际分页／完整业务章节树不由本轮升级通过。GCT／GCC无本轮新的PDF验收或模型业务分数。
+
+**执行边界与入口：** 全程真实OCR／模型调用0；11个PS示例仅保位置、上下文和原始对象／预览资产连接。原件／gold／固定成果及模型保持；活动服务／JAR／DB／索引／部署未改。成果只维护同一本本地HTML：`.local/oer-recognition-evolution-20261015/logs/index.html`，当前I28.1及I29；实际证据分别位于本地I28、I29的source-adoption01及independent材料报告。
+<!-- oer-i28-i29-resumed-closure-20261016:end -->
+
+<!-- oer-docx-native-first-20261016:start -->
+**2026-10-16 最新直接指示：Word 以原生 OOXML 为主。** DOCX 沿现有专用解析分支，逐份读取实际文本、包关系、styles/basedOn/outlineLvl、numbering/lvlText/start/override/restart、字段、修订、表格及故事部件；用户自定义规则按本份原件解析，不由统一文件名、样式名或固定编号假设代替。派生 PDF／OCR 仅辅助原生 XML 与文本无法确定的视觉排版，不作为 Word 正文或编号的主来源。此前 DOCX 双视觉实验保留为历史证据，不能据其将当前 Word 主路反转。清查并修复人为缩小支持范围的代码门，合法 OOXML 规则应实现；损坏、循环、溢出、来源绑定及防静默丢内容的检查保留，原件缺证逐项明确。I25 优先补原生编号与文档实际规则，保留 I23 冻结候选、输出和未执行评分，不借本轮修改历史结果。完整 27 Word 及原 48/39/217 范围保持；原件/gold/固定成果、模型及活动服务/DB/索引边界保持。
+
+
+**I25实际闭合并已采纳13文件：** 27份Word各正常直接解析一次，OCR/模型0；282项回归＝276通过＋6既有可选跳过。原XML独立逐项核验1187原生标题、24个outlineLvl9取消项及PRE长表186成员路径全部对应；旧15606块、表格与分节保持，40个精确文字字段变化仅为PRE13编号及6符号，PRE整篇按完整源序重建也exact。PRE487/487编号已解；保险文件从PARTIAL变PARSED，整体20 PARSED/7 PARTIAL。13候选源码逐pin采纳，当前全部src/资源/pom逐字节等同实测shadow，453活动产物保持。新producer为direct parse，旧保存结果带observe+identity，69路由身份字段差异完整保留，不授全路由metadata旧正确或完整语义通过。corpus12另19个Wingdings编号后由下述I25.1闭合；I23/I24原未完成门与失败保持。27个parse调用合计6.5039秒，producer连保存8.4342秒，owner10.516秒，含义不混用。当前Goal工具实查blocked，当前直接用户修复有授权，不记active或complete；单本HTML已追加I25。
+
+**I25.1字体编号已修复并采纳，采纳后独审0 Must：** Marking Scheme（corpus12）19个原Wingdings F06C编号按原字体和Unicode一手映射恢复为U+26AB；该文件220/239→239/239。原19项字体/码位/num/abstract/level/计数逐XML对应，其余220项编号完整对象保持。事前冻结的4个源块/20个完整文字字段及整篇aggregate精确；按明确变化重建整个旧parsedDocument后与实际整值相等、额外差异0；旧78块、nativeOutline/sections/tables均保持。实际136＝132通过＋4旧可选跳过，9新反例方法全过；主题字体优先级初稿缺陷保留，最终未知主题/冲突字体/未知码不猜，多字符/空格正常。单原件parse1.8147秒、连保存2.0954秒、owner3.906秒；OCR/模型0。4main＋1test精确采纳，完整当前src/resources/pom与实测版本逐字节相等，453活动产物保持；未重跑全27/282。该文件18个既有结构警告、PARTIAL状态保持；完整语义/分页/业务及I23/I24原缺口不升级。单本HTML追加I25.1，本轮已收口；Goal工具仍blocked，未记complete。
+
+**I26／I26.1已闭合并合并精确采纳：** 共享DOCX原生路径恢复标准SCC4／项目SCC3共7个OMML公式，133文字节点／7分式／42下标逐XML对应；另25份完整normal保持。随后补齐PRE等3Word共6个脚注引用绑定，2空note正常绑定、3自定义标记原样；完整27仅6个既存owner新增引用对象，全部旧正文、7公式、892编号、纲要／表格／分节保持。最终307＝301通过＋6既有可选跳过；5份完整来源经graph／ordinary／compact解码逐对象与文字核验通过。2main＋6test共8路径一次采纳，完整801源码／资源／pom逐字节等于实测note-shadow，453活动产物保持，采纳后不同作者复核通过。两次27原件parse分别6.4120／6.7292秒，后者连保存8.5017秒；材料成本另记台账，不混算解析耗时。0OCR／模型，原失败保留，不授整体合同语义／分页／PDF／图内文字或新模型评分；I23／I24原缺口保持。当前Goal工具无目标，不冒充active／complete；本轮直接修复已完成，活动服务／DB／索引／部署保持。
+**I27只读内容验收已完成：** 全27 DOCX的15606块与源位置可解，72965物理文字atom按顺序保留在originalText，未覆盖原生story文字0、U+FFFD替代字符/非法控制0；这不是唯一可见文字或准确率。7公式/6脚注重新核源仍对应。已证共性缺口：两Marking Scheme的4非空AC逻辑组双份进入有效正文；PRE普通run上下标及6附件用于说明/待填内容的行内斜体范围未传递；PRE11个PS对象/22对象与预览关系保持，但内部内容未展开。当前可作带来源的文字读取/引文与局部辅助输入，不授全量自动业务验收。当前标准SCC/PRE graph分别17754107/158130160字节，超过显式prepare16777216字节门；普通upload不经此门，未调用API，不泛称模块全被挡。下一步先补共享OOXML格式证据与兼容分支，再按对象关联局部补读；无本轮产品修改/新parse/Java/OCR/模型/服务/DB/索引变化，原件及实际结果保持。详见单本HTML的I27和本地I27/content-module-input-acceptance01.json。
+
+**I28 最新示例附件口径：** 用户已确认本次 PRE 的 11 个 Photoshop 嵌入图均为示例附件，只需保留原始对象/预览资产连接、来源位置、所属章节与前后文，供前端按需调取查看；不将其内部文字或表格列为本轮识别质量缺口，不扩展或调用对象 OCR。此前原件内部内容调查和页码定位保留为历史证据，尚未执行的 OCR 计划取消；Word 正文的原生格式、字段/目录、兼容分支与容量修复继续。章节层级须逐份区分真实 outline/style/numPr 证据与纯手工文字/缩进，不能按外观授原生语义。
+
+**I28 章节结构验收补充：** 已核实原生标题层级与作者手敲章节号可以同时存在；不能把 OOXML 可读、原生 outline/编号存在或文本保全等同于完整业务章节树正确。逐份保留 outline/style/numPr 与表格/缩进/文字编号的证据；SCT 等缺少原生层级、NTT 跨单元格等存在歧义的部分，必须经渲染页面布局辅助核验。可先复用派生 PDF 的可靠文字坐标；仍需视觉时沿现有 OCR 布局路线局部核验，正文文字与编号继续以原生 XML 为主。层级缺证/冲突须显式未知，不由格式修复或目录角色恢复授予完整章节树通过；本轮没有执行新的布局检测/OCR。
+
+**I28 用户已叫停：** 隔离候选已完成332项Java（326通过/6既有跳过）、44项受影响Python及完整27原件源核；当前未合并主源码，最终完整材料验证未执行，共享容量另有异常JSON类型guard次序的开放审查项。停止继续实现/实验，不启动新Goal或模型，完整证据和停止状态见同本HTML的I28与本地I28/user-stop-receipt01.json。此前本轮格式/目录等通过仅授候选，不授完整章节树、活动系统或业务通过。
+
+**I28 用户最新恢复修复：** 用户在停止汇报后明确要求“行，修起来”，继续先收口未采纳候选：补测共享容量边界、完成27份保存结果的材料传递验证和独立复核，再精确采纳。恢复后已核清此前异常JSON类型guard审查项为误报，原严格JSON入口已拒非object根，tiny补测通过，无需新增产品守卫；随后按实际原页与布局证据处理PRE章节/长表范围和分页接缝。此前停止回执保留为历史；本轮不新建Goal或定时提醒。11个PS示例仅保位置/上下文/原始资产连接，Word原生为主、布局辅助、冻结模型和活动服务/DB/索引/部署边界保持。
+<!-- oer-docx-native-first-20261016:end -->
+
+<!-- oer-focused-native-routing-20261016:start -->
+**2026-10-16 最新直接授权：继续原OER能力修复，质量重点为PRE、NTT、SCT、SCC、GCT、GCC。** 忽略Drafting样板解析引擎讨论，沿原共享OER路径和ENG/EAC门继续。本次创建前Goal工具实查null，旧active回执保留为历史；已先保存本次六类重点目标，随后Goal工具实际返回active；准确回执已存goal-resume-03/actual-goal-created.json。不重做I00-I20；I20原实际结果独审、四文件精确采纳、fresh编译和采纳后独审已闭合，0 Must；I21分节与页眉页脚绑定已精确采纳并完成采纳后独审，继续I23正文层级、完整成员与跨页边界质量线。核Word原生分节、headerReference/footerReference、default/first/even、首页/奇偶页开关及继承，保正文、表格、空结构、页眉页脚、脚尾注、公式/对象和PDF文字/表格/控件的来源及unknown；按身份/版次/实际结构分路，不由路径、编号或邻接授条款范围。原完整分母、旧正确和跨文件质量门保持，项目PRE在范围内、标准/项目和Word/PDF版本隔离。保原件/gold/固定成果及冻结模型，不改活动服务/DB/索引/部署，不恢复08:30提醒或新增timer。本次目标与实际状态入口为本地goal-resume-03，单本HTML保持。
+<!-- oer-focused-native-routing-20261016:end -->
+
+<!-- oer-i21-current-progress:start -->
+**I21已闭合并采纳，采纳后独审0 Must：** 正常Word解析保留原生分节、页眉页脚引用、六种类型槽、原始开关及继承候选。完整27份原件各正常解析一次、各两次材料构建，与独立原XML配置及全部旧内容对照通过：144个既有分节、864槽＝152显式目标＋143有目标继承候选＋569无目标；569不是空白页或坏值。2630个切块及旧正文、表格、位置守恒。实际回归249总数＝243通过＋6既有可选跳过，0失败／错误；19 PARSED／8 PARTIAL保持。实际评价05用184.344秒、峰值Job提交6062747648字节，独审0 Must；三次原失败及首次释放观察缺口保留，不追改历史。
+
+两main＋一既有test已精确采纳。root亲收原工具session9661／a8c85b→1cded7／exit0；采纳40.235秒，其中fresh隔离编译28.610秒，639主类＋42资源逐字节等于实测runtime，峰值Job提交2418470912字节，准确进程释放。791其他源码、453活动产物保持，采纳后不同作者实际复核0 Must。原正常执行旧保存回放101.594秒、新解析及两次材料364.968秒、总472.375秒保持；这些不同phase／核验时间不混作纯解析耗时。普通材料保存未压缩JSON由156906407增至257474116字节（+64.0941%），不等于wire／prompt／token成本。实际分页、完整条款语义、业务／H800未由本轮通过。
+
+**I22成本对照已闭合，不采纳：** 完整同一saved27两runtime串行各一次，81组完整JSON及真实指纹均保持；baseline174.391秒／峰值20015263744字节，candidate178.547秒／26049740800字节。没有测得收益，不继续围着一行反复测，也不由单次结果推断稳定回退或分配因果；独审0 Must。I21采纳不含该Graph一行。
+
+本项继续原39解析原件／217逻辑输入，重点PRE、NTT、SCT、SCC、GCT、GCC，忽略独立Drafting样板引擎讨论。下一质量线为母项与完整子项、条件／Notes／侧注及跨页终止边界。PRE13条未解编号已由旧／新完整记录逐项确认为超过z的同一既有formatter边界；root另亲看既有派生完整69–71与542–544页，后续先核一手规范、原生语言和适用条件，不按文件名／固定页码调规则。完整语义仍unknown。单本HTML继续维护；Goal active，模型／配方冻结、活动服务／DB／索引保持，提醒继续PAUSED。
+<!-- oer-i21-current-progress:end -->
+
+<!-- oer-i23-candidate-progress:start -->
+**I23候选02实际编译与回归已通过，尚未采纳。** 候选01母子范围交叉Must保留；修订02约束祖先停止点并检查完整子范围。实际272＝266通过＋6既有可选跳过，0失败/错误；12个新增方法及11个Standalone边界用例通过，旧249项身份/状态保持，不同作者实际复核PASS/0 Must。完整27Word＋5PDF的同normal两代重放现均结束：各32来源、3037切块及3037普通材料；基线274.969秒/峰值31805718528字节，候选355.187秒/34453499904字节。root分别亲收原工具32570→9a52f7及2509→f279ec、exit0并准确释放。基线最小实际独审PASS；候选实际及评分器05独审继续，六类质量分数仍null。上述时间包含capture、材料、快照及写盘，不是原件解析或模型耗时。0新原件parse/OCR/模型/HTTP；不能据返回成功宣称来源准确率或超过历史最好。FoT扫描control16原FAILED、9页全失败与空输出保留，不授解析成功或结构泛化通过。
+
+**剩余质量重点：** PRE缩写表完整逻辑框架与13处超过z的旧编号；NTT同一表格内子项的完整多行范围；SCT Note3(a)(b)(c)与跨页表格引用及Note4停止；SCC17.301引用替换20.1的嵌套与SCC18终止；GCT旁注精确2(b)候选；GCC4.2跨页续项与4.3终止。旧字和物理容器存在不等于这些关系已验证。新逻辑库存仅沿ordinary候选通路，canonical选中材料尚未传递，完整条款语义保持unknown。root已亲看13张完整难页，保持跨文件反例与旧正确，不按单一文件答案调规则。
+
+**PDF元数据调查纠正保持：** 原first-key扫描误取表格内部coverage的缺失判断已撤回；准确/parsedDocument/coverage/readingPlan/tasks证明GCT/GCC均有native_text_and_page_frame且sourceSha相符，不做相应route补丁。GCC保存normal实际raw1502122468字节，按真实成本规划，不改原输入。
+
+**大文件容量链已定位，尚未修改。** 同源graph raw：标准SCC14885645→20536830字节、GCC9200732→19540858字节，候选新增跨过Java显式prepare的16777216字节图输入门；PRE130857206→187299416字节，两代均超门。Java/HTTP/Python/registry/validation共11处相关容量点须按normal来源一致处理。仅确认图与具体门关系，不能声称旧完整projection/HTTP此前通过或所有上传被挡；graph不是wire/prompt。Goal active，完整48来源位置/39原件/217逻辑输入、冻结模型、活动服务/DB/索引边界保持；单本HTML持续维护。
+<!-- oer-i23-candidate-progress:end -->
+
+
+<!-- drafting-compact-goal-20261016:start -->
+**Drafting I22 已按本轮直接授权启动独立有限 Goal。** 先保存[对比实验文档](specs/drafting-compact-contract-comparison-20261016.md)，Goal工具再实际返回active，本地I22回执可查。沿剩8调用／262144声明生成预算，先做无API的compact→旧typed接缝、实际反例求值、190行能力及正常来源门，再做M2.7／准确M3.1对照和冻结局部验证；不再继续P1210同句重试，不授全图或27B通过。正常OER修复仍由其原owner推进；本实验不另造parser、不由邻接授scope、不改活动服务／DB／GPU／WSL／索引，不恢复提醒或自动push。旧I20/I21及Goal null作为历史保留，所有新结果追加原单本HTML。
+<!-- drafting-compact-goal-20261016:end -->
+
+<!-- drafting-graph-discussion-only-20261016:start -->
+**I20／I21已收口：** 减负与准确M3.1预览版对照共6次均终态。M3.1原JSON3/3，一份局部候选全维通过，另有用途变guard／用途descriptor歧义，未授稳定或全图通过。完整字典未删能力，190定义值型映射全有；原9个PDF复杂schema及4来源ref等缺口仍在。模型单句试验与变量静态审计分开，Goal仍null，不自动追加调用。
+**I20有限授权：** 用户要求减轻模型填表职责并确保变量覆盖；完整字典保留，Word顶层／嵌套与PDF定义分别审计。相同guidance的M2.7／M3先各一次、每型最多3次，原累计硬限／逐次准入不变。Goal仍null，本项不改解析／服务／DB或实际原件。
+**I19评分解释修正：** 原各0/3是完整结构验收口径，不能作为纯语义理解成功率；prompt未定义适用域表示／执行约束，M3末轮已保building域，不宜直接判语义遗漏。原评分／响应保留，解释追加HTML；0新调用，Goal不恢复。
+**I19已收口：** M2.7／M3各3次同输入真实调用，原样JSON各2/3，完整来源语义各0/3；保正向主干及缺证的局部改善。原始响应、独立源审和结果已追加原HTML。新调用停止，Goal仍null，完整图谱未过。
+**后续有限授权（I19）：** 仅测 Word SCC 单句 guidance＋另一条 NTT 原文拆解示例，M2.7／M3 同输入先各一次，必要时原样重复，总计最多6次且逐次准入，保原硬预算。Goal仍为null；不恢复完整图谱循环或解析／活动系统变更。证据追加原本地HTML。
+**最新：变量图谱Goal已由用户停止，当前仅讨论第一步编排。** Goal工具无目标；44个MiniMax任务终态，Luna／Terra未准入、未执行。下方active为历史，不自动恢复本聊天实现或模型测试；其他OER／解析聊天及活动系统保持。
+<!-- drafting-graph-discussion-only-20261016:end -->
+
+<!-- drafting-graph-stability-campaign-20261016:start -->
+**2026-10-16 最新：变量图谱持续Goal已建立。** M2.7优先、M3同题对照，允许分文件提取再联合跨文件构图；逐轮回看累计缺陷并改变一个主要因素，保原始失败、unknown、旧正确及受影响链失效，HTML只维护一本。入口为[Goal／任务／完成门](specs/drafting-graph-stability-campaign-20261016.md)，新忽略目录`.local/drafting-graph-stability-campaign-20261016/`，恢复先读state与HTML。新活动硬限64call／2097152声明生成、首24审核、每轮8／并发2；旧18调用原样保留、不混作新重复。另有[解析handoff](HANDOFF-drafting-template-evidence-parsing-20261016.md)供用户交其他agent，重点是准确正文、层级、布局、跨页完整组、跨文件引用及两版SCC隔离；此聊天未启动其parser工程。Bonsai／活动服务／DB／索引／OCR模型和原件不动，无新定时任务。Goal只在正确全量图谱＋冻结3次独立重复及来源回归门实际通过时complete。
+<!-- drafting-graph-stability-campaign-20261016:end -->
+
+**2026-10-16 图谱追加控制：** 用户新增5.6 Luna和5.6 Terra各一次同题试验，用于调查编排；原文／评分保持，运行入口差异及预算须单列，准确型号不可替换。保既有硬限和失败，单次结果不授稳定或完整图谱通过；本项仍不改parser／活动系统，入口沿用上方spec与state。
+
+<!-- drafting-guidance-followup-20261016:start -->
+**收口：18次全部回执已齐，停止新增／重试／变体，Bonsai不加载。** A5＋B基线5＋紧凑4＋M3局部1＋M27紧凑局部3，声明生成上限累计753664、全局租约清空。紧凑M27结构1/2、M3 0/2；M3 local alias自比较失败；M27 local alias过后atomic0/2（V1域含unknown或字符串布尔），后续复核／回查未执行。基线72原子断言仍not_observed，局部语义诊断不替换它；完整图谱／真实改文／原版27B与H800均未验收。详见[本轮记录](testing/drafting-guidance-followup-20261016.md)。
+**同轮最新：用户要求本地Bonsai先评估、不合适就不试，当前决定不加载。** 只读核对模型文件／disabled配置及旧性能证据：64K上下文／16K生成，旧round5约31.11生成tokens/s，generation占97.53%wall；不将旧速率或配置叫当前有效读回，不更改活动服务／GPU负载。MiniMax沿原预算收口；slim虽保97notes／194段原文，却移除source_bracket_complete等元信息并改数组语法，不授纯长度因果结论。基线M27 discovery0/2、M3 discovery2/2结构，后者alias生成32K截断，下游保持未执行；独立local METHOD诊断分开记。路A5次已结束，不能从单次128K配置断言必需128K，也不能从disabled stop授语义通过。详见[本轮记录](testing/drafting-guidance-followup-20261016.md)。
+**2026-10-16 新增有限执行：M3预算／思考模式与更细编排两路复验。** 三文档joint业务保持，SCC只用Word。路A仅比较稳定版M3的总生成65536 adaptive／32768 disabled各两次，只有前者实际length才补一次131072；不将总预算叫独立推理上限，不把Flash强度档移植M3。路B将全量要求／候选、alias与程序引用来源、单变量完整语义簇类型条件、合图复核分开，两模型有界验证。全局27调用/并发2/生成上限累计1048576 tokens，A≤5、B≤22，无自动重试；旧8失败保持。代码及输入、官方控制项依据、raw/usage/未知和实际阶段账在 `.local/drafting-guidance-followup-20261016/`，详见[本轮记录](testing/drafting-guidance-followup-20261016.md)。不动产品、原件、OCR、活动系统或Qwen27B；结果按真实调用和原文复核分别记。
+<!-- drafting-guidance-followup-20261016:end -->
+
+<!-- drafting-guidance-minimax-stability-20261015:start -->
+**2026-10-16 结果：已收齐8次并停止新增调用，严格自动消费0/8。** 原始失败分为3超时、2预算截断、2JSON/封套不合格、1完整JSON但来源/引用不合格；不把前五项扩大称模型语义错误。M3局部语义有改善观察，稳定性门仍未过；后续原子拆解/合图/模型复核/回查未执行。原文/提示/原始响应/诊断副本分别保留，详见[结果记录](testing/drafting-guidance-minimax-stability-20261015.md)。本项不是产品或Qwen27B验收，不恢复其他效果或系统变更。
+**2026-10-15 当前新增执行：Drafting guidance 联合流程稳定性。** NTT、SCT 与 Word SCC 按同一项目联合输入，不能按文档独立反推共享项目变量。三份 DOCX 已直接提取97 guidance块，3977原段与存储来源逐字一致；模型输入含1744非空原段并使用程序声明的伪段落ID。官方 `MiniMax-M2.7`／`MiniMax-M3` 的同输入两次独立归集正在执行；后续沿业务变量／紧密语义簇拆解、程序合图与有限回查。全部输入、提示词、响应及失败在 `.local/drafting-guidance-stability-20261015/`，不向Git放原件/运行证据。本轮仅有限云API试验，计划最多20生成、绝对上限28、并发2、无自动重试或参数回退；PDF SCC、Qwen27B、真实改文、OCR、产品/服务/DB与部署验收不在本轮。实际结果以该目录回执为准，提取与结构校验不授模型语义通过。
+<!-- drafting-guidance-minimax-stability-20261015:end -->
+
+<!-- oer-overnight-goal-20261015:start -->
+<!-- oer-i20-progress:start -->
+**I20已闭合，源码精确采纳及采纳后独审0Must：选中表格的完整物理成员可正常取用。** 完整27份保存结果逐值评价及不同作者独审通过：462表／4377行／15659格，原混合载体目标74表／262行／601格、234个额外闭包格均能取用，旧正文、完整chunks、strictFP及legacy完整JSON保持。最终234项测试通过、6项既有可选跳过；首轮1项失败及准备失败保持。2个main及2个既有test已精确采纳，fresh current编译15.906秒、637主类／42资源逐字节等于实际验证版本；790其他源码及453活动产物保持，owner20.719秒、峰值Job提交2420424704字节、进程释放，root亲收原工具exit0。完整实际结果独审0Must；采纳后不同作者已核全部4备份/当前文件、790其他源码、453活动产物、fresh637/42及失败保护，0Must。正常材料JSON由186128747降至156906407字节，仅指保存表示，不授实际prompt/token或语义改善。原I19“完整表选入待办”由本轮解决；字段、Notes／OR、有效显示及完整来源语义仍unknown。六类重点Goal实际active，下一项I21分节与页眉页脚绑定；0新OCR／模型，未切活动服务。
+<!-- oer-i20-progress:end -->
+
+**I19已采纳：正常Word解析保存完整表／行／格清单。** 完整27份Word实跑并经独立原XML逐项核验：227个实际加载部件、282个根、462张表、4,377行、15,659格全部对应；13张嵌套表和142个无独立正文行块的物理行明确保留，70个此前没有正文／格观察的部件也有实际加载记录。沿用同一次正常DOM和原部件哈希，不二次打开原件或调用完整observer。旧正文、结构、I17格位置、旧coverage、2,630个Chunk UUID／sourceHash／质量均保持，19 PARSED／8 PARTIAL不升级；81份旧JSON及81份新结果重复JSON字节和值均保持。227项测试实际通过、6项既有可选跳过；2 main＋3既有test已精确采纳，fresh current隔离编译14.360秒、全部634主类及42资源等于实跑版本，789其他源码／资源与453活动产物保持。新解析及两次材料构建71.110秒，32 GiB堆／48 GiB任务，峰值提交内存14.494 GiB，进程已释放；旧保存回放另34.890秒，两阶段合107.750秒。保存coverage增加18,319,575字节，ordinary材料合计仍186,128,747字节；这不是新wire／prompt或token测量。61混合／故事载体、11组模型整表闭包与语义仍unknown，0新OCR／模型，未切活动服务。下一步只修已保存清单到正常候选图的首个传递缺口，复用现有来源绑定／完整组机制，不由路径存在授填写含义；详见单本台账I19。
+**I18已实测，保留现有共享编码：** 同27份来源的old／new各完整材料数组，共54次existing MetadataWire.write＋公开decode；54份实际解码UTF8字节逐项等于原输入，全部顺序、来源事实和unknown保持，不同作者实际复核0 Must。wire合计由63,453,143增至76,843,931字节（+21.103427%）；新wire比新raw JSON少58.714636%。最大完整单来源数组为项目PRE，52,958,914字节；这些是逐源完整数组及27份加总，不是单excerpt、真实选中请求、完整prompt或token。单次编译＋测量32.922秒，32 GiB堆／48 GiB任务，峰值提交内存16.970 GiB，所属进程全释放；0产品代码改动／新parser／OCR／模型／token API。I18提出的正常producer库存待办已由I19完成原件核验及源码采纳；下一步核已保存清单到正常候选图的传递，61载体／11组未知保持。
+**I17已采纳：补齐每个已观察Word单元格的原件来源位置。** 完整27份原件实跑，15,606正常块／4,285载体中的15,659个已观察物理格，逐格与原ZIP内XML部件、行、表和137个嵌套父格精确对应；旧文字、顺序、正文和coverage保持，19 PARSED／8 PARTIAL不升级。旧保存来源81份完整JSON及新结果重复81份完整JSON字节和值保持。最终216项测试实际通过、6项既有可选回放跳过；4 main＋3既有test已精确采纳，fresh current隔离编译13.719秒、632主类逐字节等于实跑版本，787其他源码及453活动产物保持。原件解析加两次材料重建71.140秒，32 GiB堆／48 GiB任务，峰值提交内存14.917 GiB，已释放；旧保存回放另29.329秒，两阶段102.031秒。root亲看11张完整派生页及4份正常产物。每格来源已补齐，但61个混合／故事载体、11组整表闭包和235诊断中的1个嵌套案例继续unknown，不授新增识字、填写含义或语义分。
+**I17代价与下一步：** 来源定位使保存的ordinary材料JSON由134,738,933增至186,128,747字节（+38.140286%），最大excerpt4,207,345字节（旧值3.765471倍）。这是现有wire共享编码前的JSON，不据此断言实际发送payload／prompt token同幅增长。I18先复用已有MetadataWire／PromptWire对27份old/new完整材料做精确往返与成本测量，再决定是否需要最小共性改动；不删来源事实、不绕最终完整请求token门。32／48 GiB只是按需占用的起步配置，可随实际余量继续扩大；本机常驻8080仍16 GiB，本项未重启或改runtime。
+I16下条中的每格来源待办已由I17完成；I16整表selector与未知边界保持，原235／234诊断不改写。
+**I16已采纳：Word空行／格的共性材料丢失已补回234／235。** 在检索后按真实来源代次、原件SHA、XML部件和表／行身份补齐已命中物理表，保原始chunks／content／引用权限和严格指纹；同一请求只保一份表，缺SHA、元数据矛盾或未解嵌套保unknown。最终104项契约实际通过、6项既有回放因缺环境跳过；完整27份保存来源32 GiB堆／48 GiB任务30.047秒，388实体／4115行／15058格精确保持、320引用全解，2630 chunks及27旧ordinary全JSON保持。最终版与前版81份完整JSON字节和值相同，0新parser／OCR／HTTP／模型。6 main＋6既有test已精确采纳，fresh current编译14.109秒、632主类逐字节等于实际版本，782其他源码及453活动产物／配置保持；采纳后独审0 Must。root亲看8张SCT／评分表／项目PRE完整派生页，PRE标题续行不授新填写位。235分母保持，1个SCT嵌套案例、11受阻组与61混合／故事载体继续unknown，不授新语义评分或整体来源质量；实际与备份见单本台账I16。32／48 GiB是起步可按余量增加，常驻8080仍16 GiB，本项未切服务。
+下条I15中的235格为当时诊断快照，其ordinary传递待办现已由I16补回234／235，剩余未知不缩分母。
+**I15已采纳／新内存已实跑：** 正常Word原生分节事实保全的3个main／5个既有test文件已最小采纳；46项契约、完整27原件及不同作者复核通过，32 GiB堆／48 GiB任务串行85.078秒，全部释放。144源节／16870成员与原XML精确对应，旧15606 normal／graph块及正文／原coverage保持，19 PARSED／8 PARTIAL不升级；fresh current编译14.344秒、632主类字节等于实跑候选，I13保持，未切活动JAR或服务。root已亲核G301／SCT完整页及26块新Notes窗口；owner／法律适用与语义质量仍unknown。235空表格行在normal／graph保留、ordinary被旧blank筛选排除，7份文件的共性首失继续处理，不授ordinary结构全集。项目PRE（base tender）继续在范围内，不能与已排除的SL PRE参考库混同；39／217分母保持。
+**内存政策及I14闭合（后续I15实测见上条）：** 后续完整OER离线Java任务采用32 GiB堆／48 GiB拥有进程内存起步，按需占用；执行前查主机及并发余量，实际需要更多继续扩大，16／32 GiB均非永久门槛。共享启动缺省32768 MiB，显式配置仍优先；当前8080实际16 GiB及runtime保持、不重启。I14已按原16／24／32 GiB计划结束：完整七页正常缓存复跑440.563秒、14命中／0新provider与HTTP，两消费者及最终验证通过、owner释放、1444pins无变化；CPU身份2／详细7另计。工程缓存通过，来源仍PARTIAL／needs_review，I12原失败不改写。I15已按此政策完成完整原件验证及源码采纳，不由节邻接授Notes适用范围。
+**I12完整源审已结束，主路暂无识字净提升。** normal／Paddle在177同ID同规则位置均124保留／45漏／8改，MinerU137／33／7，与final05净变化0，14provider分支原文／结构／几何精确相同。57字段／74写区／11关系的665重叠义务每分支仍unknown，83旧正确未取得本轮完整语义见证。root与独审人亲看本次CPU19编号候选为19/19逐字且唯一定位，仍不计effective body（0/19）或泛化。I14已按1800秒总／1680active启动0新provider缓存验证；Word原生分节端点保全先在shadow，保I14源码／配方冻结，不推Notes法律闭包。
+**I12／I13最新：真实七页已完成、共享早门修复已采纳。** 七页冷跑1130.485秒、14provider全部释放，APL后续被同120000字符门拦住，按计划停止，无warm。I13仅删除常量／if／throw三行并更新一个既有测试，59项适用契约通过；采纳后完整AoA55块7辅助区、APL38块19辅助区在保存结果上约5.55秒通过Source／graph／ordinary，0新OCR；相同class亦已保全Annex／H273组、306方法、11206格、52关系。最终真实请求token门不变，旧失败与unknown保留。原评价器已绑定完整七页，来源质量独审、历史同域比较和I14零新provider复验另记；不动活动服务／DB／索引。
+**I11.4／I12当前状态：** 273组完整材料实际Java复核204放行／69被120000字符早门拒绝，Annex首例为76个普通短块、正文1276字符；影子元数据压缩仍32组超限，不采纳codec变更。最小方向是保完整来源并把模型准入留给实际完整请求token门。I12最终plan02已由root和独立作者核准，隔离owner实际启动、readiness通过，接续完整AoA4／APL3冷跑和成功任务复用；下方“未启动”保留为历史快照。真实任务、缓存、CPU补读和来源质量分别记入同一本HTML。
+**I11.3已实际消除小堆阻断：** 16 GiB堆／24 GiB拥有任务下，2份完整保存结果独立JVM共38.062秒，完整blocks／正文／coverage／native两次回读严格保持且候选图生成；无OOM，0新原生／模型，进程全释放。普通材料两源共同在120000字符完整单元门失败，另查全量超限对象／大字段，不作为堆失败或来源错误。I11.2旧OOM仍保存。I12跨OS预算现明确Java24 GiB＋WSL32 GiB分别受管、理论总56 GiB，未启动模型，不宣称跨OS统一32 GiB硬限。
+**最新内存执行要求：** 用户明确要求放宽堆。新完整文件离线保存／正常Java验证采用16 GiB堆、24 GiB拥有任务（含CPU整体可32 GiB），若完整实际任务仍需更多则按主机余量继续扩大，不再让旧4 GiB成为硬门。本机后端实际已16 GiB堆；`scripts/local.ps1`缺省2→16 GiB、42项既有启动接线检查通过，活动服务未重启。I11准备只读保存结果的大堆checker，0新解析／模型，旧OOM和全部原件／正常结果保持；减拷贝与来源门独立继续核。
+**I11.2已结束原生执行，保存回读失败另保留：** 完整Annex47/47＋AppendixH55/55页及306方法观察全部返回，11次原生请求、正常解析72.625秒，旧临时PDF锁故障未再现，受管进程已全释放。离线材料检查在SourceDocument保存回读时4GB堆OOM，尚未运行graph／普通材料；只读评估保存结果及最小修复候选，不重跑原生任务。102页观察恢复不授来源正确，原正文／完整组与语义门继续核。下条“已启动”是此前快照，单本台账I11／I11.2保两次实际身份与失败。
+**I10已过代码门、I11已启动plan02：** 精确provider成功复用／缺失任务恢复已冻结，最终43项直接契约通过且不同作者复核完成；保持完整双路结果和历史／新执行身份，真实缓存、来源质量与陌生首跑速度不由此通过。102页完整原生复验首次在解析前遭本地测试启动器单root约束失败，未执行／释放记录保留；仅修本地包装、经极小真实子进程自检和root重审后，plan02现已运行，0视觉模型／无自动重试。root亲看G301/SCT完整Notes条件页，后续结构生产须补完整成员／显式来源引用，不能再造整表包装或按邻接授义。全部记录仍在同一本台账，模型／活动系统边界保持。
+**新Goal首轮I09已收口：** 已合并来源／任务／结构三项盘点，48原件位置与39解析范围、217逻辑输入不变；root亲看了跨文件侧排表与多层表头。下一步I10补provider成功完成复用／仅缺失任务恢复（双路契约保持），I11准备完整Annex47页／AppendixH55页原生复验；两者均未获新来源质量通过。自动身份pending与扫描57／74／11等缺口保持，不把工程恢复当语义收益。
+**新 Goal 已创建：2026-10-16 00:58:25，工具实际返回 active；创建前已保存、检查并独立复核修订路径。** 本地 `execution-state.json` 与 `goal-restart-01/restart-receipt.json` 保留顺序和摘要证据。下一步先做全范围共性缺陷覆盖账，停止以 APL 单页优化主导执行。
+**2026-10-16 用户重启要求：先改路径文档，再创建新 Goal；先处理多文件共性问题。** 旧 Goal 已由用户删除，当前[实施路径](specs/oer-recognition-evolution-path-20261015.md)已改为先核全范围缺陷覆盖面，再做按缺口路由／可靠复用与恢复、正常结构生产及完整组装。I08 代码／64项契约检查冻结，无接线后真实跨文件通过；APL19/19保开发回归，停止针对它继续调整。Goal 创建前不推定 active，实际新状态另记；旧“Goal已激活”属历史，08:30检查点及原完整分母／系统边界保持。
+**2026-10-16 新增监督要求：防止方案过拟合。** 固定 APL 难页 19/19 仅属开发回归；当前规则冻结后，先检查未参与规则选择的其他完整文件／文档家族的收益、误触发、旧正确和未知，再决定扩用。普通正文／表格与可达竖排／多栏控制同列；历史暴露明确标记。不得按文件名、固定页号／坐标或已知答案增加补丁，不用单页成绩授整体／泛化通过，跨文件失败保留并回查通用触发与适用范围。
+**同轮最新汇报要求：只维护一本 HTML 台账。** I00 起各轮按“作用文件、问题、办法、实测成果、下一步”追加到同一 `logs/index.html`，不再生成多份轮次网页；已完成的定位、失败和真实效果分别用人话说明，技术证据折叠保留。
+**2026-10-15 当前执行：OER 小步演进 Goal 已激活，验收点为北京时间 2026-10-16 08:30。** 每轮 HTML 及不可变事件入口为 `.local/oer-recognition-evolution-20261015/logs/index.html`，路径仍承接既有 ENG／EAC。根代理负责亲看难页、审最小改动和同源完整对照；连续三次可比尝试无收益转一手经验复盘，不引入新技术栈，允许补现有栈依赖。代码／契约、真实调用、保存输出复算、来源及 H800 状态分别记录；旧失败与未过门保留。新授权覆盖下方“本轮仅文档”的旧状态，模型冻结及活动系统边界保持，截止只交真实进度，不自动宣称全部完成。
+<!-- oer-overnight-goal-20261015:end -->
+
+<!-- recognition-evolution-path-20261015:start -->
+**2026-10-15 新交接：识别引擎按“小步迭代、根代理审核、难页源核”推进，当前先交付文档。** 实施与每轮记录入口为[识别引擎小步演进路径](specs/oer-recognition-evolution-path-20261015.md)。先审难点原页、真实 provider 结果及正常消费，确认一个首丢失点后再定最小改动；已有完整表格／布局投影不重复包装。当前只有文档，未开始该路径的代码、原页视觉审计或实验；历史真实运行、质量未过门与固定模型决定保持。下一步为路径 P0／I01 的原页与输出审计，后续逐轮记录，不以本文新增任何效果通过结论。
+<!-- recognition-evolution-path-20261015:end -->
+
+<!-- recognition-repair-authorized-20261015:start -->
+**最新资源决定：目标超算平台 250 GB 高速内存，用户要求放大识别预算。** 视觉数组采集采用 512 MiB／页，完整 provider 响应及 Paddle page_json 投影采用 1 GiB／次的有限边界；实际按需占用。原 64 MiB 不能继续阻挡本轮真实完整响应，模型／输入／生成配方保持；代码边界、实际模型和来源质量分别复核。
+
+**2026-10-15 当前交接：七页真实正常解析与本机 OCR 接线已完成，表单语义缺口继续开放。** 已修原生文件映射释放、Linux 纯 CPU 观察／健康、实际 cgroup 接管／释放和512 MiB／1 GiB容量接缝。AoA4页＋APL3页经正常 Java 完整运行943.156秒，2身份＋7详细请求、14 provider全released/cgroup0、无主／清理错误，原件保持；05测试owner已停止且treeReleased=true。常驻`consense-recognition-local.service`现PID121907，锁文件误链接已修并保留首轮503；真实完整APL1复测200、双provider释放后，沿正常脚本只加BackendOcr并重启8080，现后端PID7164、OCR enabled/available true、local/18780，原JAR、15项目与其他配置保持。详见[三段完整图](diagrams/oer-recognition-after-repair-flow.md)及[实测／来源记录](testing/oer-recognition-repair-20261015.md)。两原件仍PARTIAL；177文字子集正常消费124保留/45漏/8改字，MinerU137/33/7仅独立候选；57字段/74写区/11关系缺语义声明均unknown，R157旧correct83域行未重证，不得称83错误或语义改善。固定配方、不训练调参、不用未采用LoRA；并发Drafting/SCC、原件/gold/固定成果与历史失败保留。未做活动项目上传／业务写API／索引／浏览器业务或目标超算验收；常驻本机手动管理，无timer和自动重启。
+<!-- recognition-repair-authorized-20261015:end -->
+
+<!-- drafting-typed-graph-workflow-20261015:start -->
+**2026-10-15 当前统一设计：NTT／SCT／SCC 先综合归集全部修改建议／编制要求，再反推变量并保多对多来源账；原子语义能力形成带固定类型与证据的结果，程序组合影响链并合图，集中模型复核，疑点允许有界重点回查。** 变量值、影响、相互作用和修改意图分轴；每变量／处理点完整语义簇使用独立上下文，新增和回查均先经累计预算门，未知不强归类。方案和[流程图／候选契约](specs/drafting-typed-graph-workflow-20261015.md)已持久化为 proposed／design-only；本条不启动其模型、产品、解析或服务执行，也不追认自动发现和生成已过门。原 DYN／ENG／EAC 门保持。
+<!-- drafting-typed-graph-workflow-20261015:end -->
+
+<!-- scc-pdf-variable-extraction-isolation-20261015:start -->
+**2026-10-15 最新交接：另版 PDF SCC 已按用户要求独立提取并与 Word 隔离。** 本轮66页原生文字重读与人工分析，74处理点候选（不是74输入字段）、144引文和155标记候选均可回核；来源ID分别为`scc-pdf-1bebab1afbc0`／`scc-docx-9aa2fa066836`。PDF4.2/5.2分支、NSC角色、11.2选项及22.8对本版8.2依赖分别保留，未知不套Word规则。原件、页面及完整证据在忽略目录；现有catalog／项目／服务和DB未改，模型／OCR为0，不追认为自动解析效果。详见[提取与隔离记录](research/scc-pdf-variable-extraction-isolation-20261015.md)，后续仍沿DYN／ENG依赖实施。
+<!-- scc-pdf-variable-extraction-isolation-20261015:end -->
+
+<!-- all-supplied-source-reparse-20261015:start -->
+**2026-10-15 最新接续：用户已要求当前代码全量重解析并对照最后训练遗留问题，本地原生/POI检查已收口。** 全包48原件当前SHA已核；39解析、3组成元数据、2图纸排除、4评价隔离。当前10c3eaf实际新跑27 DOCX及7新增PDF（200页），另6个入口pending PDF做独立exact-source人工身份parser-only诊断；同普通PDF路径的183个今日4bec277输入保实际旧运行身份复用。合并39原件/217逻辑/3457 PDF原页位置：主执行口径（含旧SL/AoA/APL共3原件181逻辑的显式来源身份）按原件为19 PARSED/12 PARTIAL/6 IDENTITY_PENDING/2 FAILED；另补六件人工身份诊断后为19/15/5，不修改入口pending，也不授全39件自动身份泛化。20同SHA Word保住原有来源覆盖，SCC三公式保原OMML结构，GCC169成员文字保持、GCT42一致/1未知；COM11完整表与AoA/APL语义门仍未过。完整账本、分母、运行身份及独审在[全量比较记录](testing/oer-all-document-reparse-comparison-20261015.md)。自有CPU进程已释放，0新视觉模型/训练/DB/原件写。R153为最后实际训练且候选未采用，最近有效来源判定为R157/R158；当前只确认局部工程和原生结构保全收益，完整双OCR与全来源质量尚未完成。不训练、调参、换模型、覆盖固定成果/原件/gold、切换活动服务或写DB/索引；其他旧暂停与局部授权按时序读取。
+<!-- all-supplied-source-reparse-20261015:end -->
+
+<!-- drafting-template-adaptation-plan-20261015:start -->
+**2026-10-15 新交接：动态模板／SCC版本适配已拆为DYN-00–14，当前仅规划。** 入口为[前置能力与任务图](specs/drafting-template-adaptation-prerequisites-20261015.md)。先DYN-00／01／02核实际能力、支持格式、完整挑战分母和分析修订契约；再补正常来源结构、处理点及新版对应，过G1才冻结业务改造范围，之后接变量／默认／关系／catalog与原件编辑。现有采用、快照、stale和精确DOCX编辑保留；依赖不完整先保守失效。新PDF是版本对照开发样本，不等于全文等价或可编辑生成已通过。原ENG／EAC门与暂停状态保持，本图不启动开发、模型／解析效果、迁移、服务或调度。
+<!-- drafting-template-adaptation-plan-20261015:end -->
+
+<!-- local-backend-main-upgrade-20261015:start -->
+**2026-10-15 本机后端已按用户要求升级重启。** 8080 活动 JAR 已从旧 `eb419a…` 替换为 main `4bec277` 的已绿 `22926e…` 构建，PID31816，14:48:00启动完成。必需 V16–V22 共20条DDL先在离线完整副本执行并核15旧表行数保持/3新表为空，再安装；首轮失败自动回退、第二轮成功和原库/旧包均保留。10项实际只读检查通过，15项目ID保持。前端/relay/独立原件任务、原运行配置和16GiB后端堆保持；默认Ollama不可用、OCR关闭和模型/来源质量未验收状态不追认通过。见[本地后端升级记录](testing/local-backend-main-upgrade-20261015.md)，证据在忽略的`.local/state/backend-main-restart-20261015-1445/`。用户授权仅为这次本机后端替换，不恢复其余部署或新模型优化。
+<!-- local-backend-main-upgrade-20261015:end -->
+
 <!-- native-transport-repair-20261015:start -->
 **2026-10-15 最新交接：指定原件首轮已经执行，真实共享传输阻塞已按完整证据要求修复并通过适用自动化。** 首轮22返回未评分/5失败/1中断/158未执行与OOM/HTTP400保持；Java full03 2788通过/123既有条件skip/0失败错误，Python full02 1642次执行（1533唯一ID）通过、无失败错误skip和源漂移，原case多重集保持。当前等待隔离打包/提交后使用新构建复测完整186输入，优先GCT、AoA/APL及COM11旧未决，不缩原3257 PDF页+3 DOCX分母。代码结论与来源效果分开，完整视觉runtime未ready/未调用模型；详见[本轮真实执行、修复及剩余门](testing/oer-fixed-source-reparse-and-transport-repair-20261015.md)。活动服务/DB/fixed05/gold及未采用模型边界不变。
 <!-- native-transport-repair-20261015:end -->
@@ -12,9 +177,19 @@
 **2026-10-15 Vetting 提示词改写及能力补齐已通过本轮适用代码自动化。** PM 原文和业务原意保全，实际运行/恢复身份、七类、底稿字段、44主项/69细行、人工独立及官方交付接线已完成。Java full02 2770通过/0失败错误/123既有条件skip，前端167、默认npm类型检查和隔离构建通过；Python244源码/测试与原1636绿灯逐字节一致，本轮不冒称重跑。原full01九个红和历史回放缺资产记录保持，详见[本轮实施记录](testing/vetting-competition-prompt-implementation-20261015.md)。下一阶段按最新授权验证固定六类及AoA/APL原七页的旧未决问题，不以代码绿灯关闭来源质量门。
 <!-- vetting-policy-complete-20261015:end -->
 
+<!-- five-container-limit-20261015:start -->
+**2026-10-15 最新部署限制：用户确认比赛最多5个容器。** 现带coordinator部署生成器是5个常驻CPU容器+1个活动GPU Job，峰值6，不能按已合规交付。建议Vue静态资源与Java合一，保App/MySQL/Qdrant/CPU coordinator/GPU执行槽五角色。仅限并发数时可保原串行Job；固定五容器/镜像口径则还需统一GPU镜像、独立运行环境和真实进程树释放/恢复契约。此为评估方案，未实施或目标验收；计数细则、AIOP权限和合并制品仍待核。按[规则入口](oer-scope-and-rules.md)及[准备分析](research/hackathon-first-time-preparation-20261015.md)推进；不恢复模型优化或已暂停真实效果工作。
+<!-- five-container-limit-20261015:end -->
+
 <!-- main-canonical-20261015:start -->
 **2026-10-15 当前交接：后续开发使用 `D:\R&D\ConSense` 的 main。** 通过既有适用自动化的统一提交 `4108497` 已快进合入，其他分支可恢复归档，旧工作区目录和运行证据保留。归档清单、原未提交内容及恢复边界见[main 统一与归档记录](testing/main-consolidation-20261015.md)。下方隔离分支和历史状态不再作为当前开发入口；真实模型/原件/SL、端到端和实际部署验收继续暂停。
 <!-- main-canonical-20261015:end -->
+
+<!-- model-freeze-and-cac-notice-20261015:start -->
+**2026-10-15 最新交接：用户明确“不再调模型”。** 停止新增训练、微调、模型换型比较和模型参数消融，沿用现有模型与已选运行配方；历史训练候选及未过门保持，不再按旧条件训练提案自动推进。后续重点是环境配置/部署兼容、必要缺陷修复、业务导出及赛方提交材料。真实模型/原件/SL/端到端效果验证仍暂缓；本次仅记录规则与通知，未启停任何模型/服务/调度，未部署或通过新增质量门。
+
+赛方截图确认摘要于 2026-10-28 提交，全部比赛交付于 2026-11-06 上午 10:00 截止；原型上传 AIOP（每文件 <50 GB、通过安全扫描并可运行），其余按邮件及规定命名提交。后续评委用相近规模/类型新资料测试。准确交付格式、双语摘要要求与未明事项统一在[赛前通知核对及准备清单](research/hackathon-first-time-preparation-20261015.md)，以最新[规则入口](oer-scope-and-rules.md)为准，不把截图未载明的权限当授权。
+<!-- model-freeze-and-cac-notice-20261015:end -->
 
 <!-- current-consolidation-and-retirement-20261015:start -->
 **当前交接：适用代码/本机环境自动化已完成，停在效果验证之前。** Java full09 为 2,706 通过/0 failures/errors/123 既有外部条件 skipped，另有两历史重放类及两方法显式排除；Python recovery06 1,636/1,636、独立归档恢复 6/6，前端 166/166、五脚本、类型检查、构建及本机依赖检查通过。50 个 refs 包含 49 个分支引用及 `origin/HEAD`，均已覆盖。九项 retired 不计 passed/skipped；旧失败和原 OER 质量门保持。按用户要求到此停手；真实模型/原件/SL、端到端和实际目标验收不自动开始，完整目标未 complete。最终收据与范围见[实施记录](testing/consense-integrated-implementation-20261015.md)。
@@ -6143,3 +6318,43 @@ Q1–Q10 约束资料准入、解析和检索质量，Q11 限定 Advisory 的可
 用户已授权IQ3部署测试并要求继续，已在忽略目录`.local/strata-iq3s-20261014`完成安装及真实调用。实际可共存配方为原版Flash-Next GSQ-RCO IQ3_S、262144总窗、INT8 KV streaming、MTP4、单请求、vision关、tail-skip0、28GiB CPU专家预算。全专家RAM及36GiB配置因Windows提交余量不足，仅加载后安全停止；没有改变全局分页文件或终止原任务。制品155项校验通过；4087／32757／131064／249987四档合成输入均精确计数、cache0、五字段JSON正确及stop。250083输入＋512输出为28.5 TG、1151.7 PP、TTFT217.399秒；短输入512输出为24.9 TG／TTFT2.049秒。
 
 普通配置重启和短smoke再次通过。测试后已停止Strata，为正在等待≥9728MiB显存的OER训练让出资源；停止后NVML空闲13803MiB，原Java／固定检索PID及创建时间相同。保留按需起停，未切换ConSense业务入口、未接原件／RAG业务、未训练／发布或正式采用新模型。完整证据、失败保留及起停见[本机部署测试](./research/strata-iq3s-local-deployment-test-20261014.md)。本条仅补充独立LLM测试，不覆盖文首并行解析／语义训练状态及原质量门。
+
+<!-- deepseek-v4-flash-h800-research-20261016:start -->
+## 2026-10-16 DeepSeek V4 Flash 单H800容量、速度与ConSense接线研究
+
+用户要求调查V4 Flash能否用于H800，并确保ConSense可运行，补充评估prefill、生成与切换。结论与固定版本证据见[专项研究](research/deepseek-v4-flash-h800-feasibility-20261016.md)：正式0731约2bit EXL3全GPU是速度候选，近原精度MXFP4专家CPU/GPU混合为对照；原发完整权重不能全驻单卡。前者Hopper有源码支持但H800峰值及量化业务质量未验；后者CPU专家prefill可能使完整输入等待几十分钟。模型版本、原发/转换精度及V4.1/API别名漂移严格区分。
+
+本轮仅网络/源码研究、容量/时间算术和隔离snapshot的154项既有本地契约检查（全部通过）；无真实V4调用、权重下载、目标H800或业务验收。ConSense尚需正确token/template观察、聊天与embedding路由、Drafting完整输出预算，以及Advisory10分钟/Chat20分钟等实际时限闭合；prefill、reasoning/final、cold/warm、阶段释放及整任务耗时分别测量。不采用新模型、不改代码/运行配置、活动服务/DB/索引或既有来源质量门；最新OER/Qwen共驻研究保持原候选身份，不继承其容量给DeepSeek。
+<!-- deepseek-v4-flash-h800-research-20261016:end -->
+
+<!-- drafting-I23-budget-amendment-20261016:start -->
+## 2026-10-16 Drafting I23 恢复实测
+
+用户已直接批准原实验总上限调整为66次生成／2162688声明tokens（每次32768），输入估算10个不同指纹；原61条生成和7个计数全部保留。Goal实际active，沿本聊天已准备的I23先做M2.7／准确M3.1对照，再仅对全部关键门通过的候选做同一五题包三次独立验证。原Q02/Q04/Q05/Q06保持，R01为已知NTT回归，不称holdout；私有真值不入提示，失败和未执行不删。见[对比实验文档](specs/drafting-compact-contract-comparison-20261016.md)第14节；授权及代码/源包在忽略的campaign/rounds/I23-atomic-facts中。
+
+这不是OER新解析、模型部署或产品验收授权；其他并行OER工作、服务/DB/GPU/WSL/索引和push/PR边界保持。
+<!-- drafting-I23-budget-amendment-20261016:end -->
+
+<!-- drafting-I24-node-records-offline-20261016:start -->
+**Drafting I24离线接缝已实际完成，独审0 Must。** 新浅层NDJSON只展开显式节点，不补源语义；原8值型、条件/窗口/模态/对象/evidence/needs与旧编译求值保持。作者25正/41拒/16往返，独审最终26正/41拒，原始reader及两份预览同审。原源case逐值、8个bundle逐字节和纯合成示例语义保持；两次真实离线失败及旧I23模型失败保留。当前0新模型/count，全账63/9，授权66／2162688／count10保持；67／2195456／count11只是新probe＋三次五题验证所需的待答复差额提案。见[对比实验第16节](specs/drafting-compact-contract-comparison-20261016.md)及忽略目录I24-node-records-offline。无真实模型NDJSON或稳定性通过，不动其他OER/活动服务/DB/GPU/WSL/索引/部署或push/PR。
+<!-- drafting-I24-node-records-offline-20261016:end -->
+
+<!-- drafting-I24-budget-approved-20261016:start -->
+**I24已获67/count11直接批准：** 原63次生成／9个估算指纹不变，现总帽67／2195456声明tokens／11估算，每次最多32768。用户答复、原63ledger和9fingerprints、前次66授权及提案SHA已冻结I24/budget-approved.json，新load_budget实际通过。先收口新runner/collector/phase guard独审，再真实M3.1开发probe；全源语义、13场景/独立依赖与其他关键门均过才做冻结五题3次独立验证。失败停下游，不借新批准重试旧输出，不改原件/私有判据或活动系统。详见[对比实验第17节](specs/drafting-compact-contract-comparison-20261016.md)。登记时0I24真实生成/count。
+<!-- drafting-I24-budget-approved-20261016:end -->
+
+<!-- drafting-I24-development-accepted-20261016:start -->
+**I24第64次开发已接受：** 原样NDJSON/身份、三题真实旧图及逆向、独立源审、原13场景与失效闭包全过，0未执行；初期12month/独立前提/旧正确保持。selection已冻，不授稳定性。当前64生成/2097152声明tokens、count11（4183/6007），预算67/count11余3次；冻结五题原四题12场景加R01原6分别计，待评价接缝冻结后逐次65–67，关键失败停后续。审查JSON/script漂移已按原准入SHA精确恢复留证，未改模型请求/源/输出或重发，采用32检查/0Must，不采用未准入33版。详见[实验第18节](specs/drafting-compact-contract-comparison-20261016.md)；其他OER/活动系统及全图/27B/产品边界保持。
+<!-- drafting-I24-development-accepted-20261016:end -->
+
+<!-- drafting-I24-validation-r1-accepted-20261016:start -->
+**Drafting I24首轮五题全门通过，第二轮运行中：** 同原r1在显式独审的V3两行磁盘restore修复后，原18/18及额外4/4、源审/独立依赖全部通过；原V2四次_ports机制错误及所有旧失败完整保留，未重发模型。现独立验证仅1/3通过，第66次同请求r2在运行，余1次生成/count11；不授稳定或全图/27B/产品通过。详见[实验第19节](specs/drafting-compact-contract-comparison-20261016.md)。其他OER/活动系统边界保持。
+<!-- drafting-I24-validation-r1-accepted-20261016:end -->
+
+<!-- drafting-I24-final-closed-failure-20261016:start -->
+**Drafting I24最终：稳定门失败，Goal未完成。** 同五题三独立会话仅2/3全关键通过；r3 NTT将combined/foundation合为一个bool，保39/G1a/reduced/initial12正确但缺独立依赖。原54预定中48实际通过、6因无法绑定未执行；额外20/20另列，不能删题换绿。全账67终态/2195456声明/11count、余额及pending/lease皆0，停止新API/count；原V2机制错误和所有旧失败保留，未complete。详见[实验第20节](specs/drafting-compact-contract-comparison-20261016.md)。其他OER/活动系统及完整图谱/27B/产品边界保持。
+<!-- drafting-I24-final-closed-failure-20261016:end -->
+
+<!-- drafting-I26-independent-investigation-20261016:start -->
+**Drafting I26独立调查已闭合，0新API/count：** 干净上下文主调查核原4次＋7历史代表，18旧图身份保持；原子边界/分类例外是优先待验证解释，不能断言内部出错时点。保存的错误R01经I25冻结仍错；values/predicates分工需共享已确认事实/事项/单位，39与12角色不能只靠类型核。优先最小单阶段提示边界对照，再决定分阶段；所有新方案未准入，67/11余额0、旧2/3失败/Goal未完成保持。见[实验第21节](specs/drafting-compact-contract-comparison-20261016.md)。其他OER/活动系统边界不变。
+<!-- drafting-I26-independent-investigation-20261016:end -->

@@ -62,7 +62,7 @@ public class CanonicalEvidenceService {
         com.fasterxml.jackson.databind.node.ObjectNode request=JsonUtils.mapper().createObjectNode();request.set("candidateGraph",graph);request.set("sourceBinding",sourceBinding);
         require(NormalObservedPreparationService.sameGeneration(source,sources.normalDocument(projectId,documentId,module)),HttpStatus.CONFLICT,"CANONICAL_SOURCE_STALE");
         String receipt=backend.normalObserved(JsonUtils.write(request),module);String raw=CanonicalJson.field(receipt,"projection");JsonNode projection=parse(raw);
-        projection=validateSnapshot(raw,projection.path("projectionSha256").asText());
+        projection=validatedSnapshot(raw,projection.path("projectionSha256").asText());
         require(graph.equals(projection.path("manifest").path("candidateGraph"))&&sourceBinding.equals(projection.path("manifest").path("sourceBinding")),HttpStatus.CONFLICT,"NORMAL_OBSERVED_SOURCE_BINDING_MISMATCH");
         require(parse(receipt).path("projectionSha256").equals(projection.path("projectionSha256"))&&parse(receipt).path("chunks").asInt(-1)==projection.path("chunks").size()
                 &&parse(receipt).path("immutable").asBoolean()&&!parse(receipt).path("qualityVerifiedByRegistry").asBoolean(true)&&!parse(receipt).path("sourceQualityChangedByRegistry").asBoolean(true),HttpStatus.BAD_GATEWAY,"NORMAL_OBSERVED_RECEIPT_MISMATCH");
@@ -76,7 +76,7 @@ public class CanonicalEvidenceService {
     private CanonicalEvidenceService boundary(){return boundaryProxy==null?this:boundaryProxy.getObject();}
     @Transactional(propagation=Propagation.REQUIRES_NEW,isolation=Isolation.READ_COMMITTED)
     public void saveNormalBinding(CanonicalSourceBinding binding,String module){
-        JsonNode snapshot=validateSnapshot(binding.getSnapshotJson(),binding.getProjectionSha256());require(NormalObservedContract.isNormal(snapshot),HttpStatus.BAD_REQUEST,"NORMAL_OBSERVED_AUTHORITY_MISMATCH");validateBindingPins(binding,snapshot);sources.assertSourceCurrent(binding,module);
+        JsonNode snapshot=validatedSnapshot(binding.getSnapshotJson(),binding.getProjectionSha256());require(NormalObservedContract.isNormal(snapshot),HttpStatus.BAD_REQUEST,"NORMAL_OBSERVED_AUTHORITY_MISMATCH");validateBindingPins(binding,snapshot);sources.assertSourceCurrent(binding,module);
         List<CanonicalSourceBinding> latest=bindings.findByProjectIdAndDocumentIdOrderByIdDesc(binding.getProjectId(),binding.getDocumentId());
         require(latest.isEmpty(),HttpStatus.CONFLICT,"CANONICAL_BINDING_CHANGED_DURING_PREPARATION");bindings.saveAndFlush(binding);
         sources.assertSourceCurrent(binding,module);
@@ -116,7 +116,7 @@ public class CanonicalEvidenceService {
         require(INPUT_CONTRACT.equals(health.path("inputContract").asText())&&ASSET_CONTRACT.equals(health.path("assetReturnContract").asText())
                 &&"/project".equals(health.path("canonicalProjectionEndpoint").asText())
                 &&review.scopePolicySha256.equals(health.path("scopePolicy").path("manifestSha256").asText()),HttpStatus.BAD_GATEWAY,"OER_CANONICAL_CAPABILITY_MISMATCH");
-        String raw=backend.snapshot(review.projectionSha256,review.module);JsonNode snapshot=validateSnapshot(raw,review.projectionSha256);
+        String raw=backend.snapshot(review.projectionSha256,review.module);JsonNode snapshot=validatedSnapshot(raw,review.projectionSha256);
         if(NativePdfSourceFamilyContract.isFamily(snapshot)){
             NativePdfSourceFamilyContract.validateCapability(health);
             NativePdfSourceFamilyContract.validateAlgorithms(healthRoot.path("retrieval").path("sourceWindows").path("algorithms"));
@@ -225,13 +225,13 @@ public class CanonicalEvidenceService {
         validModule(module);
         require(binding!=null&&binding.getSnapshotJson()!=null,HttpStatus.BAD_REQUEST,"CANONICAL_BINDING_UNAVAILABLE");
         require(CanonicalJson.sha(binding.getSnapshotJson().getBytes(StandardCharsets.UTF_8)).equals(binding.getSnapshotBytesSha256()),HttpStatus.CONFLICT,"CANONICAL_STORED_BYTES_CHANGED");
-        JsonNode snapshot=validateSnapshot(binding.getSnapshotJson(),binding.getProjectionSha256());validateBindingPins(binding,snapshot);
+        JsonNode snapshot=validatedSnapshot(binding.getSnapshotJson(),binding.getProjectionSha256());validateBindingPins(binding,snapshot);
         if(!NativeDocumentCollectionContract.isCollection(snapshot)){
             if(NormalObservedContract.isNormal(snapshot)||NativePdfSourceFamilyContract.isFamily(snapshot)||NativePdfCanonicalContract.isNativePdf(snapshot))recheckNativeSnapshot(binding,module);
             return snapshot.path("chunks").deepCopy();
         }
         assertCurrent(binding,module);
-        String current=backend.snapshot(binding.getProjectionSha256(),module);validateSnapshot(current,binding.getProjectionSha256());
+        String current=backend.snapshot(binding.getProjectionSha256(),module);validatedSnapshot(current,binding.getProjectionSha256());
         require(CanonicalJson.hash(current,null).equals(CanonicalJson.hash(binding.getSnapshotJson(),null)),HttpStatus.CONFLICT,"CANONICAL_STORED_BYTES_CHANGED");
         JsonNode result=NativeDocumentCollectionContract.readDocument(current,binding.getProjectionSha256(),
             ordinal->backend.batch(binding.getProjectionSha256(),ordinal,module).bytes,
@@ -398,7 +398,7 @@ public class CanonicalEvidenceService {
         CanonicalSourceBinding binding=bindings.findByProjectIdAndDocumentIdAndProjectionSha256(projectId,documentId,projection)
                 .orElseThrow(()->new CanonicalEvidenceException(HttpStatus.NOT_FOUND,"CANONICAL_BINDING_UNAVAILABLE"));
         require(binding.getSnapshotJson()!=null&&CanonicalJson.sha(binding.getSnapshotJson().getBytes(StandardCharsets.UTF_8)).equals(binding.getSnapshotBytesSha256()),HttpStatus.CONFLICT,"CANONICAL_STORED_BYTES_CHANGED");
-        JsonNode snapshot=validateSnapshot(binding.getSnapshotJson(),projection);validateBindingPins(binding,snapshot);boolean collection=NativeDocumentCollectionContract.isCollection(snapshot);
+        JsonNode snapshot=validatedSnapshot(binding.getSnapshotJson(),projection);validateBindingPins(binding,snapshot);boolean collection=NativeDocumentCollectionContract.isCollection(snapshot);
         if(NormalObservedContract.isNormal(snapshot)||NativePdfSourceFamilyContract.isFamily(snapshot)||NativePdfCanonicalContract.isNativePdf(snapshot)||NativeCanonicalContract.isNative(snapshot)||NativeDocumentCollectionContract.isCollection(snapshot)){
             // Native compact snapshots refer to private proof. Re-read the registry so every
             // public operation revalidates the actual CAS bytes, even for a persisted binding.
@@ -407,7 +407,7 @@ public class CanonicalEvidenceService {
         return new BindingView(binding,snapshot,collection);
     }
     private JsonNode recheckNativeSnapshot(CanonicalSourceBinding binding,String module){
-        assertCurrent(binding,module);String current=NormalObservedContract.isNormal(parse(binding.getSnapshotJson()))?backend.normalSnapshot(binding.getProjectionSha256(),binding.getDeclaredModule()):backend.snapshot(binding.getProjectionSha256(),module);JsonNode snapshot=validateSnapshot(current,binding.getProjectionSha256());
+        assertCurrent(binding,module);String current=NormalObservedContract.isNormal(parse(binding.getSnapshotJson()))?backend.normalSnapshot(binding.getProjectionSha256(),binding.getDeclaredModule()):backend.snapshot(binding.getProjectionSha256(),module);JsonNode snapshot=validatedSnapshot(current,binding.getProjectionSha256());
         require(CanonicalJson.hash(current,null).equals(CanonicalJson.hash(binding.getSnapshotJson(),null)),HttpStatus.CONFLICT,"CANONICAL_STORED_BYTES_CHANGED");
         if(NativeDocumentCollectionContract.isCollection(snapshot))snapshot=NativeDocumentCollectionContract.readDocument(current,binding.getProjectionSha256(),
             ordinal->backend.batch(binding.getProjectionSha256(),ordinal,module).bytes,
@@ -435,9 +435,9 @@ public class CanonicalEvidenceService {
                 &&Objects.equals(binding.getAdoptionManifestSha256(),adoptionHash(snapshot,binding.getSnapshotJson()))
                 &&Objects.equals(binding.getReviewReferenceSha256(),manifest(snapshot).path("reference").path("evidenceSha256").asText()),HttpStatus.CONFLICT,"CANONICAL_BINDING_TYPED_PINS_CHANGED");
     }
-    private static CanonicalSourceBinding sameBinding(CanonicalSourceBinding existing,CanonicalSourceBinding candidate){
-        validateBindingPins(existing,validateSnapshot(existing.getSnapshotJson(),existing.getProjectionSha256()));
-        validateBindingPins(candidate,validateSnapshot(candidate.getSnapshotJson(),candidate.getProjectionSha256()));
+    private CanonicalSourceBinding sameBinding(CanonicalSourceBinding existing,CanonicalSourceBinding candidate){
+        validateBindingPins(existing,validatedSnapshot(existing.getSnapshotJson(),existing.getProjectionSha256()));
+        validateBindingPins(candidate,validatedSnapshot(candidate.getSnapshotJson(),candidate.getProjectionSha256()));
         require(Objects.equals(existing.getOriginalSourceSha256(),candidate.getOriginalSourceSha256())&&Objects.equals(existing.getJavaParsedSourceHash(),candidate.getJavaParsedSourceHash())
                 &&Objects.equals(existing.getRoutingSha256(),candidate.getRoutingSha256())
                 &&CanonicalJson.hash(existing.getSnapshotJson(),null).equals(CanonicalJson.hash(candidate.getSnapshotJson(),null)),HttpStatus.CONFLICT,"CANONICAL_BINDING_IMMUTABLE_CONFLICT");return existing;
@@ -455,10 +455,19 @@ public class CanonicalEvidenceService {
     private static boolean starts(byte[] actual,byte[] prefix){if(actual.length<prefix.length)return false;for(int i=0;i<prefix.length;i++)if(actual[i]!=prefix[i])return false;return true;}
 
     /** Shared version gate; source freshness and actual CAS reads belong to the service/registry. */
-    public static JsonNode validateSnapshot(String raw,String address){
-        require(raw!=null&&raw.getBytes(StandardCharsets.UTF_8).length<=NativePdfCanonicalContract.MAX_BYTES,HttpStatus.BAD_GATEWAY,"CANONICAL_SNAPSHOT_TOO_LARGE");
-        JsonNode snapshot=parse(raw);
-        if(NormalObservedContract.isNormal(snapshot))return NormalObservedContract.validate(raw,address);
+    private JsonNode validatedSnapshot(String raw,String address){return validateSnapshot(raw,address,backend::normalMaximumBytes);}
+    public static JsonNode validateSnapshot(String raw,String address){return validateSnapshot(raw,address,NormalObservedContract.MAX_BYTES);}
+    public static JsonNode validateSnapshot(String raw,String address,int normalMaximum){return validateSnapshot(raw,address,()->normalMaximum);}
+    private static JsonNode validateSnapshot(String raw,String address,java.util.function.IntSupplier normalMaximum){
+        require(raw!=null,HttpStatus.BAD_GATEWAY,"CANONICAL_SNAPSHOT_TOO_LARGE");
+        int bytes=raw.getBytes(StandardCharsets.UTF_8).length;
+        require(bytes<=NormalObservedContract.MAX_BYTES,HttpStatus.BAD_GATEWAY,"CANONICAL_SNAPSHOT_TOO_LARGE");
+        JsonNode snapshot;
+        try{snapshot=parse(raw);}catch(CanonicalEvidenceException invalid){
+            require(bytes<=NativePdfCanonicalContract.MAX_BYTES,HttpStatus.BAD_GATEWAY,"CANONICAL_SNAPSHOT_TOO_LARGE");throw invalid;
+        }
+        if(NormalObservedContract.isNormal(snapshot))return NormalObservedContract.validate(raw,address,normalMaximum.getAsInt());
+        require(bytes<=NativePdfCanonicalContract.MAX_BYTES,HttpStatus.BAD_GATEWAY,"CANONICAL_SNAPSHOT_TOO_LARGE");
         if(NativePdfSourceFamilyContract.isFamily(snapshot))return NativePdfSourceFamilyContract.validateEnvelope(raw,address);
         if(NativePdfCanonicalContract.isNativePdf(snapshot)){
             require(address!=null&&address.equals(snapshot.path("projectionSha256").asText())&&address.equals(CanonicalJson.hash(raw,"projectionSha256")),HttpStatus.BAD_GATEWAY,"CANONICAL_SEAL_MISMATCH");

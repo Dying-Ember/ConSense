@@ -32,6 +32,21 @@ final class DraftDocumentBindings {
         Map<String,String> names=new LinkedHashMap<>();for(Map<String,Object> row:rows)names.put(String.valueOf(row.get("sourceParagraphId")),String.valueOf(row.get("bookmarkName")));return names;
     }
     static void associateTargets(String fileKey,TemplateIndex source,Map<String,Object> plan,List<Map<String,Object>> rows) {
+        if(plan.containsKey("graphRevisionId")) {
+            for(Map<String,Object> row:rows) {
+                Set<String> fields=new LinkedHashSet<>(),actions=new LinkedHashSet<>();
+                for(Object raw:DraftReviewGraph.list(plan.get("actions"))) {
+                    Map<String,Object> action=DraftReviewGraph.map(raw),binding=DraftReviewGraph.map(action.get("nativeBinding"));
+                    if(!fileKey.equals(action.get("document"))||!source.getSourceSha256().equals(binding.get("sourceSha256"))||!"bound".equals(binding.get("status")))continue;
+                    for(Object selected:DraftReviewGraph.list(binding.get("spans")))if(Objects.equals(row.get("sourceParagraphId"),DraftReviewGraph.map(selected).get("paragraphId"))) {
+                        actions.add(String.valueOf(action.get("id")));for(Object key:DraftReviewGraph.list(action.get("inputKeys")))fields.add(String.valueOf(key));
+                        for(Object key:DraftReviewGraph.list(action.get("fieldKeys")))fields.add(String.valueOf(key));
+                    }
+                }
+                row.put("fieldKeys",new ArrayList<>(fields));row.put("actionIds",new ArrayList<>(actions));if(!actions.isEmpty())row.put("applicationStatus","unapplied");
+            }
+            return;
+        }
         if(!DraftTemplateReadingSources.catalogueSourceVerified(fileKey,source.getSourceSha256()))return;
         for(Map<String,Object> row:rows) {
             int ordinal=((Number)row.get("sourceParagraphOrdinal")).intValue();Set<String> fields=new LinkedHashSet<>(),actions=new LinkedHashSet<>();

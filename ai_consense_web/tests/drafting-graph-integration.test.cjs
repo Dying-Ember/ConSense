@@ -88,7 +88,7 @@ async function clickTitle(title) { const control = button(title); assert.ok(cont
   assert.equal(calls.filter(call => ['source-docx', 'result-docx'].includes(call[0])).length, 0)
   assert.equal(writes.length, 0)
   console.log('PASS: production header exposes a localized graph entry without mounting the graph or reading documents')
-  await clickTitle('2. Review drafting inputs')
+  await clickTitle('4 Adopt and plan')
   const phone = document.querySelector('#input-contactTelephone')
   phone.value = '  +852 1234 5678  '; phone.dispatchEvent(new window.Event('input', { bubbles: true })); await settled()
   await click('[data-open-business-graph="header"]'); await until(() => document.querySelector('[data-graph-close]'))

@@ -5,6 +5,17 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
 class OerReadingPlanTest {
+    @Test void existingNativeSectionReferencesStayLiteralWithoutAssigningNotesApplicability(){
+        DocumentBlock first=block("first","paragraph",null,"body/0/paragraph","Notes",null),next=block("next","paragraph",null,"body/3/paragraph","Note 1",null);
+        com.fasterxml.jackson.databind.node.ObjectNode reference=com.consense.common.JsonUtils.mapper().createObjectNode();
+        reference.put("sectionId","source-bound-section");reference.put("inventoryPointer","/nativeDocxSections/sections/0");reference.put("ownerStatus","unknown");reference.put("applicabilityStatus","unknown");
+        reference.putObject("endBoundary").put("kind","paragraph_sectPr").putObject("sourcePosition").put("sourceSha256","authored-source").put("partName","word/document.xml").put("partSha256","authored-part").put("nodePath","/{authored}body[1]/{authored}p[2]/{authored}sectPr[1]");
+        first.setReadingContext(com.consense.common.JsonUtils.mapper().createObjectNode().set("nativeDocxSection",reference.deepCopy()));
+        new OerReadingPlan("authored-source","docx",null).annotate(Arrays.asList(first,next));
+        assertEquals(reference,first.getReadingContext().path("nativeDocxSection"));assertEquals("body",first.getReadingContext().path("story").asText());
+        assertFalse(next.getReadingContext().has("nativeDocxSection"));assertEquals("unknown",first.getReadingContext().path("ownerStatus").asText());
+        first.getReadingContext().path("relationCandidates").forEach(r->assertEquals("unknown_not_assigned",r.path("status").asText()));
+    }
     @Test void ordinaryPdfLinesDoNotRescanTheEntireSourceForEachOccurrence() {
         List<DocumentBlock> source=new ArrayList<>();
         for(int index=0;index<2000;index++)source.add(block("line-"+index,"pdf_line",index/40+1,"pdf-page/"+(index/40+1),"ordinary source line",new double[]{.1,.1,.2,.02}));

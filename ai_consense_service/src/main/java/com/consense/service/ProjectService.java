@@ -31,6 +31,12 @@ public class ProjectService {
     private final VettingFindingRepository findingRepository;
     private final ChatMessageRepository chatMessageRepository;
     private final EvidenceChunkRepository evidenceChunkRepository;
+    @org.springframework.beans.factory.annotation.Autowired(required=false)
+    private DraftTemplateGraphRevisionRepository graphRevisions;
+    @org.springframework.beans.factory.annotation.Autowired(required=false)
+    private DraftTemplateGraphHeadRepository graphHeads;
+    @org.springframework.beans.factory.annotation.Autowired(required=false)
+    private DraftGraphInputBindingRepository graphInputs;
 
     public List<ProjectVO> list() {
         return projectRepository.findAllByOrderByCreatedAtAsc().stream()
@@ -76,6 +82,9 @@ public class ProjectService {
     @Transactional
     public void delete(String projectId) {
         require(projectId);
+        if(graphHeads!=null)graphHeads.deleteByProjectId(projectId);
+        if(graphInputs!=null)graphInputs.deleteByProjectId(projectId);
+        if(graphRevisions!=null)graphRevisions.deleteByProjectId(projectId);
         findingRepository.deleteByProjectId(projectId);
         evidenceChunkRepository.deleteByProjectId(projectId);
         chatMessageRepository.deleteByProjectId(projectId);

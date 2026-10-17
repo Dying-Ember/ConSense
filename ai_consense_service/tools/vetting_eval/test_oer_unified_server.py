@@ -324,7 +324,7 @@ class UnifiedHttpTests(unittest.TestCase):
     def test_fixed_message_cap_request_response_and_invalid_configuration(self):
         response = self.client.post('/index', content=b' ' * (MAX_SNAPSHOT_BYTES + 1), headers={'Content-Type': 'application/json'})
         self.assertEqual(413, response.status_code, response.text)
-        for maximum in (MAX_SNAPSHOT_BYTES + 1, True, 1023):
+        for maximum in (1024 * 1024 * 1024 + 1, True, 1023):
             with self.assertRaises(ValueError):
                 create_unified_app(self.policy, backend=self.backend, artifact_store=self.store, maximum_message_bytes=maximum)
         # A complete response envelope must fit, not just the projection field.

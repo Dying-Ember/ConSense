@@ -32,7 +32,7 @@ test('stale regeneration retains one actionable status and one failure in expand
   const button = title => [...document.querySelectorAll('button')].find(node => node.textContent.trim() === title)
   const click = async title => { const control = button(title); assert.ok(control, title); assert.equal(control.disabled, false); control.click(); await wait() }
   try {
-    await wait(); await click('3. Preview and export'); await click('SCT')
+    await wait(); await click('5 Preview and export'); await click('SCT')
     assert.equal(document.querySelectorAll('[data-draft-stale-status]').length, 1)
     const status = document.querySelector('[data-draft-stale-status]').textContent
     assert.match(status, /Inputs or sources have changed/); assert.match(status, /read-only/)

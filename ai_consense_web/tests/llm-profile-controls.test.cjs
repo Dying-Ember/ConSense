@@ -104,9 +104,13 @@ async function harness({ stored = new Map(), metadata = profiles, metadataError 
   const save = deferred()
   const field = { key: 'contractTitle', kind: 'text', label: { en: 'Contract title', zhHans: '合约名称', zhHant: '合約名稱' } }
   const original = { key: 'contractTitle', value: 'Original title', confirmed: true, manuallyEdited: true, candidates: [] }
+  const reviewGraph = { kind: 'consense-template-graph-v1', graph: { variables: [{ id: 'review-q', nameZh: 'TEST', nameEn: 'TEST', status: 'pending', type: { kind: 'text' }, role: { kind: 'input' }, docIds: [], sourceAnchors: [], sourceUnitIds: [], options: [], editTargets: [], evidence: [], relatedInputIds: [], relations: [], targets: [] }], sourceReviews: {}, events: [], nextId: 1 }, sources: [], selectedDocuments: {} }
   const drafting = await harness({ metadata: available, view: 'DraftingView', respond: request => {
     if (request.url === '/projects') return [{ id: 'A', name: field.label }]
-    if (request.method === 'put') return save.promise
+    if (request.url.endsWith('/graph') && request.method === 'get') return { currentRevisionId: null, draftRevisionId: null, current: null, draft: null, sources: [] }
+    if (request.url.endsWith('/graph/bootstrap')) return { graph: reviewGraph, sources: [] }
+    if (request.url.endsWith('/graph') && request.method === 'post') return save.promise
+    if (request.url.endsWith('/candidates')) return { variables: [] }
     if (request.url.endsWith('/catalog')) return { ruleVersion: 'unchanged', groups: [{ key: 'contract', label: field.label, fields: [field] }] }
     if (request.url.endsWith('/variables')) return [original]
     if (request.url.endsWith('/inputs')) return [{ id: 1, fileName: 'source.docx', status: 'PARSED' }]
@@ -116,14 +120,15 @@ async function harness({ stored = new Map(), metadata = profiles, metadataError 
   await find(drafting.root, node => node.tag === 'button' && text(node).trim() === 'Enter inputs manually').props.onClick(); await settle()
   find(drafting.root, node => node.tag === 'input' && node.props.id === 'input-contractTitle').props.onInput({ target: { value: 'User edit' } }); await settle()
   const extraction = find(drafting.root, node => node.tag === 'button' && text(node).trim() === 'Identify inputs').props.onClick(); await settle()
-  assert.ok(drafting.requests.some(request => request.method === 'put'))
-  assert.equal(drafting.requests.some(request => request.url.endsWith('/variables/extract')), false)
+  assert.ok(drafting.requests.some(request => request.method === 'post' && request.url.endsWith('/graph')))
+  assert.equal(drafting.requests.some(request => request.method === 'put'), false, 'Template preparation does not adopt the unsaved project fact')
+  assert.equal(drafting.requests.some(request => request.url.endsWith('/review-await/extract')), false)
   await find(drafting.root, node => node.tag === 'select' && node.props['aria-label'] === 'LLM source').props.onChange({ target: { value: 'minimax-cn' } }); await settle()
-  save.resolve({ ...original, value: 'User edit' }); await extraction; await settle()
-  assert.equal(drafting.requests.find(request => request.url.endsWith('/variables/extract')).config.headers['X-ConSense-Llm-Profile'], 'local')
+  save.resolve({ id: 'review-await', graph: reviewGraph, status: 'DRAFT', sourceStale: false }); await extraction; await settle()
+  assert.equal(drafting.requests.find(request => request.url.endsWith('/review-await/extract')).config.headers['X-ConSense-Llm-Profile'], 'local')
   assert.match(text(drafting.root), /MiniMax-M3/)
   drafting.dispose()
-  console.log('PASS: rendered Drafting extraction retains click-time local selection while a manual save awaits and the topbar changes to MiniMax')
+  console.log('PASS: rendered Drafting draft extraction retains click-time local selection while a template graph save awaits without adopting an unsaved fact and the topbar changes to MiniMax')
   const plan = deferred(); let waitForPlan = false
   const generation = await harness({ metadata: available, view: 'DraftingView', respond: request => {
     if (request.url === '/projects') return [{ id: 'G', name: field.label }]

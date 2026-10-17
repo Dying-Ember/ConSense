@@ -12,6 +12,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from structured_parser_evidence import (ParserEvidenceError, build_dual_parser_evidence,
                                        normalize_parser_run, save_evidence_bundle,
@@ -114,6 +115,18 @@ def accepted_manifest(selected, *, table=False):
 
 
 class StructuredParserEvidenceContractTest(unittest.TestCase):
+    def test_paddle_page_json_projection_has_its_own_finite_wire_budget(self):
+        wire = json.dumps(paddle_page(), separators=(',', ':')).encode()
+        with patch('structured_parser_evidence.MAX_PADDLE_PAGE_JSON_BYTES', len(wire), create=True):
+            result = run('paddleocr-vl', outputs={'page_json': wire, 'model_output': {'raw': 'authored'}})
+        self.assertEqual(len(result['pages']), 1)
+        self.assertEqual(result['rawOutputs']['page_json']['sha256'], hashlib.sha256(wire).hexdigest())
+        with patch('structured_parser_evidence.MAX_PADDLE_PAGE_JSON_BYTES', len(wire)-1, create=True):
+            result = run('paddleocr-vl', outputs={'page_json': wire, 'model_output': {'raw': 'authored'}})
+        self.assertEqual(result['pages'], [])
+        self.assertEqual(result['rawOutputs']['page_json']['projectionStatus'], 'oversize_projection_not_attempted')
+        self.assertEqual(base64.b64decode(result['rawOutputs']['page_json']['bytesBase64']), wire)
+
     def test_paddle_http_pruned_page_uses_explicit_original_page_mapping(self):
         page = paddle_page()
         page.pop('input_path'); page.pop('page_index')

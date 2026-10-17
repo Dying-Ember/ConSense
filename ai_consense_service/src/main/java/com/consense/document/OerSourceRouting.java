@@ -156,7 +156,7 @@ public final class OerSourceRouting {
         value = value.trim().replaceFirst("^(?:[0-9]+[. )-]*|appendix [a-z0-9]+[. :-]*)", "").trim();
         if (value.matches("(?:articles? of agreement|form of agreement)(?: \\(aa\\))?")) return "AA";
         if (value.matches("form of tender(?: \\(ft\\))?")) return "FT";
-        if (value.matches("notice to tenderers?(?: \\(ntt\\))?")) return "NTT";
+        if (value.matches("(?:notes?|notice) to tenderers?(?: \\(ntt\\))?")) return "NTT";
         if (value.matches("special conditions? of tender(?: \\(sct\\))?")) return "SCT";
         if (value.matches("special conditions? of contract(?: \\(scc\\))?")) return "SCC";
         if (value.matches("general conditions? of tender(?: \\(gct\\))?")) return "GCT";

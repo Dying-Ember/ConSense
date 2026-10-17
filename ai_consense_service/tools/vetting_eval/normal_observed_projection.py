@@ -16,6 +16,7 @@ from oer_source_registry import SourceRegistryError, _identity, _serialize
 from token_windows import paragraph_map, utf16_length
 
 
+MAX_NORMAL_MESSAGE_BYTES = 1024 * 1024 * 1024
 SCHEMA = 'consense.normal-observed.v1'
 PRODUCER = 'normal_observed'
 VERSION = 'complete-bound-normal-observations-v1'

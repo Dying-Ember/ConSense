@@ -1,0 +1,41 @@
+flowchart TD
+    sourceSet["输入 NTT / SCT / SCC：绑定原件、版本与全文范围"]
+    directions["第一步：综合归集全部修改建议与编制要求，保留出处"]
+    candidates["综合反推变量，另登记无须变量的固定修改／核查处理点"]
+    evidencePack["主变量或处理点：本版完整证据、参考链原证据、固定类型与规则目录"]
+    atomicTasks["独立上下文：识别值型、取值分支、组合规则及候选编辑意图"]
+    fragments["结构化片段：类型、正负未知分支、typed规则、目标组、原证据及缺口"]
+    validation{"程序检查类型、来源引用及约束是否通过？"}
+    chains["程序组装本版变量影响链，保留缺口与来源"]
+    graphMerge["程序跨链合图：去重、冲突、循环、整组与引用检查"]
+    modelReview["集中模型复核：图谱摘要、链路及相关证据"]
+    followUp{"发现新的变量、关系或疑点？"}
+    coverage{"全文覆盖账齐全，关键疑点已解决？"}
+    graphResult(["形成可复核、待采用的图谱修订"])
+    questions["登记具体疑点、受影响链及需要补查的证据"]
+    budget{"仍有调查预算且存在可行动线索？"}
+    investigation["新的独立上下文：重点补查原件，提交带证据的修订片段"]
+    partialResult(["输出部分图谱、待确认项及未执行清单"])
+    dispatchGuard["统一调用门：每次模型任务先核累计预算、超时与无进展"]
+    sourceSet --> directions --> candidates --> evidencePack --> atomicTasks --> fragments --> validation
+    validation -->|"通过"| chains --> graphMerge --> modelReview --> followUp
+    validation -->|"不通过"| questions
+    followUp -->|"新增变量或要求"| directions
+    followUp -->|"冲突或缺证"| questions
+    followUp -->|"本轮无新增"| coverage
+    coverage -->|"满足"| graphResult
+    coverage -->|"不足"| questions
+    questions --> budget
+    budget -->|"可以继续"| investigation --> directions
+    budget -->|"预算到限或暂无线索"| partialResult
+    dispatchGuard -.-> directions
+    dispatchGuard -.-> atomicTasks
+    dispatchGuard -.-> modelReview
+    dispatchGuard -.-> investigation
+    classDef model fill:#edf2fb,stroke:#6d86ad,color:#253b5b;
+    classDef program fill:#edf5ef,stroke:#6b967b,color:#244a35;
+    classDef review fill:#fbf3e4,stroke:#b99a5d,color:#6b5020;
+    class atomicTasks,modelReview,investigation model;
+    class sourceSet,candidates,evidencePack,fragments,validation,chains,graphMerge,graphResult,dispatchGuard program;
+    class directions model;
+    class followUp,coverage,questions,budget,partialResult review;

@@ -133,9 +133,9 @@ class VettingProgressJpaHttpTest {
     }
 
     @Test void completedProgressCannotBypassChangedSourceReportOrLegacyDetailGate()throws Exception {
-        // Independent exact-byte golden, authored before this regression (not a production hash helper).
+        // Independent exact-byte v2 golden includes coverage and candidate-structure hashes; no production helper.
         jdbc.update("UPDATE source_document SET structured_content_json='[]' WHERE id=101");
-        jdbc.update("UPDATE vetting_run SET status='COMPLETED',source_snapshot_sha256=? WHERE id=?","aad2c86945b557b247e1cdd61f6cf7413994706c2821092ec6bd44c60d0155cb",RUN);
+        jdbc.update("UPDATE vetting_run SET status='COMPLETED',source_snapshot_sha256=? WHERE id=?","2ffe526969820c96e5fbe4305cbd473e9c7c029a06055ea53a0145f06ffd4252",RUN);
         clearFeedback();long detailStart=System.nanoTime();JsonNode before=call("/runs/"+RUN);long detailNanos=System.nanoTime()-detailStart;assertEquals(0,before.path("code").asInt());assertFalse(before.path("data").path("sourceSetStale").asBoolean());
         assertEquals(0,loads(SourceDocument.class));assertEquals(1,loads(VettingRun.class));List<String> detailSql=new ArrayList<>(SqlCapture.statements);
         clearFeedback();long progressStart=System.nanoTime();JsonNode same=call("/runs/"+RUN+"/progress");long progressNanos=System.nanoTime()-progressStart;assertEquals(before.path("data").path("id"),same.path("data").path("id"));assertEquals(before.path("data").path("sourceSnapshotSha256"),same.path("data").path("sourceSnapshotSha256"));assertLeanSql();

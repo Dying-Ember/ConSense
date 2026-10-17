@@ -1,6 +1,7 @@
 package com.consense.service.drafting;
 
 import com.consense.common.JsonUtils;
+import com.consense.document.OerTemplateEvidence;
 import java.io.ByteArrayOutputStream;
 import java.nio.file.Paths;
 import java.nio.file.Path;
@@ -91,6 +92,11 @@ class DraftingTemplateReadingIntegrationTest {
             mvc.perform(get("/api/drafting/{id}/templates/{key}/reading",id,keys[i]))
                     .andExpect(jsonPath("$.data.catalogueSourceVerified").value(true))
                     .andExpect(jsonPath("$.data.sourceHash").value(hashes[i]));
+            mvc.perform(get("/api/drafting/{id}/templates/{key}/evidence",id,keys[i]))
+                    .andExpect(jsonPath("$.code").value(0))
+                    .andExpect(jsonPath("$.data.sourceBinding.fileKey").value(keys[i]))
+                    .andExpect(jsonPath("$.data.sourceBinding.sourceSha256").value(hashes[i]))
+                    .andExpect(jsonPath("$.data.sourceBinding.analysisRevision").value(OerTemplateEvidence.ANALYSIS_REVISION));
         }
         byte[] replacement=docx("Replacement keeps the filename and must lose historical paragraph ordinals.");
         replace(id,"NTT","renamed source.docx",DOCX,replacement);
@@ -99,8 +105,11 @@ class DraftingTemplateReadingIntegrationTest {
                 .andExpect(jsonPath("$.data.sourceHash").value(sha256(replacement)))
                 .andExpect(jsonPath("$.data.paragraphs.length()").value(1))
                 .andExpect(jsonPath("$.data.paragraphs[0].text").value("Replacement keeps the filename and must lose historical paragraph ordinals."));
-        replace(id,"SCT",names[1],DOCX,Files.readAllBytes(Paths.get(sourceDir,names[0])));
-        mvc.perform(get("/api/drafting/{id}/templates/SCT/reading",id)).andExpect(jsonPath("$.data.catalogueSourceVerified").value(false));
+        mvc.perform(multipart("/api/drafting/{id}/templates/SCT/replace",id)
+                .file(new MockMultipartFile("file",names[1],DOCX,Files.readAllBytes(Paths.get(sourceDir,names[0])))))
+                .andExpect(jsonPath("$.code").value(0)).andExpect(jsonPath("$.data.parsed").value(0)).andExpect(jsonPath("$.data.failed").value(1));
+        mvc.perform(get("/api/drafting/{id}/templates/SCT/reading",id))
+                .andExpect(jsonPath("$.data.catalogueSourceVerified").value(true)).andExpect(jsonPath("$.data.sourceHash").value(hashes[1]));
     }
 
     @Test void uploadedPdfHasHonestReadingMetadataAndTheExistingPreviewStillReturnsARealPdf() throws Exception {
@@ -109,6 +118,9 @@ class DraftingTemplateReadingIntegrationTest {
             pdf.addPage(new org.apache.pdfbox.pdmodel.PDPage());pdf.save(out);uploaded=out.toByteArray();
         }
         replace(id,"NTT","uploaded source.pdf","application/pdf",uploaded);
+        mvc.perform(get("/api/drafting/{id}/templates/NTT/evidence",id))
+                .andExpect(jsonPath("$.code").value(4012))
+                .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("TEMPLATE_EVIDENCE_MISSING")));
         assertArrayEquals(uploaded,mvc.perform(get("/api/drafting/{id}/templates/NTT/source",id))
                 .andExpect(content().contentTypeCompatibleWith("application/pdf")).andReturn().getResponse().getContentAsByteArray());
         mvc.perform(get("/api/drafting/{id}/templates/NTT/reading",id))

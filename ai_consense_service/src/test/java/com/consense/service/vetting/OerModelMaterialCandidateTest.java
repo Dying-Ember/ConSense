@@ -1,6 +1,8 @@
 package com.consense.service.vetting;
 
 import com.consense.common.JsonUtils;
+import com.consense.domain.SourceDocument;
+import com.consense.document.DocumentBlock;
 import com.consense.service.advice.AdviceService;
 import com.consense.vector.VectorStore;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -14,6 +16,105 @@ import static org.mockito.Mockito.*;
 
 /** Actual frozen source literals; no HTTP, DB, model or answer files. */
 class OerModelMaterialCandidateTest {
+    @Test void wordNativeMathProjectionRetainsReadableStateWithoutExpandingRawXml() {
+        String xml="<m:oMath xmlns:m='http://schemas.openxmlformats.org/officeDocument/2006/math'>"
+                +String.join("",Collections.nCopies(1000,"source-only-proof"))+"</m:oMath>";
+        for(String state:new String[]{"projected","unresolved"}) {
+            com.fasterxml.jackson.databind.node.ObjectNode nativeObject=JsonUtils.mapper().createObjectNode();
+            nativeObject.put("kind","math");nativeObject.put("location","body/0/paragraph/node/1");
+            nativeObject.put("status","native_ooxml_unrendered");nativeObject.put("semanticStatus","unknown");nativeObject.put("nativeXml",xml);
+            com.fasterxml.jackson.databind.node.ObjectNode projection=nativeObject.putObject("mathProjection");
+            projection.put("encoding","omml_linear_v1");projection.put("status",state);projection.put("text","projected".equals(state)?"frac(a,b)":"");
+            if("unresolved".equals(state))projection.put("reason","unsupported_omml_construct:phant");
+            com.fasterxml.jackson.databind.node.ArrayNode raw=JsonUtils.mapper().createArrayNode();raw.add(nativeObject);
+            String immutable=JsonUtils.write(raw);JsonNode selected=OerModelMaterial.wordNativeObjects(raw).get(0);
+            assertEquals(projection,selected.path("mathProjection"),"Readable native math state and unknown reason must reach usable material unchanged");
+            assertEquals("omml_linear_v1",selected.path("mathProjection").path("encoding").asText());
+            assertEquals(state,selected.path("mathProjection").path("status").asText());
+            assertEquals(projection.path("text"),selected.path("mathProjection").path("text"));
+            assertEquals(projection.get("reason"),selected.path("mathProjection").get("reason"));
+            assertEquals(VettingCorpus.hash(xml),selected.path("nativeXmlSha256").asText());
+            assertFalse(selected.has("nativeXml"));assertFalse(JsonUtils.write(selected).contains("source-only-proof"));
+            assertEquals(immutable,JsonUtils.write(raw),"Projection must not mutate original native math evidence");
+        }
+        com.fasterxml.jackson.databind.node.ArrayNode legacy=JsonUtils.mapper().createArrayNode();legacy.addObject().put("kind","drawing").put("nativeXml",xml);
+        assertFalse(OerModelMaterial.wordNativeObjects(legacy).get(0).has("mathProjection"),"Legacy native objects must not gain invented math metadata");
+    }
+    @Test void inventoryTreesAreSharedOncePerRequestAndLegacyCompleteJsonStaysExact()throws Exception{
+        SourceDocument source=NormalSourceCandidateGraphTest.nativeInventorySource(89);List<VettingCorpus.Chunk> chunks=VettingCorpus.chunks(Collections.singletonList(source));assertTrue(chunks.size()>1);
+        for(VettingCorpus.Chunk chunk:chunks)for(VettingCorpus.Part part:chunk.getParts()){
+            assertTrue(part.getWordCells()==null||part.getWordCells().isEmpty(),"Real split carriers omit whole WordCells");
+            assertFalse(part.getSourcePosition().path("nodePath").asText().matches(".*\\}tr\\[[1-9][0-9]*\\]$"),"This mixed carrier must exercise the non-row prefilter gap");
+        }
+        Method fingerprint=VettingRetrievalClient.class.getDeclaredMethod("corpusFingerprint",List.class);fingerprint.setAccessible(true);Object strict=fingerprint.invoke(null,chunks);
+        String frozen=JsonUtils.write(source),before=JsonUtils.write(chunks);OerModelMaterial.Request request=new OerModelMaterial.Request(Collections.singletonList(source));
+        JsonNode first=request.projectOrdinary(chunks.get(0)),again=request.projectOrdinary(chunks.get(1));JsonNode unit=first.path("units").get(0);
+        assertEquals("ordinary-native-docx-table-tree-model-v1",first.path("projectionVersion").asText());assertEquals(unit.path("modelUnitAddress"),again.path("units").get(0).path("modelUnitRef"));
+        assertFalse(again.has("sourceDeclaration"));assertFalse(again.path("units").get(0).has("tableGroup"));assertEquals(90,unit.path("tableGroup").path("tables").get(0).path("rows").size());
+        assertEquals(first,new OerModelMaterial.Request(Collections.singletonList(source)).projectOrdinary(chunks.get(0)));assertEquals(frozen,JsonUtils.write(source));assertEquals(before,JsonUtils.write(chunks));assertEquals(strict,fingerprint.invoke(null,chunks));
+        VettingCorpus.Chunk broken=JsonUtils.read(JsonUtils.write(chunks.get(0)),VettingCorpus.Chunk.class);broken.setContent("different selected body");
+        assertThrows(IllegalArgumentException.class,()->new OerModelMaterial.Request(Collections.singletonList(source)).projectOrdinary(broken));
+        assertNull(new OerModelMaterial.Request().projectOrdinary(chunks.get(0)));assertNull(new OerModelMaterial.Request(Collections.emptyList()).projectOrdinary(chunks.get(0)));
+        SourceDocument absent=JsonUtils.read(frozen,SourceDocument.class);com.fasterxml.jackson.databind.node.ObjectNode coverage=(com.fasterxml.jackson.databind.node.ObjectNode)JsonUtils.parse(absent.getParseCoverageJson());coverage.remove("nativeDocxTables");absent.setParseCoverageJson(JsonUtils.write(coverage));NormalSourceCandidateGraph.capture(absent);
+        List<VettingCorpus.Chunk> absentChunks=VettingCorpus.chunks(Collections.singletonList(absent));
+        assertEquals(JsonUtils.write(VettingSourceMaterial.project(absentChunks)),JsonUtils.write(VettingSourceMaterial.project(absentChunks,Collections.singletonList(absent))),"No-inventory split/non-row complete ordinary JSON must remain the old no-context result");
+        absent.setNormalCandidateJson("deliberately invalid saved graph");assertNull(new OerModelMaterial.Request(Collections.singletonList(absent)).projectOrdinary(absentChunks.get(0)),"Old word=false and no inventory must return before graph validation");
+        SourceDocument missingGraph=JsonUtils.read(frozen,SourceDocument.class);missingGraph.setNormalCandidateJson(null);assertNull(new OerModelMaterial.Request(Collections.singletonList(missingGraph)).projectOrdinary(chunks.get(0)));
+        SourceDocument legacy=NormalSourceCandidateGraphTest.ordinaryWordSource();VettingCorpus.Chunk oldChunk=VettingCorpus.chunks(Collections.singletonList(legacy)).get(0);
+        JsonNode graph=NormalSourceCandidateGraph.requireBound(legacy),raw=NormalSourceCandidateGraph.selectedForModel(graph,oldChunk),actual=new OerModelMaterial.Request(Collections.singletonList(legacy)).projectOrdinary(oldChunk);
+        com.fasterxml.jackson.databind.node.ObjectNode identity=JsonUtils.mapper().createObjectNode();identity.set("source",graph.path("source").deepCopy());identity.set("generationSha256",graph.path("generationSha256").deepCopy());identity.set("coverageSha256",graph.path("coverageSha256").deepCopy());identity.put("projectionVersion","ordinary-physical-word-table-model-v1");
+        String ref="ordinary-model-source:"+VettingCorpus.hash(JsonUtils.write(identity));
+        assertEquals(ref,actual.path("sourceDeclarationRef").asText());assertEquals("ordinary-physical-word-table-model-v1",actual.path("projectionVersion").asText());
+        for(int i=0;i<raw.path("units").size();i++){
+            JsonNode u=raw.path("units").get(i);assertEquals("ordinary-model-unit:"+VettingCorpus.hash(JsonUtils.write(Arrays.asList(identity,u))),actual.path("units").get(i).path("modelUnitAddress").asText());
+            assertEquals(u.path("tableGroup"),actual.path("units").get(i).path("tableGroup"));assertLiteralParts(u.path("parts"),actual.path("units").get(i).path("parts"));
+        }
+        assertEquals(actual,new OerModelMaterial.Request(Collections.singletonList(JsonUtils.read(JsonUtils.write(legacy),SourceDocument.class))).projectOrdinary(oldChunk));
+    }
+    @Test void actualHeaderFooterNotesKeepPartAndPhysicalOrderWithoutInventingUnselectedTables()throws Exception{
+        java.io.ByteArrayOutputStream out=new java.io.ByteArrayOutputStream();
+        try(org.apache.poi.xwpf.usermodel.XWPFDocument doc=new org.apache.poi.xwpf.usermodel.XWPFDocument()){
+            doc.createParagraph().createRun().setText(String.join(" ",Collections.nCopies(150,"Plain body without table")));
+            doc.createHeader(org.apache.poi.wp.usermodel.HeaderFooterType.DEFAULT).createTable(1,2).getRow(0).getCell(0).setText(String.join(" ",Collections.nCopies(300,"Repeated literal")));
+            doc.createHeader(org.apache.poi.wp.usermodel.HeaderFooterType.FIRST).createTable(1,2).getRow(0).getCell(0).setText("Repeated literal");
+            doc.createFooter(org.apache.poi.wp.usermodel.HeaderFooterType.DEFAULT).createTable(1,2).getRow(0).getCell(0).setText("Repeated literal");
+            for(int id:new int[]{9,2}){org.apache.poi.xwpf.usermodel.XWPFFootnote note=doc.createFootnote();note.getCTFtnEdn().setId(java.math.BigInteger.valueOf(id));noteTable(note.getCTFtnEdn(),"Footnote "+id);}
+            org.apache.poi.xwpf.usermodel.XWPFFootnote separator=doc.createFootnote();separator.getCTFtnEdn().setId(java.math.BigInteger.ZERO);noteTable(separator.getCTFtnEdn(),"Unselected separator literal");
+            org.apache.poi.xwpf.usermodel.XWPFEndnote end=doc.createEndnote();end.getCTFtnEdn().setId(java.math.BigInteger.valueOf(5));noteTable(end.getCTFtnEdn(),"Endnote 5");doc.write(out);
+        }
+        com.consense.ocr.OcrClient ocr=mock(com.consense.ocr.OcrClient.class);com.consense.document.DocumentParser.ParsedDocument parsed=new com.consense.document.DocumentParser(new com.consense.config.ConsenseProperties(),ocr).parse("authored-stories.docx",out.toByteArray());
+        SourceDocument source=NormalSourceCandidateGraphTest.ordinaryWordSource();source.setSourceSha256(parsed.getSourceSha256());source.setTextContent(parsed.getText());source.setStructuredContentJson(JsonUtils.write(parsed.getBlocks()));source.setParseCoverageJson(JsonUtils.write(parsed.getCoverage()));NormalSourceCandidateGraph.capture(source);
+        List<VettingCorpus.Chunk> chunks=VettingCorpus.chunks(Collections.singletonList(source));OerModelMaterial.Request request=new OerModelMaterial.Request(Collections.singletonList(source));Set<String> addresses=new HashSet<>(),identities=new HashSet<>(),paths=new HashSet<>(),carriers=new HashSet<>();int cells=0,empty=0,body=0;boolean splitStory=false;
+        for(DocumentBlock block:VettingCorpus.blocks(source))if(!block.getWordCells().isEmpty())carriers.add(block.getId());
+        for(VettingCorpus.Chunk chunk:chunks){JsonNode ordinary=request.projectOrdinary(chunk);boolean noCells=chunk.getParts().stream().noneMatch(p->carriers.contains(p.getBlockId()));if(noCells){body++;assertNull(ordinary);continue;}
+            if(chunk.getParts().stream().anyMatch(p->carriers.contains(p.getBlockId())&&(p.getWordCells()==null||p.getWordCells().isEmpty())&&!p.getSourcePosition().path("nodePath").asText().matches(".*\\}tr\\[[1-9][0-9]*\\]$"))){splitStory=true;assertNotNull(ordinary);assertFalse(ordinary.path("units").isEmpty());}
+            for(JsonNode unit:ordinary.path("units"))if(unit.has("tableGroup")){
+                assertTrue(addresses.add(unit.path("modelUnitAddress").asText()));JsonNode position=unit.path("tableGroup").path("sourcePosition");paths.add(position.path("nodePath").asText());assertTrue(identities.add(position.path("partName").asText()+":"+position.path("nodePath").asText()));
+                JsonNode loaded=unit.path("tableGroup").path("loadedRoot");assertTrue(position.path("nodePath").asText().startsWith(loaded.path("nodePath").asText()+"/"));
+                assertEquals("unknown",unit.path("tableGroup").path("effectiveContentStatus").asText());assertFalse(unit.path("tableGroup").path("semanticScopeVerified").asBoolean());
+                for(JsonNode cell:unit.path("tableGroup").findValues("wordCell")){cells++;if(cell.path("text").asText().isEmpty())empty++;}
+                assertTrue(unit.path("parts").isEmpty());assertTrue(unit.path("sourceSpans").isEmpty());assertEquals("unknown",unit.path("legalClosure").asText());assertFalse(JsonUtils.write(unit).contains("Unselected separator literal"));
+            }
+        }
+        assertTrue(body>0);assertTrue(splitStory,"Actual long header story must split without whole WordCells and still select its table");assertEquals(6,addresses.size());assertEquals(6,identities.size());assertTrue(paths.size()<identities.size(),"Same native path in distinct header parts must not be merged");assertEquals(12,cells);assertEquals(6,empty);verifyNoInteractions(ocr);
+        for(int kind=0;kind<2;kind++){
+            SourceDocument invalid=JsonUtils.read(JsonUtils.write(source),SourceDocument.class);
+            if(kind==0){com.fasterxml.jackson.databind.node.ObjectNode coverage=(com.fasterxml.jackson.databind.node.ObjectNode)JsonUtils.parse(invalid.getParseCoverageJson());
+                for(JsonNode part:coverage.path("nativeDocxTables").path("parts"))if("word/footnotes.xml".equals(part.path("partName").asText()))((com.fasterxml.jackson.databind.node.ObjectNode)part.path("loadedRoots").get(0)).put("noteId","999");invalid.setParseCoverageJson(JsonUtils.write(coverage));
+            }else{
+                List<DocumentBlock> blocks=VettingCorpus.blocks(invalid);List<DocumentBlock> notes=new ArrayList<>();for(DocumentBlock block:blocks)if("footnote".equals(block.getKind()))notes.add(block);
+                ((com.fasterxml.jackson.databind.node.ObjectNode)notes.get(0).getSourcePosition()).set("nodePath",notes.get(1).getSourcePosition().path("nodePath"));invalid.setStructuredContentJson(JsonUtils.write(blocks));
+            }
+            NormalSourceCandidateGraph.capture(invalid);VettingCorpus.Chunk selected=VettingCorpus.chunks(Collections.singletonList(invalid)).stream().filter(c->c.getParts().stream().anyMatch(p->p.getWordCells()!=null&&!p.getWordCells().isEmpty())).findFirst().get();
+            assertThrows(IllegalArgumentException.class,()->new OerModelMaterial.Request(Collections.singletonList(invalid)).projectOrdinary(selected));
+        }
+        // The native namespace is part of each identity; a strict-namespace observation uses the same new branch.
+        SourceDocument strict=NormalSourceCandidateGraphTest.nativeInventorySource(2);strict.setStructuredContentJson(strict.getStructuredContentJson().replace("http://schemas.openxmlformats.org/wordprocessingml/2006/main","http://purl.oclc.org/ooxml/wordprocessingml/main"));strict.setParseCoverageJson(strict.getParseCoverageJson().replace("http://schemas.openxmlformats.org/wordprocessingml/2006/main","http://purl.oclc.org/ooxml/wordprocessingml/main"));NormalSourceCandidateGraph.capture(strict);
+        assertEquals(3,new OerModelMaterial.Request(Collections.singletonList(strict)).projectOrdinary(VettingCorpus.chunks(Collections.singletonList(strict)).get(0)).path("units").get(0).path("tableGroup").path("tables").size());
+    }
+    private static void noteTable(org.openxmlformats.schemas.wordprocessingml.x2006.main.CTFtnEdn note,String value){
+        org.openxmlformats.schemas.wordprocessingml.x2006.main.CTRow row=note.addNewTbl().addNewTr();row.addNewTc().addNewP().addNewR().addNewT().setStringValue(value);row.addNewTc().addNewP();
+    }
     @Test void dictionarySharingRequiresExactCompletePointerCanonicalPayloadAndRole()throws Exception{
         OerTypedHierarchyBusinessTest.Wire w=new OerTypedHierarchyBusinessTest.Wire();VettingCorpus.Chunk c=w.load("vetting").chunks().get(3);
         OerModelMaterial.Request r=new OerModelMaterial.Request();JsonNode first=r.project(c.getCanonicalEvidence(),c.getCanonicalPayload(),"standard");

@@ -184,6 +184,11 @@ public class DraftingController {
         return ApiResponse.ok(draftingService.templateReading(projectId,fileKey));
     }
 
+    @GetMapping("/templates/{fileKey}/evidence")
+    public ApiResponse<com.fasterxml.jackson.databind.JsonNode> templateEvidence(@PathVariable String projectId,@PathVariable String fileKey) {
+        return ApiResponse.ok(draftingService.templateEvidence(projectId,fileKey));
+    }
+
     @GetMapping("/templates/{fileKey}/bindings")
     public ApiResponse<DocumentBindingsVO> templateBindings(@PathVariable String projectId,@PathVariable String fileKey,@RequestParam(required=false) String sourceSha256) {
         return ApiResponse.ok(draftingService.templateBindings(projectId,fileKey,sourceSha256));

@@ -1,6 +1,7 @@
 package com.consense.service.vetting;
 
 import com.consense.common.JsonUtils;
+import com.consense.domain.SourceDocument;
 import com.consense.service.sources.NativePdfSourceFamilyContract;
 import com.consense.service.sources.NormalObservedContract;
 import com.consense.web.dto.CanonicalEvidenceDtos.EvidencePointer;
@@ -28,6 +29,57 @@ public final class OerModelMaterial {
     public static final class Request {
         private final Map<String,JsonNode> sourceUnknowns=new LinkedHashMap<>(),sourceLimits=new LinkedHashMap<>();
         private final Set<String> materialIds=new HashSet<>();
+        private final Map<String,SourceDocument> ordinarySources=new LinkedHashMap<>();
+        private final Map<String,JsonNode> ordinaryGraphs=new HashMap<>();
+        private final Map<String,NormalSourceCandidateGraph.NativeDocxTableIndex> ordinaryTables=new HashMap<>();
+        private final boolean ordinaryContextProvided;
+        public Request(){this(Collections.emptyList(),false);}
+        public Request(List<SourceDocument> sources){this(sources,true);}
+        private Request(List<SourceDocument> sources,boolean provided){
+            ordinaryContextProvided=provided;
+            for(SourceDocument source:sources)if(ordinarySources.putIfAbsent(String.valueOf(source.getId()),source)!=null)
+                throw new IllegalArgumentException("Duplicate ordinary model source identity");
+        }
+        public ObjectNode projectOrdinary(VettingCorpus.Chunk chunk){
+            SourceDocument source=ordinarySources.get(chunk.getDocumentId());
+            boolean word=chunk.getParts()!=null&&chunk.getParts().stream().anyMatch(p->"docx".equals(p.getExtractionSource())
+                    &&(p.getWordCells()!=null&&!p.getWordCells().isEmpty()||p.getSourcePosition()!=null&&p.getSourcePosition().path("nodePath").asText().matches(".*\\}tr\\[[1-9][0-9]*\\]$")));
+            if(!word&&(chunk.getParts()==null||chunk.getParts().stream().noneMatch(p->"docx".equals(p.getExtractionSource()))))return null;
+            if(source==null){
+                if(!word||!ordinaryContextProvided)return null;
+                ObjectNode missing=object();missing.put("status","unknown");missing.put("reason","selected_word_source_missing_from_request_context");return missing;
+            }
+            if(JsonUtils.isBlankText(source.getNormalCandidateJson())){
+                if(!word)return null;
+                ObjectNode missing=object();missing.put("status","unknown");missing.put("reason","bound_normal_source_graph_unavailable");return missing;
+            }
+            NormalSourceCandidateGraph.NativeDocxTableIndex tables=ordinaryTables.computeIfAbsent(chunk.getDocumentId(),id->new NormalSourceCandidateGraph.NativeDocxTableIndex(source));
+            if(!word&&!tables.present())return null;
+            JsonNode graph=ordinaryGraphs.computeIfAbsent(chunk.getDocumentId(),id->com.consense.service.sources.NormalObservedPreparationService.currentGraph(source));
+            JsonNode selected=NormalSourceCandidateGraph.selectedForModel(graph,chunk,tables);
+            if(selected.path("units").isEmpty()&&selected.path("unknowns").isEmpty())return null;
+            ObjectNode identity=object();identity.set("source",graph.path("source").deepCopy());identity.set("generationSha256",graph.path("generationSha256").deepCopy());
+            String projection=tables.present()?NormalSourceCandidateGraph.NativeDocxTableIndex.PROJECTION:"ordinary-physical-word-table-model-v1";
+            identity.set("coverageSha256",graph.path("coverageSha256").deepCopy());identity.put("projectionVersion",projection);
+            String ref="ordinary-model-source:"+VettingCorpus.hash(JsonUtils.write(identity));
+            ObjectNode out=object();out.put("projectionVersion",projection);out.put("sourceDeclarationRef",ref);
+            out.put("referenceMeaning","modelUnitRef addresses the same envelope's modelUnitAddress; sourceDeclarationRef addresses its one source declaration. These observed units have no independent rank, citation ID or quotation authority.");
+            out.set("unknowns",selected.path("unknowns").deepCopy());ArrayNode units=out.putArray("units");
+            for(JsonNode raw:selected.path("units")){
+                String address="ordinary-model-unit:"+VettingCorpus.hash(JsonUtils.write(Arrays.asList(identity,raw)));
+                ObjectNode unit=object();unit.put("sourceDeclarationRef",ref);
+                if(!materialIds.add(address)){unit.put("modelUnitRef",address);units.add(unit);continue;}
+                unit.setAll((ObjectNode)raw.deepCopy());unit.put("modelUnitAddress",address);
+                unit.set("parts",parts(raw.path("parts")));unit.set("sourceSpans",spans(raw.path("sourceSpans")));unit.set("tableGroup",table(raw.path("tableGroup")));units.add(unit);
+            }
+            if(!sourceUnknowns.containsKey(ref)){
+                sourceUnknowns.put(ref,graph.path("unknowns").deepCopy());ObjectNode declaration=identity.deepCopy();
+                declaration.put("sourceDeclarationRef",ref);declaration.put("adoptionStatus","candidate_unverified");declaration.put("sourceQualityAccepted",false);
+                declaration.put("humanConfirmed",false);declaration.put("semanticScopeVerified",false);declaration.put("legalClosure","unknown");
+                declaration.set("sourceUnknowns",graph.path("unknowns").deepCopy());out.set("sourceDeclaration",declaration);
+            }
+            return out;
+        }
         public ObjectNode project(EvidencePointer p){return project(p,null,null);}
         public ObjectNode project(EvidencePointer p,JsonNode canonicalMember,String role) {
             Objects.requireNonNull(p,"Canonical evidence pointer required");
@@ -100,7 +152,7 @@ public final class OerModelMaterial {
             if(part.has("sourcePosition"))p.set("sourcePosition",position(part.get("sourcePosition")));
             if(part.has("textTransform"))p.set("textTransform",fields(part.get("textTransform"),"kind","textChannel","offsetUnit","sourceChannel","normalization","status"));
             if(part.has("cells"))p.set("cells",table(part.get("cells")));
-            for(String key:Arrays.asList("wordNumbering","wordSymbols","wordWarnings","wordCells"))if(part.has(key))p.set(key,table(part.get(key)));
+            for(String key:Arrays.asList("wordNumbering","wordSymbols","wordWarnings","wordCells","wordTextSpans","wordFields"))if(part.has(key))p.set(key,table(part.get(key)));
             if(part.has("wordNativeObjects"))p.set("wordNativeObjects",wordNativeObjects(part.get("wordNativeObjects")));
             if(part.has("wordObservation"))p.set("wordObservation",table(wordObservation(part.get("wordObservation"),true)));
             for(String key:Arrays.asList("visualRegion","visualFrame","visualProvenance","readingContext","nativeTableCandidate","parserPageGroup","pdfFormField"))if(part.has(key))p.set(key,table(part.get(key)));
@@ -110,7 +162,7 @@ public final class OerModelMaterial {
     private static ArrayNode spans(JsonNode raw){require(raw!=null&&raw.isArray(),"canonical_source_spans_required");ArrayNode out=array();
         for(JsonNode span:raw){ObjectNode s=fields(span,"blockId","cellId","startOffset","endOffset","offsetUnit","sourceSha256","physicalPageNo");
             if(span.has("sourcePosition"))s.set("sourcePosition",position(span.get("sourcePosition")));out.add(s);}return out;}
-    private static ObjectNode position(JsonNode raw){return fields(raw,"kind","physicalPageNo","partName","nodePath","partSha256","sourceSha256","story","tableId","rowIndex","cellIndex");}
+    private static ObjectNode position(JsonNode raw){return fields(raw,"kind","physicalPageNo","partName","nodePath","partSha256","sourceSha256","story","tableId","rowIndex","cellIndex","rowNodePath","tableNodePath","parentCellNodePath");}
     private static ArrayNode relations(JsonNode raw){require(raw!=null&&raw.isArray(),"canonical_relations_required");ArrayNode out=array();
         for(JsonNode r:raw)out.add(fields(r,"type","status","scope","sameParentClause","sourceReview","basis","humanConfirmed","fromUnitId","toUnitId","fromRegionId","toRegionId","fromBlockId","toBlockId","fromCellId","toCellId","condition","qualifiers","qualifiersComplete","exceptions"));return out;}
 
@@ -129,15 +181,15 @@ public final class OerModelMaterial {
     }
     static JsonNode wordObservation(JsonNode raw,boolean whole) {
         return whole?fields(raw,"parentBlockId","nativePath","wordStructureVersion","effectiveText","parentEffectiveTextSha256",
-                "originalText","deletedText","strikeText","wordNumbering","wordSymbols","wordWarnings","wordNativeObjects")
+                "originalText","deletedText","strikeText","wordNumbering","wordSymbols","wordWarnings","wordNativeObjects","wordTextSpans","wordFields")
                 :fields(raw,"parentBlockId","nativePath","wordStructureVersion","parentEffectiveTextSha256");
     }
     static JsonNode wordNativeObjects(JsonNode raw) {
         ArrayNode out=JsonUtils.mapper().createArrayNode();
         if(raw!=null&&raw.isArray())for(JsonNode object:raw){
-            ObjectNode selected=fields(object,"kind","location","status","semanticStatus","deleted","struck","sourcePart","relationshipRefs","nativeXmlStatus");
+            ObjectNode selected=fields(object,"kind","location","status","semanticStatus","deleted","struck","sourcePart","sourcePosition","relationshipRefs","nativeXmlStatus","mathProjection","noteReference","alternateContent");
             if(object.has("nativeXml"))selected.put("nativeXmlSha256",VettingCorpus.hash(object.path("nativeXml").asText()));
-            out.add(selected);
+            out.add(table(selected));
         }
         return out;
     }

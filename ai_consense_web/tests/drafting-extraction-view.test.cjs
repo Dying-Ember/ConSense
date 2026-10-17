@@ -39,6 +39,8 @@ function harness(overrides = {}) {
     plan: async () => ({ actions: [], unresolved: [] }), extractTrace: async () => report,
     extractTraces: async () => [{ runId: 'older-A', model: '7b', status: 'completed', finishedAt: '2026-10-05T00:00:00Z' }],
     extractRun: async () => ({ ...report, runId: 'older-A', status: 'completed', stale: false, failureCode: null, failureMessage: null, rawResponses: ['old raw'] }),
+    reviewHead: async () => ({ currentRevisionId: null, draftRevisionId: 'review-test', current: null, draft: { id: 'review-test', graph: { kind: 'consense-template-graph-v1', graph: { variables: [{ id: 'review-item', nameZh: 'TEST', nameEn: 'TEST', type: {kind: 'text'}, role: {kind: 'input'}, status: 'pending', docIds: [], options: [], sourceAnchors: [], editTargets: [], sourceUnitIds: [], relatedInputIds: [], relations: [], targets: [], evidence: [] }], events: [], sourceReviews: {}, nextId: 1 }, sources: [], selectedDocuments: {} } }, sources: [] }),
+    reviewCandidates: async () => ({ variables: [] }),
     updateVariable: async (...args) => { writes.push(args); throw new Error('Read-only diagnostics must not save values') },
     ...overrides
   }
@@ -209,7 +211,7 @@ function harness(overrides = {}) {
   h.dispose()
   console.log('PASS: actual Drafting controls expose failed/stale run and attempt evidence without replacing or saving manual values')
   let latest = { ...report, runId: 'previous-success', status: 'completed', stale: false, failureMessage: null }
-  const failure = harness({ extractTrace: async () => latest, extract: async () => { latest = { ...report, runId: 'latest-failure', failureMessage: 'Current source part failed' }; throw new Error('Extraction API failed') } })
+  const failure = harness({ extractTrace: async () => latest, reviewExtract: async () => { latest = { ...report, runId: 'latest-failure', failureMessage: 'Current source part failed' }; throw new Error('Extraction API failed') } })
   await settle(); await failure.click('Identify inputs'); await failure.click('Enter inputs manually'); await failure.click('Extraction trace')
   assert.match(text(failure.root), /Current source part failed/)
   assert.match(text(failure.root), /latest-failure/)
@@ -245,7 +247,7 @@ function harness(overrides = {}) {
   unavailable.dispose()
   console.log('PASS: historical-read failures remain visible and translate when the user changes language')
   const previous = { ...report, runId: 'Unrelated earlier success', status: 'completed', stale: false, failureMessage: null }
-  const unchanged = harness({ extractTrace: async () => previous, extract: async () => { throw new Error('No current report saved') } })
+  const unchanged = harness({ extractTrace: async () => previous, reviewExtract: async () => { throw new Error('No current report saved') } })
   await settle(); await unchanged.click('Identify inputs'); await unchanged.click('Enter inputs manually')
   assert.doesNotMatch(text(unchanged.root), /Unrelated earlier success/)
   assert.equal(find(unchanged.root, node => node.tag === 'input' && node.props.id === 'input-contractTitle').props.value, 'Manual value')

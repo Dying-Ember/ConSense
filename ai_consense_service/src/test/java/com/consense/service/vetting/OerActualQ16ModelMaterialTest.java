@@ -88,6 +88,13 @@ class OerActualQ16ModelMaterialTest {
         assertTrue(frozenMembership.isArray());assertTrue(currentMembership.isArray());assertEquals(10,frozenMembership.size());assertEquals(10,currentMembership.size());
         int normalizedRefs=0;
         for(int i=0;i<frozenMembership.size();i++){
+            // The frozen pre-alias contract gains only [hitOrdinal], immediately after its independently checked ordinal.
+            ObjectNode frozenHit=(ObjectNode)frozenMembership.get(i);int ordinal=frozenHit.path("hitOrdinal").asInt();assertEquals(i+1,ordinal);
+            assertFalse(frozenHit.has("publicCitationAlias"),"This frozen fixture must retain its original pre-alias schema");
+            ObjectNode migrated=JsonUtils.mapper().createObjectNode();Iterator<Map.Entry<String,JsonNode>> fields=frozenHit.fields();
+            while(fields.hasNext()){Map.Entry<String,JsonNode> field=fields.next();migrated.set(field.getKey(),field.getValue());if("hitOrdinal".equals(field.getKey()))migrated.put("publicCitationAlias","["+ordinal+"]");}
+            ((ArrayNode)frozenMembership).set(i,migrated);
+            assertEquals("["+(i+1)+"]",currentMembership.get(i).path("publicCitationAlias").asText(),"Public aliases follow request ordinals, never internal lookup IDs");
             JsonNode before=frozenMembership.get(i).path("memberMaterialRefs"),after=currentMembership.get(i).path("memberMaterialRefs");
             assertTrue(before.isArray());assertTrue(after.isArray());assertEquals(before.size(),after.size());
             for(int j=0;j<before.size();j++){

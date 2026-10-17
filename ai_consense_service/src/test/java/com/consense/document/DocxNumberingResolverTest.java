@@ -224,12 +224,13 @@ class DocxNumberingResolverTest {
     }
 
     @Test
-    void unresolvedLetterRangeDoesNotWrapToAFalseLabel() throws Exception {
+    void letterRangeContinuesWithRepeatedLettersRatherThanExcelColumns() throws Exception {
         try (XWPFDocument document = document(level(0, 26, "lowerLetter", "(%1)", ""), "")) {
             DocxNumberingResolver resolver = new DocxNumberingResolver(document);
             assertEquals("(z)", label(resolver, document, 0));
             DocxNumberingResolver.NumberingInfo next = resolver.resolve(paragraph(document, 14, 0).getCTP().getDomNode());
-            assertFalse(next.isResolved()); assertEquals("letter_counter_out_of_supported_range", next.getReason());
+            assertTrue(next.isResolved()); assertEquals("(aa)", next.getLabel());
+            assertEquals("(bb)", label(resolver, document, 0));
         }
     }
 

@@ -15,6 +15,7 @@ public class CanonicalEvidenceProperties {
     /** Reviewed sidecar identities keyed by exact canonical projection; absent remains text/model-input only. */
     private Map<String,String> sourcePageRenderEvidenceIdentities=new LinkedHashMap<>();
     private int timeoutMs=30000;
-    private int maxSnapshotBytes=16777216;
+    /** Complete normal graphs expand into manifest, canonical and chunk copies; native contracts retain their own caps. */
+    private int maxSnapshotBytes=1024*1024*1024;
     private int maxAssetBytes=33554432;
 }

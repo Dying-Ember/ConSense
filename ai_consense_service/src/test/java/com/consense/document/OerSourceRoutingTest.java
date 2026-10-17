@@ -25,6 +25,16 @@ class OerSourceRoutingTest {
         OerDocumentIdentity identity = new OerSourceRouting().route("NTT.docx", source.getSourceSha256(), source);
         assertEquals("project_document", identity.getSourcePurpose()); assertTrue(identity.getEligibleModules().containsAll(Arrays.asList("vetting", "advisory")));
     }
+    @Test void noteNotesAndNoticeTitlesShareTheNttFamilyWithoutPromotingBodyReferences() {
+        for(String title:Arrays.asList("Notes to Tenderers","Note to Tenderer","Notice to Tenderers")) {
+            DocumentParser.ParsedDocument source=parse(title+"\nContract No: TEST/2046/02\nTender requirements");
+            OerDocumentIdentity identity=new OerSourceRouting().route("anonymous.pdf",source.getSourceSha256(),source);
+            assertEquals("NTT",identity.getKind());assertEquals("project_document",identity.getSourcePurpose());
+        }
+        DocumentParser.ParsedDocument reference=parse("This source refers to Notes to Tenderers for background.\nUnrelated material.");
+        OerDocumentIdentity unknown=new OerSourceRouting().route("NTT.pdf",reference.getSourceSha256(),reference);
+        assertEquals("UNKNOWN",unknown.getKind());assertEquals("unknown",unknown.getIdentityStatus());assertNull(unknown.getEligibleModules());
+    }
     @Test void splitParticularSpecificationCoverDoesNotExcludeProjectPre() {
         DocumentParser.ParsedDocument source = parse("PARTICULAR SPECIFICATION\nPRELIMINARIES\nContract No: TEST/2046/02\nMaterials and workmanship");
         OerDocumentIdentity identity = new OerSourceRouting().route("PRE.docx", source.getSourceSha256(), source);

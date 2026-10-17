@@ -191,7 +191,7 @@ function harness({ failRemoval = false, duration, missingTemplates = [], templat
   const post = find(h.root, node => node.tag === 'input' && node.props.id === 'input-projectArchitectPost')
   assert.ok(post)
   post.props.onInput({ target: { value: 'Unsaved human wording' } }); await settle()
-  await h.click('1. Read documents')
+  await h.click('1 Sources')
   await h.control('data-remove-input', 12)
   assert.match(text(h.root), /TEST ONLY correspondence\.docx/)
   assert.match(text(h.root), /retained|archive/i)

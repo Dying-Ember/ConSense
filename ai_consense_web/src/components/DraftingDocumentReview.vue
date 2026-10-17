@@ -68,7 +68,8 @@ function notice(key: string) {
   const messages: Record<string, string> = {
     unavailable: t('No complete reading is available for this view.', '本视图尚无完整正文。', '本視圖尚無完整正文。'),
     identityMismatch: t('Document versions differ. Retry to load one consistent revision.', '文件版本不一致，请重试载入同一版本。', '檔案版本不一致，請重試載入同一版本。'),
-    reviewUnavailable: t('Saved revision bindings are unavailable; review shows the original without claiming changes.', '尚无已保存版本的可靠位置登记；此处展示原文，暂不标注修改。', '尚無已儲存版本的可靠位置登記；此處展示原文，暫不標註修改。'),
+    reviewUnavailable: t('Saved revision bindings are unavailable; inline changes cannot be verified.', '尚无已保存版本的可靠位置登记，无法核对逐字修改。', '尚無已儲存版本的可靠位置登記，無法核對逐字修改。'),
+    savedReadingFallback: t('Showing the current saved draft. Its change mapping is unverified, so no changes are attributed or marked. Use Original template to read the source.', '当前显示真实已保存文稿。修改映射尚未验证，因此不归因或标注修改；原始模板可在原文模式单独查看。', '目前顯示真實已儲存文稿。修改映射尚未驗證，因此不歸因或標註修改；原始模板可在原文模式獨立查看。'),
     mappingUnavailable: t('A bound paragraph could not be verified in the reading; its change is not marked.', '有登记段落无法与正文核对，其修改暂不标注。', '有登記段落無法與正文核對，其修改暫不標註。'),
     selectedMappingUnavailable: t('A saved mapping for a selected input location is unavailable or unverified. Its saved change status cannot be established.', '选中输入的部分位置尚无可靠已保存映射，无法确定这些位置的文稿修改状态。', '選中輸入的部分位置尚無可靠已儲存映射，無法確定這些位置的文稿修改狀態。'),
     diffUnavailable: t('A paragraph change is too large for verified inline comparison. Read its saved result.', '有段落修改超出逐字对照范围，请阅读已保存文稿。', '有段落修改超出逐字對照範圍，請閱讀已儲存文稿。'),
@@ -87,7 +88,7 @@ function readingWarning(warning: string, carrier: 'original' | 'saved') {
 }
 const conversionWarnings = computed(() => [...new Set([...(mode.value === 'saved' ? [] : (props.original?.warnings ?? []).map(warning => readingWarning(warning, 'original'))), ...(mode.value === 'original' ? [] : (props.result?.warnings ?? []).map(warning => readingWarning(warning, 'saved')))])])
 const coverageWarning = (warning: string) => /Office Math|cannot be assigned|Incomplete main-document coverage|Native drawings\/images omitted|Native numbering labels|自动编号|自動編號/i.test(warning)
-const warnings = computed(() => [...new Set([...conversionWarnings.value.filter(coverageWarning), ...prepared.value.notices.map(notice)])])
+const warnings = computed(() => [...new Set([...conversionWarnings.value.filter(coverageWarning), ...prepared.value.notices.filter(key => key !== 'savedReadingFallback').map(notice)])])
 const diagnostics = computed(() => conversionWarnings.value.filter(warning => !coverageWarning(warning)))
 const inputState = computed(() => props.dirtyKeys.includes(selected.value) ? t('Unsaved input', '输入未保存', '輸入未儲存') : draftWord((props.fieldStates[selected.value] || 'unknown') as DraftWord, props.locale))
 const stamp = () => `${props.projectId}|${props.fileKey}|${props.document?.revisionId}|${props.original?.docxSha256}|${props.result?.docxSha256}`
@@ -188,7 +189,7 @@ watch(() => props.immersive, () => { void focusBinding() })
         <p v-if="loading" role="status">{{ t('Loading complete document…', '正在载入完整正文…', '正在載入完整正文…') }}</p>
         <div v-else-if="error" role="alert"><p>{{ error }}</p><button type="button" @click="emit('retry')">{{ t('Retry', '重试', '重試') }}</button></div>
         <div v-else-if="editing" class="body-editor-slot"><slot /></div>
-        <template v-else><details v-if="warnings.length" class="reading-warnings" data-reading-limits><summary>{{ t('Unverified reading and change mapping', '阅读与修改映射仍未验证', '閱讀與修改映射仍未驗證') }} · {{ warnings.length }}</summary><ul><li v-for="warning in warnings" :key="warning">{{ warning }}</li></ul></details><details v-if="diagnostics.length" class="conversion-diagnostics"><summary>{{ t('Conversion diagnostics', '转换诊断记录', '轉換診斷記錄') }} · {{ diagnostics.length }}</summary><ul><li v-for="diagnostic in diagnostics" :key="diagnostic">{{ diagnostic }}</li></ul></details><p v-if="navigationNotice" class="navigation-notice" role="status">{{ navigationNotice }}</p><div ref="scroll" class="document-scroll"><article ref="paper" data-document-paper class="document-paper" :class="mode" lang="en" @click="inspect" @keydown="inspect" v-html="html" /></div></template>
+        <template v-else><p v-if="prepared.notices.includes('savedReadingFallback')" class="review-notice" data-review-carrier-status="saved-unverified">{{ notice('savedReadingFallback') }}</p><details v-if="warnings.length" class="reading-warnings" data-reading-limits><summary>{{ t('Unverified reading and change mapping', '阅读与修改映射仍未验证', '閱讀與修改映射仍未驗證') }} · {{ warnings.length }}</summary><ul><li v-for="warning in warnings" :key="warning">{{ warning }}</li></ul></details><details v-if="diagnostics.length" class="conversion-diagnostics"><summary>{{ t('Conversion diagnostics', '转换诊断记录', '轉換診斷記錄') }} · {{ diagnostics.length }}</summary><ul><li v-for="diagnostic in diagnostics" :key="diagnostic">{{ diagnostic }}</li></ul></details><p v-if="navigationNotice" class="navigation-notice" role="status">{{ navigationNotice }}</p><div ref="scroll" class="document-scroll"><article ref="paper" data-document-paper class="document-paper" :class="mode" lang="en" @click="inspect" @keydown="inspect" v-html="html" /></div></template>
       </main>
       <aside ref="inspector" tabindex="-1" class="review-inspector" :aria-label="t('Current input', '当前输入', '目前輸入')">
         <section v-if="inspectedBinding" data-change-context class="change-context review-evidence">

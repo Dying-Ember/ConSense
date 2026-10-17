@@ -27,6 +27,21 @@ public class ParseCoverage {
     private List<JsonNode> visualCoverage = new ArrayList<>();
     @JsonInclude(JsonInclude.Include.NON_NULL)
     private JsonNode readingPlan;
+    /** Native Word section boundaries and retained membership only; content coverage and applicability stay unknown. */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private JsonNode nativeDocxSections;
+    /** Physical tables/rows/cells inside normal-loaded Word roots; unobserved stories and effective content remain unknown. */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private JsonNode nativeDocxTables;
+    /** Source-defined paragraph outline; separate from page layout and legal applicability. */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private JsonNode nativeDocxOutline;
+    /** Opt-in template paragraph inventory from the normal Word traversal; no rendered Word pages are inferred. */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private JsonNode nativeDocxParagraphs;
+    /** Source-bound guidance, marker and complete-range analysis for an explicitly uploaded drafting template. */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private JsonNode templateEvidence;
     @JsonInclude(JsonInclude.Include.NON_NULL)
     private JsonNode nativeTableCandidates;
     @JsonInclude(JsonInclude.Include.NON_EMPTY)

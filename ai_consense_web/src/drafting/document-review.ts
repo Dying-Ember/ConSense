@@ -258,5 +258,21 @@ export function prepareDocumentReview(options: { fileKey: string; document?: Dra
     interactive(clone, binding)
     const tail = tails.get(binding.parentBindingId) ?? anchor; tail.after(clone); tails.set(binding.parentBindingId, clone)
   }
+  // Mapping and attribution limits cannot make an old source paragraph stand in
+  // for the current saved document. Keep verified overlays only when their final
+  // text also accounts for the complete saved reading.
+  const finalReview = host.cloneNode(true) as HTMLElement
+  for (const removed of finalReview.querySelectorAll('del,.review-removed,.review-guidance')) removed.remove()
+  const paragraphs = (root: HTMLElement) => [...root.querySelectorAll<HTMLElement>('[data-native-paragraph],[data-review-added]')].map(element => normalized(documentParagraphText(element)))
+  const incomplete = !results.length || results.some(binding => !savedBindingIds.includes(binding.bindingId)) || sources.some(binding => !savedBindingIds.includes(binding.bindingId)) || ['mappingUnavailable', 'selectedMappingUnavailable', 'diffUnavailable', 'diffUnverified', 'additionUnmapped'].some(notice => notices.has(notice)) || JSON.stringify(paragraphs(finalReview)) !== JSON.stringify(paragraphs(resultHost))
+  if (incomplete) {
+    notices.add('savedReadingFallback'); bindingIds.clear(); changes.length = 0
+    for (const binding of results) {
+      if (binding.locationStatus !== 'exact' || !savedBindingIds.includes(binding.bindingId)) continue
+      const element = matchedElement(resultIndex, binding.resultParagraphId, binding.text)
+      if (element) interactive(element, binding)
+    }
+    return { html: resultHost.innerHTML, notices: [...notices], bindingIds: [...bindingIds], savedBindingIds, changes }
+  }
   return { html: host.innerHTML, notices: [...notices], bindingIds: [...bindingIds], savedBindingIds, changes }
 }

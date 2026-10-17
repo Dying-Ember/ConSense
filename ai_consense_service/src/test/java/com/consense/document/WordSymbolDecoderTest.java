@@ -91,7 +91,9 @@ class WordSymbolDecoderTest {
     void provenanceRoundTripsThroughJacksonWithoutLoss() throws Exception {
         ObjectMapper mapper = new ObjectMapper();
         for (WordSymbolDecoder.Symbol original : new WordSymbolDecoder.Symbol[]{
-                WordSymbolDecoder.decode("Wingdings", "F0FC"), WordSymbolDecoder.decode("Custom font", "F0FC")}) {
+                WordSymbolDecoder.decode("Wingdings", "F0FC"), WordSymbolDecoder.decode("Custom font", "F0FC"),
+                WordSymbolDecoder.decode("Symbol", "F0AC"), WordSymbolDecoder.decode("Symbol", "F0AE"),
+                WordSymbolDecoder.decode("Symbol", "F0B7")}) {
             String serialized = mapper.writeValueAsString(original);
             WordSymbolDecoder.Symbol copy = mapper.readValue(serialized, WordSymbolDecoder.Symbol.class);
             assertEquals(original.getFont(), copy.getFont());
@@ -102,6 +104,53 @@ class WordSymbolDecoderTest {
             assertEquals(original.isResolved(), copy.isResolved());
             assertFalse(serialized.contains("\"resolved\":"));
         }
+    }
+
+    @Test
+    void decodesActualCorpusSymbolPairsWithPrimaryMappingProvenance() throws Exception {
+        String[][] cases = {{"F0AC", "\u2190"}, {"F0AE", "\u2192"}, {"F0B7", "\u2022"}};
+        for (String[] pair : cases) {
+            WordSymbolDecoder.Symbol result = WordSymbolDecoder.decode(symbol("Symbol", pair[0]));
+            assertTrue(result.isResolved());
+            assertEquals(pair[1], result.getDecodedText());
+            assertEquals("Symbol", result.getFont());
+            assertEquals(pair[0], result.getHexCode());
+            assertEquals("https://www.unicode.org/Public/MAPPINGS/VENDORS/ADOBE/symbol.txt", result.getMappingSource());
+        }
+    }
+
+    @Test
+    void acceptsDocumentedSymbolByteAliasesAndPreservesLexicalAttributes() {
+        String[][] cases = {{"00ac", "\u2190"}, {"00ae", "\u2192"}, {"00b7", "\u2022"}};
+        for (String[] pair : cases) {
+            WordSymbolDecoder.Symbol result = WordSymbolDecoder.decode(" Symbol ", " " + pair[0] + " ");
+            assertTrue(result.isResolved());
+            assertEquals(pair[1], result.getDecodedText());
+            assertEquals(" Symbol ", result.getFont());
+            assertEquals(" " + pair[0] + " ", result.getHexCode());
+        }
+    }
+
+    @Test
+    void strictSymbolNamespaceUsesTheSameVerifiedFontMapping() throws Exception {
+        WordSymbolDecoder.Symbol result = WordSymbolDecoder.decode(xml("<x:sym xmlns:x='http://purl.oclc.org/ooxml/wordprocessingml/main' x:font='symbol' x:char='f0ac'/>"));
+        assertTrue(result.isResolved());
+        assertEquals("\u2190", result.getDecodedText());
+        assertEquals("symbol", result.getFont());
+        assertEquals("f0ac", result.getHexCode());
+    }
+
+    @Test
+    void otherSymbolCodesAndUnrelatedFontsRemainExplicitlyUnresolved() {
+        for (String code : new String[]{"F0FC", "F03A", "2190", "2192", "2022", "E0AC"})
+            assertUnresolved(WordSymbolDecoder.decode("Symbol", code), "unresolved_unsupported_character_code");
+        for (String font : new String[]{"Calibri", "Unknown Symbol Font", "Symbol MT", "Symbol 2"})
+            for (String code : new String[]{"F0AC", "F0AE", "F0B7"})
+                assertUnresolved(WordSymbolDecoder.decode(font, code), "unresolved_unsupported_font");
+        for (String code : new String[]{"F0AC", "F0AE", "F0B7"})
+            assertUnresolved(WordSymbolDecoder.decode("Wingdings", code), "unresolved_unsupported_character_code");
+        for (String code : new String[]{"AC", "0xAC", "F0AG", "1F0AC"})
+            assertUnresolved(WordSymbolDecoder.decode("Symbol", code), "unresolved_malformed_character_code");
     }
 
     private static void assertUnresolved(WordSymbolDecoder.Symbol result, String status) {

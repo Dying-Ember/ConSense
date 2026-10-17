@@ -2,7 +2,7 @@
 export function presentationRowKeys(rows: readonly unknown[]): string[] {
   const ids = rows.map(row => {
     if (!row || typeof row !== 'object' || Array.isArray(row)) return null
-    const value = (row as Record<string, unknown>).id
+    const value = (row as Record<string, unknown>)._itemId ?? (row as Record<string, unknown>).id
     return value === null || value === undefined || value === '' ? null : String(value)
   })
   const counts = new Map<string, number>()

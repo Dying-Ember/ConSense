@@ -11,7 +11,12 @@ import java.util.*;
 /** Independent unreviewed authority: complete parser observations, never reviewed adoption. */
 public final class NormalObservedContract {
     public static final String SCHEMA="consense.normal-observed.v1",PRODUCER="normal_observed",VERSION="complete-bound-normal-observations-v1";
+    public static final int MAX_BYTES=1024*1024*1024;
     private NormalObservedContract(){}
+    public static int maximumBytes(int configured){
+        if(configured<=0||configured>MAX_BYTES)throw new CanonicalEvidenceException(HttpStatus.SERVICE_UNAVAILABLE,"OER_EVIDENCE_CONFIG_INVALID");
+        return configured;
+    }
     public static boolean isNormal(JsonNode node){return SCHEMA.equals(node.path("schema").asText())||PRODUCER.equals(node.path("producerKind").asText());}
     public static void validateCapability(JsonNode oer){
         JsonNode n=oer.path("normalObserved");
@@ -22,12 +27,15 @@ public final class NormalObservedContract {
             &&"retained-in-complete-graph-not-submitted-to-model".equals(n.path("nonTextUnitPolicy").asText())
             &&"complete-manifest-actual-cas-reconstruction-every-request".equals(n.path("artifactReadValidation").asText())
             &&"java_current_source_reader".equals(n.path("originalByteVerifier").asText())&&"application".equals(n.path("observerActor").asText())
-            &&n.path("maximumMessageBytes").asInt()==NormalObservedPreparationService.MAX_BYTES,"NORMAL_OBSERVED_CAPABILITY_MISMATCH");
+            &&n.path("maximumMessageBytes").isIntegralNumber()&&n.path("maximumMessageBytes").canConvertToInt()
+            &&n.path("maximumMessageBytes").asInt()>0&&n.path("maximumMessageBytes").asInt()<=MAX_BYTES,"NORMAL_OBSERVED_CAPABILITY_MISMATCH");
         for(String key:Arrays.asList("humanConfirmed","sourceQualityAccepted","semanticScopeVerified"))require(n.path(key).isBoolean()&&!n.path(key).asBoolean(),"NORMAL_OBSERVED_AUTHORITY_MISMATCH");
         require("candidate_unverified".equals(n.path("adoptionStatus").asText()),"NORMAL_OBSERVED_AUTHORITY_MISMATCH");
     }
-    public static JsonNode validate(String raw,String address){
-        require(raw!=null&&raw.getBytes(StandardCharsets.UTF_8).length<=NormalObservedPreparationService.MAX_BYTES,"NORMAL_OBSERVED_TOO_LARGE");
+    public static JsonNode validate(String raw,String address){return validate(raw,address,MAX_BYTES);}
+    public static JsonNode validate(String raw,String address,int maximum){
+        maximumBytes(maximum);
+        require(raw!=null&&raw.getBytes(StandardCharsets.UTF_8).length<=maximum,"NORMAL_OBSERVED_TOO_LARGE");
         JsonNode p=JsonUtils.parse(raw),m=p.path("manifest"),g=m.path("candidateGraph"),b=m.path("sourceBinding"),i=p.path("projectionIdentity"),s=g.path("source");
         require(isNormal(p)&&SCHEMA.equals(p.path("schema").asText())&&PRODUCER.equals(p.path("producerKind").asText())
             &&address!=null&&address.equals(p.path("projectionSha256").asText())&&address.equals(CanonicalJson.hash(raw,"projectionSha256")),"NORMAL_OBSERVED_SEAL_MISMATCH");

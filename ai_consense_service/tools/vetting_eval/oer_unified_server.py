@@ -24,7 +24,7 @@ from source_page_index import SourcePageIndexRuntime, install_source_page_index_
 from workspace_root import resolve_workspace
 from native_pdf_source_family_server import ENDPOINT as FAMILY_ENDPOINT, install_native_pdf_source_family_route
 from normal_observed_server import (CAPABILITY as NORMAL_OBSERVED_CAPABILITY,
-    ENDPOINT as NORMAL_OBSERVED_ENDPOINT, install_normal_observed_route)
+    ENDPOINT as NORMAL_OBSERVED_ENDPOINT, MAX_NORMAL_MESSAGE_BYTES, install_normal_observed_route)
 
 
 HERE = Path(__file__).resolve().parent
@@ -72,24 +72,25 @@ def configure_unified_environment(environ, workspace):
 
 
 def create_unified_app(policy, *, backend=None, artifact_store=None, target_module='vetting',
-                       maximum_message_bytes=MAX_SNAPSHOT_BYTES):
-    fail(type(maximum_message_bytes) is int and 1024 <= maximum_message_bytes <= MAX_SNAPSHOT_BYTES,
-         'UNIFIED_MESSAGE_LIMIT_INVALID', 'Unified messages must stay within the fixed 16MiB maximum')
+                       maximum_message_bytes=MAX_NORMAL_MESSAGE_BYTES):
+    fail(type(maximum_message_bytes) is int and 1024 <= maximum_message_bytes <= MAX_NORMAL_MESSAGE_BYTES,
+         'UNIFIED_MESSAGE_LIMIT_INVALID', 'Normal messages must stay within the finite 1GiB maximum')
+    native_maximum = min(maximum_message_bytes, MAX_SNAPSHOT_BYTES)
     backend = importlib.import_module('server') if backend is None else backend
     artifact_store = artifact_store or ArtifactStore(Path(backend.STATE) / 'artifacts')
     registry = UnifiedCanonicalSourceRegistry(Path(backend.STATE) / 'canonical', artifact_store,
-        family_policy=policy, family_target_module=target_module)
+        family_policy=policy, family_target_module=target_module, maximum_message_bytes=maximum_message_bytes)
     app = create_collection_app(policy, backend=backend, artifact_store=artifact_store,
         target_module=target_module, source_registry=registry, runtime_factory=UnifiedOerWindowRuntime,
         canonical_snapshot_frame=lambda: registry.validation_frame(
             software_guard=backend._windows_runtime.algorithms))
     app = create_native_pdf_app(policy, backend=backend, artifact_store=artifact_store,
         target_module=target_module, source_registry=registry, runtime_factory=UnifiedOerWindowRuntime,
-        app=app, maximum_message_bytes=maximum_message_bytes,
+        app=app, maximum_message_bytes=native_maximum, normal_maximum_message_bytes=maximum_message_bytes,
         strict_json_paths=('/project', '/project/native', '/project/native-collection', '/project/native-pdf', FAMILY_ENDPOINT, NORMAL_OBSERVED_ENDPOINT,
                            '/index', '/index-canonical', '/index-canonical/status', '/retrieve'))
     install_native_pdf_source_family_route(app, registry, artifact_store, policy,
-        target_module=target_module, maximum_message_bytes=maximum_message_bytes,
+        target_module=target_module, maximum_message_bytes=native_maximum,
         software_guard=backend._windows_runtime.algorithms)
     install_normal_observed_route(app, registry, artifact_store, policy, target_module=target_module,
         maximum_message_bytes=maximum_message_bytes, software_guard=backend._windows_runtime.algorithms)
@@ -106,7 +107,7 @@ def create_unified_app(policy, *, backend=None, artifact_store=None, target_modu
             result['oer'][key] = {**result['oer'][key],
                 'artifactReadValidation': UNIFIED_CAPABILITY['artifactReadValidation'],
                 'artifactReadValidationScope': UNIFIED_CAPABILITY['artifactReadValidationScope']}
-        result['oer']['unifiedCanonical'] = {**UNIFIED_CAPABILITY, 'maximumMessageBytes': maximum_message_bytes}
+        result['oer']['unifiedCanonical'] = {**UNIFIED_CAPABILITY, 'maximumMessageBytes': native_maximum}
         result['oer']['normalObserved'] = {**NORMAL_OBSERVED_CAPABILITY, 'maximumMessageBytes': maximum_message_bytes}
         result['oer']['sourcePageRenderContract'] = 'consense.source-page-render-evidence.v1'
         result['oer']['sourcePageIndexContract'] = 'explicit-composite-index-pins-v1'
@@ -114,7 +115,7 @@ def create_unified_app(policy, *, backend=None, artifact_store=None, target_modu
             'schema': 'consense.native-pdf-source-family.v1', 'version': 'same-original-complete-native-pdf-components-v1',
             'producerKind': 'native_pdf_source_family', 'sourceRevisionKind': 'derived_same_original_component_set',
             'componentContract': 'complete-cold-actual-cas-native-pdf-public-roots',
-            'maximumMessageBytes': maximum_message_bytes, 'crossComponentRelations': 'unsupported',
+            'maximumMessageBytes': native_maximum, 'crossComponentRelations': 'unsupported',
             'adoptedCoverage': 'disjoint-physical-pages-required-v1',
             'wholeSourceAccepted': False, 'semanticAcceptanceByComposition': False,
             'projectEndpoint': FAMILY_ENDPOINT, 'projectionInputs': 'actual-cas-family-spec-only',

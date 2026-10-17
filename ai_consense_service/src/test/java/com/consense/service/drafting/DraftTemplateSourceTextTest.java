@@ -31,14 +31,27 @@ class DraftTemplateSourceTextTest {
         DocumentParser parser = new DocumentParser(new ConsenseProperties(), null);
         DocumentParser.ParsedDocument fresh = parser.parse("template.docx", original);
         String blocksBefore = JsonUtils.write(fresh.getBlocks());
-        assertEquals("Rate applies.", fresh.getText());
+        assertEquals("Rate x+2 applies.", fresh.getText());
         assertFalse(fresh.getBlocks().get(0).getWordNativeObjects().isEmpty());
         assertTrue(DraftTemplateSourceText.matches("Rate x+2 applies.", fresh, parser, original));
         for (String changed : Arrays.asList("Rate x+3 applies.", "Changed x+2 applies.",
                 "Rate x+2 x+2 applies.", "Rate x+2 applies.DELETED", "Rate x+2 applies.STRUCK"))
             assertFalse(DraftTemplateSourceText.matches(changed, fresh, parser, original), changed);
         assertArrayEquals(before, original); assertEquals(blocksBefore, JsonUtils.write(fresh.getBlocks()));
-        assertEquals("Rate applies.", fresh.getText());
+        assertEquals("Rate x+2 applies.", fresh.getText());
+    }
+    @Test void historicalFlattenedFractionUsesOnlyTheExactOriginalLegacyProjection()throws Exception {
+        byte[] original;
+        try(XWPFDocument word=new XWPFDocument();ByteArrayOutputStream out=new ByteArrayOutputStream()) {
+            word.createParagraph().getCTP().set(CTP.Factory.parse("<w:p xmlns:w='http://schemas.openxmlformats.org/wordprocessingml/2006/main' xmlns:m='http://schemas.openxmlformats.org/officeDocument/2006/math'><w:r><w:t>Rate </w:t></w:r><m:oMath><m:f><m:num><m:r><m:t>1</m:t></m:r></m:num><m:den><m:r><m:t>2</m:t></m:r></m:den></m:f></m:oMath><w:r><w:t> applies.</w:t></w:r></w:p>"));
+            word.write(out);original=out.toByteArray();
+        }
+        DocumentParser parser=new DocumentParser(new ConsenseProperties(),null);DocumentParser.ParsedDocument fresh=parser.parse("formula.docx",original);
+        String before=JsonUtils.write(fresh.getBlocks());assertEquals("Rate (1)/(2) applies.",fresh.getText());
+        assertEquals("Rate 12 applies.",parser.projectLegacyDocxMath(original).getText());
+        assertTrue(DraftTemplateSourceText.matches("Rate 12 applies.",fresh,parser,original));
+        assertFalse(DraftTemplateSourceText.matches("Rate 13 applies.",fresh,parser,original));
+        assertEquals(before,JsonUtils.write(fresh.getBlocks()));
     }
     private static DocumentBlock paragraph(String text) {
         DocumentBlock block = new DocumentBlock(); block.setKind("paragraph"); block.setText(text); return block;

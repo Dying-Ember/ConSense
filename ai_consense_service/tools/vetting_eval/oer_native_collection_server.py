@@ -21,6 +21,7 @@ from native_collection_registry import NativeCollectionSourceRegistry
 from native_observation import _strict_json
 from native_projection_collection import SCHEMA as COLLECTION_SCHEMA, publish_native_collection
 from native_projection_transport import MAX_SNAPSHOT_BYTES, publish_native_transport
+from normal_observed_projection import SCHEMA as NORMAL_SCHEMA, PRODUCER as NORMAL_PRODUCER
 from oer_native_server import (NATIVE_CAPABILITY, NativeOerWindowRuntime,
                                configure_native_environment)
 from oer_server import ProjectionRequest, assert_canonical_scope, create_app
@@ -144,8 +145,10 @@ def create_collection_app(policy, *, backend=None, artifact_store=None, target_m
 
     def response(value, address):
         raw = _serialize(value)
-        fail(len(raw) <= MAX_SNAPSHOT_BYTES, 'NATIVE_WIRE_RESPONSE_TOO_LARGE',
-             'Root or complete batch exceeds the fixed transport maximum')
+        normal = value.get('schema') == NORMAL_SCHEMA and value.get('producerKind') == NORMAL_PRODUCER
+        maximum = getattr(registry, 'normal_maximum_bytes', MAX_SNAPSHOT_BYTES) if normal else MAX_SNAPSHOT_BYTES
+        fail(len(raw) <= maximum, 'NATIVE_WIRE_RESPONSE_TOO_LARGE',
+             'Root or complete batch exceeds its configured typed transport maximum')
         return Response(raw, media_type='application/json', headers={
             'X-Projection-Sha256': address, 'Cache-Control': 'private, no-cache',
             'ETag': '"' + hashlib.sha256(raw).hexdigest() + '"', 'X-Content-Type-Options': 'nosniff'})

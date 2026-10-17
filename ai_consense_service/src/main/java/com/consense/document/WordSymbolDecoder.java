@@ -17,6 +17,8 @@ public final class WordSymbolDecoder {
     public static final String RESOLVED = "resolved";
     public static final String WORD_NAMESPACE = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
     private static final String STRICT_WORD_NAMESPACE = "http://purl.oclc.org/ooxml/wordprocessingml/main";
+    private static final String SYMBOL_SOURCE = "https://www.unicode.org/Public/MAPPINGS/VENDORS/ADOBE/symbol.txt";
+    private static final String WINGDINGS_CIRCLE_SOURCE = "https://www.unicode.org/L2/L2011/11344-wingdings.pdf#page=25";
     private static final String CHECKMARK_SOURCE = "https://support.microsoft.com/en-us/word/insert-a-check-mark-symbol";
 
     private WordSymbolDecoder() { }
@@ -43,15 +45,32 @@ public final class WordSymbolDecoder {
         if (!normalizedCode.matches("[0-9a-fA-F]{4}")) {
             return unresolved(originalFont, originalCode, "unresolved_malformed_character_code");
         }
+        int code = Integer.parseInt(normalizedCode, 16);
+        if ("Symbol".equalsIgnoreCase(normalizedFont)) {
+            // Adobe Symbol encoding; Word's F0xx form selects the same named-font byte.
+            // These source-witnessed pairs are not Unicode private-use character casts.
+            switch (code) {
+                case 0x00AC: case 0xF0AC:
+                    return new Symbol(originalFont, originalCode, "\u2190", RESOLVED, SYMBOL_SOURCE);
+                case 0x00AE: case 0xF0AE:
+                    return new Symbol(originalFont, originalCode, "\u2192", RESOLVED, SYMBOL_SOURCE);
+                case 0x00B7: case 0xF0B7:
+                    return new Symbol(originalFont, originalCode, "\u2022", RESOLVED, SYMBOL_SOURCE);
+                default:
+                    return unresolved(originalFont, originalCode, "unresolved_unsupported_character_code");
+            }
+        }
         if (!"Wingdings".equalsIgnoreCase(normalizedFont)) {
             return unresolved(originalFont, originalCode, "unresolved_unsupported_font");
         }
-        int code = Integer.parseInt(normalizedCode, 16);
         // Microsoft identifies Wingdings decimal 252 (00FC) as the plain tick.
         // Word's documented F03A -> 003A legacy symbol encoding also occurs as F0FC here.
         // Restrict this allowance to the verified font/code pair, not every private-use code.
         if (code == 0x00FC || code == 0xF0FC) {
             return new Symbol(originalFont, originalCode, "\u2713", RESOLVED, CHECKMARK_SOURCE);
+        }
+        if (code == 0x006C || code == 0xF06C) {
+            return new Symbol(originalFont, originalCode, "\u26AB", RESOLVED, WINGDINGS_CIRCLE_SOURCE);
         }
         return unresolved(originalFont, originalCode, "unresolved_unsupported_character_code");
     }

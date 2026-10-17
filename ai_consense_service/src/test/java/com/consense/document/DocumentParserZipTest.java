@@ -20,6 +20,23 @@ import static org.mockito.Mockito.mock;
 class DocumentParserZipTest {
 
     @Test
+    void explicitLargerPartBudgetIsNotSilentlyClampedToTheOldDefault() throws Exception {
+        ByteArrayOutputStream original=new ByteArrayOutputStream();
+        try(XWPFDocument document=new XWPFDocument()){
+            document.createParagraph().createRun().setText("Source text survives the explicitly enlarged part budget");document.write(original);
+        }
+        ByteArrayOutputStream expanded=new ByteArrayOutputStream();
+        try(ZipInputStream input=new ZipInputStream(new ByteArrayInputStream(original.toByteArray()));ZipOutputStream output=new ZipOutputStream(expanded)){
+            ZipEntry entry;byte[] buffer=new byte[8192];int count;
+            while((entry=input.getNextEntry())!=null){output.putNextEntry(new ZipEntry(entry.getName()));while((count=input.read(buffer))!=-1)output.write(buffer,0,count);output.closeEntry();}
+            for(int i=0;i<5001;i++){output.putNextEntry(new ZipEntry("customXml/unused"+i+".xml"));output.write("<unused/>".getBytes(java.nio.charset.StandardCharsets.UTF_8));output.closeEntry();}
+        }
+        ConsenseProperties props=new ConsenseProperties();props.getDocument().setMaxZipEntries(5100);
+        DocumentParser.ParsedDocument parsed=parser(props).parse("many-parts.docx",expanded.toByteArray());
+        assertTrue(parsed.getText().contains("Source text survives the explicitly enlarged part budget"));
+    }
+
+    @Test
     void legitimateCompressibleImageBelowOnePercentDoesNotDiscardContractText() throws Exception {
         byte[] image = new byte[106496];
         byte[] prefix = new byte[256];

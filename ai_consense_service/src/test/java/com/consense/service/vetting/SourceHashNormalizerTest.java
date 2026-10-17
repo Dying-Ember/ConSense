@@ -11,6 +11,12 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
 class SourceHashNormalizerTest {
+    @Test void nativeSectionReferencesAndEndpointIdentityInvalidateParsedSourceHash(){
+        SourceHashNormalizer n=new SourceHashNormalizer(4);String structure="[{\"text\":\"same\",\"paragraphStyleName\":\"Heading 1\",\"readingContext\":{\"nativeDocxSection\":{\"sectionId\":\"section-a\",\"endBoundary\":{\"sourcePosition\":{\"partSha256\":\"part-a\",\"nodePath\":\"native-path-a\"}}}}}]";
+        assertEquals(n.hash("same",structure),n.hash("same",structure.replace("Heading 1","Heading 2")));
+        for(String changed:Arrays.asList(structure.replace("section-a","section-b"),structure.replace("part-a","part-b"),structure.replace("native-path-a","native-path-b")))
+            assertNotEquals(n.hash("same",structure),n.hash("same",changed));
+    }
     private static String legacy(String text,String structure) {
         text=text==null?"":text;structure=structure==null?"":structure;
         if(structure.contains("\"paragraphStyleName\"")) {

@@ -6,6 +6,7 @@ import io
 import json
 import tempfile
 import unittest
+from unittest.mock import patch
 import numpy as np
 from artifact_store import ArtifactStore
 from complete_ocr import _paddle_native_outputs
@@ -50,6 +51,17 @@ def wire(manifest, assets):
 
 
 class PaddleNativeCodecTests(unittest.TestCase):
+    def test_receiver_uses_the_same_exact_finite_array_boundary(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = ArtifactStore(directory); raw = b'authored exact native input'
+            manifest, assets = native_result(raw, store)
+            size = sum(len(base64.b64decode(value)) for value in assets.values())
+            with patch('paddle_native_capture.MAX_NATIVE_ARRAY_BYTES', size, create=True):
+                _paddle_native_outputs(wire(manifest, assets), hashlib.sha256(raw).hexdigest(), len(raw), store)
+            with patch('paddle_native_capture.MAX_NATIVE_ARRAY_BYTES', size-1, create=True):
+                with self.assertRaisesRegex(ValueError, 'array assets exceed complete capture limit'):
+                    _paddle_native_outputs(wire(manifest, assets), hashlib.sha256(raw).hexdigest(), len(raw), store)
+
     def test_real_arrays_are_verified_and_false_native_statuses_are_refused(self):
         mutations = {
             'wrong_eos': lambda m: m['generationAttempts'][0]['actualResolvedGreedy'].update(eosIds=[9]),

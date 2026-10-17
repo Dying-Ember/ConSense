@@ -9,6 +9,8 @@ import org.w3c.dom.Node;
 
 import java.io.InputStream;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.IdentityHashMap;
@@ -106,20 +108,22 @@ public final class DocxNumberingResolver {
         // Invalid restart values are ignored by the specification, using the
         // same default as an omitted property. Never-reset levels are preserved.
         for (Level descendant : definition.levels.values()) {
-            if (descendant.index > level && descendant.restartLevel == level) counter.values[descendant.index] = null;
+            if (descendant.index > level && descendant.restartLevel >= level) counter.values[descendant.index] = null;
         }
         try {
             String label = expand(selected, definition, counter, level);
             return new NumberingInfo(true, true, numId, level, definition.abstractId, selected.format,
-                    selected.levelText, label, source, "resolved", null, value, selected.suffix);
+                    selected.levelText, label, source, "resolved", null, value, selected.suffix, selected.fontSymbols, selected.fontAttributes);
         } catch (UnsupportedLabel failure) {
             return unresolved(definition, level, selected, source, failure.getMessage());
         }
     }
 
     private static NumberingInfo unresolved(NumDefinition definition, Integer level, Level selected, String source, String reason) {
-        return NumberingInfo.unresolved(definition.numId, level, definition.abstractId,
-                selected == null ? null : selected.format, selected == null ? null : selected.levelText, source, reason);
+        return new NumberingInfo(true, false, definition.numId, level, definition.abstractId,
+                selected == null ? null : selected.format, selected == null ? null : selected.levelText,
+                "", source, "unresolved", reason, null, null,
+                selected == null ? null : selected.fontSymbols, selected == null ? null : selected.fontAttributes);
     }
 
     private StyleReference styleReference(String styleId) {
@@ -130,7 +134,7 @@ public final class DocxNumberingResolver {
         }
         Set<String> visited = new HashSet<>();
         while (styleId != null) {
-            if (!visited.add(styleId) || visited.size() > 64) { reference.failure = "style_inheritance_cycle"; break; }
+            if (!visited.add(styleId)) { reference.failure = "style_inheritance_cycle"; break; }
             reference.chain.add(styleId);
             XWPFStyle style = document.getStyles() == null ? null : document.getStyles().getStyle(styleId);
             if (style == null) break;
@@ -178,16 +182,16 @@ public final class DocxNumberingResolver {
     private static String expand(Level selected, NumDefinition definition, Counter counter, int currentLevel) {
         if ("none".equals(selected.format)) return "";
         if (selected.levelText == null) throw new UnsupportedLabel("missing_level_text");
-        String text = selected.levelText;
+        String text = selected.displayLevelText == null ? selected.levelText : selected.displayLevelText;
         if (containsPrivateUse(text)) throw new UnsupportedLabel("font_specific_level_symbol");
         StringBuilder label = new StringBuilder();
         for (int i = 0; i < text.length(); i++) {
             char character = text.charAt(i);
-            if (character != '%') { label.append(character); continue; }
-            if (i + 1 == text.length() || text.charAt(i + 1) < '1' || text.charAt(i + 1) > '9')
-                throw new UnsupportedLabel("unsupported_level_text_placeholder");
+            if (character != '%' || i + 1 == text.length() || text.charAt(i + 1) < '1' || text.charAt(i + 1) > '9') {
+                label.append(character); continue;
+            }
             int referenced = text.charAt(++i) - '1';
-            if (referenced > currentLevel) throw new UnsupportedLabel("forward_level_reference");
+            if (referenced > currentLevel) continue;
             Level parent = definition.levels.get(referenced);
             if (parent == null || parent.failure != null) throw new UnsupportedLabel("unresolved_referenced_level");
             long number = counter.values[referenced] == null ? parent.start : counter.values[referenced];
@@ -205,24 +209,35 @@ public final class DocxNumberingResolver {
     }
 
     private static String format(long number, String format) {
-        if (number < 0) throw new UnsupportedLabel("negative_counter");
         if ("decimal".equals(format)) return Long.toString(number);
+        if (number < 0) throw new UnsupportedLabel("negative_counter");
         if ("decimalZero".equals(format)) return number < 10 ? "0" + number : Long.toString(number);
-        // Beyond Z/a..z, Word's repeated-letter convention is application
-        // dependent. This bounded resolver reports that range, without guessing.
         if ("lowerLetter".equals(format) || "upperLetter".equals(format)) {
-            if (number < 1 || number > 26) throw new UnsupportedLabel("letter_counter_out_of_supported_range");
-            return Character.toString((char) (("lowerLetter".equals(format) ? 'a' : 'A') + number - 1));
+            if (number < 1) throw new UnsupportedLabel("non_positive_letter_counter");
+            // ECMA-376 17.18.59 repeats one letter: 27=aa, 28=bb, 53=aaa.
+            long repeats = (number - 1) / 26 + 1;
+            char letter = (char) (("lowerLetter".equals(format) ? 'a' : 'A') + (number - 1) % 26);
+            StringBuilder letters = new StringBuilder();
+            appendRepeated(letters, letter, repeats);
+            return letters.toString();
         }
         if ("lowerRoman".equals(format) || "upperRoman".equals(format)) {
-            if (number < 1 || number > 3999) throw new UnsupportedLabel("roman_counter_out_of_supported_range");
+            if (number < 1) throw new UnsupportedLabel("non_positive_roman_counter");
             int[] values = {1000,900,500,400,100,90,50,40,10,9,5,4,1};
             String[] symbols = {"M","CM","D","CD","C","XC","L","XL","X","IX","V","IV","I"};
             StringBuilder roman = new StringBuilder();
-            for (int i = 0; i < values.length; i++) while (number >= values[i]) { roman.append(symbols[i]); number -= values[i]; }
+            appendRepeated(roman, 'M', number / 1000);
+            number %= 1000;
+            for (int i = 1; i < values.length; i++) while (number >= values[i]) { roman.append(symbols[i]); number -= values[i]; }
             return "lowerRoman".equals(format) ? roman.toString().toLowerCase(java.util.Locale.ROOT) : roman.toString();
         }
         throw new UnsupportedLabel("unsupported_placeholder_format:" + format);
+    }
+
+    private static void appendRepeated(StringBuilder target, char character, long count) {
+        if (count > Integer.MAX_VALUE - target.length())
+            throw new UnsupportedLabel("numbering_label_exceeds_string_capacity");
+        for (long i = 0; i < count; i++) target.append(character);
     }
 
     private static Map<String, NumDefinition> readDefinitions(XWPFDocument document) {
@@ -241,8 +256,9 @@ public final class DocxNumberingResolver {
             Node abstractRoot = abstracts.get(definition.abstractId);
             if (abstractRoot == null) definition.failure = "missing_abstract_numbering";
             else {
-                if (child(abstractRoot, "numStyleLink") != null || child(abstractRoot, "styleLink") != null)
-                    definition.failure = "numbering_style_link_not_supported";
+                // styleLink names this definition; numStyleLink instead inherits another definition.
+                if (child(abstractRoot, "numStyleLink") != null)
+                    definition.failure = "numbering_style_reference_not_supported";
                 for (Node levelNode : children(abstractRoot, "lvl")) {
                     Level level = readLevel(levelNode);
                     if (level.index >= 0 && level.index <= 8) definition.levels.put(level.index, level);
@@ -259,7 +275,7 @@ public final class DocxNumberingResolver {
                     }
                     Node start = child(override, "startOverride");
                     if (start != null) {
-                        Long value = nonNegativeLong(val(start));
+                        Long value = longInteger(val(start));
                         Level level = definition.levels.get(index);
                         if (level == null) definition.failure = "missing_override_level";
                         else if (value == null) level.failure = "invalid_start_override";
@@ -277,13 +293,14 @@ public final class DocxNumberingResolver {
         Integer index = integer(attribute(node, "ilvl"));
         level.index = index == null ? -1 : index;
         Node start = child(node, "start");
-        Long value = start == null ? 0L : nonNegativeLong(val(start));
+        Long value = start == null ? 0L : longInteger(val(start));
         if (value == null) level.failure = "invalid_start_value"; else level.start = value;
         level.format = val(child(node, "numFmt"));
         if (level.format == null) level.format = "decimal";
         if (attribute(child(node, "numFmt"), "format") != null) level.failure = "custom_number_format_not_supported";
         level.levelText = val(child(node, "lvlText"));
-        if (attribute(child(node, "lvlText"), "null") != null && onOff(child(node, "lvlText"), "null")) level.levelText = "";
+        if ((level.levelText == null || level.levelText.isEmpty())
+                && attribute(child(node, "lvlText"), "null") != null && onOff(child(node, "lvlText"), "null")) level.levelText = "";
         level.styleId = val(child(node, "pStyle"));
         level.suffix = val(child(node, "suff"));
         if (level.suffix == null) level.suffix = "tab";
@@ -294,12 +311,52 @@ public final class DocxNumberingResolver {
         if (child(node, "lvlPicBulletId") != null) level.failure = "picture_bullet_not_supported";
         if (child(node, "lvlRestart") != null && (restart == null || restart < 0)) level.failure = "invalid_restart_value";
         Node fonts = child(child(node, "rPr"), "rFonts");
-        for (String attribute : new String[] {"ascii", "hAnsi", "eastAsia", "cs"}) {
-            String font = attribute(fonts, attribute);
-            if (font != null && (font.equalsIgnoreCase("Symbol") || font.toLowerCase(java.util.Locale.ROOT).startsWith("wingdings")
-                    || font.equalsIgnoreCase("Webdings"))) level.failure = "font_specific_level_symbol";
+        boolean symbolFont = false;
+        for (String slot : new String[] {"ascii", "hAnsi", "eastAsia", "cs"}) {
+            String font = attribute(fonts, slot);
+            if (font != null && (font.trim().equalsIgnoreCase("Symbol") || font.trim().toLowerCase(java.util.Locale.ROOT).startsWith("wingdings")
+                    || font.trim().equalsIgnoreCase("Webdings"))) symbolFont = true;
         }
+        if ("bullet".equals(level.format) && level.levelText != null
+                && (containsPrivateUse(level.levelText) || symbolFont)) {
+            decodeBulletSymbols(level, fonts, symbolFont);
+        } else if (symbolFont && level.failure == null) level.failure = "font_specific_level_symbol";
         return level;
+    }
+
+    private static void decodeBulletSymbols(Level level, Node fonts, boolean symbolFont) {
+        Map<String, String> attributes = new LinkedHashMap<>();
+        if (fonts != null && fonts.getAttributes() != null) for (int i = 0; i < fonts.getAttributes().getLength(); i++) {
+            Node attribute = fonts.getAttributes().item(i);
+            if (W.equals(attribute.getNamespaceURI())) attributes.put(attribute.getLocalName(), attribute.getNodeValue());
+        }
+        boolean themed = attributes.containsKey("asciiTheme") || attributes.containsKey("hAnsiTheme")
+                || attributes.containsKey("eastAsiaTheme") || attributes.containsKey("cstheme");
+        String font = null; boolean conflicting = false;
+        for (String slot : new String[] {"ascii", "hAnsi", "eastAsia", "cs"}) {
+            String candidate = attributes.get(slot);
+            if (candidate == null || candidate.trim().isEmpty()) continue;
+            if (font == null) font = candidate;
+            else if (!font.trim().equalsIgnoreCase(candidate.trim())) conflicting = true;
+        }
+        level.fontAttributes = attributes;
+        level.fontSymbols = new ArrayList<>();
+        StringBuilder display = new StringBuilder(); boolean complete = true;
+        for (int i = 0; i < level.levelText.length();) {
+            int code = level.levelText.codePointAt(i); i += Character.charCount(code);
+            if (Character.isWhitespace(code) || Character.isSpaceChar(code)
+                    || (Character.getType(code) != Character.PRIVATE_USE && !(symbolFont && code <= 0xFF))) { display.appendCodePoint(code); continue; }
+            String hex = String.format(java.util.Locale.ROOT, "%04X", code);
+            WordSymbolDecoder.Symbol symbol = themed
+                    ? new WordSymbolDecoder.Symbol(font, hex, "", "unresolved_numbering_theme_font", null)
+                    : conflicting ? new WordSymbolDecoder.Symbol("", hex, "", "unresolved_conflicting_numbering_fonts", null)
+                    : WordSymbolDecoder.decode(font, hex);
+            level.fontSymbols.add(symbol);
+            if (symbol.isResolved()) display.append(symbol.getDecodedText());
+            else { complete = false; display.appendCodePoint(code); }
+        }
+        if (complete) level.displayLevelText = display.toString();
+        else if (level.failure == null) level.failure = "font_specific_level_symbol";
     }
 
     private static boolean containsPrivateUse(String value) {
@@ -311,7 +368,7 @@ public final class DocxNumberingResolver {
         return false;
     }
     private static Integer integer(String value) { try { return value == null ? null : Integer.valueOf(value); } catch (NumberFormatException ignored) { return null; } }
-    private static Long nonNegativeLong(String value) { try { long number = Long.parseLong(value); return number < 0 ? null : number; } catch (RuntimeException ignored) { return null; } }
+    private static Long longInteger(String value) { try { return Long.valueOf(value); } catch (RuntimeException ignored) { return null; } }
     private static boolean word(Node node, String local) { return node != null && node.getNodeType() == Node.ELEMENT_NODE && W.equals(node.getNamespaceURI()) && local.equals(node.getLocalName()); }
     private static Node element(Node node) { if (node == null || node.getNodeType() == Node.ELEMENT_NODE) return node; for (Node child = node.getFirstChild(); child != null; child = child.getNextSibling()) if (child.getNodeType() == Node.ELEMENT_NODE) return child; return null; }
     private static Node child(Node node, String local) { if (node == null) return null; for (Node child = node.getFirstChild(); child != null; child = child.getNextSibling()) if (word(child, local)) return child; return null; }
@@ -323,7 +380,7 @@ public final class DocxNumberingResolver {
     private static final class StyleReference { final List<String> chain = new ArrayList<>(); String numId; String failure; boolean fromDefaults; }
     private static final class StyleDefaults { String styleId; String numId; Integer level; String failure; String numberingFailure; }
     private static final class NumDefinition { String numId; String abstractId; String failure; final Map<Integer, Level> levels = new HashMap<>(); }
-    private static final class Level { int index; long start; int restartLevel; String format; String levelText; String styleId; String suffix; String failure; boolean legal; }
+    private static final class Level { int index; long start; int restartLevel; String format; String levelText; String displayLevelText; String styleId; String suffix; String failure; boolean legal; List<WordSymbolDecoder.Symbol> fontSymbols; Map<String, String> fontAttributes; }
     private static final class Counter { final Long[] values = new Long[9]; }
     private static final class UnsupportedLabel extends RuntimeException { UnsupportedLabel(String reason) { super(reason); } }
 
@@ -333,9 +390,18 @@ public final class DocxNumberingResolver {
         private final String numId, abstractNumId, format, levelText, label, source, resolutionStatus, reason, suffix;
         private final Integer level;
         private final Long value;
+        private final List<WordSymbolDecoder.Symbol> fontSymbols;
+        private final Map<String, String> fontAttributes;
         private NumberingInfo(boolean numbered, boolean resolved, String numId, Integer level, String abstractNumId,
                               String format, String levelText, String label, String source, String resolutionStatus,
                               String reason, Long value, String suffix) {
+            this(numbered, resolved, numId, level, abstractNumId, format, levelText, label, source, resolutionStatus, reason, value, suffix, null, null);
+        }
+        private NumberingInfo(boolean numbered, boolean resolved, String numId, Integer level, String abstractNumId,
+                              String format, String levelText, String label, String source, String resolutionStatus,
+                              String reason, Long value, String suffix, List<WordSymbolDecoder.Symbol> fontSymbols, Map<String, String> fontAttributes) {
+            this.fontSymbols = fontSymbols == null ? null : Collections.unmodifiableList(new ArrayList<>(fontSymbols));
+            this.fontAttributes = fontAttributes == null ? null : Collections.unmodifiableMap(new LinkedHashMap<>(fontAttributes));
             this.numbered = numbered; this.resolved = resolved; this.numId = numId; this.level = level;
             this.abstractNumId = abstractNumId; this.format = format; this.levelText = levelText; this.label = label;
             this.source = source; this.resolutionStatus = resolutionStatus; this.reason = reason; this.value = value; this.suffix = suffix;
@@ -358,5 +424,7 @@ public final class DocxNumberingResolver {
         public String getReason() { return reason; }
         public Long getValue() { return value; }
         public String getSuffix() { return suffix; }
+        public List<WordSymbolDecoder.Symbol> getFontSymbols() { return fontSymbols; }
+        public Map<String, String> getFontAttributes() { return fontAttributes; }
     }
 }

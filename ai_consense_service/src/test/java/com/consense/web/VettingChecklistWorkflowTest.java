@@ -316,7 +316,8 @@ class VettingChecklistWorkflowTest {
     private VettingRun newRun(String projectId,String result) {
         VettingRun run=new VettingRun();run.setId(UUID.randomUUID().toString());run.setProjectId(projectId);
         run.setStatus("COMPLETED");run.setStartedAt(Instant.now());run.setFinishedAt(Instant.now());
-        run.setCoverageJson("{\"documents\":[]}");run.setSourceSnapshotSha256(com.consense.service.vetting.VettingCorpus.hash("competition-review-package-v1\n[]"));run.setResultJson(result);runs.saveAndFlush(run);return run;
+        // Synthetic completed runs bind v2 coverage and candidate-structure source dimensions.
+        run.setCoverageJson("{\"documents\":[]}");run.setSourceSnapshotSha256(com.consense.service.vetting.VettingCorpus.hash("competition-review-package-v2\n[]"));run.setResultJson(result);runs.saveAndFlush(run);return run;
     }
     private String url(VettingRun run) {return "/api/vetting/"+run.getProjectId()+"/runs/"+run.getId()+"/checklist";}
 }

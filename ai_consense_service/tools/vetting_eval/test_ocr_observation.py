@@ -15,6 +15,15 @@ import server
 
 
 class OcrObservationTests(unittest.TestCase):
+    def test_detail_callback_reuses_pinned_cpu_getter_and_recipe_without_another_factory(self):
+        engine, store = object(), object()
+        with patch.object(server, '_pinned_cpu_ocr', return_value=engine) as getter, \
+             patch.object(server, '_ocr_recipe_sha256', 'e'*64), \
+             patch('ocr_layout_coverage.observe_cpu_lines', return_value={'authored': True}) as observe:
+            self.assertEqual(server._observe_complete_cpu_lines(b'authored complete raster', store), {'authored': True})
+        getter.assert_called_once_with()
+        observe.assert_called_once_with(engine, b'authored complete raster', 'e'*64, store)
+
     def request(self, result, *, headers=None, source_context=None):
         image = Image.new('RGB', (180, 90), 'white')
         stream = io.BytesIO()
@@ -114,6 +123,7 @@ class OcrObservationTests(unittest.TestCase):
             self.assertEqual(response.status_code, 200)
             self.assertEqual(response.json()['adoptionStatus'], 'candidate_unverified')
             self.assertEqual(complete.call_count, 1)
+            self.assertIsNone(complete.call_args.kwargs['line_observer'])
 
     def test_changed_complete_configuration_fails_without_silent_baseline_fallback(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -156,6 +166,7 @@ class OcrObservationTests(unittest.TestCase):
                 _, response = self.request(self.result(), source_context=context)
             self.assertEqual(response.status_code, 200)
             self.assertEqual(complete.call_args.kwargs['source_context'], context)
+            self.assertIs(complete.call_args.kwargs['line_observer'], server._observe_complete_cpu_lines)
         context['imageSha256'] = 'f'*64
         with patch('complete_ocr.recognize_complete_page') as complete:
             _, response = self.request(self.result(), source_context=context)

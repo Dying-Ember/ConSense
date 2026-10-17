@@ -1,6 +1,7 @@
 package com.consense.service.sources;
 
 import com.consense.common.JsonUtils;
+import com.consense.config.CanonicalEvidenceProperties;
 import com.consense.domain.SourceDocument;
 import com.consense.repository.SourceDocumentRepository;
 import com.consense.service.vetting.NormalSourceCandidateGraph;
@@ -15,16 +16,17 @@ import java.nio.charset.StandardCharsets;
 /** Explicit CPU-only observation preparation; it never adopts reviewed evidence or reparses. */
 @Service @RequiredArgsConstructor
 public class NormalObservedPreparationService {
-    public static final int MAX_BYTES=16*1024*1024;
+    public static final int MAX_BYTES=NormalObservedContract.MAX_BYTES;
     private final SourceDocumentRepository documents;
     private final CanonicalCurrentSourceReader sources;
+    private final CanonicalEvidenceProperties properties;
 
     @Transactional(propagation=Propagation.REQUIRES_NEW,isolation=Isolation.READ_COMMITTED)
     public JsonNode prepare(String project,Long id,String module){
         SourceDocument source=sources.normalDocument(project,id,module);
         requireEvidence(source);
         NormalSourceCandidateGraph.capture(source);String raw=source.getNormalCandidateJson();
-        require(raw.getBytes(StandardCharsets.UTF_8).length<=MAX_BYTES,"NORMAL_OBSERVED_TOO_LARGE");
+        require(raw.getBytes(StandardCharsets.UTF_8).length<=NormalObservedContract.maximumBytes(properties.getMaxSnapshotBytes()),"NORMAL_OBSERVED_TOO_LARGE");
         SourceDocument fresh=sources.normalDocument(project,id,module);
         require(sameGeneration(source,fresh),"CANONICAL_SOURCE_STALE");
         require(documents.compareAndSetNormalCandidate(id,project,source.getSourceSha256(),source.getOerIdentityJson(),

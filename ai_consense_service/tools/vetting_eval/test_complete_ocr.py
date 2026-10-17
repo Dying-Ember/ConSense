@@ -27,6 +27,170 @@ def identity(parser):
 
 
 class CompleteOcrTests(unittest.TestCase):
+    def test_active_child_gaps_leave_provider_prefix_and_body_byte_identical(self):
+        from test_ocr_layout_coverage import reread_capture_fixture
+        with tempfile.TemporaryDirectory() as directory:
+            store = ArtifactStore(directory); raw, capture = reread_capture_fixture(store)
+            _, request = self.transport(raw)
+            original = recognize_complete_page(raw, self.config(), store, request=request,
+                source_context=self.source_context(raw))
+            value = recognize_complete_page(raw, self.config(), store, request=request,
+                source_context=self.source_context(raw), line_observer=lambda *_: capture)
+            for key in ('text', 'lines', 'wholePageGroups', 'parserRuns', 'dualEvidenceRef'):
+                self.assertEqual(value[key], original[key], key)
+            self.assertEqual(value['regions'][:len(original['regions'])], original['regions'])
+            self.assertEqual([r['originalText'] for r in value['regions'][len(original['regions']):]],
+                             [' ', 'literal low', 'ordinary'])
+            self.assertTrue(all(r['text'] == '' for r in value['regions'][len(original['regions']):]))
+            self.assertEqual(value['coverage']['auxiliaryLineCoverage']['lineReread']['groups'][0]['disposition'],
+                             'complete_child_group_active')
+
+    def test_bound_detail_appends_only_geometry_after_both_providers_release(self):
+        from test_ocr_layout_coverage import capture_fixture
+        raw = self.image(); _, request = self.transport(raw)
+        events = []
+        @contextmanager
+        def lifecycle(provider, remaining_seconds, receipt_dir):
+            name = provider['taskBinding']['parser']; events.append('enter:' + name)
+            yield {'mode': 'authored_lifecycle'}
+            events.append('release:' + name)
+        with tempfile.TemporaryDirectory() as directory:
+            store = ArtifactStore(directory)
+            with patch('complete_ocr.owned_native_provider', lifecycle):
+                original = recognize_complete_page(raw, self.config(), store, request=request, source_context=self.source_context(raw))
+                events.clear()
+                def observer(actual, actual_store):
+                    self.assertEqual(actual, raw); self.assertIs(actual_store, store)
+                    self.assertEqual(events, ['enter:paddleocr-vl', 'release:paddleocr-vl', 'enter:mineru', 'release:mineru'])
+                    events.append('cpu')
+                    return capture_fixture(store, raw)
+                value = recognize_complete_page(raw, self.config(), store, request=request,
+                    source_context=self.source_context(raw), line_observer=observer)
+            self.assertEqual(events.count('cpu'), 1)
+            self.assertEqual(value['regions'][:-1], original['regions'])
+            self.assertEqual(value['regions'][-1]['text'], '')
+            self.assertEqual(value['regions'][-1]['originalText'], 'UNVERIFIED fixture')
+            for key in ('text', 'lines', 'wholePageGroups', 'parserRuns', 'dualEvidenceRef'):
+                self.assertEqual(value[key], original[key], key)
+            coverage = value['coverage']['auxiliaryLineCoverage']
+            self.assertEqual(coverage['addedRegions'], 1)
+            self.assertEqual(coverage['synchronousNativeCancellation'], 'not_supported')
+            self.assertFalse(coverage['sourceQualityAccepted'])
+
+    def test_auxiliary_failure_preserves_successful_independent_provider_outputs(self):
+        raw = self.image(); _, request = self.transport(raw)
+        with tempfile.TemporaryDirectory() as directory:
+            store = ArtifactStore(directory)
+            def fail(*args): raise RuntimeError('Authored auxiliary failure')
+            value = recognize_complete_page(raw, self.config(), store, request=request,
+                source_context=self.source_context(raw), line_observer=fail)
+            self.assertEqual(value['text'], 'A mandatory exception.')
+            self.assertEqual(len(value['wholePageGroups'][0]['candidates']), 2)
+            self.assertEqual(value['coverage']['auxiliaryLineCoverage']['status'], 'failed')
+            self.assertIn('Authored auxiliary failure', value['coverage']['auxiliaryLineCoverage']['error'])
+
+    def test_auxiliary_budget_is_gated_and_overrun_is_observed_without_claiming_cancellation(self):
+        from test_ocr_layout_coverage import capture_fixture
+        from unittest.mock import Mock
+        raw = self.image()
+        for expire_during in ('provider', 'cpu'):
+            with self.subTest(expire_during=expire_during), tempfile.TemporaryDirectory() as directory:
+                clock = [0.0]; store = ArtifactStore(directory); _, transport = self.transport(raw)
+                def request(url, **kwargs):
+                    response = transport(url, **kwargs)
+                    if expire_during == 'provider' and url.endswith('/files/file-authored/content'):
+                        clock[0] = 4.0
+                    return response
+                def observe(actual, actual_store):
+                    clock[0] = 4.0
+                    return capture_fixture(actual_store, actual)
+                observer = Mock(side_effect=observe)
+                with patch('complete_ocr.time.monotonic', side_effect=lambda: clock[0]):
+                    value = recognize_complete_page(raw, self.config(), store, request=request,
+                        source_context=self.source_context(raw), line_observer=observer)
+                self.assertEqual(len(value['regions']), 1)
+                self.assertEqual(value['text'], 'A mandatory exception.')
+                coverage = value['coverage']['auxiliaryLineCoverage']
+                self.assertTrue(coverage['deadlineExceeded'])
+                self.assertEqual(coverage['synchronousNativeCancellation'], 'not_supported')
+                if expire_during == 'provider':
+                    observer.assert_not_called()
+                    self.assertEqual(coverage['status'], 'not_started_budget_exhausted')
+                else:
+                    observer.assert_called_once()
+                    self.assertEqual(coverage['status'], 'observed_after_deadline_unapplied')
+                    self.assertEqual(coverage['addedRegions'], 0)
+
+    def test_unbound_or_failed_detail_never_invokes_auxiliary_observer(self):
+        raw = self.image(); _, request = self.transport(raw)
+        from unittest.mock import Mock
+        observer = Mock(side_effect=AssertionError('No auxiliary call expected'))
+        with tempfile.TemporaryDirectory() as directory:
+            store = ArtifactStore(directory)
+            recognize_complete_page(raw, self.config(), store, request=request, line_observer=observer)
+            _, failed_request = self.transport(raw, fail_mineru=True)
+            with self.assertRaises(CompleteOcrError):
+                recognize_complete_page(raw, self.config(), store, request=failed_request,
+                    source_context=self.source_context(raw), line_observer=observer)
+            observer.assert_not_called()
+
+    def test_both_unavailable_pages_fail_closed_instead_of_completed_empty_text(self):
+        raw = self.image()
+        _, fixture = self.transport(raw)
+        def request(url, **kwargs):
+            response = fixture(url, **kwargs)
+            if url.endswith('/layout-parsing'):
+                value = json.loads(response)
+                value['result']['layoutParsingResults'][0]['prunedResult']['page_index'] = 'unbound'
+                return json.dumps(value).encode()
+            if url.endswith('/files/file-authored/content'):
+                stream = io.BytesIO()
+                with zipfile.ZipFile(io.BytesIO(response)) as original, zipfile.ZipFile(stream, 'w') as archive:
+                    for name in original.namelist():
+                        content = original.read(name)
+                        if name == 'middle_json.json':
+                            value = json.loads(content); value['pages'][0]['page_idx'] = 'unbound'
+                            content = json.dumps(value).encode()
+                        archive.writestr(name, content)
+                return stream.getvalue()
+            return response
+        with tempfile.TemporaryDirectory() as directory:
+            store = ArtifactStore(directory)
+            with self.assertRaisesRegex(CompleteOcrError, 'Requested parser page is unavailable'):
+                recognize_complete_page(raw, self.config(), store, request=request)
+
+    def test_missing_primary_page_fails_clearly_without_switching_to_other_parser(self):
+        raw = self.image()
+        _, fixture = self.transport(raw)
+        def request(url, **kwargs):
+            response = fixture(url, **kwargs)
+            if url.endswith('/layout-parsing'):
+                value = json.loads(response)
+                value['result']['layoutParsingResults'][0]['prunedResult']['page_index'] = 'unbound'
+                return json.dumps(value).encode()
+            return response
+        with tempfile.TemporaryDirectory() as directory:
+            store = ArtifactStore(directory)
+            with self.assertRaisesRegex(CompleteOcrError, 'Primary parser page is unavailable') as failure:
+                recognize_complete_page(raw, self.config(), store, request=request)
+            receipt = json.loads(store.read_asset(failure.exception.receipt))
+            self.assertEqual(receipt['errorType'], 'ValueError')
+            self.assertEqual(len(receipt['completedResponses']), 7)
+
+    def test_http_capture_accepts_exact_wire_boundary_and_fails_closed_above_it(self):
+        from complete_ocr import _request, HttpCaptureFailure
+        raw = b'authored exact complete provider body'
+        def respond(handler, _):
+            self.reply(handler, 200, raw)
+        with self.native_server(respond) as base:
+            with patch('complete_ocr.MAX_RESPONSE_BYTES', len(raw)):
+                self.assertEqual(_request(base, timeout=2), raw)
+            with patch('complete_ocr.MAX_RESPONSE_BYTES', len(raw)-1):
+                with self.assertRaisesRegex(HttpCaptureFailure, 'response exceeds capture limit') as failure:
+                    _request(base, timeout=2)
+            self.assertFalse(failure.exception.complete)
+            self.assertEqual(failure.exception.raw, raw)
+
     @contextmanager
     def native_server(self, respond):
         class Handler(BaseHTTPRequestHandler):

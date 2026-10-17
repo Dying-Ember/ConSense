@@ -38,10 +38,26 @@ class NormalObservedContractTest {
     }
     @Test void duplicateKeysAndOversizedSnapshotsFailClosed()throws Exception{
         String raw=resource("authored-projection.json");assertThrows(CanonicalEvidenceException.class,()->CanonicalJson.field("{\"projection\":"+raw+",\"projection\":{}}","projection"));
-        assertThrows(CanonicalEvidenceException.class,()->NormalObservedContract.validate(" ".repeat(NormalObservedPreparationService.MAX_BYTES+1),"0".repeat(64)));
+        assertThrows(CanonicalEvidenceException.class,()->NormalObservedContract.validate(" ".repeat(1025),"0".repeat(64),1024));
     }
     @Test void blankUnitDecisionMatchesPythonStripIncludingNonbreakingSpaces(){
         for(String blank:new String[]{""," \t\r\n","\u00a0","\u2007","\u202f","\u0085","\u001c\u001f"})assertTrue(NormalObservedContract.noObservedText(blank));
         for(String literal:new String[]{"\u200b","\u00a0actual\u202f","0"})assertFalse(NormalObservedContract.noObservedText(literal));
     }
+    @Test void normalCapabilityAndConfiguredSnapshotCapRemainFiniteAndTyped()throws Exception{
+        ObjectNode oer=(ObjectNode)JsonUtils.parse(resource("authored-health.json")).path("oer").deepCopy();
+        ObjectNode capability=(ObjectNode)oer.path("normalObserved");
+        capability.put("maximumMessageBytes",NormalObservedContract.MAX_BYTES);
+        assertDoesNotThrow(()->NormalObservedContract.validateCapability(oer));
+        for(String value:new String[]{"true","1.5","0","-1","2147483648","1073741825"}){
+            capability.set("maximumMessageBytes",JsonUtils.parse(value));
+            assertThrows(CanonicalEvidenceException.class,()->NormalObservedContract.validateCapability(oer));
+        }
+        String raw=resource("authored-projection.json");String address=JsonUtils.parse(raw).path("projectionSha256").asText();
+        int bytes=raw.getBytes(StandardCharsets.UTF_8).length;
+        assertEquals(JsonUtils.parse(raw),CanonicalEvidenceService.validateSnapshot(raw,address,bytes));
+        assertEquals("NORMAL_OBSERVED_TOO_LARGE",assertThrows(CanonicalEvidenceException.class,()->
+            CanonicalEvidenceService.validateSnapshot(raw,address,bytes-1)).getMessage());
+    }
+
 }

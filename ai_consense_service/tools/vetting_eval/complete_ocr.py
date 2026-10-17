@@ -17,6 +17,7 @@ import socket
 import threading
 import time
 import uuid
+import paddle_native_capture
 from native_provider_lifecycle import owned_native_provider
 from urllib.parse import urlsplit
 import zipfile
@@ -25,8 +26,12 @@ from PIL import Image
 from structured_parser_evidence import (normalize_parser_run, build_dual_parser_evidence,
                                        project_bbox_to_original)
 from whole_parser_groups import select_whole_parser_groups, validate_policy
+from provider_task_cache import task_binding, load_success, commit_success
 
-MAX_RESPONSE_BYTES = 128 * 1024 * 1024
+MAX_RESPONSE_BYTES = 1024 * 1024 * 1024
+PADDLE_OPTIONS = {'fileType': 1, 'useLayoutDetection': True, 'useDocOrientationClassify': False,
+    'useDocUnwarping': False, 'restructurePages': False, 'markdownIgnoreLabels': [], 'visualize': True}
+MINERU_OPTIONS = {'ocr_mode': 'ocr', 'output_formats': ['zip']}
 
 
 class CompleteOcrError(ValueError):
@@ -238,7 +243,7 @@ def _paddle_native_outputs(result, digest, byte_count, store):
             raise ValueError('Invalid native Paddle array artifact')
         content = base64.b64decode(value, validate=True)
         size += len(content)
-        if size > 64*1024*1024:
+        if size > paddle_native_capture.MAX_NATIVE_ARRAY_BYTES:
             raise ValueError('Native Paddle array assets exceed complete capture limit')
         assets[name] = content
     records = []
@@ -345,7 +350,7 @@ def _verify_paddle_capture_claims(manifest, capture, assets):
             raise ValueError('Native layout invocation differs from actual session IO inventory')
 
 
-def recognize_complete_page(raw, config, store, *, request=_request, source_context=None):
+def recognize_complete_page(raw, config, store, *, request=_request, source_context=None, line_observer=None):
     timeout = _config(config)
     deadline = time.monotonic() + timeout
     with Image.open(io.BytesIO(raw)) as image:
@@ -369,8 +374,8 @@ def recognize_complete_page(raw, config, store, *, request=_request, source_cont
         transform = source_context['originalPageTransform']
     frame = {'imageSha256': digest, 'width': width, 'height': height,
              'coordinateUnit': 'pixel', 'bboxFormat': 'xywh'}
-    assets = {input_name: raw}
     responses, attempts, runs, lifecycles = [], [], [], []
+    provider_tasks = []
     input_ref = store.put_bytes(raw, identity_scope='exact_parser_input_image_bytes')
     job_id = None
     job_completed = False
@@ -385,6 +390,7 @@ def recognize_complete_page(raw, config, store, *, request=_request, source_cont
         attempt = {'parser': parser, 'url': url, 'method': method or ('POST' if body is not None else 'GET'),
                    'request': request_ref, 'status': 'dispatched_response_unknown'}
         attempts.append(attempt)
+        provider_tasks[-1]['httpDispatches'] += 1
         try:
             response = request(url, body=body, timeout=remaining, **({'method': method} if method else {}))
         except Exception as error:
@@ -404,98 +410,130 @@ def recognize_complete_page(raw, config, store, *, request=_request, source_cont
 
     try:
         for parser in ('paddleocr-vl', 'mineru'):
-            task_binding={'parser':parser,'inputSha256':digest,'inputByteCount':len(raw),
-                'originalSourceSha256':source['sourceSha256'],'physicalPageNo':physical_page,
-                'profileSha256':hashlib.sha256(_bytes(config[parser]['identity'])).hexdigest()}
-            provider_config=dict(config[parser],taskBinding=task_binding)
-            with owned_native_provider(provider_config, deadline-time.monotonic(),
-                    receipt_dir=store.root / 'jobs' / uuid.uuid4().hex / parser) as lifecycle:
-                lifecycles.append(lifecycle)
-                base = config[parser]['baseUrl'].rstrip('/')
-                if parser == 'paddleocr-vl':
-                    body = {'file': base64.b64encode(raw).decode('ascii'), 'fileType': 1,
-                            'useLayoutDetection': True, 'useDocOrientationClassify': False,
-                            'useDocUnwarping': False, 'restructurePages': False,
-                            'markdownIgnoreLabels': [], 'visualize': True}
-                    wire = send(base + '/layout-parsing', body)
-                    value = _json(wire)
-                    if value.get('errorCode', 0) != 0 or len(value.get('result', {}).get('layoutParsingResults', [])) != 1:
-                        raise ValueError('Paddle full-page response is failed or incomplete')
-                    outputs = {'page_json': wire}
-                    captured_outputs, captured_assets, paddle_capture = _paddle_native_outputs(value['result'], digest, len(raw), store)
-                    if config[parser].get('requireNativeOutputCapture') and paddle_capture is None:
-                        raise ValueError('Configured native Paddle output capture is missing; pruned JSON is insufficient')
-                    outputs.update(captured_outputs); assets.update(captured_assets)
-                    for result in value['result']['layoutParsingResults']:
-                        images = dict(result.get('markdown', {}).get('images') or {})
-                        images.update(result.get('outputImages') or {})
-                        for name, encoded in images.items():
-                            if not isinstance(encoded, str) or encoded.startswith(('http:', 'https:')):
-                                raise ValueError('Paddle artifacts must be returned inline, not fetched implicitly')
-                            if encoded.startswith('data:'):
-                                encoded = encoded.split(',', 1)[1]
-                            assets['paddle/' + name] = base64.b64decode(encoded, validate=True)
-                else:
-                    upload = _json(send(base + '/uploads', {'filename': input_name, 'bytes': len(raw),
-                        'mime_type': media_type, 'purpose': 'parse', 'sha256sum': digest}))
-                    if upload.get('status') != 'completed':
-                        upload_id = upload.get('id', '')
-                        if not re.fullmatch(r'upload_[A-Za-z0-9_-]+', upload_id):
-                            raise ValueError('MinerU upload identity invalid')
-                        send(base + '/uploads/' + upload_id + '/content', raw, method='PUT')
-                        upload = _json(send(base + '/uploads/' + upload_id + '/complete', {'sha256sum': digest}))
-                    source_file_id = upload.get('file', {}).get('id', '')
-                    if (upload.get('status') != 'completed' or upload.get('sha256sum') != digest or upload.get('bytes') != len(raw)
-                            or not re.fullmatch(r'file-[A-Za-z0-9_-]+', source_file_id)):
-                        raise ValueError('MinerU uploaded source identity differs')
-                    created = _json(send(base + '/parse/jobs', {
-                        'files': [{'source': {'type': 'file_id', 'file_id': source_file_id}}],
-                        'ocr_mode': 'ocr', 'output_formats': ['zip']}))
-                    job_id = created.get('job_id', '')
-                    if not re.fullmatch(r'job_[A-Za-z0-9_-]+', job_id):
-                        raise ValueError('MinerU returned an invalid job identity')
-                    while True:
-                        value = _json(send(base + '/parse/jobs/' + job_id))
-                        if value.get('job_id') != job_id:
-                            raise ValueError('MinerU job identity changed')
-                        status = value.get('status')
-                        if status == 'completed':
-                            job_completed = True
-                            break
-                        if status not in ('queued', 'running'):
-                            raise ValueError('MinerU job did not complete: ' + str(status))
-                        time.sleep(min(.2, max(0, deadline-time.monotonic())))
-                    files = value.get('files', [])
-                    if len(files) != 1 or files[0].get('status') != 'completed' or files[0].get('file_id') != source_file_id:
-                        raise ValueError('MinerU full input did not complete')
-                    file_id = files[0].get('output_files', {}).get('zip', {}).get('file_id', '')
-                    if not re.fullmatch(r'file-[A-Za-z0-9_-]+', file_id):
-                        raise ValueError('MinerU complete artifact identity unavailable')
-                    outputs, captured = _mineru_outputs(send(base + '/files/' + file_id + '/content'))
-                    assets.update({'mineru/' + name: value for name, value in captured.items()})
-                lifecycle['transaction']={'status':'persisted','taskBinding':task_binding,'input':input_ref,
-                    'attempts':copy.deepcopy([attempt for attempt in attempts if attempt['parser']==parser]),
-                    'rawOutputs':{name:store.put_bytes(content,identity_scope='exact_native_parser_output_bytes')
-                        for name,content in outputs.items()}}
+            assets = {input_name: raw}
             mapping = [{'parserPageIndex': 0, 'providerInputPageNo': 1, 'physicalPageNo': physical_page,
                         'width': width, 'height': height, 'coordinateUnit': 'pixel',
                         'providerBboxFrame': 'raster' if parser == 'paddleocr-vl' else 'normalized',
-                        'inputArtifactName': input_name,
-                        'originalPageTransform': transform}]
-            runs.append(normalize_parser_run(parser, outputs, source, config[parser]['identity'], mapping,
+                        'inputArtifactName': input_name, 'originalPageTransform': transform}]
+            upload_body = {'filename': input_name, 'bytes': len(raw), 'mime_type': media_type,
+                           'purpose': 'parse', 'sha256sum': digest}
+            options = PADDLE_OPTIONS if parser == 'paddleocr-vl' else {'upload': upload_body, 'parse': MINERU_OPTIONS}
+            binding = task_binding(parser, source, mapping,
+                {'sha256': digest, 'byteCount': len(raw), 'mediaType': media_type}, config[parser], options, source_context)
+            task_record = {'parser': parser, 'taskSha256': hashlib.sha256(_bytes(binding)).hexdigest(),
+                           'mode': 'lookup_not_completed', 'status': 'started', 'httpDispatches': 0}
+            provider_tasks.append(task_record)
+            cached = load_success(store, binding)
+            native_binding={'parser':parser,'inputSha256':digest,'inputByteCount':len(raw),
+                'originalSourceSha256':source['sourceSha256'],'physicalPageNo':physical_page,
+                'profileSha256':hashlib.sha256(_bytes(config[parser]['identity'])).hexdigest()}
+            if cached is not None:
+                task_record.update(mode='completed_task_reuse', successRef=cached['successRef'],
+                    historicalLifecycleRef=cached['historicalLifecycleRef'])
+                outputs, assets = cached['outputs'], cached['assets']
+                if parser == 'paddleocr-vl': paddle_capture = cached['captureMetadata']
+            else:
+                task_record['mode'] = 'fresh_provider'
+                provider_config=dict(config[parser],taskBinding=native_binding)
+                with owned_native_provider(provider_config, deadline-time.monotonic(),
+                        receipt_dir=store.root / 'jobs' / uuid.uuid4().hex / parser) as lifecycle:
+                    lifecycles.append(lifecycle)
+                    base = config[parser]['baseUrl'].rstrip('/')
+                    if parser == 'paddleocr-vl':
+                        body = {'file': base64.b64encode(raw).decode('ascii'), **PADDLE_OPTIONS}
+                        wire = send(base + '/layout-parsing', body)
+                        value = _json(wire)
+                        if value.get('errorCode', 0) != 0 or len(value.get('result', {}).get('layoutParsingResults', [])) != 1:
+                            raise ValueError('Paddle full-page response is failed or incomplete')
+                        outputs = {'page_json': wire}
+                        captured_outputs, captured_assets, paddle_capture = _paddle_native_outputs(value['result'], digest, len(raw), store)
+                        if config[parser].get('requireNativeOutputCapture') and paddle_capture is None:
+                            raise ValueError('Configured native Paddle output capture is missing; pruned JSON is insufficient')
+                        outputs.update(captured_outputs); assets.update(captured_assets)
+                        for result in value['result']['layoutParsingResults']:
+                            images = dict(result.get('markdown', {}).get('images') or {})
+                            images.update(result.get('outputImages') or {})
+                            for name, encoded in images.items():
+                                if not isinstance(encoded, str) or encoded.startswith(('http:', 'https:')):
+                                    raise ValueError('Paddle artifacts must be returned inline, not fetched implicitly')
+                                if encoded.startswith('data:'):
+                                    encoded = encoded.split(',', 1)[1]
+                                assets['paddle/' + name] = base64.b64decode(encoded, validate=True)
+                    else:
+                        upload = _json(send(base + '/uploads', upload_body))
+                        if upload.get('status') != 'completed':
+                            upload_id = upload.get('id', '')
+                            if not re.fullmatch(r'upload_[A-Za-z0-9_-]+', upload_id):
+                                raise ValueError('MinerU upload identity invalid')
+                            send(base + '/uploads/' + upload_id + '/content', raw, method='PUT')
+                            upload = _json(send(base + '/uploads/' + upload_id + '/complete', {'sha256sum': digest}))
+                        source_file_id = upload.get('file', {}).get('id', '')
+                        if (upload.get('status') != 'completed' or upload.get('sha256sum') != digest or upload.get('bytes') != len(raw)
+                                or not re.fullmatch(r'file-[A-Za-z0-9_-]+', source_file_id)):
+                            raise ValueError('MinerU uploaded source identity differs')
+                        created = _json(send(base + '/parse/jobs', {
+                            'files': [{'source': {'type': 'file_id', 'file_id': source_file_id}}], **MINERU_OPTIONS}))
+                        job_id = created.get('job_id', '')
+                        if not re.fullmatch(r'job_[A-Za-z0-9_-]+', job_id):
+                            raise ValueError('MinerU returned an invalid job identity')
+                        while True:
+                            value = _json(send(base + '/parse/jobs/' + job_id))
+                            if value.get('job_id') != job_id:
+                                raise ValueError('MinerU job identity changed')
+                            status = value.get('status')
+                            if status == 'completed':
+                                job_completed = True
+                                break
+                            if status not in ('queued', 'running'):
+                                raise ValueError('MinerU job did not complete: ' + str(status))
+                            time.sleep(min(.2, max(0, deadline-time.monotonic())))
+                        files = value.get('files', [])
+                        if len(files) != 1 or files[0].get('status') != 'completed' or files[0].get('file_id') != source_file_id:
+                            raise ValueError('MinerU full input did not complete')
+                        file_id = files[0].get('output_files', {}).get('zip', {}).get('file_id', '')
+                        if not re.fullmatch(r'file-[A-Za-z0-9_-]+', file_id):
+                            raise ValueError('MinerU complete artifact identity unavailable')
+                        outputs, captured = _mineru_outputs(send(base + '/files/' + file_id + '/content'))
+                        assets.update({'mineru/' + name: value for name, value in captured.items()})
+                    lifecycle['transaction']={'status':'persisted','taskBinding':native_binding,'input':input_ref,
+                        'attempts':copy.deepcopy([attempt for attempt in attempts if attempt['parser']==parser]),
+                        'rawOutputs':{name:store.put_bytes(content,identity_scope='exact_native_parser_output_bytes')
+                            for name,content in outputs.items()}}
+            outputs, assets = dict(sorted(outputs.items())), dict(sorted(assets.items()))
+            run = normalize_parser_run(parser, outputs, source, config[parser]['identity'], mapping,
                 artifacts=assets, required_artifacts=list(assets), artifact_store=store,
                 provider_input_identity={'mediaType': media_type, 'inputSha256': digest,
                     'inputArtifactName': input_name, 'pageCount': 1, 'pageIndexMapMeaning': 'provider_input_document'},
-                    terminal={'status': 'completed', 'pageResults': [{'parserPageIndex': 0, 'status': 'completed'}]}))
+                    terminal={'status': 'completed', 'pageResults': [{'parserPageIndex': 0, 'status': 'completed'}]})
+            within_deadline = time.monotonic() < deadline
+            if cached is not None and not within_deadline:
+                raise TimeoutError('Complete-parser deadline elapsed during provider capture validation')
+            if cached is not None and run['completeness']['status'] != 'complete':
+                raise ValueError('Cached successful provider no longer has complete material')
+            if cached is None and within_deadline:
+                success = commit_success(store, binding, outputs, assets, lifecycle, run['completeness'],
+                                         paddle_capture if parser == 'paddleocr-vl' else None, deadline=deadline)
+                task_record.update(cacheDisposition='success_committed' if success else 'not_eligible_for_success_reuse')
+                if success is not None: task_record['successRef'] = success
+            elif cached is None:
+                task_record['cacheDisposition'] = 'not_stored_total_deadline_elapsed'
+            task_record['status'] = 'completed'
+            runs.append(run)
         bundle = build_dual_parser_evidence(runs, artifact_store=store)
         bundle_ref = store.put_bytes(_bytes(bundle))
         whole_groups = select_whole_parser_groups(bundle, config.get('wholeParserFeaturePolicy'), artifact_store=store)
+        if not whole_groups:
+            raise ValueError('Requested parser page is unavailable at physical page '
+                             + str(physical_page) + '; complete parser evidence retained')
         regions = []
         for group in whole_groups:
             group['dualEvidenceRef'] = bundle_ref
             channel = group['selectedParser'] or 'paddleocr-vl'
             run = next(run for run in runs if run['parser'] == channel)
-            page = next(page for page in run['pages'] if page['physicalPageNo'] == group['physicalPageNo'])
+            page = next((page for page in run['pages'] if page['physicalPageNo'] == group['physicalPageNo']), None)
+            if page is None:
+                raise ValueError('Primary parser page is unavailable for ' + channel + ' at physical page '
+                                 + str(group['physicalPageNo']) + '; complete parser evidence retained')
             for block in page['blocks']:
                 geometry = project_bbox_to_original(run, page, block['bbox'])
                 region = {'id': block['blockId'], 'kind': block['label'], 'text': block['text'],
@@ -518,7 +556,28 @@ def recognize_complete_page(raw, config, store, *, request=_request, source_cont
                 if 'table' in block:
                     region['table'] = block['table']
                 regions.append(region)
-        return {'text': '\n'.join(region['text'] for region in regions if isinstance(region['text'], str)),
+        original_text = '\n'.join(region['text'] for region in regions if isinstance(region['text'], str))
+        auxiliary = None
+        if line_observer is not None and source_context is not None:
+            started = time.monotonic()
+            auxiliary = {'status': 'not_started_budget_exhausted', 'remainingSecondsBefore': deadline-started,
+                         'synchronousNativeCancellation': 'not_supported', 'sourceQualityAccepted': False}
+            if started < deadline:
+                try:
+                    from ocr_layout_coverage import layout_gap_regions
+                    capture = line_observer(raw, store)
+                    auxiliary['observationRef'] = capture['artifactDescriptor']
+                    additions, coverage = layout_gap_regions(capture, runs, frame, physical_page, store)
+                    auxiliary.update(coverage)
+                    if time.monotonic() < deadline:
+                        regions.extend(additions)
+                    else:
+                        auxiliary.update(status='observed_after_deadline_unapplied', addedRegions=0)
+                except Exception as error:
+                    auxiliary.update(status='failed', errorType=type(error).__name__, error=str(error))
+            auxiliary['elapsedSeconds'] = time.monotonic()-started
+            auxiliary['deadlineExceeded'] = time.monotonic() >= deadline
+        value = {'text': original_text,
                 'lines': [], 'regions': regions, 'wholePageGroups': whole_groups, 'frame': frame, 'adoptionStatus': 'candidate_unverified',
                 'parserRuns': [{'parser': run['parser'], 'runId': run['runId'],
                                 'identity': run['identity'], 'captureStatus': run['captureStatus']} for run in runs],
@@ -531,12 +590,22 @@ def recognize_complete_page(raw, config, store, *, request=_request, source_cont
                     'runtimeIdentityStatus': 'operator_declaration_not_active_runtime_verification',
                     'paddleNativeCapture': paddle_capture,
                     'rawResponseSha256': bundle_ref['sha256'], 'rawResponses': responses,
-                    'providerLifecycles': lifecycles},
+                    'providerLifecycles': lifecycles, 'providerTasks': provider_tasks},
                 'coverage': {'sourceContentStatus': 'unknown', 'structureStatus': 'unverified',
-                    'dualExecutionComplete': True, 'dualParserComplete': False,
+                    'dualExecutionComplete': all(task['mode'] == 'fresh_provider' for task in provider_tasks),
+                    'freshProviderTasks': sum(task['mode'] == 'fresh_provider' for task in provider_tasks),
+                    'completedProviderTaskHits': sum(task['mode'] == 'completed_task_reuse' for task in provider_tasks),
+                    'dualResultAssemblyComplete': True, 'dualParserComplete': False,
                     'sourceQualityAccepted': False, 'captureCompleteness': bundle['dualCompleteness']}}
+        if auxiliary is not None:
+            value['coverage']['auxiliaryLineCoverage'] = auxiliary
+        return value
     except Exception as error:
-        cleanup = {'status': 'not_applicable' if job_completed else 'remote_submission_or_cancellation_unknown'}
+        if provider_tasks and provider_tasks[-1]['status'] != 'completed':
+            provider_tasks[-1].update(status='failed', errorType=type(error).__name__)
+        submitted = any(attempt['parser'] == 'mineru' and attempt['method'] == 'POST'
+                        and attempt['url'].endswith('/parse/jobs') for attempt in attempts)
+        cleanup = {'status': 'not_applicable' if job_completed or not submitted else 'remote_submission_or_cancellation_unknown'}
         if job_id and not job_completed:
             try:
                 cancellation = request(config['mineru']['baseUrl'].rstrip('/') + '/parse/jobs/' + job_id,
@@ -554,6 +623,6 @@ def recognize_complete_page(raw, config, store, *, request=_request, source_cont
                         responseComplete=cleanup_error.complete)
         receipt = store.put_bytes(_bytes({'status': 'failed', 'inputSha256': digest,
             'input': input_ref, 'attempts': attempts, 'completedResponses': responses, 'failedProvider': parser,
-            'ownedJobId': job_id, 'remoteCleanup': cleanup, 'providerLifecycles': lifecycles,
+            'ownedJobId': job_id, 'remoteCleanup': cleanup, 'providerLifecycles': lifecycles, 'providerTasks': provider_tasks,
             'errorType': type(error).__name__, 'reason': str(error)}))
         raise CompleteOcrError(str(error), receipt) from error

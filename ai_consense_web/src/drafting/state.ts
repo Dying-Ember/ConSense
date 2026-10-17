@@ -4,8 +4,8 @@ import type { BodyDraft } from './body-edit'
 
 export type DraftValue = string | number | boolean | null | DraftValue[] | { [key: string]: DraftValue }
 export type Applicability = 'yes' | 'no' | 'unknown'
-export type DraftViewState = { step: 'inputs' | 'variables' | 'preview'; activeFile: string; review?: { layout: 'list' | 'focus'; groupId: string }; reading?: { fileKey: string; selectedKey: string; selectedActionId: string } }
-export const projectDrafts = new Map<string, { values: Record<string, DraftValue>; baseline: Record<string, string>; documents?: Record<string, { content: string; baseline: string; body?: BodyDraft }>; view?: DraftViewState }>()
+export type DraftViewState = { step: 'inputs' | 'identify' | 'review' | 'variables' | 'preview'; activeFile: string; review?: { layout: 'list' | 'focus'; groupId: string }; reading?: { fileKey: string; selectedKey: string; selectedActionId: string } }
+export const projectDrafts = new Map<string, { values: Record<string, DraftValue>; baseline: Record<string, string>; notes?: Record<string, string>; intentionalEmpty?: Record<string, boolean>; emptyBaseline?: Record<string, boolean>; documents?: Record<string, { content: string; baseline: string; body?: BodyDraft }>; view?: DraftViewState }>()
 
 /** Stale snapshots remain readable, but the server requires a current draft for edits and binary output. */
 export function documentCapabilities(document: Pick<DraftDocument, 'generated' | 'stale'> | undefined, contentDirty: boolean) {
@@ -142,9 +142,10 @@ export function actionForUnresolved(issue: DraftUnresolved, actions: DraftPlanAc
 }
 
 function candidateIdentity(candidate: DraftCandidate): DraftCandidateIdentity {
-  return { value: candidate.value, sourceDocumentId: candidate.sourceDocumentId ?? null, sourceHash: candidate.sourceHash ?? null, sourceQuote: candidate.sourceQuote ?? null }
+  if (candidate.graphRevisionId) return { ...clone(candidate), sourceDocumentId: candidate.sourceDocumentId ?? null, sourceHash: candidate.sourceHash ?? null, sourceQuote: candidate.sourceQuote ?? null }
+  return { value: candidate.value, sourceDocumentId: candidate.sourceDocumentId ?? null, sourceHash: candidate.sourceHash ?? null, sourceQuote: candidate.sourceQuote ?? null, ...(candidate.originalSha256 !== undefined ? { originalSha256: candidate.originalSha256 } : {}), ...(candidate.extractionRunId !== undefined ? { extractionRunId: candidate.extractionRunId } : {}) }
 }
-export function adoptionPatch(raw: string, baseline: string, reviewRequired: boolean, candidateIndex?: number, displayed?: Pick<DraftVariable, 'source' | 'candidates'>): DraftVariablePatch {
+export function adoptionPatch(raw: string, baseline: string, reviewRequired: boolean, candidateIndex?: number, displayed?: Pick<DraftVariable, 'source' | 'candidates' | 'graphRevisionId' | 'fieldDefinitionHash'>): DraftVariablePatch {
   if (candidateIndex !== undefined) {
     const candidate = displayed?.candidates?.[candidateIndex]
     if (!candidate) throw new Error('Candidate no longer exists. Refresh the input before adopting it.')
@@ -152,7 +153,7 @@ export function adoptionPatch(raw: string, baseline: string, reviewRequired: boo
   }
   if (raw !== baseline) return { value: raw, reviewed: true }
   if (!displayed) throw new Error('Suggestion evidence is unavailable. Refresh the input before adopting it.')
-  const suggestionSnapshot = { value: baseline, source: displayed.source ?? null, candidates: (displayed.candidates ?? []).map(candidateIdentity), reviewRequired }
+  const suggestionSnapshot = { value: baseline, source: displayed.source ?? null, candidates: (displayed.candidates ?? []).map(candidateIdentity), reviewRequired, ...(displayed.graphRevisionId ? { graphRevisionId: displayed.graphRevisionId, fieldDefinitionHash: displayed.fieldDefinitionHash } : {}) }
   return reviewRequired ? { reviewed: true, confirmed: true, suggestionSnapshot } : { confirmed: true, suggestionSnapshot }
 }
 

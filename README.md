@@ -44,7 +44,21 @@ npm run dev -- --host 127.0.0.1 --port 5173
 
 Open `http://127.0.0.1:5173/#/drafting`. Set the API target and service allowed origins to match your actual ports. The frontend proxies `/api` to the companion service.
 
-When using the managed Windows launcher `scripts/local.ps1`, set `BackendMaxHeapMiB` in the ignored `.local/runtime.json` to control the backend's Java heap. For example, `"BackendMaxHeapMiB": 16384` gives a 16 GiB maximum heap; the initial heap remains 256 MiB and memory grows as needed. The default for configurations without this field remains 2048 MiB. Apply a changed limit with `pwsh -File scripts/local.ps1 -Action restart-backend`. Reserve memory for Windows, OCR/model workers and other services; physical RAM does not automatically increase Java's heap limit. Kubernetes/container memory limits and JVM sizing must be configured separately on the deployment target.
+When using the managed Windows launcher `scripts/local.ps1`, set `BackendMaxHeapMiB` in the ignored `.local/runtime.json` to control the backend's Java heap. The default when this field is absent is 32768 MiB (32 GiB); an explicit value takes precedence. For example, `"BackendMaxHeapMiB": 32768` selects a 32 GiB maximum heap; the initial heap remains 256 MiB and memory grows as needed. A running backend keeps its current limit until an authorized restart with `pwsh -File scripts/local.ps1 -Action restart-backend`. Full-document OER offline checks start with a 32 GiB heap and a 48 GiB owned-process memory limit; increase these if measured demand and host headroom require it. Account for simultaneous Windows, OCR/model and other workloads. Heap, process/container memory and GPU memory have separate limits on each deployment target.
+
+The same ignored runtime configuration can opt the normal backend into a separately managed local OCR coordinator:
+
+```json
+"BackendOcr": {
+  "Enabled": true,
+  "Mode": "local",
+  "BaseUrl": "http://127.0.0.1:18780",
+  "TimeoutMs": 1800000,
+  "TextLayerMinChars": 40
+}
+```
+
+Without `BackendOcr`, or with `"Enabled": false`, the launcher keeps OCR disabled. Enabled configurations require all five fields, an HTTP loopback IP with an explicit port, a positive integer timeout that fits OkHttp's call limit, and a positive text-layer threshold. `BaseUrl` is the coordinator authority; the backend appends `/health`, `/ocr` and `/native-pdf/table-candidates`. Start and verify the complete recognition coordinator separately before applying this setting with `pwsh -File scripts/local.ps1 -Action restart-backend`; the launcher does not start providers or certify their model/source quality. Run the isolated configuration checks with `pwsh -File scripts/tests/test-local-backend-ocr.ps1`.
 
 ## Models, OCR and document export
 

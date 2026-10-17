@@ -27,6 +27,7 @@ from artifact_store import ArtifactStore, ArtifactStoreError, DESCRIPTOR_SCHEMA
 
 SCHEMA = 'consense.structured-parser-evidence.v1'
 PARSERS = ('paddleocr-vl', 'mineru')
+MAX_PADDLE_PAGE_JSON_BYTES = 1024 * 1024 * 1024
 
 
 class ParserEvidenceError(ValueError):
@@ -600,7 +601,11 @@ def normalize_parser_run(parser, outputs, source, identity, page_map, *, artifac
     for name, value in outputs.items():
         if not isinstance(name, str) or not re.fullmatch(r'[a-zA-Z0-9_.-]+', name):
             raise ParserEvidenceError('Raw output names must be simple identifiers')
-        raw[name], decoded[name] = _raw_output(value, artifact_store=artifact_store)
+        if parser == 'paddleocr-vl' and name == 'page_json':
+            raw[name], decoded[name] = _raw_output(value, max_bytes=MAX_PADDLE_PAGE_JSON_BYTES,
+                                                   artifact_store=artifact_store)
+        else:
+            raw[name], decoded[name] = _raw_output(value, artifact_store=artifact_store)
         if raw[name]['projectionStatus'] != 'available':
             issues.append(_issue(raw[name]['projectionStatus'], '/' + name))
     artifacts = artifacts or {}

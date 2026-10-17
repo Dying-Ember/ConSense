@@ -26,14 +26,15 @@ public class CanonicalEvidenceBackend {
                 .onUnmappableCharacter(CodingErrorAction.REPORT).decode(ByteBuffer.wrap(bytes)).toString();}
             catch(java.nio.charset.CharacterCodingException invalid){throw new CanonicalEvidenceException(HttpStatus.BAD_GATEWAY,"CANONICAL_JSON_INVALID");}}
     }
+    public int normalMaximumBytes(){return NormalObservedContract.maximumBytes(properties.getMaxSnapshotBytes());}
     public String health(){return get(null,null,null,null,false,null,properties.getMaxSnapshotBytes()).json();}
-    public String normalHealth(String module){return request(normalBase(module).newBuilder().addPathSegment("health").build(),Math.min(properties.getMaxSnapshotBytes(),NormalObservedPreparationService.MAX_BYTES)).json();}
+    public String normalHealth(String module){return request(normalBase(module).newBuilder().addPathSegment("health").build(),normalMaximumBytes()).json();}
     public String normalSnapshot(String projection,String module){
         if(projection==null||!projection.matches("[a-f0-9]{64}"))throw new CanonicalEvidenceException(HttpStatus.BAD_REQUEST,"CANONICAL_SHA_INVALID");
-        return request(normalBase(module).newBuilder().addPathSegment("canonical").addPathSegment(projection).addQueryParameter("module",module).build(),Math.min(properties.getMaxSnapshotBytes(),NormalObservedPreparationService.MAX_BYTES)).json();
+        return request(normalBase(module).newBuilder().addPathSegment("canonical").addPathSegment(projection).addQueryParameter("module",module).build(),normalMaximumBytes()).json();
     }
     public String normalObserved(String request,String module){
-        int maximum=Math.min(properties.getMaxSnapshotBytes(),NormalObservedPreparationService.MAX_BYTES);
+        int maximum=normalMaximumBytes();
         byte[] bytes=request.getBytes(StandardCharsets.UTF_8);
         if(bytes.length>maximum)throw new CanonicalEvidenceException(HttpStatus.BAD_REQUEST,"NORMAL_OBSERVED_TOO_LARGE");
         HttpUrl base=normalBase(module);
@@ -97,17 +98,22 @@ public class CanonicalEvidenceBackend {
     protected Reply request(HttpUrl url,int maximum){
         return execute(new Request.Builder().url(url).get().build(),maximum);
     }
-    private Reply execute(Request request,int maximum){
+    protected Reply execute(Request request,int maximum){
         OkHttpClient client=new OkHttpClient.Builder().followRedirects(false).followSslRedirects(false).retryOnConnectionFailure(false)
                 .readTimeout(properties.getTimeoutMs(),TimeUnit.MILLISECONDS)
                 .callTimeout(properties.getTimeoutMs(),TimeUnit.MILLISECONDS).build();
         try(Response response=client.newCall(request).execute()){
             if(!response.isSuccessful()||response.body()==null)throw new CanonicalEvidenceException(HttpStatus.BAD_GATEWAY,"OER_EVIDENCE_UPSTREAM_UNAVAILABLE");
-            ResponseBody body=response.body();if(body.contentLength()>maximum)throw new CanonicalEvidenceException(HttpStatus.BAD_GATEWAY,"OER_EVIDENCE_TOO_LARGE");
-            ByteArrayOutputStream out=new ByteArrayOutputStream();byte[] block=new byte[8192];int n;
-            try(InputStream input=body.byteStream()){while((n=input.read(block))!=-1){if(out.size()>maximum-n)throw new CanonicalEvidenceException(HttpStatus.BAD_GATEWAY,"OER_EVIDENCE_TOO_LARGE");out.write(block,0,n);}}
-            return new Reply(out.toByteArray(),response.header("Content-Type"),response.header("ETag"),response.header("X-Source-Sha256"),response.header("X-Projection-Sha256"),
+            return new Reply(readBody(response.body(),maximum),response.header("Content-Type"),response.header("ETag"),response.header("X-Source-Sha256"),response.header("X-Projection-Sha256"),
                     response.header("X-Source-Revision-Sha256"),response.header("X-Evidence-Identity-Sha256"));
         }catch(IOException error){throw new CanonicalEvidenceException(HttpStatus.BAD_GATEWAY,"OER_EVIDENCE_UPSTREAM_UNAVAILABLE");}
     }
+    static byte[] readBody(ResponseBody body,int maximum)throws IOException{
+        if(maximum<=0)throw new CanonicalEvidenceException(HttpStatus.SERVICE_UNAVAILABLE,"OER_EVIDENCE_CONFIG_INVALID");
+        if(body.contentLength()>maximum)throw new CanonicalEvidenceException(HttpStatus.BAD_GATEWAY,"OER_EVIDENCE_TOO_LARGE");
+        ByteArrayOutputStream out=new ByteArrayOutputStream();byte[] block=new byte[8192];int n;
+        try(InputStream input=body.byteStream()){while((n=input.read(block))!=-1){if(out.size()>maximum-n)throw new CanonicalEvidenceException(HttpStatus.BAD_GATEWAY,"OER_EVIDENCE_TOO_LARGE");out.write(block,0,n);}}
+        return out.toByteArray();
+    }
+
 }

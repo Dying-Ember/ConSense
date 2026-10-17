@@ -105,7 +105,7 @@ const workspace = () => document.querySelector('[data-document-workspace]')
   baseDocument.docxSha256 = await docx(baseDocument.content); baseDocument.sourceSha256 = baseDocument.docxSha256
   baseDocument.blocks[0].id = nativePath
   servers.clear()
-  app.mount('#app'); await settled(); await click('3. Preview and export')
+  app.mount('#app'); await settled(); await click('5 Preview and export')
   await waitFor('the actual complete DOCX in the primary view', () => workspace()?.querySelector('[data-document-paper]')?.textContent.includes('SYNTHETIC complete document heading'))
   const paper = workspace().querySelector('[data-document-paper]'), loadCount = loads.length
   assert.ok(paper?.textContent.includes('SYNTHETIC complete document heading'), 'The primary view loads the actual full DOCX')

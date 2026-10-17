@@ -7,6 +7,7 @@ import com.fasterxml.jackson.annotation.JsonIgnore;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 /** A source location, not an inferred Word page. PDF boxes use top-left normalized coordinates. */
 @Data
@@ -44,6 +45,10 @@ public class DocumentBlock {
     @JsonInclude(JsonInclude.Include.NON_EMPTY)
     private List<JsonNode> wordNativeObjects = new ArrayList<>();
     @JsonInclude(JsonInclude.Include.NON_EMPTY)
+    private List<JsonNode> wordTextSpans = new ArrayList<>();
+    @JsonInclude(JsonInclude.Include.NON_EMPTY)
+    private List<JsonNode> wordFields = new ArrayList<>();
+    @JsonInclude(JsonInclude.Include.NON_EMPTY)
     private List<PdfPageEvidence.PdfGlyph> pdfGlyphs = new ArrayList<>();
     @JsonInclude(JsonInclude.Include.NON_NULL)
     private PdfPageEvidence.PdfFormField pdfFormField;
@@ -72,6 +77,13 @@ public class DocumentBlock {
         private String gridSpanRaw, gridBeforeRaw;
         private Integer rowIndex, cellIndex, gridColumn, columnSpan, rowSpan;
         private String text, originalText, deletedText, strikeText;
+        /** Exact original physical cell and owning native row/table; no rendered geometry. */
+        @JsonInclude(JsonInclude.Include.NON_NULL)
+        private JsonNode sourcePosition;
+        @JsonInclude(JsonInclude.Include.NON_EMPTY)
+        private List<JsonNode> wordTextSpans = new ArrayList<>();
+        @JsonInclude(JsonInclude.Include.NON_EMPTY)
+        private List<JsonNode> wordFields = new ArrayList<>();
         private List<String> limitations = new ArrayList<>();
     }
 
@@ -80,6 +92,11 @@ public class DocumentBlock {
         private Integer level;
         private Long value;
         private boolean appliedToEffectiveText;
+        /** Literal glyphs in numbering.xml, distinct from body w:sym occurrences. */
+        @JsonInclude(JsonInclude.Include.NON_NULL)
+        private List<WordSymbol> fontSymbols;
+        @JsonInclude(JsonInclude.Include.NON_NULL)
+        private Map<String, String> fontAttributes;
     }
     @Data public static class WordSymbol {
         private String location, font, hexCode, decodedText, resolutionStatus, mappingSource;

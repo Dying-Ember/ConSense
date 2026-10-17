@@ -29,11 +29,19 @@ class VettingSemanticPacketHarnessTest {
         return review(corpus,Collections.singletonList(corpus.get(0)),provider,observer,probe);
     }
     private Result review(List<Chunk> corpus,List<Chunk> ranked,LlmClient provider,VettingInputBudget.Observer observer,boolean probe) {
+        return review(corpus,ranked,provider,observer,probe,null,()->{});
+    }
+    private Result review(List<Chunk> corpus,List<Chunk> ranked,LlmClient provider,VettingInputBudget.Observer observer,boolean probe,List<com.consense.domain.SourceDocument> documents,Runnable sourceGuard) {
+        return review(corpus,ranked,provider,observer,probe,documents,sourceGuard,null);
+    }
+    private Result review(List<Chunk> corpus,List<Chunk> ranked,LlmClient provider,VettingInputBudget.Observer observer,boolean probe,List<com.consense.domain.SourceDocument> documents,Runnable sourceGuard,VettingCheckpointService.Session durable) {
         Chunk seed=corpus.get(0);ConsenseProperties p=props(seed);if(probe)p.getVetting().setProbeDirectory(temp.toString());
         when(provider.available()).thenReturn(true);when(provider.chatModel()).thenReturn(p.getLlm().getChatModel());
         VettingRetrievalClient retrieval=mock(VettingRetrievalClient.class);when(retrieval.retrieve(anyString(),anyString(),eq("tender"),anyList())).thenReturn(ranked);when(retrieval.retrieve(anyString(),anyString(),eq("tender"),anyList(),any())).thenReturn(ranked);
         VettingSemanticReview semantic=new VettingSemanticReview(new AiGateway(provider),p,retrieval);semantic.setInputBudgetObserver(observer);
-        Result result=semantic.reviewWithProgress(probe?"packet-fixture":null,"synthetic-project",corpus,"en",(n,total,message)->{assertTrue(n<=total);});
+        Result result;try(VettingSemanticReview.CheckpointScope ignored=semantic.bindCheckpoint(durable)){
+            result=semantic.reviewWithProgress(probe?"packet-fixture":null,"synthetic-project",corpus,"en",(n,total,message)->{assertTrue(n<=total);},documents,sourceGuard);
+        }
         if(probe){verify(retrieval,times(1)).index(eq("synthetic-project"),eq(corpus),any());verify(retrieval,times(1)).retrieve(eq("synthetic-project"),anyString(),eq("tender"),eq(corpus),any());}
         else {verify(retrieval,times(1)).index("synthetic-project",corpus);verify(retrieval,times(1)).retrieve(eq("synthetic-project"),anyString(),eq("tender"),eq(corpus));}
         return result;
@@ -47,6 +55,72 @@ class VettingSemanticPacketHarnessTest {
         observed.setEffectiveContextTokens(262144);return observed;
     }
     private String declaration(String assessment,Chunk c){Map<String,Object> r=new LinkedHashMap<>();VettingCompetitionFixture.details(r);r.put("assessment",assessment);r.put("type","risk");r.put("severity","low");r.put("title","Synthetic declaration");r.put("comment","Source-only synthetic observation.");r.put("impact","Review pending");r.put("suggestion","Check original source");Map<String,Object> q=new LinkedHashMap<>();q.put("chunkId",c.getId());q.put("side","source");q.put("quote",c.getContent());r.put("evidence",Collections.singletonList(q));return JsonUtils.write(Collections.singletonList(r));}
+    @Test void ordinaryWholeTableUsesSameCompletePreviewAndActualEnvelopeWithoutChangingChunkSnapshot(){
+        com.consense.domain.SourceDocument source=NormalSourceCandidateGraphTest.ordinaryWordSource();List<Chunk> chunks=VettingCorpus.chunks(Collections.singletonList(source));String before=JsonUtils.write(chunks);
+        List<VettingInputBudget.Input> counted=new ArrayList<>();List<String> sent=new ArrayList<>();LlmClient provider=emptyProvider();
+        when(provider.chatStructured(anyList(),any())).thenAnswer(call->{sent.add(JsonUtils.write(call.getArgument(0)));return "[]";});
+        Result result=review(chunks,Collections.singletonList(chunks.get(0)),provider,input->{counted.add(input);return VettingTokenFixture.observe(input);},false,Collections.singletonList(source),()->{});
+        assertTrue(result.getActualGatewayCallCount()>0);assertFalse(sent.isEmpty());for(String actual:sent)assertTrue(counted.stream().anyMatch(input->actual.equals(JsonUtils.write(input.getMessages()))));
+        for(VettingInputBudget.Input input:counted)if(input.getMessages().get(1).getContent().contains("ordinary-physical-word-table-model-v1")){
+            assertTrue(input.getMessages().get(1).getContent().contains("word-row-7"));
+        }
+        assertTrue(counted.stream().anyMatch(input->input.getMessages().get(1).getContent().contains("ordinary-physical-word-table-model-v1")));
+        assertEquals(before,JsonUtils.write(chunks));
+    }
+    @Test void expandedOrdinaryTableOverBudgetCannotBeTrimmedOrDispatched(){
+        com.consense.domain.SourceDocument source=NormalSourceCandidateGraphTest.ordinaryWordSource();List<Chunk> chunks=VettingCorpus.chunks(Collections.singletonList(source));LlmClient provider=emptyProvider();
+        List<String> inputs=new ArrayList<>();Result result=review(chunks,Collections.singletonList(chunks.get(0)),provider,input->{
+            String user=input.getMessages().get(1).getContent();inputs.add(user);VettingInputBudget.Observation observation=VettingTokenFixture.observe(input);
+            if(user.contains("ordinary-physical-word-table-model-v1"))observation.setInputTokens(observation.getEffectiveContextTokens()-observation.getOutputReserveTokens()+1);return observation;
+        },false,Collections.singletonList(source),()->{});
+        verify(provider,never()).chatStructured(anyList(),any());assertEquals(0,result.getActualGatewayCallCount());assertTrue(result.getReviewedChunkIds().isEmpty());
+        assertTrue(inputs.stream().anyMatch(user->user.contains("word-row-7")));assertTrue(result.getTopicAudits().get(0).getGlobalCallStatus().contains("over_budget"));
+    }
+    @Test void coverageOnlyChangeDuringModelCallCannotAcceptOrdinaryResult(){
+        com.consense.domain.SourceDocument source=NormalSourceCandidateGraphTest.ordinaryWordSource();com.consense.domain.SourceDocument fresh=JsonUtils.read(JsonUtils.write(source),com.consense.domain.SourceDocument.class);
+        List<Chunk> chunks=VettingCorpus.chunks(Collections.singletonList(source));LlmClient provider=emptyProvider();when(provider.chatStructured(anyList(),any())).thenAnswer(call->{fresh.setParseCoverageJson("{\"complete\":false,\"changedDuringCall\":true}");return "[]";});
+        Result result=review(chunks,Collections.singletonList(chunks.get(0)),provider,VettingTokenFixture::observe,false,Collections.singletonList(source),()->VettingSourceMaterial.requireCurrentDocuments(Collections.singletonList(source),Collections.singletonList(fresh)));
+        assertEquals(1,result.getActualGatewayCallCount());assertTrue(result.getReviewedChunkIds().isEmpty());assertTrue(result.getCandidates().isEmpty());
+    }
+    @Test void sourceChangeAfterActualCounterCannotLoadCheckpointOrDispatch(){
+        com.consense.domain.SourceDocument source=NormalSourceCandidateGraphTest.ordinaryWordSource(),fresh=JsonUtils.read(JsonUtils.write(source),com.consense.domain.SourceDocument.class);
+        Chunk seed=VettingCorpus.chunks(Collections.singletonList(source)).get(0);List<Chunk> selected=Collections.singletonList(seed);LlmClient provider=emptyProvider();VettingCheckpointService.Session durable=new VettingCheckpointService(null,null,null).session("fixture","owner",()->fail("Stale source must reject before checkpoint access"));java.util.concurrent.atomic.AtomicInteger counts=new java.util.concurrent.atomic.AtomicInteger();
+        Result result=review(selected,selected,provider,input->{VettingInputBudget.Observation observed=VettingTokenFixture.observe(input);if(counts.incrementAndGet()==2)fresh.setParseCoverageJson("{\"changedAfterCounter\":true}");return observed;},false,Collections.singletonList(source),()->VettingSourceMaterial.requireCurrentDocuments(Collections.singletonList(source),Collections.singletonList(fresh)),durable);
+        assertEquals(2,counts.get());verify(provider,never()).chatStructured(anyList(),any());assertTrue(result.getReviewedChunkIds().isEmpty());assertTrue(result.getTopicAudits().get(0).getError().contains("source generation changed"));
+    }
+    @Test void graphChangeDuringCheckpointReadCannotReuseItsSavedResult(){
+        for(boolean changed:Arrays.asList(false,true)){
+            com.consense.domain.SourceDocument source=NormalSourceCandidateGraphTest.ordinaryWordSource(),fresh=JsonUtils.read(JsonUtils.write(source),com.consense.domain.SourceDocument.class);
+            List<Chunk> selected=Collections.singletonList(VettingCorpus.chunks(Collections.singletonList(source)).get(0));LlmClient provider=emptyProvider();
+            com.consense.repository.VettingPacketCheckpointRepository packets=mock(com.consense.repository.VettingPacketCheckpointRepository.class);org.springframework.transaction.PlatformTransactionManager transactions=mock(org.springframework.transaction.PlatformTransactionManager.class);
+            when(transactions.getTransaction(any())).thenReturn(new org.springframework.transaction.support.SimpleTransactionStatus());java.util.concurrent.atomic.AtomicReference<String> envelope=new java.util.concurrent.atomic.AtomicReference<>();String snapshot=VettingCorpus.hash(JsonUtils.write(selected));
+            when(packets.findByRunIdAndObservationSha256(anyString(),anyString())).thenAnswer(call->{
+                String id="topic-1-packet-0-input-"+envelope.get()+"-source-"+snapshot;SemanticPacketVO packet=new SemanticPacketVO();packet.setPacketId(id);packet.setSourceSnapshotSha256(snapshot);packet.setPromptEnvelopeSha256(envelope.get());packet.setStatus("completed_empty");
+                VettingCheckpointService.Saved saved=new VettingCheckpointService.Saved();saved.setPacket(packet);saved.getReviewedChunkIds().add(selected.get(0).getId());saved.getWarnings().add("valid cached result marker");
+                com.consense.domain.VettingPacketCheckpoint row=new com.consense.domain.VettingPacketCheckpoint();row.setRunId("fixture");row.setPacketId(id);row.setSourceSnapshotSha256(snapshot);row.setPromptEnvelopeSha256(envelope.get());row.setObservationSha256(call.getArgument(1));row.setStatus("SAVED");row.setResultJson(JsonUtils.write(saved));row.setResultSha256(VettingCorpus.hash(row.getResultJson()));
+                if(changed)fresh.setNormalCandidateJson("{\"changedGraphOnly\":true}");return Optional.of(row);
+            });
+            VettingCheckpointService checkpoint=new VettingCheckpointService(null,packets,transactions){@Override public com.consense.domain.VettingRun owned(String id,String owner){return new com.consense.domain.VettingRun();}};
+            Result result=review(selected,selected,provider,input->{envelope.set(input.getSerializedInputSha256());return VettingTokenFixture.observe(input);},false,Collections.singletonList(source),()->VettingSourceMaterial.requireCurrentDocuments(Collections.singletonList(source),Collections.singletonList(fresh)),checkpoint.session("fixture","owner"));
+            verify(packets,atLeastOnce()).findByRunIdAndObservationSha256(anyString(),anyString());verify(provider,never()).chatStructured(anyList(),any());assertTrue(result.getCandidates().isEmpty());
+            if(changed){assertTrue(result.getReviewedChunkIds().isEmpty());assertFalse(result.getWarnings().contains("valid cached result marker"));assertTrue(result.getTopicAudits().get(0).getError().contains("source generation changed"));}
+            else {assertEquals(Collections.singleton(selected.get(0).getId()),result.getReviewedChunkIds());assertTrue(result.getWarnings().contains("valid cached result marker"));}
+        }
+    }
+    @Test void graphChangeAfterInvalidOutputCannotDispatchStructuredRetry(){
+        com.consense.domain.SourceDocument source=NormalSourceCandidateGraphTest.ordinaryWordSource(),fresh=JsonUtils.read(JsonUtils.write(source),com.consense.domain.SourceDocument.class);
+        List<Chunk> selected=Collections.singletonList(VettingCorpus.chunks(Collections.singletonList(source)).get(0));LlmClient provider=emptyProvider();
+        when(provider.chatStructured(anyList(),any())).thenAnswer(call->{fresh.setNormalCandidateJson(fresh.getNormalCandidateJson()+" ");return "{";});
+        Result result=review(selected,selected,provider,VettingTokenFixture::observe,false,Collections.singletonList(source),()->VettingSourceMaterial.requireCurrentDocuments(Collections.singletonList(source),Collections.singletonList(fresh)));
+        verify(provider,times(1)).chatStructured(anyList(),any());assertEquals(1,result.getActualGatewayCallCount());assertTrue(result.getReviewedChunkIds().isEmpty());
+    }
+    @Test void unselectedWholeTableContextDoesNotBecomeAQuoteForTheOriginalSeed(){
+        com.consense.domain.SourceDocument source=NormalSourceCandidateGraphTest.ordinaryWordSource();Chunk seed=VettingCorpus.chunks(Collections.singletonList(source)).get(0);List<Chunk> selected=Collections.singletonList(seed);
+        String quote="Actual row 7 cell 1";assertFalse(seed.getContent().contains(quote));assertFalse(VettingCorpus.evidence(seed,"source",quote).isLocated());
+        com.fasterxml.jackson.databind.node.ArrayNode records=(com.fasterxml.jackson.databind.node.ArrayNode)JsonUtils.parse(declaration("issue",seed));((com.fasterxml.jackson.databind.node.ObjectNode)records.get(0).path("evidence").get(0)).put("quote",quote);
+        LlmClient provider=emptyProvider();when(provider.chatStructured(anyList(),any())).thenAnswer(call->{assertTrue(call.<List<LlmClient.ChatTurn>>getArgument(0).get(1).getContent().contains(quote));return records.toString();});
+        Result result=review(selected,selected,provider,VettingTokenFixture::observe,false,Collections.singletonList(source),()->{});assertEquals(1,result.getActualGatewayCallCount());assertTrue(result.getCandidates().isEmpty());assertTrue(result.getTopicAudits().get(0).getRejectedRecords()>0);
+    }
     @Test void absentTokenAdapterBlocksGlobalAndExtraWithoutClaimingCoverage() {
         LlmClient provider=emptyProvider();Result r=review(corpus(),provider,null,false);SemanticTopicVO a=r.getTopicAudits().get(0);
         verify(provider,never()).chatStructured(anyList(),any());assertEquals("not_submitted_budget_unknown",a.getGlobalCallStatus());assertEquals("not_submitted_budget_unknown",a.getStatus());assertEquals("not_submitted",a.getAggregateReviewStatus());assertEquals(0,a.getExtraPacketCount(),"Unknown preview must not create a fake transport-ready packet");assertEquals(1,a.getNotSubmittedPacketCount());assertTrue(a.getPendingSourceRequestCount()>0);assertTrue(a.getSourceRequests().stream().anyMatch(q->"budget_unknown".equals(q.getTransportStatus())&&"not_submitted_budget_unknown".equals(q.getReviewExecutionStatus())&&q.getRequiredChunkIds().contains("note")));assertEquals(0,r.getActualGatewayCallCount());assertTrue(r.getReviewedChunkIds().isEmpty());

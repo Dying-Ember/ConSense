@@ -12,6 +12,12 @@ execution: spec-only; no-new-execution-started
 > **2026-10-15 当前实施状态：** 全部分支已统一，适用代码/本机环境自动化及两轴审查已收口，实际通过、123 条件 skipped、历史排除和九项 retired 见[统一实施记录](../testing/consense-integrated-implementation-20261015.md)。原 08:30 目标未达，完整质量目标未 complete；按用户要求到代码阶段停手，真实模型/赛方原件/SL 效果、端到端及实际目标验收暂缓。下方原日期的 spec-only／未开工文字保留历史语境，UNI/ENG 来源质量门不因代码通过自动关闭。
 <!-- implementation-progress-20261015:end -->
 
+<!-- drafting-template-adaptation-plan-20261015:start -->
+**2026-10-15 新增Drafting前置任务：** [DYN-00–14任务图](drafting-template-adaptation-prerequisites-20261015.md)承接模板变量增减、重编号及语义变化。先DYN-00／01／02，再按G0–G4推进识别、业务定义与动态生成；来源缺口仍归原ENG唯一owner。DYN不替换UNI／ENG或改变历史完成状态；本轮仅规划，Ready不等于开始执行，已暂停真实效果与部署不自动恢复。
+<!-- drafting-template-adaptation-plan-20261015:end -->
+
+
+
 # 统一任务入口
 
 主规格：[ConSense OER／Vetting／Advisory 统一实施与验收](consense-oer-vetting-advisory-integrated-20261014.md)。引擎子图：[ENG-00–ENG-10](oer-engine-integration-repair-tickets-20261014.md)。产品问题：[PRD01–PRD08](consense-product-issues-agent-handoff-20261014.md)。历史完整范围：[NEXT-00–NEXT-10](oer-vetting-advisory-next-development-tickets-20261012.md)。

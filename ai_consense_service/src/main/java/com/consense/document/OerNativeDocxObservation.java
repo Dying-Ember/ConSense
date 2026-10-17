@@ -521,7 +521,7 @@ public final class OerNativeDocxObservation {
         factory.setAttribute(XMLConstants.ACCESS_EXTERNAL_DTD, ""); factory.setAttribute(XMLConstants.ACCESS_EXTERNAL_SCHEMA, "");
         factory.setXIncludeAware(false); factory.setExpandEntityReferences(false); return factory;
     }
-    private static Document parseXml(byte[] bytes) throws Exception {
+    static Document parseXml(byte[] bytes) throws Exception {
         javax.xml.parsers.DocumentBuilder builder = secureXmlFactory().newDocumentBuilder();
         builder.setErrorHandler(new org.xml.sax.helpers.DefaultHandler() {
             @Override public void fatalError(org.xml.sax.SAXParseException e) throws SAXException { throw e; }

@@ -22,6 +22,25 @@ async function harness(overrides = {}) {
   app.mount(element); await settle()
   return { props, element, events, scrolls, async click(selector) { const control = element.querySelector(selector); assert(control, `Rendered control ${selector}`); control.click(); await settle() }, dispose() { app.unmount(); element.remove() } }
 }
+async function unverifiedMappingStillReadsCurrentSavedBody() {
+  for (const mismatch of ['missing', 'unknown-native-path', 'unattributed']) {
+    const props = base(); props.dirtyKeys = []
+    props.original = reading('source-sha', [[1, 'Duration: ____ months. Keep NTT original context.']])
+    props.result = reading('result-sha', [[1, 'Duration: 42 months. Keep NTT generated context.']])
+    props.sourceBindings.bindings = [binding('duration', 1, props.original.paragraphs[0].text, props.original.paragraphs[0].text)]
+    props.resultBindings.bindings = mismatch === 'missing' ? [] : [binding('duration', 1, props.original.paragraphs[0].text, props.result.paragraphs[0].text, mismatch === 'unknown-native-path' ? { resultParagraphId: 'word/document.xml#/ns0:document[1]/ns0:body[1]/ns0:p[1]', locationStatus: 'unavailable' } : { appliedActionIds: [] })]
+    const h = await harness(props), paper = () => h.element.querySelector('[data-document-paper]')
+    assert.match(paper().textContent, /Duration: 42 months\. Keep NTT generated context\./, `${mismatch}: unverified review mapping must still display the actual current saved draft`)
+    assert.doesNotMatch(paper().textContent, /____|original context/, `${mismatch}: source text must not stand in for the saved draft`)
+    assert.equal(paper().querySelectorAll('del,ins').length, 0, 'Unknown mapping must not fabricate a verified inline change')
+    assert.match(h.element.textContent, /saved.*unverified|unverified.*saved/i)
+    for (const [locale, message] of [['zh-Hans','当前显示真实已保存文稿'],['zh-Hant','目前顯示真實已儲存文稿'],['en','Showing the current saved draft']]) { h.props.locale = locale; await settle(); assert.match(h.element.querySelector('[data-review-carrier-status]').textContent, new RegExp(message)); assert.match(paper().textContent, /Duration: 42 months\./) }
+    await h.click('[data-review-mode="original"]'); assert.match(paper().textContent, /Duration: ____ months\. Keep NTT original context\./)
+    assert.equal(h.events.length, 0, 'Changing read mode cannot regenerate, write or adopt')
+    h.dispose()
+  }
+  console.log('PASS: missing, unknown native and unattributed mappings display the exact current saved body, while source mode stays original and no change is certified')
+}
 async function completeDocumentModes() {
   const h = await harness()
   const paper = () => h.element.querySelector('[data-document-paper]')
@@ -42,12 +61,12 @@ async function selectedActualTokenDiff() {
   props.sourceBindings.bindings.push(binding('other-binding', 3, 'Other old wording', 'Other old wording', { fieldKeys: ['method'], actionIds: ['method-action'] }))
   props.resultBindings.bindings.push(binding('other-binding', 3, 'Other old wording', 'Other new wording', { fieldKeys: ['method'], actionIds: ['method-action'] }))
   const h = await harness(props), paper = h.element.querySelector('[data-document-paper]')
-  assert.equal(paper.querySelector('del').textContent, '[fee]')
-  assert.equal(paper.querySelector('ins').textContent, '100')
-  assert.equal(paper.querySelector('b').textContent, 'Pay', 'Unchanged inline formatting remains in context')
-  assert.match(paper.textContent, /Other old wording/, 'Another input\'s saved amendment is not overlaid')
-  assert.equal(paper.querySelectorAll('del').length, 1)
-  h.dispose(); console.log('PASS: selected actual tokens change while unrelated and unchanged words stay plain')
+  assert.match(paper.textContent, /Pay 100 dollars\./)
+  assert.match(paper.textContent, /Other new wording/, 'A partial ledger cannot leave another changed paragraph as old template wording')
+  assert.doesNotMatch(paper.textContent, /\[fee\]|Other old wording/)
+  assert.equal(paper.querySelectorAll('del,ins').length, 0, 'An incomplete whole-document overlay falls back to the actual saved carrier without certifying individual changes')
+  assert.match(h.element.querySelector('[data-review-carrier-status]').textContent, /current saved draft.*unverified/)
+  h.dispose(); console.log('PASS: a verified change beside an unattributed change reads the complete saved result rather than mixing current and original text')
 }
 async function nativeLineBreakTokenDiff() {
   const props = base(), before = 'Pay\n[fee] dollars.', after = 'Pay\n100 dollars.'
@@ -179,15 +198,17 @@ async function unavailableSavedLedger() {
   props.resultBindings.bindings = []
   const h = await harness(props), paper = () => h.element.querySelector('[data-document-paper]')
   assert.match(h.element.textContent, /Saved revision bindings are unavailable/, 'An empty historical ledger cannot silently imply no changes')
-  assert(paper().querySelector('[data-review-binding="price-binding"]'), 'Verified source navigation remains available')
-  assert.doesNotMatch(h.element.querySelector('.binding-status').textContent, /unchanged in the saved document/)
-  assert.match(h.element.querySelector('.binding-status').textContent, /saved.*cannot be verified/i)
+  assert.equal(paper().querySelector('[data-review-binding="price-binding"]'), null, 'An absent result mapping cannot reuse a source-only interactive binding')
+  assert.match(paper().textContent, /Pay 100 dollars\./)
+  await h.click('[data-review-mode="original"]'); assert(paper().querySelector('[data-review-binding="price-binding"]'), 'Verified source navigation remains available explicitly in original mode'); await h.click('[data-review-mode="review"]')
+  assert.doesNotMatch(h.element.querySelector('.binding-status')?.textContent ?? '', /unchanged in the saved document/)
+  assert.match(h.element.querySelector('[data-review-carrier-status]').textContent, /current saved draft.*unverified/i)
   assert.equal(paper().querySelectorAll('del,ins').length, 0)
   await h.click('[data-review-mode="saved"]'); assert.match(paper().textContent, /Pay 100 dollars\./, 'Actual saved reading remains usable without a change ledger')
   await h.click('[data-review-mode="review"]')
   h.props.resultBindings.bindings = [binding('unrelated', 1, 'Complete invitation', 'Complete invitation', { fieldKeys: [] })]; await settle()
   assert.match(h.element.textContent, /saved mapping.*selected/i, 'A partial ledger missing this source binding reports that specific limitation')
-  assert.doesNotMatch(h.element.querySelector('.binding-status').textContent, /unchanged in the saved document/)
+  assert.doesNotMatch(h.element.querySelector('.binding-status')?.textContent ?? '', /unchanged in the saved document/)
   h.dispose(); console.log('PASS: empty and partial saved ledgers cannot claim unchanged wording while actual saved reading and source navigation remain available')
 }
 async function missingCrossFileTargetDoesNotFallback() {
@@ -252,4 +273,4 @@ async function compactLimitsKeepEveryRiskAndParentOwnedStaleStatus() {
   assert.match(h.element.querySelector('[data-document-paper]').textContent, /Complete invitation/)
   h.dispose(); console.log('PASS: one collapsed risk disclosure preserves numbering/binding failures while parent stale status remains singular')
 }
-;(async () => { await compactLimitsKeepEveryRiskAndParentOwnedStaleStatus(); await completeSavedRevisionChanges(); await warningSourceLabels(); await completeDocumentModes(); await selectedActualTokenDiff(); await nativeLineBreakTokenDiff(); await linkedNativeNavigation(); await branchGuidanceAndAddedMapping(); await verifiedReadingGuardsAndLocales(); await replacedTemplateKeepsCurrentOriginal(); await recordedEvidenceContext(); await appliedSharedParagraphAttribution(); await unavailableSavedLedger(); await missingCrossFileTargetDoesNotFallback() })().catch(error => { console.error(error); process.exitCode = 1 })
+;(async () => { await unverifiedMappingStillReadsCurrentSavedBody(); await compactLimitsKeepEveryRiskAndParentOwnedStaleStatus(); await completeSavedRevisionChanges(); await warningSourceLabels(); await completeDocumentModes(); await selectedActualTokenDiff(); await nativeLineBreakTokenDiff(); await linkedNativeNavigation(); await branchGuidanceAndAddedMapping(); await verifiedReadingGuardsAndLocales(); await replacedTemplateKeepsCurrentOriginal(); await recordedEvidenceContext(); await appliedSharedParagraphAttribution(); await unavailableSavedLedger(); await missingCrossFileTargetDoesNotFallback() })().catch(error => { console.error(error); process.exitCode = 1 })

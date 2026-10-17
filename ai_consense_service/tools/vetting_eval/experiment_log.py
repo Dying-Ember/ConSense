@@ -148,7 +148,7 @@ def compact_metrics(record):
     measurements, evaluation = record["measurements"], record["evaluation"]
     calls = measurements.get("actualCallMetrics", measurements.get("calls", []))
     resources = measurements.get("wholeMachineSampledResources", measurements.get("resources")) or {}
-    peaks = resources.get("sampledGpuMemoryPeaks", [])
+    peaks = resources.get("sampledGpuMemoryPeaks", []) if isinstance(resources, dict) else []
     wall = sum(call["wallSeconds"] for call in calls if isinstance(call.get("wallSeconds"), (int, float))) if calls else None
     audit = evaluation.get("actualAuditSummary", evaluation.get("stage2", evaluation))
     quote_count = audit.get("quotes", audit.get("quotedItems", audit.get("stage2QuoteCount")))

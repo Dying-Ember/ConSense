@@ -168,6 +168,8 @@ public final class VettingCorpus {
                 observation.put("deletedText",word.getDeletedText());observation.put("strikeText",word.getStrikeText());
                 observation.set("wordNumbering",JsonUtils.mapper().valueToTree(word.getWordNumbering()));observation.set("wordSymbols",JsonUtils.mapper().valueToTree(word.getWordSymbols()));
                 observation.set("wordWarnings",JsonUtils.mapper().valueToTree(word.getWordWarnings()));
+                if(!word.getWordTextSpans().isEmpty())observation.set("wordTextSpans",JsonUtils.mapper().valueToTree(word.getWordTextSpans()));
+                if(!word.getWordFields().isEmpty())observation.set("wordFields",JsonUtils.mapper().valueToTree(word.getWordFields()));
                 observation.set("wordNativeObjects",OerModelMaterial.wordNativeObjects(JsonUtils.mapper().valueToTree(word.getWordNativeObjects())));wordObservations.put(word.getId(),observation);
             }
             VettingSourceQuality.Info quality = VettingSourceQuality.from(d, sourceBlocks);
@@ -177,7 +179,7 @@ public final class VettingCorpus {
                             + "(?:\\.[A-Z]+" + NUMBER + ")*(?:\\.\\s*[A-Z](?=\\s|$))?)(?=\\s|\\.[A-Z]|[A-Z\\p{IsHan}]|$)", Pattern.CASE_INSENSITIVE);
             for (DocumentBlock b : sourceBlocks) {
                 // A blank widget still carries /V, /AP, /AS and unknown/conflict observations.
-                if (nvl(b.getEffectiveText()).trim().isEmpty() && b.getPdfFormField() == null && b.getVisualRegion() == null && b.getNativeTableCandidate() == null && b.getParserPageGroup() == null && b.getWordNativeObjects().isEmpty()) continue;
+                if (nvl(b.getEffectiveText()).trim().isEmpty() && b.getPdfFormField() == null && b.getVisualRegion() == null && b.getNativeTableCandidate() == null && b.getParserPageGroup() == null && b.getWordNativeObjects().isEmpty() && b.getWordTextSpans().isEmpty() && b.getWordFields().isEmpty()) continue;
                 String detected = heading(b, owner, ownedHeading);
                 boolean supplementary = Arrays.asList("header", "footer", "footnote", "endnote").contains(b.getKind());
                 String nextClause = supplementary ? "" : detected != null ? detected : clause;

@@ -4,6 +4,7 @@ import tempfile
 from pathlib import Path
 from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 import numpy as np
 from artifact_store import ArtifactStore
 from paddle_native_capture import NativePaddleCapture, NativePaddleCaptureError
@@ -18,6 +19,26 @@ class Tensor:
 
 
 class NativePaddleCaptureTests(unittest.TestCase):
+    def test_array_budget_accepts_exact_boundary_and_rejects_one_more_complete_array(self):
+        arrays = [np.arange(count, dtype=np.int32) for count in (4, 5, 6)]
+        sizes = []
+        for array in arrays:
+            stream = io.BytesIO(); np.save(stream, array, allow_pickle=False)
+            sizes.append(len(stream.getvalue()))
+        limit = sizes[0] + sizes[1]
+        with tempfile.TemporaryDirectory() as directory:
+            capture = NativePaddleCapture(ArtifactStore(directory), SimpleNamespace(Tensor=Tensor), 'authored-model')
+            with patch('paddle_native_capture.MAX_NATIVE_ARRAY_BYTES', limit, create=True):
+                captured = [capture.archive(array) for array in arrays[:2]]
+                self.assertEqual(capture.byte_count, limit)
+                self.assertEqual(capture.archive(arrays[0]), captured[0])
+                with self.assertRaisesRegex(ValueError, 'capture limit exceeded'):
+                    capture.archive(arrays[2])
+            self.assertEqual(capture.byte_count, limit)
+            self.assertEqual(len(capture.assets), 2)
+            for source, record in zip(arrays, captured):
+                self.assertTrue(np.array_equal(source, np.load(io.BytesIO(capture.assets[record['assetName']]), allow_pickle=False)))
+
     def test_official_class_fp32_modules_remain_native_while_other_parameters_require_bf16_cuda(self):
         class Model:
             _keep_in_fp32_modules = ['visual', 'mlp_AR']

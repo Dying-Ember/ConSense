@@ -38,7 +38,8 @@ class VettingFixedReferenceHumanWriteTest {
     @Test void fixedOnlyDriftRejectsStatusReviewAndChecklistWithoutOverwritingHistory()throws Exception{
         String project="fixed-human-"+ID,runId=UUID.randomUUID().toString();
         Project p=new Project();p.setId(project);p.setNameEn("Fixed human fixture");p.setContractNo("TEST");projects.saveAndFlush(p);
-        VettingRun run=new VettingRun();run.setId(runId);run.setProjectId(project);run.setStatus("COMPLETED");run.setStartedAt(Instant.now());run.setCoverageJson("{\"documents\":[]}");run.setResultJson("{}");run.setSourceSnapshotSha256(VettingCorpus.hash("competition-review-package-v1\n[]"));runs.saveAndFlush(run);
+        // Synthetic completed runs bind v2 coverage and candidate-structure source dimensions.
+        VettingRun run=new VettingRun();run.setId(runId);run.setProjectId(project);run.setStatus("COMPLETED");run.setStartedAt(Instant.now());run.setCoverageJson("{\"documents\":[]}");run.setResultJson("{}");run.setSourceSnapshotSha256(VettingCorpus.hash("competition-review-package-v2\n[]"));runs.saveAndFlush(run);
         JsonNode payload=JsonUtils.parse("{\"fixedBaselineManifestSha256\":\"fixture-manifest\",\"fixedBaselineVersion\":\"fixture-version\",\"originalSourceSha256\":\"fixture-original\",\"pageNo\":1,\"sourceQuality\":{\"family\":\"GCC\"}}");
         FixedReferenceEvidence reference=new FixedReferenceEvidence("fixed-gcc",0,payload,null,null);
         VectorStore.SearchHit hit=reference.asHit();when(fixed.readOnlyHitById("fixed-gcc")).thenReturn(hit);when(fixed.evidence(hit)).thenReturn(reference);

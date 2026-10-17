@@ -1,4 +1,5 @@
 import { api } from './client'
+import type { ReviewBootstrap, ReviewGraph, ReviewHead, ReviewReading, ReviewRevision, ReviewRevisionSummary } from '@/drafting/source-review-types'
 import type {
   AskResponse,
   AdviceSourceDocument,
@@ -14,6 +15,7 @@ import type {
   DraftBodyPatch,
   DraftProgress,
   DraftVariable,
+  DraftReviewCandidates,
   DraftVariablePatch,
   DraftCatalog,
   DraftPlan,
@@ -62,6 +64,20 @@ export const projectApi = {
 /* ------------------------------------------------------------ 起草 */
 
 export const draftingApi = {
+  reviewHead: (projectId: string) => api.get<ReviewHead>(`/drafting/${projectId}/graph`),
+  reviewBootstrap: (projectId: string) => api.post<ReviewBootstrap>(`/drafting/${projectId}/graph/bootstrap`),
+  reviewExtract: (projectId: string, revisionId: string, llmSelection?: LlmSelection) => api.post<DraftVariable[]>(`/drafting/${projectId}/graph/revisions/${encodeURIComponent(revisionId)}/extract`, undefined, { timeout: 7200000, llmSelection }),
+  reviewDiscover: (projectId: string, revisionId: string, expectedCurrentRevisionId: string | null, maxItems: number, llmSelection?: LlmSelection) => api.post<ReviewRevision>(`/drafting/${projectId}/graph/revisions/${encodeURIComponent(revisionId)}/discover`, { expectedCurrentRevisionId, maxItems }, { timeout: 7200000, llmSelection }),
+  reviewCandidates: (projectId: string, revisionId: string) => api.get<DraftReviewCandidates>(`/drafting/${projectId}/graph/revisions/${encodeURIComponent(revisionId)}/candidates`, { reportError: false }),
+  reviewCorrectCandidate: (projectId: string, revisionId: string, key: string, body: { expectedRunId: string; candidateIndex: number; value: string; sourceQuote: string; targetKey?: string }) => api.post<DraftReviewCandidates>(`/drafting/${projectId}/graph/revisions/${encodeURIComponent(revisionId)}/candidates/${encodeURIComponent(key)}`, body),
+  reviewSave: (projectId: string, graph: ReviewGraph, expectedCurrentRevisionId: string | null, expectedDraftRevisionId: string | null) => api.post<ReviewRevision>(`/drafting/${projectId}/graph`, { graph, expectedCurrentRevisionId, expectedDraftRevisionId }),
+  reviewConfirm: (projectId: string, revisionId: string, expectedCurrentRevisionId: string | null) => api.post<ReviewRevision>(`/drafting/${projectId}/graph/revisions/${encodeURIComponent(revisionId)}/confirm`, { expectedCurrentRevisionId }),
+  reviewRevisions: (projectId: string) => api.get<ReviewRevisionSummary[]>(`/drafting/${projectId}/graph/revisions`),
+  reviewRevision: (projectId: string, revisionId: string) => api.get<ReviewRevision>(`/drafting/${projectId}/graph/revisions/${encodeURIComponent(revisionId)}`),
+  reviewReading: (projectId: string, sourceId: string) => api.get<ReviewReading>(`/drafting/${projectId}/graph/sources/${encodeURIComponent(sourceId)}/reading`),
+  reviewSource: (projectId: string, sourceId: string, sourceSha256?: string) => api.blob(`/drafting/${projectId}/graph/sources/${encodeURIComponent(sourceId)}/original${sourceSha256 ? `?sourceSha256=${encodeURIComponent(sourceSha256)}` : ''}`, undefined, false),
+  reviewPreview: (projectId: string, sourceId: string, sourceSha256: string) => api.blob(`/drafting/${projectId}/graph/sources/${encodeURIComponent(sourceId)}/preview.pdf?sourceSha256=${encodeURIComponent(sourceSha256)}`, undefined, false),
+  templateEvidence: (projectId: string, fileKey: string) => api.get<Record<string, unknown>>(`/drafting/${projectId}/templates/${fileKey}/evidence`, { reportError: false }),
   catalog: (projectId: string) => api.get<DraftCatalog>(`/drafting/${projectId}/catalog`),
   plan: (projectId: string, values?: Record<string, string>) => values
     ? api.post<DraftPlan>(`/drafting/${projectId}/plan`, { values })

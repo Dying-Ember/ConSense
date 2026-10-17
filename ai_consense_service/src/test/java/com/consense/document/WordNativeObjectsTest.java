@@ -42,6 +42,87 @@ class WordNativeObjectsTest {
         assertEquals("word/document.xml",positions.get(0).path("partName").asText());assertEquals("word/header1.xml",positions.get(3).path("partName").asText());
         assertEquals("/"+ns+"hdr[1]",positions.get(3).path("nodePath").asText());
     }
+
+    @Test void sameTextAndBlankCellsKeepActualHeaderFooterPartIdentityAfterSaveRead() throws Exception {
+        ByteArrayOutputStream source=new ByteArrayOutputStream();
+        try(XWPFDocument doc=new XWPFDocument()){
+            doc.createTable(1,2).getRow(0).getCell(0).setText("Repeated cell text");
+            doc.createHeader(org.apache.poi.wp.usermodel.HeaderFooterType.DEFAULT).createTable(1,2).getRow(0).getCell(0).setText("Repeated cell text");
+            doc.createHeader(org.apache.poi.wp.usermodel.HeaderFooterType.FIRST).createTable(1,2).getRow(0).getCell(0).setText("Repeated cell text");
+            doc.createFooter(org.apache.poi.wp.usermodel.HeaderFooterType.DEFAULT).createTable(1,2).getRow(0).getCell(0).setText("Repeated cell text");
+            doc.write(source);
+        }
+        byte[] original=source.toByteArray();java.util.Map<String,String> hashes=new java.util.HashMap<>();
+        try(ZipInputStream zip=new ZipInputStream(new ByteArrayInputStream(original))){
+            ZipEntry entry;byte[] buffer=new byte[8192];while((entry=zip.getNextEntry())!=null){
+                ByteArrayOutputStream raw=new ByteArrayOutputStream();int n;while((n=zip.read(buffer))!=-1)raw.write(buffer,0,n);
+                hashes.put(entry.getName(),DocumentParseProbe.sha256(raw.toByteArray()));
+            }
+        }
+        OcrClient ocr=mock(OcrClient.class);DocumentParser parser=new DocumentParser(new ConsenseProperties(),ocr);
+        DocumentParser.ParsedDocument parsed=parser.parse("authored-stories.docx",original);
+        java.util.Set<String> parts=new java.util.HashSet<>(),identities=new java.util.HashSet<>();int cells=0,empty=0;
+        for(DocumentBlock block:parsed.getBlocks())for(DocumentBlock.WordCell cell:block.getWordCells()){
+            com.fasterxml.jackson.databind.JsonNode position=cell.getSourcePosition();assertNotNull(position);
+            assertEquals("docx_native",position.path("kind").asText());assertEquals(parsed.getSourceSha256(),position.path("sourceSha256").asText());
+            assertEquals(block.getSourcePosition().path("partName"),position.path("partName"));
+            assertEquals(hashes.get(position.path("partName").asText()),position.path("partSha256").asText());
+            assertTrue(position.path("nodePath").asText().endsWith("}tc["+(cell.getCellIndex()+1)+"]"));
+            assertEquals(position.path("tableNodePath").asText()+"/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tr[1]",position.path("rowNodePath").asText());
+            assertFalse(position.has("parentCellNodePath"));assertNull(block.getPageNo());
+            assertEquals(position,JsonUtils.read(JsonUtils.write(cell),DocumentBlock.WordCell.class).getSourcePosition());
+            assertTrue(identities.add(position.path("partName").asText()+"\n"+position.path("nodePath").asText()));
+            parts.add(position.path("partName").asText());cells++;if(cell.getText().isEmpty())empty++;
+        }
+        assertEquals(4,parts.size());assertEquals(8,cells);assertEquals(4,empty);
+        assertEquals(JsonUtils.write(parsed),JsonUtils.write(parser.parse("authored-stories.docx",original)));verifyNoInteractions(ocr);
+    }
+    @Test void legacyWordCellWithoutSourcePositionKeepsTheOptionalFieldAbsent() {
+        String legacy="{\"location\":\"legacy/cell/0\",\"tableLocation\":\"legacy/table\",\"text\":\"unchanged\"}";
+        DocumentBlock.WordCell cell=JsonUtils.read(legacy,DocumentBlock.WordCell.class);assertNull(cell.getSourcePosition());
+        com.fasterxml.jackson.databind.JsonNode stored=JsonUtils.mapper().valueToTree(cell);assertFalse(stored.has("sourcePosition"));
+        assertEquals(stored,JsonUtils.mapper().valueToTree(JsonUtils.read(JsonUtils.write(cell),DocumentBlock.WordCell.class)));
+    }
+    @Test void emptyLoadedStoriesAndPhysicalSeparatorTablesSurviveCoverageSaveReadWithoutBodyAuthority() throws Exception {
+        ByteArrayOutputStream source=new ByteArrayOutputStream();
+        try(XWPFDocument doc=new XWPFDocument()){
+            doc.createHeader(org.apache.poi.wp.usermodel.HeaderFooterType.DEFAULT).createParagraph();
+            doc.createFooter(org.apache.poi.wp.usermodel.HeaderFooterType.DEFAULT).createParagraph();
+            org.apache.poi.xwpf.usermodel.XWPFFootnote first=doc.createFootnote();first.getCTFtnEdn().setId(java.math.BigInteger.valueOf(9));first.createParagraph();
+            org.apache.poi.xwpf.usermodel.XWPFFootnote separator=doc.createFootnote();separator.getCTFtnEdn().setId(java.math.BigInteger.ZERO);
+            separator.getCTFtnEdn().addNewTbl().addNewTr().addNewTc().addNewP().addNewR().addNewT().setStringValue("Physical separator is not body authority");
+            org.apache.poi.xwpf.usermodel.XWPFFootnote last=doc.createFootnote();last.getCTFtnEdn().setId(java.math.BigInteger.valueOf(2));last.createParagraph();
+            org.apache.poi.xwpf.usermodel.XWPFEndnote end=doc.createEndnote();end.getCTFtnEdn().setId(java.math.BigInteger.valueOf(5));end.createParagraph();
+            org.apache.poi.xwpf.usermodel.XWPFEndnote endSeparator=doc.createEndnote();endSeparator.getCTFtnEdn().setId(java.math.BigInteger.valueOf(-1));endSeparator.createParagraph();
+            doc.write(source);
+        }
+        byte[] bytes=source.toByteArray();OcrClient ocr=mock(OcrClient.class);DocumentParser parser=new DocumentParser(new ConsenseProperties(),ocr);
+        DocumentParser.ParsedDocument parsed=parser.parse("empty-stories.docx",bytes);assertTrue(parsed.getBlocks().isEmpty());assertEquals("",parsed.getText());
+        com.fasterxml.jackson.databind.JsonNode inventory=parsed.getCoverage().getNativeDocxTables();assertEquals(5,inventory.path("parts").size());
+        java.util.Map<String,byte[]> raw=new java.util.HashMap<>();
+        try(ZipInputStream in=new ZipInputStream(new ByteArrayInputStream(bytes))){ZipEntry entry;while((entry=in.getNextEntry())!=null){ByteArrayOutputStream out=new ByteArrayOutputStream();byte[] buffer=new byte[8192];int count;while((count=in.read(buffer))!=-1)out.write(buffer,0,count);raw.put(entry.getName(),out.toByteArray());}}
+        int roots=0,physicalMembers=0;
+        for(com.fasterxml.jackson.databind.JsonNode part:inventory.path("parts")){
+            assertEquals(DocumentParseProbe.sha256(raw.get(part.path("partName").asText())),part.path("partSha256").asText());
+            assertFalse(part.path("loadedRoots").isEmpty());roots+=part.path("loadedRoots").size();physicalMembers+=part.path("members").size();
+            if(part.path("partName").asText().equals("word/footnotes.xml")){
+                assertEquals(java.util.Arrays.asList("9","0","2"),java.util.Arrays.asList(part.path("loadedRoots").get(0).path("noteId").asText(),part.path("loadedRoots").get(1).path("noteId").asText(),part.path("loadedRoots").get(2).path("noteId").asText()));
+                assertEquals(3,part.path("members").size());for(com.fasterxml.jackson.databind.JsonNode member:part.path("members"))assertTrue(member.path("retained").isEmpty());
+            }else assertTrue(part.path("members").isEmpty());
+        }
+        assertEquals(8,roots);assertEquals(3,physicalMembers);
+        ParseCoverage stored=JsonUtils.read(JsonUtils.write(parsed.getCoverage()),ParseCoverage.class);assertEquals(inventory,stored.getNativeDocxTables());
+        assertEquals(JsonUtils.write(parsed),JsonUtils.write(parser.parse("empty-stories.docx",bytes)));verifyNoInteractions(ocr);
+    }
+    @Test void optionalInventoryDoesNotAlterLegacyCoverageSerializationWhenAbsent() {
+        ParseCoverage legacy=new ParseCoverage();legacy.setComplete(false);legacy.getLimitations().add("Original legacy declaration");
+        String saved=JsonUtils.write(legacy);assertFalse(JsonUtils.parse(saved).has("nativeDocxTables"));
+        ParseCoverage replay=JsonUtils.read(saved,ParseCoverage.class);assertNull(replay.getNativeDocxTables());assertEquals(saved,JsonUtils.write(replay));
+        com.fasterxml.jackson.databind.node.ObjectNode inventory=JsonUtils.mapper().createObjectNode().put("version","docx-native-tables-v1");inventory.putArray("parts");
+        replay.setNativeDocxTables(inventory);com.fasterxml.jackson.databind.node.ObjectNode newCoverage=(com.fasterxml.jackson.databind.node.ObjectNode)JsonUtils.parse(JsonUtils.write(replay));
+        assertEquals(inventory,newCoverage.remove("nativeDocxTables"));assertEquals(JsonUtils.parse(saved),newCoverage);
+        replay.setNativeDocxTables(null);assertEquals(saved,JsonUtils.write(replay));
+    }
     @Test void imageOnlyOccurrenceAndPackageAssetAreRetainedAsUnrendered() throws Exception {
         ByteArrayOutputStream png = new ByteArrayOutputStream();
         ImageIO.write(new BufferedImage(16,16,BufferedImage.TYPE_INT_RGB),"png",png);
@@ -80,10 +161,10 @@ class WordNativeObjectsTest {
         }
         DocumentParser.ParsedDocument parsed=new DocumentParser(new ConsenseProperties(),mock(OcrClient.class,CALLS_REAL_METHODS))
                 .parse("authored-formula.docx",updated.toByteArray());
-        assertEquals(2,parsed.getBlocks().size());assertFalse(parsed.getCoverage().isComplete());
+        assertEquals(2,parsed.getBlocks().size());assertTrue(parsed.getCoverage().isComplete());
         assertFalse(parsed.getText().contains("12"));
         String retained=JsonUtils.write(parsed.getBlocks().get(1));
         assertTrue(retained.contains("wordNativeObjects"));assertTrue(retained.contains("oMath"));
-        assertTrue(retained.contains("native_ooxml_unrendered"));
+        assertTrue(parsed.getText().contains("(1)/(2)"));assertTrue(retained.contains("native_ooxml_projected"));
     }
 }

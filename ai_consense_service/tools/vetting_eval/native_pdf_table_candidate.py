@@ -16,6 +16,7 @@ import io
 import json
 import logging
 import math
+import mmap
 import os
 from pathlib import Path
 import platform
@@ -310,75 +311,95 @@ def native_textlines(table, transform):
     return lines
 
 
+@contextlib.contextmanager
+def _camelot_tables(pdf_path, local_page, flavor):
+    import playa
+    from playa.exceptions import PDFPasswordIncorrect, PDFTextExtractionNotAllowed
+    from camelot import core, handlers
+    # shortcut: Camelot 2.0 single-page handler API; revalidate on provider upgrades.
+    with handlers.PDFHandler(str(pdf_path), pages=str(local_page)) as handler:
+        try:
+            with playa.open(handler.filepath, password=handler.password, space="page", max_workers=1) as document:
+                try:
+                    if not document.is_extractable:
+                        raise PDFTextExtractionNotAllowed(f"Text extraction is not allowed: {handler.filepath}")
+                    parser = handlers.PARSERS[flavor](debug=handler.debug)
+                    tables = handler._parse_page(document.pages[local_page - 1], parser, {}, flavor)
+                    yield core.TableList(sorted(tables))
+                finally:
+                    if isinstance(document.buffer, mmap.mmap) and not document.buffer.closed:
+                        document.buffer.close()
+        except PDFPasswordIncorrect as error:
+            raise RuntimeError("File has not been decrypted") from error
+
+
 def extract_camelot(pdf_path, local_page, method, glyphs, geometry):
-    import camelot
     flavor = METHODS[method]["flavor"]
-    # No kwargs beyond the fixed flavor and exhaustive page enumeration.
-    tables = camelot.read_pdf(str(pdf_path), pages=str(local_page), flavor=flavor)
-    output = []
-    for number, table in enumerate(tables):
-        original_rotation = geometry["originalPdfRotate"] % 360
-        auto_rotation = getattr(table, "rotation", "")
-        delta = {"": 0, "clockwise": -90, "anticlockwise": 90}.get(auto_rotation)
-        if delta is None:
-            raise ValueError(f"Unrecognized Camelot auto rotation: {auto_rotation!r}")
-        parser_rotation = (original_rotation + delta) % 360
-        media = geometry["originalPdfMediaBox"]
-        parser_matrix = media_matrix(media, parser_rotation)
-        inverse = matrix_inverse(parser_matrix)
-        display_matrix = media_matrix(media, original_rotation, screen=True)
-        pp_media, pp_crop = geometry["pdfplumberMediaBox"], geometry["pdfplumberCropBox"]
-        offset = [pp_media[0] - pp_crop[0], pp_media[1] - pp_crop[1]]
-        def transform(x, y):
-            raw_x, raw_y = matrix_apply(inverse, x, y)
-            tx, ty = matrix_apply(display_matrix, raw_x, raw_y)
-            return tx + offset[0], ty + offset[1]
-        transform_description = {"from": "camelot_playa_rotated_media_bottom_left",
-            "to": FRAME, "originalPdfRotation": original_rotation,
-            "camelotAutoRotation": auto_rotation, "parserRotation": parser_rotation,
-            "parserMatrix": parser_matrix, "inverseParserMatrix": inverse,
-            "originalDisplayMatrix": display_matrix, "displayToCropTranslation": offset,
-            "parserPdfSize": getattr(table, "pdf_size", None),
-            "inputCroppingPerformed": False}
-        origins, raw_grid = [], []
-        for row_index, row in enumerate(table.cells):
-            raw_row = []
-            for col_index, cell in enumerate(row):
-                raw_box = [cell.x1, cell.y1, cell.x2, cell.y2]
-                box = bbox_transform(raw_box, transform)
-                span_known = not (cell.hspan or cell.vspan)
-                origins.append(record_origin(row_index, col_index, 1, 1,
-                    cell.text, box, raw_box, glyphs, spanKnown=span_known,
-                    spanObservation="unit_native_cell; merge_owner_not_exposed",
-                    nativeHspan=bool(cell.hspan), nativeVspan=bool(cell.vspan),
-                    nativeEdges={key: bool(getattr(cell, key)) for key in
-                                 ("left", "right", "top", "bottom")}))
-                raw_row.append(cell.text)
-            raw_grid.append(raw_row)
-        output.append({"tableId": f"{method}:table:{number}",
-                       "bbox": bbox_transform(table._bbox, transform),
-                       "rawBbox": table._bbox, "rowCount": len(table.cells),
-                       "colCount": max((len(row) for row in table.cells), default=0),
-                       "origins": origins, "rawGrid": raw_grid,
-                       "providerGrid": table.data,
-                       "providerGridTextTransform": "Camelot Table.data applies cell.text.strip()",
-                       "rawRows": table.rows, "rawCols": table.cols,
-                       "rawTextBoxes": getattr(table, "_text", None),
-                       "nativeTextLines": native_textlines(table, transform),
-                       "rawParse": safe(getattr(table, "parse", None)),
-                       "rawParseDetails": safe(getattr(table, "parse_details", None)),
-                       "diagnostics": {"parsingReport": table.parsing_report,
-                                       "confidence": getattr(table, "confidence", None),
-                                       "diagnosticsAreNotSourceTruth": True},
-                       "rawCoordinateSpace": "camelot_playa_rotated_media_bottom_left",
-                       "coordinateTransform": transform_description,
-                       "nativeFlavor": table.flavor, "nativePage": table.page,
-                       "nativeOrder": table.order, "textTransformByRunner": "none",
-                       "completeTableGroupAccepted": False})
-    return output, {"call": {"api": "camelot.read_pdf", "completePdfPath": str(pdf_path),
-                             "pages": str(local_page), "flavor": flavor,
-                             "otherKwargs": {}},
-                    "diagnosticsAreNotSourceTruth": True}
+    with _camelot_tables(pdf_path, local_page, flavor) as tables:
+        output = []
+        for number, table in enumerate(tables):
+            original_rotation = geometry["originalPdfRotate"] % 360
+            auto_rotation = getattr(table, "rotation", "")
+            delta = {"": 0, "clockwise": -90, "anticlockwise": 90}.get(auto_rotation)
+            if delta is None:
+                raise ValueError(f"Unrecognized Camelot auto rotation: {auto_rotation!r}")
+            parser_rotation = (original_rotation + delta) % 360
+            media = geometry["originalPdfMediaBox"]
+            parser_matrix = media_matrix(media, parser_rotation)
+            inverse = matrix_inverse(parser_matrix)
+            display_matrix = media_matrix(media, original_rotation, screen=True)
+            pp_media, pp_crop = geometry["pdfplumberMediaBox"], geometry["pdfplumberCropBox"]
+            offset = [pp_media[0] - pp_crop[0], pp_media[1] - pp_crop[1]]
+            def transform(x, y):
+                raw_x, raw_y = matrix_apply(inverse, x, y)
+                tx, ty = matrix_apply(display_matrix, raw_x, raw_y)
+                return tx + offset[0], ty + offset[1]
+            transform_description = {"from": "camelot_playa_rotated_media_bottom_left",
+                "to": FRAME, "originalPdfRotation": original_rotation,
+                "camelotAutoRotation": auto_rotation, "parserRotation": parser_rotation,
+                "parserMatrix": parser_matrix, "inverseParserMatrix": inverse,
+                "originalDisplayMatrix": display_matrix, "displayToCropTranslation": offset,
+                "parserPdfSize": getattr(table, "pdf_size", None),
+                "inputCroppingPerformed": False}
+            origins, raw_grid = [], []
+            for row_index, row in enumerate(table.cells):
+                raw_row = []
+                for col_index, cell in enumerate(row):
+                    raw_box = [cell.x1, cell.y1, cell.x2, cell.y2]
+                    box = bbox_transform(raw_box, transform)
+                    span_known = not (cell.hspan or cell.vspan)
+                    origins.append(record_origin(row_index, col_index, 1, 1,
+                        cell.text, box, raw_box, glyphs, spanKnown=span_known,
+                        spanObservation="unit_native_cell; merge_owner_not_exposed",
+                        nativeHspan=bool(cell.hspan), nativeVspan=bool(cell.vspan),
+                        nativeEdges={key: bool(getattr(cell, key)) for key in
+                                     ("left", "right", "top", "bottom")}))
+                    raw_row.append(cell.text)
+                raw_grid.append(raw_row)
+            output.append({"tableId": f"{method}:table:{number}",
+                           "bbox": bbox_transform(table._bbox, transform),
+                           "rawBbox": table._bbox, "rowCount": len(table.cells),
+                           "colCount": max((len(row) for row in table.cells), default=0),
+                           "origins": origins, "rawGrid": raw_grid,
+                           "providerGrid": table.data,
+                           "providerGridTextTransform": "Camelot Table.data applies cell.text.strip()",
+                           "rawRows": table.rows, "rawCols": table.cols,
+                           "rawTextBoxes": getattr(table, "_text", None),
+                           "nativeTextLines": native_textlines(table, transform),
+                           "rawParse": safe(getattr(table, "parse", None)),
+                           "rawParseDetails": safe(getattr(table, "parse_details", None)),
+                           "diagnostics": {"parsingReport": table.parsing_report,
+                                           "confidence": getattr(table, "confidence", None),
+                                           "diagnosticsAreNotSourceTruth": True},
+                           "rawCoordinateSpace": "camelot_playa_rotated_media_bottom_left",
+                           "coordinateTransform": transform_description,
+                           "nativeFlavor": table.flavor, "nativePage": table.page,
+                           "nativeOrder": table.order, "textTransformByRunner": "none",
+                           "completeTableGroupAccepted": False})
+        return output, {"call": {"api": "camelot.handlers.PDFHandler._parse_page", "completePdfPath": str(pdf_path),
+                                 "pages": str(local_page), "flavor": flavor,
+                                 "otherKwargs": {}},
+                        "diagnosticsAreNotSourceTruth": True}
 
 
 def installed_versions():

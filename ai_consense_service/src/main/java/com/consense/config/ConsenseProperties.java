@@ -95,10 +95,10 @@ public class ConsenseProperties {
     public static class Document {
         /** Optional parse/source-construction observation root; explicit job/source identities required. */
         private String probeDirectory;
-        private long maxZipEntryBytes = 128L * 1024 * 1024;
-        private long maxZipXmlBytes = 32L * 1024 * 1024;
-        private long maxZipTotalBytes = 256L * 1024 * 1024;
-        private int maxZipEntries = 5000;
+        private long maxZipEntryBytes = 512L * 1024 * 1024;
+        private long maxZipXmlBytes = 128L * 1024 * 1024;
+        private long maxZipTotalBytes = 2L * 1024 * 1024 * 1024;
+        private int maxZipEntries = 100000;
     }
 
     /** 向量库 */

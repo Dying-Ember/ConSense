@@ -19,7 +19,15 @@ public final class VettingSourceMaterial {
         return project(selected,FixedVettingReferences.empty());
     }
 
+    public static List<Map<String,Object>> project(List<Chunk> selected,List<com.consense.domain.SourceDocument> documents) {
+        return project(selected,FixedVettingReferences.empty(),documents);
+    }
+
     static List<Map<String,Object>> project(List<Chunk> selected,FixedVettingReferences fixedReferences) {
+        return project(selected,fixedReferences,null);
+    }
+
+    static List<Map<String,Object>> project(List<Chunk> selected,FixedVettingReferences fixedReferences,List<com.consense.domain.SourceDocument> documents) {
         Objects.requireNonNull(selected,"Selected source chunks are required");
         Set<String> ids=new HashSet<>();Map<List<String>,Integer> blocks=new HashMap<>(),positions=new HashMap<>();
         for(Chunk c:selected) {
@@ -31,7 +39,7 @@ public final class VettingSourceMaterial {
             }
         }
         VettingNativeCellSlices.Observation cellObservations=VettingNativeCellSlices.observe(selected);
-        OerModelMaterial.Request modelMaterial=new OerModelMaterial.Request();
+        OerModelMaterial.Request modelMaterial=documents==null?new OerModelMaterial.Request():new OerModelMaterial.Request(documents);
         Map<String,Map<String,Object>> fixedExcerpts=fixedReferences.modelExcerpts(selected);
         List<Map<String,Object>> excerpts=new ArrayList<>();
         for(Chunk c:selected) {
@@ -104,7 +112,7 @@ public final class VettingSourceMaterial {
                 cursor+=length+1;
             }
             if(!bodyBound&&unknown.isEmpty())unknown.add(map("reason","source_parts_do_not_match_selected_body"));
-            excerpts.add(map("id",c.getId(),"file",nvl(c.getFileKey())+" · "+nvl(c.getFileName()),"documentId",c.getDocumentId(),
+            Map<String,Object> excerpt=map("id",c.getId(),"file",nvl(c.getFileKey())+" · "+nvl(c.getFileName()),"documentId",c.getDocumentId(),
                     "sourceHash",c.getSourceHash(),"role",c.getRole(),"metadataVersion",c.getMetadataVersion(),
                     "segmentationVersion",c.getSegmentationVersion(),"nativeTableMetadataVersion",c.getNativeTableMetadataVersion(),
                     "sourceQualityMetadataVersion",c.getSourceQualityMetadataVersion(),"sourceQualityHash",c.getSourceQualityHash(),"sourceQuality",VettingSourceQuality.project(c),
@@ -117,9 +125,29 @@ public final class VettingSourceMaterial {
                     "unresolvedNativeCellSlices",cellObservations.unknown(c.getId()),
                     "nativeCellStructureScope","selected source UTF16 intersections only; complete cells and rows require proved union coverage; unselected headers and table grid unknown",
                     "nativeRowsStatus",rows.isEmpty()?"unknown":"observed_selected_rows_only",
-                    "tableInterpretation", "selected complete row parts only; headers, merged grid, full table and contractual adoption unknown"));
+                    "tableInterpretation", "selected complete row parts only; headers, merged grid, full table and contractual adoption unknown");
+            com.fasterxml.jackson.databind.JsonNode structure=modelMaterial.projectOrdinary(c);
+            if(structure!=null)excerpt.put("observedSourceUnits",structure);
+            excerpts.add(excerpt);
         }
         return excerpts;
+    }
+
+    /** Pure comparison for existing owners' fresh-read/actual-byte guards; never a cached source verdict. */
+    public static void requireCurrentDocuments(List<com.consense.domain.SourceDocument> captured,List<com.consense.domain.SourceDocument> current){
+        Map<Long,com.consense.domain.SourceDocument> fresh=new HashMap<>();
+        for(com.consense.domain.SourceDocument source:current)if(fresh.put(source.getId(),source)!=null)throw new IllegalArgumentException("Duplicate current source");
+        if(captured.size()!=fresh.size())throw new IllegalArgumentException("Ordinary model source set changed");
+        Set<Long> capturedIds=new HashSet<>();
+        for(com.consense.domain.SourceDocument before:captured){
+            if(!capturedIds.add(before.getId()))throw new IllegalArgumentException("Duplicate captured source");
+            com.consense.domain.SourceDocument after=fresh.get(before.getId());
+            if(after==null||!com.consense.service.sources.NormalObservedPreparationService.sameGeneration(before,after)
+                    ||!Objects.equals(before.getProjectId(),after.getProjectId())||!Objects.equals(before.getFileName(),after.getFileName())
+                    ||!Objects.equals(before.getOerIdentityJson(),after.getOerIdentityJson())||!Objects.equals(before.getTextContent(),after.getTextContent())
+                    ||!Objects.equals(before.getStructuredContentJson(),after.getStructuredContentJson())||!Objects.equals(before.getNormalCandidateJson(),after.getNormalCandidateJson()))
+                throw new IllegalArgumentException("Ordinary model source generation changed");
+        }
     }
 
     private static Map<String,Object> canonical(Chunk c,OerModelMaterial.Request modelMaterial){

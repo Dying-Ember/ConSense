@@ -613,7 +613,8 @@ class VettingWorkflowTest {
     }
 
     private VettingFinding manualFinding(String projectId, String code) {
-        VettingRun run=new VettingRun();run.setId(UUID.randomUUID().toString());run.setProjectId(projectId);run.setStatus("COMPLETED");run.setStartedAt(Instant.now());run.setCoverageJson("{\"documents\":[]}");run.setSourceSnapshotSha256(VettingCorpus.hash("competition-review-package-v1\n[]"));runs.saveAndFlush(run);
+        // Synthetic completed runs bind v2 coverage and candidate-structure source dimensions.
+        VettingRun run=new VettingRun();run.setId(UUID.randomUUID().toString());run.setProjectId(projectId);run.setStatus("COMPLETED");run.setStartedAt(Instant.now());run.setCoverageJson("{\"documents\":[]}");run.setSourceSnapshotSha256(VettingCorpus.hash("competition-review-package-v2\n[]"));runs.saveAndFlush(run);
         VettingFinding finding = new VettingFinding();
         finding.setProjectId(projectId); finding.setCode(code); finding.setGroupKey("reference");
         finding.setRunId(run.getId());

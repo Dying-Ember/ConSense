@@ -99,6 +99,9 @@ public final class DraftingDtos {
         private List<CandidateVO> candidates;
         private String adoptionState;
         private String validationIssue;
+        private String graphRevisionId;
+        private String fieldDefinitionHash;
+        private String group;
         public VariableVO(String key, String scope, String fileKey, LocalizedText label, String action,
                           String value, List<LocalizedText> options, boolean confirmed, String confirmedFrom,
                           String source, String result, String kind, List<String> cols, String linkedBase,
@@ -109,6 +112,7 @@ public final class DraftingDtos {
             this.derivedFrom=derivedFrom; this.affects=affects; this.note=note;
         }
         public String getGroup() {
+            if (group != null) return group;
             com.consense.service.drafting.DraftBlueprint.InputSpec spec = com.consense.service.drafting.DraftBlueprint.find(key);
             return spec == null ? null : spec.group;
         }
@@ -119,6 +123,7 @@ public final class DraftingDtos {
     @NoArgsConstructor
     public static class VariablePatch {
         private String value;
+        private Boolean explicitEmpty;
         private String choice;
         private Boolean confirmed;
         private String note;
@@ -127,6 +132,8 @@ public final class DraftingDtos {
         private CandidateVO candidateSnapshot;
         private SuggestionSnapshot suggestionSnapshot;
         private Boolean reviewed;
+        private String graphRevisionId;
+        private String fieldDefinitionHash;
         public VariablePatch(String value, String choice, Boolean confirmed, String note, String result) {
             this.value=value; this.choice=choice; this.confirmed=confirmed; this.note=note; this.result=result;
         }
@@ -141,6 +148,11 @@ public final class DraftingDtos {
         private String source;
         private List<CandidateVO> candidates;
         private Boolean reviewRequired;
+        private String graphRevisionId;
+        private String fieldDefinitionHash;
+        public SuggestionSnapshot(String value,String source,List<CandidateVO> candidates,Boolean reviewRequired) {
+            this.value=value;this.source=source;this.candidates=candidates;this.reviewRequired=reviewRequired;
+        }
     }
 
     @Data
@@ -154,6 +166,14 @@ public final class DraftingDtos {
         private String sourceQuote;
         private String reason;
         private Double confidence;
+        private String graphRevisionId;
+        private String fieldDefinitionHash;
+        private String extractionRunId;
+        private String originalSha256;
+        public CandidateVO(String value,Long sourceDocumentId,String fileName,String sourceHash,String sourceQuote,String reason,Double confidence) {
+            this.value=value;this.sourceDocumentId=sourceDocumentId;this.fileName=fileName;this.sourceHash=sourceHash;
+            this.sourceQuote=sourceQuote;this.reason=reason;this.confidence=confidence;
+        }
     }
 
     /** A plan preview does not mutate saved project inputs. */

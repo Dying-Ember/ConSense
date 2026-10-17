@@ -7,6 +7,7 @@ import com.consense.ocr.OcrClient;
 import com.consense.ocr.PaddleOcrClient;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.pdfbox.pdmodel.PDDocument;
@@ -26,6 +27,9 @@ import org.apache.poi.hsmf.MAPIMessage;
 import org.apache.poi.hwpf.HWPFDocument;
 import org.apache.poi.hwpf.extractor.WordExtractor;
 import org.apache.poi.openxml4j.util.ZipSecureFile;
+import org.apache.poi.openxml4j.opc.PackagePart;
+import org.apache.poi.openxml4j.opc.PackageRelationship;
+import org.apache.poi.openxml4j.opc.PackagingURIHelper;
 import org.apache.poi.xwpf.usermodel.IBodyElement;
 import org.apache.poi.xwpf.usermodel.XWPFDocument;
 import org.apache.poi.xwpf.usermodel.XWPFParagraph;
@@ -52,13 +56,17 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
+import java.util.Set;
 import java.util.List;
 import java.util.Locale;
 import java.util.Properties;
+import java.util.Objects;
 import java.util.IdentityHashMap;
 import java.util.Map;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
@@ -72,17 +80,14 @@ import java.util.zip.ZipInputStream;
 @RequiredArgsConstructor
 public class DocumentParser {
 
-    private static final long MAX_ZIP_ENTRY_BYTES = 128L * 1024 * 1024;
-    private static final long MAX_ZIP_XML_BYTES = 32L * 1024 * 1024;
-    private static final long MAX_ZIP_TOTAL_BYTES = 256L * 1024 * 1024;
-    private static final int MAX_ZIP_ENTRIES = 5000;
-
     static {
         // Legitimate tender EMF images compress below POI's default 1% ratio.
         // Configure the process-wide POI guard once, never around individual requests.
         ZipSecureFile.setMinInflateRatio(0.001);
-        ZipSecureFile.setMaxEntrySize(MAX_ZIP_ENTRY_BYTES);
-        ZipSecureFile.setMaxTextSize(MAX_ZIP_XML_BYTES);
+        // The per-document preflight enforces the explicit configured inflated-byte budgets.
+        ZipSecureFile.setMaxEntrySize(Long.MAX_VALUE);
+        ZipSecureFile.setMaxTextSize(Long.MAX_VALUE);
+        ZipSecureFile.setMaxFileCount(Long.MAX_VALUE);
     }
 
     private final ConsenseProperties props;
@@ -209,13 +214,34 @@ public class DocumentParser {
         return parse(fileName,bytes,probe,initialObservation,readingPlan(fileName,bytes,initialObservation,null));
     }
     private ParsedDocument parse(String fileName,byte[] bytes,DocumentParseProbe probe,ParsedDocument initialObservation,OerReadingPlan readingPlan) {
+        return parse(fileName,bytes,probe,initialObservation,readingPlan,false);
+    }
+
+    /** An explicit template upload uses the same content parser, with a complete paragraph evidence projection. */
+    public ParsedDocument parseTemplate(String fileKey,String fileName,byte[] bytes) {
+        return parseTemplate(fileKey,fileName,bytes,null,null);
+    }
+
+    public ParsedDocument parseTemplate(String fileKey,String fileName,byte[] bytes,ParsedDocument observation,OerDocumentIdentity identity) {
+        boolean pdf=bytes!=null&&bytes.length>=5&&new String(bytes,0,5,StandardCharsets.US_ASCII).equals("%PDF-");
+        boolean zip=bytes!=null&&bytes.length>=4&&bytes[0]=='P'&&bytes[1]=='K';
+        if(!pdf&&!zip)throw new IllegalArgumentException("Drafting templates require actual DOCX or PDF bytes");
+        // Upload names are display metadata; only the current bytes choose the content parser.
+        String parserName="template."+(pdf?"pdf":"docx");
+        if(observation!=null)validateObservation(parserName,bytes,observation);
+        ParsedDocument parsed=parse(parserName,bytes,DocumentParseProbe.disabled(),observation,readingPlan(parserName,bytes,observation,identity),true);
+        parsed.getCoverage().setTemplateEvidence(OerTemplateEvidence.analyse(fileKey,parsed));
+        return parsed;
+    }
+
+    private ParsedDocument parse(String fileName,byte[] bytes,DocumentParseProbe probe,ParsedDocument initialObservation,OerReadingPlan readingPlan,boolean templateEvidence) {
         boolean returnedNormally=false;Throwable operationFailure=null;
         String ext = extensionOf(fileName);
         try (DocumentParseProbe.Timer timer=probe.measure("parse_dispatch_and_document",null,"Actual parser operation; measured probe event I/O excluded, nested stages are not additive")) {
             ParsedDocument result;
             if ("pdf".equals(ext)) {
                 result=parsePdf(fileName,bytes,probe,initialObservation,readingPlan);
-            } else if ("docx".equals(ext)) result=parseDocx(bytes,probe);
+            } else if ("docx".equals(ext)) result=templateEvidence?parseDocx(bytes,probe,false,true):parseDocx(bytes,probe);
             else if ("doc".equals(ext)) result=parseDoc(bytes);
             else if ("msg".equals(ext)) result=parseMsg(bytes);
             else if ("eml".equals(ext) || "emlx".equals(ext)) result=parseEml(bytes);
@@ -643,20 +669,29 @@ public class DocumentParser {
     }
 
     private ParsedDocument parseDocx(byte[] bytes,DocumentParseProbe probe,boolean legacyMath) throws Exception {
+        return parseDocx(bytes,probe,legacyMath,false);
+    }
+
+    private ParsedDocument parseDocx(byte[] bytes,DocumentParseProbe probe,boolean legacyMath,boolean templateEvidence) throws Exception {
         try(DocumentParseProbe.Timer timer=probe.measure("docx_zip_preflight",null,"Original bounded OOXML inflation guard")){preflightDocx(bytes);}
         List<DocumentBlock> blocks = new ArrayList<>();
         try (XWPFDocument document = new XWPFDocument(new ByteArrayInputStream(bytes))) {
-            Map<DocumentBlock,Node> sourceNodes=new IdentityHashMap<>();Map<Node,String> nativePaths=new IdentityHashMap<>();
+            Map<Object,Node> sourceNodes=new IdentityHashMap<>();Map<Node,String> nativePaths=new IdentityHashMap<>();
             Map<String,String> partHashes=new HashMap<>();String originalSha=DocumentParseProbe.sha256(bytes);
+            WordInlineSemantics inline=legacyMath?null:new WordInlineSemantics(document,originalSha,sourceNodes);
+            NativeWordTableInventory nativeTables=new NativeWordTableInventory(nativePaths,partHashes,originalSha);
+            nativeTables.load(document.getDocument().getBody().getDomNode(),"body",document.getPackagePart(),null);
             DocxNumberingResolver numbering = new DocxNumberingResolver(document);
             Map<String,org.apache.poi.openxml4j.opc.PackagePart> wordParts=new HashMap<>();
+            Map<String,List<Node>> noteRoots=new HashMap<>();
+            Map<PackagePart,NativeSectionStories> noteRelationships=new IdentityHashMap<>();
             wordParts.put("body/",document.getPackagePart());
             int bodyIndex = 0;
             for (IBodyElement element : document.getBodyElements()) {
                 if (element instanceof XWPFParagraph) {
                     XWPFParagraph paragraph = (XWPFParagraph) element;
                     DocumentBlock block = wordBlock(paragraph.getCTP().getDomNode(), "paragraph",
-                            "body/" + bodyIndex + "/paragraph", numbering, legacyMath);
+                            "body/" + bodyIndex + "/paragraph", numbering, legacyMath, sourceNodes, inline);
                     sourceNodes.put(block,paragraph.getCTP().getDomNode());
                     block.setParagraphStyle(paragraph.getStyle());
                     if (paragraph.getStyle() != null && document.getStyles() != null) {
@@ -675,7 +710,7 @@ public class DocumentParser {
                         for (XWPFTableCell cell : row.getTableCells()) {
                             WordText value = new WordText();
                             collectWordText(cell.getCTTc().getDomNode(), false, false, value, numbering,
-                                    location + "/cell/" + cellIndex++, legacyMath);
+                                    location + "/cell/" + cellIndex++, legacyMath, sourceNodes, inline);
                             values.add(normalize(value.effective.toString()));
                             rowText.add(value);
                         }
@@ -688,36 +723,43 @@ public class DocumentParser {
                 }
                 bodyIndex++;
             }
+            if(inline!=null)inline.finish();
             int index = 0;
             for (XWPFHeader header : document.getHeaderList()) {
                 wordParts.put("header/"+index+"/",header.getPackagePart());
-                DocumentBlock block = wordBlock(header._getHdrFtr().getDomNode(), "header", "header/" + index++, numbering.newStory(), legacyMath);
+                nativeTables.load(header._getHdrFtr().getDomNode(),"header",header.getPackagePart(),null);
+                DocumentBlock block = wordBlock(header._getHdrFtr().getDomNode(), "header", "header/" + index++, numbering.newStory(), legacyMath, sourceNodes, inline==null?null:inline.newStory());
                 sourceNodes.put(block,header._getHdrFtr().getDomNode());
                 if (hasContent(block)) blocks.add(block);
             }
             index = 0;
             for (XWPFFooter footer : document.getFooterList()) {
                 wordParts.put("footer/"+index+"/",footer.getPackagePart());
-                DocumentBlock block = wordBlock(footer._getHdrFtr().getDomNode(), "footer", "footer/" + index++, numbering.newStory(), legacyMath);
+                nativeTables.load(footer._getHdrFtr().getDomNode(),"footer",footer.getPackagePart(),null);
+                DocumentBlock block = wordBlock(footer._getHdrFtr().getDomNode(), "footer", "footer/" + index++, numbering.newStory(), legacyMath, sourceNodes, inline==null?null:inline.newStory());
                 sourceNodes.put(block,footer._getHdrFtr().getDomNode());
                 if (hasContent(block)) blocks.add(block);
             }
             DocxNumberingResolver footnoteNumbering = numbering.newStory();
             for (XWPFFootnote note : document.getFootnotes()) {
                 wordParts.put("word-footnote/"+note.getId()+"/",note.getPart().getPackagePart());
+                nativeTables.load(note.getCTFtnEdn().getDomNode(),"footnote",note.getPart().getPackagePart(),note.getId().toString());
+            if(!legacyMath)noteRoots.computeIfAbsent(note.getPart().getPackagePart().getPartName().getName()+"/footnote/"+note.getId(),key->new ArrayList<>()).add(note.getCTFtnEdn().getDomNode());
                 // OOXML reserves IDs -1 and 0 for separator notes, which are not contract provisions.
                 if (note.getId().signum() <= 0) continue;
                 DocumentBlock block = wordBlock(note.getCTFtnEdn().getDomNode(), "footnote",
-                        "word-footnote/" + note.getId(), footnoteNumbering, legacyMath);
+                        "word-footnote/" + note.getId(), footnoteNumbering, legacyMath, sourceNodes, inline==null?null:inline.newStory());
                 sourceNodes.put(block,note.getCTFtnEdn().getDomNode());
                 if (hasContent(block)) blocks.add(block);
             }
             DocxNumberingResolver endnoteNumbering = numbering.newStory();
             for (XWPFEndnote note : document.getEndnotes()) {
                 wordParts.put("word-endnote/"+note.getId()+"/",note.getPart().getPackagePart());
+                nativeTables.load(note.getCTFtnEdn().getDomNode(),"endnote",note.getPart().getPackagePart(),note.getId().toString());
+            if(!legacyMath)noteRoots.computeIfAbsent(note.getPart().getPackagePart().getPartName().getName()+"/endnote/"+note.getId(),key->new ArrayList<>()).add(note.getCTFtnEdn().getDomNode());
                 if (note.getId().signum() <= 0) continue;
                 DocumentBlock block = wordBlock(note.getCTFtnEdn().getDomNode(), "endnote",
-                        "word-endnote/" + note.getId(), endnoteNumbering, legacyMath);
+                        "word-endnote/" + note.getId(), endnoteNumbering, legacyMath, sourceNodes, inline==null?null:inline.newStory());
                 sourceNodes.put(block,note.getCTFtnEdn().getDomNode());
                 if (hasContent(block)) blocks.add(block);
             }
@@ -731,9 +773,50 @@ public class DocumentParser {
                         }
                         observed.setSourcePosition(JsonUtils.mapper().valueToTree(DocumentParseProbe.map("kind","docx_native","sourceSha256",originalSha,
                                 "partName",partName,"partSha256",partHashes.get(partName),"nodePath",path)));
-                    }break;
+                        bindWordInlinePositions(observed.getWordTextSpans(),sourceNodes,nativePaths,originalSha,partName,partHashes.get(partName));
+                        bindWordInlinePositions(observed.getWordFields(),sourceNodes,nativePaths,originalSha,partName,partHashes.get(partName));
+                        for(JsonNode object:observed.getWordNativeObjects())if(object.has("alternateContent"))
+                            bindWordInlinePosition(object,sourceNodes,nativePaths,originalSha,partName,partHashes.get(partName));
+                        for(DocumentBlock.WordCell cell:observed.getWordCells()){
+                            Node cellNode=sourceNodes.get(cell);if(cellNode==null)continue;
+                            ObjectNode position=wordSectionPosition(cellNode,nativePaths,originalSha,partName,partHashes.get(partName));
+                            for(Node parent=cellNode.getParentNode();parent!=null;parent=parent.getParentNode()){
+                                if(!Objects.equals(cellNode.getNamespaceURI(),parent.getNamespaceURI()))continue;
+                                String key="tr".equals(parent.getLocalName())?"rowNodePath":"tbl".equals(parent.getLocalName())?"tableNodePath":"tc".equals(parent.getLocalName())?"parentCellNodePath":null;
+                                if(key!=null&&!position.has(key))position.put(key,nativeWordPath(parent,nativePaths));
+                            }
+                            cell.setSourcePosition(position);
+                        }
+                    }
+                    if(!legacyMath)for(JsonNode raw:observed.getWordNativeObjects())if(raw.has("noteReference")) {
+                        NativeSectionStories relations=noteRelationships.get(part.getValue());
+                        if(relations==null) {
+                            relations=new NativeSectionStories(part.getValue(),nativeTables,nativePaths,partHashes,originalSha,
+                                    document.getDocument().getBody().getDomNode().getNamespaceURI());
+                            noteRelationships.put(part.getValue(),relations);
+                        }
+                        String failure=relations.bindNoteReference((ObjectNode)raw,sourceNodes.get(raw),noteRoots);
+                        if(failure!=null)observed.getWordWarnings().add("Unresolved native Word note reference at "+raw.path("location").asText()+": "+failure);
+                    }
+                    break;
                 }
             ParseCoverage coverage = unpaginatedCoverage("DOCX locations are body/table positions; physical Word pages are unknown until rendering.");
+            String bodyPartName=document.getPackagePart().getPartName().getName().substring(1);
+            if(!partHashes.containsKey(bodyPartName))try(java.io.InputStream input=document.getPackagePart().getInputStream()){
+                partHashes.put(bodyPartName,DocumentParseProbe.sha256(org.springframework.util.StreamUtils.copyToByteArray(input)));
+            }
+            ObjectNode sections=nativeDocxSections(document.getDocument().getBody().getDomNode(),blocks,sourceNodes,
+                    nativePaths,originalSha,bodyPartName,partHashes.get(bodyPartName));
+            NativeSectionStories sectionStories=noteRelationships.get(document.getPackagePart());
+            if(sectionStories==null)sectionStories=new NativeSectionStories(document.getPackagePart(),nativeTables,nativePaths,partHashes,originalSha,
+                    document.getDocument().getBody().getDomNode().getNamespaceURI());
+            sectionStories.append(sections,document.getDocument().getBody().getDomNode(),blocks);
+            coverage.setNativeDocxSections(sections);
+            coverage.setNativeDocxTables(nativeTables.finish(blocks,sourceNodes));
+            java.util.function.Function<Node,ObjectNode> outlinePosition=node->wordSectionPosition(node,nativePaths,originalSha,bodyPartName,partHashes.get(bodyPartName));
+            coverage.setNativeDocxOutline(inline==null?OerNativeDocxOutline.observe(document,blocks,sourceNodes,outlinePosition)
+                    :OerNativeDocxOutline.observe(document,blocks,sourceNodes,outlinePosition,inline::paragraph));
+            if(templateEvidence)coverage.setNativeDocxParagraphs(nativeTables.paragraphs(inline,blocks,sourceNodes,coverage.getNativeDocxOutline()));
             coverage.getLimitations().add("Explicit run strike/dstrike and tracked deletions are retained; inherited style strike requires manual review.");
             int unresolvedNumbering = 0, unresolvedSymbols = 0, structuralWarnings = 0;
             for (DocumentBlock block : blocks) {
@@ -760,10 +843,10 @@ public class DocumentParser {
     /** Bound actual inflation before POI materializes OOXML; ZIP declared sizes are untrusted. */
     private void preflightDocx(byte[] bytes) throws IOException {
         ConsenseProperties.Document cfg = props.getDocument();
-        long entryLimit = positiveLimit(cfg.getMaxZipEntryBytes(), MAX_ZIP_ENTRY_BYTES);
-        long xmlLimit = positiveLimit(cfg.getMaxZipXmlBytes(), MAX_ZIP_XML_BYTES);
-        long totalLimit = positiveLimit(cfg.getMaxZipTotalBytes(), MAX_ZIP_TOTAL_BYTES);
-        int countLimit = (int) positiveLimit(cfg.getMaxZipEntries(), MAX_ZIP_ENTRIES);
+        long entryLimit = positiveLimit(cfg.getMaxZipEntryBytes());
+        long xmlLimit = positiveLimit(cfg.getMaxZipXmlBytes());
+        long totalLimit = positiveLimit(cfg.getMaxZipTotalBytes());
+        int countLimit = (int) positiveLimit(cfg.getMaxZipEntries());
         long total = 0;
         int count = 0;
         byte[] buffer = new byte[8192];
@@ -797,9 +880,9 @@ public class DocumentParser {
         }
     }
 
-    private static long positiveLimit(long configured, long ceiling) throws IOException {
+    private static long positiveLimit(long configured) throws IOException {
         if (configured <= 0) throw new IOException("DOCX ZIP limits must be positive");
-        return Math.min(configured, ceiling);
+        return configured;
     }
 
     // ------------------------------------------------------------------ DOC
@@ -921,12 +1004,12 @@ public class DocumentParser {
     }
 
     private DocumentBlock wordBlock(Node node, String kind, String location, DocxNumberingResolver numbering) {
-        return wordBlock(node, kind, location, numbering, false);
+        return wordBlock(node, kind, location, numbering, false, null, null);
     }
 
-    private DocumentBlock wordBlock(Node node, String kind, String location, DocxNumberingResolver numbering, boolean legacyMath) {
+    private DocumentBlock wordBlock(Node node, String kind, String location, DocxNumberingResolver numbering, boolean legacyMath, Map<Object,Node> sourceNodes, WordInlineSemantics inline) {
         WordText text = new WordText();
-        collectWordText(node, false, false, text, numbering, location, legacyMath);
+        collectWordText(node, false, false, text, numbering, location, legacyMath, sourceNodes, inline);
         return wordBlock(text, kind, location);
     }
 
@@ -941,21 +1024,41 @@ public class DocumentParser {
         block.setWordWarnings(text.warnings);
         block.setWordCells(text.cells);
         block.setWordNativeObjects(text.nativeObjects);
+        block.setWordTextSpans(text.spans);block.setWordFields(text.fields);
         return block;
     }
 
     private boolean hasContent(DocumentBlock block) {
         return !JsonUtils.isBlankText(block.getOriginalText()) || !block.getWordNumbering().isEmpty()
                 || !block.getWordSymbols().isEmpty() || !block.getWordWarnings().isEmpty() || !block.getWordCells().isEmpty()
-                || !block.getWordNativeObjects().isEmpty();
+                || !block.getWordNativeObjects().isEmpty() || !block.getWordTextSpans().isEmpty() || !block.getWordFields().isEmpty();
     }
 
     /** Traverse OOXML so deleted runs do not enter the effective contract text. */
     private void collectWordText(Node node, boolean deleted, boolean struck, WordText out,
-                                 DocxNumberingResolver numbering, String location, boolean legacyMath) {
+                                 DocxNumberingResolver numbering, String location, boolean legacyMath, Map<Object,Node> sourceNodes, WordInlineSemantics inline) {
         String name = node.getLocalName();
         boolean isDeleted = deleted || "del".equals(name) || "moveFrom".equals(name);
         boolean isStruck = struck;
+        if(inline!=null){
+            ObjectNode field=inline.field(node);if(field!=null)out.addField(field);
+            ObjectNode instruction=inline.instruction(node);if(instruction!=null)out.addField(instruction);
+            if("http://schemas.openxmlformats.org/wordprocessingml/2006/main".equals(node.getNamespaceURI())&&"fldSimple".equals(name)){
+                int childIndex=0;for(Node child=node.getFirstChild();child!=null;child=child.getNextSibling())
+                    collectWordText(child,isDeleted,isStruck,out,numbering,location+"/node/"+childIndex++,legacyMath,sourceNodes,inline);
+                inline.endSimple();return;
+            }
+        }
+        if(!legacyMath&&"http://schemas.openxmlformats.org/wordprocessingml/2006/main".equals(node.getNamespaceURI())
+                &&("footnoteReference".equals(name)||"endnoteReference".equals(name))) {
+            ObjectNode object=JsonUtils.mapper().createObjectNode();object.put("kind",name);object.put("location",location);
+            object.put("status","native_note_reference_unresolved");object.put("semanticStatus","unknown");object.put("deleted",isDeleted);object.put("struck",isStruck);
+            try{object.put("nativeXml",org.apache.xmlbeans.XmlObject.Factory.parse(node).xmlText());}
+            catch(Exception unavailable){object.put("nativeXmlStatus","unavailable_original_package_retained");}
+            ObjectNode reference=object.putObject("noteReference");reference.put("rawId",NativeSectionStories.attribute(node,node.getNamespaceURI(),"id"));
+            reference.set("rawAttributes",NativeSectionStories.attributes(node));reference.put("bindingStatus","unknown");reference.put("reason","note_binding_not_observed");
+            if(sourceNodes!=null)sourceNodes.put(object,node);out.nativeObjects.add(object);return;
+        }
         boolean math="http://schemas.openxmlformats.org/officeDocument/2006/math".equals(node.getNamespaceURI());
         if(math||("http://schemas.openxmlformats.org/wordprocessingml/2006/main".equals(node.getNamespaceURI())
                 && ("drawing".equals(name)||"pict".equals(name)||"object".equals(name)))) {
@@ -966,14 +1069,30 @@ public class DocumentParser {
             try { nativeObject.put("nativeXml",org.apache.xmlbeans.XmlObject.Factory.parse(node).xmlText()); }
             catch(Exception unavailable){nativeObject.put("nativeXmlStatus","unavailable_original_package_retained");}
             wordRelationshipRefs(node,nativeObject.putArray("relationshipRefs"));
+            if (math && !legacyMath) {
+                ObjectNode projection=nativeObject.putObject("mathProjection");projection.put("encoding","omml_linear_v1");
+                try {
+                    requireUnrevisedWordMath(node);
+                    String projected=projectWordMath(node);
+                    if(JsonUtils.isBlankText(projected))throw new IllegalArgumentException("empty_math_expression");
+                    projection.put("status","projected");projection.put("text",projected);nativeObject.put("status","native_ooxml_projected");
+                    appendWordText(out,projected,isDeleted,isStruck);
+                } catch(IllegalArgumentException unresolved) {
+                    projection.put("status","unresolved");projection.put("text","");projection.put("reason",unresolved.getMessage());
+                    nativeObject.put("status","native_ooxml_unresolved");
+                    appendWordText(out,"[unresolved Word math]",isDeleted,isStruck);
+                    out.warnings.add("Unresolved native Word math at "+location+": "+unresolved.getMessage()+"; original XML retained.");
+                }
+                out.nativeObjects.add(nativeObject);return;
+            }
             out.nativeObjects.add(nativeObject);out.warnings.add("Unrendered native Word "+nativeObject.path("kind").asText()+" at "+location+"; source semantics remain unknown.");
-            if(math && !legacyMath)return;
         }
         if ("tc".equals(name)) {
             WordText cell = new WordText(); int childIndex = 0;
             for (Node child = node.getFirstChild(); child != null; child = child.getNextSibling())
-                collectWordText(child, isDeleted, isStruck, cell, numbering, location + "/node/" + childIndex++, legacyMath);
+                collectWordText(child, isDeleted, isStruck, cell, numbering, location + "/node/" + childIndex++, legacyMath, sourceNodes, inline);
             DocumentBlock.WordCell metadata = new DocumentBlock.WordCell();
+            if(sourceNodes!=null)sourceNodes.put(metadata,node);
             metadata.setLocation(location); metadata.setTableLocation(wordDomLocation(node.getParentNode().getParentNode()));
             metadata.setRowIndex(previousWordSiblings(node.getParentNode(), "tr"));
             metadata.setCellIndex(previousWordSiblings(node, "tc"));
@@ -991,17 +1110,28 @@ public class DocumentParser {
                 cell.warnings.add("Unresolved native Word table topology at " + location); }
             metadata.setText(normalize(cell.effective.toString())); metadata.setOriginalText(normalize(cell.original.toString()));
             metadata.setDeletedText(normalize(cell.deleted.toString())); metadata.setStrikeText(normalize(cell.struck.toString()));
+            metadata.setWordTextSpans(new ArrayList<>(cell.spans));metadata.setWordFields(new ArrayList<>(cell.fields));
             cell.cells.add(0, metadata); out.add(cell); return;
         }
         if ("txbxContent".equals(name)) {
-            numbering = numbering.newStory();
+            numbering = numbering.newStory();if(inline!=null)inline=inline.newStory();
+        }
+        if ("AlternateContent".equals(name) && !legacyMath && "http://schemas.openxmlformats.org/markup-compatibility/2006".equals(node.getNamespaceURI())) {
+            WordInlineSemantics.Alternative selected=WordInlineSemantics.alternative(node);ObjectNode object=JsonUtils.mapper().createObjectNode();
+            object.put("kind","alternateContent");object.put("location",location);object.put("deleted",isDeleted);object.put("struck",isStruck);
+            object.put("status",selected.selected==null?"native_ooxml_unresolved":"native_ooxml_branch_selected");object.put("semanticStatus","unknown");object.set("alternateContent",selected.evidence);
+            try{object.put("nativeXml",org.apache.xmlbeans.XmlObject.Factory.parse(node).xmlText());}catch(Exception unavailable){object.put("nativeXmlStatus","unavailable_original_package_retained");}
+            if(sourceNodes!=null)sourceNodes.put(object,node);out.nativeObjects.add(object);
+            if(selected.selected!=null)collectWordText(selected.selected,isDeleted,isStruck,out,numbering,location+"/selected",legacyMath,sourceNodes,inline);
+            else {appendWordText(out,"[unresolved Word AlternateContent]",isDeleted,isStruck);out.warnings.add("Unresolved OOXML AlternateContent at "+location+"; original branches retained.");}
+            return;
         }
         if ("AlternateContent".equals(name)) {
             WordText alternative = new WordText();
             int alternativeIndex = 0;
             for (Node child = node.getFirstChild(); child != null; child = child.getNextSibling()) {
                 collectWordText(child, isDeleted, isStruck, alternative, numbering.newStory(),
-                        location + "/alternative/" + alternativeIndex++, legacyMath);
+                        location + "/alternative/" + alternativeIndex++, legacyMath, sourceNodes, inline);
             }
             alternative.warnings.add("Unrendered OOXML AlternateContent branches at " + location);
             for (DocumentBlock.WordNumbering item : alternative.numbering) {
@@ -1017,7 +1147,7 @@ public class DocumentParser {
             WordText paragraph = new WordText();
             int childIndex = 0;
             for (Node child = node.getFirstChild(); child != null; child = child.getNextSibling()) {
-                collectWordText(child, isDeleted, isStruck, paragraph, numbering, location + "/node/" + childIndex++, legacyMath);
+                collectWordText(child, isDeleted, isStruck, paragraph, numbering, location + "/node/" + childIndex++, legacyMath, sourceNodes, inline);
             }
             if (resolved != null && resolved.isNumbered()) {
                 // Note parts are enumerated by storage order. Cross-note label order
@@ -1034,7 +1164,23 @@ public class DocumentParser {
                 metadata.setValue(resolved.getValue()); metadata.setReason(trusted ? resolved.getReason()
                         : resolved.isResolved() ? "note_reference_order_not_verified" : resolved.getReason());
                 metadata.setResolutionStatus(trusted ? "resolved" : "unresolved");
-                metadata.setAppliedToEffectiveText(active); paragraph.numbering.add(metadata);
+                metadata.setAppliedToEffectiveText(active);
+                metadata.setFontAttributes(resolved.getFontAttributes());
+                if (resolved.getFontSymbols() != null) {
+                    List<DocumentBlock.WordSymbol> fontSymbols = new ArrayList<>(); int symbolIndex = 0;
+                    for (WordSymbolDecoder.Symbol symbol : resolved.getFontSymbols()) {
+                        DocumentBlock.WordSymbol observed = new DocumentBlock.WordSymbol();
+                        observed.setLocation(location + "/numbering/font-symbol/" + symbolIndex++);
+                        observed.setFont(symbol.getFont()); observed.setHexCode(symbol.getHexCode());
+                        observed.setDecodedText(symbol.getDecodedText()); observed.setResolutionStatus(symbol.getResolutionStatus());
+                        observed.setMappingSource(symbol.getMappingSource());
+                        observed.setDeleted(!active && !JsonUtils.isBlankText(paragraph.deleted.toString()));
+                        observed.setStruck(!active && !JsonUtils.isBlankText(paragraph.struck.toString()));
+                        fontSymbols.add(observed);
+                    }
+                    metadata.setFontSymbols(fontSymbols);
+                }
+                paragraph.numbering.add(metadata);
                 String label = (trusted ? resolved.getLabel() : "[unresolved Word numbering]")
                         + (trusted && "nothing".equals(resolved.getSuffix()) ? "" : " ");
                 if (!JsonUtils.isBlankText(paragraph.original.toString())) paragraph.original.insert(0, label);
@@ -1045,6 +1191,10 @@ public class DocumentParser {
                 }
             }
             appendWordText(paragraph, "\n", isDeleted, isStruck);
+            if(inline!=null)inline.paragraph(node,normalize(paragraph.effective.toString()),normalize(paragraph.original.toString()),
+                    normalize(paragraph.deleted.toString()),normalize(paragraph.struck.toString()));
+            if(inline!=null)inline.preNormalizedParagraph(node,paragraph.effective.toString(),paragraph.original.toString(),
+                    paragraph.deleted.toString(),paragraph.struck.toString());
             out.add(paragraph);
             return;
         }
@@ -1059,6 +1209,7 @@ public class DocumentParser {
         }
         if ("t".equals(name) || "delText".equals(name)) {
             appendWordText(out, nodeText(node), isDeleted || "delText".equals(name), isStruck);
+            if(inline!=null){ObjectNode span=inline.span(node,isDeleted,isStruck);if(span!=null)out.spans.add(span);}
             return;
         }
         if ("sym".equals(name)) {
@@ -1075,8 +1226,104 @@ public class DocumentParser {
         if ("br".equals(name) || "cr".equals(name)) appendWordText(out, "\n", isDeleted, isStruck);
         int childIndex = 0;
         for (Node child = node.getFirstChild(); child != null; child = child.getNextSibling()) {
-            collectWordText(child, isDeleted, isStruck, out, numbering, location + "/node/" + childIndex++, legacyMath);
+            collectWordText(child, isDeleted, isStruck, out, numbering, location + "/node/" + childIndex++, legacyMath, sourceNodes, inline);
         }
+    }
+
+    /** A source-tree projection, not a rendered equation or an assertion of its business meaning. */
+    private static String projectWordMath(Node node) {
+        final String math="http://schemas.openxmlformats.org/officeDocument/2006/math";
+        final String word="http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+        if(node.getNodeType()!=Node.ELEMENT_NODE) {
+            if(node.getNodeType()==Node.TEXT_NODE&&!node.getNodeValue().trim().isEmpty())throw new IllegalArgumentException("unexpected_math_text");
+            return "";
+        }
+        String name=node.getLocalName();
+        if(!math.equals(node.getNamespaceURI()))throw new IllegalArgumentException("unsupported_math_namespace:"+node.getNamespaceURI());
+        if("t".equals(name)) {
+            StringBuilder text=new StringBuilder();
+            for(Node child=node.getFirstChild();child!=null;child=child.getNextSibling()) {
+                if(child.getNodeType()==Node.TEXT_NODE||child.getNodeType()==Node.CDATA_SECTION_NODE)text.append(child.getNodeValue());
+                else if(child.getNodeType()==Node.ELEMENT_NODE)throw new IllegalArgumentException("malformed_math_text");
+            }
+            return text.toString();
+        }
+        if("f".equals(name)||"sSub".equals(name)||"sSup".equals(name)||"sSubSup".equals(name)) {
+            String[] roles="f".equals(name)?new String[]{"num","den"}:"sSub".equals(name)?new String[]{"e","sub"}
+                    :"sSup".equals(name)?new String[]{"e","sup"}:new String[]{"e","sub","sup"};
+            Map<String,String> values=new LinkedHashMap<>();boolean properties=false;
+            for(Node child=node.getFirstChild();child!=null;child=child.getNextSibling()) {
+                if(child.getNodeType()!=Node.ELEMENT_NODE){projectWordMath(child);continue;}
+                String role=child.getLocalName();
+                if(!math.equals(child.getNamespaceURI()))throw new IllegalArgumentException("unsupported_math_namespace:"+child.getNamespaceURI());
+                if((name+"Pr").equals(role)) {
+                    if(properties)throw new IllegalArgumentException("duplicate_math_properties:"+name);
+                    projectWordMathProperties(child);properties=true;continue;
+                }
+                if(!java.util.Arrays.asList(roles).contains(role)||values.containsKey(role))throw new IllegalArgumentException("malformed_math_members:"+name);
+                String value=projectWordMath(child);
+                if(JsonUtils.isBlankText(value))throw new IllegalArgumentException("empty_math_member:"+name+"/"+role);
+                values.put(role,value);
+            }
+            if(values.size()!=roles.length)throw new IllegalArgumentException("missing_math_member:"+name);
+            if("f".equals(name))return "("+values.get("num")+")/("+values.get("den")+")";
+            String value="("+values.get("e")+")";
+            if(values.containsKey("sub"))value+="_("+values.get("sub")+")";
+            if(values.containsKey("sup"))value+="^("+values.get("sup")+")";
+            return value;
+        }
+        if(!java.util.Arrays.asList("oMath","oMathPara","r","num","den","e","sub","sup").contains(name))
+            throw new IllegalArgumentException("unsupported_math_element:"+name);
+        StringBuilder text=new StringBuilder();
+        for(Node child=node.getFirstChild();child!=null;child=child.getNextSibling()) {
+            if(child.getNodeType()!=Node.ELEMENT_NODE){projectWordMath(child);continue;}
+            String childName=child.getLocalName();boolean childMath=math.equals(child.getNamespaceURI());
+            boolean properties=childMath&&("r".equals(name)&&"rPr".equals(childName)||"oMathPara".equals(name)&&"oMathParaPr".equals(childName)
+                    ||java.util.Arrays.asList("num","den","e","sub","sup").contains(name)&&"argPr".equals(childName));
+            if(properties||"r".equals(name)&&word.equals(child.getNamespaceURI())&&"rPr".equals(childName)) {projectWordMathProperties(child);continue;}
+            boolean allowed="r".equals(name)?"t".equals(childName):"oMathPara".equals(name)?"oMath".equals(childName)
+                    :java.util.Arrays.asList("r","f","sSub","sSup","sSubSup").contains(childName);
+            if(!childMath||!allowed)throw new IllegalArgumentException("unsupported_math_child:"+name+"/"+childName);
+            String value=projectWordMath(child);
+            if("oMathPara".equals(name)&&text.length()>0)text.append('\n');
+            text.append(value);
+        }
+        return text.toString();
+    }
+
+    /** Only formatting properties are omitted; fraction type can change the mathematical operation. */
+    private static void projectWordMathProperties(Node node) {
+        final String math="http://schemas.openxmlformats.org/officeDocument/2006/math";
+        final String word="http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+        String name=node.getLocalName();
+        if(word.equals(node.getNamespaceURI())&&"rPr".equals(name))return;
+        String allowed="fPr".equals(name)?"type|ctrlPr":"rPr".equals(name)?"lit|nor|scr|sty|brk|aln"
+                :"oMathParaPr".equals(name)?"jc":"argPr".equals(name)?"argSz":"sSubSupPr".equals(name)?"alnScr|ctrlPr"
+                :"sSubPr".equals(name)||"sSupPr".equals(name)?"ctrlPr":"ctrlPr".equals(name)?"rPr":"";
+        for(Node child=node.getFirstChild();child!=null;child=child.getNextSibling()) {
+            if(child.getNodeType()!=Node.ELEMENT_NODE){projectWordMath(child);continue;}
+            String childName=child.getLocalName();
+            if("ctrlPr".equals(name)&&word.equals(child.getNamespaceURI())&&"rPr".equals(childName)){projectWordMathProperties(child);continue;}
+            if(!math.equals(child.getNamespaceURI())||!childName.matches(allowed))throw new IllegalArgumentException("unsupported_math_property:"+name+"/"+childName);
+            if("type".equals(childName)) {
+                Node value=child.getAttributes().getNamedItemNS(math,"val");String type=value==null?"":value.getNodeValue();
+                if(!java.util.Arrays.asList("bar","skw","lin").contains(type))throw new IllegalArgumentException("unsupported_math_fraction_type:"+type);
+            }
+            if("ctrlPr".equals(childName))projectWordMathProperties(child);
+            else for(Node property=child.getFirstChild();property!=null;property=property.getNextSibling()) {
+                if(property.getNodeType()==Node.ELEMENT_NODE)throw new IllegalArgumentException("malformed_math_property:"+childName);
+                projectWordMath(property);
+            }
+        }
+    }
+
+    private void requireUnrevisedWordMath(Node node) {
+        if("http://schemas.openxmlformats.org/wordprocessingml/2006/main".equals(node.getNamespaceURI())) {
+            String name=node.getLocalName();
+            if(java.util.Arrays.asList("del","ins","moveFrom","moveTo","delText","rPrChange").contains(name)
+                    ||("strike".equals(name)||"dstrike".equals(name))&&onOff(node))throw new IllegalArgumentException("internal_math_revision_unresolved");
+        }
+        for(Node child=node.getFirstChild();child!=null;child=child.getNextSibling())requireUnrevisedWordMath(child);
     }
 
     private void appendWordText(WordText out, String text, boolean deleted, boolean struck) {
@@ -1095,6 +1342,18 @@ public class DocumentParser {
             }
         }
         for(Node child=node.getFirstChild();child!=null;child=child.getNextSibling())wordRelationshipRefs(child,refs);
+    }
+
+    private static void bindWordInlinePositions(List<JsonNode> items,Map<Object,Node> sources,Map<Node,String> paths,String sourceSha,String partName,String partSha){
+        for(JsonNode item:items)bindWordInlinePosition(item,sources,paths,sourceSha,partName,partSha);
+    }
+    private static void bindWordInlinePosition(JsonNode item,Map<Object,Node> sources,Map<Node,String> paths,String sourceSha,String partName,String partSha){
+        if(item instanceof ObjectNode){Node node=sources.get(item);if(node!=null)((ObjectNode)item).set("sourcePosition",wordSectionPosition(node,paths,sourceSha,partName,partSha));}
+        if(item instanceof ObjectNode){JsonNode reference=item.get("fieldSourcePosition");Node begin=sources.get(reference);
+            if(reference instanceof ObjectNode&&begin!=null)((ObjectNode)reference).setAll(wordSectionPosition(begin,paths,sourceSha,partName,partSha));
+            java.util.Iterator<Map.Entry<String,JsonNode>> entries=item.fields();while(entries.hasNext()){Map.Entry<String,JsonNode> entry=entries.next();
+                if(!"fieldSourcePosition".equals(entry.getKey())&&entry.getValue().isContainerNode())bindWordInlinePosition(entry.getValue(),sources,paths,sourceSha,partName,partSha);}}
+        else if(item.isArray())for(JsonNode child:item)if(child.isContainerNode())bindWordInlinePosition(child,sources,paths,sourceSha,partName,partSha);
     }
 
     private static void bindWordNativeObjects(DocumentBlock block,org.apache.poi.openxml4j.opc.PackagePart part) {
@@ -1185,13 +1444,465 @@ public class DocumentParser {
         return paths.get(node);
     }
     private static void cacheWordPaths(Node node,String path,Map<Node,String> paths){
-        paths.put(node,path);Map<String,Integer> counts=new HashMap<>();
+        cacheWordPaths(node,path,paths,null);
+    }
+    private static void cacheWordPaths(Node node,String path,Map<Node,String> paths,List<Node> nativeNodes){
+        paths.put(node,path);
+        if(nativeNodes!=null && isNativeWordInventoryNode(node))nativeNodes.add(node);
+        Map<String,Integer> counts=new HashMap<>();
         for(Node child=node.getFirstChild();child!=null;child=child.getNextSibling())if(child.getNodeType()==Node.ELEMENT_NODE){
             String name=wordExpandedName(child);int ordinal=counts.getOrDefault(name,0)+1;counts.put(name,ordinal);
-            cacheWordPaths(child,path+"/"+name+"["+ordinal+"]",paths);
+            cacheWordPaths(child,path+"/"+name+"["+ordinal+"]",paths,nativeNodes);
         }
     }
     private static String wordExpandedName(Node node){return "{"+(node.getNamespaceURI()==null?"":node.getNamespaceURI())+"}"+node.getLocalName();}
+
+    private static boolean isNativeWordInventoryNode(Node node){
+        String namespace=node.getNamespaceURI(),name=node.getLocalName();
+        return ("http://schemas.openxmlformats.org/wordprocessingml/2006/main".equals(namespace)
+                || "http://purl.oclc.org/ooxml/wordprocessingml/main".equals(namespace))
+                && ("body".equals(name)||"hdr".equals(name)||"ftr".equals(name)||"footnote".equals(name)
+                ||"endnote".equals(name)||"p".equals(name)||"tbl".equals(name)||"tr".equals(name)||"tc".equals(name));
+    }
+
+    /** Parse-local facts from the normal DOM/path cache; no text projection or effective-content claim. */
+    private static final class NativeWordTableInventory {
+        private final Map<Node,String> paths;
+        private final Map<String,String> hashes;
+        private final String sourceSha;
+        private final Map<String,Part> parts=new LinkedHashMap<>();
+        private NativeWordTableInventory(Map<Node,String> paths,Map<String,String> hashes,String sourceSha){
+            this.paths=paths;this.hashes=hashes;this.sourceSha=sourceSha;
+        }
+        private void load(Node root,String kind,org.apache.poi.openxml4j.opc.PackagePart packagePart,String noteId) throws IOException {
+            String name=packagePart.getPartName().getName().substring(1);
+            Part part=parts.get(name);
+            if(part==null){
+                part=new Part();parts.put(name,part);
+                Node documentRoot=root;
+                while(documentRoot.getParentNode()!=null && documentRoot.getParentNode().getNodeType()==Node.ELEMENT_NODE)
+                    documentRoot=documentRoot.getParentNode();
+                cacheWordPaths(documentRoot,"/"+wordExpandedName(documentRoot)+"[1]",paths,part.nodes);
+                if(!hashes.containsKey(name))try(java.io.InputStream input=packagePart.getInputStream()){
+                    hashes.put(name,DocumentParseProbe.sha256(org.springframework.util.StreamUtils.copyToByteArray(input)));
+                }
+            }
+            ObjectNode loaded=JsonUtils.mapper().createObjectNode();loaded.put("kind",kind);loaded.put("nodePath",paths.get(root));
+            if(noteId!=null)loaded.put("noteId",noteId);
+            part.roots.put(root,loaded);
+        }
+        private ObjectNode finish(List<DocumentBlock> blocks,Map<?,Node> sourceNodes){
+            Map<Node,com.fasterxml.jackson.databind.node.ArrayNode> retained=new IdentityHashMap<>();
+            for(int blockOrdinal=0;blockOrdinal<blocks.size();blockOrdinal++){
+                DocumentBlock block=blocks.get(blockOrdinal);Node row=sourceNodes.get(block);
+                if(row!=null && "tr".equals(row.getLocalName()) && isNativeWordInventoryNode(row))
+                    retained.computeIfAbsent(row,key->JsonUtils.mapper().createArrayNode()).addObject().put("blockOrdinalZeroBased",blockOrdinal);
+                for(int cellOrdinal=0;cellOrdinal<block.getWordCells().size();cellOrdinal++){
+                    Node cell=sourceNodes.get(block.getWordCells().get(cellOrdinal));if(cell==null)continue;
+                    retained.computeIfAbsent(cell,key->JsonUtils.mapper().createArrayNode()).addObject()
+                            .put("blockOrdinalZeroBased",blockOrdinal).put("wordCellOrdinalZeroBased",cellOrdinal);
+                }
+            }
+            ObjectNode inventory=JsonUtils.mapper().createObjectNode();inventory.put("version","docx-native-tables-v1");
+            inventory.put("kind","docx_native");inventory.put("sourceSha256",sourceSha);inventory.put("status","observed_loaded_native_roots");
+            inventory.put("scope","normal_loaded_body_header_footer_footnote_endnote_roots_only");
+            inventory.put("unobservedScope","package_stories_or_roots_not_loaded_by_normal_parser_including_unsupported_stories");
+            inventory.put("semanticScopeVerified",false);inventory.put("effectiveContentStatus","unknown");
+            com.fasterxml.jackson.databind.node.ArrayNode output=inventory.putArray("parts");
+            for(Map.Entry<String,Part> entry:parts.entrySet()){
+                Part part=entry.getValue();ObjectNode item=output.addObject();item.put("partName",entry.getKey());item.put("partSha256",hashes.get(entry.getKey()));
+                com.fasterxml.jackson.databind.node.ArrayNode roots=item.putArray("loadedRoots"),members=item.putArray("members");
+                for(Node node:part.nodes){
+                    if(part.roots.containsKey(node))roots.add(part.roots.get(node));
+                    String name=node.getLocalName();
+                    if(!("tbl".equals(name)||"tr".equals(name)||"tc".equals(name)) || !insideLoadedRoot(node,part.roots))continue;
+                    ObjectNode member=members.addObject();member.put("kind","tbl".equals(name)?"table":"tr".equals(name)?"row":"cell");
+                    member.put("nodePath",paths.get(node));
+                    for(Node parent=node.getParentNode();parent!=null;parent=parent.getParentNode()){
+                        if(!Objects.equals(node.getNamespaceURI(),parent.getNamespaceURI()))continue;
+                        String key="tbl".equals(parent.getLocalName())?("tbl".equals(name)?"parentTableNodePath":"tableNodePath")
+                                :!"tr".equals(name)&&"tc".equals(parent.getLocalName())?"parentCellNodePath":"tc".equals(name)&&"tr".equals(parent.getLocalName())?"rowNodePath":null;
+                        if(key!=null&&!member.has(key))member.put(key,paths.get(parent));
+                    }
+                    member.set("retained",retained.containsKey(node)?retained.get(node):JsonUtils.mapper().createArrayNode());
+                }
+            }
+            return inventory;
+        }
+        private static boolean insideLoadedRoot(Node node,Map<Node,ObjectNode> roots){
+            for(Node parent=node;parent!=null;parent=parent.getParentNode())if(roots.containsKey(parent))return true;
+            return false;
+        }
+        private ObjectNode loadedStory(String name,String kind){
+            Part part=parts.get(name);if(part==null)return null;
+            for(Map.Entry<Node,ObjectNode> entry:part.roots.entrySet()){
+                Node root=entry.getKey();String expected="header".equals(kind)?"hdr":"ftr";
+                if(kind.equals(entry.getValue().path("kind").asText()) && expected.equals(root.getLocalName()) && isNativeWordInventoryNode(root)){
+                    ObjectNode identity=JsonUtils.mapper().createObjectNode();identity.put("partName",name);identity.put("partSha256",hashes.get(name));
+                    identity.put("rootQName",wordExpandedName(root));identity.put("rootNodePath",paths.get(root));return identity;
+                }
+            }return null;
+        }
+
+        private ObjectNode paragraphs(WordInlineSemantics inline,List<DocumentBlock> blocks,Map<?,Node> sourceNodes,JsonNode outline){
+            ObjectNode inventory=JsonUtils.mapper().createObjectNode();inventory.put("version","docx-native-paragraphs-v1");
+            inventory.put("sourceSha256",sourceSha);inventory.put("scope","normal_loaded_body_header_footer_footnote_endnote_roots_only");
+            inventory.put("unobservedScope","package_stories_or_roots_not_loaded_by_normal_parser");
+            inventory.put("physicalWordPagesStatus","unknown_requires_rendition");
+            inventory.put("offsetConvention","utf16_code_units_per_named_parser_text_channel_start_inclusive_end_exclusive");
+            inventory.put("textConvention","Existing normal parser channels including resolved labels and whitespace normalization; nativeXml retains the paragraph formatting and control declarations separately");
+            Map<String,JsonNode> properties=new HashMap<>();
+            for(JsonNode property:outline.path("paragraphs"))properties.put(property.path("sourcePosition").path("partName").asText()+"\n"+property.path("sourcePosition").path("nodePath").asText(),property);
+            Map<Node,List<String>> represented=new IdentityHashMap<>();
+            for(DocumentBlock block:blocks){Node node=sourceNodes.get(block);if(node!=null)represented.computeIfAbsent(node,key->new ArrayList<>()).add(block.getId());}
+            Set<Node> containingParagraphs=Collections.newSetFromMap(new IdentityHashMap<>());
+            for(Part part:parts.values())for(Node node:part.nodes)if("p".equals(node.getLocalName())&&isNativeWordInventoryNode(node))
+                for(Node parent=node.getParentNode();parent!=null;parent=parent.getParentNode())if("p".equals(parent.getLocalName())&&isNativeWordInventoryNode(parent))containingParagraphs.add(parent);
+            com.fasterxml.jackson.databind.node.ArrayNode records=inventory.putArray("paragraphs");int observed=0;
+            for(Map.Entry<String,Part> entry:parts.entrySet())for(Node node:entry.getValue().nodes){
+                if(!"p".equals(node.getLocalName())||!isNativeWordInventoryNode(node)||!insideLoadedRoot(node,entry.getValue().roots))continue;
+                String partName=entry.getKey(),path=paths.get(node);ObjectNode record=records.addObject();
+                record.put("id","docx-p:"+DocumentParseProbe.sha256((sourceSha+"|"+partName+"|"+path).getBytes(StandardCharsets.UTF_8)));
+                record.put("ordinalZeroBased",records.size()-1);
+                record.set("sourcePosition",wordSectionPosition(node,paths,sourceSha,partName,hashes.get(partName)));
+                for(Node parent=node.getParentNode();parent!=null;parent=parent.getParentNode())if("p".equals(parent.getLocalName())&&isNativeWordInventoryNode(parent)){
+                    record.put("containingParagraphNodePath",paths.get(parent));record.put("textOverlapStatus","nested_paragraph_channels_may_overlap_do_not_concatenate");break;
+                }
+                if(containingParagraphs.contains(node))record.put("textOverlapStatus","contains_nested_paragraph_channels_do_not_concatenate");
+                com.fasterxml.jackson.databind.node.ArrayNode retained=record.putArray("retainedBlockIds");boolean ownerFound=false;
+                for(Node parent=node;parent!=null;parent=parent.getParentNode()){
+                    if(!ownerFound&&represented.containsKey(parent)){for(String id:represented.get(parent))retained.add(id);ownerFound=true;}
+                    String kind=parent.getLocalName();String key="tc".equals(kind)?"cellNodePath":"tr".equals(kind)?"rowNodePath":"tbl".equals(kind)?"tableNodePath":null;
+                    if(key!=null&&!record.has(key))record.put(key,paths.get(parent));
+                    if(!record.has("storyKind")&&entry.getValue().roots.containsKey(parent)){
+                        JsonNode root=entry.getValue().roots.get(parent);record.put("storyKind",root.path("kind").asText());record.put("storyRootNodePath",root.path("nodePath").asText());
+                        if(root.has("noteId"))record.set("noteId",root.get("noteId"));
+                    }
+                }
+                JsonNode text=inline==null?null:inline.paragraph(node);
+                ObjectNode observation=record.putObject("textObservation");
+                if(text!=null){observation.put("status","observed_parser_paragraph_channels");for(String key:Arrays.asList("text","originalText","deletedText","strikeText"))observation.set(key,text.path(key));observed++;}
+                else{observation.put("status","unknown");observation.put("reason","native_paragraph_channels_not_captured");}
+                if(text!=null&&text.path("preNormalizedTextObservation").isObject())record.set("preNormalizedTextObservation",text.path("preNormalizedTextObservation").deepCopy());
+                JsonNode paragraphProperties=properties.get(partName+"\n"+path);if(paragraphProperties!=null)record.set("paragraphProperties",paragraphProperties.deepCopy());
+                ObjectNode layout=record.putObject("directParagraphLayout");layout.put("meaning","Original direct paragraph declarations only; inherited style/numbering, character units and rendered geometry are not resolved");
+                for(Node ppr=node.getFirstChild();ppr!=null;ppr=ppr.getNextSibling())if("pPr".equals(ppr.getLocalName())&&Objects.equals(node.getNamespaceURI(),ppr.getNamespaceURI()))
+                    for(Node declaration=ppr.getFirstChild();declaration!=null;declaration=declaration.getNextSibling())if(Arrays.asList("ind","tabs","jc","bidi","textDirection").contains(declaration.getLocalName())&&Objects.equals(node.getNamespaceURI(),declaration.getNamespaceURI())){
+                        ArrayNode declarations=layout.has(declaration.getLocalName())?(ArrayNode)layout.get(declaration.getLocalName()):layout.putArray(declaration.getLocalName());ObjectNode item=declarations.addObject();
+                        item.set("sourcePosition",wordSectionPosition(declaration,paths,sourceSha,partName,hashes.get(partName)));
+                        ObjectNode attributes=item.putObject("attributes");NamedNodeMap nativeAttributes=declaration.getAttributes();
+                        for(int attr=0;attr<nativeAttributes.getLength();attr++){Node attribute=nativeAttributes.item(attr);attributes.put(wordExpandedName(attribute),attribute.getNodeValue());}
+                        if("tabs".equals(declaration.getLocalName()))try{item.put("nativeXml",org.apache.xmlbeans.XmlObject.Factory.parse(declaration).xmlText());}catch(Exception unavailable){item.put("nativeXmlStatus","unavailable_original_package_retained");}
+                    }
+                try{String xml=org.apache.xmlbeans.XmlObject.Factory.parse(node).xmlText();record.put("nativeXml",xml);record.put("nativeXmlSha256",DocumentParseProbe.sha256(xml.getBytes(StandardCharsets.UTF_8)));record.put("xmlEncoding","ooxml_dom_xml_utf8");}
+                catch(Exception unavailable){record.put("nativeXmlStatus","unavailable_original_package_retained");}
+            }
+            inventory.put("observedParagraphCount",observed);inventory.put("unknownParagraphCount",records.size()-observed);
+            return inventory;
+        }
+        private static final class Part {
+            private final List<Node> nodes=new ArrayList<>();
+            private final Map<Node,ObjectNode> roots=new IdentityHashMap<>();
+        }
+    }
+
+    /** Raw native configuration and typed source-link candidates, never rendered page usage. */
+    private static final class NativeSectionStories {
+        private static final String REL="http://schemas.openxmlformats.org/package/2006/relationships";
+        private final PackagePart main;
+        private final NativeWordTableInventory tables;
+        private final Map<Node,String> paths;
+        private final Map<String,String> hashes;
+        private final String sourceSha,word,relationshipNamespace,mainName;
+        private final Map<String,List<Node>> relationships=new LinkedHashMap<>();
+        private final List<Node> relationshipNodes=new ArrayList<>();
+        private String relationshipStatus="unavailable",relationshipPartName;
+        private NativeSectionStories(PackagePart main,NativeWordTableInventory tables,Map<Node,String> paths,
+                                     Map<String,String> hashes,String sourceSha,String word){
+            this.main=main;this.tables=tables;this.paths=paths;this.hashes=hashes;this.sourceSha=sourceSha;this.word=word;
+            mainName=main.getPartName().getName().substring(1);
+            relationshipNamespace="http://purl.oclc.org/ooxml/wordprocessingml/main".equals(word)
+                    ?"http://purl.oclc.org/ooxml/officeDocument/relationships":"http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+            try{
+                PackagePart part=main.getPackage().getPart(PackagingURIHelper.getRelationshipPartName(main.getPartName()));
+                if(part==null){relationshipStatus="absent";return;}
+                relationshipPartName=part.getPartName().getName().substring(1);Node root=partRoot(part);
+                if(!REL.equals(root.getNamespaceURI())||!"Relationships".equals(root.getLocalName())){relationshipStatus="invalid_root";return;}
+                for(Node node=root.getFirstChild();node!=null;node=node.getNextSibling())if(REL.equals(node.getNamespaceURI())&&"Relationship".equals(node.getLocalName())){
+                    relationshipNodes.add(node);relationships.computeIfAbsent(attribute(node,null,"Id"),key->new ArrayList<>()).add(node);
+                }
+                relationshipStatus="observed";
+            }catch(Exception unavailable){relationshipStatus="unavailable_"+unavailable.getClass().getSimpleName();}
+        }
+        private Node partRoot(PackagePart part) throws Exception {
+            byte[] bytes;try(java.io.InputStream input=part.getInputStream()){bytes=org.springframework.util.StreamUtils.copyToByteArray(input);}
+            String name=part.getPartName().getName().substring(1),sha=DocumentParseProbe.sha256(bytes);
+            if(hashes.containsKey(name)&&!sha.equals(hashes.get(name)))throw new IOException("Native part bytes changed");
+            hashes.put(name,sha);Node root=OerNativeDocxObservation.parseXml(bytes).getDocumentElement();
+            cacheWordPaths(root,"/"+wordExpandedName(root)+"[1]",paths);return root;
+        }
+        private ObjectNode position(Node node,String name){return wordSectionPosition(node,paths,sourceSha,name,hashes.get(name));}
+        private static String attribute(Node node,String namespace,String name){
+            if(node==null||node.getAttributes()==null)return null;
+            Node value=namespace==null?node.getAttributes().getNamedItem(name):node.getAttributes().getNamedItemNS(namespace,name);
+            return value==null?null:value.getNodeValue();
+        }
+        private static ObjectNode attributes(Node node){
+            ObjectNode out=JsonUtils.mapper().createObjectNode();if(node!=null&&node.getAttributes()!=null)
+                for(int i=0;i<node.getAttributes().getLength();i++){Node attribute=node.getAttributes().item(i);
+                    if(!"http://www.w3.org/2000/xmlns/".equals(attribute.getNamespaceURI()))out.put(wordExpandedName(attribute),attribute.getNodeValue());}
+            return out;
+        }
+        private ObjectNode property(Node parent,String name,String part){
+            ObjectNode out=JsonUtils.mapper().createObjectNode();ArrayNode observations=out.putArray("observations");
+            if(parent!=null)for(Node node=parent.getFirstChild();node!=null;node=node.getNextSibling())if(word.equals(node.getNamespaceURI())&&name.equals(node.getLocalName())){
+                ObjectNode observation=observations.addObject();observation.put("rawValue",attribute(node,word,"val"));
+                observation.set("rawAttributes",attributes(node));observation.set("sourcePosition",position(node,part));
+            }
+            out.put("present",!observations.isEmpty());out.putNull("rawValue");out.putNull("valueCandidate");out.putNull("sourcePosition");
+            out.put("schemaDefaultCandidate",false);out.put("status",observations.isEmpty()?"absent":"duplicate_property");
+            if(observations.size()==1){JsonNode event=observations.get(0);String value=event.path("rawValue").isNull()?null:event.path("rawValue").asText();
+                out.set("rawValue",event.get("rawValue").deepCopy());out.set("sourcePosition",event.get("sourcePosition").deepCopy());
+                if(value==null||java.util.Arrays.asList("true","1","on","false","0","off").contains(value)){
+                    out.put("valueCandidate",value==null||java.util.Arrays.asList("true","1","on").contains(value));out.put("schemaDefaultCandidate",value==null);out.put("status","observed");
+                }else out.put("status","invalid_value");
+            }return out;
+        }
+        private ArrayNode references(Node section){
+            ArrayNode out=JsonUtils.mapper().createArrayNode();if(section!=null)
+                for(Node node=section.getFirstChild();node!=null;node=node.getNextSibling())if(word.equals(node.getNamespaceURI())
+                        &&("headerReference".equals(node.getLocalName())||"footerReference".equals(node.getLocalName()))){
+                    ObjectNode reference=out.addObject();reference.put("kind","headerReference".equals(node.getLocalName())?"header":"footer");
+                    reference.put("rawType",attribute(node,word,"type"));reference.put("rawRelationshipId",attribute(node,relationshipNamespace,"id"));
+                    reference.set("rawAttributes",attributes(node));reference.set("sourcePosition",position(node,mainName));
+                    ArrayNode candidates=reference.putArray("relationshipCandidates");List<Node> matches=relationships.get(attribute(node,relationshipNamespace,"id"));
+                    if(matches!=null)for(Node match:matches)candidates.add(relationshipObservation(match));
+                }return out;
+        }
+        private ObjectNode relationshipObservation(Node node){
+            ObjectNode relation=JsonUtils.mapper().createObjectNode();relation.put("id",attribute(node,null,"Id"));relation.put("type",attribute(node,null,"Type"));
+            relation.put("rawTarget",attribute(node,null,"Target"));relation.put("rawTargetMode",attribute(node,null,"TargetMode"));
+            relation.set("rawAttributes",attributes(node));relation.set("sourcePosition",position(node,relationshipPartName));return relation;
+        }
+        private Relation resolve(String id,String kind){
+            Relation out=new Relation();if(id==null||id.isEmpty()){out.failure="missing_relationship_id";return out;}
+            if(!"observed".equals(relationshipStatus)){out.failure="relationship_inventory_unavailable";return out;}
+            List<Node> nodes=relationships.get(id);if(nodes==null){out.failure="missing_relationship";return out;}
+            if(nodes.size()!=1){out.failure="duplicate_relationship_id";return out;}Node node=nodes.get(0);
+            ObjectNode relation=relationshipObservation(node);out.observation=relation;
+            String type=attribute(node,null,"Type"),target=attribute(node,null,"Target"),mode=attribute(node,null,"TargetMode");
+            if(!(relationshipNamespace+"/"+kind).equals(type)){out.failure="wrong_relationship_type";return out;}
+            if("External".equals(mode)){out.failure="external_relationship";return out;}
+            if(mode!=null&&!"Internal".equals(mode)){out.failure="invalid_target_mode";return out;}
+            try{
+                if(target==null||target.isEmpty()||target.indexOf('\\')>=0){out.failure="unsafe_target";return out;}
+                java.net.URI uri=new java.net.URI(target),resolved=main.getPartName().getURI().resolve(uri).normalize();
+                if(uri.isAbsolute()||uri.getRawAuthority()!=null||uri.getRawFragment()!=null||uri.getRawQuery()!=null
+                        ||resolved.getRawPath()==null||!resolved.getRawPath().startsWith("/")||resolved.getPath().contains("/../")||resolved.getPath().endsWith("/..")){
+                    out.failure="unsafe_target";return out;
+                }
+                PackageRelationship actual=main.getRelationship(id);
+                if(actual==null||!Objects.equals(type,actual.getRelationshipType())||!Objects.equals(resolved,actual.getTargetURI().normalize())
+                        ||!"INTERNAL".equals(actual.getTargetMode().name())){out.failure="relationship_binding_mismatch";return out;}
+                out.target=main.getRelatedPart(actual);
+                if(out.target==null){out.failure="missing_target_part";return out;}
+                if(!resolved.equals(out.target.getPartName().getURI())){out.target=null;out.failure="relationship_binding_mismatch";}
+            }catch(Exception unavailable){out.target=null;out.failure=unavailable instanceof java.net.URISyntaxException?"unsafe_target":"missing_target_part";}
+            return out;
+        }
+        private String bindNoteReference(ObjectNode object,Node node,Map<String,List<Node>> noteRoots) {
+            ObjectNode reference=(ObjectNode)object.get("noteReference");reference.set("sourcePosition",position(node,mainName));
+            String failure=null,kind="footnoteReference".equals(object.path("kind").asText())?"footnote":"endnote";
+            String rawId=reference.path("rawId").isNull()?null:reference.path("rawId").asText(),id=null;
+            if(rawId==null||rawId.isEmpty())failure="missing_note_reference_id";
+            else try{id=new java.math.BigInteger(rawId.trim()).toString();}catch(NumberFormatException malformed){failure="invalid_note_reference_id";}
+            List<Node> matches=new ArrayList<>();
+            if(failure==null&&!"observed".equals(relationshipStatus))failure="note_relationship_inventory_unavailable";
+            if(failure==null) {
+                for(Node relationship:relationshipNodes)if((relationshipNamespace+"/"+kind+"s").equals(attribute(relationship,null,"Type")))matches.add(relationship);
+                if(matches.size()!=1) {
+                    ArrayNode candidates=reference.putArray("relationshipCandidates");for(Node match:matches)candidates.add(relationshipObservation(match));
+                    failure=matches.isEmpty()?"missing_note_relationship":"multiple_note_relationships";
+                }
+            }
+            if(failure==null) {
+                Relation relationship=resolve(attribute(matches.get(0),null,"Id"),kind+"s");
+                if(relationship.observation!=null)reference.set("relationship",relationship.observation);
+                if(relationship.failure!=null)failure=relationship.failure;
+                else {
+                    List<Node> roots=noteRoots.get(relationship.target.getPartName().getName()+"/"+kind+"/"+id);
+                    if(roots==null||roots.isEmpty())failure="missing_note_root";
+                    else if(roots.size()!=1)failure="duplicate_note_id";
+                    else reference.set("targetSourcePosition",position(roots.get(0),relationship.target.getPartName().getName().substring(1)));
+                }
+            }
+            if(failure==null){reference.put("bindingStatus","resolved");reference.remove("reason");object.put("status","native_note_reference_resolved");}
+            else{reference.put("bindingStatus","unknown");reference.put("reason",failure);object.put("status","native_note_reference_unresolved");}
+            return failure;
+        }
+        private ObjectNode settings(){
+            ObjectNode out=JsonUtils.mapper().createObjectNode();out.put("relationshipInventoryStatus",relationshipStatus);
+            ObjectNode unobserved=property(null,"evenAndOddHeaders",mainName);unobserved.put("status","unobserved");out.set("evenAndOddHeaders",unobserved);
+            List<String> ids=new ArrayList<>();for(Node node:relationshipNodes)
+                if((relationshipNamespace+"/settings").equals(attribute(node,null,"Type")))ids.add(attribute(node,null,"Id"));
+            ArrayNode candidates=out.putArray("relationshipCandidates");for(Node node:relationshipNodes)
+                if(ids.contains(attribute(node,null,"Id")))candidates.add(relationshipObservation(node));
+            if(ids.size()!=1){out.put("status",ids.isEmpty()?"settings_not_observed":"ambiguous_settings_relationships");return out;}
+            Relation relation=resolve(ids.get(0),"settings");if(relation.observation!=null)out.set("relationship",relation.observation);
+            if(relation.failure!=null){out.put("status",relation.failure);return out;}
+            try{Node root=partRoot(relation.target);String part=relation.target.getPartName().getName().substring(1);
+                out.set("sourcePosition",position(root,part));if(!word.equals(root.getNamespaceURI())||!"settings".equals(root.getLocalName())){out.put("status","wrong_target_root");return out;}
+                out.put("status","observed_settings_part");out.set("evenAndOddHeaders",property(root,"evenAndOddHeaders",part));
+            }catch(Exception unavailable){out.put("status","settings_part_unavailable");}return out;
+        }
+        private ArrayNode bindings(ArrayNode references,ArrayNode previous,String previousId,String sectionId){
+            ArrayNode out=JsonUtils.mapper().createArrayNode();for(String kind:java.util.Arrays.asList("header","footer"))for(String variant:java.util.Arrays.asList("default","first","even")){
+                ObjectNode binding=out.addObject();binding.put("kind",kind);binding.put("variant",variant);binding.put("status","no_target");binding.put("effectiveState","unknown");
+                binding.putNull("targetPart");binding.putNull("originSectionId");binding.putNull("inheritedFromSectionId");binding.put("previousSectionId",previousId);
+                ArrayNode indexes=binding.putArray("referenceIndexes");boolean invalidType=false;
+                for(int i=0;i<references.size();i++){JsonNode reference=references.get(i);if(!kind.equals(reference.path("kind").asText()))continue;
+                    String type=reference.path("rawType").asText();if(!java.util.Arrays.asList("default","first","even").contains(type)){invalidType=true;indexes.add(i);}
+                    else if(variant.equals(type))indexes.add(i);
+                }
+                String reason=invalidType?"invalid_reference_type":indexes.size()>1?"duplicate_slot":null;
+                if(reason==null&&indexes.size()==1){JsonNode reference=references.get(indexes.get(0).asInt());
+                    Relation relation=resolve(reference.path("rawRelationshipId").isNull()?null:reference.path("rawRelationshipId").asText(),kind);
+                    if(relation.observation!=null)binding.set("relationship",relation.observation);reason=relation.failure;
+                    if(reason==null){String target=relation.target.getPartName().getName().substring(1);ObjectNode identity=tables.loadedStory(target,kind);
+                        if(identity==null)reason=tables.parts.containsKey(target)?"wrong_target_root":"target_not_loaded";
+                        else{binding.put("status","explicit_target_loaded");binding.put("originSectionId",sectionId);ObjectNode origin=(ObjectNode)reference.deepCopy();origin.remove("relationshipCandidates");binding.set("originReference",origin);binding.set("targetPart",identity);}
+                    }
+                }else if(reason==null){
+                    JsonNode prior=null;if(previous!=null)for(JsonNode candidate:previous)if(kind.equals(candidate.path("kind").asText())&&variant.equals(candidate.path("variant").asText()))prior=candidate;
+                    if(prior!=null&&java.util.Arrays.asList("explicit_target_loaded","inherited_target_candidate").contains(prior.path("status").asText())&&!prior.path("targetPart").isNull()){
+                        binding.put("status","inherited_target_candidate");binding.put("inheritedFromSectionId",previousId);
+                        for(String key:java.util.Arrays.asList("originSectionId","originReference","relationship","targetPart"))binding.set(key,prior.path(key).deepCopy());
+                    }else if(prior!=null&&"unknown".equals(prior.path("status").asText())){
+                        reason="unresolved_previous_candidate";binding.set("unresolvedOrigin",prior.path("unresolvedOrigin").deepCopy());
+                    }
+                }
+                if(reason!=null){binding.put("status","unknown");binding.put("reason",reason);
+                    if(!binding.has("unresolvedOrigin")){ObjectNode origin=binding.putObject("unresolvedOrigin");origin.put("sectionId",sectionId);origin.set("referenceIndexes",indexes.deepCopy());origin.put("reason",reason);}
+                }
+            }return out;
+        }
+        private void nonEffective(Node node,java.util.Set<Node> current,ArrayNode out){
+            if(word.equals(node.getNamespaceURI())&&"sectPr".equals(node.getLocalName())&&!current.contains(node)){
+                ObjectNode item=out.addObject();item.put("status","not_current_body_section_candidate");item.set("sourcePosition",position(node,mainName));
+                item.set("sectionAttributes",attributes(node));item.set("titlePg",property(node,"titlePg",mainName));item.set("headerFooterReferences",references(node));
+            }
+            for(Node child=node.getFirstChild();child!=null;child=child.getNextSibling())if(child.getNodeType()==Node.ELEMENT_NODE)nonEffective(child,current,out);
+        }
+        private void append(ObjectNode inventory,Node body,List<DocumentBlock> blocks){
+            inventory.set("headerFooterSettings",settings());Map<String,Node> byPath=new HashMap<>();
+            bodyPaths(body,byPath);
+            java.util.Set<Node> current=Collections.newSetFromMap(new IdentityHashMap<Node,Boolean>());ArrayNode previous=null;String previousId=null;
+            for(JsonNode raw:inventory.path("sections")){ObjectNode section=(ObjectNode)raw;
+                Node endpoint=byPath.get(section.path("endBoundary").path("sourcePosition").path("nodePath").asText());
+                if(endpoint==null||!word.equals(endpoint.getNamespaceURI())||!"sectPr".equals(endpoint.getLocalName()))endpoint=null;
+                if(endpoint!=null)current.add(endpoint);section.set("sectionAttributes",attributes(endpoint));section.set("titlePg",property(endpoint,"titlePg",mainName));
+                ArrayNode references=references(endpoint);section.set("headerFooterReferences",references);section.put("effectiveSectionState","unknown");
+                previous=bindings(references,previous,previousId,section.path("sectionId").asText());section.set("headerFooterBindings",previous);previousId=section.path("sectionId").asText();
+            }
+            nonEffective(body,current,inventory.putArray("nonEffectiveSectionProperties"));
+            for(DocumentBlock block:blocks){JsonNode raw=block.getReadingContext();if(!(raw instanceof ObjectNode)||!raw.path("nativeDocxSection").isObject())continue;
+                ObjectNode reference=(ObjectNode)raw.path("nativeDocxSection");JsonNode section=inventory.path("sections").get(reference.path("ordinalZeroBased").asInt());
+                reference.set("headerFooterBindings",section.path("headerFooterBindings").deepCopy());reference.set("titlePg",section.path("titlePg").deepCopy());
+                reference.put("headerFooterSettingsRef","/nativeDocxSections/headerFooterSettings");reference.put("headerFooterReferencesRef",reference.path("inventoryPointer").asText()+"/headerFooterReferences");
+                reference.put("headerFooterRefsScope","source_parse_coverage_inventory");
+            }
+        }
+        private void bodyPaths(Node node,Map<String,Node> out){
+            out.put(nativeWordPath(node,paths),node);
+            for(Node child=node.getFirstChild();child!=null;child=child.getNextSibling())if(child.getNodeType()==Node.ELEMENT_NODE)bodyPaths(child,out);
+        }
+        private static final class Relation {private ObjectNode observation;private PackagePart target;private String failure;}
+    }
+
+    /** Observe source sections in the existing DOM, including boundaries whose paragraphs have no retained block. */
+    private static ObjectNode nativeDocxSections(Node body,List<DocumentBlock> blocks,Map<?,Node> sourceNodes,
+                                                Map<Node,String> paths,String sourceSha,String partName,String partSha){
+        ObjectNode inventory=JsonUtils.mapper().createObjectNode();inventory.put("version","docx-native-sections-v1");
+        inventory.put("status","observed_native_source_sections");inventory.put("membershipStatus","retained_blocks_only_unrepresented_members_unknown");
+        inventory.put("semanticScopeVerified",false);inventory.put("ownerStatus","unknown");inventory.put("applicabilityStatus","unknown");inventory.put("effectiveSectionState","unknown");
+        inventory.set("sourcePosition",wordSectionPosition(body,paths,sourceSha,partName,partSha));
+        com.fasterxml.jackson.databind.node.ArrayNode sections=inventory.putArray("sections");
+        List<Node> flow=new ArrayList<>();wordSectionFlow(body,flow);
+        Map<String,List<DocumentBlock>> byMember=new HashMap<>();
+        for(Node member:flow)byMember.put(nativeWordPath(member,paths),new ArrayList<>());
+        for(DocumentBlock block:blocks)if(block.getLocation()!=null && block.getLocation().startsWith("body/")){
+            Node child=sourceNodes.get(block);
+            while(child!=null && !byMember.containsKey(nativeWordPath(child,paths)))child=child.getParentNode();
+            if(child!=null)byMember.get(nativeWordPath(child,paths)).add(block);
+        }
+        ObjectNode start=wordSectionBoundary("body_start",body,paths,sourceSha,partName,partSha);
+        ObjectNode section=newWordSection(start);List<DocumentBlock> retained=new ArrayList<>();Node finalEndpoint=null;
+        for(Node child=body.getFirstChild();child!=null;child=child.getNextSibling())
+            if("sectPr".equals(child.getLocalName()) && java.util.Objects.equals(body.getNamespaceURI(),child.getNamespaceURI()))finalEndpoint=child;
+        for(Node child:flow){
+            boolean word=java.util.Objects.equals(body.getNamespaceURI(),child.getNamespaceURI());
+            String path=nativeWordPath(child,paths);((com.fasterxml.jackson.databind.node.ArrayNode)section.get("nativeMemberPaths")).add(path);
+            List<DocumentBlock> members=byMember.get(path);retained.addAll(members);
+            if(members.isEmpty())((com.fasterxml.jackson.databind.node.ArrayNode)section.get("unrepresentedNativeMemberPaths")).add(path);
+            Node properties=word && "p".equals(child.getLocalName())?wordSectionChild(child,"pPr"):null;
+            Node endpoint=wordSectionChild(properties,"sectPr");
+            if(endpoint!=null){
+                ObjectNode end=wordSectionBoundary("paragraph_sectPr",endpoint,paths,sourceSha,partName,partSha);
+                finishWordSection(section,end,retained,sections);start=end.deepCopy();start.put("kind","after_paragraph_sectPr");
+                section=newWordSection(start);retained=new ArrayList<>();
+            }
+        }
+        finishWordSection(section,wordSectionBoundary(finalEndpoint==null?"body_end_without_sectPr":"final_body_sectPr",
+                finalEndpoint==null?body:finalEndpoint,paths,sourceSha,partName,partSha),retained,sections);
+        return inventory;
+    }
+    /** Only transparent Word body wrappers are expanded; tables, revisions and alternate branches are not effective body paragraphs. */
+    private static void wordSectionFlow(Node parent,List<Node> flow){
+        for(Node child=parent.getFirstChild();child!=null;child=child.getNextSibling())if(child.getNodeType()==Node.ELEMENT_NODE){
+            boolean word=java.util.Objects.equals(parent.getNamespaceURI(),child.getNamespaceURI());String name=child.getLocalName();
+            if(word && "body".equals(parent.getLocalName()) && "sectPr".equals(name))continue;
+            if(word && "customXml".equals(parent.getLocalName()) && "customXmlPr".equals(name))continue;
+            if(word && "sdt".equals(name)){
+                Node content=wordSectionChild(child,"sdtContent");int before=flow.size();
+                if(content!=null)wordSectionFlow(content,flow);
+                if(flow.size()==before)flow.add(child);
+            }else if(word && "customXml".equals(name)){
+                int before=flow.size();wordSectionFlow(child,flow);if(flow.size()==before)flow.add(child);
+            }
+            else flow.add(child);
+        }
+    }
+    private static Node wordSectionChild(Node parent,String name){
+        if(parent!=null)for(Node child=parent.getFirstChild();child!=null;child=child.getNextSibling())
+            if(name.equals(child.getLocalName()) && java.util.Objects.equals(parent.getNamespaceURI(),child.getNamespaceURI()))return child;
+        return null;
+    }
+    private static ObjectNode newWordSection(ObjectNode start){
+        ObjectNode section=JsonUtils.mapper().createObjectNode();section.set("startBoundary",start.deepCopy());
+        section.putArray("nativeMemberPaths");section.putArray("unrepresentedNativeMemberPaths");return section;
+    }
+    private static void finishWordSection(ObjectNode section,ObjectNode end,List<DocumentBlock> retained,com.fasterxml.jackson.databind.node.ArrayNode sections){
+        int ordinal=sections.size();section.put("ordinalZeroBased",ordinal);section.set("endBoundary",end);
+        String id="docx-section:"+DocumentParseProbe.sha256((JsonUtils.write(section.path("startBoundary"))+"\n"+JsonUtils.write(end)+"\n"+ordinal).getBytes(StandardCharsets.UTF_8));
+        section.put("sectionId",id);com.fasterxml.jackson.databind.node.ArrayNode ids=section.putArray("retainedBlockIds");
+        ObjectNode reference=JsonUtils.mapper().createObjectNode();reference.put("sectionId",id);reference.put("ordinalZeroBased",ordinal);
+        reference.put("inventoryPointer","/nativeDocxSections/sections/"+ordinal);reference.put("membershipStatus","observed_native_source_section");
+        reference.put("ownerStatus","unknown");reference.put("applicabilityStatus","unknown");reference.put("effectiveSectionState","unknown");
+        reference.set("startBoundary",section.path("startBoundary").deepCopy());reference.set("endBoundary",end.deepCopy());
+        for(DocumentBlock block:retained){
+            ids.add(block.getId());ObjectNode context=block.getReadingContext() instanceof ObjectNode?(ObjectNode)block.getReadingContext():JsonUtils.mapper().createObjectNode();
+            context.set("nativeDocxSection",reference.deepCopy());block.setReadingContext(context);
+        }
+        sections.add(section);
+    }
+    private static ObjectNode wordSectionBoundary(String kind,Node node,Map<Node,String> paths,String sourceSha,String partName,String partSha){
+        ObjectNode boundary=JsonUtils.mapper().createObjectNode();boundary.put("kind",kind);
+        boundary.set("sourcePosition",wordSectionPosition(node,paths,sourceSha,partName,partSha));return boundary;
+    }
+    private static ObjectNode wordSectionPosition(Node node,Map<Node,String> paths,String sourceSha,String partName,String partSha){
+        ObjectNode position=JsonUtils.mapper().createObjectNode();position.put("kind","docx_native");position.put("sourceSha256",sourceSha);
+        position.put("partName",partName);position.put("partSha256",partSha);position.put("nodePath",nativeWordPath(node,paths));return position;
+    }
 
     private String nodeText(Node node) {
         StringBuilder text = new StringBuilder();
@@ -1245,13 +1956,15 @@ public class DocumentParser {
         private final List<String> warnings = new ArrayList<>();
         private final List<DocumentBlock.WordCell> cells = new ArrayList<>();
         private final List<JsonNode> nativeObjects = new ArrayList<>();
+        private final List<JsonNode> spans = new ArrayList<>(),fields = new ArrayList<>();
+        private void addField(JsonNode field){for(JsonNode prior:fields)if(prior==field)return;fields.add(field);}
         private void add(WordText other) {
             effective.append(other.effective); original.append(other.original);
             deleted.append(other.deleted); struck.append(other.struck);
             numbering.addAll(other.numbering); symbols.addAll(other.symbols);
             warnings.addAll(other.warnings);
             cells.addAll(other.cells);
-            nativeObjects.addAll(other.nativeObjects);
+            nativeObjects.addAll(other.nativeObjects);spans.addAll(other.spans);for(JsonNode field:other.fields)addField(field);
         }
     }
 

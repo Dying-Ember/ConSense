@@ -15,6 +15,20 @@ import static org.mockito.Mockito.*;
 
 /** The agreed actual Advice writer seam; file/contract doubles, no provider, DB or index. */
 class OerAdviceDisplayDedupTest {
+    @Test void ordinaryAdviceUsesOnlyCurrentByteMatchedSourcesAndKeepsOriginalCitationAliases()throws Exception{
+        com.consense.domain.SourceDocument source=NormalSourceCandidateGraphTest.ordinaryWordSource();source.setStoragePath("authored-current-original.docx");
+        VettingCorpus.Chunk chunk=VettingCorpus.chunks(Collections.singletonList(source)).get(0);
+        Map<String,Object> payload=new LinkedHashMap<>();payload.put("projectId",source.getProjectId());payload.put("documentId",source.getId());payload.put("sourceHash",chunk.getSourceHash());payload.put("sourceRole",chunk.getRole());payload.put("content",chunk.getContent());payload.put("pageNo",chunk.getPageNo());payload.put("anchor",chunk.getAnchor());
+        List<VectorStore.SearchHit> hits=Arrays.asList(new VectorStore.SearchHit("lookup-1",.9,payload),new VectorStore.SearchHit("lookup-2",.8,payload));String original=JsonUtils.write(hits);
+        AdviceService service=mock(AdviceService.class,CALLS_REAL_METHODS);com.consense.repository.SourceDocumentRepository repository=mock(com.consense.repository.SourceDocumentRepository.class);com.consense.service.StorageService storage=mock(com.consense.service.StorageService.class);
+        org.springframework.test.util.ReflectionTestUtils.setField(service,"sourceDocumentRepository",repository);org.springframework.test.util.ReflectionTestUtils.setField(service,"storageService",storage);
+        when(repository.findById(source.getId())).thenReturn(Optional.of(source));when(storage.matchesStoredBytes(source.getStoragePath(),source.getSourceSha256())).thenReturn(true);
+        Method method=AdviceService.class.getDeclaredMethod("normalModelMaterial",List.class);method.setAccessible(true);JsonNode material=JsonUtils.mapper().valueToTree(method.invoke(service,hits));
+        assertEquals(2,material.size());assertEquals("[1]",material.get(0).path("publicCitationAlias").asText());assertEquals("lookup-1",material.get(0).path("internalLookupId").asText());assertEquals(chunk.getContent(),material.get(0).path("content").asText());
+        JsonNode first=material.get(0).path("observedSourceUnits").path("units").get(0);assertEquals(8,first.path("parts").size());assertEquals(first.path("modelUnitAddress"),material.get(1).path("observedSourceUnits").path("units").get(0).path("modelUnitRef"));
+        assertEquals(original,JsonUtils.write(hits));verify(repository,times(1)).findById(source.getId());
+        when(storage.matchesStoredBytes(source.getStoragePath(),source.getSourceSha256())).thenReturn(false);assertEquals(0,JsonUtils.mapper().valueToTree(method.invoke(service,hits)).size());
+    }
     static String render(List<VectorStore.SearchHit> hits)throws Exception{
         Method method=AdviceService.class.getDeclaredMethod("renderExcerpts",List.class);method.setAccessible(true);
         return (String)method.invoke(mock(AdviceService.class,CALLS_REAL_METHODS),hits);

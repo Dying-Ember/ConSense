@@ -224,7 +224,21 @@ class _LinuxTree:
             self.group.rmdir()
             raise ValueError('cgroup.kill required for complete subtree release')
         read_fd, write_fd = os.pipe()
-        wrapper = 'import os,sys; open(sys.argv[1],"w").write(str(os.getpid())); os.write(int(sys.argv[2]),b"1"); os.close(int(sys.argv[2])); os.execvpe(sys.argv[3],sys.argv[3:],os.environ)'
+        wrapper = '''import os,sys
+with open(sys.argv[1], "w") as stream:
+    stream.write(str(os.getpid()))
+    stream.flush()
+expected = "0::/" + os.path.relpath(os.path.dirname(sys.argv[1]), "/sys/fs/cgroup")
+with open("/proc/self/cgroup") as stream:
+    if expected not in stream.read().splitlines():
+        raise RuntimeError("Native Linux cgroup admission readback differs")
+with open(sys.argv[1]) as stream:
+    if str(os.getpid()) not in stream.read().split():
+        raise RuntimeError("Native Linux cgroup does not contain admitted process")
+os.write(int(sys.argv[2]), b"1")
+os.close(int(sys.argv[2]))
+os.execvpe(sys.argv[3], sys.argv[3:], os.environ)
+'''
         try:
             self.process = subprocess.Popen([sys.executable, '-c', wrapper, str(self.group / 'cgroup.procs'), str(write_fd), *boot['command']],
                 cwd=boot['cwd'], env=boot['env'], stdin=subprocess.DEVNULL, stdout=stdout, stderr=stderr,
@@ -233,9 +247,20 @@ class _LinuxTree:
             os.close(write_fd); write_fd = None
             if not select.select([read_fd], [], [], min(2, remaining))[0] or os.read(read_fd, 1) != b'1':
                 raise ProviderLifecycleError('Owned Linux process did not confirm cgroup admission before native exec')
-        except BaseException:
+        except BaseException as admission_error:
             if hasattr(self, 'process'):
-                self.process.kill(); self.process.wait(timeout=2)
+                cleanup_deadline = time.monotonic() + 2
+                try:
+                    self.stop()
+                finally:
+                    self.process.kill()
+                while time.monotonic() < cleanup_deadline:
+                    if self.active() == 0 and self.process.poll() is not None:
+                        break
+                    time.sleep(.01)
+                else:
+                    raise ProviderLifecycleError('Failed Linux admission subtree release is unconfirmed: '
+                        + str(admission_error)) from admission_error
             self.group.rmdir(); raise
         finally:
             os.close(read_fd)
@@ -306,7 +331,7 @@ def owned_native_provider(provider, remaining_seconds, receipt_dir):
         probe.settimeout(min(.25, max(.001, deadline-time.monotonic())))
         if probe.connect_ex((url.hostname, url.port or (443 if url.scheme == 'https' else 80))) == 0:
             raise ProviderLifecycleError('Native provider endpoint is occupied; existing services are never adopted or killed')
-    tree = None; timer = None; expired = threading.Event()
+    tree = None; timer = None; expired = threading.Event(); primary_error = None
     with (directory / 'stdout.log').open('xb') as stdout, (directory / 'stderr.log').open('xb') as stderr:
         try:
             if time.monotonic() >= deadline:
@@ -336,6 +361,9 @@ def owned_native_provider(provider, remaining_seconds, receipt_dir):
             yield lifecycle
             if expired.is_set() or time.monotonic() >= deadline:
                 raise TimeoutError('Native provider total deadline elapsed')
+        except BaseException as error:
+            primary_error = {'type': type(error).__name__, 'message': str(error)}
+            raise
         finally:
             if timer is not None: timer.cancel(); timer.join()
             if tree is not None:
@@ -345,20 +373,23 @@ def owned_native_provider(provider, remaining_seconds, receipt_dir):
                     cleanup_deadline = time.monotonic()+boot['cleanupTimeoutSeconds']
                     while time.monotonic() < cleanup_deadline:
                         active = tree.active()
-                        if active == 0: status = 'released'; break
+                        if active == 0 and (os.name == 'nt' or tree.process.poll() is not None):
+                            status = 'released'; break
                         time.sleep(min(.02, max(0, cleanup_deadline-time.monotonic())))
                 except Exception as error: failure = type(error).__name__ + ': ' + str(error)
                 try:
-                    stdout.flush(); stderr.flush(); os.fsync(stdout.fileno()); os.fsync(stderr.fileno())
-                    lifecycle['exitReceipt'] = {'status': status, 'activeProcesses': active if os.name == 'nt' or active == 0 else None,
+                    tree.close()
+                except Exception as error:
+                    status, failure = 'release_unknown', type(error).__name__ + ': ' + str(error)
+                stdout.flush(); stderr.flush(); os.fsync(stdout.fileno()); os.fsync(stderr.fileno())
+                lifecycle['exitReceipt'] = {'status': status, 'activeProcesses': active if os.name == 'nt' or active == 0 else None,
                         'cgroupPopulated': active if os.name != 'nt' else None, 'finishedAtNs': time.time_ns(),
                         'pid': tree.pid, 'ownership': lifecycle['ownership'], 'deadlineExpired': expired.is_set(),
-                        'cleanupBudgetSeconds': boot['cleanupTimeoutSeconds'], 'error': failure,
+                        'cleanupBudgetSeconds': boot['cleanupTimeoutSeconds'], 'error': failure, 'primaryError': primary_error,
                         'stdoutSha256': _sha(directory / 'stdout.log'), 'stderrSha256': _sha(directory / 'stderr.log'),
                         'modelReady': False, 'targetAccepted': False}
-                    lifecycle['exitReceiptRef'] = _save(directory / 'exit.json', lifecycle['exitReceipt'])
-                finally:
-                    # A full/damaged receipt filesystem must not leave the owned Job handle open.
-                    tree.close()
+                lifecycle['exitReceiptRef'] = _save(directory / 'exit.json', lifecycle['exitReceipt'])
                 if status != 'released':
-                    raise ProviderLifecycleError('Owned native tree release not proven; next provider must not execute')
+                    raise ProviderLifecycleError('Owned native tree release not proven; next provider must not execute'
+                        + ('; primary error: ' + primary_error['type'] + ': ' + primary_error['message'] if primary_error else '')
+                        + ('; cleanup error: ' + failure if failure else ''))

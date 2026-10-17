@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import json
 import unittest
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 from oer_source_registry import _serialize
@@ -90,6 +91,37 @@ class NormalObservedHttpTests(unittest.TestCase):
         response = self.client.post('/normal-observed', json=self.body if body is None else body)
         self.assertEqual(200, response.status_code, response.text)
         return response.json()['projection']
+
+    def test_nonobject_cold_public_roots_report_schema_error(self):
+        from oer_source_registry import SourceRegistryError
+        from unified_source_registry import UnifiedCanonicalSourceRegistry
+        for raw in (b'[]', b'[{}]', b'1', b'null', b'true', b'"wrong"'):
+            with self.subTest(raw=raw):
+                address = hashlib.sha256(b'authored-nonobject-root:' + raw).hexdigest()
+                path = self.registry._path(address)
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(raw)
+                cold = UnifiedCanonicalSourceRegistry(self.registry.root, self.store, family_policy=self.policy)
+                with patch('unified_source_registry.normal_observed_candidate') as dispatch:
+                    with self.assertRaises(SourceRegistryError) as rejected:
+                        cold.load(address)
+                    dispatch.assert_not_called()
+                self.assertEqual('SNAPSHOT_UNAVAILABLE', rejected.exception.code)
+        self.assertEqual([], self.encodes)
+        self.assertEqual([], self.predictions)
+
+    def test_nonobject_public_root_get_is_controlled_without_inference(self):
+        with TestClient(self.app, raise_server_exceptions=False) as client:
+            for raw in (b'[]', b'[{}]', b'1', b'null', b'true', b'"wrong"'):
+                with self.subTest(raw=raw):
+                    address = hashlib.sha256(b'authored-nonobject-get:' + raw).hexdigest()
+                    path = self.registry._path(address)
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_bytes(raw)
+                    response = client.get('/canonical/' + address)
+                    self.assertEqual(404, response.status_code, response.text)
+        self.assertEqual([], self.encodes)
+        self.assertEqual([], self.predictions)
 
     def test_http_capability_and_complete_unreviewed_cas_registration(self):
         capability = self.client.get('/health').json()['oer'].get('normalObserved')
@@ -235,6 +267,7 @@ class NormalObservedHttpTests(unittest.TestCase):
         self.assertTrue(all(chunk['unitId'] != empty['unitId'] for chunk in stored))
 
     def test_chunked_or_forged_length_body_is_bounded_before_pydantic_and_publication(self):
+        self.app = create_unified_app(self.policy, backend=self.backend, maximum_message_bytes=16 * 1024 * 1024)
         for headers in ([ (b'content-type', b'application/json') ],
                         [ (b'content-type', b'application/json'), (b'content-length', b'1') ]):
             with self.subTest(headers=headers):
@@ -324,6 +357,104 @@ class NormalObservedHttpTests(unittest.TestCase):
             self.assertEqual([], self.predictions)
         finally:
             other.tearDown()
+
+
+    def test_large_normal_whole_message_survives_publication_cold_alias_and_frame(self):
+        maximum = 64 * 1024 * 1024
+        self.app = create_unified_app(self.policy, backend=self.backend, maximum_message_bytes=maximum)
+        self.client.close()
+        self.client = TestClient(self.app)
+        self.registry = self.app.state.source_registry
+        self.store = self.app.state.artifact_store
+        self.body['candidateGraph']['unknowns'].append({'path': 'authored.capacity',
+            'status': 'unknown', 'reason': '\u754c' * (6 * 1024 * 1024)})
+        request = _serialize(self.body)
+        self.assertGreater(len(request), 16 * 1024 * 1024)
+        response = self.client.post('/normal-observed', content=request,
+            headers={'Content-Type': 'application/json'})
+        self.assertEqual(200, response.status_code, response.text[:1000])
+        self.assertGreater(len(response.content), 16 * 1024 * 1024)
+        result = response.json()
+        projection = result['projection']
+        self.assertEqual(self.body['candidateGraph'], projection['manifest']['candidateGraph'])
+        self.assertEqual(maximum, self.client.get('/health').json()['oer']['normalObserved']['maximumMessageBytes'])
+        self.assertEqual(16 * 1024 * 1024,
+            self.client.get('/health').json()['oer']['nativePdfSourceFamily']['maximumMessageBytes'])
+        # A fresh registry cannot rely on publication-time mutable state or a derived cache.
+        from unified_source_registry import UnifiedCanonicalSourceRegistry
+        fresh = UnifiedCanonicalSourceRegistry(self.registry.root, self.store,
+            family_policy=self.policy, maximum_message_bytes=maximum)
+        for registry in (self.registry, fresh):
+            with registry.validation_frame(software_guard=self.backend._windows_runtime.algorithms):
+                wire, chunks = registry.wire(projection['projectionSha256'])
+                self.assertEqual(_serialize(projection), _serialize(wire))
+                self.assertEqual(projection['chunks'], chunks)
+        canonical = self.client.get('/canonical/' + projection['projectionSha256'])
+        self.assertEqual(200, canonical.status_code, canonical.text[:1000])
+        self.assertEqual(_serialize(projection), canonical.content)
+        print(json.dumps({'case': 'authored_normal_whole_capacity',
+            'graphUtf8Bytes': len(_serialize(self.body['candidateGraph'])),
+            'requestUtf8Bytes': len(request), 'receiptUtf8Bytes': len(response.content),
+            'projectionUtf8Bytes': len(_serialize(projection)),
+            'canonicalGetUtf8Bytes': len(canonical.content),
+            'registeredRootBytes': self.registry._path(projection['projectionSha256']).stat().st_size,
+            'normalAliasBytes': self.registry._normal_revision_path(projection['projectionRevisionSha256']).stat().st_size,
+            'maximumMessageBytes': maximum, 'allSourceFieldsPreserved': True,
+            'qualityAccepted': False, 'modelsCalled': 0}, sort_keys=True))
+        self.assertEqual([], self.encodes)
+        self.assertEqual([], self.predictions)
+
+    def test_normal_request_and_wrapped_receipt_use_actual_utf8_boundaries(self):
+        request = _serialize(self.body)
+        # Small injected caps keep wrapper-overhead failure observable without truncating a unit.
+        self.app = create_unified_app(self.policy, backend=self.backend,
+            maximum_message_bytes=len(request))
+        self.client.close()
+        self.client = TestClient(self.app)
+        self.registry = self.app.state.source_registry
+        result = self.client.post('/normal-observed', content=request,
+            headers={'Content-Type': 'application/json'})
+        self.assertEqual(422, result.status_code)
+        self.assertEqual('NORMAL_OBSERVED_MESSAGE_TOO_LARGE', result.json()['detail']['kind'])
+        self.assertEqual([], list(self.registry.root.glob('*.json')))
+        result = self.client.post('/normal-observed', content=request + b' ',
+            headers={'Content-Type': 'application/json', 'Content-Length': '1'})
+        self.assertEqual(413, result.status_code)
+        self.assertEqual([], list(self.registry.root.glob('*.json')))
+        self.assertEqual([], self.encodes)
+        self.assertEqual([], self.predictions)
+
+
+    def test_complete_normal_root_and_wrapped_receipt_exact_limit_and_one_less(self):
+        from normal_observed_projection import produce_normal_observed
+        from unified_source_registry import UnifiedCanonicalSourceRegistry
+        projection = produce_normal_observed(self.body['candidateGraph'], self.body['sourceBinding'],
+            artifact_store=self.store)
+        root_size = len(_serialize(projection))
+        for maximum in (root_size - 1, root_size):
+            registry = UnifiedCanonicalSourceRegistry(self.registry.root / ('bounded-' + str(maximum)),
+                self.store, family_policy=self.policy, maximum_message_bytes=maximum)
+            if maximum < root_size:
+                with self.assertRaises(ValueError): registry.publish(projection)
+                self.assertEqual([], list(registry.root.glob('*.json')))
+            else:
+                registry.publish(projection)
+                with registry.validation_frame(software_guard=self.backend._windows_runtime.algorithms):
+                    self.assertEqual(projection, registry.wire(projection['projectionSha256'])[0])
+        result = {'projectionSha256': projection['projectionSha256'], 'chunks': len(projection['chunks']),
+            'assets': 0, 'immutable': True, 'qualityVerifiedByRegistry': False,
+            'projection': projection, 'sourceQualityChangedByRegistry': False}
+        receipt_size = len(_serialize(result))
+        for maximum in (receipt_size - 1, receipt_size):
+            self.app = create_unified_app(self.policy, backend=self.backend, maximum_message_bytes=maximum)
+            self.client.close()
+            self.client = TestClient(self.app)
+            response = self.client.post('/normal-observed', content=_serialize(self.body),
+                headers={'Content-Type': 'application/json'})
+            self.assertEqual(422 if maximum < receipt_size else 200, response.status_code, response.text[:1000])
+            if maximum == receipt_size: self.assertEqual(receipt_size, len(response.content))
+        self.assertEqual([], self.encodes)
+        self.assertEqual([], self.predictions)
 
 
 if __name__ == '__main__':
