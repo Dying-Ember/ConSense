@@ -1,5 +1,5 @@
 import type { DraftCandidate, DraftCandidateIdentity, DraftCondition, DraftDocument, DraftField, DraftPlanAction, DraftTargetOverride, DraftUnresolved, DraftVariable, DraftVariablePatch } from '@/api/types'
-import { isCollectionKind, isObjectKind } from './field-kinds'
+import { isCollectionKind, isObjectKind, isVisibleDetail } from './field-kinds'
 import type { BodyDraft } from './body-edit'
 
 export type DraftValue = string | number | boolean | null | DraftValue[] | { [key: string]: DraftValue }
@@ -92,7 +92,7 @@ export function validationIssue(field: DraftField, value: DraftValue | undefined
     if (!value.length) return null // Explicit empty differs from unanswered.
     if (field.kind === 'multiselect') return value.every(item => !field.options?.length || field.options.some(option => String(option.value) === String(item))) ? null : 'invalid'
     if (!field.columnFields?.length) return value.every(hasAnswer) ? null : 'incomplete'
-    const required = field.columnFields.filter(column => !column.optional && column.key !== 'id')
+    const required = field.columnFields.filter(column => !column.optional && isVisibleDetail(column))
     if (value.some(row => !row || typeof row !== 'object' || Array.isArray(row) || required.some(column => applicability(column.condition, row as Record<string, DraftValue>) !== 'no' && validationIssue(column, row[column.key]) !== null))) return 'incomplete'
     const identity = field.columnFields.find(column => ['serial', 'number'].includes(column.key))
     if (identity) {

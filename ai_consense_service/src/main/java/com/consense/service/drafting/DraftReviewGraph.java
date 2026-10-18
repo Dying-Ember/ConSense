@@ -61,7 +61,6 @@ public final class DraftReviewGraph {
                     if(!rebind&&listAncestor(byId,input)!=null&&!Objects.equals(scope,listAncestor(byId,input)))throw invalid("GRAPH_SCOPE_CROSSES_LISTS: "+id);
                     refs.add(input);
                 }
-                if(!rebind&&"derived".equals(role(node))&&set("boolean","choice").contains(kind(node))&&branch.containsKey("resultValue"))normalize(node,text(branch.get("resultValue")));
             }
             for(Object raw:list(node.get("editTargets"))) {
                 Map<String,Object> target=map(raw);
@@ -92,6 +91,13 @@ public final class DraftReviewGraph {
         for(String id:dependencies.keySet())if("derived".equals(role(byId.get(id)))){Set<String> values=new LinkedHashSet<>();for(String ref:dependencies.get(id))if(byId.containsKey(ref)&&"derived".equals(role(byId.get(ref))))values.add(ref);valueDependencies.put(id,values);}
         for(String id:valueDependencies.keySet())cycle(id,valueDependencies,new HashSet<>(),new HashSet<>());
         validateEditions(graph,byId,dependencies);
+        Context context=new Context(graph,Collections.emptyMap());
+        for(Map<String,Object> node:byId.values())if(active(node)){
+            Map<String,Object> field=withChildren(node,context,false);
+            if(set("fixed","system").contains(role(node))&&node.get("fixedValue")!=null)typedValue(field,node.get("fixedValue"));
+            if("derived".equals(role(node))&&!Boolean.TRUE.equals(map(node.get("correction")).get("needsRebind")))
+                for(Object raw:branches(node))if(map(raw).get("resultValue")!=null)typedValue(field,map(raw).get("resultValue"));
+        }
     }
     private static void validateEditions(Map<String,Object> graph,Map<String,Map<String,Object>> nodes,Map<String,Set<String>> dependencies) {
         Map<String,String> formats=new HashMap<>();
@@ -148,8 +154,11 @@ public final class DraftReviewGraph {
         return result;
     }
     private static Map<String,Object> withChildren(Map<String,Object> node,Context context) {
+        return withChildren(node,context,true);
+    }
+    private static Map<String,Object> withChildren(Map<String,Object> node,Context context,boolean selectedOnly) {
         Map<String,Object> result=new LinkedHashMap<>(node);List<Map<String,Object>> children=new ArrayList<>();
-        for(Map<String,Object> child:context.nodes.values())if(active(child)&&context.selected(text(child.get("id")))&&Objects.equals(node.get("id"),child.get("parentId")))children.add(withChildren(child,context));
+        for(Map<String,Object> child:context.nodes.values())if(active(child)&&(!selectedOnly||context.selected(text(child.get("id"))))&&Objects.equals(node.get("id"),child.get("parentId")))children.add(withChildren(child,context,selectedOnly));
         result.put("children",children);return result;
     }
     public static String fieldHash(Map<String,Object> field) {
@@ -170,7 +179,9 @@ public final class DraftReviewGraph {
         for(Object child:list(node.get("children")))if(input(map(child)))children.add(catalogField(map(child),context));
         for(Object raw:list(node.get("options"))){Map<String,Object> option=map(raw);options.add(obj("value",option.get("value"),"label",label(text(option.get("labelZh")),text(option.get("labelEn")))));}
         for(Object raw:list(node.get("editTargets"))){Map<String,Object> target=map(raw);String document=context.document(text(target.get("docId")));if(document!=null)affects.add(obj("document",document,"clause",target.getOrDefault("text",""),"source",target.get("text")));}
-        return obj("key",node.get("id"),"label",label(text(node.get("nameZh")),text(node.get("nameEn"))),"kind","record".equals(kind(node))?"object":kind(node),"optional",Boolean.TRUE.equals(node.get("optional")),"options",options,"columnFields",children,"affects",affects,"description",label(text(map(node.get("guidance")).get("zh")),text(map(node.get("guidance")).get("en"))));
+        Map<String,Object> result=obj("key",node.get("id"),"label",label(text(node.get("nameZh")),text(node.get("nameEn"))),"kind","record".equals(kind(node))?"object":kind(node),"optional",Boolean.TRUE.equals(node.get("optional")),"options",options,"columnFields",children,"affects",affects,"description",label(text(map(node.get("guidance")).get("zh")),text(map(node.get("guidance")).get("en"))));
+        if("id".equals(text(node.get("id"))))result.put("hidden",false);
+        return result;
     }
     public static String normalize(Map<String,Object> field,String raw) {
         if(raw==null)return "";if("text".equals(kind(field)))return raw;if(raw.trim().isEmpty())return "";
@@ -243,6 +254,7 @@ public final class DraftReviewGraph {
                 if("replace".equals(action)||"fill".equals(action)) {
                     action="amend";replacement=context.replacement(target,branch,rows);
                     if(replacement==null){action="pending";context.issue(targetId,"AnswerUnknown","改文所需答案仍未确定。 / The answer supplying this text is unknown.");}
+                    if("bound".equals(text(map(target.get("nativeBinding")).get("status")))&&list(map(target.get("nativeBinding")).get("spans")).size()!=1){action="pending";context.issue(targetId,"ReplacementPlacementRequired","请为替换文字选择一个准确原件选区；多处选区须分别处理。 / Choose one exact source span for the replacement text; handle multiple spans separately.");}
                 }
                 if("unused".equals(action)){action="not_used";replacement="Not used";}
                 if("delete".equals(action))replacement="";
@@ -287,13 +299,13 @@ public final class DraftReviewGraph {
                     if(input(node))return row.get(id);
                 }
                 if(answers.containsKey(id))return answers.get(id);
-                if(set("fixed","system").contains(role(node))&&node.get("fixedValue")!=null)return typedValue(node,text(node.get("fixedValue")));
+                if(set("fixed","system").contains(role(node))&&node.get("fixedValue")!=null)return typedValue(withChildren(node,this),node.get("fixedValue"));
                 if(!"derived".equals(role(node))||Boolean.TRUE.equals(map(node.get("correction")).get("needsRebind")))return null;
                 List<Map<String,Object>> matches=new ArrayList<>();boolean unknown=false;
                 for(Object raw:branches(node)){Map<String,Object> branch=map(raw);Boolean truth=condition(branch,rows,visiting);if(truth==null)unknown=true;else if(truth)matches.add(branch);}
                 if(matches.size()>1){issue(id,"BranchConflict","多个条件同时成立，请纠正规则。 / Multiple cases match; correct the rule.");return null;}
                 if(matches.size()!=1||unknown){issue(id,"DerivedUnknown","派生答案尚不能唯一确定。 / The derived answer is not uniquely determined.");return null;}
-                if(matches.get(0).get("resultValue")==null){issue(id,"DerivedUnknown","派生规则尚未声明结果。 / The matching rule has no declared result.");return null;}return typedValue(node,text(matches.get(0).get("resultValue")));
+                if(matches.get(0).get("resultValue")==null){issue(id,"DerivedUnknown","派生规则尚未声明结果。 / The matching rule has no declared result.");return null;}return typedValue(withChildren(node,this),matches.get(0).get("resultValue"));
             } finally {visiting.remove(id);}
         }
         Map<String,Object> branch(Map<String,Object> owner,String id){if(id.isEmpty())return null;for(Object raw:branches(owner))if(id.equals(text(map(raw).get("id"))))return map(raw);return null;}
@@ -339,7 +351,7 @@ public final class DraftReviewGraph {
         try{int order="number".equals(kind(map(field)))?new BigDecimal(text(actual)).compareTo(new BigDecimal(text(expected))):LocalDate.parse(text(actual)).compareTo(LocalDate.parse(text(expected)));switch(operator){case "gt":return order>0;case "ge":return order>=0;case "lt":return order<0;case "le":return order<=0;default:return null;}}catch(RuntimeException bad){return null;}
     }
     private static Boolean equal(Map<String,Object> field,Object left,Object right){try{String type=kind(map(field));if("boolean".equals(type)){Boolean a=DraftBusinessRules.truth(left),b=DraftBusinessRules.truth(right);return a==null||b==null?null:a.equals(b);}if("number".equals(type))return new BigDecimal(text(left)).compareTo(new BigDecimal(text(right)))==0;if(set("text","choice","date").contains(type))return Objects.equals(text(left),text(right));return null;}catch(RuntimeException bad){return null;}}
-    private static Object typedValue(Map<String,Object> node,String raw){if(raw==null)return null;String normalized=normalize(node,raw);if(normalized.isEmpty()&&!"text".equals(kind(node)))return null;return set("text","date","choice").contains(kind(node))?normalized:decode(normalized);}
+    private static Object typedValue(Map<String,Object> node,Object raw){if(raw==null)return null;String supplied=raw instanceof Map||raw instanceof Collection?JsonUtils.write(raw):text(raw);String normalized=normalize(node,supplied);if(normalized.isEmpty()&&!"text".equals(kind(node)))return null;return set("text","date","choice").contains(kind(node))?normalized:decode(normalized);}
     private static Boolean combine(List<Boolean> terms,boolean all){boolean unknown=false;for(Boolean term:terms){if(term==null)unknown=true;else if(all&&!term)return false;else if(!all&&term)return true;}return unknown?null:all;}
     private static String render(Object value){return value instanceof Map||value instanceof Collection?JsonUtils.write(value):text(value);}
 

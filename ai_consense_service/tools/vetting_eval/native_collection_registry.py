@@ -118,7 +118,7 @@ class NativeCollectionSourceRegistry(NativeCanonicalSourceRegistry):
                 raise SourceRegistryError('NATIVE_CANONICAL_SOURCE_UNAVAILABLE',
                     'Native source is unregistered or its actual CAS cannot be verified') from error
             if (_serialize(locator) != _serialize(actual_wire)
-                    or full.get('projectionRevisionSha256') != revision or members != full['chunks']):
+                    or full.get('projectionRevisionSha256') != revision or _serialize(members) != _serialize(full['chunks'])):
                 raise SourceRegistryError('NATIVE_INDEX_PARENT_MISMATCH',
                     'Native index must retain every exact complete unit in global source order')
         return len(groups)

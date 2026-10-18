@@ -8,6 +8,7 @@ import com.consense.domain.SourceDocument;
 import com.consense.repository.CanonicalSourceBindingRepository;
 import com.consense.repository.SourceDocumentRepository;
 import com.consense.service.vetting.VettingCorpus;
+import com.consense.service.vetting.NormalSourceCandidateGraph;
 import com.consense.web.dto.CanonicalEvidenceDtos.EvidencePointer;
 import com.fasterxml.jackson.databind.JsonNode;
 import lombok.RequiredArgsConstructor;
@@ -261,6 +262,17 @@ public class CanonicalEvidenceService {
             pointer.setAddressKind("normal_observed_unit");pointer.setProducerKind(NormalObservedContract.PRODUCER);pointer.setBboxConvention(null);
             pointer.setOriginalGeometryStatus("unknown");pointer.setVisualReturnStatus("unknown");
             List<Integer> observedPages=new ArrayList<>();for(JsonNode page:chunk.path("physicalPages"))observedPages.add(page.asInt());pointer.setPhysicalPages(observedPages);
+            com.fasterxml.jackson.databind.node.ObjectNode context=NormalSourceCandidateGraph.pdfSourceGroupContext(snapshot.path("manifest").path("candidateGraph"),chunk.path("parts"));
+            if(context!=null&&(!context.path("groups").isEmpty()||!context.path("issues").isEmpty())){
+                JsonNode owner=context.path("source");
+                require(Objects.equals(binding.getProjectId(),owner.path("projectId").asText())
+                        &&Objects.equals(String.valueOf(binding.getDocumentId()),owner.path("documentId").asText())
+                        &&Objects.equals(binding.getOriginalSourceSha256(),owner.path("originalSourceSha256").asText())
+                        &&Objects.equals(binding.getOriginalSourceSha256(),context.path("sourceSha256").asText())
+                        &&Objects.equals(binding.getJavaParsedSourceHash(),owner.path("parsedSourceHash").asText()),HttpStatus.BAD_GATEWAY,"NORMAL_PDF_SOURCE_GROUP_BINDING_MISMATCH");
+                context.put("originalSourceSha256",binding.getOriginalSourceSha256());context.put("sourceRevisionSha256",binding.getSourceRevisionSha256());context.put("projectionSha256",binding.getProjectionSha256());
+                pointer.setNativePdfSourceGroupsContext(context);
+            }
         }else if(family){
             pointer.setProducerKind(NativePdfSourceFamilyContract.PRODUCER);pointer.setStorageShape(NativePdfSourceFamilyContract.STORAGE);
             pointer.setSourceRevisionKind(NativePdfSourceFamilyContract.REVISION);pointer.setFamilyCompositionSha256(binding.getFamilyCompositionSha256());pointer.setFamilyComponentSetSha256(binding.getFamilyComponentSetSha256());

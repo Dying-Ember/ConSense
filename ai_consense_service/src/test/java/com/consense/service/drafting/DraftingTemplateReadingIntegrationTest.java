@@ -1,17 +1,24 @@
 package com.consense.service.drafting;
 
 import com.consense.common.JsonUtils;
+import com.consense.ai.AiGateway;
 import com.consense.document.OerTemplateEvidence;
+import com.consense.domain.SourceDocument;
+import com.consense.repository.SourceDocumentRepository;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.io.ByteArrayOutputStream;
 import java.nio.file.Paths;
 import java.nio.file.Path;
 import java.nio.file.Files;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
-import java.util.UUID;
+import java.util.*;
 import java.util.stream.Stream;
 import org.apache.poi.xwpf.usermodel.XWPFDocument;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -24,6 +31,8 @@ import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
@@ -40,6 +49,8 @@ class DraftingTemplateReadingIntegrationTest {
         registry.add("consense.storage-root",()->STORAGE.toString());
     }
     @Autowired MockMvc mvc;
+    @Autowired SourceDocumentRepository sourceDocuments;
+    @Autowired DraftReviewSources reviewSources;
 
     @Test void uploadedDocxSourceReturnsItsOriginalBytesAndFilename() throws Exception {
         String id=project();byte[] uploaded=docx("Uploaded source paragraph.");
@@ -87,6 +98,7 @@ class DraftingTemplateReadingIntegrationTest {
         String id=project();String[] keys={"NTT","SCT","SCC"};
         String[] names={"01_Notes to Tenderers (NTT).docx","02_Special Conditions of Tender (SCT).docx","06_Special Conditions of Contract (SCC).docx"};
         String[] hashes={"60bd8796aa828863c7edfe8617b7a5c56ee383afe8ba87a089e820f0fd9a982c","7def01d62e07b35dd86beeff995e0e37d73ce18adca2746e2a6f6d9bafb5aaa4","9aa2fa06683652548e72dbf955c3f236d86cb0958a8fdf3b1ff6cf75b65c7208"};
+        List<JsonNode> reviewReadings=new ArrayList<>();
         for(int i=0;i<keys.length;i++) {
             replace(id,keys[i],"renamed source.docx",DOCX,Files.readAllBytes(Paths.get(sourceDir,names[i])));
             mvc.perform(get("/api/drafting/{id}/templates/{key}/reading",id,keys[i]))
@@ -97,7 +109,10 @@ class DraftingTemplateReadingIntegrationTest {
                     .andExpect(jsonPath("$.data.sourceBinding.fileKey").value(keys[i]))
                     .andExpect(jsonPath("$.data.sourceBinding.sourceSha256").value(hashes[i]))
                     .andExpect(jsonPath("$.data.sourceBinding.analysisRevision").value(OerTemplateEvidence.ANALYSIS_REVISION));
+            SourceDocument source=sourceDocuments.findFirstByProjectIdAndFileKeyAndCategory(id,keys[i],SourceDocument.CATEGORY_STANDARD_TEMPLATE).orElseThrow(AssertionError::new);
+            reviewReadings.add(reviewSources.reading(source));
         }
+        assertActualReviewConsumerEvidence(reviewReadings);
         byte[] replacement=docx("Replacement keeps the filename and must lose historical paragraph ordinals.");
         replace(id,"NTT","renamed source.docx",DOCX,replacement);
         mvc.perform(get("/api/drafting/{id}/templates/NTT/reading",id))
@@ -110,6 +125,72 @@ class DraftingTemplateReadingIntegrationTest {
                 .andExpect(jsonPath("$.code").value(0)).andExpect(jsonPath("$.data.parsed").value(0)).andExpect(jsonPath("$.data.failed").value(1));
         mvc.perform(get("/api/drafting/{id}/templates/SCT/reading",id))
                 .andExpect(jsonPath("$.data.catalogueSourceVerified").value(true)).andExpect(jsonPath("$.data.sourceHash").value(hashes[1]));
+    }
+
+    private static void assertActualReviewConsumerEvidence(List<JsonNode> readings) {
+        Map<String,JsonNode> fields=new LinkedHashMap<>();List<JsonNode> focused=new ArrayList<>();
+        JsonNode multiScope=null;String multiScopeText=null;
+        for(JsonNode reading:readings) {
+            assertEquals("bound",reading.path("evidenceStatus").asText());Set<String> noteIds=new HashSet<>();
+            int fieldCount=0;
+            for(JsonNode group:reading.path("groups")) {
+                if("native_source_field_candidate".equals(group.path("kind").asText())) {
+                    fields.put(group.path("id").asText(),group);fieldCount++;
+                    assertTrue(group.path("captureComplete").asBoolean());assertFalse(group.path("scopeComplete").asBoolean());
+                    assertFalse(group.path("automaticEditEligible").asBoolean());assertFalse(group.path("semanticApplicabilityVerified").asBoolean());
+                    assertEquals("unknown_requires_project_source",group.path("fieldValueStatus").asText());
+                    for(JsonNode note:group.path("guidanceNoteIds"))noteIds.add(note.asText());
+                }
+                if(multiScope==null&&group.path("scopeComplete").asBoolean()&&group.path("memberRanges").size()>1&&group.has("guidanceNoteId")) {
+                    multiScope=group;noteIds.add(group.path("guidanceNoteId").asText());List<String> pieces=new ArrayList<>();
+                    for(JsonNode range:group.path("memberRanges")) {
+                        JsonNode member=null;for(JsonNode candidate:reading.path("sourceMembers"))if(candidate.path("id").equals(range.path("memberId"))){member=candidate;break;}
+                        assertNotNull(member);String text=member.path("textObservation").path(range.path("channel").asText()).asText();
+                        pieces.add(text.substring(range.path("start").asInt(),range.path("end").asInt()));
+                    }
+                    multiScopeText=String.join("\n",pieces);
+                }
+            }
+            assertEquals("NTT".equals(reading.path("fileKey").asText())?0:"SCT".equals(reading.path("fileKey").asText())?23:5,fieldCount);
+            ObjectNode selected=reading.deepCopy();ArrayNode notes=selected.putArray("guidanceNotes");
+            for(JsonNode note:reading.path("guidanceNotes"))if(noteIds.contains(note.path("id").asText()))notes.add(note);
+            selected.putArray("markerCandidates");focused.add(selected);
+        }
+        assertEquals(28,fields.size());assertNotNull(multiScope);assertFalse(multiScopeText.isEmpty());
+        Map<String,Object> empty=DraftReviewGraph.obj("kind","consense-template-graph-v1","graph",DraftReviewGraph.obj("variables",new ArrayList<>(),"events",new ArrayList<>()));
+        JsonNode seeds=JsonUtils.mapper().valueToTree(DraftReviewDiscovery.seed(empty,readings));int orphanSeeds=0;
+        for(JsonNode seed:seeds.path("graph").path("variables"))if("field".equals(seed.path("discovery").path("itemKind").asText())) {
+            orphanSeeds++;assertEquals("pending",seed.path("status").asText());
+            assertEquals("bill_range_endpoint",seed.path("sourceObservation").path("fieldLabel").asText());
+            assertTrue(seed.path("sourceObservation").path("guidanceNoteIds").isEmpty());
+        }
+        assertEquals(1,orphanSeeds,"Only the field without a guidance association needs an independent seed.");
+        AiGateway model=mock(AiGateway.class);when(model.complete(anyString(),anyString())).thenReturn("{\"nodes\":[],\"notes\":[]}");
+        for(JsonNode reading:focused)DraftReviewDiscovery.discover(model,empty,Collections.singletonList(reading),10);
+        ArgumentCaptor<String> payloads=ArgumentCaptor.forClass(String.class);verify(model,atLeastOnce()).complete(anyString(),payloads.capture());
+        Map<String,JsonNode> conveyed=new LinkedHashMap<>();boolean multiScopeConveyed=false;int namedChannels=0,anchors=0;
+        for(String raw:payloads.getAllValues())for(JsonNode scope:JsonUtils.parse(raw).path("scopeCandidates")) {
+            String scopeId=scope.path("id").asText();JsonNode original=fields.get(scopeId);
+            if(original!=null) {
+                assertEquals(original,scope.path("observation"));conveyed.put(scopeId,scope);
+            }
+            if(scopeId.equals(multiScope.path("id").asText())) {
+                assertEquals(multiScopeText,scope.path("text").asText());assertEquals(multiScope.path("memberRanges"),scope.path("memberRanges"));multiScopeConveyed=true;
+            }
+        }
+        assertEquals(fields.keySet(),conveyed.keySet(),"All 27 guidance-associated fields and the orphan endpoint must reach discovery.");
+        for(Map.Entry<String,JsonNode> entry:conveyed.entrySet()) {
+            JsonNode original=fields.get(entry.getKey());
+            for(JsonNode anchor:original.path("insertionAnchors")) {
+                anchors++;assertEquals(anchor.path("start"),anchor.path("end"));assertEquals("",anchor.path("observedText").asText());
+                assertFalse(original.path("sourceFieldRangeComplete").asBoolean());assertFalse(entry.getValue().path("scopeComplete").asBoolean());
+            }
+            for(JsonNode range:original.path("memberRanges"))if("preNormalizedTextObservation.text".equals(range.path("channel").asText())) {
+                namedChannels++;assertFalse(entry.getValue().path("text").asText().isEmpty());
+                assertEquals(range.path("observedText").asText(),entry.getValue().path("text").asText());
+            }
+        }
+        assertEquals(14,anchors);assertEquals(3,namedChannels);assertTrue(multiScopeConveyed);
     }
 
     @Test void uploadedPdfHasHonestReadingMetadataAndTheExistingPreviewStillReturnsARealPdf() throws Exception {

@@ -27,6 +27,7 @@ class DocxNumberingResolverTest {
             assertEquals(0, e.getLevel()); assertEquals(5L, e.getValue());
             assertEquals("lowerLetter", e.getFormat()); assertEquals("(%1)", e.getLevelText());
             assertEquals("paragraph", e.getSource()); assertEquals("resolved", e.getResolutionStatus());
+            com.fasterxml.jackson.databind.JsonNode observed=resolver.layoutEvidence(first.getCTP().getDomNode(),"a".repeat(64));assertEquals("(e)",observed.path("numbering").path("label").asText());assertEquals(observed,resolver.newStory().layoutEvidence(first.getCTP().getDomNode(),"a".repeat(64)));
             assertEquals("(f)", resolver.resolve(second.getCTP().getDomNode()).getLabel());
         }
     }

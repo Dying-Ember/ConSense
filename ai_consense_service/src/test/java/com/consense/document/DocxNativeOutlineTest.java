@@ -23,6 +23,56 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 class DocxNativeOutlineTest {
+    @Test void paragraphLayoutKeepsRawStyleNumberingOverrideAndDirectSourcesWithoutChangingLabels()throws Exception {
+        byte[] bytes;try(XWPFDocument d=document("<w:docDefaults><w:pPrDefault><w:pPr><w:ind w:left='100'/></w:pPr></w:pPrDefault></w:docDefaults>"
+                +"<w:style w:type='paragraph' w:styleId='base'><w:pPr><w:ind w:left='700' w:rightChars='200'/><w:jc w:val='center'/></w:pPr></w:style>"
+                +"<w:style w:type='paragraph' w:styleId='local'><w:basedOn w:val='base'/><w:pPr><w:ind w:left='900'/></w:pPr></w:style>")) {
+            d.createNumbering().setNumbering(NumberingDocument.Factory.parse("<w:numbering xmlns:w='"+W+"'><w:abstractNum w:abstractNumId='10'><w:lvl w:ilvl='0'><w:start w:val='1'/><w:numFmt w:val='lowerLetter'/><w:lvlText w:val='(%1)'/><w:pPr><w:ind w:left='1200' w:hanging='300'/></w:pPr></w:lvl></w:abstractNum><w:num w:numId='14'><w:abstractNumId w:val='10'/><w:lvlOverride w:ilvl='0'><w:lvl w:ilvl='0'><w:start w:val='1'/><w:numFmt w:val='lowerLetter'/><w:lvlText w:val='(%1)'/><w:pPr><w:ind w:left='1500' w:hanging='400'/></w:pPr></w:lvl></w:lvlOverride></w:num></w:numbering>").getNumbering());
+            XWPFParagraph first=paragraph(d,"First source clause","local");first.setNumID(BigInteger.valueOf(14));first.setNumILvl(BigInteger.ZERO);first.getCTP().getPPr().addNewInd().setLeft(BigInteger.valueOf(1700));
+            XWPFParagraph second=paragraph(d,"Second source clause","local");second.setNumID(BigInteger.valueOf(14));second.setNumILvl(BigInteger.ZERO);bytes=save(d);
+        }
+        OcrClient ocr=mock(OcrClient.class);DocumentParser.ParsedDocument parsed=parser(ocr).parse("layout-source.docx",bytes);
+        assertEquals(Arrays.asList("(a) First source clause","(b) Second source clause"),parsed.getBlocks().stream().map(DocumentBlock::getText).toList());
+        assertTrue(headings(parsed).isEmpty());JsonNode layout=parsed.getBlocks().get(0).getReadingContext().path("nativeDocxParagraph").path("layoutEvidence");
+        assertEquals("source_declarations_only",layout.path("status").asText());assertEquals("14",layout.path("numbering").path("numId").asText());assertEquals("(a)",layout.path("numbering").path("label").asText());assertEquals(0,layout.path("numbering").path("level").asInt(-1));
+        Set<String> kinds=new HashSet<>();Map<String,String> partHashes=new HashMap<>();try(java.util.zip.ZipInputStream zip=new java.util.zip.ZipInputStream(new ByteArrayInputStream(bytes))){java.util.zip.ZipEntry entry;while((entry=zip.getNextEntry())!=null)partHashes.put(entry.getName(),DocumentParseProbe.sha256(zip.readAllBytes()));}
+        for(JsonNode layer:layout.path("layers")){kinds.add(layer.path("kind").asText());JsonNode at=layer.path("sourcePosition");assertEquals(parsed.getSourceSha256(),at.path("sourceSha256").asText());assertEquals(partHashes.get(at.path("partName").asText()),at.path("partSha256").asText());String root=at.path("partName").asText().contains("styles")?"styles":at.path("partName").asText().contains("numbering")?"numbering":"document";assertTrue(at.path("nodePath").asText().startsWith("/{"+W+"}"+root+"[1]/"));}
+        assertEquals(new HashSet<>(Arrays.asList("document_defaults","paragraph_style","numbering_abstract_level","numbering_level_override","direct_paragraph")),kinds);
+        JsonNode left=layout.path("effective").path("ind").path("{"+W+"}left");assertEquals("resolved",left.path("status").asText());assertEquals("1700",left.path("value").asText());assertEquals("direct_paragraph",left.path("kind").asText());
+        assertEquals("200",layout.path("effective").path("ind").path("{"+W+"}rightChars").path("value").asText());
+        SourceDocument source=source(parsed);NormalSourceCandidateGraph.capture(source);JsonNode ordinary=JsonUtils.mapper().valueToTree(VettingSourceMaterial.project(VettingCorpus.chunks(Collections.singletonList(source)),Collections.singletonList(source)));
+        assertTrue(ordinary.findValues("layoutEvidence").stream().anyMatch(layout::equals));assertEquals(JsonUtils.write(ordinary),JsonUtils.write(VettingSourceMetadataWire.decode(VettingSourceMetadataWire.encode(ordinary))));verifyNoInteractions(ocr);
+    }
+
+    @Test void eachTableParagraphKeepsItsOwnLayoutPropertiesThroughGraphAndOrdinaryMaterial()throws Exception {
+        byte[] bytes;try(XWPFDocument d=document("<w:style w:type='paragraph' w:styleId='local'><w:pPr><w:ind w:left='700'/></w:pPr></w:style>")){
+            XWPFTable table=d.createTable(1,2);table.getRow(0).getCell(0).getParagraphs().get(0).getCTP().set(p("<w:pPr><w:pStyle w:val='local'/></w:pPr>"+run("6.")));
+            XWPFTableCell cell=table.getRow(0).getCell(1);cell.getParagraphs().get(0).getCTP().set(p("<w:pPr><w:pStyle w:val='local'/><w:ind w:left='1700'/></w:pPr>"+run("First body paragraph")));cell.addParagraph().getCTP().set(p("<w:pPr><w:pStyle w:val='local'/></w:pPr>"+run("Continuation body paragraph")));bytes=save(d);
+        }
+        OcrClient ocr=mock(OcrClient.class);DocumentParser.ParsedDocument parsed=parser(ocr).parse("table-layout.docx",bytes);DocumentBlock row=parsed.getBlocks().stream().filter(b->"table_row".equals(b.getKind())).findFirst().orElseThrow();JsonNode properties=row.getReadingContext().path("nativeDocxParagraphs");
+        assertEquals(3,properties.size());Set<String> paths=new HashSet<>();for(JsonNode paragraph:properties){assertTrue(paths.add(paragraph.path("sourcePosition").path("nodePath").asText()));assertEquals(parsed.getSourceSha256(),paragraph.path("sourcePosition").path("sourceSha256").asText());assertEquals("source_declarations_only",paragraph.path("layoutEvidence").path("status").asText());}
+        SourceDocument source=source(parsed);NormalSourceCandidateGraph.capture(source);assertTrue(NormalSourceCandidateGraph.requireBound(source).findValues("nativeDocxParagraphs").stream().anyMatch(properties::equals));JsonNode ordinary=JsonUtils.mapper().valueToTree(VettingSourceMaterial.project(VettingCorpus.chunks(Collections.singletonList(source)),Collections.singletonList(source)));
+        assertTrue(ordinary.findValues("nativeDocxParagraphs").stream().anyMatch(properties::equals));assertEquals(ordinary,VettingSourceMetadataWire.decode(VettingSourceMetadataWire.encode(ordinary)));verifyNoInteractions(ocr);
+    }
+
+    @Test void conflictingStyleAndNumberingIndentIsUnknownWhileDirectZeroAndRawTabUnitsRemainExact()throws Exception {
+        byte[] bytes;try(XWPFDocument d=document("<w:style w:type='paragraph' w:styleId='local'><w:pPr><w:ind w:left='700' w:leftChars='100'/><w:tabs><w:tab w:val='left' w:pos='720'/></w:tabs></w:pPr></w:style>")){
+            d.createNumbering().setNumbering(NumberingDocument.Factory.parse("<w:numbering xmlns:w='"+W+"'><w:abstractNum w:abstractNumId='10'><w:lvl w:ilvl='0'><w:start w:val='1'/><w:numFmt w:val='lowerLetter'/><w:lvlText w:val='(%1)'/><w:pPr><w:ind w:left='1200'/></w:pPr></w:lvl></w:abstractNum><w:num w:numId='14'><w:abstractNumId w:val='10'/></w:num></w:numbering>").getNumbering());
+            XWPFParagraph first=paragraph(d,"Conflicting inherited indent","local");first.setNumID(BigInteger.valueOf(14));first.setNumILvl(BigInteger.ZERO);
+            XWPFParagraph second=paragraph(d,"Direct zero remains zero","local");second.setNumID(BigInteger.valueOf(14));second.setNumILvl(BigInteger.ZERO);second.getCTP().getPPr().addNewInd().setLeft(BigInteger.ZERO);second.getCTP().getPPr().addNewTabs().addNewTab().setVal(STTabJc.CLEAR);second.getCTP().getPPr().getTabs().getTabArray(0).setPos(BigInteger.valueOf(720));bytes=save(d);
+        }
+        OcrClient ocr=mock(OcrClient.class);DocumentParser.ParsedDocument parsed=parser(ocr).parse("conflicting-layout.docx",bytes);JsonNode first=parsed.getBlocks().get(0).getReadingContext().path("nativeDocxParagraph").path("layoutEvidence"),second=parsed.getBlocks().get(1).getReadingContext().path("nativeDocxParagraph").path("layoutEvidence");
+        assertEquals("unknown",first.path("effective").path("ind").path("{"+W+"}left").path("status").asText());assertFalse(first.path("effective").path("ind").path("{"+W+"}left").has("value"));
+        assertEquals("100",first.path("effective").path("ind").path("{"+W+"}leftChars").path("value").asText());assertEquals("0",second.path("effective").path("ind").path("{"+W+"}left").path("value").asText());assertEquals("resolved",second.path("effective").path("ind").path("{"+W+"}left").path("status").asText());
+        assertEquals("unknown",second.path("effective").path("tabs").path("status").asText());assertTrue(second.path("layers").findValues("attributes").stream().anyMatch(attrs->"clear".equals(attrs.path("{"+W+"}val").asText())&&"720".equals(attrs.path("{"+W+"}pos").asText())));verifyNoInteractions(ocr);
+    }
+
+    @Test void duplicateSameLayerIndentDeclarationsRemainRawButCannotSupplyAWinner()throws Exception {
+        byte[] bytes;try(XWPFDocument d=document("")){d.createParagraph().getCTP().set(p("<w:pPr><w:ind w:left='100'/><w:ind w:left='200'/></w:pPr>"+run("Ambiguous native declaration")));bytes=save(d);}
+        OcrClient ocr=mock(OcrClient.class);DocumentParser.ParsedDocument parsed=parser(ocr).parse("duplicate-layout.docx",bytes);JsonNode layout=parsed.getBlocks().get(0).getReadingContext().path("nativeDocxParagraph").path("layoutEvidence"),left=layout.path("effective").path("ind").path("{"+W+"}left");
+        assertEquals(2,layout.path("layers").path(0).path("declarations").size());assertEquals("unknown",left.path("status").asText());assertEquals("duplicate_layout_property_declarations",left.path("reason").asText());assertFalse(left.has("value"));verifyNoInteractions(ocr);
+    }
+
     @Test void customStyleInheritanceDefinesTableScopeUntilTheNextPeerWithoutOcr() throws Exception {
         try (XWPFDocument doc = document("<w:style w:type='paragraph' w:styleId='base'><w:name w:val='Custom Contract'/><w:pPr><w:outlineLvl w:val='3'/></w:pPr></w:style>"
                 + "<w:style w:type='paragraph' w:styleId='local'><w:name w:val='项目自定'/><w:basedOn w:val='base'/></w:style>")) {

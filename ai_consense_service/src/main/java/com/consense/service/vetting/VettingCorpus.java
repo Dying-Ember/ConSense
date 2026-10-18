@@ -385,11 +385,12 @@ public final class VettingCorpus {
         out.add(c);
     }
     public static FindingEvidence evidence(Chunk c, String side, String quote) {
-        boolean located = quote != null && quote.trim().length() >= 12 && normalize(c.getContent()).contains(normalize(quote));
+        String normalizedQuote = normalize(quote);
+        boolean located = normalizedQuote.length() >= 12 && normalize(c.getContent()).contains(normalizedQuote);
         String anchor = c.getAnchor(), page = c.getPageNo(); List<Double> bbox = c.getBbox();
         Part occurrence=null;
         if (located && c.getParts() != null) {
-            List<Part> matches=c.getParts().stream().filter(part->normalize(part.getText()).contains(normalize(quote))).collect(Collectors.toList());
+            List<Part> matches=c.getParts().stream().filter(part->normalize(part.getText()).contains(normalizedQuote)).collect(Collectors.toList());
             if(matches.size()==1){occurrence=matches.get(0);anchor=occurrence.getAnchor();page=occurrence.getPageNo();bbox=occurrence.getBbox();}
         }
         FindingEvidence evidence=new FindingEvidence(side, c.getDocumentId(), c.getFileKey(), c.getFileName(), page, anchor, quote, located,

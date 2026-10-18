@@ -24,6 +24,90 @@ public final class OerTemplateEvidence {
     private static final Pattern ENUMERATED_TARGETS=Pattern.compile("(?is)\\bin\\s+(?:the\\s+)?clauses?\\s+(.+?)\\s+(?:are|is)\\s+to\\s+be\\s+(?:deleted|amended|replaced)");
     private OerTemplateEvidence() { }
 
+    /** Source syntax projection for ordinary consumers; the template r15 analysis remains unchanged. */
+    public static ObjectNode nativeClauseRanges(JsonNode inventory) {
+        String source=sha(inventory.path("sourceSha256").asText());ObjectNode out=object();out.put("version","docx-source-clause-scopes-v1");out.put("sourceSha256",source);
+        if(inventory.path("storyRoots").isArray())out.set("storyRoots",inventory.path("storyRoots").deepCopy());
+        ArrayNode ranges=out.putArray("ranges"),stored=out.putArray("members"),issues=out.putArray("issues");List<Member> members=new ArrayList<>();Map<String,Integer> idCounts=new HashMap<>();Map<String,Set<String>> partRevisions=new HashMap<>();
+        for(JsonNode original:inventory.path("paragraphs")){idCounts.merge(original.path("id").asText(),1,Integer::sum);JsonNode position=original.path("sourcePosition");partRevisions.computeIfAbsent(position.path("partName").asText(),ignored->new HashSet<>()).add(position.path("partSha256").asText().toLowerCase(Locale.ROOT));}
+        for(JsonNode original:inventory.path("paragraphs")) {
+            ObjectNode value=original.deepCopy();JsonNode position=value.path("sourcePosition");boolean bound=source.equals(position.path("sourceSha256").asText())&&!value.path("id").asText().isEmpty()&&idCounts.get(value.path("id").asText())==1&&partRevisions.get(position.path("partName").asText()).size()==1&&!position.path("partName").asText().isEmpty()&&position.path("partSha256").asText().matches("(?i)[a-f0-9]{64}")&&!position.path("nodePath").asText().isEmpty()&&!value.path("storyKind").asText().isEmpty()&&!value.path("storyRootNodePath").asText().isEmpty();
+            value.put("sourceClauseClassification",bound?"source_bound_native_member":"source_identity_unknown");stored.add(value);members.add(new Member(value,bound));
+            if(!bound)issue(issues,"SOURCE_CLAUSE_MEMBER_UNBOUND",value.path("id").asText(),"The source member identity is missing, duplicated, foreign or inconsistent with the observed part revision");
+        }
+        ParseCoverage coverage=new ParseCoverage();coverage.setNativeDocxParagraphs(inventory);
+        String profile=detectFamily(new DocumentParser.ParsedDocument("",Collections.emptyList(),0,false,null,Collections.emptyList(),coverage,source,Collections.emptyList()));
+        if(profile==null){out.putNull("familyCandidate");issue(issues,"SOURCE_CLAUSE_FAMILY_UNRESOLVED",null,"No unique short native NTT/SCT/SCC title was observed");return out;}out.put("familyCandidate",profile);
+        ArrayNode notes=array();guidance(profile,members,notes,array(),array(),issues);Set<String> noteMembers=noteMemberIds(notes),unknownNotes=new HashSet<>();
+        for(JsonNode note:notes)if(!note.path("captureComplete").asBoolean()||!note.path("sourceSyntaxComplete").asBoolean())for(JsonNode id:note.path("orderedMemberIds"))unknownNotes.add(id.asText());
+        List<Anchor> roots=new ArrayList<>();for(Anchor anchor:clauseAnchors(profile,members)) {
+            Anchor previous=roots.isEmpty()?null:roots.get(roots.size()-1);
+            if(previous!=null&&previous.label.equals(anchor.label)&&sameStory(previous.member,anchor.member)&&sourceContinuationHeading(anchor.member))continue;
+            roots.add(anchor);
+        }
+        Map<String,Integer> occurrences=new LinkedHashMap<>();for(Anchor root:roots)occurrences.merge(root.member.story+"|"+root.member.part+"|"+root.label,1,Integer::sum);
+        Map<Anchor,ObjectNode> rootRanges=new IdentityHashMap<>();Map<Anchor,Integer> rootEnds=new IdentityHashMap<>();
+        for(Anchor owner:roots) {
+            int localEnd=members.size(),wholeEnd=members.size();for(Anchor next:roots)if(next.ordinal>owner.ordinal&&sameStory(owner.member,next.member)) {
+                if(localEnd==members.size())localEnd=next.ordinal;
+                if(!next.label.startsWith(owner.label+".")){wholeEnd=next.ordinal;break;}
+            }
+            boolean ambiguous=occurrences.get(owner.member.story+"|"+owner.member.part+"|"+owner.label)>1;
+            if(sourceContinuationHeading(owner.member))issue(issues,"SOURCE_CLAUSE_CONTINUATION_WITHOUT_START",owner.label,"A continuation heading without an earlier same-clause source start does not establish the complete clause");
+            if(ambiguous)issue(issues,"SOURCE_CLAUSE_REFERENCE_AMBIGUOUS",owner.label,"Repeated non-continuation source headings do not establish one unique clause reference");
+            JsonNode storyEnd=observedStoryEnd(inventory,owner.member);
+            List<Unit> local=units(owner,localEnd,members,noteMembers);Map<Unit,ObjectNode> projected=new IdentityHashMap<>();Map<String,Integer> unitCounts=new HashMap<>();for(Unit unit:local)unitCounts.merge(unit.reference,1,Integer::sum);
+            for(Unit unit:local) {
+                if(unit.depth==0)unit.end=wholeEnd;
+                ObjectNode range=sourceClauseRange(profile,source,owner,unit,storyEnd,members,notes,noteMembers,unknownNotes,ambiguous||unitCounts.get(unit.reference)>1);
+                ranges.add(range);projected.put(unit,range);if(unit.depth==0){rootRanges.put(owner,range);rootEnds.put(owner,wholeEnd);}
+            }
+            for(Unit unit:local)if(unit.depth>0){String parent=unit.reference.replaceFirst("\\([^()]*\\)$","");List<Unit> matches=new ArrayList<>();for(Unit candidate:local)if(candidate.reference.equals(parent))matches.add(candidate);if(matches.size()==1)projected.get(unit).put("parentId",projected.get(matches.get(0)).path("id").asText());}
+        }
+        for(Anchor owner:roots) {
+            Anchor parent=null;boolean conflict=false;for(Anchor candidate:roots)if(candidate!=owner&&sameStory(owner.member,candidate.member)&&owner.label.startsWith(candidate.label+".")&&candidate.ordinal<owner.ordinal&&owner.ordinal<rootEnds.get(candidate)) {
+                if(occurrences.get(candidate.member.story+"|"+candidate.member.part+"|"+candidate.label)>1){conflict=true;continue;}
+                if(parent==null||candidate.label.length()>parent.label.length())parent=candidate;
+            }
+            if(parent!=null&&!conflict)rootRanges.get(owner).put("parentId",rootRanges.get(parent).path("id").asText());
+        }
+        return out;
+    }
+
+    private static ObjectNode sourceClauseRange(String profile,String source,Anchor owner,Unit unit,JsonNode storyEnd,List<Member> members,ArrayNode notes,Set<String> noteMembers,Set<String> unknownNotes,boolean ambiguous) {
+        ObjectNode range=object();range.put("id","source-clause:"+digest(source+"|"+members.get(unit.start).id+"|"+unit.reference));range.put("reference",unit.reference);range.putNull("parentId");range.put("automaticEditEligible",false);range.put("semanticApplicabilityVerified",false);
+        ArrayNode ids=range.putArray("orderedMemberIds"),context=range.putArray("contextMemberIds"),reasons=range.putArray("contextObservations");boolean known=(unit.end<members.size()||storyEnd!=null)&&!ambiguous&&!sourceContinuationHeading(owner.member)&&!unit.ambiguousTail&&(unit.sharedTailStart<0||unit.sharedTailEnd<members.size()||storyEnd!=null);
+        Member body=owner.member;if(owner.label.matches("\\d+")&&!body.row.isEmpty())for(int n=owner.ordinal+1;n<unit.end;n++){Member candidate=members.get(n);if(!candidate.row.equals(body.row)||!sameStory(body,candidate))break;if(!candidate.cell.isEmpty()&&!candidate.column.equals(body.column)&&!candidate.text.trim().isEmpty()&&!noteMembers.contains(candidate.id)){body=candidate;break;}}
+        if(unit.depth>0&&!body.cell.isEmpty()&&!sameLane(body,members.get(unit.start))&&!descendant(members.get(unit.start).path,body.cell))known=false;
+        for(int n=unit.start;n<unit.end;n++) {
+            Member member=members.get(n);if(!sameStory(owner.member,member))continue;known&=member.usable&&!unknownNotes.contains(member.id)&&(storyEnd==null||descendant(member.path,storyEnd.path("sourcePosition").path("nodePath").asText()));String reason=null;
+            if(noteMembers.contains(member.id)){if(instructionOnly(member,notes))reason="source_compilation_instruction_context";else{reason="mixed_source_body_and_compilation_instruction_unknown";known=false;}}
+            else if(compilationCell(member,members,notes))reason="source_compilation_instruction_context";
+            else if(!member.text.trim().isEmpty()&&(pageFurniture(profile,member,members)||furnitureRow(profile,member,members)))reason="source_physical_furniture_context";
+            else if(n!=owner.ordinal&&sourceContinuationHeading(member)&&CLAUSE.matcher(member.text).find())reason="source_repeated_clause_heading_context";
+            else if(!body.cell.isEmpty()&&!member.cell.isEmpty()&&!sameLane(body,member)&&!descendant(member.path,body.cell)&&!(unit.depth==0&&n==owner.ordinal)){reason="parallel_native_cell_context";if(!member.text.trim().isEmpty())known=false;}
+            if(reason==null)ids.add(member.id);else{context.add(member.id);reasons.addObject().put("memberId",member.id).put("reason",reason);}
+        }
+        if(unit.sharedTailStart>=0)for(int n=unit.sharedTailStart;n<unit.sharedTailEnd;n++){Member member=members.get(n);if(!sameStory(owner.member,member))continue;appendUnique(context,member.id);reasons.addObject().put("memberId",member.id).put("reason",unit.ambiguousTail?"unresolved_shared_parent_tail_context":"shared_parent_predicate_context");known&=member.usable&&(storyEnd==null||descendant(member.path,storyEnd.path("sourcePosition").path("nodePath").asText()));}
+        range.put("scopeComplete",known&&ids.size()>0);range.put("status",ambiguous?"ambiguous_source_reference":known&&ids.size()>0?"source_syntax_complete":"partial_unknown_scope");range.put("scopeMeaning","Source-defined clause or enumeration membership only; context is separate and applicability remains unknown");
+        range.putObject("startBoundary").put("kind","explicit_source_clause_or_subitem_label").put("memberId",members.get(unit.start).id).set("sourcePosition",members.get(unit.start).value.path("sourcePosition").deepCopy());
+        ObjectNode end=range.putObject("endBoundary");end.put("kind",unit.end<members.size()?"next_explicit_source_peer_or_owner_boundary":storyEnd!=null?"native_container_end":"source_story_end_unverified");if(unit.end<members.size()){end.put("memberId",members.get(unit.end).id);end.set("sourcePosition",members.get(unit.end).value.path("sourcePosition").deepCopy());}else if(storyEnd!=null)end.set("sourcePosition",storyEnd.path("sourcePosition").deepCopy());
+        return range;
+    }
+
+    private static JsonNode observedStoryEnd(JsonNode inventory,Member owner){
+        JsonNode found=null,own=owner.value.path("sourcePosition");
+        for(JsonNode root:inventory.path("storyRoots"))if(root.path("storyKind").equals(owner.value.path("storyKind"))&&root.path("storyRootNodePath").equals(owner.value.path("storyRootNodePath"))&&root.path("sourcePosition").path("partName").equals(own.path("partName"))){
+            if(found!=null)return null;found=root;
+        }
+        if(found==null||!"observed_loaded_native_root".equals(found.path("status").asText()))return null;
+        JsonNode position=found.path("sourcePosition");
+        return own.path("sourceSha256").equals(position.path("sourceSha256"))&&own.path("partSha256").equals(position.path("partSha256"))&&found.path("storyRootNodePath").equals(position.path("nodePath"))&&descendant(owner.path,position.path("nodePath").asText())?found:null;
+    }
+
+    private static boolean sourceContinuationHeading(Member member){return member.text.trim().matches("(?is).*\\(\\s*Cont[’']?d\\s*\\)\\.?$");}
+
+
     public static JsonNode analyse(String fileKey,DocumentParser.ParsedDocument parsed) {
         if(parsed==null)throw new IllegalArgumentException("An actual parsed document is required");
         String detected=detectFamily(parsed);
@@ -75,7 +159,7 @@ public final class OerTemplateEvidence {
                 text.put("text",block.getEffectiveText());text.put("originalText",block.getOriginalText());text.put("deletedText",block.getDeletedText());text.put("strikeText",block.getStrikeText());
                 member.put("effectiveCandidate",!Arrays.asList("ocr_candidate","native_table_candidate","parser_page_group_candidate").contains(block.getSource()));
                 JsonNode pageGroup=blockObservation.path("parserPageGroup");boolean groupBound=true;if(pageGroup.isObject()){pageGroups++;groupBound=pageGroupBound(pageGroup,source,block.getPageNo(),parsed.getPageCount());if(!groupBound){foreignGroup=true;issue(issues,"PARSER_PAGE_GROUP_SOURCE_BINDING_MISMATCH",id,"Complete parser candidates are retained, but their original source SHA or physical page binding disagrees with this parse");}if(!pageGroup.path("selectedParser").isTextual()||pageGroup.path("selectedParser").asText().isEmpty()||!pageGroup.path("sourceQualityAccepted").asBoolean())unselectedGroups++;}
-                ocrObserved|="ocr".equals(block.getSource())||"ocr_candidate".equals(block.getSource());member.put("identityStatus",groupBound?"parsed_source_bound":"parser_page_group_source_mismatch");members.add(member);sourceMembers.add(new Member(member,groupBound));
+                ocrObserved|="ocr".equals(block.getSource())||"ocr_candidate".equals(block.getSource());member.put("identityStatus",groupBound?"parsed_source_bound":"parser_page_group_source_mismatch");members.add(member);sourceMembers.add(new Member(member,groupBound,source));
             }
             route.put("retainedCompleteParserPageGroupCount",pageGroups);route.put("unselectedOrUnverifiedParserPageGroupCount",unselectedGroups);route.put("parserPageGroupBindingStatus",foreignGroup?"source_or_page_mismatch_present":pageGroups>0?"observed_groups_source_and_page_bound":"no_complete_parser_page_groups_observed");
             if(unselectedGroups>0){route.put("parserCandidateSelectionStatus","complete_candidates_retained_without_verified_selection");route.put("legacyEffectiveTextAuthority","unverified_observation_only_no_source_quality_acceptance");issue(issues,"PARSER_PAGE_CANDIDATES_UNSELECTED",null,"Complete page candidates remain retained without an accepted selection; legacy effective body text is only an unverified observation");}
@@ -332,7 +416,7 @@ public final class OerTemplateEvidence {
     private static void resolveReferenceSet(String profile,List<Member> members,List<Anchor> clauses,Set<String> noteMembers,int noteAt,JsonNode note,String enumeration,ArrayNode groups,ArrayNode issues) {
         Matcher references=REFERENCE.matcher(enumeration);List<String> requested=new ArrayList<>();while(references.find())requested.add(references.group().replaceAll("\\s+",""));
         ObjectNode group=groups.addObject();String id="explicit-reference-scope:"+digest(note.path("id").asText()+"|"+enumeration);group.put("id",id);group.put("kind","explicit_reference_scope");group.put("guidanceNoteId",note.path("id").asText());group.put("instructionReferenceText",enumeration);group.put("scopeMeaning","Exactly the explicitly enumerated source locations; this does not authorize deleting entire referenced units");group.put("automaticEditEligible",false);group.put("semanticApplicabilityVerified",false);
-        ArrayNode targets=group.putArray("targets"),ids=group.putArray("orderedMemberIds"),physicalContext=group.putArray("physicalContextMemberIds"),parentContext=group.putArray("parentContextMemberIds");Set<String> selected=new HashSet<>();boolean complete=!requested.isEmpty()&&note.path("sourceSyntaxComplete").asBoolean()&&note.path("captureComplete").asBoolean();
+        ArrayNode targets=group.putArray("targets"),ids=group.putArray("orderedMemberIds"),physicalContext=group.putArray("physicalContextMemberIds"),parentContext=group.putArray("parentContextMemberIds");Set<String> selected=new HashSet<>();Map<Integer,GlyphMap> pdfFrames=new HashMap<>();boolean complete=!requested.isEmpty()&&note.path("sourceSyntaxComplete").asBoolean()&&note.path("captureComplete").asBoolean();
         for(String reference:requested) {
             String root=reference.replaceFirst("\\(.*$","");List<Anchor> matching=new ArrayList<>();for(Anchor clause:clauses)if(clause.label.equals(root))matching.add(clause);
             Anchor owner=enclosing(clauses,noteAt),chosen=owner!=null&&owner.label.equals(root)?owner:matching.size()==1?matching.get(0):null;
@@ -342,9 +426,10 @@ public final class OerTemplateEvidence {
             List<Unit> exact=new ArrayList<>();for(Unit unit:units)if(unit.reference.equals(reference))exact.add(unit);
             if(exact.size()!=1){target.put("scopeComplete",false);target.put("status",exact.isEmpty()?"missing_source_unit":"ambiguous_source_unit");complete=false;continue;}
             Unit unit=exact.get(0);ArrayNode targetIds=target.putArray("orderedMemberIds"),targetRanges=target.putArray("memberRanges"),context=target.putArray("ancestorContextMemberIds"),shared=target.putArray("sharedParentTailContextMemberIds"),physical=target.putArray("physicalContextMemberIds"),parentContinuation=target.putArray("parentContextMemberIds");boolean known=!unit.ambiguousTail;
-            for(int cursor=unit.sharedTailStart;cursor>=0&&cursor<unit.sharedTailEnd;cursor++){shared.add(members.get(cursor).id);known&=members.get(cursor).usable;}
+            boolean pdf=chosen.member.value.has("blockObservation");if(pdf)known&=unit.end<members.size()&&pdfReferenceFrame(members.get(unit.end),pdfFrames);
+            for(int cursor=unit.sharedTailStart;cursor>=0&&cursor<unit.sharedTailEnd;cursor++){shared.add(members.get(cursor).id);known&=members.get(cursor).usable&&(!pdf||pdfReferenceFrame(members.get(cursor),pdfFrames));}
             String parentReference=reference.replaceFirst("\\([^()]*\\)$","");for(Unit parent:units)if(parent.reference.equals(parentReference)&&parent.depth<unit.depth){for(int cursor=parent.start;cursor<unit.start;cursor++){Member member=members.get(cursor);if(noteMembers.contains(member.id))continue;if(cursor==parent.start||!SUBITEM.matcher(member.text).find()&&cursor<firstChild(units,parent))context.add(member.id);}break;}
-            for(int cursor=unit.start;cursor<unit.end;cursor++){Member member=members.get(cursor);if(!sameStory(chosen.member,member)||noteMembers.contains(member.id))continue;if(member.usable&&(pageFurniture(profile,member,members)||furnitureRow(profile,member,members))){physical.add(member.id);appendUnique(physicalContext,member.id);continue;}if(member.usable&&reference.contains("(")&&parentContinuationRow(member,root,members)){parentContinuation.add(member.id);appendUnique(parentContext,member.id);continue;}addRange(targetRanges,targetIds,member,0,member.text.length());selected.add(member.id);known&=member.usable;}
+            for(int cursor=unit.start;cursor<unit.end;cursor++){Member member=members.get(cursor);if(!sameStory(chosen.member,member)||noteMembers.contains(member.id))continue;if(pdf)known&=pdfReferenceFrame(member,pdfFrames);if(member.usable&&(pageFurniture(profile,member,members)||furnitureRow(profile,member,members))){physical.add(member.id);appendUnique(physicalContext,member.id);continue;}if(member.usable&&reference.contains("(")&&parentContinuationRow(member,root,members)){parentContinuation.add(member.id);appendUnique(parentContext,member.id);continue;}addRange(targetRanges,targetIds,member,0,member.text.length());selected.add(member.id);known&=member.usable;}
             target.put("scopeComplete",known&&targetIds.size()>0);target.put("status",unit.ambiguousTail?"ambiguous_parent_tail":known?"resolved_explicit_native_unit":"source_member_unknown");target.putObject("startBoundary").put("kind","explicit_native_clause_or_subitem_label").put("memberId",members.get(unit.start).id);
             ObjectNode end=target.putObject("endBoundary");end.put("kind",unit.sharedTailStart==unit.end?"shared_parent_predicate_tail_start":unit.end<members.size()?"next_native_peer_or_parent_label":"native_story_end");if(unit.end<members.size())end.put("memberId",members.get(unit.end).id);complete&=known&&targetIds.size()>0;
         }
@@ -366,6 +451,7 @@ public final class OerTemplateEvidence {
         for(Unit last:new ArrayList<>(result))if(last.depth>1) {
             List<Unit> siblings=new ArrayList<>();String parent=last.reference.replaceFirst("\\([^()]*\\)$","");for(Unit unit:result)if(unit.depth==last.depth&&unit.reference.replaceFirst("\\([^()]*\\)$","").equals(parent))siblings.add(unit);
             if(siblings.size()<2||siblings.get(siblings.size()-1)!=last)continue;
+            if(members.get(last.start).value.has("blockObservation")){int observed=pdfSharedTail(last,siblings,result,members,noteMembers);if(observed>=0){for(Unit sibling:siblings){sibling.sharedTailStart=observed;sibling.sharedTailEnd=last.end;sibling.ambiguousTail=false;}last.end=observed;continue;}}
             int tail=-1;for(int cursor=last.start+1;cursor<last.end;cursor++){Member member=members.get(cursor);if(!sameStory(clause.member,member)||noteMembers.contains(member.id)||member.text.trim().isEmpty())continue;if(member.usable&&(pageFurniture(profile,member,members)||furnitureRow(profile,member,members)||parentContinuationRow(member,clause.label,members)))continue;boolean labelledDescendant=false;for(Unit child:result)if(child.start==cursor&&child.depth>last.depth&&child.reference.startsWith(last.reference+"(")){labelledDescendant=true;break;}if(labelledDescendant)continue;tail=cursor;break;}
             if(tail<0)continue;boolean shared=members.get(tail).text.trim().matches("(?is)^(?:shall\\b|which\\s+(?:is|are)\\b).*");
             DirectIndent parentIndent=directIndent(members.get(tail));
@@ -377,6 +463,7 @@ public final class OerTemplateEvidence {
     }
 
     private static void lastSentence(List<Member> members,int noteAt,JsonNode note,ArrayNode groups,ArrayNode issues) {
+        if(members.get(noteAt).value.has("blockObservation")){if(!pdfLastSentence(members,noteAt,note,groups))issue(issues,"LAST_SENTENCE_TARGET_UNVERIFIED",note.path("id").asText(),"The marked final sentence lacks complete same-source native glyph, page, flow or sentence-boundary evidence");return;}
         int previous=noteAt-1;while(previous>=0&&members.get(previous).usable&&members.get(previous).text.trim().isEmpty()&&sameStory(members.get(noteAt),members.get(previous)))previous--;
         if(previous<0)return;Member member=members.get(previous);if(!member.usable||!sameStory(members.get(noteAt),member))return;
         int end=member.text.length();while(end>0&&Character.isWhitespace(member.text.charAt(end-1)))end--;int start=end;
@@ -566,7 +653,83 @@ public final class OerTemplateEvidence {
     private static boolean sameRowNote(Member member,JsonNode note,List<Member> members){if(member.row.isEmpty())return false;for(JsonNode id:note.path("orderedMemberIds")){int at=indexOf(members,id.asText());if(at<0||!member.row.equals(members.get(at).row)||!sameStory(member,members.get(at)))return false;}return note.path("orderedMemberIds").size()>0;}
     private static boolean attachedMarker(String text,int start,int end){int left=start-1,right=end;while(left>=0&&Character.isWhitespace(text.charAt(left)))left--;while(right<text.length()&&Character.isWhitespace(text.charAt(right)))right++;return left>=0&&"*#".indexOf(text.charAt(left))>=0||right<text.length()&&"*#".indexOf(text.charAt(right))>=0;}
     private static String preNormalizedText(Member member){JsonNode raw=member.value.path("preNormalizedTextObservation");if(!raw.path("status").asText().equals("observed_parser_channels_before_whitespace_normalization")||!raw.path("text").isTextual())return null;String text=raw.path("text").asText();return text.replaceAll("[\\s\\u00A0]+","").equals(member.text.replaceAll("[\\s\\u00A0]+",""))?text:null;}
-    private static boolean isTocCopy(Member member){String xml=member.value.path("nativeXml").asText();Matcher link=Pattern.compile("(?is)<(?:[\\w.-]+:)?hyperlink\\b[^>]*\\b(?:[\\w.-]+:)?anchor\\s*=\\s*[\"'](_Toc[^\"']+)[\"']").matcher(xml);while(link.find())if(Pattern.compile("(?i)\\bPAGEREF\\s+"+Pattern.quote(link.group(1))+"(?=\\s|<)").matcher(xml).find())return true;return false;}
+    private static boolean isTocCopy(Member member){
+        if(member.value.has("nativeFieldRoles")){
+            StringBuilder observed=new StringBuilder();boolean seen=false;
+            for(JsonNode role:member.value.path("nativeFieldRoles")){
+                if(role.path("deleted").asBoolean())continue;
+                if(!"toc_result".equals(role.path("fieldRole").asText())||!role.path("sourceText").isTextual()||!tocPosition(member,role.path("sourcePosition"))||!descendant(role.path("sourcePosition").path("nodePath").asText(),member.path)||!tocPosition(member,role.path("fieldSourcePosition")))return false;
+                observed.append(role.path("sourceText").asText());seen=true;
+            }
+            return seen&&!member.text.trim().isEmpty()&&observed.toString().replaceAll("[\\s\\p{Z}]+","").equals(member.text.replaceAll("[\\s\\p{Z}]+",""));
+        }
+        String xml=member.value.path("nativeXml").asText();Matcher link=Pattern.compile("(?is)<(?:[\\w.-]+:)?hyperlink\\b[^>]*\\b(?:[\\w.-]+:)?anchor\\s*=\\s*[\"'](_Toc[^\"']+)[\"']").matcher(xml);while(link.find())if(Pattern.compile("(?i)\\bPAGEREF\\s+"+Pattern.quote(link.group(1))+"(?=\\s|<)").matcher(xml).find())return true;return false;}
+    private static boolean tocPosition(Member member,JsonNode position){JsonNode own=member.value.path("sourcePosition");return !position.path("nodePath").asText().isEmpty()&&own.path("sourceSha256").equals(position.path("sourceSha256"))&&own.path("partName").equals(position.path("partName"))&&own.path("partSha256").equals(position.path("partSha256"));}
+
+    private static GlyphMap nativePdfLayout(Member member){
+        if(member.pdfLayoutChecked)return member.pdfLayout;member.pdfLayoutChecked=true;
+        JsonNode block=member.value.path("blockObservation");int page=block.path("pageNo").asInt(-1);
+        if(!member.usable||member.expectedPdfSource==null||!member.expectedPdfSource.equals(block.path("readingContext").path("sourceSha256").asText())||!Arrays.asList("native","native_pdf").contains(block.path("source").asText())||!"pdf_line".equals(block.path("kind").asText())||page<1)return null;
+        GlyphMap map=glyphMap(member);double[] line=pdfNumbers(block.path("bbox"),4);if(!map.complete||map.glyphs.isEmpty()||line==null||line[0]<0||line[1]<0||line[2]<=0||line[3]<=0||line[0]+line[2]>1.0001||line[1]+line[3]>1.0001)return null;Set<String> ids=new HashSet<>();Map<String,JsonNode> observed=new HashMap<>();for(JsonNode glyph:block.path("pdfGlyphs"))if(observed.putIfAbsent(glyph.path("id").asText(),glyph)!=null)return null;double baseline=Double.NaN;
+        for(GlyphSpan glyph:map.glyphs){if(!glyph.id.startsWith("pdf-page/"+page+"/glyph/")||!ids.add(glyph.id)||glyph.x<0||glyph.y<0||glyph.width<=0||glyph.x+glyph.width>1.0001||glyph.y+glyph.height>1.0001)return null;JsonNode raw=observed.get(glyph.id);if(raw==null||!raw.path("direction").isNumber()||Math.abs(raw.path("direction").asDouble())>.01)return null;double[] position=pdfNumbers(raw.path("pdfboxPosition"),10),matrix=pdfNumbers(raw.path("textMatrix"),6);if(position==null||matrix==null||position[8]<=0||position[9]<=0||position[6]<=0||position[7]<=0||matrix[0]<=0||matrix[3]<=0||Math.abs(matrix[1])>.001||Math.abs(matrix[2])>.001)return null;
+            if(Double.isNaN(baseline)){baseline=position[5];map.pageWidth=position[8];map.pageHeight=position[9];}else if(Math.abs(position[5]-baseline)>.02||Math.abs(position[8]-map.pageWidth)>.02||Math.abs(position[9]-map.pageHeight)>.02)return null;double w=map.pageWidth,h=map.pageHeight;
+            if(Math.abs(glyph.x*w-position[4])>.02||Math.abs((glyph.y+glyph.height)*h-position[5])>.02||Math.abs(glyph.width*w-position[6])>.02||Math.abs(glyph.height*h-position[7])>.02||Math.abs(matrix[4]-position[4])>.02||Math.abs(matrix[5]-(h-position[5]))>.02)return null;
+            for(int n=0;n<4;n++)if(Math.abs(position[n]-position[n+4])>.02)return null;
+            if((line[0]-glyph.x)*w>.02||(line[1]-glyph.y)*h>.02||(glyph.x+glyph.width-line[0]-line[2])*w>.02||(glyph.y+glyph.height-line[1]-line[3])*h>.02)return null;
+        }
+        member.pdfLayout=map;return map;
+    }
+    private static double[] pdfNumbers(JsonNode values,int size){if(!values.isArray()||values.size()!=size)return null;double[] out=new double[size];for(int n=0;n<size;n++){if(!values.path(n).isNumber()||!Double.isFinite(values.path(n).asDouble()))return null;out[n]=values.path(n).asDouble();}return out;}
+    private static boolean samePdfFrame(GlyphMap a,GlyphMap b){return Math.abs(a.pageWidth-b.pageWidth)<=.02&&Math.abs(a.pageHeight-b.pageHeight)<=.02;}
+    private static boolean pdfReferenceFrame(Member member,Map<Integer,GlyphMap> frames){GlyphMap map=nativePdfLayout(member);if(map==null)return false;GlyphMap prior=frames.putIfAbsent(pdfPage(member),map);return prior==null||samePdfFrame(prior,map);}
+    private static boolean samePdfPrintLane(GlyphMap a,GlyphMap b){if(!samePdfFrame(a,b))return false;GlyphSpan first=a.glyphs.get(0),second=b.glyphs.get(0);if(Math.abs(first.x-second.x)*a.pageWidth>.02||Math.abs(first.y-second.y)*a.pageHeight>.02||Math.abs(first.font-second.font)>.2)return false;for(GlyphSpan glyph:a.glyphs)if(Math.abs(glyph.font-first.font)>.2)return false;for(GlyphSpan glyph:b.glyphs)if(Math.abs(glyph.font-second.font)>.2)return false;return true;}
+    private static int pdfPage(Member member){return member.value.path("blockObservation").path("pageNo").asInt(-1);}
+    private static double pdfBodyLeft(Member member,GlyphMap map){Matcher marker=SUBITEM.matcher(member.text);if(!marker.find())return Double.NaN;int at=marker.end();while(at<member.text.length()&&(Character.isWhitespace(member.text.charAt(at))||"#*".indexOf(member.text.charAt(at))>=0))at++;for(GlyphSpan glyph:map.glyphs)if(glyph.start>=at)return glyph.x;return Double.NaN;}
+    private static int pdfSharedTail(Unit last,List<Unit> siblings,List<Unit> units,List<Member> members,Set<String> noteMembers){
+        if(last.end>=members.size())return -1;Member boundary=members.get(last.end);if(nativePdfLayout(boundary)==null||!SUBITEM.matcher(boundary.text).find()&&!CLAUSE.matcher(boundary.text).find())return -1;
+        String parentReference=last.reference.replaceFirst("\\([^()]*\\)$","");Unit parent=null;for(Unit unit:units)if(unit.reference.equals(parentReference)&&unit.depth==last.depth-1){if(parent!=null)return -1;parent=unit;}if(parent==null)return -1;for(Unit sibling:siblings)if(sibling.start<=parent.start||sibling.start>=parent.end)return -1;
+        Member owner=members.get(parent.start);GlyphMap parentMap=nativePdfLayout(owner);if(parentMap==null||!owner.text.trim().matches("(?s).*(?::|:-)$"))return -1;int page=pdfPage(owner);if(pdfPage(boundary)!=page||!samePdfFrame(parentMap,nativePdfLayout(boundary)))return -1;
+        double parentLeft=pdfBodyLeft(owner,parentMap),tolerance=parentMap.glyphs.get(0).height*.65,childLeft=Double.NaN;if(!Double.isFinite(parentLeft))return -1;
+        for(Unit sibling:siblings){Member member=members.get(sibling.start);GlyphMap map=nativePdfLayout(member);if(map==null||pdfPage(member)!=page||!samePdfFrame(parentMap,map))return -1;double left=pdfBodyLeft(member,map);if(!Double.isFinite(left)||left<=parentLeft+4*tolerance||Double.isFinite(childLeft)&&Math.abs(left-childLeft)>tolerance)return -1;childLeft=left;}
+        int tail=-1;for(int cursor=last.start+1;cursor<last.end;cursor++){Member member=members.get(cursor);if(noteMembers.contains(member.id)||member.text.trim().isEmpty()||pdfPageFurniture(member,members))continue;GlyphMap map=nativePdfLayout(member);if(map==null||pdfPage(member)!=page||!samePdfFrame(parentMap,map))return -1;double left=map.glyphs.get(0).x;
+            if(tail<0&&Math.abs(left-childLeft)<=tolerance)continue;
+            if(tail<0){if(!member.text.trim().matches("(?is)^(?:shall\\b|which\\s+(?:is|are)\\b).*")||Math.abs(left-parentLeft)>tolerance)return -1;tail=cursor;}
+            else if(Math.abs(left-parentLeft)>tolerance)return -1;
+        }
+        if(tail<0)return -1;
+        for(Unit sibling:siblings){String end="";int limit=sibling==last?tail:sibling.end;for(int cursor=sibling.start;cursor<limit;cursor++){Member member=members.get(cursor);if(noteMembers.contains(member.id)||member.text.trim().isEmpty()||pdfPageFurniture(member,members))continue;GlyphMap map=nativePdfLayout(member);if(map==null||pdfPage(member)!=page||!samePdfFrame(parentMap,map))return -1;end=member.text.trim();}if(end.isEmpty()||end.matches("(?s).*[.!?][”’\\\"')\\]]*$"))return -1;}
+        return tail;
+    }
+    private static boolean pdfPageFurniture(Member member,List<Member> members){
+        GlyphMap map=nativePdfLayout(member);if(map==null)return false;String text=member.text.replaceAll("\\s+"," ").trim();int page=pdfPage(member);double y=map.glyphs.get(0).y,height=map.glyphs.get(0).height;
+        boolean publication=text.matches("(?i)^(?:[A-Z][A-Z0-9&()./-]*\\s+)?Standard Library of .+\\bEdition\\s*$")||text.matches("(?i)^\\(\\s*Consolidated\\s+up\\s+to\\s+\\d{1,2}\\s+[A-Za-z]+\\s+\\d{4}\\s*\\)$");
+        if(y<.1&&publication&&!CLAUSE.matcher(text).find()&&!SUBITEM.matcher(text).find()){
+            double firstMarker=Double.POSITIVE_INFINITY;for(Member peer:members)if(pdfPage(peer)==page&&(CLAUSE.matcher(peer.text).find()||SUBITEM.matcher(peer.text).find())){GlyphMap observed=nativePdfLayout(peer);if(observed!=null)firstMarker=Math.min(firstMarker,observed.glyphs.get(0).y);}
+            if(y+3*height<firstMarker)for(Member peer:members)if(pdfPage(peer)!=page&&peer.text.replaceAll("\\s+"," ").trim().equals(text)){GlyphMap observed=nativePdfLayout(peer);if(observed!=null&&observed.glyphs.get(0).y<.1&&samePdfPrintLane(map,observed))return true;}
+        }
+        if(y>.9&&text.matches("\\d{1,6}")){
+            double prior=Double.NEGATIVE_INFINITY;for(Member peer:members)if(peer!=member&&pdfPage(peer)==page){GlyphMap observed=nativePdfLayout(peer);if(observed!=null){double other=observed.glyphs.get(0).y;if(other>y)return false;prior=Math.max(prior,other);}}
+            if(y-prior>4*height)for(Member peer:members)if(Math.abs(pdfPage(peer)-page)==1&&peer.text.trim().matches("\\d{1,6}")){GlyphMap observed=nativePdfLayout(peer);if(observed!=null&&observed.glyphs.get(0).y>.9&&samePdfPrintLane(map,observed)&&Integer.parseInt(peer.text.trim())-Integer.parseInt(text)==pdfPage(peer)-page)return true;}
+        }
+        return false;
+    }
+    private static boolean pdfLastSentence(List<Member> members,int noteAt,JsonNode note,ArrayNode groups){
+        if(!note.path("captureComplete").asBoolean()||!note.path("sourceSyntaxComplete").asBoolean())return false;Member instruction=members.get(noteAt);if(nativePdfLayout(instruction)==null)return false;
+        List<Member> lines=new ArrayList<>();Member next=instruction;
+        for(int cursor=noteAt-1;cursor>=0;cursor--){Member member=members.get(cursor);GlyphMap map=nativePdfLayout(member),nextMap=nativePdfLayout(next);if(map==null||nextMap==null||pdfPage(member)!=pdfPage(instruction)||!samePdfFrame(map,nextMap))return false;
+            double height=Math.max(map.glyphs.get(0).height,nextMap.glyphs.get(0).height),gap=nextMap.glyphs.get(0).y-map.glyphs.get(0).y;if(gap<=0||gap>(lines.isEmpty()?8:4)*height||Math.abs(map.glyphs.get(0).x-nextMap.glyphs.get(0).x)>height)return false;
+            lines.add(0,member);String text=String.join("\n",lines.stream().map(line->line.text).toArray(String[]::new));int end=text.length();while(end>0&&Character.isWhitespace(text.charAt(end-1)))end--;int start=end;if(start>0&&pdfSentenceBoundary(text,start-1))start--;while(start>0&&!pdfSentenceBoundary(text,start-1))start--;while(start<end&&Character.isWhitespace(text.charAt(start)))start++;
+            if(start<end&&text.charAt(start)=='*'){
+                ObjectNode group=object();group.put("id","last-sentence:"+digest(note.path("id").asText()+"|"+member.id));group.put("kind","inline_last_sentence_scope");group.put("guidanceNoteId",note.path("id").asText());group.put("captureComplete",true);group.put("scopeComplete",true);group.put("scopeMeaning","Only the marked final sentence in complete same-source native PDF line observations");group.put("automaticEditEligible",false);group.put("wholeParagraphTargetAssumed",false);ArrayNode ranges=group.putArray("memberRanges"),ids=group.putArray("orderedMemberIds");int offset=0;
+                for(Member line:lines){int from=Math.max(0,start-offset),limit=Math.min(line.text.length(),end-offset);if(from<limit)addPdfRange(ranges,ids,line,from,limit,nativePdfLayout(line));offset+=line.text.length()+1;}
+                if(ranges.isEmpty())return false;group.put("text",text.substring(start,end));JsonNode first=ranges.get(0),last=ranges.get(ranges.size()-1);group.putObject("startBoundary").put("kind","marked_sentence_after_previous_sentence_boundary").put("memberId",first.path("memberId").asText()).put("offset",first.path("start").asInt());group.putObject("endBoundary").put("kind","observed_source_sentence_end").put("memberId",last.path("memberId").asText()).put("offset",last.path("end").asInt());groups.add(group);return true;
+            }
+            if(start>0||CLAUSE.matcher(member.text).find()||SUBITEM.matcher(member.text).find())return false;next=member;
+        }
+        return false;
+    }
+
+    private static boolean pdfSentenceBoundary(String text,int at){return text.charAt(at)!='\n'&&sentenceBoundary(text,at);}
 
     /** Projects only observed source slices; glyph text must align before geometry can exclude a margin. */
     private static void projectPdfGuidance(ObjectNode note,List<Member> members,ArrayNode issues){
@@ -598,7 +761,7 @@ public final class OerTemplateEvidence {
     private static List<MarginRun> marginRuns(Member member,GlyphMap map,double anchorX,double anchorFont){List<MarginRun> runs=new ArrayList<>();for(int n=0;n<map.glyphs.size();){GlyphSpan first=map.glyphs.get(n);if(first.font>=anchorFont*.8||first.x+first.width>=anchorX){n++;continue;}int last=n;while(last+1<map.glyphs.size()&&Math.abs(map.glyphs.get(last+1).font-first.font)<.2&&Math.abs(map.glyphs.get(last+1).y-first.y)<first.height)last++;GlyphSpan end=map.glyphs.get(last);String text=member.text.substring(first.start,end.end).replaceAll("\\s+","");String role=text.matches("(?i)(?:SCC|Rev\\.\\d+)")?"seed":text.equalsIgnoreCase("approvedon")?"approval":text.matches("\\d{2}\\.\\d{2}\\.\\d{4}")?"date":"";if(!role.isEmpty()){boolean continuous=true;double right=first.x+first.width,bodyLeft=Double.NaN;for(int k=n;k<=last;k++){GlyphSpan glyph=map.glyphs.get(k);right=Math.max(right,glyph.x+glyph.width);if(k>n){GlyphSpan prior=map.glyphs.get(k-1);double tolerance=4*Math.max(Math.max(prior.width,glyph.width),Math.max(prior.height,glyph.height));if(glyph.x<prior.x-prior.width||glyph.x-(prior.x+prior.width)>tolerance)continuous=false;}}for(int k=last+1;k<map.glyphs.size();k++){GlyphSpan body=map.glyphs.get(k);if(body.font>=anchorFont*.8&&Math.abs(body.y-first.y)<=body.height+first.height){bodyLeft=Double.isNaN(bodyLeft)?body.x:Math.min(bodyLeft,body.x);}}runs.add(new MarginRun(member,first.start,end.end,first.x,first.y,first.width,first.height,first.font,role,right,bodyLeft,continuous));}n=last+1;}return runs;}
     private static boolean completeMarginCluster(MarginRun... runs){double bodyLeft=Double.NaN;for(MarginRun run:runs)if(Double.isFinite(run.bodyLaneLeft))bodyLeft=Double.isNaN(bodyLeft)?run.bodyLaneLeft:Math.min(bodyLeft,run.bodyLaneLeft);if(!Double.isFinite(bodyLeft))return false;for(MarginRun run:runs)if(!run.continuous||run.right>=bodyLeft)return false;return true;}
     private static boolean sameMargin(MarginRun a,MarginRun b){return Math.abs(a.x-b.x)<=2*Math.max(a.width,b.width)&&Math.abs(a.font-b.font)<.2;}
-    private static final class GlyphMap {final List<GlyphSpan> glyphs=new ArrayList<>();boolean complete;}
+    private static final class GlyphMap {final List<GlyphSpan> glyphs=new ArrayList<>();boolean complete;double pageWidth,pageHeight;}
     private static final class GlyphSpan {final String id;final int start,end;final double x,y,width,height,font;GlyphSpan(String id,int start,int end,double x,double y,double width,double height,double font){this.id=id;this.start=start;this.end=end;this.x=x;this.y=y;this.width=width;this.height=height;this.font=font;}}
     private static final class MarginRun {final Member member;final int start,end;final double x,y,width,height,font,right,bodyLaneLeft;final String role;final boolean continuous;MarginRun(Member member,int start,int end,double x,double y,double width,double height,double font,String role,double right,double bodyLaneLeft,boolean continuous){this.member=member;this.start=start;this.end=end;this.x=x;this.y=y;this.width=width;this.height=height;this.font=font;this.role=role;this.right=right;this.bodyLaneLeft=bodyLaneLeft;this.continuous=continuous;}}
     private static boolean unitMarkerAnchor(JsonNode group,Member member,boolean explicit){JsonNode target=explicit?group.path("targets").path(0):group;if(target.path("startBoundary").path("memberId").asText().equals(member.id))return true;String reference=explicit?target.path("reference").asText():group.path("sourceReference").asText();Matcher heading=CLAUSE.matcher(member.text);return !reference.contains("(")&&heading.find()&&heading.group(1).replaceAll("\\s+","").equals(reference)&&member.text.matches("(?is).*\\(\\s*Cont[’']?d\\s*\\)\\s*$");}
@@ -632,7 +795,7 @@ public final class OerTemplateEvidence {
     private static void appendUnique(ArrayNode values,String value){if(value!=null&&!value.isEmpty()&&!hasId(values,value))values.add(value);}
 
     private static boolean furnitureRow(String profile,Member member,List<Member> members){if(member.row.isEmpty())return false;boolean title=false;for(Member peer:members)if(peer.row.equals(member.row)&&sameStory(member,peer)&&!peer.text.trim().isEmpty()){if(!pageFurniture(profile,peer,members))return false;title=true;}return title;}
-    private static boolean pageFurniture(String profile,Member member,List<Member> members){String text=member.text.trim();if(text.isEmpty())return true;if(CLAUSE.matcher(text).find()||SUBITEM.matcher(text).find()||CELL_NUMBER.matcher(text).matches())return false;String month="(?:January|February|March|April|May|June|July|August|September|October|November|December)\\s+\\d{4}";if(text.matches("(?i)(?:notes? to tenderers?|notice to tenderers?|special conditions? of (?:tender|contract))\\s*(?:\\(Cont[’']?d\\))?"))return true;if(text.length()<120&&text.matches("(?i)(?:"+month+"\\s*[\\p{Pd}−]?\\s*)?[\\p{Pd}−]?\\s*"+Pattern.quote(profile)+"/\\d+\\s*[\\p{Pd}−]?\\s*"))return true;if(text.length()<100&&text.matches("HD\\(QS\\)\\s+[0-9A-Za-z /()._-]+"))return true;if(text.matches("(?i)"+month)){if(member.value.path("storyKind").asText().equals("footer"))return true;return adjacentHdPageFooter(profile,member,members,-1)||adjacentHdPageFooter(profile,member,members,1);}return false;}
+    private static boolean pageFurniture(String profile,Member member,List<Member> members){if(member.value.has("blockObservation")&&pdfPageFurniture(member,members))return true;String text=member.text.trim();if(text.isEmpty())return true;if(CLAUSE.matcher(text).find()||SUBITEM.matcher(text).find()||CELL_NUMBER.matcher(text).matches())return false;String month="(?:January|February|March|April|May|June|July|August|September|October|November|December)\\s+\\d{4}";if(text.matches("(?i)(?:notes? to tenderers?|notice to tenderers?|special conditions? of (?:tender|contract))\\s*(?:\\(Cont[’']?d\\))?"))return true;if(text.length()<120&&text.matches("(?i)(?:"+month+"\\s*[\\p{Pd}−]?\\s*)?[\\p{Pd}−]?\\s*"+Pattern.quote(profile)+"/\\d+\\s*[\\p{Pd}−]?\\s*"))return true;if(text.length()<100&&text.matches("HD\\(QS\\)\\s+[0-9A-Za-z /()._-]+"))return true;if(text.matches("(?i)"+month)){if(member.value.path("storyKind").asText().equals("footer"))return true;return adjacentHdPageFooter(profile,member,members,-1)||adjacentHdPageFooter(profile,member,members,1);}return false;}
     private static boolean adjacentHdPageFooter(String profile,Member member,List<Member> members,int direction){for(int n=indexOf(members,member.id)+direction;n>=0&&n<members.size();n+=direction){Member peer=members.get(n);if(!sameStory(member,peer))continue;if(!peer.usable)return false;String text=peer.text.trim();if(text.isEmpty())continue;return text.length()<100&&text.matches("(?i)HD\\(QS\\)\\s+[0-9A-Za-z /()._-]+\\s+[\\p{Pd}−]?\\s*"+Pattern.quote(profile)+"/\\d+\\s*[\\p{Pd}−]?\\s*");}return false;}
     private static int rowStart(List<Member> members,int ordinal){Member member=members.get(ordinal);while(ordinal>0&&!member.row.isEmpty()&&member.row.equals(members.get(ordinal-1).row)&&sameStory(member,members.get(ordinal-1)))ordinal--;return ordinal;}
     private static boolean memberHasInstruction(Member member,ArrayNode notes){for(JsonNode note:notes)if(hasId(note.path("orderedMemberIds"),member.id))return true;return false;}
@@ -685,8 +848,9 @@ public final class OerTemplateEvidence {
     private static ArrayNode array(){return JsonUtils.mapper().createArrayNode();}
     private static void issue(ArrayNode issues,String code,String ref,String message){ObjectNode issue=issues.addObject();issue.put("code",code);if(ref!=null)issue.put("ref",ref);issue.put("status","open");issue.put("message",message);}
     private static final class Member {
-        final ObjectNode value;final String id,text,part,path,story,table,row,cell,column;final boolean usable;
-        Member(ObjectNode value,boolean bound){this.value=value;id=value.path("id").asText();JsonNode position=value.path("sourcePosition"),observation=value.path("textObservation");part=position.path("partName").asText();path=position.path("nodePath").asText();story=value.path("storyKind").asText()+"|"+value.path("storyRootNodePath").asText();table=value.path("tableNodePath").asText();row=value.path("rowNodePath").asText();cell=value.path("cellNodePath").asText();int i=cell.lastIndexOf("}tc[");column=i<0?"":cell.substring(i);text=observation.path("text").asText();usable=bound&&observation.path("status").asText().startsWith("observed_")&&observation.path("text").isTextual()&&value.path("effectiveCandidate").asBoolean(true)&&!value.has("textOverlapStatus");}
+        final ObjectNode value;final String id,text,part,path,story,table,row,cell,column,expectedPdfSource;final boolean usable;boolean pdfLayoutChecked;GlyphMap pdfLayout;
+        Member(ObjectNode value,boolean bound){this(value,bound,null);}
+        Member(ObjectNode value,boolean bound,String expectedPdfSource){this.expectedPdfSource=expectedPdfSource;this.value=value;id=value.path("id").asText();JsonNode position=value.path("sourcePosition"),observation=value.path("textObservation");part=position.path("partName").asText();path=position.path("nodePath").asText();story=value.path("storyKind").asText()+"|"+value.path("storyRootNodePath").asText();table=value.path("tableNodePath").asText();row=value.path("rowNodePath").asText();cell=value.path("cellNodePath").asText();int i=cell.lastIndexOf("}tc[");column=i<0?"":cell.substring(i);text=observation.path("text").asText();usable=bound&&observation.path("status").asText().startsWith("observed_")&&observation.path("text").isTextual()&&value.path("effectiveCandidate").asBoolean(true)&&!value.has("textOverlapStatus");}
         boolean body(){return value.path("storyKind").asText().equals("body")||value.path("storyKind").asText().equals("physical_document");}
     }
     private static final class Anchor {final int ordinal;final String label,basis;final Member member;Anchor(int ordinal,String label,String basis,Member member){this.ordinal=ordinal;this.label=label;this.basis=basis;this.member=member;}}

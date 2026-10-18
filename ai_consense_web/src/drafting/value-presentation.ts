@@ -1,7 +1,7 @@
 import type { DraftField } from '@/api/types'
 import type { AppLocale } from '@/i18n'
 import type { DraftValue } from './state'
-import { isCollectionKind, isObjectKind } from './field-kinds'
+import { isCollectionKind, isObjectKind, isVisibleDetail } from './field-kinds'
 import { localized } from './words'
 import { previewWord } from './preview-words'
 
@@ -22,7 +22,7 @@ export function presentationValue(field: DraftField, raw: DraftValue | undefined
 }
 
 export function presentationColumns(field: DraftField, records: DraftValue[]): DraftField[] {
-  if (field.columnFields?.length) return field.columnFields.filter(column => column.key !== 'id' && !column.hidden)
+  if (field.columnFields?.length) return field.columnFields.filter(isVisibleDetail)
   if (field.kind === 'contract') return [
     { key: 'number', kind: 'text', label: { en: 'Contract number', zhHans: '合约编号', zhHant: '合約編號' } },
     { key: 'title', kind: 'text', label: { en: 'Contract title', zhHans: '合约名称', zhHant: '合約名稱' } }

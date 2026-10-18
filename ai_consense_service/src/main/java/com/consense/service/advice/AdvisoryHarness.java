@@ -340,7 +340,7 @@ final class AdvisoryHarness {
         if(value.length()>1200||value.matches("(?s).*(?:[<>`]|%%|#(?:quot|[0-9]+);|click\\s|https?://).*"))throw invalid("Unsafe or oversized graph label");
         return value.replace("\r"," ").replace("\n"," ").replace("\"","#quot;").replace("|","/");
     }
-    static boolean text(String value){return value!=null&&!value.trim().isEmpty();}
+    static boolean text(String value){return value!=null&&!value.replaceAll("[\\s\\p{Z}]+","").isEmpty();}
     static boolean flowchartRequested(String question){return question!=null&&question.toLowerCase(Locale.ROOT).matches("(?s).*(?:flow[ -]?chart|diagram|流程[图圖]|以[图圖](?:示|表示)|(?:画|畫|绘制|繪製).*(?:图|圖)).*");}
     static final class ContractViolation extends IllegalArgumentException { ContractViolation(String reason){super(reason);} }
     static String diagnostic(Throwable error){return error instanceof ContractViolation?error.getMessage():"The structured response was not one complete valid JSON object.";}

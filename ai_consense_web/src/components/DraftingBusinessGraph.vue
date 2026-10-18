@@ -7,7 +7,7 @@ import type { AppLocale } from '@/i18n'
 import { draftWord, localized, type DraftWord } from '@/drafting/words'
 import { buildBusinessGraph } from '@/drafting/business-graph'
 import { businessGraphGeometry as geometry, routeBusinessGraphEdges } from '@/drafting/business-graph-layout'
-import { isObjectKind } from '@/drafting/field-kinds'
+import { isObjectKind, isVisibleDetail } from '@/drafting/field-kinds'
 import { presentationValue, scalarValueLabel, valueSummary } from '@/drafting/value-presentation'
 import DraftingValueDisplay from './DraftingValueDisplay.vue'
 
@@ -27,7 +27,7 @@ const selectedAction = computed(() => graph.value.actions.find(action => action.
 const selectedGroupLabel = computed(() => l(graph.value.groups.find(item => item.id === selectedInput.value?.groupId)?.label))
 const field = (key: string) => graph.value.inputs.find(input => input.key === key)?.field ?? props.catalog.systemFields?.find(item => item.key === key)
 const inputLabel = (key: string) => l(field(key)?.label) || t('Manual target override', '人工目标覆盖设置', '人工目標覆寫設定')
-const visibleSubfields = (input: typeof graph.value.inputs[number]) => input.subfields.filter(item => item.key !== 'id' && !item.field.hidden)
+const visibleSubfields = (input: typeof graph.value.inputs[number]) => input.subfields.filter(item => isVisibleDetail(item.field))
 const structure = computed(() => selectedInput.value ? visibleSubfields(selectedInput.value) : [])
 const selectedSubfield = computed(() => structure.value.find(item => item.key === selectedSubfieldKey.value))
 const structuralCount = computed(() => graph.value.inputs.reduce((count, input) => count + visibleSubfields(input).length, 0))
@@ -49,7 +49,7 @@ function invalidStructuredValue(valueField: DraftField, raw: DraftValue | undefi
   if (presented.invalid) return true
   if (!valueField.columnFields?.length || !presented.value || typeof presented.value !== 'object') return false
   const records = Array.isArray(presented.value) ? presented.value : [presented.value]
-  return records.some(record => record && typeof record === 'object' && !Array.isArray(record) && valueField.columnFields!.some(column => column.key !== 'id' && !column.hidden && invalidStructuredValue(column, record[column.key])))
+  return records.some(record => record && typeof record === 'object' && !Array.isArray(record) && valueField.columnFields!.some(column => isVisibleDetail(column) && invalidStructuredValue(column, record[column.key])))
 }
 const invalidCurrentValue = computed(() => selectedInput.value ? invalidStructuredValue(selectedInput.value.field, selectedInput.value.value) : false)
 const applicableLabel = (value: string) => value === 'no' ? t('Inactive for current inputs', '当前输入下不适用', '目前輸入下不適用') : value === 'yes' ? t('Applicable', '适用', '適用') : t('Applicability unanswered', '适用条件尚未明确', '適用條件尚未明確')

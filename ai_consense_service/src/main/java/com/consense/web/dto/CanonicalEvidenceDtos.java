@@ -2,6 +2,7 @@ package com.consense.web.dto;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.annotation.JsonSetter;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.Nulls;
 import lombok.Data;
 import java.util.List;
@@ -26,6 +27,10 @@ public final class CanonicalEvidenceDtos {
         /** Native PDF capture/limitations stay declarations; this view never certifies referenced CAS or pixels. */
         @JsonSetter(nulls=Nulls.SKIP)
         private JsonNode nativePdfEvidence;
+        /** Selected context from the same sealed normal graph; no citation or adoption authority. */
+        @JsonInclude(JsonInclude.Include.NON_NULL)
+        @JsonSetter(nulls=Nulls.SKIP)
+        private JsonNode nativePdfSourceGroupsContext;
         /** An absent optional table group remains Java null through model-view transport. */
         @JsonSetter(nulls=Nulls.SKIP)
         private JsonNode tableGroup;

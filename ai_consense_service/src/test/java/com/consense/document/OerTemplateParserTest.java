@@ -76,6 +76,20 @@ class OerTemplateParserTest {
         assertTrue(headerNote);verifyNoInteractions(ocr);
     }
 
+    @Test void editorAndOerUseTheSameNativeParagraphPathsAcrossStoriesAndCells() throws Exception {
+        byte[] bytes=word();OcrClient ocr=mock(OcrClient.class);
+        DocumentParser.ParsedDocument parsed=new DocumentParser(new ConsenseProperties(),ocr).parseTemplate("SCC","authored.docx",bytes);
+        java.util.Map<String,DocxTemplateEditor.Paragraph> paragraphs=new java.util.HashMap<>();
+        for(DocxTemplateEditor.Paragraph paragraph:new DocxTemplateEditor().inspect(bytes).getParagraphs())
+            assertNull(paragraphs.put(paragraph.getPart()+"#"+paragraph.getNativeNodePath(),paragraph));
+        int matched=0;
+        for(JsonNode member:parsed.getCoverage().getNativeDocxParagraphs().path("paragraphs")) {
+            JsonNode position=member.path("sourcePosition");
+            assertNotNull(paragraphs.get(position.path("partName").asText()+"#"+position.path("nodePath").asText()));matched++;
+        }
+        assertEquals(paragraphs.size(),matched);verifyNoInteractions(ocr);
+    }
+
     @Test void pdfUsesExistingNativePhysicalEvidenceWithoutInventingWordAnchors() throws Exception {
         ByteArrayOutputStream out=new ByteArrayOutputStream();try(PDDocument pdf=new PDDocument()){
             PDPage page=new PDPage();pdf.addPage(page);try(PDPageContentStream content=new PDPageContentStream(pdf,page)){

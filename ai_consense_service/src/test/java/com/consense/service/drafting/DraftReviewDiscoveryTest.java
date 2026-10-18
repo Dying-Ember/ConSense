@@ -103,4 +103,86 @@ class DraftReviewDiscoveryTest {
     @Test void invalidOrAbsentItemBudgetMakesNoGatewayCall() {
         AiGateway ai=mock(AiGateway.class);assertThrows(BizException.class,()->DraftReviewDiscovery.discover(ai,graph(),Collections.emptyList(),0));assertThrows(BizException.class,()->DraftReviewDiscovery.discover(ai,graph(),Collections.emptyList(),11));verifyNoInteractions(ai);
     }
+
+    @Test void namedChannelFieldsAndInsertionAnchorsReachDiscoveryWithoutInventingEditableScopes() {
+        ObjectNode source=reading("1","(Guidance Notes: Insert all Bill Nos. and descriptions.)");
+        ObjectNode fieldMember=source.withArray("sourceMembers").addObject().put("id","field-member");fieldMember.putObject("preNormalizedTextObservation").put("text","Mr/Ms      )");fieldMember.putObject("textObservation").put("text","Mr/Ms )");
+        ObjectNode field=source.withArray("groups").addObject().put("id","field-1").put("kind","native_source_field_candidate")
+                .put("fieldLabel","person_name").put("sourceFieldRangeComplete",true).put("scopeComplete",false).put("requiredAction","project_source_value_required");
+        field.putArray("guidanceNoteIds").add("note-1");field.putArray("memberRanges").addObject().put("memberId","field-member").put("channel","preNormalizedTextObservation.text").put("start",5).put("end",11);
+        ObjectNode insertion=source.withArray("groups").addObject().put("id","insertion-1").put("kind","native_source_field_candidate")
+                .put("fieldLabel","bill_description").put("sourceInsertionAnchorComplete",true).put("scopeComplete",false).put("listCardinalityStatus","unknown_from_existing_numbered_source_rows");
+        insertion.putArray("guidanceNoteIds").add("note-1");insertion.putArray("orderedMemberIds").add("field-member");insertion.putArray("insertionAnchors").addObject().put("memberId","field-member").put("channel","preNormalizedTextObservation.text").put("start",11).put("end",11);
+        AiGateway ai=mock(AiGateway.class);when(ai.complete(anyString(),anyString())).thenReturn(response());
+        DraftReviewDiscovery.discover(ai,graph(),Collections.singletonList(source),1);
+        ArgumentCaptor<String> users=ArgumentCaptor.forClass(String.class);verify(ai).complete(anyString(),users.capture());JsonNode scopes=JsonUtils.parse(users.getValue()).path("scopeCandidates");
+        assertEquals("      ",scopes.path(0).path("text").asText());
+        assertEquals(field,scopes.path(0).path("observation"));assertEquals(insertion,scopes.path(1).path("observation"));
+        assertFalse(scopes.path(1).path("scopeComplete").asBoolean());assertEquals("",scopes.path(1).path("text").asText());
+    }
+
+    @Test void completeObservedMemberAndNestedTargetScopesReachTheModelInOriginalOrder() {
+        ObjectNode source=reading("1","(Guidance Notes: Select the complete alternative.)");
+        for(String id:Arrays.asList("first","second"))source.withArray("sourceMembers").addObject().put("id",id).putObject("textObservation").put("text",id+" clause member.");
+        ObjectNode alternative=source.withArray("groups").addObject().put("id","alternative-1").put("kind","complete_alternative_scope").put("scopeComplete",true).put("guidanceNoteId","note-1");
+        alternative.putArray("orderedMemberIds").add("first").add("second");
+        ObjectNode reference=source.withArray("groups").addObject().put("id","reference-1").put("kind","explicit_reference_scope").put("scopeComplete",true).put("guidanceNoteId","note-1");
+        reference.putArray("targets").addObject().putArray("memberRanges").addObject().put("memberId","second").put("channel","text").put("start",0).put("end",6);
+        AiGateway ai=mock(AiGateway.class);when(ai.complete(anyString(),anyString())).thenReturn(response());DraftReviewDiscovery.discover(ai,graph(),Collections.singletonList(source),1);
+        ArgumentCaptor<String> users=ArgumentCaptor.forClass(String.class);verify(ai).complete(anyString(),users.capture());JsonNode scopes=JsonUtils.parse(users.getValue()).path("scopeCandidates");
+        assertEquals("first clause member.\nsecond clause member.",scopes.path(0).path("text").asText());assertEquals("second",scopes.path(1).path("text").asText());
+        assertEquals(reference,scopes.path(1).path("observation"));
+    }
+
+    @Test void unmarkedFieldWithoutDedicatedGuidanceRemainsAVisiblePendingSourceItem() {
+        ObjectNode source=reading("1","Unrelated guidance.");source.putArray("guidanceNotes");
+        source.withArray("sourceMembers").addObject().put("id","range-member").putObject("textObservation").put("text","Bills Nos. 1 to ______");
+        ObjectNode field=source.withArray("groups").addObject().put("id","unmarked-field").put("kind","native_source_field_candidate").put("fieldLabel","bill_range_endpoint")
+                .put("scopeComplete",false).put("sourceFieldRangeComplete",true).put("fieldValueStatus","unknown_requires_project_source");
+        field.putArray("guidanceNoteIds");field.putArray("memberRanges").addObject().put("memberId","range-member").put("channel","text").put("start",15).put("end",21);
+        Map<String,Object> seeded=DraftReviewDiscovery.seed(graph(),Collections.singletonList(source));assertEquals(1,nodes(seeded).size());
+        Map<String,Object> item=checklist(seeded);assertEquals("pending",item.get("status"));assertEquals("verification",map(item.get("role")).get("kind"));assertEquals(field,JsonUtils.mapper().valueToTree(item.get("sourceObservation")));
+        AiGateway ai=mock(AiGateway.class);when(ai.complete(anyString(),anyString())).thenReturn(response());DraftReviewDiscovery.discover(ai,graph(),Collections.singletonList(source),1);
+        ArgumentCaptor<String> users=ArgumentCaptor.forClass(String.class);verify(ai).complete(anyString(),users.capture());assertTrue(users.getValue().contains("Bills Nos. 1 to ______"));assertTrue(fields(seeded).isEmpty());
+    }
+
+    @Test void completeMultiParagraphScopesUseOnlySourcePositionAndEqualNamedChannelsForEditableSpans() {
+        String instruction="Delete the complete alternative if it does not apply.";ObjectNode source=reading("1",instruction);
+        for(String id:Arrays.asList("first","second")) {
+            ObjectNode member=source.withArray("sourceMembers").addObject().put("id",id);member.putObject("textObservation").put("text",id+" clause member.");
+            ObjectNode position=member.putObject("sourcePosition").put("sourceSha256",SHA).put("partName","word/document.xml").put("nodePath","/native/"+id);
+            ObjectNode paragraph=source.withArray("paragraphs").addObject().put("id","editable-"+id).put("paragraphSha256",SHA).put("text",id+" clause member.").put("sourceSha256",SHA);paragraph.set("sourcePosition",position.deepCopy());
+        }
+        ObjectNode scope=source.withArray("groups").addObject().put("id","scope-1").put("guidanceNoteId","note-1").put("scopeComplete",true);
+        for(String id:Arrays.asList("first","second"))scope.withArray("memberRanges").addObject().put("memberId",id).put("channel","text").put("start",0).put("end",id.length()+15);
+        Map<String,Object> node=modelNode("alternative","boolean","decision",instruction);node.put("effects",Collections.singletonList(obj("scopeId","scope-1","quote","first clause member.\nsecond clause member.","action","delete")));
+        AiGateway ai=mock(AiGateway.class);when(ai.complete(anyString(),anyString())).thenReturn(response(node));Map<String,Object> result=DraftReviewDiscovery.discover(ai,graph(),Collections.singletonList(source),1);
+        Map<String,Object> target=map(list(find(result,"-alternative").get("editTargets")).get(0));assertEquals("delete",target.get("action"));assertEquals(2,list(map(target.get("native")).get("spans")).size());assertEquals("pending",find(result,"-alternative").get("status"));
+        for(String action:Arrays.asList("replace","fill")) {
+            node.put("effects",Collections.singletonList(obj("scopeId","scope-1","quote","first clause member.\nsecond clause member.","action",action)));
+            when(ai.complete(anyString(),anyString())).thenReturn(response(node));Map<String,Object> amendment=DraftReviewDiscovery.discover(ai,graph(),Collections.singletonList(source),1);
+            Map<String,Object> pending=map(list(find(amendment,"-alternative").get("editTargets")).get(0));assertEquals("check",pending.get("action"));assertEquals(action,pending.get("proposedAction"));assertEquals(true,pending.get("needsRebind"));assertEquals(2,list(map(pending.get("native")).get("spans")).size());
+        }
+        ((ObjectNode)source.path("sourceMembers").path(0).path("textObservation")).put("text","first  clause member.");
+        Map<String,Object> changed=DraftReviewDiscovery.discover(ai,graph(),Collections.singletonList(source),1);assertEquals("check",map(list(find(changed,"-alternative").get("editTargets")).get(0)).get("action"));
+    }
+
+    @Test void explicitMemberRangesCannotBorrowALiteralMatchFromAnotherParagraphOrInvalidUtf16Boundary() {
+        String instruction="Review the selected exact source span.",target="A conditional paragraph.";ObjectNode source=reading("1",instruction);
+        source.withArray("paragraphs").addObject().put("id","unrelated-literal-match").put("paragraphSha256",SHA).put("sourceSha256",SHA).put("text",target);
+        ObjectNode member=source.withArray("sourceMembers").addObject().put("id","body");member.putObject("textObservation").put("text",target);
+        member.putObject("sourcePosition").put("sourceSha256",SHA).put("partName","word/document.xml").put("nodePath","/source/absent");
+        ObjectNode scope=source.withArray("groups").addObject().put("id","scope-1").put("guidanceNoteId","note-1").put("scopeComplete",true);
+        ObjectNode range=scope.putArray("memberRanges").addObject().put("memberId","body").put("channel","text").put("start",0).put("end",target.length());
+        Map<String,Object> node=modelNode("selection","boolean","decision",instruction);node.put("effects",Collections.singletonList(obj("scopeId","scope-1","quote",target,"action","delete")));
+        AiGateway ai=mock(AiGateway.class);when(ai.complete(anyString(),anyString())).thenReturn(response(node));
+        Map<String,Object> result=DraftReviewDiscovery.discover(ai,graph(),Collections.singletonList(source),1),effect=map(list(find(result,"-selection").get("editTargets")).get(0));
+        assertEquals("check",effect.get("action"));assertFalse(effect.containsKey("native"));
+        String actual="Different actual text.";ObjectNode mapped=source.withArray("paragraphs").addObject().put("id","source-paragraph").put("paragraphSha256",SHA).put("sourceSha256",SHA).put("text",actual);mapped.set("sourcePosition",member.path("sourcePosition").deepCopy());
+        ((ObjectNode)member.path("textObservation")).put("text",actual);range.put("end",actual.length());scope.put("text",target);
+        Map<String,Object> inconsistent=DraftReviewDiscovery.discover(ai,graph(),Collections.singletonList(source),1);assertEquals("check",map(list(find(inconsistent,"-selection").get("editTargets")).get(0)).get("action"));
+        scope.remove("text");((ObjectNode)member.path("textObservation")).put("text","\uD83D\uDE00");range.put("start",0).put("end",1);
+        Map<String,Object> split=DraftReviewDiscovery.discover(ai,graph(),Collections.singletonList(source),1);assertEquals("check",map(list(find(split,"-selection").get("editTargets")).get(0)).get("action"));
+        ArgumentCaptor<String> users=ArgumentCaptor.forClass(String.class);verify(ai,times(3)).complete(anyString(),users.capture());assertEquals("",JsonUtils.parse(users.getAllValues().get(2)).path("scopeCandidates").path(0).path("text").asText());
+    }
 }

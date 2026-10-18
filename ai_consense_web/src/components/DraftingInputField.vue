@@ -4,7 +4,7 @@ import type { DraftField, ExtractTrace } from '@/api/types'
 import DraftingFieldDiagnostics from './DraftingFieldDiagnostics.vue'
 import { applicability, clone, type DraftValue } from '@/drafting/state'
 import { presentationRowKeys } from '@/drafting/presentation-row-keys'
-import { isObjectKind, isRecordCollectionKind } from '@/drafting/field-kinds'
+import { isObjectKind, isRecordCollectionKind, isVisibleDetail } from '@/drafting/field-kinds'
 import { draftWord, localized, type DraftWord } from '@/drafting/words'
 import type { AppLocale } from '@/i18n'
 
@@ -24,7 +24,7 @@ const rowKeys = computed(() => presentationRowKeys(rows.value))
 const object = computed(() => props.value && typeof props.value === 'object' && !Array.isArray(props.value) ? props.value : {})
 const collection = computed(() => isRecordCollectionKind(props.field.kind))
 const objectKind = computed(() => isObjectKind(props.field.kind))
-const columns = computed<DraftField[]>(() => props.field.columnFields?.length ? props.field.columnFields.filter(column => column.key !== 'id') : props.field.kind === 'contract' ? [
+const columns = computed<DraftField[]>(() => props.field.columnFields?.length ? props.field.columnFields.filter(isVisibleDetail) : props.field.kind === 'contract' ? [
   { key: 'number', kind: 'text', label: { zhHans: '合约编号', zhHant: '合約編號', en: 'Contract number' } },
   { key: 'title', kind: 'text', label: { zhHans: '合约名称', zhHant: '合約名稱', en: 'Contract title' } }
 ] : [])

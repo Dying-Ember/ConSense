@@ -45,6 +45,59 @@ class DraftReviewGraphTest {
         field.put("nameZh","另一个显示名");field.put("editTargets",Collections.singletonList(obj("action","keep")));assertEquals(before,fieldHash(field));
         field.put("questionEn","A different project fact");assertNotEquals(before,fieldHash(field));
     }
+
+    @Test void invalidDeclaredFixedValuesAreRejectedBeforePlanning(){
+        List<org.junit.jupiter.api.function.Executable> checks=new ArrayList<>();
+        for(String role:Arrays.asList("fixed","system"))for(String[] value:new String[][]{{"number","not-a-number"},{"date","2026-02-30"},{"boolean","undecided"},{"list","[1]"},{"record","{\"undeclared\":1}"}}){
+            Map<String,Object> literal=node("literal",value[0],role);literal.put("fixedValue",value[1]);
+            checks.add(()->assertThrows(BizException.class,()->validate(graph(literal)),role+" "+value[0]));
+        }
+        assertAll(checks);
+    }
+
+    @Test void invalidDeclaredDerivedValuesAreRejectedBeforePlanning(){
+        List<org.junit.jupiter.api.function.Executable> checks=new ArrayList<>();
+        for(String[] value:new String[][]{{"number","not-a-number"},{"date","2026-02-30"},{"list","[1]"},{"record","{\"undeclared\":1}"}}){
+            Map<String,Object> enabled=node("enabled","boolean","input"),derived=node("derived",value[0],"derived");
+            Map<String,Object> condition=branch("yes","all",clause("enabled","yes",""));condition.put("resultValue",value[1]);derived.put("correction",obj("branches",Collections.singletonList(condition)));
+            checks.add(()->assertThrows(BizException.class,()->validate(graph(enabled,derived)),value[0]));
+        }
+        assertAll(checks);
+    }
+
+    @Test void declaredValuesRetainFalseZeroAndExplicitEmptyCollections(){
+        Map<String,Object> enabled=node("enabled","boolean","fixed");enabled.put("fixedValue",false);
+        List<Map<String,Object>> nodes=new ArrayList<>();nodes.add(enabled);
+        String[][] values={{"boolean","false"},{"number","0"},{"list","[]"},{"record","{}"}};
+        for(String[] value:values){
+            Map<String,Object> fixed=node("fixed-"+value[0],value[0],"fixed");fixed.put("fixedValue",value[1]);nodes.add(fixed);
+            Map<String,Object> derived=node("derived-"+value[0],value[0],"derived"),condition=branch("no","all",clause("enabled","no",""));condition.put("resultValue",value[1]);derived.put("correction",obj("branches",Collections.singletonList(condition)));nodes.add(derived);
+        }
+        Map<String,Object> graph=graph(nodes.toArray(new Map[0]));assertDoesNotThrow(()->validate(graph));
+        Map<String,Object> result=assertDoesNotThrow(()->plan(graph,Collections.emptyMap())),derived=map(result.get("derived"));
+        assertAll(()->assertEquals(false,derived.get("derived-boolean")),()->assertEquals("0",String.valueOf(derived.get("derived-number"))),()->assertEquals(Collections.emptyList(),derived.get("derived-list")),()->assertEquals(Collections.emptyMap(),derived.get("derived-record")));
+    }
+
+    @Test void declaredStructuredLiteralsUseTheirChildrenSchema(){
+        Map<String,Object> enabled=node("enabled","boolean","fixed");enabled.put("fixedValue",true);List<Map<String,Object>> nodes=new ArrayList<>();nodes.add(enabled);
+        for(String role:Arrays.asList("fixed","derived"))for(String type:Arrays.asList("record","list")){
+            String id=role+"-"+type,detailId=id+"-number";Map<String,Object> literal=node(id,type,role),detail=node(detailId,"number","input");detail.put("parentId",id);nodes.add(literal);nodes.add(detail);
+            Object value="list".equals(type)?Collections.singletonList(obj(detailId,0)):obj(detailId,0);
+            if("fixed".equals(role)){
+                literal.put("fixedValue",value);Map<String,Object> known=node(id+"-known","boolean","derived"),condition=branch("known","all",clause(id,"known",""));condition.put("resultValue",true);known.put("correction",obj("branches",Collections.singletonList(condition)));nodes.add(known);
+            }else{Map<String,Object> condition=branch("yes","all",clause("enabled","yes",""));condition.put("resultValue",value);literal.put("correction",obj("branches",Collections.singletonList(condition)));}
+        }
+        Map<String,Object> graph=graph(nodes.toArray(new Map[0]));assertDoesNotThrow(()->validate(graph));Map<String,Object> derived=map(assertDoesNotThrow(()->plan(graph,Collections.emptyMap())).get("derived"));
+        assertAll(()->assertEquals(true,derived.get("fixed-record-known")),()->assertEquals(true,derived.get("fixed-list-known")),()->assertEquals("0",String.valueOf(map(derived.get("derived-record")).get("derived-record-number"))),()->assertEquals("0",String.valueOf(map(list(derived.get("derived-list")).get(0)).get("derived-list-number"))));
+    }
+
+    @Test void reviewedDetailNamedIdIsAVisibleRequiredBusinessField(){
+        Map<String,Object> rows=node("rows","list","input"),identifier=node("id","text","input");identifier.put("parentId","rows");Map<String,Object> graph=graph(rows,identifier);validate(graph);
+        Map<String,Object> field=fields(graph).get(0),group=map(list(catalog(graph).get("groups")).get(0)),catalogField=map(list(group.get("fields")).get(0)),column=map(list(catalogField.get("columnFields")).get(0));
+        assertEquals("id",column.get("key"));assertEquals(false,column.get("hidden"));
+        assertEquals("[{\"_itemId\":\"row-a\",\"id\":\"BUSINESS-42\"}]",normalize(field,"[{\"_itemId\":\"row-a\",\"id\":\"BUSINESS-42\"}]"));
+        assertThrows(BizException.class,()->normalize(field,"[{\"_itemId\":\"row-a\"}]"));
+    }
     @Test void cyclesMissingReferencesAndOptionsAreRejected(){
         Map<String,Object> a=node("a","boolean","derived"),b=node("b","boolean","derived");
         Map<String,Object> ar=branch("a1","all",clause("b","yes","")),br=branch("b1","all",clause("a","yes",""));ar.put("resultValue","yes");br.put("resultValue","yes");
@@ -57,7 +110,7 @@ class DraftReviewGraphTest {
         Map<String,Object> some=branch("some","all",clause("enabled","yes",""));some.put("scopeId","rows");some.put("scopeMode","any");some.put("resultValue","yes");
         Map<String,Object> none=branch("none","all",clause("enabled","yes",""));none.put("scopeId","rows");none.put("scopeMode","none");none.put("resultValue","no");
         result.put("correction",obj("branches",Arrays.asList(some,none)));
-        Map<String,Object> target=obj("docId","ntt","action","replace","valueSourceId","name","valueMode","join","listId","rows","prefix","[ ","separator"," / ","suffix"," ]","nativeBinding",obj("status","bound"));result.put("editTargets",Collections.singletonList(target));
+        Map<String,Object> target=obj("docId","ntt","action","replace","valueSourceId","name","valueMode","join","listId","rows","prefix","[ ","separator"," / ","suffix"," ]","nativeBinding",obj("status","bound","spans",Collections.singletonList(obj("paragraphId","joined-target"))));result.put("editTargets",Collections.singletonList(target));
         Map<String,Object> graph=graph(rows,name,enabled,result);
         Map<String,Object> plan=plan(graph,obj("rows",Arrays.asList(obj("name","A","enabled",true),obj("name","B","enabled",false))));
         assertEquals(true,map(plan.get("derived")).get("result"));assertEquals("[ A / B ]",map(list(plan.get("actions")).get(0)).get("value"));
@@ -68,7 +121,7 @@ class DraftReviewGraphTest {
         Map<String,Object> rows=node("rows","list","input"),name=node("name","text","input"),enabled=node("enabled","boolean","input"),derived=node("wording","text","derived");name.put("parentId","rows");enabled.put("parentId","rows");derived.put("parentId","rows");
         Map<String,Object> yes=branch("yes","all",clause("enabled","yes",""));yes.put("scopeId","rows");yes.put("scopeMode","each");Map<String,Object> no=branch("no","all",clause("enabled","no",""));no.put("scopeId","rows");no.put("scopeMode","each");
         rows.put("correction",obj("kind","rule","branches",Arrays.asList(yes,no)));Map<String,Object> dy=new LinkedHashMap<>(yes),dn=new LinkedHashMap<>(no);dy.put("resultValue","Included");dn.put("resultValue","Omitted");derived.put("correction",obj("branches",Arrays.asList(dy,dn)));
-        rows.put("editTargets",Collections.singletonList(obj("id","joined","docId","ntt","action","fill","branchId","yes","valueSourceId","wording","valueMode","join","listId","rows","separator"," / ","nativeBinding",obj("status","bound"))));
+        rows.put("editTargets",Collections.singletonList(obj("id","joined","docId","ntt","action","fill","branchId","yes","valueSourceId","wording","valueMode","join","listId","rows","separator"," / ","nativeBinding",obj("status","bound","spans",Collections.singletonList(obj("paragraphId","joined-target"))))));
         Map<String,Object> graph=graph(rows,name,enabled,derived);validate(graph);Map<String,Object> result=plan(graph,obj("rows",Arrays.asList(obj("_itemId","a","name","A","enabled",true),obj("_itemId","b","name","B","enabled",false))));Map<String,Object> action=map(list(result.get("actions")).get(0));
         assertEquals("amend",action.get("action"));assertEquals("Included",action.get("value"));assertEquals(Arrays.asList(true,false),Arrays.asList(map(list(action.get("scopeResults")).get(0)).get("matches"),map(list(action.get("scopeResults")).get(1)).get("matches")));
         assertEquals("Included",map(list(map(result.get("derivedItems")).get("wording")).get(0)).get("value"));assertFalse(map(result.get("derived")).containsKey("wording"));
@@ -96,6 +149,23 @@ class DraftReviewGraphTest {
     @Test void unresolvedHistoricalBindingsCanBeSavedButStayPending(){
         Map<String,Object> node=node("pending","boolean","derived");node.put("correction",obj("kind","rule","needsRebind",true,"branches",Collections.singletonList(branch("old","all",clause("removed","yes","")))));node.put("editTargets",Collections.singletonList(obj("docId","ntt","action","fill","branchId","old","valueSourceId","removed","needsRebind",true)));
         validate(graph(node));Map<String,Object> result=plan(graph(node),Collections.emptyMap());assertEquals("pending",map(list(result.get("actions")).get(0)).get("action"));assertFalse(list(result.get("unresolved")).isEmpty());
+    }
+    @Test void applicableManualAmendmentsNeedOneNativeReplacementPlacement(){
+        Map<String,Object> question=node("wording","text","input"),binding=obj("status","bound","spans",Arrays.asList(obj("paragraphId","first"),obj("paragraphId","second")));
+        Map<String,Object> target=obj("id","manual-target","docId","ntt","action","fill","valueSourceId","wording","nativeBinding",binding);
+        question.put("editTargets",Collections.singletonList(target));Map<String,Object> graph=graph(question);
+        for(String kind:Arrays.asList("replace","fill")) {
+            target.put("action",kind);Map<String,Object> result=plan(graph,obj("wording","Replacement"));
+            assertEquals("pending",map(list(result.get("actions")).get(0)).get("action"));
+            assertTrue(list(result.get("unresolved")).stream().map(DraftReviewGraph::map).anyMatch(issue->"ReplacementPlacementRequired".equals(issue.get("kind"))));
+        }
+        binding.put("spans",Collections.singletonList(obj("paragraphId","first")));
+        assertEquals("amend",map(list(plan(graph,obj("wording","Replacement")).get("actions")).get(0)).get("action"));
+        binding.put("spans",Collections.emptyList());
+        assertEquals("pending",map(list(plan(graph,obj("wording","Replacement")).get("actions")).get(0)).get("action"));
+        binding.put("spans",Arrays.asList(obj("paragraphId","first"),obj("paragraphId","second")));
+        question.put("correction",obj("branches",Collections.singletonList(branch("never","all",clause("wording","eq","Other")))));target.put("branchId","never");
+        Map<String,Object> inactive=plan(graph,obj("wording","Replacement"));assertEquals("not_adopted",map(list(inactive.get("actions")).get(0)).get("action"));assertTrue(list(inactive.get("unresolved")).isEmpty());
     }
     @Test void blankFixedScalarIsUnknownWhileExplicitFixedEmptyTextIsKnown(){
         Map<String,Object> fixed=node("fixed","number","fixed"),derived=node("known","boolean","derived");fixed.put("fixedValue","");Map<String,Object> unknown=branch("unknown","all",clause("fixed","unknown",""));unknown.put("resultValue",true);derived.put("correction",obj("branches",Collections.singletonList(unknown)));

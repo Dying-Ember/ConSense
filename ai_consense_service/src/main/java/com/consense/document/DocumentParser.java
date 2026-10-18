@@ -815,8 +815,10 @@ public class DocumentParser {
             coverage.setNativeDocxTables(nativeTables.finish(blocks,sourceNodes));
             java.util.function.Function<Node,ObjectNode> outlinePosition=node->wordSectionPosition(node,nativePaths,originalSha,bodyPartName,partHashes.get(bodyPartName));
             coverage.setNativeDocxOutline(inline==null?OerNativeDocxOutline.observe(document,blocks,sourceNodes,outlinePosition)
-                    :OerNativeDocxOutline.observe(document,blocks,sourceNodes,outlinePosition,inline::paragraph));
-            if(templateEvidence)coverage.setNativeDocxParagraphs(nativeTables.paragraphs(inline,blocks,sourceNodes,coverage.getNativeDocxOutline()));
+                    :OerNativeDocxOutline.observe(document,blocks,sourceNodes,outlinePosition,inline::paragraph,numbering));
+            ObjectNode paragraphInventory=nativeTables.paragraphs(inline,blocks,sourceNodes,coverage.getNativeDocxOutline(),templateEvidence);
+            ((ObjectNode)coverage.getNativeDocxOutline()).set("sourceClauseScopes",OerDocxSourceScopes.observe(paragraphInventory,coverage.getNativeDocxOutline()));
+            if(templateEvidence)coverage.setNativeDocxParagraphs(paragraphInventory);
             coverage.getLimitations().add("Explicit run strike/dstrike and tracked deletions are retained; inherited style strike requires manual review.");
             int unresolvedNumbering = 0, unresolvedSymbols = 0, structuralWarnings = 0;
             for (DocumentBlock block : blocks) {
@@ -1435,7 +1437,7 @@ public class DocumentParser {
         return wordDomLocation(node.getParentNode()) + "/" + node.getLocalName() + "[" + previousWordSiblings(node, node.getLocalName()) + "]";
     }
 
-    private static String nativeWordPath(Node node,Map<Node,String> paths){
+    static String nativeWordPath(Node node,Map<Node,String> paths){
         if(node==null || node.getNodeType()!=Node.ELEMENT_NODE)return null;
         if(!paths.containsKey(node)){
             Node root=node;while(root.getParentNode()!=null && root.getParentNode().getNodeType()==Node.ELEMENT_NODE)root=root.getParentNode();
@@ -1544,17 +1546,26 @@ public class DocumentParser {
             }return null;
         }
 
-        private ObjectNode paragraphs(WordInlineSemantics inline,List<DocumentBlock> blocks,Map<?,Node> sourceNodes,JsonNode outline){
+        private ObjectNode paragraphs(WordInlineSemantics inline,List<DocumentBlock> blocks,Map<?,Node> sourceNodes,JsonNode outline,boolean nativeXml){
             ObjectNode inventory=JsonUtils.mapper().createObjectNode();inventory.put("version","docx-native-paragraphs-v1");
             inventory.put("sourceSha256",sourceSha);inventory.put("scope","normal_loaded_body_header_footer_footnote_endnote_roots_only");
             inventory.put("unobservedScope","package_stories_or_roots_not_loaded_by_normal_parser");
             inventory.put("physicalWordPagesStatus","unknown_requires_rendition");
             inventory.put("offsetConvention","utf16_code_units_per_named_parser_text_channel_start_inclusive_end_exclusive");
             inventory.put("textConvention","Existing normal parser channels including resolved labels and whitespace normalization; nativeXml retains the paragraph formatting and control declarations separately");
+            ArrayNode storyRoots=inventory.putArray("storyRoots");
+            for(Map.Entry<String,Part> entry:parts.entrySet())for(Node node:entry.getValue().nodes)if(entry.getValue().roots.containsKey(node)){
+                JsonNode loaded=entry.getValue().roots.get(node);ObjectNode root=storyRoots.addObject();root.put("storyKind",loaded.path("kind").asText());root.put("storyRootNodePath",paths.get(node));root.put("status","observed_loaded_native_root");root.set("sourcePosition",wordSectionPosition(node,paths,sourceSha,entry.getKey(),hashes.get(entry.getKey())));
+            }
             Map<String,JsonNode> properties=new HashMap<>();
             for(JsonNode property:outline.path("paragraphs"))properties.put(property.path("sourcePosition").path("partName").asText()+"\n"+property.path("sourcePosition").path("nodePath").asText(),property);
             Map<Node,List<String>> represented=new IdentityHashMap<>();
             for(DocumentBlock block:blocks){Node node=sourceNodes.get(block);if(node!=null)represented.computeIfAbsent(node,key->new ArrayList<>()).add(block.getId());}
+            Map<Node,ArrayNode> fieldRoles=new IdentityHashMap<>();
+            for(DocumentBlock block:blocks)for(JsonNode span:block.getWordTextSpans())if("toc_result".equals(span.path("fieldRole").asText())) {
+                Node paragraph=sourceNodes.get(span);while(paragraph!=null&&!("p".equals(paragraph.getLocalName())&&isNativeWordInventoryNode(paragraph)))paragraph=paragraph.getParentNode();
+                if(paragraph!=null){ObjectNode role=fieldRoles.computeIfAbsent(paragraph,key->JsonUtils.mapper().createArrayNode()).addObject();for(String key:Arrays.asList("fieldRole","sourceText","deleted","sourcePosition","fieldSourcePosition"))role.set(key,span.path(key).deepCopy());}
+            }
             Set<Node> containingParagraphs=Collections.newSetFromMap(new IdentityHashMap<>());
             for(Part part:parts.values())for(Node node:part.nodes)if("p".equals(node.getLocalName())&&isNativeWordInventoryNode(node))
                 for(Node parent=node.getParentNode();parent!=null;parent=parent.getParentNode())if("p".equals(parent.getLocalName())&&isNativeWordInventoryNode(parent))containingParagraphs.add(parent);
@@ -1565,6 +1576,7 @@ public class DocumentParser {
                 record.put("id","docx-p:"+DocumentParseProbe.sha256((sourceSha+"|"+partName+"|"+path).getBytes(StandardCharsets.UTF_8)));
                 record.put("ordinalZeroBased",records.size()-1);
                 record.set("sourcePosition",wordSectionPosition(node,paths,sourceSha,partName,hashes.get(partName)));
+                if(fieldRoles.containsKey(node))record.set("nativeFieldRoles",fieldRoles.get(node));
                 for(Node parent=node.getParentNode();parent!=null;parent=parent.getParentNode())if("p".equals(parent.getLocalName())&&isNativeWordInventoryNode(parent)){
                     record.put("containingParagraphNodePath",paths.get(parent));record.put("textOverlapStatus","nested_paragraph_channels_may_overlap_do_not_concatenate");break;
                 }
@@ -1592,13 +1604,34 @@ public class DocumentParser {
                         item.set("sourcePosition",wordSectionPosition(declaration,paths,sourceSha,partName,hashes.get(partName)));
                         ObjectNode attributes=item.putObject("attributes");NamedNodeMap nativeAttributes=declaration.getAttributes();
                         for(int attr=0;attr<nativeAttributes.getLength();attr++){Node attribute=nativeAttributes.item(attr);attributes.put(wordExpandedName(attribute),attribute.getNodeValue());}
-                        if("tabs".equals(declaration.getLocalName()))try{item.put("nativeXml",org.apache.xmlbeans.XmlObject.Factory.parse(declaration).xmlText());}catch(Exception unavailable){item.put("nativeXmlStatus","unavailable_original_package_retained");}
+                        if(nativeXml&&"tabs".equals(declaration.getLocalName()))try{item.put("nativeXml",org.apache.xmlbeans.XmlObject.Factory.parse(declaration).xmlText());}catch(Exception unavailable){item.put("nativeXmlStatus","unavailable_original_package_retained");}
                     }
-                try{String xml=org.apache.xmlbeans.XmlObject.Factory.parse(node).xmlText();record.put("nativeXml",xml);record.put("nativeXmlSha256",DocumentParseProbe.sha256(xml.getBytes(StandardCharsets.UTF_8)));record.put("xmlEncoding","ooxml_dom_xml_utf8");}
+                if(nativeXml)try{String xml=org.apache.xmlbeans.XmlObject.Factory.parse(node).xmlText();record.put("nativeXml",xml);record.put("nativeXmlSha256",DocumentParseProbe.sha256(xml.getBytes(StandardCharsets.UTF_8)));record.put("xmlEncoding","ooxml_dom_xml_utf8");}
                 catch(Exception unavailable){record.put("nativeXmlStatus","unavailable_original_package_retained");}
             }
+            bindParagraphCarrierRanges(records,blocks);
             inventory.put("observedParagraphCount",observed);inventory.put("unknownParagraphCount",records.size()-observed);
             return inventory;
+        }
+        private static void bindParagraphCarrierRanges(ArrayNode records,List<DocumentBlock> blocks){
+            Map<String,DocumentBlock> carriers=new HashMap<>();Set<String> duplicateIds=new java.util.HashSet<>();
+            for(DocumentBlock block:blocks)if(carriers.putIfAbsent(block.getId(),block)!=null)duplicateIds.add(block.getId());
+            Map<String,List<ObjectNode>> byCarrier=new HashMap<>();
+            for(JsonNode raw:records){ObjectNode member=(ObjectNode)raw;ArrayNode ranges=member.putArray("retainedBlockRanges");String text=member.path("textObservation").path("text").asText();
+                if(text.isEmpty()||member.path("retainedBlockIds").size()!=1||member.has("textOverlapStatus")||!member.path("textObservation").path("status").asText().startsWith("observed_"))continue;
+                for(JsonNode id:member.path("retainedBlockIds")){
+                    DocumentBlock block=carriers.get(id.asText());if(block==null||duplicateIds.contains(id.asText())||block.getSourcePosition()==null)continue;
+                    JsonNode from=member.path("sourcePosition"),to=block.getSourcePosition();boolean bound=true;
+                    for(String field:Arrays.asList("sourceSha256","partName","partSha256"))bound&=from.path(field).isTextual()&&from.path(field).equals(to.path(field));
+                    String path=from.path("nodePath").asText(),parent=to.path("nodePath").asText(),body=block.getText();int start=body.indexOf(text);
+                    if(!bound||parent.isEmpty()||!(path.equals(parent)||path.startsWith(parent+"/"))||start<0||body.indexOf(text,start+1)>=0)continue;
+                    ObjectNode range=ranges.addObject();range.put("blockId",id.asText());range.put("startOffset",start);range.put("endOffset",start+text.length());range.put("offsetUnit","utf16");range.put("textChannel","text");range.put("parentEffectiveTextSha256",DocumentParseProbe.sha256(body.getBytes(StandardCharsets.UTF_8)));
+                    byCarrier.computeIfAbsent(id.asText(),key->new ArrayList<>()).add(range);
+                }
+            }
+            Set<String> ambiguous=new java.util.HashSet<>();
+            for(Map.Entry<String,List<ObjectNode>> entry:byCarrier.entrySet()){int end=-1;for(JsonNode range:entry.getValue()){if(range.path("startOffset").asInt()<end)ambiguous.add(entry.getKey());end=range.path("endOffset").asInt();}}
+            for(JsonNode member:records){ArrayNode ranges=(ArrayNode)member.path("retainedBlockRanges");for(int i=ranges.size()-1;i>=0;i--)if(ambiguous.contains(ranges.get(i).path("blockId").asText()))ranges.remove(i);}
         }
         private static final class Part {
             private final List<Node> nodes=new ArrayList<>();

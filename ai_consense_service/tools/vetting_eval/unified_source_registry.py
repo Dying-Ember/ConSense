@@ -152,7 +152,7 @@ class UnifiedCanonicalSourceRegistry(NativeCollectionSourceRegistry):
                 raise SourceRegistryError('SOURCE_FAMILY_SOURCE_UNAVAILABLE',
                     'Family source is unregistered or its complete child proof is invalid') from error
             if (snapshot.get('schema') != FAMILY_SCHEMA or snapshot.get('projectionRevisionSha256') != revision
-                    or _serialize(locator) != _serialize(snapshot) or members != snapshot['chunks']):
+                    or _serialize(locator) != _serialize(snapshot) or _serialize(members) != _serialize(snapshot['chunks'])):
                 raise SourceRegistryError('SOURCE_FAMILY_INDEX_PARENT_MISMATCH',
                     'Family index must retain every complete exact derived parent in declared order')
         return count + len(families) + len(normal)

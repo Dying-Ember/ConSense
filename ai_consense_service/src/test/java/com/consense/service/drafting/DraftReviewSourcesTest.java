@@ -47,6 +47,11 @@ class DraftReviewSourcesTest {
         DocxTemplateEditor.Paragraph paragraph=new DocxTemplateEditor().inspect(bytes).mainParagraph(1);
         assertEquals(paragraph.getText(),reading.path("paragraphs").path(0).path("text").asText());
         assertEquals(paragraph.getSha256(),reading.path("paragraphs").path(0).path("paragraphSha256").asText());
+        JsonNode position=reading.path("paragraphs").path(0).path("sourcePosition");
+        String word="{http://schemas.openxmlformats.org/wordprocessingml/2006/main}";
+        assertEquals(DraftTemplateRouting.sha(bytes),position.path("sourceSha256").asText());
+        assertEquals("word/document.xml",position.path("partName").asText());
+        assertEquals("/"+word+"document[1]/"+word+"body[1]/"+word+"p[1]",position.path("nodePath").asText());
         assertArrayEquals(bytes,Files.readAllBytes(Paths.get(source.getStoragePath())));
         assertEquals("PARSED",source.getParseStatus());assertFalse(reading.has("storagePath"));
     }
@@ -101,6 +106,19 @@ class DraftReviewSourcesTest {
         assertFalse(reading.path("coverage").path("complete").asBoolean());
         assertEquals("A",reading.path("blocks").path(0).path("pdfGlyphs").path(0).path("unicode").asText());
         assertEquals("EDITABLE_DOCX_REQUIRED",sources.bind(source,JsonUtils.mapper().createObjectNode()).path("reason").asText());
+    }
+
+    @Test void multipleNativeSpansMustMatchTheDisplayedSourceTextWhenSupplied() throws Exception {
+        byte[] bytes=docx("one GAP two", "third source phrase");SourceDocument source=source(1,"SCT",bytes);
+        ObjectNode selected=JsonUtils.mapper().createObjectNode().put("docId","sct").put("text","one\nthird");
+        selected.putObject("native").putArray("spans").add(passage(bytes,0,0,3).path("native")).add(passage(bytes,1,0,5).path("native"));
+        assertEquals("bound",sources.bind(source,selected).path("status").asText());
+        selected.put("text","one third");
+        assertEquals("SELECTED_TEXT_AND_NATIVE_SPAN_DIFFER",sources.bind(source,selected).path("reason").asText());
+        selected.put("text","An unrelated passage displayed for review");
+        assertEquals("unsafe",sources.bind(source,selected).path("status").asText());
+        selected.remove("text");
+        assertEquals("bound",sources.bind(source,selected).path("status").asText());
     }
 
     @Test void storedEvidenceMustStillMatchSourceFamilyInputsAndPayload() throws Exception {

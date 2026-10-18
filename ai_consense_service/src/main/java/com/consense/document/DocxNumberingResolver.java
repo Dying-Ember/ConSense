@@ -1,5 +1,8 @@
 package com.consense.document;
 
+import com.consense.common.JsonUtils;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.apache.poi.xwpf.usermodel.XWPFAbstractNum;
 import org.apache.poi.xwpf.usermodel.XWPFDocument;
 import org.apache.poi.xwpf.usermodel.XWPFNum;
@@ -34,21 +37,27 @@ public final class DocxNumberingResolver {
     private final StyleDefaults styleDefaults;
     private final Map<String, Counter> counters = new HashMap<>();
     private final Map<Node, NumberingInfo> resolvedParagraphs = new IdentityHashMap<>();
+    private final Map<Node, Level> selectedParagraphLevels;
+    private final Map<Node, NumberingInfo> observedParagraphs;
+    private final Map<Node,String> numberingPaths;
+    private final String numberingPartName,numberingPartSha;
 
     public DocxNumberingResolver(XWPFDocument document) {
         this.document = document;
         this.definitions = readDefinitions(document);
         this.styleDefaults = readStyleDefaults(document);
+        selectedParagraphLevels=new IdentityHashMap<>();observedParagraphs=new IdentityHashMap<>();numberingPaths=new IdentityHashMap<>();String[] identity=numberingPartIdentity(document);numberingPartName=identity[0];numberingPartSha=identity[1];
     }
 
-    private DocxNumberingResolver(XWPFDocument document, Map<String, NumDefinition> definitions, StyleDefaults styleDefaults) {
+    private DocxNumberingResolver(XWPFDocument document, Map<String, NumDefinition> definitions, StyleDefaults styleDefaults,Map<Node,Level> selectedParagraphLevels,Map<Node,NumberingInfo> observedParagraphs,Map<Node,String> numberingPaths,String numberingPartName,String numberingPartSha) {
         this.document = document;
         this.definitions = definitions;
         this.styleDefaults = styleDefaults;
+        this.selectedParagraphLevels=selectedParagraphLevels;this.observedParagraphs=observedParagraphs;this.numberingPaths=numberingPaths;this.numberingPartName=numberingPartName;this.numberingPartSha=numberingPartSha;
     }
 
     /** Headers, footers and notes must not advance body-list counters. */
-    public DocxNumberingResolver newStory() { return new DocxNumberingResolver(document, definitions, styleDefaults); }
+    public DocxNumberingResolver newStory() { return new DocxNumberingResolver(document, definitions, styleDefaults,selectedParagraphLevels,observedParagraphs,numberingPaths,numberingPartName,numberingPartSha); }
 
     /** Call in source order. Re-reading the same XMLBeans DOM paragraph is idempotent. */
     public NumberingInfo resolve(Node paragraph) {
@@ -57,7 +66,29 @@ public final class DocxNumberingResolver {
         if (prior != null) return prior;
         NumberingInfo result = resolveOnce(paragraph);
         resolvedParagraphs.put(paragraph, result);
+        observedParagraphs.put(paragraph,result);
         return result;
+    }
+
+    /** Reuses the already selected level and label; observing layout never advances list counters. */
+    ObjectNode layoutEvidence(Node paragraph,String sourceSha) {
+        NumberingInfo info=observedParagraphs.get(paragraph);if(info==null)return null;
+        ObjectNode out=JsonUtils.mapper().createObjectNode(),numbering=out.putObject("numbering");numbering.put("numbered",info.isNumbered());numbering.put("resolutionStatus",info.getResolutionStatus());
+        if(info.getNumId()!=null){numbering.put("numId",info.getNumId());numbering.put("abstractNumId",info.getAbstractNumId());if(info.getLevel()!=null)numbering.put("level",info.getLevel());numbering.put("format",info.getFormat());numbering.put("label",info.getLabel());numbering.put("source",info.getSource());}
+        ArrayNode layers=out.putArray("layers");Level selected=selectedParagraphLevels.get(paragraph);
+        if(selected!=null&&numberingPartName!=null&&numberingPartSha!=null){
+            java.util.function.Function<Node,ObjectNode> position=node->OerNativeDocxOutline.layoutPosition(node,sourceSha,numberingPartName,numberingPartSha,numberingPaths);
+            OerNativeDocxOutline.layoutLayer(layers,child(selected.abstractSource,"pPr"),"numbering_abstract_level",null,position);
+            if(selected.source!=selected.abstractSource)OerNativeDocxOutline.layoutLayer(layers,child(selected.source,"pPr"),"numbering_level_override",null,position);
+        }else if(selected!=null)numbering.put("layoutStatus","unknown_numbering_part_identity");
+        return out;
+    }
+
+    private static String[] numberingPartIdentity(XWPFDocument document){
+        if(document.getNumbering()!=null)try(InputStream input=document.getNumbering().getPackagePart().getInputStream()){
+            return new String[]{document.getNumbering().getPackagePart().getPartName().getName().substring(1),DocumentParseProbe.sha256(org.springframework.util.StreamUtils.copyToByteArray(input))};
+        }catch(Exception unavailable){/* In-memory, unsaved definitions have no original package identity. */}
+        return new String[]{null,null};
     }
 
     private NumberingInfo resolveOnce(Node paragraph) {
@@ -93,6 +124,7 @@ public final class DocxNumberingResolver {
         }
         if (level == null) level = 0;
         Level selected = definition.levels.get(level);
+        if(selected!=null)selectedParagraphLevels.put(paragraph,selected);
         if (level < 0 || level > 8) return unresolved(definition, level, selected, source, "level_out_of_range");
         if (definition.failure != null) return unresolved(definition, level, selected, source, definition.failure);
         if (selected == null) return unresolved(definition, level, null, source, "missing_level_definition");
@@ -270,6 +302,7 @@ public final class DocxNumberingResolver {
                     Node replacement = child(override, "lvl");
                     if (replacement != null) {
                         Level level = readLevel(replacement);
+                        Level inherited=definition.levels.get(index);level.abstractSource=inherited==null?null:inherited.abstractSource;
                         if (level.index != index) definition.failure = "mismatched_level_override";
                         definition.levels.put(index, level);
                     }
@@ -290,6 +323,7 @@ public final class DocxNumberingResolver {
 
     private static Level readLevel(Node node) {
         Level level = new Level();
+        level.source=node;level.abstractSource=node;
         Integer index = integer(attribute(node, "ilvl"));
         level.index = index == null ? -1 : index;
         Node start = child(node, "start");
@@ -380,7 +414,7 @@ public final class DocxNumberingResolver {
     private static final class StyleReference { final List<String> chain = new ArrayList<>(); String numId; String failure; boolean fromDefaults; }
     private static final class StyleDefaults { String styleId; String numId; Integer level; String failure; String numberingFailure; }
     private static final class NumDefinition { String numId; String abstractId; String failure; final Map<Integer, Level> levels = new HashMap<>(); }
-    private static final class Level { int index; long start; int restartLevel; String format; String levelText; String displayLevelText; String styleId; String suffix; String failure; boolean legal; List<WordSymbolDecoder.Symbol> fontSymbols; Map<String, String> fontAttributes; }
+    private static final class Level { int index; long start; int restartLevel; String format; String levelText; String displayLevelText; String styleId; String suffix; String failure; boolean legal; Node source,abstractSource; List<WordSymbolDecoder.Symbol> fontSymbols; Map<String, String> fontAttributes; }
     private static final class Counter { final Long[] values = new Long[9]; }
     private static final class UnsupportedLabel extends RuntimeException { UnsupportedLabel(String reason) { super(reason); } }
 

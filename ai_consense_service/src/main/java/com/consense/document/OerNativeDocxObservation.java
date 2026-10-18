@@ -397,7 +397,7 @@ public final class OerNativeDocxObservation {
         return "native-" + sha256(("consense.native-node.v1\n" + kind + "\n" + sourceSha + "\n" + partName + "\n" + partSha + "\n" + nodePath).getBytes(java.nio.charset.StandardCharsets.UTF_8));
     }
 
-    private static String path(Element e) {
+    static String path(Element e) {
         Object cached = e.getUserData(PATH_CACHE_KEY);
         if (cached instanceof String) return (String) cached;
         int index = 1;

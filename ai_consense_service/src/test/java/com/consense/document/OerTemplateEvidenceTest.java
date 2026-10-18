@@ -531,11 +531,254 @@ class OerTemplateEvidenceTest {
         for(String definition:Arrays.asList("Financial Proposals means proposals in Envelope _______ referred to in Clause SCT_______.","(2) <Financial Proposals> means proposals in Envelope _______ referred to in Clause SCT_______.")){JsonNode evidence=OerTemplateEvidence.analyse("SCC",word(p("h","SCC1.301 Definitions"),p("note","[Guidance Note: Insert the relevant Envelope number containing the technical proposals and the relevant SCT clause number.]"),p("financial",definition),p("next","SCC1.302 Other definitions")));List<JsonNode> fields=sourceFields(evidence);assertEquals(2,fields.size());for(JsonNode field:fields)assertEquals(0,field.path("guidanceNoteIds").size());}
     }
 
+    @Test void normalClauseProjectionClosesAnNttSubitemAcrossCompleteCellParagraphs() throws Exception {
+        JsonNode projection=clauseProjection(p("title","Notes to Tenderers"),cell("one","t1","r1","1","1."),cell("name","t1","r1","2","Type of Tender"),cell("a","t1","r1","2","(a) First item."),cell("f","t1","r1","2","(f) Schedules are listed below:"),cell("blank","t1","r1","2",""),cell("bill9","t1","r1","2","Bill No. 9 - Electrical Works;"),cell("bill10","t1","r1","2","Bill No. 10 - Fire Services;"),cell("bill11","t1","r1","2","Bill No. 11 - Lift Works."),cell("g","t1","r1","2","(g) A separate next item."),cell("two","t2","r1","1","2."),cell("name2","t2","r1","2","Documents"));
+        JsonNode selected=clauseRange(projection,"1(f)");assertTrue(selected.path("scopeComplete").asBoolean());assertEquals(Arrays.asList("f","blank","bill9","bill10","bill11"),strings(selected.path("orderedMemberIds")));assertEquals("g",selected.path("endBoundary").path("memberId").asText());assertEquals(clauseRange(projection,"1").path("id"),selected.path("parentId"));
+        assertFalse(clauseRange(projection,"2").path("scopeComplete").asBoolean());assertEquals(12,projection.path("members").size());
+    }
+
+    @Test void normalSctProjectionReusesNestedUnitsAcrossTablesAndSeparatesEditorialAndPhysicalContext() throws Exception {
+        JsonNode projection=clauseProjection(p("title","Special Conditions of Tender"),cell("h","t1","r1","1","SCT7 Inspection of documents"),cell("one","t1","r2","1","(1) Main requirement."),cell("role","t1","r2","2","(Project Architect)"),cell("four","t2","r1","1","(4) The following documents may be inspected:"),cell("a","t2","r1","1","(a) First document."),cell("blank","t2","r1","1",""),cell("b","t2","r1","1","(b) Second document."),cell("c","t2","r1","1","(c) Third document."),cell("five","t2","r1","1","(5) A different purpose."),cell("six","t2","r2","1","(6) Native numbering text remains observed."),p("footer","March 2020 - SCT/21 -"),p("code","HD(QS) 3C/121/1/2"),cell("running","t3","r1","1","SPECIAL CONDITIONS OF TENDER (Cont’d)"),cell("next","t4","r1","1","SCT8 Inspection of Site"));
+        JsonNode root=clauseRange(projection,"SCT7"),fourth=clauseRange(projection,"SCT7(4)");assertTrue(root.path("scopeComplete").asBoolean());assertTrue(fourth.path("scopeComplete").asBoolean());assertEquals(Arrays.asList("four","a","blank","b","c"),strings(fourth.path("orderedMemberIds")));assertEquals("five",fourth.path("endBoundary").path("memberId").asText());
+        assertEquals(fourth.path("id"),clauseRange(projection,"SCT7(4)(c)").path("parentId"));assertTrue(strings(root.path("contextMemberIds")).containsAll(Arrays.asList("role","footer","code","running")));assertFalse(strings(root.path("orderedMemberIds")).contains("role"));assertTrue(clauseRange(projection,"SCT7(6)").path("scopeComplete").asBoolean());
+    }
+
+    @Test void explicitDecimalRootContainmentUsesTokenBoundariesAndDoesNotStopAParentAtItsFirstChild() throws Exception {
+        JsonNode projection=clauseProjection(p("title","Special Conditions of Contract"),p("h","SCC1 Definitions"),p("intro","Parent introduction."),p("child","SCC1.301 Defined terms"),p("item","(1) A definition."),p("sibling","SCC1.302 Another definition"),p("body","Remaining source body."),p("ten","SCC10 Payments"));
+        JsonNode root=clauseRange(projection,"SCC1"),child=clauseRange(projection,"SCC1.301");assertEquals("ten",root.path("endBoundary").path("memberId").asText());assertTrue(strings(root.path("orderedMemberIds")).containsAll(Arrays.asList("child","item","sibling","body")));assertTrue(root.path("scopeComplete").asBoolean());assertEquals(root.path("id"),child.path("parentId"));assertEquals("sibling",child.path("endBoundary").path("memberId").asText());assertTrue(clauseRange(projection,"SCC10").path("parentId").isNull());
+    }
+
+    @Test void sourceClauseProjectionKeepsForeignStoriesDuplicatesAndUnclassifiedParallelCellsUnknown() throws Exception {
+        ObjectNode foreign=foreign("foreign","SCT8 A footnote cannot close the body clause");
+        JsonNode projection=clauseProjection(p("title","Special Conditions of Tender"),cell("h","t1","r1","1","SCT7 Inspection"),cell("a","t1","r2","1","(1) Requirement."),cell("parallel","t1","r2","2","A separate unknown side column."),foreign,cell("repeat","t2","r1","1","SCT7 Other heading with a repeated reference"),cell("next","t3","r1","1","SCT8 Site"));
+        int repeated=0;for(JsonNode range:projection.path("ranges"))if("SCT7".equals(range.path("reference").asText())){repeated++;assertFalse(range.path("scopeComplete").asBoolean());assertFalse(strings(range.path("orderedMemberIds")).contains("foreign"));}assertEquals(2,repeated);assertTrue(hasIssue(projection,"SOURCE_CLAUSE_REFERENCE_AMBIGUOUS"));
+        JsonNode unknown=clauseProjection(p("title","A letter mentioning SCT7 without a formal title"),p("h","SCT7 Inspection"),p("next","SCT8 Site"));assertTrue(unknown.path("ranges").isEmpty());assertTrue(hasIssue(unknown,"SOURCE_CLAUSE_FAMILY_UNRESOLVED"));
+    }
+
+    @Test void normalClauseProjectionKeepsMixedOrIncompleteGuidanceUnknown() throws Exception {
+        JsonNode mixed=clauseProjection(p("title","Special Conditions of Contract"),p("h","SCC1 Definitions"),p("mixed","Source obligation. [Guidance Note: Insert a value.]"),p("next","SCC2 Payment"));
+        JsonNode first=clauseRange(mixed,"SCC1");assertFalse(first.path("scopeComplete").asBoolean());assertTrue(strings(first.path("contextMemberIds")).contains("mixed"));assertFalse(strings(first.path("orderedMemberIds")).contains("mixed"));
+        JsonNode incomplete=clauseProjection(p("title","Special Conditions of Contract"),p("h","SCC1 Definitions"),p("open","[Guidance Note: Keep the actual unclosed source"),p("next","SCC2 Payment"));assertFalse(clauseRange(incomplete,"SCC1").path("scopeComplete").asBoolean());assertTrue(hasIssue(incomplete,"GUIDANCE_SOURCE_SYNTAX_INCOMPLETE"));
+    }
+
+    @Test void parallelEnumerationCannotAdoptItsOwnLaneAsACompleteBodyUnit() throws Exception {
+        JsonNode projection=clauseProjection(p("title","Special Conditions of Tender"),cell("h","t1","r1","1","SCT7 Inspection"),cell("one","t1","r2","1","(1) Main source requirement."),cell("side","t1","r2","2","(x) Unclassified parallel information."),cell("next","t2","r1","1","SCT8 Site"));
+        assertFalse(clauseRange(projection,"SCT7").path("scopeComplete").asBoolean());assertFalse(clauseRange(projection,"SCT7(1)(x)").path("scopeComplete").asBoolean());assertTrue(strings(clauseRange(projection,"SCT7(1)(x)").path("contextMemberIds")).contains("side"));
+    }
+
+    @Test void duplicateMemberIdentityKeepsEveryCopyUnknownAndUnresolvedFamiliesRetainInventory() throws Exception {
+        DocumentParser.ParsedDocument parsed=word(p("title","Special Conditions of Contract"),p("h","SCC1 Definitions"),p("same","First copy."),p("same","Second copy."),p("next","SCC2 Payment"));JsonNode inventory=parsed.getCoverage().getNativeDocxParagraphs(),before=inventory.deepCopy();
+        JsonNode projection=(JsonNode)OerTemplateEvidence.class.getDeclaredMethod("nativeClauseRanges",JsonNode.class).invoke(null,inventory);assertFalse(clauseRange(projection,"SCC1").path("scopeComplete").asBoolean());assertEquals(before,inventory);assertEquals(5,projection.path("members").size());
+        for(JsonNode member:projection.path("members"))if("same".equals(member.path("id").asText()))assertEquals("source_identity_unknown",member.path("sourceClauseClassification").asText());
+        JsonNode unknown=clauseProjection(p("a","Unclassified specification"),p("b","Source member retained."));assertTrue(unknown.path("ranges").isEmpty());assertEquals(2,unknown.path("members").size());
+    }
+
+    @Test void anIsolatedContinuationHeadingCannotStandForTheMissingClauseStart() throws Exception {
+        JsonNode orphan=clauseProjection(p("title","Special Conditions of Tender"),p("continued","SCT7 Inspection (Cont'd)"),p("body","Remaining source only."),p("next","SCT8 Site"));assertFalse(clauseRange(orphan,"SCT7").path("scopeComplete").asBoolean());assertTrue(hasIssue(orphan,"SOURCE_CLAUSE_CONTINUATION_WITHOUT_START"));
+        JsonNode complete=clauseProjection(p("title","Special Conditions of Tender"),p("start","SCT7 Inspection"),p("body","First source portion."),p("continued","SCT7 Inspection (Cont'd)"),p("tail","Remaining source portion."),p("next","SCT8 Site"));assertTrue(clauseRange(complete,"SCT7").path("scopeComplete").asBoolean());assertEquals(Arrays.asList("start","body","tail"),strings(clauseRange(complete,"SCT7").path("orderedMemberIds")));assertTrue(strings(clauseRange(complete,"SCT7").path("contextMemberIds")).contains("continued"));
+    }
+
+    @Test void conflictingPartRevisionsCannotBeCombinedUnderOneOriginalSourceHash() throws Exception {
+        ObjectNode changed=p("changed","A conflicting native part revision.");((ObjectNode)changed.path("sourcePosition")).put("partSha256",SHA);
+        JsonNode projection=clauseProjection(p("title","Special Conditions of Contract"),p("h","SCC1 Definitions"),changed,p("next","SCC2 Payment"));assertTrue(projection.path("ranges").isEmpty());assertEquals(4,projection.path("members").size());assertTrue(hasIssue(projection,"SOURCE_CLAUSE_MEMBER_UNBOUND"));
+        for(JsonNode member:projection.path("members"))assertEquals("source_identity_unknown",member.path("sourceClauseClassification").asText());
+    }
+
+    @Test void normalInventoryUsesExistingSourceBoundTocRolesWithoutRawXmlOrTitleRules() throws Exception {
+        ObjectNode copy=tocRole(p("copy","SCC1 Definitions 1"),"toc_result");
+        JsonNode projection=clauseProjection(p("title","Special Conditions of Contract"),copy,p("h","SCC1 Definitions"),p("body","Actual source clause body."),p("next","SCC2 Payment"));
+        JsonNode first=clauseRange(projection,"SCC1");assertTrue(first.path("scopeComplete").asBoolean());assertEquals(Arrays.asList("h","body"),strings(first.path("orderedMemberIds")));assertFalse(copy.has("nativeXml"));assertEquals(5,projection.path("members").size());
+        ObjectNode literal=tocRole(p("copy","SCC1 Definitions 1"),"field_result");literal.putObject("paragraphProperties").put("paragraphStyleId","toc 1");
+        JsonNode repeated=clauseProjection(p("title","Special Conditions of Contract"),literal,p("h","SCC1 Definitions"),p("body","Actual source clause body."),p("next","SCC2 Payment"));int found=0;for(JsonNode range:repeated.path("ranges"))if("SCC1".equals(range.path("reference").asText())){found++;assertFalse(range.path("scopeComplete").asBoolean());}assertEquals(2,found);
+    }
+
+    @Test void foreignPartOrSiblingTocRoleCannotSuppressAnActualSourceClause() throws Exception {
+        for(String invalid:Arrays.asList("source","part","sibling")){
+            ObjectNode copy=tocRole(p("copy","SCC1 Definitions"),"toc_result");ObjectNode position=(ObjectNode)copy.path("nativeFieldRoles").get(0).path("sourcePosition");
+            if("source".equals(invalid))position.put("sourceSha256",OTHER);else if("part".equals(invalid))position.put("partSha256",SHA);else position.put("nodePath",BODY+"/{w}p[another]/{w}r[1]/{w}t[1]");
+            JsonNode projection=clauseProjection(p("title","Special Conditions of Contract"),copy,p("body","Actual source body."),p("next","SCC2 Payment"));assertTrue(clauseRange(projection,"SCC1").path("scopeComplete").asBoolean());assertEquals("copy",clauseRange(projection,"SCC1").path("startBoundary").path("memberId").asText());
+        }
+    }
+
+    @Test void tocRolesMustCoverTheWholeCachedParagraphWithoutHidingMixedBodyText() throws Exception {
+        ObjectNode mixed=tocRole(p("mixed","SCC1 Definitions with an actual obligation. Cached TOC text"),"toc_result");((ObjectNode)mixed.path("nativeFieldRoles").get(0)).put("sourceText","Cached TOC text");mixed.put("nativeXml","<w:hyperlink w:anchor=\"_Toc42\"><w:instrText>PAGEREF _Toc42 </w:instrText></w:hyperlink>");
+        JsonNode projection=clauseProjection(p("title","Special Conditions of Contract"),mixed,p("body","Actual source body."),p("next","SCC2 Payment"));assertTrue(clauseRange(projection,"SCC1").path("scopeComplete").asBoolean());assertEquals("mixed",clauseRange(projection,"SCC1").path("startBoundary").path("memberId").asText());
+        ObjectNode complete=tocRole(p("copy","SCC1 Definitions 1"),"toc_result");ObjectNode first=(ObjectNode)complete.path("nativeFieldRoles").get(0);first.put("sourceText","SCC1\u00a0Definitions");ObjectNode second=first.deepCopy();second.put("sourceText","1");((ArrayNode)complete.path("nativeFieldRoles")).add(second);ObjectNode deleted=first.deepCopy();deleted.put("sourceText","Deleted source text");deleted.put("deleted",true);((ArrayNode)complete.path("nativeFieldRoles")).add(deleted);
+        JsonNode copied=clauseProjection(p("title","Special Conditions of Contract"),complete,p("h","SCC1 Definitions"),p("body","Actual source body."),p("next","SCC2 Payment"));assertTrue(clauseRange(copied,"SCC1").path("scopeComplete").asBoolean());assertEquals("h",clauseRange(copied,"SCC1").path("startBoundary").path("memberId").asText());
+    }
+
+    @Test void loadedNativeStoryRootClosesFinalClauseAndChildrenWithoutBorrowingAnAppendedForeignStory() throws Exception {
+        ObjectNode owner=p("last","SCC22 Final conditions"),root=loadedStoryRoot(owner);JsonNode projection=clauseProjectionWithRoot(root,p("title","Special Conditions of Contract"),owner,p("child","SCC22.309 Final special provision"),p("item","(1) Last source item."),p("blank",""),foreign("footnote","An independent footnote is not part of the final clause."));
+        for(String reference:Arrays.asList("SCC22","SCC22.309","SCC22.309(1)")){JsonNode range=clauseRange(projection,reference);assertTrue(range.path("scopeComplete").asBoolean(),reference);assertEquals("native_container_end",range.path("endBoundary").path("kind").asText());assertEquals(root.path("sourcePosition"),range.path("endBoundary").path("sourcePosition"));assertFalse(range.path("endBoundary").hasNonNull("memberId"));assertFalse(strings(range.path("orderedMemberIds")).contains("footnote"));}
+        assertEquals(clauseRange(projection,"SCC22").path("id"),clauseRange(projection,"SCC22.309").path("parentId"));assertFalse(clauseRange(projection,"SCC22").path("automaticEditEligible").asBoolean());
+        JsonNode old=clauseProjection(p("title","Special Conditions of Contract"),owner,p("body","Existing saved inventory lacks a loaded root declaration."));assertFalse(clauseRange(old,"SCC22").path("scopeComplete").asBoolean());assertEquals("source_story_end_unverified",clauseRange(old,"SCC22").path("endBoundary").path("kind").asText());
+    }
+
+    @Test void foreignUnknownOrDuplicateRootDeclarationsCannotCloseTheFinalSourceClause() throws Exception {
+        for(String invalid:Arrays.asList("source","partHash","partName","storyKind","rootPath","positionPath","status","duplicate")){
+            ObjectNode owner=p("last","SCC22 Final conditions"),root=loadedStoryRoot(owner),position=(ObjectNode)root.path("sourcePosition");
+            if("source".equals(invalid))position.put("sourceSha256",OTHER);else if("partHash".equals(invalid))position.put("partSha256",SHA);else if("partName".equals(invalid))position.put("partName","word/footnotes.xml");else if("storyKind".equals(invalid))root.put("storyKind","footnote");else if("rootPath".equals(invalid))root.put("storyRootNodePath",BODY+"/{w}p[last]");else if("positionPath".equals(invalid))position.put("nodePath",BODY+"/{w}p[last]");else if("status".equals(invalid))root.put("status","unknown");
+            ObjectNode inventory=(ObjectNode)word(p("title","Special Conditions of Contract"),owner,p("body","Last source paragraph.")).getCoverage().getNativeDocxParagraphs();ArrayNode roots=inventory.putArray("storyRoots");roots.add(root);if("duplicate".equals(invalid))roots.add(root.deepCopy());
+            JsonNode projection=(JsonNode)OerTemplateEvidence.class.getDeclaredMethod("nativeClauseRanges",JsonNode.class).invoke(null,inventory);assertFalse(clauseRange(projection,"SCC22").path("scopeComplete").asBoolean(),invalid);assertEquals("source_story_end_unverified",clauseRange(projection,"SCC22").path("endBoundary").path("kind").asText());
+        }
+    }
+
+    @Test void loadedRootDoesNotUpgradeUnknownParagraphsRepeatedClauseStartsOrAmbiguousSharedTails() throws Exception {
+        ObjectNode owner=p("last","SCC22 Final conditions"),unknown=p("unknown","Unknown text observation.");((ObjectNode)unknown.path("textObservation")).put("status","unknown");
+        JsonNode incomplete=clauseProjectionWithRoot(loadedStoryRoot(owner),p("title","Special Conditions of Contract"),owner,unknown);assertFalse(clauseRange(incomplete,"SCC22").path("scopeComplete").asBoolean());
+        JsonNode duplicate=clauseProjectionWithRoot(loadedStoryRoot(owner),p("title","Special Conditions of Contract"),owner,p("repeat","SCC22 Repeated independent start"),p("body","Remaining source."));for(JsonNode range:duplicate.path("ranges"))if("SCC22".equals(range.path("reference").asText()))assertFalse(range.path("scopeComplete").asBoolean());
+        ObjectNode numbered=p("h","SCC22.309 Final provision");JsonNode tail=clauseProjectionWithRoot(loadedStoryRoot(numbered),p("title","Special Conditions of Contract"),numbered,p("one","(1) Requirements:"),p("a","(a) first unfinished item"),p("b","(b) second unfinished item"),p("tail","Unclassified continuation without a verified parent predicate."));assertFalse(clauseRange(tail,"SCC22.309(1)(a)").path("scopeComplete").asBoolean());assertFalse(clauseRange(tail,"SCC22.309(1)(b)").path("scopeComplete").asBoolean());
+    }
+
+    private static ObjectNode loadedStoryRoot(ObjectNode member){ObjectNode root=object();root.put("status","observed_loaded_native_root");root.set("storyKind",member.path("storyKind"));root.set("storyRootNodePath",member.path("storyRootNodePath"));ObjectNode position=member.path("sourcePosition").deepCopy();position.put("nodePath",member.path("storyRootNodePath").asText());root.set("sourcePosition",position);return root;}
+    private static JsonNode clauseProjectionWithRoot(ObjectNode root,ObjectNode... paragraphs) throws Exception {ObjectNode inventory=(ObjectNode)word(paragraphs).getCoverage().getNativeDocxParagraphs();inventory.putArray("storyRoots").add(root);return (JsonNode)OerTemplateEvidence.class.getDeclaredMethod("nativeClauseRanges",JsonNode.class).invoke(null,inventory);}
+
+    private static ObjectNode tocRole(ObjectNode member,String role){ObjectNode observed=member.putArray("nativeFieldRoles").addObject();observed.put("fieldRole",role);observed.put("sourceText",member.path("textObservation").path("text").asText());observed.put("deleted",false);ObjectNode source=member.path("sourcePosition").deepCopy();source.put("nodePath",source.path("nodePath").asText()+"/{w}r[1]/{w}t[1]");observed.set("sourcePosition",source);ObjectNode field=member.path("sourcePosition").deepCopy();field.put("nodePath",field.path("nodePath").asText()+"/{w}r[1]/{w}fldChar[1]");observed.set("fieldSourcePosition",field);return member;}
+
+    private static JsonNode clauseProjection(ObjectNode... paragraphs) throws Exception {DocumentParser.ParsedDocument parsed=word(paragraphs);return (JsonNode)OerTemplateEvidence.class.getDeclaredMethod("nativeClauseRanges",JsonNode.class).invoke(null,parsed.getCoverage().getNativeDocxParagraphs());}
+    private static JsonNode clauseRange(JsonNode projection,String reference){JsonNode result=null;for(JsonNode range:projection.path("ranges"))if(reference.equals(range.path("reference").asText())){assertNull(result,"ambiguous test range");result=range;}assertNotNull(result,"missing "+reference);return result;}
     private static List<JsonNode> sourceFields(JsonNode evidence){List<JsonNode> result=new ArrayList<>();for(JsonNode group:evidence.path("groups"))if(group.path("kind").asText().equals("native_source_field_candidate"))result.add(group);return result;}
     private static ObjectNode raw(ObjectNode p,String text){ObjectNode raw=p.putObject("preNormalizedTextObservation");raw.put("status","observed_parser_channels_before_whitespace_normalization");raw.put("text",text);raw.put("originalText",text);raw.put("deletedText","");raw.put("strikeText","");return p;}
     private static ObjectNode pageGroup(){ObjectNode group=object();group.put("physicalPageNo",1);group.put("scope","whole_page");group.putObject("source").put("sourceSha256",SHA).put("sourceRevisionSha256",SHA);group.put("selectionStatus","candidate_unverified");group.putNull("selectedParser");group.put("sourceQualityAccepted",false);ObjectNode candidate=group.putArray("candidates").addObject();candidate.put("parser","first");ObjectNode page=candidate.putObject("page");page.put("physicalPageNo",1);page.putObject("mapping").putObject("originalPageTransform").putObject("targetFrame").put("sourceSha256",SHA).put("physicalPageNo",1);candidate.putArray("blocks").addObject().put("text","all candidate contents retained");return group;}
     private static DocumentBlock groupBlock(JsonNode pageGroup){DocumentBlock group=new DocumentBlock();group.setId("group");group.setSource("parser_page_group_candidate");group.setPageNo(1);group.setText("");group.setParserPageGroup(pageGroup);return group;}
     private static ObjectNode foreign(String id,String text){ObjectNode p=p(id,text);p.put("storyKind","footnote");p.put("storyRootNodePath","footnoteRoot");((ObjectNode)p.path("sourcePosition")).put("partName","word/footnotes.xml");return p;}
+    @Test void nativePdfReferenceScopesKeepChildContinuationAndSeparateObservedSharedTails() {
+        JsonNode evidence=OerTemplateEvidence.analyse("SCC",scopePdf(scopePdfReferenceBlocks())),group=firstGroup(evidence,"explicit_reference_scope");
+        assertTrue(group.path("scopeComplete").asBoolean());assertEquals(9,group.path("targets").size());Map<String,JsonNode> targets=scopePdfTargets(group);
+        assertEquals(Arrays.asList("pdf-page:18:line:17","pdf-page:18:line:18","pdf-page:18:line:19","pdf-page:18:line:20","pdf-page:18:line:21"),strings(targets.get("SCC7.3(1)(c)").path("orderedMemberIds")));
+        List<String> firstTail=Arrays.asList("pdf-page:18:line:22","pdf-page:18:line:23","pdf-page:18:line:24","pdf-page:18:line:25","pdf-page:18:line:26","pdf-page:18:line:27","pdf-page:18:line:28","pdf-page:18:line:29");
+        for(String label:Arrays.asList("a","b","c")){assertEquals(firstTail,strings(targets.get("SCC7.3(1)("+label+")").path("sharedParentTailContextMemberIds")));assertEquals(Arrays.asList("pdf-page:18:line:34","pdf-page:18:line:35"),strings(targets.get("SCC7.3(2)("+label+")").path("sharedParentTailContextMemberIds")));}
+        assertFalse(group.path("automaticEditEligible").asBoolean());assertFalse(group.path("semanticApplicabilityVerified").asBoolean());
+    }
+
+    @Test void nativePdfExplicitUnitsKeepRepeatedPageFurnitureAsPhysicalContext() {
+        JsonNode group=firstGroup(OerTemplateEvidence.analyse("SCC",scopePdf(scopePdfReferenceBlocks())),"explicit_reference_scope");Map<String,JsonNode> targets=scopePdfTargets(group);
+        assertAll(()->{JsonNode target=targets.get("SCC7.3(3)");assertEquals(Arrays.asList("pdf-page:18:line:36","pdf-page:18:line:47"),strings(target.path("orderedMemberIds")));assertEquals(Arrays.asList("pdf-page:18:line:48","pdf-page:19:line:0","pdf-page:19:line:1"),strings(target.path("physicalContextMemberIds")));},
+            ()->{JsonNode target=targets.get("SCC7.3(7)");assertEquals(Arrays.asList("pdf-page:19:line:41","pdf-page:19:line:52","pdf-page:20:line:2","pdf-page:20:line:3"),strings(target.path("orderedMemberIds")));assertEquals(Arrays.asList("pdf-page:19:line:53","pdf-page:20:line:0","pdf-page:20:line:1"),strings(target.path("physicalContextMemberIds")));});
+    }
+
+    @Test void nativePdfScopeProofRejectsForeignIncompleteOrMisalignedObservations() {
+        List<org.junit.jupiter.api.function.Executable> cases=new ArrayList<>();for(int mode=0;mode<7;mode++){final int current=mode;cases.add(()->{
+            List<DocumentBlock> blocks=scopePdfReferenceBlocks();DocumentBlock child=blocks.stream().filter(b->"pdf-page:18:line:17".equals(b.getId())).findFirst().orElseThrow();
+            if(current==0)((ObjectNode)child.getReadingContext()).put("sourceSha256",OTHER);if(current==1)child.getPdfGlyphs().get(0).setId("pdf-page/19/glyph/foreign");if(current==2)child.getPdfGlyphs().get(0).setCoordinateSpace("appearance_stream_local_matrix_no_page_box");if(current==3)child.getPdfGlyphs().get(0).setUnicode("?");if(current==4)child.getPdfGlyphs().clear();if(current==5)child.setPageNo(19);
+            if(current==6){int at=-1;for(int i=0;i<blocks.size();i++)if("pdf-page:18:line:22".equals(blocks.get(i).getId()))at=i;DocumentBlock old=blocks.get(at);blocks.set(at,scopePdfLine(old.getId(),18,"An unresolved continuation with no explicit shared predicate",old.getBbox(),old.getBbox()[0]));}
+            assertFalse(firstGroup(OerTemplateEvidence.analyse("SCC",scopePdf(blocks)),"explicit_reference_scope").path("scopeComplete").asBoolean(),"PDF layout proof case "+current);
+        });}assertAll(cases);
+    }
+
+    @Test void nativePdfLastSentenceUsesExactMarkedSuffixAcrossTwoObservedLines() {
+        List<DocumentBlock> blocks=scopePdfLastSentenceBlocks();String first=blocks.get(0).getText();JsonNode group=firstGroup(OerTemplateEvidence.analyse("SCC",scopePdf(blocks)),"inline_last_sentence_scope");
+        assertTrue(group.path("scopeComplete").asBoolean());assertEquals(Arrays.asList("pdf-page:62:line:26","pdf-page:62:line:27"),strings(group.path("orderedMemberIds")));assertEquals(2,group.path("memberRanges").size());
+        JsonNode start=group.path("memberRanges").get(0),end=group.path("memberRanges").get(1);assertEquals(first.indexOf('*'),start.path("start").asInt());assertEquals(first.length(),start.path("end").asInt());assertEquals(0,end.path("start").asInt());assertEquals(blocks.get(1).getText().length(),end.path("end").asInt());
+        assertEquals("*The railway protection plans can be inspected at\nMTRCL or viewed from the official website of MTRCL.",group.path("text").asText());assertFalse(group.path("wholeParagraphTargetAssumed").asBoolean());assertFalse(group.path("automaticEditEligible").asBoolean());
+    }
+
+    @Test void nativePdfLastSentenceCannotBorrowAnUnboundOrUnmarkedEarlierLine() {
+        List<org.junit.jupiter.api.function.Executable> cases=new ArrayList<>();for(int mode=0;mode<6;mode++){final int current=mode;cases.add(()->{List<DocumentBlock> blocks=scopePdfLastSentenceBlocks();DocumentBlock first=blocks.get(0);
+            if(current==0)((ObjectNode)first.getReadingContext()).put("sourceSha256",OTHER);if(current==1)first.getPdfGlyphs().get(0).setCoordinateSpace("unknown_frame");if(current==2)first.getPdfGlyphs().get(0).setUnicode("?");if(current==3)blocks.get(1).setPageNo(63);if(current==4)first.getPdfGlyphs().clear();if(current==5)blocks.set(0,scopePdfLine(first.getId(),62,first.getText().replace("*",""),first.getBbox(),first.getBbox()[0]));
+            JsonNode evidence=OerTemplateEvidence.analyse("SCC",scopePdf(blocks));for(JsonNode group:evidence.path("groups"))if("inline_last_sentence_scope".equals(group.path("kind").asText()))assertFalse(group.path("scopeComplete").asBoolean(),"PDF last sentence proof case "+current);
+        });}assertAll(cases);
+    }
+
+    @Test void repeatedNativePdfTopBodyDoesNotBecomePublicationContext() {
+        List<DocumentBlock> blocks=scopePdfReferenceBlocks();String text="The Contractor shall retain the complete source obligations.";
+        blocks.add(2,scopePdfLine("legal-top-18",18,text,new double[]{.269884,.08,.5,.005378},.269884));int at=-1;for(int i=0;i<blocks.size();i++)if("pdf-page:19:line:2".equals(blocks.get(i).getId()))at=i;blocks.add(at,scopePdfLine("legal-top-19",19,text,new double[]{.269884,.08,.5,.005378},.269884));
+        JsonNode group=firstGroup(OerTemplateEvidence.analyse("SCC",scopePdf(blocks)),"explicit_reference_scope"),target=scopePdfTargets(group).get("SCC7.3(3)");assertTrue(strings(target.path("orderedMemberIds")).contains("legal-top-19"));assertFalse(strings(target.path("physicalContextMemberIds")).contains("legal-top-19"));
+    }
+
+    @Test void nativePdfFooterSequenceNeedsMatchingPositionAndFont() {
+        List<org.junit.jupiter.api.function.Executable> cases=new ArrayList<>();for(int mode=0;mode<3;mode++){final int current=mode;cases.add(()->{List<DocumentBlock> blocks=scopePdfReferenceBlocks();int at=-1;for(int i=0;i<blocks.size();i++)if("pdf-page:19:line:53".equals(blocks.get(i).getId()))at=i;DocumentBlock old=blocks.get(at);double[] box=old.getBbox().clone();if(current==0)box[0]=.6;if(current==1)box[1]=.915;DocumentBlock changed=scopePdfLine(old.getId(),19,old.getText(),box,box[0]);if(current==2)for(PdfPageEvidence.PdfGlyph glyph:changed.getPdfGlyphs())glyph.setFontSizeInPt(12);blocks.set(at,changed);
+            JsonNode target=scopePdfTargets(firstGroup(OerTemplateEvidence.analyse("SCC",scopePdf(blocks)),"explicit_reference_scope")).get("SCC7.3(3)");assertTrue(strings(target.path("orderedMemberIds")).contains("pdf-page:18:line:48"),"Unmatched terminal numeric source stays in observed body, case "+current);assertFalse(strings(target.path("physicalContextMemberIds")).contains("pdf-page:18:line:48"));
+        });}assertAll(cases);
+    }
+
+    @Test void nativePdfScopeProofRequiresCompleteConsistentOriginalGlyphFrame() {
+        List<org.junit.jupiter.api.function.Executable> cases=new ArrayList<>();for(int mode=0;mode<6;mode++){final int current=mode;cases.add(()->{List<DocumentBlock> blocks=scopePdfReferenceBlocks();DocumentBlock child=blocks.stream().filter(b->"pdf-page:18:line:17".equals(b.getId())).findFirst().orElseThrow();PdfPageEvidence.PdfGlyph glyph=child.getPdfGlyphs().get(child.getPdfGlyphs().size()-1);
+            if(current==0)glyph.setPdfboxPosition(null);if(current==1){double[] frame=glyph.getPdfboxPosition().clone();frame[8]=0;glyph.setPdfboxPosition(frame);}if(current==2)glyph.setTextMatrix(null);if(current==3){double[] matrix=glyph.getTextMatrix().clone();matrix[4]+=10;glyph.setTextMatrix(matrix);}if(current==4){double[] box=glyph.getBbox().clone();box[0]+=.05;glyph.setBbox(box);}if(current==5)for(PdfPageEvidence.PdfGlyph observed:child.getPdfGlyphs()){double[] box=observed.getBbox();double w=700,h=1000,baseline=(box[1]+box[3])*h;observed.setPdfboxPosition(new double[]{box[0]*w,baseline,box[2]*w,box[3]*h,box[0]*w,baseline,box[2]*w,box[3]*h,w,h});observed.setTextMatrix(new double[]{9.96,0,0,9.96,box[0]*w,h-baseline});}
+            assertFalse(firstGroup(OerTemplateEvidence.analyse("SCC",scopePdf(blocks)),"explicit_reference_scope").path("scopeComplete").asBoolean(),"Original native frame proof case "+current);
+        });}assertAll(cases);
+    }
+
+    @Test void repeatedNativeParentOccurrencesCannotShareAnotherParentsTail() {
+        List<DocumentBlock> blocks=scopePdfReferenceBlocks();int at=-1;for(int i=0;i<blocks.size();i++)if("pdf-page:18:line:17".equals(blocks.get(i).getId()))at=i;blocks.add(at,scopePdfLine("second-parent-one",18,"(1) A second observed parent promises that:-",new double[]{.2116418,.34,.6,.0053783},.2698844));
+        JsonNode group=firstGroup(OerTemplateEvidence.analyse("SCC",scopePdf(blocks)),"explicit_reference_scope");assertFalse(group.path("scopeComplete").asBoolean());for(JsonNode target:group.path("targets"))if(target.path("reference").asText().startsWith("SCC7.3(1)("))assertFalse(target.path("scopeComplete").asBoolean());
+    }
+
+    private static Map<String,JsonNode> scopePdfTargets(JsonNode group){Map<String,JsonNode> out=new LinkedHashMap<>();for(JsonNode target:group.path("targets"))out.put(target.path("reference").asText(),target);return out;}
+    private static DocumentParser.ParsedDocument scopePdf(List<DocumentBlock> blocks){ParseCoverage coverage=new ParseCoverage();coverage.setTotalPages(66);return new DocumentParser.ParsedDocument("fixture",Collections.emptyList(),66,false,"fixture",blocks,coverage,SHA,Collections.emptyList());}
+    private static DocumentBlock scopePdfLine(String id,int page,String text,double[] bbox,double bodyLeft){
+        DocumentBlock block=new DocumentBlock();block.setId(id);block.setKind("pdf_line");block.setSource("native");block.setPageNo(page);block.setLocation("pdf-page/"+page+"/"+id);block.setText(text);block.setOriginalText(text);block.setBbox(bbox.clone());ObjectNode context=JsonUtils.mapper().createObjectNode();context.put("sourceSha256",SHA);block.setReadingContext(context);
+        java.util.regex.Matcher marker=java.util.regex.Pattern.compile("^\\s*\\([A-Za-z0-9]+\\)\\s*[#*]?\\s*").matcher(text);int markerEnd=marker.find()?marker.end():0;double step=(bbox[0]+bbox[2]-bodyLeft)/Math.max(1,text.length()-markerEnd);
+        for(int n=0;n<text.length();n++){if(Character.isWhitespace(text.charAt(n)))continue;double x=n<markerEnd?bbox[0]+n*.002:bodyLeft+(n-markerEnd)*step,w=595.4400024414062,h=841.6799926757812,width=Math.max(step*.8,.000001),baseline=(bbox[1]+bbox[3])*h;PdfPageEvidence.PdfGlyph glyph=new PdfPageEvidence.PdfGlyph();glyph.setId("pdf-page/"+page+"/glyph/"+id+"/"+n);glyph.setUnicode(text.substring(n,n+1));glyph.setCoordinateSpace("normalized_rendered_crop_top_left");glyph.setEligibleForNativeText(true);glyph.setFontSizeInPt(9);glyph.setFontSize(9);glyph.setBbox(new double[]{x,bbox[1],width,bbox[3]});glyph.setTextMatrix(new double[]{9.960000038146973,0,0,9.960000038146973,x*w,h-baseline});glyph.setPdfboxPosition(new double[]{x*w,baseline,width*w,bbox[3]*h,x*w,baseline,width*w,bbox[3]*h,w,h});block.getPdfGlyphs().add(glyph);}return block;
+    }
+    private static List<DocumentBlock> scopePdfReferenceBlocks(){
+        List<DocumentBlock> blocks=new ArrayList<>();
+        blocks.add(scopePdfLine("pdf-page:18:line:0",18,"HKHA Standard Library of SCC for Building Works 2013 Edition",new double[]{0.43297392936572704,0.037393286100121936,0.4524720908999866,0.005378314496429865},0.43297392936572704));
+        blocks.add(scopePdfLine("pdf-page:18:line:1",18,"(Consolidated up to 1 January 2023)",new double[]{0.6151921202080141,0.051080219048686065,0.27025390005769956,0.005378314496429865},0.6151921202080141));
+        blocks.add(scopePdfLine("pdf-page:18:line:2",18,"SCC7.3 Warranty and deed of warranty (roofing installation, refuge floor installation and/or other",new double[]{0.12095929359781764,0.10865509530941977,0.7620673178491032,0.005283647295321242},0.12095929359781764));
+        blocks.add(scopePdfLine("pdf-page:18:line:3",18,"waterproofing system installation) #",new double[]{0.20438666607760866,0.1226271629217659,0.2621926293468355,0.005283647295321242},0.20438666607760866));
+        blocks.add(scopePdfLine("pdf-page:18:line:4",18,"[Guidance Note:",new double[]{0.12095929359781764,0.15057129814645812,0.13053539837114525,0.005283647295321242},0.12095929359781764));
+        blocks.add(scopePdfLine("pdf-page:18:line:5",18,"# - The Roofing Installation, the Refuge Floor Installation or the Waterproofing System Installation",new double[]{0.13607416657091057,0.16425823336114317,0.7463385466674881,0.005283647295321242},0.13607416657091057));
+        blocks.add(scopePdfLine("pdf-page:18:line:6",18,"in the Clauses SCC7.3(1)(a), SCC7.3(1)(b), SCC7.3(1)(c), SCC7.3(2)(a), SCC7.3(2)(b),",new double[]{0.18141205864598595,0.1778025298611285,0.7010006545924127,0.005283647295321242},0.18141205864598595));
+        blocks.add(scopePdfLine("pdf-page:18:line:8",18," SCC7.3(2)(c), SCC7.3(3), SCC7.3(6) and SCC7.3(7) are to be deleted by the PQS as appropriate.]",new double[]{0.18141205864598595,0.191394795608584,0.698592623750101,0.006661495265438883},0.18141205864598595));
+        blocks.add(scopePdfLine("pdf-page:18:line:10",18,"(1) The Contractor shall unconditionally warrant to the Employer that:-",new double[]{0.2116418045921718,0.21848346112442382,0.5178187183908793,0.005378314496429865},0.2698844489610114));
+        blocks.add(scopePdfLine("pdf-page:18:line:11",18,"(a)# the roofing installation including that of the waterproofing membrane, insulation,",new double[]{0.2698844489610114,0.2458573315537939,0.6135462344074314,0.005378314496429837},0.3114503496370169));
+        blocks.add(scopePdfLine("pdf-page:18:line:12",18,"screeding, roofing tiles, and expansion joints and fittings and accessories",new double[]{0.3114503496370169,0.2594016280537792,0.5712822794986597,0.005378314496429837},0.3114503496370169));
+        blocks.add(scopePdfLine("pdf-page:18:line:13",18,"(hereinafter referred to as “Roofing Installation”),",new double[]{0.3114503496370169,0.27308856326846426,0.3389594266483894,0.005378314496429837},0.3114503496370169));
+        blocks.add(scopePdfLine("pdf-page:18:line:14",18,"(b)# the floor finishing installation to the refuge floor including any waterproofing",new double[]{0.2698844489610114,0.30049803898960736,0.6127808348544116,0.005378314496429837},0.3114503496370169));
+        blocks.add(scopePdfLine("pdf-page:18:line:15",18,"membrane, insulation, screeding and floor tiles (hereinafter referred to as “Refuge",new double[]{0.3114503496370169,0.3141849016884232,0.5715330049984169,0.005378314496429837},0.3114503496370169));
+        blocks.add(scopePdfLine("pdf-page:18:line:16",18,"Floor Installation”), and",new double[]{0.3114503496370169,0.3278718369031083,0.16601167277882684,0.005378314496429837},0.3114503496370169));
+        blocks.add(scopePdfLine("pdf-page:18:line:17",18,"(c)# other waterproofing system installation to the areas as specified in the Contract",new double[]{0.2698844489610114,0.3551030686177786,0.6128646833657776,0.005378314496429837},0.3114503496370169));
+        blocks.add(scopePdfLine("pdf-page:18:line:18",18,"comprising, as the case may be, the waterproofing membrane (whether liquid, sheet",new double[]{0.3114503496370169,0.3687900038324637,0.5711982259787084,0.005378314496429837},0.3114503496370169));
+        blocks.add(scopePdfLine("pdf-page:18:line:19",18,"or other forms of application), screeding (with or without waterproofing additives),",new double[]{0.3114503496370169,0.38247693904714875,0.5712583959984784,0.005378314496429837},0.3114503496370169));
+        blocks.add(scopePdfLine("pdf-page:18:line:20",18,"insulation, tiles, joints, fittings and accessories (hereinafter referred to as",new double[]{0.3114503496370169,0.3961638380038992,0.5713487022802797,0.005378314496429837},0.3114503496370169));
+        blocks.add(scopePdfLine("pdf-page:18:line:21",18,"“Waterproofing System Installation”)",new double[]{0.3114503496370169,0.4098507369606496,0.2569360554646627,0.005378314496429837},0.3114503496370169));
+        blocks.add(scopePdfLine("pdf-page:18:line:22",18,"shall remain watertight and free from leakage or defect for a period of ten years from the",new double[]{0.27008599802638233,0.4370820049332546,0.6131569999822667,0.005378314496429837},0.27008599802638233));
+        blocks.add(scopePdfLine("pdf-page:18:line:23",18,"date of completion certified by the Contract Manager in the certificate of completion",new double[]{0.27008599802638233,0.450768903890005,0.6126478611608057,0.005378314496429837},0.27008599802638233));
+        blocks.add(scopePdfLine("pdf-page:18:line:24",18,"issued under Clause 8.7 of the General Conditions of Contract. Where the Works are",new double[]{0.27008599802638233,0.46445580284675547,0.6126648768733812,0.005378314496429837},0.27008599802638233));
+        blocks.add(scopePdfLine("pdf-page:18:line:25",18,"phased for completion in Sections, the expression “certificate of completion” shall, for the",new double[]{0.27008599802638233,0.47814273806144053,0.6130508055351088,0.005378314496429837},0.27008599802638233));
+        blocks.add(scopePdfLine("pdf-page:18:line:26",18,"purposes of this Clause SCC7.3 of the Special Conditions of Contract, mean the certificate",new double[]{0.27008599802638233,0.49171081976652065,0.6128665028169717,0.005378314496429837},0.27008599802638233));
+        blocks.add(scopePdfLine("pdf-page:18:line:27",18,"of completion issued in respect of the Section in which the Roofing Installation#, the",new double[]{0.27008599802638233,0.5053977549812056,0.6126313579696934,0.005378314496429892},0.27008599802638233));
+        blocks.add(scopePdfLine("pdf-page:18:line:28",18,"Refuge Floor Installation# or the Waterproofing System Installation#, as the case may be,",new double[]{0.27008599802638233,0.5190846539379561,0.6130379924985309,0.005378314496429892},0.27008599802638233));
+        blocks.add(scopePdfLine("pdf-page:18:line:29",18,"are certified completed.",new double[]{0.27008599802638233,0.5327715528947066,0.1632405973581159,0.005378314496429892},0.27008599802638233));
+        blocks.add(scopePdfLine("pdf-page:18:line:30",18,"(2) Notwithstanding the foregoing, the Contractor shall not be held responsible for:-",new double[]{0.2116418045921718,0.5601453870661421,0.6030666183598103,0.005378314496429892},0.2698844489610114));
+        blocks.add(scopePdfLine("pdf-page:18:line:31",18,"(a)# any leakage or defect in the Roofing Installation; and",new double[]{0.2698844489610114,0.587376655038747,0.4030968750643854,0.005378314496429892},0.3114503496370169));
+        blocks.add(scopePdfLine("pdf-page:18:line:32",18,"(b)# any leakage or defect in the Refuge Floor Installation; and",new double[]{0.2698844489610114,0.614750452952248,0.43720610097349344,0.005378314496429892},0.3114503496370169));
+        blocks.add(scopePdfLine("pdf-page:18:line:33",18,"(c)# any leakage or defect in the Waterproofing System Installation",new double[]{0.2698844489610114,0.6421243233816181,0.4674358469196793,0.005378314496429892},0.3114503496370169));
+        blocks.add(scopePdfLine("pdf-page:18:line:34",18,"which is due to structural movement if such structural movement is not attributable to any",new double[]{0.26827221019448244,0.6693556276121576,0.6144889151345435,0.005378314496429892},0.26827221019448244));
+        blocks.add(scopePdfLine("pdf-page:18:line:35",18,"default of the Contractor.",new double[]{0.26827221019448244,0.6830780956027465,0.17392177528414443,0.005378314496429892},0.26827221019448244));
+        blocks.add(scopePdfLine("pdf-page:18:line:36",18,"(3) If the Contractor is in breach of the warranty as provided in this Clause SCC7.3 of the",new double[]{0.2116418045921718,0.7104519660321166,0.671601808442233,0.005378314496429892},0.2698844489610114));
+        blocks.add(scopePdfLine("pdf-page:18:line:47",18,"which the Employer may have against the Contractor for breach of warranty or otherwise.",new double[]{0.2698844489610114,0.8607228309325142,0.6087094668556982,0.005378314496429892},0.2698844489610114));
+        blocks.add(scopePdfLine("pdf-page:18:line:48",18,"15",new double[]{0.8625218577590983,0.9491412852060013,0.020908825609344484,0.005378314496429892},0.8625218577590983));
+        blocks.add(scopePdfLine("pdf-page:19:line:0",19,"HKHA Standard Library of SCC for Building Works 2013 Edition",new double[]{0.43297392936572704,0.037393286100121936,0.4524720908999866,0.005378314496429865},0.43297392936572704));
+        blocks.add(scopePdfLine("pdf-page:19:line:1",19,"(Consolidated up to 1 January 2023)",new double[]{0.6151921202080141,0.051080219048686065,0.27025390005769956,0.005378314496429865},0.6151921202080141));
+        blocks.add(scopePdfLine("pdf-page:19:line:2",19,"(4) In carrying out any work of repair or rectification, or making good any leakage or defect",new double[]{0.21144028115287397,0.10813273631018228,0.6709904728410264,0.005378314496429865},0.2698844489610114));
+        blocks.add(scopePdfLine("pdf-page:19:line:9",19,"(5) If the Contractor fails or refuses to carry out the work of repair or rectification, or make",new double[]{0.2116418045921718,0.2173429315337795,0.6707735737578351,0.005378314496429865},0.2698844489610114));
+        blocks.add(scopePdfLine("pdf-page:19:line:16",19,"(6) In addition to the obligations under Clauses SCC7.3(1) to SCC7.3(5) of the Special",new double[]{0.2116418045921718,0.3271590059089556,0.6716492679297177,0.005378314496429837},0.2698844489610114));
+        blocks.add(scopePdfLine("pdf-page:19:line:17",19,"Conditions of Contract, the Contractor shall (at no cost to the Employer and within 28",new double[]{0.2698844489610114,0.3407033024089409,0.613387045240987,0.005378314496429837},0.2698844489610114));
+        blocks.add(scopePdfLine("pdf-page:19:line:40",19,"SCC7.3 of the Special Conditions of Contract or the Contract or otherwise.",new double[]{0.3114503496370169,0.7097391350379638,0.508497887745294,0.005378314496429892},0.3114503496370169));
+        blocks.add(scopePdfLine("pdf-page:19:line:41",19,"(7) The Contractor shall further unconditionally warrant that the Relevant Warrantor shall",new double[]{0.2116418045921718,0.7369703667526343,0.6710916445778459,0.005378314496429892},0.2698844489610114));
+        blocks.add(scopePdfLine("pdf-page:19:line:52",19,"other document(s) relate to the supply and installation of the Roofing Installation#, the",new double[]{0.2698844489610114,0.8872650168581266,0.6135308587635379,0.005378314496429892},0.2698844489610114));
+        blocks.add(scopePdfLine("pdf-page:19:line:53",19,"16",new double[]{0.8625218577590983,0.9491412852060013,0.020908825609344484,0.005378314496429892},0.8625218577590983));
+        blocks.add(scopePdfLine("pdf-page:20:line:0",20,"HKHA Standard Library of SCC for Building Works 2013 Edition",new double[]{0.43297392936572704,0.037393286100121936,0.4524720908999866,0.005378314496429865},0.43297392936572704));
+        blocks.add(scopePdfLine("pdf-page:20:line:1",20,"(Consolidated up to 1 January 2023)",new double[]{0.6151921202080141,0.051080219048686065,0.27025390005769956,0.005378314496429865},0.6151921202080141));
+        blocks.add(scopePdfLine("pdf-page:20:line:2",20,"Refuge Floor Installation# or the Waterproofing System Installation# (as the case may",new double[]{0.2698844489610114,0.10813273631018228,0.6134394249345176,0.005378314496429865},0.2698844489610114));
+        blocks.add(scopePdfLine("pdf-page:20:line:3",20,"be).",new double[]{0.2698844489610114,0.12181967152486732,0.029776318207765717,0.005378314496429851},0.2698844489610114));
+        blocks.add(scopePdfLine("pdf-page:20:line:4",20,"(8) The warranty in or under this Clause SCC7.3 of the Special Conditions of Contract and",new double[]{0.2116418045921718,0.14905090323953768,0.6708740279646062,0.005378314496429865},0.2698844489610114));
+        return blocks;
+    }
+    private static List<DocumentBlock> scopePdfLastSentenceBlocks(){
+        List<DocumentBlock> blocks=new ArrayList<>();
+        blocks.add(scopePdfLine("pdf-page:62:line:26",62,"the boundary is more extensive. *The railway protection plans can be inspected at",new double[]{0.2638385151474181,0.479711002506511,0.6193850070456325,0.005378314496429837},0.2638385151474181));
+        blocks.add(scopePdfLine("pdf-page:62:line:27",62,"MTRCL or viewed from the official website of MTRCL.",new double[]{0.2638385151474181,0.4934216866683563,0.38717583145588175,0.005378314496429837},0.2638385151474181));
+        blocks.add(scopePdfLine("pdf-page:62:line:28",62,"[Guidance Note: * If the relevant railway protection plans are not yet available for",new double[]{0.2636369660820471,0.5142372218880449,0.6191252867941976,0.00537831676255085},0.2636369660820471));
+        blocks.add(scopePdfLine("pdf-page:62:line:29",62,"inspection at MTRCL or viewing from the official website of",new double[]{0.4067748315880098,0.528303922709686,0.47607106479101574,0.00528364729532127},0.4067748315880098));
+        blocks.add(scopePdfLine("pdf-page:62:line:30",62,"MTRCL, the project team should delete the last sentence and",new double[]{0.4067748315880098,0.5419908579243711,0.4764247046005669,0.00528364729532127},0.4067748315880098));
+        blocks.add(scopePdfLine("pdf-page:62:line:31",62,"prepare railway protection plan(s) for incorporation into the",new double[]{0.4067748315880098,0.555535190682291,0.4760376483916205,0.00528364729532127},0.4067748315880098));
+        blocks.add(scopePdfLine("pdf-page:62:line:32",62,"tender documents.]",new double[]{0.4067748315880098,0.5691274201718118,0.14226450330673718,0.00537831676255085},0.4067748315880098));
+        return blocks;
+    }
+
     private static DocumentParser.ParsedDocument pdf(DocumentBlock... blocks){ParseCoverage coverage=new ParseCoverage();coverage.setTotalPages(2);return new DocumentParser.ParsedDocument("fixture",Collections.emptyList(),2,false,"fixture",Arrays.asList(blocks),coverage,SHA,Collections.emptyList());}
     private static DocumentBlock pdfLine(String id,int page,String text,int smallPrefixLength,double y){DocumentBlock block=new DocumentBlock();block.setId(id);block.setSource("native");block.setKind("pdf_line");block.setPageNo(page);block.setText(text);List<PdfPageEvidence.PdfGlyph> glyphs=new ArrayList<>();double smallX=.10,bodyX=.20;for(int n=0;n<text.length();n++){if(Character.isWhitespace(text.charAt(n)))continue;boolean small=n<smallPrefixLength;PdfPageEvidence.PdfGlyph glyph=new PdfPageEvidence.PdfGlyph();glyph.setId(id+":"+n);glyph.setUnicode(text.substring(n,n+1));glyph.setBbox(new double[]{small?smallX:bodyX,y,small?.003:.005,.004});glyph.setFontSizeInPt(small?6:9);glyph.setEligibleForNativeText(true);glyphs.add(glyph);if(small)smallX+=.003;else bodyX+=.005;}block.setPdfGlyphs(glyphs);return block;}
 

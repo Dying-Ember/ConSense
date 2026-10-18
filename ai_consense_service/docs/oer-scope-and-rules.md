@@ -1,3 +1,37 @@
+<!-- oer-module-seams-20261018:start -->
+**2026-10-18 跨模块数据流／变量接缝修复已采纳源码：** 沿现有 OER 原件身份→原生观察／coverage→SourceDocument→ordinary／canonical→Drafting、Vetting、Advisory 链检查，七类可复现问题已修。Drafting 源绑定现在同时比较既有 analysisInputSha256、analysisSha256、evidenceStatus，原件／正文／算法版本相同也不能掩盖证据代次变化；预览显示、effective 与 actions 使用同一规范化提案且不落库；fixed／system／derived 字面值在保存／确认前按完整 children schema 校验；业务明细 id 明确可见并与 _itemId 行身份分离，legacy 隐藏规则保持。
+
+Python 四 native registry 的完整父对象由弱对象等值改为既有严格 JSON 序列化比较，false／0、true／1 分离；实际隔离 ASGI 原错误输入已由200变422且编码／预测／项目持久化前拒绝。Vetting 的语义引用和 rule canonical 绑定不再把 Unicode 空白当空 needle 误定位；Advisory 必需正文／actor／期限起点拒绝 Unicode 纯空白，原文／prompt／POLICY_SHA不改。来源、候选、人工采用、未知与法律适用性仍分别判门，不创建平行解析器或变量真源。
+
+最终隔离后端 329 套件／3404 项＝3289 通过＋115 条件跳过，0失败／错误，明确为完整一轮加环境修正后仅原失败套件的同用例复核合并。原1个报告输出目录未配置错误保留，源码／测试未为环境修正修改；Python定向40全过；前端194全过与typecheck通过，重叠运行不相加。20代码／测试路径精确采纳，14产品＋6测试；采纳时其余1696 baseline文件及535 main build／web产物保持，随后仅授权同步三文档。原RED和环境／helper失败保留。无main编译、真实OCR／模型、活动服务／DB／索引、部署或H800操作；旧来源质量unknown／PARTIAL和大输入容量边界不升级。
+
+完整凭据 `.local/oer-module-seams-20261018/verification.json`、`adoption-result.json`、`module-broad-combined04-summary.json`、`registry-parent-json-independent01.json`、`drafting-seams-independent-review02.json`；同一本本地HTML继续I34。本轮只确认所查契约与修复路径，不宣称所有跨模块情景或真实业务质量均已验收。
+<!-- oer-module-seams-20261018:end -->
+
+<!-- oer-native-pdf-group-closure-20261018:start -->
+**2026-10-18 最新收口：Word 完整章节／条款范围阶段已完成，原生 PDF 的已审完整来源组与消费接缝也已修复并精确采纳源码。** 沿同一 OER 原生观察→candidate graph→selected→ordinary／canonical→model／compact 链，不另造解析器或 canonical 真源。GCT 保条款完整尾段、准确 Clause2b→2(b) 边注；GCC 4.2 保跨物理19／20页21行及六小项，到实际4.3排他停止，109个多候选字面引用仍 unknown；COM11 p15普通正文命中取得独立 network／stream 原组及准确 Notes，method／frame／glyph namespace／CAS 不合并，不自动选方法。
+
+SCC 原生 PDF 修复了 Word 缩进规则误用于 PDF、(c)续行误切共享尾段、跨页页眉页脚混入正文，以及“最后一句”跨物理行漏掉前行星号。九个明确目标、两组共同尾部及 p62 两个 UTF-16 区间 [32,81)／[0,51) 均逐源核验；3182 named-channel成员、18指导、21边注、61marker保全。原202组中199整值保持，恰3组更新、1末句组新增、0删除；两个新增具名词组范围及#亦独审通过。p54指导lane缺完整框架继续 unknown；p18:27 Roofing Installation 的 secondary named-literal／条件边仍 unknown，原文、共同context、指导和marker完整保留。完整物理来源范围不授法律适用性或自动编辑。
+
+最终采纳7 main Java＋4 test Java共11路径；前一阶段Word12路径和既有Drafting改动保留。SCC115项定向全过；133套件1489项的同用例ID两轮合并为1373通过／116条件跳过、0失败／错误。原172环境错误完整保留：170为本机JDK AF_UNIX Selector前置、2为未设置的精确离线夹具；仅测试进程的临时目录和只读夹具环境修正后重跑原9套件，未改产品／测试换绿。新增5个offline producer条件跳过不记通过。三Word完整旧模板evidence逐值保持；GCT／GCC／COM11最终完整graph字节及所有selected／ordinary对象与已独审06完全一致；Python manifest／CAS→Java pointer→model正文／context／关系／unknown→ordered compact三来源回放通过。COM11空文本method候选仍在完整manifest及正文context，不生成独立可检索引文。SCC真实Drafting reading六类证据字段完整保留，canEdit=false。
+
+容量门独立：SCC同一完整保存输入8GiB在指纹物化OOM已保留，单JVM32GiB／300秒上限回放92.891秒通过；PRE此前同类32GiB边界仍在Word阶段凭据。未授当前服务容量或整份PDF准确率。PDF仍 PARTIAL，扫描NTT12页原缺陷／SCT40页未执行、Word337歧义＋256部分范围、7marker／14较广条件边／Bill最终基数与项目适用性均保持。真实OCR／模型0、无活动服务／生产DB／索引／部署或main编译；892 main build／web、343 tools保持；精确采纳时830非目标baseline文件保持，授权同步规则与handoff后其余828保持，仅这2份入口文档更新，逐SHA详见独立读回。
+
+完整凭据 `.local/oer-word-pdf-closure-20261017/pdf-stage-verification.json`、`pdf-preparation/pdf-post-adoption-independent07.json`、`pdf-broad-final-combined09-summary.json`、`scc-source-independent01/scc-actual10-source-comparison01.json`，同一本本地HTML追加 **I33**。来源、代码／契约、离线消费、容量、活动API／浏览器／模型／业务／H800分别判门；旧阶段“PDF未修改／未完成”按历史时点阅读。
+<!-- oer-native-pdf-group-closure-20261018:end -->
+
+<!-- oer-word-source-range-closure-20261017:start -->
+**2026-10-17 当前执行顺序：Word 完整章节／条款范围已完成来源及消费核验并精确采纳源码，接着修原生 PDF 完整来源组关系。** 沿现有 OER 原生观察和 canonical candidate 链补齐来源样式／编号布局证据、NTT 跨格／续段、SCT 跨表／原生编号、SCC 点号父子范围、PRE 原生章节与手工编号物理区间；不以样式名或缩进猜法律层级。TOC 复用同次已有字段角色且须覆盖整段有效文字；长表行切片使用同源、唯一全文、UTF-16、parent SHA 和段序核实的 paragraph→carrier 范围；最后条款只在实际 loaded story 根存在且精确绑定时闭合。指导、页脚、并行栏、原生编号来源及 unknown 分别保留，不另造解析器或自动采用项目值。
+
+已采纳 7 main Java＋5 test Java，共12路径；先前 Drafting 15路径改动保留。165项定向全过；较宽96套件1023项＝924通过＋99既有／条件跳过、0失败／错误，二者重叠不相加。27份实际 Word 全部正常返回且仅剥3类新增元数据后，完整旧 `parsedDocument` 与 I29逐值一致；独审34943原生段成员、4864范围（4271来源完整、337歧义、256部分未知）、19694精准carrier范围／14899 carrier和282真实story根。范围数量不是整体业务准确率；15249成员未获精准carrier子区间仍保原文，不计识字失败。标准／项目六份NTT/SCT/SCC及PRE两种子均经实际graph→selected→ordinary/model→compact校验；项目NTT长行原失败种子已闭合，PRE手工6保32段、空段和30个a…dd编号，到7排他停止。
+
+PRE全图物化8GiB堆失败已保留；同完整保存输入的32GiB、单JVM、300秒上限隔离回放44.956秒通过，运行期观察工作集21.1GiB（非峰值），不授当前服务容量验收。27原件、822其他baseline源文件、343工具文件和892 main build／web产物保持。无main编译、commit／部署、活动服务／DB／索引操作，OCR／真实模型0；未授浏览器、项目适用性、自动编辑或扫描版验收。完整凭据 `.local/oer-word-pdf-closure-20261017/word-stage-verification.json`、`source-review/word-actual27-independent-gate04.json`，继续单本HTML **I32**。PDF产品此刻尚未修改：GCT缺正常来源句法组层，COM11已有独立method组但正文命中缺闭包；二者分层修，不将历史未采纳GCT候选当现有normal事实。
+<!-- oer-word-source-range-closure-20261017:end -->
+
+<!-- drafting-oer-consumer-seam-audit-20261017:start -->
+**2026-10-17 Drafting 消费接缝核查及修复：** 当前三份 Word 的来源证据可支撑带来源阅读、人工确认规则、项目值明确采用及原件生成。已修完整范围/命名通道/无指导字段进入候选时的丢失、多段显示引文与实际绑定不一致，以及跨段替换缺少明确落点却显示可生成的问题；复用共享 OER 原生位置及既有编辑器，不另造解析器。真实三 Word 的当前隔离上传/读取/消费已补测；数量及最终回归见[人工审核接缝记录](specs/drafting-human-review-integration-20261017.md#2026-10-17-oer-consumer-seam-follow-up)。7 个未知 marker、14 处未完成条件边、Bill 零长度插入锚点与项目适用性继续待确认；PDF/扫描原质量边界保持。仅采纳实测源码及文档，未改活动服务/JAR/DB/索引，无真实 OCR/模型/浏览器运行或部署。
+<!-- drafting-oer-consumer-seam-audit-20261017:end -->
+
 <!-- drafting-template-acceptance-priority-confirmed-20261017 -->
 **2026-10-17 用户已确认验收顺序：先收口 Word 与原生 PDF 的解析质量，扫描 PDF 分阶段验证。** 当前验收不要求同步跑完 NTT/SCT 共52页扫描；已完成的NTT12页真实结果及缺陷保留，SCT40页尚未启动。每阶段分别记录实际覆盖、源质量、耗时及未完成，不以Word通过替代扫描版通过，也不由本次确认自动新增OCR、Goal或定时任务。
 

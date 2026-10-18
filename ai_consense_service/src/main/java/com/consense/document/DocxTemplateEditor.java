@@ -326,13 +326,13 @@ public final class DocxTemplateEditor {
         public Paragraph paragraph(String id){for(Paragraph p:allParagraphs)if(p.id.equals(id))return p;throw error("TARGET_NOT_FOUND",id);}
     }
     public static final class Paragraph {
-        private final String id,part,path,sha256,text,catalogText,cellId,rowId,tableId,sectionId;
+        private final String id,part,path,nativeNodePath,sha256,text,catalogText,cellId,rowId,tableId,sectionId;
         private final int ordinal;
         private final byte[] snapshotXml;
         private final boolean nativeRowCohesion;
         private final boolean compactNativeRowGaps;
         private Paragraph(String part,String path,Element node,int ordinal) {
-            this.part=part;this.path=path;id=part+"#"+path;this.ordinal=ordinal;
+            this.part=part;this.path=path;nativeNodePath=OerNativeDocxObservation.path(node);id=part+"#"+path;this.ordinal=ordinal;
             snapshotXml=xml(node);sha256=hash(snapshotXml);catalogText=descendantText(node,"t");text=editableText(node);
             cellId=ancestorId(part,node,"tc");rowId=ancestorId(part,node,"tr");tableId=ancestorId(part,node,"tbl");
             boolean together=false,gaps=false;for(Node parent=node.getParentNode();parent!=null;parent=parent.getParentNode())if(is(parent,"tr")){List<Element> properties=direct((Element)parent,"trPr");if(properties.size()==1){List<Element> controls=direct(properties.get(0),"cantSplit");together=controls.size()==1&&!Arrays.asList("0","false","off").contains(controls.get(0).getAttributeNS(W,"val"));}gaps=DocxTemplateEditor.hasCompactNativeRowGaps((Element)parent);break;}nativeRowCohesion=together;compactNativeRowGaps=gaps;
@@ -341,6 +341,7 @@ public final class DocxTemplateEditor {
             sectionId=section;
         }
         public String getId(){return id;} public String getPart(){return part;} public String getPath(){return path;}
+        public String getNativeNodePath(){return nativeNodePath;}
         public String getSha256(){return sha256;} public String getText(){return text;} public String getCatalogText(){return catalogText;}
         public int getOrdinal(){return ordinal;}
         public String getCellId(){return cellId;} public String getRowId(){return rowId;} public String getTableId(){return tableId;}

@@ -22,6 +22,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.StringJoiner;
 
 /** Source-bound review projection. It never invokes the document parser, OCR or a model. */
 @Component
@@ -50,10 +51,12 @@ public class DraftReviewSources {
     public ObjectNode reading(SourceDocument source) {
         Loaded loaded=load(source);ObjectNode result=metadata(source,loaded);
         ArrayNode paragraphs=result.putArray("paragraphs");
-        if(loaded.index!=null)for(DocxTemplateEditor.Paragraph paragraph:loaded.index.getMainParagraphs())
-            paragraphs.addObject().put("id",paragraph.getId()).put("ordinal",paragraph.getOrdinal())
+        if(loaded.index!=null)for(DocxTemplateEditor.Paragraph paragraph:loaded.index.getMainParagraphs()) {
+            ObjectNode value=paragraphs.addObject().put("id",paragraph.getId()).put("ordinal",paragraph.getOrdinal())
                 .put("text",paragraph.getText()).put("paragraphSha256",paragraph.getSha256())
                 .put("sourceSha256",loaded.sha).put("channel","editableText");
+            value.putObject("sourcePosition").put("sourceSha256",loaded.sha).put("partName",paragraph.getPart()).put("nodePath",paragraph.getNativeNodePath());
+        }
         JsonNode storedBlocks=JsonUtils.parse(source.getStructuredContentJson());
         if(storedBlocks.isArray())result.set("blocks",storedBlocks);
         else if(storedBlocks.path("blocks").isArray())result.set("blocks",storedBlocks.path("blocks"));
@@ -101,8 +104,10 @@ public class DraftReviewSources {
                 if(!"bound".equals(checked.path("status").asText()))return checked;
                 spans.add(checked.path("span"));
             }
-            if(spans.size()==1&&passage.has("text")&&!passage.path("text").asText().equals(spans.path(0).path("expectedText").asText()))
-                return pending("unsafe",sha,"SELECTED_TEXT_AND_NATIVE_SPAN_DIFFER");
+            if(passage.has("text")) {
+                StringJoiner displayed=new StringJoiner("\n");for(JsonNode span:spans)displayed.add(span.path("expectedText").asText());
+                if(!passage.path("text").asText().equals(displayed.toString()))return pending("unsafe",sha,"SELECTED_TEXT_AND_NATIVE_SPAN_DIFFER");
+            }
         } else {
             if(sparse(passage.path("wordIds")))return pending("missing",sha,"SPARSE_SELECTION_REQUIRES_NATIVE_SPANS");
             String quote=passage.path("text").asText();if(quote.isEmpty())return pending("missing",sha,"EXACT_SOURCE_TEXT_REQUIRED");

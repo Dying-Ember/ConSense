@@ -83,7 +83,7 @@ class NativeCanonicalSourceRegistry(CanonicalSourceRegistry):
                 raise SourceRegistryError('NATIVE_CANONICAL_SOURCE_UNAVAILABLE',
                                           'Native index source is unregistered or its actual CAS cannot be verified') from error
             if (snapshot.get('schema') != SCHEMA or snapshot.get('projectionRevisionSha256') != revision
-                    or _serialize(locator) != _serialize(snapshot) or members != snapshot['chunks']):
+                    or _serialize(locator) != _serialize(snapshot) or _serialize(members) != _serialize(snapshot['chunks'])):
                 raise SourceRegistryError('NATIVE_INDEX_PARENT_MISMATCH',
                                           'Native index must retain exact complete published parents in source order')
         return len(groups)
