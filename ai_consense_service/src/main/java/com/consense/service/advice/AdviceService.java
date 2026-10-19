@@ -503,6 +503,20 @@ public class AdviceService {
         return "Selected package conditions / 选定合约条件";
     }
 
+    /** Current documents for pointer identity rechecks; guidance is recomputed per request and never stored. */
+    private List<SourceDocument> materialSources(List<VectorStore.SearchHit> hits,List<SourceDocument> normalSources) {
+        Map<Long,SourceDocument> sources=new LinkedHashMap<>();
+        if(normalSources!=null)for(SourceDocument source:normalSources)if(source!=null&&source.getId()!=null)sources.put(source.getId(),source);
+        for(VectorStore.SearchHit hit:hits){
+            if(canonicalUnit(hit)==null)continue;
+            for(com.consense.web.dto.CanonicalEvidenceDtos.EvidencePointer pointer:canonicalPointers(hit)){
+                Long id=pointer.getDocumentId();
+                if(id==null||sources.containsKey(id)||sourceDocumentRepository==null)continue;
+                sourceDocumentRepository.findById(id).filter(source->Objects.equals(source.getProjectId(),pointer.getProjectId())).ifPresent(source->sources.put(id,source));
+            }
+        }
+        return new ArrayList<>(sources.values());
+    }
     private String renderExcerpts(List<VectorStore.SearchHit> hits) {
         return renderExcerpts(hits,new ArrayList<>());
     }
@@ -517,7 +531,7 @@ public class AdviceService {
                 .append("Output citation contract: cite ONLY the public aliases [1], [2], etc shown at each numbered excerpt header. ")
                 .append("Internal retrieval IDs, fixed parent IDs, document IDs and model-unit addresses below are lookup/provenance metadata and MUST NOT be used as output citation IDs.\n\n");
         int index = 1;
-        com.consense.service.vetting.OerModelMaterial.Request modelMaterial=new com.consense.service.vetting.OerModelMaterial.Request();
+        com.consense.service.vetting.OerModelMaterial.Request modelMaterial=new com.consense.service.vetting.OerModelMaterial.Request(materialSources(hits,normalSources));
         if(hits.stream().anyMatch(hit->canonicalUnit(hit)!=null))builder.append(com.consense.service.vetting.OerModelMaterial.LEGEND);
         List<JsonNode> modelStructures=new ArrayList<>();
         List<Map<String,Object>> hitMembership=new ArrayList<>();

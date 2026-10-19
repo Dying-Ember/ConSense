@@ -1,3 +1,21 @@
+<!-- oer-guidance-source-scopes-I47-20261019:start -->
+**I47：OER 指导语证据按需接入 Vetting 与 Advisory 消费链；不新增解析真源、不改 candidateGraph／canonical 契约、不重生成，活动服务未部署。**
+
+本轮修的是 I44／I45 之后确认的消费落差：Vetting／Advisory 只拿到指导语原文块，拿不到"指导→目标条款／条件／标记"关系。该结构只在 Drafting 模板路径生成（`DocumentParser.parseTemplate` → `OerTemplateEvidence.analyse`）；标准模板与指导语按既定范围不进审查／咨询语料，因此没有现成通道。
+
+做法是不扩范围、不改契约：在请求内用同一份已持久化解析（`structuredContentJson` ＋ `parseCoverageJson`）重建 `ParsedDocument` 并运行 `OerTemplateEvidence.analyse`，只投影与本次选中成员相交的部分。
+- Vetting：`OerModelMaterial.projectOrdinary` 在 `observedSourceUnits` 中新增 `observedGuidanceScopes`（`guidanceNotes`／`sourceConditions`／`markerCandidates`／`guidance_capture` 组），字段版本 `ordinary-word-guidance-scopes-v1`。
+- Advisory：`OerModelMaterial.project` 在 normal 生产者下按 `documentId`／`originalSourceSha256`／`javaParsedSourceHash` 复核请求内来源身份（`AdviceService` 按 pointer 的 documentId 取当前文档；repository 缺失时不取），命中才挂同一字段。
+- 证据不可解析、家族不支持或身份不符时字段保持缺省；不写库、不改 `parseCoverageJson`、不改持久化代次、0 OCR／模型调用。
+
+验证：定向 133 项＝128 通过＋5 项原有条件跳过，0 失败；全量后端 3635 项＝3477 通过＋14 failures＋9 errors＋135 跳过。23 项失败与改动前基线（stash 两个产品文件后同批重跑）逐类完全一致，属既有环境问题（测试用 Python 解释器、进程／端口、SQL／临时目录），原样保留、不计通过。首轮全量另有 5 个 errors 是本轮引入的（部分测试构造 AdviceService 时 repository 为空），已加空值保护修复，原失败保留记录。
+
+未覆盖：真实原件上的触发与耗时、前端与浏览器业务验收；`native_pdf`／`family` 生产者快照不含 candidateGraph，本字段对其不适用；标准模板指导语仍只在 Drafting 侧结构化。本轮只提交源码／测试／文档，不推送、不部署。证据 `.local/oer-guidance-seams-20261019-I47/verification.json`；台账 I47。
+<!-- oer-guidance-source-scopes-I47-20261019:end -->
+<!-- oer-sl-version-research-20261019:start -->
+**2026-10-19：按用户新要求恢复 SL 多版本技术调查，覆盖当前官网六个完整库；原件研究已完成首轮，不等于六版 OER 质量通过。** [SL 多版本技术部分调查](research/oer-sl-technical-version-investigation-20261019.md)记录官方 URL、每版 SHA／技术边界／书签与编号差异，以及亲看的 FIN 续表、FWP 材质修订和 ELE36 混合图文表单。官网 2024 Batch 2 rev 1 与比赛原件在 FWP3.1.5.030.B 两处材质要求不同，分别保留，不静默升级比赛来源。2026 `.10`、字母后缀、Building Services 和 TOL 编号须按各版 README 识别；书签深度及物理页范围不能跨版套用。新资料仅进独立版本对照区，SL PRE／图纸排除、训练及活动源集边界保持。旧“SL 延后”段落按历史读取；本轮 0 新 OCR／模型／训练、0 产品／活动服务／DB／索引写入。证据 `.local/oer-sl-version-research-20261019/summary-evidence.json`；单本台账 I46。
+<!-- oer-sl-version-research-20261019:end -->
+
 <!-- oer-native-pdf-source-scopes-I45-20261019:start -->
 **I45：修复原生PDF标题／修订边栏、保修表所属条款和跨页共同条件；精确采纳2产品＋2测试，活动服务未部署。** 模板规则仍为 `native-template-rules-20261019-r21`，本轮修现有普通PDF来源分组和消费者，未新增解析真源。
 
