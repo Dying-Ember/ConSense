@@ -31,7 +31,7 @@ class WordGuidanceScopesTest {
         assertEquals(1,guidance.path("guidanceNotes").size());
         assertEquals(1,guidance.path("sourceConditions").size());
         assertEquals(1,guidance.path("guidanceGroups").size());
-        assertEquals("g1",guidance.path("guidanceNotes").get(0).path("orderedMemberIds").get(0).asText());
+        assertEquals("docx-p:g1",guidance.path("guidanceNotes").get(0).path("orderedMemberIds").get(0).asText());
         assertEquals(before,source.getParseCoverageJson());
     }
 
@@ -40,11 +40,9 @@ class WordGuidanceScopesTest {
                 p("g1","[Guidance Note: Insert the amount.]"));
         SourceDocument source=source(parsed,"SCC",true);
         JsonNode none=new OerModelMaterial.Request().guidanceScopes(source,chunk("zzz"));
-        assertNotNull(none);
-        assertEquals("observed",none.path("status").asText());
-        assertTrue(none.path("guidanceNotes").isEmpty());
-        assertTrue(none.path("sourceConditions").isEmpty());
-        assertTrue(none.path("markerCandidates").isEmpty());
+        assertNull(none);
+        DocumentParser.ParsedDocument plain=word(p("title","Special Conditions of Contract"));
+        assertNull(new OerModelMaterial.Request().guidanceScopes(source(plain,"SCC",true),chunk("title")));
         assertNull(new OerModelMaterial.Request().guidanceScopes(source(parsed,"PRE",true),chunk("g1")));
         assertNull(new OerModelMaterial.Request().guidanceScopes(source(parsed,"SCC",false),chunk("g1")));
     }
@@ -59,9 +57,47 @@ class WordGuidanceScopesTest {
         com.consense.web.dto.CanonicalEvidenceDtos.EvidencePointer forged=pointer(source);forged.setJavaParsedSourceHash(OTHER);
         JsonNode absent=new OerModelMaterial.Request(Collections.singletonList(source)).project(forged,member,"tender");
         assertTrue(absent.path("observedGuidanceScopes").isMissingNode());
+        JsonNode unmatched=new OerModelMaterial.Request(Collections.singletonList(source)).project(pointer(source,"zzz"),member,"tender");
+        assertEquals("unavailable",unmatched.path("observedGuidanceScopes").path("status").asText());
+        assertEquals("no_guidance_in_selected_scope",unmatched.path("observedGuidanceScopes").path("reason").asText());
+    }
+
+    @Test void pdfObservedGuidanceIsProjectedForOrdinaryAndCanonicalConsumers() {
+        SourceDocument source=pdfSource();
+        JsonNode ordinary=new OerModelMaterial.Request().guidanceScopes(source,chunk("b1"));
+        assertNotNull(ordinary);
+        assertEquals("SCC",ordinary.path("family").asText());
+        assertEquals(1,ordinary.path("guidanceNotes").size());
+        ObjectNode member=object();member.put("schema",com.consense.service.sources.NormalObservedContract.SCHEMA);
+        JsonNode canonical=new OerModelMaterial.Request(Collections.singletonList(source)).project(pointer(source,"b1"),member,"tender");
+        assertEquals(1,canonical.path("observedGuidanceScopes").path("guidanceNotes").size());
+        com.consense.web.dto.CanonicalEvidenceDtos.EvidencePointer forged=pointer(source,"b1");
+        forged.setOriginalSourceSha256(OTHER);
+        JsonNode absent=new OerModelMaterial.Request(Collections.singletonList(source)).project(forged,member,"tender");
+        assertTrue(absent.path("observedGuidanceScopes").isMissingNode());
+    }
+
+    private static SourceDocument pdfSource() {
+        ArrayNode blocks=JsonUtils.mapper().createArrayNode();
+        ObjectNode block=blocks.addObject();
+        block.put("id","b1");block.put("kind","pdf_line");block.put("source","native");block.put("pageNo",23);
+        block.put("text","[Guidance Note: Insert the amount for SCC7.6.]");
+        block.put("originalText","[Guidance Note: Insert the amount for SCC7.6.]");
+        block.putArray("bbox").add(0.1).add(0.2).add(0.5).add(0.01);
+        ObjectNode context=block.putObject("readingContext");context.put("sourceSha256",SHA);
+        SourceDocument source=new SourceDocument();
+        source.setId(98L);source.setFileKey("SCC");source.setSourceSha256(SHA);
+        source.setTextContent("[Guidance Note: Insert the amount for SCC7.6.]");source.setPageCount(66);
+        source.setStructuredContentJson(blocks.toString());
+        source.setParseCoverageJson("{\"complete\":false,\"totalPages\":66,\"parsedPages\":66,\"ocrPages\":0,\"failedPages\":[]}");
+        return source;
     }
 
     private static com.consense.web.dto.CanonicalEvidenceDtos.EvidencePointer pointer(SourceDocument source) {
+        return pointer(source,"g1");
+    }
+
+    private static com.consense.web.dto.CanonicalEvidenceDtos.EvidencePointer pointer(SourceDocument source,String blockId) {
         com.consense.web.dto.CanonicalEvidenceDtos.EvidencePointer pointer=new com.consense.web.dto.CanonicalEvidenceDtos.EvidencePointer();
         pointer.setProjectId("authored");pointer.setDocumentId(source.getId());
         pointer.setProducerKind(com.consense.service.sources.NormalObservedContract.PRODUCER);
@@ -69,7 +105,7 @@ class WordGuidanceScopesTest {
         pointer.setSourceRevisionSha256(OTHER);pointer.setProjectionSha256(OTHER);pointer.setProjectionRevisionSha256(OTHER);
         pointer.setCanonicalSourceHash(OTHER);
         ArrayNode parts=JsonUtils.mapper().createArrayNode();
-        parts.addObject().put("blockId","g1").put("text","fixture").put("startOffset",0).put("endOffset",7).put("offsetUnit","utf16").put("sourceSha256",SHA);
+        parts.addObject().put("blockId",blockId).put("text","fixture").put("startOffset",0).put("endOffset",7).put("offsetUnit","utf16").put("sourceSha256",SHA);
         pointer.setParts(parts);
         pointer.setSourceSpans(JsonUtils.mapper().createArrayNode());
         pointer.setRelations(JsonUtils.mapper().createArrayNode());
@@ -100,7 +136,8 @@ class WordGuidanceScopesTest {
         return new DocumentParser.ParsedDocument("fixture",Collections.emptyList(),0,false,"fixture",Collections.emptyList(),coverage,SHA,Collections.emptyList());
     }
     private static ObjectNode p(String id,String text) {
-        ObjectNode p=object();p.put("id",id);p.put("storyKind","body");p.put("storyRootNodePath",BODY);
+        ObjectNode p=object();p.put("id","docx-p:"+id);p.put("storyKind","body");p.put("storyRootNodePath",BODY);
+        p.putArray("retainedBlockIds").add(id);
         ObjectNode position=p.putObject("sourcePosition");position.put("kind","docx_native");position.put("sourceSha256",SHA);
         position.put("partName","word/document.xml");position.put("partSha256",OTHER);position.put("nodePath",BODY+"/{w}p["+id+"]");
         ObjectNode channels=p.putObject("textObservation");channels.put("status","observed_parser_paragraph_channels");
