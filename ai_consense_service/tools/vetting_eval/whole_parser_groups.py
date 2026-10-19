@@ -57,11 +57,24 @@ def select_whole_parser_groups(bundle, policy=None, *, artifact_store=None):
         matches = {candidate['parser'] for candidate in candidates for rule in policy['rules']
             if candidate['parser'] == rule['parser'] and all(candidate['features'][key] == value
                 for key, value in rule['requires'].items())} if policy else set()
+        reviewed = {candidate['parser'] for candidate in candidates if complete and
+            bundle['routeAcceptance']['status'] == 'accepted' and candidate['blocks'] and
+            {block['blockId'] for block in candidate['blocks']} ==
+            {row['blockId'] for row in bundle.get('canonicalSelection') or []
+             if row['runId'] == candidate['runId'] and row['physicalPageNo'] == page}}
+        matches |= reviewed
         selected = next(iter(matches)) if len(matches) == 1 else None
-        groups.append({'physicalPageNo': page, 'scope': 'whole_page', 'source': copy.deepcopy(bundle['source']),
-            'selectionStatus': 'feature_policy_selected_candidate' if selected else 'candidate_unverified',
+        reviewed_selection = selected in reviewed
+        group = {'physicalPageNo': page, 'scope': 'whole_page', 'source': copy.deepcopy(bundle['source']),
+            'selectionStatus': 'source_review_selected_candidate' if reviewed_selection else 'feature_policy_selected_candidate' if selected else 'candidate_unverified',
             'selectedParser': selected, 'policySha256': policy_sha, 'candidates': candidates,
             'sourceQualityAccepted': False, 'adoptionStatus': 'candidate_unverified',
-            'reason': 'One independently accepted generic feature rule selects a coherent complete page candidate' if selected else
-                'No unique admitted whole-group rule; both complete observations retained without cell fusion'})
+            'reason': 'Existing source-bound review covers every block of one complete page candidate' if reviewed_selection else
+                'One independently accepted generic feature rule selects a coherent complete page candidate' if selected else
+                'No unique admitted whole-group rule; both complete observations retained without cell fusion'}
+        if reviewed_selection:
+            group['reviewManifestSha256'] = bundle['routeAcceptance']['manifestSha256']
+            group['reviewedBlockIds'] = [block['blockId'] for candidate in candidates if candidate['parser'] == selected
+                                       for block in candidate['blocks']]
+        groups.append(group)
     return groups

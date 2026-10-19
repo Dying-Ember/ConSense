@@ -34,6 +34,8 @@ class OerTemplateEvidenceTest {
         assertEquals("TEMPLATE_EVIDENCE_REVISION_STALE",assertThrows(IllegalArgumentException.class,()->OerTemplateEvidence.requireBound("SCC",SHA,tree(parsed.getBlocks()),tree(parsed.getCoverage()),old)).getMessage());
         ((ObjectNode)old.path("sourceBinding")).put("analysisRevision","native-template-rules-20261016-r15");assertEquals("TEMPLATE_EVIDENCE_REVISION_STALE",assertThrows(IllegalArgumentException.class,()->OerTemplateEvidence.requireBound("SCC",SHA,tree(parsed.getBlocks()),tree(parsed.getCoverage()),old)).getMessage());
         ((ObjectNode)old.path("sourceBinding")).put("analysisRevision","native-template-rules-20261018-r16");assertEquals("TEMPLATE_EVIDENCE_REVISION_STALE",assertThrows(IllegalArgumentException.class,()->OerTemplateEvidence.requireBound("SCC",SHA,tree(parsed.getBlocks()),tree(parsed.getCoverage()),old)).getMessage());
+        ((ObjectNode)old.path("sourceBinding")).put("analysisRevision","native-template-rules-20261019-r18");assertEquals("TEMPLATE_EVIDENCE_REVISION_STALE",assertThrows(IllegalArgumentException.class,()->OerTemplateEvidence.requireBound("SCC",SHA,tree(parsed.getBlocks()),tree(parsed.getCoverage()),old)).getMessage());
+        ((ObjectNode)old.path("sourceBinding")).put("analysisRevision","native-template-rules-20261019-r19");assertEquals("TEMPLATE_EVIDENCE_REVISION_STALE",assertThrows(IllegalArgumentException.class,()->OerTemplateEvidence.requireBound("SCC",SHA,tree(parsed.getBlocks()),tree(parsed.getCoverage()),old)).getMessage());
         ((ObjectNode)old.path("sourceBinding")).remove("analysisRevision");assertEquals("TEMPLATE_EVIDENCE_REVISION_STALE",assertThrows(IllegalArgumentException.class,()->OerTemplateEvidence.requireBound("SCC",SHA,tree(parsed.getBlocks()),tree(parsed.getCoverage()),old)).getMessage());
     }
 
@@ -605,6 +607,30 @@ class OerTemplateEvidenceTest {
         String raw="Officer is A/     (*Mr/Ms                     ), telephone          .\n";ObjectNode body=raw(cell("body","t","r","c1","Officer is A/ (*Mr/Ms ), telephone ."),raw);JsonNode evidence=OerTemplateEvidence.analyse("SCT",word(body,cell("note","t","r","c2","(Project Architect)")));assertEquals(1,evidence.path("guidanceNotes").size());List<JsonNode> fields=sourceFields(evidence);assertEquals(4,fields.size());int spaces=0;for(JsonNode field:fields){assertEquals(1,field.path("guidanceNoteIds").size());assertFalse(field.path("automaticEditEligible").asBoolean());assertFalse(field.path("scopeComplete").asBoolean());assertEquals("unknown_requires_project_source",field.path("fieldValueStatus").asText());JsonNode range=field.path("memberRanges").get(0);if(range.path("channel").asText().equals("preNormalizedTextObservation.text")){spaces++;assertEquals(raw.substring(range.path("start").asInt(),range.path("end").asInt()),range.path("observedText").asText());assertTrue(range.path("observedText").asText().matches(" {5,21}"));}else{assertEquals("Mr/Ms",range.path("observedText").asText());assertEquals(2,field.path("optionRanges").size());assertTrue(field.path("sourceChoiceComplete").asBoolean());}}assertEquals(3,spaces);assertEquals("unknown",marker(evidence,"body","*").path("disposition").asText());
     }
 
+    @Test void unmatchedQuotedInstructionsStayLinkedWithoutFuzzyTargetAuthority() {
+        JsonNode evidence=OerTemplateEvidence.analyse("SCT",word(cell("h","t","r0","c1","SCT71 Tender documents"),cell("body","t","r1","c1","*and the Bill of Quantities and General Summary"),cell("note","t","r1","c2","(Guidance Note: *For specified tenders, delete “*and the Bills of Quantities and General Summary”.)"),cell("next","t","r2","c1","SCT72 Other documents"),cell("other","t","r3","c1","*and the Bill of Quantities and General Summary")));
+        JsonNode observed=marker(evidence,"body","*"),note=evidence.path("guidanceNotes").get(0);
+        assertEquals(Collections.singletonList(note.path("id").asText()),strings(observed.path("guidanceNoteIds")));
+        assertEquals(Collections.singletonList(evidence.path("conditions").get(0).path("id").asText()),strings(observed.path("conditionIds")));
+        assertEquals("EXPLICIT_QUOTED_INSTRUCTION_WITHOUT_EXACT_MARKED_TARGET",observed.path("unknownReasonCode").asText());
+        assertEquals("unknown",observed.path("disposition").asText());assertFalse(observed.path("scopeComplete").asBoolean());assertTrue(observed.path("targetGroupIds").isEmpty());
+        assertTrue(marker(evidence,"other","*").path("guidanceNoteIds").isEmpty());
+    }
+
+    @Test void pqSInstructionContextDoesNotTurnSuffixMarkersIntoWholeClauseEdits() {
+        JsonNode evidence=OerTemplateEvidence.analyse("SCC",word(p("h","SCC71.302 Warranty (piling and footings*)"),p("note","[Guidance Notes: Only adopt this SCC Clause if applicable. *Delete/amend by the PQS as appropriate.]"),p("body","The piles and foundations including footings (raft/pad)* are warranted."),p("next","SCC71.303 Another warranty"),p("other","Other foundations* are described separately.")));
+        String note=evidence.path("guidanceNotes").get(0).path("id").asText();
+        for(String id:Arrays.asList("h","body")){JsonNode observed=marker(evidence,id,"*");assertEquals(Collections.singletonList(note),strings(observed.path("guidanceNoteIds")));assertEquals(1,observed.path("conditionIds").size());assertEquals("SOURCE_INSTRUCTION_CONTEXT_WITHOUT_EXACT_TARGET_RANGE",observed.path("unknownReasonCode").asText());assertEquals("unknown",observed.path("disposition").asText());assertFalse(observed.path("scopeComplete").asBoolean());assertTrue(observed.path("targetGroupIds").isEmpty());}
+        assertTrue(marker(evidence,"other","*").path("guidanceNoteIds").isEmpty());
+    }
+
+    @Test void observedTitleChoiceLinksItsExistingFieldWithoutPromotingSelectionAuthority() {
+        JsonNode evidence=OerTemplateEvidence.analyse("SCT",word(cell("body","t","r","c1","Officer is A/ (*Mr/Ms ), telephone ."),cell("note","t","r","c2","(Project Architect)")));
+        JsonNode observed=marker(evidence,"body","*"),choice=null;for(JsonNode field:sourceFields(evidence))if("person_title_choice".equals(field.path("fieldLabel").asText()))choice=field;
+        assertNotNull(choice);assertTrue(strings(observed.path("contextGroupIds")).contains(choice.path("id").asText()));assertEquals(choice.path("guidanceNoteIds"),observed.path("guidanceNoteIds"));assertEquals(1,observed.path("guidanceNoteIds").size());
+        assertEquals("SOURCE_CHOICE_OBSERVED_PROJECT_SELECTION_REQUIRED",observed.path("unknownReasonCode").asText());assertEquals("unknown",observed.path("disposition").asText());assertFalse(observed.path("scopeComplete").asBoolean());assertTrue(observed.path("targetGroupIds").isEmpty());assertFalse(choice.path("automaticEditEligible").asBoolean());
+    }
+
     @Test void collapsedOrLexicallyDifferentRawObservationsCannotInventWhitespaceSlots() {
         for(boolean mismatch:Arrays.asList(false,true)){ObjectNode body=p("body","Officer is A/ (*Mr/Ms ), telephone .");if(mismatch)raw(body,"Officer is A/     (*Mr/Ms DIFFERENT), telephone          .\n");JsonNode evidence=OerTemplateEvidence.analyse("SCT",word(body));List<JsonNode> fields=sourceFields(evidence);assertEquals(1,fields.size());assertEquals("person_title_choice",fields.get(0).path("fieldLabel").asText());assertEquals("unknown",marker(evidence,"body","*").path("disposition").asText());}
     }
@@ -1171,6 +1197,47 @@ class OerTemplateEvidenceTest {
         blocks.add(at++,scopePdfLine("pdf-page:19:line:21",19,"Installation#, the Refuge Floor Installation# or the Waterproofing System Installation# (as",new double[]{.2698844489610114,.3954509707518119,.6135008250057992,.005378314496429837},.2698844489610114));
         blocks.add(at++,scopePdfLine("pdf-page:19:line:25",19,"to as “the Relevant Warrantor”) for the supply and installation of the Roofing",new double[]{.2698844489610114,.45005603663791777,.6134823742331269,.005378314496429837},.2698844489610114));
         blocks.add(at,scopePdfLine("pdf-page:19:line:26",19,"Installation#, the Refuge Floor Installation# or the Waterproofing System Installation# (as",new double[]{.2698844489610114,.46374297185260277,.6135008250057992,.005378314496429837},.2698844489610114));return blocks;
+    }
+
+    @Test void deletionOfTheQuotedWordsUsesTheOwnerText() {
+        JsonNode evidence=OerTemplateEvidence.analyse("SCC",word(p("h","SCC80 Test owner"),p("n","[Guidance Note: Delete the words ‘obsolete reference’.]"),p("b","Retain the context *obsolete reference here."),p("next","SCC81 Next clause")));
+        JsonNode group=namedWordGroup(evidence,"obsolete reference");assertTrue(group.path("scopeComplete").asBoolean());assertEquals(Collections.singletonList("b"),strings(group.path("orderedMemberIds")));assertFalse(group.path("automaticEditEligible").asBoolean());
+    }
+
+    @Test void aQuotedClauseReferenceTargetsItsLiteralInTheOwnerRatherThanTheReferencedClause() {
+        JsonNode evidence=OerTemplateEvidence.analyse("SCC",word(p("other","SCC70 External referenced provision"),p("other-body","(2) Keep this external clause intact."),p("h","SCC80 Test owner"),p("n","[Guidance Note: Where Clause SCC70 Option A is used, delete ‘Clauses SCC70(2) and SCC70(3)’.]"),p("b","The exception uses *Clauses SCC70(2) and SCC70(3) in this sentence."),p("next","SCC81 Next clause")));
+        JsonNode group=namedWordGroup(evidence,"Clauses SCC70(2) and SCC70(3)");assertTrue(group.path("scopeComplete").asBoolean());assertEquals(Collections.singletonList("b"),strings(group.path("orderedMemberIds")));
+    }
+
+    @Test void prefixMarkedQuotedReferenceCanContinueOnTheNextNativePdfLine() {
+        List<DocumentBlock> blocks=new ArrayList<>();String[] text={"SCC80 Test owner","[Guidance Note: Where Clause SCC70 Option A is used, delete the words ‘Clauses SCC70(3) and SCC70(4)’.]","The exception uses #Clauses SCC70(3) and","SCC70(4) in the current sentence.","SCC81 Next clause"};
+        for(int i=0;i<text.length;i++)blocks.add(scopePdfLine("quoted-"+i,8,text[i],new double[]{.2,.12+i*.02,.65,.006},.2));
+        JsonNode evidence=OerTemplateEvidence.analyse("SCC",scopePdf(blocks)),group=namedWordGroup(evidence,"Clauses SCC70(3) and SCC70(4)");assertTrue(group.path("scopeComplete").asBoolean());assertEquals(Arrays.asList("quoted-2","quoted-3"),strings(group.path("orderedMemberIds")));JsonNode marker=group.path("markerRanges").get(0);assertEquals("quoted-2",marker.path("memberId").asText());assertEquals("#",text[2].substring(marker.path("start").asInt(),marker.path("end").asInt()));assertFalse(group.path("automaticEditEligible").asBoolean());
+    }
+
+    @Test void anExplicitDeletionTargetStillSelectsTheNamedExternalClause() {
+        JsonNode evidence=OerTemplateEvidence.analyse("SCC",word(p("h","SCC70 Named provision"),p("two","(2) Keep *obsolete reference under this target."),p("owner","SCC80 Instruction owner"),p("n","[Guidance Note: Delete the words ‘obsolete reference’ from Clause SCC70(2).]"),p("local","Do not delete *obsolete reference here."),p("next","SCC81 Next clause")));
+        JsonNode group=namedWordGroup(evidence,"obsolete reference");assertTrue(group.path("scopeComplete").asBoolean());assertEquals(Collections.singletonList("two"),strings(group.path("orderedMemberIds")));
+    }
+
+    @Test void nativeQuotedDeletionRefusesForeignMissingAmbiguousOrDiscontinuousObservations() {
+        List<org.junit.jupiter.api.function.Executable> cases=new ArrayList<>();
+        for(int mode=0;mode<11;mode++){final int current=mode;cases.add(()->{
+            String[] text={"SCC80 Test owner","[Guidance Note: Delete the words ‘Clauses SCC70(3) and SCC70(4)’.]","The exception uses #Clauses SCC70(3) and","SCC70(4) in the current sentence.","SCC81 Next clause"};List<DocumentBlock> blocks=new ArrayList<>();
+            for(int i=0;i<text.length;i++)blocks.add(scopePdfLine("q-"+i,8,text[i],new double[]{.2,.12+i*.02,.65,.006},.2));DocumentBlock second=blocks.get(3);
+            if(current==0)((ObjectNode)second.getReadingContext()).put("sourceSha256",OTHER);
+            if(current==1)second.getPdfGlyphs().clear();
+            if(current==2)second.setPageNo(9);
+            if(current==3)second.getPdfGlyphs().get(0).getPdfboxPosition()[8]+=10;
+            if(current==4)blocks.set(3,scopePdfLine("q-3",8,text[3],new double[]{.5,.18,.35,.006},.5));
+            if(current==5)blocks.set(3,scopePdfLine("q-3",8,text[3],new double[]{.2,.7,.65,.006},.2));
+            if(current==6)blocks.add(3,scopePdfLine("intervening",8,"Unrelated source text.",new double[]{.2,.17,.65,.006},.2));
+            if(current==7)blocks.set(2,scopePdfLine("q-2",8,text[2].replace("#",""),new double[]{.2,.16,.65,.006},.2));
+            if(current==8)blocks.set(2,scopePdfLine("q-2",8,text[2].replace("#","##"),new double[]{.2,.16,.65,.006},.2));
+            if(current==9)blocks.add(3,scopePdfLine("next-clause",8,"SCC81 A new owner boundary",new double[]{.2,.17,.65,.006},.2));
+            if(current==10)blocks.add(4,scopePdfLine("repeated",8,"#Clauses SCC70(3) and SCC70(4)",new double[]{.2,.20,.65,.006},.2));
+            JsonNode evidence=OerTemplateEvidence.analyse("SCC",scopePdf(blocks));for(JsonNode group:evidence.path("groups"))if("explicit_quoted_word_scope".equals(group.path("kind").asText()))assertFalse(group.path("scopeComplete").asBoolean(),"Unsafe complete scope mode "+current);
+        });}assertAll(cases);
     }
 
     private static JsonNode namedWordGroup(JsonNode evidence,String term){for(JsonNode group:evidence.path("groups"))if("explicit_quoted_word_scope".equals(group.path("kind").asText())&&term.equals(group.path("quotedSourceLiteral").asText()))return group;throw new AssertionError("Missing named word group "+term);}

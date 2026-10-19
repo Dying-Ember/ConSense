@@ -47,6 +47,42 @@ class DraftReviewDiscoveryTest {
         assertEquals("pending",checklist(result).get("status"));assertEquals(0,map(state(result).get("discoverySummary")).get("adoptedValues"));
     }
 
+    @Test void unknownMarkerKeepsItsOwnSourceReferencesWhileContextGroupsCannotAuthorizeEdits() {
+        // Actual local discover payload with a mock gateway; no real model or business acceptance.
+        String instruction="* Review the unresolved source choice.",clause="The whole source clause remains context, including this second sentence.";
+        ObjectNode source=reading("1","Use the actual project source for the local choice. Keep this complete second sentence.");
+        ObjectNode parentNote=source.withArray("guidanceNotes").addObject().put("id","parent-note").put("text","The parent condition is independent. Preserve its full instruction.").put("captureComplete",true).put("scopeComplete",false);
+        ObjectNode localCondition=source.putArray("conditions").addObject().put("id","local-condition").put("guidanceNoteId","note-1").put("text","If the local choice applies.").put("status","source_condition_candidate");
+        ObjectNode parentCondition=source.withArray("conditions").addObject().put("id","parent-condition").put("guidanceNoteId","parent-note").put("text","If the independent parent applies.").put("status","source_condition_candidate");
+        source.withArray("conditions").addObject().put("id","unrelated-condition").put("guidanceNoteId","unrelated-note").put("text","Unrelated condition stays outside this payload.");
+        ObjectNode marker=source.withArray("markerCandidates").addObject().put("id","unknown-marker").put("memberId","marked-member").put("symbol","*").put("disposition","unknown");
+        marker.putObject("localSentenceObservation").put("text",instruction);marker.putArray("guidanceNoteIds").add("note-1");marker.putArray("conditionIds").add("local-condition");
+        marker.putArray("contextGroupIds").add("field-context").add("whole-context");
+        ObjectNode relationship=marker.putArray("sourceInstructionRelationships").addObject().put("id","independent-conditions").put("kind","nested_source_condition")
+                .put("parentGroupId","whole-context").put("childGroupId","field-context").put("parentGuidanceNoteId","parent-note").put("childGuidanceNoteId","note-1")
+                .put("parentConditionId","parent-condition").put("childConditionId","local-condition").put("status","physical_source_containment_local_conditions_independent");
+        ObjectNode field=source.withArray("groups").addObject().put("id","field-context").put("kind","native_source_field_candidate").put("fieldLabel","person_title_choice").put("scopeComplete",false).put("sourceFieldRangeComplete",true).put("text","Mr/Ms");
+        field.putArray("guidanceNoteIds").add("note-1");
+        ObjectNode whole=source.withArray("groups").addObject().put("id","whole-context").put("kind","source_unit_instruction_scope").put("guidanceNoteId","note-1").put("scopeComplete",true).put("text",clause);
+        ObjectNode member=source.withArray("sourceMembers").addObject().put("id","clause-member");member.putObject("textObservation").put("text",clause);
+        ObjectNode position=member.putObject("sourcePosition").put("sourceSha256",SHA).put("partName","word/document.xml").put("nodePath","/native/context-clause");
+        ObjectNode paragraph=source.withArray("paragraphs").addObject().put("id","editable-context-clause").put("paragraphSha256",SHA).put("sourceSha256",SHA).put("text",clause);paragraph.set("sourcePosition",position.deepCopy());
+        whole.putArray("memberRanges").addObject().put("memberId","clause-member").put("channel","text").put("start",0).put("end",clause.length());
+        Map<String,Object> seeded=DraftReviewDiscovery.seed(graph(),Collections.singletonList(source));
+        for(Map<String,Object> seed:nodes(seeded))if(!"unknown-marker".equals(JsonUtils.mapper().valueToTree(seed.get("sourceObservation")).path("id").asText()))map(seed.get("discovery")).put("status","completed");
+        Map<String,Object> proposed=modelNode("choice","boolean","decision",instruction);proposed.put("effects",Arrays.asList(obj("scopeId","field-context","quote","Mr/Ms","action","delete"),obj("scopeId","whole-context","quote",clause,"action","delete")));
+        AiGateway ai=mock(AiGateway.class);when(ai.complete(anyString(),anyString())).thenReturn(response(proposed));
+        Map<String,Object> result=DraftReviewDiscovery.discover(ai,seeded,Collections.singletonList(source),1);
+        ArgumentCaptor<String> users=ArgumentCaptor.forClass(String.class);verify(ai).complete(anyString(),users.capture());JsonNode payload=JsonUtils.parse(users.getValue());
+        assertEquals(marker,payload.path("instruction").path("observation"));assertEquals("marker",payload.path("instruction").path("kind").asText());assertEquals(0,payload.path("scopeCandidates").size());
+        assertEquals(2,payload.path("relatedGuidanceNotes").size());assertEquals(source.path("guidanceNotes").path(0),payload.path("relatedGuidanceNotes").path(0));assertEquals(parentNote,payload.path("relatedGuidanceNotes").path(1));
+        assertEquals(2,payload.path("sourceConditions").size());assertEquals(localCondition,payload.path("sourceConditions").path(0));assertEquals(parentCondition,payload.path("sourceConditions").path(1));
+        assertEquals(1,payload.path("sourceRelationships").size());assertEquals(relationship,payload.path("sourceRelationships").path(0));assertEquals(0,payload.path("unresolvedConditionIds").size());assertFalse(users.getValue().contains("Unrelated condition stays outside"));
+        Map<String,Object> candidate=find(result,"-choice");assertEquals("pending",candidate.get("status"));assertFalse(candidate.containsKey("fixedValue"));assertEquals(2,list(candidate.get("editTargets")).size());
+        for(Object raw:list(candidate.get("editTargets"))){Map<String,Object> target=map(raw);assertEquals("check",target.get("action"));assertEquals("delete",target.get("proposedAction"));assertEquals(false,target.get("scopeComplete"));assertEquals(true,target.get("needsRebind"));assertFalse(target.containsKey("sourceScopeObservation"));}
+        assertEquals(0,map(state(result).get("discoverySummary")).get("adoptedValues"));assertEquals("unknown",marker.path("disposition").asText());assertFalse(marker.has("targetGroupIds"));
+    }
+
     @Test void exactBillInsertionPointMapsOnlyTheKnownParagraphNewlineAndKeepsFutureListUnknown() {
         String instruction="Insert all Bill Nos. and descriptions.";ObjectNode source=reading("1",instruction);
         ObjectNode member=source.withArray("sourceMembers").addObject().put("id","bill");

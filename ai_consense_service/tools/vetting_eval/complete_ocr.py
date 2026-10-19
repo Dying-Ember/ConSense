@@ -125,6 +125,28 @@ def _request(url, body=None, timeout=None, method=None):
 
 
 def _config(config):
+    if 'sourceReviews' in config:
+        reviews = config['sourceReviews']
+        if (not isinstance(reviews, list) or any(key in config for key in
+                ('parserRouteAcceptance', 'canonicalAdoptionManifest'))):
+            raise ValueError('Use one source-review configuration form')
+        keys = set()
+        for review in reviews:
+            if (not isinstance(review, dict) or set(review) - {
+                    'runIds', 'parserRouteAcceptance', 'canonicalAdoptionManifest'}
+                    or not any(key in review for key in ('parserRouteAcceptance', 'canonicalAdoptionManifest'))
+                    or any(not isinstance(review[key], dict) for key in
+                           ('parserRouteAcceptance', 'canonicalAdoptionManifest') if key in review)
+                    or not isinstance(review.get('runIds'), list) or len(review['runIds']) != 2
+                    or not all(isinstance(key, str) and re.fullmatch(
+                        r'(?:paddleocr-vl|mineru):[a-f0-9]{64}', key) for key in review['runIds'])
+                    or {key.split(':', 1)[0] for key in review['runIds']} != {'paddleocr-vl', 'mineru'}
+                    or len(set(review['runIds'])) != 2):
+                raise ValueError('Exact complete dual-run identities required for each source review')
+            key = tuple(sorted(review['runIds']))
+            if key in keys:
+                raise ValueError('Conflicting source reviews for the same complete dual runs')
+            keys.add(key)
     if config.get('wholeParserFeaturePolicy') is not None:
         validate_policy(config['wholeParserFeaturePolicy'])
     timeout = config.get('timeoutSeconds', 600)
@@ -350,6 +372,60 @@ def _verify_paddle_capture_claims(manifest, capture, assets):
             raise ValueError('Native layout invocation differs from actual session IO inventory')
 
 
+def project_complete_regions(bundle, whole_groups, width, height, *, canonical_projection=None):
+    """The same bound region projection for live recognition and saved-observation replay."""
+    runs = bundle['runs']
+    regions, selections = [], []
+    if canonical_projection is not None:
+        from canonical_projection import selected_complete_page_blocks
+        if canonical_projection['manifest']['scope']['requiredPhysicalPages'] != sorted(
+                group['physicalPageNo'] for group in whole_groups):
+            raise ValueError('Canonical complete-page scope differs from actual page groups')
+        units = {part['blockId']: unit['unitId'] for unit in canonical_projection['canonical']['units']
+                 for part in unit['parts']}
+        selections = [(run, page, block, 'source_review_selected_region', {
+            'projectionSha256': canonical_projection['projectionSha256'],
+            'manifestSha256': canonical_projection['projectionIdentity']['manifestSha256'],
+            'referenceEvidenceSha256': canonical_projection['manifest']['reference']['evidenceSha256'],
+            'unitId': units[block['blockId']]})
+            for run, page, block in selected_complete_page_blocks(bundle, canonical_projection)]
+    else:
+        for group in whole_groups:
+            channel = group['selectedParser'] or 'paddleocr-vl'
+            run = next(run for run in runs if run['parser'] == channel)
+            page = next((page for page in run['pages'] if page['physicalPageNo'] == group['physicalPageNo']), None)
+            if page is None:
+                raise ValueError('Primary parser page is unavailable for ' + channel + ' at physical page '
+                                 + str(group['physicalPageNo']) + '; complete parser evidence retained')
+            status = group['selectionStatus'] if group['selectedParser'] else 'legacy_primary_candidate_unverified'
+            selections.extend((run, page, block, status, None) for block in page['blocks'])
+    for run, page, block, status, selection in selections:
+        geometry = project_bbox_to_original(run, page, block['bbox'])
+        region = {'id': block['blockId'], 'kind': block['label'], 'text': block['text'],
+                  'originalText': block['text'], 'readingOrder': block['readingOrder'],
+                  'channel': run['parser'], 'semanticStatus': 'unverified',
+                  'selectionStatus': status,
+                  'geometryStatus': 'unknown', 'providerBlock': block,
+                  'originalGeometry': geometry}
+        box = block.get('bbox')
+        if box and box['coordinateFrame'] in ('raster', 'normalized', 'normalized_1000'):
+            x0, y0, x1, y1 = box['xyxy']
+            if box['coordinateFrame'] != 'raster':
+                scale = 1000 if box['coordinateFrame'] == 'normalized_1000' else 1
+                x0, x1 = x0*width/scale, x1*width/scale
+                y0, y1 = y0*height/scale, y1*height/scale
+            polygon = [[x0, y0], [x1, y0], [x1, y1], [x0, y1]]
+            region['polygon'] = polygon
+            region['bbox'] = [x0, y0, x1-x0, y1-y0]
+            region['geometryStatus'] = 'observed_input_frame' if 0 <= x0 <= x1 <= width and 0 <= y0 <= y1 <= height else 'outside_input_frame'
+        if 'table' in block:
+            region['table'] = block['table']
+        if selection is not None:
+            region['canonicalSelection'] = selection
+        regions.append(region)
+    return regions
+
+
 def recognize_complete_page(raw, config, store, *, request=_request, source_context=None, line_observer=None):
     timeout = _config(config)
     deadline = time.monotonic() + timeout
@@ -519,46 +595,30 @@ def recognize_complete_page(raw, config, store, *, request=_request, source_cont
                 task_record['cacheDisposition'] = 'not_stored_total_deadline_elapsed'
             task_record['status'] = 'completed'
             runs.append(run)
-        bundle = build_dual_parser_evidence(runs, artifact_store=store)
+        review_config = config
+        if 'sourceReviews' in config:
+            run_ids = {run['runId'] for run in runs}
+            review_config = next((review for review in config['sourceReviews']
+                                  if set(review['runIds']) == run_ids), {})
+        bundle = build_dual_parser_evidence(runs, route_acceptance_manifest=review_config.get('parserRouteAcceptance'), artifact_store=store)
         bundle_ref = store.put_bytes(_bytes(bundle))
         whole_groups = select_whole_parser_groups(bundle, config.get('wholeParserFeaturePolicy'), artifact_store=store)
         if not whole_groups:
             raise ValueError('Requested parser page is unavailable at physical page '
                              + str(physical_page) + '; complete parser evidence retained')
-        regions = []
         for group in whole_groups:
             group['dualEvidenceRef'] = bundle_ref
-            channel = group['selectedParser'] or 'paddleocr-vl'
-            run = next(run for run in runs if run['parser'] == channel)
-            page = next((page for page in run['pages'] if page['physicalPageNo'] == group['physicalPageNo']), None)
-            if page is None:
-                raise ValueError('Primary parser page is unavailable for ' + channel + ' at physical page '
-                                 + str(group['physicalPageNo']) + '; complete parser evidence retained')
-            for block in page['blocks']:
-                geometry = project_bbox_to_original(run, page, block['bbox'])
-                region = {'id': block['blockId'], 'kind': block['label'], 'text': block['text'],
-                          'originalText': block['text'], 'readingOrder': block['readingOrder'],
-                          'channel': channel, 'semanticStatus': 'unverified',
-                          'selectionStatus': group['selectionStatus'] if group['selectedParser'] else 'legacy_primary_candidate_unverified',
-                          'geometryStatus': 'unknown', 'providerBlock': block,
-                          'originalGeometry': geometry}
-                box = block.get('bbox')
-                if box and box['coordinateFrame'] in ('raster', 'normalized', 'normalized_1000'):
-                    x0, y0, x1, y1 = box['xyxy']
-                    if box['coordinateFrame'] != 'raster':
-                        scale = 1000 if box['coordinateFrame'] == 'normalized_1000' else 1
-                        x0, x1 = x0*width/scale, x1*width/scale
-                        y0, y1 = y0*height/scale, y1*height/scale
-                    polygon = [[x0, y0], [x1, y0], [x1, y1], [x0, y1]]
-                    region['polygon'] = polygon
-                    region['bbox'] = [x0, y0, x1-x0, y1-y0]
-                    region['geometryStatus'] = 'observed_input_frame' if 0 <= x0 <= x1 <= width and 0 <= y0 <= y1 <= height else 'outside_input_frame'
-                if 'table' in block:
-                    region['table'] = block['table']
-                regions.append(region)
+        canonical = None
+        if review_config.get('canonicalAdoptionManifest') is not None:
+            from canonical_projection import project_canonical
+            canonical = project_canonical(bundle, review_config['canonicalAdoptionManifest'], artifact_store=store)
+        regions = project_complete_regions(bundle, whole_groups, width, height, canonical_projection=canonical)
         original_text = '\n'.join(region['text'] for region in regions if isinstance(region['text'], str))
         auxiliary = None
-        if line_observer is not None and source_context is not None:
+        if canonical is not None and line_observer is not None:
+            auxiliary = {'status': 'not_executed_source_reviewed_complete_page', 'addedRegions': 0,
+                         'sourceQualityAccepted': False}
+        elif line_observer is not None and source_context is not None:
             started = time.monotonic()
             auxiliary = {'status': 'not_started_budget_exhausted', 'remainingSecondsBefore': deadline-started,
                          'synchronousNativeCancellation': 'not_supported', 'sourceQualityAccepted': False}
@@ -599,6 +659,8 @@ def recognize_complete_page(raw, config, store, *, request=_request, source_cont
                     'sourceQualityAccepted': False, 'captureCompleteness': bundle['dualCompleteness']}}
         if auxiliary is not None:
             value['coverage']['auxiliaryLineCoverage'] = auxiliary
+        if canonical is not None:
+            value['provenance']['canonicalProjectionRef'] = store.put_bytes(_bytes(canonical))
         return value
     except Exception as error:
         if provider_tasks and provider_tasks[-1]['status'] != 'completed':

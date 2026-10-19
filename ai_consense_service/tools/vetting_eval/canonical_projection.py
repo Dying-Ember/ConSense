@@ -260,6 +260,35 @@ def _assets(rows, units, runs, reference, artifact_store):
     return sorted(result, key=lambda a: (a['physicalPages'][0], a['unitId'], a['assetId']))
 
 
+def _reviewed_adjacent_overlap(reference, first, second, blocks):
+    a, b = first['bbox'], second['bbox']
+    if not (a[1] < b[1] < a[3] < b[3] or b[1] < a[1] < b[3] < a[3]):
+        return False
+    if first['geometryEvidence']['transformSha256'] != second['geometryEvidence']['transformSha256']:
+        return False
+    intersection = [max(a[0], b[0]), max(a[1], b[1]), min(a[2], b[2]), min(a[3], b[3])]
+    reviews = reference.get('evidence', {}).get('reviewedGeometryOverlaps', [])
+    if not isinstance(reviews, list):
+        return False
+    for review in reviews:
+        if (isinstance(review, dict) and review.get('kind') == 'source_reviewed_adjacent_regions'
+                and type(review.get('physicalPageNo')) is int
+                and review['physicalPageNo'] == first['physicalPageNo'] == second['physicalPageNo']
+                and isinstance(review.get('blockIds'), list) and len(review['blockIds']) == 2
+                and all(isinstance(bid, str) and bid for bid in review['blockIds'])
+                and set(review['blockIds']) == {first['blockId'], second['blockId']}
+                and isinstance(review.get('intersection'), list) and len(review['intersection']) == 4
+                and all(type(value) in (int, float) and 0 <= value <= 1 for value in review['intersection'])
+                and review.get('intersection') == intersection
+                and isinstance(review.get('reason'), str) and review['reason'].strip()
+                and isinstance(review.get('inputImageSha256'), str)
+                and re.fullmatch('[a-f0-9]{64}', review['inputImageSha256'])
+                and all(blocks[p['blockId']][1]['mapping']['originalPageTransform']['inputFrame']['sha256']
+                        == review['inputImageSha256'] for p in (first, second))):
+            return True
+    return False
+
+
 def _project_canonical(bundle, adoption_manifest, *, artifact_store=None):
     """Return sealed source-bound chunks; the explicit review never authenticates itself."""
     from structured_parser_evidence import assert_complete_dual
@@ -344,7 +373,8 @@ def _project_canonical(bundle, adoption_manifest, *, artifact_store=None):
                         part['candidateTextStatus'] == 'unavailable_source_observation'):
                     continue  # Explicit figure/caption association; empty figure text is not pasted twice.
                 _fail(previous['physicalPageNo'] != part['physicalPageNo'] or
-                      min(a[2], b[2]) <= max(a[0], b[0]) or min(a[3], b[3]) <= max(a[1], b[1]),
+                      min(a[2], b[2]) <= max(a[0], b[0]) or min(a[3], b[3]) <= max(a[1], b[1])
+                      or _reviewed_adjacent_overlap(reference, previous, part, blocks),
                       'overlapping_region_adoption')
             parts.append(part)
             used.add(bid)
@@ -559,3 +589,121 @@ def validate_projection(projection):
 
 
 validate_canonical_projection = validate_projection
+
+
+def _replacement_role(block):
+    if 'table' in block:
+        return 'table'
+    label = block.get('label')
+    for role, labels in (
+        ('body', {'text', 'paragraph', 'body_text', 'plain_text'}),
+        ('heading', {'title', 'doc_title', 'paragraph_title', 'section_header', 'section_title'}),
+        ('header', {'header', 'page_header'}), ('footer', {'footer', 'page_footer'}),
+        ('aside', {'aside_text', 'sidebar', 'margin_note', 'side_note'}),
+        ('footnote', {'footnote', 'note', 'endnote'}),
+        ('caption', {'caption', 'table_caption', 'figure_caption', 'chart_caption'}),
+        ('formula', {'equation', 'formula', 'isolated_formula', 'inline_formula', 'interline_equation'})):
+        if label in labels:
+            return role
+    return label
+
+
+def selected_complete_page_blocks(bundle, projection):
+    """Return original (run, page, block) tuples in sealed canonical parts order."""
+    from structured_parser_evidence import project_bbox_to_original
+    validate_projection(projection)
+    _fail(bundle.get('bundleSha256') == _hash({k: v for k, v in bundle.items()
+          if k != 'bundleSha256'}), 'immutable_bundle_mismatch')
+    _fail(projection['source'] == bundle['source'] and
+          projection['projectionIdentity']['bundleSha256'] == bundle['bundleSha256'],
+          'complete_page_projection_source_mismatch')
+    runs, blocks = _member_index(bundle)
+    for run in runs.values():
+        _fail(run.get('runContentSha256') == _hash({k: v for k, v in run.items()
+              if k != 'runContentSha256'}), 'immutable_run_mismatch')
+        _fail(run['source'] == bundle['source'], 'complete_page_run_source_mismatch')
+    _fail(projection['parserIdentities'] == {key: run['identity'] for key, run in runs.items()},
+          'complete_page_parser_identity_mismatch')
+    units = {unit['unitId']: unit for unit in projection['canonical']['units']}
+    selected, selected_ids = [], set()
+    for unit in units.values():
+        for part in unit['parts']:
+            _fail(part['blockId'] in blocks and part['blockId'] not in selected_ids,
+                  'complete_page_duplicate_or_missing_block')
+            run, page, block = blocks[part['blockId']]
+            _fail(unit['runId'] == run['runId'] and _hash(part) == _hash(_part(run, page, block)),
+                  'complete_page_selected_part_mismatch')
+            _fail('table' not in block or unit['scope'] == 'table_group',
+                  'whole_table_group_required')
+            selected.append((run, page, block))
+            selected_ids.add(part['blockId'])
+    pages = projection['manifest']['scope']['requiredPhysicalPages']
+    coverage = projection['manifest']['reference'].get('evidence', {}).get('completePageCoverage')
+    _fail(isinstance(coverage, list) and len(coverage) == len(pages),
+          'complete_page_coverage_required')
+    covered_pages = []
+    for row in coverage:
+        _fields(row, {'physicalPageNo', 'primaryRunId', 'replacements'}, 'illegal_complete_page_coverage')
+        number = row.get('physicalPageNo')
+        _fail(type(number) is int and number in pages and number not in covered_pages,
+              'complete_page_coverage_page_mismatch')
+        covered_pages.append(number)
+        primary = runs.get(row.get('primaryRunId'))
+        _fail(primary is not None, 'complete_page_primary_run_missing')
+        found = [page for page in primary['pages'] if page['physicalPageNo'] == number]
+        _fail(len(found) == 1, 'complete_page_primary_page_missing')
+        primary_ids = {block['blockId'] for block in found[0]['blocks']}
+        retained = {block['blockId'] for run, page, block in selected
+                    if run['runId'] == primary['runId'] and page['physicalPageNo'] == number}
+        foreign_units = {uid for uid, unit in units.items() if unit['runId'] != primary['runId']
+                         and number in unit['physicalPages']}
+        replacements = row.get('replacements')
+        _fail(isinstance(replacements, list), 'complete_page_replacements_required')
+        replaced, declared_foreign = [], []
+        for replacement in replacements:
+            _fields(replacement, {'primaryBlockIds', 'selectedUnitIds', 'reclassification'}, 'illegal_complete_page_replacement')
+            pids, uids = replacement.get('primaryBlockIds'), replacement.get('selectedUnitIds')
+            _fail(isinstance(pids, list) and pids and all(isinstance(bid, str) and bid in primary_ids for bid in pids)
+                  and len(pids) == len(set(pids)), 'invalid_complete_page_replaced_blocks')
+            _fail(isinstance(uids, list) and uids and all(isinstance(uid, str) and uid in foreign_units for uid in uids)
+                  and len(uids) == len(set(uids)), 'invalid_complete_page_replacement_units')
+            replaced.extend(pids)
+            declared_foreign.extend(uids)
+        _fail(len(replaced) == len(set(replaced)) and not retained.intersection(replaced)
+              and retained.union(replaced) == primary_ids, 'incomplete_primary_page_coverage')
+        _fail(len(declared_foreign) == len(set(declared_foreign))
+              and set(declared_foreign) == foreign_units, 'unbound_complete_page_foreign_selection')
+        for replacement in replacements:
+            original_blocks = [blocks[bid][2] for bid in replacement['primaryBlockIds']]
+            adopted_units = [units[uid] for uid in replacement['selectedUnitIds']]
+            adopted_blocks = [blocks[part['blockId']][2] for unit in adopted_units
+                              for part in unit['parts'] if part['physicalPageNo'] == number]
+            reclassification = replacement.get('reclassification')
+            whole_formula = (reclassification == 'whole_formula' and len(original_blocks) == 1
+                and 'table' in original_blocks[0] and len(adopted_units) == 1
+                and adopted_units[0]['scope'] == 'region' and len(adopted_units[0]['parts']) == 1
+                and len(adopted_blocks) == 1 and _replacement_role(adopted_blocks[0]) == 'formula')
+            if any('table' in block for block in original_blocks):
+                compatible = whole_formula or (reclassification is None
+                    and all('table' in block for block in original_blocks)
+                    and all(unit['scope'] == 'table_group' for unit in adopted_units))
+            else:
+                compatible = reclassification is None and {_replacement_role(block) for block in original_blocks} == {
+                    _replacement_role(block) for block in adopted_blocks}
+            _fail(compatible, 'complete_page_replacement_role_mismatch')
+            primary_boxes = [project_bbox_to_original(primary, found[0], blocks[bid][2]['bbox'])
+                             for bid in replacement['primaryBlockIds']]
+            _fail(all(box['status'] == 'verified' for box in primary_boxes),
+                  'complete_page_replacement_geometry_unknown')
+            primary_boxes = [box['xyxyNormalized'] for box in primary_boxes]
+            alternate_boxes = [part['bbox'] for uid in replacement['selectedUnitIds']
+                               for part in units[uid]['parts'] if part['physicalPageNo'] == number]
+
+            def intersects(left, right):
+                return min(left[2], right[2]) > max(left[0], right[0]) and min(left[3], right[3]) > max(left[1], right[1])
+
+            _fail(all(any(intersects(left, right) for right in alternate_boxes) for left in primary_boxes)
+                  and all(any(intersects(left, right) for left in primary_boxes) for right in alternate_boxes),
+                  'complete_page_replacement_region_mismatch')
+    _fail(sorted(covered_pages) == pages, 'complete_page_coverage_page_mismatch')
+    return selected

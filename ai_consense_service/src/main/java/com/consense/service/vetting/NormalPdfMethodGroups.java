@@ -30,15 +30,20 @@ final class NormalPdfMethodGroups {
                     JsonNode physical=unique(candidate.path("tables"),"tableId",table.path("providerTableId").asText());need(physical!=null,"pdf_method_physical_table_missing_or_ambiguous");box(table.path("bbox"));Set<String> members=new HashSet<>();
                     for(JsonNode member:group.path("members"))need(member.path("memberId").isTextual()&&members.add(member.path("memberId").asText()),"pdf_method_member_identity_ambiguous");
                     for(JsonNode relation:group.path("relations")){if(relation.has("fromMemberId"))need(members.contains(relation.path("fromMemberId").asText()),"pdf_method_relation_member_missing");if(relation.has("toTableId"))need(id.equals(relation.path("toTableId").asText()),"pdf_method_relation_table_mismatch");if(relation.has("toCell"))need(id.equals(relation.path("toCell").path("tableId").asText()),"pdf_method_relation_cell_table_mismatch");}
+                    if("none_original_physical_cell_literals".equals(table.path("textTransform").asText()))need(wholePhysicalGrid(table,physical),"pdf_method_physical_grid_incomplete_or_inconsistent");
                     TableGroup observed=new TableGroup(group,table,physical,rows(table));try{notes(group,table);}catch(IllegalArgumentException invalid){observed.noteFailure=invalid.getMessage();issue(inventory,carrier.getId(),observed.noteFailure);}groups.add(observed);
                 }
                 if(groups.isEmpty())continue;
                 for(DocumentBlock line:blocks)if(line.getPageNo()!=null&&line.getPageNo()==page&&nativeLine(line,sourceSha,frame)){
                     double[] rectangle=points(line.getBbox(),frame.path("pageWidth").asDouble(),frame.path("pageHeight").asDouble());List<TableGroup> intersected=new ArrayList<>();for(TableGroup group:groups)if(intersects(rectangle,box(group.table.path("bbox"))))intersected.add(group);
                     if(intersected.size()!=1){if(intersected.size()>1)issue(inventory,carrier.getId(),"pdf_native_line_intersects_multiple_method_tables");continue;}TableGroup group=intersected.get(0);if(!contains(box(group.table.path("bbox")),rectangle))continue;
-                    List<Row> matched=new ArrayList<>();for(Row row:group.rows)if(normal(line.getEffectiveText()).equals(row.text)&&contains(row.bbox,rectangle))matched.add(row);
+                    List<Row> matched=new ArrayList<>();Map<Integer,ArrayNode> fragments=new HashMap<>();
+                    for(Row row:group.rows)if(contains(row.bbox,rectangle)){
+                        if(normal(line.getEffectiveText()).equals(row.text))matched.add(row);
+                        else if("none_original_physical_cell_literals".equals(group.table.path("textTransform").asText())){ArrayNode proof=cellFragment(line,row,rectangle);if(proof!=null){matched.add(row);fragments.put(row.index,proof);}}
+                    }
                     if(matched.size()!=1){if(matched.size()>1)issue(inventory,carrier.getId(),"pdf_native_line_matches_multiple_method_rows");continue;}
-                    group.blocks.add(line.getId());ObjectNode alignment=group.alignments.addObject();alignment.put("blockId",line.getId());alignment.put("row",matched.get(0).index);alignment.put("basis","same_original_and_page_calibrated_frame_unique_contained_row_exact_whitespace_normalized_literal");alignment.put("textComparison","unicode_whitespace_collapsed_case_and_punctuation_preserved");alignment.put("geometryTolerancePoints",EPS);alignment.set("nativeLineBboxPoints",JsonUtils.mapper().valueToTree(rectangle));alignment.put("glyphIdNamespacesJoined",false);
+                    group.blocks.add(line.getId());ObjectNode alignment=group.alignments.addObject();alignment.put("blockId",line.getId());alignment.put("row",matched.get(0).index);alignment.put("basis",fragments.containsKey(matched.get(0).index)?"same_original_page_frame_unique_contained_native_cell_fragment":"same_original_and_page_calibrated_frame_unique_contained_row_exact_whitespace_normalized_literal");alignment.put("textComparison","unicode_whitespace_collapsed_case_and_punctuation_preserved");alignment.put("geometryTolerancePoints",EPS);alignment.set("nativeLineBboxPoints",JsonUtils.mapper().valueToTree(rectangle));alignment.put("glyphIdNamespacesJoined",false);if(fragments.containsKey(matched.get(0).index))alignment.set("nativeCellFragmentProof",fragments.get(matched.get(0).index));
                 }
                 for(TableGroup observed:groups){
                     ObjectNode group=((ArrayNode)inventory.path("groups")).addObject();String id="pdf-method-group:"+VettingCorpus.hash(JsonUtils.write(Arrays.asList(sourceSha,carrier.getId(),observed.table.path("tableId"),VettingSourceMaterial.formSourceSha256(raw))));group.put("id",id).put("kind","native_table_method_group").put("reference",observed.table.path("tableId").asText());group.putNull("parentId");group.put("scopeComplete",observed.noteFailure==null).put("status",observed.noteFailure==null?"method_observation_complete":"partial_unknown_scope").put("semanticScopeVerified",false).put("humanConfirmed",false).put("automaticEditEligible",false).put("legalClosure","unknown");
@@ -50,6 +55,28 @@ final class NormalPdfMethodGroups {
                 }
             }catch(IllegalArgumentException invalid){issue(inventory,carrier.getId(),invalid.getMessage());}
         }
+    }
+    private static boolean wholePhysicalGrid(JsonNode table,JsonNode physical){
+        if(!"none_original_physical_cell_literals".equals(table.path("textTransform").asText())||!physical.path("issues").isArray()||!physical.path("issues").isEmpty()||!physical.path("cells").isArray()||!table.path("origins").isArray()||table.path("origins").size()!=physical.path("cells").size())return false;
+        JsonNode height=table.path("rowCount"),width=table.path("colCount");if(!height.isIntegralNumber()||!height.canConvertToInt()||height.asInt()<1||!width.isIntegralNumber()||!width.canConvertToInt()||width.asInt()<1||(long)height.asInt()*width.asInt()!=table.path("origins").size())return false;
+        JsonNode coverage=physical.path("coverage");if(!coverage.path("required").isArray()||coverage.path("required").isEmpty()||!coverage.path("required").equals(coverage.path("present"))||!coverage.path("missing").isArray()||!coverage.path("missing").isEmpty()||!coverage.path("duplicate").isArray()||!coverage.path("duplicate").isEmpty())return false;
+        Set<Long> required=gridGlyphs(coverage.path("required")),owned=new HashSet<>();if(required==null)return false;Set<String> used=new HashSet<>(),positions=new HashSet<>();for(JsonNode cell:table.path("origins")){
+            JsonNode row=cell.path("row"),col=cell.path("col");if(!row.isIntegralNumber()||!row.canConvertToInt()||row.asInt()<0||row.asInt()>=height.asInt()||!col.isIntegralNumber()||!col.canConvertToInt()||col.asInt()<0||col.asInt()>=width.asInt()||!positions.add(row.asInt()+":"+col.asInt()))return false;
+            for(String span:Arrays.asList("rowSpan","colSpan"))if(!cell.path(span).isIntegralNumber()||!cell.path(span).canConvertToInt()||cell.path(span).asInt()!=1)return false;
+            if(!cell.path("spanKnown").isBoolean()||!cell.path("spanKnown").asBoolean()||!cell.path("text").isTextual())return false;
+            JsonNode ids=cell.path("physicalCellIds");if(!ids.isArray()||ids.size()!=1||!ids.get(0).isTextual()||ids.get(0).asText().isEmpty()||!used.add(ids.get(0).asText()))return false;JsonNode source=unique(physical.path("cells"),"physicalCellId",ids.get(0).asText());if(source==null)return false;
+            for(String key:Arrays.asList("row","col","rowSpan","colSpan","text","bbox","spanKnown","glyphIds"))if(!cell.path(key).equals(source.path(key)))return false;
+            Set<Long> idsOwned=gridGlyphs(source.path("glyphIds"));if(idsOwned==null)return false;for(Long id:idsOwned)if(!owned.add(id))return false;
+        }return used.size()==physical.path("cells").size()&&owned.equals(required);
+    }
+    private static Set<Long> gridGlyphs(JsonNode values){if(!values.isArray())return null;Set<Long> ids=new HashSet<>();for(JsonNode value:values)if(!value.isIntegralNumber()||!value.canConvertToLong()||value.asLong()<0||!ids.add(value.asLong()))return null;return ids;}
+    private static ArrayNode cellFragment(DocumentBlock line,Row row,double[] rectangle){
+        String text=normal(line.getEffectiveText());if(text.isEmpty())return null;ArrayNode proof=JsonUtils.mapper().createArrayNode();
+        for(JsonNode cell:row.cells)if(contains(box(cell.path("bbox")),rectangle)){
+            String value=normal(cell.path("text").asText());int at=value.indexOf(text),end=at+text.length();
+            if(at<0||value.indexOf(text,at+1)>=0||at>0&&Character.isLetterOrDigit(value.codePointBefore(at))||end<value.length()&&Character.isLetterOrDigit(value.codePointAt(end)))continue;
+            ObjectNode match=proof.addObject();match.set("row",cell.path("row"));match.set("col",cell.path("col"));match.put("nativeLiteral",line.getEffectiveText());match.put("cellLiteral",cell.path("text").asText());match.put("basis",value.equals(text)?"complete_cell_literal":"unique_contiguous_cell_literal");match.set("cellBboxPoints",cell.path("bbox"));
+        }return proof.size()==1?proof:null;
     }
     /** A body-to-notes expansion requires every literal callout to have one same-method cell/definition edge. */
     private static void notes(JsonNode group,JsonNode table){
@@ -66,7 +93,7 @@ final class NormalPdfMethodGroups {
     private static List<Row> rows(JsonNode table){
         int height=table.path("rowCount").asInt(),width=table.path("colCount").asInt();need(height>0&&width>0&&table.path("origins").isArray(),"pdf_method_table_shape_unknown");Map<Integer,List<JsonNode>> rows=new TreeMap<>();
         for(JsonNode cell:table.path("origins")){need(cell.path("row").isIntegralNumber()&&cell.path("col").isIntegralNumber()&&cell.path("text").isTextual(),"pdf_method_cell_identity_or_text_unknown");rows.computeIfAbsent(cell.path("row").asInt(),key->new ArrayList<>()).add(cell);}
-        List<Row> out=new ArrayList<>();for(Map.Entry<Integer,List<JsonNode>> entry:rows.entrySet()){List<JsonNode> cells=entry.getValue();cells.sort(Comparator.comparingInt(cell->cell.path("col").asInt()));if(cells.size()!=width)continue;boolean complete=true;List<String> text=new ArrayList<>();double[] bounds=null;for(int col=0;col<width;col++){JsonNode cell=cells.get(col);if(cell.path("col").asInt()!=col||cell.path("rowSpan").asInt()!=1||cell.path("colSpan").asInt()!=1||!cell.path("spanKnown").asBoolean()){complete=false;break;}double[] rectangle=box(cell.path("bbox"));need(contains(box(table.path("bbox")),rectangle),"pdf_method_cell_frame_outside_table");bounds=union(bounds,rectangle);text.add(cell.path("text").asText());}if(complete&&entry.getKey()>=0&&entry.getKey()<height)out.add(new Row(entry.getKey(),normal(String.join(" ",text)),bounds));}return out;
+        List<Row> out=new ArrayList<>();for(Map.Entry<Integer,List<JsonNode>> entry:rows.entrySet()){List<JsonNode> cells=entry.getValue();cells.sort(Comparator.comparingInt(cell->cell.path("col").asInt()));if(cells.size()!=width)continue;boolean complete=true;List<String> text=new ArrayList<>();double[] bounds=null;for(int col=0;col<width;col++){JsonNode cell=cells.get(col);if(cell.path("col").asInt()!=col||cell.path("rowSpan").asInt()!=1||cell.path("colSpan").asInt()!=1||!cell.path("spanKnown").asBoolean()){complete=false;break;}double[] rectangle=box(cell.path("bbox"));need(contains(box(table.path("bbox")),rectangle),"pdf_method_cell_frame_outside_table");bounds=union(bounds,rectangle);text.add(cell.path("text").asText());}if(complete&&entry.getKey()>=0&&entry.getKey()<height)out.add(new Row(entry.getKey(),normal(String.join(" ",text)),bounds,cells));}return out;
     }
     private static boolean nativeLine(DocumentBlock block,String sourceSha,JsonNode frame){
         if(!"native".equals(block.getSource())||!"pdf_line".equals(block.getKind())||block.getBbox()==null||block.getBbox().length!=4||block.getPdfGlyphs().isEmpty()||block.getReadingContext()==null||!sourceSha.equals(block.getReadingContext().path("sourceSha256").asText()))return false;
@@ -90,6 +117,6 @@ final class NormalPdfMethodGroups {
     private static boolean intersects(double[] a,double[] b){return Math.min(a[2],b[2])-Math.max(a[0],b[0])>EPS&&Math.min(a[3],b[3])-Math.max(a[1],b[1])>EPS;}
     private static void need(boolean ok,String reason){if(!ok)throw new IllegalArgumentException(reason);}
     private static void issue(ObjectNode inventory,String block,String reason){((ArrayNode)inventory.path("issues")).addObject().put("path",block).put("status","unknown").put("reason",reason);}
-    private static final class Row{final int index;final String text;final double[] bbox;Row(int index,String text,double[] bbox){this.index=index;this.text=text;this.bbox=bbox;}}
+    private static final class Row{final int index;final String text;final double[] bbox;final List<JsonNode> cells;Row(int index,String text,double[] bbox,List<JsonNode> cells){this.index=index;this.text=text;this.bbox=bbox;this.cells=cells;}}
     private static final class TableGroup{final JsonNode group,table,physical;final List<Row> rows;final List<String> blocks=new ArrayList<>();final ArrayNode alignments=JsonUtils.mapper().createArrayNode();String noteFailure;TableGroup(JsonNode group,JsonNode table,JsonNode physical,List<Row> rows){this.group=group;this.table=table;this.physical=physical;this.rows=rows;}}
 }

@@ -8,9 +8,9 @@ import unittest
 from unittest.mock import patch
 
 from artifact_store import ArtifactStore
-from canonical_projection import (ADOPTION_SCHEMA, CanonicalProjectionError,
+from canonical_projection import (ADOPTION_SCHEMA, CanonicalProjectionError, _hash, _part,
                                   project_canonical, validate_projection)
-from structured_parser_evidence import build_dual_parser_evidence, normalize_parser_run
+from structured_parser_evidence import build_dual_parser_evidence, normalize_parser_run, read_artifact_record
 from structural_retrieval import StructuralRecipe, plan
 from test_token_windows import CharacterTokenizer
 from token_windows import WindowRecipe, verify_window_coverage
@@ -22,7 +22,7 @@ def digest(value):
 
 
 def fixture(*, revision='b' * 40, source_bytes=b'authored-source-original-PDF-wire',
-            mineru_pages=(3, 4), transform_unknown=False, figure=False):
+            mineru_pages=(3, 4), transform_unknown=False, figure=False, overlap=False):
     source = {'sourceFilename': 'AUTHORED-project.pdf', 'mediaType': 'application/pdf',
               'sourceSha256': hashlib.sha256(source_bytes).hexdigest(), 'pageCount': 5}
     input_artifacts = {'original.pdf': source_bytes,
@@ -50,7 +50,7 @@ def fixture(*, revision='b' * 40, source_bytes=b'authored-source-original-PDF-wi
                     '<tr><td>' + str(physical) + ' — Must not 😀</td><td></td></tr></table>')
             blocks = [
                 {'block_id': 'heading', 'block_label': 'text', 'block_content': 'A1 Contract requirements',
-                 'block_bbox': [10, 10, 900, 100], 'block_order': 0},
+                 'block_bbox': [10, 10, 900, 250 if overlap else 100], 'block_order': 0},
                 {'block_id': 'table', 'block_label': 'image' if figure else 'table',
                  'block_content': None if figure else html,
                  'block_bbox': [100, 200, 900, 1600], 'block_order': 1},
@@ -112,6 +112,23 @@ def fixture(*, revision='b' * 40, source_bytes=b'authored-source-original-PDF-wi
             'reviewedAttributes': ['text', 'geometry', 'assetBoundary']}]
     return bundle, manifest
 
+
+class ReviewedBoundaryOverlapTests(unittest.TestCase):
+    def test_exact_original_review_can_preserve_adjacent_observed_bounds(self):
+        bundle, manifest = fixture(overlap=True)
+        primary, alternate = bundle['runs']
+        intro = primary['pages'][0]['blocks'][0]
+        table = alternate['pages'][0]['blocks'][1]
+        manifest['reference']['evidence']['reviewedGeometryOverlaps'] = [{
+            'physicalPageNo': 3, 'blockIds': [intro['blockId'], table['blockId']],
+            'intersection': [.1, .1, .9, .125],
+            'inputImageSha256': primary['pages'][0]['mapping']['originalPageTransform']['inputFrame']['sha256'],
+            'kind': 'source_reviewed_adjacent_regions',
+            'reason': 'Authored original review binds adjacent complete units; no threshold or box rewrite.'}]
+        manifest['reference']['evidenceSha256'] = digest(manifest['reference']['evidence'])
+        projection = project_canonical(bundle, manifest)
+        self.assertEqual(projection['manifest'], manifest)
+        self.assertFalse(projection['semanticScopeVerified'])
 
 class CanonicalProjectionTests(unittest.TestCase):
     def setUp(self):
@@ -382,6 +399,116 @@ class CanonicalProjectionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             with self.assertRaisesRegex(CanonicalProjectionError, 'unsupported_asset_media'):
                 self.project(artifact_store=ArtifactStore(directory))
+
+
+def reviewed_fixture(*, full_width=False, contained=False, other_image=False, other_transform=False):
+    bundle, manifest = fixture(overlap=True)
+    if full_width or contained or other_image or other_transform:
+        old_runs, new_runs = bundle['runs'], []
+        for original in old_runs:
+            outputs = {key: json.loads(read_artifact_record(value)) for key, value in original['rawOutputs'].items()}
+            for value in outputs.values():
+                for page in value if isinstance(value, list) else value.get('pages', []):
+                    for block in page.get('parsing_res_list', page.get('blocks', [])):
+                        box = block.get('block_bbox', block.get('bbox'))
+                        if full_width:
+                            box[0], box[2] = 0, 1000
+                        if contained and block.get('block_id', block.get('id')) == 'heading':
+                            box[3] = 1700
+            maps = copy.deepcopy(original['requestPageMap'])
+            artifacts = {key: read_artifact_record(value) for key, value in original['artifacts'].items()}
+            if original['parser'] == 'mineru':
+                if other_image:
+                    artifacts['page3.png'] = b'a different authored page-3 raster'
+                    maps[0]['originalPageTransform']['inputFrame']['sha256'] = hashlib.sha256(artifacts['page3.png']).hexdigest()
+                if other_transform:
+                    maps[0]['originalPageTransform']['matrix'] = [.99, 0, 1, 0, 1, 0]
+            new_runs.append(normalize_parser_run(original['parser'], outputs, original['source'], original['identity'], maps,
+                artifacts=artifacts, required_artifacts=original['requiredArtifacts'],
+                provider_input_identity=original['providerInputIdentity'], terminal=original['terminal']))
+        bundle = build_dual_parser_evidence(new_runs)
+        remap = {old['runId']: new['runId'] for old, new in zip(old_runs, new_runs)}
+        remap.update({ob['blockId']: nb['blockId'] for old, new in zip(old_runs, new_runs)
+                     for op, np in zip(old['pages'], new['pages']) for ob, nb in zip(op['blocks'], np['blocks'])})
+        def replace(value):
+            if isinstance(value, dict):
+                return {remap.get(key, key): replace(child) for key, child in value.items()}
+            if isinstance(value, list):
+                return [replace(child) for child in value]
+            return remap.get(value, value) if isinstance(value, str) else value
+        manifest = replace(manifest)
+        manifest['bundleSha256'] = bundle['bundleSha256']
+    primary, alternate = bundle['runs']
+    first = _part(primary, primary['pages'][0], primary['pages'][0]['blocks'][0])
+    second = _part(alternate, alternate['pages'][0], alternate['pages'][0]['blocks'][1])
+    a, b = first['bbox'], second['bbox']
+    record = {'physicalPageNo': 3, 'blockIds': [first['blockId'], second['blockId']],
+              'intersection': [max(a[0], b[0]), max(a[1], b[1]), min(a[2], b[2]), min(a[3], b[3])],
+              'inputImageSha256': primary['pages'][0]['mapping']['originalPageTransform']['inputFrame']['sha256'],
+              'kind': 'source_reviewed_adjacent_regions',
+              'reason': 'Authored exact review; no bbox alteration or geometry tolerance.'}
+    manifest['reference']['evidence']['reviewedGeometryOverlaps'] = [record]
+    return bundle, manifest, record
+
+
+def project(bundle, manifest):
+    manifest['reference']['evidenceSha256'] = _hash(manifest['reference']['evidence'])
+    return project_canonical(bundle, manifest)
+
+
+class ReviewedOverlapGuardTests(unittest.TestCase):
+    def test_exact_review_still_passes(self):
+        bundle, manifest, _ = reviewed_fixture()
+        self.assertFalse(project(bundle, manifest)['semanticScopeVerified'])
+
+    def test_missing_record_keeps_original_rejection(self):
+        bundle, manifest, _ = reviewed_fixture()
+        manifest['reference']['evidence'].pop('reviewedGeometryOverlaps')
+        with self.assertRaises(CanonicalProjectionError):
+            project(bundle, manifest)
+
+    def test_wrong_page_hash_pair_and_intersection_are_rejected(self):
+        changes = [('physicalPageNo', 4), ('physicalPageNo', True), ('inputImageSha256', 'f'*64),
+                   ('inputImageSha256', None), ('blockIds', []), ('blockIds', ['unknown', 'other']),
+                   ('blockIds', [[], {}]), ('intersection', [.1, .1, .9, .12500001]),
+                   ('intersection', None), ('intersection', {'x': .1}), ('reason', ' '), ('kind', 'background_only')]
+        for field, value in changes:
+            with self.subTest(field=field, value=value):
+                bundle, manifest, record = reviewed_fixture()
+                record[field] = value
+                with self.assertRaises(CanonicalProjectionError):
+                    project(bundle, manifest)
+
+    def test_overlap_review_collection_must_be_a_list(self):
+        for value in (None, {}, 'not a list', False, 7):
+            with self.subTest(value=value):
+                bundle, manifest, _ = reviewed_fixture()
+                manifest['reference']['evidence']['reviewedGeometryOverlaps'] = value
+                with self.assertRaises(CanonicalProjectionError):
+                    project(bundle, manifest)
+
+    def test_boolean_coordinates_cannot_equal_zero_or_one(self):
+        bundle, manifest, record = reviewed_fixture(full_width=True)
+        self.assertEqual(record['intersection'][::2], [0, 1])
+        record['intersection'][0], record['intersection'][2] = False, True
+        with self.assertRaises(CanonicalProjectionError):
+            project(bundle, manifest)
+
+    def test_containment_is_not_adjacent_overlap(self):
+        bundle, manifest, _ = reviewed_fixture(contained=True)
+        with self.assertRaises(CanonicalProjectionError):
+            project(bundle, manifest)
+
+    def test_same_page_but_different_actual_input_is_rejected(self):
+        bundle, manifest, _ = reviewed_fixture(other_image=True)
+        with self.assertRaises(CanonicalProjectionError):
+            project(bundle, manifest)
+
+    def test_same_input_bytes_but_different_transform_is_not_same_frame_proof(self):
+        bundle, manifest, _ = reviewed_fixture(other_transform=True)
+        with self.assertRaises(CanonicalProjectionError):
+            project(bundle, manifest)
+
 
 
 if __name__ == '__main__':

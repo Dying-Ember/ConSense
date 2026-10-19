@@ -447,8 +447,9 @@ public class PaddleOcrClient implements OcrClient {
                     || group.path("physicalPageNo").asInt()<1 || !"candidate_unverified".equals(group.path("adoptionStatus").asText())
                     || !group.path("sourceQualityAccepted").isBoolean() || group.path("sourceQualityAccepted").asBoolean()
                     || !group.path("candidates").isArray() || group.path("candidates").size()!=2
-                    || !Arrays.asList("feature_policy_selected_candidate","candidate_unverified").contains(status)
+                    || !Arrays.asList("feature_policy_selected_candidate","source_review_selected_candidate","candidate_unverified").contains(status)
                     || "feature_policy_selected_candidate".equals(status) && (selected==null || !group.path("policySha256").asText().matches("[a-f0-9]{64}"))
+                    || "source_review_selected_candidate".equals(status) && (selected==null || !group.path("reviewManifestSha256").asText().matches("[a-f0-9]{64}"))
                     || "candidate_unverified".equals(status) && selected!=null)
                 throw new BizException("OCR whole page group selection or completeness differs");
             Set<String> parsers=new HashSet<>();
@@ -458,6 +459,16 @@ public class PaddleOcrClient implements OcrClient {
                 throw new BizException("OCR whole page parser alternative is missing or duplicated");
             if(!parsers.equals(new HashSet<>(Arrays.asList("mineru","paddleocr-vl"))) || selected!=null && !parsers.contains(selected))
                 throw new BizException("OCR whole page parser identities differ");
+            if("source_review_selected_candidate".equals(status)) {
+                Set<String> reviewed=new HashSet<>(),observed=new HashSet<>();JsonNode ids=group.path("reviewedBlockIds");
+                if(!ids.isArray()||ids.isEmpty())throw new BizException("OCR reviewed whole page region inventory missing");
+                for(JsonNode id:ids)if(!id.isTextual()||id.asText().isEmpty()||!reviewed.add(id.asText()))throw new BizException("OCR reviewed whole page region identity differs");
+                for(JsonNode candidate:group.path("candidates"))if(selected.equals(candidate.path("parser").asText())) {
+                    if(!candidate.path("features").path("completeRawCapture").asBoolean()||!candidate.path("features").path("allGeometryBound").asBoolean())throw new BizException("OCR reviewed whole page capture or geometry incomplete");
+                    for(JsonNode block:candidate.path("blocks"))if(block.path("blockId").asText().isEmpty()||!observed.add(block.path("blockId").asText()))throw new BizException("OCR reviewed whole page block identity differs");
+                }
+                if(!reviewed.equals(observed))throw new BizException("OCR reviewed whole page region inventory differs");
+            }
             if(sourceContext!=null && (!group.path("source").path("sourceSha256").equals(context.path("source").path("sourceSha256"))
                     || !group.path("physicalPageNo").equals(context.path("physicalPageNo"))))
                 throw new BizException("OCR whole page group original-source bindings differ");

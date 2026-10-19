@@ -13,7 +13,7 @@ import java.util.regex.Pattern;
 /** Template evidence assembled from an existing parse; no source, renderer or model is invoked. */
 public final class OerTemplateEvidence {
     public static final String SCHEMA="consense.drafting-template-evidence.v1";
-    public static final String ANALYSIS_REVISION="native-template-rules-20261019-r18";
+    public static final String ANALYSIS_REVISION="native-template-rules-20261019-r21";
     private static final Pattern GUIDANCE=Pattern.compile("(?i)\\bguidance\\s+notes?(?:\\s+to\\s+(?:NTT|SCT|SCC)\\s*\\d+(?:\\.\\d+)*(?:\\([a-z0-9]+\\))*)?\\s*:");
     private static final Pattern EDITORIAL=Pattern.compile("(?i)\\b(?:delete|amend|insert|select|adopt|project team|for use|for tenders|alternative|option|not used|check|fill in)\\b");
     private static final Pattern ALTERNATIVE=Pattern.compile("(?i)^\\s*(?:\\(|\\[)?\\s*(alternative|option)\\s*(?:\\(([a-z0-9]+)\\)|([a-z0-9]+))(?=\\s|[-:.)]|$)");
@@ -246,6 +246,7 @@ public final class OerTemplateEvidence {
             if(++titleMembers>40)break;
             if(member.text.length()<200&&member.text.matches("(?is).*\\b(?:edition|consolidated|revision|revised)\\b.*"))candidates.addObject().put("kind","source_version").put("memberId",member.id).put("text",member.text).put("status","literal_source_version_candidate_not_identity_proof");
         }
+        if(!word)bindSourceReviewedVisualMembers(sourceMembers);
         nativeOutlineGroups(source,sourceMembers,coverage.path("nativeDocxOutline"),groups,issues);
         literalGroups(fileKey,sourceMembers,groups);
         guidance(fileKey,sourceMembers,notes,conditions,groups,issues);
@@ -253,7 +254,7 @@ public final class OerTemplateEvidence {
         resolvedScopes(fileKey,sourceMembers,notes,conditions,groups,issues);
         markerDispositions(fileKey,sourceMembers,notes,conditions,groups,markers,issues);
         resolveSourceReferenceCandidates(fileKey,sourceMembers,notes,conditions,groups);
-        if(word)nativeSourceFields(fileKey,sourceMembers,notes,groups);
+        if(word){nativeSourceFields(fileKey,sourceMembers,notes,groups);markerSourceContexts(fileKey,sourceMembers,notes,conditions,groups,markers);}
         structure.put("scopeMeaning","Native physical membership and literal source candidates; legal applicability and editing adoption remain separate");
         binding.put("generationSha256",payloadSha(out));return out;
     }
@@ -302,8 +303,65 @@ public final class OerTemplateEvidence {
         return evidence.deepCopy();
     }
 
+
+    private static void bindSourceReviewedVisualMembers(List<Member> members){
+        for(Member member:members){ObjectNode binding=sourceReviewedVisualMemberBinding(member,members);if(binding!=null)member.value.set("sourceReviewBinding",binding);}
+    }
+    private static ObjectNode sourceReviewedVisualMemberBinding(Member member,List<Member> members){
+        JsonNode block=member.value.path("blockObservation"),region=block.path("visualRegion"),provider=region.path("providerBlock"),frame=block.path("visualFrame"),context=block.path("visualProvenance").path("sourceContext"),transform=context.path("originalPageTransform"),geometry=region.path("originalGeometry");
+        if(!member.usable||member.expectedPdfSource==null||!"ocr".equals(block.path("source").asText())||!"source_review_selected_candidate".equals(region.path("selectionStatus").asText())||!"observed_input_frame".equals(region.path("geometryStatus").asText())
+                ||!provider.isObject()||!region.path("id").isTextual()||!region.path("id").equals(provider.path("blockId"))||!region.path("kind").equals(provider.path("label"))||!region.path("readingOrder").equals(provider.path("readingOrder"))
+                ||!provider.path("text").isTextual()||!member.text.equals(provider.path("text").asText())||!region.path("text").equals(provider.path("text"))||!region.path("originalText").equals(provider.path("text"))||!block.path("originalText").equals(provider.path("text"))
+                ||!member.expectedPdfSource.equals(context.path("source").path("sourceSha256").asText())||!member.expectedPdfSource.equals(block.path("readingContext").path("sourceSha256").asText())
+                ||!block.path("pageNo").isIntegralNumber()||!block.path("pageNo").equals(context.path("physicalPageNo"))||pdfPage(member)<1||context.path("source").path("pageCount").asInt()<pdfPage(member)
+                ||!context.path("imageSha256").asText().matches("[a-f0-9]{64}")||!context.path("imageSha256").equals(frame.path("imageSha256"))||!context.path("imageSha256").equals(transform.path("inputFrame").path("sha256"))
+                ||!"pixel".equals(frame.path("coordinateUnit").asText())||!"xywh".equals(frame.path("bboxFormat").asText())||!frame.path("width").equals(context.path("width"))||!frame.path("height").equals(context.path("height"))
+                ||!frame.path("width").equals(transform.path("inputFrame").path("width"))||!frame.path("height").equals(transform.path("inputFrame").path("height"))||frame.path("width").asInt()<1||frame.path("height").asInt()<1
+                ||!"verified".equals(geometry.path("status").asText())||!geometry.path("targetFrame").equals(transform.path("targetFrame"))||!member.expectedPdfSource.equals(geometry.path("targetFrame").path("sourceSha256").asText())||geometry.path("targetFrame").path("physicalPageNo").asInt()!=pdfPage(member)
+                ||!digest(canonical(transform).toString()).equals(geometry.path("transformSha256").asText()))return null;
+        double[] box=sourceReviewedVisualBox(region,frame);if(box==null||!sourceReviewedNumbersMatch(geometry.path("xyxyNormalized"),box,false)||!sourceReviewedNumbersMatch(block.path("bbox"),box,true))return null;
+        ObjectNode found=null;for(Member groupMember:members){JsonNode group=groupMember.value.path("blockObservation").path("parserPageGroup");if(!group.isObject()||group.path("physicalPageNo").asInt()!=pdfPage(member)||!"source_review_selected_candidate".equals(group.path("selectionStatus").asText()))continue;
+            if(found!=null||!"parsed_source_bound".equals(groupMember.value.path("identityStatus").asText())||!"parser_page_group_candidate".equals(groupMember.value.path("blockObservation").path("source").asText())||!pageGroupBound(group,member.expectedPdfSource,pdfPage(member),context.path("source").path("pageCount").asInt())
+                    ||!"whole_page".equals(group.path("scope").asText())||!"candidate_unverified".equals(group.path("adoptionStatus").asText())||!group.path("sourceQualityAccepted").isBoolean()||group.path("sourceQualityAccepted").asBoolean()
+                    ||!group.path("reviewManifestSha256").asText().matches("[a-f0-9]{64}")||!member.expectedPdfSource.equals(group.path("source").path("sourceRevisionSha256").asText())||!group.path("source").path("pageCount").equals(context.path("source").path("pageCount"))
+                    ||!group.path("selectedParser").equals(region.path("channel"))||!group.path("reviewedBlockIds").isArray()||!group.path("candidates").isArray()||group.path("candidates").size()!=2)return null;
+            Set<String> reviewed=new HashSet<>(),observed=new HashSet<>(),parsers=new HashSet<>();for(JsonNode id:group.path("reviewedBlockIds"))if(!id.isTextual()||id.asText().isEmpty()||!reviewed.add(id.asText()))return null;
+            JsonNode selected=null;for(JsonNode candidate:group.path("candidates")){String parser=candidate.path("parser").asText();if(!parsers.add(parser)||!Arrays.asList("paddleocr-vl","mineru").contains(parser)||!candidate.path("runId").asText().matches(Pattern.quote(parser)+":[a-f0-9]{64}")||!candidate.path("features").path("completeRawCapture").isBoolean()||!candidate.path("features").path("completeRawCapture").asBoolean()||!candidate.path("blocks").isArray()
+                        ||!candidate.path("pageId").asText().equals(candidate.path("runId").asText()+"/page/"+pdfPage(member))||!candidate.path("pageId").equals(candidate.path("page").path("pageId"))||!candidate.path("page").path("mapping").path("originalPageTransform").equals(transform)||!candidate.path("blocks").equals(candidate.path("page").path("blocks")))return null;
+                if(candidate.path("parser").equals(group.path("selectedParser"))){if(selected!=null||!candidate.path("features").path("allGeometryBound").isBoolean()||!candidate.path("features").path("allGeometryBound").asBoolean())return null;selected=candidate;for(JsonNode observedBlock:candidate.path("blocks"))if(!observedBlock.path("blockId").isTextual()||!observed.add(observedBlock.path("blockId").asText()))return null;}}
+            if(selected==null||reviewed.isEmpty()||!reviewed.equals(observed))return null;int exact=0;for(JsonNode observedBlock:selected.path("blocks"))if(observedBlock.equals(provider))exact++;if(exact!=1||!provider.path("blockId").asText().startsWith(selected.path("pageId").asText()+"/block/"))return null;
+            found=object();found.put("schema","consense.source-reviewed-visual-member-binding.v1");found.put("sourceSha256",member.expectedPdfSource);found.put("physicalPageNo",pdfPage(member));found.put("pageGroupMemberId",groupMember.id);found.set("reviewManifestSha256",group.path("reviewManifestSha256").deepCopy());found.set("reviewedBlockIds",group.path("reviewedBlockIds").deepCopy());found.set("runId",selected.path("runId").deepCopy());found.set("pageId",selected.path("pageId").deepCopy());found.set("providerBlock",provider.deepCopy());found.set("frame",frame.deepCopy());found.set("originalPageTransform",transform.deepCopy());found.set("originalGeometry",geometry.deepCopy());found.put("authority","existing_source_reviewed_complete_page_candidate_not_global_quality_or_project_applicability");
+        }return found;
+    }
+    private static double[] sourceReviewedVisualBox(JsonNode region,JsonNode frame){
+        JsonNode observed=region.path("providerBlock").path("bbox"),values=observed.path("xyxy");if(!values.isArray()||values.size()!=4||!observed.path("pageWidth").equals(frame.path("width"))||!observed.path("pageHeight").equals(frame.path("height"))||!"top-left".equals(observed.path("origin").asText()))return null;
+        double[] box=new double[4];for(int i=0;i<4;i++){if(!values.path(i).isNumber()||!Double.isFinite(values.path(i).asDouble()))return null;box[i]=values.path(i).asDouble();}
+        String mode=observed.path("coordinateFrame").asText();if(mode.equals("raster")){if(!"pixel".equals(observed.path("coordinateUnit").asText()))return null;for(int i=0;i<4;i++)box[i]/=frame.path(i%2==0?"width":"height").asDouble();}
+        else if(mode.equals("normalized_1000")){for(int i=0;i<4;i++)box[i]/=1000;}
+        else if(!mode.equals("normalized")||!"ratio".equals(observed.path("coordinateUnit").asText()))return null;
+        if(box[0]<0||box[1]<0||box[2]>1||box[3]>1||box[0]>=box[2]||box[1]>=box[3])return null;double[] pixels={box[0]*frame.path("width").asDouble(),box[1]*frame.path("height").asDouble(),box[2]*frame.path("width").asDouble(),box[3]*frame.path("height").asDouble()};
+        if(!sourceReviewedNumbersMatch(region.path("bbox"),pixels,true))return null;return box;
+    }
+    private static boolean sourceReviewedNumbersMatch(JsonNode values,double[] xyxy,boolean xywh){
+        if(!values.isArray()||values.size()!=4)return false;for(int i=0;i<4;i++){double expected=xywh&&i>=2?xyxy[i]-xyxy[i-2]:xyxy[i];if(!values.path(i).isNumber()||!Double.isFinite(values.path(i).asDouble())||Math.abs(values.path(i).asDouble()-expected)>1e-9)return false;}return true;
+    }
+    private static boolean sameSourceReviewedVisualPage(Member left,Member right){
+        JsonNode a=left.value.path("sourceReviewBinding"),b=right.value.path("sourceReviewBinding");if(!a.isObject()||!b.isObject())return false;for(String key:Arrays.asList("sourceSha256","physicalPageNo","pageGroupMemberId","reviewManifestSha256","runId","frame","originalPageTransform"))if(!a.path(key).equals(b.path(key)))return false;return true;
+    }
+    private static void sourceReviewedVisualSidebarScopes(List<Member> members,ArrayNode notes,ArrayNode groups){
+        Pattern marked=Pattern.compile("(?is)^\\s*[*#]\\s*(\\([a-z0-9]+\\))\\s+.+[.!?]\\s*$"),boundary=Pattern.compile("(?is)^\\s*[*#]?\\s*(?:(?:NTT|SCT|SCC)\\s*)?(?:\\d+(?:\\.\\d+)*\\.|\\([a-z0-9]+\\))\\s*\\p{L}.*"),numberedLine=Pattern.compile("(?im)^\\h*[*#]?\\h*(?:(?:NTT|SCT|SCC)\\h*\\d+(?:\\.\\d+)*\\.?|\\d+(?:\\.\\d+)*\\.|\\([a-z0-9]+\\))\\s*\\S");
+        for(JsonNode raw:notes){ObjectNode note=(ObjectNode)raw;if(!note.path("captureComplete").asBoolean()||!note.path("sourceSyntaxComplete").asBoolean()||note.path("orderedMemberIds").size()!=1||!note.path("text").asText().matches("(?is)^\\s*\\(\\s*delete\\s+if\\b.+\\)\\s*[.]?\\s*$"))continue;
+            Member aside=members.get(indexOf(members,note.path("orderedMemberIds").get(0).asText()));if(!aside.value.path("sourceReviewBinding").isObject()||!"aside_text".equals(aside.value.path("blockObservation").path("visualRegion").path("kind").asText()))continue;double[] margin=sourceReviewedVisualBox(aside.value.path("blockObservation").path("visualRegion"),aside.value.path("blockObservation").path("visualFrame"));List<Member> targets=new ArrayList<>();
+            for(Member candidate:members){if(!sameSourceReviewedVisualPage(aside,candidate)||!"text".equals(candidate.value.path("blockObservation").path("visualRegion").path("kind").asText())||!marked.matcher(candidate.text).matches()||candidate.text.substring(candidate.text.indexOf(candidate.text.contains("*")?'*':'#')+1).matches("(?s).*[*#].*"))continue;Matcher anchors=numberedLine.matcher(candidate.text);if(anchors.find()&&anchors.find())continue;double[] box=sourceReviewedVisualBox(candidate.value.path("blockObservation").path("visualRegion"),candidate.value.path("blockObservation").path("visualFrame"));if(box!=null&&box[2]<=margin[0]&&Math.min(box[3],margin[3])>Math.max(box[1],margin[1]))targets.add(candidate);}
+            if(targets.size()!=1)continue;Member target=targets.get(0),next=null;boolean completeProjection=true;Set<String> projected=new HashSet<>(),reviewed=new HashSet<>();for(JsonNode id:target.value.path("sourceReviewBinding").path("reviewedBlockIds"))reviewed.add(id.asText());for(Member candidate:members)if(candidate.value.path("effectiveCandidate").asBoolean(true)&&pdfPage(candidate)==pdfPage(target)){if(!sameSourceReviewedVisualPage(target,candidate)||!projected.add(candidate.value.path("sourceReviewBinding").path("providerBlock").path("blockId").asText())){completeProjection=false;break;}}if(!completeProjection||!projected.equals(reviewed))continue;double[] box=sourceReviewedVisualBox(target.value.path("blockObservation").path("visualRegion"),target.value.path("blockObservation").path("visualFrame"));double nextY=Double.POSITIVE_INFINITY;boolean ambiguous=false;
+            for(Member candidate:members){if(candidate==target||!sameSourceReviewedVisualPage(target,candidate))continue;double[] other=sourceReviewedVisualBox(candidate.value.path("blockObservation").path("visualRegion"),candidate.value.path("blockObservation").path("visualFrame"));if(other==null||Math.min(other[2],box[2])<=Math.max(other[0],box[0]))continue;if(other[1]<box[3]){if(other[3]>box[3]){ambiguous=true;break;}continue;}if(other[1]<nextY){next=candidate;nextY=other[1];ambiguous=false;}else if(other[1]==nextY)ambiguous=true;}
+            if(next==null||ambiguous||!boundary.matcher(next.text).matches())continue;Matcher own=marked.matcher(target.text);own.matches();if(next.text.replaceFirst("^\\s*[*#]?\\s*","").startsWith(own.group(1)))continue;
+            ObjectNode group=lexicalGroup(note,"source_unit_instruction_scope",target.id,groups);group.put("scopeMeaning","The complete source-reviewed single marked paragraph uniquely aligned with its same-page conditional sidebar, ending before the next explicit numbered source block; project selection remains unknown");group.put("captureComplete",true);group.put("scopeComplete",true);group.put("wholeParagraphTargetAssumed",false);addRange(group.putArray("memberRanges"),group.putArray("orderedMemberIds"),target,0,target.text.length());group.set("guidanceContextMemberIds",note.path("orderedMemberIds").deepCopy());ArrayNode proof=group.putArray("sourceReviewBindings");for(Member member:Arrays.asList(target,aside,next))proof.add(member.value.path("sourceReviewBinding").deepCopy());group.putObject("startBoundary").put("kind","source_reviewed_marked_visual_paragraph_start").put("memberId",target.id).put("offset",0);group.putObject("endBoundary").put("kind","next_source_reviewed_visual_numbered_block").put("memberId",next.id).put("offset",0);note.put("targetScopeStatus","source_reviewed_single_visual_subitem_bound");note.put("scopeComplete",true);
+        }
+    }
+
     private static void guidance(String profile,List<Member> members,ArrayNode notes,ArrayNode conditions,ArrayNode groups,ArrayNode issues) {
-        Set<String> consumed=new HashSet<>();
+        Set<String> consumed=new HashSet<>();List<Anchor> nativeClauses="NTT".equals(profile)?clauseAnchors(profile,members):Collections.emptyList();
         for(int index=0;index<members.size();index++) {
             Member first=members.get(index);if(!first.usable)continue;
             Matcher explicit=GUIDANCE.matcher(first.text);List<Integer> starts=new ArrayList<>();while(explicit.find())if(guidanceCue(first.text,explicit.start()))starts.add(explicit.start());
@@ -316,7 +374,7 @@ public final class OerTemplateEvidence {
                 note.put("profile",profile);ArrayNode ranges=note.putArray("memberRanges"),ids=note.putArray("orderedMemberIds");StringBuilder text=new StringBuilder();
                 char opening=open<0?'\0':first.text.charAt(open),closing=opening=='['?']':')';int depth=0;boolean closed=open<0,unknown=false,crossTable=false;Member last=first;
                 for(int cursor=index;cursor<members.size();cursor++) {
-                    Member current=members.get(cursor);if(!sameLane(first,current))continue;
+                    Member current=members.get(cursor);if(!closed&&cursor>index&&unclosedNttSpacerBoundary(first,index,cursor,members,nativeClauses))break;if(!sameLane(first,current))continue;
                     if(cursor>index&&hasGuidanceCue(current.text))break;
                     if(!current.usable){unknown=true;break;}
                     int from=cursor==index?start:0,end=current.text.length();
@@ -326,13 +384,15 @@ public final class OerTemplateEvidence {
                     crossTable|=!Objects.equals(first.table,current.table);
                     if(closed||opening=='\0')break;
                 }
-                boolean sourceSyntaxKnown=true;for(JsonNode memberId:ids){Member observed=members.get(indexOf(members,memberId.asText()));if(observed.value.has("blockObservation")&&!Arrays.asList("native","native_pdf").contains(observed.value.path("blockObservation").path("source").asText()))sourceSyntaxKnown=false;}
-                note.put("text",text.toString());note.put("captureComplete",closed&&!unknown);note.put("observedSyntaxComplete",closed);note.put("sourceSyntaxKnown",sourceSyntaxKnown);note.put("sourceSyntaxAuthority",sourceSyntaxKnown?first.value.has("blockObservation")?"native_pdf_text_observation":"native_ooxml_parser_channels":"ocr_or_other_derived_observation_without_original_syntax_authority");note.put("sourceSyntaxComplete",closed&&sourceSyntaxKnown);note.put("scopeComplete",false);
+                boolean sourceSyntaxKnown=true;ArrayNode sourceReviews=array();for(JsonNode memberId:ids){Member observed=members.get(indexOf(members,memberId.asText()));if(observed.value.has("blockObservation")&&!Arrays.asList("native","native_pdf").contains(observed.value.path("blockObservation").path("source").asText())){JsonNode review=observed.value.path("sourceReviewBinding");if(!review.isObject())sourceSyntaxKnown=false;else sourceReviews.add(review.deepCopy());}}
+                if(!sourceReviews.isEmpty())note.set("sourceReviewBindings",sourceReviews);
+                note.put("text",text.toString());note.put("captureComplete",closed&&!unknown);note.put("observedSyntaxComplete",closed);note.put("sourceSyntaxKnown",sourceSyntaxKnown);note.put("sourceSyntaxAuthority",sourceSyntaxKnown?!sourceReviews.isEmpty()?"source_reviewed_complete_visual_page_member":first.value.has("blockObservation")?"native_pdf_text_observation":"native_ooxml_parser_channels":"ocr_or_other_derived_observation_without_original_syntax_authority");note.put("sourceSyntaxComplete",closed&&sourceSyntaxKnown);note.put("scopeComplete",false);
                 note.put("semanticStatus","source_instruction_candidate");note.put("targetScopeStatus","requires_source_relationship_review");
                 note.put("crossTableContinuationCandidate",crossTable);note.set("referenceCandidates",references(text.toString()));notes.add(note);
                 if(first.value.has("blockObservation")){projectPdfGuidance(note,members,issues);text.setLength(0);text.append(note.path("text").asText());note.set("referenceCandidates",references(text.toString()));}
                 ObjectNode condition=conditions.addObject();condition.put("id","condition:"+digest(id));condition.put("guidanceNoteId",id);condition.put("text",text.toString());condition.set("memberRanges",ranges.deepCopy());condition.put("status","literal_source_condition_not_project_boolean");condition.set("referenceCandidates",note.path("referenceCandidates").deepCopy());
                 ObjectNode group=groups.addObject();group.put("id",id+":capture");group.put("kind","guidance_capture");group.set("orderedMemberIds",ids.deepCopy());group.set("memberRanges",ranges.deepCopy());group.put("captureComplete",note.path("captureComplete").asBoolean());group.put("observedSyntaxComplete",closed);group.put("sourceSyntaxKnown",sourceSyntaxKnown);group.put("sourceSyntaxAuthority",note.path("sourceSyntaxAuthority").asText());group.put("sourceSyntaxComplete",note.path("sourceSyntaxComplete").asBoolean());group.put("scopeComplete",false);if(note.has("pdfLaneProjection")){group.set("pdfLaneProjection",note.path("pdfLaneProjection").deepCopy());group.set("revisionMarginContextRanges",note.path("revisionMarginContextRanges").deepCopy());}
+                if(note.has("sourceReviewBindings"))group.set("sourceReviewBindings",note.path("sourceReviewBindings").deepCopy());
                 group.putObject("startBoundary").put("kind","literal_instruction_start").put("memberId",first.id).put("offset",start);
                 group.putObject("endBoundary").put("kind",closed?"literal_closing_delimiter":"unclosed_or_unobserved_continuation").put("memberId",last.id);
                 if(!closed)issue(issues,"GUIDANCE_SOURCE_SYNTAX_INCOMPLETE",id,"All observed members are retained; no closing delimiter is invented");
@@ -340,6 +400,14 @@ public final class OerTemplateEvidence {
                 if(crossTable)issue(issues,"GUIDANCE_CROSS_TABLE_LINK_UNVERIFIED",id,"Matching source-column continuation is a candidate until the relationship is reviewed");
             }
         }
+    }
+
+    private static boolean unclosedNttSpacerBoundary(Member first,int start,int cursor,List<Member> members,List<Anchor> clauses){
+        Member boundary=members.get(cursor);if(clauses.isEmpty()||first.table.isEmpty()||first.cell.isEmpty()||!sameNativeSource(first,boundary)||!first.table.equals(boundary.table)||!CELL_NUMBER.matcher(boundary.text).matches())return false;
+        Anchor owner=null,next=null;for(Anchor clause:clauses)if("explicit_native_number_cell".equals(clause.basis)&&sameNativeSource(first,clause.member)&&first.table.equals(clause.member.table)){if(clause.ordinal<start)owner=clause;if(clause.ordinal==cursor)next=clause;}
+        if(owner==null||next==null||owner.label.equals(next.label)||sameOuterLane(first,boundary))return false;
+        boolean observed=false;for(int at=cursor;at<members.size();at++){Member continuation=members.get(at);if(!sameLane(first,continuation))continue;if(hasGuidanceCue(continuation.text))break;if(!first.table.equals(continuation.table)||!sameNativeSource(first,continuation)||!nativePureSpacer(continuation))return false;observed=true;}
+        return observed;
     }
 
     private static void nativeOutlineGroups(String source,List<Member> members,JsonNode outline,ArrayNode groups,ArrayNode issues) {
@@ -363,13 +431,66 @@ public final class OerTemplateEvidence {
             if(option.find())options.add(new Anchor(n,option.group(1).toLowerCase(Locale.ROOT)+":"+(option.group(2)==null?option.group(3):option.group(2)).toLowerCase(Locale.ROOT),"literal_option_label_candidate",m));
         }
         for(int n=0;n<clauses.size();n++)serialGroup("literal_clause_candidate",clauses.get(n),n+1<clauses.size()?clauses.get(n+1):null,members,groups);
+        List<Anchor> scanClauses=scanClauseCandidates(members);Map<Anchor,Anchor> scanAssociations=new IdentityHashMap<>();
+        for(Anchor option:options)if(scanObservation(option.member))scanAssociations.put(option,scanOptionHeading(option,scanClauses));
         for(int n=0;n<options.size();n++) {
             Anchor a=options.get(n),next=null;
+            if(scanObservation(a.member)){scanOptionCandidate(a,options,scanClauses,scanAssociations,members,groups);continue;}
             for(int k=n+1;k<options.size();k++)if(options.get(k).label.split(":")[0].equals(a.label.split(":")[0])&&sameStory(a.member,options.get(k).member)){next=options.get(k);break;}
             for(Anchor clause:clauses)if(clause.ordinal>a.ordinal&&(next==null||clause.ordinal<next.ordinal)){next=clause;break;}
             serialGroup("literal_option_candidate",a,next,members,groups);
         }
     }
+
+    private static boolean scanObservation(Member member){return "ocr".equals(member.value.path("blockObservation").path("source").asText());}
+
+    /** Candidate geometry bounds OCR body membership; it does not grant source syntax or edit authority. */
+    private static ScanFrame scanFrame(Member member){
+        JsonNode block=member.value.path("blockObservation"),region=block.path("visualRegion"),geometry=region.path("originalGeometry"),frame=geometry.path("targetFrame"),box=geometry.path("xyxyNormalized");
+        if(!member.usable||!scanObservation(member)||member.expectedPdfSource==null||!"verified".equals(geometry.path("status").asText())||!member.expectedPdfSource.equals(frame.path("sourceSha256").asText())||!"original_page".equals(frame.path("coordinateFrame").asText())||!"top-left".equals(frame.path("origin").asText())||!frame.path("physicalPageNo").isIntegralNumber()||frame.path("physicalPageNo").asInt()!=pdfPage(member)||pdfPage(member)<1||!geometry.path("transformSha256").asText().matches("(?i)[a-f0-9]{64}")||!box.isArray()||box.size()!=4||!region.path("kind").isTextual()||!region.path("kind").equals(region.path("providerBlock").path("label")))return null;
+        double[] xy=new double[4];for(int at=0;at<4;at++){if(!box.get(at).isNumber())return null;xy[at]=box.get(at).asDouble();if(!Double.isFinite(xy[at])||xy[at]<0||xy[at]>1)return null;}if(xy[0]>=xy[2]||xy[1]>=xy[3])return null;
+        return new ScanFrame(frame,geometry.path("transformSha256").asText(),xy,region.path("kind").asText());
+    }
+
+    private static List<Anchor> scanClauseCandidates(List<Member> members){
+        List<Anchor> result=new ArrayList<>();Pattern title=Pattern.compile("(?i)^\\s*[*#]*\\s*((?:(?:NTT|SCT|SCC)\\s*)?\\d+(?:\\.\\d+)*)(?:[.:]\\s*|\\s+)(\\S.*)$");
+        for(int at=0;at<members.size();at++){Member member=members.get(at);ScanFrame frame=scanFrame(member);Matcher match=title.matcher(member.text);if(frame!=null&&"paragraph_title".equals(frame.role)&&match.matches())result.add(new Anchor(at,match.group(1).replaceAll("\\s+",""),"scan_positive_title_role_and_original_page_geometry",member));}
+        result.sort(Comparator.comparingInt((Anchor anchor)->pdfPage(anchor.member)).thenComparingDouble(anchor->scanFrame(anchor.member).xy[1]).thenComparingDouble(anchor->scanFrame(anchor.member).xy[0]));return result;
+    }
+
+    private static Anchor scanOptionHeading(Anchor option,List<Anchor> clauses){
+        ScanFrame annotation=scanFrame(option.member);if(annotation==null||!"aside_text".equals(annotation.role))return null;Anchor found=null;
+        for(Anchor clause:clauses){ScanFrame title=scanFrame(clause.member);if(!sameScanPage(option.member,annotation,clause.member,title)||title.xy[2]>annotation.xy[0]||Math.max(title.xy[1],annotation.xy[1])>=Math.min(title.xy[3],annotation.xy[3]))continue;if(found!=null)return null;found=clause;}return found;
+    }
+
+    private static boolean sameScanPage(Member a,ScanFrame first,Member b,ScanFrame second){return first!=null&&second!=null&&sameStory(a,b)&&Objects.equals(a.expectedPdfSource,b.expectedPdfSource)&&first.frame.equals(second.frame)&&first.transform.equals(second.transform);}
+    private static String scanTitle(Member member){return member.text.replaceFirst("^\\s*[*#]*\\s*","").replaceFirst("(?i)\\s*\\(\\s*Cont[’']?d\\s*\\)\\s*$","").replaceAll("\\s+"," ").trim().toLowerCase(Locale.ROOT);}
+    private static boolean scanContinuation(Anchor previous,Anchor current){return previous!=null&&current!=null&&current.member.text.matches("(?is).*\\(\\s*Cont[’']?d\\s*\\)\\s*$")&&pdfPage(current.member)==pdfPage(previous.member)+1&&Objects.equals(previous.member.expectedPdfSource,current.member.expectedPdfSource)&&sameStory(previous.member,current.member)&&scanTitle(previous.member).equals(scanTitle(current.member));}
+
+    private static Anchor scanAnnotation(Anchor heading,String label,List<Anchor> options,Map<Anchor,Anchor> associations){Anchor found=null;for(Anchor option:options)if(associations.get(option)==heading){if(!option.label.equals(label)||found!=null)return null;found=option;}return found;}
+
+    private static void scanOptionCandidate(Anchor option,List<Anchor> options,List<Anchor> clauses,Map<Anchor,Anchor> associations,List<Member> members,ArrayNode groups){
+        ObjectNode group=groups.addObject();group.put("id","literal_option_candidate:"+digest(option.member.id+"|"+option.label));group.put("kind","literal_option_candidate");group.put("label",option.label);group.put("boundaryBasis","scan_positive_roles_and_source_bound_original_geometry");group.put("scopeComplete",false);group.put("semanticApplicabilityVerified",false);group.put("automaticEditEligible",false);group.put("crossTable",false);
+        ArrayNode ids=group.putArray("orderedMemberIds"),annotations=group.putArray("continuationAnnotationMemberIds"),context=group.putArray("physicalContextMemberIds"),headings=group.putArray("targetAnchorMemberIds");
+        Anchor heading=associations.get(option);if(heading==null||scanAnnotation(heading,option.label,options,associations)==null){ids.add(option.member.id);annotations.add(option.member.id);group.set("targetMemberIds",ids.deepCopy());group.put("captureComplete",false);group.put("scopeStatus","scan_annotation_only_without_unique_positive_title_and_layout_association");group.putObject("startBoundary").put("kind","literal_instruction_start").put("memberId",option.member.id);group.putObject("endBoundary").put("kind","observed_annotation_member_end").put("memberId",option.member.id).put("offset",option.member.text.length());return;}
+        int first=clauses.indexOf(heading);while(first>0&&scanContinuation(clauses.get(first-1),clauses.get(first))&&scanAnnotation(clauses.get(first-1),option.label,options,associations)!=null)first--;
+        int last=first;while(last+1<clauses.size()&&scanContinuation(clauses.get(last),clauses.get(last+1))&&scanAnnotation(clauses.get(last+1),option.label,options,associations)!=null)last++;
+        Anchor end=last+1<clauses.size()?clauses.get(last+1):null;boolean known=true;Set<String> targets=new LinkedHashSet<>();
+        for(int at=first;at<=last;at++){
+            Anchor start=clauses.get(at),annotation=scanAnnotation(start,option.label,options,associations);ScanFrame title=scanFrame(start.member),margin=scanFrame(annotation.member);Anchor peer=at+1<clauses.size()?clauses.get(at+1):null;double limit=peer!=null&&pdfPage(peer.member)==pdfPage(start.member)?scanFrame(peer.member).xy[1]:1;
+            annotations.add(annotation.member.id);if(at==first){headings.add(start.member.id);targets.add(start.member.id);}else appendUnique(context,start.member.id);
+            for(Member member:members){if(pdfPage(member)!=pdfPage(start.member)||!sameStory(start.member,member))continue;ScanFrame frame=scanFrame(member);if(frame==null||!sameScanPage(start.member,title,member,frame)){known&=member.value.path("blockObservation").path("parserPageGroup").isObject()||!member.usable;appendUnique(context,member.id);continue;}
+                if(member==start.member)continue;boolean bodyRole=Arrays.asList("text","paragraph_title","equation","table").contains(frame.role),inside=frame.xy[1]>=title.xy[1]&&frame.xy[3]<=limit;boolean body=bodyRole&&inside&&frame.xy[2]<=margin.xy[0];if(bodyRole&&frame.xy[1]<limit&&frame.xy[3]>title.xy[1]&&frame.xy[0]<margin.xy[0]&&(!inside||frame.xy[2]>margin.xy[0]))known=false;
+                if(body)targets.add(member.id);else appendUnique(context,member.id);
+            }
+        }
+        for(Member member:members)if(targets.contains(member.id))ids.add(member.id);for(int at=context.size()-1;at>=0;at--)if(targets.contains(context.get(at).asText()))context.remove(at);
+        group.set("targetMemberIds",ids.deepCopy());group.put("parentClauseLabel",clauses.get(first).label);group.put("captureComplete",known&&end!=null);group.put("scopeStatus","scan_layout_bound_literal_option_candidate_requires_source_scope_review");group.put("scopeMeaning","Body under the uniquely aligned numeric title; an exact repeated title with an explicit continuation and repeated same-label annotation may join consecutive physical pages. Furniture, side notes and parser containers remain context.");
+        group.putObject("startBoundary").put("kind","scan_positive_numeric_title_with_uniquely_aligned_margin_annotation").put("memberId",clauses.get(first).member.id);
+        ObjectNode boundary=group.putObject("endBoundary");boundary.put("kind",end==null?"unverified_physical_page_end":"next_positive_numeric_body_title");if(end!=null){boundary.put("memberId",end.member.id);boundary.put("text",end.member.text);}
+    }
+
+    private static final class ScanFrame{final JsonNode frame;final String transform,role;final double[] xy;ScanFrame(JsonNode frame,String transform,double[] xy,String role){this.frame=frame;this.transform=transform;this.xy=xy;this.role=role;}}
 
     private static void serialGroup(String kind,Anchor start,Anchor next,List<Member> members,ArrayNode groups) {
         ObjectNode group=groups.addObject();group.put("id",kind+":"+digest(start.member.id+"|"+start.label));group.put("kind",kind);group.put("label",start.label);group.put("boundaryBasis",start.basis);
@@ -694,6 +815,7 @@ public final class OerTemplateEvidence {
         Set<String> noteMembers=new HashSet<>();for(JsonNode note:notes)for(JsonNode id:note.path("orderedMemberIds"))noteMembers.add(id.asText());List<Anchor> clauses=clauseAnchors(profile,members);
         quotedInstructionScopes(members,clauses,noteMembers,notes,groups,issues);
         sidebarUnitScopes(profile,members,clauses,noteMembers,notes,groups,issues);
+        sourceReviewedVisualSidebarScopes(members,notes,groups);
         placeholderScopes(members,clauses,noteMembers,notes,groups);
         inlineConditionalScopes(members,noteMembers,notes,groups);
         inlineChoiceScopes(members,noteMembers,notes,groups);
@@ -735,6 +857,37 @@ public final class OerTemplateEvidence {
             else {marker.put("status","unknown_marker_scope");marker.put("unknownReasonCode",unknownMarkerReason(member,offset));marker.put("unknownReason","The literal marker is retained, but no complete source instruction establishes its exact target under the current rules");}
             marker.put("scopeComplete",!negative&&targetGroups.size()>0);
         }
+    }
+
+    /** Context references preserve instructions without granting their marker an edit target. */
+    private static void markerSourceContexts(String profile,List<Member> members,ArrayNode notes,ArrayNode conditions,ArrayNode groups,ArrayNode markers){
+        List<Anchor> clauses=clauseAnchors(profile,members);Set<String> noteMembers=noteMemberIds(notes);
+        for(JsonNode raw:markers){
+            if(!"unknown_marker_scope".equals(raw.path("status").asText()))continue;ObjectNode marker=(ObjectNode)raw;int at=uniqueMemberIndex(members,marker.path("memberId").asText());if(at<0)continue;Member member=members.get(at);int offset=marker.path("start").asInt();ArrayNode noteIds=(ArrayNode)marker.path("guidanceNoteIds");boolean choice=false,quoted=false,instruction=false;
+            for(JsonNode group:groups)if("native_source_field_candidate".equals(group.path("kind").asText())&&group.path("sourceChoiceComplete").asBoolean()&&rangeContains(group.path("markerRanges"),member.id,offset)&&nativeRangesBound(group.path("markerRanges"),member,members)&&nativeRangesBound(group.path("memberRanges"),member,members)){
+                choice=true;appendUnique((ArrayNode)marker.path("contextGroupIds"),group.path("id").asText());for(JsonNode id:group.path("guidanceNoteIds"))appendUnique(noteIds,id.asText());for(JsonNode relationship:group.path("sourceInstructionRelationships"))addSourceRelationship(marker,(ObjectNode)relationship);
+            }
+            for(JsonNode note:notes){
+                int noteAt=uniqueMemberIndex(members,note.path("orderedMemberIds").path(0).asText());String text=note.path("text").asText(),symbol=marker.path("symbol").asText();
+                if(noteAt<0||!sameNativeSource(member,members.get(noteAt))||!contextNoteBound(note,member,members)||sourceCondition(note,conditions)==null||!text.contains(symbol)||!text.matches("(?is).*\\b(?:delete|amend)\\b.*")||!instructionTargetMembers(members,clauses,noteMembers,noteAt,text,true).contains(member.id))continue;
+                boolean quotedAction=Pattern.compile("(?is)\\b(?:delete|amend)\\s+(?:the\\s+)?(?:words?\\s+)?[“‘\"']").matcher(text).find();
+                if(quotedAction){
+                    Matcher literal=Pattern.compile("[“‘\"']([^”’\"']+)[”’\"']").matcher(text);int markedQuotes=0;while(literal.find())if(literal.group(1).contains(symbol))markedQuotes++;if(markedQuotes!=1)continue;
+                    if(!sameRowNote(member,note,members))continue;boolean resolved=false;for(JsonNode group:groups)if(note.path("id").asText().equals(group.path("guidanceNoteId").asText())&&group.path("scopeComplete").asBoolean()&&group.path("kind").asText().startsWith("explicit_quoted_"))resolved=true;if(resolved)continue;
+                    int candidates=0;for(JsonNode candidate:markers){int candidateAt=uniqueMemberIndex(members,candidate.path("memberId").asText());if(candidateAt>=0&&!noteMembers.contains(candidate.path("memberId").asText())&&sameNativeSource(member,members.get(candidateAt))&&member.row.equals(members.get(candidateAt).row)&&symbol.equals(candidate.path("symbol").asText()))candidates++;}if(candidates!=1)continue;quoted=true;
+                }
+                appendUnique(noteIds,note.path("id").asText());instruction=true;
+                ObjectNode relationship=object();relationship.put("id","source-instruction-relation:"+digest("marker-context|"+marker.path("id").asText()+"|"+note.path("id").asText()));relationship.put("kind","source_instruction_context");relationship.put("guidanceNoteId",note.path("id").asText());relationship.set("conditionId",sourceCondition(note,conditions).path("id").deepCopy());relationship.put("basis",quotedAction?"same_native_row_unique_marker_quoted_target_unreconciled":"same_native_source_unit_and_literal_instruction_symbol");relationship.set("instructionMemberRanges",note.path("memberRanges").deepCopy());relationship.put("status","source_context_only_exact_edit_target_unknown");relationship.put("automaticEditEligible",false);relationship.put("projectApplicabilityVerified",false);addSourceRelationship(marker,relationship);
+            }
+            for(JsonNode condition:conditions)if(hasId(noteIds,condition.path("guidanceNoteId").asText()))appendUnique((ArrayNode)marker.path("conditionIds"),condition.path("id").asText());
+            if(choice){marker.put("unknownReasonCode","SOURCE_CHOICE_OBSERVED_PROJECT_SELECTION_REQUIRED");marker.put("unknownReason","The exact source choice and its existing field context are retained; no project selection or edit instruction is supplied");}
+            else if(quoted){marker.put("unknownReasonCode","EXPLICIT_QUOTED_INSTRUCTION_WITHOUT_EXACT_MARKED_TARGET");marker.put("unknownReason","The same native row supplies a quoted instruction, but its literal target has not been reconciled with one exact marked source range; fuzzy wording does not authorize an edit");}
+            else if(instruction){marker.put("unknownReasonCode","SOURCE_INSTRUCTION_CONTEXT_WITHOUT_EXACT_TARGET_RANGE");marker.put("unknownReason","The same source unit supplies an explicit instruction context, but the exact local deletion or amendment boundary remains unknown");}
+        }
+    }
+    private static boolean contextNoteBound(JsonNode note,Member source,List<Member> members){
+        if(!note.path("captureComplete").asBoolean()||!note.path("sourceSyntaxComplete").asBoolean()||note.path("memberRanges").isEmpty())return false;
+        for(JsonNode range:note.path("memberRanges")){if(nativeRangesBound(array().add(range),source,members))continue;int at=uniqueMemberIndex(members,range.path("memberId").asText());if(at<0||!sameNativeSource(source,members.get(at))||!nativePureSpacer(members.get(at))||!"text".equals(range.path("channel").asText())||!range.path("sourcePosition").equals(members.get(at).value.path("sourcePosition"))||!range.path("start").isIntegralNumber()||!range.path("end").isIntegralNumber()||range.path("start").asInt()!=0||range.path("end").asInt()!=0)return false;}return true;
     }
 
     private static void commonAlternativeSelections(List<Member> members,List<Anchor> clauses,ArrayNode notes,ArrayNode conditions,ArrayNode groups){
@@ -798,13 +951,16 @@ public final class OerTemplateEvidence {
     private static void quotedInstructionScopes(List<Member> members,List<Anchor> clauses,Set<String> noteMembers,ArrayNode notes,ArrayNode groups,ArrayNode issues) {
         Pattern alternatives=Pattern.compile("(?is)delete\\s+(?:the\\s+)?inapplicable\\s+[“‘\"']([^”’\"']+)[”’\"']\\s+or\\s+[“‘\"']([^”’\"']+)[”’\"']");
         Pattern amendedWords=Pattern.compile("(?is)amend\\s+the\\s+words?\\s+((?:[“‘\"'][^”’\"']+[”’\"'])(?:\\s*(?:,|and|or)\\s*[“‘\"'][^”’\"']+[”’\"'])*)");
-        Pattern deletedWord=Pattern.compile("(?is)delete\\s+[“‘\"']([^”’\"']+)[”’\"']");
+        Pattern deletedWord=Pattern.compile("(?is)delete\\s+(?:(?:the\\s+)?words?\\s+)?[“‘\"']([^”’\"']+)[”’\"']");
         for(JsonNode note:notes) {
             int at=indexOf(members,note.path("orderedMemberIds").path(0).asText());if(at<0)continue;
             Set<String> allowed=instructionTargetMembers(members,clauses,noteMembers,at,note.path("text").asText(),true);String text=note.path("text").asText();
             Matcher pair=alternatives.matcher(text);while(pair.find())quotedChoiceScope(members,allowed,note,pair.group(1),pair.group(2),groups,issues);
             Matcher amended=amendedWords.matcher(text);while(amended.find()){Matcher quote=Pattern.compile("[“‘\"']([^”’\"']+)[”’\"']").matcher(amended.group(1));while(quote.find())markedQuotedWordScope(members,allowed,note,quote.group(1),"amend_explicitly_quoted_word",groups,issues);}
-            Matcher deleted=deletedWord.matcher(text);while(deleted.find())if(!deleted.group(1).matches("[*#]+|_+|\\s*/\\s*"))markedQuotedWordScope(members,allowed,note,deleted.group(1),"delete_explicitly_quoted_word",groups,issues);
+            // Quoted references are text to remove; conditional references do not name the removal target.
+            String unquoted=text.replaceAll("[“‘\"'][^”’\"']+[”’\"']","");Matcher target=Pattern.compile("(?i)\\b(?:in|from)\\s+(?:the\\s+)?(?:sub[- ]clauses?|clauses?)\\s+").matcher(unquoted);
+            Set<String> deletionAllowed=instructionTargetMembers(members,clauses,noteMembers,at,target.find()?unquoted.substring(target.start()):"",true);
+            Matcher deleted=deletedWord.matcher(text);while(deleted.find())if(!deleted.group(1).matches("[*#]+|_+|\\s*/\\s*"))markedQuotedWordScope(members,deletionAllowed,note,deleted.group(1),"delete_explicitly_quoted_word",groups,issues);
             Matcher named=Pattern.compile("(?is)([*#])\\s+(?:-\\s+)?(?:the\\s+)?([^#*]+?)\\s+in\\s+(?:the\\s+)?clauses?\\s+((?:NTT|SCT|SCC)\\s*\\d)").matcher(text);
             while(named.find())for(String name:named.group(2).split("(?i)\\s*,\\s*(?:(?:and|or)\\s+)?|\\s+(?:and|or)\\s+")){String term=name.replaceFirst("(?i)^the\\s+","").trim();if(term.matches("[\\p{L}][\\p{L} -]{2,100}"))markedQuotedWordScope(members,allowed,note,term,"explicitly_named_marked_object",groups,issues);}
         }
@@ -841,23 +997,24 @@ public final class OerTemplateEvidence {
         for(Member member:members)if(allowed.contains(member.id)){Matcher match=literal.matcher(member.text);while(match.find()){int left=match.start(),right=match.end(),markerLeft=left,markerRight=right;while(markerLeft>0&&Character.isWhitespace(member.text.charAt(markerLeft-1)))markerLeft--;if(markerLeft>0&&(member.text.charAt(markerLeft-1)=='*'||member.text.charAt(markerLeft-1)=='#')){markerLeft--;markerRight=markerLeft+1;}else{markerLeft=right;while(markerLeft<member.text.length()&&(Character.isWhitespace(member.text.charAt(markerLeft))||"”’\"'".indexOf(member.text.charAt(markerLeft))>=0))markerLeft++;if(markerLeft>=member.text.length()||"*#".indexOf(member.text.charAt(markerLeft))<0)continue;markerRight=markerLeft+1;}matches.add(member);ends.add(member);offsets.add(new int[]{left,right,markerLeft,markerRight});}}
         // A quoted slash alternative may carry one shared suffix marker, as in ten/twenty*.
         if(matches.isEmpty()&&term.matches("[\\p{L}][\\p{L} -]*"))for(Member member:members)if(allowed.contains(member.id)){Matcher choice=Pattern.compile("(?<![\\p{L}])("+literalWhitespace(term)+")\\s*/\\s*[\\p{L}]+([*#])(?![*#])",Pattern.CASE_INSENSITIVE).matcher(member.text);while(choice.find()){matches.add(member);ends.add(member);offsets.add(new int[]{choice.start(1),choice.end(1),choice.start(2),choice.end(2)});}}
-        for(int n=0;n+1<members.size();n++){int[] range=nativePdfMarkedWordContinuation(members.get(n),members.get(n+1),allowed,note,groups,literal);if(range!=null){matches.add(members.get(n));ends.add(members.get(n+1));offsets.add(range);}}
+        for(int n=0;n+1<members.size();n++){int[] range=nativePdfMarkedWordContinuation(members.get(n),members.get(n+1),allowed,note,groups,literal,action.equals("delete_explicitly_quoted_word"));if(range!=null){matches.add(members.get(n));ends.add(members.get(n+1));offsets.add(range);}}
         if(matches.isEmpty())return;
         ObjectNode group=lexicalGroup(note,"explicit_quoted_word_scope",term+"|"+action,groups);group.put("requiredAction",action);group.put("quotedSourceLiteral",term);group.put("scopeMeaning","Exact source word or named object established by the literal instruction; surrounding sentence and punctuation are context");ArrayNode ranges=group.putArray("memberRanges"),ids=group.putArray("orderedMemberIds"),markers=group.putArray("markerRanges");
-        for(Member member:members)for(int n=0;n<matches.size();n++)if(matches.get(n)==member){int[] range=offsets.get(n);Member end=ends.get(n);if(end==member)addRange(ranges,ids,member,range[0],range[1]);else{addPdfRange(ranges,ids,member,range[0],member.text.length(),nativePdfLayout(member));addPdfRange(ranges,ids,end,0,range[1],nativePdfLayout(end));}addRange(markers,array(),end,range[2],range[3]);}
+        for(Member member:members)for(int n=0;n<matches.size();n++)if(matches.get(n)==member){int[] range=offsets.get(n);Member end=ends.get(n);if(end==member)addRange(ranges,ids,member,range[0],range[1]);else{addPdfRange(ranges,ids,member,range[0],member.text.length(),nativePdfLayout(member));addPdfRange(ranges,ids,end,0,range[1],nativePdfLayout(end));}addRange(markers,array(),range.length==5&&range[4]==0?member:end,range[2],range[3]);}
         boolean repeatedObject=action.equals("explicitly_named_marked_object"),complete=(repeatedObject||matches.size()==1)&&note.path("captureComplete").asBoolean()&&note.path("sourceSyntaxComplete").asBoolean();group.put("captureComplete",true);group.put("scopeComplete",complete);if(!complete)issue(issues,"QUOTED_WORD_SCOPE_INCOMPLETE",group.path("id").asText(),"The explicitly quoted word has ambiguous marked occurrences in the named source units");
     }
 
-    private static int[] nativePdfMarkedWordContinuation(Member first,Member second,Set<String> allowed,JsonNode note,ArrayNode groups,Pattern literal){
+    private static int[] nativePdfMarkedWordContinuation(Member first,Member second,Set<String> allowed,JsonNode note,ArrayNode groups,Pattern literal,boolean quotedDeletion){
         if(!first.value.has("blockObservation")||!second.value.has("blockObservation")||!allowed.contains(first.id)||!allowed.contains(second.id)||!sameStory(first,second))return null;
         String joined=first.text+"\n"+second.text;int boundary=first.text.length()+1;Matcher match=literal.matcher(joined);
         while(match.find())if(match.start()<first.text.length()&&match.end()>boundary){
-            int end=match.end()-boundary,marker=end;while(marker<second.text.length()&&(Character.isWhitespace(second.text.charAt(marker))||"”’\"'".indexOf(second.text.charAt(marker))>=0))marker++;
-            if(marker>=second.text.length()||"*#".indexOf(second.text.charAt(marker))<0||marker+1<second.text.length()&&"*#".indexOf(second.text.charAt(marker+1))>=0)continue;
-            GlyphMap a=nativePdfLayout(first),b=nativePdfLayout(second);if(a==null||b==null||pdfPage(first)!=pdfPage(second)||!samePdfFrame(a,b)||!uniqueCompletePdfTarget(note,groups,first,second))return null;
+            int end=match.end()-boundary,marker=match.start(),markerMember=1;while(marker>0&&Character.isWhitespace(first.text.charAt(marker-1)))marker--;
+            if(marker>0&&"*#".indexOf(first.text.charAt(marker-1))>=0){marker--;markerMember=0;if(marker>0&&"*#".indexOf(first.text.charAt(marker-1))>=0)continue;}
+            else{marker=end;while(marker<second.text.length()&&(Character.isWhitespace(second.text.charAt(marker))||"”’\"'".indexOf(second.text.charAt(marker))>=0))marker++;if(marker>=second.text.length()||"*#".indexOf(second.text.charAt(marker))<0||marker+1<second.text.length()&&"*#".indexOf(second.text.charAt(marker+1))>=0)continue;}
+            GlyphMap a=nativePdfLayout(first),b=nativePdfLayout(second);if(a==null||b==null||pdfPage(first)!=pdfPage(second)||!samePdfFrame(a,b)||!quotedDeletion&&!uniqueCompletePdfTarget(note,groups,first,second))return null;
             GlyphSpan left=a.glyphs.get(0),right=b.glyphs.get(0);double height=Math.max(left.height,right.height),gap=right.y-left.y;
             if(gap<=0||gap>4*height||Math.abs(left.x-right.x)*a.pageWidth>height*a.pageHeight||Math.abs(left.font-right.font)>.2)return null;
-            return new int[]{match.start(),end,marker,marker+1};
+            return new int[]{match.start(),end,marker,marker+1,markerMember};
         }
         return null;
     }

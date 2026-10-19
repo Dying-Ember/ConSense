@@ -408,6 +408,51 @@ class CompleteOcrTests(unittest.TestCase):
             self.assertEqual(chosen['regions'][0]['bbox'], [10, 20, 80, 20])
             self.assertEqual(chosen['regions'][0]['originalGeometry']['targetFrame']['coordinateUnit'], 'pt')
             self.assertFalse(chosen['coverage']['sourceQualityAccepted'])
+            from test_structured_parser_evidence import accepted_manifest
+            selected_bundle = json.loads(store.read_asset(chosen['dualEvidenceRef']))
+            selected_run = next(run for run in selected_bundle['runs'] if run['parser'] == 'mineru')
+            reviewed = self.config(); reviewed['parserRouteAcceptance'] = accepted_manifest(selected_run)
+            restored = recognize_complete_page(raw, reviewed, store, request=request, source_context=self.source_context(raw))
+            self.assertEqual(restored['wholePageGroups'][0]['selectionStatus'], 'source_review_selected_candidate')
+            self.assertEqual(restored['regions'][0]['channel'], 'mineru')
+            self.assertEqual(restored['regions'][0]['text'], 'A different exception.')
+            self.assertFalse(restored['coverage']['sourceQualityAccepted'])
+            from canonical_projection import ADOPTION_SCHEMA
+            primary_run = next(run for run in selected_bundle['runs'] if run['parser'] == 'paddleocr-vl')
+            review = {'purpose': 'Authored complete-page source review; no original-source claim',
+                'completePageCoverage': [{'physicalPageNo': 3, 'primaryRunId': primary_run['runId'],
+                    'replacements': [{'primaryBlockIds': [b['blockId'] for b in primary_run['pages'][0]['blocks']],
+                                      'selectedUnitIds': ['reviewed-alternate']}]}]}
+            adoption = {'schema': ADOPTION_SCHEMA, 'bundleSha256': selected_bundle['bundleSha256'],
+                'sourceSha256': selected_bundle['source']['sourceSha256'],
+                'sourceRevisionSha256': selected_bundle['source']['sourceRevisionSha256'],
+                'documentId': 'authored-template', 'role': 'standard', 'module': 'drafting',
+                'sourcePurpose': 'standard_template', 'eligibleModules': ['drafting'],
+                'scope': {'requiredPhysicalPages': [3], 'scopePolicySha256': 'd'*64},
+                'quality': {'parseStatus': 'PARSED', 'semanticQuality': 'unknown'},
+                'reference': {'actor': 'codex', 'method': 'original_source_review',
+                    'sourceSha256': selected_bundle['source']['sourceSha256'], 'referenceVersion': 'authored-v1',
+                    'physicalPages': [3], 'evidence': review, 'evidenceSha256': hashlib.sha256(
+                        json.dumps(review, sort_keys=True, ensure_ascii=False, separators=(',', ':')).encode()).hexdigest()},
+                'units': [{'unitId': 'reviewed-alternate', 'scope': 'region', 'runId': selected_run['runId'],
+                           'blockId': selected_run['pages'][0]['blocks'][0]['blockId'],
+                           'reviewedAttributes': ['text', 'geometry']}], 'relations': [], 'assets': []}
+            canonical_config = self.config(); canonical_config['canonicalAdoptionManifest'] = adoption
+            canonical = recognize_complete_page(raw, canonical_config, store, request=request,
+                                               source_context=self.source_context(raw))
+            self.assertEqual(canonical['regions'][0]['text'], 'A different exception.')
+            self.assertEqual(canonical['regions'][0]['selectionStatus'], 'source_review_selected_region')
+            self.assertEqual(canonical['regions'][0]['providerBlock'], selected_run['pages'][0]['blocks'][0])
+            self.assertIsNone(canonical['wholePageGroups'][0]['selectedParser'])
+            self.assertFalse(canonical['coverage']['sourceQualityAccepted'])
+            projection = json.loads(store.read_asset(canonical['provenance']['canonicalProjectionRef']))
+            self.assertEqual(canonical['regions'][0]['canonicalSelection']['projectionSha256'], projection['projectionSha256'])
+            del adoption['reference']['evidence']['completePageCoverage']
+            adoption['reference']['evidenceSha256'] = hashlib.sha256(json.dumps(adoption['reference']['evidence'],
+                sort_keys=True, ensure_ascii=False, separators=(',', ':')).encode()).hexdigest()
+            with self.assertRaisesRegex(CompleteOcrError, 'complete_page_coverage_required'):
+                recognize_complete_page(raw, canonical_config, store, request=request,
+                                        source_context=self.source_context(raw))
             # Same metadata with changed native bytes cannot enter a complete run.
             descriptor['sha256'] = 'f'*64
             with self.assertRaises(CompleteOcrError):

@@ -6,6 +6,7 @@ prove a source blank, and a complete grid cannot prove complete source members.
 from __future__ import annotations
 
 import copy
+import math
 import re
 
 from native_pdf_table_conditions import observe_groups
@@ -81,6 +82,45 @@ def _numbered_grid(table, rows, logical_rows, numbering_col):
             'completeTableGroupAccepted': False}
 
 
+def _closed_physical_grid(table, cells):
+    """Keep an already closed original grid without inventing numbered columns."""
+    height, width = table.get('rowCount'), table.get('colCount')
+    xs, ys, raw = table.get('gridXEdges'), table.get('gridYEdges'), table.get('rawGrid')
+    if (type(height) is not int or type(width) is not int or height < 1 or width < 1
+            or len(cells) != height * width or table.get('extractionError')
+            or not isinstance(raw, list) or len(raw) != height
+            or any(not isinstance(row, list) or len(row) != width for row in raw)):
+        return None
+    for edges, count in ((xs, width), (ys, height)):
+        if (not isinstance(edges, list) or len(edges) != count + 1
+                or any(type(v) not in (int, float) or not math.isfinite(v) for v in edges)
+                or any(a >= b for a, b in zip(edges, edges[1:]))):
+            return None
+    if (not isinstance(table.get('bbox'), list) or any(type(v) not in (int, float) for v in table['bbox'])
+            or table['bbox'] != [xs[0], ys[0], xs[-1], ys[-1]]):
+        return None
+    occupied = set()
+    for cell in cells:
+        row, col = cell.get('row'), cell.get('col')
+        if (type(row) is not int or type(col) is not int or not 0 <= row < height or not 0 <= col < width
+                or (row, col) in occupied or cell.get('spanKnown') is not True
+                or type(cell.get('rowSpan')) is not int or cell['rowSpan'] != 1
+                or type(cell.get('colSpan')) is not int or cell['colSpan'] != 1
+                or not isinstance(cell.get('bbox'), list) or any(type(v) not in (int, float) for v in cell['bbox'])
+                or cell['bbox'] != [xs[col], ys[row], xs[col+1], ys[row+1]]
+                or not isinstance(cell.get('text'), str) or raw[row][col] != cell['text']):
+            return None
+        occupied.add((row, col))
+    origins = [dict(copy.deepcopy(cell), physicalCellIds=[cell['physicalCellId']],
+                    transform='same_provider_original_closed_physical_cell') for cell in cells]
+    return {'tableId': table['tableId'] + ':physical-grid', 'rowCount': height, 'colCount': width,
+            'bbox': copy.deepcopy(table['bbox']), 'origins': origins,
+            'physicalRows': [[row] for row in range(height)], 'numberingColumn': None,
+            'providerTableId': table['tableId'], 'excludedPhysicalCellIds': [],
+            'excludedMembership': 'all_original_physical_cells_preserved',
+            'textTransform': 'none_original_physical_cell_literals', 'completeTableGroupAccepted': False}
+
+
 def recover_table(table, observation):
     """Retain every physical cell and make reversible numbered-row proposals."""
     glyphs = {g['glyphId']: g for g in observation['glyphs']}
@@ -149,6 +189,8 @@ def recover_table(table, observation):
         if all(r in header_rows for r in row['physicalRows']):
             row['role'] = 'header_proposal'
     grid = _numbered_grid(table, rows, logical, numbering_col)
+    if grid is None and inside and set(owned) == inside and not (issues or missing or duplicate):
+        grid = _closed_physical_grid(table, cells)
     return {'schema': SCHEMA, 'tableId': table['tableId'], 'cells': cells, 'logicalRows': logical,
             'logicalTable': grid,
             'headerRows': header_rows, 'numberingColumnProposal': numbering_col,

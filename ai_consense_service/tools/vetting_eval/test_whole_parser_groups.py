@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from artifact_store import ArtifactStore
 from structured_parser_evidence import build_dual_parser_evidence, ParserEvidenceError
-from test_structured_parser_evidence import run
+from test_structured_parser_evidence import run, accepted_manifest
 from whole_parser_groups import select_whole_parser_groups
 
 
@@ -29,6 +29,51 @@ class WholeParserGroupsTests(unittest.TestCase):
         self.assertEqual(selected['blocks'][1]['label'], 'footnote')
         self.assertFalse(groups[0]['sourceQualityAccepted'])
         self.assertIsNone(bundle['canonicalSelection'])
+
+    def test_complete_existing_source_review_selects_the_reviewed_whole_page(self):
+        paddle, mineru = run('paddleocr-vl'), run('mineru', text='Reviewed source wording')
+        manifest = accepted_manifest(mineru)
+        for block in mineru['pages'][0]['blocks'][1:]:
+            route = copy.deepcopy(manifest['routes'][0]); route['blockId'] = block['blockId']
+            manifest['routes'].append(route)
+        bundle = build_dual_parser_evidence([paddle, mineru], route_acceptance_manifest=manifest)
+        self.assertEqual(len(bundle['canonicalSelection']), 2)
+        group = select_whole_parser_groups(bundle)[0]
+        self.assertEqual(group['selectedParser'], 'mineru')
+        self.assertEqual(group['selectionStatus'], 'source_review_selected_candidate')
+        self.assertFalse(group['sourceQualityAccepted'])
+        self.assertEqual(group['candidates'][1]['blocks'], mineru['pages'][0]['blocks'])
+
+    def test_partial_source_review_does_not_authorize_an_entire_page(self):
+        paddle, mineru = run('paddleocr-vl'), run('mineru')
+        bundle = build_dual_parser_evidence([paddle, mineru], route_acceptance_manifest=accepted_manifest(mineru))
+        self.assertIsNone(select_whole_parser_groups(bundle)[0]['selectedParser'])
+
+    def test_conflicting_or_stale_review_never_selects_the_first_page_by_order(self):
+        paddle, mineru = run('paddleocr-vl'), run('mineru')
+        full = []
+        for selected in (paddle, mineru):
+            manifest = accepted_manifest(selected)
+            for block in selected['pages'][0]['blocks'][1:]:
+                route = copy.deepcopy(manifest['routes'][0]); route['blockId'] = block['blockId']
+                manifest['routes'].append(route)
+            full.append(manifest)
+        for manifests in (full, list(reversed(full))):
+            combined = {'schema': full[0]['schema'], 'routes': sum((m['routes'] for m in manifests), [])}
+            bundle = build_dual_parser_evidence([paddle, mineru], route_acceptance_manifest=combined)
+            self.assertIsNone(select_whole_parser_groups(bundle)[0]['selectedParser'])
+        for key in ('sourceSha256', 'sourceRevisionSha256', 'configSha256', 'parserIdentitySha256', 'runId'):
+            stale = copy.deepcopy(full[1]); stale['routes'][0][key] = 'f' * 64
+            bundle = build_dual_parser_evidence([paddle, mineru], route_acceptance_manifest=stale)
+            self.assertIsNone(select_whole_parser_groups(bundle)[0]['selectedParser'], key)
+
+    def test_review_disagreeing_with_an_independent_feature_policy_stays_unknown(self):
+        paddle, mineru = run('paddleocr-vl'), run('mineru')
+        manifest = accepted_manifest(mineru)
+        route = copy.deepcopy(manifest['routes'][0]); route['blockId'] = mineru['pages'][0]['blocks'][1]['blockId']; manifest['routes'].append(route)
+        bundle = build_dual_parser_evidence([paddle, mineru], route_acceptance_manifest=manifest)
+        feature = policy(); feature['rules'] = [{'parser': 'paddleocr-vl', 'requires': {'completeRawCapture': True}}]
+        self.assertIsNone(select_whole_parser_groups(bundle, feature)[0]['selectedParser'])
 
     def test_no_policy_retains_both_whole_pages_without_adopting_either(self):
         bundle = build_dual_parser_evidence([run('paddleocr-vl'), run('mineru', text='different')])

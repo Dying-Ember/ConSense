@@ -60,6 +60,28 @@ class OerEngineIntegrationTest {
         com.fasterxml.jackson.databind.JsonNode state=result.getCoverage().getNativeTableCandidates();assertEquals(JsonUtils.parse("[2]"),state.path("unselectedPhysicalPages"));
         assertEquals("unknown",state.path("unselectedNativeTableStatus").asText());assertFalse(state.path("sourceQualityAccepted").asBoolean());assertFalse(state.path("canonicalAdopted").asBoolean());
     }
+    @Test void reviewedWholePageSelectionKeepsItsExactRegionInventoryAcrossTheWire() throws Exception {
+        byte[] original=scanPdf();com.fasterxml.jackson.databind.node.ObjectNode group=(com.fasterxml.jackson.databind.node.ObjectNode)wholePageGroup(DocumentParseProbe.sha256(original));
+        group.put("selectionStatus","source_review_selected_candidate");group.put("selectedParser","mineru");group.put("reviewManifestSha256",String.join("",Collections.nCopies(64,"c")));
+        com.fasterxml.jackson.databind.JsonNode candidate=group.path("candidates").get(1);com.fasterxml.jackson.databind.node.ArrayNode reviewed=group.putArray("reviewedBlockIds");
+        ((com.fasterxml.jackson.databind.node.ObjectNode)candidate.path("features")).put("allGeometryBound",true);
+        for(com.fasterxml.jackson.databind.JsonNode block:candidate.path("blocks")){((com.fasterxml.jackson.databind.node.ObjectNode)block).set("blockId",block.path("id"));reviewed.add(block.path("blockId"));}
+        ConsenseProperties properties=new ConsenseProperties();properties.getOcr().setMode("local");HttpSupport http=mock(HttpSupport.class);
+        when(http.postMultipart(anyString(),any(),anyLong())).thenReturn("{\"text\":\"reviewed whole source\",\"wholePageGroups\":["+group+"]}");
+        PaddleOcrClient client=new PaddleOcrClient(properties.getOcr(),http);Map<String,Object> context=DocumentParseProbe.map("physicalPageNo",1,"source",DocumentParseProbe.map("sourceSha256",DocumentParseProbe.sha256(original)));
+        assertEquals("mineru",client.recognize(new byte[]{1},context).getWholePageGroups().get(0).path("selectedParser").asText());
+        for(int mode=0;mode<6;mode++) {
+            com.fasterxml.jackson.databind.node.ObjectNode bad=group.deepCopy();
+            if(mode==0)((com.fasterxml.jackson.databind.node.ArrayNode)bad.path("reviewedBlockIds")).removeAll();
+            if(mode==1)bad.put("reviewManifestSha256","unbound");
+            if(mode==2)bad.put("selectedParser","paddleocr-vl");
+            if(mode==3)((com.fasterxml.jackson.databind.node.ArrayNode)bad.path("reviewedBlockIds")).add(reviewed.get(0));
+            if(mode==4)((com.fasterxml.jackson.databind.node.ObjectNode)bad.path("candidates").get(1).path("features")).put("completeRawCapture",false);
+            if(mode==5)((com.fasterxml.jackson.databind.node.ObjectNode)bad.path("candidates").get(1).path("blocks").get(0)).remove("blockId");
+            when(http.postMultipart(anyString(),any(),anyLong())).thenReturn("{\"wholePageGroups\":["+bad+"]}");
+            assertThrows(com.consense.common.BizException.class,()->client.recognize(new byte[]{1},context),"Bad reviewed inventory mode "+mode);
+        }
+    }
     @Test void wholeParserPageGroupsRejectDifferentOriginalPageMissingAlternativeAndSourceAcceptanceClaim() throws Exception {
         byte[] original=rotatedPdf();BufferedImage image=new BufferedImage(10,20,BufferedImage.TYPE_INT_RGB);ByteArrayOutputStream out=new ByteArrayOutputStream();ImageIO.write(image,"png",out);
         com.fasterxml.jackson.databind.node.ObjectNode group=(com.fasterxml.jackson.databind.node.ObjectNode)wholePageGroup(DocumentParseProbe.sha256(original));
