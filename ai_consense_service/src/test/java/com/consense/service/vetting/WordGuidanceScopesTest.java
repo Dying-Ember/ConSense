@@ -85,6 +85,21 @@ class WordGuidanceScopesTest {
         assertNotNull(new OerModelMaterial.Request().guidanceScopes(source,slice("g1",16,30)));
     }
 
+    @Test void canonicalGuidanceFallsBackToLiteralClauseCitations() {
+        DocumentParser.ParsedDocument parsed=word(p("title","Special Conditions of Contract"),
+                p("g1","[Guidance Note: See Clause 16.2 for the warranty requirements.]"));
+        SourceDocument source=source(parsed,"SCC",true);
+        ObjectNode member=object();member.put("schema",com.consense.service.sources.NormalObservedContract.SCHEMA);
+        com.consense.web.dto.CanonicalEvidenceDtos.EvidencePointer cited=pointer(source,"zzz");
+        cited.setAdoption(JsonUtils.parse("{\"clause\":{\"clauseId\":\"16.2\"}}"));
+        JsonNode model=new OerModelMaterial.Request(Collections.singletonList(source)).project(cited,member,"tender");
+        assertEquals("referenced_clause_literal",model.path("observedGuidanceScopes").path("selection").asText());
+        assertEquals(1,model.path("observedGuidanceScopes").path("guidanceNotes").size());
+        com.consense.web.dto.CanonicalEvidenceDtos.EvidencePointer other=pointer(source,"zzz");
+        other.setAdoption(JsonUtils.parse("{\"clause\":{\"clauseId\":\"9.9\"}}"));
+        assertEquals("unavailable",new OerModelMaterial.Request(Collections.singletonList(source)).project(other,member,"tender").path("observedGuidanceScopes").path("status").asText());
+    }
+
     private static Chunk slice(String blockId,int start,int end) {
         Chunk chunk=new Chunk();chunk.setId("slice-"+start);chunk.setContent("slice");
         Part part=new Part();part.setBlockId(blockId);part.setText("slice");part.setStartOffset(start);part.setEndOffset(end);

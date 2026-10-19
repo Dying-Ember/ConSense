@@ -205,6 +205,41 @@ public final class OerModelMaterial {
             }catch(RuntimeException unsupported){return null;}
         }
 
+        /** Literal clause identity of the selected canonical unit; used only for its own source citations. */
+        private static String adoptionClauseId(EvidencePointer p) {
+            JsonNode clause=p.getAdoption()==null?null:p.getAdoption().path("clause");
+            if(clause==null||!clause.isObject())return null;
+            String id=clause.path("clauseId").asText("").trim();
+            return id.isEmpty()?null:id;
+        }
+
+        /** Guidance notes that literally cite this clause id; no page proximity or text similarity is inferred. */
+        ObjectNode guidanceScopesByClause(SourceDocument source,String clauseId) {
+            JsonNode evidence=guidanceEvidence(source);
+            if(evidence==null||!carriesGuidance(evidence))return null;
+            Set<String> noteIds=new LinkedHashSet<>();ArrayNode notes=array();
+            for(JsonNode note:evidence.path("guidanceNotes"))if(noteCitesClause(note,clauseId)){notes.add(note.deepCopy());noteIds.add(note.path("id").asText());}
+            if(notes.isEmpty())return null;
+            ObjectNode out=object();out.put("version","ordinary-word-guidance-scopes-v1");out.put("status","observed");
+            out.put("analysisRevision",evidence.path("sourceBinding").path("analysisRevision").asText());
+            out.put("family",evidence.path("sourceBinding").path("fileKey").asText());
+            out.put("selection","referenced_clause_literal");out.put("clauseId",clauseId);
+            out.put("scopeMeaning","Guidance whose own text or reference candidates literally cite the selected clause id; page proximity and text similarity are not used");
+            out.set("guidanceNotes",notes);
+            ArrayNode conditions=out.putArray("sourceConditions"),groups=out.putArray("guidanceGroups");out.putArray("markerCandidates");
+            for(JsonNode condition:evidence.path("conditions"))if(noteIds.contains(condition.path("guidanceNoteId").asText()))conditions.add(condition.deepCopy());
+            for(JsonNode group:evidence.path("groups")){String id=group.path("id").asText();for(String noteId:noteIds)if(id.equals(noteId+":capture")){groups.add(group.deepCopy());break;}}
+            return out;
+        }
+
+        private static boolean noteCitesClause(JsonNode note,String clauseId) {
+            String quoted=java.util.regex.Pattern.quote(clauseId);
+            java.util.regex.Pattern bounded=java.util.regex.Pattern.compile("(?<![0-9.])"+quoted+"(?![0-9])");
+            for(JsonNode ref:note.path("referenceCandidates"))if(bounded.matcher(ref.path("text").asText()).find())return true;
+            java.util.regex.Pattern cited=java.util.regex.Pattern.compile("(?i)\\b(?:clause|scc|ntt|sct)\\s*"+quoted+"(?![0-9])");
+            return cited.matcher(note.path("text").asText()).find();
+        }
+
         private static boolean intersects(JsonNode list,Set<String> members) {
             if(list==null||!list.isArray())return false;
             for(JsonNode value:list){String id=value.isTextual()?value.asText():value.path("memberId").asText();if(members.contains(id))return true;}
@@ -277,11 +312,14 @@ public final class OerModelMaterial {
                             offsets.computeIfAbsent(block,id->new ArrayList<>()).add(new int[]{part.path("startOffset").asInt(),part.path("endOffset").asInt()});
                     }
                 ObjectNode guidance=guidanceScopes(guidanceSource,memberIds,offsets,true);
-                if(guidance!=null){
-                    if("unavailable".equals(guidance.path("status").asText())&&!NormalObservedContract.PRODUCER.equals(p.getProducerKind()))
+                if(guidance!=null&&"unavailable".equals(guidance.path("status").asText())){
+                    String clauseId=adoptionClauseId(p);
+                    ObjectNode byClause=clauseId==null?null:guidanceScopesByClause(guidanceSource,clauseId);
+                    if(byClause!=null)guidance=byClause;
+                    else if(!NormalObservedContract.PRODUCER.equals(p.getProducerKind()))
                         guidance.put("reason","producer_member_identity_not_comparable");
-                    structure.set("observedGuidanceScopes",guidance);
                 }
+                if(guidance!=null)structure.set("observedGuidanceScopes",guidance);
             }
             if(first){
                 ObjectNode declaration=identity.deepCopy();declaration.put("declarationVersion",SOURCE_VERSION);declaration.put("sourceDeclarationRef",ref);
