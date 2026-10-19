@@ -96,27 +96,29 @@ public final class OerModelMaterial {
         /** Guidance candidates are recomputed on demand from the same persisted parse; no stored generation changes. */
         ObjectNode guidanceScopes(SourceDocument source,VettingCorpus.Chunk chunk) {
             if(chunk==null)return null;
-            Set<String> members=new LinkedHashSet<>();
-            if(chunk.getParts()!=null)for(VettingCorpus.Part part:chunk.getParts())
-                if(part!=null&&part.getBlockId()!=null&&!part.getBlockId().trim().isEmpty())members.add(part.getBlockId());
-            return guidanceScopes(source,members,false);
+            Set<String> members=new LinkedHashSet<>();Map<String,List<int[]>> offsets=new HashMap<>();
+            if(chunk.getParts()!=null)for(VettingCorpus.Part part:chunk.getParts())if(part!=null&&part.getBlockId()!=null&&!part.getBlockId().trim().isEmpty()){
+                members.add(part.getBlockId());
+                offsets.computeIfAbsent(part.getBlockId(),id->new ArrayList<>()).add(new int[]{part.getStartOffset(),part.getEndOffset()});
+            }
+            return guidanceScopes(source,members,offsets,false);
         }
-        ObjectNode guidanceScopes(SourceDocument source,Set<String> members,boolean explicitUnavailable) {
+        ObjectNode guidanceScopes(SourceDocument source,Set<String> members,Map<String,List<int[]>> partOffsets,boolean explicitUnavailable) {
             if(source==null||members==null||members.isEmpty())return null;
             JsonNode evidence=guidanceEvidence(source);
             if(evidence==null)return null;
             if(!carriesGuidance(evidence))return null;
-            Set<String> observed=matchedEvidenceIds(source,members);
+            Set<String> observed=matchedEvidenceIds(source,members);Map<String,Set<String>> index=guidanceIndex(source);
             ObjectNode out=object();out.put("version","ordinary-word-guidance-scopes-v1");out.put("status","observed");
             out.put("analysisRevision",evidence.path("sourceBinding").path("analysisRevision").asText());
             out.put("family",evidence.path("sourceBinding").path("fileKey").asText());
             out.put("selection","intersected_selected_chunk_members");
             out.put("scopeMeaning","Selected observed guidance, condition and marker candidates only; capture, source syntax, applicability and legal closure remain as declared");
             ArrayNode notes=out.putArray("guidanceNotes"),conditions=out.putArray("sourceConditions"),markers=out.putArray("markerCandidates"),groups=out.putArray("guidanceGroups");
-            for(JsonNode note:evidence.path("guidanceNotes"))if(intersects(note.path("orderedMemberIds"),observed))notes.add(note.deepCopy());
-            for(JsonNode condition:evidence.path("conditions"))if(intersects(condition.path("memberRanges"),observed)||observed.contains(condition.path("memberId").asText()))conditions.add(condition.deepCopy());
+            for(JsonNode note:evidence.path("guidanceNotes"))if(intersects(note.path("orderedMemberIds"),observed)&&rangesOverlap(note.path("memberRanges"),partOffsets,index))notes.add(note.deepCopy());
+            for(JsonNode condition:evidence.path("conditions"))if((intersects(condition.path("memberRanges"),observed)||observed.contains(condition.path("memberId").asText()))&&rangesOverlap(condition.path("memberRanges"),partOffsets,index))conditions.add(condition.deepCopy());
             for(JsonNode marker:evidence.path("markerCandidates"))if(observed.contains(marker.path("memberId").asText()))markers.add(marker.deepCopy());
-            for(JsonNode group:evidence.path("groups"))if("guidance_capture".equals(group.path("kind").asText())&&intersects(group.path("orderedMemberIds"),observed))groups.add(group.deepCopy());
+            for(JsonNode group:evidence.path("groups"))if("guidance_capture".equals(group.path("kind").asText())&&intersects(group.path("orderedMemberIds"),observed)&&rangesOverlap(group.path("memberRanges"),partOffsets,index))groups.add(group.deepCopy());
             if(notes.isEmpty()&&conditions.isEmpty()&&markers.isEmpty()&&groups.isEmpty()){
                 if(!explicitUnavailable)return null;
                 ObjectNode compact=object();compact.put("status","unavailable");compact.put("reason","no_guidance_in_selected_scope");
@@ -124,6 +126,21 @@ public final class OerModelMaterial {
                 return compact;
             }
             return out;
+        }
+
+        /** Split source blocks submit only a slice; require the observed range to overlap the submitted offsets. */
+        private static boolean rangesOverlap(JsonNode ranges,Map<String,List<int[]>> partOffsets,Map<String,Set<String>> index) {
+            if(partOffsets==null||partOffsets.isEmpty())return true;
+            if(ranges==null||!ranges.isArray()||ranges.isEmpty())return true;
+            for(JsonNode range:ranges){
+                int start=range.path("start").asInt(-1),end=range.path("end").asInt(-1);
+                if(start<0||end<start)continue;
+                for(String block:index.getOrDefault(range.path("memberId").asText(),Collections.singleton(range.path("memberId").asText()))){
+                    List<int[]> slices=partOffsets.get(block);if(slices==null)continue;
+                    for(int[] slice:slices)if(start<slice[1]&&slice[0]<end)return true;
+                }
+            }
+            return false;
         }
 
         /** Word evidence members are coverage paragraph ids; expand them through retainedBlockIds to the model block ids. */
@@ -252,10 +269,14 @@ public final class OerModelMaterial {
             SourceDocument guidanceSource=ordinarySources.get(String.valueOf(p.getDocumentId()));
             if(guidanceSource!=null&&Objects.equals(guidanceSource.getSourceSha256(),p.getOriginalSourceSha256())
                     &&Objects.equals(VettingCorpus.sourceHash(guidanceSource),p.getJavaParsedSourceHash())){
-                Set<String> memberIds=new LinkedHashSet<>();
+                Set<String> memberIds=new LinkedHashSet<>();Map<String,List<int[]>> offsets=new HashMap<>();
                 if(p.getParts()!=null&&p.getParts().isArray())
-                    for(JsonNode part:p.getParts())if(part!=null&&part.path("blockId").isTextual()&&!part.path("blockId").asText().trim().isEmpty())memberIds.add(part.path("blockId").asText());
-                ObjectNode guidance=guidanceScopes(guidanceSource,memberIds,true);
+                    for(JsonNode part:p.getParts())if(part!=null&&part.path("blockId").isTextual()&&!part.path("blockId").asText().trim().isEmpty()){
+                        String block=part.path("blockId").asText();memberIds.add(block);
+                        if(part.path("startOffset").canConvertToInt()&&part.path("endOffset").canConvertToInt())
+                            offsets.computeIfAbsent(block,id->new ArrayList<>()).add(new int[]{part.path("startOffset").asInt(),part.path("endOffset").asInt()});
+                    }
+                ObjectNode guidance=guidanceScopes(guidanceSource,memberIds,offsets,true);
                 if(guidance!=null){
                     if("unavailable".equals(guidance.path("status").asText())&&!NormalObservedContract.PRODUCER.equals(p.getProducerKind()))
                         guidance.put("reason","producer_member_identity_not_comparable");

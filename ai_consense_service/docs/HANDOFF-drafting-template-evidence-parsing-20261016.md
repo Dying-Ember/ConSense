@@ -1,16 +1,17 @@
 <!-- oer-guidance-pdf-producers-I48-20261019:start -->
-**I48：指导语证据覆盖 PDF 来源与全部 canonical 生产者；Word 成员 id 经 retainedBlockIds 映射到 block id，成员命名空间不可比时显式声明，不按页或相似度推断关联，不改契约、不重生成，活动服务未部署。**
+**I48：指导语证据覆盖 PDF 来源与全部 canonical 生产者；Word 成员经 retainedBlockIds 映射、按 offset 相交，成员命名空间不可比时显式声明，不按页或相似度推断关联，不改契约、不重生成，活动服务未部署。**
 
 I47 只在 `normal_observed` 生产者的 Word 来源上命中。本轮：
-- Word 证据成员是 coverage 段落 id（`docx-p:…`），chunk／pointer 用 `DocumentBlock` id；新增按 `retainedBlockIds` 的映射，命中后同时保留段落 id 供证据选择。合成夹具已改为真实 id 形态（`docx-p:g1` ↔ `g1`）。
-- `analyseGuidance` 允许无 `nativeDocxParagraphs` 的 PDF 覆盖度（blocks 非空即可），并只在 fileKey 为 NTT／SCT／SCC 时运行；分析结果（含失败）按 source 缓存，避免逐 chunk 重算。
-- `project()` 的 guidance 钩子移到 `normal_observed` 守卫之外：`native_pdf`／`family` 也会运行，身份仍按 `documentId`／`originalSourceSha256`／`javaParsedSourceHash` 复核，`parts` 空值与空白 blockId 均跳过。
-- 显式状态：普通来源无命中不输出字段；canonical 无命中输出紧凑 `status=unavailable`；`native_pdf`／`family` 因成员命名空间不可比（`native-pdf-region:<sha>` 对 `pdf-page/<n>/line/<k>`）→ `reason=producer_member_identity_not_comparable`。
-- 未覆盖：让这两类生产者真正命中需生产器暴露 Java 成员 id（契约变更＋重生成）；标准模板仍不进审查／咨询语料；相交仍是成员级、未做 offset 级裁剪；身份 pin 未含 coverage 代次。
+- Word 证据成员是 coverage 段落 id（`docx-p:…`），chunk／pointer 用 `DocumentBlock` id；新增按 `retainedBlockIds` 的映射。合成夹具已改为真实 id 形态（`docx-p:g1` ↔ `g1`）并覆盖拆分块切片。
+- 指导语、条件与 capture 组的 `memberRanges` 必须与所选 part 的 `[startOffset,endOffset)` 相交才计入；>1400 字拆分块不再继承同一块别处的指导语（marker 仍按成员级）。
+- `analyseGuidance` 允许无 `nativeDocxParagraphs` 的 PDF 覆盖度（blocks 非空即可），只在 fileKey 为 NTT／SCT／SCC 时运行；分析结果（含失败）按 source 缓存，避免逐 chunk 重算。
+- `project()` 的钩子移到 `normal_observed` 守卫之外：`native_pdf`／`family` 也运行，身份仍按 `documentId`／`originalSourceSha256`／`javaParsedSourceHash` 复核，`parts` 空值与空白 blockId 均跳过。
+- 显式状态：普通来源无命中不输出字段；canonical 无命中输出紧凑 `status=unavailable`；`native_pdf`／`family` 因命名空间不可比（`native-pdf-region:<sha>` 对 `pdf-page/<n>/line/<k>`）→ `reason=producer_member_identity_not_comparable`。
+- 未覆盖：让这两类生产者真正命中需生产器暴露 Java 成员 id（契约变更＋重生成）；标准模板仍不进审查／咨询语料；身份 pin 未含 coverage 代次。
 
-验证：定向 88 项＝84 通过＋4 项原有条件跳过，0 失败；全量后端 3636 项＝3478 通过＋14 failures＋9 errors＋135 跳过，23 项环境失败与基线逐类一致。两个独立子代理分别核实了 PDF／生产者可行性与对 diff 的对抗审查；其 high／med 项（Word id 映射、失败缓存、逐 chunk 膨胀、空白 id）已修，offset 级与 pin 宽度作为已知边界保留。本轮只提交并推送源码／测试／文档，不部署。证据 `.local/oer-guidance-pdf-producers-20261019-I48/verification.json`；台账 I48。
+验证：定向 89 项＝85 通过＋4 项原有条件跳过，0 失败；全量后端 3637 项＝3479 通过＋14 failures＋9 errors＋135 跳过，23 项环境失败与基线逐类一致。两个独立子代理分别核实 PDF／生产者可行性并做对抗审查；其 high／med 项（Word id 映射、失败缓存、逐 chunk 膨胀、空白 id、offset 级）已修，pin 宽度作为已知边界保留。本轮只提交并推送源码／测试／文档，不部署。证据 `.local/oer-guidance-pdf-producers-20261019-I48/verification.json`；台账 I48。
 <!-- oer-guidance-pdf-producers-I48-20261019:end -->
-!-- oer-guidance-source-scopes-I47-20261019:start -->
+-- oer-guidance-source-scopes-I47-20261019:start -->
 **I47：OER 指导语证据按需接入 Vetting 与 Advisory 消费链；不新增解析真源、不改 candidateGraph／canonical 契约、不重生成，活动服务未部署。**
 
 本轮修的是 I44／I45 之后确认的消费落差：Vetting／Advisory 只拿到指导语原文块，拿不到"指导→目标条款／条件／标记"关系。该结构只在 Drafting 模板路径生成（`DocumentParser.parseTemplate` → `OerTemplateEvidence.analyse`）；标准模板与指导语按既定范围不进审查／咨询语料，因此没有现成通道。

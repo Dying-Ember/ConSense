@@ -77,6 +77,21 @@ class WordGuidanceScopesTest {
         assertTrue(absent.path("observedGuidanceScopes").isMissingNode());
     }
 
+    @Test void splitBlockSlicesDoNotInheritGuidanceFromAnotherSlice() {
+        String text="Body text here. [Guidance Note: Insert the amount.]";
+        DocumentParser.ParsedDocument parsed=word(p("title","Special Conditions of Contract"),p("g1",text));
+        SourceDocument source=source(parsed,"SCC",true);
+        assertNull(new OerModelMaterial.Request().guidanceScopes(source,slice("g1",0,10)));
+        assertNotNull(new OerModelMaterial.Request().guidanceScopes(source,slice("g1",16,30)));
+    }
+
+    private static Chunk slice(String blockId,int start,int end) {
+        Chunk chunk=new Chunk();chunk.setId("slice-"+start);chunk.setContent("slice");
+        Part part=new Part();part.setBlockId(blockId);part.setText("slice");part.setStartOffset(start);part.setEndOffset(end);
+        chunk.setParts(new ArrayList<>(Collections.singletonList(part)));
+        return chunk;
+    }
+
     private static SourceDocument pdfSource() {
         ArrayNode blocks=JsonUtils.mapper().createArrayNode();
         ObjectNode block=blocks.addObject();
