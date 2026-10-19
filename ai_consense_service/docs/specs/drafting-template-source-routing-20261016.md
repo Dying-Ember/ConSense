@@ -10,7 +10,7 @@
 
 验证：定向 133 项＝128 通过＋5 项原有条件跳过，0 失败；全量后端 3635 项＝3477 通过＋14 failures＋9 errors＋135 跳过。23 项失败与改动前基线（stash 两个产品文件后同批重跑）逐类完全一致，属既有环境问题（测试用 Python 解释器、进程／端口、SQL／临时目录），原样保留、不计通过。首轮全量另有 5 个 errors 是本轮引入的（部分测试构造 AdviceService 时 repository 为空），已加空值保护修复，原失败保留记录。
 
-未覆盖：真实原件上的触发与耗时、前端与浏览器业务验收；`native_pdf`／`family` 生产者快照不含 candidateGraph，本字段对其不适用；标准模板指导语仍只在 Drafting 侧结构化。本轮只提交源码／测试／文档，不推送、不部署。证据 `.local/oer-guidance-seams-20261019-I47/verification.json`；台账 I47。
+未覆盖：真实原件上的触发与耗时、前端与浏览器业务验收；`native_pdf`／`family` 生产者快照不含 candidateGraph，本字段对其不适用；标准模板指导语仍只在 Drafting 侧结构化。本轮只提交并推送源码／测试／文档，不部署。证据 `.local/oer-guidance-seams-20261019-I47/verification.json`；台账 I47。
 <!-- oer-guidance-source-scopes-I47-20261019:end -->
 <!-- oer-native-pdf-source-scopes-I45-20261019:start -->
 **I45：修复原生PDF标题／修订边栏、保修表所属条款和跨页共同条件；精确采纳2产品＋2测试，活动服务未部署。** 模板规则仍为 `native-template-rules-20261019-r21`，本轮修现有普通PDF来源分组和消费者，未新增解析真源。

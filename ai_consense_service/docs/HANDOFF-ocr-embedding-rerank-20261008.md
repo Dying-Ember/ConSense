@@ -10,7 +10,7 @@
 
 验证：定向 133 项＝128 通过＋5 项原有条件跳过，0 失败；全量后端 3635 项＝3477 通过＋14 failures＋9 errors＋135 跳过。23 项失败与改动前基线（stash 两个产品文件后同批重跑）逐类完全一致，属既有环境问题（测试用 Python 解释器、进程／端口、SQL／临时目录），原样保留、不计通过。首轮全量另有 5 个 errors 是本轮引入的（部分测试构造 AdviceService 时 repository 为空），已加空值保护修复，原失败保留记录。
 
-未覆盖：真实原件上的触发与耗时、前端与浏览器业务验收；`native_pdf`／`family` 生产者快照不含 candidateGraph，本字段对其不适用；标准模板指导语仍只在 Drafting 侧结构化。本轮只提交源码／测试／文档，不推送、不部署。证据 `.local/oer-guidance-seams-20261019-I47/verification.json`；台账 I47。
+未覆盖：真实原件上的触发与耗时、前端与浏览器业务验收；`native_pdf`／`family` 生产者快照不含 candidateGraph，本字段对其不适用；标准模板指导语仍只在 Drafting 侧结构化。本轮只提交并推送源码／测试／文档，不部署。证据 `.local/oer-guidance-seams-20261019-I47/verification.json`；台账 I47。
 <!-- oer-guidance-source-scopes-I47-20261019:end -->
 <!-- oer-sl-version-research-20261019:start -->
 **2026-10-19：用户已重新启动 SL 多版本技术调查，旧延后记录保留历史。** 当前官网六版已分 SHA 取得并读实际目录／全文，技术范围分别按本版建立；首轮研究与原图证据见 [SL 多版本技术部分调查](research/oer-sl-technical-version-investigation-20261019.md)。比赛 Batch 2 与官网 rev 1 的 FWP3.1.5.030.B 材质差异真实存在，禁止因封面／总页数相同混并；2024 的细书签不能推广至其他版，2026 编号包含 `.10`，原生页中的 ELE36 图像表单仍需局部补读与续表。完整原生文本比较只是调查证据，未重跑六版 OER、OCR、模型或训练，未改产品、部署、活动 DB／索引。新资料留独立版本对照区，不改变旧基线、SL PRE／图纸排除或训练／评测登记。证据 `.local/oer-sl-version-research-20261019/summary-evidence.json`，同一本 HTML I46。
