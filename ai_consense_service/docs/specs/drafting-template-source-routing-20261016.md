@@ -1,3 +1,12 @@
+<!-- oer-scc-p32-p57-scope-I49-20261020:start -->
+**I49：修复 SCC 原生 PDF 第32页括号指导语编号清单被误作条款根、跨行 `Clause 7.4` 引用被误作标题；源码已采纳，活动服务未部署。**
+
+第32页 `[Guidance Note:` 内的 1.–5. 粗体编号原被 `NormalPdfSourceGroups.marker()` 当根，真实 SCC8.7 在第一条指导语处提前结束。现按未闭合方括号捕获：括号内编号行保持为当前条款成员，直到 `]` 关闭；不按页码、字体或日期特判。第57页跨行引用（上一行以 `Clause` 结尾、下一行以 `7.4` 开头且同正文列）不再建根；标题仍按粗体／字号与原列证据判定。
+
+真实 66 页保存观察复算（源 SHA `1bebab1a…`，365 组／480 issues）：SCC8.7 `body=29`、`end=pdf-page:32:line:34`（即 SCC9 标题），裸 `1..5` 引用列表为空；无裸 `7.4` 根，真实 SCC7.4 仍为完整组（`body=44`，止于 page21 line10）。SCC8.7 仍为 `partial_unknown_scope`，不把边界修正当整份完整；p57 只在该保存观察上验证。
+
+验证：`NormalPdfSourceGroupsTest` 16 项全过（含两个新反例）；相关定向 99 项全过；全量后端 3640 项＝3482 通过＋14 failures＋9 errors＋135 跳过，23 项环境失败与基线逐类一致。0 OCR／模型调用；不部署。证据 `.local/oer-scc-p32-p57-20261020-I49/verification.json`（含真实数据 harness）；台账 I49。
+<!-- oer-scc-p32-p57-scope-I49-20261020:end -->
 <!-- oer-guidance-pdf-producers-I48-20261019:start -->
 **I48：指导语证据覆盖 PDF 来源与全部 canonical 生产者；Word 成员经 retainedBlockIds 映射、按 offset 相交，`native_pdf`／`family` 按字面条款引用关联，仍不可比时显式声明，不改契约、不重生成，活动服务未部署。**
 

@@ -18,6 +18,8 @@ public final class NormalPdfSourceGroups {
     private static final Pattern FIELD=Pattern.compile("^\\s*(?:clause|condition)\\s*("+LABEL+")(?:\\(([a-z0-9]+)\\)|([a-z]))?\\s*$",Pattern.CASE_INSENSITIVE);
     private static final Pattern REFERENCE=Pattern.compile("\\b(?:clause|condition)\\s+("+LABEL+"(?:\\([a-z0-9]+\\))*)",Pattern.CASE_INSENSITIVE),LOCAL=Pattern.compile("(?<![\\p{L}\\p{N}_])\\([a-z0-9]{1,8}\\)",Pattern.CASE_INSENSITIVE);
     private static final Pattern ABOVE=Pattern.compile("^\\s*(?:(?:,|and/or|and|or)\\s*\\([a-z0-9]{1,8}\\)\\s*)*above\\b",Pattern.CASE_INSENSITIVE);
+    private static final Pattern GUIDANCE_OPEN=Pattern.compile("\\[\\s*guidance\\s+notes?\\b",Pattern.CASE_INSENSITIVE);
+    private static final Pattern REFERENCE_TAIL=Pattern.compile("(?i)(?:\\b(?:clauses?|conditions?|sections?|paragraphs?|regulations?))\\s*$");
     private NormalPdfSourceGroups() { }
     public static ObjectNode build(List<DocumentBlock> blocks,String sourceSha256,JsonNode coverage) {
         ObjectNode out=object();out.put("version","native-pdf-source-groups-v1");out.put("sourceSha256",sourceSha256);
@@ -38,7 +40,9 @@ public final class NormalPdfSourceGroups {
             if(block.getPdfFormField()!=null)forms.add(block);else pages.computeIfAbsent(block.getPageNo(),key->new ArrayList<>()).add(block);
         }
         Map<String,Set<Integer>> occurrences=new HashMap<>();for(List<DocumentBlock> page:pages.values())for(DocumentBlock block:page)occurrences.computeIfAbsent(ws(block.getText()),key->new HashSet<>()).add(block.getPageNo());
-        List<Node> nodes=new ArrayList<>(),stack=new ArrayList<>();Node tail=null;Row last=null;int ordinal=0,previousPage=-1;boolean previousBase=false;
+        List<Node> nodes=new ArrayList<>(),stack=new ArrayList<>();Node tail=null;Row last=null,previousRow=null;int ordinal=0,previousPage=-1;boolean previousBase=false;
+        // An unclosed "[Guidance Note:" bracket keeps its numbered items out of clause roots until "]".
+        boolean guidanceOpen=false;
         for(Map.Entry<Integer,List<DocumentBlock>> page:pages.entrySet()){
             List<Row> rows=rows(page.getValue(),issues,context);double base=Double.POSITIVE_INFINITY;
             for(Row row:rows)row.table=tableProof(row,tables);
@@ -59,6 +63,7 @@ public final class NormalPdfSourceGroups {
             }
             if(rows.size()>1){Row end=rows.get(rows.size()-1),before=rows.get(rows.size()-2);if(end.text.trim().matches("\\d+")&&end.y-before.y>lineStep*1.4)footer=Math.min(footer,end.y);}
             for(Row row:rows){
+                Row previous=previousRow;previousRow=row;
                 row.ordinal=ordinal++;row.markerX=row.x-referenceBase;row.contentX=bodyX(row)-referenceBase;
                 boolean repeatedHeader=occurrences.getOrDefault(ws(row.text),Collections.emptySet()).size()>1&&row.y<firstNumberY;
                 if(repeatedHeader||row.y>=footer){for(DocumentBlock block:row.blocks)context(context,block,repeatedHeader?"repeated_native_header_context":"native_footer_band_context");continue;}
@@ -73,6 +78,21 @@ public final class NormalPdfSourceGroups {
                     if(owner!=null){owner.rows.add(row);last=row;continue;}
                 }
                 if(row.wide){issue(issues,row.first().getId(),"same_baseline_wide_column_gap_unknown");for(DocumentBlock block:row.blocks)context(context,block,"unknown_column");markActive(stack,tail,"same_baseline_column_reading_order_unknown");continue;}
+                // A bracketed guidance note is source instruction text, not clause structure: its numbered
+                // items (1., 2., ...) stay members of the active source clause until the bracket closes.
+                if(guidanceOpen){
+                    if(!stack.isEmpty())stack.get(stack.size()-1).rows.add(row);else for(DocumentBlock block:row.blocks)context(context,block,"guidance_capture_context");
+                    if(row.text.indexOf(']')>=0)guidanceOpen=false;
+                    last=row;continue;
+                }
+                if(GUIDANCE_OPEN.matcher(row.text).find()&&row.text.indexOf(']')<0){
+                    if(!stack.isEmpty())stack.get(stack.size()-1).rows.add(row);else for(DocumentBlock block:row.blocks)context(context,block,"guidance_capture_context");
+                    guidanceOpen=true;last=row;continue;
+                }
+                // A numbered line that continues a cross-line "Clause" reference is a citation, not a heading.
+                if(row.numeric!=null&&previous!=null&&!row.heading&&Math.abs(row.x-previous.x)<=row.tolerance&&REFERENCE_TAIL.matcher(previous.text).find()){
+                    row.numeric=null;row.paren=null;row.marker=null;
+                }
                 if(row.numeric!=null||row.paren!=null){
                     if(!Double.isFinite(row.contentX)){issue(issues,row.first().getId(),"marker_has_no_observed_body_glyph");for(DocumentBlock block:row.blocks)context(context,block,"marker_body_unknown");markActive(stack,tail,"marker_body_unknown");continue;}
                     Node parent=null;

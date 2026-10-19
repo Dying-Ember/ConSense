@@ -164,6 +164,33 @@ class NormalPdfSourceGroupsTest {
         assertAll("Every unresolved active parent-tail branch stays unknown",cases);
     }
 
+    @Test void numberedGuidanceListInsideBracketedNoteDoesNotBecomeClauseRoots() {
+        List<DocumentBlock> blocks=new ArrayList<>();
+        DocumentBlock root=line("scc87",1,.06,.10,"8.7 Use of the Site by Police and other disciplined services");bold(root);blocks.add(root);
+        DocumentBlock open=line("open",1,.10,.14,"[Guidance Note:");bold(open);blocks.add(open);
+        for(int i=1;i<=5;i++){DocumentBlock item=line("item"+i,1,.11,.14+i*.02,i+". Guidance item "+i+" continues this note.");bold(item);blocks.add(item);}
+        blocks.add(line("close",1,.11,.26,"be amended to (Clause 8.2(5))]"));
+        blocks.add(line("body",1,.10,.30,"Clause 8.2 of the General Conditions of Contract is amended."));
+        blocks.add(line("next",1,.06,.36,"8.8 Next clause"));
+        JsonNode result=build(blocks);
+        assertEquals(1,groups(result,"source_clause","8.7").size());
+        for(int i=1;i<=5;i++)assertTrue(groups(result,"source_clause",String.valueOf(i)).isEmpty(),"guidance item "+i+" must not become a clause root");
+        List<String> members=strings(group(result,"source_clause","8.7").path("orderedBlockIds"));
+        assertTrue(members.contains("open"));assertTrue(members.contains("item1"));assertTrue(members.contains("item5"));
+    }
+
+    @Test void numberedCrossLineClauseReferenceDoesNotBecomeAHeading() {
+        List<DocumentBlock> blocks=new ArrayList<>(Arrays.asList(
+                line("a",1,.10,.10,"4.2 Supply of documents"),
+                line("b",1,.16,.14,"For the avoidance of doubt, inspection is in accordance with Clause"),
+                line("c",1,.16,.17,"7.4 of the General Conditions of Contract of any work covered up."),
+                line("d",1,.10,.22,"4.3 Contractor documents")));
+        JsonNode result=build(blocks);
+        assertTrue(groups(result,"source_clause","7.4").isEmpty(),"a cross-line clause reference must not become a heading");
+        assertEquals("d",group(result,"source_clause","4.2").path("endBoundary").path("blockId").asText());
+    }
+
+    private static void bold(DocumentBlock block){block.getPdfGlyphs().forEach(glyph->glyph.setFontName("Times New Roman,Bold"));}
     private List<DocumentBlock> parentTail(){return new ArrayList<>(Arrays.asList(line("two",1,.10,.10,"2. Documents not issued:"),line("a",1,.15,.15,"(a) Available documents."),line("b",1,.15,.20,"(b) Other drawings."),line("inspection",1,.115,.25,"These documents may be inspected"),line("hours",1,.115,.27,"during normal office hours."),line("three",1,.10,.32,"3. Next root")));}
     private JsonNode build(List<DocumentBlock> blocks){ObjectNode coverage=JsonUtils.mapper().createObjectNode();coverage.put("complete",false);return NormalPdfSourceGroups.build(blocks,SHA,coverage);}
     private DocumentBlock line(String id,int page,double x,double y,String text){DocumentBlock block=new DocumentBlock();block.setId(id);block.setKind("pdf_line");block.setSource("native");block.setPageNo(page);block.setText(text);block.setOriginalText(text);block.setBbox(new double[]{x,y,text.codePointCount(0,text.length())*.005,.01});ObjectNode context=JsonUtils.mapper().createObjectNode();context.put("sourceSha256",SHA);block.setReadingContext(context);int offset=0,n=0;while(offset<text.length()){int point=text.codePointAt(offset);String value=new String(Character.toChars(point));PdfPageEvidence.PdfGlyph glyph=new PdfPageEvidence.PdfGlyph();glyph.setId("pdf-page/"+page+"/glyph/"+id+"/"+n);glyph.setUnicode(value);glyph.setCoordinateSpace(FRAME);glyph.setEligibleForNativeText(true);glyph.setBbox(new double[]{x+n*.005,y,.005,.01});glyph.setTextMatrix(new double[]{10,0,0,10,(x+n*.005)*1000,(1-y)*1000});glyph.setFontSize(10);glyph.setFontSizeInPt(10);glyph.setPdfboxPosition(new double[]{0,0,0,0,0,0,0,0,1000,1000});block.getPdfGlyphs().add(glyph);offset+=value.length();n++;}return block;}
