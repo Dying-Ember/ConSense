@@ -115,6 +115,49 @@ class DraftTemplateRoutingTest {
         UploadResultVO result=service.uploadTemplates(PROJECT,Arrays.asList(word("a.docx","Notes to Tenderers\nFirst edition"),word("b.docx","Notes to Tenderers\nDifferent edition")));
         assertEquals(0,result.getParsed());assertEquals(2,result.getFailed());assertTrue(documents.isEmpty());verify(storage,never()).store(any(),any(),any());
     }
+    @Test void parsedPdfCandidatesRemainCompleteWhenTheirContentMatchesThePreferredWordFamily()throws Exception {
+        String[] keys={"NTT","SCT","SCC"},titles={"Notes to Tenderers","Special Conditions of Tender","Special Conditions of Contract"};
+        for(int i=0;i<keys.length;i++) {
+            MockMultipartFile pdf=pdf("source-"+i+".pdf",titles[i]+"\nIndependent PDF edition"),word=word("editable-"+i+".docx",titles[i]);
+            UploadResultVO result=service.uploadTemplates(PROJECT,Arrays.asList(pdf,word));
+            assertEquals(1,result.getParsed());assertEquals(0,result.getFailed());
+            assertEquals(DraftTemplateRouting.sha(word.getBytes()),primary(keys[i]).getSourceSha256());
+            assertRetainedParsedAuxiliary(pdf,keys[i]);
+            assertFalse(result.getMessages().stream().anyMatch(message->message.contains(pdf.getOriginalFilename()+": duplicate source bytes")));
+            verify(parser).parseTemplate(isNull(),eq(pdf.getOriginalFilename()),any(),any(),any());
+        }
+        assertEquals(6,documents.size());
+    }
+    @Test void anUnhintedParsedPdfCannotDisplaceAnExistingBoundWordOrChangeItsSnapshot()throws Exception {
+        SourceDocument word=existingNativeWord("SCT","Special Conditions of Tender");String before=JsonUtils.write(word);
+        String snapshot=ReflectionTestUtils.invokeMethod(service,"snapshotId",PROJECT,(Map<String,String>)null);
+        MockMultipartFile pdf=pdf("reference.pdf","Special Conditions of Tender\nIndependent PDF edition");
+        UploadResultVO result=service.uploadTemplates(PROJECT,Collections.singletonList(pdf));
+        assertEquals(0,result.getParsed());assertEquals(0,result.getFailed());assertEquals(before,JsonUtils.write(primary("SCT")));
+        assertRetainedParsedAuxiliary(pdf,"SCT");
+        assertEquals(snapshot,ReflectionTestUtils.invokeMethod(service,"snapshotId",PROJECT,(Map<String,String>)null));
+    }
+    @Test void parsingPreviouslyUnanalysedAuxiliaryBytesKeepsTheirRecordAndAllNewEvidence()throws Exception {
+        existingNativeWord("SCC","Special Conditions of Contract");
+        MockMultipartFile hinted=pdf("SCC.pdf","Special Conditions of Contract\nIndependent PDF edition");
+        assertEquals(0,service.uploadTemplates(PROJECT,Collections.singletonList(hinted)).getFailed());
+        SourceDocument retained=documents.stream().filter(DraftTemplateRouting::isAuxiliary).findFirst().orElseThrow(AssertionError::new);
+        assertNull(retained.getStructuredContentJson());Long id=retained.getId();String path=retained.getStoragePath();int assetCount=assets.size();
+        MockMultipartFile renamed=new MockMultipartFile("files","reference.pdf","application/pdf",hinted.getBytes());
+        UploadResultVO result=service.uploadTemplates(PROJECT,Collections.singletonList(renamed));
+        assertEquals(0,result.getFailed());SourceDocument parsed=assertRetainedParsedAuxiliary(renamed,"SCC");
+        assertEquals(id,parsed.getId());assertEquals(path,parsed.getStoragePath());assertEquals(assetCount,assets.size());assertEquals(2,documents.size());
+    }
+    private SourceDocument assertRetainedParsedAuxiliary(MockMultipartFile file,String key)throws Exception {
+        String sha=DraftTemplateRouting.sha(file.getBytes());
+        SourceDocument source=documents.stream().filter(d->DraftTemplateRouting.isAuxiliary(d)&&sha.equals(d.getSourceSha256())).findFirst().orElseThrow(AssertionError::new);
+        DocumentParser.ParsedDocument expected=parsed(key,file.getBytes());
+        assertArrayEquals(file.getBytes(),assets.get(source.getStoragePath()));assertEquals(expected.getText(),source.getTextContent());
+        assertEquals(JsonUtils.write(expected.getBlocks()),source.getStructuredContentJson());assertEquals(JsonUtils.write(expected.getCoverage()),source.getParseCoverageJson());
+        JsonNode coverage=JsonUtils.parse(source.getParseCoverageJson());
+        assertNotNull(OerTemplateEvidence.requireBound(key,sha,JsonUtils.parse(source.getStructuredContentJson()),coverage,coverage.path("templateEvidence")));
+        return source;
+    }
     @Test void anExistingBoundNativeWordKeepsAPdfOnlyUploadUnparsedWithoutClaimingStrictIdentity()throws Exception {
         SourceDocument source=existingNativeWord("NTT","Notes to Tenderers");String before=JsonUtils.write(source);
         JsonNode evidence=service.templateEvidence(PROJECT,"NTT");assertFalse(evidence.path("route").path("strictIdentityVerified").asBoolean());

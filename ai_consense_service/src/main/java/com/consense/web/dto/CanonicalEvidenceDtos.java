@@ -31,6 +31,10 @@ public final class CanonicalEvidenceDtos {
         @JsonInclude(JsonInclude.Include.NON_NULL)
         @JsonSetter(nulls=Nulls.SKIP)
         private JsonNode nativePdfSourceGroupsContext;
+        /** Selected native Word source intervals from the same normal manifest; context only. */
+        @JsonInclude(JsonInclude.Include.NON_NULL)
+        @JsonSetter(nulls=Nulls.SKIP)
+        private JsonNode nativeWordSourceScopesContext;
         /** An absent optional table group remains Java null through model-view transport. */
         @JsonSetter(nulls=Nulls.SKIP)
         private JsonNode tableGroup;

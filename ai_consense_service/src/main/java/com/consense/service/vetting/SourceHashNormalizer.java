@@ -1,14 +1,9 @@
 package com.consense.service.vetting;
 
 import com.consense.common.JsonUtils;
+import com.consense.common.Utf8;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import java.nio.ByteBuffer;
-import java.nio.CharBuffer;
-import java.nio.charset.CharsetEncoder;
-import java.nio.charset.CodingErrorAction;
-import java.nio.charset.CoderResult;
-import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -66,14 +61,9 @@ final class SourceHashNormalizer {
     static String joinedHash(String text, String structure) {
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            ByteBuffer output = ByteBuffer.allocate(8192);
-            CharsetEncoder encoder = StandardCharsets.UTF_8.newEncoder()
-                    .onMalformedInput(CodingErrorAction.REPLACE)
-                    .onUnmappableCharacter(CodingErrorAction.REPLACE)
-                    .replaceWith(new byte[]{(byte)'?'});
-            update(digest, encoder, output, text);
+            Utf8.update(digest,text);
             digest.update((byte)'\n');
-            update(digest, encoder, output, structure);
+            Utf8.update(digest,structure);
             byte[] bytes = digest.digest();
             char[] hex = new char[bytes.length * 2];
             char[] digits = "0123456789abcdef".toCharArray();
@@ -85,21 +75,4 @@ final class SourceHashNormalizer {
         } catch (Exception error) { throw new IllegalStateException(error); }
     }
 
-    private static void update(MessageDigest digest, CharsetEncoder encoder, ByteBuffer output, String value) throws Exception {
-        encoder.reset();
-        CharBuffer input = CharBuffer.wrap(value);
-        CoderResult result;
-        do {
-            result = encoder.encode(input, output, true);
-            digest.update(output.array(), 0, output.position());
-            output.clear();
-            if (result.isError()) result.throwException();
-        } while (result.isOverflow());
-        do {
-            result = encoder.flush(output);
-            digest.update(output.array(), 0, output.position());
-            output.clear();
-            if (result.isError()) result.throwException();
-        } while (result.isOverflow());
-    }
 }

@@ -1,6 +1,7 @@
 package com.consense.service.sources;
 
 import com.consense.common.JsonUtils;
+import com.consense.common.Utf8;
 import com.consense.config.ConsenseProperties;
 import com.consense.document.OerDocumentIdentity;
 import com.consense.domain.CanonicalSourceBinding;
@@ -70,7 +71,7 @@ public class CanonicalEvidenceService {
         CanonicalSourceBinding binding=new CanonicalSourceBinding();binding.setProjectId(projectId);binding.setDocumentId(documentId);binding.setProjectionSha256(projection.path("projectionSha256").asText());
         binding.setOriginalSourceSha256(source.getSourceSha256());binding.setJavaParsedSourceHash(VettingCorpus.sourceHash(source));binding.setRoutingSha256(routingHash(source));
         binding.setSourceRevisionSha256(projection.path("source").path("sourceRevisionSha256").asText());binding.setProjectionRevisionSha256(projection.path("projectionRevisionSha256").asText());binding.setCanonicalSourceHash(projection.path("sourceHash").asText());
-        binding.setScopePolicySha256(sourceBinding.path("scopePolicySha256").asText());binding.setDeclaredModule(module);binding.setEligibleModulesJson(sourceBinding.path("eligibleModules").toString());binding.setSnapshotJson(raw);binding.setSnapshotBytesSha256(CanonicalJson.sha(raw.getBytes(StandardCharsets.UTF_8)));
+        binding.setScopePolicySha256(sourceBinding.path("scopePolicySha256").asText());binding.setDeclaredModule(module);binding.setEligibleModulesJson(sourceBinding.path("eligibleModules").toString());binding.setSnapshotJson(raw);binding.setSnapshotBytesSha256(Utf8.sha256(raw));
         sources.assertSourceCurrent(binding,module);
         boundary().saveNormalBinding(binding,module);return true;
     }
@@ -171,7 +172,7 @@ public class CanonicalEvidenceService {
         binding.setScopePolicySha256(review.scopePolicySha256);binding.setAdoptionManifestSha256(review.adoptionManifestSha256);
         binding.setReviewReferenceSha256(review.reviewReferenceSha256);binding.setFamilyCompositionSha256(review.familyCompositionSha256);binding.setFamilyComponentSetSha256(review.familyComponentSetSha256);binding.setDeclaredModule(identity.path("module").asText());
         binding.setEligibleModulesJson(identity.path("eligibleModules").toString());binding.setSnapshotJson(raw);
-        binding.setSnapshotBytesSha256(CanonicalJson.sha(raw.getBytes(StandardCharsets.UTF_8)));
+        binding.setSnapshotBytesSha256(Utf8.sha256(raw));
         // Recheck bytes and current catalog after the remote call; a failed adoption never creates a binding.
         sources.assertSourceCurrent(binding,review.module);
         Optional<CanonicalSourceBinding> existing=bindings.findByProjectIdAndDocumentIdAndProjectionSha256(projectId,documentId,review.projectionSha256);
@@ -206,7 +207,17 @@ public class CanonicalEvidenceService {
         for(JsonNode candidate:candidates)if(unitId.equals(candidate.path("unitId").asText())){require(chunk==null,HttpStatus.CONFLICT,"CANONICAL_UNIT_AMBIGUOUS");chunk=candidate;}
         require(chunk!=null,HttpStatus.NOT_FOUND,"CANONICAL_UNIT_UNAVAILABLE");
         assertCurrent(binding,module);
-        return pointer(binding,snapshot,chunk,module,view.collection?NativeDocumentCollectionContract.unitUnknowns(snapshot,unitId):unknowns(snapshot));
+        EvidencePointer pointer=pointer(binding,snapshot,chunk,module,view.collection?NativeDocumentCollectionContract.unitUnknowns(snapshot,unitId):unknowns(snapshot));
+        pointer.setNativeWordSourceScopesContext(wordSourceScopeContext(binding,snapshot,chunk));
+        assertCurrent(binding,module);return pointer;
+    }
+
+    /** One actual selected model member; whole-corpus address enumeration never expands Word chapters. */
+    @Transactional(propagation=Propagation.REQUIRES_NEW,isolation=Isolation.READ_COMMITTED,readOnly=true)
+    public JsonNode wordSourceScopeContext(String projectId,Long documentId,String projection,String chunkId,String module){
+        BindingView view=readBindingView(projectId,documentId,projection,module);
+        JsonNode context=wordSourceScopeContext(view.binding,view.snapshot,chunkById(view.snapshot,chunkId));
+        assertCurrent(view.binding,module);return context;
     }
 
     /** One source validation for all addresses, instead of hashing a large original once per chunk. */
@@ -225,7 +236,7 @@ public class CanonicalEvidenceService {
     public JsonNode chunks(CanonicalSourceBinding binding,String module){
         validModule(module);
         require(binding!=null&&binding.getSnapshotJson()!=null,HttpStatus.BAD_REQUEST,"CANONICAL_BINDING_UNAVAILABLE");
-        require(CanonicalJson.sha(binding.getSnapshotJson().getBytes(StandardCharsets.UTF_8)).equals(binding.getSnapshotBytesSha256()),HttpStatus.CONFLICT,"CANONICAL_STORED_BYTES_CHANGED");
+        require(Utf8.sha256(binding.getSnapshotJson()).equals(binding.getSnapshotBytesSha256()),HttpStatus.CONFLICT,"CANONICAL_STORED_BYTES_CHANGED");
         JsonNode snapshot=validatedSnapshot(binding.getSnapshotJson(),binding.getProjectionSha256());validateBindingPins(binding,snapshot);
         if(!NativeDocumentCollectionContract.isCollection(snapshot)){
             if(NormalObservedContract.isNormal(snapshot)||NativePdfSourceFamilyContract.isFamily(snapshot)||NativePdfCanonicalContract.isNativePdf(snapshot))recheckNativeSnapshot(binding,module);
@@ -244,7 +255,10 @@ public class CanonicalEvidenceService {
         if(NativePdfCanonicalContract.isNativePdf(snapshot))return snapshot.path("adoptionManifestRef").path("sha256").asText();
         return NativeDocumentCollectionContract.isCollection(snapshot)?snapshot.path("manifestSha256").asText():CanonicalJson.fieldHash(raw,"manifest");
     }
-    private static JsonNode unknowns(JsonNode snapshot){return NativePdfSourceFamilyContract.isFamily(snapshot)?NativePdfSourceFamilyContract.unknowns(snapshot):NativePdfCanonicalContract.isNativePdf(snapshot)?snapshot.path("captureCompleteness").path("reference").path("unknowns"):snapshot.path("unknowns");}
+    private static JsonNode unknowns(JsonNode snapshot){
+        if(NormalObservedContract.isNormal(snapshot))return snapshot.path("unknowns");
+        return NativePdfSourceFamilyContract.isFamily(snapshot)?NativePdfSourceFamilyContract.unknowns(snapshot):NativePdfCanonicalContract.isNativePdf(snapshot)?snapshot.path("captureCompleteness").path("reference").path("unknowns"):snapshot.path("unknowns");
+    }
 
     private static EvidencePointer pointer(CanonicalSourceBinding binding,JsonNode snapshot,JsonNode chunk,String module){
         return pointer(binding,snapshot,chunk,module,unknowns(snapshot));
@@ -254,11 +268,11 @@ public class CanonicalEvidenceService {
         pointer.setOriginalSourceSha256(binding.getOriginalSourceSha256());pointer.setJavaParsedSourceHash(binding.getJavaParsedSourceHash());pointer.setSourceRevisionSha256(binding.getSourceRevisionSha256());
         pointer.setCanonicalSourceHash(binding.getCanonicalSourceHash());pointer.setProjectionSha256(binding.getProjectionSha256());pointer.setProjectionRevisionSha256(binding.getProjectionRevisionSha256());
         pointer.setModule(module);pointer.setUnitId(chunk.path("unitId").asText());pointer.setCanonicalChunkId(chunk.path("id").asText());
-        boolean family=NativePdfSourceFamilyContract.isFamily(snapshot),nativePdf=!family&&NativePdfCanonicalContract.isNativePdf(snapshot);
+        boolean normal=NormalObservedContract.isNormal(snapshot),family=!normal&&NativePdfSourceFamilyContract.isFamily(snapshot),nativePdf=!normal&&!family&&NativePdfCanonicalContract.isNativePdf(snapshot);
         pointer.setSourceFilename(snapshot.path("source").path(nativePdf||family?"filename":"sourceFilename").deepCopy());pointer.setSourceOrder(chunk.path("sourceOrder").deepCopy());
         boolean collection=NativeDocumentCollectionContract.isCollection(snapshot);
         pointer.setProjectionSchema(collection?NativeCanonicalContract.SCHEMA:snapshot.path("schema").asText());
-        if(NormalObservedContract.isNormal(snapshot)){
+        if(normal){
             pointer.setAddressKind("normal_observed_unit");pointer.setProducerKind(NormalObservedContract.PRODUCER);pointer.setBboxConvention(null);
             pointer.setOriginalGeometryStatus("unknown");pointer.setVisualReturnStatus("unknown");
             List<Integer> observedPages=new ArrayList<>();for(JsonNode page:chunk.path("physicalPages"))observedPages.add(page.asInt());pointer.setPhysicalPages(observedPages);
@@ -293,6 +307,26 @@ public class CanonicalEvidenceService {
         pointer.setTableGroup(chunk.has("tableGroup")?chunk.get("tableGroup").deepCopy():null);pointer.setAssetRefs(chunk.path("assetRefs").deepCopy());pointer.setRelations(chunk.path("relations").deepCopy());
         pointer.setAdoption(chunk.path("adoption").deepCopy());pointer.setSourceQuality(chunk.path("sourceQuality").deepCopy());pointer.setUnknowns(unknowns.deepCopy());
         return pointer;
+    }
+
+    private static JsonNode chunkById(JsonNode snapshot,String id){
+        JsonNode selected=null;for(JsonNode chunk:snapshot.path("chunks"))if(Objects.equals(id,chunk.path("id").asText())){
+            require(selected==null,HttpStatus.CONFLICT,"CANONICAL_CHUNK_AMBIGUOUS");selected=chunk;
+        }
+        require(selected!=null,HttpStatus.NOT_FOUND,"CANONICAL_CHUNK_UNAVAILABLE");return selected;
+    }
+    private static JsonNode wordSourceScopeContext(CanonicalSourceBinding binding,JsonNode snapshot,JsonNode chunk){
+        if(!NormalObservedContract.isNormal(snapshot))return null;
+        com.fasterxml.jackson.databind.node.ObjectNode context=NormalSourceCandidateGraph.wordSourceScopeContext(snapshot.path("manifest").path("candidateGraph"),chunk.path("parts"));
+        if(context==null||context.path("ranges").isEmpty()&&context.path("issues").isEmpty())return null;
+        JsonNode owner=context.path("source");
+        require(Objects.equals(binding.getProjectId(),owner.path("projectId").asText())
+                &&Objects.equals(String.valueOf(binding.getDocumentId()),owner.path("documentId").asText())
+                &&Objects.equals(binding.getOriginalSourceSha256(),owner.path("originalSourceSha256").asText())
+                &&Objects.equals(binding.getOriginalSourceSha256(),context.path("sourceSha256").asText())
+                &&Objects.equals(binding.getJavaParsedSourceHash(),owner.path("parsedSourceHash").asText()),HttpStatus.BAD_GATEWAY,"NORMAL_WORD_SOURCE_SCOPE_BINDING_MISMATCH");
+        context.put("originalSourceSha256",binding.getOriginalSourceSha256());context.put("sourceRevisionSha256",binding.getSourceRevisionSha256());context.put("projectionSha256",binding.getProjectionSha256());
+        context.put("canonicalChunkId",chunk.path("id").asText());context.put("selectedPartsSha256",VettingCorpus.hash(JsonUtils.write(chunk.path("parts"))));return context;
     }
 
     @Transactional(propagation=Propagation.REQUIRES_NEW,isolation=Isolation.READ_COMMITTED,readOnly=true)
@@ -339,6 +373,10 @@ public class CanonicalEvidenceService {
             for(JsonNode chunk:view.snapshot.path("chunks"))out.add(pointer(view.binding,view.snapshot,chunk,module,
                     view.collection?NativeDocumentCollectionContract.unitUnknowns(view.snapshot,chunk.path("unitId").asText()):unknowns(view.snapshot)));
             return out;
+        }
+        public JsonNode wordSourceScopeContext(Long documentId,String projection,String chunkId,String module){
+            BindingView view=view(documentId,projection,module);
+            return CanonicalEvidenceService.wordSourceScopeContext(view.binding,view.snapshot,chunkById(view.snapshot,chunkId));
         }
         public void requireOwner(CanonicalEvidenceService service,String project,String module){active();
             require(owner==service&&this.project.equals(project)&&this.module.equals(module),HttpStatus.CONFLICT,"CANONICAL_FRAME_OWNER_MISMATCH");}
@@ -409,7 +447,7 @@ public class CanonicalEvidenceService {
         validSha(projection);validModule(module);
         CanonicalSourceBinding binding=bindings.findByProjectIdAndDocumentIdAndProjectionSha256(projectId,documentId,projection)
                 .orElseThrow(()->new CanonicalEvidenceException(HttpStatus.NOT_FOUND,"CANONICAL_BINDING_UNAVAILABLE"));
-        require(binding.getSnapshotJson()!=null&&CanonicalJson.sha(binding.getSnapshotJson().getBytes(StandardCharsets.UTF_8)).equals(binding.getSnapshotBytesSha256()),HttpStatus.CONFLICT,"CANONICAL_STORED_BYTES_CHANGED");
+        require(binding.getSnapshotJson()!=null&&Utf8.sha256(binding.getSnapshotJson()).equals(binding.getSnapshotBytesSha256()),HttpStatus.CONFLICT,"CANONICAL_STORED_BYTES_CHANGED");
         JsonNode snapshot=validatedSnapshot(binding.getSnapshotJson(),projection);validateBindingPins(binding,snapshot);boolean collection=NativeDocumentCollectionContract.isCollection(snapshot);
         if(NormalObservedContract.isNormal(snapshot)||NativePdfSourceFamilyContract.isFamily(snapshot)||NativePdfCanonicalContract.isNativePdf(snapshot)||NativeCanonicalContract.isNative(snapshot)||NativeDocumentCollectionContract.isCollection(snapshot)){
             // Native compact snapshots refer to private proof. Re-read the registry so every
@@ -472,7 +510,7 @@ public class CanonicalEvidenceService {
     public static JsonNode validateSnapshot(String raw,String address,int normalMaximum){return validateSnapshot(raw,address,()->normalMaximum);}
     private static JsonNode validateSnapshot(String raw,String address,java.util.function.IntSupplier normalMaximum){
         require(raw!=null,HttpStatus.BAD_GATEWAY,"CANONICAL_SNAPSHOT_TOO_LARGE");
-        int bytes=raw.getBytes(StandardCharsets.UTF_8).length;
+        long bytes=Utf8.byteCount(raw);
         require(bytes<=NormalObservedContract.MAX_BYTES,HttpStatus.BAD_GATEWAY,"CANONICAL_SNAPSHOT_TOO_LARGE");
         JsonNode snapshot;
         try{snapshot=parse(raw);}catch(CanonicalEvidenceException invalid){

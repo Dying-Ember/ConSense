@@ -240,7 +240,7 @@ public final class DocxNumberingResolver {
                 || "bullet".equals(format) || "none".equals(format);
     }
 
-    private static String format(long number, String format) {
+    static String format(long number, String format) {
         if ("decimal".equals(format)) return Long.toString(number);
         if (number < 0) throw new UnsupportedLabel("negative_counter");
         if ("decimalZero".equals(format)) return number < 10 ? "0" + number : Long.toString(number);

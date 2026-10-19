@@ -1,8 +1,8 @@
 package com.consense.service.sources;
 
 import com.fasterxml.jackson.core.*;
+import com.consense.common.Utf8;
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.math.*;
 import java.util.*;
@@ -15,11 +15,11 @@ final class CanonicalJson {
         try(JsonParser parser=FACTORY.createParser(json)) {
             parser.nextToken();String value=read(parser,omitRootField);
             if(parser.nextToken()!=null)throw new IOException("Trailing JSON");
-            return sha(value.getBytes(StandardCharsets.UTF_8));
+            return Utf8.sha256(value);
         }catch(IOException|IllegalArgumentException error){throw new CanonicalEvidenceException(org.springframework.http.HttpStatus.BAD_GATEWAY,"CANONICAL_JSON_INVALID");}
     }
     static String fieldHash(String json,String name) {
-        return sha(field(json,name).getBytes(StandardCharsets.UTF_8));
+        return Utf8.sha256(field(json,name));
     }
     /** Extract a canonical subtree from a noncanonical HTTP receipt without rewriting number tokens. */
     static String field(String json,String name) {
@@ -65,10 +65,16 @@ final class CanonicalJson {
     }
     static String rawObject(Map<String,String> fields) {
         Map<String,String> sorted=new TreeMap<>(CanonicalJson::compareCodepoints);sorted.putAll(fields);
-        List<String> pairs=new ArrayList<>();for(Map.Entry<String,String> row:sorted.entrySet())pairs.add(quote(row.getKey())+":"+row.getValue());
-        return "{"+String.join(",",pairs)+"}";
+        long length=2L+Math.max(0,sorted.size()-1);for(Map.Entry<String,String> row:sorted.entrySet())length+=quotedLength(row.getKey())+1+String.valueOf(row.getValue()).length();
+        StringBuilder out=new StringBuilder(Math.toIntExact(length));out.append('{');boolean first=true;
+        for(Map.Entry<String,String> row:sorted.entrySet()){if(!first)out.append(',');first=false;appendQuoted(out,row.getKey());out.append(':').append(row.getValue());}
+        return out.append('}').toString();
     }
-    static String rawArray(List<String> values){return "["+String.join(",",values)+"]";}
+    static String rawArray(List<String> values){
+        long length=2L+Math.max(0,values.size()-1);for(String value:values)length+=String.valueOf(value).length();
+        StringBuilder out=new StringBuilder(Math.toIntExact(length));out.append('[');boolean first=true;
+        for(String value:values){if(!first)out.append(',');first=false;out.append(value);}return out.append(']').toString();
+    }
     static String scalar(String value){return quote(value);}
     private static String strictRead(JsonParser p)throws IOException {
         JsonToken token=p.currentToken();
@@ -115,14 +121,16 @@ final class CanonicalJson {
         if(token==JsonToken.START_OBJECT){
             Map<String,String> fields=new TreeMap<>(CanonicalJson::compareCodepoints);
             while(p.nextToken()!=JsonToken.END_OBJECT){String key=p.getCurrentName();p.nextToken();String value=read(p,null);if(!key.equals(omit))fields.put(key,value);}
-            List<String> pairs=new ArrayList<>();for(Map.Entry<String,String> e:fields.entrySet())pairs.add(quote(e.getKey())+":"+e.getValue());return "{"+String.join(",",pairs)+"}";
+            return rawObject(fields);
         }
-        if(token==JsonToken.START_ARRAY){List<String> values=new ArrayList<>();while(p.nextToken()!=JsonToken.END_ARRAY)values.add(read(p,null));return "["+String.join(",",values)+"]";}
+        if(token==JsonToken.START_ARRAY){List<String> values=new ArrayList<>();while(p.nextToken()!=JsonToken.END_ARRAY)values.add(read(p,null));return rawArray(values);}
         if(token==JsonToken.VALUE_STRING)return quote(p.getText());
         if(token==JsonToken.VALUE_NUMBER_INT||token==JsonToken.VALUE_NUMBER_FLOAT)return p.getText();
         if(token==JsonToken.VALUE_TRUE)return "true";if(token==JsonToken.VALUE_FALSE)return "false";if(token==JsonToken.VALUE_NULL)return "null";
         throw new IOException("Invalid JSON token");
     }
     private static int compareCodepoints(String a,String b){int x=0,y=0;while(x<a.length()&&y<b.length()){int ca=a.codePointAt(x),cb=b.codePointAt(y);if(ca!=cb)return Integer.compare(ca,cb);x+=Character.charCount(ca);y+=Character.charCount(cb);}return Integer.compare(a.length()-x,b.length()-y);}
-    private static String quote(String value){StringBuilder b=new StringBuilder("\"");for(int i=0;i<value.length();i++){char c=value.charAt(i);switch(c){case '"':b.append("\\\"");break;case '\\':b.append("\\\\");break;case '\b':b.append("\\b");break;case '\f':b.append("\\f");break;case '\n':b.append("\\n");break;case '\r':b.append("\\r");break;case '\t':b.append("\\t");break;default:if(c<32)b.append(String.format("\\u%04x",(int)c));else b.append(c);}}return b.append('"').toString();}
+    private static long quotedLength(String value){long length=2;for(int i=0;i<value.length();i++){char c=value.charAt(i);length+=c=='"'||c=='\\'||c=='\b'||c=='\f'||c=='\n'||c=='\r'||c=='\t'?2:c<32?6:1;}return length;}
+    private static String quote(String value){StringBuilder out=new StringBuilder(Math.toIntExact(quotedLength(value)));appendQuoted(out,value);return out.toString();}
+    private static void appendQuoted(StringBuilder b,String value){b.append('"');for(int i=0;i<value.length();i++){char c=value.charAt(i);switch(c){case '"':b.append("\\\"");break;case '\\':b.append("\\\\");break;case '\b':b.append("\\b");break;case '\f':b.append("\\f");break;case '\n':b.append("\\n");break;case '\r':b.append("\\r");break;case '\t':b.append("\\t");break;default:if(c<32)b.append(String.format("\\u%04x",(int)c));else b.append(c);}}b.append('"');}
 }

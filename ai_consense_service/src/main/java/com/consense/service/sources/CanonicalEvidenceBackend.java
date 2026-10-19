@@ -1,5 +1,6 @@
 package com.consense.service.sources;
 
+import com.consense.common.Utf8;
 import com.consense.config.CanonicalEvidenceProperties;
 import okhttp3.*;
 import org.springframework.http.HttpStatus;
@@ -35,8 +36,8 @@ public class CanonicalEvidenceBackend {
     }
     public String normalObserved(String request,String module){
         int maximum=normalMaximumBytes();
-        byte[] bytes=request.getBytes(StandardCharsets.UTF_8);
-        if(bytes.length>maximum)throw new CanonicalEvidenceException(HttpStatus.BAD_REQUEST,"NORMAL_OBSERVED_TOO_LARGE");
+        if(Utf8.byteCount(request)>maximum)throw new CanonicalEvidenceException(HttpStatus.BAD_REQUEST,"NORMAL_OBSERVED_TOO_LARGE");
+        byte[] bytes=Utf8.bytes(request);
         HttpUrl base=normalBase(module);
         if(maximum<=0)
             throw new CanonicalEvidenceException(HttpStatus.SERVICE_UNAVAILABLE,"OER_EVIDENCE_CONFIG_INVALID");

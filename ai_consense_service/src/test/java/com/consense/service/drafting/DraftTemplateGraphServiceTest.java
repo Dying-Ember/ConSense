@@ -38,6 +38,7 @@ class DraftTemplateGraphServiceTest {
     @Autowired SourceDocumentRepository sources;
     @Autowired DraftVariableRepository values;
     @Autowired DraftTemplateGraphRevisionRepository revisions;
+    @Autowired DraftTemplateGraphHeadRepository graphHeads;
     @Autowired DraftExtractionRunRepository runs;
     @Autowired StorageService storage;
     @Autowired org.springframework.transaction.PlatformTransactionManager transactions;
@@ -55,6 +56,43 @@ class DraftTemplateGraphServiceTest {
     VariablePatch patch(VariableVO current,Object... extra){Map<String,Object> body=map("graphRevisionId",current.getGraphRevisionId(),"fieldDefinitionHash",current.getFieldDefinitionHash());for(int i=0;i<extra.length;i+=2)body.put(String.valueOf(extra[i]),extra[i+1]);return JsonUtils.mapper().convertValue(body,VariablePatch.class);}
     @SuppressWarnings("unchecked") Map<String,Object> effective(String project){return (Map<String,Object>)service.plan(project,null).get("effectiveValues");}
     String response(String value,String quote){return JsonUtils.write(Collections.singletonList(map("key","duration","value",Integer.valueOf(value),"sourceQuote",quote,"reason","Synthetic source statement","confidence",0.99)));}
+
+    @Test void bootstrapExcludesBoundAuxiliaryPdfFromSourceManifestAndSeedsButKeepsItsReading()throws Exception {
+        String project=project();SourceDocument word=guidanceTemplate(project,false),auxiliary=guidanceTemplate(project,true);saveGuidanceEvidence(auxiliary);
+        JsonNode reading=service.reading(project,auxiliary.getId());assertEquals("bound",reading.path("evidenceStatus").asText());assertEquals("pdf",reading.path("format").asText());assertEquals(1,reading.path("guidanceNotes").size());assertEquals(auxiliary.getTextContent(),reading.path("text").asText());
+        assertEquals(2,service.sources(project).size());
+        JsonNode graph=JsonUtils.mapper().valueToTree(service.bootstrap(project).get("graph"));
+        assertSelectedWordSourcesAndSeeds(graph,word);assertEquals(word.getId().toString(),graph.path("selectedDocuments").path("NTT").asText());verifyNoInteractions(ai);
+    }
+
+    @Test void auxiliaryEvidenceUpgradeCannotStaleSavedGraphOrEnterDiscovery()throws Exception {
+        String project=project();SourceDocument word=guidanceTemplate(project,false),auxiliary=guidanceTemplate(project,true);
+        Map<String,Object> draft=service.save(project,(Map<String,Object>)service.bootstrap(project).get("graph"),null);String draftId=String.valueOf(draft.get("id"));
+        assertEquals("missing",service.reading(project,auxiliary.getId()).path("evidenceStatus").asText());saveGuidanceEvidence(auxiliary);
+        assertEquals(Boolean.FALSE,service.revision(project,draftId).get("sourceStale"));assertEquals("bound",service.reading(project,auxiliary.getId()).path("evidenceStatus").asText());
+        when(ai.complete(anyString(),anyString())).thenReturn("{\"nodes\":[],\"notes\":[\"Synthetic selected source reviewed\"]}");
+        Map<String,Object> discovered=service.discover(project,draftId,null,10);assertSelectedWordSourcesAndSeeds(JsonUtils.mapper().valueToTree(discovered.get("graph")),word);
+        verify(ai,times(1)).complete(anyString(),argThat(prompt->prompt.contains("Selected Word instruction")&&!prompt.contains("Unselected PDF instruction")));
+        assertEquals(2,service.sources(project).size());assertEquals(auxiliary.getTextContent(),service.reading(project,auxiliary.getId()).path("text").asText());
+    }
+
+    void assertSelectedWordSourcesAndSeeds(JsonNode graph,SourceDocument word){
+        assertEquals(1,graph.path("sources").size());assertEquals(word.getId().toString(),graph.path("sources").get(0).path("sourceDocumentId").asText());
+        JsonNode nodes=graph.path("graph").path("variables");assertEquals(1,nodes.size());for(JsonNode node:nodes){assertEquals(1,node.path("sourceAnchors").size());assertEquals(word.getId().toString(),node.path("sourceAnchors").get(0).path("sourceDocumentId").asText());}
+    }
+    SourceDocument guidanceTemplate(String project,boolean auxiliary)throws Exception {
+        String instruction=auxiliary?"[Guidance Note: Unselected PDF instruction remains a separate edition.]":"[Guidance Note: Selected Word instruction remains available for review.]";byte[] bytes;
+        if(auxiliary)try(org.apache.pdfbox.pdmodel.PDDocument pdf=new org.apache.pdfbox.pdmodel.PDDocument();ByteArrayOutputStream out=new ByteArrayOutputStream()){
+            org.apache.pdfbox.pdmodel.PDPage page=new org.apache.pdfbox.pdmodel.PDPage();pdf.addPage(page);try(org.apache.pdfbox.pdmodel.PDPageContentStream content=new org.apache.pdfbox.pdmodel.PDPageContentStream(pdf,page)){content.beginText();content.setFont(org.apache.pdfbox.pdmodel.font.PDType1Font.HELVETICA,8);content.newLineAtOffset(36,720);content.showText(instruction);content.endText();}pdf.save(out);bytes=out.toByteArray();
+        }else try(XWPFDocument doc=new XWPFDocument();ByteArrayOutputStream out=new ByteArrayOutputStream()){doc.createParagraph().createRun().setText(instruction);doc.write(out);bytes=out.toByteArray();}
+        SourceDocument source=source(project,SourceDocument.CATEGORY_STANDARD_TEMPLATE,auxiliary?null:"NTT",auxiliary?"separate-edition.pdf":"selected.docx",bytes,instruction);
+        if(auxiliary){source.setParseStatus(DraftTemplateRouting.AUXILIARY_STATUS);sources.save(source);}else saveGuidanceEvidence(source);return source;
+    }
+    void saveGuidanceEvidence(SourceDocument source){
+        DocumentBlock block=new DocumentBlock();block.setId("synthetic-guidance-"+source.getId());block.setKind("paragraph");block.setSource("native");block.setText(source.getTextContent());block.setOriginalText(source.getTextContent());
+        ParseCoverage coverage=new ParseCoverage();coverage.setComplete(true);DocumentParser.ParsedDocument parsed=new DocumentParser.ParsedDocument(source.getTextContent(),Collections.emptyList(),0,false,"synthetic saved observations",Collections.singletonList(block),coverage,source.getSourceSha256(),Collections.emptyList());coverage.setTemplateEvidence(OerTemplateEvidence.analyse("NTT",parsed));
+        source.setStructuredContentJson(JsonUtils.write(parsed.getBlocks()));source.setParseCoverageJson(JsonUtils.write(coverage));sources.save(source);
+    }
 
     @Test void savedDraftIsImmutableAndConfirmationChecksTheDisplayedHead() throws Exception {
         String project=project();SourceDocument template=template(project);Map<String,Object> proposed=graph(template,"confirmed","number");
@@ -246,13 +284,56 @@ class DraftTemplateGraphServiceTest {
         service.updateVariable(project,"targetOverrides",patch(overrides(project),"value",JsonUtils.write(Arrays.asList(mixed.get(0),map("actionId","b","action","amend","value","B")))));assertFalse(overrides(project).isReviewRequired());assertEquals("B",((Map<?,?>)((List<?>)service.plan(project,null).get("actions")).get(1)).get("value"));
     }
     VariableVO overrides(String project){return service.variables(project).stream().filter(value->"targetOverrides".equals(value.getKey())).findFirst().get();}
+    @Test void callerSuppliedObservationOrNativeBoundStatusesCannotConfirmAnUnsupportedPassage() throws Exception {
+        String project=project();SourceDocument template=template(project);Map<String,Object> graph=graph(template,"confirmed","number");
+        Map<String,Object> node=(Map<String,Object>)((List<?>)((Map<?,?>)graph.get("graph")).get("variables")).get(0);
+        node.put("sourceAnchors",Collections.singletonList(map("docId",template.getId().toString(),"text","Fabricated unsupported instruction","sourceObservationBinding",map("status","bound"),"nativeBinding",map("status","bound"))));
+        Map<String,Object> saved=service.save(project,graph,null);Map<String,Object> savedNode=DraftReviewGraph.nodes((Map<String,Object>)saved.get("graph")).get(0);
+        Map<String,Object> anchor=(Map<String,Object>)((List<?>)savedNode.get("sourceAnchors")).get(0);assertNotEquals("bound",((Map<?,?>)anchor.get("sourceObservationBinding")).get("status"));assertNotEquals("bound",((Map<?,?>)anchor.get("nativeBinding")).get("status"));
+        assertThrows(BizException.class,()->service.confirm(project,String.valueOf(saved.get("id")),null));
+    }
+    @Test void reviewedInsertionManualOverrideKeepsItsExplicitPointAndInsertOperation() throws Exception {
+        String project=project();SourceDocument template=template(project);Map<String,Object> graph=graph(template,"confirmed","number");byte[] original=storage.read(template.getStoragePath());
+        com.consense.document.DocxTemplateEditor.Paragraph paragraph=new com.consense.document.DocxTemplateEditor().inspect(original).mainParagraph(1);int end=paragraph.getText().length();
+        Map<String,Object> point=map("paragraphId",paragraph.getId(),"paragraphSha256",paragraph.getSha256(),"sourceSha256",template.getSourceSha256(),"channel","editableText","start",end,"end",end,"expectedText","","operation","insert");
+        Map<String,Object> node=(Map<String,Object>)((List<?>)((Map<?,?>)graph.get("graph")).get("variables")).get(0);
+        node.put("editTargets",Collections.singletonList(map("id","insert-target","docId",template.getId().toString(),"text","","action","insert","valueSourceId","duration","native",map("spans",Collections.singletonList(point)))));
+        String draft=String.valueOf(service.save(project,graph,null).get("id"));service.confirm(project,draft,null);
+        service.updateVariable(project,"duration",patch(variable(project),"value","42","note","Test-only required input, independently reviewed before the target override"));
+        service.updateVariable(project,"targetOverrides",patch(overrides(project),"value",JsonUtils.write(Collections.singletonList(map("actionId","insert-target","action","amend","value"," Test-only wording")))));
+        Map<String,Object> plan=service.plan(project,null);assertTrue(((List<?>)plan.get("unresolved")).isEmpty());assertEquals("insert",((Map<?,?>)((List<?>)plan.get("actions")).get(0)).get("action"));
+        com.consense.document.DocxTemplateEditor.DocxEditResult output=service.compile(original,"NTT",plan,Collections.emptyMap(),null);
+        assertEquals(paragraph.getText()+" Test-only wording",output.getIndex().mainParagraph(1).getText());assertEquals(com.consense.document.DocxTemplateEditor.EditType.INSERT_TEXT,output.getLedger().get(0).getType());
+    }
+    @Test void reviewedMultiSpanPlacementAlsoAppliesToManualOverridesAndCompilation() throws Exception {
+        String project=project();SourceDocument template=template(project);Map<String,Object> graph=graph(template,"confirmed","number");
+        byte[] original=storage.read(template.getStoragePath());com.consense.document.DocxTemplateEditor.Paragraph paragraph=new com.consense.document.DocxTemplateEditor().inspect(original).mainParagraph(1);
+        List<Object> spans=new ArrayList<>();for(int start:new int[]{10,12})spans.add(map("paragraphId",paragraph.getId(),"paragraphSha256",paragraph.getSha256(),"sourceSha256",template.getSourceSha256(),"channel","editableText","start",start,"end",start+2,"expectedText","__"));
+        Map<String,Object> node=(Map<String,Object>)((List<?>)((Map<?,?>)graph.get("graph")).get("variables")).get(0);
+        node.put("editTargets",Collections.singletonList(map("id","duration-target","docId",template.getId().toString(),"text","__\n__","action","fill","valueSourceId","duration","native",map("spans",spans),"replacementPlacement",map("spanIndex",1))));
+        String draft=String.valueOf(service.save(project,graph,null).get("id"));service.confirm(project,draft,null);
+        service.updateVariable(project,"duration",patch(variable(project),"value","42","note","Manual test duration"));
+        service.updateVariable(project,"targetOverrides",patch(overrides(project),"value",JsonUtils.write(Collections.singletonList(map("actionId","duration-target","action","amend","value","50")))));
+        Map<String,Object> plan=service.plan(project,null);assertTrue(((List<?>)plan.get("unresolved")).isEmpty());assertEquals("amend",((Map<?,?>)((List<?>)plan.get("actions")).get(0)).get("action"));
+        assertEquals("Duration: 50 months.",service.compile(original,"NTT",plan,Collections.emptyMap(),null).getIndex().mainParagraph(1).getText());
+    }
     @Test void multiSpanAmendmentOverridesAreRejectedAndHistoricalOnesRemainPending() throws Exception {
         String project=project();SourceDocument template=template(project);Map<String,Object> graph=graph(template,"confirmed","number");
         com.consense.document.DocxTemplateEditor.Paragraph paragraph=new com.consense.document.DocxTemplateEditor().inspect(storage.read(template.getStoragePath())).mainParagraph(1);
         List<Object> spans=new ArrayList<>();for(int start:new int[]{10,12})spans.add(map("paragraphId",paragraph.getId(),"paragraphSha256",paragraph.getSha256(),"sourceSha256",template.getSourceSha256(),"channel","editableText","start",start,"end",start+2,"expectedText","__"));
         Map<String,Object> node=(Map<String,Object>)((List<?>)((Map<?,?>)graph.get("graph")).get("variables")).get(0);
         node.put("editTargets",Collections.singletonList(map("id","duration-target","docId",template.getId().toString(),"text","__\n__","action","fill","valueSourceId","duration","native",map("spans",spans))));
-        String draft=String.valueOf(service.save(project,graph,null).get("id")),current=String.valueOf(service.confirm(project,draft,null).get("id"));
+        String draft=String.valueOf(service.save(project,graph,null).get("id"));
+        assertThrows(BizException.class,()->service.confirm(project,draft,null));
+        Map<String,Object> target=(Map<String,Object>)((List<?>)node.get("editTargets")).get(0);target.put("replacementPlacement",map("spanIndex",1));
+        String placed=String.valueOf(service.save(project,graph,null).get("id")),reviewed=String.valueOf(service.confirm(project,placed,null).get("id"));
+        // A pre-placement confirmed revision is a historical fixture; new confirmations cannot create it.
+        DraftTemplateGraphRevision currentRevision=revisions.findById(reviewed).get();Map<String,Object> historicalGraph=JsonUtils.readMap(currentRevision.getGraphJson());
+        Map<String,Object> historicalNode=(Map<String,Object>)((List<?>)((Map<?,?>)historicalGraph.get("graph")).get("variables")).get(0);
+        ((Map<String,Object>)((List<?>)historicalNode.get("editTargets")).get(0)).remove("replacementPlacement");
+        String current=UUID.randomUUID().toString(),historicalJson=JsonUtils.write(historicalGraph);
+        revisions.save(new DraftTemplateGraphRevision(current,project,reviewed,"CONFIRMED",DraftAdoption.hash(historicalJson),historicalJson,currentRevision.getSourcesJson(),java.time.Instant.now()));
+        DraftTemplateGraphHead head=graphHeads.findById(project).get();head.setCurrentRevisionId(current);graphHeads.save(head);
         service.updateVariable(project,"duration",patch(variable(project),"value","42","note","Manual duration"));
         String amendment=JsonUtils.write(Collections.singletonList(map("actionId","duration-target","action","amend","value","50")));
         assertAll(

@@ -345,6 +345,7 @@ const triples = {
   targetReset: ['取消此人工覆盖', '取消此人工覆蓋', 'Remove this manual override'],
   retain: ['保留', '保留', 'Retain'],
   amend: ['改写／填写', '改寫／填寫', 'Amend / fill'],
+  insert: ['在原件锚点插入', '在原件錨點插入', 'Insert at source anchor'],
   delete: ['删除', '刪除', 'Delete'],
   not_used: ['标记 Not used', '標記 Not used', 'Mark Not used'],
   not_adopted: ['本次不采用', '本次不採用', 'Not adopted'],

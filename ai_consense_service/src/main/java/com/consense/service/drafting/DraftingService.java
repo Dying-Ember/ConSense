@@ -194,7 +194,11 @@ public class DraftingService {
             String wordHash=hint==null?null:existingPreferredWordHash(projectId,hint);
             if(wordHash==null&&hint!=null&&groups.containsKey(hint))try{DraftTemplateRouting.Upload candidate=DraftTemplateRouting.primary(groups.get(hint));if("docx".equals(candidate.format))wordHash=candidate.hash;}catch(BizException ambiguous){/* The family conflict is reported below. */}
             if(wordHash!=null){auxiliaries.add(pdf);preferredWords.put(pdf,wordHash);continue;}
-            try{parseTemplateUpload(pdf,null);groups.computeIfAbsent(pdf.fileKey,key->new ArrayList<>()).add(pdf);}
+            try{
+                parseTemplateUpload(pdf,null);wordHash=existingPreferredWordHash(projectId,pdf.fileKey);
+                if(wordHash!=null){auxiliaries.add(pdf);preferredWords.put(pdf,wordHash);}
+                else groups.computeIfAbsent(pdf.fileKey,key->new ArrayList<>()).add(pdf);
+            }
             catch(Exception failure){retainInitialFailedTemplate(projectId,null,pdf,failure);failed++;messages.add(pdf.file.getOriginalFilename()+": "+failure.getMessage());}
         }
         for(Map.Entry<String,List<DraftTemplateRouting.Upload>> group:groups.entrySet()) {
@@ -205,12 +209,15 @@ public class DraftingService {
                 if(previous!=null&&!selected.hash.equals(previousSourceHash))throw new BizException(4012,"TEMPLATE_REPLACEMENT_REQUIRED: "+selected.fileKey+" already has a different source. Use its explicit replace action; the existing source is retained.");
                 saveTemplateUpload(projectId,selected,false);parsed++;
                 messages.add(selected.fileKey+" ← "+selected.file.getOriginalFilename()+" parsed; source "+selected.hash+". "+selected.parsed.getMessage());
-                for(DraftTemplateRouting.Upload duplicate:group.getValue())if(duplicate!=selected)messages.add(duplicate.file.getOriginalFilename()+": duplicate source bytes; no additional primary was selected.");
+                for(DraftTemplateRouting.Upload candidate:group.getValue())if(candidate!=selected) {
+                    if(candidate.hash.equals(selected.hash))messages.add(candidate.file.getOriginalFilename()+": duplicate source bytes; no additional primary was selected.");
+                    else {auxiliaries.add(candidate);preferredWords.put(candidate,selected.hash);}
+                }
             }catch(Exception failure){failed+=group.getValue().size();messages.add(group.getKey()+": "+failure.getMessage());}
         }
         for(DraftTemplateRouting.Upload auxiliary:auxiliaries)try {
             SourceDocument saved=saveAuxiliaryTemplate(projectId,auxiliary,preferredWords.get(auxiliary));
-            messages.add(auxiliary.file.getOriginalFilename()+": unselected_auxiliary_candidate; Word candidate preferred. PDF content was not parsed, family/edition equivalence is unverified; raw source "+auxiliary.hash+", retained source record "+saved.getId()+".");
+            messages.add(auxiliary.file.getOriginalFilename()+": unselected_auxiliary_candidate; Word candidate preferred. "+(auxiliary.parsed==null?"PDF content was not parsed; family/edition equivalence is unverified":"Complete independent PDF parse retained; edition equivalence is unverified")+"; raw source "+auxiliary.hash+", retained source record "+saved.getId()+".");
         }catch(Exception failure){failed++;messages.add(auxiliary.file.getOriginalFilename()+": auxiliary retention failed: "+failure.getMessage());}
         invalidateDocuments(projectId);return new UploadResultVO(files.size(),parsed,failed,messages);
     }
@@ -312,14 +319,24 @@ public class DraftingService {
         });
     }
     private SourceDocument saveAuxiliaryTemplate(String projectId,DraftTemplateRouting.Upload upload,String wordHash) {
+        SourceDocument document=null;
         for(SourceDocument existing:sourceDocumentRepository.findByProjectIdAndCategoryOrderByIdAsc(projectId,SourceDocument.CATEGORY_STANDARD_TEMPLATE))
-            if(existing.getFileKey()==null&&DraftTemplateRouting.AUXILIARY_STATUS.equals(existing.getParseStatus())&&upload.hash.equals(existing.getSourceSha256())&&existing.getStoragePath()!=null&&upload.hash.equals(DraftTemplateRouting.sha(storageService.read(existing.getStoragePath()))))return existing;
-        StorageService.StoredFile stored=storageService.store(projectId,SourceDocument.CATEGORY_STANDARD_TEMPLATE,upload.file);
-        if(!upload.hash.equals(DraftTemplateRouting.sha(storageService.read(stored.getPath()))))throw new BizException(4012,"TEMPLATE_STORED_BYTES_CHANGED");
-        SourceDocument document=new SourceDocument();document.setProjectId(projectId);document.setCategory(SourceDocument.CATEGORY_STANDARD_TEMPLATE);document.setFileKey(null);
-        document.setFileName(stored.getOriginalName());document.setContentType(stored.getContentType());document.setSizeBytes(stored.getSize());document.setStoragePath(stored.getPath());document.setSourceSha256(upload.hash);
-        document.setParseStatus(DraftTemplateRouting.AUXILIARY_STATUS);document.setPageCount(0);document.setOcrUsed(false);document.setParseMessage("Word preferred; this PDF is retained without parsing or a verified family/edition relationship.");
-        document.setParseCoverageJson(JsonUtils.write(DraftBusinessRules.map("templateSelection",DraftBusinessRules.map("status","unselected_auxiliary_candidate","filenameFamilyHint",DraftTemplateRouting.filenameHint(upload.file.getOriginalFilename()),"familyConfirmed",false,"sameEditionVerified",false,"contentParsed",false,"sourceSha256",upload.hash,"preferredWordCandidateSha256",wordHash))));
+            if(DraftTemplateRouting.isAuxiliary(existing)&&upload.hash.equals(existing.getSourceSha256())&&existing.getStoragePath()!=null&&upload.hash.equals(DraftTemplateRouting.sha(storageService.read(existing.getStoragePath())))) {
+                if(upload.parsed==null)return existing;document=existing;break;
+            }
+        if(document==null)document=storedTemplateSource(projectId,null,upload,storeTemplateAsset(projectId,upload));
+        document.setParseStatus(DraftTemplateRouting.AUXILIARY_STATUS);
+        if(upload.parsed==null) {
+            document.setPageCount(0);document.setOcrUsed(false);document.setParseMessage("Word preferred; this PDF is retained without parsing or a verified family/edition relationship.");
+            document.setParseCoverageJson(JsonUtils.write(DraftBusinessRules.map("templateSelection",DraftBusinessRules.map("status","unselected_auxiliary_candidate","filenameFamilyHint",DraftTemplateRouting.filenameHint(upload.file.getOriginalFilename()),"familyConfirmed",false,"sameEditionVerified",false,"contentParsed",false,"sourceSha256",upload.hash,"preferredWordCandidateSha256",wordHash))));
+        } else {
+            DocumentParser.ParsedDocument result=upload.parsed;
+            document.setPageCount(result.getPageCount());document.setOcrUsed(result.isOcrUsed());document.setTextContent(result.getText());
+            document.setStructuredContentJson(JsonUtils.write(result.getBlocks()));
+            // Selection metadata must not change the coverage bound by the independent PDF analysis.
+            document.setParseCoverageJson(JsonUtils.write(result.getCoverage()));OerSourceMetadata.captureParsed(document,result);
+            document.setParseMessage("Word preferred; complete independent PDF observations retained without adopting this source or verifying edition equivalence.");
+        }
         return sourceDocumentRepository.save(document);
     }
 

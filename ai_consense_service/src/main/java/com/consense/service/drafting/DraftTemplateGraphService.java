@@ -88,7 +88,11 @@ public class DraftTemplateGraphService {
             if(!"confirmed".equals(node.get("status")))throw new BizException(4007,"GRAPH_REVIEW_INCOMPLETE: "+node.get("id"));
             requireReviewedSource(projectId,graph,node);
             if(Boolean.TRUE.equals(asMap(node.get("correction")).get("needsRebind")))throw new BizException(4007,"GRAPH_RULE_REBIND_REQUIRED: "+node.get("id"));
-            for(Object target:list(node.get("editTargets")))if(Boolean.TRUE.equals(asMap(target).get("needsRebind"))||"check".equals(asMap(target).get("action")))throw new BizException(4007,"GRAPH_TARGET_REVIEW_REQUIRED: "+node.get("id"));
+            for(Object rawTarget:list(node.get("editTargets"))) {
+                Map<String,Object> target=asMap(rawTarget);String action=string(target.get("action"));
+                if(Boolean.TRUE.equals(target.get("needsRebind"))||"check".equals(action))throw new BizException(4007,"GRAPH_TARGET_REVIEW_REQUIRED: "+node.get("id"));
+                if(Arrays.asList("replace","fill").contains(action)&&!DraftReviewGraph.hasReplacementPlacement(target)||"insert".equals(action)&&!DraftReviewGraph.hasInsertionPoint(target))throw new BizException(4007,"GRAPH_REPLACEMENT_PLACEMENT_REQUIRED: "+node.get("id"));
+            }
         }
         if(active==0)throw new BizException(4007,"GRAPH_HAS_NO_REVIEWED_ITEMS");
         DraftTemplateGraphRevision confirmed=create(projectId,draftId,"CONFIRMED",graph,JsonUtils.readList(draft.getSourcesJson(),Object.class));
@@ -281,6 +285,7 @@ public class DraftTemplateGraphService {
                 if("editTargets".equals(collection)&&JsonUtils.isBlankText(string(anchor.get("id"))))anchor.put("id",UUID.randomUUID().toString());
                 if("editTargets".equals(collection)&&!targetIds.add(string(anchor.get("id"))))throw new BizException(4007,"GRAPH_DUPLICATE_TARGET_ID");
                 anchor.put("nativeBinding",JsonUtils.mapper().convertValue(sourceReader.bind(source,JsonUtils.mapper().valueToTree(anchor)),Map.class));
+                if("sourceAnchors".equals(collection))anchor.put("sourceObservationBinding",JsonUtils.mapper().convertValue(sourceReader.bindObservation(source,JsonUtils.mapper().valueToTree(anchor)),Map.class));
             }
         }
         return graph;
@@ -301,13 +306,16 @@ public class DraftTemplateGraphService {
     private void lock(String projectId){if(entityManager.find(Project.class,projectId,LockModeType.PESSIMISTIC_WRITE)==null)throw new BizException(4004,"Project not found.");}
     private void expected(String actual,String expected){if(!Objects.equals(actual,expected))throw conflict("The displayed graph revision changed; reload before saving or adopting.");}
     private static BizException conflict(String message){return new BizException(4090,"GRAPH_REVISION_CONFLICT: "+message);}
-    private List<Map<String,Object>> templateIdentities(String projectId){return JsonUtils.mapper().convertValue(sourceReader.sources(sources.findByProjectIdAndCategoryOrderByIdAsc(projectId,SourceDocument.CATEGORY_STANDARD_TEMPLATE)),List.class);}
-    private List<JsonNode> templateReadings(String projectId){List<JsonNode> result=new ArrayList<>();for(SourceDocument source:sources.findByProjectIdAndCategoryOrderByIdAsc(projectId,SourceDocument.CATEGORY_STANDARD_TEMPLATE))result.add(sourceReader.reading(source));return result;}
+    private List<SourceDocument> templateSources(String projectId){
+        List<SourceDocument> result=new ArrayList<>();for(SourceDocument source:sources.findByProjectIdAndCategoryOrderByIdAsc(projectId,SourceDocument.CATEGORY_STANDARD_TEMPLATE))if(!DraftTemplateRouting.isUnadopted(source))result.add(source);return result;
+    }
+    private List<Map<String,Object>> templateIdentities(String projectId){return JsonUtils.mapper().convertValue(sourceReader.sources(templateSources(projectId)),List.class);}
+    private List<JsonNode> templateReadings(String projectId){List<JsonNode> result=new ArrayList<>();for(SourceDocument source:templateSources(projectId))result.add(sourceReader.reading(source));return result;}
     private Map<String,Object> selected(List<Map<String,Object>> identities){Map<String,Object> result=new LinkedHashMap<>();for(Map<String,Object> source:identities){String key=string(source.get("fileKey"));if(Arrays.asList("NTT","SCT","SCC").contains(key)&&(!result.containsKey(key)||"docx".equals(source.get("format"))))result.put(key,source.get("id"));}return result;}
     private void requireReviewedSource(String projectId,Map<String,Object> graph,Map<String,Object> node){
         boolean supported=false;for(Object raw:list(node.get("sourceAnchors"))){Map<String,Object> anchor=asMap(raw);for(Object identityRaw:list(graph.get("sources"))){Map<String,Object> identity=asMap(identityRaw);if(!Objects.equals(string(anchor.get("docId")),string(identity.get("docId")))&&!Objects.equals(string(anchor.get("docId")),string(identity.get("id"))))continue;
                 SourceDocument source=requireSource(projectId,((Number)identity.get("sourceDocumentId")).longValue());String quote=string(anchor.get("text"));
-                if("bound".equals(asMap(anchor.get("nativeBinding")).get("status"))||quote!=null&&!quote.trim().isEmpty()&&source.getTextContent()!=null&&source.getTextContent().contains(quote))supported=true;
+                if("bound".equals(asMap(anchor.get("nativeBinding")).get("status"))||"bound".equals(asMap(anchor.get("sourceObservationBinding")).get("status"))||quote!=null&&!quote.trim().isEmpty()&&source.getTextContent()!=null&&source.getTextContent().contains(quote))supported=true;
             }}if(!supported)throw new BizException(4007,"GRAPH_SOURCE_PASSAGE_REQUIRED: "+node.get("id"));
     }
     private void ensureInputs(String projectId,DraftTemplateGraphRevision revision,Map<String,Object> graph){int order=0;for(Map<String,Object> field:allFields(graph)){String key=id(field),definition=DraftReviewGraph.fieldHash(field);DraftVariable variable=variables.findByProjectIdAndVarKey(projectId,key).orElse(null);DraftGraphInputBinding binding=bindings.findById(bindingId(projectId,key)).orElse(null);
@@ -347,21 +355,23 @@ public class DraftTemplateGraphService {
             else{
                 if(target==null)throw new BizException(4007,"TARGET_OVERRIDE_NOT_ALLOWED: "+id);
                 if(!"bound".equals(asMap(target.get("nativeBinding")).get("status")))throw new BizException(4012,"TARGET_OVERRIDE_SOURCE_UNBOUND: "+id);
-                if("amend".equals(action)&&list(asMap(target.get("nativeBinding")).get("spans")).size()!=1)throw new BizException(4012,"GRAPH_REPLACEMENT_PLACEMENT_REQUIRED: "+id);
+                if("amend".equals(action)&&!canAmendTarget(target))throw new BizException(4012,"GRAPH_REPLACEMENT_PLACEMENT_REQUIRED: "+id);
+                if(Arrays.asList("delete","not_used").contains(action)&&DraftReviewGraph.hasInsertionPoint(target))throw new BizException(4012,"GRAPH_INSERTION_ACTION_MISMATCH: "+id);
                 override.put("sourceRevision",targetRevision(revision,target));
             }
             result.add(override);
         }return JsonUtils.write(result);
     }
-    private boolean overridesNeedReview(DraftTemplateGraphRevision revision,Map<String,Object> graph,String raw){try{Map<String,Map<String,Object>> allowed=currentTargets(graph);for(Object item:list(DraftBusinessRules.parse(raw))){Map<String,Object> entry=asMap(item),target=allowed.get(string(entry.get("actionId")));if(target==null||!targetRevision(revision,target).equals(entry.get("sourceRevision"))||"amend".equals(entry.get("action"))&&list(asMap(target.get("nativeBinding")).get("spans")).size()!=1)return true;}return false;}catch(RuntimeException bad){return true;}}
+    private boolean canAmendTarget(Map<String,Object> action){Map<String,Object> target=asMap(action.get("target"));if(target.isEmpty())target=action;return "insert".equals(target.get("action"))?DraftReviewGraph.hasInsertionPoint(target):DraftReviewGraph.hasReplacementPlacement(target);}
+    private boolean overridesNeedReview(DraftTemplateGraphRevision revision,Map<String,Object> graph,String raw){try{Map<String,Map<String,Object>> allowed=currentTargets(graph);for(Object item:list(DraftBusinessRules.parse(raw))){Map<String,Object> entry=asMap(item),target=allowed.get(string(entry.get("actionId")));if(target==null||!targetRevision(revision,target).equals(entry.get("sourceRevision"))||"amend".equals(entry.get("action"))&&!canAmendTarget(target)||Arrays.asList("delete","not_used").contains(entry.get("action"))&&DraftReviewGraph.hasInsertionPoint(target))return true;}return false;}catch(RuntimeException bad){return true;}}
     private void applyOverrides(String projectId,DraftTemplateGraphRevision revision,Map<String,Object> graph,Map<String,Object> plan,Map<String,String> patches){
         if(overrideField(graph)==null)return;DraftVariable variable=variables.findByProjectIdAndVarKey(projectId,"targetOverrides").orElse(null);String previous=variable==null?null:variable.getValueText(),raw=previous;
         boolean preview=patches!=null&&patches.containsKey("targetOverrides");if(preview){raw=normalizeOverrides(revision,graph,patches.get("targetOverrides"),previous);asMap(plan.get("inputValues")).put("targetOverrides",DraftBusinessRules.parse(raw));}else if(variable==null||!Boolean.TRUE.equals(variable.getConfirmed()))return;
         if(JsonUtils.isBlankText(raw)||"[]".equals(raw))return;
         try{Set<String> overridden=new HashSet<>();Map<String,Map<String,Object>> allowed=currentTargets(graph);for(Object item:list(DraftBusinessRules.parse(raw))){Map<String,Object> override=asMap(item);String id=string(override.get("actionId"));Map<String,Object> current=allowed.get(id);
                 if(current==null||!targetRevision(revision,current).equals(override.get("sourceRevision"))){addIssue(plan,"target_override_review:"+id,"Saved target amendment requires review against this graph revision: "+id);for(Object actionRaw:list(plan.get("actions"))){Map<String,Object> action=asMap(actionRaw);if(Objects.equals(action.get("id"),id))action.put("adoptionState","needs_review");}continue;}
-                if("amend".equals(override.get("action"))&&list(asMap(current.get("nativeBinding")).get("spans")).size()!=1){addIssue(plan,"target_override_placement:"+id,"Choose one exact source span for this saved replacement: "+id);for(Object actionRaw:list(plan.get("actions"))){Map<String,Object> action=asMap(actionRaw);if(Objects.equals(action.get("id"),id)){action.put("action","pending");action.put("adoptionState","needs_review");}}continue;}
-                for(Object actionRaw:list(plan.get("actions"))){Map<String,Object> action=asMap(actionRaw);if(!Objects.equals(action.get("id"),id))continue;action.put("action",override.get("action"));action.put("value","amend".equals(override.get("action"))?override.get("value"):"not_used".equals(override.get("action"))?"Not used":"delete".equals(override.get("action"))?"":null);action.put("adoptionOrigin","manual_target");overridden.add(id);}}
+                if("amend".equals(override.get("action"))&&!canAmendTarget(current)||Arrays.asList("delete","not_used").contains(override.get("action"))&&DraftReviewGraph.hasInsertionPoint(current)){addIssue(plan,"target_override_placement:"+id,"Choose the exact insertion point or replacement span for this saved treatment: "+id);for(Object actionRaw:list(plan.get("actions"))){Map<String,Object> action=asMap(actionRaw);if(Objects.equals(action.get("id"),id)){action.put("action","pending");action.put("adoptionState","needs_review");}}continue;}
+                for(Object actionRaw:list(plan.get("actions"))){Map<String,Object> action=asMap(actionRaw);if(!Objects.equals(action.get("id"),id))continue;action.put("action","amend".equals(override.get("action"))&&DraftReviewGraph.hasInsertionPoint(current)?"insert":override.get("action"));action.put("value","amend".equals(override.get("action"))?override.get("value"):"not_used".equals(override.get("action"))?"Not used":"delete".equals(override.get("action"))?"":null);action.put("adoptionOrigin","manual_target");overridden.add(id);}}
             List<Object> unresolved=new ArrayList<>();for(Object issue:list(plan.get("unresolved"))){Map<String,Object> value=asMap(issue);boolean resolved=false;for(Object key:list(value.get("inputKeys")))if(overridden.contains(String.valueOf(key)))resolved=true;if(!resolved)unresolved.add(issue);}plan.put("unresolved",unresolved);
         }catch(RuntimeException invalid){addIssue(plan,"target_override_invalid",invalid.getMessage());}
     }

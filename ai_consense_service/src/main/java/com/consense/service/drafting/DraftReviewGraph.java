@@ -14,7 +14,7 @@ public final class DraftReviewGraph {
     private DraftReviewGraph() { }
     private static final Set<String> TYPES = set("boolean","number","text","date","choice","multiselect","record","list");
     private static final Set<String> OPERATORS = set("yes","no","eq","ne","gt","ge","lt","le","has","lacks","known","unknown","empty","notempty");
-    private static final Set<String> ACTIONS = set("keep","replace","fill","delete","unused","check");
+    private static final Set<String> ACTIONS = set("keep","replace","fill","insert","delete","unused","check");
     private static final Set<String> ROLES = set("input","decision","content","derived","verification","system","fixed");
     public static Map<String,Object> state(Map<String,Object> graph) {
         Object nested=graph.get("graph"); if(nested instanceof Map)return map(nested);
@@ -251,10 +251,10 @@ public final class DraftReviewGraph {
                 String action=Boolean.FALSE.equals(applies)?"not_adopted":applies==null?"pending":actionKind(target.get("action"));Object replacement=null;
                 if("keep".equals(action))action="retain";
                 if("check".equals(action)){action="pending";context.issue(targetId,"ManualCheck","请核对原文与本次处理范围。 / Review the source and proposed scope.");}
-                if("replace".equals(action)||"fill".equals(action)) {
-                    action="amend";replacement=context.replacement(target,branch,rows);
+                if("replace".equals(action)||"fill".equals(action)||"insert".equals(action)) {
+                    boolean insertion="insert".equals(action);action=insertion?"insert":"amend";replacement=context.replacement(target,branch,rows);
                     if(replacement==null){action="pending";context.issue(targetId,"AnswerUnknown","改文所需答案仍未确定。 / The answer supplying this text is unknown.");}
-                    if("bound".equals(text(map(target.get("nativeBinding")).get("status")))&&list(map(target.get("nativeBinding")).get("spans")).size()!=1){action="pending";context.issue(targetId,"ReplacementPlacementRequired","请为替换文字选择一个准确原件选区；多处选区须分别处理。 / Choose one exact source span for the replacement text; handle multiple spans separately.");}
+                    if("bound".equals(text(map(target.get("nativeBinding")).get("status")))&&!(insertion?hasInsertionPoint(target):hasReplacementPlacement(target))){action="pending";context.issue(targetId,"ReplacementPlacementRequired","请明确插入点或替换文字所落的选区；其他已选替换选区将清空。 / Choose the exact insertion point or the selected span receiving replacement text; other selected replacement spans will be cleared.");}
                 }
                 if("unused".equals(action)){action="not_used";replacement="Not used";}
                 if("delete".equals(action))replacement="";
@@ -366,23 +366,39 @@ public final class DraftReviewGraph {
             if(!"bound".equals(text(binding.get("status")))||!index.getSourceSha256().equals(binding.get("sourceSha256")))throw invalid("GRAPH_SOURCE_BINDING_CHANGED: "+id);
             List<?> spans=list(binding.get("spans"));if(spans.isEmpty())throw invalid("GRAPH_EDIT_SPAN_REQUIRED: "+id);
             String replacement=action.get("value")==null?null:render(action.get("value"));
-            if("amend".equals(kind)&&(replacement==null||spans.size()!=1))throw invalid("GRAPH_REPLACEMENT_PLACEMENT_REQUIRED: "+id);
-            if(!set("amend","delete","not_used").contains(kind))throw invalid("GRAPH_EDIT_ACTION_UNSUPPORTED: "+id);
+            Map<String,Object> target=new LinkedHashMap<>(map(action.get("target")));if(target.isEmpty())target.putAll(action);target.put("nativeBinding",binding);
+            int placement=replacementSpanIndex(target);
+            if("amend".equals(kind)&&(replacement==null||placement<0))throw invalid("GRAPH_REPLACEMENT_PLACEMENT_REQUIRED: "+id);
+            if("insert".equals(kind)&&(replacement==null||!hasInsertionPoint(target)))throw invalid("GRAPH_INSERTION_POINT_REQUIRED: "+id);
+            if(!set("amend","insert","delete","not_used").contains(kind))throw invalid("GRAPH_EDIT_ACTION_UNSUPPORTED: "+id);
             int n=0;for(Object spanRaw:spans) {
                 Map<String,Object> span=map(spanRaw);Paragraph paragraph=index.paragraph(text(span.get("paragraphId")));
                 if(!paragraph.getSha256().equals(span.get("paragraphSha256")))throw invalid("GRAPH_PARAGRAPH_CHANGED: "+id);
                 int start=integer(span.get("start")),end=integer(span.get("end"));String expected=text(span.get("expectedText"));
-                for(int[] range:occupied.computeIfAbsent(paragraph.getId(),ignored->new ArrayList<>()))if(start<range[1]&&end>range[0])throw invalid("GRAPH_OVERLAPPING_EDITS: "+id);
+                if("insert".equals(kind)!= "insert".equals(text(span.get("operation")))||"insert".equals(kind)&&start!=end||!"insert".equals(kind)&&start==end)throw invalid("GRAPH_INSERTION_ACTION_MISMATCH: "+id);
+                for(int[] range:occupied.computeIfAbsent(paragraph.getId(),ignored->new ArrayList<>()))if(DocxTemplateEditor.overlappingSpans(start,end,range[0],range[1]))throw invalid("GRAPH_OVERLAPPING_EDITS: "+id);
                 occupied.get(paragraph.getId()).add(new int[]{start,end});
-                String next="amend".equals(kind)?replacement:"not_used".equals(kind)&&n==0?"Not used":"";
+                String next="insert".equals(kind)||"amend".equals(kind)&&n==placement?replacement:"not_used".equals(kind)&&n==0?"Not used":"";
                 String channel=text(span.get("channel"));
-                if("editableText".equals(channel))edits.add(Edit.replaceSpan(id+"-"+n,paragraph,start,end,expected,next));
-                else if("catalogText".equals(channel))edits.add(Edit.replaceCatalogSpan(id+"-"+n,paragraph,start,end,expected,next));
+                if("editableText".equals(channel))edits.add("insert".equals(kind)?Edit.insertText(id+"-"+n,paragraph,start,next):Edit.replaceSpan(id+"-"+n,paragraph,start,end,expected,next));
+                else if("catalogText".equals(channel)&&!"insert".equals(kind))edits.add(Edit.replaceCatalogSpan(id+"-"+n,paragraph,start,end,expected,next));
                 else throw invalid("GRAPH_TEXT_CHANNEL_REQUIRED: "+id);
                 n++;
             }
         }
         return editor.applyWithParagraphBookmarks(original,new SourceEditBatch(index.getSourceSha256(),edits),bookmarks,!bookmarks.isEmpty(),layout);
+    }
+    public static boolean hasReplacementPlacement(Map<String,Object> target){return replacementSpanIndex(target)>=0;}
+    private static int replacementSpanIndex(Map<String,Object> target) {
+        List<?> spans=list(map(target.get("nativeBinding")).get("spans"));if(spans.isEmpty())return -1;
+        for(Object raw:spans)if("insert".equals(text(map(raw).get("operation"))))return -1;
+        if(spans.size()==1)return 0;
+        Object value=map(target.get("replacementPlacement")).get("spanIndex");if(!(value instanceof Number))return -1;
+        Number index=(Number)value;int selected=index.intValue();return index.doubleValue()==selected&&selected>=0&&selected<spans.size()?selected:-1;
+    }
+    public static boolean hasInsertionPoint(Map<String,Object> target) {
+        List<?> spans=list(map(target.get("nativeBinding")).get("spans"));if(spans.size()!=1)return false;Map<String,Object> span=map(spans.get(0));
+        Object start=span.get("start"),end=span.get("end");return "insert".equals(text(span.get("operation")))&&start instanceof Number&&end instanceof Number&&((Number)start).doubleValue()==((Number)start).intValue()&&((Number)end).doubleValue()==((Number)end).intValue()&&((Number)start).intValue()==((Number)end).intValue()&&"".equals(span.get("expectedText"));
     }
     private static int integer(Object value){if(!(value instanceof Number)||((Number)value).doubleValue()!=((Number)value).intValue())throw invalid("GRAPH_SPAN_INTEGER_REQUIRED");return ((Number)value).intValue();}
     private static void requireNode(Map<String,Map<String,Object>> nodes,String id){if(!nodes.containsKey(id)||!active(nodes.get(id)))throw invalid("GRAPH_REFERENCE_MISSING: "+id);}

@@ -83,6 +83,47 @@ public class DraftReviewSources {
         return bindTarget(loaded.bytes,JsonUtils.mapper().convertValue(passage,Map.class));
     }
 
+    /** A named, saved source observation can support review without acquiring editable coordinates. */
+    public ObjectNode bindObservation(SourceDocument source,JsonNode passage) {
+        Loaded loaded=load(source);String sha=loaded.sha;JsonNode evidence=boundEvidence(source,loaded);
+        if(evidence==null)return pending("missing",sha,"CURRENT_SOURCE_OBSERVATIONS_REQUIRED");
+        if(!sha.equals(passage.path("sourceSha256").asText()))return pending("unsafe",sha,"SOURCE_HASH_MISMATCH");
+        if(!String.valueOf(source.getId()).equals(passage.path("sourceDocumentId").asText()))return pending("unsafe",sha,"SOURCE_DOCUMENT_MISMATCH");
+        JsonNode binding=evidence.path("sourceBinding");
+        for(String[] key:new String[][]{{"analysisRevision","analysisRevision"},{"analysisInputSha256","inputSha256"},{"analysisSha256","generationSha256"}})if(!passage.path(key[0]).equals(binding.path(key[1])))return pending("unsafe",sha,"SOURCE_OBSERVATION_ANALYSIS_CHANGED");
+        JsonNode original=null;String observationId=passage.path("sourceObservationId").asText();
+        if(observationId.isEmpty())return pending("missing",sha,"SOURCE_OBSERVATION_ID_REQUIRED");
+        for(String kind:Arrays.asList("guidanceNotes","markerCandidates","groups"))for(JsonNode candidate:evidence.path(kind))if(observationId.equals(candidate.path("id").asText())){if(original!=null)return pending("unsafe",sha,"AMBIGUOUS_SOURCE_OBSERVATION");original=candidate;}
+        if(original==null||!original.equals(passage.path("sourceObservation")))return pending("unsafe",sha,"SOURCE_OBSERVATION_OBJECT_CHANGED");
+        JsonNode ranges=passage.path("observedRanges");if(!ranges.isArray()||ranges.isEmpty())return pending("missing",sha,"SOURCE_OBSERVATION_RANGES_REQUIRED");
+        if(!ranges.equals(original.path("memberRanges")))return pending("unsafe",sha,"SOURCE_OBSERVATION_SCOPE_CHANGED");
+        if(!original.path("text").isTextual()||!original.path("text").equals(passage.path("text")))return pending("unsafe",sha,"SOURCE_OBSERVATION_QUOTE_MISMATCH");
+        StringJoiner selected=new StringJoiner("\n");
+        for(JsonNode range:ranges) {
+            JsonNode member=null;for(JsonNode candidate:evidence.path("sourceMembers"))if(range.path("memberId").asText().equals(candidate.path("id").asText())){if(member!=null)return pending("unsafe",sha,"AMBIGUOUS_SOURCE_MEMBER");member=candidate;}
+            if(member==null)return pending("unsafe",sha,"SOURCE_MEMBER_NOT_BOUND");
+            if("docx".equals(loaded.format)) {
+                if(!sha.equals(member.path("sourcePosition").path("sourceSha256").asText()))return pending("unsafe",sha,"SOURCE_MEMBER_NOT_BOUND");
+            }else if("pdf".equals(loaded.format)) {
+                JsonNode block=member.path("blockObservation"),context=block.path("readingContext"),provenance=range.path("pdfGlyphProvenance");
+                if(!sha.equals(context.path("sourceSha256").asText())||!member.path("id").equals(block.path("id"))||block.path("source").asText().isEmpty()||!block.path("pageNo").isIntegralNumber()||block.path("pageNo").asInt()<1||block.path("pageNo").asInt()>evidence.path("structure").path("physicalPages").asInt())return pending("unsafe",sha,"PDF_SOURCE_MEMBER_NOT_BOUND");
+                if(context.hasNonNull("occurrenceId")&&!context.path("occurrenceId").equals(block.path("id"))||provenance.hasNonNull("blockId")&&!provenance.path("blockId").equals(block.path("id"))||provenance.hasNonNull("pageNo")&&!provenance.path("pageNo").equals(block.path("pageNo")))return pending("unsafe",sha,"PDF_SOURCE_POSITION_MISMATCH");
+            }else return pending("missing",sha,"SOURCE_OBSERVATION_FORMAT_UNSUPPORTED");
+            if(range.hasNonNull("sourcePosition")&&!range.path("sourcePosition").equals(member.path("sourcePosition")))return pending("unsafe",sha,"SOURCE_POSITION_MISMATCH");
+            String channel=range.path("channel").asText("text"),name=channel.startsWith("preNormalizedTextObservation.")?channel.substring("preNormalizedTextObservation.".length()):channel;
+            if(!Arrays.asList("text","originalText","deletedText","strikeText").contains(name))return pending("unsafe",sha,"NAMED_TEXT_CHANNEL_MISMATCH");
+            JsonNode value=member.path(channel.startsWith("preNormalizedTextObservation.")?"preNormalizedTextObservation":"textObservation").path(name);
+            if(!value.isTextual()||!range.path("start").isIntegralNumber()||!range.path("end").isIntegralNumber()||!range.path("start").canConvertToInt()||!range.path("end").canConvertToInt())return pending("unsafe",sha,"INVALID_SOURCE_OBSERVATION_RANGE");
+            String text=value.asText();int start=range.path("start").asInt(),end=range.path("end").asInt();
+            if(start<0||end<=start||end>text.length())return pending("unsafe",sha,"SOURCE_OBSERVATION_RANGE_MISMATCH");
+            for(int offset:new int[]{start,end})if(offset>0&&offset<text.length()&&Character.isHighSurrogate(text.charAt(offset-1))&&Character.isLowSurrogate(text.charAt(offset)))return pending("unsafe",sha,"INVALID_UTF16_BOUNDARY");
+            String quote=text.substring(start,end);if(range.has("observedText")&&!quote.equals(range.path("observedText").asText()))return pending("unsafe",sha,"SOURCE_OBSERVATION_TEXT_MISMATCH");selected.add(quote);
+        }
+        if(!passage.path("text").isTextual()||!passage.path("text").asText().equals(selected.toString()))return pending("unsafe",sha,"SOURCE_OBSERVATION_QUOTE_MISMATCH");
+        ObjectNode result=object().put("status","bound").put("kind","named_saved_source_observation").put("sourceSha256",sha).put("sourceObservationId",observationId).put("editableAuthority",false);result.set("observedRanges",ranges.deepCopy());
+        for(String key:Arrays.asList("analysisRevision","analysisInputSha256","analysisSha256"))result.set(key,passage.path(key).deepCopy());return result;
+    }
+
     /** Exact editableText spans only. Unbound legacy page selections remain reviewable. */
     public static ObjectNode bindTarget(byte[] original,Map<String,Object> target) {
         String sha=DraftTemplateRouting.sha(original);JsonNode passage=JsonUtils.mapper().valueToTree(target);
@@ -98,9 +139,11 @@ public class DraftReviewSources {
         if(requested.isObject()) {
             JsonNode entries=requested.has("spans")?requested.path("spans"):array().add(requested);
             if(!entries.isArray()||entries.size()==0)return pending("missing",sha,"NATIVE_SPANS_REQUIRED");
+            boolean insertion="insert".equals(passage.path("action").asText());
+            if(insertion&&entries.size()!=1)return pending("unsafe",sha,"ONE_INSERTION_POINT_REQUIRED");
             if(requested.has("sourceSha256")&&!sha.equals(requested.path("sourceSha256").asText()))return pending("unsafe",sha,"SOURCE_HASH_MISMATCH");
             for(JsonNode entry:entries) {
-                ObjectNode checked=exactSpan(index,entry,sha,requested.path("sourceSha256").asText());
+                ObjectNode checked=exactSpan(index,entry,sha,requested.path("sourceSha256").asText(),insertion);
                 if(!"bound".equals(checked.path("status").asText()))return checked;
                 spans.add(checked.path("span"));
             }
@@ -109,6 +152,7 @@ public class DraftReviewSources {
                 if(!passage.path("text").asText().equals(displayed.toString()))return pending("unsafe",sha,"SELECTED_TEXT_AND_NATIVE_SPAN_DIFFER");
             }
         } else {
+            if("insert".equals(passage.path("action").asText()))return pending("missing",sha,"EXPLICIT_INSERTION_POINT_REQUIRED");
             if(sparse(passage.path("wordIds")))return pending("missing",sha,"SPARSE_SELECTION_REQUIRES_NATIVE_SPANS");
             String quote=passage.path("text").asText();if(quote.isEmpty())return pending("missing",sha,"EXACT_SOURCE_TEXT_REQUIRED");
             for(DocxTemplateEditor.Paragraph paragraph:index.getParagraphs()) {
@@ -123,13 +167,13 @@ public class DraftReviewSources {
         }
         for(int i=0;i<spans.size();i++)for(int j=i+1;j<spans.size();j++) {
             JsonNode a=spans.get(i),b=spans.get(j);
-            if(a.path("paragraphId").equals(b.path("paragraphId"))&&a.path("start").asInt()<b.path("end").asInt()&&b.path("start").asInt()<a.path("end").asInt())
+            if(a.path("paragraphId").equals(b.path("paragraphId"))&&DocxTemplateEditor.overlappingSpans(a.path("start").asInt(),a.path("end").asInt(),b.path("start").asInt(),b.path("end").asInt()))
                 return pending("unsafe",sha,"OVERLAPPING_NATIVE_SPANS");
         }
         List<DocxTemplateEditor.Edit> checks=new ArrayList<>();
         for(int n=0;n<spans.size();n++) {
             JsonNode selected=spans.get(n);DocxTemplateEditor.Paragraph paragraph=index.paragraph(selected.path("paragraphId").asText());
-            checks.add(DocxTemplateEditor.Edit.replaceSpan("review-check-"+n,paragraph,selected.path("start").asInt(),selected.path("end").asInt(),selected.path("expectedText").asText(),selected.path("expectedText").asText()));
+            checks.add("insert".equals(selected.path("operation").asText())?DocxTemplateEditor.Edit.insertText("review-check-"+n,paragraph,selected.path("start").asInt(),""):DocxTemplateEditor.Edit.replaceSpan("review-check-"+n,paragraph,selected.path("start").asInt(),selected.path("end").asInt(),selected.path("expectedText").asText(),selected.path("expectedText").asText()));
         }
         try { new DocxTemplateEditor().apply(original,new DocxTemplateEditor.SourceEditBatch(sha,checks)); }
         catch(DocxTemplateEditor.EditException unsafe){return pending("unsafe",sha,unsafe.getCode());}
@@ -214,7 +258,7 @@ public class DraftReviewSources {
         catch(IllegalArgumentException invalid){return null;}
     }
 
-    private static ObjectNode exactSpan(DocxTemplateEditor.TemplateIndex index,JsonNode entry,String sha,String parentSha) {
+    private static ObjectNode exactSpan(DocxTemplateEditor.TemplateIndex index,JsonNode entry,String sha,String parentSha,boolean insertion) {
         if(!entry.isObject()||!sha.equals(entry.has("sourceSha256")?entry.path("sourceSha256").asText():parentSha))return pending("unsafe",sha,"SOURCE_HASH_MISMATCH");
         if(entry.has("channel")&&!"editableText".equals(entry.path("channel").asText()))return pending("unsafe",sha,"NAMED_TEXT_CHANNEL_MISMATCH");
         DocxTemplateEditor.Paragraph paragraph;
@@ -223,9 +267,10 @@ public class DraftReviewSources {
         if(!paragraph.getSha256().equals(entry.path("paragraphSha256").asText()))return pending("unsafe",sha,"NATIVE_PARAGRAPH_HASH_MISMATCH");
         if(!entry.path("start").canConvertToInt()||!entry.path("end").canConvertToInt()||!entry.path("start").isIntegralNumber()||!entry.path("end").isIntegralNumber()||!entry.path("expectedText").isTextual())return pending("unsafe",sha,"INVALID_NATIVE_SPAN");
         int start=entry.path("start").asInt(),end=entry.path("end").asInt();String text=paragraph.getText(),expected=entry.path("expectedText").asText();
-        if(start<0||end<=start||end>text.length()||!text.substring(start,end).equals(expected))return pending("unsafe",sha,"NATIVE_TEXT_EXPECTATION_MISMATCH");
+        boolean explicitInsertion="insert".equals(entry.path("operation").asText());
+        if(insertion!=explicitInsertion||start<0||end<start||end>text.length()||insertion&&start!=end||!insertion&&start==end||!text.substring(start,end).equals(expected))return pending("unsafe",sha,"NATIVE_TEXT_EXPECTATION_MISMATCH");
         for(int offset:new int[]{start,end})if(offset>0&&offset<text.length()&&Character.isHighSurrogate(text.charAt(offset-1))&&Character.isLowSurrogate(text.charAt(offset)))return pending("unsafe",sha,"INVALID_UTF16_BOUNDARY");
-        ObjectNode result=object();result.put("status","bound");result.set("span",span(paragraph,start,end,expected,sha));return result;
+        ObjectNode result=object(),selected=span(paragraph,start,end,expected,sha);if(insertion)selected.put("operation","insert");result.put("status","bound");result.set("span",selected);return result;
     }
 
     private static ObjectNode span(DocxTemplateEditor.Paragraph paragraph,int start,int end,String expected,String sha) {

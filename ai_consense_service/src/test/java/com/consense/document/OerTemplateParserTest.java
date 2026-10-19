@@ -16,6 +16,26 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 class OerTemplateParserTest {
+    @Test void paragraphTabDeclarationsStayLayoutWhileVisibleTabsKeepTheirExactNativeOffsets() throws Exception {
+        ByteArrayOutputStream out=new ByteArrayOutputStream();try(XWPFDocument document=new XWPFDocument()) {
+            document.createParagraph().createRun().setText("Special Conditions of Tender");
+            XWPFParagraph bill=document.createParagraph();org.openxmlformats.schemas.wordprocessingml.x2006.main.CTTabStop stop=bill.getCTP().addNewPPr().addNewTabs().addNewTab();
+            stop.setVal(org.openxmlformats.schemas.wordprocessingml.x2006.main.STTabJc.LEFT);stop.setPos(java.math.BigInteger.valueOf(720));
+            XWPFRun run=bill.createRun();run.setText("Bill No. 3 \u2013");run.addTab();run.setText("     ");
+            XWPFParagraph propertiesOnly=document.createParagraph();org.openxmlformats.schemas.wordprocessingml.x2006.main.CTTabStop layout=propertiesOnly.getCTP().addNewPPr().addNewTabs().addNewTab();
+            layout.setVal(org.openxmlformats.schemas.wordprocessingml.x2006.main.STTabJc.LEFT);layout.setPos(java.math.BigInteger.valueOf(1440));
+            XWPFParagraph struck=document.createParagraph();struck.createRun().setText("Keep");XWPFRun deleted=struck.createRun();deleted.setStrikeThrough(true);deleted.setText("Excluded");
+            document.write(out);
+        }
+        OcrClient ocr=mock(OcrClient.class);DocumentParser parser=new DocumentParser(new ConsenseProperties(),ocr);DocumentParser.ParsedDocument parsed=parser.parseTemplate("SCT","tabs.docx",out.toByteArray());
+        JsonNode paragraphs=parsed.getCoverage().getNativeDocxParagraphs().path("paragraphs"),bill=paragraphs.path(1);
+        assertEquals("Bill No. 3 \u2013\t     \n",bill.path("preNormalizedTextObservation").path("text").asText());
+        assertEquals("Bill No. 3 \u2013",bill.path("textObservation").path("text").asText());assertEquals(1,bill.path("directParagraphLayout").path("tabs").size());
+        assertTrue(bill.path("nativeXml").asText().contains("w:tabs"));assertEquals("\n",paragraphs.path(2).path("preNormalizedTextObservation").path("text").asText());
+        assertEquals("Keep",paragraphs.path(3).path("textObservation").path("text").asText());assertEquals("Excluded",paragraphs.path(3).path("textObservation").path("strikeText").asText());
+        ObjectNode projection=JsonUtils.mapper().valueToTree(parsed);ObjectNode coverage=(ObjectNode)projection.path("coverage");coverage.remove("nativeDocxParagraphs");coverage.remove("templateEvidence");
+        assertEquals(JsonUtils.mapper().valueToTree(parser.parse("tabs.docx",out.toByteArray())),projection);verifyNoInteractions(ocr);
+    }
     @Test void nativeFillSpacesKeepTheSameParserProjectionBeforeNormalization() throws Exception {
         ByteArrayOutputStream out=new ByteArrayOutputStream();try(XWPFDocument document=new XWPFDocument()){
             document.createParagraph().createRun().setText("Special Conditions of Tender");

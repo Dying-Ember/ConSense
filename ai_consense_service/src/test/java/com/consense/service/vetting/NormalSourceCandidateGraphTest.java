@@ -442,7 +442,19 @@ class NormalSourceCandidateGraphTest {
         assertEquals("candidate_unverified",material.get(0).path("candidateStructure").path("adoptionStatus").asText());
         assertEquals(2,material.get(0).path("candidateStructure").path("units").get(0).path("parts").size());
         assertTrue(material.get(0).path("candidateStructure").path("unknowns").toString().contains("failed_page"));
-        assertFalse(material.toString().contains("FULL_SOURCE_AUDIT_GLYPH"));assertFalse(material.get(0).path("candidateStructure").toString().contains("DELETED_UNSELECTED_TEXT"));
+        assertFalse(material.toString().contains("FULL_SOURCE_AUDIT_GLYPH"));
+        for(JsonNode selected:material) {
+            assertFalse(selected.path("content").asText().contains("DELETED_UNSELECTED_TEXT"));
+            for(JsonNode unit:selected.path("candidateStructure").path("units")) {
+                assertFalse(unit.path("text").asText().contains("DELETED_UNSELECTED_TEXT"));
+                for(JsonNode part:unit.path("parts")) {
+                    assertFalse(part.path("text").asText().contains("DELETED_UNSELECTED_TEXT"));
+                    assertEquals("DELETED_UNSELECTED_TEXT",part.path("wordObservation").path("deletedText").asText());
+                    ObjectNode effective=(ObjectNode)part.deepCopy();effective.remove("wordObservation");
+                    assertFalse(effective.toString().contains("DELETED_UNSELECTED_TEXT"),"Deleted text remains solely in its explicit revision observation");
+                }
+            }
+        }
         assertNull(chunks.get(0).getCanonicalPayload());assertNull(chunks.get(0).getCanonicalEvidence());
     }
 

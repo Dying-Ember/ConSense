@@ -1,6 +1,7 @@
 package com.consense.service.sources;
 
 import com.consense.common.JsonUtils;
+import com.consense.common.Utf8;
 import com.consense.config.CanonicalEvidenceProperties;
 import com.consense.domain.SourceDocument;
 import com.consense.repository.SourceDocumentRepository;
@@ -11,7 +12,6 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.*;
-import java.nio.charset.StandardCharsets;
 
 /** Explicit CPU-only observation preparation; it never adopts reviewed evidence or reparses. */
 @Service @RequiredArgsConstructor
@@ -26,7 +26,7 @@ public class NormalObservedPreparationService {
         SourceDocument source=sources.normalDocument(project,id,module);
         requireEvidence(source);
         NormalSourceCandidateGraph.capture(source);String raw=source.getNormalCandidateJson();
-        require(raw.getBytes(StandardCharsets.UTF_8).length<=NormalObservedContract.maximumBytes(properties.getMaxSnapshotBytes()),"NORMAL_OBSERVED_TOO_LARGE");
+        require(Utf8.byteCount(raw)<=NormalObservedContract.maximumBytes(properties.getMaxSnapshotBytes()),"NORMAL_OBSERVED_TOO_LARGE");
         SourceDocument fresh=sources.normalDocument(project,id,module);
         require(sameGeneration(source,fresh),"CANONICAL_SOURCE_STALE");
         require(documents.compareAndSetNormalCandidate(id,project,source.getSourceSha256(),source.getOerIdentityJson(),

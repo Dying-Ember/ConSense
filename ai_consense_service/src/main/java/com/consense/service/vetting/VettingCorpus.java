@@ -10,7 +10,6 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.Data;
 
 import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
 import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -162,15 +161,7 @@ public final class VettingCorpus {
             Map<String,JsonNode> wordObservations=new HashMap<>();
             for(DocumentBlock word:sourceBlocks)if(!JsonUtils.isBlankText(word.getWordStructureVersion())) {
                 if(wordObservations.containsKey(word.getId())){wordObservations.put(word.getId(),null);continue;}
-                ObjectNode observation=JsonUtils.mapper().createObjectNode();observation.put("parentBlockId",word.getId());observation.put("nativePath",word.getLocation());
-                observation.put("wordStructureVersion",word.getWordStructureVersion());observation.put("effectiveText",word.getEffectiveText());
-                observation.put("parentEffectiveTextSha256",hash(nvl(word.getEffectiveText())));observation.put("originalText",word.getOriginalText());
-                observation.put("deletedText",word.getDeletedText());observation.put("strikeText",word.getStrikeText());
-                observation.set("wordNumbering",JsonUtils.mapper().valueToTree(word.getWordNumbering()));observation.set("wordSymbols",JsonUtils.mapper().valueToTree(word.getWordSymbols()));
-                observation.set("wordWarnings",JsonUtils.mapper().valueToTree(word.getWordWarnings()));
-                if(!word.getWordTextSpans().isEmpty())observation.set("wordTextSpans",JsonUtils.mapper().valueToTree(word.getWordTextSpans()));
-                if(!word.getWordFields().isEmpty())observation.set("wordFields",JsonUtils.mapper().valueToTree(word.getWordFields()));
-                observation.set("wordNativeObjects",OerModelMaterial.wordNativeObjects(JsonUtils.mapper().valueToTree(word.getWordNativeObjects())));wordObservations.put(word.getId(),observation);
+                wordObservations.put(word.getId(),wordObservation(word));
             }
             VettingSourceQuality.Info quality = VettingSourceQuality.from(d, sourceBlocks);
             Map<String,TableRow> nativeTables = nativeTables(sourceBlocks, "project_fact".equals(sourceRole(d)));
@@ -212,6 +203,19 @@ public final class VettingCorpus {
             for(int i=firstChunk;i<out.size();i++)out.get(i).setCandidateStructure(NormalSourceCandidateGraph.selected(candidate,out.get(i)));
         }
         return out;
+    }
+    /** Same native parent observation for ordinary chunks and normal canonical parts. */
+    static ObjectNode wordObservation(DocumentBlock word){
+        if(JsonUtils.isBlankText(word.getWordStructureVersion()))return null;
+        ObjectNode observation=JsonUtils.mapper().createObjectNode();observation.put("parentBlockId",word.getId());observation.put("nativePath",word.getLocation());
+                observation.put("wordStructureVersion",word.getWordStructureVersion());observation.put("effectiveText",word.getEffectiveText());
+                observation.put("parentEffectiveTextSha256",hash(nvl(word.getEffectiveText())));observation.put("originalText",word.getOriginalText());
+                observation.put("deletedText",word.getDeletedText());observation.put("strikeText",word.getStrikeText());
+                observation.set("wordNumbering",JsonUtils.mapper().valueToTree(word.getWordNumbering()));observation.set("wordSymbols",JsonUtils.mapper().valueToTree(word.getWordSymbols()));
+                observation.set("wordWarnings",JsonUtils.mapper().valueToTree(word.getWordWarnings()));
+                if(!word.getWordTextSpans().isEmpty())observation.set("wordTextSpans",JsonUtils.mapper().valueToTree(word.getWordTextSpans()));
+                if(!word.getWordFields().isEmpty())observation.set("wordFields",JsonUtils.mapper().valueToTree(word.getWordFields()));
+                observation.set("wordNativeObjects",OerModelMaterial.wordNativeObjects(JsonUtils.mapper().valueToTree(word.getWordNativeObjects())));return observation;
     }
     private static Map<String,TableRow> nativeTables(List<DocumentBlock> blocks, boolean projectFactCompatibility) {
         Pattern rowLocation = Pattern.compile("^(.+)/table-row/(\\d+)$");
@@ -408,8 +412,7 @@ public final class VettingCorpus {
     public static String normalize(String text) { return nvl(text).replaceAll("[\\s\\p{Z}]+", " ").trim(); }
     public static String hash(String text) {
         try {
-            byte[] digest = MessageDigest.getInstance("SHA-256").digest(text.getBytes(StandardCharsets.UTF_8));
-            StringBuilder out = new StringBuilder(); for (byte b : digest) out.append(String.format("%02x", b & 255)); return out.toString();
+            return com.consense.common.Utf8.sha256(text);
         } catch (Exception e) { throw new IllegalStateException(e); }
     }
     private static String nvl(String text) { return text == null ? "" : text; }

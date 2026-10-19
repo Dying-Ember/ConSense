@@ -6,7 +6,7 @@ const { loadVue } = require('./helpers/load-vue.cjs')
 const { renderer, find, text, settle, deferred } = require('./helpers/render-controls.cjs')
 const copy = value => JSON.parse(JSON.stringify(value))
 const label = title => ({ en: title, zhHans: title, zhHant: title })
-const source = { id: '41', sourceDocumentId: 41, docId: 'ntt', editionId: 'NTT-docx-TEST', fileKey: 'NTT', fileName: 'TEST ONLY template.docx', format: 'docx', sourceSha256: 'a'.repeat(64), parseStatus: 'PARSED', canEdit: true }
+const source = { id: '41', sourceDocumentId: 41, docId: 'ntt', editionId: 'NTT-docx-TEST', fileKey: 'NTT', fileName: 'TEST ONLY template.docx', format: 'docx', sourceSha256: 'a'.repeat(64), parseStatus: 'PARSED', canEdit: true, evidenceStatus: 'bound', analysisRevision: 'TEST-analysis-current' }
 const correspondence = { ...source, id: '42', sourceDocumentId: 42, docId: '42', fileKey: null, sourceSha256: 'c'.repeat(64), fileName: 'TEST ONLY correspondence.docx' }
 const paragraph = { id: 'p1', ordinal: 1, text: 'TEST ONLY exact template guidance', paragraphSha256: 'b'.repeat(64), sourceSha256: source.sourceSha256 }
 const item = { id: 'question-1', nameZh: '测试要求', nameEn: 'TEST requirement', docIds: ['41'], type: { kind: 'text', zh: '文字' }, role: { kind: 'input', zh: '项目事实' }, status: 'pending', options: [], sourceAnchors: [{ docId: '41', sourceSha256: source.sourceSha256, text: paragraph.text, native: { paragraphId: 'p1', paragraphSha256: paragraph.paragraphSha256, start: 0, end: paragraph.text.length, expectedText: paragraph.text } }], sourceUnitIds: [], editTargets: [], relatedInputIds: [], relations: [], targets: [], evidence: [] }

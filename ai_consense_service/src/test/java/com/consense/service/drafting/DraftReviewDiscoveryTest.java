@@ -28,6 +28,46 @@ class DraftReviewDiscoveryTest {
     private Map<String,Object> find(Map<String,Object> graph,String suffix){return nodes(graph).stream().filter(node->text(node.get("id")).endsWith(suffix)).findFirst().get();}
     private Map<String,Object> checklist(Map<String,Object> graph){return nodes(graph).stream().filter(node->"source_seed".equals(node.get("definitionKind"))).findFirst().get();}
 
+    @Test void sourceRelationshipsDereferenceIndependentConditionsWithoutTurningThemIntoProjectAnswers() {
+        ObjectNode source=reading("1","Local guidance remains independent.");
+        ObjectNode group=source.withArray("groups").addObject().put("id","child").put("guidanceNoteId","note-1").put("text","Target");
+        group.putArray("sourceInstructionRelationships").addObject().put("id","nested").put("kind","nested_source_condition")
+                .put("parentGroupId","parent").put("parentGuidanceNoteId","parent-note").put("parentConditionId","parent-condition")
+                .put("childGroupId","child").put("childGuidanceNoteId","note-1").put("childConditionId","child-condition")
+                .put("status","physical_source_containment_local_conditions_independent");
+        source.putArray("conditions").addObject().put("id","parent-condition").put("guidanceNoteId","parent-note").put("text","If the parent applies.");
+        source.withArray("conditions").addObject().put("id","child-condition").put("guidanceNoteId","note-1").put("text","If the local choice applies.");
+        source.withArray("conditions").addObject().put("id","unrelated").put("guidanceNoteId","foreign").put("text","Unrelated condition must stay outside this call.");
+        AiGateway ai=mock(AiGateway.class);when(ai.complete(anyString(),anyString())).thenReturn(response());
+        Map<String,Object> result=DraftReviewDiscovery.discover(ai,graph(),Collections.singletonList(source),1);
+        ArgumentCaptor<String> users=ArgumentCaptor.forClass(String.class);verify(ai).complete(anyString(),users.capture());JsonNode payload=JsonUtils.parse(users.getValue());
+        assertEquals(2,payload.path("sourceConditions").size());assertEquals(1,payload.path("sourceRelationships").size());
+        assertEquals("parent-condition",payload.path("sourceRelationships").path(0).path("parentConditionId").asText());
+        assertFalse(users.getValue().contains("Unrelated condition must stay outside"));assertTrue(fields(result).isEmpty());
+        assertEquals("pending",checklist(result).get("status"));assertEquals(0,map(state(result).get("discoverySummary")).get("adoptedValues"));
+    }
+
+    @Test void exactBillInsertionPointMapsOnlyTheKnownParagraphNewlineAndKeepsFutureListUnknown() {
+        String instruction="Insert all Bill Nos. and descriptions.";ObjectNode source=reading("1",instruction);
+        ObjectNode member=source.withArray("sourceMembers").addObject().put("id","bill");
+        member.putObject("textObservation").put("text","Bill No. 3 \u2013");
+        member.putObject("preNormalizedTextObservation").put("status","observed_parser_channels_before_whitespace_normalization").put("text"," Bill No. 3 \u2013\n");
+        ObjectNode position=member.putObject("sourcePosition").put("sourceSha256",SHA).put("partName","word/document.xml").put("nodePath","/native/bill");
+        ObjectNode paragraph=source.withArray("paragraphs").addObject().put("id","editable-bill").put("paragraphSha256",SHA).put("sourceSha256",SHA).put("text"," Bill No. 3 \u2013");paragraph.set("sourcePosition",position.deepCopy());
+        ObjectNode group=source.withArray("groups").addObject().put("id","bill-scope").put("kind","native_source_field_candidate").put("guidanceNoteId","note-1")
+                .put("scopeComplete",false).put("sourceInsertionAnchorComplete",true).put("listCardinalityStatus","unknown_from_existing_numbered_source_rows");
+        group.putArray("insertionAnchors").addObject().put("memberId","bill").put("channel","preNormalizedTextObservation.text").put("start",13).put("end",13).put("observedText","");
+        Map<String,Object> node=modelNode("description","text","input",instruction);node.put("effects",Collections.singletonList(obj("scopeId","bill-scope","quote","","action","insert","valueSourceId","description")));
+        AiGateway ai=mock(AiGateway.class);when(ai.complete(anyString(),anyString())).thenReturn(response(node));
+        Map<String,Object> result=DraftReviewDiscovery.discover(ai,graph(),Collections.singletonList(source),1),target=map(list(find(result,"-description").get("editTargets")).get(0));
+        assertEquals("insert",target.get("action"));assertEquals(false,target.get("needsRebind"));assertEquals("",target.get("text"));
+        Map<String,Object> span=map(list(map(target.get("native")).get("spans")).get(0));assertEquals(13,span.get("start"));assertEquals("insert",span.get("operation"));
+        assertEquals("pending",find(result,"-description").get("status"));assertFalse(find(result,"-description").containsKey("fixedValue"));
+        assertEquals("unknown_from_existing_numbered_source_rows",group.path("listCardinalityStatus").asText());
+        paragraph.put("text","Bill No. 3 \u2013");Map<String,Object> mismatch=DraftReviewDiscovery.discover(ai,graph(),Collections.singletonList(source),1);
+        assertEquals("check",map(list(find(mismatch,"-description").get("editTargets")).get(0)).get("action"));
+    }
+
     @Test void seedingPreservesTheCompleteInstructionAndLiteralMarkerWithoutUsingAModel() {
         String instruction="(Guidance Notes: If A applies, review the entire named clause. Do not omit this second sentence.)";
         ObjectNode source=reading("1",instruction);source.withArray("markerCandidates").addObject().put("id","marker-1").put("memberId","member-1").put("symbol","*").putObject("localSentenceObservation").put("text","* Select the applicable source option.");

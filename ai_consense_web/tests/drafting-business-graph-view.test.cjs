@@ -333,4 +333,14 @@ async function catalogueOnlyLongRelationsBypassTheActionColumn() {
   }
   h.dispose(); console.log('PASS: catalogue-only long relations stay visible and bypass unrelated action-card interiors')
 }
-;(async () => { await catalogueOnlyLongRelationsBypassTheActionColumn(); await manyToManyRelationshipsUseDistinctStablePortsAndLanes(); await compactCardsHaveReadableWideRoutingGutters(); await explicitSearchDefinesCompactDestinationGeometry(); await conditionalCollectionFieldUsesEachRowsOwnPrerequisites(); await visibleParentChildStructureDistinguishesVariablesFromConditionsAndColumns(); await selectionDimsExistingPoolWithoutRemovingOrMovingSiblings(); await actualPlannedChainAndNavigation(); await exactConditionsStructureAndPendingPlan(); await filtersNeighborhoodAndInputFreeActions(); await keyboardLifecycleProjectAndDisabledGuards(); await localizedPlanTreatmentsAndInvalidStructuredValues(); await inactiveRecordedAdoptionRemainsSeparate(); await selectedActionPrecedesLongSourceEvidence() })().catch(error => { console.error(error); process.exitCode = 1 })
+async function insertPlanLabelsRemainExplicit() {
+  const base = fixture(); base.plan.actions.find(action => action.id === 'SCT-BILLS').action = 'insert'
+  const h = await harness(base)
+  try {
+    await h.change('[data-graph-group]', 'billing'); await h.click('[data-graph-input="billNos"]')
+    assert.match(h.element.querySelector('[data-graph-action="SCT-BILLS"]').textContent, /Insert at source anchor/)
+    assert.match(h.element.querySelector('[data-graph-inspector]').textContent, /Insert at source anchor/)
+    h.props.locale = 'zh-Hant'; await settle(); assert.match(h.element.querySelector('[data-graph-action="SCT-BILLS"]').textContent, /在原件錨點插入/)
+  } finally { h.dispose() }
+}
+;(async () => { await insertPlanLabelsRemainExplicit(); await catalogueOnlyLongRelationsBypassTheActionColumn(); await manyToManyRelationshipsUseDistinctStablePortsAndLanes(); await compactCardsHaveReadableWideRoutingGutters(); await explicitSearchDefinesCompactDestinationGeometry(); await conditionalCollectionFieldUsesEachRowsOwnPrerequisites(); await visibleParentChildStructureDistinguishesVariablesFromConditionsAndColumns(); await selectionDimsExistingPoolWithoutRemovingOrMovingSiblings(); await actualPlannedChainAndNavigation(); await exactConditionsStructureAndPendingPlan(); await filtersNeighborhoodAndInputFreeActions(); await keyboardLifecycleProjectAndDisabledGuards(); await localizedPlanTreatmentsAndInvalidStructuredValues(); await inactiveRecordedAdoptionRemainsSeparate(); await selectedActionPrecedesLongSourceEvidence() })().catch(error => { console.error(error); process.exitCode = 1 })

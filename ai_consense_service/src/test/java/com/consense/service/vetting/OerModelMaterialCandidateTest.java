@@ -16,6 +16,39 @@ import static org.mockito.Mockito.*;
 
 /** Actual frozen source literals; no HTTP, DB, model or answer files. */
 class OerModelMaterialCandidateTest {
+    @Test void anAbsentRealWordSectionPositionRemainsNullInSelectedCanonicalModelAndCompact()throws Exception{
+        SourceDocument source=CanonicalWordSourceContextTest.source();JsonNode graph=NormalSourceCandidateGraph.requireBound(source),canonical=CanonicalWordSourceContextTest.canonical(graph,graph.path("units").get(0));
+        com.consense.web.dto.CanonicalEvidenceDtos.EvidencePointer pointer=CanonicalWordSourceContextTest.pointer(CanonicalWordSourceContextTest.binding(source),graph,canonical);
+        JsonNode original=canonical.path("parts").get(0).path("readingContext").path("nativeDocxSection").path("titlePg");assertTrue(original.has("sourcePosition"));assertTrue(original.path("sourcePosition").isNull());assertEquals("absent",original.path("status").asText());String before=JsonUtils.write(pointer),memberBefore=JsonUtils.write(canonical);
+        JsonNode model=new OerModelMaterial.Request().project(pointer,canonical,"tender"),part=model.path("parts").get(0);assertEquals(JsonUtils.write(original),JsonUtils.write(part.path("readingContext").path("nativeDocxSection").path("titlePg")),"Absent original Word section positions must stay JSON null instead of becoming empty positions");
+        assertFalse(part.has("extractionSource"),"The existing selected-part whitelist remains deliberate");assertEquals(before,JsonUtils.write(pointer));assertEquals(memberBefore,JsonUtils.write(canonical));SourceJsonWireAssertions.assertRoundTrip(model);
+    }
+
+    @Test void explicitNullPositionsKeepTheirTypeAtPartSpanAndNestedTableEntrypoints(){
+        com.consense.web.dto.CanonicalEvidenceDtos.EvidencePointer pointer=positionTypePointer();String before=JsonUtils.write(pointer);JsonNode model=new OerModelMaterial.Request().project(pointer);
+        assertAll(()->assertTrue(model.path("parts").get(0).path("sourcePosition").isNull()),()->assertTrue(model.path("sourceSpans").get(0).path("sourcePosition").isNull()),()->assertTrue(model.path("parts").get(0).path("readingContext").path("nativeDocxSection").path("titlePg").path("sourcePosition").isNull()),()->assertTrue(model.path("tableGroup").path("sourcePosition").isNull()));
+        assertEquals(before,JsonUtils.write(pointer));SourceJsonWireAssertions.assertRoundTrip(model);
+    }
+
+    @Test void malformedNonObjectPositionsStillRejectAtEverySelectedMaterialEntrypoint(){
+        for(String location:Arrays.asList("part","span","nested","table"))for(String value:Arrays.asList("[]","[null]","false","0","\"unavailable\"")){
+            com.consense.web.dto.CanonicalEvidenceDtos.EvidencePointer pointer=positionTypePointer();com.fasterxml.jackson.databind.node.ObjectNode owner=(com.fasterxml.jackson.databind.node.ObjectNode)(location.equals("part")?pointer.getParts().get(0):location.equals("span")?pointer.getSourceSpans().get(0):location.equals("table")?pointer.getTableGroup():pointer.getParts().get(0).path("readingContext").path("nativeDocxSection").path("titlePg"));owner.set("sourcePosition",JsonUtils.parse(value));
+            IllegalArgumentException rejected=assertThrows(IllegalArgumentException.class,()->new OerModelMaterial.Request().project(pointer),location+" "+value);assertTrue(rejected.getMessage().contains("model_structure_object_required"),location+" "+value);
+        }
+    }
+
+    @Test void anAlreadyProjectedFootnoteXmlIdentitySurvivesModelReprojectionAndRawXmlStillWins(){
+        String xml="<w:footnoteReference xmlns:w='http://schemas.openxmlformats.org/wordprocessingml/2006/main' w:id='2'/>",hash=VettingCorpus.hash(xml);com.fasterxml.jackson.databind.node.ArrayNode raw=JsonUtils.mapper().createArrayNode();com.fasterxml.jackson.databind.node.ObjectNode object=raw.addObject();object.put("kind","footnoteReference");object.put("status","native_note_reference_resolved");object.put("semanticStatus","unknown");object.put("location","body/0/paragraph/node/4/node/1");object.put("sourcePart","/word/document.xml");object.put("nativeXml",xml);object.put("nativeXmlSha256",VettingCorpus.hash("incorrect old identity"));object.putObject("noteReference").put("rawId","2").put("bindingStatus","resolved");String before=JsonUtils.write(raw);
+        JsonNode first=OerModelMaterial.wordNativeObjects(raw),again=OerModelMaterial.wordNativeObjects(first);assertEquals(hash,first.get(0).path("nativeXmlSha256").asText());assertFalse(first.get(0).has("nativeXml"));
+        com.consense.web.dto.CanonicalEvidenceDtos.EvidencePointer pointer=positionTypePointer();((com.fasterxml.jackson.databind.node.ObjectNode)pointer.getParts().get(0)).set("wordNativeObjects",first.deepCopy());JsonNode model=new OerModelMaterial.Request().project(pointer);
+        assertAll(()->assertEquals(JsonUtils.write(first),JsonUtils.write(again),"The graph's already-projected XML identity must not disappear on the selected model projection"),()->assertEquals(hash,model.path("parts").get(0).path("wordNativeObjects").get(0).path("nativeXmlSha256").asText()));
+        assertFalse(JsonUtils.write(model).contains("<w:footnoteReference"));assertEquals(before,JsonUtils.write(raw));SourceJsonWireAssertions.assertRoundTrip(model);
+    }
+
+    private com.consense.web.dto.CanonicalEvidenceDtos.EvidencePointer positionTypePointer(){
+        com.consense.web.dto.CanonicalEvidenceDtos.EvidencePointer pointer=new com.consense.web.dto.CanonicalEvidenceDtos.EvidencePointer();pointer.setProducerKind("native_docx");pointer.setUnitId("position-type-unit");pointer.setCanonicalChunkId("position-type-chunk");pointer.setParts(JsonUtils.parse("[{\"text\":\"Original source observation\",\"sourcePosition\":null,\"readingContext\":{\"nativeDocxSection\":{\"titlePg\":{\"present\":false,\"status\":\"absent\",\"sourcePosition\":null}}}}]"));pointer.setSourceSpans(JsonUtils.parse("[{\"blockId\":\"source-block\",\"sourcePosition\":null}]"));pointer.setTableGroup(JsonUtils.parse("{\"sourcePosition\":null}"));pointer.setRelations(JsonUtils.mapper().createArrayNode());pointer.setUnknowns(JsonUtils.mapper().createArrayNode());return pointer;
+    }
+
     @Test void wordNativeMathProjectionRetainsReadableStateWithoutExpandingRawXml() {
         String xml="<m:oMath xmlns:m='http://schemas.openxmlformats.org/officeDocument/2006/math'>"
                 +String.join("",Collections.nCopies(1000,"source-only-proof"))+"</m:oMath>";

@@ -817,7 +817,7 @@ public class DocumentParser {
             coverage.setNativeDocxOutline(inline==null?OerNativeDocxOutline.observe(document,blocks,sourceNodes,outlinePosition)
                     :OerNativeDocxOutline.observe(document,blocks,sourceNodes,outlinePosition,inline::paragraph,numbering));
             ObjectNode paragraphInventory=nativeTables.paragraphs(inline,blocks,sourceNodes,coverage.getNativeDocxOutline(),templateEvidence);
-            ((ObjectNode)coverage.getNativeDocxOutline()).set("sourceClauseScopes",OerDocxSourceScopes.observe(paragraphInventory,coverage.getNativeDocxOutline()));
+            ((ObjectNode)coverage.getNativeDocxOutline()).set("sourceClauseScopes",OerDocxSourceScopes.observe(paragraphInventory,coverage.getNativeDocxOutline(),sections));
             if(templateEvidence)coverage.setNativeDocxParagraphs(paragraphInventory);
             coverage.getLimitations().add("Explicit run strike/dstrike and tracked deletions are retained; inherited style strike requires manual review.");
             int unresolvedNumbering = 0, unresolvedSymbols = 0, structuralWarnings = 0;
@@ -1040,6 +1040,8 @@ public class DocumentParser {
     private void collectWordText(Node node, boolean deleted, boolean struck, WordText out,
                                  DocxNumberingResolver numbering, String location, boolean legacyMath, Map<Object,Node> sourceNodes, WordInlineSemantics inline) {
         String name = node.getLocalName();
+        if ("http://schemas.openxmlformats.org/wordprocessingml/2006/main".equals(node.getNamespaceURI())
+                && ("pPr".equals(name) || "rPr".equals(name))) return;
         boolean isDeleted = deleted || "del".equals(name) || "moveFrom".equals(name);
         boolean isStruck = struck;
         if(inline!=null){
@@ -1224,7 +1226,7 @@ public class DocumentParser {
             appendWordText(out, decoded.isResolved() ? decoded.getDecodedText() : "[unresolved Word symbol]", isDeleted, isStruck);
             return;
         }
-        if ("tab".equals(name)) appendWordText(out, " ", isDeleted, isStruck);
+        if ("tab".equals(name)) appendWordText(out, "\t", isDeleted, isStruck);
         if ("br".equals(name) || "cr".equals(name)) appendWordText(out, "\n", isDeleted, isStruck);
         int childIndex = 0;
         for (Node child = node.getFirstChild(); child != null; child = child.getNextSibling()) {
@@ -1467,6 +1469,15 @@ public class DocumentParser {
                 ||"endnote".equals(name)||"p".equals(name)||"tbl".equals(name)||"tr".equals(name)||"tc".equals(name));
     }
 
+    private static boolean nativeContentEmpty(Node paragraph){
+        if(!"p".equals(paragraph.getLocalName())||!isNativeWordInventoryNode(paragraph))return false;
+        for(Node child=paragraph.getFirstChild();child!=null;child=child.getNextSibling()){
+            if(child.getNodeType()==Node.TEXT_NODE&&child.getNodeValue().matches("[\\t\\n\\r ]*"))continue;
+            if(child.getNodeType()!=Node.ELEMENT_NODE||!Objects.equals(paragraph.getNamespaceURI(),child.getNamespaceURI())||!Arrays.asList("pPr","bookmarkStart","bookmarkEnd").contains(child.getLocalName()))return false;
+            if(!"pPr".equals(child.getLocalName()))for(Node payload=child.getFirstChild();payload!=null;payload=payload.getNextSibling())if(payload.getNodeType()!=Node.TEXT_NODE||!payload.getNodeValue().matches("[\\t\\n\\r ]*"))return false;
+        }return true;
+    }
+
     /** Parse-local facts from the normal DOM/path cache; no text projection or effective-content claim. */
     private static final class NativeWordTableInventory {
         private final Map<Node,String> paths;
@@ -1576,6 +1587,7 @@ public class DocumentParser {
                 record.put("id","docx-p:"+DocumentParseProbe.sha256((sourceSha+"|"+partName+"|"+path).getBytes(StandardCharsets.UTF_8)));
                 record.put("ordinalZeroBased",records.size()-1);
                 record.set("sourcePosition",wordSectionPosition(node,paths,sourceSha,partName,hashes.get(partName)));
+                if(nativeContentEmpty(node))record.put("nativeContentEmpty",true);
                 if(fieldRoles.containsKey(node))record.set("nativeFieldRoles",fieldRoles.get(node));
                 for(Node parent=node.getParentNode();parent!=null;parent=parent.getParentNode())if("p".equals(parent.getLocalName())&&isNativeWordInventoryNode(parent)){
                     record.put("containingParagraphNodePath",paths.get(parent));record.put("textOverlapStatus","nested_paragraph_channels_may_overlap_do_not_concatenate");break;

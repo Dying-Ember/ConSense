@@ -17,6 +17,8 @@ public final class NormalSourceCandidateGraph {
     public static final String SCHEMA="consense.canonical-candidate.v1";
     public static final String VERSION="actual-normal-source-unit-whole-page-observations-v2";
     private static final Pattern ROW=Pattern.compile("^(.+)/table-row/(\\d+)$");
+    private static final Pattern SOURCE_GLYPH=Pattern.compile("^[\\p{Z}\\s]*([-•])[\\p{Z}\\s]+");
+    private static final Pattern SOURCE_BRANCH=Pattern.compile("(?i)^[\\p{Z}\\s]*(?:\\(|\\[)?[\\p{Z}\\s]*(alternative|option)(?=[\\p{Z}\\s(])[\\p{Z}\\s]*(?:\\(([a-z0-9]+)\\)|([a-z0-9]+))(?=[\\p{Z}\\s]|[-:.)]|$)");
     private NormalSourceCandidateGraph() { }
     public static void capture(SourceDocument source) { source.setNormalCandidateJson(JsonUtils.write(build(source))); }
 
@@ -66,7 +68,7 @@ public final class NormalSourceCandidateGraph {
                         ObjectNode slice=object();slice.put("blockId",range.getBlockId());slice.put("anchor",range.getAnchor());slice.put("text",range.getText());
                         slice.put("startOffset",start);slice.put("endOffset",end);slice.put("offsetUnit","utf16");slice.put("parentEffectiveTextSha256",VettingCorpus.hash(effective));slices.add(slice);
                         if(parent.has("sourcePosition"))slice.set("sourcePosition",parent.path("sourcePosition").deepCopy());
-                        ObjectNode context=null;for(String key:Arrays.asList("nativeDocxSection","nativeDocxParagraph","nativeDocxParagraphs","nativeDocxOutline"))if(parent.path("readingContext").has(key)){
+                        ObjectNode context=null;for(String key:Arrays.asList("nativeDocxSection","nativeDocxParagraph","nativeDocxParagraphs","nativeDocxOutline","nativeWordNotes"))if(parent.path("readingContext").has(key)){
                             if(context==null)context=slice.putObject("readingContext");context.set(key,parent.path("readingContext").path(key).deepCopy());
                         }
                     }
@@ -129,9 +131,14 @@ public final class NormalSourceCandidateGraph {
                     else issues.add(unknown("source_clause_scope","unknown","partial_carrier_has_no_exact_paragraph_intersection"));
                 }
             }
-            Set<String> picked=new LinkedHashSet<>(),validated=new HashSet<>();
+            Set<String> picked=new LinkedHashSet<>(),validated=new HashSet<>();Map<String,JsonNode> usedFrames=new LinkedHashMap<>();
             for(String member:touched){
                 List<JsonNode> candidates=containing.getOrDefault(member,Collections.emptyList());
+                List<JsonNode> physical=new ArrayList<>();for(JsonNode candidate:candidates)if(candidate.has("nativeOutlineRangeIds")){
+                    scopeNeed(candidate.path("scopeComplete").asBoolean(),"narrowest_source_range_incomplete");validateScopeRange(candidate,members,positions,inventory.path("sourceSha256").asText());
+                    validateCrossOutlineScope(candidate,members,ranges,rangeMembers);validated.add(candidate.path("id").asText());physical.add(candidate);
+                }
+                if(!physical.isEmpty()){physical.clear();for(JsonNode candidate:candidates)if(!"native-outline".equals(candidate.path("kind").asText()))physical.add(candidate);candidates=physical;}
                 List<JsonNode> narrow=new ArrayList<>();for(JsonNode candidate:candidates){boolean ancestor=false;for(JsonNode other:candidates)if(candidate!=other&&scopeAncestor(candidate.path("id").asText(),other,ranges))ancestor=true;if(!ancestor)narrow.add(candidate);}
                 scopeNeed(narrow.size()<=1,"ambiguous_source_range_intersection");if(narrow.isEmpty())continue;JsonNode first=narrow.get(0);
                 if(!first.path("scopeComplete").asBoolean()){issues.add(unknown("source_clause_scope","unknown","narrowest_source_range_incomplete"));continue;}
@@ -139,17 +146,77 @@ public final class NormalSourceCandidateGraph {
                     String id=range.path("id").asText();scopeNeed(chain.add(id),"cyclic_source_range_parent");
                     if(!range.path("scopeComplete").asBoolean()){issues.add(unknown("source_clause_scope","unknown","parent_source_range_incomplete"));break;}
                     if(validated.add(id))validateScopeRange(range,members,positions,inventory.path("sourceSha256").asText());
-                    for(JsonNode peer:ranges.values())if(peer!=range&&peer.path("reference").equals(range.path("reference"))&&peer.path("parentId").equals(range.path("parentId"))&&scopeStory(members.get(peer.path("orderedMemberIds").path(0).asText())).equals(scopeStory(members.get(range.path("orderedMemberIds").path(0).asText()))))throw new IllegalArgumentException("ambiguous_source_reference");
+                    JsonNode frame=sourceFrame(range,inventory,members,positions,usedFrames);
+                    for(JsonNode peer:ranges.values())if(peer!=range&&peer.path("reference").equals(range.path("reference"))&&peer.path("parentId").equals(range.path("parentId"))&&scopeStory(members.get(peer.path("orderedMemberIds").path(0).asText())).equals(scopeStory(members.get(range.path("orderedMemberIds").path(0).asText())))&&!(nonordinalSourceGlyph(range,members)&&nonordinalSourceGlyph(peer,members))){
+                        JsonNode other=sourceFrame(peer,inventory,members,positions,usedFrames);
+                        scopeNeed(frame!=null&&other!=null&&!frame.path("id").equals(other.path("id"))&&!frame.path("label").equals(other.path("label"))&&Collections.disjoint(scopeIds(frame.path("orderedMemberIds")),scopeIds(other.path("orderedMemberIds"))),"ambiguous_source_reference");
+                    }
                     picked.add(id);String parent=range.path("parentId").asText("");if(parent.isEmpty())break;
                     JsonNode owner=ranges.get(parent);scopeNeed(owner!=null,"source_range_parent_missing");if(owner.path("scopeComplete").asBoolean())scopeNeed(rangeMembers.get(parent).containsAll(rangeMembers.get(id)),"source_range_parent_does_not_contain_child");range=owner;
                 }
             }
             Set<String> needed=new LinkedHashSet<>();for(String id:picked){JsonNode range=ranges.get(id);selected.add(range.deepCopy());needed.addAll(scopeIds(range.path("orderedMemberIds")));needed.addAll(scopeIds(range.path("contextMemberIds")));}
+            if(!usedFrames.isEmpty()){ArrayNode frames=out.putArray("referenceFrames");for(JsonNode frame:inventory.path("referenceFrames"))if(usedFrames.containsKey(frame.path("id").asText())){frames.add(frame.deepCopy());for(String key:Arrays.asList("orderedMemberIds","contextMemberIds","anchorMemberIds"))needed.addAll(scopeIds(frame.path(key)));for(String key:Arrays.asList("startBoundary","endBoundary"))if(frame.path(key).hasNonNull("memberId"))needed.add(frame.path(key).path("memberId").asText());}}
             for(Map.Entry<String,JsonNode> member:members.entrySet())if(needed.contains(member.getKey()))observed.add(member.getValue().deepCopy());
-        }catch(IllegalArgumentException invalid){selected.removeAll();observed.removeAll();issues.add(unknown("source_clause_scope","unknown",invalid.getMessage()));}
+        }catch(IllegalArgumentException invalid){selected.removeAll();observed.removeAll();out.remove("referenceFrames");issues.add(unknown("source_clause_scope","unknown",invalid.getMessage()));}
         return out;
     }
+
+    /** Selected context from this complete normal graph; it never changes a canonical quotation. */
+    public static ObjectNode wordSourceScopeContext(JsonNode graph,JsonNode parts){
+        if(!graph.path("nativeDocxOutline").path("sourceClauseScopes").isObject())return null;
+        scopeNeed("actual_source_candidate_generation".equals(graph.path("status").asText())&&parts.isArray()&&!parts.isEmpty(),"word_selected_source_generation_missing");
+        Chunk selected=new Chunk();List<Part> ranges=new ArrayList<>();
+        for(JsonNode raw:parts){
+            scopeNeed(raw.path("blockId").isTextual()&&raw.path("text").isTextual()&&raw.path("startOffset").isIntegralNumber()&&raw.path("endOffset").isIntegralNumber()
+                    &&raw.path("startOffset").canConvertToInt()&&raw.path("endOffset").canConvertToInt()&&raw.path("sourcePosition").isObject(),"word_selected_source_part_unknown");
+            Part range=new Part();range.setBlockId(raw.path("blockId").asText());range.setText(raw.path("text").asText());range.setStartOffset(raw.path("startOffset").asInt());range.setEndOffset(raw.path("endOffset").asInt());range.setSourcePosition(raw.path("sourcePosition").deepCopy());ranges.add(range);
+        }
+        selected.setParts(ranges);ObjectNode context=selectedWordScopes(graph,selected);
+        for(String field:Arrays.asList("source","generationSha256","coverageSha256"))context.set(field,graph.path(field).deepCopy());return context;
+    }
     private static void scopeNeed(boolean valid,String reason){if(!valid)throw new IllegalArgumentException(reason);}
+    private static JsonNode sourceFrame(JsonNode range,JsonNode inventory,Map<String,JsonNode> members,Map<List<String>,List<JsonNode>> positions,Map<String,JsonNode> used){
+        if(!range.has("sourceFrameId"))return null;
+        String id=range.path("sourceFrameId").asText();scopeNeed(range.path("sourceFrameId").isTextual()&&!id.isEmpty()&&inventory.path("referenceFrames").isArray(),"source_reference_frame_missing");
+        JsonNode frame=used.get(id);if(frame==null){
+            for(JsonNode candidate:inventory.path("referenceFrames"))if(id.equals(candidate.path("id").asText())){scopeNeed(frame==null,"source_reference_frame_duplicate");frame=candidate;}
+            scopeNeed(frame!=null&&Arrays.asList("explicit_native_branch","explicit_native_list_introduction").contains(frame.path("kind").asText())&&frame.path("scopeComplete").isBoolean()&&frame.path("scopeComplete").asBoolean()&&frame.path("automaticEditEligible").isBoolean()&&!frame.path("automaticEditEligible").asBoolean()&&frame.path("semanticApplicabilityVerified").isBoolean()&&!frame.path("semanticApplicabilityVerified").asBoolean(),"source_reference_frame_authority_unknown");
+            for(String key:Arrays.asList("orderedMemberIds","contextMemberIds","anchorMemberIds"))scopeNeed(frame.path(key).isArray(),"source_reference_frame_members_missing");
+            validateScopeRange(frame,members,positions,inventory.path("sourceSha256").asText());
+            Set<String> body=scopeIds(frame.path("orderedMemberIds")),anchors=scopeIds(frame.path("anchorMemberIds"));scopeNeed(!anchors.isEmpty(),"source_reference_frame_anchor_missing");
+            List<String> order=new ArrayList<>(members.keySet());int previous=-1;for(String member:body){int at=order.indexOf(member);scopeNeed(at>previous&&positions.getOrDefault(scopePosition(members.get(member).path("sourcePosition")),Collections.emptyList()).size()==1,"source_reference_frame_body_order_or_position_unknown");previous=at;}
+            JsonNode first=members.get(body.iterator().next());List<String> story=scopeStory(first);boolean introduction="explicit_native_list_introduction".equals(frame.path("kind").asText());
+            scopeNeed(introduction?anchors.size()==1&&frame.path("label").asText().equals("source-list:"+anchors.iterator().next()):frame.path("label").asText().matches("(?:alternative|option):[a-z0-9]+"),"source_reference_frame_label_unknown");
+            scopeNeed(frame.path("startBoundary").path("memberId").asText().equals(first.path("id").asText()),"source_reference_frame_start_differs");
+            for(String anchor:anchors){JsonNode member=members.get(anchor);scopeNeed(member!=null&&story.equals(scopeStory(member)),"source_reference_frame_anchor_foreign");
+                if(introduction)scopeNeed(scopeIds(frame.path("contextMemberIds")).contains(anchor)&&order.indexOf(anchor)<order.indexOf(first.path("id").asText())&&member.path("textObservation").path("text").asText().matches("(?s).*\\p{L}.*[:：][\\p{Z}\\s]*[-–—]?[\\p{Z}\\s]*$"),"source_reference_frame_introduction_unbound");
+                else {Matcher label=SOURCE_BRANCH.matcher(member.path("textObservation").path("text").asText());scopeNeed(label.find()&&(label.group(1)+":"+(label.group(2)==null?label.group(3):label.group(2))).toLowerCase(Locale.ROOT).equals(frame.path("label").asText()),"source_reference_frame_anchor_label_differs");
+                    boolean bound=body.contains(anchor);String row=nativeRow(member.path("sourcePosition").path("nodePath").asText());if(!row.isEmpty())for(String bodyId:body)if(row.equals(nativeRow(members.get(bodyId).path("sourcePosition").path("nodePath").asText())))bound=true;scopeNeed(bound,"source_reference_frame_anchor_not_in_native_branch");}
+                scopeNeed(positions.getOrDefault(scopePosition(member.path("sourcePosition")),Collections.emptyList()).size()==1,"source_reference_frame_anchor_position_ambiguous");
+            }
+            JsonNode end=frame.path("endBoundary");String last=new ArrayList<>(body).get(body.size()-1);int endAt=order.indexOf(end.path("memberId").asText());
+            scopeNeed("native_container_end".equals(end.path("kind").asText())&&!end.hasNonNull("memberId")||endAt>previous||endAt==previous&&last.equals(end.path("memberId").asText())&&end.path("offset").isIntegralNumber()&&end.path("offset").canConvertToInt()&&end.path("offset").asInt()==members.get(last).path("textObservation").path("text").asText().length(),"source_reference_frame_exclusive_end_unknown");
+            if(frame.path("startBoundary").has("offset"))scopeNeed(frame.path("startBoundary").path("offset").isIntegralNumber()&&frame.path("startBoundary").path("offset").asInt(-1)==0,"source_reference_frame_start_offset_unknown");
+            used.put(id,frame);
+        }
+        scopeNeed(range.path("scopeComplete").asBoolean(),"source_reference_frame_range_incomplete");validateScopeRange(range,members,positions,inventory.path("sourceSha256").asText());
+        scopeNeed(scopeIds(frame.path("orderedMemberIds")).containsAll(scopeIds(range.path("orderedMemberIds"))),"source_reference_frame_does_not_contain_range");return frame;
+    }
+    private static String nativeRow(String path){for(String namespace:Arrays.asList("http://schemas.openxmlformats.org/wordprocessingml/2006/main","http://purl.oclc.org/ooxml/wordprocessingml/main")){int end=path.lastIndexOf("/{"+namespace+"}tc[");if(end>=0)return path.substring(0,end);}return "";}
+    private static boolean nonordinalSourceGlyph(JsonNode range,Map<String,JsonNode> members){
+        JsonNode first=members.get(range.path("orderedMemberIds").path(0).asText());if(first==null)return false;
+        if(!"nonordinal_glyph".equals(range.path("sourceReferenceKind").asText()))return false;
+        JsonNode number=range.path("numbering"),nativeNumber=first.path("paragraphProperties").path("layoutEvidence").path("numbering");
+        if("native-list".equals(range.path("kind").asText()))return
+                number.path("numbered").asBoolean()&&"resolved".equals(number.path("resolutionStatus").asText())
+                &&"bullet".equals(number.path("format").asText())&&!number.path("label").asText().isEmpty()&&number.equals(nativeNumber);
+        JsonNode raw=first.path("preNormalizedTextObservation");Matcher glyph=SOURCE_GLYPH.matcher(raw.path("text").asText());
+        return "source-region".equals(range.path("kind").asText())&&"explicit_literal_list_label_and_bound_source_frame".equals(range.path("basis").asText())
+                &&!range.has("numbering")&&!nativeNumber.path("numbered").asBoolean()
+                &&"observed_parser_channels_before_whitespace_normalization".equals(raw.path("status").asText())&&glyph.find()
+                &&first.path("textObservation").path("text").asText().stripLeading().startsWith(glyph.group(1));
+    }
     /** A selected view of the same bound manifest graph, shared by ordinary and normal-canonical consumers. */
     public static ObjectNode pdfSourceGroupContext(JsonNode graph,JsonNode parts){return pdfSourceGroupContext(graph,parts,null);}
     private static ObjectNode pdfSourceGroupContext(JsonNode graph,JsonNode parts,Chunk ordinarySeed){
@@ -214,6 +281,22 @@ public final class NormalSourceCandidateGraph {
         return out;
     }
     private static boolean scopeAncestor(String id,JsonNode range,Map<String,JsonNode> ranges){Set<String> visited=new HashSet<>();String parent=range.path("parentId").asText("");while(!parent.isEmpty()){scopeNeed(visited.add(parent),"cyclic_source_range_parent");if(parent.equals(id))return true;JsonNode next=ranges.get(parent);scopeNeed(next!=null,"source_range_parent_missing");parent=next.path("parentId").asText("");}return false;}
+    /** Physical source intervals may cross Word headings without changing the native outline. */
+    private static void validateCrossOutlineScope(JsonNode range,Map<String,JsonNode> members,Map<String,JsonNode> ranges,Map<String,Set<String>> rangeMembers){
+        scopeNeed("manual-sequence".equals(range.path("kind").asText())&&"explicit_tab_delimited_literal_source_interval".equals(range.path("basis").asText())
+                &&"source_interval_containment_only".equals(range.path("hierarchyStatus").asText())&&range.path("parentId").isNull(),"cross_outline_source_basis_unknown");
+        for(String flag:Arrays.asList("automaticEditEligible","semanticApplicabilityVerified"))scopeNeed(range.path(flag).isBoolean()&&!range.path(flag).asBoolean(),"cross_outline_source_authority_unknown");
+        if(range.has("semanticScopeVerified"))scopeNeed(range.path("semanticScopeVerified").isBoolean()&&!range.path("semanticScopeVerified").asBoolean(),"cross_outline_source_authority_unknown");
+        Set<String> body=rangeMembers.get(range.path("id").asText());List<String> nativeIds=new ArrayList<>();
+        for(JsonNode nativeRange:ranges.values())if("native-outline".equals(nativeRange.path("kind").asText())&&!Collections.disjoint(body,rangeMembers.get(nativeRange.path("id").asText())))nativeIds.add(nativeRange.path("id").asText());
+        scopeNeed(nativeIds.size()>1&&range.path("nativeOutlineRangeIds").isArray()&&JsonUtils.mapper().valueToTree(nativeIds).equals(range.path("nativeOutlineRangeIds")),"cross_outline_source_native_membership_differs");
+        int ordinal=-1;String first=null;
+        for(String id:body){JsonNode observed=members.get(id).path("ordinalZeroBased");scopeNeed(observed.isIntegralNumber()&&observed.canConvertToInt()&&observed.asInt()>=0&&(ordinal<0||observed.asInt()==(long)ordinal+1),"cross_outline_source_member_order_unknown");if(first==null)first=id;ordinal=observed.asInt();}
+        JsonNode end=members.get(range.path("endBoundary").path("memberId").asText());
+        scopeNeed(first!=null&&first.equals(range.path("startBoundary").path("memberId").asText())&&"next_explicit_number_in_source_sequence".equals(range.path("endBoundary").path("kind").asText())
+                &&end!=null&&end.path("ordinalZeroBased").isIntegralNumber()&&end.path("ordinalZeroBased").canConvertToInt()&&end.path("ordinalZeroBased").asInt()==(long)ordinal+1
+                &&scopeStory(end).equals(scopeStory(members.get(first))),"cross_outline_source_exclusive_end_unknown");
+    }
     private static void validateScopeRange(JsonNode range,Map<String,JsonNode> members,Map<List<String>,List<JsonNode>> positions,String sha){
         scopeNeed("source_syntax_complete".equals(range.path("status").asText()),"source_range_not_complete");Set<String> body=scopeIds(range.path("orderedMemberIds"));scopeNeed(!body.isEmpty(),"source_range_body_missing");JsonNode first=members.get(body.iterator().next());scopeNeed(first!=null,"source_range_member_missing");List<String> story=scopeStory(first);
         scopeNeed(story.get(0).equals(sha)&&!story.get(1).isEmpty()&&story.get(2).matches("[a-f0-9]{64}")&&!story.get(3).isEmpty()&&!story.get(4).isEmpty(),"source_range_member_identity_missing");
@@ -323,8 +406,10 @@ public final class NormalSourceCandidateGraph {
         JsonNode scopes=selectedWordScopes(graph,chunk);if(scopes!=null){
             for(JsonNode issue:scopes.path("issues"))((ArrayNode)out.path("unknowns")).add(issue.deepCopy());
             Map<String,JsonNode> members=new HashMap<>();for(JsonNode member:scopes.path("members"))members.put(member.path("id").asText(),member);
+            ArrayNode frameMembers=JsonUtils.mapper().createArrayNode();Set<String> frameIds=new HashSet<>();for(JsonNode frame:scopes.path("referenceFrames")){for(String key:Arrays.asList("orderedMemberIds","contextMemberIds","anchorMemberIds"))frameIds.addAll(scopeIds(frame.path(key)));for(String key:Arrays.asList("startBoundary","endBoundary"))if(frame.path(key).hasNonNull("memberId"))frameIds.add(frame.path(key).path("memberId").asText());}for(JsonNode member:scopes.path("members"))if(frameIds.contains(member.path("id").asText()))frameMembers.add(member.deepCopy());
             for(JsonNode range:scopes.path("ranges")){
                 ObjectNode unit=object();unit.put("kind","ordinary_docx_source_clause");unit.put("unitId",range.path("id").asText());unit.put("scopeComplete",true);unit.put("semanticScopeVerified",false);unit.put("humanConfirmed",false);unit.put("legalClosure","unknown");unit.put("contextMeaning","Complete observed source interval and separate context; only selected chunk text has its quotation and citation authority");unit.set("range",range.deepCopy());unit.putArray("parts");unit.putArray("sourceSpans");ArrayNode body=unit.putArray("members"),context=unit.putArray("contextMembers");List<String> text=new ArrayList<>();
+                if(scopes.has("referenceFrames")){unit.set("referenceFrames",scopes.path("referenceFrames").deepCopy());unit.set("referenceFrameMembers",frameMembers.deepCopy());}
                 for(JsonNode id:range.path("orderedMemberIds")){JsonNode member=members.get(id.asText());body.add(member.deepCopy());text.add(member.path("textObservation").path("text").asText());}
                 for(JsonNode id:range.path("contextMemberIds"))context.add(members.get(id.asText()).deepCopy());unit.put("text",String.join("\n",text));((ArrayNode)out.path("units")).add(unit);
             }
@@ -602,6 +687,7 @@ public final class NormalSourceCandidateGraph {
             }else unit.putNull("tableGroup");
             units.add(unit);
         }
+        appendWordNoteContexts(units,blocks,source.getSourceSha256());
         for(JsonNode unit:units)for(JsonNode part:unit.path("parts")){
             for(JsonNode candidate:part.path("readingContext").path("relationCandidates")){
                 String target=candidate.path("toOccurrenceId").asText(),targetUnit=blockOwners.get(target);
@@ -630,6 +716,7 @@ public final class NormalSourceCandidateGraph {
         part.set("bbox",JsonUtils.mapper().valueToTree(block.getBbox()));part.set("cells",JsonUtils.mapper().valueToTree(block.getCells()));part.set("wordCells",nativeCells(block));
         part.set("wordNumbering",JsonUtils.mapper().valueToTree(block.getWordNumbering()));part.set("wordSymbols",JsonUtils.mapper().valueToTree(block.getWordSymbols()));
         part.set("wordWarnings",JsonUtils.mapper().valueToTree(block.getWordWarnings()));
+        ObjectNode wordObservation=VettingCorpus.wordObservation(block);if(wordObservation!=null)part.set("wordObservation",wordObservation);
         if(!block.getWordTextSpans().isEmpty())part.set("wordTextSpans",JsonUtils.mapper().valueToTree(block.getWordTextSpans()));
         if(!block.getWordFields().isEmpty())part.set("wordFields",JsonUtils.mapper().valueToTree(block.getWordFields()));
         part.set("wordNativeObjects",OerModelMaterial.wordNativeObjects(JsonUtils.mapper().valueToTree(block.getWordNativeObjects())));
@@ -641,6 +728,72 @@ public final class NormalSourceCandidateGraph {
             for(String key:Arrays.asList("id","fieldName","fieldType","fieldValue","appearanceValue","appearanceState","visibilityStatus","valueStatus","pageNo","needAppearances","appearancePresent","conflict","limitations"))if(field.has(key))form.set(key,field.get(key));
             part.set("pdfFormField",form);
         }return part;
+    }
+
+    /** Direct native links attach complete notes as parent context, never as a selected text range. */
+    private static void appendWordNoteContexts(ArrayNode units,List<DocumentBlock> blocks,String originalSha){
+        Map<String,List<DocumentBlock>> byId=new HashMap<>();for(DocumentBlock block:blocks)byId.computeIfAbsent(block.getId(),key->new ArrayList<>()).add(block);
+        for(JsonNode unit:units)for(JsonNode rawPart:unit.path("parts")){
+            ObjectNode parent=(ObjectNode)rawPart;List<JsonNode> references=new ArrayList<>();Map<List<String>,Integer> points=new HashMap<>();
+            for(JsonNode object:parent.path("wordNativeObjects"))if(object.has("noteReference")){
+                references.add(object);JsonNode position=object.path("noteReference").path("sourcePosition");
+                points.merge(Arrays.asList(position.path("partName").asText(),position.path("nodePath").asText()),1,Integer::sum);
+            }
+            if(references.isEmpty())continue;
+            ObjectNode reading=parent.path("readingContext").isObject()?(ObjectNode)parent.path("readingContext"):parent.putObject("readingContext");
+            ObjectNode context=reading.putObject("nativeWordNotes");context.put("version","native-word-note-context-v1");
+            context.put("scope","native_parent_block_explicit_reference_context");context.put("referenceWithinSelectedTextRange","unknown");
+            context.put("independentCitationEligible",false);context.put("automaticEditEligible",false);context.put("semanticScopeVerified",false);context.put("legalClosure","unknown");
+            context.put("parentBlockId",parent.path("blockId").asText());context.set("parentSourcePosition",parent.path("sourcePosition").deepCopy());
+            ArrayNode entries=context.putArray("entries");
+            for(JsonNode reference:references){ObjectNode entry=entries.addObject();entry.set("reference",reference.deepCopy());
+                try{
+                    scopeNeed(byId.getOrDefault(parent.path("blockId").asText(),Collections.emptyList()).size()==1,"word_note_parent_identity_ambiguous");
+                    JsonNode at=reference.path("noteReference").path("sourcePosition");scopeNeed(points.getOrDefault(Arrays.asList(at.path("partName").asText(),at.path("nodePath").asText()),0)==1,"word_note_reference_identity_duplicate");
+                    DocumentBlock target=wordNoteTarget(parent,reference,blocks,originalSha);
+                    entry.put("status","resolved");entry.set("target",part(target,originalSha));
+                }catch(IllegalArgumentException invalid){entry.put("status","unknown");entry.put("reason",invalid.getMessage());}
+            }
+        }
+    }
+    private static DocumentBlock wordNoteTarget(JsonNode parent,JsonNode object,List<DocumentBlock> blocks,String originalSha){
+        JsonNode ref=object.path("noteReference"),from=ref.path("sourcePosition"),owner=parent.path("sourcePosition"),to=ref.path("targetSourcePosition"),relationship=ref.path("relationship");
+        String kind="footnoteReference".equals(object.path("kind").asText())?"footnote":"endnoteReference".equals(object.path("kind").asText())?"endnote":null;
+        scopeNeed(kind!=null&&"resolved".equals(ref.path("bindingStatus").asText())&&"native_note_reference_resolved".equals(object.path("status").asText()),"word_note_reference_not_resolved");
+        scopeNeed(object.path("deleted").isBoolean()&&!object.path("deleted").asBoolean()&&object.path("struck").isBoolean()&&!object.path("struck").asBoolean(),"word_note_reference_inactive_or_unknown");
+        scopeNeed(originalSha!=null&&originalSha.matches("[a-f0-9]{64}")&&nativeNotePosition(owner,originalSha)&&nativeNotePosition(from,originalSha)&&nativeNotePosition(to,originalSha),"word_note_source_identity_unknown");
+        scopeNeed(sameScopePart(from,owner)&&from.path("nodePath").asText().startsWith(owner.path("nodePath").asText()+"/")&&nativeNoteNode(from,kind+"Reference"),"word_note_reference_outside_native_parent");
+        if(object.has("sourcePart"))scopeNeed(("/"+owner.path("partName").asText()).equals(object.path("sourcePart").asText()),"word_note_reference_part_differs");
+        scopeNeed(nativeNoteNode(to,kind),"word_note_target_root_unknown");
+        String id;
+        try{scopeNeed(ref.path("rawId").isTextual(),"word_note_id_unknown");java.math.BigInteger number=new java.math.BigInteger(ref.path("rawId").asText().trim());scopeNeed(number.signum()>0,"word_note_id_unknown");id=number.toString();}
+        catch(NumberFormatException invalid){throw new IllegalArgumentException("word_note_id_unknown");}
+        String location="word-"+kind+"/"+id;List<DocumentBlock> targets=new ArrayList<>();
+        for(DocumentBlock block:blocks)if(kind.equals(block.getKind())&&location.equals(block.getLocation()))targets.add(block);
+        scopeNeed(targets.size()==1,"word_note_target_missing_or_duplicate");DocumentBlock target=targets.get(0);
+        scopeNeed(!JsonUtils.isBlankText(target.getWordStructureVersion())&&target.getSourcePosition()!=null&&to.equals(target.getSourcePosition()),"word_note_target_position_differs");
+        String type=relationship.path("type").asText();scopeNeed(Arrays.asList("http://schemas.openxmlformats.org/officeDocument/2006/relationships/"+kind+"s","http://purl.oclc.org/ooxml/officeDocument/relationships/"+kind+"s").contains(type)
+                &&relationship.path("id").isTextual()&&!relationship.path("id").asText().isEmpty()
+                &&(!relationship.hasNonNull("rawTargetMode")||"Internal".equals(relationship.path("rawTargetMode").asText())),"word_note_relationship_unknown_or_external");
+        JsonNode relationPosition=relationship.path("sourcePosition");String sourcePart=owner.path("partName").asText();int slash=sourcePart.lastIndexOf('/');
+        String relPart=(slash<0?"":sourcePart.substring(0,slash+1))+"_rels/"+sourcePart.substring(slash+1)+".rels";
+        scopeNeed(nativeNotePosition(relationPosition,originalSha)&&relPart.equals(relationPosition.path("partName").asText()),"word_note_relationship_source_differs");
+        try{
+            java.net.URI raw=new java.net.URI(relationship.path("rawTarget").asText());
+            scopeNeed(!raw.isAbsolute()&&raw.getRawAuthority()==null&&raw.getRawQuery()==null&&raw.getRawFragment()==null&&raw.getRawPath()!=null&&!raw.getRawPath().isEmpty(),"word_note_relationship_target_unknown");
+            java.net.URI targetPart=new java.net.URI("/"+sourcePart).resolve(raw).normalize();
+            scopeNeed(("/"+to.path("partName").asText()).equals(targetPart.getRawPath()),"word_note_relationship_target_differs");
+        }catch(java.net.URISyntaxException invalid){throw new IllegalArgumentException("word_note_relationship_target_unknown");}
+        return target;
+    }
+    private static boolean nativeNotePosition(JsonNode position,String originalSha){
+        return position.isObject()&&"docx_native".equals(position.path("kind").asText())&&originalSha.equals(position.path("sourceSha256").asText())
+                &&position.path("partSha256").isTextual()&&position.path("partSha256").asText().matches("[a-f0-9]{64}")
+                &&position.path("partName").isTextual()&&!position.path("partName").asText().isEmpty()&&position.path("nodePath").isTextual()&&!position.path("nodePath").asText().isEmpty();
+    }
+    private static boolean nativeNoteNode(JsonNode position,String name){
+        String path=position.path("nodePath").asText();for(String ns:Arrays.asList("http://schemas.openxmlformats.org/wordprocessingml/2006/main","http://purl.oclc.org/ooxml/wordprocessingml/main"))
+            if(path.matches("(?s).*/"+Pattern.quote("{"+ns+"}"+name)+"\\[[1-9][0-9]*\\]$"))return true;return false;
     }
     private static ArrayNode nativeCells(DocumentBlock block){ArrayNode out=JsonUtils.mapper().createArrayNode();for(DocumentBlock.WordCell cell:block.getWordCells()){
         JsonNode raw=JsonUtils.mapper().valueToTree(cell);ObjectNode compact=object();for(String key:Arrays.asList("location","tableLocation","verticalMerge","horizontalMerge","topologyStatus","gridSpanRaw","gridBeforeRaw","rowIndex","cellIndex","gridColumn","columnSpan","rowSpan","text","limitations","sourcePosition"))if(raw.has(key))compact.set(key,raw.get(key));out.add(compact);

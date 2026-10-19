@@ -50,7 +50,7 @@ public final class DocxTemplateEditor {
             if(target==null)throw error("TARGET_NOT_FOUND",edit.operationId);
             if(!edit.targetId.startsWith(MAIN+"#"))throw error("STORY_EDIT_UNSUPPORTED",edit.operationId);
             if(!hash(xml(target)).equals(edit.targetSha256))throw error("TARGET_HASH_MISMATCH",edit.operationId);
-            if(edit.type==EditType.REPLACE_SPAN) {
+            if(textEdit(edit)) {
                 validateSpan(target,edit);
                 if(edit.labelOutsideFields)validateGlobalLabelFields(target,edit);
                 if(edit.donorId!=null) {Element donor=model.nodes.get(edit.donorId);if(!is(donor,"r")||!intrinsicHash(donor).equals(edit.donorSha256))throw error("STYLE_DONOR_MISMATCH",edit.operationId);}
@@ -63,7 +63,7 @@ public final class DocxTemplateEditor {
                 if(target==otherTarget) {
                     if(insertion(edit)||insertion(other)) {
                         if(destructive(edit)||destructive(other))throw error("OVERLAPPING_OPERATIONS",edit.operationId);
-                    }else if(edit.type!=EditType.REPLACE_SPAN||other.type!=EditType.REPLACE_SPAN||other.start<edit.end&&other.end>edit.start)throw error("OVERLAPPING_OPERATIONS",edit.operationId);
+                    }else if(!textEdit(edit)||!textEdit(other)||overlappingSpans(edit.start,edit.end,other.start,other.end))throw error("OVERLAPPING_OPERATIONS",edit.operationId);
                 }else if(contains(target,otherTarget)||contains(otherTarget,target))throw error("OVERLAPPING_OPERATIONS",edit.operationId);
             }
         }
@@ -75,7 +75,8 @@ public final class DocxTemplateEditor {
         ordered.sort(Comparator.comparing((Edit e)->e.targetId).thenComparing((Edit e)->-e.start));
         for(Edit edit:ordered) {
             Element target=model.nodes.get(edit.targetId);
-            if(edit.type==EditType.REPLACE_SPAN)replace(model,target,edit);
+            if(edit.type==EditType.INSERT_TEXT)insertText(target,edit);
+            else if(edit.type==EditType.REPLACE_SPAN)replace(model,target,edit);
             else if(insertion(edit))insert(model,target,edit);
             else if(edit.type==EditType.CLEAR_EDITORIAL_CELL) {
                 NodeList ps=target.getElementsByTagNameNS(W,"p");for(int i=0;i<ps.getLength();i++)clear((Element)ps.item(i));
@@ -411,7 +412,7 @@ public final class DocxTemplateEditor {
             this.edits=Collections.unmodifiableList(new ArrayList<>(Objects.requireNonNull(edits,"edits")));
         }
     }
-    public enum EditType { REPLACE_SPAN, CLEAR_EDITORIAL_CELL, CLEAR_PARAGRAPH, CLEAR_PARAGRAPH_AND_NUMBERING, DELETE_PARAGRAPH, DELETE_ROW, DELETE_TABLE, REMOVE_NODES, KEEP_ROW_TOGETHER, INSERT_BEFORE, INSERT_AFTER }
+    public enum EditType { REPLACE_SPAN, INSERT_TEXT, CLEAR_EDITORIAL_CELL, CLEAR_PARAGRAPH, CLEAR_PARAGRAPH_AND_NUMBERING, DELETE_PARAGRAPH, DELETE_ROW, DELETE_TABLE, REMOVE_NODES, KEEP_ROW_TOGETHER, INSERT_BEFORE, INSERT_AFTER }
     public static final class Edit {
         private final String operationId,targetId,targetSha256,expectedText,replacement,donorId,donorSha256;
         private final boolean labelOutsideFields,tocFieldLabel;
@@ -426,10 +427,13 @@ public final class DocxTemplateEditor {
             this(id,p,start,end,expected,replacement,labelOutsideFields,false);
         }
         private Edit(String id,Paragraph p,int start,int end,String expected,String replacement,boolean labelOutsideFields,boolean tocFieldLabel) {
+            this(id,p,start,end,expected,replacement,labelOutsideFields,tocFieldLabel,EditType.REPLACE_SPAN);
+        }
+        private Edit(String id,Paragraph p,int start,int end,String expected,String replacement,boolean labelOutsideFields,boolean tocFieldLabel,EditType type) {
             operationId=id;targetId=p.id;targetSha256=p.sha256;this.start=start;this.end=end;
             expectedText=expected;this.replacement=replacement;
             this.labelOutsideFields=labelOutsideFields;this.tocFieldLabel=tocFieldLabel;
-            type=EditType.REPLACE_SPAN;
+            this.type=type;
             donorId=null;donorSha256=null;lines=Collections.emptyList();targets=Collections.emptyList();
         }
         private Edit(String id,String target,String sha,EditType type) {
@@ -450,6 +454,9 @@ public final class DocxTemplateEditor {
         }
         public static Edit replaceSpan(String id,Paragraph p,int start,int end,String expected,String replacement) {
             return new Edit(id,p,start,end,expected,replacement);
+        }
+        public static Edit insertText(String id,Paragraph p,int offset,String text) {
+            return new Edit(id,p,offset,offset,"",text,false,false,EditType.INSERT_TEXT);
         }
         /** Catalog offsets count only descendant w:t. Mapping across controls or opaque features is rejected. */
         public static Edit replaceCatalogSpan(String id,Paragraph p,int start,int end,String expected,String replacement) {
@@ -732,13 +739,15 @@ public final class DocxTemplateEditor {
         if(!is(target,"p"))throw error("TARGET_KIND_MISMATCH",edit.operationId);
         String original=editableText(target);
         if(edit.start<0||edit.end<edit.start||edit.end>original.length()||!original.substring(edit.start,edit.end).equals(edit.expectedText))throw error("TEXT_EXPECTATION_MISMATCH",edit.operationId);
-        if(edit.start==edit.end)throw error("EMPTY_SPAN_UNSUPPORTED",edit.operationId);
+        if(edit.type==EditType.INSERT_TEXT) {
+            if(edit.start!=edit.end||!"".equals(edit.expectedText))throw error("INVALID_INSERTION_POINT",edit.operationId);
+        }else if(edit.start==edit.end)throw error("EMPTY_SPAN_UNSUPPORTED",edit.operationId);
         for(int offset:new int[]{edit.start,edit.end})if(offset>0&&offset<original.length()&&Character.isHighSurrogate(original.charAt(offset-1))&&Character.isLowSurrogate(original.charAt(offset)))throw error("INVALID_TEXT_BOUNDARY",edit.operationId);
         if(edit.replacement==null)throw error("INVALID_REPLACEMENT",edit.operationId);
         for(String fragment:edit.replacement.split("[\n\t]",-1))validText(fragment,edit.operationId);
         if(edit.labelOutsideFields)validateLabelOutsideFields(target,edit);
         else {
-            for(Segment segment:segments(target))if(!segment.safe&&(segment.start<edit.end&&segment.end>edit.start||segment.start==segment.end&&edit.start<segment.start&&segment.start<edit.end))throw error("UNSUPPORTED_INLINE_FEATURE",edit.operationId);
+            for(Segment segment:segments(target))if(!segment.safe&&(edit.type==EditType.INSERT_TEXT?segment.start<=edit.start&&edit.start<=segment.end:segment.start<edit.end&&segment.end>edit.start||segment.start==segment.end&&edit.start<segment.start&&segment.start<edit.end))throw error("UNSUPPORTED_INLINE_FEATURE",edit.operationId);
             if(has(target,"fldChar")||has(target,"instrText")||has(target,"fldSimple"))throw error("FIELD_TEXT_EDIT_UNSUPPORTED",edit.operationId);
         }
     }
@@ -888,6 +897,15 @@ public final class DocxTemplateEditor {
             p.insertBefore(replacement,firstRun.getNextSibling());p.insertBefore(right,replacement.getNextSibling());
         }
     }
+    private static void insertText(Element paragraph,Edit edit) {
+        for(Segment segment:segments(paragraph))if(segment.safe&&segment.start<=edit.start&&edit.start<=segment.end) {
+            String old=segment.node.getTextContent();int offset=edit.start-segment.start;
+            setReplacementText(segment.node,old.substring(0,offset)+edit.replacement+old.substring(offset));return;
+        }
+        if(!editableText(paragraph).isEmpty())throw error("UNSUPPORTED_INLINE_FEATURE",edit.operationId);
+        Element run=paragraph.getOwnerDocument().createElementNS(W,"w:r"),text=paragraph.getOwnerDocument().createElementNS(W,"w:t");
+        run.appendChild(text);paragraph.appendChild(run);setReplacementText(text,edit.replacement);
+    }
     private static byte[] write(LinkedHashMap<String,byte[]> entries) {
         try(ByteArrayOutputStream out=new ByteArrayOutputStream();ZipOutputStream zip=new ZipOutputStream(out)) {
             for(Map.Entry<String,byte[]> entry:entries.entrySet()) {
@@ -922,7 +940,10 @@ public final class DocxTemplateEditor {
     }
     private static boolean inScope(Element scope,Element feature){return feature!=null&&(scope==feature||contains(scope,feature));}
     private static boolean insertion(Edit edit){return edit.type==EditType.INSERT_BEFORE||edit.type==EditType.INSERT_AFTER;}
-    private static boolean destructive(Edit edit){return edit.type!=EditType.REPLACE_SPAN&&edit.type!=EditType.KEEP_ROW_TOGETHER&&!insertion(edit);}
+    private static boolean textEdit(Edit edit){return edit.type==EditType.REPLACE_SPAN||edit.type==EditType.INSERT_TEXT;}
+    /** Insertion points touching another edit's boundary also conflict: their order must never decide the result. */
+    public static boolean overlappingSpans(int start,int end,int otherStart,int otherEnd){return start==end?otherStart<=start&&start<=otherEnd:otherStart==otherEnd?start<=otherStart&&otherStart<=end:start<otherEnd&&otherStart<end;}
+    private static boolean destructive(Edit edit){return !textEdit(edit)&&edit.type!=EditType.KEEP_ROW_TOGETHER&&!insertion(edit);}
     private static boolean removesNodes(PackageModel model,Edit edit) {
         return (edit.type==EditType.DELETE_PARAGRAPH||edit.type==EditType.DELETE_ROW||edit.type==EditType.DELETE_TABLE)&&!model.retainedCellParagraphs.contains(model.nodes.get(edit.targetId));
     }
@@ -971,8 +992,8 @@ public final class DocxTemplateEditor {
             if(edit.type==EditType.INSERT_AFTER)return (startsBefore||inScope(scope,start))&&endsAfter&&!inScope(scope,end);
             return startsBefore&&!inScope(scope,start)&&(endsAfter||inScope(scope,end));
         }
-        if(edit.type==EditType.REPLACE_SPAN) {
-            for(Segment segment:segments(scope))if(segment.safe&&segment.start<edit.end&&segment.end>edit.start&&insideFeature(segment.node,start,end))return true;
+        if(textEdit(edit)) {
+            for(Segment segment:segments(scope))if(segment.safe&&(edit.type==EditType.INSERT_TEXT?segment.start<=edit.start&&edit.start<=segment.end:segment.start<edit.end&&segment.end>edit.start)&&insideFeature(segment.node,start,end))return true;
         }else {
             NodeList texts=scope.getElementsByTagNameNS(W,"t");
             for(int i=0;i<texts.getLength();i++)if(!texts.item(i).getTextContent().isEmpty()&&insideFeature(texts.item(i),start,end))return true;
@@ -1042,7 +1063,7 @@ public final class DocxTemplateEditor {
             if(edit.type==EditType.REMOVE_NODES)for(NodeAnchor node:edit.targets)targets.add(new TargetChange(node,model.nodes.get(node.id),model.retainedCellParagraphs.contains(model.nodes.get(node.id))));
             else targets.add(new TargetChange(model.index.anchor(edit.targetId),model.nodes.get(edit.targetId),model.retainedCellParagraphs.contains(model.nodes.get(edit.targetId))));
             RunInfo donor=null;
-            if(edit.type==EditType.REPLACE_SPAN&&edit.donorId==null)for(RunInfo run:model.index.paragraph(edit.targetId).getRuns())if(run.start<edit.end&&run.end>edit.start){donor=run;break;}
+            if(textEdit(edit)&&edit.donorId==null)for(RunInfo run:model.index.paragraph(edit.targetId).getRuns())if(edit.type==EditType.INSERT_TEXT?run.start<=edit.start&&edit.start<=run.end:run.start<edit.end&&run.end>edit.start){donor=run;break;}
             List<String> added=new ArrayList<>();for(Element paragraph:model.insertedParagraphs.getOrDefault(edit.operationId,Collections.emptyList()))if(paragraph.getParentNode()!=null)added.add(MAIN+"#"+path(paragraph));
             ledger.add(new AppliedEdit(edit,model.index.sourceSha256,generatedHash,targets,donor,added));
         }

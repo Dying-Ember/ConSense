@@ -25,6 +25,26 @@ class DocxTemplateEditorSafetyTest {
         try(ZipOutputStream zip=new ZipOutputStream(out)){for(Map.Entry<String,byte[]> entry:entries.entrySet()){zip.putNextEntry(new ZipEntry(entry.getKey()));zip.write(entry.getValue());zip.closeEntry();}}
         return out.toByteArray();
     }
+    @Test void explicitTextInsertionPreservesRunFormattingAndRecordsItsOperation() throws Exception {
+        byte[] original=document("<w:p><w:r><w:rPr><w:b/></w:rPr><w:t>ABCD</w:t></w:r></w:p>");DocxTemplateEditor.TemplateIndex index=editor.inspect(original);
+        DocxTemplateEditor.DocxEditResult result=editor.apply(original,new DocxTemplateEditor.SourceEditBatch(index.getSourceSha256(),Collections.singletonList(DocxTemplateEditor.Edit.insertText("insert",index.mainParagraph(1),2," X\tY\nZ "))));
+        assertEquals("AB X\tY\nZ CD",result.getIndex().mainParagraph(1).getText());assertEquals(DocxTemplateEditor.EditType.INSERT_TEXT,result.getLedger().get(0).getType());
+        assertNotNull(DocxTemplateEditorTest.mainXml(result.getDocxBytes()).getElementsByTagNameNS("http://schemas.openxmlformats.org/wordprocessingml/2006/main","b").item(0));
+        rejected("EMPTY_SPAN_UNSUPPORTED",original,index,DocxTemplateEditor.Edit.replaceSpan("replace",index.mainParagraph(1),2,2,"","X"));
+    }
+    @Test void insertionCannotCrossProtectedPointsFieldsOrUtf16Boundaries() throws Exception {
+        for(String feature:Arrays.asList("<m:oMath><m:r><m:t>x</m:t></m:r></m:oMath>","<w:r><w:drawing/></w:r>","<w:bookmarkStart w:id=\"1\" w:name=\"middle\"/><w:bookmarkEnd w:id=\"1\"/>","<w:fldSimple w:instr=\"PAGE\"><w:r><w:t>42</w:t></w:r></w:fldSimple>")) {
+            byte[] original=document("<w:p><w:r><w:t>Left</w:t></w:r>"+feature+"<w:r><w:t>Right</w:t></w:r></w:p>");DocxTemplateEditor.TemplateIndex index=editor.inspect(original);
+            assertThrows(DocxTemplateEditor.EditException.class,()->editor.apply(original,new DocxTemplateEditor.SourceEditBatch(index.getSourceSha256(),Collections.singletonList(DocxTemplateEditor.Edit.insertText("unsafe",index.mainParagraph(1),4,"X")))));
+        }
+        byte[] original=document("<w:p><w:r><w:t>A\uD83D\uDE00B</w:t></w:r></w:p>");DocxTemplateEditor.TemplateIndex index=editor.inspect(original);
+        rejected("INVALID_TEXT_BOUNDARY",original,index,DocxTemplateEditor.Edit.insertText("utf16",index.mainParagraph(1),2,"X"));
+    }
+    @Test void insertionConflictsAtBothReplacementBoundariesAndAtDuplicatePoints() throws Exception {
+        byte[] original=document("<w:p><w:r><w:t>ABCDE</w:t></w:r></w:p>");DocxTemplateEditor.TemplateIndex index=editor.inspect(original);DocxTemplateEditor.Paragraph paragraph=index.mainParagraph(1);
+        for(int offset:Arrays.asList(1,2,4))assertThrows(DocxTemplateEditor.EditException.class,()->editor.apply(original,new DocxTemplateEditor.SourceEditBatch(index.getSourceSha256(),Arrays.asList(DocxTemplateEditor.Edit.insertText("point",paragraph,offset,"X"),DocxTemplateEditor.Edit.replaceSpan("replace",paragraph,1,4,"BCD","Y")))));
+        assertThrows(DocxTemplateEditor.EditException.class,()->editor.apply(original,new DocxTemplateEditor.SourceEditBatch(index.getSourceSha256(),Arrays.asList(DocxTemplateEditor.Edit.insertText("first",paragraph,2,"X"),DocxTemplateEditor.Edit.insertText("second",paragraph,2,"Y")))));
+    }
     @Test void rejectsTextSpansThatCrossOpaqueMathAndDrawingContent() throws Exception {
         for(String feature:Arrays.asList("<m:oMath><m:r><m:t>x</m:t></m:r></m:oMath>","<w:r><w:drawing/></w:r>","<w:bookmarkStart w:id=\"1\" w:name=\"middle\"/><w:bookmarkEnd w:id=\"1\"/>")) {
             byte[] original=document("<w:p><w:r><w:t>Left</w:t></w:r>"+feature+"<w:r><w:t>Right</w:t></w:r></w:p>");

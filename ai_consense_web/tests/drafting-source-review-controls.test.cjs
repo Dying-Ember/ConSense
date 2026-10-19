@@ -7,7 +7,7 @@ const copy = value => JSON.parse(JSON.stringify(value))
 const nativeWindow = new (require('jsdom').JSDOM)('').window
 let nativeSelection
 const nativeGlobals = { getSelection: () => nativeSelection ? { rangeCount: 1, getRangeAt: () => nativeSelection } : null }
-const source = { id: '41', sourceDocumentId: 41, docId: 'ntt', editionId: 'NTT-docx-TEST', fileKey: 'NTT', fileName: 'TEST ONLY source.docx', format: 'docx', sourceSha256: 'a'.repeat(64), parseStatus: 'PARSED', canEdit: true }
+const source = { id: '41', sourceDocumentId: 41, docId: 'ntt', editionId: 'NTT-docx-TEST', fileKey: 'NTT', fileName: 'TEST ONLY source.docx', format: 'docx', sourceSha256: 'a'.repeat(64), parseStatus: 'PARSED', canEdit: true, evidenceStatus: 'bound', analysisRevision: 'TEST-analysis-current' }
 const paragraph = { id: 'p1', ordinal: 1, text: 'TEST ONLY exact source requirement', paragraphSha256: 'b'.repeat(64), sourceSha256: source.sourceSha256 }
 const item = { id: 'question-1', nameZh: '测试要求', nameEn: 'TEST requirement', docIds: ['41'], type: { kind: 'boolean', zh: '是／否' }, role: { kind: 'input', zh: '项目事实' }, status: 'pending', options: [], sourceAnchors: [{ docId: '41', sourceSha256: source.sourceSha256, text: paragraph.text, native: { paragraphId: 'p1', paragraphSha256: paragraph.paragraphSha256, start: 0, end: paragraph.text.length, expectedText: paragraph.text } }], sourceUnitIds: [], editTargets: [], relatedInputIds: [], relations: [], targets: [], evidence: [] }
 const graph = { kind: 'consense-template-graph-v1', graph: { variables: [item, { ...copy(item), id: 'unrelated-2', nameEn: 'UNRELATED graph question', status: 'confirmed' }], events: [], sourceReviews: {}, nextId: 1, blank: false, guidanceMode: 'minimum' }, sources: [source], selectedDocuments: { NTT: '41' } }
@@ -62,6 +62,7 @@ const choose = async () => { await control('data-review-question-select').props.
   for (const callback of frames.values()) callback(); frames.clear(); await settle()
   assert.match(text(find(host.root, node => node.props?.class === 'selection-tools')), /Duration/); assert.doesNotMatch(text(host.root), /Reduce of empty array/)
   await title('Use as amendment target')
+  const placement = control('data-target-placement', 0); assert.ok(placement); assert.equal(placement.props.value, ''); placement.props.onChange({ target: { value: '1' } }); await settle()
   await click('data-review-save-form'); await click('data-review-confirm-item'); saveBarrier = deferred(); const saving = click('data-review-save'); await settle()
   assert.equal(control('data-review-controls').props.disabled, true, 'A pending graph save freezes all editable source controls as one fieldset')
   await click('data-review-confirm-item'); assert.equal(writes.length, 1)
@@ -71,6 +72,7 @@ const choose = async () => { await control('data-review-question-select').props.
   assert.equal(writes[0][0], 'SOURCE-A'); assert.equal(writes[0][2], 'current-1'); assert.equal(writes[0][3], 'draft-1')
   const spans = writes[0][1].graph.variables[0].editTargets[0].native.spans
   assert.deepEqual(spans.map(span => [span.paragraphId,span.start,span.end,span.expectedText]), [['p1',5,paragraph.text.length,paragraph.text.slice(5)],['p2',0,4,extraParagraphs[0].text.slice(0,4)],['p3',3,8,extraParagraphs[1].text.slice(3,8)]], 'Cross-paragraph drag and sparse append retain all exact native intervals without expanding omitted source text')
+  assert.equal(writes[0][1].graph.variables[0].editTargets[0].replacementPlacement.spanIndex, 1, 'Replacement placement reaches the saved target as a numeric exact span index')
   const wordSpan = writes[0][1].graph.variables[0].editTargets[1].native
   assert.deepEqual([wordSpan.paragraphId,wordSpan.start,wordSpan.end,wordSpan.expectedText], ['p4',0,8,'Duration'], 'Double-click at UTF16 offset zero after an empty DOM prefix creates a real exact amendment target')
   assert.equal(writes[0][1].graph.variables[0].nameEn, 'Unsaved source question')

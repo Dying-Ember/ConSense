@@ -42,7 +42,7 @@ const locationIndex = computed(() => Math.max(0, located.value.findIndex(item =>
 const currentLocation = computed(() => located.value[locationIndex.value])
 const sourceParagraph = computed(() => reading.value?.paragraphs.find(paragraph => paragraph.id === currentLocation.value?.paragraphId))
 const unmapped = computed(() => !!currentLocation.value?.paragraphId && !prepared.value?.mappedParagraphIds.includes(currentLocation.value.paragraphId))
-const actionStatus = (action: string) => draftWord((['retain', 'amend', 'delete', 'not_used', 'pending', 'not_adopted'].includes(action) ? action : 'pending') as DraftWord, props.locale)
+const actionStatus = (action: string) => draftWord((['retain', 'amend', 'insert', 'delete', 'not_used', 'pending', 'not_adopted'].includes(action) ? action : 'pending') as DraftWord, props.locale)
 const structured = (field: DraftField) => isCollectionKind(field.kind) || isObjectKind(field.kind)
 function requestEdit(field: DraftField) { if (props.disabled || props.fieldStates[field.key] === 'inactive') return; if (structured(field)) emit('input', field.key); else emit('edit', field.key) }
 function release() { if (pdfUrl.value) URL.revokeObjectURL(pdfUrl.value); pdfUrl.value = ''; prepared.value = undefined }

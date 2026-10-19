@@ -3,6 +3,7 @@ package com.consense.service.drafting;
 import com.consense.common.JsonUtils;
 import com.consense.ai.AiGateway;
 import com.consense.document.OerTemplateEvidence;
+import com.consense.document.DocxTemplateEditor;
 import com.consense.domain.SourceDocument;
 import com.consense.repository.SourceDocumentRepository;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -35,6 +36,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
+import static com.consense.service.drafting.DraftReviewGraph.*;
 
 /** Public original-template HTTP seam. Fixtures are uploaded through the real parser and storage. */
 @SpringBootTest(properties={"spring.jpa.hibernate.ddl-auto=create-drop","spring.flyway.enabled=false",
@@ -51,6 +53,7 @@ class DraftingTemplateReadingIntegrationTest {
     @Autowired MockMvc mvc;
     @Autowired SourceDocumentRepository sourceDocuments;
     @Autowired DraftReviewSources reviewSources;
+    @Autowired DraftTemplateGraphService templateGraphs;
 
     @Test void uploadedDocxSourceReturnsItsOriginalBytesAndFilename() throws Exception {
         String id=project();byte[] uploaded=docx("Uploaded source paragraph.");
@@ -92,6 +95,43 @@ class DraftingTemplateReadingIntegrationTest {
         assertEquals(documents,mvc.perform(get("/api/drafting/{id}/documents",id)).andReturn().getResponse().getContentAsString());
     }
 
+    @Test void unhintedNativePdfCandidatesSurviveRealBatchUploadAndRemainOutsideTheDraftSnapshot() throws Exception {
+        String id=project();String[] keys={"NTT","SCT","SCC"},titles={"Notes to Tenderers","Special Conditions of Tender","Special Conditions of Contract"};
+        byte[] firstPdf=null;Long firstAuxiliaryId=null;
+        for(int i=0;i<keys.length;i++) {
+            byte[] word=docx(titles[i]),nativePdf;
+            try(org.apache.pdfbox.pdmodel.PDDocument pdf=new org.apache.pdfbox.pdmodel.PDDocument();ByteArrayOutputStream out=new ByteArrayOutputStream()) {
+                org.apache.pdfbox.pdmodel.PDPage page=new org.apache.pdfbox.pdmodel.PDPage();pdf.addPage(page);
+                try(org.apache.pdfbox.pdmodel.PDPageContentStream content=new org.apache.pdfbox.pdmodel.PDPageContentStream(pdf,page)) {
+                    content.beginText();content.setFont(org.apache.pdfbox.pdmodel.font.PDType1Font.HELVETICA,12);content.newLineAtOffset(72,720);
+                    content.showText(titles[i]);content.newLineAtOffset(0,-20);content.showText("Independent PDF edition.");content.endText();
+                }
+                pdf.save(out);nativePdf=out.toByteArray();
+            }
+            mvc.perform(multipart("/api/drafting/{id}/templates/upload",id)
+                    .file(new MockMultipartFile("files","reference-"+i+".pdf","application/pdf",nativePdf))
+                    .file(new MockMultipartFile("files","editable-"+i+".docx",DOCX,word)))
+                    .andExpect(jsonPath("$.code").value(0)).andExpect(jsonPath("$.data.parsed").value(1)).andExpect(jsonPath("$.data.failed").value(0));
+            SourceDocument primary=sourceDocuments.findFirstByProjectIdAndFileKeyAndCategory(id,keys[i],SourceDocument.CATEGORY_STANDARD_TEMPLATE).orElseThrow(AssertionError::new);
+            assertEquals(sha256(word),primary.getSourceSha256());
+            String pdfSha=sha256(nativePdf);
+            SourceDocument auxiliary=sourceDocuments.findByProjectIdAndCategoryOrderByIdAsc(id,SourceDocument.CATEGORY_STANDARD_TEMPLATE).stream()
+                    .filter(d->DraftTemplateRouting.isAuxiliary(d)&&pdfSha.equals(d.getSourceSha256())).findFirst().orElseThrow(AssertionError::new);
+            assertArrayEquals(nativePdf,Files.readAllBytes(Paths.get(auxiliary.getStoragePath())));assertTrue(auxiliary.getTextContent().contains("Independent PDF edition."));
+            assertEquals(1,auxiliary.getPageCount());assertFalse(auxiliary.getOcrUsed());assertFalse(JsonUtils.parse(auxiliary.getNativePdfEvidenceJson()).isEmpty());
+            JsonNode coverage=JsonUtils.parse(auxiliary.getParseCoverageJson());
+            OerTemplateEvidence.requireBound(keys[i],pdfSha,JsonUtils.parse(auxiliary.getStructuredContentJson()),coverage,coverage.path("templateEvidence"));
+            if(i==0){firstPdf=nativePdf;firstAuxiliaryId=auxiliary.getId();}
+        }
+        String snapshot=JsonUtils.parse(mvc.perform(get("/api/drafting/{id}/plan",id)).andReturn().getResponse().getContentAsString()).path("data").path("snapshotId").asText();
+        assertFalse(snapshot.isEmpty());
+        mvc.perform(multipart("/api/drafting/{id}/templates/upload",id).file(new MockMultipartFile("files","another-name.pdf","application/pdf",firstPdf)))
+                .andExpect(jsonPath("$.data.parsed").value(0)).andExpect(jsonPath("$.data.failed").value(0));
+        assertEquals(6,sourceDocuments.findByProjectIdAndCategoryOrderByIdAsc(id,SourceDocument.CATEGORY_STANDARD_TEMPLATE).size());
+        assertTrue(DraftTemplateRouting.isAuxiliary(sourceDocuments.findById(firstAuxiliaryId).orElseThrow(AssertionError::new)));
+        assertEquals(snapshot,JsonUtils.parse(mvc.perform(get("/api/drafting/{id}/plan",id)).andReturn().getResponse().getContentAsString()).path("data").path("snapshotId").asText());
+    }
+
     @Test void verifiedCatalogueEditionDependsOnCurrentBytesAndFileKeyInsteadOfFilename() throws Exception {
         String sourceDir=System.getProperty("consense.acceptance.sourceDir");
         assumeTrue(sourceDir!=null,"Actual competition sourceDir required for verified edition acceptance");
@@ -126,6 +166,65 @@ class DraftingTemplateReadingIntegrationTest {
         mvc.perform(get("/api/drafting/{id}/templates/SCT/reading",id))
                 .andExpect(jsonPath("$.data.catalogueSourceVerified").value(true)).andExpect(jsonPath("$.data.sourceHash").value(hashes[1]));
     }
+
+    @Test void actualSctBillAnchorsBindExactlyAndAReviewedLiteralReachesTheGeneratedPackage() throws Exception {
+        String sourceDir=System.getProperty("consense.acceptance.sourceDir");assumeTrue(sourceDir!=null,"Actual competition sourceDir required for Bill insertion acceptance");
+        String project=project();byte[] original=Files.readAllBytes(Paths.get(sourceDir,"02_Special Conditions of Tender (SCT).docx"));
+        assertEquals("7def01d62e07b35dd86beeff995e0e37d73ce18adca2746e2a6f6d9bafb5aaa4",sha256(original));
+        replace(project,"SCT","actual SCT.docx",DOCX,original);
+        SourceDocument source=sourceDocuments.findFirstByProjectIdAndFileKeyAndCategory(project,"SCT",SourceDocument.CATEGORY_STANDARD_TEMPLATE).orElseThrow(AssertionError::new);
+        assertActualBillInsertions(project,Collections.singletonList(reviewSources.reading(source)));
+    }
+
+    private void assertActualBillInsertions(String project,List<JsonNode> readings) throws Exception {
+        JsonNode reading=readings.stream().filter(item->"SCT".equals(item.path("fileKey").asText())).findFirst().orElseThrow(AssertionError::new);
+        SourceDocument source=sourceDocuments.findById(reading.path("sourceDocumentId").asLong()).orElseThrow(AssertionError::new);
+        byte[] original=Files.readAllBytes(Paths.get(source.getStoragePath()));ObjectNode focused=((ObjectNode)reading).deepCopy();
+        ArrayNode groups=focused.putArray("groups"),notes=focused.putArray("guidanceNotes");focused.putArray("markerCandidates");Set<String> noteIds=new HashSet<>();
+        for(JsonNode group:reading.path("groups"))if("bill_description".equals(group.path("fieldLabel").asText())) {
+            groups.add(group);for(JsonNode note:group.path("guidanceNoteIds"))noteIds.add(note.asText());
+            if(group.has("guidanceNoteId"))noteIds.add(group.path("guidanceNoteId").asText());
+        }
+        assertEquals(14,groups.size());for(JsonNode note:reading.path("guidanceNotes"))if(noteIds.contains(note.path("id").asText()))notes.add(note);
+        AiGateway gateway=mock(AiGateway.class);when(gateway.complete(anyString(),anyString())).thenAnswer(call->{
+            JsonNode payload=JsonUtils.parse(call.getArgument(1));List<Object> candidates=new ArrayList<>();int ordinal=0;
+            for(JsonNode scope:payload.path("scopeCandidates"))if(scope.path("sourceInsertionAnchorComplete").asBoolean()) {
+                String id="description"+(ordinal++);candidates.add(obj("id",id,"type","text","role","input","nameEn","Test-only Bill description "+id,"sourceQuote",payload.path("instruction").path("text").asText(),
+                        "effects",Collections.singletonList(obj("scopeId",scope.path("id").asText(),"quote","","action","insert","valueSourceId",id))));
+            }
+            return JsonUtils.write(obj("nodes",candidates,"notes",Collections.singletonList("Test-only candidate descriptions; no project list or cardinality inferred.")));
+        });
+        Map<String,Object> discovered=DraftReviewDiscovery.discover(gateway,obj("graph",obj("variables",new ArrayList<>(),"events",new ArrayList<>())),Collections.singletonList(focused),10);
+        Map<String,Map<String,Object>> targets=new LinkedHashMap<>();Map<String,Object> representative=null;
+        for(Map<String,Object> node:nodes(discovered))if("discovered".equals(node.get("definitionKind"))) {
+            assertEquals("pending",node.get("status"));assertFalse(node.containsKey("fixedValue"));
+            Map<String,Object> target=map(list(node.get("editTargets")).get(0));assertEquals("insert",target.get("action"));
+            JsonNode bound=reviewSources.bind(source,JsonUtils.mapper().valueToTree(target));assertEquals("bound",bound.path("status").asText(),target.get("sourceScopeId").toString());
+            target.put("nativeBinding",JsonUtils.mapper().convertValue(bound,Map.class));assertNull(targets.put(text(target.get("sourceScopeId")),target));
+            JsonNode observation=JsonUtils.mapper().valueToTree(target.get("sourceScopeObservation")),range=observation.path("insertionAnchors").path(0);
+            assertEquals("unknown_from_existing_numbered_source_rows",observation.path("listCardinalityStatus").asText());assertFalse(observation.path("scopeComplete").asBoolean());
+            assertEquals(range.path("start"),bound.path("spans").path(0).path("start"));assertEquals(range.path("end"),bound.path("spans").path(0).path("end"));
+            assertEquals("",bound.path("spans").path(0).path("expectedText").asText());assertEquals("insert",bound.path("spans").path(0).path("operation").asText());
+            if(representative==null)representative=node;
+        }
+        assertEquals(14,targets.size());assertNotNull(representative);
+        representative.put("status","confirmed");Map<String,Object> graph=obj("graph",obj("variables",Collections.singletonList(representative)),"selectedDocuments",obj("SCT",reading.path("id").asText()));
+        Map<String,Object> saved=templateGraphs.save(project,graph,null),savedAnchor=map(list(nodes(map(saved.get("graph"))).get(0).get("sourceAnchors")).get(0));
+        assertEquals("bound",map(savedAnchor.get("sourceObservationBinding")).get("status"));assertEquals(false,map(savedAnchor.get("sourceObservationBinding")).get("editableAuthority"));
+        assertNotEquals("bound",map(savedAnchor.get("nativeBinding")).get("status"));
+        String draft=text(saved.get("id"));templateGraphs.confirm(project,draft,null);
+        Map<String,Object> unknown=templateGraphs.plan(project,null);assertEquals("pending",map(list(unknown.get("actions")).get(0)).get("action"));
+        com.consense.web.dto.DraftingDtos.VariableVO variable=templateGraphs.variables(project).stream().filter(item->representativeId(graph).equals(item.getKey())).findFirst().orElseThrow(AssertionError::new);
+        String literal=" TEST-ONLY MANUALLY REVIEWED DESCRIPTION";
+        templateGraphs.updateVariable(project,variable.getKey(),JsonUtils.mapper().convertValue(obj("graphRevisionId",variable.getGraphRevisionId(),"fieldDefinitionHash",variable.getFieldDefinitionHash(),"value",literal,"note","Opt-in local test literal; not a project answer"),com.consense.web.dto.DraftingDtos.VariablePatch.class));
+        Map<String,Object> plan=templateGraphs.plan(project,null);assertTrue(list(plan.get("unresolved")).isEmpty());assertEquals("insert",map(list(plan.get("actions")).get(0)).get("action"));
+        Map<String,Object> target=map(list(representative.get("editTargets")).get(0)),span=map(list(map(target.get("nativeBinding")).get("spans")).get(0));
+        DocxTemplateEditor editor=new DocxTemplateEditor();DocxTemplateEditor.TemplateIndex before=editor.inspect(original);
+        DocxTemplateEditor.DocxEditResult generated=templateGraphs.compile(original,"SCT",plan,Collections.emptyMap(),null);
+        for(DocxTemplateEditor.Paragraph paragraph:before.getMainParagraphs())assertEquals(paragraph.getText()+(paragraph.getId().equals(span.get("paragraphId"))?literal:""),generated.getIndex().mainParagraph(paragraph.getOrdinal()).getText());
+        assertEquals(1,generated.getLedger().size());assertEquals(DocxTemplateEditor.EditType.INSERT_TEXT,generated.getLedger().get(0).getType());
+    }
+    private static String representativeId(Map<String,Object> graph){return text(nodes(graph).get(0).get("id"));}
 
     private static void assertActualReviewConsumerEvidence(List<JsonNode> readings) {
         Map<String,JsonNode> fields=new LinkedHashMap<>();List<JsonNode> focused=new ArrayList<>();

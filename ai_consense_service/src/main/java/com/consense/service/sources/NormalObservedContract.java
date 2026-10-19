@@ -1,11 +1,11 @@
 package com.consense.service.sources;
 
 import com.consense.common.JsonUtils;
+import com.consense.common.Utf8;
 import com.consense.service.vetting.NormalSourceCandidateGraph;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.*;
 import org.springframework.http.HttpStatus;
-import java.nio.charset.StandardCharsets;
 import java.util.*;
 
 /** Independent unreviewed authority: complete parser observations, never reviewed adoption. */
@@ -35,7 +35,7 @@ public final class NormalObservedContract {
     public static JsonNode validate(String raw,String address){return validate(raw,address,MAX_BYTES);}
     public static JsonNode validate(String raw,String address,int maximum){
         maximumBytes(maximum);
-        require(raw!=null&&raw.getBytes(StandardCharsets.UTF_8).length<=maximum,"NORMAL_OBSERVED_TOO_LARGE");
+        require(raw!=null&&Utf8.byteCount(raw)<=maximum,"NORMAL_OBSERVED_TOO_LARGE");
         JsonNode p=JsonUtils.parse(raw),m=p.path("manifest"),g=m.path("candidateGraph"),b=m.path("sourceBinding"),i=p.path("projectionIdentity"),s=g.path("source");
         require(isNormal(p)&&SCHEMA.equals(p.path("schema").asText())&&PRODUCER.equals(p.path("producerKind").asText())
             &&address!=null&&address.equals(p.path("projectionSha256").asText())&&address.equals(CanonicalJson.hash(raw,"projectionSha256")),"NORMAL_OBSERVED_SEAL_MISMATCH");
@@ -65,7 +65,7 @@ public final class NormalObservedContract {
         ObjectNode source=object();source.set("sourceSha256",s.path("originalSourceSha256"));source.put("sourceRevisionSha256",revision);
         source.set("filename",s.path("filename"));source.set("sourceFilename",s.path("filename"));source.set("parsedSourceHash",s.path("parsedSourceHash"));source.set("projectId",s.path("projectId"));source.set("documentId",s.path("documentId"));
         require(source.equals(p.path("source")),"NORMAL_OBSERVED_SOURCE_MISMATCH");
-        JsonNode descriptor=p.path("observationManifestRef");require(manifestSha.equals(descriptor.path("sha256").asText())&&descriptor.path("byteCount").asLong()==mr.getBytes(StandardCharsets.UTF_8).length,"NORMAL_OBSERVED_MANIFEST_REF_MISMATCH");
+        JsonNode descriptor=p.path("observationManifestRef");require(manifestSha.equals(descriptor.path("sha256").asText())&&descriptor.path("byteCount").asLong()==Utf8.byteCount(mr),"NORMAL_OBSERVED_MANIFEST_REF_MISMATCH");
         ArrayNode expectedChunks=JsonUtils.mapper().createArrayNode(),nonText=JsonUtils.mapper().createArrayNode();Set<String> units=new HashSet<>(),blocks=new HashSet<>();int previous=-1;
         for(JsonNode unit:g.path("units")){
             require(unit.path("unitId").asText().matches("candidate-unit:[a-f0-9]{64}")&&units.add(unit.path("unitId").asText())&&unit.path("sourceOrder").isIntegralNumber()&&unit.path("sourceOrder").asInt()>previous,"NORMAL_OBSERVED_UNIT_INVALID");previous=unit.path("sourceOrder").asInt();

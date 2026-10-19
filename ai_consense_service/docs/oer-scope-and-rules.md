@@ -1,3 +1,102 @@
+<!-- oer-template-closure-I40-20261019:start -->
+**I40：标准／项目版 NTT、SCT、SCC 的原生来源范围及 Drafting 读取接缝已修复，最终八个代码／测试路径已精确采纳；活动服务未部署。** 下方 I39／r17 及更早段落按历史时点阅读。当前规则为 `native-template-rules-20261019-r18`，继续沿既有 OOXML／PDF native observation → sourceClauseScopes／OerTemplateEvidence → ordinary／canonical → Drafting 来源读取，不增加第二套解析器或技术栈。
+
+六份 Word 分别按自己的原件、版本和原生 XML 核验。已修复续表与重复条款混淆、Alternative／Option 分支末界、嵌套表格误作旁栏、大小写 Roman／字母及插入后缀、显式清单和共同尾句、项目 SCT 两条填写指导的漏捕。最终消费还查出原生纯空段在条款和分支里的角色不一致，以及标准 SCC 的 source-list 越过下一 Option B；只补原 XML 正面证明的纯空段，并在共同尾句推导前应用已证分支末界，列表自身与下级范围同时裁到真实排他终点，严格包含校验保持。13 个分支共补 124 个已证空段，56 处原包含冲突归零；被原件审计拦下的 runtime11 及定向反例失败均保留。
+
+最终固定 27 份 Word 真实重新解析，墙钟 27.360 秒。I39→最终直接比较证明 34,943 个原生成员旧字段及 15,611 个内容块、原文通道和顺序保持；21 份非目标文件仅新增精确的原生空段事实，其余完整旧 JSON 保持。六模板来源范围由旧 1,788 个（1,263 complete／337 ambiguous／188 partial）重组为 1,850 个（1,837 complete／13 partial）；全部身份重绑、续章合并和范围变化有原件账本，不能把数量差当准确率。最终标准 NTT／SCT／SCC 为 62+6／218+0／700+0，项目 NTT／SCT／SCC 为 66+0／232+7／559+0，前数 complete、后数 partial。文件级状态仍为 22 PARSED＋5 PARTIAL。
+
+最终六 Word 真实模板解析与 Drafting 完整读取耗时 71.968 秒；4 份有相应指导的文件完成 named observation bind，2 份按原件不存在保留 source-absent。相同完整保存观察的 r17→r18 对照为 97→99 条指导、159 个 marker 保持、1,177→1,181 个 group、unknown 9→7；7,216 个来源成员保持，19 个完整变化对象逐项留证。该对照隔离规则变化，没有重跑旧 parser 架构。标准 SCC 的 ten、项目 SCT 的法例空位及五个原始方框字符共 7 次实际 native bind 成功；五个方框使用独立原件复核坐标，不授自动选项集合识别或项目勾选结果。
+
+独立版 SCC PDF 真实读取 66 页 native 层，40.047 秒；SCC7.3(3)、(6)、(7) 与 SCC22.1 四个重点跨页范围有完整来源成员和排他终点。PDF 的 18 条指导、61 个 marker、208 个 group 独立保存，不能借用 Word 版同号替代。实际 Drafting 阅读及 p54 observation bind 完成，完整六类来源字段相等，原始 reading／request／result 三份 gzip 均已落盘，canEdit=false。PDF 仍 PARTIAL，66 页保留 ocr_failed：本轮显式关闭 OCR，逐页 short／corrupt／form 触发为 0，但 vector gap 为 66 页、image gap 为 1 页；nativeTable 的 identity_unbound 是独立未执行原因。两种 synthetic DOCX 验证该 PDF 版内容未来以段落或表格边注 Word 提供时的既有路由兼容；当前没有该版真实 DOCX，不以合成样本冒称原件验收。
+
+固定 41 用例保持同一 caseId／rangeId／selected seed／六文档，40 正例＋1 精确 partial 拒扩。仅 4 项期望按已证原件末界更正，19 次移出的旧 witness 原对象保留；独审从六个 ZIP part 核对 1,005 次 witness／990 个唯一段。最终普通／canonical → Python 实际 CAS／registry → Java 最终材料及 compact 全链为 40 个完整范围正常保留、1 个不完整范围按预期拒绝扩大，0 失败、0 未执行。Java 前段 63.485 秒、Python 120.625 秒、Java 最终读回 40.250 秒；保 2,944 个来源单元、2,835 个可检索指针和 109 个非检索单元。这是明确隔离路由下的来源保真／消费验收，不授模板进入 Vetting／Advisory 业务权限。
+
+最终定向 250 项＝246 通过＋4 条件跳过，38.985 秒；完整后端 3,613 项＝3,498 通过＋115 条件跳过，0 失败／错误，461.484 秒。旧 I39 的 3,535 个用例身份和重数、3,420 个旧通过及 115 个完整跳过签名保持；定向原 4 个跳过的完全相同用例在完整回归中均实际通过；两轮重叠不相加。原 helper 身份差异、消费失败、定向失败和来源门拒绝均保留，不把它们改记通过。
+
+保留项具体为：标准 NTT 原指导缺闭括号影响 6 个来源范围；项目 SCT 证书 E 的手排标题缺绑定布局角色影响父项及六个子项，共 7 个来源范围。人已查看同源派生页，但没有把人工阅读冒充自动布局角色。剩余 7 个 Word marker 的精确指令／目标范围证据不足，完整原文、位置和上下文保留。项目 SCT 整份 PARTIAL 另来自 11 个签署栏原生 pict 警告，与 7 个范围问题分开。NTT／SCT 扫描 PDF 继续分阶段验证；完整来源语法不授法律适用性、项目值、自动编辑或语义评分。
+
+原件、gold、模型、活动服务／DB／索引及 892 个 main build／web 文件保持。没有 main 编译、真实 OCR／模型调用、commit／push／部署或 H800 操作。只给这六份入口文档加 I40 前缀，并更新同一本 HTML 的 I40，I00–I39 历史原字节保持。最终总门 `.local/oer-template-closure-20261019-I40/verification.json`，采纳凭据 `adoption-result.json`，来源汇总 `source-audit/summary12.json`，完整语料链 `final-execution/final-corpus-map12-02.json`；同一本 HTML 入口 `.local/oer-recognition-evolution-20261015/logs/index.html#I40`。
+<!-- oer-template-closure-I40-20261019:end -->
+
+
+<!-- oer-pre-source-review-I39-20261018:start -->
+**I39：PRE 的剩余可解来源范围问题已逐原件修复，并精确采纳六个代码／测试文件；活动服务未部署。** 本轮直接修前基线是 I38，同一原件、同一 27 份 Word 分母，沿既有 OOXML→来源范围→normal／ordinary→canonical→材料链修复，不新增解析器或技术栈。
+
+亲审原 DOCX 的正文、样式、编号与划除文字，并查看既有同源派生页图。Programme 的字母／Roman 混排与公共尾句、RGE 19(a) 的紧凑 `iii.Any`／`iv.Temporary`、BIM Coordinator／Modeller 两套编号重启、Remarks 与 QCS 局部编号、Safety ix 的树木事故与统计尾段均已有原件依据并已修正。RGE 19(a) 保完整 6 成员至 b 之前，Safety ix 保完整 27 成员至下一 x 之前；完整子范围的父范围必须真实包含其全部成员。页图只辅助布局，不作为 Word 权威分页；代码未使用文件名、固定页码或答案白名单。
+
+PRE 的 2,937 个旧范围 ID 与相对顺序全部保持，删除 0；原 52 个 partial 全部收口，新增 100 个有原件证明的完整物理范围，最终 3,037 个来源范围完整。另对 96 个旧 complete 的真实边界／父归属错误逐项举证后修正，其余 2,789 个旧 complete 整值保持；本轮 248 个变化对象均逐源审核，不用数量增加冒充准确率。27 份 Word 的 34,943 个原生成员、15,611 内容块及全部非范围字段逐值逐序保持，其余 26 份完整输出与 I38 原字节一致。最终材料修复后的 27 份输出又与已源审版本逐字节一致，实际解析墙钟 27.281 秒。
+
+完整消费回放还抓到两处共享损失，现以两行产品改动修复：合法的“未声明位置”null 不再变成空对象；脚注 XML 摘要在二次投影后不再丢失。非法位置类型仍按原校验拒绝，原 XML 不额外进入模型材料。首轮 96 用例的 97 处字段差异是两类缺陷，原失败完整保留；最终全链逐值核验为 完整96用例经普通材料、canonical、Python存取后读回及最终Java材料核验：93个范围正常保留、3个精确原文编号冲突拒绝，0失败、0未执行；两轮材料的旧97处损失均逐位置恢复，其他材料字段保持。Java 前段 643.657 秒、Python 完整 CAS／registry 存取后读回 318.218 秒、Java 最终材料读回 379.344 秒。Python 保 10,930 个来源单元、10,778 个可检索指针与 152 个非检索单元，完整图、原文、范围、父关系、原生元数据及压缩传输均保全。
+
+最终宽回归 3,535 项＝3,420 通过＋115 条件跳过，0 失败／错误，473.407 秒。原 I38 的 3,497 个用例身份与重数保持，3,382 个旧通过仍通过，115 个完整跳过签名保持；新增 38 个独立用例。定向 111＝107 通过＋4 跳过，37.516 秒，与宽回归重叠不相加；该 4 项在宽回归同 ID 实际通过。旧失败、主动中止、启动前 shell 参数错误、同源门拦下的错误候选均保留，不计通过。汇总脚本初次还因历史凭据缺可选字节数字段而拒绝，实际文件路径／SHA一致；仅修记录规范化比较，仍核真实文件及任何已声明字节数，首次失败保留。
+
+真实源异常继续保留：设计责任两个 b、投影机三个 ii、跳号及原生编号与派生显示不一致，共 7 组／8 对精确来源证据；不擅自替原件重编号。示例图片与 Photoshop 对象按已确认范围保连接、位置、资产和上下文，PRE 整份仍 PARTIAL；27 文件状态仍 22 PARSED＋5 PARTIAL。其余文件 337 个歧义范围、188 个部分范围、7 个未知模板标记及分阶段扫描 PDF 缺口不在本轮冒称解决。
+
+六文件精确采纳后，其他 1,722 个 baseline 文件及 535 个 main build／web 产物保持，随后只授权同步三份入口文档并追加同一本 HTML 的 I39，I00–I38 历史字节保持。真实 OCR／模型调用 0，无活动服务／DB／索引、commit／push／部署或 H800 操作。本轮证明来源保真及所查离线消费链，未授法律适用性、自动编辑或模型语义评分。完整凭据 `.local/oer-pre-source-review-20261018-I39/verification.json`。
+<!-- oer-pre-source-review-I39-20261018:end -->
+
+<!-- oer-source-scope-quality-I38-20261018:start -->
+**2026-10-18 I38 最新状态：Word 手工组合编号、跨原生标题的条款范围及消费接缝已修复并精确采纳源码。** 本轮沿同一 OOXML→来源范围→normal／ordinary→材料链，不新增独立解析器；下方 I37 及更早内容按历史时点阅读。
+
+G304 区分主项4(a)与同号续项5(d)、16(c)，保留原始tab／NBSP／缩进声明；第2条、第19／20条及新增来源区间按原XML核验。S303第3条完整保留(a–d)、Guidance、4×2表及共同尾句，到4(a)排他结束；既有LibreOffice衍生页图显示尾句跨第4至5页，不冒称Word权威分页。S304／S305／S306原先标complete却只保到Guidance开头的第3条，现补齐指导闭合和后续五年／十年期子项；原生标题、父关系及来源成员不改，物理条款与原生纲要分别表达。
+
+跨原生范围只在完整来源证明及精确nativeOutlineRangeIds绑定后参与选中上下文；原引文不扩大，非法／冲突／不完整范围仍unknown。优先级触发前验证来源、成员连续序号、排他终点及false权限标志；普通／canonical共用范围选择规则，compact完整保全选中结果。
+
+固定27份Word最终重新解析，墙钟19.312秒；34,943原生成员、15,611内容块、全部非范围字段及原生纲要逐值逐序保持。原4,876个范围ID及相对顺序保持，删除0；新增4个范围、修改6个已有范围，均逐原XML独审。仅三份保修变体中经原件证实的假完整范围允许修正，其他旧完整范围整值保持；22 PARSED／5 PARTIAL不强转绿。
+
+首版曾误降53个旧正确范围并污染8个旧partial理由，已被同源门拦下且未采纳；精准修复只在原范围内检查真实同号续项，不用新窄语法否定小数子项、空格字母项或别章正文。原RED、序号哨兵反例及compact测试的Java数值节点宽度误判保留；后者复用完整有序JSON字节比较，未改产品换绿。
+
+最终定向40项全过；宽回归3497项＝3382通过＋115条件跳过，0失败／错误，重叠不相加。5份真实来源、23个明确来源用例完成Java→Python生产器／本地CAS和registry→Java材料／compact回放，所有目标范围、成员和原边界保持；这不是模型语义评分或活动服务验收。OCR／模型调用0。
+
+来源物理区间完整不等于法律层级、项目适用性或自动编辑批准；既有7个未知模板标记、扫描PDF分阶段缺口仍保留。本轮没有真实模型、活动API／浏览器业务、部署或H800验收。 原件／gold／模型／活动服务、DB、索引及535个build／web产物保持；本轮不commit／push／部署。完整凭据 `.local/oer-source-scope-quality-20261018-I38/verification.json`；同一本HTML追加 **I38**，I00–I37历史字节保持。
+<!-- oer-source-scope-quality-I38-20261018:end -->
+
+<!-- vetting-word-closure-I37-20261018:start -->
+**2026-10-18 I37 最新状态：普通 Word 的原文观察、脚注引用、来源范围及 normal 消费接缝已修复并精确采纳源码。** 下方 I36 及更早状态为历史；本轮源码未部署到活动服务。
+
+PRE 两处手工30分别保留到下一31之前的完整来源序列；原 XML 和同源旧页图共同核验，跨样式只按相同原生声明或完整 literal 来源序列判断物理范围，不用缩进容差或文件白名单授法律层级。G302 显式括号 Guidance Notes 独立成组，正文与指导各自的1、2不再互相混入，指导结束后不继续吞入尾部。正文的明确原生脚注引用携完整目标与四修订通道，effective/original/deleted/strike 沿同一候选图保留；删除内容只留在命名观察通道。
+
+完整 Word 范围改在 fresh frame 内按真正选中的 chunk 派生，并绑定 canonicalChunkId、selectedPartsSha256；批量指针不预复制整章。修复每个 normal 指针递归扫描整份文档判断格式的重复工作，保留入口 seal、来源、CAS 和前后校验及全局深层异常检测。实际 PRE 的10,930个源单元（10,778个可检索指针，152个非检索单元）全部回放完成，修复前600秒超时与后续定位中止记录保留，不把失败算通过。
+
+最终固定27份Word重新解析，墙钟15.953秒、解析器合计15.301秒；修前为已验证同源码/runtime的I36完整输出。34,943个原生成员、15,611个block及全部非范围字段的原值/顺序保持，4,864个旧范围ID及相对顺序保持，删除0；12个新增范围、21个已有范围变化均逐原XML审核，这不是缺陷数或模型准确率。22 PARSED＋5 PARTIAL保持。空原生标题后的截断范围被明确标为partial；PRE真实分节到更高非空标题的已证边界保住。
+
+来源区间的实际改善为15个旧partial范围收口、10个新增完整范围；另6个旧完整范围只改判断依据，2个新增范围明确保留partial，不能当作新增漏读或语义评分。两脚注原本目标文字已保存，本轮补的是正文引用所需上下文的继续传递。最终离线Java前段43.954秒、Python完整CAS/registry封装读回290.157秒、Java sealed材料回放74.281秒；PRE指针primitive构建/序列化前段0.860秒，均不是活动API或模型耗时，未测JVM峰值。
+
+真实955,161,123-byte PRE封装曾在64GiB堆下触发JDK整串UTF8编码整数溢出。共享编码从已有8KiB encoder抽取：计数用long、SHA分段处理，HTTP真正需要正文数组时按精确大小分配；canonical字符串先计算精确容量再拼接，保留原键排序、数字token和转义。4个超过7.15亿字符的压力用例、6个编码/canonical小测试及原有归一化契约通过。最终仍消费同一完整封装原字节，不改变1GiB/16MiB契约、不跳过seal。原消费失败和最初压力夹具构造失败均保留。
+
+最终全后端3484项＝3369通过＋115条件跳过，0失败/错误；定向123项全过，与全量重叠不相加。跳过逐用例列入测试清单。真实PRE/G302完整Java→Python normal生产器→本地CAS/registry→Java材料及compact回放通过，共7个来源种子；不是mock、模型语义评分或活动服务验收。全程OCR/真实模型调用0。
+
+play-equipment warranty 的第3条仍须组合空标题之后的(d)、期限表及共同尾句；G304第2条的后继缩进不相同，完整分界继续保留未知。原文均已保全，这两个局部范围不能用于自动整条采用。既有7个模板标记的含义、项目适用性和扫描PDF分阶段验证继续保留。
+
+完整凭据 `.local/vetting-word-closure-20261018/verification.json`、`source-review/normal27-comparison03.json`、`source-review/independent-source-gate03.json`、`actual-replay/produce-final06`、`actual-replay/python-final04-guarded`、`actual-replay/consume-final07`、`adoption-result.json`。仅追加同一本HTML的 **I37**；I00–I36历史原字节保持。原件/gold/模型/活动JAR、服务、DB、索引及535个main build/web文件保持；本轮未commit/push/部署。
+<!-- vetting-word-closure-I37-20261018:end -->
+
+<!-- drafting-template-seams-r17-20261018:start -->
+**2026-10-18 I36 最新状态：模板解析与 Drafting 消费接缝已修复并精确采纳源码，规则为 `native-template-rules-20261018-r17`。** 下方 r16/I35 及更早状态保留历史语境；活动服务尚未部署此轮源码。
+
+SCT1/SCT3 的四个完整选择分支现携原生共同指导，12 个标记取得缺失的指导/条件关联；SCT6(3)(c) 的整项条件与局部 `#` 条件保为两层独立关系，不压成一个布尔值或扩大修改范围。SCC 原生 PDF p54 完整修订边注组中仅日期行与指导重叠的情况已补齐，恢复指导 capture/syntax 和精确 glyph 来源，保留三条边注；目标 scope 仍不因 capture 恢复而自动变完整，PDF 总体 PARTIAL 保持。
+
+Drafting 沿同一 OER 原观察读取条件、来源关系和关联指导；完整指导以 `sourceObservationBinding` 绑定原观察、全文、范围、原 SHA 及三个分析身份，明确 `editableAuthority=false`，编辑目标另要求精确 `nativeBinding`。Bill 插入使用显式 `insert` 和一个零长度 UTF-16 原生点，多段替换要求明确 `replacementPlacement.spanIndex`；保存、确认、计划、编译和人工 override 统一校验。修复共享 Word 文本遍历误读属性 tabs 为可见空格、真实 run tab 被压成空格的根因，真实 SCT 的14个插入点均可准确绑定；未推断未来 Bill 条数/内容或采用项目值。
+
+界面显示真实证据代次与状态；缺失/旧证据进入既有替换重传再审核步骤。生成只校验当前 confirmed graph 实际 selectedDocuments 版次，未选辅助 PDF 不阻挡 Word，PDF-only 提前说明需要对应 DOCX。多段候选仅在原范围完整、native spans/身份未改且用户明确选择动作/落点时解除待重绑。
+
+验收：27份原Word修前/修后均实际正常解析、原件SHA保持；34,943原生成员及15,611 block身份/顺序/来源保持，变化按原XML与全部19,694 carrier ranges逐项核验，无宽泛trim或忽略正文。三模板完整保存观察复算保3,999成员、97指导、122条件、157标记、717组原范围和7个未知标记；SCT只补指定关联。SCC PDF完整保存观察复算保3,182成员、其他17指导/203组及全部61标记，p54来源进入Drafting阅读与named observation绑定且canEdit=false。四来源复算没有新PDF解析、OCR或模型调用。
+
+最终较宽130套件 1407 项＝1303通过＋104条件跳过，0失败/错误；当前最终源码的真实三Word阅读和SCT14点保存确认/人工测试值/生成另行2项通过，与定向重叠不相加。前端198项全过、typecheck通过。原RED、早期消费失败、完整原件扩展回归超时和PDF helper绕过JSON wire造成的失败均保留；最终报告明确每个条件跳过与后续同用例实跑状态，不用超时或跳过计成功。
+
+本轮精确采纳27代码/测试路径，随后仅同步这六份文档；其余baseline及535受保护main build/web产物保持。不编译main、不commit/push/部署，不操作活动服务/DB/索引。7个未知标记、未来Bill基数/项目事实及PQS适用性、扫描NTT旧缺陷/SCT40未执行页继续保留。完整凭据 `.local/drafting-template-seams-20261018/verification.json`、`source-preservation-review.json`、`word27-source-review/independent-source-gate01.json`、`adoption-result.json`；单本HTML追加 **I36**。
+<!-- drafting-template-seams-r17-20261018:end -->
+
+<!-- drafting-template-stability-r16-20261018:start -->
+**2026-10-18 I35：Drafting 样板路由稳定性与 SCC 原生 PDF 具名范围已修复并采纳源码，规则为 `native-template-rules-20261018-r16`。** Word 优先后，独立 PDF 的原件及已经取得的完整解析结果仍保为未选择辅助源，不再误报同字节重复或丢弃；同 SHA 辅助记录可以补充观察，不新增原件副本。自动模板来源清单和指导读取共用既有未采用来源过滤，防止辅助 PDF 自动进入主图或补解析后误使草稿过期；全量来源列表和显式阅读仍可查它。
+
+根与实施代理亲看 SCC 物理18／19页：显式 `# - The Roofing Installation...` 首项及两个跨行出现已补齐，新增1个组、8个逻辑出现／10个精确物理范围／8个 marker 范围；原203组按ID整值、相对顺序保持。三Word完整同源复算只变规则代次及两个摘要，原生成员、97指导、157标记、717现有组等整值及顺序保持。来源范围完整不授项目适用性或自动编辑。
+
+最终定向218项全过，含真实三Word的隔离上传／读取和三family原生合成Word／PDF批量保存；较宽129套件1383项＝1280通过＋103条件跳过、0失败／错误，与定向重叠不相加。RED及测试运行中追加断言的原记录均保留；四完整保存输入修前／修后复算不叫新PDF解析或新OCR。精确采纳7路径（3产品＋4测试），main build／web产物保持，无活动服务／DB／索引／部署或真实OCR／模型操作。
+
+旧r15仍保历史，作为当前r16分析使用时须显式重分析，不做GET自动重跑；历史已错误包含辅助源的图不自动迁移。SCT12处共同选择指导关联与另2处分层条件、7个Word未知marker、SCC p54 lane、扫描NTT旧缺陷／SCT40页未执行均继续保留。完整证据 `.local/drafting-template-stability-20261018/verification.json`、`source-independent-review.json`、`final-independent-gate.json`；同一本HTML追加I35。
+<!-- drafting-template-stability-r16-20261018:end -->
+
 <!-- oer-module-seams-20261018:start -->
 **2026-10-18 跨模块数据流／变量接缝修复已采纳源码：** 沿现有 OER 原件身份→原生观察／coverage→SourceDocument→ordinary／canonical→Drafting、Vetting、Advisory 链检查，七类可复现问题已修。Drafting 源绑定现在同时比较既有 analysisInputSha256、analysisSha256、evidenceStatus，原件／正文／算法版本相同也不能掩盖证据代次变化；预览显示、effective 与 actions 使用同一规范化提案且不落库；fixed／system／derived 字面值在保存／确认前按完整 children schema 校验；业务明细 id 明确可见并与 _itemId 行身份分离，legacy 隐藏规则保持。
 

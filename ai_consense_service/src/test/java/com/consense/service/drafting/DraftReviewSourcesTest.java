@@ -149,6 +149,41 @@ class DraftReviewSourcesTest {
         assertThrows(BizException.class,()->sources.reading(correspondence));
     }
 
+    @Test void completeSavedObservationSupportsReviewButNeverEditableAuthorityAndRejectsChangedProof() throws Exception {
+        byte[] bytes="%PDF-1.4\nsource-observation-test".getBytes(StandardCharsets.UTF_8);SourceDocument source=source(1,"NTT",bytes);
+        DocumentBlock block=new DocumentBlock();block.setId("page-1");block.setPageNo(1);block.setSource("native_pdf");block.setText("(Guidance Notes: Select the applicable option.)");
+        block.setReadingContext(JsonUtils.mapper().createObjectNode().put("sourceSha256",DraftTemplateRouting.sha(bytes)).put("occurrenceId","page-1"));
+        ParseCoverage coverage=new ParseCoverage();coverage.setTotalPages(1);coverage.setParsedPages(1);coverage.setComplete(true);
+        DocumentParser.ParsedDocument parsed=new DocumentParser.ParsedDocument(block.getText(),Collections.emptyList(),1,false,null,Collections.singletonList(block),coverage,DraftTemplateRouting.sha(bytes),Collections.emptyList());
+        coverage.setTemplateEvidence(OerTemplateEvidence.analyse("NTT",parsed));source.setStructuredContentJson(JsonUtils.write(parsed.getBlocks()));source.setParseCoverageJson(JsonUtils.write(coverage));
+        ObjectNode anchor=observationPassage(source);
+        ObjectNode bound=sources.bindObservation(source,anchor);assertEquals("bound",bound.path("status").asText());assertFalse(bound.path("editableAuthority").asBoolean());assertFalse(bound.has("spans"));
+        ObjectNode wrong=anchor.deepCopy();wrong.put("text","Invented instruction");assertEquals("unsafe",sources.bindObservation(source,wrong).path("status").asText());
+        wrong=anchor.deepCopy();((ObjectNode)wrong.path("observedRanges").path(0)).put("end",1);assertEquals("SOURCE_OBSERVATION_SCOPE_CHANGED",sources.bindObservation(source,wrong).path("reason").asText());
+        wrong=anchor.deepCopy();((ObjectNode)wrong.path("sourceObservation")).put("captureComplete",false);assertEquals("SOURCE_OBSERVATION_OBJECT_CHANGED",sources.bindObservation(source,wrong).path("reason").asText());
+        for(String key:new String[]{"analysisRevision","analysisInputSha256","analysisSha256"}){wrong=anchor.deepCopy();wrong.put(key,"old-or-forged");assertEquals("SOURCE_OBSERVATION_ANALYSIS_CHANGED",sources.bindObservation(source,wrong).path("reason").asText());}
+        SourceDocument foreign=source(2,"NTT",bytes);foreign.setStructuredContentJson(source.getStructuredContentJson());foreign.setParseCoverageJson(source.getParseCoverageJson());assertEquals("SOURCE_DOCUMENT_MISMATCH",sources.bindObservation(foreign,anchor).path("reason").asText());
+        ObjectNode old=(ObjectNode)JsonUtils.parse(source.getParseCoverageJson());((ObjectNode)old.path("templateEvidence").path("sourceBinding")).put("analysisRevision","historical-rule-revision");source.setParseCoverageJson(JsonUtils.write(old));
+        assertEquals("CURRENT_SOURCE_OBSERVATIONS_REQUIRED",sources.bindObservation(source,anchor).path("reason").asText());
+    }
+
+    @Test void pdfObservationRequiresSameSourcePhysicalPageAndOccurrenceIdentity() throws Exception {
+        byte[] bytes="%PDF-1.4\nPDF identity checks".getBytes(StandardCharsets.UTF_8);String sha=DraftTemplateRouting.sha(bytes);SourceDocument source=source(1,"NTT",bytes);
+        for(String mismatch:new String[]{"source","page-zero","page-outside","occurrence"}) {
+            DocumentBlock block=new DocumentBlock();block.setId("line-1");block.setSource("native");block.setPageNo("page-zero".equals(mismatch)?0:"page-outside".equals(mismatch)?2:1);block.setText("(Guidance Notes: Select the actual source option.)");
+            block.setReadingContext(JsonUtils.mapper().createObjectNode().put("sourceSha256","source".equals(mismatch)?zeros():sha).put("occurrenceId","occurrence".equals(mismatch)?"foreign-line":"line-1"));
+            ParseCoverage coverage=new ParseCoverage();coverage.setTotalPages(1);coverage.setParsedPages(1);coverage.setComplete(true);
+            DocumentParser.ParsedDocument parsed=new DocumentParser.ParsedDocument(block.getText(),Collections.emptyList(),1,false,null,Collections.singletonList(block),coverage,sha,Collections.emptyList());coverage.setTemplateEvidence(OerTemplateEvidence.analyse("NTT",parsed));
+            source.setStructuredContentJson(JsonUtils.write(parsed.getBlocks()));source.setParseCoverageJson(JsonUtils.write(coverage));
+            assertNotEquals("bound",sources.bindObservation(source,observationPassage(source)).path("status").asText(),mismatch);
+        }
+    }
+
+    private ObjectNode observationPassage(SourceDocument source) {
+        JsonNode reading=sources.reading(source),note=reading.path("guidanceNotes").path(0);ObjectNode anchor=JsonUtils.mapper().createObjectNode().put("sourceDocumentId",source.getId()).put("sourceSha256",reading.path("sourceSha256").asText()).put("text",note.path("text").asText()).put("sourceObservationId",note.path("id").asText());
+        anchor.set("sourceObservation",note.deepCopy());anchor.set("observedRanges",note.path("memberRanges").deepCopy());for(String key:new String[]{"analysisRevision","analysisInputSha256","analysisSha256"})anchor.set(key,reading.path(key).deepCopy());return anchor;
+    }
+
     @Test void immutableArchiveSurvivesSourceIdReplacementAndRejectsTampering() throws Exception {
         byte[] original=docx("Old original");SourceDocument source=source(1,"NTT",original);
         ObjectNode archive=sources.archive(source);ObjectNode second=sources.archive(source);

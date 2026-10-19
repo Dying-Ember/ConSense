@@ -110,6 +110,8 @@ public class OerBusinessEvidence {
         require(ids.equals(bindings.stream().map(CanonicalSourceBinding::getDocumentId).collect(Collectors.toList())),"selected binding order differs");
         Map<String,Chunk> views=new LinkedHashMap<>();for(CanonicalSourceBinding binding:bindings) {
             JsonNode snapshot=JsonUtils.parse(binding.getSnapshotJson());SourceDocument source=documents.get(binding.getDocumentId());
+            boolean normal=NormalObservedContract.isNormal(snapshot),family=!normal&&NativePdfSourceFamilyContract.isFamily(snapshot),nativePdf=!normal&&!family&&NativePdfCanonicalContract.isNativePdf(snapshot);
+            JsonNode display=family?NativePdfSourceFamilyContract.displayDeclarations(snapshot):nativePdf?NativePdfCanonicalContract.displayDeclarations(snapshot):null;
             // A large native document has one root binding. Complete batches
             // are verified by the source service; the root is not a chunk.
             JsonNode payloads="consense.native-document.v1".equals(snapshot.path("schema").asText())
@@ -124,8 +126,8 @@ public class OerBusinessEvidence {
             require(payloads!=null&&payloads.isArray()&&pointers.size()==payloads.size(),"canonical pointer count differs");
             for(JsonNode payload:payloads) {
                 EvidencePointer pointer=pointers.get(payload.path("id").asText());require(pointer!=null,"canonical pointer missing");
-                if(NativePdfSourceFamilyContract.isFamily(snapshot))require(NativePdfSourceFamilyContract.displayDeclarations(snapshot).equals(pointer.getNativePdfSourceFamilyEvidence()),"native PDF family display declarations differ");
-                else if(NativePdfCanonicalContract.isNativePdf(snapshot))require(NativePdfCanonicalContract.displayDeclarations(snapshot).equals(pointer.getNativePdfEvidence()),"native PDF display declarations differ");
+                if(family)require(display.equals(pointer.getNativePdfSourceFamilyEvidence()),"native PDF family display declarations differ");
+                else if(nativePdf)require(display.equals(pointer.getNativePdfEvidence()),"native PDF display declarations differ");
                 Chunk view=view(payload,pointer,source);require(views.putIfAbsent(view.getId(),view)==null,"duplicate canonical chunk");
                 require(canonicalViewStatus(view)==null,"canonical pointer and selected snapshot differ");
             }
@@ -248,13 +250,49 @@ public class OerBusinessEvidence {
         complete(session,loaded);return response;
     }
 
+    /** Selected model context only. Neither the corpus nor a source-verification verdict is retained here. */
+    public Map<String,JsonNode> wordSourceScopeContexts(Session session,List<Chunk> selected){
+        Objects.requireNonNull(selected,"Selected model chunks required");List<Chunk> words=new ArrayList<>();Set<String> ids=new HashSet<>();
+        for(Chunk chunk:selected){
+            if(FixedVettingReferences.isFixed(chunk))continue;
+            require(chunk!=null&&session.byId.containsKey(chunk.getId())&&Objects.equals(session.viewPayloads.get(chunk.getId()),JsonUtils.write(chunk))
+                    &&canonicalViewStatus(chunk)==null,"selected model member differs from canonical session");
+            if(NormalObservedContract.isNormal(chunk.getCanonicalPayload())&&chunk.getCanonicalEvidence().getParts()!=null)
+                for(JsonNode part:chunk.getCanonicalEvidence().getParts())if("docx_native".equals(part.path("sourcePosition").path("kind").asText())){
+                    if(ids.add(chunk.getId()))words.add(chunk);break;
+                }
+        }
+        if(words.isEmpty())return Collections.emptyMap();
+        CurrentStage loaded=stage(session);Map<String,JsonNode> contexts=new LinkedHashMap<>();
+        try(CurrentStage stage=loaded){for(Chunk chunk:words){EvidencePointer pointer=chunk.getCanonicalEvidence();
+            JsonNode context=stage.frame==null?evidence.wordSourceScopeContext(session.projectId,pointer.getDocumentId(),pointer.getProjectionSha256(),pointer.getCanonicalChunkId(),session.module)
+                    :stage.frame.wordSourceScopeContext(pointer.getDocumentId(),pointer.getProjectionSha256(),pointer.getCanonicalChunkId(),session.module);
+            if(context!=null)contexts.put(chunk.getId(),context);
+        }}
+        complete(session,loaded);return contexts;
+    }
+
+    private List<VectorStore.SearchHit> withWordSourceScopes(Session session,List<VectorStore.SearchHit> hits){
+        Map<String,Chunk> selected=new LinkedHashMap<>();
+        for(VectorStore.SearchHit hit:hits)for(JsonNode member:JsonUtils.mapper().valueToTree(hit.getPayload().get("canonicalMembers"))){
+            Chunk chunk=session.byId.get(member.path("id").asText());require(chunk!=null&&member.equals(chunk.getCanonicalPayload()),"advisory model member differs from canonical session");selected.put(chunk.getId(),chunk);
+        }
+        Map<String,JsonNode> contexts=wordSourceScopeContexts(session,new ArrayList<>(selected.values()));
+        for(VectorStore.SearchHit hit:hits){Object value=hit.getPayload().get("canonicalEvidence");require(value instanceof List,"advisory model pointers required");
+            for(Object raw:(List<?>)value){require(raw instanceof EvidencePointer,"advisory model pointer type differs");EvidencePointer pointer=(EvidencePointer)raw;
+                JsonNode context=contexts.get(pointer.getCanonicalChunkId());if(context!=null)pointer.setNativeWordSourceScopesContext(context.deepCopy());
+            }
+        }
+        return hits;
+    }
+
     /** One ranked hit carries the whole observed unit; its members receive no invented rerank scores. */
     public List<VectorStore.SearchHit> adviceHits(Session session,String question) {
         JsonNode result=response(session,question,null);List<VectorStore.SearchHit> out=new ArrayList<>();
         for(int i=0;i<result.path("hits").size();i++) {
             JsonNode hit=result.path("hits").get(i),unit=result.path("sourceUnits").path("units").get(i);
             out.add(businessHit(session,hit.path("id").asText(),unit,hit.path("score").asDouble(),"reranked_seed"));
-        }return out;
+        }return withWordSourceScopes(session,out);
     }
     /** Pure observed closure for explicitly selected origins in this same immutable corpus. */
     public List<VectorStore.SearchHit> sourceHits(Session session,List<String> originIds){
@@ -269,7 +307,7 @@ public class OerBusinessEvidence {
                     :VettingRetrievalSourceUnits.TYPED_PARENT_POLICY.equals(policy)?OerCanonicalSourceUnits.resolve(parents,parents.get(id))
                     :OerCanonicalSourceUnits.resolveObserved(parents,parents.get(id));if(used.add(unit.path("unitId").asText()))
                 out.add(businessHit(session,id,unit,0d,"context_only"));
-        }current(session);return out;
+        }current(session);return withWordSourceScopes(session,out);
     }
     /** Deterministic checks traverse only accepted observations, retaining source-bound original anchors. */
     public List<VettingRuleEngine.Source> ruleSources(Session session){

@@ -2,14 +2,14 @@ export type ReviewObject = Record<string, any>
 export interface ReviewSource extends ReviewObject {
   id: string; sourceDocumentId: number | string; docId: string; editionId: string
   fileKey: string | null; fileName: string; format: 'docx' | 'pdf' | 'unsupported'
-  sourceSha256: string; sourceHash?: string; analysisRevision?: string; parseStatus: string; canEdit: boolean
+  sourceSha256: string; sourceHash?: string; analysisRevision?: string | null; evidenceStatus?: 'bound' | 'invalid' | 'missing'; parseStatus: string; canEdit: boolean
 }
 export interface ReviewParagraph { id: string; ordinal: number; text: string; paragraphSha256: string; sourceSha256: string }
 export interface ReviewReading extends ReviewSource {
   paragraphs: ReviewParagraph[]; sourceMembers: ReviewObject[]; guidanceNotes: ReviewObject[]
   markerCandidates: ReviewObject[]; groups: ReviewObject[]; conditions: ReviewObject[]; issues: ReviewObject[]; blocks: ReviewObject[]
 }
-export interface ReviewSpan { paragraphId: string; paragraphSha256: string; start: number; end: number; expectedText: string; sourceSha256?: string; channel?: 'editableText' }
+export interface ReviewSpan { paragraphId: string; paragraphSha256: string; start: number; end: number; expectedText: string; sourceSha256?: string; channel?: 'editableText'; operation?: 'insert' }
 export interface ReviewAnchor extends ReviewObject { docId: string; text: string; sourceSha256: string; native?: ReviewSpan | { spans: ReviewSpan[] }; observation?: ReviewObject }
 export interface ReviewVariable extends ReviewObject {
   id: string; nameZh: string; nameEn: string; type: ReviewObject; role: ReviewObject; status: string

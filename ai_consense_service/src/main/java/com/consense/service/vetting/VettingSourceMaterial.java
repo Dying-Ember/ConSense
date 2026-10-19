@@ -28,6 +28,10 @@ public final class VettingSourceMaterial {
     }
 
     static List<Map<String,Object>> project(List<Chunk> selected,FixedVettingReferences fixedReferences,List<com.consense.domain.SourceDocument> documents) {
+        return project(selected,fixedReferences,documents,Collections.emptyMap());
+    }
+
+    static List<Map<String,Object>> project(List<Chunk> selected,FixedVettingReferences fixedReferences,List<com.consense.domain.SourceDocument> documents,Map<String,com.fasterxml.jackson.databind.JsonNode> wordSourceScopes) {
         Objects.requireNonNull(selected,"Selected source chunks are required");
         Set<String> ids=new HashSet<>();Map<List<String>,Integer> blocks=new HashMap<>(),positions=new HashMap<>();
         for(Chunk c:selected) {
@@ -39,7 +43,7 @@ public final class VettingSourceMaterial {
             }
         }
         VettingNativeCellSlices.Observation cellObservations=VettingNativeCellSlices.observe(selected);
-        OerModelMaterial.Request modelMaterial=documents==null?new OerModelMaterial.Request():new OerModelMaterial.Request(documents);
+        OerModelMaterial.Request modelMaterial=new OerModelMaterial.Request(documents,wordSourceScopes);
         Map<String,Map<String,Object>> fixedExcerpts=fixedReferences.modelExcerpts(selected);
         List<Map<String,Object>> excerpts=new ArrayList<>();
         for(Chunk c:selected) {
