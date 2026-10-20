@@ -1,3 +1,37 @@
+<!-- unified-progress37:start -->
+**2026-10-21：联合595逻辑用例已获同源码跨两窗成功覆盖；SL／mixed-source的29文件已精确采用，尚未部署。SCT真页眉候选80项通过，新完整生成98.578秒／29页，三处字形完整性保持，但第4页正文仅剩“Page)”的回退仍待修，因此Drafting12文件未采用。整体工程估计仍约80%，Goal active。**
+
+595包含参数化调用身份：主轮594pass／1error，缺执行输出目录的一项在完全相同962来源文件的补窗1pass；保留原exit1／error，不能写成单窗595全绿。SL Java126／Python mixed63实际通过，旧正确54份unit摘要保持；Root只采用SL19＋mixed Java7＋Python3（12替换／17新增），三份未知untracked保持。当前后端仍formal18，无新增模型／共享SQL／服务启停。SCT新29页已fresh raster，Root实看联系表和4处原图，4／26页短尾FAIL；独立逐页检查与原生Word未验；Advisory最新反馈修复真实复验、Vetting内容及赛方版式、全部22,214技术页和DB＋CAS＋索引比赛包均继续保留。详细证据见[本轮实际进展](#progress37联合回归与独立oer修复采用)；以下progress36及更早块均为历史时点。
+<!-- unified-progress37:end -->
+
+## progress37：联合回归与独立OER修复采用
+
+### 软件回归及实际采用范围
+
+统一候选的冻结分母为595个逻辑用例身份／57类，包含参数化调用，不是595个Java方法定义。主窗595执行为594pass／1error／0failure／0skip，93.109秒；唯一error是`OerModelMaterialCandidateTest#actualAdviceWriterKeepsCompleteBodyWithoutSerializingWholeSourceCaptureForEachMember`保存replay时缺输出目录。只补执行目录、产品与测试字节不变的补窗为该同一身份1pass，28.094秒。两个项目各962文件逐份直接字节相同，原主窗exit1／error及terminalShapeMatchesPlan=false保留。冻结pattern对149条参数化raw名称精确映射，0缺失／歧义／重复；总596执行，595个唯一身份均有成功证据。两窗均自然Job0、输入保持、无重试。独立审查还对去重19419输入及66锚点／报告作前后鲜核，19485文件保持。
+
+Root汇总票：`.local/main-integration-round19-preparation04/root-combined-acceptance01.json`，SHA256 `4229108effa6993eb244939a6e44e86ed38b89ae67dde985cebba377b4f8309c`；独立全量审查`.local/sl-round19-aggregate-review01/review.json`，SHA256 `bdfd79695d6939047f236c54e9ce9eb91af477d15d3856bbcaa559876953c1a4`。这些是私有统一候选的软件证据，不授采用后主树完整595、真实模型、原件质量或业务通过。
+
+本轮实际采用29文件：SL19＋mixed Java7＋Python3，12替换／17新增；所有941原基线及29旧目标／新增不存在均在写入前核验，候选与实际tested／统一项目字节一致，逐目标采用后再核newSHA。三份预先存在的未知untracked保持。采用票`.local/main-adoption-round19-actual01/root-adoption-receipt.json`，SHA256 `586fca0021033c7113297fb6af898f4716f0beee895a3ec7727315182b75a3f9`。Drafting12候选因下述新分页回退未采用；运行仍formal18，本轮0模型／0共享SQL／0服务启停。
+
+### OER／SL首个接缝修复及保留边界
+
+同源native正文／表格的`nativeTableMetadataVersion`描述单元形状，不再在已经严格验证的native root中被误当不同文件身份。Python与Java三消费者仅使用比较键；原始sourceIdentity／上下文ID／payload保持，未知或普通recipe继续旧严格tuple。Java RED2与GREEN6实际完成，GREEN6为31.469秒；Python RED2保留，fixture准备失败及59pass／4error旧票保留，最小隔离fixture生命周期修复后GREEN63／63（18.219秒），54份旧实际unit摘要逐份保持。新增六用例的普通无env资源发现又单独通过6项，以及6显式坏路径／坏hash门和3有效资源读；这些六身份属于原63，不重复增加分母。新测试根只在未配置时采用repo资源；显式空／错误配置仍失败。
+
+SL Java完整表头logicalRowCount=0及表组关联条件的兼容修复实际RED4／GREEN126；GREEN126为38.829秒、0failure/error/skip、3998pins保持／自然Job0。原116个测试主体／断言保持，只在私有跨页fixture显式声明原本缺失的summary／chunk页集合。四份authored正向wire保存字节fresh冷读4/4；五个负控分属原2、独立核实的首门拒绝1、后续2，并非同一窗9/9。原辅助函数失败、过晚错误码预期、118pass／1failure／5skip的准备门失败均保留。接受票`.local/sl-table-java-feedback02/green-window01/root-acceptance01.json` SHA256 `2fc9352fd7b05d5a9123f404a7e49afb2e679386e2836053c7fe5fd75a7b2c72`。
+
+已保存numeric实际fixture另作只读cold：40.203秒，6次fresh registry load、2次显式hydrate、4个complete source units，0produce／compose／publish／HTTP／SQL；原producer观察竞争的FAILED票不重写。票`.local/sl-numeric-cold-read01/outer-runner02/cold/receipt.json`。这不证明Java实际numeric注册或完整表格已被真实模型正确消费。
+
+七版代表来源候选03的三个authoring脚本已实际完成；原postobserver不允许合法新增顶层revision导致的FAILED_PARTIAL_REGENERATION票保留，不重新生成。最小fresh只读后继对615原输入／75产物核完：7来源／14页／37093 observed glyph、16300 target glyph、16288正文glyph、293正文行、16274 pairs／331 separators（279换行／52空格）及2575 item4 glyph，身份与旧scope／reference／adoption／条件unknown语义保持。票`.local/sl-real-seven-source-candidate03-postread01/execution/receipt.json` SHA256 `405fae301fdd52250856903c4ac9ceba1874a95221225cf46b619a91172ab879`。这只授保存产物来源身份修复，不授affine／全部来源质量／canonical采用；全部22214技术页及完整DB／CAS／索引比赛包仍未验收。
+
+### Drafting：真实页眉候选已完整生成，新的分页回退保持FAIL
+
+源绑定SCT2a／2b的27／21个标题改为实际first／default header，保共享原footer／PAGE、cover、TO及appendix边界、原p／sectPr节点；应用在clone上先验证全部载体，失败保可用base与SKIPPED账。实际RED2精确复现缺真页眉；fixture family及default footer接线错误的两旧GREEN失败票保留，最小fixture修正、产品／断言不变后GREEN80／80，54.609秒、8703pins保持／自然Job0。票`.local/drafting-sct-true-header-fixture-successor03/root-acceptance01.json` SHA256 `0de53d210644f018ae5042ba396591317802503b35e200dd8393b6d595d5fdf7`。
+
+full08采用946份当前80来源＋1最小完整生成harness，947项目来源；该harness仅将SCT源part预期精确改为header1＋header2，逆patch完整恢复旧harness。Root单次实际执行98.578秒，1pass、0failure/error/skip，16GiB堆／24GiB Job，30654pins保持／自然Job0，完整三文件生成＋一次SCT转换成功。新PDF29页，preview／export同字节；页数不作放行门。票`.local/drafting-sct-full-generation08-preparation03/candidate/execution/owned-receipt.json`。
+
+来源绑定只读后验三目标P490／P496／P685分别在新11／11／16页完整；合法重复P642在15页独立保持；469bindings、465 Word／PDF CS及同4既有删除保持。票`.local/drafting-sct-full-generation08-preparation03/source-bound-target-observation08.json` SHA256 `d18a694cf243096d1ba18db62df05c55cb3017f3b1619f67108bd9e77bd122f9`。但新第4页提取正文只剩孤立`Page)`（整页162 UTF16，含header/footer），旧07第4页有完整SCT1(4)(b)正文，已作为新分页回退登记。新29页已单次fresh raster：4.203秒native／5.922秒总计，352输入pins保持／自然Job0，29PNG及3张完整contact均保留。Root已实看三张contact和4／7／13／26原图，确认第4页仅`Page)`，第26页也仅`accordance with inflation or deflation.`；两页为近空正文短尾FAIL。真实页眉已显示在续文之前，4／26短尾仍需来源定位后修复。Root视觉票`.local/sct08-raster29-preparation01/root-visual-review01.json`，raster票`.local/sct08-raster29-preparation01/native-raster/execution/owned-receipt.json` SHA256 `5b5b17d3f1775a7001add5d9be274e07d893e56270a8ff2621d52c8456754496`。全部29原图逐页视觉与原生Word仍待验，最终版式未通过，因此12个Draft候选文件保持私有，不随本轮29文件采用。
+
 <!-- unified-progress36:start -->
 **2026-10-21：SCT候选69项回归全通过，完整三文件生成及SCT转换完成，三处掉字按来源位置及新27页逐张复核恢复；6／12页标题版式仍待修。SL Java最小后继实际116/116、0失败／错误／跳过，原111pass／1failure／4skip保留。候选未部署，整体工程估计仍约80%，Goal active。**
 <!-- unified-progress36:end -->

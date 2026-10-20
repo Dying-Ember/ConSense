@@ -15,3 +15,7 @@ ai_consense_service/src/main/resources/advice/contract-system-20261014.md -text
 ai_consense_service/docs/specs/inputs/contract-vetting-system-prompt-product-20261015.md -text
 ai_consense_service/src/main/resources/vetting/contract-system-competition-20261015.md -text
 ai_consense_service/src/main/resources/vetting/checklist-logical-groups-v1.json -text
+# Native PDF consumer fixtures bind exact saved UTF-8 bytes across checkouts.
+ai_consense_service/src/test/resources/oer/native-pdf-actual-sl/** -text
+ai_consense_service/src/test/resources/oer/native-pdf-mixed-family/** -text
+ai_consense_service/src/test/resources/oer/native-pdf-table-condition/** -text

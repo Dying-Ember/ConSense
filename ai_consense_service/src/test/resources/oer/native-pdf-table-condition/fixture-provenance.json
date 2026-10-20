@@ -1,0 +1,60 @@
+{
+  "actualProducerOutputsVerified": true,
+  "cases": {
+    "cross-page-condition-before": {
+      "byteCount": 72434,
+      "coldHydrateEqualsInternal": true,
+      "dualBundleSha256": "469227517aa16e266e45611cdb4c8c577f332837bfe815fa9e692830e34c1d23",
+      "filename": "cross-page-condition-before-public-wire.json",
+      "nativeBundleSha256": "f6378fbe0b5b3842632d071468c63fe1b766f2b1afdd8a9ac65c996f0ef047db",
+      "newActualProducerCalled": true,
+      "sha256": "caadec5c393c290f3a72468c5dff57fe0ceb6c7c55e397498030d6de8f21bf06",
+      "sourceRevisionSha256": "8537c9d0bdd417dc9fbc42f8b3426ccaef2a13fb9d88412fc218090fd01134fb",
+      "sourceSha256": "dfb33ca0a58d0c347b55e0bfe9d1c3b255da1e8e53edc4e134d29ba9114725ce"
+    },
+    "header-only": {
+      "byteCount": 46962,
+      "coldHydrateEqualsInternal": true,
+      "dualBundleSha256": "469227517aa16e266e45611cdb4c8c577f332837bfe815fa9e692830e34c1d23",
+      "filename": "header-only-public-wire.json",
+      "nativeBundleSha256": "f6378fbe0b5b3842632d071468c63fe1b766f2b1afdd8a9ac65c996f0ef047db",
+      "newActualProducerCalled": true,
+      "sha256": "46f91f7ba08ad14f0ac69b938ed6f3db6c857b8b508885ae519ca03d09d29157",
+      "sourceRevisionSha256": "8537c9d0bdd417dc9fbc42f8b3426ccaef2a13fb9d88412fc218090fd01134fb",
+      "sourceSha256": "dfb33ca0a58d0c347b55e0bfe9d1c3b255da1e8e53edc4e134d29ba9114725ce"
+    },
+    "same-page-condition-after": {
+      "byteCount": 77860,
+      "coldHydrateEqualsInternal": true,
+      "dualBundleSha256": "469227517aa16e266e45611cdb4c8c577f332837bfe815fa9e692830e34c1d23",
+      "filename": "same-page-condition-after-public-wire.json",
+      "nativeBundleSha256": "f6378fbe0b5b3842632d071468c63fe1b766f2b1afdd8a9ac65c996f0ef047db",
+      "newActualProducerCalled": true,
+      "sha256": "89986ef474ec356eea2ce754e443987badacc9a403f36a90a95b49009c6e5996",
+      "sourceRevisionSha256": "8537c9d0bdd417dc9fbc42f8b3426ccaef2a13fb9d88412fc218090fd01134fb",
+      "sourceSha256": "dfb33ca0a58d0c347b55e0bfe9d1c3b255da1e8e53edc4e134d29ba9114725ce"
+    },
+    "same-page-condition-before": {
+      "byteCount": 78187,
+      "coldHydrateEqualsInternal": true,
+      "dualBundleSha256": "469227517aa16e266e45611cdb4c8c577f332837bfe815fa9e692830e34c1d23",
+      "filename": "same-page-condition-before-public-wire.json",
+      "nativeBundleSha256": "f6378fbe0b5b3842632d071468c63fe1b766f2b1afdd8a9ac65c996f0ef047db",
+      "newActualProducerCalled": true,
+      "sha256": "7f287f7ad0b9b4704232d156edb633545f01542efc2c3bea878cbdbb1ccb6b99",
+      "sourceRevisionSha256": "8537c9d0bdd417dc9fbc42f8b3426ccaef2a13fb9d88412fc218090fd01134fb",
+      "sourceSha256": "dfb33ca0a58d0c347b55e0bfe9d1c3b255da1e8e53edc4e134d29ba9114725ce"
+    }
+  },
+  "legalSemanticsAccepted": false,
+  "originalNegativeControlsPassed": 2,
+  "originalPositiveProducerCalls": 4,
+  "originalProducerWindowOverallPass": false,
+  "recoveryExplicitColdHydrateCalls": 4,
+  "recoveryProducerCalls": 0,
+  "recoveryPublishCalls": 0,
+  "remainingNegativeControlsAtThisColdPhase": 3,
+  "schema": "consense.sl-table-condition-public-fixtures.v1",
+  "scope": "Four saved actual producer outputs over authored original/native/dual inputs. Original overall window FAIL is preserved; a separate fresh Store cold-hydrated each saved output. Java tests saved public declarations only.",
+  "sourceQualityAccepted": false
+}

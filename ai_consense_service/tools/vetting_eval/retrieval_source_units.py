@@ -23,6 +23,46 @@ ATTACHMENT_SCOPE_FIELDS = (*SCOPE_FIELDS, 'originalSourceSha256', 'projectionRev
                            'sourceRevisionSha256', 'sourceSha256', 'scopeSha256', 'producerKind')
 
 
+# These are root identities, unlike nativeTableMetadataVersion, which names a
+# particular complete unit's prose/table shape. Never rewrite its raw value or
+# the emitted sourceIdentity; use this comparison key only for a known, fully
+# source-bound native public root. Unknown/ordinary shapes keep the old tuple.
+_NATIVE_ROOT_HASHES = ('originalSourceSha256', 'sourceSha256', 'projectionRevisionSha256',
+                       'sourceRevisionSha256', 'scopeSha256')
+_NATIVE_ROOT_FIELDS = ('producerKind', 'storageShape', 'module', *_NATIVE_ROOT_HASHES,
+                       'sourceEditionId', 'slUnitScopeManifestSha256')
+
+
+def _source_scope(p, fields):
+    values = tuple(p.get(field) for field in fields)
+    native = (p.get('producerKind') == 'native_pdf'
+        and p.get('storageShape') == 'cas-native-pdf-joint-adopted-public-v1'
+        and p.get('metadataVersion') in ('source-reviewed-native-pdf-cas-public-projection-v1',
+                                       'source-reviewed-native-pdf-cas-public-projection-v2'))
+    family = (p.get('producerKind') == 'native_pdf_source_family'
+        and p.get('storageShape') == 'cas-same-original-native-pdf-complete-components-public-v1'
+        and p.get('metadataVersion') == 'same-original-complete-native-pdf-components-v1')
+    expected = {'whole_text_unit': 'native-pdf-no-table-adoption-v1',
+                'whole_table_group': 'source-reviewed-native-pdf-whole-table-groups-v1'}
+    eligible = p.get('eligibleModules')
+    aliases = (p.get('sourceEditionId'), p.get('slUnitScopeManifestSha256'))
+    if (not (native or family) or p.get('nativeTableMetadataVersion') != expected.get(p.get('canonicalScope'))
+            or p.get('canonicalScope') not in expected or p.get('module') not in ('vetting', 'advisory')
+            or not isinstance(eligible, list) or not eligible
+            or any(module not in ('vetting', 'advisory') for module in eligible)
+            or len(set(eligible)) != len(eligible) or p['module'] not in eligible
+            or any(not isinstance(p.get(field), str) or not re.fullmatch('[0-9a-f]{64}', p[field])
+                   for field in _NATIVE_ROOT_HASHES)
+            or p['originalSourceSha256'] != p['sourceSha256']
+            or not (aliases == (None, None) or isinstance(aliases[0], str) and aliases[0].strip()
+                    and isinstance(aliases[1], str) and re.fullmatch('[0-9a-f]{64}', aliases[1]))):
+        return values
+    root = {'kind': 'exact-native-pdf-root-unit-shapes-v1',
+            **{field: p.get(field) for field in _NATIVE_ROOT_FIELDS}, 'eligibleModules': eligible}
+    comparison = 'exact-native-pdf-root-unit-shapes-v1:' + digest(root)
+    return tuple(comparison if field == 'nativeTableMetadataVersion' else p.get(field) for field in fields)
+
+
 class SourceUnits:
     def __init__(self, parents):
         self.parents = {p['id']: p for p in parents}
@@ -36,7 +76,7 @@ class SourceUnits:
         self.attachment_cache = {}
         self.attachment_graph = None
         for p in parents:
-            key = tuple(p.get(k) for k in SCOPE_FIELDS)
+            key = _source_scope(p, SCOPE_FIELDS)
             self.scopes[p['id']] = key
             self.docs.setdefault(p.get('documentId'), set()).add(key)
             if p.get('clauseId'):
@@ -46,7 +86,7 @@ class SourceUnits:
 
     def source(self, p):
         key = self.scopes[p['id']]
-        if (any(not isinstance(x, str) or not x.strip() for x in key)
+        if (any(not isinstance(p.get(field), str) or not p[field].strip() for field in SCOPE_FIELDS)
                 or not re.fullmatch('[0-9a-f]{64}', p['sourceHash'])
                 or not re.fullmatch('[0-9a-f]{64}', p['sourceQualityHash'])
                 or p['role'] not in ('tender', 'standard', 'project_fact', 'package_manifest')
@@ -136,7 +176,7 @@ class SourceUnits:
 
     @staticmethod
     def hierarchy_scope(p):
-        return tuple(p.get(k) for k in HIERARCHY_SCOPE_FIELDS)
+        return _source_scope(p, HIERARCHY_SCOPE_FIELDS)
 
     def _build_hierarchy(self):
         """Check declared whole-unit edges; never infer ancestry from labels."""
@@ -297,7 +337,7 @@ class SourceUnits:
 
     @staticmethod
     def attachment_scope(p):
-        return tuple(p.get(k) for k in ATTACHMENT_SCOPE_FIELDS)
+        return _source_scope(p, ATTACHMENT_SCOPE_FIELDS)
 
     def _attachment_declaration(self, owner, relation, left, right):
         """Validate the two existing producer shapes, never infer ownership."""

@@ -38,6 +38,12 @@ public final class CanonicalEvidenceDtos {
         /** An absent optional table group remains Java null through model-view transport. */
         @JsonSetter(nulls=Nulls.SKIP)
         private JsonNode tableGroup;
+        /** Whole native PDF topology stays a source-bound CAS pointer plus complete summary. */
+        @JsonInclude(JsonInclude.Include.NON_NULL)
+        @JsonSetter(nulls=Nulls.SKIP)
+        private JsonNode nativeTableGroupsRef,nativeTableSummary;
+        @JsonInclude(JsonInclude.Include.NON_NULL)
+        private String sourceEditionId,sourceUnitId,slUnitScopeManifestSha256;
         /** Independently verified full original page assets, never provider model input aliases. */
         @JsonSetter(nulls=Nulls.SKIP)
         private JsonNode sourcePageRenderRefs,sourceRenderCaptureCompleteness,sourceRenderLimitations;

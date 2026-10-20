@@ -25,18 +25,23 @@ final class OerCanonicalHierarchyContext {
         for(String field:REVISION_FIELDS) out.set(field,OerCanonicalSourceUnits.nullable(parent,field));
         return out;
     }
+    private static ObjectNode scope(JsonNode parent) {
+        ObjectNode out=OerCanonicalSourceUnits.scopeIdentity(parent);
+        for(String field:REVISION_FIELDS) out.set(field,OerCanonicalSourceUnits.nullable(parent,field));
+        return out;
+    }
     private void invalid(JsonNode key,String reason,Collection<String> ids) {
         if(ids.isEmpty())scopeErrors.putIfAbsent(key,reason);
         else for(String id:ids){associated.add(id);nodeErrors.putIfAbsent(id,reason);}
     }
     private void build() {
         Map<JsonNode,Map<JsonNode,List<JsonNode>>> nodes=new LinkedHashMap<>();
-        for(JsonNode p:parents.values())if(nativePdf(p))nodes.computeIfAbsent(identity(p),k->new LinkedHashMap<>())
+        for(JsonNode p:parents.values())if(nativePdf(p))nodes.computeIfAbsent(scope(p),k->new LinkedHashMap<>())
                 .computeIfAbsent(OerCanonicalSourceUnits.nullable(p,"unitId"),k->new ArrayList<>()).add(p);
         Map<String,Set<String>> incoming=new LinkedHashMap<>();
         Map<List<Object>,JsonNode> edges=new LinkedHashMap<>();
         for(JsonNode owner:parents.values()) {
-            if(!nativePdf(owner))continue;JsonNode key=identity(owner);
+            if(!nativePdf(owner))continue;JsonNode key=scope(owner);
             for(JsonNode relation:owner.path("relations")) {
                 if(!"parent".equals(relation.path("type").asText())||!"between_whole_units".equals(relation.path("scope").asText()))continue;
                 active.add(key);
@@ -66,22 +71,22 @@ final class OerCanonicalHierarchyContext {
                 incoming.computeIfAbsent(childId,k->new LinkedHashSet<>()).add(parentId);associated.add(childId);associated.add(parentId);
             }
         }
-        for(Map.Entry<String,Set<String>> entry:incoming.entrySet())if(entry.getValue().size()!=1){Set<String> boundary=new LinkedHashSet<>(entry.getValue());boundary.add(entry.getKey());invalid(identity(parents.get(entry.getKey())),"hierarchy_multiple_whole_unit_parents",boundary);}
+        for(Map.Entry<String,Set<String>> entry:incoming.entrySet())if(entry.getValue().size()!=1){Set<String> boundary=new LinkedHashSet<>(entry.getValue());boundary.add(entry.getKey());invalid(scope(parents.get(entry.getKey())),"hierarchy_multiple_whole_unit_parents",boundary);}
         Set<String> visited=new HashSet<>(),visiting=new HashSet<>();List<String> path=new ArrayList<>();
         for(String id:parents.keySet())if(associated.contains(id))visit(id,visited,visiting,path);
     }
     private void visit(String id,Set<String> visited,Set<String> visiting,List<String> path) {
-        if(visiting.contains(id)){invalid(identity(parents.get(id)),"hierarchy_whole_unit_cycle",path.subList(path.indexOf(id),path.size()));return;}
+        if(visiting.contains(id)){invalid(scope(parents.get(id)),"hierarchy_whole_unit_cycle",path.subList(path.indexOf(id),path.size()));return;}
         if(visited.contains(id))return;visiting.add(id);path.add(id);
         for(String child:children.getOrDefault(id,Collections.emptyMap()).keySet())visit(child,visited,visiting,path);
         visiting.remove(id);path.remove(path.size()-1);visited.add(id);
     }
 
     ObjectNode resolve(JsonNode seed,JsonNode observed) {
-        JsonNode key=identity(seed);if(!nativePdf(seed)||!active.contains(key))return null;
+        JsonNode key=scope(seed);if(!nativePdf(seed)||!active.contains(key))return null;
         List<String> base=new ArrayList<>();observed.path("requiredMemberIds").forEach(id->base.add(id.asText()));
         if(!scopeErrors.containsKey(key)&&base.stream().noneMatch(associated::contains))return null;
-        ObjectNode out=JsonUtils.mapper().createObjectNode();out.put("policy",POLICY);out.put("status","unknown");out.putNull("reason");out.set("sourceIdentity",key);
+        ObjectNode out=JsonUtils.mapper().createObjectNode();out.put("policy",POLICY);out.put("status","unknown");out.putNull("reason");out.set("sourceIdentity",identity(seed));
         out.set("seedObservedUnitId",observed.path("unitId"));ArrayNode roots=out.putArray("rootWholeUnitIds");
         for(Map.Entry<String,JsonNode> entry:parents.entrySet())if(base.contains(entry.getKey()))roots.add(OerCanonicalSourceUnits.nullable(entry.getValue(),"unitId"));
         for(String field:Arrays.asList("requiredMemberIds","members","memberPayloadSha256","edgeDeclarations","blockIds","observedRanges"))out.putArray(field);
@@ -98,7 +103,7 @@ final class OerCanonicalHierarchyContext {
             }
             for(String id:needed) {
                 JsonNode member=parents.get(id);
-                observed(identity(member).equals(key)&&member.path("sourceQuality").equals(seed.path("sourceQuality"))&&"whole_text_unit".equals(member.path("canonicalScope").asText()),"hierarchy_member_scope_quality_or_whole_unit_differs");
+                observed(scope(member).equals(key)&&member.path("sourceQuality").equals(seed.path("sourceQuality"))&&"whole_text_unit".equals(member.path("canonicalScope").asText()),"hierarchy_member_scope_quality_or_whole_unit_differs");
                 OerCanonicalSourceUnits.source(parents,member);OerCanonicalSourceUnits.mapped(member);
                 observed("complete_observed_unit".equals(OerCanonicalSourceUnits.resolveObserved(parents,member).path("status").asText()),"hierarchy_member_observed_unit_unknown");
             }
@@ -108,7 +113,7 @@ final class OerCanonicalHierarchyContext {
                 ObjectNode hash=hashes.addObject();hash.put("id",entry.getKey());hash.put("sha256",digest(member));
                 for(JsonNode part:member.path("parts"))blocks.add(part.path("blockId").asText());
             }
-            ArrayNode ranges=JsonUtils.mapper().createArrayNode();for(String block:blocks)ranges.add(OerCanonicalSourceUnits.blockRange(parents,OerCanonicalSourceUnits.identity(seed),block));
+            ArrayNode ranges=JsonUtils.mapper().createArrayNode();for(String block:blocks)ranges.add(OerCanonicalSourceUnits.blockRange(parents,OerCanonicalSourceUnits.scopeIdentity(seed),block));
             out.put("status","complete_observed_hierarchy_context");out.set("requiredMemberIds",ids);out.set("members",members);out.set("memberPayloadSha256",hashes);
             ArrayNode edgeRows=out.putArray("edgeDeclarations");declarations.values().forEach(edgeRows::add);blocks.forEach(out.putArray("blockIds")::add);out.set("observedRanges",ranges);
         }catch(OerCanonicalSourceUnits.ObservationUnknown unknown){out.put("reason",unknown.getMessage());}

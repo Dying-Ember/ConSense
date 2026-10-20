@@ -35,6 +35,21 @@ final class CanonicalJson {
         try {StringBuilder out=new StringBuilder();for(byte b:MessageDigest.getInstance("SHA-256").digest(bytes))out.append(String.format("%02x",b&255));return out.toString();}
         catch(Exception e){throw new IllegalStateException(e);}
     }
+    /** Hash a parsed declaration with the same binary64 spelling as the Python producer. */
+    static String nodeHash(com.fasterxml.jackson.databind.JsonNode value) {
+        try{return com.consense.common.Utf8.sha256(nodeCanonical(value));}
+        catch(IOException error){throw new CanonicalEvidenceException(org.springframework.http.HttpStatus.BAD_GATEWAY,"CANONICAL_JSON_INVALID");}
+    }
+    private static String nodeCanonical(com.fasterxml.jackson.databind.JsonNode value)throws IOException {
+        if(value.isObject()){Map<String,String> fields=new HashMap<>();java.util.Iterator<Map.Entry<String,com.fasterxml.jackson.databind.JsonNode>> rows=value.fields();while(rows.hasNext()){Map.Entry<String,com.fasterxml.jackson.databind.JsonNode> row=rows.next();fields.put(row.getKey(),nodeCanonical(row.getValue()));}return rawObject(fields);}
+        if(value.isArray()){List<String> values=new ArrayList<>();for(com.fasterxml.jackson.databind.JsonNode item:value)values.add(nodeCanonical(item));return rawArray(values);}
+        if(value.isFloatingPointNumber())return pythonFloat(value.asText());
+        if(value.isIntegralNumber())return value.bigIntegerValue().toString();
+        if(value.isTextual())return quote(value.asText());
+        if(value.isBoolean())return value.asBoolean()?"true":"false";
+        if(value.isNull())return "null";
+        throw new IOException("Unsupported parsed declaration node");
+    }
     /** Strict Python-produced wire only. Existing hash/read behavior above remains unchanged. */
     static String strictCanonical(String json) {
         try(JsonParser parser=FACTORY.createParser(json)) {

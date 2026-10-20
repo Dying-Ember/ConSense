@@ -1,3 +1,9 @@
+<!-- unified-progress37:start -->
+**2026-10-21：联合595逻辑用例已获同源码跨两窗成功覆盖；SL／mixed-source的29文件已精确采用，尚未部署。SCT真页眉候选80项通过，新完整生成98.578秒／29页，三处字形完整性保持，但第4页正文仅剩“Page)”的回退仍待修，因此Drafting12文件未采用。整体工程估计仍约80%，Goal active。**
+
+595包含参数化调用身份：主轮594pass／1error，缺执行输出目录的一项在完全相同962来源文件的补窗1pass；保留原exit1／error，不能写成单窗595全绿。SL Java126／Python mixed63实际通过，旧正确54份unit摘要保持；Root只采用SL19＋mixed Java7＋Python3（12替换／17新增），三份未知untracked保持。当前后端仍formal18，无新增模型／共享SQL／服务启停。SCT新29页已fresh raster，Root实看联系表和4处原图，4／26页短尾FAIL；独立逐页检查与原生Word未验；Advisory最新反馈修复真实复验、Vetting内容及赛方版式、全部22,214技术页和DB＋CAS＋索引比赛包均继续保留。详细证据见[本轮实际进展](testing/three-module-runtime-progress-20261021.md#progress37联合回归与独立oer修复采用)；以下progress36及更早块均为历史时点。
+<!-- unified-progress37:end -->
+
 <!-- unified-progress36:start -->
 **2026-10-21：SCT候选69项回归全通过，完整三文件生成及SCT转换完成，三处掉字按来源位置及新27页逐张复核恢复；6／12页标题版式仍待修。SL Java最小后继实际116/116、0失败／错误／跳过，原111pass／1failure／4skip保留。候选未部署，整体工程估计仍约80%，Goal active。**
 

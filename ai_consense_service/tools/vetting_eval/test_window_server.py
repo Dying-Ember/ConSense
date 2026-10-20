@@ -1,5 +1,6 @@
 """Fake inference/vector providers only; zero real model/index/query/DB calls."""
 import copy
+from contextlib import ExitStack
 import importlib.util
 import os
 from pathlib import Path
@@ -49,6 +50,9 @@ class ServerTests(unittest.TestCase):
     def setUp(self):
         self.environment=patch.dict(os.environ,{'CONSENSE_RETRIEVAL_GRANULARITY':'windows-v1'})
         self.environment.start();self.addCleanup(self.environment.stop)
+        # Authored local providers use the existing unconfigured-coordinator interface.
+        self.runtime_fakes=ExitStack();self.addCleanup(self.runtime_fakes.close)
+        self.runtime_fakes.enter_context(patch.object(s,'gpu_coordinator',return_value=None))
         self.tmp=tempfile.TemporaryDirectory();self.db=FakeDb();self.events=[];self.encodes=[];s.STATE=Path(self.tmp.name);s._projects={};s._selected_device='cpu';s.MODEL_DTYPE='float32'
         self.rt=WindowRuntime(s);self.rt.overlap=2
         self.rt.tokenizer=lambda kind:CharacterTokenizer();self.rt.identity=lambda kind:{'kind':kind,'tokenizerSha256':'test'}
@@ -59,7 +63,11 @@ class ServerTests(unittest.TestCase):
         self.old_settings=copy.deepcopy(s.MODEL_SETTINGS);s.MODEL_SETTINGS={'embedding':{'maxTokens':10,'batchSize':4},'reranker':{'maxTokens':10,'batchSize':4}}
         self.p=parent('abcdefghijklmnop',str(uuid.uuid4()),source_hash='a'*64)
     def tearDown(self):
-        s.MODEL_SETTINGS=self.old_settings;self.tmp.cleanup();self.environment.stop()
+        try:
+            s.MODEL_SETTINGS=self.old_settings
+        finally:
+            # Direct helper callers do not invoke unittest.doCleanups.
+            self.runtime_fakes.close();self.tmp.cleanup();self.environment.stop()
     def index(self,chunks=None,project='one'):return s.index(s.IndexRequest(projectId=project,chunks=[s.Chunk.model_validate(c)for c in(chunks or[self.p])]))
     def query(self,project='one',**kwargs):return s.retrieve(s.RetrieveRequest(projectId=project,query='q',limit=1,candidates=2,**kwargs))
     def test_index_points_are_windows_not_original_parents(self):

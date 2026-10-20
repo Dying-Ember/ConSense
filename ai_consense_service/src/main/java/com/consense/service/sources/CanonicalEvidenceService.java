@@ -320,6 +320,11 @@ public class CanonicalEvidenceService {
         }else pointer.setPhysicalPages(new ArrayList<>(pages(chunk.path("physicalPages"))));
         pointer.setEligibleModules(chunk.path("eligibleModules").deepCopy());pointer.setParts(chunk.path("parts").deepCopy());pointer.setSourceSpans(chunk.path("sourceSpans").deepCopy());
         pointer.setTableGroup(chunk.has("tableGroup")?chunk.get("tableGroup").deepCopy():null);pointer.setAssetRefs(chunk.path("assetRefs").deepCopy());pointer.setRelations(chunk.path("relations").deepCopy());
+        if(chunk.has("nativeTableGroupsRef"))pointer.setNativeTableGroupsRef(chunk.get("nativeTableGroupsRef").deepCopy());
+        if(chunk.has("nativeTableSummary"))pointer.setNativeTableSummary(chunk.get("nativeTableSummary").deepCopy());
+        if(chunk.has("sourceEditionId"))pointer.setSourceEditionId(chunk.path("sourceEditionId").asText());
+        if(chunk.has("sourceUnitId"))pointer.setSourceUnitId(chunk.path("sourceUnitId").asText());
+        if(chunk.has("slUnitScopeManifestSha256"))pointer.setSlUnitScopeManifestSha256(chunk.path("slUnitScopeManifestSha256").asText());
         pointer.setAdoption(chunk.has("adoption")?chunk.get("adoption").deepCopy():JsonUtils.mapper().nullNode());pointer.setSourceQuality(chunk.path("sourceQuality").deepCopy());pointer.setUnknowns(unknowns.deepCopy());
         return pointer;
     }

@@ -28,6 +28,7 @@ final class OerCanonicalAttachmentContext {
     OerCanonicalAttachmentContext(Map<String,JsonNode> parents){this(parents,false);}
     OerCanonicalAttachmentContext(Map<String,JsonNode> parents,boolean sharedNotes){this.parents=parents;this.sharedNotes=sharedNotes;build();}
     private static ObjectNode identity(JsonNode parent){ObjectNode out=OerCanonicalSourceUnits.identity(parent);for(String field:EXTRA_FIELDS)out.set(field,OerCanonicalSourceUnits.nullable(parent,field));return out;}
+    private static ObjectNode scope(JsonNode parent){ObjectNode out=OerCanonicalSourceUnits.scopeIdentity(parent);for(String field:EXTRA_FIELDS)out.set(field,OerCanonicalSourceUnits.nullable(parent,field));return out;}
     private static boolean nativePdf(JsonNode value){return "native_pdf".equals(value.path("producerKind").asText())||NativePdfSourceFamilyContract.PRODUCER.equals(value.path("producerKind").asText());}
     private static boolean text(JsonNode value){return value.isTextual()&&!value.asText().trim().isEmpty();}
     private static boolean sha(JsonNode value){return value.isTextual()&&value.asText().matches("[0-9a-f]{64}");}
@@ -40,7 +41,7 @@ final class OerCanonicalAttachmentContext {
             for(String field:Arrays.asList("originalSourceSha256","projectionRevisionSha256","sourceRevisionSha256","sourceSha256"))observed(sha(member.path(field)),"attachment_source_revision_identity_unknown");
             OerCanonicalSourceUnits.source(parents,member);OerCanonicalSourceUnits.mapped(member);
             boolean parts=true;for(JsonNode part:member.path("parts"))parts&=!part.has("sourceSha256")||part.path("sourceSha256").equals(member.path("sourceSha256"));
-            observed(identity(member).equals(identity(owner))&&member.path("sourceQuality").equals(owner.path("sourceQuality"))&&parts,"attachment_source_revision_quality_or_part_source_differs");
+            observed(scope(member).equals(scope(owner))&&member.path("sourceQuality").equals(owner.path("sourceQuality"))&&parts,"attachment_source_revision_quality_or_part_source_differs");
         }
         if(NativePdfSourceFamilyContract.PRODUCER.equals(owner.path("producerKind").asText()))observed(
                 NativePdfSourceFamilyContract.sameComponent(owner,left)&&NativePdfSourceFamilyContract.sameComponent(owner,right),"attachment_family_cross_component_unsupported");
@@ -74,7 +75,7 @@ final class OerCanonicalAttachmentContext {
     private void build(){
         Map<JsonNode,Map<JsonNode,List<JsonNode>>> nodes=new LinkedHashMap<>();
         for(JsonNode member:parents.values()){
-            ObjectNode scope=identity(member);boolean validShape=true;
+            ObjectNode scope=scope(member);boolean validShape=true;
             for(JsonNode value:scope)validShape&=value.isNull()||value.isTextual();
             if(!validShape){invalid(Collections.singleton(member.path("id").asText()),"attachment_source_identity_shape_invalid");continue;}
             JsonNode unit=OerCanonicalSourceUnits.nullable(member,"unitId");
@@ -91,7 +92,7 @@ final class OerCanonicalAttachmentContext {
                 if(errors.containsKey(owner.path("id").asText())||!text(relation.path("fromUnitId"))||!text(relation.path("toUnitId"))){
                     invalid(Collections.singleton(owner.path("id").asText()),"attachment_endpoint_identity_shape_invalid");continue;
                 }
-                JsonNode key=identity(owner);Map<JsonNode,List<JsonNode>> scopeNodes=nodes.get(key);
+                JsonNode key=scope(owner);Map<JsonNode,List<JsonNode>> scopeNodes=nodes.get(key);
                 List<JsonNode> lefts=scopeNodes.getOrDefault(OerCanonicalSourceUnits.nullable(relation,"fromUnitId"),Collections.emptyList()),rights=scopeNodes.getOrDefault(OerCanonicalSourceUnits.nullable(relation,"toUnitId"),Collections.emptyList());
                 Set<String> boundary=new LinkedHashSet<>();boundary.add(owner.path("id").asText());lefts.forEach(p->boundary.add(p.path("id").asText()));rights.forEach(p->boundary.add(p.path("id").asText()));
                 try{
@@ -127,15 +128,15 @@ final class OerCanonicalAttachmentContext {
                 }
             }
             for(String id:new ArrayList<>(needed)){
-                JsonNode member=parents.get(id);observed(!errors.containsKey(id),errors.get(id));observed(identity(member).equals(identity(seed))&&member.path("sourceQuality").equals(seed.path("sourceQuality")),"attachment_member_source_revision_or_quality_differs");
+                JsonNode member=parents.get(id);observed(!errors.containsKey(id),errors.get(id));observed(scope(member).equals(scope(seed))&&member.path("sourceQuality").equals(seed.path("sourceQuality")),"attachment_member_source_revision_or_quality_differs");
                 JsonNode exact=OerCanonicalSourceUnits.resolveObserved(parents,member);observed("complete_observed_unit".equals(exact.path("status").asText()),"attachment_member_observed_unit_unknown");exact.path("requiredMemberIds").forEach(value->needed.add(value.asText()));
             }
             SortedSet<String> blocks=new TreeSet<>();ArrayNode ids=JsonUtils.mapper().createArrayNode(),members=JsonUtils.mapper().createArrayNode(),hashes=JsonUtils.mapper().createArrayNode();
             for(Map.Entry<String,JsonNode> entry:parents.entrySet())if(needed.contains(entry.getKey())){
-                JsonNode member=entry.getValue();observed(!errors.containsKey(entry.getKey())&&identity(member).equals(identity(seed))&&member.path("sourceQuality").equals(seed.path("sourceQuality")),"attachment_exact_member_scope_quality_or_declaration_unknown");OerCanonicalSourceUnits.source(parents,member);OerCanonicalSourceUnits.mapped(member);
+                JsonNode member=entry.getValue();observed(!errors.containsKey(entry.getKey())&&scope(member).equals(scope(seed))&&member.path("sourceQuality").equals(seed.path("sourceQuality")),"attachment_exact_member_scope_quality_or_declaration_unknown");OerCanonicalSourceUnits.source(parents,member);OerCanonicalSourceUnits.mapped(member);
                 ids.add(entry.getKey());members.add(member.deepCopy());hashes.addObject().put("id",entry.getKey()).put("sha256",digest(member));for(JsonNode part:member.path("parts"))blocks.add(part.path("blockId").asText());
             }
-            ArrayNode ranges=JsonUtils.mapper().createArrayNode();for(String block:blocks)ranges.add(OerCanonicalSourceUnits.blockRange(parents,OerCanonicalSourceUnits.identity(seed),block));
+            ArrayNode ranges=JsonUtils.mapper().createArrayNode();for(String block:blocks)ranges.add(OerCanonicalSourceUnits.blockRange(parents,OerCanonicalSourceUnits.scopeIdentity(seed),block));
             out.put("status","complete_observed_attachment_context");out.set("requiredMemberIds",ids);out.set("members",members);out.set("memberPayloadSha256",hashes);out.set("observedRanges",ranges);blocks.forEach(out.putArray("blockIds")::add);
             ArrayNode edgeRows=out.putArray("edgeDeclarations");declarations.values().forEach(edge->{ObjectNode declared=edge.deepCopy();declared.remove("memberIds");edgeRows.add(declared);});
         }catch(OerCanonicalSourceUnits.ObservationUnknown unknown){out.put("reason",unknown.getMessage());}

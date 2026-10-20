@@ -1,0 +1,806 @@
+{
+  "actualReadDescriptors": [
+    {
+      "byteCount": 862352,
+      "identityScope": "exact_supplied_bytes",
+      "relativePath": "sha256/89/891e021e88a1b5d87bb334650cf93f99122b5286724441b4f8bc59bbff32475c.blob",
+      "schema": "consense.artifact-descriptor.v1",
+      "sha256": "891e021e88a1b5d87bb334650cf93f99122b5286724441b4f8bc59bbff32475c",
+      "storage": "content_addressed_disk"
+    },
+    {
+      "byteCount": 191436,
+      "identityScope": "canonical_json_object",
+      "relativePath": "sha256/64/640be9e0ed9fa01e781aaaeee77c28b80c5af5637c20f16f7e39b5d42d4cbcdd.blob",
+      "schema": "consense.artifact-descriptor.v1",
+      "sha256": "640be9e0ed9fa01e781aaaeee77c28b80c5af5637c20f16f7e39b5d42d4cbcdd",
+      "storage": "content_addressed_disk"
+    },
+    {
+      "byteCount": 530628,
+      "identityScope": "canonical_json_object",
+      "relativePath": "sha256/8d/8ddc4af1561876de09757698c4f012587343d299825f49b19d51d4a85297566a.blob",
+      "schema": "consense.artifact-descriptor.v1",
+      "sha256": "8ddc4af1561876de09757698c4f012587343d299825f49b19d51d4a85297566a",
+      "storage": "content_addressed_disk"
+    },
+    {
+      "byteCount": 11512,
+      "identityScope": "canonical_json_object",
+      "relativePath": "sha256/9f/9fd2f6888248ca9300f83887fee160f80898590db4663dbdaef0d8208ac01b4a.blob",
+      "schema": "consense.artifact-descriptor.v1",
+      "sha256": "9fd2f6888248ca9300f83887fee160f80898590db4663dbdaef0d8208ac01b4a",
+      "storage": "content_addressed_disk"
+    },
+    {
+      "byteCount": 2251,
+      "identityScope": "exact_supplied_bytes",
+      "relativePath": "sha256/df/dfb33ca0a58d0c347b55e0bfe9d1c3b255da1e8e53edc4e134d29ba9114725ce.blob",
+      "schema": "consense.artifact-descriptor.v1",
+      "sha256": "dfb33ca0a58d0c347b55e0bfe9d1c3b255da1e8e53edc4e134d29ba9114725ce",
+      "storage": "content_addressed_disk"
+    },
+    {
+      "byteCount": 255730,
+      "identityScope": "exact_supplied_bytes",
+      "relativePath": "sha256/5b/5bd11036e826502695fabea3eb9d4543435ea930da83aa12df576a69efd77d5c.blob",
+      "schema": "consense.artifact-descriptor.v1",
+      "sha256": "5bd11036e826502695fabea3eb9d4543435ea930da83aa12df576a69efd77d5c",
+      "storage": "content_addressed_disk"
+    },
+    {
+      "byteCount": 20043,
+      "identityScope": "exact_supplied_bytes",
+      "relativePath": "sha256/f8/f8f5237e671bccf50f0190d0f5d5883f034e2934a1c6cb3592a940a767f16e81.blob",
+      "schema": "consense.artifact-descriptor.v1",
+      "sha256": "f8f5237e671bccf50f0190d0f5d5883f034e2934a1c6cb3592a940a767f16e81",
+      "storage": "content_addressed_disk"
+    },
+    {
+      "byteCount": 21826,
+      "identityScope": "exact_supplied_bytes",
+      "relativePath": "sha256/9b/9b26fa1b7882c3814099c3389a23cdb562b440ac81f3797f0c0a31b94d91a93c.blob",
+      "schema": "consense.artifact-descriptor.v1",
+      "sha256": "9b26fa1b7882c3814099c3389a23cdb562b440ac81f3797f0c0a31b94d91a93c",
+      "storage": "content_addressed_disk"
+    },
+    {
+      "byteCount": 2975,
+      "identityScope": "exact_supplied_bytes",
+      "relativePath": "sha256/ea/ea838b4b475c244c042aa7caefbb1eb1596af3656355b538dc681275d836815c.blob",
+      "schema": "consense.artifact-descriptor.v1",
+      "sha256": "ea838b4b475c244c042aa7caefbb1eb1596af3656355b538dc681275d836815c",
+      "storage": "content_addressed_disk"
+    },
+    {
+      "byteCount": 1554,
+      "identityScope": "exact_supplied_bytes",
+      "relativePath": "sha256/f3/f31fafacaa359d71093f8aec986dd1274196245fa087df7e4f56010f919f9d03.blob",
+      "schema": "consense.artifact-descriptor.v1",
+      "sha256": "f31fafacaa359d71093f8aec986dd1274196245fa087df7e4f56010f919f9d03",
+      "storage": "content_addressed_disk"
+    },
+    {
+      "byteCount": 118129,
+      "identityScope": "exact_supplied_bytes",
+      "relativePath": "sha256/4e/4e2fb4517bf631d7d15e406efa6fb5923e5cd5d046097c94efef65a01b97cd93.blob",
+      "schema": "consense.artifact-descriptor.v1",
+      "sha256": "4e2fb4517bf631d7d15e406efa6fb5923e5cd5d046097c94efef65a01b97cd93",
+      "storage": "content_addressed_disk"
+    },
+    {
+      "byteCount": 76794336,
+      "identityScope": "exact_supplied_bytes",
+      "relativePath": "sha256/ab/ab15f23698f0510bba086088dd74af54dfccf4f970e6294cb349448d6d95d209.blob",
+      "schema": "consense.artifact-descriptor.v1",
+      "sha256": "ab15f23698f0510bba086088dd74af54dfccf4f970e6294cb349448d6d95d209",
+      "storage": "content_addressed_disk"
+    },
+    {
+      "byteCount": 118129,
+      "identityScope": "exact_supplied_bytes",
+      "relativePath": "sha256/2e/2e9837d0ea3b895a92c42e535db6bac50f3909b5fc532a28138ae58517115812.blob",
+      "schema": "consense.artifact-descriptor.v1",
+      "sha256": "2e9837d0ea3b895a92c42e535db6bac50f3909b5fc532a28138ae58517115812",
+      "storage": "content_addressed_disk"
+    },
+    {
+      "byteCount": 76844451,
+      "identityScope": "exact_supplied_bytes",
+      "relativePath": "sha256/b3/b38460d92a7b83fe987d5431d127a2d2a7b1b0d29bcef52471c4451b23885ef7.blob",
+      "schema": "consense.artifact-descriptor.v1",
+      "sha256": "b38460d92a7b83fe987d5431d127a2d2a7b1b0d29bcef52471c4451b23885ef7",
+      "storage": "content_addressed_disk"
+    },
+    {
+      "byteCount": 122768,
+      "identityScope": "exact_supplied_bytes",
+      "relativePath": "sha256/52/5256e084d5f6c7a34d076dd77abcbef9c6fe56d07bd1e9709651b642d7a333ca.blob",
+      "schema": "consense.artifact-descriptor.v1",
+      "sha256": "5256e084d5f6c7a34d076dd77abcbef9c6fe56d07bd1e9709651b642d7a333ca",
+      "storage": "content_addressed_disk"
+    },
+    {
+      "byteCount": 78928914,
+      "identityScope": "exact_supplied_bytes",
+      "relativePath": "sha256/07/072c169147ff421a4abcbad7607407dd77920383c4d209c391a86f1ced9e7562.blob",
+      "schema": "consense.artifact-descriptor.v1",
+      "sha256": "072c169147ff421a4abcbad7607407dd77920383c4d209c391a86f1ced9e7562",
+      "storage": "content_addressed_disk"
+    },
+    {
+      "byteCount": 118129,
+      "identityScope": "exact_supplied_bytes",
+      "relativePath": "sha256/f5/f5ed93d57946fb525cc825d9d593d14ab0763b7ae7b8cd94b280c1219d026bae.blob",
+      "schema": "consense.artifact-descriptor.v1",
+      "sha256": "f5ed93d57946fb525cc825d9d593d14ab0763b7ae7b8cd94b280c1219d026bae",
+      "storage": "content_addressed_disk"
+    },
+    {
+      "byteCount": 76641196,
+      "identityScope": "exact_supplied_bytes",
+      "relativePath": "sha256/59/59399f55e509336c16b6cbca03ba71d557306886fde8702b409d5eb88b629016.blob",
+      "schema": "consense.artifact-descriptor.v1",
+      "sha256": "59399f55e509336c16b6cbca03ba71d557306886fde8702b409d5eb88b629016",
+      "storage": "content_addressed_disk"
+    },
+    {
+      "byteCount": 1672,
+      "identityScope": "exact_supplied_bytes",
+      "relativePath": "sha256/08/08d8476977d5cb0b0f27c667ddf85e59fbe19c047c0226a6db5f3b5ca3732c1f.blob",
+      "schema": "consense.artifact-descriptor.v1",
+      "sha256": "08d8476977d5cb0b0f27c667ddf85e59fbe19c047c0226a6db5f3b5ca3732c1f",
+      "storage": "content_addressed_disk"
+    },
+    {
+      "byteCount": 1693568,
+      "identityScope": "exact_supplied_bytes",
+      "relativePath": "sha256/26/2678735cd97c97dc608e1bc322abdaae3f37b6325c62bbd5a20c2750e57773c1.blob",
+      "schema": "consense.artifact-descriptor.v1",
+      "sha256": "2678735cd97c97dc608e1bc322abdaae3f37b6325c62bbd5a20c2750e57773c1",
+      "storage": "content_addressed_disk"
+    },
+    {
+      "byteCount": 136,
+      "identityScope": "exact_supplied_bytes",
+      "relativePath": "sha256/37/372b1e56db56d4ae0959bc2e15b9e41f5c5198eee298efc38d8c1db8eee1972b.blob",
+      "schema": "consense.artifact-descriptor.v1",
+      "sha256": "372b1e56db56d4ae0959bc2e15b9e41f5c5198eee298efc38d8c1db8eee1972b",
+      "storage": "content_addressed_disk"
+    },
+    {
+      "byteCount": 1672,
+      "identityScope": "exact_supplied_bytes",
+      "relativePath": "sha256/3b/3bcea2f50fbbf599890e6b71bd3a7fae12cfe63b44baf6d88350b837a996bdc9.blob",
+      "schema": "consense.artifact-descriptor.v1",
+      "sha256": "3bcea2f50fbbf599890e6b71bd3a7fae12cfe63b44baf6d88350b837a996bdc9",
+      "storage": "content_addressed_disk"
+    },
+    {
+      "byteCount": 136,
+      "identityScope": "exact_supplied_bytes",
+      "relativePath": "sha256/45/45c8ff123eb40f37a21b17d794ca9a74734ee449ddde627dcf14fd41955deead.blob",
+      "schema": "consense.artifact-descriptor.v1",
+      "sha256": "45c8ff123eb40f37a21b17d794ca9a74734ee449ddde627dcf14fd41955deead",
+      "storage": "content_addressed_disk"
+    },
+    {
+      "byteCount": 132,
+      "identityScope": "exact_supplied_bytes",
+      "relativePath": "sha256/61/61417b3e0bed86ad6f26b12ced42dbd87f30d0527821e5145144f71464677b6f.blob",
+      "schema": "consense.artifact-descriptor.v1",
+      "sha256": "61417b3e0bed86ad6f26b12ced42dbd87f30d0527821e5145144f71464677b6f",
+      "storage": "content_addressed_disk"
+    },
+    {
+      "byteCount": 132,
+      "identityScope": "exact_supplied_bytes",
+      "relativePath": "sha256/6f/6f33c6f34b14c387dba1a620d13200583c6d7e7db8f5001da261f544e496fc40.blob",
+      "schema": "consense.artifact-descriptor.v1",
+      "sha256": "6f33c6f34b14c387dba1a620d13200583c6d7e7db8f5001da261f544e496fc40",
+      "storage": "content_addressed_disk"
+    },
+    {
+      "byteCount": 48000128,
+      "identityScope": "exact_supplied_bytes",
+      "relativePath": "sha256/72/7262e04816c92bdfaa80dda413d04ae323a8df2fd534b376d69c664d942edc96.blob",
+      "schema": "consense.artifact-descriptor.v1",
+      "sha256": "7262e04816c92bdfaa80dda413d04ae323a8df2fd534b376d69c664d942edc96",
+      "storage": "content_addressed_disk"
+    },
+    {
+      "byteCount": 192,
+      "identityScope": "exact_supplied_bytes",
+      "relativePath": "sha256/76/76363c046def83bb779d92cb3aacc3b68f1c6d89885e4fd828a6438c7558d724.blob",
+      "schema": "consense.artifact-descriptor.v1",
+      "sha256": "76363c046def83bb779d92cb3aacc3b68f1c6d89885e4fd828a6438c7558d724",
+      "storage": "content_addressed_disk"
+    },
+    {
+      "byteCount": 152,
+      "identityScope": "exact_supplied_bytes",
+      "relativePath": "sha256/78/780fbb43acea5a1c3db587c6b1cc4c6fb104f985789623b20bfe04a7da87c444.blob",
+      "schema": "consense.artifact-descriptor.v1",
+      "sha256": "780fbb43acea5a1c3db587c6b1cc4c6fb104f985789623b20bfe04a7da87c444",
+      "storage": "content_addressed_disk"
+    },
+    {
+      "byteCount": 1672,
+      "identityScope": "exact_supplied_bytes",
+      "relativePath": "sha256/8f/8f7b647c0c1eead2e2f90afc1bff7a590a585980ce6e29b362c93bf7606e9505.blob",
+      "schema": "consense.artifact-descriptor.v1",
+      "sha256": "8f7b647c0c1eead2e2f90afc1bff7a590a585980ce6e29b362c93bf7606e9505",
+      "storage": "content_addressed_disk"
+    },
+    {
+      "byteCount": 7680128,
+      "identityScope": "exact_supplied_bytes",
+      "relativePath": "sha256/96/960508bda0c101bfe2158cb0dbac3bfd61e7d4cc15970afb22f05a658258078e.blob",
+      "schema": "consense.artifact-descriptor.v1",
+      "sha256": "960508bda0c101bfe2158cb0dbac3bfd61e7d4cc15970afb22f05a658258078e",
+      "storage": "content_addressed_disk"
+    },
+    {
+      "byteCount": 8528,
+      "identityScope": "exact_supplied_bytes",
+      "relativePath": "sha256/b4/b42d420cb948f5657056e9c7ade0bb298c4f727b513394ec27812bf262f8303e.blob",
+      "schema": "consense.artifact-descriptor.v1",
+      "sha256": "b42d420cb948f5657056e9c7ade0bb298c4f727b513394ec27812bf262f8303e",
+      "storage": "content_addressed_disk"
+    },
+    {
+      "byteCount": 11149,
+      "identityScope": "exact_supplied_bytes",
+      "relativePath": "sha256/e8/e8ba2a208920b9432c51dd21c6ee446f9d79b8e880ed71556f99244006f3aa34.blob",
+      "schema": "consense.artifact-descriptor.v1",
+      "sha256": "e8ba2a208920b9432c51dd21c6ee446f9d79b8e880ed71556f99244006f3aa34",
+      "storage": "content_addressed_disk"
+    },
+    {
+      "byteCount": 8232,
+      "identityScope": "exact_supplied_bytes",
+      "relativePath": "sha256/f2/f2ae76f588b997ad7a3a3f27f4ecd8020b85e1ac2cdd42e7ef2dc2897f199372.blob",
+      "schema": "consense.artifact-descriptor.v1",
+      "sha256": "f2ae76f588b997ad7a3a3f27f4ecd8020b85e1ac2cdd42e7ef2dc2897f199372",
+      "storage": "content_addressed_disk"
+    },
+    {
+      "byteCount": 8528,
+      "identityScope": "exact_supplied_bytes",
+      "relativePath": "sha256/05/051fafa7f5223012f8d86ea3c083a51c73c91fcec875c1c49f3e9b64283e07cf.blob",
+      "schema": "consense.artifact-descriptor.v1",
+      "sha256": "051fafa7f5223012f8d86ea3c083a51c73c91fcec875c1c49f3e9b64283e07cf",
+      "storage": "content_addressed_disk"
+    },
+    {
+      "byteCount": 1731200,
+      "identityScope": "exact_supplied_bytes",
+      "relativePath": "sha256/84/8497e7673f5a3fab1cf1b9fa6f29de01db866cc906588eab72e9dcaf1f6dcc6c.blob",
+      "schema": "consense.artifact-descriptor.v1",
+      "sha256": "8497e7673f5a3fab1cf1b9fa6f29de01db866cc906588eab72e9dcaf1f6dcc6c",
+      "storage": "content_addressed_disk"
+    },
+    {
+      "byteCount": 1704,
+      "identityScope": "exact_supplied_bytes",
+      "relativePath": "sha256/8d/8dcaca7486442afe2b55572e437dae5b45470b739ef6469e04c146fdd6433c0b.blob",
+      "schema": "consense.artifact-descriptor.v1",
+      "sha256": "8dcaca7486442afe2b55572e437dae5b45470b739ef6469e04c146fdd6433c0b",
+      "storage": "content_addressed_disk"
+    },
+    {
+      "byteCount": 132,
+      "identityScope": "exact_supplied_bytes",
+      "relativePath": "sha256/8e/8e00b848bdb367baea7af8896d46a2d2f71659b19edde9b00c687ba9bdf45288.blob",
+      "schema": "consense.artifact-descriptor.v1",
+      "sha256": "8e00b848bdb367baea7af8896d46a2d2f71659b19edde9b00c687ba9bdf45288",
+      "storage": "content_addressed_disk"
+    },
+    {
+      "byteCount": 7680128,
+      "identityScope": "exact_supplied_bytes",
+      "relativePath": "sha256/94/947ca671942d71d9a5ecd831ec417d44feee8547ac13da0880bfc26eec5a749e.blob",
+      "schema": "consense.artifact-descriptor.v1",
+      "sha256": "947ca671942d71d9a5ecd831ec417d44feee8547ac13da0880bfc26eec5a749e",
+      "storage": "content_addressed_disk"
+    },
+    {
+      "byteCount": 152,
+      "identityScope": "exact_supplied_bytes",
+      "relativePath": "sha256/9e/9ed0375a1317b6a98118b8bd9175a3c423b5e0d26079ac2bb545ecf27cbb27dd.blob",
+      "schema": "consense.artifact-descriptor.v1",
+      "sha256": "9ed0375a1317b6a98118b8bd9175a3c423b5e0d26079ac2bb545ecf27cbb27dd",
+      "storage": "content_addressed_disk"
+    },
+    {
+      "byteCount": 1704,
+      "identityScope": "exact_supplied_bytes",
+      "relativePath": "sha256/a7/a7c1f1cf0fc0412c9739ec26145ff5ad7ca4ebbb351e62116399125a6b96693f.blob",
+      "schema": "consense.artifact-descriptor.v1",
+      "sha256": "a7c1f1cf0fc0412c9739ec26145ff5ad7ca4ebbb351e62116399125a6b96693f",
+      "storage": "content_addressed_disk"
+    },
+    {
+      "byteCount": 48000128,
+      "identityScope": "exact_supplied_bytes",
+      "relativePath": "sha256/b3/b3c567f04083782fa4e2c18d6558dbdd0fd24597e70a9dd03c8d95b2f8fa5eff.blob",
+      "schema": "consense.artifact-descriptor.v1",
+      "sha256": "b3c567f04083782fa4e2c18d6558dbdd0fd24597e70a9dd03c8d95b2f8fa5eff",
+      "storage": "content_addressed_disk"
+    },
+    {
+      "byteCount": 1704,
+      "identityScope": "exact_supplied_bytes",
+      "relativePath": "sha256/ea/eaa3d8f077f40702e9e24ab13c85a06543186fa8a0e6d9b596562caffedeb7dc.blob",
+      "schema": "consense.artifact-descriptor.v1",
+      "sha256": "eaa3d8f077f40702e9e24ab13c85a06543186fa8a0e6d9b596562caffedeb7dc",
+      "storage": "content_addressed_disk"
+    },
+    {
+      "byteCount": 192,
+      "identityScope": "exact_supplied_bytes",
+      "relativePath": "sha256/ee/ee660e7550732e7c42eb9d9ba5f09aa42da1aaa1e68546bd2c366250dc355b4c.blob",
+      "schema": "consense.artifact-descriptor.v1",
+      "sha256": "ee660e7550732e7c42eb9d9ba5f09aa42da1aaa1e68546bd2c366250dc355b4c",
+      "storage": "content_addressed_disk"
+    },
+    {
+      "byteCount": 11016,
+      "identityScope": "exact_supplied_bytes",
+      "relativePath": "sha256/99/9977e9d767bbe2a797165cd987939a8092a2d2242c162464e5d4475868052063.blob",
+      "schema": "consense.artifact-descriptor.v1",
+      "sha256": "9977e9d767bbe2a797165cd987939a8092a2d2242c162464e5d4475868052063",
+      "storage": "content_addressed_disk"
+    },
+    {
+      "byteCount": 7923,
+      "identityScope": "exact_supplied_bytes",
+      "relativePath": "sha256/68/68436c1b524770803b9d324d3d8b333284cf3d82a930157045663b55b0f3a030.blob",
+      "schema": "consense.artifact-descriptor.v1",
+      "sha256": "68436c1b524770803b9d324d3d8b333284cf3d82a930157045663b55b0f3a030",
+      "storage": "content_addressed_disk"
+    },
+    {
+      "byteCount": 192,
+      "identityScope": "exact_supplied_bytes",
+      "relativePath": "sha256/1a/1a25c24755c1856e103ad652f8f191bdaee27ebdf8f808334e323dc52476fa29.blob",
+      "schema": "consense.artifact-descriptor.v1",
+      "sha256": "1a25c24755c1856e103ad652f8f191bdaee27ebdf8f808334e323dc52476fa29",
+      "storage": "content_addressed_disk"
+    },
+    {
+      "byteCount": 132,
+      "identityScope": "exact_supplied_bytes",
+      "relativePath": "sha256/1d/1de6e4f83e3c09dff0af30210554163c92e746b60c208c0fa0c3d92fd37e1db9.blob",
+      "schema": "consense.artifact-descriptor.v1",
+      "sha256": "1de6e4f83e3c09dff0af30210554163c92e746b60c208c0fa0c3d92fd37e1db9",
+      "storage": "content_addressed_disk"
+    },
+    {
+      "byteCount": 8528,
+      "identityScope": "exact_supplied_bytes",
+      "relativePath": "sha256/26/266a0599e43e85210b0da5a188b73f7d0cd4118b57899e3fb9ee6c99e9b0e6c1.blob",
+      "schema": "consense.artifact-descriptor.v1",
+      "sha256": "266a0599e43e85210b0da5a188b73f7d0cd4118b57899e3fb9ee6c99e9b0e6c1",
+      "storage": "content_addressed_disk"
+    },
+    {
+      "byteCount": 48000128,
+      "identityScope": "exact_supplied_bytes",
+      "relativePath": "sha256/39/3907001c02c1cc241f770ad7815f76c99461db01a1fbd2c9546fe0c5e001b238.blob",
+      "schema": "consense.artifact-descriptor.v1",
+      "sha256": "3907001c02c1cc241f770ad7815f76c99461db01a1fbd2c9546fe0c5e001b238",
+      "storage": "content_addressed_disk"
+    },
+    {
+      "byteCount": 200,
+      "identityScope": "exact_supplied_bytes",
+      "relativePath": "sha256/68/68c6daf8a395ed3e47a88d1140979f0144124d032f09396c95b30b47ea17c259.blob",
+      "schema": "consense.artifact-descriptor.v1",
+      "sha256": "68c6daf8a395ed3e47a88d1140979f0144124d032f09396c95b30b47ea17c259",
+      "storage": "content_addressed_disk"
+    },
+    {
+      "byteCount": 1580672,
+      "identityScope": "exact_supplied_bytes",
+      "relativePath": "sha256/7b/7b8b3b550bec337ff1a4037531a107532415aa78ae3d9a4e834473795d8884a0.blob",
+      "schema": "consense.artifact-descriptor.v1",
+      "sha256": "7b8b3b550bec337ff1a4037531a107532415aa78ae3d9a4e834473795d8884a0",
+      "storage": "content_addressed_disk"
+    },
+    {
+      "byteCount": 132,
+      "identityScope": "exact_supplied_bytes",
+      "relativePath": "sha256/82/8288e32680b7ab12a79c3de3efb7c25aad61c8f21f6638d71490da46d45bcd2e.blob",
+      "schema": "consense.artifact-descriptor.v1",
+      "sha256": "8288e32680b7ab12a79c3de3efb7c25aad61c8f21f6638d71490da46d45bcd2e",
+      "storage": "content_addressed_disk"
+    },
+    {
+      "byteCount": 1576,
+      "identityScope": "exact_supplied_bytes",
+      "relativePath": "sha256/98/9844ab69812af261f169b7eca60f2c516943b00690b6a1ff0d782fc7be7073eb.blob",
+      "schema": "consense.artifact-descriptor.v1",
+      "sha256": "9844ab69812af261f169b7eca60f2c516943b00690b6a1ff0d782fc7be7073eb",
+      "storage": "content_addressed_disk"
+    },
+    {
+      "byteCount": 1576,
+      "identityScope": "exact_supplied_bytes",
+      "relativePath": "sha256/bc/bcfebaf4e6499489d24f722ef74516bf1462d04fa350b6eb39a58d5a36593339.blob",
+      "schema": "consense.artifact-descriptor.v1",
+      "sha256": "bcfebaf4e6499489d24f722ef74516bf1462d04fa350b6eb39a58d5a36593339",
+      "storage": "content_addressed_disk"
+    },
+    {
+      "byteCount": 152,
+      "identityScope": "exact_supplied_bytes",
+      "relativePath": "sha256/c0/c00ecd6496e0ca220f2f5e5ae1c49e8954d0545a72da8bd92a04393ce8eb7fb3.blob",
+      "schema": "consense.artifact-descriptor.v1",
+      "sha256": "c00ecd6496e0ca220f2f5e5ae1c49e8954d0545a72da8bd92a04393ce8eb7fb3",
+      "storage": "content_addressed_disk"
+    },
+    {
+      "byteCount": 1576,
+      "identityScope": "exact_supplied_bytes",
+      "relativePath": "sha256/c7/c7ae09c81aa778cebda5249223aa4cfc83c278de9829921a7eeacdd986ed48be.blob",
+      "schema": "consense.artifact-descriptor.v1",
+      "sha256": "c7ae09c81aa778cebda5249223aa4cfc83c278de9829921a7eeacdd986ed48be",
+      "storage": "content_addressed_disk"
+    },
+    {
+      "byteCount": 7680128,
+      "identityScope": "exact_supplied_bytes",
+      "relativePath": "sha256/d1/d104bb200a9ff64d1635b7771d8dbe50dc32127fcb47c19cc988c6809d1242de.blob",
+      "schema": "consense.artifact-descriptor.v1",
+      "sha256": "d104bb200a9ff64d1635b7771d8dbe50dc32127fcb47c19cc988c6809d1242de",
+      "storage": "content_addressed_disk"
+    },
+    {
+      "byteCount": 1693568,
+      "identityScope": "exact_supplied_bytes",
+      "relativePath": "sha256/d8/d8976c17b4551a47d6b972e4aa44923050b91a04277d248495428d62774cee5b.blob",
+      "schema": "consense.artifact-descriptor.v1",
+      "sha256": "d8976c17b4551a47d6b972e4aa44923050b91a04277d248495428d62774cee5b",
+      "storage": "content_addressed_disk"
+    },
+    {
+      "byteCount": 20803,
+      "identityScope": "exact_supplied_bytes",
+      "relativePath": "sha256/74/74de17d0aadca4a3bb89ca3503a08057acfcb93978eaed4324a7824eb13dae0d.blob",
+      "schema": "consense.artifact-descriptor.v1",
+      "sha256": "74de17d0aadca4a3bb89ca3503a08057acfcb93978eaed4324a7824eb13dae0d",
+      "storage": "content_addressed_disk"
+    },
+    {
+      "byteCount": 14403,
+      "identityScope": "exact_supplied_bytes",
+      "relativePath": "sha256/6d/6d4d942fc1d8a650dc8738232c5cc0440bd5285d976ae12ff94b62259a0c9503.blob",
+      "schema": "consense.artifact-descriptor.v1",
+      "sha256": "6d4d942fc1d8a650dc8738232c5cc0440bd5285d976ae12ff94b62259a0c9503",
+      "storage": "content_addressed_disk"
+    },
+    {
+      "byteCount": 7680128,
+      "identityScope": "exact_supplied_bytes",
+      "relativePath": "sha256/14/14c36e350d42972b89c883e032113e11600a6a488578f43e658825a1a1bcb8cb.blob",
+      "schema": "consense.artifact-descriptor.v1",
+      "sha256": "14c36e350d42972b89c883e032113e11600a6a488578f43e658825a1a1bcb8cb",
+      "storage": "content_addressed_disk"
+    },
+    {
+      "byteCount": 48000128,
+      "identityScope": "exact_supplied_bytes",
+      "relativePath": "sha256/18/18fa2d7a79b7cfcec0f9f3ef07e2e6a8fdc09e0011eda0ddfe19bcc11c970176.blob",
+      "schema": "consense.artifact-descriptor.v1",
+      "sha256": "18fa2d7a79b7cfcec0f9f3ef07e2e6a8fdc09e0011eda0ddfe19bcc11c970176",
+      "storage": "content_addressed_disk"
+    },
+    {
+      "byteCount": 152,
+      "identityScope": "exact_supplied_bytes",
+      "relativePath": "sha256/25/25580dc2aa59804bf1113f5ce6cad0518cd60f6422b7d851b872cd5b9f1fbc69.blob",
+      "schema": "consense.artifact-descriptor.v1",
+      "sha256": "25580dc2aa59804bf1113f5ce6cad0518cd60f6422b7d851b872cd5b9f1fbc69",
+      "storage": "content_addressed_disk"
+    },
+    {
+      "byteCount": 8528,
+      "identityScope": "exact_supplied_bytes",
+      "relativePath": "sha256/35/356672287ac8a0f1aa346fd655ea5d944a12b51fece1f06ed806f86805d09edb.blob",
+      "schema": "consense.artifact-descriptor.v1",
+      "sha256": "356672287ac8a0f1aa346fd655ea5d944a12b51fece1f06ed806f86805d09edb",
+      "storage": "content_addressed_disk"
+    },
+    {
+      "byteCount": 200,
+      "identityScope": "exact_supplied_bytes",
+      "relativePath": "sha256/3b/3b6aecd4151874653c9a371aef5ba960b2e132e42ef514c38bbc24c763387e68.blob",
+      "schema": "consense.artifact-descriptor.v1",
+      "sha256": "3b6aecd4151874653c9a371aef5ba960b2e132e42ef514c38bbc24c763387e68",
+      "storage": "content_addressed_disk"
+    },
+    {
+      "byteCount": 132,
+      "identityScope": "exact_supplied_bytes",
+      "relativePath": "sha256/c2/c27db77fcadbfaa05f82707db25c0bbcee6290a9508769add73b715bfc1a0d3d.blob",
+      "schema": "consense.artifact-descriptor.v1",
+      "sha256": "c27db77fcadbfaa05f82707db25c0bbcee6290a9508769add73b715bfc1a0d3d",
+      "storage": "content_addressed_disk"
+    },
+    {
+      "byteCount": 1580672,
+      "identityScope": "exact_supplied_bytes",
+      "relativePath": "sha256/c4/c4a41121c228c8bafeae81a782e069365f12b3bb5d24c21350bec93f75dc1d63.blob",
+      "schema": "consense.artifact-descriptor.v1",
+      "sha256": "c4a41121c228c8bafeae81a782e069365f12b3bb5d24c21350bec93f75dc1d63",
+      "storage": "content_addressed_disk"
+    },
+    {
+      "byteCount": 1576,
+      "identityScope": "exact_supplied_bytes",
+      "relativePath": "sha256/ca/caf2df08ea6de8b85b938170ba72c42ddd8b7ff1e774d17c80d8b8abd04d890d.blob",
+      "schema": "consense.artifact-descriptor.v1",
+      "sha256": "caf2df08ea6de8b85b938170ba72c42ddd8b7ff1e774d17c80d8b8abd04d890d",
+      "storage": "content_addressed_disk"
+    },
+    {
+      "byteCount": 9409,
+      "identityScope": "exact_supplied_bytes",
+      "relativePath": "sha256/8c/8c1cb98caaa54c054b9054b0fbbd86097ac282df42121c6338e287d337a509a1.blob",
+      "schema": "consense.artifact-descriptor.v1",
+      "sha256": "8c1cb98caaa54c054b9054b0fbbd86097ac282df42121c6338e287d337a509a1",
+      "storage": "content_addressed_disk"
+    },
+    {
+      "byteCount": 8049,
+      "identityScope": "exact_supplied_bytes",
+      "relativePath": "sha256/9d/9d52d1e2d77ce9a0b0d0ccbf4133df3d3a592cb40aa54ca125b38c01a5efe3a9.blob",
+      "schema": "consense.artifact-descriptor.v1",
+      "sha256": "9d52d1e2d77ce9a0b0d0ccbf4133df3d3a592cb40aa54ca125b38c01a5efe3a9",
+      "storage": "content_addressed_disk"
+    },
+    {
+      "byteCount": 904,
+      "identityScope": "exact_supplied_bytes",
+      "relativePath": "sha256/e4/e45064b2e4c6153854cd9f6436e97d50ffb41b8034afca8d3bb926b49ac6e1f2.blob",
+      "schema": "consense.artifact-descriptor.v1",
+      "sha256": "e45064b2e4c6153854cd9f6436e97d50ffb41b8034afca8d3bb926b49ac6e1f2",
+      "storage": "content_addressed_disk"
+    },
+    {
+      "byteCount": 1343,
+      "identityScope": "exact_supplied_bytes",
+      "relativePath": "sha256/17/17c384ef7d97319dd3084504b3358edd37728eaa53281e25279769a695287663.blob",
+      "schema": "consense.artifact-descriptor.v1",
+      "sha256": "17c384ef7d97319dd3084504b3358edd37728eaa53281e25279769a695287663",
+      "storage": "content_addressed_disk"
+    },
+    {
+      "byteCount": 903,
+      "identityScope": "exact_supplied_bytes",
+      "relativePath": "sha256/80/80886f7d8fb97ff3d21b97c24f530d3b6bb61b50803e61c1c2c180762bdf0dfd.blob",
+      "schema": "consense.artifact-descriptor.v1",
+      "sha256": "80886f7d8fb97ff3d21b97c24f530d3b6bb61b50803e61c1c2c180762bdf0dfd",
+      "storage": "content_addressed_disk"
+    },
+    {
+      "byteCount": 1343,
+      "identityScope": "exact_supplied_bytes",
+      "relativePath": "sha256/f1/f17a5fee6cc7d1b93d81c6bdfc4630fa67bf954bc208a6866f9709f1bad206b4.blob",
+      "schema": "consense.artifact-descriptor.v1",
+      "sha256": "f17a5fee6cc7d1b93d81c6bdfc4630fa67bf954bc208a6866f9709f1bad206b4",
+      "storage": "content_addressed_disk"
+    },
+    {
+      "byteCount": 1240,
+      "identityScope": "exact_supplied_bytes",
+      "relativePath": "sha256/3a/3a0bd77e0310c2210925dad25f783aa530831c385c0def08ae9afe55592ab4d3.blob",
+      "schema": "consense.artifact-descriptor.v1",
+      "sha256": "3a0bd77e0310c2210925dad25f783aa530831c385c0def08ae9afe55592ab4d3",
+      "storage": "content_addressed_disk"
+    },
+    {
+      "byteCount": 1800,
+      "identityScope": "exact_supplied_bytes",
+      "relativePath": "sha256/23/238658665e64acbef37b3a28bed135c6d0c2f81f907a952c6d09d9fd80ef295d.blob",
+      "schema": "consense.artifact-descriptor.v1",
+      "sha256": "238658665e64acbef37b3a28bed135c6d0c2f81f907a952c6d09d9fd80ef295d",
+      "storage": "content_addressed_disk"
+    },
+    {
+      "byteCount": 1165,
+      "identityScope": "exact_supplied_bytes",
+      "relativePath": "sha256/08/080fade702610fb9a22f0250026ad91c475ae2a001a4ac6a964e308cf6292bb3.blob",
+      "schema": "consense.artifact-descriptor.v1",
+      "sha256": "080fade702610fb9a22f0250026ad91c475ae2a001a4ac6a964e308cf6292bb3",
+      "storage": "content_addressed_disk"
+    },
+    {
+      "byteCount": 17592,
+      "identityScope": "exact_supplied_bytes",
+      "relativePath": "sha256/50/50fb416c01bb2a6bc849d997d7746566b89b8e78971bdbf2b00c28cf8c2536c5.blob",
+      "schema": "consense.artifact-descriptor.v1",
+      "sha256": "50fb416c01bb2a6bc849d997d7746566b89b8e78971bdbf2b00c28cf8c2536c5",
+      "storage": "content_addressed_disk"
+    },
+    {
+      "byteCount": 22,
+      "identityScope": "exact_supplied_bytes",
+      "relativePath": "sha256/43/43f12b83e2294ae6183e91e80f98a41d27a6f80ae4b153f7bef41a6447087eb5.blob",
+      "schema": "consense.artifact-descriptor.v1",
+      "sha256": "43f12b83e2294ae6183e91e80f98a41d27a6f80ae4b153f7bef41a6447087eb5",
+      "storage": "content_addressed_disk"
+    },
+    {
+      "byteCount": 726,
+      "identityScope": "exact_supplied_bytes",
+      "relativePath": "sha256/68/68237dde47e8db233aa6140b5adcd0880b2ffb4e81baa444a1d2131ea74f6d28.blob",
+      "schema": "consense.artifact-descriptor.v1",
+      "sha256": "68237dde47e8db233aa6140b5adcd0880b2ffb4e81baa444a1d2131ea74f6d28",
+      "storage": "content_addressed_disk"
+    },
+    {
+      "byteCount": 21,
+      "identityScope": "exact_supplied_bytes",
+      "relativePath": "sha256/84/8452c27cf64e5f162ba2859e41c9ceaacc42cef3266e008b3edba4aec26ab97c.blob",
+      "schema": "consense.artifact-descriptor.v1",
+      "sha256": "8452c27cf64e5f162ba2859e41c9ceaacc42cef3266e008b3edba4aec26ab97c",
+      "storage": "content_addressed_disk"
+    },
+    {
+      "byteCount": 725,
+      "identityScope": "exact_supplied_bytes",
+      "relativePath": "sha256/3d/3db889c6ec9f11f7f245c08a696727a93ad0fe5c431a868b7acdf1eb0b575c5b.blob",
+      "schema": "consense.artifact-descriptor.v1",
+      "sha256": "3db889c6ec9f11f7f245c08a696727a93ad0fe5c431a868b7acdf1eb0b575c5b",
+      "storage": "content_addressed_disk"
+    },
+    {
+      "byteCount": 62,
+      "identityScope": "exact_supplied_bytes",
+      "relativePath": "sha256/50/50d54836f93073696ea916a3088417cc99fd3150851b4c38c76e409da2b3527f.blob",
+      "schema": "consense.artifact-descriptor.v1",
+      "sha256": "50d54836f93073696ea916a3088417cc99fd3150851b4c38c76e409da2b3527f",
+      "storage": "content_addressed_disk"
+    },
+    {
+      "byteCount": 943,
+      "identityScope": "exact_supplied_bytes",
+      "relativePath": "sha256/cb/cb663cf78c09113e30782f1034f006b2909f38e337b15a21c42f8c91ab65fa9b.blob",
+      "schema": "consense.artifact-descriptor.v1",
+      "sha256": "cb663cf78c09113e30782f1034f006b2909f38e337b15a21c42f8c91ab65fa9b",
+      "storage": "content_addressed_disk"
+    },
+    {
+      "byteCount": 12310,
+      "identityScope": "exact_supplied_bytes",
+      "relativePath": "sha256/f4/f48e0c4abbdbc6704709f8cb92ef2ebfbe50a762893a674cc0d97fda9decfdf3.blob",
+      "schema": "consense.artifact-descriptor.v1",
+      "sha256": "f48e0c4abbdbc6704709f8cb92ef2ebfbe50a762893a674cc0d97fda9decfdf3",
+      "storage": "content_addressed_disk"
+    },
+    {
+      "byteCount": 40,
+      "identityScope": "exact_supplied_bytes",
+      "relativePath": "sha256/b3/b3cf15c6580da419d19cbde7b8258810b2bc687c671e6b5c75d77cb698ecfbc4.blob",
+      "schema": "consense.artifact-descriptor.v1",
+      "sha256": "b3cf15c6580da419d19cbde7b8258810b2bc687c671e6b5c75d77cb698ecfbc4",
+      "storage": "content_addressed_disk"
+    },
+    {
+      "byteCount": 854,
+      "identityScope": "exact_supplied_bytes",
+      "relativePath": "sha256/78/7812a360cdfe66dedff0cdec6d27c58aae8c2120b111347174e4a35a17983839.blob",
+      "schema": "consense.artifact-descriptor.v1",
+      "sha256": "7812a360cdfe66dedff0cdec6d27c58aae8c2120b111347174e4a35a17983839",
+      "storage": "content_addressed_disk"
+    },
+    {
+      "byteCount": 4638,
+      "identityScope": "exact_supplied_bytes",
+      "relativePath": "sha256/ea/ea241a013060581f8ea2d1ae301dd4c5d50d30e8e36312986b180275d8188fbe.blob",
+      "schema": "consense.artifact-descriptor.v1",
+      "sha256": "ea241a013060581f8ea2d1ae301dd4c5d50d30e8e36312986b180275d8188fbe",
+      "storage": "content_addressed_disk"
+    },
+    {
+      "byteCount": 14174,
+      "identityScope": "exact_supplied_bytes",
+      "relativePath": "sha256/ca/ca42d9894a639c70585e583fcd78665f5d2a3b068dbc06ecc1ca03fc467fa9ae.blob",
+      "schema": "consense.artifact-descriptor.v1",
+      "sha256": "ca42d9894a639c70585e583fcd78665f5d2a3b068dbc06ecc1ca03fc467fa9ae",
+      "storage": "content_addressed_disk"
+    },
+    {
+      "byteCount": 808626,
+      "identityScope": "exact_supplied_bytes",
+      "relativePath": "sha256/62/62f0792401d1037b01a60af546d6111e43731c785c0518bad7740c252859b4e0.blob",
+      "schema": "consense.artifact-descriptor.v1",
+      "sha256": "62f0792401d1037b01a60af546d6111e43731c785c0518bad7740c252859b4e0",
+      "storage": "content_addressed_disk"
+    },
+    {
+      "byteCount": 11830,
+      "identityScope": "canonical_json_object",
+      "relativePath": "sha256/5e/5e41b31208517fbe4bd8b04747e3917129ebde1310c2b91eeada6d5097f9b446.blob",
+      "schema": "consense.artifact-descriptor.v1",
+      "sha256": "5e41b31208517fbe4bd8b04747e3917129ebde1310c2b91eeada6d5097f9b446",
+      "storage": "content_addressed_disk"
+    }
+  ],
+  "allSevenVersionsAccepted": false,
+  "authoredSoftwareEvidenceOnly": true,
+  "engineCalls": 0,
+  "explicitColdHydrateCalls": 2,
+  "httpCalls": 0,
+  "javaConsumerAccepted": false,
+  "modelCalls": 0,
+  "originalInputsFreshlyUnchanged": true,
+  "planSha256": "bac9666ea383e31139121ed7f4fb6d5ab5fcab7d8fa13b169b1a8be528618ef5",
+  "producerCalls": 0,
+  "publicWires": {
+    "prose": {
+      "byteCount": 48958,
+      "hydratedExactlyEqualsSavedInternal": true,
+      "internalArtifactDescriptor": {
+        "byteCount": 862352,
+        "identityScope": "exact_supplied_bytes",
+        "relativePath": "sha256/89/891e021e88a1b5d87bb334650cf93f99122b5286724441b4f8bc59bbff32475c.blob",
+        "schema": "consense.artifact-descriptor.v1",
+        "sha256": "891e021e88a1b5d87bb334650cf93f99122b5286724441b4f8bc59bbff32475c",
+        "storage": "content_addressed_disk"
+      },
+      "internalProjectionVersion": "source-reviewed-native-pdf-sl-whole-unit-v1",
+      "oldHistoricalPublicProjectionSha256": "8eb46cb2dc3ec36cbbb13261925ad995359d5b494053ae5b21f5abeee11ffe39",
+      "projectionSha256": "dd3c022b3e9d95568e01be6c542b13bd8c7189c457fbcead0560ba255e55197b",
+      "relativePath": "prose-public-wire.json",
+      "savedInternal": {
+        "byteCount": 862352,
+        "relativePath": "prose-saved-internal.json",
+        "sha256": "891e021e88a1b5d87bb334650cf93f99122b5286724441b4f8bc59bbff32475c"
+      },
+      "sha256": "d308ea81fc02b2325505e63af6b4b8d7c556915239985bdd13f6b5b957693e18",
+      "typedStructure": {
+        "byteCount": 72744,
+        "relativePath": "prose-public-typed.json",
+        "sha256": "f17ca95845b2daa3a8e8c6ea87ee8ac5729467605366c584e8ddd1f796d3c64d"
+      }
+    },
+    "table": {
+      "byteCount": 47145,
+      "hydratedExactlyEqualsSavedInternal": true,
+      "internalArtifactDescriptor": {
+        "byteCount": 808626,
+        "identityScope": "exact_supplied_bytes",
+        "relativePath": "sha256/62/62f0792401d1037b01a60af546d6111e43731c785c0518bad7740c252859b4e0.blob",
+        "schema": "consense.artifact-descriptor.v1",
+        "sha256": "62f0792401d1037b01a60af546d6111e43731c785c0518bad7740c252859b4e0",
+        "storage": "content_addressed_disk"
+      },
+      "internalProjectionVersion": "source-reviewed-native-pdf-sl-whole-unit-tables-and-assets-v1",
+      "oldHistoricalPublicProjectionSha256": "96bbe0dd330b5672fa9f15d2480a2c98334c721bd82c2e985713bd384ba01915",
+      "projectionSha256": "483f0647a62128662f9215aa9b3e835beff518d79278e2cb9799bd19c9cf97f9",
+      "relativePath": "table-public-wire.json",
+      "savedInternal": {
+        "byteCount": 808626,
+        "relativePath": "table-saved-internal.json",
+        "sha256": "62f0792401d1037b01a60af546d6111e43731c785c0518bad7740c252859b4e0"
+      },
+      "sha256": "60a522a02d3480077921e48ec3e553a25ebbe077c7f4ef7dfd426d868dbac6df",
+      "typedStructure": {
+        "byteCount": 67316,
+        "relativePath": "table-public-typed.json",
+        "sha256": "accc92b1f36e5c138111bda42d0ae28e31451c4000f9493801b6510be5745b2a"
+      }
+    }
+  },
+  "publishCalls": 2,
+  "registryCalls": 0,
+  "retryCount": 0,
+  "rootReleaseSha256": "ecfe4605d88f343c0399f3bd73e5b55d2b9b3116b09a24419e893c3d8883a3d5",
+  "schema": "consense.sl-saved-internal-public-wire-export.v1",
+  "sourceQualityAccepted": false,
+  "sqlCalls": 0,
+  "status": "EXPORTED_SAVED_INTERNALS_PUBLISHED_AND_COLD_HYDRATED"
+}

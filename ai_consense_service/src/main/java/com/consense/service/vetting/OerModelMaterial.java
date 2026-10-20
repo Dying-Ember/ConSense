@@ -279,6 +279,11 @@ public final class OerModelMaterial {
             structure.set("physicalPages",JsonUtils.mapper().valueToTree(p.getPhysicalPages()));
             structure.set("sourceOrder",copy(p.getSourceOrder()));structure.set("parts",parts(p.getParts()));
             structure.set("sourceSpans",spans(p.getSourceSpans()));structure.set("tableGroup",table(p.getTableGroup()));
+            if(p.getNativeTableGroupsRef()!=null)structure.set("nativeTableGroupsRef",reference(p.getNativeTableGroupsRef()));
+            if(p.getNativeTableSummary()!=null)structure.set("nativeTableSummary",table(p.getNativeTableSummary()));
+            if(p.getSourceEditionId()!=null)structure.put("sourceEditionId",p.getSourceEditionId());
+            if(p.getSourceUnitId()!=null)structure.put("sourceUnitId",p.getSourceUnitId());
+            if(p.getSlUnitScopeManifestSha256()!=null)structure.put("slUnitScopeManifestSha256",p.getSlUnitScopeManifestSha256());
             structure.set("relations",relations(p.getRelations()));structure.set("assetRefs",table(p.getAssetRefs()));
             structure.set("sourceQuality",fields(p.getSourceQuality(),"attributes","semanticQuality","notes","reviewMeaning","parseStatus","version","humanConfirmed","wholeSourceAccepted","legalQualityAccepted","meaning","components","status","adoptionStatus","sourceQualityAccepted","semanticScopeVerified","legalClosure"));
             if(NativePdfSourceFamilyContract.PRODUCER.equals(p.getProducerKind()))structure.set("sourceFamilyOrigin",fields(p.getSourceFamilyOriginRef(),"componentOrdinal","childProjectionSha256","childChunkId","childUnitId","fullChildChunkSha256"));
@@ -376,7 +381,7 @@ public final class OerModelMaterial {
             if(span.has("sourcePosition"))s.set("sourcePosition",position(span.get("sourcePosition")));out.add(s);}return out;}
     private static JsonNode position(JsonNode raw){return raw==null||raw.isNull()?copy(raw):fields(raw,"kind","physicalPageNo","partName","nodePath","partSha256","sourceSha256","story","tableId","rowIndex","cellIndex","rowNodePath","tableNodePath","parentCellNodePath");}
     private static ArrayNode relations(JsonNode raw){require(raw!=null&&raw.isArray(),"canonical_relations_required");ArrayNode out=array();
-        for(JsonNode r:raw)out.add(fields(r,"type","status","scope","sameParentClause","sourceReview","basis","humanConfirmed","fromUnitId","toUnitId","fromRegionId","toRegionId","fromBlockId","toBlockId","fromCellId","toCellId","condition","qualifiers","qualifiersComplete","exceptions"));return out;}
+        for(JsonNode r:raw)out.add(fields(r,"type","status","scope","sameParentClause","sourceReview","basis","humanConfirmed","fromUnitId","toUnitId","fromRegionId","toRegionId","fromBlockId","toBlockId","fromCellId","toCellId","condition","qualifiers","qualifiersComplete","exceptions","referenceRelationIndex","reviewActor"));return out;}
 
     /** All table/cell/grid/merge/nesting values remain. Only known software/CAS proof expansions become artifact identities. */
     static JsonNode visualRegion(JsonNode raw) {

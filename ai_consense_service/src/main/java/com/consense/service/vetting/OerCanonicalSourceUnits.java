@@ -62,11 +62,11 @@ final class OerCanonicalSourceUnits {
         row.set("clauseId",nullable(seed,"clauseId"));row.set("headingLocation",nullable(seed,"clauseHeadingLocation"));row.putArray("blockIds");
         row.put("derivedMembersCanBecomeOrigins",false);row.putNull("memberScores");row.put("qualifiersComplete","unknown");row.put("semanticScopeVerified",false);
         try {
-            source(parents,seed);mapped(seed);JsonNode key=identity(seed);
+            source(parents,seed);mapped(seed);JsonNode key=scopeIdentity(seed);
             SortedMap<String,JsonNode> members=new TreeMap<>();SortedSet<String> blocks=new TreeSet<>();
             boolean clause=seed.path("clauseId").isTextual()&&!seed.path("clauseId").asText().isEmpty();
             if(clause) {
-                for(JsonNode parent:parents.values())if(identity(parent).equals(key)&&parent.path("clauseId").equals(seed.path("clauseId")))members.put(parent.path("id").asText(),parent);
+                for(JsonNode parent:parents.values())if(scopeIdentity(parent).equals(key)&&parent.path("clauseId").equals(seed.path("clauseId")))members.put(parent.path("id").asText(),parent);
                 Set<JsonNode> headings=new HashSet<>();for(JsonNode member:members.values())headings.add(nullable(member,"clauseHeadingLocation"));
                 String heading=seed.path("clauseHeadingLocation").asText();
                 observed(headings.size()==1&&!heading.isEmpty(),"clause_heading_not_unique");
@@ -76,15 +76,15 @@ final class OerCanonicalSourceUnits {
                 }
                 observed(located,"heading_not_located_in_observed_parts");row.put("kind","exact_clause_heading");
                 for(JsonNode member:members.values())for(JsonNode part:member.path("parts"))blocks.add(part.path("blockId").asText());
-                for(JsonNode parent:parents.values())if(identity(parent).equals(key)&&touches(parent,blocks))
+                for(JsonNode parent:parents.values())if(scopeIdentity(parent).equals(key)&&touches(parent,blocks))
                     observed(members.containsKey(parent.path("id").asText()),"source_block_crosses_clause_unit_boundary");
             } else {
                 row.put("kind","observed_source_blocks");for(JsonNode part:seed.path("parts"))blocks.add(part.path("blockId").asText());
-                for(JsonNode parent:parents.values())if(identity(parent).equals(key)&&touches(parent,blocks))members.put(parent.path("id").asText(),parent);
+                for(JsonNode parent:parents.values())if(scopeIdentity(parent).equals(key)&&touches(parent,blocks))members.put(parent.path("id").asText(),parent);
                 // Additional blocks of an included member are retained as payload, not followed as origins.
             }
             for(JsonNode member:members.values()) {
-                source(parents,member);observed(identity(member).equals(key)&&member.path("sourceQuality").equals(seed.path("sourceQuality")),"source_quality_or_scope_differs");mapped(member);
+                source(parents,member);observed(scopeIdentity(member).equals(key)&&member.path("sourceQuality").equals(seed.path("sourceQuality")),"source_quality_or_scope_differs");mapped(member);
             }
             ArrayNode ranges=JsonUtils.mapper().createArrayNode();for(String block:blocks)ranges.add(blockRange(parents,key,block));
             row.set("observedRanges",ranges);blocks.forEach(row.putArray("blockIds")::add);
@@ -101,12 +101,12 @@ final class OerCanonicalSourceUnits {
     }
 
     static void source(Map<String,JsonNode> parents,JsonNode parent) {
-        JsonNode key=identity(parent);boolean valid=true;for(String field:FIELDS)valid&=parent.path(field).isTextual()&&!parent.path(field).asText().trim().isEmpty();
+        JsonNode key=scopeIdentity(parent);boolean valid=true;for(String field:FIELDS)valid&=parent.path(field).isTextual()&&!parent.path(field).asText().trim().isEmpty();
         observed(valid&&sha(parent.path("sourceHash").asText())&&sha(parent.path("sourceQualityHash").asText())
                 &&Arrays.asList("tender","standard","project_fact","package_manifest").contains(parent.path("role").asText())
                 &&parent.path("sourceQuality").isObject(),"unknown_source_identity_quality_or_version");
         for(JsonNode other:parents.values())if(other.path("documentId").equals(parent.path("documentId")))
-            observed(identity(other).equals(key),"ambiguous_document_source_identity");
+            observed(scopeIdentity(other).equals(key),"ambiguous_document_source_identity");
     }
     static void mapped(JsonNode parent) {
         observed(parent.path("parts").isArray()&&parent.path("parts").size()>0,"MISSING_SOURCE_PARTS");
@@ -119,7 +119,7 @@ final class OerCanonicalSourceUnits {
                 &&part.path("anchor").isTextual()&&!part.path("anchor").asText().isEmpty()&&part.path("startOffset").asInt()>=0,"unknown_source_part_mapping");
     }
     static ObjectNode blockRange(Map<String,JsonNode> parents,JsonNode key,String block) {
-        List<JsonNode> parts=new ArrayList<>();for(JsonNode parent:parents.values())if(identity(parent).equals(key))for(JsonNode part:parent.path("parts"))
+        List<JsonNode> parts=new ArrayList<>();for(JsonNode parent:parents.values())if(scopeIdentity(parent).equals(key))for(JsonNode part:parent.path("parts"))
             if(block.equals(part.path("blockId").asText())){mapped(parent);parts.add(part);}
         parts.sort(Comparator.comparingInt((JsonNode p)->p.path("startOffset").asInt()).thenComparingInt(p->p.path("endOffset").asInt()));
         StringBuilder text=new StringBuilder();for(JsonNode part:parts) {
@@ -132,6 +132,28 @@ final class OerCanonicalSourceUnits {
         range.put("status","observed_canonical_ranges_zero_gap");range.putNull("sourceBlockComplete");return range;
     }
     private static boolean touches(JsonNode parent,Set<String> blocks){for(JsonNode part:parent.path("parts"))if(blocks.contains(part.path("blockId").asText()))return true;return false;}
+    /** Comparison only: raw identity() and all canonical payloads stay exact. */
+    static ObjectNode scopeIdentity(JsonNode parent){
+        ObjectNode out=identity(parent);String producer=parent.path("producerKind").asText(),version=parent.path("metadataVersion").asText();
+        boolean nativePdf="native_pdf".equals(producer)&&"cas-native-pdf-joint-adopted-public-v1".equals(parent.path("storageShape").asText())
+                &&Arrays.asList("source-reviewed-native-pdf-cas-public-projection-v1","source-reviewed-native-pdf-cas-public-projection-v2").contains(version);
+        boolean family="native_pdf_source_family".equals(producer)&&"cas-same-original-native-pdf-complete-components-public-v1".equals(parent.path("storageShape").asText())
+                &&"same-original-complete-native-pdf-components-v1".equals(version);
+        String scope=parent.path("canonicalScope").asText(),metadata="whole_text_unit".equals(scope)?"native-pdf-no-table-adoption-v1":"whole_table_group".equals(scope)?"source-reviewed-native-pdf-whole-table-groups-v1":null;
+        String module=parent.path("module").asText();JsonNode eligible=parent.path("eligibleModules");
+        if(!(nativePdf||family)||metadata==null||!metadata.equals(parent.path("nativeTableMetadataVersion").asText())
+                ||!Arrays.asList("vetting","advisory").contains(module)||!eligible.isArray()||eligible.isEmpty())return out;
+        Set<String> modules=new HashSet<>();for(JsonNode value:eligible)if(!value.isTextual()||!Arrays.asList("vetting","advisory").contains(value.asText())||!modules.add(value.asText()))return out;
+        if(!modules.contains(module))return out;
+        for(String field:Arrays.asList("originalSourceSha256","sourceSha256","projectionRevisionSha256","sourceRevisionSha256","scopeSha256"))
+            if(!parent.path(field).isTextual()||!sha(parent.path(field).asText()))return out;
+        if(!parent.path("originalSourceSha256").equals(parent.path("sourceSha256")))return out;
+        JsonNode edition=nullable(parent,"sourceEditionId"),policy=nullable(parent,"slUnitScopeManifestSha256");
+        if(!(edition.isNull()&&policy.isNull())&&!(edition.isTextual()&&!edition.asText().trim().isEmpty()&&policy.isTextual()&&sha(policy.asText())))return out;
+        ObjectNode root=JsonUtils.mapper().createObjectNode();root.put("kind","exact-native-pdf-root-unit-shapes-v1");
+        for(String field:Arrays.asList("producerKind","storageShape","module","originalSourceSha256","sourceSha256","projectionRevisionSha256","sourceRevisionSha256","scopeSha256","sourceEditionId","slUnitScopeManifestSha256","eligibleModules"))root.set(field,nullable(parent,field));
+        out.put("nativeTableMetadataVersion","exact-native-pdf-root-unit-shapes-v1:"+VettingCorpus.hash(JsonUtils.write(sorted(root))));return out;
+    }
     static ObjectNode identity(JsonNode parent){ObjectNode out=JsonUtils.mapper().createObjectNode();for(String key:FIELDS)out.set(key,nullable(parent,key));return out;}
     static JsonNode nullable(JsonNode parent,String field){return parent.has(field)?parent.get(field):JsonUtils.mapper().nullNode();}
     static JsonNode sorted(JsonNode node){if(node.isObject()){ObjectNode out=JsonUtils.mapper().createObjectNode();TreeMap<String,JsonNode> fields=new TreeMap<>();node.fields().forEachRemaining(e->fields.put(e.getKey(),e.getValue()));fields.forEach((k,v)->out.set(k,sorted(v)));return out;}if(node.isArray()){ArrayNode out=JsonUtils.mapper().createArrayNode();node.forEach(v->out.add(sorted(v)));return out;}return node;}

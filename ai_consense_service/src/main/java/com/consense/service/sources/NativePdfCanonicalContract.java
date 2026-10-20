@@ -18,9 +18,11 @@ public final class NativePdfCanonicalContract {
     public static final String SCHEMA = "consense.native-pdf-canonical-projection.v1";
     public static final String PRODUCER = "native_pdf";
     public static final String VERSION = "source-reviewed-native-pdf-cas-public-projection-v1";
+    public static final String TABLE_VERSION = "source-reviewed-native-pdf-cas-public-projection-v2";
     public static final String STORAGE = "cas-native-pdf-joint-adopted-public-v1";
     public static final String INTERNAL_VERSION = "source-reviewed-native-pdf-prose-and-visual-layout-v1";
     public static final String INTERNAL_V2 = "source-reviewed-native-pdf-prose-and-visual-layout-v2";
+    public static final String INTERNAL_V3 = "source-reviewed-native-pdf-prose-tables-and-page-assets-v3";
     public static final String POSITION = "pdf_native_source_reviewed_region";
     public static final String GEOMETRY = "source_reviewed_region_and_declared_visual_transform_not_exact_glyph";
     public static final String BBOX = "source_reviewed_original_raster_normalized_xyxy";
@@ -64,7 +66,7 @@ public final class NativePdfCanonicalContract {
                 && "/project/native-pdf".equals(capability.path("projectionEndpoint").asText())
                 && "actual-cas-three-descriptors-only".equals(capability.path("projectionInputs").asText())
                 && NativeCanonicalContract.actualArtifactReadPolicy(capability.path("artifactReadValidation"))
-                && "unsupported".equals(capability.path("tableAndAppearanceText").asText()) && VISUAL.equals(capability.path("visualReturnStatus").asText())
+                && set("unsupported", "source_reviewed_whole_table_groups; appearance_text_unsupported").contains(capability.path("tableAndAppearanceText").asText()) && VISUAL.equals(capability.path("visualReturnStatus").asText())
                 && positiveInt(capability.path("maximumMessageBytes")) && capability.path("maximumMessageBytes").asInt() <= MAX_BYTES, "CAPABILITY");
     }
 
@@ -78,7 +80,8 @@ public final class NativePdfCanonicalContract {
         same(algorithms.path("native_pdf_canonical_projection.py"), identity.path("internalProjectionCodeSha256"), "CAPABILITY");
         same(algorithms.path("native_pdf_observation.py"), identity.path("projectionDependencySha256").path("native_pdf_observation.py"), "CAPABILITY");
         dependencies(identity.path("projectionDependencySha256"),identity.path("internalProjectionVersion").asText());
-        if(INTERNAL_V2.equals(identity.path("internalProjectionVersion").asText()))for(String name:Arrays.asList("pdf_selected_source.py","selected_source_raster.py"))same(algorithms.path(name),identity.path("projectionDependencySha256").path(name),"CAPABILITY");
+        if(selectedSourceInternal(identity.path("internalProjectionVersion").asText()))for(String name:Arrays.asList("pdf_selected_source.py","selected_source_raster.py"))same(algorithms.path(name),identity.path("projectionDependencySha256").path(name),"CAPABILITY");
+        if(tableInternal(identity.path("internalProjectionVersion").asText()))same(algorithms.path("native_pdf_table_projection.py"),identity.path("projectionDependencySha256").path("native_pdf_table_projection.py"),"CAPABILITY");
     }
 
     /** Source-bound display declarations; no private bytes are hydrated or quality claims upgraded. */
@@ -101,7 +104,7 @@ public final class NativePdfCanonicalContract {
         fields(value, set("schema", "producerKind", "storageShape", "projectionIdentity", "projectionRevisionSha256", "projectionSha256", "sourceHash", "source", "manifest", "transportCodeRef", "internalProjectionRef", "nativeObservationRef", "dualParserBundleRef", "adoptionManifestRef", "nativeCaptureRefs", "observerIdentity", "sourceReferenceRef", "canonical", "chunks", "assetRefs", "unadoptedGlyphsRef", "unadoptedGlyphSummary", "captureCompleteness", "unobservedOriginalPhysicalPages", "humanConfirmed", "semanticScopeVerified", "wholeOriginalSourceCoverage", "visualReturnStatus", "limitations", "transportValidation"), "ENVELOPE");
         require(SCHEMA.equals(value.path("schema").asText()) && PRODUCER.equals(value.path("producerKind").asText()) && STORAGE.equals(value.path("storageShape").asText()), "VERSION");
         JsonNode identity = value.path("projectionIdentity"), source = value.path("source"), manifest = value.path("manifest");
-        require(identity.isObject() && VERSION.equals(identity.path("projectionVersion").asText()) && STORAGE.equals(identity.path("storageShape").asText()) && knownInternal(identity.path("internalProjectionVersion").asText()), "VERSION");
+        require(identity.isObject() && publicVersion(identity.path("internalProjectionVersion").asText()).equals(identity.path("projectionVersion").asText()) && STORAGE.equals(identity.path("storageShape").asText()), "VERSION");
         fields(source, set("filename", "sourceSha256", "sourceRevisionSha256", "mediaType", "byteCount", "pageCount"), "SOURCE");
         String sha = sha(source.path("sourceSha256")); String revision = sha(source.path("sourceRevisionSha256"));
         require(text(source.path("filename")) && "application/pdf".equals(source.path("mediaType").asText()) && positiveLong(source.path("byteCount")) && positiveInt(source.path("pageCount")), "SOURCE");
@@ -111,13 +114,14 @@ public final class NativePdfCanonicalContract {
         dependencies(identity.path("projectionDependencySha256"),identity.path("internalProjectionVersion").asText());
         require(sha.equals(identity.path("sourceSha256").asText()) && revision.equals(identity.path("sourceRevisionSha256").asText()), "IDENTITY");
         fields(manifest, set("schema", "nativeBundleSha256", "dualBundleSha256", "sourceSha256", "sourceRevisionSha256", "documentId", "role", "module", "eligibleModules", "sourcePurpose", "sourceClass", "scope", "quality", "reference", "regionReviewRef", "units", "sourceRelationIndices", "tableGroups", "assets"), "MANIFEST");
-        require("consense.native-pdf-canonical-adoption.v1".equals(manifest.path("schema").asText()) && empty(manifest.path("tableGroups")) && empty(manifest.path("assets")), "MANIFEST");
+        require("consense.native-pdf-canonical-adoption.v1".equals(manifest.path("schema").asText()) && manifest.path("tableGroups").isArray() && manifest.path("assets").isArray(), "MANIFEST");
+        require(tableInternal(identity.path("internalProjectionVersion").asText()) ? !manifest.path("tableGroups").isEmpty() || !manifest.path("assets").isEmpty() : empty(manifest.path("tableGroups")) && empty(manifest.path("assets")), "MANIFEST");
         for (String field : Arrays.asList("nativeBundleSha256", "dualBundleSha256", "sourceSha256", "sourceRevisionSha256", "documentId", "role", "module", "eligibleModules", "sourcePurpose", "sourceClass")) same(identity.path(field), manifest.path(field), "IDENTITY");
         module(identity);
-        fields(manifest.path("scope"), set("requiredPhysicalPages", "scopePolicySha256"), "SCOPE");
+        NativePdfSlScopeContract.scope(manifest.path("scope"), identity);
         Set<Integer> required = pages(manifest.path("scope").path("requiredPhysicalPages"), count, false); sha(manifest.path("scope").path("scopePolicySha256"));
         quality(manifest.path("quality"), false);
-        require(falseBoolean(value.path("humanConfirmed")) && falseBoolean(value.path("semanticScopeVerified")) && "unknown".equals(value.path("wholeOriginalSourceCoverage").asText()) && empty(value.path("assetRefs")) && "not_published_by_native_pdf_transport".equals(value.path("visualReturnStatus").asText()), "UNKNOWNS");
+        require(falseBoolean(value.path("humanConfirmed")) && falseBoolean(value.path("semanticScopeVerified")) && "unknown".equals(value.path("wholeOriginalSourceCoverage").asText()) && value.path("assetRefs").isArray() && "not_published_by_native_pdf_transport".equals(value.path("visualReturnStatus").asText()), "UNKNOWNS");
         JsonNode validation = value.path("transportValidation");
         fields(validation, set("mode", "derivedValidationCache", "qualityCertified"), "PROOF");
         require("cold_full_cas_and_internal_reconstruction".equals(validation.path("mode").asText()) && "not_implemented".equals(validation.path("derivedValidationCache").asText()) && falseBoolean(validation.path("qualityCertified")), "PROOF");
@@ -135,6 +139,13 @@ public final class NativePdfCanonicalContract {
         descriptor(value.path("adoptionManifestRef"), "canonical_json_object"); same(identity.path("adoptionManifestSha256"), value.path("adoptionManifestRef").path("sha256"), "PROOF");
         captures(value, source);
         Set<String> images = reference(value, sha);
+        pageAssets(value.path("assetRefs"), sha, required, images);
+        require(manifest.path("assets").size() == value.path("assetRefs").size(), "ASSETS");
+        for (int index = 0; index < manifest.path("assets").size(); index++) {
+            JsonNode declared = manifest.path("assets").get(index), asset = value.path("assetRefs").get(index);
+            fields(declared, set("assetId", "kind", "physicalPageNo", "artifactDescriptor"), "ASSETS");
+            for (String field : Arrays.asList("assetId", "kind", "physicalPageNo", "artifactDescriptor")) same(declared.path(field), asset.path(field), "ASSETS");
+        }
         typedRef(manifest.path("regionReviewRef"), sha, revision, identity.path("internalProjectionSha256"), value.path("adoptionManifestRef"), "/regionReview", "native_pdf_source_region_review");
         typedRef(value.path("unadoptedGlyphsRef"), sha, revision, identity.path("internalProjectionSha256"), internal.path("artifactDescriptor"), "/unadoptedGlyphs", "native_pdf_unadopted_unknown_inventory");
 
@@ -148,9 +159,10 @@ public final class NativePdfCanonicalContract {
         Set<Integer> absent = pages(value.path("unobservedOriginalPhysicalPages"), count, true); Set<Integer> complement = new TreeSet<>(); for (int page = 1; page <= count; page++) if (!observed.contains(page)) complement.add(page); require(complement.equals(absent), "SCOPE");
         JsonNode summary = value.path("unadoptedGlyphSummary"); require(summary.isArray() && summary.size() == observed.size(), "CAPTURE"); Set<Integer> summarized = new HashSet<>();
         for (JsonNode row : summary) { fields(row, set("physicalPageNo", "glyphCount", "status"), "CAPTURE"); require(positiveInt(row.path("physicalPageNo")) && observed.contains(row.path("physicalPageNo").asInt()) && summarized.add(row.path("physicalPageNo").asInt()) && nonnegativeInt(row.path("glyphCount")) && "unadopted_unknown".equals(row.path("status").asText()), "CAPTURE"); }
-        JsonNode canonical = value.path("canonical"); fields(canonical, set("version", "units", "relations", "assetRefs"), "COMMITMENTS"); require("native-pdf-public-whole-prose-commitments-v1".equals(canonical.path("version").asText()) && empty(canonical.path("assetRefs")) && canonical.path("relations").isArray(), "COMMITMENTS");
+        JsonNode canonical = value.path("canonical"); fields(canonical, set("version", "units", "relations", "assetRefs"), "COMMITMENTS"); require("native-pdf-public-whole-prose-commitments-v1".equals(canonical.path("version").asText()) && canonical.path("relations").isArray(), "COMMITMENTS"); same(canonical.path("assetRefs"), value.path("assetRefs"), "ASSETS");
         JsonNode chunks = value.path("chunks"), units = canonical.path("units"), adoptions = manifest.path("units");
         require(chunks.isArray() && chunks.size() > 0 && units.isArray() && units.size() == chunks.size() && adoptions.isArray() && adoptions.size() == chunks.size(), "COMMITMENTS");
+        if(NativePdfSlScopeContract.isSl(identity))require(chunks.size()==1,"SCOPE");
         Set<String> ids = new HashSet<>(), unitIds = new HashSet<>(); Map<String, String> regionUnits = new HashMap<>(); Set<Integer> adoptedPages = new TreeSet<>();
         for (int index = 0; index < chunks.size(); index++) {
             JsonNode chunk = chunks.get(index), commitment = units.get(index);
@@ -165,8 +177,10 @@ public final class NativePdfCanonicalContract {
                 require(regionUnits.put(part.path("referenceRegionId").asText(), chunk.path("unitId").asText()) == null, "ADOPTION");
             }
             Set<Integer> physical = pages(chunk.path("physicalPages"), count, false); require(required.containsAll(physical), "SCOPE"); adoptedPages.addAll(physical);
+            if(NativePdfSlScopeContract.isSl(identity))require(physical.equals(required),"SCOPE");
         }
         require(!adoptedPages.isEmpty(), "SCOPE"); relations(canonical.path("relations"), unitIds);
+        tableManifest(value);
         for (JsonNode relation : canonical.path("relations")) {
             require(relation.path("fromUnitId").asText().equals(regionUnits.get(relation.path("fromRegionId").asText()))
                     && relation.path("toUnitId").asText().equals(regionUnits.get(relation.path("toRegionId").asText())), "RELATIONS");
@@ -181,10 +195,10 @@ public final class NativePdfCanonicalContract {
     /** Standalone declaration validation; envelope overload also binds every pointer to its actual public context. */
     public static void validateChunk(JsonNode chunk, String sourceSha) {
         require(sourceSha != null && sourceSha.matches("[a-f0-9]{64}"), "SOURCE");
-        fields(chunk, set("id", "unitId", "content", "parts", "physicalPages", "pageNo", "anchor", "sourceOrder", "canonicalScope", "sourceHash", "projectionRevisionSha256", "projectionVersion", "metadataVersion", "segmentationVersion", "nativeTableMetadataVersion", "sourceQualityMetadataVersion", "sourceQualityHash", "sourceQuality", "sourceSpans", "adoption", "relations", "textAssembly", "assetRefs", "humanConfirmed", "originalSourceSha256", "documentId", "role", "module", "eligibleModules", "sourcePurpose", "sourceClass", "producerKind", "storageShape", "sourceSha256", "sourceRevisionSha256", "projectionCodeSha256", "internalProjectionVersion", "internalProjectionCodeSha256", "nativeBundleSha256", "dualBundleSha256", "referenceSha256", "adoptionManifestSha256", "dualSourceRevisionSha256", "scopeSha256", "qualitySha256", "projectionDependencySha256", "clauseId", "clauseHeadingLocation"), "CHUNK");
-        require(PRODUCER.equals(chunk.path("producerKind").asText()) && VERSION.equals(chunk.path("projectionVersion").asText()) && VERSION.equals(chunk.path("metadataVersion").asText()) && STORAGE.equals(chunk.path("storageShape").asText()) && knownInternal(chunk.path("internalProjectionVersion").asText()) && "whole-source-reviewed-pdf-region-units-v1".equals(chunk.path("segmentationVersion").asText()) && "native-pdf-observation-and-source-review-unknown-v1".equals(chunk.path("sourceQualityMetadataVersion").asText()) && "whole_text_unit".equals(chunk.path("canonicalScope").asText()) && nonnegativeInt(chunk.path("sourceOrder")) && empty(chunk.path("assetRefs")) && falseBoolean(chunk.path("humanConfirmed")), "CHUNK");
+        fields(chunk, NativePdfSlScopeContract.chunkFields(set("id", "unitId", "content", "parts", "physicalPages", "pageNo", "anchor", "sourceOrder", "canonicalScope", "sourceHash", "projectionRevisionSha256", "projectionVersion", "metadataVersion", "segmentationVersion", "nativeTableMetadataVersion", "sourceQualityMetadataVersion", "sourceQualityHash", "sourceQuality", "sourceSpans", "adoption", "relations", "textAssembly", "assetRefs", "humanConfirmed", "originalSourceSha256", "documentId", "role", "module", "eligibleModules", "sourcePurpose", "sourceClass", "producerKind", "storageShape", "sourceSha256", "sourceRevisionSha256", "projectionCodeSha256", "internalProjectionVersion", "internalProjectionCodeSha256", "nativeBundleSha256", "dualBundleSha256", "referenceSha256", "adoptionManifestSha256", "dualSourceRevisionSha256", "scopeSha256", "qualitySha256", "projectionDependencySha256", "clauseId", "clauseHeadingLocation", "nativeTableGroupsRef", "nativeTableSummary"), chunk), "CHUNK");
+        require(PRODUCER.equals(chunk.path("producerKind").asText()) && publicVersion(chunk.path("internalProjectionVersion").asText()).equals(chunk.path("projectionVersion").asText()) && chunk.path("projectionVersion").equals(chunk.path("metadataVersion")) && STORAGE.equals(chunk.path("storageShape").asText()) && knownInternal(chunk.path("internalProjectionVersion").asText()) && "whole-source-reviewed-pdf-region-units-v1".equals(chunk.path("segmentationVersion").asText()) && "native-pdf-observation-and-source-review-unknown-v1".equals(chunk.path("sourceQualityMetadataVersion").asText()) && set("whole_text_unit", "whole_table_group").contains(chunk.path("canonicalScope").asText()) && nonnegativeInt(chunk.path("sourceOrder")) && chunk.path("assetRefs").isArray() && falseBoolean(chunk.path("humanConfirmed")), "CHUNK");
         require(sourceSha.equals(chunk.path("sourceSha256").asText()) && sourceSha.equals(chunk.path("originalSourceSha256").asText()) && text(chunk.path("unitId")) && chunk.path("id").asText().matches("canonical-native-pdf-public:[a-f0-9]{64}"), "CHUNK");
-        require("native-pdf-no-table-adoption-v1".equals(chunk.path("nativeTableMetadataVersion").asText()), "CHUNK");
+        tableChunk(chunk, sourceSha);
         for (String field : Arrays.asList("sourceRevisionSha256", "sourceHash", "projectionRevisionSha256", "projectionCodeSha256", "internalProjectionCodeSha256", "sourceQualityHash", "qualitySha256", "scopeSha256", "referenceSha256", "nativeBundleSha256", "dualBundleSha256", "adoptionManifestSha256", "dualSourceRevisionSha256")) sha(chunk.path(field));
         same(chunk.path("sourceQualityHash"), chunk.path("qualitySha256"), "UNKNOWNS"); quality(chunk.path("sourceQuality"), true); module(chunk);
         dependencies(chunk.path("projectionDependencySha256"),chunk.path("internalProjectionVersion").asText());
@@ -204,7 +218,7 @@ public final class NativePdfCanonicalContract {
         }
         require(chunk.path("content").isTextual() && String.join("\n", literal).equals(chunk.path("content").asText()) && literal.stream().anyMatch(text -> !text.trim().isEmpty()), "TEXT");
         require(physical.equals(pages(chunk.path("physicalPages"), Integer.MAX_VALUE, false)) && positiveInt(chunk.path("pageNo")) && chunk.path("pageNo").asInt() == physical.iterator().next(), "PAGES"); same(chunk.path("anchor"), parts.get(0).path("anchor"), "POSITION");
-        JsonNode adoption = chunk.path("adoption"); fields(adoption, set("unitId", "scope", "regionIds", "partSeparator", "clause", "physicalPages"), "ADOPTION"); same(adoption.path("unitId"), chunk.path("unitId"), "ADOPTION"); same(adoption.path("scope"), chunk.path("canonicalScope"), "ADOPTION"); same(adoption.path("physicalPages"), chunk.path("physicalPages"), "ADOPTION"); same(adoption.path("partSeparator"), assembly, "ADOPTION");
+        JsonNode adoption = chunk.path("adoption"); fields(adoption, set("unitId", "scope", "regionIds", "partSeparator", "clause", "physicalPages", "tableGroupId"), "ADOPTION"); same(adoption.path("unitId"), chunk.path("unitId"), "ADOPTION"); same(adoption.path("scope"), chunk.path("canonicalScope"), "ADOPTION"); same(adoption.path("physicalPages"), chunk.path("physicalPages"), "ADOPTION"); same(adoption.path("partSeparator"), assembly, "ADOPTION");
         require(adoption.path("regionIds").isArray() && adoption.path("regionIds").size() == parts.size(), "ADOPTION"); for (int index = 0; index < parts.size(); index++) same(adoption.path("regionIds").get(index), parts.get(index).path("referenceRegionId"), "ADOPTION");
         if (adoption.has("clause") && !adoption.path("clause").isNull()) { fields(adoption.path("clause"), set("clauseId", "headingRegionId"), "ADOPTION"); same(adoption.path("clause").path("clauseId"), chunk.path("clauseId"), "ADOPTION"); JsonNode heading = null; for (JsonNode part : parts) if (part.path("referenceRegionId").equals(adoption.path("clause").path("headingRegionId"))) heading = part; require(heading != null, "ADOPTION"); same(heading.path("anchor"), chunk.path("clauseHeadingLocation"), "ADOPTION"); }
         else require(!chunk.has("clauseId") && !chunk.has("clauseHeadingLocation"), "ADOPTION");
@@ -221,6 +235,7 @@ public final class NativePdfCanonicalContract {
     public static void validateChunk(JsonNode chunk, JsonNode envelope) {
         require(envelope != null && envelope.isObject(), "ENVELOPE"); validateChunk(chunk, envelope.path("source").path("sourceSha256").asText());
         JsonNode identity = envelope.path("projectionIdentity");
+        NativePdfSlScopeContract.sameIdentity(chunk, identity);
         for (String field : Arrays.asList("documentId", "role", "module", "eligibleModules", "sourcePurpose", "sourceClass", "sourceSha256", "sourceRevisionSha256", "projectionCodeSha256", "internalProjectionVersion", "internalProjectionCodeSha256", "nativeBundleSha256", "dualBundleSha256", "referenceSha256", "adoptionManifestSha256", "dualSourceRevisionSha256", "scopeSha256", "qualitySha256", "projectionDependencySha256")) same(chunk.path(field), identity.path(field), "IDENTITY");
         for (String field : Arrays.asList("sourceHash", "projectionRevisionSha256")) same(chunk.path(field), envelope.path(field), "IDENTITY");
         int ordinal = chunk.path("sourceOrder").asInt(-1); require(ordinal >= 0, "ORDER");
@@ -244,12 +259,12 @@ public final class NativePdfCanonicalContract {
     private static void layout(JsonNode part, String source, int physical) {
         JsonNode layouts = part.path("visualLayoutParts"); require(layouts.isArray() && layouts.size() >= 2, "LAYOUT"); Set<String> runs = new HashSet<>(), families = new HashSet<>(), selected = new HashSet<>(), blocks = new HashSet<>();
         for (JsonNode row : layouts) {
-            fields(row, set("runId", "blockId", "physicalPageNo", "selectedLayout", "wholeBlockSha256", "actualCandidateTextSha256", "rawProvenance", "originalGeometry", "sourceRegionMappingStatus", "rasterMappingReview"), "LAYOUT");
+            fields(row, set("runId", "blockId", "physicalPageNo", "selectedLayout", "wholeBlockSha256", "actualCandidateTextSha256", "rawProvenance", "originalGeometry", "sourceRegionMappingStatus", "rasterMappingReview", "referenceRasterGeometry"), "LAYOUT");
             String run = row.path("runId").asText(); require(text(row.path("blockId")) && text(row.path("runId")) && row.path("physicalPageNo").isIntegralNumber() && row.path("physicalPageNo").asInt() == physical && row.path("selectedLayout").isBoolean() && blocks.add(run + "\n" + row.path("blockId").asText()), "LAYOUT");
             String family = run.startsWith("mineru:") ? "mineru" : run.startsWith("paddleocr-vl:") ? "paddleocr-vl" : ""; require(!family.isEmpty(), "LAYOUT"); runs.add(run); families.add(family); if (row.path("selectedLayout").asBoolean()) selected.add(run);
             sha(row.path("wholeBlockSha256")); sha(row.path("actualCandidateTextSha256")); JsonNode provenance = row.path("rawProvenance"); require(provenance.isObject() && text(provenance.path("output")) && text(provenance.path("textField")) && pointer(provenance.path("pointer")), "LAYOUT");
             require("source_reviewed_declared_box_overlap_not_exact_extent".equals(row.path("sourceRegionMappingStatus").asText()), "LAYOUT");
-            JsonNode geometry = row.path("originalGeometry"), target = geometry.path("targetFrame"); require("verified".equals(geometry.path("status").asText()) && "explicit_input_and_source_bound_transform".equals(geometry.path("reason").asText()) && "original_page".equals(target.path("coordinateFrame").asText()) && "pixel".equals(target.path("coordinateUnit").asText()) && source.equals(target.path("sourceSha256").asText()) && positiveInt(target.path("physicalPageNo")) && target.path("physicalPageNo").asInt() == physical && positiveNumber(target.path("width")) && positiveNumber(target.path("height")), "LAYOUT");
+            JsonNode geometry = row.path("originalGeometry"), target = geometry.path("targetFrame"); require("verified".equals(geometry.path("status").asText()) && "explicit_input_and_source_bound_transform".equals(geometry.path("reason").asText()) && "original_page".equals(target.path("coordinateFrame").asText()) && set("pixel", "pt").contains(target.path("coordinateUnit").asText()) && source.equals(target.path("sourceSha256").asText()) && positiveInt(target.path("physicalPageNo")) && target.path("physicalPageNo").asInt() == physical && positiveNumber(target.path("width")) && positiveNumber(target.path("height")), "LAYOUT");
             fields(geometry, set("status", "reason", "xyxyNormalized", "xyxyOriginal", "polygonOriginal", "targetFrame", "transformSha256"), "LAYOUT");
             fields(target, set("coordinateFrame", "coordinateUnit", "physicalPageNo", "sourceSha256", "width", "height", "originalPageRasterSha256"), "LAYOUT");
             box(geometry.path("xyxyNormalized"), 1, 1); box(geometry.path("xyxyOriginal"), target.path("width").asDouble(), target.path("height").asDouble()); sha(geometry.path("transformSha256"));
@@ -258,8 +273,8 @@ public final class NativePdfCanonicalContract {
             double minX = Double.POSITIVE_INFINITY, minY = Double.POSITIVE_INFINITY, maxX = Double.NEGATIVE_INFINITY, maxY = Double.NEGATIVE_INFINITY;
             for (JsonNode point : polygon) { vector(point, 2); double px = point.get(0).asDouble(), py = point.get(1).asDouble(); require(px >= 0 && px <= target.path("width").asDouble() && py >= 0 && py <= target.path("height").asDouble(), "LAYOUT"); minX = Math.min(minX, px); minY = Math.min(minY, py); maxX = Math.max(maxX, px); maxY = Math.max(maxY, py); }
             double[] bounds = {minX, minY, maxX, maxY}; for (int index = 0; index < 4; index++) require(close(bounds[index], geometry.path("xyxyOriginal").get(index).asDouble()), "LAYOUT");
-            require(overlap(part.path("bbox"), geometry.path("xyxyNormalized")), "LAYOUT");
-            JsonNode review = row.path("rasterMappingReview"); fields(review, set("status", "method", "referenceRasterSha256", "inputRasterSha256", "originalPageTransformSha256", "relationship"), "LAYOUT");
+
+            JsonNode review = row.path("rasterMappingReview"); fields(review, set("status", "method", "referenceRasterSha256", "inputRasterSha256", "originalPageTransformSha256", "relationship", "referenceRasterBridge"), "LAYOUT");
             require("source_reviewed_declared".equals(review.path("status").asText()) && "original_page_raster_geometry_review".equals(review.path("method").asText()), "LAYOUT"); sha(review.path("inputRasterSha256")); same(review.path("referenceRasterSha256"), part.path("sourceReviewAnchor").path("renditionSha256"), "LAYOUT"); same(review.path("originalPageTransformSha256"), geometry.path("transformSha256"), "LAYOUT");
             // The visual producer retains this optional original-frame identity. A declared hash
             // must bind the reviewed original raster; it is never a new pixel-quality assertion.
@@ -269,8 +284,33 @@ public final class NativePdfCanonicalContract {
                 same(raster, review.path("referenceRasterSha256"), "LAYOUT");
             }
             String relationship = review.path("relationship").asText(); require("source_reviewed_affine_to_reference_raster".equals(relationship) || "same_original_raster".equals(relationship) && review.path("inputRasterSha256").equals(review.path("referenceRasterSha256")), "LAYOUT");
+            require(overlap(part.path("bbox"), referenceGeometry(row, part, source, physical)), "LAYOUT");
         }
         require(runs.size() == 2 && families.size() == 2 && selected.size() == 1, "LAYOUT");
+    }
+
+    private static JsonNode referenceGeometry(JsonNode row,JsonNode part,String source,int physical) {
+        JsonNode geometry=row.path("originalGeometry"),target=geometry.path("targetFrame"),review=row.path("rasterMappingReview");
+        if("pixel".equals(target.path("coordinateUnit").asText())){require(!review.has("referenceRasterBridge")&&!row.has("referenceRasterGeometry"),"LAYOUT");return geometry.path("xyxyNormalized");}
+        JsonNode bridge=review.path("referenceRasterBridge"),raster=row.path("referenceRasterGeometry"),nativeFrame=part.path("sourcePosition").path("sourceFrame");
+        fields(bridge,set("schema","nativeFrameSha256","sourceFrame","referenceFrame","matrix"),"LAYOUT");
+        String schema=bridge.path("schema").asText();boolean ceil="consense.original-page-reference-raster-144dpi-ceil-affine.v1".equals(schema);
+        require(ceil||"consense.original-page-reference-raster-affine.v1".equals(schema),"LAYOUT");
+        require(CanonicalJson.nodeHash(nativeFrame).equals(sha(bridge.path("nativeFrameSha256"))),"LAYOUT");same(bridge.path("sourceFrame"),target,"LAYOUT");
+        require(close(nativeFrame.path("renderedCropSizePoints72").get(0).asDouble(),target.path("width").asDouble())&&close(nativeFrame.path("renderedCropSizePoints72").get(1).asDouble(),target.path("height").asDouble()),"LAYOUT");
+        JsonNode reference=bridge.path("referenceFrame");fields(reference,set("coordinateFrame","coordinateUnit","width","height","sourceSha256","physicalPageNo","rasterSha256"),"LAYOUT");
+        require("reference_raster".equals(reference.path("coordinateFrame").asText())&&"pixel".equals(reference.path("coordinateUnit").asText())&&positiveInt(reference.path("width"))&&positiveInt(reference.path("height"))&&source.equals(reference.path("sourceSha256").asText())&&positiveInt(reference.path("physicalPageNo"))&&reference.path("physicalPageNo").asInt()==physical,"LAYOUT");same(reference.path("rasterSha256"),part.path("sourceReviewAnchor").path("renditionSha256"),"LAYOUT");
+        double width=reference.path("width").asDouble(),height=reference.path("height").asDouble(),sx=ceil?2:width/target.path("width").asDouble(),sy=ceil?2:height/target.path("height").asDouble();
+        if(ceil)require(width==Math.ceil(2*target.path("width").asDouble())&&height==Math.ceil(2*target.path("height").asDouble()),"LAYOUT");
+        JsonNode matrix=bridge.path("matrix");vector(matrix,6);double[] expected={sx,0,0,0,sy,0};for(int n=0;n<6;n++)require(close(matrix.get(n).asDouble(),expected[n]),"LAYOUT");
+        fields(raster,set("status","pointGeometrySha256","targetFrame","xyxyReferenceRaster","polygonReferenceRaster","xyxyNormalized","review"),"LAYOUT");
+        require("source_reviewed_declared_affine_bridge_not_exact_glyph".equals(raster.path("status").asText())&&CanonicalJson.nodeHash(geometry).equals(sha(raster.path("pointGeometrySha256"))),"LAYOUT");same(raster.path("targetFrame"),reference,"LAYOUT");same(raster.path("review"),bridge,"LAYOUT");
+        JsonNode original=geometry.path("polygonOriginal"),polygon=raster.path("polygonReferenceRaster");require(polygon.isArray()&&polygon.size()==original.size(),"LAYOUT");
+        double minX=Double.POSITIVE_INFINITY,minY=Double.POSITIVE_INFINITY,maxX=Double.NEGATIVE_INFINITY,maxY=Double.NEGATIVE_INFINITY;
+        for(int n=0;n<polygon.size();n++){JsonNode point=polygon.get(n);vector(point,2);double x=original.get(n).get(0).asDouble()*sx,y=original.get(n).get(1).asDouble()*sy;require(close(x,point.get(0).asDouble())&&close(y,point.get(1).asDouble()),"LAYOUT");minX=Math.min(minX,x);minY=Math.min(minY,y);maxX=Math.max(maxX,x);maxY=Math.max(maxY,y);}
+        box(raster.path("xyxyReferenceRaster"),width,height);box(raster.path("xyxyNormalized"),1,1);double[] bounds={minX,minY,maxX,maxY};
+        for(int n=0;n<4;n++){require(close(bounds[n],raster.path("xyxyReferenceRaster").get(n).asDouble())&&close(bounds[n]/(n%2==0?width:height),raster.path("xyxyNormalized").get(n).asDouble()),"LAYOUT");if(!ceil)require(close(raster.path("xyxyNormalized").get(n).asDouble(),geometry.path("xyxyNormalized").get(n).asDouble()),"LAYOUT");}
+        return raster.path("xyxyNormalized");
     }
 
     private static void frame(JsonNode frame) {
@@ -321,13 +361,101 @@ public final class NativePdfCanonicalContract {
     }
     private static void bundleRef(JsonNode value, JsonNode seal) { fields(value, set("artifactDescriptor", "bundleSha256"), "PROOF"); descriptor(value.path("artifactDescriptor"), "canonical_json_object"); same(value.path("bundleSha256"), seal, "PROOF"); }
     private static void descriptor(JsonNode value, String scope) { fields(value, set("schema", "storage", "sha256", "byteCount", "relativePath", "identityScope"), "PROOF"); String hash = sha(value.path("sha256")); require("consense.artifact-descriptor.v1".equals(value.path("schema").asText()) && "content_addressed_disk".equals(value.path("storage").asText()) && nonnegativeLong(value.path("byteCount")) && ("sha256/" + hash.substring(0, 2) + "/" + hash + ".blob").equals(value.path("relativePath").asText()) && (scope == null ? set("exact_supplied_bytes", "canonical_json_object").contains(value.path("identityScope").asText()) : scope.equals(value.path("identityScope").asText())), "PROOF"); }
-    private static boolean knownInternal(String version){return INTERNAL_VERSION.equals(version)||INTERNAL_V2.equals(version);}
+    // Known recipe/public pairings retain the original opaque producer identities.
+    private static boolean knownInternal(String version){return INTERNAL_VERSION.equals(version)||selectedSourceInternal(version);}
+    private static boolean selectedSourceInternal(String version){return INTERNAL_V2.equals(version)||NativePdfSlScopeContract.PROSE.equals(version)||tableInternal(version);}
+    private static boolean tableInternal(String version){return INTERNAL_V3.equals(version)||NativePdfSlScopeContract.TABLES.equals(version);}
+    static String publicVersion(String internal){require(knownInternal(internal),"VERSION");return tableInternal(internal)?TABLE_VERSION:VERSION;}
+
+    static void pageAssets(JsonNode assets,String source,Set<Integer> allowed,Set<String> images) {
+        require(assets.isArray(),"ASSETS");Set<String> ids=new HashSet<>();
+        for(JsonNode asset:assets){
+            fields(asset,set("assetId","kind","physicalPageNo","artifactDescriptor","sourceSha256","sha256","byteCount","mediaType","physicalPages","sourceRelation","geometryStatus","quality"),"ASSETS");
+            require(text(asset.path("assetId"))&&ids.add(asset.path("assetId").asText())&&"original_page".equals(asset.path("kind").asText())&&source.equals(asset.path("sourceSha256").asText())&&positiveInt(asset.path("physicalPageNo"))&&allowed.contains(asset.path("physicalPageNo").asInt()),"ASSETS");
+            descriptor(asset.path("artifactDescriptor"),"exact_supplied_bytes");same(asset.path("sha256"),asset.path("artifactDescriptor").path("sha256"),"ASSETS");same(asset.path("byteCount"),asset.path("artifactDescriptor").path("byteCount"),"ASSETS");
+            require(positiveLong(asset.path("byteCount"))&&set("image/png","image/jpeg").contains(asset.path("mediaType").asText())&&"whole_original_page_no_unverified_crop".equals(asset.path("geometryStatus").asText())&&"unknown".equals(asset.path("quality").asText()),"ASSETS");
+            require(pages(asset.path("physicalPages"),Integer.MAX_VALUE,false).equals(Collections.singleton(asset.path("physicalPageNo").asInt())),"ASSETS");
+            JsonNode relation=asset.path("sourceRelation");fields(relation,set("kind","originalPhysicalPageNo","originalSourceSha256"),"ASSETS");
+            require("original_pdf_page_raster".equals(relation.path("kind").asText())&&source.equals(relation.path("originalSourceSha256").asText())&&asset.path("physicalPageNo").equals(relation.path("originalPhysicalPageNo")),"ASSETS");
+            if(images!=null)require(images.contains(asset.path("sha256").asText()),"ASSETS");
+        }
+    }
+
+    private static void tableChunk(JsonNode chunk,String source) {
+        boolean table="whole_table_group".equals(chunk.path("canonicalScope").asText()),recipe=tableInternal(chunk.path("internalProjectionVersion").asText());
+        require(recipe||!table&&empty(chunk.path("assetRefs")),"TABLE");
+        pageAssets(chunk.path("assetRefs"),source,pages(chunk.path("physicalPages"),Integer.MAX_VALUE,false),null);
+        if(!table){
+            require("native-pdf-no-table-adoption-v1".equals(chunk.path("nativeTableMetadataVersion").asText()),"CHUNK");
+            require(!chunk.has("nativeTableGroupsRef")&&!chunk.has("nativeTableSummary")&&!chunk.path("adoption").has("tableGroupId"),"TABLE");return;
+        }
+        require("source-reviewed-native-pdf-whole-table-groups-v1".equals(chunk.path("nativeTableMetadataVersion").asText()),"CHUNK");
+        require(recipe&&text(chunk.path("adoption").path("tableGroupId")),"TABLE");
+        JsonNode parts=chunk.path("parts");require(parts.isArray()&&!parts.isEmpty(),"TABLE");
+        JsonNode region=parts.get(0).path("nativePdfRegionRef"),ref=chunk.path("nativeTableGroupsRef");
+        typedRef(ref,source,chunk.path("sourceRevisionSha256").asText(),region.path("internalProjectionSha256"),region.path("artifactDescriptor"),"/chunks/"+chunk.path("sourceOrder").asInt()+"/nativeTables","native_pdf_whole_table_groups");
+        JsonNode summaries=chunk.path("nativeTableSummary");require(summaries.isArray()&&summaries.size()==1,"TABLE");JsonNode summary=summaries.get(0);
+        fields(summary,set("tableGroupId","physicalPages","logicalRowCount","completeness"),"TABLE");same(summary.path("tableGroupId"),chunk.path("adoption").path("tableGroupId"),"TABLE");require(pages(chunk.path("physicalPages"),Integer.MAX_VALUE,false).containsAll(pages(summary.path("physicalPages"),Integer.MAX_VALUE,false)),"TABLE");require(nonnegativeInt(summary.path("logicalRowCount")),"TABLE");
+        JsonNode complete=summary.path("completeness");fields(complete,set("required","present","missing","unknown"),"TABLE");same(complete.path("required"),chunk.path("adoption").path("regionIds"),"TABLE");same(complete.path("present"),complete.path("required"),"TABLE");require(empty(complete.path("missing"))&&complete.path("unknown").isArray()&&complete.path("unknown").size()==2&&"legal_semantics".equals(complete.path("unknown").get(0).asText())&&"pixel_verified_visibility".equals(complete.path("unknown").get(1).asText()),"TABLE");
+    }
+
+    private static void tableManifest(JsonNode envelope) {
+        Map<String,JsonNode> chunks=new HashMap<>();
+        for(JsonNode chunk:envelope.path("chunks")){
+            List<JsonNode> expected=new ArrayList<>(),actual=new ArrayList<>();Set<Integer> physical=pages(chunk.path("physicalPages"),Integer.MAX_VALUE,false);
+            for(JsonNode asset:envelope.path("assetRefs"))if(physical.contains(asset.path("physicalPageNo").asInt()))expected.add(asset);
+            chunk.path("assetRefs").forEach(actual::add);require(expected.equals(actual),"ASSETS");
+            if("whole_table_group".equals(chunk.path("canonicalScope").asText()))require(chunks.put(chunk.path("adoption").path("tableGroupId").asText(),chunk)==null,"TABLE");
+        }
+        JsonNode groups=envelope.path("manifest").path("tableGroups");require(groups.size()==chunks.size(),"TABLE");Set<String> seen=new HashSet<>();
+        for(JsonNode group:groups){
+            fields(group,set("tableGroupId","referenceTableId","regionIds","fragments","logicalRows","reviewedAttributes"),"TABLE");String id=group.path("tableGroupId").asText();JsonNode chunk=chunks.get(id);
+            require(text(group.path("tableGroupId"))&&seen.add(id)&&chunk!=null&&text(group.path("referenceTableId")),"TABLE");same(group.path("regionIds"),chunk.path("adoption").path("regionIds"),"TABLE");
+            JsonNode reviewed=group.path("reviewedAttributes");require(reviewed.isArray(),"TABLE");Set<String> reviews=new HashSet<>();for(JsonNode attribute:reviewed)require(attribute.isTextual()&&reviews.add(attribute.asText()),"TABLE");require(reviews.equals(set("tableInventory","cellMembership","blankCells","logicalRows","conditions")),"TABLE");
+            Map<String,Integer> regionOrder=new HashMap<>(),regionPages=new HashMap<>(),rowCounts=new HashMap<>();Set<String> physicalRows=new HashSet<>();
+            int ordinal=0;for(JsonNode part:chunk.path("parts")){regionOrder.put(part.path("referenceRegionId").asText(),ordinal++);regionPages.put(part.path("referenceRegionId").asText(),part.path("physicalPageNo").asInt());}
+            // Group parts also retain source-linked conditions; only table regions are fragments.
+            JsonNode fragments=group.path("fragments");require(fragments.isArray()&&!fragments.isEmpty()&&fragments.size()<=regionOrder.size(),"TABLE");int columnCount=-1,priorFragmentOrder=-1;Set<Integer> fragmentPages=new TreeSet<>();
+            Set<String> glyphs=new HashSet<>(),cells=new HashSet<>();
+            for(int n=0;n<fragments.size();n++){
+                JsonNode fragment=fragments.get(n);fields(fragment,set("regionId","rowCount","columnCount","headerRows","cells"),"TABLE");String rid=fragment.path("regionId").asText();
+                require(regionOrder.containsKey(rid)&&regionOrder.get(rid)>priorFragmentOrder&&positiveInt(fragment.path("rowCount"))&&positiveInt(fragment.path("columnCount"))&&rowCounts.put(rid,fragment.path("rowCount").asInt())==null,"TABLE");
+                priorFragmentOrder=regionOrder.get(rid);fragmentPages.add(regionPages.get(rid));
+                int rows=fragment.path("rowCount").asInt(),columns=fragment.path("columnCount").asInt();require(columnCount<0||columnCount==columns,"TABLE");columnCount=columns;
+                // Bound slot validation to the public message cap; it never hydrates private cells.
+                require((long)rows*columns<=MAX_BYTES/16,"TABLE");Set<Integer> occupied=new HashSet<>(),headers=new HashSet<>();
+                require(fragment.path("headerRows").isArray()&&fragment.path("cells").isArray(),"TABLE");for(JsonNode header:fragment.path("headerRows"))require(nonnegativeInt(header)&&header.asInt()<rows&&headers.add(header.asInt()),"TABLE");
+                for(JsonNode cell:fragment.path("cells")){
+                    fields(cell,set("cellId","row","col","rowSpan","colSpan","glyphIds","bboxNormalized","valueState"),"TABLE");
+                    require(text(cell.path("cellId"))&&cells.add(cell.path("cellId").asText())&&nonnegativeInt(cell.path("row"))&&nonnegativeInt(cell.path("col"))&&positiveInt(cell.path("rowSpan"))&&positiveInt(cell.path("colSpan")),"TABLE");
+                    int row=cell.path("row").asInt(),col=cell.path("col").asInt(),rs=cell.path("rowSpan").asInt(),cs=cell.path("colSpan").asInt();require((long)row+rs<=rows&&(long)col+cs<=columns,"TABLE");
+                    for(int r=row;r<row+rs;r++)for(int c=col;c<col+cs;c++)require(occupied.add(r*columns+c),"TABLE");box(cell.path("bboxNormalized"),1,1);
+                    JsonNode members=cell.path("glyphIds");require(members.isArray()&&(!members.isEmpty()?"literal":"source_reviewed_blank").equals(cell.path("valueState").asText()),"TABLE");
+                    for(JsonNode glyph:members)require(glyph.isTextual()&&glyph.asText().matches("pdf-page/"+regionPages.get(rid)+"/glyph/[0-9]+")&&glyphs.add(glyph.asText()),"TABLE");
+                }
+                require(occupied.size()==rows*columns,"TABLE");for(int row=0;row<rows;row++)if(!headers.contains(row))physicalRows.add(rid+"\n"+row);
+            }
+            require(fragmentPages.equals(pages(chunk.path("nativeTableSummary").get(0).path("physicalPages"),Integer.MAX_VALUE,false)),"TABLE");
+            JsonNode logical=group.path("logicalRows");require(logical.isArray()&&logical.size()==chunk.path("nativeTableSummary").get(0).path("logicalRowCount").asInt(),"TABLE");Set<String> logicalIds=new HashSet<>(),used=new HashSet<>();
+            for(JsonNode row:logical){
+                fields(row,set("logicalRowId","physicalRows"),"TABLE");require(text(row.path("logicalRowId"))&&logicalIds.add(row.path("logicalRowId").asText())&&row.path("physicalRows").isArray()&&!row.path("physicalRows").isEmpty(),"TABLE");String prior=null;int priorRow=-1,priorOrder=-1;
+                for(JsonNode physical:row.path("physicalRows")){
+                    fields(physical,set("regionId","row"),"TABLE");String rid=physical.path("regionId").asText();require(nonnegativeInt(physical.path("row"))&&physicalRows.contains(rid+"\n"+physical.path("row").asInt())&&used.add(rid+"\n"+physical.path("row").asInt()),"TABLE");int r=physical.path("row").asInt(),order=regionOrder.get(rid);
+                    require(order>=priorOrder&&(!rid.equals(prior)||r==priorRow+1),"TABLE");
+                    if(prior!=null&&!rid.equals(prior)){boolean continuation=false;for(JsonNode relation:chunk.path("relations"))if("continuation".equals(relation.path("type").asText())&&prior.equals(relation.path("fromRegionId").asText())&&rid.equals(relation.path("toRegionId").asText()))continuation=true;require(continuation,"TABLE");}
+                    prior=rid;priorRow=r;priorOrder=order;
+                }
+            }
+            require(used.equals(physicalRows),"TABLE");
+        }
+    }
     private static void dependencies(JsonNode value,String version) {
         require(knownInternal(version),"VERSION");Set<String> expected=new HashSet<>(PROJECTION_DEPENDENCIES);
-        if(INTERNAL_V2.equals(version))expected.addAll(Arrays.asList("pdf_selected_source.py","selected_source_raster.py"));
+        if(selectedSourceInternal(version))expected.addAll(Arrays.asList("pdf_selected_source.py","selected_source_raster.py"));
+        if(tableInternal(version))expected.add("native_pdf_table_projection.py");
         require(value.isObject()&&names(value).equals(expected),"PROOF");for(JsonNode digest:value)sha(digest);
     }
-    private static void module(JsonNode value) { String module = value.path("module").asText(), purpose = value.path("sourcePurpose").asText(), sourceClass = value.path("sourceClass").asText(); require(MODULES.contains(module) && set("tender", "standard", "project_fact", "package_manifest").contains(value.path("role").asText()) && text(value.path("documentId")) && text(value.path("sourceClass")) && !EXCLUDED.contains(sourceClass) && set("standard_template", "project_document", "reference_standard", "project_fact", "package_manifest", "unknown").contains(purpose), "SCOPE"); JsonNode eligible = value.path("eligibleModules"); require(eligible.isArray() && eligible.size() > 0, "SCOPE"); Set<String> modules = new HashSet<>(); for (JsonNode item : eligible) require(item.isTextual() && MODULES.contains(item.asText()) && modules.add(item.asText()), "SCOPE"); require(modules.contains(module), "SCOPE"); if ("standard_template".equals(purpose) || "drafting_standard_template".equals(sourceClass)) require("drafting".equals(module) && modules.equals(set("drafting")) && set("standard_template", "unknown").contains(purpose), "SCOPE"); }
+    private static void module(JsonNode value) { String module = value.path("module").asText(), purpose = value.path("sourcePurpose").asText(), sourceClass = value.path("sourceClass").asText(); NativePdfSlScopeContract.identity(value); require(MODULES.contains(module) && set("tender", "standard", "project_fact", "package_manifest").contains(value.path("role").asText()) && text(value.path("documentId")) && text(value.path("sourceClass")) && (NativePdfSlScopeContract.isSl(value)||!EXCLUDED.contains(sourceClass)) && set("standard_template", "project_document", "reference_standard", "project_fact", "package_manifest", "unknown").contains(purpose), "SCOPE"); JsonNode eligible = value.path("eligibleModules"); require(eligible.isArray() && eligible.size() > 0, "SCOPE"); Set<String> modules = new HashSet<>(); for (JsonNode item : eligible) require(item.isTextual() && MODULES.contains(item.asText()) && modules.add(item.asText()), "SCOPE"); require(modules.contains(module), "SCOPE"); if ("standard_template".equals(purpose) || "drafting_standard_template".equals(sourceClass)) require("drafting".equals(module) && modules.equals(set("drafting")) && set("standard_template", "unknown").contains(purpose), "SCOPE"); }
     private static void quality(JsonNode value, boolean expanded) { fields(value, set("parseStatus", "semanticQuality", "attributes", "notes", "version", "reviewMeaning"), "UNKNOWNS"); require("PARSED".equals(value.path("parseStatus").asText()) && "unknown".equals(value.path("semanticQuality").asText()) && text(value.path("version")), "UNKNOWNS"); JsonNode attributes = value.path("attributes"); if (expanded) require(attributes.isObject() && names(attributes).equals(UNKNOWN_ATTRIBUTES), "UNKNOWNS"); else require(attributes.isMissingNode() || attributes.isObject() && UNKNOWN_ATTRIBUTES.containsAll(names(attributes)), "UNKNOWNS"); if (attributes.isObject()) for (JsonNode item : attributes) require(item.isTextual() && "unknown".equals(item.asText()), "UNKNOWNS"); }
     private static Set<Integer> pages(JsonNode value, int maximum, boolean emptyAllowed) { require(value.isArray() && (emptyAllowed || value.size() > 0), "PAGES"); Set<Integer> result = new TreeSet<>(); int prior = 0; for (JsonNode page : value) { require(positiveInt(page) && page.asInt() <= maximum && page.asInt() > prior, "PAGES"); result.add(page.asInt()); prior = page.asInt(); } return result; }
     private static void box(JsonNode box, double width, double height) { vector(box, 4); double x0 = box.get(0).asDouble(), y0 = box.get(1).asDouble(), x1 = box.get(2).asDouble(), y1 = box.get(3).asDouble(); require(0 <= x0 && x0 < x1 && x1 <= width && 0 <= y0 && y0 < y1 && y1 <= height, "GEOMETRY"); }
