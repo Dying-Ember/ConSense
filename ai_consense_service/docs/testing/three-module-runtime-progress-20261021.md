@@ -1,3 +1,25 @@
+<!-- unified-progress38:start -->
+**2026-10-21 当前状态：formal19 已实际部署；Drafting 两张残文整页已消除，但逐页版式仍 FAIL；修复后的同题 Qwen 27B 请求已实际发出，结果观察中。统一 Goal active。撤回历史“整体约80%”作为当前进度的表述：它没有固定业务验收分母，不能用软件测试数量推算交付完成率。**
+
+| 交付项 | 已经落地的变化 | 当前未收口的部分 |
+| --- | --- | --- |
+| 本机运行版本 | 已推送的 `a5f6a2995678333fc81e8f9082fc0bf69e3e2c4d` 构建并运行于 formal19，18084／PID61512；受保护 H2 PID38980 保持 | 本机运行与数据保全通过，不代表三模块业务通过 |
+| Drafting 最终文件 | 私有 H4 完整生成成功；两张仅剩短尾的整页消除，四处来源段落字形覆盖完整 | 24 页逐张目验确认 5 组标题／引导行孤立、1 组单词续行、3 组段首单行跨页；最终版式 FAIL，候选未采用／部署，原生 Word 与项目身份全包贯穿仍待验 |
+| Advisory 实际回答 | 最新反馈修复已随 formal19 部署；同题、同项目、同来源、同 27B 的唯一请求已发出 | 真实回答、保存及固定 13 项业务判据等待本轮结果；旧 formal18 业务失败保留 |
+| Vetting 最终报告 | 既有报告内容在升级后保持；二进制差异仅创建时间、ZIP 时间与 PDF ID | 报告内容、赛方版式、原生 Word 与浏览器最终验收仍未完成 |
+| SL 全版本比赛包 | 七版本代表来源与既有兼容修复已记录，SL／mixed-source 29 文件已采用并部署 | 全部 22,214 技术页质量与完整 DB／CAS／索引可迁移包尚未验收；14 个代表页不能充当全量通过 |
+
+### progress38 的执行证据与限制
+
+实际主树打包为 **572 个逻辑调用用例通过、0 失败／错误／跳过**，不是此前私有候选的 595；差额 23 是尚未采用的四个 Drafting 测试类。955 份主树源码／资源绑定到当前 JAR，16 GiB 堆；证据见 [当前主树包验收](../../../.local/formal19-main-package-preparation01/root-package-acceptance01.json)。提交、推送和部署为已执行状态。
+
+升级保全已关闭：86 个完整 API 响应中 84 个字节相同；DOCX／PDF 两个导出文件的所有差异字节均归入元数据，正文与版式 payload 保持。八份完整 typed 文件前后一致；SQL19 实际隔离恢复并 fresh reopen，22 表／1,212 行、19 个 DOCX 与 9 个 PDF BLOB 核验通过；30 个上传文件副本覆盖 24 条 source_document 外部路径。以上数字及限制统一见 [Root runtime19 保全验收](../../../.local/runtime-preparation19/root-runtime19-acceptance01.json) 和其引用的原始收据。旧副本收据的 false 字段不被重写，后继外部引用票关闭对应条件。
+
+H4 只移除真实页眉迁移后派生的 22 个强制分页，源文真实 hard break 与字号／字体保持。实际 RED 精确复现两项行为失败，GREEN 为 85 个用例通过；完整 full09 一次生成 95.890 秒，SCT 为 24 页。来源绑定后验逐字符确认 P490／P496／P685／P642 完整；旧仅允许单页匹配的 observer FAIL 保留，由跨页来源边界票说明范围，不能直接改宽门求绿。24 张原尺寸 PNG 均经逐张实看，两个旧残文整页消除；新增／暴露的 9 组分页问题如上，故最终布局仍 FAIL。见 [H4 回归](../../../.local/round19-adoption-review01/h4-candidate01/runtime-preparation/root-green85-acceptance01.json)、[来源与逐页复查](../../../.local/round19-adoption-review01/h4-candidate01/post09/READONLY-POST09-REVIEW.md)。H5 仅在私有目录准备最小标题／段落分页约束修复，不改主树。
+
+Advisory 本轮执行目录为 [formal19-real27b-single01](../../../.local/e2e-20261020/advisory/formal19-real27b-single01/handoff.md)。fresh before 已实际完成四 SELECT／八完整文件，21 session／40 message／5 action／4 prompt；唯一新 session／ask 使用固定问题与来源，最多两次付费 preflight 加两次 answer（含一次修复），不重发，模型等待期间没有宣称新回答通过。三份原先未知 untracked 文件保持，生产／H800 未操作。
+<!-- unified-progress38:end -->
+
 <!-- unified-progress37:start -->
 **2026-10-21：联合595逻辑用例已获同源码跨两窗成功覆盖；SL／mixed-source的29文件已精确采用，尚未部署。SCT真页眉候选80项通过，新完整生成98.578秒／29页，三处字形完整性保持，但第4页正文仅剩“Page)”的回退仍待修，因此Drafting12文件未采用。整体工程估计仍约80%，Goal active。**
 
