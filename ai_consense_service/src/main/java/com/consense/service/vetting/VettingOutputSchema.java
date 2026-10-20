@@ -29,7 +29,19 @@ final class VettingOutputSchema {
         checkFields.set("itemId",choice(VettingChecklistCatalog.items().stream().map(VettingChecklistCatalog.Item::getId)
                 .filter(id->!VettingChecklistCatalog.annexItemIds().contains(id)).toArray(String[]::new)));
         checkFields.set("status",choice("fulfilled","not_fulfilled","insufficient_evidence","not_applicable"));checkFields.set("reason",text(1,1200));
-        required(check,"itemId","status","reason");
+        // Contract candidate only: all facts remain untrusted until server source-role/object validation.
+        ObjectNode support=checkFields.putObject("support");ArrayNode alternatives=support.putArray("anyOf");
+        ObjectNode absent=alternatives.addObject();absent.put("type","null");
+        ObjectNode relation=alternatives.addObject();relation.put("type","object");relation.put("additionalProperties",false);
+        ObjectNode relationFields=relation.putObject("properties");relationFields.set("kind",choice("sl_clause_selection","conditional_works_instruction","appendix_identifier_alignment"));
+        ObjectNode facts=relationFields.putObject("facts");facts.put("type","array");facts.put("minItems",3);facts.put("maxItems",3);
+        ObjectNode fact=facts.putObject("items");fact.put("type","object");fact.put("additionalProperties",false);
+        ObjectNode factFields=fact.putObject("properties");factFields.set("slot",choice("selected_specification_clause","sl_guidance_criterion","project_contract_type_or_selection_fact",
+                "pre_work_condition","same_work_required_or_optional_intent","instruction_timing_or_location","clause_number","heading_appendix_reference","running_header_reference"));
+        factFields.set("evidenceIndex",integer(0,3));factFields.set("nativePositionIndex",integer(0,4095));
+        factFields.set("startUtf16",integer(0,2400));factFields.set("endUtf16",integer(1,2400));
+        required(fact,"slot","evidenceIndex","nativePositionIndex","startUtf16","endUtf16");
+        required(relation,"kind","facts");required(check,"itemId","status","reason","support");
         ObjectNode evidence = fields.putObject("evidence");
         evidence.put("type", "array"); evidence.put("minItems", 1); evidence.put("maxItems", 4);
         ObjectNode quote = evidence.putObject("items"); quote.put("type", "object"); quote.put("additionalProperties", false);
@@ -48,6 +60,9 @@ final class VettingOutputSchema {
     private static ObjectNode text(int min, int max) {
         ObjectNode node = JsonUtils.mapper().createObjectNode(); node.put("type", "string");
         node.put("minLength", min); node.put("maxLength", max); return node;
+    }
+    private static ObjectNode integer(int min,int max) {
+        ObjectNode node=JsonUtils.mapper().createObjectNode();node.put("type","integer");node.put("minimum",min);node.put("maximum",max);return node;
     }
     private static ObjectNode choice(String... values) {
         ObjectNode node = JsonUtils.mapper().createObjectNode(); node.put("type", "string");

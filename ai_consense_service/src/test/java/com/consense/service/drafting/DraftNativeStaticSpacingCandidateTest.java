@@ -35,13 +35,35 @@ class DraftNativeStaticSpacingCandidateTest {
 
     @Test void legacyMigrationStaysExactAndUnsupportedSpacingOrMissingReplacementCannotAuthorizeCompaction() throws Exception {
         Case legacy=source("","");DocxEditResult output=legacy.apply(legacy.plan(false));List<Element> before=elements(parse(legacy.parts.get(MAIN)),W,"p"),after=elements(parse(unzip(output.getDocxBytes()).get(MAIN)),W,"p");
-        assertEquals(0,output.getNativeStoryLedger().stream().filter(r->ACTION.equals(r.getAction())).count());
-        for(int i:Set.of(1,2,5,6)){Element expected=(Element)before.get(i).cloneNode(true);for(Element text:descendants(expected,W,"t"))text.setTextContent("");assertEquals(shape(expected),shape(after.get(i)),"Null source format retains full legacy properties");}
+        assertEquals(4,output.getNativeStoryLedger().stream().filter(r->ACTION.equals(r.getAction())&&"APPLIED".equals(r.getStatus())).count(),"REAL_SCT_29_TO_40_NULL_FORMAT_CARRIERS_MUST_COMPACT");
+        for(int i:Set.of(1,2,5,6)){Element expected=(Element)before.get(i).cloneNode(true);for(Element text:descendants(expected,W,"t"))text.setTextContent("");Element spacing=descendants(expected,W,"spacing").get(0);spacing.setAttributeNS(W,"w:before","0");spacing.setAttributeNS(W,"w:after","0");spacing.setAttributeNS(W,"w:line","1");spacing.setAttributeNS(W,"w:lineRule","exact");assertEquals(shape(expected),shape(after.get(i)),"Null-format exact migrated carrier changes only clear text and four verified spacing values");}
         Case duplicateSpacing=source("", "<w:spacing w:line=\"99\"/>");assertCode("STORY_STATIC_SPACING_SCOPE_UNSUPPORTED",()->duplicateSpacing.apply(duplicateSpacing.plan(true)));
         Case duplicateProperties=source("<w:pPr/>","");assertCode("STORY_STATIC_SPACING_SCOPE_UNSUPPORTED",()->duplicateProperties.apply(duplicateProperties.plan(true)));
         Case unsupported=source("<w:r><w:drawing/></w:r>","");assertCode("LAYOUT_CLEARED_INLINE_UNSUPPORTED",()->unsupported.apply(unsupported.plan(true)));
         NativeStoryPlan base=legacy.plan(true);Section s=base.sections.get(0);List<Story> stories=new ArrayList<>();for(Story story:s.stories)stories.add(story.expectedBinding.kind==Kind.FOOTER?new Story(story.expectedBinding,StoryAction.PRESERVE,PageAction.CREATE_PAGE_FROM_STATIC_SEQUENCE,story.contractLabels,story.retainedSourceControlLines,story.pagePrefix,story.pageSuffix):story);
         Section missing=new Section(s.observedSectionId,s.sourceSection,s.sourcePosition,s.titlePg,s.pgNumType,s.pgMar,s.pgSz,s.type,stories,s.numberingChange,s.marginChange);NativeStoryPlan invalid=new NativeStoryPlan(base.sourceSha256,base.profile,base.identity,base.evenAndOddHeaders,Collections.singletonList(missing),base.staticFooterGroups,base.staticFooterSourceFormat);assertCode("STORY_STATIC_CARRIER_REQUIRED",()->legacy.apply(invalid));
+    }
+
+
+    // Actual same-source SCT grew29 to40 pages; source-bound cleared footer marks occupy all5 blank pages.
+    @Test void nullFormatUnsupportedCompactionRetainsSuccessfulMigrationAndOriginalLayout() throws Exception {
+        List<Case> cases=Arrays.asList(source("","<w:spacing w:line=\"99\"/>"),source("<w:pPr/>",""),source("<w:r><w:drawing/></w:r>",""));
+        for(Case source:cases){NativeStoryPlan plan=source.plan(false);assertNull(plan.staticFooterSourceFormat);DocxEditResult result=source.apply(plan);Map<String,byte[]> output=unzip(result.getDocxBytes());
+            List<Element> before=elements(parse(source.parts.get(MAIN)),W,"p"),after=elements(parse(output.get(MAIN)),W,"p");assertEquals(before.size(),after.size());int skipped=0;Set<Integer> targets=Set.of(1,2,5,6);
+            for(int i=0;i<before.size();i++){Element expected=(Element)before.get(i).cloneNode(true);if(targets.contains(i)){for(Element text:descendants(expected,W,"t"))text.setTextContent("");boolean unsupported=descendants(expected,W,"pPr").size()>1||descendants(expected,W,"spacing").size()>1||!descendants(expected,W,"drawing").isEmpty();if(unsupported)skipped++;else{Element spacing=descendants(expected,W,"spacing").get(0);spacing.setAttributeNS(W,"w:before","0");spacing.setAttributeNS(W,"w:after","0");spacing.setAttributeNS(W,"w:line","1");spacing.setAttributeNS(W,"w:lineRule","exact");}}assertEquals(shape(expected),shape(after.get(i)),"Unsupported null-format layout preserves the successful exact migration and all non-spacing structure");}
+            assertEquals(4,result.getNativeStoryLedger().stream().filter(r->"CLEAR_EXACT_STATIC_FOOTER".equals(r.getAction())&&"APPLIED".equals(r.getStatus())).count());
+            assertEquals(skipped,result.getNativeStoryLedger().stream().filter(r->ACTION.equals(r.getAction())&&r.getStatus().startsWith("SKIPPED_")).count(),"UNVERIFIED_NULL_FORMAT_COMPACTION_MUST_BE_REPORTED");
+            assertEquals(4-skipped,result.getNativeStoryLedger().stream().filter(r->ACTION.equals(r.getAction())&&"APPLIED".equals(r.getStatus())).count());
+            for(NativeStoryChange row:result.getNativeStoryLedger())if(ACTION.equals(row.getAction())&&row.getStatus().startsWith("SKIPPED_")){assertTrue(Set.of("SKIPPED_STORY_STATIC_SPACING_SCOPE_UNSUPPORTED","SKIPPED_LAYOUT_CLEARED_INLINE_UNSUPPORTED").contains(row.getStatus()));assertEquals(Collections.emptyMap(),row.getNewAttributes());}
+            unchanged(source.parts,output,Set.of(MAIN,RELS,TYPES));
+        }
+    }
+
+    @Test void nullFormatProtectedControlsAndMissingAppliedCarrierStillReject() throws Exception {
+        for(String bad:Arrays.asList("<w:r><w:br/></w:r>","<w:r><w:fldChar w:fldCharType=\"begin\"/></w:r>","<w:fldSimple w:instr=\"PAGE\"><w:r><w:t/></w:r></w:fldSimple>")){Fixture f=migration(bad);assertCode("STORY_STATIC_CONTROL_UNSUPPORTED",f::apply);}
+        Case source=source("","");NativeStoryPlan base=source.plan(false);Section s=base.sections.get(0);List<Story> stories=new ArrayList<>();for(Story story:s.stories)stories.add(story.expectedBinding.kind==Kind.FOOTER?new Story(story.expectedBinding,StoryAction.PRESERVE,PageAction.CREATE_PAGE_FROM_STATIC_SEQUENCE,story.contractLabels,story.retainedSourceControlLines,story.pagePrefix,story.pageSuffix):story);
+        Section missing=new Section(s.observedSectionId,s.sourceSection,s.sourcePosition,s.titlePg,s.pgNumType,s.pgMar,s.pgSz,s.type,stories,s.numberingChange,s.marginChange);NativeStoryPlan invalid=new NativeStoryPlan(base.sourceSha256,base.profile,base.identity,base.evenAndOddHeaders,Collections.singletonList(missing),base.staticFooterGroups);assertCode("STORY_STATIC_CARRIER_REQUIRED",()->source.apply(invalid));
+        Fixture hardBreak=migration("");DocxEditResult result=hardBreak.apply();assertEquals(hardBreak.index.mainParagraph(4).getSha256(),result.getIndex().mainParagraph(4).getSha256(),"Original hard page break and tail remain exact");assertEquals(hardBreak.index.mainParagraph(1).getSha256(),result.getIndex().mainParagraph(1).getSha256(),"Unrelated body is not compacted");
     }
 
     private static Case source(String extra,String spacing) throws Exception {

@@ -119,6 +119,9 @@ public final class VettingDtos {
         private String producerVersion="pm-checklist-packet-v1",itemId,status,reason,policySha256,packetId,sourceSnapshotSha256,issueTypeCode;
         private List<FindingEvidence> evidence=new java.util.ArrayList<>();
         private List<String> evidenceChunkIds=new java.util.ArrayList<>();
+        /** Server-produced requirement relation only; model support is not a verified verdict. */
+        @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+        private com.fasterxml.jackson.databind.JsonNode requirementRelation;
     }
 
     /** Full replacement of human review records, independent of finding status. */
@@ -261,6 +264,13 @@ public final class VettingDtos {
         private String sourceRole;
         @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_EMPTY)
         private List<com.fasterxml.jackson.databind.JsonNode> nativePositions;
+        /** Read-only link to this run's frozen identity observation; never baseline authority as a source quote. */
+        @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+        private com.fasterxml.jackson.databind.JsonNode packageIdentityLink;
+        /** Preserve the former Lombok full constructor as well as every existing shorter overload. */
+        public FindingEvidence(String side,String documentId,String fileKey,String fileName,String pageNo,String anchor,String clauseId,String quote,boolean located,String sourceHash,List<Double> bbox,String packetId,String packetSourceSnapshotSha256,CanonicalEvidenceDtos.EvidencePointer canonicalEvidence,com.fasterxml.jackson.databind.JsonNode fixedBaselineEvidence,String originalSourceSha256,String sourceRole,List<com.fasterxml.jackson.databind.JsonNode> nativePositions) {
+            this(side,documentId,fileKey,fileName,pageNo,anchor,clauseId,quote,located,sourceHash,bbox,packetId,packetSourceSnapshotSha256,canonicalEvidence,fixedBaselineEvidence,originalSourceSha256,sourceRole,nativePositions,null);
+        }
         public FindingEvidence(String side,String documentId,String fileKey,String fileName,String pageNo,String anchor,String quote,boolean located,String sourceHash,List<Double> bbox,String packetId,String packetSourceSnapshotSha256,CanonicalEvidenceDtos.EvidencePointer canonicalEvidence,com.fasterxml.jackson.databind.JsonNode fixedBaselineEvidence,String originalSourceSha256) {
             this(side,documentId,fileKey,fileName,pageNo,anchor,quote,located,sourceHash,bbox,packetId,packetSourceSnapshotSha256,canonicalEvidence,fixedBaselineEvidence);this.originalSourceSha256=originalSourceSha256;
         }
@@ -306,6 +316,16 @@ public final class VettingDtos {
         /** Server-produced current required-member dependencies for human checklist reuse; unknown stays explicit. */
         @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
         private com.fasterxml.jackson.databind.JsonNode checklistDependencyLedger;
+        /** Frozen authority and executed source-candidate ledger; null means this historical run did not record the check. */
+        @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+        private com.fasterxml.jackson.databind.JsonNode packageIdentityReview;
+        /** Project navigation/display metadata is audit only, outside the adopted authority identity. */
+        @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+        private com.fasterxml.jackson.databind.JsonNode packageIdentityMirrorAudit;
+        /** Keep the previous generated full constructor callable. */
+        public CoverageVO(int totalDocuments,int reviewedDocuments,List<DocumentCoverageVO> documents,List<String> warnings,List<SemanticTopicVO> semanticTopics,String reviewCompleteness,String canonicalCorpusIdentitySha256,com.fasterxml.jackson.databind.JsonNode checklistDependencyLedger) {
+            this(totalDocuments,reviewedDocuments,documents,warnings,semanticTopics,reviewCompleteness,canonicalCorpusIdentitySha256,checklistDependencyLedger,null,null);
+        }
         public CoverageVO(int totalDocuments,int reviewedDocuments,List<DocumentCoverageVO> documents,List<String> warnings,List<SemanticTopicVO> semanticTopics){
             this(totalDocuments,reviewedDocuments,documents,warnings);this.semanticTopics=semanticTopics;
         }

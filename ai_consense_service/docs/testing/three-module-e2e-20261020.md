@@ -1,3 +1,51 @@
+<!-- unified-progress31:start -->
+**2026-10-21：27文件修复已按清单精确采用主树；384唯一软件通过与同源JAR文件门已收口，尚未切换运行服务。**
+
+Root在任何写入前核全部27 oldSHA／新增不存在，全部候选与实际384源码逐字节一致；采用后核27 newSHA。主树941来源保持，唯一随后差异是去掉一个测试空行的4个尾空格，token序列不变、无产品／JAR变化。采用票`.local/e2e-20261020/main-adoption-round18-preparation01/root-adoption-actual01.json` SHA256 `bbf62c4cf358c18509a3c55dc5d9f3182d917b40c0288ef0b239b21662866d2c`；原379＋补5及失败／skip账原样保留。当前业务质量边界、SCT剩余分页、SCC92来源定位和SL全版本离线包不变；先按用户授权提交推送，再fresh保全现有API／typed／SQL与恢复，H2 owner不动后才升级。整体工程估计仍约80%，Goal active。
+<!-- unified-progress31:end -->
+
+<!-- unified-progress30:start -->
+**2026-10-21：整体约80%为工程估计；统一候选384个唯一软件测试现均有实际通过记录，最新候选尚未主树采用／部署。**
+
+原统一384轮为379pass／5skip／0failure/error，5项只因组合命令漏传sourceDir；本次同941源码仅补这5项，实际5/5、37.250秒、16GiB、pins同／自然Job0。逐身份核5skip与补5完全同集；保留原轮，不改称单轮384/384。单次离线package文件门已通过，新JAR9aa85f94…尚未部署。Vetting校验器后继实际317/317，Checklist的field roles／same object／完整scope仍unknown，不能由软件绿外推业务正确。
+
+SCT完整生成同输入34→32页，两份共66页已分别逐张审；空正文3→1，仍4短尾。32页身份／连续页码保持，剩余问题已落实原件转排、页眉页脚占高与新增分页边界，最终版式未通过。SCC06全部92目录目标页值正确，但1097应用CS只保留1005，缺92；不能用named总数1518冒充定位恢复。34个PAGEREF缓存私有副本方案已备未执行，原件／compiled不动。
+
+SL四页自造材料实际4POST／8fresh引擎完成，0retry；142个原始CAS文件与8份capture及生命周期已本地字节保全，导出0新HTTP／provider。内容质量／完整8链待审，不授比赛来源通过；所有版本22214技术页及完整DB／CAS／索引离线恢复未完成。Advisory新实际发布独立76/100，通用约束10项软件通过仍待部署后真实27B复验。正式17／受保护H2／前端未启停，统一Goal保持active。后继按27文件清单采用、提交推送、fresh保全后升级，再做真实模型／浏览器／版式复验。
+<!-- unified-progress30:end -->
+
+<!-- unified-progress29:start -->
+**2026-10-21：本轮新增SCT完整生成对照与SCC真实显式刷新；统一Goal保持active，候选尚未主树采用。**
+
+SCT同三原件、同合成身份、同完整qualifiedPackage流程，baseline与candidate各实际1JUnit通过、0failure/error/skip，分别106.594／104.032秒、16GiB／Job24GiB、pins同／自然Job0。实测34→32页；NTT/SCC全部ZIP部件逐字节同，SCT只有document.xml变化。Root独立精确逆转54处已清空静态页脚段落spacing后，整个XML完全相同。不是此前浏览器40页案例已修，也未授最终版式通过；两新PDF逐页raster准备中。
+
+SCC UNO05实际43.469秒成功，1LO／1load／两次显式刷新／1export／0retry、Job24GiB、58输入pins保持、自然Job0。全部92目标精确复核：34旧错全部修正，58旧对保持，0现错／0新错／0目标位移，仍84页。但92个目录行的CS持久来源书签在刷新中消失，剩余1426的anchorText保持；新PDF命名目标0，不能授来源定位或产品安全采用。独立审查已绑定92个CS本revision的来源公式及TOC/hyperlink/PAGEREF；06拟显式typed UNO导出并只读观察精确范围，不猜测重建。84页raster已实际完成，7联系表，Root全文仅看1–3页，其他仍待逐页，不移用旧135页视觉通过。
+
+Vetting RED10实际1正控／9指定断言失败，26.579秒；后继GREEN169实际166pass／3failure／0error/skip，56.016秒，pins同／自然Job0。3失败均为实际AiGateway在dispatch前编译新schema时拒绝anyOf/null/integer，不改原断言或缩分母。最小有界校验器候选与真实gateway正负控在准备；原执行前静态Must0不能追认实际通过，独立审查遗漏已显式纠正。Checklist相关业务仍未通过。
+
+Root另fresh核本机OER：18780 health200，当前WSL coordinator mainPID619420 active/running，实际boot cb1919f2…及complete-e2e配置71e7a03b…精确绑定；Paddle3.6.0/MinerU4.0.10为声明bf16，尚无新推理证明。全新四页双引擎／独立8链与SL所有版本高质量成果及DB/CAS/索引离线包仍未完成。Advisory新发布独立76/100保持，通用CONTRACT10软件通过尚未部署或新模型复验。正式17/H2未启停。细节见[实际执行进展](three-module-runtime-progress-20261021.md)。
+<!-- unified-progress29:end -->
+
+<!-- unified-progress28:start -->
+**2026-10-21：整体约80%为工程估计。核心链路已跑通，当前重点为质量、修复集成和全版本离线包。**
+
+Drafting SCT候选实际57/57保持；精确授权新增PAGE的夹具修正后，2a／2b六原件安装story结构复验实际6/6、0failure/error/skip、48.640秒、16GiB、pins同、自然Job0，202原ZIP项／76载体APPLIED／30产物已核。不代替完整body policy和最终PDF分页；SCT完整生成baseline/candidate两leg在准备，SCT原件29页到生成40页、SCC34/92目录错页仍未收口。
+
+Advisory新真实27B的实际发布经21来源完整范围独立核对，13项固定分母得76/100，业务FAIL：优先规则新增前提／收窄范围及tender角色被推成实际签约或项目阶段。旧raw76与旧实际发布须分开。通用转述／条件／角色元数据约束候选实际10/10、27.000秒、pins同、自然Job0；尚未主树采用／部署／新模型语义验证。
+
+SL隔离fixture后继实际154/154、0failure/error/skip、86.594秒、24GiB、原候选／副本／依赖pins同、自然Job0；旧0测试与148pass/6error现场保留。全新4页软件自造PDF已真实native捕获和raster，Root逐页看完；不属于比赛来源质量通过，双引擎及8完整链尚未执行。全版本22214技术页高质量成果及DB/CAS/索引离线包仍未完成。
+
+Vetting最新91/91保持，来源binder已静态合并为RED10／GREEN169，尚未执行。SCC UNO04实际在private pipe阶段失败，load/update/export均0，owned遗留均清理退出；05环境与同次观察窗联合修正已准备、未执行。已终态58022／77793登记已清，当前无Root运行窗口；正式17和受保护H2未启停。最新远端检查点ceaa250保持，本轮新候选均未主树采用。详细证据见[本轮实际执行进展](three-module-runtime-progress-20261021.md)。统一Goal保持active。
+<!-- unified-progress28:end -->
+
+<!-- unified-progress27:start -->
+**2026-10-21：本轮已有新实际执行。SCT候选RED4精确2pass/2指定failure，GREEN57实际57/57；安装story六原件复验实际5pass/1fixture failure，未授六源／最终分页通过。**
+
+同案例新真实Qwen27B已完成message38/session0fa513ad-1e13-4913-958f-c78f8f1afc86，8应用HTTP/1ask/0retry；新鲜before2/after4SELECT完整typed导出、有效提示词、保存/历史与账本核同，实际2cap1 preflight+2answers。实质analysis已发布且保留局部可用成果，但同编号优先规则被新增前提、tender元数据被推为实际签约/项目阶段，业务仍FAIL；同13项独立评分待审，不移用旧76分。
+
+SL154已实际148pass/0failure/6coordinator fixture import errors/0skip，24GiB/naturalJob0/原候选与副本/依赖pins保持；首轮缺samples的0测试失败也保留。SCC显式UNO prepare03因portable Python launcher/worker PID不同被严格身份门拒绝，0.672秒终态、原件/复制件/pins保持，尚未导入UNO或启动LO，不能称刷新质量实测。SCT六源夹具精确授权PAGE保护、SL隔离fixture、UNO core解释器及Advisory通用语义约束后继均在私有准备，未采用主树。正式17/受保护H2未启停，已启动Root窗口全部接回终态。细节与逐项证据见[本轮实际执行进展](three-module-runtime-progress-20261021.md)。统一Goal继续active，完整范围保持。
+<!-- unified-progress27:end -->
+
 <!-- user-sl-package-and-push-20261020:start -->
 **2026-10-20用户最新确认：SL技术部分的比赛目标，是把所有版本的高质量解析结果及数据库完整打包带入比赛；不能只带最新版本或部分开发样本。**
 

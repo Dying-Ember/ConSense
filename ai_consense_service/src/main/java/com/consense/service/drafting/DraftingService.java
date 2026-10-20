@@ -554,8 +554,51 @@ public class DraftingService {
     private VariableVO identityVariableVO(String projectId) {
         DraftVariable variable=variableRepository.findByProjectIdAndVarKey(projectId,"contractTitle").orElseThrow(()->new BizException(4006,"Project identity input not found."));
         VariableVO result=toVariableVO(variable);
-        if(Boolean.TRUE.equals(variable.getConfirmed())||Boolean.TRUE.equals(variable.getManuallyEdited()))try {requireIdentitySources(projectId,variable);}catch(RuntimeException changed){result.setReviewRequired(true);result.setAdoptionState("needs_review");}
+        if(resolvePackageIdentity(projectId,variable).requiresReview()){result.setReviewRequired(true);result.setAdoptionState("needs_review");}
         return result;
+    }
+    /** A live read of the fixed adopted input; no extraction, generation or Project synchronization. */
+    @Transactional(readOnly=true)
+    public PackageIdentitySnapshot packageIdentitySnapshot(String projectId) {
+        projectService.require(projectId);
+        return resolvePackageIdentity(projectId,variableRepository.findByProjectIdAndVarKey(projectId,"contractTitle").orElse(null));
+    }
+    /** Serialized at construction so neither callers nor a later mirror update can mutate this snapshot. */
+    public static final class PackageIdentitySnapshot {
+        public static final String POLICY="adopted-package-identity-v1";
+        private final String coreJson,auditJson,authoritySha256;
+        private PackageIdentitySnapshot(Map<String,Object> core,Map<String,Object> audit) {
+            coreJson=JsonUtils.write(core);auditJson=JsonUtils.write(audit);authoritySha256=DraftAdoption.hash(coreJson);
+        }
+        public JsonNode toJson(){Map<String,Object> result=new LinkedHashMap<>();result.put("policy",POLICY);result.put("authoritySha256",authoritySha256);result.put("core",JsonUtils.parse(coreJson));result.put("audit",JsonUtils.parse(auditJson));return JsonUtils.mapper().valueToTree(result);}
+        public String authoritySha256(){return authoritySha256;}
+        private boolean requiresReview(){return JsonUtils.parse(coreJson).path("requiresReview").asBoolean();}
+        private Object effectiveValue(){JsonNode core=JsonUtils.parse(coreJson);return core.path("eligible").asBoolean()?DraftAdoption.decode(core.path("normalizedValue").asText()):null;}
+    }
+    private PackageIdentitySnapshot resolvePackageIdentity(String projectId,DraftVariable variable) {
+        Map<String,Object> core=new LinkedHashMap<>(),audit=new LinkedHashMap<>();List<String> blockers=new ArrayList<>();List<Map<String,Object>> bindings=new ArrayList<>();
+        core.put("policy",PackageIdentitySnapshot.POLICY);core.put("projectId",projectId);core.put("key","contractTitle");
+        core.put("present",variable!=null);core.put("valueText",variable==null?null:variable.getValueText());
+        boolean confirmed=variable!=null&&Boolean.TRUE.equals(variable.getConfirmed()),manual=variable!=null&&Boolean.TRUE.equals(variable.getManuallyEdited()),review=variable!=null&&Boolean.TRUE.equals(variable.getReviewRequired());
+        core.put("confirmed",confirmed);core.put("manuallyEdited",manual);core.put("reviewRequired",review);core.put("adoptedSourcesJson",variable==null?null:variable.getAdoptedSourcesJson());
+        if(!confirmed)blockers.add(variable==null?"identity_missing":"identity_unconfirmed");if(review)blockers.add("identity_review_required");
+        String normalized="",provenance="unknown";Map<String,Object> value=Collections.emptyMap();
+        if(variable!=null) {
+            try{normalized=DraftInputRules.normalize(DraftBlueprint.find("contractTitle"),variable.getValueText());value=DraftBusinessRules.asMap(DraftAdoption.decode(normalized));}
+            catch(RuntimeException invalid){blockers.add("identity_value_invalid");}
+            try{requireIdentitySources(projectId,variable,bindings);provenance=bindings.isEmpty()?"explicit_manual":"source_backed";}
+            catch(RuntimeException invalid){provenance="invalid";blockers.add("identity_provenance_invalid_or_changed");}
+            audit.put("confirmedFrom",variable.getConfirmedFrom());audit.put("updatedAt",variable.getUpdatedAt());
+        }
+        core.put("normalizedValue",normalized);core.put("provenanceKind",provenance);core.put("sourceBindings",bindings);core.put("blockers",blockers);
+        Map<String,Object> fields=new LinkedHashMap<>();boolean any=false;
+        for(String key:Arrays.asList("number","title")) {
+            Object raw=value.get(key);boolean available=raw instanceof String&&!((String)raw).codePoints().allMatch(c->Character.isWhitespace(c)||Character.isSpaceChar(c));boolean eligible=blockers.isEmpty()&&available;
+            Map<String,Object> field=new LinkedHashMap<>();field.put("value",raw);field.put("available",available);field.put("eligible",eligible);field.put("status",!blockers.isEmpty()?"blocked":available?"eligible":"missing");
+            field.put("reasons",!blockers.isEmpty()?new ArrayList<>(blockers):available?Collections.emptyList():Collections.singletonList("identity_"+key+"_missing"));fields.put(key,field);any|=eligible;
+        }
+        core.put("fields",fields);core.put("eligible",any);core.put("requiresReview",review||variable!=null&&(confirmed||manual)&&(blockers.contains("identity_provenance_invalid_or_changed")||blockers.contains("identity_value_invalid")||!confirmed));
+        return new PackageIdentitySnapshot(core,audit);
     }
     private Object identitySnapshot(String projectId) {
         DraftVariable variable=variableRepository.findByProjectIdAndVarKey(projectId,"contractTitle").orElse(null);
@@ -565,8 +608,8 @@ public class DraftingService {
         Map<String,String> graphPatches=patches==null?null:new LinkedHashMap<>(patches);if(graphPatches!=null)graphPatches.remove("contractTitle");
         Map<String,Object> result=new LinkedHashMap<>(templateGraphService.plan(projectId,graphPatches));
         DraftVariable variable=variableRepository.findByProjectIdAndVarKey(projectId,"contractTitle").orElse(null);
-        Object visible=variable==null?null:DraftAdoption.decode(variable.getValueText()),effective=null;boolean review=variable!=null&&Boolean.TRUE.equals(variable.getReviewRequired());
-        if(variable!=null&&Boolean.TRUE.equals(variable.getConfirmed())&&!review)try{requireIdentitySources(projectId,variable);effective=DraftAdoption.decode(DraftInputRules.normalize(DraftBlueprint.find("contractTitle"),variable.getValueText()));}catch(RuntimeException invalid){review=true;}
+        PackageIdentitySnapshot identity=resolvePackageIdentity(projectId,variable);
+        Object visible=variable==null?null:DraftAdoption.decode(variable.getValueText()),effective=identity.effectiveValue();boolean review=identity.requiresReview();
         if(patches!=null&&patches.containsKey("contractTitle")){visible=DraftAdoption.decode(DraftInputRules.normalize(DraftBlueprint.find("contractTitle"),patches.get("contractTitle")));effective=visible;review=false;}
         DraftBusinessRules.asMap(result.get("inputValues")).put("contractTitle",visible);
         Map<String,Object> values=DraftBusinessRules.asMap(result.get("effectiveValues"));if(effective==null)values.remove("contractTitle");else values.put("contractTitle",effective);
@@ -574,7 +617,7 @@ public class DraftingService {
         if(review)unresolved(result).add(DraftBusinessRules.map("id","review-contractTitle","kind","input_review","inputKeys",Collections.singletonList("contractTitle"),"message",LocalizedText.same("Project identity or its source changed. Review the adopted value.")));
         result.put("snapshotId",snapshotId(projectId,patches));result.put("savedSnapshotId",snapshotId(projectId,null));result.put("preview",patches!=null);return result;
     }
-    private void requireIdentitySources(String projectId,DraftVariable variable) {
+    private void requireIdentitySources(String projectId,DraftVariable variable,List<Map<String,Object>> bindings) {
         List<CandidateVO> adopted=new ArrayList<>();
         try {
             com.fasterxml.jackson.databind.JsonNode raw=JsonUtils.mapper().reader()
@@ -592,9 +635,15 @@ public class DraftingService {
         }catch(BizException invalid){throw invalid;}
         catch(Exception invalid){throw new BizException(4007,"Project identity provenance is missing or malformed. Adopt it again.");}
         for(CandidateVO candidate:adopted) {
+            Map<String,Object> binding=new LinkedHashMap<>();bindings.add(binding);binding.put("sourceDocumentId",candidate.getSourceDocumentId());binding.put("sourceHash",candidate.getSourceHash());binding.put("sourceQuote",candidate.getSourceQuote());binding.put("originalSha256",candidate.getOriginalSha256());binding.put("status","unverified");
             SourceDocument source=sourceDocumentRepository.findById(candidate.getSourceDocumentId()).orElseThrow(()->new BizException(4007,"Project identity source no longer exists."));
+            binding.put("projectId",source.getProjectId());binding.put("category",source.getCategory());binding.put("parseStatus",source.getParseStatus());binding.put("currentSourceHash",DraftAdoption.sourceHash(source));binding.put("currentOriginalSha256",source.getSourceSha256());binding.put("originalBinding",candidate.getOriginalSha256()==null?"unknown_legacy_unbound":"unverified");
             if(!projectId.equals(source.getProjectId())||!SourceDocument.CATEGORY_PROJECT_INPUT.equals(source.getCategory())||!"PARSED".equals(source.getParseStatus())||!Objects.equals(candidate.getSourceHash(),DraftAdoption.sourceHash(source))||JsonUtils.isBlankText(candidate.getSourceQuote())||source.getTextContent()==null||!source.getTextContent().contains(candidate.getSourceQuote()))throw new BizException(4007,"Project identity source changed. Identify it again.");
-            if(candidate.getOriginalSha256()!=null&&(source.getStoragePath()==null||!candidate.getOriginalSha256().equals(DraftPdfConverter.sha256(storageService.read(source.getStoragePath())))))throw new BizException(4007,"Project identity original changed. Identify it again.");
+            if(candidate.getOriginalSha256()!=null) {
+                String actual=source.getStoragePath()==null?null:DraftPdfConverter.sha256(storageService.read(source.getStoragePath()));binding.put("checkedOriginalSha256",actual);
+                if(!candidate.getOriginalSha256().equals(actual))throw new BizException(4007,"Project identity original changed. Identify it again.");binding.put("originalBinding","verified_current_bytes");
+            }
+            binding.put("status","verified_current_source");
         }
     }
     @Transactional
@@ -606,7 +655,7 @@ public class DraftingService {
         DraftVariable variable=variableRepository.findByProjectIdAndVarKey(projectId,"contractTitle").orElseThrow(()->new BizException(4007,"Adopt the project identity before confirming."));entityManager.refresh(variable,LockModeType.PESSIMISTIC_WRITE);
         if(request.getExpectedAdoptedIdentity()==null||!Collections.singletonMap("value",variable.getValueText()).equals(request.getExpectedAdoptedIdentity()))throw new BizException(4090,"PROJECT_IDENTITY_CONFLICT: The adopted identity changed. Refresh before confirming.");
         if(!Boolean.TRUE.equals(variable.getConfirmed())||Boolean.TRUE.equals(variable.getReviewRequired())||!DraftInputRules.valid(variable))throw new BizException(4007,"Adopt and review both the project title and contract number before confirming.");
-        requireIdentitySources(projectId,variable);Map<String,Object> identity=DraftBusinessRules.asMap(DraftAdoption.decode(variable.getValueText()));String title=(String)identity.get("title"),number=(String)identity.get("number");
+        PackageIdentitySnapshot adopted=resolvePackageIdentity(projectId,variable);if(adopted.requiresReview()||adopted.effectiveValue()==null)throw new BizException(4007,"Project identity provenance is missing or changed. Adopt it again.");Map<String,Object> identity=DraftBusinessRules.asMap(adopted.effectiveValue());String title=(String)identity.get("title"),number=(String)identity.get("number");
         if(number.length()>128||title.length()>512||number.codePoints().allMatch(c->Character.isWhitespace(c)||Character.isSpaceChar(c))||title.codePoints().allMatch(c->Character.isWhitespace(c)||Character.isSpaceChar(c)))throw new BizException(4007,"Project title and contract number must be nonblank text within the supported metadata length.");
         if(!JsonUtils.isBlankText(project.getTitleLinesJson())) {
             List<LocalizedText> lines=JsonUtils.readList(project.getTitleLinesJson(),LocalizedText.class);List<LocalizedText> updated=new ArrayList<>();
@@ -642,7 +691,7 @@ public class DraftingService {
         }
         values.values().removeIf(value->value==null);
         boolean identitySourceChanged=false;DraftVariable identity=variableRepository.findByProjectIdAndVarKey(projectId,"contractTitle").orElse(null);
-        if(identity!=null&&values.containsKey("contractTitle")&&(patches==null||!patches.containsKey("contractTitle")))try{requireIdentitySources(projectId,identity);}catch(RuntimeException changed){values.remove("contractTitle");identitySourceChanged=true;}
+        if(patches==null||!patches.containsKey("contractTitle")){PackageIdentitySnapshot adopted=resolvePackageIdentity(projectId,identity);Object effective=adopted.effectiveValue();if(effective==null)values.remove("contractTitle");else values.put("contractTitle",effective);identitySourceChanged=adopted.requiresReview();}
         Map<String,Object> result=DraftBusinessRules.plan(values);
         if(identitySourceChanged)unresolved(result).add(DraftBusinessRules.map("id","review-contractTitle-source","kind","input_review","inputKeys",Collections.singletonList("contractTitle"),"message",LocalizedText.same("Project identity source changed. Review the adopted value.")));
         addTargetSourceReviews(projectId,values.get("targetOverrides"),result);

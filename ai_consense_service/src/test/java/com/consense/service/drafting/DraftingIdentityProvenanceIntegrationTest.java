@@ -45,6 +45,7 @@ class DraftingIdentityProvenanceIntegrationTest {
     @Autowired DraftVariableRepository variables;
     @Autowired DraftDocumentRepository documents;
     @Autowired StorageService storage;
+    @Autowired DraftingService drafting;
     @MockBean AiGateway ai;
 
     static Map<String,Object> map(Object... entries){Map<String,Object> result=new LinkedHashMap<>();for(int i=0;i<entries.length;i+=2)result.put((String)entries[i],entries[i+1]);return result;}
@@ -89,6 +90,7 @@ class DraftingIdentityProvenanceIntegrationTest {
         Long historicalId=historical.getId();String historyBefore=JsonUtils.write(documents.findById(historicalId).get()),valueBefore=stored(id).getValueText(),noteBefore=stored(id).getNoteText();JsonNode projectBefore=project(id),visible=identity(id),plan=getDraft(id,"/plan");
         JsonNode confirmation=response("POST","/api/drafting/"+id+"/identity/confirm",confirmation(id));
         assertAll("Strict identity provenance; retain unrelated inputs and historical records",
+            ()->assertFalse(drafting.packageIdentitySnapshot(id).toJson().path("core").path("fields").path("number").path("eligible").asBoolean(),"Vetting and Drafting must share strict authority eligibility"),
             ()->assertFalse(plan.path("effectiveValues").has("contractTitle"),"Corrupted or source-empty identity leaked into effective plan"),
             ()->assertTrue(visible.path("reviewRequired").asBoolean(),"Identity must require review"),
             ()->assertEquals("needs_review",visible.path("adoptionState").asText()),
@@ -124,4 +126,42 @@ class DraftingIdentityProvenanceIntegrationTest {
         sources.saveAndFlush(source);rejectionPreservesOtherContent(id,reviewed,JsonUtils.write(rows),false);
     }
     @Test void ordinaryPermissiveUiHelperRemainsCompatible(){DraftVariable value=new DraftVariable();value.setAdoptedSourcesJson("{broken");assertTrue(DraftAdoption.adoptedSources(value).isEmpty());}
+    @ParameterizedTest(name="reviewed={0} snapshot is read-only and mirror-independent") @MethodSource("modes")
+    void readOnlyAuthorityUsesInputAndIgnoresMirrorMarkerChanges(boolean reviewed)throws Exception {
+        String id=fresh(reviewed);adopt(id,"contractTitle",VALUE);String storedBefore=JsonUtils.write(stored(id));JsonNode projectBefore=project(id);int rowsBefore=variables.findByProjectIdOrderBySortOrderAsc(id).size();
+        DraftingService.PackageIdentitySnapshot snapshot=drafting.packageIdentitySnapshot(id);JsonNode frozen=snapshot.toJson();
+        assertEquals("explicit_manual",frozen.path("core").path("provenanceKind").asText());assertTrue(frozen.path("core").path("fields").path("number").path("eligible").asBoolean());assertEquals("INPUT",frozen.path("audit").path("confirmedFrom").asText());
+        ((com.fasterxml.jackson.databind.node.ObjectNode)frozen.path("core")).put("valueText","tampered returned JSON");assertNotEquals(frozen,snapshot.toJson(),"A caller cannot mutate a captured snapshot");
+        assertEquals(storedBefore,JsonUtils.write(stored(id)));assertEquals(projectBefore,project(id));assertEquals(rowsBefore,variables.findByProjectIdOrderBySortOrderAsc(id).size());
+        ok("POST","/api/drafting/"+id+"/identity/confirm",confirmation(id));assertEquals(snapshot.authoritySha256(),drafting.packageIdentitySnapshot(id).authoritySha256(),"Project mirror confirmation and audit timestamp must not change package authority core");
+        assertEquals("PROJECT_IDENTITY",drafting.packageIdentitySnapshot(id).toJson().path("audit").path("confirmedFrom").asText());verifyNoInteractions(ai);
+    }
+    @ParameterizedTest(name="reviewed={0} partial adopted identity") @MethodSource("modes")
+    void missingSiblingDoesNotDiscardTheAdoptedContractNumber(boolean reviewed)throws Exception {
+        String id=fresh(reviewed);adopt(id,"contractTitle","{\"number\":\"PARTIAL-001\"}");JsonNode authority=drafting.packageIdentitySnapshot(id).toJson(),fields=authority.path("core").path("fields");
+        assertTrue(fields.path("number").path("eligible").asBoolean());assertFalse(fields.path("title").path("eligible").asBoolean());assertEquals("missing",fields.path("title").path("status").asText());
+        assertEquals("PARTIAL-001",getDraft(id,"/plan").path("effectiveValues").path("contractTitle").path("number").asText());assertEquals("needs_review",identity(id).path("adoptionState").asText(),"Whole-record UI warning remains visible");
+        JsonNode before=project(id);assertEquals(4007,response("POST","/api/drafting/"+id+"/identity/confirm",confirmation(id)).path("code").asInt());assertEquals(before,project(id));verifyNoInteractions(ai);
+    }
+    @ParameterizedTest(name="reviewed={0} historical manual but unconfirmed") @MethodSource("modes")
+    void historicalManualUnconfirmedIdentityIsNotEffectiveAuthority(boolean reviewed)throws Exception {
+        String id=fresh(reviewed);adopt(id,"contractTitle",VALUE);DraftVariable row=stored(id);row.setConfirmed(false);row.setManuallyEdited(true);variables.saveAndFlush(row);String before=JsonUtils.write(stored(id));
+        assertFalse(drafting.packageIdentitySnapshot(id).toJson().path("core").path("eligible").asBoolean());assertFalse(getDraft(id,"/plan").path("effectiveValues").has("contractTitle"));assertTrue(identity(id).path("reviewRequired").asBoolean());assertEquals(before,JsonUtils.write(stored(id)));verifyNoInteractions(ai);
+    }
+    @ParameterizedTest(name="reviewed={0} identity pending review") @MethodSource("modes")
+    void reviewRequiredIdentityIsNotEffectiveAuthorityButOtherInputRemains(boolean reviewed)throws Exception {
+        String id=fresh(reviewed),other=reviewed?"duration":"contractPeriodMonths";adopt(id,other,"42");adopt(id,"contractTitle",VALUE);DraftVariable row=stored(id);row.setReviewRequired(true);variables.saveAndFlush(row);
+        assertFalse(drafting.packageIdentitySnapshot(id).toJson().path("core").path("eligible").asBoolean());JsonNode plan=getDraft(id,"/plan");assertFalse(plan.path("effectiveValues").has("contractTitle"));assertEquals(42,plan.path("effectiveValues").path(other).asInt());verifyNoInteractions(ai);
+    }
+    @ParameterizedTest(name="reviewed={0} historical unbound original") @MethodSource("modes")
+    void legacyOptionalOriginalBindingStaysEligibleWithAnExplicitUnknown(boolean reviewed)throws Exception {
+        String id=fresh(reviewed);adopt(id,"contractTitle",VALUE);List<Object> rows=JsonUtils.readList(validSources(id),Object.class);((Map<String,Object>)rows.get(0)).remove("originalSha256");saveProvenance(id,JsonUtils.write(rows),false);
+        JsonNode core=drafting.packageIdentitySnapshot(id).toJson().path("core");assertTrue(core.path("fields").path("number").path("eligible").asBoolean());assertEquals("unknown_legacy_unbound",core.path("sourceBindings").get(0).path("originalBinding").asText());verifyNoInteractions(ai);
+    }
+    @ParameterizedTest(name="reviewed={0} authority changes on source freshness") @MethodSource("modes")
+    void sourceChangeInvalidatesTheCapturedAuthorityWithoutRewritingAdoption(boolean reviewed)throws Exception {
+        String id=fresh(reviewed);adopt(id,"contractTitle",VALUE);saveProvenance(id,validSources(id),false);String raw=stored(id).getAdoptedSourcesJson();DraftingService.PackageIdentitySnapshot before=drafting.packageIdentitySnapshot(id);
+        Long sourceId=before.toJson().path("core").path("sourceBindings").get(0).path("sourceDocumentId").asLong();SourceDocument source=sources.findById(sourceId).get();source.setTextContent(source.getTextContent()+"\nA changed source revision.");sources.saveAndFlush(source);
+        DraftingService.PackageIdentitySnapshot after=drafting.packageIdentitySnapshot(id);assertNotEquals(before.authoritySha256(),after.authoritySha256());assertTrue(before.toJson().path("core").path("eligible").asBoolean());assertFalse(after.toJson().path("core").path("eligible").asBoolean());assertEquals(raw,stored(id).getAdoptedSourcesJson());verifyNoInteractions(ai);
+    }
 }

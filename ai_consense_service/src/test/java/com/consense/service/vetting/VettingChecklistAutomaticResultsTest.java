@@ -104,6 +104,17 @@ class VettingChecklistAutomaticResultsTest {
             assertTrue(report.contains("Automatic suggestion: Evidence incomplete"));
         }
     }
+    @Test void anUnverifiedRequirementDoesNotRemoveOtherLocalSuggestionsInItsLogicalGroup() {
+        VettingChecklistCatalog.LogicalGroup group=VettingChecklistCatalog.logicalGroups().stream().filter(g->g.getSourceItemIds().stream()
+                .anyMatch(id->VettingChecklistCatalog.items().stream().anyMatch(item->item.getId().equals(id)&&VettingChecklistRequirementRelations.requirement(item)!=null))
+                &&g.getSourceItemIds().size()>1).findFirst().get();
+        for(String id:group.getSourceItemIds())record(id,"not_fulfilled");
+        AutomaticGroupVO projected=find(group.getId());assertEquals("not_fulfilled",projected.getStatus());assertFalse(projected.isComplete());
+        for(com.consense.web.dto.VettingChecklistDtos.AutomaticItemVO item:projected.getSubItemAssessments()){
+            assertEquals(VettingChecklistRequirementRelations.automaticEligible(item.getItemId(),"not_fulfilled")?"not_fulfilled":"insufficient_evidence",item.getStatus());
+            assertEquals(1,item.getAssessments().size());
+        }
+    }
     @Test void aClosedLocalScopeAlsoNeedsEveryRequiredMemberInTheSamePacketForFulfilledOrNotApplicable() {
         for(String status:Arrays.asList("fulfilled","not_applicable")) {
             ((ArrayNode)packet.path("checklistAssessments")).removeAll();packet.putArray("submittedChunkIds").add("chunk-a");
@@ -139,7 +150,8 @@ class VettingChecklistAutomaticResultsTest {
     private AutomaticGroupVO find(String id){return groups().stream().filter(g->id.equals(g.getId())).findFirst().get();}
     private VettingChecklistCatalog.LogicalGroup multiGroup(){
         Map<String,VettingChecklistCatalog.Item> items=VettingChecklistCatalog.items().stream().collect(Collectors.toMap(VettingChecklistCatalog.Item::getId,i->i));
-        return VettingChecklistCatalog.logicalGroups().stream().filter(g->g.getSourceItemIds().size()>1&&g.getSourceItemIds().stream().allMatch(id->"in_scope".equals(items.get(id).getReviewScope()))).findFirst().get();
+        return VettingChecklistCatalog.logicalGroups().stream().filter(g->g.getSourceItemIds().size()>1&&g.getSourceItemIds().stream().allMatch(id->"in_scope".equals(items.get(id).getReviewScope())
+                &&VettingChecklistRequirementRelations.requirement(items.get(id))==null)).findFirst().get();
     }
     private ObjectNode record(String id,String status){
         ObjectNode row=((ArrayNode)packet.path("checklistAssessments")).addObject();

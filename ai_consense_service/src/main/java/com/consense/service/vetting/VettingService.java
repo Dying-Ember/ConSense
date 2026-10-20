@@ -74,6 +74,9 @@ public class VettingService {
     @org.springframework.beans.factory.annotation.Autowired
     public void setEvidencePreparation(com.consense.service.sources.CanonicalEvidenceService service){this.evidencePreparation=service;}
     private boolean canonicalEnabled(){return oer!=null&&oer.enabled();}
+    private com.consense.service.drafting.DraftingService draftingIdentity;
+    @org.springframework.beans.factory.annotation.Autowired(required=false)
+    public void setDraftingIdentity(com.consense.service.drafting.DraftingService service){this.draftingIdentity=service;}
     private VettingChecklistService checklistService;
     @org.springframework.beans.factory.annotation.Autowired
     public void setChecklistService(VettingChecklistService service) { this.checklistService = service; }
@@ -82,6 +85,84 @@ public class VettingService {
     private final ConcurrentMap<String,VettingServiceProbe> serviceProbes = new ConcurrentHashMap<>();
     private final ThreadPoolExecutor worker = new ThreadPoolExecutor(1,1,0,TimeUnit.MILLISECONDS,new ArrayBlockingQueue<>(8),
             task -> { Thread t = new Thread(task,"consense-vetting"); t.setDaemon(true); return t; },new ThreadPoolExecutor.AbortPolicy());
+
+    static final String PACKAGE_IDENTITY_LIFECYCLE="vetting-package-identity-lifecycle-v1";
+    private JsonNode packageAuthority(String projectId) {
+        if(draftingIdentity==null)return null;
+        // Reuse the adopted-input resolver in a fresh read transaction, not a managed entity cached by publication.
+        TransactionTemplate read=new TransactionTemplate(transactionManager);read.setReadOnly(true);
+        read.setPropagationBehavior(org.springframework.transaction.TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        return read.execute(status->{JsonNode authority=draftingIdentity.packageIdentitySnapshot(projectId).toJson();
+            if(!Objects.equals(projectId,authority.path("core").path("projectId").asText()))throw new BizException(4104,"Package identity authority belongs to another project");
+            return authority;});
+    }
+    static String packageAuthorityCore(JsonNode authority) {
+        if(authority==null||authority.isNull())return VettingCorpus.hash("package-identity-authority-unavailable-v1");
+        if(!com.consense.service.drafting.DraftingService.PackageIdentitySnapshot.POLICY.equals(authority.path("policy").asText())
+                ||!authority.path("core").isObject()||!Objects.equals(authority.path("authoritySha256").asText(),VettingCorpus.hash(JsonUtils.write(authority.path("core")))))
+            throw new IllegalArgumentException("Adopted package identity snapshot is not bound to its original authority core");
+        return authority.path("authoritySha256").asText();
+    }
+    private static JsonNode sealPackageIdentity(JsonNode value) {
+        com.fasterxml.jackson.databind.node.ObjectNode sealed=(com.fasterxml.jackson.databind.node.ObjectNode)value.deepCopy();
+        sealed.remove(Arrays.asList("ledgerSha256","decisionSha256"));
+        com.fasterxml.jackson.databind.node.ObjectNode decision=sealed.deepCopy();
+        if(decision.path("authority").isObject())((com.fasterxml.jackson.databind.node.ObjectNode)decision.path("authority")).remove("audit");
+        sealed.put("decisionSha256",VettingCorpus.hash(JsonUtils.write(decision)));
+        sealed.put("ledgerSha256",VettingCorpus.hash(JsonUtils.write(sealed)));return sealed;
+    }
+    static JsonNode freezePackageIdentity(JsonNode authority,String sourceSha) {
+        com.fasterxml.jackson.databind.node.ObjectNode frozen=(com.fasterxml.jackson.databind.node.ObjectNode)VettingPackageIdentity.review(Collections.emptyList(),authority).ledger();
+        frozen.put("lifecyclePolicy",PACKAGE_IDENTITY_LIFECYCLE);frozen.put("sourceSnapshotSha256",sourceSha);
+        frozen.put("authorityCoreSha256",packageAuthorityCore(authority));frozen.put("executionStatus","not_executed");frozen.put("status","frozen_unexecuted");
+        return sealPackageIdentity(frozen);
+    }
+    static boolean packageIdentityReviewValid(JsonNode review,String sourceSha) {
+        if(review==null||!review.isObject()||!PACKAGE_IDENTITY_LIFECYCLE.equals(review.path("lifecyclePolicy").asText())
+                ||!VettingPackageIdentity.POLICY.equals(review.path("policy").asText())||!Objects.equals(sourceSha,review.path("sourceSnapshotSha256").asText()))return false;
+        try{return Objects.equals(review.path("authorityCoreSha256").asText(),packageAuthorityCore(review.get("authority")))
+                &&Objects.equals(review.path("decisionSha256").asText(),sealPackageIdentity(review).path("decisionSha256").asText())
+                &&Objects.equals(review.path("ledgerSha256").asText(),sealPackageIdentity(review).path("ledgerSha256").asText());}
+        catch(RuntimeException invalid){return false;}
+    }
+    static JsonNode completePackageIdentity(JsonNode frozen,VettingPackageIdentity.Review review) {
+        if(frozen==null||!packageIdentityReviewValid(frozen,frozen.path("sourceSnapshotSha256").asText()))throw new IllegalArgumentException("Missing or changed frozen package identity");
+        com.fasterxml.jackson.databind.node.ObjectNode ledger=(com.fasterxml.jackson.databind.node.ObjectNode)review.ledger();
+        if(!Objects.equals(frozen.path("authorityCoreSha256").asText(),packageAuthorityCore(ledger.get("authority"))))throw new IllegalArgumentException("Identity review used another authority core");
+        ledger.put("lifecyclePolicy",PACKAGE_IDENTITY_LIFECYCLE);ledger.put("sourceSnapshotSha256",frozen.path("sourceSnapshotSha256").asText());
+        ledger.put("authorityCoreSha256",frozen.path("authorityCoreSha256").asText());ledger.put("executionStatus","executed");return sealPackageIdentity(ledger);
+    }
+    static JsonNode packageMirrorAudit(JsonNode captured,Project project) {
+        com.fasterxml.jackson.databind.node.ObjectNode current=JsonUtils.mapper().createObjectNode();
+        current.put("contractNo",project.getContractNo());current.put("nameZhHans",project.getNameZhHans());current.put("nameZhHant",project.getNameZhHant());current.put("nameEn",project.getNameEn());
+        com.fasterxml.jackson.databind.node.ObjectNode audit=JsonUtils.mapper().createObjectNode();
+        JsonNode original=captured==null||captured.isNull()?current:captured;
+        audit.set("captured",original.deepCopy());audit.set("current",current);audit.put("changed",!original.equals(current));audit.put("authorityEffect","none_project_display_is_not_package_authority");return audit;
+    }
+    private void assertPackageIdentityCurrent(String projectId,JsonNode frozen,String sourceSha) {
+        if(frozen==null)return; // Historical runs remain explicitly unexecuted; they are never upgraded by reading them.
+        if(!packageIdentityReviewValid(frozen,sourceSha)||!Objects.equals(frozen.path("authorityCoreSha256").asText(),packageAuthorityCore(packageAuthority(projectId))))
+            throw new BizException(4104,"Adopted package identity changed; rerun the review. Frozen results and human decisions are retained.");
+    }
+    private boolean packageIdentityCurrent(VettingRun run,CoverageVO recorded) {
+        try{assertPackageIdentityCurrent(run.getProjectId(),recorded==null?null:recorded.getPackageIdentityReview(),run.getSourceSnapshotSha256());return true;}
+        catch(RuntimeException stale){return false;}
+    }
+    static void bindPackageIdentityEvidence(Candidate candidate,JsonNode review) {
+        if(!Arrays.asList("package_identity_number_coordination","package_identity_title_coordination").contains(candidate.getRuleId()))return;
+        String field=candidate.getRuleId().contains("_number_")?"number":"title";
+        for(FindingEvidence quote:candidate.getEvidence()) {
+            com.fasterxml.jackson.databind.node.ObjectNode link=JsonUtils.mapper().createObjectNode();
+            link.put("policy",VettingPackageIdentity.POLICY);link.put("decisionSha256",review.path("decisionSha256").asText());
+            link.put("authorityCoreSha256",review.path("authorityCoreSha256").asText());link.put("field",field);
+            com.fasterxml.jackson.databind.node.ArrayNode ids=link.putArray("occurrenceIds");
+            for(JsonNode declaration:review.path("declarations"))if(field.equals(declaration.path("field").asText())&&"identity_candidate".equals(declaration.path("classification").asText())
+                    &&Objects.equals(quote.getDocumentId(),declaration.path("documentId").asText())&&Objects.equals(quote.getSourceHash(),declaration.path("sourceHash").asText())
+                    &&Objects.equals(quote.getAnchor(),declaration.path("anchor").asText())&&Objects.equals(quote.getQuote(),declaration.path("quote").asText()))ids.add(declaration.path("occurrenceId").asText());
+            if(ids.isEmpty())throw new IllegalArgumentException("Identity candidate quote has no exact frozen declaration link");
+            quote.setPackageIdentityLink(link);
+        }
+    }
 
     @EventListener(ApplicationReadyEvent.class)
     @org.springframework.scheduling.annotation.Scheduled(fixedDelay=30000,initialDelay=30000)
@@ -124,7 +205,8 @@ public class VettingService {
     }
     @org.springframework.scheduling.annotation.Scheduled(fixedDelay=20000,initialDelay=20000)
     public void renewLeases(){if(checkpoints!=null)for(String id:completions.keySet())try{checkpoints.renew(id,executionOwner);}catch(RuntimeException lost){log.warn("审查 {} 执行租约无法续期：{}",id,brief(lost));}}
-    private String recoveryContract(String supplement){ConsenseProperties.Vetting v=props.getVetting();return VettingCorpus.hash("vetting-checkpoint-v7-competition-policy-seven-classes\n"+JsonUtils.write(Arrays.asList(
+    private String recoveryContract(String supplement){ConsenseProperties.Vetting v=props.getVetting();return VettingCorpus.hash("vetting-checkpoint-v8-frozen-package-identity\n"+JsonUtils.write(Arrays.asList(
+            PACKAGE_IDENTITY_LIFECYCLE,VettingPackageIdentity.POLICY,com.consense.service.drafting.DraftingService.PackageIdentitySnapshot.POLICY,
             VettingPromptPolicy.metadata(supplement),VettingOutputSchema.contractSha256(),VettingSemanticReview.policyContractSha256(),
             v.isSemanticEnabled(),v.getSemanticTopics(),v.getSemanticContextChars(),v.getSemanticContextExpansionChars(),v.getProjectReferenceComparisons(),v.getProjectReferenceContextChars(),
             v.getCandidateLimit(),v.getTopK(),v.isDiffAgainstBaseline(),v.isRequireHybridRetrieval(),v.getRetrievalUrl(),v.getExpectedRetrievalContract(),v.getExpectedRetrievalSignatureVersion(),v.getExpectedRetrievalGranularity(),
@@ -246,7 +328,10 @@ public class VettingService {
             if(checkpoints!=null){run.setExecutionOwner(executionOwner);run.setLeaseUntil(Instant.now().plusSeconds(VettingCheckpointService.LEASE_SECONDS));}
             run.setModelIdentityJson(JsonUtils.write(vettingOperation==null?operation.getIdentity():vettingOperation.getIdentity()));
             run.setStatus("QUEUED"); run.setPhase("queued"); run.setTotalUnits(topicCount()+2); run.setMessage("审查已排队，人工处置按问题指纹保留。");
-            run.setCoverageJson(JsonUtils.write(coverage(snapshot,Collections.emptyList(),Collections.emptySet(),Collections.emptyList(),false)));
+            CoverageVO queuedCoverage=coverage(snapshot,Collections.emptyList(),Collections.emptySet(),Collections.emptyList(),false);
+            queuedCoverage.setPackageIdentityReview(freezePackageIdentity(packageAuthority(projectId),run.getSourceSnapshotSha256()));
+            queuedCoverage.setPackageIdentityMirrorAudit(packageMirrorAudit(null,projectService.require(projectId)));
+            run.setCoverageJson(JsonUtils.write(queuedCoverage));
             // Original REQUIRED insert call before dispatch; a caller-owned outer transaction can remain active.
             tx().execute(status -> runRepository.saveAndFlush(run));
             CompletableFuture<RunResultVO> done=new CompletableFuture<>(); completions.put(run.getId(),done);
@@ -292,6 +377,12 @@ public class VettingService {
         Throwable originalFailure=null;String outcome="aborted",stage="rules_progress";long stageStarted=System.nanoTime(),stageOverhead=probe.overheadNanos();
         long runStarted=stageStarted,runOverhead=stageOverhead;
         try {
+            VettingRun capturedRun=runRepository.findById(id).orElseThrow(()->new BizException(4102,"Review run no longer exists"));
+            CoverageVO capturedCoverage=JsonUtils.read(capturedRun.getCoverageJson(),CoverageVO.class);
+            final JsonNode frozenIdentity=capturedCoverage==null?null:capturedCoverage.getPackageIdentityReview();
+            if(frozenIdentity==null)throw new BizException(4104,"This run has no frozen package identity contract; rerun instead of upgrading historical results.");
+            Runnable sourceGuard=()->{assertMaterialSourcesCurrent(projectId,snapshot);assertPackageIdentityCurrent(projectId,frozenIdentity,capturedRun.getSourceSnapshotSha256());};
+            sourceGuard.run();
             if(canonicalEnabled()) {
                 stage="source_preparation";progress(id,0,"preparing","准备当前来源的完整原始观察；不代替原件质量确认。");
                 for(SourceDocument document:snapshot)evidencePreparation.prepareNormalObserved(projectId,document.getId(),"vetting");
@@ -301,22 +392,26 @@ public class VettingService {
             stage="rule_sources_construction";stageStarted=System.nanoTime();stageOverhead=probe.overheadNanos();
             final OerBusinessEvidence.Session canonicalSession=canonicalEnabled()?oer.load(projectId,"vetting",snapshot):null;
             List<SourceDocument> docs=canonicalSession!=null?snapshot:snapshot.stream().filter(this::reviewable).collect(Collectors.toList());
-            List<VettingRuleEngine.Source> sources=canonicalSession!=null?oer.ruleSources(canonicalSession):docs.stream().filter(this::contractSource).map(d -> new VettingRuleEngine.Source(String.valueOf(d.getId()),fileKey(d),d.getFileName(),VettingCorpus.sourceHash(d),VettingCorpus.blocks(d),d.getTextContent())).collect(Collectors.toList());
+            List<VettingRuleEngine.Source> sources=canonicalSession!=null?oer.ruleSources(canonicalSession,snapshot):docs.stream().filter(this::contractSource).map(d -> new VettingRuleEngine.Source(String.valueOf(d.getId()),fileKey(d),d.getFileName(),VettingCorpus.sourceHash(d),VettingCorpus.blocks(d),d.getTextContent())).collect(Collectors.toList());
+            List<VettingRuleEngine.Source> identitySources=canonicalSession!=null?sources:OerBusinessEvidence.ordinaryRuleSources(projectId,docs.stream().filter(this::contractSource).collect(Collectors.toList()));
             probe.elapsed(stage,stageStarted,stageOverhead,"Original reviewable/contractSource filters and Source construction only",true);
             probe.observe("rule_sources_constructed",()->VettingServiceProbe.map("sources",sources,"ruleSourceCount",sources.size(),"reviewableDocumentCount",docs.size(),
                     "boundary","Exact original RuleEngine inputs; non-contract roles are not operative rule sources"));
             stage="rule_engine_review";stageStarted=System.nanoTime();stageOverhead=probe.overheadNanos();
-            List<VettingRuleEngine.Output> rawRules=new VettingRuleEngine().review(sources);
+            sourceGuard.run();
+            VettingPackageIdentity.Review identityReview=VettingPackageIdentity.review(identitySources,frozenIdentity.get("authority"));
+            JsonNode completedIdentity=completePackageIdentity(frozenIdentity,identityReview);
+            List<VettingRuleEngine.Output> rawRules=new ArrayList<>(new VettingRuleEngine().review(sources));rawRules.addAll(identityReview.outputs());
             probe.elapsed(stage,stageStarted,stageOverhead,"Original RuleEngine.review invocation, before observer serialization",true);
             probe.observe("rule_engine_raw_outputs",()->VettingServiceProbe.map("outputs",rawRules));
             Map<String,Map<String,JsonNode>> nativePositions=canonicalSession==null?ruleNativePositions(sources):Collections.emptyMap();
             List<Candidate> candidates=new ArrayList<>(); for(VettingRuleEngine.Output o:rawRules) candidates.add(ruleCandidate(o,nativePositions));
             if(canonicalSession!=null)for(Candidate c:candidates)oer.bindRuleEvidence(canonicalSession,c.getEvidence());
             bindRuleOriginalSources(candidates,snapshot);
+            for(Candidate candidate:candidates)bindPackageIdentityEvidence(candidate,completedIdentity);
             progress(id,1,"semantic","规则检查完成，开始按主题检索语义审查片段。");
             stage="corpus_and_semantic_review";stageStarted=System.nanoTime();stageOverhead=probe.overheadNanos();
             List<Chunk> chunks=canonicalSession!=null?canonicalSession.chunks():VettingCorpusConstructionProbe.chunks(props,id,projectId,docs);
-            Runnable sourceGuard=()->assertMaterialSourcesCurrent(projectId,snapshot);
             VettingSemanticReview.Result semanticResult=JsonUtils.isBlankText(props.getVetting().getProbeDirectory())
                     ? semantic.reviewWithProgress(null,projectId,chunks,"en",(count,total,message) -> progress(id,count+1,total+2,"semantic",message),docs,sourceGuard)
                     : semantic.reviewWithProgress(id,projectId,chunks,"en",(count,total,message) -> progress(id,count+1,total+2,"semantic",message),docs,sourceGuard);
@@ -358,10 +453,13 @@ public class VettingService {
             CoverageVO coverage=coverage(snapshot,chunks,semanticResult.getReviewedChunkIds(),warnings,true);
             if(canonicalSession!=null)coverage.setCanonicalCorpusIdentitySha256(canonicalSession.identitySha256());
             coverage.setSemanticTopics(semanticResult.getTopicAudits());
+            coverage.setPackageIdentityReview(completedIdentity);
+            coverage.setPackageIdentityMirrorAudit(capturedCoverage.getPackageIdentityMirrorAudit());
             coverage.setChecklistDependencyLedger(VettingChecklistDependencies.capture(projectId,canonicalSession,snapshot,
                     sourceDocumentRepository.findBusinessSourcesByProjectId(projectId),unique.values(),semanticResult.getTopicAudits()));
             probe.elapsed(stage,stageStarted,stageOverhead,"Original coverage construction and semantic-topic assignment",true);
             probe.observe("coverage_constructed",()->VettingServiceProbe.map("coverage",coverage,"boundary","Submission coverage, not professional review acceptance"));
+            sourceGuard.run();
             if(!JsonUtils.isBlankText(semanticResult.getModelFailure())) {
                 tx().execute(status->{VettingRun run=ownedRun(id);run.setCoverageJson(JsonUtils.write(coverage));runRepository.saveAndFlush(run);return null;});
                 throw new BizException(4101,semanticResult.getModelFailure());
@@ -406,6 +504,7 @@ public class VettingService {
         if(!ACTIVE_STATES.contains(run.getStatus())) throw new BizException(4101,"任务已停止，不能覆盖结果");
         if(!runRepository.findFirstByProjectIdOrderByStartedAtDesc(projectId).map(latest->id.equals(latest.getId())).orElse(false))throw new BizException(4101,"项目已有新的审查任务，旧执行者不能发布当前结果");
         if(sourceSetStale(run))throw new BizException(4104,"审查来源已变化，旧结果不能作为当前报告保存；可靠包仍保留。");
+        assertPackageIdentityCurrent(projectId,coverage.getPackageIdentityReview(),run.getSourceSnapshotSha256());
         List<VettingFinding> previous=findingRepository.findByProjectIdOrderByCodeAsc(projectId);
         Map<String,Map<String,VettingFinding>> byFingerprintAndRevision=new LinkedHashMap<>(); int next=1;
         probe.observe("merge_previous_records",()->VettingServiceProbe.map("records",previous,"boundary","Original lookup before inactive marking/generated-field refresh; includes original human notes/decision/time"));
@@ -431,6 +530,7 @@ public class VettingService {
                     "generatedRevision",revision,"protocol","exact-generated-fields-v1","reusedExistingRecord",reused,"code",code,
                     "boundary","Human disposition is reused only for identical generated fields and evidence metadata; this is not semantic verification"));
         }
+        assertPackageIdentityCurrent(projectId,coverage.getPackageIdentityReview(),run.getSourceSnapshotSha256());
         findingRepository.saveAll(previous); findingRepository.saveAll(current);
         RunResultVO result=new RunResultVO(current.size(),metricsOf(current),coverage.getWarnings(),model);
         result.setPromptPolicy(VettingPromptPolicy.metadata(semantic.currentSupplement()));
@@ -813,6 +913,8 @@ public class VettingService {
     private ReportContext saveReportSnapshot(Project project,VettingRun run,List<FindingVO> findings) {
         findings=annotateSourceCandidateContainers(findings);
         VettingJobVO job=jobVO(run);job.setReliablePackets(Collections.emptyList());job.setReportSnapshotId(null);
+        if(job.getCoverage()!=null&&job.getCoverage().getPackageIdentityMirrorAudit()!=null)
+            job.getCoverage().setPackageIdentityMirrorAudit(packageMirrorAudit(job.getCoverage().getPackageIdentityMirrorAudit().get("captured"),project));
         if(reportSnapshots!=null) {
             VettingRunRepository.ProgressView stored=runRepository.findProgress(run.getProjectId(),run.getId())
                     .orElseThrow(()->new BizException(4103,"已保存的审查任务不存在，不能创建报告快照。"));
@@ -850,6 +952,7 @@ public class VettingService {
         List<SourceDocument> current=canonicalEnabled()?freshSourceSet(run.getProjectId()):sourceSet(run.getProjectId());
         if(!originalSourcesCurrent(current))return true;
         CoverageVO recorded=JsonUtils.read(run.getCoverageJson(),CoverageVO.class);
+        if(!packageIdentityCurrent(run,recorded))return true;
         if(!JsonUtils.isBlankText(run.getSourceSnapshotSha256())){
             if(!run.getSourceSnapshotSha256().equals(sourceSetHash(current)))return true;
             if(recorded!=null&&recorded.getCanonicalCorpusIdentitySha256()!=null){
@@ -866,7 +969,9 @@ public class VettingService {
     private void assertRunSourcesCurrent(VettingRun run,List<SourceDocument> captured){List<SourceDocument> current=freshSourceSet(run.getProjectId());
         if(!Objects.equals(run.getSourceSnapshotSha256(),sourceSetHash(current))||!originalSourcesCurrent(current))
             throw new BizException(4104,"审查来源或原件字节已变化，不能保存旧来源包；已保存结果仍保留。");
-        VettingSourceMaterial.requireCurrentDocuments(captured,current);}
+        VettingSourceMaterial.requireCurrentDocuments(captured,current);
+        CoverageVO recorded=JsonUtils.read(run.getCoverageJson(),CoverageVO.class);
+        assertPackageIdentityCurrent(run.getProjectId(),recorded==null?null:recorded.getPackageIdentityReview(),run.getSourceSnapshotSha256());}
     private void assertMaterialSourcesCurrent(String projectId,List<SourceDocument> captured){List<SourceDocument> current=freshSourceSet(projectId);
         if(!originalSourcesCurrent(current))throw new BizException(4104,"审查原件字节已变化，不能提交或保存旧来源材料。");
         VettingSourceMaterial.requireCurrentDocuments(captured,current);}

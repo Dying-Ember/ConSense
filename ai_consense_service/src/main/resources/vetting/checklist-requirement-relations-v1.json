@@ -1,0 +1,42 @@
+{
+  "version": "checklist-requirement-relations-v1",
+  "meaning": "Explicit requirement semantics, not an ID/keyword classifier or a legal verdict.",
+  "requirements": [
+    {
+      "section": "GENERALLY",
+      "clause": "1. All clauses",
+      "description": "- Ensure clauses have been correctly selected according to the type of contract and/or criteria as indicated in the Guidance Note of the respective clauses in SL.",
+      "kind": "sl_clause_selection",
+      "requiredSourceRoles": [
+        "selected_specification_clause",
+        "sl_guidance_criterion",
+        "project_contract_type_or_selection_fact"
+      ],
+      "independentDetermination": "unavailable_in_current_source_metadata"
+    },
+    {
+      "section": "GENERALLY",
+      "clause": "2. All clauses",
+      "description": "As a gentle reminder, where the works described in PRE clauses are stated with phrases like \"when instructed / if instructed / as instructed by the CM\", such kind of descriptions may be interpreted by the Contractor as either - (i) the works is required and provided for under the Contract, while the timing of execution or the actual location of the works is subject to the CM's instruction, or (ii) the work itself is provisional or optional and may not be required. For the case where the Contract Team considers the works are to be executed certainly (only the exact timing or location of the works is yet to be ascertained), but the Contractor interprets such works \"if instructed\" as optional, the Contractor may argue that the subsequent CM's instruction for confirmation of timing of execution or location of such works constitutes a Variation under the Contract. In the former case (i), avoid the use of phrases like \"if instructed\" or similar for the works to be executed certainly. If the Contract Team intends to clarify that the exact timing or location of the required works is yet to be ascertained, please consider stating that the exact timing of execution or the location of the works is subject to CM's direction. In the latter case (ii), PQS is to review whether works that are described as \"if instructed\" or similar in PRE clauses shall, where they are optional, be measured separately in the Bills of Quantities as items of provisional quantity as appropriate.",
+      "kind": "conditional_works_instruction",
+      "requiredSourceRoles": [
+        "pre_work_condition",
+        "same_work_required_or_optional_intent",
+        "instruction_timing_or_location"
+      ],
+      "independentDetermination": "unavailable_in_current_source_metadata"
+    },
+    {
+      "section": "GENERALLY",
+      "clause": "3. All appendices",
+      "description": "Ensure the clause number, the appendix reference in the heading and the header at top right corner of each page tally with each other.",
+      "kind": "appendix_identifier_alignment",
+      "requiredSourceRoles": [
+        "clause_number",
+        "heading_appendix_reference",
+        "running_header_reference"
+      ],
+      "independentDetermination": "unavailable_in_current_source_metadata"
+    }
+  ]
+}

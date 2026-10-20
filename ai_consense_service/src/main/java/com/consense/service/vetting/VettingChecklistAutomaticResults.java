@@ -46,6 +46,11 @@ public final class VettingChecklistAutomaticResults {
                 reason="The model recorded "+status+", but this requirement's complete source scope was not bound to one submitted packet.\n"+reason;
                 status="insufficient_evidence";
             }
+            if(records.stream().anyMatch(record->!VettingChecklistRequirementRelations.automaticEligible(item,record.path("status").asText()))
+                    &&Arrays.asList("fulfilled","not_fulfilled","not_applicable").contains(status)) {
+                reason="The model recorded "+status+", but the requirement's independent source field roles, same-object relation or complete scope remain unverified.\n"+reason;
+                status="insufficient_evidence";
+            }
             if("pricing_document_excluded".equals(item.getReviewScope())) {status="out_of_scope";reason=item.getScopeNote();}
             else if("mixed_contract_pricing".equals(item.getReviewScope())) {
                 reason+=(reason.isEmpty()?"":"\n")+item.getScopeNote();

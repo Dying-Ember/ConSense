@@ -115,7 +115,19 @@ public class VettingSemanticReview {
         private List<Quote> evidence;
         private List<ChecklistAssessment> checklistAssessments;
     }
-    @Data public static class ChecklistAssessment { private String itemId,status,reason; }
+    @Data public static class ChecklistAssessment {
+        private String itemId,status,reason;
+        /** Untrusted model references only. This shape never certifies requirement relevance. */
+        private ChecklistSupport support;
+    }
+    @Data public static class ChecklistSupport {
+        private String kind;
+        private List<ChecklistFactRef> facts;
+    }
+    @Data public static class ChecklistFactRef {
+        private String slot;
+        private Integer evidenceIndex,nativePositionIndex,startUtf16,endUtf16;
+    }
     @Data public static class Candidate {
         private String ruleId, type, severity, title, comment, impact, suggestion, source, packetId, sourceSnapshotSha256;
         private List<FindingEvidence> evidence = new ArrayList<>();
@@ -618,8 +630,9 @@ public class VettingSemanticReview {
                         ChecklistAssessmentVO verified=new ChecklistAssessmentVO();verified.setItemId(assessment.getItemId());verified.setStatus(assessment.getStatus());verified.setReason(assessment.getReason());
                         verified.setIssueTypeCode("not_fulfilled".equals(assessment.getStatus())?VettingIssueType.require(r.getType()).getCode():null);
                         verified.setPolicySha256(VettingPromptPolicy.sha256());verified.setPacketId(packet.getPacketId());verified.setSourceSnapshotSha256(packet.getSourceSnapshotSha256());
-                        verified.setEvidence(new ArrayList<>(evidence));verified.setEvidenceChunkIds(r.getEvidence().stream().map(Quote::getChunkId).collect(Collectors.toList()));packet.getChecklistAssessments().add(verified);
-                        verifiedChecklistIds.add(assessment.getItemId());
+                        verified.setEvidence(new ArrayList<>(evidence));verified.setEvidenceChunkIds(r.getEvidence().stream().map(Quote::getChunkId).collect(Collectors.toList()));
+                        verified.setRequirementRelation(VettingChecklistRequirementRelations.bind(assessment,verified,r.getEvidence(),byId,documents));packet.getChecklistAssessments().add(verified);
+                        if(VettingChecklistRequirementRelations.automaticEligible(assessment.getItemId(),assessment.getStatus()))verifiedChecklistIds.add(assessment.getItemId());
                     }
                     if(!"issue".equals(r.getAssessment()))packet.getVerifiedAssessments().add(new com.consense.web.dto.VettingDtos.VerifiedAssessmentVO(r.getAssessment(),r.getTitle(),r.getComment(),evidence));
                     if (!"issue".equals(r.getAssessment())) continue;
@@ -995,7 +1008,8 @@ public class VettingSemanticReview {
             + "Return [] if there is no concrete issue. If you include a consistency or incomplete-context assessment, label it accordingly; it will not become a finding. "
             + "Use not_applicable only for an explicit applicable-scope exclusion supported by substantive project tender quotations and a stated reason; absence, missing evidence or unknown applicability cannot establish it. "
             + "Return all supported assessments in a JSON array; do not cap finding counts. Each record must satisfy the supplied schema: title at most 160 characters, comment at most 1200, impact and suggestion at most 600 each; keep explanations concise. Every record, including insufficient_context, requires 1–4 evidence entries with exact quotations of 12–1200 characters from supplied passages. If no affected tender passage supports an assessment, omit that record rather than returning empty evidence. Use keys assessment(issue|consistent|insufficient_context|not_applicable), type(reference|conflict|language|risk|gap|substantive|requirement), "
-            + "severity(high|medium|low), title, comment, impact, suggestion, evidence:[{chunkId,side,quote}], subDimension, factBasis, pendingFacts, suggestedAction(delete|amend|insert|review), checklistAssessments:[{itemId,status,reason}]. "
+            + "severity(high|medium|low), title, comment, impact, suggestion, evidence:[{chunkId,side,quote}], subDimension, factBasis, pendingFacts, suggestedAction(delete|amend|insert|review), checklistAssessments:[{itemId,status,reason,support}]. "
+            + "support must be null unless the exact quoted native positions support the declared requirement kind and fact slots; references are evidence indexes, native-position indexes and UTF16 quote ranges only. Never supply fact values, relevance, verification or server requirementRelation verdicts. Native positions alone do not establish legal intent, a same-object relationship or complete appendix/page scope. "
             + "Each issue requires a specific subDimension, a source-supported factBasis and explicit suggestedAction. List unconfirmed facts in pendingFacts; if any are pending, use suggestedAction=review, never assume them to justify deletion or amendment. "
             + "For non-issue assessments subDimension and factBasis may be empty; pendingFacts and checklistAssessments may be empty arrays. "
             + "Checklist assessments must name an APP-I source row actually assessed against this record's exact evidence, not a CK group or annex example. "

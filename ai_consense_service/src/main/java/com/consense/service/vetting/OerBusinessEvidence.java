@@ -314,6 +314,9 @@ public class OerBusinessEvidence {
     }
     /** Deterministic checks traverse only accepted observations, retaining source-bound original anchors. */
     public List<VettingRuleEngine.Source> ruleSources(Session session){
+        return ruleSources(session,Collections.emptyList());
+    }
+    public List<VettingRuleEngine.Source> ruleSources(Session session,List<SourceDocument> capturedSources){
         current(session);Map<String,List<Chunk>> byDocument=new LinkedHashMap<>();for(Chunk c:session.chunks)
             if("tender".equals(c.getRole()))byDocument.computeIfAbsent(c.getDocumentId(),key->new ArrayList<>()).add(c);
         List<VettingRuleEngine.Source> out=new ArrayList<>();for(List<Chunk> chunks:byDocument.values()){
@@ -322,11 +325,85 @@ public class OerBusinessEvidence {
                 com.consense.document.DocumentBlock b=new com.consense.document.DocumentBlock();b.setId(p.getBlockId());b.setLocation(p.getAnchor());
                 b.setText(p.getText());b.setOriginalText(p.getText());b.setSource(NormalObservedContract.isNormal(c.getCanonicalPayload())?"normal_observed_candidate":"source_reviewed_canonical_observation");
                 if(p.getPageNo()!=null)b.setPageNo(Integer.valueOf(p.getPageNo().substring(1)));
-                List<Double> box=p.getBbox();if(box!=null)b.setBbox(box.stream().mapToDouble(Double::doubleValue).toArray());blocks.add(b);
+                List<Double> box=p.getBbox();if(box!=null)b.setBbox(box.stream().mapToDouble(Double::doubleValue).toArray());
+                List<SourceDocument> matching=capturedSources==null?Collections.emptyList():capturedSources.stream().filter(d->d!=null&&Objects.equals(String.valueOf(d.getId()),c.getDocumentId())).collect(Collectors.toList());
+                bindRuleContext(session.projectId,matching.size()==1?matching.get(0):null,c,p,b);blocks.add(b);
             }
             out.add(new VettingRuleEngine.Source(first.getDocumentId(),first.getFileKey(),first.getFileName(),first.getCanonicalEvidence().getJavaParsedSourceHash(),
                     blocks,blocks.stream().map(com.consense.document.DocumentBlock::getText).collect(Collectors.joining("\n"))));
         }return out;
+    }
+    /** Copies only structure from the unique current source/range; never unselected field or cell text. */
+    static void bindRuleContext(String projectId,SourceDocument source,Chunk chunk,Part part,com.consense.document.DocumentBlock target) {
+        ObjectNode context=JsonUtils.mapper().createObjectNode(),binding=context.putObject(VettingPackageIdentity.CONTEXT);target.setReadingContext(context);
+        binding.put("status","unknown");binding.put("reason","current_source_binding_missing");binding.put("startOffset",part.getStartOffset());binding.put("endOffset",part.getEndOffset());binding.put("offsetUnit","utf16");
+        if(source==null||!Objects.equals(projectId,source.getProjectId())||!"PARSED".equals(source.getParseStatus())||chunk.getCanonicalEvidence()==null||chunk.getCanonicalPayload()==null
+                ||!Objects.equals(String.valueOf(source.getId()),chunk.getDocumentId())||!Objects.equals(VettingCorpus.sourceHash(source),chunk.getCanonicalEvidence().getJavaParsedSourceHash())
+                ||source.getSourceSha256()==null||!Objects.equals(source.getSourceSha256(),chunk.getCanonicalEvidence().getOriginalSourceSha256()))return;
+        List<com.consense.document.DocumentBlock> matches;
+        try{matches=VettingCorpus.blocks(source).stream().filter(block->Objects.equals(block.getId(),part.getBlockId())).collect(Collectors.toList());}
+        catch(RuntimeException invalid){binding.put("reason","source_structure_unreadable");return;}
+        binding.put("reason","original_block_not_unique");if(matches.size()!=1)return;com.consense.document.DocumentBlock original=matches.get(0);String text=original.getEffectiveText();int start=part.getStartOffset(),end=part.getEndOffset();
+        binding.put("reason","accepted_range_differs");if(text==null||start<0||end<start||end>text.length()||!Objects.equals(text.substring(start,end),part.getText())||!Objects.equals(part.getAnchor(),original.getLocation()))return;
+        List<JsonNode> accepted=new ArrayList<>();for(JsonNode raw:chunk.getCanonicalPayload().path("parts"))if(Objects.equals(raw.path("blockId").asText(),part.getBlockId())&&raw.path("startOffset").isIntegralNumber()&&raw.path("endOffset").isIntegralNumber()&&raw.path("startOffset").asInt()==start&&raw.path("endOffset").asInt()==end&&Objects.equals(raw.path("text").asText(),part.getText()))accepted.add(raw);
+        binding.put("reason","accepted_part_not_unique");if(accepted.size()!=1)return;
+        JsonNode position=original.getSourcePosition(),supplied=accepted.get(0).get("sourcePosition");binding.put("reason","source_position_differs");
+        if(position!=null&&(!position.equals(supplied)||!source.getSourceSha256().equals(position.path("sourceSha256").asText()))||position==null&&supplied!=null&&!supplied.isNull())return;
+        copyRuleContext(source,original,target,context,binding,start,end);
+    }
+    /** Same captured-document adapter for the existing noncanonical rule path, with no canonical pointer. */
+    public static List<VettingRuleEngine.Source> ordinaryRuleSources(String projectId,List<SourceDocument> capturedSources) {
+        List<VettingRuleEngine.Source> out=new ArrayList<>();if(capturedSources==null)return out;
+        for(SourceDocument source:capturedSources)if(source!=null&&Objects.equals(projectId,source.getProjectId())&&"tender".equals(VettingCorpus.sourceRole(source))){
+            List<com.consense.document.DocumentBlock> originals=VettingCorpus.blocks(source),blocks=new ArrayList<>();Map<String,Long> counts=originals.stream().filter(b->b.getId()!=null).collect(Collectors.groupingBy(com.consense.document.DocumentBlock::getId,Collectors.counting()));
+            for(com.consense.document.DocumentBlock original:originals){com.consense.document.DocumentBlock block=JsonUtils.read(JsonUtils.write(original),com.consense.document.DocumentBlock.class);ObjectNode context=JsonUtils.mapper().createObjectNode(),binding=context.putObject(VettingPackageIdentity.CONTEXT);block.setReadingContext(context);binding.put("status","unknown");binding.put("reason","ordinary_source_binding_unverified");String text=original.getEffectiveText();
+                if("PARSED".equals(source.getParseStatus())&&source.getSourceSha256()!=null&&Objects.equals(text,original.getText())&&counts.getOrDefault(original.getId(),0L)==1L&&(original.getSourcePosition()==null||source.getSourceSha256().equals(original.getSourcePosition().path("sourceSha256").asText())))copyRuleContext(source,original,block,context,binding,0,text==null?0:text.length());
+                blocks.add(block);
+            }
+            out.add(new VettingRuleEngine.Source(String.valueOf(source.getId()),source.getFileKey(),source.getFileName(),VettingCorpus.sourceHash(source),blocks,blocks.stream().map(com.consense.document.DocumentBlock::getText).collect(Collectors.joining("\n"))));
+        }return out;
+    }
+    private static void copyRuleContext(SourceDocument source,com.consense.document.DocumentBlock original,com.consense.document.DocumentBlock target,ObjectNode context,ObjectNode binding,int start,int end) {
+        JsonNode position=original.getSourcePosition();String text=original.getEffectiveText();
+        JsonNode observed=original.getReadingContext();if(observed!=null){
+            copyContextFields(observed,context,"sourceSha256","occurrenceId","story","role","ownerStatus","semanticStatus","adoptionStatus","containerId");
+            if(observed.path("nativeDocxSection").isObject())copyContextFields(observed.path("nativeDocxSection"),context.putObject("nativeDocxSection"),"sectionId","ordinalZeroBased","inventoryPointer","membershipStatus","ownerStatus","applicabilityStatus","effectiveSectionState");
+            if(observed.path("nativeDocxOutline").isObject())copyContextFields(observed.path("nativeDocxOutline"),context.putObject("nativeDocxOutline"),"ancestorOrdinals","containedHeadingOrdinals");
+        }context.set(VettingPackageIdentity.CONTEXT,binding);
+        target.setKind(original.getKind());target.setParagraphStyle(original.getParagraphStyle());target.setParagraphStyleName(original.getParagraphStyleName());if(position!=null)target.setSourcePosition(position.deepCopy());
+        binding.put("status","source_bound");binding.put("reason","unique_current_document_block_and_accepted_range");binding.put("startOffset",start);binding.put("endOffset",end);binding.put("offsetUnit","utf16");binding.put("sourceHash",VettingCorpus.sourceHash(source));binding.put("originalSourceSha256",source.getSourceSha256());binding.put("originalBytesStatus","captured_identity_only");binding.put("role",VettingCorpus.sourceRole(source));binding.put("documentScope",source.getDocumentScope());binding.put("completeOriginalBlock",text!=null&&start==0&&end==text.length());
+        binding.put("selectedStartsAtSourceLineBoundary",text!=null&&(start==0||text.charAt(start-1)=='\n'||text.charAt(start-1)=='\r'));binding.put("selectedEndsAtSourceLineBoundary",text!=null&&(end==text.length()||text.charAt(end)=='\n'||text.charAt(end)=='\r'));
+        bindNativeStory(source,position,binding);
+        bindScopeExclusion(source,original,binding);
+    }
+    private static void copyContextFields(JsonNode source,ObjectNode target,String... keys){for(String key:keys)if(source.has(key)){JsonNode value=source.path(key);boolean allowed=value.isValueNode();if(value.isArray()){allowed=true;for(JsonNode item:value)allowed&=item.isIntegralNumber();}if(allowed)target.set(key,value.deepCopy());}}
+    /** Source outline edges may exclude examples/references; they never establish package-own identity. */
+    private static void bindScopeExclusion(SourceDocument source,com.consense.document.DocumentBlock original,ObjectNode binding) {
+        ObjectNode scope=binding.putObject("sourceScopeExclusion");scope.put("status","unknown");scope.put("reason","no_explicit_bound_scope_exclusion");
+        JsonNode refs=original.getReadingContext()==null?null:original.getReadingContext().path("nativeDocxOutline").path("ancestorOrdinals"),position=original.getSourcePosition();if(refs==null||!refs.isArray()||refs.isEmpty()||position==null||!"docx_native".equals(position.path("kind").asText())||position.path("partName").asText().isEmpty()||!position.path("partSha256").asText().matches("[a-f0-9]{64}"))return;
+        JsonNode coverage;List<com.consense.document.DocumentBlock> blocks;try{coverage=JsonUtils.parse(source.getParseCoverageJson());blocks=VettingCorpus.blocks(source);}catch(RuntimeException invalid){return;}JsonNode headings=coverage.path("nativeDocxOutline").path("headings");if(!headings.isArray())return;
+        Set<Integer> visited=new HashSet<>();Set<String> exclusions=new LinkedHashSet<>();List<ObjectNode> edges=new ArrayList<>();
+        for(JsonNode ordinal:refs){
+            if(!ordinal.isIntegralNumber()||!ordinal.canConvertToInt()||ordinal.asInt()<0||!visited.add(ordinal.asInt())){scope.put("reason","native_outline_scope_binding_unknown");return;}JsonNode heading=headings.get(ordinal.asInt());if(heading==null||heading.path("ordinalZeroBased").asInt(-1)!=ordinal.asInt()){scope.put("reason","native_outline_scope_binding_unknown");return;}
+            JsonNode at=heading.path("sourcePosition"),observation=heading.path("textObservation");boolean member=false;for(JsonNode id:heading.path("retainedBlockIds"))if(original.getId().equals(id.asText()))member=true;
+            if(!member||!source.getSourceSha256().equals(at.path("sourceSha256").asText())||!position.path("partName").equals(at.path("partName"))||!position.path("partSha256").equals(at.path("partSha256"))||!at.path("nodePath").asText().startsWith("/{")||!at.equals(observation.path("sourcePosition"))||!"observed_parser_paragraph_channels".equals(observation.path("status").asText())||!observation.path("text").isTextual()){scope.put("reason","native_outline_scope_binding_unknown");return;}
+            String text=observation.path("text").asText();List<com.consense.document.DocumentBlock> matches=blocks.stream().filter(block->at.equals(block.getSourcePosition())&&Objects.equals(text,block.getEffectiveText())).collect(Collectors.toList());if(matches.size()!=1){scope.put("reason","native_outline_heading_occurrence_not_unique");return;}
+            String excluded=VettingPackageIdentity.explicitScopeExclusion(text);if(excluded==null)continue;exclusions.add(excluded);ObjectNode edge=JsonUtils.mapper().createObjectNode();edge.put("ordinalZeroBased",ordinal.asInt());edge.put("sourceBlockId",matches.get(0).getId());edge.put("memberBlockId",original.getId());edge.set("sourcePosition",at.deepCopy());edge.put("sourceTextSha256",VettingCorpus.hash(text));edge.put("relation","native_outline_ancestor");edge.put("classification",excluded);edge.put("basis","exact_bound_source_heading_exclusion_label");edges.add(edge);
+        }
+        if(exclusions.isEmpty())return;scope.put("status","bound_native_outline_exclusion");scope.put("reason","explicit_current_source_heading_and_ancestor_membership");scope.put("classification",exclusions.size()==1?exclusions.iterator().next():"excluded_explicit_scope");for(ObjectNode edge:edges)scope.withArray("edges").add(edge);
+    }
+    private static void bindNativeStory(SourceDocument source,JsonNode position,ObjectNode binding) {
+        binding.put("storyStatus","unknown");binding.put("physicalWordPageStatus","unknown");if(position==null||!"docx_native".equals(position.path("kind").asText())||position.path("partName").asText().isEmpty()||!position.path("partSha256").asText().matches("[a-f0-9]{64}"))return;
+        JsonNode coverage;try{coverage=JsonUtils.parse(source.getParseCoverageJson());}catch(RuntimeException invalid){return;}
+        JsonNode inventory=coverage.path("nativeDocxTables");if(!source.getSourceSha256().equals(inventory.path("sourceSha256").asText()))return;
+        List<JsonNode> roots=new ArrayList<>();for(JsonNode part:inventory.path("parts"))if(position.path("partName").equals(part.path("partName"))&&position.path("partSha256").equals(part.path("partSha256")))for(JsonNode root:part.path("loadedRoots")){
+            String rootPath=root.path("nodePath").asText(),path=position.path("nodePath").asText();if(rootPath.startsWith("/{")&&Arrays.asList("body","header","footer","footnote","endnote").contains(root.path("kind").asText())&&(path.equals(rootPath)||path.startsWith(rootPath+"/")))roots.add(root);
+        }
+        if(roots.size()!=1)return;JsonNode root=roots.get(0);binding.put("storyStatus","observed_loaded_native_root");binding.put("storyKind",root.path("kind").asText());binding.set("storyRoot",root.deepCopy());
+        JsonNode sections=coverage.path("nativeDocxSections");if(!source.getSourceSha256().equals(sections.path("sourcePosition").path("sourceSha256").asText()))return;
+        for(JsonNode section:sections.path("sections"))for(JsonNode relation:section.path("headerFooterBindings")){
+            JsonNode target=relation.path("targetPart");if(position.path("partName").equals(target.path("partName"))&&position.path("partSha256").equals(target.path("partSha256"))&&root.path("nodePath").equals(target.path("rootNodePath"))){ObjectNode linked=binding.withArray("sectionRelations").addObject();linked.put("sectionId",section.path("sectionId").asText());linked.set("binding",relation.deepCopy());}
+        }
     }
     /** Rebind a literal rule quote to its accepted part; ambiguous locations do not receive a pointer. */
     public void bindRuleEvidence(Session session,List<com.consense.web.dto.VettingDtos.FindingEvidence> quotes){

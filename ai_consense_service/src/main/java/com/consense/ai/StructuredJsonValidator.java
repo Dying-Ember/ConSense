@@ -12,10 +12,11 @@ import static com.consense.ai.StructuredOutputValidationException.Reason.*;
 
 /**
  * Deliberately bounded schema subset used by VettingOutputSchema, not a general JSON Schema engine.
- * Supports type=array/object/string; array items/minItems/maxItems; object properties/required/
- * boolean additionalProperties; and string enum/minLength/maxLength. Every other keyword, type,
- * boolean schema, union, reference, or schema-valued additionalProperties is rejected before dispatch.
- * Each schema node requires a supported type. An omitted items/properties constraint is unrestricted.
+ * Supports type=array/object/string/integer; array items/minItems/maxItems; object properties/required/
+ * boolean additionalProperties; string enum/minLength/maxLength; and nonnegative 32-bit integer
+ * minimum/maximum. The only union is a sole anyOf with exactly one plain null and one object branch.
+ * Every other keyword, type, boolean schema, union, reference, or schema-valued additionalProperties
+ * is rejected before dispatch. Other nodes require a supported type. Missing items/properties is unrestricted.
  * Bounds are nonnegative 32-bit integer nodes; schema nesting beyond 64 levels is unsupported.
  * String length counts Unicode code points, including supplementary characters, rather than UTF-16 units.
  * The gateway additionally requires a direct array with no null or nested-array top-level elements.
@@ -29,6 +30,7 @@ final class StructuredJsonValidator {
     private static final Set<String> ARRAY_KEYS = keys("type", "items", "minItems", "maxItems");
     private static final Set<String> OBJECT_KEYS = keys("type", "properties", "required", "additionalProperties");
     private static final Set<String> STRING_KEYS = keys("type", "enum", "minLength", "maxLength");
+    private static final Set<String> INTEGER_KEYS = keys("type", "minimum", "maximum");
     private static final int MAX_SCHEMA_DEPTH = 64;
 
     private StructuredJsonValidator() { }
@@ -57,13 +59,16 @@ final class StructuredJsonValidator {
 
     private static Schema compileNode(JsonNode node, int depth) {
         if (depth > MAX_SCHEMA_DEPTH) throw failure(UNSUPPORTED_SCHEMA);
-        if (node == null || !node.isObject() || !node.path("type").isTextual()) throw failure(INVALID_SCHEMA);
+        if (node == null || !node.isObject()) throw failure(INVALID_SCHEMA);
+        if (node.has("anyOf")) return compileNullableObject(node, depth);
+        if (!node.path("type").isTextual()) throw failure(INVALID_SCHEMA);
         String type = node.get("type").textValue();
         Set<String> supported;
         switch (type) {
             case "array": supported = ARRAY_KEYS; break;
             case "object": supported = OBJECT_KEYS; break;
             case "string": supported = STRING_KEYS; break;
+            case "integer": supported = INTEGER_KEYS; break;
             default: throw failure(UNSUPPORTED_SCHEMA);
         }
         Iterator<String> names = node.fieldNames();
@@ -93,6 +98,8 @@ final class StructuredJsonValidator {
                 if (!node.get("additionalProperties").isBoolean()) throw failure(UNSUPPORTED_SCHEMA);
                 schema.allowAdditional = node.get("additionalProperties").booleanValue();
             }
+        } else if ("integer".equals(type)) {
+            schema.minimum = bound(node, "minimum"); schema.maximum = bound(node, "maximum");
         } else {
             schema.minimum = bound(node, "minLength"); schema.maximum = bound(node, "maxLength");
             if (node.has("enum")) {
@@ -109,6 +116,28 @@ final class StructuredJsonValidator {
         return schema;
     }
 
+    private static Schema compileNullableObject(JsonNode node, int depth) {
+        if (node.size() != 1) throw failure(UNSUPPORTED_SCHEMA);
+        JsonNode alternatives = node.get("anyOf");
+        if (!alternatives.isArray()) throw failure(INVALID_SCHEMA);
+        if (alternatives.size() != 2) throw failure(UNSUPPORTED_SCHEMA);
+        JsonNode object = null;
+        boolean hasNull = false;
+        for (JsonNode branch : alternatives) {
+            if (!branch.isObject() || !branch.path("type").isTextual()) throw failure(INVALID_SCHEMA);
+            if ("null".equals(branch.get("type").textValue()) && !hasNull) {
+                if (branch.size() != 1) throw failure(UNSUPPORTED_SCHEMA);
+                hasNull = true;
+            } else if ("object".equals(branch.get("type").textValue()) && object == null) {
+                object = branch;
+            } else throw failure(UNSUPPORTED_SCHEMA);
+        }
+        if (!hasNull || object == null) throw failure(UNSUPPORTED_SCHEMA);
+        Schema schema = compileNode(object, depth + 1);
+        schema.nullable = true;
+        return schema;
+    }
+
     private static Integer bound(JsonNode node, String name) {
         if (!node.has(name)) return null;
         JsonNode value = node.get(name);
@@ -117,6 +146,7 @@ final class StructuredJsonValidator {
     }
 
     private static void validate(JsonNode value, Schema schema) {
+        if (value.isNull() && schema.nullable) return;
         switch (schema.type) {
             case "array":
                 if (!value.isArray()) throw failure(SCHEMA_MISMATCH);
@@ -133,6 +163,11 @@ final class StructuredJsonValidator {
                     if (property != null) validate(field.getValue(), property);
                     else if (!schema.allowAdditional) throw failure(SCHEMA_MISMATCH);
                 }
+                break;
+            case "integer":
+                if (!value.isIntegralNumber() || !value.canConvertToInt() || value.intValue() < 0)
+                    throw failure(SCHEMA_MISMATCH);
+                checkBounds(value.intValue(), schema);
                 break;
             case "string":
                 if (!value.isTextual()) throw failure(SCHEMA_MISMATCH);
@@ -163,6 +198,7 @@ final class StructuredJsonValidator {
         final Set<String> required = new HashSet<>();
         Set<String> allowedStrings;
         boolean allowAdditional = true;
+        boolean nullable;
         Schema(String type) { this.type = type; }
     }
 }

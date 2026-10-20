@@ -2,6 +2,7 @@ package com.consense.service.vetting;
 
 import com.consense.common.BizException;
 import com.consense.common.JsonUtils;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.consense.common.LocalizedText;
 import com.consense.domain.Project;
 import com.consense.web.dto.VettingDtos.*;
@@ -92,9 +93,10 @@ public class VettingReportWriter {
             XWPFHeader runningHeader=document.createHeader(HeaderFooterType.DEFAULT);
             XWPFParagraph contractHeader=runningHeader.createParagraph();
             XWPFRun contractLabel=contractHeader.createRun();setWordFont(contractLabel);contractLabel.setFontSize(10);
-            contractLabel.setText("Contract No. "+available(project.getContractNo(),"en"));
+            contractLabel.setText("Contract No. "+reportIdentity(job,"number"));
             document.getProperties().getCoreProperties().setTitle(tr(lang, "招标文件审查报告", "招標文件審查報告", "Tender Document Vetting Report"));
             document.getProperties().getCoreProperties().setCreator("ConSense");
+            if(job!=null&&!JsonUtils.isBlankText(job.getReportSnapshotId()))document.getProperties().getCoreProperties().setIdentifier(job.getReportSnapshotId());
             document.write(out);
             return out.toByteArray();
         } catch (IOException e) {
@@ -140,11 +142,12 @@ public class VettingReportWriter {
                     pdfShowText(stream,font,footerLabel,8);
                     stream.endText();
                     stream.beginText();stream.setFont(font,9);stream.newLineAtOffset(MARGIN,PDRectangle.A4.getHeight()-27);
-                    pdfShowText(stream,font,"Contract No. "+available(project.getContractNo(),"en"),9);stream.endText();
+                    pdfShowText(stream,font,"Contract No. "+reportIdentity(job,"number"),9);stream.endText();
                 }
             }
             document.getDocumentInformation().setTitle(tr(lang, "招标文件审查报告", "招標文件審查報告", "Tender Document Vetting Report"));
             document.getDocumentInformation().setCreator("ConSense");
+            if(job!=null&&!JsonUtils.isBlankText(job.getReportSnapshotId()))document.getDocumentInformation().setCustomMetadataValue("ConSenseReportSnapshotId",job.getReportSnapshotId());
             document.save(out);
             return out.toByteArray();
         } catch (IOException e) {
@@ -165,7 +168,7 @@ public class VettingReportWriter {
     private void writeBusinessWord(XWPFDocument document,Project project,List<FindingVO> findings,VettingJobVO job,List<VettingChecklistCatalog.Result> checklist) {
         wordLine(document,"Comments on Tender Documentation","Title",false);
         XWPFTable metadata=document.createTable(4,3);metadata.setWidth("100%");
-        String[][] fields={{"Contract Title",available(projectName(project,"en"),"en")},{"Contract No.",available(project.getContractNo(),"en")},{"Contract Manager","Not provided"},{"Surveyor","Not provided"}};
+        String[][] fields={{"Contract Title",reportIdentity(job,"title")},{"Contract No.",reportIdentity(job,"number")},{"Contract Manager","Not provided"},{"Surveyor","Not provided"}};
         for(int i=0;i<fields.length;i++)setWordCells(metadata.getRow(i),Arrays.asList(fields[i][0],":",fields[i][1]),new int[]{25,3,72},false);
         CTTblBorders border=metadata.getCTTbl().getTblPr().addNewTblBorders();
         for(CTBorder b:Arrays.asList(border.addNewTop(),border.addNewBottom(),border.addNewLeft(),border.addNewRight(),border.addNewInsideH(),border.addNewInsideV()))b.setVal(STBorder.NONE);
@@ -221,8 +224,8 @@ public class VettingReportWriter {
     }
     private void writeBusinessPdf(PdfCursor cursor,Project project,List<FindingVO> findings,VettingJobVO job,List<VettingChecklistCatalog.Result> checklist) throws IOException {
         cursor.centeredTitle("Comments on Tender Documentation");
-        cursor.metadata("Contract Title",available(projectName(project,"en"),"en"));
-        cursor.metadata("Contract No.",available(project.getContractNo(),"en"));
+        cursor.metadata("Contract Title",reportIdentity(job,"title"));
+        cursor.metadata("Contract No.",reportIdentity(job,"number"));
         cursor.metadata("Contract Manager","Not provided");cursor.metadata("Surveyor","Not provided");
         cursor.block(new Block(0,"Comments are review suggestions. Project team remarks are recorded independently; review scope and source evidence are retained in Appendix II."),null);
         for(VettingReportPresentation.Table table:VettingReportPresentation.readerComments(findings,job==null?null:job.getCoverage()))cursor.table(table);
@@ -234,8 +237,35 @@ public class VettingReportWriter {
         for(VettingReportPresentation.Table table:VettingReportPresentation.readerChecklist(checklist,automaticChecklist(job)))cursor.table(table);
     }
 
+    static String reportIdentity(VettingJobVO job,String field) {
+        JsonNode review=job==null||job.getCoverage()==null?null:job.getCoverage().getPackageIdentityReview();
+        if(review==null)return "Not confirmed (identity check not recorded)";
+        if(!VettingService.packageIdentityReviewValid(review,job.getSourceSnapshotSha256()))return "Not confirmed (identity snapshot invalid)";
+        if(!"executed".equals(review.path("executionStatus").asText()))return "Not confirmed (identity check not executed)";
+        JsonNode adopted=review.path("authority").path("core").path("fields").path(field);
+        return adopted.path("eligible").asBoolean()&&adopted.path("value").isTextual()?adopted.path("value").asText():"Not confirmed (adopted "+field+" unavailable)";
+    }
+    private void identityOutline(List<Block> blocks,VettingJobVO job) {
+        blocks.add(new Block(2,"Package identity coordination"));
+        JsonNode review=job==null||job.getCoverage()==null?null:job.getCoverage().getPackageIdentityReview();
+        if(review==null){blocks.add(new Block(0,"This historical run has no recorded package identity coordination check. It remains unexecuted; no agreement or PASS is inferred. Project display metadata is not an adopted package identity."));return;}
+        if(!VettingService.packageIdentityReviewValid(review,job.getSourceSnapshotSha256())){blocks.add(new Block(0,"The frozen package identity record could not be verified. Its comparison and adopted identity remain unconfirmed."));return;}
+        blocks.add(new Block(0,"Adopted contract number: "+reportIdentity(job,"number")+"\nAdopted project or contract title: "+reportIdentity(job,"title")));
+        if(!"executed".equals(review.path("executionStatus").asText())){blocks.add(new Block(0,"Identity observations were not executed for this run. No agreement or PASS is inferred."));return;}
+        for(String field:Arrays.asList("number","title")) {
+            JsonNode result=review.path("fields").path(field);String state=result.path("status").asText();
+            String observation="candidate_difference_requires_review".equals(state)?"Observed labelled candidates differ and require source-scope review."
+                    :"candidate_agreement_scope_unknown".equals(state)?"Observed labelled candidates agree, but their own-package scope remains unknown.":"No comparable own-package declaration has been established.";
+            blocks.add(new Block(0,("number".equals(field)?"Contract number":"Project or contract title")+": "+observation));
+        }
+        blocks.add(new Block(0,"Labels are source identity candidates, not proof of package ownership. Explicit examples and external references remain separate. Alias equivalence and physical header/footer page use may remain unknown; no identity PASS is established."));
+        JsonNode mirror=job.getCoverage().getPackageIdentityMirrorAudit();
+        blocks.add(new Block(0,mirror!=null&&mirror.path("changed").asBoolean()?"Project display metadata changed after capture. This audit difference does not change the adopted comparison identity.":"Project display metadata is recorded separately as audit information and is not the package baseline."));
+    }
+
     private List<Block> outline(Project project,List<FindingVO> findings,VettingJobVO job,String lang) {
         List<Block> blocks=new ArrayList<>();CoverageVO coverage=job==null?null:job.getCoverage();
+        identityOutline(blocks,job);
         blocks.add(new Block(2,tr(lang,"支持审查意见的原文摘录","支持審查意見的原文摘錄","Supporting source quotations")));
         blocks.add(new Block(0,tr(lang,"编号意见均为待复核的审查建议。已有来源条款归属保留；原文位置和已定位引文本身不确认正式条款归属或法律结论，候选意见是否等价尚未确认。","編號意見均為待覆核的審查建議。已有來源條款歸屬保留；原文位置和已定位引文本身不確認正式條款歸屬或法律結論，候選意見是否等價尚未確認。","The numbered comments are review suggestions. Existing recorded source clauses are retained. Recorded source positions and located quotations do not confirm formal clause ownership or the legal conclusion. Candidate equivalence remains unconfirmed.")));
         if(findings==null||findings.isEmpty())blocks.add(new Block(0,"No findings were recorded; this does not establish that the documents have no issues."));
