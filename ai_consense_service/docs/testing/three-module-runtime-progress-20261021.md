@@ -1,3 +1,19 @@
+<!-- unified-progress35:start -->
+**2026-10-21：SCT固定5档掉字诊断已实际终态；RED精确复现3处，单独移除Latin run的eastAsia hint后3处完整恢复，原12pt与水平起点保持。尚未做新15页视觉或完整27页复验，未采用产品／部署。**
+
+窗口70.069秒、5次串行LO转换、35输入pins保持、每档24GiB／0retry／自然Job0；只换eastAsia备用字体恢复1/3，删rightChars为0/3，改左对齐也恢复3/3但改变原排版。优先继续保留两端对齐的源绑定hint修复，不从小样文字恢复授最终版式通过。SL坐标94及已推源码、正式运行formal18、三模块业务缺口与全版本22,214技术页及DB／CAS／索引比赛包状态保持。统一Goal active，完整范围不变。
+<!-- unified-progress35:end -->
+
+## progress35：SCT三处掉字取得有效单变量反馈
+
+Root实际执行`.local/drafting-sct-glyph-feedback01/window01/run_originals02.py --plan-sha 54e8ab4663bbc4f90462bee4153235474d0552fbf2674add76d06957617c6e27`，session37123自然终态exit0。五档均3页、5次LO串行、35输入pins同、每档24GiB、0retry、各owned Job自然归零，记录内窗口70.068507秒。170秒等待＋最多10秒owned清理是逐档预算，900秒仅为五档native预算之和，不涵盖前后纯文件阶段的全局硬超时。窗口没有Java／模型／HTTP／SQL／服务操作或主树产品写。
+
+纯文件observer核对P490／P496／P685：RED三段全部复现actual05相同缺字首行、相同水平起点及未缩放12pt。移除32处Latin run的`rFonts/@hint=eastAsia`后，三段完整原文各出现一次、三个旧缺字版本均消失；字体12pt及水平起点不变，两端对齐保持。仅将同32处eastAsia字体改Times New Roman恢复1/3，删三处rightChars恢复0/3；改三处两端对齐为左对齐恢复3/3，但涉及排版变化，不据此采用产品策略。
+
+此结果支持优先准备源绑定Latin hint兼容修复；仍需核新15页视觉、保持空格／表格／页眉页脚与非目标内容、跑完整来源生成及新全文逐页复验。当前SCT27页候选仍有原3处掉字及两处body标题流问题；没有凭小样回填其最终通过状态。标题真实header方案并行只读准备，不能按文字相似清附录标题；新Java SL导出owned窗口和真实七版14页scope候选也只在私有准备／审查，均未被报告为实际Java消费或来源质量通过。
+
+实际转换receipt：`.local/drafting-sct-glyph-feedback01/window01/execution/receipt.json` SHA256 `c4c9e2f1a204de9e44f1d7ff7dd883c4f269031b36c9f3f3f71e4caf738e2107`。纯文件观察：`.local/drafting-sct-glyph-feedback01/actual-feedback-observation01.json` SHA256 `d0cf2e9a4a61a23031a116532a94ee5ca52ea3fde2043cf7bf0b0a464f432574`。当前无Root在飞窗口；运行formal18及受保护H2未启停。整体约80%继续只作工程估计，不是业务用例或全版本SL质量完成率。
+
 <!-- unified-progress34:start -->
 **2026-10-21：SL DPI／整数画布接缝实际94/94通过，2产品＋1测试已精确采用源码、未部署；SCT完整生成27页无空正文／旧短尾，但3处缺字与续页body标题位置仍FAIL。统一Goal active。**
 

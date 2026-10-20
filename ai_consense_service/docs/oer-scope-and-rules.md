@@ -1,3 +1,9 @@
+<!-- unified-progress35:start -->
+**2026-10-21：SCT固定5档掉字诊断已实际终态；RED精确复现3处，单独移除Latin run的eastAsia hint后3处完整恢复，原12pt与水平起点保持。尚未做新15页视觉或完整27页复验，未采用产品／部署。**
+
+窗口70.069秒、5次串行LO转换、35输入pins保持、每档24GiB／0retry／自然Job0；只换eastAsia备用字体恢复1/3，删rightChars为0/3，改左对齐也恢复3/3但改变原排版。优先继续保留两端对齐的源绑定hint修复，不从小样文字恢复授最终版式通过。SL坐标94及已推源码、正式运行formal18、三模块业务缺口与全版本22,214技术页及DB／CAS／索引比赛包状态保持；详细证据见[本轮实际进展](testing/three-module-runtime-progress-20261021.md)。统一Goal active，完整范围不变。
+<!-- unified-progress35:end -->
+
 <!-- unified-progress34:start -->
 **2026-10-21：SL DPI／整数画布接缝实际94/94通过，2产品＋1测试已精确采用源码、未部署；SCT完整生成27页无空正文／旧短尾，但3处缺字与续页body标题位置仍FAIL。统一Goal active。**
 
