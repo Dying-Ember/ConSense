@@ -1,3 +1,31 @@
+<!-- unified-progress34:start -->
+**2026-10-21：SL DPI／整数画布接缝实际94/94通过，2产品＋1测试已精确采用源码、未部署；SCT完整生成27页无空正文／旧短尾，但3处缺字与续页body标题位置仍FAIL。统一Goal active。**
+
+94为81旧＋13新唯一方法，0failure/error/skip，43.812秒、24GiB、单child／0retry、输入保持／自然Job0。真实保存字节覆盖7来源／14页，布局观测明确为authored数值控制，不授真实dual、来源质量、affine或canonical采用。SCT一次完整生成91.921秒，原26,784 pins保持；新27页全部raster并逐张独立目验，身份／连续页码保持，原生内容与465CS＋4既有删除、313spacing／22边界核同。SCT候选仍私有，最终版式未通过。
+
+运行服务仍formal18，本轮0新模型／0共享SQL／0服务启停。SL全部22,214技术页与完整DB／CAS／索引比赛包、Java SL消费／多版policy接线、Advisory实答、Vetting内容及最终Word／浏览器验收继续保留；证据和当前剩余项见[本轮实际进展](three-module-runtime-progress-20261021.md)。
+<!-- unified-progress34:end -->
+
+## progress34：实际坐标修复、SCT空段复验及剩余交付接缝
+
+本轮所有Root实际窗口已接终态，没有因观察超时重发。SL软件窗口session34141：一次child／一次unittest，600秒上限、24GiB；实际43.812秒，94唯一方法（81旧、13新）全部通过，0失败／错误／skip，全部候选／运行副本／依赖pins保持，自然Job0。没有再次运行原full8。Root在实际运行前发现并修正计划残留expectedTests=17；两旧未执行计划76f0…／73f7…原样归档，不能当执行失败或实际17项结果。
+
+新分支复用geometryEvidence、CAS和既有source-reference／native projection链，只接受完整原PDF的144dpi、crop0／rotation0／unit1原页证明。pixel→point0.5、逆2，物理内容extent与ceil整数canvas分别保留；layout与native glyph比较使用同一raster归一化。原point／raw／glyph不改，错误DPI／换版错页／PNG／raw及revision错配、非物理矩阵、旧schema＋canvas-fit降级继续拒绝；未选越界unknown保留，选择它仍不能通过。无实际bytes的初读保持unverified，保存receipt只证明字节和身份一致性，不自授Root执行或来源审查权威。
+
+真实十四页数值另经Root文件级核对：7原件／7 native capture页框、2 phase plan／receipt、14 page receipt及实际PNG的IHDR／CRC／pHYs与argv对应，退出fresh rehash保持。完整十四页仍只是选中代表页，阅读顺序、正式归属、reviewed_separator、真实同源dual和最终adoption未通过。Root软件接受票`.local/sl-dpi-ceil-bridge-candidate01/root-acceptance01.json` SHA `0e47b067a88e18403a428f1ddee5c36fe1dde05bf766315014f82e846608226d`；主树采用票`root-main-adoption01/receipt01.json` SHA `c8469cf39bace4b561902fd13f72d8e2938040a545bcf5a4ab1f1d85a3583741`。仅两产品文件和一新测试逐字节采用，不重写旧测试；运行OER冻结副本没有切换。
+
+SCT generation05从actual04冻结942来源继承，仅资源追加59个精确源path／hash／footer guard的表内末行纯空段间距；原254项、22边界、两项已覆盖去重、正文／字段／硬分页及其余pPr保持。Root单次完整三文件生成与一次SCT转换实际1方法通过，91.921秒、16GiB堆／24GiB Job、26,784 pins保持、自然Job0。NTT／SCC各ZIP项全同；SCT只有document.xml变化。完整XML经精确59spacing＋CL及一致生成ID映射核对，465实际CS＋4既有删除与所有旧action保持，两旧续文完整且不再孤立。
+
+首个文件观察器05把story action中随document.xml变化的generatedPartSha256也当作不变量，辅助检查失败；原脚本／失败票保留。后继06逐项核before／after真实ZIP部件SHA，再比较其他字段和完整XML，不重发生成或放宽源保护。接受范围限文件保全与空段修复，不能把旧失败改为原轮全绿。
+
+新PDF27页已一次pdftoppm原样raster，5.641秒、325 pins保持、24GiB／0retry／自然Job0。独立代理逐张看全部27原尺寸PNG；Root另看3联系表和6／10／12／15原单页。没有空正文、旧孤立短尾或新增非空内容压扁；27/27身份、合约号、控制号、日期和连续页码可见。最终版式仍FAIL两族：页10的each page o／write o、页15的Bills o仍缺3个字母；页6／12续段先于body中的SPECIAL CONDITIONS OF TENDER标题，标题纵向位置不统一。来源对照确认后者原件转换及actual04已有，不能因其既有而免除用户每页统一要求。原生Word尚未验收。
+
+SCT新文件观察票`.local/drafting-sct-cell-tail-padding-candidate01/actual-observation06.json` SHA `5b7d304b8be56e83388843b275d41422c2ce71cc1aa52bb07aea70797bab9c4a`；27页视觉票`.local/drafting-sct-cell-tail-padding-visual07/all27-fresh-individual-png-review03.json` SHA `dcb5d9f418dfa9605a990ec77900830cfc84ed6aac05a522d7789cbd75c25ef5`；Root有限核对票`root-finite-review07.json` SHA `eebf2e500174d2399610e0e462c7e6ca480af912cf83686031a16726e1d35e9a`，位于cell-tail-padding-candidate01。四产品native-frame／相关测试及此布局资源仍未采用主树；不把私有27页改善报告为产品已部署。
+
+全版本离线交付只读核查又确认三处接线缺口：现有OER运行policy仍固定单个SL来源，Java消费者的internal recipe／scope白名单尚不能据Python通过外推SL technical-unit消费，完整七版包仍缺DB／CAS／revision locator／索引／绝对路径映射闭包。沿现有ArtifactStore依赖记录、registry、frozen-artifacts分卷恢复和SQL18导出／独立恢复机制补齐，不新建平行真源或关闭scope门。私有清单`.local/sl-seven-offline-policy-review01/inventory.json`保7来源／22,214技术页、selected14与未执行／unknown，未实际打包或查SQL。历史同源186输入native02最终比较现为186 normal_returned_source_quality_unscored、runInProgressOrIncomplete=false、sourceQualityAccepted=false；这不是七版22,214页的解析或质量完成。
+
+本轮没有新真实Qwen回答、共享HTTP／SQL、服务启停或受保护H2操作。Advisory修复反馈65的源码已在先前提交，运行仍formal18，最近实答limits-only业务FAIL保持；Vetting43页几何目验不能替代内容／赛方格式／Word验收。继续SCT三缺字和标题真实页眉策略、SCC目录及Word-PDF定位、SL14来源关系／dual／Java消费／按版scope与全版本完整比赛包，统一Goal不缩减。
+
 <!-- unified-progress33:start -->
 **2026-10-21：SL统一179实际178pass／唯一Win1314环境skip，原完整8通过；11份Python源码／测试已精确采用主树。七真实版本native导入与冷校验7/7、十四原页raster14/14均完成，来源质量继续待验。Goal active、完整范围不变。**
 

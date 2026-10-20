@@ -6,6 +6,7 @@ adoption. Paths inside references are retained but never followed by this
 module; callers may supply actual evidence bytes by their declared SHA.
 """
 import copy
+import binascii
 from dataclasses import dataclass
 import hashlib
 import json
@@ -18,6 +19,8 @@ import zipfile
 
 
 SCHEMA = 'consense.source-review-reference.v2'
+DPI_CEIL_SCHEMA = 'consense.original-pdf-144dpi-ceil-raster-evidence.v1'
+DPI_CEIL_ARTIFACTS = ('phasePlan', 'phaseReceipt', 'pageReceipt', 'renderer', 'rendererBundle', 'rendererRecipe')
 LEGACY_SCHEMA = 'consense.source-review-reference.v1'
 LEGACY_ADAPTERS = {
     'gct1-complete-visible-page-source-review-20261009-v2': 'gct_single_review_image_v1',
@@ -278,6 +281,132 @@ def validate_source_reference(reference, *, evidence_bytes=None):
         raise SourceReferenceError('Malformed reference structure; explicit typed anchors/lists are required') from error
 
 
+def _dpi_ceil_geometry(reference, pages, actual, unknown):
+    """One optional retained recipe; integrity never grants source/affine review.
+
+    Only complete original crop0/rotation0/unit1 pages at actual 144 dpi are
+    supported. Embedded paths are compared as opaque recipe values, never read.
+    Other historical geometryEvidence shapes retain their existing behavior.
+    """
+    geometry = reference.get('geometryEvidence')
+    if not isinstance(geometry, dict) or geometry.get('schema') != DPI_CEIL_SCHEMA:
+        return None
+    _require(set(geometry) == {'schema', 'pages'} and reference['sourceMediaType'] == 'application/pdf',
+             'DPI/ceil evidence requires original PDF pages')
+    rows = _unique_ids(geometry.get('pages'), 'pageId', 'DPI/ceil pages')
+    _require(bool(rows) and set(rows) <= set(pages), 'DPI/ceil page identity is missing')
+    result = {}
+    for page_id, row in rows.items():
+        _require(set(row) == {'pageId', 'rendererPageId', 'versionId', 'sourceRevisionSha256', 'nativeFrame',
+                 'nativeFrameSha256', 'dpi', 'physicalContentExtentPixels', 'integerCanvasPixels', 'artifacts'},
+                 'Unsupported DPI/ceil evidence fields')
+        page = pages[page_id]; anchor, image = page['sourceAnchor'], page['sourceImage']
+        _require(anchor['kind'] == 'pdf_physical_page' and isinstance(image, dict), 'DPI/ceil original raster required')
+        _text(row['rendererPageId'], 'DPI/ceil rendererPageId')
+        _text(row['versionId'], 'DPI/ceil versionId'); _sha(row['sourceRevisionSha256'], 'DPI/ceil source revision')
+        frame = row['nativeFrame']
+        _require(isinstance(frame, dict) and row['nativeFrameSha256'] == hashlib.sha256(
+            json.dumps(frame, ensure_ascii=False, sort_keys=True, separators=(',', ':'), allow_nan=False).encode('utf-8')).hexdigest(),
+            'DPI/ceil native frame hash mismatch')
+        size = frame.get('renderedCropSizePoints72')
+        _require(isinstance(size, list) and len(size) == 2 and all(type(n) in (int, float) and math.isfinite(n) and n > 0 for n in size)
+                 and frame.get('cropBox') == [0, 0, *size] and frame.get('mediaBox') == [0, 0, *size]
+                 and type(frame.get('rotation')) is int and frame['rotation'] == 0
+                 and type(frame.get('userUnit')) in (int, float) and frame['userUnit'] == 1
+                 and frame.get('transformStatus') == 'derived_page_frame_mapping_not_raster_verified'
+                 and type(row['dpi']) is int and row['dpi'] == 144,
+                 'Unsupported DPI/ceil crop/rotation/unit/DPI')
+        extent = [n * 2 for n in size]; canvas = [image['width'], image['height']]
+        _require(isinstance(row['physicalContentExtentPixels'], list)
+                 and all(type(n) in (int, float) and math.isfinite(n) for n in row['physicalContentExtentPixels'])
+                 and isinstance(row['integerCanvasPixels'], list) and all(type(n) is int for n in row['integerCanvasPixels'])
+                 and row['physicalContentExtentPixels'] == extent and row['integerCanvasPixels'] == canvas
+                 and canvas == [math.ceil(n) for n in extent], 'DPI/ceil physical extent or integer canvas mismatch')
+        artifacts = row['artifacts']
+        _require(isinstance(artifacts, dict) and set(artifacts) == set(DPI_CEIL_ARTIFACTS), 'DPI/ceil retained recipe artifacts required')
+        retained = {}
+        for name in DPI_CEIL_ARTIFACTS:
+            descriptor = artifacts[name]
+            _require(isinstance(descriptor, dict) and set(descriptor) == {'schema', 'storage', 'sha256', 'byteCount', 'relativePath', 'identityScope'},
+                     'DPI/ceil CAS descriptor required')
+            digest = _sha(descriptor['sha256'], 'DPI/ceil ' + name)
+            _require(descriptor['schema'] == 'consense.artifact-descriptor.v1' and descriptor['storage'] == 'content_addressed_disk'
+                     and descriptor['relativePath'] == 'sha256/' + digest[:2] + '/' + digest + '.blob', 'DPI/ceil invalid CAS descriptor')
+            _integer(descriptor['byteCount'], 'DPI/ceil byteCount'); _text(descriptor['identityScope'], 'DPI/ceil identityScope')
+            raw = actual(digest, 'DPI/ceil ' + name)
+            if raw is not None:
+                _require(len(raw) == descriptor['byteCount'], 'DPI/ceil byte count mismatch')
+                retained[name] = raw
+        png = actual(image['sha256'], 'DPI/ceil original PNG')
+        complete = len(retained) == len(DPI_CEIL_ARTIFACTS) and png is not None and actual(reference['sourceSha256'], 'DPI/ceil original PDF') is not None
+        if complete:
+            plan, phase, receipt, bundle = [_strict_json(retained[name]) for name in ('phasePlan', 'phaseReceipt', 'pageReceipt', 'rendererBundle')]
+            matching = [p for p in plan.get('pages', []) if p.get('pageId') == row['rendererPageId']]
+            _require(plan.get('schema') == 'consense.sl-seven-real-sources.original-page-raster.v1' and len(matching) == 1,
+                     'DPI/ceil original page recipe missing')
+            planned = matching[0]
+            def pin_matches(pin, name):
+                return isinstance(pin, dict) and pin.get('sha256') == artifacts[name]['sha256'] and pin.get('bytes') == artifacts[name]['byteCount']
+            _require(pin_matches(phase.get('plan'), 'phasePlan') and pin_matches(plan.get('renderer'), 'renderer')
+                     and pin_matches(plan.get('runner'), 'rendererRecipe') and pin_matches(plan.get('rendererBundle'), 'rendererBundle'),
+                     'DPI/ceil renderer/recipe/phase pin mismatch')
+            _require(phase.get('status') == 'SEVEN_RASTERS_RETURNED_UNREVIEWED' and phase.get('phaseId') == plan.get('phaseId')
+                     and phase.get('allInputPinsPreserved') is True and phase.get('rootReleasePreserved') is True
+                     and phase.get('priorPhaseReceiptPreserved') is True and phase.get('cleanupConfirmedForAllStartedPages') is True
+                     and phase.get('unexecutedPages') == [] and phase.get('maximumConcurrency') == 1 and phase.get('retryMaximum') == 0
+                     and phase.get('rendererCalls') == len(plan['pages'])
+                     and phase.get('inputPinsBefore') == plan.get('inputPins') == phase.get('inputPinsAfter'),
+                     'DPI/ceil retained phase incomplete or pins changed')
+            _require([p for p in phase.get('pages', []) if p.get('pageId') == row['rendererPageId']] == [receipt]
+                     and receipt.get('status') == 'RASTER_RETURNED_UNREVIEWED' and receipt.get('exitCode') == 0
+                     and receipt.get('naturalJobZero') is True and receipt.get('cleanup', {}).get('allObservedOwnedProcessesExited') is True
+                     and receipt.get('cleanup', {}).get('errors') == [] and receipt.get('cleanup', {}).get('beforeClose') == {'active': 0, 'members': []},
+                     'DPI/ceil retained page incomplete or inconsistent')
+            _require(planned.get('versionId') == receipt.get('versionId') == row['versionId']
+                     and planned.get('sourceRevisionSha256') == row['sourceRevisionSha256']
+                     and planned.get('physicalPage') == receipt.get('physicalPage') == anchor['physicalPageNo']
+                     and planned.get('source') == receipt.get('source') and planned['source']['sha256'] == reference['sourceSha256']
+                     and planned.get('nativeCapture') == receipt.get('nativeCapture')
+                     and planned.get('nativeFrame') == frame and planned.get('cropPolicy') == 'actual_original_crop_box'
+                     and planned.get('declaredDpi') == 144
+                     and [planned.get('expectedWidthPixels'), planned.get('expectedHeightPixels')] == canvas
+                     and receipt.get('png', {}).get('sha256') == image['sha256'] and receipt['png']['bytes'] == len(png)
+                     and [receipt.get('widthPixels'), receipt.get('heightPixels')] == canvas,
+                     'DPI/ceil source/version/page/raster identity mismatch')
+            argv = [plan['renderer']['path'], '-f', str(anchor['physicalPageNo']), '-l', str(anchor['physicalPageNo']),
+                    '-singlefile', '-r', '144', '-cropbox', '-png', planned['source']['path'], planned['outputPrefix']]
+            _require(planned.get('argv') == receipt.get('argv') == argv and receipt['png']['path'] == planned['outputPrefix'] + '.png'
+                     and receipt.get('parent', {}).get('imagePath') == plan['renderer']['path'], 'DPI/ceil actual renderer argv mismatch')
+            _require(isinstance(bundle.get('files'), list) and bundle.get('count') == len(bundle['files'])
+                     and plan['renderer'] in bundle['files'] and all(pin in plan['inputPins'] for pin in bundle['files'])
+                     and all(plan[name] in plan['inputPins'] for name in ('runner', 'renderer', 'rendererBundle')),
+                     'DPI/ceil renderer bundle pins missing')
+            _require(png.startswith(b'\x89PNG\r\n\x1a\n') and png[12:16] == b'IHDR'
+                     and struct.unpack('>II', png[16:24]) == tuple(canvas), 'DPI/ceil actual PNG canvas mismatch')
+            offset, physical = 8, []
+            while offset < len(png):
+                _require(offset + 12 <= len(png), 'DPI/ceil truncated PNG chunk')
+                length = struct.unpack('>I', png[offset:offset + 4])[0]; end = offset + 12 + length
+                _require(end <= len(png), 'DPI/ceil truncated PNG chunk')
+                _require(binascii.crc32(png[offset + 4:end - 4]) == struct.unpack('>I', png[end - 4:end])[0],
+                         'DPI/ceil actual PNG chunk CRC mismatch')
+                if png[offset + 4:offset + 8] == b'pHYs':
+                    _require(length == 9, 'DPI/ceil invalid PNG pHYs')
+                    physical.append(struct.unpack('>IIB', png[offset + 8:offset + 17]))
+                offset = end
+            # pHYs is integer ppm corroboration; argv above is the DPI authority.
+            _require(physical == [(5669, 5669, 1)], 'DPI/ceil actual PNG pHYs mismatch')
+        else:
+            unknown('geometryEvidence.pages.' + page_id, 'Retained recipe/PNG bytes not all supplied; no affine or source acceptance')
+        result[page_id] = {'status': 'retained_recipe_bytes_bound_not_affine_or_source_acceptance' if complete else 'unverified_actual_bytes_missing',
+            'sourceSha256': reference['sourceSha256'], 'sourceRevisionSha256': row['sourceRevisionSha256'], 'versionId': row['versionId'],
+            'physicalPageNo': anchor['physicalPageNo'], 'nativeFrameSha256': row['nativeFrameSha256'],
+            'nativeCaptureSha256': planned['nativeCapture']['sha256'] if complete else None,
+            'rasterSha256': image['sha256'], 'pointToRasterScale': 2, 'physicalContentExtentPixels': extent,
+            'integerCanvasPixels': canvas}
+    return result
+
+
 def _validate_source_reference(reference, *, evidence_bytes):
     _require(isinstance(reference, dict) and reference.get('schema') == SCHEMA, 'Validation requires a v2 reference')
     source_sha = _sha(reference.get('sourceSha256'), 'sourceSha256')
@@ -481,6 +610,7 @@ def _validate_source_reference(reference, *, evidence_bytes):
         _require(relation['fromRegionId'] != relation['toRegionId'], 'Self-referential source relation')
     _validate_groups(reference, regions, pages, unsupported)
     _validate_native_tables(reference, source_sha, source_bytes, media, native_anchor_verification, docx_part_cache)
+    raster_geometry = _dpi_ceil_geometry(reference, pages, actual, unknown)
     known = {'schema','referenceVersion','actor','method','humanConfirmed','split','sourceSha256','sourcePath',
              'sourceMediaType','physicalPages','pages','regions','relations','tables','formFields','formFieldGroups',
              'remarksGroups','coverage','historicalExposure','purpose','unknowns','semanticQuality','clauseId',
@@ -489,7 +619,8 @@ def _validate_source_reference(reference, *, evidence_bytes):
     for field in sorted(set(reference)-known):
         unsupported.append({'path':field,'status':'preserved_not_interpreted','reason':'Outside the minimal declared-anchor/identity validation contract'})
     unknown('semanticQuality', 'Input semantic quality/human confirmation claims were preserved; this module performs no semantic acceptance')
-    return {'schema':'consense.source-reference-integrity-report.v1',
+    return {**({'dpiCeilRasterGeometry': raster_geometry} if raster_geometry is not None else {}),
+            'schema':'consense.source-reference-integrity-report.v1',
             'status':'core_integrity_validated','sourceSha256':source_sha,
             'pageCount':len(pages),'regionCount':len(regions),
             'actualByteVerification':verification,'unknowns':unknowns,

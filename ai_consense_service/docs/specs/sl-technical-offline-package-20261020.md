@@ -1,3 +1,13 @@
+<!-- unified-progress34:start -->
+**2026-10-21：SL DPI／整数画布接缝实际94/94通过，2产品＋1测试已精确采用源码、未部署；SCT完整生成27页无空正文／旧短尾，但3处缺字与续页body标题位置仍FAIL。统一Goal active。**
+
+94为81旧＋13新唯一方法，0failure/error/skip，43.812秒、24GiB、单child／0retry、输入保持／自然Job0。真实保存字节覆盖7来源／14页，布局观测明确为authored数值控制，不授真实dual、来源质量、affine或canonical采用。SCT一次完整生成91.921秒，原26,784 pins保持；新27页全部raster并逐张独立目验，身份／连续页码保持，原生内容与465CS＋4既有删除、313spacing／22边界核同。SCT候选仍私有，最终版式未通过。
+
+运行服务仍formal18，本轮0新模型／0共享SQL／0服务启停。SL全部22,214技术页与完整DB／CAS／索引比赛包、Java SL消费／多版policy接线、Advisory实答、Vetting内容及最终Word／浏览器验收继续保留；证据和当前剩余项见[本轮实际进展](../testing/three-module-runtime-progress-20261021.md)。
+<!-- unified-progress34:end -->
+
+当前补充指针：SQL18只代表当时恢复；其后formal18消息等新增写入须fresh保全。旧25返回／160未执行／1中断数字按原盘点日期保留；历史同源native02现已终态186正常返回但全部来源质量未评分，证据为`.local/oer-fixed-six-reparse-20261015/comparison-native-02-final-current-01/comparison-report.json`，不与七版22,214页混算。单policy、Java SL消费契约及可移植恢复接线仍未修；没有一条已验收的七版完整pack命令。
+
 # SL 全版本技术解析与数据库离线包现状
 
 日期：2026-10-20。状态：**只读盘点完成；全版本高质量解析、完整离线包和目标还原尚未通过。**

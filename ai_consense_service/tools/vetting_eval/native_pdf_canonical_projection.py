@@ -22,7 +22,8 @@ from native_pdf_observation import validate_native_pdf_bundle
 from native_pdf_table_projection import (project_page_assets, project_table_groups, table_region_ids,
                                         VERSION as TABLE_VERSION)
 from parser_capture import rebuild_independent_capture_batch, rebuild_file_capture
-from source_reference import SCHEMA as REFERENCE_SCHEMA, read_source_reference, validate_source_reference
+from source_reference import (SCHEMA as REFERENCE_SCHEMA, DPI_CEIL_SCHEMA, DPI_CEIL_ARTIFACTS,
+                              read_source_reference, validate_source_reference)
 from structured_parser_evidence import (assert_complete_dual, build_dual_parser_evidence,
                                        normalize_parser_run, project_bbox_to_original, read_artifact_record)
 from token_windows import paragraph_map, utf16_length
@@ -270,7 +271,21 @@ def _reference(manifest, native, pages, store):
     _fail(isinstance(images, list) and len({image['sha256'] for image in images}) == len(images), 'reference_page_images_required')
     for image in images: evidence[image['sha256']] = store.read_asset(image)
     _fail({page['sourceImage']['sha256'] for page in reference['pages']} <= set(evidence), 'actual_reference_raster_missing')
+    geometry = reference.get('geometryEvidence')
+    if isinstance(geometry, dict) and geometry.get('schema') == DPI_CEIL_SCHEMA:
+        for row in geometry['pages']:
+            for name in DPI_CEIL_ARTIFACTS:
+                descriptor = row['artifacts'][name]
+                evidence[descriptor['sha256']] = store.read_asset(descriptor)
     report = validate_source_reference(reference, evidence_bytes=evidence)
+    native_pages = {page['physicalPage']: page for page in native['observation']['pageObservations']}
+    for page_id, proof in report.get('dpiCeilRasterGeometry', {}).items():
+        page = native_pages.get(proof['physicalPageNo'])
+        _fail(page is not None and proof['status'] == 'retained_recipe_bytes_bound_not_affine_or_source_acceptance'
+              and proof['sourceSha256'] == native['source']['sourceSha256']
+              and proof['sourceRevisionSha256'] == native['source']['sourceRevisionSha256']
+              and proof['nativeCaptureSha256'] == native['rawObservation']['sha256']
+              and proof['nativeFrameSha256'] == _hash(page['frame']), 'dpi_ceil_actual_native_source_mismatch', pageId=page_id)
     return reference, report
 
 
@@ -280,7 +295,7 @@ def _box(value, code):
     return value
 
 
-def _native_region_geometry(ids, glyphs, page, region, reference_page):
+def _native_region_geometry(ids, glyphs, page, region, reference_page, *, raster_geometry=None):
     frame = page['frame']
     _fail(page['observationStatus'] == 'observed_native_operators_unreviewed',
           'partial_native_page_cannot_supply_whole_adopted_region')
@@ -292,6 +307,11 @@ def _native_region_geometry(ids, glyphs, page, region, reference_page):
     # the declared rendered-crop aspect ratio, never pixel-visible glyph extent.
     _fail(abs(image['width'] - image['height'] * width / height) <= 1.01,
           'reference_raster_native_crop_aspect_mismatch')
+    sx, sy = 1, 1
+    if raster_geometry is not None:
+        _dpi_ceil_frame(raster_geometry, frame, reference_page)
+        sx, sy = [extent / canvas for extent, canvas in zip(
+            raster_geometry['physicalContentExtentPixels'], raster_geometry['integerCanvasPixels'])]
     rx0, ry0, rx1, ry1 = region['bboxNormalized']
     for gid in ids:
         glyph = glyphs[gid][0]
@@ -303,21 +323,35 @@ def _native_region_geometry(ids, glyphs, page, region, reference_page):
               and all(type(v) in (int, float) and math.isfinite(v) for v in box)
               and box[2] >= 0 and box[3] >= 0, 'native_glyph_region_geometry_unknown', glyphId=gid)
         x, y, w, h = box
+        if raster_geometry is not None:
+            x, y, w, h = x * sx, y * sy, w * sx, h * sy
         _fail((rx0 <= x <= rx1 if w == 0 else min(rx1, x + w) > max(rx0, x))
               and (ry0 <= y <= ry1 if h == 0 else min(ry1, y + h) > max(ry0, y)),
               'native_glyph_source_region_disjoint', glyphId=gid)
 
 
-def _reference_raster_bridge(projected, transform, review, native_frame, reference_page):
+def _dpi_ceil_frame(proof, native_frame, reference_page):
+    image, anchor = reference_page['sourceImage'], reference_page['sourceAnchor']
+    _fail(isinstance(proof, dict) and proof.get('status') == 'retained_recipe_bytes_bound_not_affine_or_source_acceptance'
+          and proof.get('sourceSha256') == anchor['sourceSha256'] and proof.get('physicalPageNo') == anchor['physicalPageNo']
+          and proof.get('rasterSha256') == image['sha256'] and proof.get('nativeFrameSha256') == _hash(native_frame)
+          and proof.get('integerCanvasPixels') == [image['width'], image['height']]
+          and proof.get('physicalContentExtentPixels') == [n * 2 for n in native_frame['renderedCropSizePoints72']]
+          and proof.get('pointToRasterScale') == 2, 'dpi_ceil_verified_page_geometry_required')
+
+
+def _reference_raster_bridge(projected, transform, review, native_frame, reference_page, *, raster_geometry=None):
     """Keep source point geometry intact; admit only its reviewed full-raster inverse."""
     target, image, anchor = projected['targetFrame'], reference_page['sourceImage'], reference_page['sourceAnchor']
     bridge = review.get('referenceRasterBridge')
-    if target['coordinateUnit'] == 'pixel' and target['width'] == image['width'] and target['height'] == image['height']:
+    if raster_geometry is None and target['coordinateUnit'] == 'pixel' and target['width'] == image['width'] and target['height'] == image['height']:
         _fail(bridge is None, 'unexpected_reference_raster_bridge')
         return None
     _fail(target['coordinateUnit'] == 'pt' and isinstance(bridge, dict), 'explicit_reference_raster_bridge_required')
     _fields(bridge, {'schema', 'nativeFrameSha256', 'sourceFrame', 'referenceFrame', 'matrix'}, 'illegal_reference_raster_bridge')
-    _fail(bridge.get('schema') == 'consense.original-page-reference-raster-affine.v1'
+    schema = ('consense.original-page-reference-raster-144dpi-ceil-affine.v1' if raster_geometry is not None
+              else 'consense.original-page-reference-raster-affine.v1')
+    _fail(bridge.get('schema') == schema
           and isinstance(native_frame, dict) and bridge.get('nativeFrameSha256') == _hash(native_frame)
           and native_frame.get('transformStatus') == 'derived_page_frame_mapping_not_raster_verified'
           and native_frame.get('renderedCropSizePoints72') == [target['width'], target['height']],
@@ -334,8 +368,12 @@ def _reference_raster_bridge(projected, transform, review, native_frame, referen
           and original_input.get('sha256') == image['sha256'], 'reference_raster_bridge_original_input_mismatch')
     # This seam intentionally rejects general crop/rotation/translation bridges.
     # A different raster requires a separately reviewed mapping, not this inverse.
-    forward = [target['width'] / image['width'], 0, 0, 0, target['height'] / image['height'], 0]
-    inverse = [image['width'] / target['width'], 0, 0, 0, image['height'] / target['height'], 0]
+    if raster_geometry is not None:
+        _dpi_ceil_frame(raster_geometry, native_frame, reference_page)
+        forward, inverse = [0.5, 0, 0, 0, 0.5, 0], [2, 0, 0, 0, 2, 0]
+    else:
+        forward = [target['width'] / image['width'], 0, 0, 0, target['height'] / image['height'], 0]
+        inverse = [image['width'] / target['width'], 0, 0, 0, image['height'] / target['height'], 0]
     matrix = bridge.get('matrix')
     _fail(isinstance(matrix, list) and len(matrix) == 6
           and all(type(v) in (int, float) and math.isfinite(v) for v in matrix)
@@ -344,14 +382,14 @@ def _reference_raster_bridge(projected, transform, review, native_frame, referen
     xs, ys = [p[0] for p in polygon], [p[1] for p in polygon]
     box = [min(xs), min(ys), max(xs), max(ys)]
     normal = [box[0] / image['width'], box[1] / image['height'], box[2] / image['width'], box[3] / image['height']]
-    _fail(all(abs(a-b) <= 1e-12 for a,b in zip(normal, projected['xyxyNormalized'])),
+    _fail(raster_geometry is not None or all(abs(a-b) <= 1e-12 for a,b in zip(normal, projected['xyxyNormalized'])),
           'reference_raster_bridge_normalized_geometry_changed')
     return {'status': 'source_reviewed_declared_affine_bridge_not_exact_glyph', 'pointGeometrySha256': _hash(projected),
             'targetFrame': copy.deepcopy(expected), 'xyxyReferenceRaster': box, 'polygonReferenceRaster': polygon,
             'xyxyNormalized': normal, 'review': copy.deepcopy(bridge)}
 
 
-def _layout(row, region, reference_page, dual, *, allow_table=False, native_frame=None):
+def _layout(row, region, reference_page, dual, *, allow_table=False, native_frame=None, raster_geometry=None):
     declaration = row.get('layout')
     _fields(declaration, {'selectedRunId', 'candidateBlockIds', 'rasterMappingReview'}, 'illegal_native_pdf_layout_binding')
     runs = {run['runId']: run for run in dual['runs']}
@@ -390,8 +428,9 @@ def _layout(row, region, reference_page, dual, *, allow_table=False, native_fram
                   'native_pdf_table_branch_not_supported')
             projected = project_bbox_to_original(run, page, block['bbox'])
             _fail(projected.get('status') == 'verified', 'visual_original_geometry_unknown')
-            reference_geometry = _reference_raster_bridge(projected, transform, raster_review, native_frame, reference_page)
-            a, b = region['bboxNormalized'], projected['xyxyNormalized']
+            reference_geometry = _reference_raster_bridge(projected, transform, raster_review, native_frame, reference_page,
+                                                           raster_geometry=raster_geometry)
+            a, b = region['bboxNormalized'], (reference_geometry if raster_geometry is not None else projected)['xyxyNormalized']
             _fail(min(a[2], b[2]) > max(a[0], b[0]) and min(a[3], b[3]) > max(a[1], b[1]), 'visual_source_region_disjoint')
             result.append({'runId': run_id, 'blockId': bid, 'physicalPageNo': row['physicalPageNo'],
                  'selectedLayout': run_id == declaration['selectedRunId'], 'wholeBlockSha256': _hash(block),
@@ -436,7 +475,7 @@ def _native_text(row, glyphs):
     return ''.join(text), spans
 
 
-def _regions(manifest, native, dual, reference, required):
+def _regions(manifest, native, dual, reference, required, *, raster_geometry=None):
     review = manifest.get('regionReview')
     _fields(review, {'schema', 'status', 'nativeBundleSha256', 'referenceSha256', 'regions', 'unadoptedGlyphs'}, 'illegal_native_pdf_region_review')
     _fail(review.get('schema') == REVIEW_SCHEMA and review.get('status') == 'source_reviewed_declared'
@@ -470,9 +509,11 @@ def _regions(manifest, native, dual, reference, required):
         _fail(row.get('nativeFrameSha256') == _hash(page['frame']), 'native_review_frame_mismatch')
         _fail(set(_ids(row.get('reviewedAttributes'), 'source_review_attributes_required')) == {'membership', 'readingOrder', 'text', 'geometry'},
               'source_review_attributes_required')
-        _native_region_geometry(ids, glyphs, page, region, ref_pages[anchor['pageId']])
+        geometry = (raster_geometry or {}).get(anchor['pageId'])
+        _native_region_geometry(ids, glyphs, page, region, ref_pages[anchor['pageId']], raster_geometry=geometry)
         text, spans = _native_text(row, glyphs)
-        layout = _layout(row, region, ref_pages[anchor['pageId']], dual, allow_table=rid in table_regions, native_frame=page['frame'])
+        layout = _layout(row, region, ref_pages[anchor['pageId']], dual, allow_table=rid in table_regions,
+                         native_frame=page['frame'], raster_geometry=geometry)
         used.update(ids)
         result[rid] = {'blockId': 'native-pdf-region:' + _hash({'bundle': native['bundleSha256'], 'regionId': rid}),
              'referenceRegionId': rid, 'physicalPageNo': physical, 'text': text, 'startOffset': 0, 'endOffset': utf16_length(text),
@@ -569,7 +610,8 @@ def _assemble(native, dual, manifest, descriptors, store, *, replay_identity=Non
     _fail(manifest.get('dualBundleSha256') == dual['bundleSha256'], 'stale_native_pdf_visual_adoption')
     dual_validation = _dual(dual, native, pages, store)
     reference, reference_validation = _reference(manifest, native, pages, store)
-    parts = _regions(manifest, native, dual, reference, pages)
+    parts = _regions(manifest, native, dual, reference, pages,
+                     raster_geometry=reference_validation.get('dpiCeilRasterGeometry'))
     table_groups = project_table_groups(manifest, parts, reference, native)
     assets = project_page_assets(manifest, reference, store)
     units, relations = _units(manifest, parts, reference, table_groups)
