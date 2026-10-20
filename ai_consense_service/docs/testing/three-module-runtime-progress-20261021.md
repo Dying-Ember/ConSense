@@ -1,3 +1,27 @@
+<!-- unified-progress36:start -->
+**2026-10-21：SCT候选69项回归全通过，完整三文件生成及SCT转换完成，三处掉字按来源位置及新27页逐张复核恢复；6／12页标题版式仍待修。SL Java最小后继实际116/116、0失败／错误／跳过，原111pass／1failure／4skip保留。候选未部署，整体工程估计仍约80%，Goal active。**
+<!-- unified-progress36:end -->
+
+## progress36：SCT完整源生成、三处掉字与SL Java实际消费回归
+
+SCT Latin hint候选的实际RED为1个指定行为断言失败；GREEN69为原61加8个唯一方法，69pass／0failure／0error／0skip，43.968秒。新增检查保原空格、tab、run／样式、人工采用／清空／删除后跳过、CJK与复杂控制拒绝，以及来源／节点身份门。接受票为`.local/drafting-sct-latin-hint-candidate01/root-unit-acceptance05.json`，未据软件通过授最终文件质量。
+
+Root接回同一full-generation07的实际终态，没有重复生成。单JVM16GiB、Job24GiB、一次完整三文件生成／一次SCT转换，原生执行含清理93.406秒，28,721输入pins保持、自然Job0；1个完整流程JUnit通过。receipt为`full-generation07/candidate/execution/owned-receipt.json`，SHA256 `c16e4ab0f4a43261228ada9f33ad3b82773356bcd6d9dbd9af561375c44c4332`，位于上述hint候选目录。生成后的文件检查确认NTT／SCC全部ZIP项逐字节保持，SCT只有document.xml变化；精确还原32个hint、3对新CL及一致的生成数字ID后，全XML相同。469绑定账（465实际CS及4既有删除）、313spacing与22边界保持。
+
+原保存文件观察器03的两个原生门已通过，PDF门因P685全文完整匹配2次而要求1次失败。该FAIL票完整保留。后继来源复核确认P642与P685是两个独立来源段，原path／paraId／CS不同，分别在14／15页；P642原文另有两个尾空格，两处均须保留。490／496各在page10对应CS／CL下完整出现一次，685在page15对应CS／CL下完整一次，全部3目标恢复；原文空格与tab及12pt保持。后继票`.local/drafting-sct-bound-target-observation08/source-bound-target-observation05.json` SHA256 `7d6fd97350eee1cc6b7b6a85195f6722745f9411c015d6341c4e59a936193660`。源点诊断范围不冒称原生矩形，P642末行extent仍unknown；其间四个纯文件辅助断言失败及原脚本也保留。没有删掉合法重复段或重发生成。
+
+新实际27页PDF已单次pdftoppm保存全部PNG与3联系表，4.094秒、24GiB／0retry、336pins保持、自然Job0；raster票`.local/drafting-sct-latin-hint-raster08/candidate/native-raster/execution/owned-receipt.json` SHA256 `36049e1fa6a02c3729486d078b39a0896698d3340d796c1a351e3802e575101a`。Root实际打开6／10／12／15四张原尺寸页和三联系表，page10／15目标字符完整、所看字距可读；6／12页续文仍先于正文中的正式标题。Root有限票`root-finite-review08.json` SHA256 `335083ef9b0e417473738d23e15495214be22ca82aa960eebe057dc17f800c20`在hint候选目录。独立代理随后实际逐张打开全部27张原尺寸PNG，三处目标完整，27页身份／页码／控制号／日期均可见，未见空正文／孤立短尾／明显重叠裁切；6／12标题位置仍FAIL。视觉票`.local/drafting-sct-bound-target-observation08/all27-fresh-individual-visual07.json` SHA256 `192696ee8de0f364646190f2af0c4448b272f8a61ca6e16323070e78830c9109`；视觉记账首次错套EXITED而拒绝实际COMPLETE_27_RASTERS状态的辅助失败也保留，没有重发渲染。保存110dpi词间紧但可分辨，不授精确ink gap或原生Word。最终标题版式仍未验收，候选未采用主树或部署。
+
+SL Java消费候选8产品从当前主树单独冻结，保留最新Advisory代码，不拿SCT旧冻结树整体覆盖。Root实际执行`.local/sl-java-green116-window01/run_green116.py green`一次，session77398已终态：116唯一方法为111pass／1failure／0error／4skip，38.921秒，16GiB堆／24GiB Job，3,014pins保持、自然Job0。原5个实际保存来源正向RED已全部转为pass，新增12结构方法全部pass。唯一失败为`NativePdfCanonicalContractTest.schemaProducerStorageAndVersionMustAgree`，旧要求`CANONICAL_NATIVE_PDF_CHUNK_INVALID`却返回`CANONICAL_NATIVE_PDF_TABLE_INVALID`；4个OerModelMaterial真实回放测试缺显式`CONSENSE_OER_REPLAY_ROOT`而skip，原有family replay根已提供。保留全部116及原票，先准备错误类别兼容与漏配fixture根的最小后继，不删断言或缩分母。该轮不授真实项目numeric注册、完整表格模型消费或全版本包通过。
+
+SL七版代表页review04现有完整331个separator候选实际像素上下文记录：52同线marker-body间隙、73双端非空白换行、206左端原空白glyph身份unknown但行界有支持；0所见矛盾、0未看separator。依据331个原尺度裁图、37张1:1联系表加7单独crop，保16,274pair总账和15,943非插入pair未整体验收。汇总`.local/sl-real-seven-source-review04/review04-summary.json` SHA256 `f1b24a5686bc0a02913e4dd5f3fc60d1876122772f6e6ef7f353c89ec571f8c6`；156原始pins保持。Batch1行尾技术编号的连字符及版间材料差异保持，不能统一把换行转空格。精确glyph-pixel／affine、item4证书控制范围、Root采用及22,214技术页高质量成果和完整DB／CAS／索引离线包继续OPEN。
+
+SL Java后继02随后实际执行并接回session93296：116/116、0failure／0error／0skip，39.906秒，含清理42.453秒，3,035pins保持、自然Job0。唯一产品增量是把非法／缺失nativeTableMetadataVersion的拒绝仍归既有CHUNK码，table结构／指针／采用门继续归TABLE；另补三个既有回放文件及ROOT／OUTPUT目录，全部15类116测试逐字节保持。Root独立解析15份JUnit、重核116唯一方法集合及原5实际正向＋新增12＋旧99，接受票`.local/sl-java-green116-window02/root-acceptance01.json` SHA256 `453be9ade6b7dbd7ad5a271fab68e4da1b4d53e6005072268961d64b6a69de8f`。原111／1／4现场及所有旧断言完整保留；8产品候选未主树采用／部署，真实numeric注册、完整表格模型消费和比赛包仍OPEN，不重复无新变化的116。
+
+SL条件作用范围的后继只读调查另发现一个尚未修的实际接缝：candidate02的unit/nodes.sourceLines与saved-native-locators.nativeOnlyLines复用相同lineId却未必指向相同glyph/text；例如original原页3373的node4 line21为item4正文，locator同line21却为Drain Plug，真正item4在locator line23。首因在私有extract_saved_native.py按glyph top／3px分组、build_source_candidates.py按bottom／2px重分组却重用ordinal lineId，排除footer空白再偏移；未在当前主产品发现这些私有字段消费者，不能称运行时OER丢段。原raw／glyph端点未损，331按原glyph坐标的实际像素观察仍保留；辅助lineId上下文join不能据此授条件范围。按source／revision／page／完整glyph集合修同链接缝，不用文字相似或平行行真源替代。此调查尚无Root采用或产品修复。
+
+本轮0新模型、0共享SQL、0服务启停，受保护H2不动。Vetting／Advisory业务与报告／最终Word／浏览器门保持待验；SCC既有92/92正确普通复制件结果未因本轮授正式缓存／产品完成。整体约80%仍为同一工程估计，统一Goal保持active，后继继续执行，不以任一绿色子集替代完整范围。
+
 <!-- unified-progress35:start -->
 **2026-10-21：SCT固定5档掉字诊断已实际终态；RED精确复现3处，单独移除Latin run的eastAsia hint后3处完整恢复，原12pt与水平起点保持。尚未做新15页视觉或完整27页复验，未采用产品／部署。**
 
