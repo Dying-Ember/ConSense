@@ -39,6 +39,19 @@ class VettingResponsesTransportTest {
         assertFalse(JsonUtils.write(in).contains("\"wire\""));assertFalse(JsonUtils.write(new VettingInputBudget.Observation()).contains("providerEstimate"));assertNull(in.getWire());assertFalse(new ConsenseProperties().getVetting().getResponses().isEnabled());
         assertEquals("observed_tokens",VettingInputBudget.check(in,VettingInputBudgetTest::fixtureObservation).getStatus());
     }
+    @Test void successfulResponseMetadataRetainsOnlySafePublicDeclarationsAndIntegralUsage() {
+        Http h=new Http();ObjectNode envelope=(ObjectNode)JsonUtils.parse(completed("[]"));
+        envelope.put("id",SECRET);envelope.put("unknown",SECRET);
+        envelope.withArray("output").addObject().put("type","reasoning").put("content",SECRET);
+        ObjectNode usage=envelope.putObject("usage");usage.put("input_tokens",132);usage.put("output_tokens",9);usage.put("total_tokens",141);usage.put("unknown",SECRET);usage.putObject("output_tokens_details").put("reasoning_tokens",SECRET);
+        h.generation=JsonUtils.write(envelope);VettingResponsesTransport t=new VettingResponsesTransport(props(),h);VettingResponsesTransport.Operation op=t.capture("minimax-cn",null);
+        VettingInputBudget.Input in=op.input("Synthetic instruction unchanged.","Native cells ['', 'Room | East 😀 中文']",schema(),VettingCorpus.hash("synthetic source"));
+        List<JsonNode> metadata=new ArrayList<>();assertTrue(op.complete(in,VettingInputBudget.check(in,op::observe),"Synthetic instruction unchanged.","Native cells ['', 'Room | East 😀 中文']",schema(),Map.class,new ArrayList<>(),null,metadata::add).isEmpty());
+        assertEquals(1,metadata.size());JsonNode m=metadata.get(0);assertEquals("provider_response_reported",m.path("scope").asText());assertEquals("MiniMax-M3",m.path("model").asText());assertEquals("completed",m.path("status").asText());assertFalse(m.path("usageUnavailable").asBoolean());
+        assertEquals(JsonUtils.parse("{\"prompt_tokens\":132,\"completion_tokens\":9,\"total_tokens\":141}"),m.get("usage"));assertFalse(JsonUtils.write(m).contains(SECRET));assertEquals(6,m.size());
+        usage.put("input_tokens",-1);usage.put("output_tokens",1.5);usage.put("total_tokens",SECRET);h.generation=JsonUtils.write(envelope);metadata.clear();
+        assertTrue(op.complete(in,VettingInputBudget.check(in,op::observe),"Synthetic instruction unchanged.","Native cells ['', 'Room | East 😀 中文']",schema(),Map.class,new ArrayList<>(),null,metadata::add).isEmpty());assertTrue(metadata.get(0).path("usageUnavailable").asBoolean());assertTrue(metadata.get(0).path("usage").isEmpty());assertFalse(JsonUtils.write(metadata).contains(SECRET));
+    }
     @Test void savedGatewayReplayDoesNotDuplicateSchemaOrChangeNativeText() {
         Http h=new Http();VettingResponsesTransport t=new VettingResponsesTransport(props(),h);VettingInputBudget.Input in=input(t);
         VettingInputBudget.Input rebound=t.inputFromGateway(in.getMessages().get(0).getContent(),in.getMessages().get(1).getContent(),schema(),in.getSourceSnapshotSha256());assertEquals(JsonUtils.write(in),JsonUtils.write(rebound));assertTrue(h.endpoints.isEmpty());assertThrows(Exception.class,()->t.inputFromGateway("unenveloped",in.getMessages().get(1).getContent(),schema(),in.getSourceSnapshotSha256()));

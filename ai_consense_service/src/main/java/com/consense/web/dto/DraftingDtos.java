@@ -139,6 +139,13 @@ public final class DraftingDtos {
         }
     }
 
+    /** Explicit consent to synchronize an already adopted identity with project metadata. */
+    @Data @NoArgsConstructor
+    public static class ProjectIdentityConfirmation {
+        private Map<String,String> expectedProjectIdentity;
+        private Map<String,String> expectedAdoptedIdentity;
+    }
+
     /** Read-before-adopt identity supplied by the current view; never a new project value. */
     @Data
     @NoArgsConstructor
@@ -326,10 +333,21 @@ public final class DraftingDtos {
         private String rawResponse;
         private String status;
         private String errorCode;
+        @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+        private String errorMessage;
         private ExtractionContextVO context;
+        @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+        private String providerFailureKind;
+        @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+        private String providerResponse;
+        @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+        private com.fasterxml.jackson.databind.JsonNode providerResponseMetadata;
         public ExtractionAttemptVO(int attemptIndex,String kind,String systemPrompt,String userPrompt,String rawResponse,String status,String errorCode) {
             this.attemptIndex=attemptIndex;this.kind=kind;this.systemPrompt=systemPrompt;this.userPrompt=userPrompt;
             this.rawResponse=rawResponse;this.status=status;this.errorCode=errorCode;
+        }
+        public ExtractionAttemptVO(int attemptIndex,String kind,String systemPrompt,String userPrompt,String rawResponse,String status,String errorCode,ExtractionContextVO context) {
+            this(attemptIndex,kind,systemPrompt,userPrompt,rawResponse,status,errorCode);this.context=context;
         }
     }
 

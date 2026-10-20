@@ -55,7 +55,7 @@ public class VettingReportWriter {
             writeBusinessWord(document,project,findings,job,checklist);
             XWPFParagraph appendix=document.createParagraph();appendix.setPageBreak(true);
             appendix.setStyle("Heading1");appendix.createRun().setText("APPENDIX II - Review scope and evidence records");
-            wordTable(document,VettingReportPresentation.evidenceIndex(findings,job==null?null:job.getCoverage()));
+            wordTable(document,VettingReportPresentation.readerEvidenceIndex(findings,job==null?null:job.getCoverage()));
             for (Block block : outline) {
                 XWPFParagraph paragraph = document.createParagraph();
                 if (block.pageBreak) paragraph.setPageBreak(true);
@@ -64,11 +64,14 @@ public class VettingReportWriter {
                 paragraph.setSpacingBefore(block.kind > 0 && block.kind < 3 ? block.compact ? 80 : 180 : 0);
                 paragraph.setSpacingBetween(block.compact ? 1.05 : 1.15);
                 paragraph.getCTP().getPPr().addNewWidowControl();
-                if (block.kind > 0 || block.keepWithNextOpening) paragraph.getCTP().getPPr().addNewKeepNext();
-                if (block.quote) paragraph.setIndentationLeft(240);
+                if (block.kind > 0 || block.keepWithNextOpening) {
+                    paragraph.getCTP().getPPr().addNewKeepNext();
+                    paragraph.getCTP().getPPr().addNewKeepLines();
+                }
+                if (block.quote) {paragraph.setIndentationLeft(240);paragraph.getCTP().getPPr().addNewKeepLines();}
                 XWPFRun run = paragraph.createRun();
                 setWordFont(run);
-                run.setFontSize(block.kind == 3 ? 22 : block.kind == 2 ? 14 : block.kind == 1 ? 11 : 10);
+                run.setFontSize(block.kind == 3 ? 22 : block.kind == 2 ? 14 : 11);
                 run.setBold(block.kind > 0);
                 run.setItalic(block.quote);
                 run.setColor(block.kind > 0 ? "000000" : "222222");
@@ -124,9 +127,10 @@ public class VettingReportWriter {
             try (PdfCursor cursor = new PdfCursor(document, font)) {
                 writeBusinessPdf(cursor,project,findings,job,checklist);
                 cursor.newPage();cursor.block(new Block(2,"APPENDIX II - Review scope and evidence records"),null);
-                cursor.table(VettingReportPresentation.evidenceIndex(findings,job==null?null:job.getCoverage()));
+                cursor.table(VettingReportPresentation.readerEvidenceIndex(findings,job==null?null:job.getCoverage()));
                 for (int at = 0; at < outline.size(); at++)
-                    cursor.block(outline.get(at), at + 1 < outline.size() ? outline.get(at + 1) : null);
+                    cursor.block(outline.get(at), at + 1 < outline.size() ? outline.get(at + 1) : null,
+                            at + 2 < outline.size() ? outline.get(at + 2) : null);
             }
             for (int i = 0; i < document.getNumberOfPages(); i++) {
                 try (PDPageContentStream stream = new PDPageContentStream(document, document.getPage(i), PDPageContentStream.AppendMode.APPEND, true)) {
@@ -151,8 +155,8 @@ public class VettingReportWriter {
     }
 
     private List<VettingReportPresentation.Table> businessTables(List<FindingVO> findings,VettingJobVO job,List<VettingChecklistCatalog.Result> checklist) {
-        List<VettingReportPresentation.Table> tables=new ArrayList<>(VettingReportPresentation.comments(findings,job==null?null:job.getCoverage()));
-        tables.addAll(VettingReportPresentation.checklist(checklist,automaticChecklist(job)));return tables;
+        List<VettingReportPresentation.Table> tables=new ArrayList<>(VettingReportPresentation.readerComments(findings,job==null?null:job.getCoverage()));
+        tables.addAll(VettingReportPresentation.readerChecklist(checklist,automaticChecklist(job)));return tables;
     }
     private List<com.consense.web.dto.VettingChecklistDtos.AutomaticGroupVO> automaticChecklist(VettingJobVO job) {
         return job==null?Collections.emptyList():VettingChecklistAutomaticResults.aggregate(job.getStatus(),
@@ -166,13 +170,13 @@ public class VettingReportWriter {
         CTTblBorders border=metadata.getCTTbl().getTblPr().addNewTblBorders();
         for(CTBorder b:Arrays.asList(border.addNewTop(),border.addNewBottom(),border.addNewLeft(),border.addNewRight(),border.addNewInsideH(),border.addNewInsideV()))b.setVal(STBorder.NONE);
         wordLine(document,"Comments below are review suggestions. Source quotations and the review scope are retained in Appendix II. Project team remarks are recorded independently.","Normal",false);
-        for(VettingReportPresentation.Table table:VettingReportPresentation.comments(findings,job==null?null:job.getCoverage()))wordTable(document,table);
+        for(VettingReportPresentation.Table table:VettingReportPresentation.readerComments(findings,job==null?null:job.getCoverage()))wordTable(document,table);
         wordLine(document,"The project team may record whether an amendment is required for incorporation into a tender addendum in the remarks column.","Normal",false);
         wordLine(document,"APPENDIX I","Heading1",true);
         wordLine(document,"Checklist for the Contract Team for Counterchecking Various PSS Clauses of PRE Worksection and Bills No. 1 and 2","Heading2",false);
         wordLine(document,"Automatic suggestions are separate from saved human counterchecks. A saved human decision may be fulfilled, not fulfilled with a reason, or not applicable. Unchecked items remain unknown; no findings or a handled comment does not confirm fulfilment.","Normal",false);
         wordLine(document,"Pricing-document counterchecks are retained from the sample for structure only and do not expand the competition review scope; automated review excludes pricing documents and works-related project-specific specifications.","Normal",false);
-        for(VettingReportPresentation.Table table:VettingReportPresentation.checklist(checklist,automaticChecklist(job)))wordTable(document,table);
+        for(VettingReportPresentation.Table table:VettingReportPresentation.readerChecklist(checklist,automaticChecklist(job)))wordTable(document,table);
     }
     private void wordLine(XWPFDocument document,String text,String style,boolean pageBreak) {
         XWPFParagraph p=document.createParagraph();p.setStyle(style);p.setPageBreak(pageBreak);
@@ -182,22 +186,36 @@ public class VettingReportWriter {
         if("Title".equals(style)){p.setAlignment(ParagraphAlignment.CENTER);r.setUnderline(UnderlinePatterns.SINGLE);}
     }
     private void wordTable(XWPFDocument document,VettingReportPresentation.Table model) {
-        wordLine(document,model.getTitle(),"Heading2",false);
-        XWPFTable table=document.createTable(1,model.getHeadings().size());table.setWidth("100%");
+        if(!model.commentsHeader())wordLine(document,model.getTitle(),"Heading2",false);
+        XWPFTable table=document.createTable(model.commentsHeader()?2:1,model.getHeadings().size());table.setWidth("100%");
         table.getCTTbl().getTblPr().addNewTblLayout().setType(STTblLayoutType.FIXED);
         int[] widths=model.getWidths();
-        setWordCells(table.getRow(0),model.getHeadings(),widths,true);
-        table.getRow(0).setRepeatHeader(true);
+        if(model.commentsHeader()) {
+            XWPFTableRow first=table.getRow(0),second=table.getRow(1);
+            setWordCells(first,Arrays.asList(model.sectionNumber(),model.sectionLabel(),"","",model.getHeadings().get(4)),widths,true);
+            setWordCells(second,Arrays.asList("",model.getHeadings().get(1),model.getHeadings().get(2),model.getHeadings().get(3),""),widths,true);
+            first.getCell(1).getCTTc().getTcPr().addNewGridSpan().setVal(BigInteger.valueOf(3));
+            first.getCell(1).setWidth(String.valueOf(9986*(widths[1]+widths[2]+widths[3])/100));
+            first.getCell(0).getCTTc().getTcPr().addNewVMerge().setVal(STMerge.RESTART);
+            first.getCell(4).getCTTc().getTcPr().addNewVMerge().setVal(STMerge.RESTART);
+            second.getCell(0).getCTTc().getTcPr().addNewVMerge().setVal(STMerge.CONTINUE);
+            second.getCell(4).getCTTc().getTcPr().addNewVMerge().setVal(STMerge.CONTINUE);
+            first.removeCell(3);first.removeCell(2);first.setRepeatHeader(true);second.setRepeatHeader(true);
+            // Repeated vertical merges need explicit minimum row heights in paginated Word renderers.
+            for(XWPFTableRow header:Arrays.asList(first,second)){header.setHeight(480);header.setHeightRule(TableRowHeightRule.AT_LEAST);}
+        } else {setWordCells(table.getRow(0),model.getHeadings(),widths,true);table.getRow(0).setRepeatHeader(true);}
         for(List<String> values:model.getRows())setWordCells(table.createRow(),values,widths,false);
     }
     private void setWordCells(XWPFTableRow row,List<String> values,int[] widths,boolean header) {
-        row.getCtRow().addNewTrPr();
+        row.getCtRow().addNewTrPr();row.setCantSplitRow(true);
+        // POI seeds a new row from the merged first row's physical cell count.
+        while(row.getTableCells().size()<values.size())row.addNewTableCell();
         for(int i=0;i<values.size();i++) {
             XWPFTableCell cell=row.getCell(i);cell.setWidth(String.valueOf(9986*widths[i]/100));
             cell.setVerticalAlignment(XWPFTableCell.XWPFVertAlign.TOP);
             XWPFParagraph p=cell.getParagraphs().get(0);p.setSpacingAfter(40);p.setSpacingBefore(40);p.setSpacingBetween(1.1);
             if(header)p.getCTP().addNewPPr().addNewKeepNext();
-            XWPFRun r=p.createRun();setWordFont(r);r.setFontSize(12);r.setBold(header);
+            XWPFRun r=p.createRun();setWordFont(r);r.setFontSize(11);r.setBold(header);
             String[] lines=values.get(i).split("\n",-1);for(int n=0;n<lines.length;n++){if(n>0)r.addBreak();r.setText(lines[n]);}
         }
     }
@@ -207,151 +225,140 @@ public class VettingReportWriter {
         cursor.metadata("Contract No.",available(project.getContractNo(),"en"));
         cursor.metadata("Contract Manager","Not provided");cursor.metadata("Surveyor","Not provided");
         cursor.block(new Block(0,"Comments are review suggestions. Project team remarks are recorded independently; review scope and source evidence are retained in Appendix II."),null);
-        for(VettingReportPresentation.Table table:VettingReportPresentation.comments(findings,job==null?null:job.getCoverage()))cursor.table(table);
+        for(VettingReportPresentation.Table table:VettingReportPresentation.readerComments(findings,job==null?null:job.getCoverage()))cursor.table(table);
         cursor.block(new Block(0,"The project team may record whether an amendment is required for incorporation into a tender addendum in the remarks column."),null);
         cursor.newPage();cursor.block(new Block(2,"APPENDIX I"),null);
         cursor.block(new Block(1,"Checklist for the Contract Team for Counterchecking Various PSS Clauses of PRE Worksection and Bills No. 1 and 2"),null);
         cursor.block(new Block(0,"Automatic suggestions are separate from saved human counterchecks. A saved human decision may be fulfilled, not fulfilled with a reason, or not applicable. Unchecked items remain unknown; no findings or a handled comment does not confirm fulfilment."),null);
         cursor.block(new Block(0,"Pricing-document counterchecks are retained from the sample for structure only and do not expand the competition review scope; automated review excludes pricing documents and works-related project-specific specifications."),null);
-        for(VettingReportPresentation.Table table:VettingReportPresentation.checklist(checklist,automaticChecklist(job)))cursor.table(table);
+        for(VettingReportPresentation.Table table:VettingReportPresentation.readerChecklist(checklist,automaticChecklist(job)))cursor.table(table);
     }
 
-    private List<Block> outline(Project project, List<FindingVO> findings, VettingJobVO job, String lang) {
-        List<Block> blocks = new ArrayList<>();
-        List<FindingVO> safeFindings = findings == null ? Collections.emptyList() : findings;
-        blocks.add(new Block(3, tr(lang, "招标文件审查报告", "招標文件審查報告", "Tender Document Vetting Report")));
-        blocks.add(new Block(0, projectName(project, lang)));
-        blocks.add(new Block(0, tr(lang, "合约编号", "合約編號", "Contract number") + ": " + available(project.getContractNo(), lang)));
-        blocks.add(new Block(0, tr(lang, "项目编号", "項目編號", "Project ID") + ": " + nvl(project.getId())));
-        blocks.add(new Block(0, tr(lang, "任务编号", "任務編號", "Run ID") + ": " + (job == null ? available(null, lang) : nvl(job.getId()))));
-        if(job!=null&&job.getReportSnapshotId()!=null)blocks.add(new Block(0,"Report snapshot: "+job.getReportSnapshotId()));
-        blocks.add(new Block(0, tr(lang, "模型", "模型", "Model") + ": " + (job == null || job.getResult() == null ? available(null, lang) : available(job.getResult().getModel(), lang))));
-        blocks.add(new Block(0, tr(lang, "任务完成时间", "任務完成時間", "Run completed") + ": "
-                + (job == null || job.getFinishedAt() == null ? available(null, lang) : DATE.format(job.getFinishedAt()))));
-        blocks.add(new Block(0, tr(lang, "记录的问题数量", "記錄的問題數量", "Findings recorded") + ": " + safeFindings.size()));
-        blocks.add(new Block(0, tr(lang,
-                "本报告按源文件和条款组织，记录发现、建议、人工状态及对照原文。审查依据为任务运行时的源文件快照；处理过的片段不代表不存在问题。",
-                "本報告按源文件和條款組織，記錄發現、建議、人工狀態及對照原文。審查依據為任務執行時的源文件快照；處理過的片段不代表不存在問題。",
-                "This report groups findings by source document and clause, with comments, recommendations, review status and source quotations. It reflects the source snapshot used by the task. A processed segment is not assurance that it contains no issues.")));
-        blocks.add(new Block(0, tr(lang,
-                "证据已定位仅表示引文能在所用源文件快照中找到，不代表发现的内容或结论已经确认；问题仍须由项目团队复核。",
-                "證據已定位僅表示引文能在所用源文件快照中找到，不代表發現的內容或結論已經確認；問題仍須由項目團隊覆核。",
-                "Evidence location means quotations were located in the source snapshot; it does not confirm a finding's meaning or conclusion. Findings require project team review.")));
-
-        blocks.add(new Block(2, tr(lang, "文档覆盖情况", "文件覆蓋情況", "Document coverage")));
-        CoverageVO coverage = job == null ? null : job.getCoverage();
-        if (coverage == null) {
-            blocks.add(new Block(0, tr(lang, "没有可核验的任务覆盖记录。", "沒有可核驗的任務覆蓋記錄。", "No verifiable task coverage record is available.")));
-        } else {
-            blocks.add(new Block(0, tr(lang, "已处理文档", "已處理文件", "Documents processed") + ": " + coverage.getReviewedDocuments() + " / " + coverage.getTotalDocuments()));
-            for (DocumentCoverageVO doc : safe(coverage.getDocuments())) {
-                blocks.add(compact(new Block(1, available(doc.getFileName(), lang) + "  [" + nvl(doc.getFileKey()) + "]")));
-                blocks.add(compact(new Block(0, tr(lang, "解析状态", "解析狀態", "Parse status") + ": " + nvl(doc.getParseStatus()) + "    "
-                        + tr(lang, "已处理片段", "已處理片段", "Segments processed") + ": " + doc.getReviewedSegments() + " / " + doc.getTotalSegments() + "    "
-                        + tr(lang, "已处理字符", "已處理字元", "Characters processed") + ": " + doc.getReviewedChars() + " / " + doc.getTextChars())));
+    private List<Block> outline(Project project,List<FindingVO> findings,VettingJobVO job,String lang) {
+        List<Block> blocks=new ArrayList<>();CoverageVO coverage=job==null?null:job.getCoverage();
+        blocks.add(new Block(2,tr(lang,"支持审查意见的原文摘录","支持審查意見的原文摘錄","Supporting source quotations")));
+        blocks.add(new Block(0,tr(lang,"编号意见均为待复核的审查建议。已有来源条款归属保留；原文位置和已定位引文本身不确认正式条款归属或法律结论，候选意见是否等价尚未确认。","編號意見均為待覆核的審查建議。已有來源條款歸屬保留；原文位置和已定位引文本身不確認正式條款歸屬或法律結論，候選意見是否等價尚未確認。","The numbered comments are review suggestions. Existing recorded source clauses are retained. Recorded source positions and located quotations do not confirm formal clause ownership or the legal conclusion. Candidate equivalence remains unconfirmed.")));
+        if(findings==null||findings.isEmpty())blocks.add(new Block(0,"No findings were recorded; this does not establish that the documents have no issues."));
+        Map<String,DocumentFindings> byFile=new LinkedHashMap<>();
+        for(FindingVO finding:safe(findings))if(finding!=null){ReportSource source=reportSource(finding,coverage);byFile.computeIfAbsent(source.identity,ignored->new DocumentFindings(source)).findings.add(finding);}
+        for(DocumentFindings group:byFile.values()) {
+            blocks.add(new Block(2,tr(lang,"文件","文件","Document")+" "+fileLabel(group.source,lang)));
+            for(FindingVO finding:group.findings) {
+            Block heading=compact(new Block(1,nvl(finding.getCode())+"  "+tr(lang,"原文摘录","原文摘錄","Source quotations")));
+            heading.keepWithNextOpening=true;blocks.add(heading);
+            if(safe(finding.getEvidence()).isEmpty())blocks.add(new Block(0,"No located source evidence is recorded. Source and formal clause attribution require review."));
+            for(FindingEvidence evidence:safe(finding.getEvidence()))if(evidence!=null)readerEvidence(blocks,evidence,lang);
             }
         }
-
-        blocks.add(new Block(2, tr(lang,"语义审查来源范围","語義審查來源範圍","Semantic source review scope")));
-        if(coverage==null||safe(coverage.getSemanticTopics()).isEmpty())blocks.add(new Block(0,tr(lang,"没有来源包覆盖账本，审查范围未知。","沒有來源包覆蓋帳本，審查範圍未知。","Source packet coverage ledger unavailable; review scope unknown.")));
-        else for(SemanticTopicVO topic:safe(coverage.getSemanticTopics())) {
-            if(topic==null)continue;
-            String aggregate=JsonUtils.isBlankText(topic.getAggregateReviewStatus())?"scope_unknown_legacy":topic.getAggregateReviewStatus();
-            blocks.add(compact(new Block(1,tr(lang,"主题","主題","Topic")+" "+topic.getTopicIndex()+": "+nvl(topic.getTopic()))));
-            blocks.add(compact(new Block(0,tr(lang,"来源范围状态","來源範圍狀態","Source scope status")+": "+aggregate+"    "+tr(lang,"全局调用状态（仅调用及解析）","全局呼叫狀態（僅呼叫及解析）","Global call status (call/decode only)")+": "+nvl(JsonUtils.isBlankText(topic.getGlobalCallStatus())?topic.getStatus():topic.getGlobalCallStatus()))));
-            blocks.add(compact(new Block(0,"Check state (observed scope): "+topic.getCheckState()+"; overall completeness: "+coverage.getReviewCompleteness())));
-            blocks.add(compact(new Block(0,tr(lang,"待处理来源请求","待處理來源請求","Pending source requests")+": "+topic.getPendingSourceRequestCount()+" / "+topic.getSourceRequestCount()+"    "+tr(lang,"额外来源包","額外來源包","Extra source packets")+": "+topic.getExtraPacketCount()+"    "+tr(lang,"失败包","失敗包","Failed packets")+": "+topic.getFailedPacketCount()+"    "+tr(lang,"未提交包","未提交包","Packets not submitted")+": "+topic.getNotSubmittedPacketCount())));
-            for(SemanticPacketVO packet:safe(topic.getPacketAudits()))if(packet!=null){
-                blocks.add(compact(new Block(0,tr(lang,"来源包","來源包","Source packet")+" "+packet.getPacketIndex()+": "+nvl(packet.getStatus())+"; check state: "+packet.getCheckState()+"    "+tr(lang,"输入预算","輸入預算","Input budget")+": "+nvl(packet.getInputBudgetStatus())+(JsonUtils.isBlankText(packet.getFailureKind())?"":"    "+tr(lang,"失败类型","失敗類型","Failure kind")+": "+packet.getFailureKind()))));
-                for(com.fasterxml.jackson.databind.JsonNode reference:safe(packet.getFixedBaselineEvidence()))fixedReferenceBlocks(blocks,reference);
-                for(VerifiedAssessmentVO assessment:safe(packet.getVerifiedAssessments())){
-                    blocks.add(compact(new Block(0,"Assessment (observed scope): "+assessment.getAssessment()+"; "+assessment.getTitle()+"; "+assessment.getComment())));
-                    for(FindingEvidence evidence:safe(assessment.getEvidence())){
-                        blocks.add(compact(new Block(0,"Assessment source: "+evidence.getDocumentId()+"; revision: "+evidence.getSourceHash()+"; "+evidence.getAnchor())));
-                        Block quote=new Block(0,nvl(evidence.getQuote()));quote.quote=true;blocks.add(quote);
-                    }
+        boolean assessmentHeading=false;
+        if(coverage!=null)for(SemanticTopicVO topic:safe(coverage.getSemanticTopics()))if(topic!=null)for(SemanticPacketVO packet:safe(topic.getPacketAudits()))if(packet!=null){
+            for(VerifiedAssessmentVO assessment:safe(packet.getVerifiedAssessments()))if(assessment!=null){
+                if(!assessmentHeading){blocks.add(new Block(2,tr(lang,"其他已记录的来源核对","其他已記錄的來源核對","Additional recorded source checks")));assessmentHeading=true;}
+                FindingVO context=new FindingVO();context.setEvidence(assessment.getEvidence());
+                blocks.add(compact(new Block(1,readerCheckState(assessment.getAssessment()))));
+                blocks.add(new Block(0,"Original model assessment; "+VettingReportPresentation.readerClauseQualification(context)+". "+VettingReportPresentation.readerNarrative(nvl(assessment.getTitle())+"\n"+nvl(assessment.getComment()),context)));
+                for(FindingEvidence evidence:safe(assessment.getEvidence()))if(evidence!=null)readerEvidence(blocks,evidence,lang);
+            }
+            for(com.fasterxml.jackson.databind.JsonNode reference:safe(packet.getFixedBaselineEvidence()))if(reference!=null)readerReference(blocks,reference);
+        }
+        blocks.add(new Block(2,tr(lang,"审查限制及未审范围","審查限制及未審範圍","Review limitations and unreviewed scope")));
+        if(coverage==null)blocks.add(new Block(0,"No verifiable review coverage is available. Completeness and unreviewed scope remain unknown."));
+        else {
+            for(VettingReportPresentation.SectionSummary summary:VettingReportPresentation.sectionSummaries(findings,coverage))
+                blocks.add(new Block(0,available(summary.getFileName(),lang)+": "+VettingReportPresentation.readerSummary(summary)));
+            blocks.add(new Block(0,"complete".equals(coverage.getReviewCompleteness())?"The saved review scope is marked complete. Completeness of the original and substantive correctness remain unconfirmed.":"The saved source review is incomplete or its completeness is unconfirmed."));
+            Map<String,List<String>> states=new LinkedHashMap<>();
+            for(SemanticTopicVO topic:safe(coverage.getSemanticTopics()))if(topic!=null){
+                String scope="Recorded source check "+topic.getTopicIndex()+": "+readerScopeSubject(topic.getTopic());
+                states.computeIfAbsent(readerCheckState(topic.getCheckState()),ignored->new ArrayList<>()).add(scope);
+                if(topic.getPendingSourceRequestCount()>0||topic.getBudgetDroppedGroups()>0||topic.getPartialContextGroups()>0||topic.getUnresolvedSegments()>0||topic.getMissingLocatedReferenceTargets()>0||topic.getFailedPacketCount()>0||topic.getNotSubmittedPacketCount()>0)
+                    blocks.add(new Block(0,scope+". Source support is incomplete: pending source requests "+topic.getPendingSourceRequestCount()+"; source groups omitted "+topic.getBudgetDroppedGroups()+"; groups with partial context "+topic.getPartialContextGroups()+"; unresolved excerpts "+topic.getUnresolvedSegments()+"; unlocated reference targets "+topic.getMissingLocatedReferenceTargets()+"; reviews failed or not submitted "+(topic.getFailedPacketCount()+topic.getNotSubmittedPacketCount())+"."));
+                for(SemanticSourceRequestVO request:safe(topic.getSourceRequests()))if(request!=null){
+                    if(!safe(request.getMissingChunkIds()).isEmpty())blocks.add(new Block(0,scope+". Required source excerpts missing from a recorded request: "+request.getMissingChunkIds().size()+". Complete source support remains unconfirmed."));
+                    if(!JsonUtils.isBlankText(request.getUnknownReason()))blocks.add(new Block(0,scope+". Recorded source limitation: "+request.getUnknownReason()));
                 }
             }
-        }
-        blocks.add(new Block(0,tr(lang,"来源范围状态记录已观察请求的运输、调用及解析；模型的 consistent 或空数组不确认合同无问题，未知限定及遗漏仍须人工核对。","來源範圍狀態記錄已觀察請求的運輸、呼叫及解析；模型的 consistent 或空陣列不確認合同無問題，未知限定及遺漏仍須人工核對。","Source scope status records transport, calls and decoding of observed requests. A model's consistent declaration or empty array does not confirm the contract has no issues; unknown qualifiers and omitted requests still require human review.")));
-
-        Map<String, DocumentFindings> byFile = new LinkedHashMap<>();
-        for (FindingVO finding : safeFindings) {
-            ReportSource source = reportSource(finding, coverage);
-            byFile.computeIfAbsent(source.identity, ignored -> new DocumentFindings(source)).findings.add(finding);
-        }
-        boolean first = true;
-        for (DocumentFindings group : byFile.values()) {
-            Block header = new Block(2, tr(lang, "文件", "文件", "Document") + " " + fileLabel(group.source, lang));
-            header.pageBreak = first; first = false;
-            blocks.add(header);
-            for (FindingVO finding : group.findings) {
-                blocks.add(new Block(1, nvl(finding.getCode()) + "  " + available(finding.getRefs(), lang)));
-                safe(finding.getEvidence()).stream().filter(e->!JsonUtils.isBlankText(e.getPacketId())).map(e->e.getPacketId()+" / "+nvl(e.getPacketSourceSnapshotSha256())).distinct().forEach(identity->blocks.add(compact(new Block(0,tr(lang,"发现的来源包快照","發現的來源包快照","Finding source packet snapshot")+": "+identity))));
-                blocks.add(new Block(0, pick(finding.getTitle(), lang)));
-                blocks.add(new Block(0, tr(lang, "分类", "分類", "Type") + ": " + nvl(finding.getIssueTypeCode())+" / "+String.join(", ", safe(finding.getTypes()))
-                        + "    " + tr(lang, "人工状态", "人工狀態", "Review status") + ": " + status(finding.getStatus(), lang)
-                        + "    " + tr(lang, "证据定位", "證據定位", "Evidence location") + ": " + verification(finding.getVerification(), lang)));
-                blocks.add(new Block(0, tr(lang, "范围", "範圍", "Scope") + ": " + scope(finding.getScope(), lang)
-                        + "    " + tr(lang, "严重程度", "嚴重程度", "Severity") + ": " + severity(finding.getSeverity(), lang)
-                        + "    " + tr(lang, "检查来源", "檢查來源", "Check source") + ": " + checkSource(finding.getSource(), lang)));
-                detail(blocks, tr(lang, "条款位置", "條款位置", "Clause location"), finding.getLocation());
-                detail(blocks, tr(lang, "评语", "評語", "Comment"), pick(finding.getBody(), lang));
-                detail(blocks, tr(lang, "理由与影响", "理由與影響", "Reason and impact"), pick(finding.getImpact(), lang));
-                detail(blocks, tr(lang, "对照要求", "對照要求", "Expected basis"), finding.getExpected());
-                detail(blocks, tr(lang, "建议", "建議", "Recommendation"), pick(finding.getSuggestion(), lang));
-                BusinessDetailsVO business=finding.getBusinessDetails();
-                if(business!=null) {
-                    detail(blocks,"Sub-dimension",business.getSubDimension());detail(blocks,"Fact basis",business.getFactBasis());
-                    detail(blocks,"Facts pending confirmation",String.join("; ",safe(business.getPendingFacts())));detail(blocks,"Suggested action",business.getSuggestedAction());
-                    detail(blocks,"Checklist connection",VettingReportPresentation.checklistLinks(business.getChecklistItemIds()));
-                }
-                blocks.add(new Block(1, tr(lang, "项目团队复核", "項目團隊覆核", "Project team review")));
-                detail(blocks, tr(lang, "项目团队回复", "項目團隊回覆", "Remarks by project team"),
-                        JsonUtils.isBlankText(finding.getReviewRemarks()) ? tr(lang, "未记录", "未記錄", "Not recorded") : finding.getReviewRemarks());
-                detail(blocks, tr(lang, "实际处理说明", "實際處理說明", "Action taken"),
-                        JsonUtils.isBlankText(finding.getActionTaken()) ? tr(lang, "未记录", "未記錄", "Not recorded") : finding.getActionTaken());
-                detail(blocks, tr(lang, "是否需纳入招标补遗", "是否需納入招標補遺", "Include in tender addendum"),
-                        finding.getAddendumRequired() == null ? tr(lang, "待决定", "待決定", "Undecided")
-                                : finding.getAddendumRequired() ? tr(lang, "需要", "需要", "Required") : tr(lang, "不需要", "不需要", "Not required"));
-                if (finding.getReviewUpdatedAt() != null)
-                    detail(blocks, tr(lang, "复核记录保存时间", "覆核記錄儲存時間", "Review record saved at"), finding.getReviewUpdatedAt().toString());
-                if (safe(finding.getEvidence()).isEmpty()) {
-                    blocks.add(new Block(0, tr(lang, "未提供可定位的原文证据，需要人工复核。", "未提供可定位的原文證據，需要人工覆核。", "No located source evidence is provided. Human review is required.")));
-                }
-                for (FindingEvidence evidence : safe(finding.getEvidence())) {
-                    String position = nvl(evidence.getPageNo());
-                    if (!nvl(evidence.getAnchor()).isEmpty()) position += (position.isEmpty() ? "" : " / ") + evidence.getAnchor();
-                    Block label = new Block(0, tr(lang, "证据", "證據", "Evidence") + " [" + nvl(evidence.getSide()) + "] "
-                            + available(evidence.getFileName(), lang) + "  " + available(position, lang) + "  "
-                            + (evidence.isLocated() ? tr(lang, "已定位原文", "已定位原文", "Located in source") : tr(lang, "未定位原文", "未定位原文", "Not located in source")));
-                    label.keepWithNextOpening = true; blocks.add(label);
-                    Block quote = new Block(0, nvl(evidence.getQuote())); quote.quote = true; blocks.add(quote);
-                    if(evidence.getFixedBaselineEvidence()!=null)fixedReferenceBlocks(blocks,evidence.getFixedBaselineEvidence());
-                }
+            if(states.isEmpty())blocks.add(new Block(0,"No substantive source-check record is available. Review scope remains unknown."));
+            for(Map.Entry<String,List<String>> state:states.entrySet()) {
+                blocks.add(compact(new Block(1,state.getKey())));
+                for(String scope:state.getValue())blocks.add(new Block(0,"- "+scope+"."));
             }
+            blocks.add(new Block(0,"These states cover only the recorded source excerpts. Any unconfirmed applicability, incomplete qualifying conditions, omitted requests and unreviewed source portions still require confirmation."));
+            LinkedHashSet<String> limitations=new LinkedHashSet<>();
+            for(String value:safe(coverage.getWarnings()))limitations.add(readerWarning(value,lang));
+            for(DocumentCoverageVO doc:safe(coverage.getDocuments()))for(String value:safe(doc.getWarnings()))limitations.add(available(doc.getFileName(),lang)+": "+readerWarning(value,lang));
+            for(String value:limitations)blocks.add(new Block(0,value));
+            blocks.add(new Block(0,"Only the available reviewed excerpts support these comments. An empty model response or a completed request does not establish a substantive countercheck or confirm that the documents have no issues."));
         }
-        if (safeFindings.isEmpty()) blocks.add(new Block(0, tr(lang, "本次任务没有记录审查发现。请结合覆盖情况和材料限制解读结果。", "本次任務沒有記錄審查發現。請結合覆蓋情況和材料限制解讀結果。", "No findings were recorded by this task. Interpret this result together with the coverage and material limitations.")));
-        blocks.add(new Block(2, tr(lang, "材料缺口与未审范围", "材料缺口與未審範圍", "Material gaps and unreviewed scope")));
-        boolean hasWarning = false;
-        if (coverage != null) {
-            for (String warning : safe(coverage.getWarnings())) { blocks.add(compact(new Block(0, warning(warning, lang)))); hasWarning = true; }
-            for (DocumentCoverageVO doc : safe(coverage.getDocuments())) {
-                for (String warning : safe(doc.getWarnings())) { blocks.add(compact(new Block(0, nvl(doc.getFileName()) + ": " + warning(warning, lang)))); hasWarning = true; }
-                if (doc.getReviewedSegments() < doc.getTotalSegments() || doc.getReviewedChars() < doc.getTextChars() || doc.getTextChars() == 0) {
-                    blocks.add(compact(new Block(0, nvl(doc.getFileName()) + ": " + tr(lang, "文档未全部处理或没有可用正文，请核对覆盖记录。", "文件未全部處理或沒有可用正文，請核對覆蓋記錄。", "The document was not fully processed or has no usable text. Check its coverage record."))));
-                    hasWarning = true;
-                }
-            }
-        }
-        if (!hasWarning) blocks.add(new Block(0, tr(lang, "任务没有记录额外材料缺口；这不构成对未提供文件的完整性确认。", "任務沒有記錄額外材料缺口；這不構成對未提供文件的完整性確認。", "No additional material gaps were recorded. This is not confirmation that documents absent from the source set are complete.")));
         return blocks;
     }
-
-    private static void fixedReferenceBlocks(List<Block> blocks,com.fasterxml.jackson.databind.JsonNode reference){
-        blocks.add(compact(new Block(0,"Fixed development reference: "+reference.path("parentId").asText()+"; version: "+reference.path("baselineVersion").asText()+"; manifest: "+reference.path("manifestSha256").asText())));
-        blocks.add(compact(new Block(0,"Original source: "+reference.path("originalSourceSha256").asText()+"; page: "+reference.path("pageNo").asText()+"; family: "+reference.path("sourceFamily").asText()+"; project applicability: "+reference.path("projectApplicability").asText("unconfirmed")+"; qualifiers: "+reference.path("qualifiersComplete").asText("unknown"))));
-        com.fasterxml.jackson.databind.JsonNode group=reference.get("sourceUnit");if(group!=null)blocks.add(compact(new Block(0,"Observed source group: "+group.path("unitId").asText()+"; status: "+group.path("status").asText("unknown")+"; required members: "+group.path("requiredMemberIds")+"; missing members: "+group.path("missingMemberIds")+"; unknown: "+group.path("unknown"))));
+    private void readerEvidence(List<Block> blocks,FindingEvidence evidence,String lang) {
+        String page=JsonUtils.isBlankText(evidence.getPageNo())?"":("; recorded page: "+evidence.getPageNo());
+        Block label=compact(new Block(0,available(evidence.getFileName(),lang)+" — "+VettingReportPresentation.readerEvidenceLocation(evidence)+page+"; "+verification(evidence.isLocated()?"verified":"unverified",lang)));
+        label.keepWithNextOpening=true;blocks.add(label);
+        Block quote=new Block(0,JsonUtils.isBlankText(evidence.getQuote())?"Verbatim source quotation is unavailable; source review is required.":evidence.getQuote());quote.quote=true;blocks.add(quote);
+        if(evidence.getFixedBaselineEvidence()!=null)readerReference(blocks,evidence.getFixedBaselineEvidence());
+    }
+    private void readerReference(List<Block> blocks,com.fasterxml.jackson.databind.JsonNode reference) {
+        blocks.add(compact(new Block(0,"Reference applicability: "+reference.path("projectApplicability").asText("unconfirmed")+"; completeness of applicable conditions: "+reference.path("qualifiersComplete").asText("unknown"))));
+        if(reference.path("sourceUnit").path("missingMemberIds").size()>0)blocks.add(new Block(0,"Required parts of the reference source are missing; complete source support and applicability remain unconfirmed."));
+    }
+    private String readerCheckState(String state) {
+        if("issue".equals(state))return "Candidate issues recorded in reviewed excerpts";
+        if("insufficient_evidence".equals(state)||"insufficient_context".equals(state))return "Source evidence or context is insufficient";
+        if("checked_pass".equals(state)||"consistent".equals(state))return "No issue reported for reviewed excerpts; the full source is not cleared";
+        if("not_applicable".equals(state))return "Non-applicability recorded for reviewed excerpts; project applicability requires confirmation";
+        return "Substantive source review incomplete or unconfirmed";
+    }
+    private String readerScopeSubject(String raw) {
+        String[][] known={
+                {"payment interim certificates minimum amount general conditions deleted not used reference","Interim payment certificates, minimum amounts and deleted/unused General Conditions references"},
+                {"quality control site staff QCM AQCC SQCC number minimum appointment full time","Quality control staff (QCM/AQCC/SQCC): minimum numbers, appointments and full-time requirements"},
+                {"definitions Building Services Inspector Contract Manager Representative Site Staff","Definitions of the Building Services Inspector, Contract Manager, Representative and Site Staff"},
+                {"specification library edition date general specification civil engineering off site order precedence","Specification editions/dates, civil engineering/off-site specifications and order of precedence"},
+                {"subcontracts building services nominated specialist provisional prime cost sum installation","Building services, nominated/specialist subcontracts, provisional/prime-cost sums and installation"},
+                {"tender submission electronic hardcopy copies original duplicates envelopes technical priced documents reference addendum drawings DVD HOMES notice","Tender submission: electronic/paper copies, originals/duplicates, envelopes, technical/priced documents, references, addenda, drawing references, DVD/HOMES and notices"},
+                {"modular integrated construction transport plan submission days advance frequency quarterly","Modular integrated construction transport plans: advance submission periods and frequency"},
+                {"abbreviation schedule short forms different expansions meanings definitions ambiguity","Abbreviations, conflicting expansions and defined meanings"},
+                {"form of tender articles agreement contract number title amount execution signature liquidated damages payment completion period sectional completion","Form of Tender and Articles of Agreement: contract identity/title, amounts, execution/signatures, liquidated damages, payment and completion/sectional-completion periods"},
+                {"cross reference clause section appendix not used missing applicability conditions","Clause/section/appendix cross-references, unused/missing provisions and applicability conditions"},
+                {"works scope Site boundary possession access phasing sections responsibility design workmanship defect indemnity liability insurance risk allocation","Works/site scope: boundaries, possession/access, phases/sections, responsibilities, design/workmanship/defects, indemnity/liability, insurance and risk allocation"},
+                {"programme commencement completion contract duration two envelope tender evaluation","Programme, commencement/completion, contract duration and two-envelope tender evaluation"},
+                {"design submission review approval allowance first revised submission days minimum time periods","First/revised design submissions: review/approval allowances and minimum periods"},
+                {"site personnel employment full time solely contract attendance exceptions safety staff","Site personnel: full-time dedicated employment, attendance exceptions and safety staff"},
+                {"design stages temporary works scope submission overlapping works different deadlines","Design stages, temporary-works scope, overlapping submissions and different deadlines"},
+                {"inclusive range numbered clauses definitions adopted amended not used provisions reference precision","Inclusive numbered-clause ranges, definitions, adoption/amendments, unused provisions and reference precision"},
+                {"project added amended wording British English terminology grammar spelling ambiguity guidance notes optional clauses unfilled project fields","Project additions/amendments: British English terminology, grammar/spelling, ambiguity, guidance notes, optional clauses and unfilled project fields"}
+        };
+        for(String[] subject:known)if(subject[0].equals(raw))return subject[1];
+        return JsonUtils.isBlankText(raw)?"Recorded subject unavailable":raw;
+    }
+    private String readerWarning(String raw,String lang) {
+        String value=warning(raw,lang);
+        String[][] known={
+                {"规则与语义仅处理已采用的 canonical 来源观察；未采用区域、整份原件完整性、编辑状态及采用关系保持声明的未知。字符分母仅为已采用观察的 UTF16 范围并集，不代表原件全文覆盖。",
+                 "规则与语义仅处理已采用的来源观察；未采用区域、整份原件完整性、编辑状态及采用关系仍按记录保持未知。字符统计仅采用已采用观察的字符范围并集，不代表原件全文覆盖。",
+                 "規則與語義僅處理已採用的來源觀察；未採用區域、整份原件完整性、編輯狀態及採用關係仍按記錄保持未知。字元統計僅採用已採用觀察的字元範圍聯集，不代表原件全文覆蓋。",
+                 "Rules and semantic review process only adopted source observations. Unadopted regions, completeness of the entire original, editing status and adoption relationships retain their recorded unknowns. Character counts use only the union of character ranges in adopted observations and do not establish full coverage of the original."},
+                {"片段与字符统计以已采用 canonical 观察为分母；未采用区域及原件完整性未确认。",
+                 "片段与字符统计仅以已采用的来源观察为分母；未采用区域及原件完整性未确认。",
+                 "片段與字元統計僅以已採用的來源觀察為分母；未採用區域及原件完整性未確認。",
+                 "Segment and character statistics use only adopted source observations as the denominator; unadopted regions and original-source completeness are unconfirmed."},
+                {"规则检查仅对已采用的 canonical 招标合同观察运行。",
+                 "规则检查仅对已采用的招标合同来源观察运行。","規則檢查僅對已採用的招標合同來源觀察執行。","Rule checks run only on adopted tender contract source observations."}
+        };
+        for(String[] phrase:known)value=value.replace(warning(phrase[0],lang),tr(lang,phrase[1],phrase[2],phrase[3]));
+        java.util.regex.Matcher plan=java.util.regex.Pattern.compile("语义审查按 (\\d+) 个主题检索(?:，并计划 (\\d+) 组项目资料引用比较)?；已提交的是局部原文窗口，其他限定是否完整未知。未进入模型的切片不代表已经完成语义审查。").matcher(nvl(raw));
+        while(plan.find()) {
+            String scope="";
+            if(plan.group(2)!=null)scope="0".equals(plan.group(2))
+                    ?tr(lang,"本次记录的审查范围未计划项目资料引用比较；该计划记录不证明是否进行了其他比较。","本次記錄的審查範圍未計劃項目資料引用比較；該計劃記錄不證明是否進行了其他比較。","No project-reference comparisons were planned in this recorded review scope; this plan does not establish whether other comparisons occurred.")
+                    :tr(lang,"本次记录的审查范围计划了项目资料引用比较；完成情况未确认。","本次記錄的審查範圍計劃了項目資料引用比較；完成情況未確認。","Project-reference comparisons were planned in this recorded review scope; completion is unconfirmed.");
+            String limitation=tr(lang,"已提交内容为局部原文窗口；其他限定是否完整未知。未提交给模型的片段尚未完成语义审查。","已提交內容為局部原文窗口；其他限定是否完整未知。未提交給模型的片段尚未完成語義審查。","Submitted excerpts are local source windows; completeness of other qualifiers is unknown. Excerpts not submitted to the model have not completed semantic review.");
+            value=value.replace(warning(plan.group(),lang),(scope.isEmpty()?"":scope+" ")+limitation);
+        }
+        if(value.startsWith("Explicit run strike/dstrike"))value=value.replace("Explicit run strike/dstrike and tracked deletions are retained; inherited style strike requires manual review.","Explicit strikethrough and tracked deletions are recorded; inherited formatting still requires source review.");
+        return value.replace("review.Rule checks","review. Rule checks");
     }
 
     private void setupWord(XWPFDocument document) {
@@ -366,7 +373,7 @@ public class VettingReportWriter {
             CTStyle style = CTStyle.Factory.newInstance(); style.setStyleId(name); style.setType(STStyleType.PARAGRAPH);
             style.addNewName().setVal(name); if (!"Normal".equals(name)) style.addNewBasedOn().setVal("Normal");
             CTRPr properties = style.addNewRPr();
-            CTFonts fonts = properties.addNewRFonts(); fonts.setAscii("Arial"); fonts.setHAnsi("Arial"); fonts.setEastAsia("Microsoft YaHei");
+            CTFonts fonts = properties.addNewRFonts(); fonts.setAscii("Times New Roman"); fonts.setHAnsi("Times New Roman"); fonts.setEastAsia("Microsoft YaHei");
             properties.addNewColor().setVal("000000");
             if (name.startsWith("Heading")) style.addNewPPr().addNewOutlineLvl().setVal(BigInteger.valueOf("Heading1".equals(name) ? 0 : 1));
             styles.addStyle(new XWPFStyle(style));
@@ -450,78 +457,109 @@ public class VettingReportWriter {
             stream.beginText();stream.setFont(font,size);stream.setNonStrokingColor(0,0,0);
             stream.newLineAtOffset(x,baseline);pdfShowText(stream,font,text,size);stream.endText();
         }
+        private static final float TABLE_SIZE=11, TABLE_LEADING=13.2f;
         void table(VettingReportPresentation.Table table) throws IOException {
-            List<List<String>> header=cellLines(table.getHeadings(),table.getWidths());
-            float headHeight=height(header);
-            float titleHeight=wrap(table.getTitle(),11,WIDTH).size()*11*1.48f+13;
+            float headHeight=Math.max(headerHeight(table,false),headerHeight(table,true));
+            float titleHeight=table.commentsHeader()?0:wrap(table.getTitle(),11,WIDTH).size()*11*1.48f+13;
             float firstHeight=table.getRows().isEmpty()?0:height(cellLines(table.getRows().get(0),table.getWidths()));
             float freshBody=PDRectangle.A4.getHeight()-MARGIN*2-titleHeight-headHeight;
-            // Keep a fresh table's heading/header with its first row. A row longer than a page
-            // is allowed to continue, but the opening must contain actual body text.
             float opening=titleHeight+headHeight+(firstHeight<=freshBody?firstHeight:32);
             if(y-opening<MARGIN)newPage();
-            block(new Block(1,table.getTitle()),null);
-            tableSlice(header,table.getWidths(),0,maxLines(header));
+            tableHeader(table,false);
             for(List<String> row:table.getRows()) {
                 List<List<String>> lines=cellLines(row,table.getWidths());int count=maxLines(lines),offset=0;
                 while(offset<count) {
-                    int fit=(int)((y-MARGIN-8)/14.4f);
-                    // If this row fits on a fresh page, keep it together. Long rows may continue.
-                    if(fit<1||(offset==0&&count>fit&&count*14.4f+8<PDRectangle.A4.getHeight()-MARGIN*2-headHeight-35)) {
-                        newPage();block(new Block(1,table.getTitle()+" (Cont'd)"),null);
-                        tableSlice(header,table.getWidths(),0,maxLines(header));fit=(int)((y-MARGIN-8)/14.4f);
+                    int fit=(int)((y-MARGIN-8)/TABLE_LEADING);
+                    if(fit<1||(offset==0&&count>fit&&count*TABLE_LEADING+8<PDRectangle.A4.getHeight()-MARGIN*2-headHeight-35)) {
+                        newPage();tableHeader(table,true);fit=(int)((y-MARGIN-8)/TABLE_LEADING);
                     }
                     int n=Math.min(count-offset,Math.max(1,fit));tableSlice(lines,table.getWidths(),offset,n);offset+=n;
-                    if(offset<count){newPage();block(new Block(1,table.getTitle()+" (Cont'd)"),null);tableSlice(header,table.getWidths(),0,maxLines(header));}
+                    if(offset<count){newPage();tableHeader(table,true);}
                 }
             }
             y-=12;
         }
+        float headerHeight(VettingReportPresentation.Table table,boolean continued) throws IOException {
+            if(!table.commentsHeader())return height(cellLines(table.getHeadings(),table.getWidths()));
+            int[] widths=table.getWidths();float middle=WIDTH*(widths[1]+widths[2]+widths[3])/100;
+            float top=Math.max(wrap(table.sectionNumber(),TABLE_SIZE,WIDTH*widths[0]/100-8).size(),wrap(table.sectionLabel()+(continued?" (Cont'd)":""),TABLE_SIZE,middle-8).size())*TABLE_LEADING+8;
+            float bottom=height(cellLines(Arrays.asList("",table.getHeadings().get(1),table.getHeadings().get(2),table.getHeadings().get(3),""),widths));
+            float right=wrap(table.getHeadings().get(4),TABLE_SIZE,WIDTH*widths[4]/100-8).size()*TABLE_LEADING+8;
+            return Math.max(top+bottom,right);
+        }
+        void tableHeader(VettingReportPresentation.Table table,boolean continued) throws IOException {
+            if(!table.commentsHeader()) {
+                block(new Block(1,table.getTitle()+(continued?" (Cont'd)":"")),null);
+                List<List<String>> header=cellLines(table.getHeadings(),table.getWidths());tableSlice(header,table.getWidths(),0,maxLines(header));return;
+            }
+            int[] widths=table.getWidths();float h=headerHeight(table,continued),left=WIDTH*widths[0]/100,right=WIDTH*widths[4]/100,middle=WIDTH-left-right;
+            List<List<String>> bottom=cellLines(Arrays.asList("",table.getHeadings().get(1),table.getHeadings().get(2),table.getHeadings().get(3),""),widths);
+            float bottomHeight=height(bottom),topHeight=h-bottomHeight;
+            headerCell(wrap(table.sectionNumber(),TABLE_SIZE,left-8),MARGIN,y,left,h);
+            headerCell(wrap(table.sectionLabel()+(continued?" (Cont'd)":""),TABLE_SIZE,middle-8),MARGIN+left,y,middle,topHeight);
+            float x=MARGIN+left;for(int i=1;i<=3;i++){float w=WIDTH*widths[i]/100;headerCell(bottom.get(i),x,y-topHeight,w,bottomHeight);x+=w;}
+            headerCell(wrap(table.getHeadings().get(4),TABLE_SIZE,right-8),MARGIN+WIDTH-right,y,right,h);y-=h;
+        }
+        void headerCell(List<String> lines,float x,float top,float width,float height) throws IOException {
+            stream.setStrokingColor(35,35,35);stream.setLineWidth(0.5f);stream.addRect(x,top-height,width,height);stream.stroke();
+            for(int n=0;n<lines.size();n++)textAt(x+4,top-4-TABLE_SIZE-n*TABLE_LEADING,TABLE_SIZE,lines.get(n));
+        }
         List<List<String>> cellLines(List<String> values,int[] widths) throws IOException {
             List<List<String>> result=new ArrayList<>();
             for(int i=0;i<values.size();i++) {
-                List<String> lines=new ArrayList<>();for(String p:nvl(values.get(i)).split("\n",-1))lines.addAll(wrap(p,12,WIDTH*widths[i]/100-8));result.add(lines);
+                List<String> lines=new ArrayList<>();for(String p:nvl(values.get(i)).split("\n",-1))lines.addAll(wrap(p,TABLE_SIZE,WIDTH*widths[i]/100-8));result.add(lines);
             }
             return result;
         }
         int maxLines(List<List<String>> cells) {return cells.stream().mapToInt(List::size).max().orElse(1);}
-        float height(List<List<String>> cells){return maxLines(cells)*14.4f+8;}
+        float height(List<List<String>> cells){return maxLines(cells)*TABLE_LEADING+8;}
         void tableSlice(List<List<String>> cells,int[] widths,int offset,int count) throws IOException {
-            float h=count*14.4f+8,x=MARGIN;
+            float h=count*TABLE_LEADING+8,x=MARGIN;
             stream.setStrokingColor(35,35,35);stream.setLineWidth(0.5f);
             for(int i=0;i<cells.size();i++) {
                 float w=WIDTH*widths[i]/100;stream.addRect(x,y-h,w,h);stream.stroke();
-                for(int n=0;n<count;n++)if(offset+n<cells.get(i).size()) {
-                    stream.beginText();stream.setFont(font,12);stream.setNonStrokingColor(25,25,25);
-                    stream.newLineAtOffset(x+4,y-15-n*14.4f);pdfShowText(stream,font,cells.get(i).get(offset+n),12);stream.endText();
-                }
+                for(int n=0;n<count;n++)if(offset+n<cells.get(i).size())textAt(x+4,y-4-TABLE_SIZE-n*TABLE_LEADING,TABLE_SIZE,cells.get(i).get(offset+n));
                 x+=w;
             }
             y-=h;
         }
-        void block(Block block, Block next) throws IOException {
+        void block(Block block, Block next) throws IOException { block(block,next,null); }
+        void block(Block block, Block next, Block following) throws IOException {
             if (block.pageBreak && y < PDRectangle.A4.getHeight() - MARGIN) newPage();
-            float size = block.kind == 3 ? 21 : block.kind == 2 ? 14 : block.kind == 1 ? 11 : 9.5f;
+            float size = block.kind == 3 ? 21 : block.kind == 2 ? 14 : 11;
             float lineHeight = size * (block.compact ? 1.05f : 1.48f), indent = block.quote ? 12 : 0;
             if (block.kind > 0 && y - lineHeight * 3 < MARGIN) newPage();
             List<String> lines = new ArrayList<>();
             for (String paragraph : block.text.split("\n", -1)) lines.addAll(wrap(paragraph, size, WIDTH - indent));
             if (block.keepWithNextOpening && next != null) {
-                float nextSize = next.kind == 3 ? 21 : next.kind == 2 ? 14 : next.kind == 1 ? 11 : 9.5f;
+                float nextSize = next.kind == 3 ? 21 : next.kind == 2 ? 14 : 11;
                 float nextHeight = nextSize * (next.compact ? 1.05f : 1.48f);
                 List<String> nextLines = new ArrayList<>();
                 for (String paragraph : next.text.split("\n", -1))
                     nextLines.addAll(wrap(paragraph, nextSize, WIDTH - (next.quote ? 12 : 0)));
-                float needed = (block.compact ? 0 : 3) + lineHeight * lines.size() + (block.compact ? 0 : 4)
-                        + (next.compact ? 0 : 3) + nextHeight * Math.min(2, nextLines.size());
-                // Keep the source label and quotation opening together, while allowing long quotations to paginate.
-                if (needed <= PDRectangle.A4.getHeight() - MARGIN * 2 && y - needed < MARGIN) newPage();
+                float needed = before(block) + lineHeight * lines.size() + after(block);
+                // A source heading keeps its label and first quotation paragraph, not only the label opening.
+                if (next.keepWithNextOpening && following != null) {
+                    needed += before(next) + nextHeight * nextLines.size() + after(next);
+                    next = following;nextSize = next.kind == 3 ? 21 : next.kind == 2 ? 14 : 11;
+                    nextHeight = nextSize * (next.compact ? 1.05f : 1.48f);nextLines.clear();
+                    for (String paragraph : next.text.split("\n", -1))
+                        nextLines.addAll(wrap(paragraph, nextSize, WIDTH - (next.quote ? 12 : 0)));
+                }
+                int opening = next.quote ? wrap(next.text.split("\n", -1)[0],nextSize,WIDTH - 12).size() : Math.min(2,nextLines.size());
+                float available = PDRectangle.A4.getHeight() - MARGIN * 2;
+                if (needed + before(next) + nextHeight * opening > available) opening = Math.min(2,nextLines.size());
+                needed += before(next) + nextHeight * opening;
+                // Long quotations can still paginate; an opening group that fits a fresh page cannot orphan its heading.
+                if (needed <= available && y - needed < MARGIN) newPage();
             }
             // Keep a labeled detail with its opening lines without locking long source quotations to one page.
-            if (block.keepFirstLines && y - 3 - lineHeight * Math.min(2, lines.size()) < MARGIN) newPage();
+            int openingLines=Math.min(lines.size(),lines.size()==3?3:2);
+            if ((block.keepFirstLines || lines.size()>1) && y - 3 - lineHeight * openingLines < MARGIN) newPage();
             y -= block.kind > 0 ? block.compact ? 4 : 9 : block.compact ? 0 : 3;
-            for (String line : lines) {
-                if (y - lineHeight < MARGIN) newPage();
+            for (int lineIndex=0;lineIndex<lines.size();lineIndex++) {
+                String line=lines.get(lineIndex);
+                if (y - lineHeight < MARGIN || (lines.size()-lineIndex==2 && y-lineHeight*2<MARGIN)) newPage();
                 stream.beginText(); stream.setFont(font, size);
                 stream.setNonStrokingColor(25, 25, 25);
                 stream.newLineAtOffset(MARGIN + indent, y); pdfShowText(stream,font,line,size); stream.endText();
@@ -529,6 +567,8 @@ public class VettingReportWriter {
             }
             y -= block.compact ? block.kind > 0 ? 1 : 0 : 4;
         }
+        float before(Block block) {return block.kind > 0 ? block.compact ? 4 : 9 : block.compact ? 0 : 3;}
+        float after(Block block) {return block.compact ? block.kind > 0 ? 1 : 0 : 4;}
         List<String> wrap(String text, float size, float width) throws IOException {
             if (text.isEmpty()) return Collections.singletonList("");
             List<String> lines = new ArrayList<>(); StringBuilder line = new StringBuilder(); float used = 0;
@@ -645,7 +685,7 @@ public class VettingReportWriter {
         return tr(lang, "证据待定位", "證據待定位", "Evidence awaiting location");
     }
     private String pick(LocalizedText value, String lang) { return value == null ? "" : value.pick(lang); }
-    private String warning(String value, String lang) {
+    static String warning(String value, String lang) {
         if (!"en".equalsIgnoreCase(lang) && !"zh-Hant".equalsIgnoreCase(lang)) return nvl(value);
         String source = "OCR 不识别删除线、表格行列关系及图形含义；引文、删除状态和表格对应关系须对照原始物理页复核。";
         String result = nvl(value).replace(source, tr(lang, source,
@@ -714,6 +754,9 @@ public class VettingReportWriter {
         result = warningPattern(result, "项目资料比较 ([^；\\r\\n]+) 未提交：完整招标条款及项目资料超过单次上下文预算；未提交材料不代表已审查。",
                 "項目資料比較 {1} 未提交：完整招標條款及項目資料超過單次上下文預算；未提交材料不代表已審查。",
                 "Project-reference comparison {1} was not submitted because the complete tender and project context exceeds the per-call budget. Unsubmitted material has not completed review.", lang);
+        result = warningPattern(result, "主题 (\\d+) 来源包 (\\d+)：业务形状修复前存在未获接受的非空模型候选记录，修复答复为空数组；这不证明不存在问题，请人工核对该来源包已保存的原始尝试记录。",
+                "主題 {1} 來源包 {2}：業務形狀修復前存在未獲接受的非空模型候選記錄，修復答覆為空陣列；這不證明不存在問題，請人工核對該來源包已保存的原始嘗試記錄。",
+                "Topic {1}, source packet {2}: model candidate records were saved in a nonempty array before the business shape repair but were not accepted; the repair returned an empty array. This does not establish that no issues exist. Manually check the saved original attempts for this source packet.", lang);
         result = warningPattern(result, "主题 (\\d+) 的一条模型发现未通过逐字证据校验，已剔除。",
                 "主題 {1} 的一條模型發現未通過逐字證據校驗，已剔除。",
                 "A model finding for topic {1} failed exact source-quotation validation and was excluded.", lang);
@@ -730,7 +773,7 @@ public class VettingReportWriter {
                 "無法連接 {1}，請確認本地服務已啟動（{2}）", "Cannot connect to {1}; confirm that the local service has started ({2})", lang);
         return result;
     }
-    private String warningPattern(String value, String pattern, String hant, String en, String lang) {
+    private static String warningPattern(String value, String pattern, String hant, String en, String lang) {
         java.util.regex.Matcher matcher = java.util.regex.Pattern.compile(pattern).matcher(value);
         StringBuffer result = new StringBuffer();
         while (matcher.find()) {

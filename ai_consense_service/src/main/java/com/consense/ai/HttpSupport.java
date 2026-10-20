@@ -82,6 +82,30 @@ public class HttpSupport {
         } finally { call.cancel(); }
     }
 
+    /** Bounded, cancelable single generation. HTTP failures never include provider bodies. */
+    public String postJsonBoundedWithoutReplay(String url,String json,long timeoutMs,String authHeader,int cap,Consumer<Runnable> onCancel) {
+        if(timeoutMs<=0||timeoutMs>86400000||cap<=0||cap>16*1024*1024)throw new IllegalArgumentException("Invalid bounded generation limits");
+        Request.Builder builder=new Request.Builder().url(url).post(oneShotJson(json));
+        if(authHeader!=null)builder.header("Authorization",authHeader);
+        OkHttpClient client=shared.newBuilder().retryOnConnectionFailure(false).followRedirects(false).followSslRedirects(false)
+                .connectTimeout(Math.min(timeoutMs,5000),TimeUnit.MILLISECONDS).readTimeout(timeoutMs,TimeUnit.MILLISECONDS)
+                .writeTimeout(timeoutMs,TimeUnit.MILLISECONDS).callTimeout(timeoutMs,TimeUnit.MILLISECONDS).build();
+        Call call=client.newCall(builder.build());if(onCancel!=null)onCancel.accept(call::cancel);
+        if(Thread.currentThread().isInterrupted())call.cancel();
+        try(Response response=call.execute()) {
+            if(response.code()!=200)throw new BizException("Qwen chat HTTP "+response.code());
+            if(response.body()==null)throw new BizException("Qwen chat response missing");
+            java.io.ByteArrayOutputStream bytes=new java.io.ByteArrayOutputStream();
+            try(java.io.InputStream input=response.body().byteStream()) {
+                byte[] buffer=new byte[8192];int count;
+                while((count=input.read(buffer))!=-1){if(count>cap-bytes.size())throw new BizException("Qwen chat response byte limit exceeded");bytes.write(buffer,0,count);}
+            }
+            return java.nio.charset.StandardCharsets.UTF_8.newDecoder().onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
+                    .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT).decode(java.nio.ByteBuffer.wrap(bytes.toByteArray())).toString();
+        }catch(IOException failure){throw new BizException("Qwen chat transport "+(call.isCanceled()?"cancelled":failure.getClass().getSimpleName()));}
+        finally {call.cancel();}
+    }
+
     /** MiniMax opt-in: retry only a complete HTTP 529 overloaded_error response. */
     public String postJsonWithOverloadBackoff(String url, String json, long timeoutMs, String authHeader) {
         return postJsonWithoutImplicitReplay(url, json, timeoutMs, authHeader, 3);

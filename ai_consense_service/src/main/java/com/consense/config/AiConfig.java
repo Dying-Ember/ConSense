@@ -38,6 +38,16 @@ public class AiConfig {
         return new com.consense.ai.MiniMaxChatClient(copied,http);
     }
 
+    @Bean public LlmClient qwenChatClient(ConsenseProperties props,HttpSupport http) {
+        ConsenseProperties.Llm copied=new ConsenseProperties.Llm();org.springframework.beans.BeanUtils.copyProperties(props.getQwen(),copied);
+        return new com.consense.ai.QwenChatClient(copied,http);
+    }
+
+    @Bean public LlmClient qwenFlashChatClient(ConsenseProperties props,HttpSupport http) {
+        ConsenseProperties.Llm copied=new ConsenseProperties.Llm();org.springframework.beans.BeanUtils.copyProperties(props.getQwenFlash(),copied);
+        return new com.consense.ai.QwenChatClient(copied,http);
+    }
+
     @Bean
     public OcrClient ocrClient(ConsenseProperties props, HttpSupport http) {
         ConsenseProperties.Ocr ocr = props.getOcr();

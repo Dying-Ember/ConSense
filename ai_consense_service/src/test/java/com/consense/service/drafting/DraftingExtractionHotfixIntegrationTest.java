@@ -104,6 +104,34 @@ class DraftingExtractionHotfixIntegrationTest {
         assertEquals("no_candidate",field(trace(project),"domesticBlocks").path("status").asText());
     }
 
+    @Test void truncatedJsonPublishesOnlyCompleteGroundedCandidatesAsPartialForManualAdoption() throws Exception {
+        String project=project(),quote="The contract period is 42 months.";upload(project,"test-only-truncated.txt",quote);
+        String raw="["+JsonUtils.write(candidate("contractPeriodMonths",42,quote))+",{\"key\":\"foundationIncluded\",\"value\":";
+        when(externalModel.chat(anyList())).thenReturn(raw);
+        extract(project,0);JsonNode report=trace(project),value=variable(project,"contractPeriodMonths");
+        assertEquals("partial",report.path("status").asText());assertEquals("42",value.path("value").asText());assertFalse(value.path("confirmed").asBoolean());
+        assertEquals(1,value.path("candidates").size());assertEquals(raw,report.path("parts").path(0).path("attempts").path(0).path("rawResponse").asText());
+        assertEquals("partial",report.path("parts").path(0).path("attempts").path(0).path("status").asText());
+        assertEquals("incomplete_json",report.path("parts").path(0).path("attempts").path(0).path("errorCode").asText());
+        assertEquals("",variable(project,"foundationIncluded").path("value").asText());
+        mvc.perform(put("/api/drafting/{id}/variables/contractPeriodMonths",project).contentType(MediaType.APPLICATION_JSON)
+                .content(JsonUtils.write(Collections.singletonMap("candidateIndex",0)))).andExpect(jsonPath("$.code").value(4007));
+        Map<String,Object> adopt=new LinkedHashMap<>();adopt.put("candidateIndex",0);adopt.put("candidateSnapshot",value.path("candidates").path(0));
+        mvc.perform(put("/api/drafting/{id}/variables/contractPeriodMonths",project).contentType(MediaType.APPLICATION_JSON).content(JsonUtils.write(adopt)))
+                .andExpect(jsonPath("$.code").value(0)).andExpect(jsonPath("$.data.confirmed").value(true));
+        assertEquals(report,response(get("/api/drafting/{id}/variables/extract-traces/{runId}",project,report.path("runId").asText())));
+    }
+
+    @Test void malformedLaterSourceDoesNotDiscardACompleteEarlierCandidate() throws Exception {
+        String project=project(),quote="The contract period is 42 months.";upload(project,"test-only-complete.txt",quote);upload(project,"test-only-malformed.txt","No further project decisions are supplied.");
+        when(externalModel.chat(anyList())).thenAnswer(call->{List<LlmClient.ChatTurn> turns=call.getArgument(0);return turns.get(1).getContent().contains(quote)?JsonUtils.write(Collections.singletonList(candidate("contractPeriodMonths",42,quote))):"[{\"key\":";});
+        extract(project,0);JsonNode report=trace(project),value=variable(project,"contractPeriodMonths");
+        assertEquals("partial",report.path("status").asText());assertEquals("42",value.path("value").asText());assertFalse(value.path("confirmed").asBoolean());
+        assertEquals(1,value.path("candidates").size());assertEquals(2,report.path("parts").size());
+        assertEquals("failed",report.path("parts").path(1).path("attempts").path(1).path("status").asText());
+        assertEquals("invalid_json",report.path("parts").path(1).path("attempts").path(1).path("errorCode").asText());
+    }
+
     @Test void billIdentitiesSurviveWhileOnlyExplicitRowMetadataCanPrefillClassification() throws Exception {
         String project=project();
         String quote="Schedule of Rates discussion\nBill No. | Description | Document treatment\n1 | Preliminaries | Bill schedule entry\n9 | Electrical Works | Schedule of Rates\nBill20 Other Works is a measured Bill of Quantities (BQ).";
@@ -147,6 +175,22 @@ class DraftingExtractionHotfixIntegrationTest {
         when(externalModel.chat(anyList())).thenReturn(JsonUtils.write(Arrays.asList(candidate("billNos",Arrays.asList(first,ninth),quote))));
         extract(project,0);JsonNode bills=JsonUtils.parse(variable(project,"billNos").path("value").asText());
         assertFalse(bills.get(0).hasNonNull("type"));assertEquals("SOR",bills.get(1).path("type").asText());
+    }
+
+    @Test void bsTradeCandidatesRemainAvailableAndUnadoptedUnderBothDesignationMethods() throws Exception {
+        List<String> trades=Arrays.asList("Fire services","Lift");String quote="The specialist subcontract list comprises Fire services; Lift.";
+        for(String designation:Arrays.asList("NSC","BSSSC")) {
+            String project=project();upload(project,"test-only-bs-trade-scope.txt",quote);
+            mvc.perform(put("/api/drafting/{id}/variables/subcontractArrangement",project).contentType(MediaType.APPLICATION_JSON).content(JsonUtils.write(Collections.singletonMap("value",designation))))
+                .andExpect(jsonPath("$.code").value(0));
+            when(externalModel.chat(anyList())).thenReturn(JsonUtils.write(Arrays.asList(candidate("subcontractors",trades,quote))));
+            extract(project,0);JsonNode value=variable(project,"subcontractors");
+            assertEquals(JsonUtils.write(trades),value.path("value").asText(),designation);assertFalse(value.path("candidates").isEmpty());
+            assertFalse(value.path("confirmed").asBoolean());assertFalse(value.path("manuallyEdited").asBoolean());
+            mvc.perform(put("/api/drafting/{id}/variables/subcontractors",project).contentType(MediaType.APPLICATION_JSON).content(JsonUtils.write(Collections.singletonMap("value",JsonUtils.write(trades)))))
+                .andExpect(jsonPath("$.code").value(0));
+            value=variable(project,"subcontractors");assertTrue(value.path("confirmed").asBoolean());assertTrue(value.path("manuallyEdited").asBoolean());
+        }
     }
 
     @Test void tradeArrangementCitationNeedsRepairToAQuoteThatActuallyListsEverySelectedTrade() throws Exception {
@@ -299,7 +343,7 @@ class DraftingExtractionHotfixIntegrationTest {
         assertFalse(variable(project,"domesticBlocks").path("confirmed").asBoolean());
     }
 
-    @Test void explicitlySelectedCoverageFailureRetainsUserValuesAndAnImmutableFailedReport() throws Exception {
+    @Test void explicitlySelectedCoverageFailureRetainsUserValuesAndPublishesCompletePendingCandidates() throws Exception {
         String project=project();String source="The project scope includes domestic blocks. No foundation works.";
         upload(project,"test-only-failed-coverage.txt",source);
         mvc.perform(put("/api/drafting/{id}/variables/foundationIncluded",project).contentType(MediaType.APPLICATION_JSON).content("{\"value\":\"true\"}"))
@@ -308,9 +352,9 @@ class DraftingExtractionHotfixIntegrationTest {
         when(externalModel.chat(anyList())).thenReturn(JsonUtils.write(Arrays.asList(candidate("foundationIncluded",false,"No foundation works."))))
                 .thenThrow(new com.consense.common.BizException(5001,"Test-only selected-source outage"));
         mvc.perform(post("/api/drafting/{id}/variables/extract",project).header("X-ConSense-Llm-Profile","local"))
-                .andExpect(status().isOk()).andExpect(jsonPath("$.code").value(5001));
-        assertEquals(before,response(get("/api/drafting/{id}/variables",project)));
-        JsonNode report=trace(project);assertEquals("failed",report.path("status").asText());
+                .andExpect(status().isOk()).andExpect(jsonPath("$.code").value(0));
+        JsonNode current=variable(project,"foundationIncluded");assertEquals("true",current.path("value").asText());assertTrue(current.path("confirmed").asBoolean());assertTrue(current.path("manuallyEdited").asBoolean());assertTrue(current.path("reviewRequired").asBoolean());assertEquals("false",current.path("candidates").path(0).path("value").asText());
+        JsonNode report=trace(project);assertEquals("partial",report.path("status").asText());
         assertEquals("local",report.path("modelIdentity").path("profileId").asText());
         assertEquals("coverage",report.path("parts").get(0).path("attempts").get(1).path("kind").asText());
         assertEquals("model_call_failed",report.path("parts").get(0).path("attempts").get(1).path("errorCode").asText());
@@ -455,9 +499,9 @@ class DraftingExtractionHotfixIntegrationTest {
         when(externalModel.chat(anyList())).thenReturn(JsonUtils.write(Arrays.asList(candidate("contractPeriodMonths",null,table+"\n"+closing))))
                 .thenThrow(new com.consense.common.BizException(5001,"Test-only selected-source citation-repair outage"));
         mvc.perform(post("/api/drafting/{id}/variables/extract",project).header("X-ConSense-Llm-Profile","local"))
-                .andExpect(status().isOk()).andExpect(jsonPath("$.code").value(5001));
-        assertEquals(before,response(get("/api/drafting/{id}/variables",project)));
-        JsonNode report=trace(project);assertEquals("failed",report.path("status").asText());
+                .andExpect(status().isOk()).andExpect(jsonPath("$.code").value(0));
+        JsonNode retained=variable(project,"contractPeriodMonths");assertEquals("36",retained.path("value").asText());assertTrue(retained.path("confirmed").asBoolean());assertTrue(retained.path("manuallyEdited").asBoolean());assertTrue(retained.path("candidates").isEmpty());
+        JsonNode report=trace(project);assertEquals("partial",report.path("status").asText());
         assertEquals("local",report.path("modelIdentity").path("profileId").asText());
         assertEquals("repair",report.path("parts").get(0).path("attempts").get(1).path("kind").asText());
         assertEquals("model_call_failed",report.path("parts").get(0).path("attempts").get(1).path("errorCode").asText());

@@ -217,25 +217,26 @@ public final class VettingResponsesTransport {
         result.setStatus("provider_estimated_fit");result.setReason("provider_estimate_policy_not_exact_template_observation");result.setExtraDispatchPermitted(true);return result;
     }
     public <T> List<T> complete(VettingInputBudget.Input input,VettingInputBudget.Result budget,String system,String user,JsonNode schema,Class<T> type,List<String> rawOut,Map<String,Long> timings) {
-        return complete(prepare(input),input,budget,system,user,schema,type,rawOut,timings);
+        return complete(prepare(input),input,budget,system,user,schema,type,rawOut,timings,null);
     }
-    private <T> List<T> complete(PreparedRequest prepared,VettingInputBudget.Input input,VettingInputBudget.Result budget,String system,String user,JsonNode schema,Class<T> type,List<String> rawOut,Map<String,Long> timings) {
+    private <T> List<T> complete(PreparedRequest prepared,VettingInputBudget.Input input,VettingInputBudget.Result budget,String system,String user,JsonNode schema,Class<T> type,List<String> rawOut,Map<String,Long> timings,java.util.function.Consumer<JsonNode> metadata) {
         VettingInputBudget.Input regenerated=input(prepared.profile,system,user,schema,input.getSourceSnapshotSha256());
         if(!prepared.inputJson.equals(JsonUtils.write(regenerated)))throw new IllegalArgumentException("Responses final prompts differ from counted Input");
         VettingInputBudget.Result checked=new VettingInputBudget.Result();checked.setSerializedInputSha256(input.getSerializedInputSha256());
         if(budget==null||budget.getObservation()==null||!input.getSerializedInputSha256().equals(budget.getSerializedInputSha256())||!"provider_estimated_fit".equals(budget.getStatus())||!budget.isExtraDispatchPermitted()
                 ||!"provider_estimated_fit".equals(checkEstimate(input,budget.getObservation(),checked).getStatus()))throw new IllegalArgumentException("Responses dispatch requires bound estimate policy acceptance");
         if(!prepared.profile.knownPolicy())throw new IllegalStateException("Responses context policy unknown");
-        return new AiGateway(new PreparedClient(prepared)).completeStructuredJsonList(system,user,type,schema,rawOut,timings);
+        return new AiGateway(new PreparedClient(prepared,metadata)).completeStructuredJsonList(system,user,type,schema,rawOut,timings);
     }
     private final class PreparedClient implements LlmClient {
         private final PreparedRequest prepared;
-        PreparedClient(PreparedRequest p){prepared=p;}
+        private final java.util.function.Consumer<JsonNode> metadata;
+        PreparedClient(PreparedRequest p,java.util.function.Consumer<JsonNode> metadata){prepared=p;this.metadata=metadata;}
         @Override public String chatStructured(List<ChatTurn> turns,JsonNode schema) {
             if(!JsonUtils.write(turns).equals(prepared.turnsJson)||!prepared.schemaJson.equals(JsonUtils.write(schema))||!prepared.profile.sha.equals(currentProfile(prepared.profile).sha))throw new IllegalArgumentException("Responses dispatch entity changed");
             Response response=http.post(prepared.getGenerationEndpoint(),prepared.generationJson,prepared.profile.generationTimeout,prepared.profile.generationCap,prepared.profile.authorization());
             if(response==null||response.body==null||response.body.getBytes(StandardCharsets.UTF_8).length>prepared.profile.generationCap)throw new IllegalStateException("Responses generation response bound exceeded");
-            return decode(response,prepared.profile);
+            return decode(response,prepared.profile,metadata);
         }
         @Override public String chat(List<ChatTurn> turns){throw new UnsupportedOperationException("Structured vetting only");}
         @Override public List<float[]> embed(List<String> texts){throw new UnsupportedOperationException("No embedding transport");}
@@ -243,7 +244,7 @@ public final class VettingResponsesTransport {
         @Override public String chatModel(){return prepared.profile.model;}
         @Override public String embedModel(){return null;}
     }
-    private static String decode(Response response,Profile p) {
+    private static String decode(Response response,Profile p,java.util.function.Consumer<JsonNode> metadata) {
         String safe=redact(response.body,p.key);JsonNode r;
         try{r=strictObject(response.body);}catch(Exception failure){throw incomplete("Responses envelope invalid",safe,null,IncompleteModelResponseException.FailureKind.INVALID_RESPONSE_ENVELOPE,null);}
         JsonNode provider=r.path("base_resp"),code=provider.path("status_code");
@@ -270,12 +271,24 @@ public final class VettingResponsesTransport {
         }
         if(messages!=1||JsonUtils.isBlankText(text.toString()))throw incomplete("Responses text missing",safe,null,IncompleteModelResponseException.FailureKind.MISSING_TEXT,r);
         if(r.hasNonNull("output_text")&&(!r.get("output_text").isTextual()||!text.toString().equals(r.get("output_text").textValue())))throw incomplete("Responses convenience text differs",safe,null,IncompleteModelResponseException.FailureKind.INVALID_RESPONSE_ENVELOPE,r);
+        if(metadata!=null)metadata.accept(responseMetadata(r));
         return text.toString();
     }
-    private static IncompleteModelResponseException incomplete(String m,String raw,JsonNode text,IncompleteModelResponseException.FailureKind kind,JsonNode r) {
+    /** Public provider declarations only; never copies output, reasoning, error text, identifiers or unknown usage fields. */
+    private static ObjectNode responseMetadata(JsonNode r) {
         ObjectNode projected=JsonUtils.mapper().createObjectNode();
-        if(r!=null&&r.path("usage").isObject()) {ObjectNode usage=projected.putObject("usage");for(String[] pair:new String[][]{{"input_tokens","prompt_tokens"},{"output_tokens","completion_tokens"},{"total_tokens","total_tokens"}}){JsonNode n=r.path("usage").path(pair[0]);if(n.isIntegralNumber()&&n.canConvertToLong()&&n.longValue()>=0)usage.set(pair[1],n.deepCopy());}}
-        return new IncompleteModelResponseException(m,raw,text,kind,projected);
+        projected.put("scope","provider_response_reported");
+        if(r!=null) {
+            if("response".equals(r.path("object").asText()))projected.put("object","response");
+            if("MiniMax-M3".equals(r.path("model").asText()))projected.put("model","MiniMax-M3");
+            String status=r.path("status").asText();if(Arrays.asList("completed","incomplete","failed","cancelled","queued","in_progress").contains(status))projected.put("status",status);
+            if(r.path("usage").isObject()) {ObjectNode usage=projected.putObject("usage");for(String[] pair:new String[][]{{"input_tokens","prompt_tokens"},{"output_tokens","completion_tokens"},{"total_tokens","total_tokens"}}){JsonNode n=r.path("usage").path(pair[0]);if(n.isIntegralNumber()&&n.canConvertToLong()&&n.longValue()>=0)usage.set(pair[1],n.deepCopy());}}
+        }
+        projected.put("usageUnavailable",!projected.path("usage").isObject()||projected.path("usage").isEmpty());
+        return projected;
+    }
+    private static IncompleteModelResponseException incomplete(String m,String raw,JsonNode text,IncompleteModelResponseException.FailureKind kind,JsonNode r) {
+        return new IncompleteModelResponseException(m,raw,text,kind,responseMetadata(r));
     }
     private Profile profile(){return new Profile(properties.getVetting().getResponses());}
     private Profile currentProfile(Profile captured){return new Profile(properties.getVetting().getResponses(),captured.effortOverride);}
@@ -309,7 +322,10 @@ public final class VettingResponsesTransport {
         }
         public VettingInputBudget.Observation observe(VettingInputBudget.Input in){return VettingResponsesTransport.this.observe(prepare(in),in);}
         public <T> List<T> complete(VettingInputBudget.Input in,VettingInputBudget.Result budget,String system,String user,JsonNode schema,Class<T> type,List<String> rawOut,Map<String,Long> timings) {
-            return VettingResponsesTransport.this.complete(prepare(in),in,budget,system,user,schema,type,rawOut,timings);
+            return complete(in,budget,system,user,schema,type,rawOut,timings,null);
+        }
+        public <T> List<T> complete(VettingInputBudget.Input in,VettingInputBudget.Result budget,String system,String user,JsonNode schema,Class<T> type,List<String> rawOut,Map<String,Long> timings,java.util.function.Consumer<JsonNode> metadata) {
+            return VettingResponsesTransport.this.complete(prepare(in),in,budget,system,user,schema,type,rawOut,timings,metadata);
         }
     }
     private static ObjectNode body(VettingInputBudget.Input in,Profile p) {

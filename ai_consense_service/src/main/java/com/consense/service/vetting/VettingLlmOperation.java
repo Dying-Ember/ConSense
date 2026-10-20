@@ -8,12 +8,24 @@ import com.consense.config.ConsenseProperties;
 public final class VettingLlmOperation {
     private final ModelIdentity identity;
     private final VettingResponsesTransport.Operation responses;
-    private VettingLlmOperation(ModelIdentity identity,VettingResponsesTransport.Operation responses){this.identity=identity;this.responses=responses;}
+    private final com.consense.service.llm.QwenChatUsagePreflight.Operation qwen;
+    private VettingLlmOperation(ModelIdentity identity,VettingResponsesTransport.Operation responses){this(identity,responses,null);}
+    private VettingLlmOperation(ModelIdentity identity,VettingResponsesTransport.Operation responses,com.consense.service.llm.QwenChatUsagePreflight.Operation qwen){this.identity=identity;this.responses=responses;this.qwen=qwen;}
     public ModelIdentity getIdentity(){return identity;}
     public VettingResponsesTransport.Operation getResponses(){return responses;}
     public boolean isResponses(){return responses!=null;}
+    public com.consense.service.llm.QwenChatUsagePreflight.Operation getQwen(){return qwen;}
+    public boolean isQwen(){return qwen!=null;}
     static VettingLlmOperation capture(LlmOperation chat,ConsenseProperties props,VettingResponsesTransport transport) {
+        return capture(chat,props,transport,null);
+    }
+    static VettingLlmOperation capture(LlmOperation chat,ConsenseProperties props,VettingResponsesTransport transport,com.consense.service.llm.QwenChatUsagePreflight usage) {
         if(!props.getVetting().isSemanticEnabled())return new VettingLlmOperation(chat==null?null:chat.getIdentity(),null);
+        if(chat!=null&&chat.isExplicit()&&java.util.Arrays.asList("qwen","qwen-flash").contains(chat.getIdentity().getProfileId())) {
+            if(usage==null)throw new IllegalStateException("Qwen usage-preflight component unavailable");
+            com.consense.service.llm.QwenChatUsagePreflight.Operation selected=usage.capture(chat,"vetting");
+            return new VettingLlmOperation(selected.getIdentity(),null,selected);
+        }
         boolean explicit=chat!=null&&chat.isExplicit();
         boolean minimax=explicit&&"minimax-cn".equals(chat.getIdentity().getProfileId());
         String wire=props.getVetting().getMinimaxCnWire();

@@ -37,7 +37,23 @@ class CanonicalEvidenceBackendTimeoutTest {
         assertTrue((System.nanoTime() - start) / 1_000_000 < 3000, "Configured bound must still end the request");
     }
 
+    @Test void complete_normal_publication_has_its_own_deadline_without_extending_health_reads() throws Exception {
+        CanonicalEvidenceBackend backend=backend(500,100,2000,"{}".getBytes(StandardCharsets.UTF_8));
+        assertEquals("{}",backend.normalObserved("{}","vetting"));
+        assertEquals("OER_EVIDENCE_UPSTREAM_UNAVAILABLE",assertThrows(CanonicalEvidenceException.class,backend::health).getMessage());
+    }
+
+    @Test void normal_publication_deadline_remains_bounded_and_invalid_values_fail_before_http() throws Exception {
+        CanonicalEvidenceBackend backend=backend(500,2000,100,"{}".getBytes(StandardCharsets.UTF_8));
+        assertEquals("OER_EVIDENCE_UPSTREAM_UNAVAILABLE",assertThrows(CanonicalEvidenceException.class,()->backend.normalObserved("{}","advisory")).getMessage());
+        CanonicalEvidenceProperties invalid=new CanonicalEvidenceProperties();invalid.setBaseUrl("http://127.0.0.1:1");invalid.setNormalPublicationTimeoutMs(0);
+        assertEquals("OER_EVIDENCE_CONFIG_INVALID",assertThrows(CanonicalEvidenceException.class,()->new CanonicalEvidenceBackend(invalid).normalObserved("{}","vetting")).getMessage());
+    }
+
     private CanonicalEvidenceBackend backend(long delayMs, int timeoutMs, byte[] bytes) throws Exception {
+        return backend(delayMs,timeoutMs,120000,bytes);
+    }
+    private CanonicalEvidenceBackend backend(long delayMs,int timeoutMs,int publicationTimeoutMs,byte[] bytes)throws Exception {
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         workers = Executors.newCachedThreadPool(); server.setExecutor(workers);
         server.createContext("/", exchange -> {
@@ -54,6 +70,7 @@ class CanonicalEvidenceBackendTimeoutTest {
         server.start();
         CanonicalEvidenceProperties config = new CanonicalEvidenceProperties();
         config.setBaseUrl("http://127.0.0.1:" + server.getAddress().getPort()); config.setTimeoutMs(timeoutMs);
+        config.setNormalPublicationTimeoutMs(publicationTimeoutMs);
         return new CanonicalEvidenceBackend(config);
     }
 }

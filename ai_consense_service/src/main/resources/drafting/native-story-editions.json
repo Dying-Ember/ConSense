@@ -1,0 +1,1505 @@
+{
+  "version": "source-bound-native-stories-integration11-v1",
+  "authority": "Exact edition guard metadata from the already exercised native story profiles. Old native values must come from this request fresh normal OER observation;project identity only from existing prepared effectiveValues.contractTitle.",
+  "sources": [
+    {
+      "profileId": "native-identity-2a-ntt-candidate01",
+      "edition": "2a",
+      "key": "NTT",
+      "sourceSha256": "60bd8796aa828863c7edfe8617b7a5c56ee383afe8ba87a089e820f0fd9a982c",
+      "expectedEntryHashes": {
+        "[Content_Types].xml": "cca6eded581c655622571531abe5975539fe9aec46ee2c8c27973f4196126d16",
+        "_rels/.rels": "c30fe099dbcfed4ecc4ae544ccf82f432c8d3bb665e2a301df283738b196d803",
+        "customXml/_rels/item1.xml.rels": "80482f86e196171d66001e0e74d1900408a3aaf2463e54005d251b5f2db9a0b0",
+        "customXml/_rels/item2.xml.rels": "2a6aee4c8a9714223a3568077411a0c82d11b484b1c9ab93a19d50b99c57baa5",
+        "customXml/_rels/item3.xml.rels": "3aa4054f7f463c6d441102c960783aa7f937d6945a0a885b624a66aafaeedb6c",
+        "customXml/_rels/item4.xml.rels": "3c0d4d955517fe8112c945b1e56f63d5bef3c0005ccb627e40acda432e1cdc1d",
+        "customXml/item1.xml": "3d4ce7ec179fd619b40ba84c37a8f816ac15216793cd2274122661911d0d0c91",
+        "customXml/item2.xml": "79cb720f305b1bf2d4da0d620af86b1e79bfddab64c5797f5bcb30de171eb40f",
+        "customXml/item3.xml": "5efcaf9ad70d9c29f406ee438f8f428b021a881d2c5afff0e53b00b1f67ae51e",
+        "customXml/item4.xml": "d113ea82c2f55b180212a7d0f6b87e36a0d891644827c81a2de0a0b7ce28a97e",
+        "customXml/itemProps1.xml": "539f8a13ce99b8a17cd2de72990befe7c8839008c7bb14942db285101965905f",
+        "customXml/itemProps2.xml": "4d1c710c0214ff25123e76021111a7cba1134016139523ea8f4058e57426eafa",
+        "customXml/itemProps3.xml": "3cdff079e5ea4f38c97f7412055f51a445bd295068c9b77b23b836e8341d25c8",
+        "customXml/itemProps4.xml": "75987e96e8453676fe523018e311b0d44781bb8ec4546877c6af68e906bd3511",
+        "docProps/app.xml": "a1cb77648ea27ede552cbadba2d71272e6b3f58dc112dc44f999a21d3c228cda",
+        "docProps/core.xml": "8cb50581e965af54a19fe71394dc7509d646f61d830776a1b73823deb3e80c7d",
+        "docProps/custom.xml": "175f7de368240412814bffd701f31aae13cc0d755112773605fc6ddec96cdaf5",
+        "word/_rels/document.xml.rels": "42057552ff48091aca41a9714dd455afb8f819434e52b9278136f0b3c2dbfeed",
+        "word/document.xml": "5dc5d9eb7a97f8dafda4bcdbf86199fa9b180bb3854ff68635872ba914ae343b",
+        "word/endnotes.xml": "febca204d2db1d4734d986b07fa3277ca59f315c21b20a4b40c7382f1864fea0",
+        "word/fontTable.xml": "d7c4b009c8a931a0499cc027f6e4a090f5e395739384c8f9d6e047c769a50364",
+        "word/footnotes.xml": "d26d9c76b63c10a4354c038f90f7442d05a7740079f1635f69e4c00331fe5b29",
+        "word/numbering.xml": "0cb978ff28bad4bbe0007c0fcc4cf43726089d1ccfadd836f634be7dada61bf9",
+        "word/settings.xml": "b4440f5a3259d9f48ba774769eb89a4a51c5b011ccf0f48f4dfc87b1515037e1",
+        "word/styles.xml": "af0a2f0b01058f4e1545a7d7a34bb2d6cb39f41564a79cfccb3b49636c913517",
+        "word/theme/theme1.xml": "87748024cf1895e18f8494689ead27da2d449d7dfd27198b1df04989e8162e6c",
+        "word/webSettings.xml": "1ad1badc783b3ff4e2b6583d910c04d849d1280fa634aa12b996e9157cb61c20"
+      },
+      "staticFooterMigration": [
+        {
+          "pageOrdinal": 1,
+          "paragraphs": [
+            {
+              "ordinal": 54,
+              "exactText": "HD(QS) 3C/121/2/10- NTT/1 -"
+            },
+            {
+              "ordinal": 55,
+              "exactText": "March 2020"
+            }
+          ],
+          "preserveFollowingParagraph": {
+            "ordinal": 56,
+            "exactText": "",
+            "breakAttributes": [
+              {
+                "type": "page"
+              }
+            ],
+            "lastRenderedPageBreakCount": 0,
+            "pageBreakBeforeAttributes": []
+          },
+          "otherParagraphsAndBreaks": "PRESERVE_ALL_NOT_IN_EXACT_CLEARANCE_LIST"
+        },
+        {
+          "pageOrdinal": 2,
+          "paragraphs": [
+            {
+              "ordinal": 111,
+              "exactText": "HD(QS) 3C/121/2/10- NTT/2 -"
+            },
+            {
+              "ordinal": 112,
+              "exactText": "March 2020"
+            }
+          ],
+          "preserveFollowingParagraph": {
+            "ordinal": 113,
+            "exactText": "",
+            "breakAttributes": [],
+            "lastRenderedPageBreakCount": 0,
+            "pageBreakBeforeAttributes": []
+          },
+          "otherParagraphsAndBreaks": "PRESERVE_ALL_NOT_IN_EXACT_CLEARANCE_LIST"
+        },
+        {
+          "pageOrdinal": 3,
+          "paragraphs": [
+            {
+              "ordinal": 157,
+              "exactText": "HD(QS) 3C/121/2/10- NTT/3 -"
+            },
+            {
+              "ordinal": 158,
+              "exactText": "March 2020"
+            }
+          ],
+          "preserveFollowingParagraph": {
+            "ordinal": 159,
+            "exactText": "",
+            "breakAttributes": [],
+            "lastRenderedPageBreakCount": 0,
+            "pageBreakBeforeAttributes": []
+          },
+          "otherParagraphsAndBreaks": "PRESERVE_ALL_NOT_IN_EXACT_CLEARANCE_LIST"
+        },
+        {
+          "pageOrdinal": 4,
+          "paragraphs": [
+            {
+              "ordinal": 202,
+              "exactText": "HD(QS) 3C/121/2/10- NTT/4 -"
+            },
+            {
+              "ordinal": 203,
+              "exactText": "March 2020"
+            }
+          ],
+          "preserveFollowingParagraph": {
+            "ordinal": 204,
+            "exactText": "",
+            "breakAttributes": [],
+            "lastRenderedPageBreakCount": 0,
+            "pageBreakBeforeAttributes": []
+          },
+          "otherParagraphsAndBreaks": "PRESERVE_ALL_NOT_IN_EXACT_CLEARANCE_LIST"
+        },
+        {
+          "pageOrdinal": 5,
+          "paragraphs": [
+            {
+              "ordinal": 264,
+              "exactText": "HD(QS) 3C/121/2/10- NTT/5 -"
+            },
+            {
+              "ordinal": 265,
+              "exactText": "March 2020"
+            }
+          ],
+          "preserveFollowingParagraph": {
+            "ordinal": 266,
+            "exactText": "",
+            "breakAttributes": [],
+            "lastRenderedPageBreakCount": 0,
+            "pageBreakBeforeAttributes": []
+          },
+          "otherParagraphsAndBreaks": "PRESERVE_ALL_NOT_IN_EXACT_CLEARANCE_LIST"
+        },
+        {
+          "pageOrdinal": 6,
+          "paragraphs": [
+            {
+              "ordinal": 367,
+              "exactText": "HD(QS) 3C/121/2/10- NTT/6 -"
+            },
+            {
+              "ordinal": 368,
+              "exactText": "March 2020"
+            }
+          ],
+          "preserveFollowingParagraph": {
+            "ordinal": 369,
+            "exactText": "",
+            "breakAttributes": [],
+            "lastRenderedPageBreakCount": 0,
+            "pageBreakBeforeAttributes": []
+          },
+          "otherParagraphsAndBreaks": "PRESERVE_ALL_NOT_IN_EXACT_CLEARANCE_LIST"
+        },
+        {
+          "pageOrdinal": 7,
+          "paragraphs": [
+            {
+              "ordinal": 411,
+              "exactText": "HD(QS) 3C/121/2/10- NTT/7 -"
+            },
+            {
+              "ordinal": 412,
+              "exactText": "March 2020"
+            }
+          ],
+          "preserveFollowingParagraph": {
+            "ordinal": 413,
+            "exactText": "",
+            "breakAttributes": [],
+            "lastRenderedPageBreakCount": 0,
+            "pageBreakBeforeAttributes": []
+          },
+          "otherParagraphsAndBreaks": "PRESERVE_ALL_NOT_IN_EXACT_CLEARANCE_LIST"
+        },
+        {
+          "pageOrdinal": 8,
+          "paragraphs": [
+            {
+              "ordinal": 473,
+              "exactText": "HD(QS) 3C/121/2/10- NTT/8 -"
+            },
+            {
+              "ordinal": 474,
+              "exactText": "March 2020"
+            }
+          ],
+          "preserveFollowingParagraph": {
+            "ordinal": 475,
+            "exactText": "",
+            "breakAttributes": [],
+            "lastRenderedPageBreakCount": 0,
+            "pageBreakBeforeAttributes": []
+          },
+          "otherParagraphsAndBreaks": "PRESERVE_ALL_NOT_IN_EXACT_CLEARANCE_LIST"
+        },
+        {
+          "pageOrdinal": 9,
+          "paragraphs": [
+            {
+              "ordinal": 532,
+              "exactText": "HD(QS) 3C/121/2/10- NTT/9 -"
+            },
+            {
+              "ordinal": 533,
+              "exactText": "March 2020"
+            }
+          ],
+          "preserveFollowingParagraph": {
+            "ordinal": 534,
+            "exactText": "",
+            "breakAttributes": [],
+            "lastRenderedPageBreakCount": 0,
+            "pageBreakBeforeAttributes": []
+          },
+          "otherParagraphsAndBreaks": "PRESERVE_ALL_NOT_IN_EXACT_CLEARANCE_LIST"
+        },
+        {
+          "pageOrdinal": 10,
+          "paragraphs": [
+            {
+              "ordinal": 590,
+              "exactText": "HD(QS) 3C/121/2/10- NTT/10 -"
+            },
+            {
+              "ordinal": 591,
+              "exactText": "March 2020"
+            }
+          ],
+          "preserveFollowingParagraph": {
+            "ordinal": 592,
+            "exactText": "",
+            "breakAttributes": [],
+            "lastRenderedPageBreakCount": 0,
+            "pageBreakBeforeAttributes": []
+          },
+          "otherParagraphsAndBreaks": "PRESERVE_ALL_NOT_IN_EXACT_CLEARANCE_LIST"
+        },
+        {
+          "pageOrdinal": 11,
+          "paragraphs": [
+            {
+              "ordinal": 664,
+              "exactText": "HD(QS) 3C/121/2/10- NTT/11 -"
+            },
+            {
+              "ordinal": 665,
+              "exactText": "March 2020"
+            }
+          ],
+          "preserveFollowingParagraph": null,
+          "otherParagraphsAndBreaks": "PRESERVE_ALL_NOT_IN_EXACT_CLEARANCE_LIST"
+        }
+      ],
+      "contractLabelSpecs": [],
+      "sourceControlLinesToRetain": [
+        "HD(QS) 3C/121/2/10",
+        "March 2020"
+      ],
+      "sections": [
+        {
+          "footerPagePolicy": "CREATE_PAGE_FROM_STATIC_SEQUENCE",
+          "pagePrefix": "NTT/",
+          "pageSuffix": null,
+          "sourceNumberingDiagnostic": {
+            "action": "PRESERVE",
+            "nextRaw": {}
+          }
+        }
+      ],
+      "sourceFormatting": {
+        "stylesPartSha256": "af0a2f0b01058f4e1545a7d7a34bb2d6cb39f41564a79cfccb3b49636c913517",
+        "headerStyleId": "a3",
+        "footerStyleId": "a5",
+        "candidateEdgeDistancesTwips": {
+          "header": 168,
+          "footer": 168
+        },
+        "rendererKind": "libreoffice",
+        "validationScope": "Only the existing fixed-stress NTT targeted blank5 render;not arbitrary business identities or full layout acceptance."
+      }
+    },
+    {
+      "profileId": "native-identity-2a-sct-candidate01",
+      "edition": "2a",
+      "key": "SCT",
+      "sourceSha256": "7def01d62e07b35dd86beeff995e0e37d73ce18adca2746e2a6f6d9bafb5aaa4",
+      "expectedEntryHashes": {
+        "[Content_Types].xml": "28d2dabec14536d0a74da14c0c43728e9b182fcaf4ad25775af5fc2e0745f1e9",
+        "_rels/.rels": "c30fe099dbcfed4ecc4ae544ccf82f432c8d3bb665e2a301df283738b196d803",
+        "customXml/_rels/item1.xml.rels": "80482f86e196171d66001e0e74d1900408a3aaf2463e54005d251b5f2db9a0b0",
+        "customXml/_rels/item2.xml.rels": "2a6aee4c8a9714223a3568077411a0c82d11b484b1c9ab93a19d50b99c57baa5",
+        "customXml/_rels/item3.xml.rels": "3aa4054f7f463c6d441102c960783aa7f937d6945a0a885b624a66aafaeedb6c",
+        "customXml/_rels/item4.xml.rels": "3c0d4d955517fe8112c945b1e56f63d5bef3c0005ccb627e40acda432e1cdc1d",
+        "customXml/item1.xml": "3d4ce7ec179fd619b40ba84c37a8f816ac15216793cd2274122661911d0d0c91",
+        "customXml/item2.xml": "79cb720f305b1bf2d4da0d620af86b1e79bfddab64c5797f5bcb30de171eb40f",
+        "customXml/item3.xml": "5efcaf9ad70d9c29f406ee438f8f428b021a881d2c5afff0e53b00b1f67ae51e",
+        "customXml/item4.xml": "d113ea82c2f55b180212a7d0f6b87e36a0d891644827c81a2de0a0b7ce28a97e",
+        "customXml/itemProps1.xml": "c420d1d613aa0674f8eba6553ab1abcbcde07bf578fe15b7127783cafbd5edf4",
+        "customXml/itemProps2.xml": "68cd95feba1310abbf455f5f522f5735f05b0572657b75278efb28d0427126ef",
+        "customXml/itemProps3.xml": "f5735abc2222a7c3aac5e7d75d6cd57afe88e8fbd44f7c18646eb4b0d5091fe1",
+        "customXml/itemProps4.xml": "5192973ea88f1bf15079a9dac0a3edf6e6cde6c463bf4eb91d793204ed5cd7c9",
+        "docProps/app.xml": "50c2f838134e32f0266faa3aabbce624593f97c8036055c4f7b9b0eaa5e77dba",
+        "docProps/core.xml": "d56842d0a1e7b656859e12aeef433ca1760e765ea1129e8317ddab0d45776a1b",
+        "docProps/custom.xml": "175f7de368240412814bffd701f31aae13cc0d755112773605fc6ddec96cdaf5",
+        "word/_rels/document.xml.rels": "fbdf1c7033bfeaf7315ccc85006a5f519360faded2079dd4e5a8807594fe2009",
+        "word/document.xml": "a16768ce3f168c840e01db210371575db73eb20d06417cd23c73b1c7073a76fb",
+        "word/endnotes.xml": "67586ada61edb00f991f8ed8d11f5e81bffc1a32a2871675e7e31a11407db3ec",
+        "word/fontTable.xml": "137ae7088cb2fe1d8548a08fd1e9215f4ad9c2bcd1bb63d80502783ab21aebc5",
+        "word/footer1.xml": "e9ee1f9c537702cc079ad03bd2c69be842f93542351b66eb0390608f23920326",
+        "word/footnotes.xml": "dc250ded2a82f5e0cbaf15687286c2a85e083ae22c92b39417169c08fe41421f",
+        "word/numbering.xml": "9ede338d2eb99ea341d4020e85ba1c6f66b0ab4c3e6d0f6fb989d0d23dcba804",
+        "word/settings.xml": "4228dfe27a439d77331b322e173d9ef68bf0e10391621beaa32caabb48a383cf",
+        "word/styles.xml": "c23a2d07ce83bc90596f413a9fbf08ff866adf73215f20b8c37f2ce2bcedf389",
+        "word/theme/theme1.xml": "87748024cf1895e18f8494689ead27da2d449d7dfd27198b1df04989e8162e6c",
+        "word/webSettings.xml": "0c574480d7f83f0f5f97641807aece9cc8cc72332277bf69f9d5dc6fe91b29fb"
+      },
+      "staticFooterMigration": [
+        {
+          "pageOrdinal": 1,
+          "paragraphs": [
+            {
+              "ordinal": 50,
+              "exactText": "HD(QS) 3C/121/1/2"
+            },
+            {
+              "ordinal": 51,
+              "exactText": "March 2020- SCT/1 -"
+            }
+          ],
+          "preserveFollowingParagraph": {
+            "ordinal": 52,
+            "exactText": "",
+            "breakAttributes": [
+              {
+                "type": "page"
+              }
+            ],
+            "lastRenderedPageBreakCount": 0,
+            "pageBreakBeforeAttributes": []
+          },
+          "otherParagraphsAndBreaks": "PRESERVE_ALL_NOT_IN_EXACT_CLEARANCE_LIST"
+        },
+        {
+          "pageOrdinal": 2,
+          "paragraphs": [
+            {
+              "ordinal": 93,
+              "exactText": "HD(QS) 3C/121/1/2"
+            },
+            {
+              "ordinal": 94,
+              "exactText": "March 2020- SCT/2 -"
+            }
+          ],
+          "preserveFollowingParagraph": {
+            "ordinal": 95,
+            "exactText": "",
+            "breakAttributes": [],
+            "lastRenderedPageBreakCount": 0,
+            "pageBreakBeforeAttributes": []
+          },
+          "otherParagraphsAndBreaks": "PRESERVE_ALL_NOT_IN_EXACT_CLEARANCE_LIST"
+        },
+        {
+          "pageOrdinal": 3,
+          "paragraphs": [
+            {
+              "ordinal": 151,
+              "exactText": "HD(QS) 3C/121/1/2"
+            },
+            {
+              "ordinal": 152,
+              "exactText": "March 2020- SCT/3-"
+            }
+          ],
+          "preserveFollowingParagraph": {
+            "ordinal": 153,
+            "exactText": "",
+            "breakAttributes": [],
+            "lastRenderedPageBreakCount": 0,
+            "pageBreakBeforeAttributes": []
+          },
+          "otherParagraphsAndBreaks": "PRESERVE_ALL_NOT_IN_EXACT_CLEARANCE_LIST"
+        },
+        {
+          "pageOrdinal": 4,
+          "paragraphs": [
+            {
+              "ordinal": 210,
+              "exactText": "HD(QS) 3C/121/1/2"
+            },
+            {
+              "ordinal": 211,
+              "exactText": "March 2020- SCT/4 -"
+            }
+          ],
+          "preserveFollowingParagraph": {
+            "ordinal": 212,
+            "exactText": "",
+            "breakAttributes": [],
+            "lastRenderedPageBreakCount": 0,
+            "pageBreakBeforeAttributes": []
+          },
+          "otherParagraphsAndBreaks": "PRESERVE_ALL_NOT_IN_EXACT_CLEARANCE_LIST"
+        },
+        {
+          "pageOrdinal": 5,
+          "paragraphs": [
+            {
+              "ordinal": 253,
+              "exactText": "HD(QS) 3C/121/1/2"
+            },
+            {
+              "ordinal": 254,
+              "exactText": "March 2020- SCT/5 -"
+            }
+          ],
+          "preserveFollowingParagraph": {
+            "ordinal": 255,
+            "exactText": "",
+            "breakAttributes": [],
+            "lastRenderedPageBreakCount": 0,
+            "pageBreakBeforeAttributes": []
+          },
+          "otherParagraphsAndBreaks": "PRESERVE_ALL_NOT_IN_EXACT_CLEARANCE_LIST"
+        },
+        {
+          "pageOrdinal": 6,
+          "paragraphs": [
+            {
+              "ordinal": 302,
+              "exactText": "HD(QS) 3C/121/1/2"
+            },
+            {
+              "ordinal": 303,
+              "exactText": "March 2020- SCT/6 -"
+            }
+          ],
+          "preserveFollowingParagraph": {
+            "ordinal": 304,
+            "exactText": "",
+            "breakAttributes": [],
+            "lastRenderedPageBreakCount": 0,
+            "pageBreakBeforeAttributes": []
+          },
+          "otherParagraphsAndBreaks": "PRESERVE_ALL_NOT_IN_EXACT_CLEARANCE_LIST"
+        },
+        {
+          "pageOrdinal": 7,
+          "paragraphs": [
+            {
+              "ordinal": 368,
+              "exactText": "HD(QS) 3C/121/1/2"
+            },
+            {
+              "ordinal": 369,
+              "exactText": "March 2020            - SCT/7 -"
+            }
+          ],
+          "preserveFollowingParagraph": {
+            "ordinal": 370,
+            "exactText": "",
+            "breakAttributes": [],
+            "lastRenderedPageBreakCount": 0,
+            "pageBreakBeforeAttributes": []
+          },
+          "otherParagraphsAndBreaks": "PRESERVE_ALL_NOT_IN_EXACT_CLEARANCE_LIST"
+        },
+        {
+          "pageOrdinal": 8,
+          "paragraphs": [
+            {
+              "ordinal": 417,
+              "exactText": "HD(QS) 3C/121/1/2"
+            },
+            {
+              "ordinal": 418,
+              "exactText": "March 2020- SCT/8 -"
+            }
+          ],
+          "preserveFollowingParagraph": {
+            "ordinal": 419,
+            "exactText": "",
+            "breakAttributes": [],
+            "lastRenderedPageBreakCount": 0,
+            "pageBreakBeforeAttributes": []
+          },
+          "otherParagraphsAndBreaks": "PRESERVE_ALL_NOT_IN_EXACT_CLEARANCE_LIST"
+        },
+        {
+          "pageOrdinal": 9,
+          "paragraphs": [
+            {
+              "ordinal": 471,
+              "exactText": "HD(QS) 3C/121/1/2"
+            },
+            {
+              "ordinal": 472,
+              "exactText": "March 2020- SCT/9 -"
+            }
+          ],
+          "preserveFollowingParagraph": {
+            "ordinal": 473,
+            "exactText": "",
+            "breakAttributes": [],
+            "lastRenderedPageBreakCount": 0,
+            "pageBreakBeforeAttributes": []
+          },
+          "otherParagraphsAndBreaks": "PRESERVE_ALL_NOT_IN_EXACT_CLEARANCE_LIST"
+        },
+        {
+          "pageOrdinal": 10,
+          "paragraphs": [
+            {
+              "ordinal": 502,
+              "exactText": "HD(QS) 3C/121/1/2"
+            },
+            {
+              "ordinal": 503,
+              "exactText": "March 2020- SCT/10 - "
+            }
+          ],
+          "preserveFollowingParagraph": {
+            "ordinal": 504,
+            "exactText": "",
+            "breakAttributes": [],
+            "lastRenderedPageBreakCount": 0,
+            "pageBreakBeforeAttributes": []
+          },
+          "otherParagraphsAndBreaks": "PRESERVE_ALL_NOT_IN_EXACT_CLEARANCE_LIST"
+        },
+        {
+          "pageOrdinal": 11,
+          "paragraphs": [
+            {
+              "ordinal": 527,
+              "exactText": "HD(QS) 3C/121/1/2"
+            },
+            {
+              "ordinal": 528,
+              "exactText": "March 2020- SCT/11 - "
+            }
+          ],
+          "preserveFollowingParagraph": {
+            "ordinal": 529,
+            "exactText": "",
+            "breakAttributes": [],
+            "lastRenderedPageBreakCount": 0,
+            "pageBreakBeforeAttributes": []
+          },
+          "otherParagraphsAndBreaks": "PRESERVE_ALL_NOT_IN_EXACT_CLEARANCE_LIST"
+        },
+        {
+          "pageOrdinal": 12,
+          "paragraphs": [
+            {
+              "ordinal": 563,
+              "exactText": "HD(QS) 3C/121/1/2"
+            },
+            {
+              "ordinal": 564,
+              "exactText": "March 2020- SCT/12 - "
+            }
+          ],
+          "preserveFollowingParagraph": {
+            "ordinal": 565,
+            "exactText": "",
+            "breakAttributes": [],
+            "lastRenderedPageBreakCount": 0,
+            "pageBreakBeforeAttributes": []
+          },
+          "otherParagraphsAndBreaks": "PRESERVE_ALL_NOT_IN_EXACT_CLEARANCE_LIST"
+        },
+        {
+          "pageOrdinal": 13,
+          "paragraphs": [
+            {
+              "ordinal": 610,
+              "exactText": "HD(QS) 3C/121/1/2"
+            },
+            {
+              "ordinal": 611,
+              "exactText": "March 2020- SCT/13 - "
+            }
+          ],
+          "preserveFollowingParagraph": {
+            "ordinal": 612,
+            "exactText": "",
+            "breakAttributes": [],
+            "lastRenderedPageBreakCount": 0,
+            "pageBreakBeforeAttributes": []
+          },
+          "otherParagraphsAndBreaks": "PRESERVE_ALL_NOT_IN_EXACT_CLEARANCE_LIST"
+        },
+        {
+          "pageOrdinal": 14,
+          "paragraphs": [
+            {
+              "ordinal": 660,
+              "exactText": "HD(QS) 3C/121/1/2"
+            },
+            {
+              "ordinal": 661,
+              "exactText": "March 2020- SCT/14 – "
+            }
+          ],
+          "preserveFollowingParagraph": {
+            "ordinal": 662,
+            "exactText": "",
+            "breakAttributes": [],
+            "lastRenderedPageBreakCount": 0,
+            "pageBreakBeforeAttributes": []
+          },
+          "otherParagraphsAndBreaks": "PRESERVE_ALL_NOT_IN_EXACT_CLEARANCE_LIST"
+        },
+        {
+          "pageOrdinal": 15,
+          "paragraphs": [
+            {
+              "ordinal": 700,
+              "exactText": "HD(QS) 3C/121/1/2"
+            },
+            {
+              "ordinal": 701,
+              "exactText": "March 2020- SCT/15 - "
+            }
+          ],
+          "preserveFollowingParagraph": {
+            "ordinal": 702,
+            "exactText": "",
+            "breakAttributes": [],
+            "lastRenderedPageBreakCount": 0,
+            "pageBreakBeforeAttributes": []
+          },
+          "otherParagraphsAndBreaks": "PRESERVE_ALL_NOT_IN_EXACT_CLEARANCE_LIST"
+        },
+        {
+          "pageOrdinal": 16,
+          "paragraphs": [
+            {
+              "ordinal": 737,
+              "exactText": "HD(QS) 3C/121/1/2"
+            },
+            {
+              "ordinal": 738,
+              "exactText": "March 2020- SCT/16 – "
+            }
+          ],
+          "preserveFollowingParagraph": {
+            "ordinal": 739,
+            "exactText": "",
+            "breakAttributes": [],
+            "lastRenderedPageBreakCount": 0,
+            "pageBreakBeforeAttributes": []
+          },
+          "otherParagraphsAndBreaks": "PRESERVE_ALL_NOT_IN_EXACT_CLEARANCE_LIST"
+        },
+        {
+          "pageOrdinal": 17,
+          "paragraphs": [
+            {
+              "ordinal": 776,
+              "exactText": "HD(QS) 3C/121/1/2"
+            },
+            {
+              "ordinal": 777,
+              "exactText": "March 2020- SCT/17 -"
+            }
+          ],
+          "preserveFollowingParagraph": {
+            "ordinal": 778,
+            "exactText": "",
+            "breakAttributes": [],
+            "lastRenderedPageBreakCount": 0,
+            "pageBreakBeforeAttributes": []
+          },
+          "otherParagraphsAndBreaks": "PRESERVE_ALL_NOT_IN_EXACT_CLEARANCE_LIST"
+        },
+        {
+          "pageOrdinal": 18,
+          "paragraphs": [
+            {
+              "ordinal": 833,
+              "exactText": "HD(QS) 3C/121/1/2"
+            },
+            {
+              "ordinal": 834,
+              "exactText": "March 2020- SCT/18 -"
+            }
+          ],
+          "preserveFollowingParagraph": {
+            "ordinal": 835,
+            "exactText": "",
+            "breakAttributes": [],
+            "lastRenderedPageBreakCount": 0,
+            "pageBreakBeforeAttributes": []
+          },
+          "otherParagraphsAndBreaks": "PRESERVE_ALL_NOT_IN_EXACT_CLEARANCE_LIST"
+        },
+        {
+          "pageOrdinal": 19,
+          "paragraphs": [
+            {
+              "ordinal": 876,
+              "exactText": "HD(QS) 3C/121/1/2"
+            },
+            {
+              "ordinal": 877,
+              "exactText": "March 2020- SCT/19 -"
+            }
+          ],
+          "preserveFollowingParagraph": {
+            "ordinal": 878,
+            "exactText": "",
+            "breakAttributes": [],
+            "lastRenderedPageBreakCount": 0,
+            "pageBreakBeforeAttributes": []
+          },
+          "otherParagraphsAndBreaks": "PRESERVE_ALL_NOT_IN_EXACT_CLEARANCE_LIST"
+        },
+        {
+          "pageOrdinal": 20,
+          "paragraphs": [
+            {
+              "ordinal": 911,
+              "exactText": "HD(QS) 3C/121/1/2"
+            },
+            {
+              "ordinal": 912,
+              "exactText": "March 2020- SCT/20 –"
+            }
+          ],
+          "preserveFollowingParagraph": {
+            "ordinal": 913,
+            "exactText": "",
+            "breakAttributes": [],
+            "lastRenderedPageBreakCount": 0,
+            "pageBreakBeforeAttributes": []
+          },
+          "otherParagraphsAndBreaks": "PRESERVE_ALL_NOT_IN_EXACT_CLEARANCE_LIST"
+        },
+        {
+          "pageOrdinal": 21,
+          "paragraphs": [
+            {
+              "ordinal": 953,
+              "exactText": "HD(QS) 3C/121/1/2"
+            },
+            {
+              "ordinal": 954,
+              "exactText": "March 2020- SCT/21 -"
+            }
+          ],
+          "preserveFollowingParagraph": {
+            "ordinal": 955,
+            "exactText": "",
+            "breakAttributes": [],
+            "lastRenderedPageBreakCount": 0,
+            "pageBreakBeforeAttributes": []
+          },
+          "otherParagraphsAndBreaks": "PRESERVE_ALL_NOT_IN_EXACT_CLEARANCE_LIST"
+        },
+        {
+          "pageOrdinal": 22,
+          "paragraphs": [
+            {
+              "ordinal": 1010,
+              "exactText": "HD(QS) 3C/121/1/2"
+            },
+            {
+              "ordinal": 1011,
+              "exactText": "March 2020- SCT/22 -"
+            }
+          ],
+          "preserveFollowingParagraph": {
+            "ordinal": 1012,
+            "exactText": "",
+            "breakAttributes": [],
+            "lastRenderedPageBreakCount": 0,
+            "pageBreakBeforeAttributes": []
+          },
+          "otherParagraphsAndBreaks": "PRESERVE_ALL_NOT_IN_EXACT_CLEARANCE_LIST"
+        },
+        {
+          "pageOrdinal": 23,
+          "paragraphs": [
+            {
+              "ordinal": 1058,
+              "exactText": "HD(QS) 3C/121/1/2"
+            },
+            {
+              "ordinal": 1059,
+              "exactText": "March 2020- SCT/23 -"
+            }
+          ],
+          "preserveFollowingParagraph": {
+            "ordinal": 1060,
+            "exactText": "",
+            "breakAttributes": [],
+            "lastRenderedPageBreakCount": 0,
+            "pageBreakBeforeAttributes": []
+          },
+          "otherParagraphsAndBreaks": "PRESERVE_ALL_NOT_IN_EXACT_CLEARANCE_LIST"
+        },
+        {
+          "pageOrdinal": 24,
+          "paragraphs": [
+            {
+              "ordinal": 1099,
+              "exactText": "HD(QS) 3C/121/1/2"
+            },
+            {
+              "ordinal": 1100,
+              "exactText": "March 2020- SCT/24 -"
+            }
+          ],
+          "preserveFollowingParagraph": {
+            "ordinal": 1101,
+            "exactText": "",
+            "breakAttributes": [],
+            "lastRenderedPageBreakCount": 0,
+            "pageBreakBeforeAttributes": []
+          },
+          "otherParagraphsAndBreaks": "PRESERVE_ALL_NOT_IN_EXACT_CLEARANCE_LIST"
+        },
+        {
+          "pageOrdinal": 25,
+          "paragraphs": [
+            {
+              "ordinal": 1136,
+              "exactText": "HD(QS) 3C/121/1/2"
+            },
+            {
+              "ordinal": 1137,
+              "exactText": "March 2020- SCT/25 -"
+            }
+          ],
+          "preserveFollowingParagraph": {
+            "ordinal": 1138,
+            "exactText": "",
+            "breakAttributes": [],
+            "lastRenderedPageBreakCount": 0,
+            "pageBreakBeforeAttributes": []
+          },
+          "otherParagraphsAndBreaks": "PRESERVE_ALL_NOT_IN_EXACT_CLEARANCE_LIST"
+        },
+        {
+          "pageOrdinal": 26,
+          "paragraphs": [
+            {
+              "ordinal": 1188,
+              "exactText": "HD(QS) 3C/121/1/2"
+            },
+            {
+              "ordinal": 1189,
+              "exactText": "March 2020- SCT/26 -"
+            }
+          ],
+          "preserveFollowingParagraph": {
+            "ordinal": 1190,
+            "exactText": "",
+            "breakAttributes": [],
+            "lastRenderedPageBreakCount": 0,
+            "pageBreakBeforeAttributes": []
+          },
+          "otherParagraphsAndBreaks": "PRESERVE_ALL_NOT_IN_EXACT_CLEARANCE_LIST"
+        },
+        {
+          "pageOrdinal": 27,
+          "paragraphs": [
+            {
+              "ordinal": 1237,
+              "exactText": "HD(QS) 3C/121/1/2"
+            },
+            {
+              "ordinal": 1238,
+              "exactText": "March 2020- SCT/27 -"
+            }
+          ],
+          "preserveFollowingParagraph": null,
+          "otherParagraphsAndBreaks": "PRESERVE_ALL_NOT_IN_EXACT_CLEARANCE_LIST"
+        }
+      ],
+      "contractLabelSpecs": [],
+      "sourceControlLinesToRetain": [
+        "HD(QS) 3C/121/1/2",
+        "March 2020"
+      ],
+      "sections": [
+        {
+          "footerPagePolicy": "CREATE_PAGE_FROM_STATIC_SEQUENCE",
+          "pagePrefix": "SCT/",
+          "pageSuffix": null,
+          "sourceNumberingDiagnostic": {
+            "action": "SET_VISIBLE_SEQUENCE_START",
+            "nextRaw": {
+              "start": "1"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "profileId": "native-identity-2a-scc-candidate01",
+      "edition": "2a",
+      "key": "SCC",
+      "sourceSha256": "9aa2fa06683652548e72dbf955c3f236d86cb0958a8fdf3b1ff6cf75b65c7208",
+      "expectedEntryHashes": {
+        "[Content_Types].xml": "2158bbeafe312e32538e6090e114feccbbb583b013bb7e9393dc95065eb057c3",
+        "_rels/.rels": "c30fe099dbcfed4ecc4ae544ccf82f432c8d3bb665e2a301df283738b196d803",
+        "customXml/_rels/item1.xml.rels": "80482f86e196171d66001e0e74d1900408a3aaf2463e54005d251b5f2db9a0b0",
+        "customXml/_rels/item2.xml.rels": "2a6aee4c8a9714223a3568077411a0c82d11b484b1c9ab93a19d50b99c57baa5",
+        "customXml/_rels/item3.xml.rels": "3aa4054f7f463c6d441102c960783aa7f937d6945a0a885b624a66aafaeedb6c",
+        "customXml/_rels/item4.xml.rels": "3c0d4d955517fe8112c945b1e56f63d5bef3c0005ccb627e40acda432e1cdc1d",
+        "customXml/item1.xml": "c8092edbb672f8c93f1d5ef66539a6f169462ba8738b785b59cc5d96f4aca59a",
+        "customXml/item2.xml": "79cb720f305b1bf2d4da0d620af86b1e79bfddab64c5797f5bcb30de171eb40f",
+        "customXml/item3.xml": "5efcaf9ad70d9c29f406ee438f8f428b021a881d2c5afff0e53b00b1f67ae51e",
+        "customXml/item4.xml": "d113ea82c2f55b180212a7d0f6b87e36a0d891644827c81a2de0a0b7ce28a97e",
+        "customXml/itemProps1.xml": "db4e3456366e1ab5bc91191b2f97633c305eb383c31075f779c763e772a05799",
+        "customXml/itemProps2.xml": "46594aec282774443ecf27525764da16642f2cdc45c1e0960715b5dd97d53006",
+        "customXml/itemProps3.xml": "a91c9dc1e1aeb4ac5e2cbb34a1155eaf56310462d827d0c1da1ebbb111d5d641",
+        "customXml/itemProps4.xml": "fc6be55290ae642ba65d27518ca2797b48208292646dbd77f3a83e23ca4e1a6d",
+        "docProps/app.xml": "4b51dd4e057c873c6b7f5652193fccaec3210eb7dcdf4e1d60db3d68def9574c",
+        "docProps/core.xml": "9b074c10e61f652610a6aaf4ac5a3d24ac464c596022d6974a3a5173af9c47a8",
+        "docProps/custom.xml": "175f7de368240412814bffd701f31aae13cc0d755112773605fc6ddec96cdaf5",
+        "word/_rels/document.xml.rels": "563974dffeb44f2fd22830592571051b30efe0265a483cd4bdf3b29b52bbe84e",
+        "word/document.xml": "f21f0371778a5df4b84449c0aa900b2449e8c6cba6117888b893b982ee8496e0",
+        "word/endnotes.xml": "c713f83c6f338c45e2462cdc75d1d0a9d25a5afcfce993d1d6489312f33fa463",
+        "word/fontTable.xml": "dbc0a15427b9b62a5b09765850d7176bb106bfb8e4f54e6cb6c0144559d212e3",
+        "word/footer1.xml": "b3b69f39ed51d43bcd7e150ccb67e4be94274780128f23cd82d92ee7adf75776",
+        "word/footer2.xml": "7b585be3d398eec72edb22d67313f52f03221bbb9fae9a8564401e4576e8951c",
+        "word/footnotes.xml": "72dd5435482bb8850b98cf51614fa887bc2ee7243abd63f973fb99f9dfcbab61",
+        "word/header1.xml": "15a462d09d07b7784a63cdef7c455e4dd12c4031c3b18d841ada7a38abe82afe",
+        "word/header2.xml": "8e1e1daa8e3c9f601e0c526e95ba167d5db43204cabeb57301e84641a8953019",
+        "word/header3.xml": "96aacfd982464daaacbcca00c89ccaea25ad3ce6dc8aa7d973af42731498a752",
+        "word/header4.xml": "8e1e1daa8e3c9f601e0c526e95ba167d5db43204cabeb57301e84641a8953019",
+        "word/numbering.xml": "4a4e6419fb5132bc67416bd46366c5438869468faaecb646092c191b410f6853",
+        "word/settings.xml": "78833a36a40d23c0303aeb8d02c0aca51372f852058566fbeadbd3550ee7adaa",
+        "word/styles.xml": "fbdeca3ae2575657ae3b52c571e37127e1a520a48ff20080d6b15a384c293e9e",
+        "word/theme/theme1.xml": "ff5620b3da71b704e23c4172ae212a0ace147b030cb190cf068c01b6d9cf136e",
+        "word/webSettings.xml": "2a3eb2f9d5c736797bdca8653b6f222c30bf52522c017daba02b4381812173f8"
+      },
+      "staticFooterMigration": [],
+      "contractLabelSpecs": [],
+      "sourceControlLinesToRetain": [],
+      "sections": [
+        {
+          "footerPagePolicy": "PRESERVE_EXISTING_PAGE",
+          "pagePrefix": null,
+          "pageSuffix": null,
+          "sourceNumberingDiagnostic": {
+            "action": "PRESERVE",
+            "nextRaw": {
+              "fmt": "lowerRoman",
+              "start": "1"
+            }
+          }
+        },
+        {
+          "footerPagePolicy": "PRESERVE_EXISTING_PAGE",
+          "pagePrefix": null,
+          "pageSuffix": null,
+          "sourceNumberingDiagnostic": {
+            "action": "PRESERVE",
+            "nextRaw": {
+              "start": "1"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "profileId": "native-identity-2b-ntt-candidate01",
+      "edition": "2b",
+      "key": "NTT",
+      "sourceSha256": "0cae753f94bac27bfaa992b55f9ba60d8d541d407313825fd3375d1ff41c3356",
+      "expectedEntryHashes": {
+        "[Content_Types].xml": "adf91b11b482cff9861fe57259679b844529fb19ad8c398665d518b77780e228",
+        "_rels/.rels": "c30fe099dbcfed4ecc4ae544ccf82f432c8d3bb665e2a301df283738b196d803",
+        "customXml/_rels/item1.xml.rels": "80482f86e196171d66001e0e74d1900408a3aaf2463e54005d251b5f2db9a0b0",
+        "customXml/_rels/item2.xml.rels": "2a6aee4c8a9714223a3568077411a0c82d11b484b1c9ab93a19d50b99c57baa5",
+        "customXml/_rels/item3.xml.rels": "3aa4054f7f463c6d441102c960783aa7f937d6945a0a885b624a66aafaeedb6c",
+        "customXml/_rels/item4.xml.rels": "3c0d4d955517fe8112c945b1e56f63d5bef3c0005ccb627e40acda432e1cdc1d",
+        "customXml/item1.xml": "c8092edbb672f8c93f1d5ef66539a6f169462ba8738b785b59cc5d96f4aca59a",
+        "customXml/item2.xml": "79cb720f305b1bf2d4da0d620af86b1e79bfddab64c5797f5bcb30de171eb40f",
+        "customXml/item3.xml": "5efcaf9ad70d9c29f406ee438f8f428b021a881d2c5afff0e53b00b1f67ae51e",
+        "customXml/item4.xml": "d113ea82c2f55b180212a7d0f6b87e36a0d891644827c81a2de0a0b7ce28a97e",
+        "customXml/itemProps1.xml": "9fd373c78764f5b87dc0582de337f9e70535f797dc75c0a3137b32a972ef0102",
+        "customXml/itemProps2.xml": "d41906e9ed527865b1db315749c532189a2eb2cbdb83b17c680ac6cc75920951",
+        "customXml/itemProps3.xml": "5ec2ce2323046aaf38f95e575302b52afb476fb7ed32abb2c53baf22f5073531",
+        "customXml/itemProps4.xml": "8b85b467b6c0ba4fb55b32c3b724d8f1271a8bd02d4a8cf275ccaba3e640895e",
+        "docProps/app.xml": "fe1f99610bc88aa84821d84e669c1893e1f01d27431c895015fe6779ad9a3c2e",
+        "docProps/core.xml": "0ab58109a77e537d75943a5fa880e75e6b2ced17635d90ed40c916adc5d2b94f",
+        "docProps/custom.xml": "175f7de368240412814bffd701f31aae13cc0d755112773605fc6ddec96cdaf5",
+        "word/_rels/document.xml.rels": "cff79256baf7f7f3bcffe7a48cb5d4543d8f865486b320558ac79172371bd200",
+        "word/document.xml": "a97a8b2017e8617319b0abf8e7c7224a15c156599f733a4e9598bbb6137ed244",
+        "word/endnotes.xml": "616fcfbe43245616fb3f6434d249eee557b3658e92c743e3d4707c7591a57c34",
+        "word/fontTable.xml": "d4058a31b11f7e6bf3fc50116b8b9bcb936854acec917a1e03157842d46bd71d",
+        "word/footer1.xml": "8ecb7ea1aee1a7adf1236d2c5e1c7212e53c051e704944d33e4f97fad379429e",
+        "word/footer2.xml": "d6c776e7401a4cae0eec4f1634fc69e40a3bd66f48489053df5c871d8c83f539",
+        "word/footnotes.xml": "837cd75d0ee23de433a9041c977bc08845930cc7c1c3b844423811b0162a81f8",
+        "word/header1.xml": "0bf962df8dd0de0eb7160276665b1d3b54cf8f6732b1fa41b3abe7b7f800dae6",
+        "word/numbering.xml": "6005b32cb907d25774750a86a1b83ef628ef167cd22d84bf56d79d5de7ccf9d2",
+        "word/settings.xml": "7dd48383357be95115a8c10367267fdc725a39231e802f5423f7e8a83271ce38",
+        "word/styles.xml": "e0c5050c896aead6143769867024b7bfec1aa9ee2aed97dc8ba67e2c8209e7d2",
+        "word/theme/theme1.xml": "124a137f11499ab4344fd9bd2593d5a14aac82bc64ecd1d471e5c5007fc9f124",
+        "word/webSettings.xml": "2555c5e1a0a5f99f53e9ff0b847f55866f2aea6db3b44dad70cb40ff78f156f4"
+      },
+      "staticFooterMigration": [],
+      "contractLabelSpecs": [
+        {
+          "partName": "word/footer1.xml",
+          "partSha256": "8ecb7ea1aee1a7adf1236d2c5e1c7212e53c051e704944d33e4f97fad379429e",
+          "paragraphOrdinal": 1,
+          "exactCatalogText": "20250101",
+          "start": 0,
+          "end": 8,
+          "expectedText": "20250101"
+        },
+        {
+          "partName": "word/footer2.xml",
+          "partSha256": "d6c776e7401a4cae0eec4f1634fc69e40a3bd66f48489053df5c871d8c83f539",
+          "paragraphOrdinal": 1,
+          "exactCatalogText": "20250101- NTT/10 -",
+          "start": 0,
+          "end": 8,
+          "expectedText": "20250101"
+        }
+      ],
+      "sourceControlLinesToRetain": [],
+      "sections": [
+        {
+          "footerPagePolicy": "PRESERVE_NO_PAGE",
+          "pagePrefix": null,
+          "pageSuffix": null,
+          "sourceNumberingDiagnostic": {
+            "action": "PRESERVE",
+            "nextRaw": {}
+          }
+        },
+        {
+          "footerPagePolicy": "PRESERVE_EXISTING_PAGE",
+          "pagePrefix": "NTT/",
+          "pageSuffix": null,
+          "sourceNumberingDiagnostic": {
+            "action": "PRESERVE",
+            "nextRaw": {
+              "start": "1"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "profileId": "native-identity-2b-sct-candidate01",
+      "edition": "2b",
+      "key": "SCT",
+      "sourceSha256": "6d7802ea7b094124c0ddebb0b448c7e6bfe72828ffbc91ad1c30133902a6f64c",
+      "expectedEntryHashes": {
+        "[Content_Types].xml": "9c2e7a44d38e05bd1e18e457d4f8a3177ee5639f2e108be78d42cd927126dd42",
+        "_rels/.rels": "c30fe099dbcfed4ecc4ae544ccf82f432c8d3bb665e2a301df283738b196d803",
+        "customXml/_rels/item1.xml.rels": "80482f86e196171d66001e0e74d1900408a3aaf2463e54005d251b5f2db9a0b0",
+        "customXml/_rels/item2.xml.rels": "2a6aee4c8a9714223a3568077411a0c82d11b484b1c9ab93a19d50b99c57baa5",
+        "customXml/_rels/item3.xml.rels": "3aa4054f7f463c6d441102c960783aa7f937d6945a0a885b624a66aafaeedb6c",
+        "customXml/_rels/item4.xml.rels": "3c0d4d955517fe8112c945b1e56f63d5bef3c0005ccb627e40acda432e1cdc1d",
+        "customXml/item1.xml": "c8092edbb672f8c93f1d5ef66539a6f169462ba8738b785b59cc5d96f4aca59a",
+        "customXml/item2.xml": "79cb720f305b1bf2d4da0d620af86b1e79bfddab64c5797f5bcb30de171eb40f",
+        "customXml/item3.xml": "5efcaf9ad70d9c29f406ee438f8f428b021a881d2c5afff0e53b00b1f67ae51e",
+        "customXml/item4.xml": "d113ea82c2f55b180212a7d0f6b87e36a0d891644827c81a2de0a0b7ce28a97e",
+        "customXml/itemProps1.xml": "04de1ed63f5209d6a08ecff5bbe714bb5a920f281f4c0342fa5841a07068fe79",
+        "customXml/itemProps2.xml": "72d26e200e05a366553da8496b52c62dba63a1424af8eadf7adb4ddf6db3ceff",
+        "customXml/itemProps3.xml": "ad69d62904237eee723faa578385b5ccdf68e06becd6f091fc1ded54d5ae623c",
+        "customXml/itemProps4.xml": "b76a0f40b2cf456303dd1948fb93243aeef7e240f2fcf557c37d901c4b7d5043",
+        "docProps/app.xml": "c6b496278bda034b8d6386ea86e50f318d23333e8866d911e68300cbc7cb9df9",
+        "docProps/core.xml": "05e0996e63b7581ee3d13e1ea1c95ef1b15d80865cd68a2995964d248914a9ad",
+        "docProps/custom.xml": "175f7de368240412814bffd701f31aae13cc0d755112773605fc6ddec96cdaf5",
+        "word/_rels/document.xml.rels": "74bf926119edd638175df3818c70cccb44327dde0450bacbc0e748d968b54734",
+        "word/document.xml": "8b7db19d8fb229670ebe32735ab7b5eac88641efdf404b3500660cde6aee1532",
+        "word/endnotes.xml": "0e85d1cc6e2b3f82b39200dd8a3a8142b684bd23cf384d1c019c0269e6114675",
+        "word/fontTable.xml": "137ae7088cb2fe1d8548a08fd1e9215f4ad9c2bcd1bb63d80502783ab21aebc5",
+        "word/footer1.xml": "c35c21d7a49982c3d0f99566af0041a922eff48b0fcf923b0a0e668740a72aa9",
+        "word/footer10.xml": "de447a209d7fbb98367a61dd39cf327bf1ddf0acc97b826bf4c58d4c1dc8f871",
+        "word/footer11.xml": "ff681eec65fd1016a7c9e67dd15926e18721ebd333af8983c2b00355a8d46c27",
+        "word/footer12.xml": "cdde878e4b867732e755d4768001e18f53400a24da31d20676d9565c6f81b9da",
+        "word/footer13.xml": "0cf7ba1b587a44505cd13971221867c3cc2127a58ed8d89eae23d708eb9a4771",
+        "word/footer2.xml": "e79fdba92b84dc72a83addd7e9f61e58402e2a8693df8cfa5e79ebffbd9841fb",
+        "word/footer3.xml": "83954e836174242ce1ec85493e93b0bafe2a8afc28129ce2a3fb43aa0fe58bce",
+        "word/footer4.xml": "fd8fe6d29528be19c22279519d3c87232ff2f28dceeeea3e1f5d77c7000a5473",
+        "word/footer5.xml": "5a5dc74a32ac543d4ab338e7b71cd853e283b3d1d39fa91664da728791f90177",
+        "word/footer6.xml": "ef509b69693afcd4d21bfcbed013ffbfd07debb279b06e98f6be9bf8df78842f",
+        "word/footer7.xml": "5d78d514dc953a1f5904c125528fdaadd69918586cd19c8c2e20745d86c58b0a",
+        "word/footer8.xml": "e8c73e1a988e16a2f2450164b70dd800a44bc5edd55766e60bfa13fcb178a410",
+        "word/footer9.xml": "32a15def546c67a5f37d488235ff7c8909d0fa869bb8097e5036f40cd1f729f6",
+        "word/footnotes.xml": "22c3b8e678b1b208a0c0539e4181597ec00c9d5ef932408b62368dfa01a513a6",
+        "word/header1.xml": "8208cbd944e3e2ae229f1f534e29a060df866fd2be10af878d9eb0bec17c1ae9",
+        "word/header10.xml": "8924dc2550ab84e8e4c9463b4bb98c00bece0d289834436b09c7730605786beb",
+        "word/header2.xml": "c6bf07a47866b1db2c34f9bf2d5c91d1031fdb2511c10d45499d8350ad0ff696",
+        "word/header3.xml": "590adde6f26efe3d90a702ac4ffa6ea949df486cae13e7ccb19311af6caa4a09",
+        "word/header4.xml": "b102563909b0966638217149c33e2a0ae1a4977d70e92a3d488500543fba712a",
+        "word/header5.xml": "faa45d229302b39af9869b15b209b2acfdb00bebe90d0315a4c55d182d23fca2",
+        "word/header6.xml": "ae6b281fd43262fe46f75a881abdec707a51a036e21169df6d4fd2ddfb141cdb",
+        "word/header7.xml": "0775899f300f1c14af44dc84ea70eb180e8e08e0e2a7d6694e63ca4f0bbc1f04",
+        "word/header8.xml": "3911b689363d9dd39e95b2ff4bfbcb3e69256c2c9f3479e9c8383793c6e86d26",
+        "word/header9.xml": "2ab17e814daea42fda4e57ff15fc5c9c03adf48eff7b43fda843e49bc0be0263",
+        "word/numbering.xml": "776137f2dfef6ba648f928a9970ff0b7c95dfbcc4a99e983a87c41a0cce57dd0",
+        "word/settings.xml": "eed616436afeb146d75f1e814b7eb4b1d49d351f5e1e063fa7db8ac42a95145c",
+        "word/styles.xml": "a211fadb3d34a82f1eca43aebcf4a79dc0fe1ffb7c201dd4d90206b0223f5bcf",
+        "word/theme/theme1.xml": "124a137f11499ab4344fd9bd2593d5a14aac82bc64ecd1d471e5c5007fc9f124",
+        "word/webSettings.xml": "0c574480d7f83f0f5f97641807aece9cc8cc72332277bf69f9d5dc6fe91b29fb"
+      },
+      "staticFooterMigration": [],
+      "contractLabelSpecs": [
+        {
+          "partName": "word/footer1.xml",
+          "partSha256": "c35c21d7a49982c3d0f99566af0041a922eff48b0fcf923b0a0e668740a72aa9",
+          "paragraphOrdinal": 1,
+          "exactCatalogText": "20250101",
+          "start": 0,
+          "end": 8,
+          "expectedText": "20250101"
+        },
+        {
+          "partName": "word/footer10.xml",
+          "partSha256": "de447a209d7fbb98367a61dd39cf327bf1ddf0acc97b826bf4c58d4c1dc8f871",
+          "paragraphOrdinal": 1,
+          "exactCatalogText": "20250101",
+          "start": 0,
+          "end": 8,
+          "expectedText": "20250101"
+        },
+        {
+          "partName": "word/footer11.xml",
+          "partSha256": "ff681eec65fd1016a7c9e67dd15926e18721ebd333af8983c2b00355a8d46c27",
+          "paragraphOrdinal": 1,
+          "exactCatalogText": "20250101- SCT.F/1 -",
+          "start": 0,
+          "end": 8,
+          "expectedText": "20250101"
+        },
+        {
+          "partName": "word/footer12.xml",
+          "partSha256": "cdde878e4b867732e755d4768001e18f53400a24da31d20676d9565c6f81b9da",
+          "paragraphOrdinal": 1,
+          "exactCatalogText": "20250101",
+          "start": 0,
+          "end": 8,
+          "expectedText": "20250101"
+        },
+        {
+          "partName": "word/footer13.xml",
+          "partSha256": "0cf7ba1b587a44505cd13971221867c3cc2127a58ed8d89eae23d708eb9a4771",
+          "paragraphOrdinal": 1,
+          "exactCatalogText": "20250101 - SCT.G/2 -",
+          "start": 0,
+          "end": 8,
+          "expectedText": "20250101"
+        },
+        {
+          "partName": "word/footer2.xml",
+          "partSha256": "e79fdba92b84dc72a83addd7e9f61e58402e2a8693df8cfa5e79ebffbd9841fb",
+          "paragraphOrdinal": 1,
+          "exactCatalogText": "20250101- SCT/21 -",
+          "start": 0,
+          "end": 8,
+          "expectedText": "20250101"
+        },
+        {
+          "partName": "word/footer3.xml",
+          "partSha256": "83954e836174242ce1ec85493e93b0bafe2a8afc28129ce2a3fb43aa0fe58bce",
+          "paragraphOrdinal": 1,
+          "exactCatalogText": "20250101",
+          "start": 0,
+          "end": 8,
+          "expectedText": "20250101"
+        },
+        {
+          "partName": "word/footer4.xml",
+          "partSha256": "fd8fe6d29528be19c22279519d3c87232ff2f28dceeeea3e1f5d77c7000a5473",
+          "paragraphOrdinal": 1,
+          "exactCatalogText": "20250101",
+          "start": 0,
+          "end": 8,
+          "expectedText": "20250101"
+        },
+        {
+          "partName": "word/footer5.xml",
+          "partSha256": "5a5dc74a32ac543d4ab338e7b71cd853e283b3d1d39fa91664da728791f90177",
+          "paragraphOrdinal": 1,
+          "exactCatalogText": "20250101- SCT.C/2 -",
+          "start": 0,
+          "end": 8,
+          "expectedText": "20250101"
+        },
+        {
+          "partName": "word/footer6.xml",
+          "partSha256": "ef509b69693afcd4d21bfcbed013ffbfd07debb279b06e98f6be9bf8df78842f",
+          "paragraphOrdinal": 1,
+          "exactCatalogText": "20250101",
+          "start": 0,
+          "end": 8,
+          "expectedText": "20250101"
+        },
+        {
+          "partName": "word/footer7.xml",
+          "partSha256": "5d78d514dc953a1f5904c125528fdaadd69918586cd19c8c2e20745d86c58b0a",
+          "paragraphOrdinal": 1,
+          "exactCatalogText": "20250101- SCT.D/1 -",
+          "start": 0,
+          "end": 8,
+          "expectedText": "20250101"
+        },
+        {
+          "partName": "word/footer8.xml",
+          "partSha256": "e8c73e1a988e16a2f2450164b70dd800a44bc5edd55766e60bfa13fcb178a410",
+          "paragraphOrdinal": 1,
+          "exactCatalogText": "20250101",
+          "start": 0,
+          "end": 8,
+          "expectedText": "20250101"
+        },
+        {
+          "partName": "word/footer9.xml",
+          "partSha256": "32a15def546c67a5f37d488235ff7c8909d0fa869bb8097e5036f40cd1f729f6",
+          "paragraphOrdinal": 1,
+          "exactCatalogText": "20250101- SCT.E/4 -",
+          "start": 0,
+          "end": 8,
+          "expectedText": "20250101"
+        }
+      ],
+      "sourceControlLinesToRetain": [],
+      "sections": [
+        {
+          "footerPagePolicy": "PRESERVE_NO_PAGE",
+          "pagePrefix": null,
+          "pageSuffix": null,
+          "sourceNumberingDiagnostic": {
+            "action": "PRESERVE",
+            "nextRaw": {
+              "start": "17"
+            }
+          }
+        },
+        {
+          "footerPagePolicy": "PRESERVE_EXISTING_PAGE",
+          "pagePrefix": "SCT/",
+          "pageSuffix": null,
+          "sourceNumberingDiagnostic": {
+            "action": "PRESERVE",
+            "nextRaw": {
+              "start": "1"
+            }
+          }
+        },
+        {
+          "footerPagePolicy": "PRESERVE_NO_PAGE",
+          "pagePrefix": null,
+          "pageSuffix": null,
+          "sourceNumberingDiagnostic": {
+            "action": "PRESERVE",
+            "nextRaw": {
+              "start": "1"
+            }
+          }
+        },
+        {
+          "footerPagePolicy": "PRESERVE_NO_PAGE",
+          "pagePrefix": null,
+          "pageSuffix": null,
+          "sourceNumberingDiagnostic": {
+            "action": "PRESERVE",
+            "nextRaw": {
+              "start": "1"
+            }
+          }
+        },
+        {
+          "footerPagePolicy": "PRESERVE_EXISTING_PAGE",
+          "pagePrefix": "SCT.C/",
+          "pageSuffix": null,
+          "sourceNumberingDiagnostic": {
+            "action": "PRESERVE",
+            "nextRaw": {
+              "start": "1"
+            }
+          }
+        },
+        {
+          "footerPagePolicy": "PRESERVE_NO_PAGE",
+          "pagePrefix": null,
+          "pageSuffix": null,
+          "sourceNumberingDiagnostic": {
+            "action": "PRESERVE",
+            "nextRaw": {
+              "start": "1"
+            }
+          }
+        },
+        {
+          "footerPagePolicy": "PRESERVE_EXISTING_PAGE",
+          "pagePrefix": "SCT.D/",
+          "pageSuffix": null,
+          "sourceNumberingDiagnostic": {
+            "action": "PRESERVE",
+            "nextRaw": {
+              "start": "1"
+            }
+          }
+        },
+        {
+          "footerPagePolicy": "PRESERVE_NO_PAGE",
+          "pagePrefix": null,
+          "pageSuffix": null,
+          "sourceNumberingDiagnostic": {
+            "action": "PRESERVE",
+            "nextRaw": {
+              "start": "1"
+            }
+          }
+        },
+        {
+          "footerPagePolicy": "PRESERVE_EXISTING_PAGE",
+          "pagePrefix": "SCT.E/",
+          "pageSuffix": null,
+          "sourceNumberingDiagnostic": {
+            "action": "PRESERVE",
+            "nextRaw": {
+              "start": "1"
+            }
+          }
+        },
+        {
+          "footerPagePolicy": "PRESERVE_NO_PAGE",
+          "pagePrefix": null,
+          "pageSuffix": null,
+          "sourceNumberingDiagnostic": {
+            "action": "PRESERVE",
+            "nextRaw": {
+              "start": "1"
+            }
+          }
+        },
+        {
+          "footerPagePolicy": "PRESERVE_EXISTING_PAGE",
+          "pagePrefix": "SCT.F/",
+          "pageSuffix": null,
+          "sourceNumberingDiagnostic": {
+            "action": "PRESERVE",
+            "nextRaw": {
+              "start": "1"
+            }
+          }
+        },
+        {
+          "footerPagePolicy": "PRESERVE_NO_PAGE",
+          "pagePrefix": null,
+          "pageSuffix": null,
+          "sourceNumberingDiagnostic": {
+            "action": "PRESERVE",
+            "nextRaw": {
+              "start": "1"
+            }
+          }
+        },
+        {
+          "footerPagePolicy": "PRESERVE_EXISTING_PAGE",
+          "pagePrefix": "SCT.G/",
+          "pageSuffix": null,
+          "sourceNumberingDiagnostic": {
+            "action": "PRESERVE",
+            "nextRaw": {
+              "start": "1"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "profileId": "native-identity-2b-scc-candidate01",
+      "edition": "2b",
+      "key": "SCC",
+      "sourceSha256": "8ba80d183f6adf7a11eeb08f75e32c2bffdc3960f969202fcbed357e477f7af3",
+      "expectedEntryHashes": {
+        "[Content_Types].xml": "19e9e6f730cdceb277dc1525388cdc03807cf79d4e9b0c8f13f3a554b78bd276",
+        "_rels/.rels": "c30fe099dbcfed4ecc4ae544ccf82f432c8d3bb665e2a301df283738b196d803",
+        "customXml/_rels/item1.xml.rels": "80482f86e196171d66001e0e74d1900408a3aaf2463e54005d251b5f2db9a0b0",
+        "customXml/_rels/item2.xml.rels": "2a6aee4c8a9714223a3568077411a0c82d11b484b1c9ab93a19d50b99c57baa5",
+        "customXml/_rels/item3.xml.rels": "3aa4054f7f463c6d441102c960783aa7f937d6945a0a885b624a66aafaeedb6c",
+        "customXml/_rels/item4.xml.rels": "3c0d4d955517fe8112c945b1e56f63d5bef3c0005ccb627e40acda432e1cdc1d",
+        "customXml/item1.xml": "c8092edbb672f8c93f1d5ef66539a6f169462ba8738b785b59cc5d96f4aca59a",
+        "customXml/item2.xml": "79cb720f305b1bf2d4da0d620af86b1e79bfddab64c5797f5bcb30de171eb40f",
+        "customXml/item3.xml": "5efcaf9ad70d9c29f406ee438f8f428b021a881d2c5afff0e53b00b1f67ae51e",
+        "customXml/item4.xml": "d113ea82c2f55b180212a7d0f6b87e36a0d891644827c81a2de0a0b7ce28a97e",
+        "customXml/itemProps1.xml": "e2827aa8c9505beecf5c10ca890ce4b4eef9c9dc76af2a8119ed39b2a1c1cdd2",
+        "customXml/itemProps2.xml": "486dfcfd024a4bda907da39131fc6550a5ee173be1813278aa33b2265f3b4d12",
+        "customXml/itemProps3.xml": "8c0f6483389c035075d7ae90ff644c37110f03f922e6ba9de66256306d0023c4",
+        "customXml/itemProps4.xml": "cbf6d11b7f88436aec9e01bfff2d44c635f35a1f9d3572e718922d0134df4e8f",
+        "docProps/app.xml": "98af5b91648984ffbe0b9c6b60956fce22fccec1911b04769b1271ea38272e73",
+        "docProps/core.xml": "4eaed93e0b6ed7cb30d141ce8821080d166e35747c06558d425cf406cfe53083",
+        "docProps/custom.xml": "175f7de368240412814bffd701f31aae13cc0d755112773605fc6ddec96cdaf5",
+        "word/_rels/document.xml.rels": "2550fb6bdfa69b478f6b01185c4116d320c738c98750f428ed77656817e0f897",
+        "word/document.xml": "1d217ff395bdbd931b7418c300589d2b3763892733275bd09aefcb5a0f315910",
+        "word/endnotes.xml": "5c327f3a79c25f4df3b9ed65fab07157e641c129ef36e2e294eb8fe8c51a6d7d",
+        "word/fontTable.xml": "42d6762c359a7bf7e3308c5f0f28a6f322bad0b7e73f44b65173b34039f32c29",
+        "word/footer1.xml": "c11917cf834d929947c8bdfe7a94f8e10d583b477ec27a210c89d1be88a02fd0",
+        "word/footer2.xml": "ab379594f6414b282a5b7adf9fc97b9e8b388f248129304b6b9ef7c0ea00a1a0",
+        "word/footer3.xml": "fda809b26c12cb3f5f61bb3fc2131db94b4dc2ebe839dd7eab90ab185968fe49",
+        "word/footnotes.xml": "865728b538929756124938f2753012da914b27d3481a9f4158a5f4d2deb83d7d",
+        "word/header1.xml": "23f676eceeffd2757198ec535f93e386d1d028f1e772dbb1483d02319dbf8938",
+        "word/header2.xml": "41b6f9b84e32db56383228aa887541dc1d8049be3120556d9a4339d664d4021b",
+        "word/header3.xml": "5474b7448cc788b28a1ff75d6459bad584e29474b2cf7f8ec9146fee51039e31",
+        "word/header4.xml": "d5d93b70bd68e5957e9fb1e13d4780ccfdb44e10c8fccf75951ace025697d1a6",
+        "word/numbering.xml": "a5c66ebee331ab4cf08a84869546e647e3158d864661001aec12e53491c884e3",
+        "word/settings.xml": "b8835df98a5b8ee44cf0fca7e351eb813f2b54a083e8b5d20330ba7a8051d151",
+        "word/styles.xml": "6b275ba591ff3e49307558a9e32643d10a9da2494dafa51276bfd5ee903c32d1",
+        "word/theme/theme1.xml": "ff5620b3da71b704e23c4172ae212a0ace147b030cb190cf068c01b6d9cf136e",
+        "word/webSettings.xml": "7210e0ce5baf1f845040a02ca7396798f971734012d998618662132c5d8223cb"
+      },
+      "staticFooterMigration": [],
+      "contractLabelSpecs": [
+        {
+          "partName": "word/footer1.xml",
+          "partSha256": "c11917cf834d929947c8bdfe7a94f8e10d583b477ec27a210c89d1be88a02fd0",
+          "paragraphOrdinal": 1,
+          "exactCatalogText": "20250101",
+          "start": 0,
+          "end": 8,
+          "expectedText": "20250101"
+        },
+        {
+          "partName": "word/footer2.xml",
+          "partSha256": "ab379594f6414b282a5b7adf9fc97b9e8b388f248129304b6b9ef7c0ea00a1a0",
+          "paragraphOrdinal": 1,
+          "exactCatalogText": "20250101 - SCC/i -",
+          "start": 0,
+          "end": 8,
+          "expectedText": "20250101"
+        },
+        {
+          "partName": "word/footer3.xml",
+          "partSha256": "fda809b26c12cb3f5f61bb3fc2131db94b4dc2ebe839dd7eab90ab185968fe49",
+          "paragraphOrdinal": 1,
+          "exactCatalogText": "20250101 - SCC/58 -",
+          "start": 0,
+          "end": 8,
+          "expectedText": "20250101"
+        }
+      ],
+      "sourceControlLinesToRetain": [],
+      "sections": [
+        {
+          "footerPagePolicy": "PRESERVE_NO_PAGE",
+          "pagePrefix": null,
+          "pageSuffix": null,
+          "sourceNumberingDiagnostic": {
+            "action": "PRESERVE",
+            "nextRaw": {
+              "fmt": "lowerRoman",
+              "start": "1"
+            }
+          }
+        },
+        {
+          "footerPagePolicy": "PRESERVE_EXISTING_PAGE",
+          "pagePrefix": "SCC/",
+          "pageSuffix": null,
+          "sourceNumberingDiagnostic": {
+            "action": "PRESERVE",
+            "nextRaw": {
+              "fmt": "lowerRoman",
+              "start": "1"
+            }
+          }
+        },
+        {
+          "footerPagePolicy": "PRESERVE_EXISTING_PAGE",
+          "pagePrefix": "SCC/",
+          "pageSuffix": null,
+          "sourceNumberingDiagnostic": {
+            "action": "PRESERVE",
+            "nextRaw": {
+              "start": "1"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

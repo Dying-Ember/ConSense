@@ -11,7 +11,9 @@ const nativeWindow = new (require('jsdom').JSDOM)('').window
 
 const profiles = { defaultProfile: 'local', profiles: [
   { id: 'local', provider: 'ollama', model: 'qwen2.5:7b-instruct-q4_K_M', configured: true },
-  { id: 'minimax-cn', provider: 'openai-compatible', model: 'MiniMax-M3', configured: false, unavailableReason: 'missing_api_key' }
+  { id: 'minimax-cn', provider: 'openai-compatible', model: 'MiniMax-M3', configured: false, unavailableReason: 'missing_api_key' },
+  { id: 'qwen', provider: 'openai', model: 'qwen3.8-27b', configured: true },
+  { id: 'qwen-flash', provider: 'openai', model: 'qwen3.8-flash', configured: true }
 ] }
 
 async function harness({ stored = new Map(), metadata = profiles, metadataError = false, view, respond } = {}) {
@@ -86,6 +88,29 @@ async function harness({ stored = new Map(), metadata = profiles, metadataError 
   assert.equal(find(invalid.root, node => node.tag === 'select' && node.props['aria-label'] === 'LLM source').props.value, 'local')
   invalid.dispose()
   console.log('PASS: rendered selection persists only browser profile ID; unavailable persisted choice remains visible; invalid IDs use server default; all three locales preserve configured model identity')
+  const qwenStored = new Map([['consense-llm-profile', 'qwen']])
+  const qwen = await harness({ stored: qwenStored, metadata: available })
+  const qwenSelect = find(qwen.root, node => node.tag === 'select' && node.props['aria-label'] === 'LLM source')
+  assert.equal(qwenSelect.props.value, 'qwen', 'The explicit 27B choice survives browser reload')
+  assert.match(text(find(qwenSelect, node => node.tag === 'option' && node.props.value === 'qwen')), /Qwen3\.8 27B.*qwen3\.8-27b/)
+  assert.match(text(find(qwenSelect, node => node.tag === 'option' && node.props.value === 'qwen-flash')), /Qwen3\.8 Flash-Next.*qwen3\.8-flash/)
+  const qwenStarted = qwen.api.draftingApi.extract('qwen-click-time')
+  await qwenSelect.props.onChange({ target: { value: 'qwen-flash' } }); await settle(); await qwenStarted
+  await qwen.api.adviceApi.ask('qwen-next-operation', 'A synthetic question', 'fullset')
+  assert.equal(qwen.requests.find(request => request.url === '/drafting/qwen-click-time/variables/extract').config.headers['X-ConSense-Llm-Profile'], 'qwen')
+  const qwenNext = qwen.requests.find(request => request.url === '/advice/qwen-next-operation/ask')
+  assert.equal(qwenNext.config.headers['X-ConSense-Llm-Profile'], 'qwen-flash')
+  assert.equal(Object.keys(qwenNext.config.headers).some(key => /authorization|api.key/i.test(key)), false)
+  assert.equal(qwenStored.get('consense-llm-profile'), 'qwen-flash')
+  qwen.dispose()
+  const qwenReloaded = await harness({ stored: qwenStored, metadata: available })
+  assert.equal(find(qwenReloaded.root, node => node.tag === 'select' && node.props['aria-label'] === 'LLM source').props.value, 'qwen-flash')
+  for (const locale of ['zh-Hans', 'zh-Hant', 'en']) {
+    qwenReloaded.store.changeLocale(locale); await settle()
+    assert.match(text(qwenReloaded.root), /Qwen3\.8 Flash-Next.*qwen3\.8-flash/)
+  }
+  qwenReloaded.dispose()
+  console.log('PASS: rendered Qwen 27B and Flash-Next choices use exact API IDs, persist across reload, retain click-time headers and send no credential')
   const outbound = await harness({ metadata: available })
   const started = outbound.api.draftingApi.extract('project-A')
   await find(outbound.root, node => node.tag === 'select' && node.props['aria-label'] === 'LLM source').props.onChange({ target: { value: 'minimax-cn' } }); await settle(); await started

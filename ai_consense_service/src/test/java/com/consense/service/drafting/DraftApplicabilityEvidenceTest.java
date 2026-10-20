@@ -36,13 +36,21 @@ class DraftApplicabilityEvidenceTest {
         }
     }
 
-    @Test void allCatalogueConditionsApplyToCollectionsAndScalars() {
+    @Test void catalogueScalarConditionsStillApplyToRepaymentAndPhotocopyRates() {
         ExtractTraceVO trace=trace(decision("advancePaymentAdopted",false),decision("advanceRepaymentMonths",8),
-                decision("twoEnvelopeTendering",false),decision("photocopyRateUpToA3",1.8),
-                decision("subcontractArrangement","none"),decision("subcontractors",Arrays.asList("Electrical")));
+                decision("twoEnvelopeTendering",false),decision("photocopyRateUpToA3",1.8));
         new DraftExtractionHarness(null).rejectInactiveSuggestions(trace,Collections.emptyMap());
-        for(ExtractionDecisionVO decision:trace.getDecisions())if(Arrays.asList("advanceRepaymentMonths","photocopyRateUpToA3","subcontractors").contains(decision.getKey()))
+        for(ExtractionDecisionVO decision:trace.getDecisions())if(Arrays.asList("advanceRepaymentMonths","photocopyRateUpToA3").contains(decision.getKey()))
             assertEquals("rejected",decision.getStatus(),decision.getKey());
+    }
+
+    @Test void designationDoesNotSuppressIndependentlySupportedBsTradeSuggestions() {
+        for(String designation:Arrays.asList("NSC","BSSSC")) {
+            ExtractTraceVO trace=trace(decision("subcontractArrangement",designation),decision("subcontractors",Arrays.asList("Fire services","Lift")));
+            new DraftExtractionHarness(null).rejectInactiveSuggestions(trace,Collections.emptyMap());
+            assertEquals("accepted",trace.getDecisions().get(1).getStatus(),designation);
+            assertFalse(trace.getDecisions().get(1).getCodes().contains("input_not_applicable"));
+        }
     }
 
     @Test void adoptedParentWinsOverAnUnadoptedModelSuggestionAndAConflictingParentDoesNotBecomeFalse() {

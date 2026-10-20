@@ -208,7 +208,7 @@ class CanonicalRecheckAdviceRealSeamTest {
         com.consense.web.dto.CanonicalEvidenceDtos.EvidencePointer pointer=evidence.pointers(PROJECT,43L,normal.getProjectionSha256(),"advisory").get(0);
         assertEquals("normal_observed_unit",pointer.getAddressKind());assertTrue(pointer.getPhysicalPages().isEmpty());assertFalse(pointer.isHumanConfirmed());assertEquals("normal:body:0",pointer.getParts().get(0).path("blockId").asText());
         assertEquals("NORMAL_OBSERVED_MODULE_STATE_UNAVAILABLE",assertThrows(CanonicalEvidenceException.class,()->evidence.snapshot(PROJECT,43L,normal.getProjectionSha256(),"vetting")).getMessage());
-        assertEquals("NORMAL_OBSERVED_MODULE_STATE_UNAVAILABLE",assertThrows(CanonicalEvidenceException.class,()->evidence.prepareNormalObserved(PROJECT,43L,"vetting")).getMessage());
+        assertTrue(evidence.normalPreparable(PROJECT,Collections.singletonList(43L),"vetting"),"The other module needs its own normal observation; it must not consume this advisory snapshot");
         OerBusinessEvidence.Session normalSession=assertDoesNotThrow(()->business.load(PROJECT,"advisory",documents.findBusinessSourcesByProjectId(PROJECT)));
         IndexStatusVO indexed=advice.rebuildIndex(PROJECT,"fullset");assertTrue(indexed.isVectorReady());assertEquals(snapshots.values().stream().mapToInt(s->s.path("chunks").size()).sum(),indexed.getIndexed());assertEquals(1,indexCalls.get());
         assertFalse(business.retrieve(normalSession,"AUTHORED obligation",null).isEmpty());assertEquals(1,retrieveCalls.get());assertEquals(0,chatCalls.get());

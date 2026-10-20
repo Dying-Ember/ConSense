@@ -254,10 +254,28 @@ async function warningSourceLabels() {
   assert(mixed.element.querySelector('[data-review-change-kind="joint"]'), 'A paragraph with both business and editorial operations cannot assign all changed tokens to the sole business input')
   mixed.dispose(); console.log('PASS: mixed business and editorial changes preserve the real diff with shared paragraph attribution')
   const props = base(); props.original.warnings = ['Native numbering labels and continuation sequence are not verified in this reading (22 numbered paragraph(s)). Check the PDF layout for the original list markers.']; props.result.warnings = ['Native numbering labels and continuation sequence are not verified in this reading (15 numbered paragraph(s)). Check the PDF layout for the original list markers.']
+  for (const reading of [props.original, props.result]) reading.html = reading.html.replace('<p ', '<ol class="docx-unverified-list"><li ').replace('</p>', '</li></ol>')
   const h = await harness(props)
   assert.match(h.element.querySelector('.reading-warnings').textContent, /Original.*22/s)
   assert.match(h.element.querySelector('.reading-warnings').textContent, /Saved result.*15/s)
+  const markerStyle = document.createElement('style'); markerStyle.textContent = require('node:fs').readFileSync(path.join(__dirname, '../src/styles/main.css'), 'utf8'); document.head.append(markerStyle)
+  for (const [locale, message] of [['en', 'Web-generated list markers are hidden.'], ['zh-Hans', '网页自动标号已隐藏，原编号请核对 PDF。'], ['zh-Hant', '網頁自動標號已隱藏，原編號請核對 PDF。']]) {
+    h.props.locale = locale; await settle()
+    const notice = h.element.querySelector('[data-reading-numbering-notice]')
+    assert.ok(notice && !notice.closest('details'), 'Numbering limits remain visible outside collapsed diagnostics')
+    assert.ok(notice.textContent.includes(message))
+  }
+  h.props.locale = 'en'; await settle()
+  for (const mode of ['original', 'review', 'saved']) {
+    await h.click(`[data-review-mode="${mode}"]`)
+    const list = h.element.querySelector('[data-document-paper] ol.docx-unverified-list')
+    assert.ok(list, 'Trusted marker class survives the review sanitization pass')
+    assert.equal(dom.window.getComputedStyle(list).listStyleType, 'none')
+    assert.equal(list.textContent, 'Complete invitation', 'Warning and marker policy do not change native paragraph text')
+  }
   await h.click('[data-review-mode="saved"]'); assert.doesNotMatch(h.element.querySelector('.reading-warnings').textContent, /Original/)
+  h.props.result.warnings = []; await settle(); assert.equal(h.element.querySelector('[data-reading-numbering-notice]'), null, 'Saved mode does not inherit warnings from the original carrier')
+  markerStyle.remove()
   h.dispose(); console.log('PASS: reading warnings identify original and saved carriers independently')
 }
 async function compactLimitsKeepEveryRiskAndParentOwnedStaleStatus() {

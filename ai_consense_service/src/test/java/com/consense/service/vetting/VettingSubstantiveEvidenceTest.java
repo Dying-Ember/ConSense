@@ -10,6 +10,30 @@ import java.util.*;
 import static org.junit.jupiter.api.Assertions.*;
 
 class VettingSubstantiveEvidenceTest {
+    @ParameterizedTest @ValueSource(strings={"Special Conditions of Tender"," GENERAL CONDITIONS OF CONTRACT ","Notes to Tenderers","Articles of Agreement","Form of Tender","Special\u00a0Conditions of Tender (SCT)"})
+    void aBareDocumentTitleCannotProvideASecondSubstantiveProvision(String title) {
+        Chunk reference=VettingContextBudgetTest.chunk("reference","SCT1","The Tenderer shall submit clarifications in accordance with Clause 99.8 of these Special Conditions of Tender.",120);
+        Chunk heading=VettingContextBudgetTest.chunk("heading","SCT2",title,title.length());
+        Quote origin=quote(reference,reference.getContent()),label=quote(heading,title);
+        assertFalse(VettingSubstantiveEvidence.substantive(heading,label));
+        assertEquals(1,VettingSubstantiveEvidence.distinct(Arrays.asList(origin,label),Arrays.asList(VettingCorpus.evidence(reference,"source",origin.getQuote()),VettingCorpus.evidence(heading,"source",title)),Map.of(reference.getId(),reference,heading.getId(),heading)));
+    }
+    @ParameterizedTest @ValueSource(strings={"Special Conditions of Tender shall prevail over the General Conditions of Tender.","Special Conditions of Tender\nThe Tenderer shall submit three paper copies.","2 Special Conditions of Tender","SCT 2.1 Special Conditions of Tender apply to the submitted works.","The applicable document title is Special Conditions of Tender."})
+    void titlesWithinNormativeTextOrNumberedClausesRemainSubstantive(String text) {
+        Chunk source=VettingContextBudgetTest.chunk("body","SCT1",text,text.length());
+        assertTrue(VettingSubstantiveEvidence.substantive(source,quote(source,text)));
+    }
+    @Test void quotingOnlyTheTitleOfAnActualProvisionDoesNotQuoteThatProvision() {
+        String text="Special Conditions of Tender\nThe Tenderer shall submit three paper copies.";
+        Chunk source=VettingContextBudgetTest.chunk("body","SCT1",text,text.length());
+        assertFalse(VettingSubstantiveEvidence.substantive(source,quote(source,"Special Conditions of Tender")));
+        assertTrue(VettingSubstantiveEvidence.substantive(source,quote(source,"The Tenderer shall submit three paper copies.")));
+    }
+    @Test void aLongProvisionBeginningWithADocumentTitleIsNotReducedToItsTitle() {
+        String text="General Conditions of Tender\n"+String.join(" ",Collections.nCopies(8,"The Tenderer shall submit the specified originals before the stated deadline."));
+        Chunk source=VettingContextBudgetTest.chunk("long-body","GCT1",text,text.length());
+        assertTrue(VettingSubstantiveEvidence.substantive(source,quote(source,text)));
+    }
     @ParameterizedTest @ValueSource(strings={"APPENDIX PRE.B6/III","APPENDIX PRE.B6/IV","ANNEX C-1", "SCHEDULE 3", "appendix xyz/Ⅳ", " ANNEX C TO APPENDIX A ","APPENDIX\u00a0XYZ/A"})
     void bareIdentifiersDoNotEstablishTargetContents(String text) {
         Chunk c=VettingContextBudgetTest.chunk("label","XYZ1",text,text.length());

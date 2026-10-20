@@ -447,9 +447,12 @@ public class DraftingService {
 
     @Transactional
     public List<VariableVO> listVariables(String projectId) {
-        if(reviewedRules(projectId))return templateGraphService.variables(projectId);
         ensureInputs(projectId);
-        return inputVariables(projectId).stream().map(this::toVariableVO).collect(Collectors.toList());
+        if(reviewedRules(projectId)) {
+            List<VariableVO> result=new ArrayList<>(templateGraphService.variables(projectId));
+            result.add(identityVariableVO(projectId));return result;
+        }
+        return inputVariables(projectId).stream().map(variable->"contractTitle".equals(variable.getVarKey())?identityVariableVO(projectId):toVariableVO(variable)).collect(Collectors.toList());
     }
 
     public ExtractTraceVO lastExtractTrace(String projectId) {
@@ -512,6 +515,7 @@ public class DraftingService {
     private List<DraftVariable> inputVariables(String projectId) {
         if(reviewedRules(projectId)) {
             Set<String> keys=new HashSet<>();for(Map<String,Object> field:DraftReviewGraph.fields(templateGraphService.graph(projectId)))keys.add(String.valueOf(field.get("id")));
+            keys.add("contractTitle");
             return variableRepository.findByProjectIdOrderBySortOrderAsc(projectId).stream().filter(v->"INPUT".equals(v.getScope())&&keys.contains(v.getVarKey())).collect(Collectors.toList());
         }
         return variableRepository.findByProjectIdOrderBySortOrderAsc(projectId).stream()
@@ -519,10 +523,12 @@ public class DraftingService {
     }
     private void ensureInputs(String projectId) {
         projectService.require(projectId);
-        if(reviewedRules(projectId)){templateGraphService.variables(projectId);return;}
-        for (int i=0;i<DraftBlueprint.INPUTS.size();i++) {
-            DraftBlueprint.InputSpec spec=DraftBlueprint.INPUTS.get(i);
-            DraftVariable v=variableRepository.findByProjectIdAndVarKey(projectId,spec.key).orElse(null);
+        Map<String,DraftVariable> existing=new HashMap<>();
+        for(DraftVariable row:variableRepository.findByProjectIdOrderBySortOrderAsc(projectId))existing.put(row.getVarKey(),row);
+        List<DraftBlueprint.InputSpec> specs=reviewedRules(projectId)?Collections.singletonList(DraftBlueprint.find("contractTitle")):DraftBlueprint.INPUTS;
+        for (int i=0;i<specs.size();i++) {
+            DraftBlueprint.InputSpec spec=specs.get(i);
+            DraftVariable v=existing.get(spec.key);
             boolean fresh=v==null;
             if (fresh) { v=new DraftVariable();v.setProjectId(projectId);v.setVarKey(spec.key);v.setValueText(""); }
             boolean migration=!"INPUT".equals(v.getScope());
@@ -539,14 +545,87 @@ public class DraftingService {
             if (fresh||migration) v.setUpdatedAt(Instant.now());variableRepository.save(v);
         }
     }
-    public Map<String,Object> catalog(String projectId) { projectService.require(projectId);return reviewedRules(projectId)?templateGraphService.catalog(projectId):DraftBusinessRules.catalog(); }
+    public Map<String,Object> catalog(String projectId) {
+        projectService.require(projectId);if(!reviewedRules(projectId))return DraftBusinessRules.catalog();
+        Map<String,Object> result=new LinkedHashMap<>(templateGraphService.catalog(projectId));List<Object> groups=new ArrayList<>();
+        for(Object raw:DraftBusinessRules.list(DraftBusinessRules.catalog().get("groups")))if("identity".equals(DraftBusinessRules.asMap(raw).get("id")))groups.add(raw);
+        groups.addAll(DraftBusinessRules.list(result.get("groups")));result.put("groups",groups);return result;
+    }
+    private VariableVO identityVariableVO(String projectId) {
+        DraftVariable variable=variableRepository.findByProjectIdAndVarKey(projectId,"contractTitle").orElseThrow(()->new BizException(4006,"Project identity input not found."));
+        VariableVO result=toVariableVO(variable);
+        if(Boolean.TRUE.equals(variable.getConfirmed())||Boolean.TRUE.equals(variable.getManuallyEdited()))try {requireIdentitySources(projectId,variable);}catch(RuntimeException changed){result.setReviewRequired(true);result.setAdoptionState("needs_review");}
+        return result;
+    }
+    private Object identitySnapshot(String projectId) {
+        DraftVariable variable=variableRepository.findByProjectIdAndVarKey(projectId,"contractTitle").orElse(null);
+        return variable==null?null:Arrays.asList(variable.getValueText(),variable.getConfirmed(),variable.getManuallyEdited(),variable.getReviewRequired(),variable.getAdoptedSourcesJson(),variable.getConfirmedFrom());
+    }
+    private Map<String,Object> reviewedPlan(String projectId,Map<String,String> patches) {
+        Map<String,String> graphPatches=patches==null?null:new LinkedHashMap<>(patches);if(graphPatches!=null)graphPatches.remove("contractTitle");
+        Map<String,Object> result=new LinkedHashMap<>(templateGraphService.plan(projectId,graphPatches));
+        DraftVariable variable=variableRepository.findByProjectIdAndVarKey(projectId,"contractTitle").orElse(null);
+        Object visible=variable==null?null:DraftAdoption.decode(variable.getValueText()),effective=null;boolean review=variable!=null&&Boolean.TRUE.equals(variable.getReviewRequired());
+        if(variable!=null&&Boolean.TRUE.equals(variable.getConfirmed())&&!review)try{requireIdentitySources(projectId,variable);effective=DraftAdoption.decode(DraftInputRules.normalize(DraftBlueprint.find("contractTitle"),variable.getValueText()));}catch(RuntimeException invalid){review=true;}
+        if(patches!=null&&patches.containsKey("contractTitle")){visible=DraftAdoption.decode(DraftInputRules.normalize(DraftBlueprint.find("contractTitle"),patches.get("contractTitle")));effective=visible;review=false;}
+        DraftBusinessRules.asMap(result.get("inputValues")).put("contractTitle",visible);
+        Map<String,Object> values=DraftBusinessRules.asMap(result.get("effectiveValues"));if(effective==null)values.remove("contractTitle");else values.put("contractTitle",effective);
+        for(String part:Arrays.asList("number","title"))if(!DraftBusinessRules.answered(DraftBusinessRules.asMap(effective).get(part)))unresolved(result).add(DraftBusinessRules.map("id","input-contractTitle-"+part,"kind","InputMissing","inputKeys",Collections.singletonList("contractTitle"),"message",LocalizedText.same("Complete the adopted project "+part+"; temporary project metadata is not a source fact.")));
+        if(review)unresolved(result).add(DraftBusinessRules.map("id","review-contractTitle","kind","input_review","inputKeys",Collections.singletonList("contractTitle"),"message",LocalizedText.same("Project identity or its source changed. Review the adopted value.")));
+        result.put("snapshotId",snapshotId(projectId,patches));result.put("savedSnapshotId",snapshotId(projectId,null));result.put("preview",patches!=null);return result;
+    }
+    private void requireIdentitySources(String projectId,DraftVariable variable) {
+        List<CandidateVO> adopted=new ArrayList<>();
+        try {
+            com.fasterxml.jackson.databind.JsonNode raw=JsonUtils.mapper().reader()
+                    .with(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+                    .with(com.fasterxml.jackson.core.JsonParser.Feature.STRICT_DUPLICATE_DETECTION).readTree(variable.getAdoptedSourcesJson());
+            if(raw==null||!raw.isArray())throw new BizException(4007,"Project identity provenance is missing or malformed. Adopt it again.");
+            if(raw.isEmpty()&&!Boolean.TRUE.equals(variable.getManuallyEdited()))throw new BizException(4007,"Project identity source adoption is empty. Re-adopt it or explicitly enter a manual identity.");
+            for(com.fasterxml.jackson.databind.JsonNode entry:raw) {
+                com.fasterxml.jackson.databind.JsonNode id=entry.get("sourceDocumentId");
+                if(!entry.isObject()||id==null||!id.isIntegralNumber()||!id.canConvertToLong()||id.asLong()<=0
+                        ||!entry.path("sourceHash").isTextual()||!entry.path("sourceQuote").isTextual())
+                    throw new BizException(4007,"Project identity source binding is malformed. Adopt it again.");
+                adopted.add(JsonUtils.mapper().treeToValue(entry,CandidateVO.class));
+            }
+        }catch(BizException invalid){throw invalid;}
+        catch(Exception invalid){throw new BizException(4007,"Project identity provenance is missing or malformed. Adopt it again.");}
+        for(CandidateVO candidate:adopted) {
+            SourceDocument source=sourceDocumentRepository.findById(candidate.getSourceDocumentId()).orElseThrow(()->new BizException(4007,"Project identity source no longer exists."));
+            if(!projectId.equals(source.getProjectId())||!SourceDocument.CATEGORY_PROJECT_INPUT.equals(source.getCategory())||!"PARSED".equals(source.getParseStatus())||!Objects.equals(candidate.getSourceHash(),DraftAdoption.sourceHash(source))||JsonUtils.isBlankText(candidate.getSourceQuote())||source.getTextContent()==null||!source.getTextContent().contains(candidate.getSourceQuote()))throw new BizException(4007,"Project identity source changed. Identify it again.");
+            if(candidate.getOriginalSha256()!=null&&(source.getStoragePath()==null||!candidate.getOriginalSha256().equals(DraftPdfConverter.sha256(storageService.read(source.getStoragePath())))))throw new BizException(4007,"Project identity original changed. Identify it again.");
+        }
+    }
+    @Transactional
+    public com.consense.web.dto.ProjectDtos.ProjectVO confirmProjectIdentity(String projectId,ProjectIdentityConfirmation request) {
+        Project project=projectService.require(projectId);entityManager.refresh(project,LockModeType.PESSIMISTIC_WRITE);ensureInputs(projectId);
+        Map<String,String> expected=request==null?null:request.getExpectedProjectIdentity();LocalizedText name=LocalizedText.of(project.getNameZhHans(),project.getNameZhHant(),project.getNameEn());
+        Map<String,String> current=new LinkedHashMap<>();current.put("nameZhHans",name.getZhHans());current.put("nameZhHant",name.getZhHant());current.put("nameEn",name.getEn());current.put("contractNo",project.getContractNo());
+        if(expected==null||!expected.equals(current))throw new BizException(4090,"PROJECT_IDENTITY_CONFLICT: Project metadata changed. Refresh before confirming.");
+        DraftVariable variable=variableRepository.findByProjectIdAndVarKey(projectId,"contractTitle").orElseThrow(()->new BizException(4007,"Adopt the project identity before confirming."));entityManager.refresh(variable,LockModeType.PESSIMISTIC_WRITE);
+        if(request.getExpectedAdoptedIdentity()==null||!Collections.singletonMap("value",variable.getValueText()).equals(request.getExpectedAdoptedIdentity()))throw new BizException(4090,"PROJECT_IDENTITY_CONFLICT: The adopted identity changed. Refresh before confirming.");
+        if(!Boolean.TRUE.equals(variable.getConfirmed())||Boolean.TRUE.equals(variable.getReviewRequired())||!DraftInputRules.valid(variable))throw new BizException(4007,"Adopt and review both the project title and contract number before confirming.");
+        requireIdentitySources(projectId,variable);Map<String,Object> identity=DraftBusinessRules.asMap(DraftAdoption.decode(variable.getValueText()));String title=(String)identity.get("title"),number=(String)identity.get("number");
+        if(number.length()>128||title.length()>512||number.codePoints().allMatch(c->Character.isWhitespace(c)||Character.isSpaceChar(c))||title.codePoints().allMatch(c->Character.isWhitespace(c)||Character.isSpaceChar(c)))throw new BizException(4007,"Project title and contract number must be nonblank text within the supported metadata length.");
+        if(!JsonUtils.isBlankText(project.getTitleLinesJson())) {
+            List<LocalizedText> lines=JsonUtils.readList(project.getTitleLinesJson(),LocalizedText.class);List<LocalizedText> updated=new ArrayList<>();
+            for(LocalizedText line:lines)updated.add(LocalizedText.of(identityTitleLine(line.getZhHans(),project.getContractNo(),project.getNameZhHans(),number,title),identityTitleLine(line.getZhHant(),project.getContractNo(),project.getNameZhHant(),number,title),identityTitleLine(line.getEn(),project.getContractNo(),project.getNameEn(),number,title)));
+            project.setTitleLinesJson(JsonUtils.write(updated));
+        }
+        project.setNameZhHans(title);project.setNameZhHant(title);project.setNameEn(title);project.setContractNo(number);project.setUpdatedAt(Instant.now());
+        variable.setConfirmedFrom("PROJECT_IDENTITY");variable.setUpdatedAt(Instant.now());variableRepository.save(variable);return projectService.toVO(project);
+    }
+    private String identityTitleLine(String text,String oldNumber,String oldTitle,String number,String title) {
+        return !JsonUtils.isBlankText(oldNumber)&&Objects.equals(text,oldNumber)?number:!JsonUtils.isBlankText(oldTitle)&&Objects.equals(text,oldTitle)?title:text;
+    }
     @Transactional(readOnly=true)
     public Map<String,Object> plan(String projectId,Map<String,String> patches) {
         Map<String,Object> current=preparePlan(projectId,patches);
         return patches==null?savedGenerationPlan(projectId,current):current;
     }
     private Map<String,Object> preparePlan(String projectId,Map<String,String> patches) {
-        if(reviewedRules(projectId))return templateGraphService.plan(projectId,patches);
+        if(reviewedRules(projectId))return reviewedPlan(projectId,patches);
         projectService.require(projectId);Map<String,Object> values=decodedValues(projectId);
         Map<String,Object> visibleValues=new LinkedHashMap<>(values);
         for(DraftVariable variable:inputVariables(projectId))
@@ -562,7 +641,10 @@ public class DraftingService {
             visibleValues.put(key,DraftAdoption.decode(DraftBlueprint.find(key),proposed));
         }
         values.values().removeIf(value->value==null);
+        boolean identitySourceChanged=false;DraftVariable identity=variableRepository.findByProjectIdAndVarKey(projectId,"contractTitle").orElse(null);
+        if(identity!=null&&values.containsKey("contractTitle")&&(patches==null||!patches.containsKey("contractTitle")))try{requireIdentitySources(projectId,identity);}catch(RuntimeException changed){values.remove("contractTitle");identitySourceChanged=true;}
         Map<String,Object> result=DraftBusinessRules.plan(values);
+        if(identitySourceChanged)unresolved(result).add(DraftBusinessRules.map("id","review-contractTitle-source","kind","input_review","inputKeys",Collections.singletonList("contractTitle"),"message",LocalizedText.same("Project identity source changed. Review the adopted value.")));
         addTargetSourceReviews(projectId,values.get("targetOverrides"),result);
         result.put("inputValues",visibleValues);
         String evidenceRevision=evidenceRevision(projectId);
@@ -627,8 +709,9 @@ public class DraftingService {
         return values;
     }
     private String snapshotId(String projectId,Map<String,String> patches) {
-        if(reviewedRules(projectId))return templateGraphService.snapshotId(projectId,patches);
+        if(reviewedRules(projectId))return DraftAdoption.hash(JsonUtils.write(Arrays.asList(templateGraphService.snapshotId(projectId,patches),identitySnapshot(projectId),patches,DraftNativeIdentity.INTEGRATION_VERSION)));
         Map<String,Object> snapshot=new LinkedHashMap<>();snapshot.put("ruleVersion",DraftBusinessRules.catalog().get("ruleVersion"));
+        snapshot.put("projectIdentity",identitySnapshot(projectId));snapshot.put("nativeStoryVersion",DraftNativeIdentity.INTEGRATION_VERSION);
         Map<String,Object> values=decodedValues(projectId);if(patches!=null)patches.forEach((k,v)->values.put(k,DraftAdoption.decode(DraftBlueprint.find(k),v)));snapshot.put("values",values);
         List<Object> status=new ArrayList<>();for(DraftVariable v:inputVariables(projectId))status.add(Arrays.asList(v.getVarKey(),v.getManuallyEdited(),v.getReviewRequired(),v.getConfirmed(),v.getAdoptedSourcesJson()));snapshot.put("adoption",status);
         List<Object> sources=new ArrayList<>();for(String category:Arrays.asList(SourceDocument.CATEGORY_STANDARD_TEMPLATE,SourceDocument.CATEGORY_PROJECT_INPUT))for(SourceDocument source:sourceDocumentRepository.findByProjectIdAndCategoryOrderByIdAsc(projectId,category)) {
@@ -655,7 +738,7 @@ public class DraftingService {
     }
 
     public List<VariableVO> extractVariables(String projectId) {
-        if(reviewedRules(projectId))return templateGraphService.extract(projectId);
+        if(reviewedRules(projectId)){new TransactionTemplate(transactionManager).execute(status->{ensureInputs(projectId);return null;});templateGraphService.extract(projectId);return listVariables(projectId);}
         // Model calls run outside a write transaction. A user can adopt an input while extraction is in flight.
         TransactionTemplate transaction=new TransactionTemplate(transactionManager);
         transaction.execute(status->{ensureInputs(projectId);return null;});
@@ -685,7 +768,12 @@ public class DraftingService {
         for(ExtractionPartVO part:trace.getParts())prompts.add(extractionHarness.userPrompt(configuredUser,part));
         for(int i=0;i<trace.getParts().size();i++) {
             ExtractionPartVO part=trace.getParts().get(i);
-            extractionHarness.extractPart(trace,part,system,prompts.get(i),sourceTexts.get(part.getSourceDocumentId()));
+            try {extractionHarness.extractPart(trace,part,system,prompts.get(i),sourceTexts.get(part.getSourceDocumentId()));}
+            catch(RuntimeException invalid) {
+                ExtractionAttemptVO last=part.getAttempts().isEmpty()?null:part.getAttempts().get(part.getAttempts().size()-1);
+                if(!(invalid instanceof BizException&&((BizException)invalid).getCode()==5002)&&(last==null||!"failed".equals(last.getStatus())||!"model_call_failed".equals(last.getErrorCode())))throw invalid;
+                trace.setFailureCode("partial_source_failed");trace.setFailureMessage("Some correspondence could not be completed; source-checked candidates remain available for review.");
+            }
         }
         Map<String,Object> conditions=new LinkedHashMap<>();
         // Only committed human/adopted values may override this run's applicability; stale unadopted suggestions cannot.
@@ -721,6 +809,8 @@ public class DraftingService {
             entityManager.refresh(v,LockModeType.PESSIMISTIC_WRITE);
             List<CandidateVO> latest=candidates.getOrDefault(v.getVarKey(),Collections.emptyList());
             List<CandidateVO> previous=DraftAdoption.candidates(v);
+            boolean partial=DraftExtractionHarness.incomplete(trace);
+            if(partial&&latest.isEmpty()&&!previous.isEmpty()){v.setReviewRequired(true);variableRepository.save(v);continue;}
             boolean relatedChanged=!DraftAdoption.candidateIdentity(previous).equals(DraftAdoption.candidateIdentity(latest));
             boolean adopted=Boolean.TRUE.equals(v.getManuallyEdited())||Boolean.TRUE.equals(v.getConfirmed());
             v.setCandidatesJson(JsonUtils.write(latest));
@@ -756,8 +846,10 @@ public class DraftingService {
             v.setUpdatedAt(Instant.now());variableRepository.save(v);
         }
         recordEvidenceRevision(projectId);
-        trace.setStatus("completed");trace.setFinishedAt(Instant.now().toString());
-        extractionHarness.describeFields(trace,conflicts,true);appendExtractionReport(projectId,trace);
+        boolean partial=DraftExtractionHarness.incomplete(trace);
+        trace.setStatus(partial?"partial":"completed");trace.setFinishedAt(Instant.now().toString());
+        if(partial&&trace.getFailureCode()==null){trace.setFailureCode("incomplete_json");trace.setFailureMessage("Only fully decoded, source-checked candidates were retained. Review the unfinished items manually.");}
+        extractionHarness.describeFields(trace,conflicts,!partial);appendExtractionReport(projectId,trace);
         return inputVariables(projectId).stream().map(this::toVariableVO).collect(Collectors.toList());
         });
         } catch(RuntimeException failure) {
@@ -843,7 +935,7 @@ public class DraftingService {
 
     @Transactional
     public VariableVO updateVariable(String projectId,String key,VariablePatch patch) {
-        if(reviewedRules(projectId))return templateGraphService.updateVariable(projectId,key,patch);
+        if(reviewedRules(projectId)&&!"contractTitle".equals(key))return templateGraphService.updateVariable(projectId,key,patch);
         projectService.require(projectId);ensureInputs(projectId);
         if("targetEdits".equals(key))key="targetOverrides";
         DraftBlueprint.InputSpec spec=DraftBlueprint.find(key);
@@ -862,7 +954,7 @@ public class DraftingService {
             SourceDocument source=sourceDocumentRepository.findById(candidate.getSourceDocumentId()).orElseThrow(()->new BizException(4007,"Candidate source no longer exists."));
             if(!projectId.equals(source.getProjectId())||!candidate.getSourceHash().equals(DraftAdoption.sourceHash(source)))throw new BizException(4007,"Candidate source has changed. Extract it again.");
             raw=candidate.getValue();v.setSourceRef(truncate(candidate.getSourceQuote(),480));v.setAdoptedSourcesJson(JsonUtils.write(Collections.singletonList(candidate)));v.setManuallyEdited(false);
-        } else if(raw!=null) {v.setManuallyEdited(true);v.setSourceRef(null);v.setAdoptedSourcesJson(JsonUtils.write(DraftAdoption.candidates(v)));}
+        } else if(raw!=null) {v.setManuallyEdited(true);v.setSourceRef(null);v.setAdoptedSourcesJson("contractTitle".equals(key)?"[]":JsonUtils.write(DraftAdoption.candidates(v)));}
         else if(Boolean.TRUE.equals(patch.getReviewed())||Boolean.TRUE.equals(patch.getConfirmed())) {
             SuggestionSnapshot snapshot=patch.getSuggestionSnapshot();
             if(snapshot==null||snapshot.getCandidates()==null||snapshot.getCandidates().stream().anyMatch(Objects::isNull)||
@@ -994,8 +1086,11 @@ public class DraftingService {
             DocxTemplateEditor.TemplateIndex sourceIndex=new DocxTemplateEditor().inspect(original);
             List<Map<String,Object>> sourceBindings=DraftDocumentBindings.source(key,sourceIndex);
             DraftDocumentBindings.associateTargets(key,sourceIndex,prepared,sourceBindings);
+            DocxTemplateEditor.NativeLayoutPlan nativeLayout=DraftNativeLayout.plan(sourceIndex,key,properties.getDrafting().getRendererKind());
+            try {nativeLayout=DraftNativeIdentity.attach(sourceIndex,fresh.getCoverage().getNativeDocxSections(),key,prepared,properties.getDrafting().getRendererKind(),nativeLayout);}
+            catch(IllegalArgumentException|IllegalStateException invalid){throw new BizException(4012,"NATIVE_STORY_PLAN_REVIEW_REQUIRED: "+invalid.getMessage());}
             DocxTemplateEditor.DocxEditResult generated;
-            try {generated=reviewedRules(projectId)?templateGraphService.compile(original,key,prepared,DraftDocumentBindings.bookmarkNames(sourceBindings),DraftNativeLayout.plan(original,key,properties.getDrafting().getRendererKind())):DraftFormattedRules.compile(original,key,prepared,DraftDocumentBindings.bookmarkNames(sourceBindings),DraftNativeLayout.plan(original,key,properties.getDrafting().getRendererKind()));}
+            try {generated=reviewedRules(projectId)?templateGraphService.compile(original,key,prepared,DraftDocumentBindings.bookmarkNames(sourceBindings),nativeLayout):DraftFormattedRules.compile(original,key,prepared,DraftDocumentBindings.bookmarkNames(sourceBindings),nativeLayout);}
             catch(DocxTemplateEditor.EditException unsafe){throw new BizException(4012,unsafe.getCode()+": "+unsafe.getOperationId());}
             DraftArtifact revision=new DraftArtifact();revision.setId(java.util.UUID.randomUUID().toString());revision.setProjectId(projectId);revision.setFileKey(key);
             revision.setSnapshotId(snapshot);revision.setSourceSha256(DraftPdfConverter.sha256(original));revision.setDocxSha256(generated.getDocxSha256());revision.setDocxBytes(generated.getDocxBytes());

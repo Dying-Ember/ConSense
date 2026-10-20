@@ -1,11 +1,19 @@
 package com.consense.document;
 
 import com.consense.common.JsonUtils;
+import com.consense.common.Utf8;
+import com.fasterxml.jackson.core.JsonGenerator;
+import java.io.IOException;
+import java.io.OutputStream;
+import java.io.OutputStreamWriter;
+import java.io.Writer;
+import java.nio.charset.CodingErrorAction;
+import java.nio.charset.StandardCharsets;
+import java.security.DigestOutputStream;
+import java.security.MessageDigest;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
 import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -22,6 +30,8 @@ public final class OerTemplateEvidence {
     private static final Pattern REFERENCE=Pattern.compile("(?i)\\b(?:NTT|SCT|SCC)\\s*\\d+(?:\\.\\d+)*(?:\\([a-z0-9]+\\))*");
     private static final Pattern SUBITEM=Pattern.compile("^\\s*[*#]*\\s*((?:\\([a-z0-9]+\\)\\s*)+)",Pattern.CASE_INSENSITIVE);
     private static final Pattern ENUMERATED_TARGETS=Pattern.compile("(?is)\\bin\\s+(?:the\\s+)?clauses?\\s+(.+?)\\s+(?:are|is)\\s+to\\s+be\\s+(?:deleted|amended|replaced)");
+    private static final Pattern SOURCE_LIST_END=Pattern.compile("[:：]\\s*+(?:[-–—]\\s*+)?\\z");
+    private static final Pattern SOURCE_LIST_LETTER=Pattern.compile("\\p{L}");
     private OerTemplateEvidence() { }
 
     /** Source syntax projection for ordinary consumers; the template r15 analysis remains unchanged. */
@@ -779,7 +789,9 @@ public final class OerTemplateEvidence {
         return text.substring(end).matches("(?is).*\\b(?:substituting\\s+(?:with\\s+|by\\s+)?|replacing\\s+(?:with\\s+|by\\s+)?|replaced\\s+by\\s+|amended\\s+to\\s+read\\s+)(?:the\\s+)?following\\s*[:：]\\s*[-–—]?\\s*$")?reference:null;
     }
     private static boolean sourceAmendmentHeading(String text){return text.matches("(?is).*\\b(?:clause|sub-clause)s?\\s+[0-9]+(?:\\.[0-9]+)*(?:\\([a-z0-9]+\\))*.*\\b(?:amended|substituting|replacing|inserted|replaced|adding|inserting|deleting|deleted)\\b.*");}
-    private static boolean sourceListIntroduction(String text){return text.trim().matches("(?s).*\\p{L}.*[:：]\\s*[-–—]?\\s*$");}
+    private static boolean sourceListIntroduction(String text){
+        String value=text.trim();return SOURCE_LIST_END.matcher(value).find()&&SOURCE_LIST_LETTER.matcher(value).find();
+    }
     private static boolean sourceParentPredicate(Member tail,List<Unit> siblings,List<Member> members){
         if(siblings.isEmpty()||siblings.get(0).listFrame==null)return false;String text=tail.text.trim(),intro=members.get(siblings.get(0).listFrame.intro).text;boolean unfinished=true;
         for(Unit sibling:siblings)unfinished&=!members.get(sibling.start).text.trim().matches("(?s).*[.!?]$");
@@ -1381,10 +1393,30 @@ public final class OerTemplateEvidence {
     private static boolean descendant(String path,String ancestor){return !ancestor.isEmpty()&&(path.equals(ancestor)||path.startsWith(ancestor+"/"));}
     private static ArrayNode references(String text){ArrayNode out=array();Matcher matcher=REFERENCE.matcher(text);while(matcher.find()){ObjectNode r=out.addObject();r.put("text",matcher.group());r.put("start",matcher.start());r.put("end",matcher.end());r.put("offsetUnit","utf16_in_containing_text");r.put("status","literal_reference_candidate_not_resolved");}return out;}
     private static void addRange(ArrayNode ranges,ArrayNode ids,Member member,int start,int end){ObjectNode r=ranges.addObject();r.put("memberId",member.id);r.put("channel","text");r.put("start",start);r.put("end",end);r.put("offsetUnit","utf16");r.set("sourcePosition",member.value.path("sourcePosition").deepCopy());appendUnique(ids,member.id);}
-    private static String inputSha(String key,String source,JsonNode blocks,JsonNode coverage){ObjectNode input=object();input.put("schema",SCHEMA);input.put("analysisRevision",ANALYSIS_REVISION);input.put("fileKey",key);input.put("sourceSha256",source);input.set("blocks",blocks==null?JsonUtils.mapper().nullNode():blocks.deepCopy());ObjectNode c=coverage!=null&&coverage.isObject()?(ObjectNode)coverage.deepCopy():object();c.remove("templateEvidence");input.set("coverage",c);return digest(canonical(input).toString());}
-    private static String payloadSha(JsonNode evidence){ObjectNode payload=evidence.deepCopy();JsonNode binding=payload.path("sourceBinding");if(binding.isObject())((ObjectNode)binding).remove("generationSha256");return digest(canonical(payload).toString());}
+    private static String inputSha(String key,String source,JsonNode blocks,JsonNode coverage){ObjectNode input=object();input.put("schema",SCHEMA);input.put("analysisRevision",ANALYSIS_REVISION);input.put("fileKey",key);input.put("sourceSha256",source);input.set("blocks",blocks==null?JsonUtils.mapper().nullNode():blocks);input.set("coverage",coverage!=null&&coverage.isObject()?coverage:object());return canonicalDigest(input,"coverage","templateEvidence");}
+    private static String payloadSha(JsonNode evidence){return canonicalDigest(evidence,"sourceBinding","generationSha256");}
+    /** Preserve the old sorted Writer JSON then UTF-8 replacement bytes without copying the tree or its complete JSON string. */
+    private static String canonicalDigest(JsonNode value,String excludedChild,String excludedField){
+        try{
+            MessageDigest digest=MessageDigest.getInstance("SHA-256");
+            OutputStream discard=new OutputStream(){@Override public void write(int value){}@Override public void write(byte[] value,int offset,int length){}};
+            try(Writer writer=new OutputStreamWriter(new DigestOutputStream(discard,digest),StandardCharsets.UTF_8.newEncoder().onMalformedInput(CodingErrorAction.REPLACE).onUnmappableCharacter(CodingErrorAction.REPLACE).replaceWith(new byte[]{(byte)'?'}));JsonGenerator json=JsonUtils.mapper().getFactory().createGenerator(writer)){
+                writeCanonical(json,value,excludedChild,excludedField);
+            }
+            byte[] hash=digest.digest();char[] hex=new char[hash.length*2],digits="0123456789abcdef".toCharArray();
+            for(int i=0;i<hash.length;i++){hex[2*i]=digits[(hash[i]&255)>>>4];hex[2*i+1]=digits[hash[i]&15];}return new String(hex);
+        }catch(Exception impossible){throw new IllegalStateException(impossible);}
+    }
+    private static void writeCanonical(JsonGenerator json,JsonNode value,String excludedChild,String excludedField)throws IOException{
+        if(value.isObject()){
+            json.writeStartObject();List<String> keys=new ArrayList<>();value.fieldNames().forEachRemaining(keys::add);Collections.sort(keys);
+            for(String key:keys){if(excludedChild==null&&key.equals(excludedField))continue;json.writeFieldName(key);writeCanonical(json,value.get(key),null,key.equals(excludedChild)?excludedField:null);}json.writeEndObject();
+        }else if(value.isArray()){
+            json.writeStartArray();for(JsonNode member:value)writeCanonical(json,member,null,null);json.writeEndArray();
+        }else JsonUtils.mapper().writeTree(json,value);
+    }
     private static JsonNode canonical(JsonNode value){if(value.isObject()){ObjectNode out=object();List<String> keys=new ArrayList<>();value.fieldNames().forEachRemaining(keys::add);Collections.sort(keys);for(String k:keys)out.set(k,canonical(value.get(k)));return out;}if(value.isArray()){ArrayNode out=array();for(JsonNode member:value)out.add(canonical(member));return out;}return value;}
-    private static String digest(String value){try{byte[] bytes=MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8));StringBuilder out=new StringBuilder();for(byte b:bytes)out.append(String.format(Locale.ROOT,"%02x",b&255));return out.toString();}catch(Exception impossible){throw new IllegalStateException(impossible);}}
+    private static String digest(String value){try{return Utf8.sha256(value);}catch(Exception impossible){throw new IllegalStateException(impossible);}}
     private static String sha(String value){if(value==null||!value.matches("(?i)[a-f0-9]{64}"))throw new IllegalArgumentException("Actual original source SHA256 is required");return value.toLowerCase(Locale.ROOT);}
     private static void key(String key){if(!Arrays.asList("NTT","SCT","SCC").contains(key))throw new IllegalArgumentException("Only NTT/SCT/SCC template profiles are supported");}
     private static ObjectNode object(){return JsonUtils.mapper().createObjectNode();}

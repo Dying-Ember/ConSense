@@ -25,7 +25,7 @@ class LlmSourceSelectionIntegrationTest {
     @MockBean(name="llmClient") LlmClient local;
     @MockBean(name="miniMaxChatClient") LlmClient miniMax;
 
-    @Test void unconfiguredSelectedModelActionFailsButItsFailureHistoryAndInputsStayReadable() throws Exception {
+    @Test void unconfiguredSelectedModelLeavesPartialHistoryAndInputsReadableForManualCompletion() throws Exception {
         String id="unconfigured-profile-"+java.util.UUID.randomUUID();
         mvc.perform(post("/api/projects").contentType(org.springframework.http.MediaType.APPLICATION_JSON)
                 .content("{\"id\":\""+id+"\",\"nameZhHans\":\"TEST ONLY\"}")).andExpect(jsonPath("$.code").value(0));
@@ -36,10 +36,14 @@ class LlmSourceSelectionIntegrationTest {
         mvc.perform(multipart("/api/drafting/{id}/inputs/upload",id).file(new org.springframework.mock.web.MockMultipartFile("files","unconfigured-fixture.docx","application/vnd.openxmlformats-officedocument.wordprocessingml.document",bytes)))
                 .andExpect(jsonPath("$.data.parsed").value(1));
         mvc.perform(post("/api/drafting/{id}/variables/extract",id).header("X-ConSense-Llm-Profile","minimax-cn"))
-                .andExpect(jsonPath("$.code").value(5001)).andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("missing_api_key")));
+                .andExpect(jsonPath("$.code").value(0));
         mvc.perform(get("/api/drafting/{id}/variables/extract-traces",id).header("X-ConSense-Llm-Profile","minimax-cn"))
-                .andExpect(jsonPath("$.code").value(0)).andExpect(jsonPath("$.data[0].status").value("failed"))
+                .andExpect(jsonPath("$.code").value(0)).andExpect(jsonPath("$.data[0].status").value("partial"))
                 .andExpect(jsonPath("$.data[0].modelIdentity.profileId").value("minimax-cn"));
+        mvc.perform(get("/api/drafting/{id}/variables/extract-trace",id))
+                .andExpect(jsonPath("$.data.failureCode").value("partial_source_failed"))
+                .andExpect(jsonPath("$.data.parts[0].attempts[0].errorCode").value("model_call_failed"))
+                .andExpect(jsonPath("$.data.parts[0].attempts[0].errorMessage").value(org.hamcrest.Matchers.containsString("missing_api_key")));
         mvc.perform(get("/api/drafting/{id}/inputs",id).header("X-ConSense-Llm-Profile","minimax-cn"))
                 .andExpect(jsonPath("$.code").value(0)).andExpect(jsonPath("$.data.length()").value(1));
         verifyNoInteractions(local,miniMax);
@@ -62,13 +66,19 @@ class LlmSourceSelectionIntegrationTest {
     @Test void profilesExposeSafeConfigurationWithoutCallingProvidersAndRejectUnknownIds() throws Exception {
         mvc.perform(get("/api/system/llm-profiles")).andExpect(status().isOk()).andExpect(jsonPath("$.code").value(0))
                 .andExpect(jsonPath("$.data.defaultProfile").value("local"))
-                .andExpect(jsonPath("$.data.profiles.length()").value(2))
+                .andExpect(jsonPath("$.data.profiles.length()").value(4))
                 .andExpect(jsonPath("$.data.profiles[0].id").value("local"))
                 .andExpect(jsonPath("$.data.profiles[1].id").value("minimax-cn"))
                 .andExpect(jsonPath("$.data.profiles[1].model").value("MiniMax-M3"))
                 .andExpect(jsonPath("$.data.profiles[1].configured").value(false))
                 .andExpect(jsonPath("$.data.profiles[1].unavailableReason").value("missing_api_key"))
-                .andExpect(jsonPath("$.data.profiles[1].apiKey").doesNotExist());
+                .andExpect(jsonPath("$.data.profiles[1].apiKey").doesNotExist())
+                .andExpect(jsonPath("$.data.profiles[2].id").value("qwen"))
+                .andExpect(jsonPath("$.data.profiles[2].model").value("qwen3.8-27b"))
+                .andExpect(jsonPath("$.data.profiles[2].apiKey").doesNotExist())
+                .andExpect(jsonPath("$.data.profiles[3].id").value("qwen-flash"))
+                .andExpect(jsonPath("$.data.profiles[3].model").value("qwen3.8-flash"))
+                .andExpect(jsonPath("$.data.profiles[3].apiKey").doesNotExist());
         mvc.perform(get("/api/system/llm-profiles").header("X-ConSense-Llm-Profile","minimax-cn")).andExpect(status().isOk());
         mvc.perform(get("/api/system/llm-profiles").header("X-ConSense-Llm-Profile","arbitrary-provider"))
                 .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value(400));

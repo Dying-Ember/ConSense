@@ -52,6 +52,7 @@ class AdviceSessionIntegrationTest {
     @Autowired SourceDocumentRepository sources;
     @Autowired ChatMessageRepository messages;
     @Autowired ConsenseProperties properties;
+    @Autowired com.consense.service.advice.AdviceModelProperties adviceSettings;
     @Autowired StorageService storage;
     @MockBean(name="llmClient") LlmClient local;
     @MockBean(name="miniMaxChatClient") LlmClient miniMax;
@@ -115,6 +116,50 @@ class AdviceSessionIntegrationTest {
         assertEquals(old.path("sources"),history(project,session).get(1).path("sources"));
         prompts.clear();data(askRequest(project,session,"contract","project_contract","NEW MODEL QUESTION TEST ONLY").header("X-ConSense-Llm-Profile","minimax-cn"));
         assertFalse(prompts.get(0).contains("CURRENT SOURCE QUESTION"));
+    }
+
+    @Test void clarificationTaskFollowsUnchangedRecentHistoryAndTheCompletePromptIsCounted() throws Exception {
+        String project=project();source(project,"AUTHORED complete current source TEST ONLY\nUnicode source qualifier: \u6761\u6b3e \"A\".");rebuild(project);
+        String session=session(project,"contract","project_contract");
+        String original="ORIGINAL CURRENT QUESTION TEST ONLY",priorAssumption="EARLIER USER ASSUMPTION TEST ONLY",currentAssumption="CURRENT USER ASSUMPTION TEST ONLY";
+        answer="{\"grounded\":false,\"answer\":\"EARLIER SUPPORTED ANALYSIS TEST ONLY [1]\",\"citations\":[\"[1]\"],\"clarifications\":[\"What contract stage?\"]}";
+        long first=ask(project,session,original).path("messageId").asLong();
+        Map<String,Object> reply=new LinkedHashMap<>();reply.put("scope","contract");reply.put("sessionId",session);reply.put("replyToMessageId",first);reply.put("question",priorAssumption);
+        long parent=data(post("/api/advice/{id}/ask",project).contentType(MediaType.APPLICATION_JSON).content(JsonUtils.write(reply))).path("messageId").asLong();
+        answer="{\"grounded\":false,\"answer\":\"LATER ERRONEOUS ASSISTANT CONTEXT TEST ONLY [1]\",\"citations\":[\"[1]\"],\"clarifications\":[\"What contract stage?\"]}";
+        long sibling=ask(project,session,"LATER SIBLING QUESTION TEST ONLY").path("messageId").asLong();
+        JsonNode before=history(project,session);assertEquals(6,before.size());assertTrue(sibling>parent);
+        reply.put("replyToMessageId",parent);reply.put("question",currentAssumption);String body=JsonUtils.write(reply);
+        List<VettingInputBudget.Input> counted=new ArrayList<>();List<List<LlmClient.ChatTurn>> dispatched=new ArrayList<>();
+        doAnswer(call->{VettingInputBudget.Input input=call.getArgument(0);counted.add(input);return observation(input);}).when(counter).observe(any());
+        int originalLimit=adviceSettings.getHistoryMaxExchanges();
+        try {
+            adviceSettings.setHistoryMaxExchanges(0);overrideTokens.set(262144);clearInvocations(local);
+            mvc.perform(post("/api/advice/{id}/ask",project).contentType(MediaType.APPLICATION_JSON).content(body)).andExpect(jsonPath("$.code").value(4205));
+            assertEquals(1,counted.size());verify(local,never()).chatStructured(anyList(),any());assertEquals(before,history(project,session));
+            String currentTask=counted.get(0).getMessages().get(1).getContent();
+            assertTrue(currentTask.contains(original));assertTrue(currentTask.contains(priorAssumption));assertTrue(currentTask.contains(currentAssumption));
+            assertTrue(currentTask.contains("AUTHORED complete current source TEST ONLY"));assertFalse(currentTask.contains("LATER ERRONEOUS ASSISTANT CONTEXT TEST ONLY"));
+            adviceSettings.setHistoryMaxExchanges(originalLimit);overrideTokens.set(0);counted.clear();
+            answer="{\"grounded\":true,\"answer\":\"AUTHORED final supported analysis TEST ONLY [1]\",\"citations\":[\"[1]\"]}";
+            doAnswer(call->{dispatched.add(call.getArgument(0));return com.consense.service.advice.AdviceBudgetFixture.contract(answer);}).when(local).chatStructured(anyList(),any());
+            assertTrue(data(post("/api/advice/{id}/ask",project).contentType(MediaType.APPLICATION_JSON).content(body)).path("grounded").asBoolean());
+            assertEquals(2,counted.size());assertEquals(1,dispatched.size());
+            String historyMaterial=counted.get(0).getMessages().get(1).getContent(),fullPrompt=dispatched.get(0).get(1).getContent();
+            assertTrue(historyMaterial.startsWith("\n\nConversation context only"));
+            JsonNode actualHistory=JsonUtils.parse(historyMaterial.substring(historyMaterial.indexOf('\n',2)+1));
+            List<LlmClient.ChatTurn> expected=new ArrayList<>();
+            for(long assistantId:new long[]{parent,sibling}) {
+                com.consense.domain.ChatMessage assistant=messages.findById(assistantId).get(),user=messages.findById(assistant.getQuestionMessageId()).get();
+                expected.add(LlmClient.ChatTurn.user(user.getContent()));expected.add(LlmClient.ChatTurn.assistant(assistant.getContent()));
+            }
+            assertEquals(JsonUtils.parse(JsonUtils.write(expected)),actualHistory,"Keep the same whole recent exchanges, including the sibling after the clarification target");
+            assertEquals(historyMaterial+currentTask,fullPrompt,"The exact current source/task/background block follows the exact counted history block");
+            assertTrue(historyMaterial.contains("Answer only from the current evidence IDs in the current task."));
+            assertEquals(JsonUtils.write(counted.get(1).getMessages()),JsonUtils.write(dispatched.get(0)),"Count the reordered full input actually dispatched");
+            JsonNode after=history(project,session);assertEquals(8,after.size());
+            for(int index=0;index<before.size();index++)assertEquals(before.get(index),after.get(index),"Historical messages and citations stay unchanged");
+        } finally {adviceSettings.setHistoryMaxExchanges(originalLimit);overrideTokens.set(0);}
     }
 
     @Test void clearDuringModelGenerationRejectsLatePublicationAndLeavesHistoryEmpty() throws Exception {

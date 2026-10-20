@@ -25,6 +25,7 @@ final class OerDocxSourceScopes {
     private static final Pattern COMPACT_ROMAN_LABEL=Pattern.compile("^[\\p{Z}\\s]*([ivxlcdm]+)\\.(?=\\p{L})(?!\\p{L}+\\.)");
     private static final Pattern NAMED_SOURCE_FRAME=Pattern.compile("(?i)^(Remarks:|Internal Note:|Annex [1-9][0-9]* to .+)$");
     private static final Pattern COMPOUND_SOURCE_FRAME=Pattern.compile("^[\\p{Z}\\s]*([1-9][0-9]*(?:\\.[1-9][0-9]*)+)\\.[\\p{Z}\\s]+(?=\\p{L})");
+    private static final Pattern FORWARD_INCLUDE=Pattern.compile("(?i)\\binclude\\s+(?:all\\s+of\\s+)?the\\s+following\\b");
     private OerDocxSourceScopes() { }
 
     static ObjectNode observe(JsonNode inventory,JsonNode outline,JsonNode sections) {
@@ -84,7 +85,53 @@ final class OerDocxSourceScopes {
             Map<String,JsonNode> byId=new HashMap<>();for(JsonNode member:members)byId.put(member.path("id").asText(),member);
             for(JsonNode parent:parents){List<JsonNode> flow=new ArrayList<>();for(JsonNode id:parent.path("orderedMemberIds"))flow.add(byId.get(id.asText()));refineListIntervals(flow,(ObjectNode)parent,ranges);}
         }
+        if(out.path("familyCandidate").isNull()&&ranges.isEmpty())explicitFollowingRegions(members,ranges,sections);
         return out;
+    }
+
+    /** A literal forward introduction and unique payload prove only this unoccupied source interval. */
+    private static void explicitFollowingRegions(List<JsonNode> flow,ArrayNode ranges,JsonNode sections){
+        Set<String> ids=new HashSet<>(),positions=new HashSet<>();List<Integer> roots=new ArrayList<>();Map<java.math.BigInteger,Integer> counts=new HashMap<>();
+        for(int n=0;n<flow.size();n++){
+            JsonNode member=flow.get(n),position=member.path("sourcePosition");String id=member.path("id").asText();
+            if(id.isEmpty()||!ids.add(id)||!positions.add(positionKey(position,position.path("nodePath").asText())))return;
+            Matcher marker=tabDecimal(member);if(directBody(member)&&marker!=null&&marker.group(2)==null){roots.add(n);counts.merge(new java.math.BigInteger(marker.group(1)),1,Integer::sum);}
+        }
+        for(int i=0;i+1<roots.size();i++){
+            int from=roots.get(i),end=roots.get(i+1);Matcher root=tabDecimal(flow.get(from)),next=tabDecimal(flow.get(end));
+            java.math.BigInteger number=new java.math.BigInteger(root.group(1)),following=new java.math.BigInteger(next.group(1));
+            if(!number.add(java.math.BigInteger.ONE).equals(following)||counts.get(number)!=1||counts.get(following)!=1||numbering(flow.get(from)).path("numbered").asBoolean()||numbering(flow.get(end)).path("numbered").asBoolean()||!boundObservedInterval(flow,from,end)||!oneObservedSection(flow,from,end,sections))continue;
+            int children=0,introduction=-1,lastChild=-1,payloads=0;boolean valid=true;
+            for(int n=from;n<=end&&valid;n++){
+                JsonNode member=flow.get(n);JsonNode normal=member.path("textObservation"),raw=member.path("preNormalizedTextObservation");
+                if(!normal.path("text").equals(normal.path("originalText"))||!raw.path("text").equals(raw.path("originalText"))||!normal.path("deletedText").asText().isEmpty()||!normal.path("strikeText").asText().isEmpty()||!raw.path("deletedText").asText().isEmpty()||!raw.path("strikeText").asText().isEmpty()){valid=false;break;}
+                if(n==from||n==end)continue;
+                String label=parenItem(member);
+                if(directBody(member)&&label!=null){
+                    if(label.length()!=1||label.charAt(0)!='a'+children){valid=false;break;}children++;lastChild=n;
+                    Matcher forward=FORWARD_INCLUDE.matcher(text(member));if(forward.find()){if(introduction>=0||forward.find()||text(member).matches("(?s).*[\"'“”‘’].*")){valid=false;break;}introduction=n;}
+                }else if(directBody(member)&&(sourceDecimal(member)!=null||sourceListMarker(member))){valid=false;break;}
+            }
+            if(!valid||children<3||introduction!=lastChild||introduction<0)continue;
+            for(int n=from+1;n<introduction;n++)if(directBody(flow.get(n))&&!text(flow.get(n)).isBlank()&&parenItem(flow.get(n))==null)valid=false;
+            for(int n=introduction;n<end&&valid;n++){
+                JsonNode member=flow.get(n);JsonNode properties=member.path("paragraphProperties");
+                if(!directBody(member)||!"outline_not_declared".equals(properties.path("status").asText())||numbering(member).path("numbered").asBoolean()){valid=false;break;}
+                if(n>introduction&&!text(member).isBlank()){payloads++;if(parenItem(member)!=null||sourceDecimal(member)!=null||sourceListMarker(member)||FORWARD_INCLUDE.matcher(text(member)).find())valid=false;}
+            }
+            if(!valid||payloads!=1)continue;
+            ObjectNode candidate=range("source-region",number+"("+parenItem(flow.get(introduction))+")",new ArrayList<>(flow.subList(introduction,end)),boundary("next_explicit_number_in_source_sequence",flow.get(end)));
+            candidate.put("basis","explicit_forward_introduction_unique_payload_source_interval");candidate.put("hierarchyStatus","source_interval_containment_only");ranges.add(candidate);
+        }
+    }
+
+    private static boolean oneObservedSection(List<JsonNode> flow,int from,int end,JsonNode inventory){
+        if(!"docx-native-sections-v1".equals(inventory.path("version").asText())||!"observed_native_source_sections".equals(inventory.path("status").asText())||!samePart(flow.get(from).path("sourcePosition"),inventory.path("sourcePosition")))return false;
+        JsonNode owner=null;for(int n=from;n<=end;n++){
+            String path=flow.get(n).path("sourcePosition").path("nodePath").asText();JsonNode found=null;
+            for(JsonNode section:inventory.path("sections"))for(JsonNode member:section.path("nativeMemberPaths"))if(path.equals(member.asText())||path.startsWith(member.asText()+"/")){if(found!=null&&found!=section)return false;found=section;}
+            if(found==null||owner!=null&&owner!=found)return false;owner=found;
+        }return owner!=null;
     }
 
     private static final class LiteralRoot {

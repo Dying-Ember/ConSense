@@ -41,4 +41,14 @@ class DocxNativeLayoutGuardTest {
         DocxTemplateEditor.DocxEditResult removed=editor.applyWithParagraphBookmarks(source,new DocxTemplateEditor.SourceEditBatch(index.getSourceSha256(),Collections.singletonList(DocxTemplateEditor.Edit.deleteParagraph("remove-empty",empty))),Collections.emptyMap(),false,plan);assertEquals("SKIPPED_REMOVED",removed.getNativeLayoutLedger().get(0).getStatus());assertNull(removed.getNativeLayoutLedger().get(0).getLayoutId());
         DocxTemplateEditor.DocxEditResult inserted=editor.applyWithParagraphBookmarks(source,new DocxTemplateEditor.SourceEditBatch(index.getSourceSha256(),Collections.singletonList(DocxTemplateEditor.Edit.insertParagraphs("insert-new-empty",empty,true,Arrays.asList("","TEST ONLY new paragraph"),empty))),Collections.emptyMap(),false,plan);assertEquals(1,inserted.getNativeLayoutLedger().size());assertTrue(inserted.getIndex().paragraph(inserted.getNativeLayoutLedger().get(0).getGeneratedId()).hasCompactEmptyLayoutSpacing());assertEquals("",inserted.getIndex().mainParagraph(199).getText());assertFalse(inserted.getIndex().mainParagraph(199).hasCompactEmptyLayoutSpacing());DocxTemplateEditorTest.unchangedOpaqueParts(source,inserted.getDocxBytes());
     }
+    @Test void aValidatedBusinessClearDiscardsOnlyItsManualFooterSpacing()throws Exception {
+        byte[] source=DocxTemplateEditorTest.source(1);DocxTemplateEditor.TemplateIndex index=editor.inspect(source);DocxTemplateEditor.Paragraph empty=index.mainParagraph(198),footer=index.mainParagraph(211);
+        for(DocxTemplateEditor.Edit clear:Arrays.asList(DocxTemplateEditor.Edit.clearParagraph("clear-discarded-footer",footer),DocxTemplateEditor.Edit.clearParagraphAndNumbering("clear-discarded-footer-label",footer))) {
+            DocxTemplateEditor.DocxEditResult result=editor.applyWithParagraphBookmarks(source,new DocxTemplateEditor.SourceEditBatch(index.getSourceSha256(),Collections.singletonList(clear)),Collections.emptyMap(),false,spacingPlan(index,198));
+            assertEquals("SKIPPED_CLEARED_FOOTER",result.getNativeLayoutLedger().get(0).getStatus());assertNull(result.getNativeLayoutLedger().get(0).getLayoutId());
+            assertEquals(empty.getSha256(),result.getIndex().paragraph(empty.getId()).getSha256(),"The original empty paragraph acquires no renderer spacing or marker");assertEquals("",result.getIndex().paragraph(footer.getId()).getCatalogText());
+            assertEquals(index.getMainParagraphs().size(),result.getIndex().getMainParagraphs().size());DocxTemplateEditorTest.unchangedOpaqueParts(source,result.getDocxBytes());
+        }
+        assertEquals(index.getSourceSha256(),editor.inspect(source).getSourceSha256());
+    }
 }

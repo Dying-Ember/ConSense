@@ -22,17 +22,18 @@ class VettingSampleReportAlignmentTest {
         ntt.setReviewRemarks("Not adopted: retain the project-specific requirement.");
         try(XWPFDocument d=new XWPFDocument(new ByteArrayInputStream(writer.docx(project(),Arrays.asList(sct,ntt),null,"zh-Hans")))) {
             assertEquals("Comments on Tender Documentation",d.getParagraphs().get(0).getText());
-            List<XWPFTable> comments=d.getTables().stream().filter(t->t.getRow(0).getTableCells().size()==5).collect(Collectors.toList());
+            List<XWPFTable> comments=d.getTables().stream().filter(t->t.getRows().size()>1 && t.getRow(1).getTableCells().size()==5).collect(Collectors.toList());
             assertEquals(2,comments.size(),"Actual report must use the sample's five-column comments table");
-            assertEquals(Arrays.asList("", "Page", "Clause / Item", "Comments", "Remarks by Project Team (if any)"),texts(comments.get(0).getRow(0)));
-            assertEquals("1.1",comments.get(0).getRow(1).getCell(0).getText());
-            assertEquals("NTT/2",comments.get(0).getRow(1).getCell(1).getText());
-            assertEquals("1(b)",comments.get(0).getRow(1).getCell(2).getText());
-            assertTrue(comments.get(0).getRow(1).getCell(3).getText().contains("Please clarify this provision."));
-            assertFalse(comments.get(0).getRow(1).getCell(3).getText().contains("Not adopted"));
-            assertTrue(comments.get(0).getRow(1).getCell(4).getText().contains("Not adopted"));
-            assertEquals("3.1",comments.get(1).getRow(1).getCell(0).getText());
-            assertFalse(comments.get(0).getRow(1).getCell(3).getText().contains("中文不应覆盖英文报告"));
+            assertEquals(Arrays.asList("", "Page", "Clause / Item", "Comments", ""),texts(comments.get(0).getRow(1)));
+            assertEquals(3,comments.get(0).getRow(0).getTableCells().size());assertTrue(comments.get(0).getRow(0).getCell(1).getText().contains("Notes to Tenderers"));
+            assertEquals("1.1",comments.get(0).getRow(2).getCell(0).getText());
+            assertEquals("NTT/2",comments.get(0).getRow(2).getCell(1).getText());
+            assertEquals("Recorded source location: 1(b)",comments.get(0).getRow(2).getCell(2).getText());
+            assertTrue(comments.get(0).getRow(2).getCell(3).getText().contains("Please clarify this provision."));
+            assertFalse(comments.get(0).getRow(2).getCell(3).getText().contains("Not adopted"));
+            assertTrue(comments.get(0).getRow(2).getCell(4).getText().contains("Not adopted"));
+            assertEquals("3.1",comments.get(1).getRow(2).getCell(0).getText());
+            assertFalse(comments.get(0).getRow(2).getCell(3).getText().contains("中文不应覆盖英文报告"));
             assertTrue(d.getTables().stream().anyMatch(t->t.getText().contains("APPENDIX U TO SPECIFICATION")||t.getText().contains("APU.A010")));
         }
     }
@@ -82,10 +83,10 @@ class VettingSampleReportAlignmentTest {
         VettingJobVO job=new VettingJobVO();job.setStatus("COMPLETED");job.setCoverage(coverage);
         VettingReportWriter writer=new VettingReportWriter();
         try(XWPFDocument word=new XWPFDocument(new ByteArrayInputStream(writer.docx(project(),Collections.emptyList(),job,"en")))) {
-            assertTrue(word.getTables().stream().anyMatch(t->t.getText().contains("full_countercheck_unproven")));
+            assertTrue(word.getTables().stream().anyMatch(t->t.getText().contains("Full source and substantive countercheck have not been established")));
         }
         try(PDDocument pdf=PDDocument.load(writer.pdf(project(),Collections.emptyList(),job,"en"))) {
-            assertTrue(new PDFTextStripper().getText(pdf).contains("full_countercheck_unproven"));
+            assertTrue(new PDFTextStripper().getText(pdf).contains("Full source and substantive countercheck have not been established"));
         }
     }
     @Test void checklistNeverMarksAbsentFindingsAsFulfilledAndRetainsAllTemplateRequirements() {
@@ -103,6 +104,19 @@ class VettingSampleReportAlignmentTest {
         assertTrue(manual.get(1).getRows().get(0).get(2).startsWith("Not applicable"));
         assertTrue(manual.get(1).getRows().get(1).get(2).startsWith("Not checked"));
     }
+    @Test void englishOfficialSummaryLocalizesSystemWarningsInBothFormatsWithoutChangingOriginalCoverage() throws Exception {
+        List<String> warnings=Arrays.asList("资料类型：招标合同条款","片段与字符统计以已采用 canonical 观察为分母；未采用区域及原件完整性未确认。","opaque$reason(3).txt");
+        CoverageVO coverage=new CoverageVO(1,1,Collections.singletonList(new DocumentCoverageVO("doc","SCT","Actual SCT.docx","PARSED",100,100,5,5,warnings)),Collections.emptyList());
+        VettingJobVO job=new VettingJobVO();job.setStatus("COMPLETED");job.setCoverage(coverage);VettingReportWriter writer=new VettingReportWriter();
+        VettingReportPresentation.Table model=VettingReportPresentation.comments(Collections.emptyList(),coverage).get(0);assertEquals("3.S",model.getRows().get(0).get(0));
+        try(XWPFDocument word=new XWPFDocument(new ByteArrayInputStream(writer.docx(project(),Collections.emptyList(),job,"en")))) {
+            String text=word.getBodyElements().stream().map(e->e instanceof XWPFParagraph?((XWPFParagraph)e).getText():e instanceof XWPFTable?((XWPFTable)e).getText():"").collect(Collectors.joining("\n"));
+            assertTrue(text.contains("Source role: Tender provisions"));assertTrue(text.contains("original-source completeness are unconfirmed"));assertTrue(text.contains("opaque$reason(3).txt"));assertFalse(text.contains("资料类型"));assertFalse(text.contains("片段与字符"));
+        }
+        try(PDDocument pdf=PDDocument.load(writer.pdf(project(),Collections.emptyList(),job,"en"))) {String text=new PDFTextStripper().getText(pdf);assertTrue(text.contains("Source role: Tender provisions"));assertFalse(text.contains("资料类型"));assertFalse(text.contains("片段与字符"));}
+        assertEquals(warnings,coverage.getDocuments().get(0).getWarnings());
+        assertEquals("資料類型：招標合同條款",VettingReportWriter.warning(warnings.get(0),"zh-Hant"));assertEquals(warnings.get(0),VettingReportWriter.warning(warnings.get(0),"zh-Hans"));
+    }
     @Test void actualPdfAndWordHaveBusinessTablesBeforeAuditAppendixAndWriteQaFixtures() throws Exception {
         VettingReportWriter writer=new VettingReportWriter();FindingVO ntt=finding("NTT","03 - NTT.docx","1(b)","NTT/2");
         byte[] word=writer.docx(project(),Collections.singletonList(ntt),null,"en");
@@ -111,7 +125,7 @@ class VettingSampleReportAlignmentTest {
             String text=new PDFTextStripper().getText(d).replaceAll("\\s+"," ");
             assertTrue(text.contains("Comments on Tender Documentation"));
             assertTrue(text.contains("Clause / Item"));assertTrue(text.contains("Remarks by Project Team"));
-            assertTrue(text.indexOf("Suggested action")<text.indexOf("Run ID"));
+            assertTrue(text.indexOf("Suggested action")>=0&&text.indexOf("Suggested action")<text.indexOf("APPENDIX II"));assertFalse(text.contains("Run ID:"));
             assertTrue(text.indexOf("APPENDIX I")<text.indexOf("APPENDIX II"));
             assertTrue(text.contains("Current-Contract-9"));assertFalse(text.contains("20240539"));
         }

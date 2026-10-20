@@ -12,6 +12,30 @@ import static org.mockito.Mockito.*;
 import static org.mockito.ArgumentMatchers.*;
 
 class VettingSemanticReviewTest {
+    @Test void businessConstraintDiagnosticsDoNotClaimPresentBasicFieldsAreMissingOrChangeModelAction() {
+        AiGateway ai=mock(AiGateway.class);when(ai.available()).thenReturn(true);when(ai.chatModel()).thenReturn("test");
+        ConsenseProperties props=new ConsenseProperties();props.getVetting().setSemanticTopics(1);props.getVetting().setProjectReferenceComparisons(0);
+        VettingRetrievalClient retrieval=mock(VettingRetrievalClient.class);Chunk source=chunk("source","document","The Tenderer shall submit the required signed paper copies.");
+        when(retrieval.retrieve(eq("p"),anyString(),eq("tender"),anyList())).thenReturn(Collections.singletonList(source));
+        Record invalid=record("requirement",quote(source.getId(),source.getContent()));invalid.setPendingFacts(Collections.singletonList("Confirm the intended submission requirement."));invalid.setSuggestedAction("amend");
+        when(ai.completeStructuredJsonList(anyString(),anyString(),eq(Record.class),any(),anyList())).thenReturn(Collections.singletonList(invalid));
+        Result result=VettingTokenFixture.review(ai,props,retrieval).review("p",Collections.singletonList(source),"en",(n,s)->{});
+        assertTrue(result.getCandidates().isEmpty());assertTrue(result.getModelFailure().contains("pending_facts_require_review"),result.getModelFailure());
+        for(String absent:Arrays.asList("empty_title","empty_comment","missing_evidence"))assertFalse(result.getModelFailure().contains(absent));
+        assertEquals("amend",invalid.getSuggestedAction());assertEquals(1,invalid.getPendingFacts().size());
+    }
+    @Test void basicShapeDiagnosticsNameOnlyTheMissingFields() {
+        AiGateway ai=mock(AiGateway.class);when(ai.available()).thenReturn(true);when(ai.chatModel()).thenReturn("test");
+        ConsenseProperties props=new ConsenseProperties();props.getVetting().setSemanticTopics(1);props.getVetting().setProjectReferenceComparisons(0);
+        VettingRetrievalClient retrieval=mock(VettingRetrievalClient.class);Chunk source=chunk("source","document","The Tenderer shall submit the required signed paper copies.");
+        when(retrieval.retrieve(eq("p"),anyString(),eq("tender"),anyList())).thenReturn(Collections.singletonList(source));
+        Record invalid=record("requirement");invalid.setTitle("");invalid.setComment("");
+        when(ai.completeStructuredJsonList(anyString(),anyString(),eq(Record.class),any(),anyList())).thenReturn(Collections.singletonList(invalid));
+        Result result=VettingTokenFixture.review(ai,props,retrieval).review("p",Collections.singletonList(source),"en",(n,s)->{});
+        assertTrue(result.getCandidates().isEmpty());
+        for(String missing:Arrays.asList("empty_title","empty_comment","missing_evidence"))assertTrue(result.getModelFailure().contains(missing),result.getModelFailure());
+        assertFalse(result.getModelFailure().contains("pending_facts_require_review"));
+    }
     @Test void rejectsHallucinatedQuoteAndOneSidedConflictButKeepsGroundedResult() {
         AiGateway ai = mock(AiGateway.class); VettingRetrievalClient retrieval = mock(VettingRetrievalClient.class);
         ConsenseProperties props = new ConsenseProperties(); props.getVetting().setSemanticTopics(1);

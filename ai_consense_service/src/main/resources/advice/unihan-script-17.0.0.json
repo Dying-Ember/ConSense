@@ -1,0 +1,23 @@
+{
+  "unicodeVersion": "17.0.0",
+  "sourceUrl": "https://www.unicode.org/Public/17.0.0/ucd/Unihan.zip",
+  "sourceArchiveBytes": 8518517,
+  "sourceArchiveSha256": "f7a48b2b545acfaa77b2d607ae28747404ce02baefee16396c5d2d7a8ef34b5e",
+  "sourceMember": "Unihan_Variants.txt",
+  "sourceMemberBytes": 675169,
+  "sourceMemberSha256": "3f23cd71872633f3350875d25bd388e83b60fa71807634c9a600ec26f38a68ab",
+  "licenseUrl": "https://www.unicode.org/license.txt",
+  "license": "Unicode License V3",
+  "licenseBytes": 1995,
+  "licenseSha256": "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96",
+  "licenseSnapshot": "Official bytes retrieved 2026-10-20; copyright 1991-2026",
+  "derivation": "For each direction, retain the source code point only if it has no opposite variant property, no self target, and every target explicitly maps back in the opposite property. Retain no other variant fields.",
+  "runtimeRule": "Infer only from unquoted question text with evidence from exactly one set. Both sets or neither set remain generic zh. Explicit language/script requests take precedence. Never convert user/source text.",
+  "limitations": "Unihan variants are evidence, not a complete orthographic classifier. Shared/self/dual-property characters and mixed-script text do not determine a script. The resource does not attest the model body script.",
+  "resource": "unihan-script-17.0.0.txt",
+  "resourceBytes": 42905,
+  "resourceSha256": "d5cb8cefb16ff2ff80de2334deb6a255640bae90b26489b6f11b14aa0bef1a71",
+  "hansEvidenceCodePoints": 6043,
+  "hantEvidenceCodePoints": 6497,
+  "generator": "tools/generate_advisory_script_data.py"
+}

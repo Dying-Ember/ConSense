@@ -11,7 +11,7 @@ import java.util.*;
 /** Pure, versioned drafting decisions. Facts, adoption and source mapping are separate. */
 public final class DraftBusinessRules {
  private DraftBusinessRules() { }
- public static final String RULE_VERSION="drafting-20261010.1-docx";
+ public static final String RULE_VERSION="drafting-20261020.1-bs-scope";
  private static final ObjectMapper JSON=new ObjectMapper();
  private static final Map<String,Object> RAW=load();
  private static Map<String,Object> load() {try(InputStream in=DraftBusinessRules.class.getResourceAsStream("/drafting/input-catalog.json")){return JSON.readValue(in,new TypeReference<LinkedHashMap<String,Object>>(){});}catch(Exception ex){throw new IllegalStateException("Missing versioned drafting catalog",ex);}}

@@ -384,7 +384,10 @@ tbody tr:hover { background: var(--surface-subtle); }
 
 /* ---------------------------------------------------------- 咨询 */
 
-.chat-shell { display: grid; grid-template-rows: auto minmax(280px, 1fr) auto; min-height: 640px; }
+ol.docx-unverified-list, ul.docx-unverified-list, .docx-unverified-list > li { list-style-type: none; }
+.reading-numbering-notice { margin: 6px 0; padding: 6px 10px; color: var(--amber); background: var(--amber-soft); border-radius: var(--radius-sm); font-size: 12px; line-height: 1.5; }
+
+.chat-shell { display: grid; grid-template-rows: auto auto minmax(280px, 1fr) auto; min-height: 640px; }
 .chat-header { padding: 14px 16px; border-bottom: 1px solid var(--line); display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .chat-header h4 { margin: 0; font-size: 15px; }
 .chat-header .muted { color: var(--muted); font-size: 12px; }

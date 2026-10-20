@@ -70,7 +70,7 @@ class VettingChecklistAutomaticResultsTest {
         assertEquals("not_fulfilled",group.getStatus());assertEquals(2,group.getSubItemAssessments().get(0).getAssessments().size());
         VettingReportPresentation.Table table=VettingReportPresentation.checklist(Collections.emptyList(),groups()).get(0);
         assertEquals(3,table.getHeadings().size());String remarks=table.getRows().get(0).get(2);
-        assertTrue(remarks.contains("Human countercheck: Not checked"));assertTrue(remarks.contains("Automatic suggestion: not_fulfilled \u2717"));
+        assertTrue(remarks.contains("Human countercheck: Not checked"));assertTrue(remarks.contains("Automatic suggestion: Not fulfilled \u2717"));
         assertTrue(remarks.contains("[REQ] The obligation holder is unspecified."));assertTrue(remarks.contains("[CONF] The supplied obligations conflict."));
     }
     @Test void completeGroupsNeedEveryMemberAndAFailedMemberDoesNotHideRemainingUnknowns() {
@@ -100,8 +100,8 @@ class VettingChecklistAutomaticResultsTest {
             assertEquals(status,item.getAssessments().get(0).path("status").asText());assertTrue(item.getReason().contains("The model recorded "+status));
             assertTrue(item.getReason().contains("The actual supplied requirement was reviewed."));
             String report=VettingReportPresentation.checklist(Collections.emptyList(),groups()).stream().map(t->t.getRows().toString()).collect(Collectors.joining("\n"));
-            assertFalse(report.contains("Automatic suggestion: fulfilled \u2713"));
-            assertTrue(report.contains("Automatic suggestion: insufficient_evidence"));
+            assertFalse(report.contains("Automatic suggestion: Fulfilled \u2713"));
+            assertTrue(report.contains("Automatic suggestion: Evidence incomplete"));
         }
     }
     @Test void aClosedLocalScopeAlsoNeedsEveryRequiredMemberInTheSamePacketForFulfilledOrNotApplicable() {

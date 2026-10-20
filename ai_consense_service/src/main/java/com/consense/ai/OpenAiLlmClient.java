@@ -26,6 +26,7 @@ public class OpenAiLlmClient implements LlmClient {
     private final ConsenseProperties.Llm cfg;
     private final HttpSupport http;
     private final boolean miniMax;
+    private final boolean qwen;
 
     public OpenAiLlmClient(ConsenseProperties.Llm cfg, HttpSupport http) {
         this(cfg, http, false);
@@ -33,9 +34,17 @@ public class OpenAiLlmClient implements LlmClient {
 
     /** MiniMax framing and overload policy opt-in; ordinary deployments retain their policy. */
     OpenAiLlmClient(ConsenseProperties.Llm cfg, HttpSupport http, boolean miniMax) {
-        this.cfg = cfg;
-        this.http = http;
-        this.miniMax = miniMax;
+        this(cfg,http,miniMax,false);
+    }
+
+    /** Qwen uses standard framing, explicit non-thinking and one-shot HTTP generations. */
+    static OpenAiLlmClient qwenChat(ConsenseProperties.Llm cfg,HttpSupport http) {
+        if(!Boolean.FALSE.equals(cfg.getStructuredEnableThinking()))throw new IllegalArgumentException("Qwen chat requires explicit enable_thinking=false");
+        return new OpenAiLlmClient(cfg,http,false,true);
+    }
+
+    private OpenAiLlmClient(ConsenseProperties.Llm cfg,HttpSupport http,boolean miniMax,boolean qwen) {
+        this.cfg=cfg;this.http=http;this.miniMax=miniMax;this.qwen=qwen;
     }
 
     @Override
@@ -64,6 +73,7 @@ public class OpenAiLlmClient implements LlmClient {
         body.put("model", cfg.getChatModel());
         body.put("temperature", cfg.getTemperature());
         body.put("stream", stream);
+        if(qwen)body.put("enable_thinking",false);
         if (structured) {
             body.put("n", 1);
             body.put("max_tokens", cfg.getStructuredMaxTokens());
@@ -91,7 +101,12 @@ public class OpenAiLlmClient implements LlmClient {
                 ? (cfg.isOverloadRetryEnabled()
                     ? http.postJsonWithOverloadBackoff(url, requestJson, cfg.getTimeoutMs(), authHeader())
                     : http.postJsonWithoutReplay(url, requestJson, cfg.getTimeoutMs(), authHeader()))
+                : qwen ? http.postJsonWithoutReplay(url,requestJson,cfg.getTimeoutMs(),authHeader())
                 : http.postJson(url, requestJson, cfg.getTimeoutMs(), authHeader(), structured ? 0 : cfg.getMaxRetry());
+        return decodeResponse(raw,structured);
+    }
+
+    private String decodeResponse(String raw,boolean structured) {
         JsonNode root;
         try {
             root = JsonUtils.parse(raw);
@@ -164,13 +179,36 @@ public class OpenAiLlmClient implements LlmClient {
         return output.finish();
     }
 
+    ObjectNode prepareStructuredRequest(List<ChatTurn> turns,JsonNode schema,boolean stream) {
+        validateStructured(schema);return request(turns,true,stream);
+    }
+    String sendPreparedQwen(String json,boolean stream,Consumer<String> delta,Consumer<Runnable> cancel,Consumer<String> receipt) {
+        if(!qwen)throw new IllegalStateException("Qwen prepared transport required");
+        if(stream) {
+            StreamContent output=new StreamContent(delta,false,cfg.getChatModel());
+            String raw=http.postJsonStream(trim(cfg.getBaseUrl())+"/v1/chat/completions",json,cfg.getTimeoutMs(),authHeader(),
+                    16*1024*1024,true,output::event,cancel);if(receipt!=null)receipt.accept(raw);return output.finish();
+        }
+        String raw=http.postJsonBoundedWithoutReplay(trim(cfg.getBaseUrl())+"/v1/chat/completions",json,
+                cfg.getTimeoutMs(),authHeader(),16*1024*1024,cancel);
+        if(receipt!=null)receipt.accept(raw);
+        JsonNode envelope;
+        try(JsonParser parser=JsonUtils.mapper().getFactory().createParser(raw)) {
+            parser.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);envelope=JsonUtils.mapper().readTree(parser);
+            if(envelope==null||!envelope.isObject()||parser.nextToken()!=null||!cfg.getChatModel().equals(envelope.path("model").asText()))throw new IOException();
+        }catch(IOException|RuntimeException invalid){throw new IncompleteModelResponseException("Qwen response identity invalid",raw,null,IncompleteModelResponseException.FailureKind.INVALID_RESPONSE_ENVELOPE,null);}
+        return decodeResponse(raw,true);
+    }
+
     private static final class StreamContent {
         private final StringBuilder content = new StringBuilder();
         private final Consumer<String> delta;
         private final boolean miniMax;
+        private final String expectedModel;
         private boolean stopped, done;
         private JsonNode last;
-        StreamContent(Consumer<String> d, boolean miniMax) { delta = java.util.Objects.requireNonNull(d); this.miniMax = miniMax; }
+        StreamContent(Consumer<String> d, boolean miniMax) { this(d,miniMax,null); }
+        StreamContent(Consumer<String> d,boolean miniMax,String model) { delta=java.util.Objects.requireNonNull(d);this.miniMax=miniMax;this.expectedModel=model; }
         private void reject(String message, IncompleteModelResponseException.FailureKind kind) {
             throw new IncompleteModelResponseException(message, last == null ? "" : last.toString(),
                     JsonUtils.mapper().getNodeFactory().textNode(content.toString()), kind, last);
@@ -185,6 +223,7 @@ public class OpenAiLlmClient implements LlmClient {
             } catch (IOException invalid) {
                 reject("Invalid streaming provider JSON envelope", IncompleteModelResponseException.FailureKind.INVALID_RESPONSE_ENVELOPE);
             }
+            if(expectedModel!=null&&!expectedModel.equals(last.path("model").asText()))reject("Qwen streaming response model differs",IncompleteModelResponseException.FailureKind.INVALID_RESPONSE_ENVELOPE);
             JsonNode code = last.path("base_resp").path("status_code");
             if (last.hasNonNull("error") || (last.hasNonNull("base_resp") && !last.path("base_resp").isObject())
                     || (!code.isMissingNode() && (!code.isIntegralNumber() || !code.canConvertToLong() || code.longValue() != 0)))

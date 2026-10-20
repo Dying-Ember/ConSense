@@ -55,6 +55,13 @@ class DraftingEvidenceRecoveryBoundaryTest {
         assertEquals("rejected",decide(candidate(WATER_KEY,missing,original.trim()),original,context(original,0,original.length())).getStatus());
     }
 
+    @Test void aCompleteGroundedListRestoresOriginalParagraphBreaksInsteadOfFlatteningThem() throws Exception {
+        String value="1. Library entrance planters, including planter bases and overflow sleeves;\n2. Plant room drainage channels, including grating frames;\n3. Rainwater collection tank and pump chamber, including pipe sleeves.";
+        String original=WATER_LABEL+value+"\n",flattened=value.replaceAll("\\R+"," ");assertNotEquals(value,flattened);
+        ExtractionDecisionVO decision=decide(candidate(WATER_KEY,flattened,value),original,context(original,0,original.length()));
+        assertEquals("accepted",decision.getStatus(),decision.getCodes().toString());assertEquals(value,decision.getNormalizedValue());assertTrue(decision.getCodes().contains("source_value_typography_restored"));
+    }
+
     @Test void theSameItemCountCannotHideADuplicateOrChangedIdentifier() throws Exception {
         String value=waterValue(),original=WATER_LABEL+value+"\n";
         for(String broken:new String[]{value.replace("7.Internal tankings;","6.Internal tankings;"),

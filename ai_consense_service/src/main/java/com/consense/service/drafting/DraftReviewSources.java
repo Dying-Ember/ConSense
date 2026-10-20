@@ -73,19 +73,37 @@ public class DraftReviewSources {
 
     /** The caller resolves the project source; the browser cannot choose a filesystem path. */
     public ObjectNode bind(SourceDocument source,JsonNode passage) {
-        Loaded loaded=load(source);ObjectNode description=metadata(source,loaded);
+        return bind(source,load(source),passage);
+    }
+
+    /** One graph save reuses its verified originals; nothing is cached across requests. */
+    public BoundSource bindSource(SourceDocument source) {return new BoundSource(source,load(source));}
+
+    public final class BoundSource {
+        private final SourceDocument source;private final Loaded loaded;
+        private BoundSource(SourceDocument source,Loaded loaded){this.source=source;this.loaded=loaded;}
+        public ObjectNode bind(JsonNode passage){return DraftReviewSources.this.bind(source,loaded,passage);}
+        public ObjectNode bindObservation(JsonNode passage){return DraftReviewSources.this.bindObservation(source,loaded,passage);}
+    }
+
+    private ObjectNode bind(SourceDocument source,Loaded loaded,JsonNode passage) {
+        ObjectNode description=metadata(source,loaded);
         String docId=passage.path("docId").asText();
         if(!docId.isEmpty()&&!docId.equals(description.path("id").asText())
                 &&!docId.equals(description.path("docId").asText())&&!docId.equals(description.path("editionId").asText()))
             return pending("unsafe",loaded.sha,"SOURCE_EDITION_MISMATCH");
         if(passage.has("sourceDocumentId")&&!String.valueOf(source.getId()).equals(passage.path("sourceDocumentId").asText()))
             return pending("unsafe",loaded.sha,"SOURCE_DOCUMENT_MISMATCH");
-        return bindTarget(loaded.bytes,JsonUtils.mapper().convertValue(passage,Map.class));
+        return bindTarget(loaded.bytes,loaded.prepared,JsonUtils.mapper().convertValue(passage,Map.class));
     }
 
     /** A named, saved source observation can support review without acquiring editable coordinates. */
     public ObjectNode bindObservation(SourceDocument source,JsonNode passage) {
-        Loaded loaded=load(source);String sha=loaded.sha;JsonNode evidence=boundEvidence(source,loaded);
+        return bindObservation(source,load(source),passage);
+    }
+
+    private ObjectNode bindObservation(SourceDocument source,Loaded loaded,JsonNode passage) {
+        String sha=loaded.sha;JsonNode evidence=boundEvidence(source,loaded);
         if(evidence==null)return pending("missing",sha,"CURRENT_SOURCE_OBSERVATIONS_REQUIRED");
         if(!sha.equals(passage.path("sourceSha256").asText()))return pending("unsafe",sha,"SOURCE_HASH_MISMATCH");
         if(!String.valueOf(source.getId()).equals(passage.path("sourceDocumentId").asText()))return pending("unsafe",sha,"SOURCE_DOCUMENT_MISMATCH");
@@ -126,11 +144,15 @@ public class DraftReviewSources {
 
     /** Exact editableText spans only. Unbound legacy page selections remain reviewable. */
     public static ObjectNode bindTarget(byte[] original,Map<String,Object> target) {
+        return bindTarget(original,null,target);
+    }
+
+    private static ObjectNode bindTarget(byte[] original,DocxTemplateEditor.PreparedTemplate prepared,Map<String,Object> target) {
         String sha=DraftTemplateRouting.sha(original);JsonNode passage=JsonUtils.mapper().valueToTree(target);
         if(passage.has("sourceSha256")&&!sha.equals(passage.path("sourceSha256").asText()))return pending("unsafe",sha,"SOURCE_HASH_MISMATCH");
         if(!"docx".equals(DraftTemplateRouting.format(original)))return pending("missing",sha,"EDITABLE_DOCX_REQUIRED");
         DocxTemplateEditor.TemplateIndex index;
-        try { index=new DocxTemplateEditor().inspect(original); }
+        try { if(prepared==null)prepared=new DocxTemplateEditor().prepare(original);index=prepared.getIndex(); }
         catch(DocxTemplateEditor.EditException invalid){return pending("unsafe",sha,invalid.getCode());}
         JsonNode requested=passage.path("native");
         if(requested.isMissingNode()||requested.isNull())requested=passage.path("nativeBinding");
@@ -175,7 +197,7 @@ public class DraftReviewSources {
             JsonNode selected=spans.get(n);DocxTemplateEditor.Paragraph paragraph=index.paragraph(selected.path("paragraphId").asText());
             checks.add("insert".equals(selected.path("operation").asText())?DocxTemplateEditor.Edit.insertText("review-check-"+n,paragraph,selected.path("start").asInt(),""):DocxTemplateEditor.Edit.replaceSpan("review-check-"+n,paragraph,selected.path("start").asInt(),selected.path("end").asInt(),selected.path("expectedText").asText(),selected.path("expectedText").asText()));
         }
-        try { new DocxTemplateEditor().apply(original,new DocxTemplateEditor.SourceEditBatch(sha,checks)); }
+        try { prepared.validateTextEdits(new DocxTemplateEditor.SourceEditBatch(sha,checks)); }
         catch(DocxTemplateEditor.EditException unsafe){return pending("unsafe",sha,unsafe.getCode());}
         return result;
     }
@@ -215,17 +237,17 @@ public class DraftReviewSources {
             catch(BizException unavailable){throw new BizException(4012,"REVIEW_SOURCE_UNAVAILABLE");}
             String sha=DraftTemplateRouting.sha(bytes);
             if(source.getSourceSha256()!=null&&!sha.equals(source.getSourceSha256()))throw new BizException(4012,"REVIEW_SOURCE_BYTES_CHANGED");
-            String format=DraftTemplateRouting.format(bytes);DocxTemplateEditor.TemplateIndex index=null;
-            if("docx".equals(format))try{index=new DocxTemplateEditor().inspect(bytes);}catch(DocxTemplateEditor.EditException invalid){format="unsupported";}
+            String format=DraftTemplateRouting.format(bytes);DocxTemplateEditor.PreparedTemplate prepared=null;
+            if("docx".equals(format))try{prepared=new DocxTemplateEditor().prepare(bytes);}catch(DocxTemplateEditor.EditException invalid){format="unsupported";}
             if("unknown".equals(format))format="unsupported";
-            return new Loaded(bytes,sha,format,index);
+            return new Loaded(bytes,sha,format,prepared);
         }catch(IOException|java.nio.file.InvalidPathException|NullPointerException failure){throw new BizException(4012,"REVIEW_SOURCE_UNAVAILABLE");}
     }
 
     private ObjectNode metadata(SourceDocument source,Loaded loaded) {
         ObjectNode result=base(source);result.put("sourceSha256",loaded.sha);result.put("sourceHash",DraftAdoption.sourceHash(source));
         result.put("format",loaded.format);result.put("canEdit",loaded.index!=null);
-        String family=source.getFileKey();JsonNode coverage=JsonUtils.parse(source.getParseCoverageJson()),saved=coverage.path("templateEvidence");
+        String family=source.getFileKey();JsonNode coverage=coverage(source,loaded),saved=coverage.path("templateEvidence");
         if((family==null||family.isEmpty())&&saved.isObject())family=saved.path("sourceBinding").path("fileKey").asText();
         if(family==null||family.isEmpty())family="source";
         String docId=String.valueOf(source.getId());
@@ -251,11 +273,16 @@ public class DraftReviewSources {
     }
 
     private static JsonNode boundEvidence(SourceDocument source,Loaded loaded) {
-        JsonNode coverage=JsonUtils.parse(source.getParseCoverageJson()),evidence=coverage.path("templateEvidence");
+        if(loaded.evidenceChecked)return loaded.evidence;
+        loaded.evidenceChecked=true;JsonNode coverage=coverage(source,loaded),evidence=coverage.path("templateEvidence");
         if(!evidence.isObject())return null;
         String fileKey=source.getFileKey();if(fileKey==null||fileKey.isEmpty())fileKey=evidence.path("sourceBinding").path("fileKey").asText();
-        try { return OerTemplateEvidence.requireBound(fileKey,loaded.sha,JsonUtils.parse(source.getStructuredContentJson()),coverage,evidence); }
+        try {loaded.evidence=OerTemplateEvidence.requireBound(fileKey,loaded.sha,JsonUtils.parse(source.getStructuredContentJson()),coverage,evidence);return loaded.evidence;}
         catch(IllegalArgumentException invalid){return null;}
+    }
+
+    private static JsonNode coverage(SourceDocument source,Loaded loaded) {
+        if(loaded.coverage==null)loaded.coverage=JsonUtils.parse(source.getParseCoverageJson());return loaded.coverage;
     }
 
     private static ObjectNode exactSpan(DocxTemplateEditor.TemplateIndex index,JsonNode entry,String sha,String parentSha,boolean insertion) {
@@ -282,7 +309,8 @@ public class DraftReviewSources {
     private static ObjectNode object(){return JsonUtils.mapper().createObjectNode();}
     private static ArrayNode array(){return JsonUtils.mapper().createArrayNode();}
     private static final class Loaded {
-        final byte[] bytes;final String sha,format;final DocxTemplateEditor.TemplateIndex index;
-        Loaded(byte[] bytes,String sha,String format,DocxTemplateEditor.TemplateIndex index){this.bytes=bytes;this.sha=sha;this.format=format;this.index=index;}
+        final byte[] bytes;final String sha,format;final DocxTemplateEditor.TemplateIndex index;final DocxTemplateEditor.PreparedTemplate prepared;
+        JsonNode coverage,evidence;boolean evidenceChecked;
+        Loaded(byte[] bytes,String sha,String format,DocxTemplateEditor.PreparedTemplate prepared){this.bytes=bytes;this.sha=sha;this.format=format;this.prepared=prepared;index=prepared==null?null:prepared.getIndex();}
     }
 }

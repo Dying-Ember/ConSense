@@ -54,3 +54,7 @@ export function extractionAttemptWord(kind: string): DraftWord {
   const labels: Record<string, DraftWord> = { primary: 'primaryAttempt', repair: 'repairAttempt', coverage: 'coverageAttempt', recall: 'recallAttempt' }
   return Object.prototype.hasOwnProperty.call(labels, kind) ? labels[kind] : 'recordedAttempt'
 }
+
+export function extractionRunWord(status: string | undefined): DraftWord {
+  return status === 'partial' ? 'partialRun' : status === 'failed' ? 'failedRun' : 'completedRun'
+}

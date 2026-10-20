@@ -136,7 +136,7 @@ class DraftingAdoptionIntegrationTest {
         mvc.perform(get("/api/drafting/{id}/variables",id)).andExpect(jsonPath("$.data[0].adoptionState").value("missing"));
         putValue(id,"foundationIncluded","false");putValue(id,"subcontractArrangement","BSSSC");putValue(id,"subcontractors","[\"Electrical\"]");
         assertTrue(effective(id).containsKey("subcontractors"));
-        putValue(id,"subcontractArrangement","NSC");assertFalse(effective(id).containsKey("subcontractors"));
+        putValue(id,"subcontractArrangement","NSC");assertEquals(Collections.singletonList("Electrical"),effective(id).get("subcontractors"));
         assertEquals("[\"Electrical\"]",variable(id,"subcontractors").getValue());
         mvc.perform(post("/api/drafting/{id}/plan",id).contentType(MediaType.APPLICATION_JSON)
                 .content("{\"values\":{\"foundationIncluded\":\"true\",\"subcontractArrangement\":\"BSSSC\"}}"))

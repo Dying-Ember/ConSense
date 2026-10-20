@@ -36,6 +36,7 @@ public class CanonicalEvidenceBackend {
     }
     public String normalObserved(String request,String module){
         int maximum=normalMaximumBytes();
+        if(properties.getNormalPublicationTimeoutMs()<=0)throw new CanonicalEvidenceException(HttpStatus.SERVICE_UNAVAILABLE,"OER_EVIDENCE_CONFIG_INVALID");
         if(Utf8.byteCount(request)>maximum)throw new CanonicalEvidenceException(HttpStatus.BAD_REQUEST,"NORMAL_OBSERVED_TOO_LARGE");
         byte[] bytes=Utf8.bytes(request);
         HttpUrl base=normalBase(module);
@@ -100,9 +101,10 @@ public class CanonicalEvidenceBackend {
         return execute(new Request.Builder().url(url).get().build(),maximum);
     }
     protected Reply execute(Request request,int maximum){
+        int timeout="/normal-observed".equals(request.url().encodedPath())?properties.getNormalPublicationTimeoutMs():properties.getTimeoutMs();
         OkHttpClient client=new OkHttpClient.Builder().followRedirects(false).followSslRedirects(false).retryOnConnectionFailure(false)
-                .readTimeout(properties.getTimeoutMs(),TimeUnit.MILLISECONDS)
-                .callTimeout(properties.getTimeoutMs(),TimeUnit.MILLISECONDS).build();
+                .readTimeout(timeout,TimeUnit.MILLISECONDS)
+                .callTimeout(timeout,TimeUnit.MILLISECONDS).build();
         try(Response response=client.newCall(request).execute()){
             if(!response.isSuccessful()||response.body()==null)throw new CanonicalEvidenceException(HttpStatus.BAD_GATEWAY,"OER_EVIDENCE_UPSTREAM_UNAVAILABLE");
             return new Reply(readBody(response.body(),maximum),response.header("Content-Type"),response.header("ETag"),response.header("X-Source-Sha256"),response.header("X-Projection-Sha256"),

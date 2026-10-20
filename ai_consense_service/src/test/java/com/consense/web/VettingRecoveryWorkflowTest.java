@@ -63,6 +63,7 @@ class VettingRecoveryWorkflowTest {
     @Autowired org.springframework.transaction.PlatformTransactionManager transactions;
     @Autowired LlmProfiles profiles;
     @Autowired VettingChecklistService checklist;
+    @javax.persistence.PersistenceContext javax.persistence.EntityManager entityManager;
     @MockBean AiGateway ai;
     @MockBean VettingRetrievalClient retrieval;
     private final AtomicReference<List<VettingCorpus.Chunk>> corpus=new AtomicReference<>();
@@ -94,6 +95,25 @@ class VettingRecoveryWorkflowTest {
         FindingVO current=service.listFindings(project,null,null,null,null,null).get(0);assertNotEquals(original.getFingerprint(),current.getFingerprint());assertNotEquals(original.getCode(),current.getCode());
     }
 
+    @Test void repairedEmptyWarningSurvivesDurableCoverageAndEnglishReportsWithoutPublishingTheRejectedRaw() throws Exception {
+        props.getVetting().setSemanticTopics(1);String project=project();AtomicInteger calls=new AtomicInteger();AtomicReference<String> firstRaw=new AtomicReference<>();
+        when(ai.completeStructuredJsonList(anyString(),anyString(),eq(VettingSemanticReview.Record.class),any(),anyList())).thenAnswer(call->{
+            List<String> raw=call.getArgument(4);
+            if(calls.incrementAndGet()==1){List<VettingSemanticReview.Record> rejected=records("issue");rejected.get(0).setPendingFacts(Collections.singletonList("AUTHORED unconfirmed fact"));rejected.get(0).setSuggestedAction("amend");firstRaw.set(JsonUtils.write(rejected));raw.add(firstRaw.get());return rejected;}
+            raw.add("[]");return Collections.emptyList();
+        });
+        String id=start(project);JsonNode completed=await(project,id,"COMPLETED");assertEquals(2,calls.get());assertEquals(0,completed.path("result").path("total").asInt());
+        JsonNode packet=completed.path("coverage").path("semanticTopics").get(0).path("packetAudits").get(0);assertEquals("completed_empty",packet.path("status").asText());assertEquals(2,packet.path("attempts").size());assertEquals(firstRaw.get(),packet.path("attempts").get(0).path("rawResponse").asText());assertEquals("[]",packet.path("attempts").get(1).path("rawResponse").asText());
+        String marker="修复答复为空数组";assertTrue(completed.path("coverage").path("warnings").toString().contains(marker));
+        List<ReliablePacketVO> reliable=checkpoints.reliable(id);assertEquals(1,reliable.size());assertTrue(reliable.get(0).getWarnings().stream().anyMatch(w->w.contains(marker)));assertTrue(reliable.get(0).getCandidates().isEmpty());
+        assertTrue(findings.findByProjectIdOrderByCodeAsc(project).isEmpty());byte[] json=http.perform(get("/api/vetting/"+project+"/report.json")).andReturn().getResponse().getContentAsByteArray();JsonNode exported=JsonUtils.parse(new String(json,StandardCharsets.UTF_8));assertTrue(exported.path("job").path("coverage").path("warnings").toString().contains(marker));String snapshot=exported.path("reportSnapshotId").asText();assertTrue(snapshots.findById(snapshot).isPresent());
+        for(String format:Arrays.asList("docx","pdf")){byte[] bytes=http.perform(get("/api/vetting/"+project+"/report."+format)).andReturn().getResponse().getContentAsByteArray();String text;
+            if("docx".equals(format)){try(XWPFDocument doc=new XWPFDocument(new ByteArrayInputStream(bytes))){text=doc.getParagraphs().stream().map(p->p.getText()).collect(Collectors.joining("\n"));}}
+            else {try(PDDocument doc=PDDocument.load(bytes)){text=new PDFTextStripper().getText(doc);}}
+            String compact=text.replaceAll("\\s+","");assertTrue(compact.contains("therepairreturnedanemptyarray"));assertTrue(compact.contains("werenotaccepted"));assertTrue(compact.contains("Manuallycheckthesavedoriginalattempts"));assertTrue(compact.contains(snapshot));assertFalse(text.contains(marker));
+        }
+        byte[] after=http.perform(get("/api/vetting/"+project+"/report.json")).andReturn().getResponse().getContentAsByteArray();assertArrayEquals(json,after);assertEquals("incomplete",completed.path("coverage").path("reviewCompleteness").asText());assertEquals(2,calls.get());
+    }
     @Test void aFailedSecondPacketKeepsTheVerifiedFirstPacketAndRejectsEveryFormalExport() throws Exception {
         String project=project();AtomicInteger calls=new AtomicInteger();
         when(ai.completeStructuredJsonList(anyString(),anyString(),eq(VettingSemanticReview.Record.class),any(),anyList())).thenAnswer(call->{if(calls.incrementAndGet()==2)throw new IllegalStateException("fixture model interrupted");return records("issue");});
@@ -113,6 +133,46 @@ class VettingRecoveryWorkflowTest {
         JsonNode changed=JsonUtils.parse(http.perform(get("/api/vetting/"+project+"/report.json")).andReturn().getResponse().getContentAsString());assertNotEquals(snapshot,changed.path("reportSnapshotId").asText());assertTrue(snapshots.findById(snapshot).isPresent());assertTrue(changed.path("findings").toString().contains("human retained remark"));
         SourceDocument source=documents.findByProjectIdOrderByIdAsc(project).get(0);source.setTextContent(source.getTextContent()+" changed source");documents.saveAndFlush(source);
         org.springframework.mock.web.MockHttpServletResponse stale=http.perform(get("/api/vetting/"+project+"/report.json")).andReturn().getResponse();assertNull(stale.getHeader("Content-Disposition"));assertNotEquals(0,JsonUtils.parse(stale.getContentAsString()).path("code").asInt());
+    }
+    @Test void completedSnapshotUsesStoredTimestampPrecisionBeforeReloadAndDownloads() throws Exception {
+        String project=project(),id=start(project);await(project,id,"COMPLETED");
+        Instant precise=Instant.parse("2026-10-19T18:33:56.886187100Z");
+        String first=new org.springframework.transaction.support.TransactionTemplate(transactions).execute(status->{
+            VettingRun run=runs.findById(id).orElseThrow(AssertionError::new);run.setStartedAt(precise.minusSeconds(60));run.setFinishedAt(precise);runs.saveAndFlush(run);
+            assertEquals(precise,run.getFinishedAt(),"The managed entity still contains the pre-roundtrip value");
+            Instant stored=runs.findProgress(project,id).orElseThrow(AssertionError::new).getFinishedAt();
+            assertEquals(Instant.parse("2026-10-19T18:33:56.886187Z"),stored,"Actual H2 timestamp(6) roundtrip");
+            Object target=org.springframework.test.util.AopTestUtils.getUltimateTargetObject(service);
+            org.springframework.test.util.ReflectionTestUtils.invokeMethod(target,"saveReportSnapshot",projects.findById(project).orElseThrow(AssertionError::new),run,service.listFindings(project,null,null,null,null,null));
+            String snapshot=run.getReportSnapshotSha256();JsonNode payload=JsonUtils.parse(snapshots.findById(snapshot).orElseThrow(AssertionError::new).getPayloadJson());
+            assertEquals(runs.findProgress(project,id).orElseThrow(AssertionError::new).getStartedAt().toString(),payload.path("job").path("startedAt").asText());
+            assertEquals(stored.toString(),payload.path("job").path("finishedAt").asText(),"First completion snapshot must use the stored precision");
+            assertEquals(precise,run.getFinishedAt(),"Snapshot construction must not rewrite the managed run");entityManager.clear();return snapshot;
+        });
+        JsonNode reloaded=JsonUtils.parse(http.perform(get("/api/vetting/"+project+"/runs/"+id)).andReturn().getResponse().getContentAsString()).path("data");
+        assertEquals(first,reloaded.path("reportSnapshotId").asText());
+        JsonNode exported=JsonUtils.parse(http.perform(get("/api/vetting/"+project+"/report.json")).andReturn().getResponse().getContentAsString());assertEquals(first,exported.path("reportSnapshotId").asText());
+        byte[] pdf=http.perform(get("/api/vetting/"+project+"/report.pdf")).andReturn().getResponse().getContentAsByteArray();try(PDDocument doc=PDDocument.load(pdf)){assertTrue(new PDFTextStripper().getText(doc).replaceAll("\\s","").contains(first));}
+        byte[] docx=http.perform(get("/api/vetting/"+project+"/report.docx")).andReturn().getResponse().getContentAsByteArray();try(XWPFDocument doc=new XWPFDocument(new ByteArrayInputStream(docx))){assertTrue(doc.getParagraphs().stream().anyMatch(p->p.getText().contains(first)));}
+        String original=snapshots.findById(first).orElseThrow(AssertionError::new).getPayloadJson();
+        VettingRun changed=runs.findById(id).orElseThrow(AssertionError::new);changed.setFinishedAt(precise.plusSeconds(1));runs.saveAndFlush(changed);
+        JsonNode changedReport=JsonUtils.parse(http.perform(get("/api/vetting/"+project+"/report.json")).andReturn().getResponse().getContentAsString());
+        assertNotEquals(first,changedReport.path("reportSnapshotId").asText(),"A real persisted time change must produce a new content hash");
+        assertEquals(original,snapshots.findById(first).orElseThrow(AssertionError::new).getPayloadJson(),"The earlier snapshot remains immutable");
+    }
+    @Test void missingForeignOrIncompleteStoredRunCannotCreateASnapshot() throws Exception {
+        String project=project(),id=start(project);await(project,id,"COMPLETED");
+        VettingRun run=runs.findById(id).orElseThrow(AssertionError::new);long before=snapshots.count();
+        for(String mode:Arrays.asList("missing","foreign","incomplete")) {
+            VettingRunRepository repository=mock(VettingRunRepository.class);VettingRunRepository.ProgressView stored=mock(VettingRunRepository.ProgressView.class);
+            when(stored.getId()).thenReturn("foreign".equals(mode)?"different-run":id);when(stored.getStatus()).thenReturn("incomplete".equals(mode)?"RUNNING":"COMPLETED");
+            when(repository.findProgress(project,id)).thenReturn("missing".equals(mode)?Optional.empty():Optional.of(stored));
+            VettingService guarded=new VettingService(projectService,storage,parser,props,documents,findings,repository,semantic,writer,transactions,profiles);guarded.setReportSnapshots(snapshots);
+            try {
+                BizException failure=assertThrows(BizException.class,()->org.springframework.test.util.ReflectionTestUtils.invokeMethod(guarded,"saveReportSnapshot",projects.findById(project).orElseThrow(AssertionError::new),run,service.listFindings(project,null,null,null,null,null)),mode);
+                assertEquals(4103,failure.getCode());assertEquals(before,snapshots.count(),"No fallback snapshot is saved: "+mode);
+            }finally{guarded.stopWorker();}
+        }
     }
     @Test void reconstructedWorkerReusesSavedPacketAndAnExpiredOwnerCannotPublish() throws Exception {
         String project=project();AtomicInteger calls=new AtomicInteger();CountDownLatch waiting=new CountDownLatch(1),release=new CountDownLatch(1);

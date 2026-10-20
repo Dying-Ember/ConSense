@@ -1,7 +1,8 @@
 import DOMPurify from 'dompurify'
 import type { TemplateReading } from '@/api/types'
+import { hideUnverifiedListMarkers } from './reading-list-markers'
 
-export interface PreparedTemplateReading { html: string; mappedParagraphIds: string[] }
+export interface PreparedTemplateReading { html: string; mappedParagraphIds: string[]; numberingUnverified: boolean }
 const normalize = (text: string) => text.normalize('NFKC').replace(/\s+/g, ' ').trim()
 
 /** Sanitized reading flow, with identities only when current native text mapping is unambiguous. */
@@ -12,6 +13,7 @@ export function prepareTemplateReading(html: string, reading: TemplateReading): 
     ALLOW_DATA_ATTR: false, ALLOW_ARIA_ATTR: false
   })
   const flow = document.createElement('div'); flow.innerHTML = safe
+  const numberingUnverified = hideUnverifiedListMarkers(flow) > 0
   const blocks = [...flow.querySelectorAll<HTMLElement>('p,h1,h2,h3,h4,h5,h6,li')].filter(node => node.tagName !== 'LI' || !node.querySelector('p,h1,h2,h3,h4,h5,h6,li'))
   const native = reading.paragraphs.filter(paragraph => normalize(paragraph.text))
   const ordered = blocks.length === native.length && blocks.every((node, index) => normalize(node.textContent ?? '') === normalize(native[index]!.text))
@@ -24,5 +26,5 @@ export function prepareTemplateReading(html: string, reading: TemplateReading): 
     node.dataset.nativeParagraph = paragraph.id
     mappedParagraphIds.push(paragraph.id)
   })
-  return { html: flow.innerHTML, mappedParagraphIds }
+  return { html: flow.innerHTML, mappedParagraphIds, numberingUnverified }
 }

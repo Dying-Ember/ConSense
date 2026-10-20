@@ -3,6 +3,17 @@ import org.junit.jupiter.api.Test;
 import java.util.*;
 import static org.junit.jupiter.api.Assertions.*;
 class DraftBusinessRulesTest {
+ @Test void bsTradeScopeRemainsAnIndependentRequiredInputForBothDesignationMethods(){
+  Map<String,Object> field=DraftBusinessRules.fields().stream().filter(item->"subcontractors".equals(item.get("key"))).findFirst().get();List<String> trades=Arrays.asList("Fire services","Lift");
+  for(String designation:Arrays.asList("NSC","BSSSC")){
+   Map<String,Object> values=DraftBusinessRules.map("subcontractArrangement",designation,"subcontractors",trades);
+   assertEquals(Boolean.TRUE,DraftBusinessRules.condition(field.get("condition"),values));Map<String,Object> plan=DraftBusinessRules.plan(values);
+   assertEquals(trades,DraftBusinessRules.asMap(plan.get("effectiveValues")).get("subcontractors"));
+   assertFalse(DraftBusinessRules.list(plan.get("unresolved")).stream().anyMatch(item->"input-subcontractors".equals(DraftBusinessRules.asMap(item).get("id"))));
+  }
+  assertEquals(Boolean.TRUE,DraftBusinessRules.condition(field.get("condition"),Collections.emptyMap()));
+  assertTrue(DraftBusinessRules.list(DraftBusinessRules.plan(DraftBusinessRules.map("subcontractArrangement","NSC")).get("unresolved")).stream().anyMatch(item->"input-subcontractors".equals(DraftBusinessRules.asMap(item).get("id"))));
+ }
  Map<String,Object> action(Map<String,Object>p,String id){for(Object o:DraftBusinessRules.list(p.get("actions"))){Map<String,Object>a=DraftBusinessRules.asMap(o);if(id.equals(a.get("id")))return a;}throw new AssertionError(id);}
  @Test void emptyAndEverySingleFieldUnknownAreSafe(){Map<String,Object>p=DraftBusinessRules.plan(Collections.emptyMap());assertTrue(DraftBusinessRules.list(p.get("actions")).size()>=107);assertNull(DraftBusinessRules.asMap(p.get("derived")).get("nscApplicable"));for(Map<String,Object>f:DraftBusinessRules.fields()){Map<String,Object>v=new HashMap<>();v.put(String.valueOf(f.get("key")),null);assertDoesNotThrow(()->DraftBusinessRules.plan(v),String.valueOf(f.get("key")));}}
  @Test void inclusiveDoubleConditionAndExplicitNo(){Map<String,Object>p=DraftBusinessRules.plan(DraftBusinessRules.map("foundationIncluded",true,"contractPeriodMonths",39));assertEquals("G1a",action(p,"NTT-10-BOND-REFERENCE").get("value"));p=DraftBusinessRules.plan(DraftBusinessRules.map("foundationIncluded",false));assertEquals("G1",action(p,"NTT-10-BOND-REFERENCE").get("value"));}

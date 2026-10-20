@@ -378,6 +378,11 @@ test('real panel requests all assets in source order, escapes HTML, retains unkn
   data.assetRefs[0].url = 'https://other-host.invalid/image.png'
   const h = await harness({ data })
   try {
+    // WebCrypto work can outlast the harness microtask flush under the full suite.
+    const deadline = Date.now() + 5000
+    while (h.created.length < 3 && Date.now() < deadline) {
+      await new Promise(resolve => setTimeout(resolve, 10)); await settle()
+    }
     const figures = all(h.root, node => node.tag === 'figure')
     assert.deepEqual(figures.map(node => node.props['data-asset-id']), table.assetRefs.map(asset => asset.assetId))
     assert.equal(all(h.root, node => node.tag === 'img').length, 3)

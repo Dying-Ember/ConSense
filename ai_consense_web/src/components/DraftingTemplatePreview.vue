@@ -16,6 +16,7 @@ import type { PreparedTemplateReading } from '@/drafting/template-reading'
 const props = withDefaults(defineProps<{ projectId: string; fileKey: string; locale: AppLocale; fields: DraftField[]; values: Record<string, DraftValue>; variables: DraftVariable[]; actions: DraftPlanAction[]; selectedKey: string; selectedActionId: string; fieldStates: Record<string, string>; dirtyKeys: string[]; disabled?: boolean; sourceAvailable?: boolean }>(), { sourceAvailable: undefined })
 const emit = defineEmits<{ select: [key: string]; edit: [key: string]; input: [key: string]; target: [actionId: string]; file: [fileKey: string]; locate: [actionId: string]; upload: [fileKey: string] }>()
 const w = (key: PreviewWord) => previewWord(key, props.locale)
+const t = (en: string, cn: string, hk: string) => props.locale === 'en' ? en : props.locale === 'zh-Hant' ? hk : cn
 const l = (value: Parameters<typeof localized>[0]) => localized(value, props.locale)
 const reading = ref<TemplateReading>()
 const status = ref<'loading' | 'ready' | 'missing-source' | 'unsupported' | 'error'>('loading')
@@ -160,6 +161,7 @@ onBeforeUnmount(() => { alive = false; generation++; release() })
     <p v-else>{{ w('choose') }}</p>
     <template v-if="status === 'ready' && reading?.format === 'docx'">
       <p v-if="!reading.catalogueSourceVerified" class="source-warning">{{ w('edition') }}</p>
+      <p v-if="prepared?.numberingUnverified" class="reading-numbering-notice" data-reading-numbering-notice role="status">{{ t('Web-generated list markers are hidden. Check the PDF for the original labels.', '网页自动标号已隐藏，原编号请核对 PDF。', '網頁自動標號已隱藏，原編號請核對 PDF。') }}</p>
       <nav v-if="located.length" data-preview-navigation :aria-label="w('locations')">
         <button type="button" class="btn" data-preview-previous :disabled="locationIndex <= 0" @click="showLocation(located[locationIndex - 1])">{{ w('previous') }}</button>
         <span aria-live="polite">{{ w('location') }} {{ locationIndex + 1 }} {{ w('of') }} {{ located.length }}</span>

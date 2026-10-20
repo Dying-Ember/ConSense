@@ -25,6 +25,7 @@ import java.nio.file.Paths;
 import java.util.Collections;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.*;
 
 /** Synthetic packages and persisted observations only; no upload, parser, OCR, API or database. */
 class DraftReviewSourcesTest {
@@ -80,6 +81,17 @@ class DraftReviewSourcesTest {
         passage.put("text","missing");assertEquals("missing",sources.bind(source,passage).path("status").asText());
         passage.put("text","exact phrase");passage.putArray("wordIds").add(1).add(3);
         assertEquals("SPARSE_SELECTION_REQUIRES_NATIVE_SPANS",sources.bind(source,passage).path("reason").asText());
+    }
+
+    @Test void graphSaveBindingScopeReadsEachOriginalOnceAndNeverReusesItAcrossRequests() throws Exception {
+        byte[] bytes=docx("A source-bound duration of 42 months.");SourceDocument source=source(1,"NTT",bytes);
+        ConsenseProperties properties=new ConsenseProperties();properties.setStorageRoot(directory.toString());StorageService storage=spy(new StorageService(properties));
+        DraftReviewSources reader=new DraftReviewSources(storage,properties);ObjectNode passage=JsonUtils.mapper().createObjectNode().put("docId","ntt").put("text","42 months");
+        DraftReviewSources.BoundSource binding=reader.bindSource(source);
+        assertEquals(reader.bind(source,passage),binding.bind(passage));assertEquals("missing",binding.bindObservation(passage).path("status").asText());
+        assertEquals("bound",binding.bind(passage).path("status").asText());verify(storage,times(2)).read(Paths.get(source.getStoragePath()).toRealPath().toString());
+        Files.write(Paths.get(source.getStoragePath()),docx("Changed original bytes must not borrow the earlier binding."));
+        BizException changed=assertThrows(BizException.class,()->reader.bindSource(source));assertEquals("REVIEW_SOURCE_BYTES_CHANGED",changed.getMessage());
     }
 
     @Test void sparseNativeSpansRetainTheirOwnBoundariesAndRejectOverlap() throws Exception {

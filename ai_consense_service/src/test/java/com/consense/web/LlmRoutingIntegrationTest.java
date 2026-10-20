@@ -47,11 +47,19 @@ class LlmRoutingIntegrationTest {
         JsonNode before=getData("/api/drafting/"+id+"/variables");
         when(miniMax.available()).thenReturn(true);when(miniMax.chat(anyList())).thenThrow(new com.consense.common.BizException("Selected profile authentication failed"));
         mvc.perform(post("/api/drafting/{id}/variables/extract",id).header("X-ConSense-Llm-Profile","minimax-cn"))
-                .andExpect(jsonPath("$.code").value(4000)).andExpect(jsonPath("$.message").value("Selected profile authentication failed"));
-        JsonNode saved=getData("/api/drafting/"+id+"/variables/extract-trace");assertEquals("failed",saved.path("status").asText());
+                .andExpect(jsonPath("$.code").value(0));
+        JsonNode saved=getData("/api/drafting/"+id+"/variables/extract-trace");assertEquals("partial",saved.path("status").asText());
+        assertEquals("partial_source_failed",saved.path("failureCode").asText());
+        assertEquals("Selected profile authentication failed",saved.path("parts").get(0).path("attempts").get(0).path("errorMessage").asText());
         assertEquals("minimax-cn",saved.path("modelIdentity").path("profileId").asText());
         JsonNode reread=getData("/api/drafting/"+id+"/variables/extract-traces/"+saved.path("runId").asText());assertEquals(saved,reread);
-        assertEquals(before,getData("/api/drafting/"+id+"/variables"));
+        JsonNode after=getData("/api/drafting/"+id+"/variables");
+        for(JsonNode previous:before) {
+            JsonNode current=null;for(JsonNode row:after)if(previous.path("key").equals(row.path("key")))current=row;
+            assertNotNull(current,previous.path("key").asText());
+            for(String preserved:Arrays.asList("value","confirmed","manuallyEdited","candidates"))assertEquals(previous.path(preserved),current.path(preserved),previous.path("key").asText()+"."+preserved);
+            if(previous.path("manuallyEdited").asBoolean())assertEquals(previous,current,"The manually adopted input stays unchanged; unadopted diagnostic notes may reflect the partial run");
+        }
         mvc.perform(get("/api/drafting/{id}/variables/extract-traces",id).header("X-ConSense-Llm-Profile","minimax-cn"))
                 .andExpect(jsonPath("$.data[0].modelIdentity.profileId").value("minimax-cn"));
         verify(miniMax,times(1)).chat(anyList());verifyNoInteractions(local);
@@ -63,11 +71,13 @@ class LlmRoutingIntegrationTest {
         when(miniMax.chat(anyList())).thenReturn("[{\"key\":\"contractTitle\",\"value\":\"Works B\",\"sourceQuote\":\"Contract Z-7 is entitled Works B.\",\"confidence\":1}]")
                 .thenThrow(new com.consense.common.BizException("Selected profile repair quota exhausted"));
         mvc.perform(post("/api/drafting/{id}/variables/extract",id).header("X-ConSense-Llm-Profile","minimax-cn"))
-                .andExpect(jsonPath("$.code").value(4000));
-        JsonNode saved=getData("/api/drafting/"+id+"/variables/extract-trace");assertEquals("failed",saved.path("status").asText());
+                .andExpect(jsonPath("$.code").value(0));
+        JsonNode saved=getData("/api/drafting/"+id+"/variables/extract-trace");assertEquals("partial",saved.path("status").asText());
+        assertEquals("incomplete_json",saved.path("failureCode").asText());
         assertEquals("invalid_value_shape",saved.path("decisions").get(0).path("codes").get(0).asText());
         assertEquals(2,saved.path("parts").get(0).path("attempts").size());
         assertEquals("failed",saved.path("parts").get(0).path("attempts").get(1).path("status").asText());
+        assertEquals("Selected profile repair quota exhausted",saved.path("parts").get(0).path("attempts").get(1).path("errorMessage").asText());
         verify(miniMax,times(2)).chat(anyList());verifyNoInteractions(local);
     }
 

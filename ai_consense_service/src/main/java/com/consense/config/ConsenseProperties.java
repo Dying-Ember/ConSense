@@ -17,6 +17,10 @@ public class ConsenseProperties {
     private Llm llm = new Llm();
     /** Separate server-owned China Token Plan chat settings; never the embedding deployment. */
     private Llm minimaxCn = miniMaxDefaults();
+    /** Independent Qwen chat profiles; neither provides deployment embeddings. */
+    private Llm qwen = qwenDefaults("qwen3.8-27b");
+    private Llm qwenFlash = qwenDefaults("qwen3.8-flash");
+    private QwenUsagePreflight qwenUsagePreflight = new QwenUsagePreflight();
     private Ocr ocr = new Ocr();
     private Document document = new Document();
     private VectorCfg vector = new VectorCfg();
@@ -27,6 +31,19 @@ public class ConsenseProperties {
         Llm cfg=new Llm();cfg.setProvider("openai");cfg.setBaseUrl("https://api.minimax.cn");cfg.setChatModel("MiniMax-M3");
         cfg.setEmbedModel("");cfg.setStructuredOpenAiThinkingMode("disabled");cfg.setStructuredOpenAiReasoningSplit(true);
         cfg.setStructuredMaxTokens(16384);return cfg;
+    }
+
+    private static Llm qwenDefaults(String model) {
+        Llm cfg=new Llm();cfg.setEnabled(false);cfg.setProvider("openai");
+        cfg.setBaseUrl("https://maas.qianwenaiapi.com/compatible-mode");cfg.setChatModel(model);
+        cfg.setEmbedModel("");cfg.setNumCtx(0);cfg.setMaxRetry(0);cfg.setStructuredEnableThinking(false);cfg.setStructuredMaxTokens(16384);return cfg;
+    }
+
+    /** Finite paid-generation admission caps; reaching any ceiling rejects further dispatch. */
+    @Data public static class QwenUsagePreflight {
+        private boolean enabled=true;
+        private int vettingMaxPreflights=68,vettingMaxAnswers=34,vettingMaxTotal=102;
+        private long actionLifetimeMs=7200000;
     }
 
     @Data
@@ -62,6 +79,8 @@ public class ConsenseProperties {
         private String structuredOpenAiThinkingMode;
         /** Optional OpenAI structured-call extension; null omits reasoning_split. */
         private Boolean structuredOpenAiReasoningSplit;
+        /** Qwen-only enable_thinking control; null leaves existing profiles unchanged. */
+        private Boolean structuredEnableThinking;
         /** Explicit output cap for vetting calls; includes no implicit server default. */
         private int structuredMaxTokens = 2048;
         private long timeoutMs = 300_000L;

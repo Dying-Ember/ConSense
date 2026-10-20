@@ -56,8 +56,7 @@ class DraftOrderedListBoundaryRegressionTest {
             assertEquals(1,selected.size());ExtractionDecisionVO decision=selected.get(0);
             assertEquals("accepted",decision.getStatus(),captured.path("partId").asText()+" "+decision.getCodes());
             assertEquals(captured.path("rawItem").path("value"),JsonUtils.mapper().valueToTree(decision.getRawValue()));
-            assertEquals(captured.path("rawItem").path("value").asText(),decision.getNormalizedValue());
-            assertEquals(captured.path("rawItem").path("sourceQuote").asText(),decision.getSourceQuote());
+            assertSourceListLayout(decision,captured.path("rawItem"),source);
             assertTrue(DraftEvidenceQuotes.present(source,decision.getSourceQuote()));
             assertFalse(decision.getCodes().contains("source_list_unresolved"));
         });
@@ -127,7 +126,7 @@ class DraftOrderedListBoundaryRegressionTest {
             String extended=source+"\n\n"+tail;
             ExtractionDecisionVO decision=decide((ObjectNode)item.deepCopy(),extended,0,extended.length());
             assertEquals("accepted",decision.getStatus(),tail+" "+decision.getCodes());
-            assertEquals(item.path("value").asText(),decision.getNormalizedValue());
+            assertSourceListLayout(decision,item,extended);
         }
     }
 
@@ -144,7 +143,7 @@ class DraftOrderedListBoundaryRegressionTest {
             int start=captured.path("contextStart").asInt(),end=captured.path("contextEnd").asInt();
             ExtractionDecisionVO decision=decide(item,original,start,end);
             assertEquals("accepted",decision.getStatus(),decision.getCodes().toString());
-            assertEquals(item.path("value").asText(),decision.getNormalizedValue());
+            assertSourceListLayout(decision,item,original);
             assertFalse(decision.getCodes().contains("source_list_unresolved"));
         }
     }
@@ -194,6 +193,18 @@ class DraftOrderedListBoundaryRegressionTest {
 
     private static String resource(String name) throws Exception {
         return new String(resourceBytes(name),StandardCharsets.UTF_8);
+    }
+    private static void assertSourceListLayout(ExtractionDecisionVO decision,JsonNode rawItem,String source) {
+        // These frozen originals each have one contiguous nine-item paragraph block. Read its
+        // exact bytes independently of the production boundary/recovery implementation.
+        java.util.regex.Matcher first=java.util.regex.Pattern.compile("(?m)^1\\. ").matcher(source),separator=java.util.regex.Pattern.compile("\\r?\\n[\\t ]*\\r?\\n").matcher(source);assertTrue(first.find());int start=first.start();assertTrue(separator.find(start));
+        String expected=source.substring(start,separator.start()).trim();assertEquals(9,java.util.regex.Pattern.compile("(?m)^\\d+\\. ").matcher(expected).results().count());
+        assertEquals(rawItem.path("value"),JsonUtils.mapper().valueToTree(decision.getRawValue()),"The captured model answer remains untouched");
+        assertEquals(expected,decision.getNormalizedValue(),"Use the original nine markers, newlines and indented fifth/eighth continuations");
+        assertEquals(rawItem.path("value").asText().replaceAll("(?U)\\s+"," ").trim(),expected.replaceAll("(?U)\\s+"," ").trim(),"Typography recovery changes no wording or item order");
+        if(!expected.equals(rawItem.path("value").asText()))assertTrue(decision.getCodes().contains("source_value_typography_restored"));
+        if(!rawItem.path("sourceQuote").asText().equals(decision.getSourceQuote()))assertTrue(decision.getCodes().contains("evidence_quote_reanchored"));
+        assertTrue(DraftEvidenceQuotes.present(source,decision.getSourceQuote()),"The recovered quote remains supported by the same frozen original");
     }
     private static byte[] resourceBytes(String name) throws Exception {
         try(InputStream stream=DraftOrderedListBoundaryRegressionTest.class.getResourceAsStream("/drafting/harness/ordered-list/"+name)) {

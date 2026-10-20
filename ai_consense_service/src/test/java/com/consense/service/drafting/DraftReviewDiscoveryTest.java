@@ -158,11 +158,123 @@ class DraftReviewDiscoveryTest {
         assertTrue(list(state(failed).get("events")).stream().map(DraftReviewGraph::map).anyMatch(event->"not json: preserve exactly".equals(map(event.get("data")).get("rawResponse"))));
     }
 
+    @Test void truncatedResponseRetainsOnlyCompleteSourceSupportedNodesForManualReview() {
+        String instruction="Review the stated duration and independent foundation fact.";
+        String raw="{\"nodes\":["+JsonUtils.write(modelNode("duration","number","input",instruction))+",{\"id\":\"foundation\",\"type\":\"boolean\"";
+        AiGateway ai=mock(AiGateway.class);when(ai.complete(anyString(),anyString())).thenReturn(raw);
+        Map<String,Object> result=DraftReviewDiscovery.discover(ai,graph(),Collections.singletonList(reading("1",instruction)),1);
+        assertEquals(1,fields(result).size());assertEquals("pending",find(result,"-duration").get("status"));
+        Map<String,Object> attempt=map(checklist(result).get("discovery"));assertEquals("partial",attempt.get("status"));assertEquals(raw,attempt.get("rawResponse"));
+        assertEquals(true,attempt.get("jsonIncomplete"));assertFalse(list(attempt.get("rejectedNodes")).isEmpty());assertEquals(1,map(state(result).get("discoverySummary")).get("partial"));
+        validate(result);verify(ai,times(1)).complete(anyString(),anyString());
+    }
+
+    @Test void invalidSiblingAndItsDependantsDoNotDiscardIndependentCompleteQuestions() {
+        String instruction="Each project fact requires independent source review.";
+        Map<String,Object> valid=modelNode("duration","number","input",instruction),bad=modelNode("bad","boolean","input","invented quote"),dependent=modelNode("dependent","boolean","derived",instruction);
+        dependent.put("branches",Collections.singletonList(obj("id","case","mode","all","clauses",Collections.singletonList(obj("inputId","bad","operator","yes")),"resultValue","true")));
+        AiGateway ai=mock(AiGateway.class);when(ai.complete(anyString(),anyString())).thenReturn(response(valid,bad,dependent));
+        Map<String,Object> result=DraftReviewDiscovery.discover(ai,graph(),Collections.singletonList(reading("1",instruction)),1);
+        assertEquals(1,fields(result).size());assertEquals("pending",find(result,"-duration").get("status"));assertEquals(2,nodes(result).size());
+        Map<String,Object> attempt=map(checklist(result).get("discovery"));assertEquals("partial",attempt.get("status"));assertEquals(2,list(attempt.get("rejectedNodes")).size());
+        assertTrue(JsonUtils.write(attempt).contains("DISCOVERY_SOURCE_QUOTE_NOT_IN_INSTRUCTION"));validate(result);
+    }
+
+    @Test void partialAssemblyKeepsAValidClosedDependencyGroupAndRejectsOnlyCyclicSiblings() {
+        String instruction="Review independent project facts before deriving a decision.";
+        Map<String,Object> decision=modelNode("decision","boolean","derived",instruction),fact=modelNode("fact","boolean","input",instruction),a=modelNode("a","boolean","derived",instruction),b=modelNode("b","boolean","derived",instruction);
+        decision.put("branches",Collections.singletonList(obj("id","case","mode","all","clauses",Collections.singletonList(obj("inputId","fact","operator","yes")),"resultValue","true")));
+        a.put("branches",Collections.singletonList(obj("id","case","mode","all","clauses",Collections.singletonList(obj("inputId","b","operator","yes")),"resultValue","true")));
+        b.put("branches",Collections.singletonList(obj("id","case","mode","all","clauses",Collections.singletonList(obj("inputId","a","operator","yes")),"resultValue","true")));
+        AiGateway ai=mock(AiGateway.class);when(ai.complete(anyString(),anyString())).thenReturn(response(decision,a,fact,b));
+        Map<String,Object> result=DraftReviewDiscovery.discover(ai,graph(),Collections.singletonList(reading("1",instruction)),1);
+        assertEquals(3,nodes(result).size());assertNotNull(find(result,"-decision"));assertNotNull(find(result,"-fact"));
+        assertEquals("partial",map(checklist(result).get("discovery")).get("status"));validate(result);
+    }
+
     @Test void foreignReferencesAndInventedSourceQuotesStayUnknownInsteadOfPartiallyMerging() {
         String instruction="One exact source instruction.";AiGateway ai=mock(AiGateway.class);Map<String,Object> node=modelNode("local","boolean","input",instruction);node.put("parentId","existing-other-document");when(ai.complete(anyString(),anyString())).thenReturn(response(node));
         Map<String,Object> result=DraftReviewDiscovery.discover(ai,graph(),Collections.singletonList(reading("1",instruction)),1);assertTrue(fields(result).isEmpty());assertTrue(text(map(checklist(result).get("discovery")).get("reason")).contains("DISCOVERY_FOREIGN_REFERENCE"));
         AiGateway fabricated=mock(AiGateway.class);when(fabricated.complete(anyString(),anyString())).thenReturn(response(modelNode("local","boolean","input","invented source")));
         Map<String,Object> rejected=DraftReviewDiscovery.discover(fabricated,graph(),Collections.singletonList(reading("1",instruction)),1);assertTrue(fields(rejected).isEmpty());assertEquals("DISCOVERY_SOURCE_QUOTE_NOT_IN_INSTRUCTION",map(checklist(rejected).get("discovery")).get("reason"));
+    }
+
+    @Test void sourceSupportedQuestionSurvivesBadEdgesAndLongModelIdsWithoutAcquiringEditAuthority() {
+        String instruction="(Delete if precast façade is not applicable)",local="q:precast_facade_applicable";
+        Map<String,Object> node=modelNode(local,"boolean","input",instruction);
+        node.put("branches",Collections.singletonList(obj("id","yes","mode","all","scopeId","source_unit_instruction_scope:external-source-key","scopeMode","each","clauses",Collections.singletonList(obj("inputId",local,"operator","yes")),"resultValue","keep")));
+        String raw=response(node);AiGateway ai=mock(AiGateway.class);when(ai.complete(anyString(),anyString())).thenReturn(raw);
+        Map<String,Object> result=DraftReviewDiscovery.discover(ai,graph(),Collections.singletonList(reading("1",instruction)),1);
+        Map<String,Object> core=nodes(result).stream().filter(n->local.equals(n.get("modelLocalId"))).findFirst().orElseThrow();
+        assertEquals(1,fields(result).size());assertEquals("boolean",map(core.get("type")).get("kind"));assertEquals("input",map(core.get("role")).get("kind"));assertEquals("pending",core.get("status"));assertEquals(instruction,core.get("semanticSourceQuote"));
+        assertTrue(text(core.get("id")).matches("[A-Za-z0-9][A-Za-z0-9_-]{0,63}"));assertTrue(Boolean.TRUE.equals(map(core.get("correction")).get("needsRebind")));assertTrue(list(core.get("editTargets")).isEmpty());assertTrue(list(core.get("relatedInputIds")).isEmpty());
+        Map<String,Object> attempt=map(checklist(result).get("discovery"));assertEquals("partial",attempt.get("status"));assertEquals(raw,attempt.get("rawResponse"));assertEquals(1,list(attempt.get("localIdMappings")).size());assertFalse(list(attempt.get("rejectedNodes")).isEmpty());assertEquals(0,map(state(result).get("discoverySummary")).get("adoptedValues"));
+        validate(result);verify(ai,times(1)).complete(anyString(),anyString());
+    }
+
+    @Test void remappedLocalIdsKeepOnlyExplicitUniqueLocalReferencesConsistent() {
+        String instruction="Review the project fact before deriving the local decision.",local="q:project_fact";
+        Map<String,Object> input=modelNode(local,"boolean","input",instruction),decision=modelNode("decision","boolean","derived",instruction);
+        decision.put("branches",Collections.singletonList(obj("id","yes","mode","all","clauses",Collections.singletonList(obj("inputId",local,"operator","yes")),"resultValue","true")));
+        AiGateway ai=mock(AiGateway.class);when(ai.complete(anyString(),anyString())).thenReturn(response(input,decision));
+        Map<String,Object> result=DraftReviewDiscovery.discover(ai,graph(),Collections.singletonList(reading("1",instruction)),1);Map<String,Object> mapped=nodes(result).stream().filter(n->local.equals(n.get("modelLocalId"))).findFirst().orElseThrow();
+        Map<String,Object> clause=map(list(map(list(map(find(result,"-decision").get("correction")).get("branches")).get(0)).get("clauses")).get(0));assertEquals(mapped.get("id"),clause.get("inputId"));assertEquals("completed",map(checklist(result).get("discovery")).get("status"));validate(result);
+        when(ai.complete(anyString(),anyString())).thenReturn(response(input,input));Map<String,Object> duplicates=DraftReviewDiscovery.discover(ai,graph(),Collections.singletonList(reading("1",instruction)),1);assertTrue(fields(duplicates).isEmpty());assertEquals("failed",map(checklist(duplicates).get("discovery")).get("status"));
+    }
+
+    @Test void graphInvalidEdgesMayLeaveAQuestionCoreButInvalidCoreOptionsOrParentScopeCannotBeRescued() {
+        String instruction="One exact supported question.";AiGateway ai=mock(AiGateway.class);
+        Map<String,Object> invalidOperator=modelNode("fact","boolean","input",instruction);invalidOperator.put("branches",Collections.singletonList(obj("id","bad","mode","all","clauses",Collections.singletonList(obj("inputId","fact","operator","invented")))));
+        when(ai.complete(anyString(),anyString())).thenReturn(response(invalidOperator));Map<String,Object> result=DraftReviewDiscovery.discover(ai,graph(),Collections.singletonList(reading("1",instruction)),1);
+        assertEquals(1,fields(result).size());assertEquals(true,map(find(result,"-fact").get("correction")).get("needsRebind"));assertEquals("partial",map(checklist(result).get("discovery")).get("status"));validate(result);
+        Map<String,Object> noOptions=modelNode("choice","choice","input",instruction);noOptions.put("branches",invalidOperator.get("branches"));when(ai.complete(anyString(),anyString())).thenReturn(response(noOptions));assertTrue(fields(DraftReviewDiscovery.discover(ai,graph(),Collections.singletonList(reading("1",instruction)),1)).isEmpty());
+        Map<String,Object> parent=modelNode("parent","boolean","input",instruction),child=modelNode("child","text","input",instruction);child.put("parentId","parent");when(ai.complete(anyString(),anyString())).thenReturn(response(parent,child));Map<String,Object> scoped=DraftReviewDiscovery.discover(ai,graph(),Collections.singletonList(reading("1",instruction)),1);assertEquals(1,fields(scoped).size());assertNotNull(find(scoped,"-parent"));assertTrue(nodes(scoped).stream().noneMatch(n->text(n.get("id")).endsWith("-child")));validate(scoped);
+    }
+
+    @Test void parentAndChildQuestionCoresSurviveBadRulesInEitherResponseOrderWithoutDroppingParentScope() {
+        String instruction="Review the parent details and this independent child fact.";
+        for(boolean childFirst:Arrays.asList(true,false)) {
+            Map<String,Object> parent=modelNode("parent","record","input",instruction),child=modelNode("child","boolean","input",instruction);child.put("parentId","parent");
+            parent.put("branches",Collections.singletonList(obj("id","bad","mode","all","clauses",Collections.singletonList(obj("inputId","child","operator","invented")))));
+            child.put("branches",Collections.singletonList(obj("id","bad","mode","all","clauses",Collections.singletonList(obj("inputId","child","operator","invented")))));
+            AiGateway ai=mock(AiGateway.class);when(ai.complete(anyString(),anyString())).thenReturn(childFirst?response(child,parent):response(parent,child));
+            Map<String,Object> result=DraftReviewDiscovery.discover(ai,graph(),Collections.singletonList(reading("1",instruction)),1);assertEquals(3,nodes(result).size(),"Both supported cores plus the original source seed: childFirst="+childFirst);
+            Map<String,Object> savedParent=find(result,"-parent"),savedChild=find(result,"-child");assertEquals(savedParent.get("id"),savedChild.get("parentId"));
+            for(Map<String,Object> core:Arrays.asList(savedParent,savedChild)){assertEquals("pending",core.get("status"));assertEquals(true,map(core.get("correction")).get("needsRebind"));assertTrue(list(core.get("editTargets")).isEmpty());assertEquals(instruction,core.get("semanticSourceQuote"));}
+            assertEquals("partial",map(checklist(result).get("discovery")).get("status"));validate(result);
+        }
+    }
+
+    @Test void mutuallyReferencedBadInputRulesCannotBlockEitherIndependentQuestionCore() {
+        String instruction="The two project facts require separate source review.";
+        for(boolean reversed:Arrays.asList(false,true)) {
+            Map<String,Object> first=modelNode("first","boolean","input",instruction),second=modelNode("second","boolean","input",instruction);
+            first.put("branches",Collections.singletonList(obj("id","bad","mode","all","clauses",Collections.singletonList(obj("inputId","second","operator","invented")))));
+            second.put("branches",Collections.singletonList(obj("id","bad","mode","all","clauses",Collections.singletonList(obj("inputId","first","operator","invented")))));
+            AiGateway ai=mock(AiGateway.class);when(ai.complete(anyString(),anyString())).thenReturn(reversed?response(second,first):response(first,second));
+            Map<String,Object> result=DraftReviewDiscovery.discover(ai,graph(),Collections.singletonList(reading("1",instruction)),1);assertEquals(2,fields(result).size());
+            for(String id:Arrays.asList("first","second")){Map<String,Object> core=find(result,"-"+id);assertNull(core.get("parentId"));assertEquals(true,map(core.get("correction")).get("needsRebind"));assertTrue(list(core.get("relatedInputIds")).isEmpty());assertFalse(core.containsKey("fixedValue"));assertEquals("pending",core.get("status"));}
+            assertEquals("partial",map(checklist(result).get("discovery")).get("status"));validate(result);
+        }
+    }
+
+    @Test void validMutualInputConditionsRemainUsableWithoutInventingAnInputCycleProhibition() {
+        String instruction="The two independently answered project facts jointly inform treatment.";
+        Map<String,Object> first=modelNode("first","boolean","input",instruction),second=modelNode("second","boolean","input",instruction);
+        first.put("branches",Collections.singletonList(obj("id","first_case","mode","all","clauses",Collections.singletonList(obj("inputId","second","operator","yes")))));
+        second.put("branches",Collections.singletonList(obj("id","second_case","mode","all","clauses",Collections.singletonList(obj("inputId","first","operator","yes")))));
+        AiGateway ai=mock(AiGateway.class);when(ai.complete(anyString(),anyString())).thenReturn(response(first,second));Map<String,Object> result=DraftReviewDiscovery.discover(ai,graph(),Collections.singletonList(reading("1",instruction)),1);
+        assertEquals(2,fields(result).size());assertEquals("completed",map(checklist(result).get("discovery")).get("status"));
+        for(String id:Arrays.asList("first","second")){Map<String,Object> node=find(result,"-"+id);assertEquals("pending",node.get("status"));assertFalse(Boolean.TRUE.equals(map(node.get("correction")).get("needsRebind")));assertFalse(node.containsKey("fixedValue"));}
+        validate(result);
+    }
+
+    @Test void parentCyclesRemainRejectedEvenWhenBothQuestionsHaveOtherwiseUsableCores() {
+        String instruction="Keep the actual detail ownership unknown when it is invalid.";
+        Map<String,Object> first=modelNode("first","record","input",instruction),second=modelNode("second","record","input",instruction);first.put("parentId","second");second.put("parentId","first");
+        for(Map<String,Object> node:Arrays.asList(first,second))node.put("branches",Collections.singletonList(obj("id","bad","mode","all","clauses",Collections.singletonList(obj("inputId","first","operator","invented")))));
+        AiGateway ai=mock(AiGateway.class);when(ai.complete(anyString(),anyString())).thenReturn(response(first,second));Map<String,Object> result=DraftReviewDiscovery.discover(ai,graph(),Collections.singletonList(reading("1",instruction)),1);
+        assertTrue(fields(result).isEmpty());assertEquals(1,nodes(result).size());assertEquals("failed",map(checklist(result).get("discovery")).get("status"));validate(result);
     }
 
     @Test void onlyACompleteObservedScopeWithUniqueEditableTextMayProposeATreatment() {
@@ -174,6 +286,58 @@ class DraftReviewDiscoveryTest {
         Map<String,Object> result=DraftReviewDiscovery.discover(ai,graph(),Collections.singletonList(source),1),effect=map(list(find(result,"-alternative").get("editTargets")).get(0));
         assertEquals("delete",effect.get("action"));assertEquals("missing",map(effect.get("nativeBinding")).get("status"));assertTrue(effect.containsKey("native"));assertEquals("pending",find(result,"-alternative").get("status"));
         source.put("format","pdf");Map<String,Object> pdf=DraftReviewDiscovery.discover(ai,graph(),Collections.singletonList(source),1);assertEquals("check",map(list(find(pdf,"-alternative").get("editTargets")).get(0)).get("action"));
+    }
+
+    @Test void explicitNullOptionalFieldsMatchOmittedFieldsWithoutDiscardingTheQuestionOrTreatment() {
+        String instruction="Delete the full clause if the fact applies.",target="* Complete source clause.";
+        ObjectNode source=reading("1",instruction);
+        source.withArray("paragraphs").addObject().put("id","target-paragraph").put("paragraphSha256",SHA).put("text",target).put("sourceSha256",SHA);
+        source.withArray("groups").addObject().put("id","scope-1").put("guidanceNoteId","note-1").put("scopeComplete",true).put("text",target);
+        Map<String,Object> node=modelNode("fact","boolean","input",instruction);
+        node.put("branches",Collections.singletonList(obj("id","yes","mode","all","clauses",Collections.singletonList(obj("inputId","fact","operator","yes")))));
+        node.put("effects",Collections.singletonList(obj("scopeId","scope-1","quote",target,"action","delete")));
+        AiGateway ai=mock(AiGateway.class);when(ai.complete(anyString(),anyString())).thenReturn(response(node));
+        Map<String,Object> expected=find(DraftReviewDiscovery.discover(ai,graph(),Collections.singletonList(source),1),"-fact");
+        assertEquals("delete",map(list(expected.get("editTargets")).get(0)).get("action"));
+        assertAll(Arrays.asList("parentId","scopeId","scopeMode","branchId","valueSourceId","replacementEn").stream().map(key->(org.junit.jupiter.api.function.Executable)()->{
+            Map<String,Object> nullable=JsonUtils.readMap(JsonUtils.write(node));
+            Map<String,Object> owner="parentId".equals(key)?nullable:Arrays.asList("scopeId","scopeMode").contains(key)?map(list(nullable.get("branches")).get(0)):map(list(nullable.get("effects")).get(0));
+            owner.put(key,null);String raw=response(nullable);when(ai.complete(anyString(),anyString())).thenReturn(raw);
+            Map<String,Object> result=DraftReviewDiscovery.discover(ai,graph(),Collections.singletonList(source),1);
+            assertEquals(1,fields(result).size(),key+" must keep the complete question");
+            assertEquals(expected,find(result,"-fact"),key+" null must behave like omission");
+            assertEquals("completed",map(checklist(result).get("discovery")).get("status"),key);validate(result);
+        }));
+    }
+
+    @Test void literalNullStringRemainsAnExplicitLocalReferenceAndReplacement() {
+        String instruction="Review the complete clause.",target="* Complete source clause.";ObjectNode source=reading("1",instruction);
+        source.withArray("paragraphs").addObject().put("id","target-paragraph").put("paragraphSha256",SHA).put("text",target).put("sourceSha256",SHA);
+        source.withArray("groups").addObject().put("id","scope-1").put("guidanceNoteId","note-1").put("scopeComplete",true).put("text",target);
+        Map<String,Object> question=modelNode("fact","boolean","input",instruction),literal=modelNode("null","text","input",instruction);
+        question.put("effects",Collections.singletonList(obj("scopeId","scope-1","quote",target,"action","check","valueSourceId","null","replacementEn","null")));
+        AiGateway ai=mock(AiGateway.class);when(ai.complete(anyString(),anyString())).thenReturn(response(question,literal));
+        Map<String,Object> result=DraftReviewDiscovery.discover(ai,graph(),Collections.singletonList(source),1),effect=map(list(find(result,"-fact").get("editTargets")).get(0));
+        assertEquals(find(result,"-null").get("id"),effect.get("valueSourceId"));assertEquals("null",effect.get("replacementEn"));
+        assertEquals("completed",map(checklist(result).get("discovery")).get("status"));validate(result);
+    }
+
+    @Test void foreignStringReferencesStillIsolateBadPartsAndKeepIndependentQuestions() {
+        String instruction="Review every independent fact.",target="* Complete source clause.";ObjectNode source=reading("1",instruction);
+        source.withArray("paragraphs").addObject().put("id","target-paragraph").put("paragraphSha256",SHA).put("text",target).put("sourceSha256",SHA);
+        source.withArray("groups").addObject().put("id","scope-1").put("guidanceNoteId","note-1").put("scopeComplete",true).put("text",target);
+        for(String key:Arrays.asList("parentId","scopeId","branchId","valueSourceId")) {
+            Map<String,Object> bad=modelNode("bad","boolean","input",instruction),independent=modelNode("independent","boolean","input",instruction);
+            Map<String,Object> branch=obj("id","yes","mode","all","clauses",Collections.singletonList(obj("inputId","bad","operator","yes")));
+            Map<String,Object> effect=obj("scopeId","scope-1","quote",target,"action","delete");bad.put("branches",Collections.singletonList(branch));bad.put("effects",Collections.singletonList(effect));
+            ("parentId".equals(key)?bad:"scopeId".equals(key)?branch:effect).put(key,"null");
+            AiGateway ai=mock(AiGateway.class);when(ai.complete(anyString(),anyString())).thenReturn(response(bad,independent));
+            Map<String,Object> result=DraftReviewDiscovery.discover(ai,graph(),Collections.singletonList(source),1);
+            assertEquals("pending",find(result,"-independent").get("status"));assertEquals("partial",map(checklist(result).get("discovery")).get("status"),key);
+            assertFalse(list(map(checklist(result).get("discovery")).get("rejectedNodes")).isEmpty(),key);
+            if(!"parentId".equals(key)){assertTrue(list(find(result,"-bad").get("editTargets")).isEmpty(),key);assertEquals(true,map(find(result,"-bad").get("correction")).get("needsRebind"),key);}
+            validate(result);
+        }
     }
 
     @Test void invalidOrAbsentItemBudgetMakesNoGatewayCall() {

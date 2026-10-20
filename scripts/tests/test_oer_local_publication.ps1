@@ -109,7 +109,7 @@ $normal=[pscustomobject]@{
     artifactReadValidation='complete-manifest-actual-cas-reconstruction-every-request'
     originalByteVerifier='java_current_source_reader';observerActor='application'
     sourceQualityAccepted=$false;semanticScopeVerified=$false;humanConfirmed=$false
-    adoptionStatus='candidate_unverified';maximumMessageBytes=16777216
+    adoptionStatus='candidate_unverified';maximumMessageBytes=1073741824
 }
 $health=[pscustomobject]@{device='cuda';runtime=[pscustomobject]@{
     embedding=[pscustomobject]@{device='cuda';dtype='float32';serialOffload=$true}
@@ -128,9 +128,11 @@ foreach($field in @('sourceQualityAccepted','semanticScopeVerified','humanConfir
     Assert-Rejected {Assert-OerCudaHealth $health} 'normal observed capability' "normal_${field}_cannot_claim_acceptance"
     $normal.$field=$false
 }
-$normal.maximumMessageBytes=33554432
+$normal.maximumMessageBytes=2147483648L
 Assert-Rejected {Assert-OerCudaHealth $health} 'normal observed capability' 'normal_observed_message_cap_cannot_expand'
 $normal.maximumMessageBytes=16777216
+Assert-Rejected {Assert-OerCudaHealth $health} 'normal observed capability' 'normal_observed_legacy_cap_cannot_mask_current_contract'
+$normal.maximumMessageBytes=1073741824
 $health.oer.PSObject.Properties.Remove('normalObserved')
 Assert-Rejected {Assert-OerCudaHealth $health} 'normal observed capability' 'normal_kind_without_capability_rejected'
 $health.oer|Add-Member normalObserved $normal

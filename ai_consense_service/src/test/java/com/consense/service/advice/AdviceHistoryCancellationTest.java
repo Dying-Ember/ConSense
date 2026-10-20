@@ -39,7 +39,7 @@ class AdviceHistoryCancellationTest {
             AdviceService advice=new AdviceService(null,null,null,null,fixture.props,null,null,messages,null,null,null);
             ReflectionTestUtils.setField(advice,"adviceSettings",fixture.settings);AtomicReference<Runnable> cancel=new AtomicReference<>();
             AdviceProgress progress=new AdviceProgress(){public void onCancel(Runnable action){cancel.set(action);}};
-            Future<?> pending=executor.submit(()->ReflectionTestUtils.invokeMethod(advice,"boundedHistory",session,AdviceResponsesTransportTest.SOURCE,operation.getIdentity(),null,operation,(Runnable)()->{},progress));
+            Future<?> pending=executor.submit(()->ReflectionTestUtils.invokeMethod(advice,"boundedHistory",session,AdviceResponsesTransportTest.SOURCE,operation.getIdentity(),null,operation,null,(Runnable)()->{},progress));
             assertTrue(entered.await(3,TimeUnit.SECONDS));assertNotNull(cancel.get());cancel.get().run();
             ExecutionException failure=assertThrows(ExecutionException.class,()->pending.get(2,TimeUnit.SECONDS));
             assertInstanceOf(AdviceResponsesTransport.RequestFailure.class,failure.getCause());assertEquals("transport_failed",((AdviceResponsesTransport.RequestFailure)failure.getCause()).getStatus());

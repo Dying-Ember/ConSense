@@ -30,6 +30,23 @@ class OerNormalObservedBusinessEvidenceTest {
         });return w;
     }
 
+    @Test void actualNormalPointerAbsentAdoptionSurvivesRankedCopyAndStrictContextIdentity()throws Exception {
+        OerBusinessEvidenceTest.Wire w=wire();
+        java.lang.reflect.Method factory=com.consense.service.sources.CanonicalEvidenceService.class.getDeclaredMethod("pointer",com.consense.domain.CanonicalSourceBinding.class,JsonNode.class,JsonNode.class,String.class);factory.setAccessible(true);
+        when(w.registry.pointers(eq("project"),eq(42L),anyString(),eq("vetting"))).thenAnswer(call->{
+            List<EvidencePointer> pointers=new ArrayList<>();for(JsonNode raw:w.snapshot.path("chunks"))pointers.add((EvidencePointer)factory.invoke(null,w.binding,w.snapshot,raw,"vetting"));return pointers;
+        });
+        OerBusinessEvidence.Session session=w.load();List<VettingCorpus.Chunk> ranked=new ArrayList<>();
+        for(VettingCorpus.Chunk source:session.chunks()){
+            VettingCorpus.Chunk copy=JsonUtils.read(JsonUtils.write(source),VettingCorpus.Chunk.class);ranked.add(copy);
+            assertEquals(JsonUtils.write(source),JsonUtils.write(copy));assertEquals(source,copy,"Display-pointer absence cannot reject an unchanged ranked source");
+            assertTrue(source.getCanonicalEvidence().getAdoption().isNull());assertFalse(source.getCanonicalPayload().has("adoption"));
+        }
+        assertDoesNotThrow(()->new VettingContextBuilder(session.chunks()).build("source obligation",ranked,Collections.emptyMap(),10000));
+        ranked.get(0).setContent("changed source text");
+        assertThrows(IllegalArgumentException.class,()->new VettingContextBuilder(session.chunks()).build("source obligation",ranked,Collections.emptyMap(),10000));
+    }
+
     @Test void normalViewsPreserveLiteralPositionsAndUnknownAuthorityWithoutInventingPagesOrReview() throws Exception {
         OerBusinessEvidenceTest.Wire w=wire();OerBusinessEvidence.Session session=assertDoesNotThrow(w::load);
         assertEquals(2,session.chunkCount());assertEquals("P3",session.chunks().get(0).getPageNo());

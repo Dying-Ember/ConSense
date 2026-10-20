@@ -109,6 +109,30 @@ const component = loadVue(path.join(__dirname, '../src/components/DraftingTempla
   reader.unmount()
   console.log('PASS: real DOCX conversion keeps table identities, all field markers, location next/direct selection, and source-to-input/exact-action events without dirty-state mutation')
 
+  const plainMetadata = metadata, plainSource = source
+  const numberedZip = await require('jszip').loadAsync(bytes)
+  numberedZip.file('word/document.xml', (await numberedZip.file('word/document.xml').async('string')).replace('<w:p>', '<w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr></w:pPr>'))
+  numberedZip.file('word/numbering.xml', '<w:numbering xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:abstractNum w:abstractNumId="1"><w:lvl w:ilvl="0"><w:start w:val="1"/><w:numFmt w:val="lowerLetter"/><w:lvlText w:val="(%1)"/></w:lvl></w:abstractNum><w:num w:numId="1"><w:abstractNumId w:val="1"/></w:num></w:numbering>')
+  const numberedBytes = await numberedZip.generateAsync({ type: 'nodebuffer' })
+  source = new Blob([numberedBytes]); metadata = { ...plainMetadata, sourceHash: require('node:crypto').createHash('sha256').update(numberedBytes).digest('hex') }
+  const numberedLocale = vue.ref('en')
+  const numberedReader = vue.createApp({ render: () => vue.h(component, { projectId: 'LIST-TEMPLATE-TEST', fileKey: 'NTT', locale: numberedLocale.value, fields: [field], values, variables: [], actions: [], selectedKey: field.key, selectedActionId: '', fieldStates: { [field.key]: 'manual' }, dirtyKeys: [field.key], disabled: false }) })
+  numberedReader.mount('#app')
+  for (let i = 0; i < 50 && !document.querySelector('[data-reading-numbering-notice]'); i++) { await new Promise(resolve => setTimeout(resolve, 10)); await settle() }
+  const markerStyle = document.createElement('style'); markerStyle.textContent = require('node:fs').readFileSync(path.join(__dirname, '../src/styles/main.css'), 'utf8'); document.head.append(markerStyle)
+  assert.equal(window.getComputedStyle(document.querySelector('.reading-surface ol')).listStyleType, 'none')
+  assert.equal(document.querySelector('.reading-surface li[data-native-paragraph="body-1"]').textContent, 'Invitation to tender')
+  for (const [locale, message] of [['en', 'Web-generated list markers are hidden.'], ['zh-Hans', '网页自动标号已隐藏，原编号请核对 PDF。'], ['zh-Hant', '網頁自動標號已隱藏，原編號請核對 PDF。']]) {
+    numberedLocale.value = locale; await settle()
+    for (let i = 0; i < 50 && !document.querySelector('[data-reading-numbering-notice]'); i++) { await new Promise(resolve => setTimeout(resolve, 10)); await settle() }
+    const notice = document.querySelector('[data-reading-numbering-notice]')
+    assert.ok(notice && !notice.closest('details,.reading-surface'))
+    assert.ok(notice.textContent.includes(message))
+  }
+  assert.equal(values.otherDirty, 'retain this edit')
+  numberedReader.unmount(); markerStyle.remove(); metadata = plainMetadata; source = plainSource
+  console.log('PASS: real Word list conversion hides browser markers and shows visible trilingual PDF guidance without changing source text or dirty inputs')
+
   let resolveOld
   pendingReading = { project: 'old', promise: new Promise(resolve => { resolveOld = resolve }) }
   const project = vue.ref('old'), locale = vue.ref('en')

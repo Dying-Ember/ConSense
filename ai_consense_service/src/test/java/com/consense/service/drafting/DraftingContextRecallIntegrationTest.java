@@ -228,7 +228,7 @@ class DraftingContextRecallIntegrationTest {
                 return "[{\"key\":\"projectArchitectName\",";
             });
             extract(project);JsonNode trace=trace(project);JsonNode attempts=trace.path("parts").get(0).path("attempts");
-            assertEquals("completed",trace.path("status").asText());assertEquals(2,attempts.size());
+            assertEquals("partial",trace.path("status").asText());assertEquals(2,attempts.size());
             assertEquals("failed",attempts.get(1).path("status").asText());
             assertEquals(transportFailure?"model_call_failed":"invalid_json",attempts.get(1).path("errorCode").asText());
             assertEquals(attempts.get(1).path("errorCode"),attempts.get(1).path("context").path("stopReason"));

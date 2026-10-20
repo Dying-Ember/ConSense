@@ -1,6 +1,7 @@
 package com.consense.service.drafting;
 
 import com.consense.ai.AiGateway;
+import com.consense.ai.IncompleteModelResponseException;
 import com.consense.common.BizException;
 import com.consense.common.JsonUtils;
 import com.consense.service.prompt.PromptService;
@@ -13,7 +14,7 @@ import org.springframework.stereotype.Service;
 /** Drafting-local request/intake boundary. Accepted intake never certifies business truth. */
 @Service @RequiredArgsConstructor
 public class DraftExtractionHarness {
-    public static final String VERSION="draft-extraction-20261009.27-media-scope-and-floor-normalization";
+    public static final String VERSION="draft-extraction-20261020.28-partial-bs-scope";
     private static final String PROTOCOL="DRAFTING EXTRACTION PROTOCOL. Return only a JSON array of supported items {key,value,sourceQuote,reason,confidence}. "
             +"Use native JSON values: object, array, boolean, number, string or null, according to the single catalogue below. "
             +"Example contract value: {\"number\":\"C-2026/10\",\"title\":\"Works A\"}. A supported partial contract may omit its missing sibling. "
@@ -30,7 +31,7 @@ public class DraftExtractionHarness {
             +"Bill rows may put pricing type before or after the number/description. Use the actual header to bind columns. BQ1 and SOR1 are different identities. A description containing '(All Provisional)' is a formal name, not evidence about every BQ quantity. "
             +"Keep numeric roles separate: a repayment period in months is not its first payment-certificate number. English number words and ordinals denote the same numbers. "
             +"An input whose catalogue condition is false is not applicable: return null, never false as a substitute. Known contractorLegalForm makes the two fallback clause-adoption inputs unnecessary; the business rules derive clause treatment from the known form. "
-            +"L10Pro pricing preparation is independent of paper/DVD return. NSC/BSSSC arrangement is independent of trade scope. "
+            +"L10Pro pricing preparation is independent of paper/DVD return. NSC/BSSSC arrangement is independent of trade scope. BS trades such as fire services and lift must be selected under either designation method; neither method makes the trade selection inapplicable. "
             +"otherTenderingArrangement is only an explicitly adopted alternative to the two-envelope tender procedure or replacement SCT5 wording. Hardcopy plus DVD-ROM submission under the existing two-envelope procedure is return media, not an alternative tender procedure; do not map it to this input. "
             +"A selected-trades quote must explicitly cover every selected trade. Cite a contiguous selected-trade table or the sentence defining the list, not only the NSC/BSSSC arrangement. Do not select No/excluded rows or duplicate combined Fire services and water pump or Lift and escalator with their shorter options. "
             +"Combined-foundation classification and >=39-month threshold are separate inputs; a baseline/ceiling does not establish the exact accepted period. "
@@ -84,13 +85,13 @@ public class DraftExtractionHarness {
             String effectiveUser=dispatch==1?user:user+"\nThe preceding response was not a decodable JSON array. Return only one JSON array.";
             ExtractionAttemptVO attempt=dispatch(trace,part,"primary",system,effectiveUser);
             JsonNode items;
-            try{items=decode(attempt.getRawResponse());}
+            try{items=decode(attempt);}
             catch(RuntimeException invalid) {
                 attempt.setStatus("failed");attempt.setErrorCode("invalid_json");
-                if(dispatch==2)throw new BizException(5002,"Model output is not a decodable JSON array; the failed attempts are retained in the extraction report.");
+                if(dispatch==2||attempt.getProviderFailureKind()!=null)throw new BizException(5002,"Model output is not a decodable JSON array; the failed attempts are retained in the extraction report.");
                 continue;
             }
-            attempt.setStatus("completed");int index=0;
+            if(!"partial".equals(attempt.getStatus()))attempt.setStatus("completed");int index=0;
             for(JsonNode item:items)trace.getDecisions().add(decide(part,attempt,index++,item,originalSource));
             break;
         }
@@ -116,9 +117,9 @@ public class DraftExtractionHarness {
                 +"\nUnknown-value citation repair keys: "+JsonUtils.write(unansweredQuoteRepairs)+". For these keys keep value null and repair only its exact contiguous quote and unresolved explanation; never fill a value such as a baseline duration.";
         ExtractionAttemptVO repair;
         try{repair=dispatch(trace,part,"repair",repairSystem,repairUser);}
-        catch(RuntimeException modelFailure){if(ai.explicitProfileSelected())throw modelFailure;return;}
+        catch(RuntimeException modelFailure){return;}
         try {
-            JsonNode items=decode(repair.getRawResponse());repair.setStatus("completed");int index=0;
+            JsonNode items=decode(repair);if(!"partial".equals(repair.getStatus()))repair.setStatus("completed");int index=0;
             for(JsonNode item:items) {
                 ExtractionDecisionVO decision=decide(part,repair,index++,item,originalSource);
                 if(!failed.containsKey(decision.getKey())) {decision.setStatus("rejected");decision.getCodes().add(0,"repair_key_not_allowed");}
@@ -142,7 +143,7 @@ public class DraftExtractionHarness {
                     +"Return null with explanation if this source cannot support the value. Do not answer or replace any other input.";
             ExtractionAttemptVO coverage=dispatch(trace,part,"coverage",coverageSystem,coverageUser);
             try {
-                JsonNode items=decode(coverage.getRawResponse());coverage.setStatus("completed");int index=0;
+                JsonNode items=decode(coverage);if(!"partial".equals(coverage.getStatus()))coverage.setStatus("completed");int index=0;
                 for(JsonNode item:items) {
                     ExtractionDecisionVO decision=decide(part,coverage,index++,item,originalSource);
                     if(!"domesticBlocks".equals(decision.getKey())) {decision.setStatus("rejected");decision.getCodes().add(0,"coverage_key_not_allowed");}
@@ -217,10 +218,10 @@ public class DraftExtractionHarness {
             try{attempt=dispatch(trace,window,"recall",recallSystem,user);}
             catch(RuntimeException failure) {
                 part.getAttempts().get(part.getAttempts().size()-1).getContext().setStopReason("model_call_failed");
-                if(ai.explicitProfileSelected())throw failure;continue;
+                continue;
             }
             try {
-                JsonNode items=decode(attempt.getRawResponse());attempt.setStatus("completed");int index=0;boolean accepted=false,pending=false;
+                JsonNode items=decode(attempt);if(!"partial".equals(attempt.getStatus()))attempt.setStatus("completed");int index=0;boolean accepted=false,pending=false;
                 for(JsonNode item:items) {
                     ExtractionDecisionVO decision=decide(part,attempt,index++,item,source);
                     if(!allowed.contains(decision.getKey())){decision.setStatus("rejected");decision.getCodes().add(0,"recall_key_not_allowed");}
@@ -307,7 +308,30 @@ public class DraftExtractionHarness {
         }
         try {
             String raw=ai.complete(system,user);attempt.setRawResponse(raw);trace.getRawResponses().add(raw);return attempt;
-        } catch(RuntimeException failure) {attempt.setStatus("failed");attempt.setErrorCode("model_call_failed");throw failure;}
+        } catch(RuntimeException failure) {if(recordFailure(trace,attempt,failure))return attempt;throw failure;}
+    }
+
+    static boolean recordFailure(ExtractTraceVO trace,ExtractionAttemptVO attempt,RuntimeException failure) {
+        attempt.setStatus("failed");attempt.setErrorCode("model_call_failed");attempt.setErrorMessage(failure.getMessage());
+        if(!(failure instanceof IncompleteModelResponseException))return false;
+        IncompleteModelResponseException incomplete=(IncompleteModelResponseException)failure;
+        attempt.setProviderFailureKind(incomplete.getFailureKind().name());attempt.setProviderResponse(incomplete.getRawResponse());attempt.setProviderResponseMetadata(incomplete.getResponseMetadata());
+        attempt.setRawResponse(incomplete.getModelContent());if(incomplete.getModelContent()!=null)trace.getRawResponses().add(incomplete.getModelContent());
+        if(incomplete.getFailureKind()!=IncompleteModelResponseException.FailureKind.OUTPUT_BUDGET_EXHAUSTED||incomplete.getModelContent()==null)return false;
+        attempt.setStatus("partial");attempt.setErrorCode("output_budget_exhausted");return true;
+    }
+
+    static boolean incomplete(ExtractTraceVO trace) {
+        return trace.getFailureCode()!=null||trace.getParts().stream().anyMatch(part->part.getAttempts().stream().anyMatch(attempt->"partial".equals(attempt.getStatus()))||
+                !part.getAttempts().isEmpty()&&"failed".equals(part.getAttempts().get(part.getAttempts().size()-1).getStatus()));
+    }
+
+    private JsonNode decode(ExtractionAttemptVO attempt) {
+        try {return decode(attempt.getRawResponse());}
+        catch(RuntimeException invalid) {
+            JsonNode complete=unwrap(DraftJsonItems.completePrefix(attempt.getRawResponse(),"items","findings","variables","results","data","list"),0);
+            attempt.setStatus("partial");if(attempt.getProviderFailureKind()==null)attempt.setErrorCode("incomplete_json");return complete;
+        }
     }
 
     private JsonNode decode(String raw) {

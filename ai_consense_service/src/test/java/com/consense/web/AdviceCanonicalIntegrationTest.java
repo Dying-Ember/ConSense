@@ -25,6 +25,7 @@ import java.nio.file.Paths;
 import java.time.Instant;
 import java.util.*;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -77,10 +78,13 @@ class AdviceCanonicalIntegrationTest {
     private final List<String> prompts=new ArrayList<>();
     private List<VectorStore.SearchHit> selectedHits,contextHits;
     private OerBusinessEvidence.Session loaded;
+    private final Map<String,VettingCorpus.Chunk> additionalChunks=new LinkedHashMap<>();
+    private Object originalFixedBaseline;
 
     @BeforeEach void doubles() throws Exception {
         com.consense.service.advice.AdviceBudgetFixture.bind(counter,local);
-        prompts.clear();selectedHits=new ArrayList<>();contextHits=new ArrayList<>();loaded=null;
+        prompts.clear();selectedHits=new ArrayList<>();contextHits=new ArrayList<>();loaded=null;additionalChunks.clear();
+        originalFixedBaseline=ReflectionTestUtils.getField(advice,"fixedBaseline");
         adviceModel.setMinimaxWire("chat");
         ReflectionTestUtils.setField(advice,"adviceResponses",originalResponses);
         when(canonical.enabled()).thenReturn(true);
@@ -115,6 +119,91 @@ class AdviceCanonicalIntegrationTest {
             prompts.add(JsonUtils.write(call.getArgument(0)));
             return "{\"grounded\":true,\"answer\":\"AUTHORED supported answer\",\"citations\":[\"[1]\"]}";
         });
+    }
+
+    @AfterEach void restoreSmallCorpusConfiguration(){deployment.getVector().setStuffingLimit(30000);ReflectionTestUtils.setField(advice,"fixedBaseline",originalFixedBaseline);}
+
+    @Test void smallCanonicalCorpusAppendsBodyWithItsOwnAliasAndExactPointerAndCountsTheWholeWire() throws Exception {
+        String p=project();SourceDocument d=source(p,"SCC","observed clauses.txt","tender","AUTHORED complete operative provision");
+        VectorStore.SearchHit title=smallCorpusTitle(d),body=smallCorpusBody(d);selectedHits=Collections.singletonList(title);contextHits=Collections.singletonList(body);
+        String titleBefore=JsonUtils.write(title),bodyBefore=JsonUtils.write(body);ResponsesHttp http=responses(262144);
+        http.generations.add("{\"grounded\":true,\"answer\":\"AUTHORED cited body\",\"citations\":[\"[2]\"]}");
+        JsonNode answer=data(responsesAsk(p));assertTrue(answer.path("grounded").asBoolean());assertEquals(2,answer.path("sources").size());
+        JsonNode first=answer.path("sources").get(0),second=answer.path("sources").get(1);assertEquals("[1]",first.path("evidenceId").asText());assertEquals(title.text(),first.path("content").asText());assertEquals(title.getScore(),first.path("score").asDouble());
+        assertEquals("[2]",second.path("evidenceId").asText());assertEquals(body.text(),second.path("content").asText());assertEquals(0d,second.path("score").asDouble());assertEquals("unranked_context",second.path("scoreMeaning").asText());
+        assertTrue(second.hasNonNull("canonicalEvidence"));assertEquals(2,second.path("canonicalEvidence").size());JsonNode pointer=second.path("canonicalEvidence").get(0);
+        assertEquals(d.getId().longValue(),pointer.path("documentId").asLong());assertEquals(body.getId(),pointer.path("canonicalChunkId").asText());assertEquals(SHA,pointer.path("originalSourceSha256").asText());assertEquals(body.text(),pointer.path("parts").get(0).path("text").asText());
+        assertEquals("unknown",second.path("canonicalSourceUnit").path("qualifiersComplete").asText());assertFalse(second.path("canonicalSourceUnit").path("semanticScopeVerified").asBoolean(true));assertEquals("complete_observed_unit",second.path("canonicalSourceUnit").path("status").asText());
+        assertEquals("tender",second.path("sourceRole").asText());assertTrue(pointer.path("unknowns").isArray());assertEquals(2,pointer.path("unknowns").size());
+        assertEquals(2,http.bodies.size());JsonNode counted=JsonUtils.parse(http.bodies.get(0)),sent=JsonUtils.parse(http.bodies.get(1));for(String field:Arrays.asList("model","instructions","input","reasoning"))assertEquals(counted.get(field),sent.get(field));
+        String sentText=sent.path("input").get(0).path("content").asText(),marker="\nSelected canonical model material (untrusted observations):\n";assertTrue(sentText.contains(marker));JsonNode material=VettingSourceMetadataWire.decode(sentText.substring(sentText.indexOf(marker)+marker.length()).split("\n",2)[0]);
+        JsonNode membership=material.path("hitMembership").get(1);assertEquals("[2]",membership.path("publicCitationAlias").asText());assertEquals(body.getId(),membership.path("rankedSeedId").asText());assertTrue(membership.path("memberMaterialRefs").isArray());assertEquals(2,membership.path("memberMaterialRefs").size());
+        for(JsonNode ref:membership.path("memberMaterialRefs")){List<JsonNode> matching=new ArrayList<>();for(JsonNode unit:material.path("materialDictionary"))if(ref.asText().equals(unit.path("modelUnitAddress").asText()))matching.add(unit);assertEquals(1,matching.size());assertTrue(matching.get(0).path("parts").isArray());assertEquals(1,matching.get(0).path("parts").size());assertEquals(body.text(),matching.get(0).path("parts").get(0).path("text").asText());}
+        assertEquals(titleBefore,JsonUtils.write(title));assertEquals(bodyBefore,JsonUtils.write(body));
+        verify(canonical).sourceHits(eq(loaded),eq(Collections.singletonList(body.getId())));verifyNoInteractions(vectors,legacyChunks);verify(local,never()).embed(anyList());
+        assertEquals(answer.path("sources"),data(get("/api/advice/{p}/messages",p)).get(1).path("sources"));
+    }
+
+    @Test void smallCanonicalBodyIsAppendedAfterExistingFixedAliasWithoutChangingEitherRankedHit() throws Exception {
+        String p=project();SourceDocument d=source(p,"SCC","observed clauses.txt","tender","AUTHORED body after fixed");VectorStore.SearchHit title=smallCorpusTitle(d),body=smallCorpusBody(d);
+        selectedHits=Collections.singletonList(title);contextHits=Collections.singletonList(body);VectorStore.SearchHit fixed=fixedFixture();String before=JsonUtils.write(fixed);
+        JsonNode answer=data(ask(p,"contract"));assertEquals(3,answer.path("sources").size());assertEquals("[1]",answer.path("sources").get(0).path("evidenceId").asText());
+        assertEquals("[2]",answer.path("sources").get(1).path("evidenceId").asText());assertEquals(fixed.text(),answer.path("sources").get(1).path("content").asText());assertEquals(fixed.getScore(),answer.path("sources").get(1).path("score").asDouble());
+        assertEquals("[3]",answer.path("sources").get(2).path("evidenceId").asText());assertEquals(body.text(),answer.path("sources").get(2).path("content").asText());assertEquals(before,JsonUtils.write(fixed));
+    }
+
+    @Test void fixedHitsCannotActivateSmallCorpusCompletionWhenCanonicalRetrievalReturnedNothing() throws Exception {
+        String p=project();SourceDocument d=source(p,"SCC","observed clauses.txt","tender","AUTHORED unranked only");contextHits=Collections.singletonList(smallCorpusBody(d));VectorStore.SearchHit fixed=fixedFixture();
+        JsonNode answer=data(ask(p,"contract"));assertEquals(1,answer.path("sources").size());assertEquals(fixed.text(),answer.path("sources").get(0).path("content").asText());verify(canonical,never()).sourceHits(any(),anyList());
+    }
+
+    @Test void smallCorpusCeilingCountsAllPermittedBodyRatherThanOnlyTheRankedTitle() throws Exception {
+        String p=project();SourceDocument d=source(p,"SCC","observed clauses.txt","tender","AUTHORED complete body exceeds the title-only ceiling");VectorStore.SearchHit title=smallCorpusTitle(d);selectedHits=Collections.singletonList(title);contextHits=Collections.singletonList(smallCorpusBody(d));
+        deployment.getVector().setStuffingLimit(title.text().length());JsonNode answer=data(ask(p,"contract"));assertEquals(1,answer.path("sources").size());assertEquals(title.text(),answer.path("sources").get(0).path("content").asText());verify(canonical,never()).sourceHits(any(),anyList());
+    }
+
+    @Test void smallCorpusCompletionUsesOnlyTheCurrentPermittedScope() throws Exception {
+        String p=project();SourceDocument d=source(p,"SCC","contract clauses.txt","tender","AUTHORED permitted body");VectorStore.SearchHit title=smallCorpusTitle(d),body=smallCorpusBody(d);selectedHits=Collections.singletonList(title);contextHits=Collections.singletonList(body);
+        SourceDocument excluded=source(p,"SCC","unfilled template.txt","tender","EXCLUDED TEMPLATE","STANDARD_TEMPLATE"),bq=source(p,"BQ","pricing.txt","tender","EXCLUDED PRICING"),offScope=source(p,"NTT","tender notice.txt","tender","EXCLUDED TENDER SCOPE");
+        JsonNode answer=data(ask(p,"contract"));assertEquals(Collections.singletonList(d.getId()),loaded.documentIds);assertEquals(2,answer.path("sources").size());
+        verify(canonical).sourceHits(eq(loaded),eq(Collections.singletonList(body.getId())));for(SourceDocument notAllowed:Arrays.asList(excluded,bq,offScope))assertFalse(answer.path("sources").toString().contains("chunk-"+notAllowed.getId()));
+    }
+
+    @Test void explicitFixedReferenceOnlyNeverLoadsOrCompletesProjectCorpus() throws Exception {
+        String p=project();source(p,"SCC","project clauses.txt","tender","AUTHORED project text");fixedFixture();
+        JsonNode answer=data(post("/api/advice/{p}/ask",p).contentType(MediaType.APPLICATION_JSON).content("{\"question\":\"Explain this reference only?\",\"scope\":\"contract\",\"basisScope\":\"reference_only\"}"));
+        assertEquals(1,answer.path("sources").size());verify(canonical,never()).load(anyString(),anyString(),anyList());verify(canonical,never()).sourceHits(any(),anyList());
+    }
+
+    @Test void completeSmallCorpusRemainsSubjectToTheFullWireBudgetAndSourceChangeGuard() throws Exception {
+        String p=project();SourceDocument d=source(p,"SCC","observed clauses.txt","tender","AUTHORED budgeted body");selectedHits=Collections.singletonList(smallCorpusTitle(d));contextHits=Collections.singletonList(smallCorpusBody(d));ResponsesHttp http=responses(262144);http.counterTokens=1000000;
+        mvc.perform(responsesAsk(p)).andExpect(jsonPath("$.code").value(4205));assertEquals(1,http.bodies.size());assertTrue(JsonUtils.parse(http.bodies.get(0)).path("input").toString().contains(d.getTextContent()));assertEquals(0,data(get("/api/advice/{p}/messages",p)).size());
+        http.bodies.clear();http.counterTokens=1000;http.afterCounter=()->jdbc.update("update source_document set text_content=? where id=?","AUTHORED CHANGED SOURCE",d.getId());
+        mvc.perform(responsesAsk(p)).andExpect(jsonPath("$.code").value(4204));assertEquals(1,http.bodies.size());assertEquals(0,data(get("/api/advice/{p}/messages",p)).size());verifyNoInteractions(miniMaxChat,vectors,legacyChunks);
+    }
+
+    @Test void smallCorpusRepairWithUnknownCompleteWireCountCannotGenerateAgain() throws Exception {assertSmallCorpusRepairBudgetRejects(0);}
+    @Test void smallCorpusRepairOverTheCompleteWireBudgetCannotGenerateAgain() throws Exception {assertSmallCorpusRepairBudgetRejects(1000000);}
+    private void assertSmallCorpusRepairBudgetRejects(int repairCount) throws Exception {
+        String p=project();SourceDocument d=source(p,"SCC","observed clauses.txt","tender","AUTHORED complete repair body");selectedHits=Collections.singletonList(smallCorpusTitle(d));contextHits=Collections.singletonList(smallCorpusBody(d));ResponsesHttp http=responses(262144);
+        http.counterResults.add(1000);http.counterResults.add(repairCount);http.generations.add("not JSON");mvc.perform(responsesAsk(p)).andExpect(jsonPath("$.code").value(4205));assertEquals(3,http.bodies.size());
+        JsonNode first=JsonUtils.parse(http.bodies.get(1)),repair=JsonUtils.parse(http.bodies.get(2));String firstText=first.path("input").get(0).path("content").asText(),repairText=repair.path("input").get(0).path("content").asText();assertTrue(firstText.contains(d.getTextContent()));assertTrue(repairText.startsWith(firstText));assertTrue(repairText.contains("not JSON"));assertEquals(0,data(get("/api/advice/{p}/messages",p)).size());
+    }
+
+    private VectorStore.SearchHit smallCorpusTitle(SourceDocument d){
+        VectorStore.SearchHit hit=boundSmallHit(d,"title-"+d.getId(),"AUTHORED heading",.91,"ranked");VettingCorpus.Chunk title=new VettingCorpus.Chunk();title.setId(hit.getId());title.setDocumentId(String.valueOf(d.getId()));title.setFileName(d.getFileName());title.setRole("tender");title.setContent(hit.text());additionalChunks.put(title.getId(),title);return hit;
+    }
+    private VectorStore.SearchHit smallCorpusBody(SourceDocument d){return boundSmallHit(d,"chunk-"+d.getId(),d.getTextContent(),0d,"context");}
+    private VectorStore.SearchHit boundSmallHit(SourceDocument d,String id,String text,double score,String selection){
+        VectorStore.SearchHit base=hit(d,"tender",text,"complete_observed_unit",null,selection);Map<String,Object> payload=new LinkedHashMap<>(base.getPayload());ObjectNode unit=((ObjectNode)payload.get("canonicalSourceUnit")).deepCopy();unit.put("unitId","unit-"+id);unit.putArray("requiredMemberIds").add(id);payload.put("canonicalSourceUnit",unit);
+        @SuppressWarnings("unchecked") List<EvidencePointer> pointers=(List<EvidencePointer>)payload.get("canonicalEvidence");for(EvidencePointer pointer:pointers){pointer.setCanonicalChunkId(id);pointer.setUnitId(id+"-"+pointer.getPhysicalPages().get(0));com.fasterxml.jackson.databind.node.ArrayNode parts=JsonUtils.mapper().createArrayNode();parts.addObject().put("text",text).put("anchor","AUTHORED "+id).put("blockId",id);pointer.setParts(parts);}
+        return new VectorStore.SearchHit(id,score,payload);
+    }
+    private VectorStore.SearchHit fixedFixture() throws Exception {
+        com.consense.service.vetting.FixedBaselineRetrievalClient fixed=mock(com.consense.service.vetting.FixedBaselineRetrievalClient.class);ReflectionTestUtils.setField(advice,"fixedBaseline",fixed);
+        ObjectNode payload=JsonUtils.mapper().createObjectNode();payload.put("fixedDevelopmentBaseline",true);payload.put("sourceRole","standard");payload.put("content","AUTHORED FIXED RULE");payload.put("fileLabel","ZZZ_REFERENCE FIXED");payload.put("sourceHash",SHA);payload.put("originalSourceSha256",SHA);payload.put("fixedBaselineManifestSha256",SHA);payload.put("fixedBaselineVersion","AUTHORED");
+        Constructor<com.consense.service.vetting.FixedReferenceEvidence> c=com.consense.service.vetting.FixedReferenceEvidence.class.getDeclaredConstructor(String.class,double.class,JsonNode.class,JsonNode.class,JsonNode.class);c.setAccessible(true);com.consense.service.vetting.FixedReferenceEvidence evidence=c.newInstance("authored-fixed",.81,payload,null,null);VectorStore.SearchHit hit=evidence.asHit();
+        when(fixed.enabled()).thenReturn(true);when(fixed.search(eq("advisory"),anyString(),anyInt())).thenReturn(Collections.singletonList(hit));when(fixed.frozenManifest()).thenReturn(JsonUtils.mapper().createObjectNode().put("authored",SHA));when(fixed.evidence(any())).thenReturn(evidence);when(fixed.toModelMaterial(anyList(),anyInt())).thenReturn("AUTHORED FIXED RULE");return hit;
     }
 
     @Test void scopeIsLoadedBeforeIndexingAndLegacyAdaptersAreNeverUsed() throws Exception {
@@ -229,11 +318,18 @@ class AdviceCanonicalIntegrationTest {
     }
 
     @Test void anOversizedContextUnitIsOmittedAsAWholeAndCannotPassTheAdoptionGate() throws Exception {
-        String p=project();SourceDocument library=source(p,"SL","Specification Library SL2022.txt","standard","LIBRARY"),composition=source(p,"SP","24 - The Specification.txt","tender","Specification Library adoption");
+        String p=project();SourceDocument library=source(p,"SL","Specification Library SL2022.txt","standard","LIBRARY");
         selectedHits=Collections.singletonList(hit(library,"standard","LIBRARY","complete_observed_unit",null,"ranked"));
-        StringBuilder text=new StringBuilder("Specification Library ");while(text.length()<13000)text.append("COMPLETE UNIT TEST ");
+        StringBuilder text=new StringBuilder("Specification Library ");while(text.length()<31000)text.append("COMPLETE UNIT TEST ");
+        SourceDocument composition=source(p,"SP","24 - The Specification.txt","tender",text.toString());
         contextHits=Collections.singletonList(hit(composition,"tender",text.toString(),"complete_observed_unit",null,"context"));
         JsonNode response=data(ask(p,"fullset"));assertFalse(response.path("grounded").asBoolean());assertEquals(1,response.path("sources").size());assertFalse(String.join("\n",prompts).contains("COMPLETE UNIT TEST"));
+    }
+
+    @Test void completeSmallCorpusContextDoesNotUpgradeTheExistingIncompleteAdoptionFlag() throws Exception {
+        String p=project();SourceDocument library=source(p,"SL","Specification Library SL2022.txt","standard","LIBRARY");String text="Specification Library "+"AUTHORED complete context ".repeat(520);SourceDocument composition=source(p,"SP","24 - The Specification.txt","tender",text);
+        selectedHits=Collections.singletonList(hit(library,"standard","LIBRARY","complete_observed_unit",null,"ranked"));contextHits=Collections.singletonList(smallCorpusBody(composition));
+        JsonNode response=data(ask(p,"fullset"));assertFalse(response.path("grounded").asBoolean());assertEquals(2,response.path("sources").size());assertFalse(response.path("sources").get(0).path("applicabilityContextComplete").asBoolean(true));assertEquals(text,response.path("sources").get(1).path("content").asText());assertEquals("unranked_context",response.path("sources").get(1).path("scoreMeaning").asText());
     }
 
     @Test void sourceAddedDuringChatRejectsTheOldAnswerAndDoesNotSaveEitherMessage() throws Exception {
@@ -283,13 +379,15 @@ class AdviceCanonicalIntegrationTest {
     private final class ResponsesHttp implements AdviceResponsesTransport.WireHttp {
         final List<String> endpoints=new ArrayList<>(),bodies=new ArrayList<>();
         final Deque<String> generations=new ArrayDeque<>();
+        int counterTokens=1000;
+        final Deque<Integer> counterResults=new ArrayDeque<>();
         Runnable afterCounter,afterGeneration;
         public AdviceResponsesTransport.Response post(String endpoint,String body,long timeout,int cap,String auth){
             assertFalse(TransactionSynchronizationManager.isActualTransactionActive());
             assertEquals("Bearer AUTHORED-responses-no-real-key",auth);endpoints.add(endpoint);bodies.add(body);
             if(endpoint.equals("https://api.minimax.cn/v1/responses/input_tokens")){
                 if(afterCounter!=null)afterCounter.run();
-                return new AdviceResponsesTransport.Response(200,"{\"object\":\"response.input_tokens\",\"input_tokens\":1000}");
+                return new AdviceResponsesTransport.Response(200,"{\"object\":\"response.input_tokens\",\"input_tokens\":"+(counterResults.isEmpty()?counterTokens:counterResults.removeFirst())+"}");
             }
             assertEquals("https://api.minimax.cn/v1/responses",endpoint);
             if(afterGeneration!=null)afterGeneration.run();
@@ -347,6 +445,7 @@ class AdviceCanonicalIntegrationTest {
         List<CanonicalSourceBinding> bindings=new ArrayList<>();Map<String,VettingCorpus.Chunk> views=new LinkedHashMap<>();
         for(SourceDocument d:selected){CanonicalSourceBinding b=new CanonicalSourceBinding();b.setProjectId(p);b.setDocumentId(d.getId());b.setProjectionSha256(VettingCorpus.hash("TEST projection "+d.getId()));b.setSnapshotJson("{}");bindings.add(b);
             VettingCorpus.Chunk c=new VettingCorpus.Chunk();c.setId("chunk-"+d.getId());c.setDocumentId(String.valueOf(d.getId()));c.setFileName(d.getFileName());c.setRole(d.getReviewRole());c.setContent(d.getTextContent());views.put(c.getId(),c);}
+        for(VettingCorpus.Chunk extra:additionalChunks.values())if(ids(selected).stream().map(String::valueOf).anyMatch(extra.getDocumentId()::equals))views.put(extra.getId(),extra);
         Constructor<OerBusinessEvidence.Session> constructor=OerBusinessEvidence.Session.class.getDeclaredConstructor(String.class,String.class,List.class,List.class,Map.class,Map.class);constructor.setAccessible(true);return constructor.newInstance(p,"advisory",ids(selected),bindings,views,Collections.emptyMap());
     }
     private OerCanonicalRetrievalClient.IndexState indexState(boolean ready,String signature,int count,String reason) throws Exception {Constructor<OerCanonicalRetrievalClient.IndexState> c=OerCanonicalRetrievalClient.IndexState.class.getDeclaredConstructor(boolean.class,String.class,int.class,String.class);c.setAccessible(true);return c.newInstance(ready,signature,count,reason);}

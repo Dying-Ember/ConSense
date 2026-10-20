@@ -7,6 +7,8 @@ import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.rendering.PDFRenderer;
 import org.apache.pdfbox.text.PDFTextStripper;
 import org.apache.poi.xwpf.usermodel.XWPFDocument;
+import org.apache.poi.xwpf.usermodel.XWPFParagraph;
+import org.apache.poi.xwpf.usermodel.XWPFTable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledOnOs;
 import org.junit.jupiter.api.condition.OS;
@@ -46,7 +48,7 @@ class VettingReportWriterTest {
             byte[] pdfBytes = writer.pdf(project(), findings, job, lang);
             String word, pdf;
             try (XWPFDocument document = new XWPFDocument(new ByteArrayInputStream(wordBytes))) {
-                word = document.getParagraphs().stream().map(p -> p.getText()).collect(Collectors.joining("\n"));
+                word = documentText(document);
             }
             try (PDDocument document = PDDocument.load(pdfBytes)) { pdf = new PDFTextStripper().getText(document); }
             Files.write(directory.resolve(lang + ".docx"), wordBytes);
@@ -60,34 +62,23 @@ class VettingReportWriterTest {
                 assertTrue(compact.contains("2026-10-03T02:00:00Z"));
                 assertTrue(compact.contains("Sourceclausequotation")); assertTrue(compact.contains("Comparisonclausequotation"));
                 assertTrue(compact.contains("MissingBQvolumes"));
+                assertTrue(compact.contains("Reviewstatus:Handled"));assertTrue(compact.contains("Reviewstatus:Assigned"));
+                assertTrue(compact.contains("Reviewstatus:Awaitingproject-teamreview"));
+                assertTrue(compact.contains("Includeintenderaddendum:Notrequired"));
+                assertFalse(compact.contains("Includeintenderaddendum:Undecided"));
                 if ("en".equals(lang)) {
-                    assertTrue(compact.contains("Evidencelocation:Evidencelocated"));
-                    assertTrue(compact.contains("Evidencelocation:Evidencepartlylocated"));
-                    assertTrue(compact.contains("Evidencelocation:Evidenceawaitinglocation"));
-                    assertTrue(compact.contains("itdoesnotconfirmafinding'smeaningorconclusion"));
-                    assertTrue(compact.contains("Reviewstatus:Handled")); assertTrue(compact.contains("Reviewstatus:Assigned"));
-                    assertTrue(compact.contains("Reviewstatus:Open")); assertTrue(compact.contains("Includeintenderaddendum:Notrequired"));
-                    assertTrue(compact.contains("Includeintenderaddendum:Undecided"));
+                    assertTrue(compact.contains("Evidencelocated"));assertTrue(compact.contains("Evidenceawaitinglocation"));
+                    assertTrue(compact.contains("locatedquotationsdonotconfirmformalclauseownershiporthelegalconclusion"));
                     assertTrue(compact.contains("unknownqualifiersrequirehumanreview"));
-                    assertFalse(text.contains("Verified")); assertFalse(text.contains("Partly verified"));
+                    assertFalse(text.contains("Verified"));assertFalse(text.contains("Partly verified"));
                 } else if ("zh-Hans".equals(lang)) {
-                    assertTrue(compact.contains("证据定位:证据已定位")); assertTrue(compact.contains("证据定位:部分证据已定位"));
-                    assertTrue(compact.contains("证据定位:证据待定位"));
-                    assertTrue(compact.contains("不代表发现的内容或结论已经确认"));
-                    assertTrue(compact.contains("人工状态:已处理")); assertTrue(compact.contains("人工状态:已分派"));
-                    assertTrue(compact.contains("人工状态:待处理")); assertTrue(compact.contains("是否需纳入招标补遗:不需要"));
-                    assertTrue(compact.contains("是否需纳入招标补遗:待决定"));
-                    assertTrue(compact.contains("未知限定须人工核对"));
-                    assertFalse(text.contains("已核验")); assertFalse(text.contains("部分核验"));
+                    assertTrue(compact.contains("证据已定位"));assertTrue(compact.contains("证据待定位"));
+                    assertTrue(compact.contains("不确认正式条款归属或法律结论"));assertTrue(compact.contains("未知限定须人工核对"));
+                    assertFalse(text.contains("已核验"));assertFalse(text.contains("部分核验"));
                 } else {
-                    assertTrue(compact.contains("證據定位:證據已定位")); assertTrue(compact.contains("證據定位:部分證據已定位"));
-                    assertTrue(compact.contains("證據定位:證據待定位"));
-                    assertTrue(compact.contains("不代表發現的內容或結論已經確認"));
-                    assertTrue(compact.contains("人工狀態:已處理")); assertTrue(compact.contains("人工狀態:已分派"));
-                    assertTrue(compact.contains("人工狀態:待處理")); assertTrue(compact.contains("是否需納入招標補遺:不需要"));
-                    assertTrue(compact.contains("是否需納入招標補遺:待決定"));
-                    assertTrue(compact.contains("未知限定須人工核對"));
-                    assertFalse(text.contains("已核驗")); assertFalse(text.contains("部分核驗"));
+                    assertTrue(compact.contains("證據已定位"));assertTrue(compact.contains("證據待定位"));
+                    assertTrue(compact.contains("不確認正式條款歸屬或法律結論"));assertTrue(compact.contains("未知限定須人工核對"));
+                    assertFalse(text.contains("已核驗"));assertFalse(text.contains("部分核驗"));
                 }
             }
         }
@@ -111,14 +102,19 @@ class VettingReportWriterTest {
                 PDFTextStripper stripper = new PDFTextStripper();
                 String all = stripper.getText(document);
                 assertTrue(all.contains("END_SOURCE_QUOTATION")); assertTrue(all.contains("END_REFERENCE_QUOTATION"));
+                int sourceLabels=0,referenceLabels=0;
                 for (int page = 1; page <= document.getNumberOfPages(); page++) {
                     stripper.setStartPage(page); stripper.setEndPage(page);
-                    String text = stripper.getText(document);
-                    if (text.contains("Evidence [layout-source]")) assertTrue(text.contains("BEGIN_SOURCE_QUOTATION"),
-                            "Source label orphaned at padding " + padding + ", page " + page);
-                    if (text.contains("Evidence [layout-reference]")) assertTrue(text.contains("BEGIN_REFERENCE_QUOTATION"),
-                            "Reference label orphaned at padding " + padding + ", page " + page);
+                    String text = stripper.getText(document).replaceAll("\\s+", "");
+                    if (text.contains("NTT.docx—Recorded sourcelocation:ClauseNTT10;Evidencelocated".replace(" ",""))) {
+                        sourceLabels++;assertTrue(text.contains("BEGIN_SOURCE_QUOTATION"),"Source label orphaned at padding " + padding + ", page " + page);
+                    }
+                    if (text.contains("baseline.docx—Recordedsourcelocation:ClauseSCC5;recordedpage:P3;Evidencelocated")) {
+                        referenceLabels++;assertTrue(text.contains("BEGIN_REFERENCE_QUOTATION"),"Reference label orphaned at padding " + padding + ", page " + page);
+                    }
                 }
+                assertEquals(1,sourceLabels,"Source-label orphan assertion must be exercised");
+                assertEquals(1,referenceLabels,"Reference-label orphan assertion must be exercised");
             }
         }
     }
@@ -134,18 +130,19 @@ class VettingReportWriterTest {
         java.util.List<FindingVO> findings = Arrays.asList(required, notRequired, undecided);
         String word;
         try (XWPFDocument document = new XWPFDocument(new ByteArrayInputStream(writer.docx(project(), findings, job(), "en")))) {
-            word = document.getParagraphs().stream().map(p -> p.getText()).collect(Collectors.joining("\n"));
+            word = documentText(document);
         }
         String pdf;
         try (PDDocument document = PDDocument.load(writer.pdf(project(), findings, job(), "en"))) { pdf = new PDFTextStripper().getText(document); }
-        for (String text : Arrays.asList(word, pdf)) {
-            assertTrue(text.contains("Remarks by project team")); assertTrue(text.contains("Action taken"));
-            assertTrue(text.contains("Accepted after project team review.")); assertTrue(text.contains("Preserve the cited exception."));
-            assertTrue(text.contains("Revised the reference in Addendum 2.")); assertTrue(text.contains("different objects."));
-            assertTrue(text.contains("Include in tender addendum: Required"));
-            assertTrue(text.contains("Include in tender addendum: Not required"));
-            assertTrue(text.contains("Include in tender addendum: Undecided"), "Handled alone does not decide addendum inclusion");
-            assertTrue(text.contains("2026-10-02T03:00:00Z")); assertTrue(text.contains("Source clause quotation"));
+        for (String rendered : Arrays.asList(word, pdf)) {
+            String text=rendered.replaceAll("\\s+", "");
+            assertTrue(text.contains("Remarks by Project Team".replaceAll("\\s+", ""))); assertTrue(text.contains("Action taken".replaceAll("\\s+", "")));
+            assertTrue(text.contains("Accepted after project team review.".replaceAll("\\s+", ""))); assertTrue(text.contains("Preserve the cited exception.".replaceAll("\\s+", "")));
+            assertTrue(text.contains("Revised the reference in Addendum 2.".replaceAll("\\s+", ""))); assertTrue(text.contains("different objects.".replaceAll("\\s+", "")));
+            assertTrue(text.contains("Include in tender addendum: Required".replaceAll("\\s+", "")));
+            assertTrue(text.contains("Include in tender addendum: Not required".replaceAll("\\s+", "")));
+            assertFalse(text.contains("Include in tender addendum: Undecided".replaceAll("\\s+", "")), "Absent human decisions stay absent; status alone cannot decide addendum inclusion");
+            assertTrue(text.contains("2026-10-02T03:00:00Z".replaceAll("\\s+", ""))); assertTrue(text.contains("Source clause quotation".replaceAll("\\s+", "")));
         }
     }
 
@@ -153,8 +150,8 @@ class VettingReportWriterTest {
     void wordRetainsBothSidesAnchorsReviewStatusAndCoverageWarnings() throws Exception {
         byte[] bytes = writer.docx(project(), Collections.singletonList(finding("F1", "Handled")), job(), "en");
         try (XWPFDocument document = new XWPFDocument(new ByteArrayInputStream(bytes))) {
-            String text = document.getParagraphs().stream().map(p -> p.getText()).collect(Collectors.joining("\n"));
-            assertTrue(text.contains("Contract number: 20250101"));
+            String text = documentText(document);
+            assertTrue(text.replaceAll("\\s+", "").contains("ContractNo.:20250101"));
             assertTrue(text.contains("Review status: Handled"));
             assertTrue(text.contains("Clause NTT10"));
             assertTrue(text.contains("Source clause quotation"));
@@ -176,7 +173,7 @@ class VettingReportWriterTest {
             String extracted = new PDFTextStripper().getText(document);
             assertTrue(extracted.contains("END_OF_LONG_EVIDENCE"));
             assertTrue(extracted.contains("Comparison clause quotation"));
-            assertTrue(extracted.contains("Review status: Assigned"));
+            assertTrue(extracted.replaceAll("\\s+", "").contains("Reviewstatus:Assigned"));
             assertTrue(extracted.contains("Page " + document.getNumberOfPages()));
         }
     }
@@ -187,7 +184,7 @@ class VettingReportWriterTest {
             String text = new PDFTextStripper().getText(document);
             assertTrue(text.contains("No findings were recorded"));
             assertTrue(text.contains("Missing BQ volumes"));
-            assertTrue(text.contains("Model: fixture-model"));
+            assertFalse(text.contains("Model: fixture-model"));assertTrue(text.contains("Review limitations and unreviewed scope"));
         }
     }
 
@@ -206,7 +203,7 @@ class VettingReportWriterTest {
                 new DocumentCoverageVO("standard-id", "SCC", "standard-scc.docx", "PARSED", 100, 100, 1, 1, Collections.emptyList()),
                 new DocumentCoverageVO("tender-id", "SCC", "tender-scc.docx", "PARSED", 100, 100, 1, 1, Collections.emptyList())), Collections.emptyList()));
         try (XWPFDocument document = new XWPFDocument(new ByteArrayInputStream(writer.docx(project(), Arrays.asList(tender, standard), job, "en")))) {
-            String text = document.getParagraphs().stream().map(p -> p.getText()).collect(Collectors.joining("\n"));
+            String text = documentText(document);
             assertEquals(Arrays.asList("Document SCC  tender-scc.docx", "Document SCC  standard-scc.docx"),
                     document.getParagraphs().stream().map(p -> p.getText()).filter(t -> t.startsWith("Document ") && !t.equals("Document coverage")).collect(Collectors.toList()));
             int tenderHeader = text.indexOf("Document SCC  tender-scc.docx");
@@ -260,7 +257,7 @@ class VettingReportWriterTest {
         VettingJobVO job = job(); job.getCoverage().setWarnings(Collections.singletonList(warning));
         for (String lang : Arrays.asList("en", "zh-Hant", "zh-Hans")) {
             try (XWPFDocument document = new XWPFDocument(new ByteArrayInputStream(writer.docx(project(), Collections.emptyList(), job, lang)))) {
-                String text = document.getParagraphs().stream().map(p -> p.getText()).collect(Collectors.joining("\n"));
+                String text = documentText(document);
                 if ("en".equals(lang)) {
                     assertTrue(text.contains("Topic 7 local comparison window: 12 groups omitted by the budget"));
                     assertTrue(text.contains("not fully included for 3 chunks"));
@@ -306,7 +303,7 @@ class VettingReportWriterTest {
         finding.setBody(LocalizedText.same("资料类型：招标合同条款"));
         for (String lang : Arrays.asList("en", "zh-Hant", "zh-Hans")) {
             try (XWPFDocument document = new XWPFDocument(new ByteArrayInputStream(writer.docx(project(), Collections.singletonList(finding), job, lang)))) {
-                String text = document.getParagraphs().stream().map(p -> p.getText()).collect(Collectors.joining("\n"));
+                String text = documentText(document);
                 assertTrue(text.contains(originalQuote));
                 assertTrue(text.contains("资料类型：招标合同条款")); // Raw body never goes through warning localization.
                 assertTrue(text.contains(fileName));
@@ -319,8 +316,9 @@ class VettingReportWriterTest {
                     assertTrue(text.contains("Topic 12 did not complete semantic review: opaque$reason(3).txt"));
                     assertTrue(text.contains("A model finding for topic 9 failed exact source-quotation validation and was excluded."));
                     assertTrue(text.contains("A model record for topic 13 failed evidence or applicability validation and was not accepted."));
-                    assertTrue(text.contains("Semantic review retrieves by 16 topics"));
-                    assertTrue(text.contains("plans 3 project-reference comparisons"));
+                    assertTrue(text.contains("Submitted excerpts are local source windows; completeness of other qualifiers is unknown."));
+                    assertTrue(text.contains("Project-reference comparisons were planned in this recorded review scope; completion is unconfirmed."));
+                    assertFalse(text.contains("Semantic review retrieves by 16 topics"));assertFalse(text.contains("plans 3 project-reference comparisons"));
                     assertTrue(text.contains("Project reference QRT99 could not be compared because the tender provision was not located"));
                     assertTrue(text.contains("Project reference QRT71 could not be compared because its tender source or scope is ambiguous"));
                     assertTrue(text.contains("Project-reference comparison not submitted: QRT72 (comparison limit)"));
@@ -342,7 +340,12 @@ class VettingReportWriterTest {
                     assertTrue(text.contains("限制為 4 條，另有 2 條未列入"));
                     assertTrue(text.contains("主題 15 局部比較窗口：預算略過 17 組、僅部分上下文提交 6 組"));
                     assertTrue(text.contains("未補齊的片段 9 個"));
-                } else for (String warning : warnings) assertTrue(text.contains(warning));
+                } else {
+                    for (String warning : warnings) if(!warning.startsWith("语义审查按 16 个主题检索"))assertTrue(text.contains(warning));
+                    assertTrue(text.contains("已提交内容为局部原文窗口；其他限定是否完整未知。未提交给模型的片段尚未完成语义审查。"));
+                    assertTrue(text.contains("本次记录的审查范围计划了项目资料引用比较；完成情况未确认。"));
+                    assertFalse(text.contains("语义审查按 16 个主题检索"));
+                }
             }
         }
         assertEquals(warnings, job.getCoverage().getWarnings());
@@ -367,12 +370,16 @@ class VettingReportWriterTest {
             String text = new PDFTextStripper().getText(document);
             assertTrue(text.contains("检查合约保证金条款引用"));
             assertTrue(text.contains("中文末尾标记"));
-            assertTrue(text.contains("人工状态: 已处理"));
+            assertTrue(text.replaceAll("\\s+", "").contains("Reviewstatus:Handled"));
             PDFRenderer renderer = new PDFRenderer(document);
             for (int page = 0; page < document.getNumberOfPages(); page++) {
                 ImageIO.write(renderer.renderImageWithDPI(page, 100), "png", directory.resolve("pdf-page-" + (page + 1) + ".png").toFile());
             }
         }
+    }
+
+    private String documentText(XWPFDocument document) {
+        return document.getBodyElements().stream().map(element -> element instanceof XWPFParagraph?((XWPFParagraph)element).getText():element instanceof XWPFTable?((XWPFTable)element).getText():"").collect(Collectors.joining("\n"));
     }
 
     private Project project() {

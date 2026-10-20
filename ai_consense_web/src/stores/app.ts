@@ -13,7 +13,7 @@ const LLM_PROFILE_STORAGE = 'consense-llm-profile'
 function storedLlmProfile(): LlmProfileId | null {
   try {
     const stored = localStorage.getItem(LLM_PROFILE_STORAGE)
-    return stored === 'local' || stored === 'minimax-cn' ? stored : null
+    return stored === 'local' || stored === 'minimax-cn' || stored === 'qwen' || stored === 'qwen-flash' ? stored : null
   } catch { return null }
 }
 
@@ -86,16 +86,16 @@ export const useAppStore = defineStore('app', () => {
     return created
   }
 
-  /** 重命名当前项目（名称三语同源，保持与后端 blankToFallback 行为一致） */
-  async function renameProject(projectId: string, nameZhHans: string) {
+  /** 编辑项目名称和合约编号，保留完整项目配置。 */
+  async function renameProject(projectId: string, nameZhHans: string, contractNo: string) {
     const current = projects.value.find((item) => item.id === projectId)
     if (!current) throw new Error('project not found')
-    await projectApi.save({
+    const saved = await projectApi.save({
       id: projectId,
       nameZhHans,
       nameZhHant: nameZhHans,
       nameEn: nameZhHans,
-      contractNo: current.contractNo,
+      contractNo: contractNo.trim() || null,
       packageRef: current.packageRef,
       outputReferenceFile: current.outputReferenceFile,
       pages: current.pages,
@@ -104,7 +104,10 @@ export const useAppStore = defineStore('app', () => {
       sccRange: current.sccRange,
       specification: current.specification
     })
-    await loadProjects()
+    if (saved.id !== projectId) throw new Error('Saved project response does not match the requested project')
+    projects.value = projects.value.map(item => item.id === projectId ? saved : item)
+    try { await loadProjects(); return true }
+    catch { return false }
   }
 
   /** 删除项目：至少保留一个项目（FR-P-03），删除后切到剩余第一个 */

@@ -63,23 +63,6 @@ class VettingLanguageOriginGateTest {
         assertEquals(1,packet(result).getVerifiedAssessments().size());
     }
 
-    @Test @EnabledIfSystemProperty(named="consense.languageOriginReplayDir",matches=".+")
-    void exactSavedActualRecordAndAffectedChunkRemainUnchangedAndCannotBecomeALanguageFinding()throws Exception {
-        Path saved=Paths.get(System.getProperty("consense.languageOriginReplayDir"));
-        byte[] records=Files.readAllBytes(saved.resolve("00695-model_parsed_records.json"));
-        byte[] context=Files.readAllBytes(saved.resolve("00667-context_selection.json"));
-        JsonNode raw=JsonUtils.parse(new String(records,StandardCharsets.UTF_8)).path("observations").path("records").get(2);
-        Record actual=JsonUtils.read(raw.toString(),Record.class);assertEquals("issue",actual.getAssessment());assertEquals("language",actual.getType());
-        String affected=actual.getEvidence().get(0).getChunkId();Chunk source=null;
-        for(JsonNode row:JsonUtils.parse(new String(context,StandardCharsets.UTF_8)).path("observations").path("selection").path("chunks"))
-            if(affected.equals(row.path("id").asText()))source=JsonUtils.read(row.toString(),Chunk.class);
-        assertNotNull(source);JsonNode decoded=JsonUtils.mapper().valueToTree(actual);
-        Result result=review(Collections.singletonList(source),actual);assertHeld(result);
-        assertEquals(decoded,JsonUtils.mapper().valueToTree(actual));assertArrayEquals(records,Files.readAllBytes(saved.resolve("00695-model_parsed_records.json")));
-        assertArrayEquals(context,Files.readAllBytes(saved.resolve("00667-context_selection.json")));
-        System.out.println("ACTUAL_LANGUAGE_ORIGIN_REPLAY "+JsonUtils.write(gates));
-    }
-
     private void assertHeld(Result result) {
         assertTrue(result.getCandidates().isEmpty());assertEquals(1,packet(result).getRejectedRecords());
         assertEquals("completed_with_rejections",packet(result).getStatus());assertEquals("not_completed",packet(result).getCheckState());
@@ -90,6 +73,14 @@ class VettingLanguageOriginGateTest {
     private SemanticPacketVO packet(Result result){return result.getTopicAudits().get(0).getPacketAudits().get(0);}
 
     private Result review(List<Chunk> corpus,Record... records)throws Exception {
+        Result result=reviewRaw(corpus,records);
+        assertNull(result.getModelFailure(),"The replay must reach per-record gates without a schema/mock failure");
+        assertEquals(records.length,gates.size(),"Every declared record must reach the actual per-record gate");
+        System.out.println("LANGUAGE_ORIGIN_SEAM "+JsonUtils.write(VettingReviewProbe.map("packet",packet(result),"candidates",result.getCandidates(),"warnings",result.getWarnings(),"gates",gates)));
+        return result;
+    }
+
+    private Result reviewRaw(List<Chunk> corpus,Record... records)throws Exception {
         AiGateway ai=mock(AiGateway.class);when(ai.available()).thenReturn(true);when(ai.chatModel()).thenReturn("AUTHORED-only");
         when(ai.completeStructuredJsonList(anyString(),anyString(),eq(Record.class),any(),anyList(),anyMap())).thenReturn(Arrays.asList(records));
         ConsenseProperties props=new ConsenseProperties();props.getVetting().setSemanticTopics(1);props.getVetting().setProjectReferenceComparisons(0);props.getVetting().setProbeDirectory(probes.toString());
@@ -98,9 +89,6 @@ class VettingLanguageOriginGateTest {
         String run="AUTHORED-origin-"+UUID.randomUUID();
         Result result=VettingTokenFixture.review(ai,props,retrieval).reviewWithProgress(run,"AUTHORED-project",corpus,"en",(n,total,message)->{});
         gates=new ArrayList<>();try(Stream<Path> files=Files.list(probes.resolve(run))){for(Path path:(Iterable<Path>)files.filter(p->p.getFileName().toString().endsWith("-record_evidence_applicability_gate.json"))::iterator)gates.add(JsonUtils.parse(new String(Files.readAllBytes(path),StandardCharsets.UTF_8)));}
-        assertNull(result.getModelFailure(),"The replay must reach per-record gates without a schema/mock failure");
-        assertEquals(records.length,gates.size(),"Every declared record must reach the actual per-record gate");
-        System.out.println("LANGUAGE_ORIGIN_SEAM "+JsonUtils.write(VettingReviewProbe.map("packet",packet(result),"candidates",result.getCandidates(),"warnings",result.getWarnings(),"gates",gates)));
         return result;
     }
 

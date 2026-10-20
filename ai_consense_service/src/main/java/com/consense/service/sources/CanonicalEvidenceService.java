@@ -47,10 +47,25 @@ public class CanonicalEvidenceService {
     private static final String INPUT_CONTRACT="canonical-source-chunks-upstream-scope-and-parser-projection-v1";
     private static final String ASSET_CONTRACT="source-and-projection-bound-content-addressed-assets-v1";
 
+    /** Normal observations have independent module registries; reviewed adoptions retain their shared authority. */
+    static List<CanonicalSourceBinding> latestForModule(List<CanonicalSourceBinding> revisions,String module){
+        for(CanonicalSourceBinding binding:revisions){
+            if(!Objects.equals(module,binding.getDeclaredModule())){
+                JsonNode snapshot=parse(binding.getSnapshotJson());
+                if(NormalObservedContract.isNormal(snapshot)){
+                    require(binding.getSnapshotJson()!=null&&Utf8.sha256(binding.getSnapshotJson()).equals(binding.getSnapshotBytesSha256()),HttpStatus.CONFLICT,"CANONICAL_STORED_BYTES_CHANGED");
+                    validateBindingPins(binding,snapshot);continue;
+                }
+            }
+            return Collections.singletonList(binding);
+        }
+        return Collections.emptyList();
+    }
+
     /** Explicit normal-parser preparation, independent of the reviewed registration authority. */
     public boolean prepareNormalObserved(String projectId,Long documentId,String module){
         validModule(module);
-        List<CanonicalSourceBinding> revisions=bindings.findByProjectIdAndDocumentIdOrderByIdDesc(projectId,documentId);
+        List<CanonicalSourceBinding> revisions=latestForModule(bindings.findByProjectIdAndDocumentIdOrderByIdDesc(projectId,documentId),module);
         if(!revisions.isEmpty()){boundary().snapshot(projectId,documentId,revisions.get(0).getProjectionSha256(),module);return false;}
         JsonNode graph=normalPreparation.prepare(projectId,documentId,module);
         SourceDocument source=sources.normalDocument(projectId,documentId,module);
@@ -79,14 +94,14 @@ public class CanonicalEvidenceService {
     @Transactional(propagation=Propagation.REQUIRES_NEW,isolation=Isolation.READ_COMMITTED)
     public void saveNormalBinding(CanonicalSourceBinding binding,String module){
         JsonNode snapshot=validatedSnapshot(binding.getSnapshotJson(),binding.getProjectionSha256());require(NormalObservedContract.isNormal(snapshot),HttpStatus.BAD_REQUEST,"NORMAL_OBSERVED_AUTHORITY_MISMATCH");validateBindingPins(binding,snapshot);sources.assertSourceCurrent(binding,module);
-        List<CanonicalSourceBinding> latest=bindings.findByProjectIdAndDocumentIdOrderByIdDesc(binding.getProjectId(),binding.getDocumentId());
+        List<CanonicalSourceBinding> latest=latestForModule(bindings.findByProjectIdAndDocumentIdOrderByIdDesc(binding.getProjectId(),binding.getDocumentId()),module);
         require(latest.isEmpty(),HttpStatus.CONFLICT,"CANONICAL_BINDING_CHANGED_DURING_PREPARATION");bindings.saveAndFlush(binding);
         sources.assertSourceCurrent(binding,module);
     }
     public boolean normalPreparable(String projectId,List<Long> ids,String module){
         NormalObservedContract.validateCapability(parse(backend.normalHealth(module)).path("oer"));
         boolean missing=false;
-        for(Long id:ids){List<CanonicalSourceBinding> existing=bindings.findByProjectIdAndDocumentIdOrderByIdDesc(projectId,id);
+        for(Long id:ids){List<CanonicalSourceBinding> existing=latestForModule(bindings.findByProjectIdAndDocumentIdOrderByIdDesc(projectId,id),module);
             if(!existing.isEmpty()){boundary().snapshot(projectId,id,existing.get(0).getProjectionSha256(),module);continue;}
             SourceDocument source=sources.normalDocument(projectId,id,module);NormalObservedPreparationService.requireEvidence(source);missing=true;
         }return missing;
@@ -193,7 +208,7 @@ public class CanonicalEvidenceService {
                 &&!selectedDocumentIds.contains(null)&&new HashSet<>(selectedDocumentIds).size()==selectedDocumentIds.size(),HttpStatus.BAD_REQUEST,"CANONICAL_SELECTED_DOCUMENTS_INVALID");
         List<CanonicalSourceBinding> result=new ArrayList<>();
         for(Long documentId:selectedDocumentIds){
-            List<CanonicalSourceBinding> revisions=bindings.findByProjectIdAndDocumentIdOrderByIdDesc(projectId,documentId);
+            List<CanonicalSourceBinding> revisions=latestForModule(bindings.findByProjectIdAndDocumentIdOrderByIdDesc(projectId,documentId),module);
             require(!revisions.isEmpty(),HttpStatus.CONFLICT,"CANONICAL_SELECTED_DOCUMENT_UNREGISTERED");
             result.add(readBinding(projectId,documentId,revisions.get(0).getProjectionSha256(),module));
         }
@@ -305,7 +320,7 @@ public class CanonicalEvidenceService {
         }else pointer.setPhysicalPages(new ArrayList<>(pages(chunk.path("physicalPages"))));
         pointer.setEligibleModules(chunk.path("eligibleModules").deepCopy());pointer.setParts(chunk.path("parts").deepCopy());pointer.setSourceSpans(chunk.path("sourceSpans").deepCopy());
         pointer.setTableGroup(chunk.has("tableGroup")?chunk.get("tableGroup").deepCopy():null);pointer.setAssetRefs(chunk.path("assetRefs").deepCopy());pointer.setRelations(chunk.path("relations").deepCopy());
-        pointer.setAdoption(chunk.path("adoption").deepCopy());pointer.setSourceQuality(chunk.path("sourceQuality").deepCopy());pointer.setUnknowns(unknowns.deepCopy());
+        pointer.setAdoption(chunk.has("adoption")?chunk.get("adoption").deepCopy():JsonUtils.mapper().nullNode());pointer.setSourceQuality(chunk.path("sourceQuality").deepCopy());pointer.setUnknowns(unknowns.deepCopy());
         return pointer;
     }
 
@@ -402,7 +417,7 @@ public class CanonicalEvidenceService {
         validModule(module);require(ids!=null&&!ids.isEmpty()&&!ids.contains(null)&&new HashSet<>(ids).size()==ids.size(),
                 HttpStatus.BAD_REQUEST,"CANONICAL_SELECTED_DOCUMENTS_INVALID");
         List<BindingView> input=new ArrayList<>();
-        for(Long id:ids){List<CanonicalSourceBinding> revisions=bindings.findByProjectIdAndDocumentIdOrderByIdDesc(projectId,id);
+        for(Long id:ids){List<CanonicalSourceBinding> revisions=latestForModule(bindings.findByProjectIdAndDocumentIdOrderByIdDesc(projectId,id),module);
             require(!revisions.isEmpty(),HttpStatus.CONFLICT,"CANONICAL_SELECTED_DOCUMENT_UNREGISTERED");
             input.add(readBindingView(projectId,id,revisions.get(0).getProjectionSha256(),module));}
         VerifiedBindingFrame frame=new VerifiedBindingFrame(this,boundaryProxy==null?this:boundaryProxy.getObject(),projectId,module,input);
@@ -415,7 +430,7 @@ public class CanonicalEvidenceService {
     public void assertFrameSourcesCurrent(VerifiedBindingFrame frame){
         frame.requireOwner(this,frame.project,frame.module);
         for(BindingView retained:frame.views.values()){assertCurrent(retained.binding,frame.module);
-            List<CanonicalSourceBinding> latest=bindings.findByProjectIdAndDocumentIdOrderByIdDesc(frame.project,retained.binding.getDocumentId());
+            List<CanonicalSourceBinding> latest=latestForModule(bindings.findByProjectIdAndDocumentIdOrderByIdDesc(frame.project,retained.binding.getDocumentId()),frame.module);
             require(!latest.isEmpty()&&JsonUtils.write(copyBinding(latest.get(0))).equals(JsonUtils.write(retained.binding)),
                     HttpStatus.CONFLICT,"CANONICAL_FRAME_BINDING_CHANGED");}
     }
@@ -424,7 +439,7 @@ public class CanonicalEvidenceService {
     public void revalidateFrame(VerifiedBindingFrame frame){
         frame.requireOwner(this,frame.project,frame.module);
         for(BindingView retained:frame.views.values()){
-            List<CanonicalSourceBinding> latest=bindings.findByProjectIdAndDocumentIdOrderByIdDesc(frame.project,retained.binding.getDocumentId());
+            List<CanonicalSourceBinding> latest=latestForModule(bindings.findByProjectIdAndDocumentIdOrderByIdDesc(frame.project,retained.binding.getDocumentId()),frame.module);
             require(!latest.isEmpty()&&JsonUtils.write(copyBinding(latest.get(0))).equals(JsonUtils.write(retained.binding)),
                     HttpStatus.CONFLICT,"CANONICAL_FRAME_BINDING_CHANGED");
             BindingView fresh=readBindingView(frame.project,retained.binding.getDocumentId(),latest.get(0).getProjectionSha256(),frame.module);

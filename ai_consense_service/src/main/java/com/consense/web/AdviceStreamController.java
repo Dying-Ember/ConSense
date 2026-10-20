@@ -42,6 +42,7 @@ public class AdviceStreamController {
                 || request.getQuestion() == null || request.getQuestion().trim().isEmpty())
             throw new BizException(4201, "A nonempty question, bound session and unique request ID are required.");
         LlmOperation operation = profiles.capture();
+        AdviceService.QwenOperation qwen=advice.captureQwenOperation(operation);
         Job job = new Job(projectId, request.getSessionId(), requestId);
         if (requests.putIfAbsent(requestId, job) != null) throw new BizException(4201, "This consultation request is already running.");
         String sessionKey = projectId + "\u0000" + request.getSessionId();
@@ -55,7 +56,7 @@ public class AdviceStreamController {
         try {
             job.phase("queued");
             Future<?> future = executor.submit(() -> {
-                try (LlmProfiles.Scope ignored = profiles.bind(operation)) {
+                try (LlmProfiles.Scope ignored = profiles.bind(operation);AdviceService.QwenScope ignoredQwen=advice.bindQwenOperation(qwen)) {
                     job.checkCancelled();
                     AskResponseVO result = advice.ask(projectId, request, job);
                     job.checkCancelled();

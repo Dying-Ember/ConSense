@@ -1,5 +1,6 @@
 package com.consense.document;
 
+import com.consense.document.NativeStoryPlan.*;
 import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -22,6 +23,18 @@ public final class DocxTemplateEditor {
     private static final int COUNT_LIMIT=5000;
 
     public TemplateIndex inspect(byte[] sourceDocx) { return load(sourceDocx).index; }
+    public PreparedTemplate prepare(byte[] sourceDocx) { return new PreparedTemplate(load(sourceDocx)); }
+    /** Request-local read-only validation; generation still reloads and edits the original package. */
+    public static final class PreparedTemplate {
+        private final PackageModel model;
+        private PreparedTemplate(PackageModel model){this.model=model;}
+        public TemplateIndex getIndex(){return model.index;}
+        public void validateTextEdits(SourceEditBatch batch) {
+            if(batch==null||!model.index.sourceSha256.equals(batch.expectedSourceSha256))throw error("SOURCE_HASH_MISMATCH","batch");
+            for(Edit edit:batch.edits)if(edit==null||!textEdit(edit))throw error("TEXT_REVIEW_OPERATIONS_REQUIRED","batch");
+            validateOperations(model,batch);
+        }
+    }
     public DocxEditResult apply(byte[] sourceDocx, SourceEditBatch batch) {
         return applyWithParagraphBookmarks(sourceDocx,batch,Collections.emptyMap());
     }
@@ -39,16 +52,57 @@ public final class DocxTemplateEditor {
         PackageModel model=load(sourceDocx);
         if(batch==null||!model.index.sourceSha256.equals(batch.expectedSourceSha256))throw error("SOURCE_HASH_MISMATCH","batch");
         CapturedLayout captured=captureLayout(model,layout);
+        CapturedStories stories=captureStories(model,layout==null?null:layout.stories);
         if(batch.edits.isEmpty()&&bookmarks.isEmpty()&&layout==null)return new DocxEditResult(sourceDocx,model.index);
-        Set<String> ids=new HashSet<>();
-        for(Edit edit:batch.edits) {
-            if(edit==null||edit.operationId==null||edit.operationId.trim().isEmpty()||!ids.add(edit.operationId))throw error("INVALID_OPERATION_ID","batch");
+        SourceEditBatch originalBatch=batch;batch=validateOperations(model,batch);
+        validateStoryBusinessScopes(model,stories,batch);
+        List<Edit> ordered=new ArrayList<>(batch.edits);
+        validateRemainingRows(model,batch);
+        retainRequiredCellParagraphs(model,batch);
+        validateFeatureScopes(model,batch);
+        List<FeatureImpact> impacts=featureImpacts(model,batch);
+        ordered.sort(Comparator.comparing((Edit e)->e.targetId).thenComparing((Edit e)->-e.start));
+        Set<Element> explicitlyCleared=Collections.newSetFromMap(new IdentityHashMap<>());
+        for(Edit edit:ordered) {
+            Element target=model.nodes.get(edit.targetId);
+            if(edit.type==EditType.INSERT_TEXT)insertText(target,edit);
+            else if(edit.type==EditType.REPLACE_SPAN)replace(model,target,edit);
+            else if(insertion(edit))insert(model,target,edit);
+            else if(edit.type==EditType.CLEAR_EDITORIAL_CELL) {
+                NodeList ps=target.getElementsByTagNameNS(W,"p");for(int i=0;i<ps.getLength();i++)clear((Element)ps.item(i));
+            }else if(edit.type==EditType.CLEAR_PARAGRAPH) {clear(target);explicitlyCleared.add(target);}
+            else if(edit.type==EditType.CLEAR_PARAGRAPH_AND_NUMBERING) {clear(target);clearNumbering(target);explicitlyCleared.add(target);}
+            else if(edit.type==EditType.KEEP_ROW_TOGETHER)keepRowTogether(target);
+            else if(edit.type==EditType.DELETE_PARAGRAPH) {
+                if(model.retainedCellParagraphs.contains(target))clear(target);
+                else target.getParentNode().removeChild(target);
+            }else target.getParentNode().removeChild(target);
         }
-        SourceEditBatch originalBatch=batch;batch=expand(batch);
+        List<NativeLayoutChange> layoutChanges=applyLayout(model,captured,explicitlyCleared);
+        applyStories(model,stories);
+        attachParagraphBookmarks(model,bookmarks,markAddedParagraphs);
+        Set<String> changedParts=new LinkedHashSet<>();
+        if(!bookmarks.isEmpty()||!layoutChanges.isEmpty())changedParts.add(MAIN);
+        changedParts.addAll(stories.dirtyParts);
+        for(Edit edit:ordered)changedParts.add(edit.targetId.substring(0,edit.targetId.indexOf('#')));
+        for(String part:changedParts)model.entries.put(part,xml(model.xmlParts.get(part)));
+        if(stories.plan!=null)validateStoryPackageLimits(model);
+        byte[] result=write(model.entries);
+        TemplateIndex updated=load(result).index;
+        return new DocxEditResult(result,updated,model.index.sourceSha256,impacts,ledger(model,originalBatch,updated.sourceSha256),model.index.entryHashes,layout==null?null:layout.profile,layoutChanges,storyLedger(model,stories));
+    }
+
+    private static SourceEditBatch validateOperations(PackageModel model,SourceEditBatch batch) {
+        Set<String> ids=new HashSet<>();
+        for(Edit edit:batch.edits)if(edit==null||edit.operationId==null||edit.operationId.trim().isEmpty()||!ids.add(edit.operationId))throw error("INVALID_OPERATION_ID","batch");
+        batch=expand(batch);
         for(Edit edit:batch.edits) {
             Element target=model.nodes.get(edit.targetId);
             if(target==null)throw error("TARGET_NOT_FOUND",edit.operationId);
-            if(!edit.targetId.startsWith(MAIN+"#"))throw error("STORY_EDIT_UNSUPPORTED",edit.operationId);
+            String part=edit.targetId.substring(0,edit.targetId.indexOf('#'));Element root=target.getOwnerDocument().getDocumentElement();
+            boolean nativeLabel=edit.labelOutsideFields&&!edit.tocFieldLabel&&edit.type==EditType.REPLACE_SPAN
+                    &&(part.matches("word/header[0-9]+\\.xml")&&is(root,"hdr")||part.matches("word/footer[0-9]+\\.xml")&&is(root,"ftr"));
+            if(!MAIN.equals(part)&&!nativeLabel)throw error("STORY_EDIT_UNSUPPORTED",edit.operationId);
             if(!hash(xml(target)).equals(edit.targetSha256))throw error("TARGET_HASH_MISMATCH",edit.operationId);
             if(textEdit(edit)) {
                 validateSpan(target,edit);
@@ -67,33 +121,7 @@ public final class DocxTemplateEditor {
                 }else if(contains(target,otherTarget)||contains(otherTarget,target))throw error("OVERLAPPING_OPERATIONS",edit.operationId);
             }
         }
-        List<Edit> ordered=new ArrayList<>(batch.edits);
-        validateRemainingRows(model,batch);
-        retainRequiredCellParagraphs(model,batch);
-        validateFeatureScopes(model,batch);
-        List<FeatureImpact> impacts=featureImpacts(model,batch);
-        ordered.sort(Comparator.comparing((Edit e)->e.targetId).thenComparing((Edit e)->-e.start));
-        for(Edit edit:ordered) {
-            Element target=model.nodes.get(edit.targetId);
-            if(edit.type==EditType.INSERT_TEXT)insertText(target,edit);
-            else if(edit.type==EditType.REPLACE_SPAN)replace(model,target,edit);
-            else if(insertion(edit))insert(model,target,edit);
-            else if(edit.type==EditType.CLEAR_EDITORIAL_CELL) {
-                NodeList ps=target.getElementsByTagNameNS(W,"p");for(int i=0;i<ps.getLength();i++)clear((Element)ps.item(i));
-            }else if(edit.type==EditType.CLEAR_PARAGRAPH)clear(target);
-            else if(edit.type==EditType.CLEAR_PARAGRAPH_AND_NUMBERING) {clear(target);clearNumbering(target);}
-            else if(edit.type==EditType.KEEP_ROW_TOGETHER)keepRowTogether(target);
-            else if(edit.type==EditType.DELETE_PARAGRAPH) {
-                if(model.retainedCellParagraphs.contains(target))clear(target);
-                else target.getParentNode().removeChild(target);
-            }else target.getParentNode().removeChild(target);
-        }
-        List<NativeLayoutChange> layoutChanges=applyLayout(model,captured);
-        attachParagraphBookmarks(model,bookmarks,markAddedParagraphs);
-        model.entries.put(MAIN,xml(model.xmlParts.get(MAIN)));
-        byte[] result=write(model.entries);
-        TemplateIndex updated=load(result).index;
-        return new DocxEditResult(result,updated,model.index.sourceSha256,impacts,ledger(model,originalBatch,updated.sourceSha256),model.index.entryHashes,layout==null?null:layout.profile,layoutChanges);
+        return batch;
     }
 
     public static final class NativeLayoutBoundary {
@@ -102,6 +130,7 @@ public final class DocxTemplateEditor {
     }
     public static final class NativeLayoutPlan {
         private final String sourceSha256,profile;
+        private final NativeStoryPlan stories;
         private final List<NativeLayoutBoundary> boundaries;
         private final List<NodeAnchor> emptyExclusions;
         private final List<NativeLayoutSpacing> emptySpacing;
@@ -116,7 +145,10 @@ public final class DocxTemplateEditor {
         public NativeLayoutPlan(String sourceSha256,String profile,List<NativeLayoutBoundary> boundaries,List<NodeAnchor> emptyExclusions,List<NativeLayoutSpacing> emptySpacing,List<NodeAnchor> cohesiveRows,List<NodeAnchor> compactGapRows){this(sourceSha256,profile,boundaries,emptyExclusions,emptySpacing,cohesiveRows,compactGapRows,Collections.emptyList(),Collections.emptyList());}
         public NativeLayoutPlan(String sourceSha256,String profile,List<NativeLayoutBoundary> boundaries,List<NodeAnchor> emptyExclusions,List<NativeLayoutSpacing> emptySpacing,List<NodeAnchor> cohesiveRows,List<NodeAnchor> compactGapRows,List<NativeLayoutClearedParagraph> clearedParagraphs,List<NodeAnchor> keepNextParagraphs){this(sourceSha256,profile,boundaries,emptyExclusions,emptySpacing,cohesiveRows,compactGapRows,clearedParagraphs,keepNextParagraphs,Collections.emptyList());}
         public NativeLayoutPlan(String sourceSha256,String profile,List<NativeLayoutBoundary> boundaries,List<NodeAnchor> emptyExclusions,List<NativeLayoutSpacing> emptySpacing,List<NodeAnchor> cohesiveRows,List<NodeAnchor> compactGapRows,List<NativeLayoutClearedParagraph> clearedParagraphs,List<NodeAnchor> keepNextParagraphs,List<NativeLayoutClearedKeepNextBreak> clearedKeepNextBreaks){this(sourceSha256,profile,boundaries,emptyExclusions,emptySpacing,cohesiveRows,compactGapRows,clearedParagraphs,keepNextParagraphs,clearedKeepNextBreaks,Collections.emptyList());}
-        public NativeLayoutPlan(String sourceSha256,String profile,List<NativeLayoutBoundary> boundaries,List<NodeAnchor> emptyExclusions,List<NativeLayoutSpacing> emptySpacing,List<NodeAnchor> cohesiveRows,List<NodeAnchor> compactGapRows,List<NativeLayoutClearedParagraph> clearedParagraphs,List<NodeAnchor> keepNextParagraphs,List<NativeLayoutClearedKeepNextBreak> clearedKeepNextBreaks,List<NativeLayoutParagraphBoundary> paragraphBoundaries){this.sourceSha256=Objects.requireNonNull(sourceSha256);this.profile=Objects.requireNonNull(profile);this.boundaries=Collections.unmodifiableList(new ArrayList<>(boundaries));this.emptyExclusions=Collections.unmodifiableList(new ArrayList<>(emptyExclusions));this.emptySpacing=Collections.unmodifiableList(new ArrayList<>(emptySpacing));this.cohesiveRows=Collections.unmodifiableList(new ArrayList<>(cohesiveRows));this.compactGapRows=Collections.unmodifiableList(new ArrayList<>(compactGapRows));this.clearedParagraphs=Collections.unmodifiableList(new ArrayList<>(clearedParagraphs));this.keepNextParagraphs=Collections.unmodifiableList(new ArrayList<>(keepNextParagraphs));this.clearedKeepNextBreaks=Collections.unmodifiableList(new ArrayList<>(clearedKeepNextBreaks));this.paragraphBoundaries=Collections.unmodifiableList(new ArrayList<>(paragraphBoundaries));}
+        public NativeLayoutPlan(String sourceSha256,String profile,List<NativeLayoutBoundary> boundaries,List<NodeAnchor> emptyExclusions,List<NativeLayoutSpacing> emptySpacing,List<NodeAnchor> cohesiveRows,List<NodeAnchor> compactGapRows,List<NativeLayoutClearedParagraph> clearedParagraphs,List<NodeAnchor> keepNextParagraphs,List<NativeLayoutClearedKeepNextBreak> clearedKeepNextBreaks,List<NativeLayoutParagraphBoundary> paragraphBoundaries){this(sourceSha256,profile,boundaries,emptyExclusions,emptySpacing,cohesiveRows,compactGapRows,clearedParagraphs,keepNextParagraphs,clearedKeepNextBreaks,paragraphBoundaries,null);}
+        private NativeLayoutPlan(String sourceSha256,String profile,List<NativeLayoutBoundary> boundaries,List<NodeAnchor> emptyExclusions,List<NativeLayoutSpacing> emptySpacing,List<NodeAnchor> cohesiveRows,List<NodeAnchor> compactGapRows,List<NativeLayoutClearedParagraph> clearedParagraphs,List<NodeAnchor> keepNextParagraphs,List<NativeLayoutClearedKeepNextBreak> clearedKeepNextBreaks,List<NativeLayoutParagraphBoundary> paragraphBoundaries,NativeStoryPlan stories){this.sourceSha256=Objects.requireNonNull(sourceSha256);this.profile=Objects.requireNonNull(profile);this.boundaries=Collections.unmodifiableList(new ArrayList<>(boundaries));this.emptyExclusions=Collections.unmodifiableList(new ArrayList<>(emptyExclusions));this.emptySpacing=Collections.unmodifiableList(new ArrayList<>(emptySpacing));this.cohesiveRows=Collections.unmodifiableList(new ArrayList<>(cohesiveRows));this.compactGapRows=Collections.unmodifiableList(new ArrayList<>(compactGapRows));this.clearedParagraphs=Collections.unmodifiableList(new ArrayList<>(clearedParagraphs));this.keepNextParagraphs=Collections.unmodifiableList(new ArrayList<>(keepNextParagraphs));this.clearedKeepNextBreaks=Collections.unmodifiableList(new ArrayList<>(clearedKeepNextBreaks));this.paragraphBoundaries=Collections.unmodifiableList(new ArrayList<>(paragraphBoundaries));this.stories=stories;}
+        public NativeLayoutPlan withStories(NativeStoryPlan value){Objects.requireNonNull(value);if(!sourceSha256.equals(value.sourceSha256))throw error("STORY_SOURCE_HASH_MISMATCH",profile);return new NativeLayoutPlan(sourceSha256,profile,boundaries,emptyExclusions,emptySpacing,cohesiveRows,compactGapRows,clearedParagraphs,keepNextParagraphs,clearedKeepNextBreaks,paragraphBoundaries,value);}
+        public NativeStoryPlan getStories(){return stories;}
     }
     /** An unchanged original empty paragraph associated with an exact manual footer. */
     public static final class NativeLayoutSpacing {
@@ -175,7 +207,7 @@ public final class DocxTemplateEditor {
     private static Element layoutAnchor(PackageModel model,NodeAnchor anchor){Element node=model.nodes.get(anchor.id);if(!MAIN.equals(anchor.part)||node==null||!hash(xml(node)).equals(anchor.sha256))throw error("LAYOUT_ANCHOR_MISMATCH",anchor.id);return node;}
     private static boolean firstRowHeading(Element table,Element heading){List<Element> rows=direct(table,"tr");if(rows.isEmpty()||!contains(rows.get(0),heading))return false;for(Node parent=heading.getParentNode();parent!=null;parent=parent.getParentNode())if(is(parent,"tbl"))return parent==table;return false;}
     private static boolean layoutEmpty(Element paragraph){if(!is(paragraph,"p"))return false;for(Node child=paragraph.getFirstChild();child!=null;child=child.getNextSibling())if(child instanceof Element&&!is(child,"pPr"))return false;return paragraph.getElementsByTagNameNS(W,"sectPr").getLength()==0&&paragraph.getElementsByTagNameNS(W,"pageBreakBefore").getLength()==0;}
-    private static List<NativeLayoutChange> applyLayout(PackageModel model,CapturedLayout captured) {
+    private static List<NativeLayoutChange> applyLayout(PackageModel model,CapturedLayout captured,Set<Element> explicitlyCleared) {
         List<NativeLayoutChange> changes=new ArrayList<>();if(captured.plan==null)return changes;Document document=model.xmlParts.get(MAIN);Element root=document.getDocumentElement();
         long nextMarker=0;Set<String> markerNames=new HashSet<>();NodeList markers=document.getElementsByTagNameNS(W,"bookmarkStart");for(int i=0;i<markers.getLength();i++){Element marker=(Element)markers.item(i);markerNames.add(marker.getAttributeNS(W,"name"));try{nextMarker=Math.max(nextMarker,Long.parseLong(marker.getAttributeNS(W,"id"))+1);}catch(NumberFormatException ignored){}}
         Set<String> clearedKeepNextEligibility=new HashSet<>();for(NativeLayoutClearedKeepNextBreak item:captured.plan.clearedKeepNextBreaks){Element[] nodes=captured.clearedKeepNextBreaks.get(item.paragraph.id);if(contains(root,nodes[0])&&contains(root,nodes[1])&&hash(xml(nodes[1])).equals(item.guard.sha256)&&descendantText(nodes[0],"t").trim().isEmpty())clearedKeepNextEligibility.add(item.paragraph.id);}
@@ -193,6 +225,9 @@ public final class DocxTemplateEditor {
         for(int i=0;i<captured.spacing.size();i++){
             Element paragraph=captured.spacing.get(i)[0],footer=captured.spacing.get(i)[1];NativeLayoutSpacing spacing=captured.plan.emptySpacing.get(i);NodeAnchor anchor=spacing.paragraph;
             if(!contains(root,paragraph)||!contains(root,footer)){changes.add(new NativeLayoutChange("compact_verified_empty_spacing","SKIPPED_REMOVED",anchor,null));continue;}
+            // A validated business clear can discard this manual footer with its branch. Its
+            // renderer spacing no longer applies; preserve the original empty paragraph.
+            if(explicitlyCleared.contains(footer)&&!hash(xml(footer)).equals(spacing.footer.sha256)){changes.add(new NativeLayoutChange("compact_verified_empty_spacing","SKIPPED_CLEARED_FOOTER",anchor,MAIN+"#"+path(paragraph)));continue;}
             if(!layoutEmpty(paragraph)||!hash(xml(paragraph)).equals(anchor.sha256)||!hash(xml(footer)).equals(spacing.footer.sha256))throw error("LAYOUT_EMPTY_SCOPE_CHANGED",anchor.id);
             Element props=direct(paragraph,"pPr").isEmpty()?document.createElementNS(W,"w:pPr"):direct(paragraph,"pPr").get(0);if(props.getParentNode()==null)paragraph.insertBefore(props,paragraph.getFirstChild());compactSpacing(document,props);
             String layoutId="CL"+hash((captured.plan.sourceSha256+"|"+captured.plan.profile+"|"+anchor.id).getBytes(StandardCharsets.UTF_8)).substring(0,28);if(!markerNames.add(layoutId))throw error("LAYOUT_BOOKMARK_CONFLICT",anchor.id);attachBookmark(document,paragraph,layoutId,nextMarker++);
@@ -333,11 +368,14 @@ public final class DocxTemplateEditor {
         private final boolean nativeRowCohesion;
         private final boolean compactNativeRowGaps;
         private Paragraph(String part,String path,Element node,int ordinal) {
+            this(part,path,node,ordinal,node.getOwnerDocument().getElementsByTagNameNS(W,"sectPr"));
+        }
+        private Paragraph(String part,String path,Element node,int ordinal,NodeList sections) {
             this.part=part;this.path=path;nativeNodePath=OerNativeDocxObservation.path(node);id=part+"#"+path;this.ordinal=ordinal;
             snapshotXml=xml(node);sha256=hash(snapshotXml);catalogText=descendantText(node,"t");text=editableText(node);
             cellId=ancestorId(part,node,"tc");rowId=ancestorId(part,node,"tr");tableId=ancestorId(part,node,"tbl");
             boolean together=false,gaps=false;for(Node parent=node.getParentNode();parent!=null;parent=parent.getParentNode())if(is(parent,"tr")){List<Element> properties=direct((Element)parent,"trPr");if(properties.size()==1){List<Element> controls=direct(properties.get(0),"cantSplit");together=controls.size()==1&&!Arrays.asList("0","false","off").contains(controls.get(0).getAttributeNS(W,"val"));}gaps=DocxTemplateEditor.hasCompactNativeRowGaps((Element)parent);break;}nativeRowCohesion=together;compactNativeRowGaps=gaps;
-            String section=null;NodeList sections=node.getOwnerDocument().getElementsByTagNameNS(W,"sectPr");
+            String section=null;
             for(int i=0;i<sections.getLength();i++)if((node.compareDocumentPosition(sections.item(i))&Node.DOCUMENT_POSITION_FOLLOWING)!=0) {section=part+"#"+path((Element)sections.item(i));break;}
             sectionId=section;
         }
@@ -392,16 +430,17 @@ public final class DocxTemplateEditor {
         public int getStart(){return start;} public int getEnd(){return end;}
     }
     public static final class NodeAnchor {
-        private final String id,part,path,sha256,kind;
+        private final String id,part,path,nativeNodePath,sha256,kind;
         private final List<String> paragraphIds;
         private NodeAnchor(String part,Element node) {
-            this.part=part;path=path(node);id=part+"#"+path;sha256=hash(xml(node));kind=node.getLocalName();
+            this.part=part;path=path(node);nativeNodePath=OerNativeDocxObservation.path(node);id=part+"#"+path;sha256=hash(xml(node));kind=node.getLocalName();
             List<String> ids=new ArrayList<>();NodeList ps=node.getElementsByTagNameNS(W,"p");
             if(is(node,"p"))ids.add(id);
             for(int i=0;i<ps.getLength();i++)ids.add(part+"#"+path((Element)ps.item(i)));
             paragraphIds=Collections.unmodifiableList(ids);
         }
         public String getId(){return id;} public String getPart(){return part;} public String getPath(){return path;}
+        public String getNativeNodePath(){return nativeNodePath;}
         public String getSha256(){return sha256;} public String getKind(){return kind;} public List<String> getParagraphIds(){return paragraphIds;}
     }
     public static final class SourceEditBatch {
@@ -520,13 +559,18 @@ public final class DocxTemplateEditor {
         private final Map<String,String> preservedEntryHashes;
         private final String nativeLayoutProfile;
         private final List<NativeLayoutChange> nativeLayoutLedger;
+        private final List<NativeStoryChange> nativeStoryLedger;
         private DocxEditResult(byte[] bytes,TemplateIndex index){this(bytes,index,index.sourceSha256,Collections.emptyList(),Collections.emptyList(),index.entryHashes);}
         private DocxEditResult(byte[] bytes,TemplateIndex index,String source,List<FeatureImpact> impacts,List<AppliedEdit> ledger,Map<String,String> originalHashes) {
             this(bytes,index,source,impacts,ledger,originalHashes,null,Collections.emptyList());
         }
         private DocxEditResult(byte[] bytes,TemplateIndex index,String source,List<FeatureImpact> impacts,List<AppliedEdit> ledger,Map<String,String> originalHashes,String layoutProfile,List<NativeLayoutChange> layoutLedger) {
+            this(bytes,index,source,impacts,ledger,originalHashes,layoutProfile,layoutLedger,Collections.emptyList());
+        }
+        private DocxEditResult(byte[] bytes,TemplateIndex index,String source,List<FeatureImpact> impacts,List<AppliedEdit> ledger,Map<String,String> originalHashes,String layoutProfile,List<NativeLayoutChange> layoutLedger,List<NativeStoryChange> storyLedger) {
             docxBytes=bytes.clone();this.index=index;originalSourceSha256=source;affectedFeatures=Collections.unmodifiableList(new ArrayList<>(impacts));
             nativeLayoutProfile=layoutProfile;nativeLayoutLedger=Collections.unmodifiableList(new ArrayList<>(layoutLedger));
+            nativeStoryLedger=Collections.unmodifiableList(new ArrayList<>(storyLedger));
             this.ledger=Collections.unmodifiableList(new ArrayList<>(ledger));Map<String,String> preserved=new LinkedHashMap<>();
             for(Map.Entry<String,String> entry:originalHashes.entrySet())if(entry.getValue().equals(index.entryHashes.get(entry.getKey())))preserved.put(entry.getKey(),entry.getValue());
             preservedEntryHashes=Collections.unmodifiableMap(preserved);
@@ -538,6 +582,7 @@ public final class DocxTemplateEditor {
         public String getOriginalSourceSha256(){return originalSourceSha256;}
         public List<AppliedEdit> getLedger(){return ledger;} public Map<String,String> getPreservedEntryHashes(){return preservedEntryHashes;}
         public String getNativeLayoutProfile(){return nativeLayoutProfile;} public List<NativeLayoutChange> getNativeLayoutLedger(){return nativeLayoutLedger;}
+        public List<NativeStoryChange> getNativeStoryLedger(){return nativeStoryLedger;}
     }
     public static final class AppliedEdit {
         private final String operationId,sourceSha256,generatedSha256,donorId,donorSha256,expectedText,replacement;
@@ -587,6 +632,247 @@ public final class DocxTemplateEditor {
         public String getCode(){return code;} public String getOperationId(){return operationId;}
     }
     private static EditException error(String code,String id){return new EditException(code,id);}
+    /** Source-bound native-story ledger; a generated part has no fabricated original hash. */
+    public static final class NativeStoryChange {
+        private final String action,status,generatedPartName,generatedPartSha256,generatedRelationshipId,oldText;
+        private final Section section;private final Binding binding;private final Paragraph paragraph;
+        private final int sourcePageOrdinal;private final NativeProperty originalProperty;private final Map<String,String> newAttributes;
+        private StaticFooterSourceFormat sourceFormatting;
+        private NativeStoryChange(String action,String status,Section section,Binding binding,String part,String relationship,Paragraph paragraph,int page,String oldText,NativeProperty originalProperty,Map<String,String> newAttributes,String sha){this.action=action;this.status=status;this.section=section;this.binding=binding;generatedPartName=part;generatedRelationshipId=relationship;this.paragraph=paragraph;sourcePageOrdinal=page;this.oldText=oldText;this.originalProperty=originalProperty;this.newAttributes=Collections.unmodifiableMap(new LinkedHashMap<>(newAttributes));generatedPartSha256=sha;}
+        public String getAction(){return action;}public String getStatus(){return status;}
+        public NodeAnchor getSourceSection(){return section==null?null:section.sourceSection;}public Position getSourcePosition(){return section==null?null:section.sourcePosition;}
+        public Binding getOriginalBinding(){return binding;}public String getGeneratedPartName(){return generatedPartName;}public String getGeneratedPartSha256(){return generatedPartSha256;}public String getGeneratedRelationshipId(){return generatedRelationshipId;}
+        public Paragraph getSourceParagraph(){return paragraph;}public int getSourcePageOrdinal(){return sourcePageOrdinal;}public String getOldExactText(){return oldText;}
+        public NativeProperty getOriginalProperty(){return originalProperty;}public Map<String,String> getNewAttributes(){return newAttributes;}
+        public StaticFooterSourceFormat getSourceFormatting(){return sourceFormatting;}
+    }
+    private static final String STORY_RELS="word/_rels/document.xml.rels", CONTENT_TYPES="[Content_Types].xml";
+    private static final String REL_NS="http://schemas.openxmlformats.org/package/2006/relationships", OFFICE_REL="http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+    private static final String CT_NS="http://schemas.openxmlformats.org/package/2006/content-types";
+    private static final class CapturedStory {
+        final Section section;final Element sectionNode,originReference,targetRoot;final Story story;
+        final String originalFields;String part,relationship;
+        CapturedStory(Section section,Element node,Story story,Element origin,Element target){this.section=section;sectionNode=node;this.story=story;originReference=origin;targetRoot=target;part=story.expectedBinding.targetPartName;relationship=story.expectedBinding.relationshipId;originalFields=target==null?null:storyFields(target);}
+    }
+    private static final class CapturedStaticFooter {
+        final Section section;final StaticFooterParagraph paragraph;final Element node;final int page;
+        CapturedStaticFooter(Section section,StaticFooterParagraph paragraph,Element node,int page){this.section=section;this.paragraph=paragraph;this.node=node;this.page=page;}
+    }
+    private static final class CapturedStories {
+        final NativeStoryPlan plan;final List<CapturedStory> stories=new ArrayList<>();final List<CapturedStaticFooter> staticFooters=new ArrayList<>();
+        final Map<Section,Element> sections=new LinkedHashMap<>();final Set<String> dirtyParts=new LinkedHashSet<>();final List<NativeStoryChange> changes=new ArrayList<>();
+        CapturedStories(NativeStoryPlan plan){this.plan=plan;}
+    }
+    private static CapturedStories captureStories(PackageModel model,NativeStoryPlan plan) {
+        CapturedStories captured=new CapturedStories(plan);if(plan==null)return captured;
+        if(!model.index.sourceSha256.equals(plan.sourceSha256))throw error("STORY_SOURCE_HASH_MISMATCH",plan.profile);
+        // Revalidate the immutable plain values even for a plan assembled by another server consumer.
+        new NativeStoryPlan.Identity(plan.identity.number,plan.identity.title);
+        Document main=model.xmlParts.get(MAIN);NodeList originalSections=main.getElementsByTagNameNS(W,"sectPr");
+        if(originalSections.getLength()!=plan.sections.size()||plan.sections.isEmpty())throw error("STORY_SECTION_SET_UNSUPPORTED",plan.profile);
+        List<Element> relationships=storyRelationships(model,false);Map<String,CapturedStory> previous=new LinkedHashMap<>();Map<String,Story> sharedIntents=new LinkedHashMap<>();Set<String> sectionIds=new HashSet<>();
+        Element settings=null;
+        for(Element relation:relationships)if((OFFICE_REL+"/settings").equals(relation.getAttribute("Type"))){if(settings!=null)throw error("STORY_SETTINGS_UNSUPPORTED",plan.profile);String mode=optionalAttribute(relation,"TargetMode");if(mode!=null&&!"Internal".equals(mode))throw error("STORY_SETTINGS_UNSUPPORTED",plan.profile);settings=storyXml(model,resolveStoryTarget(relation.getAttribute("Target"))).getDocumentElement();if(!is(settings,"settings"))throw error("STORY_SETTINGS_UNSUPPORTED",plan.profile);}
+        validateStoryProperty(model,plan.evenAndOddHeaders,"evenAndOddHeaders",settings);
+        int sectionOrdinal=0;String previousSection=null;
+        for(Section section:plan.sections) {
+            if(!sectionIds.add(section.observedSectionId))throw error("STORY_DUPLICATE_SECTION_ID",section.observedSectionId);
+            Element node=model.nodes.get(section.sourceSection.id);
+            if(node==null||!MAIN.equals(section.sourceSection.part)||!is(node,"sectPr")||originalSections.item(sectionOrdinal++)!=node||!hash(xml(node)).equals(section.sourceSection.sha256))throw error("STORY_SECTION_ANCHOR_MISMATCH",section.observedSectionId);
+            validateStoryPosition(model,section.sourcePosition,node,MAIN);
+            if(!section.sourceSection.nativeNodePath.equals(section.sourcePosition.nativeNodePath))throw error("STORY_SECTION_PATH_MISMATCH",section.observedSectionId);
+            captured.sections.put(section,node);
+            for(NativeProperty property:Arrays.asList(section.titlePg,section.pgNumType,section.pgMar,section.pgSz,section.type))validateStoryProperty(model,property,property.name,node);
+            if(!Arrays.asList("titlePg","pgNumType","pgMar","pgSz","type").equals(Arrays.asList(section.titlePg.name,section.pgNumType.name,section.pgMar.name,section.pgSz.name,section.type.name)))throw error("STORY_PROPERTY_NAMES_MISMATCH",section.observedSectionId);
+            if(section.stories.size()!=6)throw error("STORY_SIX_SLOTS_REQUIRED",section.observedSectionId);
+            Set<String> slots=new LinkedHashSet<>();
+            for(Story story:section.stories) {
+                Binding binding=story.expectedBinding;String slot=binding.kind+"/"+binding.variant;if(!slots.add(slot))throw error("STORY_DUPLICATE_SLOT",slot);
+                String local=binding.kind==Kind.HEADER?"headerReference":"footerReference",variant=binding.variant.name().toLowerCase(Locale.ROOT);Element reference=null;
+                for(Element candidate:direct(node,local)){if(!Arrays.asList("default","first","even").contains(candidate.getAttributeNS(W,"type")))throw error("STORY_REFERENCE_TYPE_UNSUPPORTED",slot);if(variant.equals(candidate.getAttributeNS(W,"type"))){if(reference!=null)throw error("STORY_DUPLICATE_REFERENCE",slot);reference=candidate;}}
+                CapturedStory inherited=previous.get(slot);Element actualOrigin=reference==null&&inherited!=null?inherited.originReference:reference;Element target=null;
+                if(actualOrigin==null) {
+                    if(binding.state!=BindingState.NO_TARGET||binding.targetPartName!=null||binding.targetPartSha256!=null||binding.relationshipId!=null||binding.relationshipType!=null||binding.rawTarget!=null||binding.rawTargetMode!=null||binding.originReferencePosition!=null||binding.relationshipPosition!=null||binding.originSectionId!=null||binding.inheritedFromSectionId!=null||binding.targetRootNativePath!=null)throw error("STORY_NO_TARGET_MISMATCH",slot);
+                }else {
+                    BindingState expected=reference==null?BindingState.INHERITED_TARGET_CANDIDATE:BindingState.EXPLICIT_TARGET_LOADED;
+                    String origin=reference==null?inherited.story.expectedBinding.originSectionId:section.observedSectionId;
+                    if(binding.state!=expected||!Objects.equals(binding.originSectionId,origin)||!Objects.equals(binding.inheritedFromSectionId,reference==null?previousSection:null))throw error("STORY_INHERITANCE_MISMATCH",slot);
+                    if(!Objects.equals(actualOrigin.getAttributeNS(OFFICE_REL,"id"),binding.relationshipId))throw error("STORY_REFERENCE_ID_MISMATCH",slot);
+                    validateStoryPosition(model,binding.originReferencePosition,actualOrigin,MAIN);
+                    Element relation=null;for(Element candidate:relationships)if(candidate.getAttribute("Id").equals(binding.relationshipId))relation=candidate;
+                    if(relation==null||!(OFFICE_REL+"/"+binding.kind.name().toLowerCase(Locale.ROOT)).equals(relation.getAttribute("Type"))||!Objects.equals(binding.relationshipType,relation.getAttribute("Type"))||!Objects.equals(binding.rawTarget,relation.getAttribute("Target"))||!Objects.equals(binding.rawTargetMode,optionalAttribute(relation,"TargetMode"))||binding.rawTargetMode!=null&&!"Internal".equals(binding.rawTargetMode))throw error("STORY_RELATIONSHIP_MISMATCH",slot);
+                    validateStoryPosition(model,binding.relationshipPosition,relation,STORY_RELS);
+                    String targetName=resolveStoryTarget(relation.getAttribute("Target"));
+                    if(!targetName.equals(binding.targetPartName)||!targetName.matches("word/"+(binding.kind==Kind.HEADER?"header":"footer")+"[0-9]+\\.xml")||!Objects.equals(model.index.entryHashes.get(targetName),binding.targetPartSha256))throw error("STORY_TARGET_MISMATCH",slot);
+                    target=storyXml(model,targetName).getDocumentElement();
+                    if(!is(target,binding.kind==Kind.HEADER?"hdr":"ftr")||!OerNativeDocxObservation.path(target).equals(binding.targetRootNativePath))throw error("STORY_ROOT_MISMATCH",slot);
+                    validateStoryContentType(model,targetName,binding.kind);
+                }
+                if(binding.kind==Kind.HEADER&&story.action!=StoryAction.PRESERVE&&story.action!=StoryAction.APPEND_PROJECT_TITLE||binding.kind==Kind.FOOTER&&story.action==StoryAction.APPEND_PROJECT_TITLE)throw error("STORY_ACTION_KIND_MISMATCH",slot);
+                if(story.action!=StoryAction.PRESERVE&&binding.variant==Variant.FIRST&&!storyOn(section.titlePg)&&target==null||story.action!=StoryAction.PRESERVE&&binding.variant==Variant.EVEN&&!storyOn(plan.evenAndOddHeaders)&&target==null)throw error("STORY_INACTIVE_SLOT_CREATION_UNSUPPORTED",slot);
+                validateStoryPlainText(story.pagePrefix);validateStoryPlainText(story.pageSuffix);for(String control:story.retainedSourceControlLines)validateStoryPlainText(control);
+                boolean page=false;for(Feature feature:model.index.features)if(Objects.equals(feature.part,binding.targetPartName)&&"FIELD".equals(feature.kind)&&feature.instruction!=null&&feature.instruction.trim().matches("(?is)^PAGE\\b.*"))page=true;
+                if(target!=null||story.action!=StoryAction.PRESERVE) {
+                    if(story.pageAction==PageAction.PRESERVE_NO_PAGE&&page||story.pageAction==PageAction.PRESERVE_EXISTING_PAGE&&!page||story.pageAction==PageAction.CREATE_PAGE_FROM_STATIC_SEQUENCE&&page)throw error("STORY_PAGE_POLICY_MISMATCH",slot);
+                    if(story.pageAction==PageAction.CREATE_PAGE_FROM_STATIC_SEQUENCE&&(binding.kind!=Kind.FOOTER||story.action!=StoryAction.CREATE_NATIVE_FOOTER||plan.staticFooterGroups.isEmpty()||target!=null&&(!editableText(target).trim().isEmpty()||has(target,"drawing")||has(target,"pict")||has(target,"object"))))throw error("STORY_STATIC_MIGRATION_UNSUPPORTED",slot);
+                }
+                Set<String> labelSpans=new HashSet<>();
+                if(target!=null)for(Label label:story.contractLabels) {
+                    if(!labelSpans.add(label.paragraph.id+":"+label.start+":"+label.end))throw error("STORY_LABEL_OVERLAP",label.paragraph.id);
+                    Element labelNode=model.nodes.get(label.paragraph.id);
+                    if(!binding.targetPartName.equals(label.paragraph.part)||labelNode==null||!hash(xml(labelNode)).equals(label.paragraph.sha256))throw error("STORY_LABEL_ANCHOR_MISMATCH",label.paragraph.id);
+                    Edit edit=Edit.replaceCatalogLabelOutsideFields("native-contract-label",label.paragraph,label.start,label.end,label.expectedText,storyText(plan.identity.number));
+                    validateSpan(model.nodes.get(label.paragraph.id),edit);validateGlobalLabelFields(model.nodes.get(label.paragraph.id),edit);
+                    for(Label other:story.contractLabels)if(other!=label&&other.paragraph.id.equals(label.paragraph.id)&&overlappingSpans(label.start,label.end,other.start,other.end))throw error("STORY_LABEL_OVERLAP",label.paragraph.id);
+                }
+                if(target==null&&!story.contractLabels.isEmpty())throw error("STORY_LABEL_WITHOUT_TARGET",slot);
+                if(target!=null){Story old=sharedIntents.putIfAbsent(binding.targetPartName,story);if(old!=null&&!sameStoryIntent(old,story))throw error("SHARED_STORY_INTENT_CONFLICT",binding.targetPartName);}
+                CapturedStory item=new CapturedStory(section,node,story,actualOrigin,target);captured.stories.add(item);if(actualOrigin!=null)previous.put(slot,item);
+            }
+            if(section.numberingChange!=null&&!completeStaticFooterCarriers(section,plan.evenAndOddHeaders))throw error("STORY_STATIC_CARRIER_REQUIRED",section.observedSectionId);
+            if(section.numberingChange!=null&&(section.numberingChange.expected!=section.pgNumType||!plan.profile.equals(section.numberingChange.migrationProfileId)||!"1".equals(section.numberingChange.newStart)||!"17".equals(storyPropertyAttributes(section.pgNumType).get("{"+W+"}start"))))throw error("STORY_NUMBER_START_MIGRATION_UNSUPPORTED",section.observedSectionId);
+            if(section.marginChange!=null&&(section.marginChange.expected!=section.pgMar||!plan.profile.equals(section.marginChange.verifiedEditionProfileId)))throw error("STORY_MARGIN_AUTHORITY_MISMATCH",section.observedSectionId);
+            previousSection=section.observedSectionId;
+        }
+        Set<String> staticIds=new LinkedHashSet<>();Set<Section> migratedSections=new HashSet<>();int page=0;
+        for(StaticFooterGroup group:plan.staticFooterGroups) {
+            if(group.sourcePageOrdinal!=++page||group.exactParagraphs.size()!=2)throw error("STORY_STATIC_SEQUENCE_MISMATCH",plan.profile);
+            Paragraph first=group.exactParagraphs.get(0).source,second=group.exactParagraphs.get(1).source;
+            if(second.ordinal!=first.ordinal+1||!Objects.equals(first.sectionId,second.sectionId))throw error("STORY_STATIC_PAIR_MISMATCH",plan.profile);
+            for(StaticFooterParagraph paragraph:group.exactParagraphs) {
+                Element node=model.nodes.get(paragraph.source.id);Section owner=null;for(Section section:plan.sections)if(section.sourceSection.id.equals(paragraph.source.sectionId))owner=section;
+                if(owner==null||!MAIN.equals(paragraph.source.part)||node==null||!is(node.getParentNode(),"body")||!staticIds.add(paragraph.source.id)||!hash(xml(node)).equals(paragraph.source.sha256)||!paragraph.exactText.equals(descendantText(node,"t")))throw error("STORY_STATIC_PARAGRAPH_MISMATCH",paragraph.source.id);
+                for(String control:Arrays.asList("fldChar","instrText","fldSimple","br","cr","sectPr","pageBreakBefore"))if(has(node,control))throw error("STORY_STATIC_CONTROL_UNSUPPORTED",paragraph.source.id);
+                if(!paragraph.exactText.isEmpty())validateGlobalLabelFields(node,0,editableText(node).length(),false,"native-static-footer");
+                if(!completeStaticFooterCarriers(owner,plan.evenAndOddHeaders))throw error("STORY_STATIC_CARRIER_REQUIRED",paragraph.source.id);
+                if(plan.staticFooterSourceFormat!=null){validateClearedLayoutParagraph(node,false,paragraph.source.id);List<Element> props=direct(node,"pPr");if(props.size()>1||props.size()==1&&direct(props.get(0),"spacing").size()>1)throw error("STORY_STATIC_SPACING_SCOPE_UNSUPPORTED",paragraph.source.id);}
+                migratedSections.add(owner);
+                captured.staticFooters.add(new CapturedStaticFooter(owner,paragraph,node,group.sourcePageOrdinal));
+            }
+        }
+        for(Section section:plan.sections)if((section.numberingChange!=null||section.stories.stream().anyMatch(DocxTemplateEditor::staticFooterCarrier))&&!migratedSections.contains(section))throw error("STORY_STATIC_SECTION_MISMATCH",section.observedSectionId);
+        validateStaticFooterSourceFormat(model,captured);
+        long additions=captured.stories.stream().filter(item->item.story.action!=StoryAction.PRESERVE&&item.part==null).count();
+        if(model.entries.size()+additions+(additions>0&&!model.entries.containsKey(STORY_RELS)?1:0)>COUNT_LIMIT)throw error("DOCX_ENTRY_LIMIT",plan.profile);
+        return captured;
+    }
+    private static void validateStaticFooterSourceFormat(PackageModel model,CapturedStories captured) {
+        StaticFooterSourceFormat format=captured.plan.staticFooterSourceFormat;if(format==null)return;
+        if(captured.staticFooters.isEmpty())throw error("STORY_SOURCE_STYLE_SCOPE_UNSUPPORTED",captured.plan.profile);
+        if(!format.stylesPartSha256.equals(model.index.entryHashes.get("word/styles.xml")))throw error("STORY_SOURCE_STYLE_PART_MISMATCH",captured.plan.profile);
+        int styleReferences=0;for(Element relation:storyRelationships(model,false))if((OFFICE_REL+"/styles").equals(relation.getAttribute("Type"))){styleReferences++;String mode=optionalAttribute(relation,"TargetMode");if(mode!=null&&!"Internal".equals(mode)||!"word/styles.xml".equals(resolveStoryTarget(relation.getAttribute("Target"))))throw error("STORY_SOURCE_STYLE_BINDING_UNSUPPORTED",captured.plan.profile);}
+        if(styleReferences!=1)throw error("STORY_SOURCE_STYLE_BINDING_UNSUPPORTED",captured.plan.profile);
+        int styleTypes=0;NodeList overrides=storyXml(model,CONTENT_TYPES).getDocumentElement().getElementsByTagNameNS(CT_NS,"Override");for(int i=0;i<overrides.getLength();i++){Element entry=(Element)overrides.item(i);if("/word/styles.xml".equals(entry.getAttribute("PartName"))){styleTypes++;if(!"application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml".equals(entry.getAttribute("ContentType")))throw error("STORY_SOURCE_STYLE_CONTENT_TYPE_UNSUPPORTED",captured.plan.profile);}}
+        if(styleTypes!=1)throw error("STORY_SOURCE_STYLE_CONTENT_TYPE_UNSUPPORTED",captured.plan.profile);
+        for(Section section:captured.plan.sections)if(section.marginChange!=null&&(!section.pgMar.present||section.marginChange.newTwips.keySet().stream().anyMatch(name->!Arrays.asList("header","footer").contains(name))))throw error("STORY_SOURCE_STYLE_SCOPE_UNSUPPORTED",section.observedSectionId);
+        Element styles=storyXml(model,"word/styles.xml").getDocumentElement();
+        if(!is(styles,"styles"))throw error("STORY_SOURCE_STYLE_ROOT_UNSUPPORTED",captured.plan.profile);
+        for(String id:Arrays.asList(format.headerStyleId,format.footerStyleId)) {
+            Element found=null;for(Element style:direct(styles,"style"))if(id.equals(style.getAttributeNS(W,"styleId"))){if(found!=null)throw error("STORY_SOURCE_STYLE_AMBIGUOUS",id);found=style;}
+            if(found==null||!"paragraph".equals(found.getAttributeNS(W,"type")))throw error("STORY_SOURCE_STYLE_UNSUPPORTED",id);
+        }
+        for(CapturedStory item:captured.stories)if(item.story.action!=StoryAction.PRESERVE) {
+            Story story=item.story;
+            if(story.expectedBinding.state!=BindingState.NO_TARGET||item.part!=null
+                    ||story.expectedBinding.kind==Kind.HEADER&&story.action!=StoryAction.APPEND_PROJECT_TITLE
+                    ||story.expectedBinding.kind==Kind.FOOTER&&(!staticFooterCarrier(story)||story.retainedSourceControlLines.size()!=2))
+                throw error("STORY_SOURCE_STYLE_SCOPE_UNSUPPORTED",captured.plan.profile);
+        }
+    }
+    private static void validateStoryBusinessScopes(PackageModel model,CapturedStories captured,SourceEditBatch batch) {
+        if(captured.plan==null)return;
+        for(Edit edit:batch.edits){Element target=model.nodes.get(edit.targetId);String part=edit.targetId.substring(0,edit.targetId.indexOf('#'));
+            for(CapturedStory story:captured.stories)if(story.story.action!=StoryAction.PRESERVE&&Objects.equals(part,story.part))throw error("STORY_BUSINESS_EDIT_OVERLAP",edit.operationId);
+            for(CapturedStaticFooter footer:captured.staticFooters)if(target==footer.node||contains(target,footer.node)||contains(footer.node,target))throw error("STORY_STATIC_BUSINESS_OVERLAP",edit.operationId);
+        }
+    }
+    private static void validateStoryProperty(PackageModel model,NativeProperty property,String expectedName,Element owner) {
+        if(!expectedName.equals(property.name))throw error("STORY_PROPERTY_NAME_MISMATCH",expectedName);
+        List<Element> actual=owner==null?Collections.emptyList():direct(owner,expectedName);
+        if(property.present?actual.size()!=1||property.observations.size()!=1||!Arrays.asList("observed","observed_raw_declaration").contains(property.status):!actual.isEmpty()||!property.observations.isEmpty()||!"absent".equals(property.status))throw error("STORY_PROPERTY_CARDINALITY_MISMATCH",expectedName);
+        if(property.present){PropertyOccurrence value=property.observations.get(0);Element node=actual.get(0);String part=owner.getOwnerDocument()==model.xmlParts.get(MAIN)?MAIN:partName(model,owner.getOwnerDocument());validateStoryPosition(model,value.sourcePosition,node,part);if(!storyAttributes(node).equals(value.rawAttributes))throw error("STORY_PROPERTY_VALUE_MISMATCH",expectedName);}
+    }
+    private static void validateStoryPosition(PackageModel model,Position position,Element node,String part) {
+        if(position==null||node==null||!model.index.sourceSha256.equals(position.sourceSha256)||!part.equals(position.partName)||!Objects.equals(model.index.entryHashes.get(part),position.partSha256)||!OerNativeDocxObservation.path(node).equals(position.nativeNodePath))throw error("STORY_SOURCE_POSITION_MISMATCH",part);
+    }
+    private static String partName(PackageModel model,Document document){for(Map.Entry<String,Document> entry:model.xmlParts.entrySet())if(entry.getValue()==document)return entry.getKey();throw error("STORY_PART_UNAVAILABLE","document");}
+    private static Map<String,String> storyAttributes(Element node){Map<String,String> values=new LinkedHashMap<>();NamedNodeMap attributes=node.getAttributes();for(int i=0;i<attributes.getLength();i++){Node attribute=attributes.item(i);if(XMLConstants.XMLNS_ATTRIBUTE_NS_URI.equals(attribute.getNamespaceURI()))continue;values.put("{"+(attribute.getNamespaceURI()==null?"":attribute.getNamespaceURI())+"}"+(attribute.getLocalName()==null?attribute.getNodeName():attribute.getLocalName()),attribute.getNodeValue());}return values;}
+    private static Map<String,String> storyPropertyAttributes(NativeProperty property){return property.present?property.observations.get(0).rawAttributes:Collections.emptyMap();}
+    private static boolean storyOn(NativeProperty property){if(!property.present)return false;String value=storyPropertyAttributes(property).get("{"+W+"}val");if(value!=null&&!Arrays.asList("1","true","on","0","false","off").contains(value))throw error("STORY_ON_OFF_UNSUPPORTED",property.name);return value==null||Arrays.asList("1","true","on").contains(value);}
+    private static String optionalAttribute(Element node,String name){return node.hasAttribute(name)?node.getAttribute(name):null;}
+    private static Document storyXml(PackageModel model,String part){Document cached=model.xmlParts.get(part);if(cached!=null)return cached;byte[] bytes=model.entries.get(part);if(bytes==null)throw error("STORY_PART_UNAVAILABLE",part);try{Document document=parse(bytes);model.xmlParts.put(part,document);return document;}catch(Exception invalid){throw error("STORY_XML_UNSUPPORTED",part);}}
+    private static List<Element> storyRelationships(PackageModel model,boolean create){
+        Document document=model.entries.containsKey(STORY_RELS)?storyXml(model,STORY_RELS):model.xmlParts.get(STORY_RELS);
+        if(document==null){if(!create)return Collections.emptyList();try{document=parse(("<Relationships xmlns=\""+REL_NS+"\"/>").getBytes(StandardCharsets.UTF_8));model.xmlParts.put(STORY_RELS,document);}catch(Exception invalid){throw error("STORY_RELATIONSHIPS_UNAVAILABLE",STORY_RELS);}}
+        Element root=document.getDocumentElement();if(!REL_NS.equals(root.getNamespaceURI())||!"Relationships".equals(root.getLocalName()))throw error("STORY_RELATIONSHIPS_UNSUPPORTED",STORY_RELS);
+        List<Element> out=new ArrayList<>();Set<String> ids=new HashSet<>();for(Node child=root.getFirstChild();child!=null;child=child.getNextSibling())if(child instanceof Element&&REL_NS.equals(child.getNamespaceURI())&&"Relationship".equals(child.getLocalName())){Element relation=(Element)child;if(relation.getAttribute("Id").isEmpty()||!ids.add(relation.getAttribute("Id")))throw error("STORY_RELATIONSHIP_DUPLICATE",STORY_RELS);out.add(relation);}return out;
+    }
+    private static String resolveStoryTarget(String raw){try{java.net.URI target=new java.net.URI(raw);if(target.isAbsolute()||target.getAuthority()!=null||target.getQuery()!=null||target.getFragment()!=null||raw.contains("\\"))throw new IllegalArgumentException();String path=new java.net.URI("/word/document.xml").resolve(target).normalize().getPath();if(path==null||!path.startsWith("/word/")||path.contains("../"))throw new IllegalArgumentException();return path.substring(1);}catch(Exception invalid){throw error("STORY_TARGET_URI_UNSUPPORTED",raw);}}
+    private static String storyContentType(Kind kind){return "application/vnd.openxmlformats-officedocument.wordprocessingml."+(kind==Kind.HEADER?"header":"footer")+"+xml";}
+    private static void validateStoryContentType(PackageModel model,String part,Kind kind){Document document=storyXml(model,CONTENT_TYPES);String type=null;int matches=0;NodeList entries=document.getDocumentElement().getElementsByTagNameNS(CT_NS,"Override");for(int i=0;i<entries.getLength();i++){Element entry=(Element)entries.item(i);if(("/"+part).equals(entry.getAttribute("PartName"))){matches++;type=entry.getAttribute("ContentType");}}if(matches!=1||!storyContentType(kind).equals(type))throw error("STORY_CONTENT_TYPE_MISMATCH",part);}
+    private static boolean sameStoryIntent(Story a,Story b){if(a.action!=b.action||a.pageAction!=b.pageAction||!Objects.equals(a.pagePrefix,b.pagePrefix)||!Objects.equals(a.pageSuffix,b.pageSuffix)||!a.retainedSourceControlLines.equals(b.retainedSourceControlLines)||a.contractLabels.size()!=b.contractLabels.size())return false;for(int i=0;i<a.contractLabels.size();i++){Label x=a.contractLabels.get(i),y=b.contractLabels.get(i);if(!x.paragraph.id.equals(y.paragraph.id)||x.start!=y.start||x.end!=y.end||!x.expectedText.equals(y.expectedText))return false;}return true;}
+    private static String storyText(String text){return text.replace("\r\n","\n").replace('\r','\n');}
+    private static boolean activeFooter(Story story,Section section,NativeProperty evenAndOdd){return story.expectedBinding.kind==Kind.FOOTER&&(story.expectedBinding.variant==Variant.DEFAULT||story.expectedBinding.variant==Variant.FIRST&&storyOn(section.titlePg)||story.expectedBinding.variant==Variant.EVEN&&storyOn(evenAndOdd));}
+    private static boolean staticFooterCarrier(Story story){return story.expectedBinding.kind==Kind.FOOTER&&story.action==StoryAction.CREATE_NATIVE_FOOTER&&story.pageAction==PageAction.CREATE_PAGE_FROM_STATIC_SEQUENCE;}
+    private static boolean completeStaticFooterCarriers(Section section,NativeProperty evenAndOdd){int carriers=0;for(Story story:section.stories)if(activeFooter(story,section,evenAndOdd)){if(!staticFooterCarrier(story))return false;carriers++;}return carriers>0;}
+    private static void validateAppliedStaticFooterCarriers(PackageModel model,CapturedStories captured,Section section){int carriers=0;for(CapturedStory item:captured.stories)if(item.section==section&&activeFooter(item.story,section,captured.plan.evenAndOddHeaders)){boolean page=false;Document document=item.part==null?null:model.xmlParts.get(item.part);if(document!=null){NodeList fields=document.getElementsByTagNameNS(W,"fldSimple");for(int i=0;i<fields.getLength();i++)if(((Element)fields.item(i)).getAttributeNS(W,"instr").trim().matches("(?is)^PAGE\\b.*"))page=true;}if(!staticFooterCarrier(item.story)||!page)throw error("STORY_STATIC_CARRIER_NOT_APPLIED",section.observedSectionId);carriers++;}if(carriers==0)throw error("STORY_STATIC_CARRIER_NOT_APPLIED",section.observedSectionId);}
+    private static void validateStoryPlainText(String value){if(value!=null)for(String fragment:storyText(value).split("[\n\t]",-1))validText(fragment,"native-story-plain-text");}
+    private static String storyFields(Element root){StringBuilder snapshot=new StringBuilder();Deque<Boolean> fields=new ArrayDeque<>();NodeList nodes=root.getElementsByTagName("*");for(int i=0;i<nodes.getLength();i++){Element node=(Element)nodes.item(i);if(is(node,"fldChar")){String type=node.getAttributeNS(W,"fldCharType");if("begin".equals(type))fields.push(false);else if("end".equals(type)){if(fields.isEmpty())throw error("STORY_FIELD_SCOPE_UNSUPPORTED","field");fields.pop();}else if("separate".equals(type)&&!fields.isEmpty()&&!fields.peek()){fields.pop();fields.push(true);}else throw error("STORY_FIELD_SCOPE_UNSUPPORTED","field");snapshot.append(hash(xml(node)));}else if(is(node,"fldSimple")){if(node.getAttributeNS(W,"instr").trim().isEmpty())throw error("STORY_FIELD_SCOPE_UNSUPPORTED","field");snapshot.append(hash(xml(node)));}else if(is(node,"instrText")){if(fields.isEmpty())throw error("STORY_FIELD_SCOPE_UNSUPPORTED","field");snapshot.append(hash(xml(node)));}else if(!fields.isEmpty()&&is(node,"t"))snapshot.append(hash(xml(node)));}if(!fields.isEmpty())throw error("STORY_FIELD_SCOPE_UNSUPPORTED","field");return snapshot.toString();}
+    private static void validateStoryPackageLimits(PackageModel model){if(model.entries.size()>COUNT_LIMIT)throw error("DOCX_ENTRY_LIMIT","native-stories");long total=0;for(Map.Entry<String,byte[]> entry:model.entries.entrySet()){long size=entry.getValue().length;total+=size;if(size>ENTRY_LIMIT||((entry.getKey().endsWith(".xml")||entry.getKey().endsWith(".rels"))&&size>XML_LIMIT)||total>TOTAL_LIMIT)throw error("DOCX_INFLATION_LIMIT",entry.getKey());}}
+    private static void applyStories(PackageModel model,CapturedStories captured) {
+        if(captured.plan==null)return;NativeStoryPlan plan=captured.plan;Set<String> applied=new HashSet<>();
+        for(CapturedStory item:captured.stories) {
+            Story story=item.story;String status="PRESERVED";
+            if(story.action!=StoryAction.PRESERVE) {
+                if(!contains(model.xmlParts.get(MAIN).getDocumentElement(),item.sectionNode))throw error("STORY_SECTION_REMOVED",item.section.observedSectionId);
+                if(item.part==null)createStory(model,captured,item);
+                if(applied.add(item.part)) {
+                    Element root=storyXml(model,item.part).getDocumentElement();
+                    StaticFooterSourceFormat format=plan.staticFooterSourceFormat;
+                    if(format!=null) {
+                        if(story.action==StoryAction.APPEND_PROJECT_TITLE)appendStyledStoryParagraph(root,storyText(plan.identity.title),format.headerStyleId);
+                        else {
+                            Element paragraph=appendStyledStoryParagraph(root,storyText(plan.identity.number)+"\t"+story.retainedSourceControlLines.get(0)+"\t"+(story.pagePrefix==null?"":story.pagePrefix),format.footerStyleId);
+                            appendNativePage(paragraph);appendStoryRun(paragraph,story.pageSuffix==null?"":story.pageSuffix);
+                            appendStyledStoryParagraph(root,story.retainedSourceControlLines.get(1),format.footerStyleId);
+                        }
+                    }else if(story.action==StoryAction.APPEND_PROJECT_TITLE)appendStoryParagraph(root,storyText(plan.identity.title));
+                    else {
+                        List<Label> labels=new ArrayList<>(story.contractLabels);labels.sort(Comparator.comparing((Label label)->label.paragraph.id).thenComparing(label->-label.start));
+                        for(Label label:labels){Element paragraph=model.nodes.get(label.paragraph.id);replace(model,paragraph,Edit.replaceCatalogLabelOutsideFields("native-contract-label",label.paragraph,label.start,label.end,label.expectedText,storyText(plan.identity.number)));}
+                        if(labels.isEmpty())appendStoryParagraph(root,storyText(plan.identity.number));
+                    }
+                    if(item.originalFields!=null&&!item.originalFields.equals(storyFields(root)))throw error("STORY_FIELD_CHANGED",item.part);
+                    if(format==null&&story.pageAction==PageAction.CREATE_PAGE_FROM_STATIC_SEQUENCE){for(String control:story.retainedSourceControlLines)appendStoryParagraph(root,control);Element page=appendStoryParagraph(root,story.pagePrefix==null?"":story.pagePrefix);Element field=root.getOwnerDocument().createElementNS(W,"w:fldSimple");field.setAttributeNS(W,"w:instr"," PAGE ");field.setAttributeNS(W,"w:dirty","true");Element run=root.getOwnerDocument().createElementNS(W,"w:r"),text=root.getOwnerDocument().createElementNS(W,"w:t");run.appendChild(text);field.appendChild(run);page.appendChild(field);appendStoryRun(page,story.pageSuffix==null?"":story.pageSuffix);}
+                    captured.dirtyParts.add(item.part);status="APPLIED";
+                }else status="SHARED_TARGET_ALREADY_APPLIED";
+            }
+            captured.changes.add(new NativeStoryChange(story.action.name(),status,item.section,story.expectedBinding,item.part,item.relationship,null,0,null,null,Collections.emptyMap(),null));
+        }
+        Set<Section> verifiedCarriers=new HashSet<>();for(CapturedStaticFooter footer:captured.staticFooters)if(verifiedCarriers.add(footer.section))validateAppliedStaticFooterCarriers(model,captured,footer.section);
+        for(CapturedStaticFooter footer:captured.staticFooters){
+            if(!contains(model.xmlParts.get(MAIN).getDocumentElement(),footer.node)||!footer.paragraph.exactText.equals(descendantText(footer.node,"t")))throw error("STORY_STATIC_SCOPE_CHANGED",footer.paragraph.source.id);
+            clear(footer.node);captured.dirtyParts.add(MAIN);captured.changes.add(new NativeStoryChange("CLEAR_EXACT_STATIC_FOOTER","APPLIED",footer.section,null,MAIN,null,footer.paragraph.source,footer.page,footer.paragraph.exactText,null,Collections.emptyMap(),null));
+            // Migrated footer marks otherwise retain a full empty line before continuation breaks.
+            if(plan.staticFooterSourceFormat!=null){Document document=footer.node.getOwnerDocument();List<Element> values=direct(footer.node,"pPr");Element props=values.isEmpty()?document.createElementNS(W,"w:pPr"):values.get(0);if(values.isEmpty())footer.node.insertBefore(props,footer.node.getFirstChild());compactSpacing(document,props);Map<String,String> spacing=new LinkedHashMap<>();spacing.put("before","0");spacing.put("after","0");spacing.put("line","1");spacing.put("lineRule","exact");captured.changes.add(new NativeStoryChange("COMPACT_EXACT_CLEARED_STATIC_FOOTER_SPACING","APPLIED",footer.section,null,MAIN,null,footer.paragraph.source,footer.page,footer.paragraph.exactText,null,spacing,null));}
+        }
+        for(Map.Entry<Section,Element> entry:captured.sections.entrySet()){Section section=entry.getKey();Element node=entry.getValue();if(section.numberingChange!=null){direct(node,"pgNumType").get(0).setAttributeNS(W,"w:start",section.numberingChange.newStart);captured.dirtyParts.add(MAIN);captured.changes.add(new NativeStoryChange("MIGRATE_STATIC_NUMBER_START","APPLIED",section,null,MAIN,null,null,0,null,section.pgNumType,Collections.singletonMap("start",section.numberingChange.newStart),null));}if(section.marginChange!=null){List<Element> margins=direct(node,"pgMar");Element margin=margins.isEmpty()?node.getOwnerDocument().createElementNS(W,"w:pgMar"):margins.get(0);if(margins.isEmpty()){Node before=null;for(Node child=node.getFirstChild();child!=null;child=child.getNextSibling())if(child instanceof Element&&W.equals(child.getNamespaceURI())&&Arrays.asList("paperSrc","pgBorders","lnNumType","pgNumType","cols","formProt","vAlign","noEndnote","titlePg","textDirection","bidi","rtlGutter","docGrid","printerSettings","sectPrChange").contains(child.getLocalName())){before=child;break;}node.insertBefore(margin,before);}Map<String,String> values=new LinkedHashMap<>();for(Map.Entry<String,Integer> value:section.marginChange.newTwips.entrySet()){margin.setAttributeNS(W,"w:"+value.getKey(),value.getValue().toString());values.put(value.getKey(),value.getValue().toString());}captured.dirtyParts.add(MAIN);captured.changes.add(new NativeStoryChange("EXPLICIT_SOURCE_BOUND_MARGIN_CHANGE","APPLIED",section,null,MAIN,null,null,0,null,section.pgMar,values,null));}}
+    }
+    private static Element appendStyledStoryParagraph(Element root,String text,String styleId){Element paragraph=appendStoryParagraph(root,text);Document document=root.getOwnerDocument();Element properties=document.createElementNS(W,"w:pPr"),style=document.createElementNS(W,"w:pStyle");style.setAttributeNS(W,"w:val",styleId);properties.appendChild(style);paragraph.insertBefore(properties,paragraph.getFirstChild());return paragraph;}
+    private static void appendNativePage(Element paragraph){Document document=paragraph.getOwnerDocument();Element field=document.createElementNS(W,"w:fldSimple");field.setAttributeNS(W,"w:instr"," PAGE ");field.setAttributeNS(W,"w:dirty","true");Element run=document.createElementNS(W,"w:r"),text=document.createElementNS(W,"w:t");run.appendChild(text);field.appendChild(run);paragraph.appendChild(field);}
+    private static Element appendStoryParagraph(Element root,String text){Element paragraph=root.getOwnerDocument().createElementNS(W,"w:p");root.appendChild(paragraph);appendStoryRun(paragraph,text);return paragraph;}
+    private static void appendStoryRun(Element paragraph,String value){String text=storyText(value);for(String fragment:text.split("[\n\t]",-1))validText(fragment,"native-story-plain-text");Element run=paragraph.getOwnerDocument().createElementNS(W,"w:r"),node=paragraph.getOwnerDocument().createElementNS(W,"w:t");run.appendChild(node);paragraph.appendChild(run);setReplacementText(node,text);}
+    private static void createStory(PackageModel model,CapturedStories captured,CapturedStory item){
+        Kind kind=item.story.expectedBinding.kind;String stem=kind==Kind.HEADER?"header":"footer";Document types=storyXml(model,CONTENT_TYPES);List<Element> relations=storyRelationships(model,true);Set<String> reserved=new HashSet<>(model.entries.keySet());reserved.addAll(model.xmlParts.keySet());for(Element relation:relations)if((OFFICE_REL+"/header").equals(relation.getAttribute("Type"))||(OFFICE_REL+"/footer").equals(relation.getAttribute("Type"))){String mode=optionalAttribute(relation,"TargetMode");if(mode==null||"Internal".equals(mode))reserved.add(resolveStoryTarget(relation.getAttribute("Target")));}NodeList overrides=types.getDocumentElement().getElementsByTagNameNS(CT_NS,"Override");for(int i=0;i<overrides.getLength();i++){String part=((Element)overrides.item(i)).getAttribute("PartName");if(part.startsWith("/"))reserved.add(part.substring(1));}int next=1;while(reserved.contains("word/"+stem+next+".xml"))next++;String part="word/"+stem+next+".xml";
+        Set<String> ids=new HashSet<>();for(Element relation:relations)ids.add(relation.getAttribute("Id"));int rid=1;while(ids.contains("rId"+rid))rid++;String id="rId"+rid;
+        try{Document document=parse(("<w:"+(kind==Kind.HEADER?"hdr":"ftr")+" xmlns:w=\""+W+"\"/>").getBytes(StandardCharsets.UTF_8));model.xmlParts.put(part,document);}catch(Exception failure){throw error("STORY_PART_CREATION_UNSUPPORTED",part);}
+        Document relationDocument=model.xmlParts.get(STORY_RELS);Element relation=relationDocument.createElementNS(REL_NS,"Relationship");relation.setAttribute("Id",id);relation.setAttribute("Type",OFFICE_REL+"/"+stem);relation.setAttribute("Target",part.substring("word/".length()));relationDocument.getDocumentElement().appendChild(relation);
+        Element type=types.createElementNS(CT_NS,"Override");type.setAttribute("PartName","/"+part);type.setAttribute("ContentType",storyContentType(kind));types.getDocumentElement().appendChild(type);
+        Element reference=item.sectionNode.getOwnerDocument().createElementNS(W,"w:"+stem+"Reference");reference.setAttributeNS(W,"w:type",item.story.expectedBinding.variant.name().toLowerCase(Locale.ROOT));reference.setAttributeNS(OFFICE_REL,"r:id",id);Node before=null;for(Node child=item.sectionNode.getFirstChild();child!=null;child=child.getNextSibling())if(child instanceof Element&&(kind==Kind.HEADER&&!is(child,"headerReference")||kind==Kind.FOOTER&&!is(child,"headerReference")&&!is(child,"footerReference"))){before=child;break;}item.sectionNode.insertBefore(reference,before);
+        item.part=part;item.relationship=id;captured.dirtyParts.addAll(Arrays.asList(MAIN,STORY_RELS,CONTENT_TYPES,part));
+    }
+    private static List<NativeStoryChange> storyLedger(PackageModel model,CapturedStories captured){List<NativeStoryChange> rows=new ArrayList<>();for(NativeStoryChange row:captured.changes){NativeStoryChange bound=new NativeStoryChange(row.action,row.status,row.section,row.binding,row.generatedPartName,row.generatedRelationshipId,row.paragraph,row.sourcePageOrdinal,row.oldText,row.originalProperty,row.newAttributes,row.generatedPartName==null?null:hash(model.entries.get(row.generatedPartName)));if(row.binding!=null&&!"PRESERVED".equals(row.status)||"COMPACT_EXACT_CLEARED_STATIC_FOOTER_SPACING".equals(row.action))bound.sourceFormatting=captured.plan.staticFooterSourceFormat;rows.add(bound);}return rows;}
+
     private static final class PackageModel {
         final LinkedHashMap<String,byte[]> entries=new LinkedHashMap<>();
         final Map<String,Document> xmlParts=new LinkedHashMap<>();
@@ -614,7 +900,7 @@ public final class DocxTemplateEditor {
                 model.entries.put(name,out.toByteArray());
             }
             if(!model.entries.containsKey(MAIN)||!model.entries.containsKey("[Content_Types].xml"))throw error("INVALID_DOCX_PACKAGE","source");
-            validateContentType(model.entries.get("[Content_Types].xml"));
+            model.xmlParts.put(CONTENT_TYPES,validateContentType(model.entries.get(CONTENT_TYPES)));
             List<Paragraph> paragraphs=new ArrayList<>(),all=new ArrayList<>();Map<String,NodeAnchor> anchors=new LinkedHashMap<>();List<Feature> features=new ArrayList<>();
             for(Map.Entry<String,byte[]> part:model.entries.entrySet()) {
                 if(!part.getKey().matches("word/(?:document|header[0-9]+|footer[0-9]+|footnotes|endnotes)\\.xml"))continue;
@@ -622,9 +908,9 @@ public final class DocxTemplateEditor {
                 if(!W.equals(document.getDocumentElement().getNamespaceURI()))throw error("UNSUPPORTED_DOCX_CODEC",part.getKey());
                 if(MAIN.equals(part.getKey())&&(!is(document.getDocumentElement(),"document")||direct(document.getDocumentElement(),"body").size()!=1))throw error("UNSUPPORTED_DOCX_CODEC",part.getKey());
                 model.xmlParts.put(part.getKey(),document);
-                NodeList nodes=document.getElementsByTagNameNS(W,"p");
+                NodeList sections=document.getElementsByTagNameNS(W,"sectPr"),nodes=document.getElementsByTagNameNS(W,"p");
                 for(int i=0;i<nodes.getLength();i++) {
-                    Element p=(Element)nodes.item(i);Paragraph paragraph=new Paragraph(part.getKey(),path(p),p,i+1);
+                    Element p=(Element)nodes.item(i);Paragraph paragraph=new Paragraph(part.getKey(),path(p),p,i+1,sections);
                     all.add(paragraph);if(MAIN.equals(part.getKey()))paragraphs.add(paragraph);model.nodes.put(paragraph.id,p);
                 }
                 for(String local:Arrays.asList("tc","tr","tbl","sectPr","p")) {
@@ -640,7 +926,7 @@ public final class DocxTemplateEditor {
             model.index=new TemplateIndex(hash(bytes),paragraphs,hashes,anchors,features,all);return model;
         } catch(EditException e){throw e;} catch(Exception e){throw error("INVALID_DOCX_PACKAGE","source");}
     }
-    private static void validateContentType(byte[] bytes) throws Exception {
+    private static Document validateContentType(byte[] bytes) throws Exception {
         Document document=parse(bytes);String namespace="http://schemas.openxmlformats.org/package/2006/content-types";
         if(!namespace.equals(document.getDocumentElement().getNamespaceURI())||!"Types".equals(document.getDocumentElement().getLocalName()))throw error("UNSUPPORTED_DOCX_CODEC","[Content_Types].xml");
         NodeList overrides=document.getElementsByTagNameNS(namespace,"Override");int matches=0;
@@ -652,6 +938,7 @@ public final class DocxTemplateEditor {
             }
         }
         if(matches!=1)throw error("UNSUPPORTED_DOCX_CODEC","word/document.xml");
+        return document;
     }
     private static Document parse(byte[] xml) throws Exception {
         DocumentBuilderFactory factory=DocumentBuilderFactory.newInstance();factory.setNamespaceAware(true);
@@ -782,8 +1069,12 @@ public final class DocxTemplateEditor {
     }
     /** Detached paragraph snapshots cannot see a field that starts in an earlier paragraph. */
     private static void validateGlobalLabelFields(Element target,Edit edit) {
+        validateGlobalLabelFields(target,edit.start,edit.end,edit.tocFieldLabel,edit.operationId);
+    }
+    /** Full static text clears share the field guard without authorizing a local label replacement. */
+    private static void validateGlobalLabelFields(Element target,int start,int end,boolean tocFieldLabel,String operationId) {
         Set<Element> selected=new HashSet<>();
-        for(Segment segment:segments(target))if(is(segment.node,"t")&&segment.start<edit.end&&segment.end>edit.start)selected.add(segment.node);
+        for(Segment segment:segments(target))if(is(segment.node,"t")&&segment.start<end&&segment.end>start)selected.add(segment.node);
         Deque<LabelFieldScope> active=new ArrayDeque<>();Set<LabelFieldScope> touched=new LinkedHashSet<>();
         NodeList nodes=target.getOwnerDocument().getElementsByTagName("*");
         for(int i=0;i<nodes.getLength();i++) {
@@ -797,12 +1088,12 @@ public final class DocxTemplateEditor {
             }else if(is(node,"instrText")&&!active.isEmpty()) {LabelFieldScope scope=active.peek();if(scope.separated)scope.invalid=true;scope.instruction.append(node.getTextContent());}
             if(selected.contains(node))for(LabelFieldScope scope:active){if(!scope.separated)scope.invalid=true;touched.add(scope);}
         }
-        if(edit.tocFieldLabel) {
-            if(touched.size()!=1)throw error("FIELD_TEXT_EDIT_UNSUPPORTED",edit.operationId);
+        if(tocFieldLabel) {
+            if(touched.size()!=1)throw error("FIELD_TEXT_EDIT_UNSUPPORTED",operationId);
             LabelFieldScope scope=touched.iterator().next();
-            if(!scope.complete||!scope.separated||scope.invalid)throw error("INCOMPLETE_FIELD_SCOPE",edit.operationId);
-            if(!scope.instruction.toString().trim().matches("(?is)^TOC(?:\\s.*)?$"))throw error("FIELD_TEXT_EDIT_UNSUPPORTED",edit.operationId);
-        }else if(!touched.isEmpty())throw error("FIELD_TEXT_EDIT_UNSUPPORTED",edit.operationId);
+            if(!scope.complete||!scope.separated||scope.invalid)throw error("INCOMPLETE_FIELD_SCOPE",operationId);
+            if(!scope.instruction.toString().trim().matches("(?is)^TOC(?:\\s.*)?$"))throw error("FIELD_TEXT_EDIT_UNSUPPORTED",operationId);
+        }else if(!touched.isEmpty())throw error("FIELD_TEXT_EDIT_UNSUPPORTED",operationId);
     }
     private static void validateStructural(Element target,Edit edit) {
         if(edit.type==EditType.CLEAR_EDITORIAL_CELL) {

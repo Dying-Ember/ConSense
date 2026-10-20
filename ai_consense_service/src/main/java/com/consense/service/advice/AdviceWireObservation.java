@@ -1,6 +1,8 @@
 package com.consense.service.advice;
 
 import com.consense.common.JsonUtils;
+import com.consense.service.llm.QwenChatUsagePreflight;
+import com.consense.service.vetting.VettingInputBudget;
 import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.core.JsonToken;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -45,6 +47,30 @@ final class AdviceWireObservation {
             metadata.put("generationRequest",attempt.entity("generation-request.utf8.json",generation));
             metadata.put("httpEntityScope","UTF8 JSON HTTP entity; not TCP/TLS/framing bytes");
             metadata.put("providerMaximumMeasured",false);metadata.put("sourceFreshnessAtPrepare","not_yet_checked");
+            attempt.json("request-receipt.json",metadata);return attempt;
+        } catch(IOException error){throw failed("observation_request_seal_failed");}
+    }
+    /** Same sealed Qwen entities used by admission/generation; real ledger hashes establish dispatch separately. */
+    Attempt beginQwen(QwenChatUsagePreflight.PreparedRequest request,int number,String secret) {
+        VettingInputBudget.Input input=request.getInput();
+        byte[] bound=JsonUtils.write(input).getBytes(StandardCharsets.UTF_8),generation=request.getGenerationJson().getBytes(StandardCharsets.UTF_8),preflight=request.getPreflightJson().getBytes(StandardCharsets.UTF_8);
+        rejectSecret(bound,secret);rejectSecret(generation,secret);rejectSecret(preflight,secret);
+        QwenChatUsagePreflight.WireIdentity wire=input.getQwenWire();
+        if(!VettingInputBudget.validBinding(input)||wire==null||!sha(generation).equals(wire.getGenerationEntitySha256())||!sha(preflight).equals(wire.getPreflightEntitySha256()))
+            throw failed("qwen_sealed_observation_binding_differs");
+        try {
+            Path directory=Files.createDirectory(root.resolve(UUID.randomUUID().toString()));
+            Attempt attempt=new Attempt(directory,secret,false);
+            Map<String,Object> metadata=new LinkedHashMap<>();metadata.put("schema","consense-advice-qwen-prepared-http-entity-observation-v1");metadata.put("module","advice");
+            metadata.put("provider",input.getProvider());metadata.put("model",input.getModel());metadata.put("attempt",number);
+            metadata.put("sourceSnapshotSha256",input.getSourceSnapshotSha256());metadata.put("serializedInputSha256",input.getSerializedInputSha256());
+            metadata.put("profileSha256",wire.getProfileSha256());metadata.put("policySha256",wire.getPolicySha256());
+            metadata.put("boundInput",attempt.entity("bound-input.utf8.json",bound));
+            metadata.put("preflightRequest",attempt.entity("preflight-request.utf8.json",preflight));
+            metadata.put("generationRequest",attempt.entity("generation-request.utf8.json",generation));
+            metadata.put("httpEntityScope","Exact UTF8 JSON entities from the sealed Qwen request; no fields removed or normalized. TCP/TLS/framing bytes are unobserved.");
+            metadata.put("dispatchObservedByThisRecorder",false);metadata.put("dispatchEvidence","Match these entity hashes and serialized input identity to the actual durable preflight/answer ledger receipts.");
+            metadata.put("providerMaximumMeasured",false);metadata.put("sourceFreshnessAtPrepare","current guards around preflight and generation are separate from this prepared-entity record");
             attempt.json("request-receipt.json",metadata);return attempt;
         } catch(IOException error){throw failed("observation_request_seal_failed");}
     }

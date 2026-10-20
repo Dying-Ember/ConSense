@@ -76,10 +76,10 @@ final class DraftCandidateEvidenceRecovery {
         String sourceValue=original.substring(unit.listStart,unit.listEnd).trim();
         String scope=original.substring(unit.start,unit.end);
         if(!DraftEvidenceQuotes.present(supplied,scope))return new Result(value,quote,"context_incomplete_source");
-        boolean exactValue=DraftEvidenceQuotes.textIdentity(value).equals(DraftEvidenceQuotes.textIdentity(sourceValue));
+        boolean exactValue=value.equals(sourceValue);
         if(exactValue&&DraftEvidenceQuotes.present(supplied,quote)&&DraftCandidateGrounding.directLiteralSupported(spec,value,quote))return new Result(value,quote);
         if(!canRecover||!orderedQuoteAnchor(quote,scope,unit))return new Result(value,quote);
-        // Only the list marker may differ. All item bodies and their ordered identifiers already matched.
+        // All item bodies and ordered identifiers matched; keep the original marker and paragraph layout.
         if(!exactValue)return new Result(sourceValue,scope,"source_value_typography_restored","evidence_quote_reanchored");
         return new Result(value,scope,"evidence_quote_reanchored");
     }

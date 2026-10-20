@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import type { GraphLocationTarget, GraphNavigation } from '@/drafting/graph-navigation'
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, reactive, ref, watch } from 'vue'
-import { draftingApi } from '@/api'
-import type { DraftCatalog, DraftDocument, DraftField, DraftGroup, DraftPlan, DraftPlanAction, DraftTargetOverride, DraftUnresolved, DraftVariable, DraftVariablePatch, EvidenceItem, ExtractTrace, TemplateItem } from '@/api'
+import { ApiError, draftingApi } from '@/api'
+import type { DraftCatalog, DraftDocument, DraftField, DraftGroup, DraftIdentityConfirmation, DraftPlan, DraftPlanAction, DraftTargetOverride, DraftUnresolved, DraftVariable, DraftVariablePatch, EvidenceItem, ExtractTrace, TemplateItem } from '@/api'
 import { useAppStore } from '@/stores/app'
 import AppModal from '@/components/AppModal.vue'
 import DraftingSourceReview from '@/components/DraftingSourceReview.vue'
@@ -31,7 +31,7 @@ type Step = 'inputs' | 'identify' | 'review' | 'variables' | 'preview'
 
 const projectId = computed(() => store.activeProjectId)
 const step = ref<Step>('inputs')
-const phrase = (zh: string, en: string) => store.locale === 'en' ? en : zh
+const phrase = (zh: string, en: string, hant = zh) => store.locale === 'en' ? en : store.locale === 'zh-Hant' ? hant : zh
 const sourceReview = ref<InstanceType<typeof DraftingSourceReview>>()
 const reviewMounted = ref(false), reviewDirty = ref(false), candidateDirty = ref(false), draftRevisionId = ref(''), candidateReload = ref(0), rebuildReviewOpen = ref(false)
 const discoveryBudget = ref<string | number>(1)
@@ -114,6 +114,8 @@ const readingFile = ref('NTT')
 const readingKey = ref('')
 const readingActionId = ref('')
 const previewEditKey = ref('')
+const identityConfirmation = ref<{ projectId: string; token: number; request: DraftIdentityConfirmation; name: string; number: string; currentName: string }>()
+const identityError = ref('')
 let generation = 0, planGeneration = 0
 let alive = true
 let restoreViewPending = true
@@ -129,6 +131,18 @@ const readingSourceAvailable = computed(() => {
   return tag === 'missing' ? false : tag === 'ok' || tag === 'partial' ? true : undefined
 })
 const variableMap = computed(() => new Map(variables.value.map(variable => [variable.key, variable])))
+const identityProposal = computed(() => {
+  const variable = variableMap.value.get('contractTitle'), field = fields.value.find(item => item.key === 'contractTitle')
+  const project = store.projects.find(item => item.id === projectId.value)
+  if (!variable?.confirmed || variable.reviewRequired || variable.validationIssue || !field || dirty(field) || !project) return undefined
+  try {
+    const value = JSON.parse(variable.value)
+    if (!value || Array.isArray(value) || typeof value.title !== 'string' || !value.title.trim() || typeof value.number !== 'string' || !value.number.trim()) return undefined
+    const name = value.title, number = value.number
+    if (project.contractNo === number && [project.name.zhHans, project.name.zhHant, project.name.en].every(item => item === name)) return undefined
+    return { project, variable, name, number }
+  } catch { return undefined }
+})
 const steps = computed(() => [{ key: 'inputs' as Step, label: phrase('1 来源文件', '1 Sources') }, { key: 'identify' as Step, label: phrase('2 识别要求与候选', '2 Identify') }, { key: 'review' as Step, label: phrase('3 对着原文核对', '3 Source review') }, { key: 'variables' as Step, label: phrase('4 采用与修改方案', '4 Adopt and plan') }, { key: 'preview' as Step, label: phrase('5 预览与导出', '5 Preview and export') }])
 const allTemplates = computed(() => ['NTT', 'SCT', 'SCC'].every(key => templates.value.some(template => template.key === key && template.tag === 'ok')))
 const activeDocument = computed(() => documents.value.find(document => document.fileKey === activeFile.value))
@@ -285,6 +299,49 @@ async function saveField(id: string, token: number, field: DraftField, patch: Dr
   if (!current(id, token)) return
   variables.value = [...variables.value.filter(variable => variable.key !== updated.key), updated]
   values[field.key] = decode(field, updated.value); baseline[field.key] = updated.value ?? ''; emptyBaseline[field.key] = !!updated.graphRevisionId && field.kind === 'text' && updated.value === '' && updated.confirmed; intentionalEmpty[field.key] = !!emptyBaseline[field.key]; snapshotDraft(id)
+  if (field.key === 'contractTitle') openIdentityConfirmation()
+}
+function openIdentityConfirmation() {
+  const proposal = identityProposal.value
+  if (!proposal) return
+  const { project, variable, name, number } = proposal
+  identityError.value = ''
+  identityConfirmation.value = { projectId: project.id, token: generation, name, number, currentName: l(project.name), request: {
+    expectedProjectIdentity: { nameZhHans: project.name.zhHans ?? null, nameZhHant: project.name.zhHant ?? null, nameEn: project.name.en ?? null, contractNo: project.contractNo ?? null },
+    expectedAdoptedIdentity: { value: variable.value }
+  } }
+}
+async function confirmIdentity() {
+  const confirmation = identityConfirmation.value
+  if (!confirmation || !current(confirmation.projectId, confirmation.token)) return
+  await action(phrase('应用项目身份', 'Applying project identity', '套用項目身分'), async (id, token) => {
+    let applied = false
+    try {
+      const project = await draftingApi.confirmIdentity(id, confirmation.request)
+      if (project.id !== id) throw Error(phrase('返回的项目身份不匹配，请刷新后核对。', 'The returned project identity does not match. Reload to verify it.', '返回的項目身分不相符，請重新整理後核對。'))
+      store.projects = store.projects.map(item => item.id === project.id ? project : item)
+      if (!current(id, token)) return
+      applied = true
+      documents.value = documents.value.map(document => ({ ...document, stale: true }))
+      identityConfirmation.value = undefined; identityError.value = ''
+      await store.loadProjects()
+      if (current(id, token)) await refresh(id, token)
+    } catch (caught) {
+      if (!current(id, token)) return
+      if (applied) { error.value = phrase('项目身份已保存，但重新读取失败。请刷新后核对；现有文稿需重新生成。', 'Project identity was saved, but reloading failed. Refresh to verify it and regenerate the documents.', '項目身分已儲存，但重新讀取失敗。請重新整理後核對，並重新產生文稿。'); return }
+      identityError.value = caught instanceof ApiError && caught.code === 4090
+        ? phrase('项目身份或已采用值已变化，请刷新并重新核对后确认。', 'The project identity or adopted value changed. Reload and review it before confirming again.', '項目身分或已採用值已變化，請重新整理並核對後確認。')
+        : caught instanceof Error ? caught.message : String(caught)
+    }
+  })
+}
+async function reloadIdentityConfirmation() {
+  await action(w('loading'), async (id, token) => {
+    await store.loadProjects()
+    if (!current(id, token)) return
+    await refresh(id, token)
+    if (current(id, token)) { identityConfirmation.value = undefined; openIdentityConfirmation() }
+  })
 }
 async function persistDirty(id: string, token: number, subset = fields.value) { for (const field of subset) { if (!current(id, token)) return; if (dirty(field)) await saveField(id, token, field, { value: encode(field, values[field.key]), ...(intentionalEmpty[field.key] ? { explicitEmpty: true } : {}) }) } }
 async function saveGroup(group?: DraftGroup) { await action(w('saving'), async (id, token) => { await persistDirty(id, token, group?.fields); if (current(id, token)) await refresh(id, token) }) }
@@ -559,6 +616,7 @@ watch(projectId, (id, old) => {
   closeGraph(false)
   graphNavigation.value = undefined
   generation++; planGeneration++; busy.value = ''; error.value = ''; reviewDirty.value = false; candidateDirty.value = false; draftRevisionId.value = ''; rebuildReviewOpen.value = false; step.value = 'inputs'; activeFile.value = 'NTT'; editingDocument.value = false; immersiveDocument.value = false; targetId.value = ''; restored.value = false; restoreViewPending = true; traceOpen.value = false
+  identityConfirmation.value = undefined; identityError.value = ''
   reviewLayout.value = 'list'; focusedGroupId.value = ''; search.value = ''; statusFilter.value = 'all'
   generationReview.value = undefined; catalog.value = { ruleVersion: '', groups: [] }; templates.value = []; inputs.value = []; variables.value = []; documentText.value = ''; documentBaseline.value = ''; documents.value = []; plan.value = null; trace.value = null
   bodyDraft.value = createBodyDraft(undefined); removalItem.value = null; readingOpen.value = false; readingKey.value = ''; readingActionId.value = ''; readingFile.value = 'NTT'; previewEditKey.value = ''
@@ -570,7 +628,7 @@ watch(projectId, (id, old) => {
   if (id) void action(w('loading'), refresh)
 }, { immediate: true })
 watch(activeFile, () => { if (graphNavigation.value?.fileKey !== activeFile.value) graphNavigation.value = undefined; loadDocument(false) })
-watch(activeDocument, () => { loadDocument() })
+watch(activeDocument, (_document, previous) => { if (!bodyDirty(previous, bodyDraft.value)) loadDocument(false) })
 watch(step, () => { if (step.value === 'review') void ensureReview(); if (step.value !== 'preview') { immersiveDocument.value = false; graphNavigation.value = undefined } })
 onBeforeUnmount(() => { snapshotDraft(projectId.value); alive = false; generation++; planGeneration++; if (planTimer) clearTimeout(planTimer); window.removeEventListener('beforeunload', beforeUnload); window.removeEventListener('keydown', workspaceKeydown) })
 </script>
@@ -609,6 +667,7 @@ onBeforeUnmount(() => { snapshotDraft(projectId.value); alive = false; generatio
       <div v-if="reviewLayout === 'focus' && filteredGroups.length" class="question-navigation"><button class="btn" :disabled="focusedGroupIndex <= 0" @click="moveQuestion(-1)">{{ w('previousQuestion') }}</button><span aria-live="polite">{{ w('questionPosition') }} {{ focusedGroupIndex + 1 }} / {{ filteredGroups.length }}</span><button class="btn" :disabled="focusedGroupIndex >= filteredGroups.length - 1" @click="moveQuestion(1)">{{ w('nextQuestion') }}</button></div>
       <section v-for="group in displayedGroups" :id="`group-${group.id}`" :key="group.id" class="flow-card input-group" :data-group="group.id">
         <div class="card-head"><h3><span class="group-number">{{ groupNumber(group) }}</span>{{ l(group.label) }}</h3><span class="state" :class="groupState(group)">{{ w(groupState(group)) }}</span></div><p v-if="group.description" class="hint">{{ l(group.description) }}</p>
+        <div v-if="group.id === 'identity' && identityProposal" class="condition-note" data-identity-pending><p>{{ phrase('已采用的名称和编号与当前工作区不同。确认后将替换顶部项目身份，并使包内现有文稿失效；重新生成后采用新身份。', 'The adopted name and number differ from this workspace. Confirm to replace the topbar identity and invalidate existing package drafts, then regenerate them with the new identity.', '已採用名稱及編號與目前工作區不同。確認後將替換頂部項目身分，並使包內現有文稿失效；重新產生後採用新身分。') }}</p><button type="button" class="btn" data-review-project-identity :disabled="!!busy" @click="openIdentityConfirmation">{{ phrase('核对并应用项目身份', 'Review and apply project identity', '核對並套用項目身分') }}</button></div>
         <article v-for="field in visibleFields(group)" :id="`field-${field.key}`" :key="field.key" class="variable" :class="{ 'source-selected': readingOpen && readingKey === field.key }" :data-variable="field.key"><div class="variable-head"><button class="btn text-link" :data-open-template="field.key" :disabled="!!busy" @click="openReading(field)">{{ w('locateTemplate') }}</button><span class="state" :class="state(field)">{{ dirty(field) ? w('unsaved') : w(state(field)) }}</span><button v-if="variableMap.get(field.key)?.reviewRequired" class="btn soft" :disabled="!!busy" @click="adopt(field)">{{ w('reviewed') }}</button><button v-else-if="state(field) === 'suggested'" class="btn soft" :disabled="!!busy" @click="adopt(field)">{{ w('adoptSuggested') }}</button></div><DraftingInputField :field="field" :value="values[field.key]" :values="values" :locale="store.locale" :row-identity-key="graphMode?'_itemId':'id'" :trace="trace" :disabled="inputDisabled(field)" @update="update(field, $event)"><template #actions><div class="field-save-actions"><button type="button" class="btn primary" :data-save-input="field.key" :disabled="!!busy || !dirty(field) || applicability(field.condition, values) === 'no'" @click="saveInput(field)">{{ w('saveInput') }}</button><span v-if="inputSaveStatus(field)" class="field-save-feedback" :class="{ failed: inputSaveStates[field.key] === 'failed' }" :data-input-save-status="field.key" role="status" aria-live="polite">{{ w(inputSaveStatus(field)!) }}</span></div></template></DraftingInputField><label v-if="graphMode && field.kind === 'text'" class="explicit-empty-choice"><input type="checkbox" :checked="!!intentionalEmpty[field.key]" :data-explicit-empty="field.key" :disabled="inputDisabled(field)" @change="toggleEmpty(field, ($event.target as HTMLInputElement).checked)">{{ phrase('明确留空（仍需理由并保存）', 'Intentionally blank (reason and save required)') }}</label><label v-if="variableMap.get(field.key)?.graphRevisionId && dirty(field)" class="manual-adoption-note">{{ phrase('人工采用理由', 'Reason for adopting a manual value') }}<textarea v-model="manualNotes[field.key]" :disabled="!!busy" :data-manual-note="field.key" rows="2" /></label><p v-if="derivedInput(field)" class="hint">{{ w('durationDerived') }}</p><p v-if="['contractPeriodMonths', 'periodAtLeast39Months'].includes(field.key) && durationConflict" class="condition-note">{{ w('durationConflict') }}</p><p v-if="applicability(field.condition, values) === 'unknown'" class="condition-note">{{ w('prerequisite') }}</p><p v-if="validationIssue(field, values[field.key]) && validationIssue(field, values[field.key]) !== 'missing'" class="condition-note">{{ w(validationIssue(field, values[field.key])!) }}</p><p v-if="['siteInspectionStartDate', 'siteInspectionEndDate'].includes(field.key) && reversedSiteDates(values)" class="condition-note">{{ w('reversedDates') }}</p><p v-if="variableMap.get(field.key)?.validationIssue" class="condition-note">{{ variableMap.get(field.key)?.validationIssue }}</p><details class="field-evidence"><summary>{{ w('sourceDetails') }}</summary><blockquote v-if="variableMap.get(field.key)?.source">{{ variableMap.get(field.key)?.source }}</blockquote><p v-else class="hint">{{ w('noSource') }}</p><p v-if="variableMap.get(field.key)?.note" class="hint raw-text">{{ variableMap.get(field.key)?.note }}</p><div v-for="(candidate, candidateIndex) in variableMap.get(field.key)?.candidates ?? []" :key="candidateIndex" class="candidate"><strong>{{ candidate.fileName || w('candidates') }}</strong><DraftingValueDisplay :field="field" :value="candidate.value" :locale="store.locale" /><blockquote>{{ candidate.sourceQuote }}</blockquote><p class="hint raw-text">{{ candidate.reason }}</p><button class="btn" :disabled="!!busy" @click="adopt(field, candidateIndex)">{{ w('adoptCandidate') }}</button></div><p v-for="target in field.affects ?? []" :key="`${target.document}-${target.clause}`" class="hint">{{ target.document }} {{ target.clause }} · {{ target.paragraphs }}</p></details></article>
         <DraftingBillDistribution v-if="group.id === 'bills'" :values="values" :locale="store.locale" /><p v-if="visibleFields(group).length !== group.fields.length" class="hint">{{ w('hiddenFields') }}</p><details v-if="relatedActions(group).length" class="clause-details"><summary>{{ w('affected') }}</summary><div v-for="item in relatedActions(group)" :key="item.id" class="clause-action" :data-action-id="item.id"><div class="card-head"><strong>{{ item.document }} {{ item.clause }}</strong><span class="state">{{ w((item.action in { retain: 1, amend: 1, insert: 1, delete: 1, not_used: 1, pending: 1, not_adopted: 1 } ? item.action : 'pending') as DraftWord) }}</span></div><p class="hint">{{ item.paragraphs }}</p><p>{{ l(item.detail) }}</p><details v-if="item.scopeResults"><summary>{{ phrase('逐项明细的条件判断', 'Condition result for each list item') }}</summary><ol><li v-for="result in item.scopeResults" :key="result.itemId ?? result.rowIndex">{{ phrase('第', 'Item ') }} {{ result.rowIndex + 1 }} {{ result.itemId ? ' · '+result.itemId : '' }} · {{ result.matches === true ? phrase('满足条件', 'Matches') : result.matches === false ? phrase('不满足条件', 'Does not match') : phrase('仍不确定', 'Unknown') }}</li></ol></details><details v-if="item.sourceWarning" class="source-warning"><summary>{{ w('sourceWarning') }}</summary><p class="condition-note">{{ l(item.sourceWarning) }}</p></details><pre v-if="item.value">{{ item.value }}</pre><button class="btn text-link" :disabled="!!busy" @click="openReading(undefined, item)">{{ w('locateTemplate') }}</button><button class="btn text-link" :disabled="!!busy" @click="openTarget(item)">{{ w('exactEdit') }}</button></div></details><footer v-if="group.fields.some(dirty)" class="flow-actions"><button class="btn" :disabled="!!busy" @click="discard(group)">{{ w('discard') }}</button><button class="btn primary" :disabled="!!busy" @click="saveGroup(group)">{{ w('save') }}</button></footer>
       </section>
@@ -646,6 +705,10 @@ onBeforeUnmount(() => { snapshotDraft(projectId.value); alive = false; generatio
       <DraftingTemplatePreview :project-id="projectId" :file-key="readingFile" :source-available="readingSourceAvailable" :locale="store.locale" :fields="readingFields" :values="values" :variables="variables" :actions="plan?.actions ?? []" :selected-key="readingKey" :selected-action-id="readingActionId" :field-states="readingStates" :dirty-keys="readingDirtyKeys" :disabled="!!busy" @select="selectReading" @edit="editReading" @input="selectReading" @target="readingTarget" @locate="locateReadingTarget" @file="changeReadingFile" @upload="goTemplateUpload" />
     </aside>
     <DraftingBusinessGraph v-if="graphOpen" :project-id="projectId" :catalog="catalog" :plan="plan" :values="values" :variables="variables" :field-states="readingStates" :dirty-keys="readingDirtyKeys" :locale="store.locale" :disabled="!!busy || documentDirty" @input="graphInput" @location="graphLocation" @close="closeGraph()" />
+    <AppModal :open="!!identityConfirmation" :title="phrase('是否替换当前项目身份？', 'Replace the current project identity?', '是否替換目前項目身分？')" @close="!busy && (identityConfirmation = undefined)">
+      <template v-if="identityConfirmation"><p>{{ phrase('以下值已经采用。只有点击确认才会替换工作区名称与合约编号，并贯穿此项目包。', 'These values are already adopted. Confirm to replace this workspace name and contract number across the project package.', '以下值已經採用。只有按下確認才會替換工作區名稱與合約編號，並貫穿此項目包。') }}</p><table data-project-identity-comparison><thead><tr><th></th><th>{{ phrase('当前', 'Current', '目前') }}</th><th>{{ phrase('拟采用', 'Proposed', '擬採用') }}</th></tr></thead><tbody><tr><th>{{ phrase('项目名称', 'Project name', '項目名稱') }}</th><td>{{ identityConfirmation.currentName || '—' }}</td><td>{{ identityConfirmation.name }}</td></tr><tr><th>{{ phrase('合约编号', 'Contract number', '合約編號') }}</th><td>{{ identityConfirmation.request.expectedProjectIdentity.contractNo || '—' }}</td><td>{{ identityConfirmation.number }}</td></tr></tbody></table><p class="hint">{{ phrase('确认后现有文稿须重新生成。来源文件和候选证据仍保留。', 'Existing drafts must be regenerated after confirmation. Source files and candidate evidence remain available.', '確認後現有文稿須重新產生。來源文件與候選證據仍保留。') }}</p><p v-if="identityError" role="alert" data-identity-error>{{ identityError }}</p></template>
+      <template #footer><button class="btn" :disabled="!!busy" data-cancel-project-identity @click="identityConfirmation = undefined">{{ phrase('暂不替换', 'Keep current identity', '暫不替換') }}</button><button v-if="identityError" class="btn" :disabled="!!busy" data-reload-project-identity @click="reloadIdentityConfirmation">{{ phrase('刷新并核对', 'Reload and review', '重新整理並核對') }}</button><button class="btn primary" :disabled="!!busy || !identityConfirmation" data-confirm-project-identity @click="confirmIdentity">{{ phrase('确认替换项目身份', 'Confirm project identity', '確認替換項目身分') }}</button></template>
+    </AppModal>
     <AppModal :open="!!previewEditField" :title="w('editPreviewValue')" @close="previewEditKey = ''">
       <template v-if="previewEditField"><span class="state">{{ dirty(previewEditField) ? w('unsavedValue') : w(state(previewEditField)) }}</span><p class="hint">{{ w('previewEditNote') }}</p><DraftingInputField :field="previewEditField" :value="values[previewEditField.key]" :values="values" :locale="store.locale" id-prefix="preview-edit" :row-identity-key="graphMode?'_itemId':'id'" :disabled="inputDisabled(previewEditField)" @update="update(previewEditField, $event)" /><p v-if="derivedInput(previewEditField)" class="hint">{{ w('durationDerived') }}</p><p v-if="error" class="flow-error" role="alert">{{ error }}</p><div class="flow-actions"><button class="btn" :disabled="!!busy" @click="previewEditKey = ''">{{ w('close') }}</button><button v-if="previewAdoptable(previewEditField)" class="btn" :disabled="!!busy" @click="adoptReading">{{ w('adoptSuggested') }}</button><button class="btn primary" :data-preview-save="previewEditField.key" :disabled="!!busy || !dirty(previewEditField) || applicability(previewEditField.condition, values) === 'no'" @click="saveReading">{{ w('save') }}</button></div></template>
     </AppModal>

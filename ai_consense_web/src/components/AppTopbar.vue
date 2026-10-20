@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 import { LOCALE_LABELS, SUPPORTED_LOCALES, type AppLocale } from '@/i18n'
@@ -22,6 +22,17 @@ const healthLabel = computed(() => {
   return health.ready ? t('system.healthy') : t('system.degraded')
 })
 
+function llmProfileLabel(id: string): string {
+  const profile = store.llmProfiles?.profiles.find(item => item.id === id)
+  if (id === 'qwen' || id === 'qwen-flash') {
+    const model = profile?.model || (id === 'qwen' ? 'qwen3.8-27b' : 'qwen3.8-flash')
+    return `${t(id === 'qwen' ? 'llm.qwen' : 'llm.qwenFlash')} (${model})`
+  }
+  if (id === 'local') return t('llm.local')
+  if (id === 'minimax-cn') return t('llm.minimax')
+  return id
+}
+
 const llmReadiness = computed(() => {
   if (store.llmProfilesLoading) return t('llm.loading')
   if (store.llmProfilesFailed || !store.selectedLlmProfile) return t('llm.unavailable')
@@ -33,6 +44,7 @@ const llmReadiness = computed(() => {
 /* ------------------------------------------------------------ 项目工作区：新建 / 重命名 / 删除（FR-P-01/02/03） */
 type ProjectDialogMode = 'create' | 'rename' | 'delete' | null
 const projectDialog = ref<ProjectDialogMode>(null)
+const projectDialogProjectId = ref('')
 const projectNameInput = ref('')
 const projectContractInput = ref('')
 const projectBusy = ref(false)
@@ -42,36 +54,49 @@ const activeProjectName = computed(() =>
 )
 
 function openCreate() {
+  if (projectBusy.value) return
+  projectDialogProjectId.value = ''
   projectNameInput.value = ''
   projectContractInput.value = ''
   projectDialog.value = 'create'
 }
 
 function openRename() {
+  if (projectBusy.value) return
+  projectDialogProjectId.value = store.activeProjectId
   projectNameInput.value = activeProjectName.value
   projectContractInput.value = store.activeProject?.contractNo ?? ''
   projectDialog.value = 'rename'
 }
 
 function openDelete() {
+  if (projectBusy.value) return
+  projectDialogProjectId.value = store.activeProjectId
   projectDialog.value = 'delete'
 }
 
 async function submitProjectDialog() {
+  if (projectBusy.value) return
+  const mode = projectDialog.value, projectId = projectDialogProjectId.value
+  if ((mode === 'rename' || mode === 'delete') && projectId !== store.activeProjectId) { projectDialog.value = null; return }
   const name = projectNameInput.value.trim()
-  if (projectDialog.value === 'create' || projectDialog.value === 'rename') {
+  if (mode === 'create' || mode === 'rename') {
     if (!name) return
   }
   projectBusy.value = true
   try {
-    if (projectDialog.value === 'create') {
+    if (mode === 'create') {
       await store.createProject(name, projectContractInput.value.trim())
       store.notify(t('topbar.projectCreated'))
-    } else if (projectDialog.value === 'rename' && store.activeProjectId) {
-      await store.renameProject(store.activeProjectId, name)
-      store.notify(t('common.saved'))
-    } else if (projectDialog.value === 'delete' && store.activeProjectId) {
-      await store.deleteProject(store.activeProjectId)
+    } else if (mode === 'rename' && projectId) {
+      const reloaded = await store.renameProject(projectId, name, projectContractInput.value.trim())
+      store.notify(reloaded ? t('common.saved') : pick({
+        zhHans: `项目“${name}”已保存，但项目列表重新读取失败。请刷新后核对。`,
+        zhHant: `項目「${name}」已儲存，但項目清單重新讀取失敗。請重新整理後核對。`,
+        en: `Project "${name}" was saved, but the project list could not be reloaded. Refresh to verify it.`
+      }), reloaded ? 3200 : 10000)
+    } else if (mode === 'delete' && projectId) {
+      await store.deleteProject(projectId)
       store.notify(t('topbar.projectDeleted'))
     }
     projectDialog.value = null
@@ -79,6 +104,10 @@ async function submitProjectDialog() {
     projectBusy.value = false
   }
 }
+
+watch(() => store.activeProjectId, id => {
+  if (projectDialog.value !== 'create' && id !== projectDialogProjectId.value) projectDialog.value = null
+})
 
 function onProjectChange(event: Event) {
   store.switchProject((event.target as HTMLSelectElement).value)
@@ -104,8 +133,8 @@ function onLocaleChange(event: Event) {
         <label>
           <span class="switcher-label">{{ t('llm.source') }}</span>
           <select :value="store.llmProfileId" :aria-label="t('llm.source')" :disabled="store.llmProfilesLoading || !store.llmProfiles" @change="store.changeLlmProfile(($event.target as HTMLSelectElement).value)">
-            <option v-if="!store.llmProfiles" :value="store.llmProfileId || ''" disabled>{{ store.llmProfileId ? t(store.llmProfileId === 'local' ? 'llm.local' : 'llm.minimax') : llmReadiness }}</option>
-            <option v-for="profile in store.llmProfiles?.profiles ?? []" :key="profile.id" :value="profile.id" :disabled="!profile.configured">{{ t(profile.id === 'local' ? 'llm.local' : 'llm.minimax') }}</option>
+            <option v-if="!store.llmProfiles" :value="store.llmProfileId || ''" disabled>{{ store.llmProfileId ? llmProfileLabel(store.llmProfileId) : llmReadiness }}</option>
+            <option v-for="profile in store.llmProfiles?.profiles ?? []" :key="profile.id" :value="profile.id" :disabled="!profile.configured">{{ llmProfileLabel(profile.id) }}</option>
           </select>
         </label>
         <details class="llm-profile-detail">
@@ -166,6 +195,7 @@ function onLocaleChange(event: Event) {
           <span>{{ t('topbar.projectName') }}</span>
           <input
             v-model="projectNameInput"
+            :aria-label="t('topbar.projectName')"
             type="text"
             maxlength="120"
             :placeholder="t('topbar.projectNamePlaceholder')"
@@ -173,7 +203,7 @@ function onLocaleChange(event: Event) {
         </label>
         <label>
           <span>{{ t('topbar.projectContract') }}</span>
-          <input v-model="projectContractInput" type="text" maxlength="60" placeholder="e.g. 20230196" />
+          <input v-model="projectContractInput" :aria-label="t('topbar.projectContract')" type="text" maxlength="60" placeholder="e.g. 20230196" />
         </label>
         <p v-if="projectDialog === 'create'" class="muted small">{{ t('topbar.createHint') }}</p>
         <p v-else class="muted small">{{ t('topbar.renameHint') }}</p>

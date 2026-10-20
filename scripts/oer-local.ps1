@@ -132,7 +132,7 @@ function Assert-OerCudaHealth($Health) {
                 artifactReadValidation='complete-manifest-actual-cas-reconstruction-every-request'
                 originalByteVerifier='java_current_source_reader';observerActor='application'
                 sourceQualityAccepted=$false;semanticScopeVerified=$false;humanConfirmed=$false
-                adoptionStatus='candidate_unverified';maximumMessageBytes=16777216
+                adoptionStatus='candidate_unverified';maximumMessageBytes=1073741824
             }
             $normalCapability=$Health.oer.normalObserved
             $normalFields=@($normalCapability.PSObject.Properties.Name)

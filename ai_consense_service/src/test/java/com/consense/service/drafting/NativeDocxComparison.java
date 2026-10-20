@@ -20,6 +20,10 @@ final class NativeDocxComparison {
     }
 
     static Document withoutAddedBindings(Document source,Document output) {
+        return withoutAddedBindings(source,output,Collections.emptySet());
+    }
+    /** Additional marker names must first be checked against exact source-bound layout actions. */
+    static Document withoutAddedBindings(Document source,Document output,Set<String> verifiedLayoutMarkers) {
         Document normalized=(Document)output.cloneNode(true);
         Set<String> sourceIds=new HashSet<>(),sourceNames=new HashSet<>();
         for(Element marker:elements(source,"bookmarkStart")){sourceIds.add(marker.getAttributeNS(W,"id"));sourceNames.add(marker.getAttributeNS(W,"name"));}
@@ -31,7 +35,7 @@ final class NativeDocxComparison {
         for(Element start:starts) {
             String id=start.getAttributeNS(W,"id"),name=start.getAttributeNS(W,"name");Node parent=start.getParentNode();
             List<Element> matchingEnds=endsById.getOrDefault(id,Collections.emptyList());
-            if(!generatedLeaf(start,Set.of("id","name"))||!name.matches("CS[a-f0-9]{28}")||!id.matches("[0-9]+")||sourceIds.contains(id)||sourceNames.contains(name)
+            if(!generatedLeaf(start,Set.of("id","name"))||!(name.matches("CS[a-f0-9]{28}")||name.matches("CL[a-f0-9]{28}")&&verifiedLayoutMarkers.contains(name))||!id.matches("[0-9]+")||sourceIds.contains(id)||sourceNames.contains(name)
                     ||ids.get(id)!=1||names.get(name)!=1||matchingEnds.size()!=1
                     ||!W.equals(parent.getNamespaceURI())||!"p".equals(parent.getLocalName()))continue;
             Element end=matchingEnds.get(0);if(!generatedLeaf(end,Set.of("id"))||end.getParentNode()!=parent)continue;

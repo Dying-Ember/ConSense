@@ -70,6 +70,9 @@ public class VettingService {
     private OerBusinessEvidence oer;
     @org.springframework.beans.factory.annotation.Autowired
     public void setOerBusinessEvidence(OerBusinessEvidence service){this.oer=service;}
+    private com.consense.service.sources.CanonicalEvidenceService evidencePreparation;
+    @org.springframework.beans.factory.annotation.Autowired
+    public void setEvidencePreparation(com.consense.service.sources.CanonicalEvidenceService service){this.evidencePreparation=service;}
     private boolean canonicalEnabled(){return oer!=null&&oer.enabled();}
     private VettingChecklistService checklistService;
     @org.springframework.beans.factory.annotation.Autowired
@@ -111,7 +114,7 @@ public class VettingService {
             VettingLlmOperation selected=semantic.captureOperation(chat);
             List<SourceDocument> snapshot=freshSourceSet(saved.getProjectId());
             String supplement=semantic.configuredSupplement();
-            if(chat==null||!recoveryContract(supplement).equals(saved.getRecoveryContractSha256())||!Objects.equals(saved.getSourceSnapshotSha256(),sourceSetHash(snapshot))
+            if(chat==null||!recoveryContract(supplement,selected).equals(saved.getRecoveryContractSha256())||!Objects.equals(saved.getSourceSnapshotSha256(),sourceSetHash(snapshot))
                     ||!Objects.equals(saved.getModelIdentityJson(),JsonUtils.write(selected==null?chat.getIdentity():selected.getIdentity()))||sourceSetStale(saved))
                 throw new BizException(4101,"来源、模型或审查配方与检查点不兼容，需要重新运行；可靠包和人工记录已保留。");
             tx().execute(status->{VettingRun run=checkpoints.owned(saved.getId(),executionOwner);run.setRecoveryStatus("RESUMING");run.setPhase("recovering");run.setMessage("恢复已核验的来源包；结果不明的包将显式重试。");runRepository.saveAndFlush(run);return null;});
@@ -127,10 +130,16 @@ public class VettingService {
             v.getCandidateLimit(),v.getTopK(),v.isDiffAgainstBaseline(),v.isRequireHybridRetrieval(),v.getRetrievalUrl(),v.getExpectedRetrievalContract(),v.getExpectedRetrievalSignatureVersion(),v.getExpectedRetrievalGranularity(),
             v.getExpectedEmbeddingWindowMaxTokens(),v.getExpectedRerankWindowMaxTokens(),v.getExpectedWindowOverlapTokens(),v.getExpectedStructuralEmbeddingMaxTokens(),v.getExpectedStructuralRerankMaxTokens(),v.isExpectedStructuralRerankStrict(),
             v.getExpectedRetrievalRecipeFingerprint(),v.getExpectedRetrievalSignature(),v.isTokenBudgetObserverEnabled(),v.getTokenBudgetObserverRecipeSha256(),v.getMinimaxCnWire())));}
+    private String recoveryContract(String supplement,VettingLlmOperation selected){
+        String prior=recoveryContract(supplement);
+        return selected!=null&&selected.isQwen()?VettingCorpus.hash(prior+"|qwen-usage-preflight|"+selected.getQwen().getPolicySha256()):prior;
+    }
     private void dispatch(VettingRun run,List<SourceDocument> snapshot,com.consense.ai.LlmOperation chat,VettingLlmOperation selected,CompletableFuture<RunResultVO> done,VettingServiceProbe probe,String supplement){
         worker.execute(()->{try(com.consense.ai.LlmProfiles.Scope ignored=llmProfiles.bind(chat);VettingSemanticReview.OperationScope operation=semantic.bindOperation(selected);
                 VettingSemanticReview.SupplementScope supplemental=semantic.bindSupplement(supplement);
-                VettingSemanticReview.CheckpointScope durable=semantic.bindCheckpoint(checkpoints==null?null:checkpoints.session(run.getId(),executionOwner,()->assertRunSourcesCurrent(run,snapshot)))){executeRun(run.getId(),run.getProjectId(),run.getLang(),snapshot,done,probe);}});
+                 VettingSemanticReview.CheckpointScope durable=semantic.bindCheckpoint(checkpoints==null?null:checkpoints.session(run.getId(),executionOwner,()->assertRunSourcesCurrent(run,snapshot)));
+                 com.consense.service.llm.QwenChatUsagePreflight.Operation.ActionScope usage=selected!=null&&selected.isQwen()?selected.getQwen().openAction("vetting:"+run.getId(),()->assertRunSourcesCurrent(run,snapshot)):null){executeRun(run.getId(),run.getProjectId(),run.getLang(),snapshot,done,probe);}
+            catch(RuntimeException failure){probe.originalFailure("worker_action_initialization_failed",failure);try{failRun(run.getId(),brief(failure),done,probe);}finally{probe.finish("action_initialization_failed",failure);serviceProbes.remove(run.getId(),probe);}}});
     }
     @PreDestroy public void stopWorker() {
         if(checkpoints!=null)for(String id:completions.keySet())checkpoints.release(id,executionOwner);
@@ -233,7 +242,7 @@ public class VettingService {
             if(snapshot.isEmpty()||(!canonicalEnabled()&&snapshot.stream().noneMatch(this::reviewable))) throw new BizException(4101,"审查源集没有可用正文，请上传并检查解析状态");
             VettingRun run=new VettingRun(); run.setId(UUID.randomUUID().toString()); run.setProjectId(projectId); run.setLang(normalizeLang(lang)); run.setStartedAt(Instant.now());
             run.setSourceSnapshotSha256(sourceSetHash(snapshot));
-            run.setRecoveryContractSha256(recoveryContract(supplement));run.setModelProfileExplicit(operation.isExplicit());run.setRecoveryStatus("NEW");
+            run.setRecoveryContractSha256(recoveryContract(supplement,vettingOperation));run.setModelProfileExplicit(operation.isExplicit());run.setRecoveryStatus("NEW");
             if(checkpoints!=null){run.setExecutionOwner(executionOwner);run.setLeaseUntil(Instant.now().plusSeconds(VettingCheckpointService.LEASE_SECONDS));}
             run.setModelIdentityJson(JsonUtils.write(vettingOperation==null?operation.getIdentity():vettingOperation.getIdentity()));
             run.setStatus("QUEUED"); run.setPhase("queued"); run.setTotalUnits(topicCount()+2); run.setMessage("审查已排队，人工处置按问题指纹保留。");
@@ -283,6 +292,11 @@ public class VettingService {
         Throwable originalFailure=null;String outcome="aborted",stage="rules_progress";long stageStarted=System.nanoTime(),stageOverhead=probe.overheadNanos();
         long runStarted=stageStarted,runOverhead=stageOverhead;
         try {
+            if(canonicalEnabled()) {
+                stage="source_preparation";progress(id,0,"preparing","准备当前来源的完整原始观察；不代替原件质量确认。");
+                for(SourceDocument document:snapshot)evidencePreparation.prepareNormalObserved(projectId,document.getId(),"vetting");
+                assertMaterialSourcesCurrent(projectId,snapshot);
+            }
             progress(id,0,"rules","对可解析的招标合同条款执行规则检查。");
             stage="rule_sources_construction";stageStarted=System.nanoTime();stageOverhead=probe.overheadNanos();
             final OerBusinessEvidence.Session canonicalSession=canonicalEnabled()?oer.load(projectId,"vetting",snapshot):null;
@@ -322,22 +336,24 @@ public class VettingService {
                 c.setPromptSupplementSha256(VettingPromptPolicy.supplementSha256(semantic.currentSupplement()));
                 final int ordinal=sortedOrdinal++;final String sourceBefore=c.getSource();
                 c.setSource("rule".equalsIgnoreCase(c.getSource())?"rule":"model"); String fingerprint=fingerprint(c);
+                VettingFinding projection=new VettingFinding();apply(projection,c);
+                String publicationKey=fingerprint+"\n"+generatedRevision(projection);
                 final int riskBefore=risk;
-                if(unique.containsKey(fingerprint)) {
+                if(unique.containsKey(publicationKey)) {
                     probe.observe("candidate_filter_decision",()->VettingServiceProbe.map("candidate",c,"originalOrdinals",originalOrdinals.get(c),"sortedOrdinal",ordinal,
-                            "sourceBeforeNormalization",sourceBefore,"fingerprint",fingerprint,"decision","dropped","reason","duplicate_fingerprint",
-                            "retainedCandidate",unique.get(fingerprint),"riskCounterBefore",riskBefore,"riskCounterAfter",riskBefore));
+                            "sourceBeforeNormalization",sourceBefore,"fingerprint",fingerprint,"publicationKey",publicationKey,"decision","dropped","reason","duplicate_fingerprint_and_generated_revision",
+                            "retainedCandidate",unique.get(publicationKey),"riskCounterBefore",riskBefore,"riskCounterAfter",riskBefore));
                     continue;
                 }
                 if("risk".equals(group(c.getType())))risk++;
-                unique.put(fingerprint,c);final int riskAfter=risk;
+                unique.put(publicationKey,c);final int riskAfter=risk;
                 probe.observe("candidate_filter_decision",()->VettingServiceProbe.map("candidate",c,"originalOrdinals",originalOrdinals.get(c),"sortedOrdinal",ordinal,
-                        "sourceBeforeNormalization",sourceBefore,"fingerprint",fingerprint,"decision","retained","reason","first_unique",
+                        "sourceBeforeNormalization",sourceBefore,"fingerprint",fingerprint,"publicationKey",publicationKey,"decision","retained","reason","first_unique",
                         "riskCounterBefore",riskBefore,"riskCounterAfter",riskAfter));
             }
-            probe.elapsed(stage,stageStarted,stageOverhead,"Stable severity ordering, source normalization and fingerprint dedup; no risk count cap; observer wall excluded",true);
+            probe.elapsed(stage,stageStarted,stageOverhead,"Stable severity ordering, source normalization and exact fingerprint/generated revision dedup; no risk count cap; observer wall excluded",true);
             final int skippedFinal=skipped,riskFinal=risk;
-            probe.observe("final_selected_candidates",()->VettingServiceProbe.map("candidatesByFingerprint",unique,"riskCounter",riskFinal,"riskSkippedCount",skippedFinal,"warnings",warnings));
+            probe.observe("final_selected_candidates",()->VettingServiceProbe.map("candidatesByPublicationKey",unique,"riskCounter",riskFinal,"riskSkippedCount",skippedFinal,"warnings",warnings));
             stage="coverage_construction";stageStarted=System.nanoTime();stageOverhead=probe.overheadNanos();
             CoverageVO coverage=coverage(snapshot,chunks,semanticResult.getReviewedChunkIds(),warnings,true);
             if(canonicalSession!=null)coverage.setCanonicalCorpusIdentitySha256(canonicalSession.identitySha256());
@@ -404,13 +420,14 @@ public class VettingService {
         previous.forEach(f->f.setActive(false));
         probe.observe("merge_previous_records_after_inactive_marking",()->VettingServiceProbe.map("records",previous,"committed",false));
         List<VettingFinding> current=new ArrayList<>();
-        for(Map.Entry<String,Candidate> entry:candidates.entrySet()) {
-            VettingFinding projection=new VettingFinding();apply(projection,entry.getValue());String revision=generatedRevision(projection);
-            VettingFinding f=byFingerprintAndRevision.getOrDefault(entry.getKey(),Collections.emptyMap()).get(revision);
+        for(Candidate candidate:candidates.values()) {
+            String fingerprint=fingerprint(candidate);
+            VettingFinding projection=new VettingFinding();apply(projection,candidate);String revision=generatedRevision(projection);
+            VettingFinding f=byFingerprintAndRevision.getOrDefault(fingerprint,Collections.emptyMap()).get(revision);
             boolean reused=f!=null;
             if(f==null) { f=projection; f.setProjectId(projectId); f.setCode(String.format("VT-%03d",next++)); f.setStatus(VettingFinding.STATUS_OPEN); f.setCreatedAt(Instant.now()); }
-            apply(f,entry.getValue()); f.setFingerprint(entry.getKey()); f.setRunId(id); f.setActive(true); current.add(f);
-            String code=f.getCode();probe.observe("finding_generated_revision_match",()->VettingServiceProbe.map("fingerprint",entry.getKey(),
+            apply(f,candidate); f.setFingerprint(fingerprint); f.setRunId(id); f.setActive(true); current.add(f);
+            String code=f.getCode();probe.observe("finding_generated_revision_match",()->VettingServiceProbe.map("fingerprint",fingerprint,
                     "generatedRevision",revision,"protocol","exact-generated-fields-v1","reusedExistingRecord",reused,"code",code,
                     "boundary","Human disposition is reused only for identical generated fields and evidence metadata; this is not semantic verification"));
         }
@@ -636,10 +653,13 @@ public class VettingService {
     @Transactional(readOnly=true)
     public List<FindingVO> listFindings(String projectId,String search,String group,String scope,String fileKey,String page) {
         projectService.require(projectId); String keyword=nvl(search).trim().toLowerCase(Locale.ROOT);
-        return activeFindings(projectId).stream().filter(f -> filter(group,f.getGroupKey())).filter(f -> filter(scope,f.getScope()))
+        List<VettingFinding> active=activeFindings(projectId);
+        Map<String,FindingVO> annotated=new LinkedHashMap<>();
+        for(FindingVO row:annotateSourceCandidateContainers(active.stream().map(this::toVO).collect(Collectors.toList())))annotated.put(row.getCode(),row);
+        return active.stream().filter(f -> filter(group,f.getGroupKey())).filter(f -> filter(scope,f.getScope()))
                 .filter(f -> filter(fileKey,f.getFileKey())||readEvidence(f).stream().anyMatch(e -> filter(fileKey,e.getFileKey())))
                 .filter(f -> filter(page,f.getPageNo())||readEvidence(f).stream().anyMatch(e -> filter(page,e.getPageNo())))
-                .filter(f -> keyword.isEmpty()||searchable(f).toLowerCase(Locale.ROOT).contains(keyword)).map(this::toVO).collect(Collectors.toList());
+                .filter(f -> keyword.isEmpty()||searchable(f).toLowerCase(Locale.ROOT).contains(keyword)).map(f->annotated.get(f.getCode())).collect(Collectors.toList());
     }
     public MetricsVO metrics(String projectId) { projectService.require(projectId); return metricsOf(activeFindings(projectId)); }
     public FindingVO updateStatus(String projectId,String code,String status) {
@@ -648,7 +668,7 @@ public class VettingService {
     public FindingVO updateStatus(String projectId,String code,String status,String expectedRunId,String expectedGeneratedRevisionSha256,String expectedSourceSnapshotSha256) {
         projectService.require(projectId); String normalized;
         if("open".equalsIgnoreCase(status)) normalized=VettingFinding.STATUS_OPEN; else if("handled".equalsIgnoreCase(status)) normalized=VettingFinding.STATUS_HANDLED; else if("assigned".equalsIgnoreCase(status)) normalized=VettingFinding.STATUS_ASSIGNED; else throw new BizException(4102,"状态必须为 Open、Handled 或 Assigned");
-        synchronized(lock(projectId)) { return tx().execute(tx -> {VettingFinding f=editableFinding(projectId,code,expectedRunId,expectedGeneratedRevisionSha256,expectedSourceSnapshotSha256); f.setStatus(normalized); findingRepository.saveAndFlush(f); return toVO(f); }); }
+        synchronized(lock(projectId)) { return tx().execute(tx -> {VettingFinding f=editableFinding(projectId,code,expectedRunId,expectedGeneratedRevisionSha256,expectedSourceSnapshotSha256); f.setStatus(normalized); findingRepository.saveAndFlush(f); return currentAnnotatedFinding(f); }); }
     }
     public FindingVO updateReview(String projectId,String code,ReviewUpdateRequest request) {
         projectService.require(projectId);
@@ -667,7 +687,7 @@ public class VettingService {
             finding.setAddendumRequired(decision);
             finding.setReviewUpdatedAt(Instant.now().truncatedTo(java.time.temporal.ChronoUnit.MILLIS));
             findingRepository.saveAndFlush(finding);
-            return toVO(finding);
+            return currentAnnotatedFinding(finding);
         }); }
     }
     private VettingFinding editableFinding(String projectId,String code,String runId,String generatedSha,String sourceSha){
@@ -791,7 +811,16 @@ public class VettingService {
         }); }
     }
     private ReportContext saveReportSnapshot(Project project,VettingRun run,List<FindingVO> findings) {
+        findings=annotateSourceCandidateContainers(findings);
         VettingJobVO job=jobVO(run);job.setReliablePackets(Collections.emptyList());job.setReportSnapshotId(null);
+        if(reportSnapshots!=null) {
+            VettingRunRepository.ProgressView stored=runRepository.findProgress(run.getProjectId(),run.getId())
+                    .orElseThrow(()->new BizException(4103,"已保存的审查任务不存在，不能创建报告快照。"));
+            if(!Objects.equals(run.getId(),stored.getId())||!"COMPLETED".equals(run.getStatus())||!"COMPLETED".equals(stored.getStatus()))
+                throw new BizException(4103,"已保存的审查任务身份或完成状态不一致，不能创建报告快照。");
+            // Scalar reads use the database's actual timestamp precision after the caller's flush.
+            job.setStartedAt(stored.getStartedAt());job.setFinishedAt(stored.getFinishedAt());
+        }
         List<VettingChecklistCatalog.Result> checklist=checklistService==null?Collections.emptyList():checklistService.resultsForRun(run.getProjectId(),run.getId());
         ReportSnapshotPayload current=new ReportSnapshotPayload();current.setProject(project);current.setJob(job);current.setFindings(findings);current.setChecklist(checklist);
         String payload=JsonUtils.write(current),id=VettingCorpus.hash("vetting-report-snapshot-v1\n"+payload);
@@ -859,6 +888,51 @@ public class VettingService {
         }
     }
     private List<VettingFinding> activeFindings(String id) { return findingRepository.findByProjectIdOrderByCodeAsc(id).stream().filter(f -> !Boolean.FALSE.equals(f.getActive())).collect(Collectors.toList()); }
+    private FindingVO currentAnnotatedFinding(VettingFinding finding) {
+        return annotateSourceCandidateContainers(activeFindings(finding.getProjectId()).stream().map(this::toVO).collect(Collectors.toList())).stream()
+                .filter(row->Objects.equals(finding.getCode(),row.getCode())).findFirst().orElseGet(()->toVO(finding));
+    }
+    /** Exact shared source observations organize candidates; they never establish issue equivalence. */
+    static List<FindingVO> annotateSourceCandidateContainers(List<FindingVO> rows) {
+        Map<String,List<FindingVO>> groups=new LinkedHashMap<>();
+        for(FindingVO row:rows)if(row!=null) {
+            row.setSourceCandidateContainer(null);String identity=sourceCandidateIdentity(row);
+            if(identity!=null)groups.computeIfAbsent(identity,key->new ArrayList<>()).add(row);
+        }
+        for(Map.Entry<String,List<FindingVO>> entry:groups.entrySet()) {
+            List<String> codes=entry.getValue().stream().map(FindingVO::getCode).collect(Collectors.toList());
+            SourceCandidateContainerVO container=new SourceCandidateContainerVO("source-candidates:"+VettingCorpus.hash("exact-bound-evidence-candidates-v1\n"+entry.getKey()),
+                    "exact_bound_evidence_candidates","unresolved_issue_equivalence",codes,codes.size(),null);
+            for(FindingVO row:entry.getValue())row.setSourceCandidateContainer(container);
+        }
+        return rows;
+    }
+    private static String sourceCandidateIdentity(FindingVO row) {
+        if(JsonUtils.isBlankText(row.getCode())||JsonUtils.isBlankText(row.getRunId())||!nvl(row.getSourceSnapshotSha256()).matches("[a-f0-9]{64}")||row.getEvidence()==null||row.getEvidence().isEmpty())return null;
+        List<String> sources=new ArrayList<>();
+        for(FindingEvidence side:row.getEvidence()) {
+            if(side==null||!side.isLocated()||JsonUtils.isBlankText(side.getDocumentId())||JsonUtils.isBlankText(side.getAnchor())||JsonUtils.isBlankText(side.getQuote())
+                    ||!nvl(side.getSourceHash()).matches("[a-f0-9]{64}")||!nvl(side.getOriginalSourceSha256()).matches("[a-f0-9]{64}"))return null;
+            com.fasterxml.jackson.databind.node.ObjectNode source=JsonUtils.mapper().valueToTree(side);
+            JsonNode canonical=source.path("canonicalEvidence");
+            if(!canonical.isMissingNode()&&!canonical.isNull()&&(!canonical.isObject()
+                    ||!Objects.equals(side.getDocumentId(),canonical.path("documentId").asText())
+                    ||!Objects.equals(side.getSourceHash(),canonical.path("javaParsedSourceHash").asText())
+                    ||!Objects.equals(side.getOriginalSourceSha256(),canonical.path("originalSourceSha256").asText())
+                    ||!canonical.path("sourceRevisionSha256").asText().matches("[a-f0-9]{64}")))return null;
+            source.remove(Arrays.asList("packetId","packetSourceSnapshotSha256"));
+            sources.add(stableSourceJson(source).toString());
+        }
+        Collections.sort(sources);return JsonUtils.write(Arrays.asList(row.getRunId(),row.getSourceSnapshotSha256(),sources));
+    }
+    private static JsonNode stableSourceJson(JsonNode node) {
+        if(node.isObject()) {
+            Map<String,JsonNode> fields=new TreeMap<>();node.fields().forEachRemaining(entry->fields.put(entry.getKey(),entry.getValue()));
+            com.fasterxml.jackson.databind.node.ObjectNode result=JsonUtils.mapper().createObjectNode();fields.forEach((key,value)->result.set(key,stableSourceJson(value)));return result;
+        }
+        if(node.isArray()) {com.fasterxml.jackson.databind.node.ArrayNode result=JsonUtils.mapper().createArrayNode();for(JsonNode item:node)result.add(stableSourceJson(item));return result;}
+        return node.deepCopy();
+    }
     private List<FindingEvidence> readEvidence(VettingFinding f) { try{return JsonUtils.readList(f.getEvidenceJson(),FindingEvidence.class);}catch(Exception e){log.warn("发现 {} 证据快照不可读",f.getCode());return Collections.emptyList();} }
     private FindingVO toVO(VettingFinding f) {
         List<FindingEvidence> e=readEvidence(f); long located=e.stream().filter(FindingEvidence::isLocated).count(); String v=e.isEmpty()||located==0?"unverified":located==e.size()?"verified":"partial";

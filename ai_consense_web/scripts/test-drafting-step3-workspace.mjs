@@ -46,6 +46,9 @@ try {
   await settleUntil(()=>calls.some(call=>call[0]==='sourceBytes'))
   props.projectId='current-project'; props.fileKey='SCT'; props.document={...props.document,fileKey:'SCT'}
   await settleUntil(()=>document.querySelector('[data-native-paragraph]'))
+  assert.match(document.body.textContent,/SYNTHETIC SAVED opening/,'Review opens the saved result without inventing change attribution')
+  const original=document.querySelector('[data-review-mode="original"]');assert.ok(original,'Original source remains directly available');original.click()
+  await settleUntil(()=>document.body.textContent.includes('SYNTHETIC ORIGINAL opening'))
   assert.match(document.body.textContent,/SYNTHETIC ORIGINAL opening/)
   assert.match(document.body.textContent,/End of original full document/)
   assert.equal(document.querySelectorAll('[data-native-paragraph]').length,3)

@@ -9,7 +9,7 @@ const JSZip = createRequire(require.resolve('mammoth/package.json'))('jszip')
 const window = new JSDOM('').window
 const { convertDocumentReading } = loadTypeScript(path.join(__dirname, '../src/drafting/document-reading.ts'), {
   globals: { crypto: webcrypto, document: window.document, DOMParser: window.DOMParser, XMLSerializer: window.XMLSerializer, NodeFilter: window.NodeFilter },
-  dependencies: { jszip: { default: JSZip }, 'mammoth/mammoth.browser.min.js': { default: require('mammoth/mammoth.browser.min.js') }, dompurify: { default: require('dompurify')(window) }, './document-reading-text': loadTypeScript(path.join(__dirname, '../src/drafting/document-reading-text.ts')) }
+  dependencies: { jszip: { default: JSZip }, 'mammoth/mammoth.browser.min.js': { default: require('mammoth/mammoth.browser.min.js') }, dompurify: { default: require('dompurify')(window) }, './document-reading-text': loadTypeScript(path.join(__dirname, '../src/drafting/document-reading-text.ts')), './reading-list-markers': loadTypeScript(path.join(__dirname, '../src/drafting/reading-list-markers.ts')) }
 })
 
 async function docx(body, extraParts = {}) {
@@ -68,6 +68,10 @@ async function main() {
   assert.equal(formatted.coverage.numberedParagraphCount, 1)
   assert.equal(formatted.coverage.numberingLabelsVerified, false, 'Paragraph/text receipts do not establish native list-label or continuation fidelity')
   assert.ok(formatted.warnings.some(warning => /Native numbering labels.*not verified/.test(warning)))
+  const markerStyle = window.document.createElement('style')
+  markerStyle.textContent = fs.readFileSync(path.join(__dirname, '../src/styles/main.css'), 'utf8')
+  window.document.head.append(markerStyle); window.document.body.append(flow)
+  assert.equal(window.getComputedStyle(flow.querySelector('ol')).listStyleType, 'none', 'Unverified Word list labels must not be presented as browser-generated decimal markers')
   console.log('PASS: headings, lists and inline formatting survive while source links/bookmarks cannot inject active HTML or native identities')
 
   const inheritedStyles = '<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:style w:type="paragraph" w:default="1" w:styleId="DefaultList"><w:name w:val="Default list"/><w:pPr><w:numPr><w:numId w:val="1"/></w:numPr></w:pPr></w:style><w:style w:type="paragraph" w:styleId="BaseList"><w:name w:val="Base list"/><w:pPr><w:numPr><w:numId w:val="1"/></w:numPr></w:pPr></w:style><w:style w:type="paragraph" w:styleId="ChildList"><w:name w:val="Inherited list"/><w:basedOn w:val="BaseList"/></w:style><w:style w:type="paragraph" w:styleId="DirectList"><w:name w:val="Direct style list"/><w:pPr><w:numPr><w:numId w:val="1"/></w:numPr></w:pPr></w:style><w:style w:type="paragraph" w:styleId="Plain"><w:name w:val="Plain"/></w:style><w:style w:type="paragraph" w:styleId="Suppressed"><w:name w:val="Suppressed list"/><w:basedOn w:val="BaseList"/><w:pPr><w:numPr><w:numId w:val="0"/></w:numPr></w:pPr></w:style><w:style w:type="paragraph" w:styleId="CycleA"><w:name w:val="Cycle A"/><w:basedOn w:val="CycleB"/></w:style><w:style w:type="paragraph" w:styleId="CycleB"><w:name w:val="Cycle B"/><w:basedOn w:val="CycleA"/></w:style><w:style w:type="paragraph" w:styleId="NumberCycleA"><w:name w:val="Number cycle A"/><w:basedOn w:val="NumberCycleB"/></w:style><w:style w:type="paragraph" w:styleId="NumberCycleB"><w:name w:val="Number cycle B"/><w:basedOn w:val="NumberCycleA"/><w:pPr><w:numPr><w:numId w:val="1"/></w:numPr></w:pPr></w:style><w:style w:type="paragraph" w:styleId="UnusedList"><w:name w:val="Unused list"/><w:pPr><w:numPr><w:numId w:val="1"/></w:numPr></w:pPr></w:style></w:styles>'

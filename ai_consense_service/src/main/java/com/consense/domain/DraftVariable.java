@@ -49,7 +49,6 @@ public class DraftVariable {
     @Column(length = 16)
     private String action;
 
-    @Lob
     @Column(name = "value_text", columnDefinition = "TEXT")
     private String valueText;
 

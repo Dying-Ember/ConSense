@@ -74,6 +74,13 @@ public final class VettingDtos {
         private String generatedRevisionSha256;
         private String sourceSnapshotSha256;
         private BusinessDetailsVO businessDetails;
+        /** Read-only response context; status/review requests continue to bind one original member. */
+        @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+        private SourceCandidateContainerVO sourceCandidateContainer;
+        /** Preserve the existing full response constructor and historical report snapshots. */
+        public FindingVO(String code,List<String> types,String group,String scope,String severity,String status,LocalizedText title,LocalizedText body,LocalizedText impact,LocalizedText suggestion,String pattern,String refs,String location,String expected,String evidenceId,String fileKey,String pageNo,String bucketKey,String fingerprint,String runId,String source,String verification,List<FindingEvidence> evidence,String reviewRemarks,String actionTaken,Boolean addendumRequired,Instant reviewUpdatedAt,String generatedRevisionSha256,String sourceSnapshotSha256,BusinessDetailsVO businessDetails) {
+            this(code,types,group,scope,severity,status,title,body,impact,suggestion,pattern,refs,location,expected,evidenceId,fileKey,pageNo,bucketKey,fingerprint,runId,source,verification,evidence,reviewRemarks,actionTaken,addendumRequired,reviewUpdatedAt,generatedRevisionSha256,sourceSnapshotSha256,businessDetails,null);
+        }
         public FindingVO(String code,List<String> types,String group,String scope,String severity,String status,LocalizedText title,LocalizedText body,LocalizedText impact,LocalizedText suggestion,String pattern,String refs,String location,String expected,String evidenceId,String fileKey,String pageNo,String bucketKey,String fingerprint,String runId,String source,String verification,List<FindingEvidence> evidence,String reviewRemarks,String actionTaken,Boolean addendumRequired,Instant reviewUpdatedAt,String generatedRevisionSha256,String sourceSnapshotSha256) {
             this(code,types,group,scope,severity,status,title,body,impact,suggestion,pattern,refs,location,expected,evidenceId,fileKey,pageNo,bucketKey,fingerprint,runId,source,verification,evidence,reviewRemarks,actionTaken,addendumRequired,reviewUpdatedAt,generatedRevisionSha256,sourceSnapshotSha256,null);
         }
@@ -83,6 +90,15 @@ public final class VettingDtos {
             com.consense.service.vetting.VettingIssueType type=com.consense.service.vetting.VettingIssueType.fromGroup(group);
             return type==null?null:type.getCode();
         }
+    }
+
+    @Data @NoArgsConstructor @AllArgsConstructor
+    public static class SourceCandidateContainerVO {
+        private String id,kind,resolutionStatus;
+        private List<String> memberCodes;
+        private int rawMemberCount;
+        @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.ALWAYS)
+        private Integer legalProblemCount;
     }
 
     @Data @NoArgsConstructor @AllArgsConstructor
@@ -356,7 +372,7 @@ public final class VettingDtos {
     public static class SemanticAttemptVO {
         private int ordinal;
         private String status="started",validationReason,rawResponseSha256,rawResponse;
-        private com.fasterxml.jackson.databind.JsonNode input,inputBudget;
+        private com.fasterxml.jackson.databind.JsonNode input,inputBudget,responseMetadata;
     }
     @Data @NoArgsConstructor @AllArgsConstructor
     public static class VerifiedAssessmentVO {

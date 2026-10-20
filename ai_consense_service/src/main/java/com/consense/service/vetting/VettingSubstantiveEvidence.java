@@ -6,20 +6,25 @@ import com.consense.web.dto.VettingDtos.FindingEvidence;
 import java.util.*;
 import java.util.regex.Pattern;
 
-/** Bare section identifiers locate a label; they do not establish the target's content. */
+/** Bare section/document labels locate a title; they do not establish substantive contents. */
 final class VettingSubstantiveEvidence {
     private static final String LABEL = "[\\p{L}\\p{N}]+(?:[./-][\\p{L}\\p{N}]+)*";
     private static final Pattern STANDALONE_LABEL = Pattern.compile(
             "(?:APPENDIX|ANNEX|SCHEDULE)\\s+" + LABEL
                     + "(?:\\s+TO\\s+(?:APPENDIX|ANNEX|SCHEDULE)\\s+" + LABEL + ")?",
             Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
+    private static final Pattern DOCUMENT_TITLE = Pattern.compile(
+            "(?:(?:SPECIAL|GENERAL) CONDITIONS? OF (?:TENDER|CONTRACT)|NOTES? TO TENDERERS?|ARTICLES? OF AGREEMENT|FORM OF (?:TENDER|AGREEMENT))"
+                    + "(?:\\s*\\([A-Z]{2,5}\\))?",Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
 
     static boolean standaloneLabel(String text) {
         return text != null && STANDALONE_LABEL.matcher(text.replace('\u00a0', ' ').trim()).matches();
     }
     static boolean substantive(Chunk chunk, Quote quote) {
-        return chunk != null && quote != null && !standaloneLabel(chunk.getContent()) && !standaloneLabel(quote.getQuote());
+        return chunk != null && quote != null && !standaloneLabel(chunk.getContent()) && !standaloneLabel(quote.getQuote())
+                && !documentTitle(chunk.getContent()) && !documentTitle(quote.getQuote());
     }
+    private static boolean documentTitle(String text){return text!=null&&DOCUMENT_TITLE.matcher(text.replace('\u00a0',' ').trim().replaceAll("\\s+"," ")).matches();}
     static long distinct(List<Quote> quotes, List<FindingEvidence> located, Map<String,Chunk> byId) {
         Set<String> anchors = new HashSet<>();
         for (int i = 0; i < located.size(); i++) {

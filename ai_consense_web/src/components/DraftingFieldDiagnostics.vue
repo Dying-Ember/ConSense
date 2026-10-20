@@ -26,6 +26,7 @@ const relations = computed(() => props.trace.relations?.filter(item => item.key 
     <p v-if="field.status === 'suggested'">{{ w('intakeNotFact') }}</p>
     <p v-if="trace.stale" class="diagnostic-warning">{{ w('traceStale') }}</p>
     <p v-if="trace.status === 'failed'" class="diagnostic-warning">{{ w('traceFailedNote') }}</p>
+    <p v-if="trace.status === 'partial'" class="diagnostic-warning">{{ w('tracePartialNote') }}</p>
     <details v-if="relations.length" open><summary>{{ jointWord('title', locale) }}</summary><DraftingJointEvidence v-for="(relation, index) in relations" :key="index" :relation="relation" :locale="locale" /></details>
     <details v-if="decisions.length"><summary>{{ w('diagnosticDetails') }} · {{ w('intakeAccepted') }} {{ field.candidateCount }} / {{ w('intakeRejected') }} {{ field.rejectionCount }} / {{ w('intakeUnanswered') }} {{ field.unansweredCount }}</summary><DraftingExtractionDecision v-for="(decision, index) in decisions" :key="index" :decision="decision" :trace="trace" :locale="locale" /></details>
   </aside>

@@ -304,6 +304,16 @@ public final class OerModelMaterial {
             SourceDocument guidanceSource=ordinarySources.get(String.valueOf(p.getDocumentId()));
             if(guidanceSource!=null&&Objects.equals(guidanceSource.getSourceSha256(),p.getOriginalSourceSha256())
                     &&Objects.equals(VettingCorpus.sourceHash(guidanceSource),p.getJavaParsedSourceHash())){
+                if(NormalObservedContract.PRODUCER.equals(p.getProducerKind())&&Objects.equals(guidanceSource.getProjectId(),p.getProjectId())
+                        &&Objects.equals(VettingCorpus.sourceRole(guidanceSource),role)&&p.getParts()!=null&&p.getParts().isArray()
+                        &&java.util.stream.StreamSupport.stream(p.getParts().spliterator(),false).anyMatch(part->"docx".equals(part.path("extractionSource").asText()))){
+                    VettingCorpus.Chunk selectedChunk=new VettingCorpus.Chunk();selectedChunk.setDocumentId(String.valueOf(p.getDocumentId()));selectedChunk.setRole(role);
+                    selectedChunk.setSourceHash(p.getJavaParsedSourceHash());selectedChunk.setOriginalSourceSha256(p.getOriginalSourceSha256());
+                    selectedChunk.setParts(JsonUtils.readList(JsonUtils.write(p.getParts()),VettingCorpus.Part.class));
+                    selectedChunk.setContent(String.join("\n",selectedChunk.getParts().stream().map(VettingCorpus.Part::getText).collect(java.util.stream.Collectors.toList())));
+                    selectedChunk.setCandidateStructure(ordinaryGraphs.computeIfAbsent(selectedChunk.getDocumentId(),id->com.consense.service.sources.NormalObservedPreparationService.currentGraph(guidanceSource)));
+                    ObjectNode observed=projectOrdinary(selectedChunk);if(observed!=null)structure.set("observedSourceUnits",observed);
+                }
                 Set<String> memberIds=new LinkedHashSet<>();Map<String,List<int[]>> offsets=new HashMap<>();
                 if(p.getParts()!=null&&p.getParts().isArray())
                     for(JsonNode part:p.getParts())if(part!=null&&part.path("blockId").isTextual()&&!part.path("blockId").asText().trim().isEmpty()){

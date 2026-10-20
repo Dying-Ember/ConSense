@@ -95,6 +95,48 @@ class DocxStructureIntegrationTest {
         assertNotEquals("mutated_fixture_copy",graph.path("units").get(0).path("parts").get(0).path("readingContext").path("nativeDocxSection").path("headerFooterBindings").get(0).path("status").asText());
     }
 
+    @Test void nativeSectionLayoutPropertiesKeepExactRawSourceValuesAndPositionsWithoutResolvingRendering() throws Exception {
+        String properties="<w:pgNumType w:fmt=\"upperRoman\" w:start=\"00017\"/><w:pgMar w:top=\"720\" w:bottom=\"426\" w:header=\"720\" w:footer=\"285\"/><w:pgSz w:w=\"11906\" w:h=\"16838\"/><w:type w:val=\"nextPage\"/>";
+        byte[] bytes=storySectionsFixture("",properties,"");
+        DocumentParser.ParsedDocument parsed=parse(bytes);JsonNode sections=parsed.getCoverage().getNativeDocxSections().path("sections");
+        assertEquals(2,sections.size());JsonNode layout=sections.get(0).path("layoutProperties");
+        assertEquals("docx-native-section-layout-properties-v1",layout.path("version").asText());
+        assertEquals("unknown",layout.path("effectiveState").asText());
+        String namespace="{http://schemas.openxmlformats.org/wordprocessingml/2006/main}";
+        for(String name:Arrays.asList("pgNumType","pgMar","pgSz","type")){
+            JsonNode property=layout.path(name);assertEquals("observed_raw_declaration",property.path("status").asText());
+            assertEquals(1,property.path("observations").size());JsonNode observation=property.path("observations").get(0);
+            String endpoint=sections.get(0).path("endBoundary").path("sourcePosition").path("nodePath").asText();
+            assertNativeFixturePosition(observation.path("sourcePosition"),bytes,"word/document.xml",endpoint+"/"+namespace+name+"[1]");
+            assertFalse(property.has("effectiveValue"));assertFalse(property.has("valueCandidate"));
+            assertEquals("absent",sections.get(1).path("layoutProperties").path(name).path("status").asText());
+            assertEquals(0,sections.get(1).path("layoutProperties").path(name).path("observations").size());
+        }
+        assertEquals("00017",layout.path("pgNumType").path("observations").get(0).path("rawAttributes").path(namespace+"start").asText());
+        assertEquals("upperRoman",layout.path("pgNumType").path("observations").get(0).path("rawAttributes").path(namespace+"fmt").asText());
+        assertEquals("426",layout.path("pgMar").path("observations").get(0).path("rawAttributes").path(namespace+"bottom").asText());
+        for(DocumentBlock block:parsed.getBlocks())if(block.getReadingContext()!=null&&block.getReadingContext().has("nativeDocxSection")){
+            JsonNode reference=block.getReadingContext().path("nativeDocxSection");
+            assertEquals(reference.path("inventoryPointer").asText()+"/layoutProperties",reference.path("layoutPropertiesRef").asText());
+            assertFalse(reference.has("layoutProperties"),"Keep one inventory truth instead of copying layout declarations into every source range");
+        }
+        assertEquals(parsed.getCoverage().getNativeDocxSections(),JsonUtils.read(JsonUtils.write(parsed.getCoverage()),ParseCoverage.class).getNativeDocxSections());
+    }
+
+    @Test void duplicateAndUnrecognizedSectionLayoutValuesRemainRawWithoutTakingTheFirstOrGuessingDefaults() throws Exception {
+        String properties="<w:pgNumType w:start=\"1\"/><w:pgNumType w:start=\"invalid\" w:fmt=\"unrecognized\"/><w:pgMar w:top=\"-20\"/><x:pgSz xmlns:x=\"urn:not-word\" x:w=\"999\"/>";
+        byte[] bytes=storySectionsFixture("",properties);JsonNode section=parse(bytes).getCoverage().getNativeDocxSections().path("sections").get(0);
+        JsonNode layout=section.path("layoutProperties"),numbering=layout.path("pgNumType");
+        assertEquals("duplicate_property",numbering.path("status").asText());assertEquals(2,numbering.path("observations").size());
+        String namespace="{http://schemas.openxmlformats.org/wordprocessingml/2006/main}";
+        assertEquals("1",numbering.path("observations").get(0).path("rawAttributes").path(namespace+"start").asText());
+        assertEquals("invalid",numbering.path("observations").get(1).path("rawAttributes").path(namespace+"start").asText());
+        assertEquals("unrecognized",numbering.path("observations").get(1).path("rawAttributes").path(namespace+"fmt").asText());
+        assertEquals("-20",layout.path("pgMar").path("observations").get(0).path("rawAttributes").path(namespace+"top").asText());
+        assertEquals("absent",layout.path("pgSz").path("status").asText());assertEquals("unknown",section.path("effectiveSectionState").asText());
+        assertFalse(numbering.has("rawValue"));assertFalse(numbering.has("effectiveValue"));
+    }
+
     @Test void nativeStoryConfigurationKeepsAbsentDefaultFalseAndInvalidValuesDistinct() throws Exception {
         String[] values={null,"","true","1","on","false","0","off","unexpected"};
         for(String value:values){

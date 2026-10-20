@@ -328,4 +328,33 @@ function harness(overrides = {}) {
   h.dispose()
 }
 
-console.log('Vetting view regressions passed: completion, restore, project/evidence/review races, review status and team replies, tri-state addendum, draft retention, exports, upload purpose, reconnect, cleanup and seven independent issue types.')
+{
+  let exported = false
+  const h = harness({
+    exportReport: async () => { exported = true },
+    latestRunProgress: async () => completed(),
+    getRun: async () => ({ ...completed(), reportSnapshotId: exported ? 'after-human-review' : 'run-completion' })
+  })
+  await h.mount()
+  assert.equal(h.view.job.value.reportSnapshotId, 'run-completion')
+  await h.view.exportReport()
+  assert.equal(h.view.job.value.reportSnapshotId, 'after-human-review', 'export refreshes the report snapshot created from current human review records')
+  h.dispose()
+}
+
+{
+  const pending = deferred(), reads = []
+  const h = harness({ exportReport: () => pending.promise, latestRunProgress: async project => { reads.push(project); return null } })
+  await h.mount()
+  h.view.job.value = { ...completed(), reportSnapshotId: 'project-A-snapshot' }
+  const downloading = h.view.exportReport()
+  h.store.activeProjectId = 'B'; await settle()
+  h.view.job.value = { ...completed('run-B'), reportSnapshotId: 'project-B-snapshot' }
+  const before = reads.length
+  pending.resolve(); await downloading
+  assert.equal(reads.length, before, 'a completed download from the old project cannot refresh the new project')
+  assert.equal(h.view.job.value.reportSnapshotId, 'project-B-snapshot')
+  h.dispose()
+}
+
+console.log('Vetting view regressions passed: completion, restore, project/evidence/review races, review status and team replies, tri-state addendum, draft retention, exports and snapshot refresh, upload purpose, reconnect, cleanup and seven independent issue types.')

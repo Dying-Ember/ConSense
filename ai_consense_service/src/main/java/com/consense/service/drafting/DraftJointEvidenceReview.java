@@ -76,7 +76,7 @@ final class DraftJointEvidenceReview {
             matched=attempt;
         }
         if(matched!=null) {
-            if(!"completed".equals(matched.getStatus()))return null;
+            if(!Arrays.asList("completed","partial").contains(matched.getStatus()))return null;
             if(matched.getContext()!=null)return matched.getContext();
             if(!hasAttemptContext&&"primary".equals(matched.getKind())&&decision.getAttemptIndex()==1)return part.getContext();
             return null;

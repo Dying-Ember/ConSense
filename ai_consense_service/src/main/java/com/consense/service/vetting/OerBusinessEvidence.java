@@ -296,8 +296,11 @@ public class OerBusinessEvidence {
     }
     /** Pure observed closure for explicitly selected origins in this same immutable corpus. */
     public List<VectorStore.SearchHit> sourceHits(Session session,List<String> originIds){
-        List<CanonicalSourceBinding> bindings=current(session);require(originIds!=null&&new HashSet<>(originIds).size()==originIds.size(),"context origins invalid");
-        String policy=retrieval.sourceUnitPolicy(session.indexKey,session.module,bindings);
+        require(originIds!=null&&new HashSet<>(originIds).size()==originIds.size(),"context origins invalid");
+        CurrentStage loaded=stage(session);String policy;
+        try(CurrentStage stage=loaded){policy=stage.frame==null?retrieval.sourceUnitPolicy(session.indexKey,session.module,stage.bindings)
+                :retrieval.sourceUnitPolicy(session.indexKey,session.module,stage.frame);}
+        complete(session,loaded);
         require(VettingRetrievalSourceUnits.supportsPolicy(policy),"context source-unit capability is unknown");
         Map<String,JsonNode> parents=new LinkedHashMap<>();session.byId.forEach((id,view)->parents.put(id,view.getCanonicalPayload()));
         List<VectorStore.SearchHit> out=new ArrayList<>();Set<String> used=new HashSet<>();

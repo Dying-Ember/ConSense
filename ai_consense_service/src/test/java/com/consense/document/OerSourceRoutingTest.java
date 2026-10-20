@@ -25,6 +25,20 @@ class OerSourceRoutingTest {
         OerDocumentIdentity identity = new OerSourceRouting().route("NTT.docx", source.getSourceSha256(), source);
         assertEquals("project_document", identity.getSourcePurpose()); assertTrue(identity.getEligibleModules().containsAll(Arrays.asList("vetting", "advisory")));
     }
+    @Test void nativeContractNumberWithoutColonIdentifiesTheProjectButNotAnUnfilledOrCrossLineValue() {
+        for(String label:Arrays.asList("CONTRACT NO. 20250101","Contract No: 20250101","Contract Number # 20250101")) {
+            String text="APPENDIX G305\nDeclaration of Compliance with Confidentiality\n"+label+"\nConstruction of Public Housing Development";
+            DocumentParser.ParsedDocument observed=new DocumentParser(new ConsenseProperties(),mock(OcrClient.class)).observe("source.txt",text.getBytes(StandardCharsets.UTF_8));
+            OerDocumentIdentity identity=new OerSourceRouting().route("source.txt",observed.getSourceSha256(),observed);
+            assertEquals("project_document",identity.getSourcePurpose(),label);assertEquals("content_supported",identity.getIdentityStatus());
+            assertTrue(identity.getEligibleModules().containsAll(Arrays.asList("vetting","advisory")));
+        }
+        for(String value:Arrays.asList("not provided","to be completed","insert number","unknown","n/a","________","[Contract Number]","\nConstruction of Public Housing Development")) {
+            DocumentParser.ParsedDocument source=parse("NOTICE TO TENDERERS\nContract No. "+value+"\nTender submission requirements");
+            OerDocumentIdentity identity=new OerSourceRouting().route("source.docx",source.getSourceSha256(),source);
+            assertEquals("unknown",identity.getSourcePurpose(),value);assertNull(identity.getEligibleModules(),value);
+        }
+    }
     @Test void noteNotesAndNoticeTitlesShareTheNttFamilyWithoutPromotingBodyReferences() {
         for(String title:Arrays.asList("Notes to Tenderers","Note to Tenderer","Notice to Tenderers")) {
             DocumentParser.ParsedDocument source=parse(title+"\nContract No: TEST/2046/02\nTender requirements");

@@ -17,7 +17,7 @@ public class LlmProfileFilter extends OncePerRequestFilter {
         String id=request.getHeader(LlmProfiles.HEADER);
         if(id!=null&&!profiles.supported(id)) {
             response.setStatus(400);response.setContentType("application/json");response.setCharacterEncoding("UTF-8");
-            response.getWriter().write(JsonUtils.write(ApiResponse.fail(400,"Unknown LLM profile. Choose local or minimax-cn.")));return;
+            response.getWriter().write(JsonUtils.write(ApiResponse.fail(400,"Unknown LLM profile. Choose local, minimax-cn, qwen or qwen-flash.")));return;
         }
         try(LlmProfiles.Scope ignored=profiles.bind(profiles.resolve(id))){chain.doFilter(request,response);}
     }

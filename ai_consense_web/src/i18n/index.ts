@@ -12,7 +12,7 @@ export const LOCALE_LABELS: Record<AppLocale, string> = {
 }
 
 const zhHans = {
-  llm: { source: '模型来源', local: '本地模型', minimax: 'MiniMax 国内 Token Plan', model: '模型', configured: '配置已就绪', notConfigured: '未配置', missingKey: '未配置 API 密钥', disabled: '已停用', loading: '正在读取模型配置…', unavailable: '模型配置暂时无法读取', newOperations: '切换仅影响新任务；配置就绪不代表连接或额度已验证。', recordedModel: '记录的模型', identityUnknown: '没有保存模型标识', identityNote: '标识来自所选配置；尚无供应商对实际执行模型的独立证明。' },
+  llm: { source: '模型来源', local: '本地模型', minimax: 'MiniMax 国内 Token Plan', qwen: 'Qwen3.8 27B', qwenFlash: 'Qwen3.8 Flash-Next', model: '模型', configured: '配置已就绪', notConfigured: '未配置', missingKey: '未配置 API 密钥', disabled: '已停用', loading: '正在读取模型配置…', unavailable: '模型配置暂时无法读取', newOperations: '切换仅影响新任务；配置就绪不代表连接或额度已验证。', recordedModel: '记录的模型', identityUnknown: '没有保存模型标识', identityNote: '标识来自所选配置；尚无供应商对实际执行模型的独立证明。' },
   app: { name: 'ConSense', tagline: 'CAC Solution · 本地部署' },
   nav: { drafting: 'Drafting 起草', vetting: 'Vetting 审查', advice: 'Advice 咨询', skills: 'Skills 配置', prompts: 'Prompts 提示词', collapse: '收起导航' },
   screen: {
@@ -26,7 +26,7 @@ const zhHans = {
     newProject: '新建项目', renameProject: '重命名项目', deleteProject: '删除项目',
     projectName: '项目名称', projectContract: '合约编号', projectNamePlaceholder: '例如：示例房屋重建项目',
     createHint: '新建后自动切换到该项目；项目数据相互隔离，需在第 1 步重新上传标准模板与项目资料。',
-    renameHint: '重命名只修改项目名称，不影响已上传的资料、变量与生成结果。',
+    renameHint: '修改工作区名称与合约编号。包内身份仍须在起草中明确确认；这里不采用变量或更新已生成文件。',
     deleteGuard: '至少保留一个项目',
     deleteConfirm: '确认删除项目「{name}」？该操作不可恢复。',
     deleteHint: '将一并删除该项目的标准模板、证据、变量、生成文稿、审查问题与问答记录。',
@@ -282,7 +282,7 @@ const zhHans = {
 }
 
 const zhHant: typeof zhHans = {
-  llm: { source: '模型來源', local: '本地模型', minimax: 'MiniMax 國內 Token Plan', model: '模型', configured: '配置已就緒', notConfigured: '未配置', missingKey: '未配置 API 金鑰', disabled: '已停用', loading: '正在讀取模型配置…', unavailable: '模型配置暫時無法讀取', newOperations: '切換僅影響新任務；配置就緒不代表連線或額度已驗證。', recordedModel: '記錄的模型', identityUnknown: '沒有儲存模型標識', identityNote: '標識來自所選配置；尚無供應商對實際執行模型的獨立證明。' },
+  llm: { source: '模型來源', local: '本地模型', minimax: 'MiniMax 國內 Token Plan', qwen: 'Qwen3.8 27B', qwenFlash: 'Qwen3.8 Flash-Next', model: '模型', configured: '配置已就緒', notConfigured: '未配置', missingKey: '未配置 API 金鑰', disabled: '已停用', loading: '正在讀取模型配置…', unavailable: '模型配置暫時無法讀取', newOperations: '切換僅影響新任務；配置就緒不代表連線或額度已驗證。', recordedModel: '記錄的模型', identityUnknown: '沒有儲存模型標識', identityNote: '標識來自所選配置；尚無供應商對實際執行模型的獨立證明。' },
   app: { name: 'ConSense', tagline: 'CAC Solution · 本地部署' },
   nav: { drafting: 'Drafting 起草', vetting: 'Vetting 審查', advice: 'Advice 諮詢', skills: 'Skills 配置', prompts: 'Prompts 提示詞', collapse: '收起導航' },
   screen: { drafting: 'Drafting 起草', vetting: 'Vetting 審查', advice: 'Advice 諮詢', prompts: 'Prompts 提示詞' },
@@ -291,7 +291,7 @@ const zhHant: typeof zhHans = {
     newProject: '新增項目', renameProject: '重新命名項目', deleteProject: '刪除項目',
     projectName: '項目名稱', projectContract: '合約編號', projectNamePlaceholder: '例如：示例房屋重建項目',
     createHint: '新增後自動切換至該項目；項目資料相互隔離，需在第 1 步重新上傳標準模板與項目資料。',
-    renameHint: '重新命名只修改項目名稱，不影響已上傳的資料、變量與生成結果。',
+    renameHint: '修改工作區名稱與合約編號。包內身分仍須在起草中明確確認；這裡不採用變量或更新已產生文件。',
     deleteGuard: '至少保留一個項目',
     deleteConfirm: '確認刪除項目「{name}」？該操作不可復原。',
     deleteHint: '將一併刪除該項目的標準模板、證據、變量、生成文稿、審查問題與問答記錄。',
@@ -547,7 +547,7 @@ const zhHant: typeof zhHans = {
 }
 
 const en: typeof zhHans = {
-  llm: { source: 'LLM source', local: 'Local model', minimax: 'MiniMax China Token Plan', model: 'Model', configured: 'Configuration ready', notConfigured: 'Not configured', missingKey: 'API key not configured', disabled: 'Disabled', loading: 'Loading model configuration…', unavailable: 'Model configuration could not be loaded', newOperations: 'Changes apply to new operations; configuration readiness does not verify connectivity or quota.', recordedModel: 'Recorded model', identityUnknown: 'No saved model identity', identityNote: 'Configured profile; provider execution is not independently attested.' },
+  llm: { source: 'LLM source', local: 'Local model', minimax: 'MiniMax China Token Plan', qwen: 'Qwen3.8 27B', qwenFlash: 'Qwen3.8 Flash-Next', model: 'Model', configured: 'Configuration ready', notConfigured: 'Not configured', missingKey: 'API key not configured', disabled: 'Disabled', loading: 'Loading model configuration…', unavailable: 'Model configuration could not be loaded', newOperations: 'Changes apply to new operations; configuration readiness does not verify connectivity or quota.', recordedModel: 'Recorded model', identityUnknown: 'No saved model identity', identityNote: 'Configured profile; provider execution is not independently attested.' },
   app: { name: 'ConSense', tagline: 'CAC Solution · on-premise' },
   nav: { drafting: 'Drafting', vetting: 'Vetting', advice: 'Advice', skills: 'Skills configuration', prompts: 'Prompts', collapse: 'Collapse' },
   screen: { drafting: 'Drafting', vetting: 'Vetting', advice: 'Advice', prompts: 'Prompts' },
@@ -556,7 +556,7 @@ const en: typeof zhHans = {
     newProject: 'New project', renameProject: 'Rename project', deleteProject: 'Delete project',
     projectName: 'Project name', projectContract: 'Contract no.', projectNamePlaceholder: 'e.g. Sample Housing Redevelopment',
     createHint: 'Switches to the new project automatically. Project data is isolated — upload standard templates and project evidence again in step 1.',
-    renameHint: 'Renaming only changes the project name; uploaded evidence, variables and generated documents are unaffected.',
+    renameHint: 'Edit the workspace name and contract number. Confirm the package identity in Drafting to adopt values and update generated documents.',
     deleteGuard: 'At least one project must remain',
     deleteConfirm: 'Delete project "{name}"? This cannot be undone.',
     deleteHint: 'Its templates, evidence, variables, generated documents, vetting findings and chat history will be removed as well.',

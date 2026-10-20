@@ -704,6 +704,7 @@ async function exportReport() {
     await vettingApi.exportReport(id, store.locale, `ConSense_Vetting_Report.${format}`, format)
     if (!disposed && epoch === viewEpoch && id === projectId.value) {
       store.notify(t('vetting.actions.exportStarted', { format: format.toUpperCase() }), 5000)
+      await restoreJob()
     }
   } finally {
     exporting.value = false

@@ -113,6 +113,12 @@ public class DraftingController {
         return ApiResponse.ok(draftingService.createVariable(projectId, body));
     }
 
+    @PostMapping("/identity/confirm")
+    public ApiResponse<com.consense.web.dto.ProjectDtos.ProjectVO> confirmIdentity(@PathVariable String projectId,
+                                                                                 @RequestBody ProjectIdentityConfirmation body) {
+        return ApiResponse.ok(draftingService.confirmProjectIdentity(projectId,body));
+    }
+
     @PostMapping("/variables/confirm-all")
     public ApiResponse<List<VariableVO>> confirmAll(@PathVariable String projectId,
                                                     @RequestParam(defaultValue = "INPUT") String scope,

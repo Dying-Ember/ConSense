@@ -90,7 +90,7 @@ final class DraftSourceEditCompiler implements DraftClauseRules.SourceListener {
         return new Removal(id+"-remove-scope",new ArrayList<>(nodes.values()));
     }
     private static boolean globalPageFurniture(String text) {
-        String value=text.trim();return value.startsWith("HD(QS)")||value.startsWith("March 2020")||value.startsWith("SPECIAL CONDITIONS OF TENDER")||value.startsWith("SPECIAL CONDITIONS OF CONTRACT")||value.equals("NOTES TO TENDERERS");
+        String value=text.trim();return value.startsWith("HD(QS)")||value.startsWith("March 2020")||value.startsWith("SPECIAL CONDITIONS OF TENDER")||value.startsWith("SPECIAL CONDITIONS OF CONTRACT")||value.startsWith("NOTES TO TENDERERS");
     }
     private void whole(Map<Integer,Desired> trial,List<Insertion> inserted,List<Removal> removed,Map<String,Object> action,String id,String clause,String replacement) {
         if(verifiedAutomaticNegative(trial,removed,action,id,clause,replacement))return;

@@ -75,7 +75,7 @@ public final class VettingTokenAwareRequestPacks {
         Pack globalPack=new Pack();globalPack.setIndex(0);globalPack.setChunks(copies(global.getChunks().stream().map(Chunk::getId).collect(Collectors.toList())));globalPack.setContentChars(global.getContentChars());
         globalPack.setRequestIds(original.getRequests().stream().filter(r->"already_global".equals(r.getStatus())).map(Request::getId).collect(Collectors.toList()));
         plan.setGlobalInputBudget(observe(globalPack,factory,observer,plan,memo));
-        boolean providerEstimate=plan.getGlobalInputBudget().getObservation()!=null&&plan.getGlobalInputBudget().getObservation().getProviderEstimate()!=null;
+        boolean providerEstimate=plan.getGlobalInputBudget().getObservation()!=null&&(plan.getGlobalInputBudget().getObservation().getProviderEstimate()!=null||plan.getGlobalInputBudget().getObservation().getQwenUsageEstimate()!=null);
         if(providerEstimate)out.setBudgetScope("complete_provider_wire_input_estimate_with_explicit_configured_limit_and_absolute_margin_not_exact_template");
         Set<String> requestIds=new HashSet<>();List<Request> known=new ArrayList<>();
         for(Request r:out.getRequests()) {
@@ -223,8 +223,14 @@ public final class VettingTokenAwareRequestPacks {
     private static String observationIdentity(VettingInputBudget.Input in,VettingInputBudget.Observation o) {
         Map<String,Object> identity=new LinkedHashMap<>();identity.put("provider",in.getProvider());identity.put("providerConfigurationSha256",in.getProviderConfigurationSha256());identity.put("model",o.getModel());identity.put("tokenizerIdentitySha256",o.getTokenizerIdentitySha256());identity.put("chatTemplateIdentitySha256",o.getChatTemplateIdentitySha256());identity.put("effectiveContextIdentitySha256",o.getEffectiveContextIdentitySha256());identity.put("effectiveContextTokens",o.getEffectiveContextTokens());identity.put("outputReserveTokens",o.getOutputReserveTokens());
         if(o.getProviderEstimate()!=null){VettingResponsesTransport.EstimateIdentity e=o.getProviderEstimate();identity.put("providerEstimateKind",e.getKind());identity.put("wireProtocol",e.getWireProtocol());identity.put("counterContract",e.getCounterContract());identity.put("profileSha256",e.getProfileSha256());identity.put("contextPolicySha256",e.getContextPolicySha256());identity.put("safetyMarginTokens",e.getSafetyMarginTokens());identity.put("modelIdentityScope",e.getModelIdentityScope());identity.put("responseModelUnavailable",e.isResponseModelUnavailable());}
+        if(o.getQwenUsageEstimate()!=null)identity.put("qwenUsagePolicy",com.consense.service.llm.QwenChatUsagePreflight.policyIdentity(o));
         return JsonUtils.write(identity);
     }
-    private static boolean exactMeasurement(VettingInputBudget.Result budget){return !"budget_unknown".equals(budget.getStatus())&&(budget.getObservation()==null||budget.getObservation().getProviderEstimate()==null);}
-    public static boolean sameFinalObservation(VettingInputBudget.Result preview,VettingInputBudget.Result actual) {return preview!=null&&actual!=null&&JsonUtils.write(preview).equals(JsonUtils.write(actual));}
+    private static boolean exactMeasurement(VettingInputBudget.Result budget){return !"budget_unknown".equals(budget.getStatus())&&(budget.getObservation()==null||budget.getObservation().getProviderEstimate()==null&&budget.getObservation().getQwenUsageEstimate()==null);}
+    public static boolean sameFinalObservation(VettingInputBudget.Result preview,VettingInputBudget.Result actual) {
+        if(preview!=null&&preview.getObservation()!=null&&preview.getObservation().getQwenUsageEstimate()!=null
+                ||actual!=null&&actual.getObservation()!=null&&actual.getObservation().getQwenUsageEstimate()!=null)
+            return com.consense.service.llm.QwenChatUsagePreflight.sameObservation(preview,actual);
+        return preview!=null&&actual!=null&&JsonUtils.write(preview).equals(JsonUtils.write(actual));
+    }
 }

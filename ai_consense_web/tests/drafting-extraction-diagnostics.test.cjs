@@ -72,6 +72,26 @@ const field = { key: 'contractTitle', kind: 'text', label: { en: 'Contract ident
   const absent = await renderToString(vue.createSSRApp(processReport, { trace: null, projectId: 'A', locale: 'en', open: false }))
   assert.match(absent, /No extraction report is available/); assert.match(absent, /No saved historical reports are available/)
   console.log('PASS: actual process panel renders failed outcomes/attempts/intake caveat in all three languages and handles legacy/absent reports without adoption controls or model/API calls')
+  for (const [locale, title, note, attemptTitle] of [
+    ['en', 'Extraction partially available', 'Complete source-checked candidates are available for review, editing and explicit adoption', 'Attempt partially available'],
+    ['zh-Hans', '识别部分可用', '可继续核对、修改和采用', '调用结果部分可用'],
+    ['zh-Hant', '識別部分可用', '可繼續核對、修改和採用', '呼叫結果部分可用']
+  ]) {
+    const partial = { ...trace, status: 'partial', failureCode: 'incomplete_json', failureMessage: 'Unfinished source requires review', parts: [{ ...trace.parts[0], attempts: [{ attemptIndex: 1, kind: 'primary', systemPrompt: 'exact system', userPrompt: 'exact user', rawResponse: '[{"key":"complete"},{"key":', status: 'partial', errorCode: 'output_budget_exhausted', providerFailureKind: 'OUTPUT_BUDGET_EXHAUSTED', providerResponse: '{"choices":[{"finish_reason":"length"}],"note":"<script>untrusted</script>"}', providerResponseMetadata: { finishReason: 'length', usage: { total_tokens: 120 } } }] }] }
+    const rendered = await renderToString(vue.createSSRApp(processReport, { trace: partial, projectId: 'A', locale, open: false }))
+    assert.ok(rendered.includes(title)); assert.ok(rendered.includes(note)); assert.ok(rendered.includes(attemptTitle)); assert.match(rendered, /Unfinished source requires review/)
+    assert.doesNotMatch(rendered, /<h3>Extraction completed<\/h3>|<h3>Extraction failed<\/h3>|Assessed parts are diagnostic only/)
+    assert.match(rendered, /OUTPUT_BUDGET_EXHAUSTED/); assert.match(rendered, /&quot;finishReason&quot;: &quot;length&quot;/); assert.match(rendered, /&lt;script&gt;untrusted/); assert.doesNotMatch(rendered, /<script>untrusted/)
+    const editable = await renderToString(vue.createSSRApp(input, { field, value: 'false', values: {}, locale, trace: partial }))
+    assert.ok(editable.includes(note)); assert.match(editable, /id="input-contractTitle"[^>]*value="false"/)
+  }
+  console.log('PASS: partial candidates are explicitly available for manual completion and input remains editable in all three locales without automatic adoption')
+  const outage = { ...trace, status: 'partial', failureCode: 'partial_source_failed', parts: [{ ...trace.parts[0], attempts: [{ attemptIndex: 1, kind: 'primary', systemPrompt: 'system', userPrompt: 'source', rawResponse: null, status: 'failed', errorCode: 'model_call_failed', errorMessage: 'Selected profile quota exhausted <script>untrusted</script>' }] }] }
+  for (const locale of ['en', 'zh-Hans', 'zh-Hant']) {
+    const rendered = await renderToString(vue.createSSRApp(processReport, { trace: outage, projectId: 'A', locale, open: false }))
+    assert.match(rendered, /Selected profile quota exhausted/)
+    assert.match(rendered, /&lt;script&gt;untrusted/); assert.doesNotMatch(rendered, /<script>untrusted/)
+  }
   const sourceUnresolved = { ...trace, decisions: [{ ...trace.decisions[0], key: 'foundationIncluded', rawValue: null, status: 'unanswered', sourceQuote: 'Decision: leave that classification pending.', reason: 'The classification must await a separate scope review.', codes: ['value_unanswered', 'source_unresolved'] }], fields: [{ key: 'foundationIncluded', status: 'source_unresolved', candidateCount: 0, rejectionCount: 0, unansweredCount: 1, decisionRefs: [0] }] }
   const foundation = { key: 'foundationIncluded', kind: 'boolean', label: { en: 'Foundation classification', zhHans: '基础工程分类', zhHant: '基礎工程分類' } }
   for (const [locale, label, guidance] of [

@@ -1,5 +1,5 @@
 {
-  "ruleVersion": "drafting-20261006.6-docx",
+  "ruleVersion": "drafting-20261020.1-bs-scope",
   "groups": [
     {
       "id": "identity",
@@ -188,22 +188,13 @@
         {
           "key": "subcontractors",
           "label": {
-            "en": "BSSSC specialist subcontract names (trades)",
-            "zhHans": "BSSSC专业分包名称（工种）",
-            "zhHant": "BSSSC專業分包名稱（工種）"
+            "en": "BS subcontract categories (trades)",
+            "zhHans": "BS专业分判类别（工种）",
+            "zhHant": "BS專業分判類別（工種）"
           },
           "kind": "multiselect",
           "optional": false,
           "affects": [],
-          "condition": {
-            "all": [
-              {
-                "field": "subcontractArrangement",
-                "operator": "eq",
-                "value": "BSSSC"
-              }
-            ]
-          },
           "options": [
             {
               "value": "Electrical",
@@ -3697,9 +3688,9 @@
       "clause": "SCT2(2)(b)",
       "paragraphs": "P436–437; case SCT P243",
       "detail": {
-        "zhHans": "当前模板的消防引用尚不能确定。需澄清缺失／冲突的消防范围，或核对对应 NSC 模板；不要默认某个消防选项、将同一范围两个选项都视为已确认，或在 NSC 草稿采用已收起的 BSSSC 工种清单。",
-        "zhHant": "當前模板的消防引用尚不能確定。需澄清缺失／沖突的消防范圍，或核對對應 NSC 模板；不要默認某個消防選項、將同一范圍兩個選項都視為已確認，或在 NSC 草稿采用已收起的 BSSSC 工種清單。",
-        "en": "The fire reference cannot yet be chosen for this template. Resolve missing or conflicting fire scope, or check the corresponding NSC template. Do not assume one fire option, treat both as confirmed for one scope, or reuse the hidden BSSSC trade list in an NSC draft."
+        "zhHans": "消防、电梯等 BS 工种在 NSC 和 BSSSC 下均需选择，指定方式不代替工种范围。当前模板的消防引用仍须核对缺失／冲突范围及对应版次；不要默认消防选项或将同一范围两个选项都视为已确认。",
+        "zhHant": "消防、電梯等 BS 工種在 NSC 和 BSSSC 下均需選擇，指定方式不代替工種範圍。當前模板的消防引用仍須核對缺失／衝突範圍及對應版次；不要默認消防選項或將同一範圍兩個選項都視為已確認。",
+        "en": "Select BS trades such as fire services and lift under both NSC and BSSSC; designation does not establish trade scope. Verify missing or conflicting fire scope and the applicable source edition before changing a reference. Do not assume a fire option or confirm both options for the same scope."
       }
     },
     {

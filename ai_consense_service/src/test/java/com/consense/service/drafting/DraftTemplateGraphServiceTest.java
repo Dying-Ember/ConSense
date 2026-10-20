@@ -21,6 +21,7 @@ import org.junit.jupiter.api.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.boot.test.mock.mockito.SpyBean;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.context.*;
 import static org.junit.jupiter.api.Assertions.*;
@@ -42,6 +43,8 @@ class DraftTemplateGraphServiceTest {
     @Autowired DraftExtractionRunRepository runs;
     @Autowired StorageService storage;
     @Autowired org.springframework.transaction.PlatformTransactionManager transactions;
+    @Autowired com.consense.config.ConsenseProperties settings;
+    @SpyBean DraftReviewSources reviewSources;
     @javax.persistence.PersistenceContext javax.persistence.EntityManager entityManager;
     @Autowired com.consense.service.ProjectService projectService;
     @MockBean AiGateway ai;
@@ -56,6 +59,50 @@ class DraftTemplateGraphServiceTest {
     VariablePatch patch(VariableVO current,Object... extra){Map<String,Object> body=map("graphRevisionId",current.getGraphRevisionId(),"fieldDefinitionHash",current.getFieldDefinitionHash());for(int i=0;i<extra.length;i+=2)body.put(String.valueOf(extra[i]),extra[i+1]);return JsonUtils.mapper().convertValue(body,VariablePatch.class);}
     @SuppressWarnings("unchecked") Map<String,Object> effective(String project){return (Map<String,Object>)service.plan(project,null).get("effectiveValues");}
     String response(String value,String quote){return JsonUtils.write(Collections.singletonList(map("key","duration","value",Integer.valueOf(value),"sourceQuote",quote,"reason","Synthetic source statement","confidence",0.99)));}
+    Map<String,Object> manyFields(SourceDocument template,int count){Map<String,Object> graph=graph(template,"confirmed","number"),state=(Map<String,Object>)graph.get("graph");List<Object> fields=new ArrayList<>();for(int n=0;n<count;n++){Map<String,Object> field=JsonUtils.readMap(JsonUtils.write(DraftReviewGraph.nodes(graph).get(0)));field.put("id",n==0?"duration":"duration-"+n);field.put("nameEn","Test-only duration "+n);field.put("nameZh","测试工期 "+n);fields.add(field);}state.put("variables",fields);return graph;}
+    String confirmMany(String project,SourceDocument template,int count){Map<String,Object> draft=service.save(project,manyFields(template,count),null);return String.valueOf(service.confirm(project,String.valueOf(draft.get("id")),null).get("id"));}
+
+    @Test void readingManyVariablesVerifiesTheirSharedSourceOncePerRequest()throws Exception {
+        String project=project();SourceDocument template=template(project);confirmMany(project,template,24);VariableVO first=variable(project);service.updateVariable(project,"duration",patch(first,"value","42","note","Test-only adopted value remains unchanged by reads"));
+        for(int request=0;request<2;request++){clearInvocations(reviewSources);List<VariableVO> result=service.variables(project);assertEquals(24,result.size());assertEquals("42",result.get(0).getValue());assertTrue(result.get(0).isConfirmed());assertFalse(result.get(0).isReviewRequired());verify(reviewSources,times(1)).archive(argThat(source->template.getId().equals(source.getId())));}
+        assertEquals("42",values.findByProjectIdAndVarKey(project,"duration").orElseThrow().getValueText());verify(ai,never()).complete(anyString(),anyString());
+    }
+
+    @Test void sourceAndArchiveChangesAreRecheckedOnTheNextVariableReadAndBeforeWrites()throws Exception {
+        for(boolean archive:new boolean[]{false,true}){
+            String project=project();SourceDocument template=template(project);confirmMany(project,template,6);VariableVO first=variable(project);service.updateVariable(project,"duration",patch(first,"value","42","note","Test-only adoption before integrity checks"));VariableVO adopted=variable(project);assertFalse(adopted.isReviewRequired());
+            String sourceHash=template.getSourceSha256();byte[] original=storage.read(template.getStoragePath());JsonNode manifest=reviewSources.archive(template);java.nio.file.Path changed=archive?java.nio.file.Paths.get(settings.getStorageRoot(),".draft-review-originals",manifest.path("archiveKey").asText()):java.nio.file.Paths.get(template.getStoragePath());byte[] before=java.nio.file.Files.readAllBytes(changed);
+            try {java.nio.file.Files.write(changed,"TEST ONLY damaged original or archive".getBytes(StandardCharsets.UTF_8));List<VariableVO> stale=service.variables(project);assertTrue(stale.stream().allMatch(VariableVO::isReviewRequired));assertEquals("42",stale.get(0).getValue());assertTrue(stale.get(0).isConfirmed());assertThrows(BizException.class,()->service.updateVariable(project,"duration",patch(adopted,"value","43")));assertThrows(BizException.class,()->service.extract(project));verify(ai,never()).complete(anyString(),anyString());assertEquals("42",values.findByProjectIdAndVarKey(project,"duration").orElseThrow().getValueText());assertEquals(sourceHash,sources.findById(template.getId()).orElseThrow().getSourceSha256());}
+            finally{java.nio.file.Files.write(changed,before);}
+            assertFalse(variable(project).isReviewRequired());assertArrayEquals(original,storage.read(template.getStoragePath()));
+        }
+    }
+
+    @Test void currentReadReusesOnlyCurrentSourceChecksAndStillChecksEveryRevisionManifest()throws Exception {
+        String project=project();SourceDocument first=template(project);String confirmed=confirmMany(project,first,3);Map<String,Object> draft=service.save(project,manyFields(first,4),confirmed);
+        clearInvocations(reviewSources);Map<String,Object> shared=service.current(project);assertEquals(false,((Map<?,?>)shared.get("current")).get("sourceStale"));assertEquals(false,((Map<?,?>)shared.get("draft")).get("sourceStale"));verify(reviewSources,times(1)).archive(any(SourceDocument.class));verify(reviewSources,times(2)).archivedBytes(any(JsonNode.class));
+        SourceDocument second=template(project);draft=service.save(project,manyFields(second,4),confirmed);String draftId=String.valueOf(draft.get("id"));DraftTemplateGraphRevision row=revisions.findById(draftId).orElseThrow();String original=row.getSourcesJson();
+        assertEquals(1,JsonUtils.parse(revisions.findById(confirmed).orElseThrow().getSourcesJson()).size());assertEquals(2,JsonUtils.parse(original).size());
+        clearInvocations(reviewSources);service.current(project);verify(reviewSources,times(2)).archive(any(SourceDocument.class));verify(reviewSources,times(3)).archivedBytes(any(JsonNode.class));
+        DraftTemplateGraphHead selected=graphHeads.findById(project).orElseThrow();
+        try {for(String field:Arrays.asList("sourceSha256","sourceHash","analysisRevision","analysisInputSha256","analysisSha256","evidenceStatus","archiveKey")){JsonNode changed=JsonUtils.parse(original);((ObjectNode)changed.get(0)).put(field,"TEST ONLY changed "+field);String fixtureId=UUID.randomUUID().toString();revisions.saveAndFlush(new DraftTemplateGraphRevision(fixtureId,project,draftId,"DRAFT",row.getGraphSha256(),row.getGraphJson(),JsonUtils.write(changed),java.time.Instant.now()));selected.setDraftRevisionId(fixtureId);graphHeads.saveAndFlush(selected);Map<String,Object> current=service.current(project);assertEquals(false,((Map<?,?>)current.get("current")).get("sourceStale"),field);assertEquals(true,((Map<?,?>)current.get("draft")).get("sourceStale"),field);}}
+        finally{selected.setDraftRevisionId(draftId);graphHeads.saveAndFlush(selected);}
+        SourceDocument added=correspondence(project,"Test-only new source after the previous read.");List<?> listed=(List<?>)service.current(project).get("sources");assertTrue(listed.stream().map(value->(Map<?,?>)value).anyMatch(value->Objects.equals(String.valueOf(added.getId()),value.get("id"))));
+    }
+
+    @Test void aSourceChangeDuringTheModelCannotReuseAnEarlierReadOrOverwriteAdoptedValues()throws Exception {
+        String project=project();SourceDocument template=template(project);confirmMany(project,template,4);VariableVO first=variable(project);service.updateVariable(project,"duration",patch(first,"value","42","note","Test-only adoption before the model changes source bytes"));correspondence(project,"The duration is 43 months.");service.variables(project);byte[] original=storage.read(template.getStoragePath());
+        when(ai.complete(anyString(),anyString())).thenAnswer(call->{java.nio.file.Files.write(java.nio.file.Paths.get(template.getStoragePath()),"TEST ONLY source changed during the model".getBytes(StandardCharsets.UTF_8));return response("43","The duration is 43 months.");});
+        try {List<VariableVO> result=service.extract(project);VariableVO duration=result.stream().filter(value->"duration".equals(value.getKey())).findFirst().orElseThrow();assertEquals("42",duration.getValue());assertTrue(duration.isConfirmed());assertTrue(duration.isReviewRequired());assertTrue(((Map<?,?>)service.plan(project,null).get("effectiveValues")).isEmpty());assertThrows(BizException.class,()->service.updateVariable(project,"duration",patch(duration,"value","43")));assertEquals("42",values.findByProjectIdAndVarKey(project,"duration").orElseThrow().getValueText());}
+        finally{java.nio.file.Files.write(java.nio.file.Paths.get(template.getStoragePath()),original);}
+    }
+
+    @Test void retainedQuestionCoreCannotConfirmUntilItsRejectedRulesAreManuallyRebound()throws Exception {
+        String project=project();SourceDocument template=template(project);Map<String,Object> proposed=graph(template,"confirmed","boolean");
+        Map<String,Object> node=DraftReviewGraph.nodes(proposed).get(0);node.put("discoveryCoreRetained",true);node.put("correction",map("kind","rule","branches",new ArrayList<>(),"inputIds",new ArrayList<>(),"needsRebind",true));
+        Map<String,Object> draft=service.save(project,proposed,null);BizException rejected=assertThrows(BizException.class,()->service.confirm(project,String.valueOf(draft.get("id")),null));
+        assertTrue(rejected.getMessage().contains("GRAPH_RULE_REBIND_REQUIRED"));assertNull(graphHeads.findById(project).orElseThrow().getCurrentRevisionId());assertTrue(values.findByProjectIdOrderBySortOrderAsc(project).isEmpty());
+    }
 
     @Test void bootstrapExcludesBoundAuxiliaryPdfFromSourceManifestAndSeedsButKeepsItsReading()throws Exception {
         String project=project();SourceDocument word=guidanceTemplate(project,false),auxiliary=guidanceTemplate(project,true);saveGuidanceEvidence(auxiliary);
@@ -109,6 +156,60 @@ class DraftTemplateGraphServiceTest {
         confirm(project,template,"number",null);VariableVO current=variable(project);assertEquals(1,current.getCandidates().size());assertFalse(effective(project).containsKey("duration"));
         service.updateVariable(project,"duration",patch(current,"candidateIndex",0,"candidateSnapshot",current.getCandidates().get(0)));assertEquals("42",String.valueOf(effective(project).get("duration")));
         assertTrue(runs.findFirstByProjectIdOrderByFinishedAtDescIdDesc(project).isPresent());
+    }
+    @Test void graphCandidatePromptRequiresNumericConfidenceAndKeepsLabelResponsesRejected()throws Exception {
+        String project=project();SourceDocument template=template(project);correspondence(project,"The duration is 42 months.");
+        String invalid=JsonUtils.write(Collections.singletonList(map("key","duration","value",42,"sourceQuote","The duration is 42 months.","reason","Test-only complete source","confidence","high")));
+        when(ai.complete(anyString(),anyString())).thenReturn(invalid,response("42","The duration is 42 months."));String draft=String.valueOf(service.save(project,graph(template,"pending","number"),null).get("id"));
+        List<VariableVO> rejected=service.extract(project,draft);assertTrue(rejected.get(0).getCandidates().isEmpty());assertFalse(rejected.get(0).isConfirmed());
+        JsonNode trace=JsonUtils.parse(runs.findFirstByProjectIdOrderByFinishedAtDescIdDesc(project).orElseThrow().getTraceJson());assertEquals(invalid,trace.path("parts").get(0).path("attempts").get(0).path("rawResponse").asText());assertTrue(trace.path("decisions").get(0).path("codes").toString().contains("confidence_invalid"));
+        List<VariableVO> numeric=service.extract(project,draft);assertEquals(1,numeric.get(0).getCandidates().size());assertEquals("42",numeric.get(0).getValue());assertFalse(numeric.get(0).isConfirmed());assertFalse(values.findByProjectIdAndVarKey(project,"duration").isPresent());
+        verify(ai,times(2)).complete(argThat(prompt->prompt.contains("confidence must be a JSON number from 0 to 1")&&prompt.contains("boolean uses JSON true/false")&&prompt.contains("choice uses an exact options[].value")&&prompt.contains("do not infer a clause keep/delete decision only from a template rule")),anyString());
+    }
+
+    @Test void partialDraftExtractionRemainsEditableAndCanBeConfirmedThenExplicitlyAdopted() throws Exception {
+        String project=project();SourceDocument template=template(project);correspondence(project,"The duration is 42 months.");
+        String raw="["+JsonUtils.write(map("key","duration","value",42,"sourceQuote","The duration is 42 months.","reason","Complete test-only evidence","confidence",0.99))+",{\"key\":";
+        when(ai.complete(anyString(),anyString())).thenReturn(raw);
+        String draft=String.valueOf(service.save(project,graph(template,"pending","number"),null).get("id"));List<VariableVO> proposed=service.extract(project,draft);
+        assertEquals("42",proposed.get(0).getValue());assertFalse(proposed.get(0).isConfirmed());List<?> candidateFields=(List<?>)service.candidates(project,draft).get("variables");assertEquals(2,candidateFields.size());assertEquals("contractTitle",((VariableVO)candidateFields.get(1)).getKey());assertEquals("missing",((VariableVO)candidateFields.get(1)).getAdoptionState());
+        Map<String,Object> candidateState=service.candidates(project,draft);assertNotNull(candidateState.get("runId"));
+        Map<String,Object> trace=JsonUtils.readMap(runs.findFirstByProjectIdOrderByFinishedAtDescIdDesc(project).get().getTraceJson());assertEquals("partial",trace.get("status"));assertTrue(JsonUtils.write(trace).contains(raw.replace("\"","\\\"")));
+        confirm(project,template,"number",null);VariableVO current=variable(project);assertEquals(1,current.getCandidates().size());assertFalse(current.isConfirmed());assertFalse(effective(project).containsKey("duration"));
+        service.updateVariable(project,"duration",patch(current,"candidateIndex",0,"candidateSnapshot",current.getCandidates().get(0)));assertEquals(42,((Number)effective(project).get("duration")).intValue());
+    }
+
+    @Test void invalidGraphExtractionSourceKeepsEarlierCompleteSourceCandidatesPending() throws Exception {
+        String project=project();SourceDocument template=template(project);correspondence(project,"The duration is 42 months.");correspondence(project,"Further decisions are unavailable.");
+        when(ai.complete(anyString(),anyString())).thenReturn(response("42","The duration is 42 months."),"[{\"key\":");
+        String draft=String.valueOf(service.save(project,graph(template,"pending","number"),null).get("id"));List<VariableVO> proposed=service.extract(project,draft);
+        assertEquals("42",proposed.get(0).getValue());assertFalse(proposed.get(0).isConfirmed());
+        Map<String,Object> trace=JsonUtils.readMap(runs.findFirstByProjectIdOrderByFinishedAtDescIdDesc(project).get().getTraceJson());assertEquals("partial",trace.get("status"));
+        assertNotNull(service.candidates(project,draft).get("runId"));assertFalse(values.findByProjectIdAndVarKey(project,"duration").isPresent());
+    }
+
+    @Test void actualMiniMaxHttpLengthAndLaterProviderFailureKeepEarlierGroundedCandidatesAvailable() throws Exception {
+        for(boolean length:Arrays.asList(false,true)) {
+            String first="The duration is 42 months.",second="An alternative duration is 43 months.";
+            java.util.concurrent.atomic.AtomicInteger calls=new java.util.concurrent.atomic.AtomicInteger();
+            com.sun.net.httpserver.HttpServer server=com.sun.net.httpserver.HttpServer.create(new java.net.InetSocketAddress("127.0.0.1",0),0);
+            String partial="["+JsonUtils.write(map("key","duration","value",43,"sourceQuote",second,"reason","Complete test-only alternative","confidence",0.99))+",{\"key\":";
+            String envelope=JsonUtils.write(map("base_resp",map("status_code",0),"choices",Collections.singletonList(map("finish_reason","length","message",map("content",partial))),"usage",map("prompt_tokens",100,"completion_tokens",20,"total_tokens",120)));
+            server.createContext("/v1/models",exchange->{byte[] body="{\"data\":[]}".getBytes(StandardCharsets.UTF_8);exchange.sendResponseHeaders(200,body.length);try(java.io.OutputStream out=exchange.getResponseBody()){out.write(body);}});
+            server.createContext("/v1/chat/completions",exchange->{int ordinal=calls.incrementAndGet();exchange.getRequestBody().close();String payload=ordinal==1?JsonUtils.write(map("choices",Collections.singletonList(map("finish_reason","stop","message",map("content",response("42",first)))))):length?envelope:"{\"error\":\"TEST ONLY provider failed\"}";byte[] body=payload.getBytes(StandardCharsets.UTF_8);exchange.sendResponseHeaders(ordinal==1||length?200:400,body.length);try(java.io.OutputStream out=exchange.getResponseBody()){out.write(body);}});
+            server.start();
+            try {
+                com.consense.config.ConsenseProperties props=new com.consense.config.ConsenseProperties();com.consense.config.ConsenseProperties.Llm cfg=props.getMinimaxCn();cfg.setBaseUrl("http://127.0.0.1:"+server.getAddress().getPort());cfg.setApiKey("test-only-provider-key");cfg.setEnabled(true);
+                com.consense.ai.MiniMaxChatClient client=new com.consense.ai.MiniMaxChatClient(cfg,new com.consense.ai.HttpSupport());com.consense.ai.LlmProfiles profiles=new com.consense.ai.LlmProfiles(props,client,client);com.consense.ai.AiGateway actual=new com.consense.ai.AiGateway(client,profiles);
+                doAnswer(call->actual.complete(call.getArgument(0),call.getArgument(1))).when(ai).complete(anyString(),anyString());
+                String project=project();SourceDocument template=template(project);correspondence(project,first);correspondence(project,second);String draft=String.valueOf(service.save(project,graph(template,"pending","number"),null).get("id"));
+                try(com.consense.ai.LlmProfiles.Scope selected=profiles.bind(profiles.resolve("minimax-cn"))){List<VariableVO> proposed=service.extract(project,draft);assertTrue(proposed.get(0).getCandidates().stream().anyMatch(candidate->"42".equals(candidate.getValue())));assertFalse(proposed.get(0).isConfirmed());assertEquals(length?2:1,proposed.get(0).getCandidates().size());}
+                JsonNode trace=JsonUtils.parse(runs.findFirstByProjectIdOrderByFinishedAtDescIdDesc(project).get().getTraceJson());assertEquals("partial",trace.path("status").asText());assertEquals(2,calls.get());assertNotNull(service.candidates(project,draft).get("runId"));assertFalse(values.findByProjectIdAndVarKey(project,"duration").isPresent());
+                JsonNode attempt=trace.path("parts").path(1).path("attempts").path(0);
+                if(length){assertEquals("OUTPUT_BUDGET_EXHAUSTED",attempt.path("providerFailureKind").asText());assertEquals(envelope,attempt.path("providerResponse").asText());assertEquals(partial,attempt.path("rawResponse").asText());assertEquals("length",attempt.path("providerResponseMetadata").path("finishReason").asText());assertEquals(120,attempt.path("providerResponseMetadata").path("usage").path("total_tokens").asInt());}
+                else {assertEquals("failed",attempt.path("status").asText());assertEquals("model_call_failed",attempt.path("errorCode").asText());}
+            }finally{server.stop(0);}
+        }
     }
     @Test void correctionAndCandidateRerunsKeepManualValuesAndOnlyChangedSuggestionsRequireReview() throws Exception {
         String project=project();SourceDocument template=template(project);correspondence(project,"The duration is 42 months. An alternative is 43 months.");confirm(project,template,"number",null);

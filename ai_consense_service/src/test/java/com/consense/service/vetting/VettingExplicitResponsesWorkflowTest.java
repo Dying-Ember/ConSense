@@ -127,7 +127,7 @@ class VettingExplicitResponsesWorkflowTest {
     }
     @org.junit.jupiter.params.ParameterizedTest
     @org.junit.jupiter.params.provider.ValueSource(strings={"[]}","[{}]"})
-    void malformedFirstResponseRetriesIdenticalWireWithDurableAttempts(String invalid)throws Exception {
+    void malformedFirstResponseRepairsWithBoundContextAndDurableAttempts(String invalid)throws Exception {
         wire.generationContents.add(invalid);wire.generationContents.add("[]");
         String id=project();upload(id);JsonNode queued=postData(id,"minimax-cn"),saved=await(id,queued.path("id").asText());
         assertEquals("COMPLETED",saved.path("status").asText());
@@ -135,12 +135,19 @@ class VettingExplicitResponsesWorkflowTest {
         assertEquals(2,attempts.size());assertEquals("structured_output_invalid",attempts.get(0).path("status").asText());
         assertEquals(invalid,attempts.get(0).path("rawResponse").asText());assertEquals(VettingCorpus.hash(invalid),attempts.get(0).path("rawResponseSha256").asText());
         assertEquals("decoded",attempts.get(1).path("status").asText());assertEquals(VettingCorpus.hash("[]"),packet.path("rawResponseSha256").asText());
-        assertEquals(attempts.get(0).path("input"),attempts.get(1).path("input"));
+        JsonNode first=attempts.get(0).path("input"),repair=attempts.get(1).path("input");
+        assertEquals(first.path("serializedInputSha256"),packet.path("promptEnvelopeSha256"));
+        assertEquals(first.path("schema"),repair.path("schema"));assertEquals(first.path("sourceSnapshotSha256"),repair.path("sourceSnapshotSha256"));
+        assertNotEquals(first.path("serializedInputSha256"),repair.path("serializedInputSha256"));
+        String repairedUser=repair.path("messages").get(1).path("content").asText();assertTrue(repairedUser.endsWith(first.path("messages").get(1).path("content").asText()));
+        assertTrue(repairedUser.contains(JsonUtils.write(invalid)));assertTrue(repairedUser.contains(attempts.get(0).path("validationReason").asText()));
+        assertEquals(repair.path("serializedInputSha256"),attempts.get(1).path("inputBudget").path("serializedInputSha256"));
         assertEquals("provider_estimated_fit",attempts.get(1).path("inputBudget").path("status").asText());
         assertEquals(2,wire.endpoints.stream().filter(x->x.endsWith("/v1/responses")).count());
-        assertEquals(3,wire.endpoints.stream().filter(x->x.endsWith("/input_tokens")).count());
+        assertEquals(4,wire.endpoints.stream().filter(x->x.endsWith("/input_tokens")).count());
         List<String> generationBodies=new ArrayList<>();for(int i=0;i<wire.endpoints.size();i++)if(wire.endpoints.get(i).endsWith("/v1/responses"))generationBodies.add(wire.bodies.get(i));
-        assertEquals(generationBodies.get(0),generationBodies.get(1));
+        assertNotEquals(generationBodies.get(0),generationBodies.get(1));
+        assertEquals(repairedUser,JsonUtils.parse(generationBodies.get(1)).path("input").get(0).path("content").asText());
         assertEquals(1,saved.path("coverage").path("semanticTopics").size());assertEquals(3,saved.path("totalUnits").asInt());
         verifyNoInteractions(local,miniMax);
     }
@@ -152,6 +159,28 @@ class VettingExplicitResponsesWorkflowTest {
         assertEquals(2,attempts.size());assertEquals("[]}",attempts.get(0).path("rawResponse").asText());assertEquals("[{}]",attempts.get(1).path("rawResponse").asText());
         assertEquals(2,wire.endpoints.stream().filter(x->x.endsWith("/v1/responses")).count());assertEquals(1,wire.generationContents.size());
         for(String format:Arrays.asList("json","pdf","docx"))assertNotEquals(0,JsonUtils.parse(mvc.perform(get("/api/vetting/"+id+"/report."+format)).andReturn().getResponse().getContentAsString()).path("code").asInt());
+    }
+    @Test void businessShapeFailureSharesTheDurableTwoAttemptLedgerAndKeepsTheRejectedArrayUnchanged()throws Exception {
+        List<String> raw=new ArrayList<>();java.util.concurrent.atomic.AtomicInteger generations=new java.util.concurrent.atomic.AtomicInteger();
+        wire.generationHook=()->{
+            if(generations.getAndIncrement()==0) {
+                String user=JsonUtils.parse(wire.bodies.get(wire.bodies.size()-1)).path("input").get(0).path("content").asText(),marker="\nSource excerpts (untrusted data):\n";
+                JsonNode source=VettingSourceMetadataWire.decode(user.substring(user.lastIndexOf(marker)+marker.length())).get(0);
+                Map<String,Object> record=new LinkedHashMap<>();record.put("assessment","issue");record.put("type","requirement");record.put("severity","medium");record.put("title","AUTHORED durable business shape TEST ONLY");record.put("comment","AUTHORED requirement review TEST ONLY.");record.put("impact","AUTHORED review impact TEST ONLY.");record.put("suggestion","AUTHORED verify intended requirement TEST ONLY.");record.put("subDimension","AUTHORED requirement");record.put("factBasis",source.path("content").asText());record.put("pendingFacts",Collections.singletonList("AUTHORED intended application remains unconfirmed TEST ONLY."));record.put("suggestedAction","amend");record.put("checklistAssessments",Collections.emptyList());record.put("evidence",Collections.singletonList(Map.of("chunkId",source.path("id").asText(),"side","source","quote",source.path("content").asText())));
+                raw.add(JsonUtils.write(Collections.singletonList(record)));wire.generation=VettingResponsesTransportTest.completed(raw.get(0));
+            } else wire.generation=VettingResponsesTransportTest.completed("[]");
+        };
+        String id=project();upload(id);JsonNode queued=postData(id,"minimax-cn"),saved=await(id,queued.path("id").asText());assertEquals("COMPLETED",saved.path("status").asText());
+        JsonNode packet=saved.path("reliablePackets").get(0).path("packet"),attempts=packet.path("attempts");assertEquals(2,attempts.size());
+        assertEquals("structured_output_invalid",attempts.get(0).path("status").asText());assertTrue(attempts.get(0).path("validationReason").asText().startsWith("BUSINESS_SHAPE_MISMATCH: "));assertTrue(attempts.get(0).path("validationReason").asText().contains("pending_facts_require_review"));
+        assertEquals(raw.get(0),attempts.get(0).path("rawResponse").asText());assertEquals(VettingCorpus.hash(raw.get(0)),attempts.get(0).path("rawResponseSha256").asText());
+        assertEquals("decoded",attempts.get(1).path("status").asText());String repaired=attempts.get(1).path("input").path("messages").get(1).path("content").asText();
+        assertTrue(repaired.contains(JsonUtils.write(raw.get(0))));assertTrue(repaired.contains(attempts.get(0).path("validationReason").asText()));assertTrue(repaired.endsWith(attempts.get(0).path("input").path("messages").get(1).path("content").asText()));
+        assertEquals(attempts.get(0).path("input").path("serializedInputSha256"),packet.path("promptEnvelopeSha256"));assertEquals(attempts.get(1).path("input").path("serializedInputSha256"),attempts.get(1).path("inputBudget").path("serializedInputSha256"));assertNotEquals(attempts.get(0).path("input").path("serializedInputSha256"),attempts.get(1).path("input").path("serializedInputSha256"));
+        assertEquals("amend",JsonUtils.parse(raw.get(0)).get(0).path("suggestedAction").asText(),"Never rewrite the retained rejected model action");
+        JsonNode findings=JsonUtils.parse(mvc.perform(get("/api/vetting/{id}/findings",id)).andExpect(jsonPath("$.code").value(0)).andReturn().getResponse().getContentAsString()).path("data");assertTrue(findings.isArray());assertEquals(0,findings.size());
+        assertEquals(4,wire.endpoints.stream().filter(x->x.endsWith("/input_tokens")).count());assertEquals(2,generations.get());
+        verifyNoInteractions(local,miniMax);
     }
     @Test void budgetDriftAfterMalformedResponseStopsBeforeRetryGeneration()throws Exception {
         wire.generationContents.add("[]}");wire.generationContents.add("[]");wire.generationHook=()->wire.count=262144;

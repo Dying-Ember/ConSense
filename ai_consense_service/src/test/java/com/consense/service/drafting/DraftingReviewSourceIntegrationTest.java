@@ -114,6 +114,7 @@ class DraftingReviewSourceIntegrationTest {
     @Test void explicitWtoNegativeUsesVerifiedClauseAndDistinguishesNotUsedFromDelete()throws Exception {
         String ordinary=project();value(ordinary,"wtoGpaApplies","false");generate(ordinary,0);byte[] ordinaryNotUsed=word(ordinary,"NTT");
         ntt9NotUsedHasCleanNativeNumber(original(0),ordinaryNotUsed);
+        sourceParagraphIdentical(xml(original(0)),xml(ordinaryNotUsed),477); // The next page's general continuation title belongs to retained NTT10.
         for(String decision:Arrays.asList("not_used","delete")) {
             String id=project();value(id,"targetOverrides",JsonUtils.write(Collections.singletonList(DraftBusinessRules.map("actionId","NTT-9-WTO","action",decision))));
             assertEquals("applied",action(plan(id),"NTT-9-WTO").get("applicationState"),"The catalogue NTT 9(a)–(d) target has a verified whole-clause negative mapping");
@@ -122,6 +123,7 @@ class DraftingReviewSourceIntegrationTest {
             if("not_used".equals(decision)){ntt9NotUsedHasCleanNativeNumber(original(0),emitted);assertArrayEquals(ordinaryNotUsed,emitted,"Direct Not used has the same native package output as ordinary WTO=false");}
             else {assertFalse(index.getMainParagraphs().stream().anyMatch(p->p.getCatalogText().trim().matches("\\*?9\\.")),"Delete removes the source clause number rather than leaving 9. Not used or an empty heading");assertFalse(String.valueOf(output.get("content")).contains("9. Not used"));}
             opaquePartsIdentical(original(0),emitted);sourceParagraphIdentical(xml(original(0)),xml(emitted),484);
+            sourceParagraphIdentical(xml(original(0)),xml(emitted),477);
         }
     }
 

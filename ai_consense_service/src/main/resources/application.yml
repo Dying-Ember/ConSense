@@ -79,6 +79,23 @@ consense:
     structured-open-ai-reasoning-split: true
     structured-max-tokens: 16384
 
+  # Separate Qwen chat profiles share credentials, not embedding deployment.
+  qwen:
+    enabled: "${CONSENSE_QWEN_ENABLED:false}"
+    provider: openai
+    base-url: "${CONSENSE_QWEN_BASE_URL:https://maas.qianwenaiapi.com/compatible-mode}"
+    chat-model: "${CONSENSE_QWEN_MODEL:qwen3.8-27b}"
+    api-key: ${CONSENSE_QWEN_API_KEY:${ConSense-Qwen-API:}}
+    max-retry: 0
+
+  qwen-flash:
+    enabled: "${CONSENSE_QWEN_FLASH_ENABLED:false}"
+    provider: openai
+    base-url: "${CONSENSE_QWEN_BASE_URL:https://maas.qianwenaiapi.com/compatible-mode}"
+    chat-model: "${CONSENSE_QWEN_FLASH_MODEL:qwen3.8-flash}"
+    api-key: ${CONSENSE_QWEN_API_KEY:${ConSense-Qwen-API:}}
+    max-retry: 0
+
   # ---------------- OCR（PaddleOCR / PP-Structure 服务） ----------------
   ocr:
     enabled: "${CONSENSE_OCR_ENABLED:true}"

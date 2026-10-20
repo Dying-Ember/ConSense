@@ -118,7 +118,7 @@ public final class OerSourceRouting {
     }
     private static String validSha(String value) { return value != null && value.matches("(?i)[0-9a-f]{64}") ? value.toLowerCase(Locale.ROOT) : null; }
     private static boolean projectIdentifier(String text) {
-        return Pattern.compile("(?im)^\\s*(?:contract|tender|project)\\s*(?:no\\.?|number|reference|ref\\.?|title)\\s*[:：#]\\s*(?!(?:not provided|to be completed|insert|unknown|n/a)\\b)(?![.＿_\\- ]*(?:$|\\[))(?:[\\p{L}\\p{N}][\\p{L}\\p{N}/._ -]{2,})\\s*$").matcher(text).find();
+        return Pattern.compile("(?im)^\\h*(?:contract|tender|project)\\h*(?:no\\.?|number|reference|ref\\.?|title)(?:\\h*[:：#]\\h*|\\h+)(?!(?:not provided|to be completed|insert|unknown|n/a)\\b)(?![.＿_\\- ]*(?:$|\\[))(?:[\\p{L}\\p{N}][\\p{L}\\p{N}/._ -]{2,})\\h*$").matcher(text).find();
     }
     private static String firstTitle(DocumentParser.ParsedDocument parsed) {
         if (parsed == null) return "";

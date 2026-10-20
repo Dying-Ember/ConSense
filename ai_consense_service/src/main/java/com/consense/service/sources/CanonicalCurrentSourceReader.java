@@ -37,7 +37,7 @@ public class CanonicalCurrentSourceReader {
     @Transactional(propagation=Propagation.REQUIRES_NEW,isolation=Isolation.READ_COMMITTED,readOnly=true)
     public void assertCurrent(CanonicalSourceBinding binding,String module){
         checkSource(binding,module);
-        List<CanonicalSourceBinding> current=bindings.findByProjectIdAndDocumentIdOrderByIdDesc(binding.getProjectId(),binding.getDocumentId());
+        List<CanonicalSourceBinding> current=CanonicalEvidenceService.latestForModule(bindings.findByProjectIdAndDocumentIdOrderByIdDesc(binding.getProjectId(),binding.getDocumentId()),module);
         require(!current.isEmpty()&&Objects.equals(current.get(0).getProjectionSha256(),binding.getProjectionSha256())
                 &&Objects.equals(current.get(0).getSnapshotBytesSha256(),binding.getSnapshotBytesSha256()),
                 HttpStatus.CONFLICT,"CANONICAL_ADOPTION_SUPERSEDED");

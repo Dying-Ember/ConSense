@@ -83,10 +83,12 @@ function notice(key: string) {
 }
 function readingWarning(warning: string, carrier: 'original' | 'saved') {
   const numbering = warning.match(/Native numbering labels.*\((\d+) numbered paragraph\(s\)\)/i)
-  const detail = numbering ? t(`Native numbering labels and continuation sequence are not verified (${numbering[1]} numbered paragraphs). Check the PDF for original list markers.`, `正文含 ${numbering[1]} 个自动编号段落，当前阅读视图尚未核对编号标号及续号，请在 PDF 中核对原有编号。`, `正文含 ${numbering[1]} 個自動編號段落，目前閱讀視圖尚未核對編號標號及續號，請在 PDF 中核對原有編號。`) : warning
+  const lists = warning.match(/\((\d+) converted list\(s\)\)/i)
+  const detail = numbering ? t(`Native numbering labels and continuation sequence are not verified (${numbering[1]} numbered paragraphs). Web-generated list markers are hidden${lists ? ` (${lists[1]} converted lists)` : ''}; check the PDF for the original labels.`, `正文含 ${numbering[1]} 个自动编号段落，原编号标号及续号尚未核对。网页自动标号已隐藏${lists ? `（${lists[1]} 个转换列表）` : ''}，原编号请核对 PDF。`, `正文含 ${numbering[1]} 個自動編號段落，原編號標號及續號尚未核對。網頁自動標號已隱藏${lists ? `（${lists[1]} 個轉換列表）` : ''}，原編號請核對 PDF。`) : warning
   return `${carrier === 'original' ? t('Original', '原始模板', '原始模板') : t('Saved result', '已保存文稿', '已儲存文稿')} · ${detail}`
 }
 const conversionWarnings = computed(() => [...new Set([...(mode.value === 'saved' ? [] : (props.original?.warnings ?? []).map(warning => readingWarning(warning, 'original'))), ...(mode.value === 'original' ? [] : (props.result?.warnings ?? []).map(warning => readingWarning(warning, 'saved')))])])
+const numberingUnverified = computed(() => (mode.value === 'original' ? [props.original] : mode.value === 'saved' ? [props.result] : [props.original, props.result]).some(reading => reading?.coverage?.numberingLabelsVerified === false || reading?.warnings?.some(warning => /Native numbering labels/i.test(warning))))
 const coverageWarning = (warning: string) => /Office Math|cannot be assigned|Incomplete main-document coverage|Native drawings\/images omitted|Native numbering labels|自动编号|自動編號/i.test(warning)
 const warnings = computed(() => [...new Set([...conversionWarnings.value.filter(coverageWarning), ...prepared.value.notices.filter(key => key !== 'savedReadingFallback').map(notice)])])
 const diagnostics = computed(() => conversionWarnings.value.filter(warning => !coverageWarning(warning)))
@@ -183,6 +185,7 @@ watch(() => props.immersive, () => { void focusBinding() })
       <button type="button" data-review-pdf :disabled="blocked || mode !== 'original' && !document?.generated" @click="showPdf">{{ t('Check PDF layout', '核对 PDF 版式', '核對 PDF 版式') }}</button>
     </nav>
     <p class="reading-note">{{ mode === 'review' ? t('Review the complete saved revision: red strike-through means deleted text, green means added text, and grey strike-through means template instruction cleanup. Input selection locates related wording; joint changes remain visible as a whole.', '审阅完整已保存版本：红色删除线为删除、绿色为新增、灰色删除线为模板指引清理。选择输入用于定位关联正文，共同处理仍整体显示。', '審閱完整已儲存版本：紅色刪除線為刪除、綠色為新增、灰色刪除線為模板指引清理。選擇輸入用於定位關聯正文，共同處理仍整體顯示。') : t('Complete DOCX content in reading order. PDF provides the final layout check.', '按阅读顺序展示完整 DOCX 正文，PDF 用于最终版式核对。', '按閱讀順序展示完整 DOCX 正文，PDF 用於最終版式核對。') }}</p>
+    <p v-if="!loading && !error && !editing && numberingUnverified" class="reading-numbering-notice" data-reading-numbering-notice role="status">{{ t('Web-generated list markers are hidden. Check the PDF for the original labels.', '网页自动标号已隐藏，原编号请核对 PDF。', '網頁自動標號已隱藏，原編號請核對 PDF。') }}</p>
     <p v-if="!staleNoticePresented && (document?.stale || dirtyKeys.length)" class="review-notice" role="status">{{ t('Current inputs differ from the saved document. Save/adopt and regenerate through the existing workflow to update that document.', '当前输入与已保存文稿尚未同步，须通过现有流程保存／采用并重新生成文稿。', '目前輸入與已儲存文稿尚未同步，須透過現有流程儲存／採用並重新產生文稿。') }}</p>
     <div class="review-workspace">
       <main class="document-column">

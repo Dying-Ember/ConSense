@@ -2,6 +2,7 @@ import DOMPurify from 'dompurify'
 import JSZip from 'jszip'
 import mammoth from 'mammoth/mammoth.browser.min.js'
 import { documentParagraphText as htmlParagraphText } from './document-reading-text'
+import { hideUnverifiedListMarkers } from './reading-list-markers'
 
 export interface DocumentReadingParagraph {
   id: string
@@ -236,6 +237,7 @@ export async function convertDocumentReading(bytes: ArrayBuffer, expectedSha256:
   })
   const flow = document.createElement('div')
   flow.innerHTML = safe
+  const hiddenListCount = hideUnverifiedListMarkers(flow)
   const formulasByToken = new Map(officeMath.map(formula => [formula.token, formula]))
   const walker = document.createTreeWalker(flow, NodeFilter.SHOW_TEXT)
   const textNodes: Text[] = []
@@ -265,7 +267,7 @@ export async function convertDocumentReading(bytes: ArrayBuffer, expectedSha256:
   const mapped = new Map<string, HTMLElement>()
   const warnings = converted.messages.map(message => message.message)
   if (omittedNativeGraphics.length) warnings.push(`Native drawings/images omitted from this reading: ${omittedNativeGraphics.length}. Check the PDF layout for these source objects.`)
-  if (numberedParagraphCount) warnings.push(`Native numbering labels and continuation sequence are not verified in this reading (${numberedParagraphCount} numbered paragraph(s)). Check the PDF layout for the original list markers.`)
+  if (numberedParagraphCount || hiddenListCount) warnings.push(`Native numbering labels and continuation sequence are not verified in this reading (${numberedParagraphCount} numbered paragraph(s)). Web-generated list markers are hidden (${hiddenListCount} converted list(s)); check the PDF layout for the original list markers.`)
   for (const formula of officeMath.filter(formula => formula.unsupported.length)) {
     warnings.push(`Office Math at ${formula.path} retains literal atoms only for unsupported structure(s): ${formula.unsupported.join(', ')}.`)
   }
@@ -364,7 +366,7 @@ export async function convertDocumentReading(bytes: ArrayBuffer, expectedSha256:
     nonemptyParagraphOrderVerified,
     officeMathCount: officeMath.length, renderedOfficeMathCount: flow.querySelectorAll('[data-native-math]').length,
     omittedNativeGraphics,
-    numberedParagraphCount, numberingLabelsVerified: numberedParagraphCount === 0,
+    numberedParagraphCount, numberingLabelsVerified: numberedParagraphCount === 0 && hiddenListCount === 0,
     tables: flow.querySelectorAll('table').length,
     headings: flow.querySelectorAll('h1,h2,h3,h4,h5,h6').length,
     lists: flow.querySelectorAll('ol,ul').length

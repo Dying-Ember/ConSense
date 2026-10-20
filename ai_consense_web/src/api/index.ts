@@ -17,6 +17,7 @@ import type {
   DraftVariable,
   DraftReviewCandidates,
   DraftVariablePatch,
+  DraftIdentityConfirmation,
   DraftCatalog,
   DraftPlan,
   EvidenceBundle,
@@ -64,6 +65,7 @@ export const projectApi = {
 /* ------------------------------------------------------------ 起草 */
 
 export const draftingApi = {
+  confirmIdentity: (projectId: string, body: DraftIdentityConfirmation) => api.post<Project>(`/drafting/${projectId}/identity/confirm`, body, { reportError: false }),
   reviewHead: (projectId: string) => api.get<ReviewHead>(`/drafting/${projectId}/graph`),
   reviewBootstrap: (projectId: string) => api.post<ReviewBootstrap>(`/drafting/${projectId}/graph/bootstrap`),
   reviewExtract: (projectId: string, revisionId: string, llmSelection?: LlmSelection) => api.post<DraftVariable[]>(`/drafting/${projectId}/graph/revisions/${encodeURIComponent(revisionId)}/extract`, undefined, { timeout: 7200000, llmSelection }),

@@ -40,7 +40,29 @@ class VettingServiceLifecycleWorkflowTest {
     @Autowired org.springframework.transaction.PlatformTransactionManager transactionManager;
     @SpyBean VettingFindingRepository findings;
     @MockBean VettingSemanticReview semantic;
+    @MockBean com.consense.service.sources.CanonicalEvidenceService evidencePreparation;
+    @SpyBean OerBusinessEvidence oer;
     @BeforeEach void resetFixture(){props.getVetting().setServiceProbeDirectory(null);props.getVetting().setProbeDirectory(null);props.getVetting().setExportProbeDirectory(null);props.getVetting().setMaxRiskFindings(1);props.getDocument().setProbeDirectory(null);}
+
+    @Test void canonicalRunPreparesItsSelectedNormalSourceBeforeLoadingTheCorpus() throws Exception {
+        String project=project();SourceDocument doc=source(project,"SCT","SCT.txt","SCT 1.1 Retain the complete original source.");
+        doReturn(true).when(oer).enabled();
+        doAnswer(call->{verify(evidencePreparation).prepareNormalObserved(project,doc.getId(),"vetting");throw new IllegalStateException("authored stop after prepared corpus boundary");})
+                .when(oer).load(eq(project),eq("vetting"),anyList());
+        BizException error=assertThrows(BizException.class,()->service.run(project,"en"));
+        assertTrue(error.getMessage().contains("authored stop after prepared corpus boundary"));
+        assertEquals("FAILED",service.latestRun(project).getStatus());verify(semantic,never()).reviewWithProgress(any(),anyString(),anyList(),anyString(),any(ReviewProgress.class),anyList(),any(Runnable.class));
+    }
+
+    @Test void failedNormalPreparationRetainsFailureAndDoesNotLoadOrReviewUnpreparedSources() throws Exception {
+        String project=project();SourceDocument doc=source(project,"SCT","SCT.txt","SCT 1.1 Retain the original source when preparation fails.");
+        doReturn(true).when(oer).enabled();
+        doThrow(new IllegalStateException("authored preparation unavailable")).when(evidencePreparation).prepareNormalObserved(project,doc.getId(),"vetting");
+        BizException error=assertThrows(BizException.class,()->service.run(project,"en"));
+        assertTrue(error.getMessage().contains("authored preparation unavailable"));
+        verify(oer,never()).load(anyString(),anyString(),anyList());verify(semantic,never()).reviewWithProgress(any(),anyString(),anyList(),anyString(),any(ReviewProgress.class),anyList(),any(Runnable.class));
+        assertEquals("FAILED",service.latestRun(project).getStatus());
+    }
 
     @Test void coverageOnlyChangeAfterSemanticReturnCannotReachFinalSave() throws Exception {
         String project=project();SourceDocument doc=source(project,"NTT","NTT.txt","NTT 1.1 Retain the original source evidence.");
@@ -71,10 +93,10 @@ class VettingServiceLifecycleWorkflowTest {
         assertFalse(one(events,"rule_engine_raw_outputs").path("observations").path("outputs").isEmpty());
         assertEquals(4,one(events,"semantic_result_raw_candidates").path("observations").path("result").path("candidates").size());
         List<JsonNode> decisions=phase(events,"candidate_filter_decision");assertEquals(original.size()+1,decisions.size());
-        assertEquals(1,decisions.stream().filter(e->"duplicate_fingerprint".equals(e.path("observations").path("reason").asText())).count());
+        assertEquals(1,decisions.stream().filter(e->"duplicate_fingerprint_and_generated_revision".equals(e.path("observations").path("reason").asText())).count());
         assertEquals(0,decisions.stream().filter(e->"risk_cap".equals(e.path("observations").path("reason").asText())).count());
         assertEquals(3,original.stream().filter(f->"risk".equals(f.getGroupKey())).count(),"The withdrawn risk count cap must not discard valid unique findings");
-        assertEquals(observed.getTotal(),one(events,"final_selected_candidates").path("observations").path("candidatesByFingerprint").size());
+        assertEquals(observed.getTotal(),one(events,"final_selected_candidates").path("observations").path("candidatesByPublicationKey").size());
         JsonNode records=one(events,"merge_pending_commit_records").path("observations");assertFalse(records.path("committed").asBoolean());assertEquals(observed.getTotal(),records.path("findingVos").size());
         assertTrue(one(events,"merge_and_complete_transaction_returned").path("observations").path("committed").asBoolean());
         assertTrue(phase(events,"progress_transaction_returned").stream().anyMatch(e->e.path("observations").path("totalUnits").asInt()==5));
@@ -96,7 +118,7 @@ class VettingServiceLifecycleWorkflowTest {
         Path root=probeRoot(project);props.getVetting().setServiceProbeDirectory(root.toString());assertEquals(1,service.run(project,"en").getTotal());
         List<JsonNode> decisions=phase(events(root,service.latestRun(project).getId()),"candidate_filter_decision");assertEquals(2,decisions.size());
         for(JsonNode event:decisions){JsonNode original=event.path("observations").path("originalOrdinals");assertEquals(2,original.size());assertEquals(0,original.get(0).asInt());assertEquals(1,original.get(1).asInt());}
-        assertEquals("retained",decisions.get(0).path("observations").path("decision").asText());assertEquals("duplicate_fingerprint",decisions.get(1).path("observations").path("reason").asText());
+        assertEquals("retained",decisions.get(0).path("observations").path("decision").asText());assertEquals("duplicate_fingerprint_and_generated_revision",decisions.get(1).path("observations").path("reason").asText());
     }
     @Test void actualSemanticFailureKeepsCauseSuppressedAndCommittedFailureStatus() throws Exception {
         String project=project();source(project,"NTT","NTT.txt","NTT 1.1 Original text remains available after a failed review.");

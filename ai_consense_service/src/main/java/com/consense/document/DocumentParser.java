@@ -1713,6 +1713,22 @@ public class DocumentParser {
                 }else out.put("status","invalid_value");
             }return out;
         }
+        private ObjectNode layoutProperties(Node section){
+            ObjectNode layout=JsonUtils.mapper().createObjectNode();layout.put("version","docx-native-section-layout-properties-v1");
+            layout.put("effectiveState","unknown");
+            for(String name:java.util.Arrays.asList("pgNumType","pgMar","pgSz","type")){
+                ObjectNode property=layout.putObject(name);ArrayNode observations=property.putArray("observations");
+                if(section!=null)for(Node node=section.getFirstChild();node!=null;node=node.getNextSibling())
+                    if(word.equals(node.getNamespaceURI())&&name.equals(node.getLocalName())){
+                        ObjectNode observation=observations.addObject();observation.set("rawAttributes",attributes(node));
+                        observation.set("sourcePosition",position(node,mainName));
+                    }
+                property.put("present",!observations.isEmpty());
+                property.put("status",section==null?"section_properties_not_observed":observations.isEmpty()?"absent"
+                        :observations.size()==1?"observed_raw_declaration":"duplicate_property");
+            }
+            return layout;
+        }
         private ArrayNode references(Node section){
             ArrayNode out=JsonUtils.mapper().createArrayNode();if(section!=null)
                 for(Node node=section.getFirstChild();node!=null;node=node.getNextSibling())if(word.equals(node.getNamespaceURI())
@@ -1835,6 +1851,7 @@ public class DocumentParser {
             if(word.equals(node.getNamespaceURI())&&"sectPr".equals(node.getLocalName())&&!current.contains(node)){
                 ObjectNode item=out.addObject();item.put("status","not_current_body_section_candidate");item.set("sourcePosition",position(node,mainName));
                 item.set("sectionAttributes",attributes(node));item.set("titlePg",property(node,"titlePg",mainName));item.set("headerFooterReferences",references(node));
+                item.set("layoutProperties",layoutProperties(node));
             }
             for(Node child=node.getFirstChild();child!=null;child=child.getNextSibling())if(child.getNodeType()==Node.ELEMENT_NODE)nonEffective(child,current,out);
         }
@@ -1846,6 +1863,7 @@ public class DocumentParser {
                 Node endpoint=byPath.get(section.path("endBoundary").path("sourcePosition").path("nodePath").asText());
                 if(endpoint==null||!word.equals(endpoint.getNamespaceURI())||!"sectPr".equals(endpoint.getLocalName()))endpoint=null;
                 if(endpoint!=null)current.add(endpoint);section.set("sectionAttributes",attributes(endpoint));section.set("titlePg",property(endpoint,"titlePg",mainName));
+                section.set("layoutProperties",layoutProperties(endpoint));
                 ArrayNode references=references(endpoint);section.set("headerFooterReferences",references);section.put("effectiveSectionState","unknown");
                 previous=bindings(references,previous,previousId,section.path("sectionId").asText());section.set("headerFooterBindings",previous);previousId=section.path("sectionId").asText();
             }
@@ -1854,6 +1872,7 @@ public class DocumentParser {
                 ObjectNode reference=(ObjectNode)raw.path("nativeDocxSection");JsonNode section=inventory.path("sections").get(reference.path("ordinalZeroBased").asInt());
                 reference.set("headerFooterBindings",section.path("headerFooterBindings").deepCopy());reference.set("titlePg",section.path("titlePg").deepCopy());
                 reference.put("headerFooterSettingsRef","/nativeDocxSections/headerFooterSettings");reference.put("headerFooterReferencesRef",reference.path("inventoryPointer").asText()+"/headerFooterReferences");
+                reference.put("layoutPropertiesRef",reference.path("inventoryPointer").asText()+"/layoutProperties");
                 reference.put("headerFooterRefsScope","source_parse_coverage_inventory");
             }
         }

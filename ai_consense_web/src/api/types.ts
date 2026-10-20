@@ -8,7 +8,7 @@ export interface LocalizedText {
 }
 
 export interface ModelIdentity {
-  profileId: 'local' | 'minimax-cn'
+  profileId: 'local' | 'minimax-cn' | 'qwen' | 'qwen-flash'
   provider: string
   model: string
   configurationSha256: string
@@ -27,6 +27,11 @@ export interface Project {
   sccRange: string | null
   specification: string | null
   titleLines: LocalizedText[]
+}
+
+export interface DraftIdentityConfirmation {
+  expectedProjectIdentity: { nameZhHans: string | null; nameZhHant: string | null; nameEn: string | null; contractNo: string | null }
+  expectedAdoptedIdentity: { value: string }
 }
 
 /* ------------------------------------------------------------ 起草 */
@@ -263,7 +268,7 @@ export interface ExtractTrace {
   runId?: string
   harnessVersion?: string
   evidenceRevision?: string
-  status?: 'completed' | 'failed'
+  status?: 'completed' | 'partial' | 'failed'
   startedAt?: string
   failureCode?: string | null
   failureMessage?: string | null
@@ -310,7 +315,7 @@ export interface ExtractRunSummary {
   harnessVersion?: string
   evidenceRevision?: string
   model: string
-  status: 'completed' | 'failed'
+  status: 'completed' | 'partial' | 'failed'
   startedAt?: string
   finishedAt: string
   failureCode?: string | null
@@ -338,6 +343,10 @@ export interface ExtractAttempt {
   context?: ExtractContext | null
   status: string
   errorCode?: string | null
+  errorMessage?: string | null
+  providerFailureKind?: string | null
+  providerResponse?: string | null
+  providerResponseMetadata?: Record<string, unknown> | null
 }
 
 export interface ExtractContext {
@@ -977,7 +986,7 @@ export interface SkillDoc {
   order: number
 }
 
-export type LlmProfileId = 'local' | 'minimax-cn'
+export type LlmProfileId = 'local' | 'minimax-cn' | 'qwen' | 'qwen-flash'
 export interface LlmSelection { readonly profileId: LlmProfileId | null }
 
 export interface LlmProfile {

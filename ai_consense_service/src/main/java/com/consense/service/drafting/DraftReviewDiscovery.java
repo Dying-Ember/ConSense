@@ -20,12 +20,16 @@ public final class DraftReviewDiscovery {
             +"Every independently answerable project fact MUST be its own input node. A combined contract and foundation work are TWO independent booleans; "
             +"their AND belongs only in a branch with mode all and two separate clauses. Never turn that conjunction into a single boolean. "
             +"Keep unknown facts unknown. Use record/list for actual structured answers, not invented rows or cardinality. "
+            +"BS trade categories such as fire services and lift remain independent of NSC/BSSSC designation. Both designation methods require trade selection; do not make a trade-selection question applicable only to BSSSC or infer selected trades from designation. "
             +"Return one JSON object {nodes:[...],notes:[...]} without markdown. Empty nodes with notes is valid when meaning is unresolved. "
-            +"Each node has a short local id, nameZh/nameEn, questionZh/questionEn, type (boolean|number|text|date|choice|multiselect|record|list), "
+            +"Each node has a unique local id of 1-24 ASCII letters/digits/underscore/hyphen starting with a letter or digit, nameZh/nameEn, questionZh/questionEn, type (boolean|number|text|date|choice|multiselect|record|list), "
             +"role (input|decision|content|derived|verification|system|fixed), optional, optional local parentId, options:[{value,labelZh,labelEn}], "
             +"sourceQuote (an exact nonempty excerpt of this instruction), branches:[{id,mode:all|any,clauses:[{inputId,operator,value}], "
             +"scopeId,scopeMode:each|any|all|none,resultValue,effectZh,effectEn}], and effects:[{scopeId,quote,action:keep|replace|fill|insert|delete|unused|check, "
             +"branchId,valueSourceId,replacementEn}]. References MUST use ids from this response only. "
+            +"parentId denotes structural containment by a record/list node only. For scalar dependencies omit parentId and use clauses.inputId. For ordinary scalar branches omit both scopeId and scopeMode, including scopeMode none. "
+            +"A branch scopeId is ONLY a local list node id for per-item conditions; omit scopeId and scopeMode for ordinary scalar questions. An effect scopeId is the supplied source scope candidate id; these are different namespaces. "
+            +"A branch resultValue must match its node type. Keep an applicability boolean question separate from a derived keep/delete choice and its options. If rules or effects are unresolved, return the complete source-supported question with empty branches/effects for human completion. "
             +"sourceConditions and sourceRelationships are literal source observations, never project answers. Keep independent parent/local conditions independent and unresolved references unknown. "
             +"Operators are yes,no,eq,ne,gt,ge,lt,le,has,lacks,known,unknown,empty,notempty. "
             +"An effect quote must be the COMPLETE text of one supplied scope candidate, with that scopeId. For a supplied sourceInsertionAnchorComplete point only, use action insert and empty quote; its future wording and list cardinality remain unknown until project inputs are adopted. If other scope is incomplete or absent, use check and explain in notes. "
@@ -54,7 +58,7 @@ public final class DraftReviewDiscovery {
         List<Object> variables=mutable(state,"variables"),events=mutable(state,"events");Map<String,Map<String,Object>> byId=new LinkedHashMap<>();
         for(Object raw:variables)byId.put(text(map(raw).get("id")),map(raw));
         List<Item> eligible=new ArrayList<>();for(Item item:items(readings))if("not_requested".equals(text(map(byId.get(item.seedId).get("discovery")).get("status"))))eligible.add(item);
-        int attempted=0,succeeded=0,failed=0;
+        int attempted=0,succeeded=0,partial=0,failed=0;
         for(Item item:eligible) {
             if(attempted>=maxItems)break;attempted++;
             Map<String,Object> checklist=byId.get(item.seedId);String raw=null,user=JsonUtils.write(payload(item));
@@ -62,44 +66,58 @@ public final class DraftReviewDiscovery {
                     "sourceItemId",item.original.path("id").asText(),"systemPrompt",PROMPT,"userPrompt",user,"automaticRetry",false);
             try {
                 raw=ai.complete(PROMPT,user);attempt.put("rawResponse",raw);
-                JsonNode response=JsonUtils.parse(JsonUtils.extractJson(raw));List<Map<String,Object>> local=nodes(item,response);
-                Map<String,Object> candidate=copyGraph(result);List<Object> proposed=mutable(state(candidate),"variables");
-                for(Map<String,Object> node:local){if(byId.containsKey(text(node.get("id"))))throw invalid("DISCOVERY_ID_COLLISION");proposed.add(node);}
-                validate(candidate);variables.addAll(local);for(Map<String,Object> node:local)byId.put(text(node.get("id")),node);
-                attempt.put("status",local.isEmpty()?"unknown":"completed");attempt.put("nodeIds",ids(local));attempt.put("notes",response.path("notes"));
-                attempt.put("reason",local.isEmpty()?"No source-supported atomic definitions were returned; review remains required.":"Candidate definitions require human source review.");succeeded++;
+                List<Object> rejected=new ArrayList<>();JsonNode response;
+                try {response=JsonUtils.parse(JsonUtils.extractJson(raw));}
+                catch(RuntimeException incomplete) {
+                    com.fasterxml.jackson.databind.node.ObjectNode recovered=JsonUtils.mapper().createObjectNode();recovered.set("nodes",DraftJsonItems.completePrefix(raw,"nodes"));response=recovered;
+                    attempt.put("jsonIncomplete",true);rejected.add(obj("reason","Incomplete JSON; only fully decoded candidates were retained."));
+                }
+                List<Map<String,Object>> local=validated(result,nodes(item,response,rejected),rejected);
+                attempt.put("rejectedNodes",rejected);
+                List<Object> remappings=new ArrayList<>();for(Map<String,Object> node:local)if(node.containsKey("modelLocalId"))remappings.add(obj("modelLocalId",node.get("modelLocalId"),"reviewNodeId",node.get("id")));attempt.put("localIdMappings",remappings);
+                if(local.isEmpty()&&!rejected.isEmpty())throw invalid(text(map(rejected.get(0)).get("reason")));
+                variables.addAll(local);for(Map<String,Object> node:local)byId.put(text(node.get("id")),node);
+                boolean incomplete=!rejected.isEmpty();attempt.put("status",incomplete?"partial":local.isEmpty()?"unknown":"completed");attempt.put("nodeIds",ids(local));attempt.put("notes",response.path("notes"));
+                attempt.put("reason",incomplete?"Complete source-supported candidates remain editable; rejected or unfinished candidates require manual review.":local.isEmpty()?"No source-supported atomic definitions were returned; review remains required.":"Candidate definitions require human source review.");if(incomplete)partial++;else succeeded++;
             } catch(RuntimeException failure) {
                 attempt.put("rawResponse",raw);attempt.put("status","failed");attempt.put("reason",failure.getMessage()==null?failure.getClass().getSimpleName():failure.getMessage());failed++;
             }
             checklist.put("discovery",attempt);checklist.put("status","pending");
             events.add(0,event("semantic_discovery","规则发现候选待核对","Discovered rule candidates require review",attempt));
         }
-        Map<String,Object> summary=obj("requestedItems",maxItems,"eligibleBefore",eligible.size(),"attempted",attempted,"succeeded",succeeded,"failed",failed,
+        Map<String,Object> summary=obj("requestedItems",maxItems,"eligibleBefore",eligible.size(),"attempted",attempted,"succeeded",succeeded,"partial",partial,"failed",failed,
                 "skippedBudget",Math.max(0,eligible.size()-attempted),"automaticRetry",false,"adoptedValues",0);
         state.put("discoverySummary",summary);events.add(0,event("semantic_discovery_budget","本次规则发现预算与实际执行","Discovery budget and actual execution",summary));return result;
     }
 
-    private static List<Map<String,Object>> nodes(Item item,JsonNode response) {
+    private static List<Map<String,Object>> nodes(Item item,JsonNode response,List<Object> rejected) {
         if(!response.isObject()||!response.path("nodes").isArray())throw invalid("DISCOVERY_NODES_ARRAY_REQUIRED");
         if(response.path("nodes").size()>100)throw invalid("DISCOVERY_ITEM_NODE_LIMIT_100");
         Map<String,String> names=new LinkedHashMap<>();String namespace="discovery-"+item.key.substring(0,16)+"-";
-        for(JsonNode raw:response.path("nodes")) {
-            String id=raw.path("id").asText();if(!id.matches("[A-Za-z0-9][A-Za-z0-9_-]{0,23}")||names.put(id,namespace+id)!=null)throw invalid("DISCOVERY_LOCAL_ID_INVALID_OR_DUPLICATED");
+        Map<String,Integer> counts=new HashMap<>();for(JsonNode raw:response.path("nodes")){String id=raw.path("id").asText();counts.put(id,counts.getOrDefault(id,0)+1);}
+        Set<String> assigned=new HashSet<>();
+        for(String id:counts.keySet())if(id.matches("[A-Za-z0-9][A-Za-z0-9_-]{0,23}")&&counts.get(id)==1){names.put(id,namespace+id);assigned.add(namespace+id);}
+        for(String id:counts.keySet())if(!names.containsKey(id)&&counts.get(id)==1&&id.matches("[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}")) {
+            String internal=namespace+"id-"+DraftAdoption.hash(id).substring(0,20);if(assigned.add(internal))names.put(id,internal);
         }
         List<Map<String,Object>> result=new ArrayList<>();
         for(JsonNode raw:response.path("nodes")) {
+            try {
+            if(!names.containsKey(raw.path("id").asText()))throw invalid("DISCOVERY_LOCAL_ID_INVALID_OR_DUPLICATED");
             String kind=raw.path("type").asText(),role=raw.path("role").asText(),quote=raw.path("sourceQuote").asText();
             if(!TYPES.contains(kind)||!ROLES.contains(role))throw invalid("DISCOVERY_TYPE_OR_ROLE_UNSUPPORTED");
             if(quote.trim().isEmpty()||!item.text.contains(quote))throw invalid("DISCOVERY_SOURCE_QUOTE_NOT_IN_INSTRUCTION");
             String nameZh=raw.path("nameZh").asText(),nameEn=raw.path("nameEn").asText();if(nameZh.trim().isEmpty()&&nameEn.trim().isEmpty())throw invalid("DISCOVERY_NAME_REQUIRED");
             Map<String,Object> node=base(item,names.get(raw.path("id").asText()),kind,role);
+            if(!raw.path("id").asText().matches("[A-Za-z0-9][A-Za-z0-9_-]{0,23}"))node.put("modelLocalId",raw.path("id").asText());
             node.put("definitionKind","discovered");node.put("nameZh",nameZh);node.put("nameEn",nameEn);node.put("questionZh",raw.path("questionZh").asText(nameZh));node.put("questionEn",raw.path("questionEn").asText(nameEn));
-            node.put("parentId",reference(names,raw.path("parentId").asText()));node.put("optional",raw.path("optional").asBoolean(false));node.put("semanticSourceQuote",quote);
+            node.put("parentId",reference(names,raw.path("parentId").asText("")));node.put("optional",raw.path("optional").asBoolean(false));node.put("semanticSourceQuote",quote);
             if(raw.has("fixedValue")){String fixed=raw.path("fixedValue").asText();if(fixed.isEmpty()||!item.text.contains(fixed))throw invalid("DISCOVERY_FIXED_LITERAL_NOT_IN_SOURCE");node.put("fixedValue",fixed);}
             List<Object> options=new ArrayList<>();for(JsonNode option:raw.path("options"))options.add(obj("value",option.path("value").asText(),"labelZh",option.path("labelZh").asText(),"labelEn",option.path("labelEn").asText()));node.put("options",options);
+            try {
             List<Object> branches=new ArrayList<>();Set<String> refs=new LinkedHashSet<>();
             for(JsonNode branch:raw.path("branches")) {
-                Map<String,Object> converted=obj("id",branch.path("id").asText(),"mode",branch.path("mode").asText(),"scopeId",reference(names,branch.path("scopeId").asText()),"scopeMode",branch.path("scopeMode").asText(),"resultValue",branch.path("resultValue").asText(),"effectZh",branch.path("effectZh").asText(),"effectEn",branch.path("effectEn").asText());
+                Map<String,Object> converted=obj("id",branch.path("id").asText(),"mode",branch.path("mode").asText(),"scopeId",reference(names,branch.path("scopeId").asText("")),"scopeMode",branch.path("scopeMode").asText(""),"resultValue",branch.path("resultValue").asText(),"effectZh",branch.path("effectZh").asText(),"effectEn",branch.path("effectEn").asText());
                 List<Object> clauses=new ArrayList<>();for(JsonNode clause:branch.path("clauses")){String ref=reference(names,clause.path("inputId").asText());if(ref==null)throw invalid("DISCOVERY_INPUT_REFERENCE_REQUIRED");refs.add(ref);clauses.add(obj("inputId",ref,"operator",clause.path("operator").asText(),"value",clause.has("value")?JsonUtils.mapper().convertValue(clause.get("value"),Object.class):null));}
                 converted.put("clauses",clauses);branches.add(converted);if(converted.get("scopeId")!=null)refs.add(text(converted.get("scopeId")));
             }
@@ -115,12 +133,59 @@ public final class DraftReviewDiscovery {
                 target.put("id",node.get("id")+"-target-"+(ordinal++));target.put("action",complete?action:"check");target.put("proposedAction",action);target.put("scopeComplete",complete);target.put("sourceScopeId",effect.path("scopeId").asText());target.put("needsRebind",!complete);
                 target.put("scopeReviewReason",complete?"Complete observed scope; proposed treatment still requires human review.":placementRequired?"The source spans are exact; choose one replacement placement before applying an amendment.":"Complete editable source scope is unbound; locate it and review the treatment.");
                 if(scope!=null)target.put("sourceScopeObservation",scope.deepCopy());
-                target.put("branchId",effect.path("branchId").asText());String value=reference(names,effect.path("valueSourceId").asText());target.put("valueSourceId",value);if(value!=null)refs.add(value);
-                if(effect.has("replacementEn"))target.put("replacementEn",effect.path("replacementEn").asText());targets.add(target);
+                target.put("branchId",effect.path("branchId").asText(""));String value=reference(names,effect.path("valueSourceId").asText(""));target.put("valueSourceId",value);if(value!=null)refs.add(value);
+                if(effect.hasNonNull("replacementEn"))target.put("replacementEn",effect.path("replacementEn").asText(""));targets.add(target);
             }
-            node.put("editTargets",targets);node.put("relatedInputIds",new ArrayList<>(refs));result.add(node);
+            node.put("editTargets",targets);node.put("relatedInputIds",new ArrayList<>(refs));
+            }catch(RuntimeException badRelations){if(!question(node))throw badRelations;node=questionCore(node,badRelations.getMessage());rejected.add(questionIssue(node,badRelations.getMessage()));}
+            result.add(node);
+            }catch(RuntimeException invalid){rejected.add(obj("id",raw.path("id").asText(),"reason",invalid.getMessage()));}
         }
         return result;
+    }
+
+    private static List<Map<String,Object>> validated(Map<String,Object> original,List<Map<String,Object>> proposed,List<Object> rejected) {
+        Map<String,Map<String,Object>> local=new LinkedHashMap<>();for(Map<String,Object> node:proposed)local.put(text(node.get("id")),node);
+        Map<String,Map<String,Object>> questionCores=new LinkedHashMap<>(local);
+        for(Map<String,Object> node:proposed)if(question(node))questionCores.put(text(node.get("id")),questionCore(node,"Candidate dependency core; original rules are checked separately."));
+        for(Map<String,Object> node:proposed)if(question(node)&&!Boolean.TRUE.equals(node.get("discoveryCoreRetained"))) {
+            String id=text(node.get("id"));Map<String,Map<String,Object>> ownRules=new LinkedHashMap<>(questionCores);ownRules.put(id,node);
+            Set<String> closure=new LinkedHashSet<>();dependencies(id,ownRules,closure);
+            try{validate(reviewGroup(original,ownRules,closure));}
+            catch(RuntimeException invalid) {
+                Map<String,Object> core=questionCore(node,invalid.getMessage());Map<String,Map<String,Object>> withoutBadEdges=new LinkedHashMap<>(questionCores);withoutBadEdges.put(id,core);
+                Set<String> coreClosure=new LinkedHashSet<>();dependencies(id,withoutBadEdges,coreClosure);
+                try{validate(reviewGroup(original,withoutBadEdges,coreClosure));node.clear();node.putAll(core);rejected.add(questionIssue(node,invalid.getMessage()));}
+                catch(RuntimeException invalidCore){/* Source-supported cores still require valid types, parent groups and editions. */}
+            }
+        }
+        Set<String> accepted=new HashSet<>();
+        for(Map<String,Object> node:proposed) {
+            String id=text(node.get("id"));if(accepted.contains(id))continue;
+            Set<String> closure=new LinkedHashSet<>();dependencies(id,local,closure);
+            try {validate(reviewGroup(original,local,closure));accepted.addAll(closure);}
+            catch(RuntimeException invalid){rejected.add(obj("id",id,"reason",invalid.getMessage()));}
+        }
+        List<Map<String,Object>> result=new ArrayList<>();for(Map<String,Object> node:proposed)if(accepted.contains(text(node.get("id"))))result.add(node);
+        Map<String,Object> candidate=copyGraph(original);mutable(state(candidate),"variables").addAll(result);validate(candidate);return result;
+    }
+
+    private static Map<String,Object> reviewGroup(Map<String,Object> original,Map<String,Map<String,Object>> nodes,Set<String> ids) {
+        Map<String,Object> candidate=copyGraph(original);List<Object> all=mutable(state(candidate),"variables");for(Map.Entry<String,Map<String,Object>> node:nodes.entrySet())if(ids.contains(node.getKey()))all.add(node.getValue());return candidate;
+    }
+
+    private static boolean question(Map<String,Object> node){return Arrays.asList("input","decision","content").contains(text(map(node.get("role")).get("kind")));}
+    private static Map<String,Object> questionCore(Map<String,Object> node,String reason) {
+        Map<String,Object> core=JsonUtils.readMap(JsonUtils.write(node));core.put("correction",obj("kind","rule","branches",new ArrayList<>(),"inputIds",new ArrayList<>(),"needsRebind",true));
+        core.put("editTargets",new ArrayList<>());core.put("relatedInputIds",new ArrayList<>());core.put("discoveryCoreRetained",true);
+        core.put("discoveryRejectedParts",Collections.singletonList(obj("part","branches/effects","reason",reason)));return core;
+    }
+    private static Map<String,Object> questionIssue(Map<String,Object> node,String reason){return obj("id",node.get("id"),"part","branches/effects","reason",reason,"retained","source_supported_question_requires_manual_rebind");}
+
+    private static void dependencies(String id,Map<String,Map<String,Object>> nodes,Set<String> found) {
+        if(!found.add(id)||!nodes.containsKey(id))return;Map<String,Object> node=nodes.get(id);
+        String parent=text(node.get("parentId"));if(!parent.isEmpty())dependencies(parent,nodes,found);
+        for(Object ref:list(node.get("relatedInputIds")))dependencies(text(ref),nodes,found);
     }
 
     private static Map<String,Object> base(Item item,String id,String type,String role) {

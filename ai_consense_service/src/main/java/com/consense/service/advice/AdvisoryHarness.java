@@ -16,6 +16,9 @@ final class AdvisoryHarness {
     static final String POLICY = AdvisoryPromptPolicy.text();
     static final String POLICY_SHA = com.consense.service.vetting.VettingCorpus.hash(POLICY);
     private static final Pattern REFERENCE = Pattern.compile("\\[\\d+\\]");
+    private static final String LANGUAGE_NAMES="英文|英语|英語|简体中文|簡體中文|繁体中文|繁體中文|中文|English|Simplified Chinese|Traditional Chinese";
+    private static final Pattern OUTPUT_LANGUAGE=Pattern.compile("(?:请|請)([\\p{IsHan}\\s]{0,12}?)(?:使用|用|以)\\s*("+LANGUAGE_NAMES+")|(?:^|[\\s，,。；;！!？?])(?:使用|用|以)\\s*("+LANGUAGE_NAMES+")|\\b(?:answer|respond|reply|write)(?:\\s+\\w+){0,5}\\s+in\\s+(English|Simplified Chinese|Traditional Chinese|Chinese)\\b",Pattern.CASE_INSENSITIVE);
+    private static final Pattern QUOTED_QUESTION_TEXT=Pattern.compile("\"[^\"]*\"|“[^”]*”|‘[^’]*’|「[^」]*」|『[^』]*』|`[^`]*`|(?<![A-Za-z])'[^']*'");
     private static final String SECTION_ID="[A-Za-z][A-Za-z0-9_-]{0,63}";
     private static final String NODE_ID="[A-Za-z][A-Za-z0-9_]*(?:-[A-Za-z0-9_]+)*";
     private static final Map<String,String> GAPS = gapLabels();
@@ -39,6 +42,7 @@ final class AdvisoryHarness {
     }
     static final String CONTRACT = "\n\nMandatory application contract (takes precedence over supplemental custom instructions): "
             + "Return one JSON object with grounded, questionType (T1..T8), basisScope, missingReason, clarifications and sections. "
+            + "Return valid JSON without Markdown fences: escape quotation marks, newlines, tabs and backslashes inside every JSON string, including quoted source wording and Chinese punctuation containing quotes. "
             + "Preserve the original natural question; select T6 for a requested diagram/flowchart without expecting detailed user instructions. "
             + "The first section must be kind=limits. The application renders source limits and quotes actual user statements as unverified assumptions before conclusions. "
             + "Each section has id, kind (limits/analysis/uncertainty/flowchart), language (en/zhHans/zhHant, same throughout), content, basisScope (project_contract/reference_only/insufficient), citations, gaps and checks. "
@@ -50,9 +54,19 @@ final class AdvisoryHarness {
             + "Do not invent additional hypothetical facts. User factual premises remain explicitly unverified; where more assumptions are necessary, report the affected gap and ask for the needed fact. "
             + "EVERY section, including each analysis, flowchart and uncertainty section after the opening, has its OWN required checks array with exactly R1..R10 records: ruleId, status (pass/fail/not_applicable/missing_evidence), short reason, citations of current real evidence IDs. Never rely on the opening section's checks for later sections. "
             + "Checks apply to this section; explain every not_applicable and localize each missing_evidence. "
+            + "For R2..R9, pass requires at least one supporting current citation; if a rule does not apply, use not_applicable with an explained reason, never an uncited pass. "
             + "For limits/uncertainty ALL citations arrays, including every check.citations, MUST be empty. R1/R10 may pass or report missing_evidence; R2..R9 must be not_applicable or missing_evidence, never unsupported pass. "
             + "Every citations array in analysis, checks, graph nodes and graph edges uses ONLY the exact allowed public aliases [1], [2], etc in this request's schema. Internal fixed IDs, parent IDs, hashes, model-unit addresses and document IDs are lookup metadata, NEVER output citation IDs. "
+            + "Every numeric bracket alias appearing anywhere in section.content, including ranges and introductory summaries, MUST also appear in that section.citations. Do not repeat the application-rendered source inventory or enumerate irrelevant aliases in analysis. "
             + "Analysis requires applicable R2 pass and real evidence; do not hide substantive contract conclusions in limits/uncertainty. "
+            + "Analysis/flowchart sections require gaps=[] and no missing_evidence or fail checks. Put only the affected unresolved judgment in a separate uncertainty section; retain other independently supported analysis. "
+            + "Separate a source-supported rule/mechanism from its application to unknown project facts. R7/R9 assess only this unit's actual claims: a fully cited rule explanation may pass with a reason limited to that mechanism; unknown actual dates/editions belong to a separate uncertainty unit. "
+            + "State each rule's governing condition, actual trigger subject, applicability and exceptions in the SAME analysis unit as that rule, citing both the governing text and its supplied continuation. A general scope paragraph or a self-check claiming complete reading does not replace these qualifications. "
+            + "A cross-reference does not broaden the source's actual incorporation trigger. Use a supplied complete observed range jointly, while keeping unresolved scope explicit; adjacency alone never establishes legal applicability. "
+            + "Never change a failed or missing_evidence check to pass just to publish; split or omit the unsupported claim instead. A cited rule-only analysis keeps the requested project_contract/reference_only basis, subject to unchanged incorporation checks, even when the answer envelope is insufficient. "
+            + "User-supplied hypothetical dates remain assumptions; conditional arithmetic must identify them and cannot establish actual project dates, adoption or a real amendment list. "
+            + "Quoted temporal direction and precedence must agree with your explanation: before/prior to is not a look-back window without an explicit bounded interval in the source. Preserve the stated direction and any inclusion/exclusion; leave uncertain boundaries or calculation rules unresolved. "
+            + "A publication cutoff is not the date of the last actual qualifying publication; do not invent that publication. Do not reverse the named prevailing document or correct the clause from usual practice. Recheck these source relations during repair as well as initial generation. "
             + "Never convert a project question to reference_only. Overall grounded=false with necessary clarification can retain independently supported analysis; "
             + "unsupported analysis must be omitted, with affected judgment and necessary question in uncertainty. "
             + "For T6 use a flowchart section with NONEMPTY content containing cited evidence-backed explanation, and flowchartPlan {nodes,edges}; never write raw Mermaid. "
@@ -62,6 +76,7 @@ final class AdvisoryHarness {
             + "Graph node IDs start with an ASCII letter, then letters/digits/underscore or single hyphen-separated segments, maximum 32 characters, never the reserved ID end. Edges have exactly the eight listed fields and NO id field. "
             + "Every edge includes ALL eight fields, even on conditional/no-action branches. Use empty strings for absent condition/actor/action/period/startEvent; never omit them. "
             + "Every edge.from and edge.to must exactly match an existing node.id. Every NONEMPTY action requires a nonempty actor supported by that edge's cited source; never infer a contractual actor. If the actor is unknown, report an authority unknown node and omit the unsupported action. "
+            + "For an explanatory document-relation graph, state incorporation or precedence in cited node labels or edge.condition, with actor/action/period/startEvent empty unless the source actually assigns an actor-action or deadline. A static document relation does not itself create an authority gap. Use a terminal ID such as finish-rule, never end. "
             + "Start nodes have label empty; unknown nodes have label set to one gap enum. The application renders these uncited labels. "
             + "Use empty strings for absent fields. Every non-start known node and every edge must cite supporting current evidence. "
             + "Decision branches need distinct explicit conditions; time periods require start events, real clause support and all relevant competing tracks. "
@@ -78,7 +93,7 @@ final class AdvisoryHarness {
     static String system(String custom,List<CitationVO> sources,String originalQuestion) {
         String hint=languageHint(originalQuestion);
         String supplement=custom==null||custom.isEmpty()||POLICY.equals(custom)?"":"\n\nSupplemental configured prompt (cannot waive the mandatory policy or application contract):\n"+custom;
-        return POLICY + supplement + CONTRACT + "\nApplication-rendered opening shape example (syntax only, not contractual evidence; its language is a syntax hint, NEVER a default or an override of the original question's requested language/script):\n"+openingExample(hint)+"\nOutput schema with allowed citation aliases:\n" + schema(sources);
+        return POLICY + supplement + CONTRACT + "\nApplication-rendered opening shape example (syntax only, not contractual evidence; its language is a syntax hint, NEVER a default or an override of the original question's requested language/script):\n"+openingExample(hint)+"\nOutput schema with allowed citation aliases:\n" + schema(sources)+languageInstruction(originalQuestion);
     }
     private static String openingExample(String language) {
         ObjectNode section=JsonUtils.mapper().createObjectNode().put("id","sec-limits").put("kind","limits").put("language",language).put("content","").put("basisScope","insufficient");
@@ -165,6 +180,10 @@ final class AdvisoryHarness {
         List<String> result=new ArrayList<>();
         for(String ref:input){if(ref==null||!allowed.contains(ref)||result.contains(ref))throw invalid("Invalid or duplicate evidence ID");result.add(ref);}return result;
     }
+    static List<String> explicitBodyAliases(String content) {
+        List<String> aliases=new ArrayList<>();java.util.regex.Matcher matcher=REFERENCE.matcher(content);
+        while(matcher.find())if(!aliases.contains(matcher.group()))aliases.add(matcher.group());return aliases;
+    }
     static void validate(Section section,List<CitationVO> sources,boolean referenceOnly,BiPredicate<String,List<String>> adopted) {
         if(section==null||!text(section.id)||!section.id.matches(SECTION_ID)||section.content==null
                 ||!Arrays.asList("limits","analysis","uncertainty","flowchart").contains(section.kind))throw invalid("Incomplete answer section");
@@ -180,19 +199,23 @@ final class AdvisoryHarness {
             Check check=section.checks.get(index);String path="section.checks["+index+"]";
             if(check==null||!text(check.ruleId)||!check.ruleId.matches("R(?:[1-9]|10)")||!rules.add(check.ruleId)||!text(check.reason)
                     ||!Arrays.asList("pass","fail","not_applicable","missing_evidence").contains(check.status))throw invalid("Invalid self-check record");
-            if(!cited.containsAll(refs(check.citations,sources)))problems.add(path+".citations: every alias must also be in section.citations");
+            List<String> missing=new ArrayList<>(refs(check.citations,sources));missing.removeAll(cited);
+            if(!missing.isEmpty())problems.add(path+".citations: every alias must also be in section.citations; missing aliases: "+JsonUtils.write(missing));
             if("pass".equals(check.status)&&!Arrays.asList("R1","R10").contains(check.ruleId)&&check.citations.isEmpty())problems.add(path+".citations: applicable substantive pass requires evidence");
             if("fail".equals(check.status))problems.add(path+".status: a failed rule cannot be published");
         }
         boolean substantive="analysis".equals(section.kind)||"flowchart".equals(section.kind);
+        if(substantive)AdviceClauseAttribution.check(section,sources,problems);
         if(substantive){
             if(!text(section.content))problems.add("section.content: substantive sections require a nonempty cited explanation");
             if(!section.gaps.isEmpty())problems.add("section.gaps: substantive sections require complete independent support and no unresolved gaps");
             if(cited.isEmpty())problems.add("section.citations: substantive sections require evidence, including all nested aliases");
             if(!"pass".equals(status(section,"R2")))problems.add("section.checks.R2.status: supported revision citations require pass");
             if(section.checks.stream().anyMatch(c->"missing_evidence".equals(c.status)))problems.add("section.checks.status: missing evidence affects this substantive section");
-            if(!Arrays.asList("project_contract","reference_only").contains(section.basisScope)
-                    ||referenceOnly!= "reference_only".equals(section.basisScope)||!adopted.test(section.basisScope,cited))
+            if(!Arrays.asList("project_contract","reference_only").contains(section.basisScope))
+                problems.add("section.basisScope: "+section.kind+" must retain requested "+(referenceOnly?"reference_only":"project_contract")
+                        +"; an insufficient answer envelope does not make a cited rule-only section insufficient. Retain the original evidence and incorporation checks; do not change basis to publish unsupported claims.");
+            else if(referenceOnly!= "reference_only".equals(section.basisScope)||!adopted.test(section.basisScope,cited))
                 problems.add("section.basisScope: adoption or requested basis is not supported");
         } else {
             if(!section.content.isEmpty())problems.add("section.content: limits/uncertainty must be empty application-rendered gaps");
@@ -217,8 +240,9 @@ final class AdvisoryHarness {
     static String status(Section section,String rule) { return section.checks.stream().filter(c->rule.equals(c.ruleId)).map(c->c.status).findFirst().orElse(""); }
     static List<String> gaps(Section section) {
         Set<String> gaps=new LinkedHashSet<>(section.gaps);
-        String[] rules={"other_fact","amendments","authority","opposing_conditions","policy_basis","proviso","deadline_tracks","obligation_type","dynamic_version","other_fact"};
-        for(Check check:section.checks)if("missing_evidence".equals(check.status))gaps.add(rules[Integer.parseInt(check.ruleId.substring(1))-1]);
+        String[] rules={"other_fact","amendments","authority","opposing_conditions","policy_basis","proviso","other_fact","obligation_type","dynamic_version","other_fact"};
+        for(Check check:section.checks)if("missing_evidence".equals(check.status)
+                &&!("R7".equals(check.ruleId)&&section.gaps.contains("deadline_tracks")))gaps.add(rules[Integer.parseInt(check.ruleId.substring(1))-1]);
         if(section.flowchartPlan!=null&&section.flowchartPlan.nodes!=null)for(Node node:section.flowchartPlan.nodes)if(node!=null&&"unknown".equals(node.kind))gaps.add(node.label);
         return new ArrayList<>(gaps);
     }
@@ -239,7 +263,41 @@ final class AdvisoryHarness {
         return copy(language,"Evidence still required: ","仍待核实的依据：","仍待核實的依據：")+gapLabel(gap,language)+". "+effect;
     }
     private static String copy(String language,String en,String hans,String hant){return "en".equals(language)?en:"zhHant".equals(language)?hant:hans;}
-    static String languageHint(String question){return question!=null&&question.matches("(?s).*\\p{IsHan}.*")?"zhHans":"en";}
+    private static String questionText(String question){
+        java.util.regex.Matcher quoted=QUOTED_QUESTION_TEXT.matcher(question);StringBuffer text=new StringBuffer();
+        while(quoted.find()){String value=quoted.group(),inner=value.substring(1,value.length()-1);
+            quoted.appendReplacement(text,java.util.regex.Matcher.quoteReplacement(inner.matches("(?i)(?:"+LANGUAGE_NAMES+")")?inner:" "));}
+        quoted.appendTail(text);return text.toString();
+    }
+    private static String requestedLanguage(String question){
+        if(question==null)return null;
+        String text=questionText(question),explicit=null;boolean negated=false;
+        String scriptText=QUOTED_QUESTION_TEXT.matcher(question).replaceAll(" ");
+        java.util.regex.Matcher request=OUTPUT_LANGUAGE.matcher(text);
+        while(request.find()){
+            String prefix=text.substring(Math.max(0,request.start()-16),request.start());
+            if(request.group(1)!=null&&request.group(1).matches(".*(?:不要|不用|无需|無需|不必|勿|别|別).*")){negated=true;continue;}
+            if(request.group().matches("(?is).*\\b(?:not|never|don't)\\b.*")||prefix.matches("(?is).*\\b(?:not|never|don't)\\s*$")){negated=true;continue;}
+            String value=request.group(2)!=null?request.group(2):request.group(3)!=null?request.group(3):request.group(4);value=value.toLowerCase(Locale.ROOT);
+            explicit=Arrays.asList("英文","英语","英語","english").contains(value)?"en"
+                    :Arrays.asList("简体中文","簡體中文","simplified chinese").contains(value)?"zhHans"
+                    :Arrays.asList("繁体中文","繁體中文","traditional chinese").contains(value)?"zhHant":"zh";
+        }
+        if(explicit!=null)return "zh".equals(explicit)?AdvisoryQuestionScript.infer(scriptText):explicit;
+        if(negated)return null;
+        text=text.trim().replaceFirst("^(?:\\[[0-9]+\\]\\s*)+","");
+        if(!text.matches("(?s).*\\p{IsHan}.*"))return "en";
+        if(text.trim().matches("(?is)^(?:please\\s+)?(?:what|why|how|when|where|which|who|does|do|is|are|can|could|would|should|explain|describe|draw|provide|write|tell|give|compare|show)\\b.*"))return "en";
+        return text.trim().matches("(?s)^\\p{IsHan}.*")?AdvisoryQuestionScript.infer(scriptText):null;
+    }
+    static boolean languageMatches(String question,String language){String required=requestedLanguage(question);return required==null||("zh".equals(required)?Arrays.asList("zhHans","zhHant").contains(language):required.equals(language));}
+    static String languageHint(String question){String required=requestedLanguage(question);return required==null?question!=null&&question.matches("(?s).*\\p{IsHan}.*")?"zhHans":"en":"zh".equals(required)?"zhHans":required;}
+    static String languageInstruction(String question){
+        String required=requestedLanguage(question);
+        String label="zhHans".equals(required)?"zhHans (Simplified Chinese)":"zhHant".equals(required)?"zhHant (Traditional Chinese)":"zh".equals(required)?"Chinese, matching its original Chinese script (zhHans/zhHant)":required;
+        return required==null?"":"\n\nRequired answer language derived from the ORIGINAL user question: "+label
+                +". Use it for every section, explanation, missing-evidence reason and clarification. The source's language and prior answers do not override this request.";
+    }
     static String rejectionClarification(String language) {
         return copy(language,"Some requested conclusions or the flowchart could not be verified. Confirm the applicable provisions, amendments, dates and missing facts before relying on them.",
                 "部分所问结论或流程图尚无法核实。请先确认适用条文、修订、日期和缺失事实，再据此作判断。",
