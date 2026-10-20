@@ -61,7 +61,7 @@ test('rendered fixed panel displays full table and unknown adoption, only reads 
       : new Response(pdf, { headers: { 'Content-Type': 'application/pdf', 'X-Source-SHA256': address.originalSourceSha256 } }) }
   }, boundaries: { '@noble/hashes/sha256': require('@noble/hashes/sha256'), '@/components/DraftingPdfPreview.vue': { __esModule: true, default: { props: ['source', 'initialPage'], render() { return vue.h('div', `Existing PDF.js viewer: ${this.source} page ${this.initialPage}`) } } } } })
   const rendered = renderer(), props = vue.reactive({ pointer: { ...address }, locale: 'en' }), app = rendered.createApp({ render: () => vue.h(loaded.default, props) })
-  app.mount(rendered.root); await flush()
+  app.mount(rendered.root); await waitFor(() => /Full note/.test(text(rendered.root)))
   try {
     assert.equal(calls.length, 2); assert.ok(calls.every(url => url.startsWith('/api/oer/fixed-baseline/')))
     assert.match(text(rendered.root), /project adoption is unconfirmed/)

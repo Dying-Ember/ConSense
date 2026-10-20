@@ -6,6 +6,34 @@
 用户同时明确授权“这轮完成后先提交并推送到远端”。本轮可交付修改验证、统一集成后先做一次Git checkpoint，不等待统一Goal全部完成。先核分支／远端／变更归属／必要检查及密钥排除，只提交代码、测试、文档和可版本化打包清单；原件、数据库、模型、密钥与大体积运行证据保留忽略的本地目录。先前“No commit/push”记录属于旧授权时点，不再阻止此次明确请求；仍不授权force push、reset、生产部署或中断受保护H2 owner。
 <!-- user-sl-package-and-push-20261020:end -->
 
+<!-- unified-progress26:start -->
+**2026-10-21：真实浏览器已下载三Word／三PDF，NTT11／SCT40／SCC84共135页已全部逐页亲看。身份与页码连续性成立，SCT空页/短尾及SCC目录错页仍FAIL。新前端身份引导已采用主树，完整211/211、类型检查及生产构建通过，真实点击只读1plan、0generate并正确聚焦。**
+
+Vetting全91后继实际91/91、0failure/error/skip、63.125秒、2076pin同、自然Job0，原85pass/3failure/3error及exact2诊断保持；此候选尚未主树统一采用/升级。SCT同源原件实转29页，对照生成40页，确认新增分页问题；两处末字丢失在原件PDF11与生成PDF16均复现，首损失界定为当前转换兼容，未归Editor正文损失。SCC34目录行错页，93原生字段/92书签完整且缓存沿源保持，刷新尚未实测。两原件串行转换均自然Job0、24GiB、16pin同；所有Root窗口已接回终态，正式17/H2未启停。详细证据和问题编号见[最终导出版式验收](testing/drafting-final-export-layout-20261021.md)。
+
+SL scope repair02/154软件计划及4页新capture/8整链方案已备但未执行；所有版本完整高质量成果和DB/CAS/索引离线包仍未完成。Advisory本轮0新真实Qwen，原76/100业务FAIL不变，单次27B复验待Root新鲜before/wire/唯一发送。统一Goal继续active，完整范围不缩减；以下progress25及更早块保留历史时点。
+<!-- unified-progress26:end -->
+
+<!-- unified-progress25:start -->
+**2026-10-20：formal17真实浏览器已完成Drafting人工身份采用、取消及明确替换顶部项目身份，随后成功生成新文稿；统一Goal继续active。整体约75%～80%是工程估计，不是测试通过率。**
+
+隔离项目round03b第一次生成因两个contractTitle必填值未采用而被正确拦住，旧文稿字节保留；人工填写测试编号E2E-F17-20261020及虚构项目名后，先取消替换、再明确确认替换，顶部身份实际更新。第二次新输入生成58.651秒成功，新revision为839e3384-6bb3-4210-b829-05a1e25fca92，无alert。浏览器证据在`.local/e2e-20261020/browser-formal17/round19-state.json`与同号snapshot；本次三Word／三PDF尚未导出及逐页验收，阅读修改映射2项仍未验证。缺身份时前端提前引导的候选已实际RED1复现、修复后GREEN1通过，原焦点／保旧稿／人工采用断言保持，尚未采用主树或运行新完整前端套件。
+
+Vetting身份与报告metadata组合实际91项：85通过、3failure、3error、0skip；原计划80遗漏了11个参数化实例，后继须保全全部91。taxonomy的coordination非法类型、Recovery fixture未注入同权威resolver已定位并准备候选；两个Report断言仍先做原Writer诊断，不能提前归为排版或放宽断言。Checklist来源／字段角色关联尚未业务通过。formal17升级后53/53完整接口HTTP200，49逐字节相同，4份Vetting差异已独立审查；本次16finding／69人工记录／32evidence全字段逐序保持，Word两类引文各16次。报告正文隐藏内部snapshot hash符合新设计；产物metadata保留同ID仍在候选验收。SQL17之后新增写入要求后继重启重新完整保全，受保护H2 owner保持。
+
+SL七来源代表性14页typed native实际全部返回，53.36秒；各自.030五项至.040边界均保留，与各自同源研究全文去空白7/7相同。接受票`.local/sl-oer-next-bounded-window01/actual-native01/root-acceptance01.json`及`boundary-review01/boundary-review.json`；这不代表全页质量／canonical采用。新同链scope候选独审发现已知SL可删标签降ordinary的Must及缺少完整publish/hydrate/registry冷重建测试，已安排私有最小修复，候选尚未执行／采用。所有版本完整高质量成果与DB／CAS／索引离线包仍未完成，不能用14页缩小范围。Advisory本轮仍0新真实Qwen请求，上一27B业务76/100 FAIL保持；准备同case的单次27B验证。Git检查点eb9a10e已推送，以上新候选未包含其中。以下progress24及更早块保留历史时点。
+<!-- unified-progress25:end -->
+
+<!-- unified-progress24:start -->
+**2026-10-20：本轮检查点已提交并推送 `codex/e2e-oer-20261020`，commit `eb9a10ecda339044bfe9a80d19066203a53d9e5f`，本地／tracking／远端精确相同。统一Goal继续active。**
+
+SQL17新逻辑快照已实际在独立owned文件恢复，16GiB堆、38.656秒、770输入pin保持、自然Job0；22表／1196行、最新消息35/36、16份DOCX／6份PDF完整BLOB及关闭后重新打开通过。恢复接受票 `.local/runtime-preparation17/restore01/root-acceptance01.json` SHA `5b6904032562aabf526b580f3aa41de147611c11e8ffcf0d97e8b1bf8770f838`。53份before完整接口及30份上传文件字节保全后，Root只停止exact旧后端69780，启动已接受127组合JAR的formal17（PID47512／FILETIME134369806998561502）；H2 owner38980保持，前端未重启。JVM固定-Xms1024m/-Xmx16384m。
+
+升级后53/53完整接口均HTTP200，49份与before逐字节相同；4份Vetting差异全部显式保留。发现列表16项旧字段逐字逐序保持，独立重算完整HTTP来源投影只形成1个候选来源组，法律问题数量仍null、法律等价仍unknown。报告JSON／DOCX／PDF的呈现变化及新快照编号仍审查中，不因合法JSON或HTTP200授业务／视觉通过。该实际接口包的findings.evidence分母为32，不得套用此前另一归档的47引文分母；69人工记录继续按本次before完整核对。after票 `.local/runtime-preparation17/api-after-receipt.json` SHA `537d90d56f237d89ba070c801641d4be785609fa4cdd0c5705d43d8a4abbe0d1`，全部差异在同根 `after53-comparison01/`。
+
+VT02首阶段另一次37/37已通过，第二阶段已私有冻结但尚未编译／运行／采用；formal17不含该候选。Checklist理由相关性仍真实缺陷，已定位原始模型输出，契约候选不等于来源绑定或判断修复。SL七来源14页首native窗口准备中，尚未实际执行；所有版本高质量成果及DB／CAS／索引完整离线恢复仍未完成。当前无新真实Qwen请求，上一27B业务76/100 FAIL保持；最新浏览器、Drafting 2b／长身份／SCT-SCC最终逐页、复杂PDF及分阶段扫描均保留。报告GET会新增快照，任何后继升级必须重新保全SQL17之后写入。以下23及更早块保持原历史时点。
+<!-- unified-progress24:end -->
+
 <!-- unified-progress23:start -->
 **2026-10-20：30路径候选已精确采用主树；新统一后端127/127及同源JAR通过，前端210/210、类型检查和生产构建通过。Drafting正常三DOCX＋NTT预览／正文编辑通过，11页身份／页码可见结果逐页正确；Vetting reader04新Word40页／native42页全部亲看，来源标题及17主题分页缺陷已修。**
 

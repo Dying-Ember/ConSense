@@ -63,7 +63,12 @@ function assetResponse(asset, { bytes, headers = {}, status = 200 } = {}) {
 }
 function all(node, predicate) { return [...(predicate(node) ? [node] : []), ...(node.children ?? []).flatMap(child => all(child, predicate))] }
 async function flush() { for (let i = 0; i < 12; i++) { await new Promise(resolve => setImmediate(resolve)); await settle() } }
-async function harness({ data = pointer(), initialPointer = baseAddress, respond, browserCrypto = crypto.webcrypto } = {}) {
+async function waitFor(predicate) {
+  const deadline = Date.now() + 5000
+  while (!predicate() && Date.now() < deadline) { await new Promise(resolve => setTimeout(resolve, 10)); await settle() }
+  assert.ok(predicate(), 'The observed async panel state did not complete within five seconds')
+}
+async function harness({ data = pointer(), initialPointer = baseAddress, respond, browserCrypto = crypto.webcrypto, pendingLoad = false } = {}) {
   const requests = [], created = [], revoked = []
   const fetch = async (url, options) => {
     requests.push({ url, options })
@@ -81,6 +86,7 @@ async function harness({ data = pointer(), initialPointer = baseAddress, respond
   const props = vue.reactive({ pointer: clone(initialPointer), locale: 'en' })
   const rendered = renderer(), app = rendered.createApp({ render: () => vue.h(loaded.default, props) })
   app.mount(rendered.root); await flush()
+  if (initialPointer && !pendingLoad) await waitFor(() => find(rendered.root, node => node.tag === 'button'))
   return { ...rendered, props, requests, created, revoked, dispose: () => app.unmount() }
 }
 
@@ -378,11 +384,6 @@ test('real panel requests all assets in source order, escapes HTML, retains unkn
   data.assetRefs[0].url = 'https://other-host.invalid/image.png'
   const h = await harness({ data })
   try {
-    // WebCrypto work can outlast the harness microtask flush under the full suite.
-    const deadline = Date.now() + 5000
-    while (h.created.length < 3 && Date.now() < deadline) {
-      await new Promise(resolve => setTimeout(resolve, 10)); await settle()
-    }
     const figures = all(h.root, node => node.tag === 'figure')
     assert.deepEqual(figures.map(node => node.props['data-asset-id']), table.assetRefs.map(asset => asset.assetId))
     assert.equal(all(h.root, node => node.tag === 'img').length, 3)
@@ -443,7 +444,7 @@ test('image decoding failure revokes its object URL and cannot masquerade as com
 
 test('stale pointer response is ignored and aborts; unmount drops pending assets before URL creation', async () => {
   const gate = deferred(), first = pointer(), secondAddress = { ...baseAddress, projectId: 'project-B' }, second = pointer(secondAddress)
-  const h = await harness({ respond: (url, options) => {
+  const h = await harness({ pendingLoad: true, respond: (url, options) => {
     if (url.includes('/units/')) return url.includes('/project-A/') ? gate.promise : envelope(second)
     return assetResponse(second.assetRefs.find(asset => url.includes(encodeURIComponent(asset.assetId))))
   } })
@@ -451,12 +452,13 @@ test('stale pointer response is ignored and aborts; unmount drops pending assets
   h.props.pointer = secondAddress; await flush()
   assert.equal(firstSignal.aborted, true)
   gate.resolve(envelope(first)); await flush()
+  await waitFor(() => h.created.length === 3)
   assert.equal(h.created.length, 3)
   assert.equal(h.requests.filter(request => request.url.includes('/assets/')).every(request => request.url.includes('/project-B/')), true)
   h.dispose(); assert.equal(h.revoked.length, 3)
 
   const assetGate = deferred()
-  const pending = await harness({ respond: (url, options, data) => url.includes('/units/') ? envelope(data) : assetGate.promise })
+  const pending = await harness({ pendingLoad: true, respond: (url, options, data) => url.includes('/units/') ? envelope(data) : assetGate.promise })
   const signals = pending.requests.map(request => request.options.signal)
   pending.dispose(); assetGate.resolve(assetResponse(table.assetRefs[0])); await flush()
   assert.ok(signals.every(signal => signal.aborted)); assert.equal(pending.created.length, 0)
@@ -472,6 +474,7 @@ test('pointer identity mismatch fails before assets and reload/null transition r
   const h = await harness()
   try {
     find(h.root, node => node.tag === 'button').props.onClick(); await flush()
+    await waitFor(() => h.created.length === 6)
     assert.equal(h.created.length, 6); assert.equal(h.revoked.length, 3)
     h.props.pointer = null; await flush()
     assert.match(text(h.root), /Select an explicit canonical source address/)
