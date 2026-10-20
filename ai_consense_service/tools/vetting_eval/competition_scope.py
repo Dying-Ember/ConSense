@@ -22,6 +22,7 @@ ORIGINAL_HASH_MEANING = 'original_file_bytes_sha256'
 MODULES = frozenset({'drafting', 'vetting', 'advisory'})
 SOURCE_PURPOSES = frozenset({'standard_template', 'project_document', 'reference_standard',
                             'project_fact', 'package_manifest', 'evaluation_answer', 'unknown'})
+SL_CLASSES = frozenset({'sl_library', 'sl_technical_library', 'specification_library'})
 EXCLUDED_CLASSES = frozenset({'pricing_bq', 'pricing_sor', 'pricing_general_summary',
                               'works_related_pss', 'sl_nontechnical'})
 DECLARED_INCLUDED_CLASSES = frozenset({'project_pre', 'notes_to_tenderers', 'notice_to_tenderers',
@@ -243,7 +244,12 @@ class CompetitionScopePolicy:
                      'sourcePurpose': chunk.get('sourcePurpose'),
                      'eligibleModules': None if chunk.get('eligibleModules') is None
                          else list(chunk['eligibleModules'])}
-            is_sl = chunk.get('fileKey') == 'SL' or 'specification_library' in classes
+            original_hashes = [chunk.get(field) for field in ('originalSourceSha256', 'sourceSha256')]
+            if chunk.get('originalHashMeaning') == ORIGINAL_HASH_MEANING:
+                original_hashes.append(chunk.get('sourceHash'))
+            known_sl = any(isinstance(value, str) and value.lower() == self.source_sha256
+                           for value in original_hashes)
+            is_sl = known_sl or chunk.get('fileKey') == 'SL' or bool(set(classes) & SL_CLASSES)
             sl_status = None
             if is_sl:
                 try:
@@ -252,6 +258,8 @@ class CompetitionScopePolicy:
                     raise CompetitionScopeError(error.code, chunk_id=chunk.get('id'), details=error.details) from error
                 trace['originalSourceSha256'] = _original_hash(chunk, required=True)
                 trace['physicalPages'] = pages
+                if known_sl and chunk.get('producerKind') == 'native_pdf' and not set(classes) & SL_CLASSES:
+                    raise CompetitionScopeError('known_sl_native_requires_explicit_unit', chunk_id=chunk.get('id'))
                 statuses = sorted({self._sl_status(page) for page in pages})
                 if len(statuses) != 1:
                     raise CompetitionScopeError('mixed_scope_chunk_requires_upstream_split', chunk_id=chunk.get('id'),
@@ -288,7 +296,13 @@ def load_policy(manifest_path, expected_manifest_sha256=None):
     recorded manifestContentSha256 pins canonical content excluding itself.
     Callers still own the trust of the provided scope-review manifest.
     """
-    raw = Path(manifest_path).read_bytes()
+    return load_policy_bytes(Path(manifest_path).read_bytes(), expected_manifest_sha256)
+
+
+def load_policy_bytes(raw, expected_manifest_sha256=None):
+    """Validate retained scope CAS bytes with the same original-file policy recipe."""
+    if not isinstance(raw, bytes):
+        raise CompetitionScopeError('scope_manifest_bytes_required')
     file_sha = hashlib.sha256(raw).hexdigest()
     if expected_manifest_sha256 is not None and file_sha != _digest(expected_manifest_sha256, 'expected_manifest_sha256'):
         raise CompetitionScopeError('scope_manifest_file_sha256_mismatch')

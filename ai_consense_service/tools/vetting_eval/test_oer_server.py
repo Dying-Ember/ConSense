@@ -4,6 +4,7 @@ No actual BGE forward pass, persistent Qdrant engine, network or parser process.
 TestClient exercises request validation and the real source/window integration.
 """
 import copy
+from contextlib import ExitStack
 import importlib.util
 import json
 import os
@@ -135,6 +136,12 @@ class OerHttpContractTest(unittest.TestCase):
         sys.modules[name] = self.backend
         spec.loader.exec_module(self.backend)
         self.backend.STATE = self.root / 'fresh-state'
+        # Authored local providers: no shared coordinator or real CUDA framework.
+        self.runtime_fakes = ExitStack()
+        self.addCleanup(self.runtime_fakes.close)
+        self.runtime_fakes.enter_context(patch.object(self.backend, 'gpu_coordinator', return_value=None))
+        self.runtime_fakes.enter_context(patch.dict(sys.modules, {
+            'torch': SimpleNamespace(cuda=SimpleNamespace(memory_allocated=lambda: 0))}))
         # Fake runtime identity only; no real GPU/model is instantiated by these contracts.
         self.backend._selected_device = 'cuda'
         self.db, self.encodes, self.predictions, self.events = DualFakeDb(), [], [], []
@@ -167,9 +174,13 @@ class OerHttpContractTest(unittest.TestCase):
                        parent('a-condition', 'body:2', 'Only after written approval.', 'A1', 'body/1')]
 
     def tearDown(self):
-        self.client.close()
-        self.env.stop()
-        self.temp.cleanup()
+        try:
+            self.client.close()
+        finally:
+            # Direct helper users call tearDown without unittest.doCleanups.
+            self.runtime_fakes.close()
+            self.env.stop()
+            self.temp.cleanup()
 
     def index(self, chunks=None):
         return self.client.post('/index', json={'projectId': 'oer-test',

@@ -1,3 +1,13 @@
+<!-- unified-progress33:start -->
+**2026-10-21：SL统一179实际178pass／唯一Win1314环境skip，原完整8通过；11份Python源码／测试已精确采用主树。七真实版本native导入与冷校验7/7、十四原页raster14/14均完成，来源质量继续待验。Goal active、完整范围不变。**
+
+本轮178pass／0failure/error／1skip，73.422秒、24GiB、pins同／自然Job0；不追认179全绿或符号链接保护。代码采用4产品／7测试文件，保原scope／身份／重建／退出fresh hash门，完整8不重跑。普通发现未启用actual fixture时明确skip、显式无效fixture继续失败的最小测试门已5项文件级自检通过；全部8方法／helper未变。已推送Advisory检查点`b21ac5e…`的65项修复反馈不授新模型质量，当前运行服务仍formal18。
+
+七真实来源已实际导入原件/raw/observer源码并fresh冷校验，85.938秒、17CAS文件／921,888,326bytes。14张原PDF物理页分别两串行窗口全部渲染、Root已逐张看，37,093 glyph含目标外20,793全保。真实页发现ceil整数canvas与144dpi内容extent不能混同，部分版本可见词间隔没有space glyph；v2 reference/affine/reading order、同源dual与adoption仍待补，不从首看或去空白相等授质量。全部22214技术页、DB／CAS／索引离线包未完成。
+
+SCT资源最小后继实际完整生成93.469秒成功；两旧短尾合并，但新PDF28页中第7页确为空正文，最终版式仍FAIL。保留旧观察器断言和失败票，先系统核剩余22派生边界与原硬分页关系，不逐页试删或按页数放行。详细证据见[本轮进展](three-module-runtime-progress-20261021.md)。
+<!-- unified-progress33:end -->
+
 <!-- unified-progress32:start -->
 **2026-10-21：formal18已实际升级并保全数据；新27B实答仅资料界限，业务FAIL。Advisory精确修复反馈3文件已通过65项回归并采用源码，尚未升级运行。SCT61及六原件结构、SL同源完整8均通过，最终质量仍待收口；整体约80%为工程估计，Goal active。**
 
@@ -205,3 +215,25 @@ SCT full-generation03两腿实际各1项完整MVC/JPA三文件生成＋一次SCT
 实际RED2为两个指定AssertionFailedError、0error/skip、27.500秒；GREEN65为65/65、0failure/error/skip、28.016秒，16GiB单JVM、pins同／自然Job0。精确分母为Publication11、Harness33、OwnershipView8、RepairContext7、RepairLanguage4、PromptDefaults2；原10个publication方法及旧完整断言保持。Root精确采用3文件，采用票`.local/e2e-20261020/advisory/formal18-real27b-single01/repair-feedback-decomposition-candidate01/root-adoption01/root-adoption-receipt01.json` SHA256 7b59b04e770e7f71ffb41d5a0d242965b6cfcf6f8cfa6ddee4f6eac2fba32583。运行formal18未切换、未新增真实模型调用；原新实答4–26/100 FAIL及旧76保留，不能以65软件通过授模型质量。
 
 真实SL下一阶段固定7来源/14页（每版FWP .030完整两页），保留全7版22214技术页总范围。已重新核7原件369,064,517bytes及7实际typed raw552,778,965bytes；raw内原件Base64和3observer源码SHA均核同，不需重跑7次Java。盘点与具体缺口见`.local/sl-real-seven-source-readiness01/`。正在准备原字节导入native CAS并冷读、14原页正式raster及逐版reference/adoption；目前只有4张历史研究PNG，均不冒充已审v2 reference，14页dual仍缺。后继不沿用authored固定4页、条号或2×映射，不缩7/14分母或全版本离线包。
+
+
+### progress32后续：七真实SL来源已实际导入并冷校验
+
+Root新有限窗口实际完成7/7原件/typed raw→现有native observation capture→落盘bundle→fresh ArtifactStore冷validate。总85.938秒、24GiB、单child/0retry、全部输入/副本/依赖pins保持、自然Job0；不重跑七次Java、0新operator extraction/engine/model/HTTP/renderer。CAS共17文件/921,888,326bytes，包含七原件、七完整raw及三份共享observer源码，版本、原sourceRevision、14页完整字形含目标外库存和全部unknown保持。七版为sl2022-original、sl2022-batch01、competition-batch02、sl2022-batch02-rev1、sl2022-batch03、sl2022-batch04、sl2026-original；比赛件与官网rev1不混同。
+
+Root接受票`.local/sl-real-seven-native-import01/root-acceptance01.json` SHA256 d5d51bfb6673e69ebad8898fa818a1e4655017bb04f7ac8276c8c14ed2844363；实际receipt/result均保全。仅授真实native导入/冷校验，human/semantic/sourceQuality仍false、canonicalPublished=false。14张正式原页raster/v2 reference、来源确认/adoption、同源dual、真实canonical发布/索引和所有22214技术页高质量离线包仍未完成。
+
+SCT本轮独审又核1238原段=1218保留+20授权删除，1084保留文字原样、134变更均有69clear/11star/54static对应；无不明变更/删除。58表tblPr/grid、571保留cells的tcPr保持，299→295行精确为4授权指导行，469绑定中465真实CS+4已删除指导语，无新增missing。29页身份/页脚/页码稳定，但6/13分别仅66字/2行、170字/4行，对应原件6/13为1777/2143字，仍FAIL；两处新增派生分页是下一最小修复点。原转换已知的3处末字符损失仍待修，不以DOCX文本保全授PDF文字完整。
+
+
+## progress33：真实SL原页、统一回归与源码采用
+
+统一旧回归由154+36+17共207方法观察去重为179唯一身份（重复28为canonical19+transport9），完整AST/断言均与原成功来源同。Root实际179项为178pass/0failure/error/1skip，73.422秒、24GiB、全部源/副本/7861依赖pins同、自然Job0。唯一旧symlink方法仍WinError1314，保FAILED_OR_INCOMPLETE和skip原票，不改OS/ACL。实际full8在同一产品源下已8/8，190.531秒，不重复执行。Root有限接受票在`.local/sl-oer-next-bounded-window01/unified-old-regression179-preparation01/root-finite-acceptance178-envskip01.json`；仅允许精确软件增量采用，不授原件或symlink保护质量。
+
+Root采用11份Python（4产品/7测试），全部oldSHA/不存在状态先核、候选SHA核同后精确写入；采用票`root-main-adoption01/root-adoption-receipt01.json` SHA256 fd14c1a4ee7ca7e759e905b36a28bd68afcaf40dc4a29364cc6133b496212b49。涵盖逐版sourceUnits/SL路由不可隐藏、point↔raster显式桥、每公开操作内verified bytes复用及fresh退出重hash，ArtifactStore原实现保持。唯一追加测试门是full8普通发现缺opt-in时明确SkipTest；显式空值、缺路径、未review/损坏fixture仍拒，8方法/helper/后续守卫不变，Root实际文件级5/5、0.035秒。原actual8和179票原样保存，不把普通发现skip算实际8通过。不替换运行OER/后端，不授新正式业务或全版本质量。
+
+十四张正式原页新raster两phase各7/7、14实际pdftoppm调用，6.266/6.453秒，144dpi/cropbox，24GiB串行、0retry、全部原件/renderer/glyph pins保持，每页owned自然Job0。Root逐张原尺寸看完14页，来源版本和printed .030条号保持；原版INSTALLATION/FWP3.2与其他MATERIALS/FWP3.1按来源保留，比赛Batch2和官网rev1虽同.030.B但2(a)(ii)/2(b)(ii)材质明显不同。页1/2与2/3的口径、条件延续及1/4/5机制保留，不把目标外文字混入或丢弃。首看票`.local/sl-real-seven-source-raster-window01/root-raster-and-first-look01.json` SHA256 29e765646d91b1a93c8957575d9b0d3e2722fe8c03cee67334b27f3751febfa2，明确sourceQuality/affine/referenceV2/canonicalPublished均false。
+
+两项真实能力缺口保留：crop595.320007×841.919983pt、rotation0/unit1、144dpi对应内容extent约1190.640015×1683.839966px，但PNG ceil canvas1191×1684；不能用整canvas宽高比伪装原物理DPI的精确affine。部分版native literal没有可见词间隔的space glyph（如spheroidalgraphite/castiron/materialboth），去空白相等不证明可用文本完整。下一步沿既有v2 reference/_reference_raster_bridge及reviewed_separator最小补齐，不写回raw、不另起parser或猜crop/rotation。全7来源/14页及全版22214技术页分母不变。
+
+SCT generation04只从已实际29页候选中撤tbl6/tbl14两派生空分页载体，实际1完整生成/转换通过、93.469秒、16GiB JVM/24GiB Job、pins同/natural0，实际28页。旧严格观察器实际在第7页body为空处失败，页码并无缺失，不改断言放行。新只读失败票`.local/drafting-sct-two-boundaries-candidate01/actual-failure-observation03.json` SHA256 15a8b9c046230ead70c4549bd205f6453ea34d59dacd27b4e47ee2a50efbd635，确认仅少2生成CL且书签一致编号，其余XML/22边界/465CS+4旧删除均保持；原P248/P524尾段已回正文充足页，但新空白页仍FAIL。后继先对账所有派生CL与原硬分页/keepNext/cantSplit/空段关系，避免逐页试删。已知3处源转换末字符损失、Word原生布局、长身份、多节和正式浏览器后继仍未验收。

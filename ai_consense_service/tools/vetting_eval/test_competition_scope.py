@@ -166,6 +166,44 @@ class CompetitionScopeTest(unittest.TestCase):
         source.pop('pageNo')
         self.assert_error('sl_physical_page_mapping_missing', [source])
 
+    def test_known_original_keeps_sl_page_scope_after_all_class_and_file_labels_are_removed(self):
+        chunks = [{'id': 'known-' + str(page), 'originalSourceSha256': SOURCE_SHA,
+                   'pageNo': page, 'content': 'Unchanged actual-source identity'} for page in (1127, 22, 1)]
+        before = copy.deepcopy(chunks)
+        result = self.policy.apply(chunks)
+        self.assertEqual([chunks[0]], result['included'])
+        self.assertEqual('included_technical_library', result['includedDecisions'][0]['reason'])
+        self.assertEqual(['excluded_sl_preliminaries', 'metadata_only'], [r['reason'] for r in result['excluded']])
+        self.assertEqual([], result['unclassified'])
+        self.assertEqual(before, chunks)
+
+    def test_each_explicit_original_alias_preserves_known_sl_and_conflicts_are_rejected(self):
+        for fields in ({'originalSourceSha256': SOURCE_SHA.upper()}, {'sourceSha256': SOURCE_SHA},
+                       {'sourceHash': SOURCE_SHA, 'originalHashMeaning': 'original_file_bytes_sha256'}):
+            with self.subTest(fields=fields):
+                source = {'id': 'known', 'pageNo': 22, **fields}
+                result = self.policy.apply([source])
+                self.assertEqual(1, len(result['excluded']))
+                self.assertEqual('excluded_sl_preliminaries', result['excluded'][0]['reason'])
+        self.assert_error('sl_original_source_identity_conflict', [
+            {'id': 'conflict', 'pageNo': 1127, 'originalSourceSha256': SOURCE_SHA, 'sourceSha256': '2' * 64}])
+
+    def test_known_sl_native_cannot_enter_as_an_ordinary_project_recipe(self):
+        for fields in ({}, {'sourceClass': 'project_contract'}, {'sourceClass': 'new_correspondence_type'}):
+            with self.subTest(fields=fields):
+                self.assert_error('known_sl_native_requires_explicit_unit', [
+                    {'id': 'native-known', 'originalSourceSha256': SOURCE_SHA, 'pageNo': 1127,
+                     'producerKind': 'native_pdf', **fields}])
+
+    def test_unrelated_project_original_and_unmarked_canonical_hash_keep_ordinary_path(self):
+        for fields in ({'originalSourceSha256': '2' * 64}, {'sourceHash': SOURCE_SHA},
+                       {'sourceSha256': 'ordinary-non-original-marker'}):
+            with self.subTest(fields=fields):
+                source = {'id': 'project', 'sourceClass': 'project_contract', 'content': 'Actual project', **fields}
+                result = self.policy.apply([source])
+                self.assertEqual([source], result['included'])
+                self.assertEqual('ordinary_source_unclassified', result['unclassified'][0]['reason'])
+
     def test_missing_printed_or_invalid_page_never_infers_a_physical_page(self):
         for page in (None, 'CLA/1', 'P1126-1127', 0, True, 1127.0):
             with self.subTest(page=page):

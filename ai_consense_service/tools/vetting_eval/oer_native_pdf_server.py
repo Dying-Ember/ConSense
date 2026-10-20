@@ -11,7 +11,7 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict
 from artifact_store import ArtifactStore, DESCRIPTOR_SCHEMA
 from canonical_projection import _bytes
-from competition_scope import load_policy
+from competition_scope import SL_CLASSES, load_policy
 from native_pdf_canonical_projection import SCHEMA, _json, produce_native_pdf
 from native_pdf_projection_transport import (STORAGE_SHAPE, VERSION, MAX_SNAPSHOT_BYTES,
                                             publish_native_pdf_transport)
@@ -160,6 +160,10 @@ def create_native_pdf_app(policy, *, backend=None, artifact_store=None, target_m
             fail(adoption['scope'].get('scopePolicySha256') == policy.policyIdentity['manifestSha256'],
                  'PROJECTION_SCOPE_POLICY_MISMATCH', 'PDF adoption must bind the actual process scope policy')
             internal = produce_native_pdf(native, dual, adoption, artifact_store=artifact_store)
+            fail(internal['source']['sourceSha256'] != policy.source_sha256
+                 or internal['projectionIdentity']['sourceClass'] in SL_CLASSES,
+                 'KNOWN_SL_NATIVE_REQUIRES_EXPLICIT_UNIT',
+                 'This validated SL original requires its explicit edition and whole-unit scope binding')
             public = publish_native_pdf_transport(internal, artifact_store=artifact_store)
             assert_canonical_scope(public['chunks'], policy, module=public['projectionIdentity']['module'])
             preview = {'projectionSha256': public['projectionSha256'], 'chunks': len(public['chunks']),

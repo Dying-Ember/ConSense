@@ -1,5 +1,6 @@
 """Authored actual-CAS native PDF HTTP contracts with fake vector inference."""
 import copy
+from dataclasses import replace
 import json
 from pathlib import Path
 from unittest.mock import patch
@@ -7,6 +8,8 @@ import unittest
 
 from fastapi.testclient import TestClient
 from canonical_projection import _bytes
+from native_pdf_canonical_projection import produce_native_pdf
+from native_pdf_projection_transport import publish_native_pdf_transport
 from oer_native_pdf_server import (create_native_pdf_app, configure_native_pdf_environment,
                                    NATIVE_PDF_CAPABILITY, NATIVE_PDF_ALGORITHMS)
 from test_native_pdf_canonical_projection import fixture
@@ -78,6 +81,36 @@ class NativePdfHttpTest(unittest.TestCase):
         self.assertEqual(public['chunks'], stored)
         result = self.query(); self.assertEqual(200, result.status_code, result.text)
         self.assertTrue(self.encodes); self.assertTrue(self.predictions)
+
+    def known_original_policy(self):
+        # Isolate the SHA authority boundary. This is not a newly loaded/accepted SL partition.
+        self.policy = replace(self.policy, source_sha256=self.inputs[0]['source']['sourceSha256'])
+        self.client.close()
+        self.app = create_native_pdf_app(self.policy, backend=self.backend, artifact_store=self.store)
+        self.rt = self.backend._windows_runtime
+        self.rt.tokenizer = lambda kind: CharacterTokenizer()
+        self.rt.identity = lambda kind: {'kind': kind, 'tokenizerSha256': 'authored-contract'}
+        self.client = TestClient(self.app)
+
+    def test_known_sl_original_without_all_sl_labels_is_refused_before_publication(self):
+        self.known_original_policy()
+        response = self.client.post('/project/native-pdf', json=self.body)
+        self.assertEqual(422, response.status_code, response.text)
+        self.assertEqual('KNOWN_SL_NATIVE_REQUIRES_EXPLICIT_UNIT', response.json()['detail']['kind'])
+        self.assertFalse(self.app.state.source_registry.root.exists())
+        self.assertEqual([], self.encodes); self.assertEqual([], self.predictions)
+
+    def test_direct_registered_project_recipe_cannot_bypass_known_sl_index_scope(self):
+        self.known_original_policy()
+        internal = produce_native_pdf(*self.inputs, artifact_store=self.store)
+        public = publish_native_pdf_transport(internal, artifact_store=self.store)
+        self.app.state.source_registry.publish(public)
+        response = self.client.post('/index-canonical', json={'projectId': 'known-sl-downgrade',
+            'projectionSha256': [public['projectionSha256']], 'module': 'vetting'})
+        self.assertEqual(422, response.status_code, response.text)
+        self.assertEqual('COMPETITION_SCOPE_INVALID', response.json()['detail']['kind'])
+        self.assertEqual('known_sl_native_requires_explicit_unit', response.json()['detail']['metadata']['code'])
+        self.assertEqual([], self.encodes); self.assertEqual([], self.predictions)
 
     def test_inline_extra_missing_or_invalid_descriptor_refuses_before_inference(self):
         bodies = [{'nativeBundle': self.inputs[0], 'dualBundle': self.inputs[1], 'adoptionManifest': self.inputs[2]},

@@ -15,7 +15,7 @@ from pathlib import Path
 
 from artifact_store import ArtifactStore, DESCRIPTOR_SCHEMA
 from canonical_projection import CanonicalProjectionError, _bytes, _fail, _hash
-from native_pdf_canonical_projection import SCHEMA, TABLE_PROJECTION_VERSION, _json, validate_native_pdf_projection
+from native_pdf_canonical_projection import SCHEMA, TABLE_PROJECTION_VERSIONS, _json, validate_native_pdf_projection
 
 STORAGE_SHAPE = 'cas-native-pdf-joint-adopted-public-v1'
 VERSION = 'source-reviewed-native-pdf-cas-public-projection-v1'
@@ -81,7 +81,7 @@ def _part(part, internal, descriptor, pointer):
 def _body(chunk, ordinal, internal, descriptor, code_sha):
     excluded = {'id', 'sourceHash', 'projectionRevisionSha256', 'parts', 'sourceSpans'}
     body = {key: copy.deepcopy(value) for key, value in chunk.items() if key not in excluded}
-    version = TABLE_VERSION if internal['projectionIdentity']['projectionVersion'] == TABLE_PROJECTION_VERSION else VERSION
+    version = TABLE_VERSION if internal['projectionIdentity']['projectionVersion'] in TABLE_PROJECTION_VERSIONS else VERSION
     body.update(producerKind='native_pdf', storageShape=STORAGE_SHAPE,
                 projectionVersion=version, metadataVersion=version, projectionCodeSha256=code_sha,
                 internalProjectionVersion=internal['projectionIdentity']['projectionVersion'],
@@ -114,7 +114,7 @@ def _assemble(internal, store, code_ref, *, capture):
          'adoptionSha256': _hash(body['adoption']), 'chunkPreIdentitySha256': _hash(body)} for body in bodies],
         'relations': copy.deepcopy(internal['canonical']['relations']), 'assetRefs': copy.deepcopy(internal['assetRefs'])}
     identity = copy.deepcopy(internal['projectionIdentity'])
-    version = TABLE_VERSION if internal['projectionIdentity']['projectionVersion'] == TABLE_PROJECTION_VERSION else VERSION
+    version = TABLE_VERSION if internal['projectionIdentity']['projectionVersion'] in TABLE_PROJECTION_VERSIONS else VERSION
     identity.update(projectionVersion=version, storageShape=STORAGE_SHAPE,
                     projectionCodeSha256=code_ref['sha256'], internalProjectionSha256=internal['projectionSha256'],
                     internalProjectionVersion=internal['projectionIdentity']['projectionVersion'],
@@ -166,39 +166,41 @@ def _assemble(internal, store, code_ref, *, capture):
 def publish_native_pdf_transport(internal_projection, *, artifact_store, max_snapshot_bytes=MAX_SNAPSHOT_BYTES):
     def run():
         _fail(isinstance(artifact_store, ArtifactStore), 'actual_artifact_store_required')
-        validate_native_pdf_projection(internal_projection, artifact_store=artifact_store)
-        code_ref = artifact_store.put_bytes(Path(__file__).read_bytes())
-        result = _assemble(internal_projection, artifact_store, code_ref, capture=True)
-        _size(result, max_snapshot_bytes)
-        return validate_native_pdf_transport(result, artifact_store=artifact_store, max_snapshot_bytes=max_snapshot_bytes)
+        with artifact_store.validation_session():
+            validate_native_pdf_projection(internal_projection, artifact_store=artifact_store)
+            code_ref = artifact_store.put_bytes(Path(__file__).read_bytes())
+            result = _assemble(internal_projection, artifact_store, code_ref, capture=True)
+            _size(result, max_snapshot_bytes)
+            return validate_native_pdf_transport(result, artifact_store=artifact_store, max_snapshot_bytes=max_snapshot_bytes)
     return _boundary(run, 'malformed_native_pdf_transport_input')
 
 
 def hydrate_native_pdf_transport(public_projection, *, artifact_store, max_snapshot_bytes=MAX_SNAPSHOT_BYTES):
     def run():
         _fail(isinstance(artifact_store, ArtifactStore), 'actual_artifact_store_required')
-        _fail(isinstance(public_projection, dict) and public_projection.get('schema') == SCHEMA
-              and public_projection.get('producerKind') == 'native_pdf'
-              and public_projection.get('storageShape') == STORAGE_SHAPE,
-              'unsupported_native_pdf_public_storage_shape')
-        _size(public_projection, max_snapshot_bytes)
-        _fail(public_projection.get('projectionSha256') == _hash({key: value for key, value in public_projection.items()
-                                                                if key != 'projectionSha256'}), 'native_pdf_public_seal_mismatch')
-        identity = public_projection['projectionIdentity']
-        _fail(identity.get('projectionVersion') in {VERSION, TABLE_VERSION} and identity.get('storageShape') == STORAGE_SHAPE,
-              'unsupported_native_pdf_public_projection_version')
-        code_ref = public_projection['transportCodeRef']
-        code = artifact_store.read_asset(code_ref)
-        # Retained publisher bytes must cold-match CAS and the known-version
-        # identity. They are never executed or replaced by this reader's bytes.
-        _fail(code_ref == _descriptor(code)
-              and identity.get('projectionCodeSha256') == hashlib.sha256(code).hexdigest(),
-              'native_pdf_transport_code_identity_mismatch')
-        internal = _json(artifact_store.read_asset(public_projection['internalProjectionRef']['artifactDescriptor']))
-        validate_native_pdf_projection(internal, artifact_store=artifact_store)
-        expected = _assemble(internal, artifact_store, code_ref, capture=False)
-        _fail(expected == public_projection, 'native_pdf_public_derived_payload_mismatch')
-        return internal
+        with artifact_store.validation_session():
+            _fail(isinstance(public_projection, dict) and public_projection.get('schema') == SCHEMA
+                  and public_projection.get('producerKind') == 'native_pdf'
+                  and public_projection.get('storageShape') == STORAGE_SHAPE,
+                  'unsupported_native_pdf_public_storage_shape')
+            _size(public_projection, max_snapshot_bytes)
+            _fail(public_projection.get('projectionSha256') == _hash({key: value for key, value in public_projection.items()
+                                                                    if key != 'projectionSha256'}), 'native_pdf_public_seal_mismatch')
+            identity = public_projection['projectionIdentity']
+            _fail(identity.get('projectionVersion') in {VERSION, TABLE_VERSION} and identity.get('storageShape') == STORAGE_SHAPE,
+                  'unsupported_native_pdf_public_projection_version')
+            code_ref = public_projection['transportCodeRef']
+            code = artifact_store.read_asset(code_ref)
+            # Retained publisher bytes must cold-match CAS and the known-version
+            # identity. They are never executed or replaced by this reader's bytes.
+            _fail(code_ref == _descriptor(code)
+                  and identity.get('projectionCodeSha256') == hashlib.sha256(code).hexdigest(),
+                  'native_pdf_transport_code_identity_mismatch')
+            internal = _json(artifact_store.read_asset(public_projection['internalProjectionRef']['artifactDescriptor']))
+            validate_native_pdf_projection(internal, artifact_store=artifact_store)
+            expected = _assemble(internal, artifact_store, code_ref, capture=False)
+            _fail(expected == public_projection, 'native_pdf_public_derived_payload_mismatch')
+            return internal
     return _boundary(run, 'malformed_native_pdf_public_snapshot')
 
 
