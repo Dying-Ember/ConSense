@@ -17,7 +17,7 @@
 
 **DF-PDF-SCT-20261021-02：末字在DOCX到PDF转换丢失，原件转换也复现。** 两处源及生成DOCX完整文字分别为`sum of each page of Bill No. 1`和`program to write on a DVD-ROM`，runs/pPr/表格属性保持；生成PDF16与同源原件PDF11均提取为`page o`、`write o`后换行，Root亲看生成PNG也缺相应末字。不能把它写成Editor文本删除。当前机上LibreOffice对源布局的兼容问题需要修，尚未证明具体裁切属性；SCT23其他疑点仍按逐页票保留，不凭英文推测补字。
 
-**DF-TOC-SCC-20261021-03：34个目录行页码不符，仍未修复。** 最大偏差4页。原件与生成DOCX均完整保留1 TOC及92 PAGEREF，93字段指令/缓存序列完全同，92目标书签逐一精确闭合，0缺失/重复/未闭合；TOC缓存4384字符保持，均未设置updateFields，现有转换实现没有明确目录刷新。后继实际原件PDF对照已按92个原生书签完整目标、精确outline destination、TOC link及实际页底唯一页码完成：92/92目标物理页、XYZ坐标和显示页码与生成物完全同，34个错页全在同引擎原件转换中已存在，生成新增目标位移0，最大偏差均4页。仅证明当前LO转换已有此问题，不外推原Word渲染；产品错误仍须修，不按相似标题重写页号。字段全范围和转换调查位于`browser-formal17/exports01/scc-field-inspection01/`。只对复制DOCX试验dirty/updateFields尚未实际执行，不能据标记宣称修好。
+**DF-TOC-SCC-20261021-03：34个目录行页码不符，仍未修复。** 最大偏差4页。原件与生成DOCX均完整保留1 TOC及92 PAGEREF，93字段指令/缓存序列完全同，92目标书签逐一精确闭合，0缺失/重复/未闭合；TOC缓存4384字符保持，均未设置updateFields，现有转换实现没有明确目录刷新。后继实际原件PDF对照已按92个原生书签完整目标、精确outline destination、TOC link及实际页底唯一页码完成：92/92目标物理页、XYZ坐标和显示页码与生成物完全同，34个错页全在同引擎原件转换中已存在，生成新增目标位移0，最大偏差均4页。仅证明当前LO转换已有此问题，不外推原Word渲染；产品错误仍须修，不按相似标题重写页号。字段全范围和转换调查位于`browser-formal17/exports01/scc-field-inspection01/`。后继已在独立复制DOCX实际添加93个dirty及updateFields标记，单次转换84页、24GiB、18pin同、自然Job0。新PDF全部92目录目标/实际显示值/outline与TOC link目标复核：34旧错仍错、0修正，58旧对保持、0新增错误/目标位移，最大仍差4页；没有观察到对过期目录的有效刷新。复制件不采用产品，不重复该试验，也不因目录数据同就外推全部正文/版式同。结果为`.local/drafting-scc-toc-refresh-experiment01/result-review01/summary.json`。
 
 ## 独立代码结果与未完成范围
 
