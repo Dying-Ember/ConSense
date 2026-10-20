@@ -1,3 +1,13 @@
+<!-- unified-progress32:start -->
+**2026-10-21：formal18已实际升级并保全数据；新27B实答仅资料界限，业务FAIL。Advisory精确修复反馈3文件已通过65项回归并采用源码，尚未升级运行。SCT61及六原件结构、SL同源完整8均通过，最终质量仍待收口；整体约80%为工程估计，Goal active。**
+
+已提交推送`aa8b8b83b17b515a9a847e695e9010ff816f32be`。新后端运行JAR `9aa85f94…`，16GiB堆；SQL18独立恢复22表／1208行／19DOCX／9PDF，受保护H2 owner不动。升级前后85接口全部200，82body逐字节同，3份Vetting报告变化已独立核清；8份完整typed文件前后相同。新43页PDF全部查看，未见明显重叠／越界／截断；原件内容、Word布局及赛方版式一致性仍单独待验。
+
+formal18新唯一27B会话实际8HTTP／1create／1ask／0retry，2cap1预检＋2回答，保存与两次历史回读一致、历史全typed记录／prompt保持、完整effective system已核；模型analysis因无依据的正式条号被拒，最终仅limits。固定13项独审可授4/100、含UNKNOWN上界26/100，不能将拒绝内容当发布成果或由单例推断模型全面优劣。SCT RED4精确1pass／3预期断言失败，GREEN61/61；六源夹具首轮类型编译错保留，最小类型修正后6/6、202ZIP项／76载体／30产物核对通过，完整生成对照与最终逐页版式继续执行。
+
+SL原8链窗口598.047秒仅7pass、第8未开始，保留不完整原票；调用内复用既有validation_session的新5负控全部pass，相关旧项11pass／唯一Win1314符号链接环境skip。原17不追认全绿，符号链接保护仍未验；随后另新同源原8完整链实际8/8、190.531秒、24GiB、pins同／自然Job0，旧598.047秒不完整票保留。原始响应和CAS不删，全版本22214技术页及DB／CAS／索引离线包未完成。详细证据及后继见[本轮实际进展](three-module-runtime-progress-20261021.md#progress32实际部署保全与真实复验)。
+<!-- unified-progress32:end -->
+
 # 三模块与 OER 实际执行进展：2026-10-21
 
 本记录延续统一 Goal，不缩小全版本 SL、三模块、OER 与最终文件验收范围。以下是本轮实际结果；准备完成、软件通过和真实来源／业务通过分别列示。当前前后端未重启，受保护 H2 owner 未启停。已交付远端检查点仍为 `ceaa25086d4b5c89fdb457cd75e2398fbe402100`，本记录之后的私有候选不因此视为已推送或已进入运行后端。
@@ -130,3 +140,68 @@ SL四页自造材料实际4POST／8fresh引擎完成，0retry；142个原始CAS�
 
 Root在任何写入前核全部27 oldSHA／新增不存在，全部候选与实际384源码逐字节一致；采用后核27 newSHA。主树941来源保持，唯一随后差异是去掉一个测试空行的4个尾空格，token序列不变、无产品／JAR变化。采用票`.local/e2e-20261020/main-adoption-round18-preparation01/root-adoption-actual01.json` SHA256 `bbf62c4cf358c18509a3c55dc5d9f3182d917b40c0288ef0b239b21662866d2c`；原379＋补5及失败／skip账原样保留。当前业务质量边界、SCT剩余分页、SCC92来源定位和SL全版本离线包不变；先按用户授权提交推送，再fresh保全现有API／typed／SQL与恢复，H2 owner不动后才升级。整体工程估计仍约80%，Goal active。
 <!-- unified-progress31:end -->
+
+
+## progress32：实际部署、保全与真实复验
+
+本节是progress31之后的实际后继。旧段落中的“未采用／未部署／未运行”保留其历史时点，当前以本节及文首progress32为准。旧失败与未执行项均不删除。
+
+### 运行版本、主树与升级数据保全
+
+27文件修复已精确采用主树，384个唯一软件项来自原379pass／5skip及同源补5pass，非单轮384/384。代码与7份文档共34文件已提交推送aa8b8b83b17b515a9a847e695e9010ff816f32be；实际远端已核。唯一测试空行尾空格规范化有单独票，产品与实际JAR不变。
+
+formal18运行PID64904／FILETIME134369946331475177，JAR SHA256 9aa85f9494f8f3287823f2344f99f7bceceaf276aed3242d68accd1ad73c7861。JVM -Xms1024m/-Xmx16384m。Root只替换旧formal17后端，前端16852及受保护H2 owner38980／FILETIME134369069168461127未启停。
+
+升级前fresh发现20项目／20会话，将保全接口从旧53前缀扩到85。before/after均85份完整body且200；82份逐字节相同。完整SQL18逻辑快照1,299,746,848bytes，SHA256 38dbd8a6d926e310112bd3806bca1e6b1787211cfabf4e6cdd5caaa1eafa0271。独立owned恢复42.922秒、16GiB、自然Job0，22表／1208行／19DOCX／9PDF及最新35–38完整content/sources和fresh RW reopen均核。外部30文件／4,233,776bytes复制前后全同，4范围8完整typed文件升级前后逐字节相同。
+
+Root总接受票`.local/runtime-preparation18/root-runtime18-acceptance01.json`，SHA256 f7cc0d038cc2366c6921200cee36fee7a5de8e4d162859cc702f947c50080ffa；restore票`restore01/root-acceptance01.json` SHA256 033299c9523d1c5e7855dd9f85095682c747bfdfadbc344281a70882b5e55014。该接受仅限运行升级与原数据保全。
+
+### Vetting报告：变化完整核查及43页视觉
+
+三份不同body为同snapshot的JSON／DOCX／PDF报告。16findings／69人工记录／32evidence全字段原顺序保持；JSON仅APP-I-007的7个leaf变化，自动not_fulfilled改insufficient_evidence，原因是field roles／same-object／完整scope未核，未据“两份/三份”冲突推定无关检查项已完成。DOCX保20tables及10ZIP entries，导航项目身份改为Not confirmed (identity check not recorded)，新增历史identity未执行说明，metadata补原snapshotID。PDF42→43页。
+
+Root实际渲染43页：8.578秒、24GiB Job、自然Job0，输入PDF SHA256 a63209c6c3e0eacc82bcc342dfa31c151cb2dff00885e429468cc703fd0da69c保持。43页均经8contact sheets查看，12/15/24/31另以120dpi单页打开；页码Page1–43 of43连续，未发现明显表格/正文越界、重叠或截断。第12页缩略图疑似3.5，经原PDF文字、原尺寸单页及生成代码核为3.S汇总行，无重复编号缺陷，不据视觉误读改代码。视觉票`.local/runtime-preparation18/report-visual43-root01/root-visual-review01.json` SHA256 07339780532582a5ad7d5baba08b345102f7a6fe3a628893656ed24dabf81a1b。
+
+本次只接受当前PDF的有限几何观察。历史候选重复、正式条款归属unknown、源/法律结论、原生Word布局与赛方版式逐项一致性仍未通过。完整报告差异独审票位于`.local/runtime-preparation18/report-change-independent-review01/`。
+
+### Advisory：formal18同题真实27B已实际完成，业务FAIL
+
+实际新session53c29d6b-bcec-45d4-87d6-04badc4be069，用户39／助手40，保持原146byte问题和document24／21chunks。before/after各4SELECT、8完整typed文件；session20→21、message38→40，全部旧完整typed行、所有旧actions和prompt全保。实际8应用HTTP、1create、1ask、0retry，SSE完整、history两次同；实际paid ledger为2cap1 preflight＋2answer，0history preflight、0dispatch unknown。未新运行MiniMax／Flash比较。
+
+完整effective system SHA256 31eb15958c475f4874dca19aa2b2ec8ed007803a23ba59c50071867dcc14a3d6已用实际941源重构并与新保存记录/请求实体核对。两次attempt的analysis都出现第4条[6]／第2条[17]这类来源归属未确认的正式条号，应用均正确拒绝，最终只发布limits，未回答核心优先规则问题。保存的被拒analysis不能当已发布可用结果。独立13项固定100分：可授4，3项UNKNOWN合计22只入上界，即4–26/100；业务FAIL。该单例与旧formal17实际76的差异只证明本案例回退，不支持模型全面排名或稳定性结论。
+
+证据根`.local/e2e-20261020/advisory/formal18-real27b-single01/`：before ledger SHA256 6161c7dcaea5b9d40aec1753827602d51d7f591a5c233b10925c8d5743e2e052，after f0e036dbd9b923b2fd616ad60e84bdf2d3194daaadef9018dca8210a3c1c5398；Root接受票ca60961562abb0fb213c91c8dfdb253a54f00a9d73732a83b2487f9382b9caf9仅授transport/history/prompt/调用账。独立评分`independent-source-business-review01/independent-current-score-frozen01.json` SHA256 9ae5475c87eb5f0ac15db054b4e3151718e7020a9ca487eab6c8d1bf8499d4d6。后继先诊断真实repair为什么未修正局部条号，不用去掉条号就发布仍有语义范围风险的分析，不无故新增模型请求。
+
+### Drafting：SCT61与六源结构实测
+
+源绑定的SCT native-frame私有候选经独审0 Must；RED4实际29.703秒，1pass／3指定AssertionFailedError、0error/skip；GREEN61实际42.110秒，61/61、0failure/error/skip，16GiB、pins同／自然Job0。旧57测试身份和断言保持，新增4项覆盖exact empty-footer授权、原字段及新header政策。候选尚未采用主树。
+
+six-original01首轮25秒在辅助函数text(Element)类型编译失败，实际0测试，原现场保留。six-original02只改Element.getTextContent()空文本断言调用；实际6/6、52.610秒、0failure/error/skip，202原ZIP项／76carrier／30artifacts核对通过。观察票`.local/drafting-sct-native-frame-successor02/six-original02/root-observation08.json` SHA256 033dd4d4e5e514ed878a316463f7057cdd8cda816a2ed9ca31dd3e60ca0cf7ed。此结果不替代完整body policy或最终分页。全生成对照用最新相同业务源码，仅4产品文件不同，两腿独立实际执行；页数测量不设29页目标。
+
+SCC另一路私有渲染输入仅更新34个等长PAGEREF缓存值，实际84页PDF的92目录页值全对、58旧正确保持、1518named destinations、1097来源坐标逐项与旧PDF相同。真实三腿locate2项通过、8错配按4013拒绝；Root票`.local/drafting-scc-explicit-refresh-candidate01/locate-three-leg-preparation02/root-acceptance01.json` SHA256 dde950055de05aa757e8201f740cfcdfd73678f413763e7157fe715373f341e8。仍是私有derived输入实验，正式产品接缝、逻辑/派生身份和最终Word/PDF一致性未通过，不改旧artifact标签。
+
+### OER/SL：全原始证据保全，重复读取修复保持来源门
+
+四页authored软件材料的真实4POST／8fresh双引擎输出已完整保全：export闭包142CAS／543,043,781bytes，后继fixture独立闭包91文件／543,612,290bytes，二者不是同一分母。point→reference raster桥36/36实际通过；Root按原PNG核完整prose60glyph/6spaces及唯一newline、table19glyph/不等宽1×2边界；右格可见空白的逻辑意义仍unknown、provider cell bbox仍not_supplied、clause owner仍null。两个unit实际produce/publish/cold hydrate通过。均为authored软件证据，不授比赛SL来源质量。
+
+原exact8窗口598.047秒、7pass事件、第8未start，状态FAILED_OR_INCOMPLETE，原输入保持；关闭owned Job后三个实际持有进程均确认退出，无重发。静态计数发现首方法24次完整assemble及96次大Paddle JSON解码；大JSON保留原response/rawAssets的base64真实forward ndarray，并非模型weights或正文。126GB为逻辑字节读取/校验次数算术，非实测物理IO，不以4页外推全库体积。
+
+最小后继仅在4个公开produce/validate/publish/hydrate入口复用既有ArtifactStore.validation_session；所有原结构重建及退出fresh全依赖重hash保持，不跨独立调用缓存成功结论、不删raw/页/断言。独立实际17项为16pass/0failure/0error/1skip，22.781秒、24GiB、pins同、自然Job0；新增5负控全部pass。唯一skip为旧symlink escape方法因WinError1314无创建目录符号链接特权，不改OS/ACL、不重跑16、不追认全绿。有限票`.local/sl-oer-next-bounded-window01/native-pdf-validation-session-runtime17-preparation01/root-finite-acceptance16-plus-envskip01.json` SHA256 7ea24babff810b2329613c1a4c717a430fec40ee076f57a09d5bcc0f2d28e53d仅允许另新同源完整8窗口；symlinkProtectionAccepted=false。所有版本22214技术页高质量解析和完整DB/CAS/索引离线恢复仍未完成。
+
+
+### progress32后续：同源完整8通过，SCT仍保留短尾缺陷
+
+Root另新窗口实际执行原8完整链，plan SHA256 cdb99301d22da0e2d9ab8425f82f5e1f41824f7664dcf114db52bdd2e583f75f。结果8/8、0failure/error/skip、190.531秒、24GiB、全部候选/副本/fixture/依赖pins保持、自然Job0；Root接受票`.local/sl-oer-next-bounded-window01/native-pdf-session-full8-successor01/root-acceptance01.json` SHA256 b0da379c01f60fba05096173062f98f89aa6bf6ca429dbf05a738f80e2b1a57a。原8方法/helper及91文件543,612,290byte fixture闭包均保持，0新engine/provider，未重发原窗口。此为authored完整软件链通过，仍不授真实7来源14页及22214页全版本来源/离线包验收。旧17的符号链接skip仍unknown。
+
+SCT full-generation03两腿实际各1项完整MVC/JPA三文件生成＋一次SCT转换均过，baseline94.078秒／candidate92.657秒，16GiB JVM／24GiB Job、pins同／自然Job0。同一输入和相同业务代码，仅4产品文件变化；SCT32→29页，NTT/SCC DOCX逐字节相同，SCT只word/document.xml、word/header1.xml、word/footer1.xml不同。保存差异比较SHA256 f30cab67b75760e10793d76d9d6994ba4a4dd6389b7e84f20face690085b4e9b，页数不是验收目标。
+
+实际串行raster两腿32／29页均全部生成，Root查看全61页contact；candidate无baseline第2页那种纯空正文，但第6／13页仍有显著短尾。原件29页不证明新产物等价：初步原native映射显示原件对应页仍有其他正文，正在按本轮CS定位／手工break精确核源与最早版式损失。保留FAIL／未收口，暂不采用该SCT候选为最终修复。原生Word、长身份／多节及正式浏览器后继仍待验。
+
+
+### progress32后续：Advisory具体修复反馈已离线验证并采用源码
+
+新实际repair已核包含完整错误、已接受limits及被拒候选，非反馈未发送；两attempt的1966字analysis section相同，whole sections不同。后继仅两产品文件与一测试文件：正式归属诊断增加精确designation及offsetUnit=utf16，要求整条断言连条件/效果/例外重新核源；通用contract要求每独立机制单独section，完整条件在同section。不自动删条号、改写正文、拆模型内容或放松来源/采用/发布守卫，付费预算与attempt上限不改。
+
+实际RED2为两个指定AssertionFailedError、0error/skip、27.500秒；GREEN65为65/65、0failure/error/skip、28.016秒，16GiB单JVM、pins同／自然Job0。精确分母为Publication11、Harness33、OwnershipView8、RepairContext7、RepairLanguage4、PromptDefaults2；原10个publication方法及旧完整断言保持。Root精确采用3文件，采用票`.local/e2e-20261020/advisory/formal18-real27b-single01/repair-feedback-decomposition-candidate01/root-adoption01/root-adoption-receipt01.json` SHA256 7b59b04e770e7f71ffb41d5a0d242965b6cfcf6f8cfa6ddee4f6eac2fba32583。运行formal18未切换、未新增真实模型调用；原新实答4–26/100 FAIL及旧76保留，不能以65软件通过授模型质量。
+
+真实SL下一阶段固定7来源/14页（每版FWP .030完整两页），保留全7版22214技术页总范围。已重新核7原件369,064,517bytes及7实际typed raw552,778,965bytes；raw内原件Base64和3observer源码SHA均核同，不需重跑7次Java。盘点与具体缺口见`.local/sl-real-seven-source-readiness01/`。正在准备原字节导入native CAS并冷读、14原页正式raster及逐版reference/adoption；目前只有4张历史研究PNG，均不冒充已审v2 reference，14页dual仍缺。后继不沿用authored固定4页、条号或2×映射，不缩7/14分母或全版本离线包。

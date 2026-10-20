@@ -1,5 +1,6 @@
 package com.consense.service.advice;
 
+import com.consense.common.JsonUtils;
 import com.consense.web.dto.AdviceDtos.CitationVO;
 import com.consense.web.dto.CanonicalEvidenceDtos.EvidencePointer;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -54,8 +55,8 @@ final class AdviceClauseAttribution {
             // A field-wide fallback can identify a source only when its document/version is unambiguous.
             Set<String> identities=new HashSet<>();for(CitationVO source:cited)identities.add(source.getDocumentId()+"|"+source.getSourceHash());
             if(identities.size()==1)for(CitationVO source:cited)if(declared(source,id)){supported=true;break;}
-            if(!supported)problems.add(path+": unsupported_formal_clause_attribution at "+refs.start()+".."+refs.end()+"; aliases="+selected
-                    +". A source item or external clause reference is not this excerpt's formal owner. Retain genuine source quotations, reference relationships and supported explanation; remove the unsupported formal designation or isolate the affected uncertainty.");
+            if(!supported)problems.add(path+": unsupported_formal_clause_attribution at "+refs.start()+".."+refs.end()+"; designation="+JsonUtils.write(refs.group())+"; offsetUnit=utf16; aliases="+selected
+                    +". A source item or external clause reference is not this excerpt's formal owner. Recheck the WHOLE cited assertion against original wording, including its governing conditions, trigger, effect and exceptions; deleting only this designation does not repair unsupported substance. If the formal owner remains unknown, use a supported source-item description or complete source quotation while preserving genuine cross-references. Return independently supported rule/mechanism sections with their own full conditions, and isolate only unresolved judgments under the existing uncertainty/gaps contract; preserve the requested basis, checks and immutable accepted units.");
         }
     }
 

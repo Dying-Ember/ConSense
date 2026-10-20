@@ -28,6 +28,20 @@ class AdviceClauseAttributionPublicationTest {
         }
     }
 
+    @Test void repairNamesEveryRejectedDesignationAndKeepsUtf16OffsetsWithoutMutatingClaims() throws Exception {
+        Fixture f=fixture(Collections.singletonList(source("1","1. Keep a record.",null,false)),true);begin(f,false);accept(f,opening(f));
+        String first="🙂 根据第 7 条，保留记录 [1]。",second="第 9 条规定保留记录 [1]。";
+        AdvisoryHarness.Section a=section(f,first,"sec-first"),b=section(f,second,"sec-second");String original=JsonUtils.write(Arrays.asList(a,b));
+        accept(f,a);accept(f,b);assertEquals(1,f.published.size());assertEquals(2,errors(f).size());
+        String repair=ReflectionTestUtils.invokeMethod(f.publication,"repairInstruction","AUTHORED rejected candidate");
+        for(String designation:Arrays.asList("第 7 条","第 9 条"))assertTrue(errors(f).stream().anyMatch(error->error.contains("designation="+JsonUtils.write(designation))),designation);
+        assertTrue(repair.contains(JsonUtils.write(errors(f))));
+        int start=first.indexOf("第 7 条");assertTrue(errors(f).get(0).contains("at "+start+".."+(start+"第 7 条".length())));
+        assertTrue(repair.contains("offsetUnit=utf16"));assertTrue(repair.contains("deleting only this designation does not repair unsupported substance"));
+        assertTrue(repair.contains("governing conditions, trigger, effect and exceptions"));assertTrue(repair.contains("independently supported rule/mechanism sections"));
+        assertEquals(original,JsonUtils.write(Arrays.asList(a,b)));assertEquals(Arrays.asList("limits"),ids(f));
+    }
+
     @Test void reviewedAdoptionAndAdmittedNativeExplicitDeclarationBothRemainUsable() throws Exception {
         JsonNode projected=JsonUtils.mapper().readTree(getClass().getResourceAsStream("/oer/canonical/authored-three-page-projection.json")).path("chunks").get(0);
         assertEquals(projected.path("clauseId"),projected.path("adoption").path("clause").path("clauseId"));
@@ -102,10 +116,16 @@ class AdviceClauseAttributionPublicationTest {
             transport.http.counter(1000);transport.http.generation(raw);transport.http.counter(1500);transport.http.generation(correct?replacement.toString():raw);
             AdviceService service=new AdviceService(null,null,null,null,transport.props,null,null,null,null,null,null);
             Fixture f=fixture(service,Collections.singletonList(source("1","1. Keep a record.",null,false)),false,AdviceProgress.NONE);
-            AdviceService.AnswerRecord result=ReflectionTestUtils.invokeMethod(service,"completeAdvice","AUTHORED rules","AUTHORED current evidence",null,transport.operation(),null,AdviceResponsesTransportTest.SOURCE,(Runnable)()->{},f.publication,"Explain the uploaded clause");
+            AdviceService.AnswerRecord result=ReflectionTestUtils.invokeMethod(service,"completeAdvice",AdvisoryHarness.system("AUTHORED rules"),"AUTHORED current evidence",null,transport.operation(),null,AdviceResponsesTransportTest.SOURCE,(Runnable)()->{},f.publication,"Explain the uploaded clause");
             assertEquals(4,transport.http.bodies.size(),"Exactly two admitted attempts, including fake input counts");
             String user=JsonUtils.parse(transport.http.bodies.get(3)).path("input").get(0).path("content").asText();
             assertTrue(user.contains("unsupported_formal_clause_attribution"));assertTrue(user.contains(JsonUtils.write(raw)));assertTrue(user.contains("retain source-supported correct content"));
+            JsonNode feedback=JsonUtils.parse(user.substring(user.indexOf("Application rejected: ")+"Application rejected: ".length(),user.indexOf(". Preserve the original question")));
+            assertTrue(feedback.isArray());assertTrue(feedback.get(0).asText().contains("designation="+JsonUtils.write("Clause 1")));assertTrue(feedback.get(0).asText().contains("offsetUnit=utf16"));
+            assertTrue(user.contains("deleting only this designation does not repair unsupported substance"));
+            String instructions=JsonUtils.parse(transport.http.bodies.get(3)).path("instructions").asText();
+            assertTrue(instructions.contains("Use one independently checkable rule/mechanism per analysis section"));
+            assertTrue(instructions.contains("keep each rule with its own full governing conditions, trigger, effect, exceptions and supporting continuation"));
             assertEquals(correct?2:1,accepted(f).size());assertEquals(correct?2:1,ids(f).size());assertEquals(2,((List<?>)ReflectionTestUtils.getField(f.publication,"attempts")).size());assertNotNull(result);
         }
     }
