@@ -1,3 +1,7 @@
+<!-- runtime-integration64:start -->
+**最新progress64：normal10全78页fresh原图已核，47有限通过／31WARN／0确认FAIL；原239关系／92目录／2500点及五旧断页、两漏字恢复证据均在。** [冻结记录](testing/three-module-runtime-progress-20261021.md#progress64normal10全78页新视觉已完成旧五处断页和两处漏字恢复保留31页警告)。实际前端74页人工安全BQ专项另列，正式2b身份和全部业务仍未过。源码已推送2a7f27c，运行29604/64GiB、H2保护；APU58唯一解析继续，APB59未发，新27B同题会话仍待最终保存／13项质量评分。SL未过不打包。
+<!-- runtime-integration64:end -->
+
 <!-- runtime-integration63:start -->
 **最新progress63：integration30已运行18084/PID29604/64GiB，H2 owner39876保持；填空真实前端保存、刷新、生成及Word/PDF下载已通过专项。** [执行证据](testing/three-module-runtime-progress-20261021.md#progress63填空修复已部署并通过真实前端保存生成和下载分页组合恢复旧审查死任务已收口)。normal10三模板通过并保持2500点，78页fresh视觉在验。旧40600 OOM死worker的Error收口已部署，新5＋既有31通过，6个辅助进程恢复受本机NIO/H2只读预判阻断不计PASS；旧唯一零调用/零发布run已受fence维护FAILED并保全，40600已停。前端FAILED+NOT_CHECKED误当running已修，完整View回归/构建及HMR通过，APU58唯一确认后解析中，APB59仍未发；源码/实际模型/来源质量/浏览器/最终视觉继续分层，SL质量先于比赛包。
 <!-- runtime-integration63:end -->

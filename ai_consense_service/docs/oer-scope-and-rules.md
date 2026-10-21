@@ -1,3 +1,7 @@
+<!-- runtime-integration64:start -->
+**最新progress64：normal10 SCC全78张新原图已逐页核完，47有限通过／31警告／0确认失败；五旧断页、两旧漏字均恢复。** [证据与限制](testing/three-module-runtime-progress-20261021.md#progress64normal10全78页新视觉已完成旧五处断页和两处漏字恢复保留31页警告)。与前端74页专项稿分别记录，不能继承真实2b身份或完整业务通过。19文件修复已推送exact2a7f27c并部署／HMR；APU58原解析继续，APB59未发，新27B同题会话尚待终态和固定13项评分。SL质量先于比赛包，Goal active。
+<!-- runtime-integration64:end -->
+
 <!-- runtime-integration63:start -->
 **最新progress63：填空修复已部署64GiB，真实前端人工采用／保存／刷新／三模板生成及SCC Word/PDF下载通过，三引用页已亲看。** [完整状态及边界](testing/three-module-runtime-progress-20261021.md#progress63填空修复已部署并通过真实前端保存生成和下载分页组合恢复旧审查死任务已收口)。normal10完整三模板通过，原239关系／92目录／1311 CL／2500点保持，新78页全视觉在验。旧Vetting线程OOM但续租保活的根因已修；零Qwen／零发布的旧任务经一次受fence维护明确FAILED，来源及人工记录保留，旧40600已停。前端FAILED误当running已RED/GREEN修复、构建及HMR解锁；APU58唯一确认后PARSING20页，APB59尚未发。正式2b身份／整套报告／新27B／SL全量未过，SL不打包。
 <!-- runtime-integration63:end -->

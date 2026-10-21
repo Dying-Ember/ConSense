@@ -1,3 +1,13 @@
+<!-- runtime-integration64:start -->
+## progress64：normal10全78页新视觉已完成，旧五处断页和两处漏字恢复；保留31页警告
+
+normal10的78张120dpi原图已由Root编排的两个代理逐页独立查看，47页PASS_WITH_LIMITS／31页WARN／0确认FAIL；页眉、合成项目名、左下测试合约号与i–iii、1–75连续页码可读，没有确认的裁切／重叠／异常字号跳变。五个normal06已知FAIL在本次物理27／47／49／52／58页已实际恢复衔接；SCC11.301(1)的`the Bills of Quantities`、SCC22.303(5)的`the Special Conditions`也已分别在38／69页原图核实存在。来源资格组合的25方法、正常生成、239关系／92目录／1311 CL／2500点与完整视觉分别记录，不把旧失败窗口改成通过。
+
+冻结票 `.local/drafting-main-integration27/normal10/actual01/visual-review01.json` 为121,988 bytes／SHA `39b55d78b086c451d5cf3d2c11ded43ea89c85666fa1b41807f1757364e74154`，含78连续唯一逐页行及PNG身份；PDF SHA `8513ed12174fc021277528dcfb945bbd50264c968745fb3ac09dbb2451b2be28`。31警告包括未回答变量、候选分支／标记、编号缩进、部分跨页阅读及大留白；来源原因仍有UNKNOWN，不盲删原生分页。这是实际2a＋合成身份部分稿的78页包，**与前端人工填安全BQ后产生的74页包分别验收**，不继承为真实2b身份、全部74页视觉或原生Word应用验收。
+
+代码修复已按授权提交并推送，远端exact为`2a7f27cdfa7c0d9e3389e383bc5f69267fe20093`，含Drafting提交`c19a4ab`及Vetting异常／前端状态提交`2a7f27c`。APU58原唯一解析请求继续，APB59仍待其终态后串行确认。Advisory同一真实doc24／同题／27B的新前端会话`8fcd3572-1c3b-4610-98ab-b64a9d9011db`已唯一发送，已见实际初次和既有一次repair的准备收据，尚未获得最终保存及13项评分，不计新答案质量通过；比较材料与评分准备隔离，不送模型。Goal active、完整范围不变，SL质量未过不打包。
+<!-- runtime-integration64:end -->
+
 <!-- runtime-integration63:start -->
 ## progress63：填空修复已部署并通过真实前端保存、生成和下载；分页组合恢复，旧审查死任务已收口
 

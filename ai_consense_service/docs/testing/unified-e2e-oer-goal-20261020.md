@@ -1,5 +1,9 @@
 # ConSense 统一目标：先交付人能验收的完整流程
 
+<!-- runtime-integration64:start -->
+**最新progress64：Goal active。normal10全78页新原图已实看，47有限通过／31警告／0确认失败，五旧断页及两漏字恢复；与前端74页专项稿分开验收。** [完整证据及未过门](three-module-runtime-progress-20261021.md#progress64normal10全78页新视觉已完成旧五处断页和两处漏字恢复保留31页警告)。修复已推送exact2a7f27c，APU58原解析继续、APB59未发；真实同源同题27B新会话尚待终态与13项评分。31WARN／来源UNKNOWN、原生Word应用、实际2b完整业务／正式报告与SL全量保持未通过，不缩范围，不打SL比赛包。
+<!-- runtime-integration64:end -->
+
 <!-- runtime-integration63:start -->
 **最新progress63：Goal active；填空修复及分页组合已部署64GiB，真实前端保存/刷新/三模板生成/SCC下载及三引用页专项通过。** [固定边界与证据](three-module-runtime-progress-20261021.md#progress63填空修复已部署并通过真实前端保存生成和下载分页组合恢复旧审查死任务已收口)。normal10保239关系/92目录/1311 CL/2500点，新78页全视觉在验；专项明确合成身份，实际2b身份和全成品仍未验。旧Vetting OOM死worker续租根因已修，零调用/零发布的旧任务一次受fence维护明确FAILED并保留来源，旧40600已停；前端FAILED误当running已修且实际解锁，APU58唯一确认后PARSING，APB59及整套报告继续。原6辅助恢复ERROR、新27B与SL全22,214技术页缺口保持，不打比赛包，不缩H1–H8/O1–O3范围。
 <!-- runtime-integration63:end -->
