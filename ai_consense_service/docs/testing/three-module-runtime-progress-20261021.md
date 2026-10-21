@@ -11,7 +11,9 @@
 
 **Advisory最新prompt47已真实复验。** 当前canonical索引GET为21／21切片、1／1文件、ready且stale=false，与原签名及doc24源hash一致；没有因为legacy memory后端重启而重建该索引。新会话 `6a7a4262-e773-4e1c-bfe2-922f9f10d51e` 由前端唯一发送，同题同27B，终态保存user51／assistant52。初答user输入SHA与旧46完全相同、sourceSnapshot相同，实际两份system均核含本轮完整来源／业务语言规则；repair按既有机制增加修复内容，不能要求其整串user等同初答。持久化账为2预检＋2answer共4项全部COMPLETED，未人工重发，原2answer／7预检／9总数预算未扩张。刷新后明确选择已保存会话，两条消息仍在；实际打开[8]，完整原DOCX已加载并高亮2020 GS CEW整段来源。
 
-52已恢复GS CEW场外道路／排水条件、2020／42天、两条优先及删除机制，**仍未授整题质量通过**。正文仍直接写出tender、adoptionStatus及candidate_unverified，且把来源候选核验状态与签约法律采用混在同一因果链；中文同号PSS分支另加“存在差异”前提，排除库的有限并入解释也需核完整。固定13项独立评分及R1–R5另列，不将评分／2d／2e放入模型输入，不改旧46／48／50结果。两次HTTP实体辅助脚本分别误将repair整串user要求不变、误将user文本按JSON对象读取，失败已保留；后继确认初答及来源不变并匹配实际COMPLETED账，不能将辅助断言问题归为模型或来源漂移。控制台中文编码外观也已核原JSON无replacement字符、class常量为正确UTF-8，不作产品乱码修复。
+52已恢复GS CEW场外道路／排水条件、2020／42天、两条优先及删除机制，**仍未授整题质量通过**。正文仍直接写出tender、adoptionStatus及candidate_unverified，且把来源候选核验状态与签约法律采用混在同一因果链；中文同号PSS分支另加“存在差异”前提，排除库的有限并入解释也需核完整。固定13项独立评分为**11 PASS／2 PARTIAL／0 FAIL**，C3／D1均为同号替代机制被新增前提而收窄；独立R1–R5为4 PASS／1 PARTIAL／0 FAIL，R3为中文未清楚解释有限并入。21个来源逐项核原件、11实际引用唯一匹配；原件确有字面1.／2.／4.，因此“编号段落”有源，不按虚构正式Clause报错。技术字段、来源核验与法律采用混淆、GS CEW整段重复另列H1–H3，不偷改固定13项分母。评分在`.local/runtime34-advice52-quality01.{json,md}`，不将评分／2d／2e放入模型输入，不改旧46／48／50结果。两次HTTP实体辅助脚本分别误将repair整串user要求不变、误将user文本按JSON对象读取，失败已保留；后继确认初答及来源不变并匹配实际COMPLETED账，不能将辅助断言问题归为模型或来源漂移。控制台中文编码外观也已核原JSON无replacement字符、class常量为正确UTF-8，不作产品乱码修复。
+
+本轮23个明确采用路径已提交并推送`4b4b0ae7e79aa24f78091af5adfa3a44dc98dc6d`，远端`codex/e2e-oer-20261020`、本地HEAD及tracking ref实际exact一致；三份原有未知untracked保留，原件／密钥／运行证据未提交。该提交的交付范围是已验证代码和真实验收记录，不能据此授尚有WARN的成品或Advisory残差通过。默认Git空白检查把原已声明`-text`且保持CRLF的Vetting提示词新增行识别为尾空白；已核行尾仅CRLF、没有末尾空格，使用只认可CR行尾、仍保其他尾空白检查的单次`-c core.whitespace=…cr-at-eol`检查通过，未改提示词字节、全局Git配置或原SHA契约。
 
 **Vetting／OER仍继续原请求。** 当前公开files实际为35件＝17 PARSED／15 PARTIAL／1 APB PARSING／2 EXCLUDED，APB59原61页／原SHA `37097f68…2674`，未重发用途确认或解析。文件侧07:32观察推进到P1–53双路＋P54 Paddle，107结果＝旧77＋新增30，新增30的CAS／长度／源页parser及persisted／released均核同；来源质量accepted仍0，不能用单页记录证明父请求、61页终态或整份质量。旧审查run公开仍为FAILED／NEEDS_RERUN，不是运行中。实际35整套新报告／2d版式、Advisory残差及七版SL全部22,214技术页的质量验收仍未完成，SL不打比赛包。统一Goal active，没有八点截止；下一步先收口可读性与明显留白，再接真实整套报告。
 
