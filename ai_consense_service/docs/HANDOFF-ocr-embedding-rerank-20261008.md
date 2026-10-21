@@ -1,3 +1,7 @@
+<!-- unified-progress43:start -->
+**2026-10-21 当前：原 Goal 已恢复 active；SL 当前7页＋历史219页的同分母源评分实际完成，Drafting97项为96PASS／1FAIL。** Stream保672/672、12/12、87/87、5/5，旧正确无回退，Network和pdfplumber失败保留；不是fresh226、全库、canonical发布或真实检索通过。Drafting首窗0执行测试编译错保留，最小查询修正后仅完整Latin家族剩余hint计数失败，继续核原XML的空文本run保留，未采用／生成。证据和未完成项见 [progress43](testing/three-module-runtime-progress-20261021.md)；运行未升级，比赛包按用户顺序后置。
+<!-- unified-progress43:end -->
+
 <!-- unified-progress42:start -->
 **2026-10-21：Note9 接缝已实际回归并采用源码，未部署；本轮增加真实原图质量证据，比赛包仍后置。** Python27全过并保54旧单元摘要；Java首窗85pass／1新测试 wire 节点类型比较失败，完整 JSON 字节原已完全同，修正测试后只补原失败项1pass，跨窗覆盖86身份，不称单窗86全绿。四产品／两既有测试已精确采用。七版14原页完整FWP候选的224项源评219PASS／5证书范围UNKNOWN，候选关系与运行消费分开。Drafting143类行控制已实际生成27页并逐张目验，九个旧目标同页且无新孤行，P244旧缺“of”仍FAIL；正在准备完整Latin族和行策略的联合最小修复，未授Word／产品通过。见 [progress42](testing/three-module-runtime-progress-20261021.md) 和 [SL质量说明](testing/sl-technical-source-and-retrieval-quality-20261021.md)。运行仍formal19，H2保持，Goal active。
 <!-- unified-progress42:end -->

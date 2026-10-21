@@ -24,7 +24,21 @@ Stream 的完整来源组由 4/5 改善到 5/5，新增项为原物理页 1316�
 
 候选成果与当前正常链的集成另列：[当前首个损失层审票](../../../.local/sl-com11-note9-current-chain-candidate01/first-loss01.json)（SHA256 `408af9eb7b0264c6f522c0e79f23876e1829f8e3553ffc3a7a1edabe91dfb20f`）绑定了已存 normal、原件／章节 SHA、页映射、实际 block／文字／bbox 与当时五处代码身份。现存 `sl-018/complete-normal.json.gz` 中，章节局部页 19（原页 1316）的主表及 Note 1–9 已保留，Note 9 下一页的 LM／CO／LL、RS 和 “For other areas” 续文也已被 ordinary native 读到，但未连回上一页表格的完整证据组；局部页 20 本身没有 logical table。
 
-后继已沿既有 Python capture → Java method group → 普通模型材料及完整 metadata wire 修复，Root 精确采用四个产品文件和两份既有测试文件，未部署。真实保存 provider 回放的 Python RED 精确复现缺关系，GREEN 27/27 通过、54 份旧 actual 单元摘要保持；Java RED 精确复现组内缺后缀，GREEN 首窗 85 pass／1 夹具断言失败，修正该项对数值节点类型的比较后仅补验原失败方法 1/1，跨两窗覆盖原 86 个唯一身份。原失败保留，不称单窗 86 全绿；两份完整 wire JSON 各 2,011,545 字节且原已逐字节一致。新后缀保持原表锚点、源向、三段真实 native 文字、unknown 法律语义，不伪造下一页逻辑表；可选续接分析异常不会清除已成功的同页主表。见 [六文件采用](../../../.local/sl-com11-note9-current-chain-candidate01/root-adoption-actual01.json) 与 [完整软件审计](../../../.local/sl-com11-note9-current-chain-candidate01/software-acceptance01.json)。这些是当前源码的软件／保存来源消费证据，没有新的 PDF 提取、实际引擎或真实检索调用，跨 HTTP batch 的续接仍 unknown；672 格／12 表外成员／87 关系／五完整组的本轮源评分与全库质量继续单独待验。
+后继已沿既有 Python capture → Java method group → 普通模型材料及完整 metadata wire 修复，Root 精确采用四个产品文件和两份既有测试文件，未部署。真实保存 provider 回放的 Python RED 精确复现缺关系，GREEN 27/27 通过、54 份旧 actual 单元摘要保持；Java RED 精确复现组内缺后缀，GREEN 首窗 85 pass／1 夹具断言失败，修正该项对数值节点类型的比较后仅补验原失败方法 1/1，跨两窗覆盖原 86 个唯一身份。原失败保留，不称单窗 86 全绿；两份完整 wire JSON 各 2,011,545 字节且原已逐字节一致。新后缀保持原表锚点、源向、三段真实 native 文字、unknown 法律语义，不伪造下一页逻辑表；可选续接分析异常不会清除已成功的同页主表。见 [六文件采用](../../../.local/sl-com11-note9-current-chain-candidate01/root-adoption-actual01.json) 与 [完整软件审计](../../../.local/sl-com11-note9-current-chain-candidate01/software-acceptance01.json)。这些是当前源码的软件／保存来源消费证据，没有新的 PDF 提取、实际引擎或真实检索调用；跨 HTTP batch 的续接、canonical 准入及真实检索仍未通过。本轮同分母源评分已实际执行，准确范围如下。
+
+### 当前修复输出的同分母源评分
+
+Root 实际运行一次保存来源评分，52.093 秒、exit 0、输入 pins 全部保持并自然 Job 退出。保持 R116 的封定 scorer、gold、226 页输入门和 32 个 fragments；仅将五表及必要续页所在的 7 页替换为当前实际 capture，其他 219 页原始 JSONL 行逐字节保留。三个方法独立评分，adapter 只做可逆的已证来源／页命名空间转换和展平已有 continuation 组，没有生成新文字、表格或关系；gold 仅在 scorer 读取。
+
+| 当前 capture 方法 | 正确主格字面 | 完整主表 | 完整表外成员 | 正确 typed 关系 | 完整已标来源组 | 旧正确项回退 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Camelot Stream | 672/672 | 5/5 | 12/12 | 87/87 | 5/5 | 0/1,443 |
+| Camelot Network | 650/672 | 4/5 | 12/12 | 75/87 | 4/5 | 0/1,387 |
+| pdfplumber lines/lines | 0/672 | 0/5 | 0/12 | 0/87 | 0/5 | 0/0，无旧正确项 |
+
+旧正确项是主格 topology 与 literal 两项分别计数，再加表外成员与 typed 关系；不是 1,443 个独立原件或业务问题。Network 的 56 个失败项、pdfplumber 的 1,443 个失败项全部保留；每个方法的另外 27 个历史 fragment 评分逐字段相同。五个已标目标组的所有评分依赖均在当前 7 页内，不使用其余历史页替当前关系授通过。这证明当前修复在已暴露的局部开发域中恢复了 R116 已证能力，没有超越其旧分数；不是 fresh 226 页解析、七版全库、盲测、运行部署、canonical 发布或真实检索验收。
+
+逐 ID 的当前结果见 [实际评分结果](../../../.local/sl-com11-note9-current-chain-candidate01/source-score-window01/results/green/result.json)，SHA256 `2bdd728561671d843a4ea5cfc8c9092397f2ad346ccf567a8edcfa35aaaf1606`；[实际执行收据](../../../.local/sl-com11-note9-current-chain-candidate01/source-score-window01/green/receipt.json) SHA256 `763c73d37509fc1b3d96782ae2c837dde538d2a0ddbea15dd8a30ab58f59207f`。结果明确 `currentActualPagesPerMethod=7`、`retainedHistoricalPagesPerMethod=219`、`fresh226Claim=false`、`sourceQualityFinalAccepted=false`；本次无 PDF 提取、引擎、模型、HTTP、SQL、渲染、索引、服务或比赛包操作。
 
 来源：[固定资料开发基准](../fixed-oer-development-baseline-20261012.md)、[无框表实测](../oer-borderless-table-isolated-investigation-20261012.md)及[实施交接的全151原生文字诊断](../HANDOFF-ocr-embedding-rerank-20261008.md)。本次实际重读终态：`C:/Users/Administrator/.codex/local-state/consense-oer/sl-body-source-native-diagnostic-20261012/prepare-01/root-actual-full151-01/terminal-receipt.json`。
 

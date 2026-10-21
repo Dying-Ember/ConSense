@@ -1,3 +1,13 @@
+<!-- unified-progress43:start -->
+**2026-10-21 当前：原 Goal 已实查恢复 active；SL 当前 Note9 修复的同分母源评分已实际完成，Drafting 联合97项为96 PASS／1 FAIL。比赛包继续后置。**
+
+- SL 一次保存来源评分实际完成，52.093 秒、exit0、全部输入保持／自然 Job0。五表及必要续页均在当前 7 页 capture 内，其余 219 页历史 JSONL 字节不变；原封定 scorer／gold、226 页门及 32 个 fragment 保持。Stream 为 672/672 主格、12/12 表外成员、87/87 关系、5/5 完整组，1,443 个旧正确检查项无回退；Network 仍为 650/672、12/12、75/87、4/5，56 个失败项保持；pdfplumber 全失败保持。其余 27 个历史 fragment 评分逐字段不变。这是已暴露局部开发域中当前修复恢复 R116 能力，不能写成 fresh226、七版全库、canonical 发布、部署或真实检索通过。见 [SL质量说明](sl-technical-source-and-retrieval-quality-20261021.md#当前修复输出的同分母源评分)及[实际结果](../../../.local/sl-com11-note9-current-chain-candidate01/source-score-window01/results/green/result.json)。
+- Drafting 联合候选首次窗口在新增测试夹具的三处 `Element`／`Document` 类型错误处停止，0 测试执行；54.281 秒、exit1、输入保持，原票保留。仅修三处查询为标准 `getElementsByTagNameNS`／`NodeList` 后，新有限窗实际 70.031 秒，97 项执行为 96 PASS／1 FAIL／0 ERROR／0 SKIP，输入保持／自然 Job0。唯一失败是完整 Latin 家族检查预期剩余 hint 为0、实际为2。后继只读原 XML 已核：150 段内 1,082 个提示分为 1,067 个有文本 run 可清提示、15 个无文本 Tab run 受保护提示；首个 P225 有13个应清及2个应保。产品保留 Tab 字体提示的原契约正确。另发现新增两项 row 全篇逆向测试把 `Document` 交给仅处理 `Element` 的辅助函数，原比较可能为空串；私有后继改为根元素并要求非空，再补6个受影响／新增方法，不凭原绿色记录授全XML保全。未采用、未生成新完整项目包、未授分页或 Word 质量通过。见[第二窗执行收据](../../../.local/sct-row143-integration02/runtime-preparation/green/execution/owned-receipt.json)、[失败方法](../../../.local/sct-row143-integration02/runtime-preparation/green/project/target/surefire-reports/TEST-com.consense.service.drafting.DraftNativeLatinFontHintCandidateTest.xml)及[空run实际库存](../../../.local/sct-row143-integration03/empty-run-hint-source-inventory.json)。
+- 前端待恢复项：ego-browser 原测试工作区4实际返回 `task space not found`，库存仅有用户工作区，未接管；按技能运行指南已异步询问是否允许新建本任务测试工作区，其他软件／来源工作继续。没有把缺失工作区或页面未执行写成前端通过。
+- 本轮没有真实付费调用、共享 SQL 写入、服务启停或比赛包操作。当前源码与已部署 formal19 的边界保持；七版 FWP 正常准入／版本隔离检索、Vetting业务与报告续页、Advisory D1真实语义、Drafting最终三件和逐页身份仍未完成。
+
+<!-- unified-progress43:end -->
+
 <!-- unified-progress42:start -->
 **2026-10-21 当前：SL Note9 修复已得到实际回归并采用六文件源码，未部署；七版 FWP 原图源评有 219 项正向证据及五项未知。Drafting 整类行分页的九个目标均改善，仍有一个旧字形缺陷。统一 Goal active，比赛包继续停止。**
 

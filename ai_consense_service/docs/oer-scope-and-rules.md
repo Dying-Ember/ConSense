@@ -1,3 +1,7 @@
+<!-- unified-progress43:start -->
+**2026-10-21：Goal 已实查恢复 active；SL Note9 当前 capture 的同分母源评分完成。** Stream 的672格／12表外成员／87关系／5完整组保持全通过，Network与pdfplumber旧失败不删；输入由当前7页和逐字节保留的历史219页组成，不授fresh226、全库、canonical发布或真实检索。Drafting联合97项实际96PASS／1FAIL，继续定位字体hint统计与保留契约，尚未采用。见 [progress43](testing/three-module-runtime-progress-20261021.md) 和 [SL质量说明](testing/sl-technical-source-and-retrieval-quality-20261021.md)。SL质量优先、比赛包后置不变。
+<!-- unified-progress43:end -->
+
 <!-- unified-progress42:start -->
 **2026-10-21：SL Note9 跨页消费修复已通过 Python27 与 Java85＋补1的实际回归并精确采用六文件源码，未部署；七版 FWP 的 14 原页有界源评为 224 项中 219 PASS／5 UNKNOWN。** 不授当前运行、真实检索或全部 22,214 技术页质量通过；完整状态与失败保留见 [progress42](testing/three-module-runtime-progress-20261021.md)。先 SL 质量、后比赛包的用户顺序保持，包作业没有执行。
 <!-- unified-progress42:end -->
