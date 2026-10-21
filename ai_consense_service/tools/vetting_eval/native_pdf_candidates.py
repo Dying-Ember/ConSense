@@ -20,6 +20,7 @@ from native_pdf_table_candidate import (FRAME, METHODS, capture, exception_recor
                                         extract_camelot, extract_pdfplumber,
                                         observe_source_page, safe)
 from native_pdf_table_logic import recover_page
+from native_pdf_table_continuations import build_margin_profile, observe_continuations
 
 
 SCHEMA = 'consense.native-pdf-candidates.v1'
@@ -138,7 +139,8 @@ def _capture(original_bytes, native_context, store, max_pdf_bytes, max_reply_byt
         reply['coverage']['selectedPageCount'] = len(selected)
         code_before = {}
         for name in ('native_pdf_candidates.py', 'native_pdf_table_candidate.py',
-                     'native_pdf_table_logic.py', 'native_pdf_table_conditions.py'):
+                     'native_pdf_table_logic.py', 'native_pdf_table_conditions.py',
+                     'native_pdf_table_continuations.py'):
             path = Path(__file__).with_name(name)
             raw = path.read_bytes(); code_before[path] = raw
             ref = store.put_bytes(raw, identity_scope='actual_cpu_candidate_recipe_code_bytes')
@@ -154,6 +156,7 @@ def _capture(original_bytes, native_context, store, max_pdf_bytes, max_reply_byt
                 owned_root = Path(directory).resolve()
                 _require(owned_root.is_relative_to(store.root.resolve()), 'owned_directory_outside_store')
                 path = owned_root / 'original.pdf'; path.write_bytes(original_bytes)
+                previous_methods = {}
                 for number in selected:
                     page = document.pages[number - 1]
                     glyphs, geometry, observations, observation_error = [], {}, {}, None
@@ -192,6 +195,24 @@ def _capture(original_bytes, native_context, store, max_pdf_bytes, max_reply_byt
                                     nativeGlyphNamespace=namespace, provider=specification['provider'],
                                     method=method, physicalPageNo=number,
                                     sourceSha256=original_sha, frame={'coordinateSpace': FRAME, **geometry})
+                                source_page = dict(observations, sourceSha256=original_sha,
+                                    sectionId=original_sha, originalPage=number, localPage=number,
+                                    status='succeeded')
+                                logical_page = dict(candidate, sectionId=original_sha,
+                                    originalPage=number, localPage=number)
+                                prior = previous_methods.get(method)
+                                if prior is not None:
+                                    try:
+                                        continuation = observe_continuations(prior['source'], prior['logical'],
+                                            source_page, logical_page, build_margin_profile([prior['source'], source_page]))
+                                        if continuation['groups']:
+                                            continuation.update(anchorPhysicalPageNo=prior['page'],
+                                                anchorRawRef=prior['rawRef'], anchorSourceObservationRef=prior['sourceRef'],
+                                                sourceSha256=original_sha, method=method, provider=specification['provider'])
+                                            candidate['observationGroups']['continuations'] = continuation
+                                    except Exception as error:
+                                        candidate['observationGroups']['continuationFailure'] = exception_record(error)
+                                        candidate['observationGroups']['continuationStatus'] = 'unknown_optional_continuation_observation_failed'
                             except Exception as error:
                                 failure = exception_record(error)
                             finally:
@@ -216,6 +237,11 @@ def _capture(original_bytes, native_context, store, max_pdf_bytes, max_reply_byt
                         if changed_ref:
                             raw['receivedOriginalRef'] = changed_ref
                         raw_ref = retain(raw, 'whole_independent_native_pdf_provider_result')
+                        if failure:
+                            previous_methods.pop(method, None)
+                        else:
+                            previous_methods[method] = {'source': source_page, 'logical': logical_page,
+                                'page': number, 'rawRef': raw_ref, 'sourceRef': observation_ref}
                         page_reply['methods'].append({'method': method, 'provider': specification['provider'],
                             'status': 'failed' if failure else 'candidate_observed',
                             'candidate': candidate, 'failure': failure, 'rawRef': raw_ref})

@@ -1,3 +1,21 @@
+<!-- unified-progress42:start -->
+**2026-10-21 当前：SL Note9 修复已得到实际回归并采用六文件源码，未部署；七版 FWP 原图源评有 219 项正向证据及五项未知。Drafting 整类行分页的九个目标均改善，仍有一个旧字形缺陷。统一 Goal active，比赛包继续停止。**
+
+| 项目 | 本轮实际结果 | 仍未证明／下一项 |
+| --- | --- | --- |
+| SL Note9 跨页消费 | 保存的真实 provider 回放中，Python 缺关系 RED 精确成立；GREEN27全过，54旧单元摘要保持。Java 缺后缀 RED 精确成立；首GREEN85pass／1测试失败，完整wire JSON原已字节相同，仅修测试最后比较后补原失败方法1pass，跨窗覆盖86身份。Root精确采用4产品＋2既有测试 | 未部署、未新提取PDF／调用引擎；本轮672格／12表外成员／87关系／5组源评、跨HTTP batch续接与真实检索仍待验 |
+| 七版 FWP 特定完整条款 | 14张已存原图逐张原始分辨率实看，固定224项中219PASS／0FAIL／5UNKNOWN：203文字／标量／身份／边界，14显式私有候选关系，证书范围2PASS／5UNKNOWN。50输入结束哈希保持 | 仅七个完整`.030`候选单元；候选关系未授正常链采用，当前consumer／检索、精确glyph／affine及全22,214技术页仍未验收 |
+| Drafting 行凝聚 | 143个来源绑定顶层叶行仅增142控制，旧P730保持；一次LO实际17.594秒生成27页，0retry、24GiB Job、输入保持／自然Job0。27原图逐张实看，五旧＋三新＋P754共9目标整段同页，未见新的孤行／孤立标题／空正文／重叠，身份与页码一致 | P244实际原图仍缺“of”，旧full11已有的Latin/eastAsia hint缺陷；3公式视觉可读但机器几何unknown保持。143行产品registry＋150段完整Latin族的互补修复在私有准备，未采用／生成／Word验收 |
+
+SL采用证据为 [Root六文件采用](../../../.local/sl-com11-note9-current-chain-candidate01/root-adoption-actual01.json)，SHA256 `5c1d480781c3d97326943d4d1f091a656d33126642c754e66b2aeff2a65d734c`；[跨窗软件审计](../../../.local/sl-com11-note9-current-chain-candidate01/software-acceptance01.json)保留全部方法身份和失败。Python GREEN为30.719秒；Java RED为61.031秒，原GREEN119.766秒／补1为51.594秒，各自inputs保持并自然owned Job退出。Java采用源码与补窗逐字节一致，其他85方法／断言及4产品未因夹具修复改变。原Python01缺父目录的0test失败、03缺scope资源的14pass／classSetupError及退出观测UNKNOWN保留；04补完整8份已有scope资源，本次同held Win5等待分支没有动态触发，不追认该分支复现通过。
+
+源评细节与范围见 [SL质量说明](sl-technical-source-and-retrieval-quality-20261021.md#后继七版完整-fwp-条款的-224-项有界原图源评)，[224项原始账](../../../.local/sl-fwp-seven-semantic-review01/semantic-source-review.json) SHA256 `c4788c164c7bef28acba6aab902258a43f7bf49c025e9ce3fa3a0dc554e578ef`。评估前看过候选，明确不是盲测；没有新OCR、渲染、模型、HTTP、SQL、索引或包操作。
+
+Drafting [27页视觉账](../../../.local/sct11-row-class143-diagnostic01/visual-review27-class143.json) SHA256 `9a0fae890d70ec98e81aad157df02e33f854e7e22b5faaec89b86d6f67bf46c0`；[只读来源范围](../../../.local/sct11-row-class143-diagnostic01/actual-readonly-review.json)把315非空绑定分为311精确段落同页、3公式几何未知、P244旧缺字，不把CS起点同页偷换为整段质量。Root另实际执行只读Java inspect探针，1JUnit通过、42.703秒、16GiB／24GiB，导299行／1238段真实NodeAnchor并核旧P730原hash，供registry使用；没有编辑原件或转换。Latin同类库存为150段／1067可清hint，旧3段32hint全部包含；新候选必须同时解决Latin与row marker先后、cohesiveRows与4个既有compactGapRows重合，不能丢旧控制或放宽业务变更hash门。
+
+当前运行仍formal19，H2 owner38980未动；本轮无新真实付费调用或服务启停。Vetting业务、Advisory实际D1语义、Drafting最终Word／全包身份、SL全来源与实际检索仍是未完成项。比赛包没有绑定／压缩／归档／恢复，按用户最新指示在SL质量过关后再做。
+<!-- unified-progress42:end -->
+
 <!-- unified-progress41:start -->
 **2026-10-21 最新编排：用户明确要求 SL 质量未搞定先不打包；比赛包全部后置，统一 Goal active。** Root 本轮未执行 Local05 实际 binder、压缩、归档或恢复；不再为包重复运行保全和资源测试。原件、历史修订、已有子包及所有失败保留。后续以 SL 当前正常链的表格／Notes／跨页条件与实际检索质量为主，质量过关后再恢复完整比赛包交付。
 
