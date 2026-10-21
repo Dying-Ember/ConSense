@@ -34,8 +34,14 @@ public final class DraftPdfRenderProfile {
     }
     public static DraftPdfRenderProfile libreOffice(Path executable,Path workRoot,long timeoutMillis) {
         return new DraftPdfRenderProfile(Collections.singletonList(executable.toAbsolutePath().toString()),workRoot,timeoutMillis,
-                65536,64L*1024*1024,Arrays.asList(GraphicsEnvironment.getLocalGraphicsEnvironment().getAvailableFontFamilyNames(Locale.ROOT)),
-                "JVM-visible OS font families; renderer glyph/embedding verification is separate");
+                65536,64L*1024*1024,installedFontFamilies(),
+                "JVM-visible OS font families in ROOT and English metadata locales; renderer glyph/embedding verification is separate");
+    }
+    private static Set<String> installedFontFamilies() {
+        GraphicsEnvironment environment=GraphicsEnvironment.getLocalGraphicsEnvironment();
+        Set<String> families=new TreeSet<>(Arrays.asList(environment.getAvailableFontFamilyNames(Locale.ROOT)));
+        families.addAll(Arrays.asList(environment.getAvailableFontFamilyNames(Locale.ENGLISH)));
+        return families;
     }
     public static DraftPdfRenderProfile desktopX2t(Path executable,Path workRoot,long timeoutMillis,Path assetRoot,Path fontCache) {
         return new DraftPdfRenderProfile(Collections.singletonList(executable.toAbsolutePath().toString()),workRoot,timeoutMillis,

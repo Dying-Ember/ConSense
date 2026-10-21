@@ -75,3 +75,17 @@ integration30已实际部署18084/PID29604/64GiB。真实前端读回规则 `dra
 新PDF物理53／57／61页已用fresh120dpi整页图亲看，三处正文可读、页眉临时项目名／左下测试合约号及印刷页50／54／58清楚。测试合约号在全部74页可提取；这不是全部74页视觉验收，其他未回答空栏和复杂续段仍须继续核。手工来源值专项不替代自动抽取，也不授完整实际2b项目身份或全成品通过。
 
 证据：`.local/drafting-bs-valuation-blank30/browser103.json`、`browser110.json`、`browser111.json`、`browser114.json`至`browser124.json`、`frontend-download-checks01.json`、`target-visual-review01.json`及`downloads/`。浏览器自动操作曾在页面刷新未结束及隐藏modal控件处遇到超时，先查实际状态后才继续；没有重发生成或重复上传原件。
+
+## 用户再次指出空栏后的当前回读（2026-10-22）
+
+新截图仍是纯消防 SCC20.303(5) 的整组待填空，不能仅凭图片判定它属于哪个保存 revision。Root 已重新核实际前端的保存输入：BSSSC、Electrical／Fire services and water pump／Lift，以及一般 BS `12.2 to 12.4`、电气 `12.2`、消防及水泵 `12.3`，三行均为 BQ 且分别采用对应安全用途；未选纯消防。计划回读确认三个安全目标 applied，纯消防整条为 not_adopted。
+
+runtime32 下载的 SCC revision `9eb2775c-b88c-4528-8af9-60c500cc3933` 的 Word SHA 与保存稿相同，PDF 为75页。三处引用仍在物理53／57／61页，关联空栏、候选斜杠及星号已清除；纯消防正文不存在，物理57页为 `SCC20.303 Not used`。Root 对这三张 fresh 整页图逐张亲看，未把不同工种编号代用。本专项验证的是实际所选三专业输入；纯消防明确 BQ／SOR、缺值与错误用途的真实2a编译回归虽已有覆盖，不能追认为纯消防前端完整业务验收。
+
+缺安全费用编号或类型时，产品保留可用草稿与该目标原空栏，并在未决项说明具体条款、需补的 Bill／Schedule 类型、编号及用途；不因局部缺值整单失败，不将未知当作不适用。一般 BS、电气、纯消防、消防及水泵四目标继续分别处理；NSC／BSSSC 安排与工种选择独立。
+
+同轮发现的独立限制保留：新 SCC 至少三项目录值仍错，精确保存稿的目录定版 ledger 为 UNKNOWN，原因为生成时 runtime31 的 YaHei 清单误判。runtime32 已修字体清单，Root 已在保留旧稿后唯一发送一次有意新生成，目录及新最终文件须接原请求后复核，不能凭三处填空通过授全成品通过。另发现同一计价身份需多种安全用途时，当前 `type:number` 去重与下游实体清单存在复用边界，正在准备私有复现；没有真实项目采用同号证据，不自动改写既有 Bill 输入或放松冲突保护。
+
+新证据：`.local/drafting-blank-screenshot39/{variables-readback01.json,plan-readback01.json,before-deliberate-regeneration01.json,regeneration-after-alias-once01.json}`、`.local/runtime-integration32/readback-audit39/`及`visual39/`。旧74页包、新75页包、正常生成英文78页包分别保留，不能互相继承全页视觉结论。
+
+原一次新生成随后已终态保存，三份 DOCX 与上一 revision 字节相同，故三处填空保持；新 SCC revision 为 `b8305f0f-ab06-45eb-906b-8b76a82d8082`。实际 ledger 的目录定版已通过字体能力门，继而在 `HEADING_FLOW_BOOKMARK_AMBIGUOUS: CS198a982ddd2cc46e6fe149b385e7` 保留 UNKNOWN；目录失败仍在修，旧可用稿／输入保留，未因局部定版失败整单报错。回读见 `after-deliberate-generation-observation02.json`。

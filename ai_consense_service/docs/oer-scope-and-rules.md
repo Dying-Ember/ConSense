@@ -1,3 +1,7 @@
+<!-- runtime-integration66:start -->
+**最新progress66：中文身份与字体别名修复已部署，三Word与三PDF下载成功；111页身份／页码文本回读通过，安全填空保持。** [实际证据及未过门](testing/three-module-runtime-progress-20261021.md#progress66中文身份与字体别名已修并部署111页身份回读通过安全填空保持目录删除边界仍失败)。新SCC仍有目录错页；精确旧稿字体误拒已解除，唯一新生成已终态但原239分页关系与删除条款接缝仍UNKNOWN，未授全成品通过。前端冷启动默认27B已实测；同题27B46为10／2／1、Flash48为3／3／7，不外推稳定性。实际35件为17完整／15部分／1APB原解析中／2图纸排除，整套报告待验；H2与64GiB运行保护，Goal active，SL22,214页质量未过不打包。
+<!-- runtime-integration66:end -->
+
 <!-- runtime-integration65:start -->
 **最新progress65：新同题27B已终态保存并通过前端刷新／引用回原件；固定13项为10通过／2部分／1失败，旧44评分保留。** [来源评分与边界](testing/three-module-runtime-progress-20261021.md#progress65新27b答复已保存及核源固定13项为10通过2部分1失败填空专项成品已交付)。GS条件归属改善，但裸footer被猜为日期及两分支替代效果合并仍待修，不能授质量通过。截图Bill／Schedule专项真实前端保存／生成／下载及三引用页已核；临时身份、全74页视觉限制保留。APU58原请求仍PARSING、APB59未发，35件为17完整／14部分／1解析中／1身份待确认／2排除。Goal active，SL全量质量先于打包。
 <!-- runtime-integration65:end -->

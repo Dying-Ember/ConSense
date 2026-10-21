@@ -1,3 +1,23 @@
+<!-- runtime-integration66:start -->
+## progress66：中文身份与字体别名已修并部署，111页身份回读通过；安全填空保持，目录删除边界仍失败
+
+生成身份字体修复已通过真实2a、实际2b页脚及正常生成验证：GREEN01为67 PASS／3 SKIP，原三个2b场景在GREEN02全部3 PASS／0 SKIP；normal11正常三模板1 PASS，英文三DOCX与normal10逐字节一致。仅为新生成的东亚身份run设置现有Microsoft YaHei，不重写来源正文／样式／字段；原缺来源字体拒绝门保持。真实导出又定位已安装字体被JVM ROOT本地化族名误拒，共享Profile现取同一真实GraphicsEnvironment的ROOT＋ENGLISH族名并集，实际联合24方法PASS。没有安装字体、硬编码字体等同或把ExtB当普通字体。详见[字体专项](drafting-generated-identity-font-20261022.md)。
+
+runtime32实际运行18086／PID10404／64GiB，包SHA `1bc11431f45e211bb8b9058a2cf22501fa5eeaf444605e686c286da19b9f6b4a`；受保护H2 owner39876和runtime30／29604的APB原请求保持。真实前端三Word／三PDF均下载成功，三DOCX SHA与保存revision相同；NTT11／SCT25／SCC75共111页可提取同一中文项目名、合约号及连续页脚号。Root仅授六页新图亲看范围：NTT／SCT首页与SCC物理53／57／61／75页，不授111页全视觉。正式2b身份仍UNKNOWN，继续使用明确临时身份。
+
+用户再次指出的纯消防空栏已重新核对。当前采用Electrical、Fire services and water pump、Lift，三安全BQ引用为12.2 to 12.4、12.2、12.3，DOCX和PDF三处均正确清除关联空栏／斜杠／星号；未选择纯消防，SCC20.303正文为Not used，不能借用12.3。实际纯消防BQ／SOR和缺值保护已有真实原件编译回归，尚不能追认为纯消防前端完整分支。见[填空专项](drafting-bs-safety-pricing-blank-20261022.md)。
+
+新75页SCC仍有至少三目录值与正文不一致，旧74页包也有同样错误，不能归为新字体引起。新旧DOCX仅四个header身份字体属性不同，正文／全部footer及其他ZIP项逐字节同，去家具后PDF全文保持；分页变化首见9→10页，不推定唯一因果。Root从精确保存稿ledger核实原目录刷新因runtime31误拒YaHei而UNKNOWN；修复别名后实际有意唯一新生成已终态，三新revision字节仍同，新SCC为`b8305f0f-ab06-45eb-906b-8b76a82d8082`。其ledger越过字体门后在`HEADING_FLOW_BOOKMARK_AMBIGUOUS: CS198a982ddd2cc46e6fe149b385e7`保留UNKNOWN，正在核已授权删除与原239分页关系的接缝，不按缺书签过滤分母。输入、旧稿和可用输出保留；未重发请求或报全成品通过。
+
+前端冷启动已默认Qwen3.8 27B，显式保存偏好保持；后端默认语义未改。store10项、渲染控件脚本、类型检查和Vite构建实际通过；真实localhost:5177在storedPreference=null时显示qwen／qwen3.8-27b，无清存储或发送新题。见[前端默认模型](frontend-qwen-default-20261022.md)。
+
+Advisory同题27B46与Flash48已核初次generation输入逐字相同、只有model不同；固定13项分别10 PASS／2 PARTIAL／1 FAIL和3 PASS／3 PARTIAL／7 FAIL。旧44评分保持，单题不能外推总体稳定性；正常默认保持27B。Flash模型身份已保存为qwen-flash／qwen-chat-completions／qwen3.8-flash，不以DTO没有独立model字段误判未运行。scope/rank归属最小候选仅私有准备，尚未Java回归或主树采用。
+
+APU58原请求终态PARTIAL，20页、34790字符，质量待原页核对；在其终态后唯一确认APB59为文字目录并接续解析。Root最新公开files回读实际35件为17 PARSED／15 PARTIAL／1 PARSING（APB59）／2 EXCLUDED，APB61页未终态，不重传或重发。实际整套Vetting报告与2d格式／全页验收仍未完成。SL全七版22,214技术页质量继续先于比赛包，Goal active，完整范围不缩。
+
+新运行证据：`.local/runtime-integration32/{downloads/,visual39/,readback-audit39/}`、`.local/drafting-blank-screenshot39/`、`.local/frontend-qwen-cold-default38/`。软件、真实模型、来源质量、浏览器业务和最终文件视觉分别报告，以上修复按既有授权提交推送。
+<!-- runtime-integration66:end -->
+
 <!-- runtime-integration65:start -->
 ## progress65：新27B答复已保存及核源，固定13项为10通过／2部分／1失败；填空专项成品已交付
 

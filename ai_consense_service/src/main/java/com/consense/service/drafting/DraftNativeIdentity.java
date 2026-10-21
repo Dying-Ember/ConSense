@@ -123,7 +123,7 @@ final class DraftNativeIdentity {
     }
 
 
-    static final String INTEGRATION_VERSION="source-bound-native-stories-integration11-v1";
+    static final String INTEGRATION_VERSION="source-bound-native-stories-integration12-east-asian-identity-font-v1";
     private static final JsonNode EDITIONS=editions();
     private static JsonNode editions(){try(InputStream input=DraftNativeIdentity.class.getResourceAsStream("/drafting/native-story-editions.json")){if(input==null)throw new IllegalStateException("NATIVE_STORY_EDITIONS_MISSING");return JsonUtils.mapper().readTree(input);}catch(java.io.IOException failure){throw new IllegalStateException("NATIVE_STORY_EDITIONS_INVALID",failure);}}
     /** Existing qualified values only; neither visible suggestions nor Project metadata are authority. */

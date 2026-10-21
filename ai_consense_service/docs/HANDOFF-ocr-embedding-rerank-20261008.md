@@ -1,3 +1,7 @@
+<!-- runtime-integration66:start -->
+**最新progress66：中文身份与字体别名修复已部署，三Word与三PDF下载成功；111页身份／页码文本回读通过，安全填空保持。** [实际证据及未过门](testing/three-module-runtime-progress-20261021.md#progress66中文身份与字体别名已修并部署111页身份回读通过安全填空保持目录删除边界仍失败)。新SCC仍有目录错页；精确旧稿字体误拒已解除，唯一新生成已终态但原239分页关系与删除条款接缝仍UNKNOWN，未授全成品通过。前端冷启动默认27B已实测；同题27B46为10／2／1、Flash48为3／3／7，不外推稳定性。实际35件为17完整／15部分／1APB原解析中／2图纸排除，整套报告待验；H2与64GiB运行保护，Goal active，SL22,214页质量未过不打包。
+<!-- runtime-integration66:end -->
+
 <!-- runtime-integration65:start -->
 **最新progress65：新同题27B已保存46并完成固定13项来源评分：10 PASS／2 PARTIAL／1 FAIL，旧44的8／4／1不改写。** [完整证据及未过门](testing/three-module-runtime-progress-20261021.md#progress65新27b答复已保存及核源固定13项为10通过2部分1失败填空专项成品已交付)。原一次请求4项Qwen账本全部COMPLETED，刷新历史及引用回原件通过；GS条件归属改善，但裸页脚日期推断和varies替代范围扩大仍待修，最新generic规则确已进入实际system。截图填空专项已部署及真实下载核对，临时身份与三页视觉范围保持。APU58原解析继续，APB59未发；主后端64GiB、H2保护，Goal active，SL质量未过不打包。
 <!-- runtime-integration65:end -->

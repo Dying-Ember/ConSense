@@ -1143,19 +1143,19 @@ public final class DocxTemplateEditor {
                     Element root=storyXml(model,item.part).getDocumentElement();
                     StaticFooterSourceFormat format=plan.staticFooterSourceFormat;Element newPageParagraph=null;
                     if(format!=null) {
-                        if(story.action==StoryAction.APPEND_PROJECT_TITLE)appendStyledStoryParagraph(root,storyText(plan.identity.title),format.headerStyleId);
+                        if(story.action==StoryAction.APPEND_PROJECT_TITLE)identityStoryParagraph(appendStyledStoryParagraph(root,storyText(plan.identity.title),format.headerStyleId),plan.identity.title);
                         else {
                             String control="\t"+story.retainedSourceControlLines.get(0)+"\t"+(story.pagePrefix==null?"":story.pagePrefix);
-                            Element paragraph=appendStyledStoryParagraph(root,storyText(plan.identity.number)+(format.contractNumberHalfPoints==null?control:""),format.footerStyleId);
-                            if(format.contractNumberHalfPoints!=null){Document document=root.getOwnerDocument();Element run=direct(paragraph,"r").get(0),properties=document.createElementNS(W,"w:rPr"),size=document.createElementNS(W,"w:sz");size.setAttributeNS(W,"w:val",format.contractNumberHalfPoints.toString());properties.appendChild(size);run.insertBefore(properties,run.getFirstChild());appendStoryRun(paragraph,control);}
+                            Element paragraph=identityStoryParagraph(appendStyledStoryParagraph(root,storyText(plan.identity.number)+(format.contractNumberHalfPoints==null&&!identityNeedsEastAsiaFont(plan.identity.number)?control:""),format.footerStyleId),plan.identity.number);
+                            if(format.contractNumberHalfPoints!=null){Document document=root.getOwnerDocument();Element run=direct(paragraph,"r").get(0),properties=storyRunProperties(run),size=document.createElementNS(W,"w:sz");size.setAttributeNS(W,"w:val",format.contractNumberHalfPoints.toString());properties.appendChild(size);appendStoryRun(paragraph,control);}else if(identityNeedsEastAsiaFont(plan.identity.number))appendStoryRun(paragraph,control);
                             newPageParagraph=paragraph;
                             appendStyledStoryParagraph(root,story.retainedSourceControlLines.get(1),format.footerStyleId);
                         }
-                    }else if(story.action==StoryAction.APPEND_PROJECT_TITLE)appendStoryParagraph(root,storyText(plan.identity.title));
+                    }else if(story.action==StoryAction.APPEND_PROJECT_TITLE)identityStoryParagraph(appendStoryParagraph(root,storyText(plan.identity.title)),plan.identity.title);
                     else {
                         List<Label> labels=new ArrayList<>(story.contractLabels);labels.sort(Comparator.comparing((Label label)->label.paragraph.id).thenComparing(label->-label.start));
-                        for(Label label:labels){Element paragraph=model.nodes.get(label.paragraph.id);replace(model,paragraph,Edit.replaceCatalogLabelOutsideFields("native-contract-label",label.paragraph,label.start,label.end,label.expectedText,storyText(plan.identity.number)));}
-                        if(labels.isEmpty())appendStoryParagraph(root,storyText(plan.identity.number));
+                        for(Label label:labels){Element paragraph=model.nodes.get(label.paragraph.id);Edit edit=Edit.replaceCatalogLabelOutsideFields("native-contract-label",label.paragraph,label.start,label.end,label.expectedText,storyText(plan.identity.number));if(identityNeedsEastAsiaFont(plan.identity.number))identityRunFont(replace(model,paragraph,edit,true),plan.identity.number);else replace(model,paragraph,edit);}
+                        if(labels.isEmpty())identityStoryParagraph(appendStoryParagraph(root,storyText(plan.identity.number)),plan.identity.number);
                     }
                     if(item.originalFields!=null&&!item.originalFields.equals(storyFields(root)))throw error("STORY_FIELD_CHANGED",item.part);
                     // Preserve the complete original field/cache snapshot before the separately authorized new PAGE.
@@ -1319,7 +1319,7 @@ public final class DocxTemplateEditor {
     private static List<Node> importedSctChildren(Element target,Element staged){List<Node> nodes=new ArrayList<>();for(Node child=staged.getFirstChild();child!=null;child=child.getNextSibling())nodes.add(target.getOwnerDocument().importNode(child,true));return nodes;}
     private static boolean hasSctPage(Element footer){for(Element field:elementsIn(footer,W,"fldSimple"))if(field.getAttributeNS(W,"instr").trim().matches("(?is)^PAGE\\b.*"))return true;for(Element instruction:elementsIn(footer,W,"instrText"))if(instruction.getTextContent().trim().matches("(?is)^PAGE\\b.*"))return true;return false;}
     private static void installSctHeader(Element root,SctTitleMigration policy,Identity identity,Element donor) {
-        while(root.hasChildNodes())root.removeChild(root.getFirstChild());Element project=appendStyledStoryParagraph(root,storyText(identity.title),policy.headerStyleId);centerSctHeader(project);
+        while(root.hasChildNodes())root.removeChild(root.getFirstChild());Element project=identityStoryParagraph(appendStyledStoryParagraph(root,storyText(identity.title),policy.headerStyleId),identity.title);centerSctHeader(project);
         Element heading=appendStyledStoryParagraph(root,"",policy.headerStyleId);for(Element run:new ArrayList<>(direct(heading,"r")))heading.removeChild(run);centerSctHeader(heading);
         Document document=root.getOwnerDocument();for(Element sourceRun:direct(donor,"r")){List<Element> texts=direct(sourceRun,"t");if(texts.isEmpty())continue;Element run=document.createElementNS(W,"w:r");for(Element props:direct(sourceRun,"rPr"))run.appendChild(document.importNode(props,true));for(Element text:texts)run.appendChild(document.importNode(text,true));heading.appendChild(run);}
     }
@@ -1345,6 +1345,14 @@ public final class DocxTemplateEditor {
         Element root=storyXml(model,part).getDocumentElement();if(!is(root,kind==Kind.HEADER?"hdr":"ftr"))throw error("SCT_TITLE_PART_NOT_INSTALLED",part);validateStoryContentType(model,part,kind);
     }
 
+    private static boolean identityNeedsEastAsiaFont(String value){return value.codePoints().anyMatch(cp->(cp>=0x3000&&cp<=0xd7af)||(cp>=0xf900&&cp<=0xfaff)||(cp>=0xff00&&cp<=0xffef)||(cp>=0x20000&&cp<=0x323af));}
+    // Only newly generated identity text uses the same East Asian face as product reports.
+    private static Element identityStoryParagraph(Element paragraph,String value){if(identityNeedsEastAsiaFont(value))for(Element run:direct(paragraph,"r"))identityRunFont(run,value);return paragraph;}
+    private static Element storyRunProperties(Element run){List<Element> values=direct(run,"rPr");if(!values.isEmpty())return values.get(0);Element properties=run.getOwnerDocument().createElementNS(W,"w:rPr");run.insertBefore(properties,run.getFirstChild());return properties;}
+    private static void identityRunFont(Element run,String value){
+        if(!identityNeedsEastAsiaFont(value))return;Element properties=storyRunProperties(run);List<Element> values=direct(properties,"rFonts");Element fonts=values.isEmpty()?run.getOwnerDocument().createElementNS(W,"w:rFonts"):values.get(0);
+        if(values.isEmpty()){List<Element> styles=direct(properties,"rStyle");properties.insertBefore(fonts,styles.isEmpty()?properties.getFirstChild():styles.get(styles.size()-1).getNextSibling());}fonts.removeAttributeNS(W,"eastAsiaTheme");fonts.setAttributeNS(W,"w:eastAsia","Microsoft YaHei");
+    }
     private static Element appendStyledStoryParagraph(Element root,String text,String styleId){Element paragraph=appendStoryParagraph(root,text);Document document=root.getOwnerDocument();Element properties=document.createElementNS(W,"w:pPr"),style=document.createElementNS(W,"w:pStyle");style.setAttributeNS(W,"w:val",styleId);properties.appendChild(style);paragraph.insertBefore(properties,paragraph.getFirstChild());return paragraph;}
     private static void appendNativePage(Element paragraph){Document document=paragraph.getOwnerDocument();Element field=document.createElementNS(W,"w:fldSimple");field.setAttributeNS(W,"w:instr"," PAGE ");field.setAttributeNS(W,"w:dirty","true");Element run=document.createElementNS(W,"w:r"),text=document.createElementNS(W,"w:t");run.appendChild(text);field.appendChild(run);paragraph.appendChild(field);}
     private static Element appendStoryParagraph(Element root,String text){Element paragraph=root.getOwnerDocument().createElementNS(W,"w:p");root.appendChild(paragraph);appendStoryRun(paragraph,text);return paragraph;}
@@ -1650,14 +1658,15 @@ public final class DocxTemplateEditor {
         }
         setText(current,value.substring(start));
     }
-    private static void replace(PackageModel model,Element p,Edit edit) {
+    private static void replace(PackageModel model,Element p,Edit edit) {replace(model,p,edit,false);}
+    private static Element replace(PackageModel model,Element p,Edit edit,boolean isolateReplacement) {
         List<Segment> segments=segments(p);Segment firstSegment=null;
         for(Segment segment:segments)if((segment.safe||edit.labelOutsideFields&&is(segment.node,"t"))&&segment.start<edit.end&&segment.end>edit.start){firstSegment=segment;break;}
         if(firstSegment==null)throw error("UNSUPPORTED_INLINE_FEATURE",edit.operationId);
         Element firstRun=(Element)firstSegment.node.getParentNode(),donor=edit.donorId==null?firstRun:model.nodes.get(edit.donorId);
         List<Element> firstProperties=direct(firstRun,"rPr"),donorProperties=direct(donor,"rPr");
         String originalStyle=firstProperties.isEmpty()?"":intrinsicHash(firstProperties.get(0)),donorStyle=donorProperties.isEmpty()?"":intrinsicHash(donorProperties.get(0));
-        boolean split=!originalStyle.equals(donorStyle),first=true;
+        boolean split=isolateReplacement||!originalStyle.equals(donorStyle),first=true;Element result=firstRun;
         for(Segment segment:segments) {
             if(segment.start>=edit.end||segment.end<=edit.start)continue;
             String old=segment.node.getTextContent();
@@ -1672,8 +1681,9 @@ public final class DocxTemplateEditor {
             while(text.getNextSibling()!=null)right.appendChild(text.getNextSibling());
             Element replacement=p.getOwnerDocument().createElementNS(W,"w:r");if(!donorProperties.isEmpty())replacement.appendChild(donorProperties.get(0).cloneNode(true));
             Element inserted=p.getOwnerDocument().createElementNS(W,"w:t");replacement.appendChild(inserted);setReplacementText(inserted,edit.replacement);
-            p.insertBefore(replacement,firstRun.getNextSibling());p.insertBefore(right,replacement.getNextSibling());
+            Node container=firstRun.getParentNode();container.insertBefore(replacement,firstRun.getNextSibling());container.insertBefore(right,replacement.getNextSibling());result=replacement;
         }
+        return result;
     }
     private static void insertText(Element paragraph,Edit edit) {
         for(Segment segment:segments(paragraph))if(segment.safe&&segment.start<=edit.start&&edit.start<=segment.end) {

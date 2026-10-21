@@ -52,10 +52,10 @@ async function harness({ stored = new Map(), metadata = profiles, metadataError 
   const h = await harness()
   const select = find(h.root, node => node.tag === 'select' && node.props['aria-label'] === 'LLM source')
   assert.ok(select, 'The common topbar exposes a labelled LLM source control')
-  assert.equal(select.props.value, 'local')
+  assert.equal(select.props.value, 'qwen')
   const remote = find(select, node => node.tag === 'option' && node.props.value === 'minimax-cn')
   assert.equal(remote.props.disabled, true)
-  assert.match(text(h.root), /qwen2\.5:7b-instruct-q4_K_M/)
+  assert.match(text(h.root), /qwen3\.8-27b/)
   assert.match(text(h.root), /Configuration ready/)
   assert.match(text(h.root), /Changes apply to new operations/)
   assert.equal(h.requests.some(request => request.method !== 'get'), false)
@@ -85,9 +85,9 @@ async function harness({ stored = new Map(), metadata = profiles, metadataError 
   }
   reloaded.dispose()
   const invalid = await harness({ stored: new Map([['consense-llm-profile', 'attacker-supplied-endpoint']]) })
-  assert.equal(find(invalid.root, node => node.tag === 'select' && node.props['aria-label'] === 'LLM source').props.value, 'local')
+  assert.equal(find(invalid.root, node => node.tag === 'select' && node.props['aria-label'] === 'LLM source').props.value, 'qwen')
   invalid.dispose()
-  console.log('PASS: rendered selection persists only browser profile ID; unavailable persisted choice remains visible; invalid IDs use server default; all three locales preserve configured model identity')
+  console.log('PASS: rendered selection persists only browser profile ID; unavailable persisted choice remains visible; invalid IDs use the Qwen 27B application default; all three locales preserve configured model identity')
   const qwenStored = new Map([['consense-llm-profile', 'qwen']])
   const qwen = await harness({ stored: qwenStored, metadata: available })
   const qwenSelect = find(qwen.root, node => node.tag === 'select' && node.props['aria-label'] === 'LLM source')
@@ -111,7 +111,7 @@ async function harness({ stored = new Map(), metadata = profiles, metadataError 
   }
   qwenReloaded.dispose()
   console.log('PASS: rendered Qwen 27B and Flash-Next choices use exact API IDs, persist across reload, retain click-time headers and send no credential')
-  const outbound = await harness({ metadata: available })
+  const outbound = await harness({ metadata: available, stored: new Map([['consense-llm-profile', 'local']]) })
   const started = outbound.api.draftingApi.extract('project-A')
   await find(outbound.root, node => node.tag === 'select' && node.props['aria-label'] === 'LLM source').props.onChange({ target: { value: 'minimax-cn' } }); await settle(); await started
   await outbound.api.adviceApi.ask('project-A', 'Question', 'fullset')
@@ -130,7 +130,7 @@ async function harness({ stored = new Map(), metadata = profiles, metadataError 
   const field = { key: 'contractTitle', kind: 'text', label: { en: 'Contract title', zhHans: '合约名称', zhHant: '合約名稱' } }
   const original = { key: 'contractTitle', value: 'Original title', confirmed: true, manuallyEdited: true, candidates: [] }
   const reviewGraph = { kind: 'consense-template-graph-v1', graph: { variables: [{ id: 'review-q', nameZh: 'TEST', nameEn: 'TEST', status: 'pending', type: { kind: 'text' }, role: { kind: 'input' }, docIds: [], sourceAnchors: [], sourceUnitIds: [], options: [], editTargets: [], evidence: [], relatedInputIds: [], relations: [], targets: [] }], sourceReviews: {}, events: [], nextId: 1 }, sources: [], selectedDocuments: {} }
-  const drafting = await harness({ metadata: available, view: 'DraftingView', respond: request => {
+  const drafting = await harness({ metadata: available, stored: new Map([['consense-llm-profile', 'local']]), view: 'DraftingView', respond: request => {
     if (request.url === '/projects') return [{ id: 'A', name: field.label }]
     if (request.url.endsWith('/graph') && request.method === 'get') return { currentRevisionId: null, draftRevisionId: null, current: null, draft: null, sources: [] }
     if (request.url.endsWith('/graph/bootstrap')) return { graph: reviewGraph, sources: [] }
@@ -155,7 +155,7 @@ async function harness({ stored = new Map(), metadata = profiles, metadataError 
   drafting.dispose()
   console.log('PASS: rendered Drafting draft extraction retains click-time local selection while a template graph save awaits without adopting an unsaved fact and the topbar changes to MiniMax')
   const plan = deferred(); let waitForPlan = false
-  const generation = await harness({ metadata: available, view: 'DraftingView', respond: request => {
+  const generation = await harness({ metadata: available, stored: new Map([['consense-llm-profile', 'local']]), view: 'DraftingView', respond: request => {
     if (request.url === '/projects') return [{ id: 'G', name: field.label }]
     if (request.url.endsWith('/catalog')) return { ruleVersion: 'unchanged', groups: [{ key: 'contract', label: field.label, fields: [field] }] }
     if (request.url.endsWith('/variables')) return [original]
@@ -173,7 +173,7 @@ async function harness({ stored = new Map(), metadata = profiles, metadataError 
   assert.equal(generated.config.timeout, 3600000)
   generation.dispose()
   console.log('PASS: rendered generation retains operation-entry profile across plan await and preserves full generation timeout')
-  const advice = await harness({ metadata: available, view: 'AdviceView', respond: request => {
+  const advice = await harness({ metadata: available, stored: new Map([['consense-llm-profile', 'local']]), view: 'AdviceView', respond: request => {
     if (request.url === '/projects') return [{ id: 'Q', name: field.label }]
     if (request.url.endsWith('/sessions') && request.method === 'post') return { id: 'session-Q', projectId: 'Q', scope: request.body.scope, basisScope: request.body.basisScope, createdAt: '2026-10-13T00:01:00Z' }
     if (request.url.includes('/index/status?')) return { chunks: 0 }
@@ -191,7 +191,7 @@ async function harness({ stored = new Map(), metadata = profiles, metadataError 
   advice.dispose()
   console.log('PASS: rendered Advice keeps click-time source across its pre-request scroll await')
   const queued = deferred()
-  const vetting = await harness({ metadata: available, view: 'VettingView', respond: request => {
+  const vetting = await harness({ metadata: available, stored: new Map([['consense-llm-profile', 'local']]), view: 'VettingView', respond: request => {
     if (request.url === '/projects') return [{ id: 'V', name: field.label }]
     if (request.method === 'post' && request.url.includes('/runs?')) return queued.promise
     if (request.url.endsWith('/runs/latest') || request.url.endsWith('/metrics')) return null

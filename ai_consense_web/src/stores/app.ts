@@ -28,7 +28,7 @@ export const useAppStore = defineStore('app', () => {
   const activeProjectId = ref<string>('')
   const health = ref<SystemHealth | null>(null)
   const llmProfiles = ref<LlmProfiles | null>(null)
-  const llmProfileId = ref<LlmProfileId | null>(storedLlmProfile())
+  const llmProfileId = ref<LlmProfileId | null>(storedLlmProfile() ?? 'qwen')
   const llmProfilesLoading = ref(false)
   const llmProfilesFailed = ref(false)
   const selectedLlmProfile = computed(() => llmProfiles.value?.profiles.find(profile => profile.id === llmProfileId.value) ?? null)
@@ -145,7 +145,6 @@ export const useAppStore = defineStore('app', () => {
     llmProfilesFailed.value = false
     try {
       llmProfiles.value = await systemApi.llmProfiles()
-      if (!llmProfiles.value.profiles.some(profile => profile.id === llmProfileId.value)) llmProfileId.value = llmProfiles.value.defaultProfile
     } catch {
       llmProfilesFailed.value = true
     } finally {
