@@ -30,6 +30,7 @@ import java.util.*;
 /** Word and PDF exports share one report outline and the same source snapshot. */
 @Component
 public class VettingReportWriter {
+    private static final int FURNITURE_SIZE = 11;
     private static final float MARGIN = 48;
     private static final float WIDTH = PDRectangle.A4.getWidth() - MARGIN * 2;
     private static final DateTimeFormatter DATE = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm z")
@@ -57,8 +58,16 @@ public class VettingReportWriter {
             XWPFParagraph appendix=document.createParagraph();appendix.setPageBreak(true);
             appendix.setStyle("Heading1");appendix.createRun().setText("APPENDIX II - Review scope and evidence records");
             wordTable(document,VettingReportPresentation.readerEvidenceIndex(findings,job==null?null:job.getCoverage()));
+            XWPFTable record=null;
             for (Block block : outline) {
-                XWPFParagraph paragraph = document.createParagraph();
+                XWPFParagraph paragraph;
+                if(block.ownerHeading) {
+                    record=wordRecord(document);
+                    paragraph=record.getRow(0).getCell(0).getParagraphs().get(0);
+                } else if(block.owner!=null) {
+                    XWPFTableRow row=record.createRow();row.setRepeatHeader(false);row.setCantSplitRow(block.quote);
+                    paragraph=row.getCell(0).getParagraphs().get(0);
+                } else {record=null;paragraph=document.createParagraph();}
                 if (block.pageBreak) paragraph.setPageBreak(true);
                 paragraph.setStyle(block.kind == 3 ? "Title" : block.kind == 2 ? "Heading1" : block.kind == 1 ? "Heading2" : "Normal");
                 paragraph.setSpacingAfter(block.compact ? block.kind > 0 ? 20 : 0 : block.kind > 0 ? 160 : 100);
@@ -85,14 +94,14 @@ public class VettingReportWriter {
             XWPFFooter footer = document.createFooter(HeaderFooterType.DEFAULT);
             XWPFParagraph page = footer.createParagraph();
             page.setAlignment(ParagraphAlignment.CENTER);
-            XWPFRun label = page.createRun(); setWordFont(label); label.setFontSize(8);
+            XWPFRun label = page.createRun(); setWordFont(label); label.setFontSize(FURNITURE_SIZE);
             label.setText(tr(lang, "第 ", "第 ", "Page "));
-            page.getCTP().addNewFldSimple().setInstr("PAGE");
-            XWPFRun separator = page.createRun(); separator.setText("en".equalsIgnoreCase(lang)?" of ":" / "); separator.setFontSize(8);
-            page.getCTP().addNewFldSimple().setInstr("NUMPAGES");
+            wordPageField(page,"PAGE");
+            XWPFRun separator = page.createRun(); setWordFont(separator); separator.setText("en".equalsIgnoreCase(lang)?" of ":" / "); separator.setFontSize(FURNITURE_SIZE);
+            wordPageField(page,"NUMPAGES");
             XWPFHeader runningHeader=document.createHeader(HeaderFooterType.DEFAULT);
             XWPFParagraph contractHeader=runningHeader.createParagraph();
-            XWPFRun contractLabel=contractHeader.createRun();setWordFont(contractLabel);contractLabel.setFontSize(10);
+            XWPFRun contractLabel=contractHeader.createRun();setWordFont(contractLabel);contractLabel.setFontSize(FURNITURE_SIZE);
             contractLabel.setText("Contract No. "+reportIdentity(job,"number"));
             document.getProperties().getCoreProperties().setTitle(tr(lang, "招标文件审查报告", "招標文件審查報告", "Tender Document Vetting Report"));
             document.getProperties().getCoreProperties().setCreator("ConSense");
@@ -136,13 +145,13 @@ public class VettingReportWriter {
             }
             for (int i = 0; i < document.getNumberOfPages(); i++) {
                 try (PDPageContentStream stream = new PDPageContentStream(document, document.getPage(i), PDPageContentStream.AppendMode.APPEND, true)) {
-                    stream.beginText(); stream.setFont(font, 8); stream.setNonStrokingColor(100, 110, 120);
+                    stream.beginText(); stream.setFont(font, FURNITURE_SIZE); stream.setNonStrokingColor(100, 110, 120);
                     String footerLabel=tr(lang, "第 ", "第 ", "Page ") + (i + 1) + ("en".equalsIgnoreCase(lang)?" of ":" / ") + document.getNumberOfPages();
-                    stream.newLineAtOffset((PDRectangle.A4.getWidth()-pdfWidth(font,footerLabel)/1000*8)/2, 27);
-                    pdfShowText(stream,font,footerLabel,8);
+                    stream.newLineAtOffset((PDRectangle.A4.getWidth()-pdfWidth(font,footerLabel)/1000*FURNITURE_SIZE)/2, 27);
+                    pdfShowText(stream,font,footerLabel,FURNITURE_SIZE);
                     stream.endText();
-                    stream.beginText();stream.setFont(font,9);stream.newLineAtOffset(MARGIN,PDRectangle.A4.getHeight()-27);
-                    pdfShowText(stream,font,"Contract No. "+reportIdentity(job,"number"),9);stream.endText();
+                    stream.beginText();stream.setFont(font,FURNITURE_SIZE);stream.newLineAtOffset(MARGIN,PDRectangle.A4.getHeight()-27);
+                    pdfShowText(stream,font,"Contract No. "+reportIdentity(job,"number"),FURNITURE_SIZE);stream.endText();
                 }
             }
             document.getDocumentInformation().setTitle(tr(lang, "招标文件审查报告", "招標文件審查報告", "Tender Document Vetting Report"));
@@ -209,6 +218,20 @@ public class VettingReportWriter {
         } else {setWordCells(table.getRow(0),model.getHeadings(),widths,true);table.getRow(0).setRepeatHeader(true);}
         for(List<String> values:model.getRows())setWordCells(table.createRow(),values,widths,false);
     }
+    private XWPFTable wordRecord(XWPFDocument document) {
+        // Adjacent tables can share the first table's repeated header in Word renderers.
+        List<IBodyElement> body=document.getBodyElements();
+        if(!body.isEmpty()&&body.get(body.size()-1) instanceof XWPFTable) {
+            XWPFParagraph boundary=document.createParagraph();boundary.setStyle("Normal");
+            boundary.setSpacingBefore(0);boundary.setSpacingAfter(0);boundary.setSpacingBetween(1,LineSpacingRule.EXACT);
+        }
+        XWPFTable table=document.createTable(1,1);table.setWidth("100%");table.setCellMargins(0,0,0,0);
+        table.getCTTbl().getTblPr().addNewTblLayout().setType(STTblLayoutType.FIXED);
+        table.getRow(0).getCell(0).setWidth("9986");table.getRow(0).setRepeatHeader(true);
+        CTTblBorders borders=table.getCTTbl().getTblPr().addNewTblBorders();
+        for(CTBorder border:Arrays.asList(borders.addNewTop(),borders.addNewBottom(),borders.addNewLeft(),borders.addNewRight(),borders.addNewInsideH(),borders.addNewInsideV()))border.setVal(STBorder.NONE);
+        return table;
+    }
     private void setWordCells(XWPFTableRow row,List<String> values,int[] widths,boolean header) {
         row.getCtRow().addNewTrPr();row.setCantSplitRow(true);
         // POI seeds a new row from the merged first row's physical cell count.
@@ -271,23 +294,29 @@ public class VettingReportWriter {
         if(findings==null||findings.isEmpty())blocks.add(new Block(0,"No findings were recorded; this does not establish that the documents have no issues."));
         Map<String,DocumentFindings> byFile=new LinkedHashMap<>();
         for(FindingVO finding:safe(findings))if(finding!=null){ReportSource source=reportSource(finding,coverage);byFile.computeIfAbsent(source.identity,ignored->new DocumentFindings(source)).findings.add(finding);}
+        int findingOrdinal=0;
         for(DocumentFindings group:byFile.values()) {
             blocks.add(new Block(2,tr(lang,"文件","文件","Document")+" "+fileLabel(group.source,lang)));
             for(FindingVO finding:group.findings) {
-            Block heading=compact(new Block(1,nvl(finding.getCode())+"  "+tr(lang,"原文摘录","原文摘錄","Source quotations")));
+            int recordStart=blocks.size();findingOrdinal++;
+            String code=JsonUtils.isBlankText(finding.getCode())?"Comment record "+findingOrdinal:finding.getCode();
+            Block heading=compact(new Block(1,code+"  "+tr(lang,"原文摘录","原文摘錄","Source quotations")));
             heading.keepWithNextOpening=true;blocks.add(heading);
             if(safe(finding.getEvidence()).isEmpty())blocks.add(new Block(0,"No located source evidence is recorded. Source and formal clause attribution require review."));
             for(FindingEvidence evidence:safe(finding.getEvidence()))if(evidence!=null)readerEvidence(blocks,evidence,lang);
+            ownRecord(blocks,recordStart);
             }
         }
-        boolean assessmentHeading=false;
+        boolean assessmentHeading=false;int assessmentOrdinal=0;
         if(coverage!=null)for(SemanticTopicVO topic:safe(coverage.getSemanticTopics()))if(topic!=null)for(SemanticPacketVO packet:safe(topic.getPacketAudits()))if(packet!=null){
             for(VerifiedAssessmentVO assessment:safe(packet.getVerifiedAssessments()))if(assessment!=null){
                 if(!assessmentHeading){blocks.add(new Block(2,tr(lang,"其他已记录的来源核对","其他已記錄的來源核對","Additional recorded source checks")));assessmentHeading=true;}
                 FindingVO context=new FindingVO();context.setEvidence(assessment.getEvidence());
-                blocks.add(compact(new Block(1,readerCheckState(assessment.getAssessment()))));
+                int recordStart=blocks.size();
+                blocks.add(compact(new Block(1,String.format(Locale.ROOT,"Source check A%03d  ",++assessmentOrdinal)+readerCheckState(assessment.getAssessment()))));
                 blocks.add(new Block(0,"Original model assessment; "+VettingReportPresentation.readerClauseQualification(context)+". "+VettingReportPresentation.readerNarrative(nvl(assessment.getTitle())+"\n"+nvl(assessment.getComment()),context)));
                 for(FindingEvidence evidence:safe(assessment.getEvidence()))if(evidence!=null)readerEvidence(blocks,evidence,lang);
+                ownRecord(blocks,recordStart);
             }
             for(com.fasterxml.jackson.databind.JsonNode reference:safe(packet.getFixedBaselineEvidence()))if(reference!=null)readerReference(blocks,reference);
         }
@@ -321,6 +350,10 @@ public class VettingReportWriter {
             blocks.add(new Block(0,"Only the available reviewed excerpts support these comments. An empty model response or a completed request does not establish a substantive countercheck or confirm that the documents have no issues."));
         }
         return blocks;
+    }
+    private void ownRecord(List<Block> blocks,int start) {
+        Block heading=blocks.get(start);heading.ownerHeading=true;
+        for(int at=start;at<blocks.size();at++)blocks.get(at).owner=heading.text;
     }
     private void readerEvidence(List<Block> blocks,FindingEvidence evidence,String lang) {
         String page=JsonUtils.isBlankText(evidence.getPageNo())?"":("; recorded page: "+evidence.getPageNo());
@@ -410,6 +443,11 @@ public class VettingReportWriter {
         }
     }
 
+    private void wordPageField(XWPFParagraph paragraph,String instruction) {
+        CTSimpleField field=paragraph.getCTP().addNewFldSimple();field.setInstr(instruction);
+        XWPFRun result=new XWPFRun(field.addNewR(),paragraph);setWordFont(result);result.setFontSize(FURNITURE_SIZE);
+    }
+
     private void setWordFont(XWPFRun run) {
         run.setFontFamily("Times New Roman"); run.setFontFamily("Microsoft YaHei", XWPFRun.FontCharRange.eastAsia);
     }
@@ -457,17 +495,22 @@ public class VettingReportWriter {
     }
 
     private static final class Block {
-        final int kind; final String text; boolean quote; boolean pageBreak; boolean compact; boolean keepFirstLines; boolean keepWithNextOpening;
+        final int kind; final String text; String owner; boolean ownerHeading; boolean quote; boolean pageBreak; boolean compact; boolean keepFirstLines; boolean keepWithNextOpening;
         Block(int kind, String text) { this.kind = kind; this.text = nvl(text).replace("\r\n", "\n").replace('\r', '\n').replace("\t", "    ").replaceAll("[\\p{Cntrl}&&[^\\n]]", ""); }
     }
 
     private static final class PdfCursor implements AutoCloseable {
-        final PDDocument document; final PDFont font; PDPageContentStream stream; float y;
+        final PDDocument document; final PDFont font; PDPageContentStream stream; float y;String owner;boolean ownerHeading;
         PdfCursor(PDDocument document, PDFont font) throws IOException { this.document = document; this.font = font; newPage(); }
         void newPage() throws IOException {
             if (stream != null) stream.close();
             PDPage page = new PDPage(PDRectangle.A4); document.addPage(page);
             stream = new PDPageContentStream(document, page); y = PDRectangle.A4.getHeight() - MARGIN;
+            if(owner!=null&&!ownerHeading) {
+                y-=4;
+                for(String line:wrap(owner+" (Cont'd)",11,WIDTH)){textAt(MARGIN,y,11,line);y-=11*1.05f;}
+                y-=1;
+            }
         }
         void centeredTitle(String text) throws IOException {
             float w=pdfWidth(font,text)/1000*12,x=(PDRectangle.A4.getWidth()-w)/2;
@@ -555,6 +598,7 @@ public class VettingReportWriter {
         }
         void block(Block block, Block next) throws IOException { block(block,next,null); }
         void block(Block block, Block next, Block following) throws IOException {
+            owner=block.owner;ownerHeading=block.ownerHeading;
             if (block.pageBreak && y < PDRectangle.A4.getHeight() - MARGIN) newPage();
             float size = block.kind == 3 ? 21 : block.kind == 2 ? 14 : 11;
             float lineHeight = size * (block.compact ? 1.05f : 1.48f), indent = block.quote ? 12 : 0;

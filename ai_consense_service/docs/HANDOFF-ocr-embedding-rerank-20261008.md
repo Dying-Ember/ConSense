@@ -1,5 +1,15 @@
+<!-- unified-progress47:start -->
+**2026-10-21当前：Vetting5文件已采用、41回归与生成2通过，新Word42／native43全页字号／续页已核，当前主树产品与新JAR完整核同，未部署。** 两报告仍是1072B／9段自造SCT来源，long180仅内部容量控制；下一读者验收必须实际2b资料、对照2d。开发22隔离恢复／fresh reopen已通过：22表1297行、19DOCX／9PDF、21项目15列完整核；formal19／H2保持。新SCC92目录40PASS／52FAIL、两标题孤立FAIL；清指导链29窗24PASS／5fixture属性缺失SKIP，原失败保留、只补5。浏览器新授权测试空间6/p1，旧5不存在，个人空间未动。见[progress47](testing/three-module-runtime-progress-20261021.md#progress47报告修复已集成恢复通过转实际2b资料验收)。Goal active，SL未过不打包；以下旧状态按历史读取。
+<!-- unified-progress47:end -->
+
+<!-- unified-progress46:start -->
+**接续修正：** 不展示`LONG-UNIT-*`内部容量fixture冒充可读报告，不从180单元完整外推读者版式通过；保存report42本身也是自造E2E来源，正式样张仍须实际2b资料／对照2d。新字体41回归及生成2通过，Word42全部新图与实际11pt动态页码已核；Root另核长控制17图／180单元，native43视觉在进行，Writer未采用。新NTT11／SCC83全页已看，SCC22.301／22.303标题孤立FAIL。API90／typed8文件／SCRIPT22和30上传保全实际完成，22表1297行；隔离恢复及21项目15列315格gate待执行。下段较早“正在准备／待typed”的状态由本条更新，Goal active。
+
+**2026-10-21：用户要求的最新 Drafting／Vetting 前端完整闭环及最终参考版式尚未全部验收。** 新2a三标准模板已真实生成并各做preview／export：NTT11／SCT25／SCC83，三对预览导出同字节；原外层postflight漏模块的FAIL保留，纯文件补审PASS。NTT11和SCC83已fresh raster，SCT25与full13内容／资源／几何完全同而复用视觉；新94页及2b对照正在进行。Vetting04的42页报告与17页完整长引文已逐页实看，owner与引文残尾修复通过，但Writer未采用；新确认Word动态页码11pt与标签8pt、基线不一，native家具字号也不同，字体最小修复准备中。Vetting正式报告参考实际在2d，2b用于项目合约身份／家具政策，不误把2b项目文件当标准模板。七版自己的双页真实dual已全部终态，每版2POST／4fresh／0retry；新增源评和保存组件不代表22,214页或真实检索通过。当前后端formal19及H2保持；API22实际90GET全200，typed／SCRIPT22／restore待执行。Drafting检查点9d31d55已推送核远端，SL质量未过不做比赛包，Goal active。证据及缺陷见[progress46](testing/three-module-runtime-progress-20261021.md#progress46最终文件参考对照实际三模板产物和七版双路终态)。
+<!-- unified-progress46:end -->
+
 <!-- unified-progress45:start -->
-**2026-10-21：当前主树组合762逻辑用例已获得跨两窗完整通过覆盖，Drafting六产品及12测试／fixture和一处Advisory过时提示词断言已精确采用源码，未部署。** 原窗759PASS／3FAIL，独立补窗3PASS并在同一次编译目录完成package；原失败保留，不称单窗762全绿。SCT5孤立标题已由完整25页逐张原图核验消除，真正2b三文件完整生成、Word与浏览器最终包仍未通过。Vetting旧新原生43页续页归属已有通过证据，旧DOCX经LO的42页有四页错owner；后继仅补相邻记录表的段落边界，37回归与保存报告生成通过，新LO42页已确认owner修正但单词短尾仍FAIL，Writer未采用。SL混合公式三块字面投影的最小候选已150回归及真实raw的4capture／2combine／1dual通过，LaTeX解释和原来源FAIL／UNKNOWN保持；Python候选未采用。其余六版开始串行真实引擎验证，22,214技术页全量质量和检索仍未完成，SL未过不做比赛包。OER同unit保持运行，后端formal19及H2未重启，Goal active。证据见[progress45](testing/three-module-runtime-progress-20261021.md)和[SL质量说明](testing/sl-technical-source-and-retrieval-quality-20261021.md)。
+**2026-10-21：当前主树组合762逻辑用例已获得跨两窗完整通过覆盖，Drafting六产品及12测试／fixture和一处Advisory过时提示词断言已精确采用源码，未部署。** 原窗759PASS／3FAIL，独立补窗3PASS并在同一次编译目录完成package；原失败保留，不称单窗762全绿。SCT5孤立标题已由完整25页逐张原图核验消除，三份2a标准模板的完整预览／导出、参照2b原件的逐项版式对照、Word与浏览器最终包仍未通过。Vetting旧新原生43页续页归属已有通过证据，旧DOCX经LO的42页有四页错owner；后继仅补相邻记录表的段落边界，37回归与保存报告生成通过，新LO42页已确认owner修正但单词短尾仍FAIL，Writer未采用。SL混合公式三块字面投影的最小候选已150回归及真实raw的4capture／2combine／1dual通过，LaTeX解释和原来源FAIL／UNKNOWN保持；Python候选未采用。其余六版开始串行真实引擎验证，22,214技术页全量质量和检索仍未完成，SL未过不做比赛包。OER同unit保持运行，后端formal19及H2未重启，Goal active。证据见[progress45](testing/three-module-runtime-progress-20261021.md)和[SL质量说明](testing/sl-technical-source-and-retrieval-quality-20261021.md)。
 <!-- unified-progress45:end -->
 
 <!-- unified-progress44:start -->

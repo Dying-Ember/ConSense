@@ -1,3 +1,15 @@
+<!-- sl-real-dual-progress46:start -->
+## 七版自己的双页双路已实际收齐，来源和检索仍分开验收
+
+七版真实终态现已全部收齐：competition-batch02 3556／3557，sl2022-original 3372／3373，batch01 3555／3556，batch02-rev1 3556／3557，batch03 3618／3619，batch04 3638／3639，sl2026-original 3634／3635。每版2POST／4fresh method-page／0retry，共14POST／28method-page；最后2026收据SHA `cad33e973bb8d682b1aae55a5588345d179547d9b4f8561ff84792480930cd95`，原handle53944已接回exit0，没有重发。见[实际逐版目录](../../../.local/sl-fwp-seven-semantic-review01/actual-dual/)。以下“其他六版未执行”为progress45的历史时点。
+
+比赛版、2022 original、batch01、rev1已实际导出自己的完整raw／CAS并经原生产API各4capture／2combine／1dual；batch03／04／2026文件导出／导入仍待执行。original导出305CAS、batch01为307、rev1为292，分母是各版原始blob库存，不是准确页数。三份[baseline-import03收据](../../../.local/sl-fwp-seven-semantic-review01/export-real-dual01/baseline-import03/imported/)分别SHA `37b9e8a2877d27d2621da9e91a2a6d1e9060c7d22d3a011d0482eb2a0a12fc01`／`35135cf056a8f0084868b56b270efb3eb32569d5febf06089145ca9e5e8e5180`／`d0810fe5104bc16a03738354156fe0daa7bae1eebbea900cf90a79c3434c3d79`。typed-inline03仍私有且原FAIL／UNKNOWN保持，不更新运行源码造成guard拒绝。
+
+逐版原图首看是独立适用性账，每方法各32项：original Paddle28PASS／4UNKNOWN、MinerU26PASS／2FAIL／4UNKNOWN；batch01为29／0／3与27／2／3；rev1为27／0／5与25／2／5。这些异质检查项不是OCR准确率，不能跨版本拼总分。rev1有自己的4个mixed null块（2目标内、2目标外），不是比赛版3块；Item4证书范围仍UNKNOWN，材质答案与original／batch01各自不同，严格不借版。证据在同export目录的`source-quality-sl2022-original01`、`source-quality-sl2022-batch0101`和`source-quality-sl2022-batch02-rev101`。
+
+首个真实整组经已有`produce_native_pdf`及fresh CAS冷校验1PASS／144.265秒，保存完整78,186,111字节投影，保27parts／21parent／2411 own glyph／2921未采用glyph／55真实整block，4 qualifier候选及法律scope仍UNKNOWN。随后复用该投影，私有store／registry实际publish、cache0 cold wire和另一fresh store冷hydrate1PASS／224.031秒，280CAS／644,441,988字节，cold阶段没有put_bytes补证。见[组件窗口](../../../.local/sl-fwp-seven-semantic-review01/export-real-dual01/first-source-reference03/component-window01/)及[私有发布窗口](../../../.local/sl-fwp-seven-semantic-review01/export-real-dual01/first-source-private-publication01/publication-window01/)。这是保存来源的组件与私有registry证据，**不是全局canonical、固定库索引、真实版本隔离检索或全部22,214技术页质量通过**。用户要求的质量先行、比赛包后置继续保持。
+<!-- sl-real-dual-progress46:end -->
+
 <!-- sl-real-dual-progress45:start -->
 ## 真实比赛Batch 2两页双路首测和保存消费
 

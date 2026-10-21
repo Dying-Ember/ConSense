@@ -5,12 +5,14 @@ import com.consense.common.LocalizedText;
 import com.consense.domain.Project;
 import com.consense.web.dto.VettingDtos.*;
 import java.io.ByteArrayInputStream;
+import java.nio.file.*;
 import java.util.*;
 import java.util.stream.Collectors;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.text.PDFTextStripper;
 import org.apache.poi.xwpf.usermodel.*;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import static org.junit.jupiter.api.Assertions.*;
 
 /** Authored reader-output regressions; original findings, sources and review states remain unchanged. */
@@ -62,9 +64,9 @@ class VettingReaderReportPaginationTest {
     @Test void wordSourceHeadingLabelAndQuoteKeepTheirExactTextAndOpeningTogether() throws Exception {
         FindingVO finding=finding(0);String before=JsonUtils.write(finding);
         try(XWPFDocument word=new XWPFDocument(new ByteArrayInputStream(new VettingReportWriter().docx(project(),Collections.singletonList(finding),null,"en")))) {
-            List<XWPFParagraph> paragraphs=word.getParagraphs();int at=-1;
-            for(int index=0;index<paragraphs.size();index++)if(normalized(paragraphs.get(index).getText()).equals("VT-LAYOUT-00 Source quotations"))at=index;
-            assertTrue(at>=0);XWPFParagraph heading=paragraphs.get(at),label=paragraphs.get(at+1),quote=paragraphs.get(at+2);
+            XWPFTable record=word.getTables().stream().filter(table->normalized(table.getRow(0).getCell(0).getText()).equals("VT-LAYOUT-00 Source quotations")).findFirst().get();
+            assertTrue(record.getRow(0).isRepeatHeader());
+            XWPFParagraph heading=record.getRow(0).getCell(0).getParagraphs().get(0),label=record.getRow(1).getCell(0).getParagraphs().get(0),quote=record.getRow(2).getCell(0).getParagraphs().get(0);
             assertTrue(heading.getCTP().getPPr().isSetKeepNext());assertTrue(heading.getCTP().getPPr().isSetKeepLines());
             assertTrue(label.getCTP().getPPr().isSetKeepNext());assertTrue(label.getCTP().getPPr().isSetKeepLines());
             assertTrue(label.getText().contains("BOUND-PAGE-00"));assertTrue(quote.getCTP().getPPr().isSetKeepLines());
@@ -73,12 +75,37 @@ class VettingReaderReportPaginationTest {
         assertEquals(before,JsonUtils.write(finding));
     }
 
-    @Test void aQuotationLongerThanOnePageStillPaginatesWithoutLosingItsOpeningOrAnySourceUnit() throws Exception {
-        FindingVO finding=finding(0);StringBuilder quotation=new StringBuilder();
+    private String longQuotation(){
+        StringBuilder quotation=new StringBuilder();
         for(int number=0;number<180;number++)quotation.append(String.format(Locale.ROOT,"LONG-UNIT-%03d Retain the authored condition and exception. ",number));
-        finding.getEvidence().get(0).setQuote(quotation.toString());String before=JsonUtils.write(finding);
+        return quotation.toString();
+    }
+
+    @EnabledIfSystemProperty(named="consense.vetting.reportArtifactDirectory",matches=".+")
+    @Test void saveTheExisting180UnitQuotationAsACompleteWordControlForActualRendererReview()throws Exception{
+        FindingVO finding=finding(0);finding.getEvidence().get(0).setQuote(longQuotation());String before=JsonUtils.write(finding);
+        byte[] docx=new VettingReportWriter().docx(project(),Collections.singletonList(finding),null,"en");
+        try(XWPFDocument word=new XWPFDocument(new ByteArrayInputStream(docx))){
+            XWPFTable record=word.getTables().stream().filter(table->normalized(table.getRow(0).getCell(0).getText()).equals("VT-LAYOUT-00 Source quotations")).findFirst().get();
+            assertTrue(record.getRow(0).isRepeatHeader());assertFalse(record.getRow(1).isCantSplitRow());assertTrue(record.getRow(2).isCantSplitRow());
+            assertEquals(longQuotation(),record.getRow(2).getCell(0).getText());assertEquals(1,record.getRow(2).getCell(0).getParagraphs().size());
+        }
+        assertEquals(before,JsonUtils.write(finding));
+        Path output=Paths.get(System.getProperty("consense.vetting.reportArtifactDirectory"));Files.createDirectories(output);
+        Files.write(output.resolve("vetting-long-quote-control.docx"),docx,StandardOpenOption.CREATE_NEW);
+        List<String> markers=new ArrayList<>();for(int number=0;number<180;number++)markers.add(String.format(Locale.ROOT,"LONG-UNIT-%03d",number));
+        Map<String,Object> audit=new LinkedHashMap<>();audit.put("status","AUTHORED_COMPLETE_WORD_CONTROL_GENERATED_ACTUAL_RENDERER_ACCEPTANCE_PENDING");
+        audit.put("controlOrigin","Exact180-unit fixture reused by aQuotationLongerThanOnePageStillPaginatesWithoutLosingItsOpeningOrAnySourceUnit; not a competition original or project fact");
+        audit.put("expectedOwner","VT-LAYOUT-00 Source quotations");audit.put("unitCount",markers.size());audit.put("expectedUnits",markers);audit.put("expectedQuotation",longQuotation());
+        audit.put("inputsUnchanged",true);audit.put("loMultiPagePaginationAccepted",false);audit.put("visualAccepted",false);
+        audit.put("requiredActualChecks",Arrays.asList("Quotation occupies more than one actual LO PDF page","Every unit appears once and in order, and normalized full quotation remains contiguous","Every quotation page has its own correct owner","No omitted/clipped/overlapping content, unexpected blank or header-only page"));
+        Files.write(output.resolve("long-quote-control-audit.json"),JsonUtils.write(audit).getBytes(java.nio.charset.StandardCharsets.UTF_8),StandardOpenOption.CREATE_NEW);
+    }
+
+    @Test void aQuotationLongerThanOnePageStillPaginatesWithoutLosingItsOpeningOrAnySourceUnit() throws Exception {
+        FindingVO finding=finding(0);finding.getEvidence().get(0).setQuote(longQuotation());String before=JsonUtils.write(finding);
         List<String> pages=pdfPages(new VettingReportWriter().pdf(project(),Collections.singletonList(finding),null,"en"));
-        List<String> opening=pages.stream().filter(page->page.contains("VT-LAYOUT-00 Source quotations")).collect(Collectors.toList());
+        List<String> opening=pages.stream().filter(page->page.contains("VT-LAYOUT-00 Source quotations")&&!page.contains("VT-LAYOUT-00 Source quotations (Cont'd)")).collect(Collectors.toList());
         assertEquals(1,opening.size());assertTrue(opening.get(0).contains("LONG-UNIT-000"));
         assertTrue(pages.stream().filter(page->page.contains("LONG-UNIT-")).count()>1,"A long source paragraph must remain allowed to span pages");
         String all=String.join(" ",pages);int previous=-1;

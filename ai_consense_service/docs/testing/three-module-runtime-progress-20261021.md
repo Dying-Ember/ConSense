@@ -1,3 +1,49 @@
+<!-- unified-progress47:start -->
+## progress47：报告修复已集成、恢复通过，转实际2b资料验收
+
+**2026-10-21：Vetting续页／字号5文件已采用主树，未部署；真实比赛项目读者验收未通过。** 实际41项回归及保存生成2项全过，新Word42／native43全部原尺寸目验，动态页码及标签同11pt／同基线／页序连续，正文文字／字体／坐标保持04。来源为`e2e-vetting-mini-r02-20261020`、Flash job `a5681c88-5b6c-44e1-804a-0f5012192969` 使用的1072B／9段自造SCT，明确不冒称2b比赛原件。long17／180单元只作内部容量保全控制，不作正式样张或可读性依据。A005普通正文残尾、与2d位置／分册差异及业务相关性缺陷保留。
+
+当前325产品／资源文件与编译副本精确对应，808个compiled entries及90个依赖与新JAR逐字节核同；package成功且不重复测试。JAR SHA `6e28c7eb7d410f372d849eb25dde794aa83e3bb90b314dfc8728c409d97a43df`。[5文件采用](../../../.local/vetting-report-furniture01/root-adoption01.json)、[包核对](../../../.local/vetting-report-furniture01/package-current-main01.json)、[新42页](../../../.local/vetting-report-furniture01/report42-fresh-visual-review01.json)、[新43页](../../../.local/vetting-report-furniture01/native43-fresh-visual-review01.json)、[fixture真实来源](../../../.local/vetting-report-furniture01/FIXTURE-SOURCES.md)。这是软件／渲染结果，不是部署或比赛原件业务通过。
+
+开发22隔离恢复及fresh reopen已实际通过，41.390秒／16GiB／exit0／输入保持／自然Job0：22表1297行、42消息、19DOCX及9PDF历史BLOB，全部21项目15列315格／144NULL双连接核对。API90、typed4SELECT／8文件、6actions／4prompts、SQL22及30上传／24SQL外部路径均保全；H2 owner38980／后端61512 FILETIME保持。[恢复verification](../../../.local/runtime-preparation22/restore01/verification.json) SHA `4ce4058a3de6e62743576aac846c9bdf26bbfb2c0c86fed6589d9adbf0f4ce41`、[owned终态](../../../.local/runtime-preparation22/restore01/execution/owned-receipt.json)。这里仅是开发数据保护，不是SL比赛包。
+
+Drafting新SCC83页两处22.301／22.303孤立标题FAIL；本次92目录为40PASS／52FAIL（旧34仍错，另18旧正确因新分页失配），见[当前92账](../../../.local/drafting-standard2a-three-previews02/format-reference-review04/scc-current92-toc-summary02.json)。空指导链候选29方法实际24PASS／5缺sourceDir的fixture SKIP、0failure/error，85.547秒，原outer FAIL保留，只补原5，产品未采用。目录候选须在新revision保存前共同定版DOCX/PDF，失败保原稿／可用结果／UNKNOWN，不从preview GET隐式换版本，不套旧34页值。
+
+旧浏览器TaskSpace5确已失效；依据用户既有授权新建唯一测试空间6/p1，现只读到5175首页，个人space1未触碰。首页DOM有27B／Flash-Next显式切换；截图超时保留，不授视觉通过。实际2b的35文件范围／路由及完整Vetting前端场景准备中，2d／2e仅隔离评分，不入模型。后端仍formal19未启停；SL全部22,214页／真实检索、Advisory实际质量及其他原范围继续，Goal active，SL未过不打比赛包。
+<!-- unified-progress47:end -->
+
+<!-- unified-progress46:start -->
+## progress46：最终文件参考对照、实际三模板产物和七版双路终态
+
+**2026-10-21：尚不能确认最新部署的 Drafting／Vetting 浏览器完整闭环和参考版式全部通过。** 用户要求的最终文件比较是必需验收项。Drafting 由 2a 标准模板生成，参照 2b 项目合约的身份、页眉页脚及样式；Vetting 的正式五栏意见表和 Checklist 样例实际位于 2d，另外核对 2b 项目身份政策。不把 2b 项目文件重新登记为标准模板，不复制样例的项目值、法律意见或页数。
+
+**读者报告与内部测试再次纠正：** 用户看到 `VT-LAYOUT-00 / LONG-UNIT-050…` 第16／17页后指出它不可读。该页来自 `VettingReaderReportPaginationTest.longQuotation()` 人为拼接的180单元容量fixture，只验证长引文跨页完整性／归属／页码，不是项目原文或正式读者样张；Root此前连续展示内部测试图没有先解释用途，已向用户说明并停止以此作为正式报告展示。即使180单元完整、没有裁切，也不能授予报告可读性或赛方版式通过。另一个保存报告42页来自真实应用处理过的**自造E2E SCT输入**，也不是2b比赛项目原件；“实际调用／实际生成”与“真实比赛来源”必须分别标明。后续正式读者样张须由实际2b范围内项目资料生成，并对照2d真实报告样例。内部测试页只保留在忽略目录，不作为交付报告。
+
+| 范围 | 本轮新增实际结果 | 仍未完成／实际缺陷 |
+| --- | --- | --- |
+| Drafting 三模板 | 真实 controller／MVC／JPA／DOCX 生成，每件各一次 preview／export；JUnit 1 PASS，146.281 秒，3 次转换。NTT 11 页、SCT 25 页、SCC 83 页，各自 preview／export 同字节 | 这是业务集成及真实转换，不是最新运行浏览器闭环。原外层审计漏加载 `heading50_inverse` 的失败保留；只读补审 PASS，没有重跑生成 |
+| Drafting 页面核对 | NTT 新11页、SCC 新83页均已逐张original实看；全页身份／页码／字号稳定。SCT25页 decoded content、字体资源、geometry 和全文与 full13 完全相同，复用原视觉证据 | SCC22.301／22.303在页底只有标题、正文到下一页，明确FAIL；多处大留白／缩进差异仍待源对照。源指导语已清空而空段仍占行距及标题未有效keepNext，最小同类链候选待实测。SCC92目录待本次新输出核对，SCT三公式精确几何unknown |
+| Vetting 续页／字体 | 最小字体后继实际41／41 PASS、52.594秒；保存报告与完整长控制生成2／2 PASS、33.406秒。新Word42页已逐张实看，全部页脚文字及动态数字同11pt／同基线，连续1…42；Root另亲看新长控制全部17页并核180单元／9360非空白字、69unknown不丢失。native新43页已raster、逐页视觉在进行 | Writer仍私有未采用／部署。原RED2均复现缺陷，但计划误预设先9pt页眉、实际先8pt页脚，原outer FAIL保留、纯文件补审不重跑。A005普通叙述`content.`残尾及2d位置／分册差异保留，整体读者版式／比赛原件报告未通过 |
+| SL 七版双路 | 七个来源自己的两物理页均已终态：每版 2 POST／4 fresh 引擎页／0 retry，共 14 POST／28 method-page；最后 `sl2026-original` handle53944 已接回 exit0 | 不是 22,214 技术页全量质量。比赛版、2022 original、batch01、rev1 已有实际 CAS 导出／baseline 导入；batch03／04／2026 的文件阶段仍待执行；逐版源评分别保留 FAIL／UNKNOWN，未做真实版本隔离检索 |
+| 运行与交付 | Drafting检查点`9d31d5512eadf4d45f0332cf0c20c45dfa64b48d`已推送核远端。API22 90GET完整保存；typed实际4SELECT／8文件保6actions／4prompts；SCRIPT22完成1,301,541,680字节，22表／1297行，30上传文件完整复制、24条SQL来源路径全部核对 | 后端仍formal19；当前源码不等于已部署。隔离恢复／fresh reopen待执行，新增全部21项目15列315格检查已准备，不重启H2。这里是开发数据保护，不是SL比赛包 |
+
+### 最终格式的参考与实际新缺陷
+
+2b 原生参考账保留源故事、分节、tabs、pPr／rPr、字段指令和原件哈希。NTT 原 header 为空，SCT 原 header 为 Appendix 标题，SCC 原 header 为 Special Conditions of Contract，不能声称原件已有本项目名。增加采用项目名是本产品要求；页底合约号来自 2b 的位置政策。SCT 原 `w:sz=20` 仅约束合约号，不强令项目名／页码都改为 10pt。SCC 当前 2a 标准页脚本来就是目录 i／ii／iii 和正文 1…80，无 `SCC/` 前缀；首轮 observer 强制该前缀是审计规则误用，补审 83／83 PASS，不记成产品漏页码。
+
+Vetting 参考 Comments 实际 29 页，页顶合约号、底部居中 `Page n of 29`；Checklist 参考 14 页，自身家具为另一套 Version／App I 编排。两参考并非同一页眉页脚样式，不能以统一一项字号就宣称完全相同。本次直接读取原 PDF 全部页的字体／坐标，并复看已存原件衍生图：Comments 家具量测约 11.04pt；当前 Word 页眉 10pt，页脚标签 8pt而 PAGE／NUMPAGES 数字 11pt，基线约 813.229／810.877；native 页眉 9pt、页脚 8pt。**VT-FORMAT-FONT-20261021-01：Word 动态字段与标签字号／基线不一、Word/native 家具字号不一，已复现，仍未修复采用。** 最小候选统一显式字体／11pt，包括动态字段结果，保正文、坐标、页边距及既有续页控制；候选和真实重渲染另验。
+
+### 可复核的本地实际证据
+
+- [三模板原执行](../../../.local/drafting-standard2a-three-previews02/execution/owned-receipt.json)及[纯文件补审](../../../.local/drafting-standard2a-three-previews02/postflight-supplement01/review-result.json)：原外层 FAIL 不改，补审 SHA `616511f859eea1564879a6a21ebb942da7362df16f06fa326d1da0b38f9e5b4f`。
+- [NTT11 raster](../../../.local/drafting-standard2a-three-previews02/raster-preparation03/NTT/native-raster/execution/owned-receipt.json)，SHA `d8b05fe55fbc0c4f65ecfdcca2a4facdb19b0552874d9e371fb393b8c2a6c089`；[SCC83 raster](../../../.local/drafting-standard2a-three-previews02/raster-preparation03/SCC/native-raster/execution/owned-receipt.json)，SHA `3f5078e664c96fe0c1619f0c7777f4dccc46d038478da225e0889079aa4bf6af`。两窗均 exit0／自然 Job0／输入保持，0 JVM／LO／模型。
+- [Vetting 新42页视觉](../../../.local/vetting-report-continuation04/report42-fresh-visual-review01.json) SHA `27b92e54137e17036d892ecb53e13c6b6141cc24b6ed30dba21a198898410ff0`；[完整17页长引文](../../../.local/vetting-report-continuation04/long17-fresh-visual-and-content-review01.json) SHA `98fc55b7b986ae9573b12f05c356635c5e25b398585c1b67f18789d6d4cbbf7f`；[原件与当前家具字体观测](../../../.local/vetting-report-format-reference-review01/source-and-current-page-furniture.json)。native43 新旧仅 trailer ID 不同，明确复用旧内容视觉证据，不增加 fresh43 数。
+- [七版实际终态目录](../../../.local/sl-fwp-seven-semantic-review01/actual-dual/)，最后2026收据 SHA `cad33e973bb8d682b1aae55a5588345d179547d9b4f8561ff84792480930cd95`；[首个真实整组组件](../../../.local/sl-fwp-seven-semantic-review01/export-real-dual01/first-source-reference03/component-window01/) 1 PASS／144.265 秒；[私有 registry 发布与冷重建](../../../.local/sl-fwp-seven-semantic-review01/export-real-dual01/first-source-private-publication01/publication-window01/) 1 PASS／224.031 秒，保 PARSED／unknown，不是全局 canonical／索引／检索通过。
+- [API22 完整保全](../../../.local/runtime-preparation22/api-before-receipt.json)；[Git 推送核验](../../../.local/progress45-git01/push-verification.json)。原三份未知 untracked 不纳入本轮提交。
+
+Vetting 业务关联的9条负判、Advisory真实答复条件／角色问题、最新浏览器最终下载包、七版全库质量及检索仍未通过。Goal 保持 active；不再用无固定验收分母的整体百分比代表进度。
+<!-- unified-progress46:end -->
+
 <!-- unified-progress45:start -->
 ## progress45：SCT孤立标题关闭、真实SL双路首测与Vetting续页修复回归
 
@@ -46,6 +92,8 @@ Vetting Continuation02原生43页[全页视觉](../../../.local/vetting-report-c
 [真实raw后继03收据](../../../.local/sl-fwp-seven-semantic-review01/export-real-dual01/mineru-inline-private01/actual-capture-successor03/imported/competition-batch02/import-receipt.json) SHA256 `16127af855433717b2ecdc538684b82fcf313554bea439204a8153940f94cb59`，36.062秒实际完成4capture／2combine／1dual。107块仅3556的12／18及3557的6三块恢复原typed字面；bbox、typed数组／顺序、vendor raw、来源及资产保持。该四run实际引用CAS为264个唯一blob／496,921,207字节，区别于原导出296记录。旧raw后继01因漏重算receipt自hash而失败，原现场保留；纯文件证明只有run内容hash和receipt自hash两叶派生变化，03只精确重算，未扩大白名单；02未执行树保持。公式LaTeX未改成已核单位／直径，原64评分及F03／F12失败不改，来源／关系／canonical／检索不授通过。首个其他版sl2022-original正串行进行唯一双页请求，其余进度以实际收据为准；比赛包继续后置。
 
 新Continuation03的[word-render实际票](../../../.local/vetting-report-continuation03/render-preparation01/word-render/execution/owned-receipt.json) SHA256 `4c29f5bda9852d76accf8914aae7ed0376ad404544719e3b7f5f0ce462ae9d91`，实际42页，输入及原产物保持、owned自然退出。Root亲看36／37／39／40：错误VT002／A001已被正确VT006／VT012／A005／A010替代；37页顶仅2026.、39页顶仅Tender.的引文短尾仍FAIL。全页独立目验继续，不能以owner修正授完整布局通过，04后继沿共享表格行／段落控制继续诊断，不按编号／页码放行。
+
+**DF02验收接法更正：** 用户要求参照2b项目原件的页眉页脚，不要求把2b三文件全部替成标准模板。新2b尝试窗实际1FAIL、54.390秒、pins同／自然Job0，0renderer；前两上传parsed1，SCC因已确认project_document而按TEMPLATE_SOURCE_PURPOSE_MISMATCH正确拒绝。原失败不追认为通过，不改来源目的守卫。正确后继为三份2a标准模板沿正常业务完整生成并各预览一次，以2b三原件独立只读对照身份位置、字体、分节及页码政策，不复制另一项目值／节数／页数。见[原失败执行票](../../../.local/drafting-real2b-full-generation01/execution/owned-receipt.json)与[路由更正复核](../../../.local/drafting-real2b-full-generation01/routing-correction-review.md)。此前“2b完整生成”为必需成功门的说法在本更正后撤回；Goal②原范围保持。
 <!-- unified-progress45:end -->
 
 <!-- unified-progress44:start -->
