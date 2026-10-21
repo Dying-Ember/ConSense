@@ -335,24 +335,26 @@ public class VettingService {
 
     /** A human confirms the original is textual material; the usual parser still decides usable coverage. */
     private VettingFileVO resumeIdentityPending(String projectId,Long documentId,SourceRoleConfirmationRequest request) {
+        SourceDocument claimed;byte[] sourceBytes;
         synchronized(lock(projectId)) {
             SourceDocument before=roleSourceSnapshot(documentId);
             if(!Objects.equals(projectId,before.getProjectId())||!identityConfirmationEligible(before))
                 throw new BizException(4104,"此文件当前不能恢复详细解析，请刷新并核对身份和范围。");
+            if(sourceDocumentRepository.existsCurrentParsingByProjectId(projectId))throw new BizException(4104,"仍有文件正在解析，请待完成后再确认其他文件。");
             assertRoleSourceCurrent(before);
             if(!Objects.equals(request.getExpectedOriginalSourceSha256(),before.getSourceSha256())
                     ||!Objects.equals(request.getExpectedSourceHash(),VettingCorpus.sourceHash(before))
                     ||!Objects.equals(request.getExpectedRoutingSha256(),com.consense.service.sources.CanonicalEvidenceService.routingHash(before)))
                 throw new BizException(4104,"来源版本已变化，请刷新后确认原件。");
             if(!storageService.matchesStoredBytes(before.getStoragePath(),before.getSourceSha256()))throw new BizException(4104,"原件字节已变化，不能恢复解析。");
-            byte[] sourceBytes=storageService.read(before.getStoragePath());
+            sourceBytes=storageService.read(before.getStoragePath());
             if(!before.getSourceSha256().equals(OerSourceMetadata.originalSha256(sourceBytes))
                     ||com.consense.document.OerSourceRouting.isDrawing(before.getDocumentScope(),before.getFileName(),sourceBytes))
                 throw new BizException(4104,"原件字节或图纸身份不允许恢复详细解析。");
             SourceDocument known=new SourceDocument();OerSourceMetadata.captureKnownIdentity(known,sourceBytes);
             if(OerSourceMetadata.moduleExclusion(known,"vetting")!=null||OerSourceMetadata.moduleExclusion(known,"advisory")!=null)
                 throw new BizException(4104,"已知排除原件不能由人工确认覆盖。");
-            SourceDocument claimed=tx().execute(status->{
+            claimed=tx().execute(status->{
                 if(sourceDocumentRepository.compareAndSetReviewRole(before.getId(),projectId,before.getSourceSha256(),before.getCategory(),before.getFileName(),before.getOerIdentityJson(),
                         before.getTextContent(),before.getStructuredContentJson(),before.getFileKey(),before.getReviewRole(),before.getDocumentScope(),before.getParseStatus(),before.getStoragePath(),request.getSourceRole())!=1)
                     throw new BizException(4104,"来源或审查状态已变化，本次未启动详细解析。");
@@ -360,16 +362,19 @@ public class VettingService {
                 current.setParseStatus("PARSING");current.setParseMessage("已人工核对原件为文字合同材料，正在详细解析；确认不代表全文质量已通过。");
                 sourceDocumentRepository.saveAndFlush(current);return roleSourceSnapshot(documentId);
             });
-            SourceDocument outcome=new SourceDocument();outcome.setId(claimed.getId());outcome.setProjectId(claimed.getProjectId());outcome.setCategory(claimed.getCategory());
-            outcome.setFileName(claimed.getFileName());outcome.setFileKey(claimed.getFileKey());outcome.setReviewRole(claimed.getReviewRole());outcome.setDocumentScope(claimed.getDocumentScope());outcome.setSourceSha256(claimed.getSourceSha256());
-            String parseJobId=DocumentParseProbe.configured(props)?"parse-"+claimed.getSourceSha256().substring(0,12)+"-"+UUID.randomUUID():null;
-            try {
-                DocumentParser.ParsedDocument parsed=parseJobId==null?documentParser.parse(claimed.getFileName(),sourceBytes)
-                        :documentParser.parse(claimed.getFileName(),sourceBytes,parseJobId,String.valueOf(documentId),claimed.getSourceSha256());
-                if("FAILED".equals(parsed.getParseStatus())) {outcome.setParseStatus("FAILED");outcome.setParseMessage(truncate(parsed.getMessage(),1024));}
-                else captureParsedSource(outcome,parsed,sourceBytes,true);
-            } catch(Exception failure) {outcome.setParseStatus("FAILED");outcome.setParseMessage(truncate(brief(failure),1024));}
-            VettingFileVO result=tx().execute(status->{
+        }
+        SourceDocument outcome=new SourceDocument();outcome.setId(claimed.getId());outcome.setProjectId(claimed.getProjectId());outcome.setCategory(claimed.getCategory());
+        outcome.setFileName(claimed.getFileName());outcome.setFileKey(claimed.getFileKey());outcome.setReviewRole(claimed.getReviewRole());outcome.setDocumentScope(claimed.getDocumentScope());outcome.setSourceSha256(claimed.getSourceSha256());
+        String parseJobId=DocumentParseProbe.configured(props)?"parse-"+claimed.getSourceSha256().substring(0,12)+"-"+UUID.randomUUID():null;
+        try {
+            DocumentParser.ParsedDocument parsed=parseJobId==null?documentParser.parse(claimed.getFileName(),sourceBytes)
+                    :documentParser.parse(claimed.getFileName(),sourceBytes,parseJobId,String.valueOf(documentId),claimed.getSourceSha256());
+            if("FAILED".equals(parsed.getParseStatus())) {outcome.setParseStatus("FAILED");outcome.setParseMessage(truncate(parsed.getMessage(),1024));}
+            else captureParsedSource(outcome,parsed,sourceBytes,true);
+        } catch(Exception failure) {outcome.setParseStatus("FAILED");outcome.setParseMessage(truncate(brief(failure),1024));}
+        VettingFileVO result;
+        synchronized(lock(projectId)) {
+            result=tx().execute(status->{
                 if(sourceDocumentRepository.compareAndSetReviewRole(claimed.getId(),projectId,claimed.getSourceSha256(),claimed.getCategory(),claimed.getFileName(),claimed.getOerIdentityJson(),
                         claimed.getTextContent(),claimed.getStructuredContentJson(),claimed.getFileKey(),claimed.getReviewRole(),claimed.getDocumentScope(),claimed.getParseStatus(),claimed.getStoragePath(),claimed.getReviewRole())!=1)
                     throw new BizException(4104,"来源或审查状态已变化，解析结果未覆盖当前来源。");
@@ -384,9 +389,9 @@ public class VettingService {
                 VettingFileVO row=fileVO(current);row.setOriginalSourceSha256(current.getSourceSha256());row.setSourceHash(VettingCorpus.sourceHash(current));
                 row.setRoutingSha256(com.consense.service.sources.CanonicalEvidenceService.routingHash(current));return row;
             });
-            if(parseJobId!=null)DocumentParseProbe.bindPersisted(props,parseJobId,String.valueOf(documentId),claimed.getSourceSha256(),result.getSourceHash(),result.getParseStatus());
-            return result;
         }
+        if(parseJobId!=null)DocumentParseProbe.bindPersisted(props,parseJobId,String.valueOf(documentId),claimed.getSourceSha256(),result.getSourceHash(),result.getParseStatus());
+        return result;
     }
     private void captureParsedSource(SourceDocument source,DocumentParser.ParsedDocument parsed,byte[] original,boolean confirmedText) {
         source.setParseStatus(parsed.getParseStatus());source.setParseMessage(truncate(parsed.getMessage(),1024));source.setPageCount(parsed.getPageCount());source.setOcrUsed(parsed.isOcrUsed());source.setTextContent(parsed.getText());
@@ -469,6 +474,7 @@ public class VettingService {
         synchronized(lock(projectId)) {
             VettingRun latest=runRepository.findFirstByProjectIdOrderByStartedAtDesc(projectId).orElse(null);
             if(latest!=null && ACTIVE_STATES.contains(latest.getStatus())) return jobVO(latest);
+            if(sourceDocumentRepository.existsCurrentParsingByProjectId(projectId))throw new BizException(4104,"仍有文件正在解析，请待完成后再开始审查。");
             com.consense.ai.LlmOperation operation=llmProfiles.capture();
             VettingLlmOperation vettingOperation=semantic.captureOperation(operation);
             String supplement=semantic.configuredSupplement();

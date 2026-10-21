@@ -31,6 +31,14 @@ public interface SourceDocumentRepository extends JpaRepository<SourceDocument, 
             + "where d.projectId = :projectId order by d.id asc")
     List<CatalogMetadata> findCatalogMetadataByProjectId(@Param("projectId") String projectId);
 
+    @Query("select case when count(d) > 0 then true else false end from SourceDocument d "
+            + "where d.projectId = :projectId and d.category in ('VETTING_PACKAGE','VETTING_SUPPLEMENT') "
+            + "and d.parseStatus in ('PARSING','IDENTITY_OBSERVED') "
+            + "and not exists (select newer.id from SourceDocument newer where newer.projectId = d.projectId "
+            + "and newer.category in ('VETTING_PACKAGE','VETTING_SUPPLEMENT') and newer.id > d.id "
+            + "and lower(trim(coalesce(newer.fileName,''))) = lower(trim(coalesce(d.fileName,''))))")
+    boolean existsCurrentParsingByProjectId(@Param("projectId") String projectId);
+
     /** File display and scope inputs only. Complete native archives/structure are not listing inputs. */
     interface FileDisplayMetadata extends CatalogMetadata {
         String getReviewRole();
@@ -53,6 +61,33 @@ public interface SourceDocumentRepository extends JpaRepository<SourceDocument, 
             + "d.parseCoverageJson as parseCoverageJson from SourceDocument d "
             + "where d.projectId = :projectId order by d.id asc")
     List<FileDisplayMetadata> findFileDisplayMetadataByProjectId(@Param("projectId") String projectId);
+
+    /** Source lists need exact revision hashes, never the separate candidate graph or native archive. */
+    interface SourceListMetadata extends FileDisplayMetadata {
+        String getStructuredContentJson();
+    }
+
+    @Query("select d.id as id, d.projectId as projectId, d.category as category, "
+            + "d.fileKey as fileKey, d.fileName as fileName, d.reviewRole as reviewRole, "
+            + "d.documentScope as documentScope, d.parseStatus as parseStatus, d.parseMessage as parseMessage, "
+            + "d.oerIdentityJson as oerIdentityJson, d.sourceSha256 as sourceSha256, "
+            + "d.pageCount as pageCount, d.ocrUsed as ocrUsed, d.textContent as textContent, "
+            + "d.parseCoverageJson as parseCoverageJson, d.structuredContentJson as structuredContentJson "
+            + "from SourceDocument d where d.projectId = :projectId order by d.id asc")
+    List<SourceListMetadata> findSourceListMetadataByProjectId(@Param("projectId") String projectId);
+
+    /** Detached single-query snapshots for display, scope and unchanged exact source hashing. Never save. */
+    default List<SourceDocument> findSourceListByProjectId(String projectId) {
+        List<SourceDocument> result=new ArrayList<>();
+        for(SourceListMetadata metadata:findSourceListMetadataByProjectId(projectId)) {
+            SourceDocument d=new SourceDocument();d.setId(metadata.getId());d.setProjectId(metadata.getProjectId());d.setCategory(metadata.getCategory());
+            d.setFileKey(metadata.getFileKey());d.setFileName(metadata.getFileName());d.setReviewRole(metadata.getReviewRole());d.setDocumentScope(metadata.getDocumentScope());
+            d.setParseStatus(metadata.getParseStatus());d.setParseMessage(metadata.getParseMessage());d.setOerIdentityJson(metadata.getOerIdentityJson());d.setSourceSha256(metadata.getSourceSha256());
+            d.setPageCount(metadata.getPageCount());d.setOcrUsed(metadata.getOcrUsed());d.setTextContent(metadata.getTextContent());d.setParseCoverageJson(metadata.getParseCoverageJson());
+            d.setStructuredContentJson(metadata.getStructuredContentJson());result.add(d);
+        }
+        return result;
+    }
 
     /** Complete business inputs; the retained native archive is not consumed by these readers. */
     interface BusinessSourceMetadata extends FileDisplayMetadata {

@@ -23,7 +23,133 @@ public final class DocxTemplateEditor {
     private static final int COUNT_LIMIT=5000;
 
     public TemplateIndex inspect(byte[] sourceDocx) { return load(sourceDocx).index; }
+    /** Source-bound named paragraphs; current paths are resolved only inside the frozen package. */
+    public static final class NativeHeadingFlow {
+        private final String headingBookmark,bodyBookmark;private final int emptyParagraphs;
+        public NativeHeadingFlow(String headingBookmark,String bodyBookmark,int emptyParagraphs){if(headingBookmark==null||bodyBookmark==null||!headingBookmark.matches("CS[A-Za-z0-9]{1,38}")||!bodyBookmark.matches("CS[A-Za-z0-9]{1,38}")||headingBookmark.equals(bodyBookmark)||emptyParagraphs<0)throw error("HEADING_FLOW_IDENTITY_INVALID","heading-flow");this.headingBookmark=headingBookmark;this.bodyBookmark=bodyBookmark;this.emptyParagraphs=emptyParagraphs;}
+        public String getHeadingBookmark(){return headingBookmark;}public String getBodyBookmark(){return bodyBookmark;}public int getEmptyParagraphs(){return emptyParagraphs;}
+    }
+    /** Validate the complete registered denominator, then add only measured heading page boundaries. */
+    public DocxEditResult updateNativeHeadingBoundaries(byte[] sourceDocx,String expectedSha256,List<NativeHeadingFlow> flows,Set<String> splitHeadings){
+        PackageModel model=load(sourceDocx);if(!model.index.sourceSha256.equals(expectedSha256))throw error("SOURCE_HASH_MISMATCH","heading-flow");
+        if(flows==null||flows.isEmpty()||splitHeadings==null)throw error("HEADING_FLOW_SCOPE_REQUIRED","heading-flow");
+        Map<String,Element> names=new LinkedHashMap<>(),headings=new LinkedHashMap<>();
+        Map<Element,String> owners=new IdentityHashMap<>();Set<String> bodyNames=new HashSet<>();
+        Set<Element> gaps=Collections.newSetFromMap(new IdentityHashMap<>());
+        for(NativeHeadingFlow flow:flows){
+            if(flow==null||headings.containsKey(flow.headingBookmark)||!bodyNames.add(flow.bodyBookmark))throw error("HEADING_FLOW_IDENTITY_AMBIGUOUS","heading-flow");
+            Element heading=headingFlowBookmark(model,flow.headingBookmark),body=headingFlowBookmark(model,flow.bodyBookmark);
+            for(Map.Entry<String,Element> endpoint:Map.of(flow.headingBookmark,heading,flow.bodyBookmark,body).entrySet()){
+                Element previous=names.putIfAbsent(endpoint.getKey(),endpoint.getValue());String owner=owners.putIfAbsent(endpoint.getValue(),endpoint.getKey());
+                if(previous!=null&&previous!=endpoint.getValue()||owner!=null&&!owner.equals(endpoint.getKey()))throw error("HEADING_FLOW_IDENTITY_AMBIGUOUS",endpoint.getKey());
+            }
+            validateHeadingFlowParagraph(heading,true,flow.headingBookmark);validateHeadingFlowParagraph(body,false,flow.bodyBookmark);
+            if(descendantText(heading,"t").trim().isEmpty()||descendantText(body,"t").trim().isEmpty())throw error("HEADING_FLOW_TEXT_MISSING",flow.headingBookmark);
+            headings.put(flow.headingBookmark,heading);Node next=nextNativeFlowSibling(heading);int count=0;
+            while(next!=null&&next!=body){if(next instanceof Element){Element gap=(Element)next;if(!is(gap,"p")||!gaps.add(gap)||!descendantText(gap,"t").trim().isEmpty())throw error("HEADING_FLOW_CHAIN_CHANGED",flow.headingBookmark);validateHeadingFlowParagraph(gap,false,flow.headingBookmark);count++;}next=nextNativeFlowSibling(next);}
+            if(next!=body||count!=flow.emptyParagraphs)throw error("HEADING_FLOW_CHAIN_CHANGED",flow.headingBookmark);
+        }
+        for(Element gap:gaps)if(owners.containsKey(gap))throw error("HEADING_FLOW_CHAIN_CHANGED","heading-flow");
+        if(!headings.keySet().containsAll(splitHeadings))throw error("HEADING_FLOW_TARGET_SET_MISMATCH","heading-flow");
+        if(splitHeadings.isEmpty())return new DocxEditResult(sourceDocx,model.index);
+        byte[] original=model.entries.get(MAIN);Document document=model.xmlParts.get(MAIN);if(!Arrays.equals(original,tocXmlKeepingOriginalDeclaration(document,original)))throw error("HEADING_BOUNDARY_XML_NOT_REVERSIBLE","heading-flow");
+        Map<Element,Element> previous=new LinkedHashMap<>();
+        for(String name:nativeHeadingRepairRoots(flows,splitHeadings)){Element heading=headings.get(name);List<Element> props=direct(heading,"pPr");Element old=props.isEmpty()?null:(Element)props.get(0).cloneNode(true);previous.put(heading,old);if(!props.isEmpty())for(Element value:new ArrayList<>(direct(props.get(0),"pageBreakBefore")))props.get(0).removeChild(value);pageBreakBeforeHeading(heading);}
+        byte[] changed=tocXmlKeepingOriginalDeclaration(document,original);
+        for(Map.Entry<Element,Element> entry:previous.entrySet()){Element current=direct(entry.getKey(),"pPr").get(0);if(entry.getValue()==null)entry.getKey().removeChild(current);else entry.getKey().replaceChild(entry.getValue(),current);}
+        if(!Arrays.equals(original,tocXmlKeepingOriginalDeclaration(document,original)))throw error("HEADING_BOUNDARY_XML_NOT_REVERSIBLE","heading-flow");
+        model.entries.put(MAIN,changed);byte[] result=write(model.entries);TemplateIndex index=load(result).index;for(Map.Entry<String,String> entry:model.index.entryHashes.entrySet())if(!MAIN.equals(entry.getKey())&&!entry.getValue().equals(index.entryHashes.get(entry.getKey())))throw error("HEADING_BOUNDARY_PART_CHANGED",entry.getKey());
+        return new DocxEditResult(result,index,model.index.sourceSha256,Collections.emptyList(),Collections.emptyList(),model.index.entryHashes);
+    }
+    /** Move the whole verified predecessor chain, so a repaired intro cannot strand its own heading. */
+    public static Set<String> nativeHeadingRepairRoots(List<NativeHeadingFlow> flows,Set<String> measuredSplits){
+        if(flows==null||flows.isEmpty()||measuredSplits==null)throw error("HEADING_FLOW_SCOPE_REQUIRED","heading-flow");
+        Map<String,String> predecessors=new LinkedHashMap<>();Set<String> starts=new HashSet<>();
+        for(NativeHeadingFlow flow:flows)if(flow==null||!starts.add(flow.headingBookmark)||predecessors.putIfAbsent(flow.bodyBookmark,flow.headingBookmark)!=null)throw error("HEADING_FLOW_IDENTITY_AMBIGUOUS","heading-flow");
+        if(!starts.containsAll(measuredSplits))throw error("HEADING_FLOW_TARGET_SET_MISMATCH","heading-flow");
+        Set<String> roots=new LinkedHashSet<>();for(String split:measuredSplits){String root=split;Set<String> seen=new HashSet<>();while(predecessors.containsKey(root)){if(!seen.add(root))throw error("HEADING_FLOW_CYCLE","heading-flow");root=predecessors.get(root);}roots.add(root);}return Collections.unmodifiableSet(roots);
+    }
+    /** Native zero-display markers remain in place while the exact source-bound paragraph chain is checked. */
+    private static Node nextNativeFlowSibling(Node current){
+        Node next=current.getNextSibling();while(next!=null&&(!(next instanceof Element)||transparentNativeFlowBookmark((Element)next)))next=next.getNextSibling();return next;
+    }
+    private static boolean transparentNativeFlowBookmark(Element marker){
+        boolean start=is(marker,"bookmarkStart");if(!start&&!is(marker,"bookmarkEnd")||!is(marker.getParentNode(),"body")||marker.hasChildNodes()||!marker.getAttributeNS(W,"id").matches("[0-9]+"))return false;
+        if(start&&marker.getAttributeNS(W,"name").trim().isEmpty())return false;
+        NamedNodeMap attributes=marker.getAttributes();for(int i=0;i<attributes.getLength();i++){Node attribute=attributes.item(i);if(!W.equals(attribute.getNamespaceURI())||!("id".equals(attribute.getLocalName())||start&&"name".equals(attribute.getLocalName())))return false;}return true;
+    }
+    /** A duplicate/end-before-start marker must not be hidden by the general feature index. */
+    private static Element headingFlowBookmark(PackageModel model,String name){Document document=model.xmlParts.get(MAIN);Element start=null,end=null;int named=0;NodeList starts=document.getElementsByTagNameNS(W,"bookmarkStart");for(int i=0;i<starts.getLength();i++){Element node=(Element)starts.item(i);if(name.equals(node.getAttributeNS(W,"name"))){start=node;named++;}}if(named!=1)throw error("HEADING_FLOW_BOOKMARK_AMBIGUOUS",name);String id=start.getAttributeNS(W,"id");if(id.isEmpty())throw error("HEADING_FLOW_BOOKMARK_AMBIGUOUS",name);int sameId=0;for(int i=0;i<starts.getLength();i++)if(id.equals(((Element)starts.item(i)).getAttributeNS(W,"id")))sameId++;NodeList ends=document.getElementsByTagNameNS(W,"bookmarkEnd");int matches=0;for(int i=0;i<ends.getLength();i++){Element node=(Element)ends.item(i);if(id.equals(node.getAttributeNS(W,"id"))){end=node;matches++;}}if(sameId!=1||matches!=1)throw error("HEADING_FLOW_BOOKMARK_AMBIGUOUS",name);Element paragraph=start;while(paragraph!=null&&!is(paragraph,"p"))paragraph=paragraph.getParentNode() instanceof Element?(Element)paragraph.getParentNode():null;Element finish=end;while(finish!=null&&!is(finish,"p"))finish=finish.getParentNode() instanceof Element?(Element)finish.getParentNode():null;if(paragraph==null||paragraph!=finish||!is(paragraph.getParentNode(),"body")||(start.compareDocumentPosition(end)&Node.DOCUMENT_POSITION_FOLLOWING)==0)throw error("HEADING_FLOW_BOOKMARK_RANGE_CHANGED",name);return paragraph;}
+    private static void validateHeadingFlowParagraph(Element paragraph,boolean heading,String id){Element checked=(Element)paragraph.cloneNode(true);List<Element> props=direct(checked,"pPr");if(props.size()>1)throw error("HEADING_FLOW_PROPERTIES_AMBIGUOUS",id);if(heading&&!props.isEmpty()){List<Element> breaks=direct(props.get(0),"pageBreakBefore");if(breaks.size()>1)throw error("HEADING_FLOW_PROPERTIES_AMBIGUOUS",id);for(Element value:breaks){if(!Arrays.asList("","0","1","true","false","on","off").contains(value.getAttributeNS(W,"val")))throw error("HEADING_FLOW_PROPERTIES_AMBIGUOUS",id);props.get(0).removeChild(value);}}validateClearedLayoutParagraph(checked,false,id);}
+
     public PreparedTemplate prepare(byte[] sourceDocx) { return new PreparedTemplate(load(sourceDocx)); }
+    /** Native field identities only; PDF pagination remains the caller's measured evidence. */
+    public List<TocPageReference> tocPageReferences(byte[] sourceDocx) { return tocPageReferences(load(sourceDocx)); }
+    /** Only complete numeric PAGEREF caches inside the same native TOC may change. */
+    public DocxEditResult updateTocPageCaches(byte[] sourceDocx,String expectedSha256,Map<String,String> measuredPages) {
+        PackageModel model=load(sourceDocx);
+        if(!model.index.sourceSha256.equals(expectedSha256))throw error("SOURCE_HASH_MISMATCH","toc-cache");
+        List<TocPageReference> references=tocPageReferences(model);Set<String> targets=new LinkedHashSet<>();
+        for(TocPageReference reference:references)targets.add(reference.targetBookmark);
+        if(references.isEmpty()||measuredPages==null||!targets.equals(measuredPages.keySet()))throw error("TOC_CACHE_TARGET_SET_MISMATCH","toc-cache");
+        byte[] original=model.entries.get(MAIN);Document document=model.xmlParts.get(MAIN);
+        if(!Arrays.equals(original,tocXmlKeepingOriginalDeclaration(document,original)))throw error("TOC_CACHE_XML_NOT_REVERSIBLE","toc-cache");
+        Map<Element,String> before=new LinkedHashMap<>();
+        for(TocPageReference reference:references) {
+            String page=measuredPages.get(reference.targetBookmark);
+            if(page==null||!page.matches("[1-9][0-9]*")||page.length()!=reference.cachedPage.length())throw error("TOC_CACHE_WIDTH_UNSUPPORTED",reference.fieldStartId);
+            Element node=model.nodes.get(reference.cacheNodeId);before.put(node,node.getTextContent());node.setTextContent(page);
+        }
+        byte[] changed=tocXmlKeepingOriginalDeclaration(document,original);
+        for(Map.Entry<Element,String> entry:before.entrySet())entry.getKey().setTextContent(entry.getValue());
+        if(!Arrays.equals(original,tocXmlKeepingOriginalDeclaration(document,original)))throw error("TOC_CACHE_XML_NOT_REVERSIBLE","toc-cache");
+        model.entries.put(MAIN,changed);byte[] result=write(model.entries);TemplateIndex index=load(result).index;
+        for(Map.Entry<String,String> entry:model.index.entryHashes.entrySet())if(!MAIN.equals(entry.getKey())&&!entry.getValue().equals(index.entryHashes.get(entry.getKey())))throw error("TOC_CACHE_PART_CHANGED",entry.getKey());
+        return new DocxEditResult(result,index,model.index.sourceSha256,Collections.emptyList(),Collections.emptyList(),model.index.entryHashes);
+    }
+    /** This cache-only write preserves the source declaration; the complete remaining XML must still roundtrip exactly. */
+    private static byte[] tocXmlKeepingOriginalDeclaration(Document document,byte[] original) {
+        byte[] rendered=xml(document);
+        String sourceHead=new String(original,0,Math.min(original.length,128),StandardCharsets.UTF_8),renderedHead=new String(rendered,0,Math.min(rendered.length,128),StandardCharsets.UTF_8);
+        int sourceEnd=sourceHead.indexOf("?>")+2,renderedEnd=renderedHead.indexOf("?>")+2;
+        if(!sourceHead.startsWith("<?xml ")||!renderedHead.startsWith("<?xml ")||sourceEnd<2||renderedEnd<2)throw error("TOC_CACHE_XML_NOT_REVERSIBLE","toc-cache");
+        byte[] result=new byte[sourceEnd+rendered.length-renderedEnd];System.arraycopy(original,0,result,0,sourceEnd);System.arraycopy(rendered,renderedEnd,result,sourceEnd,rendered.length-renderedEnd);return result;
+    }
+    public static final class TocPageReference {
+        private final String targetBookmark,fieldStartId,cacheNodeId,cachedPage;
+        private TocPageReference(String target,String field,String cache,String page){targetBookmark=target;fieldStartId=field;cacheNodeId=cache;cachedPage=page;}
+        public String getTargetBookmark(){return targetBookmark;}public String getFieldStartId(){return fieldStartId;}
+        public String getCacheNodeId(){return cacheNodeId;}public String getCachedPage(){return cachedPage;}
+    }
+    private static List<TocPageReference> tocPageReferences(PackageModel model) {
+        List<Feature> tocs=new ArrayList<>();
+        for(Feature feature:model.index.features)if("FIELD".equals(feature.kind)&&feature.instruction.trim().matches("(?is)^TOC(?:\\s.*)?$"))tocs.add(feature);
+        if(tocs.isEmpty())return Collections.emptyList();
+        if(tocs.size()!=1||!tocs.get(0).complete||!MAIN.equals(tocs.get(0).part))throw error("TOC_CACHE_SCOPE_UNSUPPORTED","toc-cache");
+        Feature toc=tocs.get(0);Element tocStart=model.nodes.get(toc.startId),tocEnd=model.nodes.get(toc.endId);
+        List<TocPageReference> result=new ArrayList<>();Set<String> targets=new HashSet<>();NodeList nodes=model.xmlParts.get(MAIN).getElementsByTagName("*");
+        for(Feature field:model.index.features)if("FIELD".equals(field.kind)&&MAIN.equals(field.part)&&insideFeature(model.nodes.get(field.startId),tocStart,tocEnd)) {
+            java.util.regex.Matcher command=java.util.regex.Pattern.compile("(?is)^\\s*PAGEREF\\s+(\\S+)\\s+\\\\h\\s*$").matcher(field.instruction);
+            if(!field.complete||!command.matches())throw error("TOC_CACHE_FIELD_UNSUPPORTED",field.startId);
+            String target=command.group(1);if(!targets.add(target))throw error("TOC_CACHE_DUPLICATE_TARGET",target);
+            int bookmarkCount=0;for(Feature bookmark:model.index.features)if("BOOKMARK".equals(bookmark.kind)&&target.equals(bookmark.name)&&bookmark.complete)bookmarkCount++;
+            if(bookmarkCount!=1)throw error("TOC_CACHE_BOOKMARK_AMBIGUOUS",target);
+            Element start=model.nodes.get(field.startId),end=model.nodes.get(field.endId),hyperlink=null;
+            for(Node parent=start.getParentNode();parent instanceof Element;parent=parent.getParentNode())if(is(parent,"hyperlink")){hyperlink=(Element)parent;break;}
+            if(hyperlink==null||!contains(hyperlink,end)||!target.equals(hyperlink.getAttributeNS(W,"anchor")))throw error("TOC_CACHE_HYPERLINK_MISMATCH",target);
+            Element separate=null,cache=null;
+            for(int i=0;i<nodes.getLength();i++) {
+                Element node=(Element)nodes.item(i);if(!insideFeature(node,start,end))continue;
+                if(is(node,"fldChar")){if(!"separate".equals(node.getAttributeNS(W,"fldCharType"))||separate!=null)throw error("TOC_CACHE_FIELD_UNSUPPORTED",field.startId);separate=node;}
+                if(is(node,"fldSimple"))throw error("TOC_CACHE_FIELD_UNSUPPORTED",field.startId);
+                if(is(node,"t")){if(separate==null||cache!=null||!node.getTextContent().matches("[1-9][0-9]*"))throw error("TOC_CACHE_RESULT_UNSUPPORTED",field.startId);cache=node;}
+            }
+            if(separate==null||cache==null)throw error("TOC_CACHE_RESULT_UNSUPPORTED",field.startId);
+            result.add(new TocPageReference(target,field.startId,MAIN+"#"+path(cache),cache.getTextContent()));
+        }
+        if(result.isEmpty())throw error("TOC_CACHE_RESULT_UNSUPPORTED",toc.startId);
+        return Collections.unmodifiableList(result);
+    }
     /** Request-local read-only validation; generation still reloads and edits the original package. */
     public static final class PreparedTemplate {
         private final PackageModel model;
@@ -141,7 +267,7 @@ public final class DocxTemplateEditor {
         private final List<NativeLayoutClearedParagraph> clearedParagraphs;
         private final List<NativeLayoutClearedKeepNextBreak> clearedKeepNextBreaks;
         private final List<NativeLayoutParagraphBoundary> paragraphBoundaries;
-        private final List<NodeAnchor> latinFontHintParagraphs,cellKeepNextParagraphs,cellWidowParagraphs;
+        private final List<NodeAnchor> latinFontHintParagraphs,latinFontSlotParagraphs,cellKeepNextParagraphs,cellWidowParagraphs,bodyWidowParagraphs;
         public NativeLayoutPlan(String sourceSha256,String profile,List<NativeLayoutBoundary> boundaries,List<NodeAnchor> emptyExclusions){this(sourceSha256,profile,boundaries,emptyExclusions,Collections.emptyList());}
         public NativeLayoutPlan(String sourceSha256,String profile,List<NativeLayoutBoundary> boundaries,List<NodeAnchor> emptyExclusions,List<NativeLayoutSpacing> emptySpacing){this(sourceSha256,profile,boundaries,emptyExclusions,emptySpacing,Collections.emptyList());}
         public NativeLayoutPlan(String sourceSha256,String profile,List<NativeLayoutBoundary> boundaries,List<NodeAnchor> emptyExclusions,List<NativeLayoutSpacing> emptySpacing,List<NodeAnchor> cohesiveRows){this(sourceSha256,profile,boundaries,emptyExclusions,emptySpacing,cohesiveRows,Collections.emptyList());}
@@ -151,10 +277,14 @@ public final class DocxTemplateEditor {
         public NativeLayoutPlan(String sourceSha256,String profile,List<NativeLayoutBoundary> boundaries,List<NodeAnchor> emptyExclusions,List<NativeLayoutSpacing> emptySpacing,List<NodeAnchor> cohesiveRows,List<NodeAnchor> compactGapRows,List<NativeLayoutClearedParagraph> clearedParagraphs,List<NodeAnchor> keepNextParagraphs,List<NativeLayoutClearedKeepNextBreak> clearedKeepNextBreaks,List<NativeLayoutParagraphBoundary> paragraphBoundaries){this(sourceSha256,profile,boundaries,emptyExclusions,emptySpacing,cohesiveRows,compactGapRows,clearedParagraphs,keepNextParagraphs,clearedKeepNextBreaks,paragraphBoundaries,null);}
         private NativeLayoutPlan(String sourceSha256,String profile,List<NativeLayoutBoundary> boundaries,List<NodeAnchor> emptyExclusions,List<NativeLayoutSpacing> emptySpacing,List<NodeAnchor> cohesiveRows,List<NodeAnchor> compactGapRows,List<NativeLayoutClearedParagraph> clearedParagraphs,List<NodeAnchor> keepNextParagraphs,List<NativeLayoutClearedKeepNextBreak> clearedKeepNextBreaks,List<NativeLayoutParagraphBoundary> paragraphBoundaries,NativeStoryPlan stories){this(sourceSha256,profile,boundaries,emptyExclusions,emptySpacing,cohesiveRows,compactGapRows,clearedParagraphs,keepNextParagraphs,clearedKeepNextBreaks,paragraphBoundaries,stories,Collections.emptyList());}
         private NativeLayoutPlan(String sourceSha256,String profile,List<NativeLayoutBoundary> boundaries,List<NodeAnchor> emptyExclusions,List<NativeLayoutSpacing> emptySpacing,List<NodeAnchor> cohesiveRows,List<NodeAnchor> compactGapRows,List<NativeLayoutClearedParagraph> clearedParagraphs,List<NodeAnchor> keepNextParagraphs,List<NativeLayoutClearedKeepNextBreak> clearedKeepNextBreaks,List<NativeLayoutParagraphBoundary> paragraphBoundaries,NativeStoryPlan stories,List<NodeAnchor> latinFontHintParagraphs){this(sourceSha256,profile,boundaries,emptyExclusions,emptySpacing,cohesiveRows,compactGapRows,clearedParagraphs,keepNextParagraphs,clearedKeepNextBreaks,paragraphBoundaries,stories,latinFontHintParagraphs,Collections.emptyList(),Collections.emptyList());}
-        private NativeLayoutPlan(String sourceSha256,String profile,List<NativeLayoutBoundary> boundaries,List<NodeAnchor> emptyExclusions,List<NativeLayoutSpacing> emptySpacing,List<NodeAnchor> cohesiveRows,List<NodeAnchor> compactGapRows,List<NativeLayoutClearedParagraph> clearedParagraphs,List<NodeAnchor> keepNextParagraphs,List<NativeLayoutClearedKeepNextBreak> clearedKeepNextBreaks,List<NativeLayoutParagraphBoundary> paragraphBoundaries,NativeStoryPlan stories,List<NodeAnchor> latinFontHintParagraphs,List<NodeAnchor> cellKeepNextParagraphs,List<NodeAnchor> cellWidowParagraphs){this.sourceSha256=Objects.requireNonNull(sourceSha256);this.profile=Objects.requireNonNull(profile);this.boundaries=Collections.unmodifiableList(new ArrayList<>(boundaries));this.emptyExclusions=Collections.unmodifiableList(new ArrayList<>(emptyExclusions));this.emptySpacing=Collections.unmodifiableList(new ArrayList<>(emptySpacing));this.cohesiveRows=Collections.unmodifiableList(new ArrayList<>(cohesiveRows));this.compactGapRows=Collections.unmodifiableList(new ArrayList<>(compactGapRows));this.clearedParagraphs=Collections.unmodifiableList(new ArrayList<>(clearedParagraphs));this.keepNextParagraphs=Collections.unmodifiableList(new ArrayList<>(keepNextParagraphs));this.clearedKeepNextBreaks=Collections.unmodifiableList(new ArrayList<>(clearedKeepNextBreaks));this.paragraphBoundaries=Collections.unmodifiableList(new ArrayList<>(paragraphBoundaries));this.stories=stories;this.latinFontHintParagraphs=Collections.unmodifiableList(new ArrayList<>(latinFontHintParagraphs));this.cellKeepNextParagraphs=Collections.unmodifiableList(new ArrayList<>(cellKeepNextParagraphs));this.cellWidowParagraphs=Collections.unmodifiableList(new ArrayList<>(cellWidowParagraphs));}
-        public NativeLayoutPlan withStories(NativeStoryPlan value){Objects.requireNonNull(value);if(!sourceSha256.equals(value.sourceSha256))throw error("STORY_SOURCE_HASH_MISMATCH",profile);return new NativeLayoutPlan(sourceSha256,profile,boundaries,emptyExclusions,emptySpacing,cohesiveRows,compactGapRows,clearedParagraphs,keepNextParagraphs,clearedKeepNextBreaks,paragraphBoundaries,value,latinFontHintParagraphs,cellKeepNextParagraphs,cellWidowParagraphs);}
-        public NativeLayoutPlan withLatinFontHintParagraphs(List<NodeAnchor> value){return new NativeLayoutPlan(sourceSha256,profile,boundaries,emptyExclusions,emptySpacing,cohesiveRows,compactGapRows,clearedParagraphs,keepNextParagraphs,clearedKeepNextBreaks,paragraphBoundaries,stories,value,cellKeepNextParagraphs,cellWidowParagraphs);}
-        public NativeLayoutPlan withCellParagraphFlow(List<NodeAnchor> keepNext,List<NodeAnchor> widows){return new NativeLayoutPlan(sourceSha256,profile,boundaries,emptyExclusions,emptySpacing,cohesiveRows,compactGapRows,clearedParagraphs,keepNextParagraphs,clearedKeepNextBreaks,paragraphBoundaries,stories,latinFontHintParagraphs,keepNext,widows);}
+        private NativeLayoutPlan(String sourceSha256,String profile,List<NativeLayoutBoundary> boundaries,List<NodeAnchor> emptyExclusions,List<NativeLayoutSpacing> emptySpacing,List<NodeAnchor> cohesiveRows,List<NodeAnchor> compactGapRows,List<NativeLayoutClearedParagraph> clearedParagraphs,List<NodeAnchor> keepNextParagraphs,List<NativeLayoutClearedKeepNextBreak> clearedKeepNextBreaks,List<NativeLayoutParagraphBoundary> paragraphBoundaries,NativeStoryPlan stories,List<NodeAnchor> latinFontHintParagraphs,List<NodeAnchor> cellKeepNextParagraphs,List<NodeAnchor> cellWidowParagraphs){this(sourceSha256,profile,boundaries,emptyExclusions,emptySpacing,cohesiveRows,compactGapRows,clearedParagraphs,keepNextParagraphs,clearedKeepNextBreaks,paragraphBoundaries,stories,latinFontHintParagraphs,cellKeepNextParagraphs,cellWidowParagraphs,Collections.emptyList());}
+        private NativeLayoutPlan(String sourceSha256,String profile,List<NativeLayoutBoundary> boundaries,List<NodeAnchor> emptyExclusions,List<NativeLayoutSpacing> emptySpacing,List<NodeAnchor> cohesiveRows,List<NodeAnchor> compactGapRows,List<NativeLayoutClearedParagraph> clearedParagraphs,List<NodeAnchor> keepNextParagraphs,List<NativeLayoutClearedKeepNextBreak> clearedKeepNextBreaks,List<NativeLayoutParagraphBoundary> paragraphBoundaries,NativeStoryPlan stories,List<NodeAnchor> latinFontHintParagraphs,List<NodeAnchor> cellKeepNextParagraphs,List<NodeAnchor> cellWidowParagraphs,List<NodeAnchor> latinFontSlotParagraphs){this(sourceSha256,profile,boundaries,emptyExclusions,emptySpacing,cohesiveRows,compactGapRows,clearedParagraphs,keepNextParagraphs,clearedKeepNextBreaks,paragraphBoundaries,stories,latinFontHintParagraphs,cellKeepNextParagraphs,cellWidowParagraphs,latinFontSlotParagraphs,Collections.emptyList());}
+        private NativeLayoutPlan(String sourceSha256,String profile,List<NativeLayoutBoundary> boundaries,List<NodeAnchor> emptyExclusions,List<NativeLayoutSpacing> emptySpacing,List<NodeAnchor> cohesiveRows,List<NodeAnchor> compactGapRows,List<NativeLayoutClearedParagraph> clearedParagraphs,List<NodeAnchor> keepNextParagraphs,List<NativeLayoutClearedKeepNextBreak> clearedKeepNextBreaks,List<NativeLayoutParagraphBoundary> paragraphBoundaries,NativeStoryPlan stories,List<NodeAnchor> latinFontHintParagraphs,List<NodeAnchor> cellKeepNextParagraphs,List<NodeAnchor> cellWidowParagraphs,List<NodeAnchor> latinFontSlotParagraphs,List<NodeAnchor> bodyWidowParagraphs){this.sourceSha256=Objects.requireNonNull(sourceSha256);this.profile=Objects.requireNonNull(profile);this.boundaries=Collections.unmodifiableList(new ArrayList<>(boundaries));this.emptyExclusions=Collections.unmodifiableList(new ArrayList<>(emptyExclusions));this.emptySpacing=Collections.unmodifiableList(new ArrayList<>(emptySpacing));this.cohesiveRows=Collections.unmodifiableList(new ArrayList<>(cohesiveRows));this.compactGapRows=Collections.unmodifiableList(new ArrayList<>(compactGapRows));this.clearedParagraphs=Collections.unmodifiableList(new ArrayList<>(clearedParagraphs));this.keepNextParagraphs=Collections.unmodifiableList(new ArrayList<>(keepNextParagraphs));this.clearedKeepNextBreaks=Collections.unmodifiableList(new ArrayList<>(clearedKeepNextBreaks));this.paragraphBoundaries=Collections.unmodifiableList(new ArrayList<>(paragraphBoundaries));this.stories=stories;this.latinFontHintParagraphs=Collections.unmodifiableList(new ArrayList<>(latinFontHintParagraphs));this.cellKeepNextParagraphs=Collections.unmodifiableList(new ArrayList<>(cellKeepNextParagraphs));this.cellWidowParagraphs=Collections.unmodifiableList(new ArrayList<>(cellWidowParagraphs));this.latinFontSlotParagraphs=Collections.unmodifiableList(new ArrayList<>(latinFontSlotParagraphs));this.bodyWidowParagraphs=Collections.unmodifiableList(new ArrayList<>(bodyWidowParagraphs));}
+        public NativeLayoutPlan withStories(NativeStoryPlan value){Objects.requireNonNull(value);if(!sourceSha256.equals(value.sourceSha256))throw error("STORY_SOURCE_HASH_MISMATCH",profile);return new NativeLayoutPlan(sourceSha256,profile,boundaries,emptyExclusions,emptySpacing,cohesiveRows,compactGapRows,clearedParagraphs,keepNextParagraphs,clearedKeepNextBreaks,paragraphBoundaries,value,latinFontHintParagraphs,cellKeepNextParagraphs,cellWidowParagraphs,latinFontSlotParagraphs,bodyWidowParagraphs);}
+        public NativeLayoutPlan withLatinFontHintParagraphs(List<NodeAnchor> value){return new NativeLayoutPlan(sourceSha256,profile,boundaries,emptyExclusions,emptySpacing,cohesiveRows,compactGapRows,clearedParagraphs,keepNextParagraphs,clearedKeepNextBreaks,paragraphBoundaries,stories,value,cellKeepNextParagraphs,cellWidowParagraphs,latinFontSlotParagraphs,bodyWidowParagraphs);}
+        public NativeLayoutPlan withCellParagraphFlow(List<NodeAnchor> keepNext,List<NodeAnchor> widows){return new NativeLayoutPlan(sourceSha256,profile,boundaries,emptyExclusions,emptySpacing,cohesiveRows,compactGapRows,clearedParagraphs,keepNextParagraphs,clearedKeepNextBreaks,paragraphBoundaries,stories,latinFontHintParagraphs,keepNext,widows,latinFontSlotParagraphs,bodyWidowParagraphs);}
+        public NativeLayoutPlan withLatinFontSlotParagraphs(List<NodeAnchor> value){return new NativeLayoutPlan(sourceSha256,profile,boundaries,emptyExclusions,emptySpacing,cohesiveRows,compactGapRows,clearedParagraphs,keepNextParagraphs,clearedKeepNextBreaks,paragraphBoundaries,stories,latinFontHintParagraphs,cellKeepNextParagraphs,cellWidowParagraphs,value,bodyWidowParagraphs);}
+        public NativeLayoutPlan withBodyParagraphWidows(List<NodeAnchor> value){return new NativeLayoutPlan(sourceSha256,profile,boundaries,emptyExclusions,emptySpacing,cohesiveRows,compactGapRows,clearedParagraphs,keepNextParagraphs,clearedKeepNextBreaks,paragraphBoundaries,stories,latinFontHintParagraphs,cellKeepNextParagraphs,cellWidowParagraphs,latinFontSlotParagraphs,value);}
         public NativeStoryPlan getStories(){return stories;}
     }
     /** An unchanged original empty paragraph associated with an exact manual footer. */
@@ -174,8 +304,10 @@ public final class DocxTemplateEditor {
     }
     /** Exact heading-to-body chain; only cleared intervening guidance admits a renderer page boundary. */
     public static final class NativeLayoutParagraphBoundary {
-        private final NodeAnchor heading,body;private final List<NodeAnchor> gaps;
-        public NativeLayoutParagraphBoundary(NodeAnchor heading,NodeAnchor body,List<NodeAnchor> gaps){this.heading=Objects.requireNonNull(heading);this.body=Objects.requireNonNull(body);this.gaps=Collections.unmodifiableList(new ArrayList<>(gaps));}
+        private final NodeAnchor heading,body;private final List<NodeAnchor> gaps;private final boolean compactClearedGaps,releaseTrailingPageBreak;
+        public NativeLayoutParagraphBoundary(NodeAnchor heading,NodeAnchor body,List<NodeAnchor> gaps){this(heading,body,gaps,false);}
+        public NativeLayoutParagraphBoundary(NodeAnchor heading,NodeAnchor body,List<NodeAnchor> gaps,boolean compactClearedGaps){this(heading,body,gaps,compactClearedGaps,false);}
+        public NativeLayoutParagraphBoundary(NodeAnchor heading,NodeAnchor body,List<NodeAnchor> gaps,boolean compactClearedGaps,boolean releaseTrailingPageBreak){this.heading=Objects.requireNonNull(heading);this.body=Objects.requireNonNull(body);this.gaps=Collections.unmodifiableList(new ArrayList<>(gaps));this.compactClearedGaps=compactClearedGaps;this.releaseTrailingPageBreak=releaseTrailingPageBreak;if(releaseTrailingPageBreak&&(!compactClearedGaps||!gaps.isEmpty()))throw error("LAYOUT_TRAILING_PAGE_BREAK_SCOPE_CHANGED",heading.id);}
     }
     public static final class NativeLayoutChange {
         private final String action,status,generatedId,layoutId;
@@ -189,7 +321,7 @@ public final class DocxTemplateEditor {
         final List<Element[]> boundaries=new ArrayList<>(),spacing=new ArrayList<>(),cleared=new ArrayList<>();final List<Element> empty=new ArrayList<>(),cohesiveRows=new ArrayList<>(),compactGapRows=new ArrayList<>(),keepNext=new ArrayList<>();
         final Map<String,Element[]> clearedKeepNextBreaks=new LinkedHashMap<>();
         final List<List<Element>> paragraphBoundaries=new ArrayList<>();
-        final List<Element> latinFontHintParagraphs=new ArrayList<>(),cellKeepNextParagraphs=new ArrayList<>(),cellWidowParagraphs=new ArrayList<>();
+        final List<Element> latinFontHintParagraphs=new ArrayList<>(),latinFontSlotParagraphs=new ArrayList<>(),cellKeepNextParagraphs=new ArrayList<>(),cellWidowParagraphs=new ArrayList<>(),bodyWidowParagraphs=new ArrayList<>();
         final Set<Element> sctTitleBoundaryHeadings=Collections.newSetFromMap(new IdentityHashMap<>());
         final Map<Element,Element> derivedSctTitleBreaks=new LinkedHashMap<>();
         CapturedLayout(NativeLayoutPlan plan){this.plan=plan;}
@@ -215,9 +347,25 @@ public final class DocxTemplateEditor {
         Set<String> keepIds=new HashSet<>();for(NodeAnchor anchor:plan.keepNextParagraphs)keepIds.add(anchor.id);
         for(NativeLayoutClearedKeepNextBreak item:plan.clearedKeepNextBreaks){Element paragraph=layoutAnchor(model,item.paragraph),guard=layoutAnchor(model,item.guard);if(!keepIds.contains(item.paragraph.id)||!keepIds.contains(item.guard.id)||paragraph==guard||!is(guard,"p")||!is(guard.getParentNode(),"body")||!descendantText(guard,"t").equals(item.guardText)||!hasPageBreak(paragraph)||result.clearedKeepNextBreaks.put(item.paragraph.id,new Element[]{paragraph,guard})!=null)throw error("LAYOUT_KEEP_NEXT_SCOPE_CHANGED",item.paragraph.id);}
         for(NodeAnchor anchor:plan.keepNextParagraphs){Element paragraph=layoutAnchor(model,anchor);boolean clearedBreak=result.clearedKeepNextBreaks.containsKey(anchor.id);if(!selected.add(anchor.id)||!is(paragraph,"p")||!is(paragraph.getParentNode(),"body")||has(paragraph,"sectPr")||has(paragraph,"pageBreakBefore")||hasPageBreak(paragraph)&&!clearedBreak)throw error("LAYOUT_KEEP_NEXT_SCOPE_CHANGED",anchor.id);validateClearedLayoutParagraph(paragraph,clearedBreak,anchor.id);result.keepNext.add(paragraph);}
-        Set<String> paragraphBoundaryIds=new HashSet<>();for(NativeLayoutParagraphBoundary boundary:plan.paragraphBoundaries){List<Element> chain=new ArrayList<>();Element heading=layoutAnchor(model,boundary.heading),body=layoutAnchor(model,boundary.body);chain.add(heading);for(NodeAnchor gap:boundary.gaps)chain.add(layoutAnchor(model,gap));chain.add(body);if(!paragraphBoundaryIds.add(boundary.heading.id)||boundary.gaps.isEmpty())throw error("LAYOUT_PARAGRAPH_BOUNDARY_SCOPE_CHANGED",boundary.heading.id);for(int i=0;i<chain.size();i++){Element node=chain.get(i);if(!is(node,"p")||!is(node.getParentNode(),"body"))throw error("LAYOUT_PARAGRAPH_BOUNDARY_SCOPE_CHANGED",boundary.heading.id);validateClearedLayoutParagraph(node,false,boundary.heading.id);if(i>0){Node following=chain.get(i-1).getNextSibling();while(following!=null&&!(following instanceof Element))following=following.getNextSibling();if(following!=node)throw error("LAYOUT_PARAGRAPH_BOUNDARY_SCOPE_CHANGED",boundary.heading.id);}}if(descendantText(heading,"t").trim().isEmpty()||descendantText(body,"t").trim().isEmpty())throw error("LAYOUT_PARAGRAPH_BOUNDARY_SCOPE_CHANGED",boundary.heading.id);result.paragraphBoundaries.add(chain);}
+        Set<String> paragraphBoundaryIds=new HashSet<>(),paragraphBoundaryBodies=new HashSet<>(),paragraphBoundaryGaps=new HashSet<>(),paragraphBoundaryEndpoints=new HashSet<>(),trailingBreakIds=new HashSet<>();
+        for(NativeLayoutParagraphBoundary boundary:plan.paragraphBoundaries)if(boundary.releaseTrailingPageBreak&&!trailingBreakIds.add(boundary.heading.id))throw error("LAYOUT_TRAILING_PAGE_BREAK_SCOPE_CHANGED",boundary.heading.id);
+        for(NativeLayoutParagraphBoundary boundary:plan.paragraphBoundaries){
+            List<Element> chain=new ArrayList<>();Element heading=layoutAnchor(model,boundary.heading),body=layoutAnchor(model,boundary.body);chain.add(heading);for(NodeAnchor gap:boundary.gaps){chain.add(layoutAnchor(model,gap));if(!paragraphBoundaryGaps.add(gap.id))throw error("LAYOUT_PARAGRAPH_BOUNDARY_SCOPE_CHANGED",gap.id);}chain.add(body);
+            if(!paragraphBoundaryIds.add(boundary.heading.id)||!paragraphBoundaryBodies.add(boundary.body.id)||boundary.gaps.isEmpty()&&!boundary.compactClearedGaps)throw error("LAYOUT_PARAGRAPH_BOUNDARY_SCOPE_CHANGED",boundary.heading.id);
+            paragraphBoundaryEndpoints.add(boundary.heading.id);paragraphBoundaryEndpoints.add(boundary.body.id);
+            for(int i=0;i<chain.size();i++){Element node=chain.get(i);if(!is(node,"p")||!is(node.getParentNode(),"body"))throw error("LAYOUT_PARAGRAPH_BOUNDARY_SCOPE_CHANGED",boundary.heading.id);
+                String id=i==0?boundary.heading.id:i==chain.size()-1?boundary.body.id:boundary.gaps.get(i-1).id;
+                if(trailingBreakIds.contains(id))trailingLayoutPageBreak(node,id);else validateClearedLayoutParagraph(node,false,id);
+                if(i>0){Node following=nextNativeFlowSibling(chain.get(i-1));if(following!=node)throw error("LAYOUT_PARAGRAPH_BOUNDARY_SCOPE_CHANGED",boundary.heading.id);}
+            }
+            if(descendantText(heading,"t").trim().isEmpty()||descendantText(body,"t").trim().isEmpty())throw error("LAYOUT_PARAGRAPH_BOUNDARY_SCOPE_CHANGED",boundary.heading.id);result.paragraphBoundaries.add(chain);
+        }
+        for(String gap:paragraphBoundaryGaps)if(paragraphBoundaryEndpoints.contains(gap))throw error("LAYOUT_PARAGRAPH_BOUNDARY_SCOPE_CHANGED",gap);
         for(NodeAnchor anchor:plan.latinFontHintParagraphs){Element paragraph=layoutAnchor(model,anchor);if(!selected.add(anchor.id))throw error("LAYOUT_LATIN_HINT_SCOPE_CHANGED",anchor.id);latinHintFonts(paragraph,anchor.id,true);result.latinFontHintParagraphs.add(paragraph);}
+        // A font slot may share a conditional cleared-body target; its unchanged source hash is rechecked before application.
+        Set<String> fontSlotIds=new HashSet<>();for(NodeAnchor anchor:plan.latinFontSlotParagraphs){Element paragraph=layoutAnchor(model,anchor);if(!fontSlotIds.add(anchor.id)||plan.latinFontHintParagraphs.stream().anyMatch(hint->hint.id.equals(anchor.id)))throw error("LAYOUT_LATIN_FONT_SLOT_SCOPE_CHANGED",anchor.id);latinFontControls(paragraph,anchor.id,true,true);result.latinFontSlotParagraphs.add(paragraph);}
         Set<String> cellFlowIds=new HashSet<>();for(List<NodeAnchor> anchors:Arrays.asList(plan.cellKeepNextParagraphs,plan.cellWidowParagraphs))for(NodeAnchor anchor:anchors){Element paragraph=layoutAnchor(model,anchor);if(!cellFlowIds.add(anchor.id))throw error("LAYOUT_CELL_FLOW_SCOPE_CHANGED",anchor.id);validateCellParagraphFlow(paragraph,anchor.id);(anchors==plan.cellKeepNextParagraphs?result.cellKeepNextParagraphs:result.cellWidowParagraphs).add(paragraph);}
+        for(NodeAnchor anchor:plan.bodyWidowParagraphs){Element paragraph=layoutAnchor(model,anchor);if(!selected.add(anchor.id))throw error("LAYOUT_BODY_WIDOW_SCOPE_CHANGED",anchor.id);validateBodyParagraphWidows(paragraph,anchor.id);result.bodyWidowParagraphs.add(paragraph);}
         return result;
     }
     /** Cached page positions cease to require a forced body boundary after its exact title moves to a real header. */
@@ -252,7 +400,7 @@ public final class DocxTemplateEditor {
         List<NativeLayoutChange> changes=new ArrayList<>();if(captured.plan==null)return changes;Document document=model.xmlParts.get(MAIN);Element root=document.getDocumentElement();
         long nextMarker=0;Set<String> markerNames=new HashSet<>();NodeList markers=document.getElementsByTagNameNS(W,"bookmarkStart");for(int i=0;i<markers.getLength();i++){Element marker=(Element)markers.item(i);markerNames.add(marker.getAttributeNS(W,"name"));try{nextMarker=Math.max(nextMarker,Long.parseLong(marker.getAttributeNS(W,"id"))+1);}catch(NumberFormatException ignored){}}
         Set<String> clearedKeepNextEligibility=new HashSet<>();for(NativeLayoutClearedKeepNextBreak item:captured.plan.clearedKeepNextBreaks){Element[] nodes=captured.clearedKeepNextBreaks.get(item.paragraph.id);if(contains(root,nodes[0])&&contains(root,nodes[1])&&hash(xml(nodes[1])).equals(item.guard.sha256)&&descendantText(nodes[0],"t").trim().isEmpty())clearedKeepNextEligibility.add(item.paragraph.id);}
-        Set<Integer> paragraphBoundaryEligibility=new HashSet<>();for(int i=0;i<captured.paragraphBoundaries.size();i++){List<Element> chain=captured.paragraphBoundaries.get(i);NativeLayoutParagraphBoundary boundary=captured.plan.paragraphBoundaries.get(i);boolean eligible=contains(root,chain.get(0))&&contains(root,chain.get(chain.size()-1))&&hash(xml(chain.get(0))).equals(boundary.heading.sha256)&&hash(xml(chain.get(chain.size()-1))).equals(boundary.body.sha256);for(int j=1;j<chain.size()-1;j++)eligible=eligible&&contains(root,chain.get(j))&&descendantText(chain.get(j),"t").trim().isEmpty();for(int j=1;j<chain.size();j++){Node following=chain.get(j-1).getNextSibling();while(following!=null&&!(following instanceof Element))following=following.getNextSibling();eligible=eligible&&following==chain.get(j);}if(eligible)paragraphBoundaryEligibility.add(i);}
+        Set<Integer> paragraphBoundaryEligibility=new HashSet<>();for(int i=0;i<captured.paragraphBoundaries.size();i++){List<Element> chain=captured.paragraphBoundaries.get(i);NativeLayoutParagraphBoundary boundary=captured.plan.paragraphBoundaries.get(i);boolean eligible=contains(root,chain.get(0))&&contains(root,chain.get(chain.size()-1))&&hash(xml(chain.get(0))).equals(boundary.heading.sha256)&&hash(xml(chain.get(chain.size()-1))).equals(boundary.body.sha256);for(int j=1;j<chain.size()-1;j++)eligible=eligible&&contains(root,chain.get(j))&&descendantText(chain.get(j),"t").trim().isEmpty();for(int j=1;j<chain.size();j++){Node following=nextNativeFlowSibling(chain.get(j-1));eligible=eligible&&following==chain.get(j);}if(eligible)paragraphBoundaryEligibility.add(i);}
         for(int i=0;i<captured.empty.size();i++){Element paragraph=captured.empty.get(i);NodeAnchor anchor=captured.plan.emptyExclusions.get(i);if(!contains(root,paragraph)){changes.add(new NativeLayoutChange("remove_verified_empty","SKIPPED_REMOVED",anchor,null));continue;}if(!layoutEmpty(paragraph)||!hash(xml(paragraph)).equals(anchor.sha256))throw error("LAYOUT_EMPTY_SCOPE_CHANGED",anchor.id);paragraph.getParentNode().removeChild(paragraph);changes.add(new NativeLayoutChange("remove_verified_empty","APPLIED",anchor,null));}
         for(int i=0;i<captured.boundaries.size();i++) {
             Element table=captured.boundaries.get(i)[0],heading=captured.boundaries.get(i)[1];NodeAnchor anchor=captured.plan.boundaries.get(i).table;
@@ -294,8 +442,29 @@ public final class DocxTemplateEditor {
             String layoutId="CL"+hash((captured.plan.sourceSha256+"|"+captured.plan.profile+"|keep-next|"+anchor.id).getBytes(StandardCharsets.UTF_8)).substring(0,28);if(!markerNames.add(layoutId))throw error("LAYOUT_BOOKMARK_CONFLICT",anchor.id);attachBookmark(document,paragraph,layoutId,nextMarker++);
             changes.add(new NativeLayoutChange(clearedBreak?"keep_verified_cleared_guidance_with_next":"keep_verified_paragraph_with_next","APPLIED",anchor,MAIN+"#"+path(paragraph),layoutId));
         }
-        for(int i=0;i<captured.paragraphBoundaries.size();i++){Element heading=captured.paragraphBoundaries.get(i).get(0);NodeAnchor anchor=captured.plan.paragraphBoundaries.get(i).heading;if(!paragraphBoundaryEligibility.contains(i)){changes.add(new NativeLayoutChange("page_break_before_verified_heading","SKIPPED_NOT_CLEARED",anchor,contains(root,heading)?MAIN+"#"+path(heading):null));continue;}pageBreakBeforeHeading(heading);
+        for(int i=0;i<captured.paragraphBoundaries.size();i++){List<Element> chain=captured.paragraphBoundaries.get(i);NativeLayoutParagraphBoundary boundary=captured.plan.paragraphBoundaries.get(i);Element heading=chain.get(0);NodeAnchor anchor=boundary.heading;if(!paragraphBoundaryEligibility.contains(i)){changes.add(new NativeLayoutChange(boundary.compactClearedGaps?"keep_verified_heading_flow":"page_break_before_verified_heading","SKIPPED_NOT_CLEARED",anchor,contains(root,heading)?MAIN+"#"+path(heading):null));continue;}
+            if(boundary.compactClearedGaps){
+                // The source-bound chain ends at the first body; only heading and emptied guidance flow together.
+                for(int j=0;j<chain.size()-1;j++){Element paragraph=chain.get(j);NodeAnchor source=j==0?boundary.heading:boundary.gaps.get(j-1);
+                    if(j==0&&boundary.releaseTrailingPageBreak){
+                        releaseTrailingLayoutPageBreak(paragraph,source.id);String releasedId="CL"+hash((captured.plan.sourceSha256+"|"+captured.plan.profile+"|heading-flow-trailing-break|"+source.id).getBytes(StandardCharsets.UTF_8)).substring(0,28);if(!markerNames.add(releasedId))throw error("LAYOUT_BOOKMARK_CONFLICT",source.id);attachBookmark(document,paragraph,releasedId,nextMarker++);changes.add(new NativeLayoutChange("release_verified_trailing_page_break","APPLIED",source,MAIN+"#"+path(paragraph),releasedId));
+                    }
+                    validateClearedLayoutParagraph(paragraph,false,source.id);
+                    if(j>0){List<Element> values=direct(paragraph,"pPr");Element props=values.isEmpty()?document.createElementNS(W,"w:pPr"):values.get(0);if(values.isEmpty())paragraph.insertBefore(props,paragraph.getFirstChild());compactSpacing(document,props);String compactId="CL"+hash((captured.plan.sourceSha256+"|"+captured.plan.profile+"|heading-flow-compact|"+source.id).getBytes(StandardCharsets.UTF_8)).substring(0,28);if(!markerNames.add(compactId))throw error("LAYOUT_BOOKMARK_CONFLICT",source.id);attachBookmark(document,paragraph,compactId,nextMarker++);changes.add(new NativeLayoutChange("compact_verified_cleared_spacing","APPLIED",source,MAIN+"#"+path(paragraph),compactId));}
+                    keepWithNext(paragraph);keepHeadingFlowLines(paragraph);String keepId="CL"+hash((captured.plan.sourceSha256+"|"+captured.plan.profile+"|heading-flow-keep|"+source.id).getBytes(StandardCharsets.UTF_8)).substring(0,28);if(!markerNames.add(keepId))throw error("LAYOUT_BOOKMARK_CONFLICT",source.id);attachBookmark(document,paragraph,keepId,nextMarker++);changes.add(new NativeLayoutChange("keep_verified_heading_flow","APPLIED",source,MAIN+"#"+path(paragraph),keepId));
+                }
+                continue;
+            }
+            pageBreakBeforeHeading(heading);
             String layoutId="CL"+hash((captured.plan.sourceSha256+"|"+captured.plan.profile+"|heading-break|"+anchor.id).getBytes(StandardCharsets.UTF_8)).substring(0,28);if(!markerNames.add(layoutId))throw error("LAYOUT_BOOKMARK_CONFLICT",anchor.id);attachBookmark(document,heading,layoutId,nextMarker++);changes.add(new NativeLayoutChange("page_break_before_verified_heading","APPLIED",anchor,MAIN+"#"+path(heading),layoutId));}
+        for(int i=0;i<captured.latinFontSlotParagraphs.size();i++){
+            Element paragraph=captured.latinFontSlotParagraphs.get(i);NodeAnchor anchor=captured.plan.latinFontSlotParagraphs.get(i);
+            if(!contains(root,paragraph)){changes.add(new NativeLayoutChange("normalize_verified_latin_font_slot","SKIPPED_REMOVED",anchor,null));continue;}
+            if(!hash(xml(paragraph)).equals(anchor.sha256)){changes.add(new NativeLayoutChange("normalize_verified_latin_font_slot","SKIPPED_CHANGED",anchor,MAIN+"#"+path(paragraph)));continue;}
+            for(Element fonts:latinFontControls(paragraph,anchor.id,true,true))fonts.removeAttributeNS(W,"eastAsia");
+            String layoutId="CL"+hash((captured.plan.sourceSha256+"|"+captured.plan.profile+"|latin-font-slot|"+anchor.id).getBytes(StandardCharsets.UTF_8)).substring(0,28);if(!markerNames.add(layoutId))throw error("LAYOUT_BOOKMARK_CONFLICT",anchor.id);attachBookmark(document,paragraph,layoutId,nextMarker++);
+            changes.add(new NativeLayoutChange("normalize_verified_latin_font_slot","APPLIED",anchor,MAIN+"#"+path(paragraph),layoutId));
+        }
         // Captured source hashes were checked together; apply hints before row markers change the same paragraph.
         for(int i=0;i<captured.latinFontHintParagraphs.size();i++){
             Element paragraph=captured.latinFontHintParagraphs.get(i);NodeAnchor anchor=captured.plan.latinFontHintParagraphs.get(i);
@@ -325,26 +494,42 @@ public final class DocxTemplateEditor {
         for(boolean keepNext:new boolean[]{true,false}){List<Element> paragraphs=keepNext?captured.cellKeepNextParagraphs:captured.cellWidowParagraphs;List<NodeAnchor> anchors=keepNext?captured.plan.cellKeepNextParagraphs:captured.plan.cellWidowParagraphs;String action=keepNext?"keep_verified_cell_paragraph_with_next":"keep_verified_cell_paragraph_widows";
             for(int i=0;i<paragraphs.size();i++){Element paragraph=paragraphs.get(i);NodeAnchor anchor=anchors.get(i);if(!contains(root,paragraph)||explicitlyCleared.contains(paragraph)){changes.add(new NativeLayoutChange(action,contains(root,paragraph)?"SKIPPED_CLEARED":"SKIPPED_REMOVED",anchor,null));continue;}validateCellParagraphFlow(paragraph,anchor.id);if(keepNext){keepWithNext(paragraph);controlWidows(paragraph);}else controlWidows(paragraph);
                 String layoutId="CL"+hash((captured.plan.sourceSha256+"|"+captured.plan.profile+"|"+action+"|"+anchor.id).getBytes(StandardCharsets.UTF_8)).substring(0,28);if(!markerNames.add(layoutId))throw error("LAYOUT_BOOKMARK_CONFLICT",anchor.id);attachBookmark(document,paragraph,layoutId,nextMarker++);changes.add(new NativeLayoutChange(action,"APPLIED",anchor,MAIN+"#"+path(paragraph),layoutId));}}
+        for(int i=0;i<captured.bodyWidowParagraphs.size();i++){
+            Element paragraph=captured.bodyWidowParagraphs.get(i);NodeAnchor anchor=captured.plan.bodyWidowParagraphs.get(i);String action="keep_verified_body_paragraph_widows";
+            if(!contains(root,paragraph)||explicitlyCleared.contains(paragraph)){changes.add(new NativeLayoutChange(action,contains(root,paragraph)?"SKIPPED_CLEARED":"SKIPPED_REMOVED",anchor,null));continue;}
+            if(!hash(xml(paragraph)).equals(anchor.sha256)){changes.add(new NativeLayoutChange(action,"SKIPPED_CHANGED",anchor,MAIN+"#"+path(paragraph)));continue;}
+            validateBodyParagraphWidows(paragraph,anchor.id);controlWidows(paragraph);
+            String layoutId="CL"+hash((captured.plan.sourceSha256+"|"+captured.plan.profile+"|"+action+"|"+anchor.id).getBytes(StandardCharsets.UTF_8)).substring(0,28);if(!markerNames.add(layoutId))throw error("LAYOUT_BOOKMARK_CONFLICT",anchor.id);attachBookmark(document,paragraph,layoutId,nextMarker++);changes.add(new NativeLayoutChange(action,"APPLIED",anchor,MAIN+"#"+path(paragraph),layoutId));
+        }
         // Later insertions may shift earlier BODY paths. Resolve IDs only after the complete layout.
         List<NativeLayoutChange> finalChanges=new ArrayList<>();int boundaryIndex=0;
         for(NativeLayoutChange change:changes){if("page_break_before".equals(change.action)){Element table=captured.boundaries.get(boundaryIndex++)[0];String id="APPLIED".equals(change.status)?MAIN+"#"+path((Element)table.getPreviousSibling()):null;finalChanges.add(new NativeLayoutChange(change.action,change.status,change.source,id,change.layoutId));}else finalChanges.add(change);}
         return finalChanges;
     }
     /** Exact registered Latin runs and ordinary typography only; source fonts, sizes and spaces stay unchanged. */
-    private static List<Element> latinHintFonts(Element paragraph,String id,boolean requireHint){
-        if(!is(paragraph,"p")||!latinHintText(descendantText(paragraph,"t"),true))throw error("LAYOUT_LATIN_HINT_SCOPE_CHANGED",id);
+    private static List<Element> latinHintFonts(Element paragraph,String id,boolean requireHint){return latinFontControls(paragraph,id,requireHint,false);}
+    /** Slot cleanup keeps paragraph alignment and every other font attribute; only exact registered ASCII source runs qualify. */
+    private static List<Element> latinFontControls(Element paragraph,String id,boolean required,boolean fontSlot){
+        String code=fontSlot?"LAYOUT_LATIN_FONT_SLOT_SCOPE_CHANGED":"LAYOUT_LATIN_HINT_SCOPE_CHANGED";
+        String paragraphText=descendantText(paragraph,"t");
+        if(!is(paragraph,"p")||!latinHintText(paragraphText,true)||fontSlot&&!printableAscii(paragraphText))throw error(code,id);
+        if(fontSlot&&(has(paragraph,"rPrChange")||has(paragraph,"pPrChange")))throw error(code,id);
         List<Element> result=new ArrayList<>();
         for(Node child=paragraph.getFirstChild();child!=null;child=child.getNextSibling())if(child instanceof Element){
             if(is(child,"pPr")||is(child,"bookmarkStart")||is(child,"bookmarkEnd")||is(child,"proofErr"))continue;
-            if(!is(child,"r"))throw error("LAYOUT_LATIN_HINT_SCOPE_CHANGED",id);Element run=(Element)child;
-            for(Node item=run.getFirstChild();item!=null;item=item.getNextSibling())if(item instanceof Element&&!is(item,"rPr")&&!is(item,"t")&&!is(item,"tab"))throw error("LAYOUT_LATIN_HINT_SCOPE_CHANGED",id);
-            String text=descendantText(run,"t");if(!latinHintText(text,false))throw error("LAYOUT_LATIN_HINT_SCOPE_CHANGED",id);
-            if(text.isEmpty())continue;if(!direct(run,"tab").isEmpty())throw error("LAYOUT_LATIN_HINT_SCOPE_CHANGED",id);
-            List<Element> props=direct(run,"rPr");if(props.size()>1)throw error("LAYOUT_LATIN_HINT_SCOPE_CHANGED",id);if(props.isEmpty())continue;
-            List<Element> fonts=direct(props.get(0),"rFonts");if(fonts.size()>1)throw error("LAYOUT_LATIN_HINT_SCOPE_CHANGED",id);if(fonts.size()==1&&"eastAsia".equals(fonts.get(0).getAttributeNS(W,"hint")))result.add(fonts.get(0));
+            if(!is(child,"r"))throw error(code,id);Element run=(Element)child;
+            for(Node item=run.getFirstChild();item!=null;item=item.getNextSibling())if(item instanceof Element&&!is(item,"rPr")&&!is(item,"t")&&!is(item,"tab"))throw error(code,id);
+            String text=descendantText(run,"t");if(!latinHintText(text,false)||fontSlot&&!printableAscii(text))throw error(code,id);
+            if(text.isEmpty())continue;if(!fontSlot&&!direct(run,"tab").isEmpty())throw error(code,id);
+            List<Element> props=direct(run,"rPr");if(props.size()>1)throw error(code,id);if(props.isEmpty())continue;
+            List<Element> fonts=direct(props.get(0),"rFonts");if(fonts.size()>1)throw error(code,id);
+            if(fonts.size()==1&&(fontSlot?fonts.get(0).hasAttributeNS(W,"eastAsia"):"eastAsia".equals(fonts.get(0).getAttributeNS(W,"hint")))){
+                if(fontSlot&&!direct(run,"tab").isEmpty())throw error(code,id);result.add(fonts.get(0));
+            }
         }
-        if(requireHint&&result.isEmpty())throw error("LAYOUT_LATIN_HINT_SCOPE_CHANGED",id);return result;
+        if(required&&result.isEmpty())throw error(code,id);return result;
     }
+    private static boolean printableAscii(String text){return text.codePoints().allMatch(cp->cp>=0x20&&cp<=0x7e);}
     private static boolean latinHintText(String text,boolean requireLetter){
         boolean latin=false;
         for(int offset=0;offset<text.length();){int cp=text.codePointAt(offset);offset+=Character.charCount(cp);boolean letter=Character.isLetter(cp)&&Character.UnicodeScript.of(cp)==Character.UnicodeScript.LATIN;
@@ -372,6 +557,18 @@ public final class DocxTemplateEditor {
             if(!W.equals(node.getNamespaceURI())||!Arrays.asList("r","t","tab","bookmarkStart","bookmarkEnd","proofErr","br","lastRenderedPageBreak","smartTag","smartTagPr","attr").contains(node.getLocalName())||is(node,"br")&&(!allowPageBreak||!"page".equals(node.getAttributeNS(W,"type")))||!validLegacyLayoutInline(node))throw error("LAYOUT_CLEARED_INLINE_UNSUPPORTED",id);
         }
     }
+    /** The exact bound lead may release one final run break; following text or any second break is rejected. */
+    private static Element trailingLayoutPageBreak(Element paragraph,String id){
+        validateClearedLayoutParagraph(paragraph,true,id);NodeList breaks=paragraph.getElementsByTagNameNS(W,"br");
+        if(breaks.getLength()!=1)throw error("LAYOUT_TRAILING_PAGE_BREAK_SCOPE_CHANGED",id);Element value=(Element)breaks.item(0);
+        if(!is(value.getParentNode(),"r")||value.hasChildNodes()||value.getAttributes().getLength()!=1||!"page".equals(value.getAttributeNS(W,"type")))throw error("LAYOUT_TRAILING_PAGE_BREAK_SCOPE_CHANGED",id);
+        NodeList nodes=paragraph.getElementsByTagName("*");for(int i=0;i<nodes.getLength();i++){Element node=(Element)nodes.item(i);if((value.compareDocumentPosition(node)&Node.DOCUMENT_POSITION_FOLLOWING)==0)continue;boolean properties=false;for(Node parent=node;parent!=paragraph;parent=parent.getParentNode())if(is(parent,"pPr")||is(parent,"rPr")){properties=true;break;}if(!properties&&(is(node,"tab")||is(node,"br")||is(node,"t")&&!node.getTextContent().isEmpty()))throw error("LAYOUT_TRAILING_PAGE_BREAK_SCOPE_CHANGED",id);}
+        return value;
+    }
+    private static void releaseTrailingLayoutPageBreak(Element paragraph,String id){
+        byte[] original=xml(paragraph);Element value=trailingLayoutPageBreak(paragraph,id);Node parent=value.getParentNode(),next=value.getNextSibling();parent.removeChild(value);parent.insertBefore(value,next);
+        if(!Arrays.equals(original,xml(paragraph)))throw error("LAYOUT_TRAILING_PAGE_BREAK_NOT_REVERSIBLE",id);parent.removeChild(value);
+    }
     private static boolean validLegacyLayoutInline(Element node){
         if(is(node,"lastRenderedPageBreak"))return is(node.getParentNode(),"r")&&!node.hasChildNodes();
         if(is(node,"attr"))return is(node.getParentNode(),"smartTagPr")&&!node.hasChildNodes();
@@ -381,8 +578,13 @@ public final class DocxTemplateEditor {
     }
     private static void pageBreakBeforeHeading(Element heading){Document document=heading.getOwnerDocument();List<Element> values=direct(heading,"pPr");Element props=values.isEmpty()?document.createElementNS(W,"w:pPr"):values.get(0);if(values.isEmpty())heading.insertBefore(props,heading.getFirstChild());Element value=document.createElementNS(W,"w:pageBreakBefore");value.setAttributeNS(W,"w:val","1");Node later=null;Set<String> afterBreak=Set.of("framePr","widowControl","numPr","suppressLineNumbers","pBdr","shd","tabs","suppressAutoHyphens","kinsoku","wordWrap","overflowPunct","topLinePunct","autoSpaceDE","autoSpaceDN","bidi","adjustRightInd","snapToGrid","spacing","ind","contextualSpacing","mirrorIndents","suppressOverlap","jc","textDirection","textAlignment","textboxTightWrap","outlineLvl","divId","cnfStyle","rPr","sectPr","pPrChange");for(Node child=props.getFirstChild();child!=null;child=child.getNextSibling())if(child instanceof Element&&W.equals(child.getNamespaceURI())&&afterBreak.contains(child.getLocalName())){later=child;break;}props.insertBefore(value,later);}
     private static void keepWithNext(Element paragraph){Document document=paragraph.getOwnerDocument();List<Element> values=direct(paragraph,"pPr");Element props=values.isEmpty()?document.createElementNS(W,"w:pPr"):values.get(0);if(values.isEmpty())paragraph.insertBefore(props,paragraph.getFirstChild());List<Element> existing=direct(props,"keepNext");if(!existing.isEmpty()){existing.get(0).setAttributeNS(W,"w:val","1");return;}Element value=document.createElementNS(W,"w:keepNext");value.setAttributeNS(W,"w:val","1");Node before=props.getFirstChild();if(is(before,"pStyle"))before=before.getNextSibling();props.insertBefore(value,before);}
+    /** The same exact heading/gap chain also keeps each native paragraph intact; first body is excluded. */
+    private static void keepHeadingFlowLines(Element paragraph){Document document=paragraph.getOwnerDocument();Element props=direct(paragraph,"pPr").get(0);List<Element> existing=direct(props,"keepLines");if(existing.size()>1)throw error("LAYOUT_HEADING_FLOW_CONTROL_CHANGED",path(paragraph));if(existing.size()==1){if(!Arrays.asList("","1","true","on").contains(existing.get(0).getAttributeNS(W,"val")))existing.get(0).setAttributeNS(W,"w:val","1");return;}Element value=document.createElementNS(W,"w:keepLines");value.setAttributeNS(W,"w:val","1");Node before=null;for(Node child=props.getFirstChild();child!=null;child=child.getNextSibling())if(child instanceof Element&&W.equals(child.getNamespaceURI())&&!Set.of("pStyle","keepNext").contains(child.getLocalName())){before=child;break;}props.insertBefore(value,before);}
     private static void validateCellParagraphFlow(Element paragraph,String id){if(!is(paragraph,"p")||!is(paragraph.getParentNode(),"tc")&&!(is(paragraph.getParentNode(),"body")&&editableText(paragraph).isEmpty()))throw error("LAYOUT_CELL_FLOW_SCOPE_CHANGED",id);validateClearedLayoutParagraph(paragraph,false,id);List<Element> props=direct(paragraph,"pPr");if(props.size()>1||!props.isEmpty()&&(direct(props.get(0),"keepNext").size()>1||direct(props.get(0),"widowControl").size()>1))throw error("LAYOUT_CELL_FLOW_SCOPE_CHANGED",id);}
     /** Explicit paragraph control overrides the template table styles' disabled widow protection. */
+    private static void validateBodyParagraphWidows(Element paragraph,String id){
+        if(!is(paragraph,"p")||!is(paragraph.getParentNode(),"body")||editableText(paragraph).trim().isEmpty())throw error("LAYOUT_BODY_WIDOW_SCOPE_CHANGED",id);validateClearedLayoutParagraph(paragraph,false,id);List<Element> props=direct(paragraph,"pPr");if(props.size()>1)throw error("LAYOUT_BODY_WIDOW_SCOPE_CHANGED",id);if(!props.isEmpty()){List<Element> values=direct(props.get(0),"widowControl");if(values.size()>1||!values.isEmpty()&&!Arrays.asList("","0","1","true","false","on","off").contains(values.get(0).getAttributeNS(W,"val")))throw error("LAYOUT_BODY_WIDOW_SCOPE_CHANGED",id);}
+    }
     private static void controlWidows(Element paragraph){Document document=paragraph.getOwnerDocument();List<Element> values=direct(paragraph,"pPr");Element props=values.isEmpty()?document.createElementNS(W,"w:pPr"):values.get(0);if(values.isEmpty())paragraph.insertBefore(props,paragraph.getFirstChild());List<Element> existing=direct(props,"widowControl");if(!existing.isEmpty()){existing.get(0).setAttributeNS(W,"w:val","1");return;}Element value=document.createElementNS(W,"w:widowControl");value.setAttributeNS(W,"w:val","1");Node before=null;for(Node child=props.getFirstChild();child!=null;child=child.getNextSibling())if(child instanceof Element&&W.equals(child.getNamespaceURI())&&!Set.of("pStyle","keepNext","keepLines","pageBreakBefore","framePr").contains(child.getLocalName())){before=child;break;}props.insertBefore(value,before);}
     private static void compactSpacing(Document document,Element props){
         Element value=direct(props,"spacing").isEmpty()?document.createElementNS(W,"w:spacing"):direct(props,"spacing").get(0);if(value.getParentNode()==null){Node later=null;Set<String> afterSpacing=Set.of("ind","contextualSpacing","mirrorIndents","suppressOverlap","jc","textDirection","textAlignment","textboxTightWrap","outlineLvl","divId","cnfStyle","rPr","sectPr","pPrChange");for(Node child=props.getFirstChild();child!=null;child=child.getNextSibling())if(child instanceof Element&&W.equals(child.getNamespaceURI())&&afterSpacing.contains(child.getLocalName())){later=child;break;}props.insertBefore(value,later);}
@@ -474,10 +676,13 @@ public final class DocxTemplateEditor {
         }
         public boolean hasCompactClearedLayoutSpacing(){try{Element paragraph=parse(snapshotXml).getDocumentElement();validateClearedLayoutParagraph(paragraph,false,id);if(!descendantText(paragraph,"t").trim().isEmpty())return false;List<Element> props=direct(paragraph,"pPr");if(props.size()!=1)return false;List<Element> spacing=direct(props.get(0),"spacing");if(spacing.size()!=1)return false;Element value=spacing.get(0);return "0".equals(value.getAttributeNS(W,"before"))&&"0".equals(value.getAttributeNS(W,"after"))&&"1".equals(value.getAttributeNS(W,"line"))&&"exact".equals(value.getAttributeNS(W,"lineRule"));}catch(Exception invalid){return false;}}
         public boolean hasNativeKeepNext(){try{Element paragraph=parse(snapshotXml).getDocumentElement();List<Element> props=direct(paragraph,"pPr");if(props.size()!=1)return false;List<Element> values=direct(props.get(0),"keepNext");return values.size()==1&&"1".equals(values.get(0).getAttributeNS(W,"val"));}catch(Exception invalid){return false;}}
+        public boolean hasReleasedNativeTrailingPageBreak(){try{Element paragraph=parse(snapshotXml).getDocumentElement();validateHeadingFlowParagraph(paragraph,true,id);return !has(paragraph,"br")&&hasNativeHeadingFlow();}catch(Exception invalid){return false;}}
+        public boolean hasNativeHeadingFlow(){try{if(!hasNativeKeepNext())return false;Element paragraph=parse(snapshotXml).getDocumentElement();List<Element> props=direct(paragraph,"pPr"),values=direct(props.get(0),"keepLines");return values.size()==1&&Arrays.asList("","1","true","on").contains(values.get(0).getAttributeNS(W,"val"));}catch(Exception invalid){return false;}}
         public boolean hasNativeWidowControl(){try{Element paragraph=parse(snapshotXml).getDocumentElement();List<Element> props=direct(paragraph,"pPr");if(props.size()!=1)return false;List<Element> values=direct(props.get(0),"widowControl");return values.size()==1&&"1".equals(values.get(0).getAttributeNS(W,"val"));}catch(Exception invalid){return false;}}
         public boolean hasNativeCellKeepNext(){return hasNativeKeepNext()&&hasNativeWidowControl();}
         public boolean hasNativeHeadingPageBreak(){try{Element paragraph=parse(snapshotXml).getDocumentElement();List<Element> props=direct(paragraph,"pPr");if(props.size()!=1)return false;List<Element> values=direct(props.get(0),"pageBreakBefore");return values.size()==1&&"1".equals(values.get(0).getAttributeNS(W,"val"));}catch(Exception invalid){return false;}}
         public boolean hasNormalizedNativeLatinFontHints(){try{return latinHintFonts(parse(snapshotXml).getDocumentElement(),id,false).isEmpty();}catch(Exception invalid){return false;}}
+        public boolean hasNormalizedNativeLatinFontSlots(){try{return latinFontControls(parse(snapshotXml).getDocumentElement(),id,false,true).isEmpty();}catch(Exception invalid){return false;}}
         public boolean hasClearedNativeKeepNext(){try{Element paragraph=parse(snapshotXml).getDocumentElement();return hasNativeKeepNext()&&descendantText(paragraph,"t").trim().isEmpty()&&!hasPageBreak(paragraph);}catch(Exception invalid){return false;}}
         public boolean hasNativeRowCohesion(){return nativeRowCohesion;}
         public boolean hasCompactNativeRowGaps(){return compactNativeRowGaps;}

@@ -18,11 +18,20 @@ public final class DraftPdfConverter {
     private final DraftPdfRenderProfile profile;
     public DraftPdfConverter(DraftPdfRenderProfile profile) { this.profile=profile; }
     public DraftPdfConversionResult convert(byte[] exactDocx) {
+        return convert(exactDocx,System.nanoTime()+TimeUnit.MILLISECONDS.toNanos(profile==null?1:profile.getTimeoutMillis()));
+    }
+    DraftTocFinalizer.Result finalizeToc(byte[] exactDocx) {return finalizeToc(exactDocx,null);}
+    DraftTocFinalizer.Result finalizeToc(byte[] exactDocx,String originalSourceSha256) {
+        // One bounded dynamic request includes up to three conversions and their version probes.
+        long budget=originalSourceSha256==null?(profile==null?1:profile.getTimeoutMillis()):240000;
+        long deadline=System.nanoTime()+TimeUnit.MILLISECONDS.toNanos(budget);
+        return DraftTocFinalizer.finish(exactDocx,originalSourceSha256,bytes->convert(bytes,deadline));
+    }
+    private DraftPdfConversionResult convert(byte[] exactDocx,long deadline) {
         if(profile!=null&&profile.getEngine()==DraftPdfRenderProfile.Engine.DESKTOP_X2T)return new DraftDesktopPdfAdapter(profile).convert(exactDocx);
         if(profile==null||!Files.isRegularFile(Paths.get(profile.getCommand().get(0))))
             throw new DraftPdfConversionException(DraftPdfConversionException.Code.NOT_CONFIGURED,"The explicitly configured document renderer is unavailable.");
         if(!hasProcessHandles())throw new DraftPdfConversionException(DraftPdfConversionException.Code.NOT_CONFIGURED,"This runtime cannot bound the renderer's owned process tree. Use a runtime with ProcessHandle support; no renderer was launched.");
-        long deadline=System.nanoTime()+TimeUnit.MILLISECONDS.toNanos(profile.getTimeoutMillis());
         try {
             if(exactDocx==null||exactDocx.length==0)throw new DraftPdfConversionException(DraftPdfConversionException.Code.INVALID_DOCX,"The source artifact is empty.");
             byte[] frozen=exactDocx.clone();String inputHash=sha256(frozen);

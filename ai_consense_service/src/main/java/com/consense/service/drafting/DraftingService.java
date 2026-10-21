@@ -1123,7 +1123,7 @@ public class DraftingService {
         Map<String,Object> prepared=preparePlan(projectId,null);
         if(reviewedRules(projectId)&&!unresolved(prepared).isEmpty())throw new BizException(4012,"GRAPH_PLAN_REVIEW_REQUIRED: Resolve the graph, project facts and source bindings before generation.");
         String snapshot=(String)prepared.get("snapshotId");
-        Map<String,DraftArtifact> revisions=new LinkedHashMap<>();Map<String,String> contents=new LinkedHashMap<>();
+        Map<String,DraftArtifact> revisions=new LinkedHashMap<>();Map<String,String> contents=new LinkedHashMap<>();Map<String,DraftTocFinalizer.Result> finalized=new LinkedHashMap<>();
         // Compile/validate every package before any current document pointer changes.
         for(String key:DraftBlueprint.draftFileKeys()) {
             SourceDocument template=requireTemplate(projectId,key);
@@ -1141,16 +1141,19 @@ public class DraftingService {
             DocxTemplateEditor.DocxEditResult generated;
             try {generated=reviewedRules(projectId)?templateGraphService.compile(original,key,prepared,DraftDocumentBindings.bookmarkNames(sourceBindings),nativeLayout):DraftFormattedRules.compile(original,key,prepared,DraftDocumentBindings.bookmarkNames(sourceBindings),nativeLayout);}
             catch(DocxTemplateEditor.EditException unsafe){throw new BizException(4012,unsafe.getCode()+": "+unsafe.getOperationId());}
+            DraftTocFinalizer.Result complete=finalizeDraft(key,DraftPdfConverter.sha256(original),generated.getDocxBytes());DocxTemplateEditor.TemplateIndex finalIndex=complete.index();finalized.put(key,complete);
             DraftArtifact revision=new DraftArtifact();revision.setId(java.util.UUID.randomUUID().toString());revision.setProjectId(projectId);revision.setFileKey(key);
-            revision.setSnapshotId(snapshot);revision.setSourceSha256(DraftPdfConverter.sha256(original));revision.setDocxSha256(generated.getDocxSha256());revision.setDocxBytes(generated.getDocxBytes());
-            List<Map<String,Object>> bindings=DraftDocumentBindings.generated(sourceBindings,generated);
-            revision.setBindingsJson(JsonUtils.write(bindings));revision.setLedgerJson(JsonUtils.write(DraftNativeLayout.ledger(generated,DraftNativeLayout.info(key,properties.getDrafting().getRendererKind(),generated))));revision.setBlocksJson(JsonUtils.write(DraftDocumentBindings.blocks(generated.getIndex(),bindings)));revision.setFieldImpactsJson(JsonUtils.write(generated.getAffectedFeatures()));
-            revisions.put(key,revision);contents.put(key,DraftFormattedRules.content(generated.getIndex()));
+            revision.setSnapshotId(snapshot);revision.setSourceSha256(DraftPdfConverter.sha256(original));revision.setDocxSha256(finalIndex.getSourceSha256());revision.setDocxBytes(complete.docx);
+            List<Map<String,Object>> bindings=DraftDocumentBindings.generated(sourceBindings,generated);if(!generated.getDocxSha256().equals(finalIndex.getSourceSha256()))bindings=DraftDocumentBindings.reconcile(bindings,finalIndex,false);
+            List<Object> ledger=DraftNativeLayout.ledger(generated,DraftNativeLayout.info(key,properties.getDrafting().getRendererKind(),generated));if("SCC".equals(key))ledger=complete.ledger(ledger);
+            revision.setBindingsJson(JsonUtils.write(bindings));revision.setLedgerJson(JsonUtils.write(ledger));revision.setBlocksJson(JsonUtils.write(DraftDocumentBindings.blocks(finalIndex,bindings)));revision.setFieldImpactsJson(JsonUtils.write(generated.getAffectedFeatures()));
+            revisions.put(key,revision);contents.put(key,DraftFormattedRules.content(finalIndex));
         }
         String planJson=JsonUtils.write(prepared);
         List<DraftDocumentVO> result=new ArrayList<>();
         for(String fileKey:DraftBlueprint.draftFileKeys()) {
             DraftArtifact revision=artifactRepository.save(revisions.get(fileKey));
+            saveFinalizedPdf(finalized.get(fileKey));
             DraftDocument doc=documentRepository.findByProjectIdAndFileKey(projectId,fileKey).orElseGet(DraftDocument::new);
             doc.setProjectId(projectId);doc.setFileKey(fileKey);doc.setTitle(DraftBlueprint.fileTitle(fileKey));doc.setContent(contents.get(fileKey));doc.setRevisionId(revision.getId());
             doc.setGenerated(true);doc.setContentEdited(false);doc.setSnapshotId(snapshot);doc.setRuleVersion(String.valueOf(prepared.get("ruleVersion")));
@@ -1226,10 +1229,12 @@ public class DraftingService {
             }
             if(edits.isEmpty())return documentVO(document,snapshotId(projectId,null));
             DocxTemplateEditor.DocxEditResult result=editor.applyWithParagraphBookmarks(previous.getDocxBytes(),new DocxTemplateEditor.SourceEditBatch(previous.getDocxSha256(),edits),Collections.emptyMap(),true);
+            DraftTocFinalizer.Result complete=finalizeDraft(fileKey,previous.getSourceSha256(),result.getDocxBytes());DocxTemplateEditor.TemplateIndex finalIndex=complete.index();
             DraftArtifact next=new DraftArtifact();next.setId(java.util.UUID.randomUUID().toString());next.setProjectId(projectId);next.setFileKey(fileKey);next.setSnapshotId(previous.getSnapshotId());next.setSourceSha256(previous.getSourceSha256());next.setParentRevisionId(previous.getId());
-            List<Map<String,Object>> bindings=DraftDocumentBindings.bodyEdited(DraftDocumentBindings.read(previous.getBindingsJson()),result);
-            next.setBindingsJson(JsonUtils.write(bindings));next.setDocxBytes(result.getDocxBytes());next.setDocxSha256(result.getDocxSha256());next.setLedgerJson(JsonUtils.write(DraftNativeLayout.bodyLedger(previous.getLedgerJson(),result)));next.setBlocksJson(JsonUtils.write(DraftDocumentBindings.blocks(result.getIndex(),bindings)));next.setFieldImpactsJson(JsonUtils.write(result.getAffectedFeatures()));
-            artifactRepository.save(next);document.setRevisionId(next.getId());document.setContent(DraftFormattedRules.content(result.getIndex()));
+            List<Map<String,Object>> bindings=DraftDocumentBindings.bodyEdited(DraftDocumentBindings.read(previous.getBindingsJson()),result);if(!result.getDocxSha256().equals(finalIndex.getSourceSha256()))bindings=DraftDocumentBindings.reconcile(bindings,finalIndex,false);
+            List<Object> ledger=DraftNativeLayout.bodyLedger(previous.getLedgerJson(),result);if("SCC".equals(fileKey))ledger=complete.ledger(ledger);
+            next.setBindingsJson(JsonUtils.write(bindings));next.setDocxBytes(complete.docx);next.setDocxSha256(finalIndex.getSourceSha256());next.setLedgerJson(JsonUtils.write(ledger));next.setBlocksJson(JsonUtils.write(DraftDocumentBindings.blocks(finalIndex,bindings)));next.setFieldImpactsJson(JsonUtils.write(result.getAffectedFeatures()));
+            artifactRepository.save(next);saveFinalizedPdf(complete);document.setRevisionId(next.getId());document.setContent(DraftFormattedRules.content(finalIndex));
         }catch(DocxTemplateEditor.EditException unsafe){throw new BizException(4012,unsafe.getCode()+": "+unsafe.getOperationId());}
         document.setContentEdited(true);
         document.setUpdatedAt(Instant.now());
@@ -1303,6 +1308,32 @@ public class DraftingService {
         return renderPdf(artifact.getDocxBytes());
     }
 
+    private DraftTocFinalizer.Result finalizeDraft(String key,String originalSourceSha256,byte[] compiled) {
+        ConsenseProperties.Drafting settings=properties.getDrafting();
+        if(!"SCC".equals(key)||!"libreoffice".equals(settings.getRendererKind())||JsonUtils.isBlankText(settings.getRendererExecutable())||JsonUtils.isBlankText(settings.getRendererWorkRoot()))return DraftTocFinalizer.unchanged(compiled,"TOC_FINALIZER_NOT_CONFIGURED_FOR_THIS_DOCUMENT");
+        DraftTocFinalizer.Result result;
+        try {result=finalizeCompiledToc(compiled,originalSourceSha256);}
+        catch(RuntimeException unavailable){return DraftTocFinalizer.unchanged(compiled,unavailable.getMessage());}
+        if(result==null||!java.util.Arrays.equals(compiled,result.compiled)||!DraftPdfConverter.sha256(compiled).equals(result.proof.get("compiledDocxSha256")))return DraftTocFinalizer.unchanged(compiled,"TOC_COMPILED_INPUT_IDENTITY_MISMATCH");
+        // A failed candidate can fall back to the first PDF, whose cache has a different exact-DOCX key.
+        for(int lookup=0;lookup<2&&result.pdf!=null;lookup++) {
+            String id=DraftAdoption.hash(result.pdf.getDocxSha256()+"|"+result.pdf.getRenderProfileHash());DraftPdfArtifact existing=pdfArtifactRepository.findById(id).orElse(null);
+            if(existing==null)return result;
+            if(!result.pdf.getDocxSha256().equals(existing.getDocxSha256())||!result.pdf.getRenderProfileHash().equals(existing.getRenderProfileHash()))throw new BizException(4013,"BINDING_PDF_IDENTITY_MISMATCH");
+            if(!existing.getPdfSha256().equals(DraftPdfConverter.sha256(existing.getPdfBytes())))throw new BizException(4013,"PDF_ARTIFACT_HASH_MISMATCH");
+            DraftTocFinalizer.Result selected=result.useExisting(existing);
+            if(selected.pdf!=null&&existing.getPdfSha256().equals(selected.pdf.getPdfSha256()))return selected;result=selected;
+        }
+        return result;
+    }
+    DraftTocFinalizer.Result finalizeCompiledToc(byte[] compiled,String originalSourceSha256) {return configuredPdfConverter(properties.getDrafting()).finalizeToc(compiled,originalSourceSha256);}
+    private void saveFinalizedPdf(DraftTocFinalizer.Result result) {
+        if(result==null||result.pdf==null)return;DraftPdfConversionResult pdf=result.pdf;
+        if(!DraftPdfConverter.sha256(result.docx).equals(pdf.getDocxSha256())||!DraftPdfConverter.sha256(pdf.getPdfBytes()).equals(pdf.getPdfSha256()))throw new BizException(4013,"FINALIZED_DOCX_PDF_IDENTITY_MISMATCH");
+        String id=DraftAdoption.hash(pdf.getDocxSha256()+"|"+pdf.getRenderProfileHash());DraftPdfArtifact existing=pdfArtifactRepository.findById(id).orElse(null);
+        if(existing!=null){if(!pdf.getDocxSha256().equals(existing.getDocxSha256())||!pdf.getRenderProfileHash().equals(existing.getRenderProfileHash()))throw new BizException(4013,"BINDING_PDF_IDENTITY_MISMATCH");if(!existing.getPdfSha256().equals(DraftPdfConverter.sha256(existing.getPdfBytes())))throw new BizException(4013,"PDF_ARTIFACT_HASH_MISMATCH");if(!existing.getPdfSha256().equals(pdf.getPdfSha256()))throw new BizException(4013,"IMMUTABLE_FINALIZED_PDF_CONFLICT");return;}
+        DraftPdfArtifact saved=new DraftPdfArtifact();saved.setId(id);saved.setDocxSha256(pdf.getDocxSha256());saved.setPdfSha256(pdf.getPdfSha256());saved.setRenderProfileHash(pdf.getRenderProfileHash());saved.setPdfBytes(pdf.getPdfBytes());saved.setManifestJson(JsonUtils.write(pdf.getManifest()));pdfArtifactRepository.save(saved);
+    }
     private DraftPdfConverter configuredPdfConverter(ConsenseProperties.Drafting settings) {
         java.nio.file.Path executable=java.nio.file.Paths.get(settings.getRendererExecutable()),work=java.nio.file.Paths.get(settings.getRendererWorkRoot());
         String kind=settings.getRendererKind();

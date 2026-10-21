@@ -2,6 +2,7 @@ package com.consense.web;
 
 import com.consense.ai.AiGateway;
 import com.consense.common.JsonUtils;
+import com.consense.common.BizException;
 import com.consense.document.DocumentBlock;
 import com.consense.document.DocumentParser;
 import com.consense.document.OerDocumentIdentity;
@@ -67,11 +68,12 @@ class VettingSourcePurposeJpaHttpTest {
     @MockBean AiGateway externalLlm;
     @SpyBean DocumentParser parser;
     @SpyBean OerBusinessEvidence oer;
+    @SpyBean com.consense.service.vetting.VettingSemanticReview semantic;
     String project;
 
     @BeforeEach void setup(){
         project="purpose-"+UUID.randomUUID();Project p=new Project();p.setId(project);p.setNameEn("Authored purpose confirmation");projects.saveAndFlush(p);
-        SqlCapture.statements.clear();clearInvocations(externalLlm,parser,oer);
+        SqlCapture.statements.clear();clearInvocations(externalLlm,parser,oer,semantic);
     }
     SourceDocument source(String name)throws Exception{
         String text="AUTHORED source retained exactly \uD83D\uDE00, including its condition and exception.";
@@ -335,5 +337,44 @@ class VettingSourcePurposeJpaHttpTest {
             assertEquals(retained,JsonUtils.write(fresh(d)));assertThrows(com.consense.service.sources.CanonicalEvidenceException.class,()->canonicalCurrent.currentDocument(project,d.getId(),"vetting"));
         }
         verifyNoInteractions(externalLlm,parser,oer);
+    }
+
+    @Test void heldDetailParserDoesNotBlockRunOrDuplicateConfirmationAndStillPublishesItsTerminalResult()throws Exception {
+        SourceDocument d=pendingSource("pending-held-parse-barrier.txt");Map<String,Object> body=pendingRequest(d);
+        SourceDocument other=pendingSource("pending-other-file-barrier.txt");Map<String,Object> otherBody=pendingRequest(other);String otherBefore=JsonUtils.write(fresh(other));
+        byte[] original=Files.readAllBytes(Paths.get(d.getStoragePath()));String text=d.getTextContent(),structure=d.getStructuredContentJson(),archive=d.getNativePdfEvidenceJson();
+        java.util.concurrent.CountDownLatch entered=new java.util.concurrent.CountDownLatch(1),release=new java.util.concurrent.CountDownLatch(1);
+        doAnswer(invocation->{entered.countDown();assertTrue(release.await(10,java.util.concurrent.TimeUnit.SECONDS));return invocation.callRealMethod();}).when(parser).parse(eq(d.getFileName()),any(byte[].class));
+        doThrow(new AssertionError("An in-flight source must be rejected before semantic capture")).when(semantic).captureOperation(any());
+        java.util.concurrent.ExecutorService pool=java.util.concurrent.Executors.newFixedThreadPool(4);java.util.concurrent.Future<JsonNode> first=null;
+        try {
+            first=pool.submit(()->putPending(d,body));assertTrue(entered.await(10,java.util.concurrent.TimeUnit.SECONDS));
+            java.util.concurrent.Future<JsonNode> started=pool.submit(()->JsonUtils.parse(mvc.perform(post("/api/vetting/"+project+"/runs").param("lang","en")).andReturn().getResponse().getContentAsString()));
+            java.util.concurrent.Future<JsonNode> duplicate=pool.submit(()->putPending(d,body));
+            java.util.concurrent.Future<JsonNode> otherConfirmation=pool.submit(()->putPending(other,otherBody));
+            JsonNode refused=started.get(2,java.util.concurrent.TimeUnit.SECONDS),second=duplicate.get(2,java.util.concurrent.TimeUnit.SECONDS),otherRefused=otherConfirmation.get(2,java.util.concurrent.TimeUnit.SECONDS);
+            assertEquals(1,release.getCount(),"All three requests must finish while the original parser remains held");assertEquals(4104,refused.path("code").asInt(),refused.toString());assertTrue(refused.path("message").asText().contains("解析"));assertEquals(4104,second.path("code").asInt(),second.toString());assertEquals(4104,otherRefused.path("code").asInt(),otherRefused.toString());assertTrue(otherRefused.path("message").asText().contains("解析"));assertEquals(otherBefore,JsonUtils.write(fresh(other)));verify(parser,never()).parse(eq(other.getFileName()),any(byte[].class));
+            assertFalse(runs.findFirstByProjectIdOrderByStartedAtDesc(project).isPresent());verifyNoInteractions(externalLlm,oer,semantic);verify(parser,times(1)).parse(eq(d.getFileName()),any(byte[].class));
+            SourceDocument parsing=fresh(d);assertEquals("PARSING",parsing.getParseStatus());assertEquals(text,parsing.getTextContent());assertEquals(structure,parsing.getStructuredContentJson());assertEquals(archive,parsing.getNativePdfEvidenceJson());assertArrayEquals(original,Files.readAllBytes(Paths.get(d.getStoragePath())));
+            release.countDown();assertEquals(0,first.get(20,java.util.concurrent.TimeUnit.SECONDS).path("code").asInt());assertEquals("PARSED",fresh(d).getParseStatus());assertEquals(otherBefore,JsonUtils.write(fresh(other)));verify(parser,times(1)).parse(eq(d.getFileName()),any(byte[].class));verify(parser,never()).parse(eq(other.getFileName()),any(byte[].class));assertFalse(runs.findFirstByProjectIdOrderByStartedAtDesc(project).isPresent());verifyNoInteractions(externalLlm,oer,semantic);
+        } finally {
+            release.countDown();if(first!=null)try{first.get(20,java.util.concurrent.TimeUnit.SECONDS);}catch(Exception ignored){}
+            pool.shutdownNow();assertTrue(pool.awaitTermination(5,java.util.concurrent.TimeUnit.SECONDS));
+        }
+    }
+
+    @Test void onlyCurrentPackageParsingClaimsBlockANewRunWhileAnExistingRunStillResumes()throws Exception {
+        doThrow(new BizException(4991,"Authored semantic boundary reached")).when(semantic).captureOperation(any());
+        SourceDocument old=source("parse-state-barrier.txt");
+        for(String state:new String[]{"PARSING","IDENTITY_OBSERVED"}){
+            old.setParseStatus(state);sources.saveAndFlush(old);BizException blocked=assertThrows(BizException.class,()->service.startRun(project,"en"));assertEquals(4104,blocked.getCode());assertTrue(blocked.getMessage().contains("解析"));verifyNoInteractions(semantic,externalLlm,oer);assertFalse(runs.findFirstByProjectIdOrderByStartedAtDesc(project).isPresent());
+        }
+        SourceDocument newer=source(" PARSE-STATE-BARRIER.TXT ");
+        SourceDocument template=source("non-review-template.txt");template.setCategory(SourceDocument.CATEGORY_STANDARD_TEMPLATE);template.setParseStatus("PARSING");sources.saveAndFlush(template);
+        Project other=new Project();other.setId("other-barrier-"+UUID.randomUUID());projects.saveAndFlush(other);SourceDocument outside=source("other-project-parsing.txt");outside.setProjectId(other.getId());outside.setParseStatus("PARSING");sources.saveAndFlush(outside);
+        BizException reached=assertThrows(BizException.class,()->service.startRun(project,"en"));assertEquals(4991,reached.getCode(),"Superseded, other-category and other-project parsing rows must not block this current package");verify(semantic,times(1)).captureOperation(any());assertFalse(runs.findFirstByProjectIdOrderByStartedAtDesc(project).isPresent());clearInvocations(semantic);
+        newer.setParseStatus("PARSING");sources.saveAndFlush(newer);
+        for(String state:new String[]{"QUEUED","RUNNING"}){VettingRun active=run(state);assertEquals(active.getId(),service.startRun(project,"en").getId());runs.delete(active);}
+        verifyNoInteractions(semantic,externalLlm,parser);
     }
 }

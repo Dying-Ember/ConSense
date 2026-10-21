@@ -1,3 +1,29 @@
+<!-- runtime-integration58:start -->
+## progress58：SCC完整同族实际生成通过，咨询列表减负通过回归，准备统一升级
+
+**2026-10-22 00:12：Goal active，本轮代码已集成，运行包正在构建；当前18085仍是source-use26。** 继续保护H2 owner39876与H57原解析，原唯一审查start不重发。先前normal02视觉FAIL59、旧字节码GREEN01与执行脚本预检失败均保留，不改写成通过。
+
+- **SCC完整同族修复：** 仅沿现有原生Word段落连续机制补7个条件分支→首(a)，以及唯一缺失定义→首分支；全族8分支/4定义覆盖，旧96关系保持，无固定页号特例或来源正文改写。独立源SHA/三段邻接复审通过；采用后11相关软件方法PASS。[精确采用](../../../.local/drafting-main-integration27/continuation07-adoption02.json)、[静审](../../../.local/scc-current-toc-finalization01/heading-cohesion02/dynamic01/continuation07/static-review01.json)。首采用脚本路径数组错误没有写入产品，software04仍旧代码，不算后继修复通过；software05才是本候选11PASS。
+- **最新完整正常生成：** normal04实际1PASS/224.863秒，NTT11/SCT25/SCC79页，三Word保存/下载同字节、三PDF预览/导出同字节。SCC104/104关系、92目录、1902点（1097CS/713CL/92TOC）稳定，明确12对同页、38唯一段全文在单一物理页找到，原8限定语/两漏字/公式/段内续页全部保持。SCC DOCX `9160e57c6cbc3d2293c5e7f73f4ff28a62c210d3c72e6fe6c0c076b17a865b5f`、PDF `bc15770b973e7acf2287046ee5529843d7c69d714385b72f83468aeb3bf6d0c1`。**新79页全页视觉仍在进行，实际2b身份前端闭环未验。** normal03在Java前因模板路径预检失败，没有新生成，不能与normal04混用。[正常生成](../../../.local/drafting-main-integration27/normal04/actual01/full-generation-render-result.json)、[实际日志](../../../.local/drafting-main-integration27/normal04/maven.log)。
+- **咨询来源列表实际超时与最小减负：** 真实前端及直连`/sources?scope=fullset`有12/30秒超时；旧列表读取未消费的normalCandidate，真实PRE47和Annex56分别有481,313,823/20,097,286字符。两者都在范围内，不能排除；数据库LENGTH查询35行4ms只证明长度读取，不证明大LOB传输或无阻塞。新单次投影保完整text/structure、currentCatalog、三个scope、所有current included/excluded真实sourceHash与陈旧检查，仅省未使用大字段；真正prepare/index/graph消费者保持原路径。旧产品精确SQL RED已实测；候选加Advice scope及SourceLock共69方法全部PASS，已采用，**尚未证明实际超时消除**。[源尺寸](../../../.local/runtime-source-use26/advice-source-size-sessions64.txt)、[采用/回归](../../../.local/advice-source-list28/adoption.json)、[独立复审](../../../.local/advice-source-list28/static-review01.md)。完整471M字符主结构传输与首hash仍是成本，部署后须同源复测。
+- **提示词：** 运行中`/api/prompts`已实际回读，Vetting run的system为17,539bytes/SHA `a14a3261203cc04b9e0db10d3dc230d047feb846c0d188f649433b928238c8c8`，Advisory ask为24,601bytes/SHA `ec23c7a665f803598a82d8aaf41ace65df1e431ac5e4ab24610e61d11ccf0470`，均非自定义覆盖。这是活动模板读回，不是新Qwen回答的有效提示词证明。[活动提示词](../../../.local/runtime-integration28/prompts-before.json)。本轮尚未发新咨询模型请求。
+
+真实35资料仍按progress57的30详细解析/2排除/3未终态记录；完整实际审查、2d报告、人类前端验收与SL全量质量继续未完成。FoT5已准备保原生栈的单页反重复候选，尚未运行，不改变活动H配方；SL质量未过不打包。
+<!-- runtime-integration58:end -->
+
+<!-- runtime-source-use57:start -->
+## progress57：真实35文件已接入，解析锁修复通过，SCC正常生成继续逐页收口
+
+**2026-10-21 23:50：Goal active；本轮修复已采用主树，尚未部署。** 当前前端5175连接source-use26后端18085/PID40600，H2 owner39876保持。旧18084/PID46416已在Annex原请求终态后精确撤下；没有重传原件或重复启动审查。
+
+- **真实2b来源：** 35文件已全部收到，当前17 PARSED、13 PARTIAL、2 EXCLUDED图纸、1 PARSING（55页Appendix H57）、2 IDENTITY_PENDING（APU58/APB59）。APZ54与47页Annex56已有PARTIAL终态；FoT55仍缺物理5的有效OCR。解析完成与来源质量分别记录。[当前只读回读](../../../.local/runtime-source-use26/goal-continuation27-readback01.json)、[旧后端撤下](../../../.local/runtime-source-use26/old-backend-terminal-stop.json)。H57原请求保留；APU是reference-only文字清单，APB是合同图纸文字清单，两者不能按图纸本体排除。
+- **实际审查入口卡点已复现并修复：** 在30份已解析资料上仅点一次真实前端“运行审查”，原后端持项目monitor跨整个续解析，前端30秒超时、latest/progress仍null；尚未进入本次Qwen semantic审查。候选改为短锁验证/claim、锁外原parser、短锁完整CAS保存；解析中审查与重复确认及时给出4104，不重复OCR，不覆盖旧观察。旧代码并发RED实测首个2秒等待Timeout；候选七类124方法全部PASS、零失败/错误/跳过，已精确采用三文件。首GREEN因复制保留旧mtime而运行旧字节码的122PASS/2失败完整保留，修正时间戳后核javap含两个新guard再通过，不把它归为模型或业务结果。[采用及RED/GREEN](../../../.local/source-parse-lock27/adoption.json)、[实际GREEN](../../../.local/source-parse-lock27/green02/result.json)。旧已发送start可能仍在等待，H57终态后先接回原任务，不能重复点击。
+- **Drafting完整六产品链已集成：** 三模板从实际2a compiler到JPA修订、真实LibreOffice、保存及预览/下载已实跑，NTT11/SCT25/SCC79页；三份Word保存/下载同字节，三份PDF预览/导出同字节。SCC最新normal02的96组已登记分页关系、92目录与1878定位点稳定检查通过；两处ASCII漏字、两处段内续页、公式与8组earliest限定语已覆盖。87软件PASS及后继11相关PASS为不同窗口，不累加冒称唯一98方法。采用项目身份仍为显式合成F17；actual2bAccepted=false。[最新正常生成](../../../.local/drafting-main-integration27/normal02/actual01/full-generation-render-result.json)、[同一修订核验](../../../.local/drafting-main-integration27/normal02/actual01/SCC-normal-flow-identity-checks.json)。
+- **最新视觉仍未通过：** 新79页已重新raster，逐页目验发现物理59页末条件分支导语(i)与60页首(a)分离；不因已登记96关系通过而授全版式通过。精确来源为p1560→空p1561→p1562；同族8组有1组已登记，后继仅补余7组，复用原Word段落连续机制，禁止固定页号补丁。normal01旧两处earliest孤立失败与normal02的新失败分别保留。后继候选和实际新转换通过前，当前normal02仍FAIL。
+- **运行与数据保全：** 23:28新SQL检查点3,343,176,080bytes、SHA ca9e59952ef7720e6b860117b0a025e20a2e97e4a26cd0887339be6a49f750d9已完成，H57当时活解析，不是最终队列快照或SL比赛包。[检查点](../../../.local/drafting-main-integration27/checkpoint-before-runtime27.json)。真实2b整套Qwen审查/2d报告、最新Advisory前端复验与SL全部22,214技术页质量仍未完成；质量未过不打比赛包。
+
+<!-- runtime-source-use57:end -->
+
 <!-- runtime-source-use56:start -->
 ## progress56：来源确认修复已部署，十三来源实际迁移及保全通过
 

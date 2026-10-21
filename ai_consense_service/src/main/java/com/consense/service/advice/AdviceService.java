@@ -1330,7 +1330,7 @@ public class AdviceService {
 
     public List<AdviceSourceVO> sources(String projectId,String scope) {
         projectService.require(projectId);String normalized=ProjectDocumentScope.normalizeScope(scope);
-        return ProjectDocumentScope.currentCatalog(projectId,sourceDocumentRepository.findBusinessSourcesByProjectId(projectId)).stream().map(d->{String exclusion=ProjectDocumentScope.exclusionReason(d,normalized,"advisory");
+        return ProjectDocumentScope.currentCatalog(projectId,sourceDocumentRepository.findSourceListByProjectId(projectId)).stream().map(d->{String exclusion=ProjectDocumentScope.exclusionReason(d,normalized,"advisory");
             return new AdviceSourceVO(String.valueOf(d.getId()),d.getFileKey(),d.getFileName(),VettingCorpus.sourceRole(d),d.getDocumentScope(),d.getParseStatus(),VettingCorpus.sourceHash(d),exclusion==null,exclusion);}).collect(Collectors.toList());
     }
     /** Preparation has a complete selected-source denominator and no retrieval or model operation. */
