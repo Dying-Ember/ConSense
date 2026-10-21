@@ -1,0 +1,302 @@
+{
+  "sourceSha256": "7def01d62e07b35dd86beeff995e0e37d73ce18adca2746e2a6f6d9bafb5aaa4",
+  "cohesiveRows": [
+    {
+      "sourceParagraphOrdinal": 58,
+      "rowId": "word/document.xml#/w:document[1]/w:body[1]/w:tbl[2]/w:tr[3]",
+      "rowSha256": "e4b2949d693e348d87690de53efcadf46365ba82b8312802f0302a4b40502536"
+    },
+    {
+      "sourceParagraphOrdinal": 100,
+      "rowId": "word/document.xml#/w:document[1]/w:body[1]/w:tbl[3]/w:tr[3]",
+      "rowSha256": "d212c3410b1db5ba920693af2ed03810e4af94bba7052b6a21b7681f99201333"
+    },
+    {
+      "sourceParagraphOrdinal": 159,
+      "rowId": "word/document.xml#/w:document[1]/w:body[1]/w:tbl[4]/w:tr[3]",
+      "rowSha256": "483611c8df48a0a05f1d2083be611f80fb2dac39e0f537ee6e201610f37ae72d"
+    },
+    {
+      "sourceParagraphOrdinal": 218,
+      "rowId": "word/document.xml#/w:document[1]/w:body[1]/w:tbl[5]/w:tr[3]",
+      "rowSha256": "b6fc11fbce6dc6069316900e1decd7a6260f57980b100d35dfae3bb98359cd15"
+    },
+    {
+      "sourceParagraphOrdinal": 229,
+      "rowId": "word/document.xml#/w:document[1]/w:body[1]/w:tbl[5]/w:tr[7]",
+      "rowSha256": "6ecea22b65023be29199e6d4e8f10112b35d02dae9b9f889ef8cf7dbf2d21334"
+    },
+    {
+      "sourceParagraphOrdinal": 259,
+      "rowId": "word/document.xml#/w:document[1]/w:body[1]/w:tbl[7]/w:tr[1]",
+      "rowSha256": "8a43f5ab8cef5b091d6adf01238663e969674df7632e807e5ac9213dbd4124bb"
+    },
+    {
+      "sourceParagraphOrdinal": 309,
+      "rowId": "word/document.xml#/w:document[1]/w:body[1]/w:tbl[8]/w:tr[2]",
+      "rowSha256": "b1ab85eb6ca67476227c12e71b1d48ca08990f926ff16df1cba3e94faa769a88"
+    },
+    {
+      "sourceParagraphOrdinal": 375,
+      "rowId": "word/document.xml#/w:document[1]/w:body[1]/w:tbl[9]/w:tr[3]",
+      "rowSha256": "da223a46f7a3de86e258f46bf486d05c7018c4a3a1626bc72bd3c079897334a9"
+    },
+    {
+      "sourceParagraphOrdinal": 392,
+      "rowId": "word/document.xml#/w:document[1]/w:body[1]/w:tbl[10]/w:tr[2]",
+      "rowSha256": "9122df7a9a7fd9034515679b6d90f8a6491c51209288c2a7b6a1f98ea61c5a23"
+    },
+    {
+      "sourceParagraphOrdinal": 394,
+      "rowId": "word/document.xml#/w:document[1]/w:body[1]/w:tbl[10]/w:tr[3]",
+      "rowSha256": "a524918fcc9172394f9d8fd2f6fc4c613d55c47c4f4758d135225a51fad7ec6c"
+    },
+    {
+      "sourceParagraphOrdinal": 425,
+      "rowId": "word/document.xml#/w:document[1]/w:body[1]/w:tbl[11]/w:tr[3]",
+      "rowSha256": "4000ba3809db917fa616795277550a294a9582293790089e3e4406e20d28e75d"
+    },
+    {
+      "sourceParagraphOrdinal": 478,
+      "rowId": "word/document.xml#/w:document[1]/w:body[1]/w:tbl[12]/w:tr[3]",
+      "rowSha256": "3a45d35da9d780c4f701bb154e9444e269b6cfe0495fbbe3f0006d3a0c8d083e"
+    },
+    {
+      "sourceParagraphOrdinal": 508,
+      "rowId": "word/document.xml#/w:document[1]/w:body[1]/w:tbl[13]/w:tr[3]",
+      "rowSha256": "bd52d81254b763cfed768779fb85b0c60a9a0ffa39a5fe565942384948cc9f14"
+    },
+    {
+      "sourceParagraphOrdinal": 516,
+      "rowId": "word/document.xml#/w:document[1]/w:body[1]/w:tbl[13]/w:tr[6]",
+      "rowSha256": "4edc17b94f1b6d19a7c0c40964bb18175d5e0954a97964d9e175d1666d875ea6"
+    },
+    {
+      "sourceParagraphOrdinal": 533,
+      "rowId": "word/document.xml#/w:document[1]/w:body[1]/w:tbl[15]/w:tr[1]",
+      "rowSha256": "649e4594f8ba08ad00d451c7f7da30f6fbeb6c49901cef75832bd9a6e4bcf5a9"
+    },
+    {
+      "sourceParagraphOrdinal": 550,
+      "rowId": "word/document.xml#/w:document[1]/w:body[1]/w:tbl[15]/w:tr[6]",
+      "rowSha256": "443e90a1b591f9870d753de6802366ed8b66df45276d49cd54ebe43d4af892af"
+    },
+    {
+      "sourceParagraphOrdinal": 552,
+      "rowId": "word/document.xml#/w:document[1]/w:body[1]/w:tbl[15]/w:tr[7]",
+      "rowSha256": "83562f0f7ecdbcc3c0fd51f48e2724c60d0e2e2ac5f3bb7215f98c84eecb3015"
+    },
+    {
+      "sourceParagraphOrdinal": 569,
+      "rowId": "word/document.xml#/w:document[1]/w:body[1]/w:tbl[17]/w:tr[1]",
+      "rowSha256": "c6930191c7735b62945141e219aa264923dcc7219b5dc7c3b7dcdf1efad05b21"
+    },
+    {
+      "sourceParagraphOrdinal": 585,
+      "rowId": "word/document.xml#/w:document[1]/w:body[1]/w:tbl[17]/w:tr[7]",
+      "rowSha256": "4dc5e110a82c386427fb1f4a68ff0fad0b93992ec141795725dd2b4e3d90787e"
+    },
+    {
+      "sourceParagraphOrdinal": 587,
+      "rowId": "word/document.xml#/w:document[1]/w:body[1]/w:tbl[17]/w:tr[8]",
+      "rowSha256": "75e33b8b84e3c3d61219dd71f0bfc9862dbb81ec2ef44ce51175f2ad5bab437e"
+    },
+    {
+      "sourceParagraphOrdinal": 615,
+      "rowId": "word/document.xml#/w:document[1]/w:body[1]/w:tbl[21]/w:tr[1]",
+      "rowSha256": "ab46597da4b5031cc567a36cadb5c9ee0b8160027da7e74252d18e6c57e5f341"
+    },
+    {
+      "sourceParagraphOrdinal": 665,
+      "rowId": "word/document.xml#/w:document[1]/w:body[1]/w:tbl[25]/w:tr[1]",
+      "rowSha256": "d7ce3aca0d72511e3d588acf3f443732103f764a84478b4bfd8cfab994894a5b"
+    },
+    {
+      "sourceParagraphOrdinal": 705,
+      "rowId": "word/document.xml#/w:document[1]/w:body[1]/w:tbl[28]/w:tr[1]",
+      "rowSha256": "e6bcfb0a29a66a8bc6ab66dcd525b99ac045c2cec1b861dbd4c43d94b6593fd9"
+    },
+    {
+      "sourceParagraphOrdinal": 745,
+      "rowId": "word/document.xml#/w:document[1]/w:body[1]/w:tbl[30]/w:tr[3]",
+      "rowSha256": "77de41831e43399df7aa7c1b2047c88cdbf839804c2da45939b2af449bb28439"
+    },
+    {
+      "sourceParagraphOrdinal": 782,
+      "rowId": "word/document.xml#/w:document[1]/w:body[1]/w:tbl[33]/w:tr[1]",
+      "rowSha256": "2c3123d58701e5abf5a8356c656a299cb34d987d2ee56818b76c5441c2ce2644"
+    },
+    {
+      "sourceParagraphOrdinal": 784,
+      "rowId": "word/document.xml#/w:document[1]/w:body[1]/w:tbl[33]/w:tr[2]",
+      "rowSha256": "491f63f614d5aa04bdc78e4b0a32b42f02867cd5cbbe638f0fdf57be501c1b5b"
+    },
+    {
+      "sourceParagraphOrdinal": 839,
+      "rowId": "word/document.xml#/w:document[1]/w:body[1]/w:tbl[34]/w:tr[3]",
+      "rowSha256": "06fdb53a024ee9e624e99370eb3faf5eccf29b4aaf4bcb9930804bea817d78e6"
+    },
+    {
+      "sourceParagraphOrdinal": 841,
+      "rowId": "word/document.xml#/w:document[1]/w:body[1]/w:tbl[34]/w:tr[4]",
+      "rowSha256": "6c0a677e75279ef3f22a56ffddbd5cc942e0f8f30292ce664d0c64b6739757bb"
+    },
+    {
+      "sourceParagraphOrdinal": 883,
+      "rowId": "word/document.xml#/w:document[1]/w:body[1]/w:tbl[36]/w:tr[3]",
+      "rowSha256": "9a18f0f38637ab584f6364ac364d6cb4e84e4859f1f1f46ceb380c93660fbd6a"
+    },
+    {
+      "sourceParagraphOrdinal": 919,
+      "rowId": "word/document.xml#/w:document[1]/w:body[1]/w:tbl[39]/w:tr[3]",
+      "rowSha256": "06d14f5b772d28646c7e3a6e6cbcc73f568c3668d6732d62019f35f892567998"
+    },
+    {
+      "sourceParagraphOrdinal": 921,
+      "rowId": "word/document.xml#/w:document[1]/w:body[1]/w:tbl[39]/w:tr[4]",
+      "rowSha256": "8e29a58767bb923c8d75f5a4545212d4bf5dae73e960253e6a031f6c60bd077b"
+    },
+    {
+      "sourceParagraphOrdinal": 958,
+      "rowId": "word/document.xml#/w:document[1]/w:body[1]/w:tbl[42]/w:tr[1]",
+      "rowSha256": "ba72f65a39aec45147975ebf73e68d8d6faae142f31778af2931c476f5e96f50"
+    },
+    {
+      "sourceParagraphOrdinal": 966,
+      "rowId": "word/document.xml#/w:document[1]/w:body[1]/w:tbl[42]/w:tr[4]",
+      "rowSha256": "8d4820b489a35831fe0b4ab230af53355865284512c7659563252817f21cd295"
+    },
+    {
+      "sourceParagraphOrdinal": 968,
+      "rowId": "word/document.xml#/w:document[1]/w:body[1]/w:tbl[42]/w:tr[5]",
+      "rowSha256": "cba5173b5f119f72730cb466cf9757fee080826975e42b4c9f22adac26c74d00"
+    },
+    {
+      "sourceParagraphOrdinal": 1015,
+      "rowId": "word/document.xml#/w:document[1]/w:body[1]/w:tbl[44]/w:tr[1]",
+      "rowSha256": "8524f0cf1000e63b50a5374b1eacb4dd54bb69cab9cf2fd16e787c867e208953"
+    },
+    {
+      "sourceParagraphOrdinal": 1048,
+      "rowId": "word/document.xml#/w:document[1]/w:body[1]/w:tbl[46]/w:tr[1]",
+      "rowSha256": "6770800de4ab42d6cc2adfb9c11b71ca4c1c2263cf212929f353d009de11e7a6"
+    },
+    {
+      "sourceParagraphOrdinal": 1065,
+      "rowId": "word/document.xml#/w:document[1]/w:body[1]/w:tbl[48]/w:tr[1]",
+      "rowSha256": "089845d1c9bc562ff449ca6ee5e6c862f1caf8299eff5d367027de4f64f70f7c"
+    },
+    {
+      "sourceParagraphOrdinal": 1067,
+      "rowId": "word/document.xml#/w:document[1]/w:body[1]/w:tbl[48]/w:tr[2]",
+      "rowSha256": "e2de8ed3fe167c8b7f91c03d1a84a2924f6b006bb9c1a44e8914d65dbd957b56"
+    },
+    {
+      "sourceParagraphOrdinal": 1074,
+      "rowId": "word/document.xml#/w:document[1]/w:body[1]/w:tbl[48]/w:tr[5]",
+      "rowSha256": "a0f2ab1f81d3f51d7583b9d4aa9318aed5b52a76698a3b5fc4f4f35879162e6f"
+    },
+    {
+      "sourceParagraphOrdinal": 1076,
+      "rowId": "word/document.xml#/w:document[1]/w:body[1]/w:tbl[48]/w:tr[6]",
+      "rowSha256": "01b421cf2815c9afd11dc58ea2bd20c427bfe639b9fbd6efec8dacd2b02ec6f5"
+    },
+    {
+      "sourceParagraphOrdinal": 1104,
+      "rowId": "word/document.xml#/w:document[1]/w:body[1]/w:tbl[51]/w:tr[1]",
+      "rowSha256": "3602044a199907e6769860676de90296815e19f7aa8c482547af805385362448"
+    },
+    {
+      "sourceParagraphOrdinal": 1107,
+      "rowId": "word/document.xml#/w:document[1]/w:body[1]/w:tbl[51]/w:tr[2]",
+      "rowSha256": "d68781fbb464d0be484329551492657b32e61d4d13e5bd603e1030c9bcca157d"
+    },
+    {
+      "sourceParagraphOrdinal": 1118,
+      "rowId": "word/document.xml#/w:document[1]/w:body[1]/w:tbl[52]/w:tr[1]",
+      "rowSha256": "f403061eca41ce9c5c0c2ead3c65ffa2aad6f5d580d0371a76ac2276e6c8286e"
+    },
+    {
+      "sourceParagraphOrdinal": 1120,
+      "rowId": "word/document.xml#/w:document[1]/w:body[1]/w:tbl[52]/w:tr[2]",
+      "rowSha256": "479f9dd07f4e15bb367fd2fee8950f0a0ba03027c5a5cf7362610406e831d83b"
+    },
+    {
+      "sourceParagraphOrdinal": 1141,
+      "rowId": "word/document.xml#/w:document[1]/w:body[1]/w:tbl[53]/w:tr[2]",
+      "rowSha256": "14233797bba29e494ce07700c17add1850c5d87920229d1f91baadeae8616dc6"
+    },
+    {
+      "sourceParagraphOrdinal": 1143,
+      "rowId": "word/document.xml#/w:document[1]/w:body[1]/w:tbl[53]/w:tr[3]",
+      "rowSha256": "f57f3647910bf1c3e1fce4cd23af86daeae155f5802229bcc5eff3e71819cec6"
+    },
+    {
+      "sourceParagraphOrdinal": 1176,
+      "rowId": "word/document.xml#/w:document[1]/w:body[1]/w:tbl[53]/w:tr[18]",
+      "rowSha256": "b71cb5d0e6589c47f1daf3aa2d7fdbf12cf5534a65049cf93fb1f6f66597a06a"
+    },
+    {
+      "sourceParagraphOrdinal": 1178,
+      "rowId": "word/document.xml#/w:document[1]/w:body[1]/w:tbl[53]/w:tr[19]",
+      "rowSha256": "221f1fe773c5dd50840933e1401d0aa39b32229d4611e4df9f0b4a5aeafc8c81"
+    },
+    {
+      "sourceParagraphOrdinal": 1211,
+      "rowId": "word/document.xml#/w:document[1]/w:body[1]/w:tbl[56]/w:tr[1]",
+      "rowSha256": "2c3d8588cea4dcdbef90d819b7231e70da8165f7cbfdadfcdf4c6527670ca3d5"
+    },
+    {
+      "sourceParagraphOrdinal": 1213,
+      "rowId": "word/document.xml#/w:document[1]/w:body[1]/w:tbl[56]/w:tr[2]",
+      "rowSha256": "52b2469f937c1578f6234f242722b0ab4e92ec808284a552f010e487d48254dd"
+    }
+  ],
+  "headingRowIds": [
+    "word/document.xml#/w:document[1]/w:body[1]/w:tbl[2]/w:tr[3]",
+    "word/document.xml#/w:document[1]/w:body[1]/w:tbl[3]/w:tr[3]",
+    "word/document.xml#/w:document[1]/w:body[1]/w:tbl[4]/w:tr[3]",
+    "word/document.xml#/w:document[1]/w:body[1]/w:tbl[5]/w:tr[3]",
+    "word/document.xml#/w:document[1]/w:body[1]/w:tbl[5]/w:tr[7]",
+    "word/document.xml#/w:document[1]/w:body[1]/w:tbl[7]/w:tr[1]",
+    "word/document.xml#/w:document[1]/w:body[1]/w:tbl[8]/w:tr[2]",
+    "word/document.xml#/w:document[1]/w:body[1]/w:tbl[9]/w:tr[3]",
+    "word/document.xml#/w:document[1]/w:body[1]/w:tbl[10]/w:tr[2]",
+    "word/document.xml#/w:document[1]/w:body[1]/w:tbl[11]/w:tr[3]",
+    "word/document.xml#/w:document[1]/w:body[1]/w:tbl[12]/w:tr[3]",
+    "word/document.xml#/w:document[1]/w:body[1]/w:tbl[13]/w:tr[3]",
+    "word/document.xml#/w:document[1]/w:body[1]/w:tbl[13]/w:tr[6]",
+    "word/document.xml#/w:document[1]/w:body[1]/w:tbl[15]/w:tr[1]",
+    "word/document.xml#/w:document[1]/w:body[1]/w:tbl[15]/w:tr[6]",
+    "word/document.xml#/w:document[1]/w:body[1]/w:tbl[17]/w:tr[1]",
+    "word/document.xml#/w:document[1]/w:body[1]/w:tbl[17]/w:tr[7]",
+    "word/document.xml#/w:document[1]/w:body[1]/w:tbl[21]/w:tr[1]",
+    "word/document.xml#/w:document[1]/w:body[1]/w:tbl[25]/w:tr[1]",
+    "word/document.xml#/w:document[1]/w:body[1]/w:tbl[28]/w:tr[1]",
+    "word/document.xml#/w:document[1]/w:body[1]/w:tbl[30]/w:tr[3]",
+    "word/document.xml#/w:document[1]/w:body[1]/w:tbl[33]/w:tr[1]",
+    "word/document.xml#/w:document[1]/w:body[1]/w:tbl[34]/w:tr[3]",
+    "word/document.xml#/w:document[1]/w:body[1]/w:tbl[36]/w:tr[3]",
+    "word/document.xml#/w:document[1]/w:body[1]/w:tbl[39]/w:tr[3]",
+    "word/document.xml#/w:document[1]/w:body[1]/w:tbl[42]/w:tr[1]",
+    "word/document.xml#/w:document[1]/w:body[1]/w:tbl[42]/w:tr[4]",
+    "word/document.xml#/w:document[1]/w:body[1]/w:tbl[44]/w:tr[1]",
+    "word/document.xml#/w:document[1]/w:body[1]/w:tbl[46]/w:tr[1]",
+    "word/document.xml#/w:document[1]/w:body[1]/w:tbl[48]/w:tr[1]",
+    "word/document.xml#/w:document[1]/w:body[1]/w:tbl[48]/w:tr[5]",
+    "word/document.xml#/w:document[1]/w:body[1]/w:tbl[51]/w:tr[1]",
+    "word/document.xml#/w:document[1]/w:body[1]/w:tbl[52]/w:tr[1]",
+    "word/document.xml#/w:document[1]/w:body[1]/w:tbl[53]/w:tr[2]",
+    "word/document.xml#/w:document[1]/w:body[1]/w:tbl[53]/w:tr[18]",
+    "word/document.xml#/w:document[1]/w:body[1]/w:tbl[56]/w:tr[1]"
+  ],
+  "headingRowCount": 36,
+  "emptyBridgeRowCount": 14,
+  "totalAdditionalRows": 50,
+  "originalRowCount": 143,
+  "fullRegisteredRows": 193,
+  "mergedHeadingRowIds": [
+    "word/document.xml#/w:document[1]/w:body[1]/w:tbl[17]/w:tr[7]",
+    "word/document.xml#/w:document[1]/w:body[1]/w:tbl[51]/w:tr[1]"
+  ]
+}

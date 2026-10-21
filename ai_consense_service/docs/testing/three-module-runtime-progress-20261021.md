@@ -1,3 +1,53 @@
+<!-- unified-progress45:start -->
+## progress45：SCT孤立标题关闭、真实SL双路首测与Vetting续页修复回归
+
+**2026-10-21：SCT5标题孤立已在新的完整25页产物中消除，其他23页PNG逐字节保持；SL比赛Batch 2真实两页的四个引擎页结果已收齐，发现MinerU混合公式文本投影损失；Vetting旧原生43页视觉通过，而旧DOCX经LO42页有四页错owner；后继37项回归和保存报告生成通过，新LO42页已确认owner修正但单词短尾仍FAIL。** 原统一Goal保持active，主树已精确采用本轮Drafting六产品与12测试／fixture及Advisory一处旧断言，Vetting Writer和Python混合公式候选仍未采用；后端仍formal19。前端修复及progress44已推送`41ad292fbc891ac2521c8d9212e88684aaac105b`。SL质量未过，比赛包继续后置。
+
+| 范围 | 新的实际结果 | 仍保留的边界 |
+| --- | --- | --- |
+| Drafting full13 | 1方法PASS，110.610秒，16GiB堆／24GiB Job，35,583pins保持／自然Job0；完整NTT／SCT／SCC生成，SCT一次转换。25页全部重新raster并逐张原尺寸实看；SCT5标题及首正文现在同在13页，旧12页孤立已消除 | 3公式精确几何、原页14边框线具体归属和4／5／8源间距仍unknown；原生Word、2b、浏览器最终包未通过。当前主树组合762逻辑身份已跨窗获通过覆盖并完成package，六产品源码已采用、未部署 |
+| SL真实引擎 | 比赛Batch 2原物理3556／3557，2POST、4fresh engine-page、0cache／retry，468.969秒；完整源／图片／配置／终态与输入pins保持 | 四结果不等于来源质量通过；其他六版24个method-page尚未执行，本轮未新增嵌入／检索 |
+| SL保存来源组件 | 原CAS/raw/assets实际导出296个去重blob；生产API实际4次文件capture、2次同方法跨页combine、1次dual组装通过 | 保原3块text projection unknown；法律／条件关系、布局绑定、canonical发布和真实检索仍未通过。第一次导入的generated-ID比较失败保留 |
+| Vetting报告 | RED4精确3个所属标识断言失败＋1正控；GREEN35全部通过，62.359秒；原保存报告生成1PASS、37.219秒，原80业务字段、32finding引文、15assessment引文和69人工记录保持 | 原生43页已全页目验通过；旧DOCX经LO42页在36／37／39／40页错owner为FAIL，后继37回归及保存生成1通过，新LO42页已确认owner修正但单词短尾仍FAIL，Writer未采用；APP-I007相关性FAIL、I002／008作用范围unknown不改 |
+
+### Drafting：已知孤立标题有新的整页与旧正确证据
+
+[full13实际收据](../../../.local/sct-heading-row36-integration02/runtime-preparation/full13/execution/owned-receipt.json)、[完整逆向审计](../../../.local/sct-heading-row36-integration02/post13/actual-full13-stage-review.json)和[315段／逐页身份账](../../../.local/sct-heading-row36-integration02/post13/full13-text-and-identity-review.json)保持原469绑定、NTT／SCC完整包及SCT其他ZIP项。新资源仅将原143源行扩为193：36个完整标题行及14个空桥行复用原有行控制，原10个vMerge保持；新增50项逆向后完整恢复actual full12原始XML，再复用旧143／150Latin与H5／H4逆向。312个严格全文同页段、150个Latin目标及143个已选旧行正文全保持，旧正确无丢失。
+
+[全25页视觉账](../../../.local/sct-heading-row36-integration02/post13/visual-review25-actual.json)，SHA256 `32cc1e928eb741376cc771820cb4cd51feb9e15e0e591c5c9bcc890b33aea0b5`，确认仅12／13两张PNG变化，其余23张与full12字节完全相同；Root也亲看12／13，旧SCT5孤立消除，未见空正文、单词残尾、新标题孤立、文字裁切重叠或字号漂移。原严格同table-nextrow账35组同页／1UNKNOWN保留；[后继原生相邻块证据](../../../.local/sct-heading-row36-integration02/post13/terminal-heading-native-next-block-review.json)另核第36组跨表的显式空桥及第19页同页，不将物理相邻升级为法律归属。
+
+本轮green3为2PASS／1FAIL，新增测试把原件vMerge误写为9而实际为10；原失败保留，仅更正先验及逐项merge比较后的补窗1PASS／47.500秒，产品资源字节不变。此前98唯一／103执行，加本轮共99唯一方法有PASS记录、107次执行（105PASS／2FAIL，编译0执行窗另列），不是单窗99全绿。最终采用只可按[当前主树六产品边界](../../../.local/sct-heading-row36-integration02/full13-drafting-main-closure.json)，禁止覆盖15个OER／Advisory／Vetting旧快照差异及main-only scope契约。
+
+### OER运行恢复与实际源质量分开
+
+原18780进程在源码更新后按`SOFTWARE_CHANGED_SINCE_IMPORT`拒绝health，未关闭guard。Root按[真实前状态](../../../.local/sl-fwp-seven-semantic-review01/coordinator-before01/receipt.json)和[1,050去重资产／空闲审计](../../../.local/e2e-20261020/runtime21-current-source-preparation01/root-preflight01.json)核完，12份已知历史provider start均有released／cgroup0，原服务无子任务或相关活动连接。仅同一个`consense-recognition-local.service`更新启动清单，旧config／boot和全部历史证据保留；新PID833135／startTicks51030795，health回200，见[实际恢复](../../../.local/e2e-20261020/runtime21-current-source-preparation01/root-restart02/receipt.json)。首恢复窗stop后因本机systemd-run不支持`--type=exec`失败，后继仅更正为`--property=Type=exec`后启动成功；原失败保留，未重发引擎，H2及后端未重启。
+
+[真实两页执行票](../../../.local/sl-fwp-seven-semantic-review01/actual-dual/competition-batch02/receipt.json)为8310字节，SHA256 `88ad207572fb7b4b3baf6ed291db9a6b9a068ad693b495e7d2f25f04febdcb91`。四个fresh provider均有完整输出及owned释放证据；现有路由的辅助CPU观察另属该请求内，不能把4个dual-provider页当全部内部计算次数。[64格实际源评首看](../../../.local/sl-fwp-seven-semantic-review01/actual-source-quality-firstlook01/actual-two-page32-per-method-review.json)按本版固定32项分别评分：Paddle27PASS／5UNKNOWN，MinerU25PASS／2FAIL／5UNKNOWN；这是异质检查项，不是OCR准确率。两处FAIL为<=50与>50条件段的规范化text=null，raw内text＋equation_inline原样仍在；另一个含公式的目标外块也保原raw及投影unknown，三个块不能因材料保存完整而授文本可用通过。两路关系均空，跨页控制、父子／条件、整条边界、完整读序／页眉排除和证书对象宽度不猜补。Paddle还漏了目标外相邻`.040.9`编号，单列边界风险。
+
+`captureStatus=incomplete`与`dualCompleteness complete/eligible`定义不同：[更正票](../../../.local/sl-fwp-seven-semantic-review01/actual-source-quality-firstlook01/completeness-semantics-correction01.json)说明后者只验原材料／页与终态，不授文本投影、来源质量或自动采用；原首看中“互相矛盾”的定性已由后继更正，64格、旧七版219PASS／5UNKNOWN均不改。Python typed-inline候选仍私有，保LaTeX字面与解释unknown；尚未将两FAIL改PASS。
+
+[实际文件导出](../../../.local/sl-fwp-seven-semantic-review01/export-real-dual01/actual/competition-batch02/export-receipt.json)保296个CAS blob。初次文件导入因附加完整原件后runId及派生ID变化，在pages全等断言失败，已保留原6个CAS现场，未冒充来源质量失败。最小[baseline-import02实际收据](../../../.local/sl-fwp-seven-semantic-review01/export-real-dual01/baseline-import02/imported/competition-batch02/import-receipt.json)，SHA256 `6fb93c552ac60ea88b3f48509849acbdafc57097a71546d09a51c8af90948fc4`，先保存真实run与逐leaf差异，仅允许经runId配方证明的生成ID前缀映射，文本／bbox／PNG／来源／unknown全同后，完成4／2／1生产组件调用。没有重发OCR、重写vendor raw或伪造单个两页vendor文档；首轮失败不删。
+
+Vetting报告候选证据见[GREEN35](../../../.local/vetting-report-continuation02/regression01/green/execution/owned-receipt.json)、[真实保存报告生成](../../../.local/vetting-report-continuation02/report-generation01/green/execution/owned-receipt.json)及[内容与所属关系审计](../../../.local/vetting-report-continuation02/report-generation01/green/execution/report-artifacts/content-association-audit.json)。新增报告内`Source check A001`等短标识只表示本报告记录，不是正式条号；未知与人工状态保持，视觉待验。Advisory新提示词的实际27B后继、三模块浏览器最终验收、七版22,214技术页／版本隔离检索和质量通过后的完整比赛交付均继续；SQL20仍早于新UI项目，下一后端升级前须fresh保护新增写入。
+
+
+### 当前主树组合、精确采用及真实文档后继
+
+[原762执行票](../../../.local/current-main-drafting193-composite01/green/execution/owned-receipt.json)实际为759PASS／3FAIL、0ERROR／SKIP、230.016秒，package未过。两SCT失败是旧fixture按section/slot唯一索引与新增不同story动作不兼容，实际完整ZIP及175／125条有序ledger与同窗已通过的true-header参考相同；Advisory失败是一行仍断言D1更新前的提示词。独立[补3与同target package执行票](../../../.local/current-main-drafting193-three-supplement02/green/execution/owned-receipt.json)实际3PASS、51.609秒，16GiB／24GiB、968源／90运行库，pins同且自然Job0。[跨窗核验](../../../.local/current-main-drafting193-three-supplement02/actual-cross-window762-package-review.json) SHA256 `11617016d64118c623cca584578b02bea2b1b41ddd16e721303bb03990358ce0`，精确762唯一身份有PASS，共765次执行＝762PASS＋3FAIL；759不重跑，原失败保留。SCT旧base116／78条所有断言保留，完整current175／125条无筛除／合并。
+
+Root依原manifest逐文件old／new SHA核验后采用6产品、12测试／fixture及Advice一行过时断言，19个保护文件完整保持；[采用收据](../../../.local/current-main-drafting193-three-supplement02/root-adoption01/receipt.json) SHA256 `304bd587a38cfe07612806f44bbc6d76f6e95b22871300eaa44c98c5e5656462`。没有采用验证专用ActualSix测试，也未覆盖15个旧快照产品差异、main-only scope契约或三个未知untracked。运行formal19未重启，源码采用不是浏览器或最终文件业务验收。
+
+Vetting Continuation02原生43页[全页视觉](../../../.local/vetting-report-continuation02/native43-visual-review01.json)目标续页归属PASS；其DOCX经LO42页[全页视觉](../../../.local/vetting-report-continuation02/lo42-visual-review01.json)明确36／37／39／40页错误重复VT002／A001，含VT012的单词尾段2026.，不能降成unknown。实际31记录表有29对直接相邻而无段落边界。Continuation03只在共享wordRecord加6行Normal空段／0前后／精确1pt边界，PDF、长引文可拆分和原文不改。RED2精确两个边界断言失败、33.703秒；[GREEN37](../../../.local/vetting-report-continuation03/regression01/green/execution/owned-receipt.json)37/37、49.672秒；[真实保存生成1](../../../.local/vetting-report-continuation03/report-generation01/green/execution/owned-receipt.json)1PASS、37.219秒，原80业务字段／32finding引文关系／15assessment引文关系／69人工记录及unknown保持，31表／29边界核同。新DOCX SHA256 `70a69513ff8efef9679c00c781496dc56d624ce474cb76b18c110cc7cc30d1e6`，新全页Word衍生视觉未授通过，原生MS Word未验；Writer不采用。原生PDF仅trailer文档ID变化，其他所有字节同02，见[新产物身份审计](../../../.local/vetting-report-continuation03/new-artifact-identity-review01.json)，不冒充一次新43页raster。
+
+### MinerU字面投影：软件和真实raw重建已通过，来源评分不改
+
+最小私有候选仅在既有_text增加严格text＋equation_inline数组的原字面有序投影，并保留解释unknown；新增逻辑置于既有lines／spans之后，维持有效／空／非法lines列表原优先级。初版RED2／GREEN5及149实际通过保留，采用前发现优先级边界后，新[150回归](../../../.local/sl-fwp-seven-semantic-review01/export-real-dual01/mineru-inline-private01/regression-window02/green/receipt.json)150/150、23.109秒，24GiB、全部pins同／自然Job0。264基线不改，候选与运行源码不混同。
+
+[真实raw后继03收据](../../../.local/sl-fwp-seven-semantic-review01/export-real-dual01/mineru-inline-private01/actual-capture-successor03/imported/competition-batch02/import-receipt.json) SHA256 `16127af855433717b2ecdc538684b82fcf313554bea439204a8153940f94cb59`，36.062秒实际完成4capture／2combine／1dual。107块仅3556的12／18及3557的6三块恢复原typed字面；bbox、typed数组／顺序、vendor raw、来源及资产保持。该四run实际引用CAS为264个唯一blob／496,921,207字节，区别于原导出296记录。旧raw后继01因漏重算receipt自hash而失败，原现场保留；纯文件证明只有run内容hash和receipt自hash两叶派生变化，03只精确重算，未扩大白名单；02未执行树保持。公式LaTeX未改成已核单位／直径，原64评分及F03／F12失败不改，来源／关系／canonical／检索不授通过。首个其他版sl2022-original正串行进行唯一双页请求，其余进度以实际收据为准；比赛包继续后置。
+
+新Continuation03的[word-render实际票](../../../.local/vetting-report-continuation03/render-preparation01/word-render/execution/owned-receipt.json) SHA256 `4c29f5bda9852d76accf8914aae7ed0376ad404544719e3b7f5f0ce462ae9d91`，实际42页，输入及原产物保持、owned自然退出。Root亲看36／37／39／40：错误VT002／A001已被正确VT006／VT012／A005／A010替代；37页顶仅2026.、39页顶仅Tender.的引文短尾仍FAIL。全页独立目验继续，不能以owner修正授完整布局通过，04后继沿共享表格行／段落控制继续诊断，不按编号／页码放行。
+<!-- unified-progress45:end -->
+
 <!-- unified-progress44:start -->
 ## progress44：当前前端身份闭环、Drafting完整生成和SL跨语言组件链
 

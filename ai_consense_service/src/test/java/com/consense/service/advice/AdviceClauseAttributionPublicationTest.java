@@ -125,7 +125,7 @@ class AdviceClauseAttributionPublicationTest {
             assertTrue(user.contains("deleting only this designation does not repair unsupported substance"));
             String instructions=JsonUtils.parse(transport.http.bodies.get(3)).path("instructions").asText();
             assertTrue(instructions.contains("Use one independently checkable rule/mechanism per analysis section"));
-            assertTrue(instructions.contains("keep each rule with its own full governing conditions, trigger, effect, exceptions and supporting continuation"));
+            assertTrue(instructions.contains("State that rule once as a complete condition-to-effect explanation, including its governing conditions, actual trigger subject, applicability, effect, exceptions and supporting continuation."));
             assertEquals(correct?2:1,accepted(f).size());assertEquals(correct?2:1,ids(f).size());assertEquals(2,((List<?>)ReflectionTestUtils.getField(f.publication,"attempts")).size());assertNotNull(result);
         }
     }

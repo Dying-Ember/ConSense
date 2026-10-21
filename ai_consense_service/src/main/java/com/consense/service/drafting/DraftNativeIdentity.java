@@ -135,10 +135,43 @@ final class DraftNativeIdentity {
         if(source==null){DraftFormattedRules.addIssue(prepared,key,"NATIVE_STORY_SOURCE_EDITION_UNVERIFIED","Native header/footer bindings for this source edition require review;the source stories were preserved.");return body;}
         require(nativeSections!=null&&!nativeSections.isNull(),"NATIVE_SECTION_OBSERVATION_REQUIRED");
         StaticFooterSourceFormat format=null;Map<String,Integer> edges=new LinkedHashMap<>();JsonNode styling=source.path("sourceFormatting");
-        if(!styling.isMissingNode()&&Objects.equals(rendererKind,styling.path("rendererKind").asText())){format=new StaticFooterSourceFormat(styling.path("stylesPartSha256").asText(),styling.path("headerStyleId").asText(),styling.path("footerStyleId").asText());styling.path("candidateEdgeDistancesTwips").fields().forEachRemaining(entry->edges.put(entry.getKey(),entry.getValue().asInt()));}
+        if(!styling.isMissingNode()&&Objects.equals(rendererKind,styling.path("rendererKind").asText())){format=new StaticFooterSourceFormat(styling.path("stylesPartSha256").asText(),styling.path("headerStyleId").asText(),styling.path("footerStyleId").asText(),styling.path("emptyFooterPartName").asText(null),styling.path("emptyFooterPartSha256").asText(null),styling.hasNonNull("contractNumberHalfPoints")?styling.path("contractNumberHalfPoints").asInt():null);styling.path("candidateEdgeDistancesTwips").fields().forEachRemaining(entry->edges.put(entry.getKey(),entry.getValue().asInt()));}
         NativeStoryPlan story=plan(index,nativeSections,identity,edition(source),format,edges);
+        JsonNode titles=source.path("sctTitleMigration");
+        if(!titles.isMissingNode()&&Objects.equals(rendererKind,titles.path("rendererKind").asText()))try {
+            story=story.withSctTitleMigration(sctTitles(index,story,titles));
+        }catch(IllegalStateException|IllegalArgumentException unsupported){
+            DraftFormattedRules.addIssue(prepared,key,"SCT_TITLE_MIGRATION_UNAVAILABLE","The optional SCT heading layout requires review; the original headings and the usable project package were preserved.");
+        }
         return (body==null?new NativeLayoutPlan(index.getSourceSha256(),INTEGRATION_VERSION+":story-only",Collections.emptyList(),Collections.emptyList()):body).withStories(story);
     }
+    private static SctTitleMigration sctTitles(TemplateIndex index,NativeStoryPlan plan,JsonNode raw) {
+        require("source-bound-sct-true-header-v1".equals(raw.path("version").asText())
+                &&"absent".equals(raw.path("expectedTitlePg").asText())&&raw.path("generatedTitlePg").asBoolean()
+                &&"link_verified_default".equals(raw.path("firstFooterPolicy").asText())
+                &&raw.path("candidateFrameTwips").size()==2&&raw.path("candidateFrameTwips").path("top").asInt()==1080
+                &&raw.path("candidateFrameTwips").path("header").asInt()==360,"SCT_TITLE_POLICY_UNSUPPORTED");
+        int ordinal=raw.path("sectionOrdinal").asInt();require(ordinal>0&&ordinal<=plan.sections.size(),"SCT_TITLE_SECTION_UNAVAILABLE");
+        Section section=plan.sections.get(ordinal-1);
+        require(section.observedSectionId.equals(raw.path("sectionId").asText())
+                &&section.sourceSection.getId().equals(raw.path("sectionAnchorId").asText())
+                &&section.sourceSection.getSha256().equals(raw.path("sectionNodeSha256").asText())
+                &&section.sourcePosition.nativeNodePath.equals(raw.path("sectionNativeNodePath").asText()),"SCT_TITLE_SECTION_MISMATCH");
+        List<SctBodyTitle> titles=new ArrayList<>();
+        for(JsonNode title:raw.path("bodyTitles")) {
+            Paragraph paragraph=index.mainParagraph(title.path("paragraphOrdinal").asInt());
+            require(paragraph.getId().equals(title.path("anchorId").asText())&&paragraph.getSha256().equals(title.path("nodeSha256").asText())
+                    &&paragraph.getNativeNodePath().equals(title.path("nativeNodePath").asText())
+                    &&Objects.equals(index.getEntryHashes().get(paragraph.getPart()),title.path("partSha256").asText())
+                    &&section.sourceSection.getId().equals(paragraph.getSectionId())
+                    &&paragraph.getCatalogText().equals(title.path("exactText").asText()),"SCT_TITLE_ANCHOR_MISMATCH");
+            titles.add(new SctBodyTitle(paragraph,title.path("exactText").asText(),title.path("preserveSourceColumnControl").asBoolean()));
+        }
+        require(!titles.isEmpty(),"SCT_TITLE_SCOPE_EMPTY");
+        return new SctTitleMigration(section,raw.path("stylesPartSha256").asText(),raw.path("headerStyleId").asText(),
+                raw.path("headerStyleNodeSha256").asText(),titles,raw.path("plainDonorOrdinal").asInt(),raw.path("continuedDonorOrdinal").asInt());
+    }
+
     private static VerifiedEdition edition(JsonNode source){
         Map<String,String> hashes=new LinkedHashMap<>();source.path("expectedEntryHashes").fields().forEachRemaining(entry->hashes.put(entry.getKey(),entry.getValue().asText()));List<String> controls=new ArrayList<>();source.path("sourceControlLinesToRetain").forEach(node->controls.add(node.asText()));
         List<SectionPolicy> policies=new ArrayList<>();for(JsonNode section:source.path("sections")){JsonNode numbering=section.path("sourceNumberingDiagnostic");policies.add(new SectionPolicy(PageAction.valueOf(section.path("footerPagePolicy").asText()),section.path("pagePrefix").asText(null),section.path("pageSuffix").asText(null),"PRESERVE".equals(numbering.path("action").asText())?null:numbering.path("nextRaw").path("start").asText(null),controls));}

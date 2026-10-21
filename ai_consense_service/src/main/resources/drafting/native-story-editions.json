@@ -297,6 +297,26 @@
     },
     {
       "profileId": "native-identity-2a-sct-candidate01",
+      "sourceFormatting": {
+        "stylesPartSha256": "c23a2d07ce83bc90596f413a9fbf08ff866adf73215f20b8c37f2ce2bcedf389",
+        "headerStyleId": "a3",
+        "footerStyleId": "a5",
+        "emptyFooterPartName": "word/footer1.xml",
+        "emptyFooterPartSha256": "e9ee1f9c537702cc079ad03bd2c69be842f93542351b66eb0390608f23920326",
+        "contractNumberHalfPoints": 20,
+        "candidateEdgeDistancesTwips": {
+          "header": 360
+        },
+        "rendererKind": "libreoffice",
+        "formattingReference": {
+          "sourceSha256": "6d7802ea7b094124c0ddebb0b448c7e6bfe72828ffbc91ad1c30133902a6f64c",
+          "partName": "word/footer1.xml",
+          "partSha256": "c35c21d7a49982c3d0f99566af0041a922eff48b0fcf923b0a0e668740a72aa9",
+          "authority": "2b SCT contract-number run w:sz20; a5 tabs and PAGE inherit Normal w:sz24. No NTT formatting or8pt assumption."
+        },
+        "generationPolicy": "Only a newly created header uses360twip, half the existing720twip top band. This is generation policy, not an observed source header distance; body margins, original empty footer paragraph, controls, breaks and fields remain untouched.",
+        "validationScope": "Unexecuted SCT native-frame candidate; requires original57 guards, six-source checks and same-source full generation/all-page visual review. No target page count."
+      },
       "edition": "2a",
       "key": "SCT",
       "sourceSha256": "7def01d62e07b35dd86beeff995e0e37d73ce18adca2746e2a6f6d9bafb5aaa4",
@@ -914,7 +934,274 @@
             }
           }
         }
-      ]
+      ],
+      "sctTitleMigration": {
+        "version": "source-bound-sct-true-header-v1",
+        "rendererKind": "libreoffice",
+        "sectionOrdinal": 1,
+        "sectionId": "docx-section:bdf7231da34a4bdb9796bbe17cb773ed3f89e2ffd98a5bf71e704710cc8daf33",
+        "sectionAnchorId": "word/document.xml#/w:document[1]/w:body[1]/w:sectPr[1]",
+        "sectionNodeSha256": "4d66c202c1a87830a2dbc655bafd20b6114ceee22b0664f9efeed7a134d8b4c1",
+        "sectionNativeNodePath": "/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}document[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}body[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}sectPr[1]",
+        "stylesPartSha256": "c23a2d07ce83bc90596f413a9fbf08ff866adf73215f20b8c37f2ce2bcedf389",
+        "headerStyleId": "a3",
+        "headerStyleNodeSha256": "3d06a675c991ea4c974ddb2a00f1d0c920de22537b9a8b56bd45a4fd193a858a",
+        "expectedTitlePg": "absent",
+        "generatedTitlePg": true,
+        "firstFooterPolicy": "link_verified_default",
+        "candidateFrameTwips": {
+          "top": 1080,
+          "header": 360
+        },
+        "plainDonorOrdinal": 1,
+        "continuedDonorOrdinal": 53,
+        "bodyTitles": [
+          {
+            "paragraphOrdinal": 1,
+            "anchorId": "word/document.xml#/w:document[1]/w:body[1]/w:tbl[1]/w:tr[1]/w:tc[1]/w:p[1]",
+            "nativeNodePath": "/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}document[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}body[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tbl[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tr[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tc[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p[1]",
+            "nodeSha256": "1fe796679e00565005b73acd318b0ca6229853bee35f99ad731fea9614de9da7",
+            "partSha256": "a16768ce3f168c840e01db210371575db73eb20d06417cd23c73b1c7073a76fb",
+            "exactText": "SPECIAL CONDITIONS OF TENDER",
+            "preserveSourceColumnControl": false
+          },
+          {
+            "paragraphOrdinal": 53,
+            "anchorId": "word/document.xml#/w:document[1]/w:body[1]/w:tbl[2]/w:tr[1]/w:tc[1]/w:p[1]",
+            "nativeNodePath": "/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}document[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}body[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tbl[2]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tr[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tc[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p[1]",
+            "nodeSha256": "e2eb568ab47463684480c75fc88bdb0465567545fe50ac8f8b9cc00459d72a00",
+            "partSha256": "a16768ce3f168c840e01db210371575db73eb20d06417cd23c73b1c7073a76fb",
+            "exactText": "SPECIAL CONDITIONS OF TENDER  (Cont’d)",
+            "preserveSourceColumnControl": false
+          },
+          {
+            "paragraphOrdinal": 97,
+            "anchorId": "word/document.xml#/w:document[1]/w:body[1]/w:tbl[3]/w:tr[1]/w:tc[1]/w:p[1]",
+            "nativeNodePath": "/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}document[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}body[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tbl[3]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tr[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tc[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p[1]",
+            "nodeSha256": "cbedb2b8d8dc09c26587a2953f0f3ae4b73fe5b102e00d988cfb3bddca972aed",
+            "partSha256": "a16768ce3f168c840e01db210371575db73eb20d06417cd23c73b1c7073a76fb",
+            "exactText": "SPECIAL CONDITIONS OF TENDER  (Cont’d)",
+            "preserveSourceColumnControl": false
+          },
+          {
+            "paragraphOrdinal": 155,
+            "anchorId": "word/document.xml#/w:document[1]/w:body[1]/w:tbl[4]/w:tr[1]/w:tc[1]/w:p[1]",
+            "nativeNodePath": "/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}document[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}body[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tbl[4]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tr[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tc[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p[1]",
+            "nodeSha256": "d3176a3c41951e3c1741f6518e8522f9d4efcf178246ab680a232cc5e1d6340d",
+            "partSha256": "a16768ce3f168c840e01db210371575db73eb20d06417cd23c73b1c7073a76fb",
+            "exactText": "SPECIAL CONDITIONS OF TENDER  (Cont’d)",
+            "preserveSourceColumnControl": false
+          },
+          {
+            "paragraphOrdinal": 214,
+            "anchorId": "word/document.xml#/w:document[1]/w:body[1]/w:tbl[5]/w:tr[1]/w:tc[1]/w:p[1]",
+            "nativeNodePath": "/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}document[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}body[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tbl[5]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tr[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tc[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p[1]",
+            "nodeSha256": "7e42414f36bd442ec0b32040245cab2d4e529a98932711b4ec9d9a8d0a9ff2ba",
+            "partSha256": "a16768ce3f168c840e01db210371575db73eb20d06417cd23c73b1c7073a76fb",
+            "exactText": "SPECIAL CONDITIONS OF TENDER  (Cont’d)",
+            "preserveSourceColumnControl": false
+          },
+          {
+            "paragraphOrdinal": 256,
+            "anchorId": "word/document.xml#/w:document[1]/w:body[1]/w:tbl[6]/w:tr[1]/w:tc[1]/w:p[1]",
+            "nativeNodePath": "/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}document[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}body[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tbl[6]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tr[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tc[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p[1]",
+            "nodeSha256": "3ca6e5064e5cb465b248ac43bfa55df73315f4432bfef698f43640564fed93dd",
+            "partSha256": "a16768ce3f168c840e01db210371575db73eb20d06417cd23c73b1c7073a76fb",
+            "exactText": "SPECIAL CONDITIONS OF TENDER  (Cont’d)",
+            "preserveSourceColumnControl": false
+          },
+          {
+            "paragraphOrdinal": 306,
+            "anchorId": "word/document.xml#/w:document[1]/w:body[1]/w:tbl[8]/w:tr[1]/w:tc[1]/w:p[1]",
+            "nativeNodePath": "/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}document[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}body[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tbl[8]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tr[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tc[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p[1]",
+            "nodeSha256": "88e61bee323d4643bf18027eb27212c779b146b79978442eee22b7424cdb867d",
+            "partSha256": "a16768ce3f168c840e01db210371575db73eb20d06417cd23c73b1c7073a76fb",
+            "exactText": "SPECIAL CONDITIONS OF TENDER  (Cont’d)",
+            "preserveSourceColumnControl": false
+          },
+          {
+            "paragraphOrdinal": 371,
+            "anchorId": "word/document.xml#/w:document[1]/w:body[1]/w:tbl[9]/w:tr[1]/w:tc[1]/w:p[1]",
+            "nativeNodePath": "/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}document[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}body[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tbl[9]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tr[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tc[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p[1]",
+            "nodeSha256": "c72e1f57b17dbeb8ff7dec43684c83c10a257a1c4a710c86bc59204de4f5516b",
+            "partSha256": "a16768ce3f168c840e01db210371575db73eb20d06417cd23c73b1c7073a76fb",
+            "exactText": "SPECIAL CONDITIONS OF TENDER  (Cont’d)",
+            "preserveSourceColumnControl": false
+          },
+          {
+            "paragraphOrdinal": 422,
+            "anchorId": "word/document.xml#/w:document[1]/w:body[1]/w:tbl[11]/w:tr[1]/w:tc[1]/w:p[1]",
+            "nativeNodePath": "/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}document[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}body[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tbl[11]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tr[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tc[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p[1]",
+            "nodeSha256": "f75717d5b9d58a7ec2fafbcbe8af8704b1c944c23c71282e62f18af3d5be38e3",
+            "partSha256": "a16768ce3f168c840e01db210371575db73eb20d06417cd23c73b1c7073a76fb",
+            "exactText": "SPECIAL CONDITIONS OF TENDER  (Cont’d)",
+            "preserveSourceColumnControl": true
+          },
+          {
+            "paragraphOrdinal": 474,
+            "anchorId": "word/document.xml#/w:document[1]/w:body[1]/w:tbl[12]/w:tr[1]/w:tc[1]/w:p[1]",
+            "nativeNodePath": "/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}document[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}body[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tbl[12]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tr[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tc[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p[1]",
+            "nodeSha256": "99cc2070a2ad30550137d58ddb898e555503d6c2bec158d6b1ecc8889e8299f9",
+            "partSha256": "a16768ce3f168c840e01db210371575db73eb20d06417cd23c73b1c7073a76fb",
+            "exactText": "SPECIAL CONDITIONS OF TENDER  (Cont’d)",
+            "preserveSourceColumnControl": false
+          },
+          {
+            "paragraphOrdinal": 506,
+            "anchorId": "word/document.xml#/w:document[1]/w:body[1]/w:tbl[13]/w:tr[1]/w:tc[1]/w:p[1]",
+            "nativeNodePath": "/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}document[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}body[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tbl[13]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tr[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tc[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p[1]",
+            "nodeSha256": "729f0ef805ce108a668a27dcd1f36184fe551c7877d112733ea9d2f8b2e90067",
+            "partSha256": "a16768ce3f168c840e01db210371575db73eb20d06417cd23c73b1c7073a76fb",
+            "exactText": "SPECIAL CONDITIONS OF TENDER  (Cont’d)",
+            "preserveSourceColumnControl": false
+          },
+          {
+            "paragraphOrdinal": 531,
+            "anchorId": "word/document.xml#/w:document[1]/w:body[1]/w:tbl[14]/w:tr[1]/w:tc[1]/w:p[1]",
+            "nativeNodePath": "/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}document[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}body[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tbl[14]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tr[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tc[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p[1]",
+            "nodeSha256": "af51a4cfb33872c7f2a6ce5c9f01c1abc67ee559ad6b0b03ee6d587753bfad63",
+            "partSha256": "a16768ce3f168c840e01db210371575db73eb20d06417cd23c73b1c7073a76fb",
+            "exactText": "SPECIAL CONDITIONS OF TENDER  (Cont’d)",
+            "preserveSourceColumnControl": false
+          },
+          {
+            "paragraphOrdinal": 567,
+            "anchorId": "word/document.xml#/w:document[1]/w:body[1]/w:tbl[16]/w:tr[1]/w:tc[1]/w:p[1]",
+            "nativeNodePath": "/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}document[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}body[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tbl[16]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tr[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tc[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p[1]",
+            "nodeSha256": "8cedd17d67913ff2b4aee9cfefb7b3a690348619bb12203e9b82505e284691a0",
+            "partSha256": "a16768ce3f168c840e01db210371575db73eb20d06417cd23c73b1c7073a76fb",
+            "exactText": "SPECIAL CONDITIONS OF TENDER  (Cont’d)",
+            "preserveSourceColumnControl": false
+          },
+          {
+            "paragraphOrdinal": 613,
+            "anchorId": "word/document.xml#/w:document[1]/w:body[1]/w:tbl[20]/w:tr[1]/w:tc[1]/w:p[1]",
+            "nativeNodePath": "/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}document[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}body[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tbl[20]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tr[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tc[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p[1]",
+            "nodeSha256": "309728608cbe5d714f9d2ac8bc3ae0ce9995a1c154f67820589ad36d493880da",
+            "partSha256": "a16768ce3f168c840e01db210371575db73eb20d06417cd23c73b1c7073a76fb",
+            "exactText": "SPECIAL CONDITIONS OF TENDER  (Cont’d)",
+            "preserveSourceColumnControl": false
+          },
+          {
+            "paragraphOrdinal": 663,
+            "anchorId": "word/document.xml#/w:document[1]/w:body[1]/w:tbl[24]/w:tr[1]/w:tc[1]/w:p[1]",
+            "nativeNodePath": "/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}document[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}body[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tbl[24]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tr[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tc[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p[1]",
+            "nodeSha256": "9f177e0afbb7bbcf859158bfefeec49c5d5c33f2450ccc04f2358ebf8ebc0c7e",
+            "partSha256": "a16768ce3f168c840e01db210371575db73eb20d06417cd23c73b1c7073a76fb",
+            "exactText": "SPECIAL CONDITIONS OF TENDER  (Cont’d)",
+            "preserveSourceColumnControl": false
+          },
+          {
+            "paragraphOrdinal": 703,
+            "anchorId": "word/document.xml#/w:document[1]/w:body[1]/w:tbl[27]/w:tr[1]/w:tc[1]/w:p[1]",
+            "nativeNodePath": "/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}document[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}body[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tbl[27]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tr[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tc[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p[1]",
+            "nodeSha256": "250db91e7c48bac89aa05c4c2fc898864a959bdc7c7a94a304691610c3c7d6a1",
+            "partSha256": "a16768ce3f168c840e01db210371575db73eb20d06417cd23c73b1c7073a76fb",
+            "exactText": "SPECIAL CONDITIONS OF TENDER  (Cont’d)",
+            "preserveSourceColumnControl": false
+          },
+          {
+            "paragraphOrdinal": 742,
+            "anchorId": "word/document.xml#/w:document[1]/w:body[1]/w:tbl[30]/w:tr[1]/w:tc[1]/w:p[1]",
+            "nativeNodePath": "/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}document[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}body[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tbl[30]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tr[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tc[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p[1]",
+            "nodeSha256": "01f9c4607209b6bd270f79b1cb66c4dee76bd1a26e00ca33c1bb79f465f070e1",
+            "partSha256": "a16768ce3f168c840e01db210371575db73eb20d06417cd23c73b1c7073a76fb",
+            "exactText": "SPECIAL CONDITIONS OF TENDER  (Cont’d)",
+            "preserveSourceColumnControl": false
+          },
+          {
+            "paragraphOrdinal": 780,
+            "anchorId": "word/document.xml#/w:document[1]/w:body[1]/w:tbl[32]/w:tr[1]/w:tc[1]/w:p[1]",
+            "nativeNodePath": "/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}document[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}body[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tbl[32]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tr[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tc[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p[1]",
+            "nodeSha256": "1631ce3a9fa591cf12b3cdfd69dcb802753150c81dd552caa28ad356b2d9c2c9",
+            "partSha256": "a16768ce3f168c840e01db210371575db73eb20d06417cd23c73b1c7073a76fb",
+            "exactText": "SPECIAL CONDITIONS OF TENDER  (Cont’d)",
+            "preserveSourceColumnControl": false
+          },
+          {
+            "paragraphOrdinal": 836,
+            "anchorId": "word/document.xml#/w:document[1]/w:body[1]/w:tbl[34]/w:tr[1]/w:tc[1]/w:p[1]",
+            "nativeNodePath": "/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}document[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}body[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tbl[34]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tr[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tc[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p[1]",
+            "nodeSha256": "664af46570ec28403b375da3f1ce301101716396bd5d44b4725892b43e75cfab",
+            "partSha256": "a16768ce3f168c840e01db210371575db73eb20d06417cd23c73b1c7073a76fb",
+            "exactText": "SPECIAL CONDITIONS OF TENDER  (Cont’d)",
+            "preserveSourceColumnControl": false
+          },
+          {
+            "paragraphOrdinal": 880,
+            "anchorId": "word/document.xml#/w:document[1]/w:body[1]/w:tbl[36]/w:tr[1]/w:tc[1]/w:p[1]",
+            "nativeNodePath": "/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}document[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}body[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tbl[36]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tr[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tc[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p[1]",
+            "nodeSha256": "5112954d83808af5b05cf3f4b62bf7fcf09de5da517a798853607288c59fd085",
+            "partSha256": "a16768ce3f168c840e01db210371575db73eb20d06417cd23c73b1c7073a76fb",
+            "exactText": "SPECIAL CONDITIONS OF TENDER  (Cont’d)",
+            "preserveSourceColumnControl": false
+          },
+          {
+            "paragraphOrdinal": 916,
+            "anchorId": "word/document.xml#/w:document[1]/w:body[1]/w:tbl[39]/w:tr[1]/w:tc[1]/w:p[1]",
+            "nativeNodePath": "/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}document[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}body[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tbl[39]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tr[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tc[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p[1]",
+            "nodeSha256": "bc70ab1a1936d4a820db7c2c03641ef1c86358b3b26cfa41044b834e59f846b2",
+            "partSha256": "a16768ce3f168c840e01db210371575db73eb20d06417cd23c73b1c7073a76fb",
+            "exactText": "SPECIAL CONDITIONS OF TENDER  (Cont’d)",
+            "preserveSourceColumnControl": false
+          },
+          {
+            "paragraphOrdinal": 956,
+            "anchorId": "word/document.xml#/w:document[1]/w:body[1]/w:tbl[41]/w:tr[1]/w:tc[1]/w:p[1]",
+            "nativeNodePath": "/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}document[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}body[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tbl[41]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tr[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tc[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p[1]",
+            "nodeSha256": "ed1b54bd1d7d0a308b03faff3803e051be4799d914dfafa5094de1fd832d6467",
+            "partSha256": "a16768ce3f168c840e01db210371575db73eb20d06417cd23c73b1c7073a76fb",
+            "exactText": "SPECIAL CONDITIONS OF TENDER  (Cont’d)",
+            "preserveSourceColumnControl": false
+          },
+          {
+            "paragraphOrdinal": 1013,
+            "anchorId": "word/document.xml#/w:document[1]/w:body[1]/w:tbl[43]/w:tr[1]/w:tc[1]/w:p[1]",
+            "nativeNodePath": "/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}document[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}body[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tbl[43]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tr[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tc[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p[1]",
+            "nodeSha256": "45a8c41c51e566f738da9177f1b510fbbed25edd339f35beadd94bc3b2607d6f",
+            "partSha256": "a16768ce3f168c840e01db210371575db73eb20d06417cd23c73b1c7073a76fb",
+            "exactText": "SPECIAL CONDITIONS OF TENDER  (Cont’d)",
+            "preserveSourceColumnControl": false
+          },
+          {
+            "paragraphOrdinal": 1063,
+            "anchorId": "word/document.xml#/w:document[1]/w:body[1]/w:tbl[47]/w:tr[1]/w:tc[1]/w:p[1]",
+            "nativeNodePath": "/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}document[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}body[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tbl[47]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tr[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tc[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p[1]",
+            "nodeSha256": "a3680230a7057ec29c4e83d416601a018b1d646144db13bfeed9ee1d1f7350d4",
+            "partSha256": "a16768ce3f168c840e01db210371575db73eb20d06417cd23c73b1c7073a76fb",
+            "exactText": "SPECIAL CONDITIONS OF TENDER  (Cont’d)",
+            "preserveSourceColumnControl": false
+          },
+          {
+            "paragraphOrdinal": 1102,
+            "anchorId": "word/document.xml#/w:document[1]/w:body[1]/w:tbl[50]/w:tr[1]/w:tc[1]/w:p[1]",
+            "nativeNodePath": "/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}document[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}body[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tbl[50]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tr[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tc[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p[1]",
+            "nodeSha256": "421cf5dd4224745e4996a91e0a3c2576eb1d0fd972c972b8cf4d1e7334a8e955",
+            "partSha256": "a16768ce3f168c840e01db210371575db73eb20d06417cd23c73b1c7073a76fb",
+            "exactText": "SPECIAL CONDITIONS OF TENDER  (Cont’d)",
+            "preserveSourceColumnControl": false
+          },
+          {
+            "paragraphOrdinal": 1139,
+            "anchorId": "word/document.xml#/w:document[1]/w:body[1]/w:tbl[53]/w:tr[1]/w:tc[1]/w:p[1]",
+            "nativeNodePath": "/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}document[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}body[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tbl[53]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tr[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tc[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p[1]",
+            "nodeSha256": "d562f512a7039ab40890ae0dbcfdaf7fd5a168b5a780ccde825651c700bc3e03",
+            "partSha256": "a16768ce3f168c840e01db210371575db73eb20d06417cd23c73b1c7073a76fb",
+            "exactText": "SPECIAL CONDITIONS OF TENDER  (Cont’d)",
+            "preserveSourceColumnControl": false
+          },
+          {
+            "paragraphOrdinal": 1192,
+            "anchorId": "word/document.xml#/w:document[1]/w:body[1]/w:tbl[54]/w:tr[1]/w:tc[1]/w:p[1]",
+            "nativeNodePath": "/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}document[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}body[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tbl[54]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tr[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tc[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p[1]",
+            "nodeSha256": "d887978e96b8ba5234ea8b8c49b496471175a7b7074c0386fa8e3e3a9d796730",
+            "partSha256": "a16768ce3f168c840e01db210371575db73eb20d06417cd23c73b1c7073a76fb",
+            "exactText": "SPECIAL CONDITIONS OF TENDER  (Cont’d)",
+            "preserveSourceColumnControl": false
+          }
+        ],
+        "generationPolicy": "Specific optional SCT heading migration; source semantic scope remains unknown. Frame values require fresh full-document Word and LibreOffice acceptance."
+      }
     },
     {
       "profileId": "native-identity-2a-scc-candidate01",
@@ -1389,7 +1676,220 @@
             }
           }
         }
-      ]
+      ],
+      "sctTitleMigration": {
+        "version": "source-bound-sct-true-header-v1",
+        "rendererKind": "libreoffice",
+        "sectionOrdinal": 2,
+        "sectionId": "docx-section:4c1abbddad0056f71f10623e456cea591b61be31c9dbea8e2c6abec228faa91b",
+        "sectionAnchorId": "word/document.xml#/w:document[1]/w:body[1]/w:p[141]/w:pPr[1]/w:sectPr[1]",
+        "sectionNodeSha256": "10cfb7b3564ae06896100637868e64101b42292803a44797683c0e761c0b07f3",
+        "sectionNativeNodePath": "/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}document[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}body[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p[141]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}pPr[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}sectPr[1]",
+        "stylesPartSha256": "a211fadb3d34a82f1eca43aebcf4a79dc0fe1ffb7c201dd4d90206b0223f5bcf",
+        "headerStyleId": "a3",
+        "headerStyleNodeSha256": "3d06a675c991ea4c974ddb2a00f1d0c920de22537b9a8b56bd45a4fd193a858a",
+        "expectedTitlePg": "absent",
+        "generatedTitlePg": true,
+        "firstFooterPolicy": "link_verified_default",
+        "candidateFrameTwips": {
+          "top": 1080,
+          "header": 360
+        },
+        "plainDonorOrdinal": 36,
+        "continuedDonorOrdinal": 86,
+        "bodyTitles": [
+          {
+            "paragraphOrdinal": 36,
+            "anchorId": "word/document.xml#/w:document[1]/w:body[1]/w:tbl[1]/w:tr[1]/w:tc[1]/w:p[1]",
+            "nativeNodePath": "/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}document[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}body[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tbl[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tr[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tc[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p[1]",
+            "nodeSha256": "4b3865cca327018d53015fc54fbafddccef19204c0ea392163f3110c003c0b3d",
+            "partSha256": "8b7db19d8fb229670ebe32735ab7b5eac88641efdf404b3500660cde6aee1532",
+            "exactText": "SPECIAL CONDITIONS OF TENDER",
+            "preserveSourceColumnControl": false
+          },
+          {
+            "paragraphOrdinal": 86,
+            "anchorId": "word/document.xml#/w:document[1]/w:body[1]/w:tbl[2]/w:tr[1]/w:tc[1]/w:p[1]",
+            "nativeNodePath": "/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}document[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}body[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tbl[2]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tr[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tc[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p[1]",
+            "nodeSha256": "040bad2f15de73d7597205706c88fedcc38cb6c6531cc37d1c5ad27b31365a3b",
+            "partSha256": "8b7db19d8fb229670ebe32735ab7b5eac88641efdf404b3500660cde6aee1532",
+            "exactText": "SPECIAL CONDITIONS OF TENDER  (Cont’d)",
+            "preserveSourceColumnControl": false
+          },
+          {
+            "paragraphOrdinal": 121,
+            "anchorId": "word/document.xml#/w:document[1]/w:body[1]/w:tbl[3]/w:tr[1]/w:tc[1]/w:p[1]",
+            "nativeNodePath": "/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}document[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}body[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tbl[3]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tr[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tc[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p[1]",
+            "nodeSha256": "f447a108c14830bddb27cddda10881b6733222972298f3ac95339cf996a55d80",
+            "partSha256": "8b7db19d8fb229670ebe32735ab7b5eac88641efdf404b3500660cde6aee1532",
+            "exactText": "SPECIAL CONDITIONS OF TENDER  (Cont’d)",
+            "preserveSourceColumnControl": false
+          },
+          {
+            "paragraphOrdinal": 163,
+            "anchorId": "word/document.xml#/w:document[1]/w:body[1]/w:tbl[4]/w:tr[1]/w:tc[1]/w:p[1]",
+            "nativeNodePath": "/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}document[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}body[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tbl[4]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tr[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tc[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p[1]",
+            "nodeSha256": "35f52fdb473052aedb6da2b71328ea462a9cc83b2c67d66eebbad96301b3cef7",
+            "partSha256": "8b7db19d8fb229670ebe32735ab7b5eac88641efdf404b3500660cde6aee1532",
+            "exactText": "SPECIAL CONDITIONS OF TENDER  (Cont’d)",
+            "preserveSourceColumnControl": false
+          },
+          {
+            "paragraphOrdinal": 203,
+            "anchorId": "word/document.xml#/w:document[1]/w:body[1]/w:tbl[5]/w:tr[1]/w:tc[1]/w:p[1]",
+            "nativeNodePath": "/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}document[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}body[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tbl[5]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tr[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tc[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p[1]",
+            "nodeSha256": "5d673fbb123a36127dbdab38fd347eeb3cf2dad6a170c53b118ba6a9c40667dc",
+            "partSha256": "8b7db19d8fb229670ebe32735ab7b5eac88641efdf404b3500660cde6aee1532",
+            "exactText": "SPECIAL CONDITIONS OF TENDER  (Cont’d)",
+            "preserveSourceColumnControl": false
+          },
+          {
+            "paragraphOrdinal": 229,
+            "anchorId": "word/document.xml#/w:document[1]/w:body[1]/w:tbl[6]/w:tr[1]/w:tc[1]/w:p[1]",
+            "nativeNodePath": "/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}document[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}body[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tbl[6]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tr[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tc[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p[1]",
+            "nodeSha256": "34ce0153d9085348aa8eeb0e5e3d9e288676a1de8eb61b33467f538f796c39ac",
+            "partSha256": "8b7db19d8fb229670ebe32735ab7b5eac88641efdf404b3500660cde6aee1532",
+            "exactText": "SPECIAL CONDITIONS OF TENDER  (Cont’d)",
+            "preserveSourceColumnControl": false
+          },
+          {
+            "paragraphOrdinal": 259,
+            "anchorId": "word/document.xml#/w:document[1]/w:body[1]/w:tbl[7]/w:tr[14]/w:tc[1]/w:p[1]",
+            "nativeNodePath": "/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}document[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}body[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tbl[7]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tr[14]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tc[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p[1]",
+            "nodeSha256": "234679c918bc05d19f641ef091b8afacdf2a7b9fc920ff9421da7d39de4a8fe2",
+            "partSha256": "8b7db19d8fb229670ebe32735ab7b5eac88641efdf404b3500660cde6aee1532",
+            "exactText": "SPECIAL CONDITIONS OF TENDER  (Cont’d)",
+            "preserveSourceColumnControl": false
+          },
+          {
+            "paragraphOrdinal": 281,
+            "anchorId": "word/document.xml#/w:document[1]/w:body[1]/w:tbl[9]/w:tr[1]/w:tc[1]/w:p[1]",
+            "nativeNodePath": "/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}document[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}body[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tbl[9]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tr[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tc[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p[1]",
+            "nodeSha256": "1231c0572e6bc7da79c0303d27475836eb47b47f69aaaef5d9786de0b6dfa0de",
+            "partSha256": "8b7db19d8fb229670ebe32735ab7b5eac88641efdf404b3500660cde6aee1532",
+            "exactText": "SPECIAL CONDITIONS OF TENDER  (Cont’d)",
+            "preserveSourceColumnControl": false
+          },
+          {
+            "paragraphOrdinal": 303,
+            "anchorId": "word/document.xml#/w:document[1]/w:body[1]/w:tbl[10]/w:tr[1]/w:tc[1]/w:p[1]",
+            "nativeNodePath": "/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}document[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}body[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tbl[10]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tr[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tc[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p[1]",
+            "nodeSha256": "7df7628a9f10e1359dc93f9828d088be2be7374d78d4b31ca2bd7c4a6f17a1fb",
+            "partSha256": "8b7db19d8fb229670ebe32735ab7b5eac88641efdf404b3500660cde6aee1532",
+            "exactText": "SPECIAL CONDITIONS OF TENDER  (Cont’d)",
+            "preserveSourceColumnControl": false
+          },
+          {
+            "paragraphOrdinal": 342,
+            "anchorId": "word/document.xml#/w:document[1]/w:body[1]/w:tbl[14]/w:tr[1]/w:tc[1]/w:p[1]",
+            "nativeNodePath": "/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}document[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}body[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tbl[14]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tr[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tc[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p[1]",
+            "nodeSha256": "cbc70c04742fac2df3ed287a08d59bfe31388141e99a85fc655ff1d487aba210",
+            "partSha256": "8b7db19d8fb229670ebe32735ab7b5eac88641efdf404b3500660cde6aee1532",
+            "exactText": "SPECIAL CONDITIONS OF TENDER  (Cont’d)",
+            "preserveSourceColumnControl": false
+          },
+          {
+            "paragraphOrdinal": 374,
+            "anchorId": "word/document.xml#/w:document[1]/w:body[1]/w:tbl[16]/w:tr[1]/w:tc[1]/w:p[1]",
+            "nativeNodePath": "/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}document[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}body[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tbl[16]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tr[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tc[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p[1]",
+            "nodeSha256": "f726e0d11b143d1b2f4d1b1d1fad3e2e9898d778852598ff3737f9cf787b848e",
+            "partSha256": "8b7db19d8fb229670ebe32735ab7b5eac88641efdf404b3500660cde6aee1532",
+            "exactText": "SPECIAL CONDITIONS OF TENDER  (Cont’d)",
+            "preserveSourceColumnControl": false
+          },
+          {
+            "paragraphOrdinal": 396,
+            "anchorId": "word/document.xml#/w:document[1]/w:body[1]/w:tbl[18]/w:tr[1]/w:tc[1]/w:p[1]",
+            "nativeNodePath": "/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}document[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}body[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tbl[18]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tr[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tc[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p[1]",
+            "nodeSha256": "92f331f7a1957d9edec0cc07310e970cb181b5d332646c8e3c8d05ae767dceb4",
+            "partSha256": "8b7db19d8fb229670ebe32735ab7b5eac88641efdf404b3500660cde6aee1532",
+            "exactText": "SPECIAL CONDITIONS OF TENDER  (Cont’d)",
+            "preserveSourceColumnControl": false
+          },
+          {
+            "paragraphOrdinal": 439,
+            "anchorId": "word/document.xml#/w:document[1]/w:body[1]/w:tbl[20]/w:tr[1]/w:tc[1]/w:p[1]",
+            "nativeNodePath": "/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}document[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}body[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tbl[20]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tr[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tc[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p[1]",
+            "nodeSha256": "55336fbfca049c934aac9046aaa239a4d56b75b64d278e1c55c0c00e5624a87d",
+            "partSha256": "8b7db19d8fb229670ebe32735ab7b5eac88641efdf404b3500660cde6aee1532",
+            "exactText": "SPECIAL CONDITIONS OF TENDER  (Cont’d)",
+            "preserveSourceColumnControl": false
+          },
+          {
+            "paragraphOrdinal": 477,
+            "anchorId": "word/document.xml#/w:document[1]/w:body[1]/w:tbl[23]/w:tr[1]/w:tc[1]/w:p[1]",
+            "nativeNodePath": "/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}document[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}body[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tbl[23]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tr[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tc[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p[1]",
+            "nodeSha256": "f79074a9519c3b79e1232a26ac2151cdfde0d5c56794b1898363775f40020ed0",
+            "partSha256": "8b7db19d8fb229670ebe32735ab7b5eac88641efdf404b3500660cde6aee1532",
+            "exactText": "SPECIAL CONDITIONS OF TENDER  (Cont’d)",
+            "preserveSourceColumnControl": false
+          },
+          {
+            "paragraphOrdinal": 501,
+            "anchorId": "word/document.xml#/w:document[1]/w:body[1]/w:tbl[25]/w:tr[1]/w:tc[1]/w:p[1]",
+            "nativeNodePath": "/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}document[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}body[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tbl[25]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tr[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tc[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p[1]",
+            "nodeSha256": "abc0e58555ed7441e98e18963d2019a1967aef4a93bf964460bcf69301ac2787",
+            "partSha256": "8b7db19d8fb229670ebe32735ab7b5eac88641efdf404b3500660cde6aee1532",
+            "exactText": "SPECIAL CONDITIONS OF TENDER  (Cont’d)",
+            "preserveSourceColumnControl": false
+          },
+          {
+            "paragraphOrdinal": 536,
+            "anchorId": "word/document.xml#/w:document[1]/w:body[1]/w:tbl[27]/w:tr[18]/w:tc[1]/w:p[1]",
+            "nativeNodePath": "/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}document[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}body[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tbl[27]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tr[18]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tc[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p[1]",
+            "nodeSha256": "128d211d6f9adcf678ba91195c6e176d56be78895c3603e25033ca917f1a7324",
+            "partSha256": "8b7db19d8fb229670ebe32735ab7b5eac88641efdf404b3500660cde6aee1532",
+            "exactText": "SPECIAL CONDITIONS OF TENDER  (Cont’d)",
+            "preserveSourceColumnControl": false
+          },
+          {
+            "paragraphOrdinal": 564,
+            "anchorId": "word/document.xml#/w:document[1]/w:body[1]/w:tbl[31]/w:tr[1]/w:tc[1]/w:p[1]",
+            "nativeNodePath": "/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}document[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}body[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tbl[31]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tr[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tc[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p[1]",
+            "nodeSha256": "6a56985bfd126d3a30765922332a6a2da9c1a0f803997b83b3cadcd896f0f4f2",
+            "partSha256": "8b7db19d8fb229670ebe32735ab7b5eac88641efdf404b3500660cde6aee1532",
+            "exactText": "SPECIAL CONDITIONS OF TENDER  (Cont’d)",
+            "preserveSourceColumnControl": false
+          },
+          {
+            "paragraphOrdinal": 586,
+            "anchorId": "word/document.xml#/w:document[1]/w:body[1]/w:tbl[34]/w:tr[1]/w:tc[1]/w:p[1]",
+            "nativeNodePath": "/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}document[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}body[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tbl[34]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tr[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tc[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p[1]",
+            "nodeSha256": "7e81d820529aa2abbbc03ee591baff48ce50abb9aa4b124254000aa18d4113a6",
+            "partSha256": "8b7db19d8fb229670ebe32735ab7b5eac88641efdf404b3500660cde6aee1532",
+            "exactText": "SPECIAL CONDITIONS OF TENDER  (Cont’d)",
+            "preserveSourceColumnControl": false
+          },
+          {
+            "paragraphOrdinal": 617,
+            "anchorId": "word/document.xml#/w:document[1]/w:body[1]/w:tbl[35]/w:tr[1]/w:tc[1]/w:p[1]",
+            "nativeNodePath": "/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}document[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}body[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tbl[35]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tr[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tc[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p[1]",
+            "nodeSha256": "a1649e0c9a104a9a983a37ef1db1239ba7d1b1b571b6f614c1ad6d7833b35eca",
+            "partSha256": "8b7db19d8fb229670ebe32735ab7b5eac88641efdf404b3500660cde6aee1532",
+            "exactText": "SPECIAL CONDITIONS OF TENDER  (Cont’d)",
+            "preserveSourceColumnControl": false
+          },
+          {
+            "paragraphOrdinal": 647,
+            "anchorId": "word/document.xml#/w:document[1]/w:body[1]/w:tbl[38]/w:tr[1]/w:tc[1]/w:p[1]",
+            "nativeNodePath": "/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}document[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}body[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tbl[38]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tr[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tc[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p[1]",
+            "nodeSha256": "8952249d2324ab10b2c258dd8d07b98baa29aa5bb9d0d3a10cf543faedd54281",
+            "partSha256": "8b7db19d8fb229670ebe32735ab7b5eac88641efdf404b3500660cde6aee1532",
+            "exactText": "SPECIAL CONDITIONS OF TENDER  (Cont’d)",
+            "preserveSourceColumnControl": false
+          },
+          {
+            "paragraphOrdinal": 669,
+            "anchorId": "word/document.xml#/w:document[1]/w:body[1]/w:tbl[39]/w:tr[1]/w:tc[1]/w:p[1]",
+            "nativeNodePath": "/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}document[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}body[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tbl[39]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tr[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tc[1]/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p[1]",
+            "nodeSha256": "d9b23f4d5049f98abd8f116a09c746a724dd587bee6600288bf9fb7ce2594994",
+            "partSha256": "8b7db19d8fb229670ebe32735ab7b5eac88641efdf404b3500660cde6aee1532",
+            "exactText": "SPECIAL CONDITIONS OF TENDER  (Cont’d)",
+            "preserveSourceColumnControl": false
+          }
+        ],
+        "generationPolicy": "Specific optional SCT heading migration; source semantic scope remains unknown. Frame values require fresh full-document Word and LibreOffice acceptance."
+      }
     },
     {
       "profileId": "native-identity-2b-scc-candidate01",

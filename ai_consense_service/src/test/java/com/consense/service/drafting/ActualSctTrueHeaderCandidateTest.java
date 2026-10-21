@@ -1,0 +1,65 @@
+package com.consense.service.drafting;
+
+import com.consense.common.JsonUtils;
+import com.consense.document.DocxTemplateEditor.*;
+import com.consense.document.NativeStoryPlan;
+import com.fasterxml.jackson.databind.JsonNode;
+import java.io.InputStream;
+import java.nio.file.*;
+import java.util.*;
+import org.junit.jupiter.api.Test;
+import org.w3c.dom.*;
+import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
+import static com.consense.service.drafting.DraftNativeStoryEditorCandidateTest.*;
+
+/** New explicit heading authorization; the old six-source acceptance and its results remain unchanged. */
+class ActualSctTrueHeaderCandidateTest {
+    @Test void actual2aUsesTrueFirstDefaultTitleAndRetainsExactColumnMetadataAndFields()throws Exception{actual("2a",27,0);}
+    @Test void actual2bChangesOnlyMain21AndPreservesCoverSixToLinesTenAppendixHeadersAndOtherTwelveSections()throws Exception{actual("2b",21,1);}
+
+    private void actual(String edition,int count,int targetSection)throws Exception {
+        String profiles=System.getProperty("consense.acceptance.nativeStoryProfiles");assumeTrue(profiles!=null,"Private real-source replay must be explicitly enabled");
+        JsonNode source=null;for(JsonNode row:JsonUtils.mapper().readTree(Paths.get(profiles).toFile()).path("sources"))if(edition.equals(row.path("edition").asText())&&"SCT".equals(row.path("key").asText())){assertNull(source);source=row;}assertNotNull(source);
+        String expected=edition.equals("2a")?"7def01d62e07b35dd86beeff995e0e37d73ce18adca2746e2a6f6d9bafb5aaa4":"6d7802ea7b094124c0ddebb0b448c7e6bfe72828ffbc91ad1c30133902a6f64c";
+        Path input=Paths.get(source.path("sourcePath").asText());byte[] bytes=Files.readAllBytes(input);TemplateIndex index=EDITOR.inspect(bytes);assertEquals(expected,index.getSourceSha256());assertEquals(expected,source.path("sourceSha256").asText());
+        JsonNode observation=observe(bytes,"SCT",input.getFileName().toString());assertFalse(observation.path("semanticScopeVerified").asBoolean());assertEquals("unknown",observation.path("ownerStatus").asText());
+        Map<String,Object> prepared=new LinkedHashMap<>();prepared.put("effectiveValues",Map.of("contractTitle",Map.of("number",ID.number,"title",ID.title)));
+        NativeLayoutPlan layout=DraftNativeIdentity.attach(index,observation,"SCT",prepared,"libreoffice",new NativeLayoutPlan(index.getSourceSha256(),"actual-sct-title-story-only",Collections.emptyList(),Collections.emptyList()));
+        NativeStoryPlan plan=layout.getStories();assertNotNull(plan);
+        // The old constructor intentionally makes the exact same identity/footer plan without the new optional heading policy.
+        NativeStoryPlan base=new NativeStoryPlan(plan.sourceSha256,plan.profile,plan.identity,plan.evenAndOddHeaders,plan.sections,plan.staticFooterGroups,plan.staticFooterSourceFormat);
+        DocxEditResult baseline=apply(bytes,index,new NativeLayoutPlan(index.getSourceSha256(),"actual-sct-title-baseline",Collections.emptyList(),Collections.emptyList()).withStories(base)),result=apply(bytes,index,layout);
+        String destination=System.getProperty("consense.acceptance.nativeTitleOutput");if(destination!=null){Path out=Files.createDirectories(Paths.get(destination));Files.write(out.resolve(edition+"-SCT-base.docx"),baseline.getDocxBytes());Files.write(out.resolve(edition+"-SCT-title.docx"),result.getDocxBytes());JsonUtils.mapper().writerWithDefaultPrettyPrinter().writeValue(out.resolve(edition+"-SCT-title-ledger.json").toFile(),result.getNativeStoryLedger());JsonUtils.mapper().writerWithDefaultPrettyPrinter().writeValue(out.resolve(edition+"-SCT-native-source-observation.json").toFile(),observation);}
+        List<NativeStoryChange> clears=actions(result,"CLEAR_EXACT_SCT_BODY_TITLE");assertEquals(count,clears.size(),"SOURCE_BOUND_SCT_BODY_TITLES_REQUIRE_REAL_FIRST_DEFAULT_HEADERS");
+        assertEquals(1,actions(result,"INSTALL_SCT_FIRST_TITLE_HEADER").size());assertEquals(1,actions(result,"INSTALL_SCT_DEFAULT_TITLE_HEADER").size());assertEquals(1,actions(result,"LINK_SCT_FIRST_FOOTER_TO_VERIFIED_DEFAULT").size());assertEquals(1,actions(result,"ENABLE_SCT_MAIN_FIRST_PAGE").size());assertEquals(1,actions(result,"SCT_TWO_LINE_HEADER_FRAME").size());assertEquals(0,actions(result,"MIGRATE_EXACT_SCT_TITLES").size());
+        Map<String,byte[]> before=unzip(baseline.getDocxBytes()),after=unzip(result.getDocxBytes());Document main=parse(after.get(MAIN)),baseMain=parse(before.get(MAIN));List<Element> sections=elements(main,W,"sectPr"),baseSections=elements(baseMain,W,"sectPr");Element section=sections.get(targetSection);
+        String normalHeader=part(after,section,"header","default"),firstHeader=part(after,section,"header","first"),footer=part(after,section,"footer","default");assertNotEquals(normalHeader,firstHeader);assertEquals(footer,part(after,section,"footer","first"));assertArrayEquals(before.get(footer),after.get(footer));
+        for(String name:List.of(normalHeader,firstHeader)){Document header=parse(after.get(name));assertEquals(2,elements(header,W,"p").size());assertEquals(ID.title.replace("\r\n","\n"),visible(elements(header,W,"p").get(0)));assertEquals(0,elements(header,W,"lastRenderedPageBreak").size());assertEquals(0,elements(header,W,"bookmarkStart").size());assertEquals(0,elements(header,W,"sz").size());}
+        assertEquals("SPECIAL CONDITIONS OF TENDER",visible(elements(parse(after.get(firstHeader)),W,"p").get(1)));assertEquals("SPECIAL CONDITIONS OF TENDER  (Cont’d)",visible(elements(parse(after.get(normalHeader)),W,"p").get(1)));
+        assertEquals(1,direct(section,"titlePg").size());Element margins=direct(section,"pgMar").get(0);assertEquals("1080",margins.getAttributeNS(W,"top"));assertEquals("360",margins.getAttributeNS(W,"header"));
+        for(String keep:List.of("left","right","bottom","footer","gutter"))assertEquals(direct(baseSections.get(targetSection),"pgMar").get(0).getAttributeNS(W,keep),margins.getAttributeNS(W,keep));
+        for(int i=0;i<sections.size();i++)if(i!=targetSection)assertEquals(shape(baseSections.get(i)),shape(sections.get(i)),"All non-main section declarations remain exact");
+        JsonNode fixture;try(InputStream stream=getClass().getResourceAsStream("/drafting/sct-true-header-source-anchors.json")){assertNotNull(stream);fixture=JsonUtils.mapper().readTree(stream).path(edition);}assertEquals(expected,fixture.path("sourceSha256").asText());assertEquals(count,fixture.path("titles").size());
+        Set<Integer> seen=new HashSet<>();List<Element> sourceParagraphs=elements(parse(unzip(bytes).get(MAIN)),W,"p"),outputParagraphs=elements(main,W,"p");
+        for(JsonNode title:fixture.path("titles")) {int ordinal=title.path("paragraphOrdinal").asInt();Paragraph original=index.mainParagraph(ordinal);assertTrue(seen.add(ordinal));assertEquals(title.path("anchorId").asText(),original.getId());assertEquals(title.path("nodeSha256").asText(),original.getSha256());assertEquals(title.path("exactText").asText(),original.getCatalogText());assertEquals("",result.getIndex().mainParagraph(ordinal).getCatalogText());
+            NativeStoryChange row=clears.stream().filter(c->c.getSourceParagraph()!=null&&c.getSourceParagraph().getId().equals(original.getId())).findFirst().orElseThrow(AssertionError::new);assertEquals("APPLIED",row.getStatus());assertEquals(original.getSha256(),row.getSourceParagraph().getSha256());
+            Element clearedSource=(Element)sourceParagraphs.get(ordinal-1).cloneNode(true),normalizedOutput=(Element)outputParagraphs.get(ordinal-1).cloneNode(true);for(Element t:all(clearedSource,"t"))t.setTextContent("");removeSpacing(clearedSource);removeSpacing(normalizedOutput);assertEquals(shape(clearedSource),shape(normalizedOutput),"Only exact title text and declared empty-line spacing may change; bookmarks, proof markers, columns and every run property survive");
+            if(title.path("preserveSourceColumnControl").asBoolean()){Element expectedNode=(Element)sourceParagraphs.get(ordinal-1).cloneNode(true);for(Element t:all(expectedNode,"t"))t.setTextContent("");assertEquals(shape(expectedNode),shape(outputParagraphs.get(ordinal-1)),"P422 only clears exact text; column and metadata and all original pPr remain");assertEquals(1,actions(result,"PRESERVED_SOURCE_COLUMN_CONTROL").size());assertEquals(1,all(outputParagraphs.get(ordinal-1),"br").size());assertEquals("column",all(outputParagraphs.get(ordinal-1),"br").get(0).getAttributeNS(W,"type"));}
+        }
+        assertEquals(count-(edition.equals("2a")?1:0),actions(result,"COMPACT_EXACT_CLEARED_SCT_TITLE_SPACING").size());
+        // Independently undo only the declared section/title changes and compare the complete main XML.
+        Document reversed=parse(after.get(MAIN));replaceChildren(elements(reversed,W,"sectPr").get(targetSection),baseSections.get(targetSection));List<Element> reversedPs=elements(reversed,W,"p"),basePs=elements(baseMain,W,"p");for(int ordinal:seen)replaceChildren(reversedPs.get(ordinal-1),basePs.get(ordinal-1));assertEquals(shape(baseMain.getDocumentElement()),shape(reversed.getDocumentElement()),"All non-target body, fields, metadata and source controls survive exact reversal");
+        unchanged(before,after,Set.of(MAIN,RELS,TYPES,normalHeader));assertEquals(before.size()+1,after.size(),"Exactly one new first header part; the first footer reuses an existing part");assertArrayEquals(bytes,Files.readAllBytes(input));
+        if(edition.equals("2b")){assertEquals(13,sections.size());assertEquals(10,before.keySet().stream().filter(n->n.matches("word/header(?:[1-9]|10)\\.xml")).count());for(int i=1;i<=10;i++)assertArrayEquals(before.get("word/header"+i+".xml"),after.get("word/header"+i+".xml"));assertEquals(7,outputParagraphs.stream().filter(p->p.getTextContent().equals("SPECIAL CONDITIONS OF TENDER")||p.getTextContent().equals("TO SPECIAL CONDITIONS OF TENDER")).count(),"One cover and six TO lines remain");assertFalse(text(parse(after.get(part(after,sections.get(2),"header","default")))).contains("Cont’d"));}
+    }
+    private static DocxEditResult apply(byte[] bytes,TemplateIndex index,NativeLayoutPlan layout){return EDITOR.applyWithParagraphBookmarks(bytes,new SourceEditBatch(index.getSourceSha256(),Collections.emptyList()),Collections.emptyMap(),false,layout);}
+    private static List<NativeStoryChange> actions(DocxEditResult r,String action){List<NativeStoryChange> out=new ArrayList<>();for(NativeStoryChange row:r.getNativeStoryLedger())if(action.equals(row.getAction()))out.add(row);return out;}
+    private static List<Element> direct(Element p,String name){List<Element> out=new ArrayList<>();for(Node child=p.getFirstChild();child!=null;child=child.getNextSibling())if(child instanceof Element&&W.equals(child.getNamespaceURI())&&name.equals(child.getLocalName()))out.add((Element)child);return out;}
+    private static List<Element> all(Element p,String name){List<Element> out=new ArrayList<>();NodeList list=p.getElementsByTagNameNS(W,name);for(int i=0;i<list.getLength();i++)out.add((Element)list.item(i));return out;}
+    private static void replaceChildren(Element target,Element donor){while(target.hasChildNodes())target.removeChild(target.getFirstChild());for(Node child=donor.getFirstChild();child!=null;child=child.getNextSibling())target.appendChild(target.getOwnerDocument().importNode(child,true));}
+    private static void removeSpacing(Element paragraph){for(Element props:new ArrayList<>(direct(paragraph,"pPr"))){for(Element spacing:new ArrayList<>(direct(props,"spacing")))props.removeChild(spacing);if(!props.hasChildNodes()&&!props.hasAttributes())paragraph.removeChild(props);}}
+    private static String part(Map<String,byte[]> parts,Element section,String kind,String variant)throws Exception{Element ref=direct(section,kind+"Reference").stream().filter(e->variant.equals(e.getAttributeNS(W,"type"))).findFirst().orElseThrow(AssertionError::new);String id=ref.getAttributeNS(R,"id");Element relation=elements(parse(parts.get(RELS)),P,"Relationship").stream().filter(e->id.equals(e.getAttribute("Id"))).findFirst().orElseThrow(AssertionError::new);assertEquals(R+"/"+kind,relation.getAttribute("Type"));return new java.net.URI("/"+MAIN).resolve(relation.getAttribute("Target")).normalize().getPath().substring(1);}
+    private static String shape(Node n){StringBuilder s=new StringBuilder();shape(n,s);return s.toString();}
+    private static void shape(Node n,StringBuilder s){if(n instanceof Element){s.append('<').append(n.getNamespaceURI()).append('|').append(n.getLocalName());Map<String,String> attrs=new TreeMap<>();NamedNodeMap raw=n.getAttributes();for(int i=0;i<raw.getLength();i++){Node a=raw.item(i);if(!"http://www.w3.org/2000/xmlns/".equals(a.getNamespaceURI()))attrs.put("{"+a.getNamespaceURI()+"}"+a.getLocalName(),a.getNodeValue());}s.append(attrs).append('>');for(Node child=n.getFirstChild();child!=null;child=child.getNextSibling())shape(child,s);s.append("</>");}else if(n.getNodeType()==Node.TEXT_NODE)s.append(n.getNodeValue());}
+}

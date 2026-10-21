@@ -1,3 +1,18 @@
+<!-- sl-real-dual-progress45:start -->
+## 真实比赛Batch 2两页双路首测和保存消费
+
+本轮首次执行原物理3556／3557真实双路：2POST、4fresh引擎页、0cache／retry，468.969秒，source／PNG／配置与实际owned释放均核，输入保持；其余六版24个method-page尚未执行。这不是七版全库或来源质量通过。
+
+按相同本版32项分别对原图和实际保存结果首看：Paddle27PASS／5UNKNOWN，MinerU25PASS／2FAIL／5UNKNOWN；两FAIL是50mm两侧条件段mixed text＋equation_inline在规范化层text=null，原始vendor内容仍完整。另含公式的目标外块也留原raw／投影unknown。两路关系均空，跨页scope、父子／条件、完整条款边界、读序／页眉排除及证书对象宽度均不因文字齐全而授通过。Paddle漏相邻`.040.9`编号单列边界风险，不偷并目标文字分。原224项219PASS／5UNKNOWN及全部22,214技术页分母不变。
+
+[64格首看](../../../.local/sl-fwp-seven-semantic-review01/actual-source-quality-firstlook01/actual-two-page32-per-method-review.json)保源图与实际块指针；[语义更正票](../../../.local/sl-fwp-seven-semantic-review01/actual-source-quality-firstlook01/completeness-semantics-correction01.json)明确captureStatus含局部投影issue，而dualCompleteness只授原材料／页／终态完整，原“互相矛盾”定性更正、评分不改。[执行票](../../../.local/sl-fwp-seven-semantic-review01/actual-dual/competition-batch02/receipt.json)和[296CAS原始导出](../../../.local/sl-fwp-seven-semantic-review01/export-real-dual01/actual/competition-batch02/export-receipt.json)与来源质量分开记录。
+
+保存文件在生产API完成4capture／2combine／1dual，见[baseline-import02实际票](../../../.local/sl-fwp-seven-semantic-review01/export-real-dual01/baseline-import02/imported/competition-batch02/import-receipt.json)。首窗因完整原件加入资产后生成ID变化的pages比较失败仍保留；后继仅允许经原配方证明的ID前缀转换，其他完整leaf保持，原3个投影unknown不清。没有新引擎／HTTP／嵌入／检索或canonical发布；typed-inline字面后继仍私有，LaTeX解释未知，不把non-null直接改判原图文字PASS。完整事实及运行恢复的失败／后继见[progress45](three-module-runtime-progress-20261021.md)。先质量、后比赛包顺序保持。
+
+
+本轮后继：混合text＋equation_inline的严格字面投影私有候选已通过150/150回归（23.109秒、pins同／自然Job0），维持原lines／spans优先级及有效／空／非法列表控制。[真实raw重建03](../../../.local/sl-fwp-seven-semantic-review01/export-real-dual01/mineru-inline-private01/actual-capture-successor03/imported/competition-batch02/import-receipt.json)，SHA256 `16127af855433717b2ecdc538684b82fcf313554bea439204a8153940f94cb59`，36.062秒实际4capture／2combine／1dual，107块仅3块恢复原typed字面，bbox／raw／来源／顺序保持。四run引用264个去重CAS共496,921,207字节，不能代替export296记录的分母。原LaTeX解释unknown，64格及F03／F12失败不改。后继01漏比较receipt派生自hash的失败现场保留，03仅精确重算自hash；02保持未执行。Python候选未采用，当前服务仍旧264源码；其他六版可沿原服务一次保存raw、同候选离线重建，不能为了小修反复发引擎。当前首个其他版本sl2022-original已开始串行双页执行，未收齐前不授完成。详情见progress45后续。全部22,214页和真实版本隔离检索仍未验收，比赛包不启动。
+<!-- sl-real-dual-progress45:end -->
+
 # SL 技术规范解析、嵌入与检索质量现状
 
 日期：2026-10-21。结论：已有单版开发基线、七版特定完整条款的有界原图源评和真实局部验证；七版本全库质量未验收。归档、恢复、哈希、软件测试不计作来源准确率或检索召回率。历史运行、保存来源回放、原图核对和当前运行采用分别记录；后继检查不改写历史收据。

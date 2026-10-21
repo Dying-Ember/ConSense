@@ -12,6 +12,7 @@ public final class NativeStoryPlan {
     public final List<Section> sections;
     public final List<StaticFooterGroup> staticFooterGroups;
     public final StaticFooterSourceFormat staticFooterSourceFormat;
+    public final SctTitleMigration sctTitleMigration;
 
     public NativeStoryPlan(String sourceSha256, String profile, Identity identity,
                            NativeProperty evenAndOddHeaders, List<Section> sections,
@@ -21,6 +22,12 @@ public final class NativeStoryPlan {
     public NativeStoryPlan(String sourceSha256, String profile, Identity identity,
                            NativeProperty evenAndOddHeaders, List<Section> sections,
                            List<StaticFooterGroup> staticFooterGroups, StaticFooterSourceFormat formatting) {
+        this(sourceSha256,profile,identity,evenAndOddHeaders,sections,staticFooterGroups,formatting,null);
+    }
+    private NativeStoryPlan(String sourceSha256,String profile,Identity identity,NativeProperty evenAndOddHeaders,
+                            List<Section> sections,List<StaticFooterGroup> staticFooterGroups,
+                            StaticFooterSourceFormat formatting,SctTitleMigration migration) {
+        this.sctTitleMigration=migration;
         this.staticFooterSourceFormat = formatting;
         this.sourceSha256 = required(sourceSha256); this.profile = required(profile);
         this.identity = Objects.requireNonNull(identity);
@@ -28,14 +35,49 @@ public final class NativeStoryPlan {
         this.sections = frozen(sections); this.staticFooterGroups = frozen(staticFooterGroups);
     }
 
+    public NativeStoryPlan withSctTitleMigration(SctTitleMigration migration) {
+        return new NativeStoryPlan(sourceSha256,profile,identity,evenAndOddHeaders,sections,staticFooterGroups,
+                staticFooterSourceFormat,Objects.requireNonNull(migration));
+    }
+    /** One exact SCT main-section policy; never a public arbitrary-header editing instruction. */
+    public static final class SctTitleMigration {
+        public final Section section;
+        public final String stylesPartSha256,headerStyleId,headerStyleNodeSha256;
+        public final List<SctBodyTitle> bodyTitles;
+        public final int plainDonorOrdinal,continuedDonorOrdinal;
+        public SctTitleMigration(Section section,String stylesPartSha256,String headerStyleId,String headerStyleNodeSha256,
+                                 List<SctBodyTitle> bodyTitles,int plainDonorOrdinal,int continuedDonorOrdinal) {
+            this.section=Objects.requireNonNull(section);this.stylesPartSha256=required(stylesPartSha256);
+            this.headerStyleId=required(headerStyleId);this.headerStyleNodeSha256=required(headerStyleNodeSha256);
+            this.bodyTitles=frozen(bodyTitles);this.plainDonorOrdinal=plainDonorOrdinal;this.continuedDonorOrdinal=continuedDonorOrdinal;
+        }
+    }
+    public static final class SctBodyTitle {
+        public final Paragraph source;public final String exactText;public final boolean preserveSourceColumnControl;
+        public SctBodyTitle(Paragraph source,String exactText,boolean preserveSourceColumnControl) {
+            this.source=Objects.requireNonNull(source);this.exactText=required(exactText);this.preserveSourceColumnControl=preserveSourceColumnControl;
+        }
+    }
+
     /** Only the explicit static-footer migration may reference these unchanged source styles. */
     public static final class StaticFooterSourceFormat {
         public final String stylesPartSha256, headerStyleId, footerStyleId;
+        public final String emptyFooterPartName, emptyFooterPartSha256;
+        public final Integer contractNumberHalfPoints;
         public StaticFooterSourceFormat(String stylesPartSha256, String headerStyleId, String footerStyleId) {
+            this(stylesPartSha256,headerStyleId,footerStyleId,null,null,null);
+        }
+        public StaticFooterSourceFormat(String stylesPartSha256, String headerStyleId, String footerStyleId,
+                                       String emptyFooterPartName, String emptyFooterPartSha256, Integer contractNumberHalfPoints) {
             if(stylesPartSha256==null||!stylesPartSha256.matches("[0-9a-f]{64}"))
                 throw new IllegalArgumentException("STORY_STYLE_PART_HASH_INVALID");
+            if(emptyFooterPartName==null?(emptyFooterPartSha256!=null||contractNumberHalfPoints!=null)
+                    :!emptyFooterPartName.matches("word/footer[1-9][0-9]*\\.xml")||emptyFooterPartSha256==null||!emptyFooterPartSha256.matches("[0-9a-f]{64}")
+                    ||contractNumberHalfPoints==null||contractNumberHalfPoints<1||contractNumberHalfPoints>144)
+                throw new IllegalArgumentException("STORY_STYLE_EMPTY_FOOTER_GUARD_INVALID");
             this.stylesPartSha256=stylesPartSha256;
             this.headerStyleId=required(headerStyleId);this.footerStyleId=required(footerStyleId);
+            this.emptyFooterPartName=emptyFooterPartName;this.emptyFooterPartSha256=emptyFooterPartSha256;this.contractNumberHalfPoints=contractNumberHalfPoints;
         }
     }
 

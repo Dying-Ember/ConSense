@@ -1,3 +1,7 @@
+<!-- unified-progress45:start -->
+**2026-10-21：当前主树组合762逻辑用例已获得跨两窗完整通过覆盖，Drafting六产品及12测试／fixture和一处Advisory过时提示词断言已精确采用源码，未部署。** 原窗759PASS／3FAIL，独立补窗3PASS并在同一次编译目录完成package；原失败保留，不称单窗762全绿。SCT5孤立标题已由完整25页逐张原图核验消除，真正2b三文件完整生成、Word与浏览器最终包仍未通过。Vetting旧新原生43页续页归属已有通过证据，旧DOCX经LO的42页有四页错owner；后继仅补相邻记录表的段落边界，37回归与保存报告生成通过，新LO42页已确认owner修正但单词短尾仍FAIL，Writer未采用。SL混合公式三块字面投影的最小候选已150回归及真实raw的4capture／2combine／1dual通过，LaTeX解释和原来源FAIL／UNKNOWN保持；Python候选未采用。其余六版开始串行真实引擎验证，22,214技术页全量质量和检索仍未完成，SL未过不做比赛包。OER同unit保持运行，后端formal19及H2未重启，Goal active。证据见[progress45](testing/three-module-runtime-progress-20261021.md)和[SL质量说明](testing/sl-technical-source-and-retrieval-quality-20261021.md)。
+<!-- unified-progress45:end -->
+
 <!-- unified-progress44:start -->
 **2026-10-21：前端项目身份的手工采用、拒绝替换、明确确认与刷新恢复选择已实际通过；Drafting full12 的25页仍有 SCT5 标题孤立，最终版式未通过。** Drafting 软件跨窗覆盖98个唯一方法、共103次执行，原失败保留；SL Note9 的 Java导出→Python实际CAS／冷registry→Java真实投影消费三段组件已各完成实际验证，仍未授来源准入、真实检索或七版全库质量。18780当前运行接缝需恢复，尚未执行新的真实dual。新UI项目及采用值晚于SQL20，下一后端替换前须补当前数据保全；详见[progress44](testing/three-module-runtime-progress-20261021.md#progress44当前前端身份闭环drafting完整生成和sl跨语言组件链)和[SL质量说明](testing/sl-technical-source-and-retrieval-quality-20261021.md#当前note9正常链的跨语言组件验证progress44)。SL质量未通过，不执行比赛包绑定、压缩、归档或恢复。
 <!-- unified-progress44:end -->

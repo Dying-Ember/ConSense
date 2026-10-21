@@ -80,6 +80,8 @@ public final class DocxTemplateEditor {
         }
         List<NativeLayoutChange> layoutChanges=applyLayout(model,captured,explicitlyCleared);
         applyStories(model,stories);
+        applySctTitles(model,stories);
+        releaseMigratedSctTitleBoundaries(captured,stories,layoutChanges);
         attachParagraphBookmarks(model,bookmarks,markAddedParagraphs);
         Set<String> changedParts=new LinkedHashSet<>();
         if(!bookmarks.isEmpty()||!layoutChanges.isEmpty())changedParts.add(MAIN);
@@ -139,6 +141,7 @@ public final class DocxTemplateEditor {
         private final List<NativeLayoutClearedParagraph> clearedParagraphs;
         private final List<NativeLayoutClearedKeepNextBreak> clearedKeepNextBreaks;
         private final List<NativeLayoutParagraphBoundary> paragraphBoundaries;
+        private final List<NodeAnchor> latinFontHintParagraphs,cellKeepNextParagraphs,cellWidowParagraphs;
         public NativeLayoutPlan(String sourceSha256,String profile,List<NativeLayoutBoundary> boundaries,List<NodeAnchor> emptyExclusions){this(sourceSha256,profile,boundaries,emptyExclusions,Collections.emptyList());}
         public NativeLayoutPlan(String sourceSha256,String profile,List<NativeLayoutBoundary> boundaries,List<NodeAnchor> emptyExclusions,List<NativeLayoutSpacing> emptySpacing){this(sourceSha256,profile,boundaries,emptyExclusions,emptySpacing,Collections.emptyList());}
         public NativeLayoutPlan(String sourceSha256,String profile,List<NativeLayoutBoundary> boundaries,List<NodeAnchor> emptyExclusions,List<NativeLayoutSpacing> emptySpacing,List<NodeAnchor> cohesiveRows){this(sourceSha256,profile,boundaries,emptyExclusions,emptySpacing,cohesiveRows,Collections.emptyList());}
@@ -146,8 +149,12 @@ public final class DocxTemplateEditor {
         public NativeLayoutPlan(String sourceSha256,String profile,List<NativeLayoutBoundary> boundaries,List<NodeAnchor> emptyExclusions,List<NativeLayoutSpacing> emptySpacing,List<NodeAnchor> cohesiveRows,List<NodeAnchor> compactGapRows,List<NativeLayoutClearedParagraph> clearedParagraphs,List<NodeAnchor> keepNextParagraphs){this(sourceSha256,profile,boundaries,emptyExclusions,emptySpacing,cohesiveRows,compactGapRows,clearedParagraphs,keepNextParagraphs,Collections.emptyList());}
         public NativeLayoutPlan(String sourceSha256,String profile,List<NativeLayoutBoundary> boundaries,List<NodeAnchor> emptyExclusions,List<NativeLayoutSpacing> emptySpacing,List<NodeAnchor> cohesiveRows,List<NodeAnchor> compactGapRows,List<NativeLayoutClearedParagraph> clearedParagraphs,List<NodeAnchor> keepNextParagraphs,List<NativeLayoutClearedKeepNextBreak> clearedKeepNextBreaks){this(sourceSha256,profile,boundaries,emptyExclusions,emptySpacing,cohesiveRows,compactGapRows,clearedParagraphs,keepNextParagraphs,clearedKeepNextBreaks,Collections.emptyList());}
         public NativeLayoutPlan(String sourceSha256,String profile,List<NativeLayoutBoundary> boundaries,List<NodeAnchor> emptyExclusions,List<NativeLayoutSpacing> emptySpacing,List<NodeAnchor> cohesiveRows,List<NodeAnchor> compactGapRows,List<NativeLayoutClearedParagraph> clearedParagraphs,List<NodeAnchor> keepNextParagraphs,List<NativeLayoutClearedKeepNextBreak> clearedKeepNextBreaks,List<NativeLayoutParagraphBoundary> paragraphBoundaries){this(sourceSha256,profile,boundaries,emptyExclusions,emptySpacing,cohesiveRows,compactGapRows,clearedParagraphs,keepNextParagraphs,clearedKeepNextBreaks,paragraphBoundaries,null);}
-        private NativeLayoutPlan(String sourceSha256,String profile,List<NativeLayoutBoundary> boundaries,List<NodeAnchor> emptyExclusions,List<NativeLayoutSpacing> emptySpacing,List<NodeAnchor> cohesiveRows,List<NodeAnchor> compactGapRows,List<NativeLayoutClearedParagraph> clearedParagraphs,List<NodeAnchor> keepNextParagraphs,List<NativeLayoutClearedKeepNextBreak> clearedKeepNextBreaks,List<NativeLayoutParagraphBoundary> paragraphBoundaries,NativeStoryPlan stories){this.sourceSha256=Objects.requireNonNull(sourceSha256);this.profile=Objects.requireNonNull(profile);this.boundaries=Collections.unmodifiableList(new ArrayList<>(boundaries));this.emptyExclusions=Collections.unmodifiableList(new ArrayList<>(emptyExclusions));this.emptySpacing=Collections.unmodifiableList(new ArrayList<>(emptySpacing));this.cohesiveRows=Collections.unmodifiableList(new ArrayList<>(cohesiveRows));this.compactGapRows=Collections.unmodifiableList(new ArrayList<>(compactGapRows));this.clearedParagraphs=Collections.unmodifiableList(new ArrayList<>(clearedParagraphs));this.keepNextParagraphs=Collections.unmodifiableList(new ArrayList<>(keepNextParagraphs));this.clearedKeepNextBreaks=Collections.unmodifiableList(new ArrayList<>(clearedKeepNextBreaks));this.paragraphBoundaries=Collections.unmodifiableList(new ArrayList<>(paragraphBoundaries));this.stories=stories;}
-        public NativeLayoutPlan withStories(NativeStoryPlan value){Objects.requireNonNull(value);if(!sourceSha256.equals(value.sourceSha256))throw error("STORY_SOURCE_HASH_MISMATCH",profile);return new NativeLayoutPlan(sourceSha256,profile,boundaries,emptyExclusions,emptySpacing,cohesiveRows,compactGapRows,clearedParagraphs,keepNextParagraphs,clearedKeepNextBreaks,paragraphBoundaries,value);}
+        private NativeLayoutPlan(String sourceSha256,String profile,List<NativeLayoutBoundary> boundaries,List<NodeAnchor> emptyExclusions,List<NativeLayoutSpacing> emptySpacing,List<NodeAnchor> cohesiveRows,List<NodeAnchor> compactGapRows,List<NativeLayoutClearedParagraph> clearedParagraphs,List<NodeAnchor> keepNextParagraphs,List<NativeLayoutClearedKeepNextBreak> clearedKeepNextBreaks,List<NativeLayoutParagraphBoundary> paragraphBoundaries,NativeStoryPlan stories){this(sourceSha256,profile,boundaries,emptyExclusions,emptySpacing,cohesiveRows,compactGapRows,clearedParagraphs,keepNextParagraphs,clearedKeepNextBreaks,paragraphBoundaries,stories,Collections.emptyList());}
+        private NativeLayoutPlan(String sourceSha256,String profile,List<NativeLayoutBoundary> boundaries,List<NodeAnchor> emptyExclusions,List<NativeLayoutSpacing> emptySpacing,List<NodeAnchor> cohesiveRows,List<NodeAnchor> compactGapRows,List<NativeLayoutClearedParagraph> clearedParagraphs,List<NodeAnchor> keepNextParagraphs,List<NativeLayoutClearedKeepNextBreak> clearedKeepNextBreaks,List<NativeLayoutParagraphBoundary> paragraphBoundaries,NativeStoryPlan stories,List<NodeAnchor> latinFontHintParagraphs){this(sourceSha256,profile,boundaries,emptyExclusions,emptySpacing,cohesiveRows,compactGapRows,clearedParagraphs,keepNextParagraphs,clearedKeepNextBreaks,paragraphBoundaries,stories,latinFontHintParagraphs,Collections.emptyList(),Collections.emptyList());}
+        private NativeLayoutPlan(String sourceSha256,String profile,List<NativeLayoutBoundary> boundaries,List<NodeAnchor> emptyExclusions,List<NativeLayoutSpacing> emptySpacing,List<NodeAnchor> cohesiveRows,List<NodeAnchor> compactGapRows,List<NativeLayoutClearedParagraph> clearedParagraphs,List<NodeAnchor> keepNextParagraphs,List<NativeLayoutClearedKeepNextBreak> clearedKeepNextBreaks,List<NativeLayoutParagraphBoundary> paragraphBoundaries,NativeStoryPlan stories,List<NodeAnchor> latinFontHintParagraphs,List<NodeAnchor> cellKeepNextParagraphs,List<NodeAnchor> cellWidowParagraphs){this.sourceSha256=Objects.requireNonNull(sourceSha256);this.profile=Objects.requireNonNull(profile);this.boundaries=Collections.unmodifiableList(new ArrayList<>(boundaries));this.emptyExclusions=Collections.unmodifiableList(new ArrayList<>(emptyExclusions));this.emptySpacing=Collections.unmodifiableList(new ArrayList<>(emptySpacing));this.cohesiveRows=Collections.unmodifiableList(new ArrayList<>(cohesiveRows));this.compactGapRows=Collections.unmodifiableList(new ArrayList<>(compactGapRows));this.clearedParagraphs=Collections.unmodifiableList(new ArrayList<>(clearedParagraphs));this.keepNextParagraphs=Collections.unmodifiableList(new ArrayList<>(keepNextParagraphs));this.clearedKeepNextBreaks=Collections.unmodifiableList(new ArrayList<>(clearedKeepNextBreaks));this.paragraphBoundaries=Collections.unmodifiableList(new ArrayList<>(paragraphBoundaries));this.stories=stories;this.latinFontHintParagraphs=Collections.unmodifiableList(new ArrayList<>(latinFontHintParagraphs));this.cellKeepNextParagraphs=Collections.unmodifiableList(new ArrayList<>(cellKeepNextParagraphs));this.cellWidowParagraphs=Collections.unmodifiableList(new ArrayList<>(cellWidowParagraphs));}
+        public NativeLayoutPlan withStories(NativeStoryPlan value){Objects.requireNonNull(value);if(!sourceSha256.equals(value.sourceSha256))throw error("STORY_SOURCE_HASH_MISMATCH",profile);return new NativeLayoutPlan(sourceSha256,profile,boundaries,emptyExclusions,emptySpacing,cohesiveRows,compactGapRows,clearedParagraphs,keepNextParagraphs,clearedKeepNextBreaks,paragraphBoundaries,value,latinFontHintParagraphs,cellKeepNextParagraphs,cellWidowParagraphs);}
+        public NativeLayoutPlan withLatinFontHintParagraphs(List<NodeAnchor> value){return new NativeLayoutPlan(sourceSha256,profile,boundaries,emptyExclusions,emptySpacing,cohesiveRows,compactGapRows,clearedParagraphs,keepNextParagraphs,clearedKeepNextBreaks,paragraphBoundaries,stories,value,cellKeepNextParagraphs,cellWidowParagraphs);}
+        public NativeLayoutPlan withCellParagraphFlow(List<NodeAnchor> keepNext,List<NodeAnchor> widows){return new NativeLayoutPlan(sourceSha256,profile,boundaries,emptyExclusions,emptySpacing,cohesiveRows,compactGapRows,clearedParagraphs,keepNextParagraphs,clearedKeepNextBreaks,paragraphBoundaries,stories,latinFontHintParagraphs,keepNext,widows);}
         public NativeStoryPlan getStories(){return stories;}
     }
     /** An unchanged original empty paragraph associated with an exact manual footer. */
@@ -182,6 +189,9 @@ public final class DocxTemplateEditor {
         final List<Element[]> boundaries=new ArrayList<>(),spacing=new ArrayList<>(),cleared=new ArrayList<>();final List<Element> empty=new ArrayList<>(),cohesiveRows=new ArrayList<>(),compactGapRows=new ArrayList<>(),keepNext=new ArrayList<>();
         final Map<String,Element[]> clearedKeepNextBreaks=new LinkedHashMap<>();
         final List<List<Element>> paragraphBoundaries=new ArrayList<>();
+        final List<Element> latinFontHintParagraphs=new ArrayList<>(),cellKeepNextParagraphs=new ArrayList<>(),cellWidowParagraphs=new ArrayList<>();
+        final Set<Element> sctTitleBoundaryHeadings=Collections.newSetFromMap(new IdentityHashMap<>());
+        final Map<Element,Element> derivedSctTitleBreaks=new LinkedHashMap<>();
         CapturedLayout(NativeLayoutPlan plan){this.plan=plan;}
     }
     private static CapturedLayout captureLayout(PackageModel model,NativeLayoutPlan plan) {
@@ -192,17 +202,48 @@ public final class DocxTemplateEditor {
             Element table=layoutAnchor(model,boundary.table),heading=layoutAnchor(model,boundary.heading),footer=layoutAnchor(model,boundary.footer);
             if(!selected.add(boundary.table.id)||!is(table,"tbl")||!is(table.getParentNode(),"body")||!firstRowHeading(table,heading)||(footer.compareDocumentPosition(table)&Node.DOCUMENT_POSITION_FOLLOWING)==0)throw error("LAYOUT_BOUNDARY_SCOPE_CHANGED",boundary.table.id);
             result.boundaries.add(new Element[]{table,heading});
+            if(plan.stories!=null&&plan.stories.sctTitleMigration!=null
+                    &&plan.stories.sctTitleMigration.bodyTitles.stream().anyMatch(title->title.source.id.equals(boundary.heading.id))
+                    &&sourceBoundaryWithoutHardPagination(model,footer,heading))result.sctTitleBoundaryHeadings.add(heading);
         }
         for(NodeAnchor anchor:plan.emptyExclusions){Element paragraph=layoutAnchor(model,anchor);if(!selected.add(anchor.id)||!is(paragraph.getParentNode(),"body")||!layoutEmpty(paragraph))throw error("LAYOUT_EMPTY_SCOPE_CHANGED",anchor.id);result.empty.add(paragraph);}
         for(NativeLayoutSpacing spacing:plan.emptySpacing){Element paragraph=layoutAnchor(model,spacing.paragraph),footer=layoutAnchor(model,spacing.footer);if(!selected.add(spacing.paragraph.id)||!layoutEmpty(paragraph)||!is(footer.getParentNode(),"body")||!is(footer,"p"))throw error("LAYOUT_EMPTY_SCOPE_CHANGED",spacing.paragraph.id);result.spacing.add(new Element[]{paragraph,footer});}
-        for(NodeAnchor anchor:plan.cohesiveRows){Element row=layoutAnchor(model,anchor);if(!selected.add(anchor.id))throw error("LAYOUT_ROW_SCOPE_CHANGED",anchor.id);validateStructural(row,Edit.keepRowTogether("native-layout-row",anchor));result.cohesiveRows.add(row);}
-        for(NodeAnchor anchor:plan.compactGapRows){Element row=layoutAnchor(model,anchor);if(!selected.add(anchor.id))throw error("LAYOUT_ROW_SCOPE_CHANGED",anchor.id);validateStructural(row,Edit.keepRowTogether("native-layout-gap",anchor));validateNativeGapRow(row,anchor.id);result.compactGapRows.add(row);}
+        Set<String> cohesiveRowIds=new HashSet<>(),compactRowIds=new HashSet<>();
+        for(NodeAnchor anchor:plan.cohesiveRows){Element row=layoutAnchor(model,anchor);if(!selected.add(anchor.id))throw error("LAYOUT_ROW_SCOPE_CHANGED",anchor.id);validateStructural(row,Edit.keepRowTogether("native-layout-row",anchor));cohesiveRowIds.add(anchor.id);result.cohesiveRows.add(row);}
+        for(NodeAnchor anchor:plan.compactGapRows){Element row=layoutAnchor(model,anchor);if(!compactRowIds.add(anchor.id)||!selected.add(anchor.id)&&!cohesiveRowIds.contains(anchor.id))throw error("LAYOUT_ROW_SCOPE_CHANGED",anchor.id);validateStructural(row,Edit.keepRowTogether("native-layout-gap",anchor));validateNativeGapRow(row,anchor.id);result.compactGapRows.add(row);}
         for(NativeLayoutClearedParagraph item:plan.clearedParagraphs){Element paragraph=layoutAnchor(model,item.paragraph),guard=layoutAnchor(model,item.guard);if(!selected.add(item.paragraph.id)||!is(paragraph.getParentNode(),"body")||!is(guard,"p")||!is(guard.getParentNode(),"body")||!item.guardText.matches("SCC\\d+\\.\\d{3}Not used"))throw error("LAYOUT_CLEARED_SCOPE_CHANGED",item.paragraph.id);validateClearedLayoutParagraph(paragraph,item.removePageBreak,item.paragraph.id);result.cleared.add(new Element[]{paragraph,guard});}
         Set<String> keepIds=new HashSet<>();for(NodeAnchor anchor:plan.keepNextParagraphs)keepIds.add(anchor.id);
         for(NativeLayoutClearedKeepNextBreak item:plan.clearedKeepNextBreaks){Element paragraph=layoutAnchor(model,item.paragraph),guard=layoutAnchor(model,item.guard);if(!keepIds.contains(item.paragraph.id)||!keepIds.contains(item.guard.id)||paragraph==guard||!is(guard,"p")||!is(guard.getParentNode(),"body")||!descendantText(guard,"t").equals(item.guardText)||!hasPageBreak(paragraph)||result.clearedKeepNextBreaks.put(item.paragraph.id,new Element[]{paragraph,guard})!=null)throw error("LAYOUT_KEEP_NEXT_SCOPE_CHANGED",item.paragraph.id);}
         for(NodeAnchor anchor:plan.keepNextParagraphs){Element paragraph=layoutAnchor(model,anchor);boolean clearedBreak=result.clearedKeepNextBreaks.containsKey(anchor.id);if(!selected.add(anchor.id)||!is(paragraph,"p")||!is(paragraph.getParentNode(),"body")||has(paragraph,"sectPr")||has(paragraph,"pageBreakBefore")||hasPageBreak(paragraph)&&!clearedBreak)throw error("LAYOUT_KEEP_NEXT_SCOPE_CHANGED",anchor.id);validateClearedLayoutParagraph(paragraph,clearedBreak,anchor.id);result.keepNext.add(paragraph);}
         Set<String> paragraphBoundaryIds=new HashSet<>();for(NativeLayoutParagraphBoundary boundary:plan.paragraphBoundaries){List<Element> chain=new ArrayList<>();Element heading=layoutAnchor(model,boundary.heading),body=layoutAnchor(model,boundary.body);chain.add(heading);for(NodeAnchor gap:boundary.gaps)chain.add(layoutAnchor(model,gap));chain.add(body);if(!paragraphBoundaryIds.add(boundary.heading.id)||boundary.gaps.isEmpty())throw error("LAYOUT_PARAGRAPH_BOUNDARY_SCOPE_CHANGED",boundary.heading.id);for(int i=0;i<chain.size();i++){Element node=chain.get(i);if(!is(node,"p")||!is(node.getParentNode(),"body"))throw error("LAYOUT_PARAGRAPH_BOUNDARY_SCOPE_CHANGED",boundary.heading.id);validateClearedLayoutParagraph(node,false,boundary.heading.id);if(i>0){Node following=chain.get(i-1).getNextSibling();while(following!=null&&!(following instanceof Element))following=following.getNextSibling();if(following!=node)throw error("LAYOUT_PARAGRAPH_BOUNDARY_SCOPE_CHANGED",boundary.heading.id);}}if(descendantText(heading,"t").trim().isEmpty()||descendantText(body,"t").trim().isEmpty())throw error("LAYOUT_PARAGRAPH_BOUNDARY_SCOPE_CHANGED",boundary.heading.id);result.paragraphBoundaries.add(chain);}
+        for(NodeAnchor anchor:plan.latinFontHintParagraphs){Element paragraph=layoutAnchor(model,anchor);if(!selected.add(anchor.id))throw error("LAYOUT_LATIN_HINT_SCOPE_CHANGED",anchor.id);latinHintFonts(paragraph,anchor.id,true);result.latinFontHintParagraphs.add(paragraph);}
+        Set<String> cellFlowIds=new HashSet<>();for(List<NodeAnchor> anchors:Arrays.asList(plan.cellKeepNextParagraphs,plan.cellWidowParagraphs))for(NodeAnchor anchor:anchors){Element paragraph=layoutAnchor(model,anchor);if(!cellFlowIds.add(anchor.id))throw error("LAYOUT_CELL_FLOW_SCOPE_CHANGED",anchor.id);validateCellParagraphFlow(paragraph,anchor.id);(anchors==plan.cellKeepNextParagraphs?result.cellKeepNextParagraphs:result.cellWidowParagraphs).add(paragraph);}
         return result;
+    }
+    /** Cached page positions cease to require a forced body boundary after its exact title moves to a real header. */
+    private static boolean sourceBoundaryWithoutHardPagination(PackageModel model,Element footer,Element heading) {
+        if(hasPageBreak(heading)||has(heading,"pageBreakBefore")||has(heading,"sectPr"))return false;
+        boolean inside=false;NodeList nodes=model.xmlParts.get(MAIN).getElementsByTagName("*");
+        for(int i=0;i<nodes.getLength();i++){Element node=(Element)nodes.item(i);if(node==footer)inside=true;if(node==heading)return inside;
+            if(inside&&(is(node,"sectPr")||is(node,"pageBreakBefore")||is(node,"br")&&"page".equals(node.getAttributeNS(W,"type"))))return false;}
+        return false;
+    }
+    private static void releaseMigratedSctTitleBoundaries(CapturedLayout layout,CapturedStories stories,List<NativeLayoutChange> changes) {
+        if(layout.derivedSctTitleBreaks.isEmpty())return;
+        Set<String> installed=new HashSet<>();Set<Element> cleared=Collections.newSetFromMap(new IdentityHashMap<>());
+        for(NativeStoryChange change:stories.changes)if("APPLIED".equals(change.status)) {
+            if("INSTALL_SCT_FIRST_TITLE_HEADER".equals(change.action)||"INSTALL_SCT_DEFAULT_TITLE_HEADER".equals(change.action))installed.add(change.action);
+            if("CLEAR_EXACT_SCT_BODY_TITLE".equals(change.action)&&change.paragraph!=null)
+                for(int i=0;i<stories.sctTitles.policy.bodyTitles.size();i++)if(stories.sctTitles.policy.bodyTitles.get(i).source.id.equals(change.paragraph.id))cleared.add(stories.sctTitles.nodes.get(i));
+        }
+        if(installed.size()!=2)return;
+        for(Map.Entry<Element,Element> entry:layout.derivedSctTitleBreaks.entrySet())if(cleared.contains(entry.getValue())) {
+            Element paragraph=entry.getKey();List<Element> props=direct(paragraph,"pPr");if(props.size()!=1)throw error("SCT_TITLE_BOUNDARY_CONTROL_CHANGED",path(paragraph));
+            List<Element> breaks=direct(props.get(0),"pageBreakBefore");if(breaks.size()!=1)throw error("SCT_TITLE_BOUNDARY_CONTROL_CHANGED",path(paragraph));
+            props.get(0).removeChild(breaks.get(0));
+            for(int i=0;i<changes.size();i++){NativeLayoutChange change=changes.get(i);if("page_break_before".equals(change.action)&&Objects.equals(change.generatedId,MAIN+"#"+path(paragraph)))
+                changes.set(i,new NativeLayoutChange(change.action,"RELEASED_VERIFIED_SCT_TITLE_MIGRATION",change.source,change.generatedId,change.layoutId));}
+        }
     }
     private static Element layoutAnchor(PackageModel model,NodeAnchor anchor){Element node=model.nodes.get(anchor.id);if(!MAIN.equals(anchor.part)||node==null||!hash(xml(node)).equals(anchor.sha256))throw error("LAYOUT_ANCHOR_MISMATCH",anchor.id);return node;}
     private static boolean firstRowHeading(Element table,Element heading){List<Element> rows=direct(table,"tr");if(rows.isEmpty()||!contains(rows.get(0),heading))return false;for(Node parent=heading.getParentNode();parent!=null;parent=parent.getParentNode())if(is(parent,"tbl"))return parent==table;return false;}
@@ -221,6 +262,7 @@ public final class DocxTemplateEditor {
             props.appendChild(document.createElementNS(W,"w:pageBreakBefore"));compactSpacing(document,props);paragraph.appendChild(props);table.getParentNode().insertBefore(paragraph,table);
             String layoutId="CL"+hash((captured.plan.sourceSha256+"|"+captured.plan.profile+"|"+anchor.id).getBytes(StandardCharsets.UTF_8)).substring(0,28);if(!markerNames.add(layoutId))throw error("LAYOUT_BOOKMARK_CONFLICT",anchor.id);attachBookmark(document,paragraph,layoutId,nextMarker++);
             changes.add(new NativeLayoutChange("page_break_before","APPLIED",anchor,MAIN+"#"+path(paragraph),layoutId));
+            if(captured.sctTitleBoundaryHeadings.contains(heading))captured.derivedSctTitleBreaks.put(paragraph,heading);
         }
         for(int i=0;i<captured.spacing.size();i++){
             Element paragraph=captured.spacing.get(i)[0],footer=captured.spacing.get(i)[1];NativeLayoutSpacing spacing=captured.plan.emptySpacing.get(i);NodeAnchor anchor=spacing.paragraph;
@@ -254,6 +296,15 @@ public final class DocxTemplateEditor {
         }
         for(int i=0;i<captured.paragraphBoundaries.size();i++){Element heading=captured.paragraphBoundaries.get(i).get(0);NodeAnchor anchor=captured.plan.paragraphBoundaries.get(i).heading;if(!paragraphBoundaryEligibility.contains(i)){changes.add(new NativeLayoutChange("page_break_before_verified_heading","SKIPPED_NOT_CLEARED",anchor,contains(root,heading)?MAIN+"#"+path(heading):null));continue;}pageBreakBeforeHeading(heading);
             String layoutId="CL"+hash((captured.plan.sourceSha256+"|"+captured.plan.profile+"|heading-break|"+anchor.id).getBytes(StandardCharsets.UTF_8)).substring(0,28);if(!markerNames.add(layoutId))throw error("LAYOUT_BOOKMARK_CONFLICT",anchor.id);attachBookmark(document,heading,layoutId,nextMarker++);changes.add(new NativeLayoutChange("page_break_before_verified_heading","APPLIED",anchor,MAIN+"#"+path(heading),layoutId));}
+        // Captured source hashes were checked together; apply hints before row markers change the same paragraph.
+        for(int i=0;i<captured.latinFontHintParagraphs.size();i++){
+            Element paragraph=captured.latinFontHintParagraphs.get(i);NodeAnchor anchor=captured.plan.latinFontHintParagraphs.get(i);
+            if(!contains(root,paragraph)){changes.add(new NativeLayoutChange("normalize_verified_latin_font_hint","SKIPPED_REMOVED",anchor,null));continue;}
+            if(!hash(xml(paragraph)).equals(anchor.sha256)){changes.add(new NativeLayoutChange("normalize_verified_latin_font_hint","SKIPPED_CHANGED",anchor,MAIN+"#"+path(paragraph)));continue;}
+            for(Element fonts:latinHintFonts(paragraph,anchor.id,true))fonts.removeAttributeNS(W,"hint");
+            String layoutId="CL"+hash((captured.plan.sourceSha256+"|"+captured.plan.profile+"|latin-hint|"+anchor.id).getBytes(StandardCharsets.UTF_8)).substring(0,28);if(!markerNames.add(layoutId))throw error("LAYOUT_BOOKMARK_CONFLICT",anchor.id);attachBookmark(document,paragraph,layoutId,nextMarker++);
+            changes.add(new NativeLayoutChange("normalize_verified_latin_font_hint","APPLIED",anchor,MAIN+"#"+path(paragraph),layoutId));
+        }
         for(int i=0;i<captured.cohesiveRows.size();i++){
             Element row=captured.cohesiveRows.get(i);NodeAnchor anchor=captured.plan.cohesiveRows.get(i);
             if(!contains(root,row)){changes.add(new NativeLayoutChange("keep_verified_row_together","SKIPPED_REMOVED",anchor,null));continue;}
@@ -271,10 +322,37 @@ public final class DocxTemplateEditor {
             Element paragraph=(Element)paragraphs.item(0);String layoutId="CL"+hash((captured.plan.sourceSha256+"|"+captured.plan.profile+"|gap|"+anchor.id).getBytes(StandardCharsets.UTF_8)).substring(0,28);if(!markerNames.add(layoutId))throw error("LAYOUT_BOOKMARK_CONFLICT",anchor.id);attachBookmark(document,paragraph,layoutId,nextMarker++);
             changes.add(new NativeLayoutChange("compact_verified_row_gaps","APPLIED",anchor,MAIN+"#"+path(paragraph),layoutId));
         }
+        for(boolean keepNext:new boolean[]{true,false}){List<Element> paragraphs=keepNext?captured.cellKeepNextParagraphs:captured.cellWidowParagraphs;List<NodeAnchor> anchors=keepNext?captured.plan.cellKeepNextParagraphs:captured.plan.cellWidowParagraphs;String action=keepNext?"keep_verified_cell_paragraph_with_next":"keep_verified_cell_paragraph_widows";
+            for(int i=0;i<paragraphs.size();i++){Element paragraph=paragraphs.get(i);NodeAnchor anchor=anchors.get(i);if(!contains(root,paragraph)||explicitlyCleared.contains(paragraph)){changes.add(new NativeLayoutChange(action,contains(root,paragraph)?"SKIPPED_CLEARED":"SKIPPED_REMOVED",anchor,null));continue;}validateCellParagraphFlow(paragraph,anchor.id);if(keepNext){keepWithNext(paragraph);controlWidows(paragraph);}else controlWidows(paragraph);
+                String layoutId="CL"+hash((captured.plan.sourceSha256+"|"+captured.plan.profile+"|"+action+"|"+anchor.id).getBytes(StandardCharsets.UTF_8)).substring(0,28);if(!markerNames.add(layoutId))throw error("LAYOUT_BOOKMARK_CONFLICT",anchor.id);attachBookmark(document,paragraph,layoutId,nextMarker++);changes.add(new NativeLayoutChange(action,"APPLIED",anchor,MAIN+"#"+path(paragraph),layoutId));}}
         // Later insertions may shift earlier BODY paths. Resolve IDs only after the complete layout.
         List<NativeLayoutChange> finalChanges=new ArrayList<>();int boundaryIndex=0;
         for(NativeLayoutChange change:changes){if("page_break_before".equals(change.action)){Element table=captured.boundaries.get(boundaryIndex++)[0];String id="APPLIED".equals(change.status)?MAIN+"#"+path((Element)table.getPreviousSibling()):null;finalChanges.add(new NativeLayoutChange(change.action,change.status,change.source,id,change.layoutId));}else finalChanges.add(change);}
         return finalChanges;
+    }
+    /** Exact registered Latin runs and ordinary typography only; source fonts, sizes and spaces stay unchanged. */
+    private static List<Element> latinHintFonts(Element paragraph,String id,boolean requireHint){
+        if(!is(paragraph,"p")||!latinHintText(descendantText(paragraph,"t"),true))throw error("LAYOUT_LATIN_HINT_SCOPE_CHANGED",id);
+        List<Element> result=new ArrayList<>();
+        for(Node child=paragraph.getFirstChild();child!=null;child=child.getNextSibling())if(child instanceof Element){
+            if(is(child,"pPr")||is(child,"bookmarkStart")||is(child,"bookmarkEnd")||is(child,"proofErr"))continue;
+            if(!is(child,"r"))throw error("LAYOUT_LATIN_HINT_SCOPE_CHANGED",id);Element run=(Element)child;
+            for(Node item=run.getFirstChild();item!=null;item=item.getNextSibling())if(item instanceof Element&&!is(item,"rPr")&&!is(item,"t")&&!is(item,"tab"))throw error("LAYOUT_LATIN_HINT_SCOPE_CHANGED",id);
+            String text=descendantText(run,"t");if(!latinHintText(text,false))throw error("LAYOUT_LATIN_HINT_SCOPE_CHANGED",id);
+            if(text.isEmpty())continue;if(!direct(run,"tab").isEmpty())throw error("LAYOUT_LATIN_HINT_SCOPE_CHANGED",id);
+            List<Element> props=direct(run,"rPr");if(props.size()>1)throw error("LAYOUT_LATIN_HINT_SCOPE_CHANGED",id);if(props.isEmpty())continue;
+            List<Element> fonts=direct(props.get(0),"rFonts");if(fonts.size()>1)throw error("LAYOUT_LATIN_HINT_SCOPE_CHANGED",id);if(fonts.size()==1&&"eastAsia".equals(fonts.get(0).getAttributeNS(W,"hint")))result.add(fonts.get(0));
+        }
+        if(requireHint&&result.isEmpty())throw error("LAYOUT_LATIN_HINT_SCOPE_CHANGED",id);return result;
+    }
+    private static boolean latinHintText(String text,boolean requireLetter){
+        boolean latin=false;
+        for(int offset=0;offset<text.length();){int cp=text.codePointAt(offset);offset+=Character.charCount(cp);boolean letter=Character.isLetter(cp)&&Character.UnicodeScript.of(cp)==Character.UnicodeScript.LATIN;
+            if(letter){latin=true;continue;}
+            if(cp>=0x20&&cp<=0x7e||Character.isWhitespace(cp)||Character.isSpaceChar(cp)||cp>=0x2010&&cp<=0x2015||cp>=0x2018&&cp<=0x201f||cp==0x2026||cp==0xa7)continue;
+            return false;
+        }
+        return !requireLetter||latin;
     }
     /** Only source-verified minimum row heights and explicit paragraph gaps; fonts, line spacing and cells are retained. */
     private static void validateNativeGapRow(Element row,String id){
@@ -303,6 +381,9 @@ public final class DocxTemplateEditor {
     }
     private static void pageBreakBeforeHeading(Element heading){Document document=heading.getOwnerDocument();List<Element> values=direct(heading,"pPr");Element props=values.isEmpty()?document.createElementNS(W,"w:pPr"):values.get(0);if(values.isEmpty())heading.insertBefore(props,heading.getFirstChild());Element value=document.createElementNS(W,"w:pageBreakBefore");value.setAttributeNS(W,"w:val","1");Node later=null;Set<String> afterBreak=Set.of("framePr","widowControl","numPr","suppressLineNumbers","pBdr","shd","tabs","suppressAutoHyphens","kinsoku","wordWrap","overflowPunct","topLinePunct","autoSpaceDE","autoSpaceDN","bidi","adjustRightInd","snapToGrid","spacing","ind","contextualSpacing","mirrorIndents","suppressOverlap","jc","textDirection","textAlignment","textboxTightWrap","outlineLvl","divId","cnfStyle","rPr","sectPr","pPrChange");for(Node child=props.getFirstChild();child!=null;child=child.getNextSibling())if(child instanceof Element&&W.equals(child.getNamespaceURI())&&afterBreak.contains(child.getLocalName())){later=child;break;}props.insertBefore(value,later);}
     private static void keepWithNext(Element paragraph){Document document=paragraph.getOwnerDocument();List<Element> values=direct(paragraph,"pPr");Element props=values.isEmpty()?document.createElementNS(W,"w:pPr"):values.get(0);if(values.isEmpty())paragraph.insertBefore(props,paragraph.getFirstChild());List<Element> existing=direct(props,"keepNext");if(!existing.isEmpty()){existing.get(0).setAttributeNS(W,"w:val","1");return;}Element value=document.createElementNS(W,"w:keepNext");value.setAttributeNS(W,"w:val","1");Node before=props.getFirstChild();if(is(before,"pStyle"))before=before.getNextSibling();props.insertBefore(value,before);}
+    private static void validateCellParagraphFlow(Element paragraph,String id){if(!is(paragraph,"p")||!is(paragraph.getParentNode(),"tc")&&!(is(paragraph.getParentNode(),"body")&&editableText(paragraph).isEmpty()))throw error("LAYOUT_CELL_FLOW_SCOPE_CHANGED",id);validateClearedLayoutParagraph(paragraph,false,id);List<Element> props=direct(paragraph,"pPr");if(props.size()>1||!props.isEmpty()&&(direct(props.get(0),"keepNext").size()>1||direct(props.get(0),"widowControl").size()>1))throw error("LAYOUT_CELL_FLOW_SCOPE_CHANGED",id);}
+    /** Explicit paragraph control overrides the template table styles' disabled widow protection. */
+    private static void controlWidows(Element paragraph){Document document=paragraph.getOwnerDocument();List<Element> values=direct(paragraph,"pPr");Element props=values.isEmpty()?document.createElementNS(W,"w:pPr"):values.get(0);if(values.isEmpty())paragraph.insertBefore(props,paragraph.getFirstChild());List<Element> existing=direct(props,"widowControl");if(!existing.isEmpty()){existing.get(0).setAttributeNS(W,"w:val","1");return;}Element value=document.createElementNS(W,"w:widowControl");value.setAttributeNS(W,"w:val","1");Node before=null;for(Node child=props.getFirstChild();child!=null;child=child.getNextSibling())if(child instanceof Element&&W.equals(child.getNamespaceURI())&&!Set.of("pStyle","keepNext","keepLines","pageBreakBefore","framePr").contains(child.getLocalName())){before=child;break;}props.insertBefore(value,before);}
     private static void compactSpacing(Document document,Element props){
         Element value=direct(props,"spacing").isEmpty()?document.createElementNS(W,"w:spacing"):direct(props,"spacing").get(0);if(value.getParentNode()==null){Node later=null;Set<String> afterSpacing=Set.of("ind","contextualSpacing","mirrorIndents","suppressOverlap","jc","textDirection","textAlignment","textboxTightWrap","outlineLvl","divId","cnfStyle","rPr","sectPr","pPrChange");for(Node child=props.getFirstChild();child!=null;child=child.getNextSibling())if(child instanceof Element&&W.equals(child.getNamespaceURI())&&afterSpacing.contains(child.getLocalName())){later=child;break;}props.insertBefore(value,later);}
             value.setAttributeNS(W,"w:before","0");value.setAttributeNS(W,"w:after","0");value.setAttributeNS(W,"w:line","1");value.setAttributeNS(W,"w:lineRule","exact");
@@ -393,7 +474,10 @@ public final class DocxTemplateEditor {
         }
         public boolean hasCompactClearedLayoutSpacing(){try{Element paragraph=parse(snapshotXml).getDocumentElement();validateClearedLayoutParagraph(paragraph,false,id);if(!descendantText(paragraph,"t").trim().isEmpty())return false;List<Element> props=direct(paragraph,"pPr");if(props.size()!=1)return false;List<Element> spacing=direct(props.get(0),"spacing");if(spacing.size()!=1)return false;Element value=spacing.get(0);return "0".equals(value.getAttributeNS(W,"before"))&&"0".equals(value.getAttributeNS(W,"after"))&&"1".equals(value.getAttributeNS(W,"line"))&&"exact".equals(value.getAttributeNS(W,"lineRule"));}catch(Exception invalid){return false;}}
         public boolean hasNativeKeepNext(){try{Element paragraph=parse(snapshotXml).getDocumentElement();List<Element> props=direct(paragraph,"pPr");if(props.size()!=1)return false;List<Element> values=direct(props.get(0),"keepNext");return values.size()==1&&"1".equals(values.get(0).getAttributeNS(W,"val"));}catch(Exception invalid){return false;}}
+        public boolean hasNativeWidowControl(){try{Element paragraph=parse(snapshotXml).getDocumentElement();List<Element> props=direct(paragraph,"pPr");if(props.size()!=1)return false;List<Element> values=direct(props.get(0),"widowControl");return values.size()==1&&"1".equals(values.get(0).getAttributeNS(W,"val"));}catch(Exception invalid){return false;}}
+        public boolean hasNativeCellKeepNext(){return hasNativeKeepNext()&&hasNativeWidowControl();}
         public boolean hasNativeHeadingPageBreak(){try{Element paragraph=parse(snapshotXml).getDocumentElement();List<Element> props=direct(paragraph,"pPr");if(props.size()!=1)return false;List<Element> values=direct(props.get(0),"pageBreakBefore");return values.size()==1&&"1".equals(values.get(0).getAttributeNS(W,"val"));}catch(Exception invalid){return false;}}
+        public boolean hasNormalizedNativeLatinFontHints(){try{return latinHintFonts(parse(snapshotXml).getDocumentElement(),id,false).isEmpty();}catch(Exception invalid){return false;}}
         public boolean hasClearedNativeKeepNext(){try{Element paragraph=parse(snapshotXml).getDocumentElement();return hasNativeKeepNext()&&descendantText(paragraph,"t").trim().isEmpty()&&!hasPageBreak(paragraph);}catch(Exception invalid){return false;}}
         public boolean hasNativeRowCohesion(){return nativeRowCohesion;}
         public boolean hasCompactNativeRowGaps(){return compactNativeRowGaps;}
@@ -660,6 +744,7 @@ public final class DocxTemplateEditor {
     }
     private static final class CapturedStories {
         final NativeStoryPlan plan;final List<CapturedStory> stories=new ArrayList<>();final List<CapturedStaticFooter> staticFooters=new ArrayList<>();
+        CapturedSctTitles sctTitles;String sctTitleSkip;
         final Map<Section,Element> sections=new LinkedHashMap<>();final Set<String> dirtyParts=new LinkedHashSet<>();final List<NativeStoryChange> changes=new ArrayList<>();
         CapturedStories(NativeStoryPlan plan){this.plan=plan;}
     }
@@ -752,6 +837,7 @@ public final class DocxTemplateEditor {
         }
         for(Section section:plan.sections)if((section.numberingChange!=null||section.stories.stream().anyMatch(DocxTemplateEditor::staticFooterCarrier))&&!migratedSections.contains(section))throw error("STORY_STATIC_SECTION_MISMATCH",section.observedSectionId);
         validateStaticFooterSourceFormat(model,captured);
+        if(plan.sctTitleMigration!=null)try{captured.sctTitles=captureSctTitles(model,captured);}catch(EditException unsupported){captured.sctTitleSkip=unsupported.getCode();}
         long additions=captured.stories.stream().filter(item->item.story.action!=StoryAction.PRESERVE&&item.part==null).count();
         if(model.entries.size()+additions+(additions>0&&!model.entries.containsKey(STORY_RELS)?1:0)>COUNT_LIMIT)throw error("DOCX_ENTRY_LIMIT",plan.profile);
         return captured;
@@ -771,17 +857,32 @@ public final class DocxTemplateEditor {
             Element found=null;for(Element style:direct(styles,"style"))if(id.equals(style.getAttributeNS(W,"styleId"))){if(found!=null)throw error("STORY_SOURCE_STYLE_AMBIGUOUS",id);found=style;}
             if(found==null||!"paragraph".equals(found.getAttributeNS(W,"type")))throw error("STORY_SOURCE_STYLE_UNSUPPORTED",id);
         }
+        boolean emptyCarrierMatched=false;
         for(CapturedStory item:captured.stories)if(item.story.action!=StoryAction.PRESERVE) {
             Story story=item.story;
-            if(story.expectedBinding.state!=BindingState.NO_TARGET||item.part!=null
+            boolean newTarget=story.expectedBinding.state==BindingState.NO_TARGET&&item.part==null,emptyTarget=exactSourceEmptyFooter(model,format,item);
+            if(emptyTarget)emptyCarrierMatched=true;
+            if(!newTarget&&!emptyTarget
                     ||story.expectedBinding.kind==Kind.HEADER&&story.action!=StoryAction.APPEND_PROJECT_TITLE
                     ||story.expectedBinding.kind==Kind.FOOTER&&(!staticFooterCarrier(story)||story.retainedSourceControlLines.size()!=2))
                 throw error("STORY_SOURCE_STYLE_SCOPE_UNSUPPORTED",captured.plan.profile);
         }
+        if(format.emptyFooterPartName!=null&&!emptyCarrierMatched)throw error("STORY_SOURCE_STYLE_SCOPE_UNSUPPORTED",captured.plan.profile);
+    }
+    private static boolean exactSourceEmptyFooter(PackageModel model,StaticFooterSourceFormat format,CapturedStory item) {
+        if(format.emptyFooterPartName==null||item.story.expectedBinding.kind!=Kind.FOOTER
+                ||item.story.expectedBinding.state!=BindingState.EXPLICIT_TARGET_LOADED||item.targetRoot==null
+                ||!format.emptyFooterPartName.equals(item.part)||!format.emptyFooterPartSha256.equals(model.index.entryHashes.get(item.part))
+                ||!"".equals(item.originalFields)||direct(item.targetRoot,"p").size()!=1)return false;
+        for(Node child=item.targetRoot.getFirstChild();child!=null;child=child.getNextSibling())if(child instanceof Element&&!is(child,"p"))return false;
+        Element paragraph=direct(item.targetRoot,"p").get(0);
+        for(Node child=paragraph.getFirstChild();child!=null;child=child.getNextSibling())if(child instanceof Element&&!is(child,"pPr"))return false;
+        return direct(paragraph,"pPr").size()<=1;
     }
     private static void validateStoryBusinessScopes(PackageModel model,CapturedStories captured,SourceEditBatch batch) {
         if(captured.plan==null)return;
         for(Edit edit:batch.edits){Element target=model.nodes.get(edit.targetId);String part=edit.targetId.substring(0,edit.targetId.indexOf('#'));
+            if(captured.sctTitles!=null)for(Element title:captured.sctTitles.nodes)if(target==title||contains(target,title)||contains(title,target))captured.sctTitleSkip="SCT_TITLE_BUSINESS_EDIT_OVERLAP";
             for(CapturedStory story:captured.stories)if(story.story.action!=StoryAction.PRESERVE&&Objects.equals(part,story.part))throw error("STORY_BUSINESS_EDIT_OVERLAP",edit.operationId);
             for(CapturedStaticFooter footer:captured.staticFooters)if(target==footer.node||contains(target,footer.node)||contains(footer.node,target))throw error("STORY_STATIC_BUSINESS_OVERLAP",edit.operationId);
         }
@@ -828,12 +929,14 @@ public final class DocxTemplateEditor {
                 if(item.part==null)createStory(model,captured,item);
                 if(applied.add(item.part)) {
                     Element root=storyXml(model,item.part).getDocumentElement();
-                    StaticFooterSourceFormat format=plan.staticFooterSourceFormat;
+                    StaticFooterSourceFormat format=plan.staticFooterSourceFormat;Element newPageParagraph=null;
                     if(format!=null) {
                         if(story.action==StoryAction.APPEND_PROJECT_TITLE)appendStyledStoryParagraph(root,storyText(plan.identity.title),format.headerStyleId);
                         else {
-                            Element paragraph=appendStyledStoryParagraph(root,storyText(plan.identity.number)+"\t"+story.retainedSourceControlLines.get(0)+"\t"+(story.pagePrefix==null?"":story.pagePrefix),format.footerStyleId);
-                            appendNativePage(paragraph);appendStoryRun(paragraph,story.pageSuffix==null?"":story.pageSuffix);
+                            String control="\t"+story.retainedSourceControlLines.get(0)+"\t"+(story.pagePrefix==null?"":story.pagePrefix);
+                            Element paragraph=appendStyledStoryParagraph(root,storyText(plan.identity.number)+(format.contractNumberHalfPoints==null?control:""),format.footerStyleId);
+                            if(format.contractNumberHalfPoints!=null){Document document=root.getOwnerDocument();Element run=direct(paragraph,"r").get(0),properties=document.createElementNS(W,"w:rPr"),size=document.createElementNS(W,"w:sz");size.setAttributeNS(W,"w:val",format.contractNumberHalfPoints.toString());properties.appendChild(size);run.insertBefore(properties,run.getFirstChild());appendStoryRun(paragraph,control);}
+                            newPageParagraph=paragraph;
                             appendStyledStoryParagraph(root,story.retainedSourceControlLines.get(1),format.footerStyleId);
                         }
                     }else if(story.action==StoryAction.APPEND_PROJECT_TITLE)appendStoryParagraph(root,storyText(plan.identity.title));
@@ -843,6 +946,8 @@ public final class DocxTemplateEditor {
                         if(labels.isEmpty())appendStoryParagraph(root,storyText(plan.identity.number));
                     }
                     if(item.originalFields!=null&&!item.originalFields.equals(storyFields(root)))throw error("STORY_FIELD_CHANGED",item.part);
+                    // Preserve the complete original field/cache snapshot before the separately authorized new PAGE.
+                    if(newPageParagraph!=null){appendNativePage(newPageParagraph);appendStoryRun(newPageParagraph,story.pageSuffix==null?"":story.pageSuffix);}
                     if(format==null&&story.pageAction==PageAction.CREATE_PAGE_FROM_STATIC_SEQUENCE){for(String control:story.retainedSourceControlLines)appendStoryParagraph(root,control);Element page=appendStoryParagraph(root,story.pagePrefix==null?"":story.pagePrefix);Element field=root.getOwnerDocument().createElementNS(W,"w:fldSimple");field.setAttributeNS(W,"w:instr"," PAGE ");field.setAttributeNS(W,"w:dirty","true");Element run=root.getOwnerDocument().createElementNS(W,"w:r"),text=root.getOwnerDocument().createElementNS(W,"w:t");run.appendChild(text);field.appendChild(run);page.appendChild(field);appendStoryRun(page,story.pageSuffix==null?"":story.pageSuffix);}
                     captured.dirtyParts.add(item.part);status="APPLIED";
                 }else status="SHARED_TARGET_ALREADY_APPLIED";
@@ -861,6 +966,173 @@ public final class DocxTemplateEditor {
         }
         for(Map.Entry<Section,Element> entry:captured.sections.entrySet()){Section section=entry.getKey();Element node=entry.getValue();if(section.numberingChange!=null){direct(node,"pgNumType").get(0).setAttributeNS(W,"w:start",section.numberingChange.newStart);captured.dirtyParts.add(MAIN);captured.changes.add(new NativeStoryChange("MIGRATE_STATIC_NUMBER_START","APPLIED",section,null,MAIN,null,null,0,null,section.pgNumType,Collections.singletonMap("start",section.numberingChange.newStart),null));}if(section.marginChange!=null){List<Element> margins=direct(node,"pgMar");Element margin=margins.isEmpty()?node.getOwnerDocument().createElementNS(W,"w:pgMar"):margins.get(0);if(margins.isEmpty()){Node before=null;for(Node child=node.getFirstChild();child!=null;child=child.getNextSibling())if(child instanceof Element&&W.equals(child.getNamespaceURI())&&Arrays.asList("paperSrc","pgBorders","lnNumType","pgNumType","cols","formProt","vAlign","noEndnote","titlePg","textDirection","bidi","rtlGutter","docGrid","printerSettings","sectPrChange").contains(child.getLocalName())){before=child;break;}node.insertBefore(margin,before);}Map<String,String> values=new LinkedHashMap<>();for(Map.Entry<String,Integer> value:section.marginChange.newTwips.entrySet()){margin.setAttributeNS(W,"w:"+value.getKey(),value.getValue().toString());values.put(value.getKey(),value.getValue().toString());}captured.dirtyParts.add(MAIN);captured.changes.add(new NativeStoryChange("EXPLICIT_SOURCE_BOUND_MARGIN_CHANGE","APPLIED",section,null,MAIN,null,null,0,null,section.pgMar,values,null));}}
     }
+    private static final class CapturedSctTitles {
+        final SctTitleMigration policy;final List<Element> nodes=new ArrayList<>();
+        CapturedSctTitles(SctTitleMigration policy){this.policy=policy;}
+    }
+    private static CapturedStory sctSlot(CapturedStories captured,Section section,Kind kind,Variant variant) {
+        for(CapturedStory item:captured.stories)if(item.section==section&&item.story.expectedBinding.kind==kind&&item.story.expectedBinding.variant==variant)return item;
+        throw error("SCT_TITLE_STORY_SLOT_UNAVAILABLE",section.observedSectionId);
+    }
+    private static CapturedSctTitles captureSctTitles(PackageModel model,CapturedStories captured) {
+        SctTitleMigration policy=captured.plan.sctTitleMigration;Section section=policy.section;
+        if(!captured.sections.containsKey(section)||section.titlePg.present||captured.plan.evenAndOddHeaders.present
+                ||policy.bodyTitles.isEmpty()||!"a3".equals(policy.headerStyleId))throw error("SCT_TITLE_SCOPE_UNSUPPORTED",captured.plan.profile);
+        for(Kind kind:Kind.values())for(Variant variant:Arrays.asList(Variant.DEFAULT,Variant.FIRST)) {
+            CapturedStory item=sctSlot(captured,section,kind,variant);
+            if((kind==Kind.HEADER||variant==Variant.FIRST)&&item.story.expectedBinding.state!=BindingState.NO_TARGET
+                    ||variant==Variant.FIRST&&item.story.action!=StoryAction.PRESERVE
+                    ||kind==Kind.HEADER&&variant==Variant.DEFAULT&&item.story.action!=StoryAction.APPEND_PROJECT_TITLE)
+                throw error("SCT_TITLE_ORIGINAL_BINDING_UNSUPPORTED",section.observedSectionId);
+        }
+        CapturedStory footer=sctSlot(captured,section,Kind.FOOTER,Variant.DEFAULT);
+        if(footer.story.action==StoryAction.PRESERVE||!Arrays.asList(PageAction.PRESERVE_EXISTING_PAGE,PageAction.CREATE_PAGE_FROM_STATIC_SEQUENCE).contains(footer.story.pageAction))
+            throw error("SCT_TITLE_DEFAULT_FOOTER_UNVERIFIED",section.observedSectionId);
+        Map<String,String> margins=storyPropertyAttributes(section.pgMar);
+        if(!"720".equals(margins.get("{"+W+"}top"))||!"720".equals(margins.get("{"+W+"}header")))throw error("SCT_TITLE_ORIGINAL_FRAME_UNSUPPORTED",section.observedSectionId);
+        if(!Objects.equals(policy.stylesPartSha256,model.index.entryHashes.get("word/styles.xml")))throw error("SCT_TITLE_STYLE_PART_MISMATCH",section.observedSectionId);
+        int styleRelations=0;for(Element relation:storyRelationships(model,false))if((OFFICE_REL+"/styles").equals(relation.getAttribute("Type"))){styleRelations++;String mode=optionalAttribute(relation,"TargetMode");if(mode!=null&&!"Internal".equals(mode)||!"word/styles.xml".equals(resolveStoryTarget(relation.getAttribute("Target"))))throw error("SCT_TITLE_STYLE_BINDING_UNSUPPORTED",section.observedSectionId);}
+        if(styleRelations!=1)throw error("SCT_TITLE_STYLE_BINDING_UNSUPPORTED",section.observedSectionId);
+        int styleTypes=0;for(Element entry:elementsIn(storyXml(model,CONTENT_TYPES).getDocumentElement(),CT_NS,"Override"))if("/word/styles.xml".equals(entry.getAttribute("PartName"))){styleTypes++;if(!"application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml".equals(entry.getAttribute("ContentType")))throw error("SCT_TITLE_STYLE_TYPE_UNSUPPORTED",section.observedSectionId);}
+        if(styleTypes!=1)throw error("SCT_TITLE_STYLE_TYPE_UNSUPPORTED",section.observedSectionId);
+        Element style=null;for(Element candidate:direct(storyXml(model,"word/styles.xml").getDocumentElement(),"style"))if(policy.headerStyleId.equals(candidate.getAttributeNS(W,"styleId"))){if(style!=null)throw error("SCT_TITLE_STYLE_AMBIGUOUS",policy.headerStyleId);style=candidate;}
+        if(style==null||!"paragraph".equals(style.getAttributeNS(W,"type"))||!policy.headerStyleNodeSha256.equals(hash(xml(style))))throw error("SCT_TITLE_STYLE_NODE_MISMATCH",policy.headerStyleId);
+        CapturedSctTitles result=new CapturedSctTitles(policy);Set<String> seen=new HashSet<>();int plain=0,continued=0;
+        for(SctBodyTitle title:policy.bodyTitles) {
+            Paragraph source=title.source;Element node=model.nodes.get(source.id);
+            if(!MAIN.equals(source.part)||!section.sourceSection.id.equals(source.sectionId)||node==null||!is(node,"p")
+                    ||!seen.add(source.id)||!hash(xml(node)).equals(source.sha256)||!title.exactText.equals(descendantText(node,"t")))throw error("SCT_TITLE_ANCHOR_MISMATCH",source.id);
+            if(source.ordinal==policy.plainDonorOrdinal){plain++;if(!"SPECIAL CONDITIONS OF TENDER".equals(title.exactText))throw error("SCT_TITLE_PLAIN_DONOR_UNSUPPORTED",source.id);}
+            else if(!"SPECIAL CONDITIONS OF TENDER  (Cont’d)".equals(title.exactText))throw error("SCT_TITLE_CONTINUED_DONOR_UNSUPPORTED",source.id);
+            if(source.ordinal==policy.continuedDonorOrdinal)continued++;
+            validateSctBodyTitle(model,title,node);result.nodes.add(node);
+        }
+        if(plain!=1||continued!=1||policy.plainDonorOrdinal==policy.continuedDonorOrdinal)throw error("SCT_TITLE_DONOR_SET_UNSUPPORTED",section.observedSectionId);
+        return result;
+    }
+    private static List<Element> elementsIn(Element root,String namespace,String local){List<Element> out=new ArrayList<>();NodeList nodes=root.getElementsByTagNameNS(namespace,local);for(int i=0;i<nodes.getLength();i++)out.add((Element)nodes.item(i));return out;}
+    private static void validateSctBodyTitle(PackageModel model,SctBodyTitle title,Element node) {
+        Element checked=node;
+        if(title.preserveSourceColumnControl) {
+            if(!"7def01d62e07b35dd86beeff995e0e37d73ce18adca2746e2a6f6d9bafb5aaa4".equals(model.index.sourceSha256)
+                    ||title.source.ordinal!=422||!"f75717d5b9d58a7ec2fafbcbe8af8704b1c944c23c71282e62f18af3d5be38e3".equals(title.source.sha256)
+                    ||!"word/document.xml#/w:document[1]/w:body[1]/w:tbl[11]/w:tr[1]/w:tc[1]/w:p[1]".equals(title.source.id))throw error("SCT_TITLE_COLUMN_SCOPE_UNSUPPORTED",title.source.id);
+            checked=(Element)node.cloneNode(true);List<Element> breaks=elementsIn(checked,W,"br");
+            if(breaks.size()!=1||!"column".equals(breaks.get(0).getAttributeNS(W,"type"))||!is(breaks.get(0).getParentNode(),"r"))throw error("SCT_TITLE_COLUMN_SCOPE_UNSUPPORTED",title.source.id);
+            breaks.get(0).getParentNode().removeChild(breaks.get(0));
+        }
+        validateClearedLayoutParagraph(checked,false,title.source.id);
+        for(Element run:direct(checked,"r"))if(!direct(run,"tab").isEmpty())throw error("SCT_TITLE_INLINE_UNSUPPORTED",title.source.id);
+        if(!storyFields(checked).isEmpty())throw error("SCT_TITLE_INLINE_UNSUPPORTED",title.source.id);
+        Map<String,Element> starts=new HashMap<>();Set<String> ends=new HashSet<>();for(Element start:elementsIn(node,W,"bookmarkStart")){String id=start.getAttributeNS(W,"id");if(!id.matches("[0-9]+")||start.getAttributeNS(W,"name").isEmpty()||starts.put(id,start)!=null)throw error("SCT_TITLE_BOOKMARK_SCOPE_UNSUPPORTED",title.source.id);}
+        for(Element end:elementsIn(node,W,"bookmarkEnd")){String id=end.getAttributeNS(W,"id");Element start=starts.get(id);if(start==null||!ends.add(id)||(start.compareDocumentPosition(end)&Node.DOCUMENT_POSITION_FOLLOWING)==0)throw error("SCT_TITLE_BOOKMARK_SCOPE_UNSUPPORTED",title.source.id);}
+        if(!starts.keySet().equals(ends))throw error("SCT_TITLE_BOOKMARK_SCOPE_UNSUPPORTED",title.source.id);
+        List<Element> props=direct(node,"pPr");if(props.size()>1||props.size()==1&&direct(props.get(0),"spacing").size()>1)throw error("SCT_TITLE_SPACING_UNSUPPORTED",title.source.id);
+        StringBuilder directText=new StringBuilder();for(Element run:direct(node,"r"))for(Element text:direct(run,"t"))directText.append(text.getTextContent());
+        if(!directText.toString().equals(title.exactText))throw error("SCT_TITLE_RUN_SCOPE_UNSUPPORTED",title.source.id);
+    }
+    private static void skipSctTitles(CapturedStories captured,String code) {
+        captured.changes.add(new NativeStoryChange("MIGRATE_EXACT_SCT_TITLES","SKIPPED_"+code,captured.plan.sctTitleMigration.section,null,null,null,null,0,null,null,Collections.emptyMap(),null));
+    }
+    /** Stage this optional enhancement before clearing source titles; preserve the base usable package on failure. */
+    private static void applySctTitles(PackageModel model,CapturedStories captured) {
+        if(captured.plan==null||captured.plan.sctTitleMigration==null)return;
+        if(captured.sctTitleSkip!=null){skipSctTitles(captured,captured.sctTitleSkip);return;}
+        CapturedSctTitles titles=captured.sctTitles;SctTitleMigration policy=titles.policy;Section section=policy.section;
+        PackageModel staged=new PackageModel();CapturedStories stagedChanges=new CapturedStories(captured.plan);
+        Map<Element,List<Node>> replacements=new LinkedHashMap<>();
+        try {
+            staged.index=model.index;staged.entries.putAll(model.entries);
+            for(Map.Entry<String,Document> entry:model.xmlParts.entrySet())staged.xmlParts.put(entry.getKey(),(Document)entry.getValue().cloneNode(true));
+            Map<String,Element> paths=new HashMap<>();NodeList current=staged.xmlParts.get(MAIN).getElementsByTagName("*");for(int i=0;i<current.getLength();i++){Element node=(Element)current.item(i);paths.put(path(node),node);}
+            Element actualSection=captured.sections.get(section),stageSection=paths.get(path(actualSection));
+            if(stageSection==null||!contains(model.xmlParts.get(MAIN).getDocumentElement(),actualSection))throw error("SCT_TITLE_SECTION_REMOVED",section.observedSectionId);
+            List<Element> stageTitles=new ArrayList<>();Element plain=null,continued=null;SctBodyTitle plainDonor=null,continuedDonor=null;
+            for(int i=0;i<titles.nodes.size();i++) {
+                Element actual=titles.nodes.get(i);SctBodyTitle title=policy.bodyTitles.get(i);
+                if(!contains(model.xmlParts.get(MAIN).getDocumentElement(),actual)||!hash(xml(actual)).equals(title.source.sha256))throw error("SCT_TITLE_SOURCE_CHANGED",title.source.id);
+                Element node=paths.get(path(actual));if(node==null)throw error("SCT_TITLE_SOURCE_CHANGED",title.source.id);stageTitles.add(node);
+                if(title.source.ordinal==policy.plainDonorOrdinal){plain=node;plainDonor=title;}if(title.source.ordinal==policy.continuedDonorOrdinal){continued=node;continuedDonor=title;}
+            }
+            CapturedStory defaultHeader=sctSlot(captured,section,Kind.HEADER,Variant.DEFAULT),defaultFooter=sctSlot(captured,section,Kind.FOOTER,Variant.DEFAULT);
+            if(defaultHeader.part==null||defaultFooter.part==null||defaultFooter.relationship==null)throw error("SCT_TITLE_CARRIER_NOT_APPLIED",section.observedSectionId);
+            Element footer=storyXml(staged,defaultFooter.part).getDocumentElement();String footerFields=storyFields(footer);
+            if(!hasSctPage(footer)||!editableText(footer).contains(storyText(captured.plan.identity.number)))throw error("SCT_TITLE_DEFAULT_FOOTER_INCOMPLETE",section.observedSectionId);
+            for(String line:defaultFooter.story.retainedSourceControlLines)if(!editableText(footer).contains(storyText(line)))throw error("SCT_TITLE_DEFAULT_FOOTER_INCOMPLETE",section.observedSectionId);
+            Element defaultRoot=storyXml(staged,defaultHeader.part).getDocumentElement();
+            if(direct(defaultRoot,"p").size()!=1||!editableText(defaultRoot).equals(storyText(captured.plan.identity.title))||!storyFields(defaultRoot).isEmpty())throw error("SCT_TITLE_HEADER_CARRIER_CHANGED",section.observedSectionId);
+            installSctHeader(defaultRoot,policy,captured.plan.identity,continued);stagedChanges.dirtyParts.add(defaultHeader.part);
+            CapturedStory originalFirst=sctSlot(captured,section,Kind.HEADER,Variant.FIRST);
+            CapturedStory first=new CapturedStory(section,stageSection,originalFirst.story,null,null);createStory(staged,stagedChanges,first);
+            installSctHeader(storyXml(staged,first.part).getDocumentElement(),policy,captured.plan.identity,plain);
+            addSctFooterReference(stageSection,defaultFooter.relationship);
+            Element titlePg=stageSection.getOwnerDocument().createElementNS(W,"w:titlePg");titlePg.setAttributeNS(W,"w:val","true");Node before=null;
+            for(Node child=stageSection.getFirstChild();child!=null;child=child.getNextSibling())if(child instanceof Element&&W.equals(child.getNamespaceURI())&&Set.of("textDirection","bidi","rtlGutter","docGrid","printerSettings","sectPrChange").contains(child.getLocalName())){before=child;break;}
+            stageSection.insertBefore(titlePg,before);
+            Element margins=direct(stageSection,"pgMar").get(0);margins.setAttributeNS(W,"w:top","1080");margins.setAttributeNS(W,"w:header","360");
+            validateSctCarrier(staged,stageSection,Kind.HEADER,Variant.DEFAULT,defaultHeader.part,defaultHeader.relationship);
+            validateSctCarrier(staged,stageSection,Kind.HEADER,Variant.FIRST,first.part,first.relationship);
+            validateSctCarrier(staged,stageSection,Kind.FOOTER,Variant.FIRST,defaultFooter.part,defaultFooter.relationship);
+            validateSctCarrier(staged,stageSection,Kind.FOOTER,Variant.DEFAULT,defaultFooter.part,defaultFooter.relationship);
+            if(direct(stageSection,"titlePg").size()!=1||!storyFields(footer).equals(footerFields))throw error("SCT_TITLE_INSTALLATION_INCOMPLETE",section.observedSectionId);
+            validateSctHeader(storyXml(staged,first.part).getDocumentElement(),captured.plan.identity,policy,plain);
+            validateSctHeader(defaultRoot,captured.plan.identity,policy,continued);
+            int sectionIndex=captured.plan.sections.indexOf(section);
+            if(sectionIndex+1<captured.plan.sections.size()) {
+                CapturedStory next=sctSlot(captured,captured.plan.sections.get(sectionIndex+1),Kind.HEADER,Variant.DEFAULT);
+                if(next.part==null||next.part.equals(defaultHeader.part))throw error("SCT_TITLE_NEXT_SECTION_INHERITANCE_UNSAFE",section.observedSectionId);
+            }
+            // Installations are verified before any exact body-title text is cleared, including P422.
+            for(int i=0;i<stageTitles.size();i++) {
+                Element node=stageTitles.get(i);SctBodyTitle title=policy.bodyTitles.get(i);clear(node);
+                stagedChanges.changes.add(new NativeStoryChange("CLEAR_EXACT_SCT_BODY_TITLE","APPLIED",section,null,MAIN,null,title.source,0,title.exactText,null,Collections.emptyMap(),null));
+                if(title.preserveSourceColumnControl)stagedChanges.changes.add(new NativeStoryChange("PRESERVED_SOURCE_COLUMN_CONTROL","PRESERVED",section,null,MAIN,null,title.source,0,title.exactText,null,Collections.emptyMap(),null));
+                else {List<Element> props=direct(node,"pPr");Element values=props.isEmpty()?node.getOwnerDocument().createElementNS(W,"w:pPr"):props.get(0);if(props.isEmpty())node.insertBefore(values,node.getFirstChild());compactSpacing(node.getOwnerDocument(),values);stagedChanges.changes.add(new NativeStoryChange("COMPACT_EXACT_CLEARED_SCT_TITLE_SPACING","APPLIED",section,null,MAIN,null,title.source,0,title.exactText,null,Map.of("before","0","after","0","line","1","lineRule","exact"),null));}
+            }
+            stagedChanges.dirtyParts.add(MAIN);
+            stagedChanges.changes.add(new NativeStoryChange("INSTALL_SCT_DEFAULT_TITLE_HEADER","APPLIED",section,defaultHeader.story.expectedBinding,defaultHeader.part,defaultHeader.relationship,continuedDonor.source,0,continuedDonor.exactText,null,Map.of("headerStyleId",policy.headerStyleId,"stylesPartSha256",policy.stylesPartSha256,"styleNodeSha256",policy.headerStyleNodeSha256),null));
+            stagedChanges.changes.add(new NativeStoryChange("INSTALL_SCT_FIRST_TITLE_HEADER","APPLIED",section,originalFirst.story.expectedBinding,first.part,first.relationship,plainDonor.source,0,plainDonor.exactText,null,Map.of("headerStyleId",policy.headerStyleId,"stylesPartSha256",policy.stylesPartSha256,"styleNodeSha256",policy.headerStyleNodeSha256),null));
+            stagedChanges.changes.add(new NativeStoryChange("LINK_SCT_FIRST_FOOTER_TO_VERIFIED_DEFAULT","APPLIED",section,sctSlot(captured,section,Kind.FOOTER,Variant.FIRST).story.expectedBinding,defaultFooter.part,defaultFooter.relationship,null,0,null,null,Collections.emptyMap(),null));
+            stagedChanges.changes.add(new NativeStoryChange("ENABLE_SCT_MAIN_FIRST_PAGE","APPLIED",section,null,MAIN,null,null,0,null,section.titlePg,Map.of("val","true"),null));
+            stagedChanges.changes.add(new NativeStoryChange("SCT_TWO_LINE_HEADER_FRAME","APPLIED",section,null,MAIN,null,null,0,null,section.pgMar,Map.of("top","1080","header","360"),null));
+            for(String part:stagedChanges.dirtyParts)staged.entries.put(part,xml(staged.xmlParts.get(part)));validateStoryPackageLimits(staged);
+            replacements.put(actualSection,importedSctChildren(actualSection,stageSection));
+            for(int i=0;i<titles.nodes.size();i++)replacements.put(titles.nodes.get(i),importedSctChildren(titles.nodes.get(i),stageTitles.get(i)));
+        }catch(RuntimeException unsupported){skipSctTitles(captured,unsupported instanceof EditException?((EditException)unsupported).getCode():"SCT_TITLE_STAGING_UNSUPPORTED");return;}
+        // Preserve every original paragraph/section Element referenced by later CS marker attachment.
+        for(Map.Entry<Element,List<Node>> change:replacements.entrySet()){Element node=change.getKey();while(node.hasChildNodes())node.removeChild(node.getFirstChild());for(Node child:change.getValue())node.appendChild(child);}
+        for(String part:stagedChanges.dirtyParts)if(!MAIN.equals(part)){model.xmlParts.put(part,staged.xmlParts.get(part));model.entries.put(part,staged.entries.get(part));}
+        captured.dirtyParts.addAll(stagedChanges.dirtyParts);captured.changes.addAll(stagedChanges.changes);
+    }
+    private static List<Node> importedSctChildren(Element target,Element staged){List<Node> nodes=new ArrayList<>();for(Node child=staged.getFirstChild();child!=null;child=child.getNextSibling())nodes.add(target.getOwnerDocument().importNode(child,true));return nodes;}
+    private static boolean hasSctPage(Element footer){for(Element field:elementsIn(footer,W,"fldSimple"))if(field.getAttributeNS(W,"instr").trim().matches("(?is)^PAGE\\b.*"))return true;for(Element instruction:elementsIn(footer,W,"instrText"))if(instruction.getTextContent().trim().matches("(?is)^PAGE\\b.*"))return true;return false;}
+    private static void installSctHeader(Element root,SctTitleMigration policy,Identity identity,Element donor) {
+        while(root.hasChildNodes())root.removeChild(root.getFirstChild());Element project=appendStyledStoryParagraph(root,storyText(identity.title),policy.headerStyleId);centerSctHeader(project);
+        Element heading=appendStyledStoryParagraph(root,"",policy.headerStyleId);for(Element run:new ArrayList<>(direct(heading,"r")))heading.removeChild(run);centerSctHeader(heading);
+        Document document=root.getOwnerDocument();for(Element sourceRun:direct(donor,"r")){List<Element> texts=direct(sourceRun,"t");if(texts.isEmpty())continue;Element run=document.createElementNS(W,"w:r");for(Element props:direct(sourceRun,"rPr"))run.appendChild(document.importNode(props,true));for(Element text:texts)run.appendChild(document.importNode(text,true));heading.appendChild(run);}
+    }
+    private static void centerSctHeader(Element paragraph){Element props=direct(paragraph,"pPr").get(0);Element align=paragraph.getOwnerDocument().createElementNS(W,"w:jc");align.setAttributeNS(W,"w:val","center");props.appendChild(align);}
+    private static void validateSctHeader(Element root,Identity identity,SctTitleMigration policy,Element donor) {
+        List<Element> paragraphs=direct(root,"p");if(paragraphs.size()!=2||!editableText(paragraphs.get(0)).equals(storyText(identity.title))
+                ||!descendantText(paragraphs.get(1),"t").equals(descendantText(donor,"t"))||!storyFields(root).isEmpty()
+                ||has(root,"lastRenderedPageBreak")||has(root,"bookmarkStart")||has(root,"bookmarkEnd")||has(paragraphs.get(1),"br")||has(root,"drawing"))throw error("SCT_TITLE_HEADER_NOT_INSTALLED",policy.section.observedSectionId);
+        for(Element paragraph:paragraphs)if(direct(paragraph,"pPr").size()!=1||direct(direct(paragraph,"pPr").get(0),"pStyle").size()!=1
+                ||!policy.headerStyleId.equals(direct(direct(paragraph,"pPr").get(0),"pStyle").get(0).getAttributeNS(W,"val")))throw error("SCT_TITLE_HEADER_STYLE_NOT_INSTALLED",policy.section.observedSectionId);
+    }
+    private static void addSctFooterReference(Element section,String relationship) {
+        for(Element reference:direct(section,"footerReference"))if("first".equals(reference.getAttributeNS(W,"type")))throw error("SCT_TITLE_FIRST_FOOTER_ALREADY_PRESENT","first");
+        Element reference=section.getOwnerDocument().createElementNS(W,"w:footerReference");reference.setAttributeNS(W,"w:type","first");reference.setAttributeNS(OFFICE_REL,"r:id",relationship);Node before=null;
+        for(Node child=section.getFirstChild();child!=null;child=child.getNextSibling())if(child instanceof Element&&!is(child,"headerReference")&&!is(child,"footerReference")){before=child;break;}section.insertBefore(reference,before);
+    }
+    private static void validateSctCarrier(PackageModel model,Element section,Kind kind,Variant variant,String part,String id) {
+        String local=kind==Kind.HEADER?"headerReference":"footerReference";Element found=null;for(Element reference:direct(section,local))if(variant.name().toLowerCase(Locale.ROOT).equals(reference.getAttributeNS(W,"type"))){if(found!=null)throw error("SCT_TITLE_DUPLICATE_CARRIER",part);found=reference;}
+        if(found==null||!id.equals(found.getAttributeNS(OFFICE_REL,"id")))throw error("SCT_TITLE_REFERENCE_NOT_INSTALLED",part);
+        Element relation=null;for(Element value:storyRelationships(model,false))if(id.equals(value.getAttribute("Id")))relation=value;
+        if(relation==null||!(OFFICE_REL+"/"+kind.name().toLowerCase(Locale.ROOT)).equals(relation.getAttribute("Type"))
+                ||!part.equals(resolveStoryTarget(relation.getAttribute("Target")))||optionalAttribute(relation,"TargetMode")!=null&&!"Internal".equals(optionalAttribute(relation,"TargetMode")))throw error("SCT_TITLE_RELATIONSHIP_NOT_INSTALLED",part);
+        Element root=storyXml(model,part).getDocumentElement();if(!is(root,kind==Kind.HEADER?"hdr":"ftr"))throw error("SCT_TITLE_PART_NOT_INSTALLED",part);validateStoryContentType(model,part,kind);
+    }
+
     private static Element appendStyledStoryParagraph(Element root,String text,String styleId){Element paragraph=appendStoryParagraph(root,text);Document document=root.getOwnerDocument();Element properties=document.createElementNS(W,"w:pPr"),style=document.createElementNS(W,"w:pStyle");style.setAttributeNS(W,"w:val",styleId);properties.appendChild(style);paragraph.insertBefore(properties,paragraph.getFirstChild());return paragraph;}
     private static void appendNativePage(Element paragraph){Document document=paragraph.getOwnerDocument();Element field=document.createElementNS(W,"w:fldSimple");field.setAttributeNS(W,"w:instr"," PAGE ");field.setAttributeNS(W,"w:dirty","true");Element run=document.createElementNS(W,"w:r"),text=document.createElementNS(W,"w:t");run.appendChild(text);field.appendChild(run);paragraph.appendChild(field);}
     private static Element appendStoryParagraph(Element root,String text){Element paragraph=root.getOwnerDocument().createElementNS(W,"w:p");root.appendChild(paragraph);appendStoryRun(paragraph,text);return paragraph;}
