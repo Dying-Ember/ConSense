@@ -1,5 +1,10 @@
 # ConSense 统一目标：先交付人能验收的完整流程
 
+<!-- runtime-source-use56:start -->
+**最新执行progress56：来源许可修复已部署并接前端，旧Annex原请求排空不重发；13旧来源实际迁移及哈希保全PASS，51前端续解析PARTIAL，52解析中。SCC漏字保版式双目标实转PASS，分页/字体合并37软件PASS、正常三模板已1PASS；真实整套报告及最终全页视觉未通过，H1–H8/O1–O3不缩减。** 见[实际结果](three-module-runtime-progress-20261021.md#progress56来源确认修复已部署十三来源实际迁移及保全通过)。
+<!-- runtime-source-use56:end -->
+
+
 **最新执行progress55：** 新SCC正常生成81登记关系／92目录通过，79页全页原图检查仍有4导语断页、1指导语空白及2缺字；左对齐单变量恢复p977但未采用，继续保版式修复。前端六文件已采用，新后端包未部署。原空间8消失，沿既有授权恢复9，同项目保留Annex原解析，余三份未发需补交；旧13Word许可刷新须取得fresh三pins，pending确认及整套真实报告未验。不缩减H1–H8／O1–O3，Goal active。见[实际结果](three-module-runtime-progress-20261021.md#progress55新-scc-全页检查完成漏字获得可验证的排版线索)。
 
 2026-10-21 按用户最新要求重写并实际启动，Goal 状态为 `active`，没有设置 token 预算。**取消所有 08:00／八点相关的进度点和截止约束。** 本文是当前执行要求；旧轮次的进度、失败和证据保留在[实际执行记录](three-module-runtime-progress-20261021.md)，不因重写目标清零或追认完成。
