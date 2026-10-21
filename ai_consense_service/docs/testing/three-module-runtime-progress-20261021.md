@@ -1,3 +1,27 @@
+<!-- runtime-integration63:start -->
+## progress63：填空修复已部署并通过真实前端保存、生成和下载；分页组合恢复，旧审查死任务已收口
+
+2026-10-22：主后端已升级 integration30，18084/PID29604/64GiB，包 SHA `1d816df23ca5885807a295e257bc85b2e0547a5fb9c02a90c3f7793b851f2ad7`；受保护 H2 owner39876 未重启。最新 SQL 保全 4,347,709,456 bytes，SHA `ad2df54cc50a68332dbd6fc601f91179352e6ef3c95f971d7ed98f690d33d041`。这是运行数据保全，不是 SL 比赛包。咨询条件发布门及范围投影随本包部署，但新真实27B复验仍未执行。
+
+- **截图填空的实际闭环：** 专项项目 `proj_mvifhslpws1m` 已从前端采用 BSSSC、Electrical／Fire services and water pump／Lift，以及2b原文可核的安全BQ引用 `12.2 to 12.4`／`12.2`／`12.3`，逐项保存、刷新回读、显式确认临时测试身份、唯一发送生成，三份真实2a模板均生成并保存新revision；SCC Word及PDF已通过前端下载。DOCX与PDF三处编号、计价分支及编辑标记核对通过；未选纯消防的 SCC20.303 在成品为 `Not used`，没有借消防及水泵的12.3。74页PDF的物理53／57／61页已亲看，三处引用、家具及页码清楚；测试合约号在全部74页可检，不外推全74页视觉通过。正式2b项目身份和Bill正式标题仍UNKNOWN；专项使用明确合成身份，说明列使用逐字来源用途，不冒充原Bill标题。详见[填空专项](drafting-bs-safety-pricing-blank-20261022.md)，证据 `.local/drafting-bs-valuation-blank30/browser103.json`、`browser110.json`、`browser111.json`、`browser114.json`至`browser124.json`、`frontend-download-checks01.json`及`target-visual-review01.json`。
+- **分页旧控制组合回退已修：** 业务编辑结束、布局修改开始前捕获精确原始段落资格，避免新边界属性使旧字体槽／hint／防孤行误判为用户改文。原合法组合两方法补窗PASS，另一个合法hint组合方法PASS；前窗22项既有与实际原件契约已PASS，跨窗覆盖25个唯一方法。Root自行扩充夹具时曾把互斥的hint和widow注册在同段，造成原两方法ERROR；已恢复合法夹具，不放松生产互斥guard，保留错误窗。normal10实际正常三模板 compiler/JPA/LibreOffice/预览导出通过，4分06秒、0skip；SCC239关系、92目录、原1311 CL／2500定位点完整保持，不能降成2498。新78页fresh全页视觉进行中；旧normal06、08、09失败不改写。证据 `.local/drafting-main-integration27/software12-green02`、`software12-green03`、`normal10`。
+- **整套审查的真实卡点：** 旧40600的 `consense-vetting` 线程01:58因Java heap OOM退出，但completion残留使续租器持续保活唯一QUEUED任务。最小Error收口修复已采用并部署：原Error异常完成future、停止续租、受owner/lease约束尝试FAILED，次生落盘失败不能覆盖原Error或虚报持久化成功。新5调用RED全失败，GREEN5通过；既有生命周期11、Qwen11、身份9也通过。另6个进程恢复辅助测试在H2只读重开处ERROR，保留未通过状态；本机探针确认NIO权限预判拒绝而真实零字节WRITE打开成功，不采用无效重试候选、不改全局ACL，不把这6项计PASS。证据 `.local/vetting-fatal-error31`、`.local/vetting-process-recovery32`。
+- **旧运行任务的明确终态：** 准确Qwen action不存在、checkpoint／finding／report均0，保全原run整行后，以单事务原owner／有效lease／快照及零发布条件只结束该本地E2E任务一行；公开progress已回读FAILED／NEEDS_RERUN，维护过程没有写来源及人工记录。H57已PARTIAL后才停止旧40600；没有自动恢复不完整来源包付费。证据 `.local/runtime-integration30/dead-run-maintenance01`。
+- **失败状态前端卡点已修并实际解锁：** FAILED加NOT_CHECKED曾被误当running。只为COMPLETED报告等待完整来源校验，独立保留未核finding转咨询、导出和checklist保护；QUEUED／RUNNING继续锁住来源修改。新增四状态回归在旧产品准确RED、候选GREEN，既有完整VettingView脚本也通过；两个旧上传夹具分别改为核旧job保留但stale且禁止导出、以及分开上传前后两次progress观察，原迟到响应不可重启旧报告断言保持。typecheck及Vite构建已通过，首次系统TEMP删除拒绝的失败保留，换任务独占TEMP后同源码构建通过，未改依赖／全局权限。真实HMR后APU／APB确认已启用；前端唯一确认APU58为文字目录并继续解析，实际回读PARSING20页，APB59仍IDENTITY_PENDING且未发。APU/APB是文字目录，图纸本体仍排除；用途采用不是OCR质量通过。证据 `.local/vetting-terminal-progress33/{red01,red02,green01,build01,build02}`、`.local/runtime-integration30/browser125.json`、`apu58-confirm-once.json`及`files-after-apu-once01.json`。
+
+浏览器测试空间9已消失；按用户此前允许新建测试工作区的授权，恢复为10，沿用数据库中的项目、模板和已保存值，没有重复上传。Goal保持active；真实35整套Vetting报告对2d、新27B回答、完整最终文件视觉及七版22,214技术页质量继续保留。SL质量未过不打包，不报无固定分母的整体百分比。
+<!-- runtime-integration63:end -->
+
+<!-- runtime-integration62:start -->
+## progress62：填空修复已推送，真实前端专项接入；分页新候选完整生成发现旧格式组合回退
+
+Bill／Schedule 修复已提交推送 `33737c3b4e978fac5c9d707ffd0a830e5876ce4c`，远端 exact 核实；29 项通过的源码保持。前端新建临时专项项目并一次上传三件真实 2a Word，上传 HTTP200／18.208秒；人工填写入口及旧待办文案已实际回读。当前主后端仍 integration28／11540／64GiB，新说明尚未部署，不把这次旧包页面操作算作新修复前端通过。
+
+分页 continuation10 软件首窗35方法中33通过、2旧测试仍预期154而实际239；仅同步四处完整分母字面量后，原两方法补窗通过，未弱化其余断言或生产 guard。normal07 实际47.590秒 FAIL，原件计划被单元格保护拒绝：新配置两处文本 hash 漏算 TAB。diagnosis11 只修这两处声明，全核其余新增 cell／row／anchor，不改生产 guard；新增真实 SCC 注册计划契约方法实际1 PASS／0skip。资源当前 SHA 为 `a269d2f9c30bb4a88b47aeb0fdeb3f5e56c6034a25b44d88c2a356e3af920108`。normal08 实际2分24秒 FAIL：239关系／92目录已通过，但两个旧CL缺失；独立检查已定位为p977字体槽和p1395防孤行控制被新增分页属性误判为用户改动而SKIPPED_CHANGED。Root曾误判为重复计数并发出normal09，核实后已恢复原1311 CL／2500点预期，未放行；该唯一补跑自然结束，在p1395原防孤行断言继续FAIL，未停止任何进程。diagnosis12正私有准备组合修复，保留所有改文／清空／删除防护；当前没有新的Java／LO执行或新视觉通过。normal06 的49有限通过／25警告／5失败和所有首窗失败保留。
+
+新 runtime30 构建／64GiB启动脚本仅准备，未执行或停旧进程；H2、旧H57/OCR及唯一审查start保持。实际2b对照已明确专业工程SOR与安全BQ例外的差别，正式项目名称与裸页脚token的身份用途仍 UNKNOWN，未自动采用；详见[填空缺口说明](drafting-bs-safety-pricing-blank-20261022.md)。统一Goal active，真实整套报告、新Qwen复验、最终文件视觉与SL全量均继续保留。
+<!-- runtime-integration62:end -->
+
 <!-- runtime-integration61:start -->
 ## progress61：Bill／Schedule四类填空实测通过，冲突输入仅保留对应待办，尚未部署
 

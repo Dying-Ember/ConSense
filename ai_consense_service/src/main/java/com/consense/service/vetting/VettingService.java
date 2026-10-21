@@ -205,6 +205,7 @@ public class VettingService {
             completions.put(saved.getId(),done);if(probe.enabled())serviceProbes.put(saved.getId(),probe);
             dispatch(saved,snapshot,chat,selected,done,probe,supplement);
         }catch(Exception e){failRun(saved.getId(),brief(e),done,probe);}
+        catch(Error failure){failFatalRun(saved.getId(),failure,done,probe);throw failure;}
     }
     @org.springframework.scheduling.annotation.Scheduled(fixedDelay=20000,initialDelay=20000)
     public void renewLeases(){if(checkpoints!=null)for(String id:completions.keySet())try{checkpoints.renew(id,executionOwner);}catch(RuntimeException lost){log.warn("审查 {} 执行租约无法续期：{}",id,brief(lost));}}
@@ -224,7 +225,9 @@ public class VettingService {
                 VettingSemanticReview.SupplementScope supplemental=semantic.bindSupplement(supplement);
                  VettingSemanticReview.CheckpointScope durable=semantic.bindCheckpoint(checkpoints==null?null:checkpoints.session(run.getId(),executionOwner,()->assertRunSourcesCurrent(run,snapshot)));
                  com.consense.service.llm.QwenChatUsagePreflight.Operation.ActionScope usage=selected!=null&&selected.isQwen()?selected.getQwen().openAction("vetting:"+run.getId(),()->assertRunSourcesCurrent(run,snapshot)):null){executeRun(run.getId(),run.getProjectId(),run.getLang(),snapshot,done,probe);}
-            catch(RuntimeException failure){probe.originalFailure("worker_action_initialization_failed",failure);try{failRun(run.getId(),brief(failure),done,probe);}finally{probe.finish("action_initialization_failed",failure);serviceProbes.remove(run.getId(),probe);}}});
+            catch(RuntimeException failure){probe.originalFailure("worker_action_initialization_failed",failure);try{failRun(run.getId(),brief(failure),done,probe);}finally{probe.finish("action_initialization_failed",failure);serviceProbes.remove(run.getId(),probe);}}
+            catch(Error failure){failFatalRun(run.getId(),failure,done,probe);throw failure;}
+            finally{completions.remove(run.getId(),done);serviceProbes.remove(run.getId(),probe);}});
     }
     @PreDestroy public void stopWorker() {
         if(checkpoints!=null)for(String id:completions.keySet())checkpoints.release(id,executionOwner);
@@ -641,10 +644,15 @@ public class VettingService {
             originalFailure=e;probe.elapsed(stage,stageStarted,stageOverhead,"Original operation failed in this stage; observer wall excluded",false);
             probe.originalFailure("service_run_failure",e);log.error("审查任务 {} 失败",id,e);failRun(id,brief(e),done,probe);
         } catch(Error e) {
-            originalFailure=e;probe.elapsed(stage,stageStarted,stageOverhead,"Original Error in this stage; original Error propagates unchanged",false);probe.originalFailure("service_run_failure",e);throw e;
+            originalFailure=e;throw e;
         } finally {
-            probe.elapsed("execute_run_total",runStarted,runOverhead,"Original background execution inclusive of original stages; observer wall excluded",originalFailure==null&&"completed".equals(outcome));
-            probe.finish(outcome,originalFailure);completions.remove(id,done);serviceProbes.remove(id,probe);
+            try {
+                // The outer worker handles fatal errors before allocating observer payloads.
+                if(!(originalFailure instanceof Error)) {
+                    probe.elapsed("execute_run_total",runStarted,runOverhead,"Original background execution inclusive of original stages; observer wall excluded",originalFailure==null&&"completed".equals(outcome));
+                    probe.finish(outcome,originalFailure);
+                }
+            } finally {completions.remove(id,done);serviceProbes.remove(id,probe);}
         }
     }
     private List<Map<String,Object>> candidateOrder(List<Candidate> candidates,IdentityHashMap<Candidate,List<Integer>> originalOrdinals){
@@ -719,6 +727,9 @@ public class VettingService {
         } catch(RuntimeException|Error e){if(probe!=null){probe.elapsed("progress_transaction",started,overhead,"Original progress transaction failed",false);probe.originalFailure("progress_transaction_failure",e);}throw e;}
     }
     private void failRun(String id,String message,CompletableFuture<RunResultVO> done,VettingServiceProbe probe) {
+        failRun(id,message,done,probe,null);
+    }
+    private void failRun(String id,String message,CompletableFuture<RunResultVO> done,VettingServiceProbe probe,Throwable originalFailure) {
         long started=System.nanoTime(),overhead=probe.overheadNanos();
         try {
             tx().execute(status -> { runRepository.lockById(id).ifPresent(run -> { if("COMPLETED".equals(run.getStatus())||checkpoints!=null&&(!executionOwner.equals(run.getExecutionOwner())||run.getLeaseUntil()==null||!run.getLeaseUntil().isAfter(Instant.now()))) return; run.setStatus("FAILED"); run.setPhase("failed");run.setRecoveryStatus("NEEDS_RERUN");run.setExecutionOwner(null);run.setLeaseUntil(null); run.setError(truncate(message,2048)); run.setMessage(truncate(message,2048)); run.setFinishedAt(Instant.now()); runRepository.saveAndFlush(run);
@@ -727,7 +738,20 @@ public class VettingService {
             probe.observe("fail_run_transaction_returned",()->VettingServiceProbe.returnedTransaction("records",probe.reference("failed_run_pending_commit"),
                     "boundary","Original failure policy skips an already-completed run; missing records are not fabricated"));
         } catch(RuntimeException|Error e){probe.elapsed("fail_run_transaction",started,overhead,"Original failure persistence transaction failed",false);probe.originalFailure("fail_run_transaction_failure",e);throw e;}
-        finally { done.completeExceptionally(new BizException(4101,message)); completions.remove(id,done); }
+        finally {try {if(!done.isDone())done.completeExceptionally(originalFailure==null?new BizException(4101,message):originalFailure);}
+            finally {completions.remove(id,done);}}
+    }
+    private void failFatalRun(String id,Error failure,CompletableFuture<RunResultVO> done,VettingServiceProbe probe) {
+        // A dead worker must stop renewing its lease even if failure persistence also fails.
+        completions.remove(id,done);serviceProbes.remove(id,probe);
+        try {done.completeExceptionally(failure);}catch(RuntimeException|Error secondary){retainFatalFailure(failure,secondary);}
+        try {failRun(id,"审查发生不可恢复的系统错误；已有来源和人工记录保留，请检查后重新运行。",done,probe,failure);}
+        catch(RuntimeException|Error secondary){retainFatalFailure(failure,secondary);}
+        try {probe.originalFailure("service_run_failure",failure);probe.finish("fatal_error",failure);}
+        catch(RuntimeException|Error secondary){retainFatalFailure(failure,secondary);}
+    }
+    private static void retainFatalFailure(Error original,Throwable secondary) {
+        if(original!=secondary)try {original.addSuppressed(secondary);}catch(RuntimeException|Error unavailable){/* Preserve the original fatal error under memory pressure. */}
     }
     private Map<String,Map<String,JsonNode>> ruleNativePositions(List<VettingRuleEngine.Source> sources) {
         Map<String,Map<String,JsonNode>> result=new HashMap<>();

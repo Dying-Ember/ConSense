@@ -1,3 +1,11 @@
+<!-- runtime-integration63:start -->
+**最新progress63：填空修复已部署64GiB，真实前端人工采用／保存／刷新／三模板生成及SCC Word/PDF下载通过，三引用页已亲看。** [完整状态及边界](testing/three-module-runtime-progress-20261021.md#progress63填空修复已部署并通过真实前端保存生成和下载分页组合恢复旧审查死任务已收口)。normal10完整三模板通过，原239关系／92目录／1311 CL／2500点保持，新78页全视觉在验。旧Vetting线程OOM但续租保活的根因已修；零Qwen／零发布的旧任务经一次受fence维护明确FAILED，来源及人工记录保留，旧40600已停。前端FAILED误当running已RED/GREEN修复、构建及HMR解锁；APU58唯一确认后PARSING20页，APB59尚未发。正式2b身份／整套报告／新27B／SL全量未过，SL不打包。
+<!-- runtime-integration63:end -->
+
+<!-- runtime-integration62:start -->
+**最新 progress62：填空29项通过的修复已推送33737c3，三件真实2a已由前端一次接入新临时专项项目，旧包页面基线已核；新修复尚未部署。** [运行证据](testing/three-module-runtime-progress-20261021.md#progress62填空修复已推送真实前端专项接入分页新候选完整生成发现旧格式组合回退)。分页新候选正常生成被两处漏TAB的配置hash正确拒绝，最小修正及实际原件注册契约已1PASS，normal08／09已实际终态FAIL：新增分页使旧字体槽／防孤行控制被跳过，组合后继12准备中；原1311 CL／2500点预期已恢复，未授新视觉通过。运行11540/64GiB及H2／旧H57保护，SL质量先于打包。
+<!-- runtime-integration62:end -->
+
 <!-- runtime-integration61:start -->
 **最新 progress61：用户指出的 Bill／Schedule 四类填空已用真实 2a 原件验证，明确取值可整组替换；缺值提示与三个专门工种冲突门已修，29 方法同窗通过，尚未部署／前端复验。** [实际证据与边界](testing/three-module-runtime-progress-20261021.md#progress61billschedule四类填空实测通过冲突输入仅保留对应待办尚未部署)。SCC 全79页实际为49有限通过／25警告／5失败，continuation10 准备中。运行11540/64GiB与受保护H2／旧H57保持；真实35整套报告及SL全量未过，不做比赛包。
 <!-- runtime-integration61:end -->

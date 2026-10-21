@@ -15,7 +15,7 @@ const setup = new Function('deps', `
   return { job, files, findings, running, exportDisabled, pollingPaused, selectedFinding, evidenceItems, reportFormat,
     uploadRole, uploadPackage, runVetting, restoreJob, retryPolling, openFinding, closeDrawer, updateStatus, exportReport,
     reviewDraft, reviewDirty, reviewSaving, reviewFailed, hasUnsavedReview, saveReview, discardReview,
-    uploadDocumentScope, checklist, checklistDirty, openChecklist, saveCheck, checkDirty, restoreCheck, GROUPS, metricCards };
+    uploadDocumentScope, checklist, checklistDirty, openChecklist, saveCheck, checkDirty, restoreCheck, GROUPS, metricCards, sourceRoleBlocked, handoffDisabled };
 `)
 
 const metrics = { total: 1, reference: 1, conflict: 0, language: 0, risk: 0, crossFile: 0 }
@@ -152,13 +152,18 @@ function harness(overrides = {}) {
   assert.equal(h.downloads.length, 0)
   pending.resolve({ messages: [] })
   await upload
-  assert.equal(h.view.job.value, null, 'new sources need a new review before export')
+  assert.equal(h.view.job.value.id, 'run-1', 'Uploading sources retains the previous run and its human-work context')
+  assert.equal(h.view.job.value.sourceSetStale, true, 'The retained report remains explicitly stale after source upload')
+  assert.equal(h.view.exportDisabled.value, true, 'Retaining the old run never permits exporting its outdated report')
+  await h.view.exportReport()
+  assert.equal(h.downloads.length, 0, 'The stale report cannot reach the export API after upload completes')
   h.dispose()
 }
 
 {
   const pending = deferred()
-  const h = harness({ latestRunProgress: () => pending.promise })
+  let latestReads = 0
+  const h = harness({ latestRunProgress: () => ++latestReads === 1 ? pending.promise : Promise.resolve(null) })
   await h.mount()
   await h.view.uploadPackage({ target: { files: [{ name: 'updated.docx' }] } })
   pending.resolve(completed('old-snapshot'))
@@ -355,6 +360,37 @@ function harness(overrides = {}) {
   assert.equal(reads.length, before, 'a completed download from the old project cannot refresh the new project')
   assert.equal(h.view.job.value.reportSnapshotId, 'project-B-snapshot')
   h.dispose()
+}
+
+{
+  for (const status of ['FAILED', 'COMPLETED', 'QUEUED', 'RUNNING']) {
+    let starts = 0, details = 0, checklistReads = 0
+    const h = harness({
+      latestRunProgress: async () => ({ ...active(), status, completedUnits: 0, totalUnits: 19,
+        ...(status === 'FAILED' ? { recoveryStatus: 'NEEDS_RERUN', error: 'Authored terminal failure' } : {}) }),
+      getRun: async () => { details++; throw new Error('Authored full-detail timeout') },
+      checklist: async () => { checklistReads++; throw new Error('Unverified report must not load a checklist') },
+      startRun: async () => { starts++; return active('explicit-new-run') }
+    })
+    try {
+      await h.mount()
+      h.view.openFinding(h.view.findings.value[0]); await settle()
+      const failed = status === 'FAILED'
+      assert.equal(h.view.job.value.sourceVerification, 'NOT_CHECKED')
+      assert.equal(h.view.job.value.status, status, 'A failed detail read must preserve the observed progress status')
+      assert.equal(h.view.running.value, !failed, `${status}: only a completed report waits for source verification`)
+      assert.equal(h.view.sourceRoleBlocked.value, !failed, `${status}: terminal failure allows fixing source inputs`)
+      assert.equal(h.view.exportDisabled.value, true, `${status}: an unverified report cannot be exported`)
+      assert.equal(h.view.handoffDisabled.value, true, `${status}: an unverified finding cannot be handed to Advisory`)
+      await h.view.openChecklist({ target: { open: true } })
+      assert.equal(checklistReads, 0, `${status}: source verification is still required for a report checklist`)
+      assert.equal(details, ['FAILED', 'COMPLETED'].includes(status) ? 1 : 0, 'Active jobs continue lightweight progress polling')
+      assert.equal(h.view.pollingPaused.value, ['FAILED', 'COMPLETED'].includes(status))
+      await h.view.runVetting()
+      assert.equal(starts, failed ? 1 : 0, `${status}: only a terminal failed run may be explicitly restarted`)
+      if (failed) assert.equal(h.view.job.value.id, 'explicit-new-run')
+    } finally { h.dispose() }
+  }
 }
 
 console.log('Vetting view regressions passed: completion, restore, project/evidence/review races, review status and team replies, tri-state addendum, draft retention, exports and snapshot refresh, upload purpose, reconnect, cleanup and seven independent issue types.')

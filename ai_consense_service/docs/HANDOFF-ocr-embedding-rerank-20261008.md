@@ -1,3 +1,11 @@
+<!-- runtime-integration63:start -->
+**最新progress63：integration30已运行18084/PID29604/64GiB，H2 owner39876保持；填空真实前端保存、刷新、生成及Word/PDF下载已通过专项。** [执行证据](testing/three-module-runtime-progress-20261021.md#progress63填空修复已部署并通过真实前端保存生成和下载分页组合恢复旧审查死任务已收口)。normal10三模板通过并保持2500点，78页fresh视觉在验。旧40600 OOM死worker的Error收口已部署，新5＋既有31通过，6个辅助进程恢复受本机NIO/H2只读预判阻断不计PASS；旧唯一零调用/零发布run已受fence维护FAILED并保全，40600已停。前端FAILED+NOT_CHECKED误当running已修，完整View回归/构建及HMR通过，APU58唯一确认后解析中，APB59仍未发；源码/实际模型/来源质量/浏览器/最终视觉继续分层，SL质量先于比赛包。
+<!-- runtime-integration63:end -->
+
+<!-- runtime-integration62:start -->
+**最新 progress62：Bill修复29PASS已推送33737c3，前端新临时专项实际上传三件2a原件；运行仍旧包，未认新修复前端通过。** [当前执行与失败](testing/three-module-runtime-progress-20261021.md#progress62填空修复已推送真实前端专项接入分页新候选完整生成发现旧格式组合回退)。continuation10的软件35逻辑方法跨窗通过；normal07因两cell声明漏TAB被保护拒绝，diagnosis11仅修两hash＋实际源注册契约1PASS，normal08／09已终态FAIL，正修新分页与旧字体槽／防孤行控制的组合；原保全预期已恢复。runtime30脚本已准备未构建部署，11540/64GiB、受保护H2／40600旧H57与start保持，不能重发或误停。
+<!-- runtime-integration62:end -->
+
 <!-- runtime-integration61:start -->
 **最新 progress61：Bill／Schedule 填空原产品 RED 已真实复现，最终四类原生填空与局部冲突后继29方法全部通过，规则版本同步，旧稿读前后保全；源码采用未部署。** [根因、执行与保留失败](testing/three-module-runtime-progress-20261021.md#progress61billschedule四类填空实测通过冲突输入仅保留对应待办尚未部署)。当前仍18084/11540/64GiB；H2及旧H57/OCR唯一请求保护。01:49真实35文件仍17完整／13部分／2排除／1解析中／2待确认，审查latest与progress为空，未重发。SCC79页49有限通过／25警告／5失败，后继10准备中；前端实际填写、真实报告、新Qwen复验与SL全量仍待完成。
 <!-- runtime-integration61:end -->

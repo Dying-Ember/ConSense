@@ -161,8 +161,8 @@ const BUCKET_LABELS: Record<string, { zhHans: string; zhHant: string; en: string
 
 const selectedFinding = computed(() => selectedDetail.value)
 const handoffOpening = ref(false)
-const handoffDisabled = computed(() => !projectId.value || !selectedFinding.value || handoffOpening.value || evidenceLoading.value || running.value || sourceRoleSaving.value !== null || uploading.value || reviewSaving.value || statusSaving.value || hasUnsavedReview.value || checklistDirty.value || checklistSaving.value !== null)
-const jobDetailsPending = computed(() => job.value?.sourceVerification === 'NOT_CHECKED' && !isActiveJob(job.value))
+const handoffDisabled = computed(() => !projectId.value || !selectedFinding.value || handoffOpening.value || evidenceLoading.value || running.value || job.value?.sourceVerification === 'NOT_CHECKED' || sourceRoleSaving.value !== null || uploading.value || reviewSaving.value || statusSaving.value || hasUnsavedReview.value || checklistDirty.value || checklistSaving.value !== null)
+const jobDetailsPending = computed(() => job.value?.status === 'COMPLETED' && job.value.sourceVerification === 'NOT_CHECKED')
 const running = computed(() => starting.value || isActiveJob(job.value) || jobDetailsPending.value)
 const jobModelIdentity = computed(() => job.value?.modelIdentity ?? job.value?.result?.modelIdentity)
 const recordedJobModel = computed(() => jobModelIdentity.value?.model || job.value?.result?.model)
