@@ -18,9 +18,12 @@ final class AdvisoryHarness {
     private static final Pattern REFERENCE = Pattern.compile("\\[\\d+\\]");
     private static final String NAMED_OPERAND="[A-Z][A-Z0-9_-]*(?:[\\t ]+[A-Z][A-Z0-9_-]*){0,5}";
     private static final Pattern NAMED_ORDER=Pattern.compile("(?<![\\p{L}\\p{N}_])"+NAMED_OPERAND+"(?:[\\t ]*(?<![-=])[>＞](?!=)[\\t ]*"+NAMED_OPERAND+"){1,7}");
+    private static final Pattern PRIORITY_RANK=Pattern.compile("(?m)^[\\t ]*[-*][\\t ]+\\*{0,2}((?i:最高优先级|次高优先级|最低优先级|highest priority|next priority|lowest priority))\\*{0,2}[\\t ]*[:：][\\t ]*("+NAMED_OPERAND+")");
     private static final Pattern PRECEDENCE_WORD=Pattern.compile("\\b(?:prevail|prevails|precedence|priority)\\b|优先|優先",Pattern.CASE_INSENSITIVE);
     private static final Pattern LEADING_CONDITION=Pattern.compile("(?is)^\\s*(?:(?:[0-9]+[.)]|\\([A-Za-z0-9]+\\))\\s*)?(?:subject\\s+to\\b|provided\\b|for\\b|if\\b|when\\b|where(?:ver)?\\b|only\\b|若|如果|当|當|仅|僅|受)");
     private static final Pattern LOCAL_CONDITION=Pattern.compile("\\b(?:if|when|where|wherever|for|provided|subject\\s+to|only\\s+(?:if|for|when|where))\\b|如果|若|仅对|僅對|只对|只對|仅在|僅在|只在|(?:当|當|在)[^。；;\\n]{1,120}(?:时|時|条件下|條件下)|受[^。；;\\n]{1,120}(?:约束|約束)",Pattern.CASE_INSENSITIVE);
+    // A finite scope-declaration form, not validation of arbitrary translated condition semantics.
+    private static final Pattern SCOPE_DECLARATION=Pattern.compile("(?:规定|規定)[^。；;\\n]{1,160}(?:的范围|的範圍)");
     private static final String LANGUAGE_NAMES="英文|英语|英語|简体中文|簡體中文|繁体中文|繁體中文|中文|English|Simplified Chinese|Traditional Chinese";
     private static final Pattern OUTPUT_LANGUAGE=Pattern.compile("(?:请|請)([\\p{IsHan}\\s]{0,12}?)(?:使用|用|以)\\s*("+LANGUAGE_NAMES+")|(?:^|[\\s，,。；;！!？?])(?:使用|用|以)\\s*("+LANGUAGE_NAMES+")|\\b(?:answer|respond|reply|write)(?:\\s+\\w+){0,5}\\s+in\\s+(English|Simplified Chinese|Traditional Chinese|Chinese)\\b",Pattern.CASE_INSENSITIVE);
     private static final Pattern QUOTED_QUESTION_TEXT=Pattern.compile("\"[^\"]*\"|“[^”]*”|‘[^’]*’|「[^」]*」|『[^』]*』|`[^`]*`|(?<![A-Za-z])'[^']*'");
@@ -251,32 +254,98 @@ final class AdvisoryHarness {
     }
     static String status(Section section,String rule) { return section.checks.stream().filter(c->rule.equals(c.ruleId)).map(c->c.status).findFirst().orElse(""); }
 
-    /** A bounded publication diagnostic for derived named orders, not a semantic applicability decision. */
+    /** Explicit notation/priority ranks share a source-syntax ownership gate; this is not a legal applicability decision. */
     static void conditionedOrder(Section section,List<CitationVO> sources,List<String> problems) {
         String content=section.getContent();if(content==null||section.getCitations()==null)return;
         List<CitationVO> cited=sources.stream().filter(s->section.getCitations().contains(s.getEvidenceId())).collect(Collectors.toList());
-        List<String> qualifiers=cited.stream().filter(s->s.getContent()!=null&&LEADING_CONDITION.matcher(s.getContent()).find())
-                .map(CitationVO::getEvidenceId).collect(Collectors.toList());
-        if(qualifiers.isEmpty())return;
         List<CitationVO> priority=cited.stream().filter(s->s.getContent()!=null&&PRECEDENCE_WORD.matcher(s.getContent()).find()).collect(Collectors.toList());
-        java.util.regex.Matcher order=NAMED_ORDER.matcher(content);int checked=0;
-        while(order.find()) {
-            String[] operands=order.group().split("[>＞]");boolean supportedNames=true;
-            for(String operand:operands){String name=operand.trim();Pattern literal=Pattern.compile("(?<![\\p{L}\\p{N}_])"+Pattern.quote(name)+"(?![\\p{L}\\p{N}_])",Pattern.CASE_INSENSITIVE);
-                if(priority.stream().noneMatch(s->literal.matcher(s.getContent()).find())){supportedNames=false;break;}}
-            if(!supportedNames||wholeSourceOrderQuote(content,order.start(),order.end(),cited))continue;
+        List<OrderClaim> claims=new ArrayList<>();java.util.regex.Matcher symbols=NAMED_ORDER.matcher(content);
+        while(symbols.find())claims.add(new OrderClaim(symbols.start(),symbols.end(),Arrays.asList(symbols.group().split("[>＞]")),true));
+        java.util.regex.Matcher ranks=PRIORITY_RANK.matcher(content);List<OrderClaim> group=new ArrayList<>();int lastRank=-1;
+        while(ranks.find()){
+            String label=ranks.group(1).toLowerCase(Locale.ROOT);int rank=label.startsWith("最高")||label.startsWith("highest")?0:label.startsWith("次高")||label.startsWith("next")?1:2;
+            if(!group.isEmpty()&&(rank<=lastRank||content.substring(group.get(group.size()-1).end,ranks.start()).contains("\n\n"))){addRanks(claims,group);group.clear();}
+            group.add(new OrderClaim(ranks.start(),ranks.end(),Collections.singletonList(ranks.group(2)),false));lastRank=rank;
+        }
+        addRanks(claims,group);int checked=0;
+        for(OrderClaim claim:claims){
+            int from=claim.start,to=claim.end;while(from>0&&!orderSentenceBoundary(content,from-1))from--;while(to<content.length()&&!orderSentenceBoundary(content,to))to++;
+            int paragraph=content.lastIndexOf("\n\n",claim.start);paragraph=paragraph<0?0:paragraph+2;
+            int paragraphEnd=content.indexOf("\n\n",claim.end);if(paragraphEnd<0)paragraphEnd=content.length();
+            String local=content.substring(claim.symbol?from:paragraph,claim.symbol?to:paragraphEnd);
+            List<String> localAliases=explicitBodyAliases(local);List<CitationVO> preferred=priority.stream().filter(s->localAliases.contains(s.getEvidenceId())).collect(Collectors.toList());
+            if(preferred.isEmpty())preferred=priority;List<CitationVO> selected=new ArrayList<>();
+            for(CitationVO source:preferred){
+                boolean names=true;for(String operand:claim.operands){Pattern literal=Pattern.compile("(?<![\\p{L}\\p{N}_])"+Pattern.quote(operand.trim())+"(?![\\p{L}\\p{N}_])",Pattern.CASE_INSENSITIVE);
+                    if(!literal.matcher(source.getContent()).find()){names=false;break;}}
+                if(names)selected.add(source);
+            }
+            if(selected.isEmpty()&&claim.symbol){boolean supported=true;
+                for(String operand:claim.operands){Pattern name=Pattern.compile("(?<![\\p{L}\\p{N}_])"+Pattern.quote(operand.trim())+"(?![\\p{L}\\p{N}_])",Pattern.CASE_INSENSITIVE);
+                    if(preferred.stream().noneMatch(s->name.matcher(s.getContent()).find()))supported=false;}
+                if(supported)selected.addAll(preferred);
+            }
+            if(selected.isEmpty()||wholeSourceOrderQuote(content,claim.start,claim.end,cited))continue;
             if(++checked>32){problems.add("section.content: too many derived named precedence orders");return;}
-            int from=order.start(),to=order.end();while(from>0&&!orderSentenceBoundary(content,from-1))from--;
-            while(to<content.length()&&!orderSentenceBoundary(content,to))to++;
-            String local=content.substring(from,to);
-            List<String> missing=new ArrayList<>(qualifiers);missing.removeAll(explicitBodyAliases(local));
-            if(!LOCAL_CONDITION.matcher(local).find()||!missing.isEmpty())problems.add("section.content: derived_precedence_order_lost_qualifier at "+order.start()+".."+order.end()
+            AdvicePrecedenceOwnership.Ownership ownership=AdvicePrecedenceOwnership.resolve(selected,sources,LEADING_CONDITION);
+            List<String> missing=new ArrayList<>();boolean condition;
+            if(ownership.bound){
+                String scopeLocal=content.substring(paragraph,paragraphEnd);condition=!ownership.unresolvedConditionAlias;
+                // The derived effect/discrepancy text cannot supply its own governing scope qualifier.
+                String qualifierPrefix=content.substring(claim.symbol?from:paragraph,claim.start);
+                for(AdvicePrecedenceOwnership.Condition owner:ownership.conditions){
+                    boolean direct=explicitBodyAliases(scopeLocal).contains(owner.alias)&&scopeDeclaration(qualifierPrefix);
+                    if(!direct&&!resolvedScopeReference(content,paragraph,scopeLocal,owner)){missing.add(owner.alias);condition=false;}
+                }
+            }else{
+                // Keep the existing authored/legacy symbolic diagnostic. Unknown typed contexts cannot be borrowed as legacy qualifiers.
+                if(!claim.symbol){
+                    if(selected.stream().anyMatch(AdvicePrecedenceOwnership::hasContext))problems.add("section.content: derived_precedence_source_scope_unknown at "+claim.start+".."+claim.end
+                            +"; offsetUnit=utf16. The selected source declares a scope context but its current same-source interval binding is incomplete or conflicting. Do not borrow a nearby or foreign condition, infer a formal Clause, or publish this complete rank as verified. Preserve independent supported rules or a faithful source quote and isolate only this unresolved derived order through the existing repair/gaps contract.");
+                    continue;
+                }
+                for(CitationVO source:cited)if(source.getContent()!=null&&!AdvicePrecedenceOwnership.hasContext(source)&&LEADING_CONDITION.matcher(source.getContent()).find())missing.add(source.getEvidenceId());
+                if(missing.isEmpty())continue;missing.removeAll(explicitBodyAliases(local));condition=LOCAL_CONDITION.matcher(local).find();
+            }
+            if(!condition||!missing.isEmpty())problems.add("section.content: derived_precedence_order_lost_qualifier at "+claim.start+".."+claim.end
                     +"; offsetUnit=utf16; missingLocalQualifierAliases="+JsonUtils.write(missing)+". Recheck the whole derived order against the supplied governing text and continuation. "
-                    +"State the full applicability condition and its source alias in the SAME operative sentence, or replace only this shorthand with separate complete condition-to-effect rules. "
-                    +"Do not merely delete the order symbols, invent conditions, broaden the subject, add aliases only to clear validation, or discard independently supported units. "
+                    +"State the full applicability condition and its source alias in the SAME operative sentence, or retain an explicit same-source scope reference to its earlier cited full condition; otherwise replace only this shorthand with separate complete condition-to-effect rules. "
+                    +"Do not merely delete the order symbols or priority rank labels, invent conditions, broaden the subject, add aliases only to clear validation, or discard independently supported units. "
                     +"Preserve every supported operative effect, including precedence/substitution and cross-reference incorporation; isolate only genuinely unresolved interpretation under existing uncertainty/gaps.");
         }
     }
+    private static final class OrderClaim {
+        final int start,end;final List<String> operands;final boolean symbol;
+        OrderClaim(int start,int end,List<String> operands,boolean symbol){this.start=start;this.end=end;this.operands=operands;this.symbol=symbol;}
+    }
+    private static void addRanks(List<OrderClaim> claims,List<OrderClaim> ranks){
+        if(ranks.size()<2)return;List<String> names=new ArrayList<>();for(OrderClaim rank:ranks)names.add(rank.operands.get(0));
+        if(new HashSet<>(names).size()==names.size())claims.add(new OrderClaim(ranks.get(0).start,ranks.get(ranks.size()-1).end,names,false));
+    }
+    private static boolean resolvedScopeReference(String content,int paragraph,String local,AdvicePrecedenceOwnership.Condition owner){
+        String reference=owner.reference;if(reference==null||reference.trim().isEmpty())return false;
+        List<String> labels=new ArrayList<>();labels.add(reference);int paren=reference.lastIndexOf('(');if(paren>=0&&reference.endsWith(")"))labels.add(reference.substring(paren));
+        for(String label:labels){
+            String flexible=Pattern.quote(label);
+            if(!Pattern.compile("(?is)(?:上述|前述|该|該|上文|under|within|above|that)[^。；;\\n]{0,24}"+flexible).matcher(local).find())continue;
+            String prefix=content.substring(0,paragraph);
+            for(String definition:prefix.split("\\n\\n")){
+                for(int at=definition.indexOf(label);at>=0;at=definition.indexOf(label,at+label.length())){
+                    int from=at,to=at;while(from>0&&!orderSentenceBoundary(definition,from-1))from--;
+                    while(to<definition.length()&&!orderSentenceBoundary(definition,to))to++;
+                    String declaration=definition.substring(from,to);
+                    if(explicitBodyAliases(declaration).contains(owner.alias)&&scopeDeclaration(declaration))return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /** Presence of a source-bound scope declaration only; never completeness of free paraphrase or legal applicability. */
+    private static boolean scopeDeclaration(String text) {
+        return LOCAL_CONDITION.matcher(text).find()||SCOPE_DECLARATION.matcher(text).find();
+    }
+
     private static boolean orderSentenceBoundary(String content,int at) {
         char c=content.charAt(at);return c=='\n'||c=='。'||c==';'||c=='；'||c=='.'&&at+1<content.length()&&Character.isWhitespace(content.charAt(at+1));
     }

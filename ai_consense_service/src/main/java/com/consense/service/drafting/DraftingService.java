@@ -1141,11 +1141,13 @@ public class DraftingService {
             DocxTemplateEditor.DocxEditResult generated;
             try {generated=reviewedRules(projectId)?templateGraphService.compile(original,key,prepared,DraftDocumentBindings.bookmarkNames(sourceBindings),nativeLayout):DraftFormattedRules.compile(original,key,prepared,DraftDocumentBindings.bookmarkNames(sourceBindings),nativeLayout);}
             catch(DocxTemplateEditor.EditException unsafe){throw new BizException(4012,unsafe.getCode()+": "+unsafe.getOperationId());}
-            DraftTocFinalizer.Result complete=finalizeDraft(key,DraftPdfConverter.sha256(original),generated.getDocxBytes());DocxTemplateEditor.TemplateIndex finalIndex=complete.index();finalized.put(key,complete);
+            List<Map<String,Object>> bindings=DraftDocumentBindings.generated(sourceBindings,generated);
+            List<Object> ledger=DraftNativeLayout.ledger(generated,DraftNativeLayout.info(key,properties.getDrafting().getRendererKind(),generated));
+            DraftTocFinalizer.Result complete=finalizeDraft(key,DraftPdfConverter.sha256(original),generated.getDocxBytes(),bindings,ledger);DocxTemplateEditor.TemplateIndex finalIndex=complete.index();finalized.put(key,complete);
             DraftArtifact revision=new DraftArtifact();revision.setId(java.util.UUID.randomUUID().toString());revision.setProjectId(projectId);revision.setFileKey(key);
             revision.setSnapshotId(snapshot);revision.setSourceSha256(DraftPdfConverter.sha256(original));revision.setDocxSha256(finalIndex.getSourceSha256());revision.setDocxBytes(complete.docx);
-            List<Map<String,Object>> bindings=DraftDocumentBindings.generated(sourceBindings,generated);if(!generated.getDocxSha256().equals(finalIndex.getSourceSha256()))bindings=DraftDocumentBindings.reconcile(bindings,finalIndex,false);
-            List<Object> ledger=DraftNativeLayout.ledger(generated,DraftNativeLayout.info(key,properties.getDrafting().getRendererKind(),generated));if("SCC".equals(key))ledger=complete.ledger(ledger);
+            if(!generated.getDocxSha256().equals(finalIndex.getSourceSha256()))bindings=DraftDocumentBindings.reconcile(bindings,finalIndex,false);
+            if("SCC".equals(key))ledger=complete.ledger(ledger);
             revision.setBindingsJson(JsonUtils.write(bindings));revision.setLedgerJson(JsonUtils.write(ledger));revision.setBlocksJson(JsonUtils.write(DraftDocumentBindings.blocks(finalIndex,bindings)));revision.setFieldImpactsJson(JsonUtils.write(generated.getAffectedFeatures()));
             revisions.put(key,revision);contents.put(key,DraftFormattedRules.content(finalIndex));
         }
@@ -1229,10 +1231,12 @@ public class DraftingService {
             }
             if(edits.isEmpty())return documentVO(document,snapshotId(projectId,null));
             DocxTemplateEditor.DocxEditResult result=editor.applyWithParagraphBookmarks(previous.getDocxBytes(),new DocxTemplateEditor.SourceEditBatch(previous.getDocxSha256(),edits),Collections.emptyMap(),true);
-            DraftTocFinalizer.Result complete=finalizeDraft(fileKey,previous.getSourceSha256(),result.getDocxBytes());DocxTemplateEditor.TemplateIndex finalIndex=complete.index();
+            List<Map<String,Object>> bindings=DraftDocumentBindings.bodyEdited(DraftDocumentBindings.read(previous.getBindingsJson()),result);
+            List<Object> ledger=DraftNativeLayout.bodyLedger(previous.getLedgerJson(),result);
+            DraftTocFinalizer.Result complete=finalizeDraft(fileKey,previous.getSourceSha256(),result.getDocxBytes(),bindings,ledger);DocxTemplateEditor.TemplateIndex finalIndex=complete.index();
             DraftArtifact next=new DraftArtifact();next.setId(java.util.UUID.randomUUID().toString());next.setProjectId(projectId);next.setFileKey(fileKey);next.setSnapshotId(previous.getSnapshotId());next.setSourceSha256(previous.getSourceSha256());next.setParentRevisionId(previous.getId());
-            List<Map<String,Object>> bindings=DraftDocumentBindings.bodyEdited(DraftDocumentBindings.read(previous.getBindingsJson()),result);if(!result.getDocxSha256().equals(finalIndex.getSourceSha256()))bindings=DraftDocumentBindings.reconcile(bindings,finalIndex,false);
-            List<Object> ledger=DraftNativeLayout.bodyLedger(previous.getLedgerJson(),result);if("SCC".equals(fileKey))ledger=complete.ledger(ledger);
+            if(!result.getDocxSha256().equals(finalIndex.getSourceSha256()))bindings=DraftDocumentBindings.reconcile(bindings,finalIndex,false);
+            if("SCC".equals(fileKey))ledger=complete.ledger(ledger);
             next.setBindingsJson(JsonUtils.write(bindings));next.setDocxBytes(complete.docx);next.setDocxSha256(finalIndex.getSourceSha256());next.setLedgerJson(JsonUtils.write(ledger));next.setBlocksJson(JsonUtils.write(DraftDocumentBindings.blocks(finalIndex,bindings)));next.setFieldImpactsJson(JsonUtils.write(result.getAffectedFeatures()));
             artifactRepository.save(next);saveFinalizedPdf(complete);document.setRevisionId(next.getId());document.setContent(DraftFormattedRules.content(finalIndex));
         }catch(DocxTemplateEditor.EditException unsafe){throw new BizException(4012,unsafe.getCode()+": "+unsafe.getOperationId());}
@@ -1308,11 +1312,11 @@ public class DraftingService {
         return renderPdf(artifact.getDocxBytes());
     }
 
-    private DraftTocFinalizer.Result finalizeDraft(String key,String originalSourceSha256,byte[] compiled) {
+    private DraftTocFinalizer.Result finalizeDraft(String key,String originalSourceSha256,byte[] compiled,List<Map<String,Object>> bindings,List<Object> ledger) {
         ConsenseProperties.Drafting settings=properties.getDrafting();
         if(!"SCC".equals(key)||!"libreoffice".equals(settings.getRendererKind())||JsonUtils.isBlankText(settings.getRendererExecutable())||JsonUtils.isBlankText(settings.getRendererWorkRoot()))return DraftTocFinalizer.unchanged(compiled,"TOC_FINALIZER_NOT_CONFIGURED_FOR_THIS_DOCUMENT");
         DraftTocFinalizer.Result result;
-        try {result=finalizeCompiledToc(compiled,originalSourceSha256);}
+        try {result=finalizeCompiledToc(compiled,originalSourceSha256,bindings,ledger);}
         catch(RuntimeException unavailable){return DraftTocFinalizer.unchanged(compiled,unavailable.getMessage());}
         if(result==null||!java.util.Arrays.equals(compiled,result.compiled)||!DraftPdfConverter.sha256(compiled).equals(result.proof.get("compiledDocxSha256")))return DraftTocFinalizer.unchanged(compiled,"TOC_COMPILED_INPUT_IDENTITY_MISMATCH");
         // A failed candidate can fall back to the first PDF, whose cache has a different exact-DOCX key.
@@ -1326,7 +1330,7 @@ public class DraftingService {
         }
         return result;
     }
-    DraftTocFinalizer.Result finalizeCompiledToc(byte[] compiled,String originalSourceSha256) {return configuredPdfConverter(properties.getDrafting()).finalizeToc(compiled,originalSourceSha256);}
+    DraftTocFinalizer.Result finalizeCompiledToc(byte[] compiled,String originalSourceSha256,List<Map<String,Object>> bindings,List<Object> ledger) {return configuredPdfConverter(properties.getDrafting()).finalizeToc(compiled,originalSourceSha256,bindings,ledger);}
     private void saveFinalizedPdf(DraftTocFinalizer.Result result) {
         if(result==null||result.pdf==null)return;DraftPdfConversionResult pdf=result.pdf;
         if(!DraftPdfConverter.sha256(result.docx).equals(pdf.getDocxSha256())||!DraftPdfConverter.sha256(pdf.getPdfBytes()).equals(pdf.getPdfSha256()))throw new BizException(4013,"FINALIZED_DOCX_PDF_IDENTITY_MISMATCH");

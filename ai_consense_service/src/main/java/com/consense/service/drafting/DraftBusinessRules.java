@@ -11,7 +11,7 @@ import java.util.*;
 /** Pure, versioned drafting decisions. Facts, adoption and source mapping are separate. */
 public final class DraftBusinessRules {
  private DraftBusinessRules() { }
- public static final String RULE_VERSION="drafting-20261022.1-bs-safety-trade";
+ public static final String RULE_VERSION="drafting-20261022.2-bs-safety-purpose-reuse";
  private static final ObjectMapper JSON=new ObjectMapper();
  private static final Map<String,Object> RAW=load();
  private static Map<String,Object> load() {try(InputStream in=DraftBusinessRules.class.getResourceAsStream("/drafting/input-catalog.json")){return JSON.readValue(in,new TypeReference<LinkedHashMap<String,Object>>(){});}catch(Exception ex){throw new IllegalStateException("Missing versioned drafting catalog",ex);}}
@@ -60,10 +60,20 @@ public final class DraftBusinessRules {
   if(Arrays.asList("siteInspectionStartDate","siteInspectionEndDate").contains(key)){try{LocalDate.parse(s(value));}catch(RuntimeException ex){return "Use a valid ISO date.";}}
   if(Arrays.asList("photocopyRateUpToA3","photocopyRateAboveA3","contractPeriodMonths","advanceRepaymentMonths","advanceRepaymentFirstCertificate").contains(key)){Double n=number(value);if(n==null||n<0)return "A finite non-negative number is required; the entered value is retained for review.";}
   if("oldValuableTrees".equals(key)){if(!(value instanceof List))return "Tree identities must be a list.";Set<String> seen=new HashSet<>();for(Object o:list(value)){String serial=o instanceof String?s(o):s(asMap(o).get("serial"));if(serial.trim().isEmpty())return "Complete every tree serial number before selecting single or multiple-tree handling.";if(!seen.add(serial.trim().toUpperCase(Locale.ROOT)))return "Duplicate tree serial numbers: verify identities; all entered rows are retained.";}}
-  if("billNos".equals(key)){if(!(value instanceof List))return "Bill / Schedule rows must be a list.";Set<String> seen=new HashSet<>();for(Object o:list(value)){Map<String,Object> r=asMap(o);if(!answered(r.get("number"))||!answered(r.get("description")))return "Complete each Bill / Schedule number and exact description.";String identity=s(r.get("type"))+":"+s(r.get("number")).trim().toLowerCase(Locale.ROOT);if(!seen.add(identity))return "Duplicate numbers within the same pricing-document type require review.";}}
+  if("billNos".equals(key)){if(!(value instanceof List))return "Bill / Schedule rows must be a list.";Map<String,List<Map<String,Object>>> seen=new LinkedHashMap<>();for(Object o:list(value)){Map<String,Object> r=asMap(o);if(!answered(r.get("number"))||!answered(r.get("description")))return "Complete each Bill / Schedule number and exact description.";List<Map<String,Object>> same=seen.computeIfAbsent(billIdentity(r),ignored->new ArrayList<>());for(Map<String,Object> previous:same)if(!sameSafetyBill(previous,r))return "Duplicate numbers within the same pricing-document type require review.";same.add(r);}}
   if("sections".equals(key)){if(!(value instanceof List))return "Sections must be a list.";Set<String> seen=new HashSet<>();for(Object o:list(value)){Map<String,Object> r=asMap(o);if(!answered(r.get("designation"))||!answered(r.get("workTypes"))||list(r.get("workTypes")).isEmpty())return "Each Section requires its designation and actual Works types.";if(!seen.add(s(r.get("designation")).trim().toUpperCase(Locale.ROOT)))return "Duplicate Section designations require review.";}}
   return DraftInputRules.structuredIssue(key,value);
  }
+ static String billIdentity(Map<String,Object> row){return s(row.get("type"))+":"+s(row.get("number")).trim().toLowerCase(Locale.ROOT);}
+ static boolean sameSafetyBill(Map<String,Object> first,Map<String,Object> second){
+  List<String> purposes=Arrays.asList("bsSafety","electricalSafety","fireSafety","fireWaterSafety");
+  return billIdentity(first).equals(billIdentity(second))&&Arrays.asList("BQ","SOR").contains(first.get("type"))
+   &&first.get("description")instanceof String&&answered(first.get("description"))&&Objects.equals(first.get("description"),second.get("description"))
+   &&purposes.contains(first.get("purpose"))&&purposes.contains(second.get("purpose"))&&!Objects.equals(first.get("purpose"),second.get("purpose"))
+   &&s(first.get("placement")).equals(s(second.get("placement")))&&s(first.get("placementText")).equals(s(second.get("placementText")));
+ }
+ // Safety-purpose associations share one physical pricing document; conflicts retain every row for review.
+ static List<Object> physicalBills(Object raw){List<Object> rows=list(raw);if(invalid("billNos",raw)!=null)return rows;Map<String,Object> distinct=new LinkedHashMap<>();for(Object row:rows)distinct.putIfAbsent(billIdentity(asMap(row)),row);return new ArrayList<>(distinct.values());}
  static String datesIssue(Map<String,Object> v){if(!answered(v.get("siteInspectionStartDate"))||!answered(v.get("siteInspectionEndDate")))return null;try{LocalDate a=LocalDate.parse(s(v.get("siteInspectionStartDate"))),b=LocalDate.parse(s(v.get("siteInspectionEndDate")));return a.isAfter(b)?"The inspection start date is after the end date; review both values.":null;}catch(RuntimeException ex){return "Use valid ISO dates for the inspection period.";}}
  static void baseRules(Context c){
   Boolean two=c.b("twoEnvelopeTendering"), domestic=c.b("domesticBlocks"), permission=c.b("precastFacadePermission"), foundation=c.b("contractorDesignedFoundations"), wto=c.b("wtoGpaApplies"), railway=c.b("railwayProtectionAreaWorks");String mode=c.str("electronicTendering"), arrangement=c.str("subcontractArrangement");boolean knownMode=Arrays.asList("L10Pro","Hardcopy").contains(mode);
@@ -121,7 +131,7 @@ public final class DraftBusinessRules {
   c.set("scc-railway-plan-inspection",Boolean.FALSE.equals(railway)?"not_adopted":and(railway,c.b("railwayProtectionPlansAvailable"))==null?"pending":Boolean.TRUE.equals(c.b("railwayProtectionPlansAvailable"))?"retain":"delete",null,"If plans unavailable, delete only the final public-inspection sentence and retain the definition; flag project-provided plans.","图则不可查时仅删除末尾公开查阅句，保留定义并提示项目另备图。","railwayProtectionAreaWorks","railwayProtectionPlansAvailable");
   c.set("scc-foundation-version-reference",Boolean.FALSE.equals(foundation)?"not_adopted":"pending",null,"SCT's SCC8.2 reference needs actual edition mapping; SCC8.304 has independent design AND execution conditions.","SCT旧SCC8.2须实际版次映射；8.304有独立设计及施工条件。","contractorDesignedFoundations");
  }
- static void billRules(Context c){Object raw=c.v.get("billNos");List<Object> bills=list(raw);boolean complete=raw instanceof List&&invalid("billNos",raw)==null;boolean roles=complete;
+ static void billRules(Context c){Object raw=c.v.get("billNos");List<Object> bills=physicalBills(raw);boolean complete=raw instanceof List&&invalid("billNos",raw)==null;boolean roles=complete;
   for(String[] pair:new String[][]{{"1","Preliminaries"},{"2","Preambles"}}){boolean match=false;for(Object o:bills){Map<String,Object>b=asMap(o);if(pair[0].equals(s(b.get("number")))&&pair[1].equalsIgnoreCase(s(b.get("description")).trim())&&(!answered(b.get("purpose"))||pair[1].toLowerCase(Locale.ROOT).equals(s(b.get("purpose")))))match=true;}roles&=match;}
   c.set("sct-shared-bill-list",complete?"amend":"pending",complete?bills:null,"Reuse exact adopted numbers/descriptions; role/type/placement are independent sourced attributes.","复用准确采用编号及说明；用途／类型／分发为独立有据属性。","billNos");
   c.set("sct-bill-body-summary",roles&&c.has("electronicTendering")?"amend":"pending",roles?bills:null,"Standard Bill1/2 body and collection/summary placement is valid only for the corresponding adopted roles; Not Preliminaries is not Preliminaries.","标准Bill1／2正文及汇总分发只适用于对应采用用途；Not Preliminaries不是Preliminaries。","billNos","electronicTendering");

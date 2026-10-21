@@ -88,7 +88,7 @@ class DraftNativeNormalFlowIntegrationTest {
                 assertArrayEquals(input,actual.compiled);assertEquals(HASHES[2],source);
             }
             return actual;
-        }).when(drafting).finalizeCompiledToc(any(byte[].class),anyString());
+        }).when(drafting).finalizeCompiledToc(any(byte[].class),anyString(),anyList(),anyList());
     }
     private static Set<String> compilerPoints(byte[] docx) {
         DocxTemplateEditor editor=new DocxTemplateEditor();Set<String> points=new LinkedHashSet<>();int cs=0,cl=0;
@@ -210,7 +210,7 @@ class DraftNativeNormalFlowIntegrationTest {
         long conversions,probes;try(java.util.stream.Stream<Path> dirs=Files.list(work)){conversions=dirs.filter(p->p.getFileName().toString().startsWith("render-")).count();}
         try(java.util.stream.Stream<Path> dirs=Files.list(work)){probes=dirs.filter(p->p.getFileName().toString().startsWith("profile-probe-")).count();}
         assertEquals(sccConversions+2,conversions);assertTrue(conversions<=5);assertTrue(probes<=12,"Bounded profile/version checks for generation plus preview/export of three saved files");assertEquals(3,pdfArtifacts.count());
-        verify(drafting,times(1)).finalizeCompiledToc(any(byte[].class),eq(HASHES[2]));
+        verify(drafting,times(1)).finalizeCompiledToc(any(byte[].class),eq(HASHES[2]),anyList(),anyList());
         for(String key:KEYS){DraftDocument currentDocument=documents.findByProjectIdAndFileKey(f.id,key).orElseThrow(AssertionError::new);assertEquals(f.revisions.get(key).getId(),currentDocument.getRevisionId());assertArrayEquals(f.exports.get(key),artifacts.findById(currentDocument.getRevisionId()).orElseThrow(AssertionError::new).getDocxBytes());}
         json("full-generation-render-result.json",map("projectId",f.id,"sourceEdition","2a_Standard documents","generatedFiles",Arrays.asList(KEYS),"effectiveIdentity",map("number",NUMBER,"title",TITLE),"files",files,"rendererConversions",conversions,"profileProbeDirectories",probes,"maxRendererVersionProbes",17,"sccFinalizationConversions",sccConversions,"savedInputReplayInjected",false,"bodyIntroBoundaryAccepted",false,"actual2bAccepted",false,"visualAcceptance",false,"rasterExecuted",false,"targetPageCount",null,"sharedHttp",0,"sharedSql",0,"modelRequests",0));verifyNoInteractions(ai);
     }

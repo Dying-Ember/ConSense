@@ -53,4 +53,22 @@ class VettingPromptPolicyTest {
         RunResultVO restored=JsonUtils.read(JsonUtils.write(current),RunResultVO.class);assertEquals(saved,restored.getPromptPolicy());
         assertEquals(0,restored.getMetrics().getGap());assertEquals(0,restored.getMetrics().getSubstantive());assertEquals(0,restored.getMetrics().getRequirement());
     }
+    @Test void finalPacketSystemsRetainCustomTextAndRequireEvidenceForUntypedLiteralRoles()throws Exception {
+        VettingSemanticReview review=new VettingSemanticReview(null,new com.consense.config.ConsenseProperties(),null);
+        java.lang.reflect.Method system=VettingSemanticReview.class.getDeclaredMethod("effectiveSystem",String.class,boolean.class);system.setAccessible(true);
+        String custom="AUTHORED_USER_STYLE keep supported review comments concise";
+        try(VettingSemanticReview.SupplementScope ignored=review.bindSupplement(custom)){
+            for(boolean projectReference:new boolean[]{false,true}){
+                String effective=(String)system.invoke(review,"en",projectReference);
+                for(String clause:new String[]{"如需引用应原样保留并注明含义待核","不得仅凭位数、位置、格式或来源识别标签",
+                        "日期、合约编号、适用版本或签署／采用状态","来源识别标签不等于已核日期元数据",
+                        "当前证据的明示文字及上下文","绑定该来源的已核字段元数据",
+                        "不能把发布日期改作签署日期或据此证明采用","用户陈述与假设保留其来源和状态","局部待核不抹去独立有据分析"})assertTrue(effective.contains(clause),clause);
+                assertTrue(effective.contains(custom));assertTrue(effective.indexOf(custom)<effective.indexOf(VettingPromptPolicy.text()));
+                String marker="字段含义未确认的裸数字";assertEquals(effective.indexOf(marker),effective.lastIndexOf(marker));
+                assertEquals(VettingPromptPolicy.text(),PromptCatalog.find(PromptCatalog.KEY_VETTING).defaultSystem);
+            }
+        }
+    }
+
 }

@@ -5,7 +5,7 @@ const { renderToString } = require('vue/server-renderer')
 const { loadVue } = require('./helpers/load-vue.cjs')
 const { loadTypeScript } = require('./helpers/load-typescript.cjs')
 const catalog = require('../../ai_consense_service/src/main/resources/drafting/input-catalog.json')
-const { applicability, dirtyPatch } = loadTypeScript(path.join(__dirname, '../src/drafting/state.ts'), { dependencies: { './field-kinds': './field-kinds.ts' } })
+const { applicability, dirtyPatch } = loadTypeScript(path.join(__dirname, '../src/drafting/state.ts'), { dependencies: { './field-kinds': './field-kinds.ts', './bill-identities': './bill-identities.ts' } })
 const input = loadVue(path.join(__dirname, '../src/components/DraftingInputField.vue')).default
 const fields = catalog.groups.flatMap(group => group.fields)
 const trade = fields.find(field => field.key === 'subcontractors')

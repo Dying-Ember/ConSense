@@ -1,4 +1,5 @@
 import type { DraftValue } from './state'
+import { physicalBillRows } from './bill-identities'
 
 export type BillPlacement = 'discA' | 'discB' | 'hardcopy' | 'discC' | 'custom' | 'pending'
 export type BillPortion = 'bodyWithoutTotals' | 'totalsOnly' | 'wholeBq' | 'excelCompanion' | 'preamblesPdf' | 'l10Bq' | 'adoptedPlacement' | 'sorPlacementPending' | 'pricingTypePending' | 'issuePending' | 'customPlacementPending'
@@ -14,7 +15,7 @@ export function billDistribution(values: Record<string, DraftValue>) {
     if (!groups.has(placement)) groups.set(placement, [])
     groups.get(placement)!.push({ ...row, portion, ...extra })
   }
-  for (const [index, item] of (Array.isArray(values.billNos) ? values.billNos : []).entries()) {
+  for (const [index, item] of physicalBillRows(Array.isArray(values.billNos) ? values.billNos : []).entries()) {
     if (!item || typeof item !== 'object' || Array.isArray(item)) continue
     const row: BillDistributionRow = { id: String(item.id ?? `row-${index}`), number: String(item.number ?? ''), description: String(item.description ?? ''), type: String(item.type ?? ''), portion: 'issuePending' }
     const placement = String(item.placement ?? '')

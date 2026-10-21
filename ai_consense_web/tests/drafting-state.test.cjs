@@ -2,7 +2,7 @@
 const assert = require('node:assert/strict')
 const path = require('node:path')
 const { loadTypeScript } = require('./helpers/load-typescript.cjs')
-const runtime = loadTypeScript(path.join(__dirname, '../src/drafting/state.ts'), { globals: { console }, dependencies: { './field-kinds': './field-kinds.ts' } })
+const runtime = loadTypeScript(path.join(__dirname, '../src/drafting/state.ts'), { globals: { console }, dependencies: { './field-kinds': './field-kinds.ts', './bill-identities': './bill-identities.ts' } })
 const { decode, encode, applicability, validationIssue, mergeServerValues, dirtyPatch, documentCapabilities, replaceTargetOverride, restoreDraftView, reversedSiteDates, actionForUnresolved, adoptionPatch } = runtime
 const plain = value => JSON.parse(JSON.stringify(value))
 const field = (key, kind = 'text', other = {}) => ({ key, kind, label: { en: key, zhHans: key, zhHant: key }, ...other })

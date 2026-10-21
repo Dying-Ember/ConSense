@@ -1,3 +1,7 @@
+<!-- runtime-integration67:start -->
+**最新progress67：runtime33／18086／PID61304／64GiB已部署，当前专项六份前端下载、92目录及两次正文保存通过。** [实际证据与剩余三处分页](testing/three-module-runtime-progress-20261021.md#progress67当前专项92目录已定版安全bill复用与两次正文保存通过75页逐张检查发现三处分页缺陷)。保239＝227＋12、92目标／2349点；恢复稿75张PNG与基线逐字节同，全页49有限通过／23警告／3失败，继续原native／LO后继。Advisory guard和两mandatory裸值规则已部署，尚无新Qwen答案；Vetting整套报告／SL全量未过，不打包。H2 owner39876／runtime30解析29604保护，Goal active。
+<!-- runtime-integration67:end -->
+
 <!-- runtime-integration66:start -->
 **最新progress66：中文身份与字体别名修复已部署，三Word与三PDF下载成功；111页身份／页码文本回读通过，安全填空保持。** [实际证据及未过门](testing/three-module-runtime-progress-20261021.md#progress66中文身份与字体别名已修并部署111页身份回读通过安全填空保持目录删除边界仍失败)。新SCC仍有目录错页；精确旧稿字体误拒已解除，唯一新生成已终态但原239分页关系与删除条款接缝仍UNKNOWN，未授全成品通过。前端冷启动默认27B已实测；同题27B46为10／2／1、Flash48为3／3／7，不外推稳定性。实际35件为17完整／15部分／1APB原解析中／2图纸排除，整套报告待验；H2与64GiB运行保护，Goal active，SL22,214页质量未过不打包。
 <!-- runtime-integration66:end -->

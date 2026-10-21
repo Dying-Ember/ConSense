@@ -35,4 +35,17 @@ class AdvisoryPromptDefaultsTest {
         assertTrue(custom.contains("AUTHORED_CUSTOM_INSTRUCTION"));
         assertTrue(custom.contains(AdvisoryHarness.CONTRACT));
     }
+    @Test void finalSystemRequiresEvidenceForTheRoleOfAnUntypedLiteralWithoutReplacingTheCustomSupplement() {
+        String custom="AUTHORED_USER_STYLE keep each supported answer concise";
+        String effective=AdvisoryHarness.system(custom);
+        for(String clause:new String[]{"如需引用应原样保留并注明含义待核","不得仅凭位数、位置、格式或来源识别标签",
+                "日期、合约编号、适用版本或签署／采用状态","来源识别标签不等于已核日期元数据",
+                "当前证据的明示文字及上下文","绑定该来源的已核字段元数据",
+                "不能把发布日期改作签署日期或据此证明采用","用户陈述与假设保留其来源和状态","局部待核不抹去独立有据分析"})assertTrue(effective.contains(clause),clause);
+        assertTrue(effective.startsWith(AdvisoryHarness.POLICY));assertTrue(effective.contains(custom));
+        assertTrue(effective.indexOf(custom)<effective.indexOf(AdvisoryHarness.CONTRACT));
+        String marker="字段含义未确认的裸数字";assertEquals(effective.indexOf(marker),effective.lastIndexOf(marker));
+        assertEquals(AdvisoryHarness.POLICY,PromptCatalog.find(PromptCatalog.KEY_ADVICE).defaultSystem);
+    }
+
 }

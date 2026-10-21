@@ -120,4 +120,49 @@ class DraftBsSafetyPricingRealSourceTest {
             assertTrue(String.valueOf(binding(compile(original,general,IDS[0]),1428).get("text")).contains("Schedule No(s). AUTHORED-BS of the schedule of rates"),trade);
         }
     }
+    @Test void actualExplicitSharedSafetyBillFillsGeneralAndPureFireWithoutDuplicatingPhysicalBill()throws Exception {
+        byte[] original=source();TemplateIndex index=new DocxTemplateEditor().inspect(original);
+        for(String type:Arrays.asList("BQ","SOR")){
+            Map<String,Object> general=DraftBusinessRules.map("number","AUTHORED-SHARED-7","description","AUTHORED identical safety description","type",type,"purpose","bsSafety");
+            Map<String,Object> fire=new LinkedHashMap<>(general);fire.put("purpose","fireSafety");fire.put("trade","Fire services");
+            Map<String,Object> plan=DraftBusinessRules.plan(DraftBusinessRules.map("subcontractArrangement","BSSSC","subcontractors",Collections.singletonList("Fire services"),"billNos",Arrays.asList(general,fire)));
+            assertEquals("amend",action(plan,IDS[0]).get("action"));assertEquals("amend",action(plan,IDS[2]).get("action"));
+            assertEquals(1,DraftBusinessRules.list(action(plan,"sct-shared-bill-list").get("value")).size());
+            List<Map<String,Object>> generated=compile(original,plan,IDS[0],IDS[2]);
+            String noun="BQ".equals(type)?"Bill":"Schedule",ending="BQ".equals(type)?"Bills of Quantities":"schedule of rates";
+            for(int target:new int[]{0,2}){String replacement=noun+" No"+(target==0?"(s)":"")+". AUTHORED-SHARED-7 of the "+ending;
+                assertEquals(index.mainParagraph(BODY[target]).getText().replace(target==0?PLURAL:SINGULAR,replacement),binding(generated,BODY[target]).get("text"));
+                assertTrue(DraftBusinessRules.list(binding(generated,BODY[target]).get("appliedActionIds")).contains(IDS[target]));}
+        }
+    }
+    @Test void actualSelectedPureFireWithoutItsOwnAdoptedPricingRetainsCompleteNativeBlank()throws Exception {
+        byte[] original=source();String before=new DocxTemplateEditor().inspect(original).mainParagraph(1663).getText();
+        List<Map<String,Object>> cases=new ArrayList<>();
+        for(Object bills:Arrays.asList(null,Collections.emptyList(),Collections.singletonList(DraftBusinessRules.map("number","AUTHORED-GENERAL","description","AUTHORED general safety","type","BQ","purpose","bsSafety")))){
+            Map<String,Object> values=DraftBusinessRules.map("subcontractArrangement","BSSSC","subcontractors",Collections.singletonList("Fire services"));if(bills!=null)values.put("billNos",bills);cases.add(values);}
+        for(Map<String,Object> values:cases){Map<String,Object> plan=DraftBusinessRules.plan(values);assertEquals("pending",action(plan,IDS[2]).get("action"));assertEquals(before,binding(compile(original,plan,IDS[2]),1663).get("text"));}
+    }
+
+    @Test void actualSctNativeDistributionWritesTheSharedPhysicalBillOnceInEachIssueMode()throws Exception {
+        String directory=System.getProperty("consense.acceptance.sourceDir");
+        org.junit.jupiter.api.Assumptions.assumeTrue(directory!=null&&!directory.trim().isEmpty(),"Actual 2a SCT requires explicit sourceDir; absence is SKIP, not source acceptance.");
+        byte[] original=Files.readAllBytes(Paths.get(directory,"02_Special Conditions of Tender (SCT).docx"));
+        assertEquals("7def01d62e07b35dd86beeff995e0e37d73ce18adca2746e2a6f6d9bafb5aaa4",DraftPdfConverter.sha256(original));
+        for(String mode:Arrays.asList("L10Pro","Hardcopy"))for(String type:Arrays.asList("BQ","SOR")){
+            String placement="L10Pro".equals(mode)?"DiscB":"Hardcopy";
+            Map<String,Object> general=DraftBusinessRules.map("number","7","description","AUTHORED native shared safety description","type",type,"purpose","bsSafety","placement",placement);
+            Map<String,Object> fire=new LinkedHashMap<>(general);fire.put("purpose","fireSafety");fire.put("trade","Fire services");
+            List<Object> rows=Arrays.asList(DraftBusinessRules.map("number","1","description","Preliminaries","type","BQ","purpose","preliminaries","placement","standard"),DraftBusinessRules.map("number","2","description","Preambles","type","BQ","purpose","preambles","placement","standard"),general,fire);
+            Map<String,Object> plan=DraftBusinessRules.plan(DraftBusinessRules.map("billNos",rows,"electronicTendering",mode,"subcontractArrangement","BSSSC","subcontractors",Collections.singletonList("Fire services")));
+            Map<String,Object> distribution=action(plan,"sct-shared-bill-list");plan.put("actions",Arrays.asList(action(plan,"sct-issue-alternative"),distribution));
+            DocxEditResult result=DraftFormattedRules.compile(original,"SCT",plan);
+            String emitted=result.getIndex().getMainParagraphs().stream().map(p->p.getCatalogText()).collect(java.util.stream.Collectors.joining("\n"));
+            String label=("BQ".equals(type)?"Bill No. ":"Schedule No. ")+"7 – AUTHORED native shared safety description";
+            assertEquals("applied",distribution.get("applicationState"),JsonUtils.write(distribution));
+            assertEquals(1,emitted.split(java.util.regex.Pattern.quote(label),-1).length-1,mode+"/"+type+": actual emitted DOCX contains one physical pricing-document entry");
+            if("Hardcopy".equals(mode))assertTrue(result.getIndex().getMainParagraphs().stream().anyMatch(p->p.getCatalogText().equals(DraftBusinessRules.standardParagraph("SCT",387))),"Native emission must retain the complete Disc C explanation, not replace its Bill2 substring.");
+            assertEquals(4,DraftBusinessRules.list(DraftBusinessRules.asMap(plan.get("effectiveValues")).get("billNos")).size());
+        }
+    }
+
 }

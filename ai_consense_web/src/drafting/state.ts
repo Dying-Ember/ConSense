@@ -1,5 +1,6 @@
 import type { DraftCandidate, DraftCandidateIdentity, DraftCondition, DraftDocument, DraftField, DraftPlanAction, DraftTargetOverride, DraftUnresolved, DraftVariable, DraftVariablePatch } from '@/api/types'
 import { isCollectionKind, isObjectKind, isVisibleDetail } from './field-kinds'
+import { conflictingBillDuplicates } from './bill-identities'
 import type { BodyDraft } from './body-edit'
 
 export type DraftValue = string | number | boolean | null | DraftValue[] | { [key: string]: DraftValue }
@@ -96,12 +97,12 @@ export function validationIssue(field: DraftField, value: DraftValue | undefined
     if (value.some(row => !row || typeof row !== 'object' || Array.isArray(row) || required.some(column => applicability(column.condition, row as Record<string, DraftValue>) !== 'no' && validationIssue(column, row[column.key]) !== null))) return 'incomplete'
     const identity = field.columnFields.find(column => ['serial', 'number'].includes(column.key))
     if (identity) {
-      const identities = value.map(row => {
-        const record = row as Record<string, DraftValue>
-        const number = String(record[identity.key] ?? '').trim().toUpperCase()
-        return field.key === 'billNos' ? `${String(record.type ?? '').trim().toUpperCase()}:${number}` : number
-      })
-      if (new Set(identities).size !== identities.length) return 'duplicate'
+      if (field.key === 'billNos') {
+        if (conflictingBillDuplicates(value)) return 'duplicate'
+      } else {
+        const identities = value.map(row => String((row as Record<string, DraftValue>)[identity.key] ?? '').trim().toUpperCase())
+        if (new Set(identities).size !== identities.length) return 'duplicate'
+      }
     }
     return null
   }

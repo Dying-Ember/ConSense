@@ -1,3 +1,21 @@
+<!-- runtime-integration67:start -->
+## progress67：当前专项92目录已定版，安全Bill复用与两次正文保存通过；75页逐张检查发现三处分页缺陷
+
+当前代码已统一采用并实际部署 runtime33／18086／PID61304／64GiB；H2 owner39876及 runtime30／29604 的 APB 原请求保持，未重发解析。已有80项输入、旧三份原稿均保留，实际唯一生成三份新版本；本任务测试浏览器空间11恢复后，已经刷新回读并下载当前 NTT／SCT／SCC 的六份 Word／PDF，不占用个人空间。模型界面保持明确 Qwen3.8 27B；本轮生成及正文编辑没有新增真实模型调用。
+
+**截图填空与目录的实际增量：** 同一已明确采用的 BQ／SOR 实体可关联不同安全用途，实际分发只列一次；说明、用途或分发冲突继续拒绝。纸本独立清单目标改用完整相邻来源段定位，保留 Disc C 说明。当前专项三安全引用仍为一般BS `12.2 to 12.4`、电气 `12.2`、消防及水泵 `12.3`；未选纯消防维持 Not used，不借用12.3。新SCC保存版本 `63eb8f5e…` 的目录定版实际PASS：239登记＝227适用＋12已批准删除排除，92个目录目标／2,349个当前点稳定。实际下载Word与保存revision逐字节相同、PDF与定版缓存SHA相同；Word中92缓存值全部与实际测量相同。旧20.302／20.303／20.304的三错页已分别与正文印刷51／54／54核同，不能把这份专项的43缓存改动套为旧正常稿52项缺陷的分母。
+
+**连续正文保存已实际接回服务和持久化：** 仅在明确合成的临时专项项目，对唯一未映射业务字段的原程序句尾加 TEST ONLY 标记后精确恢复，HTTP各唯一一次。新revision链为 `63eb8f5e…→4d16a7ee…→613e40e3…`，三旧行及两parent经只读JDBC核实；两次定版均PASS且保239／227／12、92目标、2349点和原删除授权。当前标记已消失，其他可编辑正文、NTT／SCT和采用快照保持。恢复DOCX hash与基线不同但文本和全部2349点、92目录、排除授权均相同；两份PDF经同Poppler120dpi重渲，全部75张PNG逐字节相同，因此基线逐张视觉观察可用于恢复后的当前文件，不能只凭文字恢复宣称版式相同。
+
+**最终视觉仍未通过：** 三代理已逐张看完当前75页原图，Root另看53／57／61／75。确认物理67只有两行续尾后整页大留白，73的Option B标题与74正文分离，74的because条件导语与75首分支分离。67已核原件P1829末尾显式断页原样保留，(4)无继承keep链，不是丢文；另两处正在核完整来源条件族。中段几处大留白及左突缩进也逐项对照原件，尚不能一概称为生成回归。使用原native布局／LibreOffice机制准备统一后继，不引入技术栈或另做PDF旁路。75页项目名、合约号、连续页码及中文字体文本回读全通过，正式2b身份及其余未回答变量仍UNKNOWN，不授完整业务通过。
+
+软件证据分别记录：用途／纸本／BQ-SOR后继9方法PASS；正确初始化的真实删除原件RED精确复现CS198缺端点，后继GREEN通过并保持Not used／92目标；主树组合91执行＝87PASS／0FAIL／ERROR／4缺专用绑定配置SKIP；历史真实三原件生成状态门用现成65值capture已补跑通过。正常三模板MVC／隔离JPA／真实LO链1PASS，完整239／92／1311CL／2500点保持，preview/export同字节。前端6脚本、类型检查和独立临时目录构建通过。不同窗口不合并为总体验收百分比。
+
+Advisory范围归属校验63PASS已随包部署；两份mandatory system新增裸数字／footer／文件名字段含义边界，旧资源2FAIL、新两套8PASS，保custom supplement。尚无本轮新Qwen答复，真实27B46仍10通过／2部分／1失败、Flash48仍3／3／7；分支效果等独立语义缺陷未追认修复。实际35文件整套Vetting／正式报告、新咨询语义与SL全22,214技术页仍未收口；质量未过不打SL比赛包。Goal active，后继优先修三处当前分页，再接真实报告与模型复验。
+
+关键证据：`.local/runtime-integration33/` 的 package／generation-response01／generated-context01／generated-audit01／body-roundtrip01／append-context01／restore-context01／restore-audit01／restored-raster-comparison01；实际六下载在downloads02，逐页报告在visual-first-review／visual-middle-review／visual-last-review。回归窗 `.local/drafting-toc-removal-runtime41/main-regression01`／`main-normal12`，提示词窗 `.local/advisory-vetting-token-role42/`。详见[填空专项](drafting-bs-safety-pricing-blank-20261022.md)及[咨询发布范围](advisory-source-scope-publication-20261022.md)。
+<!-- runtime-integration67:end -->
+
 <!-- runtime-integration66:start -->
 ## progress66：中文身份与字体别名已修并部署，111页身份回读通过；安全填空保持，目录删除边界仍失败
 

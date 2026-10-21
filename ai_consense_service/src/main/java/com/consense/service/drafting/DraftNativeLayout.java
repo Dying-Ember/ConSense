@@ -41,6 +41,53 @@ final class DraftNativeLayout {
     }
     /** The complete source edition defines the denominator; current CS ranges are checked in Editor. */
     static List<NativeHeadingFlow> headingFlows(String sourceHash,String rendererKind){Map<String,Object> registry=rendererRegistry(rendererKind);if(registry==null)throw new IllegalStateException("HEADING_FLOW_POLICY_UNAVAILABLE");Map<String,Object> selected=null;for(Object raw:DraftBusinessRules.list(registry.get("sources"))){Map<String,Object> entry=DraftBusinessRules.asMap(raw);if("SCC".equals(entry.get("key"))&&Objects.equals(sourceHash,entry.get("sourceSha256"))){if(selected!=null)throw new IllegalStateException("HEADING_FLOW_SOURCE_AMBIGUOUS");selected=entry;}}if(selected==null)throw new IllegalStateException("HEADING_FLOW_SOURCE_UNVERIFIED");List<NativeHeadingFlow> result=new ArrayList<>();for(Object raw:DraftBusinessRules.list(selected.get("paragraphBoundaries"))){Map<String,Object> row=DraftBusinessRules.asMap(raw);if(!Boolean.TRUE.equals(row.get("compactClearedGaps")))continue;String heading="CS"+DraftAdoption.hash("SCC|"+sourceHash+"|"+row.get("headingId")).substring(0,28),body="CS"+DraftAdoption.hash("SCC|"+sourceHash+"|"+row.get("bodyId")).substring(0,28);result.add(new NativeHeadingFlow(heading,body,DraftBusinessRules.list(row.get("gaps")).size()));}if(result.isEmpty())throw new IllegalStateException("HEADING_FLOW_SCOPE_REQUIRED");return Collections.unmodifiableList(result);}
+    /** A relationship is inapplicable only when this source's editor ledger proves an endpoint was removed. */
+    static List<NativeHeadingFlow> activeHeadingFlows(String sourceHash,String rendererKind,TemplateIndex current,List<Map<String,Object>> bindings,List<Object> ledger,Map<String,Object> proof) {
+        List<NativeHeadingFlow> registered=headingFlows(sourceHash,rendererKind);List<NativeHeadingFlow> active=new ArrayList<>();List<Object> excluded=new ArrayList<>();
+        proof.put("headingFlowDenominator",registered.size());proof.put("headingFlowRegistered",registered.size());
+        if(bindings.isEmpty()){proof.put("headingFlowActive",registered.size());proof.put("headingFlowExcludedAuthorized",0);proof.put("excludedAuthorizedHeadingFlows",excluded);return registered;}
+        Map<String,List<Map<String,Object>>> bound=new HashMap<>();for(Map<String,Object> row:bindings)bound.computeIfAbsent(String.valueOf(row.get("bookmarkName")),name->new ArrayList<>()).add(row);
+        Map<String,List<Feature>> markers=new HashMap<>();for(Feature feature:current.getFeatures())if("BOOKMARK".equals(feature.getKind()))markers.computeIfAbsent(feature.getName(),name->new ArrayList<>()).add(feature);
+        List<Map<String,Object>> operations=new ArrayList<>();Map<String,Object> layout=null;
+        for(Object raw:JsonUtils.readList(JsonUtils.write(ledger),Map.class)){Map<String,Object> row=DraftBusinessRules.asMap(raw);if("native_layout".equals(row.get("kind"))){if(layout!=null)throw new IllegalStateException("HEADING_FLOW_REMOVAL_LAYOUT_AMBIGUOUS");layout=row;}else if(row.get("operationId")!=null)operations.add(row);}
+        Map<String,Object> source=null;for(Object raw:DraftBusinessRules.list(rendererRegistry(rendererKind).get("sources"))){Map<String,Object> row=DraftBusinessRules.asMap(raw);if("SCC".equals(row.get("key"))&&Objects.equals(sourceHash,row.get("sourceSha256")))source=row;}
+        int ordinal=0;for(Object raw:DraftBusinessRules.list(source.get("paragraphBoundaries"))){Map<String,Object> boundary=DraftBusinessRules.asMap(raw);if(!Boolean.TRUE.equals(boundary.get("compactClearedGaps")))continue;NativeHeadingFlow flow=registered.get(ordinal++);List<Object> endpoints=new ArrayList<>();boolean removed=false;
+            for(String slot:Arrays.asList("heading","body")){
+                String id=String.valueOf(boundary.get(slot+"Id")),name="heading".equals(slot)?flow.getHeadingBookmark():flow.getBodyBookmark();List<Feature> present=markers.getOrDefault(name,Collections.emptyList());List<Map<String,Object>> rows=bound.getOrDefault(name,Collections.emptyList());
+                if(!present.isEmpty()){
+                    // Retained Not used headings remain part of the current source-bound document, even when their old body was removed.
+                    if(rows.size()==1&&"removed".equals(rows.get(0).get("locationStatus")))throw new IllegalStateException("HEADING_FLOW_REMOVAL_STILL_PRESENT: "+name);
+                    endpoints.add(DraftBusinessRules.map("slot",slot,"bookmarkName",name,"sourceParagraphId",id,"status","retained"));continue;
+                }
+                if(rows.size()!=1)throw new IllegalStateException("HEADING_FLOW_REMOVAL_BINDING_UNVERIFIED: "+name);Map<String,Object> binding=rows.get(0);
+                if(!name.equals(binding.get("bindingId"))||!id.equals(binding.get("sourceParagraphId"))||!"removed".equals(binding.get("locationStatus"))||!"applied".equals(binding.get("documentEditStatus"))||!"applied".equals(binding.get("applicationStatus"))||binding.get("sourceText")==null||!Objects.equals(binding.get("sourceTextHash"),DraftAdoption.hash(String.valueOf(binding.get("sourceText")))))throw new IllegalStateException("HEADING_FLOW_REMOVAL_BINDING_UNVERIFIED: "+name);
+                if(layout==null||!sourceHash.equals(layout.get("sourceSha256"))||!current.getSourceSha256().equals(layout.get("docxSha256"))||!(layout.get("compiledDocxSha256") instanceof String)||!String.valueOf(layout.get("compiledDocxSha256")).matches("[a-f0-9]{64}"))throw new IllegalStateException("HEADING_FLOW_REMOVAL_LINEAGE_UNVERIFIED: "+name);
+                Set<String> authorized=new LinkedHashSet<>();
+                for(Object operationId:DraftBusinessRules.list(binding.get("operationIds"))){String operation=String.valueOf(operationId);boolean adopted=false;for(Object action:DraftBusinessRules.list(binding.get("appliedActionIds")))if(DraftBusinessRules.list(binding.get("actionIds")).contains(action)&&(operation.equals(action)||operation.startsWith(action+"-")))adopted=true;if(!adopted)continue;
+                    int matches=0,operationRows=0;for(Map<String,Object> edit:operations)if(operation.equals(edit.get("operationId"))){if(++operationRows>1)throw new IllegalStateException("HEADING_FLOW_REMOVAL_OPERATION_AMBIGUOUS: "+name);
+                        if(!"REMOVE_NODES".equals(edit.get("type"))||!sourceHash.equals(edit.get("sourceSha256"))||!Objects.equals(layout.get("compiledDocxSha256"),edit.get("generatedSha256")))throw new IllegalStateException("HEADING_FLOW_REMOVAL_OPERATION_UNVERIFIED: "+name);
+                        for(Object targetRaw:DraftBusinessRules.list(edit.get("targets"))){Map<String,Object> target=DraftBusinessRules.asMap(targetRaw),anchor=DraftBusinessRules.asMap(target.get("source"));if(id.equals(anchor.get("id"))&&Objects.equals(boundary.get(slot+"Sha256"),anchor.get("sha256"))&&DraftBusinessRules.list(anchor.get("paragraphIds")).contains(id)&&"REMOVED".equals(target.get("status"))&&target.get("generatedId")==null&&target.get("afterSha256")==null)matches++;}
+                    }
+                    if(matches>1)throw new IllegalStateException("HEADING_FLOW_REMOVAL_OPERATION_AMBIGUOUS: "+name);if(matches==1)authorized.add(operation);
+                }
+                if(authorized.isEmpty())throw new IllegalStateException("HEADING_FLOW_REMOVAL_OPERATION_UNVERIFIED: "+name);removed=true;endpoints.add(DraftBusinessRules.map("slot",slot,"bookmarkName",name,"sourceParagraphId",id,"sourceNodeSha256",boundary.get(slot+"Sha256"),"status","removed","operationIds",new ArrayList<>(authorized)));
+            }
+            if(!removed){active.add(flow);continue;}
+            for(Object endpointRaw:endpoints){Map<String,Object> endpoint=DraftBusinessRules.asMap(endpointRaw);if(!"retained".equals(endpoint.get("status")))continue;String name=String.valueOf(endpoint.get("bookmarkName"));List<Map<String,Object>> rows=bound.getOrDefault(name,Collections.emptyList());List<Feature> present=markers.getOrDefault(name,Collections.emptyList());
+                if(rows.size()!=1||present.size()!=1||!present.get(0).isComplete()||!name.equals(rows.get(0).get("bindingId"))||!Objects.equals(endpoint.get("sourceParagraphId"),rows.get(0).get("sourceParagraphId"))||!"exact".equals(rows.get(0).get("locationStatus")))throw new IllegalStateException("HEADING_FLOW_RETAINED_ENDPOINT_UNVERIFIED: "+name);
+                Paragraph paragraph=null;for(Paragraph candidate:current.getMainParagraphs())if(present.get(0).getStartId().startsWith(candidate.getId()+"/")&&present.get(0).getEndId().startsWith(candidate.getId()+"/"))paragraph=candidate;
+                if(paragraph==null||paragraph.getCatalogText().trim().isEmpty()||!Objects.equals(paragraph.getId(),rows.get(0).get("resultParagraphId"))||!Objects.equals(DraftAdoption.hash(paragraph.getText()),rows.get(0).get("textHash")))throw new IllegalStateException("HEADING_FLOW_RETAINED_ENDPOINT_UNVERIFIED: "+name);
+            }
+            excluded.add(DraftBusinessRules.map("registeredOrdinal",ordinal,"headingBookmark",flow.getHeadingBookmark(),"bodyBookmark",flow.getBodyBookmark(),"reason","source_bound_adopted_remove_nodes","endpoints",endpoints));
+        }
+        proof.put("headingFlowActive",active.size());proof.put("headingFlowExcludedAuthorized",excluded.size());proof.put("excludedAuthorizedHeadingFlows",excluded);return Collections.unmodifiableList(active);
+    }
+    private static List<Object> withSourceRemovals(String previousJson,DocxEditResult result,Map<String,Object> current) {
+        List<Object> rows=new ArrayList<>();
+        if(current!=null)for(Object raw:JsonUtils.readList(previousJson,Object.class)){Map<String,Object> edit=DraftBusinessRules.asMap(raw);if("REMOVE_NODES".equals(edit.get("type"))&&Objects.equals(current.get("sourceSha256"),edit.get("sourceSha256"))&&Objects.equals(current.get("compiledDocxSha256"),edit.get("generatedSha256")))rows.add(raw);}
+        rows.addAll(result.getLedger());if(current!=null)rows.add(current);return rows;
+    }
+
     private static NodeAnchor anchor(TemplateIndex index,Map<String,Object> entry,String prefix){NodeAnchor node=index.anchor(String.valueOf(entry.get(prefix+"Id")));if(!node.getSha256().equals(entry.get(prefix+"Sha256")))throw new IllegalStateException("Native layout registry anchor mismatch: "+node.getId());return node;}
     private static NodeAnchor cellFlowAnchor(TemplateIndex index,Map<String,Object> entry){String id=String.valueOf(entry.get("paragraphId"));Paragraph paragraph=index.paragraph(id);if(paragraph.getCellId()==null&&!paragraph.getText().isEmpty()||!DraftPdfConverter.sha256(paragraph.getText().getBytes(java.nio.charset.StandardCharsets.UTF_8)).equals(entry.get("paragraphTextSha256")))throw new IllegalStateException("Native cell flow registry paragraph mismatch: "+id);return index.anchor(id);}
     static Map<String,Object> info(String key,String rendererKind,DocxEditResult result) {
@@ -73,6 +120,6 @@ final class DraftNativeLayout {
             actions.add(action);
         }
         Map<String,Object> stories=DraftBusinessRules.asMap(current.get("nativeStories"));if(!stories.isEmpty()){Map<String,Object> nextStories=new LinkedHashMap<>(stories);nextStories.put("parentDocxSha256",stories.get("docxSha256"));nextStories.put("docxSha256",result.getDocxSha256());for(Map.Entry<String,Object> entry:DraftBusinessRules.asMap(stories.get("entryHashes")).entrySet())if(!Objects.equals(entry.getValue(),result.getIndex().getEntryHashes().get(entry.getKey()))){nextStories.put("status","native_story_part_changed");current.put("status","unavailable");}current.put("nativeStories",nextStories);}
-        current.put("actions",actions);return ledger(result,current);
+        current.put("actions",actions);return withSourceRemovals(previousJson,result,current);
     }
 }

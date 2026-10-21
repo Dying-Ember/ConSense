@@ -215,6 +215,166 @@ class AdviceClauseAttributionPublicationTest {
         BizException repeated=assertThrows(BizException.class,()->accept(f,opening(f)));assertTrue(repeated.getMessage().contains("accepted section ID"));
     }
 
+    @Test
+    void typedSelectedMemberLeadingConditionCannotDisappearAtPublication() throws Exception {
+        String literal="For an authored activity only, ALPHA shall take precedence over BETA.";
+        Fixture legacy=fixture(Collections.singletonList(source("31",literal,null,false)),false);begin(legacy,false);accept(legacy,opening(legacy));
+        AdvisoryHarness.Section oldBad=section(legacy,"ALPHA > BETA [31].","sec-legacy-self-condition");scopeRefs(oldBad,"[31]");accept(legacy,oldBad);
+        assertEquals(Collections.singletonList("limits"),ids(legacy));assertEquals(1,legacy.published.size());
+        assertTrue(errors(legacy).toString().contains("derived_precedence_order_lost_qualifier"));
+        List<CitationVO> typed=Collections.singletonList(authoredSelectedConditionalSource(literal));
+        for(String text:Arrays.asList("ALPHA > BETA [31].","- **最高优先级**：ALPHA。\n- **最低优先级**：BETA [31]。")){
+            Fixture f=fixture(typed,true);begin(f,false);accept(f,opening(f));
+            AdvisoryHarness.Section bad=section(f,text,"sec-typed-self-condition");scopeRefs(bad,"[31]");String original=JsonUtils.write(bad);accept(f,bad);
+            assertEquals(Collections.singletonList("limits"),ids(f));assertEquals(1,f.published.size());
+            assertTrue(errors(f).toString().contains("derived_precedence_order_lost_qualifier"),errors(f).toString());
+            assertTrue(errors(f).toString().contains("[31]"));assertEquals(original,JsonUtils.write(bad));
+        }
+        AdvicePrecedenceOwnership.Ownership bound=AdvicePrecedenceOwnership.resolve(typed,typed,scopeLeadingCondition());
+        assertTrue(bound.bound);assertFalse(bound.unresolvedConditionAlias);assertEquals(1,bound.conditions.size());assertEquals("[31]",bound.conditions.get(0).alias);
+        for(String text:Arrays.asList("For the authored activity only, ALPHA > BETA [31].",
+                "仅对作者夹具限定的活动，ALPHA > BETA [31]。",
+                "仅对作者夹具限定的活动 [31]：\n- **最高优先级**：ALPHA。\n- **最低优先级**：BETA。")){
+            Fixture f=fixture(typed,text.contains("仅对"));begin(f,false);accept(f,opening(f));
+            AdvisoryHarness.Section good=section(f,text,"sec-typed-self-condition-good");scopeRefs(good,"[31]");accept(f,good);
+            assertTrue(errors(f).isEmpty(),text+"\n"+errors(f));assertEquals(2,f.published.size());
+        }
+    }
+
+    @Test
+    @org.junit.jupiter.api.condition.EnabledIfSystemProperty(named="consense.advice.scopeRankReplay",matches=".+")
+    void exactSaved48RankIsRejectedAndRaw46ScopeReferenceIsRetained() throws Exception {
+        JsonNode replay=scopeRankReplay();List<CitationVO> sources=scopeReplaySources(replay);
+        Fixture f=fixture(sources,true);begin(f,false);accept(f,opening(f));
+        AdvisoryHarness.Section bad=section(f,replay.path("saved48PriorityProse").asText(),"sec-real48-prose-carrier");scopeRefs(bad,"[8]");
+        String original=JsonUtils.write(bad);accept(f,bad);
+        assertEquals(Collections.singletonList("limits"),ids(f));assertEquals(1,f.published.size());
+        assertTrue(errors(f).toString().contains("derived_precedence_order_lost_qualifier"),errors(f).toString());
+        assertTrue(errors(f).toString().contains("[16]"));assertEquals(original,JsonUtils.write(bad));
+        String repair=ReflectionTestUtils.invokeMethod(f.publication,"repairInstruction",JsonUtils.write(bad));
+        assertTrue(repair.contains("priority rank labels"));assertTrue(repair.contains("offsetUnit=utf16"));
+        Fixture prior=fixture(sources,true);begin(prior,false);
+        accept(prior,JsonUtils.mapper().convertValue(replay.path("raw46Opening"),AdvisoryHarness.Section.class));
+        AdvisoryHarness.Section raw46=JsonUtils.mapper().convertValue(replay.path("raw46RepairSection"),AdvisoryHarness.Section.class);String raw=JsonUtils.write(raw46);accept(prior,raw46);
+        assertTrue(errors(prior).isEmpty(),errors(prior).toString());assertEquals(2,prior.published.size());assertEquals(raw,JsonUtils.write(raw46));
+        // PASS here is the preserved publication/scope gate only; the separate46 date/effect quality defects remain recorded.
+    }
+
+    @Test
+    @org.junit.jupiter.api.condition.EnabledIfSystemProperty(named="consense.advice.scopeRankReplay",matches=".+")
+    void exactSaved48RankCannotBeReleasedByAddingOnlyGoverningAlias() throws Exception {
+        JsonNode replay=scopeRankReplay();List<CitationVO> sources=scopeReplaySources(replay);
+        String bullet="**最高优先级**：PSS（在与 GS CEW 或 SL 冲突时均优先）。";
+        String prose=replay.path("saved48PriorityProse").asText();assertTrue(prose.contains(bullet));
+        String aliasOnly=prose.replace(bullet,bullet+" [16]");
+        assertEquals(prose,aliasOnly.replace(bullet+" [16]",bullet),"The negative changes only the governing alias");
+        Fixture f=fixture(sources,true);begin(f,false);accept(f,opening(f));
+        AdvisoryHarness.Section bad=section(f,aliasOnly,"sec-real48-alias-only");scopeRefs(bad,"[8]","[16]");
+        String original=JsonUtils.write(bad);accept(f,bad);
+        assertEquals(Collections.singletonList("limits"),ids(f));assertEquals(1,f.published.size());
+        assertTrue(errors(f).toString().contains("derived_precedence_order_lost_qualifier"),errors(f).toString());
+        assertTrue(errors(f).toString().contains("[16]"));assertEquals(original,JsonUtils.write(bad));
+    }
+
+    @Test
+    @org.junit.jupiter.api.condition.EnabledIfSystemProperty(named="consense.advice.scopeRankReplay",matches=".+")
+    void scopeReferenceCannotUseAnEmptyLabelAndAliasAntecedent() throws Exception {
+        JsonNode replay=scopeRankReplay();String prose=replay.path("saved48PriorityProse").asText();
+        String rank=prose.substring(prose.indexOf("**综合优先层级**"));
+        String unresolved="该文(c)项的范围另核 [16]。\n\n依据上述(c)项：\n"+rank;
+        Fixture f=fixture(scopeReplaySources(replay),true);begin(f,false);accept(f,opening(f));
+        AdvisoryHarness.Section bad=section(f,unresolved,"sec-empty-scope-antecedent");scopeRefs(bad,"[8]","[16]");
+        String original=JsonUtils.write(bad);accept(f,bad);
+        assertEquals(Collections.singletonList("limits"),ids(f));assertEquals(1,f.published.size());
+        assertTrue(errors(f).toString().contains("derived_precedence_order_lost_qualifier"),errors(f).toString());
+        assertTrue(errors(f).toString().contains("[16]"));assertEquals(original,JsonUtils.write(bad));
+    }
+
+    @Test
+    @org.junit.jupiter.api.condition.EnabledIfSystemProperty(named="consense.advice.scopeRankReplay",matches=".+")
+    void typedScopeBindingDoesNotUseForeignIncompleteOrUnrelatedConditions() throws Exception {
+        JsonNode replay=scopeRankReplay();List<CitationVO> sources=scopeReplaySources(replay);
+        AdvicePrecedenceOwnership.Ownership actual=scopeOwnership(sources);
+        assertTrue(actual.bound);assertFalse(actual.unresolvedConditionAlias);assertEquals(1,actual.conditions.size());
+        assertEquals("[16]",actual.conditions.get(0).alias);assertEquals("1(c)",actual.conditions.get(0).reference);
+        for(String mutation:Arrays.asList("source","part","incomplete","missing-member","duplicate-member")){
+            List<CitationVO> copy=scopeReplaySources(replay);ObjectNode context=(ObjectNode)copy.get(7).getCanonicalEvidence().get(0).getNativeWordSourceScopesContext();
+            if("source".equals(mutation))context.put("sourceSha256",String.join("",Collections.nCopies(64,"f")));
+            if("part".equals(mutation))((ObjectNode)context.path("members").get(0).path("sourcePosition")).put("partSha256",String.join("",Collections.nCopies(64,"f")));
+            if("incomplete".equals(mutation))((ObjectNode)context.path("ranges").get(0)).put("scopeComplete",false);
+            if("missing-member".equals(mutation))((com.fasterxml.jackson.databind.node.ArrayNode)context.path("members")).remove(2);
+            if("duplicate-member".equals(mutation))((com.fasterxml.jackson.databind.node.ArrayNode)context.path("members")).add(context.path("members").get(0).deepCopy());
+            assertFalse(scopeOwnership(copy).bound,mutation);
+            Fixture invalid=fixture(copy,true);begin(invalid,false);accept(invalid,opening(invalid));
+            AdvisoryHarness.Section rank=section(invalid,replay.path("saved48PriorityProse").asText(),"sec-unknown-scope");scopeRefs(rank,"[8]");accept(invalid,rank);
+            assertEquals(1,invalid.published.size(),mutation);assertTrue(errors(invalid).toString().contains("derived_precedence_source_scope_unknown"),mutation+errors(invalid));
+        }
+        List<CitationVO> noAlias=scopeReplaySources(replay);noAlias.remove(15);AdvicePrecedenceOwnership.Ownership absent=AdvicePrecedenceOwnership.resolve(Collections.singletonList(noAlias.get(7)),noAlias,scopeLeadingCondition());
+        assertTrue(absent.bound);assertTrue(absent.unresolvedConditionAlias,"A context member must not invent a public citation alias");
+        List<CitationVO> unrelated=scopeReplaySources(replay);unrelated.add(source("22","For an unrelated activity only, keep a record.",null,false));
+        Fixture f=fixture(unrelated,true);begin(f,false);accept(f,opening(f));
+        AdvisoryHarness.Section bad=section(f,"仅对另一活动适用 [22]。\n\n"+replay.path("saved48PriorityProse").asText(),"sec-unrelated");scopeRefs(bad,"[8]","[22]");accept(f,bad);
+        assertEquals(1,f.published.size());assertTrue(errors(f).toString().contains("[16]"));
+    }
+
+    @Test
+    @org.junit.jupiter.api.condition.EnabledIfSystemProperty(named="consense.advice.scopeRankReplay",matches=".+")
+    void scopedRanksSeparateRulesMathAndOriginalQuotesKeepTheirExistingBoundaries() throws Exception {
+        JsonNode replay=scopeRankReplay();String prose=replay.path("saved48PriorityProse").asText();
+        String rank=prose.substring(prose.indexOf("**综合优先层级**"));
+        String direct="仅对场地界线外的道路及排水工程 [16]：\n"+rank;
+        String reference="该文(c)项规定场地界线外道路及排水工程的范围 [16]。\n\n依据上述(c)项：\n"+rank;
+        String symbolic="仅对场地界线外的道路及排水工程，PSS > GS CEW > SL [16][8]。";
+        String separate="受第1、2项约束，在适用时，PSS > SL [6]。\n\n"+direct;
+        String english=direct.replace("最高优先级","Highest priority").replace("次高优先级","Next priority").replace("最低优先级","Lowest priority");
+        for(String good:Arrays.asList(direct,english,reference,symbolic,separate,"9 > 7 > 3; x > y; PSS -> SL; PSS >= SL; 最高温度：35 [8]。",
+                "来源原文：\""+scopeReplaySources(replay).get(7).getContent()+"\" [8]。")){
+            List<CitationVO> sources=scopeReplaySources(replay);Fixture f=fixture(sources,true);begin(f,false);accept(f,opening(f));
+            AdvisoryHarness.Section section=section(f,good,"sec-positive");scopeRefs(section,"[6]","[8]","[16]");accept(f,section);
+            assertTrue(errors(f).isEmpty(),good+"\n"+errors(f));assertEquals(2,f.published.size());
+        }
+    }
+
+    /** Entirely authored structural carrier; no real source text, original hash or business acceptance is borrowed. */
+    private CitationVO authoredSelectedConditionalSource(String literal){
+        CitationVO source=source("31",literal,null,false);String identity="AUTHORED selected-conditional-member fixture";
+        String original=com.consense.service.vetting.VettingCorpus.hash(identity+" original"),parsed=com.consense.service.vetting.VettingCorpus.hash(identity+" parsed");
+        source.setSourceHash(parsed);source.setOriginalSourceSha256(original);
+        EvidencePointer p=source.getCanonicalEvidence().get(0);p.setProjectId("authored-selected-condition");p.setOriginalSourceSha256(original);p.setJavaParsedSourceHash(parsed);
+        p.setCanonicalSourceHash(com.consense.service.vetting.VettingCorpus.hash(identity+" canonical"));p.setSourceRevisionSha256(com.consense.service.vetting.VettingCorpus.hash(identity+" revision"));
+        p.setProjectionSha256(com.consense.service.vetting.VettingCorpus.hash(identity+" projection"));p.setProjectionRevisionSha256(com.consense.service.vetting.VettingCorpus.hash(identity+" projection revision"));
+        ObjectNode unit=(ObjectNode)source.getCanonicalSourceUnit(),member=(ObjectNode)unit.path("members").get(0),part=(ObjectNode)member.path("parts").get(0);
+        part.put("blockId","authored:block31");part.put("startOffset",0);part.put("endOffset",literal.length());part.put("offsetUnit","utf16");
+        ObjectNode position=part.putObject("sourcePosition");position.put("kind","docx_native");position.put("partName","word/document.xml");position.put("nodePath","/authored/p[1]");
+        position.put("sourceSha256",original);position.put("partSha256",com.consense.service.vetting.VettingCorpus.hash(identity+" part"));p.setParts(member.path("parts").deepCopy());
+        member.put("documentId",source.getDocumentId());member.put("role",source.getSourceRole());member.put("sourceHash",p.getCanonicalSourceHash());member.put("sourceRevisionSha256",p.getSourceRevisionSha256());
+        ObjectNode context=JsonUtils.mapper().createObjectNode();context.put("version","docx-source-clause-scopes-v1");context.put("sourceSha256",original);context.put("originalSourceSha256",original);
+        context.put("sourceRevisionSha256",p.getSourceRevisionSha256());context.put("projectionSha256",p.getProjectionSha256());context.put("canonicalChunkId",p.getCanonicalChunkId());
+        context.put("selectedPartsSha256",com.consense.service.vetting.VettingCorpus.hash(JsonUtils.write(p.getParts())));context.put("generationSha256",com.consense.service.vetting.VettingCorpus.hash(identity+" generation"));context.putArray("issues");
+        ObjectNode sourceIdentity=context.putObject("source");sourceIdentity.put("projectId",p.getProjectId());sourceIdentity.put("documentId",source.getDocumentId());sourceIdentity.put("role",source.getSourceRole());sourceIdentity.put("parsedSourceHash",parsed);
+        ObjectNode scopeMember=context.putArray("members").addObject();scopeMember.put("id","authored:scope-member31");scopeMember.putArray("retainedBlockIds").add(part.path("blockId").asText());
+        scopeMember.set("sourcePosition",position.deepCopy());scopeMember.putObject("textObservation").put("text",literal);
+        ObjectNode range=context.putArray("ranges").addObject();range.put("reference","authored-scope-a");range.put("status","source_syntax_complete");range.put("scopeComplete",true);
+        range.put("hierarchyStatus","source_interval_containment_only");range.putNull("parentId");range.put("semanticApplicabilityVerified",false);range.put("automaticEditEligible",false);
+        range.putArray("orderedMemberIds").add(scopeMember.path("id").asText());ObjectNode start=range.putObject("startBoundary");start.put("memberId",scopeMember.path("id").asText());start.set("sourcePosition",position.deepCopy());
+        ObjectNode end=range.putObject("endBoundary");end.put("memberId","authored:next-member32");ObjectNode endPosition=position.deepCopy();endPosition.put("nodePath","/authored/p[2]");end.set("sourcePosition",endPosition);
+        p.setNativeWordSourceScopesContext(context);return source;
+    }
+
+    private JsonNode scopeRankReplay() throws Exception {
+        java.nio.file.Path path=java.nio.file.Paths.get(System.getProperty("consense.advice.scopeRankReplay"));
+        byte[] bytes=java.nio.file.Files.readAllBytes(path);String text=new String(bytes,java.nio.charset.StandardCharsets.UTF_8);
+        assertEquals("e80d151b2ba69f0e22312dd0163003ec700ee02a641fe512e75c8f271a41d052",com.consense.common.Utf8.sha256(text));JsonNode replay=JsonUtils.parse(text);
+        assertEquals(48,replay.path("assistantMessageId").asInt());assertEquals("28ffad55-406d-4c04-9977-0e4311713970",replay.path("sessionId").asText());
+        assertEquals("b453b0443c061e33526bf9fea14dcec68c2e5fa905c0a80db90d87167a8f748d",replay.path("historySha256").asText());
+        assertArrayEquals(bytes,java.nio.file.Files.readAllBytes(path));return replay;
+    }
+    private List<CitationVO> scopeReplaySources(JsonNode replay){return JsonUtils.readList(JsonUtils.write(replay.path("sources")),CitationVO.class);}
+    private java.util.regex.Pattern scopeLeadingCondition(){return (java.util.regex.Pattern)ReflectionTestUtils.getField(AdvisoryHarness.class,"LEADING_CONDITION");}
+    private AdvicePrecedenceOwnership.Ownership scopeOwnership(List<CitationVO> sources){return AdvicePrecedenceOwnership.resolve(Collections.singletonList(sources.get(7)),sources,scopeLeadingCondition());}
+    private void scopeRefs(AdvisoryHarness.Section section,String... aliases){section.setCitations(Arrays.asList(aliases));for(AdvisoryHarness.Check check:section.getChecks())if(!check.getCitations().isEmpty())check.setCitations(Collections.singletonList(aliases[0]));}
+
+
     private static final class Fixture {Object publication;boolean chinese;List<String> published=new ArrayList<>();}
     private Fixture fixture(List<CitationVO> sources,boolean chinese)throws Exception {
         Fixture f=new Fixture();AdviceProgress progress=new AdviceProgress(){public boolean streaming(){return true;}public void section(String text,List<String> refs,List<CitationVO> cited){f.published.add(text);}};

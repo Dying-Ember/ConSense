@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict')
 const path = require('node:path')
 const { loadTypeScript } = require('./helpers/load-typescript.cjs')
-const runtime = loadTypeScript(path.join(__dirname, '../src/drafting/bill-distribution.ts'), {})
+const runtime = loadTypeScript(path.join(__dirname, '../src/drafting/bill-distribution.ts'), { dependencies: { './bill-identities': './bill-identities.ts' } })
 const { billDistribution } = runtime
 const rows = [
   { id: 'b1', number: '1', description: 'Preliminaries', type: 'BQ', purpose: null },

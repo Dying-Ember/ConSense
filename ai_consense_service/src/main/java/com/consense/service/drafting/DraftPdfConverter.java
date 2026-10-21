@@ -21,11 +21,12 @@ public final class DraftPdfConverter {
         return convert(exactDocx,System.nanoTime()+TimeUnit.MILLISECONDS.toNanos(profile==null?1:profile.getTimeoutMillis()));
     }
     DraftTocFinalizer.Result finalizeToc(byte[] exactDocx) {return finalizeToc(exactDocx,null);}
-    DraftTocFinalizer.Result finalizeToc(byte[] exactDocx,String originalSourceSha256) {
+    DraftTocFinalizer.Result finalizeToc(byte[] exactDocx,String originalSourceSha256) {return finalizeToc(exactDocx,originalSourceSha256,Collections.emptyList(),Collections.emptyList());}
+    DraftTocFinalizer.Result finalizeToc(byte[] exactDocx,String originalSourceSha256,List<Map<String,Object>> bindings,List<Object> ledger) {
         // One bounded dynamic request includes up to three conversions and their version probes.
         long budget=originalSourceSha256==null?(profile==null?1:profile.getTimeoutMillis()):240000;
         long deadline=System.nanoTime()+TimeUnit.MILLISECONDS.toNanos(budget);
-        return DraftTocFinalizer.finish(exactDocx,originalSourceSha256,bytes->convert(bytes,deadline));
+        return DraftTocFinalizer.finish(exactDocx,originalSourceSha256,bindings,ledger,bytes->convert(bytes,deadline));
     }
     private DraftPdfConversionResult convert(byte[] exactDocx,long deadline) {
         if(profile!=null&&profile.getEngine()==DraftPdfRenderProfile.Engine.DESKTOP_X2T)return new DraftDesktopPdfAdapter(profile).convert(exactDocx);
