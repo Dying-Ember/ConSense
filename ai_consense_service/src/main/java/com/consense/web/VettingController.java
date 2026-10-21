@@ -28,6 +28,12 @@ public class VettingController {
         return ApiResponse.ok(vettingService.listFiles(projectId));
     }
 
+    @PutMapping("/sources/{documentId}/role")
+    public ApiResponse<VettingFileVO> confirmSourceRole(@PathVariable String projectId,@PathVariable Long documentId,
+            @Valid @RequestBody SourceRoleConfirmationRequest request) {
+        return ApiResponse.ok(vettingService.confirmSourceRole(projectId,documentId,request));
+    }
+
     @PostMapping("/package/upload")
     public ApiResponse<UploadResultVO> upload(@PathVariable String projectId,
                                               @RequestParam("files") List<MultipartFile> files,

@@ -1,3 +1,9 @@
+<!-- human-acceptance-goal-20261021:start -->
+**2026-10-21 新统一 Goal 已实际 active；用户取消八点要求，并将“尽快走通人可以验收的流程，报告、前端适合人类阅读使用”定为当前最高优先级。** 接续现有修复与证据，不重置数据或重发旧实验。第一阶段先做真实前端与三模块可用结果、正式 Word/PDF；Root 接 formal22 升级和实际 2b Vetting，Drafting 并行收口 SCC 目录／标题／页脚。局部回归、合成报告、服务健康不代替真实资料和可读性验收。OER 阻塞项立即修，全七版本 SL 质量与质量通过后的完整包后续继续。当前执行以[重写目标及 H1–H8 验收项](testing/unified-e2e-oer-goal-20261020.md)为准；以下运行快照和旧授权按各自历史语境读取。
+<!-- human-acceptance-goal-20261021:end -->
+
+**最新执行增量见 [progress48](testing/three-module-runtime-progress-20261021.md#progress48统一-wordlibreoffice-输出目录定版通过继续真实页面验收)：** 共同 Word→LibreOffice PDF、用途确认和逐文件上传修复已采用主树，后端仍 formal22，当前原批次逐页 OCR 不重发／不重启。SCC 92 项目录的实际两次定版已通过，但仍发现其他孤立标题，整体版式及产品保存集成未过；七版本 SL 包继续后置。
+
 <!-- unified-progress47:start -->
 **2026-10-21当前：Vetting5文件已采用、41回归与生成2通过，新Word42／native43全页字号／续页已核，当前主树产品与新JAR完整核同，未部署。** 两报告仍是1072B／9段自造SCT来源，long180仅内部容量控制；下一读者验收必须实际2b资料、对照2d。开发22隔离恢复／fresh reopen已通过：22表1297行、19DOCX／9PDF、21项目15列完整核；formal19／H2保持。新SCC92目录40PASS／52FAIL、两标题孤立FAIL；清指导链29窗24PASS／5fixture属性缺失SKIP，原失败保留、只补5。浏览器新授权测试空间6/p1，旧5不存在，个人空间未动。见[progress47](testing/three-module-runtime-progress-20261021.md#progress47报告修复已集成恢复通过转实际2b资料验收)。Goal active，SL未过不打包；以下旧状态按历史读取。
 <!-- unified-progress47:end -->

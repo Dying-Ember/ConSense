@@ -12,6 +12,7 @@ import java.util.List;
 public interface VettingRunRepository extends JpaRepository<VettingRun, String> {
     Optional<VettingRun> findFirstByProjectIdOrderByStartedAtDesc(String projectId);
     List<VettingRun> findByStatusIn(List<String> statuses);
+    boolean existsByProjectIdAndStatusIn(String projectId,List<String> statuses);
 
     @org.springframework.data.jpa.repository.Lock(javax.persistence.LockModeType.PESSIMISTIC_WRITE)
     @Query("select r from VettingRun r where r.id = :id")

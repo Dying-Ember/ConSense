@@ -7,10 +7,13 @@ import com.consense.repository.ProjectRepository;
 import com.consense.repository.VettingRunRepository;
 import com.consense.service.seed.DemoDataInitializer;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeEach;
+import com.consense.service.vetting.VettingDocxPdfFixture;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.boot.test.mock.mockito.SpyBean;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -47,6 +50,11 @@ class VettingChecklistWorkflowTest {
     @DynamicPropertySource static void isolate(DynamicPropertyRegistry r) {
         r.add("spring.datasource.url",()->"jdbc:h2:mem:checklist_"+ISOLATION+";MODE=MySQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE");
         r.add("consense.storage-root",()->Paths.get("target/checklist-uploads",ISOLATION).toAbsolutePath().toString());
+    }
+    @SpyBean com.consense.service.drafting.DraftingService drafting;
+    @BeforeEach void softwareRenderer() {
+        // Explicit renderer replacement: checklist persistence/content only, not LibreOffice acceptance.
+        org.mockito.Mockito.doAnswer(call->VettingDocxPdfFixture.render(call.getArgument(0))).when(drafting).renderPdf(org.mockito.ArgumentMatchers.any(byte[].class));
     }
     @MockBean DemoDataInitializer seed;
     @Autowired MockMvc mvc;

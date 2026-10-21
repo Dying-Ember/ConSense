@@ -486,7 +486,7 @@ public class CanonicalEvidenceService {
     }
     private void assertCurrent(CanonicalSourceBinding binding,String module){sources.assertCurrent(binding,module);}
     private SourceDocument currentDocument(String projectId,Long id,String module){return sources.currentDocument(projectId,id,module);}
-    static String routingHash(SourceDocument d){return CanonicalJson.sha(JsonUtils.write(Arrays.asList(d.getCategory(),d.getFileKey(),d.getReviewRole(),d.getDocumentScope(),d.getParseStatus(),d.getOerIdentityJson())).getBytes(StandardCharsets.UTF_8));}
+    public static String routingHash(SourceDocument d){return CanonicalJson.sha(JsonUtils.write(Arrays.asList(d.getCategory(),d.getFileKey(),d.getReviewRole(),d.getDocumentScope(),d.getParseStatus(),d.getOerIdentityJson())).getBytes(StandardCharsets.UTF_8));}
     public static void validateBindingPins(CanonicalSourceBinding binding,JsonNode snapshot){
         JsonNode identity=snapshot.path("projectionIdentity");
         if(NormalObservedContract.isNormal(snapshot)){

@@ -1,3 +1,31 @@
+<!-- unified-progress48:start -->
+## progress48：统一 Word／LibreOffice 输出，目录定版通过，继续真实页面验收
+
+**2026-10-21 当前：共同 PDF、逐文件用途确认和上传进度修复已采用主树，后端仍是 formal22，尚未部署本轮后端改动。** Goal 保持 active；无新增技术栈或依赖。当前真实 2b 项目尚未运行本轮 LLM 审查，不能把下面内部回归的报告当作比赛项目交付。
+
+- **共同分页：** Vetting 正式 PDF 入口复用 Drafting 既有精确 DOCX／profile 缓存与 LibreOffice 转换；Word／PDF 使用同一确定性 Word 稿和保存快照。既有 PDFBox 仅补文档信息中的快照标识，不重排页面。两处重复 `w:pPr` 已修，标题与表头的 keep 设置进入唯一属性容器。此前 55 个唯一软件方法的 PASS 分布在组合及补测窗口，旧失败保留，不称单窗全绿。[软件执行](../../../.local/joint-docx-pagination01/paragraph-regression/supplement04.log)、[正式调用审查](../../../.local/joint-docx-pagination01/conversion/formal-export-audit.md)。
+- **真实 LibreOffice：** native02 内部保存案例实际 42 页，全部实际页的页眉、PAGE／NUMPAGES、11pt 家具及元数据绑定前后页面内容流／尺寸相同。Root 查看全部 42 页联系图后发现 A005 一词残尾；单加段落 keepLines 的 native04 候选实际无效，保留 FAIL。后继仅凝聚已归属记录内的 narrative 行，native05 的 7 软件＋2 实转方法全部 PASS；42 页保存案例 A005／A010／A015 的完整短段与 owner 同页，另 600 单元长说明在报告第 21–33 页自然跨页、完整唯一有序并保留每页归属，无只有家具的正文页。Root 已亲看保存案例第 38–41 页的修复结果；长说明及其余最新页的图片检查继续。这是旧自造 SCT／明确容量控制回归，不授实际 2b 或整体读者质量通过。[native05 日志](../../../.local/joint-docx-pagination01/native/native05-executed.log)、[保存案例核对](../../../.local/joint-docx-pagination01/native/outputs/native05/native-regression-audit.json)、[长说明核对](../../../.local/joint-docx-pagination01/native/outputs/native05-long-narrative/long-narrative-check.json)。
+- **用途与前端：** 上传后逐文件人工用途确认使用 documentId 和原件／解析／路由三版本校验；并发旧实体保存不得覆盖人工用途，不重解析、不更改来源全文或法律采用。新 14 项真实隔离 JPA／HTTP 契约、12 项来源刷新及 1 项恢复补测合计 27 PASS。首次组合的 2 FAIL／1 ERROR／1 未启用类保留：Unicode 空白边界与 Windows 测试物理文件名已修；原恢复方法不改断言补测通过。前端累计 75 个控件／API 测试、类型检查和生产构建实际通过；主树采用正常业务摘要、折叠技术详情、图纸中性排除、用途确认和原始顺序逐文件上传。新上传每份得到结果并回读后再发送下一份，超时／断连或回读失败停队列，不重发或自动续传。两小时等待只延长观察，不代表 OCR 变快。[后端补测](../../../.local/vetting-source-purpose01/backend/java-regression02.log)、[前端验证](../../../.local/vetting-upload-queue01/verification.json)。
+- **真实 2b 尚在处理：** 33 范围内原件只有一次发送记录，两份图纸另已实际排除。最近目录观察为 9 件，Annex 1–6 仍是 47 页身份观察状态。WSL OER 日志从 17:10:42 至 17:56:09 持续逐页 OCR 返回 200，结合串行代码支持缓慢推进；这些日志无原件 SHA／物理页号，不计作逐页质量通过，也不能证明根请求终态。原请求不重发，后端和 H2 owner 不重启。[只读诊断及上传交接](../../../.local/vetting-upload-queue01/HANDOFF.md)、[最近目录观察](../../../.local/runtime-preparation22/real2b-intake-observation04.json)。
+- **SCC：** heading-flow 生成稿经两次实际 LO 后为 81 页；全部 92 项缓存＝本次目标页脚＝可见目录，23 项修正、69 项对照，1,625 个目标／CS／CL 点位不移动，原 parts 逆向恢复和负控均通过。软件首轮 1 PASS／3 FAIL 的原因是 XML 声明插入 `standalone="no"`；局部保留声明后原四软件检查通过。**整体版式仍 FAIL：** 81 页联系图已全部查看，22.301／22.303 在物理 68／69 页的原图确认与首正文同页，但又见 7.303／7.307／8.306／14.304 的标题分别留在物理 20／26／35／46 页，正文在下一页。目录与标题后继均尚未采用产品服务保存流程，不能记 H4 通过；继续同一已清指导语空段链的原生 Word 修复，不删除书签或按固定页码补丁。[真实两次定版结果](../../../.local/scc-current-toc-finalization01/native-heading/outputs/native01/native-heading-audit.json)、[92 项及点位明细](../../../.local/scc-current-toc-finalization01/native-heading/outputs/native01/toc-finalization-proof.json)。
+
+当前采用修复的 runtime23 已实际构建，325 个主树产品／资源输入按换行规范化与执行工程全文一致，809 个编译条目与 JAR 内字节相同；包 SHA `1fe993f373391cc9e7df67de5c795d88905403a4b28b9c7277f54bc1ba2da895`，仍未部署。[构建及采用收据](../../../.local/joint-docx-pagination01/package-main23-receipt.json)。此代码运行包不包含 SL 比赛资料打包。
+
+下一步是完成余下视觉缺陷和正式服务保存／下载核验；当前候选修复分别报告“已采用未部署”和“私有候选已实转”，不合并成正式验收结论。Advisory 新实际问答、七版 SL 全量质量及质量通过后的比赛包继续保留原范围；SL 包装仍后置。
+<!-- unified-progress48:end -->
+
+<!-- human-acceptance-goal-20261021:start -->
+## 当前执行目标：先交付人能验收的产品流程
+
+2026-10-21 用户暂停旧目标后要求重写，Root 查询 `goal=null` 后已实际创建新统一 Goal，状态 `active`，无 token 预算。用户明确取消八点约束；最高优先级改为尽快走通真实前端、三模块及可读正式报告。当前按[统一目标 H1–H8](unified-e2e-oer-goal-20261020.md)验收，后续 OER／七版本 SL 全量质量及质量通过后的比赛包不删减。旧失败和既有成果继承；改目标本身不是新业务进展，不重新估算整体百分比。
+
+下一件产物是升级已验证修复后，用实际 2b 项目资料在前端生成并下载可读 Vetting 报告；Drafting 最终版式及 Advisory 实质答复并行推进。下面 progress47 及更早是历史证据；formal22 入口准备完毕不表示已部署，真实 2b 流程仍未通过。
+
+**本轮实际执行增量：formal22 已升级并完成数据对照，开始真实 2b 前端接入。** 后端 14072／FILETIME134370463914108753、H2 owner38980 保持；after90 全部200、87body同字节、3报告差异的核心快照／findings／人工Checklist保持，typed8完整文件同字节。见[90接口收据](../../../.local/runtime-preparation22/api-after-receipt.json)、[typed4查询收据](../../../.local/runtime-preparation22/typed-after01/readonly-after01/complete-export-receipt.json)、[简明对照](../../../.local/runtime-preparation22/after-comparison-summary.json)。这是运行／保全结果，不是业务通过。
+
+旧空间6不存在，沿既有授权建立空间7／p1，实际看到 Vetting 主区仍暴露长hash／provider／canonical等技术记录，已安排最小可读性候选。浏览器新建 `proj_mvhvznh0z8ed`，两图纸实际排除、零OCR／零正文；33范围内原件已一次提交、解析中，未运行本轮真实LLM审查。部分已返文件用途仍unknown，继续记录为实际接入缺口。用户要求统一分页：已确认Drafting正式PDF走LO、Vetting仍走独立PDFBox；共同DOCX→LO候选与重复pPr两行修复在隔离验证，未采用／部署，不计H4／H7通过。
+<!-- human-acceptance-goal-20261021:end -->
+
 <!-- unified-progress47:start -->
 ## progress47：报告修复已集成、恢复通过，转实际2b资料验收
 

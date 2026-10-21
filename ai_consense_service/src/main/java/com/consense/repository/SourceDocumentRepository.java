@@ -146,6 +146,25 @@ public interface SourceDocumentRepository extends JpaRepository<SourceDocument, 
             @Param("originalSha") String originalSha, @Param("previousIdentity") String previousIdentity,
             @Param("identity") String identity);
 
+    /** Update only the explicit human role, against the exact current parsed/routing snapshot. */
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query("update SourceDocument d set d.reviewRole = :nextRole where d.id = :id and d.projectId = :project "
+            + "and d.sourceSha256 = :original and d.category = :category and d.fileName = :name "
+            + "and ((d.oerIdentityJson is null and :identity is null) or d.oerIdentityJson = :identity) "
+            + "and d.textContent = :text and ((d.structuredContentJson is null and :structure is null) or d.structuredContentJson = :structure) "
+            + "and ((d.fileKey is null and :fileKey is null) or d.fileKey = :fileKey) "
+            + "and ((d.reviewRole is null and :previousRole is null) or d.reviewRole = :previousRole) "
+            + "and ((d.documentScope is null and :scope is null) or d.documentScope = :scope) "
+            + "and d.parseStatus = :status and d.storagePath = :storage "
+            + "and not exists (select newer.id from SourceDocument newer where newer.projectId = d.projectId "
+            + "and newer.category in ('VETTING_PACKAGE','VETTING_SUPPLEMENT') and newer.id > d.id "
+            + "and lower(trim(newer.fileName)) = lower(trim(d.fileName))) "
+            + "and not exists (select run.id from VettingRun run where run.projectId = d.projectId and run.status in ('QUEUED','RUNNING'))")
+    int compareAndSetReviewRole(@Param("id") Long id,@Param("project") String project,@Param("original") String original,
+            @Param("category") String category,@Param("name") String name,@Param("identity") String identity,@Param("text") String text,
+            @Param("structure") String structure,@Param("fileKey") String fileKey,@Param("previousRole") String previousRole,
+            @Param("scope") String scope,@Param("status") String status,@Param("storage") String storage,@Param("nextRole") String nextRole);
+
     Optional<SourceDocument> findFirstByProjectIdAndFileKey(String projectId, String fileKey);
 
     Optional<SourceDocument> findFirstByProjectIdAndFileKeyAndCategory(String projectId, String fileKey, String category);

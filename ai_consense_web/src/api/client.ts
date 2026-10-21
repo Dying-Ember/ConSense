@@ -105,10 +105,10 @@ export const api = {
   post: <T>(url: string, body?: unknown, config?: RequestConfig) => unwrap<T>(http.post(url, body, profileConfig(config)), config?.reportError),
   put: <T>(url: string, body?: unknown) => unwrap<T>(http.put(url, body, profileConfig())),
   delete: <T>(url: string) => unwrap<T>(http.delete(url, profileConfig())),
-  upload: <T>(url: string, files: File[]) => {
+  upload: <T>(url: string, files: File[], timeoutMs?: number) => {
     const form = new FormData()
     files.forEach((file) => form.append('files', file))
-    return unwrap<T>(http.post(url, form, profileConfig({ headers: { 'Content-Type': 'multipart/form-data' } })))
+    return unwrap<T>(http.post(url, form, profileConfig({ ...(timeoutMs === undefined ? {} : { timeout: timeoutMs }), headers: { 'Content-Type': 'multipart/form-data' } })))
   },
   /** 单文件上传（字段名 file）：用于替换指定标准模板等场景 */
   uploadOne: <T>(url: string, file: File) => {

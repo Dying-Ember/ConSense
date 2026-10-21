@@ -123,6 +123,44 @@ class OerSourceMetadataTest {
         assertThrows(IllegalArgumentException.class,()->OerSourceMetadata.refreshedFixedIdentity(d,String.join("",java.util.Collections.nCopies(64,"a"))));
     }
 
+    @Test void reviewed_actual_2b_ntt_and_sct_refresh_source_purpose_without_recapturing_or_adopting_content() {
+        // The reviewed original-byte evidence is private; these are metadata contracts, not content-quality claims.
+        for(String[] source:new String[][]{
+                {"NTT","0cae753f94bac27bfaa992b55f9ba60d8d541d407313825fd3375d1ff41c3356"},
+                {"SCT","6d7802ea7b094124c0ddebb0b448c7e6bfe72828ffbc91ad1c30133902a6f64c"}}) {
+            SourceDocument d=document();d.setFileName("renamed-unrelated-reference.pdf");d.setFileKey(source[0]);d.setSourceSha256(source[1]);
+            d.setDocumentScope("package");d.setReviewRole("project_fact");d.setNativePdfEvidenceJson("AUTHORED retained evidence, not recaptured");
+            d.setOerIdentityJson("AUTHORED old identity");String before=JsonUtils.write(d),parsedHash=VettingCorpus.sourceHash(d);
+            OerDocumentIdentity next=OerSourceMetadata.refreshedFixedIdentity(d,source[1]);
+            assertEquals(source[0],next.getKind());assertEquals(source[1],next.getSourceSha256());assertEquals("sha_verified",next.getIdentityStatus());
+            assertEquals("project_document",next.getSourcePurpose());assertEquals("tender",next.getRole());
+            assertTrue(next.getEligibleModules().containsAll(java.util.Arrays.asList("vetting","advisory")));
+            assertEquals("fixed_source_sha256",next.getIdentityEvidence().get(0).getBasis());
+            assertEquals(before,JsonUtils.write(d));assertEquals(parsedHash,VettingCorpus.sourceHash(d));
+            assertEquals("project_fact",d.getReviewRole(),"Source identity refresh cannot replace an explicit human role");
+            assertThrows(IllegalArgumentException.class,()->OerSourceMetadata.refreshedFixedIdentity(d,SHA));
+        }
+    }
+
+    @Test void reviewed_2b_entries_do_not_promote_2a_templates_unregistered_bytes_or_body_references() {
+        for(String[] source:new String[][]{
+                {"NTT","60bd8796aa828863c7edfe8617b7a5c56ee383afe8ba87a089e820f0fd9a982c"},
+                {"SCT","7def01d62e07b35dd86beeff995e0e37d73ce18adca2746e2a6f6d9bafb5aaa4"},
+                {"SCC","9aa2fa06683652548e72dbf955c3f236d86cb0958a8fdf3b1ff6cf75b65c7208"}}) {
+            SourceDocument d=document();d.setFileName("actual-project-"+source[0]+".docx");d.setSourceSha256(source[1]);d.setReviewRole("tender");
+            OerDocumentIdentity next=OerSourceMetadata.refreshedFixedIdentity(d,source[1]);
+            assertEquals("standard_template",next.getSourcePurpose());assertEquals(java.util.Collections.singletonList("drafting"),next.getEligibleModules());
+            d.setOerIdentityJson(JsonUtils.write(next));assertEquals("drafting_standard_template",OerSourceMetadata.moduleExclusion(d,"vetting"));assertEquals("drafting_standard_template",OerSourceMetadata.moduleExclusion(d,"advisory"));
+        }
+        SourceDocument unregistered=document();unregistered.setFileName("03 - NTT.docx");unregistered.setSourceSha256(SHA);
+        OerDocumentIdentity unknown=OerSourceMetadata.refreshedFixedIdentity(unregistered,SHA);assertEquals("unknown",unknown.getSourcePurpose());assertNull(unknown.getEligibleModules());
+        for(String text:java.util.Arrays.asList("NOTES TO TENDERERS\nContract No. __________", "NOTES TO TENDERERS\nReference to another project: \"Contract No. OTHER/2026\"")) {
+            DocumentParser.ParsedDocument authored=new DocumentParser.ParsedDocument(text,java.util.Collections.emptyList(),0,false,"AUTHORED; no parser execution");
+            OerDocumentIdentity candidate=new OerSourceRouting().route("03 - NTT.docx",OerSourceMetadata.originalSha256(text.getBytes(StandardCharsets.UTF_8)),authored);
+            assertEquals("unknown",candidate.getSourcePurpose(),text);assertNull(candidate.getEligibleModules(),text);
+        }
+    }
+
     @Test void filename_and_display_keys_cannot_exclude_unknown_source_or_confirm_its_role() {
         for(String name:java.util.Arrays.asList("checklist.pdf","General Summary.pdf","PSS Concrete.pdf","meeting minutes report.pdf","GCC discussion.eml","APA.pdf","APC.pdf")) {
             SourceDocument d=document();d.setDocumentScope("package");d.setFileName(name);d.setFileKey("BQ");

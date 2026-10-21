@@ -49,6 +49,7 @@ class OerRoutingRefreshJpaTest {
     @Autowired MockMvc mvc;
     @Autowired ProjectRepository projects;
     @Autowired SourceDocumentRepository documents;
+    @Autowired org.springframework.jdbc.core.JdbcTemplate fixtureSql;
     @Autowired EntityManagerFactory emf;
     @Autowired ConsenseProperties properties;
     @Autowired CanonicalCurrentSourceReader current;
@@ -117,7 +118,7 @@ class OerRoutingRefreshJpaTest {
     }
     @Test void original_bytes_changed_rejects_without_metadata_write()throws Exception {byte[] changed=original.clone();changed[0]^=1;Files.write(Paths.get(d.getStoragePath()),changed);rejected(409,"SOURCE_ORIGINAL_BYTES_CHANGED");}
     @Test void changed_parsed_content_invalidates_request()throws Exception {Map<String,String> old=request();d.setTextContent(d.getTextContent()+"different");documents.saveAndFlush(d);clear();assertEquals(409,refresh(old).getStatus());}
-    @Test void changed_routing_or_explicit_role_invalidates_request()throws Exception {Map<String,String> old=request();d.setReviewRole("tender");documents.saveAndFlush(d);clear();assertEquals(409,refresh(old).getStatus());}
+    @Test void changed_routing_or_explicit_role_invalidates_request()throws Exception {Map<String,String> old=request();fixtureSql.update("update source_document set review_role=? where id=?","tender",d.getId());clear();assertEquals(409,refresh(old).getStatus());}
     @Test void newer_failed_same_name_source_still_supersedes_this_successful_parse()throws Exception {SourceDocument newer=new SourceDocument();newer.setProjectId(d.getProjectId());newer.setCategory(d.getCategory());newer.setFileKey("SP");newer.setFileName(" 24 - the specification.DOCX ");newer.setParseStatus("FAILED");documents.saveAndFlush(newer);rejected(409,"SOURCE_DOCUMENT_SUPERSEDED");}
     @Test void explicit_pricing_scope_is_not_overridden_by_exact_registry()throws Exception {d.setDocumentScope("pricing");documents.saveAndFlush(d);rejected(403,"SOURCE_MODULE_EXCLUDED");}
     @Test void known_kind_mismatch_cannot_rename_source_or_change_catalogue()throws Exception {d.setFileKey("PRE");documents.saveAndFlush(d);rejected(409,"SOURCE_ROUTING_KIND_CHANGED");}

@@ -504,7 +504,19 @@ export interface UploadResult {
 
 /* ------------------------------------------------------------ 审查 */
 
+export interface VettingSourceRoleUpdate {
+  sourceRole: VettingSourceRole
+  expectedOriginalSourceSha256: string
+  expectedSourceHash: string
+  expectedRoutingSha256: string
+}
+
 export interface VettingFile {
+  documentId?: string
+  originalSourceSha256?: string | null
+  sourceHash?: string | null
+  routingSha256?: string | null
+  roleConfirmationAvailable?: boolean
   documentScope?: DocumentScope
   exclusionReason?: string | null
   excluded?: boolean

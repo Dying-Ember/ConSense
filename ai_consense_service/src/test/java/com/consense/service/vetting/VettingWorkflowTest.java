@@ -26,6 +26,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.boot.test.mock.mockito.SpyBean;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -45,7 +46,7 @@ import static org.mockito.Mockito.doThrow;
 import static org.mockito.ArgumentMatchers.*;
 
 /**
- * Committed database records, a real asynchronous service and real document/report writers.
+ * Committed database records, a real asynchronous service and real DOCX/report writers; PDF conversion is an explicit software fixture.
  * Deliberately not transactional: the worker must see the uploaded source transaction.
  */
 @SpringBootTest(properties = {
@@ -80,11 +81,14 @@ class VettingWorkflowTest {
     @Autowired private VettingRunRepository runs;
     @Autowired private ConsenseProperties props;
     @Autowired private VettingSemanticReview semantic;
+    @SpyBean private com.consense.service.drafting.DraftingService drafting;
     @MockBean private AiGateway ai;
     @MockBean private VettingRetrievalClient retrieval;
 
     @BeforeEach
     void offlineModel() {
+        // Explicit renderer replacement: workflow persistence/dispatch only, not LibreOffice acceptance.
+        org.mockito.Mockito.doAnswer(call->VettingDocxPdfFixture.render(call.getArgument(0))).when(drafting).renderPdf(any(byte[].class));
         semantic.setInputBudgetObserver(VettingTokenFixture::observe);
         props.getDocument().setProbeDirectory(null);
         props.getVetting().setExportProbeDirectory(null);
@@ -573,19 +577,23 @@ class VettingWorkflowTest {
         assertEquals(0, job.getResult().getTotal());
         assertTrue(list(projectId).isEmpty());
         assertOfflineWarning(job);
+        String snapshotId=JsonUtils.parse(new String(service.exportJson(projectId,"en"),StandardCharsets.UTF_8)).path("reportSnapshotId").asText();
+        assertTrue(snapshotId.matches("[a-f0-9]{64}"));
 
         try (XWPFDocument doc = new XWPFDocument(new ByteArrayInputStream(service.exportDocx(projectId, "en")))) {
             String text = doc.getParagraphs().stream().map(p -> p.getText()).collect(Collectors.joining("\n"));
             assertTrue(text.contains("No findings were recorded"));
-            assertTrue(text.contains(job.getId()));
-            assertTrue(text.contains("Document coverage"));
+            assertFalse(text.contains(job.getId()));
+            assertEquals(snapshotId,doc.getProperties().getCoreProperties().getIdentifier());
+            assertTrue(text.contains("Review limitations and unreviewed scope"));
         }
         try (PDDocument doc = PDDocument.load(service.exportPdf(projectId, "en"))) {
             assertTrue(doc.getNumberOfPages() > 0);
             String text = new PDFTextStripper().getText(doc);
             assertTrue(text.contains("No findings were recorded"));
-            assertTrue(text.contains(job.getId()));
-            assertTrue(text.contains("Document coverage"));
+            assertFalse(text.contains(job.getId()));
+            assertEquals(snapshotId,doc.getDocumentInformation().getCustomMetadataValue("ConSenseReportSnapshotId"));
+            assertTrue(text.contains("Review limitations and unreviewed scope"));
         }
         JsonNode report = JsonUtils.parse(new String(service.exportJson(projectId, "en"), StandardCharsets.UTF_8));
         assertEquals("1.0", report.path("schemaVersion").asText());

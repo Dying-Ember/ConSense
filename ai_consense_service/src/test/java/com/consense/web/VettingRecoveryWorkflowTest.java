@@ -20,6 +20,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.boot.test.mock.mockito.SpyBean;
 import org.springframework.test.context.*;
 import org.springframework.test.web.servlet.MockMvc;
 import java.io.ByteArrayInputStream;
@@ -50,6 +51,7 @@ class VettingRecoveryWorkflowTest {
     @Autowired ConsenseProperties props;
     @Autowired ProjectRepository projects;
     @Autowired SourceDocumentRepository documents;
+    @Autowired org.springframework.jdbc.core.JdbcTemplate fixtureSql;
     @Autowired VettingRunRepository runs;
     @Autowired VettingFindingRepository findings;
     @Autowired VettingPacketCheckpointRepository packets;
@@ -63,12 +65,14 @@ class VettingRecoveryWorkflowTest {
     @Autowired org.springframework.transaction.PlatformTransactionManager transactions;
     @Autowired LlmProfiles profiles;
     @Autowired VettingChecklistService checklist;
-    @Autowired com.consense.service.drafting.DraftingService drafting;
+    @SpyBean com.consense.service.drafting.DraftingService drafting;
     @javax.persistence.PersistenceContext javax.persistence.EntityManager entityManager;
     @MockBean AiGateway ai;
     @MockBean VettingRetrievalClient retrieval;
     private final AtomicReference<List<VettingCorpus.Chunk>> corpus=new AtomicReference<>();
     @BeforeEach void fixture(){
+        // Explicit renderer replacement: durable recovery/content only, not LibreOffice acceptance.
+        doAnswer(call->VettingDocxPdfFixture.render(call.getArgument(0))).when(drafting).renderPdf(any(byte[].class));
         promptService.reset(com.consense.service.prompt.PromptCatalog.KEY_VETTING);
         semantic.setInputBudgetObserver(VettingTokenFixture::observe);
         props.getVetting().setSemanticTopics(2);props.getVetting().setProjectReferenceComparisons(0);props.getVetting().setProbeDirectory(null);
@@ -261,9 +265,9 @@ class VettingRecoveryWorkflowTest {
         http.perform(get(url).param("sourceHash",revision).param("sourceRole","tender")).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.code").value(4104));
         http.perform(get(url).param("sourceHash",revision).param("originalSourceSha256","wrong original").param("sourceRole","tender")).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.code").value(4104));
         http.perform(get(url).param("sourceHash",revision).param("originalSourceSha256",raw)).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.code").value(4104));
-        source.setReviewRole("standard");documents.saveAndFlush(source);assertEquals(revision,VettingCorpus.sourceHash(source));
+        fixtureSql.update("update source_document set review_role=? where id=?","standard",source.getId());assertEquals(revision,VettingCorpus.sourceHash(source));
         http.perform(get(url).param("sourceHash",revision).param("originalSourceSha256",raw).param("sourceRole","tender")).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.code").value(4104));
-        source.setReviewRole("tender");documents.saveAndFlush(source);
+        fixtureSql.update("update source_document set review_role=? where id=?","tender",source.getId());
         Path file=Paths.get(source.getStoragePath());java.nio.file.attribute.FileTime time=Files.getLastModifiedTime(file);byte[] replacement=before.clone();replacement[replacement.length-1]^=1;Files.write(file,replacement);Files.setLastModifiedTime(file,time);
         org.springframework.mock.web.MockHttpServletResponse rejected=http.perform(get(url).param("sourceHash",revision).param("originalSourceSha256",raw).param("sourceRole","tender")).andReturn().getResponse();assertEquals(4104,JsonUtils.parse(rejected.getContentAsString()).path("code").asInt());assertNull(rejected.getHeader("Content-Disposition"));assertFalse(Arrays.equals(replacement,rejected.getContentAsByteArray()));
     }

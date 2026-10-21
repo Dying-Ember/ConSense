@@ -29,6 +29,9 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.multipart.MultipartFile;
 import javax.annotation.PreDestroy;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -231,12 +234,85 @@ public class VettingService {
 
     public List<VettingFileVO> listFiles(String projectId) {
         projectService.require(projectId); List<VettingFileVO> out = new ArrayList<>();
-        for (SourceDocument d : fileDisplaySourceSet(projectId)) {
-            List<String> notes = parseWarnings(d);
-            if (excluded(d)) notes.add("source_identity_unresolved".equals(com.consense.service.sources.ProjectDocumentScope.exclusionReason(d,"fullset"))?"身份待确认，原文已保留；确认文件用途后可加入源集。":"该文件被来源身份或显式范围规则排除。");
-            out.add(new VettingFileVO(fileKey(d),roleLabel(VettingCorpus.sourceRole(d)),d.getFileName(),nvl(d.getParseMessage()),
-                    d.getParseStatus(),false,reviewable(d),d.getPageCount()==null?0:d.getPageCount(),d.getParseStatus(),d.getParseMessage(),nvl(d.getTextContent()).length(),Boolean.TRUE.equals(d.getOcrUsed()),notes,VettingCorpus.sourceRole(d),d.getDocumentScope(),com.consense.service.sources.ProjectDocumentScope.exclusionReason(d,"fullset")));
+        List<SourceDocument> displayed=fileDisplaySourceSet(projectId);
+        boolean active=displayed.stream().anyMatch(this::roleConfirmationEligible)
+                && runRepository.existsByProjectIdAndStatusIn(projectId,ACTIVE_STATES);
+        for(SourceDocument d:displayed) {
+            VettingFileVO row=fileVO(d);
+            if(!active && roleConfirmationEligible(d) && validRoleHash(d.getSourceSha256())) {
+                SourceDocument bound=roleSourceSnapshot(d.getId());
+                if(Objects.equals(d.getProjectId(),bound.getProjectId()) && Objects.equals(d.getFileName(),bound.getFileName()) && Objects.equals(d.getTextContent(),bound.getTextContent())
+                        && com.consense.service.sources.CanonicalEvidenceService.routingHash(d).equals(com.consense.service.sources.CanonicalEvidenceService.routingHash(bound))
+                        && roleConfirmationEligible(bound)) {
+                    row.setOriginalSourceSha256(bound.getSourceSha256());row.setSourceHash(VettingCorpus.sourceHash(bound));
+                    row.setRoutingSha256(com.consense.service.sources.CanonicalEvidenceService.routingHash(bound));row.setRoleConfirmationAvailable(true);
+                }
+            }
+            out.add(row);
         } return out;
+    }
+    private VettingFileVO fileVO(SourceDocument d) {
+        List<String> notes=parseWarnings(d);
+        String exclusion=ProjectDocumentScope.exclusionReason(d,"fullset");
+        if(exclusion!=null)notes.add("source_identity_unresolved".equals(exclusion)?"身份待确认，原文已保留；确认文件用途后可加入源集。":"该文件被来源身份或显式范围规则排除。");
+        VettingFileVO row=new VettingFileVO(fileKey(d),roleLabel(VettingCorpus.sourceRole(d)),d.getFileName(),nvl(d.getParseMessage()),
+                d.getParseStatus(),false,reviewable(d),d.getPageCount()==null?0:d.getPageCount(),d.getParseStatus(),d.getParseMessage(),nvl(d.getTextContent()).length(),Boolean.TRUE.equals(d.getOcrUsed()),notes,VettingCorpus.sourceRole(d),d.getDocumentScope(),exclusion);
+        row.setDocumentId(d.getId()==null?null:String.valueOf(d.getId()));return row;
+    }
+    private boolean roleConfirmationEligible(SourceDocument d) {
+        return ProjectDocumentScope.reviewCategory(d) && ProjectDocumentScope.parseUsable(d)
+                && nvl(d.getTextContent()).codePoints().anyMatch(c->!Character.isWhitespace(c)&&!Character.isSpaceChar(c))
+                && JsonUtils.isBlankText(d.getReviewRole()) && "unknown".equals(VettingCorpus.sourceRole(d))
+                && "source_identity_unresolved".equals(ProjectDocumentScope.exclusionReason(d,"fullset","vetting"));
+    }
+    private static boolean validRoleHash(String value){return value!=null&&value.matches("[a-f0-9]{64}");}
+    private SourceDocument roleSourceSnapshot(Long id) {
+        SourceDocumentRepository.VerificationMetadata m=sourceDocumentRepository.findVerificationMetadataById(id)
+                .orElseThrow(()->new BizException(4104,"来源文件已变化，请刷新后确认用途。"));
+        SourceDocument d=new SourceDocument();d.setId(m.getId());d.setProjectId(m.getProjectId());d.setCategory(m.getCategory());
+        d.setFileName(m.getFileName());d.setFileKey(m.getFileKey());d.setReviewRole(m.getReviewRole());d.setDocumentScope(m.getDocumentScope());
+        d.setParseStatus(m.getParseStatus());d.setSourceSha256(m.getSourceSha256());d.setStoragePath(m.getStoragePath());
+        d.setOerIdentityJson(m.getOerIdentityJson());d.setTextContent(m.getTextContent());d.setStructuredContentJson(m.getStructuredContentJson());return d;
+    }
+    private void assertRoleSourceCurrent(SourceDocument d) {
+        List<SourceDocument> catalog=new ArrayList<>();
+        for(SourceDocumentRepository.CatalogMetadata m:sourceDocumentRepository.findCatalogMetadataByProjectId(d.getProjectId())) {
+            SourceDocument item=new SourceDocument();item.setId(m.getId());item.setProjectId(m.getProjectId());item.setCategory(m.getCategory());
+            item.setFileName(m.getFileName());item.setFileKey(m.getFileKey());catalog.add(item);
+        }
+        if(ProjectDocumentScope.currentCatalog(d.getProjectId(),catalog).stream().noneMatch(item->Objects.equals(item.getId(),d.getId())))
+            throw new BizException(4104,"来源文件已被同名新版本替代，请刷新后确认用途。");
+    }
+    public VettingFileVO confirmSourceRole(String projectId,Long documentId,SourceRoleConfirmationRequest request) {
+        projectService.require(projectId);
+        if(request==null || !Arrays.asList("tender","standard","project_fact","package_manifest").contains(request.getSourceRole())
+                || !validRoleHash(request.getExpectedOriginalSourceSha256()) || !validRoleHash(request.getExpectedSourceHash()) || !validRoleHash(request.getExpectedRoutingSha256()))
+            throw new BizException(4101,"请选择有效文件用途，并刷新来源版本后确认。");
+        synchronized(lock(projectId)) { return tx().execute(status->{
+            if(runRepository.existsByProjectIdAndStatusIn(projectId,ACTIVE_STATES))throw new BizException(4104,"审查正在运行，请完成后再确认文件用途。");
+            SourceDocument before=roleSourceSnapshot(documentId);
+            if(!Objects.equals(projectId,before.getProjectId()) || !roleConfirmationEligible(before))throw new BizException(4104,"此文件当前不能确认用途，请刷新并检查解析状态和范围。");
+            assertRoleSourceCurrent(before);
+            if(!Objects.equals(request.getExpectedOriginalSourceSha256(),before.getSourceSha256())
+                    || !Objects.equals(request.getExpectedSourceHash(),VettingCorpus.sourceHash(before))
+                    || !Objects.equals(request.getExpectedRoutingSha256(),com.consense.service.sources.CanonicalEvidenceService.routingHash(before)))
+                throw new BizException(4104,"来源版本已变化，请刷新后确认用途。");
+            if(!storageService.matchesStoredBytes(before.getStoragePath(),before.getSourceSha256()))throw new BizException(4104,"原件字节已变化，不能确认当前用途。");
+            if(sourceDocumentRepository.compareAndSetReviewRole(before.getId(),projectId,before.getSourceSha256(),before.getCategory(),before.getFileName(),before.getOerIdentityJson(),
+                    before.getTextContent(),before.getStructuredContentJson(),before.getFileKey(),before.getReviewRole(),before.getDocumentScope(),before.getParseStatus(),before.getStoragePath(),request.getSourceRole())!=1)
+                throw new BizException(4104,"来源或审查状态已变化，请刷新后确认用途。");
+            SourceDocument after=roleSourceSnapshot(documentId);String chosen=after.getReviewRole();after.setReviewRole(before.getReviewRole());
+            if(!request.getSourceRole().equals(chosen) || !request.getExpectedSourceHash().equals(VettingCorpus.sourceHash(after))
+                    || !request.getExpectedRoutingSha256().equals(com.consense.service.sources.CanonicalEvidenceService.routingHash(after)))
+                throw new BizException(4104,"来源版本已变化，本次用途确认未保存。");
+            after.setReviewRole(chosen);assertRoleSourceCurrent(after);
+            if(runRepository.existsByProjectIdAndStatusIn(projectId,ACTIVE_STATES) || !storageService.matchesStoredBytes(after.getStoragePath(),after.getSourceSha256()))
+                throw new BizException(4104,"原件或审查状态已变化，本次用途确认未保存。");
+            VettingFileVO row=fileDisplaySourceSet(projectId).stream().filter(d->Objects.equals(d.getId(),documentId)).findFirst().map(this::fileVO)
+                    .orElseThrow(()->new BizException(4104,"来源文件已变化，本次用途确认未保存。"));
+            row.setOriginalSourceSha256(after.getSourceSha256());row.setSourceHash(VettingCorpus.sourceHash(after));
+            row.setRoutingSha256(com.consense.service.sources.CanonicalEvidenceService.routingHash(after));return row;
+        }); }
     }
 
     /** No transaction is held during parsing or OCR. */
@@ -878,8 +954,20 @@ public class VettingService {
             probe.event("report_payload",DocumentParseProbe.map("project",c.project,"job",c.job,"findings",c.findings));
             List<VettingChecklistCatalog.Result> checklist = c.checklist;
             byte[] bytes;
-            if("pdf".equals(format))bytes=reportWriter.pdf(c.project,c.findings,c.job,"en",probe.enabled()?probe:null,checklist);
-            else if("docx".equals(format))bytes=reportWriter.docx(c.project,c.findings,c.job,"en",probe.enabled()?probe:null,checklist);
+            if("pdf".equals(format)||"docx".equals(format)) {
+                byte[] docx=reportWriter.docx(c.project,c.findings,c.job,"en",probe.enabled()?probe:null,checklist);
+                if("docx".equals(format))bytes=docx;
+                else {
+                    if(draftingIdentity==null||!"libreoffice".equals(props.getDrafting().getRendererKind()))throw new BizException(4100,"NOT_CONFIGURED: Vetting PDF export requires the configured LibreOffice document renderer. The Word report remains available.");
+                    probe.event("report_pdf_input",DocumentParseProbe.map("reportSnapshotId",c.job.getReportSnapshotId(),"docxSha256",com.consense.service.drafting.DraftPdfConverter.sha256(docx),"renderer","libreoffice"));
+                    byte[] rendererPdf;
+                    try(VettingExportProbe.Timer timer=probe.measure("report_docx_pdf_conversion","Shared exact-DOCX LibreOffice conversion/cache; no independent report pagination")){rendererPdf=draftingIdentity.renderPdf(docx);}
+                    bytes=bindPdfSnapshot(rendererPdf,c.job.getReportSnapshotId());
+                    probe.event("report_pdf_snapshot_binding",DocumentParseProbe.map("reportSnapshotId",c.job.getReportSnapshotId(),"docxSha256",com.consense.service.drafting.DraftPdfConverter.sha256(docx),
+                            "rendererPdfSha256",com.consense.service.drafting.DraftPdfConverter.sha256(rendererPdf),"pdfSha256",com.consense.service.drafting.DraftPdfConverter.sha256(bytes),"bytes",bytes.length,
+                            "boundary","Document information snapshot key only; converter cache/manifest retains the original renderer PDF hash; returned artifact records the final download hash"));
+                }
+            }
             else {
                 Map<String,Object> out;
                 try(VettingExportProbe.Timer timer=probe.measure("report_json_payload_construction","Original JSON report DTO/map construction")){
@@ -898,6 +986,12 @@ public class VettingService {
             probe.returned(bytes);returnedNormally=true;return bytes;
         }catch(RuntimeException|Error e){operationFailure=e;probe.originalFailure("report_export_failure",e);throw e;}
         finally{probe.finish(returnedNormally?"returned_normally":"aborted",operationFailure);}
+    }
+    private byte[] bindPdfSnapshot(byte[] rendererPdf,String reportSnapshotId) {
+        try(org.apache.pdfbox.pdmodel.PDDocument document=org.apache.pdfbox.pdmodel.PDDocument.load(new ByteArrayInputStream(rendererPdf));ByteArrayOutputStream out=new ByteArrayOutputStream()) {
+            document.getDocumentInformation().setCustomMetadataValue("ConSenseReportSnapshotId",reportSnapshotId);
+            document.save(out);return out.toByteArray();
+        }catch(IOException failure){throw new BizException(4100,"Vetting PDF snapshot metadata could not be bound. The Word report remains available: "+failure.getMessage());}
     }
     private ReportContext reportContext(String projectId) {
         projectService.require(projectId); synchronized(lock(projectId)) { return tx().execute(status -> {

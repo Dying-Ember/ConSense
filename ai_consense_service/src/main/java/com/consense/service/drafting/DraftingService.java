@@ -1314,8 +1314,8 @@ public class DraftingService {
         return new DraftPdfConverter(DraftPdfRenderProfile.libreOffice(executable,work,settings.getRendererTimeoutMs()));
     }
 
-    /** Shared exact-DOCX conversion/cache for generated revisions and uploaded template previews. */
-    private byte[] renderPdf(byte[] docx) {
+    /** Shared exact-DOCX conversion/cache for generated drafts, templates and frozen Vetting reports. */
+    public byte[] renderPdf(byte[] docx) {
         String docxHash=DraftPdfConverter.sha256(docx);ConsenseProperties.Drafting settings=properties.getDrafting();
         if(JsonUtils.isBlankText(settings.getRendererExecutable())||JsonUtils.isBlankText(settings.getRendererWorkRoot()))throw new BizException(4013,"NOT_CONFIGURED: Set consense.drafting.renderer-executable and renderer-work-root for formatted PDF conversion.");
         try {
@@ -1327,6 +1327,7 @@ public class DraftingService {
                 if(!docxHash.equals(converted.getDocxSha256())||!profileHash.equals(converted.getRenderProfileHash()))throw new BizException(4013,"RENDER_PROFILE_CHANGED: Retry using the current renderer profile.");
                 cached=new DraftPdfArtifact();cached.setId(cacheId);cached.setDocxSha256(converted.getDocxSha256());cached.setPdfSha256(converted.getPdfSha256());cached.setRenderProfileHash(converted.getRenderProfileHash());cached.setPdfBytes(converted.getPdfBytes());cached.setManifestJson(JsonUtils.write(converted.getManifest()));pdfArtifactRepository.save(cached);
             }
+            if(!docxHash.equals(cached.getDocxSha256())||!profileHash.equals(cached.getRenderProfileHash()))throw new BizException(4013,"BINDING_PDF_IDENTITY_MISMATCH");
             byte[] bytes=cached.getPdfBytes();if(!cached.getPdfSha256().equals(DraftPdfConverter.sha256(bytes)))throw new BizException(4013,"PDF_ARTIFACT_HASH_MISMATCH");return bytes;
         }catch(DraftPdfConversionException failure){throw new BizException(4013,failure.getCode()+": "+failure.getMessage());}
         catch(IllegalArgumentException invalid){throw new BizException(4013,"NOT_CONFIGURED: Invalid formatted renderer settings.");}

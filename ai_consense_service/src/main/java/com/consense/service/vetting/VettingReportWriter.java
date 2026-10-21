@@ -20,12 +20,15 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.io.ByteArrayOutputStream;
+import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.IOException;
 import java.math.BigInteger;
 import java.time.ZoneId;
+import java.time.Instant;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
+import java.util.zip.*;
 
 /** Word and PDF exports share one report outline and the same source snapshot. */
 @Component
@@ -65,7 +68,7 @@ public class VettingReportWriter {
                     record=wordRecord(document);
                     paragraph=record.getRow(0).getCell(0).getParagraphs().get(0);
                 } else if(block.owner!=null) {
-                    XWPFTableRow row=record.createRow();row.setRepeatHeader(false);row.setCantSplitRow(block.quote);
+                    XWPFTableRow row=record.createRow();row.setRepeatHeader(false);row.setCantSplitRow(block.quote || !block.compact);
                     paragraph=row.getCell(0).getParagraphs().get(0);
                 } else {record=null;paragraph=document.createParagraph();}
                 if (block.pageBreak) paragraph.setPageBreak(true);
@@ -106,12 +109,27 @@ public class VettingReportWriter {
             document.getProperties().getCoreProperties().setTitle(tr(lang, "招标文件审查报告", "招標文件審查報告", "Tender Document Vetting Report"));
             document.getProperties().getCoreProperties().setCreator("ConSense");
             if(job!=null&&!JsonUtils.isBlankText(job.getReportSnapshotId()))document.getProperties().getCoreProperties().setIdentifier(job.getReportSnapshotId());
+            // Frozen report time and ZIP timestamps keep separate Word/PDF requests on the same DOCX bytes.
+            Date frozenTime=Date.from(job!=null&&job.getFinishedAt()!=null?job.getFinishedAt():job!=null&&job.getStartedAt()!=null?job.getStartedAt():Instant.EPOCH);
+            document.getProperties().getCoreProperties().setCreated(Optional.of(frozenTime));
+            document.getProperties().getCoreProperties().setModified(Optional.of(frozenTime));
             document.write(out);
-            return out.toByteArray();
+            return stableDocx(out.toByteArray());
         } catch (IOException e) {
             if(probe!=null)probe.originalFailure("docx_original_writer_failure",e);
             throw new BizException(4100, "生成审查报告 Word 失败: " + e.getMessage());
         }
+        }
+    }
+
+    private static byte[] stableDocx(byte[] generated) throws IOException {
+        try(ZipInputStream input=new ZipInputStream(new ByteArrayInputStream(generated));ByteArrayOutputStream bytes=new ByteArrayOutputStream();ZipOutputStream output=new ZipOutputStream(bytes)) {
+            ZipEntry source;byte[] buffer=new byte[8192];int count;
+            while((source=input.getNextEntry())!=null) {
+                ZipEntry entry=new ZipEntry(source.getName());entry.setTime(0);output.putNextEntry(entry);
+                while((count=input.read(buffer))!=-1)output.write(buffer,0,count);output.closeEntry();
+            }
+            output.finish();return bytes.toByteArray();
         }
     }
 
@@ -193,7 +211,7 @@ public class VettingReportWriter {
     private void wordLine(XWPFDocument document,String text,String style,boolean pageBreak) {
         XWPFParagraph p=document.createParagraph();p.setStyle(style);p.setPageBreak(pageBreak);
         p.setSpacingAfter("Title".equals(style)?180:100);p.setSpacingBetween(1.15);
-        if(style.startsWith("Heading"))p.getCTP().addNewPPr().addNewKeepNext();
+        if(style.startsWith("Heading"))p.getCTP().getPPr().addNewKeepNext();
         XWPFRun r=p.createRun();setWordFont(r);r.setFontSize("Title".equals(style)?12:style.startsWith("Heading")?12:11);r.setBold(style.startsWith("Heading"));r.setText(text);
         if("Title".equals(style)){p.setAlignment(ParagraphAlignment.CENTER);r.setUnderline(UnderlinePatterns.SINGLE);}
     }
@@ -240,7 +258,7 @@ public class VettingReportWriter {
             XWPFTableCell cell=row.getCell(i);cell.setWidth(String.valueOf(9986*widths[i]/100));
             cell.setVerticalAlignment(XWPFTableCell.XWPFVertAlign.TOP);
             XWPFParagraph p=cell.getParagraphs().get(0);p.setSpacingAfter(40);p.setSpacingBefore(40);p.setSpacingBetween(1.1);
-            if(header)p.getCTP().addNewPPr().addNewKeepNext();
+            if(header)p.getCTP().getPPr().addNewKeepNext();
             XWPFRun r=p.createRun();setWordFont(r);r.setFontSize(11);r.setBold(header);
             String[] lines=values.get(i).split("\n",-1);for(int n=0;n<lines.length;n++){if(n>0)r.addBreak();r.setText(lines[n]);}
         }

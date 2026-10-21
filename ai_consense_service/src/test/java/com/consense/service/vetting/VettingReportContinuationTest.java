@@ -35,12 +35,13 @@ class VettingReportContinuationTest {
     private void orderedUnits(List<String> pages,String prefix,int count){String text=String.join(" ",pages);int prior=-1;for(int n=0;n<count;n++){String id=String.format(Locale.ROOT,"%s-%03d",prefix,n);int at=text.indexOf(id);assertTrue(at>prior,id);assertEquals(at,text.lastIndexOf(id),id);prior=at;}}
     private XWPFTable record(XWPFDocument word,String prefix){XWPFTable result=word.getTables().stream().filter(t->t.getRow(0).getCell(0).getText().startsWith(prefix)).findFirst().orElse(null);assertNotNull(result,"WORD_RECORD_REPEATABLE_OWNER: "+prefix);return result;}
 
-    private void assertQuoteOnlyCohesion(XWPFTableRow row){
+    private void assertRecordRowCohesion(XWPFTableRow row){
         boolean quotation=row.getCell(0).getParagraphs().stream().flatMap(p->p.getRuns().stream()).anyMatch(XWPFRun::isItalic);
-        assertEquals(quotation,row.isCantSplitRow(),"Only quotation rows request cohesion; other body rows must remain splittable");
+        boolean narrative=row.getCell(0).getText().startsWith("Original model assessment;");
+        assertEquals(quotation||narrative,row.isCantSplitRow(),"Each quotation or narrative requests row cohesion; compact source labels remain splittable");
     }
 
-    @Test void wordQuotationCohesionDoesNotLockNonQuotationRowsOrWholeRecords()throws Exception{
+    @Test void wordNarrativeAndQuotationCohesionKeepsLabelsSplittableWithoutBindingWholeRecords()throws Exception{
         FindingVO finding=finding("VT-COHESION","FIRST QUOTE EXACT","SECOND QUOTE EXACT");
         VerifiedAssessmentVO assessment=new VerifiedAssessmentVO("insufficient_context","ASSESSMENT TITLE",units("ASSESSMENT-BODY",220),Collections.singletonList(evidence("ASSESSMENT QUOTE EXACT")));
         VettingJobVO job=job(Collections.singletonList(assessment),Collections.emptyList());String before=JsonUtils.write(finding),jobBefore=JsonUtils.write(job);
@@ -51,9 +52,11 @@ class VettingReportContinuationTest {
                 assertFalse(row.isRepeatHeader());assertEquals(1,row.getTableCells().size());assertEquals(1,row.getCell(0).getParagraphs().size());
                 XWPFParagraph paragraph=row.getCell(0).getParagraphs().get(0);assertTrue(paragraph.getCTP().getPPr().isSetKeepLines());assertTrue(paragraph.getCTP().getPPr().isSetWidowControl());
             }
-            for(XWPFTableRow row:Arrays.asList(source.getRow(1),source.getRow(3),check.getRow(1),check.getRow(2))){
-                assertFalse(row.isCantSplitRow(),"Non-quotation source labels and long model narrative must not lock the record");assertFalse(row.isRepeatHeader());
+            for(XWPFTableRow row:Arrays.asList(source.getRow(1),source.getRow(3),check.getRow(2))){
+                assertFalse(row.isCantSplitRow(),"Compact source labels must remain splittable");assertFalse(row.isRepeatHeader());
             }
+            XWPFTableRow narrative=check.getRow(1);assertTrue(narrative.isCantSplitRow());assertFalse(narrative.isRepeatHeader());
+            assertFalse(narrative.getCell(0).getParagraphs().get(0).getCTP().getPPr().isSetKeepNext(),"Narrative row cohesion must not bind the following evidence rows");
             assertEquals("FIRST QUOTE EXACT",source.getRow(2).getCell(0).getText());assertEquals("SECOND QUOTE EXACT",source.getRow(4).getCell(0).getText());
             assertEquals("ASSESSMENT QUOTE EXACT",check.getRow(3).getCell(0).getText());assertTrue(check.getRow(1).getCell(0).getText().contains(units("ASSESSMENT-BODY",220)));
         }
@@ -72,7 +75,7 @@ class VettingReportContinuationTest {
             assertEquals("ASSESSMENT QUOTE EXACT",check.getRow(3).getCell(0).getText());
             assertTrue(check.getRow(1).getCell(0).getText().contains("ASSESSMENT TITLE EXACT\nASSESSMENT COMMENT EXACT"));
             for(XWPFTable table:Arrays.asList(source,check))for(int row=1;row<table.getNumberOfRows();row++){
-                assertFalse(table.getRow(row).isRepeatHeader());assertQuoteOnlyCohesion(table.getRow(row));
+                assertFalse(table.getRow(row).isRepeatHeader());assertRecordRowCohesion(table.getRow(row));
             }
             assertFalse(check.getText().contains("OPAQUE-PACKET"));
         }
@@ -121,7 +124,7 @@ class VettingReportContinuationTest {
         assertEquals(LineSpacingRule.EXACT,boundary.getSpacingLineRule());assertEquals(1.0,boundary.getSpacingBetween(),0.001);
         assertFalse(boundary.isPageBreak());assertTrue(first.getRow(0).isRepeatHeader());assertTrue(second.getRow(0).isRepeatHeader());
         for(XWPFTable table:Arrays.asList(first,second))for(int row=1;row<table.getNumberOfRows();row++){
-            assertFalse(table.getRow(row).isRepeatHeader());assertQuoteOnlyCohesion(table.getRow(row));
+            assertFalse(table.getRow(row).isRepeatHeader());assertRecordRowCohesion(table.getRow(row));
         }
     }
 

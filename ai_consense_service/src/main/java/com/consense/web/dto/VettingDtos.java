@@ -35,7 +35,23 @@ public final class VettingDtos {
         /** Stable machine-readable input role, alongside the localized display label. */
         private String sourceRole;
         private String documentScope,exclusionReason;
+        private String documentId,originalSourceSha256,sourceHash,routingSha256;
+        private boolean roleConfirmationAvailable;
+        public VettingFileVO(String key,LocalizedText role,String fileName,String basis,String status,boolean generated,boolean parsed,int pageCount,String parseStatus,String parseMessage,int textChars,boolean ocrUsed,List<String> warnings,String sourceRole,String documentScope,String exclusionReason){this(key,role,fileName,basis,status,generated,parsed,pageCount,parseStatus,parseMessage,textChars,ocrUsed,warnings,sourceRole,documentScope,exclusionReason,null,null,null,null,false);}
         public VettingFileVO(String key,LocalizedText role,String fileName,String basis,String status,boolean generated,boolean parsed,int pageCount,String parseStatus,String parseMessage,int textChars,boolean ocrUsed,List<String> warnings,String sourceRole){this(key,role,fileName,basis,status,generated,parsed,pageCount,parseStatus,parseMessage,textChars,ocrUsed,warnings,sourceRole,null,null);}
+    }
+
+    @Data @NoArgsConstructor
+    public static class SourceRoleConfirmationRequest {
+        @javax.validation.constraints.NotNull
+        @javax.validation.constraints.Pattern(regexp="tender|standard|project_fact|package_manifest")
+        private String sourceRole;
+        @javax.validation.constraints.NotNull @javax.validation.constraints.Pattern(regexp="[a-f0-9]{64}")
+        private String expectedOriginalSourceSha256;
+        @javax.validation.constraints.NotNull @javax.validation.constraints.Pattern(regexp="[a-f0-9]{64}")
+        private String expectedSourceHash;
+        @javax.validation.constraints.NotNull @javax.validation.constraints.Pattern(regexp="[a-f0-9]{64}")
+        private String expectedRoutingSha256;
     }
 
     /** 一条审查发现 */

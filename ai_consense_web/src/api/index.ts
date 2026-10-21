@@ -41,6 +41,7 @@ import type {
   UploadResult,
   VariableCreateRequest,
   VettingFile,
+  VettingSourceRoleUpdate,
   VettingMetrics,
   VettingRunResult,
   VettingJob,
@@ -152,11 +153,13 @@ export const draftingApi = {
 
 export const vettingApi = {
   files: (projectId: string) => api.get<VettingFile[]>(`/vetting/${projectId}/files`),
+  confirmSourceRole: (projectId: string, documentId: string, request: VettingSourceRoleUpdate) =>
+    api.put<VettingFile>(`/vetting/${encodeURIComponent(projectId)}/sources/${encodeURIComponent(documentId)}/role`, request),
   uploadPackage: (projectId: string, files: File[], sourceRole?: VettingSourceRole, documentScope?: DocumentScope) => {
     const params = new URLSearchParams()
     if (sourceRole) params.set('sourceRole', sourceRole)
     if (documentScope && documentScope !== 'auto') params.set('documentScope', documentScope)
-    return api.upload<UploadResult>(`/vetting/${projectId}/package/upload${params.size ? `?${params}` : ''}`, files)
+    return api.upload<UploadResult>(`/vetting/${projectId}/package/upload${params.size ? `?${params}` : ''}`, files, 7_200_000)
   },
   run: (projectId: string, lang: string) =>
     api.post<VettingRunResult>(`/vetting/${projectId}/run?lang=${encodeURIComponent(lang)}`),

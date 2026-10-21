@@ -49,6 +49,7 @@ class VettingFileCatalogJpaHttpTest {
     @Autowired ProjectRepository projects;
     @Autowired SourceDocumentRepository documents;
     @Autowired EntityManagerFactory emf;
+    @Autowired org.springframework.jdbc.core.JdbcTemplate fixtureSql;
     @MockBean AiGateway externalLlm;
     @SpyBean DocumentParser actualParser;
     @SpyBean OerBusinessEvidence actualOer;
@@ -71,9 +72,10 @@ class VettingFileCatalogJpaHttpTest {
     void clear(){SqlCapture.statements.clear();emf.unwrap(SessionFactory.class).getStatistics().clear();org.mockito.Mockito.clearInvocations(externalLlm,actualParser,actualOer);}
     JsonNode response()throws Exception{org.springframework.mock.web.MockHttpServletResponse r=mvc.perform(get("/api/vetting/"+project+"/files")).andReturn().getResponse();assertEquals(200,r.getStatus());return JsonUtils.parse(r.getContentAsString());}
     JsonNode data()throws Exception{JsonNode r=response();assertEquals(0,r.path("code").asInt(),r.toString());return r.path("data");}
-    void assertNoArchiveHydration(){
+    void assertNoArchiveHydration(){assertNoArchiveHydration(0);}
+    void assertNoArchiveHydration(int verificationReads){
         List<String> sql=new ArrayList<>();for(String raw:SqlCapture.statements){String s=raw.toLowerCase(Locale.ROOT);if(s.startsWith("select ")&&s.contains(" from source_document "))sql.add(s);}
-        assertEquals(1,sql.size());assertFalse(sql.get(0).contains("native_pdf_evidence_json"),"file list hydrated native archive: "+sql.get(0));
+        assertEquals(1+verificationReads,sql.size());for(String statement:sql)assertFalse(statement.contains("native_pdf_evidence_json"),"file list hydrated native archive: "+statement);
         assertFalse(sql.get(0).contains("structured_content_json"),"file list hydrated full source structure");
         assertEquals(0,emf.unwrap(SessionFactory.class).getStatistics().getEntityStatistics(SourceDocument.class.getName()).getLoadCount());
         org.mockito.Mockito.verifyNoInteractions(externalLlm,actualParser,actualOer);
@@ -92,7 +94,7 @@ class VettingFileCatalogJpaHttpTest {
         assertFalse(d.get(1).path("parsed").asBoolean());assertEquals(0,d.get(1).path("textChars").asInt());assertEquals("Authored failed parse",d.get(1).path("basis").asText());assertNoArchiveHydration();
     }
     @Test void fileListKeepsExistingRoutingExclusionsAndExplicitRoles()throws Exception{
-        source("10 - SCC.docx","SCC","tender","package","Current project SCC.");SourceDocument g=source("GCC.pdf","GCC","standard","package","Current GCC standard.");g.setReviewRole("project_fact");documents.saveAndFlush(g);
+        source("10 - SCC.docx","SCC","tender","package","Current project SCC.");SourceDocument g=source("GCC.pdf","GCC","standard","package","Current GCC standard.");fixtureSql.update("update source_document set review_role=? where id=?","project_fact",g.getId());
         source("Bills of Quantities.pdf","BQ","tender","pricing","Excluded pricing.");source("Project PSS - Concrete works.pdf","WORKS_PSS","tender","works_pss","Excluded technical PSS.");source("Q&A.docx","OTHER","tender","example","Excluded answer.");
         SourceDocument t=source("NTT template.docx","NTT","standard","package","Excluded standard template.");t.setCategory(SourceDocument.CATEGORY_STANDARD_TEMPLATE);documents.saveAndFlush(t);
         SourceDocument a=source("advisory-only.docx","OTHER","tender","package","Outside vetting module.");OerDocumentIdentity onlyAdvice=OerSourceMetadata.identity(a);onlyAdvice.setEligibleModules(Collections.singletonList("advisory"));a.setOerIdentityJson(JsonUtils.write(onlyAdvice));documents.saveAndFlush(a);
@@ -117,7 +119,8 @@ class VettingFileCatalogJpaHttpTest {
         assertEquals("PARSED",waiting.path("parseStatus").asText());assertFalse(waiting.path("parsed").asBoolean());assertEquals(text.length(),waiting.path("textChars").asInt());
         assertEquals("Identity pending confirmation",waiting.path("role").path("en").asText());
         assertTrue(waiting.path("warnings").toString().contains("身份待确认"));assertFalse(rows.get(excluded.getFileName()).path("parsed").asBoolean());
-        assertNoArchiveHydration();
+        assertEquals(String.valueOf(pending.getId()),waiting.path("documentId").asText());assertTrue(waiting.path("roleConfirmationAvailable").asBoolean());
+        assertEquals(64,waiting.path("sourceHash").asText().length());assertNoArchiveHydration(1);
         List<SourceDocument> selected=ProjectDocumentScope.selected(project,documents.findBusinessSourcesByProjectId(project),"fullset");
         assertEquals(1,selected.size());assertEquals(confirmed.getId(),selected.get(0).getId());
         assertEquals("source_identity_unresolved",ProjectDocumentScope.exclusionReason(pending,"fullset"));

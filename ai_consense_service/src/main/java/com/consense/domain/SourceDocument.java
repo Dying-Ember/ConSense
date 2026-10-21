@@ -39,7 +39,8 @@ public class SourceDocument {
     private String fileKey;
 
     /** Vetting input role: tender / standard / project_fact / package_manifest; null is legacy auto. */
-    @Column(name = "review_role", length = 32)
+    // Role confirmation owns updates; detached parser saves must not undo a human choice.
+    @Column(name = "review_role", length = 32, updatable = false)
     private String reviewRole;
 
     /** Package boundary, independent of semantic role: package / works_pss / pricing / example; null is inferred. */
