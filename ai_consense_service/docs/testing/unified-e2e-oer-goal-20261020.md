@@ -32,7 +32,7 @@
 
 ### Drafting 与 Vetting 共用现有分页链
 
-用户本轮再次明确：两模块的分页缺陷一起解决，沿用 LibreOffice、Word 原生页眉页脚与 PDF 输出，不引入新技术栈。当前只读确认 Drafting 正式 PDF 使用 `DraftPdfConverter`／LibreOffice，Vetting 正式 PDF 却由 `VettingReportWriter.pdf()`／PDFBox 单独计算分页。优先让 Vetting 复用既有精确 DOCX→LibreOffice→PDF 路径；下载 Word 与对应 PDF 使用同一报告快照及同一 DOCX 内容／字节，保留人工 Checklist 与来源，避免两套排版各自修补。
+用户本轮再次明确：两模块的分页缺陷一起解决，沿用 LibreOffice、Word 原生页眉页脚与 PDF 输出，不引入新技术栈。原先 Drafting 正式 PDF 使用 `DraftPdfConverter`／LibreOffice，Vetting 则用 `VettingReportWriter.pdf()`／PDFBox 单独计算分页；共同输出修复现已提交推送至 `17d51f9`，源码正式入口均复用既有精确 DOCX→LibreOffice→PDF 路径，runtime23 已启动该修复。下载 Word 与对应 PDF 使用同一报告快照及同一 DOCX 内容／字节，保留人工 Checklist 与来源；真实 2b 报告及逐页可读性验收仍分别完成，不以源码统一或服务启动替代业务通过。运行中断及恢复的准确边界见[progress50](three-module-runtime-progress-20261021.md#progress50路由漏判已定位运行中断后恢复真实-nttsct-再验)。
 
 两模块都通过 Word 分节、原生页眉页脚、动态 PAGE／NUMPAGES、标题与首正文的 keepNext、合理的表格跨页／重复表头解决版式。指导语清空后的空段占高、重复段落属性、标题孤立和目录缓存仍须分别修首因；不按固定页码硬补分页，不把整篇正文或整张长表锁成不可拆分。修复必须在最终下载的 DOCX 与 LibreOffice 产出 PDF 上复验，不另建通用分页框架或 PDF 后处理栈。
 

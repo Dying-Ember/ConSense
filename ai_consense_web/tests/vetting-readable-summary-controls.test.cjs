@@ -102,7 +102,8 @@ test('unknown or failed non-drawings and drawings without an exclusion are not m
     await h.openSources()
     const modal = find(h.root, node => node.props?.class === 'test-modal')
     const visible = visibleText(modal)
-    for (const label of ['FAILED', 'EXCLUDED', 'PARSING', '身份待确认']) assert.ok(visible.includes(label), label)
+    for (const label of ['解析失败', '未纳入解析', '解析中', '用途尚未确定']) assert.ok(visible.includes(label), label)
+    for (const raw of ['FAILED', 'EXCLUDED', 'PARSING']) { assert.ok(text(modal).includes(raw)); assert.ok(!visible.includes(raw), raw) }
     assert.ok(!visible.includes('已按范围排除'))
   } finally { h.dispose() }
 })
@@ -136,4 +137,37 @@ test('a missing total is displayed as unknown instead of adopting the filtered l
   const h = await mount({ job, metrics: null, findings: [finding('F1', 'OPEN')] })
   try { assert.ok(visibleText(h.root).includes('审查意见共 未知 条；当前筛选列表 1 条，其中 1 条待人工处理。')) }
   finally { h.dispose() }
+})
+
+
+test('source status labels distinguish pending parsing from purpose confirmation without assuming a missing eligibility field', async () => {
+  for (const [locale, pending, unresolved, confirmable, partial, note] of [
+    ['zh-Hans', '解析结果待更新', '用途尚未确定', '用途待确认', '部分解析', '后台可能仍在处理'],
+    ['zh-Hant', '解析結果待更新', '用途尚未確定', '用途待確認', '部分解析', '背景可能仍在處理'],
+    ['en', 'Parsing result pending update', 'Purpose not established', 'Purpose pending confirmation', 'Partially parsed', 'background processing may continue']
+  ]) {
+    const pins = { originalSourceSha256: 'a'.repeat(64), sourceHash: 'b'.repeat(64), routingSha256: 'c'.repeat(64) }
+    const h = await mount({ locale, job: null, files: [
+      file('OTHER', { ...pins, documentId: '1', fileName: 'Annex.pdf', sourceRole: 'unknown', parsed: false, status: 'IDENTITY_OBSERVED', parseStatus: 'IDENTITY_OBSERVED', roleConfirmationAvailable: true, exclusionReason: 'source_identity_unresolved' }),
+      file('SCT', { ...pins, documentId: '2', fileName: 'Ready.docx', sourceRole: 'unknown', parsed: false, status: 'PARTIAL', parseStatus: 'PARTIAL', roleConfirmationAvailable: true, exclusionReason: 'source_identity_unresolved' }),
+      file('NTT', { ...pins, documentId: '3', fileName: 'Old backend.docx', sourceRole: 'unknown', parsed: false, status: 'PARSED', parseStatus: 'PARSED', exclusionReason: 'source_identity_unresolved' }),
+      file('GCT', { documentId: '4', fileName: 'Partial.pdf', parsed: true, status: 'PARTIAL', parseStatus: 'PARTIAL' })
+    ] })
+    try {
+      await h.openSources()
+      const modal = find(h.root, node => node.props?.class === 'test-modal')
+      const row = name => find(modal, node => node.tag === 'tr' && text(node).includes(name))
+      const waiting = row('Annex.pdf'), ready = row('Ready.docx'), legacy = row('Old backend.docx'), limited = row('Partial.pdf')
+      assert.ok(visibleText(waiting).includes(pending)); assert.ok(visibleText(waiting).includes(unresolved)); assert.ok(visibleText(waiting).includes(note))
+      const waitingBadge = find(waiting, node => String(node.props?.class).split(' ').includes('tag'))
+      assert.equal(visibleText(waitingBadge).trim(), pending); assert.ok(!waitingBadge.props.class.includes('ok'), 'Identity observation is not a completed parse')
+      assert.ok(!visibleText(waiting).includes(confirmable), 'Identity observation does not imply a confirmable purpose')
+      assert.ok(!find(waiting, node => node.tag === 'select'), 'Incomplete parsing cannot confirm purpose even when a stale eligibility flag is true')
+      for (const raw of ['IDENTITY_OBSERVED', 'OTHER']) { assert.ok(text(waiting).includes(raw)); assert.ok(!visibleText(waiting).includes(raw), raw) }
+      assert.ok(visibleText(ready).includes(partial)); assert.ok(visibleText(ready).includes(confirmable)); assert.ok(find(ready, node => node.tag === 'select'))
+      assert.ok(visibleText(legacy).includes(unresolved)); assert.ok(!find(legacy, node => node.tag === 'select'), 'Missing backend eligibility is not inferred from PARSED')
+      const badge = find(limited, node => String(node.props?.class).split(' ').includes('tag'))
+      assert.ok(visibleText(limited).includes(partial)); assert.ok(badge.props.class.includes('warn')); assert.ok(!badge.props.class.includes('ok'), 'Partial content is not shown as a complete parse')
+    } finally { h.dispose() }
+  }
 })

@@ -1,3 +1,30 @@
+<!-- unified-progress50:start -->
+## progress50：路由漏判已定位，运行中断后恢复，真实 NTT／SCT 再验
+
+**2026-10-21 当前：runtime23 已实际启动，真实 NTT／SCT 前端逐文件上传已返回，二者均为 `tender`、`parsed=true`、无排除原因。** NTT 的解析状态仍为 PARSED、SCT 仍为 PARTIAL；这是当前两原件的来源准入通过，不代表 SCT 来源完整、整套 2b 或模型审查通过。恢复后项目为 `proj_mvi0kncwu0as`（真实2b项目验收-恢复20261021），没有复放原 33 文件整批请求。[本次唯一发送](../../../.local/runtime-recovery23/ntt-sct-intake-sent.json)、[实际回包](../../../.local/runtime-recovery23/ntt-sct-files-after.json)。
+
+- **用户截图中的路由缺陷：** 退出前 9 件中，2 图纸已排除、1 Annex 正文结果尚未返回，其余 6 件已有解析结果但只有 GCT／Cover 两件进入业务源；NTT、SCT 和两份 Marking Scheme 共 4 件用途 unresolved。这是这组样本的实际准入情况，不作为全路由准确率。界面 `NTT`／`SCT` file key 不证明用途已确认；当前路由是确定性规则，没有调用 Qwen 做分类。
+- **具体首因：** NTT 正文没有 Contract No／Title 标签，编号 20250101 在页脚独立出现；SCT 正文有 `Contract No. 20250101 (the “Contract”)`，整行正则拒绝后面的括号／引号。两份 Marking 的原生标题／页眉明示 Appendix A to SCT、RESTRICTED (TENDER) 和技术建议评分／提交要求，但首四行标题白名单没有这类附件。runtime22 还未包含本轮已推送的 NTT／SCT exact 原件映射及人工用途确认字段；runtime23 已包含，当前实际两文件准入已验。通用附件归属修复仍在准备，不能仅靠增加两条 SHA 宣称一般路由修好。
+- **OCR 阶段状态缺陷：** 上传接缝保存 IDENTITY_OBSERVED 后直接进入同步详细解析，没有在调用前保存 PARSING。因此后台 OCR 推进时，列表仍可能写 full parsing not started；这与实际来源类别识别不同。最小阶段保存修复及原工作流回归正在准备，尚未采用。
+- **运行中断与恢复边界：** 18:54 fresh 检查确认原 Windows 后端 14072、H2 内存库 owner38980 及前端 Node 均不存在，18082／18084／5175 无监听；Root 没有执行停止，退出原因未知，旧日志最后为 18:48:23。原请求已记录中断终态。SQL22 已验证备份恢复了 21 个旧项目；下午新建的旧 2b 项目晚于该备份，数据库记录没有恢复，已上传原件仍全部保留。这不是整包解析完成或完整数据无损恢复。[原请求终态](../../../.local/runtime-recovery23/original-intake-terminal.json)、[恢复后项目回读](../../../.local/runtime-recovery23/projects-after.json)。
+- **恢复实际限制：** 用已验证文件副本尝试 H2 文件模式后，JDK `Files.isWritable=false`、`File.canWrite=true`、实际 READ_WRITE channel 打开通过；H2 据 NIO 将库视为只读，新建项目实际失败。两次尝试保留，不授可用；仅新副本的无效 ACL 尝试已全部回退。当前恢复现有 H2 TCP 内存模式，16 GiB owner62496、后端31312、前端57836；最新前端已实际新建后继项目并成功保存两个来源。持久化异常记录后继续独立验收，阶段写入用现有 SQL checkpoint 保全，不引入新数据库／技术栈。[恢复日志](../../../.local/runtime-recovery23/restore-tcp.log)、[当前后端](../../../.local/runtime-recovery23/backend03.json)。
+- **前端文案已实际采用：** 22 个控件／API 方法、类型检查和生产构建通过，Root 已在实际来源表原图核对。已解析／部分解析／解析结果待更新与用途状态分开，原始技术码保留折叠详情。首轮相对目录错误只跑了旧 21 方法，不算新候选通过；前端构建先遇系统 TEMP Access denied，改用私有 TEMP 后同源码构建通过。[新22方法](../../../.local/joint-docx-pagination01/shared-audit/frontend-controls02.log)、[类型检查](../../../.local/joint-docx-pagination01/shared-audit/frontend-typecheck02.log)、[构建](../../../.local/joint-docx-pagination01/shared-audit/frontend-build03.log)、[实际页面](../../../.local/runtime-preparation22/real2b-source-labels25.png)。
+
+SCC 最新 70 条仍为 68 同页／2 分离、92 目录通过；动态候选只针对本次测得分离的 source-bound 标题使用已有 Word 分页能力，不增加固定条号或页号特例，尚未运行。Advisory 新真实问答仍未发出；Goal active，七版本 SL 质量及质量通过后的比赛包继续原范围。
+<!-- unified-progress50:end -->
+
+<!-- unified-progress49:start -->
+## progress49：共同输出已推送，SCC 同类标题扩查与实际前端复核
+
+**2026-10-21 当前：已提交并推送 `17d51f9f82f108a04f2342f445fd0648edb9c4de`；后端仍是 formal22，本轮后端修复尚未部署。** Goal 保持 active。继续复用现有技术栈、依赖和原生 Word／LibreOffice；同类不同实现先查实际调用，修共同首因。正式 Drafting 与 Vetting PDF 的源码调用均已汇入既有 `renderPdf` → `DraftPdfConverter` → LibreOffice；旧手排 PDF 方法只保留兼容／测试调用，Advisory 没有需要统一的文件导出入口，不为其另建一套输出。
+
+- **SCC 后继实际结果：** 沿同一来源链扩查 70 条条款（34 条已清指导语空链、36 条原空链），不删除段落、书签或正文。现有两次实际转换窗口 native70-01 已终态：92 项目录全部与本次目标页脚及可见目录一致，25 项修正、67 项保持，1,625 个目标／CS／CL 点不移动；70 条标题到首可见正文有 68 条同页、2 条仍分离。7.303、14.304 原缺陷已消除；7.307 仍在物理 26／27 页、8.306 仍在 35／36 页。**整体测试 1 方法 FAIL，不能因目录 PASS 授最终版式通过。** Root 已看剩余四张原图，继续查共同首因，不按条号或固定页号补丁。18 条章节链仅观察；10.302 导语到后续编号正文的边界继续独立保留。此为保存生成稿上的有界属性候选，尚未采用产品重新生成／保存；不能将结果套给不同 SHA 的稿件。[实际日志](../../../.local/scc-current-toc-finalization01/heading-cohesion02/native70-01.log)、[70 条与 18 条明细](../../../.local/scc-current-toc-finalization01/heading-cohesion02/outputs/native70-01/native-heading-audit.json)、[本次目录证明](../../../.local/scc-current-toc-finalization01/heading-cohesion02/outputs/native70-01/toc-finalization-proof.json)。
+- **真实前端：** 原任务空间 7 已不存在，fresh inventory 仅见用户个人空间；沿用户已授权新建任务测试空间，建立 8／p1，回到同一 `proj_mvhvznh0z8ed` 项目，没有重建项目或重传。浏览器实际读取仍 9 件，两图纸排除，47 页 Annex 保留 `IDENTITY_OBSERVED`。WSL 日志至北京时间 18:38:07 仍有原连接逐页 OCR 200；日志不含原件 SHA／页号，不证明整件或整批完成。原请求保留，后端及 H2 owner 不重启。[浏览器目录回读](../../../.local/runtime-preparation22/real2b-intake-observation06.json)、[实际来源表图片](../../../.local/runtime-preparation22/real2b-source-view23.png)。
+- **新的可读性缺陷：** 来源表正常列仍裸露 `PARSED`／`PARTIAL`／`IDENTITY_OBSERVED` 与 `OTHER` 等内部代码；身份观察状态还显示“身份待确认”，未说明正文结果尚待更新。正在用既有前端三语文案和状态处理准备最小修复，技术码保留在折叠记录中；不能仅凭历史身份观察状态断言引擎正在运行，也不能把文件用途与项目身份采用混为一谈。候选尚未采用或验证。
+
+Vetting 短尾行实转通过、用途 CAS、逐文件上传、runtime23 构建的证据继续沿用 progress48，不重复计数；真实 2b 模型审查及正式报告仍未完成。Advisory 新真实复验、七版 SL 全量来源／检索质量及质量通过后的比赛包仍在统一目标内；没有引入新的技术栈。
+<!-- unified-progress49:end -->
+
 <!-- unified-progress48:start -->
 ## progress48：统一 Word／LibreOffice 输出，目录定版通过，继续真实页面验收
 

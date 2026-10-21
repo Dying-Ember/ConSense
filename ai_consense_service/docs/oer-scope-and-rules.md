@@ -2,7 +2,7 @@
 **2026-10-21 用户要求重写后已实际启动新 Goal，状态 active；取消八点及固定截止约束。当前最高优先级是尽快交付人能操作、阅读和验收的前端、Drafting、Vetting、Advisory 完整流程及正式文件。** 先升级已验证修复，以实际 2b 资料跑前端和可读报告；Drafting 以 2a 起草、2b 对照成品，Vetting 以 2d 对照报告格式。OER 中阻塞这些路径的问题立即修；七版本 SL 全量质量、受控模型比较和质量通过后的完整比赛包继续保留，不阻塞第一阶段交付。固定 H1–H8 用户验收项与后续 O1–O3 见[重写后的统一目标](testing/unified-e2e-oer-goal-20261020.md)。测试数、容量夹具和历史整体百分比不代替业务验收；以下 progress 是历史时点。
 <!-- human-acceptance-goal-20261021:end -->
 
-**最新执行增量见 [progress48](testing/three-module-runtime-progress-20261021.md#progress48统一-wordlibreoffice-输出目录定版通过继续真实页面验收)：** 共同 Word→LibreOffice PDF、用途确认和逐文件上传修复已采用主树，后端仍 formal22，当前原批次逐页 OCR 不重发／不重启。SCC 92 项目录的实际两次定版已通过，但仍发现其他孤立标题，整体版式及产品保存集成未过；七版本 SL 包继续后置。
+**最新执行增量见 [progress50](testing/three-module-runtime-progress-20261021.md#progress50路由漏判已定位运行中断后恢复真实-nttsct-再验)：** 原 Windows 测试前后端及 H2 内存库 owner 已退出，旧 2b 请求按中断保留；SQL22 恢复后运行 runtime23，原件保留。新明确后继项目中，真实 NTT／SCT 前端逐文件上传已自动进入 tender 源，SCT 的 PARTIAL 限制保持；评分附件规则和实际解析阶段状态缺陷在修。共同 Word→LibreOffice 输出已部署但真实 2b 报告未验，SCC 70 条仍有 2 条标题分离；七版本 SL 全量质量及质量通过后的比赛包继续后置。
 
 <!-- unified-progress47:start -->
 **2026-10-21当前：正式报告用实际2b项目资料生成／对照2d，合成容量fixture不得替代读者验收。** Vetting续页／11pt修复已采用、41回归及生成2通过，新Word42／native43全图已核，当前JAR产品源／classes／依赖核同，未部署。开发SQL22隔离恢复／fresh reopen已通过，H2与后端保持。新SCC92目录仍52FAIL、两标题孤立FAIL，继续完整清指导链及新revision保存前DOCX/PDF共同定版，异常保可用原稿／unknown。浏览器新授权测试空间6/p1，实际资料前端场景准备中。见[progress47](testing/three-module-runtime-progress-20261021.md#progress47报告修复已集成恢复通过转实际2b资料验收)，Goal active，SL比赛包后置。

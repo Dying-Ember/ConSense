@@ -170,6 +170,17 @@ const coverage = computed(() => job.value?.coverage ?? job.value?.result?.covera
 const sourceRoleBlocked = computed(() => running.value || uploading.value || exporting.value || sourceRoleSaving.value !== null
   || sourceRoleNeedsRefresh.value || reviewSaving.value || statusSaving.value || hasUnsavedReview.value || checklistDirty.value || checklistSaving.value !== null)
 
+function sourceParseLabel(status?: string) {
+  if (status === 'PARSED') return t('advice.sourceScope.parsed')
+  if (status === 'PARTIAL') return t('advice.sourceScope.partiallyParsed')
+  const states: Record<string, string> = { PARSING: 'parsing', IDENTITY_OBSERVED: 'awaitingResult', IDENTITY_PENDING: 'identityPending', PENDING: 'pending', FAILED: 'failed', PARSE_FAILED: 'failed', EXCLUDED: 'excluded', GENERATED: 'generated' }
+  return t(`vetting.sourceProcessing.${states[status ?? ''] ?? 'unknown'}`)
+}
+function sourcePurposeLabel(file: VettingFile) {
+  if (isExcludedDrawing(file)) return t('vetting.coverage.drawingType')
+  if (file.sourceRole === 'unknown') return t(`vetting.sourceProcessing.${canConfirmSourceRole(file) ? 'purposePending' : 'purposeUnresolved'}`)
+  return pick(file.role)
+}
 function sourceRoleVersion(file: VettingFile) {
   return [file.documentId, file.originalSourceSha256, file.sourceHash, file.routingSha256].join('|')
 }
@@ -1108,7 +1119,7 @@ function tagClass(group: string) {
           <li v-for="(warning, index) in coverage.warnings" :key="index">{{ warning }}</li>
         </ul>
         <div v-for="file in sourceWarnings" :key="file.key + file.fileName" class="warning-note">
-          <strong>{{ file.fileName || file.key }}</strong> · {{ file.parseMessage || file.status }}
+          <strong>{{ file.fileName || file.key }}</strong> · {{ file.parseMessage || sourceParseLabel(file.parseStatus ?? file.status) }}
           <span v-for="(warning, index) in file.warnings" :key="index"> · {{ warning }}</span>
         </div>
         <div v-if="coverage?.documents?.length" class="table-wrap">
@@ -1117,7 +1128,7 @@ function tagClass(group: string) {
             <tbody>
               <tr v-for="document in coverage.documents" :key="document.fileKey + document.fileName">
                 <td><strong>{{ document.fileName }}</strong><div class="mono muted small">{{ document.fileKey }}</div></td>
-                <td>{{ document.parseStatus }}</td>
+                <td>{{ sourceParseLabel(document.parseStatus) }}</td>
                 <td>{{ document.reviewedSegments }} / {{ document.totalSegments }}</td>
                 <td>{{ document.reviewedChars }} / {{ document.textChars }}</td>
                 <td><div v-for="(warning, index) in document.warnings" :key="index" class="warning-note">{{ warning }}</div><span v-if="!document.warnings?.length">—</span></td>
@@ -1552,11 +1563,11 @@ function tagClass(group: string) {
           <tbody>
             <tr v-for="file in files" :key="file.documentId || file.key + ':' + file.fileName">
               <td>
-                <strong class="mono">{{ file.key }}</strong>
-                <div class="muted small">{{ file.fileName }}</div>
+                <strong>{{ file.fileName || file.key }}</strong>
+                <div v-if="!['OTHER', 'DRAWING'].includes(file.key)" class="mono muted small">{{ file.key }}</div>
               </td>
               <td>
-                {{ isExcludedDrawing(file) ? t('vetting.coverage.drawingType') : file.sourceRole === 'unknown' ? t('vetting.uploadRole.unknown') : pick(file.role) }}
+                {{ sourcePurposeLabel(file) }}
                 <div v-if="canConfirmSourceRole(file)" class="section-gap">
                   <label class="small">{{ t('vetting.sourcePurpose.label') }}
                     <select :value="sourceRoleDrafts[sourceRoleVersion(file)] || ''" :aria-label="`${file.fileName} ${t('vetting.sourcePurpose.label')}`"
@@ -1570,18 +1581,19 @@ function tagClass(group: string) {
                 </div>
               </td>
               <td>
-                <span class="tag" :class="isExcludedDrawing(file) ? 'neutral' : file.parsed ? 'ok' : 'warn'">{{ isExcludedDrawing(file) ? t('vetting.coverage.excludedByScope') : file.status }}</span>
+                <span class="tag" :class="isExcludedDrawing(file) ? 'neutral' : file.parsed && (file.parseStatus ?? file.status) === 'PARSED' ? 'ok' : 'warn'">{{ isExcludedDrawing(file) ? t('vetting.coverage.excludedByScope') : sourceParseLabel(file.parseStatus ?? file.status) }}</span>
                 <p v-if="isExcludedDrawing(file)" class="small">{{ t('vetting.coverage.drawingNotReviewed') }}</p>
                 <template v-else>
+                  <p v-if="['PARSING', 'IDENTITY_OBSERVED'].includes(file.parseStatus ?? file.status)" class="small">{{ t('vetting.sourceProcessing.pendingNote') }}</p>
                   <p v-if="file.documentScope === 'drawing'" class="small">{{ t('vetting.documentScope.drawing') }}</p>
-                  <p v-if="file.exclusionReason" class="small">{{ t(`advice.sourceScope.reasons.${file.exclusionReason}`) }}</p>
+                  <p v-if="file.exclusionReason && !['PARSING', 'IDENTITY_OBSERVED', 'IDENTITY_PENDING', 'PENDING'].includes(file.parseStatus ?? file.status)" class="small">{{ file.exclusionReason === 'source_identity_unresolved' ? t('vetting.sourceProcessing.purposeNote') : t(`advice.sourceScope.reasons.${file.exclusionReason}`) }}</p>
                 </template>
               </td>
               <td>{{ file.pageCount || '—' }}</td>
               <td>
                 <details>
                   <summary>{{ t('vetting.coverage.fileProcessingDetails') }}</summary>
-                  <p class="mono small">{{ file.status }}<template v-if="file.parseStatus"> · {{ file.parseStatus }}</template><template v-if="file.sourceRole"> · {{ file.sourceRole }}</template></p>
+                  <p class="mono small">{{ file.status }}<template v-if="file.parseStatus"> · {{ file.parseStatus }}</template><template v-if="file.sourceRole"> · {{ file.sourceRole }}</template><template v-if="file.key"> · {{ file.key }}</template></p>
                   <p v-if="file.documentScope" class="small">{{ t(`vetting.documentScope.${file.documentScope}`) }}</p>
                   <p v-if="file.exclusionReason" class="small">{{ t(`advice.sourceScope.reasons.${file.exclusionReason}`) }}</p>
                   <div class="small">{{ file.parseMessage }}</div>
