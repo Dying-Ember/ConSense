@@ -223,7 +223,7 @@ public class AdviceService {
             try{return canonicalStatus(projectId,normalized);}
             catch(RuntimeException unavailable){
                 IndexStatusVO result=canonicalUnavailable(normalized);
-                List<SourceDocument> selected=freshSelectedDocuments(projectId,normalized);result.setEligibleDocuments(selected.size());
+                List<SourceDocument> selected=freshScopeDocuments(projectId,normalized);result.setEligibleDocuments(selected.size());
                 String reason=sourceFailure(4204,"Sources unavailable",unavailable,"source_stale").getPublicReason();result.setSourceReason(reason);result.setPreparable(false);
                 if("source_unregistered".equals(reason)&&evidencePreparation!=null)try{
                     result.setPreparable(evidencePreparation.normalPreparable(projectId,selected.stream().map(SourceDocument::getId).collect(Collectors.toList()),"advisory"));
@@ -1336,7 +1336,7 @@ public class AdviceService {
     /** Preparation has a complete selected-source denominator and no retrieval or model operation. */
     public SourcePreparationVO prepareSources(String projectId,String scope){
         projectService.require(projectId);String normalized=ProjectDocumentScope.normalizeScope(scope);
-        List<SourceDocument> selected=freshSelectedDocuments(projectId,normalized);List<SourcePreparationResult> results=new ArrayList<>();boolean failed=false;int prepared=0;
+        List<SourceDocument> selected=freshScopeDocuments(projectId,normalized);List<SourcePreparationResult> results=new ArrayList<>();boolean failed=false;int prepared=0;
         for(SourceDocument document:selected){String status="unexecuted",reason=null;
             if(!failed)try{status=evidencePreparation.prepareNormalObserved(projectId,document.getId(),"advisory")?"prepared":"already_registered";prepared++;}
             catch(RuntimeException rejected){status="failed";failed=true;reason=sourceFailure(4204,"Source preparation failed",rejected,"source_stale").getPublicReason();}
@@ -1344,7 +1344,7 @@ public class AdviceService {
         }
         boolean complete=!failed&&!selected.isEmpty();
         if(complete)try{
-            List<SourceDocument> current=freshSelectedDocuments(projectId,normalized);
+            List<SourceDocument> current=freshScopeDocuments(projectId,normalized);
             complete=current.size()==selected.size();for(int n=0;complete&&n<selected.size();n++)complete=Objects.equals(selected.get(n).getId(),current.get(n).getId())&&com.consense.service.sources.NormalObservedPreparationService.sameGeneration(selected.get(n),current.get(n));
             if(complete)try(com.consense.service.sources.CanonicalEvidenceService.VerifiedBindingFrame frame=evidencePreparation.verifiedBindings(projectId,"advisory",current.stream().map(SourceDocument::getId).collect(Collectors.toList()))){frame.beforeWait();}
         }catch(RuntimeException changed){complete=false;log.warn("Advice source preparation final source validation failed ({}): {}",changed.getClass().getSimpleName(),
@@ -1354,6 +1354,16 @@ public class AdviceService {
     private List<SourceDocument> selectedDocuments(String projectId,String scope){
         try{return ProjectDocumentScope.selected(projectId,sourceDocumentRepository.findBusinessSourcesByProjectId(projectId),scope,"advisory");}
         catch(IllegalArgumentException invalidSource){throw new BizException(4204,"An advice source identity is invalid or changed. Review the current sources before asking; no answer was published.");}
+    }
+    /** Status/preparation catalogs need exact generation fields, not every stored candidate graph. */
+    private List<SourceDocument> freshScopeDocuments(String projectId,String scope) {
+        TransactionTemplate transaction=new TransactionTemplate(transactionManager);
+        transaction.setReadOnly(true);transaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        return transaction.execute(status->{
+            entityManager.clear();
+            try{return ProjectDocumentScope.selected(projectId,sourceDocumentRepository.findSourceListByProjectId(projectId),scope,"advisory");}
+            catch(IllegalArgumentException invalidSource){throw new BizException(4204,"An advice source identity is invalid or changed. Review the current sources before asking; no answer was published.");}
+        });
     }
     private List<SourceDocument> freshSelectedDocuments(String projectId,String scope) {
         TransactionTemplate transaction=new TransactionTemplate(transactionManager);

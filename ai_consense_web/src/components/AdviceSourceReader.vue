@@ -87,7 +87,7 @@ onBeforeUnmount(() => { ++epoch; release() })
     </div>
     <template v-else>
       <a v-if="sourceUrl" :href="sourceUrl" :download="filename" class="btn">{{ copy('Download this original', '下载这份原件', '下載這份原件') }}</a>
-      <details v-if="warnings.length" class="source-limitations" open><summary>{{ copy('Location and reading limits', '定位与阅读界限', '定位與閱讀界限') }}</summary><ul><li v-for="warning in warnings" :key="warning">{{ warning }}</li></ul></details>
+      <details v-if="warnings.length" class="source-limitations"><summary>{{ copy('Location and reading limits', '定位与阅读界限', '定位與閱讀界限') }}</summary><ul><li v-for="warning in warnings" :key="warning">{{ warning }}</li></ul></details>
       <template v-if="format === 'pdf'">
         <nav v-if="pages.length > 1" class="cited-pages" :aria-label="copy('Cited pages', '引用页', '引用頁')"><button v-for="physical in pages" :key="physical" class="btn" type="button" :aria-pressed="page === physical" @click="page = physical">{{ copy('Physical page', '物理页', '實體頁') }} {{ physical }}</button></nav>
         <DraftingPdfPreview :key="`${revision}:${page}`" :source="sourceUrl" :title="filename" :locale="locale as AppLocale" :initial-page="page" />

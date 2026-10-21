@@ -82,6 +82,7 @@ const evidenceCopy = {
   reviewSources: { zhHans: '前往审查页核对文件', zhHant: '前往審查頁核對文件', en: 'Review source files in Vetting' },
   prepare: { zhHans: '准备咨询资料', zhHant: '準備諮詢資料', en: 'Prepare advice sources' },
   preparing: { zhHans: '正在准备咨询资料，问题草稿已保留。', zhHant: '正在準備諮詢資料，問題草稿已保留。', en: 'Preparing advice sources. Your question draft is retained.' },
+  checkingPrepared: { zhHans: '资料登记已结束，正在核对咨询状态，可先查看下方逐文件结果。', zhHant: '資料登記已結束，正在核對諮詢狀態，可先查看下方逐檔結果。', en: 'Source registration has finished. Checking advice status; you can review the per-file results below.' },
   preparationNote: { zhHans: '此操作仅核对已有解析并准备来源登记，不会重新解析文件或生成答复。', zhHant: '此操作僅核對已有解析並準備來源登記，不會重新解析文件或產生答覆。', en: 'This checks existing parsed material and prepares its source registration. It does not reparse files or generate an answer.' },
   preparationUnverified: { zhHans: '来源质量尚未由人工确认。', zhHant: '來源品質尚未由人工確認。', en: 'Source quality has not been confirmed by a person.' },
   preparationIncomplete: { zhHans: '资料准备尚未完成，请核对以下逐文件结果后重新检查来源。', zhHant: '資料準備尚未完成，請核對以下逐文件結果後重新檢查來源。', en: 'Source preparation is incomplete. Review each file result, then recheck sources.' },
@@ -151,7 +152,7 @@ function scopeLabel(value: string) {
 
 function sessionLabel(item: AdviceSession) {
   const date = new Date(item.createdAt)
-  const time = Number.isNaN(date.getTime()) ? '' : date.toLocaleString()
+  const time = Number.isNaN(date.getTime()) ? '' : date.toLocaleString(store.locale)
   const basis = item.basisScope === 'project_contract' ? pick(evidenceCopy.projectBasis)
     : item.basisScope === 'reference_only' ? pick(evidenceCopy.referenceBasis) : t('common.unconfirmed')
   return [time, scopeLabel(item.scope), basis].filter(Boolean).join(' · ')
@@ -534,6 +535,11 @@ function selectCitation(citation: Citation) {
   activeCitation.value = citation
 }
 
+function citationLabel(citation: Citation, index: number) {
+  return citation.evidenceId && /^\[[1-9]\d*\]$/.test(citation.evidenceId)
+    ? citation.evidenceId : `${streamCopy('Excerpt', '摘录', '摘錄')} ${index + 1}`
+}
+
 function openMessageSources(message: ChatMessage, citationText?: string) {
   if (!message.sources?.length) return
   activeSources.value = message.sources
@@ -670,7 +676,7 @@ async function askPrecedence() {
                 </template>
                 <button class="btn" type="button" @click="router.push({ name: 'vetting' })">{{ pick(evidenceCopy.reviewSources) }}</button>
               </div>
-              <p v-if="preparingSources" class="muted small" role="status" aria-live="polite">{{ pick(evidenceCopy.preparing) }}</p>
+              <p v-if="preparingSources" class="muted small" role="status" aria-live="polite">{{ pick(preparation ? evidenceCopy.checkingPrepared : evidenceCopy.preparing) }}</p>
               <div v-if="preparation" class="muted small" role="status">
                 <p>{{ t('advice.sourceScope.preparedCount', { prepared: preparation.preparedDocuments, selected: preparation.selectedDocuments }) }} · {{ pick(evidenceCopy.preparationUnverified) }}</p>
                 <p v-if="!preparation.complete" class="warning-note">{{ pick(evidenceCopy.preparationIncomplete) }}</p>
@@ -826,7 +832,7 @@ async function askPrecedence() {
                 :title="source.fileLabel"
                 @click="selectCitation(source)"
               >
-                {{ source.anchor || source.fileLabel }}
+                {{ citationLabel(source, i) }}
               </button>
             </div>
 

@@ -1,5 +1,9 @@
 # ConSense 统一目标：先交付人能验收的完整流程
 
+<!-- runtime-integration60:start -->
+**最新执行progress60：前端52控件＋生产构建与真实保存会话／引用原件回读通过；咨询发布门及范围快照优化获实际回归覆盖，未部署或重新问模型。SCC09新正常三模板生成通过138完整段／154关系／92目录，新79页视觉仍有5处关系异常，保持FAIL。新增Bill/Schedule四组填空按真实缺值pending、明确补填与BQ/SOR分支替换继续验证，不猜编号。** [实际证据](three-module-runtime-progress-20261021.md#progress60咨询发布与范围快照修复通过回归新生成完整段落通过全页视觉和bs填空继续收口)。当前64GiB11540及H2／旧H57保持；新包29未部署，H1–H8/O1–O3全范围保留，Goal active，SL质量未过不打包。
+<!-- runtime-integration60:end -->
+
 <!-- runtime-integration59:start -->
 **最新执行progress59：核心a830399已推送部署，主后端64GiB，H2及原H57解析保持。前端49控件／构建和真实咨询历史／原件回读通过；H8答案总结仍扩大GS条件。真实30来源准备5登记／SCC失败／24未执行；完整审查仍未创建。SCC全源50关系08实际154起点／92目录通过，但新完整段落检查p1648跨页，normal05 FAIL，不能提前授版式通过。** [当前证据](three-module-runtime-progress-20261021.md#progress59运行包已升级真实咨询回读通过整套资料准备及新增分页校验继续保留失败)。Goal active，H1–H8/O1–O3不缩减；七版SL全量质量未过不打包。
 <!-- runtime-integration59:end -->

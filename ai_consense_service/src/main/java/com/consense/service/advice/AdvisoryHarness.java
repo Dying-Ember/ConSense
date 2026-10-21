@@ -16,6 +16,11 @@ final class AdvisoryHarness {
     static final String POLICY = AdvisoryPromptPolicy.text();
     static final String POLICY_SHA = com.consense.service.vetting.VettingCorpus.hash(POLICY);
     private static final Pattern REFERENCE = Pattern.compile("\\[\\d+\\]");
+    private static final String NAMED_OPERAND="[A-Z][A-Z0-9_-]*(?:[\\t ]+[A-Z][A-Z0-9_-]*){0,5}";
+    private static final Pattern NAMED_ORDER=Pattern.compile("(?<![\\p{L}\\p{N}_])"+NAMED_OPERAND+"(?:[\\t ]*(?<![-=])[>＞](?!=)[\\t ]*"+NAMED_OPERAND+"){1,7}");
+    private static final Pattern PRECEDENCE_WORD=Pattern.compile("\\b(?:prevail|prevails|precedence|priority)\\b|优先|優先",Pattern.CASE_INSENSITIVE);
+    private static final Pattern LEADING_CONDITION=Pattern.compile("(?is)^\\s*(?:(?:[0-9]+[.)]|\\([A-Za-z0-9]+\\))\\s*)?(?:subject\\s+to\\b|provided\\b|for\\b|if\\b|when\\b|where(?:ver)?\\b|only\\b|若|如果|当|當|仅|僅|受)");
+    private static final Pattern LOCAL_CONDITION=Pattern.compile("\\b(?:if|when|where|wherever|for|provided|subject\\s+to|only\\s+(?:if|for|when|where))\\b|如果|若|仅对|僅對|只对|只對|仅在|僅在|只在|(?:当|當|在)[^。；;\\n]{1,120}(?:时|時|条件下|條件下)|受[^。；;\\n]{1,120}(?:约束|約束)",Pattern.CASE_INSENSITIVE);
     private static final String LANGUAGE_NAMES="英文|英语|英語|简体中文|簡體中文|繁体中文|繁體中文|中文|English|Simplified Chinese|Traditional Chinese";
     private static final Pattern OUTPUT_LANGUAGE=Pattern.compile("(?:请|請)([\\p{IsHan}\\s]{0,12}?)(?:使用|用|以)\\s*("+LANGUAGE_NAMES+")|(?:^|[\\s，,。；;！!？?])(?:使用|用|以)\\s*("+LANGUAGE_NAMES+")|\\b(?:answer|respond|reply|write)(?:\\s+\\w+){0,5}\\s+in\\s+(English|Simplified Chinese|Traditional Chinese|Chinese)\\b",Pattern.CASE_INSENSITIVE);
     private static final Pattern QUOTED_QUESTION_TEXT=Pattern.compile("\"[^\"]*\"|“[^”]*”|‘[^’]*’|「[^」]*」|『[^』]*』|`[^`]*`|(?<![A-Za-z])'[^']*'");
@@ -65,6 +70,8 @@ final class AdvisoryHarness {
             + "State each rule's governing condition, actual trigger subject, applicability and exceptions in the SAME analysis unit as that rule, citing both the governing text and its supplied continuation. A general scope paragraph or a self-check claiming complete reading does not replace these qualifications. "
             + "Any paraphrase, summary or graph must preserve the source rule's actor and trigger subject, prerequisites, effect and exceptions within its stated scope; never attach a new prerequisite or alter the rule's effect. "
             + "Compare your explanation with the cited wording: even a complete and accurate quote does not justify a contradictory summary. If a faithful interpretation is unresolved, preserve the cited source wording and independently supported analysis, and localize only the unresolved interpretation through the existing uncertainty/gaps contract. "
+            + "For a derived precedence chain, its operative sentence must retain the governing applicability condition and cite the supplied qualifying text there, not merely in an earlier paragraph. If a shorthand order cannot carry the full conditions, replace only that order with separate complete condition-to-effect rules; retain other supported units. A local conditional phrase or passing check is not independent proof of semantic completeness. "
+            + "During R5/R6 review, account separately for each operative effect in the supplied rule, including taking precedence AND substituting, exclusions AND their cross-reference incorporation exceptions. Do not reduce multiple source operations to a generic priority label; do not invent an operation or ask for evidence already supplied. "
             + "Source-role and upload-classification metadata alone establish neither the presence nor absence of signing, project adoption or incorporation, or the project's actual stage; require supporting current evidence and otherwise keep those states unknown. "
             + "A cross-reference does not broaden the source's actual incorporation trigger. Use a supplied complete observed range jointly, while keeping unresolved scope explicit; adjacency alone never establishes legal applicability. "
             + "Never change a failed or missing_evidence check to pass just to publish; split or omit the unsupported claim instead. A cited rule-only analysis keeps the requested project_contract/reference_only basis, subject to unchanged incorporation checks, even when the answer envelope is insufficient. "
@@ -210,6 +217,7 @@ final class AdvisoryHarness {
         }
         boolean substantive="analysis".equals(section.kind)||"flowchart".equals(section.kind);
         if(substantive)AdviceClauseAttribution.check(section,sources,problems);
+        if(substantive)conditionedOrder(section,sources,problems);
         if(substantive){
             if(!text(section.content))problems.add("section.content: substantive sections require a nonempty cited explanation");
             if(!section.gaps.isEmpty())problems.add("section.gaps: substantive sections require complete independent support and no unresolved gaps");
@@ -242,6 +250,44 @@ final class AdvisoryHarness {
         if(!problems.isEmpty())throw invalid(String.join("; ",problems));
     }
     static String status(Section section,String rule) { return section.checks.stream().filter(c->rule.equals(c.ruleId)).map(c->c.status).findFirst().orElse(""); }
+
+    /** A bounded publication diagnostic for derived named orders, not a semantic applicability decision. */
+    static void conditionedOrder(Section section,List<CitationVO> sources,List<String> problems) {
+        String content=section.getContent();if(content==null||section.getCitations()==null)return;
+        List<CitationVO> cited=sources.stream().filter(s->section.getCitations().contains(s.getEvidenceId())).collect(Collectors.toList());
+        List<String> qualifiers=cited.stream().filter(s->s.getContent()!=null&&LEADING_CONDITION.matcher(s.getContent()).find())
+                .map(CitationVO::getEvidenceId).collect(Collectors.toList());
+        if(qualifiers.isEmpty())return;
+        List<CitationVO> priority=cited.stream().filter(s->s.getContent()!=null&&PRECEDENCE_WORD.matcher(s.getContent()).find()).collect(Collectors.toList());
+        java.util.regex.Matcher order=NAMED_ORDER.matcher(content);int checked=0;
+        while(order.find()) {
+            String[] operands=order.group().split("[>＞]");boolean supportedNames=true;
+            for(String operand:operands){String name=operand.trim();Pattern literal=Pattern.compile("(?<![\\p{L}\\p{N}_])"+Pattern.quote(name)+"(?![\\p{L}\\p{N}_])",Pattern.CASE_INSENSITIVE);
+                if(priority.stream().noneMatch(s->literal.matcher(s.getContent()).find())){supportedNames=false;break;}}
+            if(!supportedNames||wholeSourceOrderQuote(content,order.start(),order.end(),cited))continue;
+            if(++checked>32){problems.add("section.content: too many derived named precedence orders");return;}
+            int from=order.start(),to=order.end();while(from>0&&!orderSentenceBoundary(content,from-1))from--;
+            while(to<content.length()&&!orderSentenceBoundary(content,to))to++;
+            String local=content.substring(from,to);
+            List<String> missing=new ArrayList<>(qualifiers);missing.removeAll(explicitBodyAliases(local));
+            if(!LOCAL_CONDITION.matcher(local).find()||!missing.isEmpty())problems.add("section.content: derived_precedence_order_lost_qualifier at "+order.start()+".."+order.end()
+                    +"; offsetUnit=utf16; missingLocalQualifierAliases="+JsonUtils.write(missing)+". Recheck the whole derived order against the supplied governing text and continuation. "
+                    +"State the full applicability condition and its source alias in the SAME operative sentence, or replace only this shorthand with separate complete condition-to-effect rules. "
+                    +"Do not merely delete the order symbols, invent conditions, broaden the subject, add aliases only to clear validation, or discard independently supported units. "
+                    +"Preserve every supported operative effect, including precedence/substitution and cross-reference incorporation; isolate only genuinely unresolved interpretation under existing uncertainty/gaps.");
+        }
+    }
+    private static boolean orderSentenceBoundary(String content,int at) {
+        char c=content.charAt(at);return c=='\n'||c=='。'||c==';'||c=='；'||c=='.'&&at+1<content.length()&&Character.isWhitespace(content.charAt(at+1));
+    }
+    private static boolean wholeSourceOrderQuote(String content,int from,int to,List<CitationVO> cited) {
+        java.util.regex.Matcher quotes=QUOTED_QUESTION_TEXT.matcher(content);
+        while(quotes.find())if(quotes.start()<from&&quotes.end()>to){String literal=content.substring(quotes.start()+1,quotes.end()-1).trim();
+            if(cited.stream().anyMatch(s->s.getContent()!=null&&s.getContent().trim().equals(literal)))return true;}
+        int start=content.lastIndexOf('\n',from)+1,end=content.indexOf('\n',to);if(end<0)end=content.length();
+        if(!content.startsWith("> ",start))return false;String literal=content.substring(start+2,end).trim();
+        return cited.stream().anyMatch(s->s.getContent()!=null&&s.getContent().trim().equals(literal));
+    }
     static List<String> gaps(Section section) {
         Set<String> gaps=new LinkedHashSet<>(section.gaps);
         String[] rules={"other_fact","amendments","authority","opposing_conditions","policy_basis","proviso","other_fact","obligation_type","dynamic_version","other_fact"};

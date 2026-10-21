@@ -1,3 +1,17 @@
+<!-- runtime-integration60:start -->
+## progress60：咨询发布与范围快照修复通过回归，新生成完整段落通过，全页视觉和BS填空继续收口
+
+**2026-10-22 01:37：Goal active，当前运行仍18084/PID11540、64GiB；新包29已构建未部署。** 受保护H2、旧H57解析和唯一审查start保持。已推送前端／文档提交`3e76828`；本条后继与实际验收范围分开记录。
+
+- **咨询条件发布门：** 实际message44的原段落、6最终引用及21来源用明确标注的测试carrier回放，旧产品确实把错误总结发布；最终同测试RED03为19方法中6个症状失败，含3项实际来源选择SQL。后继在既有Publication.validate共用门诊断有来源限定的派生优先链，要求同一操作句保留条件及限定引用，沿原一次repair保留其他可用单元；完整条件、前／后置条件、来源字面引用、数学及普通箭头保持。初次／repair补齐独立操作核对要求，没有硬编码本题答案。[候选说明](../../../.local/advice-condition-summary29/review.md)、[真实旧行为RED](../../../.local/source-runtime-diagnosis29/red03/maven.log)。这只是有界诊断，不能证明所有法律条件正确；真实Qwen与原13项复验尚未执行。
+- **减少整套未用图复制：** 状态失败回退、准备入口和终检三处范围快照复用既有完整text/structure投影；真正canonical图消费、来源fresh校验与完整CAS保持。联合7类83方法首窗82PASS／1测试夹具projectId过长错误，缩短唯一测试项目名前缀后原方法1PASS，实际覆盖text／coverage／routing／新成员四种终检拒绝；不称单窗83全绿。[首窗](../../../.local/source-runtime-diagnosis29/green01/maven.log)、[补窗](../../../.local/source-runtime-diagnosis29/green02/maven.log)。原RED01的Java8 var测试编译失败完整保留，不当作业务或源质量失败。
+- **前端实际可读性后继：** 引用选择从body路径改为原有合法[n]，其他来源用三语“摘录n”；会话时间随应用语言；准备返回后等待状态时明确分阶段提示；原件警告默认折叠且可完整展开。私有52控件及vue-tsc通过，Root精确采用；主树typecheck及生产build02成功。首build因系统Temp中esbuild临时文件删除被拒失败保留，改用本任务临时目录后成功，未删除系统临时文件。真实p3回读已存会话、21引用别名、中文日期、引用原件选中、7条警告折叠／展开内容保全通过，0新模型请求。[实际浏览器](../../../.local/advice-human-labels29/browser86.json)、[新屏幕](../../../.local/advice-human-labels29/browser86.jpg)、[生产构建](../../../.local/advice-human-labels29/root-build02.log)。
+- **SCC正文整段后继09：** 仅50个已确认局部关系的首正文启用现有原生keepLines，不额外串联后续列表；原生keepNext／特殊分页、其他105条配置及NTT/SCT保持。34相关方法实际全部通过；normal06真实完整三模板1PASS／200.116秒，154关系、92目录、2102定位点、138完整段落通过，p1648由62→63分裂改为63页整段，三Word保存/下载和三PDF预览/导出同字节。[34回归](../../../.local/drafting-main-integration27/software08/maven.log)、[完整生成](../../../.local/drafting-main-integration27/normal06/actual01/full-generation-render-result.json)。新SCC79页fresh原图全部亲看，49 PASS_WITH_LIMITS／25 WARN／5 FAIL；normal04的60／62／63三处断页已消除，仍有27、47、49、52、58页的导语→首项／公式关系FAIL，家具无新裁切／叠压／异常字号跳变。**不能据软件绿授最终版式通过**；[新全页票](../../../.local/drafting-main-integration27/normal06/actual01/visual-review01.json) SHA `85c9e776ed02a9039026fd907a2b1fbdd7fb451bd7d8a4b20e11d58e940cbaa9`。normal04三视觉FAIL、normal05正文FAIL均保留原时点结果。
+- **用户新增Bill／Schedule填空问题：** 截图对应纯消防SCC20.303(5)。同族4正文＋4编制指示涉及SCC20.301(7)、20.302(5)、20.303(5)、20.304(5)。normal06四处均已有exact绑定和pending动作，输入未给billNos／相关安排／工种，未发现已给编号丢失；生成清除编制提示后，PDF只剩横线、两个备选及星号，当前界面待办说明过于泛化。billNos.affects另漏一般BS正文位置，属于提示覆盖缺口；实际编译用action.paragraphs与source association，不靠该affects。正在准备明确四条款补填／BQ或SOR选择指引，以及真实2a缺值保全和给值后完整分支替换回归。禁止猜编号或把2b消防及水泵的12.3自动用于纯消防。[原件／当前绑定调查](../../../.local/drafting-bs-valuation-blank30/source-summary.json)。
+
+真实35资料／整套Vetting报告、Advisory新回答及来源登记仍未过；64GiB准备5/30、SCC失败、24未执行的终态保持，其后状态刷新484714ms已完成，无新准备重发。新包29 SHA `9bdd161d480cfd8d5496f73ba40de3f563e6d19779062cbe6577f411ef9c5608`，13类／资源已核同，因完整视觉和新填空工作仍待收口而未替换运行。七版SL全部22,214技术页质量和完整比赛包仍未完成，不打包。
+<!-- runtime-integration60:end -->
+
 <!-- runtime-integration59:start -->
 ## progress59：运行包已升级，真实咨询回读通过，整套资料准备及新增分页校验继续保留失败
 

@@ -1,3 +1,7 @@
+<!-- runtime-integration60:start -->
+**最新执行progress60：咨询实际错误总结回放已能在发布前拒绝，范围快照省未用候选图的后继获得83逻辑方法跨窗覆盖，未部署／未真实模型复验。前端52控件、主树build和真实21引用／中文日期／原件警告保全已通过。SCC09的34软件及正常三模板生成通过，138段／154关系／92目录通过；新79页视觉仍有5处关系异常待核，最终版式未过。用户指出的Bill／Schedule四组填空已核为缺值pending且提示不足，真实给值替换回归准备中。** [完整实测](testing/three-module-runtime-progress-20261021.md#progress60咨询发布与范围快照修复通过回归新生成完整段落通过全页视觉和bs填空继续收口)。新包29未部署，真实整套报告／SL全量仍未过，不做比赛包。
+<!-- runtime-integration60:end -->
+
 <!-- runtime-integration59:start -->
 **最新执行progress59：a830399已推送并部署，主后端64GiB实核，旧H57/OCR原请求持续运行。前端49控件及构建通过，真实已存咨询回读与点击原件成功；最新Qwen答案仍有总结扩大条件FAIL。整套30来源准备返回5已登记／SCC失败／24未执行，未重发。SCC新增50来源关系的起点154／目录92通过，但新normal05完整段落检查发现p1648正文62→63跨页，正常生成FAIL，继续原生分页后继。** [当前实测与限制](testing/three-module-runtime-progress-20261021.md#progress59运行包已升级真实咨询回读通过整套资料准备及新增分页校验继续保留失败)。H1–H8及O1–O3范围保持，SL全量未过不打包。
 <!-- runtime-integration59:end -->

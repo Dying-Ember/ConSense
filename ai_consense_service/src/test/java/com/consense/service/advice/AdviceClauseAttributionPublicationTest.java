@@ -14,6 +14,82 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /** Authored admitted-source carriers. Tests actual Publication.accept before progress.section. */
 class AdviceClauseAttributionPublicationTest {
+    @Test void derivedOrderRecapLosingItsGoverningQualifierNeverReachesProgress() throws Exception {
+        List<CitationVO> sources=Arrays.asList(source("1","For external works only, the following rules apply.",null,false),
+                source("2","Where the documents differ, ALPHA shall prevail over BETA and GAMMA; BETA shall prevail over GAMMA.",null,false));
+        for(String text:Arrays.asList("For external works only, the stated priority rules apply [1][2]. Therefore: ALPHA > BETA > GAMMA [2].",
+                "仅对外部工程适用以下规则 [1][2]。因此：ALPHA > BETA > GAMMA [2]。",
+                "Therefore: ALPHA > BETA > GAMMA [1][2].")) {
+            Fixture f=fixture(sources,text.contains("因此"));begin(f,false);accept(f,opening(f));
+            accept(f,section(f,"The supplied source gives a conditional document rule [1].","sec-independent"));
+            AdvisoryHarness.Section bad=section(f,text,"sec-order");bad.setCitations(Arrays.asList("[1]","[2]"));String unchanged=JsonUtils.write(bad);accept(f,bad);
+            assertEquals(Arrays.asList("limits","sec-independent"),ids(f));assertEquals(2,f.published.size());
+            assertTrue(errors(f).toString().contains("derived_precedence_order_lost_qualifier"));assertEquals(unchanged,JsonUtils.write(bad));
+            String repair=ReflectionTestUtils.invokeMethod(f.publication,"repairInstruction","AUTHORED rejected order");
+            assertTrue(repair.contains("SAME operative sentence"));assertTrue(repair.contains("replace only this shorthand"));
+            assertTrue(repair.contains("precedence/substitution and cross-reference incorporation"));
+        }
+    }
+
+    @Test void fullLocalConditionAndItsGoverningAliasesKeepAUsefulDerivedOrder() throws Exception {
+        List<CitationVO> sources=Arrays.asList(source("1","For external works only, the following rules apply.",null,false),
+                source("2","Where the documents differ, ALPHA shall prevail over BETA and GAMMA; BETA shall prevail over GAMMA.",null,false));
+        for(String text:Arrays.asList("For external works only, ALPHA > BETA > GAMMA [1][2].","仅对外部工程，ALPHA > BETA > GAMMA [1][2]。",
+                "ALPHA > BETA > GAMMA only for external works [1][2].","ALPHA > BETA > GAMMA，仅对外部工程适用 [1][2]。")) {
+            Fixture f=fixture(sources,text.contains("仅对"));begin(f,false);accept(f,opening(f));AdvisoryHarness.Section good=section(f,text,"sec-order");good.setCitations(Arrays.asList("[1]","[2]"));accept(f,good);
+            assertTrue(errors(f).isEmpty(),errors(f).toString());assertEquals(2,f.published.size());
+        }
+    }
+
+    @Test void wholeSourceQuotesMathAndOrdinaryArrowsAreNotReclassifiedAsUnsupportedOrders() throws Exception {
+        String literal="For external works only, ALPHA > BETA > GAMMA is the stated order of precedence.";
+        for(String text:Arrays.asList("The source says: \""+literal+"\" [1]","> "+literal+"\n[1]",
+                "9 > 7 > 3; x > y; ALPHA -> BETA -> GAMMA; ALPHA >= BETA; ALPHA → BETA [1].")) {
+            Fixture f=fixture(Collections.singletonList(source("1",literal,null,false)),false);begin(f,false);accept(f,opening(f));accept(f,section(f,text,"sec-available"));
+            assertTrue(errors(f).isEmpty(),errors(f).toString());assertEquals(2,f.published.size());
+        }
+        Fixture unrelated=fixture(Collections.singletonList(source("1","If x is larger than y, compare the stated values of ALPHA, BETA and GAMMA.",null,false)),false);
+        begin(unrelated,false);accept(unrelated,opening(unrelated));accept(unrelated,section(unrelated,"ALPHA > BETA > GAMMA is an authored comparison [1].","sec-math"));
+        assertTrue(errors(unrelated).isEmpty(),"No source priority wording means this diagnostic does not classify the expression as a document-precedence claim");
+    }
+
+    @Test void rejectedOrderRepairKeepsAcceptedUnitsAndCanReturnCompleteConditionalProse() throws Exception {
+        List<CitationVO> sources=Arrays.asList(source("1","For external works only, the following rules apply.",null,false),
+                source("2","Where the documents differ, ALPHA shall prevail over BETA and GAMMA; BETA shall prevail over GAMMA.",null,false),
+                source("3","When clause numbers match except suffix, ALPHA takes precedence over and substitutes BETA.",null,false),
+                source("4","If an included provision refers to an excluded provision, the referred provision is incorporated for operation.",null,false));
+        Fixture f=fixture(sources,false);begin(f,false);accept(f,opening(f));accept(f,section(f,"The supplied source gives a conditional document rule [1].","sec-independent"));
+        String prefix=JsonUtils.write(accepted(f));AdvisoryHarness.Section bad=section(f,"Therefore: ALPHA > BETA > GAMMA [1][2].","sec-order");bad.setCitations(Arrays.asList("[1]","[2]"));accept(f,bad);
+        assertTrue(errors(f).toString().contains("derived_precedence_order_lost_qualifier"));begin(f,true);
+        AdvisoryHarness.Section fixed=section(f,"For external works only, when the documents differ, ALPHA prevails over BETA and GAMMA; within that same scope BETA prevails over GAMMA [1][2].","sec-fixed");fixed.setCitations(Arrays.asList("[1]","[2]"));accept(f,fixed);
+        assertTrue(errors(f).isEmpty());assertEquals(prefix,JsonUtils.write(accepted(f).subList(0,2)));assertEquals(Arrays.asList("limits","sec-independent","sec-fixed"),ids(f));
+        for(int index=2;index<4;index++) {
+            CitationVO current=sources.get(index);AdvisoryHarness.Section operation=section(f,current.getContent()+" "+current.getEvidenceId(),"sec-operation-"+index);
+            operation.setCitations(Collections.singletonList(current.getEvidenceId()));for(AdvisoryHarness.Check check:operation.getChecks())if(!check.getCitations().isEmpty())check.setCitations(Collections.singletonList(current.getEvidenceId()));
+            accept(f,operation);
+        }
+        assertTrue(errors(f).isEmpty());assertEquals(5,f.published.size());assertEquals(prefix,JsonUtils.write(accepted(f).subList(0,2)));
+    }
+
+    @Test
+    @org.junit.jupiter.api.condition.EnabledIfSystemProperty(named="consense.advice.conditionSummaryReplay",matches=".+")
+    void exactPublished44ParagraphAndFinalSourceMappingAreRejectedBeforeProgress() throws Exception {
+        java.nio.file.Path path=java.nio.file.Paths.get(System.getProperty("consense.advice.conditionSummaryReplay"));byte[] original=java.nio.file.Files.readAllBytes(path);
+        assertEquals("7ab3c8b8d2bb84275bfb6d6f2420823fe477eea9a01828040711cd78f79a0e33",com.consense.common.Utf8.sha256(new String(original,java.nio.charset.StandardCharsets.UTF_8)));
+        JsonNode history=JsonUtils.parse(new String(original,java.nio.charset.StandardCharsets.UTF_8)),message=null;
+        for(JsonNode row:history.path("data"))if(row.path("id").asInt()==44&&row.path("sessionId").asText().equals("166682ce-3e72-4f01-858c-a06cba8cd61d")){assertNull(message);message=row;}
+        assertNotNull(message);List<CitationVO> sources=JsonUtils.readList(JsonUtils.write(message.path("sources")),CitationVO.class);assertEquals(21,sources.size());
+        List<String> paragraphs=new ArrayList<>();for(String paragraph:message.path("content").path("zhHans").asText().split("\\n\\n"))if(paragraph.contains(" > "))paragraphs.add(paragraph);
+        assertEquals(1,paragraphs.size());List<String> finalAliases=new ArrayList<>();message.path("citations").forEach(alias->finalAliases.add(alias.asText()));
+        Fixture f=fixture(sources,true);begin(f,false);accept(f,opening(f));
+        // Exact published prose + real final aliases; checks are an explicit authored carrier, not provider section reconstruction.
+        AdvisoryHarness.Section carrier=section(f,paragraphs.get(0),"sec-published44-carrier");carrier.setCitations(finalAliases);
+        for(AdvisoryHarness.Check check:carrier.getChecks())if(!check.getCitations().isEmpty())check.setCitations(Collections.singletonList(finalAliases.get(0)));
+        String unmodified=JsonUtils.write(carrier);accept(f,carrier);
+        assertEquals(Collections.singletonList("limits"),ids(f));assertEquals(1,f.published.size());assertTrue(errors(f).toString().contains("derived_precedence_order_lost_qualifier"));
+        assertTrue(errors(f).toString().contains("[16]"));assertEquals(unmodified,JsonUtils.write(carrier));assertArrayEquals(original,java.nio.file.Files.readAllBytes(path));
+    }
+
     @Test void unknownChineseAndEnglishFormalAttributionNeverReachesProgress() throws Exception {
         for(String text:Arrays.asList("Under Clause 1 of this Specification, keep a record [1].","根据第 1 条，保留记录 [1]。","第 2 条规定保留记录 [1]。","第 4 条限定了范围 [1]。","上述规则受第1条和第2条约束 [1]。","It is not unknown whether Clause 1 requires a record [1].","Not not under Clause 1, keep a record [1].","并非不能确认第1条规定保留记录 [1]。")){
             Fixture f=fixture(Collections.singletonList(source("1","1. Keep a record.",null,false)),text.contains("条"));

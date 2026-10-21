@@ -581,6 +581,46 @@ test('Advice source preparation is an explicit single mutation followed only by 
   } finally { h.dispose() }
 })
 
+test('Advice shows returned partial file results while the read-only status check is still pending', async () => {
+  const prepared = deferred(), checked = deferred(); let preparationReturned = false
+  const h = await harness({ initialView: 'advice', respondOverride: ({ url }) => {
+    if (url.includes('/index/status?')) return preparationReturned ? checked.promise
+      : { ...indexReply('Scoped source status'), indexReason: 'current_sources_unavailable', sourceReason: 'source_unregistered', preparable: true, vectorReady: false }
+    if (url.includes('/sources/prepare?')) return prepared.promise
+  } })
+  try {
+    const input = find(h.root, node => node.tag === 'textarea'); input.props['onUpdate:modelValue']('Retain this authored question'); await settle()
+    const prepare = button(h, 'Prepare advice sources'), pending = prepare.props.onClick(); await settle()
+    preparationReturned = true
+    const results = Array.from({ length: 30 }, (_, index) => ({ documentId: String(index + 1), fileName: index === 5 ? 'AUTHORED SCC.docx' : `AUTHORED source ${index + 1}.docx`,
+      status: index < 5 ? 'already_registered' : index === 5 ? 'failed' : 'unexecuted', reason: index === 5 ? 'current_sources_unavailable' : null }))
+    prepared.resolve({ sourceScope: 'fullset', selectedDocuments: 30, preparedDocuments: 5, complete: false, sourceQualityAccepted: false, humanConfirmed: false, results })
+    await settle()
+    for (const [locale, phrase] of [
+      ['zh-Hans', '资料登记已结束，正在核对咨询状态，可先查看下方逐文件结果。'],
+      ['zh-Hant', '資料登記已結束，正在核對諮詢狀態，可先查看下方逐檔結果。'],
+      ['en', 'Source registration has finished. Checking advice status; you can review the per-file results below.']
+    ]) {
+      h.store.changeLocale(locale); await settle()
+      const busy = find(h.root, node => node.tag === 'p' && node.props.role === 'status' && node.props['aria-live'] === 'polite')
+      assert.ok(busy); assert.equal(text(busy), phrase)
+      const resultBox = find(h.root, node => node.tag === 'div' && node.props.role === 'status' && find(node, item => item.tag === 'ul'))
+      assert.equal(findAll(resultBox, node => node.tag === 'li').length, 30)
+      assert.ok(text(resultBox).includes('AUTHORED SCC.docx')); assert.ok(text(resultBox).includes('AUTHORED source 30.docx'))
+    }
+    assert.match(text(h.root), /5 of 30 sources registered/)
+    assert.match(text(h.root), /AUTHORED SCC\.docx[^]*Failed/); assert.match(text(h.root), /AUTHORED source 30\.docx[^]*Not executed/)
+    assert.equal(button(h, 'Prepare advice sources').props.disabled, true)
+    assert.equal(button(h, 'Ask').props.disabled, true)
+    await prepare.props.onClick(); await settle()
+    assert.equal(h.requests.filter(request => request.url.includes('/sources/prepare?')).length, 1)
+    assert.equal(h.requests.filter(request => request.method !== 'get').length, 1)
+    assert.equal(input.value, 'Retain this authored question')
+    checked.resolve(indexReply('Checked after authored partial preparation')); await pending; await settle()
+    assert.equal(find(h.root, node => node.tag === 'p' && node.props.role === 'status' && node.props['aria-live'] === 'polite'), undefined)
+  } finally { h.dispose() }
+})
+
 test('Advice only offers source preparation for explicit unregistered and preparable sources', async () => {
   for (const status of [
     { preparable: true },
@@ -807,7 +847,7 @@ test('Citation retains observed and unknown source-unit metadata without treatin
     const metadata = find(h.root, node => node.tag === 'pre')
     assert.deepEqual(JSON.parse(text(metadata)), unit)
     assert.equal(find(h.root, node => node.tag === 'img'), undefined)
-    find(h.root, node => node.tag === 'button' && node.props.class?.includes('citation-chip') && text(node) === 'Seed').props.onClick(); await settle()
+    find(h.root, node => node.tag === 'button' && node.props.class?.includes('citation-chip') && node.props.title === 'SEED').props.onClick(); await settle()
     assert.match(text(h.root), /Rerank score 0\.937/)
     assert.match(text(h.root), /Structural evidence status is unresolved/)
     assert.match(text(h.root), /unknown_clause/)
@@ -859,6 +899,61 @@ const sessions = [
 ]
 function sessionSelect(h) { return find(h.root, node => node.tag === 'select' && find(node, option => option.tag === 'option' && option.props.value === 'session-A')) }
 
+function authoredOriginalReaderBoundaries(reads) {
+  return {
+    '@/advice/sourceOriginal': { loadAdviceOriginal: async (_project, citation) => {
+      reads.push(citation)
+      return { bytes: new Uint8Array().buffer, sha256: '8'.repeat(64), filename: citation.fileLabel, type: 'unsupported', nativePositions: [], pointers: [], pages: [] }
+    } }
+  }
+}
+
+test('Advice source tabs use saved numeric aliases or localized excerpts and preserve original targets', async () => {
+  const reads = [], sources = [
+    { evidenceId: '[14]', anchor: 'body/34/table-row/0', fileLabel: 'AUTHORED SP.docx', pageNo: '', content: 'AUTHORED first excerpt', score: 0 },
+    { evidenceId: 'Clause 2', anchor: 'body/38/paragraph', fileLabel: 'AUTHORED SP.docx', pageNo: '', content: 'AUTHORED second excerpt', score: 0 },
+    { anchor: 'word/document.xml#/w:p[46]', fileLabel: 'AUTHORED SP.docx', pageNo: '', content: 'AUTHORED third excerpt', score: 0 }
+  ]
+  const snapshot = structuredClone(sources)
+  const message = { id: 7, role: 'assistant', title: localized('Reply'), content: localized('AUTHORED reply'), unknownScope: null, citations: ['[14]'], evidenceId: null, sources }
+  const h = await harness({ initialView: 'advice', adviceMessages: [message], answerRendererBoundaries: authoredOriginalReaderBoundaries(reads) })
+  try {
+    find(h.root, node => node.tag === 'button' && node.props.class === 'citation').props.onClick(); await flushCanonical()
+    for (const [locale, fallback] of [['zh-Hans', '摘录'], ['zh-Hant', '摘錄'], ['en', 'Excerpt']]) {
+      h.store.changeLocale(locale); await settle()
+      const chips = findAll(h.root, node => node.tag === 'button' && node.props.class?.includes('citation-chip'))
+      assert.deepEqual(chips.map(text), ['[14]', `${fallback} 2`, `${fallback} 3`])
+      assert.doesNotMatch(chips.map(text).join(' '), /body\/|word\/|Clause/)
+      for (let index = 0; index < chips.length; index++) {
+        chips[index].props.onClick(); await flushCanonical()
+        assert.equal(reads.at(-1).anchor, snapshot[index].anchor)
+        assert.equal(reads.at(-1).evidenceId, snapshot[index].evidenceId)
+        assert.equal(reads.at(-1).content, snapshot[index].content)
+      }
+    }
+    assert.deepEqual(sources, snapshot)
+    assert.equal(h.requests.some(request => request.method !== 'get'), false)
+    assert.equal(h.canonicalRequests.length, 0, 'Authored local reader boundaries perform no source network calls')
+  } finally { h.dispose() }
+})
+
+test('Advice original reader keeps its warning content in a collapsed native details control', async () => {
+  const reads = [], citation = { evidenceId: '[14]', anchor: 'body/34/table-row/0', fileLabel: 'AUTHORED SP.docx', pageNo: '', content: 'AUTHORED excerpt', score: 0 }
+  const message = { id: 7, role: 'assistant', title: localized('Reply'), content: localized('AUTHORED reply'), unknownScope: null, citations: ['[14]'], evidenceId: null, sources: [citation] }
+  const h = await harness({ initialView: 'advice', adviceMessages: [message], answerRendererBoundaries: authoredOriginalReaderBoundaries(reads) })
+  try {
+    find(h.root, node => node.tag === 'button' && node.props.class === 'citation').props.onClick(); await flushCanonical()
+    for (const [locale, summary] of [['zh-Hans', '定位与阅读界限'], ['zh-Hant', '定位與閱讀界限'], ['en', 'Location and reading limits']]) {
+      h.store.changeLocale(locale); await settle()
+      const warnings = find(h.root, node => node.tag === 'details' && node.props.class === 'source-limitations')
+      assert.ok(warnings, text(h.root)); assert.equal(warnings.props.open, undefined)
+      assert.equal(text(find(warnings, node => node.tag === 'summary')), summary)
+      assert.equal(text(find(warnings, node => node.tag === 'li')), 'This original file type has no verified browser reader or locator. Download the exact source for review.')
+      assert.equal(findAll(warnings, node => node.tag === 'li').length, 1)
+    }
+  } finally { h.dispose() }
+})
+
 test('Advice ordinary context and session options use project and localized business names while details retain identifiers', async () => {
   const h = await harness({ initialView: 'advice', currentSources: [source, { ...source, documentId: '13', fileName: 'partial source.pdf', parseStatus: 'PARTIAL' }],
     respondOverride: ({ url }) => url.endsWith('/sessions') ? sessions : url.includes('/index/status?') ? indexReply('AUTHORED index ready') : undefined })
@@ -873,7 +968,7 @@ test('Advice ordinary context and session options use project and localized busi
     ]) {
       h.store.changeLocale(locale); await settle()
       assert.ok(text(header()).includes(name), locale)
-      assert.ok(text(header()).includes(`${new Date(sessions[0].createdAt).toLocaleString()} · ${scopeName} · ${basisName}`), locale)
+      assert.ok(text(header()).includes(`${new Date(sessions[0].createdAt).toLocaleString(locale)} · ${scopeName} · ${basisName}`), locale)
       assert.doesNotMatch(text(header()), /project-A|session-A|fullset|project_contract|canonical/)
       const options = sessionSelect(h)
       assert.ok(text(options).includes(scopeName));assert.ok(text(options).includes(basisName));assert.ok(text(options).includes(referenceName))
