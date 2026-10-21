@@ -154,7 +154,7 @@ export const draftingApi = {
 export const vettingApi = {
   files: (projectId: string) => api.get<VettingFile[]>(`/vetting/${projectId}/files`),
   confirmSourceRole: (projectId: string, documentId: string, request: VettingSourceRoleUpdate) =>
-    api.put<VettingFile>(`/vetting/${encodeURIComponent(projectId)}/sources/${encodeURIComponent(documentId)}/role`, request),
+    api.put<VettingFile>(`/vetting/${encodeURIComponent(projectId)}/sources/${encodeURIComponent(documentId)}/role`, request, request.confirmTextContractMaterial ? { timeout: 7_200_000 } : undefined),
   uploadPackage: (projectId: string, files: File[], sourceRole?: VettingSourceRole, documentScope?: DocumentScope) => {
     const params = new URLSearchParams()
     if (sourceRole) params.set('sourceRole', sourceRole)

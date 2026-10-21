@@ -136,3 +136,170 @@ test('the real API call site sends stable ID and role pins via the existing JSON
   await loaded.vettingApi.confirmSourceRole('project /a', '42', body)
   assert.deepEqual(requests, [{ url: '/vetting/project%20%2Fa/sources/42/role', body }])
 })
+
+const pendingRow = (id, overrides = {}) => row(id, { status: 'IDENTITY_PENDING', parseStatus: 'IDENTITY_PENDING', textChars: 0,
+  roleConfirmationAvailable: false, identityConfirmationAvailable: true, documentScope: 'package', ...overrides })
+
+test('pending identity requires a separate explicit text-material confirmation and preserves original access', async () => {
+  const h = await mount({ files: [pendingRow('51')] })
+  try {
+    assert.equal(h.selects().length, 1, 'Pending sources can choose a purpose without being parsed first')
+    assert.ok(text(h.sourceRow('51')).includes('尚未进行详细解析'))
+    const original = find(h.sourceRow('51'), node => node.tag === 'a')
+    assert.match(original.props.href, /sources\/51\/original\?sourceHash=/)
+    assert.match(original.props.href, /sourceRole=unknown/)
+    const check = find(h.sourceRow('51'), node => node.tag === 'input' && node.props.type === 'checkbox')
+    assert.ok(check)
+    await h.choose('51', 'tender')
+    assert.equal(h.confirmButton('51').props.disabled, true)
+    await h.confirmButton('51').props.onClick(); await settle()
+    assert.equal(h.calls.length, 0, 'Choosing a purpose alone must not start parsing')
+    check.props.onChange({ target: { checked: true } }); await settle()
+    assert.equal(h.confirmButton('51').props.disabled, false)
+    assert.ok(text(h.confirmButton('51')).includes('继续解析'))
+  } finally { h.dispose() }
+})
+
+test('an explicitly confirmed pending source accepts the new parse revision of the same original only', async () => {
+  const h = await mount({ files: [pendingRow('51')], confirm: async (_id, request) => ({ ...pendingRow('51'), sourceRole: request.sourceRole,
+    parseStatus: 'PARTIAL', status: 'PARTIAL', textChars: 200, parsed: true, sourceHash: 'd'.repeat(64), routingSha256: 'e'.repeat(64),
+    identityConfirmationAvailable: false, exclusionReason: null }) })
+  try {
+    await h.choose('51', 'tender')
+    find(h.sourceRow('51'), node => node.tag === 'input' && node.props.type === 'checkbox').props.onChange({ target: { checked: true } }); await settle()
+    await h.confirmButton('51').props.onClick(); await settle()
+    assert.equal(h.calls.length, 1)
+    assert.equal(h.calls[0].request.confirmTextContractMaterial, true)
+    assert.equal(h.calls[0].request.expectedSourceHash, 'b'.repeat(64))
+    assert.equal(h.state.files[0].sourceHash, 'd'.repeat(64))
+    assert.ok(!text(h.root).includes('文件版本或状态已变化'))
+    assert.ok(text(h.root).includes('解析请求已提交'))
+    assert.equal(h.button('vetting.actions.export').props.disabled, true)
+  } finally { h.dispose() }
+})
+
+test('pending identity actions cannot override known drawing, excluded scope, answers or missing server permission', async () => {
+  const h = await mount({ files: [pendingRow('1', { identityConfirmationAvailable: false }), pendingRow('2', { documentScope: 'drawing' }),
+    pendingRow('3', { documentScope: 'example' }), pendingRow('4', { documentScope: 'pricing' }), pendingRow('5', { documentScope: 'works_pss' }),
+    pendingRow('6', { exclusionReason: 'example_answer' }), pendingRow('7', { parseStatus: 'EXCLUDED' }), pendingRow('8', { sourceHash: null })] })
+  try { assert.equal(h.selects().length, 0); assert.equal(h.calls.length, 0) } finally { h.dispose() }
+})
+
+test('refresh clears a pending text-material confirmation so a fresh source needs a new decision', async () => {
+  const h = await mount({ files: [pendingRow('51')] })
+  try {
+    await h.choose('51', 'tender')
+    find(h.sourceRow('51'), node => node.tag === 'input' && node.props.type === 'checkbox').props.onChange({ target: { checked: true } }); await settle()
+    await h.button('vetting.sourcePurpose.refresh').props.onClick(); await settle()
+    await h.choose('51', 'tender')
+    assert.equal(h.confirmButton('51').props.disabled, true)
+    assert.equal(h.calls.length, 0)
+  } finally { h.dispose() }
+})
+
+test('an uncertain parse response blocks duplicate submission and requires observing the same source', async () => {
+  const h = await mount({ files: [pendingRow('51')], confirm: () => Promise.reject(new Error('transport timeout')) })
+  try {
+    await h.choose('51', 'tender')
+    find(h.sourceRow('51'), node => node.tag === 'input' && node.props.type === 'checkbox').props.onChange({ target: { checked: true } }); await settle()
+    await h.confirmButton('51').props.onClick(); await settle()
+    assert.ok(text(h.root).includes('后台可能仍在处理'))
+    assert.equal(h.confirmButton('51').props.disabled, true)
+    await h.confirmButton('51').props.onClick(); await settle()
+    assert.equal(h.calls.length, 1, 'No automatic replay or immediate second submission')
+    assert.equal(h.button('vetting.actions.export').props.disabled, true)
+    await h.button('vetting.sourcePurpose.refresh').props.onClick(); await settle()
+    assert.equal(h.calls.length, 1, 'Refreshing observes state only')
+    assert.equal(h.confirmButton('51').props.disabled, true, 'Refresh requires a new explicit decision')
+  } finally { h.dispose() }
+})
+
+test('a completed parse response for replaced original bytes cannot be adopted', async () => {
+  const h = await mount({ files: [pendingRow('51')], confirm: async (_id, request) => ({ ...pendingRow('51'), sourceRole: request.sourceRole,
+    parseStatus: 'PARSED', status: 'PARSED', parsed: true, originalSourceSha256: 'f'.repeat(64), sourceHash: 'd'.repeat(64), routingSha256: 'e'.repeat(64) }) })
+  try {
+    await h.choose('51', 'tender')
+    find(h.sourceRow('51'), node => node.tag === 'input' && node.props.type === 'checkbox').props.onChange({ target: { checked: true } }); await settle()
+    await h.confirmButton('51').props.onClick(); await settle()
+    assert.ok(text(h.root).includes('文件版本或状态已变化'))
+    assert.equal(h.confirmButton('51').props.disabled, true)
+    assert.equal(h.calls.length, 1)
+  } finally { h.dispose() }
+})
+
+test('each locale explains unparsed state and requires the same explicit text-material decision', async () => {
+  for (const [locale, note, label] of [['zh-Hans', '尚未进行详细解析', '我已核对原件'], ['zh-Hant', '尚未進行詳細解析', '我已核對原件'], ['en', 'Detailed parsing has not started', 'I checked the original']]) {
+    const h = await mount({ files: [pendingRow('51')], locale })
+    try {
+      assert.ok(text(h.sourceRow('51')).includes(note))
+      assert.ok(text(h.sourceRow('51')).includes(label))
+      await h.choose('51', 'tender')
+      assert.equal(h.confirmButton('51').props.disabled, true)
+      assert.equal(h.calls.length, 0)
+    } finally { h.dispose() }
+  }
+})
+
+test('only identity-resume PUT requests use the existing two-hour parsing timeout', async () => {
+  const requests = [], axios = { create: () => ({ put: async (url, body, config) => { requests.push({ url, body, config }); return { data: { code: 0, data: row('51') } } } }), isAxiosError: () => false }
+  const loaded = loadVue(path.join(__dirname, '../src/api/index.ts'), { boundaries: { axios: { default: axios } }, globals: { FormData, URLSearchParams } })
+  const body = { sourceRole: 'tender', expectedOriginalSourceSha256: 'a'.repeat(64), expectedSourceHash: 'b'.repeat(64), expectedRoutingSha256: 'c'.repeat(64) }
+  await loaded.vettingApi.confirmSourceRole('project /a', '51', { ...body, confirmTextContractMaterial: true })
+  await loaded.vettingApi.confirmSourceRole('project /a', '52', body)
+  assert.equal(requests[0].config.timeout, 7_200_000)
+  assert.equal(requests[1].config.timeout, undefined, 'Parsed-purpose updates retain their configured default timeout')
+  assert.equal(requests[0].body.confirmTextContractMaterial, true)
+  assert.equal(requests[1].body.confirmTextContractMaterial, undefined)
+  assert.equal(requests[0].url, '/vetting/project%20%2Fa/sources/51/role')
+})
+
+test('a failed resumed parse stays unavailable with a readable retained-original explanation in every locale', async () => {
+  for (const [locale, note] of [['zh-Hans', '详细解析尚未完成或失败，原件已保留'], ['zh-Hant', '詳細解析尚未完成或失敗，原件已保留'], ['en', 'Detailed parsing is incomplete or failed. The original is retained']]) {
+    const h = await mount({ locale, files: [pendingRow('51')], confirm: async (_id, request) => ({ ...pendingRow('51'), sourceRole: request.sourceRole,
+      parseStatus: 'FAILED', status: 'FAILED', parsed: false, identityConfirmationAvailable: false,
+      sourceHash: 'd'.repeat(64), routingSha256: 'e'.repeat(64), exclusionReason: 'source_parse_unavailable' }) })
+    try {
+      await h.choose('51', 'tender')
+      find(h.sourceRow('51'), node => node.tag === 'input' && node.props.type === 'checkbox').props.onChange({ target: { checked: true } }); await settle()
+      await h.confirmButton('51').props.onClick(); await settle()
+      assert.equal(h.selects().length, 0)
+      assert.equal(h.state.files[0].parsed, false)
+      assert.ok(text(h.sourceRow('51')).includes(note))
+      assert.ok(!text(h.sourceRow('51')).includes('advice.sourceScope.reasons.source_parse_unavailable'))
+      assert.equal(h.button('vetting.actions.export').props.disabled, true)
+      assert.equal(h.calls.length, 1)
+    } finally { h.dispose() }
+  }
+})
+
+test('server-approved pending sources with an explicitly uploaded legal role can confirm text identity and resume', async () => {
+  for (const role of ['tender', 'standard', 'project_fact', 'package_manifest']) {
+    const h = await mount({ files: [pendingRow('51', { sourceRole: role })], confirm: async (_id, request) => ({ ...pendingRow('51'), sourceRole: request.sourceRole,
+      parseStatus: 'PARTIAL', status: 'PARTIAL', textChars: 200, parsed: true, identityConfirmationAvailable: false,
+      sourceHash: 'd'.repeat(64), routingSha256: 'e'.repeat(64), exclusionReason: null }) })
+    try {
+      assert.equal(h.selects().length, 1, role)
+      assert.equal(h.selects()[0].props.value, '', 'The previous upload choice is not silently reconfirmed')
+      assert.match(find(h.sourceRow('51'), node => node.tag === 'a').props.href, new RegExp(`sourceRole=${role}`))
+      await h.choose('51', role)
+      assert.equal(h.confirmButton('51').props.disabled, true, 'The upload purpose is not text-identity consent')
+      await h.confirmButton('51').props.onClick(); await settle()
+      assert.equal(h.calls.length, 0)
+      find(h.sourceRow('51'), node => node.tag === 'input' && node.props.type === 'checkbox').props.onChange({ target: { checked: true } }); await settle()
+      await h.confirmButton('51').props.onClick(); await settle()
+      assert.equal(h.calls.length, 1)
+      assert.equal(h.calls[0].request.sourceRole, role)
+      assert.equal(h.calls[0].request.confirmTextContractMaterial, true)
+      assert.equal(h.state.files[0].parsed, true)
+    } finally { h.dispose() }
+  }
+})
+
+test('existing upload roles do not bypass server permission, excluded scopes or ordinary role-confirmation restrictions', async () => {
+  const h = await mount({ files: [pendingRow('1', { sourceRole: 'tender', identityConfirmationAvailable: false }),
+    pendingRow('2', { sourceRole: 'sample_answer' }), pendingRow('3', { sourceRole: 'drawing' }),
+    pendingRow('4', { sourceRole: 'tender', documentScope: 'drawing' }), pendingRow('5', { sourceRole: 'tender', documentScope: 'example' }),
+    pendingRow('6', { sourceRole: 'tender', exclusionReason: 'example_answer' }),
+    row('7', { sourceRole: 'tender', identityConfirmationAvailable: true })] })
+  try { assert.equal(h.selects().length, 0); assert.equal(h.calls.length, 0) } finally { h.dispose() }
+})

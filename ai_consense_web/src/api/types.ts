@@ -509,6 +509,7 @@ export interface VettingSourceRoleUpdate {
   expectedOriginalSourceSha256: string
   expectedSourceHash: string
   expectedRoutingSha256: string
+  confirmTextContractMaterial?: boolean
 }
 
 export interface VettingFile {
@@ -517,6 +518,7 @@ export interface VettingFile {
   sourceHash?: string | null
   routingSha256?: string | null
   roleConfirmationAvailable?: boolean
+  identityConfirmationAvailable?: boolean
   documentScope?: DocumentScope
   exclusionReason?: string | null
   excluded?: boolean

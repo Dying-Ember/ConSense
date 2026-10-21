@@ -1,3 +1,5 @@
+**最新执行见 [progress55](testing/three-module-runtime-progress-20261021.md#progress55新-scc-全页检查完成漏字获得可验证的排版线索)：** 新SCC正常生成81关系／92目录通过，79页逐张检查仍7处阻断；漏字左对齐单变量恢复p977，但未授两段或最终版式通过。前端六文件已采用，后端新包未部署；原浏览器空间8消失后按既有授权恢复9，Annex原请求保持，余三文件未发需补交。旧13Word许可刷新／三pending确认／整套真实报告仍待验，Goal active。以下旧进展按各自时点读取。
+
 <!-- human-acceptance-goal-20261021:start -->
 **2026-10-21 用户要求重写后已实际启动新 Goal，状态 active；取消八点及固定截止约束。当前最高优先级是尽快交付人能操作、阅读和验收的前端、Drafting、Vetting、Advisory 完整流程及正式文件。** 先升级已验证修复，以实际 2b 资料跑前端和可读报告；Drafting 以 2a 起草、2b 对照成品，Vetting 以 2d 对照报告格式。OER 中阻塞这些路径的问题立即修；七版本 SL 全量质量、受控模型比较和质量通过后的完整比赛包继续保留，不阻塞第一阶段交付。固定 H1–H8 用户验收项与后续 O1–O3 见[重写后的统一目标](testing/unified-e2e-oer-goal-20261020.md)。测试数、容量夹具和历史整体百分比不代替业务验收；以下 progress 是历史时点。
 <!-- human-acceptance-goal-20261021:end -->

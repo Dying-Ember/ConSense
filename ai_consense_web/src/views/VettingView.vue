@@ -79,6 +79,7 @@ const pollingPaused = ref(false)
 const reportFormat = ref<VettingReportFormat>('pdf')
 const sourceRoleSaving = ref<string | null>(null)
 const sourceRoleDrafts = ref<Record<string, string>>({})
+const sourceIdentityConfirmations = ref<Record<string, boolean>>({})
 const sourceRoleFeedback = ref('')
 const sourceRoleNeedsRefresh = ref(false)
 const SOURCE_ROLES: VettingSourceRole[] = ['tender', 'standard', 'project_fact', 'package_manifest']
@@ -184,12 +185,23 @@ function sourcePurposeLabel(file: VettingFile) {
 function sourceRoleVersion(file: VettingFile) {
   return [file.documentId, file.originalSourceSha256, file.sourceHash, file.routingSha256].join('|')
 }
+function isPendingSourceIdentity(file: VettingFile) {
+  return (file.parseStatus ?? file.status) === 'IDENTITY_PENDING'
+}
 function canConfirmSourceRole(file: VettingFile) {
-  return file.roleConfirmationAvailable === true && file.sourceRole === 'unknown'
+  return (isPendingSourceIdentity(file)
+    ? file.identityConfirmationAvailable === true && ['unknown', ...SOURCE_ROLES].includes(file.sourceRole ?? '')
+    : file.roleConfirmationAvailable === true && file.sourceRole === 'unknown')
     && (!file.exclusionReason || file.exclusionReason === 'source_identity_unresolved')
     && !['drawing', 'pricing', 'works_pss', 'example'].includes(file.documentScope ?? '')
-    && ['PARSED', 'PARTIAL'].includes(file.parseStatus ?? file.status) && /^\d+$/.test(file.documentId ?? '')
+    && ['PARSED', 'PARTIAL', 'IDENTITY_PENDING'].includes(file.parseStatus ?? file.status) && /^\d+$/.test(file.documentId ?? '')
     && [file.originalSourceSha256, file.sourceHash, file.routingSha256].every(value => /^[a-f0-9]{64}$/.test(value ?? ''))
+}
+function sourceFileOriginalUrl(file: VettingFile) {
+  if (!projectId.value || !/^\d+$/.test(file.documentId ?? '') || !file.documentId || !file.originalSourceSha256 || !file.sourceHash || !file.sourceRole
+    || ![file.originalSourceSha256, file.sourceHash].every(value => /^[a-f0-9]{64}$/.test(value))
+    || !['unknown', ...SOURCE_ROLES].includes(file.sourceRole ?? '')) return null
+  return `/api/vetting/${encodeURIComponent(projectId.value)}/sources/${encodeURIComponent(file.documentId)}/original?${new URLSearchParams({ sourceHash: file.sourceHash, originalSourceSha256: file.originalSourceSha256, sourceRole: file.sourceRole })}`
 }
 async function refreshSources() {
   if (sourceRoleSaving.value !== null || uploading.value) return
@@ -198,6 +210,7 @@ async function refreshSources() {
     await reload()
     if (disposed || epoch !== viewEpoch || id !== projectId.value) return
     sourceRoleDrafts.value = {}
+    sourceIdentityConfirmations.value = {}
     sourceRoleFeedback.value = ''
     sourceRoleNeedsRefresh.value = false
     await restoreJob()
@@ -208,11 +221,14 @@ async function refreshSources() {
 async function confirmSourceRole(file: VettingFile) {
   const version = sourceRoleVersion(file)
   const chosen = SOURCE_ROLES.find(role => role === sourceRoleDrafts.value[version])
+  const resumeParsing = isPendingSourceIdentity(file)
   if (sourceRoleBlocked.value || !canConfirmSourceRole(file) || !chosen || !file.documentId
+    || (resumeParsing && sourceIdentityConfirmations.value[version] !== true)
     || !file.originalSourceSha256 || !file.sourceHash || !file.routingSha256) return
   const id = projectId.value, epoch = viewEpoch, documentId = file.documentId
   const binding = { sourceRole: chosen, expectedOriginalSourceSha256: file.originalSourceSha256,
-    expectedSourceHash: file.sourceHash, expectedRoutingSha256: file.routingSha256 }
+    expectedSourceHash: file.sourceHash, expectedRoutingSha256: file.routingSha256,
+    ...(resumeParsing ? { confirmTextContractMaterial: true } : {}) }
   sourceRoleSaving.value = documentId
   sourceRoleFeedback.value = ''
   let saved = false
@@ -224,26 +240,31 @@ async function confirmSourceRole(file: VettingFile) {
     if (selectedDetail.value) reviewChanged.value = true
     const index = files.value.findIndex(current => sourceRoleVersion(current) === version)
     if (index < 0 || updated.documentId !== documentId || updated.sourceRole !== chosen
-      || updated.originalSourceSha256 !== binding.expectedOriginalSourceSha256 || updated.sourceHash !== binding.expectedSourceHash) {
+      || updated.originalSourceSha256 !== binding.expectedOriginalSourceSha256
+      || (resumeParsing ? !/^[a-f0-9]{64}$/.test(updated.sourceHash ?? '') || !/^[a-f0-9]{64}$/.test(updated.routingSha256 ?? '')
+        || !['PARSING', 'PARSED', 'PARTIAL', 'FAILED', 'PARSE_FAILED'].includes(updated.parseStatus ?? updated.status)
+        : updated.sourceHash !== binding.expectedSourceHash)) {
       sourceRoleFeedback.value = t('vetting.sourcePurpose.changed')
       sourceRoleNeedsRefresh.value = true
       return
     }
     files.value.splice(index, 1, updated)
     delete sourceRoleDrafts.value[version]
+    delete sourceIdentityConfirmations.value[version]
     saved = true
-    sourceRoleFeedback.value = t('vetting.sourcePurpose.saved')
+    sourceRoleFeedback.value = t(`vetting.sourcePurpose.${resumeParsing ? 'parseStarted' : 'saved'}`)
     await reload()
     if (disposed || epoch !== viewEpoch || id !== projectId.value) return
     await restoreJob()
   } catch (error) {
     if (!disposed && epoch === viewEpoch && id === projectId.value) {
-      if (error instanceof ApiError && error.code === 4104) {
+      if (resumeParsing || error instanceof ApiError && error.code === 4104) {
         sourceRoleNeedsRefresh.value = true
         if (job.value) job.value = { ...job.value, sourceSetStale: true }
       }
-      sourceRoleFeedback.value = saved ? t('vetting.sourcePurpose.savedRefreshFailed')
-        : error instanceof ApiError && error.code === 4104 ? t('vetting.sourcePurpose.changed') : t('vetting.sourcePurpose.failed')
+      sourceRoleFeedback.value = saved ? t(`vetting.sourcePurpose.${resumeParsing ? 'parseRefreshFailed' : 'savedRefreshFailed'}`)
+        : error instanceof ApiError && error.code === 4104 ? t('vetting.sourcePurpose.changed')
+          : t(`vetting.sourcePurpose.${resumeParsing ? 'parseUncertain' : 'failed'}`)
     }
   } finally {
     if (epoch === viewEpoch && id === projectId.value) sourceRoleSaving.value = null
@@ -521,6 +542,7 @@ watch(projectId, () => {
   files.value = []
   sourceRoleSaving.value = null
   sourceRoleDrafts.value = {}
+  sourceIdentityConfirmations.value = {}
   sourceRoleFeedback.value = ''
   sourceRoleNeedsRefresh.value = false
   findings.value = []
@@ -1565,10 +1587,12 @@ function tagClass(group: string) {
               <td>
                 <strong>{{ file.fileName || file.key }}</strong>
                 <div v-if="!['OTHER', 'DRAWING'].includes(file.key)" class="mono muted small">{{ file.key }}</div>
+                <a v-if="sourceFileOriginalUrl(file)" :href="sourceFileOriginalUrl(file)!" target="_blank" rel="noopener noreferrer" class="small">{{ t('vetting.drawer.openOriginal') }}</a>
               </td>
               <td>
                 {{ sourcePurposeLabel(file) }}
                 <div v-if="canConfirmSourceRole(file)" class="section-gap">
+                  <p v-if="isPendingSourceIdentity(file)" class="small">{{ t('vetting.sourcePurpose.identityNote') }}</p>
                   <label class="small">{{ t('vetting.sourcePurpose.label') }}
                     <select :value="sourceRoleDrafts[sourceRoleVersion(file)] || ''" :aria-label="`${file.fileName} ${t('vetting.sourcePurpose.label')}`"
                       :disabled="sourceRoleBlocked" @change="sourceRoleDrafts[sourceRoleVersion(file)] = ($event.target as HTMLSelectElement).value">
@@ -1576,8 +1600,13 @@ function tagClass(group: string) {
                       <option v-for="role in SOURCE_ROLES" :key="role" :value="role">{{ t(`vetting.uploadRole.${role}`) }}</option>
                     </select>
                   </label>
-                  <button class="btn" type="button" :disabled="sourceRoleBlocked || !SOURCE_ROLES.includes(sourceRoleDrafts[sourceRoleVersion(file)] as VettingSourceRole)"
-                    @click="confirmSourceRole(file)">{{ sourceRoleSaving === file.documentId ? t('common.loading') : t('vetting.sourcePurpose.confirm') }}</button>
+                  <label v-if="isPendingSourceIdentity(file)" class="source-identity-confirm small">
+                    <input type="checkbox" :checked="sourceIdentityConfirmations[sourceRoleVersion(file)] === true" :disabled="sourceRoleBlocked"
+                      @change="sourceIdentityConfirmations[sourceRoleVersion(file)] = ($event.target as HTMLInputElement).checked" />
+                    {{ t('vetting.sourcePurpose.identityConfirm') }}
+                  </label>
+                  <button class="btn" type="button" :disabled="sourceRoleBlocked || !SOURCE_ROLES.includes(sourceRoleDrafts[sourceRoleVersion(file)] as VettingSourceRole) || (isPendingSourceIdentity(file) && sourceIdentityConfirmations[sourceRoleVersion(file)] !== true)"
+                    @click="confirmSourceRole(file)">{{ sourceRoleSaving === file.documentId ? t('common.loading') : t(`vetting.sourcePurpose.${isPendingSourceIdentity(file) ? 'confirmAndParse' : 'confirm'}`) }}</button>
                 </div>
               </td>
               <td>
@@ -1609,6 +1638,8 @@ function tagClass(group: string) {
 </template>
 
 <style scoped>
+.source-identity-confirm { display: flex; align-items: flex-start; gap: 8px; margin: 8px 0; min-width: 220px; max-width: 320px; white-space: normal; }
+.source-identity-confirm input { flex: none; width: auto; margin-top: 3px; }
 .vetting-source-table table { min-width: 860px; }
 .vetting-source-table th:nth-child(1), .vetting-source-table td:nth-child(1) { min-width: 200px; }
 .vetting-source-table th:nth-child(2), .vetting-source-table td:nth-child(2) { min-width: 110px; }
