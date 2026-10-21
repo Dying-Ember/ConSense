@@ -65,6 +65,7 @@ class VettingPromptPolicyTest {
                         "当前证据的明示文字及上下文","绑定该来源的已核字段元数据",
                         "不能把发布日期改作签署日期或据此证明采用","用户陈述与假设保留其来源和状态","局部待核不抹去独立有据分析"})assertTrue(effective.contains(clause),clause);
                 assertTrue(effective.contains(custom));assertTrue(effective.indexOf(custom)<effective.indexOf(VettingPromptPolicy.text()));
+                for(String clause:new String[]{"正文与报告用业务语言说明证据状态","解析候选是否核验","项目采用是否确认","不得互相代换","不把解析候选未核说成合同未采用或原文无效","技术定位沿用应用已有的引用详情承载","正式条号未知时称“所引段落／列项”","不能按段落顺序、检索次序或内部路径猜编号","原文引句及其中交叉引用保留原样"})assertTrue(effective.contains(clause),clause);
                 String marker="字段含义未确认的裸数字";assertEquals(effective.indexOf(marker),effective.lastIndexOf(marker));
                 assertEquals(VettingPromptPolicy.text(),PromptCatalog.find(PromptCatalog.KEY_VETTING).defaultSystem);
             }

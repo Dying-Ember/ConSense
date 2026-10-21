@@ -57,7 +57,7 @@ class AdvisoryUnicodeWhitespaceBoundaryTest {
         graph.getEdges().get(0).setPeriod("0 days");
         graph.getEdges().get(0).setStartEvent("通知送達日");
         assertDoesNotThrow(() -> AdvisoryHarness.graph(graph, Collections.singletonList("[1]"), sources));
-        assertEquals("ec23c7a665f803598a82d8aaf41ace65df1e431ac5e4ab24610e61d11ccf0470", AdvisoryHarness.POLICY_SHA);
+        assertEquals("c0b67e64c8fac02badb7c2fbd36b4e61bbf5735a43936e062b7f72e96d3c1eb7", AdvisoryHarness.POLICY_SHA);
     }
 
     private static List<String> blanks() {

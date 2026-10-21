@@ -1,3 +1,15 @@
+<!-- runtime-integration70:start -->
+**最新progress70：runtime34／64GiB已部署，当前80条存值保全，新三稿及六份前端下载、74页逐张检查和两次正文保存恢复已接通。** [本轮证据及剩余质量](testing/three-module-runtime-progress-20261021.md#progress70当前取值的新三稿及六份前端下载完成74页逐张核与正文保存恢复通过新27b已完整回读仍有内容残差)。新v2保244／232／12、92目录和2367点；恢复后74张PNG全部同初稿，三指定分页缺陷恢复，35有限通过／39WARN而非正式成品全过。新27B52已完成唯一前端问答／回读／原件定位，两预检＋两answer全COMPLETED；仍有可读性、采用含义及中文前提残差。canonical21块索引原状态ready，未重建。H2／runtime30 APB原解析保护，35套报告／SL22,214页未过，SL不打包，Goal active。
+<!-- runtime-integration70:end -->
+
+<!-- runtime-integration69:start -->
+**最新progress69：45＋46私有正常三模板生成／真实LO／预览导出完整PASS，新78页逐张为50有限通过28WARN0确认FAIL；当前前端80值专项仍旧稿。** [实际证据与集成前限制](testing/three-module-runtime-progress-20261021.md#progress69正常三模板完整生成及新78页视觉完成三处目标已恢复当前前端专项尚未升级)。23和14方法窗分别通过、有重合；旧R2两次内存保存保239／227／12，新正常稿244／92／1329CL／2518点。两measurement旧XML断言仍失败，47软件复合覆盖不授真实模型质量。APB38双路＋39一路，H2／runtime33／runtime30保护，未部署，Goal active。
+<!-- runtime-integration69:end -->
+
+<!-- runtime-integration68:start -->
+**最新progress68：新27B50保存及刷新／完整原件定位通过，但固定13项8／0／5、整题漏答FAIL；分页45精确RED后窄回归与旧稿版本兼容继续。** [证据及未过项](testing/three-module-runtime-progress-20261021.md#progress68新27b真实复验已保存但整题漏答scc硬分页已精确复现后继与旧稿兼容继续验证)。首次user／来源／参数与46相同，实际mandatory更新；4项调用账均终态且0重发。runtime33与64GiB保持；保护H2及APB原解析，未采用或部署分页候选。实际整套报告及SL全量继续保留，质量先于比赛包，统一Goal active。
+<!-- runtime-integration68:end -->
+
 <!-- runtime-integration67:start -->
 **最新progress67：runtime33／18086／PID61304／64GiB已部署，当前专项六份前端下载、92目录及两次正文保存通过。** [实际证据与剩余三处分页](testing/three-module-runtime-progress-20261021.md#progress67当前专项92目录已定版安全bill复用与两次正文保存通过75页逐张检查发现三处分页缺陷)。保239＝227＋12、92目标／2349点；恢复稿75张PNG与基线逐字节同，全页49有限通过／23警告／3失败，继续原native／LO后继。Advisory guard和两mandatory裸值规则已部署，尚无新Qwen答案；Vetting整套报告／SL全量未过，不打包。H2 owner39876／runtime30解析29604保护，Goal active。
 <!-- runtime-integration67:end -->

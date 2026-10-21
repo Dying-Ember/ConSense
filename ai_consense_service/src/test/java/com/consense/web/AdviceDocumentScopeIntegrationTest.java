@@ -304,7 +304,7 @@ class AdviceDocumentScopeIntegrationTest {
         JsonNode history=data(get("/api/advice/{id}/messages",id));JsonNode assistant=history.get(history.size()-1);
         assertEquals(result.path("content"),assistant.path("content"));assertEquals(result.path("title"),assistant.path("title"));assertEquals(result.path("citations"),assistant.path("citations"));assertEquals("insufficient",assistant.path("basisScope").asText());
         com.consense.domain.ChatMessage row=messages.findById(result.path("messageId").asLong()).get();JsonNode checks=JsonUtils.parse(row.getAdviceChecksJson());
-        assertEquals("ec23c7a665f803598a82d8aaf41ace65df1e431ac5e4ab24610e61d11ccf0470",checks.path("policySha256").asText());assertEquals(3,checks.path("publishedSectionIds").size());
+        assertEquals("c0b67e64c8fac02badb7c2fbd36b4e61bbf5735a43936e062b7f72e96d3c1eb7",checks.path("policySha256").asText());assertEquals(3,checks.path("publishedSectionIds").size());
         assertTrue(checks.path("applicationRejections").isEmpty());assertTrue(checks.path("sections").get(1).path("checks").isArray());assertEquals(result.path("sources").get(0).path("sourceHash"),JsonUtils.parse(row.getSourcesJson()).get(0).path("sourceHash"));
     }
     @Test void explicitMissingReasonCannotBeUpgradedByModelGroundedAndRemainsVisibleWithQuestions() throws Exception {

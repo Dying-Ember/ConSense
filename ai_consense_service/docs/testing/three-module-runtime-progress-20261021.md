@@ -1,3 +1,59 @@
+<!-- runtime-integration70:start -->
+## progress70：当前取值的新三稿及六份前端下载完成，74页逐张核与正文保存恢复通过；新27B已完整回读，仍有内容残差
+
+2026-10-22：45分页、46旧稿版本兼容、47两模块mandatory提示词及48窄测试边界已统一采用并部署为runtime34，18086／PID64444／64GiB。运行包SHA `f3123ce4ab5295289e3f1f2c978f65c849d7a3937a7fabe5cf969f6712ace92e`；实际class、布局资源和两prompt与已测试文件一致。H2 owner39876／18082及runtime30／29604／18084的APB原解析均保持。升级前后80条存储取值和旧三稿保全已核；这80条不代表全部业务输入已采用，前端仍为4／79已采用。19个明确采用源码／资源／测试路径的独立静审无阻断，19个SHA全部与采用收据匹配；不能随部署授真实业务质量通过。
+
+**当前前端专项已实际接上新版本。** 空间12／p1中的第一次pointer点击被section遮挡，明确失败且未派发；只读GET仍为旧三revision、UI idle后，用同一按钮唯一一次键盘激活，前端出现正在生成并观察到实际LO进程，最终保存新NTT `bb3c214b…`、SCT `f3760b36…`、SCC `ecc3e502…`。三份Word和三份PDF均从前端下载。NTT／SCT的Word与PDF四个文件均与runtime33逐字节相同；SCC为新的74页，不沿用旧75／78页图。前端PDF核对窗实际完成74页加载，第一页canvas786×1112、页码控件／74、无alert，Root已查看真实渲染图；早期仅见默认300×150空canvas的辅助观察不算渲染通过。
+
+**新SCC成品及保存链的已通过范围：** 定版244登记＝232适用＋12原授权排除，92个目录目标缓存全部与实际正文测量一致，1041 CS／1234 CL／2367定位点保持；三条已采用安全BQ引用和未选纯消防Not used仍正确。新74页的临时项目名、左下合约号、连续页码及中文字体均逐页回读通过。三代理实际逐张查看全部74张新PNG，35 PASS_WITH_LIMITS／39 WARN／0确认FAIL；Root另亲看67／73／74，三处旧缺陷分别在物理67／印刷64、73／70、74／71恢复完整关系。39 WARN包括普通未答变量、源星号／#和A／B未选，也包括30／34／36／64等大留白及若干缩进；尤其34页仅六行续尾，原因继续核源，不能将0确认FAIL表述为正式签发版式通过。正式2b身份及原生Word应用视觉仍UNKNOWN。
+
+同一临时项目的受源绑定程序句经过两次唯一HTTP正文保存：`ecc3e502…→9bb45925…→d7965a05…`，加入TEST ONLY标记后已精确恢复，其他可编辑正文、NTT／SCT及80条取值保持。三个revision的DB父链、Word实际字节及定版proof都已回读，三次均保244／232／12、92目录和2367点。刷新前端后，恢复稿的Word／PDF再次下载；恢复Word hash虽不同于初稿，同Poppler120dpi的74张新PNG全部逐字节相同，因此初稿逐张视觉观察可用于当前恢复稿，不能仅凭文字恢复授版式同一性。正文保存本项是实际HTTP／持久化验收，不冒充本轮前端正文输入点击验收。
+
+**Advisory最新prompt47已真实复验。** 当前canonical索引GET为21／21切片、1／1文件、ready且stale=false，与原签名及doc24源hash一致；没有因为legacy memory后端重启而重建该索引。新会话 `6a7a4262-e773-4e1c-bfe2-922f9f10d51e` 由前端唯一发送，同题同27B，终态保存user51／assistant52。初答user输入SHA与旧46完全相同、sourceSnapshot相同，实际两份system均核含本轮完整来源／业务语言规则；repair按既有机制增加修复内容，不能要求其整串user等同初答。持久化账为2预检＋2answer共4项全部COMPLETED，未人工重发，原2answer／7预检／9总数预算未扩张。刷新后明确选择已保存会话，两条消息仍在；实际打开[8]，完整原DOCX已加载并高亮2020 GS CEW整段来源。
+
+52已恢复GS CEW场外道路／排水条件、2020／42天、两条优先及删除机制，**仍未授整题质量通过**。正文仍直接写出tender、adoptionStatus及candidate_unverified，且把来源候选核验状态与签约法律采用混在同一因果链；中文同号PSS分支另加“存在差异”前提，排除库的有限并入解释也需核完整。固定13项独立评分及R1–R5另列，不将评分／2d／2e放入模型输入，不改旧46／48／50结果。两次HTTP实体辅助脚本分别误将repair整串user要求不变、误将user文本按JSON对象读取，失败已保留；后继确认初答及来源不变并匹配实际COMPLETED账，不能将辅助断言问题归为模型或来源漂移。控制台中文编码外观也已核原JSON无replacement字符、class常量为正确UTF-8，不作产品乱码修复。
+
+**Vetting／OER仍继续原请求。** 当前公开files实际为35件＝17 PARSED／15 PARTIAL／1 APB PARSING／2 EXCLUDED，APB59原61页／原SHA `37097f68…2674`，未重发用途确认或解析。文件侧07:32观察推进到P1–53双路＋P54 Paddle，107结果＝旧77＋新增30，新增30的CAS／长度／源页parser及persisted／released均核同；来源质量accepted仍0，不能用单页记录证明父请求、61页终态或整份质量。旧审查run公开仍为FAILED／NEEDS_RERUN，不是运行中。实际35整套新报告／2d版式、Advisory残差及七版SL全部22,214技术页的质量验收仍未完成，SL不打比赛包。统一Goal active，没有八点截止；下一步先收口可读性与明显留白，再接真实整套报告。
+
+证据：`.local/runtime-integration34/`的`after-upgrade01.json`、`generation-ui-observation03.json`、`generation-response01.json`、`frontend-download-receipts01.json`、`frontend-pdf-preview02.{json,png}`、`generated-audit01.json`、`restore-audit01.json`、`current-delivery70.json`、`body-roundtrip01/`、`generated-context01/`、`append-context01/`、`restore-context01/`、`downloads01/`、`downloads02/`、`visual01/`、`visual02/`；全页报告`.local/runtime34-visual-{first,middle,last}01.{json,md}`。咨询为同目录`advice-final-history01.json`、`advice-wire-comparison03.json`、`advice52-readonly01/`、`advice-ui-refresh02.json`、`advice52-original-ready01.json`；真实35状态为`vetting-current-readonly04.json`，APB文件增量在`.local/vetting34-readonly/apb-existing-file-delta04.json`。
+<!-- runtime-integration70:end -->
+
+<!-- runtime-integration69:start -->
+## progress69：正常三模板完整生成及新78页视觉完成，三处目标已恢复；当前前端专项尚未升级
+
+**45分页＋46旧稿版本兼容的私有产品候选已完成正常链实测。** 45窄窗23方法实际通过；46后继14方法实际通过，包括实际旧R2两次内存正文修改／恢复、旧239登记＝227适用＋12授权排除，以及未知／伪造版本等拒绝检查。两窗口有重合方法，不相加为唯一总数。旧R2的RED精确为期望239却得到244，后继保持旧版本；新v2仍要求完整244。
+
+正常三模板MVC／隔离JPA／真实LibreOffice完整链已1 PASS，4分00秒；NTT／SCT／SCC的生成、实际预览、Word／PDF导出、保存字节和缓存同一性检查完成。SCC定版244／92目录／1329 CL／2518点、139条完整正文关系及四个完整原表核验保持，实际三次LO转换。SCC预览、导出和定版PDF同字节，SHA `c492a5cdc0c264a13958e1e5c74f104447d819d1251bded12af9865388136868`。这份正常链仍使用明确合成身份，不能充当真实2b正式文件。
+
+**新78张原图全部逐张检查，50 PASS_WITH_LIMITS／28 WARN／0确认FAIL。** 三段受检范围1–26、27–52、53–78各自保存观察及图片SHA。Root亲看新71／76／77：SCC22.304(3)/(4)完整同页，Option B→(c)→整段引文完整同页，SCC22.309(4)导语→(a)→(b)→共同结果完整同页。现有P755推页、大留白／缩进、普通未答空栏、源星号和未选A/B等仍保WARN，未授正式业务内容或原生Word视觉通过。**当前80值前端专项稿仍是runtime33旧R2，不冒用这份正常链的新结果；升级、当前输入新生成及其实际前端／逐页检查仍待做。**
+
+47两mandatory提示词仅增加通用业务可读性／未知正式条号边界，以及Advisory初答／repair回看完整已提供原来源集合的要求；不嵌本题答案、评分清单，不强制grounded通过。私有首软件窗16执行＝15 PASS／1 FAIL，唯一历史回读因Root沿用禁用本地profile的runner配置被`captured_model_profile_required`拒绝；同源码改用已Mock的本地profile后独立1 PASS，原失败保留。此为复合软件覆盖，不能声称单窗16全绿或模型质量改善。真实50仍整题FAIL，见progress68。
+
+另对旧measurement集成helper的受影响两个参数分支作了实际窄跑：生成成功，但两者都在旧“保留P1063全文XML相同”断言失败。全文ordinal1063实为direct P1055／SCC11.303标题，已有受权`keep_verified_heading_flow`及CL标记；旧比较未提供已核layout marker集合，正在精确区分合法布局改动与非法正文／原格式改变。没有删保护断言或追认这2个失败通过。产品候选仍未采用主树、未部署；下一步完成这处窄夹具核对后统一集成升级。
+
+APB文件快照06:45已推进到P1–38双路＋P39 Paddle，77成功结果及77生命周期哈希、长度、源页／parser绑定均匹配；全部来源质量仍false，不授61页终态或来源质量。实际35件Vetting完整报告与SL全22,214页继续待验；SL不打包，H2及两业务后端保护，统一Goal active。
+
+证据：`.local/scc33-pagination-followup45/green02/`；`.local/scc33-profile-compat46/{red01,green01,normal01}/`；正常链全部产物和78图在`normal01/{actual01,visual01}/`，真实目标定位为`new-scope-page-targets01.json`。逐页报告`.local/review45/normal46-first.{json,md}`、`.local/runtime-integration33/visual-middle-review/normal46-middle.{json,md}`、`.local/scc33-pagination-followup45/normal46-last.{json,md}`。47窗在`.local/advice-human-readability47/{software01,software02-history,software03-measurement}/`；APB为`.local/runtime-integration33/apb-file-progress02.json`。
+<!-- runtime-integration69:end -->
+
+<!-- runtime-integration68:start -->
+## progress68：新27B真实复验已保存但整题漏答；SCC硬分页已精确复现，后继与旧稿兼容继续验证
+
+**本轮新27B为一次前端提交，已终态保存 user49／assistant50。** 使用测试空间11的新空会话，明确 `contract`／`project_contract`／`qwen`；同一doc24的21来源别名、来源快照、首次完整user输入和六项生成参数均与旧46相同，mandatory system确已更新。实际付费调用账为2次预算预检＋2次answer，4项均COMPLETED，没有人工重发；预检单token的`length`为预算测量，不据此说answer被输出上限截断。刷新页面后需重新选择已存会话，回答与引用保持；点击[6]后完整原件阅读器加载完毕，精确高亮原始条文。
+
+**结果是整题不完整，不能授质量通过。** 独立按原固定13项评为8 PASS／0 PARTIAL／5 FAIL，原46的10／2／1保留。新稿准确区分同号PSS替代SL与一般varies优先，也没有再把裸页脚猜成日期；但未发布GS CEW的适用边界、两条优先关系、时点／版本及排除库并入机制。attempt0的正式“第1／3／4条”归属猜测被拒，流在首个分析单元中断，repair最后只返回PSS单元；不能把未接收到的其他答案说成新scope guard删除。技术登记字段`role=tender`、`adoptionStatus`、`legalClosure`及`body/46/paragraph`直接进入可见正文，另记为业务可读性缺陷，后继须用业务语言保留相同证据边界。2d／2e及固定评分仍隔离在模型输入之外。
+
+**SCC三处已确认分页缺陷仍未收口。** 唯一45候选复用既有native布局注册表，仅追加P1829→1830、P1963→1965及P1997→1999→2001→2003五条关系，完整保留旧240声明／239 flow前缀；源SHA与Java实际anchors均核同。Root在当前源码私有副本的RED实际精确失败于“SCC22.304(3) must release its source trailing hard page break”，不是用计数差代替复现。后继软件检查仍在执行，不授新PDF或最终视觉通过。
+
+初次过宽green01包含整类多次原件生成，发现早期measurement测试helper仍只认识8项CL及仅扣一个分页，另有既有`STORY_STATIC_BUSINESS_OVERLAP`拒绝；该窗口已保留为INTERRUPTED_NOT_PASS，只停止身份核实且无子进程的私有Maven，H2／业务后端／APB原请求未动。只改测试的helper后继保留内容、字段、公式及包部件断言，精确按真实APPLIED释放动作计数；改用受影响窄回归，不追认整类通过。
+
+**升级兼容风险已先发现并隔离。** 旧SCC修订持有v1布局profile，新生成将用v2；Finalizer原来只按source取当前flows，会把旧稿保存强套到新244关系，得到UNKNOWN。正在准备按已存布局版本及真实CL证据严格选择旧239／新244的最小兼容改动，未知／伪造版本继续拒绝，不拿较小计数当通过。旧R2仍是`613e40e3…`／DOCX `b54655e2…`，未修改或重生成。
+
+另已查明物理30大留白来自原有P755静态`pageBreakBefore`例外；2a及2b对应标题均无原生强制分页，未做新渲染，不把此候选称作已修。正式2b整套Vetting报告、最新Advisory完整语义和SL全22,214技术页质量仍未通过，SL比赛包继续后置。运行仍runtime33／64GiB；统一Goal active，没有八点截止。
+
+证据：`.local/runtime-integration33/advice-submit-once01.json`、`advice-final-history01.json`、`advice-wire-comparison01.json`、`advice50-readonly01/`、`advice-ui-refresh02.json`、`advice50-original-ready01.json`；独立评分`.local/advisory-runtime30-review34/quality50.OUT_OF_BAND.{json,md}`。分页RED与中断收据在`.local/scc33-pagination-followup45/`；测试后继`.local/scc33-pagination-followup45-test02/`；P755来源证据在`visual-middle-review/page30-first-loss10.{json,md}`。这些材料分别证明软件、实际模型、前端回读或来源观察，不互相替代。
+<!-- runtime-integration68:end -->
+
 <!-- runtime-integration67:start -->
 ## progress67：当前专项92目录已定版，安全Bill复用与两次正文保存通过；75页逐张检查发现三处分页缺陷
 

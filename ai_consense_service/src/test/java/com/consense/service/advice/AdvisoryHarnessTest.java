@@ -13,14 +13,14 @@ class AdvisoryHarnessTest {
     private AdvisoryHarness.Section analysis(){return JsonUtils.mapper().convertValue(JsonUtils.parse(AdviceBudgetFixture.contract("{\"grounded\":true,\"answer\":\"Supported limited explanation [1]\",\"citations\":[\"[1]\"]}")).path("sections").get(1),AdvisoryHarness.Section.class);}
     @Test void approvedPolicyIsMandatoryEvenWithCustomInstructionsButCustomTextIsRetained(){
         String system=AdvisoryHarness.system("AUTHORED CUSTOM preserve this");assertTrue(system.contains("合约咨询专家型智能体"));assertTrue(system.contains("AUTHORED CUSTOM preserve this"));
-        assertTrue(system.contains("Mandatory application contract"));assertEquals("ec23c7a665f803598a82d8aaf41ace65df1e431ac5e4ab24610e61d11ccf0470",AdvisoryHarness.POLICY_SHA);
+        assertTrue(system.contains("Mandatory application contract"));assertEquals("c0b67e64c8fac02badb7c2fbd36b4e61bbf5735a43936e062b7f72e96d3c1eb7",AdvisoryHarness.POLICY_SHA);
     }
     @Test void sectionCanPassItsOwnEvidenceAndAdoptionGate(){assertDoesNotThrow(()->AdvisoryHarness.validate(analysis(),sources,false,(basis,refs)->refs.equals(Collections.singletonList("[1]"))));}
     @Test void runtimeLocalizesDateAndVersionChecksWithoutOverridingFrozenPolicy(){
         String system=AdvisoryHarness.system("AUTHORED supplemental prompt",sources,"Explain the cited mechanism");
         assertTrue(system.startsWith(AdvisoryHarness.POLICY));
         for(String instruction:Arrays.asList("Separate a source-supported rule/mechanism from its application to unknown project facts", "R7/R9 assess only this unit's actual claims", "Never change a failed or missing_evidence check to pass just to publish", "A cited rule-only analysis keeps the requested project_contract/reference_only basis"))assertTrue(system.contains(instruction),instruction);
-        assertEquals("ec23c7a665f803598a82d8aaf41ace65df1e431ac5e4ab24610e61d11ccf0470",AdvisoryHarness.POLICY_SHA);
+        assertEquals("c0b67e64c8fac02badb7c2fbd36b4e61bbf5735a43936e062b7f72e96d3c1eb7",AdvisoryHarness.POLICY_SHA);
     }
     @Test void runtimePreservesSourceDirectionAndDistinguishesCutoffFromLastPublication(){
         for(String instruction:Arrays.asList("Quoted temporal direction and precedence must agree with your explanation", "before/prior to is not a look-back window", "A publication cutoff is not the date of the last actual qualifying publication", "Do not reverse the named prevailing document", "User-supplied hypothetical dates remain assumptions"))assertTrue(AdvisoryHarness.CONTRACT.contains(instruction),instruction);
