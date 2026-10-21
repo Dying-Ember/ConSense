@@ -4,10 +4,10 @@
 | 交付项 | 已经落地的变化 | 当前未收口的部分 |
 | --- | --- | --- |
 | 本机运行版本 | 已推送的 `a5f6a2995678333fc81e8f9082fc0bf69e3e2c4d` 构建并运行于 formal19，18084／PID61512；受保护 H2 PID38980 保持 | 本机运行与数据保全通过，不代表三模块业务通过 |
-| Drafting 最终文件 | 私有 H4 完整生成成功；两张仅剩短尾的整页消除，四处来源段落字形覆盖完整 | 24 页逐张目验确认 5 组标题／引导行孤立、1 组单词续行、3 组段首单行跨页；最终版式 FAIL，候选未采用／部署，原生 Word 与项目身份全包贯穿仍待验 |
+| Drafting 最终文件 | H4 两张残文整页消除、四处来源字形完整；H5 同91回归通过，新24页实际生成并在保存文件上精确逆向恢复 H4 源字节 | H4 原9组分页缺陷的 H5 修复效果及新回退正在逐页检查；最终版式未通过，候选未采用／部署，原生 Word 与项目身份全包贯穿仍待验 |
 | Advisory 实际回答 | 同题、同项目、同来源、同 27B 真实复验完成；已交付带引用的实质规则，固定判据由 4/100 提升至 74/100，保存／历史重读一致 | 13 项为 10 PASS／2 FAIL／1 UNKNOWN；交叉引用触发主体被末段摘要扩大，完整文件层级的证据边界未交代；整题仍 FAIL |
 | Vetting 最终报告 | 既有报告内容在升级后保持；二进制差异仅创建时间、ZIP 时间与 PDF ID | 报告内容、赛方版式、原生 Word 与浏览器最终验收仍未完成 |
-| SL 全版本比赛包 | 七版本代表来源与既有兼容修复已记录，SL／mixed-source 29 文件已采用并部署 | 全部 22,214 技术页质量与完整 DB／CAS／索引可迁移包尚未验收；14 个代表页不能充当全量通过 |
+| SL 全版本比赛包 | 七版本完整原件＋14 个代表页已存 native 修订已实际归档、fresh restore 及冷校验；既有兼容修复已部署 | 当前只是可恢复子包；全部 22,214 技术页质量、完整 DB／Local05 历史修订／索引及运行迁移仍待验 |
 
 ### progress38 的执行证据与限制
 
@@ -21,7 +21,8 @@ Advisory 本轮执行目录为 [formal19-real27b-single01](../../../.local/e2e-2
 
 固定原 13 判据／原权重、同一 Specification 原件及 21 个证据别名的独立非盲评为 **74/100，10 PASS／2 FAIL／1 UNKNOWN**；UNKNOWN 的 8 分只计可能上界 82，不能写成得分 82。旧 formal18 为 4 分、可能上界 26。两项 FAIL 为：[17] 的特定“已纳入 SL 库条文→被排除 SL 库条文”触发，被最后摘要扩大成任意 SL/PSS 交叉引用；没有明确 Specification 内部关系不足以建立全部合同文件完整优先层级。另一个未使用的 Articles／Conditions 构成句保留 UNKNOWN。已经正确交付的 GS CEW 场地外道路／排水条件、版本与 42 天时点，以及 SL/PSS 条件与优先规则保持，不因局部失败整体降回仅 limits。见 [固定 13 项业务评审](../../../.local/e2e-20261020/advisory/formal19-real27b-single01/business-review01/review.zhHans.md) 及 [完整评分票](../../../.local/e2e-20261020/advisory/formal19-real27b-single01/business-review01/fixed13-score01.json)。这只证明本题修复效果，不是模型全面比较或项目完成率。
 
-H5 对本次实际 source2a SCT 的 32 个绑定目标准备了最小 keepNext／widowControl 修复，未向 source2b 增加应用。首轮 91 项实际终态为 83 pass／8 error／0 failure／0 skip、59.563 秒、输入保持，原票保留；并未生成 full10。两处候选准备缺陷已定位：原合法 emptySpacing 与新增 keepNext 共用去重集合导致互补控制误拒；五个新合成夹具缺少 ContentTypes，在进入逻辑前即被拒。只准备最小后继修正，原 91 方法／断言保持，不授软件／最终版式通过。三份原先未知 untracked 文件保持，生产／H800 未操作。
+H5 对本次实际 source2a SCT 的 32 个绑定目标准备了最小 keepNext／widowControl 修复，未向 source2b 增加应用。首轮 91 项实际终态为 83 pass／8 error／0 failure／0 skip、59.563 秒、输入保持，原票保留；并未生成 full10。两处候选准备缺陷已定位：原合法 emptySpacing 与新增 keepNext 共用去重集合导致互补控制误拒；五个新合成夹具缺少 ContentTypes，在进入逻辑前即被拒。两处最小修正后的同 91 方法／断言已实际全部通过，64.156 秒、0 failure／error／skip、输入保持／自然 Job0，见 [H5 同91回归验收](../../../.local/round19-adoption-review01/h5-candidate02/runtime-preparation/root-green91-acceptance01.json)。full10 已实际完成完整三文件生成及一次 SCT 转换：1 JUnit pass、24 页 PDF、105.156 秒 native／131.375 秒含文件后验、输入保持／Job0；原 runner 因只读逆向审计预设 32 项全 APPLIED 而保留 FAIL。产品实际为 27 APPLIED（18 keepNext／9 widow）与 5 SKIPPED_CLEARED；保存文件补充诊断已将五处逐个核回与 full09 相同的 CLEAR_PARAGRAPH_AND_NUMBERING 操作／源 SHA／目标，并精确逆向 27 控件和 CL／CS 标记，整个 document.xml 原字节、其他 ZIP 项、NTT／SCC 整包及 H4 旧22逆向均保持，见 [补充来源诊断](../../../.local/round19-adoption-review01/h5-candidate02/post10/saved-file-diagnostic02.json)。没有重新生成或改原 FAIL。新24页已实际单次 raster（4.093 秒 native、0retry），两张完整联系表 Root 已看，原尺寸逐页验收进行中；该 raster 准备计划误留 completionStatus=NOT_EXECUTED 标签，原票保持，实际执行／Job0／24张PNG及完整hash均已保存，不能把标签误称无执行。候选仍未采用／部署，最终版式未授通过。三份原先未知 untracked 文件保持，生产／H800 未操作。
+SL 已实际完成一个可恢复阶段子包：七版本完整原始 PDF 与 selected14 页已保存的 native-bundle／raw／observer 全部声明 payload，48 文件共 1,541,753,770 字节，压缩包 971,706,183 字节。单窗口 106.266 秒，11 个边界测试通过后实际归档→新目录恢复→七份修订冷校验，17 CAS／921,888,326 字节独立核验通过，输入保持／自然 Job0，没有降采样、丢 payload、启动服务或改写内部绝对路径。见 [阶段子包验收](../../../.local/sl-seven-competition-next01/root-subpackage-acceptance01.json) 及 [frozen-artifacts 清单](../../../.local/sl-seven-competition-next01/execution/parts/manifest.json)。仅证明已保存原件／修订的恢复能力，14 页及全部 22,214 页来源质量均未授通过；其余 22,200 技术页质量、完整 DB／Local05 920 descriptor 历史闭包／索引与 portable runtime 继续待验，未将子包冒称完整比赛包。
 <!-- unified-progress38:end -->
 
 <!-- unified-progress37:start -->
