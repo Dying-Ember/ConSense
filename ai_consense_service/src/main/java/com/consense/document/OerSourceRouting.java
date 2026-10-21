@@ -54,9 +54,21 @@ public final class OerSourceRouting {
     }
 
     public OerDocumentIdentity route(String fileName, String sourceSha256, DocumentParser.ParsedDocument parsed) {
+        return route(fileName,sourceSha256,parsed == null ? null : parsed.getSourceSha256(),
+                parsed == null ? "" : parsed.getText(),parsed == null ? Collections.emptyList() : parsed.getBlocks(),
+                parsed == null ? null : parsed.getRoutingObservation());
+    }
+
+    /** Reclassify the exact persisted parser fields; this never invokes a parser or invents parse coverage. */
+    public OerDocumentIdentity routeRetained(String fileName,String sourceSha256,String text,List<DocumentBlock> blocks) {
+        return route(fileName,sourceSha256,sourceSha256,text,blocks,null);
+    }
+
+    private OerDocumentIdentity route(String fileName,String sourceSha256,String parsedSha,String text,
+            List<DocumentBlock> blocks,com.fasterxml.jackson.databind.JsonNode routingObservation) {
         OerDocumentIdentity result = new OerDocumentIdentity();
         String sha = validSha(sourceSha256); result.setSourceSha256(sha);
-        if (sha == null || (parsed != null && parsed.getSourceSha256() != null && !sha.equalsIgnoreCase(parsed.getSourceSha256()))) {
+        if (sha == null || (parsedSha != null && !sha.equalsIgnoreCase(parsedSha))) {
             result.setIdentityStatus("source_identity_mismatch");
             result.getIdentityEvidence().add(new OerDocumentIdentity.Evidence("byte_identity", null, "Missing/invalid original SHA or parsed original-byte identity differs"));
             return result;
@@ -69,16 +81,20 @@ public final class OerSourceRouting {
             result.getIdentityEvidence().add(new OerDocumentIdentity.Evidence("fixed_source_sha256", null, "Exact original bytes match the supplied source manifest"));
             return result;
         }
-        String title = firstTitle(parsed), content = parsed == null || parsed.getText() == null ? "" : parsed.getText();
-        String titleKind = titleKind(title);
+        String title = firstTitle(text,blocks), content = text == null ? "" : text;
+        OerDocumentIdentity.Evidence projectIdentifier = projectIdentifier(content,sha,blocks);
+        String titleKind = titleKind(title), appendixLocation = (titleKind == null || "SCT".equals(titleKind)) ? nativeTenderAppendix(sourceSha256,text,blocks) : null;
+        if (appendixLocation != null) titleKind = "SCT";
         if (titleKind != null) {
-            result.getIdentityEvidence().add(new OerDocumentIdentity.Evidence("native_or_parsed_title", "first_content_block", "Title supports " + titleKind + "; content quality and applicability remain separate"));
+            result.getIdentityEvidence().add(appendixLocation == null
+                    ? new OerDocumentIdentity.Evidence("native_or_parsed_title", "first_content_block", "Title supports " + titleKind + "; content quality and applicability remain separate")
+                    : new OerDocumentIdentity.Evidence("native_tender_appendix", appendixLocation, "Native title/header declares an appendix to Special Conditions of Tender with assessment and submission provisions; project adoption remains separate"));
             String purpose = "unknown";
             if (Arrays.asList("NTT", "SCT", "SCC").contains(titleKind)) {
-                if (projectIdentifier(content)) purpose = "project_document";
+                if (appendixLocation != null || projectIdentifier != null) purpose = "project_document";
                 else result.getCandidates().add(new OerDocumentIdentity.Candidate(titleKind, "standard_template", "An unfilled title alone does not establish a standard template"));
             } else if (Arrays.asList("AA", "FT").contains(titleKind)) purpose = "project_document";
-            else if ("PRE".equals(titleKind) && projectIdentifier(content)) purpose = "project_document";
+            else if ("PRE".equals(titleKind) && projectIdentifier != null) purpose = "project_document";
             else if (Arrays.asList("GCC", "GS").contains(titleKind)) purpose = "reference_standard";
             else if ("GCT".equals(titleKind) && content.matches("(?is).*\\b(?:tenderer|tender|contract)\\b.*")) purpose = "project_document";
             else if (Arrays.asList("BQ", "SOR", "GENERAL_SUMMARY").contains(titleKind)
@@ -91,22 +107,48 @@ public final class OerSourceRouting {
                 result.setEligibleModules(eligible(titleKind, purpose));
             } else result.getCandidates().add(new OerDocumentIdentity.Candidate(titleKind, purpose, "Purpose needs actual project/standard identity evidence"));
         }
-        if ("unknown".equals(result.getIdentityStatus()) && parsed != null && parsed.getRoutingObservation() != null) {
-            if (parsed.getRoutingObservation().path("nonDrawingFormatVerified").asBoolean()) {
+        if ("unknown".equals(result.getIdentityStatus()) && routingObservation != null) {
+            if (routingObservation.path("nonDrawingFormatVerified").asBoolean()) {
                 result.setIdentityStatus("format_supported_non_drawing");
-                if (projectIdentifier(content)) {
+                if (projectIdentifier != null) {
                     result.setSourcePurpose("project_document"); result.setRole("tender"); result.setIdentityStatus("content_supported");
                     result.setEligibleModules(MODULES);
-                    result.getIdentityEvidence().add(new OerDocumentIdentity.Evidence("native_project_identifier", "observed_content", "Actual project identifier in a verified non-drawing textual format; project adoption remains separate"));
                 }
             }
             else if (titleKind != null) result.setIdentityStatus("content_supported_non_drawing");
         }
+        if (projectIdentifier != null && "content_supported".equals(result.getIdentityStatus())
+                && "project_document".equals(result.getSourcePurpose())) result.getIdentityEvidence().add(projectIdentifier);
         String filenameKind = filenameCandidate(fileName);
         if (filenameKind != null && !Objects.equals(filenameKind, result.getKind()))
             result.getCandidates().add(new OerDocumentIdentity.Candidate(filenameKind, "unknown", "Filename is a clue, never the adoption or module decision"));
         if (result.getIdentityEvidence().isEmpty()) result.getIdentityEvidence().add(new OerDocumentIdentity.Evidence("unresolved", null, "No sufficient source identity evidence; candidates and original source remain available"));
         return result;
+    }
+
+    private static String nativeTenderAppendix(String sourceSha256,String sourceText,List<DocumentBlock> blocks) {
+        if (blocks == null || validSha(sourceSha256) == null) return null;
+        String opening = firstTitle(sourceText,blocks).replaceAll("\\s+", " ").trim();
+        if (opening.matches("(?i)^(?:(?:sample|model|example|suggested) (?:answer|report)|comments on tender documentation|checklist for|contractual advice|flowchart).*")) return null;
+        Pattern parent = Pattern.compile("(?i)^appendix\\h+[a-z0-9]+(?:[.-][a-z0-9]+)*\\h+to\\s*special\\h+conditions?\\h+of\\h+tender\\b");
+        String declared = null; boolean firstBody = true; StringBuilder body = new StringBuilder();
+        for (DocumentBlock block : blocks) {
+            if (block == null || block.getSourcePosition() == null || block.getEffectiveText() == null) continue;
+            com.fasterxml.jackson.databind.JsonNode position = block.getSourcePosition();
+            if (!"docx_native".equals(position.path("kind").asText()) || !sourceSha256.equals(position.path("sourceSha256").asText())
+                    || validSha(position.path("partSha256").asText()) == null || position.path("nodePath").asText().isEmpty()) continue;
+            String part = position.path("partName").asText(), text = block.getEffectiveText().replaceAll("\\s+", " ").trim();
+            if ("word/document.xml".equals(part) && !text.isEmpty()) {
+                if (firstBody && parent.matcher(text).find()) declared = block.getLocation();
+                firstBody = false; body.append(text).append('\n');
+            } else if (part.matches("word/header[0-9]+\\.xml") && parent.matcher(text).find()) declared = block.getLocation();
+        }
+        String content = body.toString();
+        return declared != null
+                && Pattern.compile("(?i)\\b(?:tenderers?|technical proposals?)\\b").matcher(content).find()
+                && Pattern.compile("(?i)\\b(?:assessment standards?|marking scheme|scores?|scoring)\\b").matcher(content).find()
+                && Pattern.compile("(?i)\\b(?:submission requirements?|submit|submitted|submitting)\\b").matcher(content).find()
+                && Pattern.compile("(?i)\\b(?:shall|must|will)\\b").matcher(content).find() ? declared : null;
     }
 
     private static List<String> eligible(String kind, String purpose) {
@@ -117,20 +159,35 @@ public final class OerSourceRouting {
         return MODULES;
     }
     private static String validSha(String value) { return value != null && value.matches("(?i)[0-9a-f]{64}") ? value.toLowerCase(Locale.ROOT) : null; }
-    private static boolean projectIdentifier(String text) {
-        return Pattern.compile("(?im)^\\h*(?:contract|tender|project)\\h*(?:no\\.?|number|reference|ref\\.?|title)(?:\\h*[:：#]\\h*|\\h+)(?!(?:not provided|to be completed|insert|unknown|n/a)\\b)(?![.＿_\\- ]*(?:$|\\[))(?:[\\p{L}\\p{N}][\\p{L}\\p{N}/._ -]{2,})\\h*$").matcher(text).find();
+    private static OerDocumentIdentity.Evidence projectIdentifier(String text, String sourceSha256, List<DocumentBlock> blocks) {
+        String opening = firstTitle(text,blocks).replaceAll("\\s+", " ").trim();
+        if (opening.matches("(?i)^(?:(?:sample|model|example|suggested) (?:answer|report)|comments on tender documentation|checklist for|contractual advice|flowchart).*")) return null;
+        if (blocks != null && validSha(sourceSha256) != null
+                && Arrays.asList("NTT", "SCT", "SCC", "PRE").contains(titleKind(firstTitle(text,blocks)))) {
+            Pattern declaration = Pattern.compile("(?i)^\\h*contract\\h*(?:no\\.?|number)(?:\\h*[:：#]\\h*|\\h+)(?=[a-z0-9/._-]*[0-9])[a-z0-9][a-z0-9/._-]{2,}\\h+\\(the\\h+(?:\"Contract\"|“Contract”)\\)\\h*$");
+            for (DocumentBlock block : blocks) {
+                if (block == null || block.getSourcePosition() == null || block.getEffectiveText() == null
+                        || block.getLocation() == null || block.getLocation().isEmpty()) continue;
+                com.fasterxml.jackson.databind.JsonNode position = block.getSourcePosition();
+                if ("docx_native".equals(position.path("kind").asText()) && sourceSha256.equals(position.path("sourceSha256").asText())
+                        && "word/document.xml".equals(position.path("partName").asText()) && validSha(position.path("partSha256").asText()) != null
+                        && !position.path("nodePath").asText().isEmpty() && declaration.matcher(block.getEffectiveText()).matches())
+                    return new OerDocumentIdentity.Evidence("native_contract_definition", block.getLocation(), "Source-bound native body declares the numbered Contract; project adoption and content completeness remain separate");
+            }
+        }
+        if (Pattern.compile("(?im)^\\h*(?:contract|tender|project)\\h*(?:no\\.?|number|reference|ref\\.?|title)(?:\\h*[:：#]\\h*|\\h+)(?!(?:not provided|to be completed|insert|unknown|n/a)\\b)(?![.＿_\\- ]*(?:$|\\[))(?:[\\p{L}\\p{N}][\\p{L}\\p{N}/._ -]{2,})\\h*$").matcher(text).find()) return new OerDocumentIdentity.Evidence("observed_project_identifier", "observed_content", "Labelled project identifier in the observed text; project adoption remains separate");
+        return null;
     }
-    private static String firstTitle(DocumentParser.ParsedDocument parsed) {
-        if (parsed == null) return "";
+    private static String firstTitle(String sourceText,List<DocumentBlock> blocks) {
         StringBuilder title = new StringBuilder(); int lines = 0;
-        if (parsed.getBlocks() != null) for (DocumentBlock block : parsed.getBlocks()) {
+        if (blocks != null) for (DocumentBlock block : blocks) {
             String text = block.getText();
             if (text != null) for (String line : text.split("\\n")) if (!line.trim().isEmpty()) {
                 title.append(line.trim()).append('\n'); if (++lines >= 4) return title.toString();
             }
         }
         if (lines > 0) return title.toString();
-        String text = parsed.getText();
+        String text = sourceText;
         if (text != null) for (String line : text.replaceFirst("(?s)^--- P\\d+ ---\\s*", "").split("\\n")) if (!line.trim().isEmpty()) {
             title.append(line.trim()).append('\n'); if (++lines >= 4) break;
         }

@@ -145,6 +145,23 @@ public final class OerSourceMetadata {
         return FixedRegistry.ROUTER.route(document.getFileName(), verifiedOriginalSha256, null);
     }
 
+    /** Existing fixed identities keep priority; otherwise reuse only retained source-bound native parser fields. */
+    public static OerDocumentIdentity refreshedIdentity(SourceDocument document,String verifiedOriginalSha256) {
+        OerDocumentIdentity fixed=refreshedFixedIdentity(document,verifiedOriginalSha256);
+        if ("sha_verified".equals(fixed.getIdentityStatus()) || JsonUtils.isBlankText(document.getStructuredContentJson())) return fixed;
+        List<com.consense.document.DocumentBlock> blocks;
+        try {blocks=JsonUtils.readList(document.getStructuredContentJson(),com.consense.document.DocumentBlock.class);}
+        catch(RuntimeException invalid){return fixed;}
+        if(blocks==null||blocks.isEmpty())return fixed;
+        for(com.consense.document.DocumentBlock block:blocks) {
+            if(block==null)return fixed;
+            JsonNode position=block.getSourcePosition();
+            if(position!=null && "docx_native".equals(position.path("kind").asText())
+                    && !verifiedOriginalSha256.equals(position.path("sourceSha256").asText())) return fixed;
+        }
+        return FixedRegistry.ROUTER.routeRetained(document.getFileName(),verifiedOriginalSha256,document.getTextContent(),blocks);
+    }
+
     /** null means unresolved; a non-null reason excludes the source from this module. */
     public static String moduleExclusion(SourceDocument document, String module) {
         if (!Arrays.asList("drafting", "vetting", "advisory").contains(module))

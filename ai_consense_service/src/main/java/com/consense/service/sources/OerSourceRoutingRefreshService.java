@@ -45,28 +45,40 @@ public class OerSourceRoutingRefreshService {
         catch(RuntimeException invalid) { throw new CanonicalEvidenceException(HttpStatus.CONFLICT,"SOURCE_ROUTING_STALE"); }
         assertCurrent(before);
         verifyOriginal(before);
-        OerDocumentIdentity identity=OerSourceMetadata.refreshedFixedIdentity(before,expectedOriginalSha);
-        require("sha_verified".equals(identity.getIdentityStatus())&&identity.getEligibleModules()!=null,
+        OerDocumentIdentity identity=OerSourceMetadata.refreshedIdentity(before,expectedOriginalSha);
+        boolean nativeSupported="content_supported".equals(identity.getIdentityStatus())
+                && identity.getIdentityEvidence().stream().anyMatch(e->Arrays.asList("native_tender_appendix","native_contract_definition").contains(e.getBasis()));
+        require(("sha_verified".equals(identity.getIdentityStatus())||nativeSupported)&&identity.getEligibleModules()!=null,
                 HttpStatus.FORBIDDEN,"SOURCE_ROUTING_IDENTITY_UNRESOLVED");
-        require(Objects.equals(before.getFileKey(),identity.getKind()),HttpStatus.CONFLICT,"SOURCE_ROUTING_KIND_CHANGED");
+        if(nativeSupported) {
+            String exclusion=ProjectDocumentScope.exclusionReason(before,"fullset","vetting");
+            require(exclusion==null||"source_identity_unresolved".equals(exclusion),HttpStatus.FORBIDDEN,"SOURCE_MODULE_EXCLUDED");
+            require(JsonUtils.isBlankText(before.getReviewRole())||"tender".equals(before.getReviewRole()),HttpStatus.FORBIDDEN,"SOURCE_ROUTING_PURPOSE_CONFLICT");
+        }
+        boolean kindChanged=!Objects.equals(before.getFileKey(),identity.getKind());
+        require(!kindChanged||nativeSupported&&"SCT".equals(identity.getKind())
+                &&(JsonUtils.isBlankText(before.getFileKey())||Arrays.asList("UNKNOWN","OTHER").contains(before.getFileKey())),
+                HttpStatus.CONFLICT,"SOURCE_ROUTING_KIND_CHANGED");
         require(identity.getEligibleModules().contains("vetting")&&identity.getEligibleModules().contains("advisory"),
                 HttpStatus.FORBIDDEN,"SOURCE_MODULE_ELIGIBILITY_UNRESOLVED_OR_EXCLUDED");
         SourceDocument proposed=snapshot(id);
         requireSameSnapshot(before,proposed);
-        proposed.setOerIdentityJson(JsonUtils.write(identity));
+        proposed.setOerIdentityJson(JsonUtils.write(identity));if(kindChanged)proposed.setFileKey(identity.getKind());
         require(ProjectDocumentScope.exclusionReason(proposed,"fullset","vetting")==null
                 &&ProjectDocumentScope.exclusionReason(proposed,"fullset","advisory")==null,
                 HttpStatus.FORBIDDEN,"SOURCE_MODULE_EXCLUDED");
         String next=proposed.getOerIdentityJson();
-        boolean changed=!Objects.equals(before.getOerIdentityJson(),next);
-        if(changed) require(documents.compareAndSetRoutingIdentity(id,projectId,expectedOriginalSha,before.getOerIdentityJson(),next)==1,
+        boolean changed=kindChanged||!Objects.equals(before.getOerIdentityJson(),next);
+        if(changed) require((kindChanged
+                ?documents.compareAndSetRoutingIdentityAndKind(id,projectId,expectedOriginalSha,before.getOerIdentityJson(),next,before.getFileKey(),identity.getKind())
+                :documents.compareAndSetRoutingIdentity(id,projectId,expectedOriginalSha,before.getOerIdentityJson(),next))==1,
                 HttpStatus.CONFLICT,"SOURCE_REFRESH_SNAPSHOT_STALE");
         SourceDocument after=snapshot(id);
-        require(Objects.equals(after.getOerIdentityJson(),next),HttpStatus.CONFLICT,"SOURCE_REFRESH_SNAPSHOT_STALE");
+        require(Objects.equals(after.getOerIdentityJson(),next)&&Objects.equals(after.getFileKey(),proposed.getFileKey()),HttpStatus.CONFLICT,"SOURCE_REFRESH_SNAPSHOT_STALE");
         // The update owns the row lock. A concurrent earlier content/role edit cannot pass this check.
-        after.setOerIdentityJson(before.getOerIdentityJson());
+        after.setOerIdentityJson(before.getOerIdentityJson());after.setFileKey(before.getFileKey());
         requireSameSnapshot(before,after);
-        after.setOerIdentityJson(next);
+        after.setOerIdentityJson(next);after.setFileKey(proposed.getFileKey());
         assertCurrent(after);
         verifyOriginal(after);
         Result result=new Result();result.setProjectId(projectId);result.setDocumentId(id);

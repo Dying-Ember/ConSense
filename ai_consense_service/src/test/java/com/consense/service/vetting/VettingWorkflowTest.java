@@ -74,7 +74,7 @@ class VettingWorkflowTest {
     }
 
     @Autowired private VettingService service;
-    @Autowired private DocumentParser parser;
+    @SpyBean private DocumentParser parser;
     @Autowired private ProjectRepository projects;
     @Autowired private SourceDocumentRepository documents;
     @Autowired private VettingFindingRepository findings;
@@ -95,6 +95,28 @@ class VettingWorkflowTest {
         props.getVetting().setRequireHybridRetrieval(false);props.getVetting().setProbeDirectory(null);
         when(ai.available()).thenReturn(false);
         when(ai.chatModel()).thenReturn("offline-test-model");
+    }
+
+    @Test
+    void uploadPublishesFullParsingBeforeTheParserAndRetainsSuccessAndFailureTerminalStates() throws Exception {
+        for(boolean fail:Arrays.asList(false,true)) {
+            String projectId=project("Upload parsing phase "+fail),name="phase-"+fail+".docx";
+            byte[] original=word("Tenderers shall submit the required documents.");
+            DocumentParser.ParsedDocument expected=parser.parse(name,original);
+            java.util.concurrent.atomic.AtomicInteger entered=new java.util.concurrent.atomic.AtomicInteger();
+            org.mockito.Mockito.doAnswer(call->{
+                SourceDocument stored=documents.findAll().stream().filter(d->projectId.equals(d.getProjectId())&&name.equals(d.getFileName())).findFirst().orElseThrow(AssertionError::new);
+                assertEquals("PARSING",stored.getParseStatus());assertFalse(stored.getParseMessage().contains("not started"));
+                assertTrue(stored.getParseMessage().contains("详细解析"));assertFalse(stored.getTextContent().isEmpty(),"Initial observation stays available");
+                entered.incrementAndGet();if(fail)throw new IllegalStateException("AUTHORED full parse failure");
+                return call.callRealMethod();
+            }).when(parser).parse(eq(name),any(byte[].class),any(DocumentParser.ParsedDocument.class),any(com.consense.document.OerDocumentIdentity.class));
+            service.uploadPackage(projectId,Collections.singletonList(upload(name,"application/vnd.openxmlformats-officedocument.wordprocessingml.document",original)),"tender","package");
+            assertEquals(1,entered.get());
+            SourceDocument saved=documents.findAll().stream().filter(d->projectId.equals(d.getProjectId())&&name.equals(d.getFileName())).findFirst().orElseThrow(AssertionError::new);
+            assertEquals(fail?"FAILED":expected.getParseStatus(),saved.getParseStatus());
+            assertTrue(fail?saved.getParseMessage().contains("AUTHORED full parse failure"):saved.getParseMessage().equals(expected.getMessage()));
+        }
     }
 
     @Test

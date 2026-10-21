@@ -368,6 +368,7 @@ public class VettingService {
                     d.setParseMessage("IDENTITY_PENDING".equals(d.getParseStatus())?"身份待确认，已保留原件和初步观察；确认前不进行详细解析。":"文件不在本次审查解析范围内："+exclusion);
                     sourceDocumentRepository.saveAndFlush(d);messages.add(d.getFileName()+" · "+d.getParseStatus()+" · "+d.getParseMessage());continue;
                 }
+                d.setParseStatus("PARSING");d.setParseMessage("文件识别观察已保存，正在进行详细解析；最终结果尚未就绪。");
                 sourceDocumentRepository.saveAndFlush(d);
                 DocumentParser.ParsedDocument p;
                 if(DocumentParseProbe.configured(props)) {

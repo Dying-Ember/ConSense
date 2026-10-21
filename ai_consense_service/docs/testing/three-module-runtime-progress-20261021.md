@@ -1,3 +1,19 @@
+<!-- unified-progress51:start -->
+## progress51：评分附件实际准入已修通，保留解析限制与原件
+
+**2026-10-21 当前：runtime24 已部署，真实后继项目中两份已存 Marking Scheme 已通过现有 routing refresh 自动进入审查来源，前端实际回读为“招标合同条款／部分解析”。** 当前该项目只有4份真实来源：NTT25、SCT26、附件27／28，四份均为 tender、parsed=true、无排除原因；没有重传、重解析或调用模型。这关闭的是两附件的来源准入卡点，不能代替整套35文件审查、内容完整性或正式报告验收。[两次实际请求及回包](../../../.local/runtime-routing24/)、[前端验收收据](../../../.local/runtime-routing24/browser-actual-routing-acceptance.json)、[实际页面](../../../.local/runtime-routing24/actual-source-list-after-refresh.png)。
+
+- **共同首因已修：** 正常上传与已存来源刷新使用同一 Router。原生标题／页眉必须同源绑定，明确声明 Appendix to Special Conditions of Tender，正文同时有投标／技术建议、评分、提交及义务语气，才支持 SCT 附件归属。明确的 BQ、GCC 等类型不会被覆盖。SCT 的严格原生正文定义 `Contract No. 20250101 (the “Contract”)` 可被识别；参考答案标题、占位、外部引用、缺失／错来源绑定仍拒绝。NTT 裸页脚号不足以通用证明项目身份，已确认真实 NTT 继续按既有 exact SHA 身份准入，不把任意数字当项目号。
+- **旧文件接缝已实际复现并修通：** runtime23 的附件27原 refresh 返回403 `SOURCE_ROUTING_IDENTITY_UNRESOLVED`，前后文件列表完整 body 相同。新接缝复用已存 text／blocks，仅接受严格 `native_tender_appendix` 或 `native_contract_definition`；保留原件字节、原件／解析／路由三版本、显式用途和范围隔离。仅空／UNKNOWN／OTHER 类型可在同一 CAS 中与身份一起升为 SCT。附件27保持 SCT；附件28由 OTHER 升为 SCT。两次实际刷新均200，服务前后快照守卫及返回的原件／解析版本均匹配原请求，PARTIAL 保留。[旧行为复现](../../../.local/runtime-recovery23/old-refresh-repro-result.json)、[附件27](../../../.local/runtime-routing24/refresh-27-result.json)、[附件28](../../../.local/runtime-routing24/refresh-28-result.json)。
+- **实际软件回归：** 当前四类共66方法全部通过、0失败／错误／跳过：Router18、routing refresh16、workflow18、source purpose14，真实来源测试属性已显式提供。包括原件／解析保留、过期版本拒绝、CAS失败、错误绑定、损坏结构、参考答案与计价排除。早先缺 JsonNode import 的编译失败窗口保留为零执行，不改称通过。前端第一后检误把用途确认结束后不再提供的版本字段当成来源变化，原失败留存；后继按实际接口契约核版本返回和页面，未重发两个变更请求。[66方法与采用收据](../../../.local/runtime-routing24/adoption-tests.json)、[实际日志](../../../.local/joint-docx-pagination01/shared-audit/java-green04.log)。
+- **阶段状态修复已部署：** 上传详细 parser 调用前先持久保存 PARSING，避免实际 OCR 运行时仍显示“未开始详细解析”。已用真实 service 工作流测试验证调用时可读状态及成功／失败终态；长 PDF 的新真实前端阶段观察仍未执行，不借软件测试追认旧 Annex 已完成。
+- **运行与保全：** 新后端50892，18084；受保护 H2 owner62496及前端57836保持。新包与325份主树输入核同，使用16 GiB堆；包含本轮四来源的SQL检查点已实际保存，1,498,490,208 bytes／SHA `5d40496b8362f7deb0ecc195451dc20b5289aa4276e52fd36c31d627c06eabc2`。这是开发数据保全，不是SL比赛包，也没有重新恢复或停止H2。[包核对](../../../.local/runtime-routing24/package-proof.json)、[运行身份](../../../.local/runtime-routing24/backend.json)、[检查点](../../../.local/runtime-recovery23/checkpoint-after-marking.json)。
+
+旧截图的9件与恢复后4件分开计：旧9件＝2图纸排除＋2已识别用途＋5用途unknown；其中4份DOCX有详细结果，Annex仅174字符身份观察，不能计作完整解析后的分类失败。原件验收总分母仍35，33范围内／2图纸先识别排除，旧中断请求没有继续运行。
+
+Drafting动态分页软件首轮22方法为21PASS／1个负控renderer提前查找被删除标记的fixture失败；仅修NO_SPLIT模式的该查找后，同类5方法实际全通过，跨两窗覆盖完整22方法，原失败保留。候选仍未采用或部署；保存稿真实LibreOffice三次转换后继正在执行，正常新生成／JPA保存、完整逐页视觉仍分别待验。Advisory无新真实问答；真实2b模型审查与正式报告、全七版SL质量及质量通过后的比赛包均未完成，Goal active，不上调整体百分比。
+<!-- unified-progress51:end -->
+
 <!-- unified-progress50:start -->
 ## progress50：路由漏判已定位，运行中断后恢复，真实 NTT／SCT 再验
 

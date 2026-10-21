@@ -10,6 +10,7 @@ import com.consense.repository.ProjectRepository;
 import com.consense.repository.SourceDocumentRepository;
 import com.consense.service.vetting.OerBusinessEvidence;
 import com.consense.service.vetting.VettingCorpus;
+import com.fasterxml.jackson.databind.JsonNode;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.util.*;
@@ -48,7 +49,7 @@ class OerRoutingRefreshJpaTest {
     }
     @Autowired MockMvc mvc;
     @Autowired ProjectRepository projects;
-    @Autowired SourceDocumentRepository documents;
+    @SpyBean SourceDocumentRepository documents;
     @Autowired org.springframework.jdbc.core.JdbcTemplate fixtureSql;
     @Autowired EntityManagerFactory emf;
     @Autowired ConsenseProperties properties;
@@ -89,6 +90,64 @@ class OerRoutingRefreshJpaTest {
         assertTrue(SqlCapture.statements.stream().noneMatch(s->s.toLowerCase(Locale.ROOT).startsWith("update source_document")));
         assertEquals(previous,documents.findById(d.getId()).get().getOerIdentityJson());verifyNoInteractions(ai,parser,oer);
     }
+    void retainedAppendix(int index)throws Exception {
+        JsonNode fixture=JsonUtils.parse(Files.readString(Paths.get(System.getProperty("consense.test.marking-native-fixtures")),StandardCharsets.UTF_8)).path("sources").get(index);
+        original=Files.readAllBytes(Paths.get(fixture.path("original").path("path").asText()));
+        assertEquals(fixture.path("original").path("sha256").asText(),OerSourceMetadata.originalSha256(original));
+        Path stored=Paths.get(properties.getStorageRoot(),d.getProjectId(),fixture.path("fileName").asText());Files.write(stored,original);
+        d.setFileName(fixture.path("fileName").asText());d.setFileKey(fixture.path("fileKey").asText());d.setStoragePath(stored.toString());
+        d.setSourceSha256(OerSourceMetadata.originalSha256(original));d.setParseStatus("PARTIAL");d.setDocumentScope("package");
+        d.setTextContent(fixture.path("text").asText());d.setStructuredContentJson(JsonUtils.write(fixture.path("blocks")));
+        d.setOerIdentityJson("{\"schemaVersion\":\"oer-source-identity-v1\",\"sourceSha256\":\""+d.getSourceSha256()+"\",\"sourcePurpose\":\"unknown\",\"kind\":\"UNKNOWN\"}");
+        d=documents.saveAndFlush(d);fixtureSql.update("update source_document set review_role=null where id=?",d.getId());d=documents.findById(d.getId()).orElseThrow(AssertionError::new);clear();
+    }
+    @Test @EnabledIfSystemProperty(named="consense.test.marking-native-fixtures",matches=".+")
+    void retained_native_marking_sources_refresh_without_reparsing_and_unknown_kind_advances_atomically()throws Exception {
+        for(int index=0;index<2;index++) {
+            retainedAppendix(index);SourceDocument before=d;Map<String,String> pins=request();
+            org.springframework.mock.web.MockHttpServletResponse response=refresh(pins);assertEquals(200,response.getStatus(),response.getContentAsString());
+            JsonNode result=JsonUtils.parse(response.getContentAsString()).path("data");assertTrue(result.path("changed").asBoolean());
+            assertEquals("content_supported",result.path("identity").path("identityStatus").asText());assertEquals("SCT",result.path("identity").path("kind").asText());
+            assertEquals("tender",result.path("identity").path("role").asText());assertEquals(pins.get("expectedParsedSourceHash"),result.path("javaParsedSourceHash").asText());
+            assertEquals(pins.get("expectedRoutingSha256"),result.path("previousRoutingSha256").asText());assertNotEquals(pins.get("expectedRoutingSha256"),result.path("routingSha256").asText());
+            List<String> writes=new ArrayList<>();for(String sql:SqlCapture.statements)if(sql.toLowerCase(Locale.ROOT).startsWith("update source_document"))writes.add(sql);
+            assertEquals(1,writes.size());String set=writes.get(0).toLowerCase(Locale.ROOT).split(" where ")[0];
+            assertTrue(set.matches(index==0?"update source_document set oer_identity_json=\\?":"update source_document set oer_identity_json=\\?,\\s*file_key=\\?"),set);
+            SourceDocument saved=documents.findById(d.getId()).orElseThrow(AssertionError::new);
+            assertEquals("SCT",saved.getFileKey());assertEquals(before.getTextContent(),saved.getTextContent());assertEquals(before.getStructuredContentJson(),saved.getStructuredContentJson());
+            assertEquals(before.getSourceSha256(),saved.getSourceSha256());assertEquals(before.getNativePdfEvidenceJson(),saved.getNativePdfEvidenceJson());assertEquals(before.getReviewRole(),saved.getReviewRole());
+            assertEquals(before.getParseStatus(),saved.getParseStatus());assertEquals(before.getParseCoverageJson(),saved.getParseCoverageJson());assertEquals(before.getParseMessage(),saved.getParseMessage());
+            assertEquals(pins.get("expectedParsedSourceHash"),VettingCorpus.sourceHash(saved));assertEquals("tender",VettingCorpus.sourceRole(saved));verifyNoInteractions(ai,parser,oer);
+            d=saved;clear();assertEquals(200,refresh(request()).getStatus());assertTrue(SqlCapture.statements.stream().noneMatch(sql->sql.toLowerCase(Locale.ROOT).startsWith("update source_document")),"Second native refresh remains idempotent");
+        }
+    }
+    @Test @EnabledIfSystemProperty(named="consense.test.marking-native-fixtures",matches=".+")
+    void retained_native_refresh_rejects_each_stale_pin_and_a_failed_kind_cas()throws Exception {
+        retainedAppendix(1);
+        for(String field:Arrays.asList("expectedOriginalSha256","expectedParsedSourceHash","expectedRoutingSha256")) {
+            Map<String,String> stale=request();stale.put(field,String.join("",Collections.nCopies(64,"a")));clear();
+            assertEquals(409,refresh(stale).getStatus());assertTrue(SqlCapture.statements.stream().noneMatch(sql->sql.toLowerCase(Locale.ROOT).startsWith("update source_document")));
+        }
+        String before=d.getOerIdentityJson();doReturn(0).when(documents).compareAndSetRoutingIdentityAndKind(anyLong(),anyString(),anyString(),anyString(),anyString(),anyString(),anyString());
+        rejected(409,"SOURCE_REFRESH_SNAPSHOT_STALE");assertEquals(before,documents.findById(d.getId()).orElseThrow(AssertionError::new).getOerIdentityJson());
+    }
+    @Test @EnabledIfSystemProperty(named="consense.test.marking-native-fixtures",matches=".+")
+    void retained_native_refresh_preserves_explicit_exclusions_and_rejects_wrong_source_binding_or_changed_original()throws Exception {
+        for(String scope:Arrays.asList("pricing","example","works_pss")) {retainedAppendix(0);d.setDocumentScope(scope);documents.saveAndFlush(d);rejected(403,"SOURCE_MODULE_EXCLUDED");}
+        for(String purpose:Arrays.asList("evaluation_answer","project_document")) {
+            retainedAppendix(0);com.fasterxml.jackson.databind.node.ObjectNode identity=(com.fasterxml.jackson.databind.node.ObjectNode)JsonUtils.parse(d.getOerIdentityJson());
+            identity.put("sourcePurpose",purpose);identity.put("kind","evaluation_answer".equals(purpose)?"EVALUATION_ANSWER":"BQ");identity.putArray("eligibleModules");
+            d.setOerIdentityJson(JsonUtils.write(identity));documents.saveAndFlush(d);rejected(403,"SOURCE_MODULE_EXCLUDED");
+        }
+        retainedAppendix(0);JsonNode blocks=JsonUtils.parse(d.getStructuredContentJson());for(JsonNode block:blocks)((com.fasterxml.jackson.databind.node.ObjectNode)block.path("sourcePosition")).put("sourceSha256",String.join("",Collections.nCopies(64,"a")));
+        d.setStructuredContentJson(JsonUtils.write(blocks));documents.saveAndFlush(d);rejected(403,"SOURCE_ROUTING_IDENTITY_UNRESOLVED");
+        retainedAppendix(0);byte[] modified=original.clone();modified[0]^=1;Files.write(Paths.get(d.getStoragePath()),modified);rejected(409,"SOURCE_ORIGINAL_BYTES_CHANGED");
+    }
+    @Test @EnabledIfSystemProperty(named="consense.test.marking-native-fixtures",matches=".+")
+    void damaged_retained_structure_is_unresolved_instead_of_a_server_error()throws Exception {
+        for(String structure:Arrays.asList("null","[null]","{bad json","[]")) {retainedAppendix(0);d.setStructuredContentJson(structure);documents.saveAndFlush(d);rejected(403,"SOURCE_ROUTING_IDENTITY_UNRESOLVED");}
+    }
+
     @Test void unknown_source_becomes_qualified_without_hydrating_or_rewriting_retained_parse_evidence()throws Exception {
         assertThrows(CanonicalEvidenceException.class,()->current.currentDocument(d.getProjectId(),d.getId(),"vetting"));clear();
         org.springframework.mock.web.MockHttpServletResponse response=refresh(request());assertEquals(200,response.getStatus(),response.getContentAsString());

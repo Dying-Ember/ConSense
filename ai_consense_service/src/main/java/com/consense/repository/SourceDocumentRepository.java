@@ -146,6 +146,16 @@ public interface SourceDocumentRepository extends JpaRepository<SourceDocument, 
             @Param("originalSha") String originalSha, @Param("previousIdentity") String previousIdentity,
             @Param("identity") String identity);
 
+    /** Unknown display kind may advance with its source-bound identity in the same routing-only CAS. */
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query("update SourceDocument d set d.oerIdentityJson = :identity, d.fileKey = :nextKind where d.id = :id "
+            + "and d.projectId = :projectId and d.sourceSha256 = :originalSha "
+            + "and ((d.oerIdentityJson is null and :previousIdentity is null) or d.oerIdentityJson = :previousIdentity) "
+            + "and ((d.fileKey is null and :previousKind is null) or d.fileKey = :previousKind)")
+    int compareAndSetRoutingIdentityAndKind(@Param("id") Long id,@Param("projectId") String projectId,
+            @Param("originalSha") String originalSha,@Param("previousIdentity") String previousIdentity,
+            @Param("identity") String identity,@Param("previousKind") String previousKind,@Param("nextKind") String nextKind);
+
     /** Update only the explicit human role, against the exact current parsed/routing snapshot. */
     @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Query("update SourceDocument d set d.reviewRole = :nextRole where d.id = :id and d.projectId = :project "
