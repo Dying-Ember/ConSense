@@ -1,3 +1,9 @@
+<!-- unified-progress39:start -->
+**2026-10-21 当前状态：Vetting JSON 三行修复已通过实际39项回归并采用源码，未部署；Drafting 93项与新完整生成通过，但25页逐张复核仍有五组单行／单词续页，候选不采用。NSC／BSSSC两种安排均可选BS工种的前端未保存切换已实际验证。运行仍formal19、受保护H2保持；统一Goal active，不再用无固定验收分母的“整体80%”表述。**
+
+当前唯一状态明细与证据索引见[progress39](testing/three-module-runtime-progress-20261021.md#progress39-的证据与具体缺口)；以下各 progress 块为历史记录。Advisory E1候选回归及D1语义、Word最终分页、Vetting业务与续页标识、全部SL技术页质量和完整DB／CAS／历史／索引比赛包继续保留未完成。
+<!-- unified-progress39:end -->
+
 <!-- unified-progress38:start -->
 **2026-10-21 当前状态：formal19 已实际部署，运行已推送的 `a5f6a2995678333fc81e8f9082fc0bf69e3e2c4d`；当前主树 572 个逻辑调用用例通过。升级前后数据保全及 SQL19 隔离恢复已关闭，受保护 H2 未重启。统一 Goal active。历史“整体约80%”缺少固定业务验收分母，撤回作为当前进度的表述。**
 

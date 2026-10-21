@@ -1,3 +1,5 @@
+当前实际状态以[统一验收看板 progress39](three-module-runtime-progress-20261021.md#progress39-的证据与具体缺口)为准。JSON已复用Word／PDF的reader映射并通过39项回归，代码已采用、未部署；真实Word39页及69项赛方要求已检查，三个续页所属标识及部分要求的业务相关性仍待修。以下日期块为历史记录，设计要求正文继续适用。
+
 <!-- unified-progress34:start -->
 **2026-10-21：SL DPI／整数画布接缝实际94/94通过，2产品＋1测试已精确采用源码、未部署；SCT完整生成27页无空正文／旧短尾，但3处缺字与续页body标题位置仍FAIL。统一Goal active。**
 

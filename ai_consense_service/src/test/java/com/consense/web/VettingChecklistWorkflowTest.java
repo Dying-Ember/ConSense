@@ -52,6 +52,7 @@ class VettingChecklistWorkflowTest {
     @Autowired MockMvc mvc;
     @Autowired ProjectRepository projects;
     @Autowired VettingRunRepository runs;
+    @Autowired com.consense.repository.VettingFindingRepository findings;
 
     @Test void completeReviewWithNoFindingsLeavesEveryChecklistRequirementUnchecked() throws Exception {
         VettingRun run=completedRun("{\"total\":0}");
@@ -247,7 +248,7 @@ class VettingChecklistWorkflowTest {
         String tableJson=report.path("checklistTables").toString();
         assertTrue(tableJson.contains("Checked and fulfilled"));
         assertTrue(tableJson.contains("Not applicable"));
-        assertTrue(tableJson.contains("Not checked - human confirmation required"));
+        assertTrue(tableJson.contains("Not checked (unknown)"));
         assertTrue(tableJson.contains("Checked and fulfilled \u2713"));
         assertTrue(tableJson.contains("Checked and not fulfilled \u2717"));
         assertTrue(tableJson.contains(unfulfilledRemarks));
@@ -257,7 +258,7 @@ class VettingChecklistWorkflowTest {
                     .map(c->c.getText()).reduce("",(a,b)->a+"\n"+b);
             assertTrue(tableText.contains(checkedRemarks));assertTrue(tableText.contains(excludedRemarks));
             assertTrue(tableText.contains("Checked and fulfilled"));
-            assertTrue(tableText.contains("Not checked - human confirmation required"));
+            assertTrue(tableText.contains("Not checked (unknown)"));
             assertTrue(tableText.contains("Checked and not fulfilled \u2717"));
             assertTrue(tableText.contains(unfulfilledRemarks));
         }
@@ -265,7 +266,7 @@ class VettingChecklistWorkflowTest {
             String text=new PDFTextStripper().getText(pdf).replaceAll("\\s+"," ");
             assertTrue(text.contains(checkedRemarks));assertTrue(text.contains(excludedRemarks));
             assertTrue(text.contains("Checked and fulfilled"));
-            assertTrue(text.contains("Not checked - human confirmation required"));
+            assertTrue(text.contains("Not checked (unknown)"));
             assertTrue(text.contains("Checked and not fulfilled"));
             assertTrue(text.contains("\u2713"));assertTrue(text.contains("\u2717"));
             assertTrue(text.contains(unfulfilledRemarks));
@@ -287,6 +288,52 @@ class VettingChecklistWorkflowTest {
         JsonNode report=JsonUtils.mapper().readTree(download(run,"json"));
         assertTrue(report.path("checklistTables").toString().contains("Outside scope: pricing-document countercheck."));
         assertTrue(report.path("checklistTables").toString().contains("PRE / contract wording only. Pricing excluded."));
+    }
+
+
+    @Test void jsonReportQualifiesUnknownClauseOwnersWithoutChangingStoredEvidenceOrHumanState() throws Exception {
+        VettingRun run=completedRun("{\"total\":1}");
+        com.consense.domain.VettingFinding finding=new com.consense.domain.VettingFinding();
+        finding.setProjectId(run.getProjectId());finding.setRunId(run.getId());finding.setCode("VT-JSON-READER");
+        finding.setGroupKey("conflict");finding.setScope("intra");finding.setFileKey("SCT");finding.setSeverity("high");
+        finding.setStatus("Open");finding.setSource("model");finding.setTitleEn("Authored candidate naming Clause 1 and Clause 2");
+        finding.setBodyEn("Authored candidate: Clause 1 and Clause 2 require source review.");
+        com.consense.web.dto.VettingDtos.FindingEvidence evidence=new com.consense.web.dto.VettingDtos.FindingEvidence(
+                "source",null,"SCT","AUTHORED-REPORT-FIXTURE.docx",null,"body/4/paragraph","AUTHORED full source condition QUOTE-END",true,"authored-source-hash",null);
+        evidence.setPacketId("AUTHORED-REPORT-PACKET-NO-PROVIDER");evidence.setPacketSourceSnapshotSha256("AUTHORED-PACKET-SNAPSHOT");
+        finding.setEvidenceJson(JsonUtils.write(Collections.singletonList(evidence)));findings.saveAndFlush(finding);
+        String originalEvidence=finding.getEvidenceJson(),coverage=run.getCoverageJson(),result=run.getResultJson();
+        JsonNode report=JsonUtils.mapper().readTree(download(run,"json"));
+        JsonNode row=report.path("commentsTables").get(0).path("rows").get(0);
+        assertTrue(row.get(3).asText().contains("formal clause numbers stated below are unconfirmed"),"JSON_UNKNOWN_OWNER_QUALIFICATION");
+        assertTrue(row.get(2).asText().contains("Body paragraph 4 (formal clause ownership unconfirmed)"));
+        assertFalse(row.get(2).asText().contains("Clause 4"));assertEquals("Not located",row.get(1).asText());
+        assertTrue(row.get(3).asText().contains(finding.getBodyEn()));
+        assertEquals("Review status: Awaiting project-team review",row.get(4).asText());
+        assertTrue(report.path("evidenceIndex").path("rows").get(0).get(2).asText().contains("formal clause ownership unconfirmed"),"JSON_INDEX_OWNER_QUALIFICATION");
+        JsonNode raw=report.path("findings").get(0);
+        assertEquals(JsonUtils.parse(originalEvidence),raw.path("evidence"));assertEquals("Open",raw.path("status").asText());
+        assertTrue(raw.path("reviewRemarks").isNull());assertTrue(raw.path("actionTaken").isNull());assertTrue(raw.path("addendumRequired").isNull());
+        assertEquals("body/4/paragraph",raw.path("evidence").get(0).path("anchor").asText());
+        assertEquals("AUTHORED-REPORT-PACKET-NO-PROVIDER",raw.path("evidence").get(0).path("packetId").asText());
+        assertEquals(originalEvidence,findings.findById(finding.getId()).orElseThrow(AssertionError::new).getEvidenceJson());
+        VettingRun stored=runs.findById(run.getId()).orElseThrow(AssertionError::new);assertEquals(coverage,stored.getCoverageJson());assertEquals(result,stored.getResultJson());
+        assertEquals(69,report.path("checklistResults").size());for(JsonNode human:report.path("checklistResults")){assertEquals("unchecked",human.path("status").asText());assertEquals("",human.path("remarks").asText());}
+    }
+
+    @Test void jsonReportKeepsExcludedPricingRowsExplicitlyOutsideAutomatedScopeWithoutHumanConfirmation() throws Exception {
+        VettingRun run=completedRun("{\"total\":0}");JsonNode report=JsonUtils.mapper().readTree(download(run,"json"));
+        String tables=report.path("checklistTables").toString();
+        assertFalse(tables.contains("Unknown status: out_of_scope"),"JSON_KNOWN_EXCLUDED_SCOPE_IS_NOT_UNKNOWN_STATUS");
+        int outside=0,rows=0;
+        for(JsonNode table:report.path("checklistTables"))for(JsonNode row:table.path("rows")) {
+            String remarks=row.get(2).asText();assertTrue(remarks.contains("Not checked (unknown)"));assertFalse(remarks.contains("Checked and fulfilled"));
+            if(remarks.contains("Outside automated review scope; no automatic countercheck performed")){outside++;assertTrue(remarks.contains("Outside scope: pricing-document countercheck."));}rows++;
+        }
+        assertEquals(69,rows);assertEquals(12,outside,"All excluded source rows remain visible with their actual scope");
+        for(JsonNode human:report.path("checklistResults")){assertEquals("unchecked",human.path("status").asText());assertEquals("",human.path("remarks").asText());}
+        int rawOutside=0;for(JsonNode group:report.path("automaticChecklistResults"))for(JsonNode item:group.path("subItemAssessments"))if("out_of_scope".equals(item.path("status").asText()))rawOutside++;
+        assertEquals(12,rawOutside,"The raw automatic audit retains its original out_of_scope status code");
     }
 
     private byte[] download(VettingRun run,String format) throws Exception {

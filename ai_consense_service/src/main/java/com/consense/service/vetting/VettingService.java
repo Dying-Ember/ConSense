@@ -887,11 +887,11 @@ public class VettingService {
                     out.put("reportSnapshotId",c.job.getReportSnapshotId());
                     out.put("reportStructureVersion","competition-comments-and-checklist-v1");out.put("reportLanguage","en");
                     out.put("promptPolicy",c.job.getResult()==null?null:c.job.getResult().getPromptPolicy());
-                    out.put("commentsTables",VettingReportPresentation.comments(c.findings,c.job.getCoverage()));
+                    out.put("commentsTables",VettingReportPresentation.readerComments(c.findings,c.job.getCoverage()));
                     out.put("sectionSummaries",VettingReportPresentation.sectionSummaries(c.findings,c.job.getCoverage()));
                     List<com.consense.web.dto.VettingChecklistDtos.AutomaticGroupVO> automatic=VettingChecklistAutomaticResults.aggregate(c.job.getStatus(),JsonUtils.mapper().valueToTree(c.job.getCoverage()),JsonUtils.mapper().valueToTree(c.job.getResult()));
-                    out.put("automaticChecklistResults",automatic);out.put("checklistTables",VettingReportPresentation.checklist(checklist,automatic));out.put("checklistResults",checklist);
-                    out.put("evidenceIndex",VettingReportPresentation.evidenceIndex(c.findings,c.job.getCoverage()));
+                    out.put("automaticChecklistResults",automatic);out.put("checklistTables",VettingReportPresentation.readerChecklist(checklist,automatic));out.put("checklistResults",checklist);
+                    out.put("evidenceIndex",VettingReportPresentation.readerEvidenceIndex(c.findings,c.job.getCoverage()));
                 }
                 try(VettingExportProbe.Timer timer=probe.measure("report_json_serialization","Original JsonUtils.write and UTF8 encoding of returned JSON report")){bytes=JsonUtils.write(out).getBytes(StandardCharsets.UTF_8);}
             }

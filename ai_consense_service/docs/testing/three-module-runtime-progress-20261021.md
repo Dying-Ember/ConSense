@@ -1,3 +1,31 @@
+<!-- unified-progress39:start -->
+**2026-10-21 当前状态：主流程已有实际运行结果，主要剩余为结果质量、修复集成及完整比赛包。历史“整体80%”已撤回，不再用无固定分母的百分比表示交付完成率。Vetting JSON 三行修复已采用源码，运行仍为 formal19；Drafting 新完整文件通过生成与来源保全，最终分页仍 FAIL。统一 Goal active。**
+
+| 工作项 | 本轮实际完成 | 仍需完成 |
+| --- | --- | --- |
+| Drafting | 93 个唯一方法全部通过；同源码 full11 一次完整生成 NTT/SCT/SCC 与 SCT 转换，105.125 秒、16 GiB 堆／24 GiB Job、输入保持／自然 Job0。新 SCT 为 25 页，25 张原图逐张审查完成；孤立标题消除，旧 LO 八组中六组不再出现相同症状 | 五组单行／单词跨页仍 FAIL；候选未采用／部署，新 Word、全项目包身份与六原件最终质量未验收 |
+| Vetting | JSON 改用现有 readerComments／readerChecklist／readerEvidenceIndex，产品仅三行替换；39 项实际通过后 Root 精确采用三个源码／测试文件。真实 Word 39 页逐张检查和 69 项赛方要求对照完成 | 尚未部署或回读当前实际 JSON；条款／requirement 业务质量及三个续页所属标识问题仍 FAIL／UNKNOWN |
+| Advisory | formal19 的同题 27B 实答仍为固定 13 项 74/100；E1 应用证据范围候选本轮 78 项实际 77 pass／1 新夹具 failure，0 error／skip | E1 未采用，夹具重复文件名使第一份来源按现有最新修订规则被替代，正在修正；D1 交叉引用触发范围扩大仍未修好。未新增真实付费调用 |
+| 前端 | ego-browser 在现有 5175 入口实际操作 NSC→BSSSC；六工种两种安排均可见，消防和升降机选择在切换后保持。Qwen 27B／Flash-Next 显式选项已见 | 此次是未保存交互，未授保存／文件传播通过。5173／5174 的旧 API 入口 500；5173 替换及新增 5176 预览均被自动批准审查拒绝，继续使用 5175 |
+| SL 比赛包 | 七版完整原件＋已存 selected14 native 修订的真实归档／恢复保持；Local05 920 descriptors 的完整载荷闭包与最新 SQL20 绑定准备继续 | SQL20／匹配附件／隔离恢复尚未执行，全部 22,214 技术页来源质量、完整数据库／CAS／历史／索引及运行迁移仍未完成 |
+
+### progress39 的证据与具体缺口
+
+Drafting 的 93 方法软件票为 [GREEN93](../../../.local/round19-adoption-review01/h5-candidate03/runtime-preparation/root-green93-acceptance01.json)。完整生成的 [保存产物审查](../../../.local/round19-adoption-review01/h5-candidate03/post11/actual-full11-stage-review.json) 核对 449 新动作全部实际应用（218 组 keepNext＋widowControl、231 组正文 widowControl）；全布局账 797 项为 775 APPLIED／22 RELEASED_VERIFIED_SCT_TITLE_MIGRATION，旧 348 项保持。精确逆向恢复 full09 的整个 document.xml，其他 SCT ZIP 项及 NTT／SCC 整包保持；469 绑定、465 CS 与 4 既有移除未改变。这些通过不等于分页质量通过。
+
+五组最终分页问题绑定到 P263（5→6）、P318（6→7）、P650（13→14，表格 Schedule I 的 signed and dated）、P974（20→21，completed by the tenderer）、P1055（21→22，Headquarters）。P650 与 P693 有相同文字，必须用来源 CS 区分。页数仅描述当前输出，不是放行条件。[25 页 raster 原始收据](../../../.local/sct11-raster25-preparation01/native-raster/execution/owned-receipt.json) 保留全部原图与三个联系表；Root 已看三个联系表，代理已逐张看完 25 张原图。只做新的源绑定 keepLines 单变量验证准备，不按页反复改动正式模板。
+
+原生 Word 参考导出实际得到 SCT 22 页和 Vetting 39 页，但 Word COM Quit 后未自然退出，原 worker COMPLETE／outer TIMEOUT 与 owned Job 清理证据完整保留，未重导以求绿。[Word SCT 22 页视觉记录](../../../.local/word-sct10-text-review01/word22-visual-review.json) 确认四组标题／引导段异页；本轮 LO 不再重现对应症状不授新 Word 通过。两个引擎页码不混用。
+
+Vetting 采用票为 [Root 三文件采用](../../../.local/vetting-json-reader-projection-candidate02/root-adoption-actual01.json)，实际软件证据为 [GREEN39](../../../.local/vetting-json-reader-projection-candidate02/green39-acceptance01.json)。真实保存报告 replay 同时核 16 个 finding、32 段 finding 引文、69 个人工记录及完整 canonical native pointers 的值与顺序；人工未知、原始 findings／job／packet 审计均保留，Writer／Presentation 未改。旧 RED 的两个 HTTP 缺陷精确复现，但原保存材料测试因 Jackson LongNode／IntNode 型别不同而失败，后继保留完整序列化字符串相同与同型树深比；旧 FAIL 和原 runner 的终态观察失败均保留，未追认 RED 全满足预期。
+
+[Vetting 内容与赛方／Word 复查](../../../.local/runtime-preparation19/vetting-content-format-review01/review-receipt01.json) 保留 APP-I007 的条件与理由不相关，以及 APP-I002／008 必要字段角色与完整作用范围 UNKNOWN；已有 Evidence incomplete 不提升为通过。Word 第 34→35 页 VT012 第二引文、35→36 页额外 assessment 引文、36→37 页 assessment 续页缺所属短标识，仍为待修 P2。80 个 finding 业务字段、32 个 finding 引文和另 15 个 assessment 引文分开计数，69 项官方要求的指定来源段均已对照，样例旧项目身份未当本项目事实。
+
+前端证据在 [BS 切换交互](../../../.local/browser-round20-check01/bs-ui-check.json) 和 [回到原项目后的未保存状态确认](../../../.local/browser-round20-check01/bs-ui-restored-source-check.json)。先前 snapshot ref 点击被元素拦截，改用已观察的具体 checkbox selector 后实际选择成功；未提交数据库保存。前端 typecheck 已通过，Vite 新 bundle 也实际 exit0 构建于本地目录；首次公用临时目录清理被拒、后继 npm 参数中的 `&` 被 shell 截断均保留，最终使用 Node 直接调用与相对输出路径完成。新 bundle 未启动服务，旧 82 个 bundle 文件已从备份精确恢复，现有 5175／后端／受保护 H2 保持。
+
+下一顺序：先提交推送已实际采用的 Vetting 小修复；独立完成 E1 同 78 方法回归及采用，继续五段分页的最小验证；新鲜 SQL20／恢复／附件保全和 Local05 完整打包串行协调。未通过项继续记账，不因单个候选影响其余可执行工作。
+<!-- unified-progress39:end -->
+
 <!-- unified-progress38:start -->
 **2026-10-21 当前状态：formal19 已实际部署；Drafting 两张残文整页已消除，但逐页版式仍 FAIL；同题 Qwen 27B 真实复验的固定 13 项业务评分由 4/100 提升至 74/100，整题仍 FAIL。统一 Goal active。撤回历史“整体约80%”作为当前进度的表述：它没有固定业务验收分母，不能用软件测试数量或单题质量分推算交付完成率。**
 
