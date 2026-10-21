@@ -1,3 +1,7 @@
+<!-- runtime-integration65:start -->
+**最新progress65：新同题27B已保存46并完成固定13项来源评分：10 PASS／2 PARTIAL／1 FAIL，旧44的8／4／1不改写。** [完整证据及未过门](testing/three-module-runtime-progress-20261021.md#progress65新27b答复已保存及核源固定13项为10通过2部分1失败填空专项成品已交付)。原一次请求4项Qwen账本全部COMPLETED，刷新历史及引用回原件通过；GS条件归属改善，但裸页脚日期推断和varies替代范围扩大仍待修，最新generic规则确已进入实际system。截图填空专项已部署及真实下载核对，临时身份与三页视觉范围保持。APU58原解析继续，APB59未发；主后端64GiB、H2保护，Goal active，SL质量未过不打包。
+<!-- runtime-integration65:end -->
+
 <!-- runtime-integration64:start -->
 **最新progress64：normal10全78页fresh原图已核，47有限通过／31WARN／0确认FAIL；原239关系／92目录／2500点及五旧断页、两漏字恢复证据均在。** [冻结记录](testing/three-module-runtime-progress-20261021.md#progress64normal10全78页新视觉已完成旧五处断页和两处漏字恢复保留31页警告)。实际前端74页人工安全BQ专项另列，正式2b身份和全部业务仍未过。源码已推送2a7f27c，运行29604/64GiB、H2保护；APU58唯一解析继续，APB59未发，新27B同题会话仍待最终保存／13项质量评分。SL未过不打包。
 <!-- runtime-integration64:end -->

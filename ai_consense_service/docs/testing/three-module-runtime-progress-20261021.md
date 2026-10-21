@@ -1,3 +1,15 @@
+<!-- runtime-integration65:start -->
+## progress65：新27B答复已保存及核源，固定13项为10通过／2部分／1失败；填空专项成品已交付
+
+同一真实doc24、同题、27B的新前端会话 `8fcd3572-1c3b-4610-98ab-b64a9d9011db` 已终态保存user45／assistant46；刷新后两条消息及引用回原件阅读器均已实际核验。原一次请求的账本为2个usage preflight＋2个answer（初次及既有一次repair），共4项全部COMPLETED、没有在途；没有重新发送问题。最新generic机制分解及完整条件／效果规则已在实际26898字符system中核到，不把模型残差归为未部署。证据 `.local/runtime-integration30/advice-final-history01.json`、`advice46-generation-receipt.json`、`advice-final-ui131.json`及`advice-source-reader133.json`。
+
+固定13项隔离核源评分为 **10 PASS／2 PARTIAL／1 FAIL**，旧44的8／4／1保持；R1–R5另列3 PASS／2 PARTIAL，不换分母。GS CEW条件归属及旧无条件扁平层级已有改善，正式条号未知也未再被段落编号冒充。仍有两处实质残差：裸页脚 `20250101` 被模型称为已核日期（E2 FAIL）；中文将同号分支与一般varies分支合并后统一写成“取代并优先”，扩大原文仅给precedence的后者（C3 PARTIAL，D1支持不足仍PARTIAL）。原footer只支持字面token，既不自动认日期也不自动认合约号；源文字到实际证据别名保持，首个已证损失出现在模型解释。评分 `.local/advisory-runtime30-review34/quality-new46.OUT_OF_BAND.json` SHA `73ded9d0bc00a3f4e87ce010a19184766c5d5ce026337737a6bcde83e6f150f4`；21别名全部逐项核原件，9个实际引用唯一。该材料只作隔离评分，不送同题模型。后继继续复用既有机制诊断，不宣称已修复或由单题推断稳定性。
+
+用户截图的Bill／Schedule专项已部署并有真实前端下载成品，三处安全BQ引用及纯消防Not used已核，详见[专项记录](drafting-bs-safety-pricing-blank-20261022.md)。Root再次实看74页包物理57整页，电气12.2与纯消防Not used清楚；74页仍只授三引用页视觉范围，不继承另一78页包的全视觉记录。正式项目身份及Bill正式标题仍UNKNOWN，临时身份明确标记。
+
+APU58原唯一请求仍PARSING，APB59未发；最新公开files回读为17 PARSED／14 PARTIAL／1 PARSING／1 IDENTITY_PENDING／2 EXCLUDED，总35，证据 `.local/runtime-integration30/files-after-apu-once03.json`。没有重传、重发解析或为等待而提前发不完整整套报告。主后端64GiB／受保护H2继续；代码最新HEAD `cb12bd81cb8dffdc80da05dc3c4db8713b27e07d`。Goal active，实际整套Vetting报告、完整身份与成品、Advisory残差和SL全22,214技术页继续；SL质量未过不打包。
+<!-- runtime-integration65:end -->
+
 <!-- runtime-integration64:start -->
 ## progress64：normal10全78页新视觉已完成，旧五处断页和两处漏字恢复；保留31页警告
 

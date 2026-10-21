@@ -1,3 +1,7 @@
+<!-- runtime-integration65:start -->
+**最新progress65：新同题27B已终态保存并通过前端刷新／引用回原件；固定13项为10通过／2部分／1失败，旧44评分保留。** [来源评分与边界](testing/three-module-runtime-progress-20261021.md#progress65新27b答复已保存及核源固定13项为10通过2部分1失败填空专项成品已交付)。GS条件归属改善，但裸footer被猜为日期及两分支替代效果合并仍待修，不能授质量通过。截图Bill／Schedule专项真实前端保存／生成／下载及三引用页已核；临时身份、全74页视觉限制保留。APU58原请求仍PARSING、APB59未发，35件为17完整／14部分／1解析中／1身份待确认／2排除。Goal active，SL全量质量先于打包。
+<!-- runtime-integration65:end -->
+
 <!-- runtime-integration64:start -->
 **最新progress64：normal10 SCC全78张新原图已逐页核完，47有限通过／31警告／0确认失败；五旧断页、两旧漏字均恢复。** [证据与限制](testing/three-module-runtime-progress-20261021.md#progress64normal10全78页新视觉已完成旧五处断页和两处漏字恢复保留31页警告)。与前端74页专项稿分别记录，不能继承真实2b身份或完整业务通过。19文件修复已推送exact2a7f27c并部署／HMR；APU58原解析继续，APB59未发，新27B同题会话尚待终态和固定13项评分。SL质量先于比赛包，Goal active。
 <!-- runtime-integration64:end -->

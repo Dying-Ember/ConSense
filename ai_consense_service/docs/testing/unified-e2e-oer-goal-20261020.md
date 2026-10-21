@@ -1,5 +1,9 @@
 # ConSense 统一目标：先交付人能验收的完整流程
 
+<!-- runtime-integration65:start -->
+**最新progress65：Goal active；新同题27B答复46已实际保存／刷新／引用回原件，固定13项10通过／2部分／1失败，旧44保持。** [实测与剩余缺陷](three-module-runtime-progress-20261021.md#progress65新27b答复已保存及核源固定13项为10通过2部分1失败填空专项成品已交付)。GS条件归属已改善，裸footer日期推断与varies效果扩大继续最小修复；没有重发问题，原4账本项全COMPLETED。填空专项成品及三页核对通过，但正式身份、全74页视觉和整套业务仍缺。APU58原请求PARSING、APB59未发；35件17完整／14部分／1解析中／1待确认／2排除。H1–H8／O1–O3范围不缩，64GiB运行和H2保护，SL全量质量未过不打包。
+<!-- runtime-integration65:end -->
+
 <!-- runtime-integration64:start -->
 **最新progress64：Goal active。normal10全78页新原图已实看，47有限通过／31警告／0确认失败，五旧断页及两漏字恢复；与前端74页专项稿分开验收。** [完整证据及未过门](three-module-runtime-progress-20261021.md#progress64normal10全78页新视觉已完成旧五处断页和两处漏字恢复保留31页警告)。修复已推送exact2a7f27c，APU58原解析继续、APB59未发；真实同源同题27B新会话尚待终态与13项评分。31WARN／来源UNKNOWN、原生Word应用、实际2b完整业务／正式报告与SL全量保持未通过，不缩范围，不打SL比赛包。
 <!-- runtime-integration64:end -->
