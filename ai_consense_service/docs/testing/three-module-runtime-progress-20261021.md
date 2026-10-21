@@ -1,3 +1,13 @@
+<!-- runtime-integration61:start -->
+## progress61：Bill／Schedule四类填空实测通过，冲突输入仅保留对应待办，尚未部署
+
+**2026-10-22 01:54：统一 Goal active。截图中的 SCC20.303(5) 来自缺少 Bill／Schedule、专业范围和分判安排取值的部分稿，四目标原生绑定均完整；不能归因为已有编号未带入。** 可读性缺陷已修：四条未决说明明确实际条号、空白、BQ／SOR、对应安全用途与关联编辑标记，沿用既有补填／逐目标人工改文入口；目录补齐四正文和四指导的位置。
+
+旧产品四方法实跑为 3 PASS／1 提示缺陷 FAIL；采用提示后六方法为 5 PASS／1 用途与工种冲突误接受 FAIL。最终最小修复只将三个专门目标的显式用途／工种冲突留为 pending，保原值及其他可用目标，一般 BS 与缺省 trade 兼容。规则版本同步为 `drafting-20261022.1-bs-safety-trade`，避免旧冻结计划冒用新规则，旧保存稿不重写。最终同窗 **29 方法 PASS、0 failure／error／skip**：真实 2a 原件 6、现有业务规则 14、输入规则 5、计划状态 4。八组 BQ／SOR、三个专门冲突、六种一般 BS 工种等实际原生填写断言均已执行；独立静态复审未发现阻断。[缺口、根因及使用方式](drafting-bs-safety-pricing-blank-20261022.md)、[绿色结果](../../../.local/drafting-bs-valuation-blank30/green01/maven.log)。这轮没有模型、共享 DB 或 LO 调用，未代表前端填写和最终 PDF 已验收。
+
+新后端仍未部署：运行继续 18084/PID11540、64GiB，H2 owner 与旧 H57/OCR 原请求及唯一审查 start 保持。01:49 实际 GET 仍为 35 文件：17 PARSED／13 PARTIAL／2 EXCLUDED／H57 PARSING／APU58 与 APB59 IDENTITY_PENDING，latest/progress 均 null，未重发。SCC normal06 全 79 页已定稿为 **49 PASS_WITH_LIMITS／25 WARN／5 FAIL**；针对五处首项／公式导语断页的 continuation10 仍在私有准备，没有新正常生成或视觉通过。真实整套报告、Advisory 新包真实模型复验及 SL 全量继续未完成，质量未过不打包。
+<!-- runtime-integration61:end -->
+
 <!-- runtime-integration60:start -->
 ## progress60：咨询发布与范围快照修复通过回归，新生成完整段落通过，全页视觉和BS填空继续收口
 

@@ -1,3 +1,7 @@
+<!-- runtime-integration61:start -->
+**最新 progress61：Bill／Schedule 填空原产品 RED 已真实复现，最终四类原生填空与局部冲突后继29方法全部通过，规则版本同步，旧稿读前后保全；源码采用未部署。** [根因、执行与保留失败](testing/three-module-runtime-progress-20261021.md#progress61billschedule四类填空实测通过冲突输入仅保留对应待办尚未部署)。当前仍18084/11540/64GiB；H2及旧H57/OCR唯一请求保护。01:49真实35文件仍17完整／13部分／2排除／1解析中／2待确认，审查latest与progress为空，未重发。SCC79页49有限通过／25警告／5失败，后继10准备中；前端实际填写、真实报告、新Qwen复验与SL全量仍待完成。
+<!-- runtime-integration61:end -->
+
 <!-- runtime-integration60:start -->
 **最新执行progress60：来源范围快照与咨询有界发布诊断已通过回归采用源码，真实message44坏链可拦截；27B新复验仍未做。前端52控件、typecheck/build和实际原件引用／警告展开通过。SCC09正常新生成1PASS，原p1648完整化，154关系／92目录／138段通过；79页fresh视觉又发现5处首项／公式导语关系问题，未授版式通过。Bill/Schedule用户截图已查四同族pending、未给值和指导提示缺口，正在准备真实编译回归。** [当前进度和失败](testing/three-module-runtime-progress-20261021.md#progress60咨询发布与范围快照修复通过回归新生成完整段落通过全页视觉和bs填空继续收口)。新JAR29已构建未部署；运行仍11540/64GiB，H2 owner39876、旧H57/40600及唯一start保持，真准备仍5/30后SCC失败；SL全量未过不打包。
 <!-- runtime-integration60:end -->

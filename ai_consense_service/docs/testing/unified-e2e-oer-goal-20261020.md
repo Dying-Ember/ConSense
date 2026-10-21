@@ -1,5 +1,9 @@
 # ConSense 统一目标：先交付人能验收的完整流程
 
+<!-- runtime-integration61:start -->
+**最新 progress61：四类 Bill／Schedule 填空已实际完成原件 RED／GREEN，29方法通过；缺值提示与专门工种矛盾仅保本目标待办、输入及其他成果保留，源码采用尚未部署。** [本轮证据](three-module-runtime-progress-20261021.md#progress61billschedule四类填空实测通过冲突输入仅保留对应待办尚未部署)。SCC79页视觉5失败继续修，运行64GiB/H2/旧H57原请求保持；H1–H8/O1–O3范围不缩减，前端实际填写、完整真实报告、真实27B后继和SL全部22,214技术页仍未验收。Goal active，质量先于比赛包。
+<!-- runtime-integration61:end -->
+
 <!-- runtime-integration60:start -->
 **最新执行progress60：前端52控件＋生产构建与真实保存会话／引用原件回读通过；咨询发布门及范围快照优化获实际回归覆盖，未部署或重新问模型。SCC09新正常三模板生成通过138完整段／154关系／92目录，新79页视觉仍有5处关系异常，保持FAIL。新增Bill/Schedule四组填空按真实缺值pending、明确补填与BQ/SOR分支替换继续验证，不猜编号。** [实际证据](three-module-runtime-progress-20261021.md#progress60咨询发布与范围快照修复通过回归新生成完整段落通过全页视觉和bs填空继续收口)。当前64GiB11540及H2／旧H57保持；新包29未部署，H1–H8/O1–O3全范围保留，Goal active，SL质量未过不打包。
 <!-- runtime-integration60:end -->

@@ -1,3 +1,7 @@
+<!-- runtime-integration61:start -->
+**最新 progress61：用户指出的 Bill／Schedule 四类填空已用真实 2a 原件验证，明确取值可整组替换；缺值提示与三个专门工种冲突门已修，29 方法同窗通过，尚未部署／前端复验。** [实际证据与边界](testing/three-module-runtime-progress-20261021.md#progress61billschedule四类填空实测通过冲突输入仅保留对应待办尚未部署)。SCC 全79页实际为49有限通过／25警告／5失败，continuation10 准备中。运行11540/64GiB与受保护H2／旧H57保持；真实35整套报告及SL全量未过，不做比赛包。
+<!-- runtime-integration61:end -->
+
 <!-- runtime-integration60:start -->
 **最新执行progress60：咨询实际错误总结回放已能在发布前拒绝，范围快照省未用候选图的后继获得83逻辑方法跨窗覆盖，未部署／未真实模型复验。前端52控件、主树build和真实21引用／中文日期／原件警告保全已通过。SCC09的34软件及正常三模板生成通过，138段／154关系／92目录通过；新79页视觉仍有5处关系异常待核，最终版式未过。用户指出的Bill／Schedule四组填空已核为缺值pending且提示不足，真实给值替换回归准备中。** [完整实测](testing/three-module-runtime-progress-20261021.md#progress60咨询发布与范围快照修复通过回归新生成完整段落通过全页视觉和bs填空继续收口)。新包29未部署，真实整套报告／SL全量仍未过，不做比赛包。
 <!-- runtime-integration60:end -->

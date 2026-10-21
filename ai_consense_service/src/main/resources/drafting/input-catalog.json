@@ -1,5 +1,5 @@
 {
-  "ruleVersion": "drafting-20261020.1-bs-scope",
+  "ruleVersion": "drafting-20261022.1-bs-safety-trade",
   "groups": [
     {
       "id": "identity",
@@ -1427,7 +1427,7 @@
             {
               "document": "SCC",
               "clause": "20.301–20.304",
-              "paragraphs": "P1334/P1548/P1663/P1777"
+              "paragraphs": "P1334/P1428/P1441/P1548/P1558/P1663/P1673/P1777"
             }
           ],
           "columnFields": [
