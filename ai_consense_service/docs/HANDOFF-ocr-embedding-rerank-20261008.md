@@ -1,3 +1,7 @@
+<!-- unified-progress41:start -->
+**2026-10-21 最新用户指示：SL 质量未解决，先不打比赛包。** Local05／七版比赛包的绑定、压缩、归档及恢复验证全部后置；不反复打包证明可恢复。Root 本轮没有执行 Local05 实际绑定或归档，现有文件保留。优先做当前正常链的完整表格／Note／跨页条件关系和七版来源、真实检索质量，质量过关后才恢复比赛包工作。SQL20 已完成的隔离恢复仅作开发数据保全；统一 Goal active、完整交付范围不变。D1 一条共享提示词改动已实际 78/78 软件回归并采用源码，未部署或真实模型复验；Drafting 行凝聚诊断五处旧症状改善但三处新孤行，最终版式仍 FAIL。实际证据与边界见 [progress41](testing/three-module-runtime-progress-20261021.md)。下方 progress40 及更早打包计划按历史读取。
+<!-- unified-progress41:end -->
+
 <!-- unified-progress40:start -->
 **2026-10-21 最新交接：E1同78项实际通过且三文件已精确采用源码，未部署；formal19／H2保持，Goal active。86API最新完整保全通过，typed／SCRIPT20／附件／隔离恢复仍待执行。** SL单版历史质量与新增七版有限验证的边界已集中到[专项质量说明](testing/sl-technical-source-and-retrieval-quality-20261021.md)；全部七版22,214技术页质量和完整数据库／CAS／历史／索引交付仍未通过。Drafting只加五段keepLines的实际正确传输复验无效果，继续定位表格行层；全部实际状态和证据见[progress40](testing/three-module-runtime-progress-20261021.md)。以下为历史块。
 <!-- unified-progress40:end -->

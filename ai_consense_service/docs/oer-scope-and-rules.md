@@ -1,3 +1,7 @@
+<!-- unified-progress41:start -->
+**2026-10-21 用户最新执行顺序：先解决 SL 解析、条件／跨页证据与实际检索质量，再做比赛交付包。SL 质量未过关期间，不执行或重复比赛包的绑定、压缩、归档、恢复验证，不因代码小修复重打包。** 已存原件、历史修订、失败和包均保留；已完成的 SQL20 开发保全不当作 SL 质量或比赛交付成绩。统一 Goal 保持 active，三模块修复继续，完整比赛包仍是后续交付要求。当前实际状态见 [progress41](testing/three-module-runtime-progress-20261021.md)。
+<!-- unified-progress41:end -->
+
 <!-- unified-progress40:start -->
 **2026-10-21：E1实际78项通过并采用源码、未部署；Vetting小修复已提交推送。运行仍formal19，Goal active。SL七版全库来源／检索质量未通过：历史单版诊断与实际嵌入、SL四题回归的准确边界见[SL质量说明](testing/sl-technical-source-and-retrieval-quality-20261021.md)，不以包恢复、文字保全或向量数代替质量。** 当前状态与新API保全／Drafting无效分页候选证据见[progress40](testing/three-module-runtime-progress-20261021.md)。下方旧progress按当时时点读取。
 <!-- unified-progress40:end -->
