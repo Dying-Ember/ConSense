@@ -1,11 +1,11 @@
 <!-- unified-progress38:start -->
-**2026-10-21 当前状态：formal19 已实际部署；Drafting 两张残文整页已消除，但逐页版式仍 FAIL；修复后的同题 Qwen 27B 请求已实际发出，结果观察中。统一 Goal active。撤回历史“整体约80%”作为当前进度的表述：它没有固定业务验收分母，不能用软件测试数量推算交付完成率。**
+**2026-10-21 当前状态：formal19 已实际部署；Drafting 两张残文整页已消除，但逐页版式仍 FAIL；同题 Qwen 27B 真实复验的固定 13 项业务评分由 4/100 提升至 74/100，整题仍 FAIL。统一 Goal active。撤回历史“整体约80%”作为当前进度的表述：它没有固定业务验收分母，不能用软件测试数量或单题质量分推算交付完成率。**
 
 | 交付项 | 已经落地的变化 | 当前未收口的部分 |
 | --- | --- | --- |
 | 本机运行版本 | 已推送的 `a5f6a2995678333fc81e8f9082fc0bf69e3e2c4d` 构建并运行于 formal19，18084／PID61512；受保护 H2 PID38980 保持 | 本机运行与数据保全通过，不代表三模块业务通过 |
 | Drafting 最终文件 | 私有 H4 完整生成成功；两张仅剩短尾的整页消除，四处来源段落字形覆盖完整 | 24 页逐张目验确认 5 组标题／引导行孤立、1 组单词续行、3 组段首单行跨页；最终版式 FAIL，候选未采用／部署，原生 Word 与项目身份全包贯穿仍待验 |
-| Advisory 实际回答 | 最新反馈修复已随 formal19 部署；同题、同项目、同来源、同 27B 的唯一请求已发出 | 真实回答、保存及固定 13 项业务判据等待本轮结果；旧 formal18 业务失败保留 |
+| Advisory 实际回答 | 同题、同项目、同来源、同 27B 真实复验完成；已交付带引用的实质规则，固定判据由 4/100 提升至 74/100，保存／历史重读一致 | 13 项为 10 PASS／2 FAIL／1 UNKNOWN；交叉引用触发主体被末段摘要扩大，完整文件层级的证据边界未交代；整题仍 FAIL |
 | Vetting 最终报告 | 既有报告内容在升级后保持；二进制差异仅创建时间、ZIP 时间与 PDF ID | 报告内容、赛方版式、原生 Word 与浏览器最终验收仍未完成 |
 | SL 全版本比赛包 | 七版本代表来源与既有兼容修复已记录，SL／mixed-source 29 文件已采用并部署 | 全部 22,214 技术页质量与完整 DB／CAS／索引可迁移包尚未验收；14 个代表页不能充当全量通过 |
 
@@ -17,7 +17,11 @@
 
 H4 只移除真实页眉迁移后派生的 22 个强制分页，源文真实 hard break 与字号／字体保持。实际 RED 精确复现两项行为失败，GREEN 为 85 个用例通过；完整 full09 一次生成 95.890 秒，SCT 为 24 页。来源绑定后验逐字符确认 P490／P496／P685／P642 完整；旧仅允许单页匹配的 observer FAIL 保留，由跨页来源边界票说明范围，不能直接改宽门求绿。24 张原尺寸 PNG 均经逐张实看，两个旧残文整页消除；新增／暴露的 9 组分页问题如上，故最终布局仍 FAIL。见 [H4 回归](../../../.local/round19-adoption-review01/h4-candidate01/runtime-preparation/root-green85-acceptance01.json)、[来源与逐页复查](../../../.local/round19-adoption-review01/h4-candidate01/post09/READONLY-POST09-REVIEW.md)。H5 仅在私有目录准备最小标题／段落分页约束修复，不改主树。
 
-Advisory 本轮执行目录为 [formal19-real27b-single01](../../../.local/e2e-20261020/advisory/formal19-real27b-single01/handoff.md)。fresh before 已实际完成四 SELECT／八完整文件，21 session／40 message／5 action／4 prompt；唯一新 session／ask 使用固定问题与来源，最多两次付费 preflight 加两次 answer（含一次修复），不重发，模型等待期间没有宣称新回答通过。三份原先未知 untracked 文件保持，生产／H800 未操作。
+Advisory 本轮执行目录为 [formal19-real27b-single01](../../../.local/e2e-20261020/advisory/formal19-real27b-single01/handoff.md)。fresh before 已实际完成四 SELECT／八完整文件，21 session／40 message／5 action／4 prompt；唯一新 session／ask 使用固定问题与来源，实际 SSE 202.062 秒完整返回，8 应用 HTTP／1 create／1 ask、0 重发。实际新 action 为两次付费 preflight 加两次 answer（含一次修复），4 次均有完整 response receipt、unknown 0；after 导出核旧 history／action／prompt 保持，message41／42 保存及两次重读一致。初始与 repair 实际 system 分别为 40,185／40,765 字节，均由实际打包源码重建并与保存 generation entity 逐字节一致；不把 prepared 实体／应用账本声称为独立 provider TCP/TLS 抓包。见 [真实调用、保存与预算核验](../../../.local/e2e-20261020/advisory/formal19-real27b-single01/root-actual27b-acceptance01.json)。
+
+固定原 13 判据／原权重、同一 Specification 原件及 21 个证据别名的独立非盲评为 **74/100，10 PASS／2 FAIL／1 UNKNOWN**；UNKNOWN 的 8 分只计可能上界 82，不能写成得分 82。旧 formal18 为 4 分、可能上界 26。两项 FAIL 为：[17] 的特定“已纳入 SL 库条文→被排除 SL 库条文”触发，被最后摘要扩大成任意 SL/PSS 交叉引用；没有明确 Specification 内部关系不足以建立全部合同文件完整优先层级。另一个未使用的 Articles／Conditions 构成句保留 UNKNOWN。已经正确交付的 GS CEW 场地外道路／排水条件、版本与 42 天时点，以及 SL/PSS 条件与优先规则保持，不因局部失败整体降回仅 limits。见 [固定 13 项业务评审](../../../.local/e2e-20261020/advisory/formal19-real27b-single01/business-review01/review.zhHans.md) 及 [完整评分票](../../../.local/e2e-20261020/advisory/formal19-real27b-single01/business-review01/fixed13-score01.json)。这只证明本题修复效果，不是模型全面比较或项目完成率。
+
+H5 对本次实际 source2a SCT 的 32 个绑定目标准备了最小 keepNext／widowControl 修复，未向 source2b 增加应用。首轮 91 项实际终态为 83 pass／8 error／0 failure／0 skip、59.563 秒、输入保持，原票保留；并未生成 full10。两处候选准备缺陷已定位：原合法 emptySpacing 与新增 keepNext 共用去重集合导致互补控制误拒；五个新合成夹具缺少 ContentTypes，在进入逻辑前即被拒。只准备最小后继修正，原 91 方法／断言保持，不授软件／最终版式通过。三份原先未知 untracked 文件保持，生产／H800 未操作。
 <!-- unified-progress38:end -->
 
 <!-- unified-progress37:start -->
