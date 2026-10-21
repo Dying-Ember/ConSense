@@ -57,3 +57,21 @@ Root 已实际执行两轮负控及最终绿色回归：原产品四方法中三
 执行证据：`.local/drafting-bs-valuation-blank30/red01`、`red02` 和 `green01`，均保留各自原结果、命令、Maven 日志与 XML 报告。绿色窗总耗时 2 分 35 秒，没有模型、HTTP、共享数据库或 LibreOffice 调用。
 
 本地诊断证据位于忽略目录 `.local/drafting-bs-valuation-blank30/source-inspection.json`，可用 `inspect_source.py` 重算。原件、运行材料和诊断产物不加入仓库。
+
+## 实际项目对照与前端复验准备
+
+实际 2b 的 NTT 与 SCC 相互印证所选工种为 Electrical、Fire services and water pump、Lift；SCC 明定 BS Specialist Sub-contractors，可透明映射为待人工采用的 BSSSC。NTT 三项专业工程本身使用 SOR，但安全／环境／卫生费用明确作为例外位于 BQ Bills `12.2 to 12.4`。因此输入行的工程工种、计价类型和安全用途必须分开确认：不能由“该专业工程使用 SOR”推导安全引用也用 SOR。
+
+消防及水泵安全 `12.3`、电气安全 `12.2` 与一般 BS 安全范围均已有逐字位置证据；没有自动选入纯消防，也没有从区间减法猜单独 Lift 编号。两件资料未找到明确的正式项目名称；页脚一致出现裸值 `20250101`，保留为待核身份候选，未自动认定或采用为正式合约编号。正式 Bill 标题也未在这些引用段落给出，继续 UNKNOWN。
+
+事实准备保留在 `.local/drafting-bs-valuation-blank30/frontend-manual-source-facts01.json`，含两件原件 hash 和 15 条原文／原生 part 位置。新的前端专项使用临时验收项目，三件真实 2a Word 已经一次上传并返回 HTTP200；这属于人工补填专项准备，不是自动提取、真实项目身份或最终生成闭环通过。
+
+## 已部署的前端与最终文件专项结果
+
+integration30已实际部署18084/PID29604/64GiB。真实前端读回规则 `drafting-20261022.1-bs-safety-trade` 及四处明确填空待办；采用原件所列BSSSC及三个专业工种，安全BQ三行逐项保存、刷新后编号和用途均保持。未取得正式项目身份，专项明确采用临时名称及 `BS-BLANK-20261022-TEST`，经过“是否替换当前项目身份”确认后才进入生成，不把测试身份当实际2b事实。Bill说明列使用上述逐字来源用途，正式Bill标题仍未知。
+
+前端唯一生成已完成，NTT／SCT／SCC分别保存新revision；SCC为 `e5663ad6-73da-41c4-ac51-33f2f6403b73`。通过界面下载的DOCX为286,709 bytes／SHA `666c0b18f29a37a9a2c2fecb9bd1368cc2c2a46ab4278f8d522952899b181b7c`；PDF为74页／631,277 bytes／SHA `189b8ec7dce623a60ef9f20c73c41a28611ad010e945a118ce9b74f9309affda`。三处实际正文为 `Bill No(s). 12.2 to 12.4`、`Bill No. 12.2`、`Bill No. 12.3`，均采用Bills of Quantities，关联下划线、候选斜杠及星号已整组处理；DOCX与PDF吻合。未选择纯消防，SCC20.303在成品为Not used，其原正文不再残留，也没有代用12.3。
+
+新PDF物理53／57／61页已用fresh120dpi整页图亲看，三处正文可读、页眉临时项目名／左下测试合约号及印刷页50／54／58清楚。测试合约号在全部74页可提取；这不是全部74页视觉验收，其他未回答空栏和复杂续段仍须继续核。手工来源值专项不替代自动抽取，也不授完整实际2b项目身份或全成品通过。
+
+证据：`.local/drafting-bs-valuation-blank30/browser103.json`、`browser110.json`、`browser111.json`、`browser114.json`至`browser124.json`、`frontend-download-checks01.json`、`target-visual-review01.json`及`downloads/`。浏览器自动操作曾在页面刷新未结束及隐藏modal控件处遇到超时，先查实际状态后才继续；没有重发生成或重复上传原件。
