@@ -8,7 +8,21 @@
 
 151 个 worksections 的独立原生文字诊断已真实完成：2,726 页的非空白字符序列一致，另 110 页字码数量和组成相同但顺序不同。这证明有限的文字保全，不能换算为 OCR 准确率、读序准确率或完整条款正确率。原 normal 中的 failed／OCR-required 标记保留。实际终态为 `complete_full151_independent_native_diagnostic_not_visual_quality`，`CERScored=false`、`wholeSLQualityAccepted=false`。
 
-完整保存的 754 个物理表父是资产库存，不能当 754 张正确源表。历史选用的 COM11 五张无框表 HTML 候选有限源评为结构 654/672、格文字面 418/672、完整字面表 2/5；其余三张残差保留。另一个独立 native 表格库研究的六条路线，严格完整单表均为 0/5，不能与前述不同 provider／评分域拼总分。跨页表头、折行字段、Notes／星号条件、cell 几何与条款归属继续未验收。
+完整保存的 754 个物理表父是资产库存，不能当 754 张正确源表。历史选用的 COM11 五张无框表 HTML 候选有限源评为结构 654/672、格文字面 418/672、完整字面表 2/5；这是旧候选的结果，不能代表后续候选始终只有 2/5。另一个独立 native 表格库研究的六条路线，严格完整单表当时均为 0/5；不同 provider／评分域及后继轮次不能拼总分。
+
+后续 R116 已对三种方法各自保存的完整 226 页产物做关系回放，在同一组已标注 COM11 五表的 672 格、12 个表外成员、87 个关系上重新源评。本次直接重读其实际收据：
+
+| R116 方法 | 正确主格字面 | 完整主表 | 完整表外成员 | 正确 typed 关系 | 完整已标来源组 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Camelot Stream | 672/672 | 5/5 | 12/12 | 87/87 | 5/5 |
+| Camelot Network | 650/672 | 4/5 | 12/12 | 75/87 | 4/5 |
+| pdfplumber lines/lines | 0/672 | 0/5 | 0/12 | 0/87 | 0/5 |
+
+Stream 的完整来源组由 4/5 改善到 5/5，新增项为原物理页 1316→1317 的 Note 9 续接；1321→1322 的已闭合列表反例仍拒绝。旧 32 个已评 fragments、原来源对应、分母与旧正确项保持；33 个作者控制及独立错来源、错 bbox、错 glyph、逆向页负控已执行。这证明该局部开发域的来源结构确有改善，不能称整库、盲测、法律归属或当前运行产品通过。收据仍明确 `sourceQualityFinalAccepted=false`、`candidateAdopted=false`、`humanReviewed=false`、`blind=false`，本轮没有重新抽取 PDF 或调用模型。
+
+实际证据为 [R116 完整源评分收据](../../../.local/state/oer-quality-adjustment-20261013/scorer-03/candidate226-score-receipt.json)、[完整评分明细](../../../.local/state/oer-quality-adjustment-20261013/scorer-03/actual-candidate226-score-01/complete-condition-group-score.json)（SHA256 `cf6686f6852e49c37c67ab315657919e86a6e56fc296a84904a875e66275177f`）与 [producer 独立复核](../../../.local/state/oer-quality-adjustment-20261013/scorer-03/producer-independent-review-receipt.json)。
+
+候选成果与当前正常链的集成另列：[当前首个损失层审票](../../../.local/sl-com11-note9-current-chain-candidate01/first-loss01.json)（SHA256 `408af9eb7b0264c6f522c0e79f23876e1829f8e3553ffc3a7a1edabe91dfb20f`）绑定了已存 normal、原件／章节 SHA、页映射、实际 block／文字／bbox 与当前五处代码身份。现存 `sl-018/complete-normal.json.gz` 中，章节局部页 19（原页 1316）的主表及 Note 1–9 已保留，Note 9 下一页的 LM／CO／LL、RS 和 “For other areas” 续文也已被 ordinary native 读到，但未连回上一页表格的完整证据组；局部页 20 本身没有 logical table。当前沿既有 Python capture → Java method group → model material 接缝准备最小修复，尚未通过新的实际回归或产品验收。跨页表头、折行字段、条件范围、cell 几何与条款归属的全库质量仍未验收。
 
 来源：[固定资料开发基准](../fixed-oer-development-baseline-20261012.md)、[无框表实测](../oer-borderless-table-isolated-investigation-20261012.md)及[实施交接的全151原生文字诊断](../HANDOFF-ocr-embedding-rerank-20261008.md)。本次实际重读终态：`C:/Users/Administrator/.codex/local-state/consense-oer/sl-body-source-native-diagnostic-20261012/prepare-01/root-actual-full151-01/terminal-receipt.json`。
 
