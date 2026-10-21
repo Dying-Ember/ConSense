@@ -2,6 +2,10 @@
 **2026-10-21 新统一 Goal 已实际 active；用户取消八点要求，并将“尽快走通人可以验收的流程，报告、前端适合人类阅读使用”定为当前最高优先级。** 接续现有修复与证据，不重置数据或重发旧实验。第一阶段先做真实前端与三模块可用结果、正式 Word/PDF；Root 接 formal22 升级和实际 2b Vetting，Drafting 并行收口 SCC 目录／标题／页脚。局部回归、合成报告、服务健康不代替真实资料和可读性验收。OER 阻塞项立即修，全七版本 SL 质量与质量通过后的完整包后续继续。当前执行以[重写目标及 H1–H8 验收项](testing/unified-e2e-oer-goal-20261020.md)为准；以下运行快照和旧授权按各自历史语境读取。
 <!-- human-acceptance-goal-20261021:end -->
 
+**当前主树／运行区分见 [progress54](testing/three-module-runtime-progress-20261021.md#progress54人工来源许可共同修复已采用待当前上传完成后部署)：** 来源人手许可五产品已采用，122唯一方法跨窗PASS覆盖；JAR ef1807e5…已构建未部署，H2 owner39876／后端46416／前端54556保持，原PDF批次Annex56仍解析。前端6候选未采用以保队列，旧13Word刷新许可／三pending确认都未执行；页面parsed不可外推canonical闭环。SCC81关系14软件PASS，正常生成6723待接回；LO同格式run实验未执行。Goal active，旧SQL检查点不代表升级前最终写入。
+
+**当前增量以 [progress53](testing/three-module-runtime-progress-20261021.md#progress53正常生成分页链通过真实-word-接入与-pdf-人工续跑缺口) 为准：** SCC正常新compiler／JPA链实际1PASS，70标题／92目录／1,733点通过，候选未采用部署，新81页全raster、8页亲看仍有导语分页／LO缺字FAIL。后继2b24份可审（23Word、其中13人工用途确认；另GCT）、2图纸EXCLUDED、2 IDENTITY_PENDING、AoA解析中；六PDF仍在原浏览器队列，不能重传整批。20:05再次退出后独立恢复当前H2 owner39876／后端46416／前端54556／8874 listener39028，旧SQL不含本轮新增写入，升级须新保全。以下runtime24旧PID及四源状态按历史读取。
+
 **最新执行增量见 [progress52](testing/three-module-runtime-progress-20261021.md#progress52scc保存稿真实动态分页通过正常生成保存仍待接回) 与 [progress51](testing/three-module-runtime-progress-20261021.md#progress51评分附件实际准入已修通保留解析限制与原件)：** runtime24／50892已部署，H2 owner62496及前端57836保持；两已存Marking实际自动准入，前端当前4来源可审、PARTIAL保留，66方法全过并推送b7b96db。SCC保存稿native后继实际1PASS：70标题同页、92目录一致、1,625点末两次稳定；动态候选尚未采用，接下来核全页视觉和正常compiler／JPA保存。2b整套报告、Advisory新复验及SL七版全量质量保持未完成，比赛包后置。
 
 <!-- unified-progress47:start -->

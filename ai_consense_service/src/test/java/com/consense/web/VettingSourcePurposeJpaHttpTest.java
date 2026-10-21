@@ -60,6 +60,9 @@ class VettingSourcePurposeJpaHttpTest {
     @Autowired VettingChecklistReviewRepository checks;
     @Autowired StorageService storage;
     @Autowired VettingService service;
+    @Autowired com.consense.service.sources.CanonicalCurrentSourceReader canonicalCurrent;
+    @Autowired com.consense.service.sources.NormalObservedPreparationService normalPreparation;
+    @Autowired com.consense.service.sources.OerSourceRoutingRefreshService routingRefresh;
     @Autowired PlatformTransactionManager transactions;
     @MockBean AiGateway externalLlm;
     @SpyBean DocumentParser parser;
@@ -110,9 +113,11 @@ class VettingSourcePurposeJpaHttpTest {
             SqlCapture.statements.clear();JsonNode response=putRole(project,d,body);assertEquals(0,response.path("code").asInt(),response.toString());JsonNode row=response.path("data");
             assertEquals(String.valueOf(d.getId()),row.path("documentId").asText());assertEquals(role,row.path("sourceRole").asText());assertTrue(row.path("parsed").asBoolean());assertFalse(row.path("roleConfirmationAvailable").asBoolean());
             assertEquals(body.get("expectedOriginalSourceSha256"),row.path("originalSourceSha256").asText());assertEquals(body.get("expectedSourceHash"),row.path("sourceHash").asText());assertEquals(64,row.path("routingSha256").asText().length());assertNotEquals(body.get("expectedRoutingSha256"),row.path("routingSha256").asText());
-            SourceDocument after=fresh(d);assertEquals(role,after.getReviewRole());after.setReviewRole(null);assertEquals(before,JsonUtils.write(after));assertArrayEquals(original,Files.readAllBytes(Paths.get(d.getStoragePath())));
+            SourceDocument after=fresh(d);assertEquals(role,after.getReviewRole());assertEquals(Arrays.asList("vetting","advisory"),OerSourceMetadata.identity(after).getEligibleModules());assertEquals("human_confirmed_source_use",OerSourceMetadata.identity(after).getIdentityStatus());
+            for(String module:new String[]{"vetting","advisory"})assertEquals(d.getId(),canonicalCurrent.currentDocument(project,d.getId(),module).getId());
+            after.setReviewRole(null);after.setOerIdentityJson(d.getOerIdentityJson());assertEquals(before,JsonUtils.write(after));assertArrayEquals(original,Files.readAllBytes(Paths.get(d.getStoragePath())));
             List<String> writes=new ArrayList<>();for(String sql:SqlCapture.statements)if(sql.toLowerCase(Locale.ROOT).startsWith("update source_document"))writes.add(sql.toLowerCase(Locale.ROOT));
-            assertEquals(1,writes.size());String assignments=writes.get(0).split(" where ")[0];assertTrue(assignments.matches("update source_document(?: \\w+)? set review_role\\s*=\\s*\\?"),assignments);
+            assertEquals(2,writes.size());for(String write:writes){String assignments=write.split(" where ")[0];assertTrue(assignments.matches("update source_document(?: \\w+)? set (?:review_role|oer_identity_json)\\s*=\\s*\\?"),assignments);}
         }
         assertEquals(humanBefore,JsonUtils.write(findings.findById(human.getId()).get()));assertEquals(checkBefore,JsonUtils.write(checks.findById(check.getId()).get()));verifyNoInteractions(externalLlm,parser,oer);
     }
@@ -190,5 +195,145 @@ class VettingSourcePurposeJpaHttpTest {
             SourceDocument saved=sources.findByProjectIdOrderByIdAsc(project).stream().filter(d->d.getFileName().equals(role+"-upload.txt")).findFirst().get();assertEquals(role,saved.getReviewRole());
         }
         verifyNoInteractions(externalLlm,oer);
+    }
+
+    SourceDocument pendingSource(String name)throws Exception {
+        SourceDocument d=source(name);d.setParseStatus("IDENTITY_PENDING");d.setParseMessage("Authored initial identity observation; full parsing not started");sources.saveAndFlush(d);return fresh(d);
+    }
+    Map<String,Object> pendingRequest(SourceDocument d) {
+        Map<String,Object> body=new LinkedHashMap<>(request(d,"tender"));body.put("confirmTextContractMaterial",true);return body;
+    }
+    JsonNode putPending(SourceDocument d,Map<String,Object> body)throws Exception {
+        return JsonUtils.parse(mvc.perform(put("/api/vetting/"+project+"/sources/"+d.getId()+"/role")
+                .contentType(MediaType.APPLICATION_JSON).content(JsonUtils.write(body))).andReturn().getResponse().getContentAsString());
+    }
+    void rejectPending(SourceDocument d,Map<String,Object> body)throws Exception {
+        String before=JsonUtils.write(fresh(d));assertEquals(4104,putPending(d,body).path("code").asInt());unchanged(d,before);
+    }
+    @Test void identityPendingOriginalOffersSeparateExplicitConfirmationAndPinsWithoutBecomingUsable()throws Exception {
+        SourceDocument d=pendingSource("pending-list.txt");d.setTextContent("");sources.saveAndFlush(d);JsonNode row=listed().get(0);
+        assertTrue(row.path("identityConfirmationAvailable").asBoolean(),row.toString());assertFalse(row.path("roleConfirmationAvailable").asBoolean());assertFalse(row.path("parsed").asBoolean());
+        assertEquals(d.getSourceSha256(),row.path("originalSourceSha256").asText());assertEquals(VettingCorpus.sourceHash(d),row.path("sourceHash").asText());assertEquals(64,row.path("routingSha256").asText().length());
+        for(String module:new String[]{"vetting","advisory"})assertTrue(ProjectDocumentScope.selected(project,sources.findBusinessSourcesByProjectId(project),"fullset",module).isEmpty());
+        verifyNoInteractions(externalLlm,parser,oer);
+    }
+    @Test void explicitPendingConfirmationPublishesParsingBeforeCallingTheUsualParserOutsideATransaction()throws Exception {
+        SourceDocument d=pendingSource("pending-success.txt");byte[] original=Files.readAllBytes(Paths.get(d.getStoragePath()));String oldHash=VettingCorpus.sourceHash(d);
+        doAnswer(invocation->{
+            assertFalse(org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive());
+            SourceDocument parsing=fresh(d);assertEquals("PARSING",parsing.getParseStatus());assertEquals("tender",parsing.getReviewRole());
+            JsonNode visible=listed().get(0);assertFalse(visible.path("parsed").asBoolean());assertFalse(visible.path("identityConfirmationAvailable").asBoolean());
+            for(String module:new String[]{"vetting","advisory"})assertTrue(ProjectDocumentScope.selected(project,sources.findBusinessSourcesByProjectId(project),"fullset",module).isEmpty());
+            return invocation.callRealMethod();
+        }).when(parser).parse(eq(d.getFileName()),any(byte[].class));
+        JsonNode response=putPending(d,pendingRequest(d));assertEquals(0,response.path("code").asInt(),response.toString());JsonNode row=response.path("data");
+        assertEquals(String.valueOf(d.getId()),row.path("documentId").asText());assertEquals("tender",row.path("sourceRole").asText());assertEquals("PARSED",row.path("parseStatus").asText());assertTrue(row.path("parsed").asBoolean());
+        assertEquals(d.getSourceSha256(),row.path("originalSourceSha256").asText());assertNotEquals(oldHash,row.path("sourceHash").asText());assertEquals(64,row.path("routingSha256").asText().length());
+        assertArrayEquals(original,Files.readAllBytes(Paths.get(d.getStoragePath())));verify(parser,times(1)).parse(eq(d.getFileName()),any(byte[].class));verifyNoInteractions(externalLlm,oer);
+    }
+    @Test void pendingConfirmationRequiresTheExplicitCheckCurrentPinsOriginalAndNoActiveReview()throws Exception {
+        SourceDocument d=pendingSource("pending-guards.txt");rejectPending(d,new LinkedHashMap<>(request(d,"tender")));
+        for(String key:new String[]{"expectedOriginalSourceSha256","expectedSourceHash","expectedRoutingSha256"}){Map<String,Object> body=pendingRequest(d);body.put(key,"0".repeat(64));rejectPending(d,body);}
+        for(String state:new String[]{"QUEUED","RUNNING"}){VettingRun active=run(state);rejectPending(d,pendingRequest(d));runs.delete(active);}
+        byte[] original=Files.readAllBytes(Paths.get(d.getStoragePath()));Files.write(Paths.get(d.getStoragePath()),"changed original".getBytes(StandardCharsets.UTF_8));rejectPending(d,pendingRequest(d));Files.write(Paths.get(d.getStoragePath()),original);
+        Project other=new Project();other.setId("pending-other-"+UUID.randomUUID());projects.saveAndFlush(other);
+        String before=JsonUtils.write(fresh(d));JsonNode foreign=JsonUtils.parse(mvc.perform(put("/api/vetting/"+other.getId()+"/sources/"+d.getId()+"/role").contentType(MediaType.APPLICATION_JSON).content(JsonUtils.write(pendingRequest(d)))).andReturn().getResponse().getContentAsString());
+        assertEquals(4104,foreign.path("code").asInt());unchanged(d,before);
+    }
+    @Test void pendingExplicitConfirmationCannotOverrideKnownExclusionsOrDrawingCandidates()throws Exception {
+        for(String scope:new String[]{"drawing","pricing","works_pss","example"}){SourceDocument d=pendingSource("pending-scope-"+scope+".txt");d.setDocumentScope(scope);sources.saveAndFlush(d);rejectPending(d,pendingRequest(d));}
+        for(String excluded:new String[]{"DRAWING","BQ","SOR","GENERAL_SUMMARY","WORKS_PSS","standard_template","evaluation_answer","drawing_candidate","module_excluded"}){
+            SourceDocument d=pendingSource("pending-identity-"+excluded+".txt");OerDocumentIdentity identity=OerSourceMetadata.identity(d);
+            if(Arrays.asList("standard_template","evaluation_answer").contains(excluded))identity.setSourcePurpose(excluded);
+            else if("drawing_candidate".equals(excluded))identity.getCandidates().add(new OerDocumentIdentity.Candidate("DRAWING","unknown","Authored native drawing candidate"));
+            else if("module_excluded".equals(excluded))identity.setEligibleModules(Collections.emptyList());else identity.setKind(excluded);
+            d.setOerIdentityJson(JsonUtils.write(identity));sources.saveAndFlush(d);rejectPending(d,pendingRequest(d));
+        }
+        SourceDocument drawing=pendingSource("pending-native-drawing.txt");byte[] bytes="AC1032 authored native DWG signature".getBytes(StandardCharsets.US_ASCII);Files.write(Paths.get(drawing.getStoragePath()),bytes);
+        drawing.setSourceSha256(OerSourceMetadata.originalSha256(bytes));OerDocumentIdentity identity=new OerDocumentIdentity();identity.setSourceSha256(drawing.getSourceSha256());drawing.setOerIdentityJson(JsonUtils.write(identity));sources.saveAndFlush(drawing);rejectPending(drawing,pendingRequest(drawing));
+    }
+    @Test void pendingParseFailureRetainsTheOriginalObservationAndCannotBeReusedAsContractEvidence()throws Exception {
+        SourceDocument d=pendingSource("pending-failure.txt");String text=d.getTextContent(),structure=d.getStructuredContentJson(),coverage=d.getParseCoverageJson(),nativeArchive=d.getNativePdfEvidenceJson();byte[] original=Files.readAllBytes(Paths.get(d.getStoragePath()));
+        doThrow(new IllegalStateException("Authored detail parser failed")).when(parser).parse(eq(d.getFileName()),any(byte[].class));
+        JsonNode response=putPending(d,pendingRequest(d));assertEquals(0,response.path("code").asInt(),response.toString());JsonNode row=response.path("data");assertEquals("FAILED",row.path("parseStatus").asText());assertFalse(row.path("parsed").asBoolean());assertEquals("tender",row.path("sourceRole").asText());
+        SourceDocument after=fresh(d);assertEquals(text,after.getTextContent());assertEquals(structure,after.getStructuredContentJson());assertEquals(coverage,after.getParseCoverageJson());assertEquals(nativeArchive,after.getNativePdfEvidenceJson());assertArrayEquals(original,Files.readAllBytes(Paths.get(d.getStoragePath())));
+        for(String module:new String[]{"vetting","advisory"})assertTrue(ProjectDocumentScope.selected(project,sources.findBusinessSourcesByProjectId(project),"fullset",module).isEmpty());
+        JsonNode listed=listed().get(0);assertEquals(d.getSourceSha256(),listed.path("originalSourceSha256").asText());assertEquals(64,listed.path("sourceHash").asText().length());
+        assertEquals(4104,putPending(d,pendingRequest(d)).path("code").asInt());verify(parser,times(1)).parse(eq(d.getFileName()),any(byte[].class));verifyNoInteractions(externalLlm,oer);
+    }
+    @Test void concurrentPendingRequestsRunTheDetailParserOnceAndRejectTheStaleSecondClaim()throws Exception {
+        SourceDocument originalPending=pendingSource("pending-concurrent.txt");new TransactionTemplate(transactions).execute(tx->cas(originalPending,"tender"));
+        SourceDocument d=fresh(originalPending);Map<String,Object> body=pendingRequest(d);java.util.concurrent.CountDownLatch entered=new java.util.concurrent.CountDownLatch(1),release=new java.util.concurrent.CountDownLatch(1);
+        doAnswer(invocation->{entered.countDown();assertTrue(release.await(10,java.util.concurrent.TimeUnit.SECONDS));return invocation.callRealMethod();}).when(parser).parse(eq(d.getFileName()),any(byte[].class));
+        java.util.concurrent.ExecutorService pool=java.util.concurrent.Executors.newFixedThreadPool(2);
+        try {
+            java.util.concurrent.Future<JsonNode> first=pool.submit(()->putPending(d,body));assertTrue(entered.await(10,java.util.concurrent.TimeUnit.SECONDS));
+            java.util.concurrent.Future<JsonNode> second=pool.submit(()->putPending(d,body));release.countDown();assertEquals(0,first.get(20,java.util.concurrent.TimeUnit.SECONDS).path("code").asInt());assertEquals(4104,second.get(20,java.util.concurrent.TimeUnit.SECONDS).path("code").asInt());
+            verify(parser,times(1)).parse(eq(d.getFileName()),any(byte[].class));assertEquals("PARSED",fresh(d).getParseStatus());
+        } finally {release.countDown();pool.shutdownNow();}
+    }
+    @Test void originalChangedDuringDetailParsingDiscardsTheResultAndKeepsTheObservation()throws Exception {
+        SourceDocument d=pendingSource("pending-change-during-parse.txt");String text=d.getTextContent(),structure=d.getStructuredContentJson();
+        doAnswer(invocation->{Files.write(Paths.get(d.getStoragePath()),"concurrently changed bytes".getBytes(StandardCharsets.UTF_8));return invocation.callRealMethod();}).when(parser).parse(eq(d.getFileName()),any(byte[].class));
+        JsonNode response=putPending(d,pendingRequest(d));assertEquals(0,response.path("code").asInt(),response.toString());assertEquals("FAILED",response.path("data").path("parseStatus").asText());assertFalse(response.path("data").path("parsed").asBoolean());
+        SourceDocument after=fresh(d);assertEquals(text,after.getTextContent());assertEquals(structure,after.getStructuredContentJson());assertEquals(d.getSourceSha256(),after.getSourceSha256());
+        for(String module:new String[]{"vetting","advisory"})assertTrue(ProjectDocumentScope.selected(project,sources.findBusinessSourcesByProjectId(project),"fullset",module).isEmpty());verifyNoInteractions(externalLlm,oer);
+    }
+
+    @Test void anExplicitUploadRoleDoesNotReplaceTheSeparateTextIdentityConfirmation()throws Exception {
+        doAnswer(invocation->{DocumentParser.ParsedDocument observed=(DocumentParser.ParsedDocument)invocation.callRealMethod();
+            com.fasterxml.jackson.databind.node.ObjectNode routing=(com.fasterxml.jackson.databind.node.ObjectNode)observed.getRoutingObservation();
+            routing.put("nonDrawingFormatVerified",false);
+            org.springframework.test.util.ReflectionTestUtils.setField(observed,"routingObservation",routing);return observed;
+        }).when(parser).observe(anyString(),any(byte[].class));
+        byte[] original="Authored unidentified original awaiting human text identity".getBytes(StandardCharsets.UTF_8);
+        JsonNode uploaded=JsonUtils.parse(mvc.perform(multipart("/api/vetting/"+project+"/package/upload").file(new MockMultipartFile("files","explicit-pending.txt","text/plain",original))
+                .param("sourceRole","tender").param("documentScope","package")).andReturn().getResponse().getContentAsString());assertEquals(0,uploaded.path("code").asInt());
+        SourceDocument d=sources.findByProjectIdOrderByIdAsc(project).get(0);assertEquals("IDENTITY_PENDING",d.getParseStatus());assertEquals("tender",d.getReviewRole());
+        JsonNode row=listed().get(0);assertTrue(row.path("identityConfirmationAvailable").asBoolean(),row.toString());assertFalse(row.path("parsed").asBoolean());
+        clearInvocations(parser);assertEquals(4104,putPending(d,new LinkedHashMap<>(request(d,"tender"))).path("code").asInt());verifyNoInteractions(parser);
+        JsonNode response=putPending(d,pendingRequest(d));assertEquals(0,response.path("code").asInt(),response.toString());assertEquals("PARSED",response.path("data").path("parseStatus").asText());assertEquals("tender",fresh(d).getReviewRole());
+        assertArrayEquals(original,Files.readAllBytes(Paths.get(d.getStoragePath())));verify(parser,times(1)).parse(eq(d.getFileName()),any(byte[].class));verifyNoInteractions(externalLlm,oer);
+    }
+
+    @Test void humanTextConfirmationReachesBothRealCanonicalReadersAndSurvivesRoutingRefreshWithoutGuessingFamily()throws Exception {
+        SourceDocument d=pendingSource("pending-canonical.txt");JsonNode response=putPending(d,pendingRequest(d));assertEquals(0,response.path("code").asInt(),response.toString());
+        SourceDocument after=fresh(d);OerDocumentIdentity identity=OerSourceMetadata.identity(after);assertEquals("UNKNOWN",identity.getKind());assertEquals("unknown",identity.getSourcePurpose());assertEquals("human_confirmed_textual_material",identity.getIdentityStatus());
+        assertEquals(Arrays.asList("vetting","advisory"),identity.getEligibleModules());assertTrue(identity.getIdentityEvidence().stream().anyMatch(e->"human_text_contract_material".equals(e.getBasis())&&("original:"+d.getSourceSha256()).equals(e.getLocation())));
+        for(String module:new String[]{"vetting","advisory"}) {
+            assertEquals(d.getId(),canonicalCurrent.currentDocument(project,d.getId(),module).getId());
+            SourceDocument normal=canonicalCurrent.normalDocument(project,d.getId(),module);assertNotNull(com.consense.service.vetting.NormalSourceCandidateGraph.requireBound(normal));
+            JsonNode graph=normalPreparation.prepare(project,d.getId(),module);assertEquals("actual_source_candidate_generation",graph.path("status").asText());assertEquals(graph,com.consense.service.vetting.NormalSourceCandidateGraph.requireBound(canonicalCurrent.normalDocument(project,d.getId(),module)));
+        }
+        String text=after.getTextContent(),structure=after.getStructuredContentJson(),raw=after.getSourceSha256(),fileKey=after.getFileKey();
+        routingRefresh.refresh(project,d.getId(),raw,VettingCorpus.sourceHash(after),CanonicalEvidenceService.routingHash(after));
+        SourceDocument refreshed=fresh(d);assertEquals(fileKey,refreshed.getFileKey());assertEquals(text,refreshed.getTextContent());assertEquals(structure,refreshed.getStructuredContentJson());assertEquals(raw,refreshed.getSourceSha256());
+        assertEquals("human_confirmed_textual_material",OerSourceMetadata.identity(refreshed).getIdentityStatus());assertEquals("UNKNOWN",OerSourceMetadata.identity(refreshed).getKind());
+        for(String module:new String[]{"vetting","advisory"}){assertEquals(d.getId(),canonicalCurrent.currentDocument(project,d.getId(),module).getId());assertEquals("actual_source_candidate_generation",normalPreparation.prepare(project,d.getId(),module).path("status").asText());}verifyNoInteractions(externalLlm,oer);
+    }
+
+    @Test void legacyExplicitRolesCanRefreshModulePermissionWithoutReparseOrChangingSourceText()throws Exception {
+        for(String role:new String[]{"tender","standard","project_fact","package_manifest"}) {
+            SourceDocument d=source("legacy-confirmed-"+role+".txt");new TransactionTemplate(transactions).execute(tx->cas(d,role));SourceDocument before=fresh(d);
+            assertNull(OerSourceMetadata.identity(before).getEligibleModules());String raw=before.getSourceSha256(),parsed=VettingCorpus.sourceHash(before),routing=CanonicalEvidenceService.routingHash(before),text=before.getTextContent(),structure=before.getStructuredContentJson(),archive=before.getNativePdfEvidenceJson();
+            routingRefresh.refresh(project,d.getId(),raw,parsed,routing);SourceDocument after=fresh(d);OerDocumentIdentity identity=OerSourceMetadata.identity(after);
+            assertEquals(role,after.getReviewRole());assertEquals(raw,after.getSourceSha256());assertEquals(parsed,VettingCorpus.sourceHash(after));assertNotEquals(routing,CanonicalEvidenceService.routingHash(after));assertEquals(text,after.getTextContent());assertEquals(structure,after.getStructuredContentJson());assertEquals(archive,after.getNativePdfEvidenceJson());
+            assertEquals("UNKNOWN",identity.getKind());assertEquals("unknown",identity.getSourcePurpose());assertEquals("human_confirmed_source_use",identity.getIdentityStatus());assertTrue(identity.getIdentityEvidence().stream().anyMatch(e->"human_source_role".equals(e.getBasis())&&("original:"+raw).equals(e.getLocation())));
+            for(String module:new String[]{"vetting","advisory"}){assertEquals(d.getId(),canonicalCurrent.currentDocument(project,d.getId(),module).getId());assertEquals("actual_source_candidate_generation",normalPreparation.prepare(project,d.getId(),module).path("status").asText());}
+            routingRefresh.refresh(project,d.getId(),raw,parsed,CanonicalEvidenceService.routingHash(fresh(d)));assertEquals("human_confirmed_source_use",OerSourceMetadata.identity(fresh(d)).getIdentityStatus());
+        }
+        verifyNoInteractions(externalLlm,parser,oer);
+    }
+
+    @Test void legacyExplicitRoleRefreshCannotInventTextIdentityOrOverrideDrawingCandidatesAndExclusions()throws Exception {
+        for(String defect:new String[]{"unverified","drawing_candidate","evaluation_answer","standard_template","excluded_modules"}) {
+            SourceDocument d=source("legacy-rejected-"+defect+".txt");OerDocumentIdentity identity=OerSourceMetadata.identity(d);
+            if("unverified".equals(defect))identity.setIdentityStatus("unknown");else if("drawing_candidate".equals(defect))identity.getCandidates().add(new OerDocumentIdentity.Candidate("DRAWING","unknown","Authored retained drawing candidate"));
+            else if("excluded_modules".equals(defect))identity.setEligibleModules(Collections.emptyList());else identity.setSourcePurpose(defect);
+            d.setOerIdentityJson(JsonUtils.write(identity));sources.saveAndFlush(d);SourceDocument old=fresh(d);new TransactionTemplate(transactions).execute(tx->cas(old,"tender"));SourceDocument before=fresh(d);String retained=JsonUtils.write(before);
+            assertThrows(com.consense.service.sources.CanonicalEvidenceException.class,()->routingRefresh.refresh(project,d.getId(),before.getSourceSha256(),VettingCorpus.sourceHash(before),CanonicalEvidenceService.routingHash(before)));
+            assertEquals(retained,JsonUtils.write(fresh(d)));assertThrows(com.consense.service.sources.CanonicalEvidenceException.class,()->canonicalCurrent.currentDocument(project,d.getId(),"vetting"));
+        }
+        verifyNoInteractions(externalLlm,parser,oer);
     }
 }

@@ -36,13 +36,15 @@ public final class VettingDtos {
         private String sourceRole;
         private String documentScope,exclusionReason;
         private String documentId,originalSourceSha256,sourceHash,routingSha256;
-        private boolean roleConfirmationAvailable;
-        public VettingFileVO(String key,LocalizedText role,String fileName,String basis,String status,boolean generated,boolean parsed,int pageCount,String parseStatus,String parseMessage,int textChars,boolean ocrUsed,List<String> warnings,String sourceRole,String documentScope,String exclusionReason){this(key,role,fileName,basis,status,generated,parsed,pageCount,parseStatus,parseMessage,textChars,ocrUsed,warnings,sourceRole,documentScope,exclusionReason,null,null,null,null,false);}
+        private boolean roleConfirmationAvailable,identityConfirmationAvailable;
+        public VettingFileVO(String key,LocalizedText role,String fileName,String basis,String status,boolean generated,boolean parsed,int pageCount,String parseStatus,String parseMessage,int textChars,boolean ocrUsed,List<String> warnings,String sourceRole,String documentScope,String exclusionReason){this(key,role,fileName,basis,status,generated,parsed,pageCount,parseStatus,parseMessage,textChars,ocrUsed,warnings,sourceRole,documentScope,exclusionReason,null,null,null,null,false,false);}
         public VettingFileVO(String key,LocalizedText role,String fileName,String basis,String status,boolean generated,boolean parsed,int pageCount,String parseStatus,String parseMessage,int textChars,boolean ocrUsed,List<String> warnings,String sourceRole){this(key,role,fileName,basis,status,generated,parsed,pageCount,parseStatus,parseMessage,textChars,ocrUsed,warnings,sourceRole,null,null);}
     }
 
     @Data @NoArgsConstructor
     public static class SourceRoleConfirmationRequest {
+        /** Explicit original-file inspection authorizes detailed parsing, not source-quality acceptance. */
+        private boolean confirmTextContractMaterial;
         @javax.validation.constraints.NotNull
         @javax.validation.constraints.Pattern(regexp="tender|standard|project_fact|package_manifest")
         private String sourceRole;

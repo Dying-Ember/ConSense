@@ -56,6 +56,7 @@ public final class ProjectDocumentScope {
         if("pricing".equals(explicit))return "pricing_document";
         if("works_pss".equals(explicit))return "project_works_specification";
         if("IDENTITY_PENDING".equals(d.getParseStatus()))return "source_identity_unresolved";
+        if(Arrays.asList("PARSING","FAILED").contains(d.getParseStatus()))return "source_parse_unavailable";
         com.consense.document.OerDocumentIdentity identity=OerSourceMetadata.identity(d);
         String kind=identity==null?"UNKNOWN":nvl(identity.getKind()).toUpperCase(Locale.ROOT);
         if(Arrays.asList("BQ","SOR","GENERAL_SUMMARY").contains(kind))return "pricing_document";

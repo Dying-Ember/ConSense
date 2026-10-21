@@ -48,14 +48,17 @@ public class OerSourceRoutingRefreshService {
         OerDocumentIdentity identity=OerSourceMetadata.refreshedIdentity(before,expectedOriginalSha);
         boolean nativeSupported="content_supported".equals(identity.getIdentityStatus())
                 && identity.getIdentityEvidence().stream().anyMatch(e->Arrays.asList("native_tender_appendix","native_contract_definition").contains(e.getBasis()));
-        require(("sha_verified".equals(identity.getIdentityStatus())||nativeSupported)&&identity.getEligibleModules()!=null,
+        boolean humanSupported=Arrays.asList("human_confirmed_textual_material","human_confirmed_source_use").contains(identity.getIdentityStatus())
+                &&identity.getIdentityEvidence().stream().anyMatch(e->Arrays.asList("human_text_contract_material","human_source_role").contains(e.getBasis())&&("original:"+expectedOriginalSha).equals(e.getLocation()));
+        require(("sha_verified".equals(identity.getIdentityStatus())||nativeSupported||humanSupported)&&identity.getEligibleModules()!=null,
                 HttpStatus.FORBIDDEN,"SOURCE_ROUTING_IDENTITY_UNRESOLVED");
         if(nativeSupported) {
             String exclusion=ProjectDocumentScope.exclusionReason(before,"fullset","vetting");
             require(exclusion==null||"source_identity_unresolved".equals(exclusion),HttpStatus.FORBIDDEN,"SOURCE_MODULE_EXCLUDED");
             require(JsonUtils.isBlankText(before.getReviewRole())||"tender".equals(before.getReviewRole()),HttpStatus.FORBIDDEN,"SOURCE_ROUTING_PURPOSE_CONFLICT");
         }
-        boolean kindChanged=!Objects.equals(before.getFileKey(),identity.getKind());
+        String nextKind=humanSupported&&"UNKNOWN".equals(identity.getKind())?before.getFileKey():identity.getKind();
+        boolean kindChanged=!Objects.equals(before.getFileKey(),nextKind);
         require(!kindChanged||nativeSupported&&"SCT".equals(identity.getKind())
                 &&(JsonUtils.isBlankText(before.getFileKey())||Arrays.asList("UNKNOWN","OTHER").contains(before.getFileKey())),
                 HttpStatus.CONFLICT,"SOURCE_ROUTING_KIND_CHANGED");
@@ -63,14 +66,14 @@ public class OerSourceRoutingRefreshService {
                 HttpStatus.FORBIDDEN,"SOURCE_MODULE_ELIGIBILITY_UNRESOLVED_OR_EXCLUDED");
         SourceDocument proposed=snapshot(id);
         requireSameSnapshot(before,proposed);
-        proposed.setOerIdentityJson(JsonUtils.write(identity));if(kindChanged)proposed.setFileKey(identity.getKind());
+        proposed.setOerIdentityJson(JsonUtils.write(identity));if(kindChanged)proposed.setFileKey(nextKind);
         require(ProjectDocumentScope.exclusionReason(proposed,"fullset","vetting")==null
                 &&ProjectDocumentScope.exclusionReason(proposed,"fullset","advisory")==null,
                 HttpStatus.FORBIDDEN,"SOURCE_MODULE_EXCLUDED");
         String next=proposed.getOerIdentityJson();
         boolean changed=kindChanged||!Objects.equals(before.getOerIdentityJson(),next);
         if(changed) require((kindChanged
-                ?documents.compareAndSetRoutingIdentityAndKind(id,projectId,expectedOriginalSha,before.getOerIdentityJson(),next,before.getFileKey(),identity.getKind())
+                ?documents.compareAndSetRoutingIdentityAndKind(id,projectId,expectedOriginalSha,before.getOerIdentityJson(),next,before.getFileKey(),nextKind)
                 :documents.compareAndSetRoutingIdentity(id,projectId,expectedOriginalSha,before.getOerIdentityJson(),next))==1,
                 HttpStatus.CONFLICT,"SOURCE_REFRESH_SNAPSHOT_STALE");
         SourceDocument after=snapshot(id);

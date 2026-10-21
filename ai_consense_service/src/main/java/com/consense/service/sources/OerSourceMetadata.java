@@ -118,6 +118,7 @@ public final class OerSourceMetadata {
         }
         if ("source_identity_mismatch".equals(identity.getIdentityStatus()))
             throw new IllegalArgumentException("Parsed metadata belongs to different source bytes");
+        identity=retainTextContractConfirmation(document,identity);
         document.setSourceSha256(digest);
         document.setOerIdentityJson(JsonUtils.write(identity));
         document.setNativePdfEvidenceJson(parsed == null || parsed.getNativePdfEvidence() == null ? null
@@ -127,6 +128,50 @@ public final class OerSourceMetadata {
             document.setFileKey(identity.getKind());
         // reviewRole is the user's explicit input; the routed role is retained
         // separately and used only when there is no valid explicit role.
+    }
+
+    /** Explicit role plus verified textual identity grants module use, never family, edition or clause ownership. */
+    public static void confirmSourceUse(SourceDocument document,boolean textMaterialConfirmed) {
+        OerDocumentIdentity identity=identity(document);
+        if(!sourceUseAllowed(document,identity)||!textMaterialConfirmed&&!observedNonDrawing(identity)&&!hasSourceUseConfirmation(identity,document.getSourceSha256()))
+            throw new IllegalArgumentException("Source-use confirmation cannot override missing textual identity, exclusions or incomplete parsing");
+        grantSourceUse(document,identity,textMaterialConfirmed?"human_text_contract_material":"human_source_role",null);
+        document.setOerIdentityJson(JsonUtils.write(identity));
+    }
+    private static boolean sourceUseAllowed(SourceDocument document,OerDocumentIdentity identity) {
+        return identity!=null&&document.getSourceSha256()!=null&&document.getSourceSha256().matches("[a-f0-9]{64}")&&document.getSourceSha256().equals(identity.getSourceSha256())
+                &&ProjectDocumentScope.reviewCategory(document)&&ProjectDocumentScope.parseUsable(document)
+                &&Arrays.asList("tender","standard","project_fact","package_manifest").contains(document.getReviewRole())
+                &&!Arrays.asList("drawing","example","pricing","works_pss").contains(document.getDocumentScope())
+                &&!Arrays.asList("DRAWING","BQ","SOR","GENERAL_SUMMARY","WORKS_PSS","SL_NON_TECHNICAL").contains(identity.getKind())
+                &&!Arrays.asList("standard_template","evaluation_answer","drawing").contains(identity.getSourcePurpose())
+                &&!"source_identity_mismatch".equals(identity.getIdentityStatus())
+                &&(identity.getEligibleModules()==null||identity.getEligibleModules().containsAll(Arrays.asList("vetting","advisory")))
+                &&identity.getCandidates().stream().noneMatch(c->"DRAWING".equals(c.getKind()));
+    }
+    private static boolean observedNonDrawing(OerDocumentIdentity identity) {
+        return identity!=null&&Arrays.asList("sha_verified","content_supported","content_supported_non_drawing","format_supported_non_drawing").contains(identity.getIdentityStatus());
+    }
+    private static boolean hasSourceUseConfirmation(OerDocumentIdentity identity,String originalSha) {
+        return identity!=null&&originalSha!=null&&originalSha.equals(identity.getSourceSha256())
+                &&identity.getIdentityEvidence().stream().anyMatch(e->Arrays.asList("human_text_contract_material","human_source_role").contains(e.getBasis())&&("original:"+originalSha).equals(e.getLocation()));
+    }
+    private static void grantSourceUse(SourceDocument document,OerDocumentIdentity identity,String basis,OerDocumentIdentity.Evidence retained) {
+        if(identity.getEligibleModules()==null) {
+            identity.setEligibleModules(Arrays.asList("vetting","advisory"));identity.setIdentityStatus("human_text_contract_material".equals(basis)?"human_confirmed_textual_material":"human_confirmed_source_use");
+        }
+        if(!hasSourceUseConfirmation(identity,document.getSourceSha256()))identity.getIdentityEvidence().add(retained!=null?retained:new OerDocumentIdentity.Evidence(
+                basis,"original:"+document.getSourceSha256(),"Explicit "+document.getReviewRole()+" use with confirmed textual identity; extraction quality, family, clause ownership and project adoption remain separate"));
+    }
+    private static OerDocumentIdentity retainTextContractConfirmation(SourceDocument document,OerDocumentIdentity next) {
+        OerDocumentIdentity previous=identity(document);
+        if(sourceUseAllowed(document,next)&&(previous==null||sourceUseAllowed(document,previous))) {
+            if(hasSourceUseConfirmation(previous,document.getSourceSha256())) {
+                for(OerDocumentIdentity.Evidence evidence:previous.getIdentityEvidence())if(Arrays.asList("human_text_contract_material","human_source_role").contains(evidence.getBasis())&&("original:"+document.getSourceSha256()).equals(evidence.getLocation()))
+                    {grantSourceUse(document,next,evidence.getBasis(),evidence);break;}
+            } else if(next.getEligibleModules()==null&&(observedNonDrawing(previous)||observedNonDrawing(next)))grantSourceUse(document,next,"human_source_role",null);
+        }
+        return next;
     }
 
     public static OerDocumentIdentity identity(SourceDocument document) {
@@ -147,7 +192,7 @@ public final class OerSourceMetadata {
 
     /** Existing fixed identities keep priority; otherwise reuse only retained source-bound native parser fields. */
     public static OerDocumentIdentity refreshedIdentity(SourceDocument document,String verifiedOriginalSha256) {
-        OerDocumentIdentity fixed=refreshedFixedIdentity(document,verifiedOriginalSha256);
+        OerDocumentIdentity fixed=retainTextContractConfirmation(document,refreshedFixedIdentity(document,verifiedOriginalSha256));
         if ("sha_verified".equals(fixed.getIdentityStatus()) || JsonUtils.isBlankText(document.getStructuredContentJson())) return fixed;
         List<com.consense.document.DocumentBlock> blocks;
         try {blocks=JsonUtils.readList(document.getStructuredContentJson(),com.consense.document.DocumentBlock.class);}
@@ -159,7 +204,7 @@ public final class OerSourceMetadata {
             if(position!=null && "docx_native".equals(position.path("kind").asText())
                     && !verifiedOriginalSha256.equals(position.path("sourceSha256").asText())) return fixed;
         }
-        return FixedRegistry.ROUTER.routeRetained(document.getFileName(),verifiedOriginalSha256,document.getTextContent(),blocks);
+        return retainTextContractConfirmation(document,FixedRegistry.ROUTER.routeRetained(document.getFileName(),verifiedOriginalSha256,document.getTextContent(),blocks));
     }
 
     /** null means unresolved; a non-null reason excludes the source from this module. */

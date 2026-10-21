@@ -1,3 +1,32 @@
+<!-- unified-progress54:start -->
+## progress54：人工来源许可共同修复已采用，待当前上传完成后部署
+
+**2026-10-21：五个后端产品文件及既有HTTP/JPA回归类已精确采用主树，325份产品／资源输入与实际测试工程全部核同；新运行包已构建，尚未部署。** 当前后端46416与原PDF批次保持，前端六文件候选未采用，避免Vite热更新影响页面内待执行队列。[采用记录](../../../.local/identity-pending-resume26/backend/adoption.json)、[运行包](../../../.local/runtime-source-use26/package.json)，JAR SHA `ef1807e5347664c6b9324a87b52a9e062bc30b610a5239a4ab75217fc8394664`。
+
+- **同一根因覆盖两个入口：** 原PUT用途端点增加独立文字材料确认，pending经原件／三版本核对、短事务CAS保存PARSING，再于事务外调用既有parser；同用途并发只调用一次，解析失败或原件变化保留原观察，PARSING／FAILED不进入Vetting、Advisory或canonical业务源。普通用途确认、旧合法显式用途来源的routing refresh和pending续解析共用OER人手使用许可，记录原件SHA绑定依据及vetting/advisory许可。已知图纸／答案／模板／计价／PSS／排除范围与drawing候选仍优先阻断；未知kind／purpose／版本／条号及质量保持未知。旧13份Word可在部署后用既有refresh补许可，不重传、不重解析；**此迁移尚未实际执行**。
+- **真实软件验证边界：** 旧产品RED2方法均在指定断言FAIL。GREEN03为70PASS／32FAIL／4error／1skip：一个新夹具修改了返回的routing副本，Advice受命令全局禁用模拟模型影响，routing类漏传原件属性而整类skip。GREEN04修正执行配置并提供真实Specification与两评分附件，实际122方法为121PASS／1fixture FAIL、0error/skip；剩余失败因ParsedDocument为final，不能Mockito spy。仅改该夹具，使用现成ReflectionTestUtils设置其authored初步观察，产品字节未变，GREEN05指定1方法实际PASS、10.386秒，完整Maven32.377秒。因此122个唯一方法均有实际PASS覆盖，**不是单窗122全绿**。25方法用途类包含真实currentDocument／normalDocument／normalPreparation.prepare双模块及refresh前后正控；同时保留原件、旧正文、未知类别、并发和硬排除负控。另含真实原件routing16、metadata14、workflow18、drawing4、normal-observed4、Advice scope41。[GREEN04完整原报告](../../../.local/identity-pending-resume26/java/green04/reports/)、[指定补验](../../../.local/identity-pending-resume26/java/green05/maven.log)。
+- **前端仍私有：** 同一个来源用途对话框新增显式勾选、原件链接、三语说明及请求不明确后刷新观察，支持已有四种合法上传用途；普通已解析用途仍只确认unknown。40个Node测试PASS、typecheck exit0。此前空输出未创建日志的错误已修正并保留说明。[候选及证据](../../../.local/identity-pending-resume26/frontend/candidate-manifest.json)。未授浏览器确认续跑、真实PDF解析或模型审查通过。
+- **Drafting后继：** 11条源绑定关系补本次7个实测导语跨页及必要前驱／Guidance入口，沿现keepNext／keepLines，保原70关系；81关系／599 CL／1,788点。三类14软件方法实际全PASS，正常生成窗正在接回，不因proof先写PASS而提前授完整测试／视觉通过。[软件日志](../../../.local/scc-current-toc-finalization01/heading-cohesion02/dynamic01/continuation01/software01/maven.log)。LO缺he已收窄到同格式run分段假设，单变量等格式run合并私有输入已备，尚未实转，不混入分页候选。
+
+21:21实查当前32记录，FoT55已PARTIAL、Annex1–6文档56仍PARSING，原队列继续；FoT物理5曾有OCR503，后续页继续，不能把该页算质量通过。全部35资料／正式报告／新真实Advisory仍未通过，SL比赛包继续后置。Goal active，不上调整体百分比。
+<!-- unified-progress54:end -->
+
+<!-- unified-progress53:start -->
+## progress53：正常生成分页链通过，真实 Word 接入与 PDF 人工续跑缺口
+
+**2026-10-21 20:35 实查：真实2b后继项目已有29条记录，24份可进入审查（17 PARSED、7 PARTIAL），2图纸EXCLUDED、2 IDENTITY_PENDING、1 PARSING。** 整套分母仍35：33范围内材料、2图纸；准入不代表内容质量或正式报告通过。23份Word均已有详细结果并准入，其中13份经过显式人工用途确认，不能算自动路由通过。GCT PDF为第24份。PDF10批次只发送一次，浏览器仍第4/10 AoA、收到3结果、0接收或解析失败；六份后续PDF尚未进入服务器记录，不重传整批。[Word19发送](../../../.local/runtime-recovery25/word19-intake-sent.json)、[人工确认结果](../../../.local/runtime-recovery25/manual-purpose-fallback-results.json)、[确认完成回读](../../../.local/runtime-recovery25/manual-purpose-fallback-completion.json)、[PDF10发送](../../../.local/runtime-recovery25/pdf10-intake-sent.json)、[后继观察](../../../.local/runtime-recovery25/pdf10-progress02.json)。
+
+- **正常生成／保存新增实际通过：** 既有三模板MVC/JPA测试使用实际2a原件及显式合成F17身份，1方法PASS、0失败/错误/跳过，203.429秒，20:33:43完成。SCC新compiler稿`dccbe433…`、新保存稿`22af41d2…`，未注入旧保存稿Result。70标题与首正文全部同页；92目录缓存、可见值与目标页脚一致（23改、69保持）；1,733点末两次稳定，含1,097 CS、544 CL及92目录目标。SCC3次LO、三稿共5次；NTT11/SCT25/SCC81页，三份Word生成/保存/当前导出同字节，三份PDF预览/导出同字节。[日志](../../../.local/scc-current-toc-finalization01/heading-cohesion02/dynamic01/normalflow01/root-normal01.log)、[完整生成结果](../../../.local/scc-current-toc-finalization01/heading-cohesion02/dynamic01/normalflow01/actual01/full-generation-render-result.json)、[保存核验](../../../.local/scc-current-toc-finalization01/heading-cohesion02/dynamic01/normalflow01/actual01/SCC-normal-flow-identity-checks.json)。候选仍未主树采用／部署。
+- **新成品视觉保持FAIL：** 新SCC81页已全部raster120，Root亲看物理20/21/38/39/40/41/50/51：7.303(2)导语与(a)、18.301导语与(1)、11.302定义导语与后续定义跨页，39大留白、40低密度仍在。70标题关系不覆盖正文导语→列表／替代条文。新81页未逐张审完；旧native01的67–81页仍未执行，不移用视觉通过。物理38的`contrary, t`缺字在原件及新旧DOCX可见XML均不存在，原XML完整`the`，首损失已定位为现有LO输出，尚未修复。[新图](../../../.local/scc-current-toc-finalization01/heading-cohesion02/dynamic01/normalflow01/actual01/raster120/)。
+- **真实产品死口：** Appendix I文档51、扫描APL文档52在初步观察后为IDENTITY_PENDING，未详细解析；现用途确认只允许PARSED/PARTIAL，routing refresh也需parseUsable，没有确认后续跑入口。正在既有source-role／原件版本接缝准备显式人工确认续跑，不直接把pending改可审、不猜正式类别、不放开图纸／答案隔离，也不加两条SHA掩盖通用缺口。AoA53仍PARSING，继续接原请求。
+- **第二次运行中断及恢复：** 约20:05本任务Windows H2／后端／前端／8874退出，Root未停止；时间与父App重建吻合，内部退出原因未证实。从最新SQL恢复四来源，重应用两次路由刷新且未重解析；独立WMI helper恢复原运行包及原8874 frozen代码，未安装服务／定时器。当前H2 owner39876、后端46416、前端54556、8874 listener39028；8875／18780保持。helper已退出、服务继续监听，未故意重启App核跨重启。[状态](../../../.local/runtime-recovery25/state.json)、[脚本](../../../.local/runtime-recovery25/start-independent-stack.ps1)。当前SQL早于Word19、用途确认及PDF新写入，**后继升级前必须保全新写入**。H2文件模式未可用，不扩大ACL试探。
+
+真实35文件／Qwen审查／正式报告尚未通过；Advisory新真实复验、2b报告对照2d及七版SL全部22,214技术页／版本隔离检索未完成。SL质量未过不打比赛包。Goal active，不上调整体百分比，Root统一集成与运行。
+**progress53 后续核查（20:52–21:00）：** 正常前端用途确认的来源准入仍不等于canonical准备通过。独立复核发现人工选择reviewRole后，未知kind/purpose的原生Word身份仍无eligibleModules；Root实际只读SQL核到本轮**全部13份人工用途确认Word**均缺该字段，CanonicalCurrentSourceReader会拒绝。前述24份只表示页面／scope准入，不能称13份已能完成实际审查。修复扩大到同一个OER人工使用许可接缝，覆盖普通确认与pending续解析；旧13份须可经既有routing refresh补齐，不重传／重解析，不猜正式类别、purpose、条号或质量。[13份逐项证据](../../../.local/identity-pending-resume26/original-review/existing-manual-role-canonical-gap.log)。身份续跑的旧产品RED已实际2方法／2个预期断言FAIL、0error/skip，45.432秒，20:52:47结束，分别复现无确认许可及4104拒绝；GREEN尚未执行。[RED日志](../../../.local/identity-pending-resume26/java/red/maven.log)。
+
+AoA53已返回PARTIAL，APZ54为第3份IDENTITY_PENDING，FoT55解析中；当前31记录＝17PARSED＋8PARTIAL＋3身份待确认＋1解析中＋2图纸排除，后四份仍在原队列未发送。当前新增写入已另存SQL检查点2,775,157,456 bytes、SHA `6ded9cce219b4d9514525256143873b8bc6b793dbfb82d908226847ab2a63dfb`，35.451秒完成，无服务停止；它是在活动队列中生成的快照，**不代表后继升级前最终状态**。[检查点](../../../.local/runtime-recovery25/checkpoint-word23-pdf-progress.json)。Root已亲看三份pending原件各前两页并记录文字合同身份依据，尚未发resume请求，不授内容质量通过。[原件核读](../../../.local/identity-pending-resume26/original-review/review-notes.json)。
+<!-- unified-progress53:end -->
+
 <!-- unified-progress52:start -->
 ## progress52：SCC保存稿真实动态分页通过，正常生成保存仍待接回
 
