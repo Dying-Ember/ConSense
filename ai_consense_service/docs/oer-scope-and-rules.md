@@ -1,3 +1,7 @@
+<!-- unified-progress40:start -->
+**2026-10-21：E1实际78项通过并采用源码、未部署；Vetting小修复已提交推送。运行仍formal19，Goal active。SL七版全库来源／检索质量未通过：历史单版诊断与实际嵌入、SL四题回归的准确边界见[SL质量说明](testing/sl-technical-source-and-retrieval-quality-20261021.md)，不以包恢复、文字保全或向量数代替质量。** 当前状态与新API保全／Drafting无效分页候选证据见[progress40](testing/three-module-runtime-progress-20261021.md)。下方旧progress按当时时点读取。
+<!-- unified-progress40:end -->
+
 <!-- unified-progress39:start -->
 **2026-10-21 当前状态：Vetting JSON 三行修复已通过实际39项回归并采用源码，未部署；Drafting 93项与新完整生成通过，但25页逐张复核仍有五组单行／单词续页，候选不采用。NSC／BSSSC两种安排均可选BS工种的前端未保存切换已实际验证。运行仍formal19、受保护H2保持；统一Goal active，不再用无固定验收分母的“整体80%”表述。**
 

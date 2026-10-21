@@ -266,6 +266,15 @@ final class AdvisoryHarness {
                 :copy(language,"The affected requested determination remains unresolved; independently supported analysis below remains available.","受影响的所问判断尚不能定论，其他独立有据分析仍可保留。","受影響的所問判斷尚不能定論，其他獨立有據分析仍可保留。");
         return copy(language,"Evidence still required: ","仍待核实的依据：","仍待核實的依據：")+gapLabel(gap,language)+". "+effect;
     }
+    static String relationEvidenceScope(String language,boolean referenceOnly,int documents){
+        return copy(language,"Evidence scope for this explanation","本次说明的证据范围","本次說明的證據範圍")+"\n\n"
+                +(referenceOnly?copy(language,"This explanation uses the selected reference sources and cites provisions from ","本次按所选参考资料作解释，实际引用了","本次按所選參考資料作解釋，實際引用了")
+                    :copy(language,"This explanation uses the selected project sources and cites provisions from ","本次按所选项目资料作解释，实际引用了","本次按所選項目資料作解釋，實際引用了"))
+                +documents+copy(language,documents==1?" file.":" files.","份文件中的条文。","份文件中的條文。")
+                +copy(language," Current source identities and citation links were checked. Each rule remains limited to the subjects, conditions and exceptions stated in its source. A complete order of precedence across all contract documents has not been independently verified in this review.",
+                    "已核对当前来源身份和引文对应关系；各条规则仍受其原文所述对象、条件和例外限制。本次未独立确认全部合同文件之间的完整优先层级。",
+                    "已核對當前來源身份和引文對應關係；各條規則仍受其原文所述對象、條件和例外限制。本次未獨立確認全部合同文件之間的完整優先層級。");
+    }
     private static String copy(String language,String en,String hans,String hant){return "en".equals(language)?en:"zhHant".equals(language)?hant:hans;}
     private static String questionText(String question){
         java.util.regex.Matcher quoted=QUOTED_QUESTION_TEXT.matcher(question);StringBuffer text=new StringBuffer();

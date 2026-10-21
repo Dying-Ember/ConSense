@@ -35,7 +35,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 /** Public HTTP plus isolated SQL persistence. Model and token observations are fixtures, never live acceptance. */
 @SpringBootTest(properties={"spring.jpa.hibernate.ddl-auto=create-drop","spring.flyway.enabled=false",
-        "consense.ocr.enabled=false","consense.vector.provider=memory","consense.llm.chat-model=session-test-chat",
+        "consense.ocr.enabled=false","consense.vector.provider=memory","consense.llm.enabled=true","consense.llm.chat-model=session-test-chat",
         "consense.llm.num-ctx=262144",
         "consense.llm.structured-thinking=false",
         "consense.advice.history-max-exchanges=2","consense.advice.history-max-messages=4","consense.advice.history-max-tokens=1024",
@@ -335,6 +335,162 @@ class AdviceSessionIntegrationTest {
         assertEquals(1,counted.size());assertEquals(1,sent.size());assertEquals(JsonUtils.write(counted.get(0).getMessages()),JsonUtils.write(sent.get(0)));
         assertTrue(counted.get(0).getSourceSnapshotSha256().matches("[a-f0-9]{64}"));assertEquals(2,data(get("/api/advice/{id}/messages",project)).size());
         assertTrue(data(get("/api/advice/{id}/sessions",project)).isEmpty(),"Admission must not require silently creating a session");
+    }
+
+    @MockBean com.consense.service.vetting.FixedBaselineRetrievalClient fixedScopeReferences;
+
+    @Test void relationScopeStreamsOnceAndMatchesCompleteHistoryAndSqlUsingOnlyCitedFiles() throws Exception {
+        String project=project();SourceDocument cited=source(project,"1. A notice must be recorded. AUTHORED TEST ONLY");
+        SourceDocument other=source(project,"2. An uncited record must be retained. AUTHORED TEST ONLY");other.setFileName("SCC independent second scope fixture.txt");sources.saveAndFlush(other);rebuild(project);
+        String session=session(project,"contract","project_contract");
+        com.fasterxml.jackson.databind.node.ObjectNode raw=e1Answer("T3","project_contract","en","The cited source contains the selected record [1].");
+        java.util.concurrent.atomic.AtomicInteger generations=e1Provider(JsonUtils.write(raw));
+        List<JsonNode> events=e1Events(project,session,"contract","project_contract","Explain the relationship of the selected requirements in English.");
+        JsonNode response=e1Complete(events),checks=e1AssertExchange(project,session,events,"en");
+        assertEquals(1,generations.get());assertEquals(2,response.path("sources").size(),"Complete response retains both retrieved sources; the application scope below counts only the cited file");
+        assertEquals(1,prompts.size());assertTrue(prompts.get(0).contains(cited.getTextContent()));assertTrue(prompts.get(0).contains(other.getTextContent()),"Both retrieved sources were available to the captured model request");
+        String content=response.path("content").path("en").asText();
+        assertTrue(content.contains("selected project sources"));assertTrue(content.contains("cites provisions from 1 file."));
+        assertFalse(content.contains("cites provisions from 2 files."));
+        e1AssertScopeEvent(events,"Evidence scope for this explanation");
+        JsonNode scope=checks.path("applicationEvidenceScope");
+        assertEquals("T3",scope.path("questionType").asText());assertEquals("project_contract",scope.path("requestedBasisScope").asText());
+        assertEquals("contract",scope.path("sourceScope").asText());assertFalse(scope.path("independentFullHierarchyVerified").asBoolean(true));
+        JsonNode actualCited=null;for(JsonNode source:response.path("sources"))if("[1]".equals(source.path("evidenceId").asText()))actualCited=source;
+        assertNotNull(actualCited);assertTrue(Arrays.asList(String.valueOf(cited.getId()),String.valueOf(other.getId())).contains(actualCited.path("documentId").asText()));
+        assertEquals(1,scope.path("documentIds").size());assertEquals(actualCited.path("documentId"),scope.path("documentIds").get(0));
+        assertEquals(actualCited.path("sourceHash"),scope.path("sourceHashes").get(0));
+        assertEquals(1,scope.path("sourceHashes").size());assertEquals(JsonUtils.parse("[null]"),scope.path("fixedOriginalSourceSha256"));
+        assertEquals(JsonUtils.parse("[\"[1]\"]"),scope.path("citedAliases"));e1AssertModelSections(raw.path("sections"),checks);
+        verify(local,never()).chatStructured(anyList(),any());
+    }
+
+    @Test void unrelatedTemplateAndLimitsOnlyDoNotPublishAnApplicationRelationScope() throws Exception {
+        for(boolean limitsOnly:new boolean[]{false,true}) {
+            String project=project();source(project,"1. A notice must be recorded. AUTHORED NEGATIVE CONTROL");rebuild(project);
+            String session=session(project,"contract","project_contract");
+            com.fasterxml.jackson.databind.node.ObjectNode raw=e1Answer(limitsOnly?"T3":"T1","project_contract","en",limitsOnly?"":"The source requires a notice record [1].");
+            if(limitsOnly)raw.put("grounded",false);
+            java.util.concurrent.atomic.AtomicInteger generations=e1Provider(JsonUtils.write(raw));
+            List<JsonNode> events=e1Events(project,session,"contract","project_contract","Explain the selected source in English.");
+            JsonNode response=e1Complete(events),checks=e1AssertExchange(project,session,events,"en");
+            assertEquals(1,generations.get());assertFalse(checks.has("applicationEvidenceScope"));
+            assertFalse(response.path("content").path("en").asText().contains("Evidence scope for this explanation"));
+            for(JsonNode event:events)if("section".equals(event.path("event").asText()))assertFalse(event.path("data").path("content").asText().contains("Evidence scope for this explanation"));
+            e1AssertModelSections(raw.path("sections"),checks);
+        }
+    }
+
+    @Test void referenceOnlyRelationScopeUsesTheFixedOriginalIdentityWithoutInventingProjectAdoption() throws Exception {
+        String text="AUTHORED complete reference wording: a notice must be recorded, subject to the stated exception.";
+        String sourceHash=com.consense.service.vetting.VettingCorpus.hash(text),originalHash=com.consense.service.vetting.VettingCorpus.hash("AUTHORED original reference bytes\n"+text);
+        com.fasterxml.jackson.databind.node.ObjectNode payload=JsonUtils.mapper().createObjectNode();
+        payload.put("id","fixed:authored-scope");payload.put("content",text);payload.put("fileLabel","GCC authored reference");payload.put("fileKey","GCC");
+        payload.put("pageNo",42);payload.putArray("originalPageNos").add(42);payload.put("anchor","AUTHORED record");payload.put("sourceHash",sourceHash);
+        payload.put("originalSourceSha256",originalHash);payload.put("sourceRole","standard");payload.putObject("sourceQuality").put("family","GCC").put("finalQualityAccepted",false);
+        payload.put("fixedDevelopmentBaseline",true);payload.put("fixedBaselineManifestSha256",com.consense.service.vetting.VettingCorpus.hash("AUTHORED scope manifest"));payload.put("fixedBaselineVersion","AUTHORED");
+        JsonNode unit=JsonUtils.parse("{\"status\":\"complete_observed_unit\",\"requiredMemberIds\":[\"fixed:authored-scope\"],\"presentMemberIds\":[\"fixed:authored-scope\"],\"missingMemberIds\":[],\"qualifiersComplete\":\"unknown\"}");
+        java.lang.reflect.Constructor<com.consense.service.vetting.FixedReferenceEvidence> constructor=com.consense.service.vetting.FixedReferenceEvidence.class.getDeclaredConstructor(String.class,double.class,JsonNode.class,JsonNode.class,JsonNode.class);
+        constructor.setAccessible(true);com.consense.service.vetting.FixedReferenceEvidence evidence=constructor.newInstance("fixed:authored-scope",0.9,payload,null,unit);
+        when(fixedScopeReferences.enabled()).thenReturn(true);when(fixedScopeReferences.frozenManifest()).thenReturn(JsonUtils.parse("{\"version\":\"AUTHORED\",\"developmentBaseline\":true}"));
+        when(fixedScopeReferences.search(eq("advisory"),anyString(),eq(10))).thenReturn(Collections.singletonList(evidence.asHit()));
+        when(fixedScopeReferences.evidence(any())).thenReturn(evidence);when(fixedScopeReferences.toModelMaterial(anyList(),eq(200000))).thenReturn(JsonUtils.write(payload));
+        String project=project(),session=session(project,"fullset","reference_only");
+        com.fasterxml.jackson.databind.node.ObjectNode raw=e1Answer("T3","reference_only","en","The reference source requires a record subject to its stated exception [1].");
+        java.util.concurrent.atomic.AtomicInteger generations=e1Provider(JsonUtils.write(raw));
+        List<JsonNode> events=e1Events(project,session,"fullset","reference_only","Explain the reference requirements and their relationship in English.");
+        JsonNode response=e1Complete(events),checks=e1AssertExchange(project,session,events,"en");
+        assertEquals(1,generations.get());assertEquals("reference_only",response.path("basisScope").asText());assertEquals(1,response.path("sources").size());
+        JsonNode source=response.path("sources").get(0);assertFalse(source.hasNonNull("documentId"),"The null fixed-reference document ID may be omitted by NON_NULL serialization; no project ID is invented");assertEquals("standard",source.path("sourceRole").asText());
+        assertEquals("fixed_development_baseline",source.path("fixedBaselineEvidence").path("evidenceBackend").asText());
+        assertEquals("unconfirmed",source.path("fixedBaselineEvidence").path("projectApplicability").asText());
+        assertFalse(source.path("fixedBaselineEvidence").path("sourceQualityAccepted").asBoolean(true));
+        String content=response.path("content").path("en").asText();assertTrue(content.contains("selected reference sources"));assertFalse(content.contains("selected project sources"));
+        assertTrue(content.contains("cites provisions from 1 file."));e1AssertScopeEvent(events,"Evidence scope for this explanation");
+        JsonNode scope=checks.path("applicationEvidenceScope");assertEquals("reference_only",scope.path("requestedBasisScope").asText());
+        assertEquals(JsonUtils.parse("[null]"),scope.path("documentIds"));assertEquals(sourceHash,scope.path("sourceHashes").get(0).asText());
+        assertEquals(originalHash,scope.path("fixedOriginalSourceSha256").get(0).asText());assertFalse(scope.path("independentFullHierarchyVerified").asBoolean(true));
+        e1AssertModelSections(raw.path("sections"),checks);
+    }
+
+    @Test void streamedRepairKeepsItsAcceptedPrefixAndAddsTheApplicationScopeOnlyAfterTheFinalUnits() throws Exception {
+        String project=project();source(project,"1. A notice must be recorded. AUTHORED REPAIR SOURCE");rebuild(project);String session=session(project,"contract","project_contract");
+        com.fasterxml.jackson.databind.node.ObjectNode initial=e1Answer("T3","project_contract","zhHans","所引资料要求保留通知记录 [1]。");
+        ((com.fasterxml.jackson.databind.node.ObjectNode)initial.path("sections").get(1)).put("id","accepted-analysis");
+        com.fasterxml.jackson.databind.node.ObjectNode rejected=((com.fasterxml.jackson.databind.node.ObjectNode)initial.path("sections").get(1)).deepCopy();
+        rejected.put("id","rejected-analysis");rejected.put("content","根据第 7 条，通知必须记录 [1]。");((com.fasterxml.jackson.databind.node.ArrayNode)initial.path("sections")).add(rejected);
+        com.fasterxml.jackson.databind.node.ObjectNode repair=e1Answer("T3","project_contract","zhHans","此处仅说明所引资料中的记录要求 [1]。");
+        com.fasterxml.jackson.databind.node.ObjectNode replacement=((com.fasterxml.jackson.databind.node.ObjectNode)repair.path("sections").get(1)).deepCopy();replacement.put("id","replacement-analysis");
+        repair.putArray("sections").add(replacement);
+        java.util.concurrent.atomic.AtomicInteger generations=e1Provider(JsonUtils.write(initial),JsonUtils.write(repair));
+        List<JsonNode> events=e1Events(project,session,"contract","project_contract","请用简体中文解释这些要求之间的关系。");
+        JsonNode response=e1Complete(events),checks=e1AssertExchange(project,session,events,"zhHans");
+        assertEquals(2,generations.get());e1AssertScopeEvent(events,"本次说明的证据范围");
+        assertFalse(response.path("content").path("zhHans").asText().contains("第 7 条"));
+        com.fasterxml.jackson.databind.node.ArrayNode expected=JsonUtils.mapper().createArrayNode();expected.add(initial.path("sections").get(0));expected.add(initial.path("sections").get(1));expected.add(replacement);
+        e1AssertModelSections(expected,checks);assertEquals(2,checks.path("attempts").size());
+        assertTrue(checks.path("attempts").get(0).path("rejections").toString().contains("unsupported_formal_clause_attribution"));
+        assertTrue(checks.path("attempts").get(1).path("rejections").isEmpty());
+        assertEquals(3,checks.path("attempts").get(0).path("sections").size());assertEquals(1,checks.path("attempts").get(1).path("sections").size());
+        assertEquals("replacement-analysis",checks.path("attempts").get(1).path("sections").get(0).path("id").asText());
+        List<JsonNode> sections=new ArrayList<>();for(JsonNode event:events)if("section".equals(event.path("event").asText()))sections.add(event.path("data"));
+        assertEquals(4,sections.size());assertEquals("\n\n"+initial.path("sections").get(1).path("content").asText(),sections.get(1).path("content").asText());
+        assertEquals("\n\n"+replacement.path("content").asText(),sections.get(2).path("content").asText());
+        verify(local,never()).chatStructured(anyList(),any());
+    }
+
+    private com.fasterxml.jackson.databind.node.ObjectNode e1Answer(String type,String basis,String language,String content) {
+        Map<String,Object> raw=new LinkedHashMap<>();raw.put("grounded",true);raw.put("basisScope",basis);raw.put("answer",content);raw.put("citations",Collections.singletonList("[1]"));
+        com.fasterxml.jackson.databind.node.ObjectNode envelope=(com.fasterxml.jackson.databind.node.ObjectNode)JsonUtils.parse(com.consense.service.advice.AdviceBudgetFixture.contract(JsonUtils.write(raw)));
+        envelope.put("questionType",type);for(JsonNode section:envelope.path("sections"))((com.fasterxml.jackson.databind.node.ObjectNode)section).put("language",language);return envelope;
+    }
+    private java.util.concurrent.atomic.AtomicInteger e1Provider(String... rawResponses) {
+        java.util.concurrent.atomic.AtomicInteger generations=new java.util.concurrent.atomic.AtomicInteger();when(local.supportsStreaming()).thenReturn(true);
+        doAnswer(call->{int index=generations.getAndIncrement();assertTrue(index<rawResponses.length,"No unplanned third provider generation");
+            String raw=rawResponses[index];prompts.add(JsonUtils.write(call.getArgument(0)));java.util.function.Consumer<String> onDelta=call.getArgument(2);onDelta.accept(raw);return raw;
+        }).when(local).chatStructuredStream(anyList(),any(),any(),any());return generations;
+    }
+    private List<JsonNode> e1Events(String project,String session,String scope,String basis,String question) throws Exception {
+        Map<String,Object> body=new LinkedHashMap<>();body.put("sessionId",session);body.put("scope",scope);body.put("basisScope",basis);body.put("question",question);
+        org.springframework.test.web.servlet.MvcResult pending=mvc.perform(post("/api/advice/{id}/ask/stream",project)
+                .header("X-ConSense-Advice-Request",UUID.randomUUID().toString().replace("-",""))
+                .contentType(MediaType.APPLICATION_JSON).content(JsonUtils.write(body))).andExpect(request().asyncStarted()).andReturn();
+        pending.getAsyncResult(30000);String wire=mvc.perform(asyncDispatch(pending)).andExpect(status().isOk()).andReturn().getResponse().getContentAsString(java.nio.charset.StandardCharsets.UTF_8);
+        List<JsonNode> events=new ArrayList<>();for(String frame:wire.replace("\r\n","\n").split("\n\n")) {
+            String event=null;StringBuilder data=new StringBuilder();for(String line:frame.split("\n")) {
+                if(line.startsWith("event:"))event=line.substring(6).trim();else if(line.startsWith("data:")){if(data.length()>0)data.append('\n');data.append(line.substring(5).trim());}
+            }
+            if(event!=null&&data.length()>0){com.fasterxml.jackson.databind.node.ObjectNode observed=JsonUtils.mapper().createObjectNode();observed.put("event",event);observed.set("data",JsonUtils.parse(data.toString()));events.add(observed);}
+        }
+        assertFalse(events.isEmpty(),wire);for(JsonNode event:events)assertNotEquals("error",event.path("event").asText(),wire);return events;
+    }
+    private JsonNode e1Complete(List<JsonNode> events) {
+        JsonNode complete=null;int count=0;for(JsonNode event:events)if("complete".equals(event.path("event").asText())){complete=event.path("data").path("response");count++;}
+        assertEquals(1,count);assertNotNull(complete);return complete;
+    }
+    private JsonNode e1AssertExchange(String project,String session,List<JsonNode> events,String language) throws Exception {
+        JsonNode response=e1Complete(events);String content=response.path("content").path(language).asText();StringBuilder streamed=new StringBuilder();
+        for(JsonNode event:events)if("section".equals(event.path("event").asText()))streamed.append(event.path("data").path("content").asText());
+        assertEquals(content,streamed.toString());JsonNode history=history(project,session);assertEquals(2,history.size());assertEquals(content,history.get(1).path("content").path(language).asText());
+        com.consense.domain.ChatMessage saved=messages.findById(response.path("messageId").asLong()).get();assertEquals(content,saved.getContent());
+        assertEquals(response.path("sources"),history.get(1).path("sources"));return JsonUtils.parse(saved.getAdviceChecksJson());
+    }
+    private void e1AssertScopeEvent(List<JsonNode> events,String title) {
+        int scopeIndex=-1,completeIndex=-1,count=0;StringBuilder body=new StringBuilder();
+        for(int index=0;index<events.size();index++){JsonNode event=events.get(index);if("complete".equals(event.path("event").asText()))completeIndex=index;
+            if("section".equals(event.path("event").asText())){JsonNode data=event.path("data");String content=data.path("content").asText();body.append(content);
+                if(content.contains(title)){count++;scopeIndex=index;assertTrue(content.startsWith("\n\n"+title));assertTrue(data.path("citations").isEmpty());assertTrue(data.path("sources").isEmpty());}
+            }
+        }
+        assertEquals(1,count);assertTrue(scopeIndex>=0&&scopeIndex<completeIndex);assertEquals(body.indexOf(title),body.lastIndexOf(title));
+        for(String internal:new String[]{"project_contract","reference_only","canonical","aliases"})assertFalse(events.get(scopeIndex).path("data").path("content").asText().contains(internal));
+    }
+    private void e1AssertModelSections(JsonNode expected,JsonNode checks) {
+        JsonNode actual=checks.path("sections");assertEquals(expected.size(),actual.size());assertEquals(expected.size(),checks.path("publishedSectionIds").size());
+        for(int index=0;index<expected.size();index++){JsonNode raw=expected.get(index),saved=actual.get(index);Iterator<Map.Entry<String,JsonNode>> fields=raw.fields();
+            while(fields.hasNext()){Map.Entry<String,JsonNode> field=fields.next();assertEquals(field.getValue(),saved.path(field.getKey()),"Original model field "+index+"."+field.getKey());}
+            assertEquals(raw.path("id"),checks.path("publishedSectionIds").get(index));
+        }
     }
 
     private VettingInputBudget.Observation observation(VettingInputBudget.Input input) {

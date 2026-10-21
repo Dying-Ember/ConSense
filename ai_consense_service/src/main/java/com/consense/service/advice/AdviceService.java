@@ -406,6 +406,23 @@ public class AdviceService {
         String content=publication.accepted.stream().map(publication::content).collect(Collectors.joining("\n\n"));
         if(AdvisoryHarness.text(answer.getMissingReason())&&!publication.rendersGap(answer.getMissingReason()))content+="\n\n"+AdvisoryHarness.missing(answer.getMissingReason(),language);
         List<String> citations=publication.accepted.stream().flatMap(s->s.getCitations().stream()).distinct().collect(Collectors.toList());
+        Map<String,Object> applicationEvidenceScope=null;
+        List<CitationVO> citedSources=sources.stream().filter(source->citations.contains(source.getEvidenceId())).collect(Collectors.toList());
+        if("T3".equals(answer.getQuestionType())&&hasAnalysis&&!citations.isEmpty()&&citedSources.size()==citations.size()
+                &&citedSources.stream().allMatch(source->evidenceScopeDocumentIdentity(source)!=null)){
+            Map<String,CitationVO> documents=new LinkedHashMap<>();
+            citedSources.forEach(source->documents.putIfAbsent(evidenceScopeDocumentIdentity(source),source));
+            String scopeText=AdvisoryHarness.relationEvidenceScope(language,fixedReferenceOnly,documents.size());
+            content+="\n\n"+scopeText;
+            if(publication.live){currentGuard.run();progress.section("\n\n"+scopeText,Collections.emptyList(),Collections.emptyList());}
+            // This application-owned limit describes performed checks, not legal hierarchy completeness.
+            applicationEvidenceScope=new LinkedHashMap<>();applicationEvidenceScope.put("questionType",answer.getQuestionType());
+            applicationEvidenceScope.put("requestedBasisScope",fixedReferenceOnly?"reference_only":"project_contract");applicationEvidenceScope.put("sourceScope",scope);
+            applicationEvidenceScope.put("documentIds",documents.values().stream().map(CitationVO::getDocumentId).collect(Collectors.toList()));
+            applicationEvidenceScope.put("sourceHashes",documents.values().stream().map(CitationVO::getSourceHash).collect(Collectors.toList()));
+            applicationEvidenceScope.put("fixedOriginalSourceSha256",documents.values().stream().map(source->source.getFixedBaselineEvidence()==null?null:source.getFixedBaselineEvidence().path("originalSourceSha256").asText(null)).collect(Collectors.toList()));
+            applicationEvidenceScope.put("citedAliases",citations);applicationEvidenceScope.put("independentFullHierarchyVerified",false);
+        }
         AskResponseVO response = new AskResponseVO(grounded,
                 grounded?LocalizedText.of("带依据的回答", "帶依據的回答", "Answer with basis"):LocalizedText.of("依据不足，尚不能完整定论", "依據不足，尚不能完整定論", "Insufficient evidence for a complete conclusion"),
                 LocalizedText.same(content),
@@ -420,6 +437,7 @@ public class AdviceService {
         Map<String,Object> checks=new LinkedHashMap<>();checks.put("policySha256",AdvisoryHarness.POLICY_SHA);checks.put("effectiveSystemSha256",VettingCorpus.hash(systemPrompt+SESSION_JSON_INSTRUCTION));checks.put("sourceSnapshotSha256",sourceSnapshot);
         if(capturedQwen!=null){checks.put("qwenGenerationActionId",capturedQwen.actionId);checks.put("qwenUsagePreflightPolicySha256",qwen.getPolicySha256());checks.put("qwenUsagePreflightKind",com.consense.service.llm.QwenChatUsagePreflight.KIND);}
         checks.put("modelIdentity",capturedIdentity);checks.put("questionType",answer.getQuestionType());checks.put("sections",answer.getSections());checks.put("publishedSectionIds",publication.accepted.stream().map(AdvisoryHarness.Section::getId).collect(Collectors.toList()));
+        if(applicationEvidenceScope!=null)checks.put("applicationEvidenceScope",applicationEvidenceScope);
         checks.put("applicationRejections",publication.errors);checks.put("attempts",publication.attempts);checks.put("missingReason",answer.getMissingReason());checks.put("clarificationGaps",answer.getClarifications());checks.put("meaning","Model self-checks plus application structural/identity/adoption checks; not independent legal acceptance");
         currentGuard.run();progress.phase("saving");
         persistExchange(projectId,scope,question,request,questionContext,response,session,selectedFixedHits,fixedSourceIdentity,conversation,sourceSnapshot,JsonUtils.write(checks),progress::checkCancelled);
@@ -755,6 +773,15 @@ public class AdviceService {
         return literal.equals(String.join("\n",members));
     }
 
+    private static String evidenceScopeDocumentIdentity(CitationVO source){
+        if(source==null||!AdvisoryHarness.text(source.getSourceHash())||"null".equals(source.getSourceHash()))return null;
+        if(AdvisoryHarness.text(source.getDocumentId())&&!"null".equals(source.getDocumentId()))return "document:"+source.getDocumentId()+"|"+source.getSourceHash();
+        JsonNode fixed=source.getFixedBaselineEvidence();
+        if(fixed!=null&&"fixed_development_baseline".equals(fixed.path("evidenceBackend").asText())
+                &&AdvisoryHarness.text(fixed.path("originalSourceSha256").asText(null)))
+            return "fixed:"+fixed.path("originalSourceSha256").asText()+"|"+source.getSourceHash();
+        return null;
+    }
     private CitationVO toCitation(VectorStore.SearchHit hit) {
         Map<String,Object> payload=hit.getPayload();
         if(fixedBaselineHit(hit)) {

@@ -1,3 +1,11 @@
+<!-- unified-progress40:start -->
+**2026-10-21：Advisory E1 同78项回归已实际全部通过并精确采用三文件源码，未部署；Vetting三行修复已推送`890b871`。当前运行仍formal19。SL已有单版真实解析诊断及嵌入／四题检索回归，七版本全库质量未通过，新增[专项质量说明](sl-technical-source-and-retrieval-quality-20261021.md)。统一Goal active。**
+
+E1 fixture05实际78/78、0failure/error/skip，46.688秒、16GiB／24GiB、pins保持／自然Job0；完整response保留全部retrieved来源，应用证据范围只计实际引用文件，SSE／保存／历史与repair前缀检查均通过。Root按测试字节精确采用AdviceService／AdvisoryHarness／既有Session集成测试；[采用票](../../../.local/e2e-20261020/advisory/formal19-real27b-single01/next-candidate01/e1-application-scope05/root-adoption-actual01.json)。未修改模型提示词或新增付费调用，D1语义FAIL及74/100旧同题评分保持，不用应用披露代替语义修好。旧夹具失败及对response/SSE筛选的误读均保留。
+
+Drafting五段keepLines单变量转换的首窗filter转义错误导致来源目的地0，保持传输UNKNOWN；只修Python owner argv重复转义的02窗正常完成，1260个目的地／465CS＋4旧removed恢复，但25页解码内容流与full11逐页字节完全相同，五组分页均无改善。因此不重做raster，不将无效候选采用产品；继续只读调查表格行的拆分控制。现存25页逐张视觉FAIL保持。升级／SL完整包前的新鲜86个API保全已实际完整200并验证，见[SQL20前API票](../../../.local/runtime-preparation20/api-before-receipt.json)；typed／SCRIPT20／隔离恢复及最新附件尚未执行，受保护H2保持。
+<!-- unified-progress40:end -->
+
 <!-- unified-progress39:start -->
 **2026-10-21 当前状态：主流程已有实际运行结果，主要剩余为结果质量、修复集成及完整比赛包。历史“整体80%”已撤回，不再用无固定分母的百分比表示交付完成率。Vetting JSON 三行修复已采用源码，运行仍为 formal19；Drafting 新完整文件通过生成与来源保全，最终分页仍 FAIL。统一 Goal active。**
 
