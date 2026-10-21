@@ -100,6 +100,12 @@ const evidenceCopy = {
 }
 
 const projectId = computed(() => store.activeProjectId)
+const projectName = computed(() => store.activeProject?.id === projectId.value ? pick(store.activeProject.name) : t('common.empty'))
+const activeSessionLabel = computed(() => {
+  if (!sessionId.value) return pick(evidenceCopy.legacy)
+  const selected = sessions.value.find(item => item.id === sessionId.value)
+  return selected ? sessionLabel(selected) : t('common.unconfirmed')
+})
 const sourcesUnavailable = computed(() => basisScope.value !== 'reference_only' && (indexStatus.value?.indexReason === 'current_sources_unavailable' || sourceErrorReason.value === 'source_unregistered'))
 const sourceProblemReason = computed(() => sourceErrorReason.value ?? indexStatus.value?.sourceReason ?? null)
 const sourcePreparationAvailable = computed(() => basisScope.value !== 'reference_only' && sourceProblemReason.value === 'source_unregistered'
@@ -138,6 +144,18 @@ const SCOPES = [
   { value: 'tender', label: () => t('advice.scope.tender') },
   { value: 'contract', label: () => t('advice.scope.contract') }
 ]
+
+function scopeLabel(value: string) {
+  return SCOPES.find(item => item.value === value)?.label() ?? t('common.unconfirmed')
+}
+
+function sessionLabel(item: AdviceSession) {
+  const date = new Date(item.createdAt)
+  const time = Number.isNaN(date.getTime()) ? '' : date.toLocaleString()
+  const basis = item.basisScope === 'project_contract' ? pick(evidenceCopy.projectBasis)
+    : item.basisScope === 'reference_only' ? pick(evidenceCopy.referenceBasis) : t('common.unconfirmed')
+  return [time, scopeLabel(item.scope), basis].filter(Boolean).join(' · ')
+}
 
 const scopeNote = computed(() => basisScope.value === 'reference_only' ? pick(evidenceCopy.referenceScope) : t('advice.scopeNote'))
 
@@ -616,6 +634,8 @@ async function askPrecedence() {
 
     <details v-if="basisScope !== 'reference_only'" class="surface source-scope section-gap">
       <summary>{{ t('advice.sourceScope.title') }} · {{ t('advice.sourceScope.includedCount', { count: scopeDocuments.filter(item => item.included).length }) }}</summary>
+      <p class="muted small">{{ pick(evidenceCopy.project) }} ID: {{ projectId }} · {{ pick(evidenceCopy.session) }} ID: {{ sessionId || '—' }}</p>
+      <p v-if="indexStatus?.evidenceBackend" class="muted small">{{ indexStatus.evidenceBackend }} · {{ indexStatus.sourceScope || scope }}</p>
       <p>{{ t('advice.sourceScope.note') }}</p>
       <div class="table-wrap">
         <table>
@@ -625,7 +645,7 @@ async function askPrecedence() {
             <td>{{ sourceRoleLabel(document) }}</td>
             <td>
               <div>{{ document.included ? t('advice.sourceScope.included') : t(`advice.sourceScope.reasons.${document.exclusionReason}`) }}</div>
-              <div>{{ sourceParseLabel(document) }} · {{ document.parseStatus }}</div>
+              <div>{{ sourceParseLabel(document) }}</div>
             </td>
           </tr></tbody>
         </table>
@@ -639,7 +659,7 @@ async function askPrecedence() {
           <div class="chat-header">
             <div>
               <h4>{{ t('advice.chat.title') }}</h4>
-              <div class="muted small">{{ pick(evidenceCopy.project) }}: {{ projectId }} · {{ pick(evidenceCopy.session) }}: {{ sessionId || pick(evidenceCopy.legacy) }}</div>
+              <div class="muted small">{{ pick(evidenceCopy.project) }}: {{ projectName }} · {{ pick(evidenceCopy.session) }}: {{ activeSessionLabel }}</div>
               <div class="muted small">{{ scopeNote }} · {{ indexHint }}</div>
               <p v-if="indexError" class="warning-note" role="alert">{{ indexError }}</p>
               <div v-if="sourcesUnavailable" class="warning-note" role="alert">
@@ -650,12 +670,12 @@ async function askPrecedence() {
                 </template>
                 <button class="btn" type="button" @click="router.push({ name: 'vetting' })">{{ pick(evidenceCopy.reviewSources) }}</button>
               </div>
+              <p v-if="preparingSources" class="muted small" role="status" aria-live="polite">{{ pick(evidenceCopy.preparing) }}</p>
               <div v-if="preparation" class="muted small" role="status">
                 <p>{{ t('advice.sourceScope.preparedCount', { prepared: preparation.preparedDocuments, selected: preparation.selectedDocuments }) }} · {{ pick(evidenceCopy.preparationUnverified) }}</p>
                 <p v-if="!preparation.complete" class="warning-note">{{ pick(evidenceCopy.preparationIncomplete) }}</p>
                 <ul><li v-for="result in preparation.results" :key="result.documentId">{{ result.fileName }} · {{ preparationStatus(result.status) }}<span v-if="result.reason"> · {{ sourceProblemText(result.reason) }}</span></li></ul>
               </div>
-              <div v-if="indexStatus?.evidenceBackend" class="muted small">{{ indexStatus.evidenceBackend }} · {{ indexStatus.sourceScope || scope }}</div>
             </div>
             <select v-model="scope" :aria-label="t('advice.sourceScope.title')" :disabled="!!sessionId || sessionCreating" style="width: auto; min-width: 170px">
               <option v-for="item in SCOPES" :key="item.value" :value="item.value">{{ item.label() }}</option>
@@ -666,7 +686,7 @@ async function askPrecedence() {
             <label>{{ pick(evidenceCopy.session) }}
               <select v-model="sessionId" :disabled="sessionCreating">
                 <option value="">{{ pick(evidenceCopy.legacy) }}</option>
-                <option v-for="item in sessions" :key="item.id" :value="item.id">{{ item.createdAt }} · {{ item.scope }} · {{ item.basisScope }}</option>
+                <option v-for="item in sessions" :key="item.id" :value="item.id">{{ sessionLabel(item) }}</option>
               </select>
             </label>
             <label>{{ pick(evidenceCopy.basis) }}

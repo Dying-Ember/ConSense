@@ -1,3 +1,18 @@
+<!-- runtime-integration59:start -->
+## progress59：运行包已升级，真实咨询回读通过，整套资料准备及新增分页校验继续保留失败
+
+**2026-10-22 01:08：Goal active。** 已推送的 `a830399` 已构建并部署18084；主后端11540已实核 `-Xmx65536m`，H2 owner39876及旧H57解析40600保持。新前端5176连接18084，旧5175/p1保原请求；没有重传35份原件或重发唯一审查start。
+
+- **前端人类标签与历史回读：** 项目名、会话本机时间、范围及证据用途显示已采用，技术来源状态移入现有详情；主树49控件方法、类型检查、生产构建实际通过。真实p3重新选择已保存会话，回读user43/assistant44；点击[14]后成功读取核验原件Specification并选中原生段落，未重新调用模型。见[主树控件](../../../.local/advice-human-labels28/successor01/root-controls.log)、[构建](../../../.local/advice-human-labels28/successor01/root-build.log)、[实际页面及会话](../../../.local/runtime-integration28/advice-human-history77.json)、[原件读取](../../../.local/runtime-integration28/source-and-prepare82.json)、[选中段落](../../../.local/runtime-integration28/prepare-current84.json)。引用切换按钮仍显示body路径、原件警告仍有技术信息，H1整体可读性保持待修。
+- **真实35资料当前状态：** fresh GET仍17 PARSED／13 PARTIAL／2 EXCLUDED／H57 PARSING／APU58与APB59待确认。latest run及progress仍null。H57不是仅凭数据库状态推定运行：已实核OCR用户服务active、MainPID833135，00:38至00:59仍连续原连接POST /ocr 200。保留原start，禁止重复点击。[实际回读](../../../.local/runtime-integration28/current-vetting78.json)、[运行日志](../../../.local/runtime-integration28/oer-journal83.txt)。
+- **来源列表与资料准备分别报告：** 新来源列表已实际返回35记录／30纳入，13历史来源hash与角色保全通过；这不授准备通过。16GiB旧后端的477086ms准备因Java heap OOM失败终态后，才替换为64GiB。新堆下仅发一次UI准备，234479ms返回HTTP200及完整30分母结果：5已登记核对、SCC因来源证据服务不可用失败、余24未执行；不能称本轮新增5份或原OOM已充分解决。页面随后仍在刷新索引状态，保busy、无重发。[唯一发送](../../../.local/runtime-integration28/prepare-heap64-click79.json)、[实际逐文件结果](../../../.local/runtime-integration28/source-and-prepare82.json)。8875与18780当前health可用，不以health代替该失败的根因证明；index/status仍有30秒观察超时，整套选择快照冗余大候选图正在做窄修复。
+- **最新真实Qwen质量：** 单真实Specification、同题、qwen3.8-27b完成一次前端SSE及保存，使用最新有效system和已有一次repair，不能推断模型整体优劣。固定13项独立源审为8 PASS／4 PARTIAL／1 FAIL：最终 `PSS > GS CEW > SL` 总括再次扩大GS的道路／排水及Site Boundary外条件；同号优先并替代、排除库引用并入的操作解释仍有遗漏。正式编号未知时本次使用“编号项”，引用和原件身份正确；有实质内容但H8业务FAIL。见[原答独审](../../../.local/runtime-integration28/bounded-answer-quality75.md)。通用发布门后继准备中，未授修复通过。
+- **Drafting normal04完整视觉：** 79页原图全部看完，46 PASS_WITH_LIMITS／30 WARN／3 FAIL；三组导语断页位于60→61、62→63、63→64。92目录正确，两处漏字恢复，项目家具与页码稳定；实际2b身份整包仍未验。[原验收票](../../../.local/drafting-main-integration27/normal04/actual01/visual-review01.json)。
+- **完整来源普查与continuation08实际验证：** 原件200触发段得到63关系／137排除；新增43普通导语及7 where→首定义，共50关系，精确采用registry与3测试。软件首窗13中12PASS／1FAIL，原失败是新测试错误要求每个选中导语自身分页，忽略5个已有前驱根；仅修测试后原方法1PASS，原失败保留，不能称单窗13全绿。normal05实际生成新79页，154起点关系／92目录／2052定位点通过；**新增完整段落检查实测p1648正文从物理62页续至63页，因此完整正常生成FAIL**。来源、compiled和output正文保持，不能把同页起点绿替代整段完整性。新79页已raster，全文及视觉继续检查，首正文段原生keepLines的共同后继准备中。[首窗](../../../.local/drafting-main-integration27/software06/result.json)、[补窗](../../../.local/drafting-main-integration27/software07/result.json)、[新正常生成失败](../../../.local/drafting-main-integration27/normal05/maven.log)、[实际定版测量](../../../.local/drafting-main-integration27/normal05/actual01/SCC-toc-finalization-proof.json)。08源码尚未部署，不提前关闭normal04三FAIL。
+
+H1–H8仍按固定要求验收；真实2b完整Vetting结果／2d格式对照报告、Drafting真实身份最终包、Advisory条件归纳、七版SL全部22,214技术页质量及O1–O3均未完成。SL质量未过，不绑定或打比赛包。
+<!-- runtime-integration59:end -->
+
 <!-- runtime-integration58:start -->
 ## progress58：SCC完整同族实际生成通过，咨询列表减负通过回归，准备统一升级
 

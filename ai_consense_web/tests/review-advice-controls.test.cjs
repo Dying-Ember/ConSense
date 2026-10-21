@@ -558,10 +558,17 @@ test('Advice source preparation is an explicit single mutation followed only by 
     await prepare.props.onClick(); await settle()
     assert.equal(h.requests.filter(request => request.url.includes('/sources/prepare?')).length, 1)
     assert.equal(button(h, 'Prepare advice sources').props.disabled, true)
+    for (const [locale, phrase] of [['zh-Hans', '正在准备咨询资料，问题草稿已保留。'], ['zh-Hant', '正在準備諮詢資料，問題草稿已保留。'], ['en', 'Preparing advice sources. Your question draft is retained.']]) {
+      h.store.changeLocale(locale); await settle()
+      const busy = find(h.root, node => node.tag === 'p' && node.props.role === 'status' && node.props['aria-live'] === 'polite')
+      assert.ok(busy, 'A disabled button must also explain that preparation is running')
+      assert.equal(text(busy), phrase)
+    }
     registered = true
     prepared.resolve({ sourceScope: 'fullset', selectedDocuments: 2, preparedDocuments: 2, complete: true, sourceQualityAccepted: false, humanConfirmed: false,
       results: [{ documentId: '12', fileName: source.fileName, status: 'prepared' }, { documentId: '13', fileName: 'second source.pdf', status: 'already_registered' }] })
     await first; await settle()
+    assert.equal(find(h.root, node => node.tag === 'p' && node.props.role === 'status' && node.props['aria-live'] === 'polite'), undefined)
     const mutations = h.requests.slice(before).filter(request => request.method !== 'get')
     assert.deepEqual(mutations.map(request => request.url), ['/advice/project-A/sources/prepare?scope=fullset'])
     assert.ok(h.requests.slice(before).some(request => request.url === '/advice/project-A/sources?scope=fullset'))
@@ -851,6 +858,41 @@ const sessions = [
   { id: 'session-B', projectId: 'project-A', scope: 'contract', basisScope: 'reference_only', createdAt: '2026-10-13T00:02:00Z' }
 ]
 function sessionSelect(h) { return find(h.root, node => node.tag === 'select' && find(node, option => option.tag === 'option' && option.props.value === 'session-A')) }
+
+test('Advice ordinary context and session options use project and localized business names while details retain identifiers', async () => {
+  const h = await harness({ initialView: 'advice', currentSources: [source, { ...source, documentId: '13', fileName: 'partial source.pdf', parseStatus: 'PARTIAL' }],
+    respondOverride: ({ url }) => url.endsWith('/sessions') ? sessions : url.includes('/index/status?') ? indexReply('AUTHORED index ready') : undefined })
+  try {
+    h.store.projects = [{ id: 'project-A', name: { zhHans: '已确认项目名称', zhHant: '已確認項目名稱', en: 'Confirmed project name' } }]
+    sessionSelect(h).props['onUpdate:modelValue']('session-A'); await settle()
+    const header = () => find(h.root, node => node.tag === 'div' && node.props.class === 'chat-header')
+    for (const [locale, name, scopeName, basisName, parsed, partial, referenceName] of [
+      ['zh-Hans', '已确认项目名称', '完整文件包及依据', '本项目合同咨询', '已解析', '部分解析', '仅解释固定标准（未确认项目采用）'],
+      ['zh-Hant', '已確認項目名稱', '完整文件包及依據', '本項目合約諮詢', '已解析', '部分解析', '僅解釋固定標準（未確認項目採用）'],
+      ['en', 'Confirmed project name', 'Complete package and references', 'Project contract advice', 'Parsed', 'Partially parsed', 'Fixed standard interpretation (adoption unconfirmed)']
+    ]) {
+      h.store.changeLocale(locale); await settle()
+      assert.ok(text(header()).includes(name), locale)
+      assert.ok(text(header()).includes(`${new Date(sessions[0].createdAt).toLocaleString()} · ${scopeName} · ${basisName}`), locale)
+      assert.doesNotMatch(text(header()), /project-A|session-A|fullset|project_contract|canonical/)
+      const options = sessionSelect(h)
+      assert.ok(text(options).includes(scopeName));assert.ok(text(options).includes(basisName));assert.ok(text(options).includes(referenceName))
+      assert.doesNotMatch(text(options), /project_contract|reference_only|fullset|2026-10-13T/)
+      const sourceDetails = find(h.root, node => node.tag === 'details' && String(node.props.class).includes('source-scope'))
+      const table = find(sourceDetails, node => node.tag === 'table')
+      assert.ok(text(table).includes(parsed));assert.ok(text(table).includes(partial));assert.doesNotMatch(text(table), /PARSED|PARTIAL/)
+      assert.match(text(sourceDetails), /project-A[\s\S]*session-A[\s\S]*canonical/)
+    }
+    h.store.projects = [{ id: 'project-A', name: localized('Updated project name') }];await settle()
+    assert.match(text(header()), /Updated project name/)
+    h.store.projects = [{ id: 'another-project', name: localized('Wrong project fallback') }];await settle()
+    assert.doesNotMatch(text(header()), /Wrong project fallback/)
+    sessionSelect(h).props['onUpdate:modelValue']('session-B');await settle()
+    assert.match(text(header()), /Contract conditions and specifications[\s\S]*Fixed standard interpretation/)
+    assert.doesNotMatch(text(header()), /session-B|reference_only/)
+    assert.equal(h.requests.some(request => request.method !== 'get'), false)
+  } finally { h.dispose() }
+})
 
 test('explicit session switch binds scope/basis and isolates late answer and history without submitting a model call', async () => {
   const oldMessages = deferred(), oldAsk = deferred()
