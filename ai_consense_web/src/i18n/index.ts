@@ -812,10 +812,12 @@ const en: typeof zhHans = {
 }
 
 function resolveInitialLocale(): AppLocale {
-  const stored = localStorage.getItem(STORAGE_KEY)
-  if (stored && (SUPPORTED_LOCALES as readonly string[]).includes(stored)) {
-    return stored as AppLocale
-  }
+  try {
+    const stored = localStorage.getItem(STORAGE_KEY)
+    if (stored && (SUPPORTED_LOCALES as readonly string[]).includes(stored)) {
+      return stored as AppLocale
+    }
+  } catch { /* Use the default language when browser storage is unavailable. */ }
   return 'zh-Hans'
 }
 
@@ -829,7 +831,7 @@ export const i18n = createI18n({
 
 export function setLocale(locale: AppLocale) {
   i18n.global.locale.value = locale
-  localStorage.setItem(STORAGE_KEY, locale)
+  try { localStorage.setItem(STORAGE_KEY, locale) } catch { /* Keep the selected language for this session. */ }
   document.documentElement.lang = locale
 }
 

@@ -86,6 +86,27 @@ Root 实际运行一次保存来源评分，52.093 秒、exit 0、输入 pins �
 
 [逐项源评](../../../.local/sl-fwp-seven-semantic-review01/semantic-source-review.json)（402,755 字节，SHA256 `c4788c164c7bef28acba6aab902258a43f7bf49c025e9ce3fa3a0dc554e578ef`）保留 224 个唯一版本／字段身份、源见值、候选值、目标产物、原页和全部 50 份输入的哈希保持；[评估说明](../../../.local/sl-fwp-seven-semantic-review01/review.md)列每版分母与未知项。每项 `candidateAdopted=false`，当前正常链消费明确为 `UNKNOWN_NOT_EXECUTED_OR_PROVEN_BY_THIS_REVIEW`。203 项文字／标量证据与 14 项私有候选关系不得合并宣称运行质量；canonical、实际检索、版本隔离、affine、精确像素／glyph 身份及七版全库验收均未提升为通过。本次 0 新捕获、OCR、渲染、模型、HTTP、SQL、索引、服务或比赛包动作。
 
+<!-- sl-normal-component-progress44:start -->
+## 当前Note9正常链的跨语言组件验证（progress44）
+
+本轮实际补上保存来源在Java和Python之间的组件消费证据，没有发起新的PDF提取、OCR或神经检索；不能由组件成功把完整SL来源准入、运行发布或质量改成通过。三个窗口分别执行和验收：
+
+| 接缝 | 实际执行及保存产物 | 仍不证明 |
+| --- | --- | --- |
+| Stage1 Java导出 | 1方法PASS、43.968秒、输入保持／自然Job0；实际18,211,812字节request有1,743单元、30关系、254PDF组。两个Note9方法均保原页20的三段ordinary-native续文 | 首窗使用前继私有fixture投影哈希，不能单独证明真实Python投影回到Java |
+| Python02 producer／CAS／冷registry | 后继1方法PASS、49.718秒含清理及pins，485输入／7,861依赖保持。实际36,817,060字节完整快照、18,211,936字节manifest CAS及私有registry root／revision alias逐字节一致；1,578可检索文字chunk＋165不可检索单元＝1,743。篡改manifest关系、截短派生关系、真实私有CAS损坏均拒绝，blob已恢复 | 私有registry存储和冷重建不是正常HTTP准入，不是fixed05发布或真实检索。前窗缺`samples.json`、0测试的导入失败保持 |
+| Stage3实际Python投影→Java pointer／模型／wire | 1方法PASS、40.266秒、2,069pins保持／自然Job0，最大1JVM、16GiB堆／24GiB Job。消费Python02完整快照及真实source／projection revisions；模型材料942,231 UTF-8字节，两个方法组完整、有序JSON相等，异修订指针拒绝 | `normalHttpAdmissionTested`、`canonicalScopeAdmissionPassed`、`sourceQualityAccepted`、`retrievalOrIndexingTested`仍全部false |
+
+实际输入图谱及binding、完整manifest和各修订封印已独立复算。Python02快照SHA256为`219a78f05e4a08ad40d94cd47d0dfd1b23c4f1ab912aec75d114fdc6cc8a4062`；projection为`60e69914b22999b2d49f7102bc4a49b34d5f284b9fe29653de87f3e06fdefd14`，projection revision为`30a90abfe7151ad690ce21d2adba38bd0b2e08239b7e1ecffdcae06dc8b42ba5`，source revision为`acf77b4bf732cede643a5f920791e0b7695be9646b18011230dde102e5faf4ca`。这些是实际组件身份，不用作者fixture哈希代替。
+
+证据分别为[Stage1导出审计](../../../.local/sl-com11-note9-current-chain-candidate01/canonical-java-export-audit01.json)、[Python02实际结果](../../../.local/sl-com11-note9-current-chain-candidate01/canonical-python-window02/results/green/result.json)、[Python02独立全hash审计](../../../.local/sl-com11-note9-current-chain-candidate01/canonical-python02-actual-audit.json)、[Stage3实际执行票](../../../.local/sl-com11-note9-current-chain-candidate01/canonical-java-window02/green/execution/owned-receipt.json)和[Stage3完整消费证据](../../../.local/sl-com11-note9-current-chain-candidate01/canonical-java-window02/green/execution/real-consumer-output/java-real-projection-consumer-evidence.json)。[Python前窗失败](../../../.local/sl-com11-note9-current-chain-candidate01/canonical-python-window01-failure-evidence.json)保留，不改为来源质量失败或后继通过。
+
+现有完整父原件scope policy要求SHA `6331…`，实际COM11章节派生件为`ce01…`，仍按`sl_source_hash_does_not_match_manifest`拒绝；没有重标full-parent SHA、改catalog role或翻quality布尔。法律归属／条件闭包继续unknown。当前7页＋历史219页同分母源评的局部Stream全通过、Network和pdfplumber失败，以及七版14页219PASS／5UNKNOWN，均保原分母与已暴露非盲测边界；组件链成功不外推至全22,214技术页、七版嵌入／检索或运行部署。
+
+Root[当前18780实际回执](../../../.local/sl-fwp-seven-semantic-review01/coordinator-before01/receipt.json)记录健康检查500／`software changed since import`，正常运行接缝需先恢复；本轮新的七版真实dual尚未发出，0新引擎调用。此前七个两页版本／28个method-page槽入口仍是准备，不能由历史原图或软件测试授dual完成。先补正常准入、真实同源双路／版本隔离检索和来源质量，SL质量未通过期间不执行比赛包绑定、压缩、归档或恢复。
+
+<!-- sl-normal-component-progress44:end -->
+
 ## 当前判断与后续验收
 
 普通原生正文已有可用实例和文字保全基础；复杂技术表格、图片内清单、条件与续页关系存在实际缺陷／未知，不能将整库称为高质量。嵌入成功只证明材料被编码和保存，不能补回缺失文字、错列数字或未建立的条件关系。

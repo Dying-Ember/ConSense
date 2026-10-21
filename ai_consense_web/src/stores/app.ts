@@ -10,6 +10,12 @@ export interface ToastState {
 }
 
 const LLM_PROFILE_STORAGE = 'consense-llm-profile'
+const ACTIVE_PROJECT_STORAGE = 'consense-active-project-id'
+function storedProjectId(): string {
+  try { return localStorage.getItem(ACTIVE_PROJECT_STORAGE) ?? '' }
+  catch { return '' }
+}
+
 function storedLlmProfile(): LlmProfileId | null {
   try {
     const stored = localStorage.getItem(LLM_PROFILE_STORAGE)
@@ -63,12 +69,14 @@ export const useAppStore = defineStore('app', () => {
   async function loadProjects() {
     projects.value = await projectApi.list()
     if (!projects.value.some((item) => item.id === activeProjectId.value)) {
-      activeProjectId.value = projects.value[0]?.id ?? ''
+      const stored = storedProjectId()
+      await switchProject(projects.value.some(item => item.id === stored) ? stored : projects.value[0]?.id ?? '')
     }
   }
 
   async function switchProject(projectId: string) {
     activeProjectId.value = projectId
+    try { localStorage.setItem(ACTIVE_PROJECT_STORAGE, projectId) } catch { /* Keep this session's choice when browser storage is unavailable. */ }
   }
 
   /** 新建项目：id 由前端生成（后端按 id upsert）；新建后自动切换 */
@@ -82,7 +90,7 @@ export const useAppStore = defineStore('app', () => {
       contractNo: contractNo || null
     })
     await loadProjects()
-    activeProjectId.value = created.id
+    await switchProject(created.id)
     return created
   }
 
@@ -115,7 +123,7 @@ export const useAppStore = defineStore('app', () => {
     if (projects.value.length <= 1) return
     await projectApi.remove(projectId)
     if (activeProjectId.value === projectId) {
-      activeProjectId.value = ''
+      await switchProject('')
     }
     await loadProjects()
   }

@@ -1,3 +1,49 @@
+<!-- unified-progress44:start -->
+## progress44：当前前端身份闭环、Drafting完整生成和SL跨语言组件链
+
+**2026-10-21：前端项目身份的手工采用／确认／拒绝／刷新恢复已有真实浏览器通过证据；Drafting完整生成已推进到新的25页逐页检查，仍有明确版式缺陷；SL已完成保存来源的三段组件消费，尚未通过正常准入、真实检索或七版全库质量。** 原Goal范围保持，历史失败与unknown不改判，比赛包继续后置。
+
+| 范围 | 本轮实际完成 | 当前未关闭的验收 |
+| --- | --- | --- |
+| Drafting软件 | 97项首窗96PASS／1FAIL之后，补窗6PASS；按逐方法身份与未变源码复核，跨窗覆盖98个唯一方法，共103次执行，含5次重复。原测试编译0执行和首窗失败均保留 | 不是单窗98全绿；软件通过不替代最终Word／PDF版式或项目包业务验收 |
+| Drafting full12 | 实际完整生成NTT／SCT／SCC及SCT转换，1JUnit通过；103.610秒、16GiB堆／24GiB Job、34,591输入pins保持。SCT为25页，逐张原始PNG全部实看；P244“Schedule of Proportions”含引号及“of”已恢复，150个Latin目标全文匹配，旧311正确项无损失 | SCT5标题在第12页底孤立，首条正文从第13页开始，最终版式FAIL；3公式精确几何、原生Word、2b覆盖及最终前端包验收未通过；Drafting候选未采用／部署 |
+| 前端项目身份 | 用户授权新建ego测试工作区5；5175页面手工采用后先提示比较，拒绝替换保留原metadata，明确确认才更新顶部和API。修复当前项目选择不持久化的缺口；刷新保持所选项目及已采用身份，失效ID按既有首项回退 | 此轮没有走模型识别候选路径、没有新生成最终三文件或核其页眉页脚；截图超时保留，不能授像素版式通过 |
+| SL Note9组件 | Stage1 Java导出、Python02真实producer／CAS／冷registry、Stage3 Java实际Python投影消费，三个独立窗口各1方法通过。保留两个Note9方法的实际续段、来源修订和完整wire；错误修订及CAS／派生关系篡改拒绝 | 私有组件链不是正常HTTP准入、固定库发布或检索；完整原件policy继续拒绝章节派生件，source／admission／retrieval均保持false |
+
+### Drafting：跨窗软件证据与完整产物仍需分开
+
+[98唯一方法复核](../../../.local/sct-row143-integration03/runtime-preparation/cross-window98-actual-review.json)确认：首窗97项执行保留96PASS／1FAIL；补窗6项全过，新增1个方法并复验5个受影响方法，合计103次执行、98个唯一身份。92个未受影响的方法体和所有产品源码与前窗逐字节相同。后继修正测试对无文本Tab run字体hint的保留预期，并将整XML逆向比较改为实际根元素、要求非空；没有通过清空比较或删除受保护hint取得绿色。不能写成原首窗改判或单窗98全绿。
+
+[full12实际生成与逆向审计](../../../.local/sct-row143-integration03/post12/actual-full12-stage-review.json)及[执行票](../../../.local/sct-row143-integration03/runtime-preparation/full12/execution/owned-receipt.json)记录本次一次完整生成／转换：新SCT PDF为269,685字节，SHA256 `58bcfa5e7718f22d42f2c878248d5ea4dd1904240d3a0109fc857447defcbcea`。原469绑定保持；143行／150Latin段策略相对full11可完整逆向核对，其余SCT ZIP项及NTT／SCC完整包相对full11的字节保持。执行103.610秒不含其后32.187秒文件／JUnit审计，两者不与其他窗口混算。
+
+[来源绑定全文与身份核对](../../../.local/sct-row143-integration03/post12/full12-text-and-identity-review.json)将315个非空生成段分为312个全文同页匹配及3个原公式几何unknown；旧311正确项无回退，150Latin目标全部全文匹配。P244现在位于第5页，“Schedule of Proportions”及两侧弯引号完整。另一次[25页raster执行](../../../.local/sct-row143-integration03/raster12-preparation/native-raster/execution/owned-receipt.json)完成，4.188秒、396输入pins保持；随后[25页逐张原图目验](../../../.local/sct-row143-integration03/post12/visual-review25-actual.json)确认项目名、合约编号及SCT/1–25连续一致，页眉12pt、页脚10／12pt的来源差异保持，未见空正文页或明显文字裁切／重叠。九个旧目标未再见单词短尾。
+
+最终视觉仍FAIL：`SCT5 Submissions required with tender`（来源段585）独留第12页底，正文第(1)条从第13页开始；第14页右上短横线归属和4／5／8页局部间距仍unknown。公式806／810／811虽可读，也没有提升精确几何。下一修复须沿真实段／表行与完整标题族定位，不能只为第12页或SCT5特判。六产品的主树候选闭包见[只读采用范围](../../../.local/sct-row143-integration03/full12-main-drafting-closure.json)，当前尚未采用，不能从旧隔离树覆盖其余主树改动。
+
+### 前端：真实身份确认与刷新恢复已通过
+
+[实际前端采用票](../../../.local/frontend-project-restore01/root-adoption-actual01.json)记录2产品＋1新增测试精确采用：只保存当前项目ID，待项目列表实际返回后确认存在再恢复；失效／删除ID回到既有首项，存储拒绝时保持本会话可用。语言模块的既有存储读写也做同一容错，避免在store建立前启动失败。16/16身份／选择／采用测试通过（新8＋旧8），既有LLM controls和完整`vue-tsc --noEmit`均exit0；[identity](../../../.local/frontend-project-restore01/checks/identity.json)、[LLM](../../../.local/frontend-project-restore01/checks/llm.json)、[typecheck](../../../.local/frontend-project-restore01/checks/typecheck.json)执行票分别为6.875／5.323／5.744秒。
+
+后继[浏览器最终复核](../../../.local/browser-round20-check01/identity-ui-root-final-review01.json)为`PASS_BROWSER_FIXED_IDENTITY_CONFIRM_CANCEL_REOPEN_AND_SELECTION_RESTORE`：工作区5、`http://127.0.0.1:5175`，唯一新增隔离项目`proj_mvhmaeomxb5h`；已采用合约编号`UI-DF44-ADOPTED-B`、项目名`E2E 身份界面验收 已采用 B 20261021`在表单、顶部、API和刷新恢复后保持，比较提示关闭。原20项目metadata无变化，失效ID实际回退到`e2e-advisory-small-20261020`并修正已存选择。页面截图调用超时且未重复，DOM／持久证据不替代截图像素版式。本轮该前端验证0付费模型、0服务重启。
+
+另一次[真实Vetting模型选择测试](../../../.local/browser-round20-check01/vetting-model-switch42.json)实际切换27B→Flash-Next→27B，历史MiniMax任务仍保留原模型身份；切换前后完整job body逐字节相同（SHA256 `e27c22b38f1a3a6abce36cb462109197afeb40e87ae5b2eabc395d57a73d3356`），未提交新任务或模型调用。重开时的短暂进度状态在完整详情返回后正确进入COMPLETED，未作为持久缺陷。
+
+**SQL20早于上述新项目、手工采用值和明确确认后的metadata写入，不能继续称其覆盖当前全部数据。下一次后端替换前必须补当前新增写入和完整API的保全；这属于开发数据保护，不是恢复比赛包作业。** 浏览器通过限于本条手工采用及确认路径；识别候选、最终三文件生成、页眉页脚和像素版式仍未授通过。
+
+### SL：保存来源的实际跨语言组件已接通，正常准入与运行仍有缺口
+
+Stage1 [Java实际导出审计](../../../.local/sl-com11-note9-current-chain-candidate01/canonical-java-export-audit01.json)与[执行票](../../../.local/sl-com11-note9-current-chain-candidate01/canonical-java-window01/green/execution/owned-receipt.json)为1方法通过、43.968秒、输入保持／自然Job0。18,211,812字节真实request含1,743单元、30关系、254原生PDF组；Stream与Network的Note9均保留原页20三段ordinary-native后缀。该窗最初使用私有前继fixture哈希，不单独证明真实Python投影回到Java。
+
+Python前窗因缺`samples.json`在导入阶段失败，17.297秒、0测试，原票[保留](../../../.local/sl-com11-note9-current-chain-candidate01/canonical-python-window01-failure-evidence.json)。后继[Python02实际票](../../../.local/sl-com11-note9-current-chain-candidate01/canonical-python-window02/green/receipt.json)、[结果](../../../.local/sl-com11-note9-current-chain-candidate01/canonical-python-window02/results/green/result.json)及[独立全hash审计](../../../.local/sl-com11-note9-current-chain-candidate01/canonical-python02-actual-audit.json)确认1方法通过、49.718秒含保全／清理／pins、485输入及7,861依赖前后保持／自然Job0。实际producer写CAS并由fresh ArtifactStore和UnifiedCanonicalSourceRegistry冷重建：36,817,060字节完整快照、18,211,936字节manifest CAS、1,743单元／1,578可检索文字chunk／165显式不可检索单元／30关系／254PDF组均有账。篡改manifest关系、截短派生关系和真实私有CAS损坏三个拒绝控制通过，损坏blob已恢复。
+
+Stage3 [实际Java窗口](../../../.local/sl-com11-note9-current-chain-candidate01/canonical-java-window02/green/execution/owned-receipt.json)已完成1方法通过、40.266秒、2,069输入pins保持／自然Job0，最大1 JVM、16GiB堆／24GiB Job，`terminalShapeMatchesPlan=true`。[真实投影消费结果](../../../.local/sl-com11-note9-current-chain-candidate01/canonical-java-window02/green/execution/real-consumer-output/java-real-projection-consumer-evidence.json)绑定Python02完整快照SHA256 `219a78f05e4a08ad40d94cd47d0dfd1b23c4f1ab912aec75d114fdc6cc8a4062`，实际Java pointer→模型材料→ordered wire保持两个方法组，模型材料942,231 UTF-8字节，完整有序JSON相等，异修订指针被拒。三段各有独立执行票，不合并为一次生产链运行。
+
+章节派生原件SHA与完整父原件scope policy不符，仍按`sl_source_hash_does_not_match_manifest`拒绝，没有冒充完整原件或改quality/admission布尔；`normalHttpAdmissionTested=false`、`canonicalScopeAdmissionPassed=false`、`sourceQualityAccepted=false`、`retrievalOrIndexingTested=false`保持。原catalog role及source binding不改，法律条件闭包unknown继续保留。672格／12表外成员／87关系／5组的当前7页＋历史219页源评，以及七版224项219PASS／5UNKNOWN的旧有界成绩不因组件通过扩大。
+
+Root本次现场检查18780健康返回500／`software changed since import`，运行接缝待恢复；当前尚未发起本轮真实Paddle／MinerU dual，0新引擎调用，未为此重启服务。[实际健康／身份／日志回执](../../../.local/sl-fwp-seven-semantic-review01/coordinator-before01/receipt.json)记录HTTP500及原PID619420，原cgroup仅此主进程；不由离线组件票替代。七版正常准入／版本隔离真实检索、Advisory D1真实语义、Vetting内容／续页报告、Drafting最终Word与整个项目包继续未完成；SL质量未通过，不做比赛包绑定、压缩、归档或恢复。
+
+<!-- unified-progress44:end -->
+
 <!-- unified-progress43:start -->
 **2026-10-21 当前：原 Goal 已实查恢复 active；SL 当前 Note9 修复的同分母源评分已实际完成，Drafting 联合97项为96 PASS／1 FAIL。比赛包继续后置。**
 

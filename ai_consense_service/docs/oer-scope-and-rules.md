@@ -1,3 +1,7 @@
+<!-- unified-progress44:start -->
+**2026-10-21：前端项目身份的手工采用、拒绝替换、明确确认与刷新恢复选择已实际通过；Drafting full12 的25页仍有 SCT5 标题孤立，最终版式未通过。** Drafting 软件跨窗覆盖98个唯一方法、共103次执行，原失败保留；SL Note9 的 Java导出→Python实际CAS／冷registry→Java真实投影消费三段组件已各完成实际验证，仍未授来源准入、真实检索或七版全库质量。18780当前运行接缝需恢复，尚未执行新的真实dual。新UI项目及采用值晚于SQL20，下一后端替换前须补当前数据保全；详见[progress44](testing/three-module-runtime-progress-20261021.md#progress44当前前端身份闭环drafting完整生成和sl跨语言组件链)和[SL质量说明](testing/sl-technical-source-and-retrieval-quality-20261021.md#当前note9正常链的跨语言组件验证progress44)。SL质量未通过，不执行比赛包绑定、压缩、归档或恢复。
+<!-- unified-progress44:end -->
+
 <!-- unified-progress43:start -->
 **2026-10-21：Goal 已实查恢复 active；SL Note9 当前 capture 的同分母源评分完成。** Stream 的672格／12表外成员／87关系／5完整组保持全通过，Network与pdfplumber旧失败不删；输入由当前7页和逐字节保留的历史219页组成，不授fresh226、全库、canonical发布或真实检索。Drafting联合97项实际96PASS／1FAIL，继续定位字体hint统计与保留契约，尚未采用。见 [progress43](testing/three-module-runtime-progress-20261021.md) 和 [SL质量说明](testing/sl-technical-source-and-retrieval-quality-20261021.md)。SL质量优先、比赛包后置不变。
 <!-- unified-progress43:end -->
