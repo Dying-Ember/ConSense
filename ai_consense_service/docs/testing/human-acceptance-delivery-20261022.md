@@ -1,6 +1,6 @@
 # ConSense 三模块验收入口
 
-状态：准备交付中，Goal当前active。Drafting 的现有六份文件、Advisory 已保存问答可以查看；PRE生产保存及完整回读已通过，真实35件Vetting后继任务已唯一启动，当前来源准备中，尚无正式整套报告。本文随实际结果补齐，不代表 Goal 已完成。
+状态：准备交付中，Goal保持active。Drafting六份文件与Advisory已保存问答可以查看；PRE生产保存／完整回读及来源准备冻结顺序修复已过，runtime37已部署。真实35件新任务已唯一启动并取得句柄，尚无正式整套报告；本文不代表Goal已完成。
 
 ## 打开前端
 
@@ -36,7 +36,7 @@
 
 ## 真实整套审查报告
 
-在 Vetting 审查中选择“真实2b项目验收-恢复20261021”。35件为33件范围内文字材料及2件仅识别排除的图纸；部分解析和来源质量限制保留。旧run844e5e5b在封存保存时FAILED／0/19；同一PRE已复用并通过生产保存和独立完整读回。10:21已从前端唯一启动后继任务，刷新后接回同一新任务，当前RUNNING／来源准备中；不要重复点击运行。模型为Qwen27B，原件资料快照保持。
+在 Vetting 审查中选择“真实2b项目验收-恢复20261021”。35件为33件范围内文字材料及2件仅识别排除的图纸，部分解析和来源质量限制保留。旧run844e5e5b的封存保存故障已解除，随后runf6e305b8在来源准备后冻结快照失配FAILED／0/19。公共来源入口顺序修复已clean回归84项全过并部署，原件资料、取值与文稿升级保全通过。11:13:41前端仅激活一次，11:14:47取得新任务`022d925f-4a5d-4291-879c-1a88ed2c4a14`，11:15回读QUEUED；模型为Qwen27B。只刷新接回此任务，不重复点击运行。
 
 待后继真实任务完成后，从页面分别导出Word和PDF，打开实际文件，核对Comments与Checklist的可读性、原件引用、人工处理保存回读及2d参考版式。此处尚无可供替代的正式整套报告，不以旧测试报告填充。
 
@@ -47,8 +47,8 @@
 <details>
 <summary>维护接续信息</summary>
 
-- 当前业务后端 runtime36：18086／PID60772，64GiB；前端5177，测试空间14/p1。
-- 真实审查项目 `proj_mvi0kncwu0as`；旧运行 `844e5e5b-545b-4034-bf6e-a75e37daef9a` 已FAILED，后继 `f6e305b8-5fb7-4cc2-9ecb-94e4aa0c27d8` 当前RUNNING/preparing，只接回此句柄，不盲重发。
+- 当前业务后端 runtime37：18086／PID51296，64GiB；前端5177，测试空间15/p1。
+- 真实审查项目 `proj_mvi0kncwu0as`；旧410／844／f6均FAILED且保留，新任务`022d925f-4a5d-4291-879c-1a88ed2c4a14`在11:15为QUEUED，沿同一句柄观察；唯一激活标记`.local/runtime-integration37/start-real35-once.json`。
 - PRE恢复为binding33；`.local/runtime-integration36/recover-pre01/result.json`记录生产保存、独立连接完整读回及0重复POST／0模型调用。
 - 起草项目 `proj_mvifhslpws1m`；咨询项目 `e2e-qwen-controlled-spec-20261020-r14`，会话 `6a7a4262-e773-4e1c-bfe2-922f9f10d51e`。
 - 已交付代码提交 `96d3fe8816ba3a4ad1aa1bedaf0829d401a7eb16`，远端同分支精确核同；本文件是随后整理的验收入口。

@@ -44,6 +44,21 @@ class CanonicalEvidenceServiceTest {
     private String assetFailure,healthOverride;
     private int remoteCalls;
 
+    @Test void registeredReviewedSourcesDoNotRequireNormalParserInputsOrPublication(){
+        register("vetting");assertNull(document.getParseCoverageJson());assertEquals("[]",document.getStructuredContentJson());
+        int before=remoteCalls;
+        assertNull(service.prepareNormalCandidate("project-a",11L,"vetting"));
+        assertNull(service.prepareNormalCandidate("project-a",11L,"advisory"));
+        assertEquals(before,remoteCalls);assertNull(document.getNormalCandidateJson());
+    }
+
+    @Test void unregisteredCandidatePreparationReusesTheExistingCpuServiceWithoutPublication(){
+        NormalObservedPreparationService preparation=mock(NormalObservedPreparationService.class);
+        org.springframework.test.util.ReflectionTestUtils.setField(service,"normalPreparation",preparation);
+        JsonNode graph=JsonUtils.parse("{\"preparedFixture\":true}");when(preparation.prepare("project-a",11L,"vetting")).thenReturn(graph);
+        assertSame(graph,service.prepareNormalCandidate("project-a",11L,"vetting"));verify(preparation).prepare("project-a",11L,"vetting");assertEquals(0,remoteCalls);
+    }
+
     @BeforeEach void prepare() throws Exception {
         raw=new String(resource("authored-three-page-projection.json"),StandardCharsets.UTF_8);fixture=JsonUtils.parse(raw);
         document=new SourceDocument();document.setId(11L);document.setProjectId("project-a");document.setCategory(SourceDocument.CATEGORY_VETTING_PACKAGE);

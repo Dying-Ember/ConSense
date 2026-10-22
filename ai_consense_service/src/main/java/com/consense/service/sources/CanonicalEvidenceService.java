@@ -62,6 +62,13 @@ public class CanonicalEvidenceService {
         return Collections.emptyList();
     }
 
+    /** Prepare only unregistered sources before callers freeze a run; existing reviewed/normal bindings keep their authority. */
+    public JsonNode prepareNormalCandidate(String projectId,Long documentId,String module){
+        validModule(module);
+        if(!latestForModule(bindings.findByProjectIdAndDocumentIdOrderByIdDesc(projectId,documentId),module).isEmpty())return null;
+        return normalPreparation.prepare(projectId,documentId,module);
+    }
+
     /** Explicit normal-parser preparation, independent of the reviewed registration authority. */
     public boolean prepareNormalObserved(String projectId,Long documentId,String module){
         validModule(module);

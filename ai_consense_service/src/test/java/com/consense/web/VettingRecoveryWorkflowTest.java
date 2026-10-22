@@ -70,6 +70,11 @@ class VettingRecoveryWorkflowTest {
     @MockBean AiGateway ai;
     @MockBean VettingRetrievalClient retrieval;
     private final AtomicReference<List<VettingCorpus.Chunk>> corpus=new AtomicReference<>();
+    @AfterEach void waitForOriginalWorkerBeforeResettingSharedMocks() throws Exception {
+        // A recovered run can be terminal while its superseded worker still uses shared mocks.
+        ExecutorService worker=(ExecutorService)org.springframework.test.util.ReflectionTestUtils.getField(service,"worker");
+        worker.submit(()->{}).get(10,TimeUnit.SECONDS);
+    }
     @BeforeEach void fixture(){
         // Explicit renderer replacement: durable recovery/content only, not LibreOffice acceptance.
         doAnswer(call->VettingDocxPdfFixture.render(call.getArgument(0))).when(drafting).renderPdf(any(byte[].class));

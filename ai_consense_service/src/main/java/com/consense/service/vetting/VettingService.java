@@ -482,6 +482,12 @@ public class VettingService {
             VettingLlmOperation vettingOperation=semantic.captureOperation(operation);
             String supplement=semantic.configuredSupplement();
             List<SourceDocument> snapshot=sourceSet(projectId);
+            if(canonicalEnabled()) {
+                // Freeze the prepared graph with its source, before run hashes and identity closures are captured.
+                for(SourceDocument document:snapshot){JsonNode prepared=evidencePreparation.prepareNormalCandidate(projectId,document.getId(),"vetting");
+                    if(prepared!=null)document.setNormalCandidateJson(JsonUtils.write(prepared));}
+                assertMaterialSourcesCurrent(projectId,snapshot);
+            }
             if(!originalSourcesCurrent(snapshot))throw new BizException(4104,"审查原件字节与已保存版本不一致，请重新上传和解析后审查。");
             if(snapshot.isEmpty()||(!canonicalEnabled()&&snapshot.stream().noneMatch(this::reviewable))) throw new BizException(4101,"审查源集没有可用正文，请上传并检查解析状态");
             VettingRun run=new VettingRun(); run.setId(UUID.randomUUID().toString()); run.setProjectId(projectId); run.setLang(normalizeLang(lang)); run.setStartedAt(Instant.now());

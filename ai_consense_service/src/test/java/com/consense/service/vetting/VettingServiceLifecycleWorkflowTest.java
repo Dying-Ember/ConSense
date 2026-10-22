@@ -41,8 +41,48 @@ class VettingServiceLifecycleWorkflowTest {
     @SpyBean VettingFindingRepository findings;
     @MockBean VettingSemanticReview semantic;
     @MockBean com.consense.service.sources.CanonicalEvidenceService evidencePreparation;
+    @MockBean com.consense.service.sources.NormalObservedPreparationService normalPreparation;
     @SpyBean OerBusinessEvidence oer;
     @BeforeEach void resetFixture(){props.getVetting().setServiceProbeDirectory(null);props.getVetting().setProbeDirectory(null);props.getVetting().setExportProbeDirectory(null);props.getVetting().setMaxRiskFindings(1);props.getDocument().setProbeDirectory(null);}
+
+    @BeforeEach void persistPreparedCandidate(){
+        when(normalPreparation.prepare(anyString(),anyLong(),eq("vetting"))).thenAnswer(call->{
+            SourceDocument fresh=documents.findById(call.<Long>getArgument(1)).orElseThrow(AssertionError::new);
+            NormalSourceCandidateGraph.capture(fresh);documents.saveAndFlush(fresh);return JsonUtils.parse(fresh.getNormalCandidateJson());
+        });
+        when(evidencePreparation.prepareNormalCandidate(anyString(),anyLong(),eq("vetting"))).thenAnswer(call->normalPreparation.prepare(call.getArgument(0),call.getArgument(1),call.getArgument(2)));
+    }
+
+    @Test void canonicalRunFreezesThePersistedPreparedGraphBeforeLoadingTheCorpus() throws Exception {
+        String project=project();SourceDocument doc=source(project,"SCT","SCT.txt","SCT 1.1 Preserve the source while preparing its observations.");
+        doReturn(true).when(oer).enabled();
+        doAnswer(call->{normalPreparation.prepare(project,doc.getId(),"vetting");return true;})
+                .when(evidencePreparation).prepareNormalObserved(project,doc.getId(),"vetting");
+        doAnswer(call->{
+            List<SourceDocument> captured=call.getArgument(2);assertEquals(1,captured.size());
+            SourceDocument persisted=documents.findById(doc.getId()).orElseThrow(AssertionError::new);
+            assertEquals(persisted.getNormalCandidateJson(),captured.get(0).getNormalCandidateJson());
+            java.lang.reflect.Method hash=VettingService.class.getDeclaredMethod("sourceSetHash",List.class);hash.setAccessible(true);
+            assertEquals(hash.invoke(null,captured),runs.findFirstByProjectIdOrderByStartedAtDesc(project).get().getSourceSnapshotSha256());
+            throw new IllegalStateException("authored stop after consistently frozen prepared source");
+        }).when(oer).load(eq(project),eq("vetting"),anyList());
+        BizException error=assertThrows(BizException.class,()->service.run(project,"en"));
+        assertTrue(error.getMessage().contains("authored stop after consistently frozen prepared source"),error.getMessage());
+        verify(oer).load(eq(project),eq("vetting"),anyList());
+    }
+
+    @Test void sourceCoverageChangedDuringPreparationCannotBeIncludedInTheFrozenRun() throws Exception {
+        String project=project();SourceDocument doc=source(project,"SCT","SCT.txt","SCT 1.1 Reject a concurrent source coverage change.");
+        doReturn(true).when(oer).enabled();
+        when(normalPreparation.prepare(project,doc.getId(),"vetting")).thenAnswer(call->{
+            SourceDocument changed=documents.findById(doc.getId()).orElseThrow(AssertionError::new);
+            changed.setParseCoverageJson("{\"complete\":false,\"concurrentlyChanged\":true}");
+            NormalSourceCandidateGraph.capture(changed);documents.saveAndFlush(changed);return JsonUtils.parse(changed.getNormalCandidateJson());
+        });
+        assertThrows(IllegalArgumentException.class,()->service.startRun(project,"en"));
+        assertFalse(runs.findFirstByProjectIdOrderByStartedAtDesc(project).isPresent());
+        verify(oer,never()).load(anyString(),anyString(),anyList());verify(evidencePreparation,never()).prepareNormalObserved(anyString(),anyLong(),anyString());
+    }
 
     @Test void canonicalRunPreparesItsSelectedNormalSourceBeforeLoadingTheCorpus() throws Exception {
         String project=project();SourceDocument doc=source(project,"SCT","SCT.txt","SCT 1.1 Retain the complete original source.");

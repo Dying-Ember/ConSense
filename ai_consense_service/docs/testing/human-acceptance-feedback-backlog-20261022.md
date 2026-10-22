@@ -1,6 +1,6 @@
 # 先完成既定全流程，再处理新增反馈
 
-**2026-10-22当前[人类验收Goal](human-acceptance-mainline-goal-20261022.md)已恢复active，下文问题保留，不作为不断新增的前置门。** run844e5e5b因H2巨型CLOB整数溢出FAILED／0/19；原PRE已沿生产边界保存并fresh完整回读通过，runtime36保持，10:21从前端唯一启动后继f6e305b8-5fb7-4cc2-9ecb-94e4aa0c27d8，当前RUNNING/preparing，继续同一句柄。任务空间已按永久授权从丢失的13恢复14/p1；当前NTT／SCT保存稿PDF和咨询52历史／原件高亮已补查，不重生成或新提问。
+**2026-10-22当前[人类验收Goal](human-acceptance-mainline-goal-20261022.md)保持active，下文问题保留，不作为不断新增的前置门。** 旧后继f6e305b8于10:44因准备后派生图与先前冻结快照不符FAILED／0/19，未进入内容审查。最小修复复用CanonicalEvidenceService及NormalObservedPreparationService，在冻结前准备未登记来源；已有reviewed／normal登记与严格来源校验保持。clean回归84项全过（green06），旧green05的83通过／1夹具ERROR保留；测试夹具已等待原worker退出再重置mock。runtime37／18086／PID51296／64GiB已部署，35件、80取值、三保存修订及咨询索引升级前后精确相同。11:13:41从前端仅激活一次，11:14:47取得新任务022d925f-4a5d-4291-879c-1a88ed2c4a14，11:15回读QUEUED；来源快照433f610a…，27B配置8fcc18b3…保持。只接回此句柄，不重发。 当前NTT／SCT保存稿PDF和咨询52历史／原件高亮已补查，不重生成或新提问。
 
 2026-10-22 用户明确纠偏：“我每次告诉你哪里有问题，是让你记下来，完成既定目标之后再去修。”
 
@@ -8,20 +8,20 @@
 
 ## 当前主线状态
 
-实际2b的35文件Vetting原run `410d9a33-ae9b-41f7-ae56-c24f24d16f27` 因来源期限FAILED；后继 `844e5e5b-545b-4034-bf6e-a75e37daef9a` 于09:37:54在PRE封存保存时FAILED／0/19，没有正式报告。原因是H2的1GiB内联CLOB阈值使957,346,908个UTF16字符进入一次性UTF8编码，3倍预估长度发生整数溢出，并非堆不足。独立私有TCP库用512MiB阈值＋H2内建memFS保存并fresh连接读回完整957,780,050B封存，SHA／UTF16长度及空值／普通Unicode控制精确通过；旧1MiB候选跨surrogate边界失败保留。runtime36／18086／PID60772／64GiB已恢复，H2 owner未停止。10:17:48又沿生产saveNormalBinding保存同一原始封存为binding33，fresh完整字节、字符数及全部pins通过；未重新POST封存、未调用模型，未启动整应用的seed／prompt／审查调度。后继真实任务`f6e305b8-5fb7-4cc2-9ecb-94e4aa0c27d8`已从前端唯一启动，当前来源准备继续，OER新来源receipt持续推进，真实整套报告仍待完成。证据 `.local/runtime-integration35/clob-stream-roundtrip04.log`、`.local/runtime-integration36/recover-pre01/result.json`及`successor-progress04.json`。不再把已解除的保存故障称作当前卡点。
+旧后继f6e305b8于10:44因准备后派生图与先前冻结快照不符FAILED／0/19，未进入内容审查。最小修复复用CanonicalEvidenceService及NormalObservedPreparationService，在冻结前准备未登记来源；已有reviewed／normal登记与严格来源校验保持。clean回归84项全过（green06），旧green05的83通过／1夹具ERROR保留；测试夹具已等待原worker退出再重置mock。runtime37／18086／PID51296／64GiB已部署，35件、80取值、三保存修订及咨询索引升级前后精确相同。11:13:41从前端仅激活一次，11:14:47取得新任务022d925f-4a5d-4291-879c-1a88ed2c4a14，11:15回读QUEUED；来源快照433f610a…，27B配置8fcc18b3…保持。只接回此句柄，不重发。 PRE原957,780,050B封存的生产保存及fresh完整回读已通过，512MiB阈值＋H2内建memFS只解除保存阻断，不代表体积优化完成；旧1MiB候选跨surrogate边界失败仍保留。证据`.local/runtime-integration36/recover-pre01/result.json`及`.local/runtime-integration37/`。真实整套报告仍待完成。
 
 ## 已记录，待既定全流程完成后处理
 
 | 问题 | 现有证据／候选 | 当前处理 |
 | --- | --- | --- |
 | 冷启动起草页面显示计划请求超时；资料及当前文稿随后可读 | runtime36的browser249／250；之后NTT／SCT当前保存修订的真实PDF画布均已加载 | 记录待修，当前浏览器预览及导出未被阻断；不为消除提示重生成或扩大性能改造 |
-| 来源准备／切块／嵌入的共用管线尚未收拢；完整阅读上下文及来源图重复展开 | PRE原件7,967,566B／正文1,491,180 UTF16；候选图481,512,393B／封存957,780,050B；`.local/scc-runtime34-whitespace71/publication13.json`。上传共用解析器，但不自动索引；normal binding及indexKey按module分开 | 用户要求同能力复用。先完成当前全流程；之后在现有公共模块内收拢同源修订／切块配方／embedding模型的内容产物，模块保留权限、范围、采用与业务状态。保留一份来源结构并以稳定引用关联上下文，禁止靠删原文／关系降低体积；不新增平行模块或脚本、不引入新栈。当前H2临时配置只解除阻断，不视为根因体积优化完成 |
+| 来源准备／切块／嵌入的共用管线尚未收拢；完整阅读上下文及来源图重复展开 | PRE原件7,967,566B／正文1,491,180 UTF16；候选图481,512,393B／封存957,780,050B。上传已解析及构造结构候选；封存形成父chunks；索引阶段做embedding窗口；查询阶段才做召回／rerank。上传未自动建索引，normal binding及indexKey按module分开；同key存在索引缓存，真实重复embedding次数未核算 | 用户要求同能力复用。先完成当前全流程；之后沿现有公共DocumentParser／NormalObservedPreparationService／CanonicalEvidenceService／OerBusinessEvidence／WindowRuntime收拢，同来源修订／读取计划保留一份内容结构，以稳定引用关联上下文；同窗口、模型／tokenizer和配方复用embedding。模块保留权限／范围／采用／业务状态，来源或配方变化正确失效。保原文、条件／续段、定位及UNKNOWN；不新增管线或技术栈。必须用真实调用与跨模块复用验收，H2临时配置不算根因体积修复 |
 | SCC四处明显留白、活动正文尾硬分页 | `.local/scc-runtime34-whitespace71/`；v3候选 `.local/scc-runtime34-v3-candidate72/` | 四项真实原件定向回归已由FAIL转PASS；保留候选，不扩大兼容／逐页优化，不称新最终文件通过 |
 | Advisory把来源观察核验混成法律采用；部分中文条件及有限并入解释不足 | 最新真实答复52；候选 `.local/advice52-model-review-labels49/` | 记录待修；候选未采用、未部署、未作新真实模型复验，不阻塞先走完整问答／保存／引用路径 |
 | Vetting启动结果不明时旧失败任务和重复Run误导；原始错误码直接显示 | `.local/vetting-start-recovery73/` | 保留已准备并完成页面软件验证的冻结候选，暂不继续扩展交互；Root保持请求唯一发送并接回指定任务 |
 | 最终正式项目身份、原生Word视觉及整套报告与2d参考版式核对 | 固定H1–H8及真实产物 | 沿原验收路径完成并明确限制，不以软件通过代替最终文件 |
 | SL七版本全部22,214技术页质量、版本隔离检索与比赛包 | 既有SL质量记录 | 保持后续阶段，质量未过不打包，不插到当前三模块流程之前 |
 
-用户同时授权“以后都允许，你自己搞”：任务测试浏览器空间以后丢失时可自行重建，不重复请求同类授权；个人空间受保护。当前已恢复任务空间13，未触发新业务POST。
+用户同时授权“以后都允许，你自己搞”：任务测试浏览器空间以后丢失时可自行重建，不重复请求同类授权；个人空间受保护。当前已按既有授权恢复任务空间15/p1；本轮真实审查仅按上述标记激活一次。
 
 完成当前既定全流程后，再按影响处理累计反馈；已知缺陷及未验项在交付中如实说明。记录或准备候选本身不计为产品修复完成。
