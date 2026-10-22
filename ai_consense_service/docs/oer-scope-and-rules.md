@@ -1,3 +1,11 @@
+<!-- human-acceptance-mainline-20261022:start -->
+**2026-10-22现行Goal：[先完成可供人验收的三模块全流程](testing/human-acceptance-mainline-goal-20261022.md)，已实际active。** 当前只修直接阻断流程的问题；用户反馈先记待办，完成本Goal后再处理。OER全面加强、七版SL全22,214技术页及完整比赛包的要求保留后置，质量未过不打包。runtime35／64GiB已部署；现有35原件、80值及三稿保全已核，真实Vetting任务844e5e5b正在来源准备，禁止因重写Goal而重发。
+<!-- human-acceptance-mainline-20261022:end -->
+
+<!-- user-priority-20261022:start -->
+**2026-10-22最新执行顺序：先完成既定人类验收全流程；新增问题先记录，之后集中修。** 当前只优先解除真实35件Vetting来源登记／完整回读时限阻断，再产出报告；分页、咨询和界面后继候选保留，不继续扩大前置范围。[当前主线与反馈待办](testing/human-acceptance-feedback-backlog-20261022.md)。APB61页原解析已终态PARTIAL；35件为17 PARSED／16 PARTIAL／2 EXCLUDED，来源质量与整套报告仍未通过。用户已授权以后自行重建丢失的任务测试空间，无需重复询问。
+<!-- user-priority-20261022:end -->
+
 <!-- runtime-integration70:start -->
 **最新progress70：runtime34／64GiB已部署，当前保存取值的新三稿及六份前端下载已完成；新SCC74页逐张检查、92目录及两次正文保存恢复已实测。** [实际证据和未过项](testing/three-module-runtime-progress-20261021.md#progress70当前取值的新三稿及六份前端下载完成74页逐张核与正文保存恢复通过新27b已完整回读仍有内容残差)。244＝232适用＋12授权排除／2367点，恢复74张PNG与初稿逐字节相同；三旧分页症状恢复，35有限通过／39WARN，留白、缩进、未答变量及正式身份继续核。新27B52已真实保存／刷新／原件高亮，完整性改善但内部字段／采用含义及部分中文前提仍需修，不授质量通过。35件仍17完整／15部分／1APB原解析／2排除；SL22,214页质量先于打包，Goal active。
 <!-- runtime-integration70:end -->

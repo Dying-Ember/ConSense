@@ -16,7 +16,7 @@ public class CanonicalEvidenceProperties {
     private Map<String,String> sourcePageRenderEvidenceIdentities=new LinkedHashMap<>();
     private int timeoutMs=30000;
     /** Whole normal-source publication builds and validates complete graphs before returning their sealed projection. */
-    private int normalPublicationTimeoutMs=120000;
+    private int normalPublicationTimeoutMs=900000;
     /** Complete normal graphs expand into manifest, canonical and chunk copies; native contracts retain their own caps. */
     private int maxSnapshotBytes=1024*1024*1024;
     private int maxAssetBytes=33554432;

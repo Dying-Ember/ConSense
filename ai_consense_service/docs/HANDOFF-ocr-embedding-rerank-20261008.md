@@ -1,3 +1,11 @@
+<!-- human-acceptance-mainline-20261022:start -->
+**2026-10-22现行Goal已实际active：[三模块人类验收全流程](testing/human-acceptance-mainline-goal-20261022.md)。** runtime35／18086／PID37784／64GiB已替换runtime34，只有正常来源登记和完整回读两个class变化，时限900000ms；H2 owner39876／18082、runtime30、两OER进程保持。前后35件、80值、三稿及既有咨询索引响应保全已核。空间13／p1唯一键盘派发新run844e5e5b-545b-4034-bf6e-a75e37daef9a，真实RUNNING/preparing，前端刷新已接回且Run禁用。接续指定任务，不重发、不重传；先实际报告和下载。用户反馈待办／冻结候选及SL后续要求保留，本Goal不继续扩修复支线。
+<!-- human-acceptance-mainline-20261022:end -->
+
+<!-- user-priority-20261022:start -->
+**2026-10-22用户纠偏：新增问题先记录，完成既定人类验收全流程后再修；仅流程阻断立即最小处理。** [主线与待办](testing/human-acceptance-feedback-backlog-20261022.md)。真实35run410d9a33已FAILED／0/19：PRE登记466.54秒超过120秒，完整封存回读超过30秒；独立正常来源时限的软件和真实字节回读已通过、主树已采用，runtime35已构建尚未部署或续跑。APB61页原解析已PARTIAL；H2 owner39876／18082及runtime30保持。分页v3、模型展示49、前端73候选保留，不因此推迟报告。任务空间13已按用户“以后都允许”恢复，同类恢复无需再询问。
+<!-- user-priority-20261022:end -->
+
 <!-- runtime-integration70:start -->
 **最新progress70：runtime34／64GiB已部署，当前80条存值保全，新三稿及六份前端下载、74页逐张检查和两次正文保存恢复已接通。** [本轮证据及剩余质量](testing/three-module-runtime-progress-20261021.md#progress70当前取值的新三稿及六份前端下载完成74页逐张核与正文保存恢复通过新27b已完整回读仍有内容残差)。新v2保244／232／12、92目录和2367点；恢复后74张PNG全部同初稿，三指定分页缺陷恢复，35有限通过／39WARN而非正式成品全过。新27B52已完成唯一前端问答／回读／原件定位，两预检＋两answer全COMPLETED；仍有可读性、采用含义及中文前提残差。canonical21块索引原状态ready，未重建。H2／runtime30 APB原解析保护，35套报告／SL22,214页未过，SL不打包，Goal active。
 <!-- runtime-integration70:end -->

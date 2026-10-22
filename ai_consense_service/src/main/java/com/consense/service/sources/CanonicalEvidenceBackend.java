@@ -32,20 +32,22 @@ public class CanonicalEvidenceBackend {
     public String normalHealth(String module){return request(normalBase(module).newBuilder().addPathSegment("health").build(),normalMaximumBytes()).json();}
     public String normalSnapshot(String projection,String module){
         if(projection==null||!projection.matches("[a-f0-9]{64}"))throw new CanonicalEvidenceException(HttpStatus.BAD_REQUEST,"CANONICAL_SHA_INVALID");
-        return request(normalBase(module).newBuilder().addPathSegment("canonical").addPathSegment(projection).addQueryParameter("module",module).build(),normalMaximumBytes()).json();
+        return execute(new Request.Builder().url(normalBase(module).newBuilder().addPathSegment("canonical").addPathSegment(projection).addQueryParameter("module",module).build())
+                .tag(Integer.class,normalTimeout()).get().build(),normalMaximumBytes()).json();
     }
     public String normalObserved(String request,String module){
         int maximum=normalMaximumBytes();
-        if(properties.getNormalPublicationTimeoutMs()<=0)throw new CanonicalEvidenceException(HttpStatus.SERVICE_UNAVAILABLE,"OER_EVIDENCE_CONFIG_INVALID");
+        int timeout=normalTimeout();
         if(Utf8.byteCount(request)>maximum)throw new CanonicalEvidenceException(HttpStatus.BAD_REQUEST,"NORMAL_OBSERVED_TOO_LARGE");
         byte[] bytes=Utf8.bytes(request);
         HttpUrl base=normalBase(module);
         if(maximum<=0)
             throw new CanonicalEvidenceException(HttpStatus.SERVICE_UNAVAILABLE,"OER_EVIDENCE_CONFIG_INVALID");
-        Request wire=new Request.Builder().url(base.newBuilder().addPathSegment("normal-observed").build())
+        Request wire=new Request.Builder().url(base.newBuilder().addPathSegment("normal-observed").build()).tag(Integer.class,timeout)
                 .post(RequestBody.create(MediaType.parse("application/json; charset=utf-8"),bytes)).build();
         return execute(wire,maximum).json();
     }
+    private int normalTimeout(){int timeout=properties.getNormalPublicationTimeoutMs();if(timeout<=0)throw new CanonicalEvidenceException(HttpStatus.SERVICE_UNAVAILABLE,"OER_EVIDENCE_CONFIG_INVALID");return timeout;}
     private HttpUrl normalBase(String module){
         if(!java.util.Arrays.asList("drafting","vetting","advisory").contains(module))throw new CanonicalEvidenceException(HttpStatus.BAD_REQUEST,"CANONICAL_MODULE_INVALID");
         String configured=properties.getRetrievalBaseUrls().getOrDefault(module,properties.getBaseUrl());HttpUrl base=HttpUrl.parse(configured==null?"":configured);
@@ -101,7 +103,8 @@ public class CanonicalEvidenceBackend {
         return execute(new Request.Builder().url(url).get().build(),maximum);
     }
     protected Reply execute(Request request,int maximum){
-        int timeout="/normal-observed".equals(request.url().encodedPath())?properties.getNormalPublicationTimeoutMs():properties.getTimeoutMs();
+        // Complete normal graphs and their sealed read-back share a budget; health and other reads keep their own.
+        Integer normalTimeout=request.tag(Integer.class);int timeout=normalTimeout==null?properties.getTimeoutMs():normalTimeout;
         OkHttpClient client=new OkHttpClient.Builder().followRedirects(false).followSslRedirects(false).retryOnConnectionFailure(false)
                 .readTimeout(timeout,TimeUnit.MILLISECONDS)
                 .callTimeout(timeout,TimeUnit.MILLISECONDS).build();

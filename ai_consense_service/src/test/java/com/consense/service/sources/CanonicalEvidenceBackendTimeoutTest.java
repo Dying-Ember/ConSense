@@ -50,6 +50,16 @@ class CanonicalEvidenceBackendTimeoutTest {
         assertEquals("OER_EVIDENCE_CONFIG_INVALID",assertThrows(CanonicalEvidenceException.class,()->new CanonicalEvidenceBackend(invalid).normalObserved("{}","vetting")).getMessage());
     }
 
+    @Test void complete_normal_snapshot_uses_the_publication_budget_without_extending_other_reads() throws Exception {
+        CanonicalEvidenceBackend backend=backend(500,100,2000,"{}".getBytes(StandardCharsets.UTF_8));
+        String projection="a".repeat(64);
+        assertEquals("{}",backend.normalSnapshot(projection,"vetting"));
+        assertEquals("OER_EVIDENCE_UPSTREAM_UNAVAILABLE",assertThrows(CanonicalEvidenceException.class,()->backend.snapshot(projection,"vetting")).getMessage());
+        assertEquals("OER_EVIDENCE_UPSTREAM_UNAVAILABLE",assertThrows(CanonicalEvidenceException.class,()->backend.normalHealth("vetting")).getMessage());
+        CanonicalEvidenceProperties invalid=new CanonicalEvidenceProperties();invalid.setBaseUrl("http://127.0.0.1:1");invalid.setNormalPublicationTimeoutMs(0);
+        assertEquals("OER_EVIDENCE_CONFIG_INVALID",assertThrows(CanonicalEvidenceException.class,()->new CanonicalEvidenceBackend(invalid).normalSnapshot(projection,"vetting")).getMessage());
+    }
+
     private CanonicalEvidenceBackend backend(long delayMs, int timeoutMs, byte[] bytes) throws Exception {
         return backend(delayMs,timeoutMs,120000,bytes);
     }
