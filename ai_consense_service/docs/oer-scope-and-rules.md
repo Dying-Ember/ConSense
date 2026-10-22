@@ -1,6 +1,10 @@
 <!-- human-acceptance-mainline-20261022:start -->
-**2026-10-22现行Goal：[先完成可供人验收的三模块全流程](testing/human-acceptance-mainline-goal-20261022.md)，已实际active。** 当前只修直接阻断流程的问题；用户反馈先记待办，完成本Goal后再处理。OER全面加强、七版SL全22,214技术页及完整比赛包的要求保留后置，质量未过不打包。runtime35／64GiB已部署；现有35原件、80值及三稿保全已核，真实Vetting任务844e5e5b正在来源准备，禁止因重写Goal而重发。
+**2026-10-22现行Goal已恢复active：[先完成可供人验收的三模块全流程](testing/human-acceptance-mainline-goal-20261022.md)。** 当前只修直接阻断流程的问题；用户反馈先记待办，完成本主线后再处理。OER全面加强、七版SL全22,214技术页及完整比赛包的要求保留后置，质量未过不打包。旧run844e5e5b因H2巨型CLOB编码整数溢出FAILED；完整PRE已沿生产saveNormalBinding保存为binding33，fresh连接读回957,780,050B／957,346,908 UTF16及全部pins精确通过，0重复POST／0模型调用。runtime36／64GiB／18086保持，前端唯一启动后继f6e305b8-5fb7-4cc2-9ecb-94e4aa0c27d8，10:41仍RUNNING/preparing；来源快照和27B配置同原任务，不能因等待重发。当前NTT11页／SCT25页的保存稿浏览器PDF实际渲染、咨询52历史及原件高亮回读已补齐；报告仍待产出。详见[验收入口](testing/human-acceptance-delivery-20261022.md)。
 <!-- human-acceptance-mainline-20261022:end -->
+
+<!-- shared-source-pipeline-20261022:start -->
+**2026-10-22用户重申：相同能力必须复用，解析、来源结构、切块及嵌入在既有公共模块内收拢，不能为各业务模块重复造轮子。** 目标流程为上传后统一准备来源及索引；同一原件／解析修订、切块配方和embedding模型的内容产物可复用，模块只保留权限、选定范围及各自业务状态；来源观察与法律采用不得合并。当前实现仅部分达到：上传共用DocumentParser并保存SourceDocument，但嵌入由后继索引入口触发；Vetting／Advisory虽共用CanonicalEvidenceService及OER实现，normal binding和indexKey仍按module区分，不能称已统一完成。PRE的7,967,566B原件／1,491,180正文UTF16字符膨胀为481,512,393B候选图和957,780,050B封存，完整outline、每part阅读上下文及manifest／canonical／chunks重复序列化是已核落点。后继优化应保留一份来源修订与结构、用稳定标识关联上下文及引用，不删原文、条件／续段关系或来源校验。当前按用户执行顺序先解除保存阻断并完成可验收流程，此差距记入[反馈待办](testing/human-acceptance-feedback-backlog-20261022.md)，不插入全面重构、不新增技术栈／并行脚本管线。
+<!-- shared-source-pipeline-20261022:end -->
 
 <!-- user-priority-20261022:start -->
 **2026-10-22最新执行顺序：先完成既定人类验收全流程；新增问题先记录，之后集中修。** 当前只优先解除真实35件Vetting来源登记／完整回读时限阻断，再产出报告；分页、咨询和界面后继候选保留，不继续扩大前置范围。[当前主线与反馈待办](testing/human-acceptance-feedback-backlog-20261022.md)。APB61页原解析已终态PARTIAL；35件为17 PARSED／16 PARTIAL／2 EXCLUDED，来源质量与整套报告仍未通过。用户已授权以后自行重建丢失的任务测试空间，无需重复询问。
