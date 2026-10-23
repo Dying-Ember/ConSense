@@ -1,3 +1,18 @@
+## Vetting方案再审（round379，设计修订，尚未实施）
+
+用户要求再审上一轮方案。本轮对照现行业务spec与真实caller／既有测试，结论是保留“语义材料先行、重型证据按需读取”的方向，但原文不能直接当作完整实施契约。已在[公共按需spec](../specs/oer-demand-driven-business-access-20261022.md)原专节修订以下四处，未新增产品代码或平行处理体系。
+
+| 再审问题 | 当前源码证据与具体风险 | 设计修正 |
+| --- | --- | --- |
+| 把取证写成全面复核语义 | `VettingSemanticReview`证据门声明`mechanically_accepted`且`semanticQualityAccepted=null`；`VettingChecklistRequirementRelations`即使绑定原生区间，角色／同一对象／法律意图仍unknown。两条真实引文分别约束不同主体时，字面校验不能证明冲突 | 同主体／条件／例外／采用与优先关系由基于完整材料的语义审查判断；后端只授已定义机械检查结果，人工核对独立保存，不默认再加一轮LLM自审 |
+| scan完成不等于跨文件比较完成 | 当前`VettingSemanticReview`沿主题检索及已有source-request组包；`VettingPacketCoverage`自己标注仅记录调用／解码，范围仍unknown。若电子与纸质递交要求被分包，各包返回一致也不能证明两侧比较过 | 基础遍历与“检查事项—适用单元／对照组”执行分账；必要两侧及限定联合提交；已知缺失先补，不以已经发现候选为前提。未召回、缺件／缺页、未执行和空结果不授完整通过 |
+| 只删输入会断开输出引用 | `VettingOutputSchema`的`support.facts`仍要求`nativePositionIndex/startUtf16/endUtf16`，`VettingChecklistRequirementRelations.bindFact`消费这些字段，既有nullable/source-binding契约测试也约束该接口 | 在原模型投影、schema、解码、定位及测试一起改为短引用与原文，由后端解位置；同文多处不猜第一处。来源未绑定与仅物理高亮缺失分开；旧报告／人工记录保持原协议读取 |
+| 公共按需响应仍可暗中整图加载 | `OerBusinessEvidence.loadSession`构建全部view／pointer；`source_read_server.py`每次catalog／ids／scan均`registry.load`并汇集全量chunks，且明确宣告`catalogInternalRead`尚非内部轻量读取 | 同时改公共内部读取和现有接口语义view，分别计DB读取、OER内部加载、响应及实际模型输入；未迁移的旧大封存冷读单列，不能将成本转移或小响应当作消除 |
+
+另补预检复用的生命周期：仅复用成功取得并验证的同输入usage观察，生成仍按原预算计数；取消、动作过期、来源／配置变化和结果未知不能绕过。同一任务可以有基础包、联合比较包及必要补读，“不默认第二轮”不承诺整个任务只有一次调用，也不允许无限追加。验收新增跨包矛盾、不同主体的合理差异、重复引文／非BMP区间、旧报告兼容、过期／未知预检和公共内部加载量检查，均为待实施／待运行的验收门。
+
+本轮只做源码／契约及文档静态审阅，未新跑产品测试、读取在线任务或数据库、调用OCR／LLM、修改来源身份、重启或切换服务；round378的18:59:29 PRE状态及probe数字保持历史收据身份。已检查文档diff、相对链接及产品文件未变；不以本次设计修订授性能、原件质量或前端业务通过。
+
 ## Vetting语义审查与取证分层设计（round378，尚未实施）
 
 用户本轮要求核实“PRE已解析为何未纳入”，并改正先加载巨量解析字段再做语义判断的设计。已将分工、实际caller改接、分批实施及必要验收门写入[公共按需spec](../specs/oer-demand-driven-business-access-20261022.md)的2026-10-23 Vetting专节；本轮仅更新设计与文档入口，产品代码、数据库、模型、原件及运行配置保持，未取消／启动审查、未重启后端或OER。
