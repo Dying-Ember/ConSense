@@ -38,6 +38,7 @@ export function createReviewReducer(data) {
     other.relatedInputIds=[...new Set([...(other.relatedInputIds||[]),...(v.relatedInputIds||[])])];
     other.relations=[...other.relations,...v.relations].filter((x,i,a)=>a.findIndex(y=>JSON.stringify(x)===JSON.stringify(y))===i);
     if(!other.correction&&v.correction)other.correction=copy(v.correction);
+    if(other.catalogAlignment||v.catalogAlignment)other.catalogAlignment={...copy(other.catalogAlignment||v.catalogAlignment),confirmed:false};
     if(v.role.kind==='fixed'&&other.role.kind!=='fixed'){other.role=copy(v.role);other.fixedValue=v.fixedValue;}
     other.status='changed';other.manual=true;
     for (const x of s.variables) {
@@ -57,6 +58,8 @@ export function createReviewReducer(data) {
     if(id===targetId)return problem('MERGE_SAME_NODE');
     if(v.status==='excluded'||other.status==='excluded')return problem('MERGE_EXCLUDED');
     if(v.type.kind!==other.type.kind)return problem('MERGE_TYPE_MISMATCH');
+    if((v.type.unit||'')!==(other.type.unit||''))return problem('MERGE_UNIT_MISMATCH');
+    if(v.catalogAlignment?.confirmed&&other.catalogAlignment?.confirmed&&['status','baselineKey','baselineVersion','scope'].some(key=>(v.catalogAlignment[key]||'')!==(other.catalogAlignment[key]||'')))return problem('MERGE_ALIGNMENT_REVIEW_REQUIRED');
     if(v.role.kind!==other.role.kind)return problem('MERGE_ROLE_MISMATCH');
     if(v.parentId!==other.parentId)return problem('MERGE_PARENT_MISMATCH');
     if(Boolean(v.optional)!==Boolean(other.optional))return problem('MERGE_OPTIONAL_MISMATCH');
@@ -97,7 +100,8 @@ export function createReviewReducer(data) {
     } else if (action.type === 'EDIT') {
       revisit(v.id);
       const before = [v.nameZh,v.nameEn,v.type.zh,v.role.zh].join(' · ');
-      const ownAnswerChanged=(action.values.type&&action.values.type.kind!==v.type.kind)||(action.values.options&&JSON.stringify(action.values.options)!==JSON.stringify(v.options||[]));
+      const ownAnswerChanged=(action.values.type&&(action.values.type.kind!==v.type.kind||(action.values.type.unit||'')!==(v.type.unit||'')))||(action.values.options&&JSON.stringify(action.values.options)!==JSON.stringify(v.options||[]));
+      if(!action.values.catalogAlignment&&v.catalogAlignment?.confirmed&&['nameZh','nameEn','type','options','optional','parentId','definitionScope'].some(key=>action.values[key]!==undefined&&JSON.stringify(action.values[key])!==JSON.stringify(v[key])))v.catalogAlignment={...v.catalogAlignment,confirmed:false};
       if(action.values.parentId!==undefined&&action.values.parentId!==v.parentId){
         const moved=new Set([v.id]);let changed=true;
         while(changed){changed=false;for(const x of s.variables)if(moved.has(x.parentId)&&!moved.has(x.id)){moved.add(x.id);changed=true;}}
@@ -106,7 +110,7 @@ export function createReviewReducer(data) {
           for(const target of x.editTargets||[])if(targetInputs(target).some(id=>moved.has(id))){target.needsRebind=true;x.status='help';}
         }
       }
-      if(action.values.type&&action.values.type.kind!==v.type.kind||action.values.role?.kind==='fixed'||(action.values.options&&JSON.stringify(action.values.options)!==JSON.stringify(v.options)))for(const x of s.variables){if(x.status!=='excluded'&&x.correction&&correctionInputs(x.correction).includes(v.id)){x.correction.needsRebind=true;x.status='help';}}
+      if(ownAnswerChanged||action.values.role?.kind==='fixed')for(const x of s.variables){if(x.status!=='excluded'&&x.correction&&correctionInputs(x.correction).includes(v.id)){x.correction.needsRebind=true;x.status='help';}}
       Object.assign(v,action.values,{status:'changed',manual:true});
       if(ownAnswerChanged&&v.correction){v.correction.needsRebind=true;v.status='help';}
       if(ownAnswerChanged)for(const x of s.variables)if(x.status!=='excluded')for(const target of x.editTargets||[])if(targetInputs(target).includes(v.id)){target.needsRebind=true;x.status='help';}
@@ -118,7 +122,7 @@ export function createReviewReducer(data) {
         docIds:[...new Set((item.sourceAnchors||[]).map(a=>a.docId))],sourceUnitIds:[],missingSource:false,
         evidence:(item.sourceAnchors||[]).map(a=>({docId:a.docId,locationZh:`原文段落`,locationEn:`Source passage`,quote:a.text})),
         questionZh:item.nameZh,questionEn:item.nameEn,type:item.type||{kind:'boolean',zh:'是／否',en:'Yes / No'},role:{kind:'input',zh:'项目资料',en:'Project information'},
-        options:[],status:'changed',manual:true,originId:v.id,relatedInputIds:[],relations:[],correction:null,
+        options:[],status:'changed',manual:true,originId:v.id,relatedInputIds:[],relations:[],correction:null,catalogAlignment:v.catalogAlignment?{...v.catalogAlignment,confirmed:false,status:'ambiguous'}:undefined,
         editTargets:(v.editTargets||[]).filter(target=>(item.sourceAnchors||[]).some(a=>a.docId===target.docId)).map(target=>({...target,needsRebind:true})),
         targets:(v.targets||[]).filter(target=>(item.sourceAnchors||[]).some(a=>a.docId===target.docId))}));
       v.status='excluded'; v.replacedBy=children.map(x=>x.id); v.reason='人工拆分 / Split during review';
@@ -156,10 +160,10 @@ export function createReviewReducer(data) {
       const units=unit?[unit.id]:(base?.sourceUnitIds||[]);
       for(const unitId of units)delete s.sourceReviews[unitId];
       for(const x of s.variables)if(x.status==='confirmed'&&(x.sourceUnitIds||[]).some(id=>units.includes(id)))x.status='pending';
-      s.variables.push({id,parentId:null,definitionKind:'added',...action.values,docIds:[action.docId],options:action.values.options||[],optional:false,
-        guidance:{zh:'人工根据原文补充。',en:'Added during source review.'},evidence:action.anchor?[{docId:action.anchor.docId,locationZh:`原文段落`,locationEn:`Source passage`,quote:action.anchor.text}]:unit?[{docId:unit.docId,locationZh:unit.locationZh,locationEn:unit.locationEn,quote:unit.quote}]:(base?.evidence||[]),
+      s.variables.push({id,parentId:null,definitionKind:'added',...action.values,docIds:action.docId?[action.docId]:[],options:action.values.options||[],optional:!!action.values.optional,
+        guidance:!action.anchor&&!unit&&action.values.definitionOrigin?.kind==='manual'?{zh:'人工新增变量定义：'+action.values.definitionOrigin.reason,en:'Manually added variable definition: '+action.values.definitionOrigin.reason}:{zh:'人工根据原文补充。',en:'Added during source review.'},evidence:action.anchor?[{docId:action.anchor.docId,locationZh:`原文段落`,locationEn:`Source passage`,quote:action.anchor.text}]:unit?[{docId:unit.docId,locationZh:unit.locationZh,locationEn:unit.locationEn,quote:unit.quote}]:(base?.evidence||[]),
         relations:[],targets:[],relatedInputIds:[],sourceUnitIds:unit?[unit.id]:(base?.sourceUnitIds||[]),missingSource:!action.anchor&&!unit&&!base?.evidence?.length,
-        status:'changed',reason:action.reason,manual:true,sourceAnchors:action.anchor?[action.anchor]:[]});
+        status:'changed',reason:action.reason,manual:true,editTargets:[],sourceAnchors:action.anchor?[action.anchor]:[]});
       event('补充了一个遗漏的问题','Added a missing question',[action.values.nameZh,action.reason]);
     } else if (action.type === 'LINK') {
       if(!compatible(v,{docIds:[action.anchor.docId]})||!canShareSources(old,v,[action.anchor.docId]))return old;
@@ -187,6 +191,12 @@ export function createReviewReducer(data) {
       v.status='confirmed';event('确认了一个问题','Reviewed a question',[v.nameZh]);
     } else if (action.type === 'HELP') {
       v.status='help';v.reason=action.reason;event('记录了需要补充的信息','Recorded a request for more context',[v.nameZh,action.reason]);
+    } else if (action.type === 'CATALOG_EXCLUDE') {
+      s.catalogReview??={exclusions:{}};
+      if(action.reason===null)delete s.catalogReview.exclusions[action.key];
+      else if(action.reason?.trim()&&action.baselineVersion)s.catalogReview.exclusions[action.key]={reason:action.reason.trim(),baselineVersion:action.baselineVersion};
+      else return old;
+      event('核对了基准变量适用性','Reviewed baseline applicability',[action.key,action.reason||'重新核对 / Review again']);
     } else if (action.type === 'SOURCE_REVIEW') {
       s.sourceReviews[action.unitId]=true;event('核对了一条原文说明','Reviewed a source note',[action.label]);
     }

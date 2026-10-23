@@ -1,5 +1,5 @@
 {
-  "ruleVersion": "drafting-20261022.2-bs-safety-purpose-reuse",
+  "ruleVersion": "drafting-20261023.1-catalog-foundation-scope",
   "groups": [
     {
       "id": "identity",
@@ -57,9 +57,9 @@
         {
           "key": "foundationIncluded",
           "label": {
-            "en": "Combined contract with foundation works",
-            "zhHans": "包含基础工程的合并合约",
-            "zhHant": "包含基礎工程的合并合約"
+            "en": "Foundation works included",
+            "zhHans": "是否包含基础工程",
+            "zhHant": "是否包含基礎工程"
           },
           "kind": "boolean",
           "optional": false,
@@ -126,6 +126,7 @@
         },
         {
           "key": "contractPeriodMonths",
+          "unit": "months",
           "label": {
             "en": "Contract period in months (optional)",
             "zhHans": "合约期月数（可选）",
@@ -1701,6 +1702,7 @@
       "fields": [
         {
           "key": "photocopyRateUpToA3",
+          "unit": "HKD/page",
           "label": {
             "en": "HK$ per page up to A3",
             "zhHans": "A3及以下每页港币费率",
@@ -1727,6 +1729,7 @@
         },
         {
           "key": "photocopyRateAboveA3",
+          "unit": "HKD/page",
           "label": {
             "en": "HK$ per page above A3",
             "zhHans": "大于A3每页港币费率",
@@ -3230,6 +3233,7 @@
         },
         {
           "key": "advanceRepaymentMonths",
+          "unit": "months",
           "label": {
             "en": "Project-specific repayment months (optional)",
             "zhHans": "项目特定偿还月数（可选）",
@@ -3256,6 +3260,7 @@
         },
         {
           "key": "advanceRepaymentFirstCertificate",
+          "unit": "certificate",
           "label": {
             "en": "Project-specific first repayment certificate ordinal (optional)",
             "zhHans": "项目特定首期偿还证书序号（可选）",

@@ -85,7 +85,7 @@ function harness({ failRemoval = false, duration, missingTemplates = [], templat
     { key: 'type', kind: 'select', label: { en: 'Pricing document type', zhHans: '计价文件类型', zhHant: '計價文件類型' }, options: [{ value: 'SOR', label: { en: 'Schedule of Rates (SOR)', zhHans: '单价表（SOR）', zhHant: '單價表（SOR）' } }] }
   ] }
   const candidate = harness({ customFields: [candidateField], customVariables: [{ key: 'billNos', value: JSON.stringify(billCandidateRows), confirmed: false, manuallyEdited: false, adoptionState: 'suggested', candidates: [{ value: JSON.stringify(billCandidateRows), fileName: 'SIMULATED Bill email.docx', sourceQuote: 'Bill 9 | Electrical Works | Schedule of Rates.', reason: 'SIMULATED source for presentation regression.' }] }] })
-  await settle(); await candidate.click('Enter inputs manually')
+  await settle(); await candidate.click('Enter values manually')
   const candidateCard = find(candidate.root, node => node.props?.class === 'candidate')
   assert.ok(candidateCard, 'The main input list retains the evidence candidate card')
   assert.ok(find(candidateCard, node => node.tag === 'table'), 'The main input evidence candidate is a readable Bill table')
@@ -106,7 +106,7 @@ function harness({ failRemoval = false, duration, missingTemplates = [], templat
   console.log('PASS: the main input evidence candidate uses readable exact Bill rows with source evidence intact and retains explicit candidate adoption')
 
   const visibleCard = harness({ customFields: [candidateField], customVariables: [{ key: 'billNos', value: JSON.stringify(billCandidateRows), confirmed: false, candidates: [] }], readerCardAboveViewport: true })
-  await settle(); await visibleCard.click('Enter inputs manually'); await visibleCard.control('data-open-template', 'billNos')
+  await settle(); await visibleCard.click('Enter values manually'); await visibleCard.control('data-open-template', 'billNos')
   await visibleCard.control('data-preview-input', 'billNos')
   assert.equal(visibleCard.panelScrolls.length, 1, 'Selecting a structured source input reveals the readable selected card inside its own side panel')
   assert.equal(visibleCard.panelScrolls[0].id, 'drafting-template-panel', 'Source-to-input coordination scrolls only the reading side panel to expose its card')
@@ -129,7 +129,7 @@ function harness({ failRemoval = false, duration, missingTemplates = [], templat
 
   for (const [fileKey, selectedKey] of [['NTT', 'foundationIncluded'], ['SCT', 'projectArchitectPost']]) {
     const missing = harness({ missingTemplates: ['NTT', 'SCT', 'SCC'] })
-    await settle(); await missing.click('Enter inputs manually')
+    await settle(); await missing.click('Enter values manually')
     find(missing.root, node => node.props?.id === 'input-projectArchitectPost').props.onInput({ target: { value: 'Retain unsaved human wording' } }); await settle()
     await missing.control('data-open-template', selectedKey)
     assert.match(text(missing.root), new RegExp(`No ${fileKey} template has been uploaded to this project`))
@@ -143,7 +143,7 @@ function harness({ failRemoval = false, duration, missingTemplates = [], templat
     assert.deepEqual(missing.fileDialogs, [], 'Navigating to upload never opens a file dialog automatically')
     assert.deepEqual(missing.uploads, [], 'Navigating to upload never uploads or replaces another project source')
     assert.deepEqual(missing.writes, [], 'Navigating to upload never saves or adopts inputs')
-    await missing.click('Enter inputs manually')
+    await missing.click('Enter values manually')
     assert.equal(find(missing.root, node => node.props?.id === 'input-projectArchitectPost').props.value, 'Retain unsaved human wording')
     await missing.click('Template reading preview')
     assert.ok(find(missing.root, node => node.props?.['data-preview-card'] === selectedKey), 'Reopening keeps the previously selected input')
@@ -157,7 +157,7 @@ function harness({ failRemoval = false, duration, missingTemplates = [], templat
     await uploadInput.props.onChange({ target: { files: [selectedFile], value: 'selected-file' } }); await settle()
     assert.equal(missing.uploads.length, 1)
     assert.deepEqual(missing.uploads[0], ['TEMPLATE-VIEW-TEST', fileKey, selectedFile], 'The existing template replacement API receives only the matching selected source')
-    await missing.click('Enter inputs manually'); await missing.click('Template reading preview')
+    await missing.click('Enter values manually'); await missing.click('Template reading preview')
     assert.equal(find(missing.root, node => node.props?.id === 'input-projectArchitectPost').props.value, 'Retain unsaved human wording', 'Source-upload refresh retains unrelated dirty inputs')
     assert.ok(find(missing.root, node => node.props?.['data-preview-card'] === selectedKey))
     assert.deepEqual(missing.readings, [['TEMPLATE-VIEW-TEST', fileKey]], 'After the upload refresh, reopening reads the correct newly available source')
@@ -168,7 +168,7 @@ function harness({ failRemoval = false, duration, missingTemplates = [], templat
   console.log('PASS: missing-template upload navigation targets the matching visible control without opening a dialog, uploading, writing inputs or losing dirty values and selection')
 
   const parseFailure = harness({ templateTags: { NTT: 'failed' }, templateReadingError: Object.assign(new Error('SOURCE_DOCX_INVALID: The saved DOCX source cannot be parsed.'), { code: 4013 }) })
-  await settle(); await parseFailure.click('Enter inputs manually'); await parseFailure.control('data-open-template', 'foundationIncluded')
+  await settle(); await parseFailure.click('Enter values manually'); await parseFailure.control('data-open-template', 'foundationIncluded')
   assert.deepEqual(parseFailure.readings, [['TEMPLATE-VIEW-TEST', 'NTT']], 'An uploaded failed template must discover and report its actual source failure rather than claim that it was never uploaded')
   assert.match(text(parseFailure.root), /Could not read the uploaded template/)
   assert.match(text(parseFailure.root), /SOURCE_DOCX_INVALID: The saved DOCX source cannot be parsed/)
@@ -178,7 +178,7 @@ function harness({ failRemoval = false, duration, missingTemplates = [], templat
   assert.deepEqual(parseFailure.writes, [])
   parseFailure.dispose()
   const unknownAvailability = harness({ templateTags: { NTT: '' } })
-  await settle(); await unknownAvailability.click('Enter inputs manually'); await unknownAvailability.control('data-open-template', 'foundationIncluded')
+  await settle(); await unknownAvailability.click('Enter values manually'); await unknownAvailability.control('data-open-template', 'foundationIncluded')
   assert.deepEqual(unknownAvailability.readings, [['TEMPLATE-VIEW-TEST', 'NTT']], 'Incomplete template metadata leaves availability unknown and discovers the source API')
   assert.match(text(unknownAvailability.root), /Unsupported template format/)
   assert.doesNotMatch(text(unknownAvailability.root), /No NTT template has been uploaded|Go to template upload/)
@@ -187,7 +187,7 @@ function harness({ failRemoval = false, duration, missingTemplates = [], templat
 
   const h = harness()
   await settle()
-  await h.click('Enter inputs manually')
+  await h.click('Enter values manually')
   const post = find(h.root, node => node.tag === 'input' && node.props.id === 'input-projectArchitectPost')
   assert.ok(post)
   post.props.onInput({ target: { value: 'Unsaved human wording' } }); await settle()
@@ -199,7 +199,7 @@ function harness({ failRemoval = false, duration, missingTemplates = [], templat
   await h.click('Remove from project')
   assert.deepEqual(h.removals, [['TEMPLATE-VIEW-TEST', 12]])
   assert.equal(find(h.root, node => node.props?.['data-remove-input'] === 12), undefined)
-  await h.click('Enter inputs manually')
+  await h.click('Enter values manually')
   assert.equal(find(h.root, node => node.props?.id === 'input-projectArchitectPost').props.value, 'Unsaved human wording', 'Removal refresh retains unrelated unsaved edits')
   assert.deepEqual(h.writes, [], 'Removal never adopts untouched suggestions or saves unrelated edits')
   h.dispose()
@@ -210,7 +210,7 @@ function harness({ failRemoval = false, duration, missingTemplates = [], templat
   assert.match(text(failed.root), /Removal failed/)
   failed.dispose()
   console.log('PASS: removal failure retains the active source and reports the error')
-  const preview = harness(); await settle(); await preview.click('Enter inputs manually')
+  const preview = harness(); await settle(); await preview.click('Enter values manually')
   const unrelated = find(preview.root, node => node.tag === 'input' && node.props.id === 'input-projectArchitectPost')
   unrelated.props.onInput({ target: { value: 'Other unsaved wording' } }); await settle()
   await preview.control('data-open-template', 'foundationIncluded')
@@ -233,13 +233,13 @@ function harness({ failRemoval = false, duration, missingTemplates = [], templat
   console.log('PASS: preview edits share inputs, save only genuine manual changes and retain unrelated draft values')
 
   const derived = harness({ duration: { months: '40', threshold: 'true', adopted: true } })
-  await settle(); await derived.click('Enter inputs manually')
+  await settle(); await derived.click('Enter values manually')
   assert.equal(find(derived.root, node => node.props?.id === 'input-periodAtLeast39Months').props.disabled, true)
   await derived.control('data-open-template', 'periodAtLeast39Months')
   await derived.control('data-preview-edit', 'periodAtLeast39Months')
   const threshold = find(derived.root, node => node.props?.id === 'preview-edit-periodAtLeast39Months')
   assert.equal(threshold.props.disabled, true, 'Preview uses the main input guard for an adopted duration')
-  assert.match(text(threshold.parent.parent), /This answer follows the entered duration/)
+  assert.match(text(threshold.parent.parent), /This value follows the entered duration/)
   assert.deepEqual(derived.writes, [], 'Reading the derived answer never adopts or changes it')
   threshold.props.onChange({ target: { value: 'false' } }); await settle()
   assert.equal(threshold.props.value, 'true', 'A stale control event cannot change a derived answer that is currently locked')
@@ -266,7 +266,7 @@ function harness({ failRemoval = false, duration, missingTemplates = [], templat
   derived.dispose()
   console.log('PASS: the preview explains and disables the derived 39-month answer consistently with the main input')
   for (const duration of [{ months: '40', threshold: 'false', adopted: true }, { months: '40', threshold: 'true', adopted: false }, { months: '40', threshold: '', adopted: true }]) {
-    const editable = harness({ duration }); await settle(); await editable.click('Enter inputs manually')
+    const editable = harness({ duration }); await settle(); await editable.click('Enter values manually')
     assert.equal(find(editable.root, node => node.props?.id === 'input-periodAtLeast39Months').props.disabled, false)
     await editable.control('data-open-template', 'periodAtLeast39Months'); await editable.control('data-preview-edit', 'periodAtLeast39Months')
     assert.equal(find(editable.root, node => node.props?.id === 'preview-edit-periodAtLeast39Months').props.disabled, false, 'Conflicting, suggested-duration or unknown threshold remains editable in both controls')
@@ -281,7 +281,7 @@ function harness({ failRemoval = false, duration, missingTemplates = [], templat
   console.log('PASS: threshold conflict, unknown value and unadopted duration keep the existing direct-answer semantics in the preview')
 
   const emptyOptional = harness({ duration: { months: '', threshold: '', adopted: false } })
-  await settle(); await emptyOptional.click('Enter inputs manually')
+  await settle(); await emptyOptional.click('Enter values manually')
   await emptyOptional.control('data-open-template', 'contractPeriodMonths'); await emptyOptional.control('data-preview-edit', 'contractPeriodMonths')
   const optionalModal = find(emptyOptional.root, node => node.props?.id === 'preview-edit-contractPeriodMonths').parent.parent
   assert.equal(!!find(optionalModal, node => node.tag === 'button' && text(node).trim() === 'Adopt current suggestion'), false, 'An empty optional input has no current suggestion to adopt')
@@ -295,7 +295,7 @@ function harness({ failRemoval = false, duration, missingTemplates = [], templat
     { months: 'unknown', threshold: '' },
     { months: '40', threshold: 'true', reviewRequired: true, validationIssue: 'invalid' }
   ]) {
-    const unavailable = harness({ duration }); await settle(); await unavailable.click('Enter inputs manually')
+    const unavailable = harness({ duration }); await settle(); await unavailable.click('Enter values manually')
     await unavailable.control('data-open-template', 'contractPeriodMonths'); await unavailable.control('data-preview-edit', 'contractPeriodMonths')
     const modal = find(unavailable.root, node => node.props?.id === 'preview-edit-contractPeriodMonths').parent.parent
     assert.equal(!!find(modal, node => node.tag === 'button' && text(node).trim() === 'Adopt current suggestion'), false, 'Missing/conflicting blank and invalid current inputs cannot be adopted from the preview')
@@ -307,7 +307,7 @@ function harness({ failRemoval = false, duration, missingTemplates = [], templat
     { key: 'contractPeriodMonths', duration: { months: '0', threshold: 'false', adopted: false } },
     { key: 'contractPeriodMonths', duration: { months: '40', threshold: 'true', adopted: true, reviewRequired: true } }
   ]) {
-    const available = harness({ duration: scenario.duration }); await settle(); await available.click('Enter inputs manually')
+    const available = harness({ duration: scenario.duration }); await settle(); await available.click('Enter values manually')
     await available.control('data-open-template', scenario.key); await available.control('data-preview-edit', scenario.key)
     const modal = find(available.root, node => node.props?.id === `preview-edit-${scenario.key}`).parent.parent
     const adoptCurrent = find(modal, node => node.tag === 'button' && text(node).trim() === 'Adopt current suggestion')
@@ -321,7 +321,7 @@ function harness({ failRemoval = false, duration, missingTemplates = [], templat
     available.dispose()
   }
   const manualClear = harness({ duration: { months: '40', threshold: 'true', adopted: true } })
-  await settle(); await manualClear.click('Enter inputs manually')
+  await settle(); await manualClear.click('Enter values manually')
   await manualClear.control('data-open-template', 'contractPeriodMonths'); await manualClear.control('data-preview-edit', 'contractPeriodMonths')
   const clearInput = find(manualClear.root, node => node.props?.id === 'preview-edit-contractPeriodMonths')
   clearInput.props.onInput({ target: { value: '' } }); await settle()
@@ -332,7 +332,7 @@ function harness({ failRemoval = false, duration, missingTemplates = [], templat
   manualClear.dispose()
   console.log('PASS: preview adoption requires a valid current value, preserves explicit false/zero/review adoption, and keeps manual clearing saveable')
   const staleAdoption = harness({ duration: { months: '40', threshold: 'true', adopted: false } })
-  await settle(); await staleAdoption.click('Enter inputs manually')
+  await settle(); await staleAdoption.click('Enter values manually')
   await staleAdoption.control('data-open-template', 'contractPeriodMonths'); await staleAdoption.control('data-preview-edit', 'contractPeriodMonths')
   const staleInput = find(staleAdoption.root, node => node.props?.id === 'preview-edit-contractPeriodMonths')
   const oldAdoptClick = find(staleInput.parent.parent, node => node.tag === 'button' && text(node).trim() === 'Adopt current suggestion').props.onClick

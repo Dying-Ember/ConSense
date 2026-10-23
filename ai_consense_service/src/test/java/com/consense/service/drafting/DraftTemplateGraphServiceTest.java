@@ -63,6 +63,41 @@ class DraftTemplateGraphServiceTest {
     Map<String,Object> manyFields(SourceDocument template,int count){Map<String,Object> graph=graph(template,"confirmed","number"),state=(Map<String,Object>)graph.get("graph");List<Object> fields=new ArrayList<>();for(int n=0;n<count;n++){Map<String,Object> field=JsonUtils.readMap(JsonUtils.write(DraftReviewGraph.nodes(graph).get(0)));field.put("id",n==0?"duration":"duration-"+n);field.put("nameEn","Test-only duration "+n);field.put("nameZh","测试工期 "+n);fields.add(field);}state.put("variables",fields);return graph;}
     String confirmMany(String project,SourceDocument template,int count){Map<String,Object> draft=service.save(project,manyFields(template,count),null);return String.valueOf(service.confirm(project,String.valueOf(draft.get("id")),null).get("id"));}
 
+    @Test void manualDefinitionWithoutTemplateSourceCanPersistConfirmAdoptAndInvalidateOnScopeChange() {
+        String project=project();Map<String,Object> node=map("id","duration","nameEn","Duration","type",map("kind","number","unit","months"),"role",map("kind","input"),"status","confirmed","optional",true,
+                "definitionOrigin",map("kind","manual","reason","User supplied a missing project input"),"sourceAnchors",Collections.emptyList(),"editTargets",Collections.emptyList(),"docIds",Collections.emptyList(),
+                "catalogAlignment",map("status","matched","baselineKey","contractPeriodMonths","baselineVersion",DraftBusinessRules.RULE_VERSION,"confirmed",true,"reason","Human confirmed the duration in months"));
+        Map<String,Object> graph=map("graph",map("variables",Collections.singletonList(node)));
+        String draft=String.valueOf(service.save(project,graph,null).get("id"));assertNotNull(service.revision(project,draft).get("graph"));
+        String confirmed=String.valueOf(service.confirm(project,draft,null).get("id"));VariableVO empty=variable(project);assertFalse(empty.isConfirmed());assertTrue(effective(project).isEmpty());
+        service.updateVariable(project,"duration",patch(empty,"value","39","note","Human project decision"));assertEquals(new java.math.BigDecimal("39"),effective(project).get("duration"));
+        Map<String,Object> changed=service.graph(project);DraftReviewGraph.nodes(changed).get(0).put("definitionScope","Separate building contract");
+        String next=String.valueOf(service.save(project,changed,confirmed,draft,true).get("id"));VariableVO preserved=variable(project);assertEquals("39",preserved.getValue());assertTrue(preserved.isReviewRequired());assertTrue(effective(project).isEmpty());
+        assertThrows(BizException.class,()->service.updateVariable(project,"duration",patch(empty,"value","40","note","Old screen")));
+        assertEquals(confirmed,service.current(project).get("currentRevisionId"));assertEquals(next,service.current(project).get("draftRevisionId"));verify(ai,never()).complete(anyString(),anyString());
+    }
+
+    @Test void manualDefinitionCannotBypassTemplateSourceRequirementForRulesOrEditTargets() {
+        String project=project();Map<String,Object> node=map("id","duration","nameEn","Duration","type",map("kind","number"),"role",map("kind","input"),"status","confirmed",
+                "definitionOrigin",map("kind","manual","reason","Human definition"),"sourceAnchors",Collections.emptyList(),"docIds",Collections.singletonList("missing-source"),
+                "editTargets",Collections.singletonList(map("id","target","docId","missing-source","action","keep","text","Keep exact original")));
+        String draft=String.valueOf(service.save(project,map("graph",map("variables",Collections.singletonList(node))),null).get("id"));
+        assertTrue(assertThrows(BizException.class,()->service.confirm(project,draft,null)).getMessage().contains("GRAPH_SOURCE_PASSAGE_REQUIRED"));
+        assertTrue(DraftReviewGraph.list(service.plan(project,null).get("unresolved")).stream().anyMatch(raw->String.valueOf(DraftReviewGraph.map(raw).get("id")).startsWith("source_review:")));verify(ai,never()).complete(anyString(),anyString());
+    }
+
+    @Test void catalogAlignmentRetainsOldCandidateEvidenceUntilExplicitReview() throws Exception {
+        String project=project();SourceDocument template=template(project);correspondence(project,"The duration is 42 months.");
+        when(ai.complete(anyString(),anyString())).thenReturn(response("42","The duration is 42 months."));
+        String first=String.valueOf(service.save(project,graph(template,"pending","number"),null).get("id"));service.extract(project,first);clearInvocations(ai);
+        Map<String,Object> changed=service.graph(project),node=DraftReviewGraph.nodes(changed).get(0);node.put("optional",true);((Map<String,Object>)node.get("type")).put("unit","months");
+        node.put("catalogAlignment",map("status","matched","baselineKey","contractPeriodMonths","baselineVersion",DraftBusinessRules.RULE_VERSION,"confirmed",false,"reason","Awaiting human review"));
+        String second=String.valueOf(service.save(project,changed,null,first,true).get("id"));JsonNode candidates=JsonUtils.mapper().valueToTree(service.candidates(project,second));
+        assertTrue(candidates.path("variables").get(0).path("candidates").isEmpty());assertEquals("42",candidates.path("unassignedVariables").get(0).path("candidates").get(0).path("value").asText());
+        node.put("status","confirmed");String pending=String.valueOf(service.save(project,changed,null,second,true).get("id"));
+        assertTrue(assertThrows(BizException.class,()->service.confirm(project,pending,null)).getMessage().contains("GRAPH_CATALOG_REVIEW_INCOMPLETE"));verifyNoInteractions(ai);
+    }
+
     @Test void currentDraftCanHoldAdoptedAnswersWithoutConfirmingItsRulesOrReplacingConfirmedHistory()throws Exception {
         String project=project();SourceDocument template=template(project);
         String draft=String.valueOf(service.save(project,graph(template,"pending","number"),null).get("id"));
@@ -92,6 +127,21 @@ class DraftTemplateGraphServiceTest {
         Map<String,Object> saved=service.save(project,DraftAutomaticDiscovery.finish(base,plan,receipts),null,null,true);
         assertNotNull(saved.get("id"));assertEquals(1,revisions.findByProjectIdOrderByCreatedAtDesc(project).size());assertNull(graphHeads.findById(project).get().getCurrentRevisionId());
         assertEquals("completed",JsonUtils.mapper().valueToTree(saved).path("graph").path("graph").path("automaticDiscovery").path("scanStatus").asText());
+    }
+
+    @Test void newlyDiscoveredInputsRequireSeparateCatalogReviewBeforeConfirmationOrUse() throws Exception {
+        String project=project(),instruction="(Delete if precast facade is not applicable)";SourceDocument template;
+        try(XWPFDocument word=new XWPFDocument();ByteArrayOutputStream bytes=new ByteArrayOutputStream()){word.createParagraph().createRun().setText("NTT1 Precast facade");word.createParagraph().createRun().setText(instruction);word.write(bytes);template=source(project,"STANDARD_TEMPLATE","NTT","NTT synthetic.docx",bytes.toByteArray(),"NTT1 Precast facade\n"+instruction);}
+        DocumentParser.ParsedDocument parsed=documentParser.parseTemplate("NTT",template.getFileName(),storage.read(template.getStoragePath()));template.setStructuredContentJson(JsonUtils.write(parsed.getBlocks()));template.setParseCoverageJson(JsonUtils.write(parsed.getCoverage()));sources.saveAndFlush(template);
+        List<JsonNode> readings=new ArrayList<>();Map<String,Object> graph=service.automationInput(project,null,null,readings);Map<String,Object> task=DraftReviewDiscovery.sourceTasks(readings).get(0);String quote=DraftReviewDiscovery.sourceTaskText(readings.get(0),task);
+        JsonNode response=JsonUtils.mapper().valueToTree(map("nodes",Collections.singletonList(map("id","facade","nameEn","Facade applicable","type","boolean","role","input","sourceQuote",quote))));
+        List<Map<String,Object>> discovered=DraftReviewDiscovery.sourceTaskNodes(readings.get(0),task,response,new ArrayList<>());assertEquals(1,discovered.size());Map<String,Object> node=discovered.get(0);String key=String.valueOf(node.get("id"));
+        assertEquals("unreviewed",DraftReviewGraph.map(node.get("catalogAlignment")).get("status"));node.put("status","confirmed");DraftReviewGraph.state(graph).put("variables",discovered);
+        String first=String.valueOf(service.save(project,graph,null).get("id"));VariableVO field=service.variables(project).stream().filter(value->key.equals(value.getKey())).findFirst().get();service.updateVariable(project,key,patch(field,"value","true","note","Explicit synthetic project value"));
+        assertTrue(effective(project).isEmpty());assertTrue(assertThrows(BizException.class,()->service.confirm(project,first,null)).getMessage().contains("GRAPH_CATALOG_REVIEW_INCOMPLETE"));
+        node.put("catalogAlignment",map("status","new","confirmed",true,"reason","Human compared the catalog and retained a distinct project definition"));
+        String second=String.valueOf(service.save(project,graph,null,first,true).get("id"));service.confirm(project,second,null);assertTrue(effective(project).isEmpty());
+        VariableVO retained=service.variables(project).stream().filter(value->key.equals(value.getKey())).findFirst().get();assertEquals("true",retained.getValue());assertTrue(retained.isReviewRequired());verify(ai,never()).complete(anyString(),anyString());
     }
 
     @Test void stoppingCandidateExtractionRetainsEarlierSourceCheckedCandidatesWithoutAdoption()throws Exception {

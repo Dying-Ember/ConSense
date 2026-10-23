@@ -152,6 +152,7 @@ export interface DraftField {
   affects?: DraftTarget[]
   columnFields?: DraftField[]
   description?: LocalizedText
+  unit?: string
   hidden?: boolean
 }
 

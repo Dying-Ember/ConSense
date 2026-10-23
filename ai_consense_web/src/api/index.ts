@@ -90,6 +90,7 @@ export const draftingApi = {
   reviewSourceBindings,
   templateEvidence: (projectId: string, fileKey: string) => api.get<Record<string, unknown>>(`/drafting/${projectId}/templates/${fileKey}/evidence`, { reportError: false }),
   catalog: (projectId: string) => api.get<DraftCatalog>(`/drafting/${projectId}/catalog`),
+  baselineCatalog: (projectId: string) => api.get<DraftCatalog>(`/drafting/${projectId}/baseline-catalog`),
   plan: (projectId: string, values?: Record<string, string>) => values
     ? api.post<DraftPlan>(`/drafting/${projectId}/plan`, { values })
     : api.get<DraftPlan>(`/drafting/${projectId}/plan`),

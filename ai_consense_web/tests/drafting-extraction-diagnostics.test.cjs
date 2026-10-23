@@ -49,7 +49,7 @@ const field = { key: 'contractTitle', kind: 'text', label: { en: 'Contract ident
   assert.match(conflict, /First quotation/); assert.match(conflict, /Second quotation/)
   assert.match(conflict, /<pre>false<\/pre>/); assert.match(conflict, /<pre>\[\]<\/pre>/)
   assert.doesNotMatch(conflict, /Conflicting evidence|Adopt this candidate/)
-  for (const [status, expectedText] of [['model_unanswered', 'Model returned an unknown value'], ['no_candidate', 'Model did not return this field'], ['not_assessed', 'Not assessed in this run']]) {
+  for (const [status, expectedText] of [['model_unanswered', 'Model returned an unknown value'], ['no_candidate', 'Model did not return a value for this variable'], ['not_assessed', 'Not assessed in this run']]) {
     const result = await renderToString(vue.createSSRApp(input, { field, value: 'Preserved manual value', values: {}, locale: 'en', trace: { ...trace, status: 'failed', stale: true, decisions: [], fields: [{ ...trace.fields[0], status, decisionRefs: [] }] } }))
     assert.ok(result.includes(expectedText)); assert.match(result, /value="Preserved manual value"/)
     assert.match(result, /This extraction failed/); assert.match(result, /Sources have changed/)
@@ -100,7 +100,7 @@ const field = { key: 'contractTitle', kind: 'text', label: { en: 'Contract ident
   const sourceUnresolved = { ...trace, decisions: [{ ...trace.decisions[0], key: 'foundationIncluded', rawValue: null, status: 'unanswered', sourceQuote: 'Decision: leave that classification pending.', reason: 'The classification must await a separate scope review.', codes: ['value_unanswered', 'source_unresolved'] }], fields: [{ key: 'foundationIncluded', status: 'source_unresolved', candidateCount: 0, rejectionCount: 0, unansweredCount: 1, decisionRefs: [0] }] }
   const foundation = { key: 'foundationIncluded', kind: 'boolean', label: { en: 'Foundation classification', zhHans: '基础工程分类', zhHant: '基礎工程分類' } }
   for (const [locale, label, guidance] of [
-    ['en', 'Source explicitly leaves this unresolved', 'The quoted source leaves this input pending or not supplied'],
+    ['en', 'Source explicitly leaves this unresolved', 'The quoted source leaves this variable pending or not supplied'],
     ['zh-Hans', '资料明确未决', '原文明确表示待定或未提供'],
     ['zh-Hant', '資料明確未決', '原文明確表示待定或未提供']
   ]) {
@@ -139,9 +139,9 @@ const field = { key: 'contractTitle', kind: 'text', label: { en: 'Contract ident
   visibleApp.unmount()
   console.log('PASS: matched source-unresolved reason, filename and quotation are visible beside the input without expanding details')
   for (const [locale, quoteLabel, metadataLabel, sourceLabel] of [
-    ['en', 'Quotation does not support the proposed value', 'Unsupported Bill metadata was removed from the suggestion', 'Matching source text explicitly leaves this input unresolved'],
-    ['zh-Hans', '引文不能支持该候选取值', '缺乏依据的 Bill 元数据已从建议中移除', '匹配的原文明确表示该输入未决'],
-    ['zh-Hant', '引文不能支持該候選取值', '缺乏依據的 Bill 元資料已從建議中移除', '匹配的原文明確表示該輸入未決']
+    ['en', 'Quotation does not support the proposed value', 'Unsupported Bill metadata was removed from the suggestion', 'Matching source text explicitly leaves this variable unresolved'],
+    ['zh-Hans', '引文不能支持该候选取值', '缺乏依据的 Bill 元数据已从建议中移除', '匹配的原文明确表示该变量未决'],
+    ['zh-Hant', '引文不能支持該候選取值', '缺乏依據的 Bill 元資料已從建議中移除', '匹配的原文明確表示該變量未決']
   ]) {
     const codes = { ...trace, decisions: [
       { ...trace.decisions[0], status: 'rejected', codes: ['quote_value_mismatch'] },
@@ -171,7 +171,7 @@ const field = { key: 'contractTitle', kind: 'text', label: { en: 'Contract ident
   }
   console.log('PASS: out-of-scope coverage fields show the exact guard reason in three languages while retaining rejected raw values and codes')
   for (const [locale, label] of [
-    ['en', 'Unknown-source repair may correct the quotation, but cannot turn the unresolved input into a definite value'],
+    ['en', 'Unknown-source repair may correct the quotation, but cannot turn the unresolved variable into a definite value'],
     ['zh-Hans', '未决项修复只允许校正来源引文，不能将未知值改成确定取值'],
     ['zh-Hant', '未決項修復只允許校正來源引文，不能將未知值改成確定取值']
   ]) {

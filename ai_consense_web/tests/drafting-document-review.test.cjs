@@ -52,6 +52,39 @@ async function completeDocumentModes() {
   await h.click('[data-review-mode="saved"]'); assert.match(paper().textContent, /Pay 100 dollars\./); assert.equal(paper().querySelectorAll('del,ins').length, 0)
   h.dispose(); console.log('PASS: complete original/review/saved content and real current values stay separate')
 }
+async function searchableVariableSelection() {
+  const props = base(), duration = { key: 'duration', kind: 'number', label: { en: 'Contract duration in months', zhHans: '合约工期（月）', zhHant: '合約工期（月）' } }
+  props.fields.push(duration); props.values.duration = 39; props.variables.push({ key: 'duration', value: '39', candidates: [] }); props.dirtyKeys = []
+  props.actions[0].inputKeys.push('duration')
+  for (const bindings of [props.sourceBindings, props.resultBindings]) bindings.bindings[0].fieldKeys.push('duration')
+  const h = await harness(props), picker = () => h.element.querySelector('[data-review-field-picker]')
+  const search = async value => { const input = h.element.querySelector('[data-review-field-search]'); input.value = value; input.dispatchEvent(new window.Event('input', { bubbles: true })); await settle() }
+  await h.click('[data-review-binding="price-binding"]')
+  assert(h.element.querySelector('[data-change-context]'))
+  await search('合同期限')
+  assert(picker().querySelector('[data-picker-option="duration"]'), 'Search uses both labels and the shared duration alias')
+  assert.equal(picker().querySelector('[data-picker-option="fee"]'), null)
+  assert.match(picker().querySelector('[data-picker-current]').textContent, /Fee/, 'Search does not replace the current selection')
+  assert.deepEqual(h.events, [], 'Searching does not save, adopt or navigate to another editor')
+  await h.click('[data-review-field-picker] [data-picker-option="duration"]')
+  assert.equal(picker().dataset.selectedId, 'duration')
+  assert(h.element.querySelector('[data-change-context]'), 'Selecting a variable from the inspected action preserves the same binding evidence')
+  assert.match(h.element.querySelector('[data-current-value]').textContent, /39/)
+  await search('no match')
+  assert.equal(picker().dataset.selectedId, 'duration'); assert.match(picker().querySelector('[data-picker-count]').textContent, /^0 /)
+  h.props.fields = h.props.fields.filter(item => item.key !== 'duration'); await settle()
+  assert.equal(picker().dataset.selectedId, 'duration', 'A missing definition never silently changes the selected variable')
+  assert.match(picker().querySelector('[data-picker-current]').textContent, /definition unavailable.*duration/)
+  assert(picker().querySelector('[data-picker-option="duration"]').disabled, 'Retain the missing variable as a disabled option')
+  await search('Fee'); h.props.disabled = true; await settle()
+  assert(h.element.querySelector('.review-field-picker').disabled)
+  picker().querySelector('[data-picker-option="fee"]').dispatchEvent(new window.MouseEvent('click', { bubbles: true })); await settle()
+  assert.equal(picker().dataset.selectedId, 'duration', 'The existing blocked guard also rejects captured selection events')
+  h.props.disabled = false; h.props.projectId = 'OTHER-READER'; await settle()
+  assert.equal(h.element.querySelector('[data-review-field-search]').value, ''); assert.equal(picker().dataset.selectedId, 'fee')
+  assert.deepEqual(h.events, []); assert.equal(h.props.values.fee, 'Unsaved current value')
+  h.dispose(); console.log('PASS: variable search preserves current and missing selections, binding inspection and blocked state without writes')
+}
 async function selectedActualTokenDiff() {
   const props = base()
   props.fields.push({ key: 'method', kind: 'text', label: { en: 'Method' } })
@@ -287,7 +320,7 @@ async function compactLimitsKeepEveryRiskAndParentOwnedStaleStatus() {
   assert(limits, 'Reading and binding limitations share one explicit disclosure')
   assert.equal(limits.open, false); assert.match(limits.querySelector('summary').textContent, /Unverified reading and change mapping/)
   assert.match(limits.textContent, /Original.*22/s); assert.match(limits.textContent, /Saved revision bindings are unavailable/)
-  assert.equal([...h.element.querySelectorAll('.review-notice')].filter(node => /Current inputs differ/.test(node.textContent)).length, 0, 'A parent-owned stale state is not repeated by its reader')
+  assert.equal([...h.element.querySelectorAll('.review-notice')].filter(node => /Current variables differ/.test(node.textContent)).length, 0, 'A parent-owned stale state is not repeated by its reader')
   assert.equal(h.element.querySelector('[data-review-mode="saved"]').disabled, true)
   assert.match(h.element.querySelector('[data-document-paper]').textContent, /Complete invitation/)
   h.dispose(); console.log('PASS: one collapsed risk disclosure preserves numbering/binding failures while parent stale status remains singular')
@@ -305,4 +338,4 @@ async function deliveryNoticesPreserveVerifiedOverlay() {
   assert.equal(h.element.querySelectorAll('[data-document-paper] ins').length, 0, 'A changed notice receipt retains the complete-reading fallback')
   h.dispose(); console.log('PASS: revision-bound delivery notices preserve complete order and do not relax mismatch guards')
 }
-;(async () => { await unverifiedMappingStillReadsCurrentSavedBody(); await compactLimitsKeepEveryRiskAndParentOwnedStaleStatus(); await completeSavedRevisionChanges(); await warningSourceLabels(); await completeDocumentModes(); await selectedActualTokenDiff(); await nativeLineBreakTokenDiff(); await linkedNativeNavigation(); await branchGuidanceAndAddedMapping(); await verifiedReadingGuardsAndLocales(); await replacedTemplateKeepsCurrentOriginal(); await recordedEvidenceContext(); await appliedSharedParagraphAttribution(); await unavailableSavedLedger(); await missingCrossFileTargetDoesNotFallback() })().catch(error => { console.error(error); process.exitCode = 1 })
+;(async () => { await unverifiedMappingStillReadsCurrentSavedBody(); await compactLimitsKeepEveryRiskAndParentOwnedStaleStatus(); await completeSavedRevisionChanges(); await warningSourceLabels(); await completeDocumentModes(); await searchableVariableSelection(); await selectedActualTokenDiff(); await nativeLineBreakTokenDiff(); await linkedNativeNavigation(); await branchGuidanceAndAddedMapping(); await verifiedReadingGuardsAndLocales(); await replacedTemplateKeepsCurrentOriginal(); await recordedEvidenceContext(); await appliedSharedParagraphAttribution(); await unavailableSavedLedger(); await missingCrossFileTargetDoesNotFallback() })().catch(error => { console.error(error); process.exitCode = 1 })

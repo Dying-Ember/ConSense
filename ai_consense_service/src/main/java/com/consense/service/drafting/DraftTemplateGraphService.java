@@ -89,6 +89,7 @@ public class DraftTemplateGraphService {
             Map<String,Object> node=asMap(raw);if("excluded".equals(node.get("status")))continue;
             active++;
             if(!"confirmed".equals(node.get("status")))throw new BizException(4007,"GRAPH_REVIEW_INCOMPLETE: "+node.get("id"));
+            if(!DraftCatalogAlignment.reviewed(node))throw new BizException(4007,"GRAPH_CATALOG_REVIEW_INCOMPLETE: "+node.get("id"));
             requireReviewedSource(projectId,graph,node);
             if(Boolean.TRUE.equals(asMap(node.get("correction")).get("needsRebind")))throw new BizException(4007,"GRAPH_RULE_REBIND_REQUIRED: "+node.get("id"));
             for(Object rawTarget:list(node.get("editTargets"))) {
@@ -420,6 +421,7 @@ public class DraftTemplateGraphService {
     private List<JsonNode> templateReadings(String projectId){List<JsonNode> result=new ArrayList<>();for(SourceDocument source:templateSources(projectId))result.add(sourceReader.reading(source));return result;}
     private Map<String,Object> selected(List<Map<String,Object>> identities){Map<String,Object> result=new LinkedHashMap<>();for(Map<String,Object> source:identities){String key=string(source.get("fileKey"));if(Arrays.asList("NTT","SCT","SCC").contains(key)&&(!result.containsKey(key)||"docx".equals(source.get("format"))))result.put(key,source.get("id"));}return result;}
     private void requireReviewedSource(String projectId,Map<String,Object> graph,Map<String,Object> node){
+        if(DraftCatalogAlignment.standaloneManualInput(node))return;
         boolean supported=false;for(Object raw:list(node.get("sourceAnchors"))){Map<String,Object> anchor=asMap(raw);for(Object identityRaw:list(graph.get("sources"))){Map<String,Object> identity=asMap(identityRaw);if(!Objects.equals(string(anchor.get("docId")),string(identity.get("docId")))&&!Objects.equals(string(anchor.get("docId")),string(identity.get("id"))))continue;
                 SourceDocument source=requireSource(projectId,((Number)identity.get("sourceDocumentId")).longValue());String quote=string(anchor.get("text"));
                 if("bound".equals(asMap(anchor.get("nativeBinding")).get("status"))||"bound".equals(asMap(anchor.get("sourceObservationBinding")).get("status"))||quote!=null&&!quote.trim().isEmpty()&&source.getTextContent()!=null&&source.getTextContent().contains(quote))supported=true;

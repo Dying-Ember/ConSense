@@ -20,6 +20,35 @@ function controls(root) {
   return {get,async click(attr,value){const n=get(attr,value);assert.ok(n,attr);assert.notEqual(n.props.disabled,true,'Enabled '+attr);await n.props.onClick();await settle()},async model(attr,value,key){const n=get(attr,key);assert.ok(n,attr);n.props['onUpdate:modelValue'](value);await settle()}}
 }
 const Component=loadVue(path.join(__dirname,'../src/components/DraftingQuestionBatch.vue'),{globals:{structuredClone}}).default
+async function prerequisiteSearchTest() {
+  const state=fixture(),duration=node('PRIVATE-DURATION','Contract duration in months');duration.nameZh='合约工期（月）';duration.type.kind='number';state.variables.push(duration)
+  state.variables.find(item=>item.id==='PRIVATE-ENVELOPE').nameZh='双信封'
+  state.variables.find(item=>item.id==='PRIVATE-THIRD').status='excluded'
+  const props=vue.reactive({state,ids:['PRIVATE-MAIN','PRIVATE-DONOR'],sources,locale:'en'}),drafts=[],events=[],original=copy(state),key='PRIVATE-DONOR:0:0'
+  const host=renderer(),app=host.createApp({render:()=>vue.h(Component,{...props,onDraft:value=>drafts.push(copy(value)),onBranches:(...args)=>events.push(args)})});app.mount(host.root);await settle()
+  const c=controls(host.root),picker=()=>c.get('data-branch-prerequisite',key)
+  const option=id=>find(picker(),item=>item.props?.['data-picker-option']===id)
+  const search=async value=>{c.get('data-branch-prerequisite-search',key).props.onInput({target:{value}});await settle()}
+  await c.model('data-branch-route','keep','PRIVATE-DONOR:0:yes');await c.model('data-branch-route','delete','PRIVATE-DONOR:0:no')
+  await c.click('data-branch-add-prerequisite','PRIVATE-DONOR:0')
+  assert.equal(option('PRIVATE-MAIN'),undefined);assert.equal(option('PRIVATE-DONOR'),undefined);assert.equal(option('PRIVATE-THIRD'),undefined)
+  await search('双信封');assert(option('PRIVATE-ENVELOPE'));assert.equal(option('PRIVATE-DURATION'),undefined)
+  await option('PRIVATE-ENVELOPE').props.onClick();await settle()
+  assert.equal(drafts.at(-1).assignments['PRIVATE-DONOR:0'].extra[0].operator,'yes','Selecting a Boolean retains the existing operator reset')
+  await search('合同期限');assert(option('PRIVATE-DURATION'));assert.equal(picker().props['data-selected-id'],'PRIVATE-ENVELOPE')
+  assert.match(text(find(picker(),item=>item.props?.['data-picker-current']!==undefined)),/Two-envelope/)
+  await search('no matching variable');assert.match(text(find(picker(),item=>item.props?.['data-picker-count']!==undefined)),/^0 /)
+  assert.deepEqual(copy(state),original);assert.deepEqual(events,[],'Searching and selecting prerequisites does not apply a graph transaction')
+  props.state.variables.find(item=>item.id==='PRIVATE-ENVELOPE').status='excluded';await settle()
+  assert.notEqual(option('PRIVATE-ENVELOPE').props.disabled,undefined,'An excluded current reference stays visible and disabled')
+  assert.match(text(c.get('data-branch-problem')),/retained prerequisite is no longer selectable/)
+  const draft=copy(drafts.at(-1));app.unmount()
+  const restored=renderer(),restoredApp=restored.createApp({render:()=>vue.h(Component,{...props,draft})});restoredApp.mount(restored.root);await settle()
+  const restoredControls=controls(restored.root),retained=restoredControls.get('data-branch-prerequisite',key)
+  assert.equal(restoredControls.get('data-branch-prerequisite-search',key).props.value,'no matching variable','Search survives the existing batch draft restore')
+  assert.equal(retained.props['data-selected-id'],'PRIVATE-ENVELOPE');assert.equal(restoredControls.get('data-branch-commit').props.disabled,true)
+  restoredApp.unmount();console.log('PASS: prerequisite search preserves selections and drafts, filters primary/source/excluded variables and blocks invalid retained references without applying changes')
+}
 async function childTest() {
   const state=fixture(), original=copy(state), events=[], drafts=[]
   const props=vue.reactive({state,ids:['PRIVATE-MAIN','PRIVATE-DONOR'],sources,locale:'en'})
@@ -29,7 +58,7 @@ async function childTest() {
   assert.equal(actionOptions.length,8,'One pending option and seven business actions; aliases cannot create duplicate labels')
   assert.equal(new Set(actionOptions).size,actionOptions.length,'Retain and Not used appear only once')
   await c.click('data-batch-mode','duplicates')
-  assert.match(text(c.get('data-batch-merge-problem')),/Answer shapes differ/,'The real boolean business / text source check mismatch has a concrete reason')
+  assert.match(text(c.get('data-batch-merge-problem')),/Value shapes differ/,'The real boolean business / text source check mismatch has a concrete reason')
   assert.equal(c.get('data-batch-confirm-merge').props.disabled,true)
   assert.doesNotMatch(text(host.root),/PRIVATE-|p-NTT|[a-f0-9]{64}/,'No internal identities appear in review text')
   await c.click('data-batch-mode','branches')
@@ -90,7 +119,7 @@ async function oldAnswerAndChoiceTest() {
   paperOld.editTargets.forEach(target=>target.branchId='PRIVATE-OLD-BRANCH');delete paperOld.editTargets[2].native
   const originalPaperRule=copy(paperOld.correction),paperEvents=[],paperHost=renderer(),paperApp=paperHost.createApp({render:()=>vue.h(Component,{state:paper,ids:['PRIVATE-MAIN',paperOld.id],sources,locale:'en',onBranches:actions=>paperEvents.push(actions)})});paperApp.mount(paperHost.root);await settle();const paperControls=controls(paperHost.root)
   for(let index=0;index<3;index++){await paperControls.model('data-branch-route','delete',paperOld.id+':'+index+':yes');await paperControls.model('data-branch-route','keep',paperOld.id+':'+index+':no')}
-  assert.match(text(paperControls.get('data-branch-problem')),/old question’s routing condition/,'An old self route cannot masquerade as an extra independent prerequisite')
+  assert.match(text(paperControls.get('data-branch-problem')),/old variable’s routing condition/,'An old self route cannot masquerade as an extra independent prerequisite')
   await paperControls.model('data-branch-answer-map','no',paperOld.id);await paperControls.model('data-branch-ack',true);await paperControls.click('data-branch-commit')
   let paperResult=paper;for(const action of paperEvents[0])paperResult=createReviewReducer({sources}).reduce(paperResult,action)
   const paperPrimary=paperResult.variables[0],paperDerived=paperResult.variables[4]
@@ -154,4 +183,4 @@ async function parentTest() {
   assert.deepEqual(writes.at(-1)[1].graph.variables[0].correction.supersededCorrection,superseded,'A later ordinary branch edit retains the archived original correction without retaining its unresolved guard')
   app.unmount()
 }
-;(async()=>{await childTest();await oldAnswerAndChoiceTest();await parentTest();console.log('PASS: multi-selection comparison, concrete merge guards, atomic batch/undo, one-answer branch target moves, reverse actions/mappings, choice routes, retained additional prerequisites, pending scope and graph/form/batch remount preservation')})().catch(error=>{console.error(error);process.exitCode=1})
+;(async()=>{await prerequisiteSearchTest();await childTest();await oldAnswerAndChoiceTest();await parentTest();console.log('PASS: multi-selection comparison, concrete merge guards, atomic batch/undo, one-answer branch target moves, reverse actions/mappings, choice routes, retained additional prerequisites, pending scope and graph/form/batch remount preservation')})().catch(error=>{console.error(error);process.exitCode=1})

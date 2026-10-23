@@ -11,7 +11,7 @@ import java.util.*;
 /** Pure, versioned drafting decisions. Facts, adoption and source mapping are separate. */
 public final class DraftBusinessRules {
  private DraftBusinessRules() { }
- public static final String RULE_VERSION="drafting-20261022.2-bs-safety-purpose-reuse";
+ public static final String RULE_VERSION="drafting-20261023.1-catalog-foundation-scope";
  private static final ObjectMapper JSON=new ObjectMapper();
  private static final Map<String,Object> RAW=load();
  private static Map<String,Object> load() {try(InputStream in=DraftBusinessRules.class.getResourceAsStream("/drafting/input-catalog.json")){return JSON.readValue(in,new TypeReference<LinkedHashMap<String,Object>>(){});}catch(Exception ex){throw new IllegalStateException("Missing versioned drafting catalog",ex);}}
@@ -84,7 +84,7 @@ public final class DraftBusinessRules {
   for(String id:Arrays.asList("NTT-3AB-PROCEDURE","NTT-4B-PROCEDURE","NTT-5D-PROCEDURE","NTT-6-PROCEDURE","NTT-7-PROCEDURE"))c.set(id,Boolean.TRUE.equals(two)?"retain":"pending",null,"Retain the standard two-envelope provision, or adopt exact replacement wording for this target. Do not invent scoring weights.","保留标准双信封条文；其他程序逐目标采用准确改文，不编造评分权重。","twoEnvelopeTendering","otherTenderingArrangement");
   c.set("NTT-9-WTO",action(wto,"not_used"),null,"WTO applicability is a business decision; No retains number 9 with Not used.","WTO适用由业务判断；否时保留9编号并写Not used。","wtoGpaApplies");
   Boolean bond=and(c.b("foundationIncluded"),c.b("periodAtLeast39Months"));c.derived.put("g1aTrigger",bond);c.derived.put("bondAppendix",bond==null?null:bond?"G1a":"G1");
-  c.set("NTT-10-BOND-REFERENCE",bond==null?"pending":"amend",bond==null?null:bond?"G1a":"G1","Select G1a only when combined foundation AND at least 39 months are true; an explicit No selects G1.","基础合并合约且工期至少39个月同时为是才用G1a；任一明确否用G1。","foundationIncluded","periodAtLeast39Months","contractPeriodMonths");
+  c.set("NTT-10-BOND-REFERENCE",bond==null?"pending":"amend",bond==null?null:bond?"G1a":"G1","Select G1a only when foundation works are included AND the period is at least 39 months; an explicit No selects G1.","包含基础工程且工期至少39个月同时为是才用G1a；任一明确否用G1。","foundationIncluded","periodAtLeast39Months","contractPeriodMonths");
   c.derived.put("nscApplicable","NSC".equals(arrangement)?Boolean.TRUE:"BSSSC".equals(arrangement)?Boolean.FALSE:null);
   c.set("NTT-13-SUBCONTRACT","NSC".equals(arrangement)?"retain":"BSSSC".equals(arrangement)&&answered(c.v.get("nscAlternativeText"))?"amend":"pending", "BSSSC".equals(arrangement)?c.v.get("nscAlternativeText"):null,"NSC retains the standard wording; BSSSC uses the exact adopted NTT13 replacement. Preserve the clause number and requirement.","NSC保留标准文字；BSSSC使用本次准确采用NTT13改文，保留条号及义务。","subcontractArrangement","nscAlternativeText");
   c.set("NTT-17-RAILWAY",action(railway,"not_used"),null,"No Works in the railway protection area means number 17 remains with Not used; plan availability is independent.","无铁路保护区工程时保留17号并写Not used；图则可查阅是独立条件。","railwayProtectionAreaWorks");

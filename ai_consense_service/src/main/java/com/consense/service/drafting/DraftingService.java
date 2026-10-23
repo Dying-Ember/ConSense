@@ -551,6 +551,8 @@ public class DraftingService {
             if (fresh||migration) v.setUpdatedAt(Instant.now());variableRepository.save(v);
         }
     }
+    public Map<String,Object> baselineCatalog(String projectId) {projectService.require(projectId);return DraftCatalogAlignment.catalog();}
+
     public Map<String,Object> catalog(String projectId) {
         projectService.require(projectId);if(!reviewedRules(projectId))return DraftBusinessRules.catalog();
         Map<String,Object> result=new LinkedHashMap<>(templateGraphService.catalog(projectId));List<Object> groups=new ArrayList<>();

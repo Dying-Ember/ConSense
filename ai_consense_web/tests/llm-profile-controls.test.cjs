@@ -141,7 +141,7 @@ async function harness({ stored = new Map(), metadata = profiles, metadataError 
     if (request.url.endsWith('/plan')) return { actions: [], unresolved: [] }
     return []
   } })
-  await find(drafting.root, node => node.tag === 'button' && text(node).trim() === 'Enter inputs manually').props.onClick(); await settle()
+  await find(drafting.root, node => node.tag === 'button' && text(node).trim() === 'Enter values manually').props.onClick(); await settle()
   find(drafting.root, node => node.tag === 'input' && node.props.id === 'input-contractTitle').props.onInput({ target: { value: 'User edit' } }); await settle()
   await find(drafting.root, node => node.tag === 'button' && text(node).trim() === '1 File identification').props.onClick(); await settle()
   const blockedAutomation = find(drafting.root, node => node.tag === 'button' && node.props['data-start-automation'] !== undefined)
@@ -188,7 +188,7 @@ async function harness({ stored = new Map(), metadata = profiles, metadataError 
     if (request.url.endsWith('/plan')) return waitForPlan ? plan.promise : { actions: [], unresolved: [] }
     return []
   } })
-  await find(generation.root, node => node.tag === 'button' && text(node).trim() === 'Enter inputs manually').props.onClick(); await settle()
+  await find(generation.root, node => node.tag === 'button' && text(node).trim() === 'Enter values manually').props.onClick(); await settle()
   waitForPlan = true
   const generating = find(generation.root, node => node.tag === 'button' && text(node).trim() === 'Generate English drafts').props.onClick(); await settle()
   await find(generation.root, node => node.tag === 'select' && node.props['aria-label'] === 'LLM source').props.onChange({ target: { value: 'minimax-cn' } }); await settle()
@@ -240,7 +240,7 @@ async function harness({ stored = new Map(), metadata = profiles, metadataError 
     if (request.url.endsWith('/extract-trace')) return trace
     return []
   } })
-  await find(traced.root, node => node.tag === 'button' && text(node).trim() === 'Enter inputs manually').props.onClick(); await settle()
+  await find(traced.root, node => node.tag === 'button' && text(node).trim() === 'Enter values manually').props.onClick(); await settle()
   await find(traced.root, node => node.tag === 'button' && text(node).trim() === 'Extraction trace').props.onClick(); await settle()
   assert.match(text(traced.root), /Recorded model: configured-local-trace/)
   assert.match(text(traced.root), /ollama/)
@@ -252,7 +252,7 @@ async function harness({ stored = new Map(), metadata = profiles, metadataError 
   }
   delete trace.modelIdentity
   await traced.store.switchProject('T2'); await settle()
-  await find(traced.root, node => node.tag === 'button' && text(node).trim() === 'Enter inputs manually').props.onClick(); await settle()
+  await find(traced.root, node => node.tag === 'button' && text(node).trim() === 'Enter values manually').props.onClick(); await settle()
   await find(traced.root, node => node.tag === 'button' && text(node).trim() === 'Extraction trace').props.onClick(); await settle()
   const legacyReport = find(traced.root, node => node.tag === 'section' && node.props.class === 'extraction-report')
   assert.match(text(legacyReport), /captured-legacy-label/)

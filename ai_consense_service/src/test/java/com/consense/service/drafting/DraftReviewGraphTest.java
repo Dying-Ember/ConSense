@@ -57,18 +57,18 @@ class DraftReviewGraphTest {
     private Map<String,Object> clause(String id,String op,String value){return obj("inputId",id,"operator",op,"value",value);}
     private Map<String,Object> branch(String id,String mode,Object... clauses){return obj("id",id,"mode",mode,"clauses",Arrays.asList(clauses),"scopeId","","scopeMode","");}
     private Map<String,Object> bondGraph(){
-        Map<String,Object> combined=node("combined","boolean","input"),foundations=node("foundations","boolean","input"),months=node("months","number","input"),bond=node("bond","choice","derived");
+        Map<String,Object> foundations=node("foundations","boolean","input"),months=node("months","number","input"),bond=node("bond","choice","derived");
         bond.put("options",Arrays.asList(obj("value","g1","labelEn","G1"),obj("value","g1a","labelEn","G1a")));
-        Map<String,Object> yes=branch("long","all",clause("combined","yes",""),clause("foundations","yes",""),clause("months","ge","39"));yes.put("resultValue","g1a");
-        Map<String,Object> no=branch("standard","any",clause("combined","no",""),clause("foundations","no",""),clause("months","lt","39"));no.put("resultValue","g1");
-        bond.put("correction",obj("branches",Arrays.asList(yes,no)));return graph(combined,foundations,months,bond);
+        Map<String,Object> yes=branch("long","all",clause("foundations","yes",""),clause("months","ge","39"));yes.put("resultValue","g1a");
+        Map<String,Object> no=branch("standard","any",clause("foundations","no",""),clause("months","lt","39"));no.put("resultValue","g1");
+        bond.put("correction",obj("branches",Arrays.asList(yes,no)));return graph(foundations,months,bond);
     }
     @Test void independentFactsAndUnknownsAreNotFlattened(){
-        Map<String,Object> graph=bondGraph();validate(graph);assertEquals(3,fields(graph).size());
-        assertEquals("g1a",map(plan(graph,obj("combined",true,"foundations",true,"months",39)).get("derived")).get("bond"));
-        assertEquals("g1",map(plan(graph,obj("combined",true,"months",38)).get("derived")).get("bond"));
-        assertFalse(map(plan(graph,obj("combined",true,"months",39)).get("derived")).containsKey("bond"));
-        assertEquals("g1",map(plan(graph,obj("combined",false,"months",100)).get("derived")).get("bond"));
+        Map<String,Object> graph=bondGraph();validate(graph);assertEquals(2,fields(graph).size());
+        assertEquals("g1a",map(plan(graph,obj("foundations",true,"months",39)).get("derived")).get("bond"));
+        assertEquals("g1",map(plan(graph,obj("months",38)).get("derived")).get("bond"));
+        assertFalse(map(plan(graph,obj("months",39)).get("derived")).containsKey("bond"));
+        assertEquals("g1",map(plan(graph,obj("foundations",false,"months",100)).get("derived")).get("bond"));
     }
     @Test void scalarAndStructuredTypesPreserveFalseZeroEmptyAndWhitespace(){
         assertEquals("false",normalize(node("b","boolean","input"),"no"));assertEquals("0",normalize(node("n","number","input"),"0.0"));

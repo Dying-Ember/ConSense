@@ -153,7 +153,7 @@ const pick=async parts=>{receipt={page:2,words:parts.map(([paragraph,start,end],
   control('data-review-name-en').props['onUpdate:modelValue']('Unsaved core edit'); await settle()
   assert.equal(control('data-review-remove-isolated-rule').props.disabled, true)
   await click('data-review-remove-isolated-rule')
-  assert.match(text(host.root), /Save or cancel the current question edit first/)
+  assert.match(text(host.root), /Save or cancel the current variable edit first/)
   await title('Cancel edit'); await click('data-review-remove-isolated-rule')
   assert.ok(!control('data-review-remove-isolated-rule'))
   assert.equal(control('data-review-confirm').props.disabled, true, 'Removing an isolated rule does not review the question or confirm its template')
@@ -179,15 +179,15 @@ const pick=async parts=>{receipt={page:2,words:parts.map(([paragraph,start,end],
     assert.ok(!control('data-review-remove-isolated-rule'), 'Do not discard existing ' + suffix + ' content')
   }
   const definition = { ...copy(item), questionZh: '原来的准确问题？', questionEn: 'The original precise question?', type: { ...item.type, format: 'preserved' }, options: [{ value: 'stored', labelZh: '旧选项', labelEn: 'Old option', extra: 'preserved' }] }
-  pending.set('SOURCE-CONDITION-ONLY', { promise: Promise.resolve({ currentRevisionId: null, draftRevisionId: revision.id, draft: { ...copy(revision), graph: { ...copy(graph), graph: { ...copy(graph.graph), variables: [definition] } } }, current: null, sources: [source] }) })
+  pending.set('SOURCE-CONDITION-ONLY', { promise: Promise.resolve({ currentRevisionId: null, draftRevisionId: revision.id, draft: { ...copy(revision), graph: { ...copy(graph), graph: { ...copy(graph.graph), variables: [definition, copy(graph.graph.variables[1])] } } }, current: null, sources: [source] }) })
   props.projectId = 'SOURCE-CONDITION-ONLY'; await settle(); await choose()
   await title('Add a case'); await title('Add condition')
-  const conditionInput = find(host.root, node => node.props?.class === 'condition-row').children.find(node => node.tag === 'select')
-  conditionInput.props['onUpdate:modelValue'](item.id); await settle()
+  const conditionInput = find(control('data-condition-input'), node => node.props?.['data-picker-option'] === 'unrelated-2')
+  await conditionInput.props.onClick(); await settle()
   await click('data-review-save-form'); await click('data-review-save')
   const conditionSaved = writes.at(-1)[1].graph.variables[0]
   for (const key of ['type', 'role', 'options', 'questionZh', 'questionEn', 'fixedValue', 'parentId']) assert.deepEqual(conditionSaved[key], definition[key], 'Condition-only save preserves definition field ' + key)
-  assert.equal(conditionSaved.correction.branches[0].clauses[0].inputId, item.id)
+  assert.equal(conditionSaved.correction.branches[0].clauses[0].inputId, 'unrelated-2')
   const markerItem = copy(item)
   markerItem.sourceAnchors = [{ ...copy(item.sourceAnchors[0]), sourceObservationId: 'marker:RESOLVED-TEST' }]
   reading.markerCandidates[1].targetGroupIds = ['scope:TEST']

@@ -44,7 +44,7 @@ async function harness({ confirmed = false } = {}) {
   const button = title => [...host.querySelectorAll('button')].find(node => node.textContent.trim() === title)
   async function click(target) { const control = target.startsWith('[') ? host.querySelector(target) : button(target); assert.ok(control, target); assert.equal(control.disabled, false, target); control.click(); await settle() }
   const visibleModal = () => [...host.querySelectorAll('.modal-backdrop')].find(node => node.classList.contains('show') && node.querySelector('[data-project-identity-comparison]'))
-  await click('Enter inputs manually')
+  await click('Enter values manually')
   return { host, store, projects, values, docs, calls, click, visibleModal, fail(code) { failure = new ApiError(code, 'TEST ONLY identity failure') }, pause() { barrier = deferred(); return barrier }, dispose() { app.unmount(); host.remove() } }
 }
 

@@ -72,7 +72,7 @@ function harness(overrides = {}) {
       rawResponse: 'Recalled source suggestion', context: { trigger: 'missing_output', keys: ['nscAlternativeText'], sourceStart: 5629, sourceEnd: 7715,
         sourceText: 'Adopted replacement wording\nUse the following exact paragraph.', stopReason: 'candidate_found' } }] }] }
   const recall = harness({ extractTrace: async () => recalled })
-  await settle(); await recall.click('Enter inputs manually'); await recall.click('Extraction trace')
+  await settle(); await recall.click('Enter values manually'); await recall.click('Extraction trace')
   assert.match(text(recall.root), /Context recall/)
   assert.doesNotMatch(text(recall.root), /nscAlternativeText|5629|7715|missing_output|candidate_found/)
   assert.match(text(recall.root), /Adopted replacement wording\nUse the following exact paragraph\./)
@@ -84,19 +84,19 @@ function harness(overrides = {}) {
   const stopLabels = [
     ['candidate_found', 'A supported suggestion was found', '已找到有依据的建议', '已找到有依據的建議'],
     ['no_supported_candidate', 'No supported suggestion was found in this context', '本次上下文未找到有依据的建议', '本次上下文未找到有依據的建議'],
-    ['explicit_pending', 'The source explicitly leaves this input pending', '原文明确将该输入留作待定', '原文明確將該輸入留作待定'],
+    ['explicit_pending', 'The source explicitly leaves this variable pending', '原文明确将该变量留作待定', '原文明確將該變量留作待定'],
     ['context_insufficient', 'The available context is insufficient', '可用上下文不足', '可用上下文不足'],
     ['budget_exhausted', 'The recall budget was reached', '已达到补查预算上限', '已達到補查預算上限'],
     ['model_call_failed', 'The model call failed', '模型调用失败', '模型呼叫失敗'],
     ['invalid_json', 'The response could not be parsed', '模型返回无法解析', '模型回傳無法解析'],
-    ['inactive', 'Recall was skipped because this input is currently inapplicable', '该输入本次不适用，已跳过补查', '該輸入本次不適用，已跳過補查'],
+    ['inactive', 'Recall was skipped because this variable is currently inapplicable', '该变量本次不适用，已跳过补查', '該變量本次不適用，已跳過補查'],
     ['no_source_cue', 'No related source cue was recorded', '未记录相关资料线索', '未記錄相關資料線索']
   ]
   const stopped = { ...recalled,
     parts: [{ ...recalled.parts[0], attempts: stopLabels.map(([stopReason], index) => ({ ...recalled.parts[0].attempts[0], attemptIndex: index + 1, context: { ...recalled.parts[0].attempts[0].context, stopReason } })) }],
     decisions: [{ ...report.decisions[0], codes: ['recall_key_not_allowed'] }] }
   const reasons = harness({ extractTrace: async () => stopped })
-  await settle(); await reasons.click('Enter inputs manually'); await reasons.click('Extraction trace')
+  await settle(); await reasons.click('Enter values manually'); await reasons.click('Extraction trace')
   for (const [locale, column, recallLabel, keyGuard] of [
     ['en', 1, 'Context recall', 'Context recall returned a field outside the requested keys'],
     ['zh-Hans', 2, '上下文补查', '上下文补查返回了目标字段以外的取值'],
@@ -116,7 +116,7 @@ function harness(overrides = {}) {
   console.log('PASS: actual extraction controls translate every recall stop and targeted-key guard in all three languages without adopting or clearing retained inputs')
   const triggerLabels = [
     ['original_neighbors', 'Original neighboring source context was included', '已包含原文相邻上下文', '已包含原文相鄰上下文'],
-    ['missing_output', 'The primary extraction omitted the targeted input', '主识别未返回该目标输入', '主識別未回傳該目標輸入'],
+    ['missing_output', 'The primary extraction omitted a value for the targeted variable', '主识别未返回该目标变量', '主識別未回傳該目標變量'],
     ['ordinary_null', 'The model returned an unknown value beside a related source cue', '模型在相关资料线索旁返回未定值', '模型在相關資料線索旁回傳未定值'],
     ['rejected_candidate', 'No usable source-local suggestion passed intake checks', '该资料中没有建议通过接收校验', '該資料中沒有建議通過接收校驗'],
     ['related_source', 'An explicit reference points to another uploaded source', '原文明示引用另一份已上传资料', '原文明示引用另一份已上傳資料']
@@ -125,7 +125,7 @@ function harness(overrides = {}) {
     attempts: [...triggerLabels.map(([trigger], index) => ({ ...recalled.parts[0].attempts[0], attemptIndex: index + 1, context: { ...recalled.parts[0].attempts[0].context, trigger, sourceStart: 0, sourceEnd: 74 } })),
       { ...recalled.parts[0].attempts[0], attemptIndex: 6, kind: 'future_attempt', context: { trigger: 'future_trigger', stopReason: 'future_stop' } }] }] }
   const planning = harness({ extractTrace: async () => planned })
-  await settle(); await planning.click('Enter inputs manually'); await planning.click('Extraction trace')
+  await settle(); await planning.click('Enter values manually'); await planning.click('Extraction trace')
   for (const [locale, column, planLabel, unknownLabel, unknownTrigger, unknownStop] of [
     ['en', 1, 'Source context plan', 'Recorded attempt type', 'Trigger description is not recorded', 'Stop description is not recorded'],
     ['zh-Hans', 2, '资料上下文计划', '记录的调用类型', '未记录此触发原因的说明', '未记录此停止原因的说明'],
@@ -147,7 +147,7 @@ function harness(overrides = {}) {
   console.log('PASS: planned stops are distinct from dispatched original context, known triggers translate and unknown metadata stays inspectable without claiming a primary attempt')
   const incomplete = { ...recalled, decisions: [{ ...report.decisions[0], rawValue: 'Partial replacement text', sourceQuote: 'Source paragraph fragment', codes: ['context_incomplete_source'] }] }
   const fragment = harness({ extractTrace: async () => incomplete })
-  await settle(); await fragment.click('Enter inputs manually'); await fragment.click('Extraction trace')
+  await settle(); await fragment.click('Enter values manually'); await fragment.click('Extraction trace')
   for (const [locale, label] of [
     ['en', 'The supplied source window cuts the paragraph or table; this fragment cannot establish a complete replacement or list'],
     ['zh-Hans', '提供的原文窗口截断了段落或表格；该片段不能确定完整替换文字或清单'],
@@ -169,30 +169,30 @@ function harness(overrides = {}) {
     { value: '[]', fileName: 'Complete empty scope', sourceQuote: 'Complete list is none.' }
   ] }
   const scoped = harness({ catalog: async () => ({ ruleVersion: 'unchanged', groups: [group] }), variables: async () => [conflict], extractTrace: async () => null })
-  await settle(); await scoped.click('Enter inputs manually')
+  await settle(); await scoped.click('Enter values manually')
   const fieldCard = find(scoped.root, node => node.props?.['data-variable'] === trades.key)
   assert.equal(find(fieldCard, node => node.props?.class?.includes('state')).props.class, 'state conflict')
   assert.equal(find(find(scoped.root, node => node.props?.['data-group'] === group.id), node => node.props?.class?.includes('state')).props.class, 'state conflict')
   await scoped.filterStatus('conflict')
   assert.ok(find(scoped.root, node => node.props?.['data-group'] === group.id), 'Blank conflicting scope remains visible through the conflict filter')
-  assert.doesNotMatch(text(scoped.root), /No matching questions/)
+  assert.doesNotMatch(text(scoped.root), /No matching variables/)
   assert.match(text(scoped.root), /Complete Electrical scope/); assert.match(text(scoped.root), /Complete empty scope/)
   assert.equal(scoped.writes.length, 0); scoped.dispose()
   console.log('PASS: a blank server value with two candidate scopes renders field/group conflict and survives the conflict filter')
   const edited = harness({ catalog: async () => ({ ruleVersion: 'unchanged', groups: [group] }), variables: async () => [conflict], extractTrace: async () => null })
-  await settle(); await edited.click('Enter inputs manually')
+  await settle(); await edited.click('Enter values manually')
   const checkbox = find(edited.root, node => node.tag === 'input' && node.props.type === 'checkbox' && node.props.value === 'Electrical')
   assert.ok(checkbox, 'User can select a trade'); checkbox.props.onChange({ target: { checked: true } }); await settle()
   assert.equal(find(find(edited.root, node => node.props?.['data-variable'] === trades.key), node => node.props?.class?.includes('state')).props.class, 'state manual')
   await edited.filterStatus('manual')
   assert.ok(find(edited.root, node => node.props?.['data-group'] === group.id), 'Edited scope appears in the manual filter')
-  await edited.filterStatus('conflict'); assert.match(text(edited.root), /No matching questions/)
+  await edited.filterStatus('conflict'); assert.match(text(edited.root), /No matching variables/)
   assert.equal(edited.writes.length, 0); edited.dispose()
   console.log('PASS: locally selected trades override stale server conflict in field/group status and filters without saving or adopting')
   const months = { key: 'advanceRepaymentMonths', kind: 'number', label: { en: 'Repayment months' } }
   const ordinaryGroup = { id: 'repayment', label: { en: 'Repayment' }, fields: [months] }
   const ordinary = harness({ catalog: async () => ({ ruleVersion: 'unchanged', groups: [ordinaryGroup] }), variables: async () => [{ key: months.key, value: '', candidates: [], adoptionState: 'missing' }], extractTrace: async () => null })
-  await settle(); await ordinary.click('Enter inputs manually'); await ordinary.filterStatus('missing')
+  await settle(); await ordinary.click('Enter values manually'); await ordinary.filterStatus('missing')
   assert.ok(find(ordinary.root, node => node.props?.['data-group'] === ordinaryGroup.id), 'Ordinary unanswered group remains in the missing filter')
   assert.equal(find(find(ordinary.root, node => node.props?.['data-variable'] === months.key), node => node.props?.class?.includes('state')).props.class, 'state missing')
   await ordinary.filterStatus('all')
@@ -203,7 +203,7 @@ function harness(overrides = {}) {
   assert.ok(find(ordinary.root, node => node.props?.['data-group'] === ordinaryGroup.id), 'Invalid manual input remains subject to the review filter')
   assert.equal(ordinary.writes.length, 0); ordinary.dispose()
   console.log('PASS: ordinary missing values stay missing and invalid local edits retain their existing review validation')
-  const h = harness(); await settle(); await h.click('Enter inputs manually'); await h.click('Extraction trace')
+  const h = harness(); await settle(); await h.click('Enter values manually'); await h.click('Extraction trace')
   assert.match(text(h.root), /This extraction failed/)
   assert.match(text(h.root), /Sources have changed since this extraction/)
   assert.match(text(h.root), /Last part failed/)
@@ -224,7 +224,7 @@ function harness(overrides = {}) {
   assert.equal(failure.writes.length, 0)
   failure.dispose()
   console.log('PASS: a partial automation task fetches its current extraction diagnostics and keeps previous manual values')
-  const history = harness(); await settle(); await history.click('Enter inputs manually'); await history.click('Extraction trace'); await history.changeReport('older-A')
+  const history = harness(); await settle(); await history.click('Enter values manually'); await history.click('Extraction trace'); await history.changeReport('older-A')
   assert.match(text(history.root), /Viewing a historical report/)
   assert.match(text(history.root), /old raw/)
   assert.equal(find(history.root, node => node.tag === 'input' && node.props.id === 'input-contractTitle').props.value, 'Manual value')
@@ -233,18 +233,18 @@ function harness(overrides = {}) {
   assert.doesNotMatch(text(history.root), /Viewing a historical report/)
   assert.equal(history.writes.length, 0); history.dispose()
   const pending = deferred()
-  const race = harness({ extractRun: () => pending.promise }); await settle(); await race.click('Enter inputs manually'); await race.click('Extraction trace')
+  const race = harness({ extractRun: () => pending.promise }); await settle(); await race.click('Enter values manually'); await race.click('Extraction trace')
   const older = race.changeReport('older-A'); await settle(); await race.changeReport(''); pending.resolve({ ...report, rawResponses: ['Late obsolete report'] }); await older
   assert.doesNotMatch(text(race.root), /Late obsolete report/); assert.match(text(race.root), /Last part failed/); race.dispose()
   const pendingProject = deferred()
   const switched = harness({ extractRun: () => pendingProject.promise, extractTrace: async id => ({ ...report, runId: `${id}-current`, failureMessage: `${id} current failure` }) })
-  await settle(); await switched.click('Enter inputs manually'); await switched.click('Extraction trace')
+  await settle(); await switched.click('Enter values manually'); await switched.click('Extraction trace')
   const oldProject = switched.changeReport('older-A'); await settle(); await switched.store.switchProject('B'); await settle()
   pendingProject.resolve({ ...report, rawResponses: ['Previous project secret report'] }); await oldProject
   assert.doesNotMatch(text(switched.root), /Previous project secret report|Viewing a historical report/)
   assert.match(text(switched.root), /B current failure/); assert.equal(switched.writes.length, 0); switched.dispose()
   console.log('PASS: actual historical-report controls are read-only; late selections and previous-project responses cannot replace current reports or manual inputs')
-  const unavailable = harness({ extractTraces: async () => { throw new Error('Offline') } }); await settle(); await unavailable.click('Enter inputs manually'); await unavailable.click('Extraction trace')
+  const unavailable = harness({ extractTraces: async () => { throw new Error('Offline') } }); await settle(); await unavailable.click('Enter values manually'); await unavailable.click('Extraction trace')
   assert.match(text(unavailable.root), /Historical reports could not be loaded/)
   unavailable.store.changeLocale('zh-Hans'); await settle()
   assert.match(text(unavailable.root), /历史报告暂时无法读取/)

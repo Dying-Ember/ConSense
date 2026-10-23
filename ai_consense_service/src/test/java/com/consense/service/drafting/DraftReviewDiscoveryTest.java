@@ -124,17 +124,19 @@ class DraftReviewDiscoveryTest {
 
     @Test void independentFactsAndAnAllBranchBecomePendingDefinitionsWithNamespacedReferences() {
         String instruction="Use G1a for a combined contract and foundation work when the duration is at least 39 months.";ObjectNode source=reading("1",instruction);
-        Map<String,Object> combined=modelNode("combined","boolean","input",instruction),foundation=modelNode("foundation","boolean","input",instruction),duration=modelNode("duration","number","input",instruction),bond=modelNode("bond","choice","derived",instruction);
+        Map<String,Object> foundation=modelNode("foundation","boolean","input",instruction),duration=modelNode("duration","number","input",instruction),bond=modelNode("bond","choice","derived",instruction);
         bond.put("options",Arrays.asList(obj("value","g1","labelEn","G1"),obj("value","g1a","labelEn","G1a")));
-        bond.put("branches",Collections.singletonList(obj("id","long","mode","all","clauses",Arrays.asList(obj("inputId","combined","operator","yes"),obj("inputId","foundation","operator","yes"),obj("inputId","duration","operator","ge","value",39)),"resultValue","g1a")));
+        bond.put("branches",Collections.singletonList(obj("id","long","mode","all","clauses",Arrays.asList(obj("inputId","foundation","operator","yes"),obj("inputId","duration","operator","ge","value",39)),"resultValue","g1a")));
         bond.put("effects",Collections.singletonList(obj("quote","G1a","action","replace","branchId","long","valueSourceId","bond")));
-        AiGateway ai=mock(AiGateway.class);when(ai.complete(anyString(),anyString())).thenReturn(response(combined,foundation,duration,bond));
-        Map<String,Object> result=DraftReviewDiscovery.discover(ai,graph(),Collections.singletonList(source),1);assertEquals(3,fields(result).size());
-        Map<String,Object> derived=find(result,"-bond"),branch=map(list(map(derived.get("correction")).get("branches")).get(0));assertEquals("all",branch.get("mode"));assertEquals(3,list(branch.get("clauses")).size());
+        AiGateway ai=mock(AiGateway.class);when(ai.complete(anyString(),anyString())).thenReturn(response(foundation,duration,bond));
+        Map<String,Object> result=DraftReviewDiscovery.discover(ai,graph(),Collections.singletonList(source),1);assertEquals(2,fields(result).size());
+        Map<String,Object> derived=find(result,"-bond"),branch=map(list(map(derived.get("correction")).get("branches")).get(0));assertEquals("all",branch.get("mode"));assertEquals(2,list(branch.get("clauses")).size());
         for(Object raw:list(branch.get("clauses")))assertTrue(text(map(raw).get("inputId")).startsWith("discovery-"));
         Map<String,Object> target=map(list(derived.get("editTargets")).get(0));assertEquals("check",target.get("action"));assertEquals(true,target.get("needsRebind"));
         for(Map<String,Object> node:nodes(result))assertEquals("pending",node.get("status"));assertEquals(0,map(state(result).get("discoverySummary")).get("adoptedValues"));
-        ArgumentCaptor<String> system=ArgumentCaptor.forClass(String.class);verify(ai,times(1)).complete(system.capture(),anyString());assertTrue(system.getValue().contains("TWO independent booleans"));
+        for(Map<String,Object> field:fields(result)){assertEquals("unreviewed",map(field.get("catalogAlignment")).get("status"));assertEquals(false,map(field.get("catalogAlignment")).get("confirmed"));}
+        assertFalse(derived.containsKey("catalogAlignment"));
+        ArgumentCaptor<String> system=ArgumentCaptor.forClass(String.class);verify(ai,times(1)).complete(system.capture(),anyString());assertTrue(system.getValue().contains("foundation works included is ONE boolean"));assertFalse(system.getValue().contains("TWO independent booleans"));
         assertEquals("completed",map(checklist(result).get("discovery")).get("status"));assertNotNull(map(checklist(result).get("discovery")).get("rawResponse"));
     }
 

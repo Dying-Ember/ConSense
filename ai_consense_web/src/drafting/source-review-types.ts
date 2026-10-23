@@ -17,7 +17,7 @@ export interface ReviewVariable extends ReviewObject {
   parentId?: string | null; docIds: string[]; options: ReviewObject[]; sourceAnchors: ReviewAnchor[]
   editTargets: ReviewObject[]; sourceUnitIds: string[]; relatedInputIds: string[]; relations: ReviewObject[]; targets: ReviewObject[]; evidence: ReviewObject[]
 }
-export interface ReviewState { variables: ReviewVariable[]; sourceReviews: Record<string, boolean>; events: ReviewObject[]; nextId: number; blank: boolean; guidanceMode: string; discoverySummary?: ReviewObject; requirements?: DraftAutomaticRequirement[]; relationProposals?: DraftAutomaticRelation[]; automaticDiscoveryIssues?: DraftAutomaticIssue[]; automaticDiscovery?: DraftAutomaticCoverage }
+export interface ReviewState { variables: ReviewVariable[]; sourceReviews: Record<string, boolean>; events: ReviewObject[]; nextId: number; blank: boolean; guidanceMode: string; catalogReview?: { exclusions: Record<string, { reason: string; baselineVersion: string }> }; discoverySummary?: ReviewObject; requirements?: DraftAutomaticRequirement[]; relationProposals?: DraftAutomaticRelation[]; automaticDiscoveryIssues?: DraftAutomaticIssue[]; automaticDiscovery?: DraftAutomaticCoverage }
 export interface ReviewGraph { kind: 'consense-template-graph-v1'; graph: ReviewState; sources: ReviewSource[]; selectedDocuments: Record<string, string> }
 export interface ReviewRevision { id: string; parentRevisionId: string | null; status: 'DRAFT' | 'CONFIRMED'; graphSha256: string; graph: ReviewGraph; createdAt: string; confirmedAt?: string | null; sourceStale: boolean }
 export type ReviewRevisionSummary = Omit<ReviewRevision, 'graph'>

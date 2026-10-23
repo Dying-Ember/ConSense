@@ -1,9 +1,11 @@
 import type { ReviewAnchor, ReviewGraph, ReviewHead, ReviewObject, ReviewReading, ReviewSpan, ReviewState, ReviewVariable } from './source-review-types'
 
 // Retain unsaved source work through project switches and locale remounts.
-export const sourceReviewDrafts = new Map<string, { graph: ReviewGraph; head: ReviewHead; dirty: boolean; selectedId: string; sourceId: string; form: ReviewObject; formBase: string; formOpen: boolean; split?: { names: ReviewObject; first?: ReviewAnchor; second?: ReviewAnchor } }>()
+type ReviewDraft = { graph: ReviewGraph; head: ReviewHead; dirty: boolean; selectedId: string; sourceId: string; form: ReviewObject; formBase: string; formOpen: boolean; split?: { names: ReviewObject; first?: ReviewAnchor; second?: ReviewAnchor } }
+const draftStorage = globalThis as typeof globalThis & { __consenseSourceDrafts?: Map<string, ReviewDraft>; __consenseCandidateDrafts?: Map<string, { form: ReviewObject; formBase: string; editing: string }> }
+export const sourceReviewDrafts = draftStorage.__consenseSourceDrafts ??= new Map<string, ReviewDraft>()
 
-export const candidateReviewDrafts = new Map<string, { form: ReviewObject; formBase: string; editing: string }>()
+export const candidateReviewDrafts = draftStorage.__consenseCandidateDrafts ??= new Map<string, { form: ReviewObject; formBase: string; editing: string }>()
 
 export function emptyReviewState(): ReviewState { return { variables: [], sourceReviews: {}, events: [], nextId: 1, blank: true, guidanceMode: 'recognized' } }
 export function nativeAnchor(reading: ReviewReading, paragraphId: string, start: number, end: number): ReviewAnchor {
@@ -50,7 +52,10 @@ export function appendNativeSelection(target: ReviewAnchor, selection: ReviewAnc
 }
 export function reviewProblem(item: ReviewVariable, state: ReviewState): string | null {
   if (!item.nameZh?.trim() || !item.nameEn?.trim()) return '请补齐中英文名称。 / Supply both names.'
-  if (item.missingSource || !item.sourceAnchors?.length && !item.sourceUnitIds?.length) return '请先关联准确原文。 / Link the exact source first.'
+  const manualDefinition = item.definitionOrigin?.kind === 'manual' && item.definitionOrigin.reason?.trim() && item.role?.kind === 'input' && !item.correction && !item.editTargets?.length
+  if (!manualDefinition && (item.missingSource || !item.sourceAnchors?.length && !item.sourceUnitIds?.length)) return '请先关联准确原文，或为独立人工变量填写新增理由。 / Link the exact source, or give a reason for an independent manual variable.'
+  if (item.catalogAlignment && (!item.catalogAlignment.confirmed || item.catalogAlignment.status === 'ambiguous')) return '请先完成人工变量对齐审核。 / Complete the variable alignment review.'
+  if (['choice','multiselect'].includes(item.type.kind) && (!item.options?.length || new Set(item.options.map(option=>String(option.value))).size!==item.options.length)) return '请填写不重复的选项。 / Supply unique options.'
   if (item.correction?.needsRebind || item.editTargets?.some(target => target.needsRebind || target.nativeBinding && target.nativeBinding.status !== 'bound')) return '关联或目标待重新核对。 / A binding or target needs review.'
   for (const target of item.editTargets ?? []) {
     const spans = targetSpans(target)
@@ -65,7 +70,7 @@ export function reviewProblem(item: ReviewVariable, state: ReviewState): string 
   if (item.role?.kind === 'fixed' && !item.fixedValue?.trim()) return '请填写固定内容。 / Supply fixed wording.'
   for (const branch of item.correction?.branches ?? []) {
     if (!['all', 'any'].includes(branch.mode) || !branch.clauses?.length) return '请明确条件的共同判断方式。 / Complete the conditions.'
-    for (const clause of branch.clauses) if (!byId.has(clause.inputId) || byId.get(clause.inputId)?.status === 'excluded') return '条件引用已变化。 / A condition input changed.'
+    for (const clause of branch.clauses) if (clause.inputId === item.id || !byId.has(clause.inputId) || byId.get(clause.inputId)?.status === 'excluded' || byId.get(clause.inputId)?.role?.kind === 'verification' || byId.get(clause.inputId)?.definitionKind === 'source_seed') return '条件引用无效或包含自身／来源核对事项。 / A condition reference is invalid, self-referential or a source check.'
     if (item.role?.kind === 'derived' && branch.resultValue === undefined) return '请填写条件对应的结果。 / Supply each conditional result.'
   }
   return null

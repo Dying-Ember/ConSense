@@ -1,3 +1,6 @@
+<!-- drafting-variable-alignment-current-20261023 -->
+**2026-10-23 Drafting 变量基准对齐与人工新增：** 用户已批准实施，并确认 `foundationIncluded` 表示“是否包含基础工程”，不另设 combined Boolean。固定目录作版本化参考，新 LLM 变量须人工确认对应／新增，歧义保留待核；支持基准缺项补入／不适用理由、独立人工变量及主要变量选择入口搜索。定义确认、变量值采用和原文修改继续分离，历史图谱与项目值不自动迁移。定向后端 133 通过／1 既有条件跳过，前端与实际隔离 HTTP／浏览器流程已验证；正式后端仍为 review101，当前活动审查保持，由“修复并验证三模块端到端流程”统一评估联合部署。没有新模型／OCR、Sean 图谱保存或采用。具体实现、测试、失败与部署边界见[变量对齐实施交接](HANDOFF-drafting-variable-catalog-alignment-20261023.md)末节。
+
 **2026-10-23 Vetting语义读取候选实现（round380，未部署）：** 生产caller已接`loadSemantic → scan → rules → review → evidence`；目录先筛选、选定来源写边界摘要、公共语义manifest、包内短引用、候选后取定位及相同预检复用已落代码。来源真实H2／触发器35项通过，Python读取59通过／1环境跳过；Java广回归及后续补测按[修复记录](testing/vetting-semantic-demand-hotfix-20261023.md)保留失败，不宣称整包通过。首次冷准备、原件／CAS核验与旧报告冷路径仍有成本；未纠正线上PRE、未重启服务／恢复OCR／新发模型。用户已停止本任务的Drafting实现，交其它agent处理；本任务保留其改动，仅收口Vetting。
 
 **2026-10-23 Vetting按需审查设计再审（round378—379，代码未改）：** [公共按需spec](specs/oer-demand-driven-business-access-20261022.md)保留语义判断与按需取证方向，并补齐四处实施约束：机械校验不证明语义正确；全范围扫描与跨文件联合比较分别记执行覆盖；短引用贯通模型输出、后端定位及旧报告兼容；公共接口内部不得每次重载整图，不能只缩小响应或把开销搬到Python。相同有效预检复用仍受取消、期限及原预算约束。项目PRE在范围内，round378记录source101为PARTIAL且身份／用途unknown，身份修复与旧记录纠正分开，冻结任务不原地换源。本轮仅修订设计，产品代码、数据库及运行任务保持，未重启／派发模型；性能、来源质量与业务效果未验，详见[验收报告](testing/drafting-result-usability-20261023.md)首节。

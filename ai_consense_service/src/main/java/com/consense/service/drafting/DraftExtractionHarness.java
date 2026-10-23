@@ -137,7 +137,7 @@ public class DraftExtractionHarness {
             String coverageSystem=system.substring(0,system.lastIndexOf("Canonical editable catalogue:\n"))+"Canonical editable catalogue:\n"+catalogue(Collections.singleton("domesticBlocks"));
             String coverageUser=user+"\nOne bounded coverage check: the original response omitted domesticBlocks or returned ordinary null, although this part contains a direct residential-scope statement. "
                     +"Return only domesticBlocks, with the exact source passage supporting its Boolean value. An omitted answer is not automatically Yes. "
-                    +"Foundation or combined-foundation classification and construction of domestic or residential blocks are independent inputs. A pending foundation classification does not make a stated domestic construction scope pending; evaluate the residential-scope statement separately. "
+                    +"Foundation-works inclusion and construction of domestic or residential blocks are independent inputs. A pending foundation classification does not make a stated domestic construction scope pending; evaluate the residential-scope statement separately. "
                     +"An actual project-scope description can support an editable suggestion without a separate domestic-construction approval decision; later UI adoption is separate. "
                     +"Questions, pending decisions, template conditions, neighbouring existing buildings and unselected alternatives do not establish project scope. "
                     +"Return null with explanation if this source cannot support the value. Do not answer or replace any other input.";

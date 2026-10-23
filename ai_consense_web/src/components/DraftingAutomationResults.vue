@@ -21,9 +21,9 @@ function reasonLabel(reason: string) { return ({
   ,semantic_completeness_not_proven_by_native_member_inventory: t('OER未将此位置列为编制要求；此清单不代表业务含义已全部核实。', 'OER did not list this position as a drafting requirement; this inventory does not establish semantic completeness.')
 } as Record<string, string>)[reason] ?? t('此项未能完整确认，请对照原文核对；已有可用结果保留。', 'This item could not be fully established. Review the source; usable results are retained.') }
 const tab=ref<'requirements'|'relations'|'issues'>('requirements'),page=ref(0),search=ref('')
-function nodeName(id:string){const node=state.value.variables.find(item=>item.id===id);return node?.definitionKind==='source_seed'?t('来源待核对','Source requires review'):node?(props.locale==='en'?node.nameEn||node.nameZh:node.nameZh||node.nameEn):t('需核对的问题','Question requiring review')}
+function nodeName(id:string){const node=state.value.variables.find(item=>item.id===id);return node?.definitionKind==='source_seed'?t('来源待核对','Source requires review'):node?(props.locale==='en'?node.nameEn||node.nameZh:node.nameZh||node.nameEn):t('需核对的变量','Variable requiring review')}
 const rows=computed(()=>{
-  const records=tab.value==='requirements'?requirements.value.map(item=>({title:item.nodeIds.map(nodeName).join('、')||t('要求尚待对应问题','Requirement needs a question'),quote:item.sourceQuote,sourceId:item.sourceId,sha:item.sourceSha256})):tab.value==='relations'?relations.value.map(item=>({title:nodeName(item.fromId)+' → '+nodeName(item.toId),quote:[item.fromQuote,item.toQuote].filter(Boolean).join(' / '),sourceId:'',sha:''})):issues.value.map(item=>({title:item.nodeId?nodeName(item.nodeId):t('来源或规则需补核','Source or rule requires review'),quote:reasonLabel(item.reason),sourceId:'',sha:''}))
+  const records=tab.value==='requirements'?requirements.value.map(item=>({title:item.nodeIds.map(nodeName).join('、')||t('要求尚待对应变量','Requirement needs a variable'),quote:item.sourceQuote,sourceId:item.sourceId,sha:item.sourceSha256})):tab.value==='relations'?relations.value.map(item=>({title:nodeName(item.fromId)+' → '+nodeName(item.toId),quote:[item.fromQuote,item.toQuote].filter(Boolean).join(' / '),sourceId:'',sha:''})):issues.value.map(item=>({title:item.nodeId?nodeName(item.nodeId):t('来源或规则需补核','Source or rule requires review'),quote:reasonLabel(item.reason),sourceId:'',sha:''}))
   return records.filter(item=>!search.value||(item.title+' '+item.quote).toLowerCase().includes(search.value.toLowerCase()))
 })
 watch([tab,search,()=>props.revision.id],()=>page.value=0)
@@ -33,11 +33,11 @@ const shown=computed(()=>rows.value.slice(page.value*5,page.value*5+5))
 <template>
   <section class="automation-results" data-automation-results>
     <h3>{{ t('本次识别记录','Identification record') }}</h3>
-    <p>{{ t('以下为任务结束时的记录。请在上方原件中逐项核对，当前问题与修改以已保存的核对草稿为准。','These are the task-end records. Review the original above; the saved review draft owns current questions and amendments.') }}</p>
+    <p>{{ t('以下为任务结束时的记录。请在上方原件中逐项核对，当前变量与修改以已保存的核对草稿为准。','These are the task-end records. Review the original above; the saved review draft owns current variables and amendments.') }}</p>
     <p v-if="revision.sourceStale" class="warning" role="status">{{ t('来源已变化，以下为旧任务记录。当前原件及历史核对结果均保留。','Sources have changed. These are historical task records; current originals and review history are retained.') }}</p>
     <div class="result-summary"><span>{{ t('识别要求','Requirements') }} {{ requirements.length }}</span><span>{{ t('关系建议待核对','Relationship proposals to review') }} {{ relations.length }}</span><span>{{ t('补核记录','Further-review records') }} {{ issues.length }}</span></div>
     <nav class="record-tabs" :aria-label="t('识别记录类别','Identification record category')"><button v-for="kind in (['requirements','relations','issues'] as const)" :key="kind" class="btn" :aria-pressed="tab===kind" @click="tab=kind">{{ kind==='requirements'?t('编制要求','Requirements'):kind==='relations'?t('关系建议','Relationships'):t('需补核','Further review') }}</button><input v-model="search" :placeholder="t('搜索本次记录','Search task records')"></nav>
-    <p v-if="!rows.length">{{ t('没有匹配的任务记录，当前问题仍以上方核对草稿为准。','No matching task records. The review draft above owns current questions.') }}</p>
+    <p v-if="!rows.length">{{ t('没有匹配的任务记录，当前变量仍以上方核对草稿为准。','No matching task records. The review draft above owns current variables.') }}</p>
     <article v-for="(item,index) in shown" :key="`${tab}-${page}-${index}`"><strong>{{ item.title }}</strong><blockquote>{{ item.quote }}</blockquote><button v-if="item.sourceId" class="btn" @click="emit('locate',item.sourceId,item.sha)">{{ t('在原件中核对','Review on original') }}</button></article>
     <nav v-if="rows.length>5" class="record-tabs"><button class="btn" :disabled="page===0" @click="page--">{{ t('上一组','Previous') }}</button><span>{{ page+1 }} / {{ Math.ceil(rows.length/5) }}</span><button class="btn" :disabled="(page+1)*5>=rows.length" @click="page++">{{ t('下一组','Next') }}</button></nav>
     <p class="hint">{{ t('识别数量不代表已确认或已采用。未决内容继续保留，系统不会自动执行关系建议。','Counts do not mean confirmation or adoption. Unresolved items remain; relationship proposals are not applied automatically.') }}</p>

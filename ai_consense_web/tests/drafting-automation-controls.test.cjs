@@ -71,7 +71,7 @@ function harness(initial = null, overrides = {}) {
   const adoptNav = find(pendingReview.root, node => node.tag === 'button' && text(node) === '3 Adopt and plan')
   await adoptNav.props.onClick(); await settle()
   assert.ok(pendingReview.control('data-pending-graph-review'), 'An unconfirmed graph presents its candidate review rather than the legacy adoption form')
-  assert.match(text(pendingReview.root), /These answers belong to the graph saved in step 2/)
+  assert.match(text(pendingReview.root), /These candidate values belong to the graph saved in step 2/)
   assert.match(text(pendingReview.control('data-pending-graph-count')), /Current graph awaiting review/)
   const previewNav = find(pendingReview.root, node => node.tag === 'button' && text(node) === '4 Preview and export')
   await previewNav.props.onClick(); await settle()

@@ -378,3 +378,18 @@ Original review also reuses exact-source-hash registered pagination controls fro
 Empty source paragraphs can carry layout meaning through explicit or inherited line height, before/after spacing, cell position and page flow. Empty text is not permission to compress or remove a paragraph. Shared rendering must preserve these properties unless a compatibility correction is registered and verified against the exact original SHA and native anchors. Do not apply a universal empty-paragraph compaction policy, and do not universally remove existing compatibility controls to reverse one document's defect. Evaluate each proposed change with bounded same-source differential PDFs, checking the affected guidance/body relationship, physical page count and blank pages, source text and locations, tables and visible footer placement. Preserve original bytes, rejected variants and any remaining layout discrepancy; matching text or complete bookmark destinations alone do not establish layout fidelity.
 
 The 2026-10-23 NTT correction removes only that exact source's 174 empty-spacing compactions while retaining its other registered controls; it remains 11 pages with all 178 nonblank paragraphs text-matched and located. The residual 16.05pt guidance/body start offset and varying body-footer baselines remain open. The adjacent SCT differential demonstrates why this cannot be generalized: removing all 313 SCT compactions changes 27 pages to 31 and creates four blank physical pages, despite retaining all 469 nonblank locations and the same text. Keep the SCT production registration unchanged until a narrower exact-source correction has passed its own evidence checks. Reuse this rule through the same DraftPdfConverter/native-layout path for every DOCX PDF consumer, including OER Word print-to-PDF; it does not add an alternative renderer or authorize document edits. Current evidence and deployment/browser boundaries are recorded in the 2026-10-23 usability report, round354—362.
+<!-- drafting-variable-alignment-20261023:start -->
+## 2026-10-23 变量基准对齐、人工新增与术语统一（已批准实施）
+
+固定变量目录提供有版本的定义参考；LLM 已识别和原子拆解的变量保留为候选，匹配到已有变量、基准未识别、目录外新增及有歧义的项均由人工核对。识别缺项不等于必填遗漏，目录外项不等于识别错误。对齐不能自动采用变量值、确认模板规则或执行改文；一条来源可支持多个变量，一个变量可关联多个来源和修改位置。相同名称、相同 guidance、结构类型相同均不单独证明同义。
+
+用户已确认 NTT10 中 combined 为基础和上盖打包的修饰语，本业务口径保留 `foundationIncluded`＝“包含基础工程”，不另设 combined Boolean。原英文指导语原样保留，旧图谱和历史答案不自动迁移；`contractorDesignedFoundations` 仍是另一项事实。工期月数与39个月阈值保留既有推导／冲突核对，39包含等号，未知不视为否。
+
+前端单一输入统一称“变量”，并区分“候选变量”（定义）与“候选值”（资料取值）。列表可直接新增变量，搜索无结果时也可新增；至少明确名称／含义、值类型、适用的单位／选项、项目或明细归属及人工理由。无模板引文的人工定义可以核对，但具体规则与修改位置仍须各自依据；定义确认、值采用和改文权限保持分离。
+
+目录读取为独立轻量参考，不替换动态项目目录。对齐决策、基准版本与人工理由保存在现有图谱修订，复用前驱校验、候选绑定、旧值保留和重新采用。含义、单位、作用域、必填性或对应定义改变须使相关旧绑定明确待核；纯说明／位置调整不误改无关变量。多来源合并保留全部条件／目标，冲突或复合项通过既有人工拆分／合并核对；不按同名或列序迁移值。来源核对项不进入变量选择；直接自引用、循环和明细作用域交由既有前后端共同校验，失效历史引用保留提示。
+
+新 LLM 识别的业务变量标记为 `unreviewed`，须由人工选择对应基准、新变量或保留歧义，不能仅凭普通定义确认跳过对齐审核。历史没有此元数据的节点兼容读取，不批量改写旧图谱。用户主动“创建为新变量”并填写理由属于明确的新定义决定，其状态及项目值仍分别确认。基准补入必须保留父子结构和必需列，已有不适用决定不得被自动撤销；不导入基准的旧编辑坐标。选择项的稳定值可显式校正，变化沿既有条件重绑和旧值复核机制处理。
+
+本批优先复用已存识别结果，不追加模型或OCR调用。历史修订、原件、未保存编辑及未知项保留，未完成事项继续受既有部分交付规则约束。本节为实施契约，最终代码／测试／真实浏览器／部署状态另记；完整交接见[变量对齐交接](../HANDOFF-drafting-variable-catalog-alignment-20261023.md)。
+<!-- drafting-variable-alignment-20261023:end -->
