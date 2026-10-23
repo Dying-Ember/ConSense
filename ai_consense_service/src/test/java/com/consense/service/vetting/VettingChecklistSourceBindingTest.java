@@ -55,6 +55,42 @@ class VettingChecklistSourceBindingTest {
         assertFalse(VettingChecklistRequirementRelations.automaticEligible(f.claim.getItemId(),f.claim.getStatus()));
     }
 
+    @Test void exactFactTextResolvesNativeIntervalsWithoutAskingTheModelForIndexes() {
+        NativeFixture fixture=new NativeFixture();
+        for(ChecklistFactRef fact:fixture.claim.getSupport().getFacts()){
+            fact.setText(fixture.quotes.get(fact.getEvidenceIndex()).getQuote());
+            fact.setNativePositionIndex(null);fact.setStartUtf16(null);fact.setEndUtf16(null);
+        }
+        JsonNode bound=fixture.bind();
+        assertEquals("current_native_intervals_bound_roles_and_scope_unverified",bound.path("supportStatus").asText());
+        assertFalse(bound.path("automaticConclusionAllowed").asBoolean());
+        fixture.claim.getSupport().getFacts().get(0).setText("text that was never submitted");
+        assertUnknownFact(fixture.bind(),0,"fact_text_missing_or_ambiguous_in_quote");
+    }
+
+    @Test void compactSemanticQuotesBindThroughTheirExactVerifiedOriginalPointer() {
+        NativeFixture fixture=new NativeFixture();fixture.semantic(false);JsonNode relation=fixture.bind();
+        assertEquals("current_native_intervals_bound_roles_and_scope_unverified",relation.path("supportStatus").asText());
+        assertFalse(relation.path("automaticConclusionAllowed").asBoolean());
+        for(int at=0;at<3;at++){Chunk chunk=fixture.byId.get("source-"+at);assertNull(chunk.getParts().get(0).getSourcePosition());JsonNode bound=relation.path("sourceBindings").get(at);
+            assertEquals("bound_current_native_interval",bound.path("bindingStatus").asText());assertEquals(fixture.quotes.get(at).getQuote(),bound.path("sourceText").asText());assertEquals(0,bound.path("startUtf16").asInt());assertEquals(fixture.quotes.get(at).getQuote().length(),bound.path("endUtf16").asInt());}
+    }
+
+    @Test void aForeignPointerOrChangedSelectedPartCannotSupplyNativeCoordinatesToASemanticQuote() {
+        for(String field:Arrays.asList("projectId","documentId","module","canonicalChunkId","unitId","originalSourceSha256","javaParsedSourceHash","canonicalSourceHash","sourceRevisionSha256","projectionSha256","projectionRevisionSha256","parts")){
+            NativeFixture fixture=new NativeFixture();fixture.semantic(false);com.consense.web.dto.VettingDtos.FindingEvidence quote=fixture.saved.getEvidence().get(0);ObjectNode changed=JsonUtils.mapper().valueToTree(quote.getCanonicalEvidence());
+            if("documentId".equals(field))changed.put(field,999L);else if("parts".equals(field))((ObjectNode)changed.path("parts").get(0)).put("text","a different selected native range");else changed.put(field,field.endsWith("Sha256")||"javaParsedSourceHash".equals(field)||"canonicalSourceHash".equals(field)?VettingCorpus.hash("foreign "+field):"foreign-"+field);
+            quote.setCanonicalEvidence(JsonUtils.read(JsonUtils.write(changed),com.consense.web.dto.CanonicalEvidenceDtos.EvidencePointer.class));assertUnknownFact(fixture.bind(),0,"canonical_pointer_or_selected_parts_changed");
+        }
+        NativeFixture position=new NativeFixture();position.semantic(false);((ObjectNode)position.saved.getEvidence().get(0).getCanonicalEvidence().getParts().get(0).path("sourcePosition")).put("nodePath","/foreign/current-looking/path");
+        position.saved.getEvidence().get(0).setNativePositions(Collections.singletonList(position.saved.getEvidence().get(0).getCanonicalEvidence().getParts().get(0).path("sourcePosition").deepCopy()));assertUnknownFact(position.bind(),0,"current_native_block_missing_or_ambiguous");
+    }
+
+    @Test void duplicateNativeOccurrencesRemainUnknownAfterSemanticPointerBinding() {
+        NativeFixture fixture=new NativeFixture();fixture.semantic(true);assertUnknownFact(fixture.bind(),0,"quote_occurrence_missing_or_ambiguous_in_native_parts");
+        NativeFixture text=new NativeFixture();text.semantic(false);text.quotes.get(0).setQuote("PRE.B8.APPEND9 PRE.B8.APPEND9");text.saved.getEvidence().get(0).setQuote(text.quotes.get(0).getQuote());text.claim.getSupport().getFacts().get(0).setText("PRE.B8.APPEND9");assertUnknownFact(text.bind(),0,"fact_text_missing_or_ambiguous_in_quote");
+    }
+
     @Test void changedOriginalParsedRevisionOrWrongNativeReferenceIsIndividuallyUnbound() {
         NativeFixture original=new NativeFixture();original.source.setSourceSha256(VettingCorpus.hash("different original"));assertUnknownFact(original.bind(),0,"current_original_parsed_revision_or_source_role_changed");
         NativeFixture revised=new NativeFixture();revised.source.setTextContent(revised.source.getTextContent()+" revised");assertUnknownFact(revised.bind(),0,"current_original_parsed_revision_or_source_role_changed");
@@ -112,6 +148,16 @@ class VettingChecklistSourceBindingTest {
                 chunk.setSourceHash(VettingCorpus.sourceHash(source));chunk.setOriginalSourceSha256(source.getSourceSha256());chunk.setParts(Collections.singletonList(part));byId.put(chunk.getId(),chunk);
                 Quote quote=new Quote();quote.setChunkId(chunk.getId());quote.setSide("source");quote.setQuote(texts[at]);quotes.add(quote);saved.getEvidence().add(VettingCorpus.evidence(chunk,"source",texts[at]));saved.getEvidenceChunkIds().add(chunk.getId());
                 ChecklistFactRef fact=new ChecklistFactRef();fact.setSlot(slots[at]);fact.setEvidenceIndex(at);fact.setNativePositionIndex(0);fact.setStartUtf16(0);fact.setEndUtf16(texts[at].length());support.getFacts().add(fact);
+            }
+        }
+        void semantic(boolean duplicateFirst){
+            if(duplicateFirst){Chunk first=byId.get("source-0");first.setParts(Arrays.asList(first.getParts().get(0),byId.get("source-2").getParts().get(0)));first.setContent(first.getContent()+"\n"+byId.get("source-2").getContent());}
+            for(int at=0;at<3;at++){Chunk chunk=byId.get("source-"+at);JsonNode nativeParts=JsonUtils.mapper().valueToTree(chunk.getParts());
+                com.consense.web.dto.CanonicalEvidenceDtos.EvidencePointer original=new com.consense.web.dto.CanonicalEvidenceDtos.EvidencePointer();original.setProjectId(source.getProjectId());original.setDocumentId(source.getId());original.setModule("vetting");original.setCanonicalChunkId(chunk.getId());original.setUnitId("unit-"+at);original.setOriginalSourceSha256(source.getSourceSha256());original.setJavaParsedSourceHash(VettingCorpus.sourceHash(source));original.setCanonicalSourceHash(chunk.getSourceHash());original.setSourceRevisionSha256(VettingCorpus.hash("authored source revision"));original.setProjectionSha256(VettingCorpus.hash("authored projection"));original.setProjectionRevisionSha256(VettingCorpus.hash("authored projection revision"));original.setProjectionSchema(com.consense.service.sources.NormalObservedContract.SCHEMA);original.setAddressKind("normal_observed_unit");original.setParts(nativeParts.deepCopy());
+                saved.getEvidence().get(at).setCanonicalEvidence(original);JsonNode parts=nativeParts.deepCopy();for(JsonNode part:parts)((ObjectNode)part).remove("sourcePosition");for(Part part:chunk.getParts())part.setSourcePosition(null);
+                com.consense.web.dto.CanonicalEvidenceDtos.EvidencePointer compact=JsonUtils.read(JsonUtils.write(original),com.consense.web.dto.CanonicalEvidenceDtos.EvidencePointer.class);compact.setProjectionSchema(OerCanonicalRetrievalClient.SEMANTIC_READ);compact.setAddressKind("semantic_source_unit");compact.setParts(parts.deepCopy());chunk.setCanonicalEvidence(compact);
+                ObjectNode raw=JsonUtils.mapper().createObjectNode();raw.put("semanticProjectionVersion",OerCanonicalRetrievalClient.SEMANTIC_READ).put("id",chunk.getId()).put("documentId",chunk.getDocumentId()).put("text",chunk.getContent()).put("role",chunk.getRole()).put("sourceHash",chunk.getSourceHash());raw.set("parts",parts);raw.putObject("evidenceRef").put("projectionSha256",original.getProjectionSha256());chunk.setCanonicalPayload(raw);
+                ChecklistFactRef fact=claim.getSupport().getFacts().get(at);fact.setText(quotes.get(at).getQuote());fact.setNativePositionIndex(null);fact.setStartUtf16(null);fact.setEndUtf16(null);
             }
         }
         JsonNode bind(){return VettingChecklistRequirementRelations.bind(claim,saved,quotes,byId,Collections.singletonList(source));}

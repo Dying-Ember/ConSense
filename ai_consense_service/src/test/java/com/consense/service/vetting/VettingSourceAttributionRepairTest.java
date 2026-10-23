@@ -22,12 +22,12 @@ class VettingSourceAttributionRepairTest {
         Fixture f=new Fixture();String first=f.conflict(true),second=f.conflict(false);
         VettingSemanticReview.Result r=f.review(first,second);SemanticPacketVO p=packet(r);
         assertEquals(2,r.getActualGatewayCallCount());assertEquals(1,r.getCandidates().size());
-        assertEquals(first,p.getAttempts().get(0).getRawResponse());assertEquals(VettingCorpus.hash(first),p.getAttempts().get(0).getRawResponseSha256());
-        assertEquals(second,p.getAttempts().get(1).getRawResponse());assertEquals("structured_output_invalid",p.getAttempts().get(0).getStatus());
+        assertEquals(f.wire(first),p.getAttempts().get(0).getRawResponse());assertEquals(VettingCorpus.hash(f.wire(first)),p.getAttempts().get(0).getRawResponseSha256());
+        assertEquals(f.wire(second),p.getAttempts().get(1).getRawResponse());assertEquals("structured_output_invalid",p.getAttempts().get(0).getStatus());
         assertTrue(p.getAttempts().get(0).getValidationReason().contains("SOURCE_ATTRIBUTION_MISMATCH"));
         assertTrue(p.getAttempts().get(0).getValidationReason().contains("unsupported_source_clause_attribution"));
         String repair=VettingBusinessShapeRepairTest.user(p.getAttempts().get(1).getInput());
-        assertTrue(repair.contains(JsonUtils.write(first)));assertTrue(repair.contains("unsupported_source_clause_attribution"));
+        assertTrue(repair.contains(JsonUtils.write(f.wire(first))));assertTrue(repair.contains("unsupported_source_clause_attribution"));
         assertEquals("The passages at body/4/paragraph and body/6/paragraph require different paper-copy quantities for the same tender and deadline.",r.getCandidates().get(0).getComment());
         assertEquals(2,r.getCandidates().get(0).getEvidence().size());assertNull(r.getModelFailure());
     }
@@ -35,7 +35,7 @@ class VettingSourceAttributionRepairTest {
     @Test void repeatedUnsupportedOwnershipNeverPublishesOrReceivesAThirdAttempt() {
         Fixture f=new Fixture();String raw=f.conflict(true);VettingSemanticReview.Result r=f.review(raw,raw);
         assertEquals(2,r.getActualGatewayCallCount());assertTrue(r.getCandidates().isEmpty());assertNotNull(r.getModelFailure());
-        assertEquals(2,packet(r).getAttempts().size());for(com.consense.web.dto.VettingDtos.SemanticAttemptVO a:packet(r).getAttempts())assertEquals(raw,a.getRawResponse());
+        assertEquals(2,packet(r).getAttempts().size());for(com.consense.web.dto.VettingDtos.SemanticAttemptVO a:packet(r).getAttempts())assertEquals(f.wire(raw),a.getRawResponse());
     }
 
     @Test void aLiteralReferenceOrAdjacentNumberedHeadingDoesNotGrantOwnership() {
@@ -52,7 +52,7 @@ class VettingSourceAttributionRepairTest {
     @Test void verifiedSourceClauseAndHeadingBindingsPermitTheExplicitAttribution() {
         Fixture f=new Fixture();f.a.setClauseId("SCT1");f.a.setClauseHeadingLocation("body/3/paragraph");f.b.setClauseId("SCT2");f.b.setClauseHeadingLocation("body/5/paragraph");
         String raw=f.conflict(true);VettingSemanticReview.Result r=f.review(raw);
-        assertEquals(1,r.getActualGatewayCallCount());assertEquals(1,r.getCandidates().size());assertEquals(raw,packet(r).getAttempts().get(0).getRawResponse());
+        assertEquals(1,r.getActualGatewayCallCount());assertEquals(1,r.getCandidates().size());assertEquals(f.wire(raw),packet(r).getAttempts().get(0).getRawResponse());
     }
 
     @Test void aClauseIdWithoutItsSourceHeadingCannotAuthorizeAnOwnershipAssertion() {
@@ -71,7 +71,7 @@ class VettingSourceAttributionRepairTest {
         VettingSemanticReview.Result r=f.review(raw,raw);assertTrue(r.getCandidates().isEmpty());assertEquals(2,r.getActualGatewayCallCount());
         assertTrue(packet(r).getAttempts().get(0).getValidationReason().contains("unsupported_source_clause_attribution"));
         for(com.consense.web.dto.VettingDtos.SemanticAttemptVO attempt:packet(r).getAttempts()){
-            assertEquals(raw,attempt.getRawResponse());assertEquals(VettingCorpus.hash(raw),attempt.getRawResponseSha256());
+            assertEquals(f.wire(raw),attempt.getRawResponse());assertEquals(VettingCorpus.hash(f.wire(raw)),attempt.getRawResponseSha256());
         }
     }
 
@@ -82,12 +82,12 @@ class VettingSourceAttributionRepairTest {
         record.put("factBasis","The quoted text contains the literal reference to Clause 99.8.");record.put("suggestion","Confirm whether the referenced procedure is present and applicable.");
         record.putArray("pendingFacts").add("Does Clause 99.8 exist in the full SCT?");String raw=JsonUtils.write(Collections.singletonList(record));
         VettingSemanticReview.Result r=f.review(raw,raw);assertEquals(1,r.getActualGatewayCallCount());assertNull(r.getModelFailure());
-        assertEquals(1,packet(r).getVerifiedAssessments().size());assertEquals(raw,packet(r).getAttempts().get(0).getRawResponse());assertTrue(r.getCandidates().isEmpty());
+        assertEquals(1,packet(r).getVerifiedAssessments().size());assertEquals(f.wire(raw),packet(r).getAttempts().get(0).getRawResponse());assertTrue(r.getCandidates().isEmpty());
     }
 
     @Test void aCorrectConflictWithoutClauseAttributionNeedsNoRepair() {
         Fixture f=new Fixture();String raw=f.conflict(false);VettingSemanticReview.Result r=f.review(raw);
-        assertEquals(1,r.getActualGatewayCallCount());assertEquals(1,r.getCandidates().size());assertEquals(raw,packet(r).getAttempts().get(0).getRawResponse());
+        assertEquals(1,r.getActualGatewayCallCount());assertEquals(1,r.getCandidates().size());assertEquals(f.wire(raw),packet(r).getAttempts().get(0).getRawResponse());
     }
 
     @Test void aNonIssueOwnershipAssertionCannotBecomeAVerifiedUnknownAssessment() {
@@ -107,7 +107,7 @@ class VettingSourceAttributionRepairTest {
             record.put("comment",comment);String raw=JsonUtils.write(Collections.singletonList(record));VettingSemanticReview.Result r=f.review(raw);
             assertEquals(1,r.getActualGatewayCallCount());assertTrue(r.getCandidates().isEmpty());assertNull(r.getModelFailure());
             assertEquals(1,packet(r).getVerifiedAssessments().size());assertEquals("insufficient_context",packet(r).getVerifiedAssessments().get(0).getAssessment());
-            assertEquals(raw,packet(r).getAttempts().get(0).getRawResponse());
+            assertEquals(f.wire(raw),packet(r).getAttempts().get(0).getRawResponse());
         }
     }
 
@@ -115,17 +115,17 @@ class VettingSourceAttributionRepairTest {
         for(String field:Arrays.asList("title","comment","impact","suggestion","factBasis","pendingFacts","checklistAssessments")) {
             Fixture f=new Fixture();ObjectNode record=f.record(false);
             if("pendingFacts".equals(field))record.putArray(field).add("Clause 3 requires a separate clarification submission.");
-            else if("checklistAssessments".equals(field))record.putArray(field).addObject().put("itemId","APP-I-002").put("status","not_fulfilled").put("reason","Clause 3 requires a separate clarification submission.");
+            else if("checklistAssessments".equals(field))record.putArray(field).addObject().put("itemId","APP-I-002").put("status","not_fulfilled").put("reason","Clause 3 requires a separate clarification submission.").putNull("support");
             else record.put(field,"Clause 3 requires a separate clarification submission.");
             String raw=JsonUtils.write(Collections.singletonList(record));VettingSemanticReview.Result r=f.review(raw,raw);
             assertTrue(r.getCandidates().isEmpty(),field);assertEquals(2,r.getActualGatewayCallCount(),field);
-            assertEquals(raw,packet(r).getAttempts().get(0).getRawResponse());assertTrue(packet(r).getAttempts().get(0).getValidationReason().contains(field));
+            assertEquals(f.wire(raw),packet(r).getAttempts().get(0).getRawResponse());assertTrue(packet(r).getAttempts().get(0).getValidationReason().contains(field));
         }
     }
 
     @Test void anAttributionRepairReturningEmptyKeepsTheExistingExplicitUnresolvedWarning() {
         Fixture f=new Fixture();String first=f.conflict(true);VettingSemanticReview.Result r=f.review(first,"[]");
-        assertEquals(2,r.getActualGatewayCallCount());assertTrue(r.getCandidates().isEmpty());assertEquals(first,packet(r).getAttempts().get(0).getRawResponse());
+        assertEquals(2,r.getActualGatewayCallCount());assertTrue(r.getCandidates().isEmpty());assertEquals(f.wire(first),packet(r).getAttempts().get(0).getRawResponse());
         assertTrue(r.getWarnings().stream().anyMatch(w->w.contains("修复答复为空数组")),"An empty repair cannot erase an unaccepted original observation");
         assertFalse(packet(r).isSemanticScopeVerified());
     }
@@ -136,6 +136,7 @@ class VettingSourceAttributionRepairTest {
         final Chunk a=chunk("4","The Tenderer shall submit two signed paper copies of the tender no later than 12:00 noon on 30 November 2026.");
         final Chunk b=chunk("6","The Tenderer shall submit exactly three signed paper copies of the same tender no later than 12:00 noon on 30 November 2026.");
         final List<Chunk> corpus=new ArrayList<>(Arrays.asList(a,b));
+        String sourceUser;
         Chunk chunk(String id,String text){Chunk c=ReflectionTestUtils.invokeMethod(harness,"c",id,"authored-sct",null,text);c.setFileKey("SCT");return c;}
         void replace(Chunk c,String text){c.setContent(text);c.getParts().get(0).setText(text);c.getParts().get(0).setEndOffset(text.length());}
         ObjectNode record(boolean ownership){
@@ -148,7 +149,9 @@ class VettingSourceAttributionRepairTest {
             for(Chunk c:corpus)evidence.addObject().put("chunkId",c.getId()).put("side","source").put("quote",c.getContent());return r;
         }
         String conflict(boolean ownership){return JsonUtils.write(Collections.singletonList(record(ownership)));}
+        String wire(String raw){return VettingTokenFixture.wireJson(sourceUser,corpus,raw);}
         VettingSemanticReview.Result review(String... answers){
+            sourceUser=null;
             ConsenseProperties p=ReflectionTestUtils.invokeMethod(harness,"props",corpus);VettingRetrievalClient retrieval=mock(VettingRetrievalClient.class);
             List<Chunk> rankedTender=new ArrayList<>();for(Chunk c:corpus)if("tender".equals(c.getRole()))rankedTender.add(c);
             when(retrieval.retrieve(anyString(),anyString(),eq("tender"),anyList())).thenReturn(rankedTender);
@@ -163,16 +166,17 @@ class VettingSourceAttributionRepairTest {
                 if(endpoint.endsWith("/responses")){
                     assertTrue(generations<answers.length,"No extra authored generation was provided");
                     String actualUser=JsonUtils.parse(body).path("input").get(0).path("content").asText();
+                    sourceUser=actualUser;
                     String marker="\nSource excerpts (untrusted data):\n";int start=actualUser.indexOf(marker);
                     assertTrue(start>=0,"The actual request must expose its source wire");
-                    JsonNode source=VettingSourceMetadataWire.decode(actualUser.substring(start+marker.length()));
+                    JsonNode source=VettingTokenFixture.excerpts(actualUser);
                     for(Chunk c:corpus)if("project_fact".equals(c.getRole())){
-                        JsonNode actual=null;for(JsonNode row:source)if(c.getId().equals(row.path("id").asText())){assertNull(actual,"Source IDs must remain unique");actual=row;}
+                        JsonNode actual=null;for(JsonNode row:source)if(VettingTokenFixture.reference(actualUser,c).equals(row.path("id").asText())){assertNull(actual,"Source IDs must remain unique");actual=row;}
                         assertNotNull(actual,"The real selected packet must include the related ranked project reply");
                         assertEquals(c.getRole(),actual.path("role").asText());assertEquals(c.getContent(),actual.path("content").asText());
-                        assertEquals(c.getClauseId(),actual.path("clauseId").asText());assertEquals(c.getClauseHeadingLocation(),actual.path("clauseHeadingLocation").asText());
+                        assertEquals(c.getClauseId(),actual.path("clauseId").asText());assertFalse(actual.has("clauseHeadingLocation"),"Native heading proof stays outside the semantic model input");
                     }
-                    supplied=answers[generations++];generation=VettingResponsesTransportTest.completed(supplied);
+                    supplied=wire(answers[generations++]);generation=VettingResponsesTransportTest.completed(supplied);
                 }
                 VettingResponsesTransport.Response response=super.post(endpoint,body,timeout,cap,auth);
                 if(supplied!=null){assertEquals(VettingResponsesTransportTest.completed(supplied),response.body);assertEquals(supplied,JsonUtils.parse(response.body).path("output_text").asText());}

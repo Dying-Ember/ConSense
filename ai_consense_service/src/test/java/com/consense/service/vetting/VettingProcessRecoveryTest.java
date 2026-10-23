@@ -19,7 +19,7 @@ class VettingProcessRecoveryTest {
         Process first=launch(root,"SCHEMA_RETRY_RESERVED");JsonNode ready;
         try{awaitFile(first,root.resolve("SCHEMA_RETRY_RESERVED-ready.json"));awaitFile(first,root.resolve("blocked.txt"));ready=JsonUtils.parse(Files.readString(root.resolve("SCHEMA_RETRY_RESERVED-ready.json")));}
         finally{stop(first);}
-        String url="jdbc:h2:file:"+root.resolve("database").toString().replace('\\','/')+";MODE=MySQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_ON_EXIT=FALSE;WRITE_DELAY=0";
+        String url=VettingRecoveryProcessFixture.databaseUrl(root);
         try(Connection db=openStoppedDatabase(url)) {
             try(Statement sql=db.createStatement();ResultSet rows=sql.executeQuery("SELECT result_json FROM vetting_packet_checkpoint")) {
                 assertTrue(rows.next());JsonNode attempts=JsonUtils.parse(rows.getString(1)).path("packet").path("attempts");
@@ -44,7 +44,7 @@ class VettingProcessRecoveryTest {
             Process first=launch(root,boundary);JsonNode ready;
             try{awaitFile(first,root.resolve(boundary+"-ready.json"));awaitFile(first,root.resolve("blocked.txt"));ready=JsonUtils.parse(Files.readString(root.resolve(boundary+"-ready.json")));}
             finally{stop(first);}
-            String url="jdbc:h2:file:"+root.resolve("database").toString().replace('\\','/')+";MODE=MySQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_ON_EXIT=FALSE;WRITE_DELAY=0";
+            String url=VettingRecoveryProcessFixture.databaseUrl(root);
             int saved;
             try(Connection database=openStoppedDatabase(url)){try(Statement sql=database.createStatement();ResultSet rows=sql.executeQuery("SELECT COUNT(*) FROM vetting_packet_checkpoint WHERE status='SAVED'")){rows.next();saved=rows.getInt(1);}assertEquals("BEFORE_PUBLISH".equals(boundary)?2:"AFTER_PACKET".equals(boundary)?1:0,saved);
                 try(PreparedStatement expire=database.prepareStatement("UPDATE vetting_run SET lease_until=? WHERE id=?")){expire.setTimestamp(1,Timestamp.from(java.time.Instant.now().minusSeconds(1)));expire.setString(2,ready.path("runId").asText());assertEquals(1,expire.executeUpdate());}}
@@ -61,7 +61,7 @@ class VettingProcessRecoveryTest {
             }finally{stop(resumed);}
     }
     private static Connection openStoppedDatabase(String url)throws Exception{long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(5);while(true){try{return DriverManager.getConnection(url,"sa","");}catch(SQLException delayedRelease){if(delayedRelease.getErrorCode()!=90020||System.nanoTime()>=deadline)throw delayedRelease;Thread.sleep(50);}}}
-    private static Process launch(Path root,String mode)throws Exception{String executable=System.getProperty("os.name","").toLowerCase(Locale.ROOT).contains("win")?"java.exe":"java";String java=Paths.get(System.getProperty("java.home"),"bin",executable).toString();String classpath=System.getProperty("surefire.test.class.path",System.getProperty("java.class.path"));return new ProcessBuilder(java,"-cp",classpath,VettingRecoveryProcessFixture.class.getName(),root.toString(),mode).redirectErrorStream(true).redirectOutput(root.resolve(mode+".log").toFile()).start();}
+    private static Process launch(Path root,String mode)throws Exception{String executable=System.getProperty("os.name","").toLowerCase(Locale.ROOT).contains("win")?"java.exe":"java";String java=Paths.get(System.getProperty("java.home"),"bin",executable).toString();String classpath=System.getProperty("surefire.test.class.path",System.getProperty("java.class.path"));return new ProcessBuilder(java,"-Djava.io.tmpdir="+System.getProperty("java.io.tmpdir"),"-cp",classpath,VettingRecoveryProcessFixture.class.getName(),root.toString(),mode).redirectErrorStream(true).redirectOutput(root.resolve(mode+".log").toFile()).start();}
     private static void awaitFile(Process process,Path file)throws Exception{long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(40);while(!Files.isRegularFile(file)&&process.isAlive()&&System.nanoTime()<deadline)Thread.sleep(30);assertTrue(Files.isRegularFile(file),"Child fixture did not create "+file+"; logs="+file.getParent());}
     private static JsonNode awaitRun(Process process,String url)throws Exception{long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(25);JsonNode run=null;while(process.isAlive()&&System.nanoTime()<deadline){run=JsonUtils.parse(VettingRecoveryProcessFixture.request(url,"GET")).path("data");if("COMPLETED".equals(run.path("status").asText())||"FAILED".equals(run.path("status").asText()))return run;Thread.sleep(30);}fail("Restart did not finish: "+run);return null;}
     private static void stop(Process process)throws Exception{if(process.isAlive())process.destroyForcibly();assertTrue(process.waitFor(10,TimeUnit.SECONDS),"Owned child fixture did not exit");}

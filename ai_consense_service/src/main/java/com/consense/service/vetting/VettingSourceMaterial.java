@@ -15,6 +15,44 @@ public final class VettingSourceMaterial {
     private static final Pattern ROW_ANCHOR=Pattern.compile("body/(\\d+)/table-row/(\\d+)(?: @(\\d+))?");
     private VettingSourceMaterial() { }
 
+    private static final Set<String> MACHINE_FIELDS=new HashSet<>(Arrays.asList(
+            "sourcePosition","nativePath","nodePath","partName","partSha256","sourceSha256","originalSourceSha256",
+            "sourceHash","sourceQualityHash","projectionSha256","projectionRevisionSha256","sourceRevisionSha256",
+            "canonicalSourceHash","generationSha256","parentEffectiveTextSha256","selectedPartsSha256",
+            "layoutEvidence","paragraphProperties","bbox","bboxConvention","polygon","originalGeometry",
+            "visualFrame","visualProvenance","referenceFrames","assetRefs","nativeXmlSha256","nativeXmlStatus",
+            "startOffset","endOffset","chunkStartOffset","chunkEndOffset","offsetUnit","startUtf16","endUtf16",
+            "documentId","anchor","partAnchor","clauseHeadingLocation","metadataVersion","segmentationVersion","sourceQualityMetadataVersion","nativeTableMetadataVersion",
+            "projectionVersion","sourceDeclarationRef","sourceDeclaration","softwareIdentity","receipt","cas","compositionSha256","componentSetSha256"));
+    private static final Set<String> REFERENCE_FIELDS=new HashSet<>(Arrays.asList("id","chunkId","canonicalChunkId","originId","originIds",
+            "coreIds","contextIds","requiredMemberIds","requiredTargetIds","eligibleOriginIds","memberIds","unresolvedChunkIds"));
+
+    /** Drop transport/layout proof, preserving actual text, table meaning, conditions and limitations. */
+    static com.fasterxml.jackson.databind.JsonNode semantic(Object value,Map<String,String> aliases) {
+        com.fasterxml.jackson.databind.JsonNode node=value instanceof com.fasterxml.jackson.databind.JsonNode
+                ?(com.fasterxml.jackson.databind.JsonNode)value:JsonUtils.mapper().valueToTree(value);
+        if(node==null||node.isNull())return JsonUtils.mapper().nullNode();
+        if(node.isTextual())return node.deepCopy();
+        if(node.isArray()){
+            com.fasterxml.jackson.databind.node.ArrayNode out=JsonUtils.mapper().createArrayNode();
+            for(com.fasterxml.jackson.databind.JsonNode child:node)out.add(semantic(child,aliases));return out;
+        }
+        if(node.isObject()){
+            com.fasterxml.jackson.databind.node.ObjectNode out=JsonUtils.mapper().createObjectNode();
+            if(node.path("sourceDeclaration").has("limits"))out.putObject("sourceDeclaration").set("limits",semantic(node.path("sourceDeclaration").path("limits"),aliases));
+            node.fields().forEachRemaining(field->{if(!MACHINE_FIELDS.contains(field.getKey())){
+                com.fasterxml.jackson.databind.JsonNode child=semantic(field.getValue(),aliases);
+                out.set(field.getKey(),REFERENCE_FIELDS.contains(field.getKey())?reference(child,aliases):child);
+            }});return out;
+        }
+        return node.deepCopy();
+    }
+    private static com.fasterxml.jackson.databind.JsonNode reference(com.fasterxml.jackson.databind.JsonNode value,Map<String,String> aliases){
+        if(value.isTextual())return JsonUtils.mapper().getNodeFactory().textNode(aliases.getOrDefault(value.textValue(),value.textValue()));
+        if(value.isArray()){com.fasterxml.jackson.databind.node.ArrayNode out=JsonUtils.mapper().createArrayNode();for(com.fasterxml.jackson.databind.JsonNode child:value)out.add(reference(child,aliases));return out;}
+        return value;
+    }
+
     public static List<Map<String,Object>> project(List<Chunk> selected) {
         return project(selected,FixedVettingReferences.empty());
     }
@@ -43,12 +81,16 @@ public final class VettingSourceMaterial {
             }
         }
         VettingNativeCellSlices.Observation cellObservations=VettingNativeCellSlices.observe(selected);
-        OerModelMaterial.Request modelMaterial=new OerModelMaterial.Request(documents,wordSourceScopes);
+        OerModelMaterial.Request modelMaterial=null;
         Map<String,Map<String,Object>> fixedExcerpts=fixedReferences.modelExcerpts(selected);
         List<Map<String,Object>> excerpts=new ArrayList<>();
         for(Chunk c:selected) {
             if(FixedVettingReferences.isFixed(c)){excerpts.add(fixedExcerpts.get(c.getId()));continue;}
-            if(c.getCanonicalPayload()!=null||c.getCanonicalEvidence()!=null){excerpts.add(canonical(c,modelMaterial));continue;}
+            if(c.getCanonicalPayload()!=null||c.getCanonicalEvidence()!=null){
+                boolean compact=c.getCanonicalPayload()!=null&&"source-semantic-units-v1".equals(c.getCanonicalPayload().path("semanticProjectionVersion").asText());
+                if(!compact&&modelMaterial==null)modelMaterial=new OerModelMaterial.Request(documents,wordSourceScopes);
+                excerpts.add(canonical(c,modelMaterial,wordSourceScopes.get(c.getId())));continue;
+            }
             List<Map<String,Object>> rows=new ArrayList<>(),unknown=new ArrayList<>(),methods=new ArrayList<>();
             boolean bodyBound=bodyMatchesParts(c);int cursor=0;
             if(c.getParts()==null||c.getParts().isEmpty())unknown.add(map("reason","source_parts_unavailable"));
@@ -130,6 +172,7 @@ public final class VettingSourceMaterial {
                     "nativeCellStructureScope","selected source UTF16 intersections only; complete cells and rows require proved union coverage; unselected headers and table grid unknown",
                     "nativeRowsStatus",rows.isEmpty()?"unknown":"observed_selected_rows_only",
                     "tableInterpretation", "selected complete row parts only; headers, merged grid, full table and contractual adoption unknown");
+            if(modelMaterial==null)modelMaterial=new OerModelMaterial.Request(documents,wordSourceScopes);
             com.fasterxml.jackson.databind.JsonNode structure=modelMaterial.projectOrdinary(c);
             if(structure!=null)excerpt.put("observedSourceUnits",structure);
             excerpts.add(excerpt);
@@ -154,9 +197,14 @@ public final class VettingSourceMaterial {
         }
     }
 
-    private static Map<String,Object> canonical(Chunk c,OerModelMaterial.Request modelMaterial){
+    private static Map<String,Object> canonical(Chunk c,OerModelMaterial.Request modelMaterial,com.fasterxml.jackson.databind.JsonNode wordScope){
         String rejected=OerBusinessEvidence.canonicalViewStatus(c);if(rejected!=null)throw new IllegalArgumentException(rejected);
         com.fasterxml.jackson.databind.JsonNode raw=c.getCanonicalPayload();
+        if("source-semantic-units-v1".equals(raw.path("semanticProjectionVersion").asText()))
+            return map("id",c.getId(),"file",nvl(c.getFileKey())+" · "+nvl(c.getFileName()),"role",c.getRole(),"clauseId",c.getClauseId(),
+                    "content",c.getContent(),"sourceQuality",c.getSourceQuality(),"semanticUnit",raw.path("semanticUnit"),
+                    "nativeRows",Collections.emptyList(),"unresolvedNativeRowParts",Collections.emptyList(),"nativeRowsStatus","unknown",
+                    "wordSourceScopeContext",wordScope);
         com.fasterxml.jackson.databind.node.ObjectNode structure=modelMaterial.project(c.getCanonicalEvidence(),raw,c.getRole());
         structure.set("canonicalScope",raw.path("canonicalScope").deepCopy());
         return map("id",c.getId(),"file",nvl(c.getFileKey())+" · "+nvl(c.getFileName()),"documentId",c.getDocumentId(),"sourceHash",c.getSourceHash(),

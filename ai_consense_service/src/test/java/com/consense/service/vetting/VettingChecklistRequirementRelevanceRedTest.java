@@ -38,7 +38,7 @@ class VettingChecklistRequirementRelevanceRedTest {
         record.setEvidence(Arrays.asList(quote(left),quote(right)));
         ChecklistAssessment check=new ChecklistAssessment();check.setItemId(id);check.setStatus("not_fulfilled");check.setReason("The two paper-copy counts differ.");record.setChecklistAssessments(Collections.singletonList(check));
         String before=JsonUtils.write(record);
-        when(ai.completeStructuredJsonList(anyString(),anyString(),eq(Record.class),any(),anyList())).thenReturn(Collections.singletonList(record));
+        when(ai.completeStructuredJsonList(anyString(),anyString(),eq(Record.class),any(),anyList())).thenAnswer(call->VettingTokenFixture.records(call.getArgument(1),corpus,Collections.singletonList(record)));
         Result reviewed=VettingTokenFixture.review(ai,props,retrieval).review("authored-project",corpus,"en",(n,s)->{});
         assertEquals(1,reviewed.getCandidates().size(),"A bad Checklist association must not delete the located general conflict.");
         assertEquals(2,reviewed.getCandidates().get(0).getEvidence().size());assertEquals(before,JsonUtils.write(record),"Original model claim stays immutable.");

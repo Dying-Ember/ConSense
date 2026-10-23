@@ -39,7 +39,7 @@ import static org.mockito.Mockito.*;
 @DataJpaTest(properties={"spring.jpa.hibernate.ddl-auto=create-drop","spring.flyway.enabled=false","spring.jpa.show-sql=false","spring.jpa.properties.hibernate.generate_statistics=true"})
 @ActiveProfiles("h2") @AutoConfigureTestDatabase(replace=AutoConfigureTestDatabase.Replace.NONE)
 @Transactional(propagation=Propagation.NOT_SUPPORTED)
-@Import({CanonicalEvidenceService.class,CanonicalCurrentSourceReader.class,NormalObservedPreparationService.class,CanonicalVerificationReadJpaTest.Config.class})
+@Import({CanonicalEvidenceService.class,CanonicalCurrentSourceReader.class,NormalObservedPreparationService.class,SourceContentDigestPreparation.class,CanonicalVerificationReadJpaTest.Config.class})
 public class CanonicalVerificationReadJpaTest {
     static final String PROJECT="project-a",URL="jdbc:h2:mem:verify_read_"+UUID.randomUUID()+";MODE=MySQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE";
     static final Set<String> VERIFY_COLUMNS=new LinkedHashSet<>(Arrays.asList("id","project_id","category","file_key","file_name","review_role","document_scope","parse_status","oer_identity_json","source_sha256","storage_path","text_content","structured_content_json"));

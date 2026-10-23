@@ -38,7 +38,7 @@ class VettingStandardLanguageBoundaryTest {
         Quote quote = new Quote(); quote.setChunkId("adopted"); quote.setQuote(adopted);
         record.setEvidence(Collections.singletonList(quote));
         when(ai.completeStructuredJsonList(anyString(), anyString(), eq(Record.class), any(), anyList()))
-            .thenReturn(Collections.singletonList(record));
+            .thenAnswer(call->VettingTokenFixture.records(call.getArgument(1),Arrays.asList(tender,standard),Collections.singletonList(record)));
         return VettingTokenFixture.review(ai, props, retrieval).review("p", Arrays.asList(tender, standard), "en", (n,s)->{});
     }
     private Chunk chunk(String id, String role, String text) {

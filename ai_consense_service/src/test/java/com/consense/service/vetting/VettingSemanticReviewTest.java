@@ -18,7 +18,7 @@ class VettingSemanticReviewTest {
         VettingRetrievalClient retrieval=mock(VettingRetrievalClient.class);Chunk source=chunk("source","document","The Tenderer shall submit the required signed paper copies.");
         when(retrieval.retrieve(eq("p"),anyString(),eq("tender"),anyList())).thenReturn(Collections.singletonList(source));
         Record invalid=record("requirement",quote(source.getId(),source.getContent()));invalid.setPendingFacts(Collections.singletonList("Confirm the intended submission requirement."));invalid.setSuggestedAction("amend");
-        when(ai.completeStructuredJsonList(anyString(),anyString(),eq(Record.class),any(),anyList())).thenReturn(Collections.singletonList(invalid));
+        when(ai.completeStructuredJsonList(anyString(),anyString(),eq(Record.class),any(),anyList())).thenAnswer(call->VettingTokenFixture.records(call.getArgument(1),Collections.singletonList(source),Collections.singletonList(invalid)));
         Result result=VettingTokenFixture.review(ai,props,retrieval).review("p",Collections.singletonList(source),"en",(n,s)->{});
         assertTrue(result.getCandidates().isEmpty());assertTrue(result.getModelFailure().contains("pending_facts_require_review"),result.getModelFailure());
         for(String absent:Arrays.asList("empty_title","empty_comment","missing_evidence"))assertFalse(result.getModelFailure().contains(absent));
@@ -30,7 +30,7 @@ class VettingSemanticReviewTest {
         VettingRetrievalClient retrieval=mock(VettingRetrievalClient.class);Chunk source=chunk("source","document","The Tenderer shall submit the required signed paper copies.");
         when(retrieval.retrieve(eq("p"),anyString(),eq("tender"),anyList())).thenReturn(Collections.singletonList(source));
         Record invalid=record("requirement");invalid.setTitle("");invalid.setComment("");
-        when(ai.completeStructuredJsonList(anyString(),anyString(),eq(Record.class),any(),anyList())).thenReturn(Collections.singletonList(invalid));
+        when(ai.completeStructuredJsonList(anyString(),anyString(),eq(Record.class),any(),anyList())).thenAnswer(call->VettingTokenFixture.records(call.getArgument(1),Collections.singletonList(source),Collections.singletonList(invalid)));
         Result result=VettingTokenFixture.review(ai,props,retrieval).review("p",Collections.singletonList(source),"en",(n,s)->{});
         assertTrue(result.getCandidates().isEmpty());
         for(String missing:Arrays.asList("empty_title","empty_comment","missing_evidence"))assertTrue(result.getModelFailure().contains(missing),result.getModelFailure());
@@ -46,7 +46,7 @@ class VettingSemanticReviewTest {
         Record bad = record("reference",quote("a","The payment is always automatically approved."));
         Record oneSided = record("conflict",quote("a",a.getContent()));
         Record good = record("reference",quote("a",a.getContent()),quote("b",b.getContent()));
-        when(ai.completeStructuredJsonList(anyString(),anyString(),eq(Record.class),any(),anyList())).thenReturn(Arrays.asList(bad,oneSided,good));
+        when(ai.completeStructuredJsonList(anyString(),anyString(),eq(Record.class),any(),anyList())).thenAnswer(call->VettingTokenFixture.records(call.getArgument(1),Arrays.asList(a,b),Arrays.asList(bad,oneSided,good)));
         Result result = VettingTokenFixture.review(ai,props,retrieval).review("project",Arrays.asList(a,b),"en",(n,s)->{});
         assertEquals(1,result.getCandidates().size()); assertEquals(2,result.getCandidates().get(0).getEvidence().size());
         Candidate accepted=result.getCandidates().get(0);assertNotNull(accepted.getBusinessDetails());
@@ -76,7 +76,7 @@ class VettingSemanticReviewTest {
             Record one=record("reference",quote("origin",a.getContent()));
             Record sameAnchor=record("reference",quote("origin",left),quote("origin",right));
             Record two=record("reference",quote("origin",left),quote("target",b.getContent()));
-            when(ai.completeStructuredJsonList(anyString(),anyString(),eq(Record.class),any(),anyList())).thenReturn(Arrays.asList(one,sameAnchor,two));
+            when(ai.completeStructuredJsonList(anyString(),anyString(),eq(Record.class),any(),anyList())).thenAnswer(call->VettingTokenFixture.records(call.getArgument(1),Arrays.asList(a,b),Arrays.asList(one,sameAnchor,two)));
             Result result=VettingTokenFixture.review(ai,props,retrieval).review("p",Arrays.asList(a,b),"en",(n,s)->{});
             assertTrue(result.getTopicAudits().get(0).getUnresolvedChunkIds().isEmpty());
             assertEquals(1,result.getCandidates().size());assertEquals("reference",result.getCandidates().get(0).getType());
@@ -93,7 +93,7 @@ class VettingSemanticReviewTest {
         Chunk a=chunk("origin","one","The submission shall comply with RZX clause 731.8.");a.setFileKey("RZX");a.setClauseId("RZX91.4");a.setClauseHeadingLocation("body/11");a.setAnchor("body/11/paragraph");
         Chunk b=chunk("other","two","The supporting submission shall retain the approval particulars.");b.setFileKey("RZX");b.setClauseId("RZX92.4");b.setClauseHeadingLocation("body/23");b.setAnchor("body/23/paragraph");
         when(retrieval.retrieve(eq("p"),anyString(),eq("tender"),anyList())).thenReturn(Arrays.asList(a,b));
-        when(ai.completeStructuredJsonList(anyString(),anyString(),eq(Record.class),any(),anyList())).thenReturn(Collections.singletonList(record("reference",quote("origin",a.getContent()),quote("other",b.getContent()))));
+        when(ai.completeStructuredJsonList(anyString(),anyString(),eq(Record.class),any(),anyList())).thenAnswer(call->VettingTokenFixture.records(call.getArgument(1),Arrays.asList(a,b),Collections.singletonList(record("reference",quote("origin",a.getContent()),quote("other",b.getContent())))));
         Result result=VettingTokenFixture.review(ai,props,retrieval).review("p",Arrays.asList(a,b),"en",(n,s)->{});
         assertTrue(result.getTopicAudits().get(0).getUnresolvedChunkIds().contains("origin"),"The production selector must actually mark the absent target as unresolved");
         assertTrue(result.getCandidates().isEmpty());assertEquals(1,result.getTopicAudits().get(0).getIssueAssessments());
@@ -109,7 +109,7 @@ class VettingSemanticReviewTest {
         when(retrieval.retrieve(eq("p"),anyString(),eq("tender"),anyList())).thenReturn(Collections.singletonList(a));
         Record consistent=record("reference",quote("origin",a.getContent()));consistent.setAssessment("consistent");
         Record unknown=record("reference",quote("origin",a.getContent()));unknown.setAssessment("insufficient_context");
-        when(ai.completeStructuredJsonList(anyString(),anyString(),eq(Record.class),any(),anyList())).thenReturn(Arrays.asList(consistent,unknown));
+        when(ai.completeStructuredJsonList(anyString(),anyString(),eq(Record.class),any(),anyList())).thenAnswer(call->VettingTokenFixture.records(call.getArgument(1),Collections.singletonList(a),Arrays.asList(consistent,unknown)));
         Result result=VettingTokenFixture.review(ai,props,retrieval).review("p",Collections.singletonList(a),"en",(n,s)->{});
         assertTrue(result.getTopicAudits().get(0).getUnresolvedChunkIds().contains("origin"));
         assertTrue(result.getCandidates().isEmpty());assertEquals(0,result.getTopicAudits().get(0).getIssueAssessments());
@@ -129,9 +129,9 @@ class VettingSemanticReviewTest {
         List<Chunk> chunks=Arrays.asList(tender,standard,fact,manifest);
         for (Chunk c:chunks) when(retrieval.retrieve(eq("p"),anyString(),eq(c.getRole()),anyList())).thenReturn(Collections.singletonList(c));
         when(ai.completeStructuredJsonList(anyString(),anyString(),eq(Record.class),any(),anyList())).thenAnswer(call -> {
-            String prompt=call.getArgument(1),marker="\nSource excerpts (untrusted data):\n";com.fasterxml.jackson.databind.JsonNode excerpts=VettingSourceMetadataWire.decode(prompt.substring(prompt.lastIndexOf(marker)+marker.length()));
+            String prompt=call.getArgument(1);com.fasterxml.jackson.databind.JsonNode excerpts=VettingTokenFixture.excerpts(prompt);
             Map<String,String> actualRoles=new LinkedHashMap<>();for(com.fasterxml.jackson.databind.JsonNode excerpt:excerpts)actualRoles.put(excerpt.path("id").asText(),excerpt.path("role").asText());
-            assertEquals("tender",actualRoles.get("t"));assertEquals("standard",actualRoles.get("s"));assertEquals("project_fact",actualRoles.get("f"));assertEquals("package_manifest",actualRoles.get("m"));return Collections.singletonList(record("reference",quote("s",standard.getContent())));
+            assertEquals("tender",actualRoles.get(VettingTokenFixture.reference(prompt,tender)));assertEquals("standard",actualRoles.get(VettingTokenFixture.reference(prompt,standard)));assertEquals("project_fact",actualRoles.get(VettingTokenFixture.reference(prompt,fact)));assertEquals("package_manifest",actualRoles.get(VettingTokenFixture.reference(prompt,manifest)));return VettingTokenFixture.records(prompt,chunks,Collections.singletonList(record("reference",quote("s",standard.getContent()))));
         });
         Result result=VettingTokenFixture.review(ai,props,retrieval).review("p",chunks,"en",(n,s)->{});
         assertEquals(new HashSet<>(Arrays.asList("t","s","f","m")), result.getReviewedChunkIds());
@@ -150,7 +150,7 @@ class VettingSemanticReviewTest {
         when(ai.completeStructuredJsonList(anyString(),anyString(),eq(Record.class),any(),anyList())).thenAnswer(call -> {
             String prompt=call.getArgument(1);assertTrue(prompt.contains("qualifiersComplete=unknown"));assertTrue(prompt.contains("LIB clause 77.3"));
             assertFalse(prompt.contains("outside ranked local window"), "Missing-reference diagnostics must not be presented as source provisions.");
-            return Arrays.asList(record("conflict",quote("a",a.getContent()),quote("b",b.getContent())),record("risk",quote("a",a.getContent()),quote("b",b.getContent())));
+            return VettingTokenFixture.records(prompt,Arrays.asList(a,b,older,newer),Arrays.asList(record("conflict",quote("a",a.getContent()),quote("b",b.getContent())),record("risk",quote("a",a.getContent()),quote("b",b.getContent()))));
         });
         Result result=VettingTokenFixture.review(ai,props,retrieval).review("p",Arrays.asList(a,b,older,newer),"en",(n,s)->{});
         assertEquals(Collections.singleton("risk"),new HashSet<>(Arrays.asList(result.getCandidates().get(0).getType())));assertEquals(1,result.getCandidates().size());
@@ -165,7 +165,7 @@ class VettingSemanticReviewTest {
             Chunk a=chunk("a","one","The processing instruction shall be checked against the supplied reference.");
             when(retrieval.retrieve(eq("p"),anyString(),eq("tender"),anyList())).thenReturn(Collections.singletonList(a));
             Record valid=record("risk",quote("a",a.getContent()));Record malformed=nullEvidence?record("risk",(Quote)null):null;
-            when(ai.completeStructuredJsonList(anyString(),anyString(),eq(Record.class),any(),anyList())).thenReturn(Arrays.asList(valid,malformed));
+            when(ai.completeStructuredJsonList(anyString(),anyString(),eq(Record.class),any(),anyList())).thenAnswer(call->VettingTokenFixture.records(call.getArgument(1),Collections.singletonList(a),Arrays.asList(valid,malformed)));
             Result result=VettingTokenFixture.review(ai,props,retrieval).review("p",Collections.singletonList(a),"en",(n,s)->{});
             assertTrue(result.getReviewedChunkIds().isEmpty());assertTrue(result.getCandidates().isEmpty());
             assertEquals("failed",result.getTopicAudits().get(0).getStatus());assertEquals(0,result.getTopicAudits().get(0).getAcceptedFindings());
@@ -194,8 +194,8 @@ class VettingSemanticReviewTest {
             Chunk a=chunk("a","one",left+" "+right);a.setAnchor("body/"+(50+attempt)+"/paragraph");
             Chunk b=chunk("b","one","The "+owner+" observer shall attend the inspection.");b.setAnchor("body/"+(150+attempt)+"/paragraph");
             when(retrieval.retrieve(eq("p"),anyString(),eq("tender"),anyList())).thenReturn(Arrays.asList(a,b));
-            when(ai.completeStructuredJsonList(anyString(),anyString(),eq(Record.class),any(),anyList())).thenReturn(Arrays.asList(
-                    record("conflict",quote("a",left),quote("a",right)),record("conflict",quote("a",left),quote("b",b.getContent()))));
+            when(ai.completeStructuredJsonList(anyString(),anyString(),eq(Record.class),any(),anyList())).thenAnswer(call->VettingTokenFixture.records(call.getArgument(1),Arrays.asList(a,b),Arrays.asList(
+                    record("conflict",quote("a",left),quote("a",right)),record("conflict",quote("a",left),quote("b",b.getContent())))));
             Result result=VettingTokenFixture.review(ai,props,retrieval).review("p",Arrays.asList(a,b),"en",(n,s)->{});
             assertEquals(1,result.getCandidates().size());assertEquals(b.getAnchor(),result.getCandidates().get(0).getEvidence().get(1).getAnchor());
             assertEquals(new HashSet<>(Arrays.asList("a","b")),result.getReviewedChunkIds());
@@ -212,7 +212,7 @@ class VettingSemanticReviewTest {
             Record valid=record("risk",quote("a",a.getContent())),malformed=record("risk",quote("a",a.getContent()));
             switch(attempt%4) {case 0: malformed.setTitle(" ");break;case 1: malformed.setComment(null);break;case 2: malformed.setEvidence(null);break;default: malformed.setEvidence(Collections.emptyList());}
             List<Record> records=new ArrayList<>(Arrays.asList(valid,malformed));if(random.nextBoolean())Collections.reverse(records);
-            when(ai.completeStructuredJsonList(anyString(),anyString(),eq(Record.class),any(),anyList())).thenReturn(records);
+            when(ai.completeStructuredJsonList(anyString(),anyString(),eq(Record.class),any(),anyList())).thenAnswer(call->VettingTokenFixture.records(call.getArgument(1),Collections.singletonList(a),records));
             Result result=VettingTokenFixture.review(ai,props,retrieval).review("p",Collections.singletonList(a),"en",(n,s)->{});
             assertTrue(result.getCandidates().isEmpty());assertTrue(result.getReviewedChunkIds().isEmpty());
             assertTrue(result.getWarnings().stream().anyMatch(w -> w.contains("schema invalid")));
@@ -226,7 +226,7 @@ class VettingSemanticReviewTest {
         Chunk standard=chunk("s","standard-doc","The submission shall include the reference particulars.");standard.setRole("standard");standard.setFileKey("GCC");standard.setFileName("reference-volume.docx");standard.setClauseId("GCC91.7");standard.setClauseHeadingLocation("page3");
         when(retrieval.retrieve(eq("p"),anyString(),eq("tender"),anyList())).thenReturn(Collections.singletonList(tender));
         when(retrieval.retrieve(eq("p"),anyString(),eq("standard"),anyList())).thenReturn(Collections.singletonList(standard));
-        when(ai.completeStructuredJsonList(anyString(),anyString(),eq(Record.class),any(),anyList())).thenReturn(Collections.singletonList(record("risk",quote("s",standard.getContent()),quote("t",tender.getContent()))));
+        when(ai.completeStructuredJsonList(anyString(),anyString(),eq(Record.class),any(),anyList())).thenAnswer(call->VettingTokenFixture.records(call.getArgument(1),Arrays.asList(tender,standard),Collections.singletonList(record("risk",quote("s",standard.getContent()),quote("t",tender.getContent())))));
         Result result=VettingTokenFixture.review(ai,props,retrieval).review("p",Arrays.asList(tender,standard),"en",(n,s)->{});
         assertEquals(1,result.getCandidates().size());assertEquals("tender-doc",result.getCandidates().get(0).getEvidence().get(0).getDocumentId());
         assertEquals("actual-volume.docx",result.getCandidates().get(0).getEvidence().get(0).getFileName());assertEquals("standard-doc",result.getCandidates().get(0).getEvidence().get(1).getDocumentId());
@@ -239,7 +239,7 @@ class VettingSemanticReviewTest {
         when(retrieval.retrieve(eq("p"),anyString(),eq("tender"),anyList())).thenReturn(Collections.singletonList(source));
         Record consistent=record("reference",quote("actual",source.getContent())); consistent.setAssessment("consistent");
         Record unknown=record("risk",quote("actual",source.getContent())); unknown.setAssessment("insufficient_context");
-        when(ai.completeStructuredJsonList(anyString(),anyString(),eq(Record.class),any(),anyList())).thenReturn(Arrays.asList(consistent,unknown));
+        when(ai.completeStructuredJsonList(anyString(),anyString(),eq(Record.class),any(),anyList())).thenAnswer(call->VettingTokenFixture.records(call.getArgument(1),Collections.singletonList(source),Arrays.asList(consistent,unknown)));
         Result result=VettingTokenFixture.review(ai,props,retrieval).review("p",Collections.singletonList(source),"en",(n,s)->{});
         assertTrue(result.getCandidates().isEmpty()); assertEquals(Collections.singleton("actual"),result.getReviewedChunkIds());
         assertEquals(1,result.getTopicAudits().get(0).getConsistentAssessments());assertEquals(1,result.getTopicAudits().get(0).getInsufficientContextAssessments());
@@ -289,7 +289,7 @@ class VettingSemanticReviewTest {
         when(retrieval.retrieve(eq("p"),anyString(),eq("project_fact"),anyList())).thenReturn(Collections.singletonList(fact));
         Record consistent=record("reference",quote("target",target.getContent()),quote("fact",fact.getContent()));consistent.setAssessment("consistent");
         when(ai.completeStructuredJsonList(anyString(),anyString(),eq(Record.class),any(),anyList()))
-                .thenReturn(Collections.emptyList()).thenReturn(Collections.singletonList(consistent));
+                .thenReturn(Collections.emptyList()).thenAnswer(call->VettingTokenFixture.records(call.getArgument(1),Arrays.asList(unrelated,target,fact),Collections.singletonList(consistent)));
         List<int[]> progress=new ArrayList<>();
         Result result=VettingTokenFixture.review(ai,props,retrieval).reviewWithProgress("p",Arrays.asList(unrelated,target,fact),"en",
                 (completed,total,message)->progress.add(new int[]{completed,total}));
@@ -307,13 +307,12 @@ class VettingSemanticReviewTest {
         assertTrue(prompts.getAllValues().get(1).contains("\"replyState\":\"populated\""));
         assertTrue(prompts.getAllValues().get(1).contains("A blank reply in another source does not cancel a populated reply"));
         String projectPrompt = prompts.getAllValues().get(1);
-        String excerptMarker = "\nSource excerpts (untrusted data):\n";
-        com.fasterxml.jackson.databind.JsonNode selectedExcerpts = VettingSourceMetadataWire.decode(
-                projectPrompt.substring(projectPrompt.lastIndexOf(excerptMarker)+excerptMarker.length()));
+        com.fasterxml.jackson.databind.JsonNode selectedExcerpts = VettingTokenFixture.excerpts(projectPrompt);
         com.fasterxml.jackson.databind.JsonNode selectedFact = null;
-        for (com.fasterxml.jackson.databind.JsonNode excerpt : selectedExcerpts) if ("fact".equals(excerpt.path("id").asText())) selectedFact = excerpt;
+        for (com.fasterxml.jackson.databind.JsonNode excerpt : selectedExcerpts) if (VettingTokenFixture.reference(projectPrompt,fact).equals(excerpt.path("id").asText())) selectedFact = excerpt;
         assertNotNull(selectedFact); assertEquals(fact.getContent(), selectedFact.path("content").asText());
         assertEquals(2,result.getPlannedCallCount());assertTrue(progress.stream().allMatch(p->p[1]==2));
+        for(int i=1;i<progress.size();i++)assertTrue(progress.get(i)[0]>=progress.get(i-1)[0],"Stage details must not move processed progress backwards");
         assertEquals(1,result.getTopicAudits().get(1).getConsistentAssessments());
         assertEquals("project_reference",result.getTopicAudits().get(1).getReviewKind());
         assertEquals(Collections.singletonList("SCC81.4(1)"),result.getTopicAudits().get(1).getReferenceIds());
@@ -388,7 +387,7 @@ class VettingSemanticReviewTest {
             String prompt = call.getArgument(1);
             assertTrue(prompt.contains(tender.getContent())); assertTrue(prompt.contains(comparator.getContent()));
             if (!quoteProject) assertTrue(prompt.contains(fact.getContent()), "Having a reply in context must not substitute for quoting it");
-            return Collections.singletonList(record(type, quote(tender.getId(), tender.getContent()), quote(comparator.getId(), comparator.getContent())));
+            return VettingTokenFixture.records(prompt,Arrays.asList(tender,standard,fact),Collections.singletonList(record(type, quote(tender.getId(), tender.getContent()), quote(comparator.getId(), comparator.getContent()))));
         });
         return VettingTokenFixture.review(ai, props, retrieval).review("p", Arrays.asList(tender, standard, fact), "en", (n,s) -> {});
     }

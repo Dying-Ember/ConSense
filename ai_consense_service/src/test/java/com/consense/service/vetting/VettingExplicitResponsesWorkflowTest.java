@@ -165,7 +165,7 @@ class VettingExplicitResponsesWorkflowTest {
         wire.generationHook=()->{
             if(generations.getAndIncrement()==0) {
                 String user=JsonUtils.parse(wire.bodies.get(wire.bodies.size()-1)).path("input").get(0).path("content").asText(),marker="\nSource excerpts (untrusted data):\n";
-                JsonNode source=VettingSourceMetadataWire.decode(user.substring(user.lastIndexOf(marker)+marker.length())).get(0);
+                JsonNode source=VettingTokenFixture.excerpts(user).get(0);
                 Map<String,Object> record=new LinkedHashMap<>();record.put("assessment","issue");record.put("type","requirement");record.put("severity","medium");record.put("title","AUTHORED durable business shape TEST ONLY");record.put("comment","AUTHORED requirement review TEST ONLY.");record.put("impact","AUTHORED review impact TEST ONLY.");record.put("suggestion","AUTHORED verify intended requirement TEST ONLY.");record.put("subDimension","AUTHORED requirement");record.put("factBasis",source.path("content").asText());record.put("pendingFacts",Collections.singletonList("AUTHORED intended application remains unconfirmed TEST ONLY."));record.put("suggestedAction","amend");record.put("checklistAssessments",Collections.emptyList());record.put("evidence",Collections.singletonList(Map.of("chunkId",source.path("id").asText(),"side","source","quote",source.path("content").asText())));
                 raw.add(JsonUtils.write(Collections.singletonList(record)));wire.generation=VettingResponsesTransportTest.completed(raw.get(0));
             } else wire.generation=VettingResponsesTransportTest.completed("[]");

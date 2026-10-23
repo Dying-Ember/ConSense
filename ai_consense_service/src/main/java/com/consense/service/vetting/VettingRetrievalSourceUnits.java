@@ -26,7 +26,8 @@ final class VettingRetrievalSourceUnits {
         final List<Unit> units;
         RankedChunks(List<Chunk> ranked,List<Unit> units){super(ranked);this.units=Collections.unmodifiableList(units);}
     }
-    static List<Unit> attached(List<Chunk> ranked){return ranked instanceof RankedChunks?((RankedChunks)ranked).units:Collections.emptyList();}
+    interface AttachedUnits {List<Unit> sourceUnits();}
+    static List<Unit> attached(List<Chunk> ranked){return ranked instanceof AttachedUnits?((AttachedUnits)ranked).sourceUnits():ranked instanceof RankedChunks?((RankedChunks)ranked).units:Collections.emptyList();}
     static List<Chunk> read(JsonNode root,List<Chunk> ranked,Map<String,Chunk> corpus,String role,boolean required) {
         JsonNode episode=root.get("sourceUnits");
         if(episode==null){require(!required,"advertised source-unit episode is missing");return ranked;}

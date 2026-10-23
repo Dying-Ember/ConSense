@@ -46,14 +46,68 @@ class QwenChatUsagePreflightTest {
         org.mockito.ArgumentCaptor<String> bodies=org.mockito.ArgumentCaptor.forClass(String.class);verify(http,times(4)).postJsonBoundedWithoutReplay(anyString(),bodies.capture(),anyLong(),anyString(),anyInt(),any());
         for(int i=0;i<4;i+=2){com.fasterxml.jackson.databind.node.ObjectNode probe=(com.fasterxml.jackson.databind.node.ObjectNode)JsonUtils.parse(bodies.getAllValues().get(i));com.fasterxml.jackson.databind.node.ObjectNode actual=(com.fasterxml.jackson.databind.node.ObjectNode)JsonUtils.parse(bodies.getAllValues().get(i+1));assertEquals(1,probe.path("max_tokens").asInt());assertEquals(16384,actual.path("max_tokens").asInt());probe.remove(Arrays.asList("max_tokens","stream"));actual.remove(Arrays.asList("max_tokens","stream"));assertEquals(actual,probe);}
     }
-    @Test void randomReceiptIdentityDoesNotCreateDriftButChangedUsageDoes() {
+    @Test void identicalFinalInputReusesPaidObservationAcrossPlannerFinalAndRepair() {
         answer();QwenChatUsagePreflight.Operation op=usage.capture(chat("qwen"),"vetting");
         try(QwenChatUsagePreflight.Operation.ActionScope action=op.openAction("test:stable",()->{})) {
             VettingInputBudget.Input in=op.input("SYS","WHOLE",JsonUtils.parse("{\"type\":\"array\",\"items\":{\"type\":\"object\"}}"),SOURCE);
             VettingInputBudget.Result a=VettingInputBudget.check(in,i->op.observe(i,"planner",()->{})),b=VettingInputBudget.check(in,i->op.observe(i,"final",()->{}));
-            assertNotEquals(a.getObservation().getQwenUsageEstimate().getResponseSha256(),b.getObservation().getQwenUsageEstimate().getResponseSha256());assertTrue(QwenChatUsagePreflight.sameObservation(a,b));
+            assertEquals(a.getObservation().getQwenUsageEstimate().getResponseSha256(),b.getObservation().getQwenUsageEstimate().getResponseSha256());assertNotSame(a.getObservation(),b.getObservation());assertTrue(QwenChatUsagePreflight.sameObservation(a,b));
             b.getObservation().setInputTokens(43);assertFalse(QwenChatUsagePreflight.sameObservation(a,b));assertTrue(QwenChatUsagePreflight.sameRetryPolicy(a,b));
+            VettingInputBudget.Result repair=VettingInputBudget.check(in,i->op.observe(i,"repair",()->{}));assertTrue(QwenChatUsagePreflight.sameObservation(a,repair));assertEquals(42,repair.getObservation().getInputTokens());
         }
+        verify(http,times(1)).postJsonBoundedWithoutReplay(anyString(),anyString(),anyLong(),anyString(),anyInt(),any());
+        verify(ledger,times(1)).reserve(anyString(),anyString(),eq("planner"),anyString(),eq(false));verify(ledger,times(1)).complete(any(),anyMap());
+        verify(ledger,never()).reserve(anyString(),anyString(),eq("final"),anyString(),eq(false));verify(ledger,never()).reserve(anyString(),anyString(),eq("repair"),anyString(),eq(false));
+    }
+    @Test void changedPromptSchemaSourceAndActionCannotBorrowTheObservation() {
+        answer();QwenChatUsagePreflight.Operation op=usage.capture(chat("qwen"),"vetting");JsonNode schema=JsonUtils.parse("{\"type\":\"array\",\"items\":{\"type\":\"object\"}}");
+        try(QwenChatUsagePreflight.Operation.ActionScope action=op.openAction("test:bindings",()->{})) {
+            VettingInputBudget.Input input=op.input("SYS","WHOLE",schema,SOURCE);op.observe(input,"planner",()->{});
+            VettingInputBudget.Input changedBudget=VettingInputBudget.copy(input);changedBudget.setOutputReserveTokens(32768);VettingInputBudget.rebind(changedBudget);assertThrows(IllegalArgumentException.class,()->op.observe(changedBudget,"final",()->{}));
+            op.observe(op.input("SYS","CHANGED",schema,SOURCE),"final",()->{});
+            op.observe(op.input("SYS","WHOLE",JsonUtils.parse("{\"type\":\"array\",\"items\":{\"type\":\"string\"}}"),SOURCE),"final",()->{});
+            op.observe(op.input("SYS","WHOLE",schema,VettingCorpus.hash("CHANGED SOURCE")),"final",()->{});
+        }
+        try(QwenChatUsagePreflight.Operation.ActionScope action=op.openAction("test:other-action",()->{})) {op.observe(op.input("SYS","WHOLE",schema,SOURCE),"final",()->{});}
+        verify(http,times(5)).postJsonBoundedWithoutReplay(anyString(),anyString(),anyLong(),anyString(),anyInt(),any());verify(ledger,times(5)).reserve(anyString(),anyString(),anyString(),anyString(),eq(false));
+    }
+    @Test void reusedObservationStillChecksSourcesDeadlineCancellationAndConfiguration() {
+        answer();QwenChatUsagePreflight.Operation op=usage.capture(chat("qwen"),"vetting");Runnable sourceGuard=mock(Runnable.class),callGuard=mock(Runnable.class);
+        try(QwenChatUsagePreflight.Operation.ActionScope action=op.openAction("test:guards",sourceGuard)) {
+            VettingInputBudget.Input in=op.input("SYS","WHOLE",JsonUtils.parse("{\"type\":\"array\"}"),SOURCE);op.observe(in,"planner",callGuard);clearInvocations(sourceGuard,callGuard);
+            op.observe(in,"final",callGuard);verify(sourceGuard,atLeast(2)).run();verify(callGuard,atLeast(2)).run();
+            assertThrows(IllegalStateException.class,()->op.observe(in,"INVALID PHASE",callGuard));
+            Thread.currentThread().interrupt();try{assertThrows(java.util.concurrent.CancellationException.class,()->op.observe(in,"interrupted",callGuard));}finally{Thread.interrupted();}
+            doThrow(new IllegalStateException("source changed")).when(callGuard).run();assertThrows(IllegalStateException.class,()->op.observe(in,"source-changed",callGuard));reset(callGuard);
+            doThrow(new IllegalStateException("qwen_action_deadline_exceeded")).when(ledger).open(eq("test:guards"),anyString(),any());assertThrows(IllegalStateException.class,()->op.observe(in,"expired",callGuard));
+            doNothing().when(ledger).open(eq("test:guards"),anyString(),any());double temperature=props.getQwen().getTemperature();props.getQwen().setTemperature(0.92);assertThrows(IllegalStateException.class,()->op.observe(in,"config-changed",callGuard));props.getQwen().setTemperature(temperature);
+            assertThrows(java.util.concurrent.CancellationException.class,()->op.observe(in,"cancelled",callGuard,Runnable::run));assertThrows(java.util.concurrent.CancellationException.class,()->op.observe(in,"cancelled-again",callGuard));
+        }
+        verify(http,times(1)).postJsonBoundedWithoutReplay(anyString(),anyString(),anyLong(),anyString(),anyInt(),any());verify(ledger,times(1)).reserve(anyString(),anyString(),anyString(),anyString(),eq(false));
+    }
+    @Test void malformedUsageCannotPopulateTheReusableObservation() {
+        QwenChatUsagePreflight.Operation op=usage.capture(chat("qwen"),"vetting");when(http.postJsonBoundedWithoutReplay(anyString(),anyString(),anyLong(),anyString(),anyInt(),any())).thenReturn(envelope("qwen3.8-flash",1,42,"{"));
+        try(QwenChatUsagePreflight.Operation.ActionScope action=op.openAction("test:never-cache-unknown",()->{})) {
+            VettingInputBudget.Input in=op.input("SYS","WHOLE",JsonUtils.parse("{\"type\":\"array\"}"),SOURCE);
+            assertFalse(VettingInputBudget.check(in,i->op.observe(i,"planner",()->{})).isExtraDispatchPermitted());assertFalse(VettingInputBudget.check(in,i->op.observe(i,"final",()->{})).isExtraDispatchPermitted());
+        }
+        verify(http,times(2)).postJsonBoundedWithoutReplay(anyString(),anyString(),anyLong(),anyString(),anyInt(),any());verify(ledger,times(2)).unknown(any(),anyMap());verify(ledger,never()).complete(any(),anyMap());
+    }
+    @Test void transportFailureCannotPopulateTheReusableObservation() {
+        QwenChatUsagePreflight.Operation op=usage.capture(chat("qwen"),"vetting");when(http.postJsonBoundedWithoutReplay(anyString(),anyString(),anyLong(),anyString(),anyInt(),any())).thenThrow(new IllegalStateException("AUTHORED timeout"));
+        try(QwenChatUsagePreflight.Operation.ActionScope action=op.openAction("test:never-cache-transport",()->{})) {
+            VettingInputBudget.Input in=op.input("SYS","WHOLE",JsonUtils.parse("{\"type\":\"array\"}"),SOURCE);
+            assertFalse(VettingInputBudget.check(in,i->op.observe(i,"planner",()->{})).isExtraDispatchPermitted());assertFalse(VettingInputBudget.check(in,i->op.observe(i,"final",()->{})).isExtraDispatchPermitted());
+        }
+        verify(http,times(2)).postJsonBoundedWithoutReplay(anyString(),anyString(),anyLong(),anyString(),anyInt(),any());verify(ledger,times(2)).unknown(any(),anyMap());verify(ledger,never()).complete(any(),anyMap());
+    }
+    @Test void aCompletedReceiptWithAFailedExitGuardIsNotReused() {
+        answer();QwenChatUsagePreflight.Operation op=usage.capture(chat("qwen"),"vetting");java.util.concurrent.atomic.AtomicInteger calls=new java.util.concurrent.atomic.AtomicInteger();Runnable guard=()->{if(calls.incrementAndGet()==4)throw new IllegalStateException("AUTHORED source changed after receipt");};
+        try(QwenChatUsagePreflight.Operation.ActionScope action=op.openAction("test:exit-guard",()->{})) {
+            VettingInputBudget.Input in=op.input("SYS","WHOLE",JsonUtils.parse("{\"type\":\"array\"}"),SOURCE);
+            assertFalse(VettingInputBudget.check(in,i->op.observe(i,"planner",guard)).isExtraDispatchPermitted());assertTrue(VettingInputBudget.check(in,i->op.observe(i,"final",guard)).isExtraDispatchPermitted());
+        }
+        verify(http,times(2)).postJsonBoundedWithoutReplay(anyString(),anyString(),anyLong(),anyString(),anyInt(),any());verify(ledger,times(2)).complete(any(),anyMap());verify(ledger,never()).unknown(any(),anyMap());
     }
     @Test void malformedOrWrongModelUsageStaysUnknownAndCannotDispatchAnswer() {
         QwenChatUsagePreflight.Operation op=usage.capture(chat("qwen"),"vetting");

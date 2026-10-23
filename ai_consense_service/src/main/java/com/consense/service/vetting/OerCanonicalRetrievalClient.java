@@ -32,6 +32,7 @@ public class OerCanonicalRetrievalClient {
     private static final String INDEX_STATUS = "read-only-existing-canonical-index-v1";
     private static final String SOURCE_PAGE_INDEX = "explicit-composite-index-pins-v1";
     public static final String SOURCE_READ = "source-bound-demand-read-v1";
+    public static final String SEMANTIC_READ = "source-semantic-units-v1";
     private static final List<String> SCOPE = Arrays.asList("documentId", "sourceHash", "role", "metadataVersion",
             "segmentationVersion", "nativeTableMetadataVersion", "sourceQualityMetadataVersion", "sourceQualityHash");
     private final HttpSupport http;
@@ -204,8 +205,100 @@ public class OerCanonicalRetrievalClient {
     }
     private static final class Capability {
         final String fingerprint,sourceUnitPolicy,indexStatusContract,softwareIdentity;
-        final boolean sourceRead;
-        Capability(String fingerprint,String policy,String indexStatusContract,boolean sourceRead,String softwareIdentity){this.fingerprint=fingerprint;this.sourceUnitPolicy=policy;this.indexStatusContract=indexStatusContract;this.sourceRead=sourceRead;this.softwareIdentity=softwareIdentity;}
+        final boolean sourceRead,semanticRead;
+        Capability(String fingerprint,String policy,String indexStatusContract,boolean sourceRead,boolean semanticRead,String softwareIdentity){this.fingerprint=fingerprint;this.sourceUnitPolicy=policy;this.indexStatusContract=indexStatusContract;this.sourceRead=sourceRead;this.semanticRead=semanticRead;this.softwareIdentity=softwareIdentity;}
+    }
+    /** Immutable semantic addresses, not a source-validity verdict or a retained source graph. */
+    public static final class SemanticSources {
+        private final String module,policy,software,runtime,token;
+        private final JsonNode addresses,manifests,sources;
+        private final List<CanonicalSourceBinding> bindings;
+        private final int total;
+        private String scopeSha;
+        private SemanticSources(String module,String policy,Capability health,String runtime,JsonNode result,List<CanonicalSourceBinding> bindings,int total){
+            this.module=module;this.policy=policy;software=health.softwareIdentity;this.runtime=runtime;token=result.path("readManifestToken").asText();
+            addresses=result.path("projectionSha256").deepCopy();manifests=result.path("readManifestSha256").deepCopy();sources=result.path("sources").deepCopy();this.bindings=new ArrayList<>();
+            for(CanonicalSourceBinding original:bindings){CanonicalSourceBinding compact=new CanonicalSourceBinding();org.springframework.beans.BeanUtils.copyProperties(original,compact);compact.setSnapshotJson(null);this.bindings.add(compact);}this.total=total;
+        }
+        public String identitySha256(){return hash(JsonUtils.write(Arrays.asList(module,policy,software,addresses,manifests,sources)));}
+        public int totalOrigins(){return total;}
+        public JsonNode sourceCatalog(){return sources.deepCopy();}
+    }
+    public SemanticSources prepareSemanticSources(String module,List<CanonicalSourceBinding> current){
+        require(current!=null&&!current.isEmpty(),"semantic sources missing");String policy=current.get(0).getScopePolicySha256();
+        ObjectNode request=JsonUtils.mapper().createObjectNode();request.put("module",module);request.put("operation","prepare");request.put("view","semantic_units");request.put("maxBytes",16777216);
+        ArrayNode addresses=request.putArray("projectionSha256");Set<Long> ids=new HashSet<>();for(CanonicalSourceBinding binding:current){
+            require(binding!=null&&ids.add(binding.getDocumentId())&&policy.equals(binding.getScopePolicySha256())&&sha(binding.getProjectionSha256()),"semantic source pins differ");addresses.add(binding.getProjectionSha256());}
+        Capability before=health(module,policy,false,false,false,false,false,false);require(before.sourceRead&&before.semanticRead,"OER bounded semantic source reads unavailable");
+        String runtime=localRuntimeFingerprint(module);JsonNode result=statusReceipt(backend.sourceRead(JsonUtils.write(request),module,16777216));
+        Capability after=health(module,policy,false,false,false,false,false,false);require(before.fingerprint.equals(after.fingerprint)&&runtime.equals(localRuntimeFingerprint(module)),"semantic runtime changed during preparation");
+        require(SOURCE_READ.equals(result.path("contract").asText())&&SEMANTIC_READ.equals(result.path("semanticProjectionVersion").asText())
+                &&"prepare".equals(result.path("operation").asText())&&"semantic_units".equals(result.path("view").asText())&&module.equals(result.path("module").asText())
+                &&addresses.equals(result.path("projectionSha256"))&&before.sourceUnitPolicy.equals(result.path("sourceUnitPolicy").asText())&&falseBoolean(result.path("sourceQualityVerified"))
+                &&"prepared".equals(result.path("coverage").path("status").asText())&&result.path("origins").isArray()&&result.path("origins").isEmpty()&&result.path("units").isArray()&&result.path("units").isEmpty(),"semantic preparation receipt differs");
+        require(result.path("readManifestSha256").isArray()&&result.path("readManifestSha256").size()==current.size()&&sha(result.path("readManifestToken").asText()),"semantic preparation addresses missing");
+        for(JsonNode manifest:result.path("readManifestSha256"))require(manifest.isTextual()&&sha(manifest.asText()),"semantic manifest identity invalid");
+        int total=validateSemanticCatalog(result.path("sources"),current);require(integer(result.path("coverage").path("totalOrigins"))&&total==result.path("coverage").path("totalOrigins").asInt(),"semantic preparation count differs");
+        return new SemanticSources(module,policy,before,runtime,result,current,total);
+    }
+    /** Every call asks the public source service to rehash its actual dependencies before and after the read. */
+    public JsonNode readSemanticSources(SemanticSources selected,JsonNode demand){
+        require(selected!=null&&demand!=null&&demand.isObject(),"semantic read scope missing");Set<String> allowed=new HashSet<>(Arrays.asList("operation","originIds","cursor","maxItems","maxBytes"));
+        demand.fieldNames().forEachRemaining(field->require(allowed.contains(field),"semantic read field unsupported"));String operation=demand.path("operation").asText();
+        int items=demand.path("maxItems").asInt(64),maximum=demand.path("maxBytes").asInt(16777216);require(Arrays.asList("catalog","ids","scan").contains(operation)&&items>0&&items<=256&&maximum>=1024&&maximum<=16777216,"semantic read operation/budget invalid");
+        for(String field:Arrays.asList("maxItems","maxBytes"))require(!demand.has(field)||integer(demand.path(field)),"semantic read budget must be integral");
+        List<String> requested=demand.has("originIds")?ids(demand.path("originIds")):Collections.emptyList();require("ids".equals(operation)?!requested.isEmpty()&&requested.size()<=items:requested.isEmpty(),"semantic read ids differ");
+        require(!demand.hasNonNull("cursor")||"scan".equals(operation)&&demand.path("cursor").isTextual(),"semantic cursor invalid");
+        Capability before=health(selected.module,selected.policy,false,false,false,false,false,false);require(before.sourceRead&&before.semanticRead&&selected.software.equals(before.softwareIdentity)&&selected.runtime.equals(localRuntimeFingerprint(selected.module)),"semantic source software changed");
+        ObjectNode request=demand.deepCopy();request.put("module",selected.module);request.put("view","semantic_units");request.put("maxItems",items);request.put("maxBytes",maximum);request.set("projectionSha256",selected.addresses);request.set("readManifestSha256",selected.manifests);request.put("readManifestToken",selected.token);
+        JsonNode result=statusReceipt(backend.sourceRead(JsonUtils.write(request),selected.module,maximum));Capability after=health(selected.module,selected.policy,false,false,false,false,false,false);
+        require(before.fingerprint.equals(after.fingerprint)&&selected.runtime.equals(localRuntimeFingerprint(selected.module)),"semantic runtime changed during read");
+        require(SOURCE_READ.equals(result.path("contract").asText())&&SEMANTIC_READ.equals(result.path("semanticProjectionVersion").asText())&&operation.equals(result.path("operation").asText())
+                &&selected.module.equals(result.path("module").asText())&&"semantic_units".equals(result.path("view").asText())&&selected.addresses.equals(result.path("projectionSha256"))
+                &&selected.manifests.equals(result.path("readManifestSha256"))&&selected.token.equals(result.path("readManifestToken").asText())&&selected.sources.equals(result.path("sources"))
+                &&before.sourceUnitPolicy.equals(result.path("sourceUnitPolicy").asText())&&falseBoolean(result.path("sourceQualityVerified")),"semantic read receipt differs");
+        ObjectNode identity=result.path("scopeIdentity").deepCopy();require(identity.isObject(),"semantic scope identity missing");JsonNode hashNode=identity.remove("scopeSha256");String scopeSha=hashNode==null?null:hashNode.asText();
+        require(sha(scopeSha)&&scopeSha.equals(hash(JsonUtils.write(OerCanonicalSourceUnits.sorted(identity))))&&selected.software.equals(identity.path("softwareIdentitySha256").asText())
+                &&selected.sources.equals(identity.path("sources"))&&selected.manifests.equals(identity.path("readManifestSha256"))&&selected.policy.equals(identity.path("policyIdentity").path("manifestSha256").asText())
+                &&selected.module.equals(identity.path("module").asText())&&"semantic_units".equals(identity.path("view").asText()),"semantic scope identity differs");
+        require(selected.scopeSha==null||selected.scopeSha.equals(scopeSha),"semantic source order changed");selected.scopeSha=scopeSha;
+        JsonNode origins=result.path("origins"),units=result.path("units"),coverage=result.path("coverage");require(origins.isArray()&&units.isArray()&&origins.size()==units.size()&&origins.size()<=items,"semantic origins/units differ");
+        List<String> returned=new ArrayList<>();for(int i=0;i<origins.size();i++){JsonNode origin=origins.get(i);validateSemanticMember(origin,selected);require(!returned.contains(origin.path("id").asText()),"semantic duplicate origin");returned.add(origin.path("id").asText());validateSemanticUnit(units.get(i),origin,selected);}
+        require(returned.equals(ids(coverage.path("returnedOriginIds")))&&integer(coverage.path("returnedOrigins"))&&returned.size()==coverage.path("returnedOrigins").asInt()&&integer(coverage.path("totalOrigins"))&&selected.total==coverage.path("totalOrigins").asInt(),"semantic read coverage differs");
+        if("ids".equals(operation))require(requested.equals(returned)&&requested.equals(ids(coverage.path("requestedOriginIds")))&&"complete".equals(coverage.path("status").asText())&&result.path("nextCursor").isNull(),"semantic requested ids omitted or reordered");
+        if("catalog".equals(operation))require(origins.isEmpty()&&"catalog".equals(coverage.path("status").asText())&&result.path("nextCursor").isNull(),"semantic catalog returned content");
+        if("scan".equals(operation)){
+            require(integer(coverage.path("processedOrigins"))&&integer(coverage.path("remainingOrigins")),"semantic scan counts missing");int start=demand.hasNonNull("cursor")?sourceCursorOffset(demand.path("cursor"),scopeSha,selected.total):0,processed=coverage.path("processedOrigins").asInt();
+            require(processed==start+returned.size()&&processed<=selected.total&&coverage.path("remainingOrigins").asInt()==selected.total-processed&&returned.equals(ids(coverage.path("requestedOriginIds"))),"semantic scan skipped or repeated origins");
+            require(processed==selected.total?result.path("nextCursor").isNull():result.path("nextCursor").isTextual()&&sourceCursorOffset(result.path("nextCursor"),scopeSha,selected.total)==processed,"semantic scan cursor differs");
+            require(processed==selected.total?"complete".equals(coverage.path("status").asText()):returned.isEmpty()?"unit_too_large".equals(coverage.path("status").asText()):"partial".equals(coverage.path("status").asText()),"semantic scan status differs");
+        }
+        return result.deepCopy();
+    }
+    private static int validateSemanticCatalog(JsonNode sources,List<CanonicalSourceBinding> bindings){
+        require(sources.isArray()&&sources.size()==bindings.size(),"semantic source catalog differs");int total=0;for(int i=0;i<bindings.size();i++){CanonicalSourceBinding binding=bindings.get(i);JsonNode source=sources.get(i);
+            require(binding.getProjectionSha256().equals(source.path("projectionSha256").asText())&&String.valueOf(binding.getDocumentId()).equals(source.path("documentId").asText())
+                    &&binding.getOriginalSourceSha256().equals(source.path("originalSourceSha256").asText())&&binding.getCanonicalSourceHash().equals(source.path("sourceHash").asText())
+                    &&binding.getJavaParsedSourceHash().equals(source.path("javaParsedSourceHash").asText())&&integer(source.path("chunkCount")),"semantic source identity differs");
+            if(source.hasNonNull("sourceRevisionSha256"))require(binding.getSourceRevisionSha256().equals(source.path("sourceRevisionSha256").asText()),"semantic source revision differs");total=Math.addExact(total,source.path("chunkCount").asInt());}
+        return total;
+    }
+    private static void validateSemanticMember(JsonNode member,SemanticSources selected){
+        require(member.isObject()&&SEMANTIC_READ.equals(member.path("semanticProjectionVersion").asText())&&!member.path("id").asText().isEmpty()&&member.path("text").isTextual()&&member.path("parts").isArray(),"semantic member invalid");
+        CanonicalSourceBinding binding=null;for(CanonicalSourceBinding candidate:selected.bindings)if(String.valueOf(candidate.getDocumentId()).equals(member.path("documentId").asText()))binding=candidate;require(binding!=null,"semantic member outside scope");
+        JsonNode reference=member.path("evidenceRef");require(binding.getProjectionSha256().equals(reference.path("projectionSha256").asText())&&member.path("id").equals(reference.path("canonicalChunkId"))
+                &&binding.getOriginalSourceSha256().equals(reference.path("originalSourceSha256").asText())&&binding.getCanonicalSourceHash().equals(member.path("sourceHash").asText())
+                &&contains(member.path("eligibleModules"),selected.module),"semantic member address differs");
+    }
+    private static void validateSemanticUnit(JsonNode unit,JsonNode origin,SemanticSources selected){
+        require(unit.isObject()&&sha(unit.path("unitId").asText())&&ids(unit.path("originIds")).equals(Collections.singletonList(origin.path("id").asText()))&&falseBoolean(unit.path("derivedMembersCanBecomeOrigins"))&&falseBoolean(unit.path("semanticScopeVerified")),"semantic unit declarations differ");
+        for(JsonNode envelope:Arrays.asList(unit,unit.get("hierarchyContext"),unit.get("attachmentContext")))if(envelope!=null){
+            List<String> required=ids(envelope.path("requiredMemberIds"));JsonNode members=envelope.path("members");require(members.isArray()&&members.size()==required.size(),"semantic unit missing complete members");
+            for(int i=0;i<members.size();i++){JsonNode member=members.get(i);validateSemanticMember(member,selected);require(required.get(i).equals(member.path("id").asText())&&origin.path("documentId").equals(member.path("documentId")),"semantic unit members reordered or outside source");}
+            require(!"unknown".equals(envelope.path("status").asText())||members.isEmpty()&&envelope.path("reason").isTextual(),"semantic unknown unit promoted");
+            require(Arrays.asList("unknown","complete_observed_unit","complete_observed_hierarchy_context","complete_observed_attachment_context").contains(envelope.path("status").asText())
+                    &&("unknown".equals(envelope.path("status").asText())||required.contains(origin.path("id").asText())),"semantic complete context omitted its origin");
+        }
     }
     public static final class IndexState {
         public final boolean ready;
@@ -609,6 +702,7 @@ public class OerCanonicalRetrievalClient {
         JsonNode sourceRead=oer.path("sourceRead");
         return new Capability(hash(base.fingerprint+JsonUtils.write(oer)),base.sourceUnitPolicy,oer.path("indexStatusContract").asText(),
                 SOURCE_READ.equals(sourceRead.path("contract").asText())&&"/sources/read".equals(sourceRead.path("endpoint").asText()),
+                SEMANTIC_READ.equals(sourceRead.path("semanticProjectionVersion").asText())&&contains(sourceRead.path("views"),"semantic_units")&&contains(sourceRead.path("operations"),"prepare"),
                 hash(JsonUtils.write(OerCanonicalSourceUnits.sorted(window.path("algorithms")))));
     }
 

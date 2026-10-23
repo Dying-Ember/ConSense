@@ -97,6 +97,12 @@ class VettingWorkflowTest {
         when(ai.chatModel()).thenReturn("offline-test-model");
     }
 
+    @org.junit.jupiter.api.AfterEach
+    void waitForWorkerBeforeSharedMocksReset() throws Exception {
+        java.util.concurrent.ExecutorService worker=(java.util.concurrent.ExecutorService)org.springframework.test.util.ReflectionTestUtils.getField(service,"worker");
+        worker.submit(()->{}).get(15,java.util.concurrent.TimeUnit.SECONDS);
+    }
+
     @Test
     void uploadPublishesFullParsingBeforeTheParserAndRetainsSuccessAndFailureTerminalStates() throws Exception {
         for(boolean fail:Arrays.asList(false,true)) {

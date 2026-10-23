@@ -32,6 +32,7 @@ final class VettingPacketCoverage {
         if(!Arrays.asList("completed","completed_empty","completed_with_rejections").contains(p.getStatus()))return "not_completed";
         if(p.getAcceptedFindings()>0)return "issue";
         if(p.getVerifiedInsufficientContextAssessments()>0)return "insufficient_evidence";
+        if(p.getKind()!=null&&p.getKind().startsWith("full_scope")&&!p.isSemanticScopeVerified())return "not_completed";
         if(p.getVerifiedNotApplicableAssessments()>0&&p.getVerifiedNotApplicableAssessments()==p.getReturnedAssessments()&&p.getRejectedRecords()==0)return "not_applicable";
         if(p.getVerifiedConsistentAssessments()>0&&p.getRejectedRecords()==0)return "checked_pass";
         return "not_completed";

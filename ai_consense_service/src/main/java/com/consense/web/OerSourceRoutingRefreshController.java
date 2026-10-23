@@ -27,6 +27,15 @@ public class OerSourceRoutingRefreshController {
         return ApiResponse.ok(routing.refresh(projectId,documentId,request.getExpectedOriginalSha256(),
                 request.getExpectedParsedSourceHash(),request.getExpectedRoutingSha256()));
     }
+    @Data public static class NativeRecheckRequest {
+        @NotNull @Pattern(regexp="[a-f0-9]{64}") private String expectedOriginalSha256;
+        @NotNull @Pattern(regexp="[a-f0-9]{64}") private String expectedRoutingSha256;
+    }
+    @PostMapping("/native-recheck")
+    public ApiResponse<OerSourceRoutingRefreshService.Result> nativeRecheck(@PathVariable String projectId,@PathVariable Long documentId,
+            @Valid @RequestBody NativeRecheckRequest request){
+        return ApiResponse.ok(routing.recheckNativeIdentity(projectId,documentId,request.getExpectedOriginalSha256(),request.getExpectedRoutingSha256()));
+    }
     @ExceptionHandler(CanonicalEvidenceException.class)
     public ResponseEntity<ApiResponse<Void>> rejected(CanonicalEvidenceException failure) {
         return ResponseEntity.status(failure.getStatus()).body(ApiResponse.fail(4300,failure.getMessage()));

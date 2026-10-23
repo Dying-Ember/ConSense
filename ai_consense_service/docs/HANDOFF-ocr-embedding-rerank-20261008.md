@@ -1,3 +1,5 @@
+**2026-10-23 Vetting语义读取候选实现（round380，未部署）：** 生产caller已接`loadSemantic → scan → rules → review → evidence`；目录先筛选、选定来源写边界摘要、公共语义manifest、包内短引用、候选后取定位及相同预检复用已落代码。来源真实H2／触发器35项通过，Python读取59通过／1环境跳过；Java广回归及后续补测按[修复记录](testing/vetting-semantic-demand-hotfix-20261023.md)保留失败，不宣称整包通过。首次冷准备、原件／CAS核验与旧报告冷路径仍有成本；未纠正线上PRE、未重启服务／恢复OCR／新发模型。用户已停止本任务的Drafting实现，交其它agent处理；本任务保留其改动，仅收口Vetting。
+
 **2026-10-23 Vetting按需审查设计再审（round378—379，代码未改）：** [公共按需spec](specs/oer-demand-driven-business-access-20261022.md)保留语义判断与按需取证方向，并补齐四处实施约束：机械校验不证明语义正确；全范围扫描与跨文件联合比较分别记执行覆盖；短引用贯通模型输出、后端定位及旧报告兼容；公共接口内部不得每次重载整图，不能只缩小响应或把开销搬到Python。相同有效预检复用仍受取消、期限及原预算约束。项目PRE在范围内，round378记录source101为PARTIAL且身份／用途unknown，身份修复与旧记录纠正分开，冻结任务不原地换源。本轮仅修订设计，产品代码、数据库及运行任务保持，未重启／派发模型；性能、来源质量与业务效果未验，详见[验收报告](testing/drafting-result-usability-20261023.md)首节。
 
 **2026-10-23 源码整合状态（round373—374，运行服务未部署）：** Paddle完整捕获已接入固定本机CAS引用传输，六份源码／测试已合入当前工作树；正式repo的64项小fixture契约实跑通过，0失败／0跳过。完整捕获及失败状态保留，不改变Java规范化OCR输出。四份实际运行配置／pin保持旧值，OCR用户unit继续停止；真实吞吐与并发峰值未测。有界页批／模型租约复用／双引擎并发仍未实施；基于stat的资产hash复用已被可写mmap反例阻断，禁止集成。详见[验收报告](testing/drafting-result-usability-20261023.md)首节。

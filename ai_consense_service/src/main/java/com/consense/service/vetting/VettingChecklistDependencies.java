@@ -37,7 +37,9 @@ final class VettingChecklistDependencies {
         ObjectNode ledger=object();ledger.put("producerVersion",VERSION);ledger.put("projectId",project);ObjectNode items=ledger.putObject("items");
         List<Scope> scopes=new ArrayList<>();ObjectNode context=object();String unknown=session==null?"current_verified_canonical_session_unavailable":null;
         Map<String,SourceDocument> sources=selected.stream().collect(Collectors.toMap(d->String.valueOf(d.getId()),d->d));
-        for(SourceDocument source:ProjectDocumentScope.currentCatalog(project,catalog)){
+        for(SourceDocument metadata:ProjectDocumentScope.currentCatalog(project,catalog)){
+            SourceDocument captured=sources.get(String.valueOf(metadata.getId()));
+            SourceDocument source=captured!=null&&ProjectDocumentScope.sameScopeRevision(captured,metadata)?captured:metadata;
             String excluded=ProjectDocumentScope.exclusionReason(source,"fullset");
             if("source_identity_unresolved".equals(excluded)){unknown="catalog_contains_unresolved_source_identity";break;}
             if(excluded!=null)continue;

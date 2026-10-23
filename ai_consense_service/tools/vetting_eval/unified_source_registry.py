@@ -298,10 +298,67 @@ class UnifiedCanonicalSourceRegistry(NativeCollectionSourceRegistry):
     def _check_frame_files(self, frame):
         for filename, expected in frame['locations'].items():
             path = Path(filename)
+            if filename in frame.get('streamLocations', set()):
+                actual = self._stream_file_identity(path, maximum=expected[1])
+                if actual != expected:
+                    raise SourceRegistryError('CANONICAL_FRAME_SOURCE_CHANGED',
+                        'Published root or revision binding changed during this request')
+                continue
             raw = self._read_frame_file(path, normal=frame['normalLocations'][filename])
             if (str(path.resolve()), len(raw), hashlib.sha256(raw).hexdigest()) != expected:
                 raise SourceRegistryError('CANONICAL_FRAME_SOURCE_CHANGED',
                     'Published root or revision binding changed during this request')
+
+    @staticmethod
+    def _stream_file_identity(path, *, maximum):
+        """Hash actual dependency bytes with bounded memory; no stat verdict."""
+        digest, size = hashlib.sha256(), 0
+        resolved = str(path.resolve())
+        try:
+            with path.open('rb') as stream:
+                while chunk := stream.read(1024 * 1024):
+                    size += len(chunk)
+                    if size > maximum:
+                        raise SourceRegistryError('CANONICAL_FRAME_SOURCE_CHANGED',
+                            'Published source dependency exceeds its sealed byte count')
+                    digest.update(chunk)
+        except OSError as error:
+            raise SourceRegistryError('CANONICAL_FRAME_SOURCE_UNAVAILABLE',
+                'Published source dependency is no longer available') from error
+        if str(path.resolve()) != resolved:
+            raise SourceRegistryError('CANONICAL_FRAME_SOURCE_CHANGED', 'Source locator changed during hashing')
+        return resolved, size, digest.hexdigest()
+
+    def verify_prepared_read_dependencies(self, files, assets):
+        """Reprove prepared derivative inputs without parsing the source graph.
+
+        This still streams every actual input byte at entry and successful
+        exit. It saves graph construction and retained bytes, not source I/O.
+        Only process-authenticated preparation manifests may call this seam.
+        """
+        frame = self._validation_frame.get()
+        if frame is None:
+            raise SourceRegistryError('CANONICAL_FRAME_REQUIRED', 'Prepared reads require a fresh source frame')
+        self._pin_family_context(frame)
+        for dependency in files:
+            path = Path(dependency['path'])
+            # Prepared locators belong to this registry, including revision
+            # aliases. Do not let a manifest become an arbitrary file reader.
+            if not path.resolve().is_relative_to(self.root):
+                raise SourceRegistryError('SNAPSHOT_PATH_INVALID', 'Prepared dependency is outside this registry')
+            expected = (dependency['resolvedPath'], dependency['byteCount'], dependency['sha256'])
+            locator = str(path.absolute())
+            prior = frame['locations'].get(locator)
+            if prior is not None and prior != expected:
+                raise SourceRegistryError('CANONICAL_FRAME_SOURCE_CHANGED', 'Prepared source locator changed')
+            if prior is None and self._stream_file_identity(path, maximum=dependency['byteCount']) != expected:
+                raise SourceRegistryError('CANONICAL_FRAME_SOURCE_CHANGED', 'Prepared source bytes changed')
+            frame['locations'][locator] = expected
+            frame['normalLocations'][locator] = dependency['normal']
+            frame['files'][str(path.resolve())] = (expected[1], expected[2])
+            frame.setdefault('streamLocations', set()).add(locator)
+        for descriptor in assets:
+            self.artifact_store.verify(descriptor)
 
     @contextmanager
     def validation_frame(self, *, software_guard):

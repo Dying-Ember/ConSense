@@ -82,7 +82,7 @@ class VettingLanguageOriginGateTest {
 
     private Result reviewRaw(List<Chunk> corpus,Record... records)throws Exception {
         AiGateway ai=mock(AiGateway.class);when(ai.available()).thenReturn(true);when(ai.chatModel()).thenReturn("AUTHORED-only");
-        when(ai.completeStructuredJsonList(anyString(),anyString(),eq(Record.class),any(),anyList(),anyMap())).thenReturn(Arrays.asList(records));
+        when(ai.completeStructuredJsonList(anyString(),anyString(),eq(Record.class),any(),anyList(),anyMap())).thenAnswer(call->VettingTokenFixture.records(call.getArgument(1),corpus,Arrays.asList(records)));
         ConsenseProperties props=new ConsenseProperties();props.getVetting().setSemanticTopics(1);props.getVetting().setProjectReferenceComparisons(0);props.getVetting().setProbeDirectory(probes.toString());
         VettingRetrievalClient retrieval=mock(VettingRetrievalClient.class);
         when(retrieval.retrieve(anyString(),anyString(),anyString(),anyList(),any(VettingReviewProbe.Call.class))).thenAnswer(call->{String role=call.getArgument(2);List<Chunk> out=new ArrayList<>();for(Chunk c:corpus)if(role.equals(c.getRole()))out.add(c);return out;});

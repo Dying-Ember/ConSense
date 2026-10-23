@@ -348,7 +348,7 @@ class SourceFrameTests(unittest.TestCase):
         self.assertEqual('canonical_load', oer['unifiedCanonical']['artifactReadValidationScope'])
         request = oer['requestSourceValidation']
         self.assertEqual('one_normal_journalled_request', request['validationScope'])
-        self.assertEqual(['/index-canonical', '/index-canonical/status', '/retrieve'], request['routes'])
+        self.assertEqual(['/index-canonical', '/index-canonical/status', '/retrieve', '/sources/read'], request['routes'])
         self.assertEqual('cold_once_per_source_within_request_or_byte_bound_replay', request['completeReconstruction'])
         self.assertFalse(request['crossRequestDerivedResultReuse']['cachedSourceValidity'])
         self.assertFalse(request['crossRequestDerivedResultReuse']['unframedReadsUseCache'])

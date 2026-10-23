@@ -173,9 +173,12 @@ class ArtifactStore:
         # Validate every supplied descriptor/path, even for cached bytes.
         path = self._path(descriptor)
         key = (str(path), descriptor['sha256'], descriptor['byteCount'])
-        if key not in cache:
-            raw = self._read_uncached(descriptor, retain=True)
-            cache[key] = (copy.deepcopy(descriptor), raw)
+        if key not in cache or (retain and cache[key][1] is None):
+            # Verification-only dependencies may be very large original or
+            # parsed sources. Retain their descriptor for the exit rehash,
+            # without materializing their entire bytes in the request cache.
+            value = self._read_uncached(descriptor, retain=retain)
+            cache[key] = (copy.deepcopy(descriptor), value if retain else None)
         raw = cache[key][1]
         return raw if retain else {'status': 'verified', 'sha256': descriptor['sha256'],
                                    'byteCount': descriptor['byteCount']}

@@ -28,7 +28,7 @@ public final class VettingRecoveryProcessFixture {
     public static void main(String[] args)throws Exception {
         root=Paths.get(args[0]).toAbsolutePath();mode=args[1];Files.createDirectories(root);
         Files.write(root.resolve("calls.log"),new byte[0],StandardOpenOption.CREATE,StandardOpenOption.APPEND);
-        String url="jdbc:h2:file:"+root.resolve("database").toString().replace('\\','/')+";MODE=MySQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_ON_EXIT=FALSE;WRITE_DELAY=0";
+        String url=databaseUrl(root);
         try(ConfigurableApplicationContext context=new SpringApplicationBuilder(Application.class,Fixture.class).run(
                 "--spring.profiles.active=h2","--server.address=127.0.0.1","--server.port=0","--spring.datasource.url="+url,
                 "--spring.jpa.hibernate.ddl-auto=update","--spring.flyway.enabled=false","--consense.storage-root="+root.resolve("uploads"),
@@ -51,6 +51,11 @@ public final class VettingRecoveryProcessFixture {
             Map<String,Object> ready=new LinkedHashMap<>();ready.put("baseUrl",base);ready.put("projectId",project);ready.put("runId",run.getId());Files.write(root.resolve(mode+"-ready.json"),JsonUtils.write(ready).getBytes(StandardCharsets.UTF_8));
             new CountDownLatch(1).await();
         }
+    }
+    static String databaseUrl(Path directory){
+        // The fixture bypasses ConSenseApplication.main; initialize the same local file-access compatibility in both JVMs.
+        com.consense.config.H2LocalFileAccess.register();
+        return "jdbc:h2:rwfile:"+directory.resolve("database").toString().replace('\\','/')+";MODE=MySQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_ON_EXIT=FALSE;WRITE_DELAY=0";
     }
     @org.springframework.boot.SpringBootConfiguration @org.springframework.boot.autoconfigure.EnableAutoConfiguration
     @org.springframework.boot.autoconfigure.domain.EntityScan("com.consense.domain")
@@ -75,7 +80,7 @@ public final class VettingRecoveryProcessFixture {
                 if("BEFORE_CALL".equals(mode)&&ordinal==1)block("before first result");if("AFTER_PACKET".equals(mode)&&ordinal==2)block("first packet saved; second call uncertain");
                 VettingCorpus.Chunk source=corpus.get().stream().filter(c->"tender".equals(c.getRole())).findFirst().orElseThrow(IllegalStateException::new);
                 VettingSemanticReview.Record record="BEFORE_SAVE".equals(mode)&&ordinal==1?new VettingSemanticReview.Record(){@Override public String getSuggestion(){block("result decoded; before verified checkpoint save");return "fixture suggestion";}}:new VettingSemanticReview.Record();
-                VettingCompetitionFixture.details(record);record.setAssessment("issue");record.setType("risk");record.setSeverity("medium");record.setTitle("Fixture assessment");record.setComment("Fixture record; no live model quality claim");VettingSemanticReview.Quote quote=new VettingSemanticReview.Quote();quote.setChunkId(source.getId());quote.setSide("source");quote.setQuote(source.getContent().trim());record.setEvidence(Collections.singletonList(quote));return Collections.singletonList(record);});return ai;}
+                VettingCompetitionFixture.details(record);record.setAssessment("issue");record.setType("risk");record.setSeverity("medium");record.setTitle("Fixture assessment");record.setComment("Fixture record; no live model quality claim");VettingSemanticReview.Quote quote=new VettingSemanticReview.Quote();quote.setChunkId(VettingTokenFixture.reference(prompt,source));quote.setSide("source");quote.setQuote(source.getContent().trim());record.setEvidence(Collections.singletonList(quote));return Collections.singletonList(record);});return ai;}
         @Bean @Primary VettingRetrievalClient fixtureRetrieval(){VettingRetrievalClient client=mock(VettingRetrievalClient.class);doAnswer(call->{corpus.set(call.getArgument(1));return null;}).when(client).index(anyString(),anyList());
             when(client.retrieve(anyString(),anyString(),anyString(),anyList())).thenAnswer(call->((List<VettingCorpus.Chunk>)call.getArgument(3)).stream().filter(c->call.getArgument(2).equals(c.getRole())).collect(java.util.stream.Collectors.toList()));return client;}
         @Bean @Primary VettingFindingRepository fixtureFindings(@Qualifier("vettingFindingRepository") VettingFindingRepository delegate){VettingFindingRepository repository=mock(VettingFindingRepository.class,org.mockito.AdditionalAnswers.delegatesTo(delegate));

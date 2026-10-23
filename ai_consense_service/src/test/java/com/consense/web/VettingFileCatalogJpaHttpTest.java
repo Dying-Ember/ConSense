@@ -143,7 +143,13 @@ class VettingFileCatalogJpaHttpTest {
     }
     @Test void invalidIdentityStillFailsClosedInsteadOfListingAsEligible()throws Exception{
         SourceDocument d=source("10 - SCC.docx","SCC","tender","package","Current text.");d.setSourceSha256("actual-source");d.setOerIdentityJson("{\"sourceSha256\":\"different-source\",\"eligibleModules\":[\"vetting\"]}");documents.saveAndFlush(d);
-        clear();JsonNode r=response();assertNotEquals(0,r.path("code").asInt());assertTrue(r.path("message").asText().contains("identity"));assertNoArchiveHydration();
+        clear();org.springframework.test.web.servlet.MvcResult result=mvc.perform(get("/api/vetting/"+project+"/files")).andReturn();
+        assertEquals(200,result.getResponse().getStatus());assertNotNull(result.getResolvedException());
+        assertEquals(IllegalArgumentException.class,result.getResolvedException().getClass());
+        assertEquals("Persisted OER identity does not match its uploaded source",result.getResolvedException().getMessage());
+        JsonNode r=JsonUtils.parse(result.getResponse().getContentAsString());assertEquals(5000,r.path("code").asInt());
+        assertEquals("服务内部错误，请稍后重试；若仍失败，请联系维护人员。",r.path("message").asText());
+        assertTrue(r.path("data").isNull()||r.path("data").isMissingNode(),"Invalid identity must never publish an eligible file list");assertNoArchiveHydration();
     }
     @Test void foreignProjectAndAbsentProjectCannotReadThisSourceCatalogue()throws Exception{
         source("10 - SCC.docx","SCC","tender","package","Project isolated source.");String original=project;project="files-"+UUID.randomUUID();Project p=new Project();p.setId(project);projects.saveAndFlush(p);clear();assertEquals(0,data().size());assertNoArchiveHydration();

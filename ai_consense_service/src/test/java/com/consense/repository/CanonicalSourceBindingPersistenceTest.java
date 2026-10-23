@@ -27,6 +27,8 @@ class CanonicalSourceBindingPersistenceTest {
             ResourceDatabasePopulator migration=new ResourceDatabasePopulator(new ClassPathResource("db/migration/V14__canonical_source_bindings.sql"));
             migration.setSqlScriptEncoding("UTF-8");migration.populate(c);
             ResourceDatabasePopulator familyMigration=new ResourceDatabasePopulator(new ClassPathResource("db/migration/V15__canonical_source_family_pins.sql"));familyMigration.setSqlScriptEncoding("UTF-8");familyMigration.populate(c);
+            // This old-DDL fixture keeps its null legacy state while exposing the current read-only ORM field.
+            sql.execute("ALTER TABLE canonical_source_binding ADD COLUMN snapshot_content_sha256 VARCHAR(64) NULL");
         }catch(Exception error){throw new IllegalStateException("Cannot execute canonical migration",error);}
         registry.add("spring.datasource.url",()->URL);
     }
@@ -69,12 +71,14 @@ class CanonicalSourceBindingPersistenceTest {
         repository.saveAndFlush(row);entityManager.clear();
         CanonicalSourceBinding loaded=repository.findByProjectIdAndDocumentIdAndProjectionSha256("project-a",11L,sha()).get();
         assertEquals(raw,loaded.getSnapshotJson());assertEquals(row.getId(),loaded.getId());
+        assertNull(loaded.getSnapshotContentSha256(),"Legacy fixture must not acquire an inferred trusted content stamp");
         assertEquals(1,repository.findByProjectIdAndDocumentIdOrderByIdDesc("project-a",11L).size());
     }
     @Test void familyPinsAndNullLegacyReviewPinsRoundTripInActualJpaAfterExactUpgrade()throws Exception{
         CanonicalSourceBinding row=com.consense.service.sources.NativePdfSourceFamilyFixture.binding("authored-family-v1.json");row.setId(null);
         repository.saveAndFlush(row);entityManager.clear();CanonicalSourceBinding loaded=repository.findById(row.getId()).get();
         assertNull(loaded.getAdoptionManifestSha256());assertNull(loaded.getReviewReferenceSha256());
+        assertNull(loaded.getSnapshotContentSha256());
         assertEquals(row.getFamilyCompositionSha256(),loaded.getFamilyCompositionSha256());assertEquals(row.getFamilyComponentSetSha256(),loaded.getFamilyComponentSetSha256());
         assertEquals(row.getSnapshotJson(),loaded.getSnapshotJson());
         com.consense.service.sources.CanonicalEvidenceService.validateBindingPins(loaded,com.consense.common.JsonUtils.parse(loaded.getSnapshotJson()));

@@ -29,5 +29,7 @@ public class CanonicalSourceBinding {
     @Column(name="declared_module",length=16,nullable=false) private String declaredModule;
     @Lob @Column(name="eligible_modules_json",nullable=false) private String eligibleModulesJson;
     @Lob @Column(name="snapshot_json",nullable=false) private String snapshotJson;
+    /** Raw UTF-8 digest maintained at the database write boundary, including direct SQL. */
+    @Column(name="snapshot_content_sha256",length=64,insertable=false,updatable=false) private String snapshotContentSha256;
     @Column(name="created_at",nullable=false) private Instant createdAt=Instant.now();
 }

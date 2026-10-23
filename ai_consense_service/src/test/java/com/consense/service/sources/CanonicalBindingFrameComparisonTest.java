@@ -31,10 +31,31 @@ class CanonicalBindingFrameComparisonTest {
             assertChanged(()->fixture.service.assertFrameSourcesCurrent(fixture.frame),field.getName()+" null");
             assertChanged(()->fixture.service.revalidateFrame(fixture.frame),field.getName()+" null");
         }
-        assertEquals(20,checked,"Revisit the complete binding comparison when the stored entity changes");
+        assertEquals(21,checked,"Revisit the complete binding comparison when the stored entity changes");
         fixture.current.set(copy(fixture.original));fixture.service.assertFrameSourcesCurrent(fixture.frame);
         verify(fixture.repository,times(checked*4+2)).findByProjectIdAndDocumentIdOrderByIdDesc("frame-project",22L,org.springframework.data.domain.PageRequest.of(0,1));
         verifyNoInteractions(fixture.backend);
+    }
+
+    @Test void compactGuardsReadOnlyFreshPinsAndRejectChangedOrNewBindingContent()throws Exception {
+        Fixture fixture=new Fixture("{}");fixture.original.setSnapshotBytesSha256(com.consense.common.Utf8.sha256("{}"));fixture.original.setSnapshotContentSha256(fixture.original.getSnapshotBytesSha256());
+        fixture.current.set(copy(fixture.original));
+        when(fixture.repository.findCompactByDocument(anyString(),anyLong(),any())).thenAnswer(call->Collections.singletonList(metadata(fixture.current.get())));
+        com.consense.domain.SourceDocument source=new com.consense.domain.SourceDocument();source.setId(22L);source.setProjectId("frame-project");
+        when(fixture.reader.currentStamp("frame-project",22L,"vetting")).thenReturn(source);
+        // The frame retained its own immutable copy before these authored digests were added.
+        Field views=fixture.frame.getClass().getDeclaredField("views");views.setAccessible(true);Object view=((Map<?,?>)views.get(fixture.frame)).get(22L);Field binding=view.getClass().getDeclaredField("binding");binding.setAccessible(true);
+        CanonicalSourceBinding retained=(CanonicalSourceBinding)binding.get(view);retained.setSnapshotBytesSha256(fixture.original.getSnapshotBytesSha256());retained.setSnapshotContentSha256(fixture.original.getSnapshotContentSha256());
+        CanonicalEvidenceService.CompactBindingScope scope=fixture.service.compactBindings(fixture.frame,Collections.singletonList(source));
+        assertNull(scope.bindings().get(0).getSnapshotJson());clearInvocations(fixture.repository,fixture.backend,fixture.reader);
+        for(int i=0;i<5;i++)fixture.service.assertCompactCurrent(scope);
+        verify(fixture.repository,times(5)).findCompactByDocument(anyString(),anyLong(),any());verify(fixture.repository,never()).findByProjectIdAndDocumentIdOrderByIdDesc(anyString(),anyLong(),any());verifyNoInteractions(fixture.backend);
+        fixture.current.get().setSnapshotContentSha256(com.consense.common.Utf8.sha256("{\"changed\":true}"));assertThrows(CanonicalEvidenceException.class,()->fixture.service.assertCompactCurrent(scope));
+        fixture.current.set(copy(fixture.original));fixture.current.get().setId(12L);when(fixture.repository.findCompactByDocumentBefore(anyString(),anyLong(),anyLong(),any())).thenReturn(Collections.singletonList(metadata(fixture.original)));
+        assertThrows(CanonicalEvidenceException.class,()->fixture.service.assertCompactCurrent(scope));
+    }
+    private static CanonicalSourceBindingRepository.CompactMetadata metadata(CanonicalSourceBinding binding){
+        return mock(CanonicalSourceBindingRepository.CompactMetadata.class,call->{return CanonicalSourceBinding.class.getMethod(call.getMethod().getName()).invoke(binding);});
     }
 
     @Test void freshGuardDoesNotSerializeTheRetainedLargeSnapshotAgain()throws Exception {

@@ -30,6 +30,24 @@ public class CanonicalCurrentSourceReader {
     @Transactional(propagation=Propagation.REQUIRES_NEW,isolation=Isolation.READ_COMMITTED,readOnly=true)
     public SourceDocument normalDocument(String projectId,Long id,String module){return readDocument(projectId,id,module,true,true);}
 
+    /** Fresh identity, permissions, latest revision and actual original bytes; never loads content LOBs. */
+    @Transactional(propagation=Propagation.REQUIRES_NEW,isolation=Isolation.READ_COMMITTED,readOnly=true)
+    public SourceDocument currentStamp(String projectId,Long id,String module){
+        SourceDocument stamp=validatedScope(projectId,id,module);
+        require(SourceContentDigests.stamped(stamp),HttpStatus.CONFLICT,"SOURCE_CONTENT_REVISION_UNAVAILABLE");return stamp;
+    }
+    /** Preparation uses its own transaction so its post-write scalar read sees the new write stamp. */
+    SourceDocument validatedScope(String projectId,Long id,String module){
+        SourceDocument stamp=SourceDocumentRepository.scopeSnapshot(documents.findScopeMetadataById(id)
+                .orElseThrow(()->new CanonicalEvidenceException(HttpStatus.NOT_FOUND,"SOURCE_DOCUMENT_UNAVAILABLE")));
+        return validateCurrentDocument(projectId,id,module,stamp);
+    }
+    /** Captured must contain the four original business fields; current must come from currentStamp. */
+    public void requireCurrentStamp(SourceDocument captured,SourceDocument current){
+        try{SourceContentDigests.requireCurrent(captured,current);}catch(IllegalArgumentException stale){throw new CanonicalEvidenceException(HttpStatus.CONFLICT,"CANONICAL_SOURCE_STALE");}
+    }
+    public void validateStampAgainstContent(SourceDocument captured,SourceDocument current){requireCurrentStamp(captured,current);}
+
     /** Registration has not saved its new adoption yet; verify committed source and original only. */
     @Transactional(propagation=Propagation.REQUIRES_NEW,isolation=Isolation.READ_COMMITTED,readOnly=true)
     public void assertSourceCurrent(CanonicalSourceBinding binding,String module){checkSource(binding,module);}
@@ -71,6 +89,10 @@ public class CanonicalCurrentSourceReader {
         // Vetting/advisory registration consumes the same complete verification fields.
         // Drafting keeps its ordinary entity path; native archives stay stored unchanged.
         SourceDocument document=normalObservation?normalVerificationDocument(id):verificationOnly||!"drafting".equals(module)?verificationDocument(id):documents.findById(id).orElseThrow(()->new CanonicalEvidenceException(HttpStatus.NOT_FOUND,"SOURCE_DOCUMENT_UNAVAILABLE"));
+        return validateCurrentDocument(projectId,id,module,document);
+    }
+    private SourceDocument validateCurrentDocument(String projectId,Long id,String module,SourceDocument document){
+        require(Arrays.asList("drafting","vetting","advisory").contains(module),HttpStatus.BAD_REQUEST,"CANONICAL_MODULE_INVALID");
         require(Objects.equals(projectId,document.getProjectId()),HttpStatus.NOT_FOUND,"SOURCE_DOCUMENT_UNAVAILABLE");
         require(!SourceDocument.CATEGORY_STANDARD_TEMPLATE.equals(document.getCategory())||"drafting".equals(module),HttpStatus.FORBIDDEN,"SOURCE_TEMPLATE_DRAFTING_ONLY");
         OerDocumentIdentity identity;

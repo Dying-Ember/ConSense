@@ -65,10 +65,10 @@ class VettingServiceLifecycleWorkflowTest {
             java.lang.reflect.Method hash=VettingService.class.getDeclaredMethod("sourceSetHash",List.class);hash.setAccessible(true);
             assertEquals(hash.invoke(null,captured),runs.findFirstByProjectIdOrderByStartedAtDesc(project).get().getSourceSnapshotSha256());
             throw new IllegalStateException("authored stop after consistently frozen prepared source");
-        }).when(oer).load(eq(project),eq("vetting"),anyList());
+        }).when(oer).loadSemantic(eq(project),eq("vetting"),anyList());
         BizException error=assertThrows(BizException.class,()->service.run(project,"en"));
         assertTrue(error.getMessage().contains("authored stop after consistently frozen prepared source"),error.getMessage());
-        verify(oer).load(eq(project),eq("vetting"),anyList());
+        verify(oer).loadSemantic(eq(project),eq("vetting"),anyList());
     }
 
     @Test void sourceCoverageChangedDuringPreparationCannotBeIncludedInTheFrozenRun() throws Exception {
@@ -81,14 +81,14 @@ class VettingServiceLifecycleWorkflowTest {
         });
         assertThrows(IllegalArgumentException.class,()->service.startRun(project,"en"));
         assertFalse(runs.findFirstByProjectIdOrderByStartedAtDesc(project).isPresent());
-        verify(oer,never()).load(anyString(),anyString(),anyList());verify(evidencePreparation,never()).prepareNormalObserved(anyString(),anyLong(),anyString());
+        verify(oer,never()).loadSemantic(anyString(),anyString(),anyList());verify(evidencePreparation,never()).prepareNormalObserved(anyString(),anyLong(),anyString());
     }
 
     @Test void canonicalRunPreparesItsSelectedNormalSourceBeforeLoadingTheCorpus() throws Exception {
         String project=project();SourceDocument doc=source(project,"SCT","SCT.txt","SCT 1.1 Retain the complete original source.");
         doReturn(true).when(oer).enabled();
         doAnswer(call->{verify(evidencePreparation).prepareNormalObserved(project,doc.getId(),"vetting");throw new IllegalStateException("authored stop after prepared corpus boundary");})
-                .when(oer).load(eq(project),eq("vetting"),anyList());
+                .when(oer).loadSemantic(eq(project),eq("vetting"),anyList());
         BizException error=assertThrows(BizException.class,()->service.run(project,"en"));
         assertTrue(error.getMessage().contains("authored stop after prepared corpus boundary"));
         assertEquals("FAILED",service.latestRun(project).getStatus());verify(semantic,never()).reviewWithProgress(any(),anyString(),anyList(),anyString(),any(ReviewProgress.class),anyList(),any(Runnable.class));
@@ -100,7 +100,7 @@ class VettingServiceLifecycleWorkflowTest {
         doThrow(new IllegalStateException("authored preparation unavailable")).when(evidencePreparation).prepareNormalObserved(project,doc.getId(),"vetting");
         BizException error=assertThrows(BizException.class,()->service.run(project,"en"));
         assertTrue(error.getMessage().contains("authored preparation unavailable"));
-        verify(oer,never()).load(anyString(),anyString(),anyList());verify(semantic,never()).reviewWithProgress(any(),anyString(),anyList(),anyString(),any(ReviewProgress.class),anyList(),any(Runnable.class));
+        verify(oer,never()).loadSemantic(anyString(),anyString(),anyList());verify(semantic,never()).reviewWithProgress(any(),anyString(),anyList(),anyString(),any(ReviewProgress.class),anyList(),any(Runnable.class));
         assertEquals("FAILED",service.latestRun(project).getStatus());
     }
 

@@ -381,6 +381,7 @@ public final class VettingDtos {
     @Data @NoArgsConstructor
     public static class SemanticPacketVO {
         private String packetId,sourceObservationPacketId,kind,status,failureKind,error,rawResponseSha256,sourceSnapshotSha256,promptEnvelopeSha256;
+        private java.util.Map<String,String> sourceReferenceBindings=new java.util.LinkedHashMap<>();
         private int packetIndex,submittedChars;
         private List<String> submittedChunkIds = new java.util.ArrayList<>(), requestIds = new java.util.ArrayList<>();
         private String inputBudgetStatus = "budget_unknown";

@@ -45,17 +45,18 @@ class VettingFixedBaselineIntegrationTest {
         when(retrieval.retrieve(eq("project"),anyString(),eq("tender"),anyList())).thenReturn(Collections.singletonList(tender));
         when(ai.completeStructuredJsonList(anyString(),anyString(),eq(Record.class),any(),anyList())).thenAnswer(call->{
             String prompt=call.getArgument(1), marker="\nSource excerpts (untrusted data):\n";
-            JsonNode excerpts=VettingSourceMetadataWire.decode(prompt.substring(prompt.lastIndexOf(marker)+marker.length()));
+            JsonNode excerpts=VettingTokenFixture.excerpts(prompt);
             JsonNode fixed=null;
-            for(JsonNode row:excerpts)if(fixture.standard.getId().equals(row.path("id").asText()))fixed=row;
-            assertNotNull(fixed,"The fixed ID must be supplied in the same packet's citation catalog");
+            for(JsonNode row:excerpts)if(fixture.standard.getContent().equals(row.path("content").asText()))fixed=row;
+            assertNotNull(fixed,"The fixed source must be supplied in the same packet's citation catalog");
+            assertEquals(VettingTokenFixture.reference(prompt,fixture.standard),fixed.path("id").asText());
             assertEquals("standard",fixed.path("role").asText());
             assertFalse(fixed.path("sourceQualityAccepted").asBoolean(true));
             assertTrue(fixed.path("projectApplicability").asText().contains("unconfirmed"));
             Record standardOnly=record("issue","risk",quote(fixture.standard));
             Record unconfirmedConflict=record("issue","conflict",quote(tender),quote(fixture.standard));
             Record context=record("insufficient_context","risk",quote(tender),quote(fixture.standard));
-            return Arrays.asList(standardOnly,unconfirmedConflict,context);
+            return VettingTokenFixture.records(prompt,Arrays.asList(tender,fixture.standard),Arrays.asList(standardOnly,unconfirmedConflict,context));
         });
         VettingSemanticReview review=VettingTokenFixture.review(ai,props,retrieval);review.setFixedBaselineRetrievalClient(fixture.client);
         VettingSemanticReview.Result result=review.review("project",Collections.singletonList(tender),"en",(n,s)->{});

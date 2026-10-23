@@ -246,6 +246,10 @@ public final class OerModelMaterial {
             return false;
         }
         public ObjectNode project(EvidencePointer p){return project(p,null,null);}
+        /** A prepared origin may enter a later packet alone; only its pure source calculations are shared. */
+        ObjectNode projectStandalone(EvidencePointer pointer,JsonNode canonicalMember,String role){
+            materialIds.clear();sourceUnknowns.clear();sourceLimits.clear();return project(pointer,canonicalMember,role);
+        }
         public ObjectNode project(EvidencePointer p,JsonNode canonicalMember,String role) {
             Objects.requireNonNull(p,"Canonical evidence pointer required");
             JsonNode word=p.getNativeWordSourceScopesContext(),requested=wordSourceScopes.get(p.getCanonicalChunkId());

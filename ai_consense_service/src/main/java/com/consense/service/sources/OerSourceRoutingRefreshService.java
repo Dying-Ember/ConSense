@@ -3,6 +3,8 @@ package com.consense.service.sources;
 import com.consense.common.JsonUtils;
 import com.consense.config.ConsenseProperties;
 import com.consense.document.OerDocumentIdentity;
+import com.consense.document.DocumentBlock;
+import com.consense.document.OerSourceRouting;
 import com.consense.domain.SourceDocument;
 import com.consense.repository.SourceDocumentRepository;
 import com.consense.service.StorageService;
@@ -20,6 +22,7 @@ import org.springframework.transaction.annotation.*;
 public class OerSourceRoutingRefreshService {
     private final SourceDocumentRepository documents;
     private final ConsenseProperties properties;
+    private final org.springframework.jdbc.core.JdbcTemplate jdbc;
 
     @Data public static class Result {
         private String projectId, originalSourceSha256, javaParsedSourceHash, previousRoutingSha256, routingSha256;
@@ -87,6 +90,61 @@ public class OerSourceRoutingRefreshService {
         result.setOriginalSourceSha256(expectedOriginalSha);result.setJavaParsedSourceHash(expectedParsedHash);
         result.setPreviousRoutingSha256(expectedRoutingHash);result.setRoutingSha256(CanonicalEvidenceService.routingHash(after));
         result.setIdentity(identity);result.setChanged(changed);return result;
+    }
+
+    /** A separate bounded identity operation; its request never pins or reads retained parsed LOBs. */
+    @Transactional(propagation=Propagation.REQUIRES_NEW,isolation=Isolation.READ_COMMITTED)
+    public Result recheckNativeIdentity(String projectId,Long id,String expectedOriginalSha,String expectedRoutingHash){
+        require(validSha(expectedOriginalSha)&&validSha(expectedRoutingHash),HttpStatus.BAD_REQUEST,"SOURCE_REFRESH_HASH_INVALID");
+        SourceDocument before=scopeSnapshot(id);
+        require(Objects.equals(projectId,before.getProjectId()),HttpStatus.NOT_FOUND,"SOURCE_DOCUMENT_UNAVAILABLE");
+        require(ProjectDocumentScope.reviewCategory(before),HttpStatus.FORBIDDEN,"SOURCE_REFRESH_REVIEW_ONLY");
+        require(Arrays.asList("PARSED","PARTIAL").contains(before.getParseStatus()),HttpStatus.CONFLICT,"SOURCE_PARSE_UNAVAILABLE");
+        require(Objects.equals(expectedOriginalSha,before.getSourceSha256())&&Objects.equals(expectedRoutingHash,CanonicalEvidenceService.routingHash(before)),HttpStatus.CONFLICT,"SOURCE_REFRESH_SNAPSHOT_STALE");
+        OerDocumentIdentity old;try{old=OerSourceMetadata.identity(before);}catch(RuntimeException invalid){throw new CanonicalEvidenceException(HttpStatus.CONFLICT,"SOURCE_ROUTING_STALE");}
+        require(old==null||"UNKNOWN".equals(old.getKind())&&"unknown".equals(old.getSourcePurpose())
+                &&!String.valueOf(old.getIdentityStatus()).startsWith("human_")&&old.getIdentityEvidence()!=null&&old.getIdentityEvidence().stream().noneMatch(e->e.getBasis()!=null&&e.getBasis().startsWith("human_")),HttpStatus.FORBIDDEN,"SOURCE_NATIVE_RECHECK_UNKNOWN_ONLY");
+        require(JsonUtils.isBlankText(before.getReviewRole())||"tender".equals(before.getReviewRole()),HttpStatus.FORBIDDEN,"SOURCE_ROUTING_PURPOSE_CONFLICT");
+        require(!Arrays.asList("drawing","example","pricing","works_pss").contains(before.getDocumentScope()),HttpStatus.FORBIDDEN,"SOURCE_MODULE_EXCLUDED");
+        require(before.getFileName()!=null&&before.getFileName().toLowerCase(Locale.ROOT).endsWith(".docx"),HttpStatus.BAD_REQUEST,"SOURCE_NATIVE_RECHECK_DOCX_ONLY");
+        require(JsonUtils.isBlankText(before.getFileKey())||Arrays.asList("UNKNOWN","OTHER","PRE").contains(before.getFileKey()),HttpStatus.CONFLICT,"SOURCE_ROUTING_KIND_CHANGED");
+        assertCurrent(before);verifyOriginal(before);List<DocumentBlock> observed;
+        try{Path original=Paths.get(before.getStoragePath()).toRealPath();require(original.startsWith(Paths.get(properties.getStorageRoot()).toRealPath()),HttpStatus.CONFLICT,"SOURCE_ORIGINAL_UNAVAILABLE");observed=NativeDocxIdentityObservation.read(original,expectedOriginalSha);}
+        catch(Exception unavailable){throw new CanonicalEvidenceException(HttpStatus.CONFLICT,"SOURCE_NATIVE_IDENTITY_UNAVAILABLE");}
+        StringBuilder text=new StringBuilder();for(DocumentBlock block:observed)text.append(block.getText()).append('\n');
+        OerDocumentIdentity identity=new OerSourceRouting().routeRetained(before.getFileName(),expectedOriginalSha,text.toString(),observed);
+        require("PRE".equals(identity.getKind())&&"project_document".equals(identity.getSourcePurpose())&&"content_supported".equals(identity.getIdentityStatus())
+                &&identity.getIdentityEvidence().stream().anyMatch(e->"native_contract_definition".equals(e.getBasis()))
+                &&identity.getEligibleModules()!=null&&identity.getEligibleModules().containsAll(Arrays.asList("vetting","advisory")),HttpStatus.FORBIDDEN,"SOURCE_ROUTING_IDENTITY_UNRESOLVED");
+        SourceDocument proposed=scopeSnapshot(id);require(ProjectDocumentScope.sameScopeRevision(before,proposed),HttpStatus.CONFLICT,"SOURCE_REFRESH_SNAPSHOT_STALE");
+        proposed.setOerIdentityJson(JsonUtils.write(identity));proposed.setFileKey("PRE");
+        require(ProjectDocumentScope.exclusionReason(proposed,"fullset","vetting")==null&&ProjectDocumentScope.exclusionReason(proposed,"fullset","advisory")==null,HttpStatus.FORBIDDEN,"SOURCE_MODULE_EXCLUDED");
+        verifyOriginal(before);String next=proposed.getOerIdentityJson();
+        require(compareNativeIdentity(before,next)==1,HttpStatus.CONFLICT,"SOURCE_REFRESH_SNAPSHOT_STALE");
+        SourceDocument after=scopeSnapshot(id);require(Objects.equals(next,after.getOerIdentityJson())&&"PRE".equals(after.getFileKey()),HttpStatus.CONFLICT,"SOURCE_REFRESH_SNAPSHOT_STALE");
+        after.setOerIdentityJson(before.getOerIdentityJson());after.setFileKey(before.getFileKey());
+        require(ProjectDocumentScope.sameScopeRevision(before,after),HttpStatus.CONFLICT,"SOURCE_REFRESH_SNAPSHOT_STALE");
+        after.setOerIdentityJson(next);after.setFileKey("PRE");assertCurrent(after);verifyOriginal(after);
+        Result result=new Result();result.setProjectId(projectId);result.setDocumentId(id);result.setOriginalSourceSha256(expectedOriginalSha);
+        result.setPreviousRoutingSha256(expectedRoutingHash);result.setRoutingSha256(CanonicalEvidenceService.routingHash(after));result.setIdentity(identity);result.setChanged(true);return result;
+    }
+    private SourceDocument scopeSnapshot(Long id){
+        require(id!=null,HttpStatus.BAD_REQUEST,"SOURCE_DOCUMENT_ID_REQUIRED");return SourceDocumentRepository.scopeSnapshot(documents.findScopeMetadataById(id)
+                .orElseThrow(()->new CanonicalEvidenceException(HttpStatus.NOT_FOUND,"SOURCE_DOCUMENT_UNAVAILABLE")));
+    }
+    private int compareNativeIdentity(SourceDocument before,String next){
+        return jdbc.execute((org.springframework.jdbc.core.ConnectionCallback<Integer>)connection->{
+            String product=connection.getMetaData().getDatabaseProductName();boolean mysql=Arrays.asList("MySQL","MariaDB").contains(product);
+            require(mysql||"H2".equals(product),HttpStatus.CONFLICT,"SOURCE_REFRESH_DATABASE_UNSUPPORTED");
+            LinkedHashMap<String,Object> pins=new LinkedHashMap<>();pins.put("id",before.getId());pins.put("project_id",before.getProjectId());pins.put("source_sha256",before.getSourceSha256());
+            pins.put("oer_identity_json",before.getOerIdentityJson());pins.put("category",before.getCategory());pins.put("file_name",before.getFileName());pins.put("file_key",before.getFileKey());
+            pins.put("review_role",before.getReviewRole());pins.put("document_scope",before.getDocumentScope());pins.put("parse_status",before.getParseStatus());pins.put("storage_path",before.getStoragePath());
+            StringBuilder sql=new StringBuilder("update source_document set oer_identity_json=?,file_key=? where 1=1");
+            for(String name:pins.keySet())sql.append(" and ").append(mysql?("id".equals(name)?name+" <=> ?":"BINARY "+name+" <=> BINARY ?"):name+" is not distinct from ?");
+            try(java.sql.PreparedStatement statement=connection.prepareStatement(sql.toString())){
+                statement.setString(1,next);statement.setString(2,"PRE");int index=3;for(Object value:pins.values())statement.setObject(index++,value);return statement.executeUpdate();
+            }
+        });
     }
 
     private SourceDocument snapshot(Long id) {

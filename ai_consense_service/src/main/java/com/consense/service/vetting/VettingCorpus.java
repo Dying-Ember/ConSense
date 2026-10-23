@@ -147,8 +147,9 @@ public final class VettingCorpus {
         return out;
     }
     public static String sourceHash(SourceDocument d) {
+        if(d.getCalculatedSourceHash()!=null)return d.getCalculatedSourceHash();
         String structure = nvl(d.getStructuredContentJson());
-        return SOURCE_HASH_NORMALIZER.hash(nvl(d.getTextContent()), structure);
+        String result=SOURCE_HASH_NORMALIZER.hash(nvl(d.getTextContent()), structure);d.setCalculatedSourceHash(result);return result;
     }
     public static List<Chunk> chunks(List<SourceDocument> docs) {
         List<Chunk> out = new ArrayList<>();

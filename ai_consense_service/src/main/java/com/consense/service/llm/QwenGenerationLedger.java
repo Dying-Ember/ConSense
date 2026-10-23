@@ -33,6 +33,9 @@ public class QwenGenerationLedger {
         private Reservation(String action,String identity,int number){actionId=action;identitySha256=identity;ordinal=number;}
         public String getActionId(){return actionId;} public int getOrdinal(){return ordinal;}
     }
+    public static final class ActionBudgetExhaustedException extends IllegalStateException {
+        public ActionBudgetExhaustedException(){super("qwen_generation_ceiling_exceeded");}
+    }
     public void open(String id,String identity,Limits limits) {
         require(id!=null&&id.matches("[A-Za-z0-9:_-]{1,128}")&&sha(identity),"qwen_action_identity_required");
         tx.executeWithoutResult(status->{
@@ -53,8 +56,9 @@ public class QwenGenerationLedger {
         return tx.execute(status->{
             QwenGenerationAction a=owned(actionId,identity);require(System.currentTimeMillis()<a.getDeadlineEpochMs(),"qwen_action_deadline_exceeded");
             ArrayNode rows=rows(a);
-            for(JsonNode row:rows)require(!(phase.equals(row.path("phase").asText())&&inputSha.equals(row.path("inputSha256").asText())),"qwen_generation_already_reserved_no_replay");
-            require(a.getTotal()<a.getMaxTotal()&&(answer?a.getAnswers()<a.getMaxAnswers():a.getPreflights()<a.getMaxPreflights()),"qwen_generation_ceiling_exceeded");
+            for(JsonNode row:rows)require(!(inputSha.equals(row.path("inputSha256").asText())
+                    &&(phase.equals(row.path("phase").asText())||!answer&&"usage_preflight_generation".equals(row.path("kind").asText()))),"qwen_generation_already_reserved_no_replay");
+            if(!(a.getTotal()<a.getMaxTotal()&&(answer?a.getAnswers()<a.getMaxAnswers():a.getPreflights()<a.getMaxPreflights())))throw new ActionBudgetExhaustedException();
             int ordinal=a.getTotal()+1;ObjectNode row=rows.addObject();row.put("ordinal",ordinal);row.put("phase",phase);row.put("inputSha256",inputSha);
             row.put("kind",answer?"answer_generation":"usage_preflight_generation");row.put("state","RESERVED");row.put("reservedEpochMs",System.currentTimeMillis());
             a.setTotal(ordinal);if(answer)a.setAnswers(a.getAnswers()+1);else a.setPreflights(a.getPreflights()+1);

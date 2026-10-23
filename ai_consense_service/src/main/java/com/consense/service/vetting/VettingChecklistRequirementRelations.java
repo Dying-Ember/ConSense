@@ -74,7 +74,8 @@ final class VettingChecklistRequirementRelations {
                                        Map<String,Chunk> byId,List<SourceDocument> sources) {
         ObjectNode out=object();out.put("bindingStatus","unknown");
         if(fact==null)return unknown(out,"null_fact_reference");out.put("requestedRole",fact.getSlot());
-        if(fact.getEvidenceIndex()==null||fact.getNativePositionIndex()==null||fact.getStartUtf16()==null||fact.getEndUtf16()==null
+        boolean textReference=fact.getText()!=null;
+        if(fact.getEvidenceIndex()==null||!textReference&&(fact.getNativePositionIndex()==null||fact.getStartUtf16()==null||fact.getEndUtf16()==null)
                 ||fact.getEvidenceIndex()<0||fact.getEvidenceIndex()>=quotes.size()||saved.getEvidence()==null
                 ||fact.getEvidenceIndex()>=saved.getEvidence().size())return unknown(out,"fact_reference_index_unavailable");
         int index=fact.getEvidenceIndex();Quote quote=quotes.get(index);Chunk chunk=byId.get(quote.getChunkId());
@@ -90,15 +91,24 @@ final class VettingChecklistRequirementRelations {
                 ||!Objects.equals(VettingCorpus.sourceRole(source),chunk.getRole()))return unknown(out,"current_original_parsed_revision_or_source_role_changed");
         if(chunk.getCanonicalEvidence()!=null&&(!Objects.equals(source.getProjectId(),chunk.getCanonicalEvidence().getProjectId())
                 ||!sha(chunk.getCanonicalEvidence().getSourceRevisionSha256())))return unknown(out,"canonical_project_or_source_revision_unavailable");
-        int start=fact.getStartUtf16(),end=fact.getEndUtf16();String quoted=quote.getQuote();
+        String quoted=quote.getQuote();int start,end;
+        if(textReference){
+            String text=fact.getText();start=JsonUtils.isBlankText(text)?-1:quoted.indexOf(text);
+            if(start<0||start!=quoted.lastIndexOf(text))return unknown(out,"fact_text_missing_or_ambiguous_in_quote");
+            end=start+text.length();
+        }else{start=fact.getStartUtf16();end=fact.getEndUtf16();}
         if(start<0||end<=start||end>quoted.length()||splitSurrogate(quoted,start)||splitSurrogate(quoted,end))return unknown(out,"invalid_quote_utf16_interval");
-        List<Part> parts=chunk.getParts()==null?Collections.emptyList():chunk.getParts().stream().filter(part->part.getText()!=null
+        List<Part> selectedParts=chunk.getParts();
+        if(chunk.getCanonicalPayload()!=null&&OerCanonicalRetrievalClient.SEMANTIC_READ.equals(chunk.getCanonicalPayload().path("semanticProjectionVersion").asText())){
+            selectedParts=semanticEvidenceParts(chunk,evidence);if(selectedParts==null)return unknown(out,"canonical_pointer_or_selected_parts_changed");
+        }
+        List<Part> parts=selectedParts==null?Collections.emptyList():selectedParts.stream().filter(part->part.getText()!=null
                 &&part.getText().indexOf(quoted)>=0&&part.getText().indexOf(quoted)==part.getText().lastIndexOf(quoted)).collect(Collectors.toList());
         if(parts.size()!=1)return unknown(out,"quote_occurrence_missing_or_ambiguous_in_native_parts");Part part=parts.get(0);
         JsonNode position=VettingCorpus.nativePosition(part.getSourcePosition(),source.getSourceSha256());
+        int nativeIndex=evidence.getNativePositions()==null||position==null?-1:evidence.getNativePositions().indexOf(position);
         if(position==null||!sha(position.path("partSha256").asText())||JsonUtils.isBlankText(position.path("partName").asText())||JsonUtils.isBlankText(position.path("nodePath").asText())
-                ||evidence.getNativePositions()==null||fact.getNativePositionIndex()<0||fact.getNativePositionIndex()>=evidence.getNativePositions().size()
-                ||!position.equals(evidence.getNativePositions().get(fact.getNativePositionIndex())))return unknown(out,"native_position_reference_unavailable_or_changed");
+                ||nativeIndex<0||!textReference&&nativeIndex!=fact.getNativePositionIndex())return unknown(out,"native_position_reference_unavailable_or_changed");
         List<DocumentBlock> blocks=VettingCorpus.blocks(source).stream().filter(block->Objects.equals(block.getId(),part.getBlockId())
                 &&Objects.equals(position,block.getSourcePosition())).collect(Collectors.toList());
         if(blocks.size()!=1)return unknown(out,"current_native_block_missing_or_ambiguous");DocumentBlock block=blocks.get(0);String full=block.getEffectiveText();
@@ -114,6 +124,28 @@ final class VettingChecklistRequirementRelations {
         out.put("completeNativeBlockSelected",part.getStartOffset()==0&&part.getEndOffset()==full.length());
         out.put("requirementFieldRole","unknown");out.put("sameRequirementObjectAndCompleteRange","unknown");
         out.put("originalBytesVerification","existing_source_guard_required_not_inferred_from_hash_equality");return out;
+    }
+
+    /** A compact model part borrows native coordinates only from its exact post-judgment source pointer. */
+    private static List<Part> semanticEvidenceParts(Chunk chunk,com.consense.web.dto.VettingDtos.FindingEvidence evidence){
+        com.consense.web.dto.CanonicalEvidenceDtos.EvidencePointer selected=chunk.getCanonicalEvidence(),original=evidence.getCanonicalEvidence();
+        if(selected==null||original==null||!evidence.isLocated()||JsonUtils.isBlankText(original.getProjectionSchema())
+                ||OerCanonicalRetrievalClient.SEMANTIC_READ.equals(original.getProjectionSchema())||"semantic_source_unit".equals(original.getAddressKind())
+                ||!Objects.equals(selected.getProjectId(),original.getProjectId())||!Objects.equals(selected.getDocumentId(),original.getDocumentId())
+                ||!Objects.equals(selected.getModule(),original.getModule())||!Objects.equals(selected.getCanonicalChunkId(),original.getCanonicalChunkId())
+                ||!Objects.equals(selected.getUnitId(),original.getUnitId()))return null;
+        List<String> before=Arrays.asList(selected.getOriginalSourceSha256(),selected.getJavaParsedSourceHash(),selected.getCanonicalSourceHash(),selected.getSourceRevisionSha256(),selected.getProjectionSha256(),selected.getProjectionRevisionSha256());
+        List<String> after=Arrays.asList(original.getOriginalSourceSha256(),original.getJavaParsedSourceHash(),original.getCanonicalSourceHash(),original.getSourceRevisionSha256(),original.getProjectionSha256(),original.getProjectionRevisionSha256());
+        if(before.stream().anyMatch(value->!sha(value))||!before.equals(after))return null;
+        JsonNode raw=original.getParts();if(raw==null||!raw.isArray()||chunk.getParts()==null||raw.size()!=chunk.getParts().size())return null;
+        List<Part> nativeParts=new ArrayList<>();for(int at=0;at<raw.size();at++){JsonNode part=raw.get(at);Part accepted=chunk.getParts().get(at);
+            if(!part.path("startOffset").isIntegralNumber()||!part.path("endOffset").isIntegralNumber()
+                    ||!part.path("startOffset").canConvertToInt()||!part.path("endOffset").canConvertToInt()
+                    ||!Objects.equals(part.path("blockId").asText(),accepted.getBlockId())||!Objects.equals(part.path("text").asText(),accepted.getText())
+                    ||part.path("startOffset").asInt()!=accepted.getStartOffset()||part.path("endOffset").asInt()!=accepted.getEndOffset())return null;
+            Part located=new Part();located.setBlockId(accepted.getBlockId());located.setText(accepted.getText());located.setStartOffset(accepted.getStartOffset());located.setEndOffset(accepted.getEndOffset());located.setSourcePosition(part.get("sourcePosition"));nativeParts.add(located);
+        }
+        return nativeParts;
     }
 
     private static ObjectNode unknown(ObjectNode out,String reason){return out.put("reasonCode",reason);}

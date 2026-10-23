@@ -11,6 +11,7 @@ import java.util.regex.Pattern;
 
 /** General source classification; filenames and isolated body keywords are only candidates. */
 public final class OerSourceRouting {
+    private static final int IDENTITY_BLOCK_LIMIT=1024,IDENTITY_TEXT_LIMIT=131072;
     private static final List<String> MODULES = Collections.unmodifiableList(Arrays.asList("drafting", "vetting", "advisory"));
     private static final List<String> PURPOSES = Arrays.asList("standard_template", "project_document", "reference_standard",
             "project_fact", "package_manifest", "evaluation_answer", "unknown");
@@ -82,10 +83,14 @@ public final class OerSourceRouting {
             return result;
         }
         String title = firstTitle(text,blocks), content = text == null ? "" : text;
-        OerDocumentIdentity.Evidence projectIdentifier = projectIdentifier(content,sha,blocks);
-        String titleKind = titleKind(title), appendixLocation = (titleKind == null || "SCT".equals(titleKind)) ? nativeTenderAppendix(sourceSha256,text,blocks) : null;
+        String titleKind=titleKind(title);
+        OerDocumentIdentity.Evidence preliminaries=nativePreliminaries(titleKind,title,sha,blocks);
+        if(preliminaries!=null)titleKind="PRE";
+        OerDocumentIdentity.Evidence projectIdentifier = projectIdentifier(content,sha,blocks,titleKind,preliminaries!=null);
+        String appendixLocation = (titleKind == null || "SCT".equals(titleKind)) ? nativeTenderAppendix(sourceSha256,text,blocks) : null;
         if (appendixLocation != null) titleKind = "SCT";
         if (titleKind != null) {
+            if(preliminaries!=null)result.getIdentityEvidence().add(preliminaries);
             result.getIdentityEvidence().add(appendixLocation == null
                     ? new OerDocumentIdentity.Evidence("native_or_parsed_title", "first_content_block", "Title supports " + titleKind + "; content quality and applicability remain separate")
                     : new OerDocumentIdentity.Evidence("native_tender_appendix", appendixLocation, "Native title/header declares an appendix to Special Conditions of Tender with assessment and submission provisions; project adoption remains separate"));
@@ -161,15 +166,43 @@ public final class OerSourceRouting {
         return MODULES;
     }
     private static String validSha(String value) { return value != null && value.matches("(?i)[0-9a-f]{64}") ? value.toLowerCase(Locale.ROOT) : null; }
-    private static OerDocumentIdentity.Evidence projectIdentifier(String text, String sourceSha256, List<DocumentBlock> blocks) {
+    private static OerDocumentIdentity.Evidence nativePreliminaries(String declaredKind,String title,String sha,List<DocumentBlock> blocks) {
+        if(blocks==null||validSha(sha)==null||declaredKind!=null)return null;
+        if(title.replaceAll("\\s+"," ").trim().matches("(?i)^(?:(?:sample|model|example|suggested) (?:answer|report)|comments on tender documentation|checklist for|contractual advice|flowchart).*"))return null;
+        String location=null;boolean projectHeading=false,worksHeading=false;int count=0,chars=0;
+        for(DocumentBlock block:blocks) {
+            if(++count>IDENTITY_BLOCK_LIMIT)break;
+            if(!boundBody(block,sha))continue;
+            String text=block.getEffectiveText();if(text==null)continue;
+            if((long)chars+text.length()>IDENTITY_TEXT_LIMIT)break;chars+=text.length();
+            for(String line:text.split("\\R")) {
+                String value=line.replaceAll("\\h+"," ").trim();
+                if(value.matches("(?i)^PRE[.]B1 PROJECT PARTICULARS(?: [0-9]+)?$"))location=block.getLocation();
+                if(value.matches("(?i)^PRE[.]B1[.]0(?:10|20)(?:[.]P)? (?:THE PROJECT|THE CONTRACT MANAGER)(?: [0-9]+)?$"))projectHeading=true;
+                if(value.matches("(?i)^PRE[.]B2 THE WORKS(?: [0-9]+)?$"))worksHeading=true;
+            }
+        }
+        return location!=null&&projectHeading&&worksHeading?new OerDocumentIdentity.Evidence("native_preliminaries_heading",location,
+                "Source-bound native PRE project-particulars, project and works headings; filename, project adoption and completeness are separate"):null;
+    }
+    private static boolean boundBody(DocumentBlock block,String sha) {
+        if(block==null||block.getSourcePosition()==null||block.getLocation()==null||block.getLocation().isEmpty())return false;
+        com.fasterxml.jackson.databind.JsonNode p=block.getSourcePosition();
+        return "docx_native".equals(p.path("kind").asText())&&sha.equals(p.path("sourceSha256").asText())
+                &&"word/document.xml".equals(p.path("partName").asText())&&validSha(p.path("partSha256").asText())!=null&&!p.path("nodePath").asText().isEmpty();
+    }
+    private static OerDocumentIdentity.Evidence projectIdentifier(String text, String sourceSha256, List<DocumentBlock> blocks,String declaredKind,boolean nativePreRequired) {
         String opening = firstTitle(text,blocks).replaceAll("\\s+", " ").trim();
         if (opening.matches("(?i)^(?:(?:sample|model|example|suggested) (?:answer|report)|comments on tender documentation|checklist for|contractual advice|flowchart).*")) return null;
         if (blocks != null && validSha(sourceSha256) != null
-                && Arrays.asList("NTT", "SCT", "SCC", "PRE").contains(titleKind(firstTitle(text,blocks)))) {
+                && Arrays.asList("NTT", "SCT", "SCC", "PRE").contains(declaredKind)) {
             Pattern declaration = Pattern.compile("(?i)^\\h*contract\\h*(?:no\\.?|number)(?:\\h*[:：#]\\h*|\\h+)(?=[a-z0-9/._-]*[0-9])[a-z0-9][a-z0-9/._-]{2,}\\h+\\(the\\h+(?:\"Contract\"|“Contract”)\\)\\h*$");
+            int count=0,chars=0;
             for (DocumentBlock block : blocks) {
+                if("PRE".equals(declaredKind)&&++count>IDENTITY_BLOCK_LIMIT)break;
                 if (block == null || block.getSourcePosition() == null || block.getEffectiveText() == null
                         || block.getLocation() == null || block.getLocation().isEmpty()) continue;
+                if("PRE".equals(declaredKind)){if((long)chars+block.getEffectiveText().length()>IDENTITY_TEXT_LIMIT)break;chars+=block.getEffectiveText().length();}
                 com.fasterxml.jackson.databind.JsonNode position = block.getSourcePosition();
                 if ("docx_native".equals(position.path("kind").asText()) && sourceSha256.equals(position.path("sourceSha256").asText())
                         && "word/document.xml".equals(position.path("partName").asText()) && validSha(position.path("partSha256").asText()) != null
@@ -177,6 +210,7 @@ public final class OerSourceRouting {
                     return new OerDocumentIdentity.Evidence("native_contract_definition", block.getLocation(), "Source-bound native body declares the numbered Contract; project adoption and content completeness remain separate");
             }
         }
+        if(nativePreRequired)return null;
         if (Pattern.compile("(?im)^\\h*(?:contract|tender|project)\\h*(?:no\\.?|number|reference|ref\\.?|title)(?:\\h*[:：#]\\h*|\\h+)(?!(?:not provided|to be completed|insert|unknown|n/a)\\b)(?![.＿_\\- ]*(?:$|\\[))(?:[\\p{L}\\p{N}][\\p{L}\\p{N}/._ -]{2,})\\h*$").matcher(text).find()) return new OerDocumentIdentity.Evidence("observed_project_identifier", "observed_content", "Labelled project identifier in the observed text; project adoption remains separate");
         return null;
     }

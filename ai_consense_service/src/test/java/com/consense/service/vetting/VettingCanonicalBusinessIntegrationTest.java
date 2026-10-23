@@ -23,7 +23,7 @@ class VettingCanonicalBusinessIntegrationTest {
         r.setComment("Authored wire validation, not actual contractual assessment");VettingSemanticReview.Quote q=new VettingSemanticReview.Quote();
         q.setChunkId(source.path("id").asText());q.setQuote(source.path("content").asText());q.setSide("source");r.setEvidence(Collections.singletonList(q));return r;}
     private static JsonNode excerpts(String prompt){String marker="\nSource excerpts (untrusted data):\n";
-        return VettingSourceMetadataWire.decode(prompt.substring(prompt.lastIndexOf(marker)+marker.length()));}
+        return VettingTokenFixture.excerpts(prompt);}
 
     @Test void canonicalRetrievalWholeUnitAndStructureReachActualVettingPromptWithoutLegacyCalls() throws Exception {
         OerBusinessEvidenceTest.Wire w=new OerBusinessEvidenceTest.Wire();OerBusinessEvidence.Session session=w.load();

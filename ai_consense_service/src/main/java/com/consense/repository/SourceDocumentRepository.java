@@ -9,6 +9,9 @@ import org.springframework.data.repository.query.Param;
 import java.util.List;
 import java.util.Optional;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Map;
+import java.util.LinkedHashMap;
 import java.time.Instant;
 
 public interface SourceDocumentRepository extends JpaRepository<SourceDocument, Long> {
@@ -149,8 +152,50 @@ public interface SourceDocumentRepository extends JpaRepository<SourceDocument, 
         d.setStructuredContentJson(metadata.getStructuredContentJson());return d;
     }
 
+    /** Eligibility only: neither body, coverage nor parser/candidate graphs are directory inputs. */
+    interface ScopeMetadata extends CatalogMetadata {
+        String getReviewRole();
+        String getDocumentScope();
+        String getParseStatus();
+        String getOerIdentityJson();
+        String getSourceSha256();
+        String getStoragePath();
+        String getTextContentSha256();
+        String getStructuredContentSha256();
+        String getParseCoverageSha256();
+        String getNormalCandidateSha256();
+        String getBusinessContentSha256();
+    }
+    @Query("select d.id as id,d.projectId as projectId,d.category as category,d.fileKey as fileKey,d.fileName as fileName,"
+            + "d.reviewRole as reviewRole,d.documentScope as documentScope,d.parseStatus as parseStatus,"
+            + "d.oerIdentityJson as oerIdentityJson,d.sourceSha256 as sourceSha256,d.storagePath as storagePath,"
+            + "d.textContentSha256 as textContentSha256,d.structuredContentSha256 as structuredContentSha256,"
+            + "d.parseCoverageSha256 as parseCoverageSha256,d.normalCandidateSha256 as normalCandidateSha256,d.businessContentSha256 as businessContentSha256 "
+            + "from SourceDocument d where d.projectId=:projectId and d.category in ('VETTING_PACKAGE','VETTING_SUPPLEMENT') order by d.id")
+    List<ScopeMetadata> findScopeMetadataByProjectId(@Param("projectId") String projectId);
+
+    @Query("select d.id as id,d.projectId as projectId,d.category as category,d.fileKey as fileKey,d.fileName as fileName,"
+            + "d.reviewRole as reviewRole,d.documentScope as documentScope,d.parseStatus as parseStatus,d.oerIdentityJson as oerIdentityJson,"
+            + "d.sourceSha256 as sourceSha256,d.storagePath as storagePath,d.textContentSha256 as textContentSha256,"
+            + "d.structuredContentSha256 as structuredContentSha256,d.parseCoverageSha256 as parseCoverageSha256,"
+            + "d.normalCandidateSha256 as normalCandidateSha256,d.businessContentSha256 as businessContentSha256 from SourceDocument d where d.id=:id")
+    Optional<ScopeMetadata> findScopeMetadataById(@Param("id") Long id);
+
+    default List<SourceDocument> findScopeSourcesByProjectId(String projectId) {
+        List<SourceDocument> result=new ArrayList<>();
+        for(ScopeMetadata m:findScopeMetadataByProjectId(projectId)) {
+            result.add(scopeSnapshot(m));
+        }
+        return result;
+    }
+    static SourceDocument scopeSnapshot(ScopeMetadata m){
+        SourceDocument d=new SourceDocument();d.setId(m.getId());d.setProjectId(m.getProjectId());d.setCategory(m.getCategory());
+        d.setFileKey(m.getFileKey());d.setFileName(m.getFileName());d.setReviewRole(m.getReviewRole());d.setDocumentScope(m.getDocumentScope());
+        d.setParseStatus(m.getParseStatus());d.setOerIdentityJson(m.getOerIdentityJson());d.setSourceSha256(m.getSourceSha256());d.setStoragePath(m.getStoragePath());copyContentStamp(m,d);return d;
+    }
+
     /** Complete business inputs; the retained native archive is not consumed by these readers. */
-    interface BusinessSourceMetadata extends FileDisplayMetadata {
+    interface BusinessSourceMetadata extends SourceListMetadata,ScopeMetadata {
         String getNormalCandidateJson();
         String getStoragePath();
         String getStructuredContentJson();
@@ -166,23 +211,60 @@ public interface SourceDocumentRepository extends JpaRepository<SourceDocument, 
             + "d.pageCount as pageCount, d.ocrUsed as ocrUsed, d.textContent as textContent, "
             + "d.parseCoverageJson as parseCoverageJson, d.storagePath as storagePath, "
             + "d.structuredContentJson as structuredContentJson, d.normalCandidateJson as normalCandidateJson, d.contentType as contentType, "
-            + "d.sizeBytes as sizeBytes, d.createdAt as createdAt from SourceDocument d "
+            + "d.sizeBytes as sizeBytes,d.createdAt as createdAt,d.textContentSha256 as textContentSha256,"
+            + "d.structuredContentSha256 as structuredContentSha256,d.parseCoverageSha256 as parseCoverageSha256,"
+            + "d.normalCandidateSha256 as normalCandidateSha256,d.businessContentSha256 as businessContentSha256 from SourceDocument d "
             + "where d.projectId = :projectId order by d.id asc")
     List<BusinessSourceMetadata> findBusinessSourceMetadataByProjectId(@Param("projectId") String projectId);
+
+    @Query("select d.id as id,d.projectId as projectId,d.category as category,d.fileKey as fileKey,d.fileName as fileName,"
+            + "d.reviewRole as reviewRole,d.documentScope as documentScope,d.parseStatus as parseStatus,d.parseMessage as parseMessage,"
+            + "d.oerIdentityJson as oerIdentityJson,d.sourceSha256 as sourceSha256,d.pageCount as pageCount,d.ocrUsed as ocrUsed,"
+            + "d.textContent as textContent,d.parseCoverageJson as parseCoverageJson,d.storagePath as storagePath,"
+            + "d.structuredContentJson as structuredContentJson,d.normalCandidateJson as normalCandidateJson,d.contentType as contentType,"
+            + "d.sizeBytes as sizeBytes,d.createdAt as createdAt,d.textContentSha256 as textContentSha256,"
+            + "d.structuredContentSha256 as structuredContentSha256,d.parseCoverageSha256 as parseCoverageSha256,"
+            + "d.normalCandidateSha256 as normalCandidateSha256,d.businessContentSha256 as businessContentSha256 "
+            + "from SourceDocument d where d.projectId=:projectId and d.id in :ids order by d.id")
+    List<BusinessSourceMetadata> findBusinessSourceMetadataByProjectIdAndIds(@Param("projectId") String projectId,@Param("ids") List<Long> ids);
+
+    /** Current revision and scope selection happen before any complete payload is requested. */
+    default List<SourceDocument> findSelectedBusinessSourcesByProjectId(String projectId,String scope,String module) {
+        List<SourceDocument> selected=com.consense.service.sources.ProjectDocumentScope.selected(projectId,findScopeSourcesByProjectId(projectId),scope,module);
+        if(selected.isEmpty())return Collections.emptyList();
+        List<Long> ids=new ArrayList<>();for(SourceDocument d:selected)ids.add(d.getId());
+        Map<Long,SourceDocument> loaded=new LinkedHashMap<>();
+        for(BusinessSourceMetadata m:findBusinessSourceMetadataByProjectIdAndIds(projectId,ids)) {
+            SourceDocument d=businessSourceSnapshot(m);
+            if(loaded.put(d.getId(),d)!=null)throw new IllegalStateException("Duplicate selected business source");
+        }
+        if(loaded.size()!=selected.size())throw new IllegalStateException("Selected business source disappeared during loading");
+        List<SourceDocument> result=new ArrayList<>();
+        for(SourceDocument before:selected) {
+            SourceDocument after=loaded.get(before.getId());
+            if(after==null||!com.consense.service.sources.ProjectDocumentScope.sameScopeRevision(before,after))
+                throw new IllegalStateException("Selected business source identity changed during loading");
+            result.add(after);
+        }
+        return result;
+    }
 
     /** Detached, exact complete business snapshots. Never save these archive-free read inputs. */
     default List<SourceDocument> findBusinessSourcesByProjectId(String projectId) {
         List<SourceDocument> result=new ArrayList<>();
         for(BusinessSourceMetadata metadata:findBusinessSourceMetadataByProjectId(projectId)) {
-            SourceDocument d=new SourceDocument();d.setId(metadata.getId());d.setProjectId(metadata.getProjectId());d.setCategory(metadata.getCategory());
-            d.setFileKey(metadata.getFileKey());d.setFileName(metadata.getFileName());d.setReviewRole(metadata.getReviewRole());d.setDocumentScope(metadata.getDocumentScope());
-            d.setParseStatus(metadata.getParseStatus());d.setParseMessage(metadata.getParseMessage());d.setOerIdentityJson(metadata.getOerIdentityJson());d.setSourceSha256(metadata.getSourceSha256());
-            d.setPageCount(metadata.getPageCount());d.setOcrUsed(metadata.getOcrUsed());d.setTextContent(metadata.getTextContent());d.setParseCoverageJson(metadata.getParseCoverageJson());
-            d.setStoragePath(metadata.getStoragePath());d.setStructuredContentJson(metadata.getStructuredContentJson());d.setContentType(metadata.getContentType());
-            d.setNormalCandidateJson(metadata.getNormalCandidateJson());
-            d.setSizeBytes(metadata.getSizeBytes());d.setCreatedAt(metadata.getCreatedAt());result.add(d);
+            result.add(businessSourceSnapshot(metadata));
         }
         return result;
+    }
+    static SourceDocument businessSourceSnapshot(BusinessSourceMetadata metadata) {
+        SourceDocument d=sourceListSnapshot(metadata);d.setStoragePath(metadata.getStoragePath());d.setContentType(metadata.getContentType());
+        d.setNormalCandidateJson(metadata.getNormalCandidateJson());d.setSizeBytes(metadata.getSizeBytes());d.setCreatedAt(metadata.getCreatedAt());copyContentStamp(metadata,d);
+        com.consense.service.sources.SourceContentDigests.verifyLoaded(d);return d;
+    }
+    static void copyContentStamp(ScopeMetadata metadata,SourceDocument d){
+        d.setTextContentSha256(metadata.getTextContentSha256());d.setStructuredContentSha256(metadata.getStructuredContentSha256());
+        d.setParseCoverageSha256(metadata.getParseCoverageSha256());d.setNormalCandidateSha256(metadata.getNormalCandidateSha256());d.setBusinessContentSha256(metadata.getBusinessContentSha256());
     }
 
     /** Exact fresh verification inputs; complete text/structure hashes remain independent of native archives. */

@@ -100,6 +100,50 @@ class OerCanonicalRetrievalClientTest {
         OerCanonicalRetrievalClient.IndexState state=client.indexStatus(KEY,"vetting",Collections.singletonList(binding));assertTrue(state.ready,state.reason);
     }
 
+    private ObjectNode semanticFixture(Wire wire,String operation){
+        ObjectNode result=sourceReadFixture(wire,"ids");result.put("view","semantic_units");result.put("operation",operation);result.put("semanticProjectionVersion",OerCanonicalRetrievalClient.SEMANTIC_READ);
+        wire.binding.setScopePolicySha256(wire.health.path("oer").path("scopePolicy").path("manifestSha256").asText());
+        ObjectNode capability=(ObjectNode)wire.health.path("oer").path("sourceRead");capability.put("semanticProjectionVersion",OerCanonicalRetrievalClient.SEMANTIC_READ);capability.putArray("views").add("canonical_units").add("semantic_units");capability.putArray("operations").add("prepare").add("catalog").add("ids").add("scan");
+        ((ObjectNode)result.path("sources").get(0)).put("javaParsedSourceHash",wire.binding.getJavaParsedSourceHash());result.putArray("readManifestSha256").add(VettingCorpus.hash("AUTHORED semantic manifest"));result.put("readManifestToken",VettingCorpus.hash("AUTHORED HMAC TEST ONLY"));
+        ArrayNode origins=(ArrayNode)result.path("origins");for(int i=0;i<origins.size();i++)origins.set(i,semanticMember(wire,origins.get(i)));
+        for(JsonNode unit:result.path("units"))semanticMembers(wire,(ObjectNode)unit);
+        ObjectNode scope=(ObjectNode)result.path("scopeIdentity");scope.put("view","semantic_units");scope.put("semanticProjectionVersion",OerCanonicalRetrievalClient.SEMANTIC_READ);scope.set("sources",result.path("sources").deepCopy());scope.set("readManifestSha256",result.path("readManifestSha256").deepCopy());sealReadScope(result);
+        ((ObjectNode)result.path("coverage")).put("totalOrigins",wire.snapshot.path("chunks").size());
+        if("prepare".equals(operation)||"catalog".equals(operation)){origins.removeAll();((ArrayNode)result.path("units")).removeAll();((ObjectNode)result.path("coverage")).put("status","prepare".equals(operation)?"prepared":"catalog").put("returnedOrigins",0).putArray("returnedOriginIds");}
+        return result;
+    }
+    private static ObjectNode semanticMember(Wire wire,JsonNode parent){
+        ObjectNode result=parent.deepCopy();result.put("semanticProjectionVersion",OerCanonicalRetrievalClient.SEMANTIC_READ);result.put("text",parent.path("content").asText());result.remove("content");
+        result.putObject("evidenceRef").put("projectionSha256",wire.binding.getProjectionSha256()).put("canonicalChunkId",parent.path("id").asText()).put("originalSourceSha256",wire.binding.getOriginalSourceSha256());return result;
+    }
+    private static void semanticMembers(Wire wire,ObjectNode unit){
+        ArrayNode members=(ArrayNode)unit.path("members");for(int i=0;i<members.size();i++)members.set(i,semanticMember(wire,members.get(i)));
+        for(String field:Arrays.asList("hierarchyContext","attachmentContext"))if(unit.path(field).isObject())semanticMembers(wire,(ObjectNode)unit.path(field));
+    }
+    @Test void preparedSemanticReadsDoNotLoadSnapshotsOrRequireAnIndex()throws Exception{
+        Wire wire=new Wire();ObjectNode prepared=semanticFixture(wire,"prepare"),returned=semanticFixture(wire,"ids");
+        when(wire.backend.sourceRead(anyString(),eq("vetting"),anyInt())).thenAnswer(call->JsonUtils.write("prepare".equals(JsonUtils.parse(call.getArgument(0)).path("operation").asText())?prepared:returned));
+        wire.binding.setSnapshotJson("AUTHORED invalid full snapshot proves this path never decodes one");
+        OerCanonicalRetrievalClient.SemanticSources scope=wire.client.prepareSemanticSources("vetting",Collections.singletonList(wire.binding));
+        ObjectNode demand=JsonUtils.mapper().createObjectNode();demand.put("operation","ids");demand.putArray("originIds").add(returned.path("origins").get(0).path("id").asText());
+        assertEquals(returned,wire.client.readSemanticSources(scope,demand));verify(wire.backend,never()).snapshot(anyString(),anyString());verify(wire.backend,never()).normalSnapshot(anyString(),anyString());
+        verify(wire.http,never()).postJson(anyString(),anyString(),anyLong());ArgumentCaptor<String> bodies=ArgumentCaptor.forClass(String.class);verify(wire.backend,times(2)).sourceRead(bodies.capture(),eq("vetting"),anyInt());
+        assertEquals(prepared.path("readManifestToken"),JsonUtils.parse(bodies.getAllValues().get(1)).path("readManifestToken"));assertFalse(bodies.getAllValues().get(1).contains("snapshotJson"));
+    }
+    @Test void semanticReadsRejectChangedScopeSourcePinsAndOmittedClosureMembers()throws Exception{
+        for(String mutation:Arrays.asList("manifest","source","member","coverage","software")){
+            Wire wire=new Wire();ObjectNode prepared=semanticFixture(wire,"prepare"),returned=semanticFixture(wire,"ids");
+            when(wire.backend.sourceRead(anyString(),eq("vetting"),anyInt())).thenAnswer(call->JsonUtils.write("prepare".equals(JsonUtils.parse(call.getArgument(0)).path("operation").asText())?prepared:returned));
+            OerCanonicalRetrievalClient.SemanticSources scope=wire.client.prepareSemanticSources("vetting",Collections.singletonList(wire.binding));
+            if("manifest".equals(mutation))((ArrayNode)returned.path("readManifestSha256")).set(0,JsonUtils.mapper().getNodeFactory().textNode(VettingCorpus.hash("CHANGED manifest")));
+            if("source".equals(mutation))((ObjectNode)returned.path("origins").get(0).path("evidenceRef")).put("originalSourceSha256",VettingCorpus.hash("CHANGED source"));
+            if("member".equals(mutation))((ArrayNode)returned.path("units").get(0).path("members")).remove(0);
+            if("coverage".equals(mutation))((ObjectNode)returned.path("coverage")).put("totalOrigins",999);
+            if("software".equals(mutation)){((ObjectNode)returned.path("scopeIdentity")).put("softwareIdentitySha256",VettingCorpus.hash("CHANGED software"));sealReadScope(returned);}
+            ObjectNode demand=JsonUtils.mapper().createObjectNode();demand.put("operation","ids");demand.putArray("originIds").add(returned.path("origins").get(0).path("id").asText());assertThrows(RuntimeException.class,()->wire.client.readSemanticSources(scope,demand),mutation);
+        }
+    }
+
     @Test void independentConcurrentSourceInvalidationMustWithholdEarlierStatusAndRetrieval() throws Exception {
         independentConcurrentInvalidation(true);
     }

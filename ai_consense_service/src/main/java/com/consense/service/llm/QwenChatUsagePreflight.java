@@ -118,11 +118,18 @@ public final class QwenChatUsagePreflight {
         }
         private ActionContext current(Runnable guard) {
             ActionContext context=action.get();if(context==null)throw new IllegalStateException("qwen_durable_action_required");
-            context.guard.run();if(guard!=null)guard.run();assertCurrent();return context;
+            context.checkCancelled();context.guard.run();if(guard!=null)guard.run();assertCurrent();context.checkCancelled();return context;
         }
         public VettingInputBudget.Observation observe(VettingInputBudget.Input in,String phase,Runnable guard){return observe(in,phase,guard,null);}
         public VettingInputBudget.Observation observe(VettingInputBudget.Input in,String phase,Runnable guard,Consumer<Runnable> cancel) {
             PreparedRequest request=bound(in);ActionContext context=current(guard);
+            if(phase==null||!phase.matches("[a-z][a-z0-9-]{0,47}"))throw new IllegalStateException("qwen_reservation_binding_required");
+            String saved=context.observations.get(in.getSerializedInputSha256());
+            if(saved!=null) {
+                if(cancel!=null)cancel.accept(()->context.cancelled.set(true));
+                current(guard);ledger.open(context.id,identity.getConfigurationSha256(),limits);assertCurrent();context.checkCancelled();
+                return JsonUtils.read(saved,VettingInputBudget.Observation.class);
+            }
             QwenGenerationLedger.Reservation reservation=ledger.reserve(context.id,identity.getConfigurationSha256(),phase,in.getSerializedInputSha256(),false);
             String raw=null;boolean terminal=false;
             try {
@@ -145,7 +152,11 @@ public final class QwenChatUsagePreflight {
                 estimate.setResponseSha256(hash(raw));estimate.setConfiguredContextTokens(CONTEXT);estimate.setSafetyMarginTokens(MARGIN);estimate.setCompletionTokens(completion);estimate.setFinishReason(choice.path("finish_reason").asText());out.setQwenUsageEstimate(estimate);
                 Map<String,Object> receipt=new LinkedHashMap<>();receipt.put("requestSha256",w.getPreflightEntitySha256());receipt.put("responseSha256",hash(raw));receipt.put("promptTokens",input);receipt.put("completionTokens",completion);
                 if(usage.has("total_tokens"))receipt.put("totalTokens",usage.path("total_tokens").longValue());receipt.put("finishReason",estimate.getFinishReason());receipt.put("stableObservationSha256",hash(JsonUtils.write(stableObservation(out))));
-                ledger.complete(reservation,receipt);terminal=true;current(guard);return out;
+                ledger.complete(reservation,receipt);terminal=true;current(guard);
+                // Reuse token accounting only after the paid receipt and exit guards have succeeded.
+                if(Arrays.asList("provider_estimated_fit","over_budget").contains(checkEstimate(in,out,new VettingInputBudget.Result()).getStatus())&&context.observations.size()<limits.preflights)
+                    context.observations.put(in.getSerializedInputSha256(),JsonUtils.write(out));
+                return out;
             }catch(RuntimeException error){if(!terminal){Map<String,Object> failure=new LinkedHashMap<>();failure.put("failureKind",error.getClass().getSimpleName());failure.put("requestSha256",in.getQwenWire().getPreflightEntitySha256());if(raw!=null)failure.put("responseSha256",hash(raw));ledger.unknown(reservation,failure);}throw error;}
         }
         public VettingInputBudget.Result observe(PreparedRequest request,String phase,Runnable guard,Consumer<Runnable> cancel) {
@@ -178,7 +189,13 @@ public final class QwenChatUsagePreflight {
             };
             return new AiGateway(preparedClient).completeStructuredJsonList(system,user,type,schema,rawOut,timings);
         }
-        private final class ActionContext {final String id;final Runnable guard;ActionContext(String id,Runnable guard){this.id=id;this.guard=guard;}}
+        private final class ActionContext {
+            final String id;final Runnable guard;
+            final Map<String,String> observations=new LinkedHashMap<>();
+            final java.util.concurrent.atomic.AtomicBoolean cancelled=new java.util.concurrent.atomic.AtomicBoolean();
+            ActionContext(String id,Runnable guard){this.id=id;this.guard=guard;}
+            void checkCancelled(){if(cancelled.get()||Thread.currentThread().isInterrupted())throw new java.util.concurrent.CancellationException("qwen_action_cancelled");}
+        }
     }
     public static final class PreparedRequest {
         private final VettingInputBudget.Input input;private final String inputJson;private final QwenChatClient.PreparedRequest bytes;

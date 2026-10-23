@@ -64,7 +64,7 @@ class VettingPackageIdentityContextTest {
         SourceDocument tracked=spy(f.source);List<VettingRuleEngine.Source> sources=OerBusinessEvidence.ordinaryRuleSources("project",Collections.singletonList(tracked));
         assertEquals(1,sources.size());assertEquals(originals.size(),sources.get(0).getBlocks().size());
         for(int i=0;i<originals.size();i++)assertEquals(expected.get(i),JsonUtils.write(sources.get(0).getBlocks().get(i).getReadingContext()));
-        verify(tracked,times(1)).getTextContent();verify(tracked,times(3)).getStructuredContentJson();verify(tracked,times(1)).getParseCoverageJson();
+        verify(tracked,never()).getTextContent();verify(tracked,times(2)).getStructuredContentJson();verify(tracked,times(1)).getParseCoverageJson();
         for(DocumentBlock block:sources.get(0).getBlocks())assertEquals("source_bound",context(block).path("status").asText());
         assertEquals("bound_native_outline_exclusion",context(sources.get(0).getBlocks().get(1)).path("sourceScopeExclusion").path("status").asText());
     }
@@ -95,7 +95,7 @@ class VettingPackageIdentityContextTest {
         SourceDocument tracked=spy(wire.document);List<VettingRuleEngine.Source> sources=wire.service.ruleSources(session,Collections.singletonList(tracked));
         assertEquals(1,sources.size());assertEquals(expected.size(),sources.get(0).getBlocks().size());assertTrue(expected.size()>4);
         for(int i=0;i<expected.size();i++)assertEquals(expected.get(i),JsonUtils.write(sources.get(0).getBlocks().get(i)));
-        verify(tracked,times(1)).getTextContent();verify(tracked,times(3)).getStructuredContentJson();verify(tracked,times(1)).getParseCoverageJson();
+        verify(tracked,never()).getTextContent();verify(tracked,times(2)).getStructuredContentJson();verify(tracked,times(1)).getParseCoverageJson();
     }
     @Test void duplicateCapturedSourcesAndLaterSourceDriftCannotReuseCanonicalContext() throws Exception {
         OerBusinessEvidenceTest.Wire wire=canonicalParts();OerBusinessEvidence.Session session=wire.load();SourceDocument tracked=spy(wire.document);

@@ -62,6 +62,14 @@ class AdviceModelIdentityMigrationIntegrationTest {
             migrationSql("V19__advice_internal_checks.sql").populate(connection);
             migrationSql("V20__vetting_checklist_generation_basis.sql").populate(connection);
             migrationSql("V21__normal_source_candidate_graph.sql").populate(connection);
+            migrationSql("V22__vetting_competition_business_details.sql").populate(connection);
+            migrationSql("V23__draft_template_graph.sql").populate(connection);
+            migrationSql("V24__qwen_generation_actions.sql").populate(connection);
+            migrationSql("V25__draft_automation.sql").populate(connection);
+            // Keep old fixture rows unresolved while providing the current ORM's nullable derived fields.
+            for(String column:new String[]{"text_content_sha256","structured_content_sha256","parse_coverage_sha256","normal_candidate_sha256","business_content_sha256"})
+                sql.execute("ALTER TABLE source_document ADD COLUMN "+column+" VARCHAR(64) NULL");
+            sql.execute("ALTER TABLE canonical_source_binding ADD COLUMN snapshot_content_sha256 VARCHAR(64) NULL");
         } catch(Exception error) {throw new IllegalStateException("Cannot seed pre-identity fixture",error);}
         r.add("spring.datasource.url",()->URL);
         r.add("consense.storage-root",()->java.nio.file.Paths.get("target","advice-migration-uploads").toAbsolutePath().toString());

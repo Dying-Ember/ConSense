@@ -14,6 +14,7 @@ OBSERVED_POLICY = 'unique-source-structural-unit-seeds-v1'
 POLICY = 'unique-source-structural-unit-seeds-typed-parent-shared-note-context-v4'
 HIERARCHY_POLICY = 'same-source-declared-typed-parent-descendant-context-v1'
 ATTACHMENT_POLICY = 'same-source-reviewed-direct-shared-note-star-context-v2'
+SEMANTIC_VERSION = 'source-semantic-units-v1'
 SCOPE_FIELDS = ('documentId', 'sourceHash', 'role', 'metadataVersion',
                 'segmentationVersion', 'nativeTableMetadataVersion',
                 'sourceQualityMetadataVersion', 'sourceQualityHash')
@@ -31,6 +32,83 @@ _NATIVE_ROOT_HASHES = ('originalSourceSha256', 'sourceSha256', 'projectionRevisi
                        'sourceRevisionSha256', 'scopeSha256')
 _NATIVE_ROOT_FIELDS = ('producerKind', 'storageShape', 'module', *_NATIVE_ROOT_HASHES,
                        'sourceEditionId', 'slUnitScopeManifestSha256')
+
+
+# These are evidence mechanics, not the semantic text/table/condition state.
+# Unknown fields inside semantic containers remain visible: a new exception or
+# cell-blank declaration must not silently disappear behind an allowlist.
+_LAYOUT_FIELDS = frozenset(('sourcePosition', 'sourceAnchor', 'bbox', 'boundingBox',
+    'coordinates', 'nodePath', 'xmlPath', 'partName', 'partSha256', 'story',
+    'layoutEvidence', 'rawProperties', 'rawNode', 'rawXml', 'nativeTokens',
+    'nativeTextSpansRef', 'nativeNodeRef', 'nativePropertiesRef', 'nativeTokensRef',
+    'nativeInventoryRef', 'gridColumnsRef', 'rawNodeRef', 'artifactDescriptor',
+    'candidateProvenance', 'rawObservation', 'jsonPointer', 'payloadSha256',
+    'sourceSpans', 'memberPayloadSha256', 'observedRanges', 'tableLocation',
+    'location', 'anchor', 'paragraphProperties', 'nativeDocxSections',
+    'nativeTablesRef', 'nativeTableNodesRef', 'nativeObservationRef', 'nativeCaptureRefs',
+    'sourceReferenceRef', 'rawOcrResponse', 'rawResponse', 'base64', 'tokens',
+    'bboxNormalized', 'bboxPdf', 'glyphIds', 'glyphIdsInReadingOrder'))
+
+
+def semantic_value(value):
+    """Keep semantic declarations literally, excluding native layout/proof trees.
+
+    In particular this does not interpret text, infer a condition, flatten a
+    table, or convert unknown adoption/blank/header state into accepted state.
+    """
+    if isinstance(value, dict):
+        result = {key: semantic_value(child) for key, child in value.items()
+                  if key not in _LAYOUT_FIELDS}
+        # The source parser stores observed list labels in layout evidence.
+        # Lift that semantic declaration before dropping its XML/style proof.
+        layout = value.get('layoutEvidence')
+        if isinstance(layout, dict) and isinstance(layout.get('numbering'), dict):
+            result['numbering'] = semantic_value(layout['numbering'])
+        return result
+    if isinstance(value, list):
+        return [semantic_value(child) for child in value]
+    return copy.deepcopy(value)
+
+
+def semantic_member(parent, projection_sha256):
+    """A compact exact-text member plus immutable evidence address."""
+    fields = ('id', 'unitId', 'producerKind', 'documentId', 'role', 'module',
+        'eligibleModules', 'sourceOrder', 'kind', 'canonicalScope', 'clauseId',
+        'clauseHeading', 'adoptionStatus', 'humanConfirmed', 'sourceQuality',
+        'unknowns', 'qualifiersComplete', 'semanticScopeVerified', 'relations',
+        'tableGroup', 'nativeTableSummary', 'nativeTextChannels',
+        'nativeEditingState', 'nativeLimitations', 'nativeSemanticQuality', 'parts',
+        'sourceHash', 'sourceQualityHash', 'metadataVersion', 'segmentationVersion',
+        'nativeTableMetadataVersion', 'sourceQualityMetadataVersion', 'physicalPages',
+        'sourceQualityAccepted', 'sourceReviewAccepted', 'legalClosure',
+        'sourceBlockComplete', 'originalGeometryStatus', 'reviewStatus', 'visualReturnStatus')
+    result = {field: semantic_value(parent[field]) for field in fields if field in parent}
+    result['text'] = parent['content']
+    result['semanticProjectionVersion'] = SEMANTIC_VERSION
+    result['evidenceRef'] = {'projectionSha256': projection_sha256,
+        'canonicalChunkId': parent['id'],
+        'module': parent.get('module'),
+        'canonicalSourceHash': parent.get('sourceHash'),
+        'projectionRevisionSha256': parent.get('projectionRevisionSha256'),
+        'sourceRevisionSha256': parent.get('sourceRevisionSha256'),
+        'originalSourceSha256': parent.get('originalSourceSha256')}
+    return result
+
+
+def semantic_unit(unit, projection_sha256, *, member_projector=None):
+    """Project the existing resolver result; never introduce a second closure."""
+    def project(row):
+        result = {}
+        for key, value in row.items():
+            if key in ('members',):
+                result[key] = [(member_projector(member) if member_projector is not None
+                    else semantic_member(member, projection_sha256)) for member in value]
+            elif key in ('hierarchyContext', 'attachmentContext'):
+                result[key] = project(value)
+            elif key not in _LAYOUT_FIELDS and key not in ('sourceIdentity', 'headingLocation'):
+                result[key] = semantic_value(value)
+        return result
+    return project(unit)
 
 
 def _source_scope(p, fields):

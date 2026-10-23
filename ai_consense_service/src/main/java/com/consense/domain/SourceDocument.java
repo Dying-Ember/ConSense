@@ -104,6 +104,32 @@ public class SourceDocument {
     @Column(name = "normal_candidate_json")
     private String normalCandidateJson;
 
+    /** Database write triggers own these fingerprints, including direct SQL/CAS writes. Legacy rows remain null. */
+    @Column(name="text_content_sha256",length=64,insertable=false,updatable=false)
+    private String textContentSha256;
+    @Column(name="structured_content_sha256",length=64,insertable=false,updatable=false)
+    private String structuredContentSha256;
+    @Column(name="parse_coverage_sha256",length=64,insertable=false,updatable=false)
+    private String parseCoverageSha256;
+    @Column(name="normal_candidate_sha256",length=64,insertable=false,updatable=false)
+    private String normalCandidateSha256;
+    @Column(name="business_content_sha256",length=64,insertable=false,updatable=false)
+    private String businessContentSha256;
+    @Transient @com.fasterxml.jackson.annotation.JsonIgnore
+    private String verifiedBusinessContentSha256;
+    @Transient @com.fasterxml.jackson.annotation.JsonIgnore
+    private String calculatedSourceHash;
+    @Transient @com.fasterxml.jackson.annotation.JsonIgnore
+    private String calculatedCoverageHash;
+    @Transient @com.fasterxml.jackson.annotation.JsonIgnore
+    private String calculatedNormalCandidateHash;
+
+    public void setTextContent(String value){if(textContent!=value)clearContentMemo();textContent=value;}
+    public void setStructuredContentJson(String value){if(structuredContentJson!=value)clearContentMemo();structuredContentJson=value;}
+    public void setParseCoverageJson(String value){if(parseCoverageJson!=value)clearContentMemo();parseCoverageJson=value;}
+    public void setNormalCandidateJson(String value){if(normalCandidateJson!=value)clearContentMemo();normalCandidateJson=value;}
+    private void clearContentMemo(){verifiedBusinessContentSha256=null;calculatedSourceHash=null;calculatedCoverageHash=null;calculatedNormalCandidateHash=null;}
+
     @Column(name = "created_at", nullable = false)
     private Instant createdAt = Instant.now();
 }

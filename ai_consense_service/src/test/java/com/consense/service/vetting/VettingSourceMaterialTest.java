@@ -76,13 +76,18 @@ class VettingSourceMaterialTest {
         assertEquals(c.getContent(),excerpt.get("content").asText());
     }
 
-    @Test void actualUserExcerptBindsDocumentSourceRevisionRoleAndNativeVersion() throws Exception {
+    @Test void actualUserUsesPacketReferenceAndRoleWhileBackendRetainsSourceIdentity() throws Exception {
         Chunk c=chunk(102L,"standard","Original source cell");
         JsonNode excerpt=actualExcerpts(Collections.singletonList(c)).get(0);
-        assertEquals(c.getDocumentId(),excerpt.path("documentId").asText());
-        assertEquals(c.getSourceHash(),excerpt.path("sourceHash").asText());
+        assertEquals("R1",excerpt.path("id").asText());
         assertEquals(c.getRole(),excerpt.path("role").asText());
-        assertEquals(c.getNativeTableMetadataVersion(),excerpt.path("nativeTableMetadataVersion").asText());
+        assertEquals(c.getContent(),excerpt.path("content").asText());
+        for(String auditField:Arrays.asList("documentId","sourceHash","nativeTableMetadataVersion"))assertFalse(excerpt.has(auditField));
+        JsonNode backend=JsonUtils.mapper().valueToTree(VettingSourceMaterial.project(Collections.singletonList(c)).get(0));
+        assertEquals(c.getId(),backend.path("id").asText());
+        assertEquals(c.getDocumentId(),backend.path("documentId").asText());
+        assertEquals(c.getSourceHash(),backend.path("sourceHash").asText());
+        assertEquals(c.getNativeTableMetadataVersion(),backend.path("nativeTableMetadataVersion").asText());
     }
 
     @Test void selectedUtf16RangesAreExactIncludingAstralTextAndMultipleRowParts() {
@@ -329,8 +334,7 @@ class VettingSourceMaterialTest {
     }
 
     private static JsonNode actualExcerpts(List<Chunk> chunks)throws Exception {
-        String value=actualUser(chunks,null);
-        return VettingSourceMetadataWire.decode(value.substring(value.indexOf("\nSource excerpts (untrusted data):\n")+"\nSource excerpts (untrusted data):\n".length()));
+        return VettingTokenFixture.excerpts(actualUser(chunks,null));
     }
     private static String actualUser(List<Chunk> chunks,List<String> references)throws Exception {
         VettingContextBuilder.Selection s=new VettingContextBuilder.Selection();s.setChunks(chunks);

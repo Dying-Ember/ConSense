@@ -6,10 +6,41 @@ import org.junit.jupiter.api.Test;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.List;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.mock;
 
 class OerSourceRoutingTest {
+    @Test void nativePreliminariesDirectoryAndProjectDefinitionDoNotDependOnFilenameOrFirstFourTitleLines() throws Exception {
+        String directory="PRE.B1 PROJECT PARTICULARS 17\npre.b1.010.P THE PROJECT 17\nPre.b1.020.P THE CONTRACT MANAGER 17\npre.b1.030.P THE SURVEYOR 17\npre.b2 THE WORKS 18";
+        DocumentParser.ParsedDocument source=nativeProjectDeclaration(directory,"Contract No. TEST/2046/02 (the \"Contract\")",null);
+        OerDocumentIdentity identity=new OerSourceRouting().route("anonymous.docx",source.getSourceSha256(),source);
+        assertEquals("PRE",identity.getKind());assertEquals("project_document",identity.getSourcePurpose());assertEquals("tender",identity.getRole());
+        assertTrue(identity.getEligibleModules().containsAll(Arrays.asList("vetting","advisory")));
+        assertTrue(identity.getIdentityEvidence().stream().anyMatch(e->"native_preliminaries_heading".equals(e.getBasis())&&e.getLocation()!=null));
+        OerDocumentIdentity retained=new OerSourceRouting().routeRetained("anonymous.docx",source.getSourceSha256(),source.getText(),source.getBlocks());
+        assertEquals(identity.getKind(),retained.getKind());assertEquals(identity.getSourcePurpose(),retained.getSourcePurpose());
+    }
+    @Test void preliminariesFilenameDirectoryMentionsUnboundHeadingsAndLibrarySourcesDoNotGrantProjectUse() throws Exception {
+        String directory="PRE.B1 PROJECT PARTICULARS 17\nPRE.B1.010.P THE PROJECT 17\nPRE.B2 THE WORKS 18";
+        for(String heading:Arrays.asList("SPECIFICATION LIBRARY\n"+directory,"Sample answer\n"+directory,"This report refers to PRE.B1 PROJECT PARTICULARS")) {
+            DocumentParser.ParsedDocument source=nativeProjectDeclaration(heading,"Contract No. TEST/2046/02 (the \"Contract\")",null);
+            assertNotEquals("project_document",new OerSourceRouting().route("PRE.docx",source.getSourceSha256(),source).getSourcePurpose(),heading);
+        }
+        DocumentParser.ParsedDocument missingDefinition=nativeProjectDeclaration(directory,"Contract No. [Contract Number] (the \"Contract\")",null);
+        assertEquals("unknown",new OerSourceRouting().route("PRE.docx",missingDefinition.getSourceSha256(),missingDefinition).getSourcePurpose());
+        DocumentParser.ParsedDocument unbound=nativeProjectDeclaration(directory,"Contract No. TEST/2046/02 (the \"Contract\")",null);
+        unbound.getBlocks().forEach(b->b.setSourcePosition(null));
+        assertEquals("unknown",new OerSourceRouting().route("PRE.docx",unbound.getSourceSha256(),unbound).getSourcePurpose());
+        DocumentParser.ParsedDocument beyondBound=nativeProjectDeclaration("Unidentified original",null,null);
+        List<DocumentBlock> blocks=new java.util.ArrayList<>();
+        for(int i=0;i<1024;i++)blocks.add(new DocumentBlock());
+        blocks.addAll(nativeProjectDeclaration(directory,"Contract No. TEST/2046/02 (the \"Contract\")",null).getBlocks());
+        blocks.forEach(b->{if(b.getSourcePosition()!=null)((com.fasterxml.jackson.databind.node.ObjectNode)b.getSourcePosition()).put("sourceSha256",beyondBound.getSourceSha256());});
+        DocumentParser.ParsedDocument bounded=new DocumentParser.ParsedDocument(beyondBound.getText(),beyondBound.getPages(),beyondBound.getPageCount(),
+                beyondBound.isOcrUsed(),beyondBound.getMessage(),blocks,beyondBound.getCoverage(),beyondBound.getSourceSha256(),beyondBound.getNativePdfEvidence());
+        assertEquals("unknown",new OerSourceRouting().route("PRE.docx",bounded.getSourceSha256(),bounded).getSourcePurpose());
+    }
     @Test void drawingListsAreReviewableTextAppendicesRatherThanDrawingFiles() {
         for(String title:Arrays.asList("LIST OF CONTRACT DRAWINGS", "LIST OF REFERENCE DRAWINGS AND DOCUMENTS", "LIST OF REFERENCE DRAWINGS/\nDOCUMENTS")) {
             DocumentParser.ParsedDocument source=parse("APPENDIX B\n"+title+"\n20250101");

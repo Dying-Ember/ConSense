@@ -119,7 +119,7 @@ class VettingRepairEmptyWarningTest {
             checkpoint=new VettingCheckpointService(null,repo,tx){@Override public VettingRun owned(String run,String owner){return new VettingRun();}};
         }
         VettingSemanticReview.Result review(VettingBusinessShapeRepairTest.Fixture f,String... outputs){
-            LlmClient provider=mock(LlmClient.class);java.util.concurrent.atomic.AtomicInteger count=new java.util.concurrent.atomic.AtomicInteger();when(provider.chatStructured(anyList(),any())).thenAnswer(c->{int i=count.getAndIncrement();assertTrue(i<outputs.length,"No unexpected extra generation");return outputs[i];});
+            LlmClient provider=mock(LlmClient.class);java.util.concurrent.atomic.AtomicInteger count=new java.util.concurrent.atomic.AtomicInteger();when(provider.chatStructured(anyList(),any())).thenAnswer(c->{int i=count.getAndIncrement();assertTrue(i<outputs.length,"No unexpected extra generation");String user=c.<List<LlmClient.ChatTurn>>getArgument(0).get(1).getContent();assertEquals("R1",VettingTokenFixture.reference(user,f.source));return outputs[i];});
             VettingSemanticReview.Result result=ReflectionTestUtils.invokeMethod(new VettingSemanticPacketHarnessTest(),"review",f.corpus,f.corpus,provider,(VettingInputBudget.Observer)VettingTokenFixture::observe,false,null,(Runnable)()->{},checkpoint.session("authored","owner"));assertEquals(outputs.length,count.get());return result;
         }
         VettingCheckpointService.Saved saved(){return JsonUtils.read(row.get().getResultJson(),VettingCheckpointService.Saved.class);}

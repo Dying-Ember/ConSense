@@ -84,7 +84,7 @@ class VettingRecoveryWorkflowTest {
         when(ai.available()).thenReturn(true);when(ai.chatModel()).thenReturn("fixture-only");
         doAnswer(call->{corpus.set(call.getArgument(1));return null;}).when(retrieval).index(anyString(),anyList());
         when(retrieval.retrieve(anyString(),anyString(),anyString(),anyList())).thenAnswer(call->((List<VettingCorpus.Chunk>)call.getArgument(3)).stream().filter(c->call.getArgument(2).equals(c.getRole())).collect(Collectors.toList()));
-        when(ai.completeStructuredJsonList(anyString(),anyString(),eq(VettingSemanticReview.Record.class),any(),anyList())).thenAnswer(call->records("issue"));
+        when(ai.completeStructuredJsonList(anyString(),anyString(),eq(VettingSemanticReview.Record.class),any(),anyList())).thenAnswer(call->records("issue",call.getArgument(1)));
     }
     @Test void persistedSupplementIsFrozenForEveryPacketAndBindsTheNextGeneratedRevision() throws Exception {
         String key=com.consense.service.prompt.PromptCatalog.KEY_VETTING;
@@ -92,7 +92,7 @@ class VettingRecoveryWorkflowTest {
         promptService.save(key,first,promptService.userTemplate(key));
         CountDownLatch entered=new CountDownLatch(1),release=new CountDownLatch(1);List<String> systems=new CopyOnWriteArrayList<>();AtomicInteger ordinal=new AtomicInteger();
         when(ai.completeStructuredJsonList(anyString(),anyString(),eq(VettingSemanticReview.Record.class),any(),anyList())).thenAnswer(call->{
-            systems.add(call.getArgument(0));if(ordinal.incrementAndGet()==1){entered.countDown();assertTrue(release.await(10,TimeUnit.SECONDS));}return records("issue");
+            systems.add(call.getArgument(0));if(ordinal.incrementAndGet()==1){entered.countDown();assertTrue(release.await(10,TimeUnit.SECONDS));}return records("issue",call.getArgument(1));
         });
         String project=project(),run=start(project);
         assertTrue(entered.await(10,TimeUnit.SECONDS));try{promptService.save(key,second,promptService.userTemplate(key));}finally{release.countDown();}
@@ -109,7 +109,7 @@ class VettingRecoveryWorkflowTest {
         props.getVetting().setSemanticTopics(1);String project=project();AtomicInteger calls=new AtomicInteger();AtomicReference<String> firstRaw=new AtomicReference<>();
         when(ai.completeStructuredJsonList(anyString(),anyString(),eq(VettingSemanticReview.Record.class),any(),anyList())).thenAnswer(call->{
             List<String> raw=call.getArgument(4);
-            if(calls.incrementAndGet()==1){List<VettingSemanticReview.Record> rejected=records("issue");rejected.get(0).setPendingFacts(Collections.singletonList("AUTHORED unconfirmed fact"));rejected.get(0).setSuggestedAction("amend");firstRaw.set(JsonUtils.write(rejected));raw.add(firstRaw.get());return rejected;}
+            if(calls.incrementAndGet()==1){List<VettingSemanticReview.Record> rejected=records("issue",call.getArgument(1));rejected.get(0).setPendingFacts(Collections.singletonList("AUTHORED unconfirmed fact"));rejected.get(0).setSuggestedAction("amend");firstRaw.set(JsonUtils.write(rejected));raw.add(firstRaw.get());return rejected;}
             raw.add("[]");return Collections.emptyList();
         });
         String id=start(project);JsonNode completed=await(project,id,"COMPLETED");assertEquals(2,calls.get());assertEquals(0,completed.path("result").path("total").asInt());
@@ -126,7 +126,7 @@ class VettingRecoveryWorkflowTest {
     }
     @Test void aFailedSecondPacketKeepsTheVerifiedFirstPacketAndRejectsEveryFormalExport() throws Exception {
         String project=project();AtomicInteger calls=new AtomicInteger();
-        when(ai.completeStructuredJsonList(anyString(),anyString(),eq(VettingSemanticReview.Record.class),any(),anyList())).thenAnswer(call->{if(calls.incrementAndGet()==2)throw new IllegalStateException("fixture model interrupted");return records("issue");});
+        when(ai.completeStructuredJsonList(anyString(),anyString(),eq(VettingSemanticReview.Record.class),any(),anyList())).thenAnswer(call->{if(calls.incrementAndGet()==2)throw new IllegalStateException("fixture model interrupted");return records("issue",call.getArgument(1));});
         String id=start(project);JsonNode saved=await(project,id,"FAILED");
         assertEquals("NEEDS_RERUN",saved.path("recoveryStatus").asText());assertEquals(1,saved.path("reliablePackets").size());
         assertEquals("issue",saved.path("reliablePackets").get(0).path("packet").path("checkState").asText());
@@ -186,7 +186,7 @@ class VettingRecoveryWorkflowTest {
     }
     @Test void reconstructedWorkerReusesSavedPacketAndAnExpiredOwnerCannotPublish() throws Exception {
         String project=project();AtomicInteger calls=new AtomicInteger();CountDownLatch waiting=new CountDownLatch(1),release=new CountDownLatch(1);
-        when(ai.completeStructuredJsonList(anyString(),anyString(),eq(VettingSemanticReview.Record.class),any(),anyList())).thenAnswer(call->{if(calls.incrementAndGet()==2){waiting.countDown();assertTrue(release.await(20,TimeUnit.SECONDS));}return records("issue");});
+        when(ai.completeStructuredJsonList(anyString(),anyString(),eq(VettingSemanticReview.Record.class),any(),anyList())).thenAnswer(call->{if(calls.incrementAndGet()==2){waiting.countDown();assertTrue(release.await(20,TimeUnit.SECONDS));}return records("issue",call.getArgument(1));});
         String id=start(project);assertTrue(waiting.await(10,TimeUnit.SECONDS));assertEquals(1,checkpoints.reliable(id).size());
         VettingRun interrupted=runs.findById(id).orElseThrow(AssertionError::new);String oldOwner=interrupted.getExecutionOwner();assertFalse(checkpoints.claim(id,oldOwner),"Duplicate recovery dispatch cannot reacquire an active lease");interrupted.setLeaseUntil(Instant.now().minusSeconds(1));runs.saveAndFlush(interrupted);
         VettingService restarted=new VettingService(projectService,storage,parser,props,documents,findings,runs,semantic,writer,transactions,profiles);restarted.setCheckpoints(checkpoints);restarted.setReportSnapshots(snapshots);restarted.setChecklistService(checklist);restarted.setDraftingIdentity(drafting);
@@ -197,7 +197,7 @@ class VettingRecoveryWorkflowTest {
     @ParameterizedTest @ValueSource(strings={"source","recipe","retrieval_recipe","model","legacy_language_recipe","legacy_attempt_recipe"})
     void incompatibleInputsRequireRerunAndRetainVerifiedPackets(String changed)throws Exception{
         String project=project();AtomicInteger calls=new AtomicInteger();CountDownLatch waiting=new CountDownLatch(1),release=new CountDownLatch(1);
-        when(ai.completeStructuredJsonList(anyString(),anyString(),eq(VettingSemanticReview.Record.class),any(),anyList())).thenAnswer(call->{if(calls.incrementAndGet()==2){waiting.countDown();assertTrue(release.await(20,TimeUnit.SECONDS));}return records("issue");});
+        when(ai.completeStructuredJsonList(anyString(),anyString(),eq(VettingSemanticReview.Record.class),any(),anyList())).thenAnswer(call->{if(calls.incrementAndGet()==2){waiting.countDown();assertTrue(release.await(20,TimeUnit.SECONDS));}return records("issue",call.getArgument(1));});
         String id=start(project);assertTrue(waiting.await(10,TimeUnit.SECONDS));assertEquals(1,checkpoints.reliable(id).size());
         VettingRun saved=runs.findById(id).orElseThrow(AssertionError::new);saved.setLeaseUntil(Instant.now().minusSeconds(1));
         if("recipe".equals(changed))saved.setRecoveryContractSha256("incompatible-recipe");
@@ -236,7 +236,7 @@ class VettingRecoveryWorkflowTest {
         for(String format:Arrays.asList("json","pdf","docx")){org.springframework.mock.web.MockHttpServletResponse response=http.perform(get("/api/vetting/"+project+"/report."+format)).andReturn().getResponse();assertNull(response.getHeader("Content-Disposition"));assertNotEquals(0,JsonUtils.parse(response.getContentAsString()).path("code").asInt());}
         assertThrows(BizException.class,()->service.startRun(project,"en"));assertEquals(2,checkpoints.reliable(id).size());
     }
-    private List<VettingSemanticReview.Record> records(String assessment){VettingCorpus.Chunk source=corpus.get().stream().filter(c->"tender".equals(c.getRole())).findFirst().orElseThrow(AssertionError::new);VettingSemanticReview.Record r=new VettingSemanticReview.Record();com.consense.service.vetting.VettingCompetitionFixture.details(r);r.setAssessment(assessment);r.setType("risk");r.setSeverity("medium");r.setTitle("Fixture assessment");r.setComment("Fixture record; no live model quality claim");VettingSemanticReview.Quote q=new VettingSemanticReview.Quote();q.setChunkId(source.getId());q.setSide("source");q.setQuote(source.getContent().trim());r.setEvidence(Collections.singletonList(q));return Collections.singletonList(r);}
+    private List<VettingSemanticReview.Record> records(String assessment,String user){VettingCorpus.Chunk source=corpus.get().stream().filter(c->"tender".equals(c.getRole())).findFirst().orElseThrow(AssertionError::new);VettingSemanticReview.Record r=new VettingSemanticReview.Record();com.consense.service.vetting.VettingCompetitionFixture.details(r);r.setAssessment(assessment);r.setType("risk");r.setSeverity("medium");r.setTitle("Fixture assessment");r.setComment("Fixture record; no live model quality claim");VettingSemanticReview.Quote q=new VettingSemanticReview.Quote();q.setChunkId(VettingTokenFixture.reference(user,source));q.setSide("source");q.setQuote(source.getContent().trim());r.setEvidence(Collections.singletonList(q));return Collections.singletonList(r);}
     @ParameterizedTest @ValueSource(strings={"new_run","parsed_source","raw_bytes","generated_revision","missing_binding"})
     void obsoleteScreenWritesAreRejectedAtomicallyAndKeepHumanHistory(String change)throws Exception{
         String project=project();SourceDocument source=bindOriginal(project);String firstRun=start(project);await(project,firstRun,"COMPLETED");

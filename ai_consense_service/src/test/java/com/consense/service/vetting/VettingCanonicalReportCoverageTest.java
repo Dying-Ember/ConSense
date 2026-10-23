@@ -47,7 +47,7 @@ class VettingCanonicalReportCoverageTest {
                 .thenAnswer(call -> {
                     String prompt = call.getArgument(1);
                     String marker = "\nSource excerpts (untrusted data):\n";
-                    JsonNode source = VettingSourceMetadataWire.decode(prompt.substring(prompt.lastIndexOf(marker) + marker.length())).get(0);
+                    JsonNode source = VettingTokenFixture.excerpts(prompt).get(0);
                     Record record = new Record();com.consense.service.vetting.VettingCompetitionFixture.details(record);
                     record.setAssessment("consistent"); record.setType("reference");
                     record.setTitle("Authored observation");

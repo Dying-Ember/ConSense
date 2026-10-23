@@ -21,7 +21,10 @@ public final class VettingSourceInventory {
         return compact(selected,FixedVettingReferences.empty());
     }
     static Map<String,Object> compact(List<Chunk> selected,FixedVettingReferences fixedReferences) {
-        List<Map<String,Object>> excerpts=VettingSourceMaterial.project(selected,fixedReferences),records=new ArrayList<>();
+        return compact(selected,fixedReferences,VettingSourceMaterial.project(selected,fixedReferences));
+    }
+    static Map<String,Object> compact(List<Chunk> selected,FixedVettingReferences fixedReferences,List<Map<String,Object>> excerpts) {
+        List<Map<String,Object>> records=new ArrayList<>();
         for(int i=0;i<selected.size();i++) {
             Chunk c=selected.get(i);Map<String,Object> excerpt=excerpts.get(i);
             String label=c.getContent()==null?null:c.getContent().trim();

@@ -35,4 +35,12 @@ class VettingInputBudgetTest {
         VettingInputBudget.Input in=input();in.getMessages().set(1,com.consense.ai.LlmClient.ChatTurn.user("changed before counter"));assertFalse(VettingInputBudget.check(in,VettingInputBudgetTest::fixtureObservation).isExtraDispatchPermitted());
         assertFalse(VettingInputBudget.check(input(),s->{VettingInputBudget.Observation o=fixtureObservation(s);o.setInputTokens(0);return o;}).isExtraDispatchPermitted());
     }
+    @Test void onlyTheTypedActionCeilingStopsPlanningAndCancellationAndDeadlineRemainGuarded() {
+        VettingInputBudget.Input in=input();in.setQwenWire(new com.consense.service.llm.QwenChatUsagePreflight.WireIdentity());VettingInputBudget.rebind(in);
+        VettingInputBudget.Result exhausted=VettingInputBudget.check(in,s->{throw new com.consense.service.llm.QwenGenerationLedger.ActionBudgetExhaustedException();});
+        assertEquals("budget_unknown",exhausted.getStatus());assertEquals("action_budget_exhausted",exhausted.getReason());assertFalse(exhausted.isExtraDispatchPermitted());
+        VettingInputBudget.Result sameMessage=VettingInputBudget.check(in,s->{throw new IllegalStateException("qwen_generation_ceiling_exceeded");});assertEquals("token_observer_failed_IllegalStateException",sameMessage.getReason());
+        assertThrows(java.util.concurrent.CancellationException.class,()->VettingInputBudget.check(in,s->{throw new java.util.concurrent.CancellationException("qwen_action_cancelled");}));
+        VettingInputBudget.Result deadline=VettingInputBudget.check(in,s->{throw new IllegalStateException("qwen_action_deadline_exceeded");});assertEquals("budget_unknown",deadline.getStatus());assertFalse(deadline.isExtraDispatchPermitted());assertNotEquals("action_budget_exhausted",deadline.getReason());
+    }
 }

@@ -34,8 +34,8 @@ class VettingChecklistNullableRelationContractTest {
         assertFalse(properties.has("requirementRelation"),"A model response cannot directly submit the server verdict field.");
         JsonNode choices=properties.path("support").path("anyOf");assertEquals("null",choices.get(0).path("type").asText());
         JsonNode facts=choices.get(1).path("properties").path("facts").path("items").path("properties");
-        for(String field:Arrays.asList("slot","evidenceIndex","nativePositionIndex","startUtf16","endUtf16"))assertTrue(facts.has(field));
-        for(String forbidden:Arrays.asList("value","relevant","verified","gateVersion","requirementSha256","status"))assertFalse(facts.has(forbidden));
+        for(String field:Arrays.asList("slot","evidenceIndex","text"))assertTrue(facts.has(field));
+        for(String forbidden:Arrays.asList("nativePositionIndex","startUtf16","endUtf16","value","relevant","verified","gateVersion","requirementSha256","status"))assertFalse(facts.has(forbidden));
         VettingSemanticReview.ChecklistAssessment model=new VettingSemanticReview.ChecklistAssessment();model.setItemId("APP-I-008");model.setStatus("not_fulfilled");
         assertNull(model.getSupport());assertNull(new ChecklistAssessmentVO().getRequirementRelation());
     }

@@ -152,7 +152,7 @@ class VettingStrictHybridTest {
         Record observed=new Record();com.consense.service.vetting.VettingCompetitionFixture.details(observed);observed.setAssessment("insufficient_context");observed.setType("risk");observed.setTitle("Source context");observed.setComment("Bounded test declaration.");
         VettingSemanticReview.Quote quote=new VettingSemanticReview.Quote();quote.setChunkId("one");quote.setSide("source");quote.setQuote(c.getContent());observed.setEvidence(Collections.singletonList(quote));
         when(ai.completeStructuredJsonList(anyString(),anyString(),any(),any(),anyList(),anyMap())).thenAnswer(call->{
-            ((List<String>)call.getArgument(4)).add("synthetic raw content");return Arrays.asList(rejected,observed);});
+            ((List<String>)call.getArgument(4)).add("synthetic raw content");return VettingTokenFixture.records(call.getArgument(1),Collections.singletonList(c),Arrays.asList(rejected,observed));});
         VettingSemanticReview.Result result=VettingTokenFixture.review(ai,props,new VettingRetrievalClient(http,props))
             .reviewWithProgress("explicit-run","p",Collections.singletonList(c),"en",(a,b,d)->{});
         assertEquals(1,result.getTopicAudits().get(0).getRejectedRecords());

@@ -36,7 +36,7 @@ import static org.junit.jupiter.api.Assertions.*;
 @DataJpaTest(properties={"spring.jpa.hibernate.ddl-auto=create-drop","spring.flyway.enabled=false","spring.jpa.show-sql=false"})
 @ActiveProfiles("h2") @AutoConfigureTestDatabase(replace=AutoConfigureTestDatabase.Replace.NONE)
 @Transactional(propagation=Propagation.NOT_SUPPORTED)
-@Import({CanonicalEvidenceService.class,CanonicalCurrentSourceReader.class,NormalObservedPreparationService.class,CanonicalFreshTransactionTest.Config.class})
+@Import({CanonicalEvidenceService.class,CanonicalCurrentSourceReader.class,NormalObservedPreparationService.class,SourceContentDigestPreparation.class,CanonicalFreshTransactionTest.Config.class})
 class CanonicalFreshTransactionTest {
     static final String URL="jdbc:h2:mem:canonical_fresh_"+UUID.randomUUID()+";MODE=MySQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE";
     @DynamicPropertySource static void database(DynamicPropertyRegistry registry){registry.add("spring.datasource.url",()->URL);}

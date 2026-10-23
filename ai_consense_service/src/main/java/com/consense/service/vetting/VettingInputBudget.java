@@ -69,6 +69,7 @@ public final class VettingInputBudget {
         String before=JsonUtils.write(input);Input supplied=copy(input);Observation observed;
         try { observed=observer.observe(supplied); }
         catch(Exception failure){
+            if(failure instanceof com.consense.service.llm.QwenGenerationLedger.ActionBudgetExhaustedException){result.setReason("action_budget_exhausted");return result;}
             if(input.getQwenWire()!=null&&(failure instanceof java.util.concurrent.CancellationException
                     ||failure instanceof com.consense.common.BizException&&Arrays.asList(4202,4204).contains(((com.consense.common.BizException)failure).getCode())))throw (RuntimeException)failure;
             if(failure instanceof VettingResponsesTransport.TypedTransportException) {

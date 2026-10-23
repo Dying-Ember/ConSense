@@ -34,6 +34,7 @@ public class CanonicalEvidenceService {
     private final CanonicalCurrentSourceReader sources;
     @Autowired private org.springframework.beans.factory.ObjectProvider<CanonicalEvidenceService> boundaryProxy;
     @Autowired private NormalObservedPreparationService normalPreparation;
+    @Autowired private SourceContentDigestPreparation digestPreparation;
     @javax.persistence.PersistenceContext private javax.persistence.EntityManager entityManager;
 
     @Autowired public CanonicalEvidenceService(CanonicalSourceBindingRepository bindings,CanonicalEvidenceBackend backend,CanonicalCurrentSourceReader sources){
@@ -236,6 +237,82 @@ public class CanonicalEvidenceService {
             result.add(readBinding(projectId,documentId,revisions.get(0).getProjectionSha256(),module));
         }
         return result;
+    }
+
+    /** Pins and validated pure content identities for one run; validity is checked anew at every boundary. */
+    public static final class CompactBindingScope {
+        private final CanonicalEvidenceService owner;
+        private final String project,module;
+        private final List<CanonicalSourceBinding> selected;
+        private final Map<Long,List<List<Object>>> histories;
+        private final Map<Long,SourceDocument> sources;
+        private CompactBindingScope(CanonicalEvidenceService owner,String project,String module,List<CanonicalSourceBinding> selected,Map<Long,List<List<Object>>> histories,Map<Long,SourceDocument> sources){
+            this.owner=owner;this.project=project;this.module=module;this.selected=selected;this.histories=histories;this.sources=sources;
+        }
+        public List<CanonicalSourceBinding> bindings(){List<CanonicalSourceBinding> result=new ArrayList<>();for(CanonicalSourceBinding binding:selected)result.add(copyBinding(binding));return Collections.unmodifiableList(result);}
+        public String identitySha256(){List<Object> pins=new ArrayList<>();for(CanonicalSourceBinding binding:selected)pins.add(bindingState(binding));return VettingCorpus.hash(JsonUtils.write(pins));}
+    }
+    /** Explicit cold preparation changes only previously absent, database-maintained fingerprints. */
+    @Transactional(propagation=Propagation.REQUIRES_NEW,isolation=Isolation.READ_COMMITTED)
+    public void prepareCompactIdentities(VerifiedBindingFrame frame,List<SourceDocument> captured){
+        frame.requireOwner(this,frame.project,frame.module);Map<Long,SourceDocument> sourcesById=new HashMap<>();for(SourceDocument source:captured)sourcesById.put(source.getId(),source);
+        for(BindingView retained:frame.views.values()){
+            SourceDocument source=sourcesById.get(retained.binding.getDocumentId());require(source!=null,HttpStatus.CONFLICT,"CANONICAL_SOURCE_SNAPSHOT_MISSING");
+            digestPreparation.prepareSourceStamp(source,frame.module);
+            Long before=null;org.springframework.data.domain.Pageable one=org.springframework.data.domain.PageRequest.of(0,1);
+            while(true){List<CanonicalSourceBinding> rows=before==null?bindings.findByProjectIdAndDocumentIdOrderByIdDesc(frame.project,source.getId(),one):bindings.findByProjectIdAndDocumentIdAndIdLessThanOrderByIdDesc(frame.project,source.getId(),before,one);
+                require(rows.size()==1,HttpStatus.CONFLICT,"CANONICAL_BINDING_REVISION_ORDER_INVALID");CanonicalSourceBinding row=rows.get(0);if(Objects.equals(row.getId(),retained.binding.getId()))break;
+                require(row.getId()!=null&&(before==null||row.getId()<before)&&row.getId()>retained.binding.getId()
+                        &&latestForModule(Collections.singletonList(row),frame.module).isEmpty(),HttpStatus.CONFLICT,"CANONICAL_COMPACT_BINDING_CHANGED");
+                digestPreparation.prepareHistoricalBindingStamp(row,source,frame.module);before=row.getId();
+            }
+            String digest=digestPreparation.prepareBindingStamp(retained.binding,source,frame.module);
+            // The CAS proved that only this derived field changed; the existing frame still owns all source bytes.
+            retained.binding.setSnapshotContentSha256(digest);
+        }
+        frame.beforeWait();
+    }
+    /** A cold owned frame has already checked the actual snapshots and source graphs. */
+    @Transactional(propagation=Propagation.REQUIRES_NEW,isolation=Isolation.READ_COMMITTED,readOnly=true)
+    public CompactBindingScope compactBindings(VerifiedBindingFrame frame,List<SourceDocument> captured){
+        frame.requireOwner(this,frame.project,frame.module);Map<Long,SourceDocument> byId=new HashMap<>();for(SourceDocument source:captured)byId.put(source.getId(),source);
+        List<CanonicalSourceBinding> selected=new ArrayList<>();Map<Long,List<List<Object>>> histories=new LinkedHashMap<>();Map<Long,SourceDocument> stamps=new LinkedHashMap<>();
+        for(CanonicalSourceBinding original:frame.bindings()){
+            SourceDocument source=byId.get(original.getDocumentId());require(source!=null,HttpStatus.CONFLICT,"CANONICAL_SOURCE_SNAPSHOT_MISSING");
+            SourceDocument stamp=sources.currentStamp(frame.project,original.getDocumentId(),frame.module);sources.validateStampAgainstContent(source,stamp);
+            stamp.setVerifiedBusinessContentSha256(SourceContentDigests.actual(source));stamps.put(original.getDocumentId(),stamp);
+            CanonicalSourceBinding compact=copyBinding(original);compact.setSnapshotJson(null);
+            List<List<Object>> history=compactHistory(frame.project,original.getDocumentId(),original.getId());
+            require(!history.isEmpty()&&history.get(history.size()-1).equals(bindingState(compact)),HttpStatus.CONFLICT,"CANONICAL_COMPACT_BINDING_CHANGED");
+            histories.put(original.getDocumentId(),history);selected.add(compact);
+        }
+        return new CompactBindingScope(this,frame.project,frame.module,selected,histories,stamps);
+    }
+    /** New or changed revisions require a cold rebuild, including unfamiliar foreign normal revisions. */
+    @Transactional(propagation=Propagation.REQUIRES_NEW,isolation=Isolation.READ_COMMITTED,readOnly=true)
+    public void assertCompactCurrent(CompactBindingScope scope){
+        require(scope!=null&&scope.owner==this,HttpStatus.CONFLICT,"CANONICAL_COMPACT_SCOPE_OWNER_MISMATCH");
+        for(CanonicalSourceBinding binding:scope.selected){
+            sources.requireCurrentStamp(scope.sources.get(binding.getDocumentId()),sources.currentStamp(scope.project,binding.getDocumentId(),scope.module));
+            require(scope.histories.get(binding.getDocumentId()).equals(compactHistory(scope.project,binding.getDocumentId(),binding.getId())),HttpStatus.CONFLICT,"CANONICAL_COMPACT_BINDING_CHANGED");
+        }
+    }
+    private List<List<Object>> compactHistory(String project,Long document,Long selectedId){
+        List<List<Object>> result=new ArrayList<>();Long before=null;org.springframework.data.domain.Pageable one=org.springframework.data.domain.PageRequest.of(0,1);
+        while(true){List<CanonicalSourceBindingRepository.CompactMetadata> rows=before==null?bindings.findCompactByDocument(project,document,one):bindings.findCompactByDocumentBefore(project,document,before,one);
+            require(rows.size()==1,HttpStatus.CONFLICT,"CANONICAL_COMPACT_BINDING_UNAVAILABLE");CanonicalSourceBinding value=compactBinding(rows.get(0));
+            require(value.getId()!=null&&(before==null||value.getId()<before)&&value.getSnapshotContentSha256()!=null
+                    &&value.getSnapshotContentSha256().equals(value.getSnapshotBytesSha256()),HttpStatus.CONFLICT,"CANONICAL_STORED_BYTES_CHANGED_OR_REVISION_UNAVAILABLE");
+            result.add(bindingState(value));if(value.getId().equals(selectedId))return result;
+            require(value.getId()>selectedId,HttpStatus.CONFLICT,"CANONICAL_COMPACT_SELECTED_BINDING_MISSING");before=value.getId();
+        }
+    }
+    private static CanonicalSourceBinding compactBinding(CanonicalSourceBindingRepository.CompactMetadata row){
+        CanonicalSourceBinding b=new CanonicalSourceBinding();b.setId(row.getId());b.setProjectId(row.getProjectId());b.setDocumentId(row.getDocumentId());b.setProjectionSha256(row.getProjectionSha256());
+        b.setOriginalSourceSha256(row.getOriginalSourceSha256());b.setJavaParsedSourceHash(row.getJavaParsedSourceHash());b.setRoutingSha256(row.getRoutingSha256());b.setSourceRevisionSha256(row.getSourceRevisionSha256());
+        b.setProjectionRevisionSha256(row.getProjectionRevisionSha256());b.setCanonicalSourceHash(row.getCanonicalSourceHash());b.setScopePolicySha256(row.getScopePolicySha256());b.setAdoptionManifestSha256(row.getAdoptionManifestSha256());
+        b.setReviewReferenceSha256(row.getReviewReferenceSha256());b.setFamilyCompositionSha256(row.getFamilyCompositionSha256());b.setFamilyComponentSetSha256(row.getFamilyComponentSetSha256());b.setSnapshotBytesSha256(row.getSnapshotBytesSha256());
+        b.setSnapshotContentSha256(row.getSnapshotContentSha256());b.setDeclaredModule(row.getDeclaredModule());b.setEligibleModulesJson(row.getEligibleModulesJson());b.setCreatedAt(row.getCreatedAt());return b;
     }
 
     @Transactional(propagation=Propagation.REQUIRES_NEW,isolation=Isolation.READ_COMMITTED,readOnly=true)
@@ -447,7 +524,7 @@ public class CanonicalEvidenceService {
                 binding.getSourceRevisionSha256(),binding.getProjectionRevisionSha256(),binding.getCanonicalSourceHash(),
                 binding.getScopePolicySha256(),binding.getAdoptionManifestSha256(),binding.getReviewReferenceSha256(),
                 binding.getFamilyCompositionSha256(),binding.getFamilyComponentSetSha256(),binding.getSnapshotBytesSha256(),
-                binding.getDeclaredModule(),binding.getEligibleModulesJson(),binding.getSnapshotJson(),binding.getCreatedAt());
+                binding.getDeclaredModule(),binding.getEligibleModulesJson(),binding.getSnapshotJson(),binding.getCreatedAt(),binding.getSnapshotContentSha256());
     }
     /** Proxy calls arrive at the owning service target; do not compare the Spring proxy to its target. */
     public void assertFrameOwner(VerifiedBindingFrame frame,String project,String module){

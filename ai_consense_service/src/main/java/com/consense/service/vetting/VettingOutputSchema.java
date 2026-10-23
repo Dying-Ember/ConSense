@@ -38,9 +38,8 @@ final class VettingOutputSchema {
         ObjectNode fact=facts.putObject("items");fact.put("type","object");fact.put("additionalProperties",false);
         ObjectNode factFields=fact.putObject("properties");factFields.set("slot",choice("selected_specification_clause","sl_guidance_criterion","project_contract_type_or_selection_fact",
                 "pre_work_condition","same_work_required_or_optional_intent","instruction_timing_or_location","clause_number","heading_appendix_reference","running_header_reference"));
-        factFields.set("evidenceIndex",integer(0,3));factFields.set("nativePositionIndex",integer(0,4095));
-        factFields.set("startUtf16",integer(0,2400));factFields.set("endUtf16",integer(1,2400));
-        required(fact,"slot","evidenceIndex","nativePositionIndex","startUtf16","endUtf16");
+        factFields.set("evidenceIndex",integer(0,3));factFields.set("text",text(1,1200));
+        required(fact,"slot","evidenceIndex","text");
         required(relation,"kind","facts");required(check,"itemId","status","reason","support");
         ObjectNode evidence = fields.putObject("evidence");
         evidence.put("type", "array"); evidence.put("minItems", 1); evidence.put("maxItems", 4);

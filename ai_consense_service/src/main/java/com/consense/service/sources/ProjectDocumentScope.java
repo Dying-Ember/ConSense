@@ -76,6 +76,15 @@ public final class ProjectDocumentScope {
     public static boolean parseUsable(SourceDocument document) {
         return Arrays.asList("PARSED","PARTIAL").contains(document.getParseStatus())&&!nvl(document.getTextContent()).trim().isEmpty();
     }
+    /** Bind the eligibility decision to the exact identity loaded, without touching content fields. */
+    public static boolean sameScopeRevision(SourceDocument before,SourceDocument after) {
+        return Objects.equals(before.getId(),after.getId())&&Objects.equals(before.getProjectId(),after.getProjectId())
+                &&Objects.equals(before.getCategory(),after.getCategory())&&Objects.equals(before.getFileName(),after.getFileName())
+                &&Objects.equals(before.getFileKey(),after.getFileKey())&&Objects.equals(before.getReviewRole(),after.getReviewRole())
+                &&Objects.equals(before.getDocumentScope(),after.getDocumentScope())&&Objects.equals(before.getParseStatus(),after.getParseStatus())
+                &&Objects.equals(before.getOerIdentityJson(),after.getOerIdentityJson())&&Objects.equals(before.getSourceSha256(),after.getSourceSha256())
+                &&Objects.equals(before.getStoragePath(),after.getStoragePath());
+    }
     private static String key(SourceDocument d){return nvl(d.getFileKey()).toUpperCase(Locale.ROOT);}
     private static String nvl(String value){return value==null?"":value;}
 }
