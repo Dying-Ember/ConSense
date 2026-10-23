@@ -1,6 +1,6 @@
 # Vetting 语义材料与按需取证修复记录
 
-日期：2026-10-23。状态：本轮候选代码及定向补测已收口，**未部署、未重启后端／OER，未触发新识别或付费模型请求**。广回归既有19项未收口按下文保留，本记录不能代替原件质量、真实 PRE 性能或整包业务验收。
+日期：2026-10-23。状态：**review102已联合部署，并完成只读HTTP及业务保全回验；未触发新识别或付费模型请求。** 部署产品源码为`3b014db5175044e60341e1c99857fc6e553b3941`，包含Vetting修复及其它agent交付的Drafting变量功能。广回归既有19项未收口按下文保留，本记录不能代替原件质量、真实 PRE 性能或整包业务验收。
 
 用户现行要求：修复此前确认的 Vetting 来源筛选、反复读大字段、模型输入混入排版结构、引用接线及进度问题。用户后续明确停止 Drafting 实现并交其他 agent 评估；该模块已有改动保留，本轮后续仅收口 Vetting。
 
@@ -54,4 +54,12 @@
 
 ### 发布与运行边界
 
-本任务与负责Drafting的聊天按用户授权协调串行Git提交和后端切换；各自仅提交拥有文件。Drafting已有及后续改动由其负责，本任务没有继续实现或回滚。Vetting部署需同轮安装写边界摘要能力并更新公共Python读取服务，不能只换Java JAR；线上活动任务尚未清空，当前没有进行这次切换。
+本任务与负责Drafting的聊天按用户授权协调串行Git提交和后端切换；各自仅提交拥有文件。Drafting已有及后续改动由其负责，本任务没有继续实现或回滚。旧审查于22:21:39（上海时间）因完整JSON校验失败终止，保留FAILED／18／20，不重跑；随后全局活动保护确认来源解析、Drafting自动任务、Vetting任务和Qwen正在派发／已保留调用均为0，才进行联合切换。
+
+- **联合包及进程。** `3b014db`离线package成功（未因此重复跑测试），review102 JAR为80,754,900字节，SHA256=`14707adc74e61fc7adeb58f32c8700170de54da0118fe0c0f4945264e7ef18a4`。当前后端PID47460／18086。H2 PID32040、前端PID24568／5177保持原创建身份，用户页面未刷新。
+- **公共读取服务。** 8874新wrapper42288／child43560，8875新wrapper20316／child44812；现有launcher按准确receipt独立更新，四个变更的公共Python模块与部署源码逐SHA相同。原state、SL scope与模型publication pins保持。两health均200／CUDA，具`prepare`、`semantic_units`、`source-semantic-units-v1`和semanticPreparation；`ocrRouteExposed=false`，识别三端口仍无监听。
+- **V26与旧数据。** 已在实际H2安装6个nullable摘要字段、2个BEFORE INSERT／UPDATE触发器；101个来源和27个binding的旧摘要仍全为NULL，未全表backfill。部署前8,435,752,960字节数据库通过H2一致BACKUP保存为394,970,065字节ZIP，CRC完整校验通过；备份保留在忽略目录。
+- **业务保全。** 前后两次只读快照的21个业务表／2,848行摘要完全相同，覆盖现有图谱、候选、采用、文稿、报告、审查检查点、咨询会话及Qwen账本；实际流式核对464,984,773个UTF16文本单位和11,709,171二进制字节。该一次部署审计明确排除来源4个巨型解析字段、原件布局及完整binding snapshot，不能冒称这些大字段做过前后全文重hash。没有重置模型额度或把失败改成成功。
+- **HTTP回验。** 变量目录直连和5177代理均200，响应44,941字节且SHA一致；Vetting轻量任务进度／来源进度、Advisory会话GET均200。旧Vetting仍FAILED／18／20；没有为验证重新识别、调用LLM、采用变量或正式生成。这里只授启动／能力声明／只读接口及业务数据保全通过，不是新语义审查的真实端到端验收。
+
+实际证据在`.local/vetting-hotfix380/joint-build14/`：`deployment-verification.json`、`database-backup-receipt.json`、`digest-schema-after.txt`、`business-before.txt`／`business-after.txt`及`http-readback02/receipt.json`。首次启动8874因旧监听尚未释放被现有保护拒绝，确认旧进程及监听已消失后继续；原失败阶段记录保留。第一轮HTTP脚本误读health的OCR字段层级，也保留了断言失败，改正为根级字段后复验通过。

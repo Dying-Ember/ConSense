@@ -88,7 +88,7 @@ Vetting 上传进度须区分浏览器收到的处理回执、服务端文件解
 
 ### 2026-10-23 Vetting：语义审查与按需取证的实施设计
 
-状态：round378设计经round379结合实际caller再审，round380已接入Vetting候选代码并回归中，尚未部署及业务验收；具体实现、收据与成本边界见[本轮修复记录](../testing/vetting-semantic-demand-hotfix-20261023.md)。以下是实施约束，不是本轮审查通过的证明。不新增一套解析、检索、证据存储或报告体系，不默认增加第二轮LLM，也不为每条候选增加人工放行步骤。
+状态：round378设计经round379结合实际caller再审，round380已接入Vetting并随review102联合部署，启动、只读HTTP及所选业务数据保全回验通过；真实来源性能及语义业务验收仍未完成。具体实现、收据与成本边界见[本轮修复记录](../testing/vetting-semantic-demand-hotfix-20261023.md)。以下是实施约束，不是本轮审查通过的证明。不新增一套解析、检索、证据存储或报告体系，不默认增加第二轮LLM，也不为每条候选增加人工放行步骤。
 
 #### 已查明的问题与数据边界
 
@@ -156,7 +156,7 @@ Vetting 上传进度须区分浏览器收到的处理回执、服务端文件解
 
 | 当前源码 | 需实施的改接 |
 | --- | --- |
-| Vetting候选已改用`loadSemantic → scan`：冷准备沿既有verified frame生成语义manifest与原生上下文，后续session只保留已读语义单元；旧`loadSession`／无session报告核验仍消费完整snapshot | 部署与真实来源性能尚未验；冷准备及旧报告成本继续保留，不能声称三模块都已摆脱整图读取 |
+| review102的Vetting已改用`loadSemantic → scan`：冷准备沿既有verified frame生成语义manifest与原生上下文，后续session只保留已读语义单元；旧`loadSession`／无session报告核验仍消费完整snapshot | 启动与只读接口已验，真实来源性能未验；冷准备及旧报告成本继续保留，不能声称三模块都已摆脱整图读取 |
 | `OerBusinessEvidence.sourceHits` 已改接公共 `/sources/read(ids)`，按最多 256 origins 分批；完整单元、顺序、去重与 unknown 保留 | 不再由该方法执行 Java 闭包算法；当前 session/frame 仍全量，后继继续收拢 |
 | Advisory 的 small-corpus／table／incorporation context 和最终 model material 已由公共 `OerBusinessEvidence` 承担，Advice 不再自行扫描全 corpus 或逐引用查业务 repository | 公共内部的范围选择仍使用现有 session；完整物理 Word 表及条件范围能力保留，不能把本次移动边界说成内部所有读取已 compact |
 | Drafting discovery／extraction 通过 `DraftReviewSources` 的全量 reading，且两处本地字符切块 | 接公共目录、结构遍历与按需项目依据；原件编译／导出路径保留 |
@@ -164,7 +164,7 @@ Vetting 上传进度须区分浏览器收到的处理回执、服务端文件解
 
 既有 958 MB binding 和历史引用必须保留，不能原地改 bytes。迁移采用受前驱校验的新修订与明确读取契约；旧数据迁移未过不得声称所有业务已摆脱整图读取。
 
-`/sources/read` 的协议为 `source-bound-demand-read-v1`。请求只传 module、projection 地址、operation、originIds/cursor、maxItems/maxBytes 和 view。线上旧版仍为`canonical_units`；round380候选增加`prepare`与`semantic_units`，语义投影版本为`source-semantic-units-v1`，服务能力不足明确失败，不静默回退重载。响应目录为紧凑来源身份，`scopeIdentity` 是包含来源修订、policy、软件和来源顺序 hash 的对象；scan 游标由当前 OER 进程 HMAC 签发。Java 核验 scope、实际返回来源、完整成员及 coverage，不在该读取路径重算闭包。模板 observation view 尚未实现，normal Word 条件／指导语／续段仍由既有公共适配补足，不能静默改为普通 chunk。
+`/sources/read` 的协议为 `source-bound-demand-read-v1`。请求只传 module、projection 地址、operation、originIds/cursor、maxItems/maxBytes 和 view。review102所用8874／8875公共服务已同时提供`canonical_units`与`semantic_units`，并增加显式`prepare`，语义投影版本为`source-semantic-units-v1`；服务能力不足明确失败，不静默回退重载。响应目录为紧凑来源身份，`scopeIdentity` 是包含来源修订、policy、软件和来源顺序 hash 的对象；scan 游标由当前 OER 进程 HMAC 签发。Java 核验 scope、实际返回来源、完整成员及 coverage，不在该读取路径重算闭包。模板 observation view 尚未实现，normal Word 条件／指导语／续段仍由既有公共适配补足，不能静默改为普通 chunk。
 
 ## 验收与防回退
 
