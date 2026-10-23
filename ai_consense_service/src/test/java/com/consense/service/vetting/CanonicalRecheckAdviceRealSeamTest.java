@@ -114,6 +114,10 @@ class CanonicalRecheckAdviceRealSeamTest {
                     // Preserve Python float lexemes in the real receipt transport.
                     response=("{\"projection\":"+raw+",\"projectionSha256\":\""+projection.path("projectionSha256").asText()+"\",\"chunks\":"+projection.path("chunks").size()+",\"assets\":0,\"immutable\":true,\"qualityVerifiedByRegistry\":false,\"sourceQualityChangedByRegistry\":false}").getBytes(StandardCharsets.UTF_8);
                 }
+                else if("/sources/read".equals(path)){
+                    JsonNode request=JsonUtils.parse(new String(readAll(exchange.getRequestBody()),StandardCharsets.UTF_8));
+                    response=JsonUtils.write(sourceReadFixture(request)).getBytes(StandardCharsets.UTF_8);
+                }
                 else if(path.startsWith("/canonical/")){
                     snapshotReads.incrementAndGet();runOnce(snapshotMutation);
                     Long id=idForProjection(path.substring("/canonical/".length()));
@@ -449,6 +453,7 @@ class CanonicalRecheckAdviceRealSeamTest {
         oer.put("inputContract",INPUT);oer.put("assetReturnContract","source-and-projection-bound-content-addressed-assets-v1");oer.put("recipe","scope-bound-dual2048-cuda-fp32-no-fixed-cache-v1");
         oer.put("targetModule","advisory");oer.put("sourceQualityVerifiedByHealth",false);oer.put("parserCandidatesAcceptedByRetrieval",false);oer.put("canonicalProjectionEndpoint","/project");oer.set("scopePolicy",scope);
         oer.put("indexStatusContract","read-only-existing-canonical-index-v1");
+        oer.putObject("sourceRead").put("contract",OerCanonicalRetrievalClient.SOURCE_READ).put("endpoint","/sources/read");
         oer.set("normalObserved",JsonUtils.parse(new String(getClass().getResourceAsStream("/canonical/normal-observed/authored-current-v3-capability.json").readAllBytes(),StandardCharsets.UTF_8)).path("oer").path("normalObserved"));
         oer.set("nativeCanonical",NativeCanonicalFixture.capability());oer.set("nativePdfCanonical",NativePdfCanonicalFixture.capability());
         ObjectNode windows=(ObjectNode)h.path("retrieval").path("sourceWindows");windows.set("competitionScope",scope.deepCopy());windows.put("oerInputContract",INPUT);windows.put("oerTargetModule","advisory");
@@ -457,6 +462,21 @@ class CanonicalRecheckAdviceRealSeamTest {
         for(String name:Arrays.asList("normal_observed_projection.py","normal_observed_server.py","unified_source_registry.py"))algorithms.put(name,VettingCorpus.hash("AUTHORED health "+name));
         for(String name:NativeCanonicalContract.ALGORITHMS)algorithms.put(name,VettingCorpus.hash("AUTHORED health "+name));
         algorithms.setAll(NativePdfCanonicalFixture.algorithms(snapshots.get(42L)));oer.put("sourcePageIndexContract","explicit-composite-index-pins-v1");return h;
+    }
+    ObjectNode sourceReadFixture(JsonNode request)throws Exception{
+        String operation=request.path("operation").asText();assertTrue(Arrays.asList("catalog","ids").contains(operation));
+        assertEquals("advisory",request.path("module").asText());assertEquals("canonical_units",request.path("view").asText());
+        Map<String,JsonNode> parents=new LinkedHashMap<>();ArrayNode sources=JsonUtils.mapper().createArrayNode();
+        for(JsonNode address:request.path("projectionSha256")){
+            Long id=idForProjection(address.asText());verifyActualCas(id);JsonNode snapshot=snapshots.get(id),source=snapshot.path("source");
+            ObjectNode row=sources.addObject();row.put("projectionSha256",address.asText());row.put("documentId",String.valueOf(id));row.set("originalSourceSha256",source.path("sourceSha256"));row.set("sourceHash",snapshot.path("sourceHash"));row.set("sourceRevisionSha256",source.path("sourceRevisionSha256"));row.put("chunkCount",snapshot.path("chunks").size());
+            for(JsonNode chunk:snapshot.path("chunks"))parents.put(chunk.path("id").asText(),chunk);
+        }
+        ObjectNode result=JsonUtils.mapper().createObjectNode();result.put("contract",OerCanonicalRetrievalClient.SOURCE_READ);result.put("module","advisory");result.put("operation",operation);result.put("view","canonical_units");result.set("projectionSha256",request.path("projectionSha256").deepCopy());result.put("sourceUnitPolicy",VettingRetrievalSourceUnits.POLICY);result.put("sourceQualityVerified",false);result.set("sources",sources);result.putNull("nextCursor");
+        ObjectNode scope=result.putObject("scopeIdentity");scope.set("sources",sources.deepCopy());scope.put("module","advisory");scope.putObject("policyIdentity").put("manifestSha256",POLICY);scope.put("sourceUnitPolicy",VettingRetrievalSourceUnits.POLICY);scope.put("view","canonical_units");scope.put("softwareIdentitySha256",VettingCorpus.hash(JsonUtils.write(OerCanonicalSourceUnits.sorted(health.path("retrieval").path("sourceWindows").path("algorithms")))));scope.put("originOrderSha256",VettingCorpus.hash(JsonUtils.write(new ArrayList<>(parents.keySet()))));scope.put("scopeSha256",VettingCorpus.hash(JsonUtils.write(OerCanonicalSourceUnits.sorted(scope))));
+        ArrayNode origins=result.putArray("origins"),units=result.putArray("units"),returned=JsonUtils.mapper().createArrayNode();
+        if("ids".equals(operation))for(JsonNode id:request.path("originIds")){JsonNode origin=parents.get(id.asText());assertNotNull(origin);origins.add(origin.deepCopy());units.add(OerCanonicalSourceUnits.resolve(parents,origin));returned.add(id.asText());}
+        ObjectNode coverage=result.putObject("coverage");coverage.put("status","catalog".equals(operation)?"catalog":"complete");coverage.put("totalOrigins",parents.size());coverage.put("returnedOrigins",origins.size());coverage.set("requestedOriginIds",returned.deepCopy());coverage.set("returnedOriginIds",returned);return result;
     }
     String produceNormal(JsonNode request)throws Exception{
         Path directory=Files.createTempDirectory(temporary,"normal-producer-"),input=directory.resolve("request.json"),output=directory.resolve("projection.json"),script=directory.resolve("produce.py");

@@ -139,7 +139,7 @@ public class AdviceService {
         String normalized=ProjectDocumentScope.normalizeScope(scope);
         if(canonical.enabled()) {
             OerBusinessEvidence.Session session=canonicalSession(projectId,normalized);
-            try{canonical.index(session);}catch(RuntimeException rejected){throw sourceFailure(4201,"Canonical advice indexing failed. Verify the current source bindings and advisory retrieval service; no legacy index was used.",rejected,"evidence_backend_unavailable");}
+            try{canonical.rebuildIndex(session);}catch(RuntimeException rejected){throw sourceFailure(4201,"Canonical advice indexing failed. Verify the current source bindings and advisory retrieval service; no legacy index was used.",rejected,"evidence_backend_unavailable");}
             // canonicalStatus checks the fresh selected scope before and after its remote status read.
             return canonicalStatus(projectId,normalized,session);
         }
@@ -306,7 +306,7 @@ public class AdviceService {
         final String sourceSnapshot=conversationSourceIdentity(projectId,scope,fixedReferenceOnly,session);
         List<VectorStore.SearchHit> hits;
         if(fixedReferenceOnly) {
-            hits=fixedReferenceHits(retrievalQuestion);
+            hits=fixedReferenceHits(projectId,retrievalQuestion);
         } else if(session!=null) {
             try {
                 canonical.ensureIndex(session);
@@ -314,7 +314,7 @@ public class AdviceService {
             }catch(RuntimeException rejected){throw sourceFailure(4204,"Canonical advice retrieval failed. Refresh the selected scope and verify current source bindings and advisory retrieval; no legacy evidence was used.",rejected,"evidence_backend_unavailable");}
             boolean hadCanonicalHits=!hits.isEmpty();
             assertCurrentSelection(session,scope);
-            if(fixedBaselineEnabled())hits.addAll(fixedReferenceHits(retrievalQuestion));
+            if(fixedBaselineEnabled())hits.addAll(fixedReferenceHits(projectId,retrievalQuestion));
             try{hits=canonical.advisoryContext(session,hits,hadCanonicalHits,props.getVector().getStuffingLimit());}
             catch(RuntimeException rejected){throw sourceFailure(4204,"Canonical advice context is unavailable or changed. Refresh the selected scope and ask again; no legacy evidence was used.",rejected,"evidence_backend_unavailable");}
         } else hits=withIncorporationContext(projectId,scope,retrieve(projectId,scope,retrievalQuestion));
@@ -941,6 +941,7 @@ public class AdviceService {
             }
         }
         binding.put("fixedBaseline",fixedBaselineEnabled()?fixedBaseline.frozenManifest():null);
+        binding.put("fixedReferenceSelection",fixedBaselineEnabled()?fixedBaseline.projectSelection(projectId):null);
         return VettingCorpus.hash(JsonUtils.write(binding));
     }
     private void assertConversationSources(String projectId,String scope,boolean referenceOnly,OerBusinessEvidence.Session selected,String expected) {
@@ -1481,9 +1482,9 @@ public class AdviceService {
         if("project_contract".equals(value)||"reference_only".equals(value))return value;
         throw new BizException(4202,"Advice basisScope must be project_contract or reference_only.");
     }
-    private List<VectorStore.SearchHit> fixedReferenceHits(String question){
+    private List<VectorStore.SearchHit> fixedReferenceHits(String projectId,String question){
         try {
-            List<VectorStore.SearchHit> hits=fixedBaseline.search("advisory",question,10);
+            List<VectorStore.SearchHit> hits=fixedBaseline.searchForProject(projectId,"advisory",question,10);
             if(hits==null)throw new IllegalStateException("fixed_reference_result_missing");
             for(VectorStore.SearchHit hit:hits)if(!fixedBaselineHit(hit))throw new IllegalStateException("fixed_reference_identity_missing");
             fixedBaseline.assertCurrent(hits);return hits;

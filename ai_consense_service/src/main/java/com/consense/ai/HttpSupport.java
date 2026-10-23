@@ -40,6 +40,16 @@ public class HttpSupport {
         return execute(request, timeoutMs, 0);
     }
 
+    public String getBounded(String url, long timeoutMs, int maxResponseBytes) {
+        if (maxResponseBytes <= 0 || maxResponseBytes == Integer.MAX_VALUE) throw new IllegalArgumentException("Invalid HTTP response byte cap");
+        return execute(new Request.Builder().url(url).get().build(), timeoutMs, 0, maxResponseBytes);
+    }
+
+    public String deleteBounded(String url, long timeoutMs, int maxResponseBytes) {
+        if (maxResponseBytes <= 0 || maxResponseBytes == Integer.MAX_VALUE) throw new IllegalArgumentException("Invalid HTTP response byte cap");
+        return execute(new Request.Builder().url(url).delete().build(), timeoutMs, 0, maxResponseBytes);
+    }
+
     public String get(String url, long timeoutMs, String authHeader) {
         Request.Builder request = new Request.Builder().url(url).get();
         if (authHeader != null) request.header("Authorization", authHeader);

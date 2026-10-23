@@ -95,6 +95,13 @@ def semantic_member(parent, projection_sha256):
     return result
 
 
+def semantic_unit_template(unit):
+    """The closure's declarations and member addresses; text is stored once per origin."""
+    return {key: (semantic_unit_template(value) if key in ('hierarchyContext', 'attachmentContext')
+                  else copy.deepcopy(value)) for key, value in unit.items()
+            if key not in ('members', 'originIds')}
+
+
 def semantic_unit(unit, projection_sha256, *, member_projector=None):
     """Project the existing resolver result; never introduce a second closure."""
     def project(row):

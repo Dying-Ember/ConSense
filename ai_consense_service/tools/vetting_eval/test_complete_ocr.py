@@ -27,6 +27,31 @@ def identity(parser):
 
 
 class CompleteOcrTests(unittest.TestCase):
+    def test_expired_caller_budget_and_cancelled_caller_never_start_a_provider(self):
+        from unittest.mock import Mock
+        for deadline, cancelled in ((-1, None), (100, lambda: True)):
+            with self.subTest(deadline=deadline), tempfile.TemporaryDirectory() as directory:
+                request = Mock(side_effect=AssertionError('Expired/cancelled provider must not dispatch'))
+                with patch('complete_ocr.time.monotonic', return_value=0), \
+                        patch('complete_ocr.owned_native_provider') as lifecycle:
+                    with self.assertRaises(CompleteOcrError):
+                        recognize_complete_page(self.image(), self.config(), ArtifactStore(directory),
+                            request=request, deadline=deadline, cancelled=cancelled)
+                lifecycle.assert_not_called(); request.assert_not_called()
+
+    def test_cancellation_after_first_response_retains_it_and_blocks_second_provider(self):
+        raw = self.image(); calls, fixture = self.transport(raw); cancelled = [False]
+        def request(*args, **kwargs):
+            response = fixture(*args, **kwargs); cancelled[0] = True; return response
+        with tempfile.TemporaryDirectory() as directory:
+            store = ArtifactStore(directory)
+            with self.assertRaises(CompleteOcrError) as failure:
+                recognize_complete_page(raw, self.config(), store, request=request, cancelled=lambda: cancelled[0])
+            receipt = json.loads(store.read_asset(failure.exception.receipt))
+            self.assertEqual(len(calls), 1)
+            self.assertEqual(len(receipt['completedResponses']), 1)
+            self.assertTrue(store.read_asset(receipt['completedResponses'][0]['response']))
+
     def test_active_child_gaps_leave_provider_prefix_and_body_byte_identical(self):
         from test_ocr_layout_coverage import reread_capture_fixture
         with tempfile.TemporaryDirectory() as directory:

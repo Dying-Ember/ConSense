@@ -340,6 +340,12 @@ public final class VettingDtos {
         /** Project navigation/display metadata is audit only, outside the adopted authority identity. */
         @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
         private com.fasterxml.jackson.databind.JsonNode packageIdentityMirrorAudit;
+        /** Exact origin denominator and unreadable-source ledger for dictionary semantic reads. */
+        @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+        private com.fasterxml.jackson.databind.JsonNode semanticSourceRead;
+        public CoverageVO(int totalDocuments,int reviewedDocuments,List<DocumentCoverageVO> documents,List<String> warnings,List<SemanticTopicVO> semanticTopics,String reviewCompleteness,String canonicalCorpusIdentitySha256,com.fasterxml.jackson.databind.JsonNode checklistDependencyLedger,com.fasterxml.jackson.databind.JsonNode packageIdentityReview,com.fasterxml.jackson.databind.JsonNode packageIdentityMirrorAudit) {
+            this(totalDocuments,reviewedDocuments,documents,warnings,semanticTopics,reviewCompleteness,canonicalCorpusIdentitySha256,checklistDependencyLedger,packageIdentityReview,packageIdentityMirrorAudit,null);
+        }
         /** Keep the previous generated full constructor callable. */
         public CoverageVO(int totalDocuments,int reviewedDocuments,List<DocumentCoverageVO> documents,List<String> warnings,List<SemanticTopicVO> semanticTopics,String reviewCompleteness,String canonicalCorpusIdentitySha256,com.fasterxml.jackson.databind.JsonNode checklistDependencyLedger) {
             this(totalDocuments,reviewedDocuments,documents,warnings,semanticTopics,reviewCompleteness,canonicalCorpusIdentitySha256,checklistDependencyLedger,null,null);

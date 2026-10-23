@@ -51,6 +51,8 @@ public class OerBusinessEvidence {
         private Map<String,String> semanticHeadingLocations=Collections.emptyMap();
         private List<VettingRuleEngine.Source> semanticRuleSources;
         private boolean scanned;
+        private final Map<String,JsonNode> semanticGroups=new LinkedHashMap<>();
+        private final List<JsonNode> semanticBlocked=new ArrayList<>();
         private Session(String project,String module,List<Long> ids,List<CanonicalSourceBinding> bindings,Map<String,Chunk> views,Map<String,String> pins){
             this.projectId=project;this.module=module;this.documentIds=Collections.unmodifiableList(new ArrayList<>(ids));
             this.bindingFingerprint=fingerprint(bindings);this.byId=views;
@@ -70,6 +72,7 @@ public class OerBusinessEvidence {
         public List<Chunk> chunks(){return chunks;}
         public int chunkCount(){return chunks.size();}
         public String identitySha256(){return renderFingerprint(bindingFingerprint,sourceRenderPins);}
+        public JsonNode semanticReadCoverage(){ObjectNode ledger=JsonUtils.mapper().createObjectNode();ledger.put("status",semanticBlocked.isEmpty()?"complete":"partial");ledger.put("totalOrigins",semanticSources.totalOrigins());ledger.put("readableOrigins",chunks.size());ledger.set("blockedOrigins",JsonUtils.mapper().valueToTree(semanticBlocked));return ledger;}
     }
     private static final class Corpus extends AbstractList<Chunk> implements VettingRetrievalSourceUnits.AttachedUnits{
         final Session session;private final List<Chunk> views,owned;
@@ -104,16 +107,21 @@ public class OerBusinessEvidence {
     }
     public List<Chunk> scan(Session session){
         require(session!=null&&session.semanticScope!=null,"semantic scan requires its selected source session");current(session);if(session.scanned)return session.chunks;
-        List<Chunk> collected=new ArrayList<>();Set<String> ids=new HashSet<>();JsonNode cursor=null;int processed=0;
+        List<Chunk> collected=new ArrayList<>();Set<String> ids=new HashSet<>();JsonNode cursor=null;int processed=0;Map<String,JsonNode> groups=new LinkedHashMap<>();List<JsonNode> blocked=new ArrayList<>();
         do{ObjectNode demand=JsonUtils.mapper().createObjectNode();demand.put("operation","scan");demand.put("maxItems",64);demand.put("maxBytes",16777216);if(cursor!=null&&!cursor.isNull())demand.set("cursor",cursor);
+            if(session.semanticSources.dictionary())demand.set("knownSemanticGroups",JsonUtils.mapper().valueToTree(groups.keySet().stream().limit(10000).collect(Collectors.toList())));
             evidence.assertCompactCurrent(session.semanticScope);JsonNode result=retrieval.readSemanticSources(session.semanticSources,demand);evidence.assertCompactCurrent(session.semanticScope);
             require(!"unit_too_large".equals(result.path("coverage").path("status").asText()),"a complete semantic source unit exceeds the bounded read budget");
-            for(int i=0;i<result.path("origins").size();i++){Chunk chunk=semanticView(session,result.path("origins").get(i),result.path("units").get(i));require(ids.add(chunk.getId()),"semantic scan repeated an origin");collected.add(chunk);}
-            int next=result.path("coverage").path("processedOrigins").asInt();require(next==processed+result.path("origins").size(),"semantic scan skipped origins");processed=next;cursor=result.path("nextCursor");
+            boolean dictionary=OerCanonicalRetrievalClient.SEMANTIC_DICTIONARY.equals(result.path("semanticReadVersion").asText());
+            if(dictionary){for(JsonNode row:result.path("units")){String group=row.path("groupId").asText();JsonNode prior=groups.putIfAbsent(group,row.path("unit"));require(prior==null||prior.equals(row.path("unit")),"semantic group changed during scan");}
+                for(JsonNode row:result.path("blockedOrigins")){require(ids.add(row.path("id").asText()),"semantic scan repeated blocked origin");blocked.add(row.deepCopy());}}
+            for(int i=0;i<result.path("origins").size();i++){JsonNode origin=result.path("origins").get(i);String group=dictionary?result.path("originUnits").path(origin.path("id").asText()).asText():null;JsonNode unit=dictionary?groups.get(group):result.path("units").get(i);require(unit!=null,"semantic scan group missing");Chunk chunk=semanticView(session,origin,unit);if(dictionary){((ObjectNode)chunk.getCanonicalPayload()).put("semanticUnitRef",group);((ObjectNode)chunk.getCanonicalPayload()).set("semanticUnit",unit);}require(ids.add(chunk.getId()),"semantic scan repeated an origin");collected.add(chunk);}
+            int next=result.path("coverage").path("processedOrigins").asInt();require(next==processed+result.path("origins").size()+(dictionary?result.path("blockedOrigins").size():0),"semantic scan skipped origins");processed=next;cursor=result.path("nextCursor");
         }while(cursor!=null&&!cursor.isNull());
         require(processed==session.semanticSources.totalOrigins(),"semantic scan did not cover its declared source scope");
         Map<String,Chunk> byId=collected.stream().collect(Collectors.toMap(Chunk::getId,c->c,(a,b)->{throw new IllegalStateException("duplicate semantic origin");},LinkedHashMap::new));
         List<VettingRetrievalSourceUnits.Unit> sourceUnits=new ArrayList<>();for(Chunk chunk:collected)sourceUnits.add(semanticSourceUnit(byId,collected,chunk));current(session);
+        session.semanticGroups.putAll(groups);session.semanticBlocked.addAll(blocked);
         for(Chunk chunk:collected){session.byId.put(chunk.getId(),chunk);session.viewPayloads.put(chunk.getId(),JsonUtils.serializedSha256(chunk));session.chunks.owned.add(chunk);}
         session.chunks.sourceUnits.addAll(sourceUnits);session.scanned=true;current(session);return session.chunks;
     }
@@ -237,8 +245,17 @@ public class OerBusinessEvidence {
         try{checkViews(session,stage.bindings);}catch(RuntimeException changed){session.invalidated=true;throw changed;}
     }
     public void index(Session session){
+        index(session,false);
+    }
+    public void rebuildIndex(Session session){
+        index(session,true);
+    }
+    private void index(Session session,boolean rebuild){
         CurrentStage loaded=stage(session);
-        try(CurrentStage stage=loaded){if(stage.frame==null)retrieval.index(session.indexKey,session.module,stage.bindings);
+        try(CurrentStage stage=loaded){if(rebuild){
+                if(stage.frame==null)retrieval.rebuild(session.indexKey,session.module,stage.bindings);
+                else retrieval.rebuild(session.indexKey,session.module,stage.frame);
+            }else if(stage.frame==null)retrieval.index(session.indexKey,session.module,stage.bindings);
             else retrieval.index(session.indexKey,session.module,stage.frame);}
         complete(session,loaded);
     }
@@ -669,7 +686,7 @@ public class OerBusinessEvidence {
         }else selected.add(hierarchy!=null&&hierarchy.isObject()&&completeTransport(hierarchy)?hierarchy:unit);
         Set<String> required=new LinkedHashSet<>();String reason=null;
         for(JsonNode context:selected){if(!completeTransport(context)){reason=context.path("reason").asText("public_source_context_unknown");break;}
-            List<String> ids=VettingRetrievalSourceUnits.textIds(context.path("requiredMemberIds"));for(JsonNode member:context.path("members")){
+            List<String> ids=VettingRetrievalSourceUnits.textIds(context.path("requiredMemberIds"));if(chunk.getCanonicalPayload().has("semanticUnitRef")){require(ids.contains(chunk.getId()),"semantic dictionary closure omitted its origin");for(String id:ids){Chunk member=byId.get(id);if(member!=null)require(Objects.equals(member.getDocumentId(),chunk.getDocumentId())&&Objects.equals(member.getOriginalSourceSha256(),chunk.getOriginalSourceSha256())&&Objects.equals(member.getSourceHash(),chunk.getSourceHash())&&Objects.equals(member.getRole(),chunk.getRole()),"semantic dictionary closure crosses source scope");}if(ids.stream().anyMatch(id->!byId.containsKey(id))){reason="semantic_closure_member_unavailable";break;}}for(JsonNode member:context.path("members")){
                 Chunk canonical=byId.get(member.path("id").asText());require(canonical!=null,"semantic closure member outside scanned scope");ObjectNode original=canonical.getCanonicalPayload().deepCopy();original.remove("semanticUnit");require(original.equals(member),"semantic closure member differs from scanned origin");}
             required.addAll(ids);
         }

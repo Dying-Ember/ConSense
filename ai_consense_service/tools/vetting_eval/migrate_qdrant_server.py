@@ -24,6 +24,19 @@ def require(condition, message):
         raise ValueError(message)
 
 
+def original_sources(frozen):
+    sources=dict(frozen['originalSources']);editions=sources.pop('slSources',None)
+    if editions is not None:
+        require('slParent' not in sources and isinstance(editions,list) and 1<=len(editions)<=100,'Ambiguous SL source catalogue')
+        names=set()
+        for source in editions:
+            name=source.get('editionId')
+            require(isinstance(name,str) and bool(name.strip()) and name.strip().lower() not in ('latest','unknown') and name not in names,'Exact unique SL edition required')
+            names.add(name);sources['sl:'+name]=source
+    require(len({value['sha256']for value in sources.values()})==len(sources),'Duplicate original SHA in frozen source catalogue')
+    return sources
+
+
 def tree(root):
     root = Path(root).resolve()
     # The active owner's OS lock is transient control data and unreadable on Windows.
@@ -88,7 +101,7 @@ def validate_metadata(frozen, meta):
     require(set(grouped) == set(parents), 'Every complete parent requires vector windows')
     for key, rows in grouped.items():
         verify_window_coverage(parents[key], rows, meta['signature']['windowRecipe']['max_tokens'])
-    originals = {d['sha256']: d for d in frozen['originalSources'].values()}
+    originals = {d['sha256']: d for d in original_sources(frozen).values()}
     for parent in parents.values():
         require(parent['originalSourceSha256'] in originals
                 and Path(parent['sourcePath']).resolve() == Path(originals[parent['originalSourceSha256']]['path']).resolve(),
@@ -211,7 +224,7 @@ def migrate(args):
                            'windowId': window['id'], 'queryVectorSha256': vector_sha256(matrix[positions[window['id']]].tolist(), dimension),
                            'results': [{'id': str(p.id), 'score': p.score, 'parentId': p.payload['parentId']} for p in points]})
         receipt['actualStorageQueries'] = write(out/'storage-query-probes.json', probes)
-        assets = {**frozen['originalSources'], **{'logicalTable:'+r['id']: r['artifact'] for r in frozen.get('adoptedLogicalTables', [])}}
+        assets = {**original_sources(frozen), **{'logicalTable:'+r['id']: r['artifact'] for r in frozen.get('adoptedLogicalTables', [])}}
         receipt['originalAndTableReadback'] = [{'kind': kind, 'file': desc(bound(artifact)), 'frozenBytesExact': True}
                                                for kind, artifact in assets.items()]
         target_meta = {**meta, 'collection': args.collection, 'vectorIntegrity': {**actual,

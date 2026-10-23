@@ -15,6 +15,40 @@ from paddle_native_server import NativePaddleRuntime, create_app, load_config
 
 
 class NativePaddleServerTests(unittest.TestCase):
+    def test_owned_raster_work_file_is_released_on_success_capture_and_postprocessing_failure(self):
+        raw, _ = self.body()
+        for failure in (None, 'capture', 'postprocessing'):
+            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as directory:
+                store = ArtifactStore(directory)
+                paths = []
+                class Result:
+                    json = {'res': {'authored': True}}
+                    img = {}
+                    def _to_markdown(self, **kwargs):
+                        if failure == 'postprocessing': raise ValueError('Authored postprocessing failure')
+                        return {'markdown_texts': 'authored', 'markdown_images': {}}
+                class Capture:
+                    def run(self, callback):
+                        values = callback()
+                        if failure == 'capture':
+                            raise NativePaddleCaptureError('Authored capture failure', {'captureStatus': 'failed'}, {})
+                        return values, {'captureStatus': 'complete_native_arrays_captured', 'runtime': {}}, {}
+                def predict(path, **kwargs):
+                    path = Path(path); paths.append(path)
+                    self.assertEqual(path.read_bytes(), raw)
+                    path.write_bytes(b'Authored provider may modify its private input')
+                    return iter([Result()])
+                runtime = NativePaddleRuntime({'maxNewTokens': 8}, store)
+                runtime.capture = Capture()
+                runtime.pipeline = type('Pipeline', (), {'predict_iter': lambda _, path, **kwargs: predict(path, **kwargs)})()
+                if failure:
+                    with self.assertRaises(NativePaddleCaptureError): runtime.recognize(raw)
+                else: runtime.recognize(raw)
+                self.assertEqual(len(paths), 1)
+                self.assertFalse(paths[0].exists())
+                descriptor = store.put_bytes(raw, identity_scope='actual_native_provider_input_raster')
+                self.assertEqual(store.read_asset(descriptor), raw)
+
     def test_every_post_inference_failure_retains_native_manifest_arrays_and_exact_input(self):
         raw, body = self.body()
         stream = io.BytesIO(); np.save(stream, np.array([[2, 3, 7]], dtype=np.int64), allow_pickle=False)

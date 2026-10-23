@@ -57,6 +57,15 @@ export { api, ApiError, setApiErrorReporter, captureLlmSelection, setLlmProfileR
 
 /* ------------------------------------------------------------ 项目 */
 
+export interface FixedSlSource { editionId: string; sha256: string }
+export interface FixedReferenceSelection { manifestSha256: string; slSources: FixedSlSource[] }
+export interface FixedReferenceSelectionStatus { manifestSha256: string; availableSlSources: FixedSlSource[]; selection: FixedReferenceSelection | null }
+export const fixedReferenceApi = {
+  status: () => api.get<{ configured: boolean }>('/oer/fixed-baseline/status', { reportError: false }),
+  selection: (projectId: string) => api.get<FixedReferenceSelectionStatus>(`/oer/fixed-baseline/projects/${encodeURIComponent(projectId)}/selection`, { reportError: false }),
+  save: (projectId: string, selection: FixedReferenceSelection) => api.put<FixedReferenceSelectionStatus>(`/oer/fixed-baseline/projects/${encodeURIComponent(projectId)}/selection`, selection, { reportError: false })
+}
+
 export const projectApi = {
   list: () => api.get<Project[]>('/projects'),
   get: (id: string) => api.get<Project>(`/projects/${id}`),

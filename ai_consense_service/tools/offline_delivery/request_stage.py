@@ -141,6 +141,7 @@ def run_request(prepared, artifacts, workspace, operation, expected_manifest, *,
             require(job_uid, 'created operation Job UID unavailable')
             deadline = time.monotonic() + settings['timeoutSeconds']
             while time.monotonic() < deadline:
+                require(cancellation is None or not cancellation.is_set(), 'GPU operation cancelled while running')
                 job = runner(command + ['get', 'job', name, '-o', 'json'])
                 require(job.get('metadata', {}).get('uid') == job_uid, 'operation Job UID changed')
                 if job.get('status', {}).get('failed'):
@@ -150,6 +151,7 @@ def run_request(prepared, artifacts, workspace, operation, expected_manifest, *,
                 time.sleep(min(.1, max(0, deadline-time.monotonic())))
             else:
                 raise TimeoutError('finite GPU operation deadline elapsed')
+            require(cancellation is None or not cancellation.is_set(), 'GPU operation cancelled before result acceptance')
             receipt = json.loads(receipt_path.read_bytes())
             require(receipt.get('contract') == 'consense-gpu-stage-result-v1' and receipt.get('status') == 'persisted'
                     and receipt.get('manifestSha256') == worker_sha and receipt.get('stage') == operation['stage']

@@ -27,6 +27,14 @@ import static org.mockito.Mockito.*;
 
 /** Actual Python health/selector captures; HTTP and neural scores are explicit fixtures. */
 class VettingDualStructureHealthTest {
+    @Test void portableStructuralSignatureRequiresExplicitV6AndRejectsWindowV5() throws Exception {
+        ObjectNode h=health();h.put("indexSignatureVersion",6);((ObjectNode)h.path("retrieval").path("sourceWindows").path("algorithms")).put("portable_index_signature.py",VettingCorpus.hash("authored portable adapter"));
+        ConsenseProperties p=expected();assertThrows(IllegalStateException.class,()->VettingRetrievalHealth.validate(h,p.getVetting()));
+        p.getVetting().setExpectedRetrievalSignatureVersion(6);assertEquals(6,VettingRetrievalHealth.validate(h,p.getVetting()).signatureVersion);
+        p.getVetting().setExpectedRetrievalSignatureVersion(5);h.put("indexSignatureVersion",5);assertThrows(IllegalStateException.class,()->VettingRetrievalHealth.validate(h,p.getVetting()));
+        p.getVetting().setExpectedRetrievalSignatureVersion(6);h.put("indexSignatureVersion",6);((ObjectNode)h.path("retrieval").path("sourceWindows").path("algorithms")).remove("portable_index_signature.py");
+        assertThrows(IllegalStateException.class,()->VettingRetrievalHealth.validate(h,p.getVetting()));
+    }
     static JsonNode resource(String name) throws Exception {
         try(InputStream in=VettingDualStructureHealthTest.class.getResourceAsStream("/vetting/"+name)) {
             assertNotNull(in);ByteArrayOutputStream out=new ByteArrayOutputStream();byte[] buffer=new byte[8192];
@@ -61,8 +69,11 @@ class VettingDualStructureHealthTest {
         assertTrue(p.getVetting().isRequireHybridRetrieval());assertEquals("http://127.0.0.1:8868",p.getVetting().getRetrievalUrl());
         assertEquals(512,p.getVetting().getExpectedEmbeddingWindowMaxTokens());assertEquals(512,p.getVetting().getExpectedRerankWindowMaxTokens());
         assertEquals(2048,p.getVetting().getExpectedStructuralEmbeddingMaxTokens());assertEquals(2048,p.getVetting().getExpectedStructuralRerankMaxTokens());
-        assertTrue(p.getVetting().isExpectedStructuralRerankStrict());assertEquals(VettingRetrievalHealth.ATTACHMENT_STRUCTURAL_CONTRACT,p.getVetting().getExpectedRetrievalContract());VettingRetrievalHealth.validate(OerAttachmentHealthTest.authoredHealth(),p.getVetting());
-        ConsenseProperties defaults=new ConsenseProperties();assertEquals(3,defaults.getVetting().getExpectedRetrievalSignatureVersion());
+        assertTrue(p.getVetting().isExpectedStructuralRerankStrict());assertEquals(VettingRetrievalHealth.ATTACHMENT_STRUCTURAL_CONTRACT,p.getVetting().getExpectedRetrievalContract());assertEquals(6,p.getVetting().getExpectedRetrievalSignatureVersion());
+        ObjectNode current=OerAttachmentHealthTest.authoredHealth();current.put("indexSignatureVersion",6);((ObjectNode)current.path("retrieval").path("sourceWindows").path("algorithms")).put("portable_index_signature.py",VettingCorpus.hash("authored portable adapter"));VettingRetrievalHealth.validate(current,p.getVetting());
+        environment.getPropertySources().addFirst(new org.springframework.core.env.MapPropertySource("legacy-pin",java.util.Collections.singletonMap("CONSENSE_VETTING_RETRIEVAL_EXPECTED_SIGNATURE_VERSION",4)));ConsenseProperties legacy=new ConsenseProperties();Binder.get(environment).bind("consense",Bindable.ofInstance(legacy));
+        assertEquals(4,legacy.getVetting().getExpectedRetrievalSignatureVersion());VettingRetrievalHealth.validate(OerAttachmentHealthTest.authoredHealth(),legacy.getVetting());
+        ConsenseProperties defaults=new ConsenseProperties();assertEquals(5,defaults.getVetting().getExpectedRetrievalSignatureVersion());
         assertEquals("windows-v1",defaults.getVetting().getExpectedRetrievalGranularity());assertFalse(defaults.getVetting().isRequireHybridRetrieval());
     }
     @Test void structuralModeVersionStrictTypesCapsAndIdentityCannotBeWeakened() throws Exception {

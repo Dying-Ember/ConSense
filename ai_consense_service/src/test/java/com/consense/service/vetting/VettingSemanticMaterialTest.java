@@ -26,8 +26,8 @@ class VettingSemanticMaterialTest {
             source.setTextContent(text[n]);source.setStructuredContentJson(JsonUtils.write(Collections.singletonList(block)));Chunk chunk=VettingCorpus.chunks(Collections.singletonList(source)).get(0);
             chunk.setClauseId(n==1?"SCT1":"NTT"+(n+1));chunk.setClauseHeadingLocation(block.getLocation());chunks.add(chunk);
         }
-        java.lang.reflect.Method full=VettingSemanticReview.class.getDeclaredMethod("reviewScanned",VettingSemanticReview.Result.class,List.class,List.class,String.class,List.class,Runnable.class,VettingReviewProbe.class);full.setAccessible(true);
-        VettingSemanticReview.Result result=(VettingSemanticReview.Result)full.invoke(review,new VettingSemanticReview.Result(),chunks,chunks,"en",null,(Runnable)()->{},VettingReviewProbe.start(properties,null,"fixture"));
+        java.lang.reflect.Method full=VettingSemanticReview.class.getDeclaredMethod("reviewScanned",String.class,VettingSemanticReview.Result.class,List.class,List.class,String.class,List.class,Runnable.class,VettingReviewProbe.class);full.setAccessible(true);
+        VettingSemanticReview.Result result=(VettingSemanticReview.Result)full.invoke(review,"fixture-project",new VettingSemanticReview.Result(),chunks,chunks,"en",null,(Runnable)()->{},VettingReviewProbe.start(properties,null,"fixture"));
         assertEquals(1,result.getActualGatewayCallCount());assertTrue(result.getReviewedChunkIds().containsAll(Arrays.asList(chunks.get(0).getId(),chunks.get(1).getId(),chunks.get(2).getId())));
         com.consense.web.dto.VettingDtos.SemanticTopicVO audit=result.getTopicAudits().get(0);assertEquals("full_scope",audit.getReviewKind());assertEquals("not_completed",audit.getCheckState());
         assertTrue(audit.getPacketAudits().stream().anyMatch(p->p.getSubmittedChunkIds().contains(chunks.get(0).getId())&&p.getSubmittedChunkIds().contains(chunks.get(1).getId())));

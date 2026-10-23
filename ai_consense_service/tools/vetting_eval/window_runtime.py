@@ -9,7 +9,10 @@ import importlib.metadata
 import json
 import math
 import os
+import shutil
+import re
 import time
+import uuid
 from token_windows import WindowRecipe, WindowError, windows, verify_window_coverage, aggregate_max, dense_expand, digest, text_sha, FullInputTokenizerGuard, fail
 from fixed_vector_cache import lookup as fixed_lookup
 from retrieval_source_units import (select_source_units, POLICY as STRUCTURAL_SELECTION_POLICY,
@@ -22,11 +25,12 @@ from preparation_cache import PreparationCache
 from checkpoint_identity import checkpoint_inventory
 from checkpoint_publication import CheckpointPublication
 from index_integrity import inspect_points, verify_reuse, vector_sha256, PROTOCOL as INDEX_INTEGRITY_PROTOCOL
+from portable_index_signature import portable, matches as portable_signature_matches, legacy_candidate, migration_signature_version
 
 CONTRACT = "source-bound-window-points-full-parent-results-v1"
-SIGNATURE_VERSION = 3
+SIGNATURE_VERSION = 5
 _loaded_source_hashes = {name:hashlib.sha256(Path(__file__).with_name(name).read_bytes()).hexdigest()
-                        for name in ('window_runtime.py','token_windows.py','fixed_vector_cache.py','server.py','qdrant_backend.py','workspace_root.py','retrieval_source_units.py','embedding_compatibility.py','structural_retrieval.py','preparation_cache.py','checkpoint_identity.py','checkpoint_publication.py','index_integrity.py','migrated_qdrant_index.py','migrate_qdrant_server.py','fixed_development_baseline_runtime.py','verify_retrieval_offline.py')}
+                        for name in ('window_runtime.py','token_windows.py','fixed_vector_cache.py','server.py','qdrant_backend.py','workspace_root.py','retrieval_source_units.py','embedding_compatibility.py','structural_retrieval.py','preparation_cache.py','checkpoint_identity.py','checkpoint_publication.py','index_integrity.py','migrated_qdrant_index.py','migrate_qdrant_server.py','fixed_development_baseline_runtime.py','verify_retrieval_offline.py','portable_index_signature.py')}
 
 
 def file_identity(path):
@@ -157,17 +161,23 @@ class WindowRuntime:
     def embedding_algorithms(self):
         return verified_embedding_algorithms(Path(__file__).parent, self.algorithms())
 
+    def logical_identity(self,kind):
+        return portable(self.identity(kind))
+
+    def signature_matches(self,stored,chunks):
+        return portable_signature_matches(stored,self.signature(chunks),Path(__file__).parent)
+
     def signature(self,chunks):
         runtime=self.s.model_runtime('embedding')
         return {'signatureVersion':self.signature_version(),'contract':self.contract(),'embedding':self.s.MODELS['embedding'],'runtime':runtime,
                 'structuralSelectionPolicy':self.selection_policy(),
                 'normalized':True,'corpus':self.s.digest(chunks),'windowRecipe':self.recipe('embedding').__dict__,
                 'embeddingPreprocessing':{'strip':True,'lowerCase':False,'version':'sentence-transformers-strip-no-lower-v1'},
-                'tokenizerAndModelFiles':self.identity('embedding'),'algorithms':self.embedding_algorithms(),
+                'tokenizerAndModelFiles':self.logical_identity('embedding'),'algorithms':self.embedding_algorithms(),
                 **({'structuralRecipe':self.structural_recipe.identity(),'sourceOrderBasis':'canonical_request_order'} if self.structural_recipe.enabled else {})}
 
     def signature_version(self):
-        return 4 if self.structural_recipe.enabled else SIGNATURE_VERSION
+        return 6 if self.structural_recipe.enabled else SIGNATURE_VERSION
 
     def retrieval_recipe(self,*,observe_tokenizer_identity=True):
         return {'contract':self.contract(),'denseAggregation':'independent_lane_rrf' if self.structural_recipe.enabled else 'max','rerankAggregation':'observed_structure_context_max_with_same_pool_baseline' if self.structural_recipe.enabled else 'max','embeddingWindows':self.recipe('embedding').__dict__,
@@ -191,7 +201,7 @@ class WindowRuntime:
                 **({'structuralRecipe':self.structural_recipe.identity()} if self.structural_recipe.enabled else {})}
 
     def prepare_windows(self,chunks,kind,query=None):
-        recipe=self.recipe(kind);tokenizer=self.tokenizer(kind);identity=self.identity(kind)
+        recipe=self.recipe(kind);tokenizer=self.tokenizer(kind);identity=self.logical_identity(kind)
         rows=[]
         for c in chunks:rows.extend(windows(c,tokenizer,recipe,identity,query=query,embedding_strip=kind=='embedding'))
         fail(len({w['id']for w in rows})==len(rows),'WINDOW_ID_COLLISION','Window IDs must be globally unique in the project plan')
@@ -202,8 +212,8 @@ class WindowRuntime:
     def guard(self,tokenizer,kind):
         return FullInputTokenizerGuard(tokenizer,self.inference_cap(kind),lambda p:self.emit('inference-full-input-tokenizer',{'kind':kind,**p}))
 
-    def prepared_structure(self,chunks):
-        tokenizer=self.tokenizer('embedding');identity=self.identity('embedding')
+    def prepared_structure(self,chunks,tokenizer_identity=None):
+        tokenizer=self.tokenizer('embedding');identity=self.logical_identity('embedding') if tokenizer_identity is None else tokenizer_identity
         short=self.recipe('embedding');structure=self.structural_recipe
         key=digest({'chunks':chunks,'tokenizerAndModelFiles':identity,'runtime':self.s.model_runtime('embedding'),
                     'shortRecipe':short.__dict__,'structuralRecipe':structure.identity(),'algorithms':self.algorithms(),
@@ -211,11 +221,14 @@ class WindowRuntime:
         return self.prepared_structures.compute(key,lambda:structural_plan(chunks,tokenizer,identity,short,structure))
 
     def validate_metadata(self,metadata):
-        fail(metadata.get('contract')==self.contract() and metadata.get('signature',{}).get('signatureVersion')==self.signature_version(),'OLD_INDEX_CONTRACT','Index contract/mode differs from the explicitly configured recipe')
+        migration=getattr(self.s,'_migrated_index',None)
+        migrated=migration is not None and getattr(migration,'metadata',None) is metadata
+        compatible=migration_signature_version(metadata.get('signature',{}).get('signatureVersion'),self.signature_version()) if migrated else self.signature_matches(metadata.get('signature',{}),metadata['chunks'])
+        fail(metadata.get('contract')==self.contract() and compatible,'OLD_INDEX_CONTRACT','Index contract/mode differs from the explicitly configured recipe')
         rows=metadata['windows'];parents={p['id']:p for p in metadata['chunks']}
         fail(metadata['windowManifestSha256']==digest(rows)and metadata['vectorPoints']==len(rows),'WINDOW_MANIFEST_MISMATCH','Saved window manifest/hash/count differs')
         if self.structural_recipe.enabled:
-            planned=self.prepared_structure(metadata['chunks'])
+            planned=self.prepared_structure(metadata['chunks'],metadata['signature']['tokenizerAndModelFiles'])
             fail(rows==planned['points'] and metadata.get('structureContexts')==planned['contexts'] and
                  metadata.get('structureBindings')==planned['bindings'] and metadata.get('structuralCoverage')==planned['coverage'],
                  'STRUCTURAL_MANIFEST_MISMATCH','Dual points, contexts or unknown coverage differ from canonical source plan')
@@ -228,25 +241,41 @@ class WindowRuntime:
         for id_,ww in grouped.items():verify_window_coverage(parents[id_],ww,self.recipe('embedding').max_tokens)
         return parents,{w['id']:w for w in rows}
 
+    def index_collection(self,key,signed,generation=None):
+        fail(generation is None or isinstance(generation,str) and len(generation)==32
+             and all(c in '0123456789abcdef' for c in generation),
+             'INDEX_GENERATION_INVALID','Index generation must be an exact owned UUID')
+        return 'project_'+self.s.digest(key)[:16]+'_'+self.s.digest(signed)[:16]+('_g'+generation if generation else '')
+
     def index(self,request):
         from qdrant_client import models
         import numpy as np
         s=self.s;key=s.project_key(request.projectId);chunks=[c.model_dump(exclude_none=True)for c in request.chunks]
         if not self.structural_recipe.enabled:chunks.sort(key=lambda c:c['id'])
-        s.validate_corpus(chunks);signed=self.signature(chunks);collection='project_'+s.digest(key)[:16]+'_'+s.digest(signed)[:16]
+        s.validate_corpus(chunks);signed=self.signature(chunks);rebuild=getattr(request,'rebuild',False)
+        fail(type(rebuild) is bool,'INDEX_REBUILD_INVALID','Explicit rebuild must be a boolean')
         with s.LOCK:
             path=s.metadata_path(key)
+            prior=file_identity(path) if path.exists() else None
             if path.exists():
                 existing=json.loads(path.read_text(encoding='utf-8'))
-                if existing.get('signature')==signed and existing.get('contract')==self.contract():
+                reusable=existing.get('contract')==self.contract() and self.signature_matches(existing.get('signature',{}),chunks)
+                if not rebuild and legacy_candidate(existing.get('signature',{}),signed):
+                    fail(reusable,'INDEX_SIGNATURE_ADAPTER_REQUIRED','Frozen legacy index needs its pinned source adapter; no automatic re-embedding was started')
+                if not rebuild and reusable:
+                    signed=existing['signature']
                     s._projects.pop(key,None)
                     self.validate_metadata(existing)
+                    collection=self.index_collection(key,signed,existing.get('generation'))
                     try:verify_reuse(s.database() if chunks else None,existing,key=key,collection=collection,chunks=chunks,signature=signed)
                     except WindowError:raise
                     except Exception as error:
                         raise WindowError('INDEX_REUSE_UNAVAILABLE','Complete persisted index integrity cannot be verified') from error
                     s._projects[key]=existing
                     return {'projectId':key,'indexed':len(chunks),'vectorPoints':existing['vectorPoints'],'signature':s.digest(signed),'cached':True,'contract':self.contract()}
+            s._projects.pop(key,None)
+            generation=uuid.uuid4().hex if rebuild else None
+            collection=self.index_collection(key,signed,generation)
             started=time.perf_counter();structure=None
             if self.structural_recipe.enabled:
                 structure=self.prepared_structure(chunks)
@@ -285,7 +314,16 @@ class WindowRuntime:
                 integrity['persistedPointsSha256']=digest([{'id':key,'vectorSha256':persisted_vector_hashes[key]} for key in sorted(persisted_vector_hashes)])
                 integrity['sealSha256']=digest(integrity)
                 metadata['vectorIntegrity']=integrity
+                if generation:metadata['generation']=generation
                 if structure:metadata.update(structureContexts=structure['contexts'],structureBindings=structure['bindings'],structuralCoverage=structure['coverage'])
+                fail((file_identity(path) if path.exists() else None)==prior,'INDEX_METADATA_CHANGED','Published metadata changed during index construction')
+                if rebuild and prior is not None:
+                    history=path.parent/'index-history'/(path.stem+'-'+generation+'.json')
+                    history.parent.mkdir(parents=True,exist_ok=True)
+                    with path.open('rb') as reader,history.open('xb') as handle:shutil.copyfileobj(reader,handle,1024*1024)
+                    fail(file_identity(history)['sha256']==prior['sha256'],'INDEX_METADATA_CHANGED','Previous metadata changed while preserving rebuild evidence')
+                    metadata['previousMetadataFile']=str(history.relative_to(path.parent))
+                    metadata['previousMetadataSha256']=prior['sha256']
                 path.parent.mkdir(parents=True,exist_ok=True);pending=path.with_suffix('.json.pending');pending.write_text(json.dumps(metadata,ensure_ascii=False),encoding='utf-8');pending.replace(path)
                 s._projects[key]=metadata
                 return {'projectId':key,'indexed':len(chunks),'vectorPoints':len(rows),'fixedCacheHits':cache_hits,'encodedWindows':encoded,'signature':s.digest(signed),'cached':False,'contract':self.contract(),'seconds':time.perf_counter()-started,
@@ -324,22 +362,33 @@ class WindowRuntime:
         key=s.project_key(request.projectId)
         with s.LOCK:
             metadata=s.read_project(key);parents,bound=self.validate_metadata(metadata)
-            scope=[c for c in metadata['chunks']if request.role is None or c['role']==request.role]
+            source_selection=getattr(request,'sourceSha256',None)
+            known_sources={c.get('originalSourceSha256')for c in metadata['chunks']if c.get('originalSourceSha256')}
+            sl_sources={c.get('originalSourceSha256')for c in metadata['chunks']if c.get('fileKey')=='SL' or c.get('sourceQuality',{}).get('family')=='SL'}
+            if source_selection is None and len(sl_sources)>1:raise s.HTTPException(422,'Select exact SL source editions before querying a multi-edition index')
+            if source_selection is not None and (not source_selection or len(set(source_selection))!=len(source_selection)
+                    or any(not isinstance(value,str) or not re.fullmatch('[0-9a-f]{64}',value) for value in source_selection)
+                    or not set(source_selection)<=known_sources):raise s.HTTPException(422,'Selected original source SHA set is invalid or outside this index')
+            scope=[c for c in metadata['chunks']if (request.role is None or c['role']==request.role)
+                   and (source_selection is None or c.get('originalSourceSha256')in source_selection)]
+            source_receipt={'selectedSourceSha256':sorted(source_selection)}if source_selection is not None else {}
             if not scope:
-                hits,units=select_source_units(metadata['chunks'],[],request.limit,
+                hits,units=select_source_units(scope,[],request.limit,
                                               hierarchy_context=self.structural_recipe.enabled)
-                return {'hits':hits,'sourceUnits':units,'mode':self.contract(),'projectId':key,'indexSignature':s.digest(metadata['signature']),'emptyScope':True}
+                return {'hits':hits,'sourceUnits':units,'mode':self.contract(),'projectId':key,'indexSignature':s.digest(metadata['signature']),'emptyScope':True,**source_receipt}
             try:
                 started=time.perf_counter();tokenizer=self.tokenizer('embedding')
                 full_query=len(tokenizer(request.query.strip(),add_special_tokens=True,truncation=False)['input_ids'])
                 fail(full_query<=self.recipe('embedding').max_tokens,'QUERY_TOKEN_BUDGET_EXHAUSTED','Full embedding query exceeds frozen cap',fullTokens=full_query,maxTokens=self.recipe('embedding').max_tokens)
                 vector=s.encode_embeddings([request.query])[0]
-                eligible={id_:w for id_,w in bound.items()if request.role is None or w['role']==request.role}
+                scope_ids={c['id']for c in scope}
+                eligible={id_:w for id_,w in bound.items()if w['parentId']in scope_ids}
                 def dense_lane(granularity=None):
                     lane={id_:w for id_,w in eligible.items()if granularity is None or w.get('granularity')==granularity}
                     conditions=[]
                     if request.role:conditions.append(models.FieldCondition(key='role',match=models.MatchValue(value=request.role)))
                     if granularity:conditions.append(models.FieldCondition(key='granularity',match=models.MatchValue(value=granularity)))
+                    if source_selection is not None:conditions.append(models.FieldCondition(key='parentId',match=models.MatchAny(any=sorted(scope_ids))))
                     filt=models.Filter(must=conditions)if conditions else None
                     fetch_ordinal=0
                     def fetch(limit):
@@ -372,15 +421,15 @@ class WindowRuntime:
                     for rank,c in enumerate(found,1):fused[c['id']]=fused.get(c['id'],0)+1/(s.RRF_CONSTANT+rank);lookup_[c['id']]=c
                 candidate_ids=sorted(fused,key=lambda id_:(-fused[id_],id_))[:request.candidates];candidates=[lookup_[id_]for id_ in candidate_ids]
                 self.emit('parent-rrf-candidates',{'constant':s.RRF_CONSTANT,'allFusedInOrder':[{'id':id_,'score':fused[id_]}for id_ in sorted(fused,key=lambda id_:(-fused[id_],id_))],'submittedParentIds':candidate_ids})
-                ranked=self.rerank(request.query,candidates,metadata['chunks'])if self.structural_recipe.enabled else s.rerank_candidates(request.query,candidates)
+                ranked=self.rerank(request.query,candidates,scope)if self.structural_recipe.enabled else s.rerank_candidates(request.query,candidates)
                 scores=np.asarray(ranked).reshape(-1);order=sorted(range(len(candidates)),key=lambda i:(-float(scores[i]),candidates[i]['id']))
                 raw=[{'id':candidates[i]['id'],'score':float(scores[i]),'payload':candidates[i]}for i in order]
-                hits,units=select_source_units(metadata['chunks'],raw,request.limit,
+                hits,units=select_source_units(scope,raw,request.limit,
                                               hierarchy_context=self.structural_recipe.enabled)
                 self.emit('parent-final-ranking',{'allRerankedInTrueScoreOrder':[{'id':h['id'],'score':h['score']}for h in raw], 'returnedIds':[h['id']for h in hits], 'rawParentTopKIds':units['rawParentTopKIds'],'selectionPolicy':units['policy']})
                 self.emit('source-unit-closure',units)
                 return {'hits':hits,'sourceUnits':units,'mode':self.contract(),'projectId':key,
-                        'indexSignature':s.digest(metadata['signature']),'seconds':time.perf_counter()-started,'denseWindowExpansion':receipt,
+                        'indexSignature':s.digest(metadata['signature']),'seconds':time.perf_counter()-started,'denseWindowExpansion':receipt,**source_receipt,
                         'scoreMeaning':'Observed structure-context relevance, compared with the same-pool short-window baseline; not evidence validity or defect probability'if self.structural_recipe.enabled else 'Max pair-window reranker score, not evidence validity or probability of a contract defect',
                         **({'structuralCoverage':metadata['structuralCoverage'],'rerankPolicy':'same_pool_observed_structure_context'}if self.structural_recipe.enabled else {})}
             except WindowError as e:raise s.HTTPException(422 if e.kind=='QUERY_TOKEN_BUDGET_EXHAUSTED' else 503,{'kind':e.kind,'message':str(e),'metadata':e.metadata})from e

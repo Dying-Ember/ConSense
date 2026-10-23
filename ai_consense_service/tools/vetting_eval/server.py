@@ -147,6 +147,7 @@ class Chunk(BaseModel):
 class IndexRequest(BaseModel):
     projectId: int | str
     chunks: list[Chunk] = Field(max_length=50000)
+    rebuild: bool = Field(default=False, strict=True)
 
 
 class RetrieveRequest(BaseModel):
@@ -155,6 +156,7 @@ class RetrieveRequest(BaseModel):
     role: str | None = None
     limit: int = Field(default=10, ge=1, le=100)
     candidates: int = Field(default=50, ge=1, le=500)
+    sourceSha256: list[str] | None = Field(default=None, min_length=1, max_length=128)
 
 
 def project_key(value):
@@ -337,7 +339,7 @@ def read_project(key):
         if not path.exists():
             raise HTTPException(404, 'Project is not indexed')
         stored = json.loads(path.read_text(encoding='utf-8'))
-    if stored.get('projectId') != key or stored.get('signature') != signature(stored['chunks']):
+    if stored.get('projectId') != key or not window_runtime().signature_matches(stored.get('signature',{}),stored['chunks']):
         raise HTTPException(409, 'Index signature changed; re-index current documents')
     if stored['chunks'] and not database().collection_exists(stored['collection']):
         raise HTTPException(409, 'Index collection is missing; re-index current documents')
@@ -428,9 +430,26 @@ def _observe_complete_cpu_lines(raw, store):
 
 @app.post('/ocr')
 def ocr(file: UploadFile = File(...), purpose: Annotated[str | None, Header(alias='X-Consense-Ocr-Purpose')] = None,
-        source_context: Annotated[str | None, Form(alias='sourceContext')] = None):
+        source_context: Annotated[str | None, Form(alias='sourceContext')] = None,
+        task_id: Annotated[str | None, Header(alias='X-Consense-Ocr-Task-Id')] = None,
+        deadline_ms: Annotated[int | None, Header(alias='X-Consense-Ocr-Deadline-Ms')] = None):
+    from artifact_store import ArtifactStore
+    from ocr_request_lifecycle import OcrRequest, OcrRequestError
+    admitted_at = time.time()
     if purpose not in (None, 'identity', 'parse'):
         raise HTTPException(422, 'Unsupported OCR observation purpose')
+    config, config_sha = None, None
+    complete_config = os.environ.get('CONSENSE_COMPLETE_OCR_CONFIG')
+    if complete_config and purpose != 'identity':
+        config_bytes = Path(complete_config).read_bytes()
+        config_sha = hashlib.sha256(config_bytes).hexdigest()
+        if config_sha != os.environ.get('CONSENSE_COMPLETE_OCR_CONFIG_SHA256'):
+            raise HTTPException(503, 'Complete OCR configuration changed or lacks its exact SHA-256 pin')
+        config = json.loads(config_bytes)
+    maximum = config.get('timeoutSeconds', 600) if config is not None else 600
+    if isinstance(maximum, bool) or not isinstance(maximum, (int, float)) or not 0 < maximum <= 86400:
+        raise HTTPException(503, 'OCR server timeout must be positive finite and bounded')
+    deadline_ms = min(deadline_ms, int((admitted_at + maximum) * 1000)) if deadline_ms is not None else int((admitted_at + maximum) * 1000)
     from PIL import Image, UnidentifiedImageError
     raw = file.file.read(25*1024*1024+1)
     if len(raw) > 25*1024*1024:
@@ -450,39 +469,79 @@ def ocr(file: UploadFile = File(...), purpose: Annotated[str | None, Header(alia
             source_context = validate_source_context(json.loads(source_context), raw, image.width, image.height, input_name)
         except (ValueError, TypeError, KeyError) as error:
             raise HTTPException(422, 'Invalid original source/raster binding: ' + str(error)) from error
+    task = None
     try:
-        with LOCK:
-            complete_config = os.environ.get('CONSENSE_COMPLETE_OCR_CONFIG')
-            if complete_config and purpose != 'identity':
-                from artifact_store import ArtifactStore
+        store = ArtifactStore(STATE / 'ocr-observations')
+        task = OcrRequest(store, task_id, {'inputSha256': hashlib.sha256(raw).hexdigest(),
+            'purpose': purpose or 'parse', 'sourceContext': source_context, 'completeConfigSha256': config_sha},
+            deadline_ms=deadline_ms, max_seconds=maximum)
+        if not task.fresh:
+            return task.existing_result()
+        with task.acquire(LOCK):
+            if config is not None:
                 from complete_ocr import recognize_complete_page, CompleteOcrError
-                config_bytes = Path(complete_config).read_bytes()
-                if hashlib.sha256(config_bytes).hexdigest() != os.environ.get('CONSENSE_COMPLETE_OCR_CONFIG_SHA256'):
-                    raise ValueError('Complete OCR configuration changed or lacks its exact SHA-256 pin')
-                try:
-                    return recognize_complete_page(raw, json.loads(config_bytes), ArtifactStore(STATE / 'ocr-observations'),
-                        source_context=source_context,
-                        line_observer=_observe_complete_cpu_lines if source_context is not None else None)
-                except CompleteOcrError as error:
-                    raise HTTPException(503, {'kind': 'complete_parser_failed', 'message': str(error),
-                                             'receipt': error.receipt}) from error
-            engine = _pinned_cpu_ocr()
-            started = time.perf_counter()
-            result = engine(image)
-            from ocr_response import baseline_observation
-            payload = baseline_observation(result, image, raw)
-            payload['provenance']['observationPurpose'] = purpose or 'parse'
-            payload['provenance']['ocrRecipeSha256'] = _ocr_recipe_sha256
-            payload['provenance']['sourceContext'] = source_context
-            payload['provenance']['sourceBindingStatus'] = 'caller_bound_original_source_unverified_original_bytes' if source_context else 'raster_input_only'
-            payload.update(imageWidth=image.width, imageHeight=image.height,
-                seconds=time.perf_counter()-started, engine='RapidOCR CPU baseline',
-                limitations=['No table-cell or deletion-state interpretation'])
-            return payload
+                payload = recognize_complete_page(raw, config, store,
+                    source_context=source_context, deadline=task.deadline, cancelled=task.cancelled,
+                    line_observer=_observe_complete_cpu_lines if source_context is not None else None)
+            else:
+                task.check()
+                engine = _pinned_cpu_ocr()
+                task.check()
+                started = time.perf_counter()
+                result = engine(image)
+                from ocr_response import baseline_observation
+                payload = baseline_observation(result, image, raw)
+                payload['provenance']['observationPurpose'] = purpose or 'parse'
+                payload['provenance']['ocrRecipeSha256'] = _ocr_recipe_sha256
+                payload['provenance']['sourceContext'] = source_context
+                payload['provenance']['sourceBindingStatus'] = 'caller_bound_original_source_unverified_original_bytes' if source_context else 'raster_input_only'
+                payload.update(imageWidth=image.width, imageHeight=image.height,
+                    seconds=time.perf_counter()-started, engine='RapidOCR CPU baseline',
+                    limitations=['No table-cell or deletion-state interpretation'])
+        payload.setdefault('provenance', {})['requestTaskId'] = task.task_id
+        return task.success(payload)
+    except OcrRequestError as error:
+        if task is not None and task.fresh:
+            task.fail(error)
+        raise HTTPException(error.status_code, {'kind': 'ocr_request_not_completed', 'message': str(error),
+            'task': task.record if task is not None else error.task}) from error
     except HTTPException:
         raise
     except Exception as error:
-        raise HTTPException(503, f'OCR unavailable: {type(error).__name__}: {error}') from error
+        if task is not None and task.fresh:
+            task.fail(error)
+        raise HTTPException(503, {'kind': 'ocr_failed', 'message': f'{type(error).__name__}: {error}',
+            'task': task.record if task is not None else None, 'receipt': getattr(error, 'receipt', None)}) from error
+
+
+@app.get('/ocr/tasks/{task_id}')
+def ocr_task_status(task_id: str):
+    from artifact_store import ArtifactStore
+    from ocr_request_lifecycle import read_request, OcrRequestError
+    try:
+        return read_request(ArtifactStore(STATE / 'ocr-observations'), task_id)
+    except OcrRequestError as error:
+        raise HTTPException(error.status_code, str(error)) from error
+
+
+@app.get('/ocr/tasks/{task_id}/result')
+def ocr_task_result(task_id: str):
+    from artifact_store import ArtifactStore
+    from ocr_request_lifecycle import request_result, OcrRequestError
+    try:
+        return request_result(ArtifactStore(STATE / 'ocr-observations'), task_id)
+    except OcrRequestError as error:
+        raise HTTPException(error.status_code, {'message': str(error), 'task': error.task}) from error
+
+
+@app.delete('/ocr/tasks/{task_id}')
+def ocr_task_cancel(task_id: str):
+    from artifact_store import ArtifactStore
+    from ocr_request_lifecycle import cancel_request, OcrRequestError
+    try:
+        return cancel_request(ArtifactStore(STATE / 'ocr-observations'), task_id)
+    except OcrRequestError as error:
+        raise HTTPException(error.status_code, str(error)) from error
 
 
 @app.post('/native-pdf/table-candidates')

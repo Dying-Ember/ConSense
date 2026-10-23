@@ -393,7 +393,7 @@ class AdviceSessionIntegrationTest {
         java.lang.reflect.Constructor<com.consense.service.vetting.FixedReferenceEvidence> constructor=com.consense.service.vetting.FixedReferenceEvidence.class.getDeclaredConstructor(String.class,double.class,JsonNode.class,JsonNode.class,JsonNode.class);
         constructor.setAccessible(true);com.consense.service.vetting.FixedReferenceEvidence evidence=constructor.newInstance("fixed:authored-scope",0.9,payload,null,unit);
         when(fixedScopeReferences.enabled()).thenReturn(true);when(fixedScopeReferences.frozenManifest()).thenReturn(JsonUtils.parse("{\"version\":\"AUTHORED\",\"developmentBaseline\":true}"));
-        when(fixedScopeReferences.search(eq("advisory"),anyString(),eq(10))).thenReturn(Collections.singletonList(evidence.asHit()));
+        when(fixedScopeReferences.searchForProject(anyString(),eq("advisory"),anyString(),eq(10))).thenReturn(Collections.singletonList(evidence.asHit()));
         when(fixedScopeReferences.evidence(any())).thenReturn(evidence);when(fixedScopeReferences.toModelMaterial(anyList(),eq(200000))).thenReturn(JsonUtils.write(payload));
         String project=project(),session=session(project,"fullset","reference_only");
         com.fasterxml.jackson.databind.node.ObjectNode raw=e1Answer("T3","reference_only","en","The reference source requires a record subject to its stated exception [1].");

@@ -28,7 +28,8 @@ class FixedBaselineRetrievalClientTest {
         final Path corpus=temp.resolve("corpus.jsonl");
         final Path original=temp.resolve("original.pdf");
         final FixedBaselineRetrievalClient client;
-        Fixture(boolean table) throws Exception {
+        Fixture(boolean table) throws Exception {this(table,3);}
+        Fixture(boolean table,int signatureVersion) throws Exception {
             if(table) {
                 ObjectNode artifact=JsonUtils.mapper().createObjectNode();artifact.put("id","parent-b");artifact.put("originalSourceSha256",ORIGINAL);artifact.put("sourceQualityAccepted",false);
                 ArrayNode matrix=artifact.putObject("table").putArray("extractedMatrix");matrix.addArray().add("Heading").addNull().add("");matrix.addArray().add("Authored value").add("Exception").add("Cell");
@@ -37,7 +38,7 @@ class FixedBaselineRetrievalClientTest {
             ObjectNode rawFirst=first.deepCopy();rawFirst.putNull("observedNodeId");
             Files.write(corpus,(JsonUtils.write(rawFirst)+"\n"+JsonUtils.write(second)+"\n").getBytes(StandardCharsets.UTF_8));
             ObjectNode runtime=runtime("embedding",16),rr=runtime("reranker",4);
-            health.put("status","ok");health.put("mode","local");health.put("offline",true);health.put("device","cuda");health.put("indexSignatureVersion",3);
+            health.put("status","ok");health.put("mode","local");health.put("offline",true);health.put("device","cuda");health.put("indexSignatureVersion",signatureVersion);
             ObjectNode models=health.putObject("models");models.set("embedding",model("embedding"));models.set("reranker",model("reranker"));
             ObjectNode runs=health.putObject("runtime");runs.set("embedding",runtime);runs.set("reranker",rr);
             ObjectNode retrieval=health.putObject("retrieval");retrieval.put("roleFilter",true);ObjectNode windows=retrieval.putObject("sourceWindows");
@@ -46,7 +47,7 @@ class FixedBaselineRetrievalClientTest {
             windows.set("embeddingWindows",recipe);windows.set("rerankWindows",recipe);windows.set("rerankRuntime",rr);windows.putObject("algorithms");
             windows.putObject("structuralSelection").put("policy","unique-source-structural-unit-seeds-v1").put("closureMembersAreRanked",false);
             ObjectNode plan=JsonUtils.mapper().createObjectNode();plan.put("projectId","authored-fixed");plan.put("indexSignatureSha256",SIGNATURE);
-            ObjectNode sig=plan.putObject("signature");sig.set("embedding",model("embedding"));sig.set("runtime",runtime);sig.set("windowRecipe",recipe);sig.putObject("algorithms");
+            ObjectNode sig=plan.putObject("signature");sig.put("signatureVersion",signatureVersion);sig.set("embedding",model("embedding"));sig.set("runtime",runtime);sig.set("windowRecipe",recipe);sig.putObject("algorithms");
             Path planPath=temp.resolve("plan.json");write(planPath,plan);
             ObjectNode manifest=JsonUtils.mapper().createObjectNode();manifest.put("schema","consense.frozen-fixed-development-baseline.v1");manifest.put("developmentBaseline",true);
             manifest.put("finalParsingAccepted",false);manifest.put("businessAccepted",false);manifest.put("version","authored-freeze-05");manifest.put("indexSignature",SIGNATURE);
@@ -111,6 +112,49 @@ class FixedBaselineRetrievalClientTest {
         HttpSupport http=mock(HttpSupport.class);FixedBaselineRetrievalClient c=new FixedBaselineRetrievalClient(http,new FixedBaselineProperties());
         assertFalse(c.enabled());assertThrows(IllegalStateException.class,()->c.search("vetting","q",1));verifyNoInteractions(http);
     }
+
+    @Test void multiEditionRequiresSelectionAndRejectsUnselectedGroupMember() throws Exception {
+        Fixture f=new Fixture(false);Path mp=Paths.get(f.p.getManifestPath());
+        ObjectNode manifest=(ObjectNode)JsonUtils.parse(new String(Files.readAllBytes(mp),StandardCharsets.UTF_8));
+        ((ObjectNode)manifest.path("originalSources")).remove("gccSource");
+        ArrayNode sources=((ObjectNode)manifest.path("originalSources")).putArray("slSources");
+        ObjectNode a=(ObjectNode)descriptor(f.original);a.put("editionId","edition-a");sources.add(a);
+        Path other=temp.resolve("other.pdf");Files.write(other,"other source".getBytes(StandardCharsets.UTF_8));
+        ObjectNode b=(ObjectNode)descriptor(other);b.put("editionId","edition-b");sources.add(b);
+        for(ObjectNode parent:Arrays.asList(f.first,f.second)){((ObjectNode)parent.path("sourceQuality")).put("family","SL");parent.put("fileKey","SL");}
+        f.second.put("originalSourceSha256",b.path("sha256").asText());
+        f.response.withArray("hits").addObject().put("id","parent-b").put("score",.7).set("payload",f.second);
+        ObjectNode secondUnit=f.unit().deepCopy();secondUnit.put("unitId",sha("second group"));
+        secondUnit.putArray("originIds").add("parent-b");secondUnit.putArray("requiredMemberIds").add("parent-b");secondUnit.putArray("members").add(f.second);
+        f.unit().putArray("requiredMemberIds").add("parent-a");f.unit().putArray("members").add(f.first);
+        ((ObjectNode)f.response.path("sourceUnits")).withArray("units").add(secondUnit);
+        Files.write(f.corpus,(JsonUtils.write(f.first)+"\n"+JsonUtils.write(f.second)+"\n").getBytes(StandardCharsets.UTF_8));manifest.set("corpus",descriptor(f.corpus));
+        write(mp,manifest);f.p.setManifestSha256(sha(Files.readAllBytes(mp)));
+        assertThrows(IllegalStateException.class,f::search);verifyNoInteractions(f.http);
+        ObjectNode selection=JsonUtils.mapper().createObjectNode().put("manifestSha256",f.p.getManifestSha256());
+        selection.putArray("slSources").addObject().put("editionId","edition-a").put("sha256",ORIGINAL);
+        f.response.putArray("selectedSourceSha256").add(ORIGINAL);
+        assertThrows(IllegalStateException.class,()->f.client.searchEvidence("advisory","q",1,selection));
+        selection.withArray("slSources").addObject().put("editionId","edition-b").put("sha256",b.path("sha256").asText());
+        f.response.withArray("selectedSourceSha256").add(b.path("sha256").asText());
+        assertEquals(2,f.client.searchEvidence("advisory","q",2,selection).size());
+        selection.withArray("slSources").remove(1);((ObjectNode)selection.path("slSources").get(0)).put("editionId","wrong-edition");
+        assertThrows(IllegalStateException.class,()->f.client.searchEvidence("advisory","q",1,selection));
+    }
+
+    @Test void projectSelectionIsPersistedAndPinsTheExactManifest() throws Exception {
+        Fixture f=new Fixture(false);
+        com.consense.repository.ProjectRepository repository=mock(com.consense.repository.ProjectRepository.class);
+        com.consense.domain.Project project=new com.consense.domain.Project();project.setId("project-a");
+        when(repository.findById("project-a")).thenReturn(Optional.of(project));
+        java.lang.reflect.Field field=FixedBaselineRetrievalClient.class.getDeclaredField("projectRepository");field.setAccessible(true);field.set(f.client,repository);
+        JsonNode selected=f.client.projectSelection("project-a");assertEquals(f.p.getManifestSha256(),selected.path("manifestSha256").asText());
+        f.client.saveProjectSelection("project-a",selected);verify(repository).save(project);
+        assertEquals(selected,JsonUtils.parse(project.getFixedReferenceSelectionJson()));
+        ((ObjectNode)selected).put("manifestSha256",sha("stale manifest"));
+        assertThrows(IllegalStateException.class,()->f.client.saveProjectSelection("project-a",selected));
+        assertThrows(IllegalStateException.class,()->f.client.projectSelection("missing-project"));
+    }
     @Test void fullSourceGroupAndTopLevelNullWireArePreserved() throws Exception {
         Fixture f=new Fixture(false);List<VectorStore.SearchHit> hits=f.search();assertEquals(2,hits.size());
         JsonNode material=JsonUtils.parse(f.client.toModelMaterial(hits,100000));assertEquals("reference_only",material.path("basisScope").asText());
@@ -149,6 +193,25 @@ class FixedBaselineRetrievalClientTest {
     }
     @Test void defaultLocalGuardStillRejectsServerHealth() throws Exception {
         Fixture f=new Fixture(false);f.health.put("mode","server");assertThrows(IllegalStateException.class,f::search);verify(f.http,never()).postJson(anyString(),anyString(),anyLong());
+    }
+    @Test void portableV5HealthMustMatchTheFrozenRuntimePlan() throws Exception {
+        Fixture f=new Fixture(false,5);assertEquals(2,f.search().size());
+        f.health.put("indexSignatureVersion",3);assertThrows(IllegalStateException.class,f::search);
+    }
+    @Test void oldPinnedMigratedQueryNeverAcceptsAnUnannouncedVersionUpgrade() throws Exception {
+        Fixture f=new Fixture(false);f.enableMigration();f.health.put("indexSignatureVersion",5);
+        assertThrows(IllegalStateException.class,f::search);
+    }
+    @Test void explicitlyPinnedV5QueryKeepsTheHistoricalV3IndexIdentity() throws Exception {
+        Fixture f=new Fixture(false);f.enableMigration();Path qp=Paths.get(f.p.getQueryRuntimePath());
+        ObjectNode query=(ObjectNode)JsonUtils.parse(new String(Files.readAllBytes(qp),StandardCharsets.UTF_8));
+        ((ObjectNode)query.path("queryIdentity")).put("signatureVersion",5);f.health.put("indexSignatureVersion",5);
+        ((ObjectNode)f.health.path("retrieval").path("sourceWindows").path("algorithms")).put("portable_index_signature.py",sha("portable adapter"));
+        ((ObjectNode)query.path("queryRecipe").path("algorithms")).put("portable_index_signature.py",sha("portable adapter"));query.set("health",f.health.deepCopy());
+        java.lang.reflect.Method digest=FixedBaselineRetrievalClient.class.getDeclaredMethod("queryDigest",JsonNode.class);digest.setAccessible(true);
+        query.put("queryRuntimeSignature",(String)digest.invoke(null,query.path("queryIdentity")));write(qp,query);f.p.setQueryRuntimeSha256(sha(Files.readAllBytes(qp)));
+        for(String key:Arrays.asList("queryIdentity","queryRecipe","queryRuntimeSignature"))((ObjectNode)f.response.path("indexAccess")).set(key,query.path(key).deepCopy());
+        assertEquals(2,f.search().size());assertEquals(SIGNATURE,f.response.path("indexSignature").asText());
     }
     @Test void querySignatureMatchesActualPythonIntegerJsonGolden() throws Exception {
         JsonNode value=JsonUtils.parse("{\"modelMaxLength\":1000000000000000019884624838656,\"files\":[{\"bytes\":10}]}");

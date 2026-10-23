@@ -26,7 +26,7 @@ consense:
     retrieval-url: "${CONSENSE_RETRIEVAL_URL:}"
     require-hybrid-retrieval: true
     expected-retrieval-contract: source-bound-window-points-full-parent-results-v1
-    expected-retrieval-signature-version: 3
+    expected-retrieval-signature-version: ${CONSENSE_VETTING_RETRIEVAL_EXPECTED_SIGNATURE_VERSION:5}
     expected-embedding-window-max-tokens: 512
     expected-rerank-window-max-tokens: 512
     expected-window-overlap-tokens: 64

@@ -53,6 +53,10 @@ public class Project {
     @Column(name = "title_lines_json", columnDefinition = "TEXT")
     private String titleLinesJson;
 
+    @Lob
+    @Column(name = "fixed_reference_selection_json", columnDefinition = "TEXT")
+    private String fixedReferenceSelectionJson;
+
     @Column(name = "created_at", nullable = false)
     private Instant createdAt = Instant.now();
 

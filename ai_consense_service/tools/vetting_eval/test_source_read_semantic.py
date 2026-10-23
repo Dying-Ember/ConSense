@@ -16,6 +16,71 @@ class SemanticSourceReadTests(unittest.TestCase):
     publish = legacy.SourceReadHttpTests.publish
     publish_pdf = legacy.SourceReadHttpTests.publish_pdf
     publish_all = legacy.SourceReadHttpTests.publish_all
+    def prepare_dictionary(self):
+        response = self.read('prepare', view='semantic_units', semanticReadVersion='source-semantic-dictionary-v2')
+        self.assertEqual(200, response.status_code, response.text)
+        return {key: response.json()[key] for key in ('readManifestSha256', 'readManifestToken', 'semanticReadVersion')}
+
+    def test_dictionary_cas_and_scan_share_groups_without_repeating_member_bodies(self):
+        parents = self.publish()
+        prepared = self.prepare_dictionary()
+        saved_members, saved_groups = [], {}
+        for address in prepared['readManifestSha256']:
+            manifest = json.loads((self.store.root / 'sha256' / address[:2] / (address + '.blob')).read_bytes())
+            self.assertEqual('consense.source-semantic-read-manifest.v2', manifest['schema'])
+            saved_members.extend(manifest['origins'])
+            saved_groups.update(manifest['groups'])
+            for entry in manifest['origins']:
+                stored = json.loads(self.store.read_asset(entry['recordRef']))
+                self.assertEqual(entry['id'], stored['id'])
+                self.assertNotIn('unit', stored)
+        self.assertEqual(len(parents), len(saved_members))
+        self.assertLess(len(saved_groups), len(saved_members))
+        groups, origins, cursor = {}, [], None
+        for _ in range(len(parents) + 1):
+            response = self.read('scan', view='semantic_units', **prepared, cursor=cursor,
+                maxItems=1, knownSemanticGroups=list(groups))
+            self.assertEqual(200, response.status_code, response.text)
+            result = response.json()
+            for row in result['units']:
+                self.assertNotIn(row['groupId'], groups)
+                groups[row['groupId']] = row['unit']
+                self.assertNotIn('members', row['unit'])
+                self.assertNotIn('originIds', row['unit'])
+            origins.extend(result['origins'])
+            self.assertTrue(set(result['originUnits'].values()) <= groups.keys())
+            cursor = result['nextCursor']
+            if cursor is None:
+                break
+        self.assertEqual([p['id'] for p in parents], [p['id'] for p in origins])
+        self.assertLess(len(groups), len(origins))
+        self.assertEqual([], self.encodes)
+        self.assertEqual([], self.predictions)
+
+    def test_dictionary_resume_without_known_groups_retransmits_the_needed_template(self):
+        self.publish()
+        prepared = self.prepare_dictionary()
+        first = self.read('scan', view='semantic_units', **prepared, maxItems=1).json()
+        resumed = self.read('scan', view='semantic_units', **prepared, maxItems=1, cursor=first['nextCursor'])
+        self.assertEqual(200, resumed.status_code, resumed.text)
+        self.assertEqual(1, len(resumed.json()['units']))
+        forged = self.read('scan', view='semantic_units', **prepared, maxItems=1, knownSemanticGroups=['0' * 64])
+        self.assertEqual(422, forged.status_code)
+
+    def test_dictionary_small_budget_records_blocked_origins_and_advances_without_truncation(self):
+        self.normal()
+        prepared = self.prepare_dictionary()
+        result = self.read('scan', view='semantic_units', **prepared, maxItems=1, maxBytes=9000)
+        self.assertEqual(200, result.status_code, result.text)
+        body = result.json()
+        self.assertEqual([], body['origins'])
+        self.assertEqual(1, len(body['blockedOrigins']))
+        self.assertEqual(1, body['coverage']['processedOrigins'])
+        self.assertIsNotNone(body['nextCursor'])
+        resumed = self.read('scan', view='semantic_units', **prepared, cursor=body['nextCursor'], maxBytes=9000)
+        self.assertEqual(200, resumed.status_code, resumed.text)
+        self.assertTrue(resumed.json()['origins'])
+
     def normal(self):
         body = fixture(self.policy)
         first = body['candidateGraph']['units'][0]

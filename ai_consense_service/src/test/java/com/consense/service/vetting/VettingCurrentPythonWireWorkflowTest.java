@@ -14,6 +14,7 @@ class VettingCurrentPythonWireWorkflowTest {
  @DynamicPropertySource static void isolated(DynamicPropertyRegistry r){
   r.add("spring.datasource.url",()->"jdbc:h2:mem:strict_wire_"+DB+";MODE=MySQL;DATABASE_TO_LOWER=TRUE;CASE_INSENSITIVE_IDENTIFIERS=TRUE;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE");
   r.add("consense.storage-root",()->Paths.get("target","wire-uploads",DB).toAbsolutePath().toString());r.add("consense.vetting.retrieval-url",()->wire().url+"/normal");
+  r.add("consense.vetting.expected-retrieval-signature-version",()->5);
  }
  @Autowired VettingService service;@Autowired ConsenseProperties props;@Autowired ProjectRepository projects;@Autowired SourceDocumentRepository documents;@Autowired VettingFindingRepository findings;@MockBean AiGateway ai;
  @BeforeEach void offline(){reset(ai);when(ai.available()).thenReturn(true);when(ai.chatModel()).thenReturn("uninvoked-wire-test");props.getVetting().setRetrievalUrl(wire().url+"/normal");props.getVetting().setProbeDirectory(wire().output.resolve("review-probes").toString());assertTrue(props.getVetting().isRequireHybridRetrieval());}

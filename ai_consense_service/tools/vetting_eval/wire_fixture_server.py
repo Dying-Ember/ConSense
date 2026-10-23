@@ -24,6 +24,8 @@ from window_runtime import WindowRuntime,CONTRACT
 from retrieval_source_units import select_source_units
 from token_windows import digest
 rt=WindowRuntime(s);s._windows_runtime=rt
+# Authored identity for the empty transport fixture; no tokenizer is loaded.
+rt.identity=lambda kind:{'kind':kind,'authoredTransportFixture':True}
 counts={'actualHealthMethods':0,'actualEmptyScopeRetrieveMethods':0,'fixtureIndexRequests':0,'fixtureNonemptyRetrieve':0,'actualIndexCalls':0,'actualNeuralForward':0,'actualTokenizerLoads':0,'actualVectorDb':0,'actualOCR':0}
 for name in ['embedding_model','encode_embeddings','rerank_model','rerank_candidates','database','ocr']:
  if hasattr(s,name):
@@ -65,7 +67,7 @@ class Handler(BaseHTTPRequestHandler):
    if case=='retrieve_fail':return self.answer(503,{'detail':{'kind':'FIXTURE_RETRIEVAL_UNAVAILABLE'}},raw)
    # Actual runtime early empty-scope branch, on explicit fixture metadata.
    # The scope contains no parents, so no vector/model/tokenizer method runs.
-   metadata={'contract':CONTRACT,'projectId':str(body['projectId']),'signature':{'signatureVersion':3,'fixture':True},'chunks':[], 'windows':[], 'windowManifestSha256':digest([]),'vectorPoints':0}
+   metadata={'contract':CONTRACT,'projectId':str(body['projectId']),'signature':rt.signature([]),'chunks':[], 'windows':[], 'windowManifestSha256':digest([]),'vectorPoints':0}
    s.read_project=lambda key:metadata;counts['actualEmptyScopeRetrieveMethods']+=1;o=rt.retrieve(request)
    # Index receipt/signature here is an HTTP fixture, never claimed an actual indexed corpus.
    o['indexSignature']=state['signature']

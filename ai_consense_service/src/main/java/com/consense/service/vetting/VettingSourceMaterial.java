@@ -25,7 +25,7 @@ public final class VettingSourceMaterial {
             "documentId","anchor","partAnchor","clauseHeadingLocation","metadataVersion","segmentationVersion","sourceQualityMetadataVersion","nativeTableMetadataVersion",
             "projectionVersion","sourceDeclarationRef","sourceDeclaration","softwareIdentity","receipt","cas","compositionSha256","componentSetSha256"));
     private static final Set<String> REFERENCE_FIELDS=new HashSet<>(Arrays.asList("id","chunkId","canonicalChunkId","originId","originIds",
-            "coreIds","contextIds","requiredMemberIds","requiredTargetIds","eligibleOriginIds","memberIds","unresolvedChunkIds"));
+            "coreIds","contextIds","requiredMemberIds","requiredTargetIds","eligibleOriginIds","memberIds","unresolvedChunkIds","unavailableMemberIds"));
 
     /** Drop transport/layout proof, preserving actual text, table meaning, conditions and limitations. */
     static com.fasterxml.jackson.databind.JsonNode semantic(Object value,Map<String,String> aliases) {
@@ -83,13 +83,13 @@ public final class VettingSourceMaterial {
         VettingNativeCellSlices.Observation cellObservations=VettingNativeCellSlices.observe(selected);
         OerModelMaterial.Request modelMaterial=null;
         Map<String,Map<String,Object>> fixedExcerpts=fixedReferences.modelExcerpts(selected);
-        List<Map<String,Object>> excerpts=new ArrayList<>();
+        List<Map<String,Object>> excerpts=new ArrayList<>();Set<String> emittedSemanticGroups=new HashSet<>();
         for(Chunk c:selected) {
             if(FixedVettingReferences.isFixed(c)){excerpts.add(fixedExcerpts.get(c.getId()));continue;}
             if(c.getCanonicalPayload()!=null||c.getCanonicalEvidence()!=null){
                 boolean compact=c.getCanonicalPayload()!=null&&"source-semantic-units-v1".equals(c.getCanonicalPayload().path("semanticProjectionVersion").asText());
                 if(!compact&&modelMaterial==null)modelMaterial=new OerModelMaterial.Request(documents,wordSourceScopes);
-                excerpts.add(canonical(c,modelMaterial,wordSourceScopes.get(c.getId())));continue;
+                excerpts.add(canonical(c,modelMaterial,wordSourceScopes.get(c.getId()),emittedSemanticGroups,ids));continue;
             }
             List<Map<String,Object>> rows=new ArrayList<>(),unknown=new ArrayList<>(),methods=new ArrayList<>();
             boolean bodyBound=bodyMatchesParts(c);int cursor=0;
@@ -197,9 +197,18 @@ public final class VettingSourceMaterial {
         }
     }
 
-    private static Map<String,Object> canonical(Chunk c,OerModelMaterial.Request modelMaterial,com.fasterxml.jackson.databind.JsonNode wordScope){
+    private static Map<String,Object> canonical(Chunk c,OerModelMaterial.Request modelMaterial,com.fasterxml.jackson.databind.JsonNode wordScope,Set<String> emittedGroups,Set<String> selectedIds){
         String rejected=OerBusinessEvidence.canonicalViewStatus(c);if(rejected!=null)throw new IllegalArgumentException(rejected);
         com.fasterxml.jackson.databind.JsonNode raw=c.getCanonicalPayload();
+        if(raw.has("semanticUnitRef")){
+            String group=raw.path("semanticUnitRef").asText();com.fasterxml.jackson.databind.JsonNode unit=raw.path("semanticUnit");
+            com.fasterxml.jackson.databind.node.ObjectNode member=raw.deepCopy();member.remove(Arrays.asList("semanticUnit","semanticUnitRef"));
+            Set<String> unavailable=new LinkedHashSet<>();for(com.fasterxml.jackson.databind.JsonNode context:Arrays.asList(unit,unit.get("hierarchyContext"),unit.get("attachmentContext")))if(context!=null)for(com.fasterxml.jackson.databind.JsonNode id:context.path("requiredMemberIds"))if(!selectedIds.contains(id.asText()))unavailable.add(id.asText());
+            return map("id",c.getId(),"file",nvl(c.getFileKey())+" · "+nvl(c.getFileName()),"role",c.getRole(),"clauseId",c.getClauseId(),"content",c.getContent(),"sourceQuality",c.getSourceQuality(),
+                    "semanticMember",member,"semanticUnitRef",group,"semanticUnit",emittedGroups.add(group)?unit:null,
+                    "unitReadStatus",unavailable.isEmpty()?"complete":"incomplete","unavailableMemberIds",unavailable,
+                    "nativeRows",Collections.emptyList(),"unresolvedNativeRowParts",Collections.emptyList(),"nativeRowsStatus","unknown","wordSourceScopeContext",wordScope);
+        }
         if("source-semantic-units-v1".equals(raw.path("semanticProjectionVersion").asText()))
             return map("id",c.getId(),"file",nvl(c.getFileKey())+" · "+nvl(c.getFileName()),"role",c.getRole(),"clauseId",c.getClauseId(),
                     "content",c.getContent(),"sourceQuality",c.getSourceQuality(),"semanticUnit",raw.path("semanticUnit"),

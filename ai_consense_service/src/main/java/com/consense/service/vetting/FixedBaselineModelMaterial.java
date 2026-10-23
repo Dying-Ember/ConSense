@@ -26,7 +26,7 @@ public final class FixedBaselineModelMaterial {
                 if (!ids.contains(id.asText())) throw new IllegalStateException("fixed_reference_incomplete_selected_group");
             JsonNode p = e.getPayload(); ObjectNode row = rows.addObject();
             row.put("id", e.getId()); row.put("file", e.getFileLabel()); row.put("family", e.getSourceFamily());
-            for (String key : Arrays.asList("documentId", "pageNo", "originalPageNos", "anchor", "clauseId", "originalSourceSha256", "sourceHash", "qualifiersComplete", "semanticScopeVerified", "legalScopeAccepted", "qualityAdopted", "observedNodeKind"))
+            for (String key : Arrays.asList("fixedBaselineEditionId", "documentId", "pageNo", "originalPageNos", "anchor", "clauseId", "originalSourceSha256", "sourceHash", "qualifiersComplete", "semanticScopeVerified", "legalScopeAccepted", "qualityAdopted", "observedNodeKind"))
                 if (p.has(key)) row.set(key, p.get(key));
             row.put("sourceBlockComplete", "unknown"); row.put("sourceQualityAccepted", false);
             if (unit != null) {

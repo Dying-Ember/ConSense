@@ -75,7 +75,7 @@ onBeforeUnmount(() => { ++epoch; cleanup() })
     <p v-if="error" role="alert">{{ displayError }}</p>
     <button type="button" class="btn" :disabled="loading" @click="load">{{ label('retry') }}</button>
     <template v-if="evidence">
-      <strong>{{ evidence.fileLabel }}</strong>
+      <strong>{{ evidence.fileLabel }}<template v-if="evidence.payload.fixedBaselineEditionId"> · {{ evidence.payload.fixedBaselineEditionId }}</template></strong>
       <pre>{{ evidence.content }}</pre>
       <p v-if="!evidence.tableArtifact && !group?.members.some(member => member.table)" class="warning-note">{{ label('noAssets') }}</p>
       <div v-if="matrix.length" class="table-wrap"><table><tbody><tr v-for="(row, rowIndex) in matrix" :key="rowIndex"><td v-for="(cell, cellIndex) in row" :key="cellIndex">{{ cell === null ? 'null' : cell }}</td></tr></tbody></table></div>

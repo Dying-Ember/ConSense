@@ -67,7 +67,7 @@ class OerEngineIntegrationTest {
         ((com.fasterxml.jackson.databind.node.ObjectNode)candidate.path("features")).put("allGeometryBound",true);
         for(com.fasterxml.jackson.databind.JsonNode block:candidate.path("blocks")){((com.fasterxml.jackson.databind.node.ObjectNode)block).set("blockId",block.path("id"));reviewed.add(block.path("blockId"));}
         ConsenseProperties properties=new ConsenseProperties();properties.getOcr().setMode("local");HttpSupport http=mock(HttpSupport.class);
-        when(http.postMultipart(anyString(),any(),anyLong())).thenReturn("{\"text\":\"reviewed whole source\",\"wholePageGroups\":["+group+"]}");
+        when(http.postMultipart(anyString(),any(),anyLong(),anyMap(),eq(32*1024*1024))).thenReturn("{\"text\":\"reviewed whole source\",\"wholePageGroups\":["+group+"]}");
         PaddleOcrClient client=new PaddleOcrClient(properties.getOcr(),http);Map<String,Object> context=DocumentParseProbe.map("physicalPageNo",1,"source",DocumentParseProbe.map("sourceSha256",DocumentParseProbe.sha256(original)));
         assertEquals("mineru",client.recognize(new byte[]{1},context).getWholePageGroups().get(0).path("selectedParser").asText());
         for(int mode=0;mode<6;mode++) {
@@ -78,7 +78,7 @@ class OerEngineIntegrationTest {
             if(mode==3)((com.fasterxml.jackson.databind.node.ArrayNode)bad.path("reviewedBlockIds")).add(reviewed.get(0));
             if(mode==4)((com.fasterxml.jackson.databind.node.ObjectNode)bad.path("candidates").get(1).path("features")).put("completeRawCapture",false);
             if(mode==5)((com.fasterxml.jackson.databind.node.ObjectNode)bad.path("candidates").get(1).path("blocks").get(0)).remove("blockId");
-            when(http.postMultipart(anyString(),any(),anyLong())).thenReturn("{\"wholePageGroups\":["+bad+"]}");
+            when(http.postMultipart(anyString(),any(),anyLong(),anyMap(),eq(32*1024*1024))).thenReturn("{\"wholePageGroups\":["+bad+"]}");
             assertThrows(com.consense.common.BizException.class,()->client.recognize(new byte[]{1},context),"Bad reviewed inventory mode "+mode);
         }
     }
@@ -87,22 +87,22 @@ class OerEngineIntegrationTest {
         com.fasterxml.jackson.databind.node.ObjectNode group=(com.fasterxml.jackson.databind.node.ObjectNode)wholePageGroup(DocumentParseProbe.sha256(original));
         group.put("physicalPageNo",2);Map<String,Object> context=DocumentParseProbe.map("physicalPageNo",2,"source",DocumentParseProbe.map("sourceSha256",DocumentParseProbe.sha256(original)));
         ConsenseProperties.Ocr cfg=new ConsenseProperties().getOcr();cfg.setMode("local");HttpSupport http=mock(HttpSupport.class);
-        when(http.postMultipart(anyString(),any(),anyLong())).thenReturn("{\"text\":\"\",\"regions\":[],\"wholePageGroups\":["+group+"]}");
+        when(http.postMultipart(anyString(),any(),anyLong(),anyMap(),eq(32*1024*1024))).thenReturn("{\"text\":\"\",\"regions\":[],\"wholePageGroups\":["+group+"]}");
         PaddleOcrClient client=new PaddleOcrClient(cfg,http);assertFalse(client.recognize(out.toByteArray(),context).isEmpty());
-        group.put("physicalPageNo",1);when(http.postMultipart(anyString(),any(),anyLong())).thenReturn("{\"wholePageGroups\":["+group+"]}");
+        group.put("physicalPageNo",1);when(http.postMultipart(anyString(),any(),anyLong(),anyMap(),eq(32*1024*1024))).thenReturn("{\"wholePageGroups\":["+group+"]}");
         assertThrows(com.consense.common.BizException.class,()->client.recognize(out.toByteArray(),context));
         group.put("physicalPageNo",2);((com.fasterxml.jackson.databind.node.ArrayNode)group.path("candidates")).remove(1);
-        when(http.postMultipart(anyString(),any(),anyLong())).thenReturn("{\"wholePageGroups\":["+group+"]}");
+        when(http.postMultipart(anyString(),any(),anyLong(),anyMap(),eq(32*1024*1024))).thenReturn("{\"wholePageGroups\":["+group+"]}");
         assertThrows(com.consense.common.BizException.class,()->client.recognize(out.toByteArray(),context));
         group=(com.fasterxml.jackson.databind.node.ObjectNode)wholePageGroup(DocumentParseProbe.sha256(original));group.put("physicalPageNo",2);group.put("sourceQualityAccepted",true);
-        when(http.postMultipart(anyString(),any(),anyLong())).thenReturn("{\"wholePageGroups\":["+group+"]}");
+        when(http.postMultipart(anyString(),any(),anyLong(),anyMap(),eq(32*1024*1024))).thenReturn("{\"wholePageGroups\":["+group+"]}");
         assertThrows(com.consense.common.BizException.class,()->client.recognize(out.toByteArray(),context));
     }
     @Test void unselectedCompleteParserPageGroupsSurviveWireParserAndStoredJsonWithNoQuotedText() throws Exception {
         byte[] original=scanPdf();com.fasterxml.jackson.databind.JsonNode group=wholePageGroup(DocumentParseProbe.sha256(original));
         ConsenseProperties properties=new ConsenseProperties();properties.getOcr().setMode("local");HttpSupport http=mock(HttpSupport.class);
         when(http.get(anyString(),anyLong())).thenReturn("{}");
-        when(http.postMultipart(endsWith("/ocr"),any(),anyLong())).thenReturn("{\"text\":\"\",\"lines\":[],\"regions\":[],\"wholePageGroups\":["+group+"]}");
+        when(http.postMultipart(endsWith("/ocr"),any(),anyLong(),anyMap(),eq(32*1024*1024))).thenReturn("{\"text\":\"\",\"lines\":[],\"regions\":[],\"wholePageGroups\":["+group+"]}");
         DocumentParser.ParsedDocument result=new DocumentParser(properties,new PaddleOcrClient(properties.getOcr(),http)).parse("scan.pdf",original);
         assertEquals("PARTIAL",result.getParseStatus(),"nontextual complete alternatives must not disappear as an empty OCR failure");
         assertTrue(result.getCoverage().getFailedPages().isEmpty());assertTrue(result.getText().isEmpty());
@@ -302,7 +302,7 @@ class OerEngineIntegrationTest {
                 "source",DocumentParseProbe.map("sourceFilename","original.pdf","sourceSha256",DocumentParseProbe.sha256(rotatedPdf()),"pageCount",2),
                 "imageSha256",DocumentParseProbe.sha256(input),"width",10,"height",20);
         ConsenseProperties.Ocr cfg=new ConsenseProperties().getOcr();cfg.setMode("local");HttpSupport http=mock(HttpSupport.class);
-        when(http.postMultipart(anyString(),any(),anyLong())).thenAnswer(invocation->{
+        when(http.postMultipart(anyString(),any(),anyLong(),anyMap(),eq(32*1024*1024))).thenAnswer(invocation->{
             okhttp3.MultipartBody body=invocation.getArgument(1);assertEquals(2,body.parts().size());
             okio.Buffer bytes=new okio.Buffer();body.part(0).body().writeTo(bytes);assertArrayEquals(input,bytes.readByteArray());
             okio.Buffer json=new okio.Buffer();body.part(1).body().writeTo(json);
@@ -312,13 +312,13 @@ class OerEngineIntegrationTest {
         });
         PaddleOcrClient client=new PaddleOcrClient(cfg,http);assertEquals("body",client.recognize(input,context).getText());
         com.fasterxml.jackson.databind.node.ObjectNode wrong=JsonUtils.mapper().valueToTree(context);wrong.put("physicalPageNo",1);
-        doReturn("{\"text\":\"body\",\"provenance\":{\"sourceContext\":"+wrong+"}}").when(http).postMultipart(anyString(),any(),anyLong());
+        doReturn("{\"text\":\"body\",\"provenance\":{\"sourceContext\":"+wrong+"}}").when(http).postMultipart(anyString(),any(),anyLong(),anyMap(),eq(32*1024*1024));
         assertThrows(com.consense.common.BizException.class,()->client.recognize(input,context));
     }
     @Test void layoutOnlyResponseIsAnObservationRatherThanEmptyOcr() {
         ConsenseProperties.Ocr cfg=new ConsenseProperties().getOcr();cfg.setMode("local");
         HttpSupport http=mock(HttpSupport.class);
-        when(http.postMultipart(anyString(),any(),anyLong())).thenReturn("{\"text\":\"\",\"lines\":[],\"regions\":[{\"id\":\"control1\",\"kind\":\"checkbox\",\"text\":\"\",\"bbox\":[1,2,3,4],\"fields\":[{\"state\":\"unknown\"}]}]}");
+        when(http.postMultipart(anyString(),any(),anyLong(),anyMap(),eq(32*1024*1024))).thenReturn("{\"text\":\"\",\"lines\":[],\"regions\":[{\"id\":\"control1\",\"kind\":\"checkbox\",\"text\":\"\",\"bbox\":[1,2,3,4],\"fields\":[{\"state\":\"unknown\"}]}]}");
         assertFalse(new PaddleOcrClient(cfg,http).recognize(new byte[]{1}).isEmpty());
     }
     @Test void nativeDrawingFormatIdentityDoesNotDependOnItsDisplayFilename() {
@@ -370,21 +370,21 @@ class OerEngineIntegrationTest {
         byte[] bytes=out.toByteArray();String sha=DocumentParseProbe.sha256(bytes);
         ConsenseProperties.Ocr cfg=new ConsenseProperties().getOcr();cfg.setMode("local");HttpSupport http=mock(HttpSupport.class);
         String wrongFrame="{\"text\":\"body\",\"frame\":{\"imageSha256\":\""+sha+"\",\"width\":11,\"height\":20,\"coordinateUnit\":\"pixel\",\"bboxFormat\":\"xywh\"}}";
-        when(http.postMultipart(anyString(),any(),anyLong())).thenReturn(wrongFrame);
+        when(http.postMultipart(anyString(),any(),anyLong(),anyMap(),eq(32*1024*1024))).thenReturn(wrongFrame);
         assertThrows(com.consense.common.BizException.class,()->new PaddleOcrClient(cfg,http).recognize(bytes));
-        when(http.postMultipart(anyString(),any(),anyLong())).thenReturn("{\"text\":\"body\",\"provenance\":{\"inputSha256\":\"different-input\"}}");
+        when(http.postMultipart(anyString(),any(),anyLong(),anyMap(),eq(32*1024*1024))).thenReturn("{\"text\":\"body\",\"provenance\":{\"inputSha256\":\"different-input\"}}");
         assertThrows(com.consense.common.BizException.class,()->new PaddleOcrClient(cfg,http).recognize(bytes));
     }
     @Test void localIdentityPurposeDoesNotReuseBaselineAsCompleteParserTask() throws Exception {
         ConsenseProperties properties=new ConsenseProperties();properties.getOcr().setMode("local");
         HttpSupport http=mock(HttpSupport.class);when(http.get(anyString(),anyLong())).thenReturn("{} ");
-        when(http.postMultipart(anyString(),any(),anyLong(),anyMap())).thenReturn("{\"text\":\"General Conditions of Contract\",\"lines\":[]}");
-        when(http.postMultipart(anyString(),any(),anyLong())).thenReturn("{\"text\":\"General Conditions of Contract\",\"regions\":[{\"id\":\"body\",\"kind\":\"text\",\"text\":\"General Conditions of Contract\",\"bbox\":[20,20,200,20]}],\"adoptionStatus\":\"candidate_unverified\"}");
+        when(http.postMultipart(anyString(),any(),anyLong(),argThat(headers -> headers != null && "identity".equals(headers.get("X-Consense-Ocr-Purpose"))),eq(32*1024*1024))).thenReturn("{\"text\":\"General Conditions of Contract\",\"lines\":[]}");
+        when(http.postMultipart(anyString(),any(),anyLong(),argThat(headers -> headers != null && "parse".equals(headers.get("X-Consense-Ocr-Purpose"))),eq(32*1024*1024))).thenReturn("{\"text\":\"General Conditions of Contract\",\"regions\":[{\"id\":\"body\",\"kind\":\"text\",\"text\":\"General Conditions of Contract\",\"bbox\":[20,20,200,20]}],\"adoptionStatus\":\"candidate_unverified\"}");
         DocumentParser parser=new DocumentParser(properties,new PaddleOcrClient(properties.getOcr(),http));byte[] bytes=scanPdf();
         DocumentParser.ParsedDocument observation=parser.observe("source.pdf",bytes);
         DocumentParser.ParsedDocument result=parser.parse("source.pdf",bytes,observation);
-        verify(http).postMultipart(anyString(),any(),anyLong(),eq(Collections.singletonMap("X-Consense-Ocr-Purpose","identity")));
-        verify(http).postMultipart(anyString(),any(),anyLong());
+        verify(http).postMultipart(anyString(),any(),anyLong(),argThat(headers -> headers != null && "identity".equals(headers.get("X-Consense-Ocr-Purpose"))),eq(32*1024*1024));
+        verify(http).postMultipart(anyString(),any(),anyLong(),argThat(headers -> headers != null && "parse".equals(headers.get("X-Consense-Ocr-Purpose"))),eq(32*1024*1024));
         assertEquals("PARTIAL",result.getParseStatus());
         assertEquals("candidate_unverified",result.getCoverage().getVisualCoverage().get(0).path("parserEvidence").path("adoptionStatus").asText());
     }

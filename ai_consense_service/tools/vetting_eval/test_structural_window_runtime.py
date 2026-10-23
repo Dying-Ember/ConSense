@@ -59,7 +59,7 @@ class DualRuntimeTests(unittest.TestCase):
         result = self.index()
         self.assertEqual(result['contract'], CONTRACT)
         saved = baseline.s.read_project('dual-test')
-        self.assertEqual(saved['signature']['signatureVersion'], 4)
+        self.assertEqual(saved['signature']['signatureVersion'], 6)
         self.assertEqual([p['id'] for p in saved['chunks']], [p['id'] for p in self.corpus])
         self.assertEqual({p['granularity'] for p in saved['windows']}, {'short', 'structure'})
         self.assertEqual(saved['structuralCoverage']['contextUnavailable'], [])
@@ -210,7 +210,7 @@ class StructuralLoaderIntegrationTests(unittest.TestCase):
         fake_torch = SimpleNamespace(cuda=SimpleNamespace(is_available=lambda: False))
         with patch.dict(sys.modules, {'torch': fake_torch}):
             result = self.server.health()
-        self.assertEqual(result['indexSignatureVersion'], 4)
+        self.assertEqual(result['indexSignatureVersion'], 6)
         recipe = result['retrieval']['sourceWindows']
         self.assertEqual(recipe['contract'], CONTRACT)
         self.assertEqual((recipe['longEmbeddingMaxTokens'], recipe['contextRerankMaxTokens']), (60, 70))

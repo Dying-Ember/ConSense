@@ -15,6 +15,24 @@ import static org.mockito.Mockito.*;
 
 /** Authored compact protocol doubles; no database, source OCR, retrieval model or LLM calls. */
 class OerSemanticBusinessEvidenceTest {
+    @Test void sharedDictionaryGroupHasOneSessionTemplateAndOneModelSubmission()throws Exception {
+        Fixture f=new Fixture(2);f.dictionary=true;List<VettingCorpus.Chunk> chunks=f.service.scan(f.session);
+        assertSame(chunks.get(0).getCanonicalPayload().path("semanticUnit"),chunks.get(1).getCanonicalPayload().path("semanticUnit"));
+        assertFalse(chunks.get(0).getCanonicalPayload().path("semanticUnit").has("members"));
+        List<Map<String,Object>> model=VettingSourceMaterial.project(chunks);
+        assertNotNull(model.get(0).get("semanticUnit"));assertNull(model.get(1).get("semanticUnit"));
+        assertEquals("complete",model.get(0).get("unitReadStatus"));assertEquals("complete",model.get(1).get("unitReadStatus"));
+        assertEquals("AUTHORED obligation 0",((JsonNode)model.get(0).get("semanticMember")).path("text").asText());
+        assertEquals("AUTHORED obligation 1",((JsonNode)model.get(1).get("semanticMember")).path("text").asText());
+    }
+    @Test void oversizedDictionaryMemberRetainsReadableScopeAndExactPendingDenominator()throws Exception {
+        Fixture f=new Fixture(2);f.dictionary=true;f.blockedFirst=true;List<VettingCorpus.Chunk> chunks=f.service.scan(f.session);
+        assertEquals(1,chunks.size());assertEquals("unit-1",chunks.get(0).getId());JsonNode coverage=f.session.semanticReadCoverage();
+        assertEquals("partial",coverage.path("status").asText());assertEquals(2,coverage.path("totalOrigins").asInt());assertEquals(1,coverage.path("readableOrigins").asInt());
+        assertEquals("unit-0",coverage.path("blockedOrigins").get(0).path("id").asText());
+        assertEquals("unknown",VettingRetrievalSourceUnits.attached(chunks).get(0).status);
+        Map<String,Object> model=VettingSourceMaterial.project(chunks).get(0);assertEquals("incomplete",model.get("unitReadStatus"));assertEquals(Collections.singleton("unit-0"),model.get("unavailableMemberIds"));
+    }
     @Test void aThousandOrderedUnitsAreScannedOnceAndWarmReadsNeverLoadTheOldGraph()throws Exception {
         Fixture f=new Fixture(1000);long started=System.nanoTime();List<VettingCorpus.Chunk> chunks=f.service.scan(f.session);
         assertEquals(1000,chunks.size());assertTrue(OerBusinessEvidence.isSemanticCorpus(chunks));assertEquals("unit-0",chunks.get(0).getId());assertEquals("unit-999",chunks.get(999).getId());
@@ -104,7 +122,7 @@ class OerSemanticBusinessEvidenceTest {
         final CanonicalEvidenceService evidence=mock(CanonicalEvidenceService.class);
         final OerCanonicalRetrievalClient retrieval=mock(OerCanonicalRetrievalClient.class);
         final OerBusinessEvidence service=new OerBusinessEvidence(evidence,retrieval,new com.consense.config.CanonicalEvidenceProperties());
-        final OerBusinessEvidence.Session session;int scans,catalogs;boolean blocked,invalidClosure;
+        final OerBusinessEvidence.Session session;int scans,catalogs;boolean blocked,invalidClosure,dictionary,blockedFirst;
         Fixture(int count)throws Exception {
             CanonicalSourceBinding binding=new CanonicalSourceBinding();binding.setId(3L);binding.setProjectId("authored");binding.setDocumentId(42L);binding.setProjectionSha256(sha("projection"));binding.setOriginalSourceSha256(sha("original"));binding.setJavaParsedSourceHash(sha("parsed"));binding.setCanonicalSourceHash(sha("canonical"));binding.setSourceRevisionSha256(sha("source revision"));binding.setProjectionRevisionSha256(sha("projection revision"));binding.setScopePolicySha256(sha("policy"));binding.setSnapshotBytesSha256(sha("snapshot"));binding.setSnapshotContentSha256(binding.getSnapshotBytesSha256());binding.setDeclaredModule("vetting");binding.setEligibleModulesJson("[\"vetting\"]");
             Constructor<?> compact=CanonicalEvidenceService.CompactBindingScope.class.getDeclaredConstructor(CanonicalEvidenceService.class,String.class,String.class,List.class,Map.class,Map.class);compact.setAccessible(true);
@@ -118,6 +136,10 @@ class OerSemanticBusinessEvidenceTest {
             session=(OerBusinessEvidence.Session)constructor.newInstance("authored","vetting",scope,selected,Collections.singletonMap(42L,document),contexts,anchors,rules,Collections.emptyMap());
             when(retrieval.readSemanticSources(eq(selected),any())).thenAnswer(call->{JsonNode demand=call.getArgument(1);ObjectNode response=JsonUtils.mapper().createObjectNode();response.putArray("origins");response.putArray("units");ObjectNode coverage=response.putObject("coverage");response.putNull("nextCursor");
                 if("catalog".equals(demand.path("operation").asText())){catalogs++;return response;}
+                if(dictionary){scans++;response.put("semanticReadVersion",OerCanonicalRetrievalClient.SEMANTIC_DICTIONARY);response.putObject("originUnits");response.putArray("blockedOrigins");
+                    String group=sha("shared closure");ObjectNode unit=response.withArray("units").addObject();unit.put("groupId",group);ObjectNode template=unit.putObject("unit");template.put("unitId",sha("shared closure unit"));template.put("status","complete_observed_unit");template.putArray("requiredMemberIds").add("unit-0").add("unit-1");
+                    for(int i=0;i<count;i++)if(blockedFirst&&i==0)response.withArray("blockedOrigins").addObject().put("id","unit-0").put("documentId","42").put("reason","semantic_member_or_group_too_large");else {response.withArray("origins").add(origin(binding,i));((ObjectNode)response.path("originUnits")).put("unit-"+i,group);}
+                    coverage.put("processedOrigins",count);coverage.put("status",blockedFirst?"complete_with_blocked":"complete");return response;}
                 scans++;int offset=demand.path("cursor").asInt(0),end=Math.min(count,offset+64);coverage.put("status",blocked?"unit_too_large":end<count?"partial":"complete");coverage.put("processedOrigins",end);
                 if(!blocked)for(int i=offset;i<end;i++){ObjectNode origin=origin(binding,i);response.withArray("origins").add(origin);ObjectNode unit=response.withArray("units").addObject();unit.put("status","complete_observed_unit");unit.put("unitId",sha("closure"+i));unit.putArray("originIds").add("unit-"+i);unit.putArray("requiredMemberIds").add("unit-"+i);unit.putArray("members").add(origin.deepCopy());if(i==0&&count>1){unit.withArray("requiredMemberIds").add("unit-1");unit.withArray("members").add(origin(binding,1));}}
                 if(invalidClosure&&!response.path("units").isEmpty())((ObjectNode)response.path("units").get(0).path("members").get(0)).put("text","AUTHORED changed closure text");

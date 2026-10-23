@@ -37,6 +37,7 @@ public class FixedBaselineSourceController {
         result.put("retrievalLiveVerified",false);
         if(fixed.enabled()) {
             JsonNode manifest=fixed.frozenManifest();
+            result.put("availableSlSources",FixedBaselineRetrievalClient.slSources(manifest));
             for(String key:Arrays.asList("version","developmentBaseline","finalParsingAccepted",
                     "businessAccepted","H800Accepted","scope","coverage","indexSignature",
                     "collection","persistedVectorCount","knownGaps"))
@@ -46,7 +47,7 @@ public class FixedBaselineSourceController {
     }
 
     @Data public static class SearchRequest {
-        private String module,query;
+        private String projectId,module,query;
         private int limit=10;
     }
 
@@ -57,7 +58,21 @@ public class FixedBaselineSourceController {
                 ||request.getQuery()==null||request.getQuery().trim().isEmpty()
                 ||request.getQuery().length()>20000||request.getLimit()<1||request.getLimit()>10)
             throw new BizException(4001,"Provide module vetting/advisory, a query and limit 1..10.");
+        if(request.getProjectId()!=null) {
+            List<FixedReferenceEvidence> evidence=new ArrayList<>();
+            for(VectorStore.SearchHit hit:fixed.searchForProject(request.getProjectId(),request.getModule(),request.getQuery(),request.getLimit()))evidence.add(fixed.evidence(hit));
+            return ApiResponse.ok(evidence);
+        }
         return ApiResponse.ok(fixed.searchEvidence(request.getModule(),request.getQuery(),request.getLimit()));
+    }
+
+    @GetMapping("/projects/{projectId}/selection")
+    public ApiResponse<JsonNode> selection(@PathVariable String projectId) {return ApiResponse.ok(fixed.selectionStatus(projectId));}
+
+    @PutMapping("/projects/{projectId}/selection")
+    public ApiResponse<JsonNode> selection(@PathVariable String projectId,@RequestBody JsonNode selection) {
+        try{return ApiResponse.ok(fixed.saveProjectSelection(projectId,selection));}
+        catch(IllegalStateException invalid){throw new BizException(4001,invalid.getMessage());}
     }
 
     @GetMapping("/evidence")
@@ -69,7 +84,7 @@ public class FixedBaselineSourceController {
     public ResponseEntity<ByteArrayResource> original(@RequestParam String sourceSha256) throws IOException {
         if(sourceSha256==null||!sourceSha256.matches("[a-f0-9]{64}"))
             throw new BizException(4001,"A frozen original source SHA256 is required.");
-        JsonNode sources=fixed.frozenManifest().path("originalSources");
+        List<JsonNode> sources=FixedBaselineRetrievalClient.originalSources(fixed.frozenManifest());
         JsonNode selected=null;
         for(JsonNode descriptor:sources)if(sourceSha256.equals(descriptor.path("sha256").asText())) {
             if(selected!=null)throw new BizException(4091,"Ambiguous frozen original source identity.");

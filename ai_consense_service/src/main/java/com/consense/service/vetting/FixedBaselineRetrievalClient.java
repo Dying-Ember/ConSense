@@ -7,6 +7,10 @@ import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.databind.*;
 import com.fasterxml.jackson.databind.node.*;
 import org.springframework.stereotype.Component;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.transaction.annotation.Transactional;
+import com.consense.domain.Project;
+import com.consense.repository.ProjectRepository;
 import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
@@ -20,9 +24,10 @@ import java.util.concurrent.ConcurrentHashMap;
 public class FixedBaselineRetrievalClient {
     private static final ObjectMapper JSON = new ObjectMapper().enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
     private static final ObjectReader READER = JSON.readerFor(JsonNode.class).with(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
-    private static final List<String> LOCAL_FIELDS = Arrays.asList("fixedBaselineManifestSha256", "fixedBaselineVersion", "fixedReferenceSourceUnit", "fixedReferenceOrigin", "fileLabel");
+    private static final List<String> LOCAL_FIELDS = Arrays.asList("fixedBaselineManifestSha256", "fixedBaselineVersion", "fixedReferenceSourceUnit", "fixedReferenceOrigin", "fixedBaselineEditionId", "fileLabel");
     private final HttpSupport http;
     private final FixedBaselineProperties properties;
+    @Autowired(required=false) private ProjectRepository projectRepository;
     private volatile Catalog catalog;
     private final Set<String> verifiedSourceUnits = Collections.newSetFromMap(new ConcurrentHashMap<String,Boolean>());
     private static final class Row {
@@ -50,20 +55,83 @@ public class FixedBaselineRetrievalClient {
         for(FixedReferenceEvidence e:searchEvidence(module,query,limit)) hits.add(e.asHit());
         return hits;
     }
+    public List<VectorStore.SearchHit> searchForProject(String projectId,String module,String query,int limit) {
+        List<VectorStore.SearchHit> hits=new ArrayList<>();
+        for(FixedReferenceEvidence e:searchEvidence(module,query,limit,projectSelection(projectId)))hits.add(e.asHit());
+        return hits;
+    }
+    private Project project(String projectId) {
+        require(projectRepository!=null&&projectId!=null&&!projectId.trim().isEmpty(),"fixed_reference_project_required");
+        return projectRepository.findById(projectId).orElseThrow(()->new IllegalStateException("fixed_reference_project_missing"));
+    }
+    public JsonNode projectSelection(String projectId) {
+        String value=project(projectId).getFixedReferenceSelectionJson();
+        JsonNode selection=value==null?defaultSelection(ready().manifest):parse(value);
+        selectedSources(ready().manifest,selection);return selection.deepCopy();
+    }
+    public JsonNode selectionStatus(String projectId) {
+        Catalog c=ready();checkCurrent(c);String saved=project(projectId).getFixedReferenceSelectionJson();
+        ObjectNode result=JSON.createObjectNode();result.put("manifestSha256",properties.getManifestSha256());result.set("availableSlSources",slSources(c.manifest));
+        result.set("selection",saved==null?defaultSelection(c.manifest):parse(saved));result.put("projectAdoptionRequired",true);return result;
+    }
+    @Transactional
+    public JsonNode saveProjectSelection(String projectId,JsonNode selection) {
+        Catalog c=ready();checkCurrent(c);selectedSources(c.manifest,selection);Project p=project(projectId);
+        p.setFixedReferenceSelectionJson(write(selection));projectRepository.save(p);return selectionStatus(projectId);
+    }
+    private JsonNode defaultSelection(JsonNode manifest) {
+        if(manifest.path("originalSources").has("slSources"))return JSON.nullNode();
+        ObjectNode selection=JSON.createObjectNode();selection.put("manifestSha256",properties.getManifestSha256());ArrayNode values=selection.putArray("slSources");
+        for(JsonNode source:slSources(manifest))values.addObject().put("editionId",source.path("editionId").asText()).put("sha256",source.path("sha256").asText());
+        return selection;
+    }
+    public static ArrayNode slSources(JsonNode manifest) {
+        ArrayNode values=JSON.createArrayNode();JsonNode originals=manifest.path("originalSources"),declared=originals.path("slSources");
+        require(!(originals.has("slParent")&&originals.has("slSources")),"fixed_sl_source_catalog_ambiguous");
+        if(originals.has("slSources")) {
+            require(declared.isArray()&&declared.size()>0&&declared.size()<=100,"fixed_sl_source_catalog_invalid");Set<String> editions=new HashSet<>(),hashes=new HashSet<>();
+            for(JsonNode source:declared){String edition=source.path("editionId").asText();
+                require(text(source.path("editionId"))&&edition.equals(edition.trim())&&!Arrays.asList("latest","unknown").contains(edition.toLowerCase(Locale.ROOT))&&shaText(source.path("sha256").asText())
+                        &&editions.add(edition)&&hashes.add(source.path("sha256").asText()),"fixed_sl_source_catalog_ambiguous");values.add(source.deepCopy());}
+        }else if(originals.has("slParent")) {ObjectNode source=((ObjectNode)originals.path("slParent")).deepCopy();source.put("editionId","legacy:"+source.path("sha256").asText());values.add(source);}
+        return values;
+    }
+    public static List<JsonNode> originalSources(JsonNode manifest) {
+        List<JsonNode> sources=new ArrayList<>();for(Iterator<Map.Entry<String,JsonNode>> it=manifest.path("originalSources").fields();it.hasNext();){Map.Entry<String,JsonNode> entry=it.next();if(!Arrays.asList("slParent","slSources").contains(entry.getKey()))sources.add(entry.getValue());}
+        slSources(manifest).forEach(sources::add);return sources;
+    }
+    private Set<String> selectedSources(JsonNode manifest,JsonNode selection) {
+        require(selection!=null&&selection.isObject()&&properties.getManifestSha256().equals(selection.path("manifestSha256").asText())&&selection.path("slSources").isArray(),"fixed_sl_selection_required_or_stale");
+        Set<String> selected=new TreeSet<>(),editions=new HashSet<>();ArrayNode available=slSources(manifest);
+        for(JsonNode choice:selection.path("slSources")) {String hash=choice.path("sha256").asText(),edition=choice.path("editionId").asText();boolean found=false;
+            for(JsonNode source:available)if(hash.equals(source.path("sha256").asText())&&edition.equals(source.path("editionId").asText()))found=true;
+            require(found&&selected.add(hash)&&editions.add(edition),"fixed_sl_selection_outside_catalog");}
+        require(available.size()==0||!selected.isEmpty(),"fixed_sl_selection_empty");
+        for(String key:Arrays.asList("gccSource","gctSource")){JsonNode source=manifest.path("originalSources").path(key);if(source.isObject())selected.add(source.path("sha256").asText());}
+        return selected;
+    }
     public List<FixedReferenceEvidence> searchEvidence(String module,String query,int limit) {
+        return searchEvidence(module,query,limit,defaultSelection(ready().manifest));
+    }
+    public List<FixedReferenceEvidence> searchEvidence(String module,String query,int limit,JsonNode selection) {
         require(Arrays.asList("vetting","advisory","advice").contains(module),"module_outside_fixed_reference_scope");
         require(query!=null&&!query.trim().isEmpty()&&limit>0&&limit<=50,"invalid_fixed_reference_query");
         Catalog c=ready();checkCurrent(c);
+        Set<String> selected=selectedSources(c.manifest,selection);
         JsonNode health=parse(http.get(baseUrl()+"/health",properties.getTimeoutMs())); validateHealth(c,health);
         ObjectNode request=JSON.createObjectNode();request.put("projectId",properties.getProjectId());request.put("query",query);
         request.put("role","standard");request.put("candidates",Math.max(limit,properties.getCandidates()));request.put("limit",limit);
+        boolean scoped=c.manifest.path("originalSources").has("slSources");
+        if(scoped){ArrayNode hashes=request.putArray("sourceSha256");selected.forEach(hashes::add);}
         JsonNode response=parse(http.postJson(baseUrl()+"/retrieve",write(request),properties.getTimeoutMs()));
         if(migrationConfigured()) validateMigratedResponse(c,response);
+        if(scoped)require(stringSet(response.path("selectedSourceSha256")).equals(selected),"fixed_retrieval_source_selection_mismatch");
         require(properties.getProjectId().equals(response.path("projectId").asText())&&properties.getIndexSignature().equals(response.path("indexSignature").asText()),"retrieval_identity_mismatch");
         require("source-bound-window-points-full-parent-results-v1".equals(response.path("mode").asText())&&response.path("hits").isArray(),"retrieval_shape_invalid");
         Map<String,JsonNode> seedPayload=new LinkedHashMap<>();Map<String,Double> scores=new HashMap<>();
         for(JsonNode h:response.path("hits")) {
             String id=h.path("id").asText();JsonNode p=h.path("payload");validateParent(c,id,p);
+            require(selected.contains(p.path("originalSourceSha256").asText()),"fixed_retrieval_unselected_source");
             require(h.path("score").isNumber()&&Double.isFinite(h.path("score").asDouble())&&!seedPayload.containsKey(id),"retrieval_score_or_duplicate_invalid");
             seedPayload.put(id,p);scores.put(id,h.path("score").asDouble());
         }
@@ -86,6 +154,7 @@ public class FixedBaselineRetrievalClient {
             }
             require(unit.path("members").isArray()&&unit.path("members").size()>0&&unit.path("requiredMemberIds").isArray()&&unit.path("originIds").isArray(),"source_bound_unit_incomplete");
             Set<String> required=stringSet(unit.path("requiredMemberIds")),members=new HashSet<>();double score=Double.NEGATIVE_INFINITY;
+            String groupOriginal=null;
             for(JsonNode origin:unit.path("originIds")) {
                 String id=origin.asText();require(seedPayload.containsKey(id)&&origins.add(id),"source_unit_origin_invalid");score=Math.max(score,scores.get(id));
             }
@@ -94,6 +163,8 @@ public class FixedBaselineRetrievalClient {
             ObjectNode compact=((ObjectNode)unit).deepCopy();compact.remove("members");compact.remove("observedRanges");compact.remove("blockIds");compact.remove("memberScores");
             for(JsonNode p:unit.path("members")) {
                 String id=p.path("id").asText();validateParent(c,id,p);require(members.add(id),"source_unit_duplicate_member");
+                require(selected.contains(p.path("originalSourceSha256").asText()),"fixed_group_unselected_source");
+                String originalSha=p.path("originalSourceSha256").asText();require(groupOriginal==null||groupOriginal.equals(originalSha),"fixed_group_crosses_original_sources");groupOriginal=originalSha;
                 for(Iterator<Map.Entry<String,JsonNode>> it=unit.path("sourceIdentity").fields();it.hasNext();) {
                     Map.Entry<String,JsonNode> identity=it.next();require(p.path(identity.getKey()).equals(identity.getValue()),"source_unit_member_identity_mismatch");
                 }
@@ -105,8 +176,8 @@ public class FixedBaselineRetrievalClient {
             verifiedSourceUnits.add(normalizedDigest(compact));
         }
         require(origins.equals(seedPayload.keySet()),"source_unit_seeds_not_complete");
-        List<JsonNode> selected=new ArrayList<>();for(FixedReferenceEvidence item:all.values())selected.add(item.getPayload());
-        assertOriginals(c,selected);checkCurrent(c);
+        List<JsonNode> selectedParents=new ArrayList<>();for(FixedReferenceEvidence item:all.values())selectedParents.add(item.getPayload());
+        assertOriginals(c,selectedParents);checkCurrent(c);
         return new ArrayList<>(all.values());
     }
     public FixedReferenceEvidence evidence(VectorStore.SearchHit hit) {
@@ -138,6 +209,7 @@ public class FixedBaselineRetrievalClient {
     private FixedReferenceEvidence makeEvidence(Catalog c,String id,double score,JsonNode original,JsonNode unit,boolean origin) {
         ObjectNode p=((ObjectNode)original).deepCopy();
         p.put("fixedBaselineManifestSha256",properties.getManifestSha256());p.put("fixedBaselineVersion",c.manifest.path("version").asText());
+        if("SL".equals(original.path("sourceQuality").path("family").asText()))for(JsonNode source:slSources(c.manifest))if(source.path("sha256").equals(original.path("originalSourceSha256")))p.put("fixedBaselineEditionId",source.path("editionId").asText());
         p.put("fixedReferenceOrigin",origin);p.put("fileLabel",original.path("fileKey").asText());if(unit!=null)p.set("fixedReferenceSourceUnit",unit);
         JsonNode artifact=null;
         if(original.has("tableArtifact")) {
@@ -190,8 +262,10 @@ public class FixedBaselineRetrievalClient {
     }
     private static void validateSource(JsonNode manifest,JsonNode p) {
         require(p.isObject()&&text(p.path("id"))&&text(p.path("content"))&&"standard".equals(p.path("role").asText())&&text(p.path("documentId"))&&text(p.path("anchor"))&&p.path("pageNo").isIntegralNumber()&&p.path("pageNo").asInt()>0,"frozen_parent_source_incomplete");
-        String family=p.path("sourceQuality").path("family").asText();String sourceKey="GCC".equals(family)?"gccSource":"GCT".equals(family)?"gctSource":"SL".equals(family)?"slParent":null;
-        require(sourceKey!=null&&manifest.path("originalSources").path(sourceKey).path("sha256").equals(p.path("originalSourceSha256")),"frozen_parent_outside_source_scope");
+        String family=p.path("sourceQuality").path("family").asText();boolean inScope=false;
+        if("SL".equals(family)){for(JsonNode source:slSources(manifest))if(source.path("sha256").equals(p.path("originalSourceSha256")))inScope=true;}
+        else {String sourceKey="GCC".equals(family)?"gccSource":"GCT".equals(family)?"gctSource":null;inScope=sourceKey!=null&&manifest.path("originalSources").path(sourceKey).path("sha256").equals(p.path("originalSourceSha256"));}
+        require(inScope,"frozen_parent_outside_source_scope");
         require(shaText(p.path("sourceHash").asText())&&shaText(p.path("sourceQualityHash").asText())&&p.path("fullObservedParentPreserved").asBoolean()&&p.path("fixedDevelopmentBaseline").asBoolean(),"frozen_parent_binding_incomplete");
         require(p.path("parts").isArray()&&p.path("parts").size()>0&&!p.path("qualityAdopted").asBoolean(true)&&!p.path("legalScopeAccepted").asBoolean(true)&&!p.path("semanticScopeVerified").asBoolean(true),"frozen_parent_quality_or_parts_invalid");
         for(JsonNode part:p.path("parts"))require(text(part.path("blockId"))&&part.path("text").isTextual()&&part.path("pageNo").isIntegralNumber()&&part.path("pageNo").asInt()>0,"frozen_parent_part_binding_missing");
@@ -213,7 +287,7 @@ public class FixedBaselineRetrievalClient {
             readParent(c,parent.path("id").asText());
             String expected=parent.path("originalSourceSha256").asText();if(!checked.add(expected))continue;
             JsonNode descriptor=null;
-            for(JsonNode source:c.manifest.path("originalSources"))if(expected.equals(source.path("sha256").asText())) {
+            for(JsonNode source:originalSources(c.manifest))if(expected.equals(source.path("sha256").asText())) {
                 require(descriptor==null,"fixed_original_descriptor_ambiguous");descriptor=source;
             }
             require(descriptor!=null&&text(descriptor.path("path"))&&descriptor.path("bytes").isIntegralNumber()
@@ -232,7 +306,10 @@ public class FixedBaselineRetrievalClient {
     private void validateHealth(Catalog c,JsonNode h) {
         if(migrationConfigured()) { validateMigratedHealth(c,h);return; }
         JsonNode signature=c.plan.path("signature"),w=h.path("retrieval").path("sourceWindows");
-        require("ok".equals(h.path("status").asText())&&"local".equals(h.path("mode").asText())&&h.path("offline").asBoolean()&&"cuda".equals(h.path("device").asText())&&h.path("indexSignatureVersion").asInt()==3,"fixed_runtime_health_invalid");
+        int version=signature.path("signatureVersion").asInt();
+        require(signature.path("signatureVersion").isIntegralNumber()&&signature.path("signatureVersion").canConvertToInt()
+                &&h.path("indexSignatureVersion").isIntegralNumber()&&h.path("indexSignatureVersion").canConvertToInt()
+                &&VettingRetrievalHealth.signatureVersion(VettingRetrievalHealth.WINDOW_CONTRACT,version)&&"ok".equals(h.path("status").asText())&&"local".equals(h.path("mode").asText())&&h.path("offline").asBoolean()&&"cuda".equals(h.path("device").asText())&&h.path("indexSignatureVersion").asInt()==version,"fixed_runtime_health_invalid");
         require("source-bound-window-points-full-parent-results-v1".equals(w.path("contract").asText())&&"max".equals(w.path("denseAggregation").asText())&&"max".equals(w.path("rerankAggregation").asText()),"fixed_runtime_contract_invalid");
         require(normalizedDigest(signature.path("embedding")).equals(normalizedDigest(h.path("models").path("embedding")))&&normalizedDigest(signature.path("runtime")).equals(normalizedDigest(h.path("runtime").path("embedding"))),"fixed_embedding_recipe_changed");
         require("BAAI/bge-reranker-v2-m3".equals(h.path("models").path("reranker").path("name").asText())&&"953dc6f6f85a1b2dbfca4c34a2796e7dde08d41e".equals(h.path("models").path("reranker").path("revision").asText()),"fixed_reranker_identity_changed");
@@ -296,8 +373,14 @@ public class FixedBaselineRetrievalClient {
                 &&q.path("readOnly").asBoolean()&&q.path("runtimeCompatibilityVerified").isBoolean()&&!q.path("runtimeCompatibilityVerified").asBoolean()
                 &&q.path("fullVectorIntegrity").equals(m.path("targetVectorIntegrity")),"migration_query_binding_changed");
         JsonNode identity=q.path("queryIdentity"),recipe=q.path("queryRecipe"),sig=c.plan.path("signature");
-        for(String field:Arrays.asList("contract","embedding","corpus","windowRecipe","embeddingPreprocessing","normalized","structuralSelectionPolicy","signatureVersion"))
+        for(String field:Arrays.asList("contract","embedding","corpus","windowRecipe","embeddingPreprocessing","normalized","structuralSelectionPolicy"))
             require(identity.path(field).equals(sig.path(field)),"migration_query_source_recipe_changed:"+field);
+        int indexVersion=sig.path("signatureVersion").asInt(),queryVersion=identity.path("signatureVersion").asInt();
+        require(sig.path("signatureVersion").isIntegralNumber()&&sig.path("signatureVersion").canConvertToInt()
+                &&identity.path("signatureVersion").isIntegralNumber()&&identity.path("signatureVersion").canConvertToInt()
+                &&VettingRetrievalHealth.signatureVersion(sig.path("contract").asText(),indexVersion)
+                &&VettingRetrievalHealth.signatureVersion(identity.path("contract").asText(),queryVersion)
+                &&(queryVersion==indexVersion||indexVersion==3&&queryVersion==5||indexVersion==4&&queryVersion==6),"migration_query_signature_version_changed");
         for(String field:Arrays.asList("model","files","backendSha256","tokenizerClass","fast","modelMaxLength"))
             require(identity.path("tokenizerAndModelFiles").path(field).equals(sig.path("tokenizerAndModelFiles").path(field)),"migration_query_model_changed:"+field);
         for(String kind:Arrays.asList("embedding","reranker")) {
@@ -312,13 +395,15 @@ public class FixedBaselineRetrievalClient {
         }
         for(String name:Arrays.asList("server.py","window_runtime.py","migrated_qdrant_index.py","migrate_qdrant_server.py","fixed_development_baseline_runtime.py","verify_retrieval_offline.py","token_windows.py","index_integrity.py","retrieval_source_units.py","checkpoint_publication.py","fixed_vector_cache.py","qdrant_backend.py","workspace_root.py","embedding_compatibility.py","structural_retrieval.py","preparation_cache.py","checkpoint_identity.py"))
             require(shaText(recipe.path("algorithms").path(name).asText()),"migration_query_software_closure_missing:"+name);
+        if(queryVersion>=5)require(shaText(recipe.path("algorithms").path("portable_index_signature.py").asText()),"migration_query_software_closure_missing:portable_index_signature.py");
         require(queryDigest(identity).equals(q.path("queryRuntimeSignature").asText()),"migration_query_signature_changed");
         verifyArtifact(m.path("candidateMetadata"));return q;
     }
     private void validateMigratedHealth(Catalog c,JsonNode actual) {
         JsonNode q=migrationQuery(c),expected=q.path("health"),w=actual.path("retrieval").path("sourceWindows"),recipe=q.path("queryRecipe");
         require("ok".equals(actual.path("status").asText())&&"server".equals(actual.path("mode").asText())&&actual.path("offline").asBoolean()
-                &&actual.path("indexSignatureVersion").asInt()==3,"migrated_runtime_health_invalid");
+                &&actual.path("indexSignatureVersion").equals(q.path("queryIdentity").path("signatureVersion"))
+                &&actual.path("indexSignatureVersion").equals(expected.path("indexSignatureVersion")),"migrated_runtime_health_invalid");
         for(String field:Arrays.asList("device","models","runtime","retrieval"))
             require(actual.path(field).equals(expected.path(field)),"migrated_runtime_health_changed:"+field);
         require(actual.path("runtime").path("embedding").equals(q.path("queryIdentity").path("runtime"))

@@ -6,7 +6,7 @@ class VettingCurrentPythonWireTest {
  static WireFixtureTestSupport wire;static int ordinal;
  @BeforeAll static void start()throws Exception{wire=new WireFixtureTestSupport("client");}
  @AfterAll static void stop()throws Exception{wire.close();}
- static ConsenseProperties props(String route){ConsenseProperties p=VettingStrictHybridTest.strict();p.getVetting().setRetrievalUrl(wire.url+"/"+route);return p;}
+ static ConsenseProperties props(String route){ConsenseProperties p=VettingStrictHybridTest.strict();p.getVetting().setExpectedRetrievalSignatureVersion(5);p.getVetting().setRetrievalUrl(wire.url+"/"+route);return p;}
  static List<Chunk> corpus(){return Collections.singletonList(VettingStrictHybridTest.source("synthetic-lantern","tender","Blue lantern laboratory observation. 蓝灯记录 😀"));}
  static void record(String scenario,Object result)throws Exception{WireFixtureTestSupport.save(wire.output.resolve("java-"+(++ordinal)+"-"+scenario+".json"),VettingReviewProbe.map("scenario",scenario,"result",result,"actualNeuralOrIndex",0,"transportFixtureOnly",true));}
  @Test void currentRuntimeEmptyScopeRemainsValidEmptyWithoutChangingModeOrRepair()throws Exception{

@@ -176,7 +176,7 @@ public class ConsenseProperties {
         private boolean requireHybridRetrieval = false;
         /** Required local wire contract; corpus/signature identity is still per-project. */
         private String expectedRetrievalContract = "source-bound-window-points-full-parent-results-v1";
-        private int expectedRetrievalSignatureVersion = 3;
+        private int expectedRetrievalSignatureVersion = 5;
         private int expectedEmbeddingWindowMaxTokens = 512;
         private int expectedRerankWindowMaxTokens = 512;
         private int expectedWindowOverlapTokens = 64;

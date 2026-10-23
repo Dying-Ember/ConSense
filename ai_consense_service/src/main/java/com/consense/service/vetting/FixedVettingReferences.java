@@ -11,6 +11,7 @@ import java.util.stream.Collectors;
 final class FixedVettingReferences {
     static final String SOURCE_CLASS = "fixed_development_baseline_standard";
     private final FixedBaselineRetrievalClient client;
+    private String projectId,selectionIdentity;
     private final Map<String, SearchHit> hits = new LinkedHashMap<>();
     private final Map<String, String> views = new LinkedHashMap<>();
 
@@ -32,9 +33,14 @@ final class FixedVettingReferences {
     }
 
     static FixedVettingReferences empty() { return new FixedVettingReferences(null, Collections.emptyList()); }
-    static FixedVettingReferences retrieve(FixedBaselineRetrievalClient client, String topic, int limit) {
-        return client == null || !client.enabled() ? empty()
-                : new FixedVettingReferences(client, client.search("vetting", topic, limit));
+    static FixedVettingReferences retrieve(FixedBaselineRetrievalClient client,String projectId,String topic,int limit) {
+        if(client==null||!client.enabled())return empty();
+        String identity=JsonUtils.write(client.projectSelection(projectId));
+        FixedVettingReferences result=new FixedVettingReferences(client,client.searchForProject(projectId,"vetting",topic,limit));
+        result.projectId=projectId;result.selectionIdentity=identity;result.assertSelectionCurrent();return result;
+    }
+    private void assertSelectionCurrent() {
+        if(projectId!=null&&!Objects.equals(selectionIdentity,JsonUtils.write(client.projectSelection(projectId))))throw new IllegalStateException("Fixed reference editions changed during this review");
     }
     boolean isEmpty() { return hits.isEmpty(); }
     JsonNode pointer(String id) {SearchHit hit=hits.get(id);if(hit==null)throw new IllegalArgumentException("Fixed reference is outside this packet catalog");return client.evidence(hit).pointer();}
@@ -99,6 +105,7 @@ final class FixedVettingReferences {
         return result;
     }
     Map<String, Map<String, Object>> modelExcerpts(List<Chunk> selected) {
+        assertSelectionCurrent();
         List<SearchHit> chosen = selectedHits(selected);
         Map<String, Map<String, Object>> result = new LinkedHashMap<>();
         if (chosen.isEmpty()) return result;
@@ -126,6 +133,7 @@ final class FixedVettingReferences {
         return result;
     }
     void assertCurrent(List<Chunk> selected) {
+        assertSelectionCurrent();
         List<SearchHit> chosen = selectedHits(selected);
         if (!chosen.isEmpty()) client.assertCurrent(chosen);
     }

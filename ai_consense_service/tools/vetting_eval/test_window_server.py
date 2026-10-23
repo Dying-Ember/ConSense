@@ -36,7 +36,9 @@ class FakeDb:
     def query_points(self,name,query,limit,query_filter=None):
         self.fetch_limits.append(limit)
         conditions=query_filter.must if query_filter else []
-        selected=[p for p in self.collections[name].values()if all(p.payload.get(condition.key)==condition.match.value for condition in conditions)]
+        selected=[p for p in self.collections[name].values()if all(
+            p.payload.get(condition.key) in condition.match.any if hasattr(condition.match,'any')
+            else p.payload.get(condition.key)==condition.match.value for condition in conditions)]
         selected=sorted(selected,key=lambda p:(-len(p.payload['content']),str(p.id)))[:limit]
         return SimpleNamespace(points=[SimpleNamespace(id=p.id,payload=copy.deepcopy(p.payload),score=len(p.payload['content'])/1000)for p in selected])
 
@@ -117,6 +119,18 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(a,self.rt.embedding_cache_identity(2))
         self.rt.identity=lambda kind:{'resolvedSnapshot':'/h800/models','files':[{'sha256':'changed'}],'backendSha256':'tokenizer'}
         self.assertNotEqual(a,self.rt.embedding_cache_identity(2))
+
+    def test_source_sha_filter_reaches_dense_lexical_and_full_group(self):
+        a=copy.deepcopy(self.p);a.update(originalSourceSha256='a'*64,fileKey='SL')
+        b=parent('longer other edition q',str(uuid.uuid4()),source_hash='b'*64)
+        b.update(originalSourceSha256='b'*64,fileKey='SL')
+        self.index([a,b])
+        result=self.query(sourceSha256=['a'*64])
+        self.assertEqual(['a'*64],result['selectedSourceSha256'])
+        self.assertEqual([a['id']],[hit['id']for hit in result['hits']])
+        self.assertTrue(all(member['originalSourceSha256']=='a'*64 for unit in result['sourceUnits']['units']for member in unit['members']))
+        with self.assertRaises(s.HTTPException):self.query()
+        with self.assertRaises(s.HTTPException):self.query(sourceSha256=['c'*64])
     def test_project_collections_isolate_same_parent_id(self):
         self.index(project='one');self.index(project='two');self.assertNotEqual(s._projects['one']['collection'],s._projects['two']['collection'])
     def test_unchanged_index_cache_exposes_real_point_count(self):

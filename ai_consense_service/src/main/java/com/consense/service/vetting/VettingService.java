@@ -876,7 +876,11 @@ public class VettingService {
             if(usable && rulesScanned && checked.size()<parts.size()) notes.add("语义仅覆盖 "+checked.size()+"/"+parts.size()+" 片段，其他片段未进入成功的模型调用。");
             if(usable && !checked.isEmpty()) processed++;
             documents.add(new DocumentCoverageVO(String.valueOf(d.getId()),fileKey(d),d.getFileName(),d.getParseStatus(),chars,covered,parts.size(),checked.size(),notes));
-        } return new CoverageVO(snapshot.size(),processed,documents,new ArrayList<>(new LinkedHashSet<>(warnings)));
+        } CoverageVO result=new CoverageVO(snapshot.size(),processed,documents,new ArrayList<>(new LinkedHashSet<>(warnings)));
+        if(OerBusinessEvidence.isSemanticCorpus(chunks)){JsonNode read=OerBusinessEvidence.session(chunks).semanticReadCoverage();result.setSemanticSourceRead(read);
+            if(!read.path("blockedOrigins").isEmpty()){result.setReviewCompleteness("incomplete");result.getWarnings().add("部分来源单元超过有界读取预算，已保留原件与精确未完成范围；可读内容继续审查，不代表声明范围完整完成。"+JsonUtils.write(read));
+                for(DocumentCoverageVO document:documents){int denied=0;for(JsonNode row:read.path("blockedOrigins"))if(document.getDocumentId().equals(row.path("documentId").asText()))denied++;if(denied>0){document.setTotalSegments(document.getTotalSegments()+denied);document.getWarnings().add("另有 "+denied+" 个来源单元未读取，字符分母仅覆盖可读部分，缺失范围见 semanticSourceRead。");}}}}
+        return result;
     }
 
     /** Count the union of source block ranges; overlapping model chunks do not inflate coverage. */

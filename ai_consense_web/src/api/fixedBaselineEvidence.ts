@@ -8,6 +8,7 @@ export interface FixedBaselineEvidenceAddress {
   sourceFamily: string
   sourceRole: 'standard'
   originalSourceSha256: string
+  editionId?: string
   originalPageNos?: number[]
   pageNo: number
   projectApplicability: string
@@ -60,6 +61,7 @@ export async function fetchFixedEvidence(address: FixedBaselineEvidenceAddress, 
   const original = payload.originalSourceSha256 ?? payload.sourceHash
   requireValue(data.id === address.parentId && payload.fixedBaselineManifestSha256 === address.manifestSha256
     && payload.fixedBaselineVersion === address.baselineVersion && (sourceIdentity ? sha(original) && matchesSource(payload, sourceIdentity) : original === address.originalSourceSha256)
+    && (address.editionId == null || payload.fixedBaselineEditionId === address.editionId)
     && (payload.sourceRole ?? payload.role) === 'standard' && data.sourceFamily === address.sourceFamily, 'FIXED_EVIDENCE_IDENTITY_MISMATCH')
   requireValue(typeof data.content === 'string' && typeof data.fileLabel === 'string', 'FIXED_EVIDENCE_INVALID')
   return data as unknown as FixedBaselineEvidence

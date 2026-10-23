@@ -72,7 +72,7 @@ class AdviceFixedBaselineTest {
         Constructor<FixedReferenceEvidence> constructor=FixedReferenceEvidence.class.getDeclaredConstructor(String.class,double.class,JsonNode.class,JsonNode.class,JsonNode.class);constructor.setAccessible(true);
         JsonNode unit=JsonUtils.parse("{\"status\":\"complete_observed_unit\",\"requiredMemberIds\":[\"fixed:authored\"],\"presentMemberIds\":[\"fixed:authored\"],\"missingMemberIds\":[],\"qualifiersComplete\":\"unknown\"}");
         evidence=constructor.newInstance("fixed:authored",0.9,payload,null,unit);standard=evidence.asHit();
-        when(fixed.search(eq("advisory"),anyString(),eq(10))).thenReturn(Collections.singletonList(standard));
+        when(fixed.searchForProject(anyString(),eq("advisory"),anyString(),eq(10))).thenReturn(Collections.singletonList(standard));
         when(fixed.evidence(any())).thenReturn(evidence);when(fixed.toModelMaterial(anyList(),eq(200000))).thenReturn("{\"role\":\"standard\",\"reference_only\":true,\"id\":\"fixed:authored\",\"content\":\"AUTHORED complete standard text including the exception.\"}");
         when(llm.chat(anyList())).thenReturn(JsonUtils.write(answer("reference_only")));
     }
@@ -127,12 +127,12 @@ class AdviceFixedBaselineTest {
         when(documents.findBusinessSourcesByProjectId("authored-project")).thenReturn(Collections.singletonList(source));
         when(canonical.load(anyString(),eq("advisory"),anyList())).thenThrow(new IllegalStateException("AUTHORED missing canonical binding"));
         BizException failure=assertThrows(BizException.class,()->advice.ask("authored-project",new AskRequest("Project applicability?","contract")));
-        assertEquals(4204,failure.getCode());verify(fixed,never()).search(anyString(),anyString(),anyInt());verify(ai,never()).completeJson(anyString(),anyString(),any());assertTrue(saved.isEmpty());
+        assertEquals(4204,failure.getCode());verify(fixed,never()).searchForProject(anyString(),anyString(),anyString(),anyInt());verify(ai,never()).completeJson(anyString(),anyString(),any());assertTrue(saved.isEmpty());
     }
     @Test void explicitReferenceOnlyIsRejectedWhenTheDefaultOffAdapterIsDisabled() {
         when(fixed.enabled()).thenReturn(false);
         BizException failure=assertThrows(BizException.class,()->advice.ask("authored-project",reference()));
-        assertEquals(4204,failure.getCode());verify(fixed,never()).search(anyString(),anyString(),anyInt());verify(ai,never()).completeJson(anyString(),anyString(),any());assertTrue(saved.isEmpty());
+        assertEquals(4204,failure.getCode());verify(fixed,never()).searchForProject(anyString(),anyString(),anyString(),anyInt());verify(ai,never()).completeJson(anyString(),anyString(),any());assertTrue(saved.isEmpty());
     }
     @Test void frozenSourceChangeDuringTheModelCallPreventsHistoryPersistence() {
         AtomicBoolean changed=new AtomicBoolean();

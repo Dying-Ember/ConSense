@@ -184,6 +184,10 @@ def _sl_technical_unit(manifest, native, store):
     raw = store.read_asset(binding['scopeManifestRef'])
     policy = load_policy_bytes(raw, manifest['scope']['scopePolicySha256'])
     scoped = _json(raw)
+    scope_manifest_sha = policy.manifest_sha256
+    if hasattr(policy, 'source_manifest'):
+        scoped = policy.source_manifest(native['source']['sourceSha256'])
+        policy = policy.for_source(native['source']['sourceSha256'])
     edition = _name(binding.get('editionId'), 'sl_edition_id')
     _fail(edition.strip().lower() not in {'unknown', 'latest'} and scoped['source'].get('versionId') == edition,
           'sl_native_edition_binding_mismatch')
@@ -233,7 +237,7 @@ def _sl_technical_unit(manifest, native, store):
           'sl_native_complete_glyph_ranges_required')
     return {'editionId': edition, 'unitId': uid, 'physicalPages': pages,
             'scope': unit['scope'], 'clauseId': clause_id,
-            'scopeManifestSha256': policy.manifest_sha256, 'glyphIdsByPage': expected}
+            'scopeManifestSha256': scope_manifest_sha, 'glyphIdsByPage': expected}
 
 
 def _sl_whole_unit(binding, manifest, units):

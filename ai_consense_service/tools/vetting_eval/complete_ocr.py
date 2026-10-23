@@ -492,9 +492,13 @@ def project_complete_regions(bundle, whole_groups, width, height, *, canonical_p
     return regions
 
 
-def recognize_complete_page(raw, config, store, *, request=_request, source_context=None, line_observer=None):
+def recognize_complete_page(raw, config, store, *, request=_request, source_context=None, line_observer=None,
+                            deadline=None, cancelled=None):
     timeout = _config(config)
-    deadline = time.monotonic() + timeout
+    configured_deadline = time.monotonic() + timeout
+    if deadline is not None and (isinstance(deadline, bool) or not isinstance(deadline, (int, float)) or not math.isfinite(deadline)):
+        raise ValueError('Finite monotonic caller deadline required')
+    deadline = min(deadline, configured_deadline) if deadline is not None else configured_deadline
     with Image.open(io.BytesIO(raw)) as image:
         width, height = image.size
         media_type, extension = {'PNG': ('image/png', 'png'), 'JPEG': ('image/jpeg', 'jpg'),
@@ -525,6 +529,8 @@ def recognize_complete_page(raw, config, store, *, request=_request, source_cont
     paddle_capture = None
 
     def send(url, body=None, method=None):
+        if cancelled is not None and cancelled():
+            raise RuntimeError('Complete-parser caller cancelled')
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             raise TimeoutError('Complete-parser deadline elapsed')
@@ -560,6 +566,8 @@ def recognize_complete_page(raw, config, store, *, request=_request, source_cont
 
     try:
         for parser in ('paddleocr-vl', 'mineru'):
+            if time.monotonic() >= deadline or cancelled is not None and cancelled():
+                raise TimeoutError('Complete-parser caller cancelled or deadline elapsed before provider admission')
             assets = {input_name: raw}
             mapping = [{'parserPageIndex': 0, 'providerInputPageNo': 1, 'physicalPageNo': physical_page,
                         'width': width, 'height': height, 'coordinateUnit': 'pixel',
@@ -586,7 +594,8 @@ def recognize_complete_page(raw, config, store, *, request=_request, source_cont
                 task_record['mode'] = 'fresh_provider'
                 provider_config=dict(config[parser],taskBinding=native_binding)
                 with owned_native_provider(provider_config, deadline-time.monotonic(),
-                        receipt_dir=store.root / 'jobs' / uuid.uuid4().hex / parser) as lifecycle:
+                        receipt_dir=store.root / 'jobs' / uuid.uuid4().hex / parser,
+                        **({'cancelled': cancelled} if cancelled is not None else {})) as lifecycle:
                     lifecycles.append(lifecycle)
                     base = config[parser]['baseUrl'].rstrip('/')
                     if parser == 'paddleocr-vl':
@@ -697,14 +706,14 @@ def recognize_complete_page(raw, config, store, *, request=_request, source_cont
             started = time.monotonic()
             auxiliary = {'status': 'not_started_budget_exhausted', 'remainingSecondsBefore': deadline-started,
                          'synchronousNativeCancellation': 'not_supported', 'sourceQualityAccepted': False}
-            if started < deadline:
+            if started < deadline and not (cancelled is not None and cancelled()):
                 try:
                     from ocr_layout_coverage import layout_gap_regions
                     capture = line_observer(raw, store)
                     auxiliary['observationRef'] = capture['artifactDescriptor']
                     additions, coverage = layout_gap_regions(capture, runs, frame, physical_page, store)
                     auxiliary.update(coverage)
-                    if time.monotonic() < deadline:
+                    if time.monotonic() < deadline and not (cancelled is not None and cancelled()):
                         regions.extend(additions)
                     else:
                         auxiliary.update(status='observed_after_deadline_unapplied', addedRegions=0)

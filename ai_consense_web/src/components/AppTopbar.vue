@@ -7,6 +7,7 @@ import { useAppStore } from '@/stores/app'
 import { useLocalized } from '@/composables/useLocalized'
 import AppIcon from './AppIcon.vue'
 import AppModal from './AppModal.vue'
+import FixedReferenceSelection from './FixedReferenceSelection.vue'
 import { inspectionWords } from '@/i18n/inspection'
 
 const { t } = useI18n()
@@ -173,6 +174,7 @@ function onLocaleChange(event: Event) {
         </button>
       </label>
 
+      <FixedReferenceSelection :project-id="store.activeProjectId" :locale="store.locale" />
       <label class="lang-switcher">
         <AppIcon name="globe" :size="16" />
         <span class="switcher-label" style="margin-left: 6px">{{ t('topbar.language') }}</span>

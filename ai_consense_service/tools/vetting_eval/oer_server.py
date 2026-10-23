@@ -46,6 +46,7 @@ class CanonicalIndexRequest(BaseModel):
     projectId: int | str
     projectionSha256: list[str] = Field(min_length=1, max_length=10000)
     module: str = 'vetting'
+    rebuild: bool = Field(default=False, strict=True)
 
 
 
@@ -338,7 +339,7 @@ def create_app(policy, *, backend=None, artifact_store=None, source_registry=Non
                          projectionSha256=address)
                     chunks.extend(source_registry.chunks(address, module=request.module))
                 assert_canonical_scope(chunks, policy, module=request.module)
-                body = backend.IndexRequest(projectId=request.projectId, chunks=chunks)
+                body = backend.IndexRequest(projectId=request.projectId, chunks=chunks, rebuild=request.rebuild)
                 result = index(body)
                 return {**result, 'canonicalProjections': request.projectionSha256,
                         'targetModule': request.module}
@@ -390,11 +391,11 @@ def create_app(policy, *, backend=None, artifact_store=None, source_registry=Non
                         fail(stored['chunks'] == chunks, 'INDEX_STATUS_CURRENT_SOURCE_MISMATCH',
                              'Complete persisted parents differ from the exact current selected sources')
                         runtime.validate_metadata(stored)
-                        signed = runtime.signature(chunks)
-                        fail(stored['signature'] == signed, 'INDEX_STATUS_CURRENT_RUNTIME_MISMATCH',
+                        fail(runtime.signature_matches(stored['signature'], chunks), 'INDEX_STATUS_CURRENT_RUNTIME_MISMATCH',
                              'Persisted signature differs from the exact current source/runtime recipe')
+                        signed = stored['signature']
                         from index_integrity import verify_reuse
-                        collection = 'project_' + backend.digest(key)[:16] + '_' + backend.digest(signed)[:16]
+                        collection = runtime.index_collection(key, signed, stored.get('generation'))
                         verify_reuse(backend.database() if chunks else None, stored, key=key,
                                      collection=collection, chunks=chunks, signature=signed)
                         fail(before is not None and before == file_identity(), 'INDEX_STATUS_METADATA_CHANGED',

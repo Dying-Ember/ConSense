@@ -156,6 +156,14 @@ class CompetitionScopePolicy:
     metadata_spans: tuple[tuple[int, int], ...]
     excluded_spans: tuple[tuple[int, int], ...]
 
+    def for_source(self, source_sha256):
+        if source_sha256 != self.source_sha256:
+            raise CompetitionScopeError('sl_source_hash_does_not_match_manifest')
+        return self
+
+    def recognizes(self, source_sha256):
+        return source_sha256 == self.source_sha256
+
     @property
     def policyIdentity(self):
         identity = {'schema': POLICY_VERSION, 'scopeVersion': self.scope_version,
@@ -289,6 +297,47 @@ class CompetitionScopePolicy:
                 'includedDecisions': decisions, 'policyIdentity': self.policyIdentity}
 
 
+@dataclass(frozen=True)
+class CompetitionScopeSetPolicy:
+    manifest_sha256: str
+    editions: tuple
+
+    @property
+    def policyIdentity(self):
+        return {'schema':'consense.competition-scope-set.v1', 'manifestSha256':self.manifest_sha256,
+                'sources':[{'editionId':edition, **policy.policyIdentity} for edition, policy, _ in self.editions]}
+
+    def recognizes(self, source_sha256):
+        return any(policy.recognizes(source_sha256) for _, policy, _ in self.editions)
+
+    def for_source(self, source_sha256):
+        for _, policy, _ in self.editions:
+            if policy.recognizes(source_sha256):
+                return policy
+        raise CompetitionScopeError('sl_source_hash_does_not_match_manifest')
+
+    def source_manifest(self, source_sha256):
+        return next(manifest for _, policy, manifest in self.editions if policy.recognizes(source_sha256))
+
+    def apply(self, chunks, *, module='vetting'):
+        if not isinstance(chunks, (list, tuple)):
+            raise CompetitionScopeError('chunks_must_be_ordered_objects')
+        result = {key:[] for key in ('included','excluded','unclassified','includedDecisions')}
+        for ordinal, chunk in enumerate(chunks):
+            if not isinstance(chunk, dict):
+                raise CompetitionScopeError('chunk_must_be_object')
+            source = _original_hash(chunk, required=False)
+            is_sl = self.recognizes(source) or chunk.get('fileKey') == 'SL' or any(
+                isinstance(chunk.get(field),str) and chunk[field] in SL_CLASSES for field in ('sourceClass','documentClass'))
+            policy = self.for_source(source) if is_sl else self.editions[0][1]
+            applied = policy.apply([chunk], module=module)
+            for key in result:
+                for value in applied[key]:
+                    if key != 'included': value['ordinal'] = ordinal
+                    result[key].append(value)
+        return {**result, 'policyIdentity':self.policyIdentity}
+
+
 def load_policy(manifest_path, expected_manifest_sha256=None):
     """Read and validate an entire source-bound partition before applying scope.
 
@@ -313,6 +362,20 @@ def load_policy_bytes(raw, expected_manifest_sha256=None):
         if isinstance(error, CompetitionScopeError):
             raise
         raise CompetitionScopeError('scope_manifest_not_strict_utf8_json') from error
+    if isinstance(manifest, dict) and manifest.get('schema') == 'consense.sl-library-scope-set.v1':
+        values = manifest.get('manifests')
+        if set(manifest) != {'schema','manifests'} or not isinstance(values, list) or not 1 <= len(values) <= 100:
+            raise CompetitionScopeError('scope_set_manifest_shape_invalid')
+        editions, sources, names = [], set(), set()
+        for value in values:
+            policy = load_policy_bytes(_json_bytes(value))
+            if not isinstance(policy, CompetitionScopePolicy):
+                raise CompetitionScopeError('nested_scope_sets_forbidden')
+            edition = value['source'].get('versionId')
+            if not isinstance(edition, str) or not edition.strip() or edition.lower() in ('unknown','latest') or edition in names or policy.source_sha256 in sources:
+                raise CompetitionScopeError('scope_set_source_or_edition_ambiguous')
+            names.add(edition); sources.add(policy.source_sha256); editions.append((edition,policy,value))
+        return CompetitionScopeSetPolicy(file_sha, tuple(editions))
     if not isinstance(manifest, dict) or manifest.get('schema') != SCHEMA:
         raise CompetitionScopeError('unsupported_scope_manifest_schema')
     content_sha = _digest(manifest.get('manifestContentSha256'), 'manifestContentSha256')

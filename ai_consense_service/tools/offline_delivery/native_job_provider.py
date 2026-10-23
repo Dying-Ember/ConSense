@@ -27,8 +27,9 @@ def configuration(provider):
 
 
 @contextmanager
-def owned_gpu_provider(provider, remaining_seconds, receipt_dir, *, runner=kubectl, ready=None):
-    from native_provider_lifecycle import ProviderLifecycleError, _finite, _wire_ready
+def owned_gpu_provider(provider, remaining_seconds, receipt_dir, *, runner=kubectl, ready=None, cancelled=None):
+    from native_provider_lifecycle import ProviderLifecycleError, _finite, _wire_ready, _watch_cancellation
+    deadline = time.monotonic() + _finite(remaining_seconds, 'remaining_seconds')
     boot, manifest, service, adapter = configuration(provider)
     _finite(remaining_seconds, 'remaining_seconds'); _finite(boot.get('cleanupTimeoutSeconds'), 'cleanupTimeoutSeconds', 360)
     task = provider.get('taskBinding')
@@ -50,14 +51,20 @@ def owned_gpu_provider(provider, remaining_seconds, receipt_dir, *, runner=kubec
         try: outcome['result'] = run_request(boot['prepared'], boot['artifacts'], workspace, operation, boot['manifestSha256'], runner=runner, cancellation=cancellation)
         except BaseException as error: outcome['error'] = error
         finally: done.set()
+    require(time.monotonic() < deadline and not (cancelled is not None and cancelled()),
+            'Caller cancelled or native GPU Job deadline elapsed before dispatch')
+    timer = threading.Timer(max(.001, deadline-time.monotonic()), cancellation.set); timer.daemon = True; timer.start()
     worker = threading.Thread(target=dispatch, name='consense-native-gpu-job', daemon=True); worker.start()
     lifecycle = {'schema':'consense.native-provider-lifecycle.v1','mode':'owned_kubernetes_job','taskBinding':task,
                  'operationBindingSha256':operation['bindingSha256'],'modelReady':False,'targetAccepted':False}
-    save(receipt_dir/'start.json', lifecycle)
     failed = True
+    stop_watching = _watch_cancellation(cancelled, cancellation.set)
     try:
-        deadline = time.monotonic()+min(remaining_seconds, _finite(boot.get('readyTimeoutSeconds'), 'readyTimeoutSeconds'))
-        while time.monotonic() < deadline:
+        save(receipt_dir/'start.json', lifecycle)
+        ready_deadline = min(deadline, time.monotonic()+_finite(boot.get('readyTimeoutSeconds'), 'readyTimeoutSeconds'))
+        while time.monotonic() < ready_deadline:
+            if cancelled is not None and cancelled():
+                raise ProviderLifecycleError('Caller cancelled owned native GPU Job before readiness')
             if done.is_set(): raise outcome.get('error', ProviderLifecycleError('native Job terminated before readiness'))
             try:
                 pods = runner(command+['get','pods','-l','job-name='+name,'-o','json']).get('items', [])
@@ -67,18 +74,24 @@ def owned_gpu_provider(provider, remaining_seconds, receipt_dir, *, runner=kubec
                 if len(pods) == 1 and job_uid and pods[0].get('metadata',{}).get('uid') in targets \
                         and any(row.get('uid') == job_uid for row in pods[0].get('metadata',{}).get('ownerReferences',[])):
                     probe = {'baseUrl':provider['baseUrl'], 'ownedBoot':{'readyPath':adapter['profile']['readyPath']}}
-                    if ready(probe) if ready else _wire_ready(probe, min(.25,max(.001,deadline-time.monotonic()))):
+                    if ready(probe) if ready else _wire_ready(probe, min(.25,max(.001,ready_deadline-time.monotonic()))):
                         lifecycle['wireReady'] = {'status':'wire_ready_model_readiness_unverified', 'podUid':pods[0]['metadata']['uid']}
                         break
             except (OSError, ValueError): pass
             time.sleep(.05)
         else: raise TimeoutError('native GPU Job readiness deadline elapsed')
         yield lifecycle
+        if cancelled is not None and cancelled():
+            raise ProviderLifecycleError('Caller cancelled owned native GPU Job')
+        if time.monotonic() >= deadline:
+            raise TimeoutError('Native GPU Job caller deadline elapsed')
         from native_session_worker import verify_transaction
         verify_transaction(lifecycle.get('transaction',{}), task, store_root)
         failed = False
     finally:
-        cancellation.set()
+        timer.cancel(); timer.join()
+        stop_watching()
+        if failed: cancellation.set()
         transaction = lifecycle.get('transaction') if not failed else {'status':'aborted','taskBinding':task}
         if directory.is_dir(): save(directory/'transaction.json', transaction)
         worker.join(boot['cleanupTimeoutSeconds'])

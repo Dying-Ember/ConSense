@@ -1,3 +1,5 @@
+**2026-10-24 第二轮审计 R01–R07 源码修复（未部署）：** 语义成员／组字典 v2、OCR 同期限任务与单次派发、Paddle 临时输入释放、项目精确 SL 选版、可移植 5／6 签名及旧索引 adapter、显式 generation 重建已落代码。旧 v1／冻结记录与严格来源门保持，失败／blocked／unknown 不提升为完整；V27 未安装，私有运行 pin／产品服务／停止的 OCR 保持。实际回归、基线失败和部署准入见[修复验证](testing/oer-dataflow-and-sl-freeze-repair-20261024.md)。以下运行记录按各自历史阶段读取。
+
 **2026-10-23 review102联合部署已完成：** 产品源码`3b014db`的联合包已上线，后端47460／18086，公共Vetting／Advisory读取服务8874／8875已更新并确认`prepare + semantic_units`；V26六字段／两触发器已安装，旧101来源／27binding摘要保持NULL，无全表回填。原Vetting已因JSON校验失败终止18／20，未重跑；部署前全局活动保护0。21业务表／2848行所选内容前后摘要相同，H2与前端原进程保持、页面未刷新、OCR仍停，无新模型／识别／采用／生成。只授启动、只读HTTP与业务保全通过，真实PRE吞吐和语义结果未验；[部署及准确边界](testing/vetting-semantic-demand-hotfix-20261023.md)保留失败与原始收据。下方待部署说明按各自历史阶段读取。
 
 <!-- drafting-variable-alignment-current-20261023 -->

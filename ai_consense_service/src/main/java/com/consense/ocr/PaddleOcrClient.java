@@ -32,6 +32,7 @@ import java.util.HashSet;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
+import java.util.UUID;
 
 /**
  * PaddleOCR / PP-Structure 客户端。
@@ -401,14 +402,46 @@ public class PaddleOcrClient implements OcrClient {
         return recognizeLocal(imageBytes, identityOnly, null);
     }
     private OcrResult recognizeLocal(byte[] imageBytes, boolean identityOnly, Map<String,Object> sourceContext) {
+        long started = System.currentTimeMillis();
+        String taskId = UUID.randomUUID().toString().replace("-", "");
+        Map<String,String> headers = new LinkedHashMap<>();
+        headers.put("X-Consense-Ocr-Task-Id", taskId);
+        headers.put("X-Consense-Ocr-Deadline-Ms", Long.toString(Math.addExact(started, cfg.getTimeoutMs())));
+        headers.put("X-Consense-Ocr-Purpose", identityOnly ? "identity" : "parse");
+        RequestBody image = RequestBody.create(imageBytes, MediaType.get("image/png"));
+        RequestBody oneShotImage = new RequestBody() {
+            @Override public MediaType contentType(){return image.contentType();}
+            @Override public long contentLength() throws IOException{return image.contentLength();}
+            @Override public void writeTo(okio.BufferedSink sink) throws IOException{image.writeTo(sink);}
+            @Override public boolean isOneShot(){return true;}
+        };
         MultipartBody.Builder builder = new MultipartBody.Builder().setType(MultipartBody.FORM)
-                .addFormDataPart("file", "page.png",
-                        RequestBody.create(imageBytes, MediaType.get("image/png")));
+                .addFormDataPart("file", "page.png", oneShotImage);
         if (sourceContext != null) builder.addFormDataPart("sourceContext", JsonUtils.write(sourceContext));
         MultipartBody body = builder.build();
-        String raw = identityOnly ? http.postMultipart(trim(cfg.getBaseUrl()) + "/ocr", body, cfg.getTimeoutMs(),
-                Collections.singletonMap("X-Consense-Ocr-Purpose", "identity"))
-                : http.postMultipart(trim(cfg.getBaseUrl()) + "/ocr", body, cfg.getTimeoutMs());
+        String raw;
+        try {
+            long remaining = Math.max(1, cfg.getTimeoutMs() - (System.currentTimeMillis() - started));
+            raw = http.postMultipart(trim(cfg.getBaseUrl()) + "/ocr", body, remaining, headers, 32*1024*1024);
+        } catch (RuntimeException failure) {
+            String status = "unknown", retained = "";
+            String taskUrl = trim(cfg.getBaseUrl()) + "/ocr/tasks/" + taskId;
+            try {
+                JsonNode task = JsonUtils.parse(http.getBounded(taskUrl, 2000, 65536));
+                if (!taskId.equals(task.path("taskId").asText())) throw new BizException("OCR task response identity differs");
+                status = task.path("status").asText("unknown");
+                retained = task.has("resultRef") ? "; resultRef=" + task.path("resultRef").path("sha256").asText() : "";
+                if ("completed".equals(status) && task.path("resultRef").path("byteCount").asLong(Long.MAX_VALUE) <= 32L*1024*1024)
+                    raw = http.getBounded(taskUrl + "/result", 2000, 32*1024*1024);
+                else {
+                    if ("queued".equals(status) || "running".equals(status)) http.deleteBounded(taskUrl, 2000, 65536);
+                    throw new BizException("OCR task has no inline completed result");
+                }
+            } catch (RuntimeException queryFailure) {
+                throw new BizException("OCR task " + taskId + " status=" + status + retained
+                        + "; no OCR request was replayed: " + failure.getMessage());
+            }
+        }
         JsonNode response = JsonUtils.parse(raw);
         validateObservation(response, imageBytes);
         validatePageGroups(response.get("wholePageGroups"),sourceContext);

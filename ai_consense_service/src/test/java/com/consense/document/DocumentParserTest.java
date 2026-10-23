@@ -34,6 +34,7 @@ import java.util.zip.ZipOutputStream;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
@@ -238,7 +239,7 @@ class DocumentParserTest {
         cfg.setBaseUrl("http://localhost:8868");
         HttpSupport http = mock(HttpSupport.class);
         when(http.get(eq("http://localhost:8868/health"), anyLong())).thenReturn("{\"ok\":true}");
-        when(http.postMultipart(eq("http://localhost:8868/ocr"), any(), anyLong()))
+        when(http.postMultipart(eq("http://localhost:8868/ocr"), any(), anyLong(), anyMap(), eq(32*1024*1024)))
                 .thenReturn("{\"text\":\"SCT5 Envelope 1\",\"lines\":[{\"text\":\"SCT5 Envelope 1\","
                         + "\"confidence\":0.95,\"bbox\":[10,20,100,30]}],\"imageWidth\":200,\"imageHeight\":200}");
         PaddleOcrClient client = new PaddleOcrClient(cfg, http);
@@ -248,7 +249,7 @@ class DocumentParserTest {
         assertEquals("SCT5 Envelope 1", result.getText());
         assertArrayEquals(new double[]{10, 20, 100, 30}, result.getLines().get(0).getBbox());
         verify(http).postMultipart(eq("http://localhost:8868/ocr"), argThat(body ->
-                body.part(0).headers().get("Content-Disposition").contains("name=\"file\"")), anyLong());
+                body.part(0).headers().get("Content-Disposition").contains("name=\"file\"")), anyLong(), anyMap(), eq(32*1024*1024));
     }
 
     @Test

@@ -183,7 +183,7 @@ public class VettingSemanticReview {
         int count = Math.min(TOPICS.length, Math.max(0, props.getVetting().getSemanticTopics()));
         if(count>0&&OerBusinessEvidence.isSemanticCorpus(chunks)){
             progress.update(0,1,"读取本次范围的完整来源单元。");sourceGuard.run();
-            Result full=reviewScanned(result,chunks,oer.scan(OerBusinessEvidence.session(chunks)),lang,documents,sourceGuard,probe);
+            Result full=reviewScanned(projectId,result,chunks,oer.scan(OerBusinessEvidence.session(chunks)),lang,documents,sourceGuard,probe);
             returnedNormally=true;return full;
         }
         VettingReviewPackBuilder.Result factComparisons;
@@ -255,7 +255,7 @@ public class VettingSemanticReview {
             retrievalUnits.addAll(VettingRetrievalSourceUnits.attached(hits));
             // This independent read-only lane never indexes standards into the uploaded project.
             // A configured fixed baseline failure remains a failure, rather than silently using stale references.
-            fixedReferences=FixedVettingReferences.retrieve(fixedBaseline,topic,props.getVetting().getTopK());
+            fixedReferences=FixedVettingReferences.retrieve(fixedBaseline,projectId,topic,props.getVetting().getTopK());
             if(!fixedReferences.isEmpty()) {
                 topicCorpus=fixedReferences.topicCorpus(chunks);
                 topicProbe.event("fixed_standard_references",VettingReviewProbe.map("selectedReferenceIds",fixedReferences.chunks().stream().map(Chunk::getId).collect(Collectors.toList()),
@@ -366,13 +366,14 @@ public class VettingSemanticReview {
         }finally{if(previousProgress==null)activeProgress.remove();else activeProgress.set(previousProgress);}
     }
 
-    private Result reviewScanned(Result result,List<Chunk> corpus,List<Chunk> scanned,String lang,
+    private Result reviewScanned(String projectId,Result result,List<Chunk> corpus,List<Chunk> scanned,String lang,
                                  List<com.consense.domain.SourceDocument> documents,Runnable guard,VettingReviewProbe probe){
         guard.run();
         List<Chunk> subjects=scanned.stream().filter(c->"tender".equals(c.getRole())).collect(Collectors.toList());
+        if(subjects.isEmpty()&&OerBusinessEvidence.isSemanticCorpus(scanned)&&!OerBusinessEvidence.session(scanned).semanticReadCoverage().path("blockedOrigins").isEmpty()){result.getWarnings().add("本次招标审查起点均超限未读取，语义审查未执行，来源及未完成分母见 semanticSourceRead。");return result;}
         if(subjects.isEmpty())throw new IllegalStateException("No review subject in the declared source scope");
         String topic="Full declared-scope review: all applicable competition checks, including cross-file comparisons. "+String.join("; ",TOPICS);
-        FixedVettingReferences fixed=FixedVettingReferences.retrieve(fixedBaseline,topic,props.getVetting().getTopK());
+        FixedVettingReferences fixed=FixedVettingReferences.retrieve(fixedBaseline,projectId,topic,props.getVetting().getTopK());
         List<Chunk> all=fixed.isEmpty()?scanned:fixed.topicCorpus(scanned);
         Map<String,List<Chunk>> references=new LinkedHashMap<>();
         for(String role:Arrays.asList("standard","project_fact","package_manifest"))
@@ -403,6 +404,7 @@ public class VettingSemanticReview {
         Set<String> submitted=new HashSet<>();for(SemanticPacketVO packet:audit.getPacketAudits())if(packet.isActualGatewayCallStarted())submitted.addAll(packet.getSubmittedChunkIds());
         long unsubmitted=scanned.stream().filter(c->!submitted.contains(c.getId())).count();
         result.getWarnings().add("本次有序读取 "+scanned.size()+" 个来源单元；未提交模型 "+unsubmitted+" 个。读取完成、模型返回和语义核对分别计，空结果不表示全包无问题。");
+        if(OerBusinessEvidence.isSemanticCorpus(scanned)){JsonNode read=OerBusinessEvidence.session(scanned).semanticReadCoverage();if(!read.path("blockedOrigins").isEmpty()){audit.setAggregateReviewStatus("incomplete");audit.setCheckState("not_completed");for(JsonNode row:read.path("blockedOrigins"))audit.getUnresolvedChunkIds().add(row.path("id").asText());result.getWarnings().add("声明范围 "+read.path("totalOrigins").asInt()+" 个来源起点中，"+read.path("blockedOrigins").size()+" 个超限未读取；受影响判断未完成，详见 semanticSourceRead。");}}
         if(audit.getPendingSourceRequestCount()>0)result.getWarnings().add("尚有 "+audit.getPendingSourceRequestCount()+" 项来源／联合比较未完成，保留原因；没有扩大本次模型调用预算。");
         progressStage(result,first,"本轮已保存",System.nanoTime());return result;
     }

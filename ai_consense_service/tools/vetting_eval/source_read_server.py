@@ -18,13 +18,14 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from oer_server import assert_canonical_scope, canonical_scope_policy_sha
 from oer_source_registry import _serialize
-from retrieval_source_units import POLICY, SEMANTIC_VERSION, SourceUnits, semantic_member, semantic_unit, semantic_value
+from retrieval_source_units import POLICY, SEMANTIC_VERSION, SourceUnits, semantic_member, semantic_unit, semantic_value, semantic_unit_template
 from token_windows import WindowError, fail
 
 
 ENDPOINT = '/sources/read'
 CONTRACT = 'source-bound-demand-read-v1'
 MAX_BYTES = 16 * 1024 * 1024
+DICTIONARY_VERSION = 'source-semantic-dictionary-v2'
 Sha = Annotated[str, Field(min_length=64, max_length=64, pattern=r'^[0-9a-f]{64}$')]
 OriginId = Annotated[str, Field(min_length=1, max_length=2048)]
 LIMITATIONS = {
@@ -44,6 +45,7 @@ CAPABILITY = {
     'contract': CONTRACT, 'version': CONTRACT, 'endpoint': ENDPOINT,
     'operations': ['catalog', 'ids', 'scan', 'prepare'], 'views': ['canonical_units', 'semantic_units'],
     'semanticProjectionVersion': SEMANTIC_VERSION,
+    'semanticReadVersions': ['source-semantic-records-v1', DICTIONARY_VERSION],
     'semanticLimitations': SEMANTIC_LIMITATIONS,
     'semanticPreparation': {'operation': 'prepare', 'view': 'semantic_units',
         'subsequentRequestFields': ['readManifestSha256', 'readManifestToken'],
@@ -72,6 +74,8 @@ class SourceReadRequest(BaseModel):
     view: Annotated[str, Field(min_length=1, max_length=128)] = 'canonical_units'
     readManifestSha256: list[Sha] = Field(default_factory=list, max_length=10000)
     readManifestToken: Annotated[str, Field(min_length=64, max_length=64, pattern=r'^[0-9a-f]{64}$')] | None = None
+    semanticReadVersion: Literal['source-semantic-records-v1', 'source-semantic-dictionary-v2'] = 'source-semantic-records-v1'
+    knownSemanticGroups: list[Sha] = Field(default_factory=list, max_length=10000)
 
 
 def _unique(chunks, key):
@@ -139,6 +143,8 @@ def install_source_read_route(app, registry, policy, *, target_module, software_
         binding = {'projectionSha256': request.projectionSha256, 'readManifestSha256': addresses,
             'module': request.module, 'scopePolicySha256': policy.policyIdentity['manifestSha256'],
             'softwareIdentitySha256': software_sha(), 'semanticProjectionVersion': SEMANTIC_VERSION}
+        if request.semanticReadVersion == DICTIONARY_VERSION:
+            binding['semanticReadVersion'] = DICTIONARY_VERSION
         return hmac.new(secret, _serialize(binding), hashlib.sha256).hexdigest()
 
     def cas_json(address, maximum):
@@ -229,7 +235,23 @@ def install_source_read_route(app, registry, policy, *, target_module, software_
                             projected['nativeTables'] = semantic_value(value)
                         projected_members[parent['id']] = projected
                     return projected_members[parent['id']]
+                groups = {}
                 for parent in parents:
+                    if request.semanticReadVersion == DICTIONARY_VERSION:
+                        projected = member(parent)
+                        descriptor = registry.artifact_store.put_bytes(_serialize(projected), identity_scope='source_semantic_member_v2')
+                        template = semantic_unit_template(semantic_unit(catalog.resolve(parent), address, member_projector=member))
+                        template['documentId'] = projected['documentId']
+                        group_sha = hashlib.sha256(_serialize(template)).hexdigest()
+                        if group_sha not in groups:
+                            groups[group_sha] = registry.artifact_store.put_bytes(_serialize(template), identity_scope='source_semantic_group_v2')
+                        entries.append({'id': parent['id'], 'documentId': projected['documentId'], 'sourceHash': projected['sourceHash'], 'unitId': template['unitId'], 'groupId': group_sha,
+                            'recordRef': descriptor})
+                        # No per-origin closure tree survives the preparation loop.
+                        catalog.cache.clear()
+                        catalog.hierarchy_cache.clear()
+                        catalog.attachment_cache.clear()
+                        continue
                     record = {'origin': member(parent),
                               'unit': semantic_unit(catalog.resolve(parent), address, member_projector=member)}
                     raw = _serialize(record)
@@ -244,6 +266,8 @@ def install_source_read_route(app, registry, policy, *, target_module, software_
                     'softwareIdentitySha256': software, 'source': source,
                     'origins': entries, 'fileDependencies': list(files.values()),
                     'casDependencies': list(assets.values()), 'sourceQualityVerified': False}
+                if request.semanticReadVersion == DICTIONARY_VERSION:
+                    manifest.update(schema='consense.source-semantic-read-manifest.v2', semanticReadVersion=DICTIONARY_VERSION, groups=groups)
                 raw = _serialize(manifest)
                 fail(len(raw) <= MAX_BYTES, 'SOURCE_READ_MANIFEST_TOO_LARGE',
                      'Prepared source metadata exceeds its finite bound')
@@ -262,12 +286,80 @@ def install_source_read_route(app, registry, policy, *, target_module, software_
             'coldPreparation': {'performed': True, 'fullGraphValidation': True,
                 'closureAlgorithm': POLICY, 'originalSealsChanged': False},
             'limitations': SEMANTIC_LIMITATIONS, 'sourceQualityVerified': False}
+        if request.semanticReadVersion == DICTIONARY_VERSION:
+            result['semanticReadVersion'] = DICTIONARY_VERSION
         fail(len(_serialize(result)) <= request.maxBytes, 'SOURCE_READ_BUDGET_EXCEEDED',
              'Preparation receipt exceeds maxBytes', maxBytes=request.maxBytes)
         prepared_addresses[preparation_key] = manifests
         while len(prepared_addresses) > 128 or sum(len(key) + len(_serialize(value))
                 for key, value in prepared_addresses.items()) > 4 * 1024 * 1024:
             prepared_addresses.popitem(last=False)
+        return result
+
+    def dictionary_read(request, result, entries, groups, start, scope_sha):
+        """Members travel once in origin order; the consumer assembles complete closures after scan."""
+        from native_observation import _strict_json
+        known = set(request.knownSemanticGroups)
+        fail(len(known) == len(request.knownSemanticGroups) and known <= groups.keys(),
+             'SOURCE_READ_PREPARATION_STALE', 'Known groups must belong to these exact prepared manifests')
+        result.update(semanticReadVersion=DICTIONARY_VERSION, originUnits={}, blockedOrigins=[])
+        result['scopeIdentity']['semanticReadVersion'] = DICTIONARY_VERSION
+        ledger = result['coverage']
+        ledger['blockedOriginIds'] = []
+        if request.operation == 'catalog':
+            return result
+        by_id = {entry['id']: entry for entry in entries}
+        fail(all(id_ in by_id for id_ in request.originIds), 'SOURCE_READ_ORIGIN_OUTSIDE_SCOPE', 'Origin outside prepared scope')
+        selected = ([by_id[id_] for id_ in request.originIds] if request.operation == 'ids'
+                    else entries[start:start + request.maxItems])
+        def progress():
+            count = len(result['origins']) + len(result['blockedOrigins'])
+            ledger.update(returnedOrigins=len(result['origins']), processedOrigins=start + count,
+                remainingOrigins=len(entries) - start - count)
+            result['nextCursor'] = (cursor(scope_sha, start + count)
+                if request.operation == 'scan' and start + count < len(entries) else None)
+            ledger['status'] = ('partial' if result['nextCursor'] is not None else
+                'complete_with_blocked' if result['blockedOrigins'] else 'complete')
+        for entry in selected:
+            descriptor, group_id = entry['recordRef'], entry['groupId']
+            group_ref = groups[group_id]
+            new_group = group_id not in known
+            required = descriptor['byteCount'] + (group_ref['byteCount'] if new_group else 0)
+            origin, group = None, None
+            if required <= MAX_BYTES:
+                origin = _strict_json(registry.artifact_store.read_asset(descriptor))
+                fail(origin['id'] == entry['id'], 'SOURCE_READ_PREPARATION_STALE', 'Member differs from its prepared address')
+                if new_group:
+                    group = _strict_json(registry.artifact_store.read_asset(group_ref))
+                    fail(group['unitId'] == entry['unitId'] and group['documentId'] == origin['documentId'],
+                         'SOURCE_READ_PREPARATION_STALE', 'Group differs from its prepared address')
+                    result['units'].append({'groupId': group_id, 'unit': group})
+                result['origins'].append(origin)
+                result['originUnits'][entry['id']] = group_id
+                ledger['returnedOriginIds'].append(entry['id'])
+                ledger['requestedOriginIds'].append(entry['id'])
+                progress()
+                required = len(_serialize(result))
+                if required <= request.maxBytes:
+                    known.add(group_id)
+                    continue
+                result['origins'].pop()
+                result['originUnits'].pop(entry['id'])
+                ledger['returnedOriginIds'].pop()
+                ledger['requestedOriginIds'].pop()
+                if new_group:
+                    result['units'].pop()
+                progress()
+                if result['origins'] or result['blockedOrigins']:
+                    break
+            fail(request.operation != 'ids', 'SOURCE_READ_BUDGET_EXCEEDED',
+                 'Requested member/group exceeds the finite read budget; no text is truncated', originId=entry['id'])
+            result['blockedOrigins'].append({'id': entry['id'], 'documentId': entry['documentId'], 'sourceHash': entry['sourceHash'], 'unitId': entry['unitId'], 'groupId': group_id,
+                'reason': 'semantic_member_or_group_too_large', 'requiredBytes': required, 'maxBytes': request.maxBytes})
+            ledger['blockedOriginIds'].append(entry['id'])
+            ledger['requestedOriginIds'].append(entry['id'])
+            progress()
+            fail(len(_serialize(result)) <= request.maxBytes, 'SOURCE_READ_BUDGET_EXCEEDED', 'Blocked-source ledger exceeds maxBytes')
         return result
 
     def semantic_read(request):
@@ -279,11 +371,12 @@ def install_source_read_route(app, registry, policy, *, target_module, software_
         fail(hmac.compare_digest(request.readManifestToken, preparation_token(request, request.readManifestSha256)),
              'SOURCE_READ_PREPARATION_STALE', 'Preparation belongs to another process, scope, source order, policy or software')
         with registry.validation_frame(software_guard=software_guard):
-            sources, entries, metadata_bytes = [], [], 0
+            sources, entries, metadata_bytes, groups = [], [], 0, {}
             for address, prepared in zip(request.projectionSha256, request.readManifestSha256):
                 manifest, size = cas_json(prepared, MAX_BYTES - metadata_bytes)
                 metadata_bytes += size
-                fail(manifest['schema'] == 'consense.source-semantic-read-manifest.v1'
+                dictionary = request.semanticReadVersion == DICTIONARY_VERSION
+                fail(manifest['schema'] == ('consense.source-semantic-read-manifest.v2' if dictionary else 'consense.source-semantic-read-manifest.v1')
                      and manifest['projectionSha256'] == address
                      and manifest['module'] == request.module
                      and manifest['scopePolicySha256'] == policy.policyIdentity['manifestSha256']
@@ -293,12 +386,19 @@ def install_source_read_route(app, registry, policy, *, target_module, software_
                      'SOURCE_READ_PREPARATION_STALE', 'Prepared read identities do not match the current request')
                 registry.verify_prepared_read_dependencies(manifest['fileDependencies'], manifest['casDependencies'])
                 sources.append(manifest['source']); entries.extend(manifest['origins'])
+                if dictionary:
+                    for key, descriptor in manifest['groups'].items():
+                        fail(key == descriptor['sha256'] and (key not in groups or groups[key] == descriptor),
+                             'SOURCE_READ_PREPARATION_STALE', 'Group address is ambiguous')
+                        groups[key] = descriptor
             by_id = {entry['id']: entry for entry in entries}
             fail(len(by_id) == len(entries), 'SOURCE_READ_AMBIGUOUS_ORIGIN', 'Prepared origin IDs must be unique')
             scope = {'sources': sources, 'module': request.module, 'policyIdentity': policy.policyIdentity,
                 'sourceUnitPolicy': POLICY, 'view': request.view, 'semanticProjectionVersion': SEMANTIC_VERSION,
                 'readManifestSha256': request.readManifestSha256, 'softwareIdentitySha256': software_sha(),
                 'originOrderSha256': hashlib.sha256(_serialize([entry['id'] for entry in entries])).hexdigest()}
+            if request.semanticReadVersion == DICTIONARY_VERSION:
+                scope['semanticReadVersion'] = DICTIONARY_VERSION
             scope_sha = hashlib.sha256(_serialize(scope)).hexdigest()
             start = offset(request.cursor, scope_sha, len(entries))
             ledger = {'status': 'catalog' if request.operation == 'catalog' else 'complete',
@@ -311,6 +411,10 @@ def install_source_read_route(app, registry, policy, *, target_module, software_
                 'readManifestSha256': request.readManifestSha256, 'readManifestToken': request.readManifestToken,
                 'origins': [], 'units': [], 'nextCursor': None, 'coverage': ledger,
                 'limitations': SEMANTIC_LIMITATIONS, 'sourceQualityVerified': False}
+            if request.semanticReadVersion == DICTIONARY_VERSION:
+                result = dictionary_read(request, result, entries, groups, start, scope_sha)
+                fail(len(_serialize(result)) <= request.maxBytes, 'SOURCE_READ_BUDGET_EXCEEDED', 'Semantic dictionary exceeds maxBytes')
+                return result
             if request.operation != 'catalog':
                 fail(all(origin in by_id for origin in request.originIds), 'SOURCE_READ_ORIGIN_OUTSIDE_SCOPE',
                      'Every requested ID must belong to the prepared source scope')

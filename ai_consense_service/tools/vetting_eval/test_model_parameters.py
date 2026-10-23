@@ -376,7 +376,7 @@ class ModelParametersTest(unittest.TestCase):
             self.assertEqual('cuda', server.device())
             current = server.signature(CHUNKS)
             self.assertEqual(('cuda', 'float32'), (current['runtime']['device'], current['runtime']['dtype']))
-            self.assertEqual(3, current['signatureVersion'])
+            self.assertEqual(5, current['signatureVersion'])
         fake_torch.set_num_threads.assert_called_once_with(4)
         with patch.dict(sys.modules, {'torch': fake_torch}), \
              patch.dict(server.os.environ, {'CONSENSE_MODEL_DEVICE': 'cuda'}), \
@@ -446,7 +446,7 @@ class ModelParametersTest(unittest.TestCase):
              patch.object(server, '_windows_runtime', runtime), patch.object(server, 'MODEL_DTYPE', 'float32'):
             initial = server.signature(CHUNKS)
             self.assertEqual('float32', initial['runtime']['dtype'])
-            self.assertEqual(3, initial['signatureVersion'])
+            self.assertEqual(5, initial['signatureVersion'])
             settings['reranker'].update(maxTokens=1024, batchSize=2)
             self.assertEqual(initial, server.signature(CHUNKS))
             for key, value in (('maxTokens', 1024), ('batchSize', 2)):

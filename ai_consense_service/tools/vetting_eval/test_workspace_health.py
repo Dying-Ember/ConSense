@@ -80,7 +80,7 @@ class WorkspaceHealthTests(unittest.TestCase):
 
     def test_explicit_structural_recipe_reports_its_own_signature_without_loading_models(self):
         with patch.dict(os.environ,{'CONSENSE_RETRIEVAL_GRANULARITY':'dual-structure-v1'}):
-            self.assertEqual(self.health()['indexSignatureVersion'],4)
+            self.assertEqual(self.health()['indexSignatureVersion'],6)
 
     def test_health_does_not_load_tokenizer_or_neural_models(self):
         result = self.health(); windows = result['retrieval']['sourceWindows']

@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path
 import threading
+import tempfile
 
 from fastapi import FastAPI, HTTPException
 from PIL import Image
@@ -130,13 +131,20 @@ class NativePaddleRuntime:
         with Image.open(io.BytesIO(raw)) as image:
             extension = {'PNG': 'png', 'JPEG': 'jpg', 'TIFF': 'tiff', 'WEBP': 'webp'}[image.format]
         input_root = self.store.root / 'inputs'; input_root.mkdir(exist_ok=True)
-        path = input_root / (input_descriptor['sha256'] + '.' + extension)
-        try:
+        with tempfile.TemporaryDirectory(prefix='raster-', dir=input_root) as directory:
+            path = Path(directory) / ('page.' + extension)
             with path.open('xb') as stream:
                 stream.write(raw); stream.flush(); os.fsync(stream.fileno())
-        except FileExistsError:
-            if path.read_bytes() != raw:
-                raise ValueError('Previously persisted immutable raster bytes changed')
+            try:
+                return self._capture_page(path, input_descriptor)
+            except NativePaddleCaptureError as error:
+                self.store.put_bytes(json.dumps(error.manifest, ensure_ascii=False, allow_nan=False).encode(),
+                    identity_scope='actual_failed_native_capture_manifest')
+                for content in error.assets.values():
+                    self.store.put_bytes(content, identity_scope='actual_failed_native_capture_asset')
+                raise
+
+    def _capture_page(self, path, input_descriptor):
         try:
             results, manifest, assets = self.capture.run(lambda: list(self.pipeline.predict_iter(str(path),
                 max_new_tokens=self.config['maxNewTokens'], markdown_ignore_labels=[], use_queues=False)))
@@ -173,8 +181,10 @@ class NativePaddleRuntime:
                     allow_nan=False, sort_keys=True).encode()).decode('ascii')},
                 **_native_assets(assets, manifest, self.config, self.store),
                 'nativeCapture': {'status': manifest['captureStatus'], 'runtime': manifest['runtime'],
-                                  'inputSha256': hashlib.sha256(raw).hexdigest(), 'sourceQualityAccepted': False}}
+                                  'inputSha256': input_descriptor['sha256'], 'sourceQualityAccepted': False}}
             json.dumps(response, ensure_ascii=False, allow_nan=False)
+            self.store.put_bytes(base64.b64decode(response['rawOutputs']['model_output']),
+                identity_scope='actual_successful_native_capture_manifest')
             return response
         except Exception as error:
             captured_manifest.update(input=input_descriptor, captureStatus='failed_native_capture',

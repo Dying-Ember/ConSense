@@ -30,6 +30,7 @@ public final class FixedReferenceEvidence {
         pointer.put("evidenceBackend","fixed_development_baseline");pointer.put("parentId",id);
         pointer.put("manifestSha256",payload.path("fixedBaselineManifestSha256").asText());pointer.put("baselineVersion",payload.path("fixedBaselineVersion").asText());
         pointer.put("sourceFamily",getSourceFamily());pointer.put("sourceRole","standard");pointer.put("originalSourceSha256",payload.path("originalSourceSha256").asText(payload.path("sourceHash").asText()));
+        if(payload.has("fixedBaselineEditionId"))pointer.put("editionId",payload.path("fixedBaselineEditionId").asText());
         if(payload.has("originalPageNos"))pointer.set("originalPageNos",payload.get("originalPageNos").deepCopy());pointer.put("pageNo",getPageNo());
         pointer.put("fullObservedParentPreserved",true);pointer.put("sourceQualityAccepted",false);pointer.put("projectApplicability","unconfirmed");pointer.put("qualifiersComplete","unknown");pointer.put("legalOwnershipAccepted",false);
         if(sourceUnit!=null){com.fasterxml.jackson.databind.node.ObjectNode group=pointer.putObject("sourceUnit");for(String key:java.util.Arrays.asList("unitId","kind","status","sourceIdentity","requiredMemberIds","presentMemberIds","missingMemberIds","originIds","required","present","missing","unknown","qualifiersComplete","semanticScopeVerified"))if(sourceUnit.has(key))group.set(key,sourceUnit.get(key).deepCopy());}

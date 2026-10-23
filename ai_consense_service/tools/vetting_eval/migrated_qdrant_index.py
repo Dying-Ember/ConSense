@@ -12,6 +12,7 @@ from index_integrity import verify_reuse
 from migrate_qdrant_server import validate_metadata
 from token_windows import digest, fail
 from verify_retrieval_offline import descriptor
+from portable_index_signature import migration_signature_version
 
 ENV = 'CONSENSE_QDRANT_MIGRATION_RECEIPT'
 
@@ -75,7 +76,7 @@ class MigratedIndex:
         bound(self.receipt_file); bound(self.receipt['frozenManifest']); bound(self.receipt['candidateMetadata'])
         m = self.metadata
         fail(key == m['projectId'], 'MIGRATED_INDEX_PROJECT', 'Only the pinned migrated project can be queried')
-        fail(m['contract'] == runtime.contract() and m['signature']['signatureVersion'] == runtime.signature_version()
+        fail(m['contract'] == runtime.contract() and migration_signature_version(m['signature']['signatureVersion'], runtime.signature_version())
              and asdict(runtime.recipe('embedding')) == m['signature']['windowRecipe'],
              'MIGRATED_INDEX_QUERY_RECIPE', 'Query contract or full source window recipe differs')
         identity = runtime.identity('embedding'); original = m['signature']['tokenizerAndModelFiles']

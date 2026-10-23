@@ -33,6 +33,7 @@ public class OerCanonicalRetrievalClient {
     private static final String SOURCE_PAGE_INDEX = "explicit-composite-index-pins-v1";
     public static final String SOURCE_READ = "source-bound-demand-read-v1";
     public static final String SEMANTIC_READ = "source-semantic-units-v1";
+    public static final String SEMANTIC_DICTIONARY = "source-semantic-dictionary-v2";
     private static final List<String> SCOPE = Arrays.asList("documentId", "sourceHash", "role", "metadataVersion",
             "segmentationVersion", "nativeTableMetadataVersion", "sourceQualityMetadataVersion", "sourceQualityHash");
     private final HttpSupport http;
@@ -206,6 +207,7 @@ public class OerCanonicalRetrievalClient {
     private static final class Capability {
         final String fingerprint,sourceUnitPolicy,indexStatusContract,softwareIdentity;
         final boolean sourceRead,semanticRead;
+        boolean semanticDictionary;
         Capability(String fingerprint,String policy,String indexStatusContract,boolean sourceRead,boolean semanticRead,String softwareIdentity){this.fingerprint=fingerprint;this.sourceUnitPolicy=policy;this.indexStatusContract=indexStatusContract;this.sourceRead=sourceRead;this.semanticRead=semanticRead;this.softwareIdentity=softwareIdentity;}
     }
     /** Immutable semantic addresses, not a source-validity verdict or a retained source graph. */
@@ -215,14 +217,17 @@ public class OerCanonicalRetrievalClient {
         private final List<CanonicalSourceBinding> bindings;
         private final int total;
         private String scopeSha;
+        private final boolean dictionary;
         private SemanticSources(String module,String policy,Capability health,String runtime,JsonNode result,List<CanonicalSourceBinding> bindings,int total){
             this.module=module;this.policy=policy;software=health.softwareIdentity;this.runtime=runtime;token=result.path("readManifestToken").asText();
+            dictionary=SEMANTIC_DICTIONARY.equals(result.path("semanticReadVersion").asText());
             addresses=result.path("projectionSha256").deepCopy();manifests=result.path("readManifestSha256").deepCopy();sources=result.path("sources").deepCopy();this.bindings=new ArrayList<>();
             for(CanonicalSourceBinding original:bindings){CanonicalSourceBinding compact=new CanonicalSourceBinding();org.springframework.beans.BeanUtils.copyProperties(original,compact);compact.setSnapshotJson(null);this.bindings.add(compact);}this.total=total;
         }
         public String identitySha256(){return hash(JsonUtils.write(Arrays.asList(module,policy,software,addresses,manifests,sources)));}
         public int totalOrigins(){return total;}
         public JsonNode sourceCatalog(){return sources.deepCopy();}
+        public boolean dictionary(){return dictionary;}
     }
     public SemanticSources prepareSemanticSources(String module,List<CanonicalSourceBinding> current){
         require(current!=null&&!current.isEmpty(),"semantic sources missing");String policy=current.get(0).getScopePolicySha256();
@@ -230,8 +235,10 @@ public class OerCanonicalRetrievalClient {
         ArrayNode addresses=request.putArray("projectionSha256");Set<Long> ids=new HashSet<>();for(CanonicalSourceBinding binding:current){
             require(binding!=null&&ids.add(binding.getDocumentId())&&policy.equals(binding.getScopePolicySha256())&&sha(binding.getProjectionSha256()),"semantic source pins differ");addresses.add(binding.getProjectionSha256());}
         Capability before=health(module,policy,false,false,false,false,false,false);require(before.sourceRead&&before.semanticRead,"OER bounded semantic source reads unavailable");
+        if(before.semanticDictionary)request.put("semanticReadVersion",SEMANTIC_DICTIONARY);
         String runtime=localRuntimeFingerprint(module);JsonNode result=statusReceipt(backend.sourceRead(JsonUtils.write(request),module,16777216));
         Capability after=health(module,policy,false,false,false,false,false,false);require(before.fingerprint.equals(after.fingerprint)&&runtime.equals(localRuntimeFingerprint(module)),"semantic runtime changed during preparation");
+        require(before.semanticDictionary==SEMANTIC_DICTIONARY.equals(result.path("semanticReadVersion").asText()),"semantic read version differs");
         require(SOURCE_READ.equals(result.path("contract").asText())&&SEMANTIC_READ.equals(result.path("semanticProjectionVersion").asText())
                 &&"prepare".equals(result.path("operation").asText())&&"semantic_units".equals(result.path("view").asText())&&module.equals(result.path("module").asText())
                 &&addresses.equals(result.path("projectionSha256"))&&before.sourceUnitPolicy.equals(result.path("sourceUnitPolicy").asText())&&falseBoolean(result.path("sourceQualityVerified"))
@@ -243,7 +250,7 @@ public class OerCanonicalRetrievalClient {
     }
     /** Every call asks the public source service to rehash its actual dependencies before and after the read. */
     public JsonNode readSemanticSources(SemanticSources selected,JsonNode demand){
-        require(selected!=null&&demand!=null&&demand.isObject(),"semantic read scope missing");Set<String> allowed=new HashSet<>(Arrays.asList("operation","originIds","cursor","maxItems","maxBytes"));
+        require(selected!=null&&demand!=null&&demand.isObject(),"semantic read scope missing");Set<String> allowed=new HashSet<>(Arrays.asList("operation","originIds","cursor","maxItems","maxBytes","knownSemanticGroups"));
         demand.fieldNames().forEachRemaining(field->require(allowed.contains(field),"semantic read field unsupported"));String operation=demand.path("operation").asText();
         int items=demand.path("maxItems").asInt(64),maximum=demand.path("maxBytes").asInt(16777216);require(Arrays.asList("catalog","ids","scan").contains(operation)&&items>0&&items<=256&&maximum>=1024&&maximum<=16777216,"semantic read operation/budget invalid");
         for(String field:Arrays.asList("maxItems","maxBytes"))require(!demand.has(field)||integer(demand.path(field)),"semantic read budget must be integral");
@@ -251,6 +258,7 @@ public class OerCanonicalRetrievalClient {
         require(!demand.hasNonNull("cursor")||"scan".equals(operation)&&demand.path("cursor").isTextual(),"semantic cursor invalid");
         Capability before=health(selected.module,selected.policy,false,false,false,false,false,false);require(before.sourceRead&&before.semanticRead&&selected.software.equals(before.softwareIdentity)&&selected.runtime.equals(localRuntimeFingerprint(selected.module)),"semantic source software changed");
         ObjectNode request=demand.deepCopy();request.put("module",selected.module);request.put("view","semantic_units");request.put("maxItems",items);request.put("maxBytes",maximum);request.set("projectionSha256",selected.addresses);request.set("readManifestSha256",selected.manifests);request.put("readManifestToken",selected.token);
+        if(selected.dictionary)request.put("semanticReadVersion",SEMANTIC_DICTIONARY);
         JsonNode result=statusReceipt(backend.sourceRead(JsonUtils.write(request),selected.module,maximum));Capability after=health(selected.module,selected.policy,false,false,false,false,false,false);
         require(before.fingerprint.equals(after.fingerprint)&&selected.runtime.equals(localRuntimeFingerprint(selected.module)),"semantic runtime changed during read");
         require(SOURCE_READ.equals(result.path("contract").asText())&&SEMANTIC_READ.equals(result.path("semanticProjectionVersion").asText())&&operation.equals(result.path("operation").asText())
@@ -262,6 +270,7 @@ public class OerCanonicalRetrievalClient {
                 &&selected.sources.equals(identity.path("sources"))&&selected.manifests.equals(identity.path("readManifestSha256"))&&selected.policy.equals(identity.path("policyIdentity").path("manifestSha256").asText())
                 &&selected.module.equals(identity.path("module").asText())&&"semantic_units".equals(identity.path("view").asText()),"semantic scope identity differs");
         require(selected.scopeSha==null||selected.scopeSha.equals(scopeSha),"semantic source order changed");selected.scopeSha=scopeSha;
+        if(selected.dictionary){validateSemanticDictionary(result,demand,selected,operation,items,scopeSha);return result.deepCopy();}
         JsonNode origins=result.path("origins"),units=result.path("units"),coverage=result.path("coverage");require(origins.isArray()&&units.isArray()&&origins.size()==units.size()&&origins.size()<=items,"semantic origins/units differ");
         List<String> returned=new ArrayList<>();for(int i=0;i<origins.size();i++){JsonNode origin=origins.get(i);validateSemanticMember(origin,selected);require(!returned.contains(origin.path("id").asText()),"semantic duplicate origin");returned.add(origin.path("id").asText());validateSemanticUnit(units.get(i),origin,selected);}
         require(returned.equals(ids(coverage.path("returnedOriginIds")))&&integer(coverage.path("returnedOrigins"))&&returned.size()==coverage.path("returnedOrigins").asInt()&&integer(coverage.path("totalOrigins"))&&selected.total==coverage.path("totalOrigins").asInt(),"semantic read coverage differs");
@@ -274,6 +283,29 @@ public class OerCanonicalRetrievalClient {
             require(processed==selected.total?"complete".equals(coverage.path("status").asText()):returned.isEmpty()?"unit_too_large".equals(coverage.path("status").asText()):"partial".equals(coverage.path("status").asText()),"semantic scan status differs");
         }
         return result.deepCopy();
+    }
+    private static void validateSemanticDictionary(JsonNode result,JsonNode demand,SemanticSources selected,String operation,int items,String scopeSha){
+        require(SEMANTIC_DICTIONARY.equals(result.path("semanticReadVersion").asText())&&SEMANTIC_DICTIONARY.equals(result.path("scopeIdentity").path("semanticReadVersion").asText()),"semantic dictionary version differs");
+        JsonNode origins=result.path("origins"),groups=result.path("units"),blocked=result.path("blockedOrigins"),links=result.path("originUnits"),coverage=result.path("coverage");
+        require(origins.isArray()&&groups.isArray()&&blocked.isArray()&&links.isObject()&&origins.size()+blocked.size()<=items,"semantic dictionary shape differs");
+        Set<String> known=new HashSet<>(demand.has("knownSemanticGroups")?ids(demand.path("knownSemanticGroups")):Collections.emptyList());Map<String,JsonNode> templates=new HashMap<>();
+        for(String id:known)require(sha(id),"semantic known group identity invalid");
+        for(JsonNode row:groups){String id=row.path("groupId").asText();JsonNode unit=row.path("unit");require(sha(id)&&!known.contains(id)&&templates.put(id,unit)==null&&id.equals(hash(JsonUtils.write(OerCanonicalSourceUnits.sorted(unit)))),"semantic group identity differs");
+            require(sha(unit.path("unitId").asText())&&falseBoolean(unit.path("derivedMembersCanBecomeOrigins"))&&falseBoolean(unit.path("semanticScopeVerified"))&&!unit.has("originIds"),"semantic group declarations differ");
+            require(selected.bindings.stream().anyMatch(b->String.valueOf(b.getDocumentId()).equals(unit.path("documentId").asText())),"semantic group outside scope");
+            for(JsonNode envelope:Arrays.asList(unit,unit.get("hierarchyContext"),unit.get("attachmentContext")))if(envelope!=null){List<String> required=ids(envelope.path("requiredMemberIds"));require(!envelope.has("members")&&Arrays.asList("unknown","complete_observed_unit","complete_observed_hierarchy_context","complete_observed_attachment_context").contains(envelope.path("status").asText()),"semantic group contains expanded or unknown transport");require(!"unknown".equals(envelope.path("status").asText())||required.isEmpty()&&envelope.path("reason").isTextual(),"semantic unknown group promoted");}}
+        List<String> returned=new ArrayList<>(),denied=new ArrayList<>();for(JsonNode origin:origins){validateSemanticMember(origin,selected);String id=origin.path("id").asText(),group=links.path(id).asText();require(!returned.contains(id)&&sha(group)&&(known.contains(group)||templates.containsKey(group)),"semantic origin group missing");returned.add(id);JsonNode template=templates.get(group);if(template!=null)require(template.path("documentId").equals(origin.path("documentId")),"semantic origin group source differs");}
+        require(links.size()==returned.size(),"semantic group links contain extra origins");
+        for(JsonNode row:blocked)require(selected.bindings.stream().anyMatch(b->String.valueOf(b.getDocumentId()).equals(row.path("documentId").asText())&&Objects.equals(b.getCanonicalSourceHash(),row.path("sourceHash").asText())),"semantic blocked origin outside source scope");
+        for(JsonNode row:blocked){String id=row.path("id").asText();require(!id.isEmpty()&&!returned.contains(id)&&!denied.contains(id)&&sha(row.path("unitId").asText())&&sha(row.path("groupId").asText())&&"semantic_member_or_group_too_large".equals(row.path("reason").asText())&&integer(row.path("requiredBytes"))&&row.path("requiredBytes").asLong()>demand.path("maxBytes").asLong(16777216),"semantic blocked origin differs");denied.add(id);}
+        require(returned.equals(ids(coverage.path("returnedOriginIds")))&&denied.equals(ids(coverage.path("blockedOriginIds")))&&integer(coverage.path("totalOrigins"))&&coverage.path("totalOrigins").asInt()==selected.total&&integer(coverage.path("returnedOrigins"))&&coverage.path("returnedOrigins").asInt()==returned.size(),"semantic dictionary coverage differs");
+        List<String> requested=ids(coverage.path("requestedOriginIds"));Set<String> processedIds=new HashSet<>(returned);processedIds.addAll(denied);require(new HashSet<>(requested).equals(processedIds)&&requested.size()==processedIds.size(),"semantic processed origin ledger differs");
+        if("catalog".equals(operation)){require(returned.isEmpty()&&blocked.isEmpty()&&groups.isEmpty()&&result.path("nextCursor").isNull()&&"catalog".equals(coverage.path("status").asText()),"semantic dictionary catalog contains content");return;}
+        if("ids".equals(operation)){require(denied.isEmpty()&&returned.equals(ids(demand.path("originIds")))&&"complete".equals(coverage.path("status").asText())&&result.path("nextCursor").isNull(),"semantic dictionary requested origins omitted");return;}
+        int start=demand.hasNonNull("cursor")?sourceCursorOffset(demand.path("cursor"),scopeSha,selected.total):0,processed=coverage.path("processedOrigins").asInt();
+        require(integer(coverage.path("processedOrigins"))&&integer(coverage.path("remainingOrigins"))&&processed==start+returned.size()+denied.size()&&processed>start&&processed<=selected.total&&coverage.path("remainingOrigins").asInt()==selected.total-processed,"semantic dictionary scan skipped origins");
+        require(processed==selected.total?result.path("nextCursor").isNull():result.path("nextCursor").isTextual()&&sourceCursorOffset(result.path("nextCursor"),scopeSha,selected.total)==processed,"semantic dictionary cursor differs");
+        require((processed<selected.total?"partial":denied.isEmpty()?"complete":"complete_with_blocked").equals(coverage.path("status").asText()),"semantic dictionary scan status differs");
     }
     private static int validateSemanticCatalog(JsonNode sources,List<CanonicalSourceBinding> bindings){
         require(sources.isArray()&&sources.size()==bindings.size(),"semantic source catalog differs");int total=0;for(int i=0;i<bindings.size();i++){CanonicalSourceBinding binding=bindings.get(i);JsonNode source=sources.get(i);
@@ -353,10 +385,12 @@ public class OerCanonicalRetrievalClient {
 
     /** Complete JSON is authoritative; no old Chunk/Part DTO conversion occurs. */
     public void index(String indexKey,String module,CanonicalEvidenceService.VerifiedBindingFrame frame){
-        index(indexKey,module,frame.bindings(),frame);
+        index(indexKey,module,frame.bindings(),frame,false);
     }
-    public void index(String indexKey, String module, List<CanonicalSourceBinding> current){index(indexKey,module,current,null);}
-    private void index(String indexKey, String module, List<CanonicalSourceBinding> current,CanonicalEvidenceService.VerifiedBindingFrame frame) {
+    public void index(String indexKey, String module, List<CanonicalSourceBinding> current){index(indexKey,module,current,null,false);}
+    public void rebuild(String indexKey,String module,CanonicalEvidenceService.VerifiedBindingFrame frame){index(indexKey,module,frame.bindings(),frame,true);}
+    public void rebuild(String indexKey,String module,List<CanonicalSourceBinding> current){index(indexKey,module,current,null,true);}
+    private void index(String indexKey, String module, List<CanonicalSourceBinding> current,CanonicalEvidenceService.VerifiedBindingFrame frame,boolean rebuild) {
         Operation operation=beginOperation(indexKey,true);
         try {
         Corpus corpus = corpus(current,module,frame);
@@ -364,6 +398,7 @@ public class OerCanonicalRetrievalClient {
         bindContext(operation,module,corpus,health);
         ObjectNode request = JsonUtils.mapper().createObjectNode();
         request.put("projectId", indexKey); request.put("module", module);
+        if(rebuild)request.put("rebuild",true);
         ArrayNode addresses = request.putArray("projectionSha256"); corpus.projections.forEach(addresses::add);
         if(!corpus.sourcePageEvidence.isEmpty())request.set("sourcePageEvidence",JsonUtils.mapper().valueToTree(corpus.sourcePageEvidence));
         if(frame!=null)frame.beforeWait();
@@ -679,7 +714,7 @@ public class OerCanonicalRetrievalClient {
                     && runtime.path("serialOffload").isBoolean() && runtime.path("serialOffload").asBoolean(),
                     "canonical CUDA float32 serial runtime required: "+kind);
         }
-        require(VettingRetrievalHealth.structuralContract(base.contract) && base.signatureVersion==4
+        require(VettingRetrievalHealth.structuralContract(base.contract) && VettingRetrievalHealth.signatureVersion(base.contract,base.signatureVersion)
                 && INPUT.equals(oer.path("inputContract").asText()) && ASSETS.equals(oer.path("assetReturnContract").asText())
                 && RECIPE.equals(oer.path("recipe").asText()) && module.equals(oer.path("targetModule").asText())
                 && falseBoolean(oer.path("sourceQualityVerifiedByHealth")) && falseBoolean(oer.path("parserCandidatesAcceptedByRetrieval"))
@@ -700,10 +735,11 @@ public class OerCanonicalRetrievalClient {
         if(familySources){NativePdfSourceFamilyContract.validateCapability(oer);NativePdfSourceFamilyContract.validateAlgorithms(window.path("algorithms"));}
         if(normalSources){NormalObservedContract.validateCapability(oer);for(String file:Arrays.asList("normal_observed_projection.py","normal_observed_server.py","unified_source_registry.py"))require(sha(window.path("algorithms").path(file).asText()),"normal observed algorithm identity missing: "+file);}
         JsonNode sourceRead=oer.path("sourceRead");
-        return new Capability(hash(base.fingerprint+JsonUtils.write(oer)),base.sourceUnitPolicy,oer.path("indexStatusContract").asText(),
+        Capability capability=new Capability(hash(base.fingerprint+JsonUtils.write(oer)),base.sourceUnitPolicy,oer.path("indexStatusContract").asText(),
                 SOURCE_READ.equals(sourceRead.path("contract").asText())&&"/sources/read".equals(sourceRead.path("endpoint").asText()),
                 SEMANTIC_READ.equals(sourceRead.path("semanticProjectionVersion").asText())&&contains(sourceRead.path("views"),"semantic_units")&&contains(sourceRead.path("operations"),"prepare"),
                 hash(JsonUtils.write(OerCanonicalSourceUnits.sorted(window.path("algorithms")))));
+        capability.semanticDictionary=contains(sourceRead.path("semanticReadVersions"),SEMANTIC_DICTIONARY);return capability;
     }
 
     /** This endpoint returns only a small receipt; reject ambiguous or over-cap JSON. */

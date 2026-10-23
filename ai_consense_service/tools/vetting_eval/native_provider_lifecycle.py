@@ -44,6 +44,24 @@ def _bytes(value):
     return json.dumps(value, sort_keys=True, ensure_ascii=False, separators=(',', ':'), allow_nan=False).encode('utf-8')
 
 
+def _watch_cancellation(cancelled, cancel_owned):
+    if cancelled is None:
+        return lambda: None
+    finished = threading.Event()
+    def observe():
+        while not finished.is_set():
+            if cancelled():
+                try: cancel_owned()
+                except OSError: pass  # The owner's final release readback remains authoritative.
+                return
+            finished.wait(.05)
+    watcher = threading.Thread(target=observe, name='consense-owned-ocr-cancellation', daemon=True)
+    watcher.start()
+    def release():
+        finished.set(); watcher.join()
+    return release
+
+
 def _save(path, value):
     with path.open('xb') as stream:
         stream.write(_bytes(value)); stream.flush(); os.fsync(stream.fileno())
@@ -295,7 +313,7 @@ def _wire_ready(provider, timeout):
 
 
 @contextmanager
-def owned_native_provider(provider, remaining_seconds, receipt_dir):
+def owned_native_provider(provider, remaining_seconds, receipt_dir, *, cancelled=None):
     """Yield mutable lifecycle metadata. Total provider budget + at most 2s cleanup.
 
     No ownedBoot means an explicitly existing/remote provider; no launch or stop
@@ -304,10 +322,12 @@ def owned_native_provider(provider, remaining_seconds, receipt_dir):
     """
     budget = _finite(remaining_seconds, 'remaining_seconds')
     deadline = time.monotonic() + budget
+    if cancelled is not None and cancelled():
+        raise ProviderLifecycleError('Caller cancelled before owned provider admission')
     validate_provider(provider)
     if provider.get('ownedJob') is not None:
         from native_job_provider import owned_gpu_provider
-        with owned_gpu_provider(provider, budget, receipt_dir) as lifecycle:
+        with owned_gpu_provider(provider, deadline-time.monotonic(), receipt_dir, cancelled=cancelled) as lifecycle:
             yield lifecycle
         return
     directory = Path(receipt_dir).resolve()
@@ -332,6 +352,7 @@ def owned_native_provider(provider, remaining_seconds, receipt_dir):
         if probe.connect_ex((url.hostname, url.port or (443 if url.scheme == 'https' else 80))) == 0:
             raise ProviderLifecycleError('Native provider endpoint is occupied; existing services are never adopted or killed')
     tree = None; timer = None; expired = threading.Event(); primary_error = None
+    stop_watching = lambda: None
     with (directory / 'stdout.log').open('xb') as stdout, (directory / 'stderr.log').open('xb') as stderr:
         try:
             if time.monotonic() >= deadline:
@@ -345,6 +366,7 @@ def owned_native_provider(provider, remaining_seconds, receipt_dir):
                 try: tree.stop()
                 except OSError: pass  # Main-thread exit readback remains authoritative.
             timer = threading.Timer(max(.001, deadline-time.monotonic()), expire); timer.daemon = True; timer.start()
+            stop_watching = _watch_cancellation(cancelled, tree.stop)
             ready_deadline = min(deadline, time.monotonic()+boot['readyTimeoutSeconds'])
             while time.monotonic() < ready_deadline:
                 if tree.active() == 0:
@@ -359,12 +381,15 @@ def owned_native_provider(provider, remaining_seconds, receipt_dir):
                                       'meaning': 'Only configured loopback API availability; no runtime/model identity or GPU readiness proof'}
             _save(directory / 'wire-ready.json', lifecycle['wireReady'])
             yield lifecycle
+            if cancelled is not None and cancelled():
+                raise ProviderLifecycleError('Caller cancelled the owned provider')
             if expired.is_set() or time.monotonic() >= deadline:
                 raise TimeoutError('Native provider total deadline elapsed')
         except BaseException as error:
             primary_error = {'type': type(error).__name__, 'message': str(error)}
             raise
         finally:
+            stop_watching()
             if timer is not None: timer.cancel(); timer.join()
             if tree is not None:
                 status, active, failure = 'release_unknown', None, None

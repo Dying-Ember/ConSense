@@ -5,6 +5,16 @@ import org.junit.jupiter.api.Test;import org.springframework.boot.env.YamlProper
 import org.springframework.boot.context.properties.bind.*;import org.springframework.core.env.*;import java.util.*;
 import static org.junit.jupiter.api.Assertions.*;import static org.mockito.Mockito.*;import static org.mockito.ArgumentMatchers.*;
 class VettingRetrievalHealthTest {
+ @Test void portableWindowSignatureRequiresExplicitV5AndKeepsFrozenRecipePins(){
+  ObjectNode health=VettingStrictHybridTest.currentHealth().deepCopy();health.put("indexSignatureVersion",5);
+  ((ObjectNode)health.path("retrieval").path("sourceWindows").path("algorithms")).put("portable_index_signature.py",VettingCorpus.hash("authored portable adapter"));
+  ConsenseProperties p=new ConsenseProperties();assertEquals(5,p.getVetting().getExpectedRetrievalSignatureVersion());p.getVetting().setExpectedRetrievalSignatureVersion(3);assertThrows(IllegalStateException.class,()->VettingRetrievalHealth.validate(health,p.getVetting()));
+  p.getVetting().setExpectedRetrievalSignatureVersion(5);VettingRetrievalHealth.Identity accepted=VettingRetrievalHealth.validate(health,p.getVetting());assertEquals(5,accepted.signatureVersion);
+  p.getVetting().setExpectedRetrievalRecipeFingerprint(accepted.fingerprint);assertEquals(accepted.fingerprint,VettingRetrievalHealth.validate(health,p.getVetting()).fingerprint);
+  p.getVetting().setExpectedRetrievalSignatureVersion(6);health.put("indexSignatureVersion",6);assertThrows(IllegalStateException.class,()->VettingRetrievalHealth.validate(health,p.getVetting()));
+  p.getVetting().setExpectedRetrievalSignatureVersion(5);health.put("indexSignatureVersion",5);((ObjectNode)health.path("retrieval").path("sourceWindows").path("algorithms")).put("portable_index_signature.py",VettingCorpus.hash("changed adapter"));
+  assertThrows(IllegalStateException.class,()->VettingRetrievalHealth.validate(health,p.getVetting()));
+ }
  @Test void zeroTextStructuresStayInTheCorpusButCannotBecomeEmbeddingText(){
   HttpSupport http=mock(HttpSupport.class);ConsenseProperties p=VettingStrictHybridTest.strict();
   when(http.get(endsWith("/health"),anyLong())).thenReturn(JsonUtils.write(VettingStrictHybridTest.currentHealth()));
@@ -20,14 +30,17 @@ class VettingRetrievalHealthTest {
   StandardEnvironment env=new StandardEnvironment();env.getPropertySources().remove(StandardEnvironment.SYSTEM_ENVIRONMENT_PROPERTY_SOURCE_NAME);env.getPropertySources().remove(StandardEnvironment.SYSTEM_PROPERTIES_PROPERTY_SOURCE_NAME);
   for(PropertySource<?>s:new YamlPropertySourceLoader().load("local",new ClassPathResource("application-vetting-local.yml")))env.getPropertySources().addLast(s);
   ConsenseProperties p=new ConsenseProperties();Binder.get(env).bind("consense",Bindable.ofInstance(p));
-  assertTrue(p.getVetting().isRequireHybridRetrieval());assertEquals(3,p.getVetting().getExpectedRetrievalSignatureVersion());
+  assertTrue(p.getVetting().isRequireHybridRetrieval());assertEquals(5,p.getVetting().getExpectedRetrievalSignatureVersion());
   assertEquals(512,p.getVetting().getExpectedEmbeddingWindowMaxTokens());assertEquals(512,p.getVetting().getExpectedRerankWindowMaxTokens());assertEquals(64,p.getVetting().getExpectedWindowOverlapTokens());
-  VettingRetrievalHealth.validate(VettingStrictHybridTest.currentHealth(),p.getVetting());assertFalse(new ConsenseProperties().getVetting().isRequireHybridRetrieval());
+  ObjectNode current=VettingStrictHybridTest.currentHealth().deepCopy();current.put("indexSignatureVersion",5);((ObjectNode)current.path("retrieval").path("sourceWindows").path("algorithms")).put("portable_index_signature.py",VettingCorpus.hash("authored portable adapter"));
+  VettingRetrievalHealth.validate(current,p.getVetting());assertFalse(new ConsenseProperties().getVetting().isRequireHybridRetrieval());
+  env.getPropertySources().addFirst(new MapPropertySource("legacy-pin",Collections.singletonMap("CONSENSE_VETTING_RETRIEVAL_EXPECTED_SIGNATURE_VERSION",3)));ConsenseProperties legacy=new ConsenseProperties();Binder.get(env).bind("consense",Bindable.ofInstance(legacy));
+  assertEquals(3,legacy.getVetting().getExpectedRetrievalSignatureVersion());VettingRetrievalHealth.validate(VettingStrictHybridTest.currentHealth(),legacy.getVetting());
  }
  @Test void capturedCurrentRuntimeHealthIsAcceptedAndDynamicLoadedMemoryFlagsDoNotChangeRecipe(){
-  JsonNode original=VettingStrictHybridTest.currentHealth();VettingRetrievalHealth.Identity a=VettingRetrievalHealth.validate(original,new ConsenseProperties().getVetting());
+  JsonNode original=VettingStrictHybridTest.currentHealth();VettingRetrievalHealth.Identity a=VettingRetrievalHealth.validate(original,VettingStrictHybridTest.strict().getVetting());
   ObjectNode changed=original.deepCopy();changed.put("cudaAllocatedMiB",8000);((ObjectNode)changed.path("loaded")).put("embedding",true);
-  assertEquals(a.fingerprint,VettingRetrievalHealth.validate(changed,new ConsenseProperties().getVetting()).fingerprint);
+  assertEquals(a.fingerprint,VettingRetrievalHealth.validate(changed,VettingStrictHybridTest.strict().getVetting()).fingerprint);
  }
  @Test void versionsCapsOverlapModelAndAlgorithmCorruptionsCannotPass(){
   for(String bad:Arrays.asList("version","versionOverflow","contract","cap","capOverflow","overlap","aggregation","model","modelRevision","rerankRuntime","dtype","algorithm","roleFilter","rrf","bm25")){
@@ -47,11 +60,11 @@ class VettingRetrievalHealthTest {
    if(bad.equals("roleFilter"))((ObjectNode)h.path("retrieval")).put("roleFilter",false);
    if(bad.equals("rrf"))((ObjectNode)h.path("retrieval")).put("rrfConstant",0);
    if(bad.equals("bm25"))((ObjectNode)h.path("retrieval").path("bm25")).put("b",2);
-   assertThrows(IllegalStateException.class,()->VettingRetrievalHealth.validate(h,new ConsenseProperties().getVetting()),bad);
+   assertThrows(IllegalStateException.class,()->VettingRetrievalHealth.validate(h,VettingStrictHybridTest.strict().getVetting()),bad);
   }
  }
  @Test void externalRecipeSealMustMatchObservedPublicIdentity(){
-  ConsenseProperties p=new ConsenseProperties();JsonNode h=VettingStrictHybridTest.currentHealth();String fingerprint=VettingRetrievalHealth.validate(h,p.getVetting()).fingerprint;
+  ConsenseProperties p=VettingStrictHybridTest.strict();JsonNode h=VettingStrictHybridTest.currentHealth();String fingerprint=VettingRetrievalHealth.validate(h,p.getVetting()).fingerprint;
   p.getVetting().setExpectedRetrievalRecipeFingerprint(fingerprint);assertEquals(fingerprint,VettingRetrievalHealth.validate(h,p.getVetting()).fingerprint);
   p.getVetting().setExpectedRetrievalRecipeFingerprint(String.join("",Collections.nCopies(64,"0")));assertThrows(IllegalStateException.class,()->VettingRetrievalHealth.validate(h,p.getVetting()));
  }

@@ -10,7 +10,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from competition_scope import CompetitionScopeError, load_policy
+from competition_scope import CompetitionScopeError, load_policy, load_policy_bytes, _json_bytes
 
 
 SOURCE_SHA = '1' * 64
@@ -52,6 +52,20 @@ class CompetitionScopeTest(unittest.TestCase):
 
     def write(self, value):
         self.path.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding='utf-8')
+
+    def test_multiple_editions_keep_their_own_source_and_page_partition(self):
+        first = manifest(); first['source']['versionId'] = 'edition-a'; seal(first)
+        second = manifest(); second['source'].update(sourceSha256='2'*64, versionId='edition-b')
+        second['includedPageSpans'] = [{'physicalPageStart': 2000, 'physicalPageEnd': 4300}]
+        second['excludedSpans'] = [{'physicalPageStart': 22, 'physicalPageEnd': 1999}]; seal(second)
+        policy = load_policy_bytes(_json_bytes({'schema':'consense.sl-library-scope-set.v1', 'manifests':[first, second]}))
+        a = sl(1200); b = sl(1200, chunk_id='other', originalSourceSha256='2'*64)
+        self.assertEqual([a], policy.apply([a,b])['included'])
+        self.assertEqual([b['id']], [row['chunkId'] for row in policy.apply([a,b])['excluded']])
+        with self.assertRaises(CompetitionScopeError):
+            policy.apply([sl(2200, originalSourceSha256='3'*64)])
+        with self.assertRaises(CompetitionScopeError):
+            load_policy_bytes(_json_bytes({'schema':'consense.sl-library-scope-set.v1', 'manifests':[first,first]}))
 
     def assert_error(self, code, chunks):
         with self.assertRaises(CompetitionScopeError) as captured:

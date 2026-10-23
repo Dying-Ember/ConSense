@@ -12,8 +12,28 @@ import json
 from pathlib import Path
 import sys
 from token_windows import paragraph_map, utf16_length, digest
+from competition_scope import load_policy_bytes
 
 VERSION = 'fixed-development-normal-source-parents-v1'
+
+def sl_edition_plans(plan):
+    if 'slEditions' not in plan:
+        return [plan]
+    editions=plan['slEditions'];names=set();sources=set()
+    if not isinstance(editions,list) or not 1<=len(editions)<=100:
+        raise ValueError('Explicit SL edition plans required')
+    for edition in editions:
+        source=edition['slParent'];name=source.get('editionId')
+        if not isinstance(name,str) or not name.strip() or name.strip().lower() in ('latest','unknown') or name in names or source['sha256']in sources:
+            raise ValueError('SL edition/source identity is ambiguous')
+        names.add(name);sources.add(source['sha256'])
+        scoped=read_descriptor(edition['scopeManifest']);policy=load_policy_bytes(Path(edition['scopeManifest']['path']).read_bytes(),edition['scopeManifest']['sha256'])
+        if policy.source_sha256!=source['sha256'] or scoped['source'].get('versionId')!=name:
+            raise ValueError('SL edition plan differs from exact scope source')
+        pages=edition.get('requiredPhysicalPages')
+        expected=[page for a,b in policy.included_spans for page in range(a,b+1)]
+        if pages!=sorted(expected):raise ValueError('SL edition technical-page inventory differs from scope')
+    return editions
 
 def descriptor(path, raw=None):
     path = Path(path).resolve()
@@ -196,33 +216,35 @@ def build(args):
         quality('GCT', {'totalPages': 2, 'complete': True, 'parseStatus': 'PARSED'},
                 {'finiteSourceChecks': '27 body nodes / 11 complete roots; legal predicates and version generalization not accepted'}),
         {'structureAndCompleteGroups': plan['gctGroups']}, corpus, coverage_rows)
-    all_profiles = plan['slProfiles'] + plan['slOldNine']; page_inventory = []
-    if len(all_profiles) != plan['expectedSLUnits']: raise ValueError('SL full input count differs')
-    for ordinal, profile in enumerate(all_profiles, 1):
-        structure = read_descriptor(profile['structure'])
-        if 'normalRoot' in profile:
-            normal_root = Path(profile['normalRoot']); summary = json.loads((normal_root/'summary.json').read_bytes())
-            bd = descriptor(normal_root/'blocks.jsonl'); pd = descriptor(normal_root/'pages.jsonl')
-            blocks = jsonl_descriptor(bd); pages = jsonl_descriptor(pd)
-            sd = descriptor(normal_root/'summary.json')
-        else:
-            bd, pd, sd = profile['normalBlockEvents'], profile['normalPageEvents'], profile['normalViewSummary']
-            blocks = jsonl_descriptor(bd); pages = jsonl_descriptor(pd); summary = read_descriptor(sd)
-        page_map = profile['originalPhysicalPages']; page_inventory.extend(page_map)
-        if len(pages) != len(page_map): raise ValueError('Complete normal page inventory differs: ' + profile['name'])
-        if structure['sourceSha256'] != profile['sourceSha256']: raise ValueError('SL structure/source identity differs')
-        sq = quality('SL', summary['coverage'], {'normalParseStatus': summary['parseStatus'],
-             'worksection': profile['worksectionRaw'], 'inputUnitRole': profile['inputUnitRole']})
-        artifact_refs = {'normalBlocks': bd, 'normalPages': pd, 'normalSummary': sd,
-                         'structure': profile['structure'], 'rawArchive': summary.get('rawArchive'),
-                         'imageRouting': summary.get('imageRouting')}
-        parents_from_groups(normal_groups(structure, blocks), blocks, structure['nodes'],
-            plan['slParent'], profile['name'], 'SL', page_map, sq, artifact_refs, corpus, coverage_rows)
-        if ordinal % 20 == 0: print(json.dumps({'phase':'cpu_corpus','SLUnits':ordinal,'parents':len(corpus)}), flush=True)
-    if len(page_inventory) != plan['expectedSLPages'] or len(set(page_inventory)) != len(page_inventory):
-        raise ValueError('SL required page inventory overlap/missing')
-    if sorted(page_inventory) != list(range(1127, 4301)):
-        raise ValueError('SL required technical physical range differs')
+    all_profiles=[];page_inventory=[]
+    for edition in sl_edition_plans(plan):
+        profiles=edition['slProfiles']+edition['slOldNine'];all_profiles.extend(profiles);edition_pages=[]
+        if len(profiles)!=edition['expectedSLUnits']:raise ValueError('SL edition full input count differs')
+        for ordinal, profile in enumerate(profiles, 1):
+            structure = read_descriptor(profile['structure'])
+            if 'normalRoot' in profile:
+                normal_root = Path(profile['normalRoot']); summary = json.loads((normal_root/'summary.json').read_bytes())
+                bd = descriptor(normal_root/'blocks.jsonl'); pd = descriptor(normal_root/'pages.jsonl')
+                blocks = jsonl_descriptor(bd); pages = jsonl_descriptor(pd)
+                sd = descriptor(normal_root/'summary.json')
+            else:
+                bd, pd, sd = profile['normalBlockEvents'], profile['normalPageEvents'], profile['normalViewSummary']
+                blocks = jsonl_descriptor(bd); pages = jsonl_descriptor(pd); summary = read_descriptor(sd)
+            page_map = profile['originalPhysicalPages']; edition_pages.extend(page_map)
+            if len(pages) != len(page_map): raise ValueError('Complete normal page inventory differs: ' + profile['name'])
+            if structure['sourceSha256'] != profile['sourceSha256']: raise ValueError('SL structure/source identity differs')
+            sq = quality('SL', summary['coverage'], {**({'editionId':edition['slParent']['editionId']}if 'slEditions'in plan else {}),'normalParseStatus': summary['parseStatus'],
+                 'worksection': profile['worksectionRaw'], 'inputUnitRole': profile['inputUnitRole']})
+            artifact_refs = {'normalBlocks': bd, 'normalPages': pd, 'normalSummary': sd,
+                             'structure': profile['structure'], 'rawArchive': summary.get('rawArchive'),
+                             'imageRouting': summary.get('imageRouting')}
+            parents_from_groups(normal_groups(structure, blocks), blocks, structure['nodes'],
+                edition['slParent'], ((edition['slParent']['editionId']+':') if 'slEditions' in plan else '')+profile['name'], 'SL', page_map, sq, artifact_refs, corpus, coverage_rows)
+            if ordinal % 20 == 0: print(json.dumps({'phase':'cpu_corpus','SLUnits':ordinal,'parents':len(corpus)}), flush=True)
+        required=edition['requiredPhysicalPages'] if 'slEditions' in plan else list(range(1127,4301))
+        if len(edition_pages)!=edition['expectedSLPages'] or sorted(edition_pages)!=required or len(set(edition_pages))!=len(edition_pages):
+            raise ValueError('SL edition required page inventory overlap/missing')
+        page_inventory.extend(edition_pages)
     if len({p['id'] for p in corpus}) != len(corpus): raise ValueError('Duplicate parent identity')
     cp = out/'corpus.jsonl'
     with cp.open('x', encoding='utf-8', newline='\n') as stream:
@@ -235,6 +257,8 @@ def build(args):
         'familyParents': dict(Counter(c['sourceQuality']['family'] for c in corpus)),
         'sourceCoverage': coverage_rows, 'inputPlan': descriptor(args.plan), 'models': plan['models'],
         'tableProjectionInputs': plan.get('tableProjectionInputs', []),
+        'originalSources':{'gccSource':plan['gccSource'],'gctSource':plan['gctSource'],
+            **({'slSources':[edition['slParent'] for edition in sl_edition_plans(plan)]} if 'slEditions' in plan else {'slParent':plan['slParent']})},
         'finalQualityAccepted': False, 'productionAdopted': False, 'developmentFreezeAuthorized': True,
         'excluded': plan['excluded'], 'largeRawExpandedOrRead': False,
         'parserOCRModelDatabaseNetworkCalls': 0, 'knownGapsRetained': True,

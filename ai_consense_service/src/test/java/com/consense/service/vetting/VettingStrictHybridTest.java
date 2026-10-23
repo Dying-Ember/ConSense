@@ -36,7 +36,7 @@ class VettingStrictHybridTest {
             "cacheMode","sealed-precomputed-cache","hits",Collections.singletonList(VettingReviewProbe.map("id",chunk.getId(),"score",.4,"payload",payload(chunk))));
     }
     static ConsenseProperties strict() {
-        ConsenseProperties p=new ConsenseProperties();p.getVetting().setRequireHybridRetrieval(true);p.getVetting().setSemanticTopics(1);return p;
+        ConsenseProperties p=new ConsenseProperties();p.getVetting().setExpectedRetrievalSignatureVersion(3);p.getVetting().setRequireHybridRetrieval(true);p.getVetting().setSemanticTopics(1);return p;
     }
     static JsonNode currentHealth() {
         try(java.io.InputStream in=VettingStrictHybridTest.class.getResourceAsStream("/vetting/current_window_health.json")) {

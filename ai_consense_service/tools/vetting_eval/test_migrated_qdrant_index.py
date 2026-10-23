@@ -27,7 +27,11 @@ class MigratedIndexTests(unittest.TestCase):
                                 'backendSha256':'b'*64, 'tokenizerClass':'CharacterTokenizer', 'fast':True, 'modelMaxLength':512}
                            for kind in ('embedding','reranker')}
         self.runtime.identity = lambda kind:copy.deepcopy(self.identities[kind])
+        query_version = self.runtime.signature_version
+        if getattr(self, 'legacy_source', False):
+            self.runtime.signature_version = lambda: 3
         self.base.index()
+        self.runtime.signature_version = query_version
         meta = copy.deepcopy(s._projects['one']); collection = meta['collection']
         # The synthetic build profile deliberately differs from the current CPU query profile.
         meta['signature']['runtime'].update(device='cuda', dtype='float16')
@@ -147,6 +151,20 @@ class MigratedIndexTests(unittest.TestCase):
         with patch.dict(s.os.environ,{ENV:str(self.receipt_file)},clear=True), patch.object(s,'database') as db:
             with self.assertRaises(s.HTTPException) as error:s.read_project('one')
             self.assertEqual(error.exception.status_code,409); db.assert_not_called()
+
+
+class LegacySignatureMigrationTests(MigratedIndexTests):
+    legacy_source = True
+
+    def test_new_query_reader_preserves_legacy_signature_and_vector_seal(self):
+        reader = MigratedIndex(self.environ)
+        before = self.metadata_file.read_bytes()
+        result = self.read(reader)
+        self.assertEqual(3, result['signature']['signatureVersion'])
+        self.assertEqual(5, reader.last_observation['queryIdentity']['signatureVersion'])
+        self.assertEqual(before, self.metadata_file.read_bytes())
+        with patch.object(s, '_migrated_index', reader):
+            self.runtime.validate_metadata(result)
 
 
 class BackendConfigurationTests(unittest.TestCase):

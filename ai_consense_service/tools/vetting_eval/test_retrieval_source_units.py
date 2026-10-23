@@ -1,7 +1,7 @@
 """Deterministic saved-score/structure fixtures, no neural/vector/HTTP calls."""
 import copy
 import unittest
-from retrieval_source_units import select_source_units
+from retrieval_source_units import select_source_units, SourceUnits, semantic_unit, semantic_unit_template
 
 
 def parent(id_, block, text, clause=None, heading=None, start=0, doc='source'):
@@ -21,6 +21,16 @@ def hit(p, score):
 
 
 class StructuralSelectionTests(unittest.TestCase):
+    def test_semantic_dictionary_stores_same_group_once_without_member_text(self):
+        parents = self.corpus()[:2]
+        catalog = SourceUnits(parents)
+        templates = [semantic_unit_template(semantic_unit(catalog.resolve(p), 'c' * 64)) for p in parents]
+        self.assertEqual(templates[0], templates[1])
+        self.assertNotIn('members', templates[0])
+        self.assertNotIn('originIds', templates[0])
+        self.assertEqual(['a-head', 'a-tail'], templates[0]['requiredMemberIds'])
+        self.assertNotIn('Only when active', repr(templates))
+
     def corpus(self):
         return [parent('a-head','body:1','A heading', 'A1','body/1'),
                 parent('a-tail','body:2','Only when active', 'A1','body/1'),

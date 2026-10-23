@@ -31,6 +31,9 @@ test('fixed source paths ignore supplied URLs and pin original/manifest/version/
   const calls = [], client = api(async url => { calls.push(url); return envelope(evidence()) })
   assert.match(client.fixedEvidencePath({ ...address, originalUrl: 'https://bad.invalid/' }, 'original'), /^\/api\/oer\/fixed-baseline\/original\?sourceSha256=/)
   await client.fetchFixedEvidence(address)
+  const editionEvidence = evidence(); editionEvidence.payload.fixedBaselineEditionId = 'edition-a'
+  await api(async () => envelope(editionEvidence)).fetchFixedEvidence({ ...address, editionId: 'edition-a' })
+  await assert.rejects(api(async () => envelope(editionEvidence)).fetchFixedEvidence({ ...address, editionId: 'edition-b' }), /FIXED_EVIDENCE_IDENTITY_MISMATCH/)
   assert.equal(calls[0], '/api/oer/fixed-baseline/evidence?id=same%2Fproject%3Fid')
   for (const key of ['fixedBaselineManifestSha256', 'fixedBaselineVersion', 'originalSourceSha256', 'sourceRole']) {
     const changed = evidence(); changed.payload[key] = 'changed'

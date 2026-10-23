@@ -18,7 +18,7 @@ import static org.mockito.ArgumentMatchers.*;
 class VettingFixedBaselineIntegrationTest {
     @Test void fixedCatalogSurvivesTheExistingChunkCopiesAndKeepsRawMetadataOutOfModelMaterial() {
         Fixture fixture = new Fixture();
-        FixedVettingReferences catalog = FixedVettingReferences.retrieve(fixture.client,"payment",10);
+        FixedVettingReferences catalog = FixedVettingReferences.retrieve(fixture.client,"project","payment",10);
         Chunk copied = JsonUtils.read(JsonUtils.write(catalog.chunks().get(0)),Chunk.class);
         List<Map<String,Object>> excerpts = VettingSourceMaterial.project(Collections.singletonList(copied),catalog);
         assertEquals("standard",excerpts.get(0).get("role"));
@@ -69,7 +69,7 @@ class VettingFixedBaselineIntegrationTest {
         assertEquals("unconfirmed",savedPointer.path("projectApplicability").asText());assertEquals("unknown",savedPointer.path("qualifiersComplete").asText());
         assertFalse(savedPointer.toString().contains("secret-raw-layout-audit"));
         verify(retrieval).index(eq("project"),argThat(chunks->chunks.size()==1&&"tender".equals(chunks.get(0).getRole())));
-        verify(fixture.client).search(eq("vetting"),anyString(),eq(props.getVetting().getTopK()));
+        verify(fixture.client).searchForProject(anyString(),eq("vetting"),anyString(),eq(props.getVetting().getTopK()));
         // First attempt checks fixed sources before checkpoint access, immediately before dispatch, and after decoding.
         verify(fixture.client,times(3)).assertCurrent(argThat(hits->hits.size()==1&&fixture.hit.getId().equals(hits.get(0).getId())));
     }
@@ -80,13 +80,13 @@ class VettingFixedBaselineIntegrationTest {
         VettingSemanticReview review=VettingTokenFixture.review(mock(AiGateway.class),new ConsenseProperties(),mock(VettingRetrievalClient.class));
         review.setOerBusinessEvidence(oer);review.setFixedBaselineRetrievalClient(fixture.client);
         assertThrows(IllegalStateException.class,()->review.review("project",Collections.singletonList(chunk("p","tender","SCT","SCT1","The project source shall be verified before any model operation.")),"en",(n,s)->{}));
-        verify(fixture.client,never()).search(anyString(),anyString(),anyInt());
+        verify(fixture.client,never()).searchForProject(anyString(),anyString(),anyString(),anyInt());
     }
 
     @Test void fixedRetrievalFailureIsNotSilentlyConvertedIntoLegacyStandardEvidence() {
         Fixture fixture=new Fixture();
-        when(fixture.client.search(anyString(),anyString(),anyInt())).thenThrow(new IllegalStateException("fixed_reference_signature_changed"));
-        assertThrows(IllegalStateException.class,()->FixedVettingReferences.retrieve(fixture.client,"payment",10));
+        when(fixture.client.searchForProject(anyString(),anyString(),anyString(),anyInt())).thenThrow(new IllegalStateException("fixed_reference_signature_changed"));
+        assertThrows(IllegalStateException.class,()->FixedVettingReferences.retrieve(fixture.client,"project","payment",10));
     }
 
     @Test void aMultiParentObservedReferenceIsEitherAdmittedWholeOrRecordedAsOmitted() {
@@ -98,9 +98,9 @@ class VettingFixedBaselineIntegrationTest {
         JsonNode group=JsonUtils.parse("{\"unitId\":\"whole-payment-unit\",\"requiredMemberIds\":[\"fixed-gcc-payment\",\"fixed-gcc-continuation\"]}");
         FixedReferenceEvidence firstEvidence=new FixedReferenceEvidence(fixture.hit.getId(),fixture.hit.getScore(),JsonUtils.parse(JsonUtils.write(fixture.hit.getPayload())),null,group);
         FixedReferenceEvidence secondEvidence=new FixedReferenceEvidence(secondHit.getId(),secondHit.getScore(),JsonUtils.parse(JsonUtils.write(secondRaw)),null,group);
-        when(fixture.client.search(anyString(),anyString(),anyInt())).thenReturn(Arrays.asList(fixture.hit,secondHit));
+        when(fixture.client.searchForProject(anyString(),anyString(),anyString(),anyInt())).thenReturn(Arrays.asList(fixture.hit,secondHit));
         when(fixture.client.evidence(any())).thenAnswer(call->fixture.hit.getId().equals(((SearchHit)call.getArgument(0)).getId())?firstEvidence:secondEvidence);
-        FixedVettingReferences catalog=FixedVettingReferences.retrieve(fixture.client,"payment",10);
+        FixedVettingReferences catalog=FixedVettingReferences.retrieve(fixture.client,"project","payment",10);
         Chunk tender=chunk("project","tender","SCT","SCT8","The interim payment provisions shall be checked against the project amendments.");
         VettingContextBuilder.Selection small=new VettingContextBuilder.Selection();small.setChunks(new ArrayList<>(Collections.singletonList(tender)));small.setContentChars(tender.getContent().length());
         catalog.admit(small,tender.getContent().length()+fixture.standard.getContent().length());
@@ -124,7 +124,7 @@ class VettingFixedBaselineIntegrationTest {
             raw.put("fixedDevelopmentBaseline",true);raw.put("rawLayoutAudit","secret-raw-layout-audit");
             hit=new SearchHit(standard.getId(),0.9,raw);
             FixedReferenceEvidence evidence=new FixedReferenceEvidence(hit.getId(),hit.getScore(),JsonUtils.parse(JsonUtils.write(raw)),null,null);
-            when(client.enabled()).thenReturn(true);when(client.search(anyString(),anyString(),anyInt())).thenReturn(Collections.singletonList(hit));
+            when(client.enabled()).thenReturn(true);when(client.searchForProject(anyString(),anyString(),anyString(),anyInt())).thenReturn(Collections.singletonList(hit));
             when(client.evidence(any())).thenReturn(evidence);
             when(client.toModelMaterial(anyList(),anyInt())).thenAnswer(call->FixedBaselineModelMaterial.render(Collections.singletonList(evidence),call.getArgument(1)));
         }

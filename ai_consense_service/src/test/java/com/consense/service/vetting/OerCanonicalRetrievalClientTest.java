@@ -27,6 +27,25 @@ import static org.mockito.Mockito.*;
 class OerCanonicalRetrievalClientTest {
     private static final String INPUT="canonical-source-chunks-upstream-scope-and-parser-projection-v1";
     private static final String KEY="test-canonical";
+    @Test void portableStructuralHealthUsesExplicitV6WithoutRelaxingOldVersionPins() throws Exception {
+        Wire wire=new Wire();wire.health.put("indexSignatureVersion",6);
+        ((ObjectNode)wire.health.path("retrieval").path("sourceWindows").path("algorithms")).put("portable_index_signature.py",VettingCorpus.hash("authored portable adapter"));
+        assertThrows(IllegalStateException.class,()->wire.client.index(KEY,"vetting",Collections.singletonList(wire.binding)));
+        wire.properties.getVetting().setExpectedRetrievalSignatureVersion(6);
+        wire.client.index(KEY,"vetting",Collections.singletonList(wire.binding));
+        wire.health.put("indexSignatureVersion",5);wire.properties.getVetting().setExpectedRetrievalSignatureVersion(5);
+        assertThrows(IllegalStateException.class,()->wire.client.index(KEY,"vetting",Collections.singletonList(wire.binding)));
+    }
+    @Test void explicitRebuildIsDistinctFromAutomaticIndexing() throws Exception {
+        Wire wire=new Wire();List<CanonicalSourceBinding> bindings=Collections.singletonList(wire.binding);
+        wire.client.index(KEY,"vetting",bindings);wire.client.rebuild(KEY,"vetting",bindings);
+        ArgumentCaptor<String> requests=ArgumentCaptor.forClass(String.class);
+        verify(wire.http,times(2)).postJson(endsWith("/index-canonical"),requests.capture(),anyLong());
+        JsonNode first=JsonUtils.parse(requests.getAllValues().get(0)),second=JsonUtils.parse(requests.getAllValues().get(1));
+        assertFalse(first.has("rebuild"));assertTrue(second.path("rebuild").asBoolean());
+        assertEquals(first.path("projectionSha256"),second.path("projectionSha256"));
+        assertEquals(first.path("projectId"),second.path("projectId"));
+    }
     private static final class Wire {
         final HttpSupport http=mock(HttpSupport.class);
         final CanonicalEvidenceBackend backend=mock(CanonicalEvidenceBackend.class);
@@ -130,6 +149,24 @@ class OerCanonicalRetrievalClientTest {
         verify(wire.http,never()).postJson(anyString(),anyString(),anyLong());ArgumentCaptor<String> bodies=ArgumentCaptor.forClass(String.class);verify(wire.backend,times(2)).sourceRead(bodies.capture(),eq("vetting"),anyInt());
         assertEquals(prepared.path("readManifestToken"),JsonUtils.parse(bodies.getAllValues().get(1)).path("readManifestToken"));assertFalse(bodies.getAllValues().get(1).contains("snapshotJson"));
     }
+    @Test void dictionaryReadsValidateGroupBytesAndDoNotInventMissingCachedTemplates()throws Exception{
+        for(String mutation:Arrays.asList("none","group_bytes","missing_group","source")){
+            Wire wire=new Wire();ObjectNode prepared=semanticFixture(wire,"prepare"),returned=semanticFixture(wire,"ids");
+            ((ObjectNode)wire.health.path("oer").path("sourceRead")).putArray("semanticReadVersions").add(OerCanonicalRetrievalClient.SEMANTIC_DICTIONARY);
+            for(ObjectNode reply:Arrays.asList(prepared,returned)){reply.put("semanticReadVersion",OerCanonicalRetrievalClient.SEMANTIC_DICTIONARY);((ObjectNode)reply.path("scopeIdentity")).put("semanticReadVersion",OerCanonicalRetrievalClient.SEMANTIC_DICTIONARY);sealReadScope(reply);}
+            ObjectNode template=((ObjectNode)returned.path("units").get(0)).deepCopy();stripDictionaryMembers(template);template.put("documentId",returned.path("origins").get(0).path("documentId").asText());
+            String group=VettingCorpus.hash(JsonUtils.write(OerCanonicalSourceUnits.sorted(template)));returned.putArray("units").addObject().put("groupId",group).set("unit",template);
+            returned.putObject("originUnits").put(returned.path("origins").get(0).path("id").asText(),group);returned.putArray("blockedOrigins");((ObjectNode)returned.path("coverage")).putArray("blockedOriginIds");
+            when(wire.backend.sourceRead(anyString(),eq("vetting"),anyInt())).thenAnswer(call->JsonUtils.write("prepare".equals(JsonUtils.parse(call.getArgument(0)).path("operation").asText())?prepared:returned));
+            OerCanonicalRetrievalClient.SemanticSources scope=wire.client.prepareSemanticSources("vetting",Collections.singletonList(wire.binding));assertTrue(scope.dictionary());
+            if("group_bytes".equals(mutation))template.put("status","unknown");
+            if("missing_group".equals(mutation))((ArrayNode)returned.path("units")).removeAll();
+            if("source".equals(mutation))((ObjectNode)returned.path("origins").get(0).path("evidenceRef")).put("originalSourceSha256",VettingCorpus.hash("changed"));
+            ObjectNode demand=JsonUtils.mapper().createObjectNode();demand.put("operation","ids");demand.putArray("originIds").add(returned.path("origins").get(0).path("id").asText());
+            if("none".equals(mutation))assertEquals(returned,wire.client.readSemanticSources(scope,demand));else assertThrows(RuntimeException.class,()->wire.client.readSemanticSources(scope,demand),mutation);
+        }
+    }
+    private static void stripDictionaryMembers(ObjectNode unit){unit.remove(Arrays.asList("members","originIds"));for(String field:Arrays.asList("hierarchyContext","attachmentContext"))if(unit.path(field).isObject())stripDictionaryMembers((ObjectNode)unit.path(field));}
     @Test void semanticReadsRejectChangedScopeSourcePinsAndOmittedClosureMembers()throws Exception{
         for(String mutation:Arrays.asList("manifest","source","member","coverage","software")){
             Wire wire=new Wire();ObjectNode prepared=semanticFixture(wire,"prepare"),returned=semanticFixture(wire,"ids");

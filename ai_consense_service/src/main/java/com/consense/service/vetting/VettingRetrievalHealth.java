@@ -22,6 +22,7 @@ final class VettingRetrievalHealth {
         return STRUCTURAL_VERSION;
     }
     static boolean structuralContract(String contract){return STRUCTURAL_CONTRACT.equals(contract)||ATTACHMENT_STRUCTURAL_CONTRACT.equals(contract);}
+    static boolean signatureVersion(String contract,int version){return structuralContract(contract)?version==4||version==6:WINDOW_CONTRACT.equals(contract)&&(version==3||version==5);}
     static final class Identity {
         final String contract, fingerprint;
         final int signatureVersion;
@@ -38,8 +39,8 @@ final class VettingRetrievalHealth {
         require(retrieval.isObject()&&window.isObject()&&expected.getExpectedRetrievalContract()!=null
                 &&expected.getExpectedRetrievalContract().equals(window.path("contract").asText()),"source-window contract differs");
         boolean structural=structuralContract(expected.getExpectedRetrievalContract());
-        require(structural ? expected.getExpectedRetrievalSignatureVersion()==4&&"dual-structure-v1".equals(expected.getExpectedRetrievalGranularity())
-                : WINDOW_CONTRACT.equals(expected.getExpectedRetrievalContract())&&expected.getExpectedRetrievalSignatureVersion()==3&&"windows-v1".equals(expected.getExpectedRetrievalGranularity()),
+        require(signatureVersion(expected.getExpectedRetrievalContract(),expected.getExpectedRetrievalSignatureVersion())
+                &&(structural ? "dual-structure-v1".equals(expected.getExpectedRetrievalGranularity()) : "windows-v1".equals(expected.getExpectedRetrievalGranularity())),
                 "configured contract/version/granularity combination is unknown");
         require((structural?"independent_lane_rrf":"max").equals(window.path("denseAggregation").asText())
                 &&(structural?"observed_structure_context_max_with_same_pool_baseline":"max").equals(window.path("rerankAggregation").asText()),"window aggregation is unknown");
@@ -72,6 +73,7 @@ final class VettingRetrievalHealth {
         }
         require(runtime.path("reranker").equals(window.path("rerankRuntime")),"rerank recipe/runtime identity differs");
         JsonNode algorithms=window.path("algorithms");require(algorithms.isObject(),"source algorithm fingerprints are absent");
+        if(expected.getExpectedRetrievalSignatureVersion()>=5)require(algorithms.path("portable_index_signature.py").isTextual()&&algorithms.path("portable_index_signature.py").asText().matches("[0-9a-f]{64}"),"portable signature adapter fingerprint is absent");
         String sourceUnitPolicy=null;
         require(!structural||window.has("structuralSelection"),"structural seed selection is absent");
         if(window.has("structuralSelection")) {

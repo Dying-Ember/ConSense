@@ -70,6 +70,7 @@ class AdviceModelIdentityMigrationIntegrationTest {
             for(String column:new String[]{"text_content_sha256","structured_content_sha256","parse_coverage_sha256","normal_candidate_sha256","business_content_sha256"})
                 sql.execute("ALTER TABLE source_document ADD COLUMN "+column+" VARCHAR(64) NULL");
             sql.execute("ALTER TABLE canonical_source_binding ADD COLUMN snapshot_content_sha256 VARCHAR(64) NULL");
+            migrationSql("V27__project_fixed_reference_selection.sql").populate(connection);
         } catch(Exception error) {throw new IllegalStateException("Cannot seed pre-identity fixture",error);}
         r.add("spring.datasource.url",()->URL);
         r.add("consense.storage-root",()->java.nio.file.Paths.get("target","advice-migration-uploads").toAbsolutePath().toString());
@@ -94,6 +95,7 @@ class AdviceModelIdentityMigrationIntegrationTest {
 
     @Test void migratedHistoricalAnswerStaysUnknownAndNewAnswerIdentitySurvivesHttpReload() throws Exception {
         com.consense.service.advice.AdviceBudgetFixture.bind(counter,local,miniMax);
+        assertNull(jdbc.queryForObject("SELECT fixed_reference_selection_json FROM project WHERE id=?",String.class,PROJECT),"The nullable upgrade must not invent reference editions for the historical project");
         JsonNode old=history();assertEquals(1,old.size());
         assertEquals("Legacy text TEST ONLY",old.get(0).path("content").path("en").asText());
         assertTrue(old.get(0).path("modelIdentity").isMissingNode());

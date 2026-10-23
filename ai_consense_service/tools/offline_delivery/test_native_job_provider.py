@@ -7,6 +7,7 @@ import socket
 import subprocess
 import sys
 import threading
+import time
 import unittest
 from unittest.mock import patch
 from urllib.request import urlopen
@@ -74,6 +75,32 @@ class NativeJobProviderTest(DeliveryFixture, unittest.TestCase):
     def transaction(self):
         return {'status':'persisted','taskBinding':self.task,'input':self.input,
                 'attempts':[{'parser':'paddleocr-vl','status':'completed','response':self.output}], 'rawOutputs':{'model_output':self.output}}
+
+    def test_running_owned_job_is_released_while_caller_http_is_still_waiting(self):
+        from native_provider_lifecycle import ProviderLifecycleError
+        cancelled, deleted = threading.Event(), threading.Event()
+        cancelled_at = [None]
+        def running(argv, payload=None):
+            if 'create' in argv:
+                self.calls.append(argv); self.created = True
+                return {'metadata': {'uid': 'actual-fixture-job'}}
+            if 'delete' in argv:
+                self.calls.append(argv); self.deleted = True; deleted.set(); return {}
+            if 'get' in argv and 'job' in argv and self.created and cancelled.is_set():
+                if cancelled_at[0] is None: cancelled_at[0] = time.monotonic()
+                if time.monotonic() - cancelled_at[0] > 1:
+                    return {'metadata': {'uid': 'actual-fixture-job'}, 'status': {'failed': 1}}
+            return self.runner(argv, payload)
+        with self.assertRaises(ProviderLifecycleError):
+            with native_job_provider.owned_gpu_provider(self.provider, 3,
+                    self.store.root/'jobs'/'cancel-running'/'paddle', runner=running,
+                    ready=lambda _: True, cancelled=cancelled.is_set) as lifecycle:
+                cancelled.set()
+                self.assertTrue(deleted.wait(.5), 'An outstanding native HTTP call must not delay owned Job cancellation')
+        self.assertEqual(lifecycle['exitReceipt']['status'], 'released')
+        self.assertTrue(lifecycle['exitReceipt']['podsAbsent'])
+        self.assertEqual(sum('create' in row for row in self.calls), 1)
+        self.assertEqual(sum('delete' in row for row in self.calls), 1)
 
     def test_complete_http_session_and_exact_cas_persist_before_pod_release(self):
         with native_job_provider.owned_gpu_provider(self.provider,10,self.store.root/'jobs'/'first'/'paddle',runner=self.runner) as lifecycle:
