@@ -17,6 +17,11 @@ def prepare_complete_ocr(config_path, output):
     config = copy.deepcopy(config)
     for name in ('paddleocr-vl', 'mineru'):
         row = config.get(name, {})
+        if row.get('nativeCaptureTransport') is not None:
+            if name != 'paddleocr-vl':
+                raise ValueError('Native local CAS transport applies to Paddle only')
+            from complete_ocr import _paddle_asset_store
+            _paddle_asset_store(row)
         if row.get('ownedBoot') is not None:
             row['ownedBoot'].setdefault('precision', 'bf16')
             row.setdefault('identity', {}).setdefault('config', {}).setdefault('precision', 'bf16')
@@ -38,7 +43,9 @@ def prepare_complete_ocr(config_path, output):
         'handoffStatus': 'owned_native_release_required' if all(config[name].get('ownedBoot') or config[name].get('ownedJob') for name in
             ('paddleocr-vl', 'mineru')) else 'remote_handoff_unverified',
         'providers': {name: {'baseUrl': config[name]['baseUrl'], 'identity': config[name]['identity'],
-            'ownedBoot': config[name].get('ownedBoot'), 'modelReady': False} for name in ('paddleocr-vl', 'mineru')},
+            'ownedBoot': config[name].get('ownedBoot'),
+            **({'nativeCaptureTransport': config[name]['nativeCaptureTransport']} if 'nativeCaptureTransport' in config[name] else {}),
+            'modelReady': False} for name in ('paddleocr-vl', 'mineru')},
         'targetAccepted': False,
         'boundary': 'Offline configuration and declared file SHA verification only; no native launch, image/model/API/GPU/source-quality acceptance.'}
     _save(output / 'boot-plan.json', plan)

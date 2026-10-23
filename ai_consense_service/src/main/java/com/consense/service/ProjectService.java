@@ -37,6 +37,10 @@ public class ProjectService {
     private DraftTemplateGraphHeadRepository graphHeads;
     @org.springframework.beans.factory.annotation.Autowired(required=false)
     private DraftGraphInputBindingRepository graphInputs;
+    @org.springframework.beans.factory.annotation.Autowired(required=false)
+    private DraftAutomationRunRepository automationRuns;
+    @org.springframework.beans.factory.annotation.Autowired(required=false)
+    private DraftAutomationItemRepository automationItems;
 
     public List<ProjectVO> list() {
         return projectRepository.findAllByOrderByCreatedAtAsc().stream()
@@ -82,6 +86,7 @@ public class ProjectService {
     @Transactional
     public void delete(String projectId) {
         require(projectId);
+        if(automationRuns!=null){for(com.consense.domain.DraftAutomationRun run:automationRuns.findByProjectIdAndStatusIn(projectId,Arrays.asList("QUEUED","RUNNING","COMPLETED","PARTIAL","FAILED","INTERRUPTED","CANCELLED")))if(automationItems!=null)automationItems.deleteByRunId(run.getId());automationRuns.deleteByProjectId(projectId);}
         if(graphHeads!=null)graphHeads.deleteByProjectId(projectId);
         if(graphInputs!=null)graphInputs.deleteByProjectId(projectId);
         if(graphRevisions!=null)graphRevisions.deleteByProjectId(projectId);

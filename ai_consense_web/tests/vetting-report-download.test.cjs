@@ -21,8 +21,11 @@ const globals = {
 const client = loadTypeScript(path.join(__dirname, '../src/api/client.ts'), {
   globals, dependencies: { axios }, compilerOptions: { esModuleInterop: true }
 })
+const sourceLocations = loadTypeScript(path.join(__dirname, '../src/api/source-locations.ts'), {
+  dependencies: { './client': client }
+})
 const { vettingApi } = loadTypeScript(path.join(__dirname, '../src/api/index.ts'), {
-  dependencies: { './client': client, './types': './types.ts' }
+  dependencies: { './client': client, './source-locations': sourceLocations, './types': './types.ts' }
 })
 client.setApiErrorReporter(message => reported.push(message))
 client.setLlmProfileResolver(() => 'minimax-cn')

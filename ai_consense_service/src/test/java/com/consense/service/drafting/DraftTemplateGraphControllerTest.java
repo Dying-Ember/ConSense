@@ -9,7 +9,7 @@ import static org.mockito.Mockito.*;
 
 class DraftTemplateGraphControllerTest {
     @Test void saveRequiresBothExplicitRevisionExpectationsIncludingNullOnFirstSave(){
-        DraftTemplateGraphService service=mock(DraftTemplateGraphService.class);DraftTemplateGraphController controller=new DraftTemplateGraphController(service);Map<String,Object> body=new LinkedHashMap<>();body.put("graph",Collections.emptyMap());body.put("expectedCurrentRevisionId",null);
+        DraftTemplateGraphService service=mock(DraftTemplateGraphService.class);DraftTemplateGraphController controller=new DraftTemplateGraphController(service,mock(DraftAutomationService.class));Map<String,Object> body=new LinkedHashMap<>();body.put("graph",Collections.emptyMap());body.put("expectedCurrentRevisionId",null);
         assertThrows(BizException.class,()->controller.save("p",body));verifyNoInteractions(service);body.put("expectedDraftRevisionId",null);controller.save("p",body);verify(service).save("p",Collections.emptyMap(),null,null,true);
     }
 }

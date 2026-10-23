@@ -36,7 +36,7 @@ const api = {
   templateSource: async () => new Blob([bytes])
 }
 const loaded = loadVue(path.join(__dirname, '../src/views/DraftingView.vue'), { boundaries: {
-  '@/api': { draftingApi: api, setLlmProfileResolver() {} }, pinia: piniaRuntime, 'vue-i18n': require('vue-i18n'),
+  '@/api/source-locations': { reviewSourceBindings: async () => { throw Error('Source location transport not provided by this fixture') } }, '@/api': { draftingApi: api, setLlmProfileResolver() {} }, pinia: piniaRuntime, 'vue-i18n': require('vue-i18n'),
   'pdfjs-dist': { GlobalWorkerOptions: {}, getDocument() { throw new Error('No generated PDF requested') } },
   'pdfjs-dist/build/pdf.worker.min.mjs?url': { default: 'external-worker' },
   'mammoth/mammoth.browser.min.js': { default: require('mammoth/mammoth.browser.min.js') },

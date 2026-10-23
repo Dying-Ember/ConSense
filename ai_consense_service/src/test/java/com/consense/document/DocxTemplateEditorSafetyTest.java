@@ -9,6 +9,17 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /** Adversarial OOXML behavior through the same public package interface; not a layout acceptance. */
 class DocxTemplateEditorSafetyTest {
+    @Test void selectedNativeTabsCanBeReplacedWhileOutsideTabsAndRunStylesStayIntact() throws Exception {
+        byte[] original=document("<w:p><w:r><w:rPr><w:b/></w:rPr><w:t>Label</w:t><w:tab/><w:t>A</w:t><w:tab/><w:t>B</w:t><w:tab/><w:t>Tail</w:t></w:r></w:p>");
+        for(int start:new int[]{6,7}) {
+            DocxTemplateEditor.TemplateIndex index=editor.inspect(original);DocxTemplateEditor.Paragraph paragraph=index.mainParagraph(1);
+            byte[] result=editor.apply(original,new DocxTemplateEditor.SourceEditBatch(index.getSourceSha256(),Collections.singletonList(DocxTemplateEditor.Edit.replaceSpan("selected-tab",paragraph,start,9,paragraph.getText().substring(start,9),"Not used")))).getDocxBytes();
+            assertEquals(start==6?"Label\tNot used\tTail":"Label\tANot used\tTail",editor.inspect(result).mainParagraph(1).getText());
+            org.w3c.dom.Document xml=DocxTemplateEditorTest.mainXml(result);
+            assertEquals(2,xml.getElementsByTagNameNS("http://schemas.openxmlformats.org/wordprocessingml/2006/main","tab").getLength());
+            assertEquals(1,xml.getElementsByTagNameNS("http://schemas.openxmlformats.org/wordprocessingml/2006/main","b").getLength());
+        }
+    }
     private final DocxTemplateEditor editor=new DocxTemplateEditor();
     private void rejected(String code,byte[] original,DocxTemplateEditor.TemplateIndex index,DocxTemplateEditor.Edit edit) {
         DocxTemplateEditor.EditException failure=assertThrows(DocxTemplateEditor.EditException.class,

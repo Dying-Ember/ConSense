@@ -49,6 +49,7 @@ let rows = [binding('SYNTHETIC-b1', 2, fields.slice(0, 2).map(field => field.key
 const actions = [{ id: 'SYNTHETIC-A', document: 'NTT', clause: 'Route', paragraphs: 'P2', inputKeys: ['foundationIncluded'], action: 'amend', detail: label('SYNTHETIC route amendment') }]
 const bundle = (view, file) => ({ fileKey: file, view, sourceSha256: original.sha, ...(view === 'result' ? { revisionId: saved.revisionId, docxSha256: result.sha } : {}), bindings: clone(rows).map(row => view === 'source' ? { ...row, text: row.sourceText, appliedActionIds: [], operationIds: [], applicationStatus: 'unchanged' } : row) })
 const api = {
+  reviewHead: async () => ({ currentRevisionId: null, draftRevisionId: null, current: null, draft: null }),
   catalog: async () => ({ ruleVersion: 'SYNTHETIC', groups: [{ id: 'scope', label: label('Scope'), fields }] }), variables: async () => clone(variables),
   templates: async () => ['NTT', 'SCT', 'SCC'].map(key => ({ key, tag: 'ok' })), inputs: async () => [], extractTrace: async () => clone(extractionTrace),
   documents: async () => ['NTT', 'SCT', 'SCC'].map(fileKey => ({ ...clone(saved), fileKey })), plan: async () => ({ actions, unresolved: [] }),
@@ -64,7 +65,7 @@ const api = {
 }
 const loaded = loadVue(path.join(__dirname, '../src/views/DraftingView.vue'), {
   globals: { window, document, Element, HTMLElement, Node, DOMParser: window.DOMParser, XMLSerializer: window.XMLSerializer, NodeFilter: window.NodeFilter, ResizeObserver, Blob, crypto: crypto.webcrypto, URL: { createObjectURL: () => 'blob:SYNTHETIC', revokeObjectURL() {} }, localStorage: { getItem: () => 'en', setItem() {} } },
-  boundaries: { '@/api': { draftingApi: api, setLlmProfileResolver() {} }, pinia: piniaRuntime, 'vue-i18n': require('vue-i18n'), jszip: { default: JSZip }, dompurify: { default: require('dompurify')(window) }, 'mammoth/mammoth.browser.min.js': { default: require('mammoth/mammoth.browser.min.js') }, 'mammoth/mammoth.browser': { default: require('mammoth/mammoth.browser') }, 'pdfjs-dist/build/pdf.worker.min.mjs?url': { default: 'external-worker' }, 'pdfjs-dist': { GlobalWorkerOptions: {}, getDocument() { throw new Error('Native location navigation must not open a PDF') } } }
+  boundaries: { '@/api/source-locations': { reviewSourceBindings: async () => { throw Error('Source location transport not provided by this fixture') } }, '@/api': { draftingApi: api, setLlmProfileResolver() {} }, pinia: piniaRuntime, 'vue-i18n': require('vue-i18n'), jszip: { default: JSZip }, dompurify: { default: require('dompurify')(window) }, 'mammoth/mammoth.browser.min.js': { default: require('mammoth/mammoth.browser.min.js') }, 'mammoth/mammoth.browser': { default: require('mammoth/mammoth.browser') }, 'pdfjs-dist/build/pdf.worker.min.mjs?url': { default: 'external-worker' }, 'pdfjs-dist': { GlobalWorkerOptions: {}, getDocument() { throw new Error('Native location navigation must not open a PDF') } } }
 })
 const pinia = piniaRuntime.createPinia(); piniaRuntime.setActivePinia(pinia)
 const store = loaded.loadLocal(path.join(__dirname, '../src/stores/app.ts')).useAppStore(); store.switchProject('SYNTHETIC-BOUND-P1')
@@ -75,12 +76,12 @@ async function until(predicate) { for (let n = 0; n < 100; n++) { await settled(
 function button(title, within = document) { return [...within.querySelectorAll('button')].find(node => node.textContent.trim() === title) }
 async function click(selector) { const control = document.querySelector(selector); assert.ok(control, `Public control ${selector}`); assert.equal(control.disabled, false); control.click(); await settled() }
 async function clickTitle(title) { const control = button(title); assert.ok(control, `Public control ${title}`); assert.equal(control.disabled, false); control.click(); await settled() }
-async function project(id, expectedError = false) { store.switchProject(id); await settled(); await clickTitle('5 Preview and export'); if (expectedError) await until(() => workspace()?.querySelector('[role="alert"]')); else await until(() => paper()?.querySelector('[data-native-paragraph]')) }
+async function project(id, expectedError = false) { store.switchProject(id); await settled(); await clickTitle('4 Preview and export'); if (expectedError) await until(() => workspace()?.querySelector('[role="alert"]')); else await until(() => paper()?.querySelector('[data-native-paragraph]')) }
 
 ;(async () => {
   original = await docx(sourceText); result = await docx(resultText)
   Object.assign(saved, { sourceSha256: original.sha, docxSha256: result.sha, blocks: [{ id: nativePath(2), bindingId: rows[0].bindingId, text: resultText[1], textHash: hash(resultText[1]), paragraphOrdinal: 2, editable: true }] })
-  app.mount('#app'); await settled(); await clickTitle('5 Preview and export'); await until(() => paper()?.querySelector('[data-review-binding="SYNTHETIC-b1"]'))
+  app.mount('#app'); await settled(); await clickTitle('4 Preview and export'); await until(() => paper()?.querySelector('[data-review-binding="SYNTHETIC-b1"]'))
   assert.match(paper().textContent, /SYNTHETIC complete opening context/); assert.match(paper().textContent, /SYNTHETIC complete ending context/)
   assert.equal(paper().querySelectorAll('[data-native-paragraph]').length, sourceText.length)
   assert.ok(calls.some(call => call[0] === 'result-bindings' && call[3] === saved.revisionId && call[4] === result.sha), 'Saved metadata is requested with the exact revision and real SHA')
@@ -131,7 +132,7 @@ async function project(id, expectedError = false) { store.switchProject(id); awa
   assert.equal(document.activeElement, document.querySelector('#input-foundationIncluded'), 'Return to the existing step-2 control restores edit focus')
   assert.equal(document.querySelector('#input-foundationIncluded').value, 'true')
   const phone = document.querySelector('#input-contactTelephone'); phone.value = '  +852 1234 5678  '; phone.dispatchEvent(new window.Event('input', { bubbles: true })); await settled()
-  await clickTitle('5 Preview and export'); await until(() => paper()?.querySelector('[data-native-paragraph]'))
+  await clickTitle('4 Preview and export'); await until(() => paper()?.querySelector('[data-native-paragraph]'))
   await click('[data-review-field="contactTelephone"]')
   assert.match(workspace().querySelector('[data-current-value]').textContent, /\+852 1234 5678/)
   assert.equal(workspace().querySelector('[data-current-value] input'), null, 'Preview value is read-only')
@@ -157,11 +158,11 @@ async function project(id, expectedError = false) { store.switchProject(id); awa
   assert.equal(writes.length, 0)
   console.log('PASS: source, saved revision and DOCX identity guards reject mismatches; retry restores complete content; unavailable native targets stay explicit')
 
-  slowSource = deferred(); store.switchProject('SYNTHETIC-LATE-SOURCE'); await settled(); await clickTitle('5 Preview and export'); await settled()
+  slowSource = deferred(); store.switchProject('SYNTHETIC-LATE-SOURCE'); await settled(); await clickTitle('4 Preview and export'); await settled()
   await project('SYNTHETIC-AFTER-LATE-SOURCE'); const ownedPaper = paper()
   slowSource.resolve(new Blob([original.bytes])); await settled()
   assert.equal(paper(), ownedPaper, 'Late source bytes cannot replace the current project reader')
-  slowResult = deferred(); store.switchProject('SYNTHETIC-LATE-RESULT'); await settled(); await clickTitle('5 Preview and export'); await settled()
+  slowResult = deferred(); store.switchProject('SYNTHETIC-LATE-RESULT'); await settled(); await clickTitle('4 Preview and export'); await settled()
   await project('SYNTHETIC-AFTER-LATE-RESULT'); const currentPaper = paper()
   slowResult.resolve(bundle('result', 'NTT')); await settled()
   assert.equal(paper(), currentPaper, 'Late saved metadata cannot replace the current project reader')

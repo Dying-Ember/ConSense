@@ -61,7 +61,7 @@ function harness({ failRemoval = false, duration, missingTemplates = [], templat
   }
   const documentBoundary = { documentElement: {}, getElementById(id) { return domNode(rendered && find(rendered.root, item => item.props?.id === id)) } }
   const loaded = loadVue(path.join(__dirname, '../src/views/DraftingView.vue'), { boundaries: {
-    '@/api': { draftingApi: api, setLlmProfileResolver() {} }, pinia: piniaRuntime, 'vue-i18n': require('vue-i18n'),
+    '@/api/source-locations': { reviewSourceBindings: async () => { throw Error('Source location transport not provided by this fixture') } }, '@/api': { draftingApi: api, setLlmProfileResolver() {} }, pinia: piniaRuntime, 'vue-i18n': require('vue-i18n'),
     'pdfjs-dist': { GlobalWorkerOptions: {}, getDocument() { throw new Error('No final document requested') } },
     'pdfjs-dist/build/pdf.worker.min.mjs?url': { default: 'external-worker' },
     'mammoth/mammoth.browser': { convertToHtml() { throw new Error('Unsupported source must not be parsed as DOCX') } }
@@ -191,7 +191,7 @@ function harness({ failRemoval = false, duration, missingTemplates = [], templat
   const post = find(h.root, node => node.tag === 'input' && node.props.id === 'input-projectArchitectPost')
   assert.ok(post)
   post.props.onInput({ target: { value: 'Unsaved human wording' } }); await settle()
-  await h.click('1 Sources')
+  await h.click('1 File identification')
   await h.control('data-remove-input', 12)
   assert.match(text(h.root), /TEST ONLY correspondence\.docx/)
   assert.match(text(h.root), /retained|archive/i)

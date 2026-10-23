@@ -4,7 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { vettingApi } from '@/api'
 import { ApiError } from '@/api/client'
-import type { Citation, EvidenceBundle, Finding, FindingWriteBinding, FindingEvidence, VettingFile, VettingJob, VettingProgress, VettingMetrics, VettingReportFormat, VettingSemanticTopic, VettingSourceRole, DocumentScope, VettingChecklist, VettingChecklistItem } from '@/api/types'
+import type { Citation, EvidenceBundle, Finding, FindingWriteBinding, FindingEvidence, VettingFile, VettingJob, VettingProgress, VettingMetrics, VettingReportFormat, VettingSemanticTopic, VettingSourceRole, VettingChecklist, VettingChecklistItem } from '@/api/types'
 import { useAppStore } from '@/stores/app'
 import { useLocalized } from '@/composables/useLocalized'
 import AppIcon from '@/components/AppIcon.vue'
@@ -13,9 +13,11 @@ import CanonicalEvidencePanel from '@/components/CanonicalEvidencePanel.vue'
 import FixedBaselineEvidencePanel from '@/components/FixedBaselineEvidencePanel.vue'
 import AdviceSourceReader from '@/components/AdviceSourceReader.vue'
 import { createReviewHandoff, newReviewHandoffToken, removeReviewHandoff, reviewHandoffCopy, storeReviewHandoff } from '@/advice/reviewHandoff'
+import { uploadVettingFiles, vettingUploadQueue } from '@/vetting/upload-queue'
 
 const { t } = useI18n()
 const store = useAppStore()
+const projectId = computed(() => store.activeProjectId)
 const router = useRouter()
 const { pick, currentKey } = useLocalized()
 
@@ -47,9 +49,78 @@ const metrics = ref<VettingMetrics | null>(null)
 type ObservedJob = VettingJob & { sourceVerification?: 'NOT_CHECKED' }
 const job = ref<ObservedJob | null>(null)
 const starting = ref(false)
-const uploading = ref(false)
-const uploadProgress = ref<{ total: number; completed: number; current: number; fileName: string; failed: number;
-  state: 'running' | 'completed' | 'uncertain' | 'refresh_failed'; messages: string[] } | null>(null)
+const uploadQueue = computed(() => projectId.value ? vettingUploadQueue(projectId.value) : null)
+const uploading = computed(() => uploadQueue.value?.running ?? false)
+const uploadProgress = computed(() => uploadQueue.value?.progress ?? null)
+watch(() => uploadQueue.value?.sources, sources => { if (sources) files.value = sources }, { immediate: true })
+const sourceProgress = ref<import('@/api/types').VettingSourceProgress[]>([])
+let sourceProgressTimer: number | undefined
+let sourceProgressSequence = 0
+const sourceProgressFailed = ref(false)
+const sourceProgressCopy = {
+  currentFile: { zhHans: '当前文件：', zhHant: '目前檔案：', en: 'Current file: ' },
+  method: { zhHans: '处理方法：', zhHant: '處理方法：', en: 'Reported method: ' },
+  page: { zhHans: '当前物理页：', zhHant: '目前實體頁：', en: 'Current physical page: ' },
+  step: { zhHans: '当前步骤：', zhHant: '目前步驟：', en: 'Current step: ' },
+  unknownMethod: { zhHans: '后端尚未报告处理方法', zhHant: '後端尚未回報處理方法', en: 'The backend has not reported the processing method' },
+  unknownPage: { zhHans: '后端尚未报告当前页码', zhHant: '後端尚未回報目前頁碼', en: 'The backend has not reported the current page' },
+  waiting: { zhHans: '等待后端报告当前文件处理进度', zhHant: '等候後端回報目前檔案處理進度', en: 'Waiting for backend progress for this file' },
+  visual: { zhHans: '视觉识别（具体引擎未报告）', zhHant: '視覺識別（具體引擎未回報）', en: 'Visual recognition (specific engine not reported)' },
+  native: { zhHans: '原生文字读取', zhHant: '原生文字讀取', en: 'Native text reading' },
+  render: { zhHans: '页面渲染', zhHant: '頁面渲染', en: 'Page rendering' },
+  textLayout: { zhHans: '文字、表格与版面读取', zhHant: '文字、表格與版面讀取', en: 'Reading text, tables and layout' },
+  layout: { zhHans: '表格与版面核对', zhHant: '表格與版面核對', en: 'Checking tables and layout' },
+  file: { zhHans: '文件正文与结构读取', zhHant: '檔案正文與結構讀取', en: 'Reading file content and structure' },
+  lastReported: { zhHans: '最近已报告进度；本次读取失败，当前状态未确认。', zhHant: '最近已回報進度；本次讀取失敗，目前狀態未確認。', en: 'Last reported progress; this read failed and the current state is unconfirmed.' }
+}
+const currentFileProgress = computed(() => {
+  const queue = uploadProgress.value
+  const pending = queue && queue.state !== 'completed'
+  const row = pending
+    ? sourceProgress.value.find(item => item.fileName === queue.fileName && (item.parseStatus === 'PARSING' || queue.completed >= queue.current))
+    : sourceProgress.value.find(item => item.parseStatus === 'PARSING')
+  return pending || row ? { fileName: pending ? queue.fileName : row!.fileName, row } : null
+})
+const currentFileDetails = computed(() => {
+  const row = currentFileProgress.value?.row, message = row?.parseMessage?.trim() ?? ''
+  const page = message.match(/^第\s*(\d+)\s*\/\s*(\d+)\s*页[：:]\s*(.*)$/s)
+  const validPage = page && Number(page[1]) > 0 && Number(page[1]) <= Number(page[2])
+  let method = sourceProgressCopy.unknownMethod
+  if (message.includes('等待视觉识别结果')) method = sourceProgressCopy.visual
+  else if (/读取原生(?:PDF)?(?:文字|文本)/.test(message)) method = sourceProgressCopy.native
+  else if (message.includes('渲染页面')) method = sourceProgressCopy.render
+  else if (message.includes('读取文字、表格与版面')) method = sourceProgressCopy.textLayout
+  else if (message.includes('核对表格')) method = sourceProgressCopy.layout
+  else if (message.startsWith('读取文件正文与结构')) method = sourceProgressCopy.file
+  return {
+    method: pick(method),
+    page: validPage ? `${page![1]} / ${page![2]}` : `${pick(sourceProgressCopy.unknownPage)}${row?.pageCount ? ` · ${row.pageCount} ${t('vetting.uploadProgress.pages')}` : ''}`,
+    step: validPage ? page![3] : message || pick(sourceProgressCopy.waiting)
+  }
+})
+async function pollSourceProgress() {
+  if (sourceProgressTimer) window.clearTimeout(sourceProgressTimer)
+  const id = projectId.value, epoch = viewEpoch, sequence = ++sourceProgressSequence
+  if (!id || disposed) return
+  try {
+    const rows = await vettingApi.sourceProgress(id)
+    if (disposed || epoch !== viewEpoch || id !== projectId.value || sequence !== sourceProgressSequence) return
+    const finished = sourceProgress.value.some(previous => previous.parseStatus === 'PARSING'
+      && rows.some(row => row.id === previous.id && row.parseStatus !== 'PARSING'))
+    if (finished) await reload()
+    if (disposed || epoch !== viewEpoch || id !== projectId.value || sequence !== sourceProgressSequence) return
+    sourceProgress.value = rows
+    sourceProgressFailed.value = false
+    if (rows.some(row => row.parseStatus === 'PARSING') || uploading.value) {
+      sourceProgressTimer = window.setTimeout(() => { void pollSourceProgress() }, 3000)
+    }
+  } catch {
+    if (!disposed && epoch === viewEpoch && id === projectId.value && sequence === sourceProgressSequence) {
+      sourceProgressFailed.value = true
+      sourceProgressTimer = window.setTimeout(() => { void pollSourceProgress() }, 5000)
+    }
+  }
+}
 const statusSaving = ref(false)
 const reviewSaving = ref(false)
 const reviewFailed = ref(false)
@@ -83,8 +154,6 @@ const sourceIdentityConfirmations = ref<Record<string, boolean>>({})
 const sourceRoleFeedback = ref('')
 const sourceRoleNeedsRefresh = ref(false)
 const SOURCE_ROLES: VettingSourceRole[] = ['tender', 'standard', 'project_fact', 'package_manifest']
-const uploadRole = ref<'auto' | VettingSourceRole>('auto')
-const uploadDocumentScope = ref<DocumentScope>('auto')
 const checklist = ref<VettingChecklist | null>(null)
 const checklistBaseline = ref<VettingChecklistItem[]>([])
 const checklistLoading = ref(false)
@@ -116,8 +185,6 @@ const selectedCode = ref<string | null>(null)
 const drawerOpen = ref(false)
 const evidence = ref<EvidenceBundle | null>(null)
 const sourceCitation = ref<Citation | null>(null)
-
-const projectId = computed(() => store.activeProjectId)
 
 const GROUPS = ['reference', 'conflict', 'language', 'risk', 'gap', 'substantive', 'requirement'] as const
 
@@ -531,7 +598,10 @@ function retryPolling() {
   else void restoreJob()
 }
 
-onMounted(() => { void reload().catch(() => undefined); void restoreJob() })
+onMounted(() => { void pollSourceProgress(); void reload().catch(() => undefined); void restoreJob() })
+watch(() => [projectId.value, uploading.value] as const, ([id, active], [previousId, wasActive]) => {
+  if (id === previousId && wasActive && !active) void reload().then(() => restoreJob()).catch(() => undefined)
+})
 watch(projectId, () => {
   viewEpoch++
   jobSequence++
@@ -551,10 +621,8 @@ watch(projectId, () => {
   evidence.value = null
   sourceCitation.value = null
   starting.value = false
-  uploading.value = false
-  uploadProgress.value = null
-  uploadRole.value = 'auto'
-  uploadDocumentScope.value = 'auto'
+  sourceProgress.value = []
+  void pollSourceProgress()
   checklist.value = null
   checklistBaseline.value = []
   checklistSequence++
@@ -583,6 +651,7 @@ watch(projectId, () => {
 
 onBeforeUnmount(() => {
   disposed = true
+  if (sourceProgressTimer) window.clearTimeout(sourceProgressTimer)
   viewEpoch++
   evidenceSequence++
   stopPolling()
@@ -791,6 +860,7 @@ async function runVetting() {
 }
 
 async function refreshUploadStatus() {
+  await pollSourceProgress()
   try { await reload() } catch { store.notify(t('vetting.uploadProgress.refreshFailed')) }
 }
 async function uploadPackage(event: Event) {
@@ -800,45 +870,17 @@ async function uploadPackage(event: Event) {
     return
   }
   if (!selected.length || running.value || sourceRoleSaving.value !== null || uploading.value) return
-  const id = projectId.value, epoch = viewEpoch
-  const sourceRole = uploadRole.value === 'auto' ? undefined : uploadRole.value
-  const documentScope = uploadDocumentScope.value
+  const id = projectId.value
   jobSequence++
-  uploading.value = true
-  uploadProgress.value = { total: selected.length, completed: 0, current: 1, fileName: selected[0].name, failed: 0, state: 'running', messages: [] }
   if (job.value) job.value = { ...job.value, sourceSetStale: true }
   store.setBusy(t('vetting.uploadProgress.title'))
-  let acknowledged = false
+  ;(event.target as HTMLInputElement).value = ''
   try {
-    // Keep the user's order. A complete response and source refresh precede the next request.
-    for (let index = 0; index < selected.length; index++) {
-      if (disposed || epoch !== viewEpoch || id !== projectId.value) return
-      const progress = uploadProgress.value!
-      progress.current = index + 1; progress.fileName = selected[index].name
-      acknowledged = false
-      const result = await vettingApi.uploadPackage(id, [selected[index]], sourceRole, documentScope)
-      if (disposed || epoch !== viewEpoch || id !== projectId.value) return
-      acknowledged = true
-      progress.completed++
-      if (result.failed > 0 || result.accepted < 1) progress.failed++
-      progress.messages.push(...result.messages)
-      await reload()
-    }
-    if (disposed || epoch !== viewEpoch || id !== projectId.value) return
-    uploadProgress.value!.state = 'completed'
-    await restoreJob()
-  } catch {
-    if (!disposed && epoch === viewEpoch && id === projectId.value && uploadProgress.value) {
-      uploadProgress.value.state = acknowledged ? 'refresh_failed' : 'uncertain'
-      // Read saved results once; a timeout is not permission to replay or continue the queue.
-      await reload().catch(() => undefined)
-    }
+    const operation = uploadVettingFiles(id, selected)
+    void pollSourceProgress()
+    await operation
   } finally {
     store.clearBusy()
-    if (epoch === viewEpoch && id === projectId.value) {
-      uploading.value = false
-      if (packageInput.value) packageInput.value.value = ''
-    }
   }
 }
 
@@ -959,22 +1001,6 @@ function tagClass(group: string) {
         </button>
         <input ref="packageInput" type="file" multiple class="hidden"
                accept=".pdf,.doc,.docx,.txt,.md,.msg,.eml,.emlx" @change="uploadPackage" />
-        <label class="upload-role">
-          <span>{{ t('vetting.uploadRole.label') }}</span>
-          <select v-model="uploadRole" :disabled="running || sourceRoleSaving !== null || uploading">
-            <option value="auto">{{ t('vetting.uploadRole.auto') }}</option>
-            <option value="tender">{{ t('vetting.uploadRole.tender') }}</option>
-            <option value="standard">{{ t('vetting.uploadRole.standard') }}</option>
-            <option value="project_fact">{{ t('vetting.uploadRole.project_fact') }}</option>
-            <option value="package_manifest">{{ t('vetting.uploadRole.package_manifest') }}</option>
-          </select>
-        </label>
-        <label class="upload-role">
-          <span>{{ t('vetting.documentScope.label') }}</span>
-          <select v-model="uploadDocumentScope" :disabled="running || sourceRoleSaving !== null || uploading">
-            <option v-for="value in ['auto', 'package', 'works_pss', 'pricing', 'example', 'drawing']" :key="value" :value="value">{{ t(`vetting.documentScope.${value}`) }}</option>
-          </select>
-        </label>
         <button class="btn" type="button" :disabled="running || sourceRoleSaving !== null || uploading || hasUnsavedReview || reviewSaving || checklistDirty || checklistSaving !== null" @click="packageInput?.click()">
           <AppIcon name="upload" :size="15" />{{ t('vetting.actions.upload') }}
         </button>
@@ -993,10 +1019,21 @@ function tagClass(group: string) {
       </div>
     </div>
 
-    <div v-if="uploadProgress" class="surface section-gap" aria-live="polite">
+    <div v-if="uploadProgress || sourceProgress.some(row => row.parseStatus === 'PARSING' || row.parseStatus === 'FAILED')" class="surface section-gap" aria-live="polite">
       <div class="surface-body">
         <strong>{{ t('vetting.uploadProgress.title') }}</strong>
+        <p v-if="sourceProgressFailed" class="warning-note">{{ t('vetting.uploadProgress.refreshFailed') }}</p>
+        <template v-if="uploadProgress">
         <p class="small">{{ t('vetting.uploadProgress.current', { current: uploadProgress.current, total: uploadProgress.total, file: uploadProgress.fileName }) }}</p>
+        </template>
+        <section v-if="currentFileProgress" data-vetting-current-file role="status" class="source-note">
+          <strong>{{ pick(sourceProgressCopy.currentFile) }}{{ currentFileProgress.fileName }}</strong>
+          <p v-if="sourceProgressFailed" class="warning-note">{{ pick(sourceProgressCopy.lastReported) }}</p>
+          <p class="small">{{ pick(sourceProgressCopy.method) }}{{ currentFileDetails.method }}</p>
+          <p class="small">{{ pick(sourceProgressCopy.page) }}{{ currentFileDetails.page }}</p>
+          <p class="small">{{ pick(sourceProgressCopy.step) }}{{ currentFileDetails.step }}</p>
+        </section>
+        <template v-if="uploadProgress">
         <p class="small">{{ t('vetting.uploadProgress.received', { count: uploadProgress.completed, total: uploadProgress.total, failed: uploadProgress.failed }) }}</p>
         <progress class="vetting-progress" :value="uploadProgress.completed" :max="uploadProgress.total" :aria-label="t('vetting.uploadProgress.title')" />
         <p :class="uploadProgress.state === 'running' || uploadProgress.state === 'completed' ? 'muted small' : 'warning-note'">{{ t(`vetting.uploadProgress.${uploadProgress.state}`) }}</p>
@@ -1005,6 +1042,12 @@ function tagClass(group: string) {
           <summary>{{ t('vetting.uploadProgress.records') }}</summary>
           <p v-for="(message, index) in uploadProgress.messages" :key="index">{{ message }}</p>
         </details>
+        </template>
+        <p v-for="row in sourceProgress" :key="row.id" class="small">
+          <strong>{{ row.fileName }}</strong> · {{ sourceParseLabel(row.parseStatus) }}
+          <span v-if="row.pageCount"> · {{ row.pageCount }} {{ t('vetting.uploadProgress.pages') }}</span>
+          <br />{{ row.parseMessage }}
+        </p>
       </div>
     </div>
 
@@ -1565,7 +1608,7 @@ function tagClass(group: string) {
     </AppModal>
 
     <!-- 审查源集 -->
-    <AppModal :open="sourceOpen" :title="t('vetting.actions.source')" wide @close="sourceOpen = false">
+    <AppModal class="vetting-source-modal" :open="sourceOpen" :title="t('vetting.actions.source')" wide @close="sourceOpen = false">
       <div class="row section-gap">
         <p class="muted small">{{ t('vetting.sourcePurpose.note') }}</p>
         <button class="btn" type="button" :disabled="sourceRoleSaving !== null || uploading" @click="refreshSources">{{ t('vetting.sourcePurpose.refresh') }}</button>
@@ -1638,6 +1681,7 @@ function tagClass(group: string) {
 </template>
 
 <style scoped>
+.vetting-source-modal :deep(.modal.wide) { width: min(1520px, 100%); }
 .source-identity-confirm { display: flex; align-items: flex-start; gap: 8px; margin: 8px 0; min-width: 220px; max-width: 320px; white-space: normal; }
 .source-identity-confirm input { flex: none; width: auto; margin-top: 3px; }
 .vetting-source-table table { min-width: 860px; }

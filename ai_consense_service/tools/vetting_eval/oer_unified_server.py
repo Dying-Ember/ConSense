@@ -25,6 +25,8 @@ from workspace_root import resolve_workspace
 from native_pdf_source_family_server import ENDPOINT as FAMILY_ENDPOINT, install_native_pdf_source_family_route
 from normal_observed_server import (CAPABILITY as NORMAL_OBSERVED_CAPABILITY,
     ENDPOINT as NORMAL_OBSERVED_ENDPOINT, MAX_NORMAL_MESSAGE_BYTES, install_normal_observed_route)
+from source_read_server import (CAPABILITY as SOURCE_READ_CAPABILITY,
+    ENDPOINT as SOURCE_READ_ENDPOINT, install_source_read_route)
 
 
 HERE = Path(__file__).resolve().parent
@@ -32,7 +34,7 @@ UNIFIED_ALGORITHMS = ('unified_source_registry.py', 'oer_unified_server.py',
                       'source_page_registry.py', 'source_page_server.py', 'source_render_assets.py',
                       'source_page_index.py', 'parser_capture.py', 'native_pdf_source_family.py',
                       'native_pdf_source_family_server.py', 'normal_observed_projection.py',
-                      'normal_observed_server.py')
+                      'normal_observed_server.py', 'source_read_server.py')
 _UNIFIED_HASHES = {name: hashlib.sha256((HERE / name).read_bytes()).hexdigest() for name in UNIFIED_ALGORITHMS}
 UNIFIED_CAPABILITY = {
     'version': 'actual-cas-mixed-source-registry-v1', 'registrationIdentity': 'one-source-root',
@@ -88,7 +90,7 @@ def create_unified_app(policy, *, backend=None, artifact_store=None, target_modu
         target_module=target_module, source_registry=registry, runtime_factory=UnifiedOerWindowRuntime,
         app=app, maximum_message_bytes=native_maximum, normal_maximum_message_bytes=maximum_message_bytes,
         strict_json_paths=('/project', '/project/native', '/project/native-collection', '/project/native-pdf', FAMILY_ENDPOINT, NORMAL_OBSERVED_ENDPOINT,
-                           '/index', '/index-canonical', '/index-canonical/status', '/retrieve'))
+                           '/index', '/index-canonical', '/index-canonical/status', '/retrieve', SOURCE_READ_ENDPOINT))
     install_native_pdf_source_family_route(app, registry, artifact_store, policy,
         target_module=target_module, maximum_message_bytes=native_maximum,
         software_guard=backend._windows_runtime.algorithms)
@@ -96,6 +98,8 @@ def create_unified_app(policy, *, backend=None, artifact_store=None, target_modu
         maximum_message_bytes=maximum_message_bytes, software_guard=backend._windows_runtime.algorithms)
     install_source_page_routes(app, registry, policy, target_module=target_module)
     install_source_page_index_route(app, backend)
+    install_source_read_route(app, registry, policy, target_module=target_module,
+        software_guard=backend._windows_runtime.algorithms)
     old_health = next(route for route in app.routes if getattr(route, 'path', None) == '/health')
     endpoint = old_health.endpoint
     app.router.routes.remove(old_health)
@@ -109,6 +113,8 @@ def create_unified_app(policy, *, backend=None, artifact_store=None, target_modu
                 'artifactReadValidationScope': UNIFIED_CAPABILITY['artifactReadValidationScope']}
         result['oer']['unifiedCanonical'] = {**UNIFIED_CAPABILITY, 'maximumMessageBytes': native_maximum}
         result['oer']['normalObserved'] = {**NORMAL_OBSERVED_CAPABILITY, 'maximumMessageBytes': maximum_message_bytes}
+        result['oer']['sourceRead'] = SOURCE_READ_CAPABILITY
+        result['oer']['requestSourceValidation']['routes'].append(SOURCE_READ_ENDPOINT)
         result['oer']['sourcePageRenderContract'] = 'consense.source-page-render-evidence.v1'
         result['oer']['sourcePageIndexContract'] = 'explicit-composite-index-pins-v1'
         result['oer']['nativePdfSourceFamily'] = {

@@ -10,6 +10,19 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.mock;
 
 class OerSourceRoutingTest {
+    @Test void drawingListsAreReviewableTextAppendicesRatherThanDrawingFiles() {
+        for(String title:Arrays.asList("LIST OF CONTRACT DRAWINGS", "LIST OF REFERENCE DRAWINGS AND DOCUMENTS", "LIST OF REFERENCE DRAWINGS/\nDOCUMENTS")) {
+            DocumentParser.ParsedDocument source=parse("APPENDIX B\n"+title+"\n20250101");
+            OerDocumentIdentity identity=new OerSourceRouting().route("anonymous.txt",source.getSourceSha256(),source);
+            assertEquals("project_document",identity.getSourcePurpose(),title);
+            assertEquals("tender",identity.getRole());
+            assertTrue(identity.getEligibleModules().contains("vetting"));
+        }
+        for(String text:Arrays.asList("DRAWINGS", "This letter refers to LIST OF CONTRACT DRAWINGS", "Sample answer\nLIST OF CONTRACT DRAWINGS")) {
+            DocumentParser.ParsedDocument source=parse(text);
+            assertEquals("unknown",new OerSourceRouting().route("APB_List of Contract Dwg.pdf",source.getSourceSha256(),source).getSourcePurpose());
+        }
+    }
     private DocumentParser.ParsedDocument parse(String text) {
         return new DocumentParser(new ConsenseProperties(), mock(OcrClient.class)).parse("source.txt", text.getBytes(StandardCharsets.UTF_8));
     }

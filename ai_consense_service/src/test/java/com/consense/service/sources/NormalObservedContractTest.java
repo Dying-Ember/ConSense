@@ -1,6 +1,7 @@
 package com.consense.service.sources;
 
 import com.consense.common.JsonUtils;
+import com.consense.service.vetting.NormalSourceCandidateGraph;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.nio.charset.StandardCharsets;
@@ -14,9 +15,18 @@ class NormalObservedContractTest {
         assertEquals(p,CanonicalEvidenceService.validateSnapshot(raw,p.path("projectionSha256").asText()));
         assertEquals(3,p.path("canonical").path("units").size());assertEquals(2,p.path("chunks").size());assertEquals(1,p.path("nonRetrievableUnits").size());
         assertEquals("no_observed_text",p.path("nonRetrievableUnits").get(0).path("reason").asText());
-        NormalObservedContract.validateCapability(JsonUtils.parse(resource("authored-health.json")).path("oer"));
+        assertEquals(NormalSourceCandidateGraph.LEGACY_VERSION,p.path("manifest").path("candidateGraph").path("producerVersion").asText());
         String receipt="{\"projection\":"+raw+",\"chunks\":2}";
         assertEquals(raw,CanonicalJson.field(receipt,"projection"));
+    }
+    @Test void currentPublicationRequiresV3WhileTheFrozenV2ProjectionRemainsReadable()throws Exception{
+        JsonNode legacy=JsonUtils.parse(resource("authored-health.json")).path("oer");
+        assertEquals(NormalSourceCandidateGraph.LEGACY_VERSION,legacy.path("normalObserved").path("candidateGraphVersion").asText());
+        assertEquals("NORMAL_OBSERVED_CAPABILITY_MISMATCH",assertThrows(CanonicalEvidenceException.class,()->NormalObservedContract.validateCapability(legacy)).getMessage());
+        JsonNode current=JsonUtils.parse(resource("authored-current-v3-capability.json")).path("oer");
+        assertEquals(NormalSourceCandidateGraph.VERSION,current.path("normalObserved").path("candidateGraphVersion").asText());
+        assertDoesNotThrow(()->NormalObservedContract.validateCapability(current));
+        String raw=resource("authored-projection.json");assertEquals(JsonUtils.parse(raw),NormalObservedContract.validate(raw,JsonUtils.parse(raw).path("projectionSha256").asText()));
     }
     @Test void recomputingOuterSealCannotGrantQualityOrDropACompleteMember()throws Exception{
         JsonNode original=JsonUtils.parse(resource("authored-projection.json"));
@@ -45,7 +55,7 @@ class NormalObservedContractTest {
         for(String literal:new String[]{"\u200b","\u00a0actual\u202f","0"})assertFalse(NormalObservedContract.noObservedText(literal));
     }
     @Test void normalCapabilityAndConfiguredSnapshotCapRemainFiniteAndTyped()throws Exception{
-        ObjectNode oer=(ObjectNode)JsonUtils.parse(resource("authored-health.json")).path("oer").deepCopy();
+        ObjectNode oer=(ObjectNode)JsonUtils.parse(resource("authored-current-v3-capability.json")).path("oer").deepCopy();
         ObjectNode capability=(ObjectNode)oer.path("normalObserved");
         capability.put("maximumMessageBytes",NormalObservedContract.MAX_BYTES);
         assertDoesNotThrow(()->NormalObservedContract.validateCapability(oer));

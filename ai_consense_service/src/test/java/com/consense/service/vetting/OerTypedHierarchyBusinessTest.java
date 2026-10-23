@@ -47,6 +47,7 @@ class OerTypedHierarchyBusinessTest {
             response=OerTypedHierarchyValidationTest.episode(parents,expected.path("originIds").get(0).asText(),expected.deepCopy(),VettingRetrievalSourceUnits.TYPED_PARENT_POLICY);
             when(retrieval.retrieve(anyString(),anyString(),anyString(),nullable(String.class),anyList())).thenAnswer(call->response.deepCopy());
             when(retrieval.sourceUnitPolicy(anyString(),anyString(),anyList())).thenReturn(VettingRetrievalSourceUnits.TYPED_PARENT_POLICY);
+            when(retrieval.readSources(anyString(),any(JsonNode.class),anyList())).thenAnswer(call->OerBusinessEvidenceTest.authoredSourceRead(call.getArgument(2),call.getArgument(1),VettingRetrievalSourceUnits.TYPED_PARENT_POLICY));
             CanonicalEvidenceProperties properties=new CanonicalEvidenceProperties();properties.setBaseUrl("http://127.0.0.1:8868");service=new OerBusinessEvidence(registry,retrieval,properties);
         }
         OerBusinessEvidence.Session load(String module){return service.load(source.getProjectId(),module,Collections.singletonList(source));}
@@ -62,7 +63,7 @@ class OerTypedHierarchyBusinessTest {
             assertEquals(member.path("id"),pointer.path("canonicalChunkId"));assertEquals(member.path("unitId"),pointer.path("unitId"));assertEquals(member.path("parts"),pointer.path("parts"));
             assertEquals(member.path("originalSourceSha256"),pointer.path("originalSourceSha256"));assertEquals(member.path("projectionRevisionSha256"),pointer.path("projectionRevisionSha256"));assertFalse(pointer.path("humanConfirmed").asBoolean());
         }
-        AdviceService advice=mock(AdviceService.class,CALLS_REAL_METHODS);Method render=AdviceService.class.getDeclaredMethod("renderExcerpts",List.class);render.setAccessible(true);String excerpts=(String)render.invoke(advice,hits);
+        AdviceService advice=mock(AdviceService.class,CALLS_REAL_METHODS);Method render=AdviceService.class.getDeclaredMethod("renderExcerpts",List.class,OerModelMaterial.Request.class);render.setAccessible(true);String excerpts=(String)render.invoke(advice,hits,new OerModelMaterial.Request(Collections.emptyList()));
         OerAdviceDisplayDedupTest.assertCompleteBodies(hits,excerpts);assertTrue(excerpts.contains("legalClosureVerified=false"),"Missing context semantic limit");assertTrue(excerpts.contains("descendants are unranked source context"),"Missing context score limit");assertFalse(hit.getPayload().containsKey("memberScores"));
     }
     @Test void pureSourceHitsUseSameContextWhileVettingKeepsOneRankedSeedAndAdmitsCompleteGroup()throws Exception {

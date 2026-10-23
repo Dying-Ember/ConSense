@@ -191,6 +191,38 @@ class DraftReviewSourcesTest {
         }
     }
 
+    @Test void markerContextBindsAsEvidenceWithoutGrantingEditingAuthority() throws Exception {
+        byte[] bytes="%PDF-1.4\nmarker test".getBytes(StandardCharsets.UTF_8);SourceDocument source=source(1,"NTT",bytes);
+        DocumentBlock block=new DocumentBlock();block.setId("page-1");block.setPageNo(1);block.setSource("native_pdf");block.setText("#(e) Assessment of Sub-surface Conditions");
+        block.setReadingContext(JsonUtils.mapper().createObjectNode().put("sourceSha256",DraftTemplateRouting.sha(bytes)).put("occurrenceId","page-1"));
+        ParseCoverage coverage=new ParseCoverage();coverage.setTotalPages(1);coverage.setParsedPages(1);coverage.setComplete(true);
+        DocumentParser.ParsedDocument parsed=new DocumentParser.ParsedDocument(block.getText(),Collections.emptyList(),1,false,null,Collections.singletonList(block),coverage,DraftTemplateRouting.sha(bytes),Collections.emptyList());
+        coverage.setTemplateEvidence(OerTemplateEvidence.analyse("NTT",parsed));source.setStructuredContentJson(JsonUtils.write(parsed.getBlocks()));source.setParseCoverageJson(JsonUtils.write(coverage));
+        JsonNode reading=sources.reading(source),marker=reading.path("markerCandidates").path(0);assertTrue(marker.isObject());
+        ObjectNode anchor=JsonUtils.mapper().createObjectNode().put("sourceDocumentId",source.getId()).put("sourceSha256",reading.path("sourceSha256").asText()).put("text",marker.path("localSentenceObservation").path("text").asText()).put("sourceObservationId",marker.path("id").asText());
+        anchor.set("sourceObservation",marker.deepCopy());for(String key:new String[]{"analysisRevision","analysisInputSha256","analysisSha256"})anchor.set(key,reading.path(key).deepCopy());
+        ObjectNode bound=sources.bindObservation(source,anchor);assertEquals("bound",bound.path("status").asText(),bound.toString());assertFalse(bound.path("editableAuthority").asBoolean());assertFalse(bound.has("spans"));
+        anchor.set("observedRanges",DraftReviewSources.observationRanges(marker));assertEquals("bound",sources.bindObservation(source,anchor).path("status").asText());
+        ObjectNode wrong=anchor.deepCopy();((ObjectNode)wrong.path("observedRanges").path(0)).put("end",1);assertEquals("SOURCE_OBSERVATION_SCOPE_CHANGED",sources.bindObservation(source,wrong).path("reason").asText());
+        wrong=anchor.deepCopy();wrong.put("text","#");assertEquals("SOURCE_OBSERVATION_QUOTE_MISMATCH",sources.bindObservation(source,wrong).path("reason").asText());
+        wrong=anchor.deepCopy();wrong.put("analysisSha256","old");assertEquals("SOURCE_OBSERVATION_ANALYSIS_CHANGED",sources.bindObservation(source,wrong).path("reason").asText());
+    }
+
+    @Test void guidanceBlankParagraphRemainsEvidenceWithoutEditableAuthority() throws Exception {
+        byte[] bytes=docx("[Guidance Notes:","","1. Project team to insert the contract number.]");
+        SourceDocument source=source(1,"SCC",bytes);
+        DocumentParser.ParsedDocument parsed=new DocumentParser(new ConsenseProperties(),null).parseTemplate("SCC","SCC.docx",bytes);
+        source.setStructuredContentJson(JsonUtils.write(parsed.getBlocks()));source.setParseCoverageJson(JsonUtils.write(parsed.getCoverage()));
+        ObjectNode anchor=observationPassage(source);boolean empty=false;
+        for(JsonNode range:anchor.path("observedRanges"))if(range.path("start").asInt()==0&&range.path("end").asInt()==0)empty=true;
+        assertTrue(empty,"Fixture must retain the empty native paragraph");
+        ObjectNode bound=sources.bindObservation(source,anchor);
+        assertEquals("bound",bound.path("status").asText(),bound.toString());
+        assertFalse(bound.path("editableAuthority").asBoolean());assertFalse(bound.has("spans"));
+        ObjectNode changed=anchor.deepCopy();((ObjectNode)changed.path("observedRanges").path(0)).put("end",0);
+        assertEquals("SOURCE_OBSERVATION_SCOPE_CHANGED",sources.bindObservation(source,changed).path("reason").asText());
+    }
+
     private ObjectNode observationPassage(SourceDocument source) {
         JsonNode reading=sources.reading(source),note=reading.path("guidanceNotes").path(0);ObjectNode anchor=JsonUtils.mapper().createObjectNode().put("sourceDocumentId",source.getId()).put("sourceSha256",reading.path("sourceSha256").asText()).put("text",note.path("text").asText()).put("sourceObservationId",note.path("id").asText());
         anchor.set("sourceObservation",note.deepCopy());anchor.set("observedRanges",note.path("memberRanges").deepCopy());for(String key:new String[]{"analysisRevision","analysisInputSha256","analysisSha256"})anchor.set(key,reading.path(key).deepCopy());return anchor;

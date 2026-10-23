@@ -5,10 +5,9 @@ import com.consense.config.ConsenseProperties;
 import com.consense.document.OerDocumentIdentity;
 import com.consense.domain.SourceDocument;
 import com.consense.repository.SourceDocumentRepository;
+import com.consense.service.StorageService;
 import com.consense.service.vetting.VettingCorpus;
-import java.io.InputStream;
 import java.nio.file.*;
-import java.security.MessageDigest;
 import java.util.*;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
@@ -113,13 +112,7 @@ public class OerSourceRoutingRefreshService {
 
     private void verifyOriginal(SourceDocument d) {
         try {
-            Path root=Paths.get(properties.getStorageRoot()).toAbsolutePath().normalize().toRealPath();
-            Path original=Paths.get(d.getStoragePath()).toAbsolutePath().normalize().toRealPath();
-            require(original.startsWith(root)&&Files.isRegularFile(original),HttpStatus.CONFLICT,"SOURCE_ORIGINAL_UNAVAILABLE");
-            MessageDigest hash=MessageDigest.getInstance("SHA-256");
-            try(InputStream stream=Files.newInputStream(original)){byte[] buffer=new byte[8192];int count;while((count=stream.read(buffer))!=-1)hash.update(buffer,0,count);}
-            StringBuilder digest=new StringBuilder();for(byte b:hash.digest())digest.append(String.format("%02x",b&255));
-            require(Objects.equals(d.getSourceSha256(),digest.toString()),HttpStatus.CONFLICT,"SOURCE_ORIGINAL_BYTES_CHANGED");
+            require(Objects.equals(d.getSourceSha256(),StorageService.storedSha256(Paths.get(properties.getStorageRoot()),d.getStoragePath())),HttpStatus.CONFLICT,"SOURCE_ORIGINAL_BYTES_CHANGED");
         }catch(CanonicalEvidenceException failure){throw failure;}
         catch(Exception failure){throw new CanonicalEvidenceException(HttpStatus.CONFLICT,"SOURCE_ORIGINAL_UNAVAILABLE");}
     }

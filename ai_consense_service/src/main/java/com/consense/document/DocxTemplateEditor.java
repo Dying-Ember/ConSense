@@ -23,6 +23,23 @@ public final class DocxTemplateEditor {
     private static final int COUNT_LIMIT=5000;
 
     public TemplateIndex inspect(byte[] sourceDocx) { return load(sourceDocx).index; }
+    /** Renderer-only copy: reuse the guarded Latin-run policy without changing text or saved artifacts. */
+    public DocxEditResult libreOfficeRenderingCopy(byte[] sourceDocx) {
+        PackageModel model=load(sourceDocx);Set<String> parts=new LinkedHashSet<>();List<NativeLayoutChange> changes=new ArrayList<>();
+        for(Paragraph paragraph:model.index.getParagraphs()) {
+            List<Element> fonts;
+            try { fonts=latinFontControls(model.nodes.get(paragraph.id),paragraph.id,false,false,true); }
+            catch(EditException unsupported) { continue; }
+            if(fonts.isEmpty())continue;
+            for(Element font:fonts)font.removeAttributeNS(W,"hint");
+            parts.add(paragraph.part);
+            changes.add(new NativeLayoutChange("normalize_verified_latin_font_hint","APPLIED",model.index.anchor(paragraph.id),paragraph.id));
+        }
+        if(parts.isEmpty())return new DocxEditResult(sourceDocx,model.index);
+        for(String part:parts)model.entries.put(part,xml(model.xmlParts.get(part)));
+        byte[] result=write(model.entries);
+        return new DocxEditResult(result,load(result).index,model.index.sourceSha256,Collections.emptyList(),Collections.emptyList(),model.index.entryHashes,"libreoffice-latin-hints-v1",changes);
+    }
     /** Source-bound named paragraphs; current paths are resolved only inside the frozen package. */
     public static final class NativeHeadingFlow {
         private final String headingBookmark,bodyBookmark;private final int emptyParagraphs;
@@ -516,6 +533,9 @@ public final class DocxTemplateEditor {
     private static List<Element> latinHintFonts(Element paragraph,String id,boolean requireHint){return latinFontControls(paragraph,id,requireHint,false);}
     /** Slot cleanup keeps paragraph alignment and every other font attribute; only exact registered ASCII source runs qualify. */
     private static List<Element> latinFontControls(Element paragraph,String id,boolean required,boolean fontSlot){
+        return latinFontControls(paragraph,id,required,fontSlot,false);
+    }
+    private static List<Element> latinFontControls(Element paragraph,String id,boolean required,boolean fontSlot,boolean renderingCopy){
         String code=fontSlot?"LAYOUT_LATIN_FONT_SLOT_SCOPE_CHANGED":"LAYOUT_LATIN_HINT_SCOPE_CHANGED";
         String paragraphText=descendantText(paragraph,"t");
         if(!is(paragraph,"p")||!latinHintText(paragraphText,true)||fontSlot&&!printableAscii(paragraphText))throw error(code,id);
@@ -526,7 +546,7 @@ public final class DocxTemplateEditor {
             if(!is(child,"r"))throw error(code,id);Element run=(Element)child;
             for(Node item=run.getFirstChild();item!=null;item=item.getNextSibling())if(item instanceof Element&&!is(item,"rPr")&&!is(item,"t")&&!is(item,"tab"))throw error(code,id);
             String text=descendantText(run,"t");if(!latinHintText(text,false)||fontSlot&&!printableAscii(text))throw error(code,id);
-            if(text.isEmpty())continue;if(!fontSlot&&!direct(run,"tab").isEmpty())throw error(code,id);
+            if(text.isEmpty())continue;if(!fontSlot&&!renderingCopy&&!direct(run,"tab").isEmpty())throw error(code,id);
             List<Element> props=direct(run,"rPr");if(props.size()>1)throw error(code,id);if(props.isEmpty())continue;
             List<Element> fonts=direct(props.get(0),"rFonts");if(fonts.size()>1)throw error(code,id);
             if(fonts.size()==1&&(fontSlot?fonts.get(0).hasAttributeNS(W,"eastAsia"):"eastAsia".equals(fonts.get(0).getAttributeNS(W,"hint")))){
@@ -821,6 +841,7 @@ public final class DocxTemplateEditor {
                     catalog+=length;
                 }
                 if(actualStart<0||actualEnd<actualStart)throw error("CATALOG_MAPPING_UNSUPPORTED",id);
+                if(actualEnd-actualStart!=end-start)throw error("UNSUPPORTED_INLINE_FEATURE",id);
                 Edit edit=new Edit(id,p,actualStart,actualEnd,p.text.substring(actualStart,actualEnd),replacement,labelOutsideFields,tocFieldLabel);
                 validateSpan(parse(p.snapshotXml).getDocumentElement(),edit);
                 return edit;
@@ -1517,6 +1538,7 @@ public final class DocxTemplateEditor {
         List<Element> out=new ArrayList<>();for(Node child=node.getFirstChild();child!=null;child=child.getNextSibling())if(is(child,local))out.add((Element)child);return out;
     }
     private static boolean contains(Node ancestor,Node child){for(Node n=child.getParentNode();n!=null;n=n.getParentNode())if(n==ancestor)return true;return false;}
+    private static boolean plainNativeTab(Element node,Element paragraph){return is(node,"tab")&&!node.hasChildNodes()&&node.getAttributes().getLength()==0&&is(node.getParentNode(),"r")&&node.getParentNode().getParentNode()==paragraph;}
     private static void validateSpan(Element target,Edit edit) {
         if(!is(target,"p"))throw error("TARGET_KIND_MISMATCH",edit.operationId);
         String original=editableText(target);
@@ -1529,7 +1551,7 @@ public final class DocxTemplateEditor {
         for(String fragment:edit.replacement.split("[\n\t]",-1))validText(fragment,edit.operationId);
         if(edit.labelOutsideFields)validateLabelOutsideFields(target,edit);
         else {
-            for(Segment segment:segments(target))if(!segment.safe&&(edit.type==EditType.INSERT_TEXT?segment.start<=edit.start&&edit.start<=segment.end:segment.start<edit.end&&segment.end>edit.start||segment.start==segment.end&&edit.start<segment.start&&segment.start<edit.end))throw error("UNSUPPORTED_INLINE_FEATURE",edit.operationId);
+            for(Segment segment:segments(target))if(!segment.safe&&!(edit.type!=EditType.INSERT_TEXT&&plainNativeTab(segment.node,target))&&(edit.type==EditType.INSERT_TEXT?segment.start<=edit.start&&edit.start<=segment.end:segment.start<edit.end&&segment.end>edit.start||segment.start==segment.end&&edit.start<segment.start&&segment.start<edit.end))throw error("UNSUPPORTED_INLINE_FEATURE",edit.operationId);
             if(has(target,"fldChar")||has(target,"instrText")||has(target,"fldSimple"))throw error("FIELD_TEXT_EDIT_UNSUPPORTED",edit.operationId);
         }
     }
@@ -1660,6 +1682,8 @@ public final class DocxTemplateEditor {
     }
     private static void replace(PackageModel model,Element p,Edit edit) {replace(model,p,edit,false);}
     private static Element replace(PackageModel model,Element p,Edit edit,boolean isolateReplacement) {
+        // Materialize only selected tabs so the existing run-preserving replacement owns their exact offsets.
+        for(Segment segment:segments(p))if(plainNativeTab(segment.node,p)&&segment.start<edit.end&&segment.end>edit.start){Element text=p.getOwnerDocument().createElementNS(W,"w:t");setText(text,"\t");segment.node.getParentNode().replaceChild(text,segment.node);}
         List<Segment> segments=segments(p);Segment firstSegment=null;
         for(Segment segment:segments)if((segment.safe||edit.labelOutsideFields&&is(segment.node,"t"))&&segment.start<edit.end&&segment.end>edit.start){firstSegment=segment;break;}
         if(firstSegment==null)throw error("UNSUPPORTED_INLINE_FEATURE",edit.operationId);

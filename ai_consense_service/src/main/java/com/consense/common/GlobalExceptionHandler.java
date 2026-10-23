@@ -37,6 +37,6 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(Exception.class)
     public ApiResponse<Void> handleOther(Exception ex) {
         log.error("unexpected error", ex);
-        return ApiResponse.fail(5000, "服务内部错误: " + ex.getMessage());
+        return ApiResponse.fail(5000, PublicErrorMessages.from(ex,"服务内部错误，请稍后重试；若仍失败，请联系维护人员。"));
     }
 }

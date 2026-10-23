@@ -9,18 +9,14 @@ const w = (key: DraftWord) => draftWord(key, props.locale)
 
 <template>
   <div class="extraction-context">
-    <p v-if="context.trigger">{{ w('contextTrigger') }}: {{ contextTrigger(context.trigger, locale) }} <code>{{ context.trigger }}</code></p>
-    <p v-if="context.keys?.length">{{ w('contextKeys') }}: {{ context.keys.join(', ') }}</p>
-    <p v-if="context.sourceStart !== undefined && context.sourceStart !== null && context.sourceEnd !== undefined && context.sourceEnd !== null">{{ w('contextOffsets') }}: [{{ context.sourceStart }}, {{ context.sourceEnd }})</p>
-    <details v-if="context.sourceText !== undefined && context.sourceText !== null"><summary>{{ w(dispatched ? 'suppliedContextText' : 'recordedContextText') }}</summary><pre>{{ context.sourceText }}</pre></details>
-    <p v-if="context.stopReason">{{ w('contextStopReason') }}: {{ recallStopReason(context.stopReason, locale) }} <code>{{ context.stopReason }}</code></p>
+    <p v-if="context.trigger">{{ w('contextTrigger') }}: {{ contextTrigger(context.trigger, locale) }}</p>
+    <section v-if="context.sourceText !== undefined && context.sourceText !== null"><p><strong>{{ w(dispatched ? 'suppliedContextText' : 'recordedContextText') }}</strong></p><pre>{{ context.sourceText }}</pre></section>
+    <p v-if="context.stopReason">{{ w('contextStopReason') }}: {{ recallStopReason(context.stopReason, locale) }}</p>
   </div>
 </template>
 
 <style scoped>
 .extraction-context { padding: 8px 12px; background: var(--surface-subtle); border: 1px solid var(--line); border-radius: var(--radius-sm); }
 p { margin: 4px 0; overflow-wrap: anywhere; }
-summary { cursor: pointer; padding: 8px 0; }
-pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; font-family: var(--font-mono); max-height: 400px; overflow: auto; }
-code { font-size: 11px; color: var(--muted); }
+pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; font-family: inherit; max-height: 400px; overflow: auto; }
 </style>

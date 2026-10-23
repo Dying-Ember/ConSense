@@ -1,6 +1,7 @@
 package com.consense.service.drafting;
 
 import com.consense.ai.AiGateway;
+import com.consense.common.BizException;
 import com.consense.common.JsonUtils;
 import com.consense.config.ConsenseProperties;
 import com.consense.document.DocumentParser;
@@ -31,6 +32,7 @@ class DraftingPlanGenerationStateTest {
         final Map<String,DraftArtifact> artifacts=new LinkedHashMap<>();
         final DraftDocumentRepository docs=mock(DraftDocumentRepository.class);
         final DraftArtifactRepository revisions=mock(DraftArtifactRepository.class);
+        final DraftPdfArtifactRepository pdfs=mock(DraftPdfArtifactRepository.class);
         final DraftVariableRepository inputs=mock(DraftVariableRepository.class);
         final SourceDocumentRepository sources=mock(SourceDocumentRepository.class);
         final AiGateway model=mock(AiGateway.class);
@@ -51,7 +53,7 @@ class DraftingPlanGenerationStateTest {
             when(docs.save(any(DraftDocument.class))).thenAnswer(i->{DraftDocument d=i.getArgument(0);documents.put(d.getFileKey(),d);return d;});
             when(revisions.findById(anyString())).thenAnswer(i->Optional.ofNullable(artifacts.get(i.getArgument(0))));
             when(revisions.save(any(DraftArtifact.class))).thenAnswer(i->{DraftArtifact a=i.getArgument(0);artifacts.put(a.getId(),a);return a;});
-            service=new DraftingService(projects,storage,parser,model,sources,inputs,docs,revisions,mock(DraftPdfArtifactRepository.class),props,null,null,null,null,null,null);
+            service=new DraftingService(projects,storage,parser,model,sources,inputs,docs,revisions,pdfs,props,null,null,null,null,null,null);
         }
         void value(String key,Object value) {DraftVariable v=new DraftVariable();v.setProjectId(PROJECT);v.setScope("INPUT");v.setVarKey(key);v.setConfirmed(true);v.setValueText(value instanceof String?(String)value:JsonUtils.write(value));variables.put(key,v);}
         void source(String key,byte[] bytes) {
@@ -90,6 +92,68 @@ class DraftingPlanGenerationStateTest {
         assertEquals(DraftBusinessRules.list(saved.get("unresolved")),DraftBusinessRules.list(read.get("unresolved")),"Independent pending issues must survive.");
     }
     @Test void matchingCurrentRevisionsExposeTheirFrozenApplicationState()throws Exception {Fixture f=new Fixture();f.seedFrozen();assertEquals("applied",action(f.service.plan(PROJECT,null),"scc-excision").get("applicationState"));verifyNoInteractions(f.model);}
+    @Test void listingDraftsWithoutCachedPdfsChecksExistenceWithoutLoadingPdfArtifacts()throws Exception {
+        Fixture f=new Fixture();f.seedFrozen();DraftingService service=spy(f.service);
+        f.props.getDrafting().setRendererExecutable("missing-cache-must-not-probe-renderer");f.props.getDrafting().setRendererWorkRoot("missing-cache-must-not-create-renderer-work");
+        List<DraftDocumentVO> listed=service.listDocuments(PROJECT);assertEquals(3,listed.size());
+        for(DraftDocumentVO document:listed) {
+            assertTrue(document.isGenerated());assertEquals("fixture-"+document.getFileKey(),document.getRevisionId());assertNull(document.getPdfSha256());assertNull(document.getRenderProfileHash());
+        }
+        verify(service,never()).currentConfiguredPdfProfileHash();
+        String hash=f.artifacts.get("fixture-NTT").getDocxSha256();verify(f.pdfs,times(3)).existsByDocxSha256(hash);verifyNoMoreInteractions(f.pdfs);verifyNoInteractions(f.model);
+    }
+    @Test void listingDraftsWithCachedPdfsReadsOnlyCurrentProfileMetadata()throws Exception {
+        Fixture f=new Fixture();f.seedFrozen();DraftingService service=spy(f.service);
+        String hash=f.artifacts.get("fixture-NTT").getDocxSha256(),profile="assessed-current-renderer-profile",pdfHash="saved-current-pdf-hash",cacheId=DraftAdoption.hash(hash+"|"+profile);
+        when(f.pdfs.existsByDocxSha256(hash)).thenReturn(true);
+        doReturn(profile).when(service).currentConfiguredPdfProfileHash();
+        DraftPdfArtifactRepository.Metadata metadata=mock(DraftPdfArtifactRepository.Metadata.class);
+        when(metadata.getDocxSha256()).thenReturn(hash);when(metadata.getPdfSha256()).thenReturn(pdfHash);when(metadata.getRenderProfileHash()).thenReturn(profile);
+        when(f.pdfs.findMetadataById(cacheId)).thenReturn(Optional.of(metadata));
+        when(f.pdfs.findById(anyString())).thenThrow(new AssertionError("Draft listing must not hydrate PDF or manifest LOBs"));
+        List<DraftDocumentVO> listed=service.listDocuments(PROJECT);assertEquals(3,listed.size());
+        for(DraftDocumentVO document:listed){assertTrue(document.isGenerated());assertEquals("fixture-"+document.getFileKey(),document.getRevisionId());assertEquals(hash,document.getDocxSha256());assertEquals(pdfHash,document.getPdfSha256());assertEquals(profile,document.getRenderProfileHash());}
+        verify(service,times(1)).currentConfiguredPdfProfileHash();verify(f.pdfs,times(3)).existsByDocxSha256(hash);
+        verify(f.pdfs,times(3)).findMetadataById(cacheId);verifyNoMoreInteractions(f.pdfs);verifyNoInteractions(f.model);
+    }
+    @Test void listingDraftsRejectsMismatchedPdfMetadataIdentity()throws Exception {
+        for(String changed:Arrays.asList("docx","profile")) {
+            Fixture f=new Fixture();f.seedFrozen();DraftingService service=spy(f.service);
+            String hash=f.artifacts.get("fixture-NTT").getDocxSha256(),profile="assessed-current-renderer-profile",cacheId=DraftAdoption.hash(hash+"|"+profile);
+            when(f.pdfs.existsByDocxSha256(hash)).thenReturn(true);
+            doReturn(profile).when(service).currentConfiguredPdfProfileHash();
+            DraftPdfArtifactRepository.Metadata metadata=mock(DraftPdfArtifactRepository.Metadata.class);
+            when(metadata.getDocxSha256()).thenReturn("docx".equals(changed)?"different-source":hash);when(metadata.getRenderProfileHash()).thenReturn("profile".equals(changed)?"different-renderer-profile":profile);
+            when(f.pdfs.findMetadataById(cacheId)).thenReturn(Optional.of(metadata));
+            BizException failure=assertThrows(BizException.class,()->service.listDocuments(PROJECT));assertEquals(4013,failure.getCode());assertEquals("BINDING_PDF_IDENTITY_MISMATCH",failure.getMessage());
+            verify(f.pdfs).existsByDocxSha256(hash);verify(f.pdfs).findMetadataById(cacheId);verifyNoMoreInteractions(f.pdfs);verifyNoInteractions(f.model);
+        }
+    }
+    @Test void threeDistinctDraftPdfsShareOneLiveRendererAssessmentWithoutCachingTheNextRequest()throws Exception {
+        Fixture f=new Fixture();f.seedFrozen();DraftingService service=spy(f.service);
+        f.props.getDrafting().setRendererExecutable("authored-renderer-must-not-run");f.props.getDrafting().setRendererWorkRoot("authored-work-must-not-create");
+        String profile="first-live-profile",changedProfile="next-live-profile";doReturn(profile,changedProfile).when(service).currentConfiguredPdfProfileHash();
+        for(String key:DraftBlueprint.draftFileKeys()) {
+            DraftArtifact artifact=f.artifacts.get("fixture-"+key);byte[] original=artifact.getDocxBytes(),distinct=Arrays.copyOf(original,original.length+key.length());
+            System.arraycopy(key.getBytes(java.nio.charset.StandardCharsets.UTF_8),0,distinct,original.length,key.length());
+            artifact.setDocxBytes(distinct);String hash=DraftPdfConverter.sha256(distinct);artifact.setDocxSha256(hash);
+            when(f.pdfs.existsByDocxSha256(hash)).thenReturn(true);
+            DraftPdfArtifactRepository.Metadata metadata=mock(DraftPdfArtifactRepository.Metadata.class);
+            when(metadata.getDocxSha256()).thenReturn(hash);when(metadata.getRenderProfileHash()).thenReturn(profile);when(metadata.getPdfSha256()).thenReturn("saved-pdf-"+key);
+            when(f.pdfs.findMetadataById(DraftAdoption.hash(hash+"|"+profile))).thenReturn(Optional.of(metadata));
+        }
+        List<DraftDocumentVO> first=service.listDocuments(PROJECT);
+        assertEquals(3,first.size());assertEquals(3,first.stream().map(DraftDocumentVO::getDocxSha256).distinct().count());
+        for(DraftDocumentVO document:first){assertEquals(profile,document.getRenderProfileHash());assertEquals("saved-pdf-"+document.getFileKey(),document.getPdfSha256());}
+        verify(service,times(1)).currentConfiguredPdfProfileHash();
+        for(DraftDocumentVO document:service.listDocuments(PROJECT))assertNull(document.getPdfSha256(),"A new request must check the changed live profile, not reuse the previous lookup");
+        verify(service,times(2)).currentConfiguredPdfProfileHash();
+        for(DraftArtifact artifact:f.artifacts.values()) {
+            verify(f.pdfs).findMetadataById(DraftAdoption.hash(artifact.getDocxSha256()+"|"+profile));
+            verify(f.pdfs).findMetadataById(DraftAdoption.hash(artifact.getDocxSha256()+"|"+changedProfile));
+        }
+        verify(f.pdfs,never()).findById(anyString());verifyNoInteractions(f.model);
+    }
     @Test void changedAdoptedInputsRejectTheOldGenerationState()throws Exception {Fixture f=new Fixture();f.seedFrozen();f.value("foundationIncluded",true);fresh(f);}
     @Test void changedCorrespondenceCannotBorrowTheOldSourceCompile()throws Exception {Fixture f=new Fixture();f.seedFrozen();SourceDocument evidence=new SourceDocument();evidence.setId(91L);evidence.setProjectId(PROJECT);evidence.setCategory(SourceDocument.CATEGORY_PROJECT_INPUT);evidence.setTextContent("Changed project correspondence.");f.correspondence.add(evidence);fresh(f);assertEquals(true,f.service.plan(PROJECT,null).get("evidenceChangedSinceExtraction"));}
     @Test void previewPatchesNeverExposeAnOldGenerationAsTheirResult()throws Exception {Fixture f=new Fixture();f.seedFrozen();Map<String,Object> p=f.service.plan(PROJECT,Collections.singletonMap("foundationIncluded","true"));assertNotEquals("applied",action(p,"scc-excision").get("applicationState"));assertEquals(true,p.get("preview"));verifyNoInteractions(f.model);}

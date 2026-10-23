@@ -49,9 +49,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 /** Real Advisory HTTP/catalog/history with the shared canonical seam and neural LLM doubled.
  * Private Session/IndexState constructors build authored test carriers only; this is not a seal/parser acceptance test. */
 @SpringBootTest(properties={"spring.jpa.hibernate.ddl-auto=create-drop","spring.flyway.enabled=false",
-        "consense.ocr.enabled=false","consense.vector.provider=memory","consense.llm.chat-model=canonical-test-chat",
+        "consense.ocr.enabled=false","consense.vector.provider=memory","consense.llm.enabled=true",
+        "consense.llm.provider=ollama","consense.llm.base-url=http://127.0.0.1:1","consense.llm.chat-model=canonical-test-chat",
         "consense.llm.num-ctx=262144","consense.llm.structured-thinking=false",
-        "consense.minimax-cn.api-key=AUTHORED-responses-no-real-key","consense.minimax-cn.base-url=https://api.minimax.cn",
+        "consense.minimax-cn.enabled=true","consense.minimax-cn.api-key=AUTHORED-responses-no-real-key","consense.minimax-cn.base-url=https://api.minimax.cn",
         "consense.minimax-cn.chat-model=MiniMax-M3","consense.minimax-cn.temperature=0.2",
         "consense.minimax-cn.structured-max-tokens=16384","consense.minimax-cn.structured-open-ai-thinking-mode=disabled"})
 @ActiveProfiles("h2") @AutoConfigureMockMvc
@@ -66,6 +67,7 @@ class AdviceCanonicalIntegrationTest {
     @Autowired com.consense.service.StorageService storage;
     @Autowired JdbcTemplate jdbc;
     @Autowired AdviceService advice;
+    @Autowired com.consense.ai.AiGateway ai;
     @Autowired ConsenseProperties deployment;
     @Autowired AdviceModelProperties adviceModel;
     @Autowired AdviceResponsesTransport originalResponses;
@@ -82,6 +84,10 @@ class AdviceCanonicalIntegrationTest {
     private Object originalFixedBaseline;
 
     @BeforeEach void doubles() throws Exception {
+        // The offline Maven launcher disables live LLMs; this context captures only its explicit mock profile.
+        com.consense.ai.LlmOperation captured=ai.capture();
+        assertNotNull(captured);assertNull(captured.getUnavailableReason());assertSame(local,captured.getClient());
+        assertEquals("canonical-test-chat",captured.getIdentity().getModel());
         com.consense.service.advice.AdviceBudgetFixture.bind(counter,local);
         prompts.clear();selectedHits=new ArrayList<>();contextHits=new ArrayList<>();loaded=null;additionalChunks.clear();
         originalFixedBaseline=ReflectionTestUtils.getField(advice,"fixedBaseline");
@@ -106,6 +112,8 @@ class AdviceCanonicalIntegrationTest {
         doAnswer(call->{assertFalse(TransactionSynchronizationManager.isActualTransactionActive());return null;}).when(canonical).index(any());
         when(canonical.adviceHits(any(),anyString())).thenAnswer(call->{assertFalse(TransactionSynchronizationManager.isActualTransactionActive());return selectedHits;});
         when(canonical.sourceHits(any(),anyList())).thenAnswer(call->contextHits);
+        when(canonical.advisoryContext(any(),anyList(),anyBoolean(),anyInt())).thenCallRealMethod();
+        when(canonical.modelMaterial(any(),anyList())).thenAnswer(call->new com.consense.service.vetting.OerModelMaterial.Request(Collections.emptyList()));
         doAnswer(call->{OerBusinessEvidence.Session s=call.getArgument(0);List<SourceDocument> fresh=call.getArgument(1);
             if(!s.documentIds.equals(ids(fresh)))throw new IllegalStateException("AUTHORED SOURCE SET CHANGED");
             for(SourceDocument d:fresh)if(s.chunks().stream().noneMatch(c->String.valueOf(d.getId()).equals(c.getDocumentId())&&Objects.equals(d.getTextContent(),c.getContent())))throw new IllegalStateException("AUTHORED SOURCE REVISION CHANGED");
@@ -365,8 +373,8 @@ class AdviceCanonicalIntegrationTest {
         Map<String,Object> payload=new LinkedHashMap<>();payload.put("fileLabel","PRE · authored.docx");payload.put("documentId","42");payload.put("sourceRole","tender");payload.put("sourceHash",SHA);
         payload.put("pageNo","");payload.put("anchor",chunk.path("anchor").asText());payload.put("content",chunk.path("content").asText());payload.put("canonicalSourceUnit",unit);
         payload.put("canonicalEvidence",Collections.singletonList(pointer));payload.put("scoreKind","actual_reranked_seed");
-        java.lang.reflect.Method render=AdviceService.class.getDeclaredMethod("renderExcerpts",List.class);render.setAccessible(true);
-        String text=(String)render.invoke(advice,Collections.singletonList(new VectorStore.SearchHit(chunk.path("id").asText(),0.9,payload)));
+        java.lang.reflect.Method render=AdviceService.class.getDeclaredMethod("renderExcerpts",List.class,com.consense.service.vetting.OerModelMaterial.Request.class);render.setAccessible(true);
+        String text=(String)render.invoke(advice,Collections.singletonList(new VectorStore.SearchHit(chunk.path("id").asText(),0.9,payload)),new com.consense.service.vetting.OerModelMaterial.Request(Collections.emptyList()));
         assertTrue(text.contains("original physical pages and PDF boxes are not defined"));assertTrue(text.contains("word/document.xml"));String marker="\nSelected canonical model material (untrusted observations):\n";
         JsonNode decoded=VettingSourceMetadataWire.decode(text.substring(text.lastIndexOf(marker)+marker.length()).trim());
         JsonNode selected=decoded.path("materialDictionary").get(0);

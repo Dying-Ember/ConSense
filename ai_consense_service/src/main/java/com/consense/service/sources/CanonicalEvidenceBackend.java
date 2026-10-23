@@ -47,6 +47,16 @@ public class CanonicalEvidenceBackend {
                 .post(RequestBody.create(MediaType.parse("application/json; charset=utf-8"),bytes)).build();
         return execute(wire,maximum).json();
     }
+    /** Bounded source reads use the module process; callers send addresses, never a complete graph. */
+    public String sourceRead(String request,String module,int maximumBytes){
+        if(request==null||Utf8.byteCount(request)>65536||maximumBytes<1024||maximumBytes>16*1024*1024)
+            throw new CanonicalEvidenceException(HttpStatus.BAD_REQUEST,"OER_SOURCE_READ_BUDGET_INVALID");
+        int maximum=Math.min(maximumBytes,properties.getMaxSnapshotBytes());
+        if(maximum<1024)throw new CanonicalEvidenceException(HttpStatus.SERVICE_UNAVAILABLE,"OER_EVIDENCE_CONFIG_INVALID");
+        Request wire=new Request.Builder().url(normalBase(module).newBuilder().addPathSegment("sources").addPathSegment("read").build())
+                .post(RequestBody.create(MediaType.parse("application/json; charset=utf-8"),Utf8.bytes(request))).build();
+        return execute(wire,maximum).json();
+    }
     private int normalTimeout(){int timeout=properties.getNormalPublicationTimeoutMs();if(timeout<=0)throw new CanonicalEvidenceException(HttpStatus.SERVICE_UNAVAILABLE,"OER_EVIDENCE_CONFIG_INVALID");return timeout;}
     private HttpUrl normalBase(String module){
         if(!java.util.Arrays.asList("drafting","vetting","advisory").contains(module))throw new CanonicalEvidenceException(HttpStatus.BAD_REQUEST,"CANONICAL_MODULE_INVALID");

@@ -257,6 +257,17 @@ public class VettingService {
             out.add(row);
         } return out;
     }
+    public List<SourceDocumentRepository.ParseProgressMetadata> parseProgress(String projectId) {
+        projectService.require(projectId);return sourceDocumentRepository.findParseProgressByProjectId(projectId);
+    }
+    @EventListener(ApplicationReadyEvent.class)
+    // shortcut: this local runtime has one backend owner; use a parser lease before sharing its database across instances.
+    public void markInterruptedParses() { sourceDocumentRepository.markInterruptedVettingParses(); }
+
+    private AutoCloseable observeParseProgress(SourceDocument source) {
+        return DocumentParser.observeProgress(message->sourceDocumentRepository.updateParseProgress(source.getId(),source.getSourceSha256(),
+                truncate(message+" · 更新于 "+Instant.now(),1024)));
+    }
     private VettingFileVO fileVO(SourceDocument d) {
         List<String> notes=parseWarnings(d);
         String exclusion=ProjectDocumentScope.exclusionReason(d,"fullset");
@@ -369,7 +380,7 @@ public class VettingService {
         SourceDocument outcome=new SourceDocument();outcome.setId(claimed.getId());outcome.setProjectId(claimed.getProjectId());outcome.setCategory(claimed.getCategory());
         outcome.setFileName(claimed.getFileName());outcome.setFileKey(claimed.getFileKey());outcome.setReviewRole(claimed.getReviewRole());outcome.setDocumentScope(claimed.getDocumentScope());outcome.setSourceSha256(claimed.getSourceSha256());
         String parseJobId=DocumentParseProbe.configured(props)?"parse-"+claimed.getSourceSha256().substring(0,12)+"-"+UUID.randomUUID():null;
-        try {
+        try (AutoCloseable progress=observeParseProgress(claimed)) {
             DocumentParser.ParsedDocument parsed=parseJobId==null?documentParser.parse(claimed.getFileName(),sourceBytes)
                     :documentParser.parse(claimed.getFileName(),sourceBytes,parseJobId,String.valueOf(documentId),claimed.getSourceSha256());
             if("FAILED".equals(parsed.getParseStatus())) {outcome.setParseStatus("FAILED");outcome.setParseMessage(truncate(parsed.getMessage(),1024));}
@@ -420,6 +431,7 @@ public class VettingService {
             StorageService.StoredFile stored=storageService.store(projectId,SourceDocument.CATEGORY_VETTING_PACKAGE,file);
             SourceDocument d=new SourceDocument(); d.setProjectId(projectId); d.setCategory(SourceDocument.CATEGORY_VETTING_PACKAGE); d.setFileKey(matchFileKey(stored.getOriginalName()));
             d.setFileName(stored.getOriginalName()); d.setContentType(stored.getContentType()); d.setSizeBytes(stored.getSize()); d.setStoragePath(stored.getPath()); d.setCreatedAt(Instant.now()); d.setParseStatus("PARSING");
+            d.setParseMessage("正在识别文件身份与解析范围 · 更新于 "+Instant.now());
             // Preserve only an explicit choice; auto inference remains distinguishable and can improve safely.
             d.setReviewRole(role);
             d.setDocumentScope(boundary);
@@ -458,11 +470,14 @@ public class VettingService {
                 d.setParseStatus("PARSING");d.setParseMessage("文件识别观察已保存，正在进行详细解析；最终结果尚未就绪。");
                 sourceDocumentRepository.saveAndFlush(d);
                 DocumentParser.ParsedDocument p;
+                try(AutoCloseable progress=observeParseProgress(d)) {
                 if(DocumentParseProbe.configured(props)) {
                     rawSha256=DocumentParseProbe.sha256(sourceBytes);
                     parseJobId="parse-"+rawSha256.substring(0,12)+"-"+UUID.randomUUID();
                     p=documentParser.parse(stored.getOriginalName(),sourceBytes,parseJobId,String.valueOf(d.getId()),rawSha256,observation,com.consense.service.sources.OerSourceMetadata.identity(d));
                 }else p=documentParser.parse(stored.getOriginalName(),sourceBytes,observation,com.consense.service.sources.OerSourceMetadata.identity(d));
+                }
+                sourceDocumentRepository.updateParseProgress(d.getId(),d.getSourceSha256(),"解析已返回，正在保存正文、结构与来源观察 · 更新于 "+Instant.now());
                 captureParsedSource(d,p,sourceBytes,false);
                 if ("FAILED".equals(p.getParseStatus())) failed++; else parsed++;
                 messages.add(d.getFileName()+" · "+p.getParseStatus()+" · "+p.getMessage());

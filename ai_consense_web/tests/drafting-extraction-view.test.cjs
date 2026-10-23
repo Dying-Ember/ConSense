@@ -33,19 +33,20 @@ function harness(overrides = {}) {
   const field = { key: 'contractTitle', kind: 'text', label: { en: 'Contract identity', zhHans: '合约身份', zhHant: '合約身份' } }
   const writes = []
   const api = {
-    catalog: async () => ({ ruleVersion: 'unchanged', groups: [{ key: 'contract', label: field.label, fields: [field] }] }),
+    catalog: async () => ({ ruleVersion: 'unchanged', groups: [{ id: 'contract', key: 'contract', label: field.label, fields: [field] }] }),
     variables: async () => [{ key: 'contractTitle', value: 'Manual value', confirmed: true, manuallyEdited: true, candidates: [] }],
     templates: async () => [], inputs: async () => [{ id: 3, fileName: 'source.docx', status: 'PARSED' }], documents: async () => [],
-    plan: async () => ({ actions: [], unresolved: [] }), extractTrace: async () => report,
+    plan: async () => ({ actions: [], unresolved: [] }), extractTrace: async () => report, automationLatest: async () => null,
     extractTraces: async () => [{ runId: 'older-A', model: '7b', status: 'completed', finishedAt: '2026-10-05T00:00:00Z' }],
     extractRun: async () => ({ ...report, runId: 'older-A', status: 'completed', stale: false, failureCode: null, failureMessage: null, rawResponses: ['old raw'] }),
-    reviewHead: async () => ({ currentRevisionId: null, draftRevisionId: 'review-test', current: null, draft: { id: 'review-test', graph: { kind: 'consense-template-graph-v1', graph: { variables: [{ id: 'review-item', nameZh: 'TEST', nameEn: 'TEST', type: {kind: 'text'}, role: {kind: 'input'}, status: 'pending', docIds: [], options: [], sourceAnchors: [], editTargets: [], sourceUnitIds: [], relatedInputIds: [], relations: [], targets: [], evidence: [] }], events: [], sourceReviews: {}, nextId: 1 }, sources: [], selectedDocuments: {} } }, sources: [] }),
+    reviewHead: async () => ({ currentRevisionId: null, draftRevisionId: null, current: null, draft: null, sources: [] }),
     reviewCandidates: async () => ({ variables: [] }),
+    reviewRevision: async (_id, revisionId) => ({ id: revisionId, graph: { graph: { variables: [] }, sources: [] } }),
     updateVariable: async (...args) => { writes.push(args); throw new Error('Read-only diagnostics must not save values') },
     ...overrides
   }
   const loaded = loadVue(path.join(__dirname, '../src/views/DraftingView.vue'), { boundaries: {
-    '@/api': { draftingApi: api, setLlmProfileResolver() {}, captureLlmSelection: () => ({ profileId: null }) }, pinia: piniaRuntime, 'vue-i18n': require('vue-i18n'),
+    '@/api/source-locations': { reviewSourceBindings: async () => { throw Error('Source location transport not provided by this fixture') } }, '@/api': { draftingApi: api, setLlmProfileResolver() {}, captureLlmSelection: () => ({ profileId: null }) }, pinia: piniaRuntime, 'vue-i18n': require('vue-i18n'),
     'pdfjs-dist': { GlobalWorkerOptions: {}, getDocument() { throw new Error('PDF renderer is outside this diagnostic test') } },
     'pdfjs-dist/build/pdf.worker.min.mjs?url': { default: 'external-pdf-worker' }
   }, globals: { localStorage: { getItem: () => 'en', setItem() {} }, window: { addEventListener() {}, removeEventListener() {} }, document: { documentElement: {}, getElementById() { return null } } } })
@@ -60,22 +61,26 @@ function harness(overrides = {}) {
   }
 }
 ;(async () => {
+  const draftReport = harness({ reviewHead: async () => ({ currentRevisionId: null, draftRevisionId: 'draft-review', current: null, draft: { id: 'draft-review', graph: { graph: { variables: [] }, sources: [] } }, sources: [] }) })
+  await settle(); await settle(); await draftReport.click('3 Adopt and plan')
+  assert.ok(find(draftReport.root, node => node.props?.['data-pending-extraction-report'] !== undefined), 'Pending graph review keeps the existing report accessible')
+  await draftReport.click('Extraction trace')
+  assert.ok(find(draftReport.root, node => node.props?.class === 'extraction-report'))
+  assert.equal(draftReport.writes.length, 0); draftReport.dispose()
   const recalled = { ...report, status: 'completed', stale: false, failureCode: null, failureMessage: null,
     parts: [{ ...report.parts[0], sourceText: 'Original core part', attempts: [{ ...report.parts[0].attempts[0], kind: 'recall', status: 'completed', errorCode: null,
-      rawResponse: 'Recalled source suggestion', context: { trigger: 'Missing model output beside an adoption heading', keys: ['nscAlternativeText'], sourceStart: 5629, sourceEnd: 7715,
+      rawResponse: 'Recalled source suggestion', context: { trigger: 'missing_output', keys: ['nscAlternativeText'], sourceStart: 5629, sourceEnd: 7715,
         sourceText: 'Adopted replacement wording\nUse the following exact paragraph.', stopReason: 'candidate_found' } }] }] }
   const recall = harness({ extractTrace: async () => recalled })
   await settle(); await recall.click('Enter inputs manually'); await recall.click('Extraction trace')
   assert.match(text(recall.root), /Context recall/)
-  assert.match(text(recall.root), /Missing model output beside an adoption heading/)
-  assert.match(text(recall.root), /Targeted inputs: nscAlternativeText/)
-  assert.match(text(recall.root), /5629.*7715/)
+  assert.doesNotMatch(text(recall.root), /nscAlternativeText|5629|7715|missing_output|candidate_found/)
   assert.match(text(recall.root), /Adopted replacement wording\nUse the following exact paragraph\./)
   assert.match(text(recall.root), /A supported suggestion was found/)
   assert.match(text(recall.root), /Original core part/)
   assert.equal(find(recall.root, node => node.props?.id === 'input-contractTitle').props.value, 'Manual value')
   assert.equal(recall.writes.length, 0); recall.dispose()
-  console.log('PASS: actual extraction controls distinguish context recall, target keys and dispatched offsets/text from the original source part without changing manual inputs')
+  console.log('PASS: extraction controls show recalled source text and readable outcomes without internal keys or offsets, and preserve manual inputs')
   const stopLabels = [
     ['candidate_found', 'A supported suggestion was found', '已找到有依据的建议', '已找到有依據的建議'],
     ['no_supported_candidate', 'No supported suggestion was found in this context', '本次上下文未找到有依据的建议', '本次上下文未找到有依據的建議'],
@@ -101,7 +106,7 @@ function harness(overrides = {}) {
     assert.ok(text(reasons.root).includes(recallLabel), `${locale}: recall attempt label`)
     for (const row of stopLabels) {
       assert.ok(text(reasons.root).includes(row[column]), `${locale}: ${row[0]} stop explanation`)
-      assert.ok(text(reasons.root).includes(row[0]), `${locale}: raw ${row[0]} retained`)
+      assert.ok(!text(reasons.root).includes(row[0]), `${locale}: raw context code is not shown`)
     }
     assert.ok(text(reasons.root).includes(keyGuard), `${locale}: targeted-key guard explanation`)
     assert.match(text(reasons.root), /recall_key_not_allowed/)
@@ -129,12 +134,12 @@ function harness(overrides = {}) {
     planning.store.changeLocale(locale); await settle()
     for (const literal of [planLabel, unknownLabel, unknownTrigger, unknownStop]) assert.ok(text(planning.root).includes(literal), `${locale}: ${literal}`)
     for (const row of triggerLabels) assert.ok(text(planning.root).includes(row[column]), `${locale}: ${row[0]} trigger explanation`)
-    assert.match(text(planning.root), /\[0, 74\)/)
-    for (const rawCode of ['future_attempt', 'future_trigger', 'future_stop']) assert.ok(text(planning.root).includes(rawCode), `${locale}: raw ${rawCode} retained`)
+    assert.doesNotMatch(text(planning.root), /\[0, 74\)|future_trigger|future_stop/)
+    assert.doesNotMatch(text(planning.root), /future_attempt/)
     const plannedContext = find(planning.root, node => node.props?.class === 'context-plan')
     assert.ok(plannedContext, 'Non-dispatched planning diagnostics are present beside the source')
     assert.doesNotMatch(text(plannedContext), /Actual supplied source context|本次实际提供的原文上下文|本次實際提供的原文上下文/)
-    const unknownAttempt = find(planning.root, node => node.tag === 'details' && node.props?.class === 'attempt' && text(node).includes('future_attempt'))
+    const unknownAttempt = find(planning.root, node => node.tag === 'details' && node.props?.class === 'attempt' && text(node).includes(unknownLabel))
     assert.ok(unknownAttempt, 'Unknown attempt code remains inspectable')
     assert.doesNotMatch(text(unknownAttempt), /Primary extraction|主识别调用|主識別呼叫/)
   }
@@ -202,7 +207,7 @@ function harness(overrides = {}) {
   assert.match(text(h.root), /This extraction failed/)
   assert.match(text(h.root), /Sources have changed since this extraction/)
   assert.match(text(h.root), /Last part failed/)
-  assert.match(text(h.root), /source-hash-A/)
+  assert.doesNotMatch(text(h.root), /source-hash-A/)
   assert.match(text(h.root), /Primary extraction/)
   assert.match(text(h.root), /bad raw/)
   const input = find(h.root, node => node.tag === 'input' && node.props.id === 'input-contractTitle')
@@ -211,14 +216,14 @@ function harness(overrides = {}) {
   h.dispose()
   console.log('PASS: actual Drafting controls expose failed/stale run and attempt evidence without replacing or saving manual values')
   let latest = { ...report, runId: 'previous-success', status: 'completed', stale: false, failureMessage: null }
-  const failure = harness({ extractTrace: async () => latest, reviewExtract: async () => { latest = { ...report, runId: 'latest-failure', failureMessage: 'Current source part failed' }; throw new Error('Extraction API failed') } })
-  await settle(); await failure.click('Identify inputs'); await failure.click('Enter inputs manually'); await failure.click('Extraction trace')
+  const failure = harness({ templates: async () => [{ key: 'NTT', tag: 'ok' }], extractTrace: async () => latest, automationStart: async id => { latest = { ...report, runId: 'latest-failure', failureMessage: 'Current source part failed' }; return { id: 'TEST-automation', projectId: id, status: 'PARTIAL', phase: 'READY_FOR_REVIEW', message: 'Current source part failed', currentFile: null, completedItems: 1, totalItems: 1, failedItems: 1, unresolvedItems: 1, requirementsCount: 1, nodesCount: 1, resultRevisionId: 'review-test', updatedAt: 'TEST-current' } } })
+  await settle(); await failure.click('Identify variables and build graph'); await failure.click('3 Adopt and plan'); await failure.click('Extraction trace')
   assert.match(text(failure.root), /Current source part failed/)
-  assert.match(text(failure.root), /latest-failure/)
+  assert.doesNotMatch(text(failure.root), /latest-failure/)
   assert.equal(find(failure.root, node => node.tag === 'input' && node.props.id === 'input-contractTitle').props.value, 'Manual value')
   assert.equal(failure.writes.length, 0)
   failure.dispose()
-  console.log('PASS: failed extraction fetches its own diagnostic report and keeps previous manual values')
+  console.log('PASS: a partial automation task fetches its current extraction diagnostics and keeps previous manual values')
   const history = harness(); await settle(); await history.click('Enter inputs manually'); await history.click('Extraction trace'); await history.changeReport('older-A')
   assert.match(text(history.root), /Viewing a historical report/)
   assert.match(text(history.root), /old raw/)
@@ -239,7 +244,7 @@ function harness(overrides = {}) {
   assert.doesNotMatch(text(switched.root), /Previous project secret report|Viewing a historical report/)
   assert.match(text(switched.root), /B current failure/); assert.equal(switched.writes.length, 0); switched.dispose()
   console.log('PASS: actual historical-report controls are read-only; late selections and previous-project responses cannot replace current reports or manual inputs')
-  const unavailable = harness({ extractTraces: async () => { throw new Error('Offline') } }); await settle(); await unavailable.click('Extraction trace')
+  const unavailable = harness({ extractTraces: async () => { throw new Error('Offline') } }); await settle(); await unavailable.click('Enter inputs manually'); await unavailable.click('Extraction trace')
   assert.match(text(unavailable.root), /Historical reports could not be loaded/)
   unavailable.store.changeLocale('zh-Hans'); await settle()
   assert.match(text(unavailable.root), /历史报告暂时无法读取/)
@@ -247,8 +252,8 @@ function harness(overrides = {}) {
   unavailable.dispose()
   console.log('PASS: historical-read failures remain visible and translate when the user changes language')
   const previous = { ...report, runId: 'Unrelated earlier success', status: 'completed', stale: false, failureMessage: null }
-  const unchanged = harness({ extractTrace: async () => previous, reviewExtract: async () => { throw new Error('No current report saved') } })
-  await settle(); await unchanged.click('Identify inputs'); await unchanged.click('Enter inputs manually')
+  const unchanged = harness({ templates: async () => [{ key: 'NTT', tag: 'ok' }], extractTrace: async () => previous, automationStart: async () => { throw new Error('No current report saved') } })
+  await settle(); await unchanged.click('Identify variables and build graph'); await unchanged.click('3 Adopt and plan')
   assert.doesNotMatch(text(unchanged.root), /Unrelated earlier success/)
   assert.equal(find(unchanged.root, node => node.tag === 'input' && node.props.id === 'input-contractTitle').props.value, 'Manual value')
   unchanged.dispose()

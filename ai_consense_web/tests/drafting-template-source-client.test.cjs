@@ -25,8 +25,10 @@ function load(relativePath, requireModule) {
   return sandbox.exports
 }
 const client = load('../src/api/client.ts', name => { assert.equal(name, 'axios'); return axios })
+const sourceLocations = load('../src/api/source-locations.ts', name => { assert.equal(name, './client'); return client })
 const { draftingApi } = load('../src/api/index.ts', name => {
   if (name === './client') return client
+  if (name === './source-locations') return sourceLocations
   assert.equal(name, './types'); return {}
 })
 const reported = []

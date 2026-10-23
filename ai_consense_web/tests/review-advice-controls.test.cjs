@@ -1081,23 +1081,24 @@ test('stopping before an answer has only the stopped state, without a completed 
   } finally { h.dispose() }
 })
 
-test('drawing upload sends explicit identity-only scope and source list retains excluded original identity', async () => {
-  const drawing = { key: 'DRAWING', fileName: 'drawing.pdf', role: localized('Drawing identity'), status: 'EXCLUDED', parsed: false, documentScope: 'drawing', exclusionReason: 'drawing_outside_scope', parseStatus: 'EXCLUDED', parseMessage: 'Identity only; original retained', pageCount: 0 }
+test('upload delegates scope to OER and an identity-only drawing retains its excluded original', async () => {
+  const drawing = { documentId: '51', sourceRole: 'unknown', sourceHash: 'a'.repeat(64), originalSourceSha256: 'b'.repeat(64), key: 'DRAWING', fileName: 'drawing.pdf', role: localized('Drawing identity'), status: 'EXCLUDED', parsed: false, documentScope: 'drawing', exclusionReason: 'drawing_outside_scope', parseStatus: 'EXCLUDED', parseMessage: 'Identity only; original retained', pageCount: 0 }
   const h = await harness({ respondOverride: ({ url }) => {
     if (url.endsWith('/files')) return [drawing]
     if (url.includes('/package/upload')) return { accepted: 1, parsed: 0, failed: 0, messages: ['Drawing excluded from parsing'] }
   } })
   try {
-    const selector = find(h.root, node => node.tag === 'select' && find(node, option => option.tag === 'option' && option.props.value === 'drawing'))
-    assert.ok(find(selector, node => node.tag === 'option' && node.props.value === 'drawing'))
-    selector.props['onUpdate:modelValue']('drawing'); await settle()
+    assert.equal(find(h.root, node => node.tag === 'select' && find(node, option => option.tag === 'option' && option.props.value === 'drawing')), undefined, 'The upload entry has no batch scope selector')
     const upload = find(h.root, node => node.tag === 'input' && node.props.type === 'file')
     await upload.props.onChange({ target: { files: [new File(['%PDF fixture'], 'drawing.pdf')], value: '' } }); await settle()
     const request = h.requests.find(request => request.url.includes('/package/upload'))
-    assert.equal(request.url, '/vetting/project-A/package/upload?documentScope=drawing')
+    assert.equal(request.url, '/vetting/project-A/package/upload', 'OER decides identity and scope without caller overrides')
     assert.equal(request.body.getAll('files')[0].name, 'drawing.pdf')
-    assert.match(text(h.root), /drawing\.pdf/); assert.match(text(h.root), /EXCLUDED/)
-    assert.match(text(h.root), /Drawing identity only; excluded from parsing and advice/)
+    assert.match(text(h.root), /drawing\.pdf/); assert.match(text(h.root), /Excluded by scope/)
+    assert.match(text(h.root), /Not included in review/)
+    const original = find(h.root, node => node.tag === 'a' && node.props.href?.includes('/sources/51/original?'))
+    assert.ok(original, 'The excluded source retains its original-file entry')
+    assert.ok(original.props.href.includes(`originalSourceSha256=${drawing.originalSourceSha256}`))
     assert.equal(button(h, 'Run vetting').props.disabled, true)
     assert.equal(h.requests.some(request => /\/runs$|\/ask$/.test(request.url)), false)
   } finally { h.dispose() }

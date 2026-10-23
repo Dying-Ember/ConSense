@@ -115,7 +115,7 @@ class AdviceOwnershipViewTest {
     }
 
     private String render(VectorStore.SearchHit... hits) throws Exception {
-        Method method=AdviceService.class.getDeclaredMethod("renderExcerpts",List.class);method.setAccessible(true);return (String)method.invoke(service,Arrays.asList(hits));
+        Method method=AdviceService.class.getDeclaredMethod("renderExcerpts",List.class,com.consense.service.vetting.OerModelMaterial.Request.class);method.setAccessible(true);return (String)method.invoke(service,Arrays.asList(hits),new com.consense.service.vetting.OerModelMaterial.Request(Collections.emptyList()));
     }
     private JsonNode view(String rendered){List<JsonNode> parsed=views(rendered);assertFalse(parsed.isEmpty(),"The canonical alias must expose its existing ownership declarations");return parsed.get(0);}
     private List<JsonNode> views(String rendered){List<JsonNode> out=new ArrayList<>();for(String line:rendered.split("\n"))if(line.startsWith(MARKER))out.add(JsonUtils.parse(line.substring(MARKER.length())));return out;}

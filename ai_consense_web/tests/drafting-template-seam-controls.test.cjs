@@ -18,36 +18,36 @@ test('source review exposes invalid/missing revisions, keeps original reading an
   const auxiliary = { ...source, id: '99', fileName: 'TEST unselected same-family PDF.pdf', format: 'pdf', canEdit: false }
   const correspondence = { ...source, id: '100', fileKey: null, fileName: 'TEST correspondence.docx', evidenceStatus: 'missing' }
   const currentGraph = () => ({ ...copy(graph), sources: [copy(selected)] })
-  const reading = () => ({ ...copy(selected), paragraphs: [{ id: 'p1', ordinal: 1, text: 'Bills: ', paragraphSha256: span.paragraphSha256, sourceSha256: selected.sourceSha256 }], blocks: [], guidanceNotes: [{ id: 'unclosed', text: '(Guidance Note: TEST original without closing bracket', captureComplete: false, sourceSyntaxKnown: true, sourceSyntaxComplete: false }], sourceMembers: [], markerCandidates: [{ id: 'human', text: '*Mr/Ms', disposition: 'unknown' }], groups: [], conditions: [], issues: [{ code: 'TEST_SOURCE_REQUIRES_HUMAN', original: 'TEST preserve source issue' }] })
+  const reading = () => ({ ...copy(selected), paragraphs: [{ id: 'p1', ordinal: 1, text: 'Bills: ', paragraphSha256: span.paragraphSha256, sourceSha256: selected.sourceSha256 }], blocks: [], guidanceNotes: [{ id: 'unclosed', text: '(Guidance Note: TEST original without closing bracket', captureComplete: false, sourceSyntaxKnown: true, sourceSyntaxComplete: false }], sourceMembers: [], markerCandidates: [{ id: 'human', symbol: '*', localSentenceObservation: { text: '*Mr/Ms' }, disposition: 'unknown' }], groups: [], conditions: [], issues: [{ code: 'TEST_SOURCE_REQUIRES_HUMAN', original: 'TEST preserve source issue' }] })
   const api = {
     reviewHead: async () => ({ currentRevisionId: null, draftRevisionId: revision.id, current: null, draft: { ...copy(revision), graph: currentGraph() }, sources: [copy(selected), auxiliary, correspondence] }),
     reviewReading: async () => reading(), reviewBootstrap: async () => { bootstraps++; throw Error('Unexpected bootstrap') },
     reviewSave: async (_project, proposed) => { saves.push(copy(proposed)); return { ...copy(revision), graph: copy(proposed) } }
   }
-  const loaded = loadVue(path.join(__dirname, '../src/components/DraftingSourceReview.vue'), { boundaries: { '@/api': { draftingApi: api }, './AppModal.vue': { default: Modal }, './DraftingPdfPreview.vue': { default: { render: () => null } } }, globals })
+  const loaded = loadVue(path.join(__dirname, '../src/components/DraftingSourceReview.vue'), { boundaries: { '@/api/source-locations': { reviewSourceBindings: async () => { throw Error('Source location transport not provided by this fixture') } }, '@/api': { draftingApi: api }, './AppModal.vue': { default: Modal }, './DraftingPdfPreview.vue': { default: { render: () => null } } }, globals })
   const component = vue.ref(), host = renderer(), app = host.createApp({ setup: () => () => vue.h(loaded.default, { ref: component, projectId: 'TEST-EVIDENCE', locale: 'en', onReplace: () => replacements++ }) })
   app.mount(host.root)
   const control = (attr, value) => find(host.root, node => value === undefined ? node.props?.[attr] !== undefined : node.props?.[attr] === value)
   try {
     await settle()
-    assert.match(text(control('data-source-evidence-status')), /invalid.*TEST-old-analysis/)
+    assert.match(text(control('data-source-evidence-status')), /invalid.*old analysis revision/)
     assert.match(text(control('data-source-evidence-block')), /unchanged original.*expired analysis revision/)
     assert.equal(control('data-review-confirm').props.disabled, true)
     await assert.rejects(component.value.prepareCandidates(), /Replace or re-upload/)
     assert.equal(bootstraps, 0)
-    const original = find(host.root, node => node.tag === 'button' && text(node).trim() === 'View original layout')
-    assert.equal(original.props.disabled, false, 'Evidence failure does not hide retained source reading')
+    const original = control('data-source-page-review')
+    assert.ok(original, 'Evidence failure does not hide the original-page reader')
     await control('data-source-replace').props.onClick(); assert.equal(replacements, 1)
-    assert.match(text(control('data-source-unresolved')), /no automatic edit authority[\s\S]*\*Mr\/Ms/)
-    assert.match(text(host.root), /Source capture incomplete.*Source syntax incomplete/)
+    assert.match(text(control('data-source-unresolved')), /cannot yet authorize automatic edits[\s\S]*\*Mr\/Ms/)
+    assert.match(text(host.root), /Source requires review/)
     selected.evidenceStatus = 'missing'; selected.analysisRevision = null; await component.value.refresh(false); await settle()
-    assert.match(text(control('data-source-evidence-status')), /missing.*Not provided/)
+    assert.match(text(control('data-source-evidence-status')), /Current source evidence missing/)
     await assert.rejects(component.value.prepareCandidates(), /Replace or re-upload/)
     selected.evidenceStatus = 'bound'; selected.analysisRevision = 'TEST-current-analysis'; await component.value.refresh(false); await settle()
     assert.equal(control('data-source-evidence-block'), undefined, 'Unselected same-family PDF and non-template correspondence do not invalidate a bound selected Word')
-    assert.match(text(control('data-source-evidence-status')), /bound.*TEST-current-analysis/)
-    await control('data-review-question-select').props.onChange({ target: { value: item.id } }); await settle()
-    assert.equal(typeof control('data-target-action', 0).props['onUpdate:modelValue'], 'function')
+    assert.match(text(control('data-source-evidence-status')), /Source evidence bound/)
+    await control('data-review-question',item.id).props.onClick(); await settle(); await control('data-review-edit-question').props.onClick(); await settle()
+    assert.equal(typeof control('data-target-action', 0).props.onChange, 'function')
     assert.match(text(host.root), /List size and contents require explicit adoption/)
     control('data-review-name-en').props['onUpdate:modelValue']('Human-reviewed Bill description'); await settle()
     await control('data-review-save-form').props.onClick(); await settle(); await control('data-review-save').props.onClick(); await settle()
@@ -71,7 +71,7 @@ test('generation uses the exact confirmed selected source, disables PDF-only edi
     plan: async () => { plans++; return { actions: [{ id: 'TEST-insert', document: 'SCC', clause: 'Bill description', action: 'insert', inputKeys: [item.id] }], unresolved: [] } }, generate: async () => { generations++; return [] }
   }
   const loaded = loadVue(path.join(__dirname, '../src/views/DraftingView.vue'), { boundaries: {
-    '@/api': { draftingApi: api, setLlmProfileResolver() {}, captureLlmSelection: () => ({ profileId: 'TEST' }) }, pinia: piniaRuntime, 'vue-i18n': require('vue-i18n'),
+    '@/api/source-locations': { reviewSourceBindings: async () => { throw Error('Source location transport not provided by this fixture') } }, '@/api': { draftingApi: api, setLlmProfileResolver() {}, captureLlmSelection: () => ({ profileId: 'TEST' }) }, pinia: piniaRuntime, 'vue-i18n': require('vue-i18n'),
     '@/components/AppModal.vue': { default: Modal }, '@/components/DraftingSourceReview.vue': { default: { render: () => null } }, '@/components/DraftingCandidateReview.vue': { default: { render: () => null } },
     '@/components/DraftingDocumentWorkspace.vue': { default: { render: () => null } }, '@/components/DraftingTemplatePreview.vue': { default: { render: () => null } }
   }, globals })
@@ -81,17 +81,17 @@ test('generation uses the exact confirmed selected source, disables PDF-only edi
   const button = label => find(host.root, node => node.tag === 'button' && text(node).trim() === label)
   const warning = () => find(host.root, node => node.props?.['data-generation-source-block'] !== undefined)
   try {
-    await settle(); await button('4 Adopt and plan').props.onClick(); await settle()
+    await settle(); await button('3 Adopt and plan').props.onClick(); await settle()
     assert.match(text(host.root), /Insert at source anchor/, 'The plan card presents insertion as insertion, without downgrading it to Pending')
     assert.match(text(warning()), /TEST selected independent PDF\.pdf/)
     assert.match(text(warning()), /Another Word edition cannot be substituted/)
     assert.equal(button('Generate English drafts').props.disabled, true)
     const before = plans; await button('Generate English drafts').props.onClick(); await settle()
     assert.equal(generations, 0); assert.equal(plans, before, 'Unsupported source is rejected before saves, plan calls or generation')
-    selectedId = '41'; store.switchProject('TEST-WORD-SELECTED'); await settle(); await button('4 Adopt and plan').props.onClick(); await settle()
+    selectedId = '41'; store.switchProject('TEST-WORD-SELECTED'); await settle(); await button('3 Adopt and plan').props.onClick(); await settle()
     assert.equal(warning(), undefined, 'An unselected PDF does not block the selected editable Word')
     assert.equal(button('Generate English drafts').props.disabled, false)
-    stale = true; store.switchProject('TEST-STALE-SELECTED'); await settle(); await button('4 Adopt and plan').props.onClick(); await settle()
+    stale = true; store.switchProject('TEST-STALE-SELECTED'); await settle(); await button('3 Adopt and plan').props.onClick(); await settle()
     assert.match(text(warning()), /source binding changed/); assert.equal(button('Generate English drafts').props.disabled, true)
     assert.equal(generations, 0)
   } finally { app.unmount() }
@@ -99,7 +99,7 @@ test('generation uses the exact confirmed selected source, disables PDF-only edi
 
 test('insert actions keep their label in the actual template preview', async () => {
   const loaded = loadVue(path.join(__dirname, '../src/components/DraftingTemplatePreview.vue'), { boundaries: {
-    '@/api': { draftingApi: {} }, './DraftingPdfPreview.vue': { default: { render: () => null } }
+    '@/api/source-locations': { reviewSourceBindings: async () => { throw Error('Source location transport not provided by this fixture') } }, '@/api': { draftingApi: {} }, './DraftingPdfPreview.vue': { default: { render: () => null } }
   }, globals })
   const host = renderer(), app = host.createApp(loaded.default, { projectId: 'TEST-INSERT-PREVIEW', fileKey: 'SCC', locale: 'en', fields: [{ key: item.id, kind: 'text', label: { en: 'Bill description' } }], values: { [item.id]: 'TEST adopted description' }, variables: [], actions: [{ id: 'TEST-insert', document: 'SCC', clause: 'Bill description', action: 'insert', inputKeys: [item.id] }], selectedKey: item.id, selectedActionId: '', fieldStates: { [item.id]: 'manual' }, dirtyKeys: [], sourceAvailable: false })
   app.mount(host.root)
@@ -121,13 +121,13 @@ test('a discovered exact multi-span amendment becomes confirmable only after the
       reviewSave: async (_project, proposed) => { writes.push(copy(proposed)); saved = { ...copy(saved), graph: copy(proposed) }; return copy(saved) },
       reviewConfirm: async () => { const accepted = saved.graph.graph.variables[0]; assert.equal(accepted.status, 'confirmed'); assert.equal(accepted.editTargets[0].needsRebind, false); assert.equal(accepted.editTargets[0].scopeComplete, true); confirms++; return copy(saved) }
     }
-    const loaded = loadVue(path.join(__dirname, '../src/components/DraftingSourceReview.vue'), { boundaries: { '@/api': { draftingApi: api }, './AppModal.vue': { default: Modal }, './DraftingPdfPreview.vue': { default: { render: () => null } } }, globals })
+    const loaded = loadVue(path.join(__dirname, '../src/components/DraftingSourceReview.vue'), { boundaries: { '@/api/source-locations': { reviewSourceBindings: async () => { throw Error('Source location transport not provided by this fixture') } }, '@/api': { draftingApi: api }, './AppModal.vue': { default: Modal }, './DraftingPdfPreview.vue': { default: { render: () => null } } }, globals })
     const host = renderer(), app = host.createApp(loaded.default, { projectId: 'TEST-DISCOVERY-PLACEMENT-' + mismatch, locale: 'en' }); app.mount(host.root)
     const control = (attr, value) => find(host.root, node => value === undefined ? node.props?.[attr] !== undefined : node.props?.[attr] === value)
     const click = async attr => { await control(attr).props.onClick(); await settle() }
     try {
-      await settle(); await control('data-review-question-select').props.onChange({ target: { value: question.id } }); await settle()
-      control('data-target-action', 0).props['onUpdate:modelValue']('replace'); await settle()
+      await settle(); await control('data-review-question',question.id).props.onClick(); await settle(); await control('data-review-edit-question').props.onClick(); await settle()
+      control('data-target-action', 0).props.onChange({ target: { value: 'replace' } }); await settle()
       await click('data-review-save-form'); await click('data-review-confirm-item')
       assert.equal(control('data-review-confirm').props.disabled, true, 'Choosing only the action leaves the placement gate unresolved')
       control('data-target-placement', 0).props.onChange({ target: { value: '1' } }); await settle()

@@ -88,6 +88,7 @@ class WordModelSelectionTest {
             binding.setSnapshotJson(JsonUtils.write(snapshot));binding.setSnapshotBytesSha256(VettingCorpus.hash(binding.getSnapshotJson()));
             when(registry.verifiedBindings(eq("authored"),eq("vetting"),eq(Collections.singletonList(97L)))).thenAnswer(call->frame());
             when(registry.currentBindings(eq("authored"),eq("vetting"),eq(Collections.singletonList(97L)))).thenAnswer(call->Collections.singletonList(binding));
+            when(client.readSources(anyString(),any(JsonNode.class),any(CanonicalEvidenceService.VerifiedBindingFrame.class))).thenAnswer(call->{CanonicalEvidenceService.VerifiedBindingFrame selected=call.getArgument(2);return OerBusinessEvidenceTest.authoredSourceRead(selected.bindings(),call.getArgument(1),VettingRetrievalSourceUnits.POLICY);});
             CanonicalEvidenceProperties config=new CanonicalEvidenceProperties();config.setBaseUrl("http://authored.invalid");service=new OerBusinessEvidence(registry,client,config);
         }
         OerBusinessEvidence.Session load(){return service.load("authored","vetting",Collections.singletonList(source));}

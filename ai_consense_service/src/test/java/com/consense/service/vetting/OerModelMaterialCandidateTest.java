@@ -209,8 +209,8 @@ class OerModelMaterialCandidateTest {
         OerTypedHierarchyBusinessTest.Wire w=new OerTypedHierarchyBusinessTest.Wire();
         List<VectorStore.SearchHit> hits=w.service.adviceHits(w.load("advisory"),"source-only replay");
         String immutable=JsonUtils.write(hits);AdviceService advice=mock(AdviceService.class,CALLS_REAL_METHODS);
-        Method render=AdviceService.class.getDeclaredMethod("renderExcerpts",List.class);render.setAccessible(true);
-        String prompt=(String)render.invoke(advice,hits);
+        Method render=AdviceService.class.getDeclaredMethod("renderExcerpts",List.class,OerModelMaterial.Request.class);render.setAccessible(true);
+        String prompt=(String)render.invoke(advice,hits,new OerModelMaterial.Request(Collections.emptyList()));
         Path out=Paths.get(System.getenv("CONSENSE_OER_REPLAY_OUTPUT"));
         Files.write(out.resolve("actual-advice-model-material.txt"),prompt.getBytes(StandardCharsets.UTF_8));
         OerAdviceDisplayDedupTest.assertCompleteBodies(hits,prompt);

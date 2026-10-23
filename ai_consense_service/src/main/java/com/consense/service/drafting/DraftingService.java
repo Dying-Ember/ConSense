@@ -4,6 +4,7 @@ import com.consense.ai.AiGateway;
 import com.consense.common.BizException;
 import com.consense.common.JsonUtils;
 import com.consense.common.LocalizedText;
+import com.consense.common.PublicErrorMessages;
 import com.consense.document.DocumentParser;
 import com.consense.document.OerTemplateEvidence;
 import com.consense.document.OerDocumentIdentity;
@@ -109,7 +110,7 @@ public class DraftingService {
     @org.springframework.beans.factory.annotation.Autowired(required=false)
     private DraftTemplateGraphService templateGraphService;
 
-    private boolean reviewedRules(String projectId) { return templateGraphService!=null&&templateGraphService.hasConfirmed(projectId); }
+    private boolean reviewedRules(String projectId) { return templateGraphService!=null&&(templateGraphService.hasConfirmed(projectId)||templateGraphService.hasDraft(projectId)); }
 
     /** 模型识别结果（Jackson 反序列化用 Lombok POJO） */
     @Data
@@ -144,15 +145,15 @@ public class DraftingService {
 
     public List<TemplateVO> listTemplates(String projectId) {
         projectService.require(projectId);
-        List<SourceDocument> documents =
-                sourceDocumentRepository.findByProjectIdAndCategoryOrderByIdAsc(projectId,
+        List<SourceDocumentRepository.UploadDisplayMetadata> documents =
+                sourceDocumentRepository.findUploadDisplayMetadataByProjectIdAndCategory(projectId,
                         SourceDocument.CATEGORY_STANDARD_TEMPLATE);
-        Map<String, SourceDocument> byKey = new HashMap<>();
+        Map<String, SourceDocumentRepository.UploadDisplayMetadata> byKey = new HashMap<>();
         documents.forEach(d -> byKey.put(d.getFileKey(), d));
 
         List<TemplateVO> result = new ArrayList<>();
         for (String key : TEMPLATE_KEYS) {
-            SourceDocument document = byKey.get(key);
+            SourceDocumentRepository.UploadDisplayMetadata document = byKey.get(key);
             boolean uploaded = document != null && "PARSED".equals(document.getParseStatus());
             boolean partial = document != null && "PARTIAL".equals(document.getParseStatus());
             boolean identityPending = document != null && "IDENTITY_PENDING".equals(document.getParseStatus());
@@ -187,7 +188,7 @@ public class DraftingService {
                 preflightTemplateIdentity(upload,null);
                 if("pdf".equals(upload.format)){pdfs.add(upload);continue;}
                 parseTemplateUpload(upload,null);groups.computeIfAbsent(upload.fileKey,key->new ArrayList<>()).add(upload);
-            }catch(Exception failure){failed++;messages.add(file.getOriginalFilename()+": "+failure.getMessage());}
+            }catch(Exception failure){failed++;messages.add(file.getOriginalFilename()+": "+uploadFailure(failure));}
         }
         for(DraftTemplateRouting.Upload pdf:pdfs) {
             String hint=DraftTemplateRouting.filenameHint(pdf.file.getOriginalFilename());
@@ -199,7 +200,7 @@ public class DraftingService {
                 if(wordHash!=null){auxiliaries.add(pdf);preferredWords.put(pdf,wordHash);}
                 else groups.computeIfAbsent(pdf.fileKey,key->new ArrayList<>()).add(pdf);
             }
-            catch(Exception failure){retainInitialFailedTemplate(projectId,null,pdf,failure);failed++;messages.add(pdf.file.getOriginalFilename()+": "+failure.getMessage());}
+            catch(Exception failure){retainInitialFailedTemplate(projectId,null,pdf,failure);failed++;messages.add(pdf.file.getOriginalFilename()+": "+uploadFailure(failure));}
         }
         for(Map.Entry<String,List<DraftTemplateRouting.Upload>> group:groups.entrySet()) {
             try {
@@ -213,13 +214,18 @@ public class DraftingService {
                     if(candidate.hash.equals(selected.hash))messages.add(candidate.file.getOriginalFilename()+": duplicate source bytes; no additional primary was selected.");
                     else {auxiliaries.add(candidate);preferredWords.put(candidate,selected.hash);}
                 }
-            }catch(Exception failure){failed+=group.getValue().size();messages.add(group.getKey()+": "+failure.getMessage());}
+            }catch(Exception failure){failed+=group.getValue().size();messages.add(group.getKey()+": "+uploadFailure(failure));}
         }
         for(DraftTemplateRouting.Upload auxiliary:auxiliaries)try {
             SourceDocument saved=saveAuxiliaryTemplate(projectId,auxiliary,preferredWords.get(auxiliary));
             messages.add(auxiliary.file.getOriginalFilename()+": unselected_auxiliary_candidate; Word candidate preferred. "+(auxiliary.parsed==null?"PDF content was not parsed; family/edition equivalence is unverified":"Complete independent PDF parse retained; edition equivalence is unverified")+"; raw source "+auxiliary.hash+", retained source record "+saved.getId()+".");
-        }catch(Exception failure){failed++;messages.add(auxiliary.file.getOriginalFilename()+": auxiliary retention failed: "+failure.getMessage());}
+        }catch(Exception failure){failed++;messages.add(auxiliary.file.getOriginalFilename()+": "+uploadFailure(failure));}
         invalidateDocuments(projectId);return new UploadResultVO(files.size(),parsed,failed,messages);
+    }
+
+    private String uploadFailure(Exception failure) {
+        log.warn("drafting upload failed",failure);
+        return PublicErrorMessages.from(failure,"文件处理失败，请稍后重试；若仍失败，请联系维护人员。");
     }
 
     private void parseTemplateUpload(DraftTemplateRouting.Upload upload,String expectedKey) {
@@ -345,7 +351,7 @@ public class DraftingService {
     public List<EvidenceVO> listInputs(String projectId) {
         projectService.require(projectId);
         return sourceDocumentRepository
-                .findByProjectIdAndCategoryOrderByIdAsc(projectId, SourceDocument.CATEGORY_PROJECT_INPUT)
+                .findUploadDisplayMetadataByProjectIdAndCategory(projectId, SourceDocument.CATEGORY_PROJECT_INPUT)
                 .stream().map(this::toEvidenceVO).collect(Collectors.toList());
     }
 
@@ -359,7 +365,7 @@ public class DraftingService {
             upload=new DraftTemplateRouting.Upload(file,file.getBytes());parseTemplateUpload(upload,fileKey);
             saveTemplateUpload(projectId,upload,true);invalidateDocuments(projectId);
             return new UploadResultVO(1,1,0,Collections.singletonList(fileKey+" ← "+file.getOriginalFilename()+" replaced and parsed; source "+upload.hash+". "+upload.parsed.getMessage()));
-        }catch(Exception failure){retainInitialFailedTemplate(projectId,fileKey,upload,failure);return new UploadResultVO(1,0,1,Collections.singletonList(file.getOriginalFilename()+": "+failure.getMessage()+"; any previous template is retained."));}
+        }catch(Exception failure){retainInitialFailedTemplate(projectId,fileKey,upload,failure);return new UploadResultVO(1,0,1,Collections.singletonList(file.getOriginalFilename()+": "+uploadFailure(failure)+" 如已有模板，将继续保留。"));}
     }
 
     @Transactional
@@ -1121,9 +1127,9 @@ public class DraftingService {
         if(templateGraphService!=null)templateGraphService.lockForGeneration(projectId);
         ensureInputs(projectId);
         Map<String,Object> prepared=preparePlan(projectId,null);
-        if(reviewedRules(projectId)&&!unresolved(prepared).isEmpty())throw new BizException(4012,"GRAPH_PLAN_REVIEW_REQUIRED: Resolve the graph, project facts and source bindings before generation.");
         String snapshot=(String)prepared.get("snapshotId");
         Map<String,DraftArtifact> revisions=new LinkedHashMap<>();Map<String,String> contents=new LinkedHashMap<>();Map<String,DraftTocFinalizer.Result> finalized=new LinkedHashMap<>();
+        Map<String,DocxTemplateEditor.DocxEditResult> compiled=new LinkedHashMap<>();Map<String,List<Map<String,Object>>> compiledBindings=new LinkedHashMap<>();
         // Compile/validate every package before any current document pointer changes.
         for(String key:DraftBlueprint.draftFileKeys()) {
             SourceDocument template=requireTemplate(projectId,key);
@@ -1142,10 +1148,23 @@ public class DraftingService {
             try {generated=reviewedRules(projectId)?templateGraphService.compile(original,key,prepared,DraftDocumentBindings.bookmarkNames(sourceBindings),nativeLayout):DraftFormattedRules.compile(original,key,prepared,DraftDocumentBindings.bookmarkNames(sourceBindings),nativeLayout);}
             catch(DocxTemplateEditor.EditException unsafe){throw new BizException(4012,unsafe.getCode()+": "+unsafe.getOperationId());}
             List<Map<String,Object>> bindings=DraftDocumentBindings.generated(sourceBindings,generated);
+            compiled.put(key,generated);compiledBindings.put(key,bindings);
+        }
+        Map<String,Object> deliveryGraph=reviewedRules(projectId)?templateGraphService.graph(projectId):null;
+        for(String key:DraftBlueprint.draftFileKeys()) {
+            List<String> outstanding=deliveryGraph==null?Collections.emptyList():DraftIncompleteNotice.outstanding(deliveryGraph,prepared,key);
+            DocxTemplateEditor.DocxEditResult generated=compiled.get(key);List<Map<String,Object>> bindings=compiledBindings.get(key);
             List<Object> ledger=DraftNativeLayout.ledger(generated,DraftNativeLayout.info(key,properties.getDrafting().getRendererKind(),generated));
-            DraftTocFinalizer.Result complete=finalizeDraft(key,DraftPdfConverter.sha256(original),generated.getDocxBytes(),bindings,ledger);DocxTemplateEditor.TemplateIndex finalIndex=complete.index();finalized.put(key,complete);
+            DraftIncompleteNotice.Delivery notice=DraftIncompleteNotice.applyWithReceipt(generated.getDocxBytes(),outstanding);
+            byte[] delivery=notice.bytes;
+            if(!outstanding.isEmpty()) {
+                DocxTemplateEditor.DocxEditResult marked=new DocxTemplateEditor().apply(delivery,new DocxTemplateEditor.SourceEditBatch(DraftPdfConverter.sha256(delivery),Collections.emptyList()));
+                bindings=DraftDocumentBindings.reconcile(bindings,marked.getIndex(),false);ledger=DraftNativeLayout.bodyLedger(JsonUtils.write(ledger),marked);
+                DraftIncompleteNotice.bindDelivery(bindings,marked.getIndex(),notice);
+            }
+            DraftTocFinalizer.Result complete=finalizeDraft(key,generated.getOriginalSourceSha256(),delivery,bindings,ledger);DocxTemplateEditor.TemplateIndex finalIndex=complete.index();finalized.put(key,complete);
             DraftArtifact revision=new DraftArtifact();revision.setId(java.util.UUID.randomUUID().toString());revision.setProjectId(projectId);revision.setFileKey(key);
-            revision.setSnapshotId(snapshot);revision.setSourceSha256(DraftPdfConverter.sha256(original));revision.setDocxSha256(finalIndex.getSourceSha256());revision.setDocxBytes(complete.docx);
+            revision.setSnapshotId(snapshot);revision.setSourceSha256(generated.getOriginalSourceSha256());revision.setDocxSha256(finalIndex.getSourceSha256());revision.setDocxBytes(complete.docx);
             if(!generated.getDocxSha256().equals(finalIndex.getSourceSha256()))bindings=DraftDocumentBindings.reconcile(bindings,finalIndex,false);
             if("SCC".equals(key))ledger=complete.ledger(ledger);
             revision.setBindingsJson(JsonUtils.write(bindings));revision.setLedgerJson(JsonUtils.write(ledger));revision.setBlocksJson(JsonUtils.write(DraftDocumentBindings.blocks(finalIndex,bindings)));revision.setFieldImpactsJson(JsonUtils.write(generated.getAffectedFeatures()));
@@ -1168,9 +1187,13 @@ public class DraftingService {
     public List<DraftDocumentVO> listDocuments(String projectId) {
         projectService.require(projectId);String current=snapshotId(projectId,null);
         Map<String,DraftDocument> byKey=new HashMap<>();documentRepository.findByProjectIdOrderByIdAsc(projectId).forEach(d->byKey.put(d.getFileKey(),d));
-        List<DraftDocumentVO> result=new ArrayList<>();for(String key:DraftBlueprint.draftFileKeys())result.add(byKey.containsKey(key)?documentVO(byKey.get(key),current):new DraftDocumentVO(key,DraftBlueprint.fileTitle(key),"",false));return result;
+        ListingPdfMetadata pdfMetadata=new ListingPdfMetadata();
+        List<DraftDocumentVO> result=new ArrayList<>();for(String key:DraftBlueprint.draftFileKeys())result.add(byKey.containsKey(key)?documentVO(byKey.get(key),current,pdfMetadata::find):new DraftDocumentVO(key,DraftBlueprint.fileTitle(key),"",false));return result;
     }
     private DraftDocumentVO documentVO(DraftDocument document,String current) {
+        return documentVO(document,current,this::currentPdfMetadata);
+    }
+    private DraftDocumentVO documentVO(DraftDocument document,String current,java.util.function.Function<String,DraftPdfArtifactRepository.Metadata> pdfMetadata) {
         DraftDocumentVO vo=new DraftDocumentVO(document.getFileKey(),document.getTitle(),nvl(document.getContent()),Boolean.TRUE.equals(document.getGenerated()));
         vo.setSnapshotId(document.getSnapshotId());vo.setRuleVersion(document.getRuleVersion());
         vo.setContentEdited(Boolean.TRUE.equals(document.getContentEdited()));
@@ -1180,7 +1203,7 @@ public class DraftingService {
             vo.setRevisionId(artifact.getId());vo.setDocxSha256(artifact.getDocxSha256());vo.setSourceSha256(artifact.getSourceSha256());
             vo.setBlocks(currentBlocks(artifact));vo.setFieldImpacts((List)JsonUtils.readList(artifact.getFieldImpactsJson(),Map.class));vo.setFieldStatus("UNVERIFIED");
             vo.setNativeLayout(DraftNativeLayout.savedInfo(artifact.getLedgerJson(),document.getFileKey(),properties.getDrafting().getRendererKind(),artifact.getSourceSha256(),artifact.getDocxSha256()));
-            DraftPdfArtifact pdf=currentPdfArtifact(artifact.getDocxSha256());if(pdf!=null){vo.setPdfSha256(pdf.getPdfSha256());vo.setRenderProfileHash(pdf.getRenderProfileHash());}
+            DraftPdfArtifactRepository.Metadata pdf=pdfMetadata.apply(artifact.getDocxSha256());if(pdf!=null){vo.setPdfSha256(pdf.getPdfSha256());vo.setRenderProfileHash(pdf.getRenderProfileHash());}
         }
         try{vo.setUnresolved((List)JsonUtils.readList(document.getUnresolvedJson(),Map.class));}catch(RuntimeException invalidLegacy){vo.setUnresolved(Collections.emptyList());}return vo;
     }
@@ -1290,14 +1313,39 @@ public class DraftingService {
         String workingHash=DraftPdfConverter.sha256(working);
         DocumentBindingsVO result=DraftDocumentBindings.locate(DraftDocumentBindings.bundle(fileKey,"source",sourceHash,null,workingHash,DraftDocumentBindings.reconcile(rows,new DocxTemplateEditor().inspect(working),false)),currentPdfArtifact(workingHash));result.setNativeLayout(DraftNativeLayout.info(fileKey,properties.getDrafting().getRendererKind(),workingResult));return result;
     }
+    private DraftPdfArtifactRepository.Metadata currentPdfMetadata(String docxHash) {
+        String profileHash=currentPdfProfileHash(docxHash);if(profileHash==null)return null;
+        return currentPdfMetadata(docxHash,profileHash);
+    }
+    private DraftPdfArtifactRepository.Metadata currentPdfMetadata(String docxHash,String profileHash) {
+        DraftPdfArtifactRepository.Metadata metadata=pdfArtifactRepository.findMetadataById(DraftAdoption.hash(docxHash+"|"+profileHash)).orElse(null);
+        if(metadata!=null&&(!docxHash.equals(metadata.getDocxSha256())||!profileHash.equals(metadata.getRenderProfileHash())))throw new BizException(4013,"BINDING_PDF_IDENTITY_MISMATCH");
+        return metadata;
+    }
+    /** A single listing assesses the live renderer once; each document retains its exact PDF identity check. */
+    private final class ListingPdfMetadata {
+        private boolean assessed;
+        private String profileHash;
+        private DraftPdfArtifactRepository.Metadata find(String docxHash) {
+            if(!pdfArtifactRepository.existsByDocxSha256(docxHash))return null;
+            if(!assessed){assessed=true;profileHash=currentConfiguredPdfProfileHash();}
+            return profileHash==null?null:currentPdfMetadata(docxHash,profileHash);
+        }
+    }
     private DraftPdfArtifact currentPdfArtifact(String docxHash) {
-        if(!pdfArtifactRepository.findFirstByDocxSha256OrderByCreatedAtDesc(docxHash).isPresent())return null;
+        String profileHash=currentPdfProfileHash(docxHash);if(profileHash==null)return null;
+        DraftPdfArtifact artifact=pdfArtifactRepository.findById(DraftAdoption.hash(docxHash+"|"+profileHash)).orElse(null);
+        if(artifact!=null&&(!docxHash.equals(artifact.getDocxSha256())||!profileHash.equals(artifact.getRenderProfileHash())))throw new BizException(4013,"BINDING_PDF_IDENTITY_MISMATCH");
+        return artifact;
+    }
+    String currentPdfProfileHash(String docxHash) {
+        if(!pdfArtifactRepository.existsByDocxSha256(docxHash))return null;
+        return currentConfiguredPdfProfileHash();
+    }
+    String currentConfiguredPdfProfileHash() {
         ConsenseProperties.Drafting settings=properties.getDrafting();if(JsonUtils.isBlankText(settings.getRendererExecutable())||JsonUtils.isBlankText(settings.getRendererWorkRoot()))return null;
         try {
-            DraftPdfConverter converter=configuredPdfConverter(settings);
-            String profileHash=converter.currentProfileHash();DraftPdfArtifact artifact=pdfArtifactRepository.findById(DraftAdoption.hash(docxHash+"|"+profileHash)).orElse(null);
-            if(artifact!=null&&(!docxHash.equals(artifact.getDocxSha256())||!profileHash.equals(artifact.getRenderProfileHash())))throw new BizException(4013,"BINDING_PDF_IDENTITY_MISMATCH");
-            return artifact;
+            return configuredPdfConverter(settings).currentProfileHash();
         }catch(DraftPdfConversionException|IllegalArgumentException unavailable){return null;} // Current renderer unavailable: old coordinates remain pending.
     }
     @Transactional
@@ -1426,7 +1474,7 @@ public class DraftingService {
     @Transactional(readOnly=true)
     public TemplateSourceFile reviewSource(String projectId,Long sourceId,String expectedSha256,boolean preview) {
         projectService.require(projectId);
-        SourceDocument source=sourceDocumentRepository.findById(sourceId).filter(item->projectId.equals(item.getProjectId())&&Arrays.asList(SourceDocument.CATEGORY_STANDARD_TEMPLATE,SourceDocument.CATEGORY_PROJECT_INPUT).contains(item.getCategory()))
+        SourceDocumentRepository.OriginalAssetMetadata source=sourceDocumentRepository.findOriginalAssetMetadataById(sourceId).filter(item->projectId.equals(item.getProjectId())&&Arrays.asList(SourceDocument.CATEGORY_STANDARD_TEMPLATE,SourceDocument.CATEGORY_PROJECT_INPUT).contains(item.getCategory()))
                 .orElseThrow(()->new BizException(4006,"REVIEW_SOURCE_NOT_FOUND"));
         if(expectedSha256==null||!expectedSha256.matches("[a-f0-9]{64}"))throw new BizException(4090,"REVIEW_SOURCE_IDENTITY_REQUIRED");
         if(source.getStoragePath()==null||!storageService.matchesStoredBytes(source.getStoragePath(),expectedSha256))throw new BizException(4090,"REVIEW_SOURCE_CHANGED: Reload the current source.");
@@ -1434,10 +1482,23 @@ public class DraftingService {
         if(!expectedSha256.equals(DraftPdfConverter.sha256(original)))throw new BizException(4090,"REVIEW_SOURCE_CHANGED");
         if(isPdfSource(original))return new TemplateSourceFile(original,source.getFileName(),"application/pdf");
         if(preview) {
-            try{new DocxTemplateEditor().inspect(original);}catch(DocxTemplateEditor.EditException unsupported){throw new BizException(4012,"REVIEW_VISUAL_PREVIEW_UNAVAILABLE: The source can still be reviewed as text.");}
-            return new TemplateSourceFile(renderPdf(original),source.getFileName()+".pdf","application/pdf");
+            DraftDocumentBindings.SourcePreview prepared=reviewPreview(sourceId,original);
+            return new TemplateSourceFile(renderPdf(prepared.docx),source.getFileName()+".pdf","application/pdf");
         }
         return new TemplateSourceFile(original,source.getFileName(),"application/octet-stream");
+    }
+
+    @Transactional
+    public DocumentBindingsVO reviewSourceBindings(String projectId,Long sourceId,String expectedSha256) {
+        TemplateSourceFile original=reviewSource(projectId,sourceId,expectedSha256,false);
+        if(isPdfSource(original.getBytes()))throw new BizException(4012,"EDITABLE_DOCX_REQUIRED: Original PDF locations use native page evidence.");
+        DraftDocumentBindings.SourcePreview prepared=reviewPreview(sourceId,original.getBytes());
+        renderPdf(prepared.docx);
+        return DraftDocumentBindings.locate(prepared.bindings,currentPdfArtifact(prepared.bindings.getDocxSha256()));
+    }
+    private DraftDocumentBindings.SourcePreview reviewPreview(Long sourceId,byte[] original) {
+        try{return DraftDocumentBindings.originalPreview(String.valueOf(sourceId),original,properties.getDrafting().getRendererKind());}
+        catch(DocxTemplateEditor.EditException unsupported){throw new BizException(4012,"REVIEW_VISUAL_PREVIEW_UNAVAILABLE: The source can still be reviewed as text.");}
     }
 
     @Data @AllArgsConstructor
@@ -1706,7 +1767,7 @@ public class DraftingService {
         return result.isEmpty() ? "（无聚焦摘录）" : result;
     }
 
-    private EvidenceVO toEvidenceVO(SourceDocument document) {
+    private EvidenceVO toEvidenceVO(SourceDocumentRepository.UploadDisplayMetadata document) {
         String contentType = nvl(document.getContentType()).toLowerCase(Locale.ROOT);
         String fileName = nvl(document.getFileName()).toLowerCase(Locale.ROOT);
         String typeLabel;

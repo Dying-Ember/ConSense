@@ -51,6 +51,7 @@ export function contextTrigger(code: string, locale: AppLocale): string {
 }
 
 export function extractionAttemptWord(kind: string): DraftWord {
+  if (/^primary-fields-\d+$/.test(kind)) return 'primaryAttempt'
   const labels: Record<string, DraftWord> = { primary: 'primaryAttempt', repair: 'repairAttempt', coverage: 'coverageAttempt', recall: 'recallAttempt' }
   return Object.prototype.hasOwnProperty.call(labels, kind) ? labels[kind] : 'recordedAttempt'
 }

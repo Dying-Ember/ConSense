@@ -39,7 +39,8 @@ class OerNativePdfBusinessEvidenceTest {
             when(registry.pointers(eq(source.getProjectId()),eq(42L),eq(binding.getProjectionSha256()),anyString())).thenAnswer(call->{
                 List<EvidencePointer> result=new ArrayList<>();for(JsonNode chunk:snapshot.path("chunks"))result.add(NativePdfCanonicalFixture.pointer(snapshot,chunk,binding,call.getArgument(3)));return result;
             });
-            when(retrieval.sourceUnitPolicy(anyString(),anyString(),anyList())).thenReturn(VettingRetrievalSourceUnits.POLICY);service=new OerBusinessEvidence(registry,retrieval,properties);
+            when(retrieval.sourceUnitPolicy(anyString(),anyString(),anyList())).thenReturn(VettingRetrievalSourceUnits.POLICY);
+            when(retrieval.readSources(anyString(),any(JsonNode.class),anyList())).thenAnswer(call->OerBusinessEvidenceTest.authoredSourceRead(call.getArgument(2),call.getArgument(1),VettingRetrievalSourceUnits.POLICY));service=new OerBusinessEvidence(registry,retrieval,properties);
         }
         OerBusinessEvidence.Session load(String module){return service.load(source.getProjectId(),module,Collections.singletonList(source));}
     }
@@ -92,10 +93,10 @@ class OerNativePdfBusinessEvidenceTest {
     @Test void advisorySourceHitsAndTextIncludeOriginalPdfPositionsWithoutInventedAssetSupport() throws Exception {
         Wire w=new Wire();OerBusinessEvidence.Session session=w.load("advisory");List<VectorStore.SearchHit> hits=w.service.sourceHits(session,Collections.singletonList(session.chunks().get(0).getId()));
         assertEquals(1,hits.size());assertEquals("P1, P2",hits.get(0).getPayload().get("pageNo"));
-        AdviceService advice=mock(AdviceService.class,CALLS_REAL_METHODS);Method render=AdviceService.class.getDeclaredMethod("renderExcerpts",List.class);render.setAccessible(true);
-        String text=(String)render.invoke(advice,hits);assertTrue(text.contains("Native PDF source-reviewed regions:"));assertTrue(text.contains("pdf_native_source_reviewed_region"));
+        AdviceService advice=mock(AdviceService.class,CALLS_REAL_METHODS);Method render=AdviceService.class.getDeclaredMethod("renderExcerpts",List.class,OerModelMaterial.Request.class);render.setAccessible(true);
+        String text=(String)render.invoke(advice,hits,new OerModelMaterial.Request(Collections.emptyList()));assertTrue(text.contains("Native PDF source-reviewed regions:"));assertTrue(text.contains("pdf_native_source_reviewed_region"));
         assertTrue(text.contains("effective visibility and whole-source semantics remain unknown"));assertTrue(text.contains(NativePdfCanonicalContract.VISUAL));assertFalse(text.contains("capturedSelectedPhysicalPages"));assertFalse(text.contains("captureCompleteness"));
-        assertFalse(text.contains("Native DOCX observations:"));verify(w.retrieval).sourceUnitPolicy(anyString(),anyString(),anyList());verifyNoMoreInteractions(w.retrieval);
+        assertFalse(text.contains("Native DOCX observations:"));verify(w.retrieval).readSources(eq("advisory"),any(JsonNode.class),anyList());verifyNoMoreInteractions(w.retrieval);
     }
 
     @Test void optionalPdfDeclarationsStayNullInExistingScannedAndDocxChunkRoundtrips() throws Exception {

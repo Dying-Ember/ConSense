@@ -2,7 +2,7 @@
 from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict
 
-from normal_observed_projection import SCHEMA, VERSION, OBSERVER, MAX_NORMAL_MESSAGE_BYTES, produce_normal_observed
+from normal_observed_projection import SCHEMA, VERSION, OBSERVER, GRAPH_VERSION, MAX_NORMAL_MESSAGE_BYTES, produce_normal_observed
 from oer_server import assert_canonical_scope
 from oer_source_registry import _serialize
 from token_windows import WindowError, fail
@@ -11,7 +11,7 @@ from token_windows import WindowError, fail
 ENDPOINT = '/normal-observed'
 CAPABILITY = {'schema': SCHEMA, 'version': VERSION, 'producerKind': 'normal_observed',
     'projectionEndpoint': ENDPOINT, 'candidateGraphSchema': 'consense.canonical-candidate.v1',
-    'candidateGraphVersion': 'actual-normal-source-unit-whole-page-observations-v2',
+    'candidateGraphVersion': GRAPH_VERSION,
     'completeUnitPolicy': 'complete-bound-generation-all-units-in-source-order',
     'nonTextUnitPolicy': 'retained-in-complete-graph-not-submitted-to-model',
     'artifactReadValidation': 'complete-manifest-actual-cas-reconstruction-every-request',

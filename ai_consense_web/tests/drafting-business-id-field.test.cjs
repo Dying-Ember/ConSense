@@ -42,6 +42,21 @@ test('reviewed required id is validated instead of being exempted as row metadat
   assert.equal(state.validationIssue(field, []), null)
 })
 
+test('collection guidance is shown once while distinct column guidance stays visible', async () => {
+  const shared = label('Shared list guidance')
+  const described = { ...field, description: shared, columnFields: [
+    { ...field.columnFields[0], description: shared },
+    { key: 'address', kind: 'text', label: label('Address'), description: label('Use the site office address') }
+  ] }
+  const h = await mount(loaded.default, { field: described, value: [{ id: '1', address: 'Office A' }, { id: '2', address: 'Office B' }], values: {}, locale: 'en' })
+  try {
+    assert.equal(h.element.textContent.split('Shared list guidance').length - 1, 1)
+    assert.equal(h.element.textContent.split('Use the site office address').length - 1, 1)
+    assert.equal(h.element.querySelectorAll('tbody .field-description').length, 0)
+    assert.equal(h.element.querySelectorAll('tbody input').length, 4)
+  } finally { h.dispose() }
+})
+
 test('reviewed id values remain visible in exact-value presentation', async () => {
   assert.deepEqual(plain(presentation.presentationColumns(field, [])), field.columnFields)
   const component = loaded.loadLocal(path.join(__dirname, '../src/components/DraftingValueDisplay.vue')).default

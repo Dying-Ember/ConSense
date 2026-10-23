@@ -18,6 +18,7 @@ function harness() {
   const server = id => { if (!servers.has(id)) servers.set(id, makeServer()); return servers.get(id) }
   const writes = [], llmCalls = [], readings = [], focusCalls = [], scrollCalls = [], pending = new Map(), pendingWrites = new Map(), failedWrites = new Set()
   const api = {
+    reviewHead: async () => ({ currentRevisionId: null, draftRevisionId: null, current: null, draft: null, sources: [] }),
     catalog: async () => ({ ruleVersion: 'unchanged', groups }),
     variables: async id => pending.has(id) ? pending.get(id).promise : server(id).map(item => ({ ...item })),
     templates: async () => ['NTT', 'SCT', 'SCC'].map(key => ({ key, fileName: `${key}.bin`, tag: 'ok' })),
@@ -41,7 +42,7 @@ function harness() {
     return node
   }
   const loaded = loadVue(path.join(__dirname, '../src/views/DraftingView.vue'), { boundaries: {
-    '@/api': { draftingApi: api, setLlmProfileResolver() {} }, pinia: piniaRuntime, 'vue-i18n': require('vue-i18n'),
+    '@/api/source-locations': { reviewSourceBindings: async () => { throw Error('Source location transport not provided by this fixture') } }, '@/api': { draftingApi: api, setLlmProfileResolver() {} }, pinia: piniaRuntime, 'vue-i18n': require('vue-i18n'),
     'pdfjs-dist': { GlobalWorkerOptions: {}, getDocument() { throw new Error('No generated document') } },
     'pdfjs-dist/build/pdf.worker.min.mjs?url': { default: 'external-worker' },
     'mammoth/mammoth.browser': { convertToHtml() { throw new Error('Unsupported source') } }

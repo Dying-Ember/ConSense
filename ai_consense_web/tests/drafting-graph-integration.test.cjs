@@ -37,7 +37,7 @@ const extractionTrace = { model: 'SYNTHETIC recorded model', finishedAt: '2026-1
 const sourceText = ['SYNTHETIC complete opening context.', 'Tender route [choice] applies.', 'SYNTHETIC second Foundation works target.', 'SYNTHETIC ordinary heading.', 'SYNTHETIC cleanup unrelated to any input.', 'SYNTHETIC obsolete field metadata.', 'SYNTHETIC complete ending context.']
 const resultText = [...sourceText]; resultText[1] = 'Tender route A applies.'
 const clone = value => JSON.parse(JSON.stringify(value)), calls = [], writes = []
-let original, result, guard = '', slowSource, slowResult, slowPlan
+let original, result, guard = '', slowSource, slowResult, slowPlan, slowProjectRead
 const saved = { fileKey: 'NTT', title: 'SYNTHETIC contract', content: resultText[1], generated: true, stale: false, snapshotId: 'SYNTHETIC-snapshot', revisionId: 'SYNTHETIC-revision-1', unresolved: [], blocks: [] }
 const binding = (id, ordinal, keys, applied = false) => ({
   bindingId: id, bookmarkName: id, sourceParagraphId: nativePath(ordinal), sourceParagraphOrdinal: ordinal, sourceText: sourceText[ordinal - 1],
@@ -49,9 +49,10 @@ let rows = [binding('SYNTHETIC-b1', 2, fields.slice(0, 2).map(field => field.key
 const actions = [{ id: 'SYNTHETIC-A', document: 'NTT', clause: 'Route', paragraphs: 'P2', inputKeys: ['foundationIncluded'], action: 'amend', detail: label('SYNTHETIC route amendment') }]
 const bundle = (view, file) => ({ fileKey: file, view, sourceSha256: original.sha, ...(view === 'result' ? { revisionId: saved.revisionId, docxSha256: result.sha } : {}), bindings: clone(rows).map(row => view === 'source' ? { ...row, text: row.sourceText, appliedActionIds: [], operationIds: [], applicationStatus: 'unchanged' } : row) })
 const api = {
+  reviewHead: async () => ({ currentRevisionId: null, draftRevisionId: null, current: null, draft: null, sources: [] }),
   catalog: async () => ({ ruleVersion: 'SYNTHETIC', groups: [{ id: 'scope', label: label('Scope'), fields }] }), variables: async () => clone(variables),
   templates: async () => ['NTT', 'SCT', 'SCC'].map(key => ({ key, tag: 'ok' })), inputs: async () => [], extractTrace: async () => clone(extractionTrace),
-  documents: async () => ['NTT', 'SCT', 'SCC'].map(fileKey => ({ ...clone(saved), fileKey })), plan: async (id, inputValues) => { if (id === 'SYNTHETIC-GRAPH-LATE') return slowPlan.promise; return { ruleVersion: 'SYNTHETIC', inputValues: clone({ ...Object.fromEntries(variables.map(item => [item.key, item.value])), ...(inputValues ?? {}) }), effectiveValues: {}, actions, unresolved: [] } },
+  documents: async id => id === 'SYNTHETIC-GRAPH-LATE' ? slowProjectRead.promise : ['NTT', 'SCT', 'SCC'].map(fileKey => ({ ...clone(saved), fileKey })), plan: async (id, inputValues) => { calls.push(['plan', id]); if (id === 'SYNTHETIC-GRAPH-LATE') return slowPlan.promise; return { ruleVersion: 'SYNTHETIC', inputValues: clone({ ...Object.fromEntries(variables.map(item => [item.key, item.value])), ...(inputValues ?? {}) }), effectiveValues: {}, actions, unresolved: [] } },
   templateBindings: async (...args) => { calls.push(['source-bindings', ...args]); const value = bundle('source', args[1]); if (guard === 'source') value.sourceSha256 = 'wrong-source'; return value },
   templateSource: async (...args) => { calls.push(['source-docx', ...args]); return args[0] === 'SYNTHETIC-LATE-SOURCE' ? slowSource.promise : new Blob([original.bytes]) },
   documentBindings: async (...args) => { calls.push(['result-bindings', ...args]); const value = bundle('result', args[1]); if (guard === 'revision') value.revisionId = 'wrong-revision'; if (guard === 'result') value.docxSha256 = 'wrong-result'; return args[0] === 'SYNTHETIC-LATE-RESULT' ? slowResult.promise : value },
@@ -64,7 +65,7 @@ const api = {
 }
 const loaded = loadVue(path.join(__dirname, '../src/views/DraftingView.vue'), {
   globals: { window, document, Element, HTMLElement, Node, DOMParser: window.DOMParser, XMLSerializer: window.XMLSerializer, NodeFilter: window.NodeFilter, ResizeObserver, Blob, crypto: crypto.webcrypto, URL: { createObjectURL: () => 'blob:SYNTHETIC', revokeObjectURL() {} }, localStorage: { getItem: () => 'en', setItem() {} } },
-  boundaries: { '@/api': { draftingApi: api, setLlmProfileResolver() {} }, pinia: piniaRuntime, 'vue-i18n': require('vue-i18n'), jszip: { default: JSZip }, dompurify: { default: require('dompurify')(window) }, 'mammoth/mammoth.browser.min.js': { default: require('mammoth/mammoth.browser.min.js') }, 'mammoth/mammoth.browser': { default: require('mammoth/mammoth.browser') }, 'pdfjs-dist/build/pdf.worker.min.mjs?url': { default: 'external-worker' }, 'pdfjs-dist': { GlobalWorkerOptions: {}, getDocument() { throw new Error('Native location navigation must not open a PDF') } } }
+  boundaries: { '@/api/source-locations': { reviewSourceBindings: async () => { throw Error('Source location transport not provided by this fixture') } }, '@/api': { draftingApi: api, setLlmProfileResolver() {} }, pinia: piniaRuntime, 'vue-i18n': require('vue-i18n'), jszip: { default: JSZip }, dompurify: { default: require('dompurify')(window) }, 'mammoth/mammoth.browser.min.js': { default: require('mammoth/mammoth.browser.min.js') }, 'mammoth/mammoth.browser': { default: require('mammoth/mammoth.browser') }, 'pdfjs-dist/build/pdf.worker.min.mjs?url': { default: 'external-worker' }, 'pdfjs-dist': { GlobalWorkerOptions: {}, getDocument() { throw new Error('Native location navigation must not open a PDF') } } }
 })
 const pinia = piniaRuntime.createPinia(); piniaRuntime.setActivePinia(pinia)
 const store = loaded.loadLocal(path.join(__dirname, '../src/stores/app.ts')).useAppStore(); store.switchProject('SYNTHETIC-BOUND-P1')
@@ -88,7 +89,7 @@ async function clickTitle(title) { const control = button(title); assert.ok(cont
   assert.equal(calls.filter(call => ['source-docx', 'result-docx'].includes(call[0])).length, 0)
   assert.equal(writes.length, 0)
   console.log('PASS: production header exposes a localized graph entry without mounting the graph or reading documents')
-  await clickTitle('4 Adopt and plan')
+  await clickTitle('3 Adopt and plan')
   const phone = document.querySelector('#input-contactTelephone')
   phone.value = '  +852 1234 5678  '; phone.dispatchEvent(new window.Event('input', { bubbles: true })); await settled()
   await click('[data-open-business-graph="header"]'); await until(() => document.querySelector('[data-graph-close]'))
@@ -131,10 +132,17 @@ async function clickTitle(title) { const control = button(title); assert.ok(cont
   assert.equal(writes.length, 0)
   console.log('PASS: actual graph potential navigation forwards the exact field/file/clause and shows a truthful missing-source notice without fallback')
   await click('[data-open-business-graph="header"]'); await until(() => document.querySelector('[data-graph-close]'))
-  slowPlan = deferred(); store.switchProject('SYNTHETIC-GRAPH-LATE'); await settled()
+  slowProjectRead = deferred(); slowPlan = deferred(); store.switchProject('SYNTHETIC-GRAPH-LATE'); await settled()
   assert.equal(document.querySelector('[data-graph-close]'), null, 'Project changes unmount graph selection immediately')
   assert.equal(document.querySelector('[data-open-business-graph="header"]').disabled, true, 'Busy project loading blocks graph navigation')
+  assert.equal(calls.some(call => call[0] === 'plan' && call[1] === 'SYNTHETIC-GRAPH-LATE'), false, 'The file step does not calculate a plan while loading the project')
+  slowProjectRead.resolve(['NTT', 'SCT', 'SCC'].map(fileKey => ({ ...clone(saved), fileKey }))); await settled()
+  assert.equal(document.querySelector('[data-open-business-graph="header"]').disabled, false, 'Navigation is restored only after actual project reads finish')
+  await clickTitle('3 Adopt and plan')
+  assert.ok(calls.some(call => call[0] === 'plan' && call[1] === 'SYNTHETIC-GRAPH-LATE'), 'Entering adoption dispatches the old project plan before testing its late response')
   saved.generated = true; store.switchProject('SYNTHETIC-GRAPH-AFTER-LATE'); await settled()
+  await clickTitle('3 Adopt and plan')
+  assert.ok(calls.some(call => call[0] === 'plan' && call[1] === 'SYNTHETIC-GRAPH-AFTER-LATE'), 'The new project loads its own plan when adoption opens')
   slowPlan.resolve({ ruleVersion: 'SYNTHETIC', inputValues: { foundationIncluded: true }, effectiveValues: {}, actions: [{ ...actions[0], id: 'SYNTHETIC-OLD', clause: 'Old project only' }], unresolved: [] }); await settled()
   await click('[data-open-business-graph="header"]'); await until(() => document.querySelector('[data-graph-close]'))
   await click('[data-graph-input="foundationIncluded"]')

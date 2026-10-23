@@ -28,6 +28,7 @@ async function mount({ locale = 'zh-Hans', files = [], findings = [], metrics = 
     '@/composables/useLocalized': { useLocalized: () => ({ currentKey: vue.computed(() => locale === 'en' ? 'en' : locale === 'zh-Hant' ? 'zhHant' : 'zhHans'), pick: value => typeof value === 'string' ? value : value?.en ?? '' }) },
     '@/api/client': { ApiError: class ApiError extends Error {} },
     '@/api': { vettingApi: { files: async () => files, findings: async () => findings, metrics: async () => metrics,
+      sourceProgress: async () => files.map(source => ({ id: source.documentId ?? source.key, fileName: source.fileName, parseStatus: source.parseStatus ?? source.status, parseMessage: source.parseMessage, pageCount: source.pageCount })),
       latestRunProgress: async () => job, getRun: async () => pendingDetails ? deferredDetail.promise : job } },
     '@/advice/reviewHandoff': { reviewHandoffCopy: {} },
     '@/components/AppIcon.vue': { default: empty },
@@ -76,7 +77,9 @@ test('explicitly excluded drawings are neutral, excluded from parse warnings and
     assert.ok(visibleText(h.root).includes('2 份图纸已按范围排除，不参与审查。'))
     assert.ok(!find(h.root, node => node.tag === 'details' && String(node.props?.class).includes('coverage-panel')), 'Expected drawing exclusion does not create a parsing failure panel')
     await h.openSources()
-    const modal = find(h.root, node => node.props?.class === 'test-modal')
+    const modal = find(h.root, node => String(node.props?.class).split(' ').includes('test-modal'))
+    assert.ok(modal, 'The source dialog opens with its inherited classes')
+    assert.ok(modal.props.class.split(' ').includes('vetting-source-modal'), 'The source dialog retains the layout class passed by the view')
     const rows = all(modal, node => node.tag === 'tr').slice(1)
     assert.equal(rows.length, 2)
     for (const row of rows) {
@@ -100,7 +103,7 @@ test('unknown or failed non-drawings and drawings without an exclusion are not m
     assert.ok(visibleText(h.root).includes('仍有覆盖或来源限制待人工核对'))
     assert.ok(text(h.root).includes('Ordinary parse failed'))
     await h.openSources()
-    const modal = find(h.root, node => node.props?.class === 'test-modal')
+    const modal = find(h.root, node => String(node.props?.class).split(' ').includes('test-modal'))
     const visible = visibleText(modal)
     for (const label of ['解析失败', '未纳入解析', '解析中', '用途尚未确定']) assert.ok(visible.includes(label), label)
     for (const raw of ['FAILED', 'EXCLUDED', 'PARSING']) { assert.ok(text(modal).includes(raw)); assert.ok(!visible.includes(raw), raw) }
@@ -155,7 +158,7 @@ test('source status labels distinguish pending parsing from purpose confirmation
     ] })
     try {
       await h.openSources()
-      const modal = find(h.root, node => node.props?.class === 'test-modal')
+      const modal = find(h.root, node => String(node.props?.class).split(' ').includes('test-modal'))
       const row = name => find(modal, node => node.tag === 'tr' && text(node).includes(name))
       const waiting = row('Annex.pdf'), ready = row('Ready.docx'), legacy = row('Old backend.docx'), limited = row('Partial.pdf')
       assert.ok(visibleText(waiting).includes(pending)); assert.ok(visibleText(waiting).includes(unresolved)); assert.ok(visibleText(waiting).includes(note))

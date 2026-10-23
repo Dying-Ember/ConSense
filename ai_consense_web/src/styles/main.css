@@ -486,7 +486,7 @@ ol.docx-unverified-list, ul.docx-unverified-list, .docx-unverified-list > li { l
 .skill-out, .skill-guard { border: 1px solid var(--line); border-radius: 6px; padding: 11px 12px; background: var(--surface-subtle); }
 .skill-out h6, .skill-guard h6 { margin: 0 0 7px; font-size: 12.5px; }
 .skill-out ul, .skill-guard ul { margin: 0; padding-left: 18px; font-size: 12.5px; color: var(--ink-soft); display: grid; gap: 5px; }
-.skill-table td:last-child { width: 70px; color: var(--accent-dark); font-weight: 700; }
+.skill-table td:last-child { min-width: 180px; color: var(--accent-dark); }
 .skill-toolbar { display: flex; gap: 8px; align-items: center; justify-content: space-between; margin-bottom: 12px; flex-wrap: wrap; }
 
 /* ---------------------------------------------------------- 工具类 */

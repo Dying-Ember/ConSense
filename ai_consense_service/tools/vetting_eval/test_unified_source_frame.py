@@ -73,6 +73,50 @@ class SourceFrameTests(unittest.TestCase):
                 self.assertEqual(one['chunks'], chunks)
             self.assertEqual(1, validate.call_count)
 
+    def test_cold_load_decodes_each_requested_root_once(self):
+        address = self.single_address()
+        with patch.object(self.registry, '_wire', wraps=self.registry._wire) as wire:
+            with self.registry.validation_frame(software_guard=self.rt.algorithms):
+                first = self.registry.load(address)
+                later = self.registry.load(address)
+                self.assertEqual(self.single, first)
+                self.assertEqual(first, later)
+                self.assertIsNot(first, later)
+            self.assertEqual(2, wire.call_count)
+
+    def test_ordinary_derivation_retains_dependencies_without_copying_root(self):
+        address = self.single_address()
+        with self.registry.validation_frame(software_guard=self.rt.algorithms):
+            self.assertEqual(self.single, self.registry.load(address))
+        result = next(iter(self.registry._derived_results.values()))
+        self.assertFalse(result.collection)
+        self.assertEqual(0, len(result.serialized))
+        self.assertTrue(result.dependencies)
+        dependencies = [json.loads(raw) for raw in result.file_dependencies]
+        self.assertIn(str(self.registry._path(address).absolute()), [row['path'] for row in dependencies])
+
+    def test_normal_root_reuses_wire_and_only_retains_complete_dependency_proof(self):
+        from normal_observed_projection import produce_normal_observed
+        from oer_source_registry import _serialize
+        from test_normal_observed import fixture
+        body = fixture(self.policy)
+        source = produce_normal_observed(body['candidateGraph'], body['sourceBinding'], artifact_store=self.store)
+        self.registry.publish(source)
+        address = source['projectionSha256']
+        self.registry._derived_max_bytes = len(_serialize(source)) - 1
+        with patch.object(self.registry, '_validate_normal', wraps=self.registry._validate_normal) as validate:
+            with patch('unified_source_registry._serialize', wraps=_serialize) as serialize:
+                for _ in range(2):
+                    with self.registry.validation_frame(software_guard=self.rt.algorithms):
+                        self.assertEqual(source, self.registry.load(address))
+                roots = [call for call in serialize.call_args_list if isinstance(call.args[0], dict)
+                         and call.args[0].get('projectionSha256') == address]
+                self.assertEqual(0, len(roots))
+            self.assertEqual(1, validate.call_count)
+        result = next(iter(self.registry._derived_results.values()))
+        self.assertEqual(b'', result.serialized)
+        self.assertTrue(result.dependencies)
+
     def test_pdf_subregistry_participates_and_detaches_mutable_returns(self):
         pdf = self.publish_pdf()
         address = pdf['projectionSha256']

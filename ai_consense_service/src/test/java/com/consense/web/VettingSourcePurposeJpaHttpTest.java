@@ -71,9 +71,45 @@ class VettingSourcePurposeJpaHttpTest {
     @SpyBean com.consense.service.vetting.VettingSemanticReview semantic;
     String project;
 
+    @Test void progressReadsOnlyMetadataAndRestartMarksOnlyUnfinishedVettingFiles() throws Exception {
+        SourceDocument source=new SourceDocument();source.setProjectId(project);source.setCategory(SourceDocument.CATEGORY_VETTING_PACKAGE);
+        source.setFileName("inflight.pdf");source.setParseStatus("PARSING");source.setSourceSha256(String.join("",Collections.nCopies(64,"a")));
+        source.setParseMessage("initial");source.setCreatedAt(Instant.now());source.setTextContent("body must not be polled");sources.saveAndFlush(source);
+        assertEquals(0,sources.updateParseProgress(source.getId(),String.join("",Collections.nCopies(64,"b")),"wrong source"));
+        assertEquals(1,sources.updateParseProgress(source.getId(),source.getSourceSha256(),"第 2 / 47 页：等待视觉识别结果"));
+        SqlCapture.statements.clear();
+        JsonNode response=JsonUtils.parse(mvc.perform(get("/api/vetting/"+project+"/sources/progress")).andReturn().getResponse().getContentAsString());
+        assertEquals(0,response.path("code").asInt(),response.toString());
+        assertTrue(response.path("data").get(0).path("parseMessage").asText().contains("2 / 47"));
+        assertFalse(SqlCapture.statements.stream().anyMatch(sql->sql.contains("text_content")||sql.contains("structured_content")),SqlCapture.statements.toString());
+        service.markInterruptedParses();
+        assertEquals("FAILED",sources.findById(source.getId()).get().getParseStatus());
+        assertEquals("body must not be polled",sources.findById(source.getId()).get().getTextContent());
+        assertEquals(0,sources.updateParseProgress(source.getId(),source.getSourceSha256(),"late result"));
+    }
+
     @BeforeEach void setup(){
         project="purpose-"+UUID.randomUUID();Project p=new Project();p.setId(project);p.setNameEn("Authored purpose confirmation");projects.saveAndFlush(p);
         SqlCapture.statements.clear();clearInvocations(externalLlm,parser,oer,semantic);
+    }
+    @Test void automaticListUploadsPersistRoutedPurposeAndEnterTheBusinessSourceSet()throws Exception {
+        int index=0;
+        for(String title:Arrays.asList("LIST OF CONTRACT DRAWINGS","LIST OF REFERENCE DRAWINGS/\nDOCUMENTS")) {
+            byte[] original=("APPENDIX B\n"+title+"\n20250101").getBytes(StandardCharsets.UTF_8);
+            JsonNode response=JsonUtils.parse(mvc.perform(multipart("/api/vetting/"+project+"/package/upload")
+                    .file(new MockMultipartFile("files","anonymous-"+(index++)+".txt","text/plain",original)))
+                    .andReturn().getResponse().getContentAsString());
+            assertEquals(0,response.path("code").asInt(),response.toString());
+        }
+        List<SourceDocument> retained=sources.findBusinessSourcesByProjectId(project);
+        assertEquals(2,retained.size());
+        for(SourceDocument d:retained) {
+            assertNull(d.getReviewRole());assertNull(d.getDocumentScope());assertEquals("tender",VettingCorpus.sourceRole(d));
+            assertTrue(ProjectDocumentScope.parseUsable(d));assertEquals("content_supported",OerSourceMetadata.identity(d).getIdentityStatus());
+        }
+        assertEquals(2,ProjectDocumentScope.selected(project,retained,"fullset").size());
+        assertEquals(2,service.listFiles(project).stream().filter(f->"tender".equals(f.getSourceRole())&&f.isParsed()).count());
+        verifyNoInteractions(externalLlm);
     }
     SourceDocument source(String name)throws Exception{
         String text="AUTHORED source retained exactly \uD83D\uDE00, including its condition and exception.";
@@ -225,7 +261,7 @@ class VettingSourcePurposeJpaHttpTest {
             assertFalse(org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive());
             SourceDocument parsing=fresh(d);assertEquals("PARSING",parsing.getParseStatus());assertEquals("tender",parsing.getReviewRole());
             JsonNode visible=listed().get(0);assertFalse(visible.path("parsed").asBoolean());assertFalse(visible.path("identityConfirmationAvailable").asBoolean());
-            for(String module:new String[]{"vetting","advisory"})assertTrue(ProjectDocumentScope.selected(project,sources.findBusinessSourcesByProjectId(project),"fullset",module).isEmpty());
+            assertUnavailableSourceStaysInCoverage(d);
             return invocation.callRealMethod();
         }).when(parser).parse(eq(d.getFileName()),any(byte[].class));
         JsonNode response=putPending(d,pendingRequest(d));assertEquals(0,response.path("code").asInt(),response.toString());JsonNode row=response.path("data");
@@ -259,7 +295,7 @@ class VettingSourcePurposeJpaHttpTest {
         doThrow(new IllegalStateException("Authored detail parser failed")).when(parser).parse(eq(d.getFileName()),any(byte[].class));
         JsonNode response=putPending(d,pendingRequest(d));assertEquals(0,response.path("code").asInt(),response.toString());JsonNode row=response.path("data");assertEquals("FAILED",row.path("parseStatus").asText());assertFalse(row.path("parsed").asBoolean());assertEquals("tender",row.path("sourceRole").asText());
         SourceDocument after=fresh(d);assertEquals(text,after.getTextContent());assertEquals(structure,after.getStructuredContentJson());assertEquals(coverage,after.getParseCoverageJson());assertEquals(nativeArchive,after.getNativePdfEvidenceJson());assertArrayEquals(original,Files.readAllBytes(Paths.get(d.getStoragePath())));
-        for(String module:new String[]{"vetting","advisory"})assertTrue(ProjectDocumentScope.selected(project,sources.findBusinessSourcesByProjectId(project),"fullset",module).isEmpty());
+        assertUnavailableSourceStaysInCoverage(d);
         JsonNode listed=listed().get(0);assertEquals(d.getSourceSha256(),listed.path("originalSourceSha256").asText());assertEquals(64,listed.path("sourceHash").asText().length());
         assertEquals(4104,putPending(d,pendingRequest(d)).path("code").asInt());verify(parser,times(1)).parse(eq(d.getFileName()),any(byte[].class));verifyNoInteractions(externalLlm,oer);
     }
@@ -279,7 +315,15 @@ class VettingSourcePurposeJpaHttpTest {
         doAnswer(invocation->{Files.write(Paths.get(d.getStoragePath()),"concurrently changed bytes".getBytes(StandardCharsets.UTF_8));return invocation.callRealMethod();}).when(parser).parse(eq(d.getFileName()),any(byte[].class));
         JsonNode response=putPending(d,pendingRequest(d));assertEquals(0,response.path("code").asInt(),response.toString());assertEquals("FAILED",response.path("data").path("parseStatus").asText());assertFalse(response.path("data").path("parsed").asBoolean());
         SourceDocument after=fresh(d);assertEquals(text,after.getTextContent());assertEquals(structure,after.getStructuredContentJson());assertEquals(d.getSourceSha256(),after.getSourceSha256());
-        for(String module:new String[]{"vetting","advisory"})assertTrue(ProjectDocumentScope.selected(project,sources.findBusinessSourcesByProjectId(project),"fullset",module).isEmpty());verifyNoInteractions(externalLlm,oer);
+        assertUnavailableSourceStaysInCoverage(d);verifyNoInteractions(externalLlm,oer);
+    }
+
+    void assertUnavailableSourceStaysInCoverage(SourceDocument source) {
+        for(String module:new String[]{"vetting","advisory"}) {
+            List<SourceDocument> selected=ProjectDocumentScope.selected(project,sources.findBusinessSourcesByProjectId(project),"fullset",module);
+            assertEquals(Collections.singletonList(source.getId()),selected.stream().map(SourceDocument::getId).collect(java.util.stream.Collectors.toList()));
+            assertFalse(ProjectDocumentScope.parseUsable(selected.get(0)),"Coverage membership must not authorize unavailable parser evidence");
+        }
     }
 
     @Test void anExplicitUploadRoleDoesNotReplaceTheSeparateTextIdentityConfirmation()throws Exception {

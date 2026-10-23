@@ -19,7 +19,7 @@ test('stale regeneration retains one actionable status and one failure in expand
     generate: async () => { generations++; throw new Error('AUTHORED generation failed; previous revision retained') }
   }
   const loaded = loadVue(path.join(__dirname, '../src/views/DraftingView.vue'), {
-    boundaries: { '@/api': { draftingApi: api, setLlmProfileResolver() {}, captureLlmSelection: () => ({ profileId: 'local' }) }, pinia: piniaRuntime, 'vue-i18n': require('vue-i18n'),
+    boundaries: { '@/api/source-locations': { reviewSourceBindings: async () => { throw Error('Source location transport not provided by this fixture') } }, '@/api': { draftingApi: api, setLlmProfileResolver() {}, captureLlmSelection: () => ({ profileId: 'local' }) }, pinia: piniaRuntime, 'vue-i18n': require('vue-i18n'),
       'pdfjs-dist': { GlobalWorkerOptions: {}, getDocument() { throw new Error('No PDF request belongs to this failure-feedback test') } },
       'pdfjs-dist/build/pdf.worker.min.mjs?url': { default: 'authored-worker' },
       'mammoth/mammoth.browser': { convertToHtml() { throw new Error('No template conversion belongs to this feedback test') } },
@@ -32,13 +32,15 @@ test('stale regeneration retains one actionable status and one failure in expand
   const button = title => [...document.querySelectorAll('button')].find(node => node.textContent.trim() === title)
   const click = async title => { const control = button(title); assert.ok(control, title); assert.equal(control.disabled, false); control.click(); await wait() }
   try {
-    await wait(); await click('5 Preview and export'); await click('SCT')
+    await wait(); await click('4 Preview and export'); await click('SCT')
     assert.equal(document.querySelectorAll('[data-draft-stale-status]').length, 1)
     const status = document.querySelector('[data-draft-stale-status]').textContent
     assert.match(status, /Inputs or sources have changed/); assert.match(status, /read-only/)
-    assert.ok(document.querySelector('[data-draft-layout-limits] summary'))
-    assert.equal(document.querySelector('[data-draft-layout-limits]').open, false)
-    assert.match(document.querySelector('[data-draft-layout-limits]').textContent, /PDF font substitutions and TOC/)
+    const layoutLimits = document.querySelector('[data-draft-layout-limits]')
+    assert.ok(layoutLimits, 'Layout limitations remain directly visible beside the saved document')
+    assert.equal(layoutLimits.closest('details'), null, 'Reading layout limitations requires no disclosure step')
+    assert.match(layoutLimits.querySelector('strong').textContent, /Layout checks remain unverified/)
+    assert.match(layoutLimits.textContent, /PDF font substitutions and TOC/)
     await click('Expand document'); await click('Regenerate')
     const errors = [...document.querySelectorAll('[role="alert"]')].filter(node => node.textContent.includes('AUTHORED generation failed'))
     assert.equal(errors.length, 1, 'The expanded workspace owns the failed attempt; no duplicate background alert')

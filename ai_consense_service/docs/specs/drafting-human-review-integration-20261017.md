@@ -1,3 +1,116 @@
+## 2026-10-23 沉浸核对与多处关联
+
+原件核对区提供显式沉浸式入口；原版页面与问题编辑栏一起占满可用窗口，桌面左右约2:1。页面和编辑栏各自滚动，不再叠加外层工作区滚动。退出按钮与Esc均可退出，同一预览实例保留当前页、选词及未保存问题调整；关闭、切换项目／离开步骤、组件卸载恢复背景滚动。嵌套对话框先处理Esc，加载失败仍能退出。
+
+同一变量可关联多段原文和多处修改范围。版面文字出现多次本身不是错误：在当前绑定原件中显示同页全部匹配，跨页列出匹配页供切换；右侧各条已关联原文可分别定位。文字匹配仅辅助对照，不自动确认来源归属、创建编辑范围或采用答案。原件／分析身份无法核实时继续拒绝猜测绑定；文字层未找到与文字层无法检索须分别提示，不混成“多处所以失败”。
+
+自动定位失败只在原件阅读区给出非阻断提示，明确仍可浏览、翻页和选词，不作为整块红色业务错误显示；来源版本不可用、读取／保存失败等实际错误仍独立处理。空白段落或无文字位置明确标注，不提供点击后必然失败的定位操作。阅读辅助定位不生成编辑授权，旧分析／多重原生身份继续拒绝猜测。
+
+同一guidance note可拆出不同事实及其组合条件；同一事实应复用变量并关联多处来源／修改范围，不因处理多个片段而重复建输入。完全相同引文、答案类型与角色却没有独立事实含义的节点须作为重复候选核查；不能仅凭同文就合并不同事实、不同条件或不同输出类型。现存电子发行／BQ示例的重复与联动缺陷仍在验收报告中待修，预览修复不代表该语义问题完成。
+
+## 2026-10-23 用户要求：恢复原版页面核对交互
+
+以2026-10-16“在原件上核对”原型的原版页面交互替换重排文字主视图：保留原件排版、旁注和物理分页，用户在页面框选文字、逐词增减选择，就地补充／关联问题、指定影响范围；右侧一次核对一个问题，复用已有条件、拆分合并、多处范围、草稿保存及后续明确采用流程。“另开只读PDF窗口＋重排文字选词”不能作为本要求已经完成的证据。
+
+切换文件只改变查看对象，设为本次起草版次是独立明确操作；项目、来源SHA、分析身份及图谱修订守卫保持。页面坐标不能直接当作Word偏移：仅在当前原件及完整选词／上下文能唯一准确对应原生文字时，构造包含准确引文、UTF-16偏移、段落身份及SHA的native选区，服务端保存时仍独立核验。重复／无法唯一对应的位置不得猜测、借用另一版Word或扩大范围。PDF来源可供阅读和来源关联，不获得另一版Word的编辑权限。
+
+当前文件问题采用搜索和分页，选择问题后在原版页面定位及高亮来源，通过显式操作进入变量和影响范围调整。历史任务记录保留，要求／关系建议／需补核使用有界标签页、搜索及分页；不再把整屏原子记录和反复折叠作为主操作。历史任务数量不冒充当前草稿数量，未确认草稿不能声称已确认。
+
+当前实现和真实浏览器证据见[结果验收报告](../testing/drafting-result-usability-20261023.md)。本交互改造不证明全部模板语义正确或导出文件逐页通过。
+
+## 2026-10-23 用户确认：允许有明确标记的部分草稿交付
+
+允许在部分修改尚未核对完成时预览和导出未完成草稿。只应用用户明确核对并采用、来源及编辑校验通过的修改；未决部分保留原文，不自动采用模型答案、不绕过来源版本或准确编辑范围校验。依赖未决条件或冲突的修改同样保留未处理，不能仅因局部答案已采用就执行。
+
+部分交付的预览及导出文件须带醒目的“未完成草稿”标记，并附可读的未处理清单，列明问题、涉及文件／原文位置、未处理原因和下一步操作。标记必须进入实际导出文件，不能仅显示在网页或文件名。全部需要核对的内容确认完成、必要答案明确采用且修改方案无未决时，自动省略未完成标记及未处理清单；不得仅按识别任务完成、位置全部绑定或用户点击导出来消除标记。
+
+此项是用户最新确认的交付规则，替代此前“整图未确认时一律不能输出”的产品限制。实施需复用现有图谱、事实采用、计划、原件编辑和LibreOffice导出能力；原整图确认流程及历史证据保留，部分交付不能将未完成图谱伪装为已确认版本。当前规则已确认，生产接线和文件验收尚待完成。
+
+第三步同一方案内的修改影响按来源文件归组，文件名只显示一次；纯填空符号汇总目标数，正常原文引文逐条保留。坐标绑定数量与修改待核对数量分开统计，展示归组不改变目标、候选序号、原文或采用权限，不增加折叠和后台请求。待核对数量须包括既有图谱投影中整条方案的规则重绑、未决、缺失引用、版本不兼容及仅参考状态，不能因各目标坐标bound而显示无待核对；计数为0也不授予确认、采用或执行权限。
+
+修改影响展示须区分来源位置绑定与处理方式核对：原生范围bound但动作仍check时，明确位置已绑定、修改仍待核对且不执行，不将坐标核验显示成业务规则已通过。
+
+第三步原文预览须复用第二步保存的原生选区：方案携带nativeBinding时，仅在绑定状态、原件SHA、原生段落身份、editableText通道、偏移及准确引文全部一致后导航；多段绑定须完整核验，重复身份拒绝。失效绑定不得回退至相似文本或旧目录猜测。无该绑定的既有目录路径保持原边界。原文选词可能只是一个词或填空，展示称“原文位置”，不把它宣称为已确认的正式条款编号；导航不授予编辑、确认或采用权限。
+
+人工把已配置修改切换为“需要核查”时，应保存原拟议动作以及答案配置和替换文字落点，继续等待核对。重新选择同一拟议动作不能提前删除其范围核对依据；明确切换成其它处理则按该动作清理不适用配置。动作切换与保存均不自动确认图谱或采用答案。
+
+来源未完成而暂存为check的目标，如proposedAction明确为fill／replace／insert，保存问题或条件调整时须保留拟议答案引用、拼接配置及固定改文，不因当前待核对状态删除方案。保留配置不授编辑权限，原check、needsRebind及原件绑定守卫保持。
+
+待确认图谱的第三步候选列表应直接展示同版图谱记录的关联修改影响，复用既有图谱关系投影，不新增模型请求或来源读取。展示问题自身及直接引用此答案的方案、原文目标与待核状态；没有直接方案须明确说明，不把候选值作为采用值试填。旧版或来源失效时不展示影响，退出节点的方案不进入当前影响。没有适用条件的记录不得描述为已确认适用；纯占位符目标以可读说明呈现，并保留原文核对入口。
+
+修改范围未绑定时，应向用户说明缺少准确原文选区及如何继续核对，不直接显示内部错误码。重复填入同一答案须分别建立准确目标；现有多选区替换仍只在指定选区写入，其余选区清空。来源已识别不等于答案格式、条件或编辑范围已获确认。
+
+<!-- drafting-result-usability-20261023:start -->
+候选列表须支持按问题名称、文件名和原文筛选并显示可见／全部数量；筛选只改变展示，保留原候选序号、证据及定义绑定。未保存校正时禁止改变筛选，切换项目／修订清空筛选，避免隐藏恢复的草稿；清空搜索恢复全部结果，不额外请求识别或模型。
+
+已存指导说明的成员范围允许经同版原件与观察核实的空文本0–0区间，保留空段分隔及完整引文；非空文本零长区间、越界、错版或改动范围继续拒绝。此规则仅授来源观察核对能力，不生成原生编辑坐标，不改变范围完整性或采用权限。
+
+保存核对草稿时，顶部与底部入口须显示实际保存中状态，服务器成功返回前不得提示已保存；失败保留调整并恢复入口。切换项目或重新读取后，旧保存请求的成功或失败均不得覆盖当前项目状态。保存仍不等于模板确认或答案采用。
+
+共用来源上下文展示使用可读的触发与停止说明，不向业务用户展示内部字段key、字符偏移或重复机器代码；原文直接展示，不再增加一层折叠。记录窗口与实际派发上下文的区别保持，未知原因明确缺少说明；完整定位和诊断仍保留在原记录中，不因显示简化修改证据。
+
+有待确认图谱的第三步同样提供已有识别报告入口，复用历史只读报告，不要求先确认模板或回到旧目录。按字段分批的primary调用使用“主识别调用”标签，调用摘要不重复显示内部kind／status代码；未知调用仍标记为记录的调用类型，不猜测性质，原始提示及返回保留。
+
+原件版面读取期间同一来源不重复发起转换请求；等待与失败状态分开，失败后才提供重试。切换来源或项目后旧响应不得覆盖当前版面，渲染失败不影响准确原文核对。
+
+第三步已归属候选须能直接查看对应模板问题及修改范围，复用第二步问题选择与原文定位。导航携带候选所属图谱修订；当前编辑版不一致、问题已退出或不存在时拒绝跳转并说明需重新核对。未归属候选先明确归属，不猜测目标；未保存候选或问题表单继续受现有守卫保护。导航不保存、不确认、不采用，也不将展示范围自动转为编辑选区。
+
+“定位关联原文”不能仅依赖可编辑native span：已绑定来源观察可在同原件／分析代次下，以观察成员唯一对应的原生part／nodePath定位段落。此路径与范围展示复用身份解析，不按相似引文搜索，不把观察偏移转成编辑偏移，不创建选区；旧版本或多重对应仍须明确报不可准确定位。
+
+修改标记的来源观察可通过同版已存memberId／channel及localSentenceObservation范围绑定为理解上下文，不能要求其伪造指导说明的memberRanges。发现与核对使用同一适配；历史缺范围锚点只有在完整观察对象、原件及分析身份一致时才能恢复。该绑定不产生原生编辑选区或编辑权限，错误显式范围仍须拒绝。
+
+来源范围展示同时接收指导说明的明确关联与同版修改标记的targetGroupIds，复用原件身份／分析代次校验。一个标记关联多项目共享范围时，展示该范围不等于授权当前变量修改所有项目；标记位置、理解上下文和可执行目标须保持区分。
+
+长问题表单末尾须就近提供保存草稿入口，复用整版保存及冲突／锁定／未记录表单校验。界面须区分“记录问题调整”和“持久化保存草稿”；保存不等于确认模板或采用答案，不要求用户回到远处顶部才能完成保存。
+
+**2026-10-23 用户要求：基于已完成结果修复可供人使用的流程，不重发识别或追加付费模型调用。** 有未确认图谱时，第三步必须显示该版候选答案和确认前提，不能静默展示旧固定变量目录冒充第二步的结果。模板规则确认与项目事实采用继续分开，不自动确认、合并不确定语义或采用项目值。没有草稿／确认图谱的旧项目继续保留既有人工填写路径；已确认版本仍是生成权威。原文查看、准确选词及修改位置绑定复用现有组件；业务界面不展示哈希及内部节点标识，不依赖反复折叠才能完成主要操作。历史占位项、历次自动节点及本次结果须核清，保留人工调整和来源证据，不按同名直接合并。进展、未定事项及验收边界见[本次结果验收报告](../testing/drafting-result-usability-20261023.md)。
+
+来源待核对占位（source_seed）与业务变量分开呈现。自动化收尾只将完整成功或明确无业务要求的来源任务对应、仍为pending且manual=false、没有人工规则／修改目标且未被其他有效节点引用的占位退出业务待确认列表；原文、观察、处理状态和替代节点引用留在原图历史。部分、失败、未执行以及人工调整／确认／有引用的项保留核对，不自动授予业务变量确认。该规则不构成同名业务变量合并授权。已有结果修复须保存新草稿、保持旧版本和候选绑定，不重发模型。
+
+修改目标的“文字来自哪个答案”只列当前有效业务问题，复用既有业务／核对分类，不把来源待核对占位或verification事项当作可采用答案。历史目标若已引用不适用或缺失项，保留原引用并明确提示重新核对，不自动清空为固定文字；从核对事项创建新目标时，不默认以该事项作为答案来源。此入口筛选不改变既有条件语义或来源／生成校验。
+
+角色为verification的原文／编辑核对事项同样与项目问题分组显示，无论来自占位还是原子识别；统计、下拉列表和关系图标签口径一致。将明确的符号清理指令改归核对事项，不等于确认执行或补全编辑范围，仍保留来源和未确认状态。不得把“是否删除星号／下划线”这类已由原文规定的处理误作任意项目事实供采用。
+
+问题合并或退出后，已提取候选必须保留原文、旧归属及候选快照，并显示为待明确归属；只可通过既有人工校正接口选定当前问题后迁移，不自动采用，不调用模型。候选校正只更新目标问题定义绑定，不将无关问题追认为新版。
+
+人工合并也不能静默改变必填性：可选与必填定义不一致时拒绝直接合并，先核对原要求。历史未声明 optional 的问题继续使用现有必填默认；不得因为保留方向不同而改变回答义务。
+
+两个问题均只含完全空的 rule 占位（branches 与 inputIds 为空、needsRebind=true、无其他规则字段）时，不因各自携带占位而拒绝明确的同义合并；保留问题仍须保持 needsRebind，原失败诊断留在历史。含实际规则或额外作用域信息的双规则合并继续拒绝，不以占位整理代替条件或修改范围核对。
+
+修改问题名称、角色或其他非条件字段不能重建／清空原规则。条件分支未改变时保留完整 correction 及 needsRebind；移除空隔离规则须使用现有明确操作，不能由普通表单保存隐式完成。
+
+反向同样成立：仅修改条件、修改位置或处理说明，不能重写未编辑的问题原句、类型／角色说明、选项扩展字段、所属关系或缺省固定值。表单按实际变更提交定义字段；共享reducer不得将局部EDIT未携带type解释为类型变化。真实答案类型或选项变化仍保留原有依赖重绑和候选定义核对要求，不能靠忽略定义哈希掩盖误改。
+
+人工核对须展示当前问题的指导说明在同版OER中明确关联的来源范围和涉及段落，保留完整／未完整状态。导航可用原生part／nodePath及原件身份定位唯一段落，但导航不是编辑选区：规范化来源偏移不能直接作Word修改偏移；仍复用准确选词及目标绑定。缺失或重复位置明确保留不可准确定位状态，不按文本相似度猜测，也不自动选择／确认修改。
+
+段内词语范围须单独展示同版OER已存的准确词语，整段另作上下文展示。括号等包装字符若标记为需要独立清理决定，界面必须明示其不在当前词语范围内；不得因为整段被展开就授予整段修改权限。缺少准确词语时显示未提供，不凭段落文字推算。此展示不自动创建原生选区或保存修改。
+
+准确原生Word选区中的普通直接run/tab属于可明确选择的正文控制字符，共用编辑器应支持其随选区替换，保留选区外tab和原run属性。此支持不扩展到catalog规范化坐标跨控制、插入点、字段或分页符；不得用放宽这些边界修复正文tab误拦。实际生成仍必须验证完整原件及最终版式。
+
+问题仍有效但定义已改变（包括清单子字段调整）时同样保留旧候选为待核对，不因定义哈希不匹配而在界面消失。旧候选的结构化展示／编辑使用与提取记录定义匹配的历史字段目录；当前目录继续用于选择归属和校正校验。不能把旧列按同名或位置静默映射到新列，也不能把历史候选展示当作新版定义已获确认。
+
+同一问题的候选可来自不同的已保存定义；按每条候选的修订和定义绑定选择展示字段，同一修订只读取一次、同一定义只返回一次。校正一条不能将其他未校正候选追认为当前定义。只要该问题仍混有未适配定义的候选，整组保留待核对，不能写入可采用目录；全部明确校正一致后才恢复候选采用入口，仍不自动采用。
+
+候选展示及校正复用既有取值展示／字段输入组件，并由同版图谱目录提供标签、选项及子字段；布尔值使用可读答案，结构化清单按有名称的列呈现和编辑，不要求正常用户编写JSON。缺少字段定义或原值格式不合法时保留原内容并明确提示，不能猜测字段或丢失候选。展示、校正不改变事实采用权限。
+
+<!-- drafting-result-usability-20261023:end -->
+
+<!-- drafting-automation80-20261022:start -->
+**2026-10-22 用户纠偏：第一步“文件识别”，第二步“变量识别与图谱”。** 第一阶段识别文件身份、内容、结构与实际布局状态；普通 DOCX 上传尚未接通的转 PDF／视觉核对／页码映射仍按[生产缺口](../testing/docx-upload-production-gap-20261022.md)保留，不得把原生解析完成说成布局确认。第二阶段一次启动整套模板的要求识别、变量归纳与原子候选拆解、跨项关系检查，保存待人工核对的图谱。不得用“每次识别1项”、创建草稿、重建版本等内部控制替代自动推进，也不收进高级操作。
+
+**模板专用路由必须复用：** `DraftingService.parseTemplateUpload → DocumentParser.parseTemplate → OerTemplateEvidence.analyse` 在文件识别阶段产出 guidanceNotes、markerCandidates、groups、conditions 与原生字段候选，绑定原件及分析修订；指导说明捕获、修改标记定位及其控制范围是 OER 的职责。第二阶段遍历这些已存观察及其范围／条件闭包，LLM仅解释业务要求、归纳变量、拆解原子候选及检查跨项关系，不再发现指导说明、重判标记或猜测编辑范围。范围完整性由OER及原生编辑校验决定，模型不能补真。所需上下文按既有公共读取与来源范围能力取得；完整原生XML、段落属性及重复正文不进入模型请求。
+
+第二阶段采用既有 Spring／JPA 后台任务、现有模型入口与 OER 已存模板观察。完整sourceMembers仅用于来源覆盖与未定项审计，不能把每段原文无差别送LLM冒充全面识别。每项保存有界增量receipt，最终仅发布一份DRAFT图谱，不逐项保存全图历史；复用现有观察选择及闭包装配，不另造parser或截字chunker。一次来源准备只读一套来源投影；派发守卫查标量身份，最终发布重新核实原件和分析绑定。
+
+阶段提示必须来自实际后台状态：准备来源、建立计划、识别要求与变量并拆解原子候选、检查跨项关系、保存图谱、提取项目资料取值候选、待人工核对。原子识别与要求归集若在同一请求内执行，不虚构两个先后完成事件。显示当前文件、实际完成／总项数、失败和未决数量；刷新只读取并恢复原任务，不再启动调用。
+
+自动识别保留精确引文及要求到节点映射。跨项的同一事实、依赖、冲突、未定关系先保存为关系候选，不按同名或相似条号自动合并，不自动成为执行边。生成结果、源扫描覆盖、语义质量、视觉布局核验分别报告；人工核对、修改、采用及项目身份确认守卫保持。局部 JSON、模型、关系或预算问题保留完整可用结果；来源或 head 冲突不得覆盖新人工结果。
+
+任务绑定项目、模板清单、原分析修订、基础 head、点击时模型配置。单 worker、有限队列、每阶段最多512项、累计最多768次模型调用、6小时期限；达到边界留未执行项。每次派发前写入 IN_FLIGHT；重启标 UNKNOWN，并允许显式继续未发送事项，不重放已发送未知或失败调用。已有图谱保存后重启仅标部分完成，不自动重做候选提取。取消在调用边界生效；已完成的图谱与安全候选可供核对。
+
+本批是自动候选识别及持久编排接线，不宣称全部模板语义完整、逐主变量独立语义调查、关系自动采用或 DOCX 视觉生产链已完成。实现与实际验证见[自动化接线记录](../testing/drafting-automatic-graph-20261022.md)。Goal工具保持 paused，按用户后续热修授权执行。
+<!-- drafting-automation80-20261022:end -->
+
 <!-- three-module-new-requirements-20261020:start -->
 **2026-10-20 用户追加要求，已纳入本Goal且尚未验收：** DF01固定顶级项目名称／合约编号，识别后经产品用户确认替换项目显示并贯穿整个包；DF02按项目2b NTT／SCT／SCC原件核对并更新预览／生成页眉页脚身份；DF03逐页检查版式与页码；PR01核对Vetting／Advisory实际使用最新system提示词；VT01结构化报告与赛方对应文件核对栏目及版式；VT02审查整包项目名称／合约编号一致性，区分自身身份与合法外部引用。需求、验收案例、状态及证据按ID记录在[新增能力验收记录](../testing/three-module-e2e-followups-20261020.md)。临时项目名不能直接作身份真值，识别不得静默改项目；原件与当前run保持，不追认已覆盖。
 <!-- three-module-new-requirements-20261020:end -->
@@ -247,3 +360,21 @@ The same rule applies when the existing MiniMax/OpenAI adapter reports `finish_r
 BS trade scope is independent of the NSC/BSSSC designation method. Fire services, lift and other BS subcontract categories must remain visible, selectable and saveable under both methods, including while designation is unknown. Switching the designation must preserve the selected trade scope. Do not infer the actual selected categories from designation, and do not treat a list as company names. This rule does not authorize converting a BSSSC-specific source clause into an NSC clause or borrowing another edition: exact source binding, applicable edition and edit-scope checks remain necessary.
 
 08:00 on 2026-10-20 is a progress acceptance checkpoint. Record missing user decisions, unavailable services, failed requests and unexecuted coverage, then continue independent tests and repairs. Code/contract, real MiniMax, original-source fidelity, browser workflow and document output checks remain separate. Current test evidence and actual requests are retained under the ignored `.local/e2e-20261020/drafting/` directory.
+
+
+## 2026-10-23 original-page location authority
+
+Original DOCX review must reuse the shared source paragraph bookmark and LibreOffice PDF named-destination pipeline. Only nonprinting markers may be inserted into a disposable original-review working copy; generated-document layout changes must not be applied. Original downloads preserve the exact uploaded bytes. Preview assets and location bindings must derive from the same deterministic working bytes and render profile. Source ID, original SHA and the actual displayed PDF SHA must agree before coordinates can be used.
+
+Resolve all current native spans or source-observation ranges, excluding empty text members from navigable passages. Keep each distinct source paragraph as a separate location, including repeated identical wording; provide passage navigation and physical pages. A bookmark point authorizes navigation only. Shared PDF text-layer measurements may refine highlighting, while exact native UTF-16 span checks continue to govern editing. Missing, partial, stale or mismatched geometry must not prevent reading or authorize an edit. Asset endpoints must read narrow metadata rather than full source archives. This contract does not certify guidance semantics, existing graph correctness, headers/footers, native PDFs or scans. Current scoped verification and preserved failures are recorded in the 2026-10-23 usability report, round299—315.
+
+
+## 2026-10-23 shared LibreOffice rendering correction
+
+All DOCX-to-PDF consumers, including original/template/generated previews, Vetting reports and OER Word print-to-PDF visual parsing, must reuse DraftPdfConverter and its guarded DocxTemplateEditor Latin-hint compatibility policy. Do not create separate module-specific soffice commands or font replacement code. Preserve exact uploaded/saved DOCX bytes and OOXML evidence. Identify the temporary renderer copy separately in provenance; only eligible Latin formatting hints may change, never text, fonts, sizes, tables or business decisions. Version the render profile so stale PDFs cannot be reused. Current non-PDF Advisory text reading is not converted merely by this rule.
+
+Original review also reuses exact-source-hash registered pagination controls from the existing native layout registry; unknown editions do not inherit them. This supersedes the earlier claim that every preview working copy adds only nonprinting markers. No generated project-identity stories or contract edits are authorized for originals. Validate actual source text, PDF pages and visible layout separately from bookmark existence. Unbound manual page selections remain reviewable as pending targets; an explicit choice of a source paragraph may bind its complete range, while automatic editing still requires exact native validation. Consecutive component updates must not delete dirty snapshots while a replacement instance is loading.
+
+Empty source paragraphs can carry layout meaning through explicit or inherited line height, before/after spacing, cell position and page flow. Empty text is not permission to compress or remove a paragraph. Shared rendering must preserve these properties unless a compatibility correction is registered and verified against the exact original SHA and native anchors. Do not apply a universal empty-paragraph compaction policy, and do not universally remove existing compatibility controls to reverse one document's defect. Evaluate each proposed change with bounded same-source differential PDFs, checking the affected guidance/body relationship, physical page count and blank pages, source text and locations, tables and visible footer placement. Preserve original bytes, rejected variants and any remaining layout discrepancy; matching text or complete bookmark destinations alone do not establish layout fidelity.
+
+The 2026-10-23 NTT correction removes only that exact source's 174 empty-spacing compactions while retaining its other registered controls; it remains 11 pages with all 178 nonblank paragraphs text-matched and located. The residual 16.05pt guidance/body start offset and varying body-footer baselines remain open. The adjacent SCT differential demonstrates why this cannot be generalized: removing all 313 SCT compactions changes 27 pages to 31 and creates four blank physical pages, despite retaining all 469 nonblank locations and the same text. Keep the SCT production registration unchanged until a narrower exact-source correction has passed its own evidence checks. Reuse this rule through the same DraftPdfConverter/native-layout path for every DOCX PDF consumer, including OER Word print-to-PDF; it does not add an alternative renderer or authorize document edits. Current evidence and deployment/browser boundaries are recorded in the 2026-10-23 usability report, round354—362.

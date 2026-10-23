@@ -50,6 +50,7 @@ class OerBusinessEvidenceTest {
             when(registry.pointers(eq("project"),eq(42L),anyString(),eq("vetting"))).thenAnswer(call->pointers());
             when(client.retrieve(anyString(),eq("vetting"),anyString(),nullable(String.class),anyList())).thenAnswer(call->response.deepCopy());
             when(client.sourceUnitPolicy(anyString(),anyString(),anyList())).thenReturn(VettingRetrievalSourceUnits.POLICY);
+            when(client.readSources(anyString(),any(JsonNode.class),anyList())).thenAnswer(call->authoredSourceRead(call.getArgument(2),call.getArgument(1),VettingRetrievalSourceUnits.POLICY));
             service=new OerBusinessEvidence(registry,client,config);
         }
         void store(){binding.setSnapshotJson(JsonUtils.write(snapshot));binding.setSnapshotBytesSha256(VettingCorpus.hash(binding.getSnapshotJson()));}
@@ -67,6 +68,48 @@ class OerBusinessEvidenceTest {
             p.setTableGroup(c.get("tableGroup"));p.setAssetRefs(c.path("assetRefs").deepCopy());p.setRelations(c.path("relations").deepCopy());
             p.setAdoption(c.path("adoption").deepCopy());p.setSourceQuality(c.path("sourceQuality").deepCopy());p.setUnknowns(snapshot.path("unknowns").deepCopy());result.add(p);
         }return result;}
+    }
+
+    /** Explicit remote-client double; actual source-read transport contracts are tested separately. */
+    static JsonNode authoredSourceRead(List<CanonicalSourceBinding> bindings,JsonNode demand,String policy){
+        if(!VettingRetrievalSourceUnits.supportsPolicy(policy))throw new IllegalStateException("Authored OER source-read capability unavailable");
+        Map<String,JsonNode> parents=new LinkedHashMap<>();for(CanonicalSourceBinding binding:bindings)for(JsonNode parent:JsonUtils.parse(binding.getSnapshotJson()).path("chunks"))parents.put(parent.path("id").asText(),parent);
+        ObjectNode result=JsonUtils.mapper().createObjectNode();result.put("sourceUnitPolicy",policy);result.putArray("origins");result.putArray("units");
+        for(JsonNode origin:demand.path("originIds")){JsonNode parent=parents.get(origin.asText());assertNotNull(parent,"Requested authored origin must be in the selected source snapshot");
+            ((com.fasterxml.jackson.databind.node.ArrayNode)result.path("origins")).add(parent.deepCopy());
+            JsonNode unit=VettingRetrievalSourceUnits.attachmentPolicy(policy)?OerCanonicalSourceUnits.resolveAttached(parents,parent,VettingRetrievalSourceUnits.SHARED_NOTE_POLICY.equals(policy))
+                    :VettingRetrievalSourceUnits.TYPED_PARENT_POLICY.equals(policy)?OerCanonicalSourceUnits.resolve(parents,parent):OerCanonicalSourceUnits.resolveObserved(parents,parent);
+            ((com.fasterxml.jackson.databind.node.ArrayNode)result.path("units")).add(unit);
+        }return result;
+    }
+
+    @Test void explicitContextUsesRemoteUnknownsAndNeverFallsBackToLocalClosure()throws Exception{
+        Wire w=new Wire();OerBusinessEvidence.Session session=w.load();String id=session.chunks().get(0).getId();
+        when(w.client.readSources(anyString(),any(JsonNode.class),anyList())).thenAnswer(call->{ObjectNode result=(ObjectNode)authoredSourceRead(call.getArgument(2),call.getArgument(1),VettingRetrievalSourceUnits.POLICY);
+            ((ObjectNode)result.path("units").get(0)).put("status","unknown").put("reason","remote_authority_unknown");return result;});
+        VectorStore.SearchHit hit=w.service.sourceHits(session,Collections.singletonList(id)).get(0);
+        JsonNode unit=JsonUtils.mapper().valueToTree(hit.getPayload().get("canonicalSourceUnit"));assertEquals("unknown",unit.path("status").asText());assertEquals("remote_authority_unknown",unit.path("reason").asText());assertEquals(0d,hit.getScore());assertEquals("unranked_context",hit.getPayload().get("scoreKind"));
+        verify(w.client).readSources(eq("vetting"),argThat(d->"ids".equals(d.path("operation").asText())&&d.path("originIds").get(0).asText().equals(id)),anyList());verify(w.client,never()).sourceUnitPolicy(anyString(),anyString(),anyList());
+        when(w.client.readSources(anyString(),any(JsonNode.class),anyList())).thenThrow(new IllegalStateException("authored source read unavailable"));
+        assertEquals("authored source read unavailable",assertThrows(IllegalStateException.class,()->w.service.sourceHits(session,Collections.singletonList(id))).getMessage());
+    }
+    @Test void explicitContextRejectsRemoteOriginReorderingWithoutLocalFallback()throws Exception{
+        Wire w=new Wire();OerBusinessEvidence.Session session=w.load();List<String> requested=session.chunks().stream().limit(2).map(Chunk::getId).collect(Collectors.toList());
+        when(w.client.readSources(anyString(),any(JsonNode.class),anyList())).thenAnswer(call->{ObjectNode result=(ObjectNode)authoredSourceRead(call.getArgument(2),call.getArgument(1),VettingRetrievalSourceUnits.POLICY);
+            com.fasterxml.jackson.databind.node.ArrayNode origins=(com.fasterxml.jackson.databind.node.ArrayNode)result.path("origins");JsonNode first=origins.get(0);origins.set(0,origins.get(1));origins.set(1,first);return result;});
+        assertTrue(assertThrows(IllegalStateException.class,()->w.service.sourceHits(session,requested)).getMessage().contains("reordered"));verify(w.client).readSources(eq("vetting"),any(JsonNode.class),anyList());verify(w.client,never()).sourceUnitPolicy(anyString(),anyString(),anyList());
+    }
+    @Test void explicitContextBatchesAt256AndDeduplicatesRemoteUnitIdsAcrossBatches()throws Exception{
+        Wire w=new Wire();Chunk original=w.load().chunks().get(0);Map<String,Chunk> views=new LinkedHashMap<>();
+        for(int i=0;i<257;i++){Chunk copy=JsonUtils.read(JsonUtils.write(original),Chunk.class);String id="authored-batch-"+i;copy.setId(id);((ObjectNode)copy.getCanonicalPayload()).put("id",id);copy.getCanonicalEvidence().setCanonicalChunkId(id);views.put(id,copy);}
+        java.lang.reflect.Constructor<OerBusinessEvidence.Session> constructor=OerBusinessEvidence.Session.class.getDeclaredConstructor(String.class,String.class,List.class,List.class,Map.class,Map.class);constructor.setAccessible(true);
+        OerBusinessEvidence.Session session=constructor.newInstance("project","vetting",Collections.singletonList(42L),Collections.singletonList(w.binding),views,Collections.emptyMap());List<String> requested=new ArrayList<>(views.keySet());List<Integer> batches=new ArrayList<>();List<String> actualOrder=new ArrayList<>();
+        when(w.client.readSources(anyString(),any(JsonNode.class),anyList())).thenAnswer(call->{JsonNode demand=call.getArgument(1);batches.add(demand.path("maxItems").asInt());ObjectNode result=JsonUtils.mapper().createObjectNode();result.put("sourceUnitPolicy",VettingRetrievalSourceUnits.POLICY);result.putArray("origins");result.putArray("units");
+            for(JsonNode raw:demand.path("originIds")){String id=raw.asText();actualOrder.add(id);((com.fasterxml.jackson.databind.node.ArrayNode)result.path("origins")).add(views.get(id).getCanonicalPayload());
+                String unitId=id.equals(requested.get(0))||id.equals(requested.get(256))?"authored-shared-unit":id;
+                ((com.fasterxml.jackson.databind.node.ArrayNode)result.path("units")).addObject().put("unitId",unitId).put("status","unknown").put("qualifiersComplete","unknown");}return result;});
+        List<VectorStore.SearchHit> result=w.service.sourceHits(session,requested);assertEquals(Arrays.asList(256,1),batches);assertEquals(requested,actualOrder);assertEquals(256,result.size());assertEquals(requested.subList(0,256),result.stream().map(VectorStore.SearchHit::getId).collect(Collectors.toList()));
+        for(VectorStore.SearchHit hit:result){assertEquals(0d,hit.getScore());assertEquals("unranked_context",hit.getPayload().get("scoreKind"));}verify(w.client,times(2)).readSources(eq("vetting"),any(JsonNode.class),anyList());verify(w.client,never()).sourceUnitPolicy(anyString(),anyString(),anyList());
     }
 
     @Test void collectionRootLoadsAllActualBatchParentsAndKeepsRootAddressThroughBusinessSession() throws Exception {
@@ -163,7 +206,7 @@ class OerBusinessEvidenceTest {
         assertEquals(identity,((EvidencePointer)pointers.get(0)).getSourceRenderEvidenceIdentitySha256());
         assertEquals(pinned.chunks().get(0).getCanonicalEvidence().getUnknowns(),((EvidencePointer)pointers.get(0)).getUnknowns());
         w.config.getSourcePageRenderEvidenceIdentities().put(w.binding.getProjectionSha256(),VettingCorpus.hash("new reviewed composite"));
-        assertThrows(IllegalStateException.class,()->w.service.assertCurrent(pinned));verify(w.client).sourceUnitPolicy(anyString(),anyString(),anyList());verifyNoMoreInteractions(w.client);
+        assertThrows(IllegalStateException.class,()->w.service.assertCurrent(pinned));verify(w.client).readSources(eq("vetting"),any(JsonNode.class),anyList());verifyNoMoreInteractions(w.client);
     }
 
     @Test void disabledWrongProjectDuplicateOrMissingSelectedBindingRejects() throws Exception {
@@ -184,6 +227,18 @@ class OerBusinessEvidenceTest {
             when(w.registry.currentBindings(anyString(),anyString(),anyList())).thenReturn(Collections.singletonList(restored));
             assertThrows(IllegalStateException.class,()->w.service.index(session));
         }
+    }
+
+    @Test void mutationSealsRetainOnlyTheExactSerializedViewFingerprint() throws Exception {
+        Wire wire=new Wire();OerBusinessEvidence.Session session=wire.load();
+        Map<?,?> seals=(Map<?,?>)ReflectionTestUtils.getField(session,"viewPayloads");
+        assertNotNull(seals);assertEquals(session.chunkCount(),seals.size());
+        for(Chunk view:session.chunks()){
+            String seal=(String)seals.get(view.getId());
+            assertEquals(64,seal.length(),"Do not retain another complete JSON copy just to detect mutations");
+            assertEquals(com.consense.common.Utf8.sha256(JsonUtils.write(view)),seal);
+        }
+        assertDoesNotThrow(()->wire.service.index(session));
     }
 
     @Test void synchronizedPayloadViewOrAssetMutationCannotReachInference() throws Exception {

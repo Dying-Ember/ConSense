@@ -74,9 +74,12 @@ class CanonicalEvidenceServiceTest {
         when(documents.findCatalogMetadataByProjectId("project-a")).thenAnswer(invocation->CatalogMetadataFixtures.from(catalog));
         when(bindings.findByProjectIdAndDocumentIdAndProjectionSha256(anyString(),anyLong(),anyString())).thenAnswer(invocation->saved.stream()
                 .filter(b->b.getProjectId().equals(invocation.getArgument(0))&&b.getDocumentId().equals(invocation.getArgument(1))&&b.getProjectionSha256().equals(invocation.getArgument(2))).findFirst());
-        when(bindings.findByProjectIdAndDocumentIdOrderByIdDesc(anyString(),anyLong())).thenAnswer(invocation->{List<CanonicalSourceBinding> rows=new ArrayList<>();
+        when(bindings.findByProjectIdAndDocumentIdOrderByIdDesc(anyString(),anyLong(),any(org.springframework.data.domain.Pageable.class))).thenAnswer(invocation->{List<CanonicalSourceBinding> rows=new ArrayList<>();
             for(CanonicalSourceBinding b:saved)if(b.getProjectId().equals(invocation.getArgument(0))&&b.getDocumentId().equals(invocation.getArgument(1)))rows.add(b);
-            Collections.reverse(rows);return rows;});
+            Collections.reverse(rows);return rows.isEmpty()?rows:Collections.singletonList(rows.get(0));});
+        when(bindings.findByProjectIdAndDocumentIdAndIdLessThanOrderByIdDesc(anyString(),anyLong(),anyLong(),any(org.springframework.data.domain.Pageable.class))).thenAnswer(invocation->saved.stream()
+                .filter(b->b.getProjectId().equals(invocation.getArgument(0))&&b.getDocumentId().equals(invocation.getArgument(1))&&b.getId()<(Long)invocation.getArgument(2))
+                .sorted(Comparator.comparing(CanonicalSourceBinding::getId).reversed()).limit(1).collect(java.util.stream.Collectors.toList()));
         when(bindings.saveAndFlush(any(CanonicalSourceBinding.class))).thenAnswer(invocation->{CanonicalSourceBinding row=invocation.getArgument(0);row.setId((long)saved.size()+1);saved.add(row);return row;});
         for(JsonNode ref:fixture.path("assetRefs"))images.put(ref.path("assetId").asText(),resource("page"+ref.path("physicalPages").get(0).asInt()+".png"));
         server=HttpServer.create(new InetSocketAddress("127.0.0.1",0),0);
@@ -197,7 +200,7 @@ class CanonicalEvidenceServiceTest {
         register("vetting");assertEquals(address(),service.currentBindings("project-a","advisory",Collections.singletonList(11L)).get(0).getProjectionSha256());
         assertReason("CANONICAL_SELECTED_DOCUMENT_UNREGISTERED",()->service.currentBindings("project-a","vetting",Arrays.asList(11L,12L)));
         assertReason("CANONICAL_SELECTED_DOCUMENTS_INVALID",()->service.currentBindings("project-a","vetting",Arrays.asList(11L,11L)));
-        CanonicalSourceBinding newer=new CanonicalSourceBinding();newer.setProjectId("project-a");newer.setDocumentId(11L);newer.setProjectionSha256(repeat('a'));saved.add(newer);
+        CanonicalSourceBinding newer=new CanonicalSourceBinding();newer.setId((long)saved.size()+1);newer.setProjectId("project-a");newer.setDocumentId(11L);newer.setProjectionSha256(repeat('a'));saved.add(newer);
         assertThrows(CanonicalEvidenceException.class,()->service.currentBindings("project-a","vetting",Collections.singletonList(11L)));
     }
     @Test void stored_json_tampering_and_source_unavailability_fail_closed() {

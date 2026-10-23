@@ -35,12 +35,13 @@ class DraftTemplateGraphServiceTest {
     static final String DB=UUID.randomUUID().toString();
     @DynamicPropertySource static void resources(DynamicPropertyRegistry registry){registry.add("spring.datasource.url",()->"jdbc:h2:mem:graph_"+DB+";MODE=MySQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE");registry.add("consense.storage-root",()->Paths.get("target","graph-service-synthetic",DB).toAbsolutePath().toString());}
     @Autowired DraftTemplateGraphService service;
+    @Autowired DocumentParser documentParser;
     @Autowired ProjectRepository projects;
     @Autowired SourceDocumentRepository sources;
-    @Autowired DraftVariableRepository values;
+    @SpyBean DraftVariableRepository values;
     @Autowired DraftTemplateGraphRevisionRepository revisions;
     @Autowired DraftTemplateGraphHeadRepository graphHeads;
-    @Autowired DraftExtractionRunRepository runs;
+    @SpyBean DraftExtractionRunRepository runs;
     @Autowired StorageService storage;
     @Autowired org.springframework.transaction.PlatformTransactionManager transactions;
     @Autowired com.consense.config.ConsenseProperties settings;
@@ -61,6 +62,45 @@ class DraftTemplateGraphServiceTest {
     String response(String value,String quote){return JsonUtils.write(Collections.singletonList(map("key","duration","value",Integer.valueOf(value),"sourceQuote",quote,"reason","Synthetic source statement","confidence",0.99)));}
     Map<String,Object> manyFields(SourceDocument template,int count){Map<String,Object> graph=graph(template,"confirmed","number"),state=(Map<String,Object>)graph.get("graph");List<Object> fields=new ArrayList<>();for(int n=0;n<count;n++){Map<String,Object> field=JsonUtils.readMap(JsonUtils.write(DraftReviewGraph.nodes(graph).get(0)));field.put("id",n==0?"duration":"duration-"+n);field.put("nameEn","Test-only duration "+n);field.put("nameZh","测试工期 "+n);fields.add(field);}state.put("variables",fields);return graph;}
     String confirmMany(String project,SourceDocument template,int count){Map<String,Object> draft=service.save(project,manyFields(template,count),null);return String.valueOf(service.confirm(project,String.valueOf(draft.get("id")),null).get("id"));}
+
+    @Test void currentDraftCanHoldAdoptedAnswersWithoutConfirmingItsRulesOrReplacingConfirmedHistory()throws Exception {
+        String project=project();SourceDocument template=template(project);
+        String draft=String.valueOf(service.save(project,graph(template,"pending","number"),null).get("id"));
+        assertEquals(draft,service.catalog(project).get("graphRevisionId"));assertEquals("DRAFT",service.catalog(project).get("reviewStatus"));
+        VariableVO field=service.variables(project).stream().filter(v->"duration".equals(v.getKey())).findFirst().get();
+        service.updateVariable(project,"duration",patch(field,"value","42","note","Explicit synthetic test adoption"));
+        Map<String,Object> pending=service.plan(project,null);assertFalse(DraftReviewGraph.map(pending.get("effectiveValues")).containsKey("duration"));
+        assertTrue(DraftReviewGraph.list(pending.get("unresolved")).stream().anyMatch(x->"NodeReviewRequired".equals(DraftReviewGraph.map(x).get("kind"))));
+        assertNull(graphHeads.findById(project).get().getCurrentRevisionId());assertEquals("pending",DraftReviewGraph.nodes(JsonUtils.readMap(revisions.findById(draft).get().getGraphJson())).get(0).get("status"));
+        String reviewedDraft=String.valueOf(service.save(project,graph(template,"confirmed","number"),null,draft,true).get("id"));
+        assertEquals(reviewedDraft,service.catalog(project).get("graphRevisionId"));assertTrue(service.plan(project,null).get("effectiveValues").toString().contains("42"));
+        assertThrows(BizException.class,()->service.updateVariable(project,"duration",patch(field,"value","43","note","Stale revision")));
+        String confirmed=String.valueOf(service.confirm(project,reviewedDraft,null).get("id"));assertEquals(confirmed,service.catalog(project).get("graphRevisionId"));assertEquals("CONFIRMED",service.catalog(project).get("reviewStatus"));
+        String changed=String.valueOf(service.save(project,graph(template,"pending","number"),confirmed).get("id"));
+        assertEquals(changed,service.catalog(project).get("graphRevisionId"));assertEquals(confirmed,graphHeads.findById(project).get().getCurrentRevisionId());
+        assertTrue(service.variables(project).stream().filter(v->"duration".equals(v.getKey())).findFirst().get().isConfirmed());
+        assertFalse(DraftReviewGraph.map(service.plan(project,null).get("effectiveValues")).containsKey("duration"));verify(ai,never()).complete(anyString(),anyString());
+    }
+
+    @Test void automaticPreparationUsesSavedSourceAndPublishesOneSourceBoundDraft()throws Exception {
+        String project=project();String instruction="(Delete if precast facade is not applicable)";SourceDocument template;
+        try(XWPFDocument word=new XWPFDocument();ByteArrayOutputStream bytes=new ByteArrayOutputStream()){word.createParagraph().createRun().setText("NTT1 Precast facade");word.createParagraph().createRun().setText(instruction);word.write(bytes);template=source(project,"STANDARD_TEMPLATE","NTT","NTT synthetic.docx",bytes.toByteArray(),"NTT1 Precast facade\n"+instruction);}
+        DocumentParser.ParsedDocument parsed=documentParser.parseTemplate("NTT",template.getFileName(),storage.read(template.getStoragePath()));template.setStructuredContentJson(JsonUtils.write(parsed.getBlocks()));template.setParseCoverageJson(JsonUtils.write(parsed.getCoverage()));sources.saveAndFlush(template);List<JsonNode> readings=new ArrayList<>();
+        Map<String,Object> base=service.automationInput(project,null,null,readings);assertEquals(1,readings.size());assertEquals("bound",readings.get(0).path("evidenceStatus").asText());
+        DraftAutomaticDiscovery.Plan plan=DraftAutomaticDiscovery.plan(readings);assertFalse(plan.tasks().isEmpty());when(ai.complete(anyString(),anyString())).thenReturn("{\"requirements\":[],\"nodes\":[]}");
+        List<Map<String,Object>> receipts=new ArrayList<>();for(Map<String,Object> task:plan.tasks())receipts.add(DraftAutomaticDiscovery.process(ai,plan,task));
+        Map<String,Object> saved=service.save(project,DraftAutomaticDiscovery.finish(base,plan,receipts),null,null,true);
+        assertNotNull(saved.get("id"));assertEquals(1,revisions.findByProjectIdOrderByCreatedAtDesc(project).size());assertNull(graphHeads.findById(project).get().getCurrentRevisionId());
+        assertEquals("completed",JsonUtils.mapper().valueToTree(saved).path("graph").path("graph").path("automaticDiscovery").path("scanStatus").asText());
+    }
+
+    @Test void stoppingCandidateExtractionRetainsEarlierSourceCheckedCandidatesWithoutAdoption()throws Exception {
+        String project=project();SourceDocument template=template(project);correspondence(project,"The duration is 42 months.");correspondence(project,"The alternative duration is 43 months.");
+        String draft=String.valueOf(service.save(project,graph(template,"pending","number"),null).get("id"));when(ai.complete(anyString(),anyString())).thenReturn(response("42","The duration is 42 months."));
+        java.util.concurrent.atomic.AtomicInteger calls=new java.util.concurrent.atomic.AtomicInteger();service.extract(project,draft,new DraftTemplateGraphService.ExtractionMonitor(){public boolean beforeCall(String system,String user,String file){return calls.incrementAndGet()==1;}});
+        JsonNode candidates=JsonUtils.mapper().valueToTree(service.candidates(project,draft));assertEquals("42",candidates.path("variables").get(0).path("candidates").get(0).path("value").asText());
+        assertEquals("partial",JsonUtils.parse(runs.findFirstByProjectIdOrderByFinishedAtDescIdDesc(project).get().getTraceJson()).path("status").asText());assertFalse(values.findByProjectIdAndVarKey(project,"duration").isPresent());verify(ai,times(1)).complete(anyString(),anyString());
+    }
 
     @Test void readingManyVariablesVerifiesTheirSharedSourceOncePerRequest()throws Exception {
         String project=project();SourceDocument template=template(project);confirmMany(project,template,24);VariableVO first=variable(project);service.updateVariable(project,"duration",patch(first,"value","42","note","Test-only adopted value remains unchanged by reads"));
@@ -149,6 +189,13 @@ class DraftTemplateGraphServiceTest {
         assertThrows(BizException.class,()->service.save(project,proposed,null));assertEquals(current,service.current(project).get("currentRevisionId"));
         assertThrows(BizException.class,()->service.revision(project(),current));verifyNoInteractions(ai);
     }
+    @Test void consecutiveProviderFailuresStopExtractionWithoutDiscardingTheUsableCandidate() throws Exception {
+        String project=project();SourceDocument template=template(project);for(int i=0;i<6;i++)correspondence(project,"The duration is 42 months. Source "+i);
+        when(ai.complete(anyString(),anyString())).thenReturn(response("42","The duration is 42 months.")).thenThrow(new IllegalStateException("synthetic timeout"));
+        String draft=String.valueOf(service.save(project,graph(template,"pending","number"),null).get("id"));List<VariableVO> proposed=service.extract(project,draft);
+        verify(ai,times(4)).complete(anyString(),anyString());assertEquals("42",proposed.get(0).getValue());assertFalse(proposed.get(0).isConfirmed());
+        JsonNode trace=JsonUtils.parse(runs.findFirstByProjectIdOrderByFinishedAtDescIdDesc(project).orElseThrow().getTraceJson());assertEquals("partial",trace.path("status").asText());assertEquals(4,trace.path("parts").size());
+    }
     @Test void draftExtractionDoesNotAdoptOrOverwriteCurrentValuesAndSurvivesReviewConfirmation() throws Exception {
         String project=project();SourceDocument template=template(project);correspondence(project,"The duration is 42 months.");when(ai.complete(anyString(),anyString())).thenReturn(response("42","The duration is 42 months."));
         Map<String,Object> draft=service.save(project,graph(template,"pending","number"),null);List<VariableVO> identified=service.extract(project,String.valueOf(draft.get("id")));
@@ -165,6 +212,7 @@ class DraftTemplateGraphServiceTest {
         JsonNode trace=JsonUtils.parse(runs.findFirstByProjectIdOrderByFinishedAtDescIdDesc(project).orElseThrow().getTraceJson());assertEquals(invalid,trace.path("parts").get(0).path("attempts").get(0).path("rawResponse").asText());assertTrue(trace.path("decisions").get(0).path("codes").toString().contains("confidence_invalid"));
         List<VariableVO> numeric=service.extract(project,draft);assertEquals(1,numeric.get(0).getCandidates().size());assertEquals("42",numeric.get(0).getValue());assertFalse(numeric.get(0).isConfirmed());assertFalse(values.findByProjectIdAndVarKey(project,"duration").isPresent());
         verify(ai,times(2)).complete(argThat(prompt->prompt.contains("confidence must be a JSON number from 0 to 1")&&prompt.contains("boolean uses JSON true/false")&&prompt.contains("choice uses an exact options[].value")&&prompt.contains("do not infer a clause keep/delete decision only from a template rule")),anyString());
+        verify(ai,times(2)).complete(argThat(prompt->!prompt.contains("sourceAnchors")&&!prompt.contains("editTargets")&&prompt.length()<64000&&prompt.contains("Omit fields without a supported non-null answer")),anyString());
     }
 
     @Test void partialDraftExtractionRemainsEditableAndCanBeConfirmedThenExplicitlyAdopted() throws Exception {
@@ -293,7 +341,52 @@ class DraftTemplateGraphServiceTest {
         Map<String,Object> corrected=service.correctCandidate(project,draft,"duration",map("expectedRunId",before.get("runId"),"candidateIndex",0,"value","42","sourceQuote","The duration is 42 months."));
         assertNotEquals(before.get("runId"),corrected.get("runId"));assertTrue(runs.findById(String.valueOf(before.get("runId"))).isPresent());assertFalse(values.findByProjectIdAndVarKey(project,"duration").isPresent());
         assertThrows(BizException.class,()->service.correctCandidate(project,draft,"duration",map("expectedRunId",before.get("runId"),"candidateIndex",0,"value","41","sourceQuote","The duration is 42 months.")));
+        assertEquals("42",variable(project).getCandidates().get(0).getValue());
+        clearInvocations(runs,values,ai);
+        assertEquals("42",variable(project).getCandidates().get(0).getValue());
+        verify(runs,times(1)).findByProjectIdOrderByFinishedAtDescIdDesc(eq(project),argThat(page->page.isPaged()&&page.getPageSize()==1&&page.getPageNumber()==0));
+        verify(values,never()).save(any());verify(ai,never()).complete(anyString(),anyString());
         confirm(project,template,"number",null);VariableVO current=variable(project);assertEquals("42",current.getCandidates().get(0).getValue());assertFalse(current.isConfirmed());assertFalse(effective(project).containsKey("duration"));
+    }
+    @Test void changedActiveQuestionRetainsCandidateForExplicitReviewWithoutNewInference() throws Exception {
+        String project=project();SourceDocument template=template(project);correspondence(project,"The duration is 42 months.");when(ai.complete(anyString(),anyString())).thenReturn(response("42","The duration is 42 months."));
+        String first=String.valueOf(service.save(project,graph(template,"pending","number"),null).get("id"));service.extract(project,first);clearInvocations(ai);
+        String next=String.valueOf(service.save(project,graph(template,"pending","text"),null).get("id"));
+        JsonNode review=JsonUtils.mapper().valueToTree(service.candidates(project,next));
+        assertTrue(review.path("variables").get(0).path("candidates").isEmpty());
+        assertEquals("42",review.path("unassignedVariables").path(0).path("candidates").path(0).path("value").asText());
+        String hash=review.path("unassignedVariables").path(0).path("candidates").path(0).path("fieldDefinitionHash").asText();
+        assertEquals("number",review.path("candidateDefinitions").path(hash).path("kind").asText());
+        assertEquals("text",review.path("catalog").path("groups").path(0).path("fields").path(0).path("kind").asText());
+        assertTrue(review.path("unassignedVariables").path(0).path("reviewRequired").asBoolean());
+        assertFalse(values.findByProjectIdAndVarKey(project,"duration").isPresent());verifyNoInteractions(ai);
+    }
+    @Test void correctingOneCandidateDoesNotRebindOtherCandidatesToChangedDefinition() throws Exception {
+      for(boolean confirmFirst:Arrays.asList(false,true)) {
+        String project=project();SourceDocument template=template(project);correspondence(project,"The duration is 42 months.");correspondence(project,"The duration is 43 months.");
+        when(ai.complete(anyString(),anyString())).thenAnswer(call->((String)call.getArgument(1)).contains("43 months")?response("43","The duration is 43 months."):response("42","The duration is 42 months."));
+        String first=String.valueOf(service.save(project,graph(template,"pending","number"),null).get("id"));service.extract(project,first);clearInvocations(ai);
+        String next=String.valueOf(service.save(project,graph(template,confirmFirst?"confirmed":"pending","text"),null).get("id"));if(confirmFirst)next=String.valueOf(service.confirm(project,next,null).get("id"));Map<String,Object> before=service.candidates(project,next);JsonNode old=JsonUtils.mapper().valueToTree(before).path("unassignedVariables").path(0).path("candidates");assertEquals(2,old.size());
+        Map<String,Object> updated=service.correctCandidate(project,next,"duration",map("expectedRunId",before.get("runId"),"candidateIndex",0,"value",old.get(0).path("value").asText(),"sourceQuote",old.get(0).path("sourceQuote").asText()));
+        JsonNode after=JsonUtils.mapper().valueToTree(updated);assertTrue(after.path("variables").get(0).path("candidates").isEmpty());JsonNode retained=after.path("unassignedVariables").get(0).path("candidates");assertEquals(2,retained.size());
+        assertEquals(old.get(1),retained.get(0));assertEquals("number",after.path("candidateDefinitions").path(retained.get(0).path("fieldDefinitionHash").asText()).path("kind").asText());assertEquals("text",after.path("candidateDefinitions").path(retained.get(1).path("fieldDefinitionHash").asText()).path("kind").asText());
+        if(confirmFirst)assertTrue(variable(project).getCandidates().isEmpty());
+        JsonNode completed=JsonUtils.mapper().valueToTree(service.correctCandidate(project,next,"duration",map("expectedRunId",updated.get("runId"),"candidateIndex",0,"value",retained.get(0).path("value").asText(),"sourceQuote",retained.get(0).path("sourceQuote").asText())));
+        assertTrue(completed.path("unassignedVariables").isEmpty());assertEquals(2,completed.path("variables").get(0).path("candidates").size());
+        if(confirmFirst)assertFalse(variable(project).isConfirmed());verifyNoInteractions(ai);
+      }
+    }
+    @Test void retiredQuestionsRetainCandidatesForExplicitReassignmentWithoutNewInference() throws Exception {
+      for(boolean confirmFirst:Arrays.asList(false,true)) {
+        String project=project();SourceDocument template=template(project);correspondence(project,"The duration is 42 months.");when(ai.complete(anyString(),anyString())).thenReturn(response("42","The duration is 42 months."));
+        String first=String.valueOf(service.save(project,graph(template,"pending","number"),null).get("id"));service.extract(project,first);clearInvocations(ai);
+        Map<String,Object> changed=graph(template,"pending","number");List<Map<String,Object>> nodes=DraftReviewGraph.nodes(changed);Map<String,Object> retained=JsonUtils.readMap(JsonUtils.write(nodes.get(0)));retained.put("id","duration-current");nodes.get(0).put("status","excluded");nodes.get(0).put("replacedBy",Collections.singletonList("duration-current"));List<Object> all=new ArrayList<>(nodes);if(confirmFirst)retained.put("status","confirmed");all.add(retained);DraftReviewGraph.state(changed).put("variables",all);
+        String next=String.valueOf(service.save(project,changed,null).get("id"));if(confirmFirst)next=String.valueOf(service.confirm(project,next,null).get("id"));Map<String,Object> review=service.candidates(project,next);
+        JsonNode displayField=JsonUtils.mapper().valueToTree(review).path("catalog").path("groups").get(0).path("fields").get(0);assertEquals("duration-current",displayField.path("key").asText());assertEquals("number",displayField.path("kind").asText());assertFalse(displayField.path("label").isMissingNode());
+        JsonNode orphan=JsonUtils.mapper().valueToTree(review).path("unassignedVariables").get(0);assertEquals("duration",orphan.path("key").asText());assertEquals("42",orphan.path("candidates").get(0).path("value").asText());assertTrue(orphan.path("reviewRequired").asBoolean());
+        Map<String,Object> corrected=service.correctCandidate(project,next,"duration",map("expectedRunId",review.get("runId"),"candidateIndex",0,"targetKey","duration-current","value","42","sourceQuote","The duration is 42 months."));
+        JsonNode after=JsonUtils.mapper().valueToTree(corrected);assertTrue(after.path("unassignedVariables").isEmpty());assertEquals("42",after.path("variables").get(0).path("candidates").get(0).path("value").asText());if(confirmFirst){assertFalse(service.variables(project).stream().filter(value->"duration-current".equals(value.getKey())).findFirst().get().isConfirmed());}else assertFalse(values.findByProjectIdAndVarKey(project,"duration-current").isPresent());verifyNoInteractions(ai);
+      }
     }
     @Test void explicitTargetAmendmentsUseOnlyCurrentGraphTargetsAndRequireReviewAfterAnotherRevision() throws Exception {
         String project=project();SourceDocument template=template(project);Map<String,Object> graph=graph(template,"confirmed","number");

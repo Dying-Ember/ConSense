@@ -17,6 +17,22 @@ import java.util.*;
 final class DraftDocumentBindings {
     private DraftDocumentBindings() { }
 
+    static final class SourcePreview {
+        final byte[] docx;
+        final DocumentBindingsVO bindings;
+        SourcePreview(byte[] docx,DocumentBindingsVO bindings){this.docx=docx;this.bindings=bindings;}
+    }
+    /** Reuse exact-edition source pagination; no business edits or generated identity stories. */
+    static SourcePreview originalPreview(String sourceId,byte[] original) {
+        return originalPreview(sourceId,original,"libreoffice");
+    }
+    static SourcePreview originalPreview(String sourceId,byte[] original,String rendererKind) {
+        TemplateIndex index=new DocxTemplateEditor().inspect(original);
+        List<Map<String,Object>> rows=source(sourceId,index);
+        byte[] working=sourceWorkingCopy(original,rows,DraftNativeLayout.originalPreviewPlan(index,rendererKind));
+        return new SourcePreview(working,bundle(sourceId,"source",index.getSourceSha256(),null,DraftPdfConverter.sha256(working),rows));
+    }
+
     static List<Map<String,Object>> source(String fileKey,TemplateIndex index) {
         List<Map<String,Object>> rows=new ArrayList<>();
         for(Paragraph paragraph:index.getMainParagraphs())if(!paragraph.getCatalogText().trim().isEmpty()) {

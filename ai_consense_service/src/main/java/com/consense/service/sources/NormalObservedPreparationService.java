@@ -36,9 +36,9 @@ public class NormalObservedPreparationService {
     }
     public static void requireEvidence(SourceDocument source){
         require(ProjectDocumentScope.parseUsable(source)&&!JsonUtils.isBlankText(source.getStructuredContentJson())
-                &&JsonUtils.parse(source.getStructuredContentJson()).isArray()&&!JsonUtils.parse(source.getStructuredContentJson()).isEmpty()
-                &&!JsonUtils.isBlankText(source.getParseCoverageJson())&&JsonUtils.parse(source.getParseCoverageJson()).isObject()
-                &&!JsonUtils.parse(source.getParseCoverageJson()).isEmpty(),"NORMAL_OBSERVED_SOURCE_EVIDENCE_MISSING");
+                &&!JsonUtils.isBlankText(source.getParseCoverageJson()),"NORMAL_OBSERVED_SOURCE_EVIDENCE_MISSING");
+        JsonNode blocks=JsonUtils.parse(source.getStructuredContentJson()),coverage=JsonUtils.parse(source.getParseCoverageJson());
+        require(blocks.isArray()&&!blocks.isEmpty()&&coverage.isObject()&&!coverage.isEmpty(),"NORMAL_OBSERVED_SOURCE_EVIDENCE_MISSING");
     }
     public static boolean sameGeneration(SourceDocument a,SourceDocument b){
         return java.util.Objects.equals(a.getSourceSha256(),b.getSourceSha256())

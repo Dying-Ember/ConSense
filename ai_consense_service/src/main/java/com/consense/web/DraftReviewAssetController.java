@@ -1,6 +1,8 @@
 package com.consense.web;
 
 import com.consense.service.drafting.DraftingService;
+import com.consense.common.ApiResponse;
+import com.consense.web.dto.DraftingDtos.DocumentBindingsVO;
 import lombok.RequiredArgsConstructor;
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.http.*;
@@ -11,6 +13,10 @@ import org.springframework.web.bind.annotation.*;
 @RequestMapping("/api/drafting/{projectId}/graph/sources/{sourceId}")
 public class DraftReviewAssetController {
     private final DraftingService drafting;
+    @GetMapping("/bindings")
+    public ApiResponse<DocumentBindingsVO> bindings(@PathVariable String projectId,@PathVariable Long sourceId,@RequestParam String sourceSha256) {
+        return ApiResponse.ok(drafting.reviewSourceBindings(projectId,sourceId,sourceSha256));
+    }
     @GetMapping("/original")
     public ResponseEntity<ByteArrayResource> original(@PathVariable String projectId,@PathVariable Long sourceId,@RequestParam String sourceSha256) {
         return asset(drafting.reviewSource(projectId,sourceId,sourceSha256,false));

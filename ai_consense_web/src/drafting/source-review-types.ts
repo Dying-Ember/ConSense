@@ -1,10 +1,11 @@
+import type { DraftAutomaticCoverage, DraftAutomaticIssue, DraftAutomaticRelation, DraftAutomaticRequirement } from './automation-types'
 export type ReviewObject = Record<string, any>
 export interface ReviewSource extends ReviewObject {
   id: string; sourceDocumentId: number | string; docId: string; editionId: string
   fileKey: string | null; fileName: string; format: 'docx' | 'pdf' | 'unsupported'
   sourceSha256: string; sourceHash?: string; analysisRevision?: string | null; evidenceStatus?: 'bound' | 'invalid' | 'missing'; parseStatus: string; canEdit: boolean
 }
-export interface ReviewParagraph { id: string; ordinal: number; text: string; paragraphSha256: string; sourceSha256: string }
+export interface ReviewParagraph { id: string; ordinal: number; text: string; paragraphSha256: string; sourceSha256: string; sourcePosition?: ReviewObject }
 export interface ReviewReading extends ReviewSource {
   paragraphs: ReviewParagraph[]; sourceMembers: ReviewObject[]; guidanceNotes: ReviewObject[]
   markerCandidates: ReviewObject[]; groups: ReviewObject[]; conditions: ReviewObject[]; issues: ReviewObject[]; blocks: ReviewObject[]
@@ -16,7 +17,7 @@ export interface ReviewVariable extends ReviewObject {
   parentId?: string | null; docIds: string[]; options: ReviewObject[]; sourceAnchors: ReviewAnchor[]
   editTargets: ReviewObject[]; sourceUnitIds: string[]; relatedInputIds: string[]; relations: ReviewObject[]; targets: ReviewObject[]; evidence: ReviewObject[]
 }
-export interface ReviewState { variables: ReviewVariable[]; sourceReviews: Record<string, boolean>; events: ReviewObject[]; nextId: number; blank: boolean; guidanceMode: string; discoverySummary?: ReviewObject }
+export interface ReviewState { variables: ReviewVariable[]; sourceReviews: Record<string, boolean>; events: ReviewObject[]; nextId: number; blank: boolean; guidanceMode: string; discoverySummary?: ReviewObject; requirements?: DraftAutomaticRequirement[]; relationProposals?: DraftAutomaticRelation[]; automaticDiscoveryIssues?: DraftAutomaticIssue[]; automaticDiscovery?: DraftAutomaticCoverage }
 export interface ReviewGraph { kind: 'consense-template-graph-v1'; graph: ReviewState; sources: ReviewSource[]; selectedDocuments: Record<string, string> }
 export interface ReviewRevision { id: string; parentRevisionId: string | null; status: 'DRAFT' | 'CONFIRMED'; graphSha256: string; graph: ReviewGraph; createdAt: string; confirmedAt?: string | null; sourceStale: boolean }
 export type ReviewRevisionSummary = Omit<ReviewRevision, 'graph'>

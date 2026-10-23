@@ -29,7 +29,7 @@ async function harness({ confirmed = false } = {}) {
   }
   const workspace = vue.defineComponent({ props: ['document'], setup(props) { return () => vue.h('p', { 'data-test-stale': String(props.document?.stale) }) } })
   const loaded = loadVue(path.join(__dirname, '../src/views/DraftingView.vue'), { boundaries: {
-    '@/api': { ApiError, draftingApi: api, projectApi: { list: async () => { calls.push(['projects']); return copy(projects) } }, setLlmProfileResolver() {}, captureLlmSelection: () => ({ profileId: 'local' }) },
+    '@/api/source-locations': { reviewSourceBindings: async () => { throw Error('Source location transport not provided by this fixture') } }, '@/api': { ApiError, draftingApi: api, projectApi: { list: async () => { calls.push(['projects']); return copy(projects) } }, setLlmProfileResolver() {}, captureLlmSelection: () => ({ profileId: 'local' }) },
     pinia: piniaRuntime, 'vue-i18n': require('vue-i18n'), 'vue-router': routerRuntime,
     '@/components/DraftingDocumentWorkspace.vue': { default: workspace },
     'pdfjs-dist': { GlobalWorkerOptions: {}, getDocument() { throw Error('No PDF rendering belongs to this test') } }, 'pdfjs-dist/build/pdf.worker.min.mjs?url': { default: 'TEST-ONLY-WORKER' },

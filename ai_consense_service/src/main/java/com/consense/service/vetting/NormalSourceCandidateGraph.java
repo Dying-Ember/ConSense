@@ -15,12 +15,16 @@ import java.util.regex.*;
 /** Ordinary source observations never authorize accepted canonical adoption. */
 public final class NormalSourceCandidateGraph {
     public static final String SCHEMA="consense.canonical-candidate.v1";
-    public static final String VERSION="actual-normal-source-unit-whole-page-observations-v2";
+    public static final String LEGACY_VERSION="actual-normal-source-unit-whole-page-observations-v2";
+    public static final String VERSION="actual-normal-source-unit-whole-page-observations-v3";
+    private static final String PARAGRAPH_REF="$nativeParagraph";
+    private static final String SECTION_REF="$nativeSection";
     private static final Pattern ROW=Pattern.compile("^(.+)/table-row/(\\d+)$");
     private static final Pattern SOURCE_GLYPH=Pattern.compile("^[\\p{Z}\\s]*([-•])[\\p{Z}\\s]+");
     private static final Pattern SOURCE_BRANCH=Pattern.compile("(?i)^[\\p{Z}\\s]*(?:\\(|\\[)?[\\p{Z}\\s]*(alternative|option)(?=[\\p{Z}\\s(])[\\p{Z}\\s]*(?:\\(([a-z0-9]+)\\)|([a-z0-9]+))(?=[\\p{Z}\\s]|[-:.)]|$)");
     private NormalSourceCandidateGraph() { }
     public static void capture(SourceDocument source) { source.setNormalCandidateJson(JsonUtils.write(build(source))); }
+    public static boolean supportedVersion(String version){return VERSION.equals(version)||LEGACY_VERSION.equals(version);}
 
     public static JsonNode requireBound(SourceDocument source) {
         JsonNode graph=bound(source);
@@ -33,12 +37,86 @@ public final class NormalSourceCandidateGraph {
     static JsonNode bound(SourceDocument source) {
         if(JsonUtils.isBlankText(source.getNormalCandidateJson()))return null;
         JsonNode stored=JsonUtils.parse(source.getNormalCandidateJson());
-        // Compare the persisted JSON representation; small Word Long values reload as IntNode.
-        JsonNode current=JsonUtils.parse(JsonUtils.write(build(source)));
-        if(stored.equals(current))return current;
+        String version=stored.path("producerVersion").asText();
+        // Small Word Long values reload as IntNode; all other JSON types remain strict.
+        if(supportedVersion(version)&&sameJson(stored,build(source,version)))return stored;
         ObjectNode unknown=declarations();unknown.put("status","generation_binding_unknown");unknown.putArray("units");
         unknown.putArray("unknowns").add(unknown("source_generation","unknown","saved_candidate_differs_from_current_original_identity_structure_or_coverage"));
         return unknown;
+    }
+
+    private static boolean sameJson(JsonNode a,JsonNode b){
+        if(a==b)return true;if(a==null||b==null)return false;
+        if(a.isObject()&&b.isObject()){
+            if(a.size()!=b.size())return false;Iterator<Map.Entry<String,JsonNode>> fields=a.fields();
+            while(fields.hasNext()){Map.Entry<String,JsonNode> field=fields.next();if(!sameJson(field.getValue(),b.get(field.getKey())))return false;}return true;
+        }
+        if(a.isArray()&&b.isArray()){if(a.size()!=b.size())return false;for(int i=0;i<a.size();i++)if(!sameJson(a.get(i),b.get(i)))return false;return true;}
+        if((a.isInt()||a.isLong())&&(b.isInt()||b.isLong()))return a.longValue()==b.longValue();
+        return a.equals(b);
+    }
+
+    /** Resolve selected paragraph and section contexts; the complete graph stays compact in storage. */
+    public static JsonNode expandedParagraphContexts(JsonNode graph,JsonNode value){
+        if(!VERSION.equals(graph.path("producerVersion").asText()))return value.deepCopy();
+        return expandParagraphContexts(graph,value,new HashMap<>());
+    }
+    private static JsonNode expandParagraphContexts(JsonNode graph,JsonNode value,Map<String,Set<Integer>> validated){
+        if(value.isObject()){
+            if(value.has(PARAGRAPH_REF)||value.has(SECTION_REF))return nativeContextTarget(graph,value,validated).deepCopy();
+            ObjectNode out=object();value.fields().forEachRemaining(field->out.set(field.getKey(),expandParagraphContexts(graph,field.getValue(),validated)));return out;
+        }
+        if(value.isArray()){ArrayNode out=JsonUtils.mapper().createArrayNode();for(JsonNode item:value)out.add(expandParagraphContexts(graph,item,validated));return out;}
+        return value.deepCopy();
+    }
+    public static void validateParagraphReferences(JsonNode graph){
+        if(!VERSION.equals(graph.path("producerVersion").asText()))return;
+        Map<String,Set<Integer>> validated=new HashMap<>();
+        for(JsonNode unit:graph.path("units"))for(JsonNode part:unit.path("parts"))for(String key:Arrays.asList("nativeDocxParagraph","nativeDocxParagraphs","nativeDocxSection"))
+            validateParagraphValue(graph,part.path("readingContext").path(key),validated);
+        for(JsonNode member:graph.path("nativeDocxOutline").path("sourceClauseScopes").path("members"))validateParagraphValue(graph,member.path("paragraphProperties"),validated);
+    }
+    private static void validateParagraphValue(JsonNode graph,JsonNode value,Map<String,Set<Integer>> validated){
+        if(value.isObject()&&(value.has(PARAGRAPH_REF)||value.has(SECTION_REF))){nativeContextTarget(graph,value,validated);return;}
+        if(value.isContainerNode())for(JsonNode child:value)validateParagraphValue(graph,child,validated);
+    }
+    private static JsonNode nativeContextTarget(JsonNode graph,JsonNode value,Map<String,Set<Integer>> validated){
+        boolean paragraph=value.has(PARAGRAPH_REF);String marker=paragraph?PARAGRAPH_REF:SECTION_REF,reason=paragraph?"native_paragraph_reference_":"native_section_reference_";
+        JsonNode pool=paragraph?graph.path("nativeDocxOutline").path("paragraphs"):graph.path("nativeDocxSections"),ref=value.path(marker);
+        scopeNeed(value.size()==1&&ref.isIntegralNumber()&&ref.canConvertToInt()&&ref.asInt()>=0&&pool.isArray()&&ref.asInt()<pool.size(),reason+"invalid");
+        int ordinal=ref.asInt();JsonNode target=pool.get(ordinal);scopeNeed(target.isObject()&&(!paragraph||target.path("sourcePosition").isObject()),reason+"target_invalid");
+        if(validated.computeIfAbsent(marker,key->new HashSet<>()).add(ordinal))scopeNeed(!containsNativeContextReference(target),reason+"nested_or_cyclic");return target;
+    }
+    private static boolean containsNativeContextReference(JsonNode value){
+        if(value.isObject()&&(value.has(PARAGRAPH_REF)||value.has(SECTION_REF)))return true;
+        if(value.isContainerNode())for(JsonNode child:value)if(containsNativeContextReference(child))return true;return false;
+    }
+
+    private static Map<JsonNode,Integer> paragraphInventory(JsonNode graph){
+        Map<JsonNode,Integer> indexes=new HashMap<>();int ordinal=0;
+        for(JsonNode paragraph:graph.path("nativeDocxOutline").path("paragraphs")){
+            if(paragraph.isObject())indexes.merge(paragraph,ordinal,(first,duplicate)->-1);ordinal++;
+        }return indexes;
+    }
+    private static JsonNode paragraphReference(JsonNode value,Map<JsonNode,Integer> indexes){
+        Integer ordinal=indexes.get(value);return ordinal!=null&&ordinal>=0?object().put(PARAGRAPH_REF,ordinal):value.deepCopy();
+    }
+    private static Map<JsonNode,Integer> sectionInventory(ObjectNode graph,List<DocumentBlock> blocks){
+        Map<JsonNode,Integer> indexes=new HashMap<>();ArrayNode pool=JsonUtils.mapper().createArrayNode();
+        for(DocumentBlock block:blocks){JsonNode section=block.getReadingContext()==null?null:block.getReadingContext().get("nativeDocxSection");
+            if(section!=null&&section.isObject()&&!indexes.containsKey(section)){indexes.put(section,pool.size());pool.add(section.deepCopy());}}
+        if(!pool.isEmpty())graph.set("nativeDocxSections",pool);return indexes;
+    }
+    private static JsonNode compactReadingContext(JsonNode value,Map<JsonNode,Integer> indexes,Map<JsonNode,Integer> sections){
+        if(!value.isObject())return value.deepCopy();
+        ObjectNode out=object();value.fields().forEachRemaining(field->{
+            if("nativeDocxParagraph".equals(field.getKey()))out.set(field.getKey(),paragraphReference(field.getValue(),indexes));
+            else if("nativeDocxParagraphs".equals(field.getKey())&&field.getValue().isArray()){
+                ArrayNode paragraphs=out.putArray(field.getKey());for(JsonNode paragraph:field.getValue())paragraphs.add(paragraphReference(paragraph,indexes));
+            }else if("nativeDocxSection".equals(field.getKey())&&field.getValue().isObject()){
+                Integer ordinal=sections.get(field.getValue());out.set(field.getKey(),ordinal==null?field.getValue().deepCopy():object().put(SECTION_REF,ordinal));
+            }else out.set(field.getKey(),field.getValue().deepCopy());
+        });return out;
     }
 
     /** Selected native-table/visual/form units expand whole structure; paragraph slices retain only selected text. */
@@ -56,7 +134,7 @@ public final class NormalSourceCandidateGraph {
             if(!touches)continue;
             boolean ambiguous=false;for(JsonNode unknown:unit.path("unknowns"))if("missing_or_duplicate_actual_block_id".equals(unknown.path("reason").asText()))ambiguous=true;
             if(ambiguous){((ArrayNode)selected.get("unknowns")).add(unknown("selected_members","unknown","ambiguous_actual_member_identity_prevents_unit_expansion"));continue;}
-            ObjectNode material=(ObjectNode)unit.deepCopy();
+            ObjectNode material=(ObjectNode)expandedParagraphContexts(graph,unit);
             if("source_block".equals(unit.path("kind").asText())){
                 JsonNode parent=unit.path("parts").get(0);List<Part> ranges=parts.get(parent.path("blockId").asText());
                 boolean whole=ranges.size()==1&&ranges.get(0).getStartOffset()==0&&ranges.get(0).getEndOffset()==parent.path("text").asText().length();
@@ -69,7 +147,7 @@ public final class NormalSourceCandidateGraph {
                         slice.put("startOffset",start);slice.put("endOffset",end);slice.put("offsetUnit","utf16");slice.put("parentEffectiveTextSha256",VettingCorpus.hash(effective));slices.add(slice);
                         if(parent.has("sourcePosition"))slice.set("sourcePosition",parent.path("sourcePosition").deepCopy());
                         ObjectNode context=null;for(String key:Arrays.asList("nativeDocxSection","nativeDocxParagraph","nativeDocxParagraphs","nativeDocxOutline","nativeWordNotes"))if(parent.path("readingContext").has(key)){
-                            if(context==null)context=slice.putObject("readingContext");context.set(key,parent.path("readingContext").path(key).deepCopy());
+                            if(context==null)context=slice.putObject("readingContext");context.set(key,expandedParagraphContexts(graph,parent.path("readingContext").path(key)));
                         }
                     }
                     material.put("closureStatus","selected_source_range_only");((ArrayNode)material.get("unknowns")).add(unknown("whole_parent","unknown","unselected_parent_remains_in_source_storage"));
@@ -147,7 +225,7 @@ public final class NormalSourceCandidateGraph {
                     if(!range.path("scopeComplete").asBoolean()){issues.add(unknown("source_clause_scope","unknown","parent_source_range_incomplete"));break;}
                     if(validated.add(id))validateScopeRange(range,members,positions,inventory.path("sourceSha256").asText());
                     JsonNode frame=sourceFrame(range,inventory,members,positions,usedFrames);
-                    for(JsonNode peer:ranges.values())if(peer!=range&&peer.path("reference").equals(range.path("reference"))&&peer.path("parentId").equals(range.path("parentId"))&&scopeStory(members.get(peer.path("orderedMemberIds").path(0).asText())).equals(scopeStory(members.get(range.path("orderedMemberIds").path(0).asText())))&&!(nonordinalSourceGlyph(range,members)&&nonordinalSourceGlyph(peer,members))){
+                    for(JsonNode peer:ranges.values())if(peer!=range&&peer.path("reference").equals(range.path("reference"))&&peer.path("parentId").equals(range.path("parentId"))&&scopeStory(members.get(peer.path("orderedMemberIds").path(0).asText())).equals(scopeStory(members.get(range.path("orderedMemberIds").path(0).asText())))&&!(nonordinalSourceGlyph(graph,range,members)&&nonordinalSourceGlyph(graph,peer,members))){
                         JsonNode other=sourceFrame(peer,inventory,members,positions,usedFrames);
                         scopeNeed(frame!=null&&other!=null&&!frame.path("id").equals(other.path("id"))&&!frame.path("label").equals(other.path("label"))&&Collections.disjoint(scopeIds(frame.path("orderedMemberIds")),scopeIds(other.path("orderedMemberIds"))),"ambiguous_source_reference");
                     }
@@ -157,7 +235,7 @@ public final class NormalSourceCandidateGraph {
             }
             Set<String> needed=new LinkedHashSet<>();for(String id:picked){JsonNode range=ranges.get(id);selected.add(range.deepCopy());needed.addAll(scopeIds(range.path("orderedMemberIds")));needed.addAll(scopeIds(range.path("contextMemberIds")));}
             if(!usedFrames.isEmpty()){ArrayNode frames=out.putArray("referenceFrames");for(JsonNode frame:inventory.path("referenceFrames"))if(usedFrames.containsKey(frame.path("id").asText())){frames.add(frame.deepCopy());for(String key:Arrays.asList("orderedMemberIds","contextMemberIds","anchorMemberIds"))needed.addAll(scopeIds(frame.path(key)));for(String key:Arrays.asList("startBoundary","endBoundary"))if(frame.path(key).hasNonNull("memberId"))needed.add(frame.path(key).path("memberId").asText());}}
-            for(Map.Entry<String,JsonNode> member:members.entrySet())if(needed.contains(member.getKey()))observed.add(member.getValue().deepCopy());
+            for(Map.Entry<String,JsonNode> member:members.entrySet())if(needed.contains(member.getKey()))observed.add(expandedParagraphContexts(graph,member.getValue()));
         }catch(IllegalArgumentException invalid){selected.removeAll();observed.removeAll();out.remove("referenceFrames");issues.add(unknown("source_clause_scope","unknown",invalid.getMessage()));}
         return out;
     }
@@ -204,10 +282,10 @@ public final class NormalSourceCandidateGraph {
         scopeNeed(scopeIds(frame.path("orderedMemberIds")).containsAll(scopeIds(range.path("orderedMemberIds"))),"source_reference_frame_does_not_contain_range");return frame;
     }
     private static String nativeRow(String path){for(String namespace:Arrays.asList("http://schemas.openxmlformats.org/wordprocessingml/2006/main","http://purl.oclc.org/ooxml/wordprocessingml/main")){int end=path.lastIndexOf("/{"+namespace+"}tc[");if(end>=0)return path.substring(0,end);}return "";}
-    private static boolean nonordinalSourceGlyph(JsonNode range,Map<String,JsonNode> members){
+    private static boolean nonordinalSourceGlyph(JsonNode graph,JsonNode range,Map<String,JsonNode> members){
         JsonNode first=members.get(range.path("orderedMemberIds").path(0).asText());if(first==null)return false;
         if(!"nonordinal_glyph".equals(range.path("sourceReferenceKind").asText()))return false;
-        JsonNode number=range.path("numbering"),nativeNumber=first.path("paragraphProperties").path("layoutEvidence").path("numbering");
+        JsonNode number=range.path("numbering"),nativeNumber=expandedParagraphContexts(graph,first.path("paragraphProperties")).path("layoutEvidence").path("numbering");
         if("native-list".equals(range.path("kind").asText()))return
                 number.path("numbered").asBoolean()&&"resolved".equals(number.path("resolutionStatus").asText())
                 &&"bullet".equals(number.path("format").asText())&&!number.path("label").asText().isEmpty()&&number.equals(nativeNumber);
@@ -391,7 +469,7 @@ public final class NormalSourceCandidateGraph {
             Set<String> rowPaths=new HashSet<>();boolean repeated=false;
             for(JsonNode part:tables.get(key)){
                 if(!rowPaths.add(part.path("sourcePosition").path("nodePath").asText()))repeated=true;
-                members.add(part.path("blockId").asText());parts.add(part.deepCopy());
+                members.add(part.path("blockId").asText());parts.add(expandedParagraphContexts(graph,part));
                 ObjectNode span=object();for(String field:Arrays.asList("blockId","startOffset","endOffset","offsetUnit","sourceSha256","sourcePosition"))span.set(field,part.path(field).deepCopy());spans.add(span);
                 ObjectNode row=object();row.put("blockId",part.path("blockId").asText());row.put("location",part.path("anchor").asText());
                 row.set("cells",part.path("cells").deepCopy());row.set("wordCells",part.path("wordCells").deepCopy());row.set("sourcePosition",part.path("sourcePosition").deepCopy());rows.add(row);
@@ -626,8 +704,9 @@ public final class NormalSourceCandidateGraph {
         return Arrays.asList(position.path("partName").asText(),position.path("partSha256").asText(),location.toString(),row.group(1));
     }
 
-    private static ObjectNode build(SourceDocument source) {
-        ObjectNode graph=declarations();graph.put("producerVersion",VERSION);graph.put("status","actual_source_candidate_generation");
+    private static ObjectNode build(SourceDocument source) {return build(source,VERSION);}
+    private static ObjectNode build(SourceDocument source,String version) {
+        ObjectNode graph=declarations();graph.put("producerVersion",version);graph.put("status","actual_source_candidate_generation");
         ObjectNode identity=object();identity.put("projectId",source.getProjectId());identity.put("documentId",String.valueOf(source.getId()));
         identity.put("originalSourceSha256",source.getSourceSha256());identity.put("parsedSourceHash",VettingCorpus.sourceHash(source));
         identity.put("filename",source.getFileName());identity.put("role",VettingCorpus.sourceRole(source));identity.put("scope",source.getDocumentScope());
@@ -635,7 +714,10 @@ public final class NormalSourceCandidateGraph {
         JsonNode coverage=JsonUtils.isBlankText(source.getParseCoverageJson())?object():JsonUtils.parse(source.getParseCoverageJson());
         graph.put("coverageSha256",VettingCorpus.hash(nvl(source.getParseCoverageJson())));
         if(coverage.has("readingPlan"))graph.set("readingPlan",coverage.get("readingPlan").deepCopy());
-        if(coverage.has("nativeDocxOutline"))graph.set("nativeDocxOutline",coverage.get("nativeDocxOutline").deepCopy());
+        if(coverage.has("nativeDocxOutline"))graph.set("nativeDocxOutline",VERSION.equals(version)?coverage.get("nativeDocxOutline"):coverage.get("nativeDocxOutline").deepCopy());
+        Map<JsonNode,Integer> paragraphs=VERSION.equals(version)?paragraphInventory(graph):null;
+        if(paragraphs!=null)for(JsonNode member:graph.path("nativeDocxOutline").path("sourceClauseScopes").path("members"))
+            if(member.isObject()&&member.has("paragraphProperties"))((ObjectNode)member).set("paragraphProperties",paragraphReference(member.path("paragraphProperties"),paragraphs));
         ArrayNode unknowns=graph.putArray("unknowns");
         if(source.getSourceSha256()==null||!source.getSourceSha256().matches("[a-f0-9]{64}"))unknowns.add(unknown("original_source","unknown","original_bytes_identity_missing"));
         if(OerSourceMetadata.identity(source)==null)unknowns.add(unknown("source_identity","unknown","confirmed_source_identity_unavailable"));
@@ -645,7 +727,7 @@ public final class NormalSourceCandidateGraph {
         for(JsonNode page:coverage.path("needsReviewPages"))unknowns.add(unknown("physical_page."+page.asText(),"unverified","needs_review_page"));
         if(coverage.path("ocrQualityPageScopeUnknown").asBoolean())unknowns.add(unknown("ocr_page_scope","unknown","unverified_ocr_page_scope_unknown"));
         for(JsonNode limitation:coverage.path("limitations"))unknowns.add(unknown("source_limitation","unknown",limitation.asText()));
-        List<DocumentBlock> blocks=VettingCorpus.blocks(source);Map<String,Integer> counts=new HashMap<>();
+        List<DocumentBlock> blocks=VettingCorpus.blocks(source);Map<JsonNode,Integer> sections=VERSION.equals(version)?sectionInventory(graph,blocks):null;Map<String,Integer> counts=new HashMap<>();
         for(DocumentBlock block:blocks)counts.merge(nvl(block.getId()),1,Integer::sum);
         Map<String,List<DocumentBlock>> groups=new LinkedHashMap<>();Map<String,String> kinds=new HashMap<>();Map<String,Integer> sourceOrders=new HashMap<>();
         int ordinal=0;for(DocumentBlock block:blocks){
@@ -660,13 +742,13 @@ public final class NormalSourceCandidateGraph {
         }
         ArrayNode units=graph.putArray("units"),relations=graph.putArray("relations");Map<String,String> visualOwners=new HashMap<>(),blockOwners=new HashMap<>();
         for(Map.Entry<String,List<DocumentBlock>> group:groups.entrySet()) {
-            ObjectNode unit=object();String unitId="candidate-unit:"+VettingCorpus.hash(JsonUtils.write(Arrays.asList(identity,graph.path("coverageSha256"),VERSION,group.getKey())));
+            ObjectNode unit=object();String unitId="candidate-unit:"+VettingCorpus.hash(JsonUtils.write(Arrays.asList(identity,graph.path("coverageSha256"),version,group.getKey())));
             unit.put("unitId",unitId);unit.put("kind",kinds.get(group.getKey()));unit.put("status","observed_structure_candidate");
             unit.put("adoptionStatus","candidate_unverified");unit.put("semanticScopeVerified",false);unit.put("qualifiersComplete","unknown");
             ArrayNode members=unit.putArray("requiredMemberBlockIds"),parts=unit.putArray("parts"),spans=unit.putArray("sourceSpans"),pages=unit.putArray("physicalPages"),unitUnknowns=unit.putArray("unknowns");
             Set<Integer> pageIds=new TreeSet<>();List<String> effective=new ArrayList<>();unit.put("sourceOrder",sourceOrders.get(group.getKey()));
             for(DocumentBlock block:group.getValue()) {
-                members.add(block.getId());ObjectNode part=part(block,source.getSourceSha256());parts.add(part);effective.add(nvl(block.getEffectiveText()));
+                members.add(block.getId());ObjectNode part=part(block,source.getSourceSha256(),paragraphs,sections);parts.add(part);effective.add(nvl(block.getEffectiveText()));
                 if(blockOwners.containsKey(block.getId()))blockOwners.put(block.getId(),"");else blockOwners.put(block.getId(),unitId);
                 ObjectNode span=object();span.put("blockId",block.getId());span.put("startOffset",0);span.put("endOffset",nvl(block.getEffectiveText()).length());span.put("offsetUnit","utf16");
                 span.put("sourceSha256",source.getSourceSha256());span.set("sourcePosition",part.path("sourcePosition").deepCopy());spans.add(span);
@@ -710,10 +792,11 @@ public final class NormalSourceCandidateGraph {
         }
         boolean pdf=blocks.stream().anyMatch(block->block.getPageNo()!=null&&block.getPageNo()>0&&("native".equals(block.getSource())||block.getNativeTableCandidate()!=null||block.getPdfFormField()!=null));
         if(pdf&&source.getSourceSha256()!=null&&source.getSourceSha256().matches("[a-f0-9]{64}")){ObjectNode pdfGroups=NormalPdfSourceGroups.build(blocks,source.getSourceSha256(),coverage);graph.set("nativePdfSourceGroups",pdfGroups);}
-        graph.put("generationSha256",VettingCorpus.hash(JsonUtils.write(graph)));return graph;
+        validateParagraphReferences(graph);graph.put("generationSha256",JsonUtils.serializedSha256(graph));return graph;
     }
 
-    private static ObjectNode part(DocumentBlock block,String sourceSha) {
+    private static ObjectNode part(DocumentBlock block,String sourceSha) {return part(block,sourceSha,null,null);}
+    private static ObjectNode part(DocumentBlock block,String sourceSha,Map<JsonNode,Integer> paragraphs,Map<JsonNode,Integer> sections) {
         ObjectNode part=object();part.put("blockId",block.getId());part.put("anchor",block.getLocation());part.put("text",block.getEffectiveText());
         part.put("physicalPageNo",block.getPageNo());part.put("extractionSource",block.getSource());part.put("sourceSha256",sourceSha);
         part.put("startOffset",0);part.put("endOffset",nvl(block.getEffectiveText()).length());part.put("offsetUnit","utf16");
@@ -728,7 +811,7 @@ public final class NormalSourceCandidateGraph {
         if(!block.getWordFields().isEmpty())part.set("wordFields",JsonUtils.mapper().valueToTree(block.getWordFields()));
         part.set("wordNativeObjects",OerModelMaterial.wordNativeObjects(JsonUtils.mapper().valueToTree(block.getWordNativeObjects())));
         if(block.getVisualRegion()!=null){part.set("visualRegion",OerModelMaterial.visualRegion(block.getVisualRegion()));part.set("visualFrame",OerModelMaterial.visualFrame(block.getVisualFrame()));part.set("visualProvenance",OerModelMaterial.visualProvenance(block.getVisualProvenance()));}
-        if(block.getReadingContext()!=null)part.set("readingContext",block.getReadingContext().deepCopy());
+        if(block.getReadingContext()!=null)part.set("readingContext",paragraphs==null?block.getReadingContext().deepCopy():compactReadingContext(block.getReadingContext(),paragraphs,sections));
         if(block.getNativeTableCandidate()!=null)part.set("nativeTableCandidate",OerModelMaterial.nativeTableCandidate(block.getNativeTableCandidate()));
         if(block.getParserPageGroup()!=null)part.set("parserPageGroup",OerModelMaterial.parserPageGroup(block.getParserPageGroup()));
         if(block.getPdfFormField()!=null){JsonNode field=JsonUtils.mapper().valueToTree(block.getPdfFormField());ObjectNode form=object();

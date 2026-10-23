@@ -15,7 +15,8 @@ import org.springframework.test.context.*;
 import static org.junit.jupiter.api.Assertions.*;
 
 /** Executes the exact new SQL against populated H2 MySQL-mode state, then uses actual JPA. */
-@DataJpaTest(properties={"spring.jpa.hibernate.ddl-auto=none","spring.flyway.enabled=false"})
+@DataJpaTest(properties={"spring.jpa.hibernate.ddl-auto=none","spring.flyway.enabled=false","spring.jpa.show-sql=false","spring.jpa.properties.hibernate.generate_statistics=true",
+        "spring.jpa.properties.hibernate.session_factory.statement_inspector=com.consense.repository.CanonicalSourceBindingPersistenceTest$SqlCapture"})
 @ActiveProfiles("h2") @AutoConfigureTestDatabase(replace=AutoConfigureTestDatabase.Replace.NONE)
 class CanonicalSourceBindingPersistenceTest {
     private static final String URL="jdbc:h2:mem:canonical_migration_"+UUID.randomUUID()+";MODE=MySQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1";
@@ -32,6 +33,30 @@ class CanonicalSourceBindingPersistenceTest {
     @Autowired CanonicalSourceBindingRepository repository;
     @Autowired JdbcTemplate jdbc;
     @Autowired javax.persistence.EntityManager entityManager;
+    public static class SqlCapture implements org.hibernate.resource.jdbc.spi.StatementInspector {
+        static final java.util.List<String> statements=java.util.Collections.synchronizedList(new java.util.ArrayList<>());
+        @Override public String inspect(String sql){statements.add(sql);return sql;}
+    }
+    @Test void latestSelectionLimitsActualJpaToOneBindingAndLeavesOlderSnapshotsUnloaded() {
+        Long newestId=null;
+        for(int i=0;i<4;i++){
+            CanonicalSourceBinding row=new CanonicalSourceBinding();row.setProjectId("bounded-project");row.setDocumentId(22L);row.setProjectionSha256(String.format(java.util.Locale.ROOT,"%064d",i+1));
+            row.setOriginalSourceSha256(sha());row.setJavaParsedSourceHash(sha());row.setRoutingSha256(sha());row.setSourceRevisionSha256(sha());row.setProjectionRevisionSha256(sha());row.setCanonicalSourceHash(sha());row.setScopePolicySha256(sha());
+            row.setSnapshotBytesSha256(sha());row.setDeclaredModule("vetting");row.setEligibleModulesJson("[\"vetting\"]");row.setSnapshotJson(i==3?"{\"latestOwn\":true}":"{\"oldUnusedSnapshot\":\""+"x".repeat(16384)+"\"}");newestId=repository.saveAndFlush(row).getId();
+        }
+        entityManager.clear();org.hibernate.stat.Statistics statistics=entityManager.getEntityManagerFactory().unwrap(org.hibernate.SessionFactory.class).getStatistics();statistics.clear();SqlCapture.statements.clear();
+        com.consense.service.sources.CanonicalEvidenceService service=new com.consense.service.sources.CanonicalEvidenceService(repository,org.mockito.Mockito.mock(com.consense.service.sources.CanonicalEvidenceBackend.class),org.mockito.Mockito.mock(com.consense.service.sources.CanonicalCurrentSourceReader.class));
+        assertNull(service.prepareNormalCandidate("bounded-project",22L,"vetting"));
+        java.util.List<String> selects=new java.util.ArrayList<>();for(String sql:SqlCapture.statements)if(sql.toLowerCase(java.util.Locale.ROOT).contains("from canonical_source_binding"))selects.add(sql.toLowerCase(java.util.Locale.ROOT));
+        assertEquals(1,selects.size(),selects.toString());assertTrue(selects.get(0).contains(" limit ")||selects.get(0).contains(" fetch first "),"Latest selection must bound actual SQL: "+selects.get(0));
+        assertEquals(1,statistics.getEntityStatistics(CanonicalSourceBinding.class.getName()).getLoadCount(),"Unselected historical snapshot LOBs must not be hydrated");
+        assertEquals(4,jdbc.queryForObject("SELECT COUNT(*) FROM canonical_source_binding WHERE project_id='bounded-project' AND document_id=22",Integer.class));
+        entityManager.clear();statistics.clear();SqlCapture.statements.clear();
+        java.util.List<CanonicalSourceBinding> older=repository.findByProjectIdAndDocumentIdAndIdLessThanOrderByIdDesc("bounded-project",22L,newestId,org.springframework.data.domain.PageRequest.of(0,1));
+        assertEquals(1,older.size());assertTrue(older.get(0).getId()<newestId);assertTrue(older.get(0).getSnapshotJson().contains("oldUnusedSnapshot"));
+        assertEquals(1,SqlCapture.statements.size());String seek=SqlCapture.statements.get(0).toLowerCase(java.util.Locale.ROOT);
+        assertTrue(seek.contains("<")&&(seek.contains(" limit ")||seek.contains(" fetch first ")),seek);assertEquals(1,statistics.getEntityStatistics(CanonicalSourceBinding.class.getName()).getLoadCount());
+    }
     @Test void exact_sql_preserves_legacy_unknowns_and_jpa_roundtrips_complete_snapshot(){
         assertEquals("legacy-preserved.pdf",jdbc.queryForObject("SELECT file_name FROM source_document WHERE id=11",String.class));
         assertNull(jdbc.queryForObject("SELECT source_sha256 FROM source_document WHERE id=11",String.class));

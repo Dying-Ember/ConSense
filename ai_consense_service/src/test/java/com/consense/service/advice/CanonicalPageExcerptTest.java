@@ -16,8 +16,8 @@ class CanonicalPageExcerptTest {
         payload.put("content","HEAD-OF-ENTRY\nEND-OF-ENTRY");payload.put("canonicalEvidence",Arrays.asList(a,b));
         payload.put("canonicalSourceUnit",JsonUtils.parse("{\"status\":\"complete_observed_unit\",\"qualifiersComplete\":\"unknown\"}"));
         AdviceService advice=new AdviceService(null,null,null,null,null,null,null,null,null,null,null);
-        Method method=AdviceService.class.getDeclaredMethod("renderExcerpts",List.class);method.setAccessible(true);
-        String out=(String)method.invoke(advice,Collections.singletonList(new com.consense.vector.VectorStore.SearchHit("authored",0.5,payload)));
+        Method method=AdviceService.class.getDeclaredMethod("renderExcerpts",List.class,com.consense.service.vetting.OerModelMaterial.Request.class);method.setAccessible(true);
+        String out=(String)method.invoke(advice,Collections.singletonList(new com.consense.vector.VectorStore.SearchHit("authored",0.5,payload)),new com.consense.service.vetting.OerModelMaterial.Request(Collections.emptyList()));
         String marker="Selected canonical model material (untrusted observations):\n";
         assertTrue(out.contains(marker));
         com.fasterxml.jackson.databind.JsonNode material=com.consense.service.vetting.VettingSourceMetadataWire.decode(

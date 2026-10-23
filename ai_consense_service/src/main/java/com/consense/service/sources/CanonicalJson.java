@@ -1,8 +1,9 @@
 package com.consense.service.sources;
 
 import com.fasterxml.jackson.core.*;
-import com.consense.common.Utf8;
-import java.io.IOException;
+import java.io.*;
+import java.nio.charset.StandardCharsets;
+import java.security.DigestOutputStream;
 import java.security.MessageDigest;
 import java.math.*;
 import java.util.*;
@@ -13,23 +14,83 @@ final class CanonicalJson {
     private static final JsonFactory FACTORY=new JsonFactory().enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
     static String hash(String json,String omitRootField) {
         try(JsonParser parser=FACTORY.createParser(json)) {
-            parser.nextToken();String value=read(parser,omitRootField);
+            parser.nextToken();CanonicalValue value=readValue(parser,omitRootField);
             if(parser.nextToken()!=null)throw new IOException("Trailing JSON");
-            return Utf8.sha256(value);
+            return digest(value);
         }catch(IOException|IllegalArgumentException error){throw new CanonicalEvidenceException(org.springframework.http.HttpStatus.BAD_GATEWAY,"CANONICAL_JSON_INVALID");}
     }
     static String fieldHash(String json,String name) {
-        return Utf8.sha256(field(json,name));
+        try{return digest(fieldValue(json,name));}
+        catch(IOException|IllegalArgumentException error){throw new CanonicalEvidenceException(org.springframework.http.HttpStatus.BAD_GATEWAY,"CANONICAL_JSON_INVALID");}
     }
     /** Extract a canonical subtree from a noncanonical HTTP receipt without rewriting number tokens. */
     static String field(String json,String name) {
+        try{CanonicalValue value=fieldValue(json,name);LengthWriter length=new LengthWriter();value.write(length);
+            StringWriter out=new StringWriter(Math.toIntExact(length.length));value.write(out);return out.toString();}
+        catch(IOException|IllegalArgumentException error){throw new CanonicalEvidenceException(org.springframework.http.HttpStatus.BAD_GATEWAY,"CANONICAL_JSON_INVALID");}
+    }
+    private static CanonicalValue fieldValue(String json,String name)throws IOException {
         try(JsonParser p=FACTORY.createParser(json)){
             if(p.nextToken()!=JsonToken.START_OBJECT)throw new IOException("Expected object");
-            String found=null;
-            while(p.nextToken()!=JsonToken.END_OBJECT){String key=p.getCurrentName();p.nextToken();String value=read(p,null);if(key.equals(name))found=value;}
+            CanonicalValue found=null;
+            while(p.nextToken()!=JsonToken.END_OBJECT){String key=p.getCurrentName();p.nextToken();if(key.equals(name))found=readValue(p,null);else skipValue(p);}
             if(found==null||p.nextToken()!=null)throw new IOException("Missing field or trailing JSON");
             return found;
-        }catch(IOException|IllegalArgumentException error){throw new CanonicalEvidenceException(org.springframework.http.HttpStatus.BAD_GATEWAY,"CANONICAL_JSON_INVALID");}
+        }
+    }
+    private interface CanonicalValue {void write(Writer out)throws IOException;}
+    private static final class LengthWriter extends Writer {
+        private long length;
+        @Override public void write(int value){length++;}
+        @Override public void write(char[] value,int offset,int count){length+=count;}
+        @Override public void write(String value,int offset,int count){length+=count;}
+        @Override public void flush(){}
+        @Override public void close(){}
+    }
+    /** Retain sortable values, never a canonical string for every enclosing object. */
+    private static CanonicalValue readValue(JsonParser p,String omit)throws IOException {
+        JsonToken token=p.currentToken();
+        if(token==JsonToken.START_OBJECT){
+            Map<String,CanonicalValue> fields=new TreeMap<>(CanonicalJson::compareCodepoints);
+            while(p.nextToken()!=JsonToken.END_OBJECT){String key=p.getCurrentName();p.nextToken();if(key.equals(omit))skipValue(p);else fields.put(key,readValue(p,null));}
+            return out->{out.write('{');boolean first=true;for(Map.Entry<String,CanonicalValue> row:fields.entrySet()){if(!first)out.write(',');first=false;writeQuoted(out,row.getKey());out.write(':');row.getValue().write(out);}out.write('}');};
+        }
+        if(token==JsonToken.START_ARRAY){
+            List<CanonicalValue> values=new ArrayList<>();while(p.nextToken()!=JsonToken.END_ARRAY)values.add(readValue(p,null));
+            return out->{out.write('[');boolean first=true;for(CanonicalValue value:values){if(!first)out.write(',');first=false;value.write(out);}out.write(']');};
+        }
+        if(token==JsonToken.VALUE_STRING){String value=p.getText();return out->writeQuoted(out,value);}
+        if(token==JsonToken.VALUE_NUMBER_INT||token==JsonToken.VALUE_NUMBER_FLOAT){String value=p.getText();return out->out.write(value);}
+        if(token==JsonToken.VALUE_TRUE)return out->out.write("true");
+        if(token==JsonToken.VALUE_FALSE)return out->out.write("false");
+        if(token==JsonToken.VALUE_NULL)return out->out.write("null");
+        throw new IOException("Invalid JSON token");
+    }
+    private static void skipValue(JsonParser p)throws IOException {
+        JsonToken token=p.currentToken();
+        if(token==JsonToken.START_OBJECT||token==JsonToken.START_ARRAY){p.skipChildren();return;}
+        if(token==JsonToken.VALUE_STRING||token==JsonToken.VALUE_NUMBER_INT||token==JsonToken.VALUE_NUMBER_FLOAT
+                ||token==JsonToken.VALUE_TRUE||token==JsonToken.VALUE_FALSE||token==JsonToken.VALUE_NULL)return;
+        throw new IOException("Invalid JSON token");
+    }
+    private static String digest(CanonicalValue value)throws IOException {
+        try {
+            MessageDigest digest=MessageDigest.getInstance("SHA-256");
+            OutputStream discard=new OutputStream(){@Override public void write(int value){}@Override public void write(byte[] bytes,int offset,int length){}};
+            // Buffer characters too: OutputStreamWriter.write(String) otherwise copies an entire scalar.
+            try(Writer out=new BufferedWriter(new OutputStreamWriter(new DigestOutputStream(discard,digest),StandardCharsets.UTF_8))){value.write(out);}
+            StringBuilder hex=new StringBuilder(64);for(byte b:digest.digest())hex.append(String.format("%02x",b&255));return hex.toString();
+        }catch(java.security.NoSuchAlgorithmException impossible){throw new IllegalStateException(impossible);}
+    }
+    private static void writeQuoted(Writer out,String value)throws IOException {
+        out.write('"');int start=0;
+        for(int i=0;i<value.length();i++){
+            char c=value.charAt(i);String escape;
+            switch(c){case '"':escape="\\\"";break;case '\\':escape="\\\\";break;case '\b':escape="\\b";break;case '\f':escape="\\f";break;case '\n':escape="\\n";break;case '\r':escape="\\r";break;case '\t':escape="\\t";break;default:escape=null;}
+            if(escape!=null){out.write(value,start,i-start);out.write(escape);start=i+1;}
+            else if(c<32){out.write(value,start,i-start);out.write("\\u00");out.write(Character.forDigit(c>>>4,16));out.write(Character.forDigit(c&15,16));start=i+1;}
+        }
+        out.write(value,start,value.length()-start);out.write('"');
     }
     static String sha(byte[] bytes) {
         try {StringBuilder out=new StringBuilder();for(byte b:MessageDigest.getInstance("SHA-256").digest(bytes))out.append(String.format("%02x",b&255));return out.toString();}

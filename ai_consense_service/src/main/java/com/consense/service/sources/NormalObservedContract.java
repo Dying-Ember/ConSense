@@ -34,20 +34,24 @@ public final class NormalObservedContract {
     }
     public static JsonNode validate(String raw,String address){return validate(raw,address,MAX_BYTES);}
     public static JsonNode validate(String raw,String address,int maximum){
+        return validate(raw,address,maximum,null);
+    }
+    static JsonNode validate(String raw,String address,int maximum,JsonNode parsed){
         maximumBytes(maximum);
         require(raw!=null&&Utf8.byteCount(raw)<=maximum,"NORMAL_OBSERVED_TOO_LARGE");
-        JsonNode p=JsonUtils.parse(raw),m=p.path("manifest"),g=m.path("candidateGraph"),b=m.path("sourceBinding"),i=p.path("projectionIdentity"),s=g.path("source");
+        JsonNode p=parsed==null?JsonUtils.parse(raw):parsed,m=p.path("manifest"),g=m.path("candidateGraph"),b=m.path("sourceBinding"),i=p.path("projectionIdentity"),s=g.path("source");
         require(isNormal(p)&&SCHEMA.equals(p.path("schema").asText())&&PRODUCER.equals(p.path("producerKind").asText())
             &&address!=null&&address.equals(p.path("projectionSha256").asText())&&address.equals(CanonicalJson.hash(raw,"projectionSha256")),"NORMAL_OBSERVED_SEAL_MISMATCH");
         keys(p,"schema","producerKind","projectionIdentity","sourceHash","projectionRevisionSha256","source","manifest","observationManifestRef","canonical","chunks","nonRetrievableUnits","assetRefs","unknowns","adoptionStatus","humanConfirmed","sourceQualityAccepted","semanticScopeVerified","legalClosure","projectionSha256");
         keys(m,"candidateGraph","sourceBinding","observer");keys(b,"module","eligibleModules","sourcePurpose","sourceClass","routingSha256","scopePolicySha256");
         require(JsonUtils.parse("{\"actor\":\"application\",\"method\":\"normal_parser_observation\",\"originalByteVerifier\":\"java_current_source_reader\"}").equals(m.path("observer")),"NORMAL_OBSERVED_AUTHORITY_MISMATCH");
         declarations(p);declarations(g);
-        require(NormalSourceCandidateGraph.SCHEMA.equals(g.path("schema").asText())&&NormalSourceCandidateGraph.VERSION.equals(g.path("producerVersion").asText())
+        require(NormalSourceCandidateGraph.SCHEMA.equals(g.path("schema").asText())&&NormalSourceCandidateGraph.supportedVersion(g.path("producerVersion").asText())
             &&"actual_source_candidate_generation".equals(g.path("status").asText())&&g.path("units").isArray()&&!g.path("units").isEmpty()
             &&g.path("relations").isArray()&&g.path("unknowns").isArray(),"NORMAL_OBSERVED_GRAPH_INVALID");
-        String mr=CanonicalJson.field(raw,"manifest"),gr=CanonicalJson.field(mr,"candidateGraph"),ir=CanonicalJson.field(raw,"projectionIdentity");
-        String graphSha=CanonicalJson.hash(gr,null),manifestSha=CanonicalJson.hash(mr,null);
+        NormalSourceCandidateGraph.validateParagraphReferences(g);
+        String mr=CanonicalJson.field(raw,"manifest"),ir=CanonicalJson.field(raw,"projectionIdentity");
+        String graphSha=CanonicalJson.fieldHash(mr,"candidateGraph"),manifestSha=CanonicalJson.hash(mr,null);
         ObjectNode expectedIdentity=object();expectedIdentity.put("version",VERSION);expectedIdentity.put("producerKind",PRODUCER);
         sha(i.path("projectionCodeSha256").asText());expectedIdentity.set("projectionCodeSha256",i.path("projectionCodeSha256"));
         for(String key:Arrays.asList("documentId","role"))expectedIdentity.set(key,s.path(key));
@@ -66,7 +70,8 @@ public final class NormalObservedContract {
         source.set("filename",s.path("filename"));source.set("sourceFilename",s.path("filename"));source.set("parsedSourceHash",s.path("parsedSourceHash"));source.set("projectId",s.path("projectId"));source.set("documentId",s.path("documentId"));
         require(source.equals(p.path("source")),"NORMAL_OBSERVED_SOURCE_MISMATCH");
         JsonNode descriptor=p.path("observationManifestRef");require(manifestSha.equals(descriptor.path("sha256").asText())&&descriptor.path("byteCount").asLong()==Utf8.byteCount(mr),"NORMAL_OBSERVED_MANIFEST_REF_MISMATCH");
-        ArrayNode expectedChunks=JsonUtils.mapper().createArrayNode(),nonText=JsonUtils.mapper().createArrayNode();Set<String> units=new HashSet<>(),blocks=new HashSet<>();int previous=-1;
+        ArrayNode nonText=JsonUtils.mapper().createArrayNode();Set<String> units=new HashSet<>(),blocks=new HashSet<>();int previous=-1,chunkOrdinal=0;
+        require(p.path("chunks").isArray(),"NORMAL_OBSERVED_COMPLETE_CHUNKS_MISMATCH");
         for(JsonNode unit:g.path("units")){
             require(unit.path("unitId").asText().matches("candidate-unit:[a-f0-9]{64}")&&units.add(unit.path("unitId").asText())&&unit.path("sourceOrder").isIntegralNumber()&&unit.path("sourceOrder").asInt()>previous,"NORMAL_OBSERVED_UNIT_INVALID");previous=unit.path("sourceOrder").asInt();
             require("candidate_unverified".equals(unit.path("adoptionStatus").asText())&&unit.path("semanticScopeVerified").isBoolean()&&!unit.path("semanticScopeVerified").asBoolean()&&"unknown".equals(unit.path("qualifiersComplete").asText()),"NORMAL_OBSERVED_UNIT_AUTHORITY_INVALID");
@@ -82,10 +87,10 @@ public final class NormalObservedContract {
             }
             require(unit.path("text").isTextual()&&String.join("\n",texts).equals(unit.path("text").asText())&&JsonUtils.mapper().valueToTree(pages).equals(unit.path("physicalPages")),"NORMAL_OBSERVED_UNIT_MISMATCH");
             if(noObservedText(unit.path("text").asText())){ObjectNode skipped=nonText.addObject();skipped.set("unitId",unit.path("unitId"));skipped.set("sourceOrder",unit.path("sourceOrder"));skipped.put("reason","no_observed_text");continue;}
-            expectedChunks.add(chunk(unit,g,i,sourceHash,revision,projectionRevision,manifestSha));
+            require(chunkOrdinal<p.path("chunks").size()&&chunk(unit,g,i,sourceHash,revision,projectionRevision,manifestSha).equals(p.path("chunks").get(chunkOrdinal++)),"NORMAL_OBSERVED_COMPLETE_CHUNKS_MISMATCH");
         }
         for(JsonNode relation:g.path("relations"))require(relation.path("humanConfirmed").isBoolean()&&!relation.path("humanConfirmed").asBoolean()&&units.contains(relation.path("fromUnitId").asText())&&(relation.path("toUnitId").isNull()||!relation.has("toUnitId")||units.contains(relation.path("toUnitId").asText())),"NORMAL_OBSERVED_RELATION_INVALID");
-        require(expectedChunks.equals(p.path("chunks"))&&nonText.equals(p.path("nonRetrievableUnits")),"NORMAL_OBSERVED_COMPLETE_CHUNKS_MISMATCH");return p;
+        require(chunkOrdinal==p.path("chunks").size()&&nonText.equals(p.path("nonRetrievableUnits")),"NORMAL_OBSERVED_COMPLETE_CHUNKS_MISMATCH");return p;
     }
     private static ObjectNode chunk(JsonNode u,JsonNode graph,JsonNode identity,String sourceHash,String revision,String projectionRevision,String manifestSha){
         ObjectNode c=object();c.put("id","canonical:"+hashFields("revision",CanonicalJson.scalar(projectionRevision),"unitId",scalar(u,"unitId")));
@@ -93,7 +98,7 @@ public final class NormalObservedContract {
         if(u.path("parts").get(0).path("anchor").isTextual())c.set("anchor",u.path("parts").get(0).path("anchor"));
         c.put("sourceHash",sourceHash);c.set("sourceSha256",identity.path("originalSourceSha256"));c.set("originalSourceSha256",identity.path("originalSourceSha256"));c.put("sourceRevisionSha256",revision);c.put("projectionRevisionSha256",projectionRevision);c.put("observationManifestSha256",manifestSha);
         ObjectNode quality=declarations();quality.put("status","PARSED");quality.put("semanticQuality","unknown");c.set("sourceQuality",quality);c.put("sourceQualityHash",CanonicalJson.hash(JsonUtils.write(quality),null));c.putArray("assetRefs");declarations().fields().forEachRemaining(e->c.set(e.getKey(),e.getValue()));
-        for(String key:Arrays.asList("unitId","kind","parts","sourceSpans","physicalPages","sourceOrder","tableGroup","unknowns","requiredMemberBlockIds","qualifiersComplete"))if(!u.path(key).isNull()&&!u.path(key).isMissingNode())c.set(key,u.path(key));
+        for(String key:Arrays.asList("unitId","kind","parts","sourceSpans","physicalPages","sourceOrder","tableGroup","unknowns","requiredMemberBlockIds","qualifiersComplete"))if(!u.path(key).isNull()&&!u.path(key).isMissingNode())c.set(key,"parts".equals(key)?NormalSourceCandidateGraph.expandedParagraphContexts(graph,u.path(key)):u.path(key));
         for(String key:Arrays.asList("documentId","role","module","eligibleModules","sourcePurpose","sourceClass"))c.set(key,identity.path(key));
         ArrayNode relations=c.putArray("relations");for(JsonNode r:graph.path("relations"))if(u.path("unitId").equals(r.path("fromUnitId"))||u.path("unitId").equals(r.path("toUnitId")))relations.add(r);return c;
     }

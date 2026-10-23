@@ -154,6 +154,10 @@ def _config(config):
         raise ValueError('Positive finite complete-parser timeout required')
     for parser in ('paddleocr-vl', 'mineru'):
         row = config.get(parser, {})
+        if row.get('nativeCaptureTransport') is not None:
+            if parser != 'paddleocr-vl':
+                raise ValueError('Native local CAS transport applies to Paddle only')
+            _paddle_asset_store(row)
         url = urlsplit(row.get('baseUrl', ''))
         if url.scheme not in ('http', 'https') or not url.hostname or url.username or url.password or url.query or url.fragment:
             raise ValueError('Explicit trusted parser base URL required')
@@ -238,9 +242,79 @@ def _mineru_outputs(raw):
     return outputs, assets
 
 
-def _paddle_native_outputs(result, digest, byte_count, store):
+def _paddle_asset_store(provider):
+    root = paddle_native_capture.native_asset_root((provider or {}).get('nativeCaptureTransport'))
+    if root is None:
+        return None
+    address = urlsplit(provider.get('baseUrl', ''))
+    if (not isinstance(provider.get('ownedBoot'), dict) or address.scheme != 'http'
+            or not address.hostname or not ipaddress.ip_address(address.hostname).is_loopback):
+        raise ValueError('Native CAS references require a pinned owned local provider')
+    from artifact_store import ArtifactStore
+    return ArtifactStore(root)
+
+
+def _paddle_assets(result, store, provider, *, failed=False):
+    source = _paddle_asset_store(provider)
+    failure_inline = (failed and source is not None
+        and result.get('rawAssetTransport') == paddle_native_capture.FAILED_INLINE_TRANSPORT
+        and isinstance(result.get('assetReferenceError'), dict) and 'rawAssetRefs' not in result)
+    if failure_inline:
+        source = None
+    if source is None:
+        if not failure_inline and ('rawAssetTransport' in result or 'rawAssetRefs' in result):
+            raise ValueError('Native CAS reference transport was not configured')
+        supplied = result.get('rawAssets')
+    else:
+        if result.get('rawAssetTransport') != paddle_native_capture.LOCAL_CAS_TRANSPORT or 'rawAssets' in result:
+            raise ValueError('Native CAS response transport differs from its configuration')
+        supplied = result.get('rawAssetRefs')
+    if not isinstance(supplied, dict):
+        raise ValueError('Native Paddle array assets missing')
+    assets, imported, size = {}, {}, 0
+    for name, value in supplied.items():
+        if (not isinstance(name, str) or not name.startswith('arrays/') or not name.endswith('.npy')
+                or '..' in name.split('/')):
+            raise ValueError('Invalid native Paddle array artifact')
+        if source is not None:
+            count = value.get('byteCount') if isinstance(value, dict) else None
+            if type(count) is not int or count < 0 or size+count > paddle_native_capture.MAX_NATIVE_ARRAY_BYTES:
+                raise ValueError('Native Paddle array assets exceed complete capture limit')
+            content = source.read_asset(value)
+        else:
+            if not isinstance(value, str):
+                raise ValueError('Invalid native Paddle array artifact')
+            content = base64.b64decode(value, validate=True)
+        size += len(content)
+        if size > paddle_native_capture.MAX_NATIVE_ARRAY_BYTES:
+            raise ValueError('Native Paddle array assets exceed complete capture limit')
+        assets[name] = content
+        imported[name] = store.put_bytes(content, identity_scope='actual_returned_native_array_npy')
+    return assets, imported
+
+
+def _paddle_failed_capture(result, digest, byte_count, store, provider):
+    supplied = result.get('rawOutputs')
+    if not isinstance(supplied, dict) or set(supplied) != {'model_output'} or not isinstance(supplied['model_output'], str):
+        raise ValueError('Failed native Paddle model-output manifest missing')
+    raw = base64.b64decode(supplied['model_output'], validate=True)
+    manifest = _json(raw)
+    if (manifest.get('schema') != 'consense.paddle-native-output-capture.v1'
+            or manifest.get('captureStatus') != 'failed_native_capture'
+            or manifest.get('input', {}).get('sha256') != digest or manifest['input'].get('byteCount') != byte_count):
+        raise ValueError('Failed native Paddle manifest is not bound to the dispatched input')
+    _, references = _paddle_assets(result, store, provider, failed=True)
+    return {'status': 'failed_capture_bytes_preserved', 'sourceQualityAccepted': False,
+            'manifest': store.put_bytes(raw, identity_scope='actual_failed_native_capture_manifest'),
+            'assets': references}
+
+
+def _paddle_native_outputs(result, digest, byte_count, store, *, provider=None):
     supplied = result.get('rawOutputs')
     if supplied is None:
+        if ('rawAssetTransport' in result or 'rawAssetRefs' in result
+                or (provider or {}).get('nativeCaptureTransport') is not None):
+            raise ValueError('Native CAS assets have no model-output manifest')
         return {}, {}, None
     if not isinstance(supplied, dict) or set(supplied) != {'model_output'} or not isinstance(supplied['model_output'], str):
         raise ValueError('Native Paddle must supply an exact model-output manifest')
@@ -255,19 +329,7 @@ def _paddle_native_outputs(result, digest, byte_count, store):
             or any(row.get('status') != 'completed' or row.get('terminalStatus') != 'eos_before_cap' for row in manifest['generationAttempts'])
             or any(row.get('status') != 'completed' or not row.get('inputs') or not row.get('outputs') for row in manifest['layoutRuns'])):
         raise ValueError('Native Paddle input/terminal/capture identity is incomplete')
-    encoded = result.get('rawAssets')
-    if not isinstance(encoded, dict):
-        raise ValueError('Native Paddle array assets missing')
-    assets, size = {}, 0
-    for name, value in encoded.items():
-        if (not isinstance(name, str) or not name.startswith('arrays/') or not name.endswith('.npy')
-                or '..' in name.split('/') or not isinstance(value, str)):
-            raise ValueError('Invalid native Paddle array artifact')
-        content = base64.b64decode(value, validate=True)
-        size += len(content)
-        if size > paddle_native_capture.MAX_NATIVE_ARRAY_BYTES:
-            raise ValueError('Native Paddle array assets exceed complete capture limit')
-        assets[name] = content
+    assets, imported = _paddle_assets(result, store, provider)
     records = []
     def collect(value):
         if isinstance(value, dict):
@@ -280,12 +342,16 @@ def _paddle_native_outputs(result, digest, byte_count, store):
     if not records or set(assets) != {row.get('assetName') for row in records}:
         raise ValueError('Native array manifest and returned complete asset set differ')
     import numpy as np
+    verified = {}
     for row in records:
         content = assets[row['assetName']]
         descriptor = row.get('artifact', {})
-        store.put_bytes(content, identity_scope='actual_returned_native_array_npy')
-        store.verify(descriptor)
-        if descriptor.get('sha256') != hashlib.sha256(content).hexdigest() or descriptor.get('byteCount') != len(content):
+        if row['assetName'] not in verified:
+            store.verify(descriptor)
+            verified[row['assetName']] = descriptor
+        elif descriptor != verified[row['assetName']]:
+            raise ValueError('Native array repeated reference descriptors differ')
+        if descriptor.get('sha256') != imported[row['assetName']]['sha256'] or descriptor.get('byteCount') != len(content):
             raise ValueError('Native array actual bytes differ from their manifest')
         stream = io.BytesIO(content)
         version = np.lib.format.read_magic(stream)
@@ -474,6 +540,14 @@ def recognize_complete_page(raw, config, store, *, request=_request, source_cont
                 httpStatus=getattr(error, 'status', None), responseComplete=getattr(error, 'complete', False))
             if hasattr(error, 'raw'):
                 attempt['response'] = store.put_bytes(error.raw, identity_scope='actual_received_http_body_complete' if error.complete else 'actual_received_http_body_incomplete')
+                if parser == 'paddleocr-vl' and error.complete and getattr(error, 'status', None) == 503:
+                    try:
+                        detail = _json(error.raw).get('detail', {})
+                        if isinstance(detail, dict) and detail.get('kind') == 'native_capture_failed':
+                            attempt['nativeFailureCapture'] = _paddle_failed_capture(detail, digest, len(raw), store, config[parser])
+                    except Exception as capture_error:
+                        attempt['nativeFailureCapture'] = {'status': 'failed_capture_import_failed',
+                            'errorType': type(capture_error).__name__, 'reason': str(capture_error), 'sourceQualityAccepted': False}
             raise
         if not isinstance(response, bytes) or len(response) > MAX_RESPONSE_BYTES:
             raise ValueError('Complete parser must return bounded actual response bytes')
@@ -522,7 +596,8 @@ def recognize_complete_page(raw, config, store, *, request=_request, source_cont
                         if value.get('errorCode', 0) != 0 or len(value.get('result', {}).get('layoutParsingResults', [])) != 1:
                             raise ValueError('Paddle full-page response is failed or incomplete')
                         outputs = {'page_json': wire}
-                        captured_outputs, captured_assets, paddle_capture = _paddle_native_outputs(value['result'], digest, len(raw), store)
+                        captured_outputs, captured_assets, paddle_capture = _paddle_native_outputs(value['result'], digest, len(raw), store,
+                            provider=config[parser])
                         if config[parser].get('requireNativeOutputCapture') and paddle_capture is None:
                             raise ValueError('Configured native Paddle output capture is missing; pruned JSON is insufficient')
                         outputs.update(captured_outputs); assets.update(captured_assets)

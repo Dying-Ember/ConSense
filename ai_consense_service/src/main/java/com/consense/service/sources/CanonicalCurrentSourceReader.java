@@ -7,10 +7,9 @@ import com.consense.domain.CanonicalSourceBinding;
 import com.consense.domain.SourceDocument;
 import com.consense.repository.CanonicalSourceBindingRepository;
 import com.consense.repository.SourceDocumentRepository;
+import com.consense.service.StorageService;
 import com.consense.service.vetting.VettingCorpus;
-import java.io.InputStream;
 import java.nio.file.*;
-import java.security.MessageDigest;
 import java.util.*;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -23,6 +22,7 @@ public class CanonicalCurrentSourceReader {
     private final SourceDocumentRepository documents;
     private final CanonicalSourceBindingRepository bindings;
     private final ConsenseProperties properties;
+    @javax.persistence.PersistenceContext private javax.persistence.EntityManager entityManager;
 
     @Transactional(propagation=Propagation.REQUIRES_NEW,isolation=Isolation.READ_COMMITTED,readOnly=true)
     public SourceDocument currentDocument(String projectId,Long id,String module){return readDocument(projectId,id,module);}
@@ -37,7 +37,7 @@ public class CanonicalCurrentSourceReader {
     @Transactional(propagation=Propagation.REQUIRES_NEW,isolation=Isolation.READ_COMMITTED,readOnly=true)
     public void assertCurrent(CanonicalSourceBinding binding,String module){
         checkSource(binding,module);
-        List<CanonicalSourceBinding> current=CanonicalEvidenceService.latestForModule(bindings.findByProjectIdAndDocumentIdOrderByIdDesc(binding.getProjectId(),binding.getDocumentId()),module);
+        List<CanonicalSourceBinding> current=CanonicalEvidenceService.latestForModule(bindings,entityManager,binding.getProjectId(),binding.getDocumentId(),module);
         require(!current.isEmpty()&&Objects.equals(current.get(0).getProjectionSha256(),binding.getProjectionSha256())
                 &&Objects.equals(current.get(0).getSnapshotBytesSha256(),binding.getSnapshotBytesSha256()),
                 HttpStatus.CONFLICT,"CANONICAL_ADOPTION_SUPERSEDED");
@@ -90,12 +90,7 @@ public class CanonicalCurrentSourceReader {
             throw new CanonicalEvidenceException(HttpStatus.CONFLICT,"SOURCE_DOCUMENT_SUPERSEDED");
         require(document.getSourceSha256()!=null&&document.getSourceSha256().matches("[a-f0-9]{64}"),HttpStatus.BAD_REQUEST,"CANONICAL_SHA_INVALID");
         try{
-            Path root=Paths.get(properties.getStorageRoot()).toAbsolutePath().normalize().toRealPath();
-            Path original=Paths.get(document.getStoragePath()).toAbsolutePath().normalize().toRealPath();
-            require(original.startsWith(root)&&Files.isRegularFile(original),HttpStatus.CONFLICT,"SOURCE_ORIGINAL_UNAVAILABLE");
-            MessageDigest hash=MessageDigest.getInstance("SHA-256");try(InputStream stream=Files.newInputStream(original)){byte[] buffer=new byte[8192];int n;while((n=stream.read(buffer))!=-1)hash.update(buffer,0,n);}
-            StringBuilder hex=new StringBuilder();for(byte b:hash.digest())hex.append(String.format("%02x",b&255));
-            require(document.getSourceSha256().equals(hex.toString()),HttpStatus.CONFLICT,"SOURCE_ORIGINAL_BYTES_CHANGED");
+            require(document.getSourceSha256().equals(StorageService.storedSha256(Paths.get(properties.getStorageRoot()),document.getStoragePath())),HttpStatus.CONFLICT,"SOURCE_ORIGINAL_BYTES_CHANGED");
         }catch(CanonicalEvidenceException e){throw e;}catch(Exception error){throw new CanonicalEvidenceException(HttpStatus.CONFLICT,"SOURCE_ORIGINAL_UNAVAILABLE");}
         return document;
     }

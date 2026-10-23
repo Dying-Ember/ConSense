@@ -37,10 +37,10 @@ async function harness(initial) {
   const app = vue.createApp(loaded.default); app.use(pinia); app.use(loaded.loadLocal(path.join(__dirname, '../src/i18n/index.ts')).i18n); app.mount(host); await settle()
   const button = title => [...host.querySelectorAll('button')].find(node => node.textContent.trim() === title)
   async function click(title) { const control = button(title); assert.ok(control, title); assert.equal(control.disabled, false, `${title} must be enabled`); control.click(); await settle() }
-  async function prepareRefresh() { if (!confirmed) await click('3 Source review') }
+  async function prepareRefresh() { if (!confirmed) await click('2 Variables and graph') }
   async function refresh() { await prepareRefresh(); confirmed(); await settle() }
   function unlocked() { assert.ok([...host.querySelectorAll('.flow-steps button')].every(control => !control.disabled), 'A clean arriving document must not lock the five steps'); assert.equal(host.querySelector('[data-open-business-graph="header"]').disabled, false) }
-  async function edit(text, additions) { await click('5 Preview and export'); const edit = host.querySelector('[aria-label="Edit paragraph 1"]'); assert.ok(edit); assert.equal(edit.disabled, false); edit.click(); await settle(); const textarea = host.querySelector('#body-p-1'); assert.ok(textarea); textarea.value = text; textarea.dispatchEvent(new window.Event('input', { bubbles: true })); await settle(); if (additions) { await click('Add paragraphs after this paragraph'); const insert = [...host.querySelectorAll('.body-block textarea')].find(node => node !== textarea); assert.ok(insert); insert.value = additions; insert.dispatchEvent(new window.Event('input', { bubbles: true })); await settle() } }
+  async function edit(text, additions) { await click('4 Preview and export'); const edit = host.querySelector('[aria-label="Edit paragraph 1"]'); assert.ok(edit); assert.equal(edit.disabled, false); edit.click(); await settle(); const textarea = host.querySelector('#body-p-1'); assert.ok(textarea); textarea.value = text; textarea.dispatchEvent(new window.Event('input', { bubbles: true })); await settle(); if (additions) { await click('Add paragraphs after this paragraph'); const insert = [...host.querySelectorAll('.body-block textarea')].find(node => node !== textarea); assert.ok(insert); insert.value = additions; insert.dispatchEvent(new window.Event('input', { bubbles: true })); await settle() } }
   const cache = loaded.loadLocal(path.join(__dirname, '../src/drafting/state.ts')).projectDrafts
   return { host, server, calls, store, cache, button, click, refresh, prepareRefresh, unlocked, edit, dispose() { app.unmount(); host.remove() } }
 }
@@ -49,7 +49,7 @@ test('the first backend document arriving after the initial load initializes its
   const h = await harness({ 'TEST-ARRIVAL': [] })
   try {
     await h.prepareRefresh(); h.server.set('TEST-ARRIVAL', [saved('NTT', 'first-revision', 'TEST ONLY first backend body')]); await h.refresh()
-    h.unlocked(); await h.click('5 Preview and export')
+    h.unlocked(); await h.click('4 Preview and export')
     assert.equal(h.host.querySelector('[data-test-body-workspace]').dataset.dirty, 'false')
     assert.match(h.host.querySelector('.body-block .paragraph-text').textContent, /first backend body/)
     assert.equal(h.host.querySelector('[data-draft-stale-status]'), null)
@@ -61,7 +61,7 @@ test('a clean existing document follows a new saved revision and its new paragra
   const h = await harness({ 'TEST-CLEAN-REVISION': [saved('NTT', 'old-revision', 'TEST ONLY old saved body')] })
   try {
     await h.prepareRefresh(); h.server.set('TEST-CLEAN-REVISION', [saved('NTT', 'new-revision', 'TEST ONLY new saved body')]); await h.refresh()
-    h.unlocked(); await h.click('5 Preview and export')
+    h.unlocked(); await h.click('4 Preview and export')
     assert.equal(h.host.querySelector('[data-test-body-workspace]').dataset.dirty, 'false')
     assert.match(h.host.querySelector('.body-block .paragraph-text').textContent, /new saved body/)
     assert.doesNotMatch(h.host.querySelector('.body-block .paragraph-text').textContent, /old saved body/)
@@ -86,7 +86,7 @@ test('a real paragraph edit and insertion survive a later backend revision and p
 test('a cached SCT body returns to the correct project and file without leaking into clean NTT', async () => {
   const h = await harness({ 'TEST-FILES': [saved('NTT', 'ntt-revision', 'TEST ONLY clean NTT'), saved('SCT', 'sct-revision', 'TEST ONLY clean SCT')], 'TEST-OTHER': [saved('NTT', 'other-revision', 'TEST ONLY other project')] })
   try {
-    await h.click('5 Preview and export'); await h.click('SCT'); await h.edit('TEST ONLY cached SCT edit')
+    await h.click('4 Preview and export'); await h.click('SCT'); await h.edit('TEST ONLY cached SCT edit')
     h.store.switchProject('TEST-OTHER'); await settle(); h.unlocked(); h.store.switchProject('TEST-FILES'); await settle()
     assert.ok(h.host.querySelector('.body-block .paragraph-text'), JSON.stringify({ cached: h.cache.get('TEST-FILES'), text: h.host.textContent }))
     assert.match(h.host.querySelector('.body-block .paragraph-text').textContent, /cached SCT edit/)

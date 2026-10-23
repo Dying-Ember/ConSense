@@ -319,7 +319,9 @@ class NormalSourceCandidateGraphTest {
         source.setTextContent(parsed.getText());source.setStructuredContentJson(JsonUtils.write(parsed.getBlocks()));source.setParseCoverageJson(JsonUtils.write(parsed.getCoverage()));
         source=JsonUtils.read(JsonUtils.write(source),SourceDocument.class);assertEquals(parsed.getCoverage().getNativeDocxSections(),JsonUtils.parse(source.getParseCoverageJson()).path("nativeDocxSections"));
         NormalSourceCandidateGraph.capture(source);JsonNode graph=NormalSourceCandidateGraph.requireBound(source),reference=parsed.getBlocks().get(0).getReadingContext().path("nativeDocxSection");
-        assertEquals(reference,graph.path("units").get(0).path("parts").get(0).path("readingContext").path("nativeDocxSection"));
+        JsonNode savedSection=graph.path("units").get(0).path("parts").get(0).path("readingContext").path("nativeDocxSection");
+        assertTrue(savedSection.path("$nativeSection").isIntegralNumber());
+        assertEquals(reference,NormalSourceCandidateGraph.expandedParagraphContexts(graph,savedSection));
         List<VettingCorpus.Chunk> chunks=VettingCorpus.chunks(Collections.singletonList(source));assertTrue(chunks.size()>1);boolean partial=false;
         for(JsonNode material:JsonUtils.mapper().valueToTree(VettingSourceMaterial.project(chunks)))for(JsonNode unit:material.path("candidateStructure").path("units"))for(JsonNode part:unit.path("parts")){
             JsonNode ref=part.path("readingContext").path("nativeDocxSection");assertTrue(ref.path("sectionId").isTextual());assertFalse(ref.has("retainedBlockIds"));

@@ -17,6 +17,28 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /** Authored metadata contracts; no real corpus parse or human/source-quality acceptance. */
 class OerSourceMetadataTest {
+    @Test void pdfListObservationSurvivesDetailedParsingAndEntersReviewWithoutAnExplicitRole() throws Exception {
+        for(String title:java.util.Arrays.asList("LIST OF CONTRACT DRAWINGS","LIST OF REFERENCE DRAWINGS AND DOCUMENTS")) {
+            byte[] bytes;
+            try(org.apache.pdfbox.pdmodel.PDDocument pdf=new org.apache.pdfbox.pdmodel.PDDocument();java.io.ByteArrayOutputStream out=new java.io.ByteArrayOutputStream()) {
+                org.apache.pdfbox.pdmodel.PDPage page=new org.apache.pdfbox.pdmodel.PDPage();pdf.addPage(page);
+                try(org.apache.pdfbox.pdmodel.PDPageContentStream content=new org.apache.pdfbox.pdmodel.PDPageContentStream(pdf,page)) {
+                    content.beginText();content.setFont(org.apache.pdfbox.pdmodel.font.PDType1Font.HELVETICA,12);content.newLineAtOffset(40,700);content.showText(title);content.endText();
+                }
+                pdf.save(out);bytes=out.toByteArray();
+            }
+            com.consense.config.ConsenseProperties props=new com.consense.config.ConsenseProperties();props.getOcr().setTextLayerMinChars(1);
+            DocumentParser parser=new DocumentParser(props,org.mockito.Mockito.mock(com.consense.ocr.OcrClient.class));
+            SourceDocument d=document();d.setReviewRole(null);d.setDocumentScope(null);d.setParseStatus("PARSING");
+            DocumentParser.ParsedDocument observation=parser.observe("anonymous.pdf",bytes);
+            assertTrue(OerSourceMetadata.captureObservation(d,observation,bytes),title);
+            assertEquals("tender",VettingCorpus.sourceRole(d));assertNull(d.getReviewRole());
+            DocumentParser.ParsedDocument parsed=parser.parse("anonymous.pdf",bytes,observation,OerSourceMetadata.identity(d));
+            OerSourceMetadata.capture(d,parsed,bytes);d.setTextContent(parsed.getText());d.setParseStatus(parsed.getParseStatus());
+            assertNull(ProjectDocumentScope.exclusionReason(d,"fullset"));
+            assertEquals(java.util.Collections.singletonList(d),ProjectDocumentScope.selected(d.getProjectId(),java.util.Collections.singletonList(d),"fullset"));
+        }
+    }
     private static final byte[] BYTES="AUTHORED-original-bytes".getBytes(StandardCharsets.UTF_8);
     private static final String SHA=OerSourceMetadata.originalSha256(BYTES);
     private SourceDocument document() {
@@ -197,5 +219,35 @@ class OerSourceMetadataTest {
         assertEquals(1,ProjectDocumentScope.currentCatalog(d.getProjectId(),java.util.Arrays.asList(d)).size());
         assertFalse(ProjectDocumentScope.parseUsable(d));
         assertEquals("A native paragraph",d.getTextContent());
+    }
+
+    @Test void failed_and_parsing_latest_sources_keep_scope_membership_without_becoming_parse_usable() {
+        for(String status:java.util.Arrays.asList("FAILED","PARSING")) {
+            SourceDocument old=document(),latest=document();latest.setId(18L);latest.setFileName(" RENAMED-DOCUMENT.PDF ");
+            for(SourceDocument source:java.util.Arrays.asList(old,latest))
+                OerSourceMetadata.capture(source,parsed(SHA),BYTES,routing("project_document","SCC","tender"));
+            latest.setParseStatus(status);latest.setTextContent(null);
+            for(String module:java.util.Arrays.asList("vetting","advisory")) {
+                assertNull(ProjectDocumentScope.exclusionReason(latest,"contract",module),status);
+                assertEquals(java.util.Collections.singletonList(latest),ProjectDocumentScope.selected(old.getProjectId(),java.util.Arrays.asList(old,latest),"contract",module),status);
+            }
+            assertFalse(ProjectDocumentScope.parseUsable(latest),status);
+            for(String scope:java.util.Arrays.asList("drawing","pricing","example","works_pss")) {
+                latest.setDocumentScope(scope);
+                for(String module:java.util.Arrays.asList("vetting","advisory"))
+                    assertTrue(ProjectDocumentScope.selected(old.getProjectId(),java.util.Arrays.asList(old,latest),"fullset",module).isEmpty(),status+" "+scope);
+            }
+            SourceDocument unknown=document();unknown.setId(19L);
+            OerSourceMetadata.capture(unknown,parsed(SHA),BYTES,new OerSourceRouting());unknown.setParseStatus(status);
+            assertEquals("source_identity_unresolved",ProjectDocumentScope.exclusionReason(unknown,"fullset"));
+            for(String module:java.util.Arrays.asList("vetting","advisory"))
+                assertTrue(ProjectDocumentScope.selected(old.getProjectId(),java.util.Arrays.asList(old,unknown),"fullset",module).isEmpty(),status);
+            for(String[] excluded:new String[][]{{"standard_template","SCT","standard"},{"evaluation_answer","EVALUATION_ANSWER",null}}) {
+                SourceDocument blocked=document();blocked.setId(20L);
+                OerSourceMetadata.capture(blocked,parsed(SHA),BYTES,routing(excluded[0],excluded[1],excluded[2]));blocked.setParseStatus(status);
+                for(String module:java.util.Arrays.asList("vetting","advisory"))
+                    assertTrue(ProjectDocumentScope.selected(old.getProjectId(),java.util.Arrays.asList(old,blocked),"fullset",module).isEmpty(),status+" "+excluded[0]);
+            }
+        }
     }
 }

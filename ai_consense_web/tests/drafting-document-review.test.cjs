@@ -279,6 +279,7 @@ async function warningSourceLabels() {
   h.dispose(); console.log('PASS: reading warnings identify original and saved carriers independently')
 }
 async function compactLimitsKeepEveryRiskAndParentOwnedStaleStatus() {
+  await deliveryNoticesPreserveVerifiedOverlay()
   const props = base(); props.document.stale = true; props.staleNoticePresented = true; props.result = undefined; props.resultBindings = undefined
   props.original.warnings = ['Native numbering labels and continuation sequence are not verified in this reading (22 numbered paragraph(s)). Check the PDF layout for the original list markers.']
   const h = await harness(props)
@@ -290,5 +291,18 @@ async function compactLimitsKeepEveryRiskAndParentOwnedStaleStatus() {
   assert.equal(h.element.querySelector('[data-review-mode="saved"]').disabled, true)
   assert.match(h.element.querySelector('[data-document-paper]').textContent, /Complete invitation/)
   h.dispose(); console.log('PASS: one collapsed risk disclosure preserves numbering/binding failures while parent stale status remains singular')
+}
+async function deliveryNoticesPreserveVerifiedOverlay() {
+  const props = base()
+  props.result = reading('result-sha', [[10, 'INCOMPLETE DRAFT'], [1, 'Complete invitation'], [2, 'Pay 100 dollars.'], [3, 'Complete closing paragraph'], [11, 'Outstanding items']])
+  for (const [n, text, position] of [[10, 'INCOMPLETE DRAFT', 'before'], [11, 'Outstanding items', 'after']]) props.resultBindings.bindings.push(binding(`notice-${n}`, n, null, text, { sourceParagraphId: null, sourceParagraphOrdinal: null, fieldKeys: [], actionIds: [], appliedActionIds: [], operationIds: [], applicationStatus: 'delivery_notice', deliveryPosition: position }))
+  const h = await harness(props), paper = h.element.querySelector('[data-document-paper]')
+  assert.match(paper.textContent, /^INCOMPLETE DRAFT/); assert.match(paper.textContent, /Outstanding items$/)
+  assert.equal(paper.querySelector('ins').textContent, '100', 'Registered notices do not discard the verified business diff')
+  assert.equal(paper.querySelectorAll('[data-review-added][data-review-binding]').length, 0, 'Delivery notices are not business inputs')
+  h.props.resultBindings.bindings.find(row => row.bindingId === 'notice-10').text = 'Unverified replacement'
+  await settle()
+  assert.equal(h.element.querySelectorAll('[data-document-paper] ins').length, 0, 'A changed notice receipt retains the complete-reading fallback')
+  h.dispose(); console.log('PASS: revision-bound delivery notices preserve complete order and do not relax mismatch guards')
 }
 ;(async () => { await unverifiedMappingStillReadsCurrentSavedBody(); await compactLimitsKeepEveryRiskAndParentOwnedStaleStatus(); await completeSavedRevisionChanges(); await warningSourceLabels(); await completeDocumentModes(); await selectedActualTokenDiff(); await nativeLineBreakTokenDiff(); await linkedNativeNavigation(); await branchGuidanceAndAddedMapping(); await verifiedReadingGuardsAndLocales(); await replacedTemplateKeepsCurrentOriginal(); await recordedEvidenceContext(); await appliedSharedParagraphAttribution(); await unavailableSavedLedger(); await missingCrossFileTargetDoesNotFallback() })().catch(error => { console.error(error); process.exitCode = 1 })

@@ -94,6 +94,8 @@ public final class OerSourceRouting {
                 if (appendixLocation != null || projectIdentifier != null) purpose = "project_document";
                 else result.getCandidates().add(new OerDocumentIdentity.Candidate(titleKind, "standard_template", "An unfilled title alone does not establish a standard template"));
             } else if (Arrays.asList("AA", "FT").contains(titleKind)) purpose = "project_document";
+            else if (Arrays.asList("APB", "APU").contains(titleKind)
+                    && title.matches("(?is)^\\s*(?:appendix\\s+[a-z0-9]+\\s+)?list of (?:contract drawings|reference drawings\\s*(?:/|and)\\s*documents)(?:\\s.*)?$")) purpose = "project_document";
             else if ("PRE".equals(titleKind) && projectIdentifier != null) purpose = "project_document";
             else if (Arrays.asList("GCC", "GS").contains(titleKind)) purpose = "reference_standard";
             else if ("GCT".equals(titleKind) && content.matches("(?is).*\\b(?:tenderer|tender|contract)\\b.*")) purpose = "project_document";
@@ -194,6 +196,7 @@ public final class OerSourceRouting {
         return title.toString();
     }
     private static String titleKind(String title) {
+        if (title.matches("(?is)^\\s*(?:appendix\\s+[a-z0-9]+\\s+)?list of reference drawings\\s*(?:/|and)\\s*documents(?:\\s.*)?$")) return "APU";
         // A PRE cover commonly prints PARTICULAR SPECIFICATION and PRELIMINARIES on separate lines.
         for (String line : title.split("\\n")) { String kind = titledKind(line); if (kind != null) {
             if ("WORKS_PSS".equals(kind) && Pattern.compile("(?im)^\\s*preliminaries(?:\\s+specification)?\\s*$").matcher(title).find()) return "PRE";
@@ -213,6 +216,8 @@ public final class OerSourceRouting {
         value = value.trim().replaceFirst("^(?:[0-9]+[. )-]*|appendix [a-z0-9]+[. :-]*)", "").trim();
         if (value.matches("(?:articles? of agreement|form of agreement)(?: \\(aa\\))?")) return "AA";
         if (value.matches("form of tender(?: \\(ft\\))?")) return "FT";
+        if (value.matches("list of contract drawings")) return "APB";
+        if (value.matches("list of reference drawings and documents")) return "APU";
         if (value.matches("(?:notes?|notice) to tenderers?(?: \\(ntt\\))?")) return "NTT";
         if (value.matches("special conditions? of tender(?: \\(sct\\))?")) return "SCT";
         if (value.matches("special conditions? of contract(?: \\(scc\\))?")) return "SCC";

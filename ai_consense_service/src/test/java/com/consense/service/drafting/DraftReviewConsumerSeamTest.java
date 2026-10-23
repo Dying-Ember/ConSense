@@ -32,10 +32,11 @@ class DraftReviewConsumerSeamTest {
     }
     @Test void legacyProjectsKeepTheirExistingCatalog(){when(graph.hasConfirmed("p")).thenReturn(false);assertEquals(DraftBusinessRules.catalog().get("ruleVersion"),drafting.catalog("p").get("ruleVersion"));verify(graph,never()).catalog(anyString());}
     @Test void sourceIdentityGuardsAlternateEditionAssetsWithoutReparsing(){
-        SourceDocument source=new SourceDocument();source.setId(23L);source.setProjectId("p");source.setCategory(SourceDocument.CATEGORY_STANDARD_TEMPLATE);source.setFileKey("SCC");source.setFileName("different-scc.pdf");source.setStoragePath("private/source");
+        SourceDocumentRepository.OriginalAssetMetadata source=mock(SourceDocumentRepository.OriginalAssetMetadata.class);when(source.getId()).thenReturn(23L);when(source.getProjectId()).thenReturn("p");when(source.getCategory()).thenReturn(SourceDocument.CATEGORY_STANDARD_TEMPLATE);when(source.getFileName()).thenReturn("different-scc.pdf");when(source.getStoragePath()).thenReturn("private/source");
         byte[] bytes="%PDF-1.4\noriginal source bytes".getBytes(StandardCharsets.UTF_8);String sha=DraftPdfConverter.sha256(bytes);
-        when(sources.findById(23L)).thenReturn(Optional.of(source));when(storage.matchesStoredBytes("private/source",sha)).thenReturn(true);when(storage.read("private/source")).thenReturn(bytes);
+        when(sources.findOriginalAssetMetadataById(23L)).thenReturn(Optional.of(source));when(storage.matchesStoredBytes("private/source",sha)).thenReturn(true);when(storage.read("private/source")).thenReturn(bytes);
         assertArrayEquals(bytes,drafting.reviewSource("p",23L,sha,true).getBytes());
+        verify(sources,never()).findById(anyLong());
         assertThrows(BizException.class,()->drafting.reviewSource("p",23L,"wrong",false));
         assertThrows(BizException.class,()->drafting.reviewSource("other-project",23L,sha,false));
         when(storage.read("private/source")).thenReturn("changed".getBytes(StandardCharsets.UTF_8));assertThrows(BizException.class,()->drafting.reviewSource("p",23L,sha,false));

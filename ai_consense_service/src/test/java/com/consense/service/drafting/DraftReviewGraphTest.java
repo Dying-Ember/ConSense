@@ -10,6 +10,48 @@ import static org.junit.jupiter.api.Assertions.*;
 import static com.consense.service.drafting.DraftReviewGraph.*;
 
 class DraftReviewGraphTest {
+    @Test void conflictReviewKeepsDocumentAndCoordinateSystemsSeparate(){
+        Map<String,Object> first=obj("id","a","document","NTT","action","delete","nativeBinding",obj("spans",Collections.singletonList(obj("paragraphId","p1","channel","editableText","start",0,"end",2))));
+        Map<String,Object> second=obj("id","b","document","SCT","action","retain","nativeBinding",obj("spans",Collections.singletonList(obj("paragraphId","p1","channel","catalogText","start",10,"end",12))));
+        Map<String,Object> result=obj("actions",Arrays.asList(first,second));deferConflictingActions(result);assertTrue(list(result.get("unresolved")).isEmpty());
+        second.put("document","NTT");deferConflictingActions(result);assertEquals("pending",first.get("action"));assertEquals("pending",second.get("action"));assertEquals(2,list(result.get("unresolved")).size());
+    }
+    @Test void partialPlanningPreservesUnreviewedOwnersAndDependenciesWithoutChangingSavedGraph() {
+        Map<String,Object> answer=node("answer","text","input"),condition=node("condition","boolean","fixed"),owner=node("owner","text","verification"),pending=node("pending","text","verification");
+        condition.put("fixedValue",true);condition.put("status","pending");pending.put("status","changed");
+        Map<String,Object> binding=obj("status","bound","spans",Collections.singletonList(obj("paragraphId","exact")));
+        owner.put("correction",obj("branches",Collections.singletonList(branch("yes","all",clause("condition","yes","")))));
+        owner.put("editTargets",Arrays.asList(obj("id","dependent","docId","ntt","action","delete","branchId","yes","nativeBinding",binding),obj("id","independent","docId","ntt","action","fill","valueSourceId","answer","nativeBinding",binding)));
+        pending.put("editTargets",Collections.singletonList(obj("id","unreviewed-delete","docId","ntt","action","delete","nativeBinding",binding)));
+        Map<String,Object> graph=graph(answer,condition,owner,pending),adopted=obj("answer","Approved wording");String before=com.consense.common.JsonUtils.write(graph);
+        Map<String,Object> result=plan(graph,adopted,true);List<?> actions=list(result.get("actions"));
+        assertEquals("pending",map(actions.get(0)).get("action"));assertEquals("amend",map(actions.get(1)).get("action"));assertEquals("Approved wording",map(actions.get(1)).get("value"));assertEquals("pending",map(actions.get(2)).get("action"));
+        assertEquals(2,list(result.get("unresolved")).stream().filter(x->"NodeReviewRequired".equals(map(x).get("kind"))).count());
+        assertEquals(before,com.consense.common.JsonUtils.write(graph));assertEquals(obj("answer","Approved wording"),adopted);
+        answer.put("status","pending");result=plan(graph,adopted,true);assertEquals("pending",map(list(result.get("actions")).get(1)).get("action"));assertFalse(map(result.get("effectiveValues")).containsKey("answer"));
+        answer.put("status","confirmed");condition.put("status","confirmed");pending.put("status","confirmed");
+        result=plan(graph,adopted,true);assertTrue(list(result.get("unresolved")).isEmpty());assertEquals("delete",map(list(result.get("actions")).get(0)).get("action"));
+        assertEquals(com.consense.common.JsonUtils.write(plan(graph,adopted)),com.consense.common.JsonUtils.write(result));
+    }
+    @Test void extractionDefinitionPreservesRecursiveMeaningWithoutSourceStorageOrEditPayload() {
+        Map<String,Object> child=node("child","boolean","input"),field=node("parent","record","input");
+        field.put("children",Collections.singletonList(child));field.put("guidance",obj("zh","仅适用于已确认的基础工程","en","Only for confirmed foundation works","sourceAnchors","NATIVE-XML-MUST-STAY-SERVER-SIDE"));
+        field.put("sourceAnchors",Collections.singletonList(obj("rawXml",String.join("",Collections.nCopies(100000,"x")))));
+        field.put("editTargets",Collections.singletonList(obj("nativeBinding","PRIVATE-EDIT-COORDINATES")));
+        field.put("correction",obj("mode","all","clauses",Collections.singletonList(clause("child","yes",""))));
+        String before=com.consense.common.JsonUtils.write(field);Map<String,Object> prompt=extractionDefinitions(Collections.singletonList(field)).get(0);
+        assertEquals(fieldHash(field),fieldHash(prompt));assertEquals(field.get("correction"),prompt.get("correction"));
+        assertEquals("Only for confirmed foundation works",map(prompt.get("guidance")).get("en"));
+        String wire=com.consense.common.JsonUtils.write(prompt);assertFalse(wire.contains("rawXml"));assertFalse(wire.contains("sourceAnchors"));assertFalse(wire.contains("PRIVATE-EDIT"));assertTrue(wire.length()<2000);
+        assertEquals(before,com.consense.common.JsonUtils.write(field));
+    }
+    @Test void extractionBatchesKeepEveryCompleteDefinitionInOrderAndRejectAnOversizedSingleField() {
+        List<Map<String,Object>> fields=new ArrayList<>();for(int i=0;i<202;i++){Map<String,Object> field=node("field-"+i,"text","input");field.put("questionEn",String.join("",Collections.nCopies(900,"q")));fields.add(field);}
+        List<Map<String,Object>> flattened=new ArrayList<>();List<List<Map<String,Object>>> batches=extractionDefinitionBatches(fields);assertTrue(batches.size()>1);
+        for(List<Map<String,Object>> batch:batches){assertTrue(com.consense.common.JsonUtils.write(batch).length()<=48000);flattened.addAll(batch);}
+        assertEquals(fields.size(),flattened.size());for(int i=0;i<fields.size();i++)assertEquals(fieldHash(fields.get(i)),fieldHash(flattened.get(i)));
+        Map<String,Object> oversized=node("large","text","input");oversized.put("questionEn",String.join("",Collections.nCopies(50000,"q")));assertThrows(BizException.class,()->extractionDefinitionBatches(Collections.singletonList(oversized)));
+    }
     private Map<String,Object> node(String id,String type,String role){return obj("id",id,"nameZh",id,"nameEn",id,"questionEn",id,"parentId",null,"type",obj("kind",type),"role",obj("kind",role),"status","confirmed","docIds",Collections.singletonList("ntt"),"options",new ArrayList<>(),"editTargets",new ArrayList<>());}
     private Map<String,Object> graph(Map<String,Object>... nodes){return obj("kind","consense-template-graph-v1","graph",obj("variables",Arrays.asList(nodes)),"selectedDocuments",obj("NTT","ntt"));}
     private Map<String,Object> clause(String id,String op,String value){return obj("inputId",id,"operator",op,"value",value);}
@@ -182,7 +224,24 @@ class DraftReviewGraphTest {
         Map<String,Object> plan=obj("actions",Collections.singletonList(action));
         DocxTemplateEditor.DocxEditResult output=compile(original,"NTT",obj(),plan,Collections.emptyMap(),null);
         assertEquals("Before G1a after",output.getIndex().getMainParagraphs().get(0).getText());assertEquals("Keep this paragraph",output.getIndex().getMainParagraphs().get(1).getText());
+        Map<String,Object> unresolved=obj("id","other-target","document","NTT","action","pending");
+        plan.put("actions",Arrays.asList(action,unresolved));String frozen=com.consense.common.JsonUtils.write(plan);
+        assertThrows(BizException.class,()->compile(original,"NTT",obj(),plan,Collections.emptyMap(),null));
+        DocxTemplateEditor.DocxEditResult partial=compile(original,"NTT",obj(),plan,Collections.emptyMap(),null,true);
+        assertEquals("Before G1a after",partial.getIndex().getMainParagraphs().get(0).getText());assertEquals("Keep this paragraph",partial.getIndex().getMainParagraphs().get(1).getText());
+        assertEquals(frozen,com.consense.common.JsonUtils.write(plan));
+        unresolved.put("nativeBinding",binding);assertThrows(BizException.class,()->compile(original,"NTT",obj(),plan,Collections.emptyMap(),null,true));
+        Map<String,Object> conflicted=com.consense.common.JsonUtils.readMap(com.consense.common.JsonUtils.write(plan));
+        DocxTemplateEditor.Paragraph second=index.getMainParagraphs().get(1);
+        Map<String,Object> independent=obj("id","independent","document","NTT","action","amend","value","Saved","nativeBinding",obj("status","bound","sourceSha256",index.getSourceSha256(),"spans",Collections.singletonList(obj("paragraphId",second.getId(),"paragraphSha256",second.getSha256(),"start",0,"end",4,"expectedText","Keep","channel","editableText"))));
+        ((List<Object>)conflicted.get("actions")).add(independent);deferConflictingActions(conflicted);
+        assertEquals(2,list(conflicted.get("unresolved")).size());assertEquals("amend",independent.get("action"));
+        String deferred=com.consense.common.JsonUtils.write(conflicted);deferConflictingActions(conflicted);assertEquals(deferred,com.consense.common.JsonUtils.write(conflicted));
+        DocxTemplateEditor.DocxEditResult independentOutput=compile(original,"NTT",obj(),conflicted,Collections.emptyMap(),null,true);
+        assertEquals("Before *G1/*G1a after",independentOutput.getIndex().getMainParagraphs().get(0).getText());assertEquals("Saved this paragraph",independentOutput.getIndex().getMainParagraphs().get(1).getText());
         plan.put("actions",Arrays.asList(action,action));assertThrows(BizException.class,()->compile(original,"NTT",obj(),plan,Collections.emptyMap(),null));
+        assertThrows(BizException.class,()->compile(original,"NTT",obj(),plan,Collections.emptyMap(),null,true));
         plan.put("actions",Collections.singletonList(action));binding.put("sourceSha256",String.join("",Collections.nCopies(64,"0")));assertThrows(BizException.class,()->compile(original,"NTT",obj(),plan,Collections.emptyMap(),null));
+        assertThrows(BizException.class,()->compile(original,"NTT",obj(),plan,Collections.emptyMap(),null,true));
     }
 }

@@ -10,6 +10,14 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.io.BufferedWriter;
+import java.io.OutputStream;
+import java.io.OutputStreamWriter;
+import java.io.Writer;
+import java.nio.charset.StandardCharsets;
+import java.security.DigestOutputStream;
+import java.security.MessageDigest;
 
 public final class JsonUtils {
 
@@ -33,6 +41,23 @@ public final class JsonUtils {
             return MAPPER.writeValueAsString(value);
         } catch (Exception e) {
             throw new BizException("JSON 序列化失败: " + e.getMessage());
+        }
+    }
+
+    /** Same bytes as Utf8.sha256(write(value)), without retaining the complete JSON string. */
+    public static String serializedSha256(Object value) {
+        Objects.requireNonNull(value,"JSON fingerprint value");
+        try {
+            MessageDigest digest=MessageDigest.getInstance("SHA-256");
+            OutputStream discard=new OutputStream(){@Override public void write(int value){}@Override public void write(byte[] bytes,int offset,int length){}};
+            try(Writer out=new BufferedWriter(new OutputStreamWriter(new DigestOutputStream(discard,digest),StandardCharsets.UTF_8))){
+                MAPPER.writeValue(out,value);
+            }
+            char[] hex=new char[64],digits="0123456789abcdef".toCharArray();byte[] bytes=digest.digest();
+            for(int i=0;i<bytes.length;i++){hex[2*i]=digits[(bytes[i]&255)>>>4];hex[2*i+1]=digits[bytes[i]&15];}
+            return new String(hex);
+        } catch(Exception e) {
+            throw new BizException("JSON 序列化失败: "+e.getMessage());
         }
     }
 

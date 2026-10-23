@@ -302,13 +302,14 @@ class NativePdfSourceFamilyCacheTest(unittest.TestCase):
         self.assertIsNone(self.registry._validation_frame.get())
 
     def test_retention_budget_includes_file_commitments_and_cap_does_not_truncate_roots(self):
-        bounded = self.new_registry(derived_cache_max_bytes=len(_serialize(self.family)))
+        self.warm()
+        retained = next(iter(self.registry._derived_results.values())).retained_bytes
+        bounded = self.new_registry(derived_cache_max_bytes=retained - 1)
         original_child = family_module.validate_native_pdf_transport
         with patch.object(family_module, 'validate_native_pdf_transport', wraps=original_child) as child:
             self.framed(bounded); self.framed(bounded)
             self.assertEqual(4, child.call_count)
         self.assertEqual(0, len(bounded._derived_results))
-        self.warm()
         path = self.registry._path(self.children[0]['projectionSha256']); raw = path.read_bytes()
         try:
             path.write_bytes(raw + b' ' * (family_module.MAX_SNAPSHOT_BYTES - len(raw) + 1))

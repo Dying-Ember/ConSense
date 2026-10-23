@@ -66,7 +66,7 @@ const api = {
 const loaded = loadVue(path.join(__dirname, '../src/views/DraftingView.vue'), {
   globals: { window, document, HTMLElement, Element, Node, DOMParser: window.DOMParser, XMLSerializer: window.XMLSerializer, NodeFilter: window.NodeFilter, ResizeObserver, Blob, URL: { createObjectURL: () => `blob:SYNTHETIC-${previews.length}`, revokeObjectURL() {} }, crypto: crypto.webcrypto, localStorage: { getItem: () => 'en', setItem() {} } },
   boundaries: {
-    '@/api': { draftingApi: api, setLlmProfileResolver() {} }, pinia: piniaRuntime, 'vue-i18n': require('vue-i18n'),
+    '@/api/source-locations': { reviewSourceBindings: async () => { throw Error('Source location transport not provided by this fixture') } }, '@/api': { draftingApi: api, setLlmProfileResolver() {} }, pinia: piniaRuntime, 'vue-i18n': require('vue-i18n'),
     'mammoth/mammoth.browser': { default: require('mammoth/mammoth.browser') },
     jszip: { default: JSZip }, 'mammoth/mammoth.browser.min.js': { default: require('mammoth/mammoth.browser.min.js') }, dompurify: { default: require('dompurify')(window) },
     'pdfjs-dist/build/pdf.worker.min.mjs?url': { default: 'external-worker' },
@@ -105,7 +105,7 @@ const workspace = () => document.querySelector('[data-document-workspace]')
   baseDocument.docxSha256 = await docx(baseDocument.content); baseDocument.sourceSha256 = baseDocument.docxSha256
   baseDocument.blocks[0].id = nativePath
   servers.clear()
-  app.mount('#app'); await settled(); await click('5 Preview and export')
+  app.mount('#app'); await settled(); await click('4 Preview and export')
   await waitFor('the actual complete DOCX in the primary view', () => workspace()?.querySelector('[data-document-paper]')?.textContent.includes('SYNTHETIC complete document heading'))
   const paper = workspace().querySelector('[data-document-paper]'), loadCount = loads.length
   assert.ok(paper?.textContent.includes('SYNTHETIC complete document heading'), 'The primary view loads the actual full DOCX')
@@ -124,8 +124,7 @@ const workspace = () => document.querySelector('[data-document-workspace]')
   await click('Document information')
   assert.notEqual(workspace().querySelector('.document-info').style.display, 'none')
   const informationToggle = button('Document information', workspace())
-  const versionSummary = workspace().querySelector('.document-versions summary')
-  versionSummary.focus(); keydown(versionSummary, 'Escape'); await settled()
+  informationToggle.focus(); keydown(informationToggle, 'Escape'); await settled()
   assert.equal(workspace().getAttribute('role'), 'dialog', 'Escape closes the information panel before leaving expanded view')
   assert.equal(workspace().querySelector('.document-info').style.display, 'none')
   assert.equal(document.activeElement, informationToggle, 'Closing focused document information restores its visible opener')
@@ -143,13 +142,14 @@ const workspace = () => document.querySelector('[data-document-workspace]')
   assert.equal(workspace().querySelector('.draft-unresolved').open, true, 'Returning to ordinary preview restores its existing expanded review presentation')
   assert.equal(writes.length, 0); assert.equal(exportCalls.length, 0)
   console.log('PASS: mounted native document expands without reopening an artifact, exits on Escape and restores focus without writes or exports')
-  assert.ok(workspace().textContent.includes('Saved revision'), 'The saved artifact revision is identified explicitly')
+  assert.match(workspace().querySelector('.document-revision-status').textContent, /Showing the saved document/, 'The saved artifact is identified in readable language')
   await click('Edit content'); await click('Edit paragraph')
   const revised = '  Pending exact\tparagraph.\nSecond line.  '
   input(document.getElementById('body-p-2'), revised); await settled()
   await click('Expand document')
   assert.ok(workspace().textContent.includes('Pending body changes'), 'Unsaved body text is labeled as pending rather than assigned to the saved PDF revision')
-  assert.ok(workspace().textContent.includes('SYNTHETIC-revision-1'))
+  assert.equal(server('SYNTHETIC-P1').revisionId, 'SYNTHETIC-revision-1', 'Pending text does not change the saved artifact identity')
+  assert.ok(!workspace().querySelector('.document-info').textContent.includes('SYNTHETIC-revision-1'), 'Internal revision IDs are not displayed in document information')
   assert.equal(workspace().querySelector('canvas'), null, 'An old saved PDF is not displayed as the current pending body')
   assert.equal(button('Export PDF').disabled, true); assert.equal(button('NTT', workspace()).disabled, true)
   escape(); await settled()
@@ -170,9 +170,10 @@ const workspace = () => document.querySelector('[data-document-workspace]')
   assert.equal(workspace().querySelector('canvas'), null)
   assert.deepEqual(writes[0], ['SYNTHETIC-P1', 'NTT', { revisionId: 'SYNTHETIC-revision-1', docxSha256: baseDocument.docxSha256, blocks: [{ id: nativePath, expectedTextHash: 'SYNTHETIC-text-1', text: revised }] }])
   failedWrite = false; await click('Save content and preview')
-  assert.ok(workspace().textContent.includes('Saved revision: SYNTHETIC-revision-2'))
+  assert.match(workspace().querySelector('.document-revision-status').textContent, /Showing the saved document/)
+  assert.equal(server('SYNTHETIC-P1').revisionId, 'SYNTHETIC-revision-2')
   assert.ok(!workspace().textContent.includes('Pending body changes'))
-  assert.ok(workspace().textContent.includes(server('SYNTHETIC-P1').docxSha256)); assert.ok(workspace().textContent.includes('SYNTHETIC-pdf-2')); assert.ok(workspace().textContent.includes('SYNTHETIC-profile'))
+  for (const internal of [server('SYNTHETIC-P1').docxSha256, 'SYNTHETIC-revision-2', 'SYNTHETIC-pdf-2', 'SYNTHETIC-profile']) assert.ok(!workspace().querySelector('.document-info').textContent.includes(internal), 'Internal artifact identities remain outside the business display')
   assert.equal(previews.length, 0, 'Saving does not silently request an optional PDF')
   await waitFor('the returned saved DOCX ready for reading', () => {
     const control = workspace()?.querySelector('[data-review-mode="saved"]')
@@ -193,11 +194,11 @@ const workspace = () => document.querySelector('[data-document-workspace]')
   await click('Export PDF'); await click('Export Word')
   assert.deepEqual(exportCalls, [['SYNTHETIC-P1', 'NTT', 'pdf', 'SYNTHETIC-revision-2'], ['SYNTHETIC-P1', 'NTT', 'docx', 'SYNTHETIC-revision-2']])
   assert.equal(server('SYNTHETIC-P1').content, revised)
-  console.log('PASS: expanded save conflicts stay visible without losing exact dirty text; retry, PDF preview and both exports use the returned saved revision and retain hash/profile metadata')
+  console.log('PASS: expanded save conflicts retain exact dirty text; retry, PDF preview and both exports bind the returned saved revision without displaying hashes/profile metadata')
   const words = loaded.loadLocal(path.join(__dirname, '../src/drafting/words.ts'))
-  for (const locale of ['zh-Hans', 'zh-Hant', 'en']) {
+  for (const [locale, savedLabel] of [['zh-Hans', '当前显示已保存的文稿'], ['zh-Hant', '目前顯示已儲存的文稿'], ['en', 'Showing the saved document']]) {
     store.locale = locale; await settled()
-    assert.ok(workspace().textContent.includes(words.draftWord('savedBodyRevision', locale)))
+    assert.ok(workspace().querySelector('.document-revision-status').textContent.includes(savedLabel))
     await click(words.draftWord('exitImmersive', locale))
     await click(words.draftWord('immersivePreview', locale))
     assert.ok(workspace().querySelector('[data-document-paper]').textContent.includes('Pending exact'))

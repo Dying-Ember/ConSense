@@ -10,6 +10,16 @@ import org.apache.pdfbox.pdmodel.font.PDType1Font;
 public final class DraftPdfConverterFixture {
     public static void main(String[] args) throws Exception {
         String mode=args[0];
+        if("temporary-directory".equals(mode)) {
+            Path expected=Paths.get(args[1]).toAbsolutePath();
+            for(String name:Arrays.asList("TEMP","TMP","TMPDIR"))if(!expected.equals(Paths.get(System.getenv(name))))throw new IllegalStateException("Unexpected scratch directory: "+name);
+            Path probe=Files.createTempFile(expected,"renderer-",".tmp");Files.write(probe,new byte[]{1});Files.delete(probe);System.out.print("private scratch usable");return;
+        }
+        if("held-process".equals(mode)) {
+            Path gate=Paths.get(args[1]);Files.createDirectories(gate);Files.write(gate.resolve("started"),new byte[]{1});
+            while(!Files.exists(gate.resolve("release")))Thread.sleep(20);return;
+        }
+        if("marked-process".equals(mode)) {Files.write(Paths.get(args[1]),new byte[]{1});return;}
         if("timeout-budget".equals(mode))Thread.sleep(700);
         if(Arrays.asList(args).contains("--version")) {System.out.println("FixtureRenderer 1.0");return;}
         if("timeout".equals(mode)) {Thread.sleep(30000);return;}

@@ -59,6 +59,11 @@ class DraftTemplateRoutingTest {
         lenient().when(sources.findFirstByProjectIdAndFileKeyAndCategory(eq(PROJECT),anyString(),eq(SourceDocument.CATEGORY_STANDARD_TEMPLATE)))
                 .thenAnswer(call->documents.stream().filter(d->Objects.equals(call.getArgument(1),d.getFileKey())).findFirst());
         lenient().when(sources.findByProjectIdAndCategoryOrderByIdAsc(PROJECT,SourceDocument.CATEGORY_STANDARD_TEMPLATE)).thenReturn(documents);
+        lenient().when(sources.findUploadDisplayMetadataByProjectIdAndCategory(PROJECT,SourceDocument.CATEGORY_STANDARD_TEMPLATE)).thenAnswer(call->{
+            org.springframework.data.projection.ProjectionFactory projections=new org.springframework.data.projection.SpelAwareProxyProjectionFactory();
+            List<SourceDocumentRepository.UploadDisplayMetadata> rows=new ArrayList<>();
+            for(SourceDocument document:documents)rows.add(projections.createProjection(SourceDocumentRepository.UploadDisplayMetadata.class,document));return rows;
+        });
         lenient().when(sources.save(any(SourceDocument.class))).thenAnswer(call->{SourceDocument d=call.getArgument(0);if(d.getId()==null){d.setId((long)documents.size()+1);documents.add(d);}else for(int i=0;i<documents.size();i++)if(d.getId().equals(documents.get(i).getId())){documents.set(i,d);break;}return d;});
         lenient().when(storage.store(eq(PROJECT),eq(SourceDocument.CATEGORY_STANDARD_TEMPLATE),any(MultipartFile.class))).thenAnswer(call->{MultipartFile file=call.getArgument(2);String path="fixture-asset-"+(assets.size()+1);assets.put(path,file.getBytes());return new StorageService.StoredFile(file.getOriginalFilename(),path,file.getSize(),file.getContentType());});
         lenient().when(storage.read(anyString())).thenAnswer(call->assets.get(call.getArgument(0)));
@@ -214,6 +219,20 @@ class DraftTemplateRoutingTest {
         SourceDocument old=existing("NTT","Notes to Tenderers");String before=JsonUtils.write(old);
         when(parser.parseTemplate(eq("NTT"),eq("bad.docx"),any())).thenThrow(new IllegalArgumentException("damaged source"));
         assertEquals(1,service.replaceTemplate(PROJECT,"NTT",word("bad.docx","malformed")).getFailed());assertEquals(before,JsonUtils.write(old));
+    }
+    @Test void databaseFailuresReturnReadableUploadErrorsAndPreserveTheOldTemplate()throws Exception {
+        SourceDocument old=existing("NTT","Notes to Tenderers");String before=JsonUtils.write(old);
+        when(sources.save(any(SourceDocument.class))).thenThrow(new org.springframework.orm.jpa.JpaSystemException(
+                new javax.persistence.PersistenceException("could not insert: [com.consense.domain.SourceDocument]; SQL insert into source_documents; D:/private/database")));
+        UploadResultVO replacement=service.replaceTemplate(PROJECT,"NTT",word("new.docx","Notes to Tenderers\nNew edition"));
+        UploadResultVO batch=service.uploadTemplates(PROJECT,Collections.singletonList(word("again.docx","Notes to Tenderers")));
+        for(UploadResultVO result:Arrays.asList(replacement,batch)) {
+            assertEquals(1,result.getFailed());assertEquals(0,result.getParsed());
+            String message=String.join("\n",result.getMessages());
+            assertTrue(message.contains("文件处理失败"),message);
+            assertFalse(message.contains("SourceDocument"),message);assertFalse(message.contains("SQL"),message);assertFalse(message.contains("D:/private"),message);
+        }
+        assertEquals(before,JsonUtils.write(primary("NTT")));
     }
     @Test void anInitialUnsupportedSourceRemainsReadableWithoutFabricatedAnalysis()throws Exception {
         byte[] raw="Unsupported raw source".getBytes(StandardCharsets.UTF_8);when(parser.parseTemplate(eq("NTT"),eq("broken.docx"),any())).thenThrow(new IllegalArgumentException("Unsupported template format"));

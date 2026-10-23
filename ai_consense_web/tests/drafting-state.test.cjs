@@ -22,6 +22,7 @@ check('language remounts preserve project working step and document without movi
   assert.deepEqual(plain(restoreDraftView({ step: 'preview', activeFile: 'SCC' }, [{ fileKey: 'SCC', generated: true }])), { step: 'preview', activeFile: 'SCC' })
   assert.deepEqual(plain(restoreDraftView({ step: 'preview', activeFile: 'SCC' }, [])), { step: 'variables', activeFile: 'SCC' })
   assert.deepEqual(plain(restoreDraftView(undefined, [])), { step: 'inputs', activeFile: 'NTT' })
+  assert.deepEqual(plain(restoreDraftView({ step: 'identify', activeFile: 'SCT', review: { layout: 'focus', groupId: 'kept' } }, [])), { step: 'inputs', activeFile: 'SCT', review: { layout: 'focus', groupId: 'kept' } })
 })
 check('re-adopting one target retains every other target source binding and exact adopted text', () => {
   const first = { actionId: 'NTT-9', action: 'retain', sourceMapping: 'Old edition', sourceRevision: { document: 'NTT', sourceDocumentId: 10, sourceHash: 'hash-before' } }

@@ -144,6 +144,7 @@ public class PaddleOcrClient implements OcrClient {
 
         private void observe(List<Integer> batch) {
             if(stopped){recordFailure(batch,"not_executed",null,null);return;}
+            com.consense.document.DocumentParser.progress("正在核对表格与版面，物理页："+batch);
             Map<String,Object> scoped=new LinkedHashMap<>(context);scoped.put("selectedPhysicalPages",batch);
             if(context.get("javaNativeEvidence") instanceof List<?>) {
                 List<Object> evidence=new ArrayList<>();

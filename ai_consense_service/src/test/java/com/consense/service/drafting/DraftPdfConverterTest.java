@@ -15,6 +15,12 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class DraftPdfConverterTest {
     @TempDir Path temporary;
+    @Test void rendererUsesWritableOwnedScratchWithoutChangingParentEnvironment() throws Exception {
+        Map<String,String> before=new HashMap<>(System.getenv());
+        DraftPdfRenderProfile profile=fixture("temporary-directory",5000);List<String> command=new ArrayList<>(profile.getCommand());command.add(temporary.resolve("tmp").toAbsolutePath().toString());
+        assertEquals("private scratch usable",DraftPdfProcess.run(profile,command,temporary,System.nanoTime()+TimeUnit.SECONDS.toNanos(5),0));
+        assertTrue(Files.isDirectory(temporary.resolve("tmp")));assertEquals(before,System.getenv());
+    }
     @Test void anUnavailableExplicitExecutableHasNoTextPdfFallback() {
         DraftPdfRenderProfile profile=new DraftPdfRenderProfile(Collections.singletonList(temporary.resolve("not-installed.exe").toString()),
                 temporary.resolve("work"),1000,1024,1024,Collections.singleton("Times New Roman"),"fixture fonts");
@@ -54,6 +60,22 @@ class DraftPdfConverterTest {
     }
     static String sha(byte[] bytes) throws Exception {
         StringBuilder hash=new StringBuilder();for(byte value:java.security.MessageDigest.getInstance("SHA-256").digest(bytes))hash.append(String.format(Locale.ROOT,"%02x",value&255));return hash.toString();
+    }
+    @Test void renderingCopyRecordsBothIdentitiesAndDoesNotRewriteSavedDocx() throws Exception {
+        ByteArrayOutputStream bytes=new ByteArrayOutputStream();
+        try(ZipInputStream input=new ZipInputStream(new ByteArrayInputStream(docx("English as detailed")));ZipOutputStream output=new ZipOutputStream(bytes)) {
+            ZipEntry entry;while((entry=input.getNextEntry())!=null) {
+                byte[] content=input.readAllBytes();
+                if("word/document.xml".equals(entry.getName()))content=new String(content,StandardCharsets.UTF_8).replace("<w:rFonts ","<w:rFonts w:hint=\"eastAsia\" ").getBytes(StandardCharsets.UTF_8);
+                output.putNextEntry(new ZipEntry(entry.getName()));output.write(content);output.closeEntry();
+            }
+        }
+        byte[] source=bytes.toByteArray(),before=source.clone();DraftPdfConversionResult result=new DraftPdfConverter(fixture("success",10000)).convert(source);
+        assertArrayEquals(before,source);assertEquals(sha(source),result.getDocxSha256());
+        byte[] rendering=Files.readAllBytes(Paths.get(String.valueOf(result.getManifest().get("privateWorkDirectory"))).resolve("artifact.docx"));
+        assertEquals(sha(rendering),result.getManifest().get("rendererInputSha256"));assertNotEquals(sha(source),sha(rendering));
+        assertEquals(1,result.getManifest().get("latinHintParagraphs"));
+        assertEquals("English as detailed",new com.consense.document.DocxTemplateEditor().inspect(rendering).mainParagraph(1).getText());
     }
     @Test void anUnavailableFontUsedByActualTextIsAnExplicitCapabilityFailure() throws Exception {
         byte[] source;
@@ -132,5 +154,47 @@ class DraftPdfConverterTest {
         DraftPdfConversionException failure=assertThrows(DraftPdfConversionException.class,()->new DraftPdfConverter(fixture("timeout-budget",1100)).convert(docx("One deadline")));
         assertEquals(DraftPdfConversionException.Code.CONVERSION_TIMEOUT,failure.getCode());
         assertTrue(TimeUnit.NANOSECONDS.toMillis(System.nanoTime()-started)<4000);
+    }
+    @Test void processQueueUsesTheOriginalDeadlineAndNeverLaunchesATimedOutWaiter() throws Exception {
+        Path gate=temporary.resolve("held"),after=temporary.resolve("after-release");ExecutorService pool=Executors.newSingleThreadExecutor();
+        try {
+            Future<String> owner=pool.submit(()->process("held-process",gate,10000));awaitFile(gate.resolve("started"));
+            DraftPdfRenderProfile queued=fixture("success",150);long started=System.nanoTime();
+            DraftPdfConversionException failure=assertThrows(DraftPdfConversionException.class,()->DraftPdfProcess.run(queued,Collections.singletonList(temporary.resolve("must-not-launch-missing-executable").toString()),temporary,started+TimeUnit.MILLISECONDS.toNanos(150),0));
+            assertEquals(DraftPdfConversionException.Code.CONVERSION_TIMEOUT,failure.getCode());assertTrue(System.nanoTime()-started>=TimeUnit.MILLISECONDS.toNanos(100));assertFalse(owner.isDone());
+            Files.write(gate.resolve("release"),new byte[]{1});owner.get(5,TimeUnit.SECONDS);process("marked-process",after,5000);assertTrue(Files.exists(after));
+        }finally{Files.createDirectories(gate);Files.write(gate.resolve("release"),new byte[]{1});pool.shutdownNow();assertTrue(pool.awaitTermination(5,TimeUnit.SECONDS));}
+    }
+    @Test void anInterruptedQueuedProcessKeepsTheInterruptAndCannotLaunch() throws Exception {
+        Path gate=temporary.resolve("held-interrupt"),marker=temporary.resolve("interrupted-must-not-start");ExecutorService pool=Executors.newFixedThreadPool(2);java.util.concurrent.atomic.AtomicReference<Thread> waiting=new java.util.concurrent.atomic.AtomicReference<>();java.util.concurrent.atomic.AtomicBoolean interrupted=new java.util.concurrent.atomic.AtomicBoolean();CountDownLatch ready=new CountDownLatch(1);
+        try {
+            Future<String> owner=pool.submit(()->process("held-process",gate,10000));awaitFile(gate.resolve("started"));
+            Future<DraftPdfConversionException> queued=pool.submit(()->{waiting.set(Thread.currentThread());ready.countDown();try{process("marked-process",marker,5000);return null;}catch(DraftPdfConversionException failure){interrupted.set(Thread.currentThread().isInterrupted());return failure;}});
+            assertTrue(ready.await(2,TimeUnit.SECONDS));long limit=System.nanoTime()+TimeUnit.SECONDS.toNanos(2);while(waiting.get().getState()!=Thread.State.TIMED_WAITING&&!queued.isDone()&&System.nanoTime()<limit)Thread.sleep(5);waiting.get().interrupt();
+            DraftPdfConversionException failure=queued.get(5,TimeUnit.SECONDS);assertNotNull(failure);assertEquals(DraftPdfConversionException.Code.CONVERSION_FAILED,failure.getCode());assertTrue(interrupted.get());assertFalse(Files.exists(marker));
+            Files.write(gate.resolve("release"),new byte[]{1});owner.get(5,TimeUnit.SECONDS);
+        }finally{Files.createDirectories(gate);Files.write(gate.resolve("release"),new byte[]{1});pool.shutdownNow();assertTrue(pool.awaitTermination(5,TimeUnit.SECONDS));}
+    }
+    @Test void aFailedProcessLaunchDoesNotHoldTheJvmProcessSlot() throws Exception {
+        DraftPdfRenderProfile profile=fixture("success",5000);
+        assertThrows(IOException.class,()->DraftPdfProcess.run(profile,Collections.singletonList(temporary.resolve("missing-executable").toString()),temporary,System.nanoTime()+TimeUnit.SECONDS.toNanos(2),0));
+        Path marker=temporary.resolve("after-failed-launch");process("marked-process",marker,5000);assertTrue(Files.exists(marker));
+    }
+    @Test void profileProbeDirectoriesAreRemovedAfterSuccessAndTimeout() throws Exception {
+        for(String mode:Arrays.asList("success","timeout-budget")){
+            DraftPdfConverter converter=new DraftPdfConverter(fixture(mode,"success".equals(mode)?5000:100));
+            if("success".equals(mode))assertEquals(64,converter.currentProfileHash().length());else assertEquals(DraftPdfConversionException.Code.CONVERSION_TIMEOUT,assertThrows(DraftPdfConversionException.class,converter::currentProfileHash).getCode());
+            try(java.util.stream.Stream<Path> children=Files.list(temporary.resolve("work"))){assertFalse(children.anyMatch(path->path.getFileName().toString().startsWith("profile-probe-")),"Version-only profiles have no document evidence and must be removed");}
+        }
+    }
+    @Test void profileProbeCleanupDoesNotRemoveSavedRenderEvidence() throws Exception {
+        DraftPdfConverter converter=new DraftPdfConverter(fixture("success",10000));DraftPdfConversionResult result=converter.convert(docx("Retained exact render evidence"));Path work=Paths.get(String.valueOf(result.getManifest().get("privateWorkDirectory")));
+        String expected=sha(Files.readAllBytes(work.resolve("artifact.docx")));converter.currentProfileHash();assertEquals(expected,sha(Files.readAllBytes(work.resolve("artifact.docx"))));assertTrue(Files.isRegularFile(work.resolve("out/artifact.pdf")));
+    }
+    private String process(String mode,Path argument,long timeout) throws IOException {
+        DraftPdfRenderProfile profile=fixture(mode,timeout);List<String> command=new ArrayList<>(profile.getCommand());command.add(argument.toString());return DraftPdfProcess.run(profile,command,temporary,System.nanoTime()+TimeUnit.MILLISECONDS.toNanos(timeout),0);
+    }
+    private void awaitFile(Path path) throws Exception {
+        long limit=System.nanoTime()+TimeUnit.SECONDS.toNanos(5);while(!Files.exists(path)&&System.nanoTime()<limit)Thread.sleep(10);assertTrue(Files.exists(path),"Process fixture did not enter its held stage");
     }
 }

@@ -93,6 +93,17 @@ public class DocumentParser {
     private final ConsenseProperties props;
     private final OcrClient ocrClient;
 
+    private static final ThreadLocal<java.util.function.Consumer<String>> PROGRESS = new ThreadLocal<>();
+    public static AutoCloseable observeProgress(java.util.function.Consumer<String> listener) {
+        java.util.function.Consumer<String> previous=PROGRESS.get();PROGRESS.set(listener);
+        return ()->{if(previous==null)PROGRESS.remove();else PROGRESS.set(previous);};
+    }
+    public static void progress(String message) {
+        if(PROGRESS.get()==null)return;
+        try { PROGRESS.get().accept(message); }
+        catch(RuntimeException failure) { log.warn("解析进度写入失败；内容解析继续",failure); }
+    }
+
     public ParsedDocument parse(String fileName, byte[] bytes) {
         return parse(fileName,bytes,DocumentParseProbe.disabled());
     }
@@ -238,6 +249,7 @@ public class DocumentParser {
         boolean returnedNormally=false;Throwable operationFailure=null;
         String ext = extensionOf(fileName);
         try (DocumentParseProbe.Timer timer=probe.measure("parse_dispatch_and_document",null,"Actual parser operation; measured probe event I/O excluded, nested stages are not additive")) {
+            progress("读取文件正文与结构（"+ext+"）");
             ParsedDocument result;
             if ("pdf".equals(ext)) {
                 result=parsePdf(fileName,bytes,probe,initialObservation,readingPlan);
@@ -290,6 +302,7 @@ public class DocumentParser {
                     || annotation.getNormalAppearanceStream() != null);
             Boolean ocrReady = null;
             for (int pageNo = 1; pageNo <= totalPages; pageNo++) {
+                progress("第 "+pageNo+" / "+totalPages+" 页：读取文字、表格与版面");
                 PDPage page = document.getPage(pageNo - 1);
                 PdfPageEvidence pageEvidence = nativeEvidence.get(pageNo - 1);
                 PositionedStripper stripper = new PositionedStripper(pageNo, page, pageEvidence);
@@ -345,6 +358,7 @@ public class DocumentParser {
                     try {
                         BufferedImage image;
                         try(DocumentParseProbe.Timer timer=probe.measure("pdf_render",pageNo,"Original PDFRenderer RGB render at fixed 200 DPI")) {
+                            progress("第 "+pageNo+" / "+totalPages+" 页：渲染页面");
                             image = renderer.renderImageWithDPI(pageNo - 1, 200, ImageType.RGB);
                         }
                         probe.image("pdf_render_image",pageNo,image,200);
@@ -370,6 +384,7 @@ public class DocumentParser {
                                 if (!ocrReady) throw new IOException("OCR disabled or service unavailable");
                                 Map<String,Object> sourceContext=pdfSourceContext(fileName, sourceSha, totalPages, pageNo, page, image, input);
                                 sourceContext.put("readingPlan",readingPlan.metadata());
+                                progress("第 "+pageNo+" / "+totalPages+" 页：等待视觉识别结果");
                                 result = actualOcr.recognize(input, sourceContext);
                             }
                             probe.event("pdf_ocr_routing",pageNo,DocumentParseProbe.map("configuredEnabled",props.getOcr().isEnabled(),"ocrReady",ocrReady,"observationReused",reused));
@@ -423,6 +438,7 @@ public class DocumentParser {
             }
             String text = joinPages(pages);
             coverage.setComplete(coverage.getFailedPages().isEmpty());
+            progress("逐页文字读取完成，正在核对表格、表单与版面");
             observeNativeTables(fileName,bytes,sourceSha,totalPages,nativeEvidence,blocks,coverage,readingPlan,probe);
             coverage.getLimitations().add("OCR selection uses a per-page text/image heuristic; text accuracy and diagram topology require review.");
             String message = "PDF 共 " + totalPages + " 页，已解析 " + coverage.getParsedPages()

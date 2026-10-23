@@ -258,6 +258,18 @@ export function prepareDocumentReview(options: { fileKey: string; document?: Dra
     interactive(clone, binding)
     const tail = tails.get(binding.parentBindingId) ?? anchor; tail.after(clone); tails.set(binding.parentBindingId, clone)
   }
+  // Only revision-bound system notices are placed outside the original body.
+  const beforeNotices: HTMLElement[] = []
+  for (const binding of results.filter(item => item.applicationStatus === 'delivery_notice')) {
+    const element = matchedElement(resultIndex, binding.resultParagraphId, binding.text)
+    if (binding.sourceParagraphId || !savedBindingIds.includes(binding.bindingId) || !element || !['before', 'after'].includes(binding.deliveryPosition ?? '')) { notices.add('additionUnmapped'); continue }
+    const clone = element.cloneNode(true) as HTMLElement
+    clone.removeAttribute('data-native-paragraph'); clone.removeAttribute('data-native-ordinal')
+    clone.dataset.reviewAdded = 'true'
+    if (binding.deliveryPosition === 'before') beforeNotices.push(clone)
+    else host.append(clone)
+  }
+  host.prepend(...beforeNotices)
   // Mapping and attribution limits cannot make an old source paragraph stand in
   // for the current saved document. Keep verified overlays only when their final
   // text also accounts for the complete saved reading.

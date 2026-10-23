@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import json
 from pathlib import Path
 
 from artifact_store import ArtifactStore
@@ -21,7 +22,8 @@ SCHEMA = 'consense.normal-observed.v1'
 PRODUCER = 'normal_observed'
 VERSION = 'complete-bound-normal-observations-v1'
 GRAPH_SCHEMA = 'consense.canonical-candidate.v1'
-GRAPH_VERSION = 'actual-normal-source-unit-whole-page-observations-v2'
+GRAPH_VERSION = 'actual-normal-source-unit-whole-page-observations-v3'
+LEGACY_GRAPH_VERSION = 'actual-normal-source-unit-whole-page-observations-v2'
 OBSERVER = {'actor': 'application', 'method': 'normal_parser_observation',
             'originalByteVerifier': 'java_current_source_reader'}
 DECLARATIONS = {'adoptionStatus': 'candidate_unverified', 'humanConfirmed': False,
@@ -36,7 +38,127 @@ def _fail(condition, code, message):
 
 
 def _hash(value):
-    return hashlib.sha256(_serialize(value)).hexdigest()
+    digest = hashlib.sha256()
+    for chunk in _canonical_chunks(value):
+        digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _canonical_chunks(value):
+    encoder = json.JSONEncoder(ensure_ascii=False, sort_keys=True, separators=(',', ':'), allow_nan=False)
+    return (chunk.encode('utf-8') for chunk in encoder.iterencode(value))
+
+
+def _serialized_equal(left, right):
+    """Exact canonical bytes, without two whole-document encoded copies."""
+    streams = iter(_canonical_chunks(left)), iter(_canonical_chunks(right))
+    a, b = next(streams[0], b''), next(streams[1], b'')
+    while a or b:
+        if not a or not b:
+            return False
+        size = min(len(a), len(b))
+        if a[:size] != b[:size]:
+            return False
+        a, b = a[size:], b[size:]
+        if not a:
+            a = next(streams[0], b'')
+        if not b:
+            b = next(streams[1], b'')
+    return True
+
+
+def _matches_serialized_bytes(value, raw):
+    offset = 0
+    for chunk in _canonical_chunks(value):
+        if not raw.startswith(chunk, offset):
+            return False
+        offset += len(chunk)
+    return offset == len(raw)
+
+
+def _paragraph(graph, value):
+    if not isinstance(value, dict):
+        return value
+    marker = next((key for key in ('$nativeParagraph', '$nativeSection') if key in value), None)
+    if marker is None:
+        return value
+    ordinal = value[marker]
+    if marker == '$nativeParagraph':
+        outline = graph.get('nativeDocxOutline')
+        pool = outline.get('paragraphs', []) if isinstance(outline, dict) else []
+        code = 'NORMAL_OBSERVED_PARAGRAPH_REF_INVALID'
+    else:
+        pool = graph.get('nativeDocxSections', [])
+        code = 'NORMAL_OBSERVED_SECTION_REF_INVALID'
+    _fail(graph.get('producerVersion') == GRAPH_VERSION and set(value) == {marker}
+          and isinstance(pool, list) and type(ordinal) is int and 0 <= ordinal < len(pool)
+          and isinstance(pool[ordinal], dict)
+          and (marker != '$nativeParagraph' or isinstance(pool[ordinal].get('sourcePosition'), dict)),
+          code, 'A native context reference must resolve in its bound source inventory')
+    stack, visited = [pool[ordinal]], set()
+    while stack:
+        node = stack.pop()
+        if isinstance(node, (dict, list)):
+            if id(node) in visited:
+                continue
+            visited.add(id(node))
+        if isinstance(node, dict):
+            _fail('$nativeParagraph' not in node and '$nativeSection' not in node, code,
+                  'The native context inventory cannot contain nested references')
+            stack.extend(node.values())
+        elif isinstance(node, list):
+            stack.extend(node)
+    return pool[ordinal]
+
+
+def _expand_paragraph_contexts(graph, value):
+    if graph.get('producerVersion') != GRAPH_VERSION:
+        return copy.deepcopy(value)
+    resolved = _paragraph(graph, value)
+    if resolved is not value:
+        return copy.deepcopy(resolved)
+    if isinstance(value, dict):
+        return {key: _expand_paragraph_contexts(graph, child) for key, child in value.items()}
+    if isinstance(value, list):
+        return [_expand_paragraph_contexts(graph, child) for child in value]
+    return value
+
+
+def _validate_paragraph_references(graph):
+    if graph.get('producerVersion') != GRAPH_VERSION:
+        return
+    outline = graph.get('nativeDocxOutline') or {}
+    _fail(isinstance(outline, dict), 'NORMAL_OBSERVED_PARAGRAPH_REF_INVALID', 'The paragraph inventory must be an object')
+    scopes = outline.get('sourceClauseScopes') or {}
+    _fail(isinstance(scopes, dict), 'NORMAL_OBSERVED_PARAGRAPH_REF_INVALID', 'The source scopes must be an object')
+    containers = [member.get('paragraphProperties') for member in scopes.get('members', [])
+                  if isinstance(member, dict)]
+    for unit in graph.get('units', []):
+        if not isinstance(unit, dict):
+            continue
+        for part in unit.get('parts', []):
+            if not isinstance(part, dict):
+                continue
+            context = part.get('readingContext') or {}
+            if not isinstance(context, dict):
+                continue
+            containers.append(context.get('nativeDocxParagraph'))
+            containers.append(context.get('nativeDocxParagraphs'))
+            containers.append(context.get('nativeDocxSection'))
+    visited = set()
+    while containers:
+        value = containers.pop()
+        if isinstance(value, (dict, list)):
+            if id(value) in visited:
+                continue
+            visited.add(id(value))
+        if isinstance(value, dict):
+            if '$nativeParagraph' in value or '$nativeSection' in value:
+                _paragraph(graph, value)
+            else:
+                containers.extend(value.values())
+        elif isinstance(value, list):
+            containers.extend(value)
 
 
 def normal_observed_candidate(value):
@@ -63,7 +185,7 @@ def _validate_manifest(manifest):
           'Only explicit application normal-parser observations are supported')
     graph, binding = manifest['candidateGraph'], manifest['sourceBinding']
     _fail(isinstance(graph, dict) and graph.get('schema') == GRAPH_SCHEMA
-          and graph.get('producerVersion') == GRAPH_VERSION
+          and graph.get('producerVersion') in (GRAPH_VERSION, LEGACY_GRAPH_VERSION)
           and graph.get('status') == 'actual_source_candidate_generation'
           and all(graph.get(key) == value and type(graph.get(key)) is type(value)
                   for key, value in DECLARATIONS.items()), 'NORMAL_OBSERVED_GRAPH_AUTHORITY_INVALID',
@@ -91,6 +213,7 @@ def _validate_manifest(manifest):
     _fail(_unknowns(graph.get('unknowns')) and isinstance(graph.get('units'), list) and graph['units']
           and isinstance(graph.get('relations'), list), 'NORMAL_OBSERVED_GRAPH_INCOMPLETE',
           'Keep complete source units, relations and explicit unknowns')
+    _validate_paragraph_references(graph)
     unit_ids, block_ids, previous_order = set(), set(), -1
     for unit in graph['units']:
         _fail(isinstance(unit, dict), 'NORMAL_OBSERVED_UNIT_INVALID', 'Source units must be objects')
@@ -167,11 +290,19 @@ def _assemble(manifest, descriptor, code_sha):
         'originalSourceSha256': source['originalSourceSha256'], 'javaParsedSourceHash': source['parsedSourceHash'],
         'generationSha256': graph['generationSha256'], 'candidateGraphSha256': graph_sha,
         'observationManifestSha256': manifest_sha, 'sourceRevisionSha256': revision}
-    canonical = {'units': copy.deepcopy(graph['units']), 'relations': copy.deepcopy(graph['relations']), 'assetRefs': []}
+    # The detached manifest owns these immutable observations; derived views need no second full tree.
+    canonical = {'units': graph['units'], 'relations': graph['relations'], 'assetRefs': []}
     source_hash = _hash({'projectionIdentity': identity, 'canonical': canonical})
     projection_revision = _hash({'sourceHash': source_hash, 'projectionIdentity': identity})
     chunks, non_retrievable = [], []
     quality = {'status': 'PARSED', 'semanticQuality': 'unknown', **DECLARATIONS}
+    quality_sha = _hash(quality)
+    relations_by_unit = {}
+    for relation in graph['relations']:
+        origin, target = relation['fromUnitId'], relation.get('toUnitId')
+        relations_by_unit.setdefault(origin, []).append(relation)
+        if target is not None and target != origin:
+            relations_by_unit.setdefault(target, []).append(relation)
     for unit in graph['units']:
         if not unit['text'].strip():
             non_retrievable.append({'unitId': unit['unitId'], 'sourceOrder': unit['sourceOrder'],
@@ -187,17 +318,17 @@ def _assemble(manifest, descriptor, code_sha):
             'sourceSha256': source['originalSourceSha256'], 'originalSourceSha256': source['originalSourceSha256'],
             'sourceRevisionSha256': revision, 'projectionRevisionSha256': projection_revision,
             'observationManifestSha256': manifest_sha, 'sourceQuality': copy.deepcopy(quality),
-            'sourceQualityHash': _hash(quality), 'assetRefs': [], **DECLARATIONS}
+            'sourceQualityHash': quality_sha, 'assetRefs': [], **DECLARATIONS}
         for key in ('unitId', 'kind', 'parts', 'sourceSpans', 'physicalPages', 'sourceOrder',
                     'tableGroup', 'unknowns', 'requiredMemberBlockIds', 'qualifiersComplete'):
             if unit[key] is not None:
-                chunk[key] = copy.deepcopy(unit[key])
+                chunk[key] = (_expand_paragraph_contexts(graph, unit[key]) if key == 'parts'
+                              else copy.deepcopy(unit[key]))
         if chunk['anchor'] is None:
             del chunk['anchor']
         for key in ('documentId', 'role', 'module', 'eligibleModules', 'sourcePurpose', 'sourceClass'):
             chunk[key] = copy.deepcopy(identity[key])
-        chunk['relations'] = [copy.deepcopy(relation) for relation in graph['relations']
-            if unit['unitId'] in (relation['fromUnitId'], relation.get('toUnitId'))]
+        chunk['relations'] = [copy.deepcopy(relation) for relation in relations_by_unit.get(unit['unitId'], [])]
         paragraph_map(chunk)
         chunks.append(chunk)
     result = {'schema': SCHEMA, 'producerKind': PRODUCER, 'projectionIdentity': identity,
@@ -205,7 +336,7 @@ def _assemble(manifest, descriptor, code_sha):
         'source': {'sourceSha256': source['originalSourceSha256'], 'sourceRevisionSha256': revision,
             'filename': source['filename'], 'sourceFilename': source['filename'],
             'parsedSourceHash': source['parsedSourceHash'], 'projectId': source['projectId'],
-            'documentId': source['documentId']}, 'manifest': copy.deepcopy(manifest),
+            'documentId': source['documentId']}, 'manifest': manifest,
         'observationManifestRef': copy.deepcopy(descriptor), 'canonical': canonical, 'chunks': chunks,
         'nonRetrievableUnits': non_retrievable,
         'assetRefs': [], 'unknowns': copy.deepcopy(graph['unknowns']), **DECLARATIONS}
@@ -228,11 +359,12 @@ def validate_normal_observed(projection, *, artifact_store):
           and projection.get('producerKind') == PRODUCER, 'NORMAL_OBSERVED_SCHEMA_INVALID',
           'Only the explicit normal-observed authority is supported')
     descriptor = projection['observationManifestRef']
-    manifest = _strict_json(artifact_store.read_asset(descriptor))
-    _fail(_serialize(manifest) == artifact_store.read_asset(descriptor)
-          and _serialize(manifest) == _serialize(projection['manifest']), 'NORMAL_OBSERVED_CAS_MANIFEST_MISMATCH',
+    raw_manifest = artifact_store.read_asset(descriptor)
+    manifest = _strict_json(raw_manifest)
+    _fail(_matches_serialized_bytes(manifest, raw_manifest)
+          and _matches_serialized_bytes(projection['manifest'], raw_manifest), 'NORMAL_OBSERVED_CAS_MANIFEST_MISMATCH',
           'Every load requires the exact complete retained observation manifest bytes')
     code = _identity(projection['projectionIdentity']['projectionCodeSha256'], 'projectionCodeSha256')
-    _fail(_serialize(_assemble(manifest, descriptor, code)) == _serialize(projection), 'NORMAL_OBSERVED_DERIVED_MISMATCH',
+    _fail(_serialized_equal(_assemble(manifest, descriptor, code), projection), 'NORMAL_OBSERVED_DERIVED_MISMATCH',
           'Normal observed source seals and complete parents must reconstruct exactly from actual CAS')
     return projection

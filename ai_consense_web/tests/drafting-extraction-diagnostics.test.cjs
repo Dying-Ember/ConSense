@@ -8,13 +8,18 @@ const input = loadVue(path.join(__dirname, '../src/components/DraftingInputField
 const processReport = loadVue(path.join(__dirname, '../src/components/DraftingExtractionReport.vue'), { boundaries: { '@/api': { draftingApi: {} } } }).default
 const trace = {
   model: '7b', finishedAt: '2026-10-06T08:00:00Z', systemPrompt: 'protocol', userPrompt: 'source', rawResponses: ['raw'],
-  runId: 'run-A', status: 'completed', stale: false,
+  runId: 'run-A', status: 'completed', stale: false, evidenceRevision: 'INTERNAL-EVIDENCE-HASH', modelIdentity: { model: '7b', provider: 'qwen', configurationSha256: 'INTERNAL-CONFIG-HASH' },
   parts: [{ partId: 'p1', sourceDocumentId: 8, fileName: 'meeting.docx', sourceHash: 'hash1', partIndex: 1, sourceText: 'Formal contract', attempts: [] }],
   decisions: [{ partId: 'p1', attemptIndex: 1, itemIndex: 0, key: 'contractTitle', rawValue: 'Wrong shape', sourceQuote: 'Formal contract', reason: 'Readable but invalid structure', confidence: 0.9, status: 'rejected', codes: ['invalid_value_shape'] }],
   fields: [{ key: 'contractTitle', status: 'rejected', candidateCount: 0, rejectionCount: 1, unansweredCount: 0, decisionRefs: [0] }]
 }
 const field = { key: 'contractTitle', kind: 'text', label: { en: 'Contract identity', zhHans: '合约身份', zhHant: '合約身份' } }
 ;(async () => {
+  const batchTrace = { ...trace, parts: [{ ...trace.parts[0], attempts: [{ attemptIndex: 0, kind: 'primary-fields-0', status: 'completed', rawResponse: 'Preserved batch response' }] }] }
+  const batchHtml = await renderToString(vue.createSSRApp(processReport, { trace: batchTrace, projectId: '', locale: 'en', open: false }))
+  assert.match(batchHtml, /Primary extraction/)
+  assert.doesNotMatch(batchHtml, /primary-fields-0/)
+  assert.match(batchHtml, /Preserved batch response/)
   const html = await renderToString(vue.createSSRApp(input, { field, value: 'Manual value', values: {}, locale: 'en', trace }))
   assert.match(html, /No usable suggestion returned/)
   assert.match(html, /Value does not match the required structure/)
@@ -63,7 +68,7 @@ const field = { key: 'contractTitle', kind: 'text', label: { en: 'Contract ident
     const report = { ...trace, status: 'failed', stale: true, failureCode: 'invalid_json', failureMessage: 'Captured failure', parts: [{ ...trace.parts[0], attempts: [{ attemptIndex: 1, kind: 'primary', systemPrompt: 'exact system', userPrompt: 'exact user', rawResponse: 'exact raw', status: 'failed', errorCode: 'invalid_json' }] }] }
     const rendered = await renderToString(vue.createSSRApp(processReport, { trace: report, projectId: 'A', locale, open: false }))
     assert.ok(rendered.includes(outcome)); assert.ok(rendered.includes(primary)); assert.ok(rendered.includes(caution))
-    assert.match(rendered, /Captured failure/); assert.match(rendered, /hash1/); assert.match(rendered, /exact system/); assert.match(rendered, /exact user/); assert.match(rendered, /exact raw/)
+    assert.match(rendered, /Captured failure/); assert.doesNotMatch(rendered, /hash1|INTERNAL-CONFIG-HASH|INTERNAL-EVIDENCE-HASH/); assert.match(rendered, /exact system/); assert.match(rendered, /exact user/); assert.match(rendered, /exact raw/)
     assert.doesNotMatch(rendered, /Adopt this candidate|采用此候选值|採用此候選值/)
   }
   const oldReport = await renderToString(vue.createSSRApp(processReport, { trace: { model: 'legacy', finishedAt: '2026-10-05', systemPrompt: 'old system', userPrompt: 'old user', rawResponses: ['old raw'] }, projectId: 'A', locale: 'en', open: false }))

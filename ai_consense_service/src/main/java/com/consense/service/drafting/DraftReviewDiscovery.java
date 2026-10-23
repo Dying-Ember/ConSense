@@ -36,6 +36,53 @@ public final class DraftReviewDiscovery {
             +"Do not supply native coordinates, geometry, source ids, statuses, or confirmed values. Do not merge facts across contexts. All output remains pending human review.";
     private DraftReviewDiscovery() { }
 
+    static String automaticPrompt() {
+        return PROMPT+" This instruction and its scopes, markers and conditions were ALREADY identified by the template-specific OER route. "
+                +"Interpret their drafting business meaning, identify the required project variables, and decompose them into independent atomic nodes and supported relations. "
+                +"Do not rediscover guidance, infer formal clause ownership, enlarge editing scopes, or upgrade unknown/incomplete source scopes. "
+                +"Also return requirements:[{id,sourceQuote,kind,nodeIds,reason}], where kind is input|choice|amendment|reference|verification. "
+                +"Each requirement needs an exact sourceQuote and local nodeIds, which may be empty for fixed wording or external checks. "
+                +"Return requirements:[] and nodes:[] when no drafting requirement is supported. Preserve incomplete/unknown meanings in notes. "
+                +"Do not invent editable scope: source members are reading coverage, not authority to change every member.";
+    }
+
+    /** Automatic work enumerates exactly the same saved OER observations as manual discovery. */
+    static List<Map<String,Object>> sourceTasks(List<JsonNode> readings) {
+        List<Map<String,Object>> tasks=new ArrayList<>();
+        for(Item item:items(readings)) {
+            JsonNode reading=item.reading;Set<String> memberIds=new LinkedHashSet<>();collectMemberIds(item.original,memberIds);
+            Map<String,Object> context=payload(item);
+            for(Object raw:list(context.get("scopeCandidates")))collectMemberIds(raw,memberIds);
+            for(String key:Arrays.asList("sourceConditions","relatedGuidanceNotes"))for(Object raw:list(context.get(key)))collectMemberIds(raw,memberIds);
+            String id="source-"+DraftAdoption.hash(item.key+"|"+reading.path("analysisRevision").asText()+"|"+reading.path("analysisInputSha256").asText()+"|"+reading.path("analysisSha256").asText()).substring(0,24);
+            tasks.add(obj("taskId",id,"phase","ATOMIC_DISCOVERY","sourceId",reading.path("id").asText(),"sourceSha256",reading.path("sourceSha256").asText(),
+                    "fileName",reading.path("fileName").asText(),"sourceName",reading.path("fileName").asText(),"fileKey",reading.path("fileKey").asText(),"itemKind",item.kind,"sourceObservationId",item.original.path("id").asText(),
+                    "sourceKey",item.key,"memberIds",new ArrayList<>(memberIds),"sourceChars",item.text.length(),"status","ready"));
+        }return tasks;
+    }
+    private static void collectMemberIds(JsonNode value,Set<String> found) {
+        if(value.isObject()) {if(value.path("memberId").isTextual())found.add(value.path("memberId").asText());for(JsonNode id:value.path("orderedMemberIds"))found.add(id.asText());value.fields().forEachRemaining(entry->{if(!"observation".equals(entry.getKey())&&!"sourcePosition".equals(entry.getKey()))collectMemberIds(entry.getValue(),found);});}
+        else if(value.isArray())for(JsonNode item:value)collectMemberIds(item,found);
+    }
+    private static void collectMemberIds(Object value,Set<String> found){if(value instanceof JsonNode)collectMemberIds((JsonNode)value,found);else if(value instanceof Map)for(Map.Entry<?,?> entry:((Map<?,?>)value).entrySet()){if("memberId".equals(entry.getKey()))found.add(text(entry.getValue()));else if(!"observation".equals(entry.getKey())&&!"sourcePosition".equals(entry.getKey()))collectMemberIds(entry.getValue(),found);}else if(value instanceof Iterable)for(Object item:(Iterable<?>)value)collectMemberIds(item,found);}
+    static Map<String,Object> sourceTaskPayload(JsonNode reading,Map<String,Object> task){return payload(sourceTask(reading,task));}
+    static String sourceTaskText(JsonNode reading,Map<String,Object> task){return sourceTask(reading,task).text;}
+    static List<Map<String,Object>> sourceTaskNodes(JsonNode reading,Map<String,Object> task,JsonNode response,List<Object> rejected) {
+        Item item=sourceTask(reading,task);Map<String,Object> local=obj("sources",Collections.singletonList(obj("id",reading.path("id").asText(),"fileKey",reading.path("fileKey").asText(),"docId",reading.path("docId").asText(),"editionId",reading.path("editionId").asText())),"graph",obj("variables",new ArrayList<>(),"events",new ArrayList<>()));
+        List<Map<String,Object>> converted=validated(local,nodes(item,response,rejected),rejected);localMappings(item,response,converted);return converted;
+    }
+    private static Item sourceTask(JsonNode reading,Map<String,Object> task) {
+        for(Item item:items(Collections.singletonList(reading)))if(item.key.equals(task.get("sourceKey"))&&item.kind.equals(task.get("itemKind"))&&item.original.path("id").asText().equals(task.get("sourceObservationId")))return item;
+        throw invalid("AUTOMATIC_SOURCE_OBSERVATION_CHANGED");
+    }
+
+    private static void localMappings(Item item,JsonNode response,List<Map<String,Object>> converted) {
+        String namespace="discovery-"+item.key.substring(0,16)+"-";
+        for(JsonNode proposed:response.path("nodes"))for(Map<String,Object> node:converted) {
+            String localId=proposed.path("id").asText();if((namespace+localId).equals(node.get("id")))node.put("modelLocalId",localId);
+        }
+    }
+
     /** Idempotent, model-free source checklist; full instruction text and observed ranges are retained. */
     public static Map<String,Object> seed(Map<String,Object> graph,List<JsonNode> readings) {
         Map<String,Object> result=copyGraph(graph),state=state(result);List<Object> variables=mutable(state,"variables"),events=mutable(state,"events");
@@ -197,7 +244,7 @@ public final class DraftReviewDiscovery {
                 "discoverySourceKey",item.key);
     }
     private static Map<String,Object> anchor(Item item,String quote) {
-        String sha=item.reading.path("sourceSha256").asText();Map<String,Object> result=obj("docId",item.reading.path("id").asText(),"sourceDocumentId",item.reading.path("sourceDocumentId").asLong(),"sourceSha256",sha,"text",quote,"observedRanges",item.original.path("memberRanges").deepCopy());
+        String sha=item.reading.path("sourceSha256").asText();Map<String,Object> result=obj("docId",item.reading.path("id").asText(),"sourceDocumentId",item.reading.path("sourceDocumentId").asLong(),"sourceSha256",sha,"text",quote,"observedRanges",DraftReviewSources.observationRanges(item.original).deepCopy());
         if(quote.equals(item.text)) {
             result.put("sourceObservationId",item.original.path("id").asText());result.put("sourceObservation",item.original.deepCopy());
             for(String key:Arrays.asList("analysisRevision","analysisInputSha256","analysisSha256"))result.put(key,item.reading.path(key).deepCopy());

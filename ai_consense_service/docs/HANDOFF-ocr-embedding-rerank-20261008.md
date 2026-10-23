@@ -1,3 +1,75 @@
+**2026-10-23 源码整合状态（round373—374，运行服务未部署）：** Paddle完整捕获已接入固定本机CAS引用传输，六份源码／测试已合入当前工作树；正式repo的64项小fixture契约实跑通过，0失败／0跳过。完整捕获及失败状态保留，不改变Java规范化OCR输出。四份实际运行配置／pin保持旧值，OCR用户unit继续停止；真实吞吐与并发峰值未测。有界页批／模型租约复用／双引擎并发仍未实施；基于stat的资产hash复用已被可写mmap反例阻断，禁止集成。详见[验收报告](testing/drafting-result-usability-20261023.md)首节。
+
+**2026-10-23用户已要求停止Vetting识别（round372）：** 原35件队列已停发，source100 Annex已落盘PARTIAL，保留20／47页结果、21—47页未完成。已核实并停止唯一对应OCR用户unit，18780／18771／18772无监听，协调器与两提供者均退出；H2／Java／前端保持。OCR服务保持停止，不自动重识别。Drafting多选对照及同一问题两路线已前端热更新并有限浏览器核验；资产校验复用和Paddle CAS引用传输仍为离线候选，真实并发／有界页批尚未实现或实测。详见[验收报告](testing/drafting-result-usability-20261023.md)首节；下方活动上传状态按历史读取。
+
+**2026-10-23 Vetting详细进度已前端热更新（round366—368）：** 当前文件／方法类别／物理页及步骤已直接显示在顶部，独立内置浏览器实际source100 Annex9→10／47验证；40／40控件回归、类型及生产构建通过。只更新VettingView与测试，upload-queue字节保持，后台6292与H2／前端进程均未重启，原Drafting未保存状态保留。具体OCR引擎与GPU子阶段仍未由轻量接口报告，当前性能另按provider实际日志诊断，不能把展示修复算性能修复。详见[验收报告](testing/drafting-result-usability-20261023.md)首节；下方review101继续是当前后端版本。
+
+**2026-10-23 NTT旁注／正文式页脚热修（review101／round354—363）：** 后端6292／18086，H2与前端保持。NTT精确来源的174处空段压缩误伤原生排版间距，已只移除该组压缩并保留分页及其它来源规则；7／7回归通过。实际线上11页、178段正文完整且178坐标一致；独立浏览器沉浸式第2页确认旁注与(e)相邻、页码和日期回到底部。旁注仍低16.05pt、正文式页脚仍非各页同高，未授Word整版完全一致。SCT全恢复313处会27→31页且多四空白页，方案拒绝、生产SCT未改，针对性修复仍待办；无新识别／模型／保存／采用。详见[验收报告](testing/drafting-result-usability-20261023.md)首节及[原件核对spec](specs/drafting-human-review-integration-20261017.md)末节；下方review100等为历史。
+
+**2026-10-23 读取与上传队列热修（review100／round345—353）：** 后端7460／18086，H2及前端保持。Drafting初始重复整轮读取、旧任务图下载、目录大字段和同次PDF配方重复核查已定向修；实际目录705ms、完整读取22.137s（旧110.107s），8GET／11.7MB（旧18GET／30.1MB），22s剩余延迟仍未收口。Vetting新队列跨模块继续绑定原项目，硬刷新丢失File引用仍不重传；旧3／35不能凭日志恢复。后台54通过／1条件skip，Vetting前端38通过，Drafting控件及构建通过，无新识别／模型。详见[验收报告](testing/drafting-result-usability-20261023.md)首节；下方review99为历史。
+
+**2026-10-23 Vetting进度热修（review99／round335—344）：** 后端35112／18086，H2及前端保持。逐文件轻量进度、刷新恢复、公共解析逐页／表格批次阶段及1520px源集弹窗已部署；后端30／前端36通过，真实浏览器两次刷新8份来源保持。source89已明确标为重启中断，原件SHA与47页保留，无自动重试或新模型；旧35文件队列仅8份已接收，未补造历史进度。真实长文件逐页推进及普通DOCX双视觉接线仍未验／未完成，见[验收报告](testing/drafting-result-usability-20261023.md)首节。下方review98为历史。
+
+**2026-10-23 公共PDF渲染热修（review98／round316—334）：** LibreOffice复用受限英文hint兼容处理，原件／保存DOCX保持；原件预览接回既有SHA注册分页。在线NTT11／SCT27／SCC83页及1744正文坐标已核验，NTT／SCT全文回读通过，SCC整版未授通过。Vetting上传source89被本次重启中断，部署活动保护漏查已明确记录；后继修逐页阶段及刷新恢复，勿重发35整包。OER Word打印PDF必须共用该渲染，但普通上传视觉链未完成。见[验收报告](testing/drafting-result-usability-20261023.md)首节；下方review96为历史。
+
+**2026-10-23 原件定位热修现行状态（review96／round299—315）：** 后端29596／18086／64GiB；H2及前端保持。原件核对复用共享Word非打印书签→LibreOffice PDF坐标，实际NTT／SCT／SCC共1,744个非空正文段落的页坐标及预览身份已核验；Sean前端第3页与多处切换已实测，未保存调整保留，0新识别／模型／保存／采用。后端19项通过；前端12文件通过、3文件与冻结基线同处失败，构建通过。此结果不代表指导范围语义、重复变量、所有来源或最终成品验收通过。详见[结果验收报告](testing/drafting-result-usability-20261023.md)首节；下方review94等为历史。
+
+**2026-10-23 当前运行（review94／round264—276）：** 后端18420／18086／64GiB，H2与前端保持；当前草稿第三步与带标记部分出稿已部署。Sean真实前端一次生成三份，NTT实际下载且22,241正文字符保持；仍未完成三份PDF、逐页目录及新增说明页修改映射验收。图谱／106候选保持，0采用，无新识别／模型调用。详见[结果验收报告](testing/drafting-result-usability-20261023.md)，下方为历史。
+
+**2026-10-23 当前运行（review93／round237—241）：** 业务后端35168／18086／64GiB，数据库32040与前端24568保持。仅更新Skills默认说明资源，两个恢复默认按钮真实复验；Sean图谱、106候选及模板／资料／文稿逐值保持，草稿7e8bd05a仍未确认。第三步106／106、可见错误0；无新识别／模型／采用／正式生成。详见[验收报告](testing/drafting-result-usability-20261023.md)，下方为历史。
+
+**2026-10-23 当前结果（round218—221）：** 六处拆除标段通过真实选词和保存绑定准确Word位置，草稿65deb350；全部check／拟议fill，尚不执行。其它511节点／106完整候选保持，203业务＋167核对、待归属0。完整图谱离线计划23动作／192未决，六目标全部pending；第三步刷新后准确区分位置已绑定与修改待核对。答案格式及互斥执行仍未收口，无新识别／模型／确认／采用／正式生成；见[验收报告](testing/drafting-result-usability-20261023.md)，下方为历史。
+
+**2026-10-23 当前结果（round215）：** 两处原文明指同一SCC8.303采用状态，前端合并并明确条款名称；草稿d6aedecf为203业务＋167核对＝370未确认，512历史节点／106候选保持，待归属0。其余510节点及已有填空条件逐值不变。固定目录已有互斥规则，但动态图谱执行接线尚缺，不能算互斥已实现；详见[验收报告](testing/drafting-result-usability-20261023.md)。无新识别／模型／确认／采用／生成，review92保持，下方为历史。
+
+**2026-10-23 当前结果（round214）：** 未完成填空保存误删答案引用已修；前端补SCC8.303采用条件并保存为738e0d60，第三步同版即时显示。其余511节点／106完整候选保持，204业务＋167核对、待归属0，未确认或采用。六处编辑位置／答案格式／8.302互斥仍待收口；无新识别／模型／生成，review92保持。详见[验收报告](testing/drafting-result-usability-20261023.md)，下方按历史读取。
+
+**2026-10-23 当前结果（round205）：** 同源拆除标段问题合并并将两条旧候选明确归属，草稿19cd8fe5为204业务＋167核对＝371未确认，512历史节点／106候选保持，待归属0；其余510节点及保留修改目标逐值未变。六处原文已核，原生编辑跨度及适用条件仍待连通，未授修改方案通过。无新识别／模型调用／确认／采用／生成，review92保持。详见[验收报告](testing/drafting-result-usability-20261023.md)，下方为历史。
+
+**2026-10-23 当前结果（round193）：** 七对同源业务问题经前端合并并保存，草稿ba2f461a为205业务＋167核对＝372未确认，512历史节点及4未决规则保持。其它499节点逐值未变；106候选证据和值保持，拆除标段旧候选明确归属但未采用，待归属0。review92保持，未识别／调用模型／确认／生成。详见[验收报告](testing/drafting-result-usability-20261023.md)，下方为历史。
+
+**2026-10-23 现行更新（review92／round189）：** 指导说明原生空段0–0观察误拒已修并部署，后端32332／18086／64GiB，H2及前端保持。真实三模板297指导锚点只读通过；新草稿ba5ebb38仅更新98节点的99处来源观察绑定，512历史节点、212业务＋167核对、106完整候选保持，未确认或采用。真实前端刷新后第三步106／106、待归属0、可见错误0；七组合并仍未执行，最终文件未验。见[结果验收报告](testing/drafting-result-usability-20261023.md)，下方按历史读取。
+
+**2026-10-23 现行结果更新（round185）：** 同源价格波动条款引用、NSC及预制立面三对同义问题经前端合并；NSC未决与既有预制立面条件／目标保持，两旧候选明确归属但未采用。草稿755a6b9b保留512历史节点，212业务＋167核对＝379未确认，4规则仍需重绑；106候选证据和值保留、待归属0、真实第三步无错误。候选搜索、直达模板问题／范围及沟通原件PDF查看已有局部前端证据，最终文件未验。无重新识别／模型调用／模板确认／事实采用；详见[结果验收报告](testing/drafting-result-usability-20261023.md)，下方状态按历史读取。
+
+**2026-10-23 最新部署review90：SCT6(2)准确选区跨原生tab误拦已修复。** 后端PID36484／18086／64GiB，H2、OER及前端保持；49项回归通过、1既有条件跳过，静态页脚另有基线失败保留。真实前端保存修订aca42c70，三段目标由unsafe变bound，227业务＋167核对＝394未确认，12个规则仍需重绑。512历史节点、106候选对象保持；前端仅条件编辑误改字段定义已修；原定义恢复后待归属0，真实前端再次仅改条件说明仍保持106候选／待归属0，未确认图谱或采用项目答案。真实原件离线编辑及局部PDF检查有证据，但未完成Sean正式生成。详见[结果验收报告](testing/drafting-result-usability-20261023.md)，下方旧状态按各自时间读取。
+
+**2026-10-23 02:05 当前运行更新：review89／PID3812／18086／64GiB。** 已部署候选定义变化后的保留与逐条校正隔离；当前Sean修订252业务问题＋157来源核对，106候选保持，尚未确认或采用。前后状态核对保持、H2／OER／前端进程未重启。清单列映射已实现控件回归，实际合并保存尚待验收；详见[结果可用性报告](testing/drafting-result-usability-20261023.md)。下方review88及未部署说明按历史读取。
+
+**2026-10-23 当前：review88已部署（候选复用同版目录和结构化展示），正在修复Sean既有结果的人类可用性。** 无新识别／模型调用；98条已完成来源占位保留历史并退出有效列表，一对严格重复及两对来源定义相同的同义问题经前端合并保存。当前254业务问题、157来源核对项、106候选保持；未确认图谱或采用事实。后端18086／PID33508／64GiB，H2与OER保持。现行要求及未验收边界见[结果可用性报告](testing/drafting-result-usability-20261023.md)和[spec](specs/drafting-human-review-integration-20261017.md)。下方旧部署／暂停状态按历史读取，当前Goal active。
+
+**2026-10-22 后端 hotfix86 已联合部署：** 用户要求停止 Sean 原任务、修候选提取重复传输并合入 Vetting 接缝。原任务现 CANCELLED，图谱保持，5 失败／1 停止时结果未知已如实回填且不重发。提取不再发送完整字段锚点，完整语义定义有界分批；132 项为 131 通过／1 既有条件 skip。18086／PID24292／64GiB，H2、OER、前端保持；三模板／15资料／三稿及真实2b35件返回逐项保持。APB／APU新路由已上线，旧pending未迁移；Drafting本地切块／公共按需取证、DOCX视觉及整包质量仍未完成，不能宣称全部重复能力已消除。[本轮修复及准确边界](testing/drafting-extraction-payload-hotfix-20261022.md)。下方候选未部署是本次升级前历史。
+
+**2026-10-22 Vetting准入接缝候选待安全部署：** [本轮热修](testing/vetting-upload-entry-hotfix-20261022.md)在既有公共路由补APB／APU清单标题；实际首页身份观察两份通过，软件／隔离HTTP-JPA组合65项通过。当前18086仍automation80，保护Sean原自动任务，不以候选冒充在线生效；旧两pending未迁移，完整解析、DOCX视觉链及真实35报告仍未完成。
+
+<!-- drafting-template-route80-current:start -->
+**2026-10-22当前热修：Drafting第一步文件识别，第二步变量／原子／图谱。模板专用OER路由已存在，不能再把整份原生结构交LLM重新做指导语／标记／范围发现。** 当前自动化接线已纠偏至复用已存OER观察与范围闭包，automation80已部署至18086/PID20700/64GiB；隔离真实NTT一键启动及刷新恢复同任务已验证，24/24执行后保存14要求／18原子节点／5关系候选，PARTIAL待核对、未自动采用；真实NTT只读核查与失败请求体分解见[本批记录](testing/drafting-automatic-graph-20261022.md)，现行职责见[spec](specs/drafting-human-review-integration-20261017.md)。源扫描、语义质量、视觉布局、模型和浏览器验收分开；Goal paused。
+<!-- drafting-template-route80-current:end -->
+
+<!-- docx-production-gap78-current:start -->
+**2026-10-22普通DOCX上传生产状态校正：** [实际调用链及手测证据](testing/docx-upload-production-gap-20261022.md)确认只有原生POI／OOXML读取，未接自动转PDF、双视觉核对、页码映射或后台补跑。Sean18份DOCX均页数0、OCR未用；历史离线实验不算本次上传完成。公共完整接线已写spec但尚未实现，重复装配／Drafting提取等后继保留，不再保证整体已消除重复实现。上传状态样式已生效，0新OCR／模型调用，Goal仍paused。
+<!-- docx-production-gap78-current:end -->
+
+<!-- drafting-upload-write77-current:start -->
+**2026-10-22 19:25手测后继：** [NTT上传写入热修及证据](testing/drafting-template-upload-hotfix-20261022.md)已部署。公共rwfile兼容补齐后端JDBC客户端临时LOB，默认1MiB与磁盘分块保持；40项回归及同原件真实上传／刷新通过。当前后端PID38868／64GiB，H2／OER未重启，原来源／草稿身份状态保持。Goal仍paused，未新授三模块完整业务或最终文件通过，下文旧运行PID按历史读取。
+<!-- drafting-upload-write77-current:end -->
+
+<!-- oer-demand-access-20261022-current:start -->
+**2026-10-22本批公共按需读取及 Advisory 接线已部署，用户接下来手测再热修。** [现行 spec](specs/oer-demand-driven-business-access-20261022.md)仍约束完整后继，本批不冒充所有三模块已compact化。Python40通过，Java211中210通过／1既有Q1.6体积门FAIL；完整内容与来源关系比对已过，不能删来源或放宽门掩盖失败。前端5177、后端18086／64GiB、两OER已恢复；02:56 SQL已单次恢复到持久化H2文件库并独立重开，上午新保存稿及咨询52未恢复。新JAR9fb71c60…；[手测入口、实际证据与未完范围](testing/oer-demand-access-handoff-20261022.md)为现行。Goal工具paused、旧958MB binding未迁移，SL后置；下方未恢复和active均按较早语境读取。
+<!-- oer-demand-access-20261022-current:end -->
+
+<!-- shared-capability-reuse75-current:start -->
+**2026-10-22复用后继已完成离线集成，仍未恢复服务。** 公共JSON指纹、业务seal／normal snapshot、按文档规则适配、canonical fieldHash、窗口父指纹及PDF存在性查询已修；160业务通过／1真实原件夹具skip，57公共hash及Python132／直接接缝42通过，历史PRE10,930单位逐项保持。新图仍238,538,721B，旧958MB binding未迁移，不把历史回放当当前来源或真人验收。Goal工具paused，GitHub凭据失效待推送；[复用修复、实际证据和有序后继](testing/shared-capability-reuse-hotfix-20261022.md)。
+<!-- shared-capability-reuse75-current:end -->
+
+<!-- source-evidence-hotfix75-current:start -->
+**2026-10-22 来源内存热修已取得最终离线证据。** 段落与节上下文共享、Java/Python流式哈希／精确比较、receipt单次解析、frame20字段比较及两处重复解析已修。Python30通过；Java257方法组合中256通过，唯一旧inline表示断言更新后完整方法单独通过，保留红票。历史PRE图480,537,861→238,538,721 B，49份节上下文共享，10,930 units完整展开逐项保持，原件／正文／结构／coverage保持；1秒采样最大工作集约11.72GiB，整机最低可用约90.23GiB。不是完整封存读写或当前运行库验收。Goal工具paused，前后端／OER／H2未恢复，旧958MB binding仍需受前驱校验的新修订；GitHub令牌失效阻断远端交付。详见[热修记录](testing/source-evidence-memory-hotfix-20261022.md)，下方active／RUNNING为历史。
+<!-- source-evidence-hotfix75-current:end -->
+
+<!-- desktop-freeze-20261022-current:start -->
+**2026-10-22 12:35现场校正：Windows在11:39及12:13两次重启，原业务后端／H2内存owner／OER／前端均已退出；下方runtime37与RUNNING记录仅是重启前历史。** 用户确认两次是桌面卡死后重启，当前只读归因和恢复盘点，不启动新重任务。第一次前巨型来源处理属于合理负载嫌疑；第二次前未启动本任务服务，无法将两次均归到原审查。今日无内存耗尽事件／新蓝屏转储，连续峰值采样缺失，根因未定。Goal仍active；最新已知SQL检查点为runtime30／02:56、SHA ad2df54cc50a68332dbd6fc601f91179352e6ef3c95f971d7ed98f690d33d041，之后来源、三稿及咨询记录的恢复差异待核，尚未执行恢复。原件／CAS／六下载仍在，不等于内存库所有记录已恢复。证据`.local/desktop-freeze-20261022/`；不得直接重放历史launcher或重新发审查。
+<!-- desktop-freeze-20261022-current:end -->
+
 <!-- human-acceptance-mainline-20261022:start -->
 **2026-10-22现行Goal保持active：[三模块人类验收全流程](testing/human-acceptance-mainline-goal-20261022.md)。** 旧后继f6e305b8于10:44因准备后派生图与先前冻结快照不符FAILED／0/19，未进入内容审查。最小修复复用CanonicalEvidenceService及NormalObservedPreparationService，在冻结前准备未登记来源；已有reviewed／normal登记与严格来源校验保持。clean回归84项全过（green06），旧green05的83通过／1夹具ERROR保留；测试夹具已等待原worker退出再重置mock。runtime37／18086／PID51296／64GiB已部署，35件、80取值、三保存修订及咨询索引升级前后精确相同。11:13:41从前端仅激活一次，11:14:47取得新任务022d925f-4a5d-4291-879c-1a88ed2c4a14，11:15回读QUEUED；来源快照433f610a…，27B配置8fcc18b3…保持。只接回此句柄，不重发。 JAR ba10ebcd5973685c270beb7b8ff408b81f16b0e3611cec47b9ff7057e3973e17，仅替换实际已测两产品class family。H2 owner39876／runtime30及两OER保持，512MiB内联阈值／H2内建memFS与900000ms来源预算保留；PRE的binding33生产保存与fresh完整回读门已过，不重放恢复。新任务状态证据`.local/runtime-integration37/successor-progress02.json`；回归`.local/source-preparation-freeze74/green06/`；升级保全`runtime-integration37/before.json`与`after.json`。浏览器空间14已消失，按永久授权恢复15/p1，个人空间未动。真实报告、人工处理／2d对照／Vetting同项目咨询入口仍待完成；来源复用及其余反馈见[范围入口](oer-scope-and-rules.md)、[待办](testing/human-acceptance-feedback-backlog-20261022.md)与[验收入口](testing/human-acceptance-delivery-20261022.md)。
 <!-- human-acceptance-mainline-20261022:end -->

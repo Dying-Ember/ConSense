@@ -26,8 +26,67 @@ export function createReviewReducer(data) {
     return state.variables.filter(x => x.id !== id && compatible(x,v) && x.status !== 'excluded' &&
       (refs(x).includes(id) || refs(v).includes(x.id)));
   }
+  function mergeInto(s, id, targetId) {
+    const v=s.variables.find(x=>x.id===id),other=s.variables.find(x=>x.id===targetId);
+    v.status='excluded';v.replacedBy=[other.id];v.reason='人工合并 / Merged during review';
+    other.docIds=[...new Set([...other.docIds,...v.docIds])];
+    other.sourceUnitIds=[...new Set([...(other.sourceUnitIds||[]),...(v.sourceUnitIds||[])])];
+    other.evidence=[...other.evidence,...v.evidence].filter((x,i,a)=>a.findIndex(y=>y.docId===x.docId&&y.quote===x.quote)===i);
+    other.targets=[...other.targets,...v.targets].filter((x,i,a)=>a.findIndex(y=>y.docId===x.docId&&y.labelZh===x.labelZh)===i);
+    other.sourceAnchors=[...(other.sourceAnchors||[]),...(v.sourceAnchors||[])];
+    other.editTargets=[...(other.editTargets||[]),...(v.editTargets||[])];
+    other.relatedInputIds=[...new Set([...(other.relatedInputIds||[]),...(v.relatedInputIds||[])])];
+    other.relations=[...other.relations,...v.relations].filter((x,i,a)=>a.findIndex(y=>JSON.stringify(x)===JSON.stringify(y))===i);
+    if(!other.correction&&v.correction)other.correction=copy(v.correction);
+    if(v.role.kind==='fixed'&&other.role.kind!=='fixed'){other.role=copy(v.role);other.fixedValue=v.fixedValue;}
+    other.status='changed';other.manual=true;
+    for (const x of s.variables) {
+      if(x.parentId===v.id){x.parentId=other.id;if(x.status==='confirmed')x.status='pending';}
+      x.relatedInputIds=[...new Set((x.relatedInputIds||[]).map(id=>id===v.id?other.id:id))].filter(id=>id!==x.id);
+      if(x.correction?.inputIds) x.correction.inputIds=[...new Set(x.correction.inputIds.map(id=>id===v.id?other.id:id))];
+      if(x.correction?.branches)for(const branch of x.correction.branches){branch.clauses=branch.clauses.map(c=>({...c,inputId:c.inputId===v.id?other.id:c.inputId}));if(branch.scopeId===v.id)branch.scopeId=other.id;}
+      else if(x.correction?.clauses)x.correction.clauses=x.correction.clauses.map(c=>({...c,inputId:c.inputId===v.id?other.id:c.inputId}));
+      for(const target of x.editTargets||[]){if(target.valueSourceId===v.id)target.valueSourceId=other.id;if(target.listId===v.id)target.listId=other.id;if(target.itemKey===v.id){target.itemKey=other.id;target.needsRebind=true;x.status='help';}}
+    }
+    for(const requirement of s.requirements||[])requirement.nodeIds=[...new Set((requirement.nodeIds||[]).map(id=>id===v.id?other.id:id))];
+  }
+  function mergeProblem(state, id, targetId) {
+    const v=state.variables.find(x=>x.id===id),other=state.variables.find(x=>x.id===targetId);
+    const problem=code=>({code,id,targetId});
+    if(!v||!other)return problem('MERGE_NODE_MISSING');
+    if(id===targetId)return problem('MERGE_SAME_NODE');
+    if(v.status==='excluded'||other.status==='excluded')return problem('MERGE_EXCLUDED');
+    if(v.type.kind!==other.type.kind)return problem('MERGE_TYPE_MISMATCH');
+    if(v.role.kind!==other.role.kind)return problem('MERGE_ROLE_MISMATCH');
+    if(v.parentId!==other.parentId)return problem('MERGE_PARENT_MISMATCH');
+    if(Boolean(v.optional)!==Boolean(other.optional))return problem('MERGE_OPTIONAL_MISMATCH');
+    if(JSON.stringify(v.options||[])!==JSON.stringify(other.options||[]))return problem('MERGE_OPTIONS_MISMATCH');
+    if(v.role.kind==='fixed'&&v.fixedValue!==other.fixedValue)return problem('MERGE_FIXED_VALUE_MISMATCH');
+    const emptyUnresolved=c=>c?.kind==='rule'&&c.needsRebind===true&&Array.isArray(c.branches)&&!c.branches.length&&Array.isArray(c.inputIds)&&!c.inputIds.length&&Object.keys(c).every(key=>['kind','needsRebind','branches','inputIds'].includes(key));
+    if(v.correction&&other.correction&&!(emptyUnresolved(v.correction)&&emptyUnresolved(other.correction)))return problem('MERGE_RULE_CONFLICT');
+    if(!compatible(other,v))return problem('MERGE_SOURCE_EDITION_CONFLICT');
+    if(!canShareSources(state,v,other.docIds)||!canShareSources(state,other,v.docIds))return problem('MERGE_SOURCE_SCOPE_CONFLICT');
+    const projected=copy(state);mergeInto(projected,id,targetId);
+    return isolatedSources(projected)?null:problem('MERGE_SOURCE_SCOPE_CONFLICT');
+  }
+  function mergeMany(state, ids, targetId, at, reason) {
+    const failed=(code,id=targetId)=>({state,problem:{code,id,targetId}});
+    if(!Array.isArray(ids)||ids.length<2)return failed('MERGE_SELECTION_REQUIRED');
+    const duplicate=ids.find((id,index)=>ids.indexOf(id)!==index);
+    if(duplicate!==undefined)return failed('MERGE_DUPLICATE_ID',duplicate);
+    if(!ids.includes(targetId))return failed('MERGE_TARGET_REQUIRED');
+    for(const id of ids)if(typeof id!=='string'||!id||!state.variables.some(v=>v.id===id))return failed('MERGE_NODE_MISSING',id);
+    let next=state;
+    for(const id of ids)if(id!==targetId){
+      const merged=reduce(next,{type:'MERGE',id,targetId,at,reason});
+      if(merged===next)return {state,problem:mergeProblem(next,id,targetId)||{code:'MERGE_SOURCE_SCOPE_CONFLICT',id,targetId}};
+      next=merged;
+    }
+    return {state:next,problem:null};
+  }
   // The preview records explicit human decisions; it does not reinterpret source wording.
   function reduce(old, action) {
+    if(action.type==='MERGE_MANY')return mergeMany(old,action.ids,action.targetId,action.at,action.reason).state;
     const s = copy(old), find = id => s.variables.find(v => v.id === id);
     const v = find(action.id);
     const event = (zh,en,details=[]) => s.events.unshift({zh,en,details,time:action.at});
@@ -47,7 +106,7 @@ export function createReviewReducer(data) {
           for(const target of x.editTargets||[])if(targetInputs(target).some(id=>moved.has(id))){target.needsRebind=true;x.status='help';}
         }
       }
-      if(action.values.type?.kind!==v.type.kind||action.values.role?.kind==='fixed'||(action.values.options&&JSON.stringify(action.values.options)!==JSON.stringify(v.options)))for(const x of s.variables){if(x.status!=='excluded'&&x.correction&&correctionInputs(x.correction).includes(v.id)){x.correction.needsRebind=true;x.status='help';}}
+      if(action.values.type&&action.values.type.kind!==v.type.kind||action.values.role?.kind==='fixed'||(action.values.options&&JSON.stringify(action.values.options)!==JSON.stringify(v.options)))for(const x of s.variables){if(x.status!=='excluded'&&x.correction&&correctionInputs(x.correction).includes(v.id)){x.correction.needsRebind=true;x.status='help';}}
       Object.assign(v,action.values,{status:'changed',manual:true});
       if(ownAnswerChanged&&v.correction){v.correction.needsRebind=true;v.status='help';}
       if(ownAnswerChanged)for(const x of s.variables)if(x.status!=='excluded')for(const target of x.editTargets||[])if(targetInputs(target).includes(v.id)){target.needsRebind=true;x.status='help';}
@@ -76,31 +135,11 @@ export function createReviewReducer(data) {
       event('将一个问题拆成了两个独立问题','Split one question into two',[v.nameZh,...children.map(x=>x.nameZh),action.mode==='all'?'两个问题必须同时成立 / Both must be true':action.mode==='any'?'任一问题成立即可 / Either may be true':'条件仍待确认 / Conditions still need review']);
     } else if (action.type === 'MERGE') {
       const other=find(action.targetId);
-      if (!other || other.id === v.id || !compatible(other,v)||!canShareSources(old,v,other.docIds)||!canShareSources(old,other,v.docIds)) return old;
-      if(v.correction&&other.correction)return old;
-      if(v.parentId!==other.parentId||JSON.stringify(v.options||[])!==JSON.stringify(other.options||[]))return old;
-      if(v.role.kind==='fixed'&&other.role.kind==='fixed'&&v.fixedValue!==other.fixedValue)return old;
+      if(mergeProblem(old,action.id,action.targetId))return old;
       revisit(v.id); revisit(other.id);
       const oldName=v.nameZh;
-      v.status='excluded';v.replacedBy=[other.id];v.reason='人工合并 / Merged during review';
-      other.docIds=[...new Set([...other.docIds,...v.docIds])];
-      other.sourceUnitIds=[...new Set([...(other.sourceUnitIds||[]),...(v.sourceUnitIds||[])])];
-      other.evidence=[...other.evidence,...v.evidence].filter((x,i,a)=>a.findIndex(y=>y.docId===x.docId&&y.quote===x.quote)===i);
-      other.targets=[...other.targets,...v.targets].filter((x,i,a)=>a.findIndex(y=>y.docId===x.docId&&y.labelZh===x.labelZh)===i);
-      other.sourceAnchors=[...(other.sourceAnchors||[]),...(v.sourceAnchors||[])];
-      other.editTargets=[...(other.editTargets||[]),...(v.editTargets||[])];
-      other.relatedInputIds=[...new Set([...(other.relatedInputIds||[]),...(v.relatedInputIds||[])])];
-      other.relations=[...other.relations,...v.relations].filter((x,i,a)=>a.findIndex(y=>JSON.stringify(x)===JSON.stringify(y))===i);
-      if(!other.correction&&v.correction)other.correction=copy(v.correction);
-      if(v.role.kind==='fixed'&&other.role.kind!=='fixed'){other.role=copy(v.role);other.fixedValue=v.fixedValue;}
-      other.status='changed';other.manual=true;
-      for (const x of s.variables) {
-        x.relatedInputIds=[...new Set((x.relatedInputIds||[]).map(id=>id===v.id?other.id:id))].filter(id=>id!==x.id);
-        if(x.correction?.inputIds) x.correction.inputIds=[...new Set(x.correction.inputIds.map(id=>id===v.id?other.id:id))];
-        if(x.correction?.branches)for(const branch of x.correction.branches){branch.clauses=branch.clauses.map(c=>({...c,inputId:c.inputId===v.id?other.id:c.inputId}));if(branch.scopeId===v.id)branch.scopeId=other.id;}
-        else if(x.correction?.clauses)x.correction.clauses=x.correction.clauses.map(c=>({...c,inputId:c.inputId===v.id?other.id:c.inputId}));
-        for(const target of x.editTargets||[]){if(target.valueSourceId===v.id)target.valueSourceId=other.id;if(target.listId===v.id)target.listId=other.id;}
-      }
+      mergeInto(s,v.id,other.id);
+      if(!isolatedSources(s))return old;
       event('确认两处是在问同一件事','Merged two references to the same question',[oldName,'→ '+other.nameZh,action.reason]);
     } else if (action.type === 'EXCLUDE') {
       revisit(v.id);v.status='excluded';v.reason=action.reason;v.manual=true;
@@ -153,5 +192,5 @@ export function createReviewReducer(data) {
     }
     return s;
   }
-  return { reduce, compatible, isolatedSources };
+  return { reduce, compatible, isolatedSources, mergeProblem, mergeMany };
 }

@@ -6,6 +6,7 @@ import com.consense.domain.CanonicalSourceBinding;
 import com.consense.domain.SourceDocument;
 import com.consense.service.sources.CanonicalEvidenceService;
 import com.consense.service.sources.CanonicalSourcePageService;
+import com.consense.service.sources.CanonicalCurrentSourceReader;
 import com.consense.service.sources.NativeCanonicalContract;
 import com.consense.service.sources.NativePdfCanonicalContract;
 import com.consense.service.sources.NativePdfSourceFamilyContract;
@@ -30,6 +31,7 @@ public class OerBusinessEvidence {
     private final OerCanonicalRetrievalClient retrieval;
     private final CanonicalEvidenceProperties properties;
     @Autowired(required=false) private CanonicalSourcePageService sourcePages;
+    @Autowired private CanonicalCurrentSourceReader currentSources;
 
     public boolean enabled(){return !JsonUtils.isBlankText(properties.getBaseUrl());}
     public static final class Session {
@@ -45,7 +47,7 @@ public class OerBusinessEvidence {
             this.projectId=project;this.module=module;this.documentIds=Collections.unmodifiableList(new ArrayList<>(ids));
             this.bindingFingerprint=fingerprint(bindings);this.byId=views;
             this.sourceRenderPins=Collections.unmodifiableMap(new TreeMap<>(pins));
-            this.viewPayloads=new LinkedHashMap<>();views.forEach((id,view)->viewPayloads.put(id,JsonUtils.write(view)));
+            this.viewPayloads=new LinkedHashMap<>();views.forEach((id,view)->viewPayloads.put(id,JsonUtils.serializedSha256(view)));
             Object projections=bindings.stream().map(CanonicalSourceBinding::getProjectionSha256).collect(Collectors.toList());
             this.indexKey=project+"::canonical::"+module+"::"+VettingCorpus.hash(JsonUtils.write(pins.isEmpty()?projections:Arrays.asList(projections,sourceRenderPins)));
             this.chunks=new Corpus(this,new ArrayList<>(views.values()));
@@ -85,7 +87,7 @@ public class OerBusinessEvidence {
     private void checkViews(Session session,List<CanonicalSourceBinding> bindings){
         require(session.bindingFingerprint.equals(fingerprint(bindings)),"current bindings changed since corpus load");
         require(session.sourceRenderPins.equals(sourceRenderPins(bindings)),"source render identities changed since corpus load");
-        for(Chunk view:session.chunks)require(Objects.equals(session.viewPayloads.get(view.getId()),JsonUtils.write(view))
+        for(Chunk view:session.chunks)require(Objects.equals(session.viewPayloads.get(view.getId()),JsonUtils.serializedSha256(view))
                 &&canonicalViewStatus(view)==null,"selected canonical view changed");
     }
 
@@ -109,7 +111,8 @@ public class OerBusinessEvidence {
         require(pins.isEmpty()||sourcePages!=null,"source page validator required for reviewed render identities");
         require(ids.equals(bindings.stream().map(CanonicalSourceBinding::getDocumentId).collect(Collectors.toList())),"selected binding order differs");
         Map<String,Chunk> views=new LinkedHashMap<>();for(CanonicalSourceBinding binding:bindings) {
-            JsonNode snapshot=JsonUtils.parse(binding.getSnapshotJson());SourceDocument source=documents.get(binding.getDocumentId());
+            JsonNode verifiedNormal=stage.frame==null?null:stage.frame.normalSnapshot(binding.getDocumentId(),binding.getProjectionSha256(),module);
+            JsonNode snapshot=verifiedNormal==null?JsonUtils.parse(binding.getSnapshotJson()):verifiedNormal;SourceDocument source=documents.get(binding.getDocumentId());
             boolean normal=NormalObservedContract.isNormal(snapshot),family=!normal&&NativePdfSourceFamilyContract.isFamily(snapshot),nativePdf=!normal&&!family&&NativePdfCanonicalContract.isNativePdf(snapshot);
             JsonNode display=family?NativePdfSourceFamilyContract.displayDeclarations(snapshot):nativePdf?NativePdfCanonicalContract.displayDeclarations(snapshot):null;
             // A large native document has one root binding. Complete batches
@@ -255,7 +258,7 @@ public class OerBusinessEvidence {
         Objects.requireNonNull(selected,"Selected model chunks required");List<Chunk> words=new ArrayList<>();Set<String> ids=new HashSet<>();
         for(Chunk chunk:selected){
             if(FixedVettingReferences.isFixed(chunk))continue;
-            require(chunk!=null&&session.byId.containsKey(chunk.getId())&&Objects.equals(session.viewPayloads.get(chunk.getId()),JsonUtils.write(chunk))
+            require(chunk!=null&&session.byId.containsKey(chunk.getId())&&Objects.equals(session.viewPayloads.get(chunk.getId()),JsonUtils.serializedSha256(chunk))
                     &&canonicalViewStatus(chunk)==null,"selected model member differs from canonical session");
             if(NormalObservedContract.isNormal(chunk.getCanonicalPayload())&&chunk.getCanonicalEvidence().getParts()!=null)
                 for(JsonNode part:chunk.getCanonicalEvidence().getParts())if("docx_native".equals(part.path("sourcePosition").path("kind").asText())){
@@ -294,23 +297,156 @@ public class OerBusinessEvidence {
             out.add(businessHit(session,hit.path("id").asText(),unit,hit.path("score").asDouble(),"reranked_seed"));
         }return withWordSourceScopes(session,out);
     }
-    /** Pure observed closure for explicitly selected origins in this same immutable corpus. */
+
+    /** Advisory declares its context needs; source selection and observed closure stay in shared OER. */
+    public List<VectorStore.SearchHit> advisoryContext(Session session,List<VectorStore.SearchHit> hits,boolean includeSmallCorpus,int stuffingLimit){
+        List<VectorStore.SearchHit> selected=withIncorporationContext(session,hits);
+        selected=withTableContext(session,selected);
+        return includeSmallCorpus?withSmallCorpusContext(session,selected,stuffingLimit):selected;
+    }
+    public OerModelMaterial.Request modelMaterial(Session session,List<VectorStore.SearchHit> hits){
+        require(session!=null,"canonical model material requires its selected source session");
+        return new OerModelMaterial.Request(materialSources(session,hits,false));
+    }
+    private List<VectorStore.SearchHit> withSmallCorpusContext(Session session,List<VectorStore.SearchHit> hits,int stuffingLimit){
+        long remaining=stuffingLimit;if(remaining<=0)return hits;
+        for(Chunk chunk:session.chunks){remaining-=text(chunk.getContent()).length();if(remaining<0)return hits;}
+        Set<String> represented=new LinkedHashSet<>(),units=new LinkedHashSet<>();
+        for(VectorStore.SearchHit hit:hits)if(!fixedBaselineHit(hit)){
+            represented.add(hit.getId());JsonNode unit=canonicalUnit(hit);units.add(unit==null?hit.getId():unit.path("unitId").asText(hit.getId()));
+            for(EvidencePointer pointer:canonicalPointers(hit))if(!JsonUtils.isBlankText(pointer.getCanonicalChunkId()))represented.add(pointer.getCanonicalChunkId());
+        }
+        List<String> origins=session.chunks.stream().map(Chunk::getId).filter(id->!represented.contains(id)).collect(Collectors.toList());
+        if(origins.isEmpty())return hits;
+        List<VectorStore.SearchHit> result=new ArrayList<>(hits);
+        for(VectorStore.SearchHit context:sourceHits(session,origins)){JsonNode unit=canonicalUnit(context);if(units.add(unit==null?context.getId():unit.path("unitId").asText(context.getId())))result.add(context);}
+        return result;
+    }
+    private List<VectorStore.SearchHit> withTableContext(Session session,List<VectorStore.SearchHit> hits){
+        List<SourceDocument> sources=materialSources(session,hits,true);if(sources.isEmpty())return hits;
+        OerModelMaterial.Request material=new OerModelMaterial.Request(sources);
+        Map<List<String>,Set<String>> members=new LinkedHashMap<>();Set<String> present=new LinkedHashSet<>();
+        for(VectorStore.SearchHit hit:hits){
+            JsonNode unit=canonicalUnit(hit);if(unit!=null)present.add(unit.path("unitId").asText());
+            JsonNode payloads=JsonUtils.mapper().valueToTree(hit.getPayload().get("canonicalMembers"));int ordinal=0;
+            for(EvidencePointer pointer:canonicalPointers(hit)){
+                JsonNode payload=payloads.isArray()&&ordinal<payloads.size()?payloads.get(ordinal):null;ordinal++;
+                if(!NormalObservedContract.PRODUCER.equals(pointer.getProducerKind()))continue;
+                JsonNode selected=material.project(pointer,payload,String.valueOf(hit.getPayload().get("sourceRole")));
+                for(JsonNode table:selected.path("observedSourceUnits").path("units"))
+                    if(Arrays.asList("ordinary_docx_native_table_tree","ordinary_docx_table").contains(table.path("kind").asText()))
+                        for(JsonNode id:table.path("requiredMemberBlockIds"))members.computeIfAbsent(tableSource(pointer,String.valueOf(hit.getPayload().get("sourceRole"))),key->new LinkedHashSet<>()).add(id.asText());
+            }
+        }
+        if(members.isEmpty())return hits;
+        List<String> origins=new ArrayList<>();
+        for(Chunk chunk:session.chunks){EvidencePointer pointer=chunk.getCanonicalEvidence();if(pointer==null)continue;
+            Set<String> required=members.get(tableSource(pointer,chunk.getRole()));
+            if(required!=null&&chunk.getParts().stream().anyMatch(part->required.contains(part.getBlockId())))origins.add(chunk.getId());
+        }
+        List<VectorStore.SearchHit> result=new ArrayList<>(hits);
+        for(VectorStore.SearchHit context:sourceHits(session,origins))if(present.add(canonicalUnit(context).path("unitId").asText()))result.add(context);
+        return result;
+    }
+    private List<SourceDocument> materialSources(Session session,List<VectorStore.SearchHit> hits,boolean normalOnly){
+        Map<Long,SourceDocument> byDocument=new LinkedHashMap<>();
+        for(VectorStore.SearchHit hit:hits)for(EvidencePointer pointer:canonicalPointers(hit)){
+            boolean normal=NormalObservedContract.PRODUCER.equals(pointer.getProducerKind());if(normalOnly&&!normal)continue;
+            require(Objects.equals(session.projectId,pointer.getProjectId())&&session.documentIds.contains(pointer.getDocumentId()),"model material pointer outside selected scope");
+            SourceDocument source=byDocument.get(pointer.getDocumentId());
+            if(source==null){require(currentSources!=null,"current source reader required for selected model material");source=normal?currentSources.normalDocument(session.projectId,pointer.getDocumentId(),session.module):currentSources.currentDocument(session.projectId,pointer.getDocumentId(),session.module);byDocument.put(pointer.getDocumentId(),source);}
+            require(Objects.equals(source.getProjectId(),pointer.getProjectId())&&Objects.equals(source.getId(),pointer.getDocumentId())
+                    &&Objects.equals(source.getSourceSha256(),pointer.getOriginalSourceSha256())&&Objects.equals(VettingCorpus.sourceHash(source),pointer.getJavaParsedSourceHash())
+                    &&Objects.equals(VettingCorpus.sourceRole(source),String.valueOf(hit.getPayload().get("sourceRole"))),"model material current source differs from selected pointer");
+        }
+        return new ArrayList<>(byDocument.values());
+    }
+    private static List<String> tableSource(EvidencePointer pointer,String role){
+        return Arrays.asList(pointer.getProjectId(),String.valueOf(pointer.getDocumentId()),pointer.getOriginalSourceSha256(),pointer.getJavaParsedSourceHash(),pointer.getProjectionSha256(),role);
+    }
+    private List<VectorStore.SearchHit> withIncorporationContext(Session session,List<VectorStore.SearchHit> hits){
+        List<VectorStore.SearchHit> libraries=hits.stream().filter(h->"standard".equals(String.valueOf(h.getPayload().get("sourceRole")))).collect(Collectors.toList());if(libraries.isEmpty())return hits;
+        List<String> origins=new ArrayList<>();for(Chunk chunk:session.chunks){
+            if(!"tender".equals(chunk.getRole()))continue;
+            String name=text(chunk.getFileName()).toLowerCase(Locale.ROOT).replace('_',' ').replace('-',' ');
+            if(name.contains("the specification")||name.contains("specification composition")||libraries.stream().anyMatch(h->referenceMention(chunk.getContent(),h.fileLabel())))origins.add(chunk.getId());
+        }
+        List<VectorStore.SearchHit> contexts=origins.isEmpty()?Collections.emptyList():sourceHits(session,origins);
+        List<VectorStore.SearchHit> result=new ArrayList<>(hits);Set<String> units=new LinkedHashSet<>(),representedOrigins=new LinkedHashSet<>();
+        for(VectorStore.SearchHit hit:hits){JsonNode unit=canonicalUnit(hit);if(unit!=null){units.add(unit.path("unitId").asText());recordCompleteMembers(unit,representedOrigins);}}
+        boolean complete=!origins.isEmpty();int contextChars=0;
+        for(VectorStore.SearchHit context:contexts){JsonNode unit=canonicalUnit(context);if(unit==null||!"complete_observed_unit".equals(unit.path("status").asText()))complete=false;
+            String unitId=unit==null?context.getId():unit.path("unitId").asText();if(units.contains(unitId))continue;
+            if(contextChars+context.text().length()>12000){complete=false;continue;}
+            units.add(unitId);result.add(context);contextChars+=context.text().length();recordCompleteMembers(unit,representedOrigins);
+        }
+        complete=complete&&representedOrigins.containsAll(origins);List<VectorStore.SearchHit> annotated=new ArrayList<>();
+        for(VectorStore.SearchHit hit:result){Map<String,Object> payload=new LinkedHashMap<>(hit.getPayload());if("standard".equals(payload.get("sourceRole"))&&!fixedBaselineHit(hit))payload.put("applicabilityContextComplete",complete);annotated.add(new VectorStore.SearchHit(hit.getId(),hit.getScore(),payload));}
+        return annotated;
+    }
+    private static void recordCompleteMembers(JsonNode unit,Set<String> representedOrigins){
+        if(unit!=null&&"complete_observed_unit".equals(unit.path("status").asText()))for(JsonNode member:unit.path("requiredMemberIds"))representedOrigins.add(member.asText());
+    }
+    public static boolean referenceMention(String passage,String referenceLabel){
+        String content=text(passage).toLowerCase(Locale.ROOT),label=text(referenceLabel).toLowerCase(Locale.ROOT);
+        if(label.startsWith("sl ")||label.contains("specification library")||label.contains("general specification"))return content.contains("specification library")||content.contains("general specification")||content.matches("(?s).*\\b(?:sl[ -]?20\\d\\d|gscew\\d*|gs[ -]?20\\d\\d)\\b.*");
+        if(label.startsWith("gcc ")||label.contains("general conditions of contract"))return content.contains("general conditions of contract")||content.matches("(?s).*\\bgcc\\b.*");
+        String key=label.split("[ ·]",2)[0];return !key.isEmpty()&&content.matches("(?s).*\\b"+java.util.regex.Pattern.quote(key)+"\\b.*");
+    }
+    private static JsonNode canonicalUnit(VectorStore.SearchHit hit){Object unit=hit.getPayload().get("canonicalSourceUnit");return unit instanceof JsonNode?(JsonNode)unit:unit==null?null:JsonUtils.mapper().valueToTree(unit);}
+    private static List<EvidencePointer> canonicalPointers(VectorStore.SearchHit hit){Object pointers=hit.getPayload().get("canonicalEvidence");return pointers==null?Collections.emptyList():JsonUtils.readList(JsonUtils.write(pointers),EvidencePointer.class);}
+    private static boolean fixedBaselineHit(VectorStore.SearchHit hit){return hit!=null&&hit.getPayload()!=null&&Boolean.TRUE.equals(hit.getPayload().get("fixedDevelopmentBaseline"));}
+    private static String text(String value){return value==null?"":value;}
+    /** OER returns observed closure for explicitly requested origins in this same immutable corpus. */
     public List<VectorStore.SearchHit> sourceHits(Session session,List<String> originIds){
         require(originIds!=null&&new HashSet<>(originIds).size()==originIds.size(),"context origins invalid");
-        CurrentStage loaded=stage(session);String policy;
-        try(CurrentStage stage=loaded){policy=stage.frame==null?retrieval.sourceUnitPolicy(session.indexKey,session.module,stage.bindings)
-                :retrieval.sourceUnitPolicy(session.indexKey,session.module,stage.frame);}
-        complete(session,loaded);
-        require(VettingRetrievalSourceUnits.supportsPolicy(policy),"context source-unit capability is unknown");
-        Map<String,JsonNode> parents=new LinkedHashMap<>();session.byId.forEach((id,view)->parents.put(id,view.getCanonicalPayload()));
+        for(String id:originIds)require(session.byId.containsKey(id),"context origin outside selected corpus");
+        if(originIds.isEmpty()){current(session);return Collections.emptyList();}
+        CurrentStage loaded=stage(session);String policy=null;
         List<VectorStore.SearchHit> out=new ArrayList<>();Set<String> used=new HashSet<>();
-        for(String id:originIds){require(parents.containsKey(id),"context origin outside selected corpus");
-            JsonNode unit=VettingRetrievalSourceUnits.attachmentPolicy(policy)
-                    ?OerCanonicalSourceUnits.resolveAttached(parents,parents.get(id),VettingRetrievalSourceUnits.SHARED_NOTE_POLICY.equals(policy))
-                    :VettingRetrievalSourceUnits.TYPED_PARENT_POLICY.equals(policy)?OerCanonicalSourceUnits.resolve(parents,parents.get(id))
-                    :OerCanonicalSourceUnits.resolveObserved(parents,parents.get(id));if(used.add(unit.path("unitId").asText()))
-                out.add(businessHit(session,id,unit,0d,"context_only"));
-        }current(session);return withWordSourceScopes(session,out);
+        try(CurrentStage stage=loaded){
+            for(int start=0;start<originIds.size();start+=256){
+                List<String> batch=originIds.subList(start,Math.min(originIds.size(),start+256));ObjectNode demand=JsonUtils.mapper().createObjectNode();
+                demand.put("operation","ids");demand.put("view","canonical_units");demand.put("maxItems",batch.size());demand.put("maxBytes",16777216);demand.set("originIds",JsonUtils.mapper().valueToTree(batch));
+                JsonNode result=stage.frame==null?retrieval.readSources(session.module,demand,stage.bindings):retrieval.readSources(session.module,demand,stage.frame);
+                String returnedPolicy=result.path("sourceUnitPolicy").asText();require(VettingRetrievalSourceUnits.supportsPolicy(returnedPolicy)&&(policy==null||policy.equals(returnedPolicy)),"context source-unit capability is unknown or changed");policy=returnedPolicy;
+                JsonNode origins=result.path("origins"),units=result.path("units");require(origins.isArray()&&units.isArray()&&origins.size()==batch.size()&&units.size()==batch.size(),"context source read omitted requested origins");
+                for(int i=0;i<batch.size();i++){
+                    String id=batch.get(i);require(id.equals(origins.get(i).path("id").asText()),"context source read reordered requested origins");JsonNode unit=units.get(i);
+                    require(unit.path("unitId").isTextual()&&!unit.path("unitId").asText().isEmpty(),"context source-unit identity missing");
+                    if(used.add(unit.path("unitId").asText()))out.add(businessHit(session,id,unit,0d,"context_only"));
+                }
+            }
+        }
+        complete(session,loaded);current(session);return withWordSourceScopes(session,out);
+    }
+    /** One synchronous adapter owns these lazy reads; rejected identities never parse the source. */
+    private static final class RuleSourceRead {
+        final SourceDocument source;
+        private String sourceHash;
+        private List<com.consense.document.DocumentBlock> blocks;
+        private RuntimeException blocksFailure;
+        private boolean blocksRead;
+        private final Map<String,List<com.consense.document.DocumentBlock>> byId=new HashMap<>();
+        private Map<JsonNode,Map<String,List<com.consense.document.DocumentBlock>>> headings;
+        private JsonNode coverage;
+        RuleSourceRead(SourceDocument source){this.source=source;}
+        String sourceHash(){if(sourceHash==null)sourceHash=VettingCorpus.sourceHash(source);return sourceHash;}
+        List<com.consense.document.DocumentBlock> blocks(){
+            if(!blocksRead){blocksRead=true;try{blocks=VettingCorpus.blocks(source);for(com.consense.document.DocumentBlock block:blocks)byId.computeIfAbsent(block.getId(),key->new ArrayList<>()).add(block);}
+                catch(RuntimeException invalid){blocksFailure=invalid;}}
+            if(blocksFailure!=null)throw blocksFailure;return blocks;
+        }
+        List<com.consense.document.DocumentBlock> blockMatches(String id){blocks();return byId.getOrDefault(id,Collections.emptyList());}
+        List<com.consense.document.DocumentBlock> headingMatches(JsonNode position,String text){
+            if(headings==null){headings=new HashMap<>();for(com.consense.document.DocumentBlock block:blocks())headings.computeIfAbsent(block.getSourcePosition(),key->new HashMap<>()).computeIfAbsent(block.getEffectiveText(),key->new ArrayList<>()).add(block);}
+            return headings.getOrDefault(position,Collections.emptyMap()).getOrDefault(text,Collections.emptyList());
+        }
+        JsonNode coverage(){
+            if(coverage==null)try{coverage=JsonUtils.parse(source.getParseCoverageJson());}
+                catch(RuntimeException invalid){coverage=JsonUtils.mapper().createObjectNode();}
+            return coverage;
+        }
     }
     /** Deterministic checks traverse only accepted observations, retaining source-bound original anchors. */
     public List<VettingRuleEngine.Source> ruleSources(Session session){
@@ -321,13 +457,14 @@ public class OerBusinessEvidence {
             if("tender".equals(c.getRole()))byDocument.computeIfAbsent(c.getDocumentId(),key->new ArrayList<>()).add(c);
         List<VettingRuleEngine.Source> out=new ArrayList<>();for(List<Chunk> chunks:byDocument.values()){
             Chunk first=chunks.get(0);List<com.consense.document.DocumentBlock> blocks=new ArrayList<>();Set<String> observed=new HashSet<>();
+            List<SourceDocument> matching=capturedSources==null?Collections.emptyList():capturedSources.stream().filter(d->d!=null&&Objects.equals(String.valueOf(d.getId()),first.getDocumentId())).collect(Collectors.toList());
+            RuleSourceRead read=new RuleSourceRead(matching.size()==1?matching.get(0):null);
             for(Chunk c:chunks)for(Part p:c.getParts())if(observed.add(p.getBlockId()+"|"+p.getStartOffset()+"|"+p.getEndOffset())){
                 com.consense.document.DocumentBlock b=new com.consense.document.DocumentBlock();b.setId(p.getBlockId());b.setLocation(p.getAnchor());
                 b.setText(p.getText());b.setOriginalText(p.getText());b.setSource(NormalObservedContract.isNormal(c.getCanonicalPayload())?"normal_observed_candidate":"source_reviewed_canonical_observation");
                 if(p.getPageNo()!=null)b.setPageNo(Integer.valueOf(p.getPageNo().substring(1)));
                 List<Double> box=p.getBbox();if(box!=null)b.setBbox(box.stream().mapToDouble(Double::doubleValue).toArray());
-                List<SourceDocument> matching=capturedSources==null?Collections.emptyList():capturedSources.stream().filter(d->d!=null&&Objects.equals(String.valueOf(d.getId()),c.getDocumentId())).collect(Collectors.toList());
-                bindRuleContext(session.projectId,matching.size()==1?matching.get(0):null,c,p,b);blocks.add(b);
+                bindRuleContext(session.projectId,read,c,p,b);blocks.add(b);
             }
             out.add(new VettingRuleEngine.Source(first.getDocumentId(),first.getFileKey(),first.getFileName(),first.getCanonicalEvidence().getJavaParsedSourceHash(),
                     blocks,blocks.stream().map(com.consense.document.DocumentBlock::getText).collect(Collectors.joining("\n"))));
@@ -335,13 +472,17 @@ public class OerBusinessEvidence {
     }
     /** Copies only structure from the unique current source/range; never unselected field or cell text. */
     static void bindRuleContext(String projectId,SourceDocument source,Chunk chunk,Part part,com.consense.document.DocumentBlock target) {
+        bindRuleContext(projectId,new RuleSourceRead(source),chunk,part,target);
+    }
+    private static void bindRuleContext(String projectId,RuleSourceRead read,Chunk chunk,Part part,com.consense.document.DocumentBlock target) {
+        SourceDocument source=read.source;
         ObjectNode context=JsonUtils.mapper().createObjectNode(),binding=context.putObject(VettingPackageIdentity.CONTEXT);target.setReadingContext(context);
         binding.put("status","unknown");binding.put("reason","current_source_binding_missing");binding.put("startOffset",part.getStartOffset());binding.put("endOffset",part.getEndOffset());binding.put("offsetUnit","utf16");
         if(source==null||!Objects.equals(projectId,source.getProjectId())||!"PARSED".equals(source.getParseStatus())||chunk.getCanonicalEvidence()==null||chunk.getCanonicalPayload()==null
-                ||!Objects.equals(String.valueOf(source.getId()),chunk.getDocumentId())||!Objects.equals(VettingCorpus.sourceHash(source),chunk.getCanonicalEvidence().getJavaParsedSourceHash())
+                ||!Objects.equals(String.valueOf(source.getId()),chunk.getDocumentId())||!Objects.equals(read.sourceHash(),chunk.getCanonicalEvidence().getJavaParsedSourceHash())
                 ||source.getSourceSha256()==null||!Objects.equals(source.getSourceSha256(),chunk.getCanonicalEvidence().getOriginalSourceSha256()))return;
         List<com.consense.document.DocumentBlock> matches;
-        try{matches=VettingCorpus.blocks(source).stream().filter(block->Objects.equals(block.getId(),part.getBlockId())).collect(Collectors.toList());}
+        try{matches=read.blockMatches(part.getBlockId());}
         catch(RuntimeException invalid){binding.put("reason","source_structure_unreadable");return;}
         binding.put("reason","original_block_not_unique");if(matches.size()!=1)return;com.consense.document.DocumentBlock original=matches.get(0);String text=original.getEffectiveText();int start=part.getStartOffset(),end=part.getEndOffset();
         binding.put("reason","accepted_range_differs");if(text==null||start<0||end<start||end>text.length()||!Objects.equals(text.substring(start,end),part.getText())||!Objects.equals(part.getAnchor(),original.getLocation()))return;
@@ -349,21 +490,22 @@ public class OerBusinessEvidence {
         binding.put("reason","accepted_part_not_unique");if(accepted.size()!=1)return;
         JsonNode position=original.getSourcePosition(),supplied=accepted.get(0).get("sourcePosition");binding.put("reason","source_position_differs");
         if(position!=null&&(!position.equals(supplied)||!source.getSourceSha256().equals(position.path("sourceSha256").asText()))||position==null&&supplied!=null&&!supplied.isNull())return;
-        copyRuleContext(source,original,target,context,binding,start,end);
+        copyRuleContext(read,original,target,context,binding,start,end);
     }
     /** Same captured-document adapter for the existing noncanonical rule path, with no canonical pointer. */
     public static List<VettingRuleEngine.Source> ordinaryRuleSources(String projectId,List<SourceDocument> capturedSources) {
         List<VettingRuleEngine.Source> out=new ArrayList<>();if(capturedSources==null)return out;
         for(SourceDocument source:capturedSources)if(source!=null&&Objects.equals(projectId,source.getProjectId())&&"tender".equals(VettingCorpus.sourceRole(source))){
-            List<com.consense.document.DocumentBlock> originals=VettingCorpus.blocks(source),blocks=new ArrayList<>();Map<String,Long> counts=originals.stream().filter(b->b.getId()!=null).collect(Collectors.groupingBy(com.consense.document.DocumentBlock::getId,Collectors.counting()));
+            RuleSourceRead read=new RuleSourceRead(source);List<com.consense.document.DocumentBlock> originals=read.blocks(),blocks=new ArrayList<>();Map<String,Long> counts=originals.stream().filter(b->b.getId()!=null).collect(Collectors.groupingBy(com.consense.document.DocumentBlock::getId,Collectors.counting()));
             for(com.consense.document.DocumentBlock original:originals){com.consense.document.DocumentBlock block=JsonUtils.read(JsonUtils.write(original),com.consense.document.DocumentBlock.class);ObjectNode context=JsonUtils.mapper().createObjectNode(),binding=context.putObject(VettingPackageIdentity.CONTEXT);block.setReadingContext(context);binding.put("status","unknown");binding.put("reason","ordinary_source_binding_unverified");String text=original.getEffectiveText();
-                if("PARSED".equals(source.getParseStatus())&&source.getSourceSha256()!=null&&Objects.equals(text,original.getText())&&counts.getOrDefault(original.getId(),0L)==1L&&(original.getSourcePosition()==null||source.getSourceSha256().equals(original.getSourcePosition().path("sourceSha256").asText())))copyRuleContext(source,original,block,context,binding,0,text==null?0:text.length());
+                if("PARSED".equals(source.getParseStatus())&&source.getSourceSha256()!=null&&Objects.equals(text,original.getText())&&counts.getOrDefault(original.getId(),0L)==1L&&(original.getSourcePosition()==null||source.getSourceSha256().equals(original.getSourcePosition().path("sourceSha256").asText())))copyRuleContext(read,original,block,context,binding,0,text==null?0:text.length());
                 blocks.add(block);
             }
-            out.add(new VettingRuleEngine.Source(String.valueOf(source.getId()),source.getFileKey(),source.getFileName(),VettingCorpus.sourceHash(source),blocks,blocks.stream().map(com.consense.document.DocumentBlock::getText).collect(Collectors.joining("\n"))));
+            out.add(new VettingRuleEngine.Source(String.valueOf(source.getId()),source.getFileKey(),source.getFileName(),read.sourceHash(),blocks,blocks.stream().map(com.consense.document.DocumentBlock::getText).collect(Collectors.joining("\n"))));
         }return out;
     }
-    private static void copyRuleContext(SourceDocument source,com.consense.document.DocumentBlock original,com.consense.document.DocumentBlock target,ObjectNode context,ObjectNode binding,int start,int end) {
+    private static void copyRuleContext(RuleSourceRead read,com.consense.document.DocumentBlock original,com.consense.document.DocumentBlock target,ObjectNode context,ObjectNode binding,int start,int end) {
+        SourceDocument source=read.source;
         JsonNode position=original.getSourcePosition();String text=original.getEffectiveText();
         JsonNode observed=original.getReadingContext();if(observed!=null){
             copyContextFields(observed,context,"sourceSha256","occurrenceId","story","role","ownerStatus","semanticStatus","adoptionStatus","containerId");
@@ -371,30 +513,32 @@ public class OerBusinessEvidence {
             if(observed.path("nativeDocxOutline").isObject())copyContextFields(observed.path("nativeDocxOutline"),context.putObject("nativeDocxOutline"),"ancestorOrdinals","containedHeadingOrdinals");
         }context.set(VettingPackageIdentity.CONTEXT,binding);
         target.setKind(original.getKind());target.setParagraphStyle(original.getParagraphStyle());target.setParagraphStyleName(original.getParagraphStyleName());if(position!=null)target.setSourcePosition(position.deepCopy());
-        binding.put("status","source_bound");binding.put("reason","unique_current_document_block_and_accepted_range");binding.put("startOffset",start);binding.put("endOffset",end);binding.put("offsetUnit","utf16");binding.put("sourceHash",VettingCorpus.sourceHash(source));binding.put("originalSourceSha256",source.getSourceSha256());binding.put("originalBytesStatus","captured_identity_only");binding.put("role",VettingCorpus.sourceRole(source));binding.put("documentScope",source.getDocumentScope());binding.put("completeOriginalBlock",text!=null&&start==0&&end==text.length());
+        binding.put("status","source_bound");binding.put("reason","unique_current_document_block_and_accepted_range");binding.put("startOffset",start);binding.put("endOffset",end);binding.put("offsetUnit","utf16");binding.put("sourceHash",read.sourceHash());binding.put("originalSourceSha256",source.getSourceSha256());binding.put("originalBytesStatus","captured_identity_only");binding.put("role",VettingCorpus.sourceRole(source));binding.put("documentScope",source.getDocumentScope());binding.put("completeOriginalBlock",text!=null&&start==0&&end==text.length());
         binding.put("selectedStartsAtSourceLineBoundary",text!=null&&(start==0||text.charAt(start-1)=='\n'||text.charAt(start-1)=='\r'));binding.put("selectedEndsAtSourceLineBoundary",text!=null&&(end==text.length()||text.charAt(end)=='\n'||text.charAt(end)=='\r'));
-        bindNativeStory(source,position,binding);
-        bindScopeExclusion(source,original,binding);
+        bindNativeStory(read,position,binding);
+        bindScopeExclusion(read,original,binding);
     }
     private static void copyContextFields(JsonNode source,ObjectNode target,String... keys){for(String key:keys)if(source.has(key)){JsonNode value=source.path(key);boolean allowed=value.isValueNode();if(value.isArray()){allowed=true;for(JsonNode item:value)allowed&=item.isIntegralNumber();}if(allowed)target.set(key,value.deepCopy());}}
     /** Source outline edges may exclude examples/references; they never establish package-own identity. */
-    private static void bindScopeExclusion(SourceDocument source,com.consense.document.DocumentBlock original,ObjectNode binding) {
+    private static void bindScopeExclusion(RuleSourceRead read,com.consense.document.DocumentBlock original,ObjectNode binding) {
+        SourceDocument source=read.source;
         ObjectNode scope=binding.putObject("sourceScopeExclusion");scope.put("status","unknown");scope.put("reason","no_explicit_bound_scope_exclusion");
         JsonNode refs=original.getReadingContext()==null?null:original.getReadingContext().path("nativeDocxOutline").path("ancestorOrdinals"),position=original.getSourcePosition();if(refs==null||!refs.isArray()||refs.isEmpty()||position==null||!"docx_native".equals(position.path("kind").asText())||position.path("partName").asText().isEmpty()||!position.path("partSha256").asText().matches("[a-f0-9]{64}"))return;
-        JsonNode coverage;List<com.consense.document.DocumentBlock> blocks;try{coverage=JsonUtils.parse(source.getParseCoverageJson());blocks=VettingCorpus.blocks(source);}catch(RuntimeException invalid){return;}JsonNode headings=coverage.path("nativeDocxOutline").path("headings");if(!headings.isArray())return;
+        JsonNode coverage=read.coverage();try{read.blocks();}catch(RuntimeException invalid){return;}JsonNode headings=coverage.path("nativeDocxOutline").path("headings");if(!headings.isArray())return;
         Set<Integer> visited=new HashSet<>();Set<String> exclusions=new LinkedHashSet<>();List<ObjectNode> edges=new ArrayList<>();
         for(JsonNode ordinal:refs){
             if(!ordinal.isIntegralNumber()||!ordinal.canConvertToInt()||ordinal.asInt()<0||!visited.add(ordinal.asInt())){scope.put("reason","native_outline_scope_binding_unknown");return;}JsonNode heading=headings.get(ordinal.asInt());if(heading==null||heading.path("ordinalZeroBased").asInt(-1)!=ordinal.asInt()){scope.put("reason","native_outline_scope_binding_unknown");return;}
             JsonNode at=heading.path("sourcePosition"),observation=heading.path("textObservation");boolean member=false;for(JsonNode id:heading.path("retainedBlockIds"))if(original.getId().equals(id.asText()))member=true;
             if(!member||!source.getSourceSha256().equals(at.path("sourceSha256").asText())||!position.path("partName").equals(at.path("partName"))||!position.path("partSha256").equals(at.path("partSha256"))||!at.path("nodePath").asText().startsWith("/{")||!at.equals(observation.path("sourcePosition"))||!"observed_parser_paragraph_channels".equals(observation.path("status").asText())||!observation.path("text").isTextual()){scope.put("reason","native_outline_scope_binding_unknown");return;}
-            String text=observation.path("text").asText();List<com.consense.document.DocumentBlock> matches=blocks.stream().filter(block->at.equals(block.getSourcePosition())&&Objects.equals(text,block.getEffectiveText())).collect(Collectors.toList());if(matches.size()!=1){scope.put("reason","native_outline_heading_occurrence_not_unique");return;}
+            String text=observation.path("text").asText();List<com.consense.document.DocumentBlock> matches=read.headingMatches(at,text);if(matches.size()!=1){scope.put("reason","native_outline_heading_occurrence_not_unique");return;}
             String excluded=VettingPackageIdentity.explicitScopeExclusion(text);if(excluded==null)continue;exclusions.add(excluded);ObjectNode edge=JsonUtils.mapper().createObjectNode();edge.put("ordinalZeroBased",ordinal.asInt());edge.put("sourceBlockId",matches.get(0).getId());edge.put("memberBlockId",original.getId());edge.set("sourcePosition",at.deepCopy());edge.put("sourceTextSha256",VettingCorpus.hash(text));edge.put("relation","native_outline_ancestor");edge.put("classification",excluded);edge.put("basis","exact_bound_source_heading_exclusion_label");edges.add(edge);
         }
         if(exclusions.isEmpty())return;scope.put("status","bound_native_outline_exclusion");scope.put("reason","explicit_current_source_heading_and_ancestor_membership");scope.put("classification",exclusions.size()==1?exclusions.iterator().next():"excluded_explicit_scope");for(ObjectNode edge:edges)scope.withArray("edges").add(edge);
     }
-    private static void bindNativeStory(SourceDocument source,JsonNode position,ObjectNode binding) {
+    private static void bindNativeStory(RuleSourceRead read,JsonNode position,ObjectNode binding) {
+        SourceDocument source=read.source;
         binding.put("storyStatus","unknown");binding.put("physicalWordPageStatus","unknown");if(position==null||!"docx_native".equals(position.path("kind").asText())||position.path("partName").asText().isEmpty()||!position.path("partSha256").asText().matches("[a-f0-9]{64}"))return;
-        JsonNode coverage;try{coverage=JsonUtils.parse(source.getParseCoverageJson());}catch(RuntimeException invalid){return;}
+        JsonNode coverage=read.coverage();
         JsonNode inventory=coverage.path("nativeDocxTables");if(!source.getSourceSha256().equals(inventory.path("sourceSha256").asText()))return;
         List<JsonNode> roots=new ArrayList<>();for(JsonNode part:inventory.path("parts"))if(position.path("partName").equals(part.path("partName"))&&position.path("partSha256").equals(part.path("partSha256")))for(JsonNode root:part.path("loadedRoots")){
             String rootPath=root.path("nodePath").asText(),path=position.path("nodePath").asText();if(rootPath.startsWith("/{")&&Arrays.asList("body","header","footer","footnote","endnote").contains(root.path("kind").asText())&&(path.equals(rootPath)||path.startsWith(rootPath+"/")))roots.add(root);

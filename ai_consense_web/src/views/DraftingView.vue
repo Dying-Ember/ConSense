@@ -2,13 +2,16 @@
 import type { GraphLocationTarget, GraphNavigation } from '@/drafting/graph-navigation'
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { ApiError, draftingApi } from '@/api'
+import { containTab, focusableControls } from '@/focus'
 import type { DraftCatalog, DraftDocument, DraftField, DraftGroup, DraftIdentityConfirmation, DraftPlan, DraftPlanAction, DraftTargetOverride, DraftUnresolved, DraftVariable, DraftVariablePatch, EvidenceItem, ExtractTrace, TemplateItem } from '@/api'
 import { useAppStore } from '@/stores/app'
 import AppModal from '@/components/AppModal.vue'
 import DraftingSourceReview from '@/components/DraftingSourceReview.vue'
 import DraftingCandidateReview from '@/components/DraftingCandidateReview.vue'
+import DraftingAutomationResults from '@/components/DraftingAutomationResults.vue'
 import { sourceReviewDrafts, candidateReviewDrafts } from '@/drafting/source-review-state'
 import type { ReviewHead, ReviewRevision } from '@/drafting/source-review-types'
+import type { DraftAutomationRun } from '@/drafting/automation-types'
 import DraftingInputField from '@/components/DraftingInputField.vue'
 import DraftingExtractionReport from '@/components/DraftingExtractionReport.vue'
 import DraftingBillDistribution from '@/components/DraftingBillDistribution.vue'
@@ -18,7 +21,7 @@ import DraftingValueDisplay from '@/components/DraftingValueDisplay.vue'
 import DraftingUnresolvedItems from '@/components/DraftingUnresolvedItems.vue'
 import DraftingBodyEditor from '@/components/DraftingBodyEditor.vue'
 import { bodyDirty, bodyPatch, createBodyDraft } from '@/drafting/body-edit'
-import { actionForUnresolved, adoptionPatch, applicability, clone, decode, dirtyPatch, documentCapabilities, encode, mergeServerValues, projectDrafts, replaceTargetOverride, restoreDraftView, reversedSiteDates, validationIssue, type DraftValue } from '@/drafting/state'
+import { actionForUnresolved, adoptionPatch, applicability, clone, decode, dirtyPatch, documentCapabilities, encode, mergeServerValues, projectDrafts, replaceTargetOverride, restoreDraftView, reversedSiteDates, validationIssue, type DraftValue, type DraftViewState } from '@/drafting/state'
 import { draftWord, localized, type DraftWord } from '@/drafting/words'
 import { buildBusinessGraph } from '@/drafting/business-graph'
 const DraftingBusinessGraph = defineAsyncComponent(() => import('@/components/DraftingBusinessGraph.vue').then(module => module.default))
@@ -26,50 +29,121 @@ const DraftingBusinessGraph = defineAsyncComponent(() => import('@/components/Dr
 const store = useAppStore()
 const w = (key: DraftWord) => draftWord(key, store.locale)
 const l = (text: Parameters<typeof localized>[0]) => localized(text, store.locale)
-type Step = 'inputs' | 'identify' | 'review' | 'variables' | 'preview'
+type Step = DraftViewState['step']
 
 
 const projectId = computed(() => store.activeProjectId)
 const step = ref<Step>('inputs')
 const phrase = (zh: string, en: string, hant = zh) => store.locale === 'en' ? en : store.locale === 'zh-Hant' ? hant : zh
 const sourceReview = ref<InstanceType<typeof DraftingSourceReview>>()
-const reviewMounted = ref(false), reviewDirty = ref(false), candidateDirty = ref(false), draftRevisionId = ref(''), candidateReload = ref(0), rebuildReviewOpen = ref(false)
-const discoveryBudget = ref<string | number>(1)
+const reviewMounted = ref(false), reviewDirty = ref(false), candidateDirty = ref(false), draftRevisionId = ref(''), candidateReload = ref(0)
+const automation = ref<DraftAutomationRun | null>(null), automationError = ref(''), automationChecking = ref(false), automationResultPending = ref(false)
+const automationRevision = ref<ReviewRevision | null>(null)
+const automationActive = computed(() => ['QUEUED', 'RUNNING'].includes(automation.value?.status ?? ''))
+const automationResumable = computed(() => automation.value?.status === 'INTERRUPTED' && !automation.value.resultRevisionId)
+const automationPhase = computed(() => ({
+  PREPARING_SOURCES: phrase('正在核对文件来源', 'Checking source files'),
+  PLANNING: phrase('正在整理全部模板要求', 'Planning template requirements'),
+  DISCOVERING_VARIABLES: phrase('正在识别变量并进行原子拆解', 'Identifying variables and decomposing atomic capabilities'),
+  LINKING_GRAPH: phrase('正在连接条件、依赖和修改位置', 'Linking conditions, dependencies and edit targets'),
+  SAVING_GRAPH: phrase('正在保存变量图谱', 'Saving the variable graph'),
+  EXTRACTING_CANDIDATES: phrase('正在从项目资料提取候选答案', 'Extracting candidate answers from project sources'),
+  READY_FOR_REVIEW: phrase('识别结果已可核对', 'Results are ready for review')
+}[automation.value?.phase ?? 'PREPARING_SOURCES']))
+const automationStatus = computed(() => ({ QUEUED: phrase('排队中', 'Queued'), RUNNING: phrase('执行中', 'Running'), COMPLETED: phrase('处理完成，等待人工核对', 'Finished; human review required'), PARTIAL: phrase('部分完成，已有结果可核对', 'Partially finished; available results can be reviewed'), FAILED: phrase('任务失败，已有结果保留', 'Task failed; available results are retained'), INTERRUPTED: phrase('任务已中断，可继续', 'Interrupted; can be resumed'), CANCELLED: phrase('任务已停止，已有结果保留', 'Stopped; available results are retained') }[automation.value?.status ?? 'QUEUED']))
+let automationTimer: ReturnType<typeof setTimeout> | undefined
+let automationAbort: AbortController | undefined
+let automationSequence = 0, automationRefreshed = ''
 const manualNotes = reactive<Record<string, string>>({})
 const intentionalEmpty = reactive<Record<string, boolean>>({}), emptyBaseline = reactive<Record<string, boolean>>({})
 async function ensureReview() { reviewMounted.value = true; await nextTick(); await sourceReview.value?.ready(); return sourceReview.value }
-async function identifyTemplates(rebuild = false) {
-  await action(phrase('识别模板要求', 'Identifying template requirements'), async (id, token) => {
-    if (candidateDirty.value) throw Error(phrase('请先保存或取消候选调整。', 'Save or cancel the candidate edit first.'))
-    const editor = await ensureReview(); const revision = await editor?.prepareCandidates(rebuild)
-    if (revision && current(id, token)) { draftRevisionId.value = revision.id; step.value = 'review'; rebuildReviewOpen.value = false; candidateReload.value++ }
-  })
+function stopAutomationPolling() { automationSequence++; if (automationTimer) clearTimeout(automationTimer); automationTimer = undefined; automationAbort?.abort(); automationAbort = undefined }
+async function refreshAutomationResult(id = projectId.value, token = generation) {
+  const run = automation.value
+  if (!run?.resultRevisionId || automationActive.value || !current(id, token)) return
+  if (reviewDirty.value || candidateDirty.value || dirtyInputs.value || documentDirty.value) { automationResultPending.value = true; return }
+  const key = `${run.id}:${run.updatedAt}`
+  if (key === automationRefreshed) return
+  await refresh(id, token)
+  if (!current(id, token) || automation.value?.id !== run.id) return
+  const selectedRevision = generationReview.value?.draft ?? generationReview.value?.current
+  if (selectedRevision) automationRevision.value = selectedRevision.graph.graph.automaticDiscovery ? selectedRevision : null
+  else {
+    const revision = await draftingApi.reviewRevision(id, run.resultRevisionId)
+    if (!current(id, token) || automation.value?.id !== run.id) return
+    if (revision.id !== run.resultRevisionId) throw Error(phrase('识别结果的保存版本不一致，请重新读取。', 'The saved identification revision does not match. Reload the result.'))
+    automationRevision.value = revision
+  }
+  if (reviewMounted.value) await sourceReview.value?.refresh()
+  if (!current(id, token)) return
+  candidateReload.value++; automationRefreshed = key; automationResultPending.value = false
 }
-async function discoverTemplates() {
-  const maxItems = Number(discoveryBudget.value), llmSelection = store.captureLlmSelection()
-  if (!Number.isInteger(maxItems) || maxItems < 1 || maxItems > 10) { error.value = phrase('请填写1至10条的明确识别预算。', 'Choose an explicit discovery budget from 1 to 10.'); return }
-  await action(phrase('按原件识别独立要求', 'Discovering source requirements'), async (id, token) => {
-    if (candidateDirty.value) throw Error(phrase('请先保存候选调整。', 'Save candidate edits first.'))
-    const editor = await ensureReview(), revision = await editor?.prepareCandidates()
-    if (!revision || !current(id, token)) return
-    const discovered = await draftingApi.reviewDiscover(id, revision.id, editor?.currentRevisionId() ?? null, maxItems, llmSelection)
+function scheduleAutomationPoll(id: string, token: number) {
+  if (automationTimer) clearTimeout(automationTimer)
+  if (current(id, token) && automationActive.value) automationTimer = setTimeout(() => { void loadAutomation(id, token, automation.value?.id) }, 2000)
+}
+async function loadAutomation(id: string, token: number, runId?: string, refreshResult = true) {
+  const sequence = ++automationSequence
+  automationAbort?.abort(); const controller = new AbortController(); automationAbort = controller
+  automationChecking.value = true
+  try {
+    const run = runId ? await draftingApi.automationGet(id, runId, controller.signal) : await draftingApi.automationLatest(id, controller.signal)
+    if (!current(id, token) || sequence !== automationSequence) return
+    if (run && run.projectId !== id) throw Error(phrase('任务不属于当前项目，请重新读取。', 'The task does not belong to this project. Reload its status.'))
+    automation.value = run; automationError.value = ''
+    if (refreshResult && automationActive.value && !runId) { step.value = 'review'; await ensureReview() }
+    if (refreshResult) await refreshAutomationResult(id, token)
+  } catch (caught) { if (current(id, token) && sequence === automationSequence && !controller.signal.aborted) automationError.value = caught instanceof Error ? caught.message : String(caught) }
+  finally { if (current(id, token) && sequence === automationSequence) { automationChecking.value = false; if (refreshResult) scheduleAutomationPoll(id, token) } }
+}
+async function runAutomation(resume = false) {
+  if (automationActive.value || automationChecking.value || automationError.value) return
+  const llmSelection = store.captureLlmSelection(), runId = resume ? automation.value?.id : undefined
+  await action(phrase('正在启动变量识别与图谱任务', 'Starting variable identification and graph construction'), async (id, token) => {
+    await ensureReview()
     if (!current(id, token)) return
-    draftRevisionId.value = discovered.id; await editor?.refresh(false); candidateReload.value++; step.value = 'review'
+    if (reviewDirty.value || candidateDirty.value || dirtyInputs.value || documentDirty.value) throw Error(phrase('请先保存或取消尚未保存的核对、候选和填写内容，再开始自动识别。', 'Save or cancel unsaved review, candidate and input edits before starting automation.'))
+    const head = await draftingApi.reviewHead(id)
+    if (!current(id, token)) return
+    stopAutomationPolling(); automationChecking.value = false
+    const binding = { expectedCurrentRevisionId: head.currentRevisionId, expectedDraftRevisionId: head.draftRevisionId }
+    if (!resume) { trace.value = null; traceOpen.value = false }
+    try {
+      const run = runId ? await draftingApi.automationResume(id, runId, binding, llmSelection) : await draftingApi.automationStart(id, binding, llmSelection)
+      if (!current(id, token)) return
+      if (run.projectId !== id) throw Error(phrase('任务不属于当前项目，请重新读取。', 'The task does not belong to this project. Reload its status.'))
+      automation.value = run; automationError.value = ''; step.value = 'review'
+      if (!resume) automationRevision.value = null
+      await refreshAutomationResult(id, token); scheduleAutomationPoll(id, token)
+    } catch (caught) { if (current(id, token)) await loadAutomation(id, token); throw caught }
   })
 }
-function reviewSaved(revision: ReviewRevision) { draftRevisionId.value = revision.id; candidateReload.value++ }
+async function cancelAutomation() {
+  const runId = automation.value?.id
+  if (!runId || !automationActive.value) return
+  await action(phrase('正在请求停止任务', 'Requesting task cancellation'), async (id, token) => {
+    stopAutomationPolling(); automationChecking.value = false
+    try { const run = await draftingApi.automationCancel(id, runId); if (!current(id, token)) return; if (run.projectId !== id) throw Error(phrase('任务不属于当前项目，请重新读取。', 'The task does not belong to this project. Reload its status.')); automation.value = run; await refreshAutomationResult(id, token) }
+    finally { if (current(id, token)) scheduleAutomationPoll(id, token) }
+  })
+}
+function reviewSaved(revision: ReviewRevision) { candidateReviewRevision.value = revision; draftRevisionId.value = revision.id; if (revision.graph.graph.automaticDiscovery) automationRevision.value = revision; candidateReload.value++ }
 async function reviewConfirmed() { await action(w('loading'), refresh); step.value = 'variables' }
 async function locateCandidate(sourceId: string, sourceSha256?: string | null) { if (candidateDirty.value) return; step.value = 'review'; const editor = await ensureReview(); await editor?.locateSource(sourceId, sourceSha256) }
+async function locateCandidateQuestion(key: string, revisionId: string) { if (candidateDirty.value || busy.value) return; step.value = 'review'; const editor = await ensureReview(); await editor?.locateQuestion(key, revisionId) }
 
 const catalog = ref<DraftCatalog>({ ruleVersion: '', groups: [] })
 const templates = ref<TemplateItem[]>([])
+const templateRows = computed(() => ['NTT', 'SCT', 'SCC'].map(key => ({ key, template: templates.value.find(item => item.key === key) })))
 const generationReview = ref<ReviewHead>()
+const candidateReviewRevision = ref<ReviewRevision>()
+const generationWorkingRevision = computed(() => [generationReview.value?.current, generationReview.value?.draft].find(revision => revision?.id === catalog.value.graphRevisionId))
 const nonEditableSelectedSources = computed(() => {
-  const head = generationReview.value, current = head?.current
-  if (!graphMode.value || !current) return []
+  const head = generationReview.value, current = generationWorkingRevision.value
+  if (!graphMode.value || !head || !current) return []
   return Object.values(current.graph.selectedDocuments).flatMap(id => { const source = head.sources.find(item => String(item.id) === String(id)); return source && (source.format !== 'docx' || !source.canEdit) ? [source] : [] })
 })
-const generationSourceBlocked = computed(() => graphMode.value && (!generationReview.value?.current || generationReview.value.current.id !== catalog.value.graphRevisionId || generationReview.value.current.sourceStale || Object.values(generationReview.value.current.graph.selectedDocuments).some(id => !generationReview.value!.sources.some(source => String(source.id) === String(id) && source.evidenceStatus === 'bound')) || nonEditableSelectedSources.value.length > 0))
+const generationSourceBlocked = computed(() => graphMode.value && (!generationWorkingRevision.value || generationWorkingRevision.value.sourceStale || Object.values(generationWorkingRevision.value.graph.selectedDocuments).some(id => !generationReview.value!.sources.some(source => String(source.id) === String(id) && source.evidenceStatus === 'bound')) || nonEditableSelectedSources.value.length > 0))
 const inputs = ref<EvidenceItem[]>([])
 const variables = ref<DraftVariable[]>([])
 const documents = ref<DraftDocument[]>([])
@@ -143,11 +217,12 @@ const identityProposal = computed(() => {
     return { project, variable, name, number }
   } catch { return undefined }
 })
-const steps = computed(() => [{ key: 'inputs' as Step, label: phrase('1 来源文件', '1 Sources') }, { key: 'identify' as Step, label: phrase('2 识别要求与候选', '2 Identify') }, { key: 'review' as Step, label: phrase('3 对着原文核对', '3 Source review') }, { key: 'variables' as Step, label: phrase('4 采用与修改方案', '4 Adopt and plan') }, { key: 'preview' as Step, label: phrase('5 预览与导出', '5 Preview and export') }])
+const steps = computed(() => [{ key: 'inputs' as Step, label: phrase('1 文件识别', '1 File identification') }, { key: 'review' as Step, label: phrase('2 变量识别与图谱', '2 Variables and graph') }, { key: 'variables' as Step, label: phrase('3 采用与修改方案', '3 Adopt and plan') }, { key: 'preview' as Step, label: phrase('4 预览与导出', '4 Preview and export') }])
 const allTemplates = computed(() => ['NTT', 'SCT', 'SCC'].every(key => templates.value.some(template => template.key === key && template.tag === 'ok')))
 const activeDocument = computed(() => documents.value.find(document => document.fileKey === activeFile.value))
 const documentDirty = computed(() => bodyDirty(activeDocument.value, bodyDraft.value))
 const graphMode = computed(() => !!catalog.value.graphRevisionId)
+const pendingGraphReview = computed(() => !!draftRevisionId.value && draftRevisionId.value !== catalog.value.graphRevisionId && !(generationReview.value?.current && generationReview.value.current.id === catalog.value.graphRevisionId && generationReview.value.current.parentRevisionId === draftRevisionId.value))
 const dirtyInputs = computed(() => fields.value.some(dirty))
 const documentAccess = computed(() => documentCapabilities(activeDocument.value, documentDirty.value))
 const canExport = computed(() => documentAccess.value.exportable)
@@ -176,7 +251,7 @@ function changeReviewLayout(layout: 'list' | 'focus') { focusedGroupId.value = f
 function moveQuestion(offset: number) { const group = filteredGroups.value[focusedGroupIndex.value + offset]; if (group) chooseGroup(group.id) }
 
 function derivedInput(field: DraftField) { return field.key === 'periodAtLeast39Months' && durationAdopted.value && thresholdPresent.value && !durationConflict.value }
-function inputDisabled(field: DraftField) { return !!busy.value || applicability(field.condition, values) === 'no' || derivedInput(field) }
+function inputDisabled(field: DraftField) { return !!busy.value || automationActive.value || applicability(field.condition, values) === 'no' || derivedInput(field) }
 function previewAdoptable(field: DraftField) {
   const variable = variableMap.value.get(field.key)
   return !dirty(field) && encode(field, values[field.key]).trim() !== '' && validationIssue(field, values[field.key]) === null && !variable?.validationIssue && applicability(field.condition, values) !== 'no' && (state(field) === 'suggested' || !!variable?.reviewRequired)
@@ -265,15 +340,23 @@ async function updatePlan() {
 }
 async function refresh(id: string, token: number) {
   generationReview.value = undefined
-  const [schema, list] = await Promise.all([draftingApi.catalog(id), draftingApi.variables(id)])
+  if (step.value === 'inputs') { planGeneration++; plan.value = null }
+  const showReadStages = busy.value === w('loading')
+  const sourceLists = Promise.all([draftingApi.templates(id), draftingApi.inputs(id)]).then(([ts, ins]) => {
+    if (current(id, token)) {
+      templates.value = ts; inputs.value = ins
+      if (showReadStages) busy.value = phrase('文件目录已载入，正在读取已保存的变量与文稿…', 'Files loaded; reading saved variables and documents…')
+    }
+  })
+  // Attach a rejection handler immediately while independent catalogue reads are pending.
+  const loaded = Promise.all([draftingApi.catalog(id), draftingApi.variables(id), draftingApi.documents(id), draftingApi.extractTrace(id), sourceLists])
+  const [schema, list, docs, tr] = await loaded
   if (!current(id, token)) return
   catalog.value = schema
   const cached = projectDrafts.get(id)
   if (!Object.keys(values).length && cached) { Object.assign(values, clone(cached.values)); Object.assign(baseline, clone(cached.baseline)); Object.assign(manualNotes, clone(cached.notes ?? {})); Object.assign(intentionalEmpty, clone(cached.intentionalEmpty ?? {})); Object.assign(emptyBaseline, clone(cached.emptyBaseline ?? {})); restored.value = schema.groups.some(group => group.fields.some(field => encode(field, values[field.key]) !== (baseline[field.key] ?? ''))) }
   initialize(list)
-  const [ts, ins, docs, tr] = await Promise.all([draftingApi.templates(id), draftingApi.inputs(id), draftingApi.documents(id), draftingApi.extractTrace(id)])
-  if (!current(id, token)) return
-  templates.value = ts; inputs.value = ins; documents.value = docs; trace.value = tr
+  documents.value = docs; trace.value = tr
   if (restoreViewPending) {
     restoreViewPending = false
     const view = restoreDraftView(cached?.view, docs)
@@ -282,10 +365,13 @@ async function refresh(id: string, token: number) {
     activeFile.value = view.activeFile; step.value = view.step; loadDocument(false)
     if (view.reading) { readingOpen.value = true; readingFile.value = view.reading.fileKey; readingKey.value = view.reading.selectedKey; readingActionId.value = view.reading.selectedActionId }
   }
-  const review = schema.graphRevisionId ? await draftingApi.reviewHead(id) : undefined
+  if (showReadStages) busy.value = phrase('正在核对已保存的图谱与来源版本…', 'Checking the saved graph and source versions…')
+  const review = await draftingApi.reviewHead(id)
   if (!current(id, token)) return
   generationReview.value = review
-  await updatePlan()
+  candidateReviewRevision.value = review.draft ?? review.current ?? undefined
+  draftRevisionId.value = review.draftRevisionId ?? ''
+  if (step.value !== 'inputs') await updatePlan()
 }
 async function saveField(id: string, token: number, field: DraftField, patch: DraftVariablePatch) {
   const variable = variableMap.value.get(field.key)
@@ -365,11 +451,13 @@ async function adopt(field: DraftField, candidateIndex?: number) {
   })
 }
 async function upload(event: Event, target: 'templates' | 'inputs', key?: string) {
+  if (automationActive.value) { error.value = phrase('请先停止变量识别任务，再变更来源文件。', 'Stop the variable identification task before changing source files.'); return }
   if (reviewDirty.value || candidateDirty.value) { error.value = phrase('请先保存来源核对和候选调整，再变更来源文件。', 'Save source review and candidate edits before changing source files.'); return }
   const el = event.target as HTMLInputElement, files = Array.from(el.files ?? []); el.value = ''; if (!files.length) return
   await action(w('uploading'), async (id, token) => { const result = key ? await draftingApi.replaceTemplate(id, key, files[0]!) : target === 'templates' ? await draftingApi.uploadTemplates(id, files) : await draftingApi.uploadInputs(id, files); if (!current(id, token)) return; store.notify(`${result.parsed}/${result.accepted} ${w('parsed')}`); await refresh(id, token); if (reviewMounted.value && current(id, token)) await sourceReview.value?.refresh(); if (result.failed && current(id, token)) error.value = result.messages.join('\n') })
 }
 async function removeCorrespondence() {
+  if (automationActive.value) return
   const item = removalItem.value
   if (item?.id === null || item?.id === undefined) return
   await action(w('saving'), async (id, token) => {
@@ -381,37 +469,13 @@ async function removeCorrespondence() {
     if (reviewMounted.value && current(id, token)) await sourceReview.value?.refresh()
   })
 }
-async function extract() {
-  const llmSelection = store.captureLlmSelection()
-  await action(w('extracting'), async (id, token) => {
-    if (candidateDirty.value) throw Error(phrase('请先保存或取消候选调整。', 'Save or cancel candidate edits first.'))
-    const editor = await ensureReview(); const revision = await editor?.prepareCandidates()
-    if (!revision || !current(id, token)) return
-    draftRevisionId.value = revision.id
-    const previousTrace = trace.value
-    try { await draftingApi.reviewExtract(id, revision.id, llmSelection) }
-    catch (caught) {
-      if (current(id, token)) {
-        trace.value = null
-        try {
-          const failedTrace = await draftingApi.extractTrace(id)
-          const newer = failedTrace && (failedTrace.runId ? failedTrace.runId !== previousTrace?.runId : failedTrace.finishedAt !== previousTrace?.finishedAt)
-          if (current(id, token) && newer) trace.value = failedTrace
-        }
-        catch { /* Keep the extraction error; an earlier report must not masquerade as this failed run. */ }
-      }
-      throw caught
-    }
-    if (!current(id, token)) return; trace.value = await draftingApi.extractTrace(id); if (current(id, token)) { candidateReload.value++; step.value = 'review' }
-  })
-}
 async function generate() {
   if (!allTemplates.value || documentDirty.value) return
   if (generationSourceBlocked.value) { error.value = phrase('所选模板暂不能生成保留原格式的 Word。请核对来源和确认版本；PDF 版次需先提供同版可编辑 DOCX，不能借另一版 Word。', 'The selected template cannot generate a Word original. Check sources and the confirmed revision; a PDF edition needs its own editable DOCX, never another edition.'); return }
   if (graphMode.value && dirtyInputs.value) { error.value = phrase('请先逐项保存并采用项目事实，再生成文件。', 'Save and adopt project facts before generating documents.'); return }
   const llmSelection = store.captureLlmSelection()
   const navigation: { missingIdentity?: { id: string; token: number } } = {}
-  await action(w('generating'), async (id, token) => { await persistDirty(id, token); if (!current(id, token)) return; const sharedPlan = await draftingApi.plan(id); if (!current(id, token)) return; plan.value = sharedPlan; if (sharedPlan.unresolved.some(item => item.kind === 'InputMissing' && item.inputKeys.includes('contractTitle'))) { error.value = phrase('请先在第4步“采用与修改方案”中补齐并采用项目名称和合约编号，再生成文件。现有文稿已保留。', 'Complete and adopt the project name and contract number in step 4 (Adopt and plan), then generate again. Existing drafts are retained.', '請先在第4步「採用與修改方案」補齊並採用項目名稱及合約編號，再產生文件。現有文稿已保留。'); navigation.missingIdentity = { id, token }; return }; const docs = await draftingApi.generate(id, 'en', llmSelection); if (!current(id, token)) return; documents.value = docs; step.value = 'preview'; documentText.value = docs.find(document => document.fileKey === activeFile.value)?.content ?? ''; documentBaseline.value = documentText.value; bodyDraft.value = createBodyDraft(activeDocument.value); editingDocument.value = false; snapshotDraft(id) })
+  await action(w('generating'), async (id, token) => { await persistDirty(id, token); if (!current(id, token)) return; const sharedPlan = await draftingApi.plan(id); if (!current(id, token)) return; plan.value = sharedPlan; if (!graphMode.value && sharedPlan.unresolved.some(item => item.kind === 'InputMissing' && item.inputKeys.includes('contractTitle'))) { error.value = phrase('请先在第3步“采用与修改方案”中补齐并采用项目名称和合约编号，再生成文件。现有文稿已保留。', 'Complete and adopt the project name and contract number in step 3 (Adopt and plan), then generate again. Existing drafts are retained.', '請先在第3步「採用與修改方案」補齊並採用項目名稱及合約編號，再產生文件。現有文稿已保留。'); navigation.missingIdentity = { id, token }; return }; const docs = await draftingApi.generate(id, 'en', llmSelection); if (!current(id, token)) return; documents.value = docs; step.value = 'preview'; documentText.value = docs.find(document => document.fileKey === activeFile.value)?.content ?? ''; documentBaseline.value = documentText.value; bodyDraft.value = createBodyDraft(activeDocument.value); editingDocument.value = false; snapshotDraft(id) })
   if (navigation.missingIdentity && current(navigation.missingIdentity.id, navigation.missingIdentity.token)) goInput('contractTitle')
 }
 async function saveDocument() {
@@ -427,20 +491,6 @@ function setImmersive(expanded: boolean) {
   immersiveDocument.value = expanded
   documentInfoOpen.value = false
   nextTick(() => { if (expanded) documentWorkspace.value?.focus({ preventScroll: true }); else immersiveToggle.value?.focus({ preventScroll: true }) })
-}
-function focusableControls(container: HTMLElement) {
-  return [...container.querySelectorAll<HTMLElement>('button, a[href], input, select, textarea, summary, [tabindex]')].filter(control => {
-    const style = window.getComputedStyle(control)
-    return control.tabIndex >= 0 && !control.matches(':disabled, [aria-disabled="true"]') && !control.closest('[hidden], [inert], [aria-hidden="true"]') && style.visibility !== 'hidden' && style.display !== 'none' && control.getClientRects().length > 0
-  })
-}
-function containTab(event: KeyboardEvent, container: HTMLElement) {
-  const controls = focusableControls(container), first = controls[0], last = controls.at(-1), focused = document.activeElement
-  if (!first || !controls.some(control => control === focused)) {
-    event.preventDefault(); ((event.shiftKey ? last : first) ?? container).focus({ preventScroll: true })
-  } else if (event.shiftKey && focused === first || !event.shiftKey && focused === last) {
-    event.preventDefault(); (event.shiftKey ? last : first)?.focus({ preventScroll: true })
-  }
 }
 function workspaceKeydown(event: KeyboardEvent) {
   if (graphOpen.value || !immersiveDocument.value || event.defaultPrevented) return
@@ -469,7 +519,7 @@ function workspaceKeydown(event: KeyboardEvent) {
   containTab(event, documentWorkspace.value)
 }
 async function exportDocument(format: 'docx' | 'pdf') { if (canExport.value) await action(w('exporting'), id => draftingApi.exportDocument(id, activeFile.value, format, activeDocument.value?.revisionId)) }
-function move(next: Step) { if (busy.value || documentDirty.value) return; if (next === 'review') { void ensureReview(); }; graphNavigation.value = undefined; if (next === 'preview' && !documents.value.some(document => document.generated)) { if (graphMode.value) { error.value = phrase('先在采用与修改方案中明确生成文件，再查看预览。', 'Generate documents from the adopted values and plan before opening preview.'); return }; void generate(); return }; step.value = next }
+function move(next: Step) { if (busy.value || documentDirty.value || candidateDirty.value || automationActive.value && !['inputs', 'review'].includes(next)) return; if (next === 'review') { void ensureReview(); }; graphNavigation.value = undefined; if (next === 'preview' && !documents.value.some(document => document.generated)) { if (graphMode.value || pendingGraphReview.value) { error.value = phrase('先在采用与修改方案中明确生成文件，再查看预览。', 'Generate documents from the adopted values and plan before opening preview.'); return }; void generate(); return }; step.value = next }
 function goInput(key: string) {
   const id = projectId.value, token = generation
   graphNavigation.value = undefined
@@ -484,6 +534,7 @@ function goInput(key: string) {
   })
 }
 function openGraph(event: MouseEvent) {
+  if (pendingGraphReview.value) { move('review'); return }
   if (!projectId.value || busy.value || documentDirty.value || !catalog.value.groups.length) return
   graphInvoker = event.currentTarget instanceof HTMLElement ? event.currentTarget : undefined
   graphProject = projectId.value
@@ -612,54 +663,106 @@ watch(filteredGroups, groups => {
   if (restoreViewPending || !catalog.value.groups.length) return
   if (!groups.some(group => group.id === focusedGroupId.value)) { focusedGroupId.value = groups[0]?.id ?? ''; snapshotDraft(projectId.value) }
 })
-watch(values, () => { if (planTimer) clearTimeout(planTimer); planTimer = setTimeout(() => { if (!busy.value) void updatePlan() }, 350) }, { deep: true })
+watch(values, () => { if (planTimer) clearTimeout(planTimer); planTimer = setTimeout(() => { if (!busy.value && step.value !== 'inputs') void updatePlan() }, 350) }, { deep: true })
 watch(projectId, (id, old) => {
   if (old) snapshotDraft(old)
   closeGraph(false)
   graphNavigation.value = undefined
-  generation++; planGeneration++; busy.value = ''; error.value = ''; reviewDirty.value = false; candidateDirty.value = false; draftRevisionId.value = ''; rebuildReviewOpen.value = false; step.value = 'inputs'; activeFile.value = 'NTT'; editingDocument.value = false; immersiveDocument.value = false; targetId.value = ''; restored.value = false; restoreViewPending = true; traceOpen.value = false
+  stopAutomationPolling(); automation.value = null; automationRevision.value = null; automationError.value = ''; automationChecking.value = false; automationResultPending.value = false; automationRefreshed = ''
+  generation++; planGeneration++; busy.value = ''; error.value = ''; reviewDirty.value = false; candidateDirty.value = false; draftRevisionId.value = ''; step.value = 'inputs'; activeFile.value = 'NTT'; editingDocument.value = false; immersiveDocument.value = false; targetId.value = ''; restored.value = false; restoreViewPending = true; traceOpen.value = false
   identityConfirmation.value = undefined; identityError.value = ''
   reviewLayout.value = 'list'; focusedGroupId.value = ''; search.value = ''; statusFilter.value = 'all'
-  generationReview.value = undefined; catalog.value = { ruleVersion: '', groups: [] }; templates.value = []; inputs.value = []; variables.value = []; documentText.value = ''; documentBaseline.value = ''; documents.value = []; plan.value = null; trace.value = null
+  generationReview.value = undefined; candidateReviewRevision.value = undefined; catalog.value = { ruleVersion: '', groups: [] }; templates.value = []; inputs.value = []; variables.value = []; documentText.value = ''; documentBaseline.value = ''; documents.value = []; plan.value = null; trace.value = null
   bodyDraft.value = createBodyDraft(undefined); removalItem.value = null; readingOpen.value = false; readingKey.value = ''; readingActionId.value = ''; readingFile.value = 'NTT'; previewEditKey.value = ''
   for (const key of Object.keys(values)) delete values[key]; for (const key of Object.keys(baseline)) delete baseline[key]
   for (const key of Object.keys(inputSaveStates)) delete inputSaveStates[key]
   for (const key of Object.keys(manualNotes)) delete manualNotes[key]
   for (const key of Object.keys(intentionalEmpty)) delete intentionalEmpty[key]
   for (const key of Object.keys(emptyBaseline)) delete emptyBaseline[key]
-  if (id) void action(w('loading'), refresh)
+  if (id) void action(w('loading'), async (project, token) => {
+    await loadAutomation(project, token, undefined, false)
+    if (!current(project, token)) return
+    await refresh(project, token)
+    if (!current(project, token)) return
+    const run = automation.value, selected = generationReview.value?.draft ?? generationReview.value?.current
+    if (run?.resultRevisionId && !automationActive.value && selected) {
+      automationRevision.value = selected.graph.graph.automaticDiscovery ? selected : null
+      automationRefreshed = `${run.id}:${run.updatedAt}`
+    } else if (!automationActive.value) await refreshAutomationResult(project, token)
+    if (current(project, token) && automationActive.value) { step.value = 'review'; await ensureReview(); scheduleAutomationPoll(project, token) }
+  })
 }, { immediate: true })
 watch(activeFile, () => { if (graphNavigation.value?.fileKey !== activeFile.value) graphNavigation.value = undefined; loadDocument(false) })
 watch(activeDocument, (_document, previous) => { if (!bodyDirty(previous, bodyDraft.value)) loadDocument(false) })
-watch(step, () => { if (step.value === 'review') void ensureReview(); if (step.value !== 'preview') { immersiveDocument.value = false; graphNavigation.value = undefined } })
-onBeforeUnmount(() => { snapshotDraft(projectId.value); alive = false; generation++; planGeneration++; if (planTimer) clearTimeout(planTimer); window.removeEventListener('beforeunload', beforeUnload); window.removeEventListener('keydown', workspaceKeydown) })
+watch(step, () => { if (step.value === 'review') void ensureReview(); if (step.value !== 'inputs' && !busy.value && !plan.value) void updatePlan(); if (step.value !== 'preview') { immersiveDocument.value = false; graphNavigation.value = undefined } })
+onBeforeUnmount(() => { snapshotDraft(projectId.value); alive = false; generation++; planGeneration++; stopAutomationPolling(); if (planTimer) clearTimeout(planTimer); window.removeEventListener('beforeunload', beforeUnload); window.removeEventListener('keydown', workspaceKeydown) })
 </script>
 
 <template>
   <section class="draft-flow" :class="{ 'with-template': readingOpen && step === 'variables' }">
-    <header class="flow-head"><div><h2>{{ w('title') }}</h2><p>{{ w('subtitle') }}</p></div><div class="row"><button type="button" class="btn" data-open-business-graph="header" :disabled="!projectId || !!busy || documentDirty || !catalog.groups.length" @click="openGraph">{{ w('businessGraph') }}</button><span class="flow-count">{{ adoptedCount }} / {{ actionableFields.length }} {{ w('adopted') }} · {{ unresolvedInputCount }} {{ w('pending') }}</span></div></header>
-    <nav class="flow-steps"><button v-for="item in steps" :key="item.key" type="button" :class="{ active: step === item.key }" :aria-current="step === item.key ? 'step' : undefined" :disabled="!!busy || documentDirty || (item.key === 'preview' && !allTemplates && !documents.some(document => document.generated))" @click="move(item.key)">{{ item.label }}</button></nav>
+    <header class="flow-head"><div><h2>{{ w('title') }}</h2><p>{{ w('subtitle') }}</p></div><div class="row"><button type="button" class="btn" data-open-business-graph="header" :disabled="!projectId || !!busy || documentDirty || candidateDirty || (!pendingGraphReview && !catalog.groups.length)" @click="openGraph">{{ w('businessGraph') }}</button><span v-if="pendingGraphReview" class="flow-count" data-pending-graph-count>{{ phrase('本次图谱待核对确认', 'Current graph awaiting review and confirmation') }}</span><span v-else class="flow-count">{{ adoptedCount }} / {{ actionableFields.length }} {{ w('adopted') }} · {{ unresolvedInputCount }} {{ w('pending') }}</span></div></header>
+    <nav class="flow-steps"><button v-for="item in steps" :key="item.key" type="button" :class="{ active: step === item.key }" :aria-current="step === item.key ? 'step' : undefined" :disabled="!!busy || documentDirty || candidateDirty || (automationActive && !['inputs', 'review'].includes(item.key)) || (item.key === 'preview' && !allTemplates && !documents.some(document => document.generated))" @click="move(item.key)">{{ item.label }}</button></nav>
     <p v-if="!projectId" class="empty-state">{{ w('selectProject') }}</p><p v-if="busy && !immersiveDocument" class="flow-status" role="status">{{ busy }}</p><p v-if="error && !immersiveDocument" class="flow-error" role="alert">{{ error }}</p><p v-if="restored" class="review-note">{{ w('restoreNote') }}</p>
+    <button v-if="error && projectId && !busy && !immersiveDocument" type="button" class="btn" data-drafting-retry-read @click="action(w('loading'), refresh)">{{ phrase('重新读取当前项目','Reload current project') }}</button>
     <div v-if="projectId && step === 'inputs'" class="source-stack">
-      <section class="flow-card"><div class="card-head"><h3>{{ w('templates') }}</h3><label class="btn" :class="{ disabled: !!busy }">{{ w('uploadTemplates') }}<input type="file" accept=".doc,.docx,.pdf,.txt,.md" multiple :disabled="!!busy" @change="upload($event, 'templates')" /></label></div><p class="hint">{{ w('templateNote') }}</p><p class="hint">{{ w('editableSource') }}</p><div v-for="key in ['NTT', 'SCT', 'SCC']" :id="`template-source-${key}`" :key="key" class="source-row"><strong>{{ key }}</strong><div><div>{{ templates.find(template => template.key === key)?.fileName || w('notUploaded') }}</div><small>{{ l(templates.find(template => template.key === key)?.status) }} · {{ l(templates.find(template => template.key === key)?.note) }}</small></div><button :id="`template-upload-button-${key}`" type="button" class="btn" :disabled="!!busy" :aria-label="`${key} · ${w('replace')}`" @click="chooseTemplate(key)">{{ w('replace') }}</button><input :id="`template-upload-${key}`" type="file" hidden accept=".doc,.docx,.pdf,.txt,.md" :disabled="!!busy" @change="upload($event, 'templates', key)" /></div></section>
-      <section class="flow-card"><div class="card-head"><h3>{{ w('evidence') }}</h3><label class="btn" :class="{ disabled: !!busy }">{{ w('uploadEvidence') }}<input type="file" accept=".doc,.docx,.pdf,.txt,.md,.eml,.msg" multiple :disabled="!!busy" @change="upload($event, 'inputs')" /></label></div><p class="hint">{{ w('evidenceNote') }}</p><p v-if="!inputs.length" class="hint">{{ w('emptyEvidence') }}</p><div v-for="input in inputs" :key="input.id ?? input.code" class="evidence-row"><div class="card-head"><strong>{{ input.fileName || l(input.title) }}</strong><div class="row"><span>{{ input.status === 'PARSED' ? w('parsedStatus') : ['FAILED', 'PARSE_FAILED'].includes(input.status) ? w('failedStatus') : w('waitingStatus') }}</span><button v-if="input.id !== null && input.id !== undefined" class="btn text-link" :data-remove-input="input.id" :disabled="!!busy" @click="removalItem = input">{{ w('removeCorrespondence') }}</button></div></div><small>{{ l(input.message) }} {{ input.pageCount || '' }}</small></div></section>
-      <footer class="flow-actions"><button class="btn primary" :disabled="!!busy" @click="move('identify')">{{ phrase('下一步：识别模板要求', 'Next: identify requirements') }}</button><button v-if="trace" class="btn" @click="traceOpen = true">{{ w('trace') }}</button><button class="btn" :disabled="!!busy || !catalog.groups.length" @click="move('variables')">{{ w('manualEntry') }}</button><button class="btn primary" :disabled="!!busy || !inputs.some(input => input.status === 'PARSED')" @click="extract">{{ w('extract') }}</button></footer>
+      <section class="flow-card">
+        <div class="card-head"><h3>{{ w('templates') }}</h3><label class="btn" :class="{ disabled: !!busy || automationActive }">{{ w('uploadTemplates') }}<input type="file" accept=".doc,.docx,.pdf,.txt,.md" multiple :disabled="!!busy || automationActive" @change="upload($event, 'templates')" /></label></div>
+        <p class="hint">{{ w('templateNote') }}</p><p class="hint">{{ w('editableSource') }}</p>
+        <div v-for="{ key, template } in templateRows" :id="`template-source-${key}`" :key="key" class="source-row" :class="{ uploaded: template?.tag === 'ok' }">
+          <strong>{{ key }}</strong>
+          <div>
+            <div class="template-file-name">{{ template?.fileName || w('notUploaded') }}</div>
+            <span class="tag template-upload-state" :class="{ ok: template?.tag === 'ok', warn: ['partial', 'identity_pending'].includes(template?.tag || ''), danger: template?.tag === 'failed', neutral: !template?.tag || template.tag === 'missing' }"><span v-if="template?.tag === 'ok'" aria-hidden="true">✓</span>{{ l(template?.status) || w('notUploaded') }}</span>
+            <small>{{ l(template?.note) }}</small>
+          </div>
+          <button :id="`template-upload-button-${key}`" type="button" class="btn" :disabled="!!busy || automationActive" :aria-label="`${key} · ${w('replace')}`" @click="chooseTemplate(key)">{{ w('replace') }}</button>
+          <input :id="`template-upload-${key}`" type="file" hidden accept=".doc,.docx,.pdf,.txt,.md" :disabled="!!busy || automationActive" @change="upload($event, 'templates', key)" />
+        </div>
+      </section>
+      <section class="flow-card"><div class="card-head"><h3>{{ w('evidence') }}</h3><label class="btn" :class="{ disabled: !!busy || automationActive }">{{ w('uploadEvidence') }}<input type="file" accept=".doc,.docx,.pdf,.txt,.md,.eml,.msg" multiple :disabled="!!busy || automationActive" @change="upload($event, 'inputs')" /></label></div><p class="hint">{{ w('evidenceNote') }}</p><p v-if="!inputs.length" class="hint">{{ w('emptyEvidence') }}</p><div v-for="input in inputs" :key="input.id ?? input.code" class="evidence-row"><div class="card-head"><strong>{{ input.fileName || l(input.title) }}</strong><div class="row"><span>{{ input.status === 'PARSED' ? w('parsedStatus') : ['FAILED', 'PARSE_FAILED'].includes(input.status) ? w('failedStatus') : w('waitingStatus') }}</span><button v-if="input.id !== null && input.id !== undefined" class="btn text-link" :data-remove-input="input.id" :disabled="!!busy || automationActive" @click="removalItem = input">{{ w('removeCorrespondence') }}</button></div></div><small>{{ l(input.message) }} {{ input.pageCount || '' }}</small></div></section>
+      <p v-if="automationError" class="flow-error" role="alert">{{ automationError }} <button class="btn" data-reload-automation :disabled="!!busy || automationChecking" @click="loadAutomation(projectId, generation)">{{ phrase('重新读取任务进度', 'Reload task progress') }}</button></p>
+      <p class="hint">{{ phrase('本步负责上传和识别文件。继续后，系统会自动识别全部模板变量、进行原子拆解、连接图谱，并从项目资料提取候选答案。', 'This step uploads and identifies files. Continue to automatically identify template variables, decompose atomic capabilities, connect the graph and extract candidate answers from project sources.') }}</p>
+      <footer class="flow-actions"><button class="btn" :disabled="!!busy || automationActive || !catalog.groups.length" @click="move('variables')">{{ w('manualEntry') }}</button><button class="btn primary" data-start-automation :disabled="!!busy || automationActive || automationChecking || !!automationError || reviewDirty || candidateDirty || dirtyInputs || documentDirty || !templates.some(template => ['ok', 'partial'].includes(template.tag))" @click="runAutomation()">{{ phrase('开始识别变量并构建图谱', 'Identify variables and build graph') }}</button><button v-if="automation" class="btn" @click="move('review')">{{ phrase('查看变量识别任务', 'View variable identification task') }}</button></footer>
     </div>
-    <section v-if="projectId && step === 'identify'" class="flow-card" data-identify-stage>
-      <h3>{{ phrase('先识别模板要求，再识别沟通候选', 'Identify template requirements, then correspondence candidates') }}</h3>
-      <p class="hint">{{ phrase('模板里的指导说明形成待核对的问题、条件和修改位置；沟通材料只提供项目事实候选。两者都不会自动确认或采用。', 'Template guidance produces questions, conditions and amendment targets for review. Correspondence supplies candidate project facts. Neither is confirmed or adopted automatically.') }}</p>
-      <div class="flow-actions"><button class="btn" :disabled="!!busy || reviewDirty || candidateDirty" @click="identifyTemplates()">{{ phrase('建立／继续模板要求草稿', 'Prepare or continue template review') }}</button><button class="btn" :disabled="!!busy || reviewDirty || candidateDirty" @click="rebuildReviewOpen = true">{{ phrase('按现有原件新建核对版本', 'Start a new review from current sources') }}</button><label class="discovery-budget">{{ phrase('本次最多识别几条模板要求（1至10）', 'Template requirement budget for this run (1 to 10)') }}<input v-model="discoveryBudget" type="number" min="1" max="10" step="1" data-discovery-budget /></label><button class="btn" data-discover-templates :disabled="!!busy || reviewDirty || candidateDirty" @click="discoverTemplates">{{ phrase('按预算调用模型识别模板要求', 'Discover template requirements within this budget') }}</button><button class="btn primary" data-extract-draft :disabled="!!busy || candidateDirty || !inputs.some(input => input.status === 'PARSED')" @click="extract">{{ phrase('识别沟通材料候选，不采用', 'Extract correspondence candidates without adoption') }}</button><button v-if="trace" class="btn" @click="traceOpen = true">{{ w('trace') }}</button></div>
-      <p class="hint">{{ phrase('已保存的模板版本保留在历史中。新建版本不会替换已确认版本；核对完成后需明确确认。', 'Saved template versions remain in history. A new review does not replace the confirmed version until explicitly confirmed.') }}</p>
-    </section>
     <div v-if="projectId && reviewMounted" v-show="step === 'review'" class="source-stack" data-review-stage>
-      <DraftingSourceReview ref="sourceReview" :project-id="projectId" :locale="store.locale" :active="step === 'review'" :locked="candidateDirty" @dirty="reviewDirty = $event" @saved="reviewSaved" @confirmed="reviewConfirmed" @replace="move('inputs')" />
-      <DraftingCandidateReview v-if="draftRevisionId" :project-id="projectId" :revision-id="draftRevisionId" :locale="store.locale" :reload-key="candidateReload" @dirty="candidateDirty = $event" @locate="locateCandidate" />
-      <footer class="flow-actions"><button class="btn" :disabled="!!busy" @click="move('identify')">{{ phrase('返回识别', 'Back to identification') }}</button><button class="btn" :disabled="!!busy || reviewDirty || candidateDirty" @click="move('variables')">{{ phrase('查看已确认版本的采用与方案', 'Open adopted values and plan for the confirmed version') }}</button></footer>
+      <section class="flow-card automation-card" data-automation-panel>
+        <h3>{{ phrase('自动识别变量、原子拆解与构建图谱', 'Automatic variable identification, atomic decomposition and graph construction') }}</h3>
+        <p class="hint">{{ phrase('系统连续处理全部模板要求并提取资料候选，无需逐批点击。结果先供核对，不会自动确认图谱或采用项目事实。', 'The system processes template requirements and source candidates continuously. You do not need to run individual batches. Results require review; graph confirmation and fact adoption remain explicit.') }}</p>
+        <div v-if="automation" role="status" aria-live="polite" data-automation-progress>
+          <strong>{{ automationActive ? automationPhase : automationStatus }}</strong>
+          <p>{{ automation.message }}</p><p v-if="automation.currentFile">{{ automationActive ? phrase('当前文件：', 'Current file: ') : phrase('任务最后处理文件：', 'Last file handled by this task: ') }}{{ automation.currentFile }}</p>
+          <p>{{ automationActive ? phrase('处理进度：', 'Processing progress: ') : phrase('本次识别任务记录：', 'Identification task record: ') }}{{ automation.completedItems }} / {{ automation.totalItems }} · {{ phrase('要求：', 'Requirements: ') }}{{ automation.requirementsCount }} · {{ phrase('原子节点：', 'Atomic nodes: ') }}{{ automation.nodesCount }}</p>
+          <p v-if="automation.failedItems || automation.unresolvedItems" class="condition-note">{{ phrase('失败事项：', 'Failed items: ') }}{{ automation.failedItems }} · {{ automationActive ? phrase('待处理或待人工核对：', 'Unresolved or requiring human review: ') : phrase('任务结束时留待核对的事项：', 'Items left for review when the task ended: ') }}{{ automation.unresolvedItems }}</p>
+          <p v-if="!automationActive" class="hint" data-automation-historical>{{ phrase('以上是这次自动识别结束时的记录，不随之后的合并、修改或核对更新。当前问题及待核对数量以下方核对草稿为准。', 'These counts describe the completed identification task and do not change with later merges, edits or reviews. Use the review draft below for current question and review counts.') }}</p>
+        </div>
+        <p v-else class="hint">{{ phrase('尚未开始变量识别。点击开始，系统将自动执行并持续显示实际进度。', 'Variable identification has not started. Start once to run the task automatically and follow its actual progress.') }}</p>
+        <p v-if="automationError" class="flow-error" role="alert">{{ automationError }}</p>
+        <p v-if="automationResultPending" class="condition-note">{{ phrase('已有新的识别结果。请先保存或取消当前未保存修改，再读取结果。', 'New results are available. Save or cancel unsaved edits before loading the results.') }}</p>
+        <div class="flow-actions">
+          <button v-if="!automationActive && !automationResumable" class="btn primary" data-start-automation :disabled="!!busy || automationChecking || !!automationError || reviewDirty || candidateDirty || dirtyInputs || documentDirty || !templates.some(template => ['ok', 'partial'].includes(template.tag))" @click="runAutomation()">{{ automation ? phrase('按当前文件重新识别变量与图谱', 'Identify variables and graph from current files again') : phrase('开始识别变量并构建图谱', 'Identify variables and build graph') }}</button>
+          <button v-if="automationResumable" class="btn primary" data-resume-automation :disabled="!!busy || automationChecking || !!automationError || reviewDirty || candidateDirty || dirtyInputs || documentDirty" @click="runAutomation(true)">{{ phrase('继续未完成的变量识别', 'Resume unfinished variable identification') }}</button>
+          <button v-if="automationActive" class="btn" data-cancel-automation :disabled="!!busy" @click="cancelAutomation">{{ phrase('停止任务并保留已有结果', 'Stop task and retain available results') }}</button>
+          <button v-if="automationError" class="btn" data-reload-automation :disabled="!!busy || automationChecking" @click="loadAutomation(projectId, generation, automation?.id)">{{ phrase('重新读取任务进度', 'Reload task progress') }}</button>
+          <button v-if="automationResultPending" class="btn" data-load-automation-result :disabled="!!busy || reviewDirty || candidateDirty || dirtyInputs || documentDirty" @click="action(phrase('正在读取识别结果', 'Loading identification results'), refreshAutomationResult)">{{ phrase('读取已保存的识别结果', 'Load saved identification results') }}</button>
+        </div>
+      </section>
+      <fieldset class="automation-review" :disabled="automationActive"><DraftingSourceReview ref="sourceReview" :project-id="projectId" :locale="store.locale" :active="step === 'review'" :locked="candidateDirty || automationActive" @dirty="reviewDirty = $event" @saved="reviewSaved" @confirmed="reviewConfirmed" @replace="move('inputs')" />
+      </fieldset>
+      <DraftingAutomationResults v-if="automationRevision && !automationActive" :revision="automationRevision" :locale="store.locale" @locate="locateCandidate" />
+      <footer class="flow-actions"><button class="btn" :disabled="!!busy" @click="move('inputs')">{{ phrase('返回文件识别', 'Back to file identification') }}</button><button class="btn" :disabled="!!busy || automationActive || reviewDirty || candidateDirty" @click="move('variables')">{{ phrase('查看候选答案与采用方案', 'Review candidate answers and adoption plan') }}</button></footer>
     </div>
-    <AppModal :open="rebuildReviewOpen" :title="phrase('新建模板核对版本', 'Start a new template review')" @close="rebuildReviewOpen = false"><p>{{ phrase('将根据当前上传原件重新建立待核对项目。已保存版本保留；此操作不会确认规则或采用项目事实。', 'Build pending review items from the currently uploaded originals. Saved versions remain available. This does not confirm rules or adopt project facts.') }}</p><button class="btn primary" :disabled="!!busy || reviewDirty || candidateDirty" @click="identifyTemplates(true)">{{ phrase('建立新核对草稿', 'Create a new review draft') }}</button></AppModal>
     <p v-if="projectId && generationSourceBlocked" class="condition-note" data-generation-source-block role="status">{{ nonEditableSelectedSources.length ? phrase('所选版次只有 PDF 或不可编辑原件，仍可阅读和核对；生成 Word 需先上传同版可编辑 DOCX 并重新核对确认。不能借另一版 Word。', 'The selected edition has a PDF or non-editable original. Reading and review remain available; Word generation needs an editable DOCX of that edition and a newly confirmed review. Another Word edition cannot be substituted.') : phrase('当前确认版本或来源绑定已变化，请在来源核对步骤刷新并确认后再生成。', 'The confirmed revision or source binding changed. Refresh and confirm it in Source review before generation.') }} {{ nonEditableSelectedSources.map(source => source.fileName).join(' · ') }}</p>
-    <div v-if="projectId && step === 'variables'" class="input-stack">
-      <div class="input-intro"><p>{{ graphMode ? phrase('只有明确采用且无复核标记的事实进入修改方案。人工值请附理由并保存；模板确认不会代替事实采用。', 'Only explicitly adopted facts without review flags enter the plan. Supply a reason and save manual values. Template confirmation does not adopt facts.') : w('reviewIntro') }}</p><div class="row"><button class="btn" :disabled="!!busy" @click="openReading()">{{ w('templateReading') }}</button><button class="btn" :disabled="!!busy || !inputs.some(input => input.status === 'PARSED')" @click="extract">{{ w('extract') }}</button><button v-if="trace" class="btn" @click="traceOpen = true">{{ w('trace') }}</button></div></div>
+    <section v-if="projectId && step === 'variables' && pendingGraphReview" class="flow-card input-stack" data-pending-graph-review>
+      <h3>{{ phrase('本次识别的候选答案', 'Candidate answers from this identification') }}</h3>
+      <p>{{ phrase('以下答案对应第二步保存的图谱。请先核对重复问题、条件和修改位置，并确认这版模板，再采用答案和生成修改方案。', 'These answers belong to the graph saved in step 2. Review duplicate questions, conditions and amendment locations, then confirm this template before adopting answers and generating the plan.') }}</p>
+      <button class="btn primary" :disabled="candidateDirty" @click="move('review')">{{ phrase('返回第二步核对并确认图谱', 'Review and confirm the graph in step 2') }}</button>
+      <button v-if="trace" class="btn" data-pending-extraction-report @click="traceOpen = true">{{ w('trace') }}</button>
+      <DraftingCandidateReview :project-id="projectId" :revision-id="draftRevisionId" :review="candidateReviewRevision" :locale="store.locale" :reload-key="candidateReload" @dirty="candidateDirty = $event" @locate="locateCandidate" @question="locateCandidateQuestion" />
+    </section>
+    <div v-if="projectId && step === 'variables' && !pendingGraphReview" class="input-stack">
+      <DraftingCandidateReview v-if="catalog.graphRevisionId" :project-id="projectId" :revision-id="catalog.graphRevisionId" :locale="store.locale" :reload-key="candidateReload" unassigned-only @dirty="candidateDirty = $event" @locate="locateCandidate" @corrected="action(w('loading'), refresh)" />
+      <p v-if="generationWorkingRevision?.status === 'DRAFT'" class="condition-note" data-partial-draft-notice>{{ phrase('本次图谱仍在核对。可以保存并采用明确答案；只有已核对的修改才会执行。现在生成的未完成草稿会保留未决原文，并附标记及未处理清单。', 'This graph is under review. You can save and adopt known answers; only reviewed changes will apply. Incomplete drafts retain unresolved source wording and include a notice and outstanding-items list.') }}</p>
+      <div class="input-intro"><p>{{ graphMode ? phrase('只有明确采用且无复核标记的事实进入修改方案。人工值请附理由并保存；模板确认不会代替事实采用。', 'Only explicitly adopted facts without review flags enter the plan. Supply a reason and save manual values. Template confirmation does not adopt facts.') : w('reviewIntro') }}</p><div class="row"><button class="btn" :disabled="!!busy" @click="openReading()">{{ w('templateReading') }}</button><button class="btn" :disabled="!!busy" @click="move('review')">{{ phrase('变量识别与图谱任务', 'Variable identification and graph task') }}</button><button v-if="trace" class="btn" @click="traceOpen = true">{{ w('trace') }}</button></div></div>
       <div class="question-tools"><input v-model="search" :placeholder="w('search')" :aria-label="w('search')" /><select v-model="statusFilter" :aria-label="w('all')"><option value="all">{{ w('all') }}</option><option v-for="status in ['missing', 'suggested', 'adopted', 'manual', 'needs_review', 'conflict', 'inactive'] as DraftWord[]" :key="status" :value="status">{{ w(status) }}</option></select><button class="btn" @click="search = ''; statusFilter = 'all'">{{ w('clearFilters') }}</button></div>
       <div class="review-layout-switch" role="group" :aria-label="w('reviewLayout')"><button class="btn" :class="{ primary: reviewLayout === 'list' }" :aria-pressed="reviewLayout === 'list'" @click="changeReviewLayout('list')">{{ w('listLayout') }}</button><button class="btn" :class="{ primary: reviewLayout === 'focus' }" :aria-pressed="reviewLayout === 'focus'" @click="changeReviewLayout('focus')">{{ w('focusLayout') }}</button></div>
       <p v-if="!filteredGroups.length" class="empty-state">{{ w('noMatches') }}</p>
@@ -674,7 +777,7 @@ onBeforeUnmount(() => { snapshotDraft(projectId.value); alive = false; generatio
         <DraftingBillDistribution v-if="group.id === 'bills'" :values="values" :locale="store.locale" /><p v-if="visibleFields(group).length !== group.fields.length" class="hint">{{ w('hiddenFields') }}</p><details v-if="relatedActions(group).length" class="clause-details"><summary>{{ w('affected') }}</summary><div v-for="item in relatedActions(group)" :key="item.id" class="clause-action" :data-action-id="item.id"><div class="card-head"><strong>{{ item.document }} {{ item.clause }}</strong><span class="state">{{ w((item.action in { retain: 1, amend: 1, insert: 1, delete: 1, not_used: 1, pending: 1, not_adopted: 1 } ? item.action : 'pending') as DraftWord) }}</span></div><p class="hint">{{ item.paragraphs }}</p><p>{{ l(item.detail) }}</p><details v-if="item.scopeResults"><summary>{{ phrase('逐项明细的条件判断', 'Condition result for each list item') }}</summary><ol><li v-for="result in item.scopeResults" :key="result.itemId ?? result.rowIndex">{{ phrase('第', 'Item ') }} {{ result.rowIndex + 1 }} {{ result.itemId ? ' · '+result.itemId : '' }} · {{ result.matches === true ? phrase('满足条件', 'Matches') : result.matches === false ? phrase('不满足条件', 'Does not match') : phrase('仍不确定', 'Unknown') }}</li></ol></details><details v-if="item.sourceWarning" class="source-warning"><summary>{{ w('sourceWarning') }}</summary><p class="condition-note">{{ l(item.sourceWarning) }}</p></details><pre v-if="item.value">{{ item.value }}</pre><button class="btn text-link" :disabled="!!busy" @click="openReading(undefined, item)">{{ w('locateTemplate') }}</button><button class="btn text-link" :disabled="!!busy" @click="openTarget(item)">{{ w('exactEdit') }}</button></div></details><footer v-if="group.fields.some(dirty)" class="flow-actions"><button class="btn" :disabled="!!busy" @click="discard(group)">{{ w('discard') }}</button><button class="btn primary" :disabled="!!busy" @click="saveGroup(group)">{{ w('save') }}</button></footer>
       </section>
       </div></div>
-      <footer class="flow-actions"><button class="btn" :disabled="!!busy" @click="move('inputs')">{{ w('backSources') }}</button><button class="btn" :disabled="!!busy || !dirtyInputs" @click="saveGroup()">{{ w('saveAll') }}</button><button class="btn primary" :disabled="!!busy || !allTemplates || generationSourceBlocked" @click="generate">{{ w('generate') }}</button></footer><p class="hint">{{ w('generateNote') }}</p><p v-if="!allTemplates" class="condition-note">{{ w('missingTemplates') }}</p>
+      <footer class="flow-actions"><button class="btn" :disabled="!!busy" @click="move('inputs')">{{ w('backSources') }}</button><button class="btn" :disabled="!!busy || !dirtyInputs" @click="saveGroup()">{{ w('saveAll') }}</button><button class="btn primary" :disabled="!!busy || !allTemplates || generationSourceBlocked" @click="generate">{{ w('generate') }}</button></footer><p class="hint">{{ w(graphMode ? 'reviewedGenerateNote' : 'generateNote') }}</p><p v-if="!allTemplates" class="condition-note">{{ w('missingTemplates') }}</p>
       <details v-if="plan?.unresolved.length" class="flow-card"><summary>{{ w('unresolved') }} ({{ plan.unresolved.length }})</summary><DraftingUnresolvedItems :items="plan.unresolved" :fields="fields" :values="values" :actions="plan.actions" :locale="store.locale" @input="goInput" @target="openTarget" /></details>
     </div>
     <section v-if="projectId && step === 'preview'" ref="documentWorkspace" class="flow-card preview-card" :class="{ 'preview-card--immersive': immersiveDocument }" data-document-workspace :role="immersiveDocument ? 'dialog' : undefined" :aria-modal="immersiveDocument ? true : undefined" :aria-label="w('documentWorkspace')" tabindex="-1">
@@ -685,9 +788,8 @@ onBeforeUnmount(() => { snapshotDraft(projectId.value); alive = false; generatio
       </div>
       <div v-show="!immersiveDocument || documentInfoOpen" class="document-info" id="draft-document-info">
       <h3>{{ activeDocument?.title }}</h3>
-      <p v-if="activeDocument?.revisionId" class="document-revision-status" role="status"><span>{{ w('savedBodyRevision') }}: {{ activeDocument.revisionId }}</span><strong v-if="documentDirty">{{ w('pendingBodyRevision') }}</strong></p>
-      <details v-if="activeDocument?.revisionId" class="document-versions"><summary>{{ w('documentVersions') }}</summary><p v-if="activeDocument.snapshotId">{{ w('snapshot') }}: {{ activeDocument.snapshotId }}</p><p>Revision: {{ activeDocument.revisionId }}</p><p>DOCX SHA-256: {{ activeDocument.docxSha256 }}</p><p v-if="activeDocument.pdfSha256">PDF SHA-256: {{ activeDocument.pdfSha256 }}</p><p v-if="activeDocument.renderProfileHash">Render profile: {{ activeDocument.renderProfileHash }}</p></details>
-      <details v-if="activeDocument?.generated" class="document-layout-limits" data-draft-layout-limits><summary>{{ l({ en: 'Layout checks remain unverified', zhHans: '版式核对仍未验证', zhHant: '版式核對仍未驗證' }) }}</summary><p>{{ w('formatReview') }}</p></details>
+      <p v-if="activeDocument?.revisionId" class="document-revision-status" role="status"><span>{{ phrase('当前显示已保存的文稿', 'Showing the saved document', '目前顯示已儲存的文稿') }}</span><strong v-if="documentDirty">{{ w('pendingBodyRevision') }}</strong></p>
+      <div v-if="activeDocument?.generated" class="document-layout-limits" data-draft-layout-limits><strong>{{ l({ en: 'Layout checks remain unverified', zhHans: '版式核对仍未验证', zhHant: '版式核對仍未驗證' }) }}</strong><p>{{ w('formatReview') }}</p></div>
       </div>
       <p v-if="documentDirty" class="condition-note">{{ w('pendingBodyNote') }}</p>
       <p v-if="activeDocument?.stale || dirtyInputs" class="review-note" data-draft-stale-status role="status">{{ w('stale') }} <span v-if="activeDocument?.stale">{{ w('staleReadOnly') }}</span></p>
@@ -701,7 +803,7 @@ onBeforeUnmount(() => { snapshotDraft(projectId.value); alive = false; generatio
       <details v-if="currentUnresolved.length" class="draft-unresolved" :open="!immersiveDocument"><summary>{{ w('unresolved') }} ({{ currentUnresolved.length }})</summary><DraftingUnresolvedItems :items="currentUnresolved" :fields="fields" :values="values" :actions="plan?.actions ?? []" :locale="store.locale" @input="goInput" @target="openTarget" /></details>
       <footer class="flow-actions"><button class="btn" :disabled="!!busy || documentDirty" @click="move('variables')">{{ w('backInputs') }}</button><p v-if="immersiveDocument" class="hint regeneration-warning">{{ w('regenerationNote') }}</p><button class="btn" :disabled="!!busy || !allTemplates || generationSourceBlocked || documentDirty" @click="generate">{{ w('regenerate') }}</button></footer><p v-if="!immersiveDocument" class="hint">{{ w('regenerationNote') }}</p>
     </section>
-    <footer v-if="catalog.ruleVersion" class="hint">{{ graphMode ? phrase('当前使用已确认的模板核对版本', 'Using the confirmed template review') : `${w('ruleVersion')}: ${catalog.ruleVersion}` }}</footer>
+    <footer v-if="catalog.ruleVersion" class="hint">{{ graphMode ? generationWorkingRevision?.status === 'CONFIRMED' ? phrase('当前使用已确认的模板核对版本', 'Using the confirmed template review') : phrase('当前使用已保存的核对草稿；未决修改保留原文。', 'Using the saved review draft; unresolved changes retain the source wording.') : phrase('当前使用预设起草规则', 'Using the preset drafting rules') }}</footer>
     <aside v-if="projectId && step === 'variables' && readingOpen" id="drafting-template-panel" class="template-side-panel" data-template-panel :aria-label="w('templateReading')">
       <header class="card-head"><h3>{{ w('templateReading') }}</h3><button class="btn" @click="closeReading">{{ w('close') }}</button></header>
       <DraftingTemplatePreview :project-id="projectId" :file-key="readingFile" :source-available="readingSourceAvailable" :locale="store.locale" :fields="readingFields" :values="values" :variables="variables" :actions="plan?.actions ?? []" :selected-key="readingKey" :selected-action-id="readingActionId" :field-states="readingStates" :dirty-keys="readingDirtyKeys" :disabled="!!busy" @select="selectReading" @edit="editReading" @input="selectReading" @target="readingTarget" @locate="locateReadingTarget" @file="changeReadingFile" @upload="goTemplateUpload" />
@@ -755,13 +857,14 @@ h2,h3,p { margin: 0; }
 h2 { font-size: 22px; line-height: 1.3; }
 .flow-head p { margin-top: 5px; color: var(--muted); font-size: 13px; }
 .flow-count { font-size: 11.5px; font-weight: 700; padding: 5px 10px; background: var(--accent-soft); color: var(--accent-dark); border-radius: 999px; white-space: nowrap; }
-.flow-steps { display: grid; grid-template-columns: repeat(5,minmax(0,1fr)); gap: 8px; }
+.flow-steps { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 8px; }
 .flow-steps button { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 10px 12px; min-height: 46px; text-align: left; color: var(--ink-soft); font: inherit; font-size: 12px; font-weight: 600; }
 .explicit-empty-choice { display: flex; align-items: center; gap: 6px; margin: 10px 0; font-size: 12px; }
 .manual-adoption-note { display: block; font-size: 12px; margin: 12px 0; }
 .manual-adoption-note textarea { display: block; width: 100%; box-sizing: border-box; margin-top: 6px; padding: 8px; border: 1px solid var(--line); border-radius: 5px; font: inherit; background: var(--surface); color: var(--ink); }
-.discovery-budget { display: flex; flex-direction: column; gap: 6px; font-size: 12px; max-width: 280px; }
-.discovery-budget input { width: 80px; padding: 8px; }
+.automation-card { border-color: var(--accent); }
+.automation-review { border: 0; padding: 0; margin: 0; min-width: 0; }
+.automation-card [role=status] { border-left: 3px solid var(--accent); padding-left: 12px; margin: 16px 0; }
 .flow-steps button.active { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-dark); }
 .source-stack,.input-stack { display: flex; flex-direction: column; gap: 12px; padding: 16px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); min-width: 0; }
 .flow-card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px; min-width: 0; }
@@ -769,6 +872,9 @@ h2 { font-size: 22px; line-height: 1.3; }
 .group-number { display: inline-flex; align-items: center; justify-content: center; background: var(--accent-soft); color: var(--accent-dark); width: 22px; height: 22px; border-radius: 50%; margin-right: 8px; font-size: 11px; }
 .source-row { display: grid; grid-template-columns: 45px minmax(0,1fr) auto; gap: 12px; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--line); }
 .source-row:last-child { border: 0; }
+.source-row.uploaded { background: var(--green-soft); box-shadow: inset 3px 0 0 var(--green); border-radius: var(--radius-sm); padding: 12px; margin: 6px 0; border-bottom-color: transparent; }
+.template-file-name { font-weight: 600; }
+.template-upload-state { margin-top: 7px; border: 1px solid currentColor; }
 .source-row small,.evidence-row small { color: var(--muted); display: block; font-size: 12px; line-height: 1.55; margin-top: 5px; }
 .source-row div { overflow-wrap: anywhere; }
 .evidence-row { padding: 12px 0; border-bottom: 1px solid var(--line); }

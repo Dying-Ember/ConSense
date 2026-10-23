@@ -17,6 +17,14 @@ final class DraftNativeLayout {
     static NativeLayoutPlan plan(TemplateIndex index,String key,String rendererKind) {
         return plan(null,index,key,rendererKind);
     }
+    static NativeLayoutPlan originalPreviewPlan(TemplateIndex index,String rendererKind) {
+        Map<String,Object> registry=rendererRegistry(rendererKind);if(registry==null)return null;
+        for(Object raw:DraftBusinessRules.list(registry.get("sources"))) {
+            Map<String,Object> entry=DraftBusinessRules.asMap(raw);
+            if(index.getSourceSha256().equals(entry.get("sourceSha256")))return plan(index,String.valueOf(entry.get("key")),rendererKind);
+        }
+        return null;
+    }
     private static NativeLayoutPlan plan(byte[] source,TemplateIndex suppliedIndex,String key,String rendererKind) {
         Map<String,Object> registry=rendererRegistry(rendererKind);if(registry==null)return null;String sourceHash=suppliedIndex==null?DraftPdfConverter.sha256(source):suppliedIndex.getSourceSha256();
         for(Object raw:DraftBusinessRules.list(registry.get("sources"))) {

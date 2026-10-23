@@ -103,7 +103,7 @@ $family=[pscustomobject]@{
 $normal=[pscustomobject]@{
     schema='consense.normal-observed.v1';version='complete-bound-normal-observations-v1';producerKind='normal_observed'
     projectionEndpoint='/normal-observed';candidateGraphSchema='consense.canonical-candidate.v1'
-    candidateGraphVersion='actual-normal-source-unit-whole-page-observations-v2'
+    candidateGraphVersion='actual-normal-source-unit-whole-page-observations-v3'
     completeUnitPolicy='complete-bound-generation-all-units-in-source-order'
     nonTextUnitPolicy='retained-in-complete-graph-not-submitted-to-model'
     artifactReadValidation='complete-manifest-actual-cas-reconstruction-every-request'

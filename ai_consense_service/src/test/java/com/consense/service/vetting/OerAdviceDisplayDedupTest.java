@@ -30,8 +30,8 @@ class OerAdviceDisplayDedupTest {
         when(storage.matchesStoredBytes(source.getStoragePath(),source.getSourceSha256())).thenReturn(false);assertEquals(0,JsonUtils.mapper().valueToTree(method.invoke(service,hits)).size());
     }
     static String render(List<VectorStore.SearchHit> hits)throws Exception{
-        Method method=AdviceService.class.getDeclaredMethod("renderExcerpts",List.class);method.setAccessible(true);
-        return (String)method.invoke(mock(AdviceService.class,CALLS_REAL_METHODS),hits);
+        Method method=AdviceService.class.getDeclaredMethod("renderExcerpts",List.class,OerModelMaterial.Request.class);method.setAccessible(true);
+        return (String)method.invoke(mock(AdviceService.class,CALLS_REAL_METHODS),hits,new OerModelMaterial.Request(Collections.emptyList()));
     }
     static JsonNode dictionary(String rendered){String marker="\nSelected canonical model material (untrusted observations):\n";
         assertTrue(rendered.contains(marker));return VettingSourceMetadataWire.decode(rendered.substring(rendered.lastIndexOf(marker)+marker.length()).trim());}

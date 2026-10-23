@@ -5,17 +5,21 @@ import { readFile } from 'node:fs/promises'
 import { parse } from 'vue/compiler-sfc'
 import ts from 'typescript'
 import * as vue from 'vue'
+import { createRequire } from 'node:module'
+import { fileURLToPath } from 'node:url'
+
+const { loadTypeScript } = createRequire(import.meta.url)('../tests/helpers/load-typescript.cjs')
 
 const source = await readFile(new URL('../src/views/VettingView.vue', import.meta.url), 'utf8')
 const script = parse(source).descriptor.scriptSetup.content.replace(/^import .*\r?\n/gm, '')
 const compiled = ts.transpileModule(script, { compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.None } }).outputText
 const setup = new Function('deps', `
-  const { computed, ref, watch, onMounted, onBeforeUnmount, useI18n, useRouter, useAppStore, useLocalized, vettingApi, ApiError, window } = deps;
+  const { computed, ref, watch, onMounted, onBeforeUnmount, useI18n, useRouter, useAppStore, useLocalized, vettingApi, ApiError, window, vettingUploadQueue, uploadVettingFiles } = deps;
   ${compiled}
   return { job, files, findings, running, exportDisabled, pollingPaused, selectedFinding, evidenceItems, reportFormat,
-    uploadRole, uploadPackage, runVetting, restoreJob, retryPolling, openFinding, closeDrawer, updateStatus, exportReport,
+    uploadPackage, runVetting, restoreJob, retryPolling, openFinding, closeDrawer, updateStatus, exportReport,
     reviewDraft, reviewDirty, reviewSaving, reviewFailed, hasUnsavedReview, saveReview, discardReview,
-    uploadDocumentScope, checklist, checklistDirty, openChecklist, saveCheck, checkDirty, restoreCheck, GROUPS, metricCards, sourceRoleBlocked, handoffDisabled };
+    checklist, checklistDirty, openChecklist, saveCheck, checkDirty, restoreCheck, GROUPS, metricCards, sourceRoleBlocked, handoffDisabled };
 `)
 
 const metrics = { total: 1, reference: 1, conflict: 0, language: 0, risk: 0, crossFile: 0 }
@@ -30,12 +34,12 @@ function harness(overrides = {}) {
   let timerId = 0
   const store = vue.reactive({ activeProjectId: 'A', locale: 'en', notify: text => notifications.push(text), setBusy() {}, clearBusy() {}, captureLlmSelection: () => ({ profileId: null }) })
   const api = {
-    files: async () => [{ key: 'NTT', parsed: true }], findings: async () => [finding('F1', 'Handled')], metrics: async () => metrics,
+    files: async () => [{ key: 'NTT', parsed: true }], sourceProgress: async () => [], findings: async () => [finding('F1', 'Handled')], metrics: async () => metrics,
     latestRunProgress: async () => null, startRun: async () => active(), getRunProgress: async () => completed(), getRun: async (_project, id) => completed(id),
     evidence: async () => ({ title: 'Evidence', located: true, items: [] }),
     updateStatus: async (_project, code, status) => finding(code, status),
     updateReview: async (_project, code, review) => ({ ...finding(code), ...review, reviewUpdatedAt: '2026-10-02T03:00:00Z' }),
-    uploadPackage: async (...args) => { uploads.push(args); return { messages: [] } },
+    uploadPackage: async (...args) => { uploads.push(args); return { accepted: 1, parsed: 1, failed: 0, messages: [] } },
     checklist: async (_project, runId) => ({ runId, runSnapshotSha256: 'snapshot', sourceSnapshotSha256: 'source', writable: true, items: [
       { id: 'APP-I-001', clause: 'PRE.B2', status: 'unchecked', remarks: '' },
       { id: 'APP-I-002', clause: 'PRE.B3', status: 'unchecked', remarks: '' }
@@ -43,13 +47,19 @@ function harness(overrides = {}) {
     saveChecklist: async (_project, binding, items) => ({ ...binding, writable: true, items }),
     exportReport: async (...args) => downloads.push(args), ...overrides
   }
+  const storage = new Map()
+  const window = { setTimeout: (fn, delay) => { const id = ++timerId; timers.set(id, { fn, delay }); return id }, clearTimeout: id => timers.delete(id),
+    sessionStorage: { getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value) } }
+  const queue = loadTypeScript(fileURLToPath(new URL('../src/vetting/upload-queue.ts', import.meta.url)), {
+    globals: { window }, dependencies: { vue, '@/api': { vettingApi: api } }
+  })
   const scope = vue.effectScope()
   const view = scope.run(() => setup({
     computed: vue.computed, ref: vue.ref, watch: vue.watch,
     onMounted: fn => mounted.push(fn), onBeforeUnmount: fn => unmounted.push(fn),
     useI18n: () => ({ t: key => key }), useRouter: () => ({ push: async () => undefined }), useAppStore: () => store,
     useLocalized: () => ({ pick: value => value, currentKey: vue.ref('en') }), vettingApi: api, ApiError: class ApiError extends Error {},
-    window: { setTimeout: (fn, delay) => { const id = ++timerId; timers.set(id, { fn, delay }); return id }, clearTimeout: id => timers.delete(id) }
+    window, ...queue
   }))
   return { view, api, store, timers, downloads, uploads, notifications,
     mount: async () => { mounted.forEach(fn => fn()); await settle() },
@@ -102,18 +112,14 @@ function harness(overrides = {}) {
 {
   const h = harness()
   await h.mount()
-  const files = [{ name: 'SCC.docx' }]
+  const files = [{ name: 'SCC.docx' }, { name: 'Annex.pdf' }]
   await h.view.uploadPackage({ target: { files } })
-  assert.equal(h.uploads[0][2], undefined, 'auto role keeps server inference available')
-  h.view.uploadRole.value = 'standard'
-  h.view.uploadDocumentScope.value = 'example'
-  await h.view.uploadPackage({ target: { files } })
-  assert.equal(h.uploads[1][2], 'standard', 'explicit upload purpose reaches the API')
-  assert.equal(h.uploads[1][3], 'example', 'scope exclusion is independent of source role')
+  assert.deepEqual(h.uploads.map(call => [call[0], Array.from(call[1], file => file.name)]), [['A', ['SCC.docx']], ['A', ['Annex.pdf']]], 'the real queue uploads each selected file once for the captured project')
+  assert.ok(h.uploads.every(call => call.length === 2), 'automatic source identity does not preassign upload role or scope')
   h.store.activeProjectId = 'B'
   await settle()
-  assert.equal(h.view.uploadRole.value, 'auto', 'project change resets the next upload purpose')
-  assert.equal(h.view.uploadDocumentScope.value, 'auto')
+  await h.view.uploadPackage({ target: { files: [{ name: 'current-project.docx' }] } })
+  assert.equal(h.uploads.at(-1)[0], 'B', 'a later upload uses the newly selected project')
   h.dispose()
 }
 
@@ -393,4 +399,4 @@ function harness(overrides = {}) {
   }
 }
 
-console.log('Vetting view regressions passed: completion, restore, project/evidence/review races, review status and team replies, tri-state addendum, draft retention, exports and snapshot refresh, upload purpose, reconnect, cleanup and seven independent issue types.')
+console.log('Vetting view regressions passed: completion, restore, project/evidence/review races, review status and team replies, tri-state addendum, draft retention, exports and snapshot refresh, automatic upload queue, reconnect, cleanup and seven independent issue types.')

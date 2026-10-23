@@ -13,6 +13,24 @@ import java.time.Instant;
 
 public interface SourceDocumentRepository extends JpaRepository<SourceDocument, Long> {
 
+    @Modifying
+    @org.springframework.transaction.annotation.Transactional
+    @Query("update SourceDocument d set d.parseMessage=:message where d.id=:id and d.sourceSha256=:sha and d.parseStatus='PARSING'")
+    int updateParseProgress(@Param("id") Long id,@Param("sha") String sha,@Param("message") String message);
+
+    interface ParseProgressMetadata { Long getId(); String getFileName(); String getParseStatus(); String getParseMessage(); Integer getPageCount(); }
+    @Query("select d.id as id,d.fileName as fileName,d.parseStatus as parseStatus,d.parseMessage as parseMessage,d.pageCount as pageCount from SourceDocument d where d.projectId=:projectId and d.category in ('VETTING_PACKAGE','VETTING_SUPPLEMENT') and not exists (select newer.id from SourceDocument newer where newer.projectId=d.projectId and newer.category in ('VETTING_PACKAGE','VETTING_SUPPLEMENT') and newer.id>d.id and lower(trim(coalesce(newer.fileName,'')))=lower(trim(coalesce(d.fileName,'')))) order by d.id")
+    List<ParseProgressMetadata> findParseProgressByProjectId(@Param("projectId") String projectId);
+
+    @Modifying
+    @org.springframework.transaction.annotation.Transactional
+    @Query("update SourceDocument d set d.parseStatus='FAILED',d.parseMessage=substring(concat('服务重启，解析已中断；原件保留，尚未自动重试。最后记录：',coalesce(d.parseMessage,'')),1,1024) where d.category in ('VETTING_PACKAGE','VETTING_SUPPLEMENT') and d.parseStatus='PARSING'")
+    int markInterruptedVettingParses();
+
+    /** Automation dispatch guard only; never hydrate source bodies on every model call. */
+    @Query("select d.id,d.category,d.fileKey,d.sourceSha256,d.parseStatus,d.storagePath from SourceDocument d where d.projectId=:projectId and d.category in ('STANDARD_TEMPLATE','PROJECT_INPUT') order by d.id")
+    List<Object[]> findDraftAutomationStamp(@Param("projectId") String projectId);
+
     List<SourceDocument> findByProjectIdAndCategoryOrderByIdAsc(String projectId, String category);
 
     List<SourceDocument> findByProjectIdOrderByIdAsc(String projectId);
@@ -25,6 +43,26 @@ public interface SourceDocumentRepository extends JpaRepository<SourceDocument, 
         String getFileKey();
         String getFileName();
     }
+
+    /** Upload cards use a bounded preview, never the retained source graphs. */
+    interface UploadDisplayMetadata extends CatalogMetadata {
+        String getContentType();
+        String getParseStatus();
+        String getParseMessage();
+        Integer getPageCount();
+        Boolean getOcrUsed();
+        String getTextContent();
+    }
+    @Query("select d.id as id,d.projectId as projectId,d.category as category,d.fileKey as fileKey,d.fileName as fileName,"
+            + "d.contentType as contentType,d.parseStatus as parseStatus,d.parseMessage as parseMessage,"
+            + "d.pageCount as pageCount,d.ocrUsed as ocrUsed,substring(d.textContent,1,401) as textContent "
+            + "from SourceDocument d where d.projectId=:projectId and d.category=:category order by d.id")
+    List<UploadDisplayMetadata> findUploadDisplayMetadataByProjectIdAndCategory(@Param("projectId") String projectId,@Param("category") String category);
+
+    /** Reading original assets must not load parsed bodies or retained evidence graphs. */
+    interface OriginalAssetMetadata extends CatalogMetadata { String getStoragePath(); }
+    @Query("select d.id as id,d.projectId as projectId,d.category as category,d.fileKey as fileKey,d.fileName as fileName,d.storagePath as storagePath from SourceDocument d where d.id=:id")
+    Optional<OriginalAssetMetadata> findOriginalAssetMetadataById(@Param("id") Long id);
 
     @Query("select d.id as id, d.projectId as projectId, d.category as category, "
             + "d.fileKey as fileKey, d.fileName as fileName from SourceDocument d "
@@ -76,17 +114,39 @@ public interface SourceDocumentRepository extends JpaRepository<SourceDocument, 
             + "from SourceDocument d where d.projectId = :projectId order by d.id asc")
     List<SourceListMetadata> findSourceListMetadataByProjectId(@Param("projectId") String projectId);
 
+    /** Draft review still verifies complete text, structure and originals, within its own categories. */
+    interface DraftReviewMetadata extends SourceListMetadata { String getStoragePath(); }
+    @Query("select d.id as id,d.projectId as projectId,d.category as category,d.fileKey as fileKey,d.fileName as fileName,"
+            + "d.reviewRole as reviewRole,d.documentScope as documentScope,d.parseStatus as parseStatus,d.parseMessage as parseMessage,"
+            + "d.oerIdentityJson as oerIdentityJson,d.sourceSha256 as sourceSha256,d.pageCount as pageCount,d.ocrUsed as ocrUsed,"
+            + "d.textContent as textContent,d.parseCoverageJson as parseCoverageJson,d.structuredContentJson as structuredContentJson,"
+            + "d.storagePath as storagePath from SourceDocument d where d.projectId=:projectId "
+            + "and d.category in ('STANDARD_TEMPLATE','PROJECT_INPUT') order by d.id")
+    List<DraftReviewMetadata> findDraftReviewMetadataByProjectId(@Param("projectId") String projectId);
+
+    default List<SourceDocument> findDraftReviewSourcesByProjectId(String projectId) {
+        List<SourceDocument> result=new ArrayList<>();
+        for(DraftReviewMetadata metadata:findDraftReviewMetadataByProjectId(projectId)) {
+            SourceDocument source=sourceListSnapshot(metadata);source.setStoragePath(metadata.getStoragePath());result.add(source);
+        }
+        return result;
+    }
+
     /** Detached single-query snapshots for display, scope and unchanged exact source hashing. Never save. */
     default List<SourceDocument> findSourceListByProjectId(String projectId) {
         List<SourceDocument> result=new ArrayList<>();
         for(SourceListMetadata metadata:findSourceListMetadataByProjectId(projectId)) {
-            SourceDocument d=new SourceDocument();d.setId(metadata.getId());d.setProjectId(metadata.getProjectId());d.setCategory(metadata.getCategory());
-            d.setFileKey(metadata.getFileKey());d.setFileName(metadata.getFileName());d.setReviewRole(metadata.getReviewRole());d.setDocumentScope(metadata.getDocumentScope());
-            d.setParseStatus(metadata.getParseStatus());d.setParseMessage(metadata.getParseMessage());d.setOerIdentityJson(metadata.getOerIdentityJson());d.setSourceSha256(metadata.getSourceSha256());
-            d.setPageCount(metadata.getPageCount());d.setOcrUsed(metadata.getOcrUsed());d.setTextContent(metadata.getTextContent());d.setParseCoverageJson(metadata.getParseCoverageJson());
-            d.setStructuredContentJson(metadata.getStructuredContentJson());result.add(d);
+            result.add(sourceListSnapshot(metadata));
         }
         return result;
+    }
+
+    static SourceDocument sourceListSnapshot(SourceListMetadata metadata) {
+        SourceDocument d=new SourceDocument();d.setId(metadata.getId());d.setProjectId(metadata.getProjectId());d.setCategory(metadata.getCategory());
+        d.setFileKey(metadata.getFileKey());d.setFileName(metadata.getFileName());d.setReviewRole(metadata.getReviewRole());d.setDocumentScope(metadata.getDocumentScope());
+        d.setParseStatus(metadata.getParseStatus());d.setParseMessage(metadata.getParseMessage());d.setOerIdentityJson(metadata.getOerIdentityJson());d.setSourceSha256(metadata.getSourceSha256());
+        d.setPageCount(metadata.getPageCount());d.setOcrUsed(metadata.getOcrUsed());d.setTextContent(metadata.getTextContent());d.setParseCoverageJson(metadata.getParseCoverageJson());
+        d.setStructuredContentJson(metadata.getStructuredContentJson());return d;
     }
 
     /** Complete business inputs; the retained native archive is not consumed by these readers. */

@@ -2,6 +2,7 @@ import copy
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 from token_windows import *
 from fixed_vector_cache import cache_identity, store, lookup
 
@@ -32,6 +33,46 @@ class WindowTests(unittest.TestCase):
     def test_complete_source_coverage(self): self.assertTrue(verify_window_coverage(self.p,self.win(),10)["zeroGapCoverage"])
     def test_special_tokens_in_budget(self): self.assertTrue(all(w["fullModelTokens"]<=10 and w["specialTokens"]==2 for w in self.win()))
     def test_full_query_pair_budget(self): self.assertTrue(all(w["fullModelTokens"]<=10 and w["queryTokens"]==3 and w["specialTokens"]==4 for w in self.win(query="abc")))
+    def test_window_parent_hashes_reused_within_each_stage(self):
+        p=parent("abcdefghijklmnopqrstuvwxyz"*4)
+        with patch("token_windows.text_sha",wraps=text_sha) as text_hash, patch("token_windows.stable_parent_payload_sha",wraps=stable_parent_payload_sha) as payload_hash:
+            rows=self.win(p,query="Q")
+        self.assertGreater(len(rows),2)
+        self.assertEqual(sum(call.args==(p["content"],) for call in text_hash.call_args_list),2)
+        self.assertEqual(sum(call.args==("Q",) for call in text_hash.call_args_list),1)
+        self.assertEqual(payload_hash.call_count,2)
+    def test_coverage_parent_hashes_computed_once(self):
+        p=parent("abcdefghijklmnopqrstuvwxyz"*4);rows=self.win(p)
+        with patch("token_windows.text_sha",wraps=text_sha) as text_hash, patch("token_windows.stable_parent_payload_sha",wraps=stable_parent_payload_sha) as payload_hash:
+            verify_window_coverage(p,rows,10)
+        self.assertEqual(sum(call.args==(p["content"],) for call in text_hash.call_args_list),1)
+        self.assertEqual(payload_hash.call_count,1)
+    def test_later_window_tampering_still_rejected(self):
+        for key,value,kind in [("parentContentSha256","bad","WINDOW_PARENT_MISMATCH"),
+                               ("parentStablePayloadSha256","bad","WINDOW_SOURCE_PAYLOAD_MISMATCH"),
+                               ("sourceHash","bad","WINDOW_SOURCE_PAYLOAD_MISMATCH"),
+                               ("role","bad","WINDOW_SOURCE_PAYLOAD_MISMATCH"),
+                               ("documentId","bad","WINDOW_SOURCE_PAYLOAD_MISMATCH"),
+                               ("sourceSpans",[],"WINDOW_SOURCE_SPANS_MISMATCH"),
+                               ("modelTextSha256","bad","WINDOW_MODEL_TEXT_MISMATCH")]:
+            with self.subTest(field=key):
+                rows=self.win();rows[-1][key]=value
+                with self.assertRaises(WindowError) as error:verify_window_coverage(self.p,rows,10)
+                self.assertEqual(error.exception.kind,kind)
+    def test_hash_reuse_does_not_cross_calls(self):
+        rows=self.win();changed=copy.deepcopy(self.p);changed["cells"]=["changed"]
+        verify_window_coverage(changed,self.win(changed),10)
+        with self.assertRaises(WindowError) as error:verify_window_coverage(changed,rows,10)
+        self.assertEqual(error.exception.kind,"WINDOW_SOURCE_PAYLOAD_MISMATCH")
+    def test_coverage_and_identity_errors_precede_payload_hashing(self):
+        for field,value,kind in [("parentStartCodepoint",1,"WINDOW_COVERAGE_GAP"),
+                                 ("parentId","wrong","WINDOW_PARENT_MISMATCH"),
+                                 ("sourceHash","wrong","WINDOW_SOURCE_PAYLOAD_MISMATCH")]:
+            with self.subTest(field=field):
+                rows=self.win();rows[0][field]=value
+                changed=copy.deepcopy(self.p);changed["cells"]={"not JSON serializable"}
+                with self.assertRaises(WindowError) as error:verify_window_coverage(changed,rows,10)
+                self.assertEqual(error.exception.kind,kind)
     def test_long_query_explicit_failure(self):
         with self.assertRaises(WindowError)as e:self.win(query="abcdefghijklmnop")
         self.assertEqual(e.exception.kind,"QUERY_TOKEN_BUDGET_EXHAUSTED")

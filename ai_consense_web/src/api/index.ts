@@ -1,5 +1,7 @@
 import { api } from './client'
+import { reviewSourceBindings } from './source-locations'
 import type { ReviewBootstrap, ReviewGraph, ReviewHead, ReviewReading, ReviewRevision, ReviewRevisionSummary } from '@/drafting/source-review-types'
+import type { DraftAutomationBinding, DraftAutomationRun } from '@/drafting/automation-types'
 import type {
   AskResponse,
   AdviceSourceDocument,
@@ -66,6 +68,11 @@ export const projectApi = {
 /* ------------------------------------------------------------ 起草 */
 
 export const draftingApi = {
+  automationStart: (projectId: string, body: DraftAutomationBinding, llmSelection: LlmSelection) => api.post<DraftAutomationRun>(`/drafting/${projectId}/graph/automation`, body, { timeout: 30000, llmSelection, reportError: false }),
+  automationLatest: (projectId: string, signal?: AbortSignal) => api.get<DraftAutomationRun | null>(`/drafting/${projectId}/graph/automation/latest`, { timeout: 30000, signal, llmSelection: { profileId: null }, reportError: false }),
+  automationGet: (projectId: string, runId: string, signal?: AbortSignal) => api.get<DraftAutomationRun>(`/drafting/${projectId}/graph/automation/${encodeURIComponent(runId)}`, { timeout: 30000, signal, llmSelection: { profileId: null }, reportError: false }),
+  automationResume: (projectId: string, runId: string, body: DraftAutomationBinding, llmSelection: LlmSelection) => api.post<DraftAutomationRun>(`/drafting/${projectId}/graph/automation/${encodeURIComponent(runId)}/resume`, body, { timeout: 30000, llmSelection, reportError: false }),
+  automationCancel: (projectId: string, runId: string) => api.post<DraftAutomationRun>(`/drafting/${projectId}/graph/automation/${encodeURIComponent(runId)}/cancel`, undefined, { timeout: 30000, llmSelection: { profileId: null }, reportError: false }),
   confirmIdentity: (projectId: string, body: DraftIdentityConfirmation) => api.post<Project>(`/drafting/${projectId}/identity/confirm`, body, { reportError: false }),
   reviewHead: (projectId: string) => api.get<ReviewHead>(`/drafting/${projectId}/graph`),
   reviewBootstrap: (projectId: string) => api.post<ReviewBootstrap>(`/drafting/${projectId}/graph/bootstrap`),
@@ -80,6 +87,7 @@ export const draftingApi = {
   reviewReading: (projectId: string, sourceId: string) => api.get<ReviewReading>(`/drafting/${projectId}/graph/sources/${encodeURIComponent(sourceId)}/reading`),
   reviewSource: (projectId: string, sourceId: string, sourceSha256?: string) => api.blob(`/drafting/${projectId}/graph/sources/${encodeURIComponent(sourceId)}/original${sourceSha256 ? `?sourceSha256=${encodeURIComponent(sourceSha256)}` : ''}`, undefined, false),
   reviewPreview: (projectId: string, sourceId: string, sourceSha256: string) => api.blob(`/drafting/${projectId}/graph/sources/${encodeURIComponent(sourceId)}/preview.pdf?sourceSha256=${encodeURIComponent(sourceSha256)}`, undefined, false),
+  reviewSourceBindings,
   templateEvidence: (projectId: string, fileKey: string) => api.get<Record<string, unknown>>(`/drafting/${projectId}/templates/${fileKey}/evidence`, { reportError: false }),
   catalog: (projectId: string) => api.get<DraftCatalog>(`/drafting/${projectId}/catalog`),
   plan: (projectId: string, values?: Record<string, string>) => values
@@ -153,6 +161,7 @@ export const draftingApi = {
 
 export const vettingApi = {
   files: (projectId: string) => api.get<VettingFile[]>(`/vetting/${projectId}/files`),
+  sourceProgress: (projectId: string) => api.get<import('./types').VettingSourceProgress[]>(`/vetting/${projectId}/sources/progress`),
   confirmSourceRole: (projectId: string, documentId: string, request: VettingSourceRoleUpdate) =>
     api.put<VettingFile>(`/vetting/${encodeURIComponent(projectId)}/sources/${encodeURIComponent(documentId)}/role`, request, request.confirmTextContractMaterial ? { timeout: 7_200_000 } : undefined),
   uploadPackage: (projectId: string, files: File[], sourceRole?: VettingSourceRole, documentScope?: DocumentScope) => {

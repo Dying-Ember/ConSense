@@ -18,7 +18,7 @@ function loadVue(file, { boundaries = {}, globals = {} } = {}) {
       : source
     const output = ts.transpileModule(script, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS }, fileName: target }).outputText
     const module = { exports: {} }; cache.set(target, module)
-    vm.runInNewContext(output, { ...globals, module, exports: module.exports, console, setTimeout, clearTimeout,
+    vm.runInNewContext(output, { AbortController, module, exports: module.exports, console, setTimeout, clearTimeout, ...globals,
       require(name) {
         if (name === 'vue') return vue
         if (Object.hasOwn(boundaries, name)) return boundaries[name]

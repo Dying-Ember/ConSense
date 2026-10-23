@@ -9,6 +9,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
 import java.util.*;
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.*;
 
 /** Exercises the actual metadata adapter, without a registry/provider or a new parsing path. */
 class VettingPackageIdentityContextTest {
@@ -55,5 +56,73 @@ class VettingPackageIdentityContextTest {
     }
     @Test void staleOrUnboundOutlineExclusionCannotBeGuessedFromThePreviousHeading(){
         for(String failure:Arrays.asList("membership","text","position")){Fixture f=scopeFixture("Sample");ObjectNode coverage=(ObjectNode)JsonUtils.parse(f.source.getParseCoverageJson()),heading=(ObjectNode)coverage.path("nativeDocxOutline").path("headings").get(0);if("membership".equals(failure))heading.putArray("retainedBlockIds").add("another-member");if("text".equals(failure))((ObjectNode)heading.path("textObservation")).put("text","Unbound heading text");if("position".equals(failure))((ObjectNode)heading.path("sourcePosition")).put("partSha256","different-part");f.source.setParseCoverageJson(JsonUtils.write(coverage));DocumentBlock b=f.bound();assertEquals("unknown",context(b).path("sourceScopeExclusion").path("status").asText());VettingPackageIdentity.Review review=review(f,b);assertEquals(1,review.outputs().size());assertEquals("identity_candidate",review.ledger().path("declarations").get(0).path("classification").asText());assertEquals("unknown",review.ledger().path("declarations").get(0).path("scopeStatus").asText());}
+    }
+
+    @Test void ordinaryMultiplePartsReadDocumentStructureHashAndCoverageOnceWithoutChangingContextBytes(){
+        Fixture f=multipleParts();List<DocumentBlock> originals=VettingCorpus.blocks(f.source);List<String> expected=new ArrayList<>();
+        for(DocumentBlock original:originals)expected.add(JsonUtils.write(isolatedBinding(f.source,original).getReadingContext()));
+        SourceDocument tracked=spy(f.source);List<VettingRuleEngine.Source> sources=OerBusinessEvidence.ordinaryRuleSources("project",Collections.singletonList(tracked));
+        assertEquals(1,sources.size());assertEquals(originals.size(),sources.get(0).getBlocks().size());
+        for(int i=0;i<originals.size();i++)assertEquals(expected.get(i),JsonUtils.write(sources.get(0).getBlocks().get(i).getReadingContext()));
+        verify(tracked,times(1)).getTextContent();verify(tracked,times(3)).getStructuredContentJson();verify(tracked,times(1)).getParseCoverageJson();
+        for(DocumentBlock block:sources.get(0).getBlocks())assertEquals("source_bound",context(block).path("status").asText());
+        assertEquals("bound_native_outline_exclusion",context(sources.get(0).getBlocks().get(1)).path("sourceScopeExclusion").path("status").asText());
+    }
+    @Test void malformedCoverageIsReadOnceAndKeepsTextBindingsWithUnknownStoryAndScope(){
+        Fixture f=multipleParts();f.source.setParseCoverageJson("{broken");SourceDocument tracked=spy(f.source);
+        List<VettingRuleEngine.Source> sources=OerBusinessEvidence.ordinaryRuleSources("project",Collections.singletonList(tracked));
+        for(DocumentBlock block:sources.get(0).getBlocks()){assertEquals("source_bound",context(block).path("status").asText());assertEquals("unknown",context(block).path("storyStatus").asText());assertEquals("unknown",context(block).path("sourceScopeExclusion").path("status").asText());}
+        verify(tracked,times(1)).getParseCoverageJson();
+    }
+    @Test void ruleSourceReuseDoesNotSurviveAnotherCallOrMaskDuplicateBlocks(){
+        Fixture f=multipleParts();SourceDocument tracked=spy(f.source);OerBusinessEvidence.ordinaryRuleSources("project",Collections.singletonList(tracked));
+        clearInvocations(tracked);List<DocumentBlock> changed=VettingCorpus.blocks(f.source);changed.add(changed.get(1));tracked.setStructuredContentJson(JsonUtils.write(changed));tracked.setParseCoverageJson("{broken");
+        List<VettingRuleEngine.Source> refreshed=OerBusinessEvidence.ordinaryRuleSources("project",Collections.singletonList(tracked));
+        for(DocumentBlock block:refreshed.get(0).getBlocks())if(f.original.getId().equals(block.getId()))assertEquals("unknown",context(block).path("status").asText());
+        assertEquals("unknown",context(refreshed.get(0).getBlocks().get(2)).path("storyStatus").asText());
+        verify(tracked,times(1)).getTextContent();verify(tracked,times(3)).getStructuredContentJson();verify(tracked,times(1)).getParseCoverageJson();
+    }
+    @Test void rejectedCanonicalSourceDoesNotEagerlyParseBlocksOrCoverage(){
+        for(String mutation:Arrays.asList("project","parse","hash")){Fixture f=new Fixture();if("project".equals(mutation))f.source.setProjectId("other");if("parse".equals(mutation))f.source.setParseStatus("FAILED");if("hash".equals(mutation))f.source.setTextContent("Changed source");SourceDocument tracked=spy(f.source);DocumentBlock target=new DocumentBlock();
+            OerBusinessEvidence.bindRuleContext("project",tracked,f.chunk,f.part,target);assertEquals("unknown",context(target).path("status").asText());verify(tracked,never()).getParseCoverageJson();verify(tracked,times("hash".equals(mutation)?1:0)).getStructuredContentJson();}
+    }
+    @Test void canonicalMultiplePartsReuseDocumentReadsAndKeepEveryBoundBlockByte() throws Exception {
+        OerBusinessEvidenceTest.Wire wire=canonicalParts();OerBusinessEvidence.Session session=wire.load();List<String> expected=new ArrayList<>();
+        for(VettingCorpus.Chunk chunk:session.chunks())for(VettingCorpus.Part part:chunk.getParts()){
+            DocumentBlock block=new DocumentBlock();block.setId(part.getBlockId());block.setLocation(part.getAnchor());block.setText(part.getText());block.setOriginalText(part.getText());block.setSource("source_reviewed_canonical_observation");
+            OerBusinessEvidence.bindRuleContext("project",wire.document,chunk,part,block);expected.add(JsonUtils.write(block));
+        }
+        SourceDocument tracked=spy(wire.document);List<VettingRuleEngine.Source> sources=wire.service.ruleSources(session,Collections.singletonList(tracked));
+        assertEquals(1,sources.size());assertEquals(expected.size(),sources.get(0).getBlocks().size());assertTrue(expected.size()>4);
+        for(int i=0;i<expected.size();i++)assertEquals(expected.get(i),JsonUtils.write(sources.get(0).getBlocks().get(i)));
+        verify(tracked,times(1)).getTextContent();verify(tracked,times(3)).getStructuredContentJson();verify(tracked,times(1)).getParseCoverageJson();
+    }
+    @Test void duplicateCapturedSourcesAndLaterSourceDriftCannotReuseCanonicalContext() throws Exception {
+        OerBusinessEvidenceTest.Wire wire=canonicalParts();OerBusinessEvidence.Session session=wire.load();SourceDocument tracked=spy(wire.document);
+        List<VettingRuleEngine.Source> duplicate=wire.service.ruleSources(session,Arrays.asList(tracked,tracked));
+        for(DocumentBlock block:duplicate.get(0).getBlocks())assertEquals("unknown",context(block).path("status").asText());
+        verify(tracked,never()).getStructuredContentJson();verify(tracked,never()).getParseCoverageJson();
+        wire.service.ruleSources(session,Collections.singletonList(tracked));clearInvocations(tracked);tracked.setTextContent("Changed after the prior rule call");
+        List<VettingRuleEngine.Source> changed=wire.service.ruleSources(session,Collections.singletonList(tracked));
+        for(DocumentBlock block:changed.get(0).getBlocks())assertEquals("unknown",context(block).path("status").asText());
+        verify(tracked,times(1)).getStructuredContentJson();verify(tracked,never()).getParseCoverageJson();
+    }
+    private OerBusinessEvidenceTest.Wire canonicalParts() throws Exception {
+        OerBusinessEvidenceTest.Wire wire=new OerBusinessEvidenceTest.Wire(true);List<DocumentBlock> blocks=new ArrayList<>();
+        for(JsonNode chunk:wire.snapshot.path("chunks"))for(JsonNode part:chunk.path("parts")){
+            DocumentBlock block=new DocumentBlock();block.setId(part.path("blockId").asText());block.setLocation(part.path("anchor").asText());block.setText(part.path("text").asText());block.setOriginalText(block.getText());block.setKind("paragraph");block.setSourcePosition(part.path("sourcePosition").deepCopy());blocks.add(block);
+        }
+        wire.document.setStructuredContentJson(JsonUtils.write(blocks));wire.document.setTextContent(String.join("\n",blocks.stream().map(DocumentBlock::getEffectiveText).toArray(String[]::new)));wire.document.setParseStatus("PARSED");wire.document.setSourceSha256(wire.binding.getOriginalSourceSha256());wire.document.setReviewRole("tender");wire.document.setParseCoverageJson("{}");wire.binding.setJavaParsedSourceHash(VettingCorpus.sourceHash(wire.document));return wire;
+    }
+    private Fixture multipleParts(){
+        Fixture f=scopeFixture("Sample");List<DocumentBlock> blocks=new ArrayList<>(VettingCorpus.blocks(f.source));ObjectNode coverage=(ObjectNode)JsonUtils.parse(f.source.getParseCoverageJson());
+        for(int i=0;i<5;i++){DocumentBlock extra=JsonUtils.read(JsonUtils.write(f.original),DocumentBlock.class);extra.setId("extra-"+i);extra.setLocation("extra-anchor-"+i);((ObjectNode)extra.getSourcePosition()).put("nodePath","/{urn:word}document[1]/{urn:word}body[1]/{urn:word}p["+(i+3)+"]");blocks.add(extra);((ObjectNode)coverage.path("nativeDocxOutline").path("headings").get(0)).withArray("retainedBlockIds").add(extra.getId());}
+        f.source.setStructuredContentJson(JsonUtils.write(blocks));f.source.setTextContent(String.join("\n",blocks.stream().map(DocumentBlock::getEffectiveText).toArray(String[]::new)));f.source.setParseCoverageJson(JsonUtils.write(coverage));return f;
+    }
+    private DocumentBlock isolatedBinding(SourceDocument source,DocumentBlock original){
+        DocumentBlock target=JsonUtils.read(JsonUtils.write(original),DocumentBlock.class);VettingCorpus.Part part=new VettingCorpus.Part();part.setBlockId(original.getId());part.setAnchor(original.getLocation());part.setText(original.getEffectiveText());part.setStartOffset(0);part.setEndOffset(part.getText().length());
+        ObjectNode payload=JsonUtils.mapper().createObjectNode(),raw=payload.withArray("parts").addObject();raw.put("blockId",part.getBlockId());raw.put("startOffset",0);raw.put("endOffset",part.getEndOffset());raw.put("text",part.getText());if(original.getSourcePosition()!=null)raw.set("sourcePosition",original.getSourcePosition().deepCopy());
+        VettingCorpus.Chunk chunk=new VettingCorpus.Chunk();chunk.setDocumentId(String.valueOf(source.getId()));chunk.setCanonicalPayload(payload);EvidencePointer pointer=new EvidencePointer();pointer.setJavaParsedSourceHash(VettingCorpus.sourceHash(source));pointer.setOriginalSourceSha256(source.getSourceSha256());chunk.setCanonicalEvidence(pointer);
+        OerBusinessEvidence.bindRuleContext("project",source,chunk,part,target);return target;
     }
 }

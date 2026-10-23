@@ -64,7 +64,7 @@ class CanonicalCompleteCollectionServiceTest {
         assertEquals(Arrays.asList(0,1,2),batches);
         assertEquals(root,JsonUtils.parse(binding.getSnapshotJson()));assertFalse(JsonUtils.parse(binding.getSnapshotJson()).has("chunks"));
         when(bindings.findByProjectIdAndDocumentIdAndProjectionSha256(anyString(),anyLong(),anyString())).thenReturn(Optional.of(binding));
-        when(bindings.findByProjectIdAndDocumentIdOrderByIdDesc("authored-complete",42L)).thenReturn(Collections.singletonList(binding));
+        when(bindings.findByProjectIdAndDocumentIdOrderByIdDesc("authored-complete",42L,org.springframework.data.domain.PageRequest.of(0,1))).thenReturn(Collections.singletonList(binding));
         String projection=binding.getProjectionSha256();JsonNode expected=NativeCanonicalFixture.snapshot();
         List<Runnable> operations=Arrays.asList(
             ()->assertEquals(root,JsonUtils.parse(service.snapshot("authored-complete",42L,projection,"vetting"))),

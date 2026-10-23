@@ -5,7 +5,7 @@ import type { BodyDraft } from './body-edit'
 
 export type DraftValue = string | number | boolean | null | DraftValue[] | { [key: string]: DraftValue }
 export type Applicability = 'yes' | 'no' | 'unknown'
-export type DraftViewState = { step: 'inputs' | 'identify' | 'review' | 'variables' | 'preview'; activeFile: string; review?: { layout: 'list' | 'focus'; groupId: string }; reading?: { fileKey: string; selectedKey: string; selectedActionId: string } }
+export type DraftViewState = { step: 'inputs' | 'review' | 'variables' | 'preview'; activeFile: string; review?: { layout: 'list' | 'focus'; groupId: string }; reading?: { fileKey: string; selectedKey: string; selectedActionId: string } }
 export const projectDrafts = new Map<string, { values: Record<string, DraftValue>; baseline: Record<string, string>; notes?: Record<string, string>; intentionalEmpty?: Record<string, boolean>; emptyBaseline?: Record<string, boolean>; documents?: Record<string, { content: string; baseline: string; body?: BodyDraft }>; view?: DraftViewState }>()
 
 /** Stale snapshots remain readable, but the server requires a current draft for edits and binary output. */
@@ -16,9 +16,10 @@ export function documentCapabilities(document: Pick<DraftDocument, 'generated' |
 }
 
 /** Language remounts restore the same project's place, but a project without a generated draft cannot restore preview. */
-export function restoreDraftView(view: DraftViewState | undefined, documents: Pick<DraftDocument, 'fileKey' | 'generated'>[]): DraftViewState {
+export function restoreDraftView(view: (Omit<DraftViewState, 'step'> & { step: DraftViewState['step'] | 'identify' }) | undefined, documents: Pick<DraftDocument, 'fileKey' | 'generated'>[]): DraftViewState {
   const activeFile = ['NTT', 'SCT', 'SCC'].includes(view?.activeFile ?? '') ? view!.activeFile : 'NTT'
-  const step = view?.step === 'preview' && !documents.some(document => document.generated) ? 'variables' : view?.step ?? 'inputs'
+  const previousStep = view?.step === 'identify' ? 'inputs' : view?.step ?? 'inputs'
+  const step = previousStep === 'preview' && !documents.some(document => document.generated) ? 'variables' : previousStep
   const reading = view?.reading && ['NTT', 'SCT', 'SCC'].includes(view.reading.fileKey) ? { ...view.reading } : undefined
   const review = view?.review && ['list', 'focus'].includes(view.review.layout) ? { ...view.review } : undefined
   return { step, activeFile, ...(reading ? { reading } : {}), ...(review ? { review } : {}) }

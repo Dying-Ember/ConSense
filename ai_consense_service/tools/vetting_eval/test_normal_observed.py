@@ -73,6 +73,133 @@ def with_empty_unit(body):
     return body
 
 
+def many_unit_fixture(policy, count=8):
+    body = fixture(policy)
+    graph, template = body['candidateGraph'], body['candidateGraph']['units'][-1]
+    graph['units'] = []
+    for index in range(count):
+        unit = copy.deepcopy(template)
+        block = 'authored-many-block-' + str(index)
+        unit.update(unitId='candidate-unit:' + hashlib.sha256(block.encode()).hexdigest(),
+                    sourceOrder=index, requiredMemberBlockIds=[block])
+        unit['parts'][0].update(blockId=block, anchor='body/' + str(index))
+        unit['parts'][0]['sourcePosition']['nodePath'] = 'body/' + str(index)
+        unit['sourceSpans'][0].update(blockId=block,
+            sourcePosition=copy.deepcopy(unit['parts'][0]['sourcePosition']))
+        graph['units'].append(unit)
+    graph['relations'] = [{'type': 'observed_candidate', 'humanConfirmed': False,
+        'fromUnitId': unit['unitId'], 'toUnitId': graph['units'][(index + 1) % count]['unitId']}
+        for index, unit in enumerate(graph['units'])]
+    return body
+
+
+class NormalObservedStreamingTests(unittest.TestCase):
+    def manifest(self, count=8):
+        from normal_observed_projection import OBSERVER
+        body = many_unit_fixture(type('Policy', (), {'policyIdentity': {'manifestSha256': 'a' * 64}})(), count)
+        return {**body, 'observer': copy.deepcopy(OBSERVER)}
+
+    def test_assemble_relation_endpoints_read_once_per_relation(self):
+        from normal_observed_projection import _assemble
+        class CountedRelation(dict):
+            reads = 0
+            def __getitem__(self, key):
+                if key == 'fromUnitId':
+                    type(self).reads += 1
+                return super().__getitem__(key)
+        manifest = self.manifest()
+        graph = manifest['candidateGraph']
+        graph['relations'] = [CountedRelation(row) for row in graph['relations']]
+        _assemble(manifest, {'authoredDescriptor': True}, 'b' * 64)
+        self.assertEqual(len(graph['relations']), CountedRelation.reads)
+
+    def test_assemble_quality_hash_computed_once(self):
+        import normal_observed_projection as normal
+        quality = {'status': 'PARSED', 'semanticQuality': 'unknown', **normal.DECLARATIONS}
+        with patch.object(normal, '_hash', wraps=normal._hash) as hashed:
+            normal._assemble(self.manifest(), {'authoredDescriptor': True}, 'b' * 64)
+        self.assertEqual(1, sum(call.args == (quality,) for call in hashed.call_args_list))
+
+    def test_relation_index_keeps_order_duplicates_self_and_unknown_targets(self):
+        from normal_observed_projection import _assemble
+        manifest = self.manifest(3)
+        graph = manifest['candidateGraph']
+        graph['relations'].extend([dict(graph['relations'][0], toUnitId=graph['units'][0]['unitId']),
+            dict(graph['relations'][1], toUnitId=None), copy.deepcopy(graph['relations'][0])])
+        missing_target = dict(graph['relations'][2])
+        missing_target.pop('toUnitId')
+        graph['relations'].append(missing_target)
+        result = _assemble(manifest, {'authoredDescriptor': True}, 'b' * 64)
+        for chunk in result['chunks']:
+            self.assertEqual([relation for relation in graph['relations']
+                if chunk['unitId'] in (relation['fromUnitId'], relation.get('toUnitId'))], chunk['relations'])
+        result['chunks'][0]['relations'][0]['humanConfirmed'] = True
+        self.assertTrue(all(relation['humanConfirmed'] is False for relation in graph['relations']))
+
+    def test_relation_index_rejects_unknown_endpoint_before_assembly(self):
+        from normal_observed_projection import _assemble
+        from oer_source_registry import SourceRegistryError
+        for endpoint in ('fromUnitId', 'toUnitId'):
+            manifest = self.manifest()
+            manifest['candidateGraph']['relations'][-1][endpoint] = 'candidate-unit:' + '0' * 64
+            with self.subTest(endpoint=endpoint), self.assertRaises(SourceRegistryError) as error:
+                _assemble(manifest, {'authoredDescriptor': True}, 'b' * 64)
+            self.assertEqual('NORMAL_OBSERVED_RELATION_INVALID', error.exception.code)
+
+    def test_streaming_hash_and_comparison_preserve_exact_canonical_bytes(self):
+        from normal_observed_projection import _hash, _serialized_equal, _matches_serialized_bytes
+        values = [None, {}, [], {'z': '中文 🚀\n\x00', 'a': [1, 1.0, -0.0, 1e-7]},
+                  {'z': ['large literal ' * 20000], 'a': {'nested': True}}]
+        for value in values:
+            raw = _serialize(value)
+            with self.subTest(value_type=type(value).__name__):
+                with patch('normal_observed_projection._serialize', side_effect=AssertionError('No whole encoded copy')):
+                    self.assertEqual(hashlib.sha256(raw).hexdigest(), _hash(value))
+                    self.assertTrue(_matches_serialized_bytes(value, raw))
+                    self.assertTrue(_serialized_equal(value, copy.deepcopy(value)))
+                    self.assertFalse(_matches_serialized_bytes(value, raw + b' '))
+        for first, second in ((1, 1.0), (False, 0), ([1, 2], [2, 1]), ({'a': 1}, {'a': '1'})):
+            self.assertFalse(_serialized_equal(first, second))
+
+    def test_nested_scope_paragraph_references_validate_without_rejecting_shared_aliases(self):
+        from normal_observed_projection import GRAPH_VERSION, _paragraph, _validate_paragraph_references
+        from oer_source_registry import SourceRegistryError
+        shared = {'literal': ['AUTHORED layout declaration']}
+        properties = {'sourcePosition': {'nodePath': 'AUTHORED paragraph'},
+                      'first': shared, 'second': shared}
+        reference = {'$nativeParagraph': 0}
+        graph = {'producerVersion': GRAPH_VERSION, 'nativeDocxOutline': {
+            'paragraphs': [properties], 'sourceClauseScopes': {'members': [
+                {'paragraphProperties': {'nested': [reference, {'alias': reference}]}}]}}}
+        _validate_paragraph_references(graph)
+        self.assertIs(properties, _paragraph(graph, reference))
+        for ordinal in (-1, True, 0.0, '0', 1):
+            with self.subTest(ordinal=ordinal):
+                reference['$nativeParagraph'] = ordinal
+                with self.assertRaises(SourceRegistryError) as rejected:
+                    _validate_paragraph_references(graph)
+                self.assertEqual('NORMAL_OBSERVED_PARAGRAPH_REF_INVALID', rejected.exception.code)
+
+    def test_direct_python_cyclic_paragraph_input_reaches_canonical_encoder_rejection(self):
+        import tempfile
+        from artifact_store import ArtifactStore
+        from normal_observed_projection import GRAPH_VERSION, _paragraph, produce_normal_observed
+        body = fixture(type('Policy', (), {'policyIdentity': {'manifestSha256': 'a' * 64}})())
+        graph = body['candidateGraph']
+        graph['producerVersion'] = GRAPH_VERSION
+        properties = {'sourcePosition': {'nodePath': 'AUTHORED paragraph'}}
+        cycle = [properties]
+        properties['cycle'] = cycle
+        graph['nativeDocxOutline'] = {'paragraphs': [properties]}
+        graph['units'][0]['parts'][0]['readingContext']['nativeDocxParagraph'] = {'$nativeParagraph': 0}
+        self.assertIs(properties, _paragraph(graph, {'$nativeParagraph': 0}))
+        with tempfile.TemporaryDirectory() as directory:
+            store = ArtifactStore(directory)
+            with patch.object(store, 'put_bytes', side_effect=AssertionError('Cyclic input must never enter CAS')):
+                with self.assertRaisesRegex(ValueError, 'Circular reference'):
+                    produce_normal_observed(graph, body['sourceBinding'], artifact_store=store)
+
+
 class NormalObservedHttpTests(unittest.TestCase):
     tearDown = base_tests.OerHttpContractTest.tearDown
 
@@ -128,6 +255,7 @@ class NormalObservedHttpTests(unittest.TestCase):
         self.assertIsInstance(capability, dict)
         self.assertEqual('consense.normal-observed.v1', capability['schema'])
         self.assertEqual('/normal-observed', capability['projectionEndpoint'])
+        self.assertEqual('actual-normal-source-unit-whole-page-observations-v3', capability['candidateGraphVersion'])
         projection = self.publish()
         self.assertEqual('consense.normal-observed.v1', projection['schema'])
         self.assertEqual(self.body['candidateGraph'], projection['manifest']['candidateGraph'])
@@ -149,6 +277,198 @@ class NormalObservedHttpTests(unittest.TestCase):
         response = self.client.get('/canonical/' + projection['projectionSha256'] + '?module=advisory')
         self.assertEqual(200, response.status_code, response.text)
         self.assertEqual(_serialize(projection), response.content)
+        self.assertEqual([], self.encodes)
+        self.assertEqual([], self.predictions)
+
+    def test_compact_paragraph_references_keep_complete_chunk_context_and_original_manifest(self):
+        from normal_observed_projection import GRAPH_VERSION
+        body = copy.deepcopy(self.body)
+        graph = body['candidateGraph']
+        graph['producerVersion'] = GRAPH_VERSION
+        properties = {'sourcePosition': graph['units'][0]['parts'][0]['sourcePosition'],
+                      'status': 'outline_not_declared', 'layoutEvidence': {'meaning': 'AUTHORED layout',
+                      'raw': 'AUTHORED shared declaration ' * 2000}}
+        graph['nativeDocxOutline'] = {'paragraphs': [properties], 'sourceClauseScopes': {
+            'members': [{'id': 'AUTHORED scope member', 'paragraphProperties': {'$nativeParagraph': 0}}]}}
+        for unit in graph['units']:
+            for part in unit['parts']:
+                part['readingContext']['nativeDocxParagraph'] = {'$nativeParagraph': 0}
+                part['readingContext']['nativeDocxParagraphs'] = [{'$nativeParagraph': 0}]
+        before = _serialize(body)
+        projection = self.publish(body)
+        self.assertEqual(before, _serialize(body))
+        self.assertEqual(graph, projection['manifest']['candidateGraph'])
+        self.assertEqual(graph['units'], projection['canonical']['units'])
+        for chunk in projection['chunks']:
+            for part in chunk['parts']:
+                self.assertEqual(properties, part['readingContext']['nativeDocxParagraph'])
+                self.assertEqual([properties], part['readingContext']['nativeDocxParagraphs'])
+        self.assertLess(len(_serialize(graph)), len(_serialize(projection['chunks'])))
+        loaded = self.client.get('/canonical/' + projection['projectionSha256'] + '?module=vetting')
+        self.assertEqual(200, loaded.status_code, loaded.text)
+        self.assertEqual(_serialize(projection), loaded.content)
+        self.assertEqual([], self.encodes)
+        self.assertEqual([], self.predictions)
+
+    def test_compact_paragraph_invalid_references_never_publish(self):
+        from normal_observed_projection import GRAPH_VERSION
+        for reference in ({'$nativeParagraph': -1}, {'$nativeParagraph': True}, {'$nativeParagraph': 0.0},
+                          {'$nativeParagraph': '0'}, {'$nativeParagraph': 1},
+                          {'$nativeParagraph': 0, 'extra': 'untrusted'}):
+            with self.subTest(reference=reference):
+                body = copy.deepcopy(self.body)
+                graph = body['candidateGraph']
+                graph['producerVersion'] = GRAPH_VERSION
+                graph['nativeDocxOutline'] = {'paragraphs': [{'sourcePosition': {'nodePath': 'AUTHORED'}}]}
+                graph['units'][0]['parts'][0]['readingContext']['nativeDocxParagraph'] = reference
+                rejected = self.client.post('/normal-observed', json=body)
+                self.assertNotEqual(200, rejected.status_code)
+                self.assertIn('NORMAL_OBSERVED_PARAGRAPH_REF_INVALID', rejected.text)
+        self.assertEqual([], self.encodes)
+        self.assertEqual([], self.predictions)
+
+    def test_compact_scope_nested_invalid_reference_is_rejected(self):
+        from normal_observed_projection import GRAPH_VERSION
+        body = copy.deepcopy(self.body)
+        graph = body['candidateGraph']
+        graph['producerVersion'] = GRAPH_VERSION
+        graph['nativeDocxOutline'] = {'paragraphs': [{'sourcePosition': {'nodePath': 'AUTHORED'}}],
+                                    'sourceClauseScopes': {'members': [{'paragraphProperties': {
+                                        'nested': {'$nativeParagraph': -1}}}]}}
+        rejected = self.client.post('/normal-observed', json=body)
+        self.assertNotEqual(200, rejected.status_code)
+        self.assertIn('NORMAL_OBSERVED_PARAGRAPH_REF_INVALID', rejected.text)
+
+    def test_empty_units_validate_dict_shaped_paragraph_contexts_before_publication(self):
+        from normal_observed_projection import GRAPH_VERSION
+        for context in ({'$nativeParagraph': -1}, {'nested': [{'$nativeParagraph': -1}]}):
+            with self.subTest(context=context):
+                body = with_empty_unit(self.body)
+                graph = body['candidateGraph']
+                graph['producerVersion'] = GRAPH_VERSION
+                graph['nativeDocxOutline'] = {'paragraphs': [{'sourcePosition': {'nodePath': 'AUTHORED'}}]}
+                graph['units'][-1]['parts'][0]['readingContext']['nativeDocxParagraphs'] = context
+                rejected = self.client.post('/normal-observed', json=body)
+                self.assertEqual(422, rejected.status_code, rejected.text[:1000])
+                self.assertIn('NORMAL_OBSERVED_PARAGRAPH_REF_INVALID', rejected.text)
+        self.assertEqual([], list(self.registry.root.glob('*.json')))
+        for context in ({'layoutHint': 'AUTHORED literal dict'}, {'$nativeParagraph': 0},
+                        {'nested': [{'$nativeParagraph': 0}]}):
+            with self.subTest(valid_context=context):
+                body = with_empty_unit(self.body)
+                graph = body['candidateGraph']
+                graph['producerVersion'] = GRAPH_VERSION
+                graph['nativeDocxOutline'] = {'paragraphs': [{'sourcePosition': {'nodePath': 'AUTHORED'}}]}
+                graph['units'][-1]['parts'][0]['readingContext']['nativeDocxParagraphs'] = context
+                projection = self.publish(body)
+                self.assertEqual(1, len(projection['nonRetrievableUnits']))
+                self.assertEqual(graph['units'][-1], projection['canonical']['units'][-1])
+        self.assertEqual([], self.encodes)
+        self.assertEqual([], self.predictions)
+
+    def _section_body(self, section):
+        from normal_observed_projection import GRAPH_VERSION
+        body = copy.deepcopy(self.body)
+        graph = body['candidateGraph']
+        graph['producerVersion'] = GRAPH_VERSION
+        graph['nativeDocxSections'] = [section]
+        for unit in graph['units']:
+            for part in unit['parts']:
+                part['readingContext']['nativeDocxSection'] = {'$nativeSection': 0}
+        return body
+
+    def test_compact_sections_share_the_inventory_and_restore_complete_chunk_context(self):
+        section = {'sectionId': 'AUTHORED section', 'ownerStatus': 'unknown',
+                   'headerFooterBindings': [{'status': 'unknown', 'raw': 'AUTHORED full binding ' * 2000}]}
+        body = self._section_body(section)
+        before = _serialize(body)
+        projection = self.publish(body)
+        graph = body['candidateGraph']
+        self.assertEqual(before, _serialize(body))
+        self.assertEqual(graph, projection['manifest']['candidateGraph'])
+        self.assertEqual(graph['units'], projection['canonical']['units'])
+        self.assertEqual([section], projection['manifest']['candidateGraph']['nativeDocxSections'])
+        for chunk in projection['chunks']:
+            for part in chunk['parts']:
+                self.assertEqual(section, part['readingContext']['nativeDocxSection'])
+        self.assertLess(len(_serialize(graph)), len(_serialize(projection['chunks'])))
+        loaded = self.client.get('/canonical/' + projection['projectionSha256'] + '?module=vetting')
+        self.assertEqual(200, loaded.status_code, loaded.text[:1000])
+        self.assertEqual(_serialize(projection), loaded.content)
+        self.assertEqual([], self.encodes)
+        self.assertEqual([], self.predictions)
+
+    def test_compact_section_bad_references_and_targets_never_publish(self):
+        invalid = ({'$nativeSection': -1}, {'$nativeSection': True}, {'$nativeSection': 0.0},
+                   {'$nativeSection': '0'}, {'$nativeSection': None}, {'$nativeSection': 1},
+                   {'$nativeSection': 2147483648}, {'$nativeSection': 0, 'extra': 'untrusted'})
+        for reference in invalid:
+            with self.subTest(reference=reference):
+                body = self._section_body({'sectionId': 'AUTHORED'})
+                body['candidateGraph']['units'][0]['parts'][0]['readingContext']['nativeDocxSection'] = reference
+                rejected = self.client.post('/normal-observed', json=body)
+                self.assertEqual(422, rejected.status_code, rejected.text[:1000])
+                self.assertIn('NORMAL_OBSERVED_SECTION_REF_INVALID', rejected.text)
+        for target in (None, [], 'untrusted', True, {'nested': {'$nativeSection': 0}},
+                       {'nested': {'$nativeParagraph': 0}}):
+            with self.subTest(target=target):
+                rejected = self.client.post('/normal-observed', json=self._section_body(target))
+                self.assertEqual(422, rejected.status_code, rejected.text[:1000])
+                self.assertIn('NORMAL_OBSERVED_SECTION_REF_INVALID', rejected.text)
+        body = self._section_body({'sectionId': 'AUTHORED'})
+        del body['candidateGraph']['nativeDocxSections']
+        self.assertEqual(422, self.client.post('/normal-observed', json=body).status_code)
+        body = self._section_body({'sectionId': 'AUTHORED'})
+        graph = body['candidateGraph']
+        graph['nativeDocxOutline'] = {'paragraphs': [{'sourcePosition': {},
+                                                   'nested': {'$nativeSection': 0}}]}
+        graph['units'][0]['parts'][0]['readingContext']['nativeDocxParagraph'] = {'$nativeParagraph': 0}
+        rejected = self.client.post('/normal-observed', json=body)
+        self.assertEqual(422, rejected.status_code, rejected.text[:1000])
+        self.assertIn('NORMAL_OBSERVED_PARAGRAPH_REF_INVALID', rejected.text)
+        self.assertEqual([], list(self.registry.root.glob('*.json')))
+        self.assertEqual([], self.encodes)
+        self.assertEqual([], self.predictions)
+
+    def test_empty_units_reject_nested_section_refs_without_rejecting_inline_shapes(self):
+        for context in ({'$nativeSection': -1}, {'unknown': [{'$nativeSection': -1}]}):
+            with self.subTest(context=context):
+                body = with_empty_unit(self._section_body({'sectionId': 'AUTHORED'}))
+                body['candidateGraph']['units'][-1]['parts'][0]['readingContext']['nativeDocxSection'] = context
+                rejected = self.client.post('/normal-observed', json=body)
+                self.assertEqual(422, rejected.status_code, rejected.text[:1000])
+                self.assertIn('NORMAL_OBSERVED_SECTION_REF_INVALID', rejected.text)
+        self.assertEqual([], list(self.registry.root.glob('*.json')))
+        for context in (None, 7, ['AUTHORED literal'], {'unknown': 'AUTHORED inline shape'}):
+            with self.subTest(inline_context=context):
+                body = with_empty_unit(self._section_body({'sectionId': 'AUTHORED'}))
+                graph = body['candidateGraph']
+                for unit in graph['units']:
+                    for part in unit['parts']:
+                        part['readingContext']['nativeDocxSection'] = context
+                del graph['nativeDocxSections']
+                projection = self.publish(body)
+                self.assertEqual(1, len(projection['nonRetrievableUnits']))
+                self.assertEqual(graph['units'][-1], projection['canonical']['units'][-1])
+                for chunk in projection['chunks']:
+                    for part in chunk['parts']:
+                        self.assertEqual(context, part['readingContext']['nativeDocxSection'])
+        self.assertEqual([], self.encodes)
+        self.assertEqual([], self.predictions)
+
+    def test_legacy_inline_sections_and_undefined_legacy_markers_remain_unchanged(self):
+        for context in ({'sectionId': 'AUTHORED v2 inline section', 'ownerStatus': 'unknown'},
+                        {'$nativeSection': 0}):
+            with self.subTest(context=context):
+                body = copy.deepcopy(self.body)
+                for unit in body['candidateGraph']['units']:
+                    for part in unit['parts']:
+                        part['readingContext']['nativeDocxSection'] = context
+                projection = self.publish(body)
+                self.assertEqual(body['candidateGraph'], projection['manifest']['candidateGraph'])
+                for chunk in projection['chunks']:
+                    for part in chunk['parts']:
+                        self.assertEqual(context, part['readingContext']['nativeDocxSection'])
         self.assertEqual([], self.encodes)
         self.assertEqual([], self.predictions)
 

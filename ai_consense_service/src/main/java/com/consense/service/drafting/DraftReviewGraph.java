@@ -167,12 +167,36 @@ public final class DraftReviewGraph {
         for(String key:Arrays.asList("id","type","role","options","parentId","questionZh","questionEn","fixedValue"))meaning.put(key,field.get(key));
         meaning.put("children",children);return DraftAdoption.hash(JsonUtils.write(meaning));
     }
+    /** Business definitions travel to inference; original anchors and edit coordinates stay in the bound graph. */
+    public static List<Map<String,Object>> extractionDefinitions(List<Map<String,Object>> fields) {
+        List<Map<String,Object>> result=new ArrayList<>();
+        for(Map<String,Object> field:fields) {
+            Map<String,Object> definition=new LinkedHashMap<>();
+            for(String key:Arrays.asList("id","parentId","nameZh","nameEn","questionZh","questionEn","type","role","options","fixedValue","optional","correction","relatedInputIds","semanticSourceQuote"))
+                if(field.containsKey(key))definition.put(key,field.get(key));
+            Map<String,Object> guidance=map(field.get("guidance"));
+            if(!guidance.isEmpty()){Map<String,Object> text=new LinkedHashMap<>();for(String key:Arrays.asList("zh","en"))if(guidance.containsKey(key))text.put(key,guidance.get(key));definition.put("guidance",text);}
+            List<Map<String,Object>> children=new ArrayList<>();for(Object child:list(field.get("children")))children.add(map(child));
+            definition.put("children",extractionDefinitions(children));result.add(definition);
+        }
+        return result;
+    }
+    public static List<List<Map<String,Object>>> extractionDefinitionBatches(List<Map<String,Object>> fields) {
+        List<List<Map<String,Object>>> batches=new ArrayList<>();List<Map<String,Object>> batch=new ArrayList<>();int chars=2;
+        for(Map<String,Object> field:extractionDefinitions(fields)) {
+            int size=JsonUtils.write(field).length()+1;
+            if(size+2>48000)throw new BizException(4007,"A complete field definition exceeds the extraction request budget; retain it for manual review.");
+            if(chars+size>48000){batches.add(batch);batch=new ArrayList<>();chars=2;}
+            batch.add(field);chars+=size;
+        }
+        if(!batch.isEmpty())batches.add(batch);return batches;
+    }
     public static Map<String,Object> catalog(Map<String,Object> graph) {
         List<Map<String,Object>> fields=new ArrayList<>(),system=new ArrayList<>();
         Context context=new Context(graph,Collections.emptyMap());
         for(Map<String,Object> field:fields(graph))fields.add(catalogField(field,context));
         for(Map<String,Object> node:nodes(graph))if(active(node)&&context.selected(text(node.get("id")))&&"derived".equals(role(node)))system.add(catalogField(withChildren(node,context),context));
-        return obj("ruleVersion","review-"+DraftAdoption.hash(JsonUtils.write(graph)),"groups",Collections.singletonList(obj("id","reviewed","label",label("已审核的项目问题","Reviewed project questions"),"fields",fields)),"systemFields",system);
+        return obj("ruleVersion","review-"+DraftAdoption.hash(JsonUtils.write(graph)),"groups",Collections.singletonList(obj("id","reviewed","label",label("本次图谱的项目问题","Project questions from this graph"),"fields",fields)),"systemFields",system);
     }
     private static Map<String,Object> catalogField(Map<String,Object> node,Context context) {
         List<Map<String,Object>> children=new ArrayList<>(),options=new ArrayList<>(),affects=new ArrayList<>();
@@ -214,9 +238,14 @@ public final class DraftReviewGraph {
         if(!keys.containsAll(actual.keySet()))throw invalid("GRAPH_UNKNOWN_DETAIL");return result;
     }
     public static Map<String,Object> plan(Map<String,Object> graph,Map<String,Object> adopted) {
-        validate(graph);Context context=new Context(graph,adopted);Map<String,Object> effective=new LinkedHashMap<>(),derived=new LinkedHashMap<>(),derivedItems=new LinkedHashMap<>();
+        return plan(graph,adopted,false);
+    }
+    public static Map<String,Object> plan(Map<String,Object> graph,Map<String,Object> adopted,boolean requireReviewedNodes) {
+        validate(graph);Context context=new Context(graph,adopted,requireReviewedNodes);Map<String,Object> effective=new LinkedHashMap<>(),derived=new LinkedHashMap<>(),derivedItems=new LinkedHashMap<>();
+        if(requireReviewedNodes)for(Map<String,Object> node:context.nodes.values())if(active(node)&&context.selected(text(node.get("id")))&&!context.reviewed(node))context.issue(text(node.get("id")),"NodeReviewRequired","此问题或规则尚未核对确认，相关修改保留原文。 / This question or rule is not reviewed; related source text is preserved.");
         for(Map<String,Object> field:fields(graph)) {
             String id=text(field.get("id"));Object value=adopted.get(id);
+            if(!context.reviewed(field)){context.answers.remove(id);continue;}
             if(value==null){if(!Boolean.TRUE.equals(field.get("optional")))context.issue(id,"InputMissing","请采用本项目答案；未知不等于否。 / Adopt a project answer; unknown is not No.");continue;}
             try{Object normalized=validateValue(field,value);context.answers.put(id,normalized);effective.put(id,normalized);}catch(BizException bad){context.answers.remove(id);context.issue(id,"InputInvalid",bad.getMessage());}
         }
@@ -247,7 +276,7 @@ public final class DraftReviewGraph {
                     applies=scopeResults!=null&&scopeResults.isEmpty()?Boolean.FALSE:rows==null?null:context.condition(branch,rows,new HashSet<>());
                     if(rows==null&&!(scopeResults!=null&&scopeResults.isEmpty()))context.issue(targetId,"ItemPlacementRequired","逐项编辑需要唯一项目身份及该项的原件定位。 / Each-item edits need one unique item identity and its exact source placement.");
                 } else applies=branch==null?Boolean.TRUE:context.condition(branch,rows,new HashSet<>());
-                if((!text(target.get("branchId")).isEmpty()&&branch==null)||Boolean.TRUE.equals(map(owner.get("correction")).get("needsRebind"))||Boolean.TRUE.equals(target.get("needsRebind")))applies=null;
+                if(!context.reviewed(owner)||(!text(target.get("branchId")).isEmpty()&&branch==null)||Boolean.TRUE.equals(map(owner.get("correction")).get("needsRebind"))||Boolean.TRUE.equals(target.get("needsRebind")))applies=null;
                 String action=Boolean.FALSE.equals(applies)?"not_adopted":applies==null?"pending":actionKind(target.get("action"));Object replacement=null;
                 if("keep".equals(action))action="retain";
                 if("check".equals(action)){action="pending";context.issue(targetId,"ManualCheck","请核对原文与本次处理范围。 / Review the source and proposed scope.");}
@@ -267,14 +296,38 @@ public final class DraftReviewGraph {
         }
         return obj("ruleVersion",catalog(graph).get("ruleVersion"),"inputValues",adopted,"effectiveValues",effective,"derived",derived,"derivedItems",derivedItems,"actions",actions,"unresolved",context.issues);
     }
+    public static void deferConflictingActions(Map<String,Object> plan) {
+        List<?> actions=list(plan.get("actions"));Set<Integer> conflicts=new LinkedHashSet<>();
+        for(int i=0;i<actions.size();i++)for(int j=i+1;j<actions.size();j++){
+            Map<String,Object> left=map(actions.get(i)),right=map(actions.get(j));
+            if(!Objects.equals(left.get("document"),right.get("document"))||"not_adopted".equals(left.get("action"))||"not_adopted".equals(right.get("action")))continue;
+            if(set("retain","pending").contains(text(left.get("action")))&&set("retain","pending").contains(text(right.get("action"))))continue;
+            for(Object a:list(map(left.get("nativeBinding")).get("spans")))for(Object b:list(map(right.get("nativeBinding")).get("spans"))){
+                Map<String,Object> first=map(a),second=map(b);
+                if(first.get("paragraphId")==null||!Objects.equals(first.get("paragraphId"),second.get("paragraphId")))continue;
+                if(!(first.get("start") instanceof Number)||!(first.get("end") instanceof Number)||!(second.get("start") instanceof Number)||!(second.get("end") instanceof Number))continue;
+                if(!Objects.equals(first.get("channel"),second.get("channel"))||DocxTemplateEditor.overlappingSpans(integer(first.get("start")),integer(first.get("end")),integer(second.get("start")),integer(second.get("end")))){conflicts.add(i);conflicts.add(j);}
+            }
+        }
+        List<Object> issues=new ArrayList<>(list(plan.get("unresolved")));
+        for(int index:conflicts){Map<String,Object> action=map(actions.get(index));action.put("action","pending");
+            String issueId="OverlappingEdits:"+text(action.get("id"));
+            if(issues.stream().noneMatch(raw->issueId.equals(map(raw).get("id"))))issues.add(obj("id",issueId,"kind","OverlappingEdits","inputKeys",Collections.singletonList(action.get("id")),"message",label("修改范围与另一项处理重叠，已保留原文；请在原文中核对并确定唯一处理方案。","This range overlaps another treatment and retains its source wording. Review the source and choose one consistent treatment.")));
+        }
+        plan.put("unresolved",issues);
+    }
     private static final class Context {
         final Map<String,Object> graph;final Map<String,Map<String,Object>> nodes=new LinkedHashMap<>();final Map<String,Object> answers=new LinkedHashMap<>();final List<Map<String,Object>> issues=new ArrayList<>();final Set<String> issueIds=new HashSet<>();
-        final Map<String,Set<String>> dependencies=new HashMap<>();final Map<String,String> editions=new HashMap<>();final Map<String,Boolean> selection=new HashMap<>();
+        final Map<String,Set<String>> dependencies=new HashMap<>();final Map<String,String> editions=new HashMap<>();final Map<String,Boolean> selection=new HashMap<>();final boolean requireReviewedNodes;
         Context(Map<String,Object> graph,Map<String,Object> adopted){
-            this.graph=graph;for(Map<String,Object> node:nodes(graph))nodes.put(text(node.get("id")),node);
+            this(graph,adopted,false);
+        }
+        Context(Map<String,Object> graph,Map<String,Object> adopted,boolean requireReviewedNodes){
+            this.graph=graph;this.requireReviewedNodes=requireReviewedNodes;for(Map<String,Object> node:nodes(graph))nodes.put(text(node.get("id")),node);
             for(Object raw:list(graph.get("sources"))){Map<String,Object> source=map(raw);if("SCC".equalsIgnoreCase(text(source.get("fileKey"))))for(String key:Arrays.asList("id","docId","editionId"))if(!text(source.get(key)).isEmpty())editions.put(text(source.get(key)),text(source.get("id")));}
             for(Map<String,Object> node:nodes.values()){Set<String> refs=new HashSet<>();for(Object raw:branches(node)){Map<String,Object> branch=map(raw);if(!text(branch.get("scopeId")).isEmpty())refs.add(text(branch.get("scopeId")));for(Object term:list(branch.get("clauses")))refs.add(text(map(term).get("inputId")));}for(Object raw:list(node.get("editTargets"))){Map<String,Object> target=map(raw);for(String key:Arrays.asList("valueSourceId","listId","itemKey"))if(!text(target.get(key)).isEmpty())refs.add(text(target.get(key)));}dependencies.put(text(node.get("id")),refs);}
         }
+        boolean reviewed(Map<String,Object> node){return !requireReviewedNodes||"confirmed".equals(text(node.get("status")));}
         boolean selected(String id){if(selection.containsKey(id))return selection.get(id);Set<String> found=new HashSet<>();collectReachableEditions(id,nodes,dependencies,editions,found,new HashSet<>());String selected=text(map(graph.get("selectedDocuments")).get("SCC"));selected=editions.getOrDefault(selected,selected);boolean result=found.isEmpty()||(found.size()==1&&found.contains(selected));selection.put(id,result);return result;}
         void issue(String id,String kind,String message){if(issueIds.add(kind+":"+id))issues.add(obj("id",kind+":"+id,"kind",kind,"inputKeys",Collections.singletonList(id),"message",label(message,message)));}
         String document(String sourceId) {
@@ -291,7 +344,7 @@ public final class DraftReviewGraph {
         Object value(String id,Map<String,Map<String,Object>> rows,Set<String> visiting) {
             if(!visiting.add(id)){issue(id,"GraphCycle","存在循环依赖。 / Cyclic dependency.");return null;}
             try {
-                Map<String,Object> node=nodes.get(id);if(node==null||!active(node)||!selected(id))return null;
+                Map<String,Object> node=nodes.get(id);if(node==null||!active(node)||!selected(id)||!reviewed(node))return null;
                 String parent=text(node.get("parentId"));
                 if(!parent.isEmpty()) {
                     Map<String,Object> row=rows.get(parent);
@@ -356,12 +409,15 @@ public final class DraftReviewGraph {
     private static String render(Object value){return value instanceof Map||value instanceof Collection?JsonUtils.write(value):text(value);}
 
     public static DocxEditResult compile(byte[] original,String fileKey,Map<String,Object> graph,Map<String,Object> plan,Map<String,String> bookmarks,NativeLayoutPlan layout) {
+        return compile(original,fileKey,graph,plan,bookmarks,layout,false);
+    }
+    public static DocxEditResult compile(byte[] original,String fileKey,Map<String,Object> graph,Map<String,Object> plan,Map<String,String> bookmarks,NativeLayoutPlan layout,boolean incompleteDraft) {
         DocxTemplateEditor editor=new DocxTemplateEditor();TemplateIndex index=editor.inspect(original);List<Edit> edits=new ArrayList<>();
         Map<String,List<int[]>> occupied=new HashMap<>();
         for(Object raw:list(plan.get("actions"))) {
             Map<String,Object> action=map(raw);if(!fileKey.equals(text(action.get("document"))))continue;
             String kind=text(action.get("action")),id=text(action.get("id"));if(set("retain","not_adopted").contains(kind))continue;
-            if("pending".equals(kind))throw invalid("GRAPH_ACTION_UNRESOLVED: "+id);
+            if("pending".equals(kind)){if(incompleteDraft)continue;throw invalid("GRAPH_ACTION_UNRESOLVED: "+id);}
             Map<String,Object> binding=map(action.get("nativeBinding"));
             if(!"bound".equals(text(binding.get("status")))||!index.getSourceSha256().equals(binding.get("sourceSha256")))throw invalid("GRAPH_SOURCE_BINDING_CHANGED: "+id);
             List<?> spans=list(binding.get("spans"));if(spans.isEmpty())throw invalid("GRAPH_EDIT_SPAN_REQUIRED: "+id);
@@ -375,6 +431,12 @@ public final class DraftReviewGraph {
                 Map<String,Object> span=map(spanRaw);Paragraph paragraph=index.paragraph(text(span.get("paragraphId")));
                 if(!paragraph.getSha256().equals(span.get("paragraphSha256")))throw invalid("GRAPH_PARAGRAPH_CHANGED: "+id);
                 int start=integer(span.get("start")),end=integer(span.get("end"));String expected=text(span.get("expectedText"));
+                if(incompleteDraft)for(Object otherRaw:list(plan.get("actions"))){
+                    Map<String,Object> other=map(otherRaw);if(!fileKey.equals(text(other.get("document")))||!"pending".equals(other.get("action")))continue;
+                    for(Object pendingRaw:list(map(other.get("nativeBinding")).get("spans"))){Map<String,Object> pending=map(pendingRaw);
+                        if(Objects.equals(span.get("paragraphId"),pending.get("paragraphId"))&&DocxTemplateEditor.overlappingSpans(start,end,integer(pending.get("start")),integer(pending.get("end"))))throw invalid("GRAPH_PENDING_EDIT_OVERLAP: "+id);
+                    }
+                }
                 if("insert".equals(kind)!= "insert".equals(text(span.get("operation")))||"insert".equals(kind)&&start!=end||!"insert".equals(kind)&&start==end)throw invalid("GRAPH_INSERTION_ACTION_MISMATCH: "+id);
                 for(int[] range:occupied.computeIfAbsent(paragraph.getId(),ignored->new ArrayList<>()))if(DocxTemplateEditor.overlappingSpans(start,end,range[0],range[1]))throw invalid("GRAPH_OVERLAPPING_EDITS: "+id);
                 occupied.get(paragraph.getId()).add(new int[]{start,end});

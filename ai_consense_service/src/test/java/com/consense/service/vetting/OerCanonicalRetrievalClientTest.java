@@ -29,6 +29,7 @@ class OerCanonicalRetrievalClientTest {
     private static final String KEY="test-canonical";
     private static final class Wire {
         final HttpSupport http=mock(HttpSupport.class);
+        final CanonicalEvidenceBackend backend=mock(CanonicalEvidenceBackend.class);
         final ConsenseProperties properties=VettingDualStructureHealthTest.expected();
         final CanonicalEvidenceProperties config=new CanonicalEvidenceProperties();
         final ObjectNode snapshot,index,response,health;
@@ -74,7 +75,7 @@ class OerCanonicalRetrievalClientTest {
             when(http.postJson(endsWith("/index-canonical"),anyString(),anyLong())).thenAnswer(call->JsonUtils.write(index));
             when(http.postJson(endsWith("/index-canonical/status"),anyString(),anyLong())).thenAnswer(call->{ObjectNode status=index.deepCopy();status.put("ready",true);status.put("readOnly",true);status.put("vectorPoints",status.path("indexed").asInt());status.put("indexStatusContract","read-only-existing-canonical-index-v1");return JsonUtils.write(status);});
             when(http.postJson(endsWith("/retrieve"),anyString(),anyLong())).thenAnswer(call->JsonUtils.write(response));
-            client=new OerCanonicalRetrievalClient(http,properties,config);
+            client=new OerCanonicalRetrievalClient(http,properties,config,backend);
         }
         void store(){binding.setSnapshotJson(JsonUtils.write(snapshot));binding.setSnapshotBytesSha256(VettingCorpus.hash(binding.getSnapshotJson()));}
         void index(){client.index(KEY,"vetting",Collections.singletonList(binding));}
@@ -769,7 +770,7 @@ class OerCanonicalRetrievalClientTest {
             com.consense.service.sources.CanonicalCurrentSourceReader reader=mock(com.consense.service.sources.CanonicalCurrentSourceReader.class);
             java.util.concurrent.atomic.AtomicBoolean finalHealthReturned=new java.util.concurrent.atomic.AtomicBoolean(),acceptedBeforeClose=new java.util.concurrent.atomic.AtomicBoolean();
             java.util.concurrent.atomic.AtomicInteger freshBindingReads=new java.util.concurrent.atomic.AtomicInteger(),healthCalls=new java.util.concurrent.atomic.AtomicInteger();
-            when(repository.findByProjectIdAndDocumentIdOrderByIdDesc(eq(KEY),eq(42L))).thenAnswer(call->{
+            when(repository.findByProjectIdAndDocumentIdOrderByIdDesc(eq(KEY),eq(42L),any(org.springframework.data.domain.Pageable.class))).thenAnswer(call->{
                 if(finalHealthReturned.get())freshBindingReads.incrementAndGet();return Collections.singletonList(w.binding);
             });
             when(repository.findByProjectIdAndDocumentIdAndProjectionSha256(eq(KEY),eq(42L),eq(w.binding.getProjectionSha256()))).thenAnswer(call->Optional.of(w.binding));
@@ -905,5 +906,86 @@ class OerCanonicalRetrievalClientTest {
     }
     @Test void familyCapabilityMissingCannotFallThroughNativePdfOrScannedAliases()throws Exception{
         Wire w=new Wire();OerCanonicalRetrievalClient client=familyClient(w);((ObjectNode)w.health.path("oer")).remove("nativePdfSourceFamily");assertThrows(RuntimeException.class,()->client.index(KEY,"vetting",Collections.singletonList(w.binding)));verify(w.http,never()).postJson(endsWith("/index-canonical"),anyString(),anyLong());
+    }
+    private ObjectNode demand(Wire wire,String operation){
+        ObjectNode demand=JsonUtils.mapper().createObjectNode();demand.put("operation",operation);demand.put("maxItems",64);demand.put("maxBytes",4194304);
+        if("ids".equals(operation))demand.putArray("originIds").add(wire.response.path("hits").get(0).path("id").asText());return demand;
+    }
+    private ObjectNode sourceReadFixture(Wire wire,String operation){
+        ((ObjectNode)wire.health.path("oer")).putObject("sourceRead").put("contract",OerCanonicalRetrievalClient.SOURCE_READ).put("endpoint","/sources/read");
+        ObjectNode result=JsonUtils.mapper().createObjectNode();result.put("contract",OerCanonicalRetrievalClient.SOURCE_READ);result.put("module","vetting");result.put("view","canonical_units");result.put("operation",operation);
+        result.putArray("projectionSha256").add(wire.binding.getProjectionSha256());result.set("sourceUnitPolicy",wire.response.path("sourceUnits").path("policy").deepCopy());result.put("sourceQualityVerified",false);
+        ObjectNode source=result.putArray("sources").addObject();source.put("projectionSha256",wire.binding.getProjectionSha256());source.put("documentId",String.valueOf(wire.binding.getDocumentId()));
+        source.put("originalSourceSha256",wire.binding.getOriginalSourceSha256());source.put("sourceHash",wire.binding.getCanonicalSourceHash());source.put("chunkCount",wire.snapshot.path("chunks").size());
+        ObjectNode scope=result.putObject("scopeIdentity");scope.put("module","vetting");scope.put("scopeSha256",VettingCorpus.hash("authored scope"));scope.set("sources",result.path("sources").deepCopy());scope.set("policyIdentity",wire.health.path("oer").path("scopePolicy").deepCopy());
+        scope.set("sourceUnitPolicy",result.path("sourceUnitPolicy").deepCopy());scope.put("softwareIdentitySha256",VettingCorpus.hash(JsonUtils.write(OerCanonicalSourceUnits.sorted(wire.health.path("retrieval").path("sourceWindows").path("algorithms")))));
+        ArrayNode ordered=JsonUtils.mapper().createArrayNode();wire.snapshot.path("chunks").forEach(chunk->ordered.add(chunk.path("id").asText()));scope.put("originOrderSha256",VettingCorpus.hash(JsonUtils.write(ordered)));sealReadScope(result);
+        ArrayNode origins=result.putArray("origins"),units=result.putArray("units");ObjectNode coverage=result.putObject("coverage");coverage.putArray("requestedOriginIds");
+        if("ids".equals(operation)){
+            JsonNode seed=wire.response.path("hits").get(0).path("payload");origins.add(seed.deepCopy());units.add(wire.response.path("sourceUnits").path("units").get(0).deepCopy());
+            coverage.withArray("requestedOriginIds").add(seed.path("id").asText());
+        }
+        coverage.set("returnedOriginIds",coverage.path("requestedOriginIds").deepCopy());coverage.put("returnedOrigins",origins.size());coverage.put("status","catalog".equals(operation)?"catalog":"complete");result.putNull("nextCursor");
+        when(wire.backend.sourceRead(anyString(),eq("vetting"),eq(4194304))).thenAnswer(call->JsonUtils.write(result));return result;
+    }
+    private static void sealReadScope(ObjectNode response){ObjectNode scope=(ObjectNode)response.path("scopeIdentity");scope.remove("scopeSha256");scope.put("scopeSha256",VettingCorpus.hash(JsonUtils.write(OerCanonicalSourceUnits.sorted(scope))));}
+    private ObjectNode scanFixture(Wire wire,int index){
+        ObjectNode result=sourceReadFixture(wire,"scan");JsonNode origin=wire.snapshot.path("chunks").get(index);result.withArray("origins").add(origin.deepCopy());
+        ObjectNode unit=result.withArray("units").addObject();unit.put("unitId",VettingCorpus.hash("AUTHORED unknown unit "+index));unit.putArray("originIds").add(origin.path("id").asText());unit.set("sourceIdentity",OerCanonicalSourceUnits.identity(origin));
+        unit.put("derivedMembersCanBecomeOrigins",false);unit.put("semanticScopeVerified",false);unit.put("qualifiersComplete","unknown");unit.put("status","unknown");unit.put("reason","AUTHORED unknown boundary");unit.putArray("members");unit.putArray("requiredMemberIds");
+        ObjectNode coverage=(ObjectNode)result.path("coverage");coverage.putArray("requestedOriginIds").add(origin.path("id").asText());coverage.putArray("returnedOriginIds").add(origin.path("id").asText());coverage.put("returnedOrigins",1);
+        int processed=index+1,total=wire.snapshot.path("chunks").size();coverage.put("totalOrigins",total);coverage.put("processedOrigins",processed);coverage.put("remainingOrigins",total-processed);coverage.put("status",processed==total?"complete":"partial");
+        if(processed<total)result.put("nextCursor",sourceCursor(result,processed));return result;
+    }
+    private String sourceCursor(ObjectNode response,int offset){ObjectNode cursor=JsonUtils.mapper().createObjectNode();cursor.set("scopeSha256",response.path("scopeIdentity").path("scopeSha256"));cursor.put("offset",offset);return Base64.getUrlEncoder().encodeToString(JsonUtils.write(cursor).getBytes(java.nio.charset.StandardCharsets.UTF_8))+"."+VettingCorpus.hash("AUTHORED signature TEST ONLY");}
+    @Test void sourceReadUsesTheCommonOerClosureWithoutIndexOrQueryInference()throws Exception{
+        Wire wire=new Wire();ObjectNode expected=sourceReadFixture(wire,"ids");JsonNode actual=wire.client.readSources("vetting",demand(wire,"ids"),Collections.singletonList(wire.binding));
+        assertEquals(expected,actual);ArgumentCaptor<String> request=ArgumentCaptor.forClass(String.class);verify(wire.backend).sourceRead(request.capture(),eq("vetting"),eq(4194304));
+        JsonNode sent=JsonUtils.parse(request.getValue());assertEquals(wire.binding.getProjectionSha256(),sent.path("projectionSha256").get(0).asText());
+        assertFalse(request.getValue().contains("candidateGraph"));assertFalse(request.getValue().contains("snapshotJson"));assertFalse(sent.has("chunks"));
+        verify(wire.http,never()).postJson(anyString(),anyString(),anyLong());
+        Wire catalog=new Wire();ObjectNode compact=sourceReadFixture(catalog,"catalog");assertEquals(compact,catalog.client.readSources("vetting",demand(catalog,"catalog"),Collections.singletonList(catalog.binding)));
+    }
+    @Test void sourceReadRejectsTamperedIdentityMemberTextOriginOrderAndQualityClaims()throws Exception{
+        for(String mutation:Arrays.asList("module","revision","member","origin","quality","duplicate","scope")){
+            Wire wire=new Wire();ObjectNode reply=sourceReadFixture(wire,"ids");
+            if("module".equals(mutation))reply.put("module","advisory");
+            if("revision".equals(mutation))((ObjectNode)reply.path("sources").get(0)).put("originalSourceSha256",VettingCorpus.hash("other original"));
+            if("member".equals(mutation))((ObjectNode)reply.path("units").get(0).path("members").get(0)).put("content","forged source");
+            if("origin".equals(mutation))((ObjectNode)reply.path("origins").get(0)).put("id","unselected-origin");
+            if("quality".equals(mutation))reply.put("sourceQualityVerified",true);
+            if("duplicate".equals(mutation))((ArrayNode)reply.path("units").get(0).path("requiredMemberIds")).add(reply.path("units").get(0).path("requiredMemberIds").get(0));
+            if("scope".equals(mutation))((ObjectNode)reply.path("scopeIdentity").path("policyIdentity")).put("manifestSha256",VettingCorpus.hash("other policy"));
+            assertThrows(IllegalStateException.class,()->wire.client.readSources("vetting",demand(wire,"ids"),Collections.singletonList(wire.binding)),mutation);
+        }
+    }
+    @Test void sourceReadRejectsInvalidDemandsBeforeTransportAndKeepsUnknownOriginalsUsable()throws Exception{
+        Wire invalid=new Wire();ObjectNode bad=demand(invalid,"ids");bad.put("maxBytes","4096");assertThrows(IllegalStateException.class,()->invalid.client.readSources("vetting",bad,Collections.singletonList(invalid.binding)));
+        bad.remove("maxBytes");bad.putArray("originIds").add("outside-scope");assertThrows(IllegalStateException.class,()->invalid.client.readSources("vetting",bad,Collections.singletonList(invalid.binding)));verifyNoInteractions(invalid.backend);
+        Wire wire=new Wire();ObjectNode reply=sourceReadFixture(wire,"ids"),unit=(ObjectNode)reply.path("units").get(0);unit.put("status","unknown");unit.put("reason","source boundary unresolved");unit.putArray("members");unit.putArray("requiredMemberIds");
+        JsonNode result=wire.client.readSources("vetting",demand(wire,"ids"),Collections.singletonList(wire.binding));assertEquals("unknown",result.path("units").get(0).path("status").asText());assertEquals(1,result.path("origins").size());
+        Wire drift=new Wire();ObjectNode unchanged=sourceReadFixture(drift,"ids");when(drift.backend.sourceRead(anyString(),anyString(),anyInt())).thenAnswer(call->{drift.binding.setRoutingSha256(VettingCorpus.hash("changed during read"));return JsonUtils.write(unchanged);});
+        assertThrows(IllegalStateException.class,()->drift.client.readSources("vetting",demand(drift,"ids"),Collections.singletonList(drift.binding)));
+    }
+    @Test void sourceReadBindsScopeSoftwareOrderAndCoverageInsteadOfAcceptingAFakeLastPage()throws Exception{
+        Wire first=new Wire();ObjectNode page=scanFixture(first,0);assertEquals(page,first.client.readSources("vetting",demand(first,"scan"),Collections.singletonList(first.binding)));
+        Wire next=new Wire();ObjectNode second=scanFixture(next,1),nextDemand=demand(next,"scan");nextDemand.put("cursor",sourceCursor(second,1));assertEquals(second,next.client.readSources("vetting",nextDemand,Collections.singletonList(next.binding)));
+        for(String mutation:Arrays.asList("skip","ledger","count","status","software","order","policy","scopeHash")){
+            Wire wire=new Wire();ObjectNode reply=scanFixture(wire,"skip".equals(mutation)?wire.snapshot.path("chunks").size()-1:0);
+            ObjectNode scope=(ObjectNode)reply.path("scopeIdentity"),coverage=(ObjectNode)reply.path("coverage");
+            if("ledger".equals(mutation))coverage.putArray("returnedOriginIds");if("count".equals(mutation))coverage.put("returnedOrigins",0);if("status".equals(mutation))coverage.put("status","complete");
+            if("software".equals(mutation))scope.put("softwareIdentitySha256",VettingCorpus.hash("another software"));if("order".equals(mutation))scope.put("originOrderSha256",VettingCorpus.hash("another order"));if("policy".equals(mutation))scope.put("sourceUnitPolicy","another policy");
+            sealReadScope(reply);if("scopeHash".equals(mutation))scope.put("scopeSha256",VettingCorpus.hash("forged scope"));
+            assertThrows(IllegalStateException.class,()->wire.client.readSources("vetting",demand(wire,"scan"),Collections.singletonList(wire.binding)),mutation);
+        }
+    }
+    @Test void sourceReadContextCannotPromoteUnknownsOrLeaveItsOriginSource()throws Exception{
+        for(String mutation:Arrays.asList("semantic","legal","origin","source")){
+            Wire wire=new Wire();ObjectNode reply=sourceReadFixture(wire,"ids"),unit=(ObjectNode)reply.path("units").get(0),context=unit.putObject("hierarchyContext");
+            context.set("seedObservedUnitId",unit.path("unitId"));context.set("sourceIdentity",unit.path("sourceIdentity").deepCopy());context.set("members",unit.path("members").deepCopy());context.set("requiredMemberIds",unit.path("requiredMemberIds").deepCopy());
+            context.put("status","complete_observed_hierarchy_context");context.put("derivedMembersCanBecomeOrigins",false);context.put("semanticScopeVerified",false);context.put("legalClosureVerified",false);context.put("qualifiersComplete","unknown");
+            if("semantic".equals(mutation))context.put("semanticScopeVerified",true);if("legal".equals(mutation))context.put("legalClosureVerified",true);if("origin".equals(mutation))context.put("seedObservedUnitId",VettingCorpus.hash("other origin"));if("source".equals(mutation))((ObjectNode)context.path("sourceIdentity")).put("documentId","other document");
+            assertThrows(IllegalStateException.class,()->wire.client.readSources("vetting",demand(wire,"ids"),Collections.singletonList(wire.binding)),mutation);
+        }
     }
 }

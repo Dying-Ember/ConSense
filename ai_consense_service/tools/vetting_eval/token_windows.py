@@ -169,9 +169,9 @@ def windows(parent, tokenizer, recipe, tokenizer_identity, *, query=None, embedd
                      'Aligned observed Parts must advance within the full model budget')
         fail(piece.strip(), "EMPTY_MODEL_WINDOW", "Window contains only whitespace")
         window_id = str(uuid.uuid5(NAMESPACE, digest(identity_base | {"startUtf16": utf16_length(text[:start_cp]), "endUtf16": utf16_length(text[:end_cp])})))
-        result.append({"id": window_id, "parentId": parent["id"], "parentContentSha256": text_sha(text),
-                       "parentStablePayloadSha256": stable_parent_payload_sha(parent), "content": piece,
-                       "operation": "rerank_pair" if query is not None else "embedding", "querySha256": text_sha(query) if query is not None else None,
+        result.append({"id": window_id, "parentId": parent["id"], "parentContentSha256": identity_base["parentContentSha256"],
+                       "parentStablePayloadSha256": result[0]["parentStablePayloadSha256"] if result else stable_parent_payload_sha(parent), "content": piece,
+                       "operation": "rerank_pair" if query is not None else "embedding", "querySha256": identity_base["querySha256"],
                        "windowContentSha256": text_sha(piece), "documentId": parent["documentId"], "sourceHash": parent["sourceHash"], "role": parent["role"],
                        "parentStartCodepoint": start_cp, "parentEndCodepoint": end_cp,
                        "parentStartUtf16": utf16_length(text[:start_cp]), "parentEndUtf16": utf16_length(text[:end_cp]),
@@ -201,12 +201,16 @@ def verify_window_coverage(parent, rows, max_tokens):
     fail(rows and len({r["id"] for r in rows}) == len(rows), "WINDOW_ID_COLLISION", "Windows require unique IDs")
     cursor = 0
     mapped,construction=paragraph_map(parent)
+    # Reuse hashes lazily so coverage and identity failures keep their priority.
+    parent_content_sha = parent_payload_sha = None
     for row in sorted(rows, key=lambda r: r["parentStartCodepoint"]):
         a, b = row["parentStartCodepoint"], row["parentEndCodepoint"]
         fail(0 <= a < b <= len(parent["content"]) and a <= cursor, "WINDOW_COVERAGE_GAP", "Window coverage has a source gap")
-        fail(row["parentId"] == parent["id"] and row["parentContentSha256"] == text_sha(parent["content"]), "WINDOW_PARENT_MISMATCH", "Window belongs to another parent")
+        fail(row["parentId"] == parent["id"] and row["parentContentSha256"] == (text_sha(parent["content"]) if parent_content_sha is None else parent_content_sha), "WINDOW_PARENT_MISMATCH", "Window belongs to another parent")
+        parent_content_sha = row["parentContentSha256"]
         fail(row.get('sourceHash')==parent['sourceHash'] and row.get('role')==parent['role'] and row.get('documentId')==parent['documentId']
-             and row.get('parentStablePayloadSha256')==stable_parent_payload_sha(parent), 'WINDOW_SOURCE_PAYLOAD_MISMATCH', 'Window source/role/native payload differs from parent')
+             and row.get('parentStablePayloadSha256')==(stable_parent_payload_sha(parent) if parent_payload_sha is None else parent_payload_sha), 'WINDOW_SOURCE_PAYLOAD_MISMATCH', 'Window source/role/native payload differs from parent')
+        parent_payload_sha = row['parentStablePayloadSha256']
         fail(row["content"] == parent["content"][a:b] and row["windowContentSha256"] == text_sha(row["content"]), "WINDOW_TEXT_MISMATCH", "Window text differs from original parent span")
         fail(row["parentStartUtf16"] == utf16_length(parent["content"][:a]) and row["parentEndUtf16"] == utf16_length(parent["content"][:b]), "WINDOW_UTF16_MISMATCH", "Window UTF16 span is incorrect")
         fail(row.get('sourceSpans')==source_spans(a,b,mapped) and row.get('parentConstruction')==construction,

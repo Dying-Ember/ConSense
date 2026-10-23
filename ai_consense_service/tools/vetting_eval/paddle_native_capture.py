@@ -9,6 +9,22 @@ from pathlib import Path
 from collections.abc import Mapping
 
 MAX_NATIVE_ARRAY_BYTES = 512 * 1024 * 1024
+LOCAL_CAS_TRANSPORT = 'consense.paddle-native-cas-assets.v1'
+FAILED_INLINE_TRANSPORT = 'consense.paddle-native-failed-inline-assets.v1'
+
+
+def native_asset_root(transport):
+    """Resolve only operator configuration; a response never selects a CAS root."""
+    if transport is None:
+        return None
+    if (not isinstance(transport, dict) or set(transport) != {'schema', 'artifactRoot'}
+            or transport.get('schema') != LOCAL_CAS_TRANSPORT
+            or not isinstance(transport.get('artifactRoot'), str)):
+        raise ValueError('Explicit native local CAS transport configuration required')
+    root = Path(transport['artifactRoot'])
+    if not root.is_absolute() or not root.is_dir():
+        raise ValueError('Native local CAS root must be an existing absolute directory')
+    return root.resolve()
 
 
 class NativePaddleCaptureError(RuntimeError):

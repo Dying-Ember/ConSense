@@ -51,7 +51,7 @@ const selectedBinding = computed(() => activeBundle.value?.bindings.find(binding
 const originalLocationAbsent = computed(() => view.value === 'source' && !!activeBundle.value && !selectedBinding.value && explicitBinding.value?.bindingId === selectedBindingId.value && explicitBinding.value.sourceSha256 === activeBundle.value.sourceSha256 && !explicitBinding.value.hasSource && (!selectedFieldKey.value || explicitBinding.value.fieldKeys.includes(selectedFieldKey.value)))
 const targetFields = computed(() => selectedBinding.value?.fieldKeys.flatMap(key => props.fields.filter(field => field.key === key)) ?? [])
 const otherFiles = computed(() => [...new Set(selectedField.value?.affects?.map(target => target.document) ?? [])].filter(file => file !== props.fileKey))
-const savedChangeBindings = computed(() => view.value === 'result' ? activeBundle.value?.bindings.filter(binding => binding.documentEditStatus === 'applied' || ['body_edited', 'body_added', 'generated_added'].includes(binding.applicationStatus)) ?? [] : [])
+const savedChangeBindings = computed(() => view.value === 'result' ? activeBundle.value?.bindings.filter(binding => binding.applicationStatus !== 'delivery_notice' && (binding.documentEditStatus === 'applied' || ['body_edited', 'body_added', 'generated_added'].includes(binding.applicationStatus))) ?? [] : [])
 const markerLocations = computed(() => {
   const binding = selectedBinding.value
   if (activeBundle.value?.geometryStatus !== 'ready' || !binding) return []
@@ -88,6 +88,7 @@ function rangeUnavailable(id: string) { if (!unavailableRanges.value.includes(id
 function rangeAvailable(id: string) { unavailableRanges.value = unavailableRanges.value.filter(item => item !== id) }
 function ordinal(binding: DraftDocumentBinding) { return view.value === 'source' ? binding.sourceParagraphOrdinal : binding.resultParagraphOrdinal ?? binding.sourceParagraphOrdinal }
 function applicationWord(binding: DraftDocumentBinding): DraftWord {
+  if (binding.applicationStatus === 'delivery_notice') return 'deliveryNoticeTarget'
   if (binding.applicationStatus === 'applied') return binding.appliedActionIds?.length ? 'appliedTarget' : 'documentOperationApplied'
   return ({ unapplied: 'unappliedTarget', unchanged: 'unchangedTarget', body_edited: 'bodyEditedTarget', body_added: 'bodyAddedTarget', generated_added: 'generatedAddedTarget' } as const)[binding.applicationStatus]
 }

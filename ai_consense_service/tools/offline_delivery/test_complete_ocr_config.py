@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+import sys
 
 from complete_ocr_config import prepare_complete_ocr
 
@@ -50,6 +51,35 @@ class CompleteOcrConfigTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'absolute executable'):
             self.prepare()
         self.assertFalse((self.root / 'prepared').exists())
+
+    def test_local_cas_transport_is_explicit_pinned_and_reported_in_generated_plan(self):
+        provider = self.config['paddleocr-vl']
+        model = self.root/'authored-model.bin'; model.write_bytes(b'authored small identity fixture')
+        executable = Path(sys.executable).resolve()
+        provider['identity']['models'][0]['assetPaths'] = [str(model)]
+        provider['ownedBoot'] = {'command': [str(executable)], 'cwd': str(self.root), 'env': {},
+            'precision': 'bf16', 'readyPath': '/', 'readyTimeoutSeconds': 5, 'cleanupTimeoutSeconds': 2,
+            'runtimeAssets': [{'path': str(path), 'byteCount': path.stat().st_size,
+                'sha256': hashlib.sha256(path.read_bytes()).hexdigest(), 'kind': kind}
+                for path, kind in ((executable, 'executable'), (model, 'model'))]}
+        provider['nativeCaptureTransport'] = {'schema': 'consense.paddle-native-cas-assets.v1',
+                                              'artifactRoot': str(self.root)}
+        receipt = self.prepare()
+        self.assertEqual(receipt['providers']['paddleocr-vl']['nativeCaptureTransport'], provider['nativeCaptureTransport'])
+        emitted = (self.root/'prepared/complete-ocr.json').read_bytes()
+        self.assertEqual(json.loads(emitted)['paddleocr-vl']['nativeCaptureTransport'], provider['nativeCaptureTransport'])
+        self.assertEqual(receipt['configSha256'], hashlib.sha256(emitted).hexdigest())
+
+    def test_cas_transport_unknown_root_mode_or_remote_provider_is_rejected_before_emission(self):
+        provider = self.config['paddleocr-vl']
+        provider['nativeCaptureTransport'] = {'schema': 'consense.paddle-native-cas-assets.v1', 'artifactRoot': str(self.root)}
+        for change in ({'nativeCaptureTransport': {'schema': 'unknown', 'artifactRoot': str(self.root)}},
+                       {'nativeCaptureTransport': {'schema': 'consense.paddle-native-cas-assets.v1', 'artifactRoot': 'relative'}},
+                       {'baseUrl': 'http://192.0.2.1:19101'}, {'ownedBoot': None}):
+            original = dict(provider); provider.update(change)
+            with self.subTest(change=change), self.assertRaises(ValueError): self.prepare()
+            self.assertFalse((self.root/'prepared').exists())
+            provider.clear(); provider.update(original)
 
 
 if __name__ == '__main__':

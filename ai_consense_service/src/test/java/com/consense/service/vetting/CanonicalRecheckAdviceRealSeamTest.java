@@ -42,7 +42,7 @@ import static org.mockito.Mockito.*;
  * local fake registry/retrieval HTTP; all neural consumers are explicit doubles. No online services. */
 @SpringBootTest(properties={"spring.jpa.hibernate.ddl-auto=create-drop","spring.flyway.enabled=false",
         "spring.jpa.show-sql=false","consense.ocr.enabled=false","consense.vector.provider=memory",
-        "consense.llm.chat-model=synthetic-recheck-chat","consense.llm.structured-thinking=false",
+        "consense.llm.enabled=true","consense.llm.chat-model=synthetic-recheck-chat","consense.llm.structured-thinking=false",
         "consense.llm.num-ctx=524288","logging.level.org.hibernate.SQL=OFF"})
 @ActiveProfiles("h2")
 class CanonicalRecheckAdviceRealSeamTest {
@@ -204,6 +204,15 @@ class CanonicalRecheckAdviceRealSeamTest {
         CanonicalSourceBinding normal=bindings.findByProjectIdAndDocumentIdOrderByIdDesc(PROJECT,43L).get(0);
         assertNull(normal.getAdoptionManifestSha256());assertNull(normal.getReviewReferenceSha256());assertNull(normal.getFamilyCompositionSha256());assertNull(normal.getFamilyComponentSetSha256());
         assertEquals("normal_observed",JsonUtils.parse(normal.getSnapshotJson()).path("producerKind").asText());
+        CanonicalEvidenceService.VerifiedBindingFrame normalFrame=evidence.verifiedBindings(PROJECT,"advisory",Arrays.asList(42L,43L));
+        try(CanonicalEvidenceService.VerifiedBindingFrame held=normalFrame){
+            assertNull(held.normalSnapshot(42L,snapshots.get(42L).path("projectionSha256").asText(),"advisory"));
+            ObjectNode detached=(ObjectNode)held.normalSnapshot(43L,normal.getProjectionSha256(),"advisory");String before=JsonUtils.write(detached);
+            detached.put("humanConfirmed",true);((ArrayNode)detached.path("chunks")).removeAll();
+            assertEquals(before,JsonUtils.write(held.normalSnapshot(43L,normal.getProjectionSha256(),"advisory")));
+            assertEquals(before,JsonUtils.write(held.snapshot(43L,normal.getProjectionSha256(),"advisory")));
+        }
+        assertThrows(RuntimeException.class,()->normalFrame.normalSnapshot(43L,normal.getProjectionSha256(),"advisory"));
         assertEquals(2,evidence.currentBindings(PROJECT,"advisory",Arrays.asList(42L,43L)).size());
         com.consense.web.dto.CanonicalEvidenceDtos.EvidencePointer pointer=evidence.pointers(PROJECT,43L,normal.getProjectionSha256(),"advisory").get(0);
         assertEquals("normal_observed_unit",pointer.getAddressKind());assertTrue(pointer.getPhysicalPages().isEmpty());assertFalse(pointer.isHumanConfirmed());assertEquals("normal:body:0",pointer.getParts().get(0).path("blockId").asText());
@@ -363,6 +372,7 @@ class CanonicalRecheckAdviceRealSeamTest {
     @Test void frameReturnsDetachedBindingsSnapshotsAndPointersAndPerformsFreshClose(){
         String projection=snapshots.get(42L).path("projectionSha256").asText();CanonicalEvidenceService.VerifiedBindingFrame frame=evidence.verifiedBindings(PROJECT,"advisory",Arrays.asList(42L,43L));
         evidence.assertFrameOwner(frame,PROJECT,"advisory");String before=JsonUtils.write(frame.snapshot(42L,projection,"advisory"));
+        assertNull(frame.normalSnapshot(42L,projection,"advisory"));
         assertThrows(UnsupportedOperationException.class,()->frame.bindings().clear());frame.bindings().get(0).setOriginalSourceSha256(repeat('f'));
         ((ObjectNode)frame.snapshot(42L,projection,"advisory")).put("humanConfirmed",true);
         String pointerBefore=JsonUtils.write(frame.pointers(42L,projection,"advisory"));com.consense.web.dto.CanonicalEvidenceDtos.EvidencePointer pointer=frame.pointers(42L,projection,"advisory").get(0);
@@ -370,7 +380,7 @@ class CanonicalRecheckAdviceRealSeamTest {
         assertEquals(before,JsonUtils.write(frame.snapshot(42L,projection,"advisory")));assertEquals(pointerBefore,JsonUtils.write(frame.pointers(42L,projection,"advisory")));
         assertEquals(snapshots.get(42L).path("source").path("sourceSha256").asText(),frame.bindings().get(0).getOriginalSourceSha256());
         assertEquals(2,snapshotReads.get());frame.close();assertEquals(4,snapshotReads.get());frame.close();assertEquals(4,snapshotReads.get());
-        assertThrows(RuntimeException.class,frame::bindings);assertThrows(RuntimeException.class,()->frame.snapshot(42L,projection,"advisory"));assertEquals(0,history.count());
+        assertThrows(RuntimeException.class,frame::bindings);assertThrows(RuntimeException.class,()->frame.snapshot(42L,projection,"advisory"));assertThrows(RuntimeException.class,()->frame.normalSnapshot(42L,projection,"advisory"));assertEquals(0,history.count());
     }
     @ParameterizedTest @MethodSource("sourceMutations") void frameCloseRefusesActualSourceCasAndCommittedBindingDriftAndAlwaysClears(Long id,String kind){
         CanonicalEvidenceService.VerifiedBindingFrame frame=evidence.verifiedBindings(PROJECT,"advisory",Arrays.asList(42L,43L));mutate(id,kind);
@@ -379,8 +389,9 @@ class CanonicalRecheckAdviceRealSeamTest {
     @Test void frameRejectsWrongThreadProjectModuleProjectionDocumentAndServiceOwner()throws Exception{
         CanonicalEvidenceService.VerifiedBindingFrame frame=evidence.verifiedBindings(PROJECT,"advisory",Arrays.asList(42L,43L));String projection=snapshots.get(42L).path("projectionSha256").asText();
         ExecutorService other=Executors.newSingleThreadExecutor();try{Future<Boolean> future=other.submit(()->{
-            assertThrows(RuntimeException.class,frame::bindings);assertThrows(RuntimeException.class,frame::close);assertThrows(RuntimeException.class,frame::revalidate);return true;});assertTrue(future.get(10,TimeUnit.SECONDS));}finally{other.shutdownNow();}
+            assertThrows(RuntimeException.class,frame::bindings);assertThrows(RuntimeException.class,frame::close);assertThrows(RuntimeException.class,frame::revalidate);assertThrows(RuntimeException.class,()->frame.normalSnapshot(42L,projection,"advisory"));return true;});assertTrue(future.get(10,TimeUnit.SECONDS));}finally{other.shutdownNow();}
         assertThrows(RuntimeException.class,()->frame.snapshot(42L,projection,"vetting"));assertThrows(RuntimeException.class,()->frame.snapshot(42L,repeat('b'),"advisory"));
+        assertThrows(RuntimeException.class,()->frame.normalSnapshot(42L,projection,"vetting"));assertThrows(RuntimeException.class,()->frame.normalSnapshot(42L,repeat('b'),"advisory"));assertThrows(RuntimeException.class,()->frame.normalSnapshot(999L,projection,"advisory"));
         assertThrows(RuntimeException.class,()->frame.snapshot(999L,projection,"advisory"));assertThrows(RuntimeException.class,()->evidence.assertFrameOwner(frame,"another","advisory"));
         CanonicalEvidenceService another=new CanonicalEvidenceService(documents,bindings,new CanonicalEvidenceBackend(canonicalProps),props);
         assertThrows(RuntimeException.class,()->another.assertFrameOwner(frame,PROJECT,"advisory"));frame.close();assertEquals(4,snapshotReads.get());assertEquals(0,history.count());
@@ -438,7 +449,7 @@ class CanonicalRecheckAdviceRealSeamTest {
         oer.put("inputContract",INPUT);oer.put("assetReturnContract","source-and-projection-bound-content-addressed-assets-v1");oer.put("recipe","scope-bound-dual2048-cuda-fp32-no-fixed-cache-v1");
         oer.put("targetModule","advisory");oer.put("sourceQualityVerifiedByHealth",false);oer.put("parserCandidatesAcceptedByRetrieval",false);oer.put("canonicalProjectionEndpoint","/project");oer.set("scopePolicy",scope);
         oer.put("indexStatusContract","read-only-existing-canonical-index-v1");
-        oer.set("normalObserved",JsonUtils.parse(new String(getClass().getResourceAsStream("/canonical/normal-observed/authored-health.json").readAllBytes(),StandardCharsets.UTF_8)).path("oer").path("normalObserved"));
+        oer.set("normalObserved",JsonUtils.parse(new String(getClass().getResourceAsStream("/canonical/normal-observed/authored-current-v3-capability.json").readAllBytes(),StandardCharsets.UTF_8)).path("oer").path("normalObserved"));
         oer.set("nativeCanonical",NativeCanonicalFixture.capability());oer.set("nativePdfCanonical",NativePdfCanonicalFixture.capability());
         ObjectNode windows=(ObjectNode)h.path("retrieval").path("sourceWindows");windows.set("competitionScope",scope.deepCopy());windows.put("oerInputContract",INPUT);windows.put("oerTargetModule","advisory");
         ObjectNode algorithms=(ObjectNode)windows.path("algorithms");
@@ -450,7 +461,8 @@ class CanonicalRecheckAdviceRealSeamTest {
     String produceNormal(JsonNode request)throws Exception{
         Path directory=Files.createTempDirectory(temporary,"normal-producer-"),input=directory.resolve("request.json"),output=directory.resolve("projection.json"),script=directory.resolve("produce.py");
         Files.write(input,JsonUtils.write(request).getBytes(StandardCharsets.UTF_8));Files.copy(getClass().getResourceAsStream("/canonical/normal-observed/produce.py"),script);
-        Path tools=Paths.get(System.getProperty("consense.test.wireFixture")).getParent();
+        String configuredTools=System.getProperty("consense.test.oerTools");
+        Path tools=configuredTools==null?Paths.get(System.getProperty("consense.test.wireFixture")).getParent():Paths.get(configuredTools);
         Process process=new ProcessBuilder(System.getProperty("consense.test.python"),script.toString(),tools.toString(),input.toString(),directory.resolve("cas").toString(),output.toString()).redirectErrorStream(true).redirectOutput(directory.resolve("producer.log").toFile()).start();
         if(!process.waitFor(20,TimeUnit.SECONDS)){process.destroyForcibly();throw new IOException("Authored offline normal producer timed out");}
         if(process.exitValue()!=0)throw new IOException("Authored offline normal producer failed: "+Files.readString(directory.resolve("producer.log")));

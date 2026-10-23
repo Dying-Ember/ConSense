@@ -113,9 +113,14 @@ public class DraftReviewSources {
         if(observationId.isEmpty())return pending("missing",sha,"SOURCE_OBSERVATION_ID_REQUIRED");
         for(String kind:Arrays.asList("guidanceNotes","markerCandidates","groups"))for(JsonNode candidate:evidence.path(kind))if(observationId.equals(candidate.path("id").asText())){if(original!=null)return pending("unsafe",sha,"AMBIGUOUS_SOURCE_OBSERVATION");original=candidate;}
         if(original==null||!original.equals(passage.path("sourceObservation")))return pending("unsafe",sha,"SOURCE_OBSERVATION_OBJECT_CHANGED");
-        JsonNode ranges=passage.path("observedRanges");if(!ranges.isArray()||ranges.isEmpty())return pending("missing",sha,"SOURCE_OBSERVATION_RANGES_REQUIRED");
-        if(!ranges.equals(original.path("memberRanges")))return pending("unsafe",sha,"SOURCE_OBSERVATION_SCOPE_CHANGED");
-        if(!original.path("text").isTextual()||!original.path("text").equals(passage.path("text")))return pending("unsafe",sha,"SOURCE_OBSERVATION_QUOTE_MISMATCH");
+        boolean marker=original.path("localSentenceObservation").isObject()&&original.path("memberId").isTextual();
+        JsonNode expectedRanges=observationRanges(original),ranges=passage.path("observedRanges");
+        // Legacy marker anchors omitted ranges; recover only from the identical saved observation.
+        if(marker&&(ranges.isMissingNode()||ranges.isNull()||ranges.isArray()&&ranges.isEmpty()))ranges=expectedRanges;
+        if(!ranges.isArray()||ranges.isEmpty())return pending("missing",sha,"SOURCE_OBSERVATION_RANGES_REQUIRED");
+        if(!ranges.equals(expectedRanges))return pending("unsafe",sha,"SOURCE_OBSERVATION_SCOPE_CHANGED");
+        JsonNode quoteObservation=marker?original.path("localSentenceObservation"):original;
+        if(!quoteObservation.path("text").isTextual()||!quoteObservation.path("text").equals(passage.path("text")))return pending("unsafe",sha,"SOURCE_OBSERVATION_QUOTE_MISMATCH");
         StringJoiner selected=new StringJoiner("\n");
         for(JsonNode range:ranges) {
             JsonNode member=null;for(JsonNode candidate:evidence.path("sourceMembers"))if(range.path("memberId").asText().equals(candidate.path("id").asText())){if(member!=null)return pending("unsafe",sha,"AMBIGUOUS_SOURCE_MEMBER");member=candidate;}
@@ -133,13 +138,23 @@ public class DraftReviewSources {
             JsonNode value=member.path(channel.startsWith("preNormalizedTextObservation.")?"preNormalizedTextObservation":"textObservation").path(name);
             if(!value.isTextual()||!range.path("start").isIntegralNumber()||!range.path("end").isIntegralNumber()||!range.path("start").canConvertToInt()||!range.path("end").canConvertToInt())return pending("unsafe",sha,"INVALID_SOURCE_OBSERVATION_RANGE");
             String text=value.asText();int start=range.path("start").asInt(),end=range.path("end").asInt();
-            if(start<0||end<=start||end>text.length())return pending("unsafe",sha,"SOURCE_OBSERVATION_RANGE_MISMATCH");
+            // Saved guidance includes empty paragraphs; their verified 0–0 ranges preserve separators, not edit authority.
+            if(start<0||end<start||end>text.length()||end==start&&!text.isEmpty())return pending("unsafe",sha,"SOURCE_OBSERVATION_RANGE_MISMATCH");
             for(int offset:new int[]{start,end})if(offset>0&&offset<text.length()&&Character.isHighSurrogate(text.charAt(offset-1))&&Character.isLowSurrogate(text.charAt(offset)))return pending("unsafe",sha,"INVALID_UTF16_BOUNDARY");
             String quote=text.substring(start,end);if(range.has("observedText")&&!quote.equals(range.path("observedText").asText()))return pending("unsafe",sha,"SOURCE_OBSERVATION_TEXT_MISMATCH");selected.add(quote);
         }
         if(!passage.path("text").isTextual()||!passage.path("text").asText().equals(selected.toString()))return pending("unsafe",sha,"SOURCE_OBSERVATION_QUOTE_MISMATCH");
         ObjectNode result=object().put("status","bound").put("kind","named_saved_source_observation").put("sourceSha256",sha).put("sourceObservationId",observationId).put("editableAuthority",false);result.set("observedRanges",ranges.deepCopy());
         for(String key:Arrays.asList("analysisRevision","analysisInputSha256","analysisSha256"))result.set(key,passage.path(key).deepCopy());return result;
+    }
+
+    static JsonNode observationRanges(JsonNode observation) {
+        if(observation.path("memberRanges").isArray())return observation.path("memberRanges");
+        JsonNode context=observation.path("localSentenceObservation");
+        if(!observation.path("memberId").isTextual()||!context.isObject())return observation.path("memberRanges");
+        ObjectNode range=object();range.set("memberId",observation.path("memberId"));range.set("channel",observation.path("channel"));
+        range.set("start",context.path("start"));range.set("end",context.path("end"));
+        return JsonUtils.mapper().createArrayNode().add(range);
     }
 
     /** Exact editableText spans only. Unbound legacy page selections remain reviewable. */

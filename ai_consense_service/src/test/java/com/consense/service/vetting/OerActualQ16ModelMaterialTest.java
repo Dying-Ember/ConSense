@@ -59,8 +59,8 @@ class OerActualQ16ModelMaterialTest {
         String hitsBefore=JsonUtils.write(hits);int members=0,pdfs=0;List<EvidencePointer> pointers=new ArrayList<>();
         for(VectorStore.SearchHit h:hits){List<EvidencePointer> ps=JsonUtils.readList(JsonUtils.write(h.getPayload().get("canonicalEvidence")),EvidencePointer.class);pointers.addAll(ps);members+=ps.size();pdfs+=ps.stream().filter(p->"native_pdf".equals(p.getProducerKind())).count();}
         assertEquals(109,members);assertEquals(87,pdfs);
-        AdviceService advice=mock(AdviceService.class,CALLS_REAL_METHODS);Method render=AdviceService.class.getDeclaredMethod("renderExcerpts",List.class);render.setAccessible(true);
-        String prompt=(String)render.invoke(advice,hits);Files.write(ROOT.resolve("actual-q16-advice-excerpts.txt"),prompt.getBytes(StandardCharsets.UTF_8));
+        AdviceService advice=mock(AdviceService.class,CALLS_REAL_METHODS);Method render=AdviceService.class.getDeclaredMethod("renderExcerpts",List.class,OerModelMaterial.Request.class);render.setAccessible(true);
+        String prompt=(String)render.invoke(advice,hits,new OerModelMaterial.Request(Collections.emptyList()));Files.write(ROOT.resolve("actual-q16-advice-excerpts.txt"),prompt.getBytes(StandardCharsets.UTF_8));
         JsonNode stats=JsonUtils.mapper().createObjectNode().put("actualQ16RankedHits",hits.size()).put("actualPointerOccurrences",members).put("nativePdfPointerOccurrences",pdfs).put("excerptsJavaChars",prompt.length()).put("excerptsUtf8Bytes",prompt.getBytes(StandardCharsets.UTF_8).length).put("tokenCountObserved",false);
         Files.write(ROOT.resolve("actual-q16-model-material-metrics.json"),JsonUtils.write(stats).getBytes(StandardCharsets.UTF_8));
         assertEquals(immutable,JsonUtils.write(session.chunks()));assertEquals(hitsBefore,JsonUtils.write(hits));
@@ -76,14 +76,31 @@ class OerActualQ16ModelMaterialTest {
         // Complete-pointer serialization can change opaque addresses; only their bijection may differ.
         JsonNode frozenMaterial=normalizedFrozen.path("materialDictionary"),currentMaterial=envelope.path("materialDictionary");
         assertTrue(frozenMaterial.isArray());assertTrue(currentMaterial.isArray());assertEquals(57,frozenMaterial.size());assertEquals(57,currentMaterial.size());
+        Map<String,JsonNode> sourceChunks=new LinkedHashMap<>();
+        for(JsonNode snapshot:Arrays.asList(gcc,scc))for(JsonNode chunk:snapshot.path("chunks"))assertNull(sourceChunks.put(chunk.path("id").asText(),chunk));
+        int relationIndexes=0,reviewActors=0;
         Map<String,String> aliases=new LinkedHashMap<>();Set<String> currentAddresses=new HashSet<>();
         for(int i=0;i<frozenMaterial.size();i++){
+            JsonNode source=sourceChunks.get(frozenMaterial.get(i).path("canonicalChunkId").asText());assertNotNull(source,"Frozen material must resolve in the SHA-pinned source snapshots");
+            JsonNode rawRelations=source.path("relations"),frozenRelations=frozenMaterial.get(i).path("relations"),currentRelations=currentMaterial.get(i).path("relations");
+            assertTrue(rawRelations.isArray());assertEquals(rawRelations.size(),frozenRelations.size());assertEquals(rawRelations.size(),currentRelations.size());
+            // The frozen presentation predates a5f6a299; migrate only its two source-backed relation declarations.
+            for(int j=0;j<rawRelations.size();j++)for(String key:Arrays.asList("referenceRelationIndex","reviewActor")){
+                JsonNode raw=rawRelations.get(j),actual=currentRelations.get(j);assertEquals(raw.has(key),actual.has(key),"Relation declaration presence must match the pinned source: "+key);
+                if(raw.has(key)){
+                    assertFalse(frozenRelations.get(j).has(key),"Frozen fixture must retain its pre-a5f6a299 relation schema");
+                    assertEquals(JsonUtils.write(raw.get(key)),JsonUtils.write(actual.get(key)),"Relation declaration must match the pinned source: "+key);
+                    ((ObjectNode)frozenRelations.get(j)).set(key,raw.get(key).deepCopy());
+                    if("referenceRelationIndex".equals(key))relationIndexes++;else reviewActors++;
+                }
+            }
             JsonNode before=frozenMaterial.get(i).path("modelUnitAddress"),after=currentMaterial.get(i).path("modelUnitAddress");
             assertTrue(before.isTextual());assertTrue(after.isTextual());
             assertTrue(before.asText().matches("model-unit:[0-9a-f]{64}"));assertTrue(after.asText().matches("model-unit:[0-9a-f]{64}"));
             assertNull(aliases.put(before.asText(),after.asText()),"Frozen model addresses must be unique");assertTrue(currentAddresses.add(after.asText()),"Current model addresses must be unique");
             ((ObjectNode)frozenMaterial.get(i)).put("modelUnitAddress",after.asText());
         }
+        assertEquals(176,relationIndexes);assertEquals(132,reviewActors);
         JsonNode frozenMembership=normalizedFrozen.path("hitMembership"),currentMembership=envelope.path("hitMembership");
         assertTrue(frozenMembership.isArray());assertTrue(currentMembership.isArray());assertEquals(10,frozenMembership.size());assertEquals(10,currentMembership.size());
         int normalizedRefs=0;

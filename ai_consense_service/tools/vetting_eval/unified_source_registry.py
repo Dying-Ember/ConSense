@@ -429,7 +429,8 @@ class UnifiedCanonicalSourceRegistry(NativeCollectionSourceRegistry):
             # Always perform the original strict bounded wire read, including
             # the current address and exact bytes. Only the expensive already
             # verified reconstruction is reused within this fresh frame.
-            wire = self._wire(address)
+            with self._capture_file_dependencies() as root_files:
+                wire = self._wire(address)
             policy_bound = source_family_candidate(wire) or normal_observed_candidate(wire)
             family_context = self._pin_family_context(frame) if policy_bound else b''
             if address not in frame['values']:
@@ -440,12 +441,15 @@ class UnifiedCanonicalSourceRegistry(NativeCollectionSourceRegistry):
                     self._fresh_dependencies(result)
                 else:
                     with self._capture_file_dependencies() as files, self.artifact_store.capture_read_dependencies() as dependencies:
-                        serialized = _serialize(self._load_current(address))
+                        full = self._load_current(address, wire=wire)
+                        collection = wire.get('schema') == COLLECTION_SCHEMA
+                        serialized = _serialize(full) if collection else b''
                     captured = tuple(_serialize(descriptor) for descriptor in dependencies.values())
+                    files = {**root_files, **files}
                     captured_files = tuple(_serialize(files[path]) for path in sorted(files))
                     retained_bytes = len(serialized) + sum(map(len, captured)) + sum(map(len, captured_files)) + sum(map(len, key))
                     result = _DerivedResult(serialized, captured, captured_files,
-                        wire.get('schema') == COLLECTION_SCHEMA, retained_bytes)
+                        collection, retained_bytes)
                     frame['pending'][key] = result
                 frame['values'][address] = result
             result = frame['values'][address]
@@ -456,8 +460,8 @@ class UnifiedCanonicalSourceRegistry(NativeCollectionSourceRegistry):
         with self.artifact_store.validation_session():
             return self._load_current(address)
 
-    def _load_current(self, address):
-        wire = self._wire(address)
+    def _load_current(self, address, *, wire=None):
+        wire = self._wire(address) if wire is None else wire
         if normal_observed_candidate(wire):
             self._validate_normal(wire)
             return wire

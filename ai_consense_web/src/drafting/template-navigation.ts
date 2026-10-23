@@ -40,6 +40,18 @@ export function locateTemplateTargets(reading: TemplateReading, fields: DraftFie
   for (const [index, item] of targets.entries()) {
     const { target, action, keys } = item
     const base = { document: reading.fileKey, clause: target.clause, actionId: action?.id, fieldKeys: keys, sourceText: action?.sourceText ?? '' }
+    if (action?.nativeBinding) {
+      const binding = action.nativeBinding, spans = binding.spans ?? []
+      const bound = spans.map(span => reading.paragraphs.filter(paragraph => paragraph.id === span.paragraphId))
+      const valid = binding.status === 'bound' && !!binding.sourceSha256 && binding.sourceSha256 === reading.sourceHash && spans.length > 0 && spans.every((span, index) => {
+        const paragraphs = bound[index]!, paragraph = paragraphs[0]
+        return paragraphs.length === 1 && paragraph && span.sourceSha256 === reading.sourceHash && span.channel === 'editableText' && Number.isInteger(span.start) && Number.isInteger(span.end) && span.start >= 0 && span.end >= span.start && span.end <= paragraph.text.length && paragraph.text.slice(span.start, span.end) === span.expectedText && (span.end > span.start || span.operation === 'insert')
+      })
+      const paragraphs = valid ? [...new Map(bound.map(matches => [matches[0]!.id, matches[0]!])).values()] : []
+      for (const paragraph of paragraphs) locations.push({ ...base, id: `${action.id}:${paragraph.id}`, paragraphId: paragraph.id, ordinal: paragraph.ordinal, quality: 'exact' })
+      if (!valid) locations.push({ ...base, id: action.id, paragraphId: null, ordinal: null, quality: 'missing' })
+      continue
+    }
     const source = normalize(action?.sourceText ?? '')
     let matched = reading.catalogueSourceVerified ? reading.paragraphs.filter(paragraph => inScope(paragraph.ordinal, reading.fileKey, target.paragraphs)) : []
     let quality: TemplateLocationQuality = 'exact'

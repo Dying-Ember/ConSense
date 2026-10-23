@@ -1,4 +1,5 @@
 import type { CanonicalEvidenceAddress } from './canonicalEvidence'
+import type { ReviewSpan } from '@/drafting/source-review-types'
 
 /** 后端统一返回的三语文案对象 */
 export interface LocalizedText {
@@ -126,6 +127,9 @@ export interface DraftReviewCandidates {
   graphRevisionId: string
   stale?: boolean
   variables: DraftVariable[]
+  unassignedVariables?: DraftVariable[]
+  catalog?: DraftCatalog
+  candidateDefinitions?: Record<string, DraftField>
 }
 
 export interface DraftCondition {
@@ -166,6 +170,7 @@ export interface DraftCatalog {
 }
 
 export interface DraftPlanAction extends DraftTarget {
+  nativeBinding?: { status: string; sourceSha256?: string; spans?: ReviewSpan[] }
   scopeResults?: Array<{ itemId?: string | null; rowIndex: number; matches?: boolean | null }>
   itemId?: string | null
   scopeId?: string
@@ -462,6 +467,7 @@ export interface DraftDocumentBinding {
   bindingId: string
   bookmarkName: string
   parentBindingId?: string | null
+  deliveryPosition?: 'before' | 'after'
   sourceParagraphId?: string | null
   sourceParagraphOrdinal?: number | null
   sourceText?: string | null
@@ -476,7 +482,7 @@ export interface DraftDocumentBinding {
   operationIds: string[]
   editorialOperationIds?: string[]
   bodyOperationIds?: string[]
-  applicationStatus: 'applied' | 'unapplied' | 'unchanged' | 'body_edited' | 'body_added' | 'generated_added'
+  applicationStatus: 'applied' | 'unapplied' | 'unchanged' | 'body_edited' | 'body_added' | 'generated_added' | 'delivery_notice'
   documentEditStatus?: 'applied' | 'unchanged'
   locationStatus: 'exact' | 'removed' | 'missing' | 'approximate' | 'conflicted'
   geometryStatus: 'pending' | 'ready' | 'unavailable'
@@ -510,6 +516,14 @@ export interface VettingSourceRoleUpdate {
   expectedSourceHash: string
   expectedRoutingSha256: string
   confirmTextContractMaterial?: boolean
+}
+
+export interface VettingSourceProgress {
+  id: number
+  fileName: string
+  parseStatus: string
+  parseMessage?: string
+  pageCount?: number
 }
 
 export interface VettingFile {

@@ -40,6 +40,50 @@ import static org.mockito.Mockito.*;
 class DocumentParserTest {
 
     @Test
+    void observeProgressReportsPhysicalPagesAndRestoresNestedListeners() throws Exception {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        try (PDDocument document = new PDDocument()) {
+            for (int pageNo = 1; pageNo <= 2; pageNo++) {
+                PDPage page = new PDPage(new PDRectangle(72, 72)); document.addPage(page);
+                try (PDPageContentStream stream = new PDPageContentStream(document, page)) {
+                    stream.beginText(); stream.setFont(PDType1Font.HELVETICA, 2); stream.newLineAtOffset(2, 40);
+                    stream.showText("Page " + pageNo + " contractor interim statements include all contract value and payment details.");
+                    stream.endText();
+                }
+            }
+            document.save(output);
+        }
+        ConsenseProperties properties = new ConsenseProperties(); properties.getOcr().setEnabled(false);
+        OcrClient ocr = mock(OcrClient.class, CALLS_REAL_METHODS);
+        DocumentParser parser = new DocumentParser(properties, ocr);
+        byte[] bytes = output.toByteArray();
+        String originalText = parser.parse("progress.pdf", bytes).getText();
+        java.util.List<String> outer = new java.util.ArrayList<>(), inner = new java.util.ArrayList<>();
+        java.util.List<String> expected = java.util.Arrays.asList("第 1 / 2 页：读取文字、表格与版面", "第 2 / 2 页：读取文字、表格与版面");
+        try (AutoCloseable outerScope = DocumentParser.observeProgress(outer::add)) {
+            try (AutoCloseable innerScope = DocumentParser.observeProgress(inner::add)) {
+                assertEquals(originalText, parser.parse("progress.pdf", bytes).getText());
+                assertTrue(inner.containsAll(expected));
+                assertTrue(inner.indexOf(expected.get(0)) < inner.indexOf(expected.get(1)));
+                assertTrue(outer.isEmpty(), "A nested listener must replace the outer listener only within its scope");
+            }
+            int innerCount = inner.size();
+            DocumentParser.ParsedDocument parsed = parser.parse("progress.pdf", bytes);
+            assertEquals(originalText, parsed.getText()); assertEquals(2, parsed.getCoverage().getParsedPages());
+            assertTrue(outer.containsAll(expected));
+            assertTrue(outer.indexOf(expected.get(0)) < outer.indexOf(expected.get(1)));
+            assertEquals(innerCount, inner.size(), "The closed nested listener must not receive further callbacks");
+        }
+        int outerCount = outer.size(), innerCount = inner.size();
+        assertEquals(originalText, parser.parse("progress.pdf", bytes).getText());
+        assertEquals(outerCount, outer.size()); assertEquals(innerCount, inner.size());
+        try (AutoCloseable ignored = DocumentParser.observeProgress(message -> { throw new IllegalStateException("progress unavailable"); })) {
+            assertEquals(originalText, parser.parse("progress.pdf", bytes).getText(), "Progress storage failure must not change parser output");
+        }
+        verifyNoInteractions(ocr);
+    }
+
+    @Test
     void docxNumericStyleIdsResolveToActualHeadingAndContentsNames() throws Exception {
         ByteArrayOutputStream output = new ByteArrayOutputStream();
         try (XWPFDocument document = new XWPFDocument()) {

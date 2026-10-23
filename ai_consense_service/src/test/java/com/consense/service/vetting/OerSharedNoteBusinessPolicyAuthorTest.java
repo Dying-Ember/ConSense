@@ -25,6 +25,7 @@ class OerSharedNoteBusinessPolicyAuthorTest {
         final CanonicalEvidenceService registry=mock(CanonicalEvidenceService.class);
         final OerCanonicalRetrievalClient retrieval=mock(OerCanonicalRetrievalClient.class,call->{
             if("sourceUnitPolicy".equals(call.getMethod().getName()))return policy;
+            if("readSources".equals(call.getMethod().getName()))return OerBusinessEvidenceTest.authoredSourceRead(call.getArgument(2),call.getArgument(1),policy);
             return Answers.RETURNS_DEFAULTS.answer(call);
         });
         final SourceDocument source=new SourceDocument();final CanonicalSourceBinding binding=new CanonicalSourceBinding();

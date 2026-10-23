@@ -12,6 +12,8 @@ const { parse, compileScript } = await import('vue/compiler-sfc')
 const source = await readFile(new URL('../src/views/VettingView.vue', import.meta.url), 'utf8')
 const compiled = compileScript(parse(source).descriptor, { id: 'vetting-progress-test', inlineTemplate: true })
 const apiSource = await readFile(new URL('../src/api/index.ts', import.meta.url), 'utf8')
+const sourceLocationsSource = await readFile(new URL('../src/api/source-locations.ts', import.meta.url), 'utf8')
+const uploadQueueSource = await readFile(new URL('../src/vetting/upload-queue.ts', import.meta.url), 'utf8')
 
 function load(source, dependencies) {
   const code = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, esModuleInterop: true } }).outputText
@@ -41,6 +43,7 @@ function fixture(overrides = {}) {
   const client = {
     get: async path => {
       calls.push({ method: 'GET', path })
+      if (path.endsWith('/sources/progress')) return []
       if (path.endsWith('/runs/latest/progress')) return handlers.latestProgress(path)
       if (path.endsWith('/progress')) return handlers.progress(path)
       if (path.endsWith('/runs/latest')) return handlers.latest(path)
@@ -52,7 +55,8 @@ function fixture(overrides = {}) {
     },
     post: async path => { calls.push({ method: 'POST', path }); return handlers.start(path) },
   }
-  const { vettingApi } = load(apiSource, { './client': { api: client }, './types': {} })
+  const sourceLocations = load(sourceLocationsSource, { './client': { api: client } })
+  const { vettingApi } = load(apiSource, { './client': { api: client }, './source-locations': sourceLocations, './types': {} })
   const store = vue.reactive({ activeProjectId: 'A', locale: 'en', notify: message => notifications.push(message), captureLlmSelection: () => ({}), setBusy() {}, clearBusy() {} })
   const placeholder = { __esModule: true, default: vue.defineComponent({ setup: () => () => null }) }
   const component = load(compiled.content, {
@@ -64,6 +68,7 @@ function fixture(overrides = {}) {
     '@/components/FixedBaselineEvidencePanel.vue': placeholder,
     '@/components/AdviceSourceReader.vue': placeholder,
     '@/advice/reviewHandoff': { reviewHandoffCopy: {} },
+    '@/vetting/upload-queue': load(uploadQueueSource, { vue, '@/api': { vettingApi } }),
   }).default
   window.setTimeout = (fn, delay) => { const id = ++timerId; timers.set(id, { fn, delay }); return id }
   window.clearTimeout = id => timers.delete(id)

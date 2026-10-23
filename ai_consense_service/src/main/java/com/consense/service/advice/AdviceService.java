@@ -315,8 +315,8 @@ public class AdviceService {
             boolean hadCanonicalHits=!hits.isEmpty();
             assertCurrentSelection(session,scope);
             if(fixedBaselineEnabled())hits.addAll(fixedReferenceHits(retrievalQuestion));
-            hits=withCanonicalTableContext(session,withCanonicalIncorporationContext(session,hits));
-            if(hadCanonicalHits)hits=withCanonicalSmallCorpusContext(session,hits);
+            try{hits=canonical.advisoryContext(session,hits,hadCanonicalHits,props.getVector().getStuffingLimit());}
+            catch(RuntimeException rejected){throw sourceFailure(4204,"Canonical advice context is unavailable or changed. Refresh the selected scope and ask again; no legacy evidence was used.",rejected,"evidence_backend_unavailable");}
         } else hits=withIncorporationContext(projectId,scope,retrieve(projectId,scope,retrievalQuestion));
         final List<VectorStore.SearchHit> selectedFixedHits=hits.stream().filter(this::fixedBaselineHit).collect(Collectors.toList());
         final String fixedSourceIdentity=selectedFixedHits.isEmpty()?null:fixedSourceIdentity(selectedFixedHits);
@@ -355,7 +355,7 @@ public class AdviceService {
         }
 
         progress.phase("context");
-        String excerpts = renderExcerpts(hits,normalSources);
+        String excerpts = renderExcerpts(hits,normalSources,session);
         String userPrompt = PromptService.format(promptService.userTemplate(PromptCatalog.KEY_ADVICE),
                 fixedReferenceOnly?"Fixed standard reference only / 固定标准参考解释":scopeLabel(scope), excerpts, questionContext.originalQuestion);
         if(fixedReferenceOnly)userPrompt+="\n\nExplicit answer scope: reference_only. Explain only the cited standard text in this frozen development baseline. Do not assert that this standard, edition or requirement is adopted by the project, and do not return project_contract. Parsing, legal ownership and completeness limitations remain unverified. Lack of project incorporation alone is a disclosed scope limit, not a necessary clarification for this standard-reference explanation. Request only missing facts or source provisions that prevent the requested standard interpretation.";
@@ -551,24 +551,22 @@ public class AdviceService {
         return "Selected package conditions / 选定合约条件";
     }
 
-    /** Current documents for pointer identity rechecks; guidance is recomputed per request and never stored. */
-    private List<SourceDocument> materialSources(List<VectorStore.SearchHit> hits,List<SourceDocument> normalSources) {
-        Map<Long,SourceDocument> sources=new LinkedHashMap<>();
-        if(normalSources!=null)for(SourceDocument source:normalSources)if(source!=null&&source.getId()!=null)sources.put(source.getId(),source);
-        for(VectorStore.SearchHit hit:hits){
-            if(canonicalUnit(hit)==null)continue;
-            for(com.consense.web.dto.CanonicalEvidenceDtos.EvidencePointer pointer:canonicalPointers(hit)){
-                Long id=pointer.getDocumentId();
-                if(id==null||sources.containsKey(id)||sourceDocumentRepository==null)continue;
-                sourceDocumentRepository.findById(id).filter(source->Objects.equals(source.getProjectId(),pointer.getProjectId())).ifPresent(source->sources.put(id,source));
-            }
-        }
-        return new ArrayList<>(sources.values());
-    }
     private String renderExcerpts(List<VectorStore.SearchHit> hits) {
-        return renderExcerpts(hits,new ArrayList<>());
+        return renderExcerpts(hits,new ArrayList<>(),(OerBusinessEvidence.Session)null);
     }
-    private String renderExcerpts(List<VectorStore.SearchHit> hits,List<SourceDocument> normalSources) {
+    private String renderExcerpts(List<VectorStore.SearchHit> hits,com.consense.service.vetting.OerModelMaterial.Request material){
+        return renderExcerpts(hits,new ArrayList<>(),material);
+    }
+    private String renderExcerpts(List<VectorStore.SearchHit> hits,List<SourceDocument> normalSources,OerBusinessEvidence.Session session){
+        boolean selectedCanonical=hits.stream().anyMatch(hit->canonicalUnit(hit)!=null);
+        if(selectedCanonical&&(session==null||canonical==null))throw new IllegalArgumentException("Canonical model material requires its selected source session");
+        com.consense.service.vetting.OerModelMaterial.Request material;
+        if(selectedCanonical){try{material=canonical.modelMaterial(session,hits);}
+            catch(RuntimeException rejected){throw sourceFailure(4204,"Canonical advice model material is unavailable or changed. Refresh the selected scope and ask again; no legacy evidence was used.",rejected,"evidence_backend_unavailable");}}
+        else material=new com.consense.service.vetting.OerModelMaterial.Request(normalSources);
+        return renderExcerpts(hits,normalSources,material);
+    }
+    private String renderExcerpts(List<VectorStore.SearchHit> hits,List<SourceDocument> normalSources,com.consense.service.vetting.OerModelMaterial.Request modelMaterial) {
         StringBuilder builder = new StringBuilder();
         List<VectorStore.SearchHit> fixedHits=hits.stream().filter(this::fixedBaselineHit).collect(Collectors.toList());
         String fixedMaterial=fixedHits.isEmpty()?null:fixedModelMaterial(fixedHits);
@@ -580,7 +578,6 @@ public class AdviceService {
                 .append("Internal retrieval IDs, fixed parent IDs, document IDs and model-unit addresses below are lookup/provenance metadata and MUST NOT be used as output citation IDs. ")
                 .append("Observed table context does not extend a ranked row's quotation authority. Cite the separately numbered member excerpts for other rows; where no such member is supplied, report the affected support as unknown.\n\n");
         int index = 1;
-        com.consense.service.vetting.OerModelMaterial.Request modelMaterial=new com.consense.service.vetting.OerModelMaterial.Request(materialSources(hits,normalSources));
         if(hits.stream().anyMatch(hit->canonicalUnit(hit)!=null))builder.append(com.consense.service.vetting.OerModelMaterial.LEGEND)
                 .append("Ownership reading: the per-alias view below repeats same-source member declarations only. A null clauseId or clauseHeadingLocation means missing or conflicting formal ownership. ")
                 .append("Observed numbering and native_ooxml_container/native_ooxml_story do not establish a formal clause. Unknown ownership limits that designation and ownership-dependent applicability; source-supported explanations remain available.\n");
@@ -1430,94 +1427,6 @@ public class AdviceService {
         return chunks.stream().allMatch(c->Objects.equals(c.getSourceHash(),hashes.get(String.valueOf(c.getDocumentId())))&&Objects.equals(c.getSourceRole(),roles.get(String.valueOf(c.getDocumentId()))));
     }
     private List<CitationVO> safeSources(String json){if(JsonUtils.isBlankText(json))return Collections.emptyList();try{return JsonUtils.readList(json,CitationVO.class);}catch(Exception e){return Collections.emptyList();}}
-    /** The existing small-corpus stuffing policy also applies to canonical sources, with real new aliases. */
-    private List<VectorStore.SearchHit> withCanonicalSmallCorpusContext(OerBusinessEvidence.Session session,List<VectorStore.SearchHit> hits) {
-        long remaining=props.getVector().getStuffingLimit();if(remaining<=0)return hits;
-        for(VettingCorpus.Chunk chunk:session.chunks()){remaining-=nvl(chunk.getContent()).length();if(remaining<0)return hits;}
-        Set<String> represented=new LinkedHashSet<>(),units=new LinkedHashSet<>();
-        for(VectorStore.SearchHit hit:hits)if(!fixedBaselineHit(hit)){
-            represented.add(hit.getId());JsonNode unit=canonicalUnit(hit);units.add(unit==null?hit.getId():unit.path("unitId").asText(hit.getId()));
-            for(com.consense.web.dto.CanonicalEvidenceDtos.EvidencePointer pointer:canonicalPointers(hit))if(!JsonUtils.isBlankText(pointer.getCanonicalChunkId()))represented.add(pointer.getCanonicalChunkId());
-        }
-        List<String> origins=session.chunks().stream().map(VettingCorpus.Chunk::getId).filter(id->!represented.contains(id)).collect(Collectors.toList());
-        if(origins.isEmpty())return hits;
-        List<VectorStore.SearchHit> contexts;
-        try{contexts=canonical.sourceHits(session,origins);}
-        catch(RuntimeException rejected){throw sourceFailure(4204,"Canonical advice context is unavailable or changed. Refresh the selected scope and ask again; no legacy evidence was used.",rejected,"evidence_backend_unavailable");}
-        List<VectorStore.SearchHit> result=new ArrayList<>(hits);
-        for(VectorStore.SearchHit context:contexts){JsonNode unit=canonicalUnit(context);if(units.add(unit==null?context.getId():unit.path("unitId").asText(context.getId())))result.add(context);}
-        return result;
-    }
-    /** Give other observed table rows their own real source pointers before assigning public aliases. */
-    private List<VectorStore.SearchHit> withCanonicalTableContext(OerBusinessEvidence.Session session,List<VectorStore.SearchHit> hits) {
-        com.consense.service.vetting.OerModelMaterial.Request material=new com.consense.service.vetting.OerModelMaterial.Request(materialSources(hits,new ArrayList<>()));
-        Map<List<String>,Set<String>> members=new LinkedHashMap<>();Set<String> present=new LinkedHashSet<>();
-        for(VectorStore.SearchHit hit:hits){
-            JsonNode unit=canonicalUnit(hit);if(unit!=null)present.add(unit.path("unitId").asText());
-            JsonNode payloads=JsonUtils.mapper().valueToTree(hit.getPayload().get("canonicalMembers"));int ordinal=0;
-            for(com.consense.web.dto.CanonicalEvidenceDtos.EvidencePointer pointer:canonicalPointers(hit)){
-                JsonNode payload=payloads.isArray()&&ordinal<payloads.size()?payloads.get(ordinal):null;ordinal++;
-                if(!com.consense.service.sources.NormalObservedContract.PRODUCER.equals(pointer.getProducerKind()))continue;
-                JsonNode selected=material.project(pointer,payload,String.valueOf(hit.getPayload().get("sourceRole")));
-                for(JsonNode table:selected.path("observedSourceUnits").path("units"))
-                    if(Arrays.asList("ordinary_docx_native_table_tree","ordinary_docx_table").contains(table.path("kind").asText()))
-                        for(JsonNode id:table.path("requiredMemberBlockIds"))members.computeIfAbsent(tableSource(pointer,String.valueOf(hit.getPayload().get("sourceRole"))),key->new LinkedHashSet<>()).add(id.asText());
-            }
-        }
-        if(members.isEmpty())return hits;
-        List<String> origins=new ArrayList<>();
-        for(VettingCorpus.Chunk chunk:session.chunks()){
-            com.consense.web.dto.CanonicalEvidenceDtos.EvidencePointer pointer=chunk.getCanonicalEvidence();if(pointer==null)continue;
-            Set<String> required=members.get(tableSource(pointer,chunk.getRole()));
-            if(required!=null&&chunk.getParts().stream().anyMatch(part->required.contains(part.getBlockId())))origins.add(chunk.getId());
-        }
-        List<VectorStore.SearchHit> result=new ArrayList<>(hits);
-        for(VectorStore.SearchHit context:canonical.sourceHits(session,origins))if(present.add(canonicalUnit(context).path("unitId").asText()))result.add(context);
-        return result;
-    }
-    private List<String> tableSource(com.consense.web.dto.CanonicalEvidenceDtos.EvidencePointer pointer,String role){
-        return Arrays.asList(pointer.getProjectId(),String.valueOf(pointer.getDocumentId()),pointer.getOriginalSourceSha256(),pointer.getJavaParsedSourceHash(),pointer.getProjectionSha256(),role);
-    }
-
-    /** Library retrieval must also show current incorporation/edition/override provisions, if available. */
-    private List<VectorStore.SearchHit> withCanonicalIncorporationContext(OerBusinessEvidence.Session session,List<VectorStore.SearchHit> hits) {
-        List<VectorStore.SearchHit> libraries=hits.stream().filter(h->"standard".equals(String.valueOf(h.getPayload().get("sourceRole")))).collect(Collectors.toList());
-        if(libraries.isEmpty())return hits;
-        List<String> origins=new ArrayList<>();
-        for(VettingCorpus.Chunk chunk:session.chunks()) {
-            if(!"tender".equals(chunk.getRole()))continue;
-            String name=nvl(chunk.getFileName()).toLowerCase(java.util.Locale.ROOT).replace('_',' ').replace('-',' ');
-            boolean composition=name.contains("the specification")||name.contains("specification composition");
-            if(composition||libraries.stream().anyMatch(h->referenceMention(chunk.getContent(),h.fileLabel())))origins.add(chunk.getId());
-        }
-        List<VectorStore.SearchHit> contexts=origins.isEmpty()?Collections.emptyList():canonical.sourceHits(session,origins);
-        List<VectorStore.SearchHit> result=new ArrayList<>(hits);Set<String> units=new LinkedHashSet<>(),representedOrigins=new LinkedHashSet<>();
-        for(VectorStore.SearchHit hit:hits){JsonNode unit=canonicalUnit(hit);if(unit!=null){units.add(unit.path("unitId").asText());recordCompleteMembers(unit,representedOrigins);}}
-        boolean complete=!origins.isEmpty();int contextChars=0;
-        for(VectorStore.SearchHit context:contexts) {
-            JsonNode unit=canonicalUnit(context);
-            if(unit==null||!"complete_observed_unit".equals(unit.path("status").asText()))complete=false;
-            String unitId=unit==null?context.getId():unit.path("unitId").asText();
-            if(units.contains(unitId))continue;
-            if(contextChars+context.text().length()>12000){complete=false;continue;}
-            units.add(unitId);result.add(context);contextChars+=context.text().length();recordCompleteMembers(unit,representedOrigins);
-        }
-        complete=complete&&representedOrigins.containsAll(origins);
-        // This flag concerns the bounded observed context only, never standard adoption or whole-source quality.
-        List<VectorStore.SearchHit> annotated=new ArrayList<>();
-        for(VectorStore.SearchHit hit:result) {
-            Map<String,Object> payload=new LinkedHashMap<>(hit.getPayload());
-            if("standard".equals(payload.get("sourceRole"))&&!fixedBaselineHit(hit))payload.put("applicabilityContextComplete",complete);
-            annotated.add(new VectorStore.SearchHit(hit.getId(),hit.getScore(),payload));
-        }
-        return annotated;
-    }
-
-    private void recordCompleteMembers(JsonNode unit,Set<String> representedOrigins) {
-        if(unit!=null&&"complete_observed_unit".equals(unit.path("status").asText()))
-            for(JsonNode member:unit.path("requiredMemberIds"))representedOrigins.add(member.asText());
-    }
-
     private List<VectorStore.SearchHit> withIncorporationContext(String projectId,String scope,List<VectorStore.SearchHit> hits) {
         List<VectorStore.SearchHit> libraries=hits.stream().filter(h->"standard".equals(String.valueOf(h.getPayload().get("sourceRole")))).collect(Collectors.toList());
         if(libraries.isEmpty())return hits;
@@ -1546,11 +1455,7 @@ public class AdviceService {
         return true;
     }
     private boolean referenceMention(String passage,String referenceLabel) {
-        String text=nvl(passage).toLowerCase(java.util.Locale.ROOT),label=nvl(referenceLabel).toLowerCase(java.util.Locale.ROOT);
-        if(label.startsWith("sl ")||label.contains("specification library")||label.contains("general specification"))
-            return text.contains("specification library")||text.contains("general specification")||text.matches("(?s).*\\b(?:sl[ -]?20\\d\\d|gscew\\d*|gs[ -]?20\\d\\d)\\b.*");
-        if(label.startsWith("gcc ")||label.contains("general conditions of contract"))return text.contains("general conditions of contract")||text.matches("(?s).*\\bgcc\\b.*");
-        String key=label.split("[ ·]",2)[0];return !key.isEmpty()&&text.matches("(?s).*\\b"+java.util.regex.Pattern.quote(key)+"\\b.*");
+        return OerBusinessEvidence.referenceMention(passage,referenceLabel);
     }
     private String evidenceIdentity(VectorStore.SearchHit hit){return hit.getPayload().get("documentId")+"|"+hit.anchor()+"|"+VettingCorpus.hash(hit.text());}
     private QuestionContext clarificationContext(String projectId,String scope,Long replyTo,String text,String requestedBasis,String sessionId) {

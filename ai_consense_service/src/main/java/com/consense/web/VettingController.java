@@ -23,6 +23,11 @@ public class VettingController {
 
     private final VettingService vettingService;
 
+    @GetMapping("/sources/progress")
+    public ApiResponse<List<com.consense.repository.SourceDocumentRepository.ParseProgressMetadata>> parseProgress(@PathVariable String projectId) {
+        return ApiResponse.ok(vettingService.parseProgress(projectId));
+    }
+
     @GetMapping("/files")
     public ApiResponse<List<VettingFileVO>> files(@PathVariable String projectId) {
         return ApiResponse.ok(vettingService.listFiles(projectId));

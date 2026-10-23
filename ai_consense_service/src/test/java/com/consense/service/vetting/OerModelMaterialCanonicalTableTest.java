@@ -2,11 +2,13 @@ package com.consense.service.vetting;
 
 import com.consense.common.JsonUtils;
 import com.consense.config.ConsenseProperties;
+import com.consense.config.CanonicalEvidenceProperties;
 import com.consense.document.DocumentParser;
 import com.consense.domain.SourceDocument;
 import com.consense.ocr.OcrClient;
 import com.consense.repository.SourceDocumentRepository;
 import com.consense.service.advice.AdviceService;
+import com.consense.service.sources.CanonicalCurrentSourceReader;
 import com.consense.vector.VectorStore;
 import com.consense.web.dto.AdviceDtos.CitationVO;
 import com.consense.web.dto.CanonicalEvidenceDtos.EvidencePointer;
@@ -38,11 +40,12 @@ class OerModelMaterialCanonicalTableTest {
         VettingCorpus.Chunk foreign=JsonUtils.read(JsonUtils.write(selectedRow),VettingCorpus.Chunk.class);foreign.setId("foreign-source");foreign.getCanonicalEvidence().setDocumentId(source.getId()+1);corpus.put(foreign.getId(),foreign);
         java.lang.reflect.Constructor<OerBusinessEvidence.Session> constructor=OerBusinessEvidence.Session.class.getDeclaredConstructor(String.class,String.class,List.class,List.class,Map.class,Map.class);constructor.setAccessible(true);
         OerBusinessEvidence.Session session=constructor.newInstance(source.getProjectId(),"advisory",Collections.singletonList(source.getId()),Collections.emptyList(),corpus,Collections.emptyMap());
-        OerBusinessEvidence canonical=mock(OerBusinessEvidence.class);when(canonical.sourceHits(eq(session),anyList())).thenAnswer(call->{List<VectorStore.SearchHit> result=new ArrayList<>();for(String id:call.<List<String>>getArgument(1))result.add(hits.get(id));return result;});
-        SourceDocumentRepository repository=mock(SourceDocumentRepository.class);when(repository.findById(source.getId())).thenReturn(Optional.of(source));
+        OerBusinessEvidence canonical=spy(new OerBusinessEvidence(null,null,new CanonicalEvidenceProperties()));doAnswer(call->{List<VectorStore.SearchHit> result=new ArrayList<>();for(String id:call.<List<String>>getArgument(1))result.add(hits.get(id));return result;}).when(canonical).sourceHits(eq(session),anyList());
+        CanonicalCurrentSourceReader reader=mock(CanonicalCurrentSourceReader.class);when(reader.normalDocument(source.getProjectId(),source.getId(),"advisory")).thenReturn(source);ReflectionTestUtils.setField(canonical,"currentSources",reader);
+        SourceDocumentRepository repository=mock(SourceDocumentRepository.class);
         AdviceService service=new AdviceService(null,null,null,null,null,repository,null,null,null,canonical,null);
         VectorStore.SearchHit seed=hits.values().stream().filter(hit->"Excluded library C".equals(hit.text())).findFirst().get();String unchanged=JsonUtils.write(seed);
-        List<VectorStore.SearchHit> selected=ReflectionTestUtils.invokeMethod(service,"withCanonicalTableContext",session,Collections.singletonList(seed));
+        List<VectorStore.SearchHit> selected=canonical.advisoryContext(session,Collections.singletonList(seed),false,0);
         assertEquals(4,selected.size());assertSame(seed,selected.get(0));assertEquals(unchanged,JsonUtils.write(seed));
         List<String> texts=new ArrayList<>(),locations=new ArrayList<>();
         for(VectorStore.SearchHit hit:selected){CitationVO citation=ReflectionTestUtils.invokeMethod(service,"toCitation",hit);texts.add(citation.getContent());locations.add(citation.getAnchor());
@@ -50,6 +53,20 @@ class OerModelMaterialCanonicalTableTest {
         assertEquals(Arrays.asList("Excluded library C","Excluded library A","Excluded library B","Excluded library D"),texts);assertEquals(4,new HashSet<>(locations).size());
         assertEquals(4,selected.stream().map(hit->hit.getPayload().get("canonicalSourceUnit")).distinct().count());
         verify(canonical).sourceHits(eq(session),argThat(ids->ids.size()==4&&!ids.contains("foreign-source")));
+        verify(reader,times(1)).normalDocument(source.getProjectId(),source.getId(),"advisory");verifyNoMoreInteractions(reader);verifyNoInteractions(repository);
+        clearInvocations(reader);OerModelMaterial.Request model=canonical.modelMaterial(session,selected);
+        JsonNode member=JsonUtils.mapper().valueToTree(seed.getPayload().get("canonicalMembers")).get(0);
+        JsonNode projected=model.project(selectedRow.getCanonicalEvidence(),member,"tender");
+        assertEquals(4,projected.path("observedSourceUnits").path("units").get(0).path("requiredMemberBlockIds").size());
+        assertEquals("Excluded library C",projected.path("parts").get(0).path("text").asText());
+        verify(reader,times(1)).normalDocument(source.getProjectId(),source.getId(),"advisory");verifyNoMoreInteractions(reader);verifyNoInteractions(repository);
+        String project=source.getProjectId(),original=source.getSourceSha256(),text=source.getTextContent();Long document=source.getId();
+        for(String changed:Arrays.asList("project","document","original","parsed")){
+            if("project".equals(changed))source.setProjectId("another-project");if("document".equals(changed))source.setId(document+1);
+            if("original".equals(changed))source.setSourceSha256("0".repeat(64));if("parsed".equals(changed))source.setTextContent(text+" changed");
+            try{assertTrue(assertThrows(IllegalStateException.class,()->canonical.modelMaterial(session,selected)).getMessage().contains("current source differs"),changed);}
+            finally{source.setProjectId(project);source.setId(document);source.setSourceSha256(original);source.setTextContent(text);}
+        }
     }
     @Test void oneCanonicalRowKeepsAllFourObservedRowsAndLeavesTheOtherTableUnselected() throws Exception {
         SourceDocument source=source();EvidencePointer pointer=pointer(source);String before=JsonUtils.write(source),savedPointer=JsonUtils.write(pointer);

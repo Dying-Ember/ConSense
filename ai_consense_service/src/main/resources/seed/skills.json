@@ -13,7 +13,7 @@
       "en": "Reads the typographic layer of the standard templates and treats every “to be decided” spot as a candidate variable, keeping the source wording as evidence."
     },
     "badges": [
-      {"zhHans": "7 条判定规则", "zhHant": "7 條判定規則", "en": "7 detection rules"},
+      {"zhHans": "7 类来源示例", "zhHant": "7 類來源示例", "en": "7 source examples"},
       {"zhHans": "NTT / SCT / SCC", "zhHant": "NTT / SCT / SCC", "en": "NTT / SCT / SCC"}
     ],
     "steps": [
@@ -43,16 +43,16 @@
       {"zhHans": "排版样式", "zhHant": "排版樣式", "en": "Typographic style"},
       {"zhHans": "适用文件", "zhHant": "適用文件", "en": "Applies to"},
       {"zhHans": "推理结果", "zhHant": "推理結果", "en": "What the skill infers"},
-      {"zhHans": "置信度", "zhHant": "置信度", "en": "Conf."}
+      {"zhHans": "示例性质", "zhHant": "示例性質", "en": "Example status"}
     ],
     "rules": [
-      ["(Alternative (a) - for tenders adopting electronic ...)", "斜体", "NTT · SCT", "二选一变量", "0.92"],
-      ["(Delete if precast facade is not applicable)", "斜体", "NTT · SCT", "是非变量（整段删除，含编号）", "0.92"],
-      ["\"Not used\" if ... WTO GPA", "斜体", "NTT · SCT · SCC", "保留编号，正文改为 Not used", "0.88"],
-      ["*(e) / *G1 / *G1a", "星号", "NTT · SCT · SCC", "可选条款", "0.86"],
-      ["[ Maintenance Period ]", "中括号粗体", "SCC", "填空变量", "0.94"],
-      ["[Guidance Note: Delete/amend by the PQS as appropriate]", "中括号粗体", "SCC", "编校指令", "0.90"],
-      ["(Insert all Bill Nos. ...)", "圆括号斜体", "SCT · SCC", "填空变量", "0.93"]
+      ["(Alternative (a) - for tenders adopting electronic ...)", "斜体", "NTT · SCT", "二选一变量", "示例 / Example"],
+      ["(Delete if precast facade is not applicable)", "斜体", "NTT · SCT", "是非变量（整段删除，含编号）", "示例 / Example"],
+      ["\"Not used\" if ... WTO GPA", "斜体", "NTT · SCT · SCC", "保留编号，正文改为 Not used", "示例 / Example"],
+      ["*(e) / *G1 / *G1a", "星号", "NTT · SCT · SCC", "可选条款", "示例 / Example"],
+      ["[ Maintenance Period ]", "中括号粗体", "SCC", "填空变量", "示例 / Example"],
+      ["[Guidance Note: Delete/amend by the PQS as appropriate]", "中括号粗体", "SCC", "编校指令", "示例 / Example"],
+      ["(Insert all Bill Nos. ...)", "圆括号斜体", "SCT · SCC", "填空变量", "示例 / Example"]
     ],
     "outItems": [
       {"zhHans": "候选变量清单：变量名 / 类型 / 所属文件 / 条款号。", "zhHant": "候選變量清單：變量名 / 類型 / 所屬文件 / 條款號。", "en": "Candidate variable list with name, type, owning file and clause number."},
@@ -61,8 +61,8 @@
     ],
     "guardItems": [
       {"zhHans": "排版样式丢失时不猜测，标记为待人工判断。", "zhHant": "排版樣式丟失時不猜測，標記為待人工判斷。", "en": "When styling is lost, do not guess — flag for manual review."},
-      {"zhHans": "同一片段命中多条规则时取优先级最高的一条。", "zhHant": "同一片段命中多條規則時取優先級最高的一條。", "en": "When one span matches several rules, take the highest priority only."},
-      {"zhHans": "置信度低于 0.70 不自动生成变量。", "zhHant": "置信度低於 0.70 不自動生成變量。", "en": "Never auto-generate a variable below 0.70 confidence."},
+      {"zhHans": "同一片段可涉及多个问题；以已存来源和图谱核对结果为准。", "zhHant": "同一片段可涉及多個問題；以已存來源和圖譜核對結果為準。", "en": "One source passage may support multiple questions; review the saved evidence and graph."},
+      {"zhHans": "表内信号仅为示例，不是本次识别分数或准确率；不据此确认图谱。", "zhHant": "表內信號僅為示例，不是本次識別分數或準確率；不據此確認圖譜。", "en": "These signals are examples, not scores or accuracy measurements for this run; they do not confirm the graph."},
       {"zhHans": "只识别与留证，不替代 QS 的专业判断。", "zhHant": "只識別與留證，不替代 QS 的專業判斷。", "en": "Detect and document only; never replace the QS judgement."}
     ]
   },
@@ -101,8 +101,8 @@
         {"zhHans": "同一事实多版本时取最新，并列出被覆盖的旧版本。", "zhHant": "同一事實多版本時取最新，並列出被覆蓋的舊版本。", "en": "Take the latest version and list the superseded ones."}
       ],
       [
-        {"zhHans": "置信度分级与转人工", "zhHant": "置信度分級與轉人工", "en": "Grade confidence and escalate"},
-        {"zhHans": "≥0.90 直接采用；hedged 措辞 ≤0.70 转 QS；范围外仅记录不入库。", "zhHant": "≥0.90 直接採用；hedged 措辭 ≤0.70 轉 QS；範圍外僅記錄不入庫。", "en": "≥0.90 auto-adopt; hedged wording ≤0.70 to QS; out-of-scope recorded but not committed."}
+        {"zhHans": "核对候选再采用", "zhHant": "核對候選再採用", "en": "Review candidates before adoption"},
+        {"zhHans": "提取结果均为候选；明确核对来源、条件和问题归属后，由用户采用。置信度不授予采用权限。", "zhHant": "提取結果均為候選；明確核對來源、條件和問題歸屬後，由使用者採用。置信度不授予採用權限。", "en": "Every extracted answer remains a candidate. The user reviews evidence, conditions and question assignment before adoption; confidence does not authorize adoption."}
       ]
     ],
     "ruleHead": [
@@ -111,19 +111,19 @@
       {"zhHans": "结果处理", "zhHant": "結果處理", "en": "How the result is handled"}
     ],
     "rules": [
-      ["合约编号 / QS 编号", "编号形态 + 上下文关键词", "绑定 B01，需人工确认"],
-      ["项目名称", "专有名词 + 项目上下文", "绑定 B01 / B02"],
-      ["是否采用双信封", "two-envelope / 双信封 / 雙信封", "绑定分文件变量 B04（整段重写）"],
-      ["电子 / 纸质招标路线", "electronic / paper / 电子 / 紙本", "绑定 B05（二选一）"],
-      ["评分表与提交要求", "权重百分比 + 提交清单", "绑定 B03，与 SCT 附表交叉复核"],
-      ["清单（Bill Nos. / 专业分包）", "枚举清单 + 编号序列", "绑定 billNos / subcontractors 清单变量"],
-      ["限定句（\"proposed\" / \"subject to\"）", "情态与限定措辞识别", "置信度 ≤0.70，转 QS 人工判断"],
+      ["合约编号 / QS 编号", "编号形态 + 上下文关键词", "核对项目身份，不自动覆盖"],
+      ["项目名称", "专有名词 + 项目上下文", "核对项目名称及原文依据"],
+      ["是否采用双信封", "two-envelope / 双信封 / 雙信封", "关联当前图谱中的招标方式问题，待用户采用"],
+      ["电子 / 纸质招标路线", "electronic / paper / 电子 / 紙本", "核对适用文件和发行方式，不默认选择"],
+      ["评分表与提交要求", "权重百分比 + 提交清单", "与相关模板问题及 SCT 附表核对"],
+      ["清单（Bill Nos. / 专业分包）", "枚举清单 + 编号序列", "保留各行和值，核对当前问题及列归属"],
+      ["限定句（\"proposed\" / \"subject to\"）", "情态与限定措辞识别", "保留限定条件，待用户核对，不自动采用"],
       ["范围外声明（价格计算 / 图纸算量）", "范围外关键词", "仅记录，不入库"]
     ],
     "outItems": [
       {"zhHans": "事实清单：值 / 绑定变量 / 置信度 / 是否转人工。", "zhHant": "事實清單：值 / 綁定變量 / 置信度 / 是否轉人工。", "en": "Fact list with value, bound variable, confidence and escalation flag."},
       {"zhHans": "每条事实可回溯到具体一行原文。", "zhHant": "每條事實可回溯到具體一行原文。", "en": "Every fact traces back to a specific source line."},
-      {"zhHans": "与模板推理候选合并后在 Step 2 一并确认。", "zhHant": "與模板推理候選合併後在 Step 2 一併確認。", "en": "Merged with template candidates and confirmed together in step 2."}
+      {"zhHans": "第2步核对模板问题与图谱；第3步核对候选答案，模板确认后再逐项采用。", "zhHant": "第2步核對模板問題與圖譜；第3步核對候選答案，模板確認後再逐項採用。", "en": "Review template questions and the graph in step 2; review candidate answers in step 3 and adopt them individually after template confirmation."}
     ],
     "guardItems": [
       {"zhHans": "范围内作答，排除 BQ 计价、施工方案与图纸算量。", "zhHant": "範圍內作答，排除 BQ 計價、施工方案與圖紙算量。", "en": "Stay in scope: no BQ pricing, method statements or quantity take-off."},

@@ -67,3 +67,22 @@ const foreignScope = { ...reading, fileKey: 'SCC', paragraphs: [
 const foreignAction = { ...action, document: 'SCC', sourceText: undefined, paragraphs: 'P1017; SCT5 P627–637; WWQS cues638–642' }
 assert.deepEqual(plain(locateTemplateTargets(foreignScope, [], [foreignAction]).map(item => [item.ordinal, item.quality])), [[1017, 'exact']])
 console.log('PASS: foreign-document references and WWQS cue numbers cannot become exact locations in the current uploaded document')
+
+const wordReading = { ...reading, sourceHash: 'same-original', catalogueSourceVerified: false, paragraphs: [
+  { id: 'repayment', ordinal: 1212, text: 'Repay over #six consecutive months.' },
+  { id: 'another', ordinal: 2000, text: 'Repay over #six consecutive months.' }
+] }
+const wordSpan = { paragraphId: 'repayment', sourceSha256: 'same-original', channel: 'editableText', start: 12, end: 15, expectedText: 'six' }
+const wordAction = { ...action, clause: 'six', paragraphs: undefined, sourceText: 'six', nativeBinding: { status: 'bound', sourceSha256: 'same-original', spans: [wordSpan] } }
+const wordBefore = JSON.stringify([wordReading, wordAction])
+assert.deepEqual(plain(locateTemplateTargets(wordReading, [], [wordAction]).map(item => [item.paragraphId, item.quality])), [['repayment', 'exact']], 'Short words use exact saved native identity even when text repeats')
+for (const change of [
+ { status: 'missing' }, { sourceSha256: 'old-original' }, { spans: [] },
+ { spans: [{ ...wordSpan, sourceSha256: 'old-original' }] },
+ { spans: [{ ...wordSpan, expectedText: 'seven' }] },
+ { spans: [{ ...wordSpan, start: -1 }] },
+ { spans: [wordSpan, { ...wordSpan, paragraphId: 'missing' }] }
+]) assert.deepEqual(plain(locateTemplateTargets(wordReading, [], [{ ...wordAction, nativeBinding: { ...wordAction.nativeBinding, ...change } }]).map(item => [item.paragraphId, item.quality])), [[null, 'missing']], 'Invalid native bindings never fall back to text or catalogue guesses')
+assert.equal(locateTemplateTargets({ ...wordReading, paragraphs: [...wordReading.paragraphs, wordReading.paragraphs[0]] }, [], [wordAction])[0].quality, 'missing', 'Duplicate native identities are rejected')
+assert.equal(JSON.stringify([wordReading, wordAction]), wordBefore)
+console.log('PASS: bound word targets navigate by original identity and exact spans, rejecting stale, incomplete and ambiguous bindings without mutation')

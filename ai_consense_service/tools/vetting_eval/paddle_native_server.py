@@ -13,7 +13,40 @@ import threading
 from fastapi import FastAPI, HTTPException
 from PIL import Image
 from artifact_store import ArtifactStore
-from paddle_native_capture import NativePaddleCapture, NativePaddleCaptureError
+from paddle_native_capture import (NativePaddleCapture, NativePaddleCaptureError,
+                                   LOCAL_CAS_TRANSPORT, FAILED_INLINE_TRANSPORT, native_asset_root)
+
+
+def _native_assets(assets, manifest, config, store):
+    root = native_asset_root(config.get('nativeCaptureTransport'))
+    if root is None:
+        return {'rawAssets': {name: base64.b64encode(raw).decode('ascii') for name, raw in assets.items()}}
+    if root != store.root:
+        raise ValueError('Native provider CAS differs from its pinned transport root')
+    references = {}
+    def collect(value):
+        if isinstance(value, dict):
+            if value.get('kind') in ('actual_paddle_tensor', 'actual_numpy_array'):
+                name, reference = value.get('assetName'), value.get('artifact')
+                if name in references and references[name] != reference:
+                    raise ValueError('Native array repeated reference descriptors differ')
+                references[name] = reference
+            for child in value.values(): collect(child)
+        elif isinstance(value, list):
+            for child in value: collect(child)
+    collect(manifest)
+    result = {}
+    for name, raw in assets.items():
+        reference = references.get(name)
+        if reference is None:
+            # A failed capture may retain an array before its parent record was appended.
+            reference = store.put_bytes(raw, identity_scope='actual_native_array_npy_without_pickle')
+        else:
+            if reference.get('sha256') != hashlib.sha256(raw).hexdigest() or reference.get('byteCount') != len(raw):
+                raise ValueError('Native CAS array differs from captured bytes')
+            store.verify(reference)
+        result[name] = reference
+    return {'rawAssetTransport': LOCAL_CAS_TRANSPORT, 'rawAssetRefs': result}
 
 
 def load_config(path, expected_sha):
@@ -23,6 +56,7 @@ def load_config(path, expected_sha):
     config = json.loads(raw)
     if config.get('schema') != 'consense.paddle-native-provider.v1' or config.get('precision') != 'bf16':
         raise ValueError('Explicit native Paddle provider schema and BF16 required')
+    native_asset_root(config.get('nativeCaptureTransport'))
     assets = config.get('assets', [])
     if not assets:
         raise ValueError('Complete model/runtime/font assets must be pinned')
@@ -137,7 +171,7 @@ class NativePaddleRuntime:
                 'outputImages': output_images}],
                 'rawOutputs': {'model_output': base64.b64encode(json.dumps(manifest, ensure_ascii=False,
                     allow_nan=False, sort_keys=True).encode()).decode('ascii')},
-                'rawAssets': {name: base64.b64encode(value).decode('ascii') for name, value in assets.items()},
+                **_native_assets(assets, manifest, self.config, self.store),
                 'nativeCapture': {'status': manifest['captureStatus'], 'runtime': manifest['runtime'],
                                   'inputSha256': hashlib.sha256(raw).hexdigest(), 'sourceQualityAccepted': False}}
             json.dumps(response, ensure_ascii=False, allow_nan=False)
@@ -150,6 +184,9 @@ class NativePaddleRuntime:
 
 
 def create_app(config, store, runtime_factory=NativePaddleRuntime):
+    root = native_asset_root(config.get('nativeCaptureTransport'))
+    if root is not None and root != store.root:
+        raise ValueError('Native provider CAS differs from its pinned transport root')
     app = FastAPI(title='ConSense owned Paddle native capture provider')
     runtime, lock = runtime_factory(config, store), threading.Lock()
     @app.get('/health')
@@ -179,9 +216,16 @@ def create_app(config, store, runtime_factory=NativePaddleRuntime):
             failed_manifest = json.dumps(error.manifest, ensure_ascii=False, allow_nan=False).encode()
             receipt = store.put_bytes(failed_manifest,
                 identity_scope='actual_failed_native_capture_manifest')
+            try:
+                assets = _native_assets(error.assets, error.manifest, config, store)
+            except Exception as asset_error:
+                # Failed CAS publication must not discard bytes already captured in memory.
+                assets = {'rawAssetTransport': FAILED_INLINE_TRANSPORT,
+                    'assetReferenceError': {'errorType': type(asset_error).__name__, 'reason': str(asset_error)},
+                    'rawAssets': {name: base64.b64encode(raw).decode('ascii') for name, raw in error.assets.items()}}
             raise HTTPException(503, {'kind': 'native_capture_failed', 'reason': str(error), 'receipt': receipt,
                 'rawOutputs': {'model_output': base64.b64encode(failed_manifest).decode('ascii')},
-                'rawAssets': {name: base64.b64encode(raw).decode('ascii') for name, raw in error.assets.items()}}) from error
+                **assets}) from error
         except Exception as error:
             raise HTTPException(503, {'kind': 'native_provider_failed', 'reason': str(error)}) from error
     return app

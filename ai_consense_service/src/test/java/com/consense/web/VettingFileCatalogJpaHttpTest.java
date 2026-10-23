@@ -10,6 +10,8 @@ import com.consense.domain.SourceDocument;
 import com.consense.repository.ProjectRepository;
 import com.consense.repository.SourceDocumentRepository;
 import com.consense.service.vetting.OerBusinessEvidence;
+import com.consense.service.vetting.VettingCorpus;
+import com.consense.service.sources.CanonicalEvidenceService;
 import com.consense.service.sources.OerSourceMetadata;
 import com.consense.service.sources.ProjectDocumentScope;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -91,7 +93,12 @@ class VettingFileCatalogJpaHttpTest {
         SourceDocument failed=source(" 10 - scc.DOCX ","SCC","tender","package",null);failed.setParseStatus("FAILED");failed.setParseMessage("Authored failed parse");documents.saveAndFlush(failed);
         source("03 - NTT.docx","NTT","tender","package","Current tender text.");clear();JsonNode d=data();assertEquals(2,d.size());
         assertEquals("NTT",d.get(0).path("key").asText());assertEquals("FAILED",d.get(1).path("parseStatus").asText());
-        assertFalse(d.get(1).path("parsed").asBoolean());assertEquals(0,d.get(1).path("textChars").asInt());assertEquals("Authored failed parse",d.get(1).path("basis").asText());assertNoArchiveHydration();
+        assertFalse(d.get(1).path("parsed").asBoolean());assertEquals(0,d.get(1).path("textChars").asInt());assertEquals("Authored failed parse",d.get(1).path("basis").asText());
+        assertEquals(String.valueOf(failed.getId()),d.get(1).path("documentId").asText());
+        assertEquals(failed.getSourceSha256(),d.get(1).path("originalSourceSha256").asText());
+        assertEquals(VettingCorpus.sourceHash(failed),d.get(1).path("sourceHash").asText());
+        assertEquals(CanonicalEvidenceService.routingHash(failed),d.get(1).path("routingSha256").asText());
+        assertNoArchiveHydration(1);
     }
     @Test void fileListKeepsExistingRoutingExclusionsAndExplicitRoles()throws Exception{
         source("10 - SCC.docx","SCC","tender","package","Current project SCC.");SourceDocument g=source("GCC.pdf","GCC","standard","package","Current GCC standard.");fixtureSql.update("update source_document set review_role=? where id=?","project_fact",g.getId());

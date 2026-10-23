@@ -7,6 +7,7 @@ import java.util.*;
 import java.util.concurrent.TimeUnit;
 import java.security.MessageDigest;
 import com.consense.common.JsonUtils;
+import com.consense.document.DocxTemplateEditor;
 import org.apache.pdfbox.pdmodel.*;
 import org.apache.pdfbox.pdmodel.font.PDFont;
 import org.apache.pdfbox.cos.COSName;
@@ -37,9 +38,13 @@ public final class DraftPdfConverter {
             if(exactDocx==null||exactDocx.length==0)throw new DraftPdfConversionException(DraftPdfConversionException.Code.INVALID_DOCX,"The source artifact is empty.");
             byte[] frozen=exactDocx.clone();String inputHash=sha256(frozen);
             Map<String,Object> sourceCapabilities=DraftPdfSourceCapabilities.inspect(frozen,profile.getInstalledFonts());
+            DocxTemplateEditor.DocxEditResult rendering;
+            try { rendering=new DocxTemplateEditor().libreOfficeRenderingCopy(frozen); }
+            catch(DocxTemplateEditor.EditException invalid) { throw new DraftPdfConversionException(DraftPdfConversionException.Code.INVALID_DOCX,"Cannot prepare the renderer-only DOCX copy.",invalid); }
+            byte[] renderBytes=rendering.getDocxBytes();String renderHash=sha256(renderBytes);
             Files.createDirectories(profile.getWorkRoot());Path work=Files.createTempDirectory(profile.getWorkRoot(),"render-");
             Path privateProfile=Files.createDirectory(work.resolve("profile")),out=Files.createDirectory(work.resolve("out"));
-            Path input=work.resolve("artifact.docx");Files.write(input,frozen);
+            Path input=work.resolve("artifact.docx");Files.write(input,renderBytes);
             List<String> versionCommand=new ArrayList<>(profile.getCommand());versionCommand.add("-env:UserInstallation="+privateProfile.toUri().toASCIIString());versionCommand.add("--version");
             String version=run(versionCommand,work,deadline).trim();
             if(version.isEmpty())throw new DraftPdfConversionException(DraftPdfConversionException.Code.NOT_CONFIGURED,"The renderer did not identify its version.");
@@ -48,7 +53,7 @@ public final class DraftPdfConverter {
             String filterArgument=System.getProperty("os.name","").startsWith("Windows")?EXPORT_FILTER.replace("\"","\\\""):EXPORT_FILTER;
             command.addAll(Arrays.asList("--headless","--nologo","--nodefault","--norestore","--convert-to",filterArgument,"--outdir",out.toString(),input.toString()));
             String diagnostic=run(command,work,deadline);
-            if(!inputHash.equals(sha256(Files.readAllBytes(input))))throw new DraftPdfConversionException(DraftPdfConversionException.Code.CONVERSION_FAILED,"Renderer changed the frozen DOCX working copy.");
+            if(!renderHash.equals(sha256(Files.readAllBytes(input))))throw new DraftPdfConversionException(DraftPdfConversionException.Code.CONVERSION_FAILED,"Renderer changed the frozen DOCX working copy.");
             Path output=out.resolve("artifact.pdf");
             if(!Files.isRegularFile(output))throw new DraftPdfConversionException(DraftPdfConversionException.Code.OUTPUT_MISSING,"Renderer returned without the expected PDF artifact. Private-profile path length="+privateProfile.toString().length()+"; some portable Windows renderers require an explicitly shorter work root. Output: "+diagnostic);
             if(Files.size(output)>profile.getMaxPdfBytes())throw new DraftPdfConversionException(DraftPdfConversionException.Code.OUTPUT_TOO_LARGE,"Renderer output exceeds the configured PDF byte limit.");
@@ -62,6 +67,7 @@ public final class DraftPdfConverter {
                 manifest.put("pdfFonts",Collections.unmodifiableSet(renderedFonts));
             }catch(IOException|RuntimeException invalid){throw new DraftPdfConversionException(DraftPdfConversionException.Code.INVALID_PDF,"Renderer output is not a readable non-empty PDF.",invalid);}
             manifest.put("docxSha256",inputHash);manifest.put("pdfSha256",sha256(pdf));manifest.put("rendererExecutable",profile.getCommand().get(0));
+            manifest.put("rendererInputSha256",renderHash);manifest.put("latinHintPolicy","libreoffice-latin-hints-v1");manifest.put("latinHintParagraphs",rendering.getNativeLayoutLedger().size());
             manifest.put("rendererVersion",version);manifest.put("adapter","headless writer_pdf_Export");manifest.put("exportFilter",EXPORT_FILTER);
             manifest.put("renderProfileHash",profileHash(version));
             manifest.put("privateProfileId",privateProfile.toUri().toASCIIString());manifest.put("privateWorkDirectory",work.toString());
@@ -75,20 +81,35 @@ public final class DraftPdfConverter {
     }
     /** Assess the actual executable/version/fonts before selecting a cached PDF. */
     public String currentProfileHash() {
+        long deadline=System.nanoTime()+TimeUnit.MILLISECONDS.toNanos(profile==null?1:profile.getTimeoutMillis());
         if(profile!=null&&profile.getEngine()==DraftPdfRenderProfile.Engine.DESKTOP_X2T)return new DraftDesktopPdfAdapter(profile).currentProfileHash();
         if(profile==null||!Files.isRegularFile(Paths.get(profile.getCommand().get(0))))throw new DraftPdfConversionException(DraftPdfConversionException.Code.NOT_CONFIGURED,"The explicitly configured document renderer is unavailable.");
         if(!hasProcessHandles())throw new DraftPdfConversionException(DraftPdfConversionException.Code.NOT_CONFIGURED,"A runtime with ProcessHandle support is required.");
         try {
-            Files.createDirectories(profile.getWorkRoot());Path work=Files.createTempDirectory(profile.getWorkRoot(),"profile-probe-");Path privateProfile=Files.createDirectory(work.resolve("profile"));
+            Files.createDirectories(profile.getWorkRoot());
+            try(ProfileProbe probe=new ProfileProbe(profile.getWorkRoot())){
+            Path work=probe.work,privateProfile=Files.createDirectory(work.resolve("profile"));
             List<String> command=new ArrayList<>(profile.getCommand());command.add("-env:UserInstallation="+privateProfile.toUri().toASCIIString());command.add("--version");
-            String version=run(command,work,System.nanoTime()+TimeUnit.MILLISECONDS.toNanos(profile.getTimeoutMillis())).trim();
+            String version=run(command,work,deadline).trim();
             if(version.isEmpty())throw new DraftPdfConversionException(DraftPdfConversionException.Code.NOT_CONFIGURED,"The renderer did not identify its version.");
             return profileHash(version);
+            }
         }catch(IOException failure){throw new DraftPdfConversionException(DraftPdfConversionException.Code.CONVERSION_FAILED,"Cannot assess configured renderer.",failure);}
+    }
+    private static final class ProfileProbe implements AutoCloseable {
+        private final Path root,work;
+        ProfileProbe(Path root)throws IOException{this.root=root.toRealPath();this.work=Files.createTempDirectory(this.root,"profile-probe-");}
+        @Override public void close()throws IOException{
+            if(!root.equals(work.toAbsolutePath().normalize().getParent())||!work.getFileName().toString().startsWith("profile-probe-"))throw new IOException("Renderer probe directory is outside its work root.");
+            Files.walkFileTree(work,new SimpleFileVisitor<Path>(){
+                @Override public FileVisitResult visitFile(Path file,java.nio.file.attribute.BasicFileAttributes attrs)throws IOException{Files.delete(file);return FileVisitResult.CONTINUE;}
+                @Override public FileVisitResult postVisitDirectory(Path directory,IOException failure)throws IOException{if(failure!=null)throw failure;Files.delete(directory);return FileVisitResult.CONTINUE;}
+            });
+        }
     }
     private String profileHash(String version)throws IOException {
         Map<String,Object> identity=new LinkedHashMap<>();identity.put("command",profile.getCommand());identity.put("version",version);identity.put("exportFilter",EXPORT_FILTER);
-        identity.put("executableSha256",sha256(Files.readAllBytes(Paths.get(profile.getCommand().get(0)))));identity.put("adapterVersion",2);
+        identity.put("executableSha256",sha256(Files.readAllBytes(Paths.get(profile.getCommand().get(0)))));identity.put("adapterVersion",3);identity.put("latinHintPolicy","libreoffice-latin-hints-v1");
         identity.put("locale",Locale.getDefault().toLanguageTag());identity.put("profilePolicy","fresh private profile for every conversion");
         identity.put("fontInventoryIdentity",profile.getFontInventoryIdentity());identity.put("installedFontFamilies",profile.getInstalledFonts());
         return sha256(JsonUtils.write(identity).getBytes(StandardCharsets.UTF_8));

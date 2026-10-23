@@ -126,17 +126,16 @@ async function harness({ stored = new Map(), metadata = profiles, metadataError 
   assert.equal(outbound.requests.find(request => request.url === '/drafting/legacy-operation/variables/extract').config.headers['X-ConSense-Llm-Profile'], undefined)
   outbound.dispose()
   console.log('PASS: actual client snapshots selected profile in request headers; later selection affects only subsequent requests and sends no key')
-  const save = deferred()
   const field = { key: 'contractTitle', kind: 'text', label: { en: 'Contract title', zhHans: '合约名称', zhHant: '合約名稱' } }
   const original = { key: 'contractTitle', value: 'Original title', confirmed: true, manuallyEdited: true, candidates: [] }
-  const reviewGraph = { kind: 'consense-template-graph-v1', graph: { variables: [{ id: 'review-q', nameZh: 'TEST', nameEn: 'TEST', status: 'pending', type: { kind: 'text' }, role: { kind: 'input' }, docIds: [], sourceAnchors: [], sourceUnitIds: [], options: [], editTargets: [], evidence: [], relatedInputIds: [], relations: [], targets: [] }], sourceReviews: {}, events: [], nextId: 1 }, sources: [], selectedDocuments: {} }
+  const reviewHead = { currentRevisionId: null, draftRevisionId: null, current: null, draft: null, sources: [] }
   const drafting = await harness({ metadata: available, stored: new Map([['consense-llm-profile', 'local']]), view: 'DraftingView', respond: request => {
     if (request.url === '/projects') return [{ id: 'A', name: field.label }]
-    if (request.url.endsWith('/graph') && request.method === 'get') return { currentRevisionId: null, draftRevisionId: null, current: null, draft: null, sources: [] }
-    if (request.url.endsWith('/graph/bootstrap')) return { graph: reviewGraph, sources: [] }
-    if (request.url.endsWith('/graph') && request.method === 'post') return save.promise
+    if (request.url.endsWith('/graph') && request.method === 'get') return reviewHead
+    if (request.url.endsWith('/graph/automation/latest')) return null
+    if (request.url.endsWith('/templates')) return [{ key: 'NTT', fileName: 'NTT.docx', tag: 'ok' }]
     if (request.url.endsWith('/candidates')) return { variables: [] }
-    if (request.url.endsWith('/catalog')) return { ruleVersion: 'unchanged', groups: [{ key: 'contract', label: field.label, fields: [field] }] }
+    if (request.url.endsWith('/catalog')) return { ruleVersion: 'unchanged', groups: [{ id: 'contract', key: 'contract', label: field.label, fields: [field] }] }
     if (request.url.endsWith('/variables')) return [original]
     if (request.url.endsWith('/inputs')) return [{ id: 1, fileName: 'source.docx', status: 'PARSED' }]
     if (request.url.endsWith('/plan')) return { actions: [], unresolved: [] }
@@ -144,20 +143,46 @@ async function harness({ stored = new Map(), metadata = profiles, metadataError 
   } })
   await find(drafting.root, node => node.tag === 'button' && text(node).trim() === 'Enter inputs manually').props.onClick(); await settle()
   find(drafting.root, node => node.tag === 'input' && node.props.id === 'input-contractTitle').props.onInput({ target: { value: 'User edit' } }); await settle()
-  const extraction = find(drafting.root, node => node.tag === 'button' && text(node).trim() === 'Identify inputs').props.onClick(); await settle()
-  assert.ok(drafting.requests.some(request => request.method === 'post' && request.url.endsWith('/graph')))
-  assert.equal(drafting.requests.some(request => request.method === 'put'), false, 'Template preparation does not adopt the unsaved project fact')
-  assert.equal(drafting.requests.some(request => request.url.endsWith('/review-await/extract')), false)
-  await find(drafting.root, node => node.tag === 'select' && node.props['aria-label'] === 'LLM source').props.onChange({ target: { value: 'minimax-cn' } }); await settle()
-  save.resolve({ id: 'review-await', graph: reviewGraph, status: 'DRAFT', sourceStale: false }); await extraction; await settle()
-  assert.equal(drafting.requests.find(request => request.url.endsWith('/review-await/extract')).config.headers['X-ConSense-Llm-Profile'], 'local')
-  assert.match(text(drafting.root), /MiniMax-M3/)
+  await find(drafting.root, node => node.tag === 'button' && text(node).trim() === '1 File identification').props.onClick(); await settle()
+  const blockedAutomation = find(drafting.root, node => node.tag === 'button' && node.props['data-start-automation'] !== undefined)
+  assert.ok(blockedAutomation)
+  assert.equal(blockedAutomation.props.disabled, true, 'Unadopted input edits prevent an automatic graph mutation')
+  await blockedAutomation.props.onClick(); await settle()
+  assert.equal(drafting.requests.some(request => request.method === 'put'), false, 'Starting identification never adopts the unsaved project fact')
+  assert.equal(drafting.requests.some(request => request.method === 'post' && /\/graph(?:\/automation)?$|\/extract$/.test(request.url)), false)
+  assert.match(text(drafting.root), /Save or cancel unsaved/)
   drafting.dispose()
-  console.log('PASS: rendered Drafting draft extraction retains click-time local selection while a template graph save awaits without adopting an unsaved fact and the topbar changes to MiniMax')
+  const headRead = deferred(); let waitForHead = false
+  const automation = await harness({ metadata: available, stored: new Map([['consense-llm-profile', 'local']]), view: 'DraftingView', respond: request => {
+    if (request.url === '/projects') return [{ id: 'A-automation', name: field.label }]
+    if (request.url.endsWith('/graph') && request.method === 'get') return waitForHead ? headRead.promise : reviewHead
+    if (request.url.endsWith('/graph/automation/latest')) return null
+    if (request.url.endsWith('/graph/automation') && request.method === 'post') return { id: 'saved-identification', projectId: 'A-automation', status: 'CANCELLED', phase: 'CANCELLED', message: 'Fixture task ended', completedItems: 0, totalItems: 0, failedItems: 0, unresolvedItems: 0, requirementsCount: 0, nodesCount: 0, resultRevisionId: null }
+    if (request.url.endsWith('/catalog')) return { ruleVersion: 'unchanged', groups: [] }
+    if (request.url.endsWith('/templates')) return [{ key: 'NTT', fileName: 'NTT.docx', tag: 'ok' }]
+    return []
+  } })
+  waitForHead = true
+  const startAutomation = find(automation.root, node => node.tag === 'button' && node.props['data-start-automation'] !== undefined)
+  assert.ok(startAutomation); assert.equal(startAutomation.props.disabled, false)
+  const identifying = startAutomation.props.onClick(); await settle()
+  assert.equal(automation.requests.some(request => request.method === 'post'), false, 'The review-head read finishes before the automatic task is posted')
+  await find(automation.root, node => node.tag === 'select' && node.props['aria-label'] === 'LLM source').props.onChange({ target: { value: 'minimax-cn' } }); await settle()
+  headRead.resolve({ ...reviewHead, draftRevisionId: 'review-await' }); await identifying; await settle()
+  const identified = automation.requests.find(request => request.method === 'post' && request.url.endsWith('/graph/automation'))
+  assert.ok(identified)
+  assert.equal(identified.config.headers['X-ConSense-Llm-Profile'], 'local')
+  assert.deepEqual(Object.keys(identified.body).sort(), ['expectedCurrentRevisionId', 'expectedDraftRevisionId'])
+  assert.equal(identified.body.expectedCurrentRevisionId, null)
+  assert.equal(identified.body.expectedDraftRevisionId, 'review-await')
+  assert.equal(automation.requests.some(request => request.method === 'put' || /\/extract$/.test(request.url)), false)
+  assert.match(text(automation.root), /MiniMax-M3/)
+  automation.dispose()
+  console.log('PASS: current Drafting automation blocks unsaved facts and retains click-time local selection across the saved-graph read while the next-operation topbar changes to MiniMax')
   const plan = deferred(); let waitForPlan = false
   const generation = await harness({ metadata: available, stored: new Map([['consense-llm-profile', 'local']]), view: 'DraftingView', respond: request => {
     if (request.url === '/projects') return [{ id: 'G', name: field.label }]
-    if (request.url.endsWith('/catalog')) return { ruleVersion: 'unchanged', groups: [{ key: 'contract', label: field.label, fields: [field] }] }
+    if (request.url.endsWith('/catalog')) return { ruleVersion: 'unchanged', groups: [{ id: 'contract', key: 'contract', label: field.label, fields: [field] }] }
     if (request.url.endsWith('/variables')) return [original]
     if (request.url.endsWith('/templates')) return ['NTT', 'SCT', 'SCC'].map(key => ({ key, fileName: `${key}.docx`, tag: 'ok' }))
     if (request.url.endsWith('/plan')) return waitForPlan ? plan.promise : { actions: [], unresolved: [] }
@@ -210,14 +235,16 @@ async function harness({ stored = new Map(), metadata = profiles, metadataError 
   const trace = { model: 'captured-legacy-label', finishedAt: '2026-10-06', systemPrompt: 'saved system', userPrompt: 'saved source', rawResponses: [], status: 'completed', runId: 'saved-trace', modelIdentity: { profileId: 'local', provider: 'ollama', model: 'configured-local-trace', configurationSha256: 'c'.repeat(64), identityScope: 'configured_profile' } }
   const traced = await harness({ metadata: available, view: 'DraftingView', stored: new Map([['consense-llm-profile', 'minimax-cn']]), respond: request => {
     if (request.url === '/projects') return [{ id: 'T', name: field.label }]
-    if (request.url.endsWith('/catalog')) return { ruleVersion: 'unchanged', groups: [{ key: 'contract', label: field.label, fields: [field] }] }
+    if (request.url.endsWith('/catalog')) return { ruleVersion: 'unchanged', groups: [{ id: 'contract', key: 'contract', label: field.label, fields: [field] }] }
     if (request.url.endsWith('/plan')) return { actions: [], unresolved: [] }
     if (request.url.endsWith('/extract-trace')) return trace
     return []
   } })
+  await find(traced.root, node => node.tag === 'button' && text(node).trim() === 'Enter inputs manually').props.onClick(); await settle()
   await find(traced.root, node => node.tag === 'button' && text(node).trim() === 'Extraction trace').props.onClick(); await settle()
   assert.match(text(traced.root), /Recorded model: configured-local-trace/)
-  assert.match(text(traced.root), /local · ollama/)
+  assert.match(text(traced.root), /ollama/)
+  assert.equal(trace.modelIdentity.profileId, 'local', 'The saved profile identity remains bound to the historical report without requiring its internal ID in the display')
   assert.match(text(traced.root), /Model: MiniMax-M3/)
   for (const [locale, label] of [['zh-Hans', '记录的模型'], ['zh-Hant', '記錄的模型'], ['en', 'Recorded model']]) {
     traced.store.changeLocale(locale); await settle()
@@ -225,6 +252,7 @@ async function harness({ stored = new Map(), metadata = profiles, metadataError 
   }
   delete trace.modelIdentity
   await traced.store.switchProject('T2'); await settle()
+  await find(traced.root, node => node.tag === 'button' && text(node).trim() === 'Enter inputs manually').props.onClick(); await settle()
   await find(traced.root, node => node.tag === 'button' && text(node).trim() === 'Extraction trace').props.onClick(); await settle()
   const legacyReport = find(traced.root, node => node.tag === 'section' && node.props.class === 'extraction-report')
   assert.match(text(legacyReport), /captured-legacy-label/)
