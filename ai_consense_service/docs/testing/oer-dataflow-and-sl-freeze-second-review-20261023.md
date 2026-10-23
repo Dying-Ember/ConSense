@@ -77,7 +77,7 @@
 
 ### R07．P2：索引损坏能被拒绝，但“重新构建”仍只重试失败的复用路径
 
-**具体触发。** 原件、修订与请求配方都没有变化，现有派生向量 collection 缺点或完整性不符。状态检查可以判断索引不可用，但用户点击重新构建仍发送同一 index 请求，无法绕出失败复用分支。
+**具体触发。** 正常动态索引仍存在同 signature／contract 的 metadata，原件、修订与请求配方都没有变化，但现有派生向量 collection 缺点或完整性不符。状态检查可以判断索引不可用，但用户点击重新构建仍发送同一 index 请求，无法绕出失败复用分支。此项不包含 `server.py:505–508` 按设计只读、明确拒绝写入的 migrated 固定索引。
 
 **代码与反例。** [AdviceService.java:137](/D:/R&D/ConSense/ai_consense_service/src/main/java/com/consense/service/advice/AdviceService.java:137)显式 rebuild 调 `canonical.index(session)`，经 [OerCanonicalRetrievalClient.java:359](/D:/R&D/ConSense/ai_consense_service/src/main/java/com/consense/service/vetting/OerCanonicalRetrievalClient.java:359)进入 `/index-canonical`；[oer_server.py:44](/D:/R&D/ConSense/ai_consense_service/tools/vetting_eval/oer_server.py:44)的请求没有 rebuild 意图。自动 `ensureIndex()` 也只在不 ready 时调用同一 index。[WindowRuntime.index:239](/D:/R&D/ConSense/ai_consense_service/tools/vetting_eval/window_runtime.py:239)一旦 metadata signature／contract 相同就执行 `verify_reuse`，异常直接抛出，250 行以下重建代码不可达。
 
