@@ -4,6 +4,8 @@ import com.consense.ai.AiGateway;
 import com.consense.common.JsonUtils;
 import com.consense.domain.*;
 import com.consense.repository.*;
+import com.consense.service.export.EnglishFileOutput;
+import com.fasterxml.jackson.databind.JsonNode;
 import org.springframework.boot.builder.SpringApplicationBuilder;
 import org.springframework.boot.web.servlet.context.ServletWebServerApplicationContext;
 import org.springframework.boot.test.context.TestConfiguration;
@@ -69,6 +71,12 @@ public final class VettingRecoveryProcessFixture {
     static String request(String url,String method)throws Exception{java.net.HttpURLConnection connection=(java.net.HttpURLConnection)new java.net.URL(url).openConnection();connection.setRequestMethod(method);connection.setConnectTimeout(5000);connection.setReadTimeout(5000);try(java.io.InputStream in=connection.getInputStream()){return new String(in.readAllBytes(),StandardCharsets.UTF_8);}finally{connection.disconnect();}}
     @TestConfiguration
     public static class Fixture {
+        @Bean @Primary EnglishFileOutput fixtureEnglishFiles(){
+            EnglishFileOutput output=mock(EnglishFileOutput.class);
+            when(output.json(any(JsonNode.class),anyString(),any(Runnable.class))).thenAnswer(call->{call.<Runnable>getArgument(2).run();return call.<JsonNode>getArgument(0).deepCopy();});
+            when(output.docx(any(byte[].class),anyString(),any(Runnable.class))).thenAnswer(call->{call.<Runnable>getArgument(2).run();return call.<byte[]>getArgument(0).clone();});
+            return output;
+        }
         @Bean @Primary VettingInputBudget.Observer fixtureTokens(){return VettingTokenFixture::observe;}
         @Bean org.springframework.boot.web.embedded.tomcat.TomcatServletWebServerFactory fixtureServer(){org.springframework.boot.web.embedded.tomcat.TomcatServletWebServerFactory server=new org.springframework.boot.web.embedded.tomcat.TomcatServletWebServerFactory();server.setProtocol("org.apache.coyote.http11.Http11Nio2Protocol");return server;}
         @Bean @Primary AiGateway fixtureGateway(){AiGateway ai=mock(AiGateway.class);when(ai.available()).thenReturn(true);when(ai.chatModel()).thenReturn("fixture-only");

@@ -26,6 +26,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @SpringBootTest(properties={"spring.jpa.hibernate.ddl-auto=create-drop","spring.flyway.enabled=false","consense.llm.enabled=false","consense.ocr.enabled=false","consense.vector.provider=memory"})
 @ActiveProfiles("h2") @AutoConfigureMockMvc
 class DraftingArtifactIntegrationTest {
+    @org.springframework.boot.test.mock.mockito.MockBean com.consense.service.export.EnglishFileOutput englishFileOutput;
+    @org.junit.jupiter.api.BeforeEach void englishDeliveryBoundary(){EnglishFileOutputNoopFixture.configure(englishFileOutput);}
     private static final String DB=UUID.randomUUID().toString();
     private static final String[] NAMES={"01_Notes to Tenderers (NTT).docx","02_Special Conditions of Tender (SCT).docx","06_Special Conditions of Contract (SCC).docx"};
     private static final String[] KEYS={"NTT","SCT","SCC"};

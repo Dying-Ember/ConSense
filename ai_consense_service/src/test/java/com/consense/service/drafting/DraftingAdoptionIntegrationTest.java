@@ -37,6 +37,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @ActiveProfiles("h2")
 @AutoConfigureMockMvc
 class DraftingAdoptionIntegrationTest {
+    @org.springframework.boot.test.mock.mockito.MockBean com.consense.service.export.EnglishFileOutput englishFileOutput;
+    @org.junit.jupiter.api.BeforeEach void englishDeliveryBoundary(){EnglishFileOutputNoopFixture.configure(englishFileOutput);}
     private static final String DB=UUID.randomUUID().toString();
     @DynamicPropertySource static void resources(DynamicPropertyRegistry r) {
         r.add("spring.datasource.url",()->"jdbc:h2:mem:draft_adoption_"+DB+";MODE=MySQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE");

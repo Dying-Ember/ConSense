@@ -77,6 +77,21 @@ class VettingReaderReportPresentationTest {
             assertEquals(before,JsonUtils.write(finding));
         }
     }
+    @Test void readerWordGivesTranslatedHumanRemarksQuarterWidthWithoutChangingColumnsOrSavedMeaning() throws Exception {
+        FindingVO finding=candidate();finding.setReviewRemarks("English translation: The same payment cannot be due on both day 14 and day 21. Refer to QS; no real-project adoption is confirmed.");finding.setActionTaken("English translation: Retain both original texts and source locations until QS confirms priority.");String before=JsonUtils.write(finding);
+        VettingReportPresentation.Table model=readerComments(Collections.singletonList(finding),null).get(0);
+        assertArrayEquals(new int[]{7,10,15,43,25},model.getWidths());assertEquals(100,Arrays.stream(model.getWidths()).sum());
+        assertEquals(VettingReportPresentation.comments(Collections.singletonList(finding),null).get(0).getHeadings(),model.getHeadings());
+        assertArrayEquals(model.getWidths(),readerComments(Collections.emptyList(),null).get(0).getWidths());
+        try(XWPFDocument word=new XWPFDocument(new ByteArrayInputStream(new VettingReportWriter().docx(project(),Collections.singletonList(finding),null,"en")))){
+            XWPFTable table=word.getTables().stream().filter(t->t.getRow(0).getTableCells().stream().anyMatch(c->c.getText().contains("Remarks by Project Team"))).findFirst().orElseThrow(AssertionError::new);
+            XWPFTableRow row=table.getRow(2);assertEquals(5,row.getTableCells().size());
+            assertEquals(Integer.toString(9986*25/100),row.getCell(4).getCTTc().getTcPr().getTcW().getW().toString());
+            assertEquals(Integer.toString(9986*43/100),row.getCell(3).getCTTc().getTcPr().getTcW().getW().toString());
+            assertTrue(row.getCell(4).getText().contains(finding.getReviewRemarks()));assertTrue(row.getCell(4).getText().contains(finding.getActionTaken()));
+        }
+        assertEquals(before,JsonUtils.write(finding));
+    }
     @Test void unknownAndUnsupportedLocationsStayUnknownWithoutInventedPhysicalPages() throws Exception {
         for(String raw:Arrays.asList("body/4/table/row/1","/word/header3.xml/w:p[1]","")) {
             String location=readerLocation(raw);

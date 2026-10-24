@@ -8,25 +8,25 @@ import org.apache.xmlbeans.XmlCursor;
 
 /** Delivery notice is added to a fresh generated copy, never to the source template. */
 final class DraftIncompleteNotice {
-    static final String TITLE="未完成草稿 / INCOMPLETE DRAFT";
+    static final String TITLE="INCOMPLETE DRAFT";
     private DraftIncompleteNotice() { }
 
     static List<String> outstanding(Map<String,Object> graph,Map<String,Object> plan) {
         return outstanding(graph,plan,null);
     }
     static List<String> outstanding(Map<String,Object> graph,Map<String,Object> plan,String fileKey) {
-        Map<String,String> labels=new LinkedHashMap<>();labels.put("contractTitle","项目名称及合约编号 / Project name and contract number");
+        Map<String,String> labels=new LinkedHashMap<>();labels.put("contractTitle","Project name and contract number");
         Map<String,String> documents=new HashMap<>();
         for(Object raw:list(graph.get("sources"))){Map<String,Object> source=map(raw);documents.put(text(source.get("docId")),text(source.get("fileName")));}
         for(Map<String,Object> node:nodes(graph)){
-            String name=text(node.get("nameZh"));if(name.isEmpty())name=text(node.get("nameEn"));if(name.isEmpty())name="待核对问题 / Question requiring review";
+            String name=text(node.get("nameEn"));if(name.isEmpty())name=text(node.get("nameZh"));if(name.isEmpty())name="Question requiring review";
             if("source_seed".equals(text(node.get("definitionKind")))){
                 Set<String> descriptions=new LinkedHashSet<>();
                 for(Object raw:list(node.get("sourceAnchors"))){Map<String,Object> anchor=map(raw);String file=documents.getOrDefault(text(anchor.get("docId")),"");String quote=text(anchor.get("text")).replaceAll("\\s+"," ").trim();
                     if(quote.length()>240)quote=quote.substring(0,quote.offsetByCodePoints(0,Math.min(240,quote.codePointCount(0,quote.length()))))+"…";
                     if(!file.isEmpty()||!quote.isEmpty())descriptions.add(file+(quote.isEmpty()?"":" — “"+quote+"”"));
                 }
-                name="核对来源指导 / Review source guidance"+(descriptions.isEmpty()?"":" — "+String.join("；",descriptions));
+                name="Review source guidance"+(descriptions.isEmpty()?"":" — "+String.join("; ",descriptions));
             }
             labels.put(text(node.get("id")),name);
             for(Object raw:list(node.get("editTargets"))){Map<String,Object> target=map(raw);String file=documents.getOrDefault(text(target.get("docId")),"");String quote=text(target.get("text")).replaceAll("\\s+"," ").trim();
@@ -46,27 +46,27 @@ final class DraftIncompleteNotice {
             String kind=text(issue.get("kind"));int colon=kind.indexOf(':');if(subjects.isEmpty()&&colon>=0&&labels.containsKey(kind.substring(colon+1))){String id=kind.substring(colon+1);identities.add(id);subjects.add(labels.get(id));}
             // Group only the same identified subjects; equal display names do not prove equivalence.
             String group=!subjects.isEmpty()&&!identities.isEmpty()?com.consense.common.JsonUtils.write(identities):"unidentified:"+(++unidentified);
-            headings.putIfAbsent(group,subjects.isEmpty()?(DraftBlueprint.draftFileKeys().contains(document)?document+" 文稿 / Document":"项目文稿 / Project draft"):String.join("；",subjects));
+            headings.putIfAbsent(group,subjects.isEmpty()?(DraftBlueprint.draftFileKeys().contains(document)?document+" document":"Project draft"):String.join("; ",subjects));
             reasons.computeIfAbsent(group,key->new LinkedHashSet<>()).add(reason(colon<0?kind:kind.substring(0,colon)));
         }
         List<String> result=new ArrayList<>();
-        reasons.forEach((key,value)->result.add(headings.get(key)+"："+String.join("\n",value)));
-        otherDocuments.forEach((key,count)->result.add(key+" 文稿另有 "+count+" 项未处理记录，请查看该文稿附后的清单；整套文件仍未完成。 / "+count+" outstanding records remain in "+key+". See that document's list; the package remains incomplete."));
+        reasons.forEach((key,value)->result.add(headings.get(key)+": "+String.join("\n",value)));
+        otherDocuments.forEach((key,count)->result.add(count+" outstanding records remain in "+key+". See that document's list; the package remains incomplete."));
         return result;
     }
     private static String reason(String kind){
         switch(kind){
-            case "SourceFormat":return "原件版式或项目身份显示仍需核对；请检查页眉页脚、项目名称及合约编号，处理前保留原内容。 / Review the source layout, headers, footers and project identity; existing content is retained pending review.";
-            case "NodeReviewRequired":return "问题或规则尚未确认；请核对指导说明和修改范围。 / Review the guidance and modification scope.";
-            case "InputMissing":case "AnswerUnknown":case "DerivedUnknown":return "答案尚未明确采用或无法确定；请核对来源并采用答案。 / Review the sources and adopt the required answer.";
-            case "InputInvalid":return "答案不符合此问题的格式要求；请修正后重新核对。 / Correct the answer format and review it again.";
-            case "OverlappingEdits":return "修改范围重叠，双方保留原文；请确定一致的处理方案。 / Overlapping treatments retain their source wording; choose one consistent treatment.";
-            case "ConditionUnknown":case "BranchConflict":return "适用条件未确定或存在冲突；请核对条件。 / Review the unresolved or conflicting applicability conditions.";
-            case "SourceBindingRequired":case "ReplacementPlacementRequired":case "ItemPlacementRequired":case "UnknownTargetSource":return "原文位置或改文落点尚未明确；请打开原文件并指定准确范围。 / Open the original and identify the exact modification range and placement.";
-            case "GraphCycle":case "SchemaNeedsReview":return "规则关系尚不能执行；请核对依赖关系和规则定义。 / Review the rule definitions and dependencies before applying changes.";
-            case "source_review":case "graph_source_changed":case "input_review":return "来源或采用依据需要重新核对；请确认当前原件和答案。 / Recheck the current source and adopted answer.";
-            case "ManualCheck":return "处理方式尚待核对；请对照原文确认本次修改。 / Check the source and confirm the intended treatment.";
-            default:return "修改方案仍有待核对事项，相关内容保留原文；请返回采用与修改方案查看并处理。 / This treatment requires review and retains its source wording; review it in the adoption and modification plan.";
+            case "SourceFormat":return "Review the source layout, headers, footers and project identity; existing content is retained pending review.";
+            case "NodeReviewRequired":return "Review the guidance and modification scope.";
+            case "InputMissing":case "AnswerUnknown":case "DerivedUnknown":return "Review the sources and adopt the required answer.";
+            case "InputInvalid":return "Correct the answer format and review it again.";
+            case "OverlappingEdits":return "Overlapping treatments retain their source wording; choose one consistent treatment.";
+            case "ConditionUnknown":case "BranchConflict":return "Review the unresolved or conflicting applicability conditions.";
+            case "SourceBindingRequired":case "ReplacementPlacementRequired":case "ItemPlacementRequired":case "UnknownTargetSource":return "Open the original and identify the exact modification range and placement.";
+            case "GraphCycle":case "SchemaNeedsReview":return "Review the rule definitions and dependencies before applying changes.";
+            case "source_review":case "graph_source_changed":case "input_review":return "Recheck the current source and adopted answer.";
+            case "ManualCheck":return "Check the source and confirm the intended treatment.";
+            default:return "This treatment requires review and retains its source wording; review it in the adoption and modification plan.";
         }
     }
 
@@ -90,10 +90,10 @@ final class DraftIncompleteNotice {
             }
             if(cover==null)throw new IllegalStateException("Cannot insert incomplete-draft notice");
             cover.setSpacingAfter(240);XWPFRun title=noticeRun(cover);title.setText(TITLE);title.setBold(true);title.setColor("B91C1C");title.setFontSize(20);title.addBreak();
-            XWPFRun explanation=noticeRun(cover);explanation.setFontSize(12);explanation.setText("仅应用已核对并采用的修改；未决部分保留原文。未处理清单附后。本稿不可视为已完成文件。");explanation.addBreak();
+            XWPFRun explanation=noticeRun(cover);explanation.setFontSize(12);
             explanation.setText("Only reviewed and adopted changes are applied. Unresolved passages retain their source wording. See the outstanding-items list at the end. This document is not complete.");explanation.addBreak(BreakType.PAGE);
             annotation(cover,bookmarkId=bookmarkId.add(java.math.BigInteger.ONE),"before",annotations);
-            XWPFParagraph heading=document.createParagraph();heading.setPageBreak(true);XWPFRun headingRun=noticeRun(heading);headingRun.setText("未处理清单 / Outstanding items");headingRun.setBold(true);headingRun.setFontSize(16);
+            XWPFParagraph heading=document.createParagraph();heading.setPageBreak(true);XWPFRun headingRun=noticeRun(heading);headingRun.setText("Outstanding items");headingRun.setBold(true);headingRun.setFontSize(16);
             annotation(heading,bookmarkId=bookmarkId.add(java.math.BigInteger.ONE),"after",annotations);
             int number=0;
             for(String item:outstanding) {

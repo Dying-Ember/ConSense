@@ -12,6 +12,13 @@ import static org.mockito.Mockito.*;
 import static org.mockito.ArgumentMatchers.*;
 
 class QwenChatUsagePreflightTest {
+    @Test void englishFileExportUsesItsOwnFinitePaidActionBudget() {
+        QwenChatUsagePreflight.Operation op=usage.capture(chat("qwen"),"file-export");
+        try(QwenChatUsagePreflight.Operation.ActionScope ignored=op.openAction("file-export:authored",()->{})) { }
+        org.mockito.ArgumentCaptor<QwenGenerationLedger.Limits> limits=org.mockito.ArgumentCaptor.forClass(QwenGenerationLedger.Limits.class);
+        verify(ledger).open(eq("file-export:authored"),anyString(),limits.capture());
+        assertEquals(24,limits.getValue().preflights);assertEquals(24,limits.getValue().answers);assertEquals(48,limits.getValue().total);
+    }
     private final ConsenseProperties props=new ConsenseProperties();
     private final HttpSupport http=mock(HttpSupport.class);
     private final QwenGenerationLedger ledger=mock(QwenGenerationLedger.class);

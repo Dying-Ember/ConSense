@@ -46,6 +46,7 @@ public final class QwenChatUsagePreflight {
         ConsenseProperties.QwenUsagePreflight p=props.getQwenUsagePreflight();
         if(!p.isEnabled())throw new IllegalStateException("qwen_usage_preflight_policy_disabled");
         if("vetting".equals(module))return new QwenGenerationLedger.Limits(p.getVettingMaxPreflights(),p.getVettingMaxAnswers(),p.getVettingMaxTotal(),p.getActionLifetimeMs());
+        if("file-export".equals(module))return new QwenGenerationLedger.Limits(24,24,48,p.getActionLifetimeMs());
         if(!"advice".equals(module)||h<0||h>100)throw new IllegalArgumentException("Qwen bounded action scope required");
         return new QwenGenerationLedger.Limits(h+2,2,h+4,p.getActionLifetimeMs());
     }

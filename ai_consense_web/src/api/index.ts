@@ -151,12 +151,12 @@ export const draftingApi = {
     ),
 
   progress: (projectId: string) => api.get<DraftProgress>(`/drafting/${projectId}/progress`),
-  generate: (projectId: string, lang: string, llmSelection?: LlmSelection) =>
+  generate: (projectId: string, llmSelection?: LlmSelection) =>
     // Full SCC templates are generated in many model calls; keep the request alive.
-    api.post<DraftDocument[]>(`/drafting/${projectId}/generate?lang=${encodeURIComponent(lang)}`, undefined, { timeout: 3600000, llmSelection }),
+    api.post<DraftDocument[]>(`/drafting/${projectId}/generate?lang=en`, undefined, { timeout: 3600000, llmSelection }),
   documents: (projectId: string) => api.get<DraftDocument[]>(`/drafting/${projectId}/documents`),
   documentSource: (projectId: string, fileKey: string, revisionId: string) =>
-    api.blob(`/drafting/${projectId}/documents/${fileKey}/export.docx?revisionId=${encodeURIComponent(revisionId)}`, undefined, false),
+    api.blob(`/drafting/${projectId}/documents/${fileKey}/source?revisionId=${encodeURIComponent(revisionId)}`, undefined, false),
   updateDocument: (projectId: string, fileKey: string, patch: DraftBodyPatch) =>
     api.put<DraftDocument>(`/drafting/${projectId}/documents/${fileKey}`, patch),
   previewDocument: (projectId: string, fileKey: string, revisionId?: string) =>
@@ -217,15 +217,20 @@ export const vettingApi = {
       expectedRunId: binding.runId, expectedSourceSnapshotSha256: binding.sourceSnapshotSha256,
       runSnapshotSha256: binding.runSnapshotSha256, items
     }),
-  exportReport: (projectId: string, lang: string, fallbackName: string, format: VettingReportFormat = 'pdf') =>
-    api.download(`/vetting/${projectId}/report.${format}?lang=${encodeURIComponent(lang)}`, fallbackName,
+  exportReport: (projectId: string, fallbackName: string, format: VettingReportFormat = 'pdf') =>
+    api.download(`/vetting/${projectId}/report.${format}?lang=en`, fallbackName,
       format === 'json' ? { jsonDocument: value => {
         if (!value || typeof value !== 'object') return false
         const report = value as Record<string, unknown>
         const project = report.project as { id?: unknown } | null
         const job = report.job as { id?: unknown; status?: unknown } | null
-        return report.schemaVersion === '1.0' && report.reportStructureVersion === 'competition-comments-and-checklist-v1'
+        const diagnostics = report.diagnostics as { retainedServerSide?: unknown; sourceRunId?: unknown; sourceReportSnapshotId?: unknown } | null
+        const sha256 = (value: unknown) => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value)
+        return report.schemaVersion === '2.0' && report.reportStructureVersion === 'competition-comments-and-checklist-v1'
+          && report.presentationOnly === true && report.language === 'en' && report.reportLanguage === 'en'
           && project?.id === projectId && typeof job?.id === 'string' && job.id.length > 0 && job.status === 'COMPLETED'
+          && report.sourceRunId === job.id && sha256(report.sourceReportSnapshotId) && sha256(report.sourceSnapshotSha256)
+          && diagnostics?.retainedServerSide === true && diagnostics.sourceRunId === job.id && diagnostics.sourceReportSnapshotId === report.sourceReportSnapshotId
           && ['findings', 'commentsTables', 'checklistTables', 'checklistResults'].every(key => Array.isArray(report[key]))
       } } : undefined)
 }

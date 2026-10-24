@@ -37,7 +37,8 @@ const zhHans = {
     upload: '上传', download: '下载', search: '搜索', refresh: '刷新', delete: '删除', add: '新增',
     reset: '恢复默认', all: '全部', loading: '处理中…', done: '完成', empty: '暂无数据', confirmAll: '确认全部',
     status: '状态', type: '类型', scope: '范围', file: '文件', page: '页码', actions: '操作', detail: '详情',
-    generated: '已生成', pending: '待生成', confirmed: '已确认', unconfirmed: '待确认', saved: '已保存'
+    generated: '已生成', pending: '待生成', confirmed: '已确认', unconfirmed: '待确认', saved: '已保存',
+    generatedOutputLanguage: '导出文件统一为英文；非英文内容自动翻译，来源译文会标注。'
   },
   drafting: {
     title: '按标准模板与项目证据生成 NTT / SCT / SCC',
@@ -327,7 +328,8 @@ const zhHant: typeof zhHans = {
     upload: '上傳', download: '下載', search: '搜尋', refresh: '重新整理', delete: '刪除', add: '新增',
     reset: '恢復預設', all: '全部', loading: '處理中…', done: '完成', empty: '暫無資料', confirmAll: '確認全部',
     status: '狀態', type: '類型', scope: '範圍', file: '文件', page: '頁碼', actions: '操作', detail: '詳情',
-    generated: '已生成', pending: '待生成', confirmed: '已確認', unconfirmed: '待確認', saved: '已儲存'
+    generated: '已生成', pending: '待生成', confirmed: '已確認', unconfirmed: '待確認', saved: '已儲存',
+    generatedOutputLanguage: '匯出檔案統一為英文；非英文內容自動翻譯，來源譯文會標註。'
   },
   drafting: {
     title: '按標準模板與項目證據生成 NTT / SCT / SCC',
@@ -617,7 +619,8 @@ const en: typeof zhHans = {
     upload: 'Upload', download: 'Download', search: 'Search', refresh: 'Refresh', delete: 'Delete', add: 'Add',
     reset: 'Restore defaults', all: 'All', loading: 'Working…', done: 'Done', empty: 'No data yet', confirmAll: 'Confirm all',
     status: 'Status', type: 'Type', scope: 'Scope', file: 'File', page: 'Page', actions: 'Actions', detail: 'Detail',
-    generated: 'Generated', pending: 'Draft pending', confirmed: 'Confirmed', unconfirmed: 'Pending', saved: 'Saved'
+    generated: 'Generated', pending: 'Draft pending', confirmed: 'Confirmed', unconfirmed: 'Pending', saved: 'Saved',
+    generatedOutputLanguage: 'Exports are in English. Non-English content is translated automatically; translated source quotations are labelled.'
   },
   drafting: {
     title: 'Draft NTT / SCT / SCC from standard templates and project evidence',

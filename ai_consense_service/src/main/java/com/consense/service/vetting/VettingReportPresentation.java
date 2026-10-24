@@ -96,9 +96,10 @@ public final class VettingReportPresentation {
         List<Group> ordered=new ArrayList<>(groups.values());
         ordered.sort(Comparator.comparingInt((Group g)->rank(g.key,g.filename)).thenComparing(g->g.filename));
         List<Table> tables=new ArrayList<>();int[] sectionCounts=new int[9];
+        int[] widths=reader?new int[]{7,10,15,43,25}:new int[]{7,11,15,52,15};
         for(Group g:ordered) {
             int section=rank(g.key,g.filename);
-            Table table=new Table(section+". "+label(g.key,g.filename),Arrays.asList("", "Page", "Clause / Item", "Comments", "Remarks by Project Team (if any)"),7,11,15,52,15);
+            Table table=new Table(section+". "+label(g.key,g.filename),Arrays.asList("", "Page", "Clause / Item", "Comments", "Remarks by Project Team (if any)"),widths);
             Map<String,String> readerGroupLeaders=new HashMap<>();
             if(reader)for(FindingVO finding:g.findings)if(finding.getSourceCandidateContainer()!=null&&!str(finding.getSourceCandidateContainer().getId()).isEmpty()&&!str(finding.getCode()).isEmpty())
                 readerGroupLeaders.putIfAbsent(finding.getSourceCandidateContainer().getId(),finding.getCode());
@@ -137,7 +138,7 @@ public final class VettingReportPresentation {
             tables.add(table);
         }
         if(tables.isEmpty()) {
-            Table t=new Table("Comments recorded",Arrays.asList("", "Page", "Clause / Item", "Comments", "Remarks by Project Team (if any)"),7,11,15,52,15);
+            Table t=new Table("Comments recorded",Arrays.asList("", "Page", "Clause / Item", "Comments", "Remarks by Project Team (if any)"),widths);
             t.row("-","-","-","No findings were recorded by this task. This does not establish that the documents have no issues. See the review scope and limitations in Appendix II.","");tables.add(t);
         }
         return tables;

@@ -908,7 +908,7 @@ async function exportReport() {
   const epoch = viewEpoch
   exporting.value = true
   try {
-    await vettingApi.exportReport(id, store.locale, `ConSense_Vetting_Report.${format}`, format)
+    await vettingApi.exportReport(id, `ConSense_Vetting_Report.${format}`, format)
     if (!disposed && epoch === viewEpoch && id === projectId.value) {
       store.notify(t('vetting.actions.exportStarted', { format: format.toUpperCase() }), 5000)
       await restoreJob()
@@ -1035,6 +1035,8 @@ function tagClass(group: string) {
         </button>
       </div>
     </div>
+
+    <p class="small" data-generated-output-language>{{ t('common.generatedOutputLanguage') }}</p>
 
     <div v-if="uploadProgress || sourceProgress.some(row => row.parseStatus === 'PARSING' || row.parseStatus === 'FAILED')" class="surface section-gap" aria-live="polite">
       <div class="surface-body">

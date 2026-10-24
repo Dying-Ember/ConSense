@@ -7,6 +7,7 @@ import com.consense.domain.*;
 import com.consense.repository.*;
 import com.consense.service.StorageService;
 import com.consense.service.drafting.DraftingService;
+import com.consense.service.export.EnglishFileOutput;
 import com.consense.service.vetting.VettingSemanticReview.*;
 import com.consense.web.dto.VettingDtos.*;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -31,11 +32,15 @@ class VettingPackageIdentityWorkflowTest {
     @Autowired VettingService service;@Autowired ConsenseProperties props;
     @Autowired ProjectRepository projects;@Autowired SourceDocumentRepository sources;@Autowired VettingRunRepository runs;
     @Autowired VettingFindingRepository findings;
+    @Autowired VettingReportSnapshotRepository reportSnapshots;
     @MockBean DraftingService drafting;
     @MockBean VettingSemanticReview semantic;
     @MockBean OerBusinessEvidence oer;
     @MockBean StorageService storage;
+    @MockBean EnglishFileOutput englishFiles;
     @BeforeEach void setup()throws Exception {
+        when(englishFiles.json(any(JsonNode.class),anyString(),any(Runnable.class))).thenAnswer(call->{call.<Runnable>getArgument(2).run();return call.getArgument(0);});
+        when(englishFiles.docx(any(byte[].class),anyString(),any(Runnable.class))).thenAnswer(call->{call.<Runnable>getArgument(2).run();return call.getArgument(0);});
         props.getVetting().setServiceProbeDirectory(null);props.getVetting().setProbeDirectory(null);props.getVetting().setExportProbeDirectory(null);
         when(storage.matchesStoredBytes(eq("AUTHORED_STORAGE"),anyString())).thenReturn(true);
         authority("PKG-1","INPUT");when(semantic.reviewWithProgress(isNull(),anyString(),anyList(),eq("en"),any(ReviewProgress.class),anyList(),any(Runnable.class))).thenReturn(empty());
@@ -67,12 +72,25 @@ class VettingPackageIdentityWorkflowTest {
     @Test void completedExportAllowsMirrorAuditButRejectsChangedAdoptedCore()throws Exception {
         String project=project();service.run(project,"en");Project mirror=projects.findById(project).get();mirror.setContractNo("DISPLAY-ONLY");projects.saveAndFlush(mirror);
         JsonNode exported=JsonUtils.parse(new String(service.exportJson(project,"en"),java.nio.charset.StandardCharsets.UTF_8));
-        assertTrue(exported.path("job").path("coverage").path("packageIdentityMirrorAudit").path("changed").asBoolean());assertEquals("PKG-1",exported.path("job").path("coverage").path("packageIdentityReview").path("authority").path("core").path("fields").path("number").path("value").asText());
+        JsonNode original=savedReport(exported);
+        assertTrue(original.path("job").path("coverage").path("packageIdentityMirrorAudit").path("changed").asBoolean());assertEquals("PKG-1",original.path("job").path("coverage").path("packageIdentityReview").path("authority").path("core").path("fields").path("number").path("value").asText());
+        assertFalse(exported.path("job").path("coverage").has("packageIdentityMirrorAudit"));assertFalse(exported.path("job").path("coverage").has("packageIdentityReview"));
         authority("PKG-9","INPUT");assertThrows(BizException.class,()->service.exportJson(project,"en"));assertEquals(1,findings.findByProjectIdOrderByCodeAsc(project).stream().filter(VettingFinding::getActive).count());
     }
     @Test void recoveryCannotReauthorizeSavedWorkUnderAnotherAuthority()throws Exception {
         String project=project();service.run(project,"en");VettingJobVO job=service.latestRun(project);VettingRun run=runs.findById(job.getId()).get();run.setStatus("RUNNING");run.setRecoveryStatus("AUTHORED_INTERRUPTED");run.setExecutionOwner(null);run.setLeaseUntil(Instant.EPOCH);runs.saveAndFlush(run);
         authority("PKG-8","INPUT");clearInvocations(semantic);service.recoverInterruptedRuns();assertEquals("FAILED",service.getRun(project,run.getId()).getStatus());
         verify(semantic,never()).reviewWithProgress(any(),anyString(),anyList(),anyString(),any(ReviewProgress.class),anyList(),any(Runnable.class));assertEquals(1,findings.findByProjectIdOrderByCodeAsc(project).stream().filter(VettingFinding::getActive).count());
+    }
+    private JsonNode savedReport(JsonNode exported) {
+        assertEquals("2.0",exported.path("schemaVersion").asText());assertEquals("en",exported.path("language").asText());assertTrue(exported.path("presentationOnly").asBoolean());
+        String snapshotId=exported.path("sourceReportSnapshotId").asText();assertTrue(snapshotId.matches("[a-f0-9]{64}"));
+        VettingReportSnapshot saved=reportSnapshots.findById(snapshotId).orElseThrow(AssertionError::new);
+        assertEquals(saved.getRunId(),exported.path("sourceRunId").asText());assertEquals(saved.getRunId(),exported.path("job").path("id").asText());
+        assertTrue(exported.path("diagnostics").path("retainedServerSide").asBoolean());assertFalse(exported.path("job").has("result"));
+        assertEquals(snapshotId,VettingCorpus.hash("vetting-report-snapshot-v1\n"+saved.getPayloadJson()));
+        JsonNode original=JsonUtils.parse(saved.getPayloadJson());
+        assertEquals(original.path("job").path("sourceSnapshotSha256").asText(),exported.path("sourceSnapshotSha256").asText());
+        return original;
     }
 }

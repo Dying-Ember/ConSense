@@ -62,11 +62,14 @@ public class VettingService {
     private final com.consense.ai.LlmProfiles llmProfiles;
     private VettingCheckpointService checkpoints;
     private com.consense.repository.VettingReportSnapshotRepository reportSnapshots;
+    private com.consense.service.export.EnglishFileOutput englishFiles;
     private final String executionOwner=UUID.randomUUID().toString();
     @org.springframework.beans.factory.annotation.Autowired
     public void setCheckpoints(VettingCheckpointService service){this.checkpoints=service;}
     @org.springframework.beans.factory.annotation.Autowired
     public void setReportSnapshots(com.consense.repository.VettingReportSnapshotRepository repository){this.reportSnapshots=repository;}
+    @org.springframework.beans.factory.annotation.Autowired(required=false)
+    public void setEnglishFileOutput(com.consense.service.export.EnglishFileOutput output){this.englishFiles=output;}
     private FixedBaselineRetrievalClient fixedBaseline;
     @org.springframework.beans.factory.annotation.Autowired(required=false)
     public void setFixedBaselineRetrievalClient(FixedBaselineRetrievalClient client){this.fixedBaseline=client;}
@@ -1086,9 +1089,19 @@ public class VettingService {
                     "boundary","Actual unchanged reportContext lookup and payload DTO construction, measured before probe I/O"));
             probe.event("report_payload",DocumentParseProbe.map("project",c.project,"job",c.job,"findings",c.findings));
             List<VettingChecklistCatalog.Result> checklist = c.checklist;
+            if(englishFiles==null)throw new BizException(4100,"English file output is unavailable. No untranslated report was returned.");
+            String sourceReference="vetting-report:"+c.job.getId()+":"+c.job.getReportSnapshotId();
+            String frozenId=c.job.getReportSnapshotId(),frozenRun=c.job.getId(),frozenSource=c.job.getSourceSnapshotSha256();
+            Runnable frozenGuard=()->{
+                if(Thread.currentThread().isInterrupted())throw new BizException(4100,"English report export was cancelled.");
+                if(!Objects.equals(frozenId,c.job.getReportSnapshotId())||!Objects.equals(frozenRun,c.job.getId())||!Objects.equals(frozenSource,c.job.getSourceSnapshotSha256()))
+                    throw new BizException(4104,"The frozen report reference changed during English export.");
+            };
             byte[] bytes;
             if("pdf".equals(format)||"docx".equals(format)) {
-                byte[] docx=reportWriter.docx(c.project,c.findings,c.job,"en",probe.enabled()?probe:null,checklist);
+                byte[] originalDocx=reportWriter.docx(c.project,c.findings,c.job,"en",probe.enabled()?probe:null,checklist);
+                byte[] docx=englishFiles.docx(originalDocx,sourceReference,frozenGuard);
+                if(docx==null||docx.length==0)throw new BizException(4100,"The English Word report was not completed.");
                 if("docx".equals(format))bytes=docx;
                 else {
                     if(draftingIdentity==null||!"libreoffice".equals(props.getDrafting().getRendererKind()))throw new BizException(4100,"NOT_CONFIGURED: Vetting PDF export requires the configured LibreOffice document renderer. The Word report remains available.");
@@ -1104,21 +1117,81 @@ public class VettingService {
             else {
                 Map<String,Object> out;
                 try(VettingExportProbe.Timer timer=probe.measure("report_json_payload_construction","Original JSON report DTO/map construction")){
-                    out=new LinkedHashMap<>();out.put("schemaVersion","1.0");out.put("language",normalizeLang(lang));out.put("project",projectService.toVO(c.project));out.put("job",c.job);out.put("findings",c.findings);
-                    out.put("reportSnapshotId",c.job.getReportSnapshotId());
-                    out.put("reportStructureVersion","competition-comments-and-checklist-v1");out.put("reportLanguage","en");
-                    out.put("promptPolicy",c.job.getResult()==null?null:c.job.getResult().getPromptPolicy());
-                    out.put("commentsTables",VettingReportPresentation.readerComments(c.findings,c.job.getCoverage()));
-                    out.put("sectionSummaries",VettingReportPresentation.sectionSummaries(c.findings,c.job.getCoverage()));
-                    List<com.consense.web.dto.VettingChecklistDtos.AutomaticGroupVO> automatic=VettingChecklistAutomaticResults.aggregate(c.job.getStatus(),JsonUtils.mapper().valueToTree(c.job.getCoverage()),JsonUtils.mapper().valueToTree(c.job.getResult()));
-                    out.put("automaticChecklistResults",automatic);out.put("checklistTables",VettingReportPresentation.readerChecklist(checklist,automatic));out.put("checklistResults",checklist);
-                    out.put("evidenceIndex",VettingReportPresentation.readerEvidenceIndex(c.findings,c.job.getCoverage()));
+                    out=englishReportPresentation(c);
                 }
-                try(VettingExportProbe.Timer timer=probe.measure("report_json_serialization","Original JsonUtils.write and UTF8 encoding of returned JSON report")){bytes=JsonUtils.write(out).getBytes(StandardCharsets.UTF_8);}
+                JsonNode english=englishFiles.json(JsonUtils.mapper().valueToTree(out),sourceReference,frozenGuard);
+                if(english==null||!english.isObject())throw new BizException(4100,"The English report presentation was not completed.");
+                try(VettingExportProbe.Timer timer=probe.measure("report_json_serialization","English presentation JSON serialization; the original frozen snapshot remains server-side")){bytes=JsonUtils.write(english).getBytes(StandardCharsets.UTF_8);}
             }
+            frozenGuard.run();
+            ReportContext latest=reportContext(projectId);
+            if(!Objects.equals(frozenId,latest.job.getReportSnapshotId()))throw new BizException(4104,"The source set or human review changed during English export. Generate the report again; original records are retained.");
             probe.returned(bytes);returnedNormally=true;return bytes;
         }catch(RuntimeException|Error e){operationFailure=e;probe.originalFailure("report_export_failure",e);throw e;}
         finally{probe.finish(returnedNormally?"returned_normally":"aborted",operationFailure);}
+    }
+    /** A derived reader view, never a replacement for the signed source/report snapshot or raw model record. */
+    private Map<String,Object> englishReportPresentation(ReportContext c) {
+        Map<String,Object> out=new LinkedHashMap<>();out.put("schemaVersion","2.0");out.put("language","en");out.put("reportLanguage","en");out.put("presentationOnly",true);
+        out.put("presentationVersion","vetting-english-presentation-v2");out.put("reportStructureVersion","competition-comments-and-checklist-v1");
+        out.put("sourceReportSnapshotId",c.job.getReportSnapshotId());out.put("sourceRunId",c.job.getId());out.put("sourceSnapshotSha256",c.job.getSourceSnapshotSha256());
+        out.put("authorityMeaning","This English presentation is derived from the referenced original snapshot. Translated wording is not original evidence or a new source authority.");
+        com.fasterxml.jackson.databind.node.ObjectNode project=reportFields(c.project,"id","contractNo","packageRef");
+        project.put("name",LocalizedText.of(c.project.getNameZhHans(),c.project.getNameZhHant(),c.project.getNameEn()).pick("en"));project.put("displayOnly",true);out.put("project",project);
+        Map<String,Object> identity=new LinkedHashMap<>();identity.put("contractNumber",VettingReportWriter.reportIdentity(c.job,"number"));identity.put("projectOrContractTitle",VettingReportWriter.reportIdentity(c.job,"title"));identity.put("displayOnly",true);identity.put("originalAuthorityRetainedServerSide",true);out.put("packageIdentityPresentation",identity);
+        com.fasterxml.jackson.databind.node.ObjectNode job=reportFields(c.job,"id","status","phase","completedUnits","totalUnits","message","startedAt","finishedAt","modelIdentity","sourceSetStale","recoveryStatus");
+        if(c.job.getResult()!=null){job.put("recordedFindingCount",c.job.getResult().getTotal());job.set("metrics",JsonUtils.mapper().valueToTree(c.job.getResult().getMetrics()));}job.set("coverage",reportCoverage(c.job.getCoverage()));out.put("job",job);
+        List<Object> findings=new ArrayList<>();for(FindingVO finding:c.findings){
+            com.fasterxml.jackson.databind.node.ObjectNode row=reportFields(finding,"code","types","issueTypeCode","group","scope","severity","status","expected","refs","location","fileKey","pageNo","runId","source","verification","reviewRemarks","actionTaken","addendumRequired","reviewUpdatedAt","generatedRevisionSha256","sourceSnapshotSha256","businessDetails","sourceCandidateContainer");
+            row.put("title",reportText(finding.getTitle()));row.put("body",reportText(finding.getBody()));row.put("impact",reportText(finding.getImpact()));row.put("suggestion",reportText(finding.getSuggestion()));
+            row.put("verificationMeaning","Verification refers to the original retained evidence only, not the translated presentation.");row.set("evidence",reportEvidence(finding.getEvidence()));findings.add(row);
+        }out.put("findings",findings);
+        List<com.consense.web.dto.VettingChecklistDtos.AutomaticGroupVO> automatic=VettingChecklistAutomaticResults.aggregate(c.job.getStatus(),JsonUtils.mapper().valueToTree(c.job.getCoverage()),JsonUtils.mapper().valueToTree(c.job.getResult()));
+        out.put("commentsTables",VettingReportPresentation.readerComments(c.findings,c.job.getCoverage()));out.put("sectionSummaries",VettingReportPresentation.sectionSummaries(c.findings,c.job.getCoverage()));
+        out.put("automaticChecklistResults",reportAutomatic(automatic));out.put("checklistTables",VettingReportPresentation.readerChecklist(c.checklist,automatic));
+        List<Object> checklist=new ArrayList<>();for(VettingChecklistCatalog.Result result:c.checklist)checklist.add(reportFields(result,"id","status","remarks","updatedAt","reviewedRunId","reviewScope","sourceSnapshotSha256","dependencyStatus","previousDecisionStatus","previousRemarks","previousReviewedRunId"));out.put("checklistResults",checklist);
+        out.put("evidenceIndex",VettingReportPresentation.readerEvidenceIndex(c.findings,c.job.getCoverage()));
+        Map<String,Object> diagnostics=new LinkedHashMap<>();diagnostics.put("retainedServerSide",true);diagnostics.put("sourceRunId",c.job.getId());diagnostics.put("sourceReportSnapshotId",c.job.getReportSnapshotId());
+        diagnostics.put("meaning","Original prompts, provider responses, source proofs, frozen identity records and unmodified human records remain in the system. This file contains their English reader presentation and references only.");out.put("diagnostics",diagnostics);out.put("diagnosticsRetainedServerSide",true);
+        return out;
+    }
+    private static String reportText(LocalizedText text){return text==null?"":text.pick("en");}
+    private static com.fasterxml.jackson.databind.node.ObjectNode reportFields(Object original,String... fields){
+        JsonNode raw=original instanceof JsonNode?(JsonNode)original:JsonUtils.mapper().valueToTree(original);com.fasterxml.jackson.databind.node.ObjectNode out=JsonUtils.mapper().createObjectNode();
+        if(raw!=null)for(String field:fields)if(raw.has(field))out.set(field,raw.get(field).deepCopy());return out;
+    }
+    private static com.fasterxml.jackson.databind.node.ArrayNode reportEvidence(List<FindingEvidence> evidence){
+        com.fasterxml.jackson.databind.node.ArrayNode out=JsonUtils.mapper().createArrayNode();for(FindingEvidence original:evidence==null?Collections.<FindingEvidence>emptyList():evidence)if(original!=null){
+            com.fasterxml.jackson.databind.node.ObjectNode row=reportFields(original,"side","documentId","fileKey","fileName","pageNo","anchor","clauseId","sourceHash","originalSourceSha256","sourceRole","packetId","packetSourceSnapshotSha256");
+            row.put("displayQuote",nvl(original.getQuote()));row.put("quotePresentation","English translation/presentation of source quotation; original wording is retained in the system. This display is not literal source evidence.");
+            row.put("literalSourceEvidence",false);row.put("originalQuoteSha256",VettingCorpus.hash(nvl(original.getQuote())));row.put("originalLocated",original.isLocated());
+            if(original.getCanonicalEvidence()!=null)row.set("canonicalEvidenceReference",reportFields(original.getCanonicalEvidence(),"projectId","documentId","canonicalChunkId","unitId","originalSourceSha256","javaParsedSourceHash","sourceRevisionSha256","projectionSha256","canonicalSourceHash"));
+            if(original.getFixedBaselineEvidence()!=null)row.set("fixedBaselineReference",reportFields(original.getFixedBaselineEvidence(),"parentId","manifestSha256","baselineVersion","sourceFamily","sourceRole","originalSourceSha256","originalPageNos"));out.add(row);
+        }return out;
+    }
+    private static com.fasterxml.jackson.databind.node.ObjectNode reportCoverage(CoverageVO original){
+        com.fasterxml.jackson.databind.node.ObjectNode out=reportFields(original,"totalDocuments","reviewedDocuments","documents","warnings","reviewCompleteness","canonicalCorpusIdentitySha256");
+        if(original!=null&&original.getSemanticSourceRead()!=null)out.set("semanticSourceRead",reportFields(original.getSemanticSourceRead(),"status","totalOrigins","readableOrigins"));
+        com.fasterxml.jackson.databind.node.ArrayNode topics=out.putArray("semanticTopics");for(SemanticTopicVO topic:original==null||original.getSemanticTopics()==null?Collections.<SemanticTopicVO>emptyList():original.getSemanticTopics())if(topic!=null){
+            com.fasterxml.jackson.databind.node.ObjectNode row=reportFields(topic,"topicIndex","topic","status","error","reviewKind","selectionStrategy","failureKind","referenceIds","submittedChars","budgetDroppedGroups","partialContextGroups","unresolvedSegments","initialContextBudgetChars","effectiveContextBudgetChars","missingLocatedReferenceTargets","contextExpansionAttempted","contextExpanded","returnedAssessments","issueAssessments","consistentAssessments","insufficientContextAssessments","acceptedFindings","rejectedRecords","verifiedConsistentAssessments","verifiedInsufficientContextAssessments","verifiedNotApplicableAssessments","checkState","globalCallStatus","aggregateReviewStatus","requestPacketPolicy","reviewCoverageScope","sourceRequestCount","pendingSourceRequestCount","extraPacketCount","failedPacketCount","notSubmittedPacketCount","semanticScopeVerified");
+            com.fasterxml.jackson.databind.node.ArrayNode packets=row.putArray("packetAudits");for(SemanticPacketVO packet:topic.getPacketAudits()==null?Collections.<SemanticPacketVO>emptyList():topic.getPacketAudits())if(packet!=null){
+                com.fasterxml.jackson.databind.node.ObjectNode p=reportFields(packet,"packetId","sourceObservationPacketId","kind","status","failureKind","error","packetIndex","submittedChars","requestIds","inputBudgetStatus","returnedAssessments","issueAssessments","consistentAssessments","insufficientContextAssessments","acceptedFindings","rejectedRecords","actualGatewayCallStarted","semanticScopeVerified","verifiedConsistentAssessments","verifiedInsufficientContextAssessments","verifiedNotApplicableAssessments","checkState","checkpointStatus","executionLedger");
+                JsonNode budget=packet.getInputBudgetMetadata();com.fasterxml.jackson.databind.node.ObjectNode inputBudget=reportFields(budget,"status","reason","extraDispatchPermitted","serializedInputSha256");
+                JsonNode observed=budget==null?null:budget.get("observation");com.fasterxml.jackson.databind.node.ObjectNode observation=reportFields(observed,"model","inputTokens","effectiveContextTokens","outputReserveTokens","scope","completeChatTemplateAndSchemaObserved");
+                if(observed!=null){observation.set("qwenUsageEstimate",reportFields(observed.get("qwenUsageEstimate"),"kind","version","configuredContextTokens","safetyMarginTokens","completionTokens","modelIdentityScope","finishReason"));observation.set("providerEstimate",reportFields(observed.get("providerEstimate"),"kind","estimatedInputTokens","configuredContextTokens","outputReserveTokens","safetyMarginTokens","scope"));}inputBudget.set("observation",observation);p.set("inputBudget",inputBudget);
+                p.set("modelResponseMetadata",reportFields(packet.getModelResponseMetadata(),"model","usage","usageUnavailable","scope","responseSha256"));
+                com.fasterxml.jackson.databind.node.ArrayNode checks=p.putArray("verifiedAssessments");for(VerifiedAssessmentVO assessment:packet.getVerifiedAssessments()==null?Collections.<VerifiedAssessmentVO>emptyList():packet.getVerifiedAssessments())if(assessment!=null){com.fasterxml.jackson.databind.node.ObjectNode a=reportFields(assessment,"assessment","title","comment");a.set("evidence",reportEvidence(assessment.getEvidence()));checks.add(a);}packets.add(p);
+            }
+            com.fasterxml.jackson.databind.node.ArrayNode requests=row.putArray("sourceRequests");for(SemanticSourceRequestVO request:topic.getSourceRequests()==null?Collections.<SemanticSourceRequestVO>emptyList():topic.getSourceRequests())requests.add(reportFields(request,"requestId","kind","observationId","transportStatus","unknownReason","reviewExecutionStatus","packetId","packIndex","contentChars","requiredChunkIds","missingChunkIds","applicability","qualifiersComplete","semanticScopeVerified"));topics.add(row);
+        }return out;
+    }
+    private static List<Object> reportAutomatic(List<com.consense.web.dto.VettingChecklistDtos.AutomaticGroupVO> original){
+        List<Object> out=new ArrayList<>();for(com.consense.web.dto.VettingChecklistDtos.AutomaticGroupVO group:original){com.fasterxml.jackson.databind.node.ObjectNode row=reportFields(group,"id","status","symbol","reason","complete","sourceItemIds");com.fasterxml.jackson.databind.node.ArrayNode items=row.putArray("subItemAssessments");
+            for(com.consense.web.dto.VettingChecklistDtos.AutomaticItemVO item:group.getSubItemAssessments()==null?Collections.<com.consense.web.dto.VettingChecklistDtos.AutomaticItemVO>emptyList():group.getSubItemAssessments()){
+                com.fasterxml.jackson.databind.node.ObjectNode entry=reportFields(item,"itemId","status","reason");entry.put("assessmentCount",item.getAssessments()==null?0:item.getAssessments().size());com.fasterxml.jackson.databind.node.ArrayNode refs=entry.putArray("assessmentReferences");
+                for(JsonNode assessment:item.getAssessments()==null?Collections.<JsonNode>emptyList():item.getAssessments())refs.add(reportFields(assessment,"packetId","itemId","status","reason","issueTypeCode","evidenceChunkIds","sourceSnapshotSha256"));items.add(entry);
+            }out.add(row);
+        }return out;
     }
     private byte[] bindPdfSnapshot(byte[] rendererPdf,String reportSnapshotId) {
         try(org.apache.pdfbox.pdmodel.PDDocument document=org.apache.pdfbox.pdmodel.PDDocument.load(new ByteArrayInputStream(rendererPdf));ByteArrayOutputStream out=new ByteArrayOutputStream()) {
@@ -1162,7 +1235,7 @@ public class VettingService {
         current.getJob().setReportSnapshotId(id);return new ReportContext(current.getProject(),current.getJob(),current.getFindings(),current.getChecklist());
     }
     public String pdfFileName(String id) { return reportFileName(id,"pdf"); }
-    public String reportFileName(String id,String format) { return "ConSense_Vetting_Report_"+nvl(projectService.require(id).getContractNo()).replaceAll("[\\\\/:*?\"<>|]","_")+"."+format; }
+    public String reportFileName(String id,String format) { return com.consense.service.export.EnglishFileOutput.fileName("ConSense_Vetting_Report_"+nvl(projectService.require(id).getContractNo()).replaceAll("[\\\\/:*?\"<>|]","_")+"."+format,"ConSense_Vetting_Report."+format); }
     private static final class ReportContext { final Project project; final VettingJobVO job; final List<FindingVO> findings;final List<VettingChecklistCatalog.Result> checklist; ReportContext(Project p,VettingJobVO j,List<FindingVO> f,List<VettingChecklistCatalog.Result> c){project=p;job=j;findings=f;checklist=c;} }
     @lombok.Data @lombok.NoArgsConstructor
     public static class ReportSnapshotPayload {private Project project;private VettingJobVO job;private List<FindingVO> findings;private List<VettingChecklistCatalog.Result> checklist;}

@@ -25,6 +25,8 @@ import static com.consense.service.drafting.DraftReviewGraph.obj;
 @SpringBootTest(properties={"spring.jpa.hibernate.ddl-auto=create-drop","spring.flyway.enabled=false","consense.llm.enabled=false","consense.ocr.enabled=false","consense.vector.provider=memory"})
 @ActiveProfiles("h2")
 class DraftReviewRuntimeIntegrationTest {
+    @org.springframework.boot.test.mock.mockito.MockBean com.consense.service.export.EnglishFileOutput englishFileOutput;
+    @org.junit.jupiter.api.BeforeEach void englishDeliveryBoundary(){EnglishFileOutputNoopFixture.configure(englishFileOutput);}
     static final String DB=UUID.randomUUID().toString();
     @DynamicPropertySource static void resources(DynamicPropertyRegistry registry){registry.add("spring.datasource.url",()->"jdbc:h2:mem:graph_runtime_"+DB+";MODE=MySQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE");registry.add("consense.storage-root",()->Paths.get("target","graph-runtime-synthetic",DB).toAbsolutePath().toString());}
     @Autowired DraftingService drafting;
@@ -52,7 +54,7 @@ class DraftReviewRuntimeIntegrationTest {
         assertEquals(draft,drafting.catalog(project).get("graphRevisionId"));assertTrue(drafting.listVariables(project).stream().anyMatch(v->"duration".equals(v.getKey())));
         List<DraftDocumentVO> partial=drafting.generate(project,"en");assertEquals(3,partial.size());assertNull(graphService.current(project).get("currentRevisionId"));
         for(DraftDocumentVO document:partial){byte[] output=drafting.exportWord(project,document.getFileKey(),document.getRevisionId());DocxTemplateEditor.TemplateIndex index=new DocxTemplateEditor().inspect(output);
-            assertTrue(index.getMainParagraphs().get(0).getText().contains(DraftIncompleteNotice.TITLE));assertEquals("Duration: ____ months.",index.getMainParagraphs().get(1).getText());assertTrue(document.getContent().contains("未处理清单"));assertFalse(document.isStale());}
+            assertTrue(index.getMainParagraphs().get(0).getText().contains(DraftIncompleteNotice.TITLE));assertEquals("Duration: ____ months.",index.getMainParagraphs().get(1).getText());assertTrue(document.getContent().contains("Outstanding items"));assertFalse(document.isStale());}
         assertFalse(graphService.variables(project).stream().filter(v->"duration".equals(v.getKey())).findFirst().get().isConfirmed());
         node.put("status","confirmed");draft=String.valueOf(graphService.save(project,graph,null,draft,true).get("id"));graphService.confirm(project,draft,null);
         VariableVO input=graphService.variables(project).stream().filter(v->"duration".equals(v.getKey())).findFirst().get();graphService.updateVariable(project,"duration",adoption(input,"42"));

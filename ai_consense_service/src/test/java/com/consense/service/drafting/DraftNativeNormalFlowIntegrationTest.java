@@ -32,6 +32,8 @@ import static org.mockito.Mockito.*;
 @SpringBootTest(properties={"spring.jpa.hibernate.ddl-auto=create-drop","spring.flyway.enabled=false","consense.llm.enabled=false","consense.ocr.enabled=false","consense.vector.provider=memory"})
 @ActiveProfiles("h2") @AutoConfigureMockMvc
 class DraftNativeNormalFlowIntegrationTest {
+    @org.springframework.boot.test.mock.mockito.MockBean com.consense.service.export.EnglishFileOutput englishFileOutput;
+    @org.junit.jupiter.api.BeforeEach void englishDeliveryBoundary(){EnglishFileOutputNoopFixture.configure(englishFileOutput);}
     private static final String DB=UUID.randomUUID().toString();
     private static final String NUMBER="E2E-F17-20261020",TITLE="E2E FORMAL17 PARTIAL PACKAGE - SYNTHETIC ACCEPTANCE PROJECT";
     private static final String[] KEYS={"NTT","SCT","SCC"};

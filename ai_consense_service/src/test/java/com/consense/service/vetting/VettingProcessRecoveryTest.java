@@ -48,7 +48,7 @@ class VettingProcessRecoveryTest {
             int saved;
             try(Connection database=openStoppedDatabase(url)){try(Statement sql=database.createStatement();ResultSet rows=sql.executeQuery("SELECT COUNT(*) FROM vetting_packet_checkpoint WHERE status='SAVED'")){rows.next();saved=rows.getInt(1);}assertEquals("BEFORE_PUBLISH".equals(boundary)?2:"AFTER_PACKET".equals(boundary)?1:0,saved);
                 try(PreparedStatement expire=database.prepareStatement("UPDATE vetting_run SET lease_until=? WHERE id=?")){expire.setTimestamp(1,Timestamp.from(java.time.Instant.now().minusSeconds(1)));expire.setString(2,ready.path("runId").asText());assertEquals(1,expire.executeUpdate());}}
-            int callsBefore=Files.readAllLines(root.resolve("calls.log")).size();Process resumed=launch(root,"RESUME");
+            int callsBefore=Files.readAllLines(root.resolve("calls.log")).size();Process resumed=launch(root,"RESUME");JsonNode exportedReport=null;
             try{awaitFile(resumed,root.resolve("RESUME-ready.json"));JsonNode restarted=JsonUtils.parse(Files.readString(root.resolve("RESUME-ready.json")));String base=restarted.path("baseUrl").asText(),project=restarted.path("projectId").asText(),run=restarted.path("runId").asText();assertEquals(ready.path("runId").asText(),run);
                 JsonNode completed=awaitRun(resumed,base+"/api/vetting/"+project+"/runs/"+run);
                 Path response=root.resolve("RESUME-public-completed.json");Files.write(response,JsonUtils.write(completed).getBytes(StandardCharsets.UTF_8));
@@ -56,9 +56,23 @@ class VettingProcessRecoveryTest {
                 assertEquals(2,completed.path("reliablePackets").size(),"Durable packets at "+boundary+"; response="+response);
                 assertEquals(2,completed.path("result").path("total").asInt(),"Published findings at "+boundary+"; response="+response);
                 assertEquals(2-saved,Files.readAllLines(root.resolve("calls.log")).size()-callsBefore,"Saved packets must not call the gateway again at "+boundary);
-                JsonNode report=JsonUtils.parse(VettingRecoveryProcessFixture.request(base+"/api/vetting/"+project+"/report.json","GET"));assertEquals(run,report.path("job").path("id").asText());assertEquals(2,report.path("findings").size());assertTrue(report.path("reportSnapshotId").asText().matches("[a-f0-9]{64}"));
+                exportedReport=JsonUtils.parse(VettingRecoveryProcessFixture.request(base+"/api/vetting/"+project+"/report.json","GET"));assertEquals(run,exportedReport.path("job").path("id").asText());assertEquals(2,exportedReport.path("findings").size());
+                assertEquals("2.0",exportedReport.path("schemaVersion").asText());assertEquals("en",exportedReport.path("language").asText());assertTrue(exportedReport.path("presentationOnly").asBoolean());
+                assertEquals(project,exportedReport.path("project").path("id").asText());assertEquals(run,exportedReport.path("sourceRunId").asText());assertTrue(exportedReport.path("sourceReportSnapshotId").asText().matches("[a-f0-9]{64}"));
+                assertTrue(exportedReport.path("diagnostics").path("retainedServerSide").asBoolean());assertFalse(exportedReport.path("job").has("result"));
                 JsonNode progress=JsonUtils.parse(VettingRecoveryProcessFixture.request(base+"/api/vetting/"+project+"/runs/"+run+"/progress","GET")).path("data");assertFalse(progress.has("coverage"));assertFalse(progress.has("reliablePackets"));assertEquals("COMPLETED",progress.path("status").asText());
             }finally{stop(resumed);}
+            assertNotNull(exportedReport);
+            try(Connection database=openStoppedDatabase(url);PreparedStatement snapshot=database.prepareStatement("SELECT run_id,payload_json FROM vetting_report_snapshot WHERE id=?")){
+                snapshot.setString(1,exportedReport.path("sourceReportSnapshotId").asText());try(ResultSet rows=snapshot.executeQuery()){
+                    assertTrue(rows.next());assertEquals(exportedReport.path("sourceRunId").asText(),rows.getString(1));String payload=rows.getString(2);
+                    assertEquals(exportedReport.path("sourceReportSnapshotId").asText(),VettingCorpus.hash("vetting-report-snapshot-v1\n"+payload));JsonNode original=JsonUtils.parse(payload);
+                    assertEquals(exportedReport.path("project").path("id").asText(),original.path("project").path("id").asText());assertEquals(exportedReport.path("sourceRunId").asText(),original.path("job").path("id").asText());
+                    assertEquals(exportedReport.path("sourceSnapshotSha256").asText(),original.path("job").path("sourceSnapshotSha256").asText());assertEquals(2,original.path("findings").size());
+                    JsonNode literal=original.path("findings").get(0).path("evidence").get(0),display=exportedReport.path("findings").get(0).path("evidence").get(0);
+                    assertFalse(literal.path("quote").asText().isEmpty());assertEquals(VettingCorpus.hash(literal.path("quote").asText()),display.path("originalQuoteSha256").asText());assertFalse(display.path("literalSourceEvidence").asBoolean(true));assertFalse(display.has("quote"));
+                }
+            }
     }
     private static Connection openStoppedDatabase(String url)throws Exception{long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(5);while(true){try{return DriverManager.getConnection(url,"sa","");}catch(SQLException delayedRelease){if(delayedRelease.getErrorCode()!=90020||System.nanoTime()>=deadline)throw delayedRelease;Thread.sleep(50);}}}
     private static Process launch(Path root,String mode)throws Exception{String executable=System.getProperty("os.name","").toLowerCase(Locale.ROOT).contains("win")?"java.exe":"java";String java=Paths.get(System.getProperty("java.home"),"bin",executable).toString();String classpath=System.getProperty("surefire.test.class.path",System.getProperty("java.class.path"));return new ProcessBuilder(java,"-Djava.io.tmpdir="+System.getProperty("java.io.tmpdir"),"-cp",classpath,VettingRecoveryProcessFixture.class.getName(),root.toString(),mode).redirectErrorStream(true).redirectOutput(root.resolve(mode+".log").toFile()).start();}

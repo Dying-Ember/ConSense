@@ -252,10 +252,17 @@ public class DraftingController {
                 .body(new ByteArrayResource(content));
     }
 
+    @GetMapping("/documents/{fileKey}/source")
+    public ResponseEntity<ByteArrayResource> documentSource(@PathVariable String projectId,@PathVariable String fileKey,@RequestParam(required=false) String revisionId) {
+        byte[] bytes=draftingService.documentSource(projectId,fileKey,revisionId);
+        return ResponseEntity.ok().header(HttpHeaders.CONTENT_DISPOSITION,"inline; filename*=UTF-8''"+urlEncode("ConSense_"+fileKey+".docx"))
+                .contentType(MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.wordprocessingml.document")).body(new ByteArrayResource(bytes));
+    }
+
     @GetMapping("/documents/{fileKey}/export.{format}")
     public ResponseEntity<ByteArrayResource> export(@PathVariable String projectId, @PathVariable String fileKey, @PathVariable String format,@RequestParam(required=false) String revisionId) {
         if (!"pdf".equals(format) && !"docx".equals(format)) throw new com.consense.common.BizException(4007, "仅支持 Word 和 PDF");
-        byte[] bytes = "pdf".equals(format) ? draftingService.previewPdf(projectId, fileKey,revisionId) : draftingService.exportWord(projectId, fileKey,revisionId);
+        byte[] bytes = "pdf".equals(format) ? draftingService.exportPdf(projectId, fileKey,revisionId) : draftingService.exportWord(projectId, fileKey,revisionId);
         MediaType type = "pdf".equals(format) ? MediaType.APPLICATION_PDF : MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.wordprocessingml.document");
         return ResponseEntity.ok().header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename*=UTF-8''" + urlEncode("ConSense_" + fileKey + "." + format))
                 .contentType(type).body(new ByteArrayResource(bytes));

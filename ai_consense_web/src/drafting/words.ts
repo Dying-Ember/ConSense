@@ -288,6 +288,7 @@ const triples = {
   staleReadOnly: ['先前文稿仅供阅读。请重新生成后再保存正文、查看 PDF 或导出。', '先前文稿僅供閱讀。請重新生成後再儲存正文、查看 PDF 或匯出。', 'The previous draft is read-only. Regenerate before saving content, previewing PDF or exporting.'],
   exportWord: ['导出 Word', '匯出 Word', 'Export Word'],
   exportPdf: ['导出 PDF', '匯出 PDF', 'Export PDF'],
+  englishOutput: ['导出文件统一为英文；非英文内容自动翻译，来源译文会标注。', '匯出檔案統一為英文；非英文內容自動翻譯，來源譯文會標註。', 'Exports are in English. Non-English content is translated automatically; translated source quotations are labelled.'],
   documentText: ['文稿正文', '文稿正文', 'Document content'],
   editContent: ['编辑正文', '編輯正文', 'Edit content'],
   viewPdf: ['查看 PDF', '查看 PDF', 'View PDF'],

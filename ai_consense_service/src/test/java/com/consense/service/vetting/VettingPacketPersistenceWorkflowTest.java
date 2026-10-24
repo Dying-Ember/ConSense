@@ -6,7 +6,9 @@ import com.consense.document.DocumentBlock;
 import com.consense.domain.*;
 import com.consense.repository.*;
 import com.consense.service.vetting.VettingSemanticReview.*;
+import com.consense.service.export.EnglishFileOutput;
 import com.consense.web.dto.VettingDtos.*;
+import com.fasterxml.jackson.databind.JsonNode;
 import org.junit.jupiter.api.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -26,15 +28,26 @@ import static org.mockito.Mockito.*;
 class VettingPacketPersistenceWorkflowTest {
     private static final String ID=UUID.randomUUID().toString();
     @DynamicPropertySource static void isolation(DynamicPropertyRegistry r){r.add("spring.datasource.url",()->"jdbc:h2:mem:packet_persistence_"+ID+";MODE=MySQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE");r.add("consense.storage-root",()->Paths.get("target/packet-persistence-uploads",ID).toAbsolutePath().toString());}
-    @Autowired VettingService service;@Autowired ConsenseProperties props;@Autowired ProjectRepository projects;@Autowired SourceDocumentRepository documents;@Autowired VettingFindingRepository findings;@MockBean VettingSemanticReview semantic;
-    @BeforeEach void settings(){props.getVetting().setMaxRiskFindings(20);props.getVetting().setServiceProbeDirectory(null);props.getVetting().setProbeDirectory(null);props.getVetting().setExportProbeDirectory(null);}
+    @Autowired VettingService service;@Autowired ConsenseProperties props;@Autowired ProjectRepository projects;@Autowired SourceDocumentRepository documents;@Autowired VettingFindingRepository findings;@Autowired VettingReportSnapshotRepository reportSnapshots;@MockBean VettingSemanticReview semantic;
+    @MockBean EnglishFileOutput englishFiles;
+    @BeforeEach void settings(){
+        props.getVetting().setMaxRiskFindings(20);props.getVetting().setServiceProbeDirectory(null);props.getVetting().setProbeDirectory(null);props.getVetting().setExportProbeDirectory(null);
+        when(englishFiles.json(any(JsonNode.class),anyString(),any(Runnable.class))).thenAnswer(call->{call.<Runnable>getArgument(2).run();return call.getArgument(0);});
+        when(englishFiles.docx(any(byte[].class),anyString(),any(Runnable.class))).thenAnswer(call->{call.<Runnable>getArgument(2).run();return call.getArgument(0);});
+    }
     private SourceDocument source(){Project p=new Project();p.setId("packet-"+UUID.randomUUID());p.setNameEn("Packet persistence fixture");p.setContractNo("TEST");projects.saveAndFlush(p);DocumentBlock block=new DocumentBlock();block.setId("fixture-block");block.setKind("paragraph");block.setLocation("body/fixture");block.setSource("fixture_saved_text");block.setText("The original register shall be retained.");SourceDocument s=new SourceDocument();s.setProjectId(p.getId());s.setCategory(SourceDocument.CATEGORY_VETTING_PACKAGE);s.setReviewRole("tender");s.setFileKey("OTHER");s.setFileName("source-fixture.txt");s.setParseStatus("PARSED");s.setTextContent(block.getText());s.setStructuredContentJson(JsonUtils.write(Collections.singletonList(block)));return documents.saveAndFlush(s);}
     private Candidate candidate(SourceDocument s,String variant){String sha=VettingCorpus.hash("synthetic-bound-source-snapshot:"+variant);String packet="topic-1-packet-1-"+sha;Candidate c=new Candidate();c.setRuleId("semantic-risk");c.setSource("model");c.setType("risk");c.setSeverity("high");c.setTitle("Same synthetic finding");c.setComment("Same source quotation, distinct source input scope.");c.setImpact("Manual review");c.setSuggestion("Check original");c.setPacketId(packet);c.setSourceSnapshotSha256(sha);FindingEvidence e=new FindingEvidence("source",String.valueOf(s.getId()),s.getFileKey(),s.getFileName(),null,"body/fixture",s.getTextContent(),true,VettingCorpus.sourceHash(s),null);e.setPacketId(packet);e.setPacketSourceSnapshotSha256(sha);c.setEvidence(Collections.singletonList(e));return c;}
     private Result result(Candidate... cs){Result r=new Result();r.setModel("synthetic-review-fixture");r.getCandidates().addAll(Arrays.asList(cs));SemanticTopicVO a=new SemanticTopicVO();a.setTopicIndex(1);a.setStatus("completed");a.setGlobalCallStatus("completed");a.setAggregateReviewStatus("partial");a.setSourceRequestCount(2);a.setPendingSourceRequestCount(1);r.getTopicAudits().add(a);return r;}
     @Test void exactPacketMetadataSurvivesDatabaseListJsonSourceDialogAndCoverage() throws Exception {
         SourceDocument s=source();Candidate a=candidate(s,"A"),b=candidate(s,"B");when(semantic.reviewWithProgress(isNull(),eq(s.getProjectId()),anyList(),eq("en"),any(ReviewProgress.class),anyList(),any(Runnable.class))).thenReturn(result(a,b));assertEquals(2,service.run(s.getProjectId(),"en").getTotal());List<FindingVO> vos=service.listFindings(s.getProjectId(),null,null,null,null,null);assertEquals(2,vos.size());assertNotEquals(vos.get(0).getFingerprint(),vos.get(1).getFingerprint());
         for(FindingVO vo:vos){FindingEvidence e=vo.getEvidence().get(0);assertNotNull(e.getPacketId());assertTrue(e.getPacketId().endsWith(e.getPacketSourceSnapshotSha256()));assertEquals(e.getPacketId(),service.evidence(s.getProjectId(),vo.getCode()).getItems().get(0).getPacketId());assertEquals(e.getPacketSourceSnapshotSha256(),service.evidence(s.getProjectId(),vo.getCode()).getItems().get(0).getPacketSourceSnapshotSha256());VettingFinding row=findings.findByProjectIdAndCode(s.getProjectId(),vo.getCode()).get();assertTrue(row.getEvidenceJson().contains(e.getPacketId()));}
-        String json=new String(service.exportJson(s.getProjectId(),"en"),StandardCharsets.UTF_8);assertTrue(json.contains(a.getPacketId()));assertTrue(json.contains(b.getPacketId()));assertTrue(json.contains("aggregateReviewStatus"));assertEquals("partial",service.latestRun(s.getProjectId()).getCoverage().getSemanticTopics().get(0).getAggregateReviewStatus());
+        JsonNode exported=JsonUtils.parse(new String(service.exportJson(s.getProjectId(),"en"),StandardCharsets.UTF_8));String raw=savedReport(exported).toString();
+        assertTrue(raw.contains(a.getPacketId()));assertTrue(raw.contains(b.getPacketId()));
+        assertEquals("partial",exported.path("job").path("coverage").path("semanticTopics").get(0).path("aggregateReviewStatus").asText());
+        for(JsonNode finding:exported.path("findings"))for(JsonNode evidence:finding.path("evidence")){
+            assertFalse(evidence.path("literalSourceEvidence").asBoolean(true));assertFalse(evidence.has("quote"));assertTrue(evidence.path("displayQuote").isTextual());
+        }
+        assertEquals("partial",service.latestRun(s.getProjectId()).getCoverage().getSemanticTopics().get(0).getAggregateReviewStatus());
     }
     @Test void changedPacketSourceScopeNeverInheritsPreviousHumanDecisionAndExactScopeDoes() {
         SourceDocument s=source();AtomicReference<String> variant=new AtomicReference<>("A");when(semantic.reviewWithProgress(isNull(),eq(s.getProjectId()),anyList(),eq("en"),any(ReviewProgress.class),anyList(),any(Runnable.class))).thenAnswer(call->result(candidate(s,variant.get())));service.run(s.getProjectId(),"en");FindingVO old=service.listFindings(s.getProjectId(),null,null,null,null,null).get(0);VettingHumanReviewFixture.updateStatus(service,s.getProjectId(),old.getCode(),"Handled");FindingVO manual=VettingHumanReviewFixture.updateReview(service,s.getProjectId(),old.getCode(),new ReviewUpdateRequest("Review applies to packet A only","No amendment",false));service.run(s.getProjectId(),"en");FindingVO same=service.listFindings(s.getProjectId(),null,null,null,null,null).get(0);assertEquals(old.getCode(),same.getCode());assertEquals("Handled",same.getStatus());assertEquals(manual.getReviewRemarks(),same.getReviewRemarks());
@@ -51,5 +64,16 @@ class VettingPacketPersistenceWorkflowTest {
         assertEquals(VettingPromptPolicy.supplementSha256(""),c.getPromptSupplementSha256());
         assertNotEquals(historical,saved.getFingerprint(),"A current worker always binds policy even when a legacy-shaped fixture has no business fields");
         assertEquals(VettingService.fingerprint(c),saved.getFingerprint());
+    }
+    private JsonNode savedReport(JsonNode exported) {
+        assertEquals("2.0",exported.path("schemaVersion").asText());assertEquals("en",exported.path("language").asText());assertTrue(exported.path("presentationOnly").asBoolean());
+        String snapshotId=exported.path("sourceReportSnapshotId").asText();assertTrue(snapshotId.matches("[a-f0-9]{64}"));
+        VettingReportSnapshot saved=reportSnapshots.findById(snapshotId).orElseThrow(AssertionError::new);
+        assertEquals(saved.getRunId(),exported.path("sourceRunId").asText());assertEquals(saved.getRunId(),exported.path("job").path("id").asText());
+        assertTrue(exported.path("diagnostics").path("retainedServerSide").asBoolean());assertFalse(exported.path("job").has("result"));
+        assertEquals(snapshotId,VettingCorpus.hash("vetting-report-snapshot-v1\n"+saved.getPayloadJson()));
+        JsonNode original=JsonUtils.parse(saved.getPayloadJson());
+        assertEquals(original.path("job").path("sourceSnapshotSha256").asText(),exported.path("sourceSnapshotSha256").asText());
+        return original;
     }
 }

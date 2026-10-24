@@ -9,10 +9,13 @@ import com.consense.domain.Project;
 import com.consense.domain.SourceDocument;
 import com.consense.domain.VettingFinding;
 import com.consense.domain.VettingRun;
+import com.consense.domain.VettingReportSnapshot;
 import com.consense.repository.ProjectRepository;
 import com.consense.repository.SourceDocumentRepository;
 import com.consense.repository.VettingFindingRepository;
 import com.consense.repository.VettingRunRepository;
+import com.consense.repository.VettingReportSnapshotRepository;
+import com.consense.service.export.EnglishFileOutput;
 import com.consense.web.dto.VettingDtos.*;
 import com.fasterxml.jackson.databind.JsonNode;
 import org.apache.pdfbox.pdmodel.PDDocument;
@@ -79,14 +82,18 @@ class VettingWorkflowTest {
     @Autowired private SourceDocumentRepository documents;
     @Autowired private VettingFindingRepository findings;
     @Autowired private VettingRunRepository runs;
+    @Autowired private VettingReportSnapshotRepository reportSnapshots;
     @Autowired private ConsenseProperties props;
     @Autowired private VettingSemanticReview semantic;
     @SpyBean private com.consense.service.drafting.DraftingService drafting;
     @MockBean private AiGateway ai;
     @MockBean private VettingRetrievalClient retrieval;
+    @MockBean private EnglishFileOutput englishFiles;
 
     @BeforeEach
     void offlineModel() {
+        when(englishFiles.json(any(JsonNode.class),anyString(),any(Runnable.class))).thenAnswer(call->{call.<Runnable>getArgument(2).run();return call.getArgument(0);});
+        when(englishFiles.docx(any(byte[].class),anyString(),any(Runnable.class))).thenAnswer(call->{call.<Runnable>getArgument(2).run();return call.getArgument(0);});
         // Explicit renderer replacement: workflow persistence/dispatch only, not LibreOffice acceptance.
         org.mockito.Mockito.doAnswer(call->VettingDocxPdfFixture.render(call.getArgument(0))).when(drafting).renderPdf(any(byte[].class));
         semantic.setInputBudgetObserver(VettingTokenFixture::observe);
@@ -327,7 +334,7 @@ class VettingWorkflowTest {
         assertTrue(coverage(restored, fact).getReviewedSegments() > 0);
         assertTrue(list(projectId).isEmpty(), "A completed empty comparison is not a finding");
         JsonNode exported = JsonUtils.parse(new String(service.exportJson(projectId, "en"), StandardCharsets.UTF_8));
-        JsonNode last = exported.path("job").path("coverage").path("semanticTopics").get(VettingSemanticReview.maxTopics());
+        JsonNode last = savedReport(exported).path("job").path("coverage").path("semanticTopics").get(VettingSemanticReview.maxTopics());
         assertEquals("project_reference", last.path("reviewKind").asText());
         assertEquals("SCT37", last.path("referenceIds").get(0).asText());
     }
@@ -454,15 +461,15 @@ class VettingWorkflowTest {
         assertEquals(reviewTime, persisted.getReviewUpdatedAt());
 
         JsonNode report = JsonUtils.parse(new String(service.exportJson(projectId, "en"), StandardCharsets.UTF_8));
-        assertEquals("1.0", report.path("schemaVersion").asText());
+        JsonNode originalReport = savedReport(report);
         assertEquals(second.getId(), report.path("job").path("id").asText());
         assertEquals("COMPLETED", report.path("job").path("status").asText());
         assertEquals(second.getResult().getTotal(), report.path("findings").size());
         assertEquals(repeated.getCode(), report.path("findings").get(0).path("code").asText());
         assertEquals(VettingFinding.STATUS_HANDLED, report.path("findings").get(0).path("status").asText());
         assertEquals(2, report.path("findings").get(0).path("evidence").size());
-        assertEquals(remarks, report.path("findings").get(0).path("reviewRemarks").asText());
-        assertEquals(action, report.path("findings").get(0).path("actionTaken").asText());
+        assertEquals(remarks, originalReport.path("findings").get(0).path("reviewRemarks").asText());
+        assertEquals(action, originalReport.path("findings").get(0).path("actionTaken").asText());
         assertTrue(report.path("findings").get(0).path("addendumRequired").asBoolean());
         assertEquals(reviewTime, Instant.parse(report.path("findings").get(0).path("reviewUpdatedAt").asText()));
     }
@@ -605,7 +612,7 @@ class VettingWorkflowTest {
         assertEquals(0, job.getResult().getTotal());
         assertTrue(list(projectId).isEmpty());
         assertOfflineWarning(job);
-        String snapshotId=JsonUtils.parse(new String(service.exportJson(projectId,"en"),StandardCharsets.UTF_8)).path("reportSnapshotId").asText();
+        String snapshotId=JsonUtils.parse(new String(service.exportJson(projectId,"en"),StandardCharsets.UTF_8)).path("sourceReportSnapshotId").asText();
         assertTrue(snapshotId.matches("[a-f0-9]{64}"));
 
         try (XWPFDocument doc = new XWPFDocument(new ByteArrayInputStream(service.exportDocx(projectId, "en")))) {
@@ -624,10 +631,10 @@ class VettingWorkflowTest {
             assertTrue(text.contains("Review limitations and unreviewed scope"));
         }
         JsonNode report = JsonUtils.parse(new String(service.exportJson(projectId, "en"), StandardCharsets.UTF_8));
-        assertEquals("1.0", report.path("schemaVersion").asText());
+        JsonNode originalReport = savedReport(report);
         assertEquals(job.getId(), report.path("job").path("id").asText());
         assertEquals(0, report.path("findings").size());
-        assertFalse(report.path("job").path("coverage").path("warnings").isEmpty());
+        assertFalse(originalReport.path("job").path("coverage").path("warnings").isEmpty());
 
         VettingRun pending = new VettingRun(); pending.setId(UUID.randomUUID().toString()); pending.setProjectId(projectId);
         pending.setStatus("RUNNING"); pending.setPhase("review"); pending.setLang("en"); pending.setStartedAt(Instant.now().plusSeconds(10));
@@ -640,6 +647,18 @@ class VettingWorkflowTest {
         } finally {
             runs.deleteById(pending.getId());
         }
+    }
+
+    private JsonNode savedReport(JsonNode exported) {
+        assertEquals("2.0",exported.path("schemaVersion").asText());assertEquals("en",exported.path("language").asText());assertTrue(exported.path("presentationOnly").asBoolean());
+        String snapshotId=exported.path("sourceReportSnapshotId").asText();assertTrue(snapshotId.matches("[a-f0-9]{64}"));
+        VettingReportSnapshot saved=reportSnapshots.findById(snapshotId).orElseThrow(AssertionError::new);
+        assertEquals(saved.getRunId(),exported.path("sourceRunId").asText());assertEquals(saved.getRunId(),exported.path("job").path("id").asText());
+        assertTrue(exported.path("diagnostics").path("retainedServerSide").asBoolean());assertFalse(exported.path("job").has("result"));
+        assertEquals(snapshotId,VettingCorpus.hash("vetting-report-snapshot-v1\n"+saved.getPayloadJson()));
+        JsonNode original=JsonUtils.parse(saved.getPayloadJson());
+        assertEquals(original.path("job").path("sourceSnapshotSha256").asText(),exported.path("sourceSnapshotSha256").asText());
+        return original;
     }
 
     private String project(String name) {

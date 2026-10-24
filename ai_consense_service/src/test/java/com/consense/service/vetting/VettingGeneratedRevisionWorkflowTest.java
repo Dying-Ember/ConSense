@@ -6,6 +6,7 @@ import com.consense.document.DocumentParser;
 import com.consense.domain.*;
 import com.consense.repository.*;
 import com.consense.service.vetting.VettingSemanticReview.*;
+import com.consense.service.export.EnglishFileOutput;
 import com.consense.web.dto.VettingDtos.*;
 import com.fasterxml.jackson.databind.JsonNode;
 import org.junit.jupiter.api.*;
@@ -40,8 +41,14 @@ class VettingGeneratedRevisionWorkflowTest {
     @Autowired ProjectRepository projects;
     @Autowired SourceDocumentRepository documents;
     @Autowired VettingFindingRepository findings;
+    @Autowired VettingReportSnapshotRepository reportSnapshots;
     @MockBean VettingSemanticReview semantic;
-    @BeforeEach void resetFixture() {props.getVetting().setServiceProbeDirectory(null);props.getVetting().setProbeDirectory(null);props.getVetting().setExportProbeDirectory(null);props.getVetting().setMaxRiskFindings(20);}
+    @MockBean EnglishFileOutput englishFiles;
+    @BeforeEach void resetFixture() {
+        props.getVetting().setServiceProbeDirectory(null);props.getVetting().setProbeDirectory(null);props.getVetting().setExportProbeDirectory(null);props.getVetting().setMaxRiskFindings(20);
+        when(englishFiles.json(any(JsonNode.class),anyString(),any(Runnable.class))).thenAnswer(call->{call.<Runnable>getArgument(2).run();return call.getArgument(0);});
+        when(englishFiles.docx(any(byte[].class),anyString(),any(Runnable.class))).thenAnswer(call->{call.<Runnable>getArgument(2).run();return call.getArgument(0);});
+    }
 
     @Test void sevenClassesPersistFilterCountAndExportAsInternalMetadata() throws Exception {
         SourceDocument doc=source();String project=doc.getProjectId();
@@ -61,9 +68,11 @@ class VettingGeneratedRevisionWorkflowTest {
         }
         assertEquals(VettingPromptPolicy.metadata(),result.getPromptPolicy());
         com.fasterxml.jackson.databind.JsonNode report=JsonUtils.parse(new String(service.exportJson(project,"en"),StandardCharsets.UTF_8));
-        assertEquals(VettingPromptPolicy.sha256(),report.path("promptPolicy").path("sha256").asText());
+        JsonNode originalReport=savedReport(report);
+        assertEquals(VettingPromptPolicy.sha256(),originalReport.path("job").path("result").path("promptPolicy").path("sha256").asText());
+        assertFalse(report.has("promptPolicy"),"Internal prompt metadata stays in the immutable source snapshot");
         assertEquals(5,report.path("commentsTables").get(0).path("headings").size(),"Seven classes must not add an official report column");
-        Set<String> codes=new HashSet<>();report.path("findings").forEach(f->codes.add(f.path("issueTypeCode").asText()));assertEquals(7,codes.size());
+        Set<String> codes=new HashSet<>();originalReport.path("findings").forEach(f->codes.add(f.path("issueTypeCode").asText()));assertEquals(7,codes.size());
         assertEquals("Authored source review",report.path("findings").get(0).path("businessDetails").path("subDimension").asText());
         assertEquals(44,report.path("automaticChecklistResults").size());
     }
@@ -103,7 +112,7 @@ class VettingGeneratedRevisionWorkflowTest {
         assertEquals(first.getBody().getEn(),old.getBodyEn());
         JsonNode report=JsonUtils.parse(new String(service.exportJson(project,"en"),StandardCharsets.UTF_8));
         assertEquals(1,report.path("findings").size());assertEquals(changed.getCode(),report.path("findings").get(0).path("code").asText());
-        assertTrue(report.path("findings").get(0).path("reviewRemarks").isNull());
+        assertTrue(savedReport(report).path("findings").get(0).path("reviewRemarks").isNull());
         VettingHumanReviewFixture.updateStatus(service,project,changed.getCode(),"Assigned");
         FindingVO newManual=VettingHumanReviewFixture.updateReview(service,project,changed.getCode(),new ReviewUpdateRequest(" new review "," new action ",true));
         FindingVO repeated=run(project);
@@ -136,6 +145,18 @@ class VettingGeneratedRevisionWorkflowTest {
         assertNull(current.getReviewRemarks());assertNull(current.getAddendumRequired());
         VettingFinding retained=findings.findByProjectIdAndCode(project,original.getCode()).orElseThrow(AssertionError::new);
         assertEquals(" Legacy manual ",retained.getReviewRemarks());assertFalse(retained.getActive());assertNull(retained.getBodyEn());
+    }
+
+    private JsonNode savedReport(JsonNode exported) {
+        assertEquals("2.0",exported.path("schemaVersion").asText());assertEquals("en",exported.path("language").asText());assertTrue(exported.path("presentationOnly").asBoolean());
+        String snapshotId=exported.path("sourceReportSnapshotId").asText();assertTrue(snapshotId.matches("[a-f0-9]{64}"));
+        VettingReportSnapshot saved=reportSnapshots.findById(snapshotId).orElseThrow(AssertionError::new);
+        assertEquals(saved.getRunId(),exported.path("sourceRunId").asText());assertEquals(saved.getRunId(),exported.path("job").path("id").asText());
+        assertTrue(exported.path("diagnostics").path("retainedServerSide").asBoolean());assertFalse(exported.path("job").has("result"));
+        assertEquals(snapshotId,VettingCorpus.hash("vetting-report-snapshot-v1\n"+saved.getPayloadJson()));
+        JsonNode original=JsonUtils.parse(saved.getPayloadJson());
+        assertEquals(original.path("job").path("sourceSnapshotSha256").asText(),exported.path("sourceSnapshotSha256").asText());
+        return original;
     }
 
     private FindingVO run(String project) {assertEquals(1,service.run(project,"en").getTotal());return service.listFindings(project,null,null,null,null,null).get(0);}

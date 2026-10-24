@@ -30,7 +30,7 @@ class DraftIncompleteNoticeTest {
     @Test void fileListKeepsGlobalAndUnknownIssuesAndSummarizesExplicitOtherDocuments(){
         Map<String,Object> plan=com.consense.common.JsonUtils.readMap("{\"unresolved\":[{\"kind\":\"SourceFormat\",\"document\":\"SCC\"},{\"kind\":\"SourceFormat\",\"document\":\"NTT\"},{\"kind\":\"InputMissing\",\"inputKeys\":[\"contractTitle\"]},{\"kind\":\"unknown\",\"document\":\"unrecognized\"}]}");
         List<String> items=DraftIncompleteNotice.outstanding(Collections.emptyMap(),plan,"NTT");
-        assertEquals(4,items.size());assertTrue(items.get(0).contains("NTT"));assertTrue(items.get(0).contains("页眉页脚"));assertTrue(items.get(1).contains("合约编号"));assertTrue(items.get(2).contains("项目文稿"));assertTrue(items.get(3).contains("SCC 文稿另有 1"));
+        assertEquals(4,items.size());assertTrue(items.get(0).contains("NTT"));assertTrue(items.get(0).contains("headers, footers"));assertTrue(items.get(1).contains("contract number"));assertTrue(items.get(2).contains("Project draft"));assertTrue(items.get(3).contains("1 outstanding records remain in SCC"));
         Map<String,Object> onlyOther=com.consense.common.JsonUtils.readMap("{\"unresolved\":[{\"kind\":\"SourceFormat\",\"document\":\"SCC\"}]}");
         assertFalse(DraftIncompleteNotice.outstanding(Collections.emptyMap(),onlyOther,"NTT").isEmpty());
         assertTrue(DraftIncompleteNotice.outstanding(Collections.emptyMap(),Collections.emptyMap(),"NTT").isEmpty());
@@ -40,14 +40,14 @@ class DraftIncompleteNoticeTest {
         Map<String,Object> plan=com.consense.common.JsonUtils.readMap("{\"unresolved\":[{\"kind\":\"NodeReviewRequired\",\"inputKeys\":[\"a\"]},{\"kind\":\"InputMissing\",\"inputKeys\":[\"a\"]},{\"kind\":\"InputMissing\",\"inputKeys\":[\"a\"]},{\"kind\":\"InputMissing\",\"inputKeys\":[\"b\"]},{\"kind\":\"unknown1\"},{\"kind\":\"unknown2\"}]}");
         String before=com.consense.common.JsonUtils.write(plan);
         List<String> items=DraftIncompleteNotice.outstanding(graph,plan);
-        assertEquals(4,items.size());assertTrue(items.get(0).contains("问题或规则尚未确认"));assertTrue(items.get(0).contains("答案尚未明确采用"));
-        assertEquals(1,items.get(0).split("答案尚未明确采用",-1).length-1);
+        assertEquals(4,items.size());assertTrue(items.get(0).contains("Review the guidance"));assertTrue(items.get(0).contains("adopt the required answer"));
+        assertEquals(1,items.get(0).split("adopt the required answer",-1).length-1);
         assertTrue(items.get(1).startsWith("同名问题"));assertEquals(before,com.consense.common.JsonUtils.write(plan));
     }
     @Test void outstandingListUsesBusinessLabelsAndNeverRawDiagnosticIdentifiers(){
         Map<String,Object> graph=com.consense.common.JsonUtils.readMap("{\"sources\":[{\"docId\":\"17\",\"fileName\":\"SCT.docx\"}],\"graph\":{\"variables\":[{\"id\":\"internal-node-123\",\"nameZh\":\"预制立面\",\"editTargets\":[{\"id\":\"internal-target-456\",\"docId\":\"17\",\"text\":\"Tender option\"}]}]}}");
         Map<String,Object> plan=com.consense.common.JsonUtils.readMap("{\"unresolved\":[{\"kind\":\"NodeReviewRequired\",\"inputKeys\":[\"internal-node-123\"]},{\"kind\":\"OverlappingEdits\",\"inputKeys\":[\"internal-target-456\"]},{\"kind\":\"InputMissing\",\"inputKeys\":[\"contractTitle\"]},{\"kind\":\"unexpected_internal_error\",\"message\":\"secret-hash-and-node-id\"}]}");
-        List<String> items=DraftIncompleteNotice.outstanding(graph,plan);assertEquals(4,items.size());assertTrue(items.get(0).contains("预制立面"));assertTrue(items.get(1).contains("SCT.docx"));assertTrue(items.get(1).contains("Tender option"));assertTrue(items.get(2).contains("合约编号"));
+        List<String> items=DraftIncompleteNotice.outstanding(graph,plan);assertEquals(4,items.size());assertTrue(items.get(0).contains("预制立面"));assertTrue(items.get(1).contains("SCT.docx"));assertTrue(items.get(1).contains("Tender option"));assertTrue(items.get(2).contains("contract number"));
         assertFalse(items.toString().contains("internal-"));assertFalse(items.toString().contains("secret-hash"));assertFalse(items.toString().contains("unexpected_internal_error"));
         assertTrue(DraftIncompleteNotice.outstanding(graph,Collections.emptyMap()).isEmpty());
     }
@@ -68,10 +68,20 @@ class DraftIncompleteNoticeTest {
             assertEquals("Existing table",doc.getTables().get(0).getRow(0).getCell(0).getText());
             assertTrue(doc.getHeaderList().get(0).getText().contains("Project identity"));assertTrue(doc.getFooterList().get(0).getText().contains("Contract number"));
             assertTrue(doc.getParagraphs().get(2).isPageBreak());
+            assertEquals("Outstanding items",doc.getParagraphs().get(2).getText());
+            assertFalse(doc.getParagraphs().stream().anyMatch(p->p.getText().matches("(?s).*\\p{IsHan}.*")),"Static delivery wording is English regardless of the interface language");
             assertEquals("1. SCC: Price fluctuation reference needs review.",doc.getParagraphs().get(3).getText());
             assertEquals("2. SCT: Confirm the applicable facade option.",doc.getParagraphs().get(4).getText());
         }
         assertSame(original,DraftIncompleteNotice.apply(original,Collections.emptyList()));
         assertThrows(IllegalArgumentException.class,()->DraftIncompleteNotice.apply(original,Collections.singletonList(" ")));
+    }
+    @Test void englishLabelsTakePrecedenceWithoutChangingTheSavedGraphOrDroppingUnresolvedItems(){
+        Map<String,Object> graph=com.consense.common.JsonUtils.readMap("{\"graph\":{\"variables\":[{\"id\":\"duration\",\"nameZh\":\"工期\",\"nameEn\":\"Duration\"},{\"id\":\"custom\",\"nameZh\":\"人工记录\"}]}}");
+        Map<String,Object> plan=com.consense.common.JsonUtils.readMap("{\"unresolved\":[{\"kind\":\"AnswerUnknown\",\"inputKeys\":[\"duration\"]},{\"kind\":\"ManualCheck\",\"inputKeys\":[\"custom\"]}]}");
+        String before=com.consense.common.JsonUtils.write(graph);List<String> items=DraftIncompleteNotice.outstanding(graph,plan);
+        assertEquals(2,items.size());assertTrue(items.get(0).startsWith("Duration: "));assertFalse(items.get(0).contains("工期"));
+        assertTrue(items.get(1).startsWith("人工记录: "),"A missing English label remains available for the derived-file translator instead of being discarded");
+        assertEquals(before,com.consense.common.JsonUtils.write(graph));
     }
 }

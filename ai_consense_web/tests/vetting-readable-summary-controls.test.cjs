@@ -18,7 +18,7 @@ const completed = () => ({ id: 'run-1', status: 'COMPLETED', phase: 'done', comp
   coverage: { reviewedDocuments: 1, totalDocuments: 2, warnings: ['Raw canonical UTF16 parser warning'], documents: [] } })
 
 async function mount({ locale = 'zh-Hans', files = [], findings = [], metrics = { total: 10 }, job = completed(), pendingDetails = false, pendingRefresh = false } = {}) {
-  const notifications = []
+  const notifications = [], apiCalls = []
   const store = vue.reactive({ activeProjectId: 'project-a', locale, notify(message) { notifications.push(message) }, setBusy() {}, clearBusy() {}, captureLlmSelection: () => ({ profileId: null }) })
   const deferredDetail = deferred()
   let detailReads = 0
@@ -32,7 +32,8 @@ async function mount({ locale = 'zh-Hans', files = [], findings = [], metrics = 
     '@/api': { vettingApi: { files: async () => files, findings: async () => findings, metrics: async () => metrics,
       sourceProgress: async () => files.map(source => ({ id: source.documentId ?? source.key, fileName: source.fileName, parseStatus: source.parseStatus ?? source.status, parseMessage: source.parseMessage, pageCount: source.pageCount })),
       latestRunProgress: async () => job, getRun: async () => { detailReads++; return pendingDetails || pendingRefresh && detailReads > 1 ? deferredDetail.promise : job },
-      exportReport: async () => undefined, evidence: async () => ({ located: true, items: [] }), startRun: async () => job } },
+      exportReport: async (...args) => { apiCalls.push(['export', ...args]) }, evidence: async () => ({ located: true, items: [] }),
+      startRun: async (...args) => { apiCalls.push(['run', ...args]); return job } } },
     '@/advice/reviewHandoff': { reviewHandoffCopy: {} },
     '@/components/AppIcon.vue': { default: empty },
     '@/components/AppModal.vue': { default: { props: ['open', 'title'], setup: (props, { slots }) => () => props.open ? vue.h('div', { class: 'test-modal' }, slots.default?.()) : null } },
@@ -44,11 +45,28 @@ async function mount({ locale = 'zh-Hans', files = [], findings = [], metrics = 
   i18n.global.locale.value = locale
   const h = renderer(), app = h.createApp(loaded.default)
   app.use(i18n); app.mount(h.root); await settle()
-  return { ...h, notifications, dispose: () => app.unmount(), resolveDetails: async () => { deferredDetail.resolve(job); await settle() }, openSources: async () => {
+  return { ...h, notifications, apiCalls, dispose: () => app.unmount(), resolveDetails: async () => { deferredDetail.resolve(job); await settle() }, openSources: async () => {
     const button = find(h.root, node => node.tag === 'button' && text(node).trim() === i18n.global.t('vetting.actions.source'))
     assert.ok(button); button.props.onClick(); await settle()
   } }
 }
+
+test('report exports omit interface language while vetting runs retain all three interface languages', async () => {
+  for (const [locale, runLabel, exportLabel, notice] of [
+    ['zh-Hans', '运行审查', '导出审查报告', '导出文件统一为英文；非英文内容自动翻译，来源译文会标注。'],
+    ['zh-Hant', '執行審查', '匯出審查報告', '匯出檔案統一為英文；非英文內容自動翻譯，來源譯文會標註。'],
+    ['en', 'Run vetting', 'Export report', 'Exports are in English. Non-English content is translated automatically; translated source quotations are labelled.']
+  ]) {
+    const h = await mount({ locale, files: [file('SCC')] })
+    try {
+      const languageNotice = find(h.root, node => Object.hasOwn(node.props ?? {}, 'data-generated-output-language'))
+      assert.ok(languageNotice); assert.equal(text(languageNotice), notice); assert.equal(closedAncestor(languageNotice), false)
+      const click = async label => { const control = find(h.root, node => node.tag === 'button' && text(node).trim() === label); assert.ok(control, label); assert.equal(control.props.disabled, false); await control.props.onClick(); await settle() }
+      await click(exportLabel); await click(runLabel)
+      assert.deepEqual(h.apiCalls, [['export', 'project-a', 'ConSense_Vetting_Report.pdf', 'pdf'], ['run', 'project-a', locale, { profileId: null }]])
+    } finally { h.dispose() }
+  }
+})
 
 test('reader summary keeps snapshot documents, total findings and filtered pending findings separate in all locales', async () => {
   for (const [locale, coverageText, findingText, pendingText, riskText] of [

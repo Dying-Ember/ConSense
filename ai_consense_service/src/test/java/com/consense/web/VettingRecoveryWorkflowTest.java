@@ -7,6 +7,7 @@ import com.consense.document.DocumentParser;
 import com.consense.domain.*;
 import com.consense.repository.*;
 import com.consense.service.*;
+import com.consense.service.export.EnglishFileOutput;
 import com.consense.service.vetting.*;
 import com.consense.web.dto.VettingDtos.*;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -69,6 +70,7 @@ class VettingRecoveryWorkflowTest {
     @javax.persistence.PersistenceContext javax.persistence.EntityManager entityManager;
     @MockBean AiGateway ai;
     @MockBean VettingRetrievalClient retrieval;
+    @MockBean EnglishFileOutput englishFiles;
     private final AtomicReference<List<VettingCorpus.Chunk>> corpus=new AtomicReference<>();
     @AfterEach void waitForOriginalWorkerBeforeResettingSharedMocks() throws Exception {
         // A recovered run can be terminal while its superseded worker still uses shared mocks.
@@ -76,6 +78,8 @@ class VettingRecoveryWorkflowTest {
         worker.submit(()->{}).get(10,TimeUnit.SECONDS);
     }
     @BeforeEach void fixture(){
+        when(englishFiles.json(any(JsonNode.class),anyString(),any(Runnable.class))).thenAnswer(call->{call.<Runnable>getArgument(2).run();return call.<JsonNode>getArgument(0).deepCopy();});
+        when(englishFiles.docx(any(byte[].class),anyString(),any(Runnable.class))).thenAnswer(call->{call.<Runnable>getArgument(2).run();return call.<byte[]>getArgument(0).clone();});
         // Explicit renderer replacement: durable recovery/content only, not LibreOffice acceptance.
         doAnswer(call->VettingDocxPdfFixture.render(call.getArgument(0))).when(drafting).renderPdf(any(byte[].class));
         promptService.reset(com.consense.service.prompt.PromptCatalog.KEY_VETTING);
@@ -116,7 +120,9 @@ class VettingRecoveryWorkflowTest {
         JsonNode packet=completed.path("coverage").path("semanticTopics").get(0).path("packetAudits").get(0);assertEquals("completed_empty",packet.path("status").asText());assertEquals(2,packet.path("attempts").size());assertEquals(firstRaw.get(),packet.path("attempts").get(0).path("rawResponse").asText());assertEquals("[]",packet.path("attempts").get(1).path("rawResponse").asText());
         String marker="修复答复为空数组";assertTrue(completed.path("coverage").path("warnings").toString().contains(marker));
         List<ReliablePacketVO> reliable=checkpoints.reliable(id);assertEquals(1,reliable.size());assertTrue(reliable.get(0).getWarnings().stream().anyMatch(w->w.contains(marker)));assertTrue(reliable.get(0).getCandidates().isEmpty());
-        assertTrue(findings.findByProjectIdOrderByCodeAsc(project).isEmpty());byte[] json=http.perform(get("/api/vetting/"+project+"/report.json")).andReturn().getResponse().getContentAsByteArray();JsonNode exported=JsonUtils.parse(new String(json,StandardCharsets.UTF_8));assertTrue(exported.path("job").path("coverage").path("warnings").toString().contains(marker));String snapshot=exported.path("reportSnapshotId").asText();assertTrue(snapshots.findById(snapshot).isPresent());
+        assertTrue(findings.findByProjectIdOrderByCodeAsc(project).isEmpty());byte[] json=http.perform(get("/api/vetting/"+project+"/report.json")).andReturn().getResponse().getContentAsByteArray();JsonNode exported=JsonUtils.parse(new String(json,StandardCharsets.UTF_8));JsonNode originalReport=savedReport(exported);assertTrue(originalReport.path("job").path("coverage").path("warnings").toString().contains(marker));String snapshot=exported.path("sourceReportSnapshotId").asText();
+        assertEquals(firstRaw.get(),originalReport.path("job").path("coverage").path("semanticTopics").get(0).path("packetAudits").get(0).path("attempts").get(0).path("rawResponse").asText());
+        assertFalse(exported.path("job").path("coverage").path("semanticTopics").get(0).path("packetAudits").get(0).has("attempts"));
         for(String format:Arrays.asList("docx","pdf")){byte[] bytes=http.perform(get("/api/vetting/"+project+"/report."+format)).andReturn().getResponse().getContentAsByteArray();String text;
             if("docx".equals(format)){try(XWPFDocument doc=new XWPFDocument(new ByteArrayInputStream(bytes))){assertEquals(snapshot,doc.getProperties().getCoreProperties().getIdentifier());text=doc.getParagraphs().stream().map(p->p.getText()).collect(Collectors.joining("\n"));}}
             else {try(PDDocument doc=PDDocument.load(bytes)){assertEquals(snapshot,doc.getDocumentInformation().getCustomMetadataValue("ConSenseReportSnapshotId"));text=new PDFTextStripper().getText(doc);}}
@@ -136,11 +142,11 @@ class VettingRecoveryWorkflowTest {
     }
     @Test void allFormatsUseTheSavedSnapshotAndHumanEditsCreateANewRetainedRevision() throws Exception {
         String project=project();String id=start(project);await(project,id,"COMPLETED");
-        byte[] json=http.perform(get("/api/vetting/"+project+"/report.json")).andReturn().getResponse().getContentAsByteArray();JsonNode first=JsonUtils.parse(new String(json,StandardCharsets.UTF_8));String snapshot=first.path("reportSnapshotId").asText();assertTrue(snapshot.matches("[a-f0-9]{64}"));assertTrue(snapshots.findById(snapshot).isPresent());
+        byte[] json=http.perform(get("/api/vetting/"+project+"/report.json")).andReturn().getResponse().getContentAsByteArray();JsonNode first=JsonUtils.parse(new String(json,StandardCharsets.UTF_8));savedReport(first);String snapshot=first.path("sourceReportSnapshotId").asText();
         byte[] pdf=http.perform(get("/api/vetting/"+project+"/report.pdf")).andReturn().getResponse().getContentAsByteArray();try(PDDocument doc=PDDocument.load(pdf)){assertEquals(snapshot,doc.getDocumentInformation().getCustomMetadataValue("ConSenseReportSnapshotId"));}
         byte[] docx=http.perform(get("/api/vetting/"+project+"/report.docx")).andReturn().getResponse().getContentAsByteArray();try(XWPFDocument doc=new XWPFDocument(new ByteArrayInputStream(docx))){assertEquals(snapshot,doc.getProperties().getCoreProperties().getIdentifier());}
         JsonNode loaded=first.path("findings").get(0);String code=loaded.path("code").asText();http.perform(put("/api/vetting/"+project+"/findings/"+code+"/review").contentType("application/json").content(reviewBody(loaded,"human retained remark"))).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.code").value(0));
-        JsonNode changed=JsonUtils.parse(http.perform(get("/api/vetting/"+project+"/report.json")).andReturn().getResponse().getContentAsString());assertNotEquals(snapshot,changed.path("reportSnapshotId").asText());assertTrue(snapshots.findById(snapshot).isPresent());assertTrue(changed.path("findings").toString().contains("human retained remark"));
+        JsonNode changed=JsonUtils.parse(http.perform(get("/api/vetting/"+project+"/report.json")).andReturn().getResponse().getContentAsString());assertNotEquals(snapshot,changed.path("sourceReportSnapshotId").asText());assertTrue(snapshots.findById(snapshot).isPresent());assertTrue(savedReport(changed).path("findings").toString().contains("human retained remark"));
         SourceDocument source=documents.findByProjectIdOrderByIdAsc(project).get(0);source.setTextContent(source.getTextContent()+" changed source");documents.saveAndFlush(source);
         org.springframework.mock.web.MockHttpServletResponse stale=http.perform(get("/api/vetting/"+project+"/report.json")).andReturn().getResponse();assertNull(stale.getHeader("Content-Disposition"));assertNotEquals(0,JsonUtils.parse(stale.getContentAsString()).path("code").asInt());
     }
@@ -161,13 +167,13 @@ class VettingRecoveryWorkflowTest {
         });
         JsonNode reloaded=JsonUtils.parse(http.perform(get("/api/vetting/"+project+"/runs/"+id)).andReturn().getResponse().getContentAsString()).path("data");
         assertEquals(first,reloaded.path("reportSnapshotId").asText());
-        JsonNode exported=JsonUtils.parse(http.perform(get("/api/vetting/"+project+"/report.json")).andReturn().getResponse().getContentAsString());assertEquals(first,exported.path("reportSnapshotId").asText());
+        JsonNode exported=JsonUtils.parse(http.perform(get("/api/vetting/"+project+"/report.json")).andReturn().getResponse().getContentAsString());savedReport(exported);assertEquals(first,exported.path("sourceReportSnapshotId").asText());
         byte[] pdf=http.perform(get("/api/vetting/"+project+"/report.pdf")).andReturn().getResponse().getContentAsByteArray();try(PDDocument doc=PDDocument.load(pdf)){assertEquals(first,doc.getDocumentInformation().getCustomMetadataValue("ConSenseReportSnapshotId"));}
         byte[] docx=http.perform(get("/api/vetting/"+project+"/report.docx")).andReturn().getResponse().getContentAsByteArray();try(XWPFDocument doc=new XWPFDocument(new ByteArrayInputStream(docx))){assertEquals(first,doc.getProperties().getCoreProperties().getIdentifier());}
         String original=snapshots.findById(first).orElseThrow(AssertionError::new).getPayloadJson();
         VettingRun changed=runs.findById(id).orElseThrow(AssertionError::new);changed.setFinishedAt(precise.plusSeconds(1));runs.saveAndFlush(changed);
         JsonNode changedReport=JsonUtils.parse(http.perform(get("/api/vetting/"+project+"/report.json")).andReturn().getResponse().getContentAsString());
-        assertNotEquals(first,changedReport.path("reportSnapshotId").asText(),"A real persisted time change must produce a new content hash");
+        savedReport(changedReport);assertNotEquals(first,changedReport.path("sourceReportSnapshotId").asText(),"A real persisted time change must produce a new content hash");
         assertEquals(original,snapshots.findById(first).orElseThrow(AssertionError::new).getPayloadJson(),"The earlier snapshot remains immutable");
     }
     @Test void missingForeignOrIncompleteStoredRunCannotCreateASnapshot() throws Exception {
@@ -177,7 +183,7 @@ class VettingRecoveryWorkflowTest {
             VettingRunRepository repository=mock(VettingRunRepository.class);VettingRunRepository.ProgressView stored=mock(VettingRunRepository.ProgressView.class);
             when(stored.getId()).thenReturn("foreign".equals(mode)?"different-run":id);when(stored.getStatus()).thenReturn("incomplete".equals(mode)?"RUNNING":"COMPLETED");
             when(repository.findProgress(project,id)).thenReturn("missing".equals(mode)?Optional.empty():Optional.of(stored));
-            VettingService guarded=new VettingService(projectService,storage,parser,props,documents,findings,repository,semantic,writer,transactions,profiles);guarded.setReportSnapshots(snapshots);guarded.setDraftingIdentity(drafting);
+            VettingService guarded=new VettingService(projectService,storage,parser,props,documents,findings,repository,semantic,writer,transactions,profiles);guarded.setReportSnapshots(snapshots);guarded.setDraftingIdentity(drafting);guarded.setEnglishFileOutput(englishFiles);
             try {
                 BizException failure=assertThrows(BizException.class,()->org.springframework.test.util.ReflectionTestUtils.invokeMethod(guarded,"saveReportSnapshot",projects.findById(project).orElseThrow(AssertionError::new),run,service.listFindings(project,null,null,null,null,null)),mode);
                 assertEquals(4103,failure.getCode());assertEquals(before,snapshots.count(),"No fallback snapshot is saved: "+mode);
@@ -189,7 +195,7 @@ class VettingRecoveryWorkflowTest {
         when(ai.completeStructuredJsonList(anyString(),anyString(),eq(VettingSemanticReview.Record.class),any(),anyList())).thenAnswer(call->{if(calls.incrementAndGet()==2){waiting.countDown();assertTrue(release.await(20,TimeUnit.SECONDS));}return records("issue",call.getArgument(1));});
         String id=start(project);assertTrue(waiting.await(10,TimeUnit.SECONDS));assertEquals(1,checkpoints.reliable(id).size());
         VettingRun interrupted=runs.findById(id).orElseThrow(AssertionError::new);String oldOwner=interrupted.getExecutionOwner();assertFalse(checkpoints.claim(id,oldOwner),"Duplicate recovery dispatch cannot reacquire an active lease");interrupted.setLeaseUntil(Instant.now().minusSeconds(1));runs.saveAndFlush(interrupted);
-        VettingService restarted=new VettingService(projectService,storage,parser,props,documents,findings,runs,semantic,writer,transactions,profiles);restarted.setCheckpoints(checkpoints);restarted.setReportSnapshots(snapshots);restarted.setChecklistService(checklist);restarted.setDraftingIdentity(drafting);
+        VettingService restarted=new VettingService(projectService,storage,parser,props,documents,findings,runs,semantic,writer,transactions,profiles);restarted.setCheckpoints(checkpoints);restarted.setReportSnapshots(snapshots);restarted.setChecklistService(checklist);restarted.setDraftingIdentity(drafting);restarted.setEnglishFileOutput(englishFiles);
         try{restarted.recoverInterruptedRuns();await(project,id,"COMPLETED");assertEquals(3,calls.get(),"Only the uncertain second packet is repeated; the verified first packet is restored");assertEquals(2,checkpoints.reliable(id).size());
             assertThrows(BizException.class,()->checkpoints.renew(id,oldOwner));release.countDown();Thread.sleep(100);assertEquals("COMPLETED",runs.findById(id).orElseThrow(AssertionError::new).getStatus());assertEquals(2,findings.findByProjectIdOrderByCodeAsc(project).size());
         }finally{release.countDown();restarted.stopWorker();}
@@ -214,7 +220,7 @@ class VettingRecoveryWorkflowTest {
         runs.saveAndFlush(saved);String previousRecipe=props.getVetting().getExpectedRetrievalRecipeFingerprint();
         if("retrieval_recipe".equals(changed))props.getVetting().setExpectedRetrievalRecipeFingerprint("changed-retrieval-recipe");
         if("source".equals(changed)){SourceDocument source=documents.findByProjectIdOrderByIdAsc(project).get(0);source.setTextContent(source.getTextContent()+" changed");documents.saveAndFlush(source);}
-        VettingService restarted=new VettingService(projectService,storage,parser,props,documents,findings,runs,semantic,writer,transactions,profiles);restarted.setCheckpoints(checkpoints);restarted.setReportSnapshots(snapshots);restarted.setChecklistService(checklist);restarted.setDraftingIdentity(drafting);
+        VettingService restarted=new VettingService(projectService,storage,parser,props,documents,findings,runs,semantic,writer,transactions,profiles);restarted.setCheckpoints(checkpoints);restarted.setReportSnapshots(snapshots);restarted.setChecklistService(checklist);restarted.setDraftingIdentity(drafting);restarted.setEnglishFileOutput(englishFiles);
         try{restarted.recoverInterruptedRuns();JsonNode failed=await(project,id,"FAILED");assertEquals("NEEDS_RERUN",failed.path("recoveryStatus").asText());assertEquals(1,failed.path("reliablePackets").size());assertEquals(2,calls.get(),"No incompatible model call may resume");
             if(legacyPacket!=null){assertEquals(legacyPacket,packets.findByRunIdOrderByUpdatedAtAsc(id).get(0).getResultJson());assertEquals("legacy_language_recipe".equals(changed)?"language":"risk",failed.path("reliablePackets").get(0).path("candidates").get(0).path("type").asText());}}
         finally{release.countDown();restarted.stopWorker();props.getVetting().setExpectedRetrievalRecipeFingerprint(previousRecipe);}
@@ -320,6 +326,13 @@ class VettingRecoveryWorkflowTest {
         http.perform(get(url).param("sourceHash",item.path("sourceHash").asText()).param("originalSourceSha256",raw).param("sourceRole","tender"))
                 .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.code").value(4104));
         verify(ai,never()).completeStructuredJsonList(anyString(),anyString(),eq(VettingSemanticReview.Record.class),any(),anyList());
+    }
+    private JsonNode savedReport(JsonNode exported){
+        assertEquals("2.0",exported.path("schemaVersion").asText());assertEquals("en",exported.path("language").asText());assertTrue(exported.path("presentationOnly").asBoolean());
+        String id=exported.path("sourceReportSnapshotId").asText();assertTrue(id.matches("[a-f0-9]{64}"));VettingReportSnapshot saved=snapshots.findById(id).orElseThrow(AssertionError::new);
+        assertEquals(id,VettingCorpus.hash("vetting-report-snapshot-v1\n"+saved.getPayloadJson()));assertEquals(saved.getRunId(),exported.path("sourceRunId").asText());assertEquals(saved.getRunId(),exported.path("job").path("id").asText());
+        assertTrue(exported.path("diagnostics").path("retainedServerSide").asBoolean());assertFalse(exported.path("job").has("result"));JsonNode original=JsonUtils.parse(saved.getPayloadJson());
+        assertEquals(original.path("project").path("id").asText(),exported.path("project").path("id").asText());assertEquals(original.path("job").path("sourceSnapshotSha256").asText(),exported.path("sourceSnapshotSha256").asText());return original;
     }
     private SourceDocument bindOriginal(String project)throws Exception{SourceDocument source=documents.findByProjectIdOrderByIdAsc(project).get(0);Path file=Paths.get(props.getStorageRoot(),project,"SCC.txt");Files.createDirectories(file.getParent());byte[] bytes=source.getTextContent().getBytes(StandardCharsets.UTF_8);Files.write(file,bytes);source.setStoragePath(file.toString());source.setSourceSha256(com.consense.service.sources.OerSourceMetadata.originalSha256(bytes));return documents.saveAndFlush(source);}
     private static String reviewBody(JsonNode loaded,String remarks){return JsonUtils.write(Map.of("expectedRunId",loaded.path("runId").asText(),"expectedGeneratedRevisionSha256",loaded.path("generatedRevisionSha256").asText(),"expectedSourceSnapshotSha256",loaded.path("sourceSnapshotSha256").asText(),"reviewRemarks",remarks,"actionTaken","reviewed","addendumRequired",true));}

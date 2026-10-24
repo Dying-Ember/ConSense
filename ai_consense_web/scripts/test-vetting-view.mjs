@@ -80,10 +80,10 @@ function harness(overrides = {}) {
   assert.equal([...h.timers.values()].some(timer => timer.delay === 2000), false, 'completed task stops polling')
   h.view.reportFormat.value = 'docx'
   await h.view.exportReport()
-  assert.equal(h.downloads[0][3], 'docx')
+  assert.deepEqual(h.downloads[0], ['A', 'ConSense_Vetting_Report.docx', 'docx'])
   h.view.reportFormat.value = 'json'
   await h.view.exportReport()
-  assert.equal(h.downloads[1][3], 'json')
+  assert.deepEqual(h.downloads[1], ['A', 'ConSense_Vetting_Report.json', 'json'])
   h.dispose()
 }
 
