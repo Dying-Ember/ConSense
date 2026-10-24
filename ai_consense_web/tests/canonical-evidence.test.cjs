@@ -494,6 +494,26 @@ test('LAN panel displays all verified images and localizes status without upgrad
   } finally { h.dispose() }
 })
 
+test('source identity is optional at one level while source names and important limitations stay visible', async () => {
+  const h = await harness()
+  const visible = node => node.tag === 'details' && !node.props?.open
+    ? (node.children ?? []).filter(child => child.tag === 'summary').map(visible).join(' ')
+    : node.text || (node.children ?? []).map(visible).join(' ')
+  try {
+    const main = visible(h.root)
+    assert.ok(main.includes(baseAddress.sourceFilename))
+    assert.match(main, /Not human-confirmed/)
+    assert.ok(!/[a-f0-9]{64}/i.test(main), 'Full technical identifiers do not crowd the default evidence view')
+    assert.ok(text(h.root).includes(baseAddress.originalSourceSha256), 'Exact identity is retained')
+    const technical = all(h.root, node => node.tag === 'details' && node.props?.class === 'evidence-technical-details')
+    assert.equal(technical.length, 1); assert.ok(!technical[0].props.open)
+    assert.equal(all(technical[0], node => node.tag === 'details').length, 1, 'Technical details have no nested disclosures')
+    for (const control of all(h.root, node => node.tag === 'button')) {
+      for (let parent = control.parent; parent; parent = parent.parent) assert.notEqual(parent.tag, 'details', 'Evidence controls stay directly available')
+    }
+  } finally { h.dispose() }
+})
+
 test('portable SHA matches standard vectors, padding boundaries, binary data and multiple chunks', async () => {
   const helper = shaHelper({ crypto: null })
   for (const [input, expected] of [

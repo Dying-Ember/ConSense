@@ -1,0 +1,82 @@
+{
+  "datasetId": "actual-bad-target-scope",
+  "expectedResolved": {
+    "attachmentContext": {
+      "blockIds": [],
+      "contextId": "77aa9522b58523333f38be04577415236fcd4d76acc724d4e452531b2ab74a0c",
+      "derivedMembersCanBecomeOrigins": false,
+      "edgeDeclarations": [],
+      "legalClosureVerified": false,
+      "memberOrder": "canonical_source_input",
+      "memberPayloadSha256": [],
+      "memberScores": null,
+      "members": [],
+      "observedRanges": [],
+      "policy": "same-source-reviewed-direct-shared-note-star-context-v2",
+      "qualifiersComplete": "unknown",
+      "reason": "attachment_exact_observed_unit_unknown",
+      "requiredMemberIds": [],
+      "rootWholeUnitIds": [
+        "GCC/physical-65/margin-note/1-2"
+      ],
+      "seedObservedUnitId": "4394841ca90ab506ec577cef2885b48b721ec5f8f1ecc4ec45bbc7c38d5f57ec",
+      "semanticScopeVerified": false,
+      "sourceIdentity": {
+        "documentId": "236",
+        "metadataVersion": "source-reviewed-native-pdf-cas-public-projection-v1",
+        "nativeTableMetadataVersion": "native-pdf-no-table-adoption-v1",
+        "originalSourceSha256": "d7d74db6d9aee390093b9e22bb30dccdbf3c0316d47635922109422278d161e7",
+        "producerKind": "native_pdf",
+        "projectionRevisionSha256": "c92ff8633d8edbbb3dfb63fd520e2bb486b5440c6a473be256bbcbefbb4b79b2",
+        "role": "standard",
+        "scopeSha256": "cd83500385611e40377851fabc42336080fa2753a5325a9d439e8d5101448291",
+        "segmentationVersion": "whole-source-reviewed-pdf-region-units-v1",
+        "sourceHash": "9bcc311e9d714ce3d501de06683a1cd59dd44ae78015e0d3c191793ebbd28aab",
+        "sourceQualityHash": "7472a74d920094ec27481d8113cdb000b13230a078b006a8edbc4e6a4bc3093b",
+        "sourceQualityMetadataVersion": "native-pdf-observation-and-source-review-unknown-v1",
+        "sourceRevisionSha256": "4fc695edd06c98062cb556dca830b9c2d417a50a796878f195fae0a41a2d0cd8",
+        "sourceSha256": "d7d74db6d9aee390093b9e22bb30dccdbf3c0316d47635922109422278d161e7"
+      },
+      "status": "unknown"
+    },
+    "blockIds": [],
+    "clauseId": null,
+    "derivedMembersCanBecomeOrigins": false,
+    "headingLocation": null,
+    "kind": "unknown",
+    "memberScores": null,
+    "members": [],
+    "observedRanges": [],
+    "originIds": [
+      "canonical-native-pdf-public:12df2694460cd4da689d8bb558b7c5636a2cb82d64141d0095c97296f512ba2e"
+    ],
+    "qualifiersComplete": "unknown",
+    "reason": "ambiguous_document_source_identity",
+    "requiredMemberIds": [],
+    "semanticScopeVerified": false,
+    "sourceIdentity": {
+      "documentId": "236",
+      "metadataVersion": "source-reviewed-native-pdf-cas-public-projection-v1",
+      "nativeTableMetadataVersion": "native-pdf-no-table-adoption-v1",
+      "role": "standard",
+      "segmentationVersion": "whole-source-reviewed-pdf-region-units-v1",
+      "sourceHash": "9bcc311e9d714ce3d501de06683a1cd59dd44ae78015e0d3c191793ebbd28aab",
+      "sourceQualityHash": "7472a74d920094ec27481d8113cdb000b13230a078b006a8edbc4e6a4bc3093b",
+      "sourceQualityMetadataVersion": "native-pdf-observation-and-source-review-unknown-v1"
+    },
+    "status": "unknown",
+    "unitId": "4394841ca90ab506ec577cef2885b48b721ec5f8f1ecc4ec45bbc7c38d5f57ec"
+  },
+  "expectedStructuralBinding": {
+    "attachmentContextId": "77aa9522b58523333f38be04577415236fcd4d76acc724d4e452531b2ab74a0c",
+    "attachmentContextPolicy": "same-source-reviewed-direct-shared-note-star-context-v2",
+    "contextId": "77aa9522b58523333f38be04577415236fcd4d76acc724d4e452531b2ab74a0c",
+    "reason": "attachment_exact_observed_unit_unknown",
+    "status": "unknown",
+    "unitId": "4394841ca90ab506ec577cef2885b48b721ec5f8f1ecc4ec45bbc7c38d5f57ec"
+  },
+  "expectedStructuralContext": null,
+  "schema": "consense.shared-note-current-strict-root-negative.v1",
+  "seedId": "canonical-native-pdf-public:12df2694460cd4da689d8bb558b7c5636a2cb82d64141d0095c97296f512ba2e",
+  "sourceFixtureSha256": "cda3a7a07579fb7bd0a2e3cd39e20b7daac9f3c21b1c36ac95c018f17dfb4633"
+}

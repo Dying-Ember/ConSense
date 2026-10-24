@@ -343,18 +343,34 @@ public class VettingReportWriter {
         else {
             for(VettingReportPresentation.SectionSummary summary:VettingReportPresentation.sectionSummaries(findings,coverage))
                 blocks.add(new Block(0,available(summary.getFileName(),lang)+": "+VettingReportPresentation.readerSummary(summary)));
+            for(DocumentCoverageVO document:safe(coverage.getDocuments()))if(document!=null)
+                blocks.add(new Block(0,readerCoverage(document,lang)));
             blocks.add(new Block(0,"complete".equals(coverage.getReviewCompleteness())?"The saved review scope is marked complete. Completeness of the original and substantive correctness remain unconfirmed.":"The saved source review is incomplete or its completeness is unconfirmed."));
             Map<String,List<String>> states=new LinkedHashMap<>();
+            boolean legacyRequestScope=false;
             for(SemanticTopicVO topic:safe(coverage.getSemanticTopics()))if(topic!=null){
                 String scope="Recorded source check "+topic.getTopicIndex()+": "+readerScopeSubject(topic.getTopic());
                 states.computeIfAbsent(readerCheckState(topic.getCheckState()),ignored->new ArrayList<>()).add(scope);
                 if(topic.getPendingSourceRequestCount()>0||topic.getBudgetDroppedGroups()>0||topic.getPartialContextGroups()>0||topic.getUnresolvedSegments()>0||topic.getMissingLocatedReferenceTargets()>0||topic.getFailedPacketCount()>0||topic.getNotSubmittedPacketCount()>0)
-                    blocks.add(new Block(0,scope+". Source support is incomplete: pending source requests "+topic.getPendingSourceRequestCount()+"; source groups omitted "+topic.getBudgetDroppedGroups()+"; groups with partial context "+topic.getPartialContextGroups()+"; unresolved excerpts "+topic.getUnresolvedSegments()+"; unlocated reference targets "+topic.getMissingLocatedReferenceTargets()+"; reviews failed or not submitted "+(topic.getFailedPacketCount()+topic.getNotSubmittedPacketCount())+"."));
+                    blocks.add(new Block(0,scope+". Source support is incomplete: pending source requests "+topic.getPendingSourceRequestCount()+(topic.getSourceRequestCount()>0?" of "+topic.getSourceRequestCount():"")+"; source groups omitted "+topic.getBudgetDroppedGroups()+"; groups with partial context "+topic.getPartialContextGroups()+"; unresolved excerpts "+topic.getUnresolvedSegments()+"; unlocated reference targets "+topic.getMissingLocatedReferenceTargets()+"; source checks failed "+topic.getFailedPacketCount()+"; source checks not submitted "+topic.getNotSubmittedPacketCount()+"."));
+                if(JsonUtils.isBlankText(topic.getAggregateReviewStatus()))legacyRequestScope=true;
+                if("completed_empty".equals(topic.getGlobalCallStatus()))blocks.add(new Block(0,scope+". "+tr(lang,
+                        "整体模型调用未返回意见；这不确认合同没有问题，也不证明各项来源请求已完成实质审查。",
+                        "整體模型呼叫未返回意見；這不確認合同沒有問題，也不證明各項來源請求已完成實質審查。",
+                        "The overall model call returned no comments; this does not confirm that the contract has no issues or establish substantive review of the source requests.")));
+                for(SemanticPacketVO packet:safe(topic.getPacketAudits()))if(packet!=null){
+                    String limitation=readerPacketLimitation(packet,lang);
+                    if(limitation!=null)blocks.add(new Block(0,scope+". "+tr(lang,"来源核对批次 ","來源核對批次 ","Source check packet ")+packet.getPacketIndex()+": "+limitation));
+                }
                 for(SemanticSourceRequestVO request:safe(topic.getSourceRequests()))if(request!=null){
                     if(!safe(request.getMissingChunkIds()).isEmpty())blocks.add(new Block(0,scope+". Required source excerpts missing from a recorded request: "+request.getMissingChunkIds().size()+". Complete source support remains unconfirmed."));
                     if(!JsonUtils.isBlankText(request.getUnknownReason()))blocks.add(new Block(0,scope+". Recorded source limitation: "+request.getUnknownReason()));
                 }
             }
+            if(legacyRequestScope)blocks.add(new Block(0,tr(lang,
+                    "部分历史来源核对未记录请求覆盖评估，其范围仍未知；模型调用完成不代表已完成实质审查。",
+                    "部分歷史來源核對未記錄請求覆蓋評估，其範圍仍未知；模型呼叫完成不代表已完成實質審查。",
+                    "Some historical source checks have no recorded request-coverage assessment. Their scope remains unknown; a completed model call does not establish substantive review.")));
             if(states.isEmpty())blocks.add(new Block(0,"No substantive source-check record is available. Review scope remains unknown."));
             for(Map.Entry<String,List<String>> state:states.entrySet()) {
                 blocks.add(compact(new Block(1,state.getKey())));
@@ -368,6 +384,43 @@ public class VettingReportWriter {
             blocks.add(new Block(0,"Only the available reviewed excerpts support these comments. An empty model response or a completed request does not establish a substantive countercheck or confirm that the documents have no issues."));
         }
         return blocks;
+    }
+    private String readerCoverage(DocumentCoverageVO document,String lang) {
+        String unknown=tr(lang,"未记录","未記錄","not recorded");
+        String excerpts=document.getTotalSegments()>0?document.getReviewedSegments()+"/"+document.getTotalSegments():unknown;
+        String characters=document.getTextChars()>0?document.getReviewedChars()+"/"+document.getTextChars():unknown;
+        return available(document.getFileName(),lang)+": "+tr(lang,
+                "保存来源范围内的已记录覆盖：片段 "+excerpts+"；字符 "+characters+"。这些数字仅描述已记录的来源观察，不代表整份原件完整或实质核对通过。",
+                "保存來源範圍內的已記錄覆蓋：片段 "+excerpts+"；字元 "+characters+"。這些數字僅描述已記錄的來源觀察，不代表整份原件完整或實質核對通過。",
+                "Recorded coverage within the saved source scope: excerpts "+excerpts+"; characters "+characters+". These figures describe only recorded source observations, not completeness of the entire original or a substantive pass.");
+    }
+    private String readerPacketLimitation(SemanticPacketVO packet,String lang) {
+        boolean notSubmitted=nvl(packet.getStatus()).startsWith("not_submitted");
+        boolean failed="failed".equals(packet.getStatus());
+        boolean overBudget="over_budget".equals(packet.getInputBudgetStatus());
+        boolean estimated="provider_estimated_fit".equals(packet.getInputBudgetStatus());
+        boolean budgetUnknown=!overBudget&&!estimated&&!"observed_tokens".equals(packet.getInputBudgetStatus());
+        boolean unknownReason="input_budget_unknown".equals(packet.getFailureKind())||notSubmitted&&budgetUnknown;
+        boolean overBudgetReason="input_context_over_budget".equals(packet.getFailureKind())||notSubmitted&&overBudget;
+        boolean unknownExplained=false,overBudgetExplained=false;
+        List<String> limitations=new ArrayList<>();
+        if(notSubmitted||failed||!JsonUtils.isBlankText(packet.getFailureKind())) {
+            String reason;
+            if("output_budget_exhausted".equals(packet.getFailureKind()))reason=tr(lang,"模型输出预算已耗尽","模型輸出預算已耗盡","the model output budget was exhausted");
+            else if(overBudgetReason){reason=tr(lang,"完整输入超出可用上下文预算","完整輸入超出可用上下文預算","the complete input exceeded the available context budget");overBudgetExplained=true;}
+            else if(unknownReason){reason=tr(lang,"完整输入预算尚未确认","完整輸入預算尚未確認","the complete input budget was not established");unknownExplained=true;}
+            else if("transport_failure".equals(packet.getFailureKind()))reason=tr(lang,"模型连接或传输失败","模型連接或傳輸失敗","the model connection or transfer failed");
+            else if("structured_output_invalid".equals(packet.getFailureKind()))reason=tr(lang,"模型输出未通过所需结构校验","模型輸出未通過所需結構校驗","the model output did not pass the required structure checks");
+            else reason=tr(lang,"须查阅已保存的审查记录确认具体原因","須查閱已保存的審查記錄確認具體原因","consult the saved review record for the specific reason");
+            String execution=notSubmitted?tr(lang,"未提交：","未提交：","Not submitted: "):failed?tr(lang,"未完成：","未完成：","Not completed: "):tr(lang,"记录的审查限制：","記錄的審查限制：","Recorded review limitation: ");
+            limitations.add(execution+reason+tr(lang,"。","。","."));
+        }
+        if(budgetUnknown&&!unknownExplained)limitations.add(tr(lang,"完整输入预算仍未确认。","完整輸入預算仍未確認。","The complete input budget remains unconfirmed."));
+        if(overBudget&&!overBudgetExplained)limitations.add(tr(lang,"已记录的完整输入超出可用上下文预算。","已記錄的完整輸入超出可用上下文預算。","The recorded complete input exceeded the available context budget."));
+        if(estimated)limitations.add(tr(lang,"完整输入预算仅依据提供者估计，尚无实际观测的词元数。","完整輸入預算僅依據提供者估計，尚無實際觀測的詞元數。","The complete input budget is based on a provider estimate; an observed token count is unavailable."));
+        if(limitations.isEmpty())return null;
+        limitations.add(tr(lang,"这些记录不证明来源审查完整或实质正确。","這些記錄不證明來源審查完整或實質正確。","These records do not establish completeness or substantive correctness of the source review."));
+        return String.join(" ",limitations);
     }
     private void ownRecord(List<Block> blocks,int start) {
         Block heading=blocks.get(start);heading.ownerHeading=true;

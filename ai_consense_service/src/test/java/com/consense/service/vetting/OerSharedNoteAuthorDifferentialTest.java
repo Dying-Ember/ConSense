@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.DynamicTest;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestFactory;
+import java.io.InputStream;
 import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -20,6 +21,8 @@ class OerSharedNoteAuthorDifferentialTest {
     static final String NEW_ATTACHMENT="same-source-reviewed-direct-shared-note-star-context-v2";
     static final String NEW_VERSION="observed-structure-dual-granularity-typed-parent-shared-note-context-v4";
     static final String NEW_UNION="independent-observed-hierarchy-and-direct-shared-note-union-v2";
+    static final String CURRENT_SCOPE_DATASET="actual-bad-target-scope";
+    static final String CURRENT_SCOPE_SEED="canonical-native-pdf-public:12df2694460cd4da689d8bb558b7c5636a2cb82d64141d0095c97296f512ba2e";
     static JsonNode fixture() throws Exception {
         String path=System.getenv("CONSENSE_SHARED_NOTE_FIXTURE");assertNotNull(path,"Explicit owned fixture path required");
         byte[] raw=Files.readAllBytes(Path.of(path));
@@ -33,9 +36,16 @@ class OerSharedNoteAuthorDifferentialTest {
         Method method=OerBusinessEvidence.class.getDeclaredMethod("transportUnit",JsonNode.class,Map.class);method.setAccessible(true);return (JsonNode)method.invoke(null,unit,parents);
     }
     @TestFactory Collection<DynamicTest> allActualAndAuthoredNewPolicyEpisodesMatchPython()throws Exception {
-        List<DynamicTest> tests=new ArrayList<>();
-        for(JsonNode dataset:fixture().path("datasets"))for(JsonNode row:dataset.path("cases"))tests.add(DynamicTest.dynamicTest(dataset.path("datasetId").asText()+"/"+row.path("seedId").asText(),()->{
+        List<DynamicTest> tests=new ArrayList<>();int currentScopeCases=0;JsonNode fixtures=fixture();
+        for(JsonNode dataset:fixtures.path("datasets"))if(CURRENT_SCOPE_DATASET.equals(dataset.path("datasetId").asText())){
+            assertEquals(1,dataset.path("cases").size());assertEquals(CURRENT_SCOPE_SEED,dataset.path("cases").get(0).path("seedId").asText());currentScopeCases++;
+        }
+        assertEquals(1,currentScopeCases);
+        for(JsonNode dataset:fixtures.path("datasets"))for(JsonNode row:dataset.path("cases"))tests.add(DynamicTest.dynamicTest(dataset.path("datasetId").asText()+"/"+row.path("seedId").asText(),()->{
             Map<String,JsonNode> corpus=parents(dataset);String seed=row.path("seedId").asText();
+            if(CURRENT_SCOPE_DATASET.equals(dataset.path("datasetId").asText())&&CURRENT_SCOPE_SEED.equals(seed)){
+                currentScopeNegative(row,corpus);return;
+            }
             OerCanonicalSourceUnits.validate(row.path("response"),corpus,Collections.singletonList(seed));
             JsonNode actual=transport(row.path("expectedResolved"),corpus),expected=row.path("expectedStructuralContext");
             if(!expected.isNull()) {
@@ -48,6 +58,34 @@ class OerSharedNoteAuthorDifferentialTest {
             assertEquals("unknown",actual.path("qualifiersComplete").asText());
         }));
         assertEquals(33,tests.size());return tests;
+    }
+    private static void currentScopeNegative(JsonNode row,Map<String,JsonNode> corpus)throws Exception {
+        // a5f6a299 binds native root revisions; the older frozen v4 response predates that stricter gate.
+        IllegalStateException rejected=assertThrows(IllegalStateException.class,
+                ()->OerCanonicalSourceUnits.validate(row.path("response"),corpus,Collections.singletonList(CURRENT_SCOPE_SEED)));
+        assertEquals("Canonical retrieval rejected: source-unit field differs: kind",rejected.getMessage());
+        JsonNode current=OerCanonicalSourceUnits.resolveAttached(corpus,corpus.get(CURRENT_SCOPE_SEED),true);
+        assertEquals("unknown",current.path("kind").asText());assertEquals("unknown",current.path("status").asText());
+        assertEquals("ambiguous_document_source_identity",current.path("reason").asText());
+        assertTrue(current.path("members").isEmpty());assertTrue(current.path("requiredMemberIds").isEmpty());assertTrue(current.path("observedRanges").isEmpty());
+        JsonNode attachment=current.path("attachmentContext");assertEquals("unknown",attachment.path("status").asText());
+        assertEquals("attachment_exact_observed_unit_unknown",attachment.path("reason").asText());
+        assertTrue(attachment.path("members").isEmpty());assertTrue(attachment.path("requiredMemberIds").isEmpty());assertTrue(attachment.path("observedRanges").isEmpty());
+        assertFalse(attachment.path("legalClosureVerified").asBoolean(true));assertFalse(attachment.path("semanticScopeVerified").asBoolean(true));
+        assertEquals("unknown",attachment.path("qualifiersComplete").asText());
+        try(InputStream input=OerSharedNoteAuthorDifferentialTest.class.getResourceAsStream("/oer/canonical/shared-note-current-scope-negative.json")){
+            assertNotNull(input);byte[] raw=input.readAllBytes();
+            assertEquals("fd9dffea2bf809c256c894a1d971a606cbce5b74bd2590fffc760c729610c84c",HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(raw)));
+            JsonNode python=JsonUtils.parse(new String(raw,StandardCharsets.UTF_8));
+            assertEquals("consense.shared-note-current-strict-root-negative.v1",python.path("schema").asText());
+            assertEquals("cda3a7a07579fb7bd0a2e3cd39e20b7daac9f3c21b1c36ac95c018f17dfb4633",python.path("sourceFixtureSha256").asText());
+            assertEquals(CURRENT_SCOPE_DATASET,python.path("datasetId").asText());assertEquals(CURRENT_SCOPE_SEED,python.path("seedId").asText());
+            assertEquals(python.path("expectedResolved"),current);
+            JsonNode selected=transport(current,corpus);assertEquals("unknown",selected.path("status").asText());
+            assertEquals(python.path("expectedStructuralBinding").path("reason"),selected.path("reason"));
+            assertEquals(python.path("expectedStructuralBinding").path("contextId"),selected.path("contextId"));
+            assertTrue(python.path("expectedStructuralContext").isNull());
+        }
     }
     @Test void oldV3MultipleTargetsRemainUnknownAndCannotMasqueradeAsV4()throws Exception {
         JsonNode dataset=fixture().path("datasets").get(0),row=dataset.path("cases").get(0);Map<String,JsonNode> corpus=parents(dataset);

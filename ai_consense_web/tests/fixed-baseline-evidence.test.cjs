@@ -70,6 +70,15 @@ test('rendered fixed panel displays full table and unknown adoption, only reads 
     assert.match(text(rendered.root), /project adoption is unconfirmed/)
     assert.match(text(rendered.root), /Exception remains/); assert.match(text(rendered.root), /Full note/)
     assert.equal(find(rendered.root, node => node.tag === 'script'), undefined)
+    const visible = node => node.tag === 'details' && !node.props?.open
+      ? (node.children ?? []).filter(child => child.tag === 'summary').map(visible).join(' ')
+      : node.text || (node.children ?? []).map(visible).join(' ')
+    assert.ok(!/[a-f0-9]{64}/i.test(visible(rendered.root)), 'Manifest and original hashes are optional technical details')
+    assert.match(visible(rendered.root), /project adoption is unconfirmed/)
+    assert.match(visible(rendered.root), /Literal complete standard/)
+    assert.ok(text(rendered.root).includes(address.manifestSha256))
+    for (let parent = find(rendered.root, node => node.tag === 'button' && text(node) === 'Read the complete original PDF').parent; parent; parent = parent.parent)
+      assert.notEqual(parent.tag, 'details', 'The original-reading action is outside optional technical details')
     find(rendered.root, node => node.tag === 'button' && text(node) === 'Read the complete original PDF').props.onClick()
     await waitFor(() => /byte SHA-256 verified/.test(text(rendered.root)))
     assert.match(text(rendered.root), /byte SHA-256 verified/); assert.equal(urls.length, 1)
@@ -127,7 +136,8 @@ test('saved pointer supplies complete group when read-only parent response has n
   try {
     assert.equal(calls.length, 4)
     assert.match(text(rendered.root), /A complete required exception on another page/)
-    assert.match(text(rendered.root), /Missing members \/ assets: missing/)
+    assert.match(text(rendered.root), /Missing members \/ assets: 1/)
+    assert.match(text(rendered.root), /"missingMemberIds": \[\s*"missing"\s*\]/, 'Exact missing identities remain in optional technical details')
     assert.match(text(rendered.root), /relations remain unverified/)
     assert.equal(calls.some(url => /\/ask|\/projects/.test(url)), false)
   } finally { app.unmount() }

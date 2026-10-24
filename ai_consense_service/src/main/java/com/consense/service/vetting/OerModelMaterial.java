@@ -301,12 +301,7 @@ public final class OerModelMaterial {
                     structure.set("observedSourceGroups",NormalSourceCandidateGraph.pdfModelGroups(context));structure.set("sourceGroupUnknowns",context.path("issues").deepCopy());structure.set("sourceGroupRelations",context.path("relations").deepCopy());
                 }
                 if(word!=null&&!word.isNull()){
-                    require("docx-source-clause-scopes-v1".equals(word.path("version").asText())&&Objects.equals(p.getOriginalSourceSha256(),word.path("sourceSha256").asText())
-                            &&Objects.equals(p.getOriginalSourceSha256(),word.path("originalSourceSha256").asText())&&Objects.equals(p.getSourceRevisionSha256(),word.path("sourceRevisionSha256").asText())
-                            &&Objects.equals(p.getProjectionSha256(),word.path("projectionSha256").asText())&&Objects.equals(p.getProjectId(),word.path("source").path("projectId").asText())
-                            &&Objects.equals(String.valueOf(p.getDocumentId()),word.path("source").path("documentId").asText())&&Objects.equals(p.getJavaParsedSourceHash(),word.path("source").path("parsedSourceHash").asText())
-                            &&word.path("generationSha256").asText().matches("[a-f0-9]{64}")&&Objects.equals(p.getCanonicalChunkId(),word.path("canonicalChunkId").asText())
-                            &&Objects.equals(VettingCorpus.hash(JsonUtils.write(p.getParts())),word.path("selectedPartsSha256").asText()),"normal_word_source_scope_context_binding_differs");
+                    ObservedSourceClauseLocators.requireBinding(p,word);
                     structure.set("observedWordSourceScopes",fields(word,"version","sourceSha256","ranges","referenceFrames","members","issues"));
                 }
             }

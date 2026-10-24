@@ -121,13 +121,22 @@ class VettingSampleReportAlignmentTest {
         VettingReportWriter writer=new VettingReportWriter();FindingVO ntt=finding("NTT","03 - NTT.docx","1(b)","NTT/2");
         byte[] word=writer.docx(project(),Collections.singletonList(ntt),null,"en");
         byte[] pdf=writer.pdf(project(),Collections.singletonList(ntt),null,"en");
+        String wordText;
+        try(XWPFDocument document=new XWPFDocument(new ByteArrayInputStream(word))) {
+            wordText=document.getBodyElements().stream().map(element->element instanceof XWPFParagraph
+                    ?((XWPFParagraph)element).getText():element instanceof XWPFTable?((XWPFTable)element).getText():"").collect(Collectors.joining("\n"));
+        }
         try(PDDocument d=PDDocument.load(pdf)) {
-            String text=new PDFTextStripper().getText(d).replaceAll("\\s+"," ");
-            assertTrue(text.contains("Comments on Tender Documentation"));
-            assertTrue(text.contains("Clause / Item"));assertTrue(text.contains("Remarks by Project Team"));
-            assertTrue(text.indexOf("Suggested action")>=0&&text.indexOf("Suggested action")<text.indexOf("APPENDIX II"));assertFalse(text.contains("Run ID:"));
-            assertTrue(text.indexOf("APPENDIX I")<text.indexOf("APPENDIX II"));
-            assertTrue(text.contains("Current-Contract-9"));assertFalse(text.contains("20240539"));
+            for(String body:Arrays.asList(wordText,new PDFTextStripper().getText(d))) {
+                String text=body.replaceAll("\\s+"," ");
+                assertTrue(text.contains("Comments on Tender Documentation"));
+                assertTrue(text.contains("Clause / Item"));assertTrue(text.contains("Remarks by Project Team"));
+                assertTrue(text.indexOf("Suggested action")>=0&&text.indexOf("Suggested action")<text.indexOf("APPENDIX II"));assertFalse(text.contains("Run ID:"));
+                assertTrue(text.indexOf("APPENDIX I")<text.indexOf("APPENDIX II"));
+                assertTrue(text.contains("Not confirmed (identity check not recorded)"));
+                assertFalse(text.contains("Current-Contract-9"),"Unadopted project display identity must not become report authority");
+                assertFalse(text.contains("20240539"));
+            }
         }
         Path qa=Paths.get("target","report-sample-alignment-qa");Files.createDirectories(qa);
         Files.write(qa.resolve("competition-format.docx"),word);Files.write(qa.resolve("competition-format.pdf"),pdf);

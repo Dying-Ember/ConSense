@@ -43,6 +43,17 @@ function packetBudgetStatus(status?: string): string {
 }
 function checkStateLabel(status?: string): string { return t(`vetting.checkStates.${status && ['checked_pass', 'issue', 'insufficient_evidence', 'not_completed', 'not_applicable'].includes(status) ? status : 'not_completed'}`) }
 
+function jobFailureMessageKey(value?: string | null): string | null {
+  const message = value?.trim() ?? ''
+  if (message.startsWith('Model response source attribution invalid:')) return 'vetting.job.sourceAttributionFailed'
+  if (message.startsWith('Structured output must be one complete JSON value')) return 'vetting.job.resultFormatFailed'
+  return null
+}
+function readerJobMessage(value?: string | null): string {
+  const key = jobFailureMessageKey(value)
+  return key ? t(key) : value ?? ''
+}
+
 const files = ref<VettingFile[]>([])
 const findings = ref<Finding[]>([])
 const metrics = ref<VettingMetrics | null>(null)
@@ -231,8 +242,10 @@ const handoffOpening = ref(false)
 const handoffDisabled = computed(() => !projectId.value || !selectedFinding.value || handoffOpening.value || evidenceLoading.value || running.value || job.value?.sourceVerification === 'NOT_CHECKED' || sourceRoleSaving.value !== null || uploading.value || reviewSaving.value || statusSaving.value || hasUnsavedReview.value || checklistDirty.value || checklistSaving.value !== null)
 const jobDetailsPending = computed(() => job.value?.status === 'COMPLETED' && job.value.sourceVerification === 'NOT_CHECKED')
 const running = computed(() => starting.value || isActiveJob(job.value) || jobDetailsPending.value)
+const reviewActive = computed(() => starting.value || isActiveJob(job.value))
 const jobModelIdentity = computed(() => job.value?.modelIdentity ?? job.value?.result?.modelIdentity)
 const recordedJobModel = computed(() => jobModelIdentity.value?.model || job.value?.result?.model)
+const jobFailureMessages = computed(() => [...new Set([readerJobMessage(job.value?.error), readerJobMessage(job.value?.message)].filter(Boolean))])
 const exportDisabled = computed(() => running.value || sourceRoleSaving.value !== null || uploading.value || exporting.value || statusSaving.value || reviewSaving.value || hasUnsavedReview.value || checklistDirty.value || checklistSaving.value !== null || job.value?.sourceSetStale === true || job.value?.status !== 'COMPLETED' || job.value?.sourceVerification === 'NOT_CHECKED')
 const coverage = computed(() => job.value?.coverage ?? job.value?.result?.coverage ?? null)
 const sourceRoleBlocked = computed(() => running.value || uploading.value || exporting.value || sourceRoleSaving.value !== null
@@ -521,7 +534,11 @@ async function acceptJob(value: VettingJob, id: string, epoch: number, sequence:
         evidence.value = null
       }
     }
-    if (notifyCompletion && value.status === 'FAILED') store.notify(value.error || value.message || t('vetting.job.failed'), 6000)
+    if (notifyCompletion && value.status === 'FAILED') {
+      const message = value.error || value.message || t('vetting.job.failed')
+      // Known technical failures already have one reader-facing alert on this page.
+      if (!jobFailureMessageKey(message)) store.notify(readerJobMessage(message), 6000)
+    }
   }
 }
 
@@ -1006,7 +1023,7 @@ function tagClass(group: string) {
         </button>
         <button class="btn primary" type="button" :disabled="running || sourceRoleSaving !== null || uploading || reviewSaving || statusSaving || hasUnsavedReview || checklistDirty || checklistSaving !== null || !files.some(file => file.parsed)" @click="runVetting">
           <AppIcon name="play" :size="15" />
-          {{ running ? t('vetting.actions.running') : t('vetting.actions.run') }}
+          {{ reviewActive ? t('vetting.actions.running') : t('vetting.actions.run') }}
         </button>
         <select v-model="reportFormat" class="report-format" :aria-label="t('vetting.report.format')" :disabled="exporting">
           <option value="pdf">PDF</option>
@@ -1014,7 +1031,7 @@ function tagClass(group: string) {
           <option value="json">JSON</option>
         </select>
         <button class="btn" type="button" :disabled="exportDisabled" @click="exportReport">
-          <AppIcon name="download" :size="15" />{{ t('vetting.actions.export') }}
+          <AppIcon name="download" :size="15" />{{ t('vetting.actions.export') }}<span v-if="exporting"> · {{ t('common.loading') }}</span>
         </button>
       </div>
     </div>
@@ -1135,7 +1152,7 @@ function tagClass(group: string) {
         <div class="row">
           <strong>{{ t('vetting.job.title') }}</strong>
           <span v-if="job" class="tag" :class="job.status === 'FAILED' ? 'danger' : 'info'">
-            {{ jobDetailsPending ? t('common.loading') : t(`vetting.job.status.${job.status}`) }}
+            {{ t(`vetting.job.status.${job.status}`) }}
           </span>
           <span v-if="job?.totalUnits" class="mono muted small">{{ t('vetting.job.progressLabel') }}: {{ job.completedUnits }} / {{ job.totalUnits }}</span>
           <span class="spacer" />
@@ -1148,12 +1165,20 @@ function tagClass(group: string) {
           <p v-if="coverage">{{ t('vetting.job.documentSummary', { reviewed: coverage.reviewedDocuments, total: coverage.totalDocuments }) }}</p>
           <p>{{ t('vetting.job.findingSummary', { total: metrics?.total ?? job.result?.total ?? t('vetting.coverage.unknownCount'), listed: findings.length, pending: pendingListFindings }) }}</p>
         </div>
-        <p v-if="(running || job?.status === 'FAILED') && job?.message" class="small">{{ job.message }}</p>
+        <p v-if="running && job?.status !== 'FAILED' && job?.message" class="small">{{ readerJobMessage(job.message) }}</p>
+        <template v-if="job?.status === 'FAILED'">
+          <p v-for="message in jobFailureMessages" :key="message" class="run-error" role="alert">{{ message }}</p>
+        </template>
         <p v-if="job?.recoveryStatus === 'NEEDS_RERUN'" class="warning-note">{{ t('vetting.recovery.NEEDS_RERUN') }}</p>
         <p v-if="job" class="muted small">{{ recordedJobModel ? `${t('llm.recordedModel')}: ${recordedJobModel}` : t('llm.identityUnknown') }}</p>
         <details v-if="job" class="small section-gap">
           <summary>{{ t('vetting.job.executionDetails') }}</summary>
           <p v-if="!running && job.status !== 'FAILED' && job.message">{{ job.message }}</p>
+          <template v-if="job.status === 'FAILED'">
+            <h5>{{ t('vetting.job.rawFailureRecord') }}</h5>
+            <pre v-if="job.message">{{ job.message }}</pre>
+            <pre v-if="job.error && job.error !== job.message">{{ job.error }}</pre>
+          </template>
           <p v-if="job.recoveryStatus">{{ t(`vetting.recovery.${job.recoveryStatus}`) }}</p>
           <p v-if="job.reportSnapshotId" class="mono" style="overflow-wrap:anywhere">{{ t('vetting.report.snapshot') }}: {{ job.reportSnapshotId }}</p>
           <p v-if="jobModelIdentity" class="muted">{{ jobModelIdentity.profileId }} · {{ jobModelIdentity.provider }}</p>
@@ -1162,10 +1187,10 @@ function tagClass(group: string) {
             <div v-for="saved in job.reliablePackets" :key="saved.packet.packetId" class="small section-gap"><strong>{{ checkStateLabel(saved.packet.checkState) }}</strong> · {{ saved.packet.status }}<p class="mono" style="overflow-wrap:anywhere">{{ saved.packet.packetId }} · {{ saved.packet.sourceSnapshotSha256 }}</p><p v-for="warning in saved.warnings" :key="warning" class="warning-note">{{ warning }}</p><details><summary>{{ t('vetting.drawer.evidence') }}</summary><pre>{{ JSON.stringify(saved, null, 2) }}</pre></details></div>
           </details>
         </details>
-        <progress v-if="running && jobPercent !== null" class="vetting-progress" :value="jobPercent" max="100" :aria-label="t('vetting.job.title')" />
-        <p v-if="job?.status === 'FAILED' && job.error" class="run-error">{{ job.error }}</p>
-        <p v-if="pollingPaused" class="warning-note">{{ t('vetting.job.connectionPaused') }}</p>
-        <p v-else-if="running" class="muted small">{{ t('vetting.job.background') }}</p>
+        <progress v-if="reviewActive && jobPercent !== null" class="vetting-progress" :value="jobPercent" max="100" :aria-label="t('vetting.job.title')" />
+        <p v-if="pollingPaused" class="warning-note">{{ t(jobDetailsPending ? 'vetting.job.sourceCheckPaused' : 'vetting.job.connectionPaused') }}</p>
+        <p v-else-if="jobDetailsPending" class="muted small" role="status">{{ t('vetting.job.checkingSources') }}</p>
+        <p v-else-if="reviewActive" class="muted small">{{ t('vetting.job.background') }}</p>
         <p v-if="job?.status === 'COMPLETED' && !jobDetailsPending" class="muted small">{{ t('vetting.review.retained') }}</p>
       </div>
     </div>
@@ -1248,7 +1273,10 @@ function tagClass(group: string) {
                       <div>{{ requestStateLabel(request.transportStatus, 'transportStates') }} · {{ requestStateLabel(request.reviewExecutionStatus, 'requestStates') }}</div>
                       <div v-if="request.unknownReason" class="warning-note">{{ request.unknownReason }}</div>
                       <div>{{ t('vetting.coverage.requiredMembers') }}: {{ request.requiredChunkIds?.length ?? t('vetting.coverage.unknownCount') }} · {{ t('vetting.coverage.missingMembers') }}: {{ request.missingChunkIds?.length ?? t('vetting.coverage.unknownCount') }}</div>
-                      <div v-if="request.packetId" class="mono" style="overflow-wrap:anywhere">{{ t('vetting.coverage.fullInputPacket') }}: {{ request.packetId }}</div>
+                      <details v-if="request.packetId" class="evidence-technical-details">
+                        <summary>{{ t('vetting.coverage.packetIdentity') }}</summary>
+                        <div class="mono" style="overflow-wrap:anywhere">{{ t('vetting.coverage.fullInputPacket') }}: {{ request.packetId }}</div>
+                      </details>
                     </div>
                   </details>
                 </td>
@@ -1524,16 +1552,21 @@ function tagClass(group: string) {
                   <span class="tag" :class="item.located ? 'ok' : 'warn'">{{ item.located ? t('vetting.drawer.located') : t('vetting.drawer.unverified') }}</span>
                 </div>
                 <div class="quote">{{ item.quote }}</div>
+                <button v-if="isOrdinaryDocx(item) && originalSourceUrl(item)" class="btn" type="button" @click="openOriginalSource(item)">{{ t('vetting.drawer.openOriginal') }}</button>
+                <a v-else-if="originalSourceUrl(item)" class="btn" :href="originalSourceUrl(item) ?? undefined"
+                  :target="item.fileName.toLowerCase().endsWith('.pdf') ? '_blank' : undefined"
+                  :download="item.fileName.toLowerCase().endsWith('.pdf') ? undefined : item.fileName" rel="noopener noreferrer">
+                  {{ t(item.fileName.toLowerCase().endsWith('.pdf') ? 'vetting.drawer.openOriginal' : 'vetting.drawer.downloadOriginal') }}
+                </a>
+                <p v-if="!item.located" class="warning-note">{{ t('vetting.drawer.notLocated') }}</p>
                 <FixedBaselineEvidencePanel v-if="item.fixedBaselineEvidence" :pointer="item.fixedBaselineEvidence" :locale="store.locale" />
                 <CanonicalEvidencePanel v-else-if="item.canonicalEvidence" :pointer="item.canonicalEvidence" :locale="store.locale" />
-                <div v-if="item.packetId || item.packetSourceSnapshotSha256" class="small">
+                <details v-if="item.packetId || item.packetSourceSnapshotSha256" class="small evidence-technical-details">
+                  <summary>{{ t('vetting.coverage.packetIdentity') }}</summary>
                   <div class="mono" style="overflow-wrap:anywhere">{{ t('vetting.coverage.fullInputPacket') }}: {{ item.packetId ?? t('vetting.coverage.unknownCount') }}</div>
                   <div class="mono" style="overflow-wrap:anywhere">{{ t('vetting.coverage.packetSnapshot') }}: {{ item.packetSourceSnapshotSha256 ?? t('vetting.coverage.unknownCount') }}</div>
-                </div>
+                </details>
                 <p v-else class="muted small">{{ t('vetting.coverage.legacyPacketUnknown') }}</p>
-                <button v-if="isOrdinaryDocx(item) && originalSourceUrl(item)" class="btn" type="button" @click="openOriginalSource(item)">{{ t('vetting.drawer.openOriginal') }}</button>
-                <a v-else-if="originalSourceUrl(item)" class="btn" :href="originalSourceUrl(item) ?? undefined" target="_blank" rel="noopener noreferrer">{{ t('vetting.drawer.openOriginal') }}</a>
-                <p v-if="!item.located" class="warning-note">{{ t('vetting.drawer.notLocated') }}</p>
               </div>
             </div>
             <div v-else-if="!evidenceLoading && !evidenceFailed" class="evidence-missing">
@@ -1630,7 +1663,11 @@ function tagClass(group: string) {
               <td>
                 <strong>{{ file.fileName || file.key }}</strong>
                 <div v-if="!['OTHER', 'DRAWING'].includes(file.key)" class="mono muted small">{{ file.key }}</div>
-                <a v-if="sourceFileOriginalUrl(file)" :href="sourceFileOriginalUrl(file)!" target="_blank" rel="noopener noreferrer" class="small">{{ t('vetting.drawer.openOriginal') }}</a>
+                <a v-if="sourceFileOriginalUrl(file)" :href="sourceFileOriginalUrl(file)!" class="small"
+                  :target="file.fileName.toLowerCase().endsWith('.pdf') ? '_blank' : undefined"
+                  :download="file.fileName.toLowerCase().endsWith('.pdf') ? undefined : file.fileName" rel="noopener noreferrer">
+                  {{ t(file.fileName.toLowerCase().endsWith('.pdf') ? 'vetting.drawer.openOriginal' : 'vetting.drawer.downloadOriginal') }}
+                </a>
               </td>
               <td>
                 {{ sourcePurposeLabel(file) }}

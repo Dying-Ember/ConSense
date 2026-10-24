@@ -10,10 +10,11 @@ import java.util.regex.Pattern;
 
 /** Checks explicit source-location assertions without rewriting any model text. */
 final class VettingSourceAttribution {
-    static final String POLICY="explicit-source-clause-attribution-v1";
+    static final String POLICY="explicit-source-clause-attribution-v3:bound-packet-citation-v1:"+ObservedSourceClauseLocators.VERSION;
     private static final String NUMBER="\\d+(?:\\s*\\.\\s*\\d+)*(?:\\s*\\([a-z0-9]+\\))*";
     private static final Pattern CLAUSE=Pattern.compile("(?i)(?:(NTT|SCT|SCC|GCT|GCC|PRE|FT|AA|GS|SL)\\s+)?\\bClauses?\\s+("+NUMBER+"(?:\\s*(?:,|and|or|to)\\s*(?:Clauses?\\s+)?"+NUMBER+")*)");
     private static final Pattern NUMBERS=Pattern.compile(NUMBER,Pattern.CASE_INSENSITIVE);
+    private static final Pattern PACKET_CITATION=Pattern.compile("(?s)^(.*\\S)[\\s\\p{Z}]+\\((R[1-9][0-9]*)\\)$");
     private static final Pattern OWNER=Pattern.compile("^([A-Z][A-Z.]*?)[.]?(\\d.*)$");
     private static final Pattern QUESTION=Pattern.compile("(?i)^(?:(?:please\\s+)?(?:confirm|check|verify|review|determine)\\s+)?(?:whether|if|does|do|is|are|was|were|can|could|would|should|which|what|how)\\b|\\b(?:unknown|unverified|unconfirmed|uncertain)\\b.*\\bwhether\\b");
     private static final Pattern REFERENCE=Pattern.compile("(?i)(?:\\b(?:cross[- ]?)?references?\\s+to\\s*(?:(?:the|non-existent|unverified|missing|internal|external)\\s+)*|\\b(?:cites?|citing|refers?\\s+to)\\s*)$");
@@ -23,16 +24,28 @@ final class VettingSourceAttribution {
     private VettingSourceAttribution() { }
 
     static List<Map<String,Object>> reasons(List<Record> records,Map<String,Chunk> byId) {
+        return reasons(records,byId,Collections.emptyMap());
+    }
+    static List<Map<String,Object>> reasons(List<Record> records,Map<String,Chunk> byId,Map<String,ObservedSourceClauseLocators.Bound> locators) {
+        return reasons(records,byId,locators,Collections.emptyMap());
+    }
+    static List<Map<String,Object>> reasons(List<Record> records,Map<String,Chunk> byId,Map<String,ObservedSourceClauseLocators.Bound> locators,Map<String,String> packetBindings) {
         List<Map<String,Object>> out=new ArrayList<>();
         for(int i=0;records!=null&&i<records.size();i++) {
             Record r=records.get(i);if(r==null)continue;
             Set<String> owned=new LinkedHashSet<>();List<Map<String,Object>> bindings=new ArrayList<>();
+            Map<String,Set<String>> exactQuotedOwners=new LinkedHashMap<>();
             for(Quote q:r.getEvidence()==null?Collections.<Quote>emptyList():r.getEvidence()) {
                 Chunk c=q==null?null:byId.get(q.getChunkId());
                 if(c==null||!VettingCorpus.evidence(c,q.getSide(),q.getQuote()).isLocated())continue;
-                bindings.add(VettingReviewProbe.map("chunkId",c.getId(),"role",c.getRole(),"clauseId",c.getClauseId(),"clauseHeadingLocation",c.getClauseHeadingLocation(),"anchor",c.getAnchor()));
+                Map<String,Object> binding=VettingReviewProbe.map("chunkId",c.getId(),"role",c.getRole(),"clauseId",c.getClauseId(),"clauseHeadingLocation",c.getClauseHeadingLocation(),"anchor",c.getAnchor());
+                ObservedSourceClauseLocators.Bound locator=locators.get(c.getId());if(locator!=null)binding.put("observedSourceClauseLocators",locator.model(c));bindings.add(binding);
                 // A literal cross-reference, adjacent heading or array position never grants ownership.
-                if(Arrays.asList("tender","standard").contains(c.getRole())&&!JsonUtils.isBlankText(c.getClauseId())&&!JsonUtils.isBlankText(c.getClauseHeadingLocation()))owned.add(canonical(c.getClauseId()));
+                Set<String> sourceOwned=new LinkedHashSet<>();
+                if(Arrays.asList("tender","standard").contains(c.getRole())&&!JsonUtils.isBlankText(c.getClauseId())&&!JsonUtils.isBlankText(c.getClauseHeadingLocation()))sourceOwned.add(canonical(c.getClauseId()));
+                if(locator!=null)for(String reference:locator.references(c,q.getQuote()))sourceOwned.add(canonical(reference));
+                owned.addAll(sourceOwned);
+                if(exactUnique(c.getContent(),q.getQuote()))exactQuotedOwners.computeIfAbsent(c.getId(),key->new LinkedHashSet<>()).addAll(sourceOwned);
             }
             Map<String,String> fields=new LinkedHashMap<>();fields.put("title",r.getTitle());fields.put("comment",r.getComment());fields.put("impact",r.getImpact());fields.put("suggestion",r.getSuggestion());fields.put("factBasis",r.getFactBasis());
             for(int n=0;r.getPendingFacts()!=null&&n<r.getPendingFacts().size();n++)fields.put("pendingFacts["+n+"]",r.getPendingFacts().get(n));
@@ -45,6 +58,11 @@ final class VettingSourceAttribution {
                     while(number.find()) {
                         String id=canonical(number.group());String namespace=mention.group(1)==null?null:canonical(mention.group(1));
                         boolean supported=owned.stream().anyMatch(value->owned(value,namespace,id));
+                        // A separated, case-sensitive packet citation is transport syntax only when its quoted source owns the base locator.
+                        if(!supported){Matcher citation=PACKET_CITATION.matcher(number.group());if(citation.matches()){
+                            String source=packetBindings.get(citation.group(2)),base=canonical(citation.group(1));
+                            supported=exactQuotedOwners.getOrDefault(source,Collections.emptySet()).stream().anyMatch(value->owned(value,namespace,base));
+                        }}
                         if(!supported)out.add(VettingReviewProbe.map("recordIndex",i,"field",field.getKey(),"clauseId",namespace==null?id:namespace+id,
                                 "reason","unsupported_source_clause_attribution","quotedSourceBindings",bindings,
                                 "requiredCorrection","Use the exact source anchor when source clause ownership is unverified; preserve supported substantive observations and literal references."));
@@ -54,6 +72,8 @@ final class VettingSourceAttribution {
         }
         return out;
     }
+
+    private static boolean exactUnique(String text,String quote){return text!=null&&quote!=null&&quote.length()>=12&&text.indexOf(quote)>=0&&text.indexOf(quote)==text.lastIndexOf(quote);}
 
     private static boolean owned(String value,String namespace,String number) {
         Matcher m=OWNER.matcher(value);if(!m.matches())return namespace==null&&value.equals(number);

@@ -121,6 +121,7 @@ final class OerCanonicalSourceUnits {
     static ObjectNode blockRange(Map<String,JsonNode> parents,JsonNode key,String block) {
         List<JsonNode> parts=new ArrayList<>();for(JsonNode parent:parents.values())if(scopeIdentity(parent).equals(key))for(JsonNode part:parent.path("parts"))
             if(block.equals(part.path("blockId").asText())){mapped(parent);parts.add(part);}
+        observed(!parts.isEmpty(),"observed_block_mapping_missing");
         parts.sort(Comparator.comparingInt((JsonNode p)->p.path("startOffset").asInt()).thenComparingInt(p->p.path("endOffset").asInt()));
         StringBuilder text=new StringBuilder();for(JsonNode part:parts) {
             int start=part.path("startOffset").asInt(),end=part.path("endOffset").asInt();String raw=part.path("text").asText();

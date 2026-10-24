@@ -5,6 +5,7 @@ import com.consense.service.sources.CanonicalEvidenceService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.io.InputStream;
+import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 import org.junit.jupiter.api.Test;
@@ -27,6 +28,32 @@ class NativePdfMixedSourceUnitsTest {
             assertEquals("prose".equals(kind)?"15728b5e85557b4f9cab7b5e81ab6355238147b46771d98763063836cadc319a":"98b53ef37d0ce9bc83b652018392854436fb20cfc726bb0e7b556c964b89fa6e",observed.path("unitId").asText());
             assertEquals(seed,observed.path("members").get(0));
         }
+    }
+    @Test void businessUnionUsesTheSameNativeRootKeyAsObservedBlockRanges()throws Exception {
+        ObjectNode root=root("numeric-family-public-wire.json"),before=root.deepCopy();Map<String,JsonNode> parents=parents(root);
+        JsonNode seed=root.path("chunks").get(0),table=root.path("chunks").get(1);
+        ObjectNode unit=OerCanonicalSourceUnits.resolveObserved(parents,seed);
+        for(String kind:Arrays.asList("hierarchy","attachment")){
+            ObjectNode context=unit.putObject(kind+"Context");context.put("status","complete_observed_"+kind+"_context");
+            context.put("contextId",kind+"-authored");context.put("policy","attachment".equals(kind)?OerCanonicalAttachmentContext.SHARED_POLICY:OerCanonicalHierarchyContext.POLICY);
+            context.set("sourceIdentity",OerCanonicalSourceUnits.identity(seed));context.putArray("members").add(seed.deepCopy()).add(table.deepCopy());
+        }
+        Method method=OerBusinessEvidence.class.getDeclaredMethod("transportUnit",JsonNode.class,Map.class);method.setAccessible(true);
+        JsonNode transport=(JsonNode)method.invoke(null,unit,parents);
+        assertEquals("complete_observed_context_union",transport.path("status").asText());assertEquals(2,transport.path("members").size());
+        for(JsonNode range:transport.path("observedRanges")){
+            int expectedEnd=0;for(JsonNode parent:parents.values())for(JsonNode part:parent.path("parts"))
+                if(range.path("blockId").equals(part.path("blockId")))expectedEnd=Math.max(expectedEnd,part.path("endOffset").asInt());
+            assertTrue(expectedEnd>0);assertEquals(expectedEnd,range.path("endUtf16").asInt());
+        }
+        assertFalse(transport.path("legalClosureVerified").asBoolean(true));assertFalse(transport.path("semanticScopeVerified").asBoolean(true));
+        assertEquals("unknown",transport.path("qualifiersComplete").asText());assertEquals(before,root);
+    }
+    @Test void aRangeWithoutAnySourcePartsCannotBecomeACompleteEmptyObservation()throws Exception {
+        ObjectNode root=root("numeric-family-public-wire.json");Map<String,JsonNode> parents=parents(root);JsonNode seed=root.path("chunks").get(0);
+        OerCanonicalSourceUnits.ObservationUnknown missing=assertThrows(OerCanonicalSourceUnits.ObservationUnknown.class,
+                ()->OerCanonicalSourceUnits.blockRange(parents,OerCanonicalSourceUnits.identity(seed),seed.path("parts").get(0).path("blockId").asText()));
+        assertEquals("observed_block_mapping_missing",missing.getMessage());
     }
     @Test void changedRootRevisionScopeModulesOrSlAliasesCannotJoinTheSameDocument()throws Exception {
         for(String field:Arrays.asList("sourceHash","role","metadataVersion","segmentationVersion","sourceQualityMetadataVersion","sourceQualityHash","originalSourceSha256","sourceSha256","projectionRevisionSha256","sourceRevisionSha256","scopeSha256","sourceEditionId","slUnitScopeManifestSha256","module","eligibleModules")){

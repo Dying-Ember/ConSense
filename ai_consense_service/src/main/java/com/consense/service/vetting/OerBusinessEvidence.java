@@ -47,6 +47,7 @@ public class OerBusinessEvidence {
         private OerCanonicalRetrievalClient.SemanticSources semanticSources;
         private Map<Long,SourceDocument> semanticDocuments;
         private Map<String,JsonNode> semanticContexts;
+        private Map<String,ObservedSourceClauseLocators.Bound> semanticLocators=Collections.emptyMap();
         private Map<String,List<String>> semanticAnchors;
         private Map<String,String> semanticHeadingLocations=Collections.emptyMap();
         private List<VettingRuleEngine.Source> semanticRuleSources;
@@ -89,12 +90,13 @@ public class OerBusinessEvidence {
         Session result;CurrentStage loaded=stage(projectId,module,new ArrayList<>(documents.keySet()));
         try(CurrentStage held=loaded){
             require(held.frame!=null,"semantic preparation requires an owned source frame");evidence.prepareCompactIdentities(held.frame,selected);held.bindings=held.frame.bindings();Session cold=loadSession(projectId,module,documents,held);held.session=cold;
-            OerModelMaterial.Request material=new OerModelMaterial.Request(selected);Map<String,JsonNode> contexts=new LinkedHashMap<>();Map<String,List<String>> anchors=new LinkedHashMap<>();Map<String,String> headingLocations=new LinkedHashMap<>();
+            OerModelMaterial.Request material=new OerModelMaterial.Request(selected);Map<String,JsonNode> contexts=new LinkedHashMap<>();Map<String,List<String>> anchors=new LinkedHashMap<>();Map<String,String> headingLocations=new LinkedHashMap<>();Map<String,ObservedSourceClauseLocators.Bound> locators=new LinkedHashMap<>();
             for(Chunk chunk:cold.chunks){EvidencePointer pointer=JsonUtils.read(JsonUtils.write(chunk.getCanonicalEvidence()),EvidencePointer.class);
                 anchors.put(chunk.getId(),chunk.getParts().stream().map(Part::getAnchor).collect(Collectors.toList()));
                 headingLocations.put(chunk.getId(),chunk.getClauseHeadingLocation());
                 JsonNode word=held.frame.wordSourceScopeContext(pointer.getDocumentId(),pointer.getProjectionSha256(),pointer.getCanonicalChunkId(),module);if(word!=null)pointer.setNativeWordSourceScopesContext(word);
                 contexts.put(chunk.getId(),VettingSourceMaterial.semantic(material.projectStandalone(pointer,chunk.getCanonicalPayload(),chunk.getRole()),Collections.emptyMap()));
+                ObservedSourceClauseLocators.Bound locator=ObservedSourceClauseLocators.capture(pointer,chunk.getCanonicalPayload(),chunk.getRole(),word);if(locator!=null)locators.put(chunk.getId(),locator);
             }
             OerCanonicalRetrievalClient.SemanticSources sources=retrieval.prepareSemanticSources(module,held.bindings);
             CanonicalEvidenceService.CompactBindingScope scope=evidence.compactBindings(held.frame,selected);
@@ -102,6 +104,7 @@ public class OerBusinessEvidence {
                 SourceDocument source=new SourceDocument();source.setId(original.getId());source.setProjectId(original.getProjectId());source.setFileName(original.getFileName());source.setFileKey(original.getFileKey());source.setReviewRole(original.getReviewRole());catalog.put(source.getId(),source);}
             result=new Session(projectId,module,scope,sources,catalog,contexts,anchors,buildRuleSources(cold,selected),sourceRenderPins(held.bindings));
             result.semanticHeadingLocations=Collections.unmodifiableMap(headingLocations);
+            result.semanticLocators=Collections.unmodifiableMap(locators);
         }
         current(result);return result;
     }
@@ -345,6 +348,18 @@ public class OerBusinessEvidence {
         try(CurrentStage stage=loaded){response=stage.frame==null?retrieval.retrieve(session.indexKey,session.module,query,role,stage.bindings)
                 :retrieval.retrieve(session.indexKey,session.module,query,role,stage.frame);}
         complete(session,loaded);return response;
+    }
+
+    /** Current selected source syntax only; capabilities are never reconstructed from compact model JSON. */
+    Map<String,ObservedSourceClauseLocators.Bound> sourceClauseLocators(Session session,List<Chunk> selected,Map<String,JsonNode> wordContexts){
+        current(session);Map<String,ObservedSourceClauseLocators.Bound> result=new LinkedHashMap<>();
+        for(Chunk chunk:selected){
+            if(FixedVettingReferences.isFixed(chunk))continue;
+            require(chunk!=null&&session.byId.containsKey(chunk.getId())&&Objects.equals(session.viewPayloads.get(chunk.getId()),JsonUtils.serializedSha256(chunk)),"selected source locator differs");
+            ObservedSourceClauseLocators.Bound locator=session.semanticScope!=null?session.semanticLocators.get(chunk.getId()):ObservedSourceClauseLocators.capture(chunk.getCanonicalEvidence(),chunk.getCanonicalPayload(),chunk.getRole(),wordContexts.get(chunk.getId()));
+            if(locator!=null&&!locator.model(chunk).isEmpty())result.put(chunk.getId(),locator);
+        }
+        return Collections.unmodifiableMap(result);
     }
 
     /** Selected model context only. Neither the corpus nor a source-verification verdict is retained here. */
@@ -720,7 +735,7 @@ public class OerBusinessEvidence {
         require(!members.isEmpty(),"complete transport union has no source members");
         SortedSet<String> blocks=new TreeSet<>();for(JsonNode member:members)for(JsonNode part:member.path("parts"))blocks.add(part.path("blockId").asText());
         com.fasterxml.jackson.databind.node.ArrayNode blockIds=union.putArray("blockIds"),ranges=union.putArray("observedRanges");
-        for(String block:blocks){blockIds.add(block);ranges.add(OerCanonicalSourceUnits.blockRange(parents,OerCanonicalSourceUnits.identity(members.get(0)),block));}
+        for(String block:blocks){blockIds.add(block);ranges.add(OerCanonicalSourceUnits.blockRange(parents,OerCanonicalSourceUnits.scopeIdentity(members.get(0)),block));}
         ObjectNode address=JsonUtils.mapper().createObjectNode();address.put("policy",unionPolicy);address.set("observedUnitId",unit.path("unitId"));address.set("hierarchyContextId",context.path("contextId"));address.set("attachmentContextId",attachment.path("contextId"));address.set("memberPayloadSha256",hashes);
         union.put("contextId",VettingCorpus.hash(JsonUtils.write(OerCanonicalSourceUnits.sorted(address))));return union;
     }

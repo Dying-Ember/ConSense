@@ -55,6 +55,17 @@ class VettingSourceAttributionRepairTest {
         assertEquals(1,r.getActualGatewayCallCount());assertEquals(1,r.getCandidates().size());assertEquals(f.wire(raw),packet(r).getAttempts().get(0).getRawResponse());
     }
 
+    @Test void actualReceivingPacketSeparatesItsBoundCitationsWithoutRepairOrRewritingTheRawNarrative() {
+        Fixture f=new Fixture();f.a.setClauseId("SCT1");f.a.setClauseHeadingLocation("body/3/paragraph");f.b.setClauseId("SCT2");f.b.setClauseHeadingLocation("body/5/paragraph");
+        String fact="SCT Clause 1 (R1) requires two signed paper copies; SCT Clause 2 (R2) requires exactly three signed paper copies.";
+        ObjectNode record=f.record(true);record.put("factBasis",fact);String raw=JsonUtils.write(Collections.singletonList(record));
+        VettingSemanticReview.Result result=f.review(raw);SemanticPacketVO actual=packet(result);
+        assertEquals(1,result.getActualGatewayCallCount());assertEquals(1,result.getCandidates().size());assertNull(result.getModelFailure());
+        assertEquals(1,actual.getAttempts().size());assertEquals("decoded",actual.getAttempts().get(0).getStatus());
+        assertEquals(f.wire(raw),actual.getAttempts().get(0).getRawResponse());assertEquals(VettingCorpus.hash(f.wire(raw)),actual.getAttempts().get(0).getRawResponseSha256());
+        assertEquals(fact,JsonUtils.parse(actual.getAttempts().get(0).getRawResponse()).get(0).path("factBasis").asText());
+    }
+
     @Test void aClauseIdWithoutItsSourceHeadingCannotAuthorizeAnOwnershipAssertion() {
         Fixture f=new Fixture();f.a.setClauseId("SCT1");f.b.setClauseId("SCT2");String raw=f.conflict(true);
         VettingSemanticReview.Result r=f.review(raw,raw);assertTrue(r.getCandidates().isEmpty());assertEquals(2,r.getActualGatewayCallCount());

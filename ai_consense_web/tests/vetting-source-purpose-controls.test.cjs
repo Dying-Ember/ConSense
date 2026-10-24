@@ -148,6 +148,8 @@ test('pending identity requires a separate explicit text-material confirmation a
     const original = find(h.sourceRow('51'), node => node.tag === 'a')
     assert.match(original.props.href, /sources\/51\/original\?sourceHash=/)
     assert.match(original.props.href, /sourceRole=unknown/)
+    assert.equal(original.props.download, 'SCT-51.docx'); assert.equal(original.props.target, undefined)
+    assert.equal(text(original).trim(), '下载原始文件')
     const check = find(h.sourceRow('51'), node => node.tag === 'input' && node.props.type === 'checkbox')
     assert.ok(check)
     await h.choose('51', 'tender')
@@ -158,6 +160,29 @@ test('pending identity requires a separate explicit text-material confirmation a
     assert.equal(h.confirmButton('51').props.disabled, false)
     assert.ok(text(h.confirmButton('51')).includes('继续解析'))
   } finally { h.dispose() }
+})
+
+test('source-list original links download non-PDF files with readable labels and retain the original identity', async () => {
+  const files = ['word-source.DOCX', 'legacy-source.DOC', 'outlook-message.msg', 'email-message.eml', 'plain-source.txt', 'pdf-source.PDF']
+    .map((fileName, index) => pendingRow(String(51 + index), { fileName }))
+  for (const [locale, downloadLabel, openLabel] of [
+    ['zh-Hans', '下载原始文件', '打开原始文件'], ['zh-Hant', '下載原始文件', '開啟原始文件'], ['en', 'Download original', 'Open original']
+  ]) {
+    const h = await mount({ locale, files })
+    try {
+      for (const source of files) {
+        const sourceRow = find(h.root, node => node.tag === 'tr' && text(node).includes(source.fileName))
+        const original = find(sourceRow, node => node.tag === 'a'), pdf = source.fileName.toLowerCase().endsWith('.pdf')
+        assert.ok(original); assert.equal(text(original).trim(), pdf ? openLabel : downloadLabel)
+        assert.equal(original.props.target, pdf ? '_blank' : undefined)
+        assert.equal(original.props.download, pdf ? undefined : source.fileName)
+        const url = new URL(original.props.href, 'http://localhost')
+        assert.equal(url.pathname, `/api/vetting/project-a/sources/${source.documentId}/original`)
+        for (const key of ['sourceHash', 'originalSourceSha256', 'sourceRole']) assert.equal(url.searchParams.get(key), source[key])
+      }
+      assert.equal(h.calls.length, 0, 'Rendering original links does not parse, review, export or confirm a source')
+    } finally { h.dispose() }
+  }
 })
 
 test('an explicitly confirmed pending source accepts the new parse revision of the same original only', async () => {

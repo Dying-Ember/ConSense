@@ -148,18 +148,24 @@ class VettingReportWriterTest {
 
     @Test
     void wordRetainsBothSidesAnchorsReviewStatusAndCoverageWarnings() throws Exception {
-        byte[] bytes = writer.docx(project(), Collections.singletonList(finding("F1", "Handled")), job(), "en");
+        FindingVO finding = finding("F1", "Handled"); VettingJobVO saved = job();
+        byte[] bytes = writer.docx(project(), Collections.singletonList(finding), saved, "en");
+        String word;
         try (XWPFDocument document = new XWPFDocument(new ByteArrayInputStream(bytes))) {
-            String text = documentText(document);
-            assertTrue(text.replaceAll("\\s+", "").contains("ContractNo.:20250101"));
-            assertTrue(text.contains("Review status: Handled"));
-            assertTrue(text.contains("Clause NTT10"));
-            assertTrue(text.contains("Source clause quotation"));
-            assertTrue(text.contains("Comparison clause quotation"));
-            assertTrue(text.contains("baseline.docx"));
-            assertTrue(text.contains("Missing BQ volumes"));
-            assertTrue(text.contains("Unparsed scan pages"));
+            word = documentText(document);
             assertEquals("Title", document.getParagraphs().get(0).getStyle());
+        }
+        String pdf;
+        try (PDDocument document = PDDocument.load(writer.pdf(project(), Collections.singletonList(finding), saved, "en"))) {
+            pdf = new PDFTextStripper().getText(document);
+        }
+        for(String text:Arrays.asList(word,pdf)) {
+            String compact=text.replaceAll("\\s+", "");
+            assertTrue(compact.contains("Notconfirmed(identitychecknotrecorded)"));
+            assertFalse(text.contains("20250101"), "Project display identity is not an adopted package identity");
+            for(String retained:Arrays.asList("Review status: Handled","Clause NTT10","Source clause quotation",
+                    "Comparison clause quotation","baseline.docx","Missing BQ volumes","Unparsed scan pages"))
+                assertTrue(compact.contains(retained.replaceAll("\\s+","")),retained);
         }
     }
 

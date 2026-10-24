@@ -19,3 +19,4 @@ ai_consense_service/src/main/resources/vetting/checklist-logical-groups-v1.json 
 ai_consense_service/src/test/resources/oer/native-pdf-actual-sl/** -text
 ai_consense_service/src/test/resources/oer/native-pdf-mixed-family/** -text
 ai_consense_service/src/test/resources/oer/native-pdf-table-condition/** -text
+ai_consense_service/src/test/resources/oer/canonical/shared-note-current-scope-negative.json -text

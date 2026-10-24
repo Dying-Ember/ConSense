@@ -14,6 +14,7 @@ const words = {
   groupUnknown: ['成员／限定关系未确认。缺失项不能当作完整依据；其余回取成员仍保留。', '成員／限定關係未確認。缺失項不能當作完整依據；其餘回取成員仍保留。', 'Member and qualifier relations remain unverified. Missing items are not complete evidence; other retrieved members remain available.'],
   noAssets: ['未绑定完整表格资产；请回查完整原页。', '未綁定完整表格資產；請回查完整原頁。', 'No complete table asset is bound; inspect the full original pages.'],
   structure: ['来源结构与未确认项', '來源結構與未確認項', 'Source structure and unresolved items'],
+  technical: ['技术详情（来源标识与结构）', '技術詳情（來源標識與結構）', 'Technical details (source identity and structure)'],
   table: ['完整表格资产', '完整表格資產', 'Complete table asset'],
   loading: ['读取中…', '讀取中…', 'Loading…'], retry: ['重新读取证据', '重新讀取證據', 'Reload evidence'],
   stale: ['固定基准或原件已变化；保留历史引用，请重新取证。', '固定基準或原件已變化；保留歷史引用，請重新取證。', 'The fixed baseline or original changed. Retain the historical citation and retrieve current evidence.'],
@@ -69,29 +70,35 @@ onBeforeUnmount(() => { ++epoch; cleanup() })
   <section class="fixed-evidence-panel canonical-evidence-panel" aria-live="polite">
     <h4>{{ label('title') }}</h4>
     <p class="warning-note">{{ label('note') }}</p>
-    <p class="mono small">{{ pointer.sourceFamily }} · {{ pointer.baselineVersion }} · {{ pointer.manifestSha256 }}</p>
-    <p class="mono small">SHA-256: {{ pointer.originalSourceSha256 }} · {{ pointer.originalPageNos?.join(', ') || pointer.pageNo }}</p>
+    <p class="small">{{ pointer.sourceFamily }} · {{ pointer.baselineVersion }} · {{ pointer.originalPageNos?.join(', ') || pointer.pageNo }}</p>
     <p v-if="loading" role="status">{{ label('loading') }}</p>
     <p v-if="error" role="alert">{{ displayError }}</p>
     <button type="button" class="btn" :disabled="loading" @click="load">{{ label('retry') }}</button>
     <template v-if="evidence">
       <strong>{{ evidence.fileLabel }}<template v-if="evidence.payload.fixedBaselineEditionId"> · {{ evidence.payload.fixedBaselineEditionId }}</template></strong>
+      <div><button type="button" class="btn" :disabled="originalLoading" @click="openOriginal">{{ originalLoading ? label('loading') : label('original') }}</button></div>
+      <p v-if="assetError" role="alert">{{ assetError }}</p>
       <pre>{{ evidence.content }}</pre>
       <p v-if="!evidence.tableArtifact && !group?.members.some(member => member.table)" class="warning-note">{{ label('noAssets') }}</p>
       <div v-if="matrix.length" class="table-wrap"><table><tbody><tr v-for="(row, rowIndex) in matrix" :key="rowIndex"><td v-for="(cell, cellIndex) in row" :key="cellIndex">{{ cell === null ? 'null' : cell }}</td></tr></tbody></table></div>
-      <details v-if="table !== null" open><summary>{{ label('table') }}</summary><pre>{{ JSON.stringify(table, null, 2) }}</pre></details>
       <div v-if="sourceUnit" class="source-member-group"><h5>{{ label('group') }}</h5>
-        <p>{{ label('required') }}: {{ sourceUnit.requiredMemberIds?.join(', ') || 'unknown' }}</p>
-        <p>{{ label('present') }}: {{ group?.members.map(member => member.evidence.id).join(', ') || 'unknown' }}</p>
-        <p v-if="group?.missingMemberIds.length || group?.missingAssetIds.length" role="alert">{{ label('missing') }}: {{ [...(group?.missingMemberIds ?? []), ...(group?.missingAssetIds ?? [])].join(', ') }}</p>
+        <p>{{ label('required') }}: {{ sourceUnit.requiredMemberIds?.length ?? 'unknown' }}</p>
+        <p>{{ label('present') }}: {{ group?.members.length ?? 'unknown' }}</p>
+        <p v-if="group?.missingMemberIds.length || group?.missingAssetIds.length" role="alert">{{ label('missing') }}: {{ (group?.missingMemberIds.length ?? 0) + (group?.missingAssetIds.length ?? 0) }}</p>
         <p class="warning-note">{{ label('groupUnknown') }}</p>
-        <article v-for="member in group?.members ?? []" :key="member.evidence.id"><strong>{{ member.evidence.fileLabel }} · {{ member.evidence.pageNo }} · {{ member.evidence.id }}</strong><pre>{{ member.evidence.content }}</pre><details v-if="member.table"><summary>{{ label('table') }}</summary><pre>{{ JSON.stringify(member.table, null, 2) }}</pre></details></article>
+        <article v-for="member in group?.members ?? []" :key="member.evidence.id"><strong>{{ member.evidence.fileLabel }} · {{ member.evidence.pageNo }}</strong><pre>{{ member.evidence.content }}</pre></article>
       </div>
-      <details><summary>{{ label('structure') }}</summary><pre>{{ JSON.stringify({ sourceUnit, sourceQuality: evidence.payload.sourceQuality, unknowns: evidence.payload.unknowns, projectApplicability: pointer.projectApplicability, qualifiersComplete: pointer.qualifiersComplete }, null, 2) }}</pre></details>
-      <button type="button" class="btn" :disabled="originalLoading" @click="openOriginal">{{ originalLoading ? label('loading') : label('original') }}</button>
-      <p v-if="assetError" role="alert">{{ assetError }}</p>
       <template v-if="original"><p>{{ label('verified') }}</p><a class="btn" :href="`${original}#page=${pointer.originalPageNos?.[0] || pointer.pageNo}`" target="_blank" rel="noopener noreferrer">{{ label('originalPage') }}</a><PdfPreview :source="original" :initial-page="pointer.originalPageNos?.[0] || pointer.pageNo" :title="evidence.fileLabel" :locale="locale" /></template>
     </template>
+    <details class="evidence-technical-details">
+      <summary>{{ label('technical') }}</summary>
+      <p class="mono small">{{ pointer.manifestSha256 }}</p>
+      <p class="mono small">SHA-256: {{ pointer.originalSourceSha256 }}</p>
+      <template v-if="evidence">
+        <h5>{{ label('structure') }}</h5><pre>{{ JSON.stringify({ sourceUnit, sourceQuality: evidence.payload.sourceQuality, unknowns: evidence.payload.unknowns, projectApplicability: pointer.projectApplicability, qualifiersComplete: pointer.qualifiersComplete, group }, null, 2) }}</pre>
+        <template v-if="table !== null"><h5>{{ label('table') }}</h5><pre>{{ JSON.stringify(table, null, 2) }}</pre></template>
+      </template>
+    </details>
   </section>
 </template>
 <style scoped>

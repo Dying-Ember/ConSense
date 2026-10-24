@@ -6,6 +6,9 @@ import type { CanonicalEvidenceAddress, CanonicalEvidenceAsset, CanonicalEvidenc
 const props = withDefaults(defineProps<{ pointer: CanonicalEvidenceAddress | null; locale?: 'zh-Hans' | 'zh-Hant' | 'en' }>(), { locale: 'zh-Hans' })
 const copy = {
   sourcePage: ['完整原页渲染', '完整原頁渲染', 'Full original page render'],
+  sourceImage: ['来源图像', '來源圖像', 'Source image'],
+  technical: ['技术详情（来源标识与位置）', '技術詳情（來源標識與位置）', 'Technical details (source identity and positions)'],
+  unresolved: ['仍有未确认的来源或显示限制，请结合原件核对后采用。', '仍有未確認的來源或顯示限制，請結合原件核對後採用。', 'Source or display limitations remain unresolved. Check the original before relying on this evidence.'],
   title: ['原件证据', '原件證據', 'Original source evidence'], loading: ['正在读取绑定的原件证据…', '正在讀取綁定的原件證據…', 'Loading bound source evidence…'],
   empty: ['请选择明确的 canonical 原件位置。', '請選擇明確的 canonical 原件位置。', 'Select an explicit canonical source address.'],
   source: ['来源文件', '來源文件', 'Source file'], pages: ['原 PDF 物理页', '原 PDF 物理頁', 'Original PDF physical pages'],
@@ -100,50 +103,51 @@ onBeforeUnmount(() => { ++epoch; active?.abort(); clearAssets() })
         <dt>{{ label('source') }}</dt><dd>{{ resolved.sourceFilename }}</dd>
         <template v-if="!native && resolved.physicalPages.length"><dt>{{ label('pages') }}</dt><dd>{{ [...resolved.physicalPages].sort((a, b) => a - b).join(', ') }}</dd></template>
         <template v-else-if="native"><dt>{{ label('nativeParts') }}</dt><dd>{{ nativePartNames.join(', ') }}</dd></template>
-        <dt>SHA-256</dt><dd>{{ resolved.originalSourceSha256 }}</dd>
       </dl>
       <p class="evidence-status">{{ label('notHuman') }}</p>
+      <p v-if="resolved.unknowns.length || resolved.sourceRenderLimitations?.length" class="evidence-status">{{ label('unresolved') }}</p>
       <p v-if="native" role="status">{{ label('nativeBoundary') }}</p>
+      <p v-if="native" class="evidence-status">{{ label('nativeChannel') }}</p>
       <p v-if="normal" role="status">{{ label('normalBoundary') }}</p>
-      <p v-if="resolved.tableGroup">{{ normal ? label('normalTable') : native ? label('nativeTable') : label('table') }}: {{ resolved.tableGroup.tableGroupId ?? resolved.tableGroup.tableLocation }}</p>
+      <p v-if="resolved.tableGroup">{{ normal ? label('normalTable') : native ? label('nativeTable') : label('table') }}</p>
       <p v-if="coverage?.status === 'no_assets'" role="status">{{ label('noAssets') }}</p>
       <p v-if="incomplete" role="alert">{{ label('incomplete') }} {{ coverage?.missingPages.join(', ') }}</p>
       <div class="source-images">
         <figure v-for="view in assets" :key="view.asset.assetId" :data-asset-id="view.asset.assetId">
-          <figcaption>{{ label('pages') }} {{ view.asset.physicalPages.join(', ') }} — {{ view.asset.kind === 'source_page_render' ? label('sourcePage') : (view.asset.artifactName || view.asset.assetId) }}</figcaption>
+          <figcaption>{{ label('pages') }} {{ view.asset.physicalPages.join(', ') }} — {{ view.asset.kind === 'source_page_render' ? label('sourcePage') : label('sourceImage') }}</figcaption>
           <p v-if="view.status === 'loading'" role="status">{{ label('assetLoading') }}</p>
           <p v-if="view.status === 'error'" role="alert">{{ label('imageError') }}: {{ displayReason(view.error) }}</p>
           <img v-if="view.url" :src="view.url" :alt="`${resolved.sourceFilename} — ${label('pages')} ${view.asset.physicalPages.join(', ')}`" @error="imageFailed(view.asset.assetId, view.url)" />
           <p v-if="view.shaImplementation" class="evidence-status" :data-sha-implementation="view.shaImplementation">{{ label('shaVerified') }}</p>
-          <p v-for="region in view.asset.sourceRegions" :key="region.blockId" class="source-position">{{ label('position') }}: {{ region.bbox?.join(', ') || label('geometryUnknown') }}</p>
-          <p v-if="view.asset.sourceRegions.length === 0" class="source-position">{{ label('position') }}: {{ label('geometryUnknown') }}</p>
+          <p v-if="view.asset.sourceRegions.length === 0 || view.asset.sourceRegions.some(region => !region.bbox)" class="source-position">{{ label('geometryUnknown') }}</p>
         </figure>
       </div>
       <details>
         <summary>{{ label('text') }}</summary>
         <article v-for="part in parts" :key="part.blockId" :data-block-id="part.blockId">
-          <template v-if="normal">
-            <p>{{ label('nativePosition') }}:</p>
-            <pre class="native-position">{{ JSON.stringify(part.sourcePosition, null, 2) }}</pre>
-            <p>UTF-16 [{{ part.startOffset }}, {{ part.endOffset }})</p>
-          </template>
-          <template v-else-if="native">
-            <p>{{ label('nativePosition') }}: {{ part.sourcePosition?.partName }}</p>
-            <pre class="native-position">{{ part.sourcePosition?.nodePath }}</pre>
-            <p>{{ label('nativeChannel') }}: {{ part.textTransform?.textChannel }} · UTF-16 [{{ part.textTransform?.sourceStartUtf16 }}, {{ part.textTransform?.sourceEndUtf16 }})</p>
-            <p v-if="part.text === ''" class="evidence-status">{{ label('nativeBlank') }}</p>
-          </template>
-          <p v-else>{{ label('pages') }} {{ part.physicalPageNo }} · {{ label('position') }}: {{ part.bbox?.join(', ') || label('geometryUnknown') }}</p>
+          <p v-if="!native && part.physicalPageNo">{{ label('pages') }} {{ part.physicalPageNo }}</p>
+          <p v-if="part.text === ''" class="evidence-status">{{ label('nativeBlank') }}</p>
           <pre>{{ part.text }}</pre>
         </article>
       </details>
-      <details v-if="(native || normal) && resolved.tableGroup">
-        <summary>{{ normal ? label('normalTable') : label('nativeTable') }}</summary>
-        <pre>{{ JSON.stringify(resolved.tableGroup, null, 2) }}</pre>
-      </details>
-      <details>
-        <summary>{{ label('attributes') }}</summary>
+      <details class="evidence-technical-details">
+        <summary>{{ label('technical') }}</summary>
+        <dl class="source-identity"><dt>SHA-256</dt><dd>{{ resolved.originalSourceSha256 }}</dd></dl>
+        <h4>{{ label('attributes') }}</h4>
         <pre>{{ JSON.stringify({ sourceQuality: resolved.sourceQuality, unknowns: resolved.unknowns, relations: resolved.relations, sourceRenderCaptureCompleteness: resolved.sourceRenderCaptureCompleteness, sourceRenderLimitations: resolved.sourceRenderLimitations, humanConfirmed: resolved.humanConfirmed, ...(native ? { visualReturnStatus: resolved.visualReturnStatus, editingStates: parts.map(part => part.nativeEditingState) } : {}) }, null, 2) }}</pre>
+        <template v-if="resolved.tableGroup">
+          <h4>{{ normal ? label('normalTable') : native ? label('nativeTable') : label('table') }}</h4>
+          <pre>{{ JSON.stringify(resolved.tableGroup, null, 2) }}</pre>
+        </template>
+        <div v-for="part in parts" :key="part.blockId">
+          <p>{{ label('nativePosition') }}: {{ part.blockId }}</p>
+          <pre>{{ JSON.stringify({ sourcePosition: part.sourcePosition, bbox: part.bbox, startOffset: part.startOffset, endOffset: part.endOffset, textTransform: part.textTransform }, null, 2) }}</pre>
+        </div>
+        <div v-for="view in assets" :key="view.asset.assetId">
+          <p>{{ label('sourceImage') }}: {{ view.asset.assetId }}</p>
+          <p v-for="region in view.asset.sourceRegions" :key="region.blockId" class="source-position">{{ label('position') }}: {{ region.bbox?.join(', ') || label('geometryUnknown') }}</p>
+          <pre>{{ JSON.stringify(view.asset, null, 2) }}</pre>
+        </div>
       </details>
     </template>
   </section>

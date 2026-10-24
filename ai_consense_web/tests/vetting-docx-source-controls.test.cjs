@@ -48,6 +48,28 @@ async function mount(items) {
 const originalButton = root => find(root, node => node.tag === 'button' && text(node) === 'vetting.drawer.openOriginal')
 const reader = root => find(root, node => node.props?.class === 'shared-original-reader')
 
+test('finding evidence keeps hashes in one optional layer and leaves original and review actions visible', async () => {
+  const packetId = 'packet:' + 'd'.repeat(64), snapshot = 'e'.repeat(64)
+  const h = await mount([evidence({ packetId, packetSourceSnapshotSha256: snapshot })])
+  const visible = node => node.tag === 'details' && !node.props?.open
+    ? (node.children ?? []).filter(child => child.tag === 'summary').map(visible).join(' ')
+    : node.text || (node.children ?? []).map(visible).join(' ')
+  try {
+    await h.openFinding('F1')
+    const drawer = find(h.root, node => node.tag === 'aside' && String(node.props?.class).includes('finding-drawer'))
+    assert.ok(visible(drawer).includes('same-wording.docx')); assert.ok(visible(drawer).includes('Repeated wording exists elsewhere.'))
+    assert.ok(!visible(drawer).includes(packetId)); assert.ok(!visible(drawer).includes(snapshot))
+    assert.ok(text(drawer).includes(packetId)); assert.ok(text(drawer).includes(snapshot))
+    const technical = find(drawer, node => node.tag === 'details' && String(node.props?.class).includes('evidence-technical-details'))
+    assert.ok(technical); assert.ok(!technical.props.open)
+    for (let parent = technical.parent; parent; parent = parent.parent) assert.notEqual(parent.tag, 'details')
+    for (const control of [originalButton(drawer), find(drawer, node => node.tag === 'button' && text(node) === 'vetting.review.save')]) {
+      assert.ok(control)
+      for (let parent = control.parent; parent; parent = parent.parent) assert.notEqual(parent.tag, 'details', 'Business actions never require technical expansion')
+    }
+  } finally { h.dispose() }
+})
+
 test('ordinary Vetting DOCX opens the existing reader with exact identity and every original native position', async () => {
   const h = await mount([evidence()])
   try {
@@ -97,9 +119,20 @@ test('canonical/fixed panels and PDF links keep their existing paths; incomplete
     assert.ok(find(h.root, node => node.props?.class === 'canonical-panel'))
     assert.ok(find(h.root, node => node.props?.class === 'fixed-panel'))
     assert.equal(originalButton(h.root), undefined, 'Only an ordinary DOCX with a complete original identity enters the shared reader')
+    const canonical = find(h.root, node => node.tag === 'a' && node.props?.download === 'canonical.docx')
+    assert.ok(canonical, 'A normal canonical DOCX uses the native download link')
+    assert.equal(canonical.props.target, undefined, 'A non-PDF original does not open a new browsing tab')
+    assert.equal(text(canonical).trim(), 'vetting.drawer.downloadOriginal', 'The download has a visible text label')
+    const canonicalUrl = new URL(canonical.props.href, 'http://localhost')
+    assert.equal(canonicalUrl.searchParams.get('sourceHash'), 'registered-source-hash')
+    assert.equal(canonicalUrl.searchParams.get('originalSourceSha256'), 'a'.repeat(64))
+    assert.equal(canonicalUrl.searchParams.get('sourceRole'), 'tender')
+    assert.ok(!find(h.root, node => node.tag === 'a' && node.props?.download === 'fixed.docx'), 'Fixed originals keep their separate evidence route')
     const pdf = find(h.root, node => node.tag === 'a' && node.props?.href?.includes('#page=7'))
     assert.match(pdf.props.href, /^\/api\/vetting\/project-a\/sources\/42\/original\?/)
     assert.equal(new URL(pdf.props.href, 'http://localhost').searchParams.get('sourceRole'), 'tender')
+    assert.equal(pdf.props.target, '_blank'); assert.equal(pdf.props.download, undefined)
+    assert.equal(text(pdf).trim(), 'vetting.drawer.openOriginal')
     assert.equal(h.readCalls.length, 0)
   } finally { h.dispose() }
 })

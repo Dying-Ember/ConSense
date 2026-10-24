@@ -70,6 +70,10 @@ public final class VettingSourceMaterial {
     }
 
     static List<Map<String,Object>> project(List<Chunk> selected,FixedVettingReferences fixedReferences,List<com.consense.domain.SourceDocument> documents,Map<String,com.fasterxml.jackson.databind.JsonNode> wordSourceScopes) {
+        return project(selected,fixedReferences,documents,wordSourceScopes,Collections.emptyMap());
+    }
+
+    static List<Map<String,Object>> project(List<Chunk> selected,FixedVettingReferences fixedReferences,List<com.consense.domain.SourceDocument> documents,Map<String,com.fasterxml.jackson.databind.JsonNode> wordSourceScopes,Map<String,ObservedSourceClauseLocators.Bound> locators) {
         Objects.requireNonNull(selected,"Selected source chunks are required");
         Set<String> ids=new HashSet<>();Map<List<String>,Integer> blocks=new HashMap<>(),positions=new HashMap<>();
         for(Chunk c:selected) {
@@ -89,7 +93,9 @@ public final class VettingSourceMaterial {
             if(c.getCanonicalPayload()!=null||c.getCanonicalEvidence()!=null){
                 boolean compact=c.getCanonicalPayload()!=null&&"source-semantic-units-v1".equals(c.getCanonicalPayload().path("semanticProjectionVersion").asText());
                 if(!compact&&modelMaterial==null)modelMaterial=new OerModelMaterial.Request(documents,wordSourceScopes);
-                excerpts.add(canonical(c,modelMaterial,wordSourceScopes.get(c.getId()),emittedSemanticGroups,ids));continue;
+                Map<String,Object> excerpt=canonical(c,modelMaterial,wordSourceScopes.get(c.getId()),emittedSemanticGroups,ids);
+                ObservedSourceClauseLocators.Bound locator=locators.get(c.getId());if(locator!=null)excerpt.put("observedSourceClauseLocators",locator.model(c));
+                excerpts.add(excerpt);continue;
             }
             List<Map<String,Object>> rows=new ArrayList<>(),unknown=new ArrayList<>(),methods=new ArrayList<>();
             boolean bodyBound=bodyMatchesParts(c);int cursor=0;

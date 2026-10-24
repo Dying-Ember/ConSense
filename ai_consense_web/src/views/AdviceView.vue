@@ -840,7 +840,7 @@ async function askPrecedence() {
               <div class="sv-file">{{ activeCitation.fileLabel }} · {{ activeCitation.pageNo }}</div>
               <p v-if="activeCitation.fixedBaselineEvidence" class="warning-note">{{ streamCopy('This is a fixed standard original. Its source identity does not establish project adoption.', '这是固定标准原件，其来源身份本身不证明本项目采用。', '這是固定標準原件，其來源身份本身不證明本項目採用。') }}</p>
               <AdviceSourceReader :project-id="projectId" :citation="activeCitation" :scope="activeSourceScope" />
-              <details class="source-context"><summary>{{ streamCopy('Quoted excerpt and related original images', '引用摘录及关联原图', '引用摘錄及關聯原圖') }}</summary>
+              <section class="source-context"><h4>{{ streamCopy('Quoted excerpt and related original images', '引用摘录及关联原图', '引用摘錄及關聯原圖') }}</h4>
               <div class="sv-para" v-html="highlightHtml(activeCitation.content)" />
               <button class="btn" type="button" @click="sourceDetails = !sourceDetails">{{ streamCopy('Show related original images / tables', '查看关联原图／整表', '查看關聯原圖／整表') }}</button>
               <template v-if="sourceDetails">
@@ -852,7 +852,7 @@ async function askPrecedence() {
               />
               <FixedBaselineEvidencePanel v-if="activeCitation.fixedBaselineEvidence" :pointer="activeCitation.fixedBaselineEvidence" :locale="store.locale" />
               </template>
-              </details>
+              </section>
               <div class="sv-meta">
                 {{ t('advice.citation.footer') }}
                 <span v-if="activeCitation.scoreMeaning === 'unranked_context'"> · {{ pick(evidenceCopy.context) }}</span>

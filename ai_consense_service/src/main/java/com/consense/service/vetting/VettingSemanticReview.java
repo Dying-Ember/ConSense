@@ -438,10 +438,14 @@ public class VettingSemanticReview {
         sourceGuard.run();
         LinkedHashSet<String> ids=selection.getChunks().stream().map(Chunk::getId).collect(Collectors.toCollection(LinkedHashSet::new));
         if(ids.size()!=selection.getChunks().size())throw new IllegalArgumentException("Duplicate complete Input source ID");
-        return selectedInput(effectiveSystem(lang,projectReference),user(topic,selection,referenceIds,fixedReferences,documents,selectedWordContexts(suppliedCorpus,selection.getChunks())),VettingOutputSchema.forChunkIds(new VettingPacketReferences(selection.getChunks()).wireIds()),VettingCorpus.hash(JsonUtils.write(selection.getChunks())));
+        Map<String,JsonNode> wordContexts=selectedWordContexts(suppliedCorpus,selection.getChunks());
+        return selectedInput(effectiveSystem(lang,projectReference),user(topic,selection,referenceIds,fixedReferences,documents,wordContexts,selectedSourceLocators(suppliedCorpus,selection.getChunks(),wordContexts)),VettingOutputSchema.forChunkIds(new VettingPacketReferences(selection.getChunks()).wireIds()),VettingCorpus.hash(JsonUtils.write(selection.getChunks())));
     }
     private Map<String,JsonNode> selectedWordContexts(List<Chunk> corpus,List<Chunk> selected){
         return corpus!=null&&OerBusinessEvidence.canonicalCorpus(corpus)?oer.wordSourceScopeContexts(OerBusinessEvidence.session(corpus),selected):Collections.emptyMap();
+    }
+    private Map<String,ObservedSourceClauseLocators.Bound> selectedSourceLocators(List<Chunk> corpus,List<Chunk> selected,Map<String,JsonNode> wordContexts){
+        return corpus!=null&&OerBusinessEvidence.canonicalCorpus(corpus)?oer.sourceClauseLocators(OerBusinessEvidence.session(corpus),selected,wordContexts):Collections.emptyMap();
     }
     private void executePacket(Result result,SemanticTopicVO audit,SemanticPacketVO packet,VettingContextBuilder.Selection selection,String topic,String lang,boolean projectReference,List<String> referenceIds,int topicIndex,VettingReviewProbe.Call topicProbe,VettingInputBudget.Result previewBudget,List<Chunk> suppliedCorpus) {
         executePacket(result,audit,packet,selection,topic,lang,projectReference,referenceIds,topicIndex,topicProbe,previewBudget,suppliedCorpus,FixedVettingReferences.empty());
@@ -462,11 +466,14 @@ public class VettingSemanticReview {
             int candidateStart=result.getCandidates().size(),warningStart=result.getWarnings().size();
             try {
                 String actualSystem,actualUser;
+                Map<String,ObservedSourceClauseLocators.Bound> sourceLocators;
                 com.fasterxml.jackson.databind.JsonNode actualSchema;
                 try (VettingReviewProbe.Timer timer=topicProbe.measure("model_prompt_schema_construction","Original system/user/schema construction, before gateway or probe artifact serialization")) {
                     sourceGuard.run();
                     actualSystem = effectiveSystem(lang, projectReference);
-                    actualUser = user(topic, selection, referenceIds,fixedReferences,documents,selectedWordContexts(suppliedCorpus,submitted));
+                    Map<String,JsonNode> wordContexts=selectedWordContexts(suppliedCorpus,submitted);
+                    sourceLocators=selectedSourceLocators(suppliedCorpus,submitted,wordContexts);
+                    actualUser = user(topic, selection, referenceIds,fixedReferences,documents,wordContexts,sourceLocators);
                     actualSchema = VettingOutputSchema.forChunkIds(references.wireIds());
                 }
                 topicProbe.text("model_system", VettingReviewProbe.map("model", selectedModel(),
@@ -579,7 +586,7 @@ public class VettingSemanticReview {
                         }
                         List<Map<String,Object>> shapeReasons=recordShapeReasons(records);
                         if(!shapeReasons.isEmpty())throw new RecordShapeException(shapeReasons);
-                        List<Map<String,Object>> attributionReasons=VettingSourceAttribution.reasons(records,byId);
+                        List<Map<String,Object>> attributionReasons=VettingSourceAttribution.reasons(records,byId,sourceLocators,references.bindings());
                         if(!attributionReasons.isEmpty())throw new RecordShapeException(SOURCE_ATTRIBUTION_REASON,attributionReasons);
                         attempt.setStatus("decoded");
                     } catch(RecordShapeException invalid) {
@@ -820,8 +827,11 @@ public class VettingSemanticReview {
         return user(topic,selection,referenceIds,fixedReferences,documents,Collections.emptyMap());
     }
     private static String user(String topic,VettingContextBuilder.Selection selection,List<String> referenceIds,FixedVettingReferences fixedReferences,List<com.consense.domain.SourceDocument> documents,Map<String,JsonNode> wordSourceScopes) {
+        return user(topic,selection,referenceIds,fixedReferences,documents,wordSourceScopes,Collections.emptyMap());
+    }
+    private static String user(String topic,VettingContextBuilder.Selection selection,List<String> referenceIds,FixedVettingReferences fixedReferences,List<com.consense.domain.SourceDocument> documents,Map<String,JsonNode> wordSourceScopes,Map<String,ObservedSourceClauseLocators.Bound> sourceLocators) {
         Map<String,String> aliases=new VettingPacketReferences(selection.getChunks()).aliases();
-        List<Map<String,Object>> excerpts=VettingSourceMaterial.project(selection.getChunks(),fixedReferences,documents,wordSourceScopes);
+        List<Map<String,Object>> excerpts=VettingSourceMaterial.project(selection.getChunks(),fixedReferences,documents,wordSourceScopes,sourceLocators);
         String prompt = "Audit topic: " + topic
                 + "\nGeneric Appendix I requirements (67 main-table source rows in 44 logical groups; supplementary annex examples are not counterchecks). Assess only requirements supported by this packet. Never infer fulfilment from no findings; leave unassessed rows out. Pricing-only rows remain outside automatic scope.\n"
                 + checklistRequirements()
