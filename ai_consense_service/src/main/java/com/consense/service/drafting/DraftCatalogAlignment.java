@@ -1,6 +1,7 @@
 package com.consense.service.drafting;
 
 import com.consense.common.BizException;
+import com.consense.common.JsonUtils;
 import java.util.*;
 import static com.consense.service.drafting.DraftReviewGraph.*;
 
@@ -10,7 +11,7 @@ public final class DraftCatalogAlignment {
 
     public static Map<String,Object> catalog() { return DraftBusinessRules.catalog(); }
 
-    private static Map<String,Map<String,Object>> definitions() {
+    static Map<String,Map<String,Object>> definitions() {
         Map<String,Map<String,Object>> result=new LinkedHashMap<>();
         for(Map<String,Object> field:DraftBusinessRules.fields())index(field,"",result);
         return result;
@@ -18,6 +19,23 @@ public final class DraftCatalogAlignment {
     private static void index(Map<String,Object> field,String parent,Map<String,Map<String,Object>> result) {
         String key=parent.isEmpty()?text(field.get("key")):parent+"."+field.get("key");result.put(key,field);
         for(Object child:list(field.get("columnFields")))index(map(child),key,result);
+    }
+
+    static Map<String,Map<String,Object>> confirmedDefinitions(Map<String,Object> graph) {
+        Map<String,Map<String,Object>> result=new LinkedHashMap<>(),baseline=definitions();
+        try{validate(graph);}catch(BizException invalid){return result;}
+        for(Map<String,Object> node:nodes(graph)) {
+            Map<String,Object> alignment=map(node.get("catalogAlignment"));String key=text(alignment.get("baselineKey"));
+            if("excluded".equals(node.get("status"))||"verification".equals(map(node.get("role")).get("kind"))||"source_seed".equals(node.get("definitionKind"))||!"matched".equals(alignment.get("status"))||!Boolean.TRUE.equals(alignment.get("confirmed")))continue;
+            Map<String,Object> field=baseline.get(key);if(field==null)continue;
+            int dot=key.lastIndexOf('.');Map<String,Object> type=obj("kind",baselineKind(field));if(field.containsKey("unit"))type.put("unit",field.get("unit"));
+            Map<String,Object> definition=obj("baselineKey",key,"baselineVersion",DraftBusinessRules.RULE_VERSION,"parentKey",dot<0?"":key.substring(0,dot),"label",field.get("label"),"type",type,"optional",Boolean.TRUE.equals(field.get("optional")));
+            for(String property:Arrays.asList("options","description"))if(field.containsKey(property))definition.put(property,field.get(property));
+            result.put(text(node.get("id")),JsonUtils.readMap(JsonUtils.write(definition)));
+        }
+        // A column cannot acquire a confirmed definition through an unreviewed parent.
+        boolean removed;do{removed=false;for(Map<String,Object> node:nodes(graph)){Map<String,Object> definition=result.get(text(node.get("id")));if(definition==null||text(definition.get("parentKey")).isEmpty())continue;Map<String,Object> parent=result.get(text(node.get("parentId")));if(parent==null||!Objects.equals(parent.get("baselineKey"),definition.get("parentKey"))){result.remove(text(node.get("id")));removed=true;}}}while(removed);
+        return result;
     }
 
     public static void validate(Map<String,Object> graph) {
@@ -78,16 +96,14 @@ public final class DraftCatalogAlignment {
         if(!DraftBusinessRules.RULE_VERSION.equals(version))throw invalid("GRAPH_CATALOG_VERSION_CHANGED");
     }
     private static void compatible(Map<String,Object> node,Map<String,Object> baseline) {
-        String kind=text(map(node.get("type")).get("kind")),expected=text(baseline.get("kind"));
-        if(Arrays.asList("contract","object").contains(expected))expected="record";
-        if(Arrays.asList("bills","table","records").contains(expected))expected="list";
-        if(Arrays.asList("textarea","longtext").contains(expected))expected="text";
+        String kind=text(map(node.get("type")).get("kind")),expected=baselineKind(baseline);
         if(!kind.equals(expected))throw invalid("GRAPH_CATALOG_TYPE_MISMATCH: "+node.get("id"));
         Object unit=map(node.get("type")).get("unit");if(unit==null)unit=node.get("unit");
         if(!text(unit).equals(text(baseline.get("unit"))))throw invalid("GRAPH_CATALOG_UNIT_MISMATCH: "+node.get("id"));
         if(Arrays.asList("choice","multiselect").contains(kind)&&!optionValues(node).equals(optionValues(baseline)))throw invalid("GRAPH_CATALOG_OPTIONS_MISMATCH: "+node.get("id"));
         if(Boolean.TRUE.equals(node.get("optional"))!=Boolean.TRUE.equals(baseline.get("optional")))throw invalid("GRAPH_CATALOG_OPTIONAL_MISMATCH: "+node.get("id"));
     }
+    private static String baselineKind(Map<String,Object> baseline){String kind=text(baseline.get("kind"));return Arrays.asList("contract","object").contains(kind)?"record":Arrays.asList("bills","table","records").contains(kind)?"list":Arrays.asList("textarea","longtext").contains(kind)?"text":kind;}
     private static Set<Object> optionValues(Map<String,Object> field) {
         Set<Object> result=new HashSet<>();for(Object raw:list(field.get("options")))result.add(map(raw).get("value"));return result;
     }

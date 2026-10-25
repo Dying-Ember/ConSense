@@ -160,7 +160,8 @@ public final class DraftReviewGraph {
         return withChildren(node,context,true);
     }
     private static Map<String,Object> withChildren(Map<String,Object> node,Context context,boolean selectedOnly) {
-        Map<String,Object> result=new LinkedHashMap<>(node);List<Map<String,Object>> children=new ArrayList<>();
+        Map<String,Object> result=new LinkedHashMap<>(node);result.remove("baselineDefinition");List<Map<String,Object>> children=new ArrayList<>();
+        Map<String,Object> definition=context.baselineDefinitions.get(text(node.get("id")));if(definition!=null){result.put("baselineDefinition",definition);Map<String,Object> label=map(definition.get("label"));result.put("nameZh",label.getOrDefault("zhHans",label.get("zhHant")));result.put("nameEn",label.get("en"));}
         for(Map<String,Object> child:context.nodes.values())if(active(child)&&(!selectedOnly||context.selected(text(child.get("id"))))&&Objects.equals(node.get("id"),child.get("parentId")))children.add(withChildren(child,context,selectedOnly));
         result.put("children",children);return result;
     }
@@ -175,8 +176,9 @@ public final class DraftReviewGraph {
         List<Map<String,Object>> result=new ArrayList<>();
         for(Map<String,Object> field:fields) {
             Map<String,Object> definition=new LinkedHashMap<>();
-            for(String key:Arrays.asList("id","parentId","nameZh","nameEn","questionZh","questionEn","type","role","options","fixedValue","optional","correction","relatedInputIds","semanticSourceQuote","unit","definitionScope","catalogAlignment"))
+            for(String key:Arrays.asList("id","parentId","nameZh","nameEn","questionZh","questionEn","type","role","options","fixedValue","optional","correction","relatedInputIds","semanticSourceQuote","unit","definitionScope","baselineDefinition"))
                 if(field.containsKey(key))definition.put(key,field.get(key));
+            if(field.containsKey("catalogAlignment")){Map<String,Object> alignment=new LinkedHashMap<>();for(String key:Arrays.asList("status","baselineKey","baselineVersion","confirmed","reason","scope"))if(map(field.get("catalogAlignment")).containsKey(key))alignment.put(key,map(field.get("catalogAlignment")).get(key));definition.put("catalogAlignment",alignment);}
             Map<String,Object> guidance=map(field.get("guidance"));
             if(!guidance.isEmpty()){Map<String,Object> text=new LinkedHashMap<>();for(String key:Arrays.asList("zh","en"))if(guidance.containsKey(key))text.put(key,guidance.get(key));definition.put("guidance",text);}
             List<Map<String,Object>> children=new ArrayList<>();for(Object child:list(field.get("children")))children.add(map(child));
@@ -204,11 +206,12 @@ public final class DraftReviewGraph {
     private static Map<String,Object> catalogField(Map<String,Object> node,Context context) {
         List<Map<String,Object>> children=new ArrayList<>(),options=new ArrayList<>(),affects=new ArrayList<>();
         for(Object child:list(node.get("children")))if(input(map(child)))children.add(catalogField(map(child),context));
-        for(Object raw:list(node.get("options"))){Map<String,Object> option=map(raw);options.add(obj("value",option.get("value"),"label",label(text(option.get("labelZh")),text(option.get("labelEn")))));}
+        Map<String,Object> baseline=map(node.get("baselineDefinition")),baselineLabel=map(baseline.get("label"));
+        for(Object raw:list(baseline.containsKey("options")?baseline.get("options"):node.get("options"))){Map<String,Object> option=map(raw),optionLabel=map(option.get("label"));options.add(obj("value",option.get("value"),"label",optionLabel.isEmpty()?label(text(option.get("labelZh")),text(option.get("labelEn"))):LocalizedText.of(text(optionLabel.get("zhHans")),text(optionLabel.get("zhHant")),text(optionLabel.get("en")))));}
         for(Object raw:list(node.get("editTargets"))){Map<String,Object> target=map(raw);String document=context.document(text(target.get("docId")));if(document!=null)affects.add(obj("document",document,"clause",target.getOrDefault("text",""),"source",target.get("text")));}
-        Map<String,Object> result=obj("key",node.get("id"),"label",label(text(node.get("nameZh")),text(node.get("nameEn"))),"kind","record".equals(kind(node))?"object":kind(node),"optional",Boolean.TRUE.equals(node.get("optional")),"options",options,"columnFields",children,"affects",affects,"description",label(text(map(node.get("guidance")).get("zh")),text(map(node.get("guidance")).get("en"))));
+        Map<String,Object> result=obj("key",node.get("id"),"label",baselineLabel.isEmpty()?label(text(node.get("nameZh")),text(node.get("nameEn"))):LocalizedText.of(text(baselineLabel.get("zhHans")),text(baselineLabel.get("zhHant")),text(baselineLabel.get("en"))),"kind","record".equals(kind(node))?"object":kind(node),"optional",Boolean.TRUE.equals(node.get("optional")),"options",options,"columnFields",children,"affects",affects,"description",label(text(map(node.get("guidance")).get("zh")),text(map(node.get("guidance")).get("en"))));
         Object unit=map(node.get("type")).get("unit");if(unit==null)unit=node.get("unit");if(unit!=null)result.put("unit",unit);
-        for(String key:Arrays.asList("definitionScope","catalogAlignment"))if(node.containsKey(key))result.put(key,node.get(key));
+        for(String key:Arrays.asList("definitionScope","catalogAlignment","baselineDefinition"))if(node.containsKey(key))result.put(key,node.get(key));
         if("id".equals(text(node.get("id"))))result.put("hidden",false);
         return result;
     }
@@ -323,13 +326,14 @@ public final class DraftReviewGraph {
         plan.put("unresolved",issues);
     }
     private static final class Context {
-        final Map<String,Object> graph;final Map<String,Map<String,Object>> nodes=new LinkedHashMap<>();final Map<String,Object> answers=new LinkedHashMap<>();final List<Map<String,Object>> issues=new ArrayList<>();final Set<String> issueIds=new HashSet<>();
+        final Map<String,Object> graph;final Map<String,Map<String,Object>> nodes=new LinkedHashMap<>(),baselineDefinitions;final Map<String,Object> answers=new LinkedHashMap<>();final List<Map<String,Object>> issues=new ArrayList<>();final Set<String> issueIds=new HashSet<>();
         final Map<String,Set<String>> dependencies=new HashMap<>();final Map<String,String> editions=new HashMap<>();final Map<String,Boolean> selection=new HashMap<>();final boolean requireReviewedNodes;
         Context(Map<String,Object> graph,Map<String,Object> adopted){
             this(graph,adopted,false);
         }
         Context(Map<String,Object> graph,Map<String,Object> adopted,boolean requireReviewedNodes){
             this.graph=graph;this.requireReviewedNodes=requireReviewedNodes;for(Map<String,Object> node:nodes(graph))nodes.put(text(node.get("id")),node);
+            baselineDefinitions=DraftCatalogAlignment.confirmedDefinitions(graph);
             for(Object raw:list(graph.get("sources"))){Map<String,Object> source=map(raw);if("SCC".equalsIgnoreCase(text(source.get("fileKey"))))for(String key:Arrays.asList("id","docId","editionId"))if(!text(source.get(key)).isEmpty())editions.put(text(source.get(key)),text(source.get("id")));}
             for(Map<String,Object> node:nodes.values()){Set<String> refs=new HashSet<>();for(Object raw:branches(node)){Map<String,Object> branch=map(raw);if(!text(branch.get("scopeId")).isEmpty())refs.add(text(branch.get("scopeId")));for(Object term:list(branch.get("clauses")))refs.add(text(map(term).get("inputId")));}for(Object raw:list(node.get("editTargets"))){Map<String,Object> target=map(raw);for(String key:Arrays.asList("valueSourceId","listId","itemKey"))if(!text(target.get(key)).isEmpty())refs.add(text(target.get(key)));}dependencies.put(text(node.get("id")),refs);}
         }

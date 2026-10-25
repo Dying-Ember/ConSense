@@ -153,7 +153,7 @@ public class DraftAutomationService {
             if(cancelled(run.getId())||Thread.currentThread().isInterrupted()||System.currentTimeMillis()-run.getCreatedAt().toEpochMilli()>=LIFETIME)return true;
             if(processed++>=MAX_TASKS||modelCalls(receipts)>=MAX_CALLS)return true;
             guard(run,false);
-            phase(run.getId(),relations?"LINKING_GRAPH":"DISCOVERING_VARIABLES",text(task.get("fileName")),relations?"检查跨事项的同一事实、条件依赖及冲突；不凭同名自动合并。":"依据OER已识别的指导说明、修改标记及控制范围，归纳变量和原子项。");
+            phase(run.getId(),relations?"LINKING_GRAPH":"DISCOVERING_VARIABLES",text(task.get("fileName")),relations?"检查跨事项关系并建议对应固定变量，供人工核对；不凭同名自动合并。":"依据OER已识别的指导说明、修改标记及控制范围，归纳变量和原子项。");
             tx.executeWithoutResult(s->{item.setStatus("IN_FLIGHT");items.saveAndFlush(item);});
             Map<String,Object> receipt;
             try{

@@ -79,7 +79,7 @@ function locationUnavailable(reason: 'not_found' | 'unreadable') {
 const busy = ref(false), error = ref(''), dirty = ref(false), search = ref(''), formBase = ref(''), formOpen = ref(false)
 const saving = ref(false)
 const catalogOpen = ref(false), baselineCatalog = shallowRef<DraftCatalog>(), catalogLoading = ref(false), catalogError = ref('')
-const emptyCatalogDraft = () => ({ tab: 'matched', nodeId: '', baselineKey: '', missingKey: '', query: '', baselineQuery: '', missingQuery: '', reason: '', scope: '' })
+const emptyCatalogDraft = () => ({ tab: 'matched', nodeId: '', baselineKey: '', proposalVersion: '', missingKey: '', query: '', baselineQuery: '', missingQuery: '', reason: '', scope: '' })
 const catalogDraft = reactive<ReviewObject>(emptyCatalogDraft())
 async function openCatalog() {
   catalogOpen.value = !catalogOpen.value
@@ -95,10 +95,13 @@ function alignVariable(id: string, alignment: ReviewObject) {
   if (!node || !businessVariable(node) || !alignment.reason?.trim()) return
   if (alignment.status === 'matched') {
     const field = baselineVariables(baselineCatalog.value).find(item => item.baselineKey === alignment.baselineKey)
-    if (!field || !compatibleBaseline(node, field, state.value)) { error.value = t('变量类型、单位、选项或明细归属与基准不相容。', 'The type, unit, options or detail membership is incompatible with the baseline.'); return }
+    if (!field || !compatibleBaseline(node, field, state.value, alignment.scope ?? '')) { error.value = t('变量类型、单位、选项或明细归属与基准不相容。', 'The type, unit, options or detail membership is incompatible with the baseline.'); return }
     if (state.value.variables.some(item => item.id !== id && businessVariable(item) && item.catalogAlignment?.confirmed && item.catalogAlignment.baselineKey === alignment.baselineKey && (item.parentId ?? '') === (node.parentId ?? '') && (item.catalogAlignment.scope ?? '') === (alignment.scope ?? ''))) { error.value = t('已有变量对应同一基准和范围；请先核对并合并，或明确不同适用范围。', 'Another variable already uses this baseline and scope. Review and merge it, or identify the distinct scope.'); return }
   }
-  apply({ type: 'EDIT', id, values: { catalogAlignment: alignment } }); resetForm(); catalogDraft.tab = alignment.status; catalogDraft.reason = ''
+  const reviewed = { ...node.catalogAlignment, ...alignment }
+  if (alignment.status !== 'matched') { delete reviewed.baselineKey; delete reviewed.baselineVersion }
+  if (!alignment.scope) delete reviewed.scope
+  apply({ type: 'EDIT', id, values: { catalogAlignment: reviewed } }); resetForm(); catalogDraft.tab = alignment.status; catalogDraft.reason = ''
 }
 function excludeBaseline(key: string, reason: string | null) {
   if (!protect() || splitDirty.value || !baselineCatalog.value) return
