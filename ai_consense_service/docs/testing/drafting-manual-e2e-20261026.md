@@ -1,8 +1,8 @@
 # Drafting 人工全流程验证（2026-10-26）
 
-状态：进行中，batch108 候选已冻结并完成离线验证；正式切换、F 分支实际“更新目录及预览”及新导出验收由执行者继续留证。本文保留 A–E 的原始失败、旧最终文件及数字页码不符结果，不将本地回归、真实离线 renderer 或服务就绪写成全流程通过。
+状态：本轮前端人工路线到三份实际 Word 下载与目录验证已完成。F 分支经正式 batch108、实际“更新目录及预览”、第二次幂等点击、PDF预览、硬刷新重入、原生保存稿读回及独立目录/渲染核验后封存。本文保留 A–E 的原始失败、旧最终文件及53项旧页码不符；2项业务未知、2个可选override保持模板默认、4个不完整TOC标题书签UNKNOWN、heading-flow UNKNOWN及元数据缺口、原有兼容性红项分别保留。该结果不代表模型语义准确率、法律/来源完整性或原生Word分页认证。
 
-当前续测环境阻断：`F-EGO-SPACE-LOST`（2026-10-26 04:27:13 +08:00）记录原Ego TaskSpace4返回 `task space not found: 4`，枚举仅有用户space1。执行者暂停部署和浏览器写入，等待用户答复是否转用当前应用内浏览器；未创建新任务空间。此为环境阻断，不认定Drafting产品失败。详细报告/CSV已按该动作刷新为执行中快照，F实际按钮和新导出仍pending。
+历史浏览器环境阻断：`F-EGO-SPACE-LOST`（2026-10-26 04:27:13 +08:00）记录原Ego TaskSpace4返回 `task space not found: 4`，枚举仅有用户space1。用户随后明确允许切换IAB；`cua.getState` 和按URL `getTab` 各发生约300秒工具连接超时，回执转录值分别300.0103/300.0194秒，未独立计时。`js_reset`成功后选中专用tab2恢复，用户tab1保持不动。首次实际目录请求期间另有3.077秒的selector等待工具失败（请求timeout45000ms、产品仍RUNNING、未重复点击），随后同一请求成功。两次连接超时、短等待失败及环境恢复分别保留，不计为Drafting产品失败，也不覆盖原13项FAILED。
 
 ## 范围与输入
 
@@ -21,7 +21,7 @@
 |C|`FORK-C` 从 `B-GENERATE` 继续，保留值和未知项|重开人工页时脚本仅等可见、未等启用，保留该失败后等候就绪。机械修复后继续生成及补充 Bill 信息。|
 |D|阅读失败期间使用独立保存正文编辑入口|保存 SCC 24 处及 SCT 3 处人工修订。SCT 原文前导空白在编辑器中被隐藏，首次严格文字比对失败保留；随后记录实际原生块和可见原文再操作。|
 |E|batch107 切换后从阅读失败处继续|`E-RETRY-READING` 截图 CDP 超时保留；独立只读记录显示 SCT 阅读正文长度 32233、`readingErrors=[]`。SCC11.305 编校为 `Not used.` 后保存成功；刷新后首次点击尚 disabled 的第 4 步失败，等控件启用后重新进入并实际下载三份 Word。目录及渲染核验另记。|
-|F|batch108 及显式“更新目录及预览”控制|已准备；实际按钮、子修订、正式预览及 `deliverables/final-verified/` 新导出尚待执行者通知后封存。旧 `deliverables/final/` 保留。|
+|F|batch108 及显式“更新目录及预览”控制|实际首次更新产生新SCC修订，第二次updated=false且同文稿；PDF预览59页、硬刷新重入阅读及三Word实际下载通过，目录92/92独立核验。新输出位于 `deliverables/final-verified/`，旧 `deliverables/final/` 保留；最后动作 `F-FINAL-VERIFICATION` 附独立证据。|
 
 `B-SAVE-2` 原始日志误标 `branch=A`；报告按执行者确认归 B，仍保留原始 A 和更正说明。任何后续恢复均不覆盖原始 `FAILED`。日志 `effect` 是执行者的现象声明，独立核验另外列示。
 
@@ -93,12 +93,15 @@ E 分支旧最终 SCC 为59物理页、正文末页56；独立按完整“编号
 |浏览器阅读恢复|SCT 完整阅读正文长度 32233、无阅读错误|支持该时点的阅读恢复；最终编辑/保存/导出仍按后续证据核对。|
 |最终 Word 下载|E 分支经前端实际下载 NTT/SCT/SCC；清单及本地 SHA 见下表|支持实际下载及文件身份；页数、逐项内容与版式另行核对。|
 |旧最终渲染与内容|NTT12/SCT23/SCC59，共94物理页已复核；旧SCC数字目录53项不符|旧文件保留，不以新离线结果改写历史；全分页/Word/招标或法律验收不在该结果内。|
+|F正式按钮及幂等|首次updated=true，新修订96a9235a；第二次updated=false、92项0改/92不变、文稿DTO完全相同|实际IAB操作/正式API证据，不从updated=false单独推导隐藏数据库零写入。|
+|F硬刷新/阅读/原生读回|SCC阅读长度167621，无loading/readingErrors；三稿native GET均200且metadata/实际下载/GET字节同|API可见12业务字段不变，变量与任务表的保全另看21表快照；不替代来源确认。|
+|F最终目录及视觉证据|SCC59物理页、目录92/92正确、0不符/未定位；总55481原生节点仅53个w:t数字缓存不同|SCC目录1–3新作原尺寸复核，4–59共56页精确pixel相同复用；NTT12/SCT23同字节复用，94物理页有视觉证据覆盖，并非本次全部重开。|
 
 batch107 候选 `consense-drafting-source-toc107.jar` SHA-256 为 `ebaa8ddce511adb0a85cc43bc3290959ae559b74ac5c31b426bbff8d2f0d8faa`；保留 source106 已核对的两类方法级覆盖，仅增加冻结的 Editor/Finalizer class family。隔离编译 target 8/class major 52，未编译其他脏源码。
 
 第一次 batch107 preflight 在停止旧进程前因 PowerShell 将 ISO 时间自动转换为 `DateTime`、随后文化相关字符串导致 `DateTimeOffset.Parse` 失败；修正类型处理后重新执行。`runtime-batch107/first-preflight-failure.json` 为执行者后补转录，未取得原始独立失败日志。该脚本失败与产品生成/阅读缺陷分开，不作为一次产品失败，也不冒充一次已完成切换。
 
-batch108 候选 `consense-drafting-toc108.jar` SHA-256 为 `a3510ab3658cd65b74573e4199cc7c930f91f22ab10aaa992d708c2504a9774e`。固定107基包只覆盖两TOC类族和各追加一个refreshToc的Service/Controller，原190/38个方法、字段、CP前缀和class元数据字节完全保留。两TOC类族等于真实renderer所用class；route等于7项契约测试所用class。实际候选 `-Xverify:all` reflection通过，未初始化类或调用业务。构建/验证不等于已部署，F分支及正式保全另行封存。
+batch108 候选 `consense-drafting-toc108.jar` SHA-256 为 `a3510ab3658cd65b74573e4199cc7c930f91f22ab10aaa992d708c2504a9774e`。固定107基包只覆盖两TOC类族和各追加一个refreshToc的Service/Controller，原190/38个方法、字段、CP前缀和class元数据字节完全保留。两TOC类族等于真实renderer所用class；route等于7项契约测试所用class。实际候选 `-Xverify:all` reflection通过，未初始化类或调用业务。正式切换由独立deployment回执确认：27772→16212，新creationFiletime `134374426219933485`；切换前后21张选定表均2959行，TSV逐字节相同，SHA-256 `03756979eda60b03871e881828d508409620d5e76098480b2b5a14a43fec1838`。
 
 ## E 分支旧最终 Word 下载身份
 
@@ -110,7 +113,29 @@ batch108 候选 `consense-drafting-toc108.jar` SHA-256 为 `a3510ab3658cd65b7457
 |SCT.docx|127661|`485d5736600ffb253842902bfd00e56c2e9e64b9fd13babb9d291033fb1c40d7`|2026-10-26 03:29:29.867|
 |SCC.docx|258767|`8e8aeefa41b13b012c899d8c9401b657fa2aad362617c0162fbf809e723c38b7`|2026-10-26 03:29:34.595|
 
-上述是实际旧下载身份。独立核对随后确认旧SCC目录页码39正确/53不符/0未定位，保留其失败；批量修订和来源范围按证据分别核验。F分支新下载使用 `deliverables/final-verified/`，等待实际动作和独立QA后封存，不能仅由hash、已保存提示或离线成功推导通过。SCC物理41页的SCC16.301标题与后页正文分离仍属未验收项；稀疏空白、原件#six/#twelve和旧模板引用保留专业/来源复核边界。
+上述是实际旧下载身份。独立核对随后确认旧SCC目录页码39正确/53不符/0未定位，保留其失败；批量修订和来源范围按证据分别核验。旧内容receipt严格期望 `Not used`，实际为E分支人工补句点的 `Not used.`，导致同一标题及目录的两个严格比对差异；原红项保留，另有标点等价审查，不修改旧期望来抹除。SCC物理41页的SCC16.301标题与后页正文分离仍属未验收项；稀疏空白、原件#six/#twelve和旧模板引用保留专业/来源复核边界。
+
+## F 分支正式新修订、实际下载及独立核验
+
+首次实际更新产生SCC修订 `96a9235a-eb7e-4cee-8c9d-ed2fccfa9a78`，本次输入的已保存稿为 `e3609dea-d3ed-47be-aae9-050ec491e95c`。实际响应TOC PASS：92目标＝53数字缓存更新＋39不变，2114原生点两遍稳定；heading仍UNKNOWN/244注册/repair0/mutation0，原reason保留。正式DOCX与离线真实renderer结果同SHA；正式采用PDF hash `408a2fb7cf20f571015d33084f6de7d6729cfb65f1b2cfbd33c6f30fb95e6b08`与离线PDF hash分别记录。
+
+第二次真实点击返回updated=false、同revision/hash、整个document DTO相同，TOC92目标0改/92不变。正式newrevision PDF请求返回200 `application/pdf`，前端显示59页；随后实际 `tab.reload`、等待第4步启用并重新进入SCC，阅读正文167621字符、无loading或readingErrors，仍显示已保存文稿。
+
+|新Word|字节|SHA-256|实际IAB下载上海时间|
+|---|---:|---|---|
+|NTT.docx|65521|`beffcd65c1e8d955f8442659073a946f1901a858c6f63971f92f3e0d7028349b`|2026-10-26 07:04:51.743|
+|SCT.docx|127661|`485d5736600ffb253842902bfd00e56c2e9e64b9fd13babb9d291033fb1c40d7`|2026-10-26 07:04:57.321|
+|SCC.docx|258722|`506baa7624333866c1200eaef47b158565cfc12fb4f163086ee799d5b5b59c51`|2026-10-26 07:05:02.413|
+
+下载位于 `deliverables/final-verified/`，三份浏览器Downloads原文件与证据副本逐字节相同。按after-reload对象的确切revisionId对三稿执行native source GET，均200且stale=false，metadata hash、实际下载及原生保存稿字节三者完全一致。NTT/SCT与旧final同字节；新SCC只改53个PAGEREF数字缓存。
+
+独立currentGET比较确认NTT/SCT整份DTO不变；SCC仅revisionId/content/docxSha256/pdfSha256/blocks/nativeLayout改变。其余12字段完全相同：fileKey、title、generated、snapshotId、ruleVersion、stale、contentEdited、sourceSha256、fieldStatus、fieldImpacts、unresolved、renderProfileHash。1927blocks中1874个完全相同，53个只变行末页码及正确textHash；nativeLayout只改两处artifact hash镜像。API未暴露的字段不由该DTO比较推导。
+
+正式操作后的21表COMPLETE快照为2961行，TSV SHA-256 `8471be8eaace2f61ee6d8417c5c616f62f74088c89f299ca22606256343abf85`。相对切换前2959行，仅draft_document摘要更新（12行不变）、draft_artifact31→32、draft_pdf_artifact24→25；净增两行分别为一个DOCX artifact及一个PDF artifact。其余18张选定表摘要完全相同，包括draft_variable、graph输入/自动/提取表、qwen_generation_action、Vetting及Advice记录；全部活动guard保持0。快照PLAN排除的source/parse/canonical与graph大正文不在保全声明内。读库采集为已审SELECT-only并rollback，H2虽请求readOnly但连接报告false，不能宣称服务器强制只读。
+
+`frontend-final-verified-review/final-qa-receipt.json` 独立核验新SCC59物理页、正文打印1–56、完整编号＋标题定位92/92正确、0不符/未定位。原生XML共55481节点，仅53个w:t数字缓存不同，其余文字、属性、拓扑及包部件保持。视觉证据为新看目录1–3页，正文4–59共56页精确pixel相同复用；NTT12/SCT23页按同字节既有原尺寸证据复用，三稿共94物理页有视觉证据覆盖。本次没有重开全部94页。
+
+按 `oracle/manual-values-reviewed.json`，业务未知只有2项：`foundationIncluded` 为 `unresolved_current_independent_meaning`，`contractorLegalForm` 为 `intentionally_unknown`；`advanceRepaymentMonths`、`advanceRepaymentFirstCertificate` 为2个 `optional_unchanged`，保持six/seventh模板默认，不归为UNKNOWN。历史QA中“four root-recorded UNKNOWN”声明照留，此处按oracle明确纠正分类。另有4个TOC标题书签不完整UNKNOWN，以及heading-flow UNKNOWN与CLEAR/removed元数据/沿袭缺口，均未因数字目录PASS变成已解决。外部Specification及采用边界、三个NTT旧SCC引用和完整SIM14 NTT13保留，未强行插入18个Specification区域或3个设计scope。原 `DraftNativeStaticInlineCompatibilityTest` 红项及所有历史FAILED继续保留。
 
 ## 证据入口与交付边界
 
@@ -125,6 +150,8 @@ batch108 候选 `consense-drafting-toc108.jar` SHA-256 为 `a3510ab3658cd65b7457
 - `toc-page-investigation/`、`toc-page-regression/`：正式当前artifact只读提取、首遍UNKNOWN、页脚定位、冻结50项及真实renderer两遍/独立cache-only/PDF目录核验。
 - `toc-refresh-regression/`、`toc-refresh-ui-regression/`：新增显式已保存修订动作的源/方法graft、7项服务测试、10项前端测试及HEAD精确patch发布候选。Service/Controller/API完整dirty文件不直接stage。
 - `runtime-batch108/`：固定107＋两TOC类族＋两个追加方法的候选、只读包验证及root控制的正式切换/保全。
+- `runtime-batch108/current-get-business-preservation.json`、`formal-idempotent-and-exports-verification.json`、`native-final-readback.json`、`business-ui-preservation-comparison.json`：正式更新后的独立DTO、幂等/下载/网络、原生稿及21表差异核验。
+- `frontend-final-verified-review/final-qa-receipt.json`、`layout/SCC-v2/`：实际新下载的92项目录、原生缓存差异、原尺寸3页新看及56页pixel复用证据。
 - `owned-files.json`（历史9项）、`owned-files108.json`（历史11项）、`owned-files-final108.json`（最终17项：9产品/8测试）：保留原清单，最终清单区分发布候选与工作文件原始hash；本文为额外测试文档。
 
-详细报告及 CSV 尚未封存。最终导出、目录标题/页码、人工修订保留、未知项和版式检查完成后，再以同一原始日志快照记录最终文件哈希及结论。模型、提示词、语义识别质量及无关 OER/Vetting/Advisory 工作不在本轮修复范围。
+详细report.md及39列UTF-8 BOM operations.csv以最后 `F-FINAL-VERIFICATION` 为止的同一281动作日志快照封存，13项原始FAILED、环境阻断、两次约300秒连接超时、3.077秒工具等待失败及恢复均保留；最后动作附independentVerification PASS及独立证据，不由effect推导通过。模型、提示词、语义识别准确率及无关OER/Vetting/Advisory工作不在本轮修复与验收范围。
