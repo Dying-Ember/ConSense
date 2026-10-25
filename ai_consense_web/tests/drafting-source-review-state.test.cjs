@@ -1,8 +1,8 @@
 const assert = require('node:assert/strict')
 const path = require('node:path')
 const { loadTypeScript } = require('./helpers/load-typescript.cjs')
-const { emptyReviewState, nativeAnchor, nativeRangeAnchor, observedAnchor, appendNativeSelection, reviewProblem } = loadTypeScript(path.join(__dirname, '../src/drafting/source-review-state.ts'))
-const { createReviewReducer } = loadTypeScript(path.join(__dirname, '../src/drafting/source-review/reducer.js'), { globals: { structuredClone } })
+const { emptyReviewState, nativeAnchor, nativeRangeAnchor, observedAnchor, appendNativeSelection, reviewProblem } = loadTypeScript(path.join(__dirname, '../src/drafting/source-review-state.ts'), { dependencies: { './source-review/value-dependencies.js': './source-review/value-dependencies.js' } })
+const { createReviewReducer } = loadTypeScript(path.join(__dirname, '../src/drafting/source-review/reducer.js'), { globals: { structuredClone }, dependencies: { './value-dependencies.js': './value-dependencies.js' } })
 const source = { id: '41', docId: 'scc-word', fileKey: 'SCC', format: 'docx', sourceSha256: 'a'.repeat(64), paragraphs: [{ id: 'p:1', text: '甲\t乙\n😀 retain', paragraphSha256: 'b'.repeat(64), sourceSha256: 'a'.repeat(64) }], blocks: [] }
 const anchor = nativeAnchor(source, 'p:1', 2, 6)
 assert.equal(anchor.docId, '41', 'Persist canonical source ID, not the SCC display alias')
@@ -50,6 +50,6 @@ assert.equal(reducer.reduce(state, { type: 'MERGE', id: 'word-question', targetI
 const split = reducer.reduce(state, { type: 'SPLIT', id: 'word-question', mode: 'unknown', items: [{ nameZh: 'A', nameEn: 'A', sourceAnchors: [anchor] }, { nameZh: 'B', nameEn: 'B', sourceAnchors: [nativeAnchor(source, 'p:1', 7, 13)] }] })
 assert.equal(split.variables[0].status, 'excluded')
 assert.equal(split.variables[2].sourceAnchors[0].native.expectedText, '乙\n😀')
-assert.match(reviewProblem(split.variables[2], split), /needs review/)
+assert.match(reviewProblem(split.variables[2], split), /split variables/)
 assert.equal(state.variables[0].status, 'confirmed', 'Reducing source work cannot mutate a previous graph revision')
 console.log('PASS: source-review anchors retain exact native text and hashes; PDF observations cannot authorize Word edits; canonical SCC editions remain isolated through link, merge and split')

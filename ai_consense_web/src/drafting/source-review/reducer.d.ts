@@ -6,4 +6,5 @@ export function createReviewReducer(data: ReviewObject): {
   isolatedSources(state: ReviewState): boolean
   mergeProblem(state: ReviewState, id: string, targetId: string): MergeProblem | null
   mergeMany(state: ReviewState, ids: string[], targetId: string, at?: string, reason?: string): { state: ReviewState; problem: MergeProblem | null }
+  splitProblem(state: ReviewState, id: string, items: ReviewObject[]): string | null
 }

@@ -1,3 +1,4 @@
+import { isSourceCheck, valueDependencies } from './value-dependencies.js';
 function create() {
   'use strict';
 
@@ -28,9 +29,10 @@ function create() {
         referenceOnly: false, needsRebind: false, unresolved: false, ...details,
         self: from === to, cyclic: false,
         missing: !input || !output, excluded: input?.status === 'excluded' || output?.status === 'excluded',
-        incompatible: new Set([...docs].map(edition).filter(Boolean)).size > 1 };
+        incompatible: new Set([...docs].map(edition).filter(Boolean)).size > 1,
+        invalidSource: ['condition', 'scope', 'value', 'join', 'match'].includes(kind) && isSourceCheck(input) };
       edges.push(edge);
-      for (const flag of ['missing', 'excluded', 'incompatible', 'needsRebind', 'unresolved']) {
+      for (const flag of ['missing', 'excluded', 'incompatible', 'needsRebind', 'unresolved', 'invalidSource']) {
         if (edge[flag]) warnings.push({ kind: flag, ownerId: owner.id, edgeIndex: edges.length - 1 });
       }
     };
@@ -40,6 +42,7 @@ function create() {
       for (const id of node.replacedBy || []) add(node, node.id, id, 'replaced-by', { referenceOnly: true });
       for (const id of node.relatedInputIds || []) add(node, id, node.id, 'reference', { referenceOnly: true });
       const correction = node.correction;
+      if (node.splitReview) for (const id of node.splitReview.inputIds || []) add(node, id, node.id, 'split-review', { referenceOnly: true, mode: node.splitReview.mode, unresolved: !['all', 'any'].includes(node.splitReview.mode) });
       if (correction?.kind === 'split') {
         for (const [predicateIndex, id] of (correction.inputIds || []).entries()) {
           add(node, id, node.id, 'condition', { predicateIndex, mode: correction.mode, operator: 'yes',
@@ -63,29 +66,14 @@ function create() {
           unresolved: Boolean(target.branchId && (!branch || branch.mode === 'unknown')) };
         if (target.valueSourceId) add(node, target.valueSourceId, node.id, 'value', { ...details, valueMode: target.valueMode || 'single' });
         if (target.valueMode === 'join' && target.listId) add(node, target.listId, node.id, 'join', { ...details, separator: target.separator });
+        if (target.itemKey) add(node, target.itemKey, node.id, 'match', details);
       }
     }
-    const adjacency = new Map(), reachable = new Map();
-    const dependency = edge => !edge.self && ['condition', 'value'].includes(edge.kind);
-    for (const edge of edges.filter(dependency)) {
-      if (!adjacency.has(edge.from)) adjacency.set(edge.from, new Set());
-      adjacency.get(edge.from).add(edge.to);
-    }
-    const reaches = id => {
-      if (!reachable.has(id)) {
-        const seen = new Set(), pending = [...(adjacency.get(id) || [])];
-        while (pending.length) {
-          const next = pending.pop();
-          if (seen.has(next)) continue;
-          seen.add(next);
-          for (const target of adjacency.get(next) || []) if (!seen.has(target)) pending.push(target);
-        }
-        reachable.set(id, seen);
-      }
-      return reachable.get(id);
-    };
+    const dependencies = valueDependencies(state);
     edges.forEach((edge, edgeIndex) => {
-      edge.cyclic = dependency(edge) && reaches(edge.to).has(edge.from);
+      const dependency = dependencies.find(item => item.from === edge.from && item.to === edge.to && item.kind === edge.kind);
+      edge.valueDependency = Boolean(dependency);
+      edge.cyclic = Boolean(dependency?.cyclic);
       if (edge.cyclic) warnings.push({ kind: 'cycle', ownerId: edge.ownerId, edgeIndex });
     });
     // shortcut: declared cycles are shown for review; this projection does not evaluate rules.
@@ -104,9 +92,9 @@ function create() {
   }
 
   function impact(graph, id) {
-    // Reachability shows possible linked changes; it does not evaluate condition answers.
-    const eligible = graph.edges.filter(edge => ['condition', 'scope', 'value', 'join'].includes(edge.kind) &&
-      !['needsRebind', 'excluded', 'missing', 'incompatible', 'unresolved', 'referenceOnly'].some(flag => edge[flag]));
+    // Follow answer derivations; amendment links select actions without changing another answer.
+    const eligible = graph.edges.filter(edge => edge.valueDependency &&
+      !['needsRebind', 'excluded', 'missing', 'incompatible', 'unresolved', 'referenceOnly', 'cyclic', 'invalidSource'].some(flag => edge[flag]));
     const walk = direction => {
       const from = direction === 'downstream' ? 'from' : 'to', to = from === 'from' ? 'to' : 'from';
       const adjacency = new Map(), visited = new Set([id]), links = new Set(), pending = [id];

@@ -3,7 +3,7 @@ const assert = require('node:assert/strict'), path = require('node:path'), vue =
 const { loadVue } = require('./helpers/load-vue.cjs')
 const { renderer, find, text, settle } = require('./helpers/render-controls.cjs')
 const { loadTypeScript } = require('./helpers/load-typescript.cjs')
-const { createReviewReducer } = loadTypeScript(path.join(__dirname, '../src/drafting/source-review/reducer.js'), { globals: { structuredClone } })
+const { createReviewReducer } = loadTypeScript(path.join(__dirname, '../src/drafting/source-review/reducer.js'), { globals: { structuredClone }, dependencies: { './value-dependencies.js': './value-dependencies.js' } })
 const copy = value => JSON.parse(JSON.stringify(value))
 const sources = ['NTT','SCT'].map((fileKey,index) => ({ id: String(41+index), docId: fileKey.toLowerCase(), editionId: fileKey+'-TEST', fileKey, fileName: 'SYNTHETIC '+fileKey+'.docx', format: 'docx', sourceSha256: String(index+1).repeat(64), evidenceStatus: 'bound', canEdit: true, parseStatus: 'PARSED' }))
 const target = (docId, quote, action='keep') => ({ docId, sourceSha256:sources.find(source=>source.id===docId).sourceSha256, text:quote, action, native:{ paragraphId:'p-'+quote,paragraphSha256:'f'.repeat(64),start:0,end:quote.length,expectedText:quote } })
@@ -22,6 +22,7 @@ function controls(root) {
 const Component=loadVue(path.join(__dirname,'../src/components/DraftingQuestionBatch.vue'),{globals:{structuredClone}}).default
 async function prerequisiteSearchTest() {
   const state=fixture(),duration=node('PRIVATE-DURATION','Contract duration in months');duration.nameZh='合约工期（月）';duration.type.kind='number';state.variables.push(duration)
+  state.variables.push({...node('PRIVATE-MANUAL-SEED','Edited source check'),definitionKind:'source_seed',manual:true})
   state.variables.find(item=>item.id==='PRIVATE-ENVELOPE').nameZh='双信封'
   state.variables.find(item=>item.id==='PRIVATE-THIRD').status='excluded'
   const props=vue.reactive({state,ids:['PRIVATE-MAIN','PRIVATE-DONOR'],sources,locale:'en'}),drafts=[],events=[],original=copy(state),key='PRIVATE-DONOR:0:0'
@@ -32,6 +33,7 @@ async function prerequisiteSearchTest() {
   await c.model('data-branch-route','keep','PRIVATE-DONOR:0:yes');await c.model('data-branch-route','delete','PRIVATE-DONOR:0:no')
   await c.click('data-branch-add-prerequisite','PRIVATE-DONOR:0')
   assert.equal(option('PRIVATE-MAIN'),undefined);assert.equal(option('PRIVATE-DONOR'),undefined);assert.equal(option('PRIVATE-THIRD'),undefined)
+  assert.equal(option('PRIVATE-MANUAL-SEED'),undefined,'Editing a source seed cannot make it a condition answer')
   await search('双信封');assert(option('PRIVATE-ENVELOPE'));assert.equal(option('PRIVATE-DURATION'),undefined)
   await option('PRIVATE-ENVELOPE').props.onClick();await settle()
   assert.equal(drafts.at(-1).assignments['PRIVATE-DONOR:0'].extra[0].operator,'yes','Selecting a Boolean retains the existing operator reset')
@@ -109,12 +111,12 @@ async function oldAnswerAndChoiceTest() {
   assert.equal(migrated.clauses[1].inputId,'PRIVATE-MAIN');assert.equal(migrated.clauses[1].operator,'yes','The old boolean predicate is translated through the explicit inverse mapping')
   assert.equal(migrated.clauses[2].inputId,'PRIVATE-ENVELOPE','A genuinely separate two-envelope prerequisite remains separate')
   app.unmount()
-  const blocked=fixture();blocked.variables[4].role.kind='input';blocked.variables[4].type.kind='boolean';blocked.variables[4].manual=true
+  const blocked=fixture();blocked.variables[4].role.kind='input';blocked.variables[4].type.kind='boolean';blocked.variables[4].manual=true;blocked.variables[4].definitionKind='discovered'
   const blockedHost=renderer(),blockedApp=blockedHost.createApp({render:()=>vue.h(Component,{state:blocked,ids:['PRIVATE-MAIN','PRIVATE-DONOR'],sources,locale:'en'})});blockedApp.mount(blockedHost.root);await settle();assert.match(text(controls(blockedHost.root).get('data-branch-old-inputs')),/original treatment rules do not clearly separate/,'Rules without a clear self route remain explicit blockers instead of being overwritten');blockedApp.unmount()
-  const legacy=fixture();legacy.variables[4].role.kind='input';legacy.variables[4].type.kind='boolean';legacy.variables[4].manual=true;legacy.variables[4].correction={kind:'rule',mode:'all',clauses:[{inputId:'PRIVATE-DONOR',operator:'no'}]}
+  const legacy=fixture();legacy.variables[4].role.kind='input';legacy.variables[4].type.kind='boolean';legacy.variables[4].manual=true;legacy.variables[4].definitionKind='discovered';legacy.variables[4].correction={kind:'rule',mode:'all',clauses:[{inputId:'PRIVATE-DONOR',operator:'no'}]}
   const legacyHost=renderer(),legacyApp=legacyHost.createApp({render:()=>vue.h(Component,{state:legacy,ids:['PRIVATE-MAIN','PRIVATE-DONOR'],sources,locale:'en'})});legacyApp.mount(legacyHost.root);await settle();assert.match(text(controls(legacyHost.root).get('data-branch-old-inputs')),/original treatment rules do not clearly separate/,'A legacy top-level rule stays reviewable without crashing or silently rewriting it');legacyApp.unmount()
   const paper=fixture(),paperOld=paper.variables[4]
-  paperOld.role.kind='input';paperOld.type.kind='boolean';paperOld.manual=true
+  paperOld.role.kind='input';paperOld.type.kind='boolean';paperOld.manual=true;paperOld.definitionKind='discovered'
   paperOld.correction.branches[0].clauses=[{inputId:paperOld.id,operator:'no'}, {inputId:'PRIVATE-ENVELOPE',operator:'yes'}]
   paperOld.editTargets.forEach(target=>target.branchId='PRIVATE-OLD-BRANCH');delete paperOld.editTargets[2].native
   const originalPaperRule=copy(paperOld.correction),paperEvents=[],paperHost=renderer(),paperApp=paperHost.createApp({render:()=>vue.h(Component,{state:paper,ids:['PRIVATE-MAIN',paperOld.id],sources,locale:'en',onBranches:actions=>paperEvents.push(actions)})});paperApp.mount(paperHost.root);await settle();const paperControls=controls(paperHost.root)

@@ -2,6 +2,7 @@
 import { computed, reactive, ref, toRaw, watch } from 'vue'
 import { createReviewReducer } from '@/drafting/source-review/reducer.js'
 import { targetSpans } from '@/drafting/source-review-state'
+import { isSourceCheck } from '@/drafting/source-review/value-dependencies.js'
 import type { ReviewObject, ReviewSource, ReviewState, ReviewVariable } from '@/drafting/source-review-types'
 import DraftingQuestionPicker from './DraftingQuestionPicker.vue'
 
@@ -9,10 +10,10 @@ const props = defineProps<{ state: ReviewState; ids: string[]; sources: ReviewSo
 const emit = defineEmits<{ merge: [ids: string[], targetId: string]; branches: [actions: ReviewObject[], targetId: string]; locate: [id: string]; draft: [value: ReviewObject] }>()
 const t = (zh: string, en: string) => props.locale === 'en' ? en : zh
 const copy = <T,>(value: T): T => JSON.parse(JSON.stringify(value))
-const check = (item: ReviewVariable) => item.role.kind === 'verification' || item.definitionKind === 'source_seed' && !item.manual
+const check = isSourceCheck
 function label(item?: ReviewVariable) {
   if (!item) return t('待核对的资料', 'Variable to review')
-  if (item.definitionKind === 'source_seed' && (!item.manual || /guidance:[a-f0-9]{16,}/i.test(item.nameZh + ' ' + item.nameEn))) return t('来源核对：', 'Source check: ') + (item.sourceAnchors[0]?.text ?? t('查看原文', 'See source'))
+  if (item.definitionKind === 'source_seed') return t('来源核对：', 'Source check: ') + (item.sourceAnchors[0]?.text ?? t('查看原文', 'See source'))
   return props.locale === 'en' ? item.nameEn || item.nameZh : item.nameZh || item.nameEn
 }
 const items = computed(() => props.ids.flatMap(id => props.state.variables.find(item => item.id === id && item.status !== 'excluded') ?? []))
@@ -75,7 +76,8 @@ const mergeReason = computed(() => {
     MERGE_FIXED_VALUE_MISMATCH: t('固定内容不同，需分别核对。', 'Fixed wording differs; review it separately.'),
     MERGE_RULE_CONFLICT: t('两项都有处理规则，不能拍扁；请在“同一变量的分支处理”逐处归属。', 'Both items have rules. Assign their passages in branch handling before considering a duplicate merge.'),
     MERGE_SOURCE_EDITION_CONFLICT: t('包含不同版次的SCC，不能共用一套修改。', 'Different SCC editions cannot share amendments.'),
-    MERGE_SOURCE_SCOPE_CONFLICT: t('相关条件或取值跨越不相容来源版次。', 'Related conditions or values cross incompatible source editions.')
+    MERGE_SOURCE_SCOPE_CONFLICT: t('相关条件或取值跨越不相容来源版次。', 'Related conditions or values cross incompatible source editions.'),
+    MERGE_DEPENDENCY_CYCLE: t('合并后会产生派生答案循环；请先核对派生规则及资料归属。', 'The merge would create a derived-answer cycle. Review the value rules and record membership first.')
   }
   return `${label(props.state.variables.find(item => item.id === issue.id))}：${reasons[issue.code] ?? t('选择已变化，请重新勾选核对。', 'The selection changed; select and review it again.')}`
 })

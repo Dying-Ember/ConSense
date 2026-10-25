@@ -124,11 +124,14 @@ public final class DraftAutomaticDiscovery {
 
     public static Map<String,Object> finish(Map<String,Object> baseGraph,Plan plan,List<Map<String,Object>> receipts) {
         List<Map<String,Object>> nodes=receiptNodes(plan,receipts);Map<String,Object> graph=new LinkedHashMap<>(JsonUtils.readMap(JsonUtils.write(baseGraph))),state=state(graph);
-        List<Object> existing=new ArrayList<>(list(state.get("variables")));Set<String> ids=new HashSet<>();for(Object raw:existing)ids.add(text(map(raw).get("id")));for(Map<String,Object> node:nodes)if(ids.add(text(node.get("id"))))existing.add(node);state.put("variables",existing);
+        List<Object> existing=new ArrayList<>(list(state.get("variables")));
         Map<String,Map<String,Object>> byTask=receiptsByTask(receipts);List<Object> requirements=new ArrayList<>(),relations=new ArrayList<>(),issues=new ArrayList<>();int scanned=0,partial=0,failed=0,unexecuted=0;
         for(Map<String,Object> task:plan.tasks){Map<String,Object> receipt=byTask.get(text(task.get("taskId")));if(receipt==null){unexecuted++;continue;}requirements.addAll(list(receipt.get("requirements")));issues.addAll(list(receipt.get("issues")));String status=text(receipt.get("status"));if(Arrays.asList("completed","reviewed_no_requirement").contains(status))scanned++;else if("partial".equals(status))partial++;else failed++;}
         int relationPending=0;Set<String> relationKeys=new HashSet<>();for(Map<String,Object> task:planRelations(plan,receipts)){Map<String,Object> receipt=byTask.get(text(task.get("taskId")));if(receipt==null||!"completed".equals(receipt.get("status")))relationPending++;if(receipt!=null)for(Object raw:list(receipt.get("relations"))){Map<String,Object> relation=map(raw);String key=relation.get("fromId")+"|"+relation.get("toId")+"|"+relation.get("kind");if(relationKeys.add(key))relations.add(relation);}}
-        state.put("requirements",requirements);state.put("relationProposals",relations);state.put("blank",existing.isEmpty());
+        Map<String,String> remapped=isolateChangedDefinitions(existing,plan,byTask,issues);
+        Set<String> ids=new HashSet<>();for(Object raw:existing)ids.add(text(map(raw).get("id")));
+        for(Map<String,Object> proposed:nodes){Map<String,Object> node=remappedNode(proposed,remapped);if(remapped.containsKey(text(proposed.get("id")))){node.put("status","pending");node.put("manual",false);node.put("reason","重新识别的定义与已有记录不同，请分别核对 / Reidentified definitions differ from existing records; review this candidate separately.");}if(ids.add(text(node.get("id"))))existing.add(node);}
+        state.put("variables",existing);state.put("requirements",remappedReferences(requirements,remapped));state.put("relationProposals",remappedReferences(relations,remapped));state.put("blank",existing.isEmpty());
         Map<String,Object> coverage=JsonUtils.readMap(JsonUtils.write(plan.coverage));
         int reviewedMembers=0,partialMembers=0,unexecutedMembers=0,notListedMembers=0,unresolvedOer=0;
         for(Object source:list(coverage.get("sources"))) {
@@ -138,13 +141,45 @@ public final class DraftAutomaticDiscovery {
             }
         }
         coverage.put("scannedMembers",reviewedMembers);coverage.put("partialMembers",partialMembers);coverage.put("unexecutedMembers",unexecutedMembers);coverage.put("membersNotListedAsRequirements",notListedMembers);coverage.put("completedRequirementTasks",scanned);coverage.put("partialRequirementTasks",partial);coverage.put("failedRequirementTasks",failed);coverage.put("unexecutedRequirementTasks",unexecuted);coverage.put("unresolvedOerObservations",unresolvedOer);coverage.put("relationTasksUnresolved",relationPending);coverage.put("requirementCount",requirements.size());coverage.put("candidateCount",nodes.size());
-        boolean complete=partial==0&&failed==0&&unexecuted==0&&relationPending==0&&unresolvedOer==0&&((Number)coverage.get("blockedMembers")).intValue()==0&&((Number)coverage.get("sourceIssues")).intValue()==0;
+        boolean complete=remapped.isEmpty()&&partial==0&&failed==0&&unexecuted==0&&relationPending==0&&unresolvedOer==0&&((Number)coverage.get("blockedMembers")).intValue()==0&&((Number)coverage.get("sourceIssues")).intValue()==0;
         coverage.put("scanStatus",complete?"completed":"partial");coverage.put("semanticCompleteness","requires_human_review");coverage.put("visualLayoutCompleteness","not_verified_by_this_task");state.put("automaticDiscovery",coverage);state.put("automaticDiscoveryIssues",issues);
-        retireCompletedSourceSeeds(state,plan,byTask);
+        retireCompletedSourceSeeds(state,plan,byTask,remapped);
         validate(graph);return graph;
     }
 
-    private static void retireCompletedSourceSeeds(Map<String,Object> state,Plan plan,Map<String,Map<String,Object>> receipts) {
+    private static Map<String,String> isolateChangedDefinitions(List<Object> existing,Plan plan,Map<String,Map<String,Object>> receipts,List<Object> issues) {
+        Map<String,Map<String,Object>> prior=new HashMap<>();for(Object raw:existing)prior.put(text(map(raw).get("id")),map(raw));Map<String,String> result=new LinkedHashMap<>();
+        for(Map<String,Object> task:plan.tasks){Map<String,Object> receipt=receipts.get(text(task.get("taskId")));if(receipt==null)continue;List<Object> proposed=list(receipt.get("nodes")),changed=new ArrayList<>(),definitions=new ArrayList<>();
+            for(Object raw:proposed){Map<String,Object> node=map(raw);String id=text(node.get("id"));Map<String,Object> meaning=discoveryMeaning(node);definitions.add(meaning);if(prior.containsKey(id)&&!meaning.equals(discoveryMeaning(prior.get(id))))changed.add(id);}
+            if(changed.isEmpty())continue;
+            definitions.sort(Comparator.comparing(value->text(map(value).get("id"))));String revision=DraftAdoption.hash(JsonUtils.write(definitions));Map<String,String> local;
+            // Keep the complete atomic response together; a retained old question cannot redefine a new condition.
+            for(int attempt=0;;attempt++){local=new LinkedHashMap<>();for(Object raw:proposed){String id=text(map(raw).get("id"));local.put(id,"rediscovery-"+DraftAdoption.hash(task.get("taskId")+"|"+id+"|"+revision+"|"+attempt).substring(0,32));}
+                boolean conflict=false;for(Object raw:proposed){Map<String,Object> candidate=remappedNode(map(raw),local),old=prior.get(text(candidate.get("id")));if(old!=null&&!discoveryMeaning(candidate).equals(discoveryMeaning(old))){conflict=true;break;}}if(!conflict)break;
+            }
+            result.putAll(local);issues.add(obj("taskId",task.get("taskId"),"reason","existing_node_definition_changed","existingNodeIds",changed,"nodeIdMappings",local,"retained","existing_reviewed_nodes_and_complete_new_candidates"));
+        }return result;
+    }
+    private static Map<String,Object> discoveryMeaning(Map<String,Object> node) {
+        Map<String,Object> meaning=new LinkedHashMap<>();for(String key:Arrays.asList("id","parentId","definitionKind","questionZh","questionEn","optional","fixedValue","unit","definitionScope","semanticSourceQuote","docIds","options","splitReview"))meaning.put(key,node.get(key));
+        meaning.put("type",obj("kind",map(node.get("type")).get("kind"),"unit",map(node.get("type")).get("unit")));meaning.put("role",map(node.get("role")).get("kind"));
+        Map<String,Object> correction=map(node.get("correction"));meaning.put("correction",obj("kind",correction.get("kind"),"branches",correction.get("branches"),"clauses",correction.get("clauses"),"mode",correction.get("mode")));
+        List<Object> targets=new ArrayList<>();for(Object raw:list(node.get("editTargets"))){Map<String,Object> target=map(raw),definition=new LinkedHashMap<>();for(String key:Arrays.asList("id","docId","text","action","branchId","valueSourceId","replacementEn","sourceScopeId","valueMode","listId","itemKey","separator","native","observedRanges"))definition.put(key,target.get(key));targets.add(definition);}meaning.put("editTargets",targets);return meaning;
+    }
+    private static Map<String,Object> remappedNode(Map<String,Object> proposed,Map<String,String> remapped) {
+        Map<String,Object> node=map(remappedReferences(proposed,remapped));String id=text(proposed.get("id"));if(remapped.containsKey(id)){node.put("id",remapped.get(id));int ordinal=0;for(Object raw:list(node.get("editTargets")))map(raw).put("id",node.get("id")+"-target-"+(ordinal++));}return node;
+    }
+    private static Object remappedReferences(Object value,Map<String,String> remapped) {
+        if(value instanceof Map){Map<String,Object> result=new LinkedHashMap<>();for(Map.Entry<String,Object> entry:map(value).entrySet()){String key=entry.getKey();Object child=entry.getValue();
+                if(Arrays.asList("parentId","inputId","scopeId","valueSourceId","listId","itemKey","fromId","toId").contains(key)&&child instanceof String)child=remapped.getOrDefault(child,(String)child);
+                else if(Arrays.asList("inputIds","relatedInputIds","nodeIds").contains(key)&&child instanceof List){List<Object> refs=new ArrayList<>();for(Object ref:list(child))refs.add(ref instanceof String?remapped.getOrDefault(ref,(String)ref):ref);child=refs;}
+                else if(Arrays.asList("correction","branches","clauses","editTargets","relations","targets").contains(key))child=remappedReferences(child,remapped);
+                else child=JsonUtils.mapper().convertValue(child,Object.class);result.put(key,child);
+            }return result;
+        }if(value instanceof List){List<Object> result=new ArrayList<>();for(Object item:list(value))result.add(remappedReferences(item,remapped));return result;}return value;
+    }
+
+    private static void retireCompletedSourceSeeds(Map<String,Object> state,Plan plan,Map<String,Map<String,Object>> receipts,Map<String,String> remapped) {
         List<Object> variables=list(state.get("variables"));
         Set<String> seedIds=new HashSet<>(),referenced=new HashSet<>();
         for(Object raw:variables)if("source_seed".equals(map(raw).get("definitionKind")))seedIds.add(text(map(raw).get("id")));
@@ -152,7 +187,7 @@ public final class DraftAutomaticDiscovery {
         for(Map<String,Object> task:plan.tasks) {
             Map<String,Object> receipt=receipts.get(text(task.get("taskId")));
             if(receipt==null||!Arrays.asList("completed","reviewed_no_requirement").contains(text(receipt.get("status"))))continue;
-            List<Object> replacements=new ArrayList<>();for(Object raw:list(receipt.get("nodes")))replacements.add(map(raw).get("id"));
+            List<Object> replacements=new ArrayList<>();for(Object raw:list(receipt.get("nodes"))){String id=text(map(raw).get("id"));replacements.add(remapped.getOrDefault(id,id));}
             for(Object raw:variables) {
                 Map<String,Object> seed=map(raw);
                 if(!"source_seed".equals(seed.get("definitionKind"))||!"pending".equals(seed.get("status"))||!Boolean.FALSE.equals(seed.get("manual"))||!Objects.equals(seed.get("discoverySourceKey"),task.get("sourceKey")))continue;

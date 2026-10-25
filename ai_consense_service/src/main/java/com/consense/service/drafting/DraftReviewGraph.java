@@ -39,13 +39,14 @@ public final class DraftReviewGraph {
             for(Object raw:list(node.get("options")))if(text(map(raw).get("value")).isEmpty()||!options.add(text(map(raw).get("value"))))throw invalid("GRAPH_OPTION_INVALID: "+id);
             if(set("choice","multiselect").contains(kind(node))&&options.isEmpty())throw invalid("GRAPH_OPTIONS_REQUIRED: "+id);
         }
-        Map<String,Set<String>> dependencies=new LinkedHashMap<>();
+        Map<String,Set<String>> dependencies=new LinkedHashMap<>(),valueDependencies=new LinkedHashMap<>();
         for(Map<String,Object> node:byId.values())if(active(node)) {
-            String id=text(node.get("id")),parent=text(node.get("parentId")); Set<String> refs=new LinkedHashSet<>();
+            String id=text(node.get("id")),parent=text(node.get("parentId")); Set<String> refs=new LinkedHashSet<>(),valueRefs=new LinkedHashSet<>();
             Set<String> declared=new HashSet<>();for(Object doc:list(node.get("docIds")))declared.add(text(doc));
             for(String group:Arrays.asList("sourceAnchors","editTargets","evidence"))for(Object raw:list(node.get(group))){String doc=text(map(raw).get("docId"));if(!doc.isEmpty()&&!declared.contains(doc))throw invalid("GRAPH_SOURCE_OUTSIDE_DECLARED_DOCUMENTS: "+id);}
             if(!parent.isEmpty()) {
                 requireNode(byId,parent); if(!set("record","list").contains(kind(byId.get(parent))))throw invalid("GRAPH_PARENT_NOT_A_GROUP: "+id);
+                if(!"list".equals(kind(byId.get(parent))))valueRefs.add(parent);
             }
             Set<String> cases=new HashSet<>();
             boolean rebind=Boolean.TRUE.equals(map(node.get("correction")).get("needsRebind"));
@@ -53,14 +54,15 @@ public final class DraftReviewGraph {
                 Map<String,Object> branch=map(raw); String caseId=text(branch.get("id"));
                 if(caseId.isEmpty()||!cases.add(caseId)||!set("all","any").contains(text(branch.get("mode")))||list(branch.get("clauses")).isEmpty())throw invalid("GRAPH_CASE_INVALID: "+id);
                 String scope=text(branch.get("scopeId")),mode=text(branch.get("scopeMode"));
-                if(!scope.isEmpty()) {if(!rebind)requireNode(byId,scope); if((!rebind&&!"list".equals(kind(byId.get(scope))))||!set("each","any","all","none").contains(mode))throw invalid("GRAPH_SCOPE_INVALID: "+id);refs.add(scope);}
+                if(!scope.isEmpty()) {requireValueNode(byId,scope,rebind); if((!rebind&&!"list".equals(kind(byId.get(scope))))||!set("each","any","all","none").contains(mode))throw invalid("GRAPH_SCOPE_INVALID: "+id);refs.add(scope);if("derived".equals(role(node)))valueRefs.add(scope);}
                 else if(!mode.isEmpty())throw invalid("GRAPH_SCOPE_REQUIRED: "+id);
                 for(Object term:list(branch.get("clauses"))) {
-                    Map<String,Object> clause=map(term); String input=text(clause.get("inputId"));if(!rebind)requireNode(byId,input);
+                    Map<String,Object> clause=map(term); String input=text(clause.get("inputId"));requireValueNode(byId,input,rebind);
                     if(!OPERATORS.contains(text(clause.get("operator"))))throw invalid("GRAPH_OPERATOR_UNSUPPORTED: "+id);
                     if(!rebind)validateOperator(byId.get(input),clause);
                     if(!rebind&&listAncestor(byId,input)!=null&&!Objects.equals(scope,listAncestor(byId,input)))throw invalid("GRAPH_SCOPE_CROSSES_LISTS: "+id);
                     refs.add(input);
+                    if("derived".equals(role(node)))valueRefs.add(input);
                 }
             }
             for(Object raw:list(node.get("editTargets"))) {
@@ -68,35 +70,35 @@ public final class DraftReviewGraph {
                 if(!ACTIONS.contains(actionKind(target.get("action"))))throw invalid("GRAPH_ACTION_UNSUPPORTED: "+id);
                 boolean targetRebind=rebind||Boolean.TRUE.equals(target.get("needsRebind"));
                 String branch=text(target.get("branchId"));if(!targetRebind&&!branch.isEmpty()&&!cases.contains(branch))throw invalid("GRAPH_TARGET_CASE_MISSING: "+id);
-                String value=text(target.get("valueSourceId"));if(!value.isEmpty()){if(!targetRebind)requireNode(byId,value);if(!value.equals(id))refs.add(value);}
+                String value=text(target.get("valueSourceId"));if(!value.isEmpty()){requireValueNode(byId,value,targetRebind);if(!value.equals(id))refs.add(value);}
                 String itemKey=text(target.get("itemKey"));if(!itemKey.isEmpty()) {
-                    if(!targetRebind){requireNode(byId,itemKey);String itemScope="";for(Object branchRaw:branches(node)){Map<String,Object> condition=map(branchRaw);if(branch.equals(text(condition.get("id")))&&"each".equals(text(condition.get("scopeMode"))))itemScope=text(condition.get("scopeId"));}
+                    requireValueNode(byId,itemKey,targetRebind);
+                    if(!targetRebind){String itemScope="";for(Object branchRaw:branches(node)){Map<String,Object> condition=map(branchRaw);if(branch.equals(text(condition.get("id")))&&"each".equals(text(condition.get("scopeMode"))))itemScope=text(condition.get("scopeId"));}
                         if(itemScope.isEmpty()||!itemScope.equals(listAncestor(byId,itemKey))||!set("boolean","number","text","date","choice").contains(kind(byId.get(itemKey))))throw invalid("GRAPH_ITEM_SCOPE_INVALID: "+id);}
                     refs.add(itemKey);
                 }
                 if("join".equals(text(target.get("valueMode")))) {
-                    String listId=text(target.get("listId"));if(!targetRebind)requireNode(byId,listId);
+                    String listId=text(target.get("listId"));requireValueNode(byId,listId,targetRebind);
                     if(!targetRebind&&(!"list".equals(kind(byId.get(listId)))||value.isEmpty()||!listId.equals(listAncestor(byId,value))))throw invalid("GRAPH_JOIN_SCOPE_INVALID: "+id);
                     if(!targetRebind&&!branch.isEmpty())for(Object branchRaw:branches(node)){Map<String,Object> condition=map(branchRaw);if(branch.equals(text(condition.get("id")))&&"each".equals(text(condition.get("scopeMode")))&&!listId.equals(text(condition.get("scopeId"))))throw invalid("GRAPH_JOIN_SCOPE_INVALID: "+id);}
                     refs.add(listId);
                 }
             }
             dependencies.put(id,refs);
+            if(!sourceCheck(node))valueDependencies.put(id,valueRefs);
         }
-        // Parent membership is validated separately; it is not a value dependency of the parent.
+        // Branch scope supplies list dependencies; record children also read their parent.
         for(Map<String,Object> node:byId.values()) {
             Set<String> ancestors=new HashSet<>();String id=text(node.get("id"));
             while(!id.isEmpty()){if(!ancestors.add(id))throw invalid("GRAPH_PARENT_CYCLE");id=text(map(byId.get(id)).get("parentId"));}
         }
-        Map<String,Set<String>> valueDependencies=new LinkedHashMap<>();
-        for(String id:dependencies.keySet())if("derived".equals(role(byId.get(id)))){Set<String> values=new LinkedHashSet<>();for(String ref:dependencies.get(id))if(byId.containsKey(ref)&&"derived".equals(role(byId.get(ref))))values.add(ref);valueDependencies.put(id,values);}
         for(String id:valueDependencies.keySet())cycle(id,valueDependencies,new HashSet<>(),new HashSet<>());
         validateEditions(graph,byId,dependencies);
         Context context=new Context(graph,Collections.emptyMap());
         for(Map<String,Object> node:byId.values())if(active(node)){
             Map<String,Object> field=withChildren(node,context,false);
             if(set("fixed","system").contains(role(node))&&node.get("fixedValue")!=null)typedValue(field,node.get("fixedValue"));
-            if("derived".equals(role(node))&&!Boolean.TRUE.equals(map(node.get("correction")).get("needsRebind")))
+            if("derived".equals(role(node))&&!ruleNeedsReview(node))
                 for(Object raw:branches(node))if(map(raw).get("resultValue")!=null)typedValue(field,map(raw).get("resultValue"));
         }
     }
@@ -196,7 +198,7 @@ public final class DraftReviewGraph {
         List<Map<String,Object>> fields=new ArrayList<>(),system=new ArrayList<>();
         Context context=new Context(graph,Collections.emptyMap());
         for(Map<String,Object> field:fields(graph))fields.add(catalogField(field,context));
-        for(Map<String,Object> node:nodes(graph))if(active(node)&&context.selected(text(node.get("id")))&&"derived".equals(role(node)))system.add(catalogField(withChildren(node,context),context));
+        for(Map<String,Object> node:nodes(graph))if(active(node)&&!sourceCheck(node)&&context.selected(text(node.get("id")))&&"derived".equals(role(node)))system.add(catalogField(withChildren(node,context),context));
         return obj("ruleVersion","review-"+DraftAdoption.hash(JsonUtils.write(graph)),"groups",Collections.singletonList(obj("id","reviewed","label",label("本次图谱的项目变量","Project variables from this graph"),"fields",fields)),"systemFields",system);
     }
     private static Map<String,Object> catalogField(Map<String,Object> node,Context context) {
@@ -253,9 +255,9 @@ public final class DraftReviewGraph {
             try{Object normalized=validateValue(field,value);context.answers.put(id,normalized);effective.put(id,normalized);}catch(BizException bad){context.answers.remove(id);context.issue(id,"InputInvalid",bad.getMessage());}
         }
         for(Map<String,Object> node:context.nodes.values())if(active(node)&&context.selected(text(node.get("id")))) {
-            String id=text(node.get("id"));Map<String,Object> correction=map(node.get("correction"));
+            String id=text(node.get("id"));
             if(!DraftCatalogAlignment.reviewed(node))context.issue(id,"CatalogAlignmentReview","变量定义对应关系仍待人工确认。 / Review the variable definition alignment before use.");
-            if(Boolean.TRUE.equals(correction.get("needsRebind"))||"split".equals(text(correction.get("kind"))))context.issue(id,"SchemaNeedsReview","规则结构仍待修订，不能执行。 / The rule structure requires review before execution.");
+            if(ruleNeedsReview(node))context.issue(id,"SchemaNeedsReview","规则结构仍待修订，不能执行。 / The rule structure requires review before execution.");
             if(!"derived".equals(role(node)))continue;
             String scope=listAncestor(context.nodes,id);
             if(scope==null){Object value=context.value(id,Collections.emptyMap(),new HashSet<>());if(value!=null)derived.put(id,value);}
@@ -280,7 +282,7 @@ public final class DraftReviewGraph {
                     applies=scopeResults!=null&&scopeResults.isEmpty()?Boolean.FALSE:rows==null?null:context.condition(branch,rows,new HashSet<>());
                     if(rows==null&&!(scopeResults!=null&&scopeResults.isEmpty()))context.issue(targetId,"ItemPlacementRequired","逐项编辑需要唯一项目身份及该项的原件定位。 / Each-item edits need one unique item identity and its exact source placement.");
                 } else applies=branch==null?Boolean.TRUE:context.condition(branch,rows,new HashSet<>());
-                if(!context.reviewed(owner)||(!text(target.get("branchId")).isEmpty()&&branch==null)||Boolean.TRUE.equals(map(owner.get("correction")).get("needsRebind"))||Boolean.TRUE.equals(target.get("needsRebind")))applies=null;
+                if(!context.reviewed(owner)||(!text(target.get("branchId")).isEmpty()&&branch==null)||ruleNeedsReview(owner)||Boolean.TRUE.equals(target.get("needsRebind")))applies=null;
                 String action=Boolean.FALSE.equals(applies)?"not_adopted":applies==null?"pending":actionKind(target.get("action"));Object replacement=null;
                 if("keep".equals(action))action="retain";
                 if("check".equals(action)){action="pending";context.issue(targetId,"ManualCheck","请核对原文与本次处理范围。 / Review the source and proposed scope.");}
@@ -348,7 +350,7 @@ public final class DraftReviewGraph {
         Object value(String id,Map<String,Map<String,Object>> rows,Set<String> visiting) {
             if(!visiting.add(id)){issue(id,"GraphCycle","存在循环依赖。 / Cyclic dependency.");return null;}
             try {
-                Map<String,Object> node=nodes.get(id);if(node==null||!active(node)||!selected(id)||!reviewed(node))return null;
+                Map<String,Object> node=nodes.get(id);if(node==null||sourceCheck(node)||!active(node)||!selected(id)||!reviewed(node))return null;
                 String parent=text(node.get("parentId"));
                 if(!parent.isEmpty()) {
                     Map<String,Object> row=rows.get(parent);
@@ -357,7 +359,7 @@ public final class DraftReviewGraph {
                 }
                 if(answers.containsKey(id))return answers.get(id);
                 if(set("fixed","system").contains(role(node))&&node.get("fixedValue")!=null)return typedValue(withChildren(node,this),node.get("fixedValue"));
-                if(!"derived".equals(role(node))||Boolean.TRUE.equals(map(node.get("correction")).get("needsRebind")))return null;
+                if(!"derived".equals(role(node))||ruleNeedsReview(node))return null;
                 List<Map<String,Object>> matches=new ArrayList<>();boolean unknown=false;
                 for(Object raw:branches(node)){Map<String,Object> branch=map(raw);Boolean truth=condition(branch,rows,visiting);if(truth==null)unknown=true;else if(truth)matches.add(branch);}
                 if(matches.size()>1){issue(id,"BranchConflict","多个条件同时成立，请纠正规则。 / Multiple cases match; correct the rule.");return null;}
@@ -468,8 +470,11 @@ public final class DraftReviewGraph {
     }
     private static int integer(Object value){if(!(value instanceof Number)||((Number)value).doubleValue()!=((Number)value).intValue())throw invalid("GRAPH_SPAN_INTEGER_REQUIRED");return ((Number)value).intValue();}
     private static void requireNode(Map<String,Map<String,Object>> nodes,String id){if(!nodes.containsKey(id)||!active(nodes.get(id)))throw invalid("GRAPH_REFERENCE_MISSING: "+id);}
+    public static boolean ruleNeedsReview(Map<String,Object> node){Map<String,Object> correction=map(node.get("correction")),split=node.get("splitReview")!=null?map(node.get("splitReview")):"split".equals(text(correction.get("kind")))?correction:null;return Boolean.TRUE.equals(correction.get("needsRebind"))||split!=null&&!set("all","any").contains(text(split.get("mode")));}
+    private static void requireValueNode(Map<String,Map<String,Object>> nodes,String id,boolean needsRebind){if(!needsRebind)requireNode(nodes,id);if(nodes.containsKey(id)&&sourceCheck(nodes.get(id)))throw invalid("GRAPH_SOURCE_CHECK_NOT_A_VALUE: "+id);}
     private static boolean active(Map<String,Object> node){return !"excluded".equals(text(node.get("status")));}
-    private static boolean input(Map<String,Object> node){return set("input","decision","content").contains(role(node));}
+    private static boolean sourceCheck(Map<String,Object> node){return "verification".equals(role(node))||"source_seed".equals(text(node.get("definitionKind")));}
+    private static boolean input(Map<String,Object> node){return !sourceCheck(node)&&set("input","decision","content").contains(role(node));}
     private static String actionKind(Object raw){String value=text(raw);return "retain".equals(value)?"keep":"not_used".equals(value)?"unused":value;}
     private static String kind(Map<String,Object> node){return text(map(node.get("type")).get("kind"));}
     private static String role(Map<String,Object> node){return text(map(node.get("role")).get("kind"));}

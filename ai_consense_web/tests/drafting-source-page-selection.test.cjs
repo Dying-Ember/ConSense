@@ -1,6 +1,6 @@
 const assert=require('node:assert/strict'),path=require('node:path')
 const {loadTypeScript}=require('./helpers/load-typescript.cjs')
-const {bindPageSelection,wordsInBox}=loadTypeScript(path.join(__dirname,'../src/drafting/source-page-selection.ts'),{dependencies:{'./pdf-text-ranges':loadTypeScript(path.join(__dirname,'../src/drafting/pdf-text-ranges.ts')),'./source-review-state':loadTypeScript(path.join(__dirname,'../src/drafting/source-review-state.ts'))}})
+const {bindPageSelection,wordsInBox}=loadTypeScript(path.join(__dirname,'../src/drafting/source-page-selection.ts'),{dependencies:{'./pdf-text-ranges':loadTypeScript(path.join(__dirname,'../src/drafting/pdf-text-ranges.ts')),'./source-review-state':loadTypeScript(path.join(__dirname,'../src/drafting/source-review-state.ts'),{dependencies:{'./source-review/value-dependencies.js':'./source-review/value-dependencies.js'}})}})
 const sha='a'.repeat(64)
 const reading={id:'41',format:'docx',canEdit:true,sourceSha256:sha,paragraphs:[{id:'p1',text:'Use\tAppendix G1a with a reduced bond.',sourceSha256:sha,paragraphSha256:'b'.repeat(64)}]}
 const context='Use Appendix G1a with a reduced bond.'

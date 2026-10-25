@@ -63,6 +63,59 @@ class DraftReviewGraphTest {
         Map<String,Object> no=branch("standard","any",clause("foundations","no",""),clause("months","lt","39"));no.put("resultValue","g1");
         bond.put("correction",obj("branches",Arrays.asList(yes,no)));return graph(foundations,months,bond);
     }
+    @Test void anInputsOwnAnswerControlsEditsWithoutBecomingAValueCycle() {
+        for(String role:Arrays.asList("input","decision","content")) {
+            Map<String,Object> answer=node("answer","boolean",role);answer.put("correction",obj("branches",Collections.singletonList(branch("no","all",clause("answer","no","")))));
+            answer.put("editTargets",Collections.singletonList(obj("id","delete","docId","ntt","branchId","no","action","delete","nativeBinding",obj("status","bound","spans",Collections.singletonList(obj("paragraphId","p1"))))));
+            Map<String,Object> graph=graph(answer);assertDoesNotThrow(()->validate(graph));
+            assertEquals("delete",map(list(plan(graph,obj("answer",false)).get("actions")).get(0)).get("action"));
+            assertEquals("not_adopted",map(list(plan(graph,obj("answer",true)).get("actions")).get(0)).get("action"));
+            assertEquals("pending",map(list(plan(graph,Collections.emptyMap()).get("actions")).get(0)).get("action"));
+        }
+        Map<String,Object> a=node("a","boolean","input"),b=node("b","boolean","input");a.put("correction",obj("branches",Collections.singletonList(branch("b-yes","all",clause("b","yes","")))));b.put("correction",obj("branches",Collections.singletonList(branch("a-yes","all",clause("a","yes","")))));assertDoesNotThrow(()->validate(graph(a,b)));
+    }
+    @Test void editTextReferencesDoNotBecomeDerivedValueDependencies() {
+        Map<String,Object> fixed=node("fixed","boolean","fixed"),a=node("a","boolean","derived"),b=node("b","boolean","derived");fixed.put("fixedValue",true);
+        Map<String,Object> aCase=branch("yes","all",clause("fixed","yes","")),bCase=branch("yes","all",clause("a","yes",""));aCase.put("resultValue",true);bCase.put("resultValue",true);a.put("correction",obj("branches",Collections.singletonList(aCase)));b.put("correction",obj("branches",Collections.singletonList(bCase)));
+        Map<String,Object> target=obj("docId","ntt","action","fill","valueSourceId","b","nativeBinding",obj("status","bound","spans",Collections.singletonList(obj("paragraphId","p1"))));a.put("editTargets",Collections.singletonList(target));
+        Map<String,Object> graph=graph(fixed,a,b);assertDoesNotThrow(()->validate(graph));assertEquals(true,map(plan(graph,Collections.emptyMap()).get("derived")).get("b"));
+        target.put("valueSourceId","missing");assertTrue(assertThrows(BizException.class,()->validate(graph)).getMessage().contains("GRAPH_REFERENCE_MISSING"));
+    }
+    @Test void recordParentReadsParticipateInDerivedValueCycleValidation() {
+        Map<String,Object> self=node("self","boolean","derived"),selfCondition=branch("yes","all",clause("self","yes",""));selfCondition.put("resultValue",true);self.put("correction",obj("branches",Collections.singletonList(selfCondition)));assertTrue(assertThrows(BizException.class,()->validate(graph(self))).getMessage().contains("GRAPH_DEPENDENCY_CYCLE"));
+        Map<String,Object> parent=node("parent","record","derived"),child=node("child","boolean","input");child.put("parentId","parent");
+        Map<String,Object> condition=branch("known","all",clause("child","known",""));condition.put("resultValue",obj("child",true));parent.put("correction",obj("branches",Collections.singletonList(condition)));
+        assertTrue(assertThrows(BizException.class,()->validate(graph(parent,child))).getMessage().contains("GRAPH_DEPENDENCY_CYCLE"));
+        parent.put("correction",obj("kind","rule","needsRebind",true,"branches",Collections.singletonList(condition)));assertThrows(BizException.class,()->validate(graph(parent,child)));
+        parent.put("status","excluded");child.put("status","excluded");assertDoesNotThrow(()->validate(graph(parent,child)));
+    }
+    @Test void sourceChecksNeverBecomeAdoptableInputsOrConditionValues() {
+        for(String marker:Arrays.asList("verification","source_seed")) {
+            Map<String,Object> check=node("check","boolean","verification"),owner=node("owner","boolean","input");
+            if("source_seed".equals(marker)){check.put("role",obj("kind","input"));check.put("definitionKind","source_seed");check.put("definitionOrigin",obj("kind","manual","reason","Renamed by user"));}
+            Map<String,Object> graph=graph(check,owner);assertEquals(1,fields(graph).size());assertEquals("owner",fields(graph).get(0).get("id"));
+            owner.put("correction",obj("branches",Collections.singletonList(branch("unknown","all",clause("check","unknown","")))));
+            assertTrue(assertThrows(BizException.class,()->validate(graph)).getMessage().contains("GRAPH_SOURCE_CHECK_NOT_A_VALUE"));
+            assertThrows(BizException.class,()->plan(graph,obj("owner",true,"check",false),true));
+            owner.remove("correction");owner.put("editTargets",Collections.singletonList(obj("docId","ntt","action","fill","valueSourceId","check")));
+            assertTrue(assertThrows(BizException.class,()->validate(graph)).getMessage().contains("GRAPH_SOURCE_CHECK_NOT_A_VALUE"));
+        }
+    }
+    @Test void sourceCheckScopesAndItemReferencesCannotSupplyExecutableValues() {
+        Map<String,Object> rows=node("rows","list","verification"),owner=node("owner","boolean","input"),child=node("child","boolean","input");child.put("parentId","rows");Map<String,Object> condition=branch("each","all",clause("child","yes",""));condition.put("scopeId","rows");condition.put("scopeMode","each");owner.put("correction",obj("branches",Collections.singletonList(condition)));
+        assertTrue(assertThrows(BizException.class,()->validate(graph(rows,owner,child))).getMessage().contains("GRAPH_SOURCE_CHECK_NOT_A_VALUE"));
+        owner.remove("correction");owner.put("editTargets",Collections.singletonList(obj("docId","ntt","action","fill","valueMode","join","valueSourceId","child","listId","rows")));
+        assertTrue(assertThrows(BizException.class,()->validate(graph(rows,owner,child))).getMessage().contains("GRAPH_SOURCE_CHECK_NOT_A_VALUE"));
+        rows.put("role",obj("kind","input"));child.put("role",obj("kind","verification"));owner.put("editTargets",Collections.singletonList(obj("docId","ntt","action","delete","itemKey","child")));assertTrue(assertThrows(BizException.class,()->validate(graph(rows,owner,child))).getMessage().contains("GRAPH_SOURCE_CHECK_NOT_A_VALUE"));
+    }
+    @Test void unresolvedSplitRelationshipsDeferEditsUntilTheRelationshipIsReviewed() {
+        Map<String,Object> owner=node("owner","boolean","input");owner.put("splitReview",obj("mode","unknown","inputIds",Collections.singletonList("owner")));owner.put("editTargets",Collections.singletonList(obj("docId","ntt","action","delete","nativeBinding",obj("status","bound","spans",Collections.singletonList(obj("paragraphId","p1"))))));Map<String,Object> graph=graph(owner);
+        assertEquals("pending",map(list(plan(graph,obj("owner",true)).get("actions")).get(0)).get("action"));
+        map(owner.get("splitReview")).put("mode","all");assertEquals("delete",map(list(plan(graph,obj("owner",true)).get("actions")).get(0)).get("action"));
+        owner.put("splitReview",null);assertFalse(ruleNeedsReview(owner));
+        owner.remove("splitReview");owner.put("correction",obj("kind","split","mode","unknown","inputIds",Collections.singletonList("owner")));assertEquals("pending",map(list(plan(graph,obj("owner",true)).get("actions")).get(0)).get("action"));
+        map(owner.get("correction")).put("mode","any");assertFalse(list(plan(graph,obj("owner",true)).get("unresolved")).stream().anyMatch(raw->"SchemaNeedsReview".equals(map(raw).get("kind"))));
+    }
     @Test void independentFactsAndUnknownsAreNotFlattened(){
         Map<String,Object> graph=bondGraph();validate(graph);assertEquals(2,fields(graph).size());
         assertEquals("g1a",map(plan(graph,obj("foundations",true,"months",39)).get("derived")).get("bond"));

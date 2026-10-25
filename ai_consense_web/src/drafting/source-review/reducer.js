@@ -1,3 +1,4 @@
+import { isSourceCheck, valueDependencies } from './value-dependencies.js';
 export function createReviewReducer(data) {
   const copy = value => structuredClone(value);
   const edition = id => {
@@ -61,6 +62,7 @@ export function createReviewReducer(data) {
     if((v.type.unit||'')!==(other.type.unit||''))return problem('MERGE_UNIT_MISMATCH');
     if(v.catalogAlignment?.confirmed&&other.catalogAlignment?.confirmed&&['status','baselineKey','baselineVersion','scope'].some(key=>(v.catalogAlignment[key]||'')!==(other.catalogAlignment[key]||'')))return problem('MERGE_ALIGNMENT_REVIEW_REQUIRED');
     if(v.role.kind!==other.role.kind)return problem('MERGE_ROLE_MISMATCH');
+    if(isSourceCheck(v)!==isSourceCheck(other))return problem('MERGE_ROLE_MISMATCH');
     if(v.parentId!==other.parentId)return problem('MERGE_PARENT_MISMATCH');
     if(Boolean(v.optional)!==Boolean(other.optional))return problem('MERGE_OPTIONAL_MISMATCH');
     if(JSON.stringify(v.options||[])!==JSON.stringify(other.options||[]))return problem('MERGE_OPTIONS_MISMATCH');
@@ -70,7 +72,23 @@ export function createReviewReducer(data) {
     if(!compatible(other,v))return problem('MERGE_SOURCE_EDITION_CONFLICT');
     if(!canShareSources(state,v,other.docIds)||!canShareSources(state,other,v.docIds))return problem('MERGE_SOURCE_SCOPE_CONFLICT');
     const projected=copy(state);mergeInto(projected,id,targetId);
+    if(valueDependencies(projected).some(edge=>edge.cyclic))return problem('MERGE_DEPENDENCY_CYCLE');
     return isolatedSources(projected)?null:problem('MERGE_SOURCE_SCOPE_CONFLICT');
+  }
+  const spans = anchor => anchor.native ? anchor.native.spans || [anchor.native] : anchor.nativeBinding?.status==='bound' ? anchor.nativeBinding.spans || [] : [];
+  const sourceHash = anchor => anchor.sourceSha256 || anchor.nativeBinding?.sourceSha256;
+  const contains = (anchor,target) => {
+    if(anchor.docId!==target.docId||!sourceHash(anchor)||sourceHash(anchor)!==sourceHash(target))return false;
+    const selected=spans(anchor),original=spans(target);
+    if(original.length)return original.every(part=>selected.some(span=>span.paragraphId===part.paragraphId&&span.paragraphSha256===part.paragraphSha256&&span.start<=part.start&&span.end>=part.end));
+    if(target.observation&&anchor.observation)return target.observation.blockId===anchor.observation.blockId&&anchor.observation.start<=target.observation.start&&anchor.observation.end>=target.observation.end;
+    return Boolean(target.text)&&anchor.text===target.text;
+  };
+  function splitProblem(state,id,items) {
+    const v=state.variables.find(node=>node.id===id);
+    if(!v||v.status==='excluded'||!Array.isArray(items)||items.length!==2||items.some(item=>!item.sourceAnchors?.length))return 'SPLIT_SELECTION_REQUIRED';
+    if((v.editTargets||[]).some(target=>items.filter(item=>item.sourceAnchors.some(anchor=>contains(anchor,target))).length!==1))return 'SPLIT_TARGET_OWNERSHIP_REQUIRED';
+    return null;
   }
   function mergeMany(state, ids, targetId, at, reason) {
     const failed=(code,id=targetId)=>({state,problem:{code,id,targetId}});
@@ -116,18 +134,25 @@ export function createReviewReducer(data) {
       if(ownAnswerChanged)for(const x of s.variables)if(x.status!=='excluded')for(const target of x.editTargets||[])if(targetInputs(target).includes(v.id)){target.needsRebind=true;x.status='help';}
       event('调整了问题的内容或用途','Changed the question or its purpose',[before,'→ '+[v.nameZh,v.nameEn,v.type.zh,v.role.zh].join(' · ')]);
     } else if (action.type === 'SPLIT') {
+      if(splitProblem(old,v.id,action.items))return old;
       if(!compatible({docIds:action.items.flatMap(item=>(item.sourceAnchors||[]).map(a=>a.docId))},v))return old;
       revisit(v.id);
       const children = action.items.map(item => ({...copy(v),id:`review-${s.nextId++}`,parentId:v.parentId||null,definitionKind:'added',...item,
         docIds:[...new Set((item.sourceAnchors||[]).map(a=>a.docId))],sourceUnitIds:[],missingSource:false,
         evidence:(item.sourceAnchors||[]).map(a=>({docId:a.docId,locationZh:`原文段落`,locationEn:`Source passage`,quote:a.text})),
         questionZh:item.nameZh,questionEn:item.nameEn,type:item.type||{kind:'boolean',zh:'是／否',en:'Yes / No'},role:{kind:'input',zh:'项目资料',en:'Project information'},
-        options:[],status:'changed',manual:true,originId:v.id,relatedInputIds:[],relations:[],correction:null,catalogAlignment:v.catalogAlignment?{...v.catalogAlignment,confirmed:false,status:'ambiguous'}:undefined,
-        editTargets:(v.editTargets||[]).filter(target=>(item.sourceAnchors||[]).some(a=>a.docId===target.docId)).map(target=>({...target,needsRebind:true})),
+        options:[],status:'changed',manual:true,originId:v.id,relatedInputIds:copy(v.relatedInputIds||[]),relations:copy(v.relations||[]),correction:v.correction?{...copy(v.correction),needsRebind:true,supersededCorrection:copy(v.correction)}:null,catalogAlignment:v.catalogAlignment?{...v.catalogAlignment,confirmed:false,status:'ambiguous'}:undefined,
+        editTargets:(v.editTargets||[]).filter(target=>(item.sourceAnchors||[]).some(a=>contains(a,target))).map(target=>({...target,needsRebind:true})),
         targets:(v.targets||[]).filter(target=>(item.sourceAnchors||[]).some(a=>a.docId===target.docId))}));
+      for(const child of children){
+        if(child.correction?.inputIds)child.correction.inputIds=child.correction.inputIds.map(id=>id===v.id?child.id:id);
+        for(const branch of ruleBranches(child.correction))for(const clause of branch.clauses||[])if(clause.inputId===v.id)clause.inputId=child.id;
+        for(const target of child.editTargets)if(target.valueSourceId===v.id)target.valueSourceId=child.id;
+      }
       v.status='excluded'; v.replacedBy=children.map(x=>x.id); v.reason='人工拆分 / Split during review';
       s.variables.push(...children);
-      children[0].correction={kind:'split',mode:action.mode,inputIds:children.map(x=>x.id),originalZh:v.nameZh,originalEn:v.nameEn,needsRebind:action.mode==='unknown'};
+      const splitReview={mode:action.mode,inputIds:children.map(x=>x.id),originalZh:v.nameZh,originalEn:v.nameEn};
+      children[0].splitReview=splitReview;
       if(!isolatedSources(s))return old;
       for (const x of s.variables) if (x.id !== v.id && x.status!=='excluded' && !children.some(c=>c.id===x.id)) {
         for(const target of x.editTargets||[])if(targetInputs(target).includes(v.id)){target.needsRebind=true;x.status='help';}
@@ -136,6 +161,7 @@ export function createReviewReducer(data) {
           x.correction.needsRebind=true;x.status='help';x.reason='引用的问题已拆分，请重新确认条件。 / A referenced question was split. Review the condition.';
         }
       }
+      for(const requirement of s.requirements||[])requirement.nodeIds=[...new Set((requirement.nodeIds||[]).flatMap(id=>id===v.id?children.map(child=>child.id):[id]))];
       event('将一个问题拆成了两个独立问题','Split one question into two',[v.nameZh,...children.map(x=>x.nameZh),action.mode==='all'?'两个问题必须同时成立 / Both must be true':action.mode==='any'?'任一问题成立即可 / Either may be true':'条件仍待确认 / Conditions still need review']);
     } else if (action.type === 'MERGE') {
       const other=find(action.targetId);
@@ -188,6 +214,7 @@ export function createReviewReducer(data) {
       if(!isolatedSources(s))return old;
       event('调整了条件与联动','Changed conditions and linked effects',[v.nameZh,...ruleBranches(action.correction).map(b=>b.effectZh)]);
     } else if (action.type === 'REVIEW') {
+      if(valueDependencies(s).some(edge=>edge.cyclic&&(edge.from===v.id||edge.to===v.id)))return old;
       v.status='confirmed';event('确认了一个问题','Reviewed a question',[v.nameZh]);
     } else if (action.type === 'HELP') {
       v.status='help';v.reason=action.reason;event('记录了需要补充的信息','Recorded a request for more context',[v.nameZh,action.reason]);
@@ -202,5 +229,5 @@ export function createReviewReducer(data) {
     }
     return s;
   }
-  return { reduce, compatible, isolatedSources, mergeProblem, mergeMany };
+  return { reduce, compatible, isolatedSources, mergeProblem, mergeMany, splitProblem };
 }

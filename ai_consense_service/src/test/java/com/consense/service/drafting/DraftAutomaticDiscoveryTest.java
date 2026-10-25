@@ -125,6 +125,78 @@ class DraftAutomaticDiscoveryTest {
         AiGateway ai=mock(AiGateway.class);when(ai.complete(anyString(),anyString())).thenReturn("{\"requirements\":[],\"nodes\":[]}");Map<String,Object> receipt=DraftAutomaticDiscovery.process(ai,plan,plan.tasks().get(0));Map<String,Object> base=graph();String before=JsonUtils.write(base);DraftAutomaticDiscovery.finish(base,plan,Collections.singletonList(receipt));assertEquals(before,JsonUtils.write(base));receipt.put("sourceId","other");assertThrows(BizException.class,()->DraftAutomaticDiscovery.finish(base,plan,Collections.singletonList(receipt)));
     }
 
+    @Test void reidentificationKeepsDifferentReviewedDefinitionsAndRemapsTheCompleteNewAtomicGroup() {
+        String quote="Delete clause A if foundation works are not included.";ObjectNode source=source("1");member(source,"body",quote,"main");guidance(source,"body",quote);
+        DraftAutomaticDiscovery.Plan plan=DraftAutomaticDiscovery.plan(Collections.singletonList(source));
+        Map<String,Object> fact=node("fact",quote);fact.put("type","boolean");
+        Map<String,Object> first=atomicReceipt(plan,Collections.singletonList(fact));Map<String,Object> old=map(list(first.get("nodes")).get(0));
+        old.put("nameEn","Different reviewed project flag");old.put("questionEn","Does the independent package apply?");old.put("status","confirmed");old.put("manual",true);old.put("catalogAlignment",obj("status","new","confirmed",true,"reason","Reviewed independent meaning"));
+        Map<String,Object> base=DraftReviewDiscovery.seed(graph(),Collections.singletonList(source));List<Object> initial=new ArrayList<>(list(state(base).get("variables")));initial.add(old);state(base).put("variables",initial);
+        Map<String,Object> outcome=node("outcome",quote);outcome.put("type","boolean");outcome.put("role","derived");outcome.put("branches",Collections.singletonList(obj("id","case","mode","all","clauses",Collections.singletonList(obj("inputId","fact","operator","no")),"resultValue","true")));
+        outcome.put("effects",Collections.singletonList(obj("quote",quote,"action","fill","branchId","case","valueSourceId","fact")));
+        Map<String,Object> rerun=atomicReceipt(plan,Arrays.asList(fact,outcome));String originalFact=text(map(list(rerun.get("nodes")).get(0)).get("id")),originalOutcome=text(map(list(rerun.get("nodes")).get(1)).get("id"));
+        Map<String,Object> relation=DraftAutomaticDiscovery.processRelation((system,user)->JsonUtils.write(obj("relations",Collections.singletonList(obj("fromId",originalFact,"toId",originalOutcome,"kind","dependency","fromQuote",quote,"toQuote",quote)))),plan,Collections.singletonList(rerun),DraftAutomaticDiscovery.planRelations(plan,Collections.singletonList(rerun)).get(0));
+        List<Map<String,Object>> receipts=Arrays.asList(rerun,relation);String baseBefore=JsonUtils.write(base),receiptsBefore=JsonUtils.write(receipts),oldBefore=JsonUtils.write(old);
+        Map<String,Object> finished=DraftAutomaticDiscovery.finish(base,plan,receipts);
+        assertEquals(4,nodes(finished).size(),"The seed, reviewed node and both complete new candidates must survive");
+        Map<String,Object> newFact=nodes(finished).stream().filter(n->"fact".equals(n.get("modelLocalId"))&&!originalFact.equals(n.get("id"))).findFirst().orElseThrow();
+        Map<String,Object> newOutcome=nodes(finished).stream().filter(n->"outcome".equals(n.get("modelLocalId"))).findFirst().orElseThrow();
+        assertNotEquals(originalOutcome,newOutcome.get("id"));assertEquals("pending",newFact.get("status"));assertEquals("pending",newOutcome.get("status"));
+        Map<String,Object> branch=map(list(map(newOutcome.get("correction")).get("branches")).get(0)),target=map(list(newOutcome.get("editTargets")).get(0));
+        assertEquals(newFact.get("id"),map(list(branch.get("clauses")).get(0)).get("inputId"));assertEquals(newFact.get("id"),target.get("valueSourceId"));assertEquals("case",target.get("branchId"));assertTrue(text(target.get("id")).startsWith(text(newOutcome.get("id"))));
+        assertEquals(newFact.get("id"),list(newOutcome.get("relatedInputIds")).get(0));assertEquals(newFact.get("id"),list(map(newOutcome.get("correction")).get("inputIds")).get(0));
+        assertEquals(Arrays.asList(newFact.get("id"),newOutcome.get("id")),map(list(state(finished).get("requirements")).get(0)).get("nodeIds"));
+        Map<String,Object> linked=map(list(state(finished).get("relationProposals")).get(0));assertEquals(newFact.get("id"),linked.get("fromId"));assertEquals(newOutcome.get("id"),linked.get("toId"));
+        assertEquals(Arrays.asList(newFact.get("id"),newOutcome.get("id")),nodes(finished).get(0).get("replacedBy"));
+        assertEquals(oldBefore,JsonUtils.write(nodes(finished).stream().filter(n->originalFact.equals(n.get("id"))).findFirst().orElseThrow()));
+        assertTrue(JsonUtils.write(state(finished).get("automaticDiscoveryIssues")).contains("existing_node_definition_changed"));
+        assertEquals(baseBefore,JsonUtils.write(base));assertEquals(receiptsBefore,JsonUtils.write(receipts));
+        assertEquals(4,nodes(DraftAutomaticDiscovery.finish(finished,plan,receipts)).size(),"The same isolated candidates are reused on another identical run");validate(finished);
+    }
+
+    @Test void identicalReidentificationReusesReviewedNodesWithoutTreatingReviewMetadataAsNewMeaning() {
+        String quote="Provide the project name.";ObjectNode source=source("1");member(source,"body",quote,"main");guidance(source,"body",quote);DraftAutomaticDiscovery.Plan plan=DraftAutomaticDiscovery.plan(Collections.singletonList(source));
+        Map<String,Object> receipt=atomicReceipt(plan,Collections.singletonList(node("name",quote)));Map<String,Object> base=DraftAutomaticDiscovery.finish(graph(),plan,Collections.singletonList(receipt)),old=nodes(base).get(0);
+        old.put("status","confirmed");old.put("manual",true);old.put("catalogAlignment",obj("status","new","confirmed",true,"reason","Reviewed"));String before=JsonUtils.write(old);
+        Map<String,Object> finished=DraftAutomaticDiscovery.finish(base,plan,Collections.singletonList(receipt));assertEquals(1,nodes(finished).size());assertEquals(before,JsonUtils.write(nodes(finished).get(0)));
+    }
+
+    @Test void isolationRemapsListParentsScopesAndValueSourcesWithoutRewritingSourceEvidenceOrHistory() {
+        String quote="Provide the applicable items and their completion decisions.";ObjectNode source=source("1");member(source,"body",quote,"main");guidance(source,"body",quote);DraftAutomaticDiscovery.Plan plan=DraftAutomaticDiscovery.plan(Collections.singletonList(source));
+        Map<String,Object> group=node("items",quote),child=node("included",quote),outcome=node("outcome",quote);group.put("type","list");child.put("type","boolean");child.put("parentId","items");outcome.put("type","boolean");outcome.put("role","derived");
+        group.put("effects",Collections.singletonList(obj("quote",quote,"action","fill","valueSourceId","items")));
+        outcome.put("branches",Collections.singletonList(obj("id","each","mode","all","scopeId","items","scopeMode","each","clauses",Collections.singletonList(obj("inputId","included","operator","yes")),"resultValue","true")));
+        outcome.put("effects",Collections.singletonList(obj("quote",quote,"action","fill","branchId","each","valueSourceId","included")));
+        Map<String,Object> first=atomicReceipt(plan,Arrays.asList(group,child));Map<String,Object> base=DraftAutomaticDiscovery.finish(graph(),plan,Collections.singletonList(first));
+        String oldGroup=text(nodes(base).get(0).get("id")),oldChild=text(nodes(base).get(1).get("id"));nodes(base).get(1).put("questionEn","A different reviewed item flag");
+        Map<String,Object> history=obj("id","historic","type",obj("kind","text"),"role",obj("kind","verification"),"status","excluded","replacedBy",Arrays.asList(oldGroup,oldChild));List<Object> original=new ArrayList<>(list(state(base).get("variables")));original.add(history);state(base).put("variables",original);String before=JsonUtils.write(base);
+        Map<String,Object> rerun=JsonUtils.readMap(JsonUtils.write(atomicReceipt(plan,Arrays.asList(group,child,outcome))));Map<String,Object> proposed=map(list(rerun.get("nodes")).get(2)),target=map(list(proposed.get("editTargets")).get(0));target.put("valueMode","join");target.put("listId",oldGroup);target.put("itemKey",oldChild);target.put("needsRebind",false);
+        map(map(list(proposed.get("sourceAnchors")).get(0)).get("sourceObservation")).put("inputId",oldGroup);
+        proposed.put("superseded",Collections.singletonList(obj("inputId",oldChild,"parentId",oldGroup)));proposed.put("customAudit",obj("inputId",oldChild));
+        Map<String,Object> finished=DraftAutomaticDiscovery.finish(base,plan,Collections.singletonList(rerun));assertEquals(6,nodes(finished).size());
+        List<?> refs=list(map(list(state(finished).get("requirements")).get(0)).get("nodeIds"));String newGroup=text(refs.get(0)),newChild=text(refs.get(1));
+        Map<String,Object> isolatedGroup=nodes(finished).stream().filter(n->newGroup.equals(n.get("id"))).findFirst().orElseThrow(),isolatedChild=nodes(finished).stream().filter(n->newChild.equals(n.get("id"))).findFirst().orElseThrow(),isolatedOutcome=nodes(finished).stream().filter(n->refs.get(2).equals(n.get("id"))).findFirst().orElseThrow();
+        assertEquals(newGroup,isolatedChild.get("parentId"));assertEquals(newGroup,map(list(map(isolatedOutcome.get("correction")).get("branches")).get(0)).get("scopeId"));
+        assertEquals(newGroup,map(list(isolatedGroup.get("editTargets")).get(0)).get("valueSourceId"));Map<String,Object> isolatedTarget=map(list(isolatedOutcome.get("editTargets")).get(0));assertEquals(newGroup,isolatedTarget.get("listId"));assertEquals(newChild,isolatedTarget.get("itemKey"));assertEquals(newChild,isolatedTarget.get("valueSourceId"));
+        assertEquals(oldGroup,map(map(list(isolatedOutcome.get("sourceAnchors")).get(0)).get("sourceObservation")).get("inputId"),"Literal source observations never use the graph's replacement namespace");
+        assertEquals(proposed.get("superseded"),isolatedOutcome.get("superseded"));assertEquals(proposed.get("customAudit"),isolatedOutcome.get("customAudit"));
+        assertEquals(Arrays.asList(oldGroup,oldChild),nodes(finished).stream().filter(n->"historic".equals(n.get("id"))).findFirst().orElseThrow().get("replacedBy"));assertEquals(before,JsonUtils.write(base));
+        for(Object id:refs)assertTrue(text(id).matches("[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}"));validate(finished);
+    }
+
+    @Test void changedIsolatedCandidatesReceiveAnotherStableIdentityInsteadOfOverwritingOrGrowingOnEveryRun() {
+        String quote="Provide the project name.";ObjectNode source=source("1");member(source,"body",quote,"main");guidance(source,"body",quote);DraftAutomaticDiscovery.Plan plan=DraftAutomaticDiscovery.plan(Collections.singletonList(source));Map<String,Object> receipt=atomicReceipt(plan,Collections.singletonList(node("name",quote)));
+        Map<String,Object> base=DraftAutomaticDiscovery.finish(graph(),plan,Collections.singletonList(receipt));nodes(base).get(0).put("questionEn","A previously reviewed other question");
+        Map<String,Object> second=DraftAutomaticDiscovery.finish(base,plan,Collections.singletonList(receipt));assertEquals(2,nodes(second).size());nodes(second).get(1).put("questionEn","A separately reviewed interpretation");nodes(second).get(1).put("manual",true);String previous=JsonUtils.write(nodes(second));
+        Map<String,Object> third=DraftAutomaticDiscovery.finish(second,plan,Collections.singletonList(receipt));assertEquals(3,nodes(third).size());assertEquals(previous,JsonUtils.write(nodes(third).subList(0,2)));assertEquals("pending",nodes(third).get(2).get("status"));
+        assertEquals(3,nodes(DraftAutomaticDiscovery.finish(third,plan,Collections.singletonList(receipt))).size());
+    }
+
+    private static Map<String,Object> atomicReceipt(DraftAutomaticDiscovery.Plan plan,List<Map<String,Object>> nodes) {
+        List<Object> ids=new ArrayList<>();for(Map<String,Object> node:nodes)ids.add(node.get("id"));String quote=text(nodes.get(0).get("sourceQuote"));
+        return DraftAutomaticDiscovery.process((system,user)->JsonUtils.write(obj("nodes",nodes,"requirements",Collections.singletonList(obj("id","requirement","sourceQuote",quote,"kind","amendment","nodeIds",ids)))),plan,plan.tasks().get(0));
+    }
+
     private static ObjectNode source(String id){ObjectNode source=JsonUtils.mapper().createObjectNode().put("id",id).put("sourceDocumentId",Long.parseLong(id)).put("sourceSha256",SHA).put("format","docx").put("fileKey","NTT").put("fileName","NTT.docx").put("evidenceStatus","bound");for(String key:Arrays.asList("sourceMembers","paragraphs","guidanceNotes","markerCandidates","groups","conditions"))source.putArray(key);return source;}
     private static void member(ObjectNode source,String id,String text,String story){ObjectNode member=source.withArray("sourceMembers").addObject().put("id",id).put("storyKind",story).put("identityStatus","source_bound");member.putObject("sourcePosition").put("sourceSha256",SHA).put("partName","word/"+story+".xml").put("nodePath","/"+id);member.putObject("textObservation").put("text",text);}
     private static void guidance(ObjectNode source,String memberId,String text){ObjectNode note=source.withArray("guidanceNotes").addObject().put("id","note").put("text",text).put("scopeComplete",false);note.putArray("memberRanges").addObject().put("memberId",memberId).put("channel","text").put("start",0).put("end",text.length());}

@@ -2,7 +2,7 @@ import Overview from './graph-overview.js';
 function create(Overview) {
   'use strict';
 
-  const blocked = item => ['referenceOnly', 'needsRebind', 'unresolved', 'excluded', 'missing', 'incompatible'].some(flag => item[flag]);
+  const blocked = item => ['referenceOnly', 'needsRebind', 'unresolved', 'excluded', 'missing', 'incompatible', 'cyclic', 'invalidSource'].some(flag => item[flag]);
 
   function routes(edges, boxes) {
     const outgoing = new Map(), incoming = new Map();
@@ -43,7 +43,9 @@ function create(Overview) {
     const allById = new Map(graph.nodes.map(node => [node.id, node]));
     const addAction = (owner, details) => {
       const action = { ownerId: owner.id, node: owner, targets: [], referenceOnly: false,
-        needsRebind: Boolean(owner.correction?.needsRebind), unresolved: false, excluded: owner.status === 'excluded', ...details };
+        needsRebind: Boolean(owner.correction?.needsRebind), unresolved: false, excluded: owner.status === 'excluded',
+        cyclic: graph.edges.some(edge => edge.cyclic && (edge.from === owner.id || edge.to === owner.id)), ...details };
+      action.unresolved = action.unresolved || Boolean(owner.splitReview && !['all', 'any'].includes(owner.splitReview.mode));
       action.docIds = [...new Set(action.targets.map(entry => entry.target.docId).filter(Boolean))];
       action.missingDestination = !action.targets.length || action.targets.some(entry => !documents.some(doc => doc[0] === entry.target.docId));
       action.incompatible = new Set([...(owner.docIds || []), ...action.docIds].map(edition).filter(Boolean)).size > 1;
@@ -67,12 +69,13 @@ function create(Overview) {
           addInput(clause.inputId, 'condition', { predicateIndex, mode: action.branch.mode, operator: clause.operator, value: clause.value });
         }
       }
-      if (action.kind === 'split') for (const [predicateIndex, id] of (owner.correction.inputIds || []).entries()) {
-        addInput(id, 'condition', { predicateIndex, mode: owner.correction.mode, operator: 'yes' });
+      if (action.kind === 'split') for (const [predicateIndex, id] of (action.correction.inputIds || []).entries()) {
+        addInput(id, 'condition', { predicateIndex, mode: action.correction.mode, operator: 'yes' });
       }
       for (const { target, index } of action.targets) {
         addInput(target.valueSourceId, 'value', { targetIndex: index, valueMode: target.valueMode || 'single' });
         if (target.valueMode === 'join') addInput(target.listId, 'join', { targetIndex: index, separator: target.separator });
+        addInput(target.itemKey, 'match', { targetIndex: index });
       }
       const actionInputs = allEdges.filter(edge => edge.actionId === action.id);
       action.missing = actionInputs.some(edge => edge.missing);
@@ -117,6 +120,9 @@ function create(Overview) {
       if (correction?.kind === 'split') addAction(owner, { id: 'action:' + owner.id + ':split', kind: 'split',
         branch: null, correction, mode: correction.mode, unresolved: true, referenceOnly: true,
         labelZh: '拆分后的关系待核对', labelEn: 'Review split relationships' });
+      if (owner.splitReview) addAction(owner, { id: 'action:' + owner.id + ':split-review', kind: 'split',
+        branch: null, correction: owner.splitReview, mode: owner.splitReview.mode, unresolved: !['all', 'any'].includes(owner.splitReview.mode), referenceOnly: true,
+        labelZh: '拆分关系记录', labelEn: 'Recorded split relationship' });
       for (const [index, relation] of (owner.relations || []).entries()) addAction(owner, {
         id: 'action:' + owner.id + ':reference:' + index, kind: 'reference', referenceOnly: true, relation,
         labelZh: '原有关系说明 · 参考', labelEn: 'Previous relationship · reference' });
@@ -149,6 +155,7 @@ function create(Overview) {
     const variables = ordered.map(item => {
       const inset = Math.min(item.depth, 3) * 18, h = item.depth ? 70 : 80;
       const result = { ...item, x: 26 + inset, y, w: 214 - inset, h,
+        cyclic: graph.edges.some(edge => edge.cyclic && (edge.from === item.id || edge.to === item.id)),
         matched: !normalizedQuery || (item.node.nameZh + ' ' + item.node.nameEn).toLocaleLowerCase().includes(normalizedQuery) };
       const ownActions = actionsByOwner.get(item.id) || [];
       ownActions.forEach((action, index) => Object.assign(action, { x: 300, y: y + index * 92, w: 230, h: 78 }));
@@ -170,9 +177,9 @@ function create(Overview) {
     const impact = selectedAction ? { upstreamIds: [], downstreamIds: [] } : Overview.impact(view.graph, ownerId);
     const downstream = new Set([ownerId, ...impact.downstreamIds]);
     const actions = selectedAction ? [selectedAction] : view.actions.filter(action => action.ownerId === ownerId ||
-      downstream.has(action.ownerId) && !blocked(action));
+      (downstream.has(action.ownerId) || action.inputIds.some(id => downstream.has(id))) && !blocked(action));
     const variableIds = new Set([ownerId, ...impact.upstreamIds, ...impact.downstreamIds]);
-    for (const action of actions) for (const inputId of action.inputIds) variableIds.add(inputId);
+    for (const action of actions) { variableIds.add(action.ownerId); for (const inputId of action.inputIds) variableIds.add(inputId); }
     const actionIds = new Set(actions.map(action => action.id)), edgeIds = new Set();
     const fileIds = new Set();
     for (const edge of view.edges) {
@@ -180,7 +187,7 @@ function create(Overview) {
       if (related && selectedAction && !edge.actionId && edge.kind !== 'parent') {
         related = edge.ownerId === ownerId && (['condition', 'scope'].includes(edge.kind)
           ? ['branch', 'split'].includes(selectedAction.kind) && edge.branchIndex === selectedAction.branchIndex
-          : ['value', 'join'].includes(edge.kind) && selectedAction.targets.some(entry => entry.index === edge.targetIndex));
+          : ['value', 'join', 'match'].includes(edge.kind) && selectedAction.targets.some(entry => entry.index === edge.targetIndex));
       }
       if (related) {
         edgeIds.add(edge.id);

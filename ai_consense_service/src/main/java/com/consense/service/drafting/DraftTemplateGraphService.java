@@ -91,7 +91,7 @@ public class DraftTemplateGraphService {
             if(!"confirmed".equals(node.get("status")))throw new BizException(4007,"GRAPH_REVIEW_INCOMPLETE: "+node.get("id"));
             if(!DraftCatalogAlignment.reviewed(node))throw new BizException(4007,"GRAPH_CATALOG_REVIEW_INCOMPLETE: "+node.get("id"));
             requireReviewedSource(projectId,graph,node);
-            if(Boolean.TRUE.equals(asMap(node.get("correction")).get("needsRebind")))throw new BizException(4007,"GRAPH_RULE_REBIND_REQUIRED: "+node.get("id"));
+            if(DraftReviewGraph.ruleNeedsReview(node))throw new BizException(4007,"GRAPH_RULE_REBIND_REQUIRED: "+node.get("id"));
             for(Object rawTarget:list(node.get("editTargets"))) {
                 Map<String,Object> target=asMap(rawTarget);String action=string(target.get("action"));
                 if(Boolean.TRUE.equals(target.get("needsRebind"))||"check".equals(action))throw new BizException(4007,"GRAPH_TARGET_REVIEW_REQUIRED: "+node.get("id"));

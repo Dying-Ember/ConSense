@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict')
 const path = require('node:path')
 const { loadTypeScript } = require('./helpers/load-typescript.cjs')
-const { createReviewReducer } = loadTypeScript(path.join(__dirname, '../src/drafting/source-review/reducer.js'), { globals: { structuredClone } })
+const { createReviewReducer } = loadTypeScript(path.join(__dirname, '../src/drafting/source-review/reducer.js'), { globals: { structuredClone }, dependencies: { './value-dependencies.js': './value-dependencies.js' } })
 const node = (id, kind = 'text') => ({ id, nameZh: id, nameEn: id, parentId: null, type: { kind }, role: { kind: 'input' }, docIds: ['41'], status: 'confirmed', options: [], sourceUnitIds: [], relatedInputIds: [], sourceAnchors: [], editTargets: [], evidence: [], targets: [], relations: [] })
 const base = () => ({ variables: [node('old'), node('keep'), { ...node('dependent'), editTargets: [{ id: 'target', valueSourceId: 'old', itemKey: 'old' }] }], requirements: [{ id: 'req', nodeIds: ['old', 'keep'], sourceQuote: 'Original guidance' }], sourceReviews: {}, events: [] })
 const reduce = createReviewReducer({ sources: [{ id: '41', fileKey: 'NTT', format: 'docx' }] }).reduce

@@ -15,7 +15,8 @@ const list = variable('work-list', '分期施工明细', 'list')
 const record = variable('project-record', '项目基本资料', 'record')
 const check = variable('source-check', 'guidance:0123456789abcdef0123', 'boolean', { definitionKind: 'source_seed', role: { kind: 'verification' }, sourceObservation: { text: 'Only adopt this clause if the contract includes foundation works.' } })
 const excluded = variable('old-duration', '已排除的合约工期', 'number', { status: 'excluded' })
-const graph = { kind: 'consense-template-graph-v1', graph: { variables: [question, duration, threshold, foundation, list, record, check, excluded], events: [], sourceReviews: {}, nextId: 1, blank: false, guidanceMode: 'minimum' }, sources: [source], selectedDocuments: { NTT: '41' } }
+const manualCheck = variable('manual-source-check', '手工改名的来源核对', 'boolean', { definitionKind: 'source_seed', manual: true })
+const graph = { kind: 'consense-template-graph-v1', graph: { variables: [question, duration, threshold, foundation, list, record, check, excluded, manualCheck], events: [], sourceReviews: {}, nextId: 1, blank: false, guidanceMode: 'minimum' }, sources: [source], selectedDocuments: { NTT: '41' } }
 const revision = { id: 'authored-draft', graph, status: 'DRAFT', sourceStale: false }
 const writes = []
 const api = { reviewHead: async () => ({ draftRevisionId: revision.id, draft: copy(revision), sources: [source] }), reviewReading: async () => ({ ...source, paragraphs: [], guidanceNotes: [], sourceMembers: [], markerCandidates: [], groups: [], conditions: [], issues: [], blocks: [] }), reviewPreview: async () => { throw Error('Authored fixture has no PDF') }, reviewSave: async (...args) => { writes.push(args); return revision }, reviewCandidates: async () => ({ variables: [] }) }
@@ -59,8 +60,16 @@ const cached = () => loaded.loadLocal(path.join(__dirname, '../src/drafting/sour
   await find(control('data-condition-scope', 'retained-case'), node => node.props?.['data-picker-clear-search'] !== undefined).props.onClick(); await settle()
   await set('data-condition-input-search', '', 'retained-case:0')
   const eligible = options(control('data-condition-input', 'retained-case:0'))
-  assert.equal(eligible.some(option => option.value === check.id || option.value === question.id), false, 'New inputs exclude source checks and self references')
-  for (const [index, id, reason] of [[1, check.id, /指导原文|修改标记/], [2, question.id, /自己.*前置条件/], [3, excluded.id, /已排除/]]) {
+  assert.equal(eligible.some(option => option.value === check.id), false, 'Source checks never supply condition answers')
+  assert.ok(eligible.some(option => option.value === question.id && !option.disabled), 'An independent input can select its own amendment route')
+  assert.equal(control('data-condition-reference-problem', 'retained-case:2'), undefined, 'An existing own-answer amendment condition is valid')
+  assert.equal(eligible.some(option => option.value === manualCheck.id), false, 'Manual editing cannot bypass the source-seed identity')
+  await set('data-review-role', 'derived')
+  assert.ok(options(control('data-condition-input', 'retained-case:2')).find(option => option.value === question.id)?.disabled, 'A derived value cannot select its own calculation input')
+  assert.match(text(control('data-condition-reference-problem', 'retained-case:2')), /派生答案|derived/i)
+  await set('data-review-role', 'input')
+  assert.equal(control('data-condition-reference-problem', 'retained-case:2'), undefined)
+  for (const [index, id, reason] of [[1, check.id, /指导原文|修改标记/], [3, excluded.id, /已排除/]]) {
     const retained = options(control('data-condition-input', `retained-case:${index}`)).find(option => option.value === id)
     assert.ok(retained?.disabled, 'An existing invalid reference stays visible and disabled')
     assert.equal(selectValue(control('data-condition-input', `retained-case:${index}`)), id)
@@ -126,5 +135,5 @@ const cached = () => loaded.loadLocal(path.join(__dirname, '../src/drafting/sour
   restored.unmount()
   assert.equal(cached().newConditionInput.branchId, '')
   assert.equal(writes.length, 0)
-  console.log('PASS: searchable condition controls exclude new self/source references, retain old references, and preserve unsaved edits and explicit manual facts without saving or adopting')
+  console.log('PASS: searchable controls permit independent own-answer routes, exclude source checks, retain invalid references and preserve unsaved edits/manual facts without saving or adopting')
 })().catch(error => { console.error(error); process.exitCode = 1 })

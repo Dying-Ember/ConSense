@@ -1,7 +1,9 @@
 package com.consense.service.drafting;
 
 import com.consense.common.BizException;
+import com.consense.domain.DraftVariable;
 import com.consense.domain.SourceDocument;
+import com.consense.repository.DraftVariableRepository;
 import com.consense.repository.SourceDocumentRepository;
 import com.consense.service.ProjectService;
 import com.consense.service.StorageService;
@@ -11,6 +13,8 @@ import java.util.*;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.transaction.PlatformTransactionManager;
+import static com.consense.service.drafting.DraftReviewGraph.*;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
@@ -22,13 +26,15 @@ class DraftReviewConsumerSeamTest {
         when(graph.hasConfirmed("p")).thenReturn(true);
     }
     @Test void oneConfirmedDefinitionOwnsCatalogValuesExtractionAdoptionAndPlan(){
-        Map<String,Object> catalog=Collections.singletonMap("ruleVersion","graph-2");when(graph.catalog("p")).thenReturn(catalog);assertSame(catalog,drafting.catalog("p"));
-        List<VariableVO> values=Collections.singletonList(new VariableVO());when(graph.variables("p")).thenReturn(values);assertSame(values,drafting.listVariables("p"));
-        when(graph.extract("p")).thenReturn(values);assertSame(values,drafting.extractVariables("p"));
+        DraftVariable identity=new DraftVariable();identity.setVarKey("contractTitle");identity.setScope("INPUT");identity.setValueText("{\"number\":\"TEST-1\",\"title\":\"Synthetic contract\"}");identity.setConfirmed(true);identity.setManuallyEdited(true);identity.setAdoptedSourcesJson("[]");
+        DraftVariableRepository variables=mock(DraftVariableRepository.class);when(variables.findByProjectIdOrderBySortOrderAsc("p")).thenReturn(Collections.singletonList(identity));when(variables.findByProjectIdAndVarKey("p","contractTitle")).thenReturn(Optional.of(identity));ReflectionTestUtils.setField(drafting,"variableRepository",variables);ReflectionTestUtils.setField(drafting,"transactionManager",mock(PlatformTransactionManager.class));
+        Map<String,Object> group=obj("id","reviewed","fields",Collections.singletonList(obj("key","new-field"))),catalog=obj("ruleVersion","graph-2","groups",Collections.singletonList(group));when(graph.catalog("p")).thenReturn(catalog);Map<String,Object> combinedCatalog=drafting.catalog("p");assertEquals("graph-2",combinedCatalog.get("ruleVersion"));assertEquals(2,list(combinedCatalog.get("groups")).size());assertEquals("identity",map(list(combinedCatalog.get("groups")).get(0)).get("id"));assertEquals("contractTitle",map(list(map(list(combinedCatalog.get("groups")).get(0)).get("fields")).get(0)).get("key"));assertSame(group,list(combinedCatalog.get("groups")).get(1));assertEquals(1,list(catalog.get("groups")).size());
+        VariableVO dynamic=new VariableVO();dynamic.setKey("new-field");List<VariableVO> values=Collections.singletonList(dynamic);when(graph.variables("p")).thenReturn(values);List<VariableVO> combinedValues=drafting.listVariables("p");assertEquals(2,combinedValues.size());assertSame(dynamic,combinedValues.get(0));assertEquals("contractTitle",combinedValues.get(1).getKey());assertEquals(identity.getValueText(),combinedValues.get(1).getValue());assertEquals(1,values.size());
+        when(graph.extract("p")).thenReturn(values);List<VariableVO> extracted=drafting.extractVariables("p");assertEquals(2,extracted.size());assertSame(dynamic,extracted.get(0));assertEquals("contractTitle",extracted.get(1).getKey());verify(graph).extract("p");
         VariablePatch patch=new VariablePatch();VariableVO result=new VariableVO();when(graph.updateVariable("p","new-field",patch)).thenReturn(result);assertSame(result,drafting.updateVariable("p","new-field",patch));
         when(graph.confirmAll("p")).thenReturn(values);assertSame(values,drafting.confirmAll("p","INPUT",null));
-        Map<String,String> proposed=Collections.singletonMap("new-field","false");Map<String,Object> plan=Collections.singletonMap("snapshotId","version2");when(graph.plan("p",proposed)).thenReturn(plan);assertSame(plan,drafting.plan("p",proposed));
-        when(graph.snapshotId("p",null)).thenReturn("graph-snapshot");assertEquals("graph-snapshot",ReflectionTestUtils.invokeMethod(drafting,"snapshotId","p",null));
+        Map<String,String> proposed=Collections.singletonMap("new-field","false");Map<String,Object> action=obj("id","dynamic-action","action","delete"),plan=obj("ruleVersion","graph-2","snapshotId","version2","inputValues",obj("new-field",false),"effectiveValues",obj("new-field",false),"actions",Collections.singletonList(action),"unresolved",new ArrayList<>());when(graph.plan("p",proposed)).thenReturn(plan);when(graph.snapshotId("p",null)).thenReturn("graph-snapshot");when(graph.snapshotId("p",proposed)).thenReturn("graph-preview");Map<String,Object> combinedPlan=drafting.plan("p",proposed);assertEquals("graph-2",combinedPlan.get("ruleVersion"));assertSame(action,list(combinedPlan.get("actions")).get(0));assertEquals(false,map(combinedPlan.get("effectiveValues")).get("new-field"));assertEquals("TEST-1",map(map(combinedPlan.get("effectiveValues")).get("contractTitle")).get("number"));assertTrue(list(combinedPlan.get("unresolved")).isEmpty());verify(graph).plan("p",proposed);
+        String snapshot=ReflectionTestUtils.invokeMethod(drafting,"snapshotId","p",null);assertNotEquals("graph-snapshot",snapshot);assertEquals(snapshot,combinedPlan.get("savedSnapshotId"));assertNotEquals(snapshot,combinedPlan.get("snapshotId"));assertEquals(snapshot,ReflectionTestUtils.invokeMethod(drafting,"snapshotId","p",null));identity.setValueText("{\"number\":\"TEST-2\",\"title\":\"Synthetic contract\"}");assertNotEquals(snapshot,ReflectionTestUtils.invokeMethod(drafting,"snapshotId","p",null));
     }
     @Test void legacyProjectsKeepTheirExistingCatalog(){when(graph.hasConfirmed("p")).thenReturn(false);assertEquals(DraftBusinessRules.catalog().get("ruleVersion"),drafting.catalog("p").get("ruleVersion"));verify(graph,never()).catalog(anyString());}
     @Test void sourceIdentityGuardsAlternateEditionAssetsWithoutReparsing(){

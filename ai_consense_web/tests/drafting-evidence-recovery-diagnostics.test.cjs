@@ -9,8 +9,8 @@ const inputView = loadVue(path.join(__dirname, '../src/components/DraftingInputF
 const reportView = loadVue(path.join(__dirname, '../src/components/DraftingExtractionReport.vue'), { boundaries: { '@/api': { draftingApi: {} } } }).default
 const cases = [
   ['bill_type_unsupported', ['该 Bill 的计价类型缺乏本行原文依据', '該 Bill 的計價類型缺乏本列原文依據', 'The Bill pricing type is not supported by its source row']],
-  ['input_not_applicable', ['按照当前已知条件，此输入不适用，模型建议未被接收', '按照目前已知條件，此輸入不適用，模型建議未被接收', 'This input is not applicable under the current known conditions; the model suggestion was not accepted']],
-  ['input_applicability_conflict', ['前置输入的候选值有分歧，无法确定此项是否适用，模型建议暂不接收', '前置輸入的候選值有分歧，無法確定此項是否適用，模型建議暫不接收', 'Prerequisite candidates disagree, so applicability could not be established and this suggestion was not accepted']],
+  ['input_not_applicable', ['按照当前已知条件，此变量不适用，模型建议未被接收', '按照目前已知條件，此變量不適用，模型建議未被接收', 'This variable is not applicable under the current known conditions; the model suggestion was not accepted']],
+  ['input_applicability_conflict', ['前置变量的候选值有分歧，无法确定此项是否适用，模型建议暂不接收', '前置變量的候選值有分歧，無法確定此項是否適用，模型建議暫不接收', 'Prerequisite candidates disagree, so applicability could not be established and this suggestion was not accepted']],
   ['source_list_ambiguous', ['多个原文列表与建议匹配，无法确定唯一的完整来源列表', '多個原文列表與建議相符，無法確定唯一的完整來源列表', 'Several source lists match this suggestion; a unique complete source list could not be established']],
   ['source_list_invalid_sequence', ['原文列表存在缺号、重复编号或空项目，不能据此接收完整清单', '原文列表存在缺號、重複編號或空項目，不能據此接收完整清單', 'The source list has missing or repeated numbers, or empty items; it cannot establish a complete list']],
   ['source_list_incomplete', ['候选清单未保留原文列表的全部项目及编号', '候選清單未保留原文列表的全部項目及編號', 'The suggested list does not retain every original item and number']],
