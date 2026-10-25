@@ -164,6 +164,7 @@ const activeFile = ref('NTT')
 const documentText = ref('')
 const documentBaseline = ref('')
 const editingDocument = ref(false)
+const tocRefreshNotice = ref('')
 const immersiveDocument = ref(false)
 const documentInfoOpen = ref(false)
 const graphOpen = ref(false)
@@ -226,6 +227,7 @@ const pendingGraphReview = computed(() => !!draftRevisionId.value && draftRevisi
 const dirtyInputs = computed(() => fields.value.some(dirty))
 const documentAccess = computed(() => documentCapabilities(activeDocument.value, documentDirty.value))
 const canExport = computed(() => documentAccess.value.exportable)
+const canRefreshToc = computed(() => !!projectId.value && activeFile.value === 'SCC' && documentAccess.value.editable && !!activeDocument.value?.revisionId && !!activeDocument.value?.docxSha256 && !busy.value && !documentDirty.value && !dirtyInputs.value && !reviewDirty.value && !candidateDirty.value && !automationActive.value)
 const durationKnown = computed(() => values.contractPeriodMonths !== null && values.contractPeriodMonths !== undefined && values.contractPeriodMonths !== '' && Number.isFinite(Number(values.contractPeriodMonths)) && Number(values.contractPeriodMonths) >= 0)
 const durationAdopted = computed(() => durationKnown.value && (dirty(fields.value.find(field => field.key === 'contractPeriodMonths') ?? { key: 'contractPeriodMonths', kind: 'number', label: { en: '', zhHans: '', zhHant: '' } }) || variableMap.value.get('contractPeriodMonths')?.confirmed || variableMap.value.get('contractPeriodMonths')?.manuallyEdited))
 const thresholdPresent = computed(() => values.periodAtLeast39Months !== null && values.periodAtLeast39Months !== undefined && values.periodAtLeast39Months !== '')
@@ -483,6 +485,29 @@ async function saveDocument() {
   const key = activeFile.value
   await action(w('saving'), async (id, token) => { const patch = bodyPatch(activeDocument.value!, bodyDraft.value); const updated = await draftingApi.updateDocument(id, key, patch); if (!current(id, token)) return; documents.value = documents.value.map(document => document.fileKey === key ? updated : document); documentText.value = updated.content; documentBaseline.value = updated.content; bodyDraft.value = createBodyDraft(updated); editingDocument.value = false; snapshotDraft(id) })
 }
+async function refreshDocumentToc() {
+  if (!canRefreshToc.value || !activeDocument.value) return
+  const saved = activeDocument.value, key = saved.fileKey, head = { revisionId: saved.revisionId!, docxSha256: saved.docxSha256! }
+  tocRefreshNotice.value = ''
+  await action(phrase('正在更新目录及预览…', 'Updating contents and preview…', '正在更新目錄及預覽…'), async (id, token) => {
+    const result = await draftingApi.refreshToc(id, key, head)
+    if (!current(id, token)) return
+    const displayed = documents.value.find(document => document.fileKey === key)
+    if (displayed?.revisionId !== head.revisionId || displayed.docxSha256 !== head.docxSha256 || displayed.stale || documentDirty.value || dirtyInputs.value || reviewDirty.value || candidateDirty.value || automationActive.value) throw Error(phrase('文稿或待保存修改已变化；更新结果未替换当前文稿，请先核对。', 'The document or pending edits changed. The refresh result was not applied; review the current draft.', '文稿或待儲存修改已變化；更新結果未取代目前文稿，請先核對。'))
+    if (result.tocFinalization.status !== 'PASS') {
+      const reason = result.tocFinalization.reason || phrase('转换及页码核对未完成。', 'Rendering and page verification did not complete.', '轉換及頁碼核對未完成。')
+      throw Error(phrase('目录页码未更新，现有文稿已保留。未完成核对的原因：', 'Contents page numbers were not updated; the saved draft was retained. Verification stopped because: ', '目錄頁碼未更新，現有文稿已保留。未完成核對的原因：') + reason)
+    }
+    const updated = result.document
+    if (updated.fileKey !== key || !updated.generated || updated.stale || !updated.revisionId || !updated.docxSha256 || saved.sourceSha256 && updated.sourceSha256 !== saved.sourceSha256 || !result.updated && (updated.revisionId !== head.revisionId || updated.docxSha256 !== head.docxSha256)) throw Error(phrase('更新结果的文稿版本不一致；当前文稿已保留，请重新读取。', 'The refreshed document identity does not match. The current draft was retained; reload it.', '更新結果的文稿版本不一致；目前文稿已保留，請重新讀取。'))
+    documents.value = documents.value.map(document => document.fileKey === key ? updated : document)
+    documentText.value = updated.content; documentBaseline.value = updated.content; bodyDraft.value = createBodyDraft(updated); editingDocument.value = false; snapshotDraft(id)
+    await nextTick()
+    if (!current(id, token) || activeDocument.value?.revisionId !== updated.revisionId || activeDocument.value?.docxSha256 !== updated.docxSha256) return
+    tocRefreshNotice.value = result.updated ? phrase('目录页码已更新，预览与导出已切换到该保存版本。', 'Contents page numbers were updated. Preview and export now use that saved revision.', '目錄頁碼已更新，預覽與匯出已切換至該儲存版本。') : phrase('目录页码已核对，无需修改。', 'Contents page numbers were verified; no change was needed.', '目錄頁碼已核對，無需修改。')
+    if (result.tocFinalization.headingFlowStatus === 'UNKNOWN') tocRefreshNotice.value += phrase(' 条款标题与正文的分页仍需人工核对。', ' Pagination between clause headings and body text still requires review.', ' 條款標題與正文的分頁仍需人工核對。')
+  })
+}
 function editBody(id: string, text: string) { bodyDraft.value.texts[id] = text; snapshotDraft(projectId.value) }
 function insertBody(id: string, lines: string[]) { bodyDraft.value.insertions[id] = lines; snapshotDraft(projectId.value) }
 function chooseBoundFile(key: string) { if (!busy.value && !documentDirty.value && ['NTT', 'SCT', 'SCC'].includes(key)) activeFile.value = key }
@@ -669,7 +694,7 @@ watch(projectId, (id, old) => {
   closeGraph(false)
   graphNavigation.value = undefined
   stopAutomationPolling(); automation.value = null; automationRevision.value = null; automationError.value = ''; automationChecking.value = false; automationResultPending.value = false; automationRefreshed = ''
-  generation++; planGeneration++; busy.value = ''; error.value = ''; reviewDirty.value = false; candidateDirty.value = false; draftRevisionId.value = ''; step.value = 'inputs'; activeFile.value = 'NTT'; editingDocument.value = false; immersiveDocument.value = false; targetId.value = ''; restored.value = false; restoreViewPending = true; traceOpen.value = false
+  generation++; planGeneration++; busy.value = ''; error.value = ''; tocRefreshNotice.value = ''; reviewDirty.value = false; candidateDirty.value = false; draftRevisionId.value = ''; step.value = 'inputs'; activeFile.value = 'NTT'; editingDocument.value = false; immersiveDocument.value = false; targetId.value = ''; restored.value = false; restoreViewPending = true; traceOpen.value = false
   identityConfirmation.value = undefined; identityError.value = ''
   reviewLayout.value = 'list'; focusedGroupId.value = ''; search.value = ''; statusFilter.value = 'all'
   generationReview.value = undefined; candidateReviewRevision.value = undefined; catalog.value = { ruleVersion: '', groups: [] }; templates.value = []; inputs.value = []; variables.value = []; documentText.value = ''; documentBaseline.value = ''; documents.value = []; plan.value = null; trace.value = null
@@ -692,8 +717,9 @@ watch(projectId, (id, old) => {
     if (current(project, token) && automationActive.value) { step.value = 'review'; await ensureReview(); scheduleAutomationPoll(project, token) }
   })
 }, { immediate: true })
-watch(activeFile, () => { if (graphNavigation.value?.fileKey !== activeFile.value) graphNavigation.value = undefined; loadDocument(false) })
-watch(activeDocument, (_document, previous) => { if (!bodyDirty(previous, bodyDraft.value)) loadDocument(false) })
+watch(activeFile, () => { tocRefreshNotice.value = ''; if (graphNavigation.value?.fileKey !== activeFile.value) graphNavigation.value = undefined; loadDocument(false) })
+watch(activeDocument, (_document, previous) => { tocRefreshNotice.value = ''; if (!bodyDirty(previous, bodyDraft.value)) loadDocument(false) })
+watch(documentDirty, dirty => { if (dirty) tocRefreshNotice.value = '' })
 watch(step, () => { if (step.value === 'review') void ensureReview(); if (step.value !== 'inputs' && !busy.value && !plan.value) void updatePlan(); if (step.value !== 'preview') { immersiveDocument.value = false; graphNavigation.value = undefined } })
 onBeforeUnmount(() => { snapshotDraft(projectId.value); alive = false; generation++; planGeneration++; stopAutomationPolling(); if (planTimer) clearTimeout(planTimer); window.removeEventListener('beforeunload', beforeUnload); window.removeEventListener('keydown', workspaceKeydown) })
 </script>
@@ -784,7 +810,7 @@ onBeforeUnmount(() => { snapshotDraft(projectId.value); alive = false; generatio
       <div class="card-head">
         <div class="document-tabs"><button v-for="key in ['NTT', 'SCT', 'SCC']" :key="key" class="btn" :class="{ primary: activeFile === key }" :disabled="!!busy || documentDirty" @click="activeFile = key">{{ key }}</button></div>
         <div class="document-tools"><button class="btn" :disabled="!!busy || !documentAccess.editable || documentDirty" @click="editingDocument = !editingDocument">{{ editingDocument && !activeDocument?.stale ? w('readDocument') : w('editContent') }}</button><template v-if="documentDirty"><button class="btn" :disabled="!!busy" @click="discardBody">{{ w('discard') }}</button><button class="btn primary" :disabled="!!busy || !documentAccess.editable" @click="saveDocument">{{ w('saveContent') }}</button></template><button v-if="activeDocument?.stale" class="btn primary" :disabled="!!busy || !allTemplates || generationSourceBlocked || documentDirty" @click="generate">{{ w('regenerate') }}</button><button v-if="immersiveDocument" ref="documentInfoToggle" type="button" class="btn" :aria-expanded="documentInfoOpen" aria-controls="draft-document-info" @click="documentInfoOpen = !documentInfoOpen">{{ w('documentInformation') }}</button></div>
-        <div class="row"><button v-if="immersiveDocument" type="button" class="btn" data-open-business-graph="immersive" :disabled="!!busy || documentDirty || !catalog.groups.length" @click="openGraph">{{ w('businessGraph') }}</button><button class="btn" :disabled="!!busy || !canExport" @click="exportDocument('docx')">{{ w('exportWord') }}</button><button class="btn primary" :disabled="!!busy || !canExport" @click="exportDocument('pdf')">{{ w('exportPdf') }}</button><button ref="immersiveToggle" type="button" class="btn" :aria-expanded="immersiveDocument" @click="setImmersive(!immersiveDocument)">{{ immersiveDocument ? w('exitImmersive') : w('immersivePreview') }}</button></div>
+        <div class="row"><button v-if="immersiveDocument" type="button" class="btn" data-open-business-graph="immersive" :disabled="!!busy || documentDirty || !catalog.groups.length" @click="openGraph">{{ w('businessGraph') }}</button><button v-if="activeFile === 'SCC' && activeDocument?.generated" type="button" class="btn" data-refresh-toc :disabled="!canRefreshToc" @click="refreshDocumentToc">{{ phrase('更新目录及预览', 'Update contents and preview', '更新目錄及預覽') }}</button><button class="btn" :disabled="!!busy || !canExport" @click="exportDocument('docx')">{{ w('exportWord') }}</button><button class="btn primary" :disabled="!!busy || !canExport" @click="exportDocument('pdf')">{{ w('exportPdf') }}</button><button ref="immersiveToggle" type="button" class="btn" :aria-expanded="immersiveDocument" @click="setImmersive(!immersiveDocument)">{{ immersiveDocument ? w('exitImmersive') : w('immersivePreview') }}</button></div>
       </div>
       <p class="hint" data-generated-output-language>{{ w('englishOutput') }}</p>
       <div v-show="!immersiveDocument || documentInfoOpen" class="document-info" id="draft-document-info">
@@ -792,6 +818,7 @@ onBeforeUnmount(() => { snapshotDraft(projectId.value); alive = false; generatio
       <p v-if="activeDocument?.revisionId" class="document-revision-status" role="status"><span>{{ phrase('当前显示已保存的文稿', 'Showing the saved document', '目前顯示已儲存的文稿') }}</span><strong v-if="documentDirty">{{ w('pendingBodyRevision') }}</strong></p>
       <div v-if="activeDocument?.generated" class="document-layout-limits" data-draft-layout-limits><strong>{{ l({ en: 'Layout checks remain unverified', zhHans: '版式核对仍未验证', zhHant: '版式核對仍未驗證' }) }}</strong><p>{{ w('formatReview') }}</p></div>
       </div>
+      <p v-if="tocRefreshNotice && !documentDirty && !dirtyInputs && !activeDocument?.stale" class="hint" data-toc-refresh-status role="status">{{ tocRefreshNotice }}</p>
       <p v-if="documentDirty" class="condition-note">{{ w('pendingBodyNote') }}</p>
       <p v-if="activeDocument?.stale || dirtyInputs" class="review-note" data-draft-stale-status role="status">{{ w('stale') }} <span v-if="activeDocument?.stale">{{ w('staleReadOnly') }}</span></p>
       <p v-if="immersiveDocument && busy" class="flow-status" role="status">{{ busy }}</p><p v-if="immersiveDocument && error" class="flow-error" role="alert">{{ error }}</p>

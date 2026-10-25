@@ -159,6 +159,7 @@ export const draftingApi = {
     api.blob(`/drafting/${projectId}/documents/${fileKey}/source?revisionId=${encodeURIComponent(revisionId)}`, undefined, false),
   updateDocument: (projectId: string, fileKey: string, patch: DraftBodyPatch) =>
     api.put<DraftDocument>(`/drafting/${projectId}/documents/${fileKey}`, patch),
+  refreshToc: (projectId: string, fileKey: string, head: { revisionId: string; docxSha256: string }) => api.post<{ document: DraftDocument; tocFinalization: { status: string; reason?: string; headingFlowStatus?: string; headingFlowReason?: string }; updated: boolean }>(`/drafting/${projectId}/documents/${fileKey}/refresh-toc`, head, { timeout: 300000, llmSelection: { profileId: null }, reportError: false }),
   previewDocument: (projectId: string, fileKey: string, revisionId?: string) =>
     api.blob(`/drafting/${projectId}/documents/${fileKey}/preview.pdf${revisionId ? `?revisionId=${encodeURIComponent(revisionId)}` : ''}`),
   exportDocument: (projectId: string, fileKey: string, format: 'docx' | 'pdf', revisionId?: string) =>

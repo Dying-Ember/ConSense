@@ -2,12 +2,14 @@ package com.consense.service.drafting;
 
 import com.consense.common.BizException;
 import com.consense.document.DocxTemplateEditor.*;
+import com.consense.document.NativeStoryPlan;
 import java.util.*;
 import java.util.regex.*;
 
 /** Compiles semantic paragraph events; it never receives or diffs a final flattened document. */
 final class DraftSourceEditCompiler implements DraftClauseRules.SourceListener {
     private final TemplateIndex source;private final String document;
+    private final Set<String> migratingStaticFooters=new HashSet<>();
     private Map<Integer,Desired> desired=new LinkedHashMap<>();private List<Insertion> insertions=new ArrayList<>();
     private List<Removal> removals=new ArrayList<>();
     private static final class Removal {final String id;final List<NodeAnchor> nodes;Removal(String id,List<NodeAnchor> nodes){this.id=id;this.nodes=nodes;}}
@@ -17,7 +19,18 @@ final class DraftSourceEditCompiler implements DraftClauseRules.SourceListener {
         Insertion(Paragraph p,String value,String id,boolean after){this(p,value,id,after,p);}
         Insertion(Paragraph p,String value,String id,boolean after,Paragraph donor){this.p=p;this.value=value;this.id=id;this.after=after;this.donor=donor;}
     }
-    DraftSourceEditCompiler(TemplateIndex source,String document){this.source=source;this.document=document;}
+    DraftSourceEditCompiler(TemplateIndex source,String document){this(source,document,null);}
+    DraftSourceEditCompiler(TemplateIndex source,String document,NativeLayoutPlan layout){
+        this.source=source;this.document=document;
+        NativeStoryPlan stories=layout==null?null:layout.getStories();if(stories==null)return;
+        if(!source.getSourceSha256().equals(stories.sourceSha256))throw new BizException(4012,"SOURCE_STATIC_MIGRATION_HASH_MISMATCH");
+        for(NativeStoryPlan.StaticFooterGroup group:stories.staticFooterGroups)for(NativeStoryPlan.StaticFooterParagraph footer:group.exactParagraphs){
+            Paragraph actual=source.paragraph(footer.source.getId());
+            if(!actual.getSha256().equals(footer.source.getSha256())||!actual.getCatalogText().equals(footer.exactText))throw new BizException(4012,"SOURCE_STATIC_MIGRATION_ANCHOR_MISMATCH");
+            boolean migrating=stories.sections.stream().filter(section->section.sourceSection.getId().equals(actual.getSectionId())).anyMatch(section->section.stories.stream().anyMatch(story->story.expectedBinding.kind==NativeStoryPlan.Kind.FOOTER&&story.action==NativeStoryPlan.StoryAction.CREATE_NATIVE_FOOTER&&story.pageAction==NativeStoryPlan.PageAction.CREATE_PAGE_FROM_STATIC_SEQUENCE));
+            if(migrating)migratingStaticFooters.add(actual.getId());
+        }
+    }
     String projection(){StringJoiner out=new StringJoiner("\n");for(Paragraph p:source.getMainParagraphs())out.add(p.getCatalogText());return out.toString();}
     @Override public void adopted(Map<String,Object> action,List<DraftClauseRules.SourceChange> changes,boolean changed) {
         if(changed&&changes.isEmpty())throw new BizException(4012,"SOURCE_WHOLE_FORMAT_MAPPING_REQUIRED");
@@ -53,6 +66,9 @@ final class DraftSourceEditCompiler implements DraftClauseRules.SourceListener {
         for(int ordinal=start;ordinal<=end;ordinal++) {
             Paragraph p=resolve(ordinal);
             if(retainedRow!=null&&retainedRow.equals(p.getRowId()))continue;
+            // The same source-bound story plan migrates and clears these exact paragraphs later.
+            // Keep their native nodes out of business deletion; the editor still validates the full plan.
+            if(migratingStaticFooters.contains(p.getId()))continue;
             selected.add(p.getId());
             if(p.getRowId()!=null)rows.add(p.getRowId());
             else body.add(source.anchor(p.getId()));

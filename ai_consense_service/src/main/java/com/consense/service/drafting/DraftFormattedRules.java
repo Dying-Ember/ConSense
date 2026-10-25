@@ -39,7 +39,7 @@ final class DraftFormattedRules {
     }
     static DocxEditResult compile(byte[] original,String key,Map<String,Object> plan,Map<String,String> bookmarks,NativeLayoutPlan layout) {
         DocxTemplateEditor editor=new DocxTemplateEditor();TemplateIndex index=editor.inspect(original);List<Edit> edits=new ArrayList<>();
-        DraftSourceEditCompiler compiler=new DraftSourceEditCompiler(index,key);
+        DraftSourceEditCompiler compiler=new DraftSourceEditCompiler(index,key,layout);
         DraftClauseRules.apply(compiler.projection(),key,plan,compiler);
         List<Map<String,Object>> verified=new ArrayList<>();
         for(Object raw:DraftBusinessRules.list(GUIDANCE.get("operations"))) {

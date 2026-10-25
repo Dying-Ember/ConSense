@@ -1901,6 +1901,42 @@ public class DraftingService {
         }
     }
 
+    // BEGIN DRAFTING_TOC_REFRESH_20261026
+    /** Refresh only a saved SCC's native TOC; keep adopted values and human body edits unchanged. */
+    @Transactional(isolation=Isolation.READ_COMMITTED)
+    public Map<String,Object> refreshToc(String projectId,String fileKey,String expectedRevision,String expectedDocxSha256) {
+        if(!"SCC".equals(fileKey))throw new BizException(4007,"TOC_REFRESH_UNSUPPORTED_DOCUMENT");
+        if(JsonUtils.isBlankText(expectedRevision)||expectedDocxSha256==null||!expectedDocxSha256.matches("[a-f0-9]{64}"))throw new BizException(4090,"TOC_REFRESH_IDENTITY_REQUIRED");
+        DraftDocument document=currentExportDocument(projectId,fileKey,expectedRevision);
+        entityManager.refresh(document,LockModeType.PESSIMISTIC_WRITE);requireCurrent(document);requireRevision(document,expectedRevision);
+        DraftArtifact previous=requireArtifact(document);
+        if(!expectedDocxSha256.equals(previous.getDocxSha256()))throw new BizException(4090,"ARTIFACT_REVISION_CONFLICT: Reload the current draft before updating its TOC.");
+        String frozenSnapshot=document.getSnapshotId(),sourceSha256=previous.getSourceSha256();
+        SourceDocument template=requireTemplate(projectId,fileKey);Long templateId=template.getId();
+        if(template.getStoragePath()==null||!Objects.equals(sourceSha256,template.getSourceSha256())||!Objects.equals(sourceSha256,DraftPdfConverter.sha256(storageService.read(template.getStoragePath()))))throw new BizException(4090,"TEMPLATE_SOURCE_REVISION_CONFLICT: Reload the current original.");
+        List<Map<String,Object>> bindings=DraftDocumentBindings.read(previous.getBindingsJson());
+        List<Object> ledger=JsonUtils.readList(previous.getLedgerJson(),Object.class);
+        DraftTocFinalizer.Result complete=finalizeDraft(fileKey,sourceSha256,previous.getDocxBytes(),bindings,ledger);
+        // No database writes precede this clear. Re-read values, source and document after rendering.
+        entityManager.clear();document=currentExportDocument(projectId,fileKey,expectedRevision);
+        entityManager.refresh(document,LockModeType.PESSIMISTIC_WRITE);requireCurrent(document);requireRevision(document,expectedRevision);
+        DraftArtifact current=requireArtifact(document);SourceDocument currentTemplate=requireTemplate(projectId,fileKey);
+        if(!expectedDocxSha256.equals(current.getDocxSha256())||!Objects.equals(sourceSha256,current.getSourceSha256())||!Objects.equals(frozenSnapshot,document.getSnapshotId()))throw new BizException(4090,"ARTIFACT_REVISION_CONFLICT: The saved draft changed during TOC rendering.");
+        if(!Objects.equals(templateId,currentTemplate.getId())||currentTemplate.getStoragePath()==null||!Objects.equals(sourceSha256,currentTemplate.getSourceSha256())||!Objects.equals(sourceSha256,DraftPdfConverter.sha256(storageService.read(currentTemplate.getStoragePath()))))throw new BizException(4090,"TEMPLATE_SOURCE_REVISION_CONFLICT: The original changed during TOC rendering.");
+        Map<String,Object> proof=new LinkedHashMap<>(complete.proof);boolean updated=false;
+        Object repairs=proof.get("headingFlowRepairCount"),mutations=proof.get("headingMutationCount");
+        if(proof.containsKey("repairDocxSha256")||repairs instanceof Number&&((Number)repairs).intValue()!=0||mutations instanceof Number&&((Number)mutations).intValue()!=0){proof.put("status","UNKNOWN");proof.put("reason","TOC_REFRESH_REQUIRES_HEADING_REPAIR");}
+        if("PASS".equals(proof.get("status"))&&(complete.pdf==null||!Objects.equals(proof.get("finalDocxSha256"),DraftPdfConverter.sha256(complete.docx)))){proof.put("status","UNKNOWN");proof.put("reason","TOC_REFRESH_FINAL_PAIR_UNVERIFIED");}
+        if("PASS".equals(proof.get("status"))&&!Arrays.equals(previous.getDocxBytes(),complete.docx)) {
+            DocxTemplateEditor.TemplateIndex finalIndex=complete.index();bindings=DraftDocumentBindings.reconcile(bindings,finalIndex,false);
+            DraftArtifact next=new DraftArtifact();next.setId(java.util.UUID.randomUUID().toString());next.setProjectId(projectId);next.setFileKey(fileKey);next.setSnapshotId(previous.getSnapshotId());next.setSourceSha256(sourceSha256);next.setParentRevisionId(previous.getId());
+            next.setDocxBytes(complete.docx);next.setDocxSha256(finalIndex.getSourceSha256());next.setBindingsJson(JsonUtils.write(bindings));next.setLedgerJson(JsonUtils.write(complete.ledger(ledger)));next.setBlocksJson(JsonUtils.write(DraftDocumentBindings.blocks(finalIndex,bindings)));next.setFieldImpactsJson(previous.getFieldImpactsJson());
+            artifactRepository.save(next);saveFinalizedPdf(complete);document.setRevisionId(next.getId());document.setContent(DraftFormattedRules.content(finalIndex));document.setUpdatedAt(Instant.now());documentRepository.save(document);updated=true;
+        }
+        Map<String,Object> response=new LinkedHashMap<>();response.put("document",documentVO(document,snapshotId(projectId,null)));response.put("tocFinalization",proof);response.put("updated",updated);return response;
+    }
+    // END DRAFTING_TOC_REFRESH_20261026
+
     /** Native reading and editing must use the exact saved revision bound by the source locations. */
     public byte[] documentSource(String projectId,String fileKey,String expectedRevision) {
         DraftDocument document=currentExportDocument(projectId,fileKey,expectedRevision);DraftArtifact artifact=requireArtifact(document);

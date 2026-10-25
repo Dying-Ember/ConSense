@@ -252,6 +252,14 @@ public class DraftingController {
                 .body(new ByteArrayResource(content));
     }
 
+    // BEGIN DRAFTING_TOC_REFRESH_20261026
+    @PostMapping("/documents/{fileKey}/refresh-toc")
+    public ApiResponse<Map<String,Object>> refreshToc(@PathVariable String projectId,@PathVariable String fileKey,@RequestBody Map<String,String> body) {
+        if(body==null||body.size()!=2||!body.containsKey("revisionId")||!body.containsKey("docxSha256"))throw new com.consense.common.BizException(4090,"TOC_REFRESH_IDENTITY_REQUIRED");
+        return ApiResponse.ok(draftingService.refreshToc(projectId,fileKey,body.get("revisionId"),body.get("docxSha256")));
+    }
+    // END DRAFTING_TOC_REFRESH_20261026
+
     @GetMapping("/documents/{fileKey}/source")
     public ResponseEntity<ByteArrayResource> documentSource(@PathVariable String projectId,@PathVariable String fileKey,@RequestParam(required=false) String revisionId) {
         byte[] bytes=draftingService.documentSource(projectId,fileKey,revisionId);

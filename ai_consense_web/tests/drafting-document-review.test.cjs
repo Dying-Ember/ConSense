@@ -13,14 +13,31 @@ const fee = { key: 'fee', kind: 'text', label: { en: 'Fee', zhHans: '费用', zh
 const binding = (id, n, sourceText, text, extra = {}) => ({ bindingId: id, bookmarkName: id, sourceParagraphId: sourcePath(n), resultParagraphId: sourcePath(n), sourceParagraphOrdinal: n, resultParagraphOrdinal: n, sourceText, text, fieldKeys: ['fee'], actionIds: ['price'], appliedActionIds: ['price'], operationIds: ['price-fill'], applicationStatus: 'applied', locationStatus: 'exact', geometryStatus: 'unavailable', ...extra })
 const base = () => ({ projectId: 'TEST-READER', fileKey: 'NTT', document: { fileKey: 'NTT', title: 'Notes', content: '', generated: true, revisionId: 'r1', sourceSha256: 'source-sha', docxSha256: 'result-sha' }, original: reading('source-sha', [[1, 'Complete invitation'], [2, 'Pay [fee] dollars.'], [3, 'Complete closing paragraph']]), result: reading('result-sha', [[1, 'Complete invitation'], [2, 'Pay 100 dollars.'], [3, 'Complete closing paragraph']]), sourceBindings: { fileKey: 'NTT', view: 'source', sourceSha256: 'source-sha', bindings: [binding('price-binding', 2, 'Pay [fee] dollars.', 'Pay [fee] dollars.')] }, resultBindings: { fileKey: 'NTT', view: 'result', sourceSha256: 'source-sha', docxSha256: 'result-sha', revisionId: 'r1', bindings: [binding('price-binding', 2, 'Pay [fee] dollars.', 'Pay 100 dollars.')] }, fields: [fee], values: { fee: 'Unsaved current value' }, variables: [{ key: 'fee', value: '100', candidates: [] }], actions: [{ id: 'price', document: 'NTT', clause: 'Price', paragraphs: 'P2', inputKeys: ['fee'], action: 'fill' }], fieldStates: { fee: 'adopted' }, dirtyKeys: ['fee'], locale: 'en', loading: false })
 const settle = async () => { for (let i = 0; i < 8; i++) { await Promise.resolve(); await vue.nextTick() } }
-async function harness(overrides = {}) {
+async function harness(overrides = {}, slots) {
   const props = vue.reactive({ ...base(), ...overrides }), events = [], scrolls = []
   dom.window.HTMLElement.prototype.scrollTo = function (value) { scrolls.push(value); this.scrollTop = value.top ?? 0 }
   const component = loadVue(path.join(__dirname, '../src/components/DraftingDocumentReview.vue'), { boundaries: { dompurify: { default: purify } }, globals: { document, window, Element, Node, HTMLElement } }).default
   const element = document.createElement('div'); document.body.append(element)
-  const app = vue.createApp({ render: () => vue.h(component, { ...props, onInput: key => events.push(['input', key]), onFile: key => events.push(['file', key]), onRetry: () => events.push(['retry']), onPdf: view => events.push(['pdf', view]) }) })
+  const app = vue.createApp({ render: () => vue.h(component, { ...props, onInput: key => events.push(['input', key]), onFile: key => events.push(['file', key]), onRetry: () => events.push(['retry']), onPdf: view => events.push(['pdf', view]) }, slots) })
   app.mount(element); await settle()
   return { props, element, events, scrolls, async click(selector) { const control = element.querySelector(selector); assert(control, `Rendered control ${selector}`); control.click(); await settle() }, dispose() { app.unmount(); element.remove() } }
+}
+async function failedAuxiliaryReadDoesNotHideSavedRevisionEditing() {
+  const authored = vue.ref('Exact saved block from revision r1')
+  const h = await harness({ error: 'Request failed with status code 404', original: undefined, result: undefined, sourceBindings: undefined, resultBindings: undefined }, { default: () => vue.h('textarea', { 'data-authored-body': '', value: authored.value, onInput: event => { authored.value = event.target.value } }) })
+  assert.match(h.element.querySelector('[role="alert"]').textContent, /404/)
+  assert.equal(h.element.querySelector('[data-authored-body]'), null, 'Reading mode keeps its real failure visible')
+  h.props.editing = true; await settle()
+  const editor = h.element.querySelector('[data-authored-body]')
+  assert(editor, 'A failed auxiliary reading request must not hide the saved revision block editor')
+  assert.equal(editor.value, 'Exact saved block from revision r1')
+  assert.match(h.element.querySelector('[role="alert"]').textContent, /404/, 'Editing does not certify the failed reading as repaired')
+  editor.value = 'Explicit manual revision'; editor.dispatchEvent(new window.Event('input', { bubbles: true })); await settle()
+  await h.click('[role="alert"] button'); assert.deepEqual(h.events, [['retry']])
+  h.props.loading = true; await settle(); assert.equal(h.element.querySelector('[data-authored-body]').value, 'Explicit manual revision', 'Retrying the reader preserves the separately owned edit')
+  h.props.loading = false; h.props.editing = false; await settle(); assert.equal(h.element.querySelector('[data-authored-body]'), null)
+  assert.match(h.element.querySelector('[role="alert"]').textContent, /404/); assert.equal(h.element.querySelector('[data-document-paper]'), null, 'Failed reading never falls back to fabricated source/result content')
+  h.dispose(); console.log('PASS: auxiliary read failure remains visible and retryable while saved-revision manual editing stays available')
 }
 async function unverifiedMappingStillReadsCurrentSavedBody() {
   for (const mismatch of ['missing', 'unknown-native-path', 'unattributed']) {
@@ -338,4 +355,4 @@ async function deliveryNoticesPreserveVerifiedOverlay() {
   assert.equal(h.element.querySelectorAll('[data-document-paper] ins').length, 0, 'A changed notice receipt retains the complete-reading fallback')
   h.dispose(); console.log('PASS: revision-bound delivery notices preserve complete order and do not relax mismatch guards')
 }
-;(async () => { await unverifiedMappingStillReadsCurrentSavedBody(); await compactLimitsKeepEveryRiskAndParentOwnedStaleStatus(); await completeSavedRevisionChanges(); await warningSourceLabels(); await completeDocumentModes(); await searchableVariableSelection(); await selectedActualTokenDiff(); await nativeLineBreakTokenDiff(); await linkedNativeNavigation(); await branchGuidanceAndAddedMapping(); await verifiedReadingGuardsAndLocales(); await replacedTemplateKeepsCurrentOriginal(); await recordedEvidenceContext(); await appliedSharedParagraphAttribution(); await unavailableSavedLedger(); await missingCrossFileTargetDoesNotFallback() })().catch(error => { console.error(error); process.exitCode = 1 })
+;(async () => { await failedAuxiliaryReadDoesNotHideSavedRevisionEditing(); await unverifiedMappingStillReadsCurrentSavedBody(); await compactLimitsKeepEveryRiskAndParentOwnedStaleStatus(); await completeSavedRevisionChanges(); await warningSourceLabels(); await completeDocumentModes(); await searchableVariableSelection(); await selectedActualTokenDiff(); await nativeLineBreakTokenDiff(); await linkedNativeNavigation(); await branchGuidanceAndAddedMapping(); await verifiedReadingGuardsAndLocales(); await replacedTemplateKeepsCurrentOriginal(); await recordedEvidenceContext(); await appliedSharedParagraphAttribution(); await unavailableSavedLedger(); await missingCrossFileTargetDoesNotFallback() })().catch(error => { console.error(error); process.exitCode = 1 })

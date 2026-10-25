@@ -102,6 +102,106 @@ public final class DocxTemplateEditor {
     public PreparedTemplate prepare(byte[] sourceDocx) { return new PreparedTemplate(load(sourceDocx)); }
     /** Native field identities only; PDF pagination remains the caller's measured evidence. */
     public List<TocPageReference> tocPageReferences(byte[] sourceDocx) { return tocPageReferences(load(sourceDocx)); }
+    /** A cleared endpoint may remain as an empty native paragraph; this does not certify its heading flow. */
+    public Paragraph verifyEmptyNativeBookmarkParagraph(byte[] sourceDocx,String expectedSha256,String bookmark,String expectedParagraphId){
+        PackageModel model=load(sourceDocx);if(!model.index.sourceSha256.equals(expectedSha256))throw error("SOURCE_HASH_MISMATCH","cleared-endpoint");Element paragraph=headingFlowBookmark(model,bookmark);String id=MAIN+"#"+path(paragraph);
+        if(!id.equals(expectedParagraphId)||!editableText(paragraph).isEmpty())throw error("TOC_CLEARED_ENDPOINT_NOT_EMPTY",bookmark);
+        validateClearedLayoutParagraph(paragraph,false,bookmark);
+        for(String unsupported:Arrays.asList("numPr","pStyle","pBdr","fldChar","instrText","fldSimple","drawing","pict","oMath","sym","object","tab","br","cr","sectPr","pageBreakBefore"))if(has(paragraph,unsupported))throw error("TOC_CLEARED_ENDPOINT_CONTROL_UNSUPPORTED",bookmark);
+        return model.index.paragraph(id);
+    }
+    /** Read-only authority for disambiguating a rendered PAGE value from this exact footer's literals. */
+    public Map<String,TocFooterPageSource> tocFooterPageSources(byte[] sourceDocx,String expectedSha256) {
+        PackageModel model=load(sourceDocx);if(!model.index.sourceSha256.equals(expectedSha256))throw error("SOURCE_HASH_MISMATCH","toc-footer");
+        List<Element> relationships=storyRelationships(model,false);Element settings=null;
+        for(Element relation:relationships)if((OFFICE_REL+"/settings").equals(relation.getAttribute("Type"))){if(settings!=null||!internalStoryRelation(relation))throw error("TOC_FOOTER_SETTINGS_UNSUPPORTED","toc-footer");settings=storyXml(model,resolveStoryTarget(relation.getAttribute("Target"))).getDocumentElement();}
+        if(settings!=null)for(Element odd:direct(settings,"evenAndOddHeaders"))if(!Arrays.asList("0","false","off").contains(odd.getAttributeNS(W,"val")))throw error("TOC_FOOTER_VARIANT_UNSUPPORTED","toc-footer");
+        Map<String,TocFooterPageSource> result=new LinkedHashMap<>(),sections=new HashMap<>();
+        for(TocPageReference reference:tocPageReferences(model)){
+            Feature bookmark=null;for(Feature feature:model.index.features)if("BOOKMARK".equals(feature.kind)&&reference.targetBookmark.equals(feature.name)&&feature.complete)bookmark=feature;
+            Paragraph paragraph=null;for(Paragraph candidate:model.index.mainParagraphs)if(bookmark.startId.startsWith(candidate.id+"/")&&(paragraph==null||candidate.id.length()>paragraph.id.length()))paragraph=candidate;
+            if(paragraph==null||paragraph.sectionId==null)throw error("TOC_FOOTER_SECTION_UNMAPPED",reference.targetBookmark);
+            TocFooterPageSource source=sections.get(paragraph.sectionId);
+            if(source==null){
+                Element section=model.nodes.get(paragraph.sectionId);if(section==null||!is(section,"sectPr"))throw error("TOC_FOOTER_SECTION_UNMAPPED",reference.targetBookmark);
+                for(Element title:direct(section,"titlePg"))if(!Arrays.asList("0","false","off").contains(title.getAttributeNS(W,"val")))throw error("TOC_FOOTER_VARIANT_UNSUPPORTED",paragraph.sectionId);
+                List<Element> numbers=direct(section,"pgNumType");if(numbers.size()>1)throw error("TOC_FOOTER_NUMBERING_UNSUPPORTED",paragraph.sectionId);
+                if(!numbers.isEmpty()){Element number=numbers.get(0);if(!Arrays.asList("","decimal").contains(number.getAttributeNS(W,"fmt"))||number.hasAttributeNS(W,"chapStyle")||number.hasAttributeNS(W,"chapSep"))throw error("TOC_FOOTER_NUMBERING_UNSUPPORTED",paragraph.sectionId);}
+                List<Element> refs=direct(section,"footerReference");if(refs.size()!=1||!"default".equals(refs.get(0).getAttributeNS(W,"type")))throw error("TOC_FOOTER_VARIANT_UNSUPPORTED",paragraph.sectionId);
+                String id=refs.get(0).getAttributeNS(OFFICE_REL,"id");Element relation=null;int matches=0;for(Element entry:relationships)if(id.equals(entry.getAttribute("Id"))){relation=entry;matches++;}
+                if(matches!=1||!(OFFICE_REL+"/footer").equals(relation.getAttribute("Type"))||!internalStoryRelation(relation))throw error("TOC_FOOTER_RELATIONSHIP_UNSUPPORTED",paragraph.sectionId);
+                String part=resolveStoryTarget(relation.getAttribute("Target"));Element footer=storyXml(model,part).getDocumentElement();if(!is(footer,"ftr"))throw error("TOC_FOOTER_PART_UNSUPPORTED",part);validateStoryContentType(model,part,Kind.FOOTER);
+                List<Feature> fields=new ArrayList<>();for(Feature feature:model.index.features)if("FIELD".equals(feature.kind)&&part.equals(feature.part))fields.add(feature);
+                if(fields.size()!=1||!fields.get(0).complete||!tocPageInstruction(fields.get(0).instruction))throw error("TOC_FOOTER_PAGE_FIELD_UNSUPPORTED",part);
+                Feature field=fields.get(0);Element start=model.nodes.get(field.startId),end=model.nodes.get(field.endId);if(start==null||end==null||tocFooterAncestor(start,"p")!=tocFooterAncestor(end,"p"))throw error("TOC_FOOTER_PAGE_FIELD_UNSUPPORTED",part);
+                if(is(start,"fldSimple")?has(footer,"fldChar"):footer.getElementsByTagNameNS(W,"fldChar").getLength()!=3)throw error("TOC_FOOTER_PAGE_FIELD_UNSUPPORTED",part);
+                for(String unsupported:Arrays.asList("drawing","pict","oMath","tbl","sdt","hyperlink","altChunk"))if(has(footer,unsupported))throw error("TOC_FOOTER_CONTENT_UNSUPPORTED",part);
+                List<String> literals=new ArrayList<>();int controls=0;
+                for(Node child=footer.getFirstChild();child!=null;child=child.getNextSibling())if(child instanceof Element){if(!is(child,"p"))throw error("TOC_FOOTER_CONTENT_UNSUPPORTED",part);StringBuilder literal=new StringBuilder();NodeList nodes=((Element)child).getElementsByTagName("*");
+                    for(int i=0;i<nodes.getLength();i++){Element node=(Element)nodes.item(i);if(tocFooterAncestor(node,"pPr")!=null||tocFooterAncestor(node,"rPr")!=null||is(node,"pPr")||is(node,"rPr"))continue;
+                        if(node==start){appendTocFooterLiteral(literals,literal);controls++;}
+                        if(is(start,"fldSimple")&&contains(start,node)||node==start||node==end||insideFeature(node,start,end))continue;
+                        if(is(node,"t"))literal.append(node.getTextContent());else if(is(node,"tab")||is(node,"br")||is(node,"cr"))appendTocFooterLiteral(literals,literal);
+                        else if(!is(node,"r")&&!is(node,"bookmarkStart")&&!is(node,"bookmarkEnd"))throw error("TOC_FOOTER_CONTENT_UNSUPPORTED",part);
+                    }appendTocFooterLiteral(literals,literal);
+                }
+                if(controls!=1)throw error("TOC_FOOTER_LITERAL_SCOPE_UNSUPPORTED",part);
+                source=new TocFooterPageSource(model.index.sourceSha256,paragraph.sectionId,part,hash(model.entries.get(part)),field.startId,literals);sections.put(paragraph.sectionId,source);
+            }result.put(reference.targetBookmark,source);
+        }return Collections.unmodifiableMap(result);
+    }
+    private static boolean tocPageInstruction(String instruction){String value=instruction.trim().replaceAll("(?U)\\s+"," ");return "PAGE".equalsIgnoreCase(value)||"PAGE \\* MERGEFORMAT".equalsIgnoreCase(value);}
+    private static Element tocFooterAncestor(Element node,String local){for(Node parent=node.getParentNode();parent instanceof Element;parent=parent.getParentNode())if(is(parent,local))return (Element)parent;return null;}
+    private static boolean internalStoryRelation(Element relation){String mode=optionalAttribute(relation,"TargetMode");return mode==null||"Internal".equals(mode);}
+    private static void appendTocFooterLiteral(List<String> literals,StringBuilder text){String value=text.toString().trim().replaceAll("(?U)\\s+"," ");if(!value.isEmpty())literals.add(value);text.setLength(0);}
+    public static final class TocFooterPageSource {
+        private final String sourceSha256,sectionId,part,partSha256,pageFieldId;private final List<String> literals;
+        private TocFooterPageSource(String source,String section,String part,String sha,String field,List<String> literals){sourceSha256=source;sectionId=section;this.part=part;partSha256=sha;pageFieldId=field;this.literals=Collections.unmodifiableList(new ArrayList<>(literals));}
+        public String getSourceSha256(){return sourceSha256;}public String getSectionId(){return sectionId;}public String getPart(){return part;}public String getPartSha256(){return partSha256;}public String getPageFieldId(){return pageFieldId;}public List<String> getLiterals(){return literals;}
+    }
+    /** Refresh only displayed TOC titles bound to complete, unique current heading bookmarks. */
+    public TocTitleCacheUpdate updateTocTitleCaches(byte[] sourceDocx,String expectedSha256) {
+        PackageModel model=load(sourceDocx);if(!model.index.sourceSha256.equals(expectedSha256))throw error("SOURCE_HASH_MISMATCH","toc-title");
+        List<TocPageReference> references=tocPageReferences(model);Map<Element,String> replacements=new LinkedHashMap<>(),before=new LinkedHashMap<>();
+        List<Map<String,String>> changes=new ArrayList<>(),unknown=new ArrayList<>();
+        for(TocPageReference reference:references)try {
+            Element heading=headingFlowBookmark(model,reference.targetBookmark);Feature bookmark=null;
+            for(Feature feature:model.index.features)if("BOOKMARK".equals(feature.kind)&&reference.targetBookmark.equals(feature.name))bookmark=feature;
+            Element headingStart=model.nodes.get(bookmark.startId),headingEnd=model.nodes.get(bookmark.endId);
+            if(has(heading,"fldChar")||has(heading,"instrText")||has(heading,"fldSimple")||has(heading,"drawing")||has(heading,"pict")||has(heading,"oMath"))throw error("TOC_TITLE_HEADING_CONTROL_UNSUPPORTED",reference.targetBookmark);
+            NodeList headingTexts=heading.getElementsByTagNameNS(W,"t");for(int i=0;i<headingTexts.getLength();i++)if(!insideFeature(headingTexts.item(i),headingStart,headingEnd))throw error("TOC_TITLE_HEADING_RANGE_INCOMPLETE",reference.targetBookmark);
+            String full=editableText(heading).trim();int separator=full.indexOf('\t');
+            if(separator<=0||full.indexOf('\n')>=0||full.indexOf('\r')>=0)throw error("TOC_TITLE_HEADING_SEPARATOR_UNSUPPORTED",reference.targetBookmark);
+            String number=full.substring(0,separator).trim(),title=full.substring(separator+1).trim();
+            if(title.isEmpty()||title.indexOf('\t')>=0)throw error("TOC_TITLE_HEADING_SEPARATOR_UNSUPPORTED",reference.targetBookmark);
+            Element field=model.nodes.get(reference.fieldStartId),hyperlink=field;while(hyperlink!=null&&!is(hyperlink,"hyperlink"))hyperlink=hyperlink.getParentNode() instanceof Element?(Element)hyperlink.getParentNode():null;
+            StringBuilder label=new StringBuilder(),cached=new StringBuilder();List<Element> titleNodes=new ArrayList<>();int tabs=0;NodeList nodes=hyperlink.getElementsByTagName("*");
+            for(int i=0;i<nodes.getLength();i++){Element node=(Element)nodes.item(i);if(node==field)break;
+                if(is(node,"tab")){tabs++;continue;}
+                if(is(node,"fldChar")||is(node,"instrText")||is(node,"fldSimple")||is(node,"br")||is(node,"cr")||is(node,"drawing")||is(node,"pict"))throw error("TOC_TITLE_ROW_CONTROL_UNSUPPORTED",reference.targetBookmark);
+                if(is(node,"t")){if(tabs==0)label.append(node.getTextContent());else if(tabs==1){titleNodes.add(node);cached.append(node.getTextContent());}else if(!node.getTextContent().isEmpty())throw error("TOC_TITLE_ROW_SEPARATOR_UNSUPPORTED",reference.targetBookmark);}
+            }
+            if(tabs!=2||!number.equals(label.toString().trim()))throw error("TOC_TITLE_LABEL_MISMATCH",reference.targetBookmark);
+            if(title.equals(cached.toString().trim()))continue;
+            // A changed multi-run title needs explicit formatting review; never move text between styles.
+            if(titleNodes.size()!=1)throw error("TOC_TITLE_FORMAT_SCOPE_UNSUPPORTED",reference.targetBookmark);
+            Element node=titleNodes.get(0);if(replacements.put(node,title)!=null)throw error("TOC_TITLE_TARGET_AMBIGUOUS",reference.targetBookmark);before.put(node,node.getTextContent());
+            Map<String,String> receipt=new LinkedHashMap<>();receipt.put("targetBookmark",reference.targetBookmark);receipt.put("cacheNodeId",MAIN+"#"+path(node));receipt.put("before",node.getTextContent());receipt.put("after",title);changes.add(Collections.unmodifiableMap(receipt));
+        }catch(EditException unsupported){Map<String,String> issue=new LinkedHashMap<>();issue.put("targetBookmark",reference.targetBookmark);issue.put("reason",unsupported.getCode());unknown.add(Collections.unmodifiableMap(issue));}
+        if(replacements.isEmpty())return new TocTitleCacheUpdate(new DocxEditResult(sourceDocx,model.index),references.size(),changes,unknown);
+        byte[] original=model.entries.get(MAIN);Document document=model.xmlParts.get(MAIN);if(!Arrays.equals(original,tocXmlKeepingOriginalDeclaration(document,original)))throw error("TOC_TITLE_XML_NOT_REVERSIBLE","toc-title");
+        for(Map.Entry<Element,String> entry:replacements.entrySet())entry.getKey().setTextContent(entry.getValue());byte[] changed=tocXmlKeepingOriginalDeclaration(document,original);
+        for(Map.Entry<Element,String> entry:before.entrySet())entry.getKey().setTextContent(entry.getValue());if(!Arrays.equals(original,tocXmlKeepingOriginalDeclaration(document,original)))throw error("TOC_TITLE_XML_NOT_REVERSIBLE","toc-title");
+        model.entries.put(MAIN,changed);byte[] bytes=write(model.entries);TemplateIndex index=load(bytes).index;
+        for(Map.Entry<String,String> entry:model.index.entryHashes.entrySet())if(!MAIN.equals(entry.getKey())&&!entry.getValue().equals(index.entryHashes.get(entry.getKey())))throw error("TOC_TITLE_PART_CHANGED",entry.getKey());
+        return new TocTitleCacheUpdate(new DocxEditResult(bytes,index,model.index.sourceSha256,Collections.emptyList(),Collections.emptyList(),model.index.entryHashes),references.size(),changes,unknown);
+    }
+    public static final class TocTitleCacheUpdate {
+        private final DocxEditResult result;private final int targetCount;private final List<Map<String,String>> changes,unknown;
+        private TocTitleCacheUpdate(DocxEditResult result,int targetCount,List<Map<String,String>> changes,List<Map<String,String>> unknown){this.result=result;this.targetCount=targetCount;this.changes=Collections.unmodifiableList(new ArrayList<>(changes));this.unknown=Collections.unmodifiableList(new ArrayList<>(unknown));}
+        public DocxEditResult getResult(){return result;}public int getTargetCount(){return targetCount;}
+        public List<Map<String,String>> getChanges(){return changes;}public List<Map<String,String>> getUnknown(){return unknown;}
+    }
     /** Only complete numeric PAGEREF caches inside the same native TOC may change. */
     public DocxEditResult updateTocPageCaches(byte[] sourceDocx,String expectedSha256,Map<String,String> measuredPages) {
         PackageModel model=load(sourceDocx);
