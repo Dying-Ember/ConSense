@@ -8,11 +8,12 @@ const { parse, compileScript } = require('vue/compiler-sfc')
 const { renderToString } = require('vue/server-renderer')
 const { loadTypeScript } = require('./helpers/load-typescript.cjs')
 const words = loadTypeScript(path.join(__dirname, '../src/drafting/words.ts'), {})
+const body = loadTypeScript(path.join(__dirname, '../src/drafting/body-edit.ts'), {})
 const file = path.join(__dirname, '../src/components/DraftingBodyEditor.vue')
 const script = compileScript(parse(fs.readFileSync(file, 'utf8'), { filename: file }).descriptor, { id: 'body-editor-test', inlineTemplate: true }).content
 const compiled = ts.transpileModule(script, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText
 const moduleForComponent = { exports: {} }
-vm.runInNewContext(compiled, { module: moduleForComponent, exports: moduleForComponent.exports, require: name => name === 'vue' ? vue : name === '@/drafting/words' ? words : (() => { throw new Error(name) })() })
+vm.runInNewContext(compiled, { module: moduleForComponent, exports: moduleForComponent.exports, require: name => name === 'vue' ? vue : name === '@/drafting/words' ? words : name === '@/drafting/body-edit' ? body : (() => { throw new Error(name) })() })
 ;(async () => {
   for (const locale of ['en', 'zh-Hans', 'zh-Hant']) {
     const blocks = [{ id: 'source/p[2]', text: 'Exact formal\twording', textHash: 'h2', paragraphOrdinal: 2, editable: true }, { id: 'source/p[3]', text: 'TOC result', textHash: 'h3', paragraphOrdinal: 3, editable: false }]

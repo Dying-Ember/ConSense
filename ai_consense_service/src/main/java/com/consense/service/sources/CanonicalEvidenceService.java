@@ -419,7 +419,7 @@ public class CanonicalEvidenceService {
     @Transactional(propagation=Propagation.REQUIRES_NEW,isolation=Isolation.READ_COMMITTED,readOnly=true)
     public List<CanonicalSourceBinding> compactNormalCandidates(String project,String module,List<SourceDocument> selected,java.util.function.BiConsumer<String,Integer> recorder){
         validModule(module);require(selected!=null&&!selected.isEmpty(),HttpStatus.BAD_REQUEST,"CANONICAL_SELECTED_DOCUMENTS_INVALID");
-        if(!"vetting".equals(module)){admission(recorder,"unsupported_module",0);return null;}
+        if(!Arrays.asList("vetting","advisory").contains(module)){admission(recorder,"unsupported_module",0);return null;}
         if(entityManager==null){admission(recorder,"persistence_context_unavailable",0);return null;}
         List<CanonicalSourceBinding> candidates=new ArrayList<>();Map<Long,List<List<Object>>> prefixes=new LinkedHashMap<>();Set<Long> ids=new HashSet<>();
         for(SourceDocument source:selected){
@@ -479,7 +479,11 @@ public class CanonicalEvidenceService {
     }
     @Transactional(propagation=Propagation.REQUIRES_NEW,isolation=Isolation.READ_COMMITTED,readOnly=true)
     public CompactNormalPreparation prepareCompactNormalSources(String project,String module,List<SourceDocument> selected,List<CanonicalSourceBinding> candidates,java.util.function.BiConsumer<SourceDocument,JsonNode> consumer,java.util.function.BiConsumer<String,Integer> recorder){
-        require("vetting".equals(module)&&selected!=null&&candidates!=null&&selected.size()==candidates.size()&&!selected.isEmpty()&&consumer!=null&&entityManager!=null,HttpStatus.BAD_REQUEST,"CANONICAL_SELECTED_DOCUMENTS_INVALID");
+        return prepareCompactNormalSources(project,module,selected,candidates,consumer,recorder,null);
+    }
+    @Transactional(propagation=Propagation.REQUIRES_NEW,isolation=Isolation.READ_COMMITTED,readOnly=true)
+    public CompactNormalPreparation prepareCompactNormalSources(String project,String module,List<SourceDocument> selected,List<CanonicalSourceBinding> candidates,java.util.function.BiConsumer<SourceDocument,JsonNode> consumer,java.util.function.BiConsumer<String,Integer> recorder,Map<Long,JsonNode> registeredHeaders){
+        validModule(module);require(Arrays.asList("vetting","advisory").contains(module)&&selected!=null&&candidates!=null&&selected.size()==candidates.size()&&!selected.isEmpty()&&consumer!=null&&entityManager!=null,HttpStatus.BAD_REQUEST,"CANONICAL_SELECTED_DOCUMENTS_INVALID");
         List<CanonicalSourceBinding> retained=new ArrayList<>();Map<Long,List<List<Object>>> histories=new LinkedHashMap<>();
         Map<Long,SourceDocument> stamps=new LinkedHashMap<>();Map<Long,CompactRegistryPin> registryPins=new LinkedHashMap<>();Map<Long,String> graphs=new LinkedHashMap<>(),generations=new LinkedHashMap<>();
         for(int i=0;i<selected.size();i++){
@@ -491,8 +495,8 @@ public class CanonicalEvidenceService {
             require(modules(JsonUtils.parse(binding.getEligibleModulesJson())).contains(module),HttpStatus.FORBIDDEN,"CANONICAL_MODULE_NOT_ELIGIBLE");
             List<List<Object>> capturedHistory=candidates instanceof CompactNormalCandidates?((CompactNormalCandidates)candidates).prefixes.get(captured.getId()):Collections.singletonList(bindingState(binding));
             require(capturedHistory!=null&&capturedHistory.equals(compactHistory(project,captured.getId(),binding.getId())),HttpStatus.CONFLICT,"CANONICAL_COMPACT_BINDING_CHANGED");
-            String[] authority=new String[2];
-            require(Objects.equals(binding.getSnapshotBytesSha256(),streamedSnapshotSha256(binding.getId(),authority)),HttpStatus.CONFLICT,"CANONICAL_STORED_BYTES_CHANGED");
+            String[] authority=new String[2];com.fasterxml.jackson.databind.node.ObjectNode header=registeredHeaders==null?null:JsonUtils.mapper().createObjectNode();
+            require(Objects.equals(binding.getSnapshotBytesSha256(),streamedSnapshotSha256(binding.getId(),authority,header)),HttpStatus.CONFLICT,"CANONICAL_STORED_BYTES_CHANGED");
             if(!NormalObservedContract.SCHEMA.equals(authority[0])||!NormalObservedContract.PRODUCER.equals(authority[1])){admission(recorder,"stored_authority_not_normal",i);return null;}
             SourceDocument source=sources.normalDocument(project,captured.getId(),module);
             require(ProjectDocumentScope.sameScopeRevision(captured,source)&&SourceContentDigests.stamped(source)&&Objects.equals(captured.getBusinessContentSha256(),source.getBusinessContentSha256())
@@ -505,6 +509,7 @@ public class CanonicalEvidenceService {
             CanonicalSourceBinding compact=copyBinding(binding);compact.setSnapshotJson(null);List<List<Object>> history=compactNormalHistory(project,module,source,compact,graph,graphs.get(source.getId()));
             if(history==null){admission(recorder,"foreign_authority_not_normal",i);return null;}
             require(capturedHistory.equals(history),HttpStatus.CONFLICT,"CANONICAL_COMPACT_BINDING_CHANGED");
+            if(header!=null){validateCompactForeignNormal(binding,header,source,graph,graphs.get(source.getId()),module);registeredHeaders.put(source.getId(),header);}
             consumer.accept(source,graph);
             retained.add(compact);histories.put(source.getId(),history);stamps.put(source.getId(),stamp);registryPins.put(source.getId(),new CompactRegistryPin(null,true,sources.observeOriginal(stamp)));
         }
@@ -782,6 +787,11 @@ public class CanonicalEvidenceService {
 
     private static EvidencePointer pointer(CanonicalSourceBinding binding,JsonNode snapshot,JsonNode chunk,String module){
         return pointer(binding,snapshot,chunk,module,unknowns(snapshot));
+    }
+    /** A DTO view only; its caller retains the registered raw/source proof and native attestation. */
+    public static EvidencePointer compactNormalPointer(CanonicalSourceBinding binding,JsonNode header,JsonNode graph,JsonNode chunk,String module){
+        com.fasterxml.jackson.databind.node.ObjectNode selected=(com.fasterxml.jackson.databind.node.ObjectNode)header.deepCopy();selected.putObject("manifest").set("candidateGraph",graph);
+        return pointer(binding,selected,chunk,module,graph.path("unknowns"));
     }
     private static EvidencePointer pointer(CanonicalSourceBinding binding,JsonNode snapshot,JsonNode chunk,String module,JsonNode unknowns){
         EvidencePointer pointer=new EvidencePointer();pointer.setProjectId(binding.getProjectId());pointer.setDocumentId(binding.getDocumentId());

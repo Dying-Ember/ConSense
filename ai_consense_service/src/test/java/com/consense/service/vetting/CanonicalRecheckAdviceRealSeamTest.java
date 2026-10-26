@@ -105,6 +105,8 @@ class CanonicalRecheckAdviceRealSeamTest {
     final AtomicReference<Runnable> semanticPrepareMutation=new AtomicReference<>();
     final AtomicReference<Runnable> statusMutation=new AtomicReference<>();
     final AtomicInteger semanticPrepareCalls=new AtomicInteger(),semanticCatalogCalls=new AtomicInteger(),semanticScanCalls=new AtomicInteger(),semanticEntryReads=new AtomicInteger(),normalPublications=new AtomicInteger();
+    final List<JsonNode> compactAdvicePrepareRequests=new CopyOnWriteArrayList<>();
+    final AtomicInteger compactAdvicePrepareCasReads=new AtomicInteger();final AtomicLong compactAdvicePrepareCasBytes=new AtomicLong();
     final AtomicReference<java.util.function.Consumer<ObjectNode>> retrieveResponseMutation=new AtomicReference<>();
     final AtomicReference<JsonNode> indexRequest=new AtomicReference<>();
     final Map<String,ObjectNode> remoteIndexes=new ConcurrentHashMap<>();
@@ -885,27 +887,32 @@ class CanonicalRecheckAdviceRealSeamTest {
         algorithms.setAll(NativePdfCanonicalFixture.algorithms(snapshots.get(42L)));oer.put("sourcePageIndexContract","explicit-composite-index-pins-v1");return h;
     }
     ObjectNode sourceReadFixture(JsonNode request)throws Exception{
-        if("vetting".equals(request.path("module").asText())&&"semantic_units".equals(request.path("view").asText())){
+        if(("vetting".equals(request.path("module").asText())||request.has("normalProofVersion"))&&"semantic_units".equals(request.path("view").asText())){
             if(!"prepare".equals(request.path("operation").asText())){
                 if("catalog".equals(request.path("operation").asText()))semanticCatalogCalls.incrementAndGet();
                 if("scan".equals(request.path("operation").asText()))semanticScanCalls.incrementAndGet();
                 throw new IOException("AUTHORED stop after successful semantic frame close");}
             semanticPrepareCalls.incrementAndGet();semanticEntryReads.set(snapshotReads.get());
-            ObjectNode result=JsonUtils.mapper().createObjectNode();result.put("contract",OerCanonicalRetrievalClient.SOURCE_READ);result.put("module","vetting");result.put("operation","prepare");result.put("view","semantic_units");
+            if(request.has("normalProofVersion"))compactAdvicePrepareRequests.add(request.deepCopy());
+            ObjectNode result=JsonUtils.mapper().createObjectNode();result.put("contract",OerCanonicalRetrievalClient.SOURCE_READ);result.put("module",request.path("module").asText());result.put("operation","prepare");result.put("view","semantic_units");
             result.put("semanticProjectionVersion",OerCanonicalRetrievalClient.SEMANTIC_READ);result.put("sourceUnitPolicy",VettingRetrievalSourceUnits.POLICY);result.put("sourceQualityVerified",false);
             result.set("projectionSha256",request.path("projectionSha256").deepCopy());result.putArray("origins");result.putArray("units");result.put("readManifestToken",VettingCorpus.hash("AUTHORED semantic preparation token"));
             ArrayNode sources=result.putArray("sources"),manifests=result.putArray("readManifestSha256");int total=0;
             Map<Long,Path> preparedOriginalPaths=new LinkedHashMap<>();Map<Long,String> preparedOriginalShas=new LinkedHashMap<>();
             for(JsonNode address:request.path("projectionSha256")){
-                Long id=idForProjection(address.asText());CanonicalSourceBinding binding=bindings.findByProjectIdAndDocumentIdAndProjectionSha256(PROJECT,id,address.asText()).orElseThrow();
-                preparedOriginalPaths.put(id,Paths.get(SourceDocumentRepository.scopeSnapshot(documents.findScopeMetadataById(id).orElseThrow()).getStoragePath()));preparedOriginalShas.put(id,binding.getOriginalSourceSha256());
-                ObjectNode row=sources.addObject();row.put("projectionSha256",address.asText());row.put("documentId",String.valueOf(id));row.put("originalSourceSha256",binding.getOriginalSourceSha256());row.put("sourceHash",binding.getCanonicalSourceHash());row.put("javaParsedSourceHash",binding.getJavaParsedSourceHash());row.put("sourceRevisionSha256",binding.getSourceRevisionSha256());
+                Long id=idForProjection(address.asText());JsonNode snapshot=snapshots.get(id),identity=snapshot.path("projectionIdentity");
+                preparedOriginalPaths.put(id,Paths.get(SourceDocumentRepository.scopeSnapshot(documents.findScopeMetadataById(id).orElseThrow()).getStoragePath()));preparedOriginalShas.put(id,snapshot.path("source").path("sourceSha256").asText());
+                ObjectNode row=sources.addObject();row.put("projectionSha256",address.asText());row.put("documentId",String.valueOf(id));row.set("originalSourceSha256",snapshot.path("source").path("sourceSha256"));row.set("sourceHash",snapshot.path("sourceHash"));row.set("javaParsedSourceHash",snapshot.path("source").path("parsedSourceHash"));row.set("sourceRevisionSha256",snapshot.path("source").path("sourceRevisionSha256"));
                 int count=snapshots.get(id).path("chunks").size();row.put("chunkCount",count);total+=count;manifests.add(VettingCorpus.hash("AUTHORED semantic manifest "+id));
             }
+            if(request.has("normalProofVersion")){result.set("normalProofVersion",request.path("normalProofVersion"));ArrayNode proofs=result.putArray("normalProofs");for(JsonNode address:request.path("projectionSha256")){
+                Long id=idForProjection(address.asText());JsonNode snapshot=snapshots.get(id);ObjectNode proof=proofs.addObject();for(String field:Arrays.asList("projectionSha256","producerKind","projectionIdentity","projectionRevisionSha256","sourceHash","source"))proof.set(field,snapshot.path(field).deepCopy());proof.set("sourceBinding",snapshot.path("manifest").path("sourceBinding").deepCopy());proof.put("snapshotSha256",VettingCorpus.hash(JsonUtils.write(OerCanonicalSourceUnits.sorted(snapshot))));proof.put("parentSha256",VettingCorpus.hash(JsonUtils.write(OerCanonicalSourceUnits.sorted(snapshot.path("chunks")))));
+            }}
             result.putObject("coverage").put("status","prepared").put("totalOrigins",total);runOnce(semanticPrepareMutation);
             // The native prepare owner verifies actual dependencies on exit before returning its receipt.
             for(JsonNode address:request.path("projectionSha256")){
                 Long id=idForProjection(address.asText());verifyActualCas(id);
+                if(request.has("normalProofVersion")){compactAdvicePrepareCasReads.incrementAndGet();compactAdvicePrepareCasBytes.addAndGet(Files.size(normalCasRoots.get(id).resolve(snapshots.get(id).path("observationManifestRef").path("relativePath").asText())));}
                 if(!preparedOriginalShas.get(id).equals(shaBytes(Files.readAllBytes(preparedOriginalPaths.get(id)))))throw new IOException("Authored native prepare original bytes changed");
             }
             return result;
@@ -975,7 +982,7 @@ class CanonicalRecheckAdviceRealSeamTest {
         if(actual.length!=record.path("byteCount").asInt()||!shaBytes(actual).equals(record.path("sha256").asText()))throw new IOException("SYNTHETIC actual CAS bytes changed");}}
     Long idForProjection(String projection){return snapshots.entrySet().stream().filter(e->e.getValue().path("projectionSha256").asText().equals(projection)).map(Map.Entry::getKey).findFirst().orElseThrow(()->new IllegalArgumentException("Unknown projection"));}
     Map<String,Integer> snapshotCounts(){Map<String,Integer> result=new TreeMap<>();perDocumentSnapshotReads.forEach((id,count)->result.put(String.valueOf(id),count.get()));return result;}
-    void resetCounters(){snapshotReads.set(0);unchangedSnapshotReads.set(0);snapshotResponseBytes.set(0);indexCalls.set(0);retrieveCalls.set(0);chatCalls.set(0);sourceReadCalls.set(0);healthReads.set(0);healthMutationOrdinal=1;perDocumentSnapshotReads.clear();events.clear();conditionalSnapshotTags.clear();clearInvocations(evidence,reader,business,llm,history);}
+    void resetCounters(){snapshotReads.set(0);unchangedSnapshotReads.set(0);snapshotResponseBytes.set(0);indexCalls.set(0);retrieveCalls.set(0);chatCalls.set(0);sourceReadCalls.set(0);healthReads.set(0);healthMutationOrdinal=1;perDocumentSnapshotReads.clear();events.clear();conditionalSnapshotTags.clear();compactAdvicePrepareRequests.clear();compactAdvicePrepareCasReads.set(0);compactAdvicePrepareCasBytes.set(0);clearInvocations(evidence,reader,business,llm,history);}
     void assertScalarAvailabilityGuards(){List<String> sequence=new ArrayList<>(events);int start=sequence.indexOf("availability:start"),end=sequence.indexOf("availability:end");assertTrue(start>=0&&end>start);
         int firstHealth=sequence.subList(0,start).lastIndexOf("health:start"),lastHealth=sequence.subList(end+1,sequence.size()).indexOf("health:end")+end+1;
         assertTrue(firstHealth>=0&&lastHealth>end);assertTrue(sequence.subList(0,firstHealth).contains("scalar:end"));assertTrue(sequence.subList(lastHealth+1,sequence.size()).contains("scalar:start"));
@@ -1209,6 +1216,66 @@ class CanonicalRecheckAdviceRealSeamTest {
         assertEquals(1,frames.size(),"Initial Ask load, retrieval and declared text context must share one cold source epoch");
         for(CanonicalEvidenceService.VerifiedBindingFrame frame:frames)assertThrows(RuntimeException.class,frame::bindings);
         assertEquals(0,chatCalls.get());assertEquals(0,history.count());assertTrue(unchangedSnapshotReads.get()>0,"Remote-boundary CAS checks remain active");
+    }
+
+    @ParameterizedTest @org.junit.jupiter.params.provider.ValueSource(strings={"none","original_bytes","cas_bytes","raw_snapshot","source_revision","wrong_module","rank_payload","member_missing","member_forged","rank_score"})
+    void qwenRankedNormalTextDoesNotHydrateTheWholeBindingBeforeGateway(String change)throws Exception {
+        rankedNormalTextCase(change);
+    }
+    @Test void qwenRankedNormalAdmissionLogRecordsOnlyVerifiedSelectedScope()throws Exception {rankedNormalTextCase("none");}
+    private void rankedNormalTextCase(String change)throws Exception {
+        ObjectNode read=(ObjectNode)health.path("oer").path("sourceRead");read.put("semanticProjectionVersion",OerCanonicalRetrievalClient.SEMANTIC_READ);read.putArray("views").add("semantic_units");read.putArray("operations").add("prepare");read.putObject("semanticPreparation").put("normalProofVersion",OerCanonicalRetrievalClient.COMPACT_NORMAL_PROOF);
+        bindings.delete(bindings.findByProjectIdAndDocumentIdOrderByIdDesc(PROJECT,43L).get(0));bindings.flush();
+        SourceDocument source=documents.findById(43L).orElseThrow();List<com.consense.document.DocumentBlock> blocks=new ArrayList<>();
+        for(int ordinal=0;ordinal<512;ordinal++){
+            com.consense.document.DocumentBlock block=new com.consense.document.DocumentBlock();block.setId("authored:normal:"+ordinal);block.setSource("native");block.setLocation("body/"+ordinal+"/paragraph");
+            block.setText("AUTHORED clause "+ordinal+": The contractor shall retain this complete distinct paragraph and its stated qualification for the corresponding work item. No other authored clause changes this requirement.");blocks.add(block);
+        }
+        source.setTextContent(blocks.stream().map(com.consense.document.DocumentBlock::getText).collect(java.util.stream.Collectors.joining("\n")));
+        source.setStructuredContentJson(JsonUtils.write(blocks));source.setParseCoverageJson("{\"complete\":true}");source.setNormalCandidateJson(null);documents.saveAndFlush(source);
+        assertTrue(advice.prepareSources(PROJECT,"fullset").isComplete());assertTrue(snapshots.get(43L).path("chunks").size()>1,"Fixture must contain unrelated source units");
+        advice.rebuildIndex(PROJECT,"fullset");resetCounters();
+        JsonNode seed=snapshots.get(43L).path("chunks").get(0);Map<String,JsonNode> parents=new LinkedHashMap<>();
+        for(JsonNode snapshot:snapshots.values())for(JsonNode chunk:snapshot.path("chunks"))parents.put(chunk.path("id").asText(),chunk);
+        com.consense.web.dto.CanonicalEvidenceDtos.EvidencePointer legacyPointer=evidence.pointer(PROJECT,43L,snapshots.get(43L).path("projectionSha256").asText(),seed.path("unitId").asText(),"advisory");resetCounters();
+        retrieveResponseMutation.set(result->{
+            ObjectNode hit=result.putArray("hits").addObject();hit.put("id",seed.path("id").asText());hit.put("score",0.9);hit.set("payload",seed.deepCopy());
+            ObjectNode unit=OerCanonicalSourceUnits.resolve(parents,seed);unit.put("originalRerankOrdinal",1);unit.put("seedScore",0.9);
+            ObjectNode units=(ObjectNode)result.path("sourceUnits");units.putArray("originalHitIds").add(seed.path("id").asText());units.putArray("units").add(unit);
+            if("rank_payload".equals(change))((ObjectNode)hit.path("payload")).put("content","AUTHORED forged ranked text");
+            if("member_missing".equals(change))unit.putArray("requiredMemberIds");
+            if("member_forged".equals(change))((ObjectNode)unit.path("members").get(0)).put("content","AUTHORED forged closure member");
+            if("rank_score".equals(change))hit.put("score","0.9");
+        });
+        if("original_bytes".equals(change))semanticPrepareMutation.set(()->mutate(43L,"original_same_length_restored_mtime"));
+        if("cas_bytes".equals(change))semanticPrepareMutation.set(()->{try{changeExactLengthRestoredMtime(normalCasRoots.get(43L).resolve(snapshots.get(43L).path("observationManifestRef").path("relativePath").asText()));}catch(IOException failed){throw new UncheckedIOException(failed);}});
+        if("raw_snapshot".equals(change))retrieveMutation.set(()->jdbc.update("update canonical_source_binding set snapshot_json=? where document_id=?"," "+bindings.findByProjectIdAndDocumentIdOrderByIdDesc(PROJECT,43L).get(0).getSnapshotJson(),43L));
+        if("source_revision".equals(change))retrieveMutation.set(()->mutate(43L,"binding_revision"));
+        if("wrong_module".equals(change))retrieveMutation.set(()->((ObjectNode)snapshots.get(43L).path("projectionIdentity")).put("module","vetting"));
+        List<Integer> bindingReadsAtGateway=new ArrayList<>(),loadedViewsBeforePack=new ArrayList<>();List<Long> rawProofReadsAtGateway=new ArrayList<>();List<String> prompts=new ArrayList<>();
+        doAnswer(call->{OerBusinessEvidence.Session selected=call.getArgument(0);loadedViewsBeforePack.add(selected.chunks().size());return call.callRealMethod();}).when(business).advisoryTextContext(any(),anyList());
+        com.consense.ai.HttpSupport transport=authoredQwenTransport(new ArrayList<>(),new ArrayList<>());
+        doAnswer(call->{bindingReadsAtGateway.add(NormalSourceSql.bindingReads.size());rawProofReadsAtGateway.add(jdbc.queryForObject("select coalesce(sum(execution_count),0) from information_schema.query_statistics where lower(sql_statement) like 'select snapshot_json from canonical_source_binding where id=%'",Long.class));prompts.add(call.getArgument(1));
+            boolean probe=JsonUtils.parse(call.<String>getArgument(1)).path("max_tokens").asInt()==1;
+            String content=probe?"{":com.consense.service.advice.AdviceBudgetFixture.contract("{\"grounded\":true,\"answer\":\"Supported wording [1].\",\"citations\":[\"[1]\"]}");
+            ObjectNode envelope=JsonUtils.mapper().createObjectNode();envelope.put("object","chat.completion");envelope.put("model","qwen3.8-27b");ObjectNode choice=envelope.putArray("choices").addObject();choice.put("index",0);choice.put("finish_reason","stop");choice.putObject("message").put("role","assistant").put("content",content);
+            envelope.putObject("usage").put("prompt_tokens",1000).put("completion_tokens",1).put("total_tokens",1001);return JsonUtils.write(envelope);
+        }).when(transport).postJsonBoundedWithoutReplay(anyString(),anyString(),anyLong(),anyString(),anyInt(),any());
+        ch.qos.logback.classic.Logger routeLogger=(ch.qos.logback.classic.Logger)org.slf4j.LoggerFactory.getLogger(OerBusinessEvidence.class);ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> routeTrace=new ch.qos.logback.core.read.ListAppender<>();routeTrace.start();routeLogger.addAppender(routeTrace);
+        NormalSourceSql.reads.clear();NormalSourceSql.bindingReads.clear();jdbc.execute("SET QUERY_STATISTICS TRUE");NormalSourceSql.capture=true;AskResponseVO response;
+        try(AdviceService.QwenScope selected=advice.bindQwenOperation(authoredQwen(generationLedger,transport))){
+            if(!"none".equals(change)){assertThrows(RuntimeException.class,()->advice.ask(PROJECT,new AskRequest("Explain the first authored obligation","fullset")));assertTrue(prompts.isEmpty(),"Changed bytes, identity or closure must fail before a model request");assertTrue(routeTrace.list.stream().noneMatch(event->event.getFormattedMessage().contains("reason=accepted_after_rank_validation")),"Rejected rank or proof must never log final admission");assertEquals(0,history.count());return;}
+            response=advice.ask(PROJECT,new AskRequest("Explain the first authored obligation","fullset"));}
+        finally{NormalSourceSql.capture=false;routeLogger.detachAppender(routeTrace);routeTrace.stop();}
+        assertFalse(prompts.isEmpty());assertTrue(prompts.stream().allMatch(prompt->prompt.contains(seed.path("content").asText())));
+        assertEquals(1,routeTrace.list.stream().filter(event->event.getFormattedMessage().contains("Advisory selected-proof admission selectedSources=1 selectedProjections=1 rankedHits=1 retainedViews=1 reason=accepted_after_rank_validation")).count());
+        assertEquals(1,response.getSources().size());assertFalse(response.getSources().get(0).getCanonicalEvidence().isEmpty());
+        assertEquals(JsonUtils.mapper().valueToTree(legacyPointer),JsonUtils.mapper().valueToTree(response.getSources().get(0).getCanonicalEvidence().get(0)),"Selected compact pointer must exactly preserve the legacy normal pointer");
+        assertEquals(1,compactAdvicePrepareRequests.size());assertEquals(JsonUtils.parse("[\""+snapshots.get(43L).path("projectionSha256").asText()+"\"]"),compactAdvicePrepareRequests.get(0).path("projectionSha256"));assertEquals(1,compactAdvicePrepareCasReads.get());assertTrue(compactAdvicePrepareCasBytes.get()>0);
+        ObjectNode counts=JsonUtils.mapper().createObjectNode();counts.set("wholeBindingOrmReadsAtGateway",JsonUtils.mapper().valueToTree(bindingReadsAtGateway));counts.set("registeredRawStreamProofReadsAtGateway",JsonUtils.mapper().valueToTree(rawProofReadsAtGateway));counts.set("materializedViewsBeforePack",JsonUtils.mapper().valueToTree(loadedViewsBeforePack));counts.put("sourceUnits",snapshots.get(43L).path("chunks").size());counts.put("compactNativePrepareCalls",compactAdvicePrepareRequests.size());counts.set("compactNativePrepareProjections",compactAdvicePrepareRequests.get(0).path("projectionSha256"));counts.put("compactNativePrepareActualManifestChecks",compactAdvicePrepareCasReads.get());counts.put("compactNativePrepareActualManifestBytes",compactAdvicePrepareCasBytes.get());System.out.println("AUTHORED_ADVISORY_LOADER_BOUNDARY "+JsonUtils.write(counts));
+        assertEquals(Arrays.asList(0,0),bindingReadsAtGateway,"The text-first Qwen gateway must precede whole ranked-document binding CLOB reads");
+        assertTrue(rawProofReadsAtGateway.stream().allMatch(count->count>0),"Avoiding ORM materialization must retain the registered raw snapshot stream proof");
+        assertTrue(loadedViewsBeforePack.stream().allMatch(count->count<=1),"Only selected source units may be materialized before text packing");
     }
 
     @Test void complete33SourceColdAskRecoversReadyIndexAndOnlyHydratesRankedSourcesBeforePaidAndSaveGuards()throws Exception {

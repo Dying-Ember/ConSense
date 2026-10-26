@@ -346,13 +346,38 @@ class OerSemanticBusinessEvidenceTest {
             if(normal)assertEquals(1,packet.getVerifiedAssessments().size(),"The actual normal locator must still authorize its bound NTT1 claim");
             assertEquals(2,q.requests.size());verify(q.ledger,never()).reserve(anyString(),anyString(),eq("planner"),anyString(),eq(false));
             verify(q.ledger,times(1)).reserve(anyString(),anyString(),eq("final"),anyString(),eq(false));verify(q.ledger,times(1)).reserve(anyString(),anyString(),eq("answer"),anyString(),eq(true));
-            int packetWords=invocations(f.observed,"wordSourceScopeContexts");assertTrue(invocations(f.observed,"sourceClauseLocators")>0,"Actual receiving attribution still needs locators");
+            int packetWords=invocations(f.observed,"wordSourceScopeContexts");assertEquals(normal?1:0,invocations(f.observed,"sourceClauseLocators"),"Only the returned formal ownership claim requires its actual locator");
             ObjectNode proof=q.proof(input,result);writeQwenProof("semantic-"+(normal?"normal":"native"),proof,inputWords,inputLocators,packetWords);
             assertEquals(0,inputWords,"Qwen input does not consume legacy word contexts");assertEquals(0,inputLocators,"Qwen preview does not consume source locators");
             assertEquals(0,packetWords,"Semantic Qwen packets acquire their normal locators directly and do not consume the eager word map");
             int guardCalls=q.guards;assertThrows(InvocationTargetException.class,()->q.input(Arrays.asList(f.chunks.get(0),f.chunks.get(0))));assertTrue(q.guards>guardCalls,"Duplicate IDs must not bypass the source guard");
             return null;
         });
+    }
+    @Test void qwenSemanticEmptyResponseDoesNotHydrateSourceLocatorsBeforeGateway()throws Exception {
+        SemanticCase f=semanticCase(true);QwenRun q=new QwenRun(f);
+        CanonicalCurrentSourceReader reader=(CanonicalCurrentSourceReader)ReflectionTestUtils.getField(f.observed,"currentSources");assertNotNull(reader);clearInvocations(reader);
+        List<Integer> locatorCalls=new ArrayList<>(),sourceLoads=new ArrayList<>();Runnable observe=()->{locatorCalls.add(invocations(f.observed,"sourceClauseLocators"));sourceLoads.add((int)mockingDetails(reader).getInvocations().stream().filter(call->"normalDocument".equals(call.getMethod().getName())).count());};q.afterProbe=observe;q.afterAnswer=observe;
+        q.action(()->{VettingSemanticReview.Result result=q.review();assertEquals(1,result.getActualGatewayCallCount());assertNull(result.getModelFailure());assertEquals("decoded",packet(result).getAttempts().get(0).getStatus());return null;});
+        assertEquals(Arrays.asList(0,0),locatorCalls,"The actual OerBusinessEvidence locator loader must not run before a text-only gateway request");
+        assertEquals(Arrays.asList(0,0),sourceLoads,"No complete normal source may be loaded before the model returns evidence needing it");verify(reader,never()).normalDocument(anyString(),anyLong(),anyString());
+    }
+    @org.junit.jupiter.params.ParameterizedTest @org.junit.jupiter.params.provider.ValueSource(strings={"json","schema","business","foreignReference","noClaim"})
+    void qwenSemanticUnusableOrClaimFreeRepliesDoNotLoadNormalLocators(String kind)throws Exception {
+        SemanticCase f=semanticCase(true);QwenRun q=new QwenRun(f);CanonicalCurrentSourceReader reader=(CanonicalCurrentSourceReader)ReflectionTestUtils.getField(f.observed,"currentSources");clearInvocations(reader);
+        if("json".equals(kind))q.answer="{\"records\":[}";
+        else if("schema".equals(kind))q.answer="{\"records\":[{}]}";
+        else{ObjectNode envelope=(ObjectNode)JsonUtils.parse(unknownRecord(f.chunks.get(0),"The quoted source text is available; the remaining procedure needs confirmation."));ObjectNode record=(ObjectNode)envelope.path("records").get(0);
+            if("business".equals(kind)){record.put("assessment","issue");record.put("comment","NTT Clause 1 requires the quoted obligation.");record.put("suggestedAction","amend");record.withArray("pendingFacts").add("The applicable procedure is not established.");}
+            if("foreignReference".equals(kind))((ObjectNode)record.path("evidence").get(0)).put("chunkId","R999");q.answer=JsonUtils.write(envelope);}
+        q.action(()->{VettingSemanticReview.Result result=q.review();assertTrue(result.getCandidates().isEmpty());assertEquals("noClaim".equals(kind)?1:2,result.getActualGatewayCallCount());assertEquals("noClaim".equals(kind)?"decoded":"structured_output_invalid",packet(result).getAttempts().get(packet(result).getAttempts().size()-1).getStatus());return null;});
+        assertEquals(0,invocations(f.observed,"sourceClauseLocators"));verify(reader,never()).normalDocument(anyString(),anyLong(),anyString());
+    }
+    @Test void qwenSemanticVerifiedClaimLoadsItsActualNormalSourceOnlyAfterTheGatewayReturns()throws Exception {
+        SemanticCase f=semanticCase(true);QwenRun q=new QwenRun(f);q.answer=unknownRecord(f.chunks.get(0),"NTT Clause 1 requires payment within 14 days after certification.");CanonicalCurrentSourceReader reader=(CanonicalCurrentSourceReader)ReflectionTestUtils.getField(f.observed,"currentSources");clearInvocations(reader);
+        List<Integer> before=new ArrayList<>();Runnable observe=()->before.add(invocations(f.observed,"sourceClauseLocators"));q.afterProbe=observe;q.afterAnswer=observe;
+        q.action(()->{VettingSemanticReview.Result result=q.review();assertEquals(1,result.getActualGatewayCallCount());assertEquals(1,packet(result).getVerifiedAssessments().size());assertNull(result.getModelFailure());return null;});
+        assertEquals(Arrays.asList(0,0),before);assertEquals(1,invocations(f.observed,"sourceClauseLocators"));verify(reader,times(1)).normalDocument(anyString(),anyLong(),anyString());
     }
     @org.junit.jupiter.params.ParameterizedTest @org.junit.jupiter.params.provider.ValueSource(booleans={false,true})
     void qwenSemanticPacketsStillRejectUnsupportedFormalOwnershipTwice(boolean normal)throws Exception {
@@ -361,7 +386,11 @@ class OerSemanticBusinessEvidenceTest {
             assertEquals(2,result.getActualGatewayCallCount());assertTrue(result.getCandidates().isEmpty());assertTrue(packet.getVerifiedAssessments().isEmpty());assertNull(result.getModelFailure());assertEquals("failed",packet.getStatus());assertEquals("source_attribution_invalid",packet.getFailureKind());assertTrue(result.getReviewedChunkIds().isEmpty());
             assertEquals(2,packet.getAttempts().size());for(com.consense.web.dto.VettingDtos.SemanticAttemptVO attempt:packet.getAttempts()){
                 assertTrue(attempt.getValidationReason().contains("unsupported_source_clause_attribution"));assertEquals("structured_output_invalid",attempt.getStatus());assertNotNull(attempt.getRawResponse());}
-            assertTrue(invocations(f.observed,"sourceClauseLocators")>0);writeQwenProof("ownership-"+(normal?"normal":"native"),q.proof(null,result),0,0,invocations(f.observed,"wordSourceScopeContexts"));
+            assertEquals(1,invocations(f.observed,"sourceClauseLocators"),"The same rejected source must not be hydrated again for its second attempt");
+            List<org.mockito.invocation.Invocation> reads=new ArrayList<>();for(org.mockito.invocation.Invocation call:mockingDetails(f.observed).getInvocations())if("sourceClauseLocators".equals(call.getMethod().getName()))reads.add(call);
+            @SuppressWarnings("unchecked") List<VettingCorpus.Chunk> requested=reads.get(0).getArgument(1);assertEquals(Collections.singletonList(f.chunks.get(0).getId()),requested.stream().map(VettingCorpus.Chunk::getId).collect(java.util.stream.Collectors.toList()),"Only the returned record's quoted source can request locator proof");
+            if(!normal)assertTrue(f.chunks.size()>1,"Unquoted selected chunks must remain outside this locator request");
+            writeQwenProof("ownership-"+(normal?"normal":"native"),q.proof(null,result),0,0,invocations(f.observed,"wordSourceScopeContexts"));
             assertEquals(0,invocations(f.observed,"wordSourceScopeContexts"));return null;});
     }
     @org.junit.jupiter.params.ParameterizedTest @org.junit.jupiter.params.provider.ValueSource(booleans={false,true})

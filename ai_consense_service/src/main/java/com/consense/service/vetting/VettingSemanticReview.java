@@ -637,6 +637,16 @@ public class VettingSemanticReview {
     private Map<String,ObservedSourceClauseLocators.Bound> selectedSourceLocators(List<Chunk> corpus,List<Chunk> selected,Map<String,JsonNode> wordContexts){
         return corpus!=null&&OerBusinessEvidence.canonicalCorpus(corpus)?oer.sourceClauseLocators(OerBusinessEvidence.session(corpus),selected,wordContexts):Collections.emptyMap();
     }
+    private static List<Chunk> attributionSources(List<Record> records,Map<String,Chunk> byId,List<Map<String,Object>> reasons,Set<String> inspected){
+        Set<Integer> indexes=new LinkedHashSet<>();for(Map<String,Object> reason:reasons)indexes.add(((Number)reason.get("recordIndex")).intValue());
+        Set<String> ids=new HashSet<>();
+        for(Integer index:indexes)for(Quote quote:records.get(index).getEvidence()==null?Collections.<Quote>emptyList():records.get(index).getEvidence()){
+            Chunk source=quote==null?null:byId.get(quote.getChunkId());
+            if(source!=null&&!inspected.contains(source.getId())&&Arrays.asList("tender","standard").contains(source.getRole())
+                    &&VettingCorpus.evidence(source,quote.getSide(),quote.getQuote()).isLocated())ids.add(source.getId());
+        }
+        return byId.values().stream().filter(source->ids.contains(source.getId())).collect(Collectors.toList());
+    }
     private void executePacket(Result result,SemanticTopicVO audit,SemanticPacketVO packet,VettingContextBuilder.Selection selection,String topic,String lang,boolean projectReference,List<String> referenceIds,int topicIndex,VettingReviewProbe.Call topicProbe,VettingInputBudget.Result previewBudget,List<Chunk> suppliedCorpus) {
         executePacket(result,audit,packet,selection,topic,lang,projectReference,referenceIds,topicIndex,topicProbe,previewBudget,suppliedCorpus,FixedVettingReferences.empty());
     }
@@ -657,12 +667,14 @@ public class VettingSemanticReview {
             try {
                 String actualSystem,actualUser;
                 Map<String,ObservedSourceClauseLocators.Bound> sourceLocators;
+                boolean deferredLocators=qwenEnabled()&&OerBusinessEvidence.isSemanticCorpus(suppliedCorpus);
+                Set<String> inspectedLocators=new HashSet<>();
                 com.fasterxml.jackson.databind.JsonNode actualSchema;
                 try (VettingReviewProbe.Timer timer=topicProbe.measure("model_prompt_schema_construction","Original system/user/schema construction, before gateway or probe artifact serialization")) {
                     sourceGuard.run();
                     actualSystem = effectiveSystem(lang, projectReference);
                     Map<String,JsonNode> wordContexts=qwenEnabled()&&OerBusinessEvidence.isSemanticCorpus(suppliedCorpus)?Collections.emptyMap():selectedWordContexts(suppliedCorpus,submitted);
-                    sourceLocators=selectedSourceLocators(suppliedCorpus,submitted,wordContexts);
+                    sourceLocators=deferredLocators?new LinkedHashMap<>():selectedSourceLocators(suppliedCorpus,submitted,wordContexts);
                     actualUser = qwenEnabled()?textFirstUser(topic,selection):user(topic, selection, referenceIds,fixedReferences,documents,wordContexts,sourceLocators);
                     actualSchema = VettingOutputSchema.forChunkIds(references.wireIds());
                 }
@@ -779,6 +791,14 @@ public class VettingSemanticReview {
                         List<Map<String,Object>> shapeReasons=recordShapeReasons(records);
                         if(!shapeReasons.isEmpty())throw new RecordShapeException(shapeReasons);
                         List<Map<String,Object>> attributionReasons=VettingSourceAttribution.reasons(records,byId,sourceLocators,references.bindings());
+                        if(deferredLocators&&!attributionReasons.isEmpty()){
+                            List<Chunk> required=attributionSources(records,byId,attributionReasons,inspectedLocators);
+                            if(!required.isEmpty()){
+                                sourceGuard.run();sourceLocators.putAll(selectedSourceLocators(suppliedCorpus,required,Collections.emptyMap()));
+                                required.forEach(source->inspectedLocators.add(source.getId()));
+                                attributionReasons=VettingSourceAttribution.reasons(records,byId,sourceLocators,references.bindings());
+                            }
+                        }
                         if(!attributionReasons.isEmpty())throw new RecordShapeException(SOURCE_ATTRIBUTION_REASON,attributionReasons);
                         attempt.setStatus("decoded");
                     } catch(RecordShapeException invalid) {

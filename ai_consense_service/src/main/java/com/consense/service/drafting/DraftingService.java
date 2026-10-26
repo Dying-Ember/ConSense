@@ -1209,6 +1209,8 @@ public class DraftingService {
             DraftArtifact artifact=artifactRepository.findById(document.getRevisionId()).orElseThrow(()->new BizException(4012,"GENERATED_ARTIFACT_MISSING: Regenerate this draft."));
             vo.setRevisionId(artifact.getId());vo.setDocxSha256(artifact.getDocxSha256());vo.setSourceSha256(artifact.getSourceSha256());
             vo.setBlocks(currentBlocks(artifact));vo.setFieldImpacts((List)JsonUtils.readList(artifact.getFieldImpactsJson(),Map.class));vo.setFieldStatus("UNVERIFIED");
+            vo.setBodyCleanupScopes(DraftBodyCleanup.candidates(artifact.getDocxBytes(),new DocxTemplateEditor().inspect(artifact.getDocxBytes()),DraftDocumentBindings.read(artifact.getBindingsJson())));
+            vo.setBodyCleanupReceipts(DraftBodyCleanup.receipts(artifact.getLedgerJson()));
             vo.setNativeLayout(DraftNativeLayout.savedInfo(artifact.getLedgerJson(),document.getFileKey(),properties.getDrafting().getRendererKind(),artifact.getSourceSha256(),artifact.getDocxSha256()));
             DraftPdfArtifactRepository.Metadata pdf=pdfMetadata.apply(artifact.getDocxSha256());if(pdf!=null){vo.setPdfSha256(pdf.getPdfSha256());vo.setRenderProfileHash(pdf.getRenderProfileHash());}
         }
@@ -1237,13 +1239,13 @@ public class DraftingService {
         if(patch.getContent()!=null)throw new BizException(4012,"FLAT_BODY_EDIT_UNSUPPORTED: Edit source-bound paragraph blocks instead.");
         DraftArtifact previous=requireArtifact(document);
         if(!previous.getId().equals(patch.getRevisionId())||!previous.getDocxSha256().equals(patch.getDocxSha256()))throw new BizException(4090,"ARTIFACT_REVISION_CONFLICT: Reload the current draft before saving.");
-        if(patch.getBlocks()==null||patch.getBlocks().isEmpty())throw new BizException(4012,"SOURCE_BLOCK_PATCH_REQUIRED");
+        if((patch.getBlocks()==null||patch.getBlocks().isEmpty())&&(patch.getScopeEdits()==null||patch.getScopeEdits().isEmpty()))throw new BizException(4012,"SOURCE_BLOCK_PATCH_REQUIRED");
         DocxTemplateEditor editor=new DocxTemplateEditor();DocxTemplateEditor.TemplateIndex index=editor.inspect(previous.getDocxBytes());
         Map<String,DocxTemplateEditor.Paragraph> paragraphs=new HashMap<>();for(DocxTemplateEditor.Paragraph p:index.getMainParagraphs())paragraphs.put(p.getId(),p);
         Map<String,List<DocxTemplateEditor.Paragraph>> markers=DraftDocumentBindings.markers(index);Set<String> registeredBindings=new HashSet<>();for(Map<String,Object> binding:DraftDocumentBindings.read(previous.getBindingsJson()))registeredBindings.add(String.valueOf(binding.get("bindingId")));
         List<DocxTemplateEditor.Edit> edits=new ArrayList<>();Set<String> selected=new HashSet<>();
         try {
-            for(BlockPatch block:patch.getBlocks()) {
+            for(BlockPatch block:patch.getBlocks()==null?Collections.<BlockPatch>emptyList():patch.getBlocks()) {
                 DocxTemplateEditor.Paragraph p=paragraphs.get(block.getId());
                 if(block.getBindingId()!=null) {
                     List<DocxTemplateEditor.Paragraph> targets=markers.getOrDefault(block.getBindingId(),Collections.emptyList());
@@ -1253,18 +1255,33 @@ public class DraftingService {
                 if(!DraftAdoption.hash(p.getText()).equals(block.getExpectedTextHash()))throw new BizException(4090,"SOURCE_BLOCK_TEXT_CONFLICT: "+block.getId());
                 String unsupported=DraftFormattedRules.blockUnsupportedReason(index,p);
                 if(unsupported!=null)throw new BizException(4012,unsupported+": "+block.getId());
+                String operation=block.getOperation();
+                if(operation!=null&&!Arrays.asList("replace_text","delete_paragraph").contains(operation))throw new BizException(4012,"BODY_OPERATION_UNSUPPORTED: "+block.getId());
+                if("delete_paragraph".equals(operation)) {
+                    if(block.getBindingId()==null)throw new BizException(4012,"BINDING_REQUIRED_FOR_PARAGRAPH_DELETE: "+block.getId());
+                    if(block.getText()!=null||block.getInsertAfter()!=null&&!block.getInsertAfter().isEmpty())throw new BizException(4012,"PARAGRAPH_DELETE_CONFLICT: "+block.getId());
+                    // Removing the last cell paragraph would degrade to text-only clearing and retain math.
+                    if(p.getCellId()!=null||!p.getId().matches("word/document.xml#/w:document\\[1\\]/w:body\\[1\\]/w:p\\[\\d+\\]"))throw new BizException(4012,"PARAGRAPH_DELETE_SCOPE_UNSUPPORTED: "+block.getId());
+                    for(DocxTemplateEditor.Feature feature:index.getFeatures())if("BOOKMARK".equals(feature.getKind())&&feature.getName()!=null&&feature.getName().startsWith("_Toc")&&feature.getStartId().startsWith(p.getId()+"/"))throw new BizException(4012,"TOC_TARGET_DELETE_UNSUPPORTED: "+block.getId());
+                    edits.add(DocxTemplateEditor.Edit.removeNodes("body-delete-"+p.getOrdinal(),Collections.singletonList(index.anchor(p.getId()))));
+                    continue;
+                }
                 if(block.getText()==null)throw new BizException(4012,"NULL_TEXT_EDIT_UNSUPPORTED: "+block.getId());
                 if(block.getText().replaceAll("(?U)\\s+","").isEmpty()&&DraftFormattedRules.hasNativeMath(index,p))throw new BizException(4012,"NATIVE_MATH_CLEAR_UNSUPPORTED: "+block.getId());
                 if(block.getText().isEmpty())edits.add(DocxTemplateEditor.Edit.clearParagraph("body-"+p.getOrdinal(),p));
                 else edits.addAll(DraftSourceEditCompiler.editableSpans("body-"+p.getOrdinal(),p,block.getText()));
                 if(block.getInsertAfter()!=null&&!block.getInsertAfter().isEmpty())edits.add(DocxTemplateEditor.Edit.insertParagraphs("body-insert-"+p.getOrdinal(),p,true,block.getInsertAfter(),p));
             }
+            edits.addAll(DraftBodyCleanup.compile(previous.getDocxBytes(),index,DraftDocumentBindings.read(previous.getBindingsJson()),patch.getScopeEdits()));
+            DraftBodyCleanup.requireDisjoint(previous.getDocxBytes(),index,DraftDocumentBindings.read(previous.getBindingsJson()),patch.getScopeEdits(),selected);
             if(edits.isEmpty())return documentVO(document,snapshotId(projectId,null));
             DocxTemplateEditor.DocxEditResult result=editor.applyWithParagraphBookmarks(previous.getDocxBytes(),new DocxTemplateEditor.SourceEditBatch(previous.getDocxSha256(),edits),Collections.emptyMap(),true);
             List<Map<String,Object>> bindings=DraftDocumentBindings.bodyEdited(DraftDocumentBindings.read(previous.getBindingsJson()),result);
             List<Object> ledger=DraftNativeLayout.bodyLedger(previous.getLedgerJson(),result);
+            Map<String,Object> cleanup=DraftBodyCleanup.receipt(previous.getId(),previous.getDocxBytes(),index,DraftDocumentBindings.read(previous.getBindingsJson()),patch.getScopeEdits(),result);if(cleanup!=null)ledger.add(cleanup);
             DraftTocFinalizer.Result complete=finalizeDraft(fileKey,previous.getSourceSha256(),result.getDocxBytes(),bindings,ledger);DocxTemplateEditor.TemplateIndex finalIndex=complete.index();
             DraftArtifact next=new DraftArtifact();next.setId(java.util.UUID.randomUUID().toString());next.setProjectId(projectId);next.setFileKey(fileKey);next.setSnapshotId(previous.getSnapshotId());next.setSourceSha256(previous.getSourceSha256());next.setParentRevisionId(previous.getId());
+            if(cleanup!=null){cleanup.put("savedRevisionId",next.getId());cleanup.put("savedDocxSha256",finalIndex.getSourceSha256());}
             if(!result.getDocxSha256().equals(finalIndex.getSourceSha256()))bindings=DraftDocumentBindings.reconcile(bindings,finalIndex,false);
             if("SCC".equals(fileKey))ledger=complete.ledger(ledger);
             next.setBindingsJson(JsonUtils.write(bindings));next.setDocxBytes(complete.docx);next.setDocxSha256(finalIndex.getSourceSha256());next.setLedgerJson(JsonUtils.write(ledger));next.setBlocksJson(JsonUtils.write(DraftDocumentBindings.blocks(finalIndex,bindings)));next.setFieldImpactsJson(JsonUtils.write(result.getAffectedFeatures()));

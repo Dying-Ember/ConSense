@@ -688,6 +688,9 @@ public class AdviceService {
     private List<VectorStore.SearchHit> advisorySupplement(OerBusinessEvidence.Session session,List<VectorStore.SearchHit> initial,
                                                             AnswerRecord draft,Runnable guard){
         if(draft.getEvidenceRequests().isEmpty())return Collections.emptyList();
+        List<VectorStore.SearchHit> requestedSources=new ArrayList<>();for(EvidenceRequest request:draft.getEvidenceRequests()){VectorStore.SearchHit source=requestedSource(initial,request);if(source!=null)requestedSources.add(source);}
+        guard.run();canonical.prepareAdviceSupplement(session,requestedSources);guard.run();
+        try{
         List<String> origins=requestedSupplementOriginIds(session.chunks(),initial,draft.getEvidenceRequests());
         List<VectorStore.SearchHit> tableSeeds=new ArrayList<>();
         for(EvidenceRequest request:draft.getEvidenceRequests())if("table".equals(request.getKind())){
@@ -711,6 +714,7 @@ public class AdviceService {
             extra.add(hit);
         }
         return extra;
+        }finally{session.completeInitialAsk();}
     }
     private static boolean hasSupportedAnalysis(List<AdvisoryHarness.Section> sections){
         return sections.stream().anyMatch(section->"analysis".equals(section.getKind())||"flowchart".equals(section.getKind()));

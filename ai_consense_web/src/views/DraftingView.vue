@@ -20,8 +20,9 @@ import DraftingTemplatePreview from '@/components/DraftingTemplatePreview.vue'
 import DraftingValueDisplay from '@/components/DraftingValueDisplay.vue'
 import DraftingUnresolvedItems from '@/components/DraftingUnresolvedItems.vue'
 import DraftingBodyEditor from '@/components/DraftingBodyEditor.vue'
-import { bodyDirty, bodyPatch, createBodyDraft } from '@/drafting/body-edit'
+import { bodyDirty, bodyPatch, createBodyDraft, setBodyDeletion, setBodyScopeDeletion } from '@/drafting/body-edit'
 import { actionForUnresolved, adoptionPatch, applicability, clone, decode, dirtyPatch, documentCapabilities, encode, mergeServerValues, projectDrafts, replaceTargetOverride, restoreDraftView, reversedSiteDates, validationIssue, type DraftValue, type DraftViewState } from '@/drafting/state'
+import { adoptionPlanMatches, adoptionVariablesMatch, captureAdoptionRefresh, type AdoptionRefreshContext } from '@/drafting/adoption-refresh'
 import { draftWord, localized, type DraftWord } from '@/drafting/words'
 import { buildBusinessGraph } from '@/drafting/business-graph'
 const DraftingBusinessGraph = defineAsyncComponent(() => import('@/components/DraftingBusinessGraph.vue').then(module => module.default))
@@ -337,7 +338,7 @@ async function action(label: string, task: (id: string, token: number) => Promis
 async function updatePlan() {
   if (!projectId.value || !fields.value.length) return
   const sequence = ++planGeneration, id = projectId.value, token = generation
-  try { const result = await draftingApi.plan(id, !graphMode.value && dirtyInputs.value ? rawValues() : undefined); if (sequence === planGeneration && current(id, token)) plan.value = result }
+  try { const result = await draftingApi.plan(id, !graphMode.value && dirtyInputs.value ? rawValues() : undefined); if (sequence === planGeneration && current(id, token)) { plan.value = result; return result } }
   catch (caught) { if (sequence === planGeneration && current(id, token)) error.value = caught instanceof Error ? caught.message : String(caught) }
 }
 async function refresh(id: string, token: number) {
@@ -389,6 +390,25 @@ async function saveField(id: string, token: number, field: DraftField, patch: Dr
   values[field.key] = decode(field, updated.value); baseline[field.key] = updated.value ?? ''; emptyBaseline[field.key] = !!updated.graphRevisionId && field.kind === 'text' && updated.value === '' && updated.confirmed; intentionalEmpty[field.key] = !!emptyBaseline[field.key]; snapshotDraft(id)
   if (field.key === 'contractTitle') openIdentityConfirmation()
 }
+function adoptionRefreshContext(field: DraftField) {
+  return field.key === 'contractTitle' || automationActive.value || reviewDirty.value || candidateDirty.value || generationSourceBlocked.value
+    ? null : captureAdoptionRefresh(catalog.value, variables.value, plan.value, generationReview.value)
+}
+async function refreshAdoptedValues(id: string, token: number, context: AdoptionRefreshContext | null) {
+  if (!current(id, token)) return
+  documents.value = documents.value.map(document => ({ ...document, stale: true }))
+  if (!context) { await refresh(id, token); return }
+  planGeneration++; plan.value = null
+  const list = await draftingApi.variables(id)
+  if (!current(id, token)) return
+  if (!adoptionVariablesMatch(context, list)) { await refresh(id, token); return }
+  initialize(list)
+  // Reading variables may restore candidates and review flags; evaluate the plan after it commits.
+  const latest = await updatePlan()
+  if (!current(id, token) || !latest) return
+  if (!adoptionPlanMatches(context, latest)) { await refresh(id, token); return }
+  snapshotDraft(id)
+}
 function openIdentityConfirmation() {
   const proposal = identityProposal.value
   if (!proposal) return
@@ -436,20 +456,22 @@ async function saveGroup(group?: DraftGroup) { await action(w('saving'), async (
 async function saveInput(field: DraftField) {
   if (!dirty(field) || applicability(field.condition, values) === 'no') return
   await action(w('saving'), async (id, token) => {
+    const context = adoptionRefreshContext(field)
     inputSaveStates[field.key] = 'saving'
     try { await persistDirty(id, token, [field]) }
     catch (caught) { if (current(id, token)) inputSaveStates[field.key] = 'failed'; throw caught }
     if (!current(id, token)) return
     inputSaveStates[field.key] = 'saved'
-    await refresh(id, token)
+    await refreshAdoptedValues(id, token, context)
   })
 }
 async function adopt(field: DraftField, candidateIndex?: number) {
   await action(w('saving'), async (id, token) => {
+    const context = adoptionRefreshContext(field)
     const variable = variableMap.value.get(field.key)
     const patch = candidateIndex === undefined && intentionalEmpty[field.key] && dirty(field) ? { value: '', explicitEmpty: true } : adoptionPatch(encode(field, values[field.key]), baseline[field.key] ?? '', !!variable?.reviewRequired, candidateIndex, variable)
     await saveField(id, token, field, patch)
-    if (current(id, token)) await refresh(id, token)
+    if (current(id, token)) await refreshAdoptedValues(id, token, context)
   })
 }
 async function upload(event: Event, target: 'templates' | 'inputs', key?: string) {
@@ -510,6 +532,16 @@ async function refreshDocumentToc() {
 }
 function editBody(id: string, text: string) { bodyDraft.value.texts[id] = text; snapshotDraft(projectId.value) }
 function insertBody(id: string, lines: string[]) { bodyDraft.value.insertions[id] = lines; snapshotDraft(projectId.value) }
+function removeBody(id: string, remove: boolean) {
+  const block = activeDocument.value?.blocks?.find(item => item.id === id)
+  if (!block || busy.value || !documentAccess.value.editable) return
+  setBodyDeletion(block, bodyDraft.value, remove); snapshotDraft(projectId.value)
+}
+function removeBodyScope(id: string, remove: boolean) {
+  if (!activeDocument.value || busy.value || !documentAccess.value.editable) return
+  try { setBodyScopeDeletion(activeDocument.value, bodyDraft.value, id, remove); snapshotDraft(projectId.value) }
+  catch { error.value = phrase('此范围与当前文稿或待保存修改不一致，请先核对或恢复正文修改。', 'This scope differs from the current document or pending edits. Review or restore the body changes first.', '此範圍與目前文稿或待儲存修改不一致，請先核對或恢復正文修改。') }
+}
 function chooseBoundFile(key: string) { if (!busy.value && !documentDirty.value && ['NTT', 'SCT', 'SCC'].includes(key)) activeFile.value = key }
 function discardBody() { bodyDraft.value = createBodyDraft(activeDocument.value); documentText.value = activeDocument.value?.content ?? ''; documentBaseline.value = documentText.value; editingDocument.value = false; snapshotDraft(projectId.value) }
 function setImmersive(expanded: boolean) {
@@ -834,7 +866,7 @@ onBeforeUnmount(() => { snapshotDraft(projectId.value); alive = false; generatio
       <p v-if="immersiveDocument && busy" class="flow-status" role="status">{{ busy }}</p><p v-if="immersiveDocument && error" class="flow-error" role="alert">{{ error }}</p>
       <div class="document-surface">
       <DraftingDocumentWorkspace :project-id="projectId" :file-key="activeFile" :document="activeDocument" :dirty="documentDirty" :editing="editingDocument" :locale="store.locale" :immersive="immersiveDocument" :fields="readingFields" :values="values" :variables="variables" :actions="plan?.actions ?? []" :field-states="readingStates" :dirty-keys="readingDirtyKeys" :trace="trace" :graph-navigation="graphNavigation" :disabled="!!busy" :stale-notice-presented="true" @input="goInput" @file="chooseBoundFile">
-        <DraftingBodyEditor v-if="activeDocument?.blocks" :blocks="activeDocument.blocks" :draft="bodyDraft" :locale="store.locale" :readonly="!documentAccess.editable" :disabled="!!busy" :immersive="immersiveDocument" @text="editBody" @insert="insertBody" />
+        <DraftingBodyEditor v-if="activeDocument?.blocks" :blocks="activeDocument.blocks" :cleanup-scopes="activeDocument.bodyCleanupScopes" :draft="bodyDraft" :locale="store.locale" :readonly="!documentAccess.editable" :disabled="!!busy" :immersive="immersiveDocument" @text="editBody" @insert="insertBody" @remove="removeBody" @scope-remove="removeBodyScope" />
         <pre v-else class="raw-text">{{ documentText }}</pre>
       </DraftingDocumentWorkspace>
       </div>

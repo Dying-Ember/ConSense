@@ -33,9 +33,24 @@ class DraftTocTitleCacheTest {
         assertArrayEquals(changed,EDITOR.updateTocTitleCaches(changed,DraftPdfConverter.sha256(changed)).getResult().getDocxBytes(),"Already synchronized caches must be byte-idempotent");
     }
 
+    @Test void whitespaceOutsideTheCompleteHeadingBookmarkKeepsItsExactNativeRunWhileRefreshingTheTitle() throws Exception {
+        String blank="<w:r><w:t xml:space=\"preserve\"> </w:t></w:r>";
+        String original=xml(source());
+        for(String document:Arrays.asList(original.replace("<w:bookmarkStart w:id=\"7\"",blank+"<w:bookmarkStart w:id=\"7\""),
+                original.replace("<w:bookmarkEnd w:id=\"7\"/>","<w:bookmarkEnd w:id=\"7\"/>"+blank))){
+            byte[] bytes=packageXml(document);TocTitleCacheUpdate update=EDITOR.updateTocTitleCaches(bytes,DraftPdfConverter.sha256(bytes));byte[] changed=update.getResult().getDocxBytes();
+            assertEquals(1,update.getChanges().size());assertTrue(update.getUnknown().isEmpty());
+            assertEquals(document.replace("Old cached title","Current adopted title"),xml(changed));
+            assertEquals(features(bytes),features(changed));unchangedPartsExceptDocument(bytes,changed);
+            assertEquals("12",EDITOR.tocPageReferences(changed).get(0).getCachedPage());
+            assertArrayEquals(changed,EDITOR.updateTocTitleCaches(changed,DraftPdfConverter.sha256(changed)).getResult().getDocxBytes());
+        }
+    }
+
     @Test void incompleteHeadingDifferentNumberAndSplitFormattingStayUnchangedWithReasons() throws Exception {
         String original=xml(source());Map<String,String> cases=new LinkedHashMap<>();
         cases.put(original.replace("<w:bookmarkStart w:id=\"7\"",text("Outside bookmark")+"<w:bookmarkStart w:id=\"7\""),"TOC_TITLE_HEADING_RANGE_INCOMPLETE");
+        cases.put(original.replace("<w:bookmarkEnd w:id=\"7\"/>","<w:bookmarkEnd w:id=\"7\"/>"+text("Outside bookmark")),"TOC_TITLE_HEADING_RANGE_INCOMPLETE");
         cases.put(original.replace("<w:t>SCC1.301</w:t></w:r>","<w:t>SCC9.999</w:t></w:r>"),"TOC_TITLE_LABEL_MISMATCH");
         cases.put(original.replace("<w:t>Old cached title</w:t>","<w:t>Old cached</w:t><w:t> title</w:t>"),"TOC_TITLE_FORMAT_SCOPE_UNSUPPORTED");
         for(Map.Entry<String,String> entry:cases.entrySet()){byte[] bytes=packageXml(entry.getKey());TocTitleCacheUpdate update=EDITOR.updateTocTitleCaches(bytes,DraftPdfConverter.sha256(bytes));assertArrayEquals(bytes,update.getResult().getDocxBytes());assertTrue(update.getChanges().isEmpty());assertEquals(entry.getValue(),update.getUnknown().get(0).get("reason"));}
@@ -81,8 +96,7 @@ class DraftTocTitleCacheTest {
     @Test void actualSccWith24SavedBodyEditsChangesOnlyTheTwoResidualTocTitles() throws Exception {
         String input=System.getProperty("consense.acceptance.manualArtifact");assumeTrue(input!=null,"Explicit saved manual SCC artifact is required");
         byte[] original=Files.readAllBytes(Paths.get(input));TocTitleCacheUpdate update=EDITOR.updateTocTitleCaches(original,DraftPdfConverter.sha256(original));byte[] changed=update.getResult().getDocxBytes();
-        assertEquals(92,update.getTargetCount());assertEquals(2,update.getChanges().size());assertEquals(4,update.getUnknown().size());
-        Set<String> unknownTargets=new HashSet<>();for(Map<String,String> row:update.getUnknown()){unknownTargets.add(row.get("targetBookmark"));assertEquals("TOC_TITLE_HEADING_RANGE_INCOMPLETE",row.get("reason"));}assertEquals(Set.of("_Toc183592382","_Toc183592393","_Toc183592403","_Toc183592446"),unknownTargets);
+        assertEquals(92,update.getTargetCount());assertEquals(2,update.getChanges().size());assertTrue(update.getUnknown().isEmpty());
         assertEquals(Set.of("_Toc183592395","_Toc183592419"),new HashSet<>(Arrays.asList(update.getChanges().get(0).get("targetBookmark"),update.getChanges().get(1).get("targetBookmark"))));
         String restored=xml(changed);for(Map<String,String> receipt:update.getChanges()){int start=restored.indexOf("<w:hyperlink w:anchor=\""+receipt.get("targetBookmark")+"\""),end=restored.indexOf("</w:hyperlink>",start)+"</w:hyperlink>".length();String row=restored.substring(start,end);restored=restored.substring(0,start)+row.replace("<w:t>"+receipt.get("after")+"</w:t>","<w:t>"+receipt.get("before")+"</w:t>")+restored.substring(end);}
         assertEquals(xml(original),restored,"Reversing only the two TOC text nodes must restore every body, field, bookmark and format byte");

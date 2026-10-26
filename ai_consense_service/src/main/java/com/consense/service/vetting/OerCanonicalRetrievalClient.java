@@ -856,6 +856,11 @@ public class OerCanonicalRetrievalClient {
     /** Initial Advisory ranking needs current scope pins; only ranked source documents need local trees. */
     JsonNode retrieveAdvisory(String indexKey,String query,List<CanonicalSourceBinding> current,String sourceGeneration,Runnable guard,
             java.util.function.Function<List<Long>,CanonicalEvidenceService.VerifiedBindingFrame> hydrate){
+        return retrieveAdvisory(indexKey,query,current,sourceGeneration,guard,hydrate,null);
+    }
+    JsonNode retrieveAdvisory(String indexKey,String query,List<CanonicalSourceBinding> current,String sourceGeneration,Runnable guard,
+            java.util.function.Function<List<Long>,CanonicalEvidenceService.VerifiedBindingFrame> hydrate,
+            java.util.function.BiFunction<List<Long>,JsonNode,Map<String,JsonNode>> compactParents){
         String module="advisory";Operation operation=beginOperation(indexKey,false);Receipt receipt=operation.receipt;
         try{
             require(receipt!=null&&receipt.verifiedSourceGenerationSha256!=null&&receipt.verifiedSourceGenerationSha256.equals(sourceGeneration),"verified source generation receipt required");Corpus selected=scalarCorpus(current,module);
@@ -879,7 +884,9 @@ public class OerCanonicalRetrievalClient {
             List<Long> ids=new ArrayList<>();for(Long id:authorized.keySet())if(requested.contains(id))ids.add(id);
             require(result.path("hits").isEmpty()==ids.isEmpty(),"ranked source documents missing or unexpected");
             Corpus checked=selected;CanonicalEvidenceService.VerifiedBindingFrame frame=null;
-            if(!ids.isEmpty()){
+            Map<String,JsonNode> compact=ids.isEmpty()||compactParents==null?null:compactParents.apply(ids,result);
+            if(compact!=null){checked=scalarCorpus(current,module);checked.chunks.putAll(compact);compact.clear();}
+            else if(!ids.isEmpty()){
                 frame=hydrate.apply(ids);require(frame!=null,"ranked source frame missing");List<CanonicalSourceBinding> hydrated=frame.bindings();
                 List<Long> hydratedIds=hydrated.stream().map(CanonicalSourceBinding::getDocumentId).collect(java.util.stream.Collectors.toList());
                 require(hydratedIds.containsAll(ids)&&new HashSet<>(hydratedIds).size()==hydratedIds.size(),"hydrated source documents differ");
@@ -889,7 +896,8 @@ public class OerCanonicalRetrievalClient {
             // Availability rechecks the complete selected registry roots, without returning their trees to Java.
             IndexState available=indexAvailable(indexKey,module,current);require(available.ready&&receipt.signature.equals(available.signature),"current canonical index unavailable after ranking");
             if(frame!=null)frame.revalidate();guard.run();
-            validateQueryResult(result,indexKey,module,receipt,checked,null);
+            try{validateQueryResult(result,indexKey,module,receipt,checked,null);}
+            finally{if(compact!=null)checked.chunks.clear();}
             require(selected.sourcePageEvidence.equals(sourcePageEvidence(current)),"source page evidence changed during retrieval");
             return publishQuery(operation,result,selected,current,module);
         }catch(RuntimeException invalid){invalidate(operation);throw invalid;}

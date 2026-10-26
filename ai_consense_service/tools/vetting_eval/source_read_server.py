@@ -38,6 +38,7 @@ DICTIONARY_VERSION = 'source-semantic-dictionary-v2'
 TEXT_FIRST_PROFILE = 'text-first-scan-v1'
 STREAM_VERSION = 'source-semantic-stream-v1'
 NORMAL_PROOF_VERSION = 'compact-normal-source-proof-v1'
+INLINE_GROUP_BYTES = MAX_BYTES // 2
 Sha = Annotated[str, Field(min_length=64, max_length=64, pattern=r'^[0-9a-f]{64}$')]
 OriginId = Annotated[str, Field(min_length=1, max_length=2048)]
 LIMITATIONS = {
@@ -337,7 +338,7 @@ def install_source_read_route(app, registry, policy, *, target_module, software_
                             projected['nativeTables'] = semantic_value(value)
                         projected_members[parent['id']] = projected
                     return projected_members[parent['id']]
-                groups = {}
+                groups, inline_group_bytes = {}, 0
                 for parent in parents:
                     if request.semanticReadVersion == DICTIONARY_VERSION:
                         projected = member(parent)
@@ -347,7 +348,13 @@ def install_source_read_route(app, registry, policy, *, target_module, software_
                         raw_template = _serialize(template)
                         group_sha = hashlib.sha256(raw_template).hexdigest()
                         if group_sha not in groups:
-                            groups[group_sha] = registry.artifact_store.put_bytes(raw_template, identity_scope='source_semantic_group_v2')
+                            if inline_group_bytes + len(raw_template) <= INLINE_GROUP_BYTES:
+                                groups[group_sha] = {'schema': 'consense.inline-semantic-group.v1',
+                                    'storage': 'inline_prepared_manifest', 'sha256': group_sha,
+                                    'byteCount': len(raw_template), 'unit': template}
+                                inline_group_bytes += len(raw_template)
+                            else:
+                                groups[group_sha] = registry.artifact_store.put_bytes(raw_template, identity_scope='source_semantic_group_v2')
                         entries.append({'id': parent['id'], 'documentId': projected['documentId'], 'sourceHash': projected['sourceHash'], 'unitId': template['unitId'], 'groupId': group_sha,
                             'recordRef': descriptor})
                         projected_members.pop(parent['id'])
@@ -372,13 +379,19 @@ def install_source_read_route(app, registry, policy, *, target_module, software_
                     'origins': entries, 'fileDependencies': list(files.values()),
                     'casDependencies': list(assets.values()), 'sourceQualityVerified': False}
                 if request.semanticReadVersion == DICTIONARY_VERSION:
-                    manifest.update(schema='consense.source-semantic-read-manifest.v2', semanticReadVersion=DICTIONARY_VERSION, groups=groups)
+                    manifest.update(schema='consense.source-semantic-read-manifest.v3', semanticReadVersion=DICTIONARY_VERSION, groups=groups)
                 if request.semanticReadProfile == TEXT_FIRST_PROFILE:
                     manifest['semanticReadProfile'] = TEXT_FIRST_PROFILE
                 if normal_proofs is not None:
                     manifest['normalProof'] = normal_proof
                     normal_proofs.append(normal_proof)
                 raw = _serialize(manifest)
+                if len(raw) > MAX_BYTES and inline_group_bytes:
+                    # Keep the existing finite manifest allowance even when inline metadata consumes its remaining space.
+                    for key, reference in groups.items():
+                        if reference.get('storage') == 'inline_prepared_manifest':
+                            groups[key] = registry.artifact_store.put_bytes(_serialize(reference['unit']), identity_scope='source_semantic_group_v2')
+                    raw = _serialize(manifest)
                 fail(len(raw) <= MAX_BYTES, 'SOURCE_READ_MANIFEST_TOO_LARGE',
                      'Prepared source metadata exceeds its finite bound')
                 descriptor = registry.artifact_store.put_bytes(raw, identity_scope='source_semantic_read_manifest')
@@ -460,8 +473,17 @@ def install_source_read_route(app, registry, policy, *, target_module, software_
                     origin = _text_first_origin(origin)
                 added = appended_bytes(result['origins'], origin)
                 if new_group:
-                    group = _strict_json(registry.artifact_store.read_asset(group_ref))
-                    registry.artifact_store.release_bytes((group_ref,))
+                    if group_ref.get('storage') == 'inline_prepared_manifest':
+                        group = group_ref['unit']
+                        raw_group = _serialize(group)
+                        fail(group_ref.get('schema') == 'consense.inline-semantic-group.v1'
+                             and type(group_ref['byteCount']) is int
+                             and len(raw_group) == group_ref['byteCount']
+                             and hashlib.sha256(raw_group).hexdigest() == group_id,
+                             'SOURCE_READ_PREPARATION_STALE', 'Inline group differs from its prepared address')
+                    else:
+                        group = _strict_json(registry.artifact_store.read_asset(group_ref))
+                        registry.artifact_store.release_bytes((group_ref,))
                     fail(group['unitId'] == entry['unitId'] and group['documentId'] == origin['documentId'],
                          'SOURCE_READ_PREPARATION_STALE', 'Group differs from its prepared address')
                     row = {'groupId': group_id, 'unit': group}
@@ -517,7 +539,8 @@ def install_source_read_route(app, registry, policy, *, target_module, software_
         for address, prepared in zip(request.projectionSha256, request.readManifestSha256):
             manifest, _ = cas_json(prepared, MAX_BYTES)
             dictionary = request.semanticReadVersion == DICTIONARY_VERSION
-            fail(manifest['schema'] == ('consense.source-semantic-read-manifest.v2' if dictionary else 'consense.source-semantic-read-manifest.v1')
+            fail(manifest['schema'] in (('consense.source-semantic-read-manifest.v2', 'consense.source-semantic-read-manifest.v3')
+                 if dictionary else ('consense.source-semantic-read-manifest.v1',))
                  and manifest['projectionSha256'] == address
                  and manifest['module'] == request.module
                  and manifest.get('semanticReadProfile', 'full') == request.semanticReadProfile
@@ -534,8 +557,21 @@ def install_source_read_route(app, registry, policy, *, target_module, software_
             sources.append(manifest['source']); entries.extend(manifest['origins'])
             if dictionary:
                 for key, descriptor in manifest['groups'].items():
-                    fail(key == descriptor['sha256'] and (key not in groups or groups[key] == descriptor),
+                    fail(isinstance(descriptor, dict)
+                         and (manifest['schema'] == 'consense.source-semantic-read-manifest.v3'
+                          or descriptor.get('storage') != 'inline_prepared_manifest')
+                         and key == descriptor.get('sha256') and (key not in groups or groups[key] == descriptor),
                          'SOURCE_READ_PREPARATION_STALE', 'Group address is ambiguous')
+                    if descriptor.get('storage') == 'inline_prepared_manifest':
+                        fail(set(descriptor) == {'schema', 'storage', 'sha256', 'byteCount', 'unit'}
+                             and descriptor.get('schema') == 'consense.inline-semantic-group.v1'
+                             and type(descriptor.get('byteCount')) is int
+                             and 0 <= descriptor['byteCount'] <= INLINE_GROUP_BYTES
+                             and isinstance(descriptor.get('unit'), dict),
+                             'SOURCE_READ_PREPARATION_STALE', 'Inline group metadata is malformed')
+                    else:
+                        fail(set(descriptor) == {'schema', 'storage', 'sha256', 'byteCount', 'relativePath', 'identityScope'},
+                             'SOURCE_READ_PREPARATION_STALE', 'Group CAS metadata must not contain inline fields')
                     groups[key] = descriptor
         by_id = {entry['id']: entry for entry in entries}
         fail(len(by_id) == len(entries), 'SOURCE_READ_AMBIGUOUS_ORIGIN', 'Prepared origin IDs must be unique')

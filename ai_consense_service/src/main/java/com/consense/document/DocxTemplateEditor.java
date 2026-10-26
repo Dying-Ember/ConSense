@@ -192,7 +192,7 @@ public final class DocxTemplateEditor {
             for(Feature feature:model.index.features)if("BOOKMARK".equals(feature.kind)&&reference.targetBookmark.equals(feature.name))bookmark=feature;
             Element headingStart=model.nodes.get(bookmark.startId),headingEnd=model.nodes.get(bookmark.endId);
             if(has(heading,"fldChar")||has(heading,"instrText")||has(heading,"fldSimple")||has(heading,"drawing")||has(heading,"pict")||has(heading,"oMath"))throw error("TOC_TITLE_HEADING_CONTROL_UNSUPPORTED",reference.targetBookmark);
-            NodeList headingTexts=heading.getElementsByTagNameNS(W,"t");for(int i=0;i<headingTexts.getLength();i++)if(!insideFeature(headingTexts.item(i),headingStart,headingEnd))throw error("TOC_TITLE_HEADING_RANGE_INCOMPLETE",reference.targetBookmark);
+            NodeList headingTexts=heading.getElementsByTagNameNS(W,"t");for(int i=0;i<headingTexts.getLength();i++)if(!headingTexts.item(i).getTextContent().trim().isEmpty()&&!insideFeature(headingTexts.item(i),headingStart,headingEnd))throw error("TOC_TITLE_HEADING_RANGE_INCOMPLETE",reference.targetBookmark);
             String full=editableText(heading).trim();int separator=full.indexOf('\t');
             if(separator<=0||full.indexOf('\n')>=0||full.indexOf('\r')>=0)throw error("TOC_TITLE_HEADING_SEPARATOR_UNSUPPORTED",reference.targetBookmark);
             String number=full.substring(0,separator).trim(),title=full.substring(separator+1).trim();
@@ -397,7 +397,8 @@ public final class DocxTemplateEditor {
                 if(otherTarget==null)continue;
                 if(target==otherTarget) {
                     if(insertion(edit)||insertion(other)) {
-                        if(destructive(edit)||destructive(other))throw error("OVERLAPPING_OPERATIONS",edit.operationId);
+                        // A text-only paragraph clear keeps this sibling anchor and style donor intact.
+                        if((destructive(edit)||destructive(other))&&edit.type!=EditType.CLEAR_PARAGRAPH&&other.type!=EditType.CLEAR_PARAGRAPH)throw error("OVERLAPPING_OPERATIONS",edit.operationId);
                     }else if(!textEdit(edit)||!textEdit(other)||overlappingSpans(edit.start,edit.end,other.start,other.end))throw error("OVERLAPPING_OPERATIONS",edit.operationId);
                 }else if(contains(target,otherTarget)||contains(otherTarget,target))throw error("OVERLAPPING_OPERATIONS",edit.operationId);
             }

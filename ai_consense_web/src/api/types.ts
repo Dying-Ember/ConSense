@@ -420,6 +420,8 @@ export interface DraftDocument {
   fieldStatus?: string
   fieldImpacts?: unknown[]
   blocks?: DraftBlock[]
+  bodyCleanupScopes?: DraftBodyCleanupScope[]
+  bodyCleanupReceipts?: unknown[]
   nativeLayout?: DraftNativeLayout
 }
 
@@ -448,7 +450,38 @@ export interface DraftBlock {
 export interface DraftBodyPatch {
   revisionId: string
   docxSha256: string
-  blocks: { id: string; bindingId?: string; expectedTextHash: string; text: string; insertAfter?: string[] }[]
+  blocks: ({ id: string; bindingId?: string; expectedTextHash: string } & (
+    { operation?: 'replace_text'; text: string; insertAfter?: string[] } |
+    { operation: 'delete_paragraph'; text?: never; insertAfter?: never }
+  ))[]
+  scopeEdits?: DraftBodyScopePatch[]
+}
+
+export interface DraftBodyCleanupScope {
+  scopeId: string
+  kind: 'table' | 'row' | 'body_range' | 'paragraph_numbering'
+  operation: 'delete_empty_table' | 'delete_empty_row' | 'delete_empty_body_range' | 'clear_empty_numbering'
+  nodeSha256: string
+  memberBindingIds: string[]
+  paragraphCount: number
+  paragraphIds: string[]
+  paragraphOrdinals: number[]
+  clearProofBindings?: string[]
+  nativeTargets?: { id: string; sha256: string; kind: string; paragraphIds: string[] }[]
+  enclosingRetainedBookmarks?: { id: string; name: string }[]
+  retainedCrossingBookmarks?: { id: string; name: string }[]
+  retainedBoundaryBookmarks?: { id: string; name: string }[]
+  nativeNumberingCount?: number
+  nativeTabCount?: number
+  nativeRowHeightCount?: number
+  previousText?: string
+  nextText?: string
+}
+export interface DraftBodyScopePatch {
+  scopeId: string
+  expectedScopeHash: string
+  operation: DraftBodyCleanupScope['operation']
+  memberBindingIds: string[]
 }
 
 /** A paragraph anchor is a physical PDF point, not a full text rectangle. */

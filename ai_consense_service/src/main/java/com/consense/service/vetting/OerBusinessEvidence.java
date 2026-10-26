@@ -858,12 +858,19 @@ public class OerBusinessEvidence {
         return new VettingRetrievalSourceUnits.RankedChunks(seeds,units);
     }
     public JsonNode response(Session session,String query,String role){
+        return response(session,query,role,false);
+    }
+    private JsonNode response(Session session,String query,String role,boolean textOnly){
         if(session.queryScope!=null){
             require(role==null,"initial Advisory query role must remain unfiltered");
-            try{return retrieval.retrieveAdvisory(session.indexKey,query,session.queryScope,session.querySourceGeneration,
-                    ()->currentQueryScope(session),ids->hydrateQueryDocuments(session,ids));}
+            int[] admitted={0};
+            try{JsonNode result=retrieval.retrieveAdvisory(session.indexKey,query,session.queryScope,session.querySourceGeneration,
+                    ()->currentQueryScope(session),ids->hydrateQueryDocuments(session,ids),textOnly?(ids,ranked)->{Map<String,JsonNode> parents=compactAdviceParents(session,ids,ranked);if(parents!=null)admitted[0]=ids.size();return parents;}:null);
+                if(textOnly&&admitted[0]>0)logAdviceAdmission(admitted[0],admitted[0],result.path("hits").size(),session.byId.size(),"accepted_after_rank_validation");
+                else if(textOnly&&result.path("hits").isEmpty())logAdviceAdmission(0,0,0,0,"no_ranked_sources");return result;}
             catch(RuntimeException|Error rejected){try{session.close();}catch(RuntimeException|Error closing){rejected.addSuppressed(closing);}session.invalidated=true;throw rejected;}
         }
+        if(textOnly)logAdviceAdmission(session.documentIds.size(),session.documentIds.size(),0,session.byId.size(),"fallback_query_scope_unavailable");
         JsonNode response;
         CurrentStage loaded=stage(session);
         try(CurrentStage stage=loaded){response=stage.frame==null?retrieval.retrieve(session.indexKey,session.module,query,role,stage.bindings)
@@ -967,14 +974,50 @@ public class OerBusinessEvidence {
 
     /** One ranked hit carries the whole observed unit; its members receive no invented rerank scores. */
     public List<VectorStore.SearchHit> adviceHits(Session session,String question) {
-        return withWordSourceScopes(session,adviceTextHits(session,question));
+        return withWordSourceScopes(session,adviceHits(session,question,false));
     }
     public List<VectorStore.SearchHit> adviceTextHits(Session session,String question) {
-        JsonNode result=response(session,question,null);List<VectorStore.SearchHit> out=new ArrayList<>();
+        return adviceHits(session,question,true);
+    }
+    private List<VectorStore.SearchHit> adviceHits(Session session,String question,boolean textOnly){
+        JsonNode result=response(session,question,null,textOnly);List<VectorStore.SearchHit> out=new ArrayList<>();
         for(int i=0;i<result.path("hits").size();i++) {
             JsonNode hit=result.path("hits").get(i),unit=result.path("sourceUnits").path("units").get(i);
             out.add(businessHit(session,hit.path("id").asText(),unit,hit.path("score").asDouble(),"reranked_seed"));
         }return out;
+    }
+    private Map<String,JsonNode> compactAdviceParents(Session session,List<Long> ids,JsonNode result){
+        if(session.readStage!=null||!session.byId.isEmpty()){logAdviceAdmission(ids.size(),ids.size(),result.path("hits").size(),session.byId.size(),"fallback_loaded_session");return null;}
+        Set<Long> requested=new LinkedHashSet<>(ids);List<SourceDocument> selected=session.querySelection.get().stream().filter(source->requested.contains(source.getId())).collect(Collectors.toList());
+        List<CanonicalSourceBinding> bindings=evidence.compactNormalCandidates(session.projectId,session.module,selected);if(bindings==null){logAdviceAdmission(ids.size(),ids.size(),result.path("hits").size(),0,"fallback_non_normal_or_unstamped");return null;}
+        currentQueryScope(session);boolean supported=retrieval.compactNormalPreparationAvailable(session.module,bindings);currentQueryScope(session);if(!supported){logAdviceAdmission(ids.size(),bindings.size(),result.path("hits").size(),0,"fallback_capability_unavailable");return null;}
+        Map<Long,CanonicalSourceBinding> byDocument=new LinkedHashMap<>();bindings.forEach(binding->byDocument.put(binding.getDocumentId(),binding));
+        Set<String> retained=new LinkedHashSet<>();for(JsonNode hit:result.path("hits"))retained.add(hit.path("id").asText());
+        for(JsonNode unit:result.path("sourceUnits").path("units"))for(JsonNode envelope:Arrays.asList(unit,unit.path("hierarchyContext"),unit.path("attachmentContext")))
+            for(JsonNode id:envelope.path("requiredMemberIds"))retained.add(id.asText());
+        Map<Long,JsonNode> headers=new LinkedHashMap<>();Map<String,JsonNode> parents=new LinkedHashMap<>();Map<String,EvidencePointer> pointers=new LinkedHashMap<>();
+        CanonicalEvidenceService.CompactNormalPreparation prepared=evidence.prepareCompactNormalSources(session.projectId,session.module,selected,bindings,(source,graph)->{
+            CanonicalSourceBinding binding=byDocument.get(source.getId());JsonNode header=headers.get(source.getId());
+            for(JsonNode unit:graph.path("units"))if(!NormalObservedContract.noObservedText(unit.path("text").asText())){
+                JsonNode chunk=NormalObservedContract.compactChunk(unit,graph,header);String id=chunk.path("id").asText();require(parents.putIfAbsent(id,chunk)==null,"duplicate normal source origin");
+                if(retained.contains(id)){EvidencePointer pointer=CanonicalEvidenceService.compactNormalPointer(binding,header,graph,chunk,session.module);
+                    if(sourcePages!=null)pointer=sourcePages.enrich(pointer);require(Objects.equals(session.sourceRenderPins.get(binding.getProjectionSha256()),pointer.getSourceRenderEvidenceIdentitySha256()),"source render pointer differs from reviewed identity");pointers.put(id,pointer);}
+            }
+        },null,headers);
+        if(prepared==null){parents.clear();logAdviceAdmission(ids.size(),bindings.size(),result.path("hits").size(),0,"fallback_registered_authority_not_normal");return null;}
+        OerCanonicalRetrievalClient.SemanticSources proof=retrieval.prepareCompactNormalSources(session.module,prepared.bindings());evidence.attestCompactNormalSources(prepared,proof.normalProofs());
+        CanonicalEvidenceService.CompactBindingScope scope=prepared.scope();evidence.revalidateCompactSelection(scope,requested);
+        Map<Long,SourceDocument> sources=prepared.sources();require(pointers.keySet().equals(retained),"ranked source closure contains an unavailable member");
+        for(String id:retained){EvidencePointer pointer=pointers.get(id);Chunk view=view(parents.get(id),pointer,sources.get(pointer.getDocumentId()));require(canonicalViewStatus(view)==null,"compact normal view differs");session.byId.put(id,view);session.chunks.owned.add(view);session.viewPayloads.put(id,JsonUtils.serializedSha256(view));}
+        Runnable previous=session.initialAskExit;session.initialAskExit=()->{evidence.revalidateCompactSelection(scope,requested);if(previous!=null)previous.run();currentQueryScope(session);};
+        headers.clear();return parents;
+    }
+    private static void logAdviceAdmission(int sources,int projections,int hits,int views,String reason){LOG.info("Advisory selected-proof admission selectedSources={} selectedProjections={} rankedHits={} retainedViews={} reason={}",sources,projections,hits,views,reason);}
+    /** Explicit model evidence requests may now load their complete source documents. */
+    public void prepareAdviceSupplement(Session session,List<VectorStore.SearchHit> selected){
+        if(session.queryScope==null)return;Set<Long> documents=new LinkedHashSet<>();
+        for(VectorStore.SearchHit hit:selected)if(!fixedBaselineHit(hit))for(EvidencePointer pointer:canonicalPointers(hit))documents.add(pointer.getDocumentId());
+        if(!documents.isEmpty())hydrateQueryDocuments(session,new ArrayList<>(documents));
     }
 
     /** Advisory declares its context needs; source selection and observed closure stay in shared OER. */

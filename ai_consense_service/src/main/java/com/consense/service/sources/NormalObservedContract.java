@@ -140,6 +140,9 @@ public final class NormalObservedContract {
     }
     public static void validateChunk(JsonNode chunk){require(PRODUCER.equals(chunk.path("producerKind").asText())&&VERSION.equals(chunk.path("metadataVersion").asText())&&"normal_observed_unit".equals(chunk.path("addressKind").asText())&&chunk.path("parts").isArray()&&!chunk.path("parts").isEmpty(),"NORMAL_OBSERVED_CHUNK_INVALID");declarations(chunk);declarations(chunk.path("sourceQuality"));require("unknown".equals(chunk.path("sourceQuality").path("semanticQuality").asText()),"NORMAL_OBSERVED_AUTHORITY_MISMATCH");}
     public static String canonicalChunkId(String projectionRevision,String unitId){return "canonical:"+hashFields("revision",CanonicalJson.scalar(projectionRevision),"unitId",CanonicalJson.scalar(unitId));}
+    public static ObjectNode compactChunk(JsonNode unit,JsonNode graph,JsonNode registeredHeader){
+        JsonNode identity=registeredHeader.path("projectionIdentity");return chunk(unit,graph,identity,registeredHeader.path("sourceHash").asText(),identity.path("sourceRevisionSha256").asText(),registeredHeader.path("projectionRevisionSha256").asText(),identity.path("observationManifestSha256").asText());
+    }
     public static boolean noObservedText(String text){return text.codePoints().allMatch(c->Character.isWhitespace(c)||Character.isSpaceChar(c)||c==0x85);}
     private static ObjectNode declarations(){ObjectNode d=object();d.put("adoptionStatus","candidate_unverified");d.put("humanConfirmed",false);d.put("sourceQualityAccepted",false);d.put("semanticScopeVerified",false);d.put("legalClosure","unknown");return d;}
     private static void declarations(JsonNode node){declarations().fields().forEachRemaining(e->require(e.getValue().equals(node.path(e.getKey())),"NORMAL_OBSERVED_AUTHORITY_MISMATCH"));require(!node.has("adoption")&&!node.has("reference"),"NORMAL_OBSERVED_AUTHORITY_MISMATCH");}

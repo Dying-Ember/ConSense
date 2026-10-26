@@ -218,7 +218,9 @@ public final class DraftingDtos {
         private String revisionId;
         private String docxSha256;
         private List<BlockPatch> blocks;
+        private List<BodyScopePatch> scopeEdits;
         public DocumentPatch(String content) { this.content=content; }
+        public DocumentPatch(String content,String revisionId,String docxSha256,List<BlockPatch> blocks) { this.content=content;this.revisionId=revisionId;this.docxSha256=docxSha256;this.blocks=blocks; }
     }
 
     @Data
@@ -227,8 +229,18 @@ public final class DraftingDtos {
         private String id;
         private String bindingId;
         private String expectedTextHash;
+        private String operation;
         private String text;
         private List<String> insertAfter;
+    }
+
+    /** Explicit current native-container deletion; ordinary paragraph clearing is unchanged. */
+    @Data @NoArgsConstructor
+    public static class BodyScopePatch {
+        private String scopeId;
+        private String expectedScopeHash;
+        private String operation;
+        private List<String> memberBindingIds;
     }
 
     /** Revision-bound template targets; evidence anchors remain separate source references. */
@@ -440,6 +452,8 @@ public final class DraftingDtos {
         private String docxSha256;
         private String sourceSha256;
         private List<Map<String,Object>> blocks;
+        private List<Map<String,Object>> bodyCleanupScopes;
+        private List<Map<String,Object>> bodyCleanupReceipts;
         private String fieldStatus;
         private List<Map<String,Object>> fieldImpacts;
         private String pdfSha256;

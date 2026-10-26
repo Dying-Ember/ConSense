@@ -85,7 +85,7 @@ class SemanticSourceReadTests(unittest.TestCase):
         saved_members, saved_groups = [], {}
         for address in prepared['readManifestSha256']:
             manifest = json.loads((self.store.root / 'sha256' / address[:2] / (address + '.blob')).read_bytes())
-            self.assertEqual('consense.source-semantic-read-manifest.v2', manifest['schema'])
+            self.assertEqual('consense.source-semantic-read-manifest.v3', manifest['schema'])
             saved_members.extend(manifest['origins'])
             saved_groups.update(manifest['groups'])
             for entry in manifest['origins']:

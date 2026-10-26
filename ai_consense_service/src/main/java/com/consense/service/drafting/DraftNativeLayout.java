@@ -71,7 +71,10 @@ final class DraftNativeLayout {
     }
     /** A relationship is inapplicable only when this source's editor ledger proves an endpoint was removed. */
     static List<NativeHeadingFlow> activeHeadingFlows(String sourceHash,String rendererKind,TemplateIndex current,List<Map<String,Object>> bindings,List<Object> ledger,Map<String,Object> proof) {
-        List<NativeHeadingFlow> registered=headingFlows(sourceHash,rendererKind);List<NativeHeadingFlow> active=new ArrayList<>();List<Object> excluded=new ArrayList<>();
+        return activeHeadingFlows(sourceHash,rendererKind,current,bindings,ledger,proof,null);
+    }
+    static List<NativeHeadingFlow> activeHeadingFlows(String sourceHash,String rendererKind,TemplateIndex current,List<Map<String,Object>> bindings,List<Object> ledger,Map<String,Object> proof,byte[] currentDocx) {
+        List<NativeHeadingFlow> registered=headingFlows(sourceHash,rendererKind);List<NativeHeadingFlow> active=new ArrayList<>();List<Object> excluded=new ArrayList<>(),retainedEmpty=new ArrayList<>();
         if(bindings.isEmpty()&&ledger.isEmpty()){proof.put("headingFlowDenominator",registered.size());proof.put("headingFlowRegistered",registered.size());proof.put("headingFlowActive",registered.size());proof.put("headingFlowExcludedAuthorized",0);proof.put("excludedAuthorizedHeadingFlows",excluded);return registered;}
         Map<String,List<Map<String,Object>>> bound=new HashMap<>();for(Map<String,Object> row:bindings)bound.computeIfAbsent(String.valueOf(row.get("bookmarkName")),name->new ArrayList<>()).add(row);
         Map<String,List<Feature>> markers=new HashMap<>();for(Feature feature:current.getFeatures())if("BOOKMARK".equals(feature.getKind()))markers.computeIfAbsent(feature.getName(),name->new ArrayList<>()).add(feature);
@@ -80,15 +83,18 @@ final class DraftNativeLayout {
         if(layout==null||!sourceHash.equals(layout.get("sourceSha256"))||!current.getSourceSha256().equals(layout.get("docxSha256"))||!(layout.get("compiledDocxSha256") instanceof String)||!String.valueOf(layout.get("compiledDocxSha256")).matches("[a-f0-9]{64}"))throw new IllegalStateException("HEADING_FLOW_REMOVAL_LINEAGE_UNVERIFIED");
         String profile=String.valueOf(layout.get("profile"));List<Object> boundaries=savedHeadingBoundaries(headingFlowSource(sourceHash,rendererKind),profile);registered=headingFlows(sourceHash,boundaries);
         int profileControls=verifyHeadingProfileControls(sourceHash,profile,boundaries,layout,markers);proof.put("headingFlowProfile",profile);proof.put("headingFlowBoundaryRows",boundaries.size());proof.put("headingFlowProfileBindingCount",profileControls);proof.put("headingFlowDenominator",registered.size());proof.put("headingFlowRegistered",registered.size());
+        Set<String> wanted=new LinkedHashSet<>();for(NativeHeadingFlow flow:registered){wanted.add(flow.getHeadingBookmark());wanted.add(flow.getBodyBookmark());}Map<String,Map<String,Object>> manual=currentDocx==null?Collections.emptyMap():DraftBodyCleanup.headingEndpointEvidence(currentDocx,sourceHash,current,bindings,ledger,wanted);
+        int manualCleared=0,manualRemoved=0;for(Map<String,Object> endpoint:manual.values())if("manual_text_cleared_anchor_retained".equals(endpoint.get("state")))manualCleared++;else if("explicit_body_scope_removed".equals(endpoint.get("state")))manualRemoved++;proof.put("headingFlowManualRetainedEmptyEndpointCount",manualCleared);proof.put("headingFlowExplicitBodyScopeRemovedEndpointCount",manualRemoved);proof.put("manualHeadingEndpointEvidence",new ArrayList<>(manual.values()));
         int ordinal=0;for(Object raw:boundaries){Map<String,Object> boundary=DraftBusinessRules.asMap(raw);if(!Boolean.TRUE.equals(boundary.get("compactClearedGaps")))continue;NativeHeadingFlow flow=registered.get(ordinal++);List<Object> endpoints=new ArrayList<>();boolean removed=false;
             for(String slot:Arrays.asList("heading","body")){
                 String id=String.valueOf(boundary.get(slot+"Id")),name="heading".equals(slot)?flow.getHeadingBookmark():flow.getBodyBookmark();List<Feature> present=markers.getOrDefault(name,Collections.emptyList());List<Map<String,Object>> rows=bound.getOrDefault(name,Collections.emptyList());
                 if(!present.isEmpty()){
                     // Retained Not used headings remain part of the current source-bound document, even when their old body was removed.
-                    if(rows.size()==1&&"removed".equals(rows.get(0).get("locationStatus")))throw new IllegalStateException("HEADING_FLOW_REMOVAL_STILL_PRESENT: "+name);
+                    if(rows.size()==1&&"removed".equals(rows.get(0).get("locationStatus"))){Map<String,Object> editorial=manual.get(name);if(editorial==null||!"manual_text_cleared_anchor_retained".equals(editorial.get("state")))throw new IllegalStateException("HEADING_FLOW_REMOVAL_STILL_PRESENT: "+name);Map<String,Object> endpoint=new LinkedHashMap<>(editorial);endpoint.put("slot",slot);endpoint.put("status","retained_manual_empty");endpoints.add(endpoint);continue;}
                     endpoints.add(DraftBusinessRules.map("slot",slot,"bookmarkName",name,"sourceParagraphId",id,"status","retained"));continue;
                 }
                 if(rows.size()!=1)throw new IllegalStateException("HEADING_FLOW_REMOVAL_BINDING_UNVERIFIED: "+name);Map<String,Object> binding=rows.get(0);
+                Map<String,Object> editorial=manual.get(name);if(editorial!=null&&"explicit_body_scope_removed".equals(editorial.get("state"))){Map<String,Object> endpoint=new LinkedHashMap<>(editorial);endpoint.put("slot",slot);endpoint.put("status","removed");endpoints.add(endpoint);removed=true;continue;}
                 if(!name.equals(binding.get("bindingId"))||!id.equals(binding.get("sourceParagraphId"))||!"removed".equals(binding.get("locationStatus"))||!"applied".equals(binding.get("documentEditStatus"))||!"applied".equals(binding.get("applicationStatus"))||binding.get("sourceText")==null||!Objects.equals(binding.get("sourceTextHash"),DraftAdoption.hash(String.valueOf(binding.get("sourceText")))))throw new IllegalStateException("HEADING_FLOW_REMOVAL_BINDING_UNVERIFIED: "+name);
                 if(layout==null||!sourceHash.equals(layout.get("sourceSha256"))||!current.getSourceSha256().equals(layout.get("docxSha256"))||!(layout.get("compiledDocxSha256") instanceof String)||!String.valueOf(layout.get("compiledDocxSha256")).matches("[a-f0-9]{64}"))throw new IllegalStateException("HEADING_FLOW_REMOVAL_LINEAGE_UNVERIFIED: "+name);
                 Set<String> authorized=new LinkedHashSet<>();
@@ -101,7 +107,7 @@ final class DraftNativeLayout {
                 }
                 if(authorized.isEmpty())throw new IllegalStateException("HEADING_FLOW_REMOVAL_OPERATION_UNVERIFIED: "+name);removed=true;endpoints.add(DraftBusinessRules.map("slot",slot,"bookmarkName",name,"sourceParagraphId",id,"sourceNodeSha256",boundary.get(slot+"Sha256"),"status","removed","operationIds",new ArrayList<>(authorized)));
             }
-            if(!removed){active.add(flow);continue;}
+            if(!removed){boolean empty=false;for(Object endpoint:endpoints)if("retained_manual_empty".equals(DraftBusinessRules.asMap(endpoint).get("status")))empty=true;if(empty)retainedEmpty.add(DraftBusinessRules.map("registeredOrdinal",ordinal,"headingBookmark",flow.getHeadingBookmark(),"bodyBookmark",flow.getBodyBookmark(),"reason","manual_text_cleared_anchor_retained","endpoints",endpoints));else active.add(flow);continue;}
             for(Object endpointRaw:endpoints){Map<String,Object> endpoint=DraftBusinessRules.asMap(endpointRaw);if(!"retained".equals(endpoint.get("status")))continue;String name=String.valueOf(endpoint.get("bookmarkName"));List<Map<String,Object>> rows=bound.getOrDefault(name,Collections.emptyList());List<Feature> present=markers.getOrDefault(name,Collections.emptyList());
                 if(rows.size()!=1||present.size()!=1||!present.get(0).isComplete()||!name.equals(rows.get(0).get("bindingId"))||!Objects.equals(endpoint.get("sourceParagraphId"),rows.get(0).get("sourceParagraphId"))||!"exact".equals(rows.get(0).get("locationStatus")))throw new IllegalStateException("HEADING_FLOW_RETAINED_ENDPOINT_UNVERIFIED: "+name);
                 Paragraph paragraph=null;for(Paragraph candidate:current.getMainParagraphs())if(present.get(0).getStartId().startsWith(candidate.getId()+"/")&&present.get(0).getEndId().startsWith(candidate.getId()+"/"))paragraph=candidate;
@@ -109,7 +115,7 @@ final class DraftNativeLayout {
             }
             excluded.add(DraftBusinessRules.map("registeredOrdinal",ordinal,"headingBookmark",flow.getHeadingBookmark(),"bodyBookmark",flow.getBodyBookmark(),"reason","source_bound_adopted_remove_nodes","endpoints",endpoints));
         }
-        proof.put("headingFlowActive",active.size());proof.put("headingFlowExcludedAuthorized",excluded.size());proof.put("excludedAuthorizedHeadingFlows",excluded);return Collections.unmodifiableList(active);
+        proof.put("headingFlowActive",active.size());proof.put("headingFlowExcludedAuthorized",excluded.size());proof.put("excludedAuthorizedHeadingFlows",excluded);proof.put("headingFlowRetainedEmptyFlowCount",retainedEmpty.size());proof.put("retainedEmptyHeadingFlows",retainedEmpty);return Collections.unmodifiableList(active);
     }
     private static List<Object> withSourceRemovals(String previousJson,DocxEditResult result,Map<String,Object> current) {
         List<Object> rows=new ArrayList<>();
@@ -133,13 +139,13 @@ final class DraftNativeLayout {
     }
     static List<Object> bodyLedger(String previousJson,DocxEditResult result) {
         Map<String,Object> previous=null;for(Object raw:JsonUtils.readList(previousJson,Object.class)){Map<String,Object> row=DraftBusinessRules.asMap(raw);if("native_layout".equals(row.get("kind")))previous=row;}
-        if(previous==null)return ledger(result,null);Map<String,Object> current=new LinkedHashMap<>(previous);current.put("parentDocxSha256",previous.get("docxSha256"));current.put("docxSha256",result.getDocxSha256());List<Object> actions=new ArrayList<>();
+        if(previous==null)return DraftBodyCleanup.preserveHistory(previousJson,ledger(result,null));Map<String,Object> current=new LinkedHashMap<>(previous);current.put("parentDocxSha256",previous.get("docxSha256"));current.put("docxSha256",result.getDocxSha256());List<Object> actions=new ArrayList<>();
         Map<String,List<Feature>> markers=new HashMap<>();for(Feature feature:result.getIndex().getFeatures())if("BOOKMARK".equals(feature.getKind())&&"word/document.xml".equals(feature.getPart()))markers.computeIfAbsent(feature.getName(),id->new ArrayList<>()).add(feature);
         for(Object raw:DraftBusinessRules.list(previous.get("actions"))){
             Map<String,Object> action=new LinkedHashMap<>(DraftBusinessRules.asMap(raw));
             if(action.get("layoutId")!=null){
                 List<Feature> matches=markers.getOrDefault(String.valueOf(action.get("layoutId")),Collections.emptyList());
-                if(matches.size()!=1||!matches.get(0).isComplete()){action.put("status","MISSING_LAYOUT_CONTROL");action.put("generatedId",null);current.put("status","unavailable");}
+                if(matches.size()!=1||!matches.get(0).isComplete()){List<String> removed=DraftBodyCleanup.removedLayoutOperations(result,action);if(!removed.isEmpty()){action.put("status","REMOVED_WITH_BODY_SCOPE");action.put("bodyOperationIds",removed);action.put("generatedId",null);}else{action.put("status","MISSING_LAYOUT_CONTROL");action.put("generatedId",null);current.put("status","unavailable");}}
                 else{
                     String start=matches.get(0).getStartId(),paragraph=start.substring(0,start.lastIndexOf("/w:bookmarkStart"));action.put("generatedId",paragraph);Paragraph node=result.getIndex().paragraph(paragraph);String kind=String.valueOf(action.get("action"));
                     boolean changed="page_break_before".equals(kind)&&"RELEASED_VERIFIED_SCT_TITLE_MIGRATION".equals(action.get("status"))&&!node.hasCompactEmptyLayoutSpacing()||"compact_verified_empty_spacing".equals(kind)&&!node.hasCompactEmptyLayoutSpacing()||"keep_verified_row_together".equals(kind)&&!node.hasNativeRowCohesion()||"compact_verified_row_gaps".equals(kind)&&!node.hasCompactNativeRowGaps()||"compact_verified_cleared_spacing".equals(kind)&&!node.hasCompactClearedLayoutSpacing()||"keep_verified_paragraph_with_next".equals(kind)&&!node.hasNativeKeepNext()||"keep_verified_heading_flow".equals(kind)&&!node.hasNativeHeadingFlow()||"release_verified_trailing_page_break".equals(kind)&&!node.hasReleasedNativeTrailingPageBreak()||"keep_verified_cleared_guidance_with_next".equals(kind)&&!node.hasClearedNativeKeepNext()||"page_break_before_verified_heading".equals(kind)&&!node.hasNativeHeadingPageBreak()||"normalize_verified_latin_font_hint".equals(kind)&&!node.hasNormalizedNativeLatinFontHints()||"normalize_verified_latin_font_slot".equals(kind)&&!node.hasNormalizedNativeLatinFontSlots()||"keep_verified_cell_paragraph_with_next".equals(kind)&&!node.hasNativeCellKeepNext()||"keep_verified_cell_paragraph_widows".equals(kind)&&!node.hasNativeWidowControl()||"keep_verified_body_paragraph_widows".equals(kind)&&!node.hasNativeWidowControl()||"keep_verified_boundary_body_lines".equals(kind)&&!node.hasNativeBodyLines();
@@ -149,6 +155,6 @@ final class DraftNativeLayout {
             actions.add(action);
         }
         Map<String,Object> stories=DraftBusinessRules.asMap(current.get("nativeStories"));if(!stories.isEmpty()){Map<String,Object> nextStories=new LinkedHashMap<>(stories);nextStories.put("parentDocxSha256",stories.get("docxSha256"));nextStories.put("docxSha256",result.getDocxSha256());for(Map.Entry<String,Object> entry:DraftBusinessRules.asMap(stories.get("entryHashes")).entrySet())if(!Objects.equals(entry.getValue(),result.getIndex().getEntryHashes().get(entry.getKey()))){nextStories.put("status","native_story_part_changed");current.put("status","unavailable");}current.put("nativeStories",nextStories);}
-        current.put("actions",actions);return withSourceRemovals(previousJson,result,current);
+        current.put("actions",actions);return DraftBodyCleanup.preserveHistory(previousJson,withSourceRemovals(previousJson,result,current));
     }
 }

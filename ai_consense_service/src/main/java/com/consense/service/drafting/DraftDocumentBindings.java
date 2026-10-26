@@ -118,7 +118,10 @@ final class DraftDocumentBindings {
         Map<String,Map<String,Object>> prior=new HashMap<>();for(Map<String,Object> row:previous)prior.put(String.valueOf(row.get("bindingId")),row);
         for(Map<String,Object> row:rows) {
             Map<String,Object> old=prior.get(String.valueOf(row.get("bindingId")));if(old==null)continue;Set<String> operations=new LinkedHashSet<>();
-            for(AppliedEdit edit:result.getLedger())for(TargetChange change:edit.getTargets())if(change.getSource().getParagraphIds().contains(String.valueOf(old.get("resultParagraphId"))))operations.add(edit.getOperationId());
+            boolean removed=false;
+            for(AppliedEdit edit:result.getLedger())for(TargetChange change:edit.getTargets())if(change.getSource().getParagraphIds().contains(String.valueOf(old.get("resultParagraphId")))){operations.add(edit.getOperationId());removed|="REMOVED".equals(change.getStatus());}
+            if(removed){row.put("locationStatus","removed");row.put("applicationStatus","body_deleted");row.put("documentEditStatus","applied");}
+            if(operations.isEmpty()&&"removed".equals(old.get("locationStatus")))for(Object id:DraftBusinessRules.list(old.get("bodyOperationIds")))operations.add(String.valueOf(id));
             row.put("bodyOperationIds",new ArrayList<>(operations));
         }
         return rows;

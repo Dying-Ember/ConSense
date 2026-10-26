@@ -270,7 +270,11 @@ final class DraftSourceEditCompiler implements DraftClauseRules.SourceListener {
     }
     static List<Edit> editableSpans(String id,Paragraph p,String replacement) {
         // Normalize paired transport line endings before alignment with existing native breaks.
-        return spans(id,p,replacement.replace("\r\n","\n"),false);
+        String next=replacement.replace("\r\n","\n"),text=p.getText();int tab=text.indexOf('\t');
+        String root=tab>0?text.substring(0,tab):"";
+        // The same native heading keeps its layout tab and bookmark-external trailing whitespace.
+        boolean heading=tab>0&&tab==text.lastIndexOf('\t')&&root.matches("(?:SCT\\d+|SCC\\d+\\.\\d{3})")&&next.startsWith(root+"\t")&&p.getCatalogText().equals(text.replace("\t",""));
+        return spans(id,p,next,heading);
     }
     private static List<Edit> spans(String id,Paragraph p,String replacement,boolean catalog) {
         String original=catalog?p.getCatalogText():p.getText();if(original.equals(replacement))return Collections.emptyList();

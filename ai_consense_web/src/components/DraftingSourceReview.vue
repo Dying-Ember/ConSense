@@ -261,7 +261,14 @@ const splitDirty = computed(() => !!splitFirst.value || !!splitSecond.value || [
 function cancelSplit() { splitFirst.value = undefined; splitSecond.value = undefined; Object.assign(splitNames, { firstZh: '', firstEn: '', secondZh: '', secondEn: '', mode: 'unknown' }); splitOpen.value = false }
 const newVariableDirty = computed(() => !!newConditionInput.branchId && [newConditionInput.nameZh,newConditionInput.nameEn,newConditionInput.unit,newConditionInput.optionsText,newConditionInput.reason,newConditionInput.scope,newConditionInput.parentId].some(value => value.trim()))
 const formDirty = computed(() => formOpen.value && JSON.stringify(form) !== formBase.value || newVariableDirty.value)
-const isolatedRule = computed(() => selected.value?.discoveryCoreRetained === true && selected.value.status !== 'excluded' && selected.value.correction?.kind === 'rule' && selected.value.correction.needsRebind === true && !selected.value.correction.branches?.length && !selected.value.correction.inputIds?.length && !selected.value.editTargets?.length)
+const isolatedRule = computed(() => {
+  const item = selected.value, correction = item?.correction
+  return !!item && item.role?.kind === 'input' && !isReviewCheck(item) && item.status !== 'excluded' && !item.missingSource &&
+    (item.discoveryCoreRetained === true || item.definitionKind === 'discovered') && !!(item.sourceAnchors?.length || item.sourceUnitIds?.length) &&
+    correction?.kind === 'rule' && correction.needsRebind === true && Array.isArray(correction.branches) && !correction.branches.length &&
+    Array.isArray(correction.inputIds) && !correction.inputIds.length && Object.keys(correction).every(key => ['kind', 'needsRebind', 'branches', 'inputIds'].includes(key)) &&
+    !item.editTargets?.length && !item.targets?.length
+})
 const parents = computed(() => state.value.variables.filter(item => item.status !== 'excluded' && !isReviewCheck(item) && ['record', 'list'].includes(item.type.kind) && item.id !== selectedId.value))
 const conditionInputs = computed(() => state.value.variables.filter(item => item.status !== 'excluded' && (item.id !== selectedId.value || form.role !== 'derived') && !isReviewCheck(item)))
 const conditionLists = computed(() => state.value.variables.filter(item => item.status !== 'excluded' && item.type.kind === 'list' && !isReviewCheck(item) && (item.id !== selectedId.value || form.role !== 'derived')))
