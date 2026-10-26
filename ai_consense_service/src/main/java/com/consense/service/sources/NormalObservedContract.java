@@ -129,7 +129,7 @@ public final class NormalObservedContract {
         require(chunkOrdinal==p.path("chunks").size()&&nonText.equals(p.path("nonRetrievableUnits")),"NORMAL_OBSERVED_COMPLETE_CHUNKS_MISMATCH");return p;
     }
     private static ObjectNode chunk(JsonNode u,JsonNode graph,JsonNode identity,String sourceHash,String revision,String projectionRevision,String manifestSha){
-        ObjectNode c=object();c.put("id","canonical:"+hashFields("revision",CanonicalJson.scalar(projectionRevision),"unitId",scalar(u,"unitId")));
+        ObjectNode c=object();c.put("id",canonicalChunkId(projectionRevision,u.path("unitId").asText()));
         c.put("producerKind",PRODUCER);c.put("projectionVersion",VERSION);c.put("metadataVersion",VERSION);c.put("segmentationVersion","complete-normal-source-unit-boundaries-v1");c.put("nativeTableMetadataVersion","normal-parser-preserved-table-candidates-v1");c.put("sourceQualityMetadataVersion","unreviewed-normal-observation-quality-v1");c.put("addressKind","normal_observed_unit");c.set("content",u.path("text"));
         if(u.path("parts").get(0).path("anchor").isTextual())c.set("anchor",u.path("parts").get(0).path("anchor"));
         c.put("sourceHash",sourceHash);c.set("sourceSha256",identity.path("originalSourceSha256"));c.set("originalSourceSha256",identity.path("originalSourceSha256"));c.put("sourceRevisionSha256",revision);c.put("projectionRevisionSha256",projectionRevision);c.put("observationManifestSha256",manifestSha);
@@ -139,7 +139,8 @@ public final class NormalObservedContract {
         ArrayNode relations=c.putArray("relations");for(JsonNode r:graph.path("relations"))if(u.path("unitId").equals(r.path("fromUnitId"))||u.path("unitId").equals(r.path("toUnitId")))relations.add(r);return c;
     }
     public static void validateChunk(JsonNode chunk){require(PRODUCER.equals(chunk.path("producerKind").asText())&&VERSION.equals(chunk.path("metadataVersion").asText())&&"normal_observed_unit".equals(chunk.path("addressKind").asText())&&chunk.path("parts").isArray()&&!chunk.path("parts").isEmpty(),"NORMAL_OBSERVED_CHUNK_INVALID");declarations(chunk);declarations(chunk.path("sourceQuality"));require("unknown".equals(chunk.path("sourceQuality").path("semanticQuality").asText()),"NORMAL_OBSERVED_AUTHORITY_MISMATCH");}
-    static boolean noObservedText(String text){return text.codePoints().allMatch(c->Character.isWhitespace(c)||Character.isSpaceChar(c)||c==0x85);}
+    public static String canonicalChunkId(String projectionRevision,String unitId){return "canonical:"+hashFields("revision",CanonicalJson.scalar(projectionRevision),"unitId",CanonicalJson.scalar(unitId));}
+    public static boolean noObservedText(String text){return text.codePoints().allMatch(c->Character.isWhitespace(c)||Character.isSpaceChar(c)||c==0x85);}
     private static ObjectNode declarations(){ObjectNode d=object();d.put("adoptionStatus","candidate_unverified");d.put("humanConfirmed",false);d.put("sourceQualityAccepted",false);d.put("semanticScopeVerified",false);d.put("legalClosure","unknown");return d;}
     private static void declarations(JsonNode node){declarations().fields().forEachRemaining(e->require(e.getValue().equals(node.path(e.getKey())),"NORMAL_OBSERVED_AUTHORITY_MISMATCH"));require(!node.has("adoption")&&!node.has("reference"),"NORMAL_OBSERVED_AUTHORITY_MISMATCH");}
     private static ObjectNode object(){return JsonUtils.mapper().createObjectNode();}

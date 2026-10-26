@@ -31,7 +31,7 @@ class VettingBusinessShapeRepairTest {
   Fixture f=new Fixture();String invalid=f.raw("amend",true,f.source.getContent());VettingResponsesTransportTest.Http http=f.wire(invalid,invalid);VettingSemanticReview.Result result=f.review(http);
   assertEquals(2,result.getActualGatewayCallCount());assertTrue(result.getCandidates().isEmpty());SemanticPacketVO packet=result.getTopicAudits().get(0).getPacketAudits().get(0);
   assertEquals(2,packet.getAttempts().size());for(SemanticAttemptVO attempt:packet.getAttempts())assertEquals(invalid,attempt.getRawResponse());
-  assertEquals(2,http.endpoints.stream().filter(e->e.endsWith("/responses")).count());assertNotNull(result.getModelFailure());
+  assertEquals(2,http.endpoints.stream().filter(e->e.endsWith("/responses")).count());assertNull(result.getModelFailure());assertEquals("failed",packet.getStatus());assertEquals("business_shape_invalid",packet.getFailureKind());assertTrue(result.getReviewedChunkIds().isEmpty());
  }
  @Test void aLiteralSourceEvidenceRejectionDoesNotBecomeAnAutomaticBusinessShapeRepair() {
   Fixture f=new Fixture();String invalidQuote=f.raw("review",false,"This invented quotation never appears in the supplied source.");VettingResponsesTransportTest.Http http=f.wire(invalidQuote,"[]");VettingSemanticReview.Result result=f.review(http);

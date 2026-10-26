@@ -56,7 +56,7 @@ class VettingRepairEmptyWarningTest {
         String second=f.raw("review",true,"AUTHORED invented quotation never in this source");VettingSemanticReview.Result r=f.review(f.wire(invalid(),second));assertTrue(warnings(r).isEmpty());assertTrue(r.getCandidates().isEmpty());assertEquals(second,packet(r).getAttempts().get(1).getRawResponse());
     }
     @Test void anExhaustedBusinessRepairKeepsItsFailureAndNeverAddsTheEmptyWarning(){
-        VettingSemanticReview.Result r=f.review(f.wire(invalid(),invalid()));assertTrue(warnings(r).isEmpty());assertNotNull(r.getModelFailure());assertEquals(2,r.getActualGatewayCallCount());assertEquals(2,packet(r).getAttempts().size());
+        VettingSemanticReview.Result r=f.review(f.wire(invalid(),invalid()));assertTrue(warnings(r).isEmpty());assertNull(r.getModelFailure());assertEquals("failed",packet(r).getStatus());assertEquals("business_shape_invalid",packet(r).getFailureKind());assertEquals(2,r.getActualGatewayCallCount());assertEquals(2,packet(r).getAttempts().size());
     }
     @Test void restoredEarlierAttemptIsInspectedAndTheNewWarningIsSavedAndReusedWithoutAnotherGeneration(){
         Store store=new Store();VettingSemanticReview.Result first=store.review(f,invalid(),"[]");store.rewindToFirstAttempt();

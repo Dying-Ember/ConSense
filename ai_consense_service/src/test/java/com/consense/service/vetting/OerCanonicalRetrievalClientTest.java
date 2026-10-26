@@ -204,6 +204,27 @@ class OerCanonicalRetrievalClientTest {
         verify(wire.http,never()).postJson(anyString(),anyString(),anyLong());ArgumentCaptor<String> bodies=ArgumentCaptor.forClass(String.class);verify(wire.backend,times(2)).sourceRead(bodies.capture(),eq("vetting"),anyInt());
         assertEquals(prepared.path("readManifestToken"),JsonUtils.parse(bodies.getAllValues().get(1)).path("readManifestToken"));assertFalse(bodies.getAllValues().get(1).contains("snapshotJson"));
     }
+    @Test void compactNormalPreparationIsExplicitlyNegotiatedAndRetainsOnlyAnIndependentProofCopy()throws Exception{
+        Wire wire=new Wire();ObjectNode prepared=semanticFixture(wire,"prepare");List<CanonicalSourceBinding> bindings=Collections.singletonList(wire.binding);
+        assertFalse(wire.client.compactNormalPreparationAvailable("vetting",bindings));
+        ((ObjectNode)wire.health.path("oer").path("sourceRead")).putObject("semanticPreparation").put("normalProofVersion",OerCanonicalRetrievalClient.COMPACT_NORMAL_PROOF);
+        assertTrue(wire.client.compactNormalPreparationAvailable("vetting",bindings));prepared.put("normalProofVersion",OerCanonicalRetrievalClient.COMPACT_NORMAL_PROOF);prepared.putArray("normalProofs").addObject().put("projectionSha256",wire.binding.getProjectionSha256());
+        when(wire.backend.sourceRead(anyString(),eq("vetting"),anyInt())).thenReturn(JsonUtils.write(prepared));wire.binding.setSnapshotJson("AUTHORED full projection must stay unread");
+        OerCanonicalRetrievalClient.SemanticSources scope=wire.client.prepareCompactNormalSources("vetting",bindings);
+        assertEquals(prepared.path("normalProofs"),scope.normalProofs());((ObjectNode)scope.normalProofs().get(0)).put("callerChanged",true);assertFalse(scope.normalProofs().get(0).has("callerChanged"));
+        ArgumentCaptor<String> request=ArgumentCaptor.forClass(String.class);verify(wire.backend).sourceRead(request.capture(),eq("vetting"),eq(16777216));
+        assertEquals(OerCanonicalRetrievalClient.COMPACT_NORMAL_PROOF,JsonUtils.parse(request.getValue()).path("normalProofVersion").asText());assertFalse(request.getValue().contains("snapshot"));verify(wire.backend,never()).normalSnapshot(anyString(),anyString());
+    }
+    @Test void compactNormalPreparationCannotAcceptAnAbsentUnadvertisedOrWrongSizedProof()throws Exception{
+        for(String mutation:Arrays.asList("capability","version","missing","count")){
+            Wire wire=new Wire();ObjectNode prepared=semanticFixture(wire,"prepare");List<CanonicalSourceBinding> bindings=Collections.singletonList(wire.binding);
+            if(!"capability".equals(mutation))((ObjectNode)wire.health.path("oer").path("sourceRead")).putObject("semanticPreparation").put("normalProofVersion",OerCanonicalRetrievalClient.COMPACT_NORMAL_PROOF);
+            prepared.put("normalProofVersion","version".equals(mutation)?"future-unknown":OerCanonicalRetrievalClient.COMPACT_NORMAL_PROOF);
+            if(!"missing".equals(mutation)){ArrayNode proofs=prepared.putArray("normalProofs");proofs.addObject();if("count".equals(mutation))proofs.addObject();}
+            when(wire.backend.sourceRead(anyString(),eq("vetting"),anyInt())).thenReturn(JsonUtils.write(prepared));assertThrows(IllegalStateException.class,()->wire.client.prepareCompactNormalSources("vetting",bindings),mutation);
+            if("capability".equals(mutation))verify(wire.backend,never()).sourceRead(anyString(),anyString(),anyInt());
+        }
+    }
     @Test void dictionaryReadsValidateGroupBytesAndDoNotInventMissingCachedTemplates()throws Exception{
         for(String mutation:Arrays.asList("none","group_bytes","missing_group","source")){
             Wire wire=new Wire();ObjectNode prepared=semanticFixture(wire,"prepare"),returned=semanticFixture(wire,"ids");

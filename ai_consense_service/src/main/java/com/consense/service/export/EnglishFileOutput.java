@@ -127,15 +127,26 @@ public class EnglishFileOutput {
         if(texts.isEmpty())return Collections.emptyMap();
         if(texts.size()>12000||texts.stream().mapToInt(String::length).sum()>2000000||texts.stream().anyMatch(s->s.length()>32000))throw failure("The English export exceeds the bounded translation size. No partial file was returned.");
         LlmOperation captured=ai.capture();String model=captured==null?"legacy-deployment":JsonUtils.write(captured.getIdentity());
+        com.consense.ai.ModelIdentity identity=captured==null?null:captured.getIdentity();
+        boolean share=identity!=null&&Arrays.asList(identity.getProfileId(),identity.getProvider(),identity.getModel(),identity.getIdentityScope(),identity.getConfigurationSha256())
+                .stream().allMatch(value->value!=null&&!value.isBlank())&&identity.getConfigurationSha256().matches("[a-f0-9]{64}");
+        Runnable currentGuard=()->{guard.run();if(share){LlmOperation current=ai.capture();
+            if(current==null||!model.equals(JsonUtils.write(current.getIdentity())))throw failure("The English translation model changed.");}};
         String key=sha((POLICY+"\n"+model+"\n"+sourceReference+"\n"+JsonUtils.write(texts)).getBytes(StandardCharsets.UTF_8));
         synchronized(("english-file-output:"+key).intern()){
-            Path cache=cacheRoot.resolve(key+".json");Map<String,String> cached=readCache(cache,key,texts);if(cached!=null){guard.run();return cached;}
+            currentGuard.run();Path cache=cacheRoot.resolve(key+".json");Map<String,String> cached=readCache(cache,key,texts);if(cached!=null){currentGuard.run();return cached;}
+            Map<String,String> changes=new LinkedHashMap<>(),languages=new LinkedHashMap<>();List<String> pending=new ArrayList<>();
+            for(String text:texts){
+                String segment=segmentKey(model,text);Map<String,String> previous=share?readCache(cacheRoot.resolve("segment-"+segment+".json"),segment,Collections.singletonList(text)):null;
+                if(previous==null)pending.add(text);else changes.putAll(previous);
+            }
+            currentGuard.run();if(pending.isEmpty())return changes;
             QwenChatUsagePreflight.Operation qwen=preflight!=null&&preflight.selected(captured)?preflight.capture(captured,"file-export"):null;
-            Map<String,String> changes=new LinkedHashMap<>(),languages=new LinkedHashMap<>();List<List<String>> batches=new ArrayList<>();List<String> batch=new ArrayList<>();int size=0,foreign=0;
-            for(String text:texts){int extra=hasNonEnglishText(text)?text.length():0;if(!batch.isEmpty()&&(size+text.length()>32000||foreign+extra>8000||batch.size()>=32)){batches.add(batch);batch=new ArrayList<>();size=0;foreign=0;}batch.add(text);size+=text.length();foreign+=extra;}
+            List<List<String>> batches=new ArrayList<>();List<String> batch=new ArrayList<>();int size=0,foreign=0;
+            for(String text:pending){int extra=hasNonEnglishText(text)?text.length():0;if(!batch.isEmpty()&&(size+text.length()>32000||foreign+extra>8000||batch.size()>=32)){batches.add(batch);batch=new ArrayList<>();size=0;foreign=0;}batch.add(text);size+=text.length();foreign+=extra;}
             if(!batch.isEmpty())batches.add(batch);if(batches.size()>24)throw failure("The English export exceeds the bounded translation call limit. No partial file was returned.");
             String sourceSha=sha(JsonUtils.write(texts).getBytes(StandardCharsets.UTF_8));
-            Runnable frozenGuard=()->{guard.run();if(!sourceSha.equals(sha(JsonUtils.write(texts).getBytes(StandardCharsets.UTF_8))))throw failure("The translation input changed.");};
+            Runnable frozenGuard=()->{currentGuard.run();if(!sourceSha.equals(sha(JsonUtils.write(texts).getBytes(StandardCharsets.UTF_8))))throw failure("The translation input changed.");};
             try(QwenChatUsagePreflight.Operation.ActionScope action=qwen==null?null:qwen.openAction("file-export:"+UUID.randomUUID(),frozenGuard)){
                 for(int b=0;b<batches.size();b++){
                     List<String> current=batches.get(b);
@@ -153,10 +164,16 @@ public class EnglishFileOutput {
                     for(Translation row:result)languages.put(current.get(Integer.parseInt(row.id.substring(1))),row.sourceLanguage);
                     frozenGuard.run();
                 }
-                writeCache(cache,key,texts,changes,languages);guard.run();return changes;
+                frozenGuard.run();
+                if(share){
+                    // Segment results certify exact presentation text, never a report's source authority.
+                    for(String text:pending){String segment=segmentKey(model,text);writeCache(cacheRoot.resolve("segment-"+segment+".json"),segment,Collections.singletonList(text),changes,languages);}
+                }else writeCache(cache,key,texts,changes,languages);
+                currentGuard.run();return changes;
             }catch(BizException error){throw error;}catch(RuntimeException error){throw failure("English translation failed or was incomplete. The original records are retained; no mixed-language file was returned.");}
         }
     }
+    private static String segmentKey(String model,String text){return sha(("segments-v1\n"+POLICY+"\n"+model+"\n"+text).getBytes(StandardCharsets.UTF_8));}
     private List<Translation> languageBatch(QwenChatUsagePreflight.Operation qwen,String system,List<String> texts,String sourceSha,String phase,Runnable guard,boolean splitOnEmpty){
         ArrayNode input=JsonUtils.mapper().createArrayNode();for(int i=0;i<texts.size();i++)input.addObject().put("id","T"+i).put("text",texts.get(i));
         List<String> raw=new ArrayList<>();

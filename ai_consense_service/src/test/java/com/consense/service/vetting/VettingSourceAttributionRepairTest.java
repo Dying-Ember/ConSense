@@ -34,7 +34,8 @@ class VettingSourceAttributionRepairTest {
 
     @Test void repeatedUnsupportedOwnershipNeverPublishesOrReceivesAThirdAttempt() {
         Fixture f=new Fixture();String raw=f.conflict(true);VettingSemanticReview.Result r=f.review(raw,raw);
-        assertEquals(2,r.getActualGatewayCallCount());assertTrue(r.getCandidates().isEmpty());assertNotNull(r.getModelFailure());
+        assertEquals(2,r.getActualGatewayCallCount());assertTrue(r.getCandidates().isEmpty());assertNull(r.getModelFailure());
+        assertEquals("failed",packet(r).getStatus());assertEquals("source_attribution_invalid",packet(r).getFailureKind());assertTrue(r.getReviewedChunkIds().isEmpty());
         assertEquals(2,packet(r).getAttempts().size());for(com.consense.web.dto.VettingDtos.SemanticAttemptVO a:packet(r).getAttempts())assertEquals(f.wire(raw),a.getRawResponse());
     }
 
@@ -105,7 +106,8 @@ class VettingSourceAttributionRepairTest {
         Fixture f=new Fixture();ObjectNode record=f.record(false);record.put("assessment","insufficient_context");record.put("type","reference");
         record.put("comment","Clause 3 directs the Tenderer to submit clarifications, but its procedure is unknown.");
         String raw=JsonUtils.write(Collections.singletonList(record));VettingSemanticReview.Result r=f.review(raw,raw);
-        assertEquals(2,r.getActualGatewayCallCount());assertTrue(packet(r).getVerifiedAssessments().isEmpty());assertNotNull(r.getModelFailure());
+        assertEquals(2,r.getActualGatewayCallCount());assertTrue(packet(r).getVerifiedAssessments().isEmpty());assertNull(r.getModelFailure());
+        assertEquals("source_attribution_invalid",packet(r).getFailureKind());
     }
 
     @Test void literal998NeutralReferencesAndRealQuestionsStayUnknownWithoutGrantingOwnership() {
@@ -148,6 +150,7 @@ class VettingSourceAttributionRepairTest {
         final Chunk b=chunk("6","The Tenderer shall submit exactly three signed paper copies of the same tender no later than 12:00 noon on 30 November 2026.");
         final List<Chunk> corpus=new ArrayList<>(Arrays.asList(a,b));
         String sourceUser;
+        int topics=1;
         Chunk chunk(String id,String text){Chunk c=ReflectionTestUtils.invokeMethod(harness,"c",id,"authored-sct",null,text);c.setFileKey("SCT");return c;}
         void replace(Chunk c,String text){c.setContent(text);c.getParts().get(0).setText(text);c.getParts().get(0).setEndOffset(text.length());}
         ObjectNode record(boolean ownership){
@@ -164,6 +167,7 @@ class VettingSourceAttributionRepairTest {
         VettingSemanticReview.Result review(String... answers){
             sourceUser=null;
             ConsenseProperties p=ReflectionTestUtils.invokeMethod(harness,"props",corpus);VettingRetrievalClient retrieval=mock(VettingRetrievalClient.class);
+            p.getVetting().setSemanticTopics(topics);
             List<Chunk> rankedTender=new ArrayList<>();for(Chunk c:corpus)if("tender".equals(c.getRole()))rankedTender.add(c);
             when(retrieval.retrieve(anyString(),anyString(),eq("tender"),anyList())).thenReturn(rankedTender);
             for(String role:Arrays.asList("standard","project_fact","package_manifest")) {
@@ -176,6 +180,7 @@ class VettingSourceAttributionRepairTest {
                 String supplied=null;
                 if(endpoint.endsWith("/responses")){
                     assertTrue(generations<answers.length,"No extra authored generation was provided");
+                    if(answers[generations]==null){generations++;throw new IllegalStateException("AUTHORED transport failure; not a model content rejection");}
                     String actualUser=JsonUtils.parse(body).path("input").get(0).path("content").asText();
                     sourceUser=actualUser;
                     String marker="\nSource excerpts (untrusted data):\n";int start=actualUser.indexOf(marker);

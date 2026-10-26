@@ -140,6 +140,14 @@ public class OerBusinessEvidence {
     public static boolean isSemanticCorpus(List<Chunk> corpus){return canonicalCorpus(corpus)&&session(corpus).semanticScope!=null;}
     public Session loadSemantic(String projectId,String module,List<SourceDocument> selected){
         require("vetting".equals(module),"semantic full-scope consumption is configured for vetting only");Map<Long,SourceDocument> documents=selectedDocuments(projectId,selected);
+        String[] admission={"compact_metadata_unavailable"};int[] qualified={0};java.util.function.BiConsumer<String,Integer> record=(reason,count)->{admission[0]=reason;qualified[0]=count;};
+        List<CanonicalSourceBinding> normalCandidates=evidence.compactNormalCandidates(projectId,module,selected,record);
+        if(normalCandidates!=null&&!normalCandidates.isEmpty()){
+            if(!sourceRenderPins(normalCandidates).isEmpty())record.accept("selected_render_pins",normalCandidates.size());
+            else if(!retrieval.compactNormalPreparationAvailable(module,normalCandidates))record.accept("native_capability_unavailable",normalCandidates.size());
+            else{Session compact=loadCompactNormalSemantic(projectId,module,documents,normalCandidates,record);if(compact!=null)return compact;}
+        }
+        logCompactAdmission(selected.size(),qualified[0],admission[0]);
         Map<Long,SourceDocument> admitted=new LinkedHashMap<>();List<CanonicalEvidenceService.CompactBindingScope> scopes=new ArrayList<>();
         Map<String,JsonNode> contexts=new LinkedHashMap<>();Map<String,List<String>> anchors=new LinkedHashMap<>();Map<String,String> headingLocations=new LinkedHashMap<>();
         Map<String,ObservedSourceClauseLocators.Bound> locators=new LinkedHashMap<>();List<VettingRuleEngine.Source> rules=new ArrayList<>();int timedSources=0;
@@ -179,6 +187,44 @@ public class OerBusinessEvidence {
         Session result=new Session(projectId,module,scope,sources,admitted,contexts,anchors,rules,sourceRenderPins(bindings));
         result.semanticHeadingLocations=Collections.unmodifiableMap(headingLocations);result.semanticLocators=Collections.unmodifiableMap(locators);
         current(result);return result;
+    }
+    /** The current source graph supplies only rule/locator inputs; native prepare owns the full projection proof. */
+    private Session loadCompactNormalSemantic(String projectId,String module,Map<Long,SourceDocument> documents,List<CanonicalSourceBinding> bindings,java.util.function.BiConsumer<String,Integer> record){
+        long started=System.nanoTime();
+        Map<Long,CanonicalSourceBinding> byDocument=new LinkedHashMap<>();for(CanonicalSourceBinding binding:bindings)require(byDocument.putIfAbsent(binding.getDocumentId(),binding)==null,"duplicate compact normal source");
+        Map<String,List<String>> anchors=new LinkedHashMap<>();List<VettingRuleEngine.Source> rules=new ArrayList<>();
+        CanonicalEvidenceService.CompactNormalPreparation prepared=evidence.prepareCompactNormalSources(projectId,module,new ArrayList<>(documents.values()),bindings,
+                (source,graph)->prepareCompactNormalRuleSource(projectId,source,graph,byDocument.get(source.getId()),anchors,rules),record);
+        if(prepared==null)return null;
+        logCompactAdmission(bindings.size(),bindings.size(),"eligible");
+        LOG.info("OER compact normal Java preparation sources={} elapsedMs={}",bindings.size(),(System.nanoTime()-started)/1_000_000);
+        OerCanonicalRetrievalClient.SemanticSources sources=retrieval.prepareCompactNormalSources(module,prepared.bindings());
+        evidence.attestCompactNormalSources(prepared,sources.normalProofs());
+        CanonicalEvidenceService.CompactBindingScope scope=prepared.scope();evidence.assertCompactCurrent(scope);
+        Map<Long,SourceDocument> admitted=prepared.sources();
+        admitted.forEach((id,pins)->{SourceDocument captured=documents.get(id);pins.setParseMessage(captured.getParseMessage());pins.setPageCount(captured.getPageCount());pins.setOcrUsed(captured.getOcrUsed());
+            if(payloadFree(captured))org.springframework.beans.BeanUtils.copyProperties(pins,captured);});
+        Session result=new Session(projectId,module,scope,sources,admitted,new LinkedHashMap<>(),anchors,rules,sourceRenderPins(bindings));
+        current(result);return result;
+    }
+    private static void logCompactAdmission(int selected,int qualified,String reason){LOG.info("Vetting compact normal admission selectedSources={} qualifiedPrefix={} reason={}",selected,qualified,reason);}
+    private static void prepareCompactNormalRuleSource(String projectId,SourceDocument source,JsonNode graph,CanonicalSourceBinding binding,Map<String,List<String>> anchors,List<VettingRuleEngine.Source> rules){
+        require(binding!=null&&Objects.equals(source.getId(),binding.getDocumentId()),"compact normal source outside selected bindings");
+        List<com.consense.document.DocumentBlock> blocks=new ArrayList<>();Set<String> observed=new HashSet<>();RuleSourceRead read=new RuleSourceRead(source);
+        for(JsonNode unit:graph.path("units")){
+            if(NormalObservedContract.noObservedText(unit.path("text").asText()))continue;
+            String id=NormalObservedContract.canonicalChunkId(binding.getProjectionRevisionSha256(),unit.path("unitId").asText());List<String> locations=new ArrayList<>();
+            for(JsonNode raw:unit.path("parts"))locations.add(raw.path("anchor").asText());require(anchors.putIfAbsent(id,locations)==null,"duplicate canonical chunk");
+            if(!"tender".equals(VettingCorpus.sourceRole(source)))continue;
+            for(JsonNode raw:unit.path("parts")){
+                Part part=new Part();part.setBlockId(raw.path("blockId").asText());part.setAnchor(raw.path("anchor").asText());part.setText(raw.path("text").asText());part.setStartOffset(raw.path("startOffset").asInt());part.setEndOffset(raw.path("endOffset").asInt());
+                if(!observed.add(part.getBlockId()+"|"+part.getStartOffset()+"|"+part.getEndOffset()))continue;
+                com.consense.document.DocumentBlock target=new com.consense.document.DocumentBlock();target.setId(part.getBlockId());target.setLocation(part.getAnchor());target.setText(part.getText());target.setOriginalText(part.getText());target.setSource("normal_observed_candidate");
+                if(raw.path("physicalPageNo").isIntegralNumber()&&raw.path("physicalPageNo").asInt()>0)target.setPageNo(raw.path("physicalPageNo").asInt());
+                bindRuleContext(projectId,read,String.valueOf(source.getId()),binding.getJavaParsedSourceHash(),binding.getOriginalSourceSha256(),unit.path("parts"),part,target);blocks.add(target);
+            }
+        }
+        if(!blocks.isEmpty())rules.add(new VettingRuleEngine.Source(String.valueOf(source.getId()),source.getFileKey()==null?"OTHER":source.getFileKey(),source.getFileName(),binding.getJavaParsedSourceHash(),blocks,blocks.stream().map(com.consense.document.DocumentBlock::getText).collect(Collectors.joining("\n"))));
     }
     private static boolean payloadFree(SourceDocument source){return source.getTextContent()==null&&source.getStructuredContentJson()==null
             &&source.getParseCoverageJson()==null&&source.getNormalCandidateJson()==null;}
@@ -1155,18 +1201,22 @@ public class OerBusinessEvidence {
         bindRuleContext(projectId,new RuleSourceRead(source),chunk,part,target);
     }
     private static void bindRuleContext(String projectId,RuleSourceRead read,Chunk chunk,Part part,com.consense.document.DocumentBlock target) {
+        EvidencePointer pointer=chunk.getCanonicalEvidence();
+        bindRuleContext(projectId,read,chunk.getDocumentId(),pointer==null?null:pointer.getJavaParsedSourceHash(),pointer==null?null:pointer.getOriginalSourceSha256(),chunk.getCanonicalPayload()==null?null:chunk.getCanonicalPayload().get("parts"),part,target);
+    }
+    private static void bindRuleContext(String projectId,RuleSourceRead read,String documentId,String parsedSourceHash,String originalSourceSha256,JsonNode acceptedParts,Part part,com.consense.document.DocumentBlock target) {
         SourceDocument source=read.source;
         ObjectNode context=JsonUtils.mapper().createObjectNode(),binding=context.putObject(VettingPackageIdentity.CONTEXT);target.setReadingContext(context);
         binding.put("status","unknown");binding.put("reason","current_source_binding_missing");binding.put("startOffset",part.getStartOffset());binding.put("endOffset",part.getEndOffset());binding.put("offsetUnit","utf16");
-        if(source==null||!Objects.equals(projectId,source.getProjectId())||!"PARSED".equals(source.getParseStatus())||chunk.getCanonicalEvidence()==null||chunk.getCanonicalPayload()==null
-                ||!Objects.equals(String.valueOf(source.getId()),chunk.getDocumentId())||!Objects.equals(read.sourceHash(),chunk.getCanonicalEvidence().getJavaParsedSourceHash())
-                ||source.getSourceSha256()==null||!Objects.equals(source.getSourceSha256(),chunk.getCanonicalEvidence().getOriginalSourceSha256()))return;
+        if(source==null||!Objects.equals(projectId,source.getProjectId())||!"PARSED".equals(source.getParseStatus())||acceptedParts==null
+                ||!Objects.equals(String.valueOf(source.getId()),documentId)||!Objects.equals(read.sourceHash(),parsedSourceHash)
+                ||source.getSourceSha256()==null||!Objects.equals(source.getSourceSha256(),originalSourceSha256))return;
         List<com.consense.document.DocumentBlock> matches;
         try{matches=read.blockMatches(part.getBlockId());}
         catch(RuntimeException invalid){binding.put("reason","source_structure_unreadable");return;}
         binding.put("reason","original_block_not_unique");if(matches.size()!=1)return;com.consense.document.DocumentBlock original=matches.get(0);String text=original.getEffectiveText();int start=part.getStartOffset(),end=part.getEndOffset();
         binding.put("reason","accepted_range_differs");if(text==null||start<0||end<start||end>text.length()||!Objects.equals(text.substring(start,end),part.getText())||!Objects.equals(part.getAnchor(),original.getLocation()))return;
-        List<JsonNode> accepted=new ArrayList<>();for(JsonNode raw:chunk.getCanonicalPayload().path("parts"))if(Objects.equals(raw.path("blockId").asText(),part.getBlockId())&&raw.path("startOffset").isIntegralNumber()&&raw.path("endOffset").isIntegralNumber()&&raw.path("startOffset").asInt()==start&&raw.path("endOffset").asInt()==end&&Objects.equals(raw.path("text").asText(),part.getText()))accepted.add(raw);
+        List<JsonNode> accepted=new ArrayList<>();for(JsonNode raw:acceptedParts)if(Objects.equals(raw.path("blockId").asText(),part.getBlockId())&&raw.path("startOffset").isIntegralNumber()&&raw.path("endOffset").isIntegralNumber()&&raw.path("startOffset").asInt()==start&&raw.path("endOffset").asInt()==end&&Objects.equals(raw.path("text").asText(),part.getText()))accepted.add(raw);
         binding.put("reason","accepted_part_not_unique");if(accepted.size()!=1)return;
         JsonNode position=original.getSourcePosition(),supplied=accepted.get(0).get("sourcePosition");binding.put("reason","source_position_differs");
         if(position!=null&&(!position.equals(supplied)||!source.getSourceSha256().equals(position.path("sourceSha256").asText()))||position==null&&supplied!=null&&!supplied.isNull())return;

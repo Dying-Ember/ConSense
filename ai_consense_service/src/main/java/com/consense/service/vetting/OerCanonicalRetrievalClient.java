@@ -222,14 +222,14 @@ public class OerCanonicalRetrievalClient {
     private static final class Capability {
         final String fingerprint,sourceUnitPolicy,indexStatusContract,softwareIdentity;
         final boolean sourceRead,semanticRead;
-        boolean semanticDictionary,semanticTextFirst,semanticStream,indexAvailability,indexAvailabilityBootstrap;
+        boolean semanticDictionary,semanticTextFirst,semanticStream,indexAvailability,indexAvailabilityBootstrap,compactNormalPreparation;
         int dictionaryScanMaximumItems=256;
         Capability(String fingerprint,String policy,String indexStatusContract,boolean sourceRead,boolean semanticRead,String softwareIdentity){this.fingerprint=fingerprint;this.sourceUnitPolicy=policy;this.indexStatusContract=indexStatusContract;this.sourceRead=sourceRead;this.semanticRead=semanticRead;this.softwareIdentity=softwareIdentity;}
     }
     /** Immutable semantic addresses, not a source-validity verdict or a retained source graph. */
     public static final class SemanticSources {
         private final String module,policy,software,runtime,token;
-        private final JsonNode addresses,manifests,sources;
+        private final JsonNode addresses,manifests,sources,normalProofs;
         private final List<CanonicalSourceBinding> bindings;
         private final int total;
         private String scopeSha;
@@ -238,23 +238,33 @@ public class OerCanonicalRetrievalClient {
         private SemanticSources(String module,String policy,Capability health,String runtime,JsonNode result,List<CanonicalSourceBinding> bindings,int total){
             this.module=module;this.policy=policy;software=health.softwareIdentity;this.runtime=runtime;token=result.path("readManifestToken").asText();
             dictionary=SEMANTIC_DICTIONARY.equals(result.path("semanticReadVersion").asText());textFirst=TEXT_FIRST_PROFILE.equals(result.path("semanticReadProfile").asText());scanMaximumItems=dictionary?health.dictionaryScanMaximumItems:256;stream=dictionary&&health.semanticStream;
-            addresses=result.path("projectionSha256").deepCopy();manifests=result.path("readManifestSha256").deepCopy();sources=result.path("sources").deepCopy();this.bindings=new ArrayList<>();
+            addresses=result.path("projectionSha256").deepCopy();manifests=result.path("readManifestSha256").deepCopy();sources=result.path("sources").deepCopy();normalProofs=result.path("normalProofs").deepCopy();this.bindings=new ArrayList<>();
             for(CanonicalSourceBinding original:bindings){CanonicalSourceBinding compact=new CanonicalSourceBinding();org.springframework.beans.BeanUtils.copyProperties(original,compact);compact.setSnapshotJson(null);this.bindings.add(compact);}this.total=total;
         }
         public String identitySha256(){return hash(JsonUtils.write(Arrays.asList(module,policy,software,addresses,manifests,sources)));}
         public int totalOrigins(){return total;}
         public JsonNode sourceCatalog(){return sources.deepCopy();}
+        public JsonNode normalProofs(){return normalProofs.deepCopy();}
         public boolean dictionary(){return dictionary;}
         public boolean textFirst(){return textFirst;}
         public boolean stream(){return stream;}
         public int scanMaximumItems(){return scanMaximumItems;}
     }
-    public SemanticSources prepareSemanticSources(String module,List<CanonicalSourceBinding> current){
+    public static final String COMPACT_NORMAL_PROOF="compact-normal-source-proof-v1";
+    public boolean compactNormalPreparationAvailable(String module,List<CanonicalSourceBinding> current){
+        require(current!=null&&!current.isEmpty(),"semantic sources missing");
+        Capability available=health(module,current.get(0).getScopePolicySha256(),false,false,false,false,false,false);
+        return available.sourceRead&&available.semanticRead&&available.compactNormalPreparation;
+    }
+    public SemanticSources prepareSemanticSources(String module,List<CanonicalSourceBinding> current){return prepareSemanticSources(module,current,false);}
+    public SemanticSources prepareCompactNormalSources(String module,List<CanonicalSourceBinding> current){return prepareSemanticSources(module,current,true);}
+    private SemanticSources prepareSemanticSources(String module,List<CanonicalSourceBinding> current,boolean compactNormal){
         require(current!=null&&!current.isEmpty(),"semantic sources missing");String policy=current.get(0).getScopePolicySha256();
         ObjectNode request=JsonUtils.mapper().createObjectNode();request.put("module",module);request.put("operation","prepare");request.put("view","semantic_units");request.put("maxBytes",16777216);
         ArrayNode addresses=request.putArray("projectionSha256");Set<Long> ids=new HashSet<>();for(CanonicalSourceBinding binding:current){
             require(binding!=null&&ids.add(binding.getDocumentId())&&policy.equals(binding.getScopePolicySha256())&&sha(binding.getProjectionSha256()),"semantic source pins differ");addresses.add(binding.getProjectionSha256());}
         Capability before=health(module,policy,false,false,false,false,false,false);require(before.sourceRead&&before.semanticRead,"OER bounded semantic source reads unavailable");
+        if(compactNormal){require(before.compactNormalPreparation,"OER compact normal preparation unavailable");request.put("normalProofVersion",COMPACT_NORMAL_PROOF);}
         if(before.semanticDictionary)request.put("semanticReadVersion",SEMANTIC_DICTIONARY);
         if(before.semanticDictionary&&before.semanticTextFirst)request.put("semanticReadProfile",TEXT_FIRST_PROFILE);
         String runtime=localRuntimeFingerprint(module);JsonNode result=statusReceipt(backend.sourceRead(JsonUtils.write(request),module,16777216));
@@ -268,6 +278,7 @@ public class OerCanonicalRetrievalClient {
         require(result.path("readManifestSha256").isArray()&&result.path("readManifestSha256").size()==current.size()&&sha(result.path("readManifestToken").asText()),"semantic preparation addresses missing");
         for(JsonNode manifest:result.path("readManifestSha256"))require(manifest.isTextual()&&sha(manifest.asText()),"semantic manifest identity invalid");
         int total=validateSemanticCatalog(result.path("sources"),current);require(integer(result.path("coverage").path("totalOrigins"))&&total==result.path("coverage").path("totalOrigins").asInt(),"semantic preparation count differs");
+        if(compactNormal)require(COMPACT_NORMAL_PROOF.equals(result.path("normalProofVersion").asText())&&result.path("normalProofs").isArray()&&result.path("normalProofs").size()==current.size(),"compact normal preparation proof missing");
         return new SemanticSources(module,policy,before,runtime,result,current,total);
     }
     /** Every call asks the public source service to rehash its actual dependencies before and after the read. */
@@ -1062,6 +1073,7 @@ public class OerCanonicalRetrievalClient {
         capability.semanticDictionary=contains(sourceRead.path("semanticReadVersions"),SEMANTIC_DICTIONARY);
         capability.semanticTextFirst=contains(sourceRead.path("semanticReadProfiles"),TEXT_FIRST_PROFILE);
         capability.semanticStream=contains(sourceRead.path("semanticScanStreamVersions"),SEMANTIC_SCAN_STREAM);
+        capability.compactNormalPreparation=COMPACT_NORMAL_PROOF.equals(sourceRead.path("semanticPreparation").path("normalProofVersion").asText());
         JsonNode scanMaximum=sourceRead.path("dictionaryScanMaximumItems");if(capability.semanticDictionary&&integer(scanMaximum)&&scanMaximum.asInt()>=256&&scanMaximum.asInt()<=1024)capability.dictionaryScanMaximumItems=scanMaximum.asInt();
         return capability;
     }

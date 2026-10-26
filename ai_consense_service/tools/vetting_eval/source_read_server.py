@@ -37,6 +37,7 @@ MAX_BYTES = 16 * 1024 * 1024
 DICTIONARY_VERSION = 'source-semantic-dictionary-v2'
 TEXT_FIRST_PROFILE = 'text-first-scan-v1'
 STREAM_VERSION = 'source-semantic-stream-v1'
+NORMAL_PROOF_VERSION = 'compact-normal-source-proof-v1'
 Sha = Annotated[str, Field(min_length=64, max_length=64, pattern=r'^[0-9a-f]{64}$')]
 OriginId = Annotated[str, Field(min_length=1, max_length=2048)]
 LIMITATIONS = {
@@ -65,7 +66,8 @@ CAPABILITY = {
         'binding': 'process_signed_exact_sources_manifests_module_policy_software',
         'coldPreparation': 'explicit_full_validation_on_first_preparation_per_source_scope_and_process',
         'repeatedPreparation': 'bounded_derived_addresses_only_fresh_actual_byte_validation',
-        'graphReloadOnPreparedRead': False, 'actualBytesStillStreamed': True},
+        'graphReloadOnPreparedRead': False, 'actualBytesStillStreamed': True,
+        'normalProofVersion': NORMAL_PROOF_VERSION},
     'sourceUnitPolicy': POLICY, 'maximumResponseBytes': MAX_BYTES,
     'maximumItems': 256, 'dictionaryScanMaximumItems': 1024,
     'originOrder': 'request_projection_order_then_registered_source_order',
@@ -101,6 +103,7 @@ class SourceReadRequest(BaseModel):
     semanticReadVersion: Literal['source-semantic-records-v1', 'source-semantic-dictionary-v2'] = 'source-semantic-records-v1'
     semanticReadProfile: Literal['full', 'text-first-scan-v1'] = 'full'
     knownSemanticGroups: list[Sha] = Field(default_factory=list, max_length=10000)
+    normalProofVersion: Literal['compact-normal-source-proof-v1'] | None = None
 
 
 def _unique(chunks, key):
@@ -227,6 +230,8 @@ def install_source_read_route(app, registry, policy, *, target_module, software_
             binding['semanticReadVersion'] = DICTIONARY_VERSION
         if request.semanticReadProfile == TEXT_FIRST_PROFILE:
             binding['semanticReadProfile'] = TEXT_FIRST_PROFILE
+        if not addresses and request.normalProofVersion is not None:
+            binding['normalProofVersion'] = request.normalProofVersion
         return hmac.new(secret, _serialize(binding), hashlib.sha256).hexdigest()
 
     def cas_json(address, maximum):
@@ -250,17 +255,22 @@ def install_source_read_route(app, registry, policy, *, target_module, software_
         fail(not request.readManifestSha256 and request.readManifestToken is None,
              'SOURCE_READ_OPERATION_INVALID', 'prepare does not accept an existing manifest binding')
         preparation_key = preparation_token(request, [])
+        normal_proofs = [] if request.normalProofVersion is not None else None
         if preparation_key in prepared_addresses:
             manifests = prepared_addresses[preparation_key]
-            catalog = semantic_read(request.model_copy(update={'operation': 'catalog',
+            catalog_request = request.model_copy(update={'operation': 'catalog',
                 'readManifestSha256': manifests, 'readManifestToken': preparation_token(request, manifests),
-                'maxBytes': MAX_BYTES}))
+                'normalProofVersion': None, 'maxBytes': MAX_BYTES})
+            with registry.validation_frame(software_guard=software_guard):
+                catalog = semantic_page(catalog_request, semantic_plan(catalog_request, normal_proofs=normal_proofs))
             prepared_addresses.move_to_end(preparation_key)
             result = {key: value for key, value in catalog.items() if key not in ('scopeIdentity', 'nextCursor')}
             result.update(operation='prepare', coverage={'status': 'prepared',
                 'totalOrigins': catalog['coverage']['totalOrigins']},
                 coldPreparation={'performed': False, 'fullGraphValidation': False,
                     'closureAlgorithm': POLICY, 'originalSealsChanged': False})
+            if normal_proofs is not None:
+                result.update(normalProofVersion=NORMAL_PROOF_VERSION, normalProofs=normal_proofs)
             fail(len(_serialize(result)) <= request.maxBytes, 'SOURCE_READ_BUDGET_EXCEEDED',
                  'Preparation receipt exceeds maxBytes', maxBytes=request.maxBytes)
             return result
@@ -271,6 +281,16 @@ def install_source_read_route(app, registry, policy, *, target_module, software_
             for address in request.projectionSha256:
                 with registry._capture_file_dependencies() as files, registry.artifact_store.capture_read_dependencies() as assets:
                     snapshot = registry.load(address)
+                    normal_proof = None
+                    if normal_proofs is not None and snapshot.get('schema') == 'consense.normal-observed.v1' \
+                            and snapshot.get('projectionIdentity', {}).get('module') == request.module:
+                        # The owned load already validated this exact source; the compact reader also pins its revision alias.
+                        metadata = registry.source_metadata(address, module=request.module)
+                        normal_proof = {key: metadata[key] for key in ('projectionSha256', 'producerKind',
+                            'projectionIdentity', 'projectionRevisionSha256', 'sourceHash', 'source',
+                            'snapshotSha256', 'parentSha256')}
+                        normal_proof['sourceBinding'] = metadata['manifest']['sourceBinding']
+                        del metadata
                 fail(canonical_scope_policy_sha(snapshot) == policy.policyIdentity['manifestSha256'],
                      'PROJECTION_SCOPE_POLICY_MISMATCH', 'Source was prepared against another scope policy')
                 registry._module(snapshot, request.module)
@@ -355,6 +375,9 @@ def install_source_read_route(app, registry, policy, *, target_module, software_
                     manifest.update(schema='consense.source-semantic-read-manifest.v2', semanticReadVersion=DICTIONARY_VERSION, groups=groups)
                 if request.semanticReadProfile == TEXT_FIRST_PROFILE:
                     manifest['semanticReadProfile'] = TEXT_FIRST_PROFILE
+                if normal_proofs is not None:
+                    manifest['normalProof'] = normal_proof
+                    normal_proofs.append(normal_proof)
                 raw = _serialize(manifest)
                 fail(len(raw) <= MAX_BYTES, 'SOURCE_READ_MANIFEST_TOO_LARGE',
                      'Prepared source metadata exceeds its finite bound')
@@ -381,6 +404,8 @@ def install_source_read_route(app, registry, policy, *, target_module, software_
             result['semanticReadVersion'] = DICTIONARY_VERSION
         if request.semanticReadProfile == TEXT_FIRST_PROFILE:
             result['semanticReadProfile'] = TEXT_FIRST_PROFILE
+        if normal_proofs is not None:
+            result.update(normalProofVersion=NORMAL_PROOF_VERSION, normalProofs=normal_proofs)
         fail(len(_serialize(result)) <= request.maxBytes, 'SOURCE_READ_BUDGET_EXCEEDED',
              'Preparation receipt exceeds maxBytes', maxBytes=request.maxBytes)
         prepared_addresses[preparation_key] = manifests
@@ -482,7 +507,7 @@ def install_source_read_route(app, registry, policy, *, target_module, software_
             fail(response_bytes <= request.maxBytes, 'SOURCE_READ_BUDGET_EXCEEDED', 'Blocked-source ledger exceeds maxBytes')
         return result
 
-    def semantic_plan(request):
+    def semantic_plan(request, *, normal_proofs=None):
         fail(len(request.readManifestSha256) == len(request.projectionSha256) and request.readManifestToken is not None,
              'SOURCE_READ_BOUNDED_UNAVAILABLE',
              'Explicit prepare is required before a bounded semantic read; no legacy full-graph fallback is performed')
@@ -502,6 +527,10 @@ def install_source_read_route(app, registry, policy, *, target_module, software_
                  and manifest['semanticProjectionVersion'] == SEMANTIC_VERSION,
                  'SOURCE_READ_PREPARATION_STALE', 'Prepared read identities do not match the current request')
             registry.verify_prepared_read_dependencies(manifest['fileDependencies'], manifest['casDependencies'])
+            if normal_proofs is not None:
+                fail('normalProof' in manifest, 'SOURCE_READ_PREPARATION_STALE',
+                     'Prepared source has no requested compact normal proof')
+                normal_proofs.append(manifest['normalProof'])
             sources.append(manifest['source']); entries.extend(manifest['origins'])
             if dictionary:
                 for key, descriptor in manifest['groups'].items():
@@ -592,6 +621,8 @@ def install_source_read_route(app, registry, policy, *, target_module, software_
             return semantic_page(request, semantic_plan(request))
 
     def validate_request(request):
+        fail(request.normalProofVersion is None or request.operation == 'prepare' and request.view == 'semantic_units',
+             'SOURCE_READ_OPERATION_INVALID', 'Compact normal proof belongs only to semantic preparation')
         fail(request.view in ('canonical_units', 'semantic_units'), 'SOURCE_READ_VIEW_UNSUPPORTED',
              'Only canonical_units and semantic_units are implemented; complete normal Word scope remains unknown',
              view=request.view, limitations=LIMITATIONS)

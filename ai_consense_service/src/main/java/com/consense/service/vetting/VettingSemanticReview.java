@@ -713,7 +713,10 @@ public class VettingSemanticReview {
                     if("retrying_uncertain_packet".equals(packet.getCheckpointStatus()))result.getWarnings().add("上次调用结果未确认，当前执行者显式重试来源包 "+packet.getSourceObservationPacketId()+"；已保存包不会重复发布。");
                 }
                 records=null;
-                if(packet.getAttempts().size()>=VettingCheckpointService.MAX_MODEL_ATTEMPTS)throw new IllegalStateException("Model attempt allowance exhausted; uncertain responses require a new run");
+                if(packet.getAttempts().size()>=VettingCheckpointService.MAX_MODEL_ATTEMPTS){
+                    RuntimeException rejected=exhaustedOutputRejection(null,packet);if(rejected!=null)throw rejected;
+                    throw new IllegalStateException("Model attempt allowance exhausted; uncertain responses require a new run");
+                }
                 while(packet.getAttempts().size()<VettingCheckpointService.MAX_MODEL_ATTEMPTS) {
                     VettingInputBudget.Input dispatchInput=fullInput;VettingInputBudget.Result dispatchBudget=inputBudget;String dispatchUser=actualUser;
                     if(!packet.getAttempts().isEmpty()) {
@@ -930,9 +933,11 @@ public class VettingSemanticReview {
                 result.getCandidates().addAll(topicCandidates);result.getReviewedChunkIds().addAll(byId.keySet());
                 audit.setAcceptedFindings(topicCandidates.size());audit.setStatus(records.isEmpty()?"completed_empty":audit.getRejectedRecords()>0?"completed_with_rejections":"completed");
             } catch (Exception e) {if(e instanceof VettingReviewProbe.Failure)throw e;
-                result.setModelFailure(brief(e));
+                if(exhaustedOutputRejection(e,packet)==null)result.setModelFailure(brief(e));
                 audit.setStatus("failed");audit.setError(brief(e)); result.getWarnings().add("主题 " + topicIndex + " 未完成语义检查：" + brief(e));
-                if(e instanceof VettingResponsesTransport.TypedTransportException) {
+                if(e instanceof RecordShapeException) {
+                    audit.setFailureKind(((RecordShapeException)e).sourceAttribution?"source_attribution_invalid":"business_shape_invalid");
+                } else if(e instanceof VettingResponsesTransport.TypedTransportException) {
                     VettingResponsesTransport.TypedTransportException transportFailure=(VettingResponsesTransport.TypedTransportException)e;
                     audit.setFailureKind("transport_failure");
                     audit.setModelResponseMetadata(JsonUtils.parse(JsonUtils.write(transportFailure.getDiagnosticMetadata())));
@@ -1084,8 +1089,32 @@ public class VettingSemanticReview {
     private static final String SOURCE_ATTRIBUTION_REASON="SOURCE_ATTRIBUTION_MISMATCH: ";
     private static final class RecordShapeException extends IllegalArgumentException {
         final String validationReason;
+        final boolean sourceAttribution;
         RecordShapeException(List<Map<String,Object>> reasons){this(BUSINESS_SHAPE_REASON,reasons);}
-        RecordShapeException(String prefix,List<Map<String,Object>> reasons){super("Model response "+(BUSINESS_SHAPE_REASON.equals(prefix)?"schema":"source attribution")+" invalid: "+JsonUtils.write(reasons));validationReason=prefix+JsonUtils.write(reasons);}
+        RecordShapeException(String prefix,List<Map<String,Object>> reasons){super("Model response "+(BUSINESS_SHAPE_REASON.equals(prefix)?"schema":"source attribution")+" invalid: "+JsonUtils.write(reasons));validationReason=prefix+JsonUtils.write(reasons);sourceAttribution=SOURCE_ATTRIBUTION_REASON.equals(prefix);}
+        RecordShapeException(String retainedReason){super("Recorded model output remains rejected: "+retainedReason);validationReason=retainedReason;sourceAttribution=retainedReason.startsWith(SOURCE_ATTRIBUTION_REASON);}
+    }
+    private static RuntimeException exhaustedOutputRejection(Exception failure,SemanticPacketVO packet){
+        boolean rejected=failure==null||failure instanceof RecordShapeException;
+        if(failure instanceof com.consense.ai.StructuredOutputValidationException){
+            com.consense.ai.StructuredOutputValidationException.Reason reason=((com.consense.ai.StructuredOutputValidationException)failure).getReason();
+            rejected=reason==com.consense.ai.StructuredOutputValidationException.Reason.INVALID_JSON||reason==com.consense.ai.StructuredOutputValidationException.Reason.SCHEMA_MISMATCH;
+        }
+        if(!rejected||packet.getAttempts().size()!=VettingCheckpointService.MAX_MODEL_ATTEMPTS)return null;
+        RuntimeException retained=null;
+        for(int index=0;index<packet.getAttempts().size();index++){
+            com.consense.web.dto.VettingDtos.SemanticAttemptVO attempt=packet.getAttempts().get(index);
+            if(attempt==null||attempt.getOrdinal()!=index+1||!"structured_output_invalid".equals(attempt.getStatus())||attempt.getRawResponse()==null
+                    ||!VettingCorpus.hash(attempt.getRawResponse()).equals(attempt.getRawResponseSha256()))return null;
+            String reason=attempt.getValidationReason();
+            if("INVALID_JSON".equals(reason)||"SCHEMA_MISMATCH".equals(reason))retained=new com.consense.ai.StructuredOutputValidationException(com.consense.ai.StructuredOutputValidationException.Reason.valueOf(reason));
+            else if(reason!=null&&(reason.startsWith(BUSINESS_SHAPE_REASON)||reason.startsWith(SOURCE_ATTRIBUTION_REASON)))retained=new RecordShapeException(reason);
+            else return null;
+        }
+        if(failure instanceof RecordShapeException&&(!(retained instanceof RecordShapeException)||((RecordShapeException)failure).sourceAttribution!=((RecordShapeException)retained).sourceAttribution))return null;
+        if(failure instanceof com.consense.ai.StructuredOutputValidationException&&(!(retained instanceof com.consense.ai.StructuredOutputValidationException)
+                ||((com.consense.ai.StructuredOutputValidationException)failure).getReason()!=((com.consense.ai.StructuredOutputValidationException)retained).getReason()))return null;
+        return failure==null?retained:(RuntimeException)failure;
     }
     private static boolean businessShapeReason(String reason){return reason!=null&&reason.startsWith(BUSINESS_SHAPE_REASON);}
     private static boolean recordRepairReason(String reason){return businessShapeReason(reason)||reason!=null&&reason.startsWith(SOURCE_ATTRIBUTION_REASON);}

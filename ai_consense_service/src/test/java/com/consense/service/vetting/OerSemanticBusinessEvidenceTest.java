@@ -358,7 +358,7 @@ class OerSemanticBusinessEvidenceTest {
     void qwenSemanticPacketsStillRejectUnsupportedFormalOwnershipTwice(boolean normal)throws Exception {
         SemanticCase f=semanticCase(normal);QwenRun q=new QwenRun(f);q.answer=unknownRecord(f.chunks.get(0),"Clause 99 requires the recorded source obligation.");
         q.action(()->{VettingSemanticReview.Result result=q.review();com.consense.web.dto.VettingDtos.SemanticPacketVO packet=packet(result);
-            assertEquals(2,result.getActualGatewayCallCount());assertTrue(result.getCandidates().isEmpty());assertTrue(packet.getVerifiedAssessments().isEmpty());assertNotNull(result.getModelFailure());
+            assertEquals(2,result.getActualGatewayCallCount());assertTrue(result.getCandidates().isEmpty());assertTrue(packet.getVerifiedAssessments().isEmpty());assertNull(result.getModelFailure());assertEquals("failed",packet.getStatus());assertEquals("source_attribution_invalid",packet.getFailureKind());assertTrue(result.getReviewedChunkIds().isEmpty());
             assertEquals(2,packet.getAttempts().size());for(com.consense.web.dto.VettingDtos.SemanticAttemptVO attempt:packet.getAttempts()){
                 assertTrue(attempt.getValidationReason().contains("unsupported_source_clause_attribution"));assertEquals("structured_output_invalid",attempt.getStatus());assertNotNull(attempt.getRawResponse());}
             assertTrue(invocations(f.observed,"sourceClauseLocators")>0);writeQwenProof("ownership-"+(normal?"normal":"native"),q.proof(null,result),0,0,invocations(f.observed,"wordSourceScopeContexts"));

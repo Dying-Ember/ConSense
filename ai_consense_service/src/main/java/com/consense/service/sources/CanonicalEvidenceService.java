@@ -411,6 +411,168 @@ public class CanonicalEvidenceService {
         return Collections.unmodifiableList(result);
     }
 
+    /** Only stamped, current, same-module normal rows use the compact preparation capability. */
+    @Transactional(propagation=Propagation.REQUIRES_NEW,isolation=Isolation.READ_COMMITTED,readOnly=true)
+    public List<CanonicalSourceBinding> compactNormalCandidates(String project,String module,List<SourceDocument> selected){
+        return compactNormalCandidates(project,module,selected,null);
+    }
+    @Transactional(propagation=Propagation.REQUIRES_NEW,isolation=Isolation.READ_COMMITTED,readOnly=true)
+    public List<CanonicalSourceBinding> compactNormalCandidates(String project,String module,List<SourceDocument> selected,java.util.function.BiConsumer<String,Integer> recorder){
+        validModule(module);require(selected!=null&&!selected.isEmpty(),HttpStatus.BAD_REQUEST,"CANONICAL_SELECTED_DOCUMENTS_INVALID");
+        if(!"vetting".equals(module)){admission(recorder,"unsupported_module",0);return null;}
+        if(entityManager==null){admission(recorder,"persistence_context_unavailable",0);return null;}
+        List<CanonicalSourceBinding> candidates=new ArrayList<>();Map<Long,List<List<Object>>> prefixes=new LinkedHashMap<>();Set<Long> ids=new HashSet<>();
+        for(SourceDocument source:selected){
+            require(source!=null&&source.getId()!=null&&Objects.equals(project,source.getProjectId())&&ids.add(source.getId()),HttpStatus.BAD_REQUEST,"CANONICAL_SELECTED_DOCUMENTS_INVALID");
+            if(!SourceContentDigests.stamped(source)){
+                if(source.getBusinessContentSha256()==null){admission(recorder,"legacy_source_stamp",candidates.size());return null;}
+                throw new CanonicalEvidenceException(HttpStatus.CONFLICT,"SOURCE_CONTENT_REVISION_INVALID");
+            }
+            CanonicalSourceBinding binding=null;Long before=null;List<List<Object>> prefix=new ArrayList<>();
+            while(true){
+                List<CanonicalSourceBindingRepository.CompactMetadata> page=before==null?bindings.findCompactByDocument(project,source.getId(),org.springframework.data.domain.PageRequest.of(0,1)):bindings.findCompactByDocumentBefore(project,source.getId(),before,org.springframework.data.domain.PageRequest.of(0,1));
+                if(page.isEmpty()){admission(recorder,before==null?"missing_binding":"foreign_latest_binding",candidates.size());return null;}
+                require(page.size()==1,HttpStatus.CONFLICT,"CANONICAL_BINDING_REVISION_ORDER_INVALID");binding=compactBinding(page.get(0));
+                require(binding.getId()!=null&&(before==null||binding.getId()<before),HttpStatus.CONFLICT,"CANONICAL_BINDING_REVISION_ORDER_INVALID");
+                prefix.add(bindingState(binding));
+                if(Objects.equals(module,binding.getDeclaredModule()))break;
+                if(!compactUnreviewed(binding)||!MODULES.contains(binding.getDeclaredModule())||binding.getSnapshotContentSha256()==null){admission(recorder,"foreign_latest_binding",candidates.size());return null;}
+                require(validDigest(binding.getSnapshotBytesSha256())&&Objects.equals(binding.getSnapshotBytesSha256(),binding.getSnapshotContentSha256()),HttpStatus.CONFLICT,"CANONICAL_STORED_BYTES_CHANGED_OR_REVISION_UNAVAILABLE");
+                before=binding.getId();
+            }
+            if(binding.getAdoptionManifestSha256()!=null||binding.getReviewReferenceSha256()!=null){admission(recorder,"reviewed_binding",candidates.size());return null;}
+            if(binding.getFamilyCompositionSha256()!=null||binding.getFamilyComponentSetSha256()!=null){admission(recorder,"family_binding",candidates.size());return null;}
+            if(binding.getSnapshotContentSha256()==null){admission(recorder,"legacy_binding_stamp",candidates.size());return null;}
+            require(validDigest(binding.getSnapshotBytesSha256())&&Objects.equals(binding.getSnapshotBytesSha256(),binding.getSnapshotContentSha256()),HttpStatus.CONFLICT,"CANONICAL_STORED_BYTES_CHANGED_OR_REVISION_UNAVAILABLE");
+            candidates.add(binding);
+            prefixes.put(source.getId(),Collections.unmodifiableList(prefix));
+        }
+        admission(recorder,"candidate_metadata_eligible",candidates.size());
+        return new CompactNormalCandidates(candidates,prefixes);
+    }
+    private static void admission(java.util.function.BiConsumer<String,Integer> recorder,String reason,int count){if(recorder!=null)recorder.accept(reason,count);}
+    private static boolean compactUnreviewed(CanonicalSourceBinding binding){return binding.getAdoptionManifestSha256()==null&&binding.getReviewReferenceSha256()==null&&binding.getFamilyCompositionSha256()==null&&binding.getFamilyComponentSetSha256()==null;}
+    private static final class CompactNormalCandidates extends AbstractList<CanonicalSourceBinding>{
+        final List<CanonicalSourceBinding> selected;final Map<Long,List<List<Object>>> prefixes;
+        CompactNormalCandidates(List<CanonicalSourceBinding> selected,Map<Long,List<List<Object>>> prefixes){this.selected=Collections.unmodifiableList(selected);this.prefixes=Collections.unmodifiableMap(prefixes);}
+        @Override public CanonicalSourceBinding get(int index){return selected.get(index);}
+        @Override public int size(){return selected.size();}
+    }
+
+    /** Current source proof remains local; only compact identities survive the native preparation wait. */
+    public static final class CompactNormalPreparation {
+        private final CompactBindingScope scope;
+        private final Map<Long,String> graphSha256,generationSha256;
+        private boolean attested;
+        private CompactNormalPreparation(CompactBindingScope scope,Map<Long,String> graphSha256,Map<Long,String> generationSha256){this.scope=scope;this.graphSha256=graphSha256;this.generationSha256=generationSha256;}
+        public List<CanonicalSourceBinding> bindings(){return scope.bindings();}
+        public CompactBindingScope scope(){require(attested,HttpStatus.CONFLICT,"CANONICAL_COMPACT_NORMAL_PROOF_REQUIRED");return scope;}
+        public Map<Long,SourceDocument> sources(){
+            require(attested,HttpStatus.CONFLICT,"CANONICAL_COMPACT_NORMAL_PROOF_REQUIRED");Map<Long,SourceDocument> copies=new LinkedHashMap<>();
+            scope.sources.forEach((id,source)->{SourceDocument copy=new SourceDocument();org.springframework.beans.BeanUtils.copyProperties(source,copy);copies.put(id,copy);});return Collections.unmodifiableMap(copies);
+        }
+    }
+
+    @Transactional(propagation=Propagation.REQUIRES_NEW,isolation=Isolation.READ_COMMITTED,readOnly=true)
+    public CompactNormalPreparation prepareCompactNormalSources(String project,String module,List<SourceDocument> selected,List<CanonicalSourceBinding> candidates,java.util.function.BiConsumer<SourceDocument,JsonNode> consumer){
+        return prepareCompactNormalSources(project,module,selected,candidates,consumer,null);
+    }
+    @Transactional(propagation=Propagation.REQUIRES_NEW,isolation=Isolation.READ_COMMITTED,readOnly=true)
+    public CompactNormalPreparation prepareCompactNormalSources(String project,String module,List<SourceDocument> selected,List<CanonicalSourceBinding> candidates,java.util.function.BiConsumer<SourceDocument,JsonNode> consumer,java.util.function.BiConsumer<String,Integer> recorder){
+        require("vetting".equals(module)&&selected!=null&&candidates!=null&&selected.size()==candidates.size()&&!selected.isEmpty()&&consumer!=null&&entityManager!=null,HttpStatus.BAD_REQUEST,"CANONICAL_SELECTED_DOCUMENTS_INVALID");
+        List<CanonicalSourceBinding> retained=new ArrayList<>();Map<Long,List<List<Object>>> histories=new LinkedHashMap<>();
+        Map<Long,SourceDocument> stamps=new LinkedHashMap<>();Map<Long,CompactRegistryPin> registryPins=new LinkedHashMap<>();Map<Long,String> graphs=new LinkedHashMap<>(),generations=new LinkedHashMap<>();
+        for(int i=0;i<selected.size();i++){
+            SourceDocument captured=selected.get(i);CanonicalSourceBinding binding=candidates.get(i);
+            require(captured!=null&&binding!=null&&Objects.equals(project,captured.getProjectId())&&Objects.equals(project,binding.getProjectId())&&Objects.equals(captured.getId(),binding.getDocumentId())
+                    &&Objects.equals(module,binding.getDeclaredModule())&&binding.getSnapshotJson()==null&&SourceContentDigests.stamped(captured),HttpStatus.CONFLICT,"CANONICAL_SOURCE_STALE");
+            require(binding.getAdoptionManifestSha256()==null&&binding.getReviewReferenceSha256()==null&&binding.getFamilyCompositionSha256()==null&&binding.getFamilyComponentSetSha256()==null,HttpStatus.CONFLICT,"CANONICAL_BINDING_TYPED_PINS_CHANGED");
+            require(validDigest(binding.getSnapshotBytesSha256())&&Objects.equals(binding.getSnapshotBytesSha256(),binding.getSnapshotContentSha256()),HttpStatus.CONFLICT,"CANONICAL_STORED_BYTES_CHANGED_OR_REVISION_UNAVAILABLE");
+            require(modules(JsonUtils.parse(binding.getEligibleModulesJson())).contains(module),HttpStatus.FORBIDDEN,"CANONICAL_MODULE_NOT_ELIGIBLE");
+            List<List<Object>> capturedHistory=candidates instanceof CompactNormalCandidates?((CompactNormalCandidates)candidates).prefixes.get(captured.getId()):Collections.singletonList(bindingState(binding));
+            require(capturedHistory!=null&&capturedHistory.equals(compactHistory(project,captured.getId(),binding.getId())),HttpStatus.CONFLICT,"CANONICAL_COMPACT_BINDING_CHANGED");
+            String[] authority=new String[2];
+            require(Objects.equals(binding.getSnapshotBytesSha256(),streamedSnapshotSha256(binding.getId(),authority)),HttpStatus.CONFLICT,"CANONICAL_STORED_BYTES_CHANGED");
+            if(!NormalObservedContract.SCHEMA.equals(authority[0])||!NormalObservedContract.PRODUCER.equals(authority[1])){admission(recorder,"stored_authority_not_normal",i);return null;}
+            SourceDocument source=sources.normalDocument(project,captured.getId(),module);
+            require(ProjectDocumentScope.sameScopeRevision(captured,source)&&SourceContentDigests.stamped(source)&&Objects.equals(captured.getBusinessContentSha256(),source.getBusinessContentSha256())
+                    &&Objects.equals(binding.getOriginalSourceSha256(),source.getSourceSha256())&&Objects.equals(binding.getJavaParsedSourceHash(),VettingCorpus.sourceHash(source))
+                    &&Objects.equals(binding.getRoutingSha256(),routingHash(source)),HttpStatus.CONFLICT,"CANONICAL_SOURCE_STALE");
+            SourceContentDigests.verifyLoaded(source);JsonNode graph=NormalObservedPreparationService.currentGraph(source);
+            require(graphs.putIfAbsent(source.getId(),CanonicalJson.nodeHash(graph))==null,HttpStatus.CONFLICT,"CANONICAL_SELECTED_DOCUMENTS_INVALID");generations.put(source.getId(),graph.path("generationSha256").asText());
+            SourceDocument stamp=CanonicalCurrentSourceReader.compactVerifiedSource(source);sources.requireCurrentStamp(stamp,sources.currentStamp(project,source.getId(),module));
+            require(capturedHistory.equals(compactHistory(project,source.getId(),binding.getId())),HttpStatus.CONFLICT,"CANONICAL_COMPACT_BINDING_CHANGED");
+            CanonicalSourceBinding compact=copyBinding(binding);compact.setSnapshotJson(null);List<List<Object>> history=compactNormalHistory(project,module,source,compact,graph,graphs.get(source.getId()));
+            if(history==null){admission(recorder,"foreign_authority_not_normal",i);return null;}
+            require(capturedHistory.equals(history),HttpStatus.CONFLICT,"CANONICAL_COMPACT_BINDING_CHANGED");
+            consumer.accept(source,graph);
+            retained.add(compact);histories.put(source.getId(),history);stamps.put(source.getId(),stamp);registryPins.put(source.getId(),new CompactRegistryPin(null,true,sources.observeOriginal(stamp)));
+        }
+        CompactBindingScope scope=new CompactBindingScope(this,project,module,retained,histories,stamps,registryPins);assertCompactCurrent(scope);
+        admission(recorder,"native_proof_pending",selected.size());
+        return new CompactNormalPreparation(scope,graphs,generations);
+    }
+
+    /** Foreign rows are skipped only after their registered bytes and current graph identity are proved. */
+    private List<List<Object>> compactNormalHistory(String project,String module,SourceDocument source,CanonicalSourceBinding selected,JsonNode graph,String graphSha256){
+        List<List<Object>> result=new ArrayList<>();Long before=null;
+        while(true){
+            List<CanonicalSourceBindingRepository.CompactMetadata> rows=before==null?bindings.findCompactByDocument(project,source.getId(),org.springframework.data.domain.PageRequest.of(0,1)):bindings.findCompactByDocumentBefore(project,source.getId(),before,org.springframework.data.domain.PageRequest.of(0,1));
+            require(rows.size()==1,HttpStatus.CONFLICT,"CANONICAL_COMPACT_BINDING_CHANGED");CanonicalSourceBinding row=compactBinding(rows.get(0));
+            require(row.getId()!=null&&(before==null||row.getId()<before)&&row.getSnapshotContentSha256()!=null&&Objects.equals(row.getSnapshotContentSha256(),row.getSnapshotBytesSha256()),HttpStatus.CONFLICT,"CANONICAL_STORED_BYTES_CHANGED_OR_REVISION_UNAVAILABLE");
+            result.add(bindingState(row));
+            if(row.getId().equals(selected.getId())){require(bindingState(row).equals(bindingState(selected)),HttpStatus.CONFLICT,"CANONICAL_COMPACT_BINDING_CHANGED");return result;}
+            require(row.getId()>selected.getId()&&!Objects.equals(module,row.getDeclaredModule()),HttpStatus.CONFLICT,"CANONICAL_COMPACT_BINDING_CHANGED");
+            if(!compactUnreviewed(row)||!MODULES.contains(row.getDeclaredModule()))return null;
+            com.fasterxml.jackson.databind.node.ObjectNode header=JsonUtils.mapper().createObjectNode();String[] authority=new String[2];
+            require(Objects.equals(row.getSnapshotBytesSha256(),streamedSnapshotSha256(row.getId(),authority,header)),HttpStatus.CONFLICT,"CANONICAL_STORED_BYTES_CHANGED");
+            if(!NormalObservedContract.SCHEMA.equals(authority[0])||!NormalObservedContract.PRODUCER.equals(authority[1]))return null;
+            validateCompactForeignNormal(row,header,source,graph,graphSha256,module);before=row.getId();
+        }
+    }
+    private static void validateCompactForeignNormal(CanonicalSourceBinding row,JsonNode header,SourceDocument source,JsonNode graph,String graphSha256,String requestedModule){
+        validateBindingPins(row,header);JsonNode identity=header.path("projectionIdentity");OerDocumentIdentity routing=OerSourceMetadata.identity(source);
+        require(routing!=null&&routing.getEligibleModules()!=null&&routing.getEligibleModules().contains(requestedModule)&&routing.getEligibleModules().contains(row.getDeclaredModule()),HttpStatus.CONFLICT,"CANONICAL_MODULE_NOT_ELIGIBLE");
+        Set<String> keys=new HashSet<>();identity.fieldNames().forEachRemaining(keys::add);
+        require(keys.equals(new HashSet<>(Arrays.asList("version","producerKind","projectionCodeSha256","documentId","role","module","eligibleModules","sourcePurpose","sourceClass","routingSha256","scopePolicySha256","originalSourceSha256","javaParsedSourceHash","generationSha256","candidateGraphSha256","observationManifestSha256","sourceRevisionSha256")))
+            &&NormalObservedContract.VERSION.equals(identity.path("version").asText())&&NormalObservedContract.PRODUCER.equals(identity.path("producerKind").asText())&&validDigest(identity.path("projectionCodeSha256").asText())&&validDigest(identity.path("observationManifestSha256").asText())
+            &&validDigest(row.getScopePolicySha256())&&Objects.equals(row.getProjectionSha256(),header.path("projectionSha256").asText())
+            &&Objects.equals(String.valueOf(source.getId()),identity.path("documentId").asText())&&Objects.equals(VettingCorpus.sourceRole(source),identity.path("role").asText())
+            &&Objects.equals(graphSha256,identity.path("candidateGraphSha256").asText())&&graph.path("generationSha256").equals(identity.path("generationSha256"))
+            &&Objects.equals(source.getSourceSha256(),row.getOriginalSourceSha256())&&Objects.equals(VettingCorpus.sourceHash(source),row.getJavaParsedSourceHash())&&Objects.equals(routingHash(source),row.getRoutingSha256()),HttpStatus.CONFLICT,"CANONICAL_COMPACT_NORMAL_GRAPH_CHANGED");
+        String sourceClass=VettingCorpus.sourceClass(source);com.fasterxml.jackson.databind.node.ObjectNode binding=JsonUtils.mapper().createObjectNode();binding.put("module",row.getDeclaredModule());binding.set("eligibleModules",JsonUtils.mapper().valueToTree(routing.getEligibleModules()));binding.put("sourcePurpose",routing.getSourcePurpose());binding.put("sourceClass",sourceClass==null?routing.getKind().toLowerCase(Locale.ROOT):sourceClass);binding.put("routingSha256",row.getRoutingSha256());binding.put("scopePolicySha256",row.getScopePolicySha256());
+        require(binding.equals(header.path("sourceBinding")),HttpStatus.CONFLICT,"CANONICAL_BINDING_TYPED_PINS_CHANGED");binding.fields().forEachRemaining(field->require(field.getValue().equals(identity.path(field.getKey())),HttpStatus.CONFLICT,"CANONICAL_BINDING_TYPED_PINS_CHANGED"));
+        com.fasterxml.jackson.databind.node.ObjectNode original=JsonUtils.mapper().createObjectNode();original.put("sourceSha256",source.getSourceSha256());original.put("sourceRevisionSha256",row.getSourceRevisionSha256());original.put("filename",source.getFileName());original.put("sourceFilename",source.getFileName());original.put("parsedSourceHash",row.getJavaParsedSourceHash());original.put("projectId",source.getProjectId());original.put("documentId",String.valueOf(source.getId()));
+        require(original.equals(header.path("source")),HttpStatus.CONFLICT,"CANONICAL_SOURCE_STALE");
+        require("candidate_unverified".equals(header.path("adoptionStatus").asText())&&header.path("humanConfirmed").isBoolean()&&!header.path("humanConfirmed").asBoolean()&&header.path("sourceQualityAccepted").isBoolean()&&!header.path("sourceQualityAccepted").asBoolean()&&header.path("semanticScopeVerified").isBoolean()&&!header.path("semanticScopeVerified").asBoolean()&&"unknown".equals(header.path("legalClosure").asText()),HttpStatus.CONFLICT,"CANONICAL_BINDING_TYPED_PINS_CHANGED");
+    }
+
+    /** The native owner emits this compact record only after complete source/CAS/software exit proof. */
+    public void attestCompactNormalSources(CompactNormalPreparation prepared,JsonNode proofs){
+        require(prepared!=null&&prepared.scope.owner==this&&!prepared.attested,HttpStatus.CONFLICT,"CANONICAL_COMPACT_SCOPE_OWNER_MISMATCH");CompactBindingScope scope=prepared.scope;
+        assertCompactCurrent(scope);require(proofs!=null&&proofs.isArray()&&proofs.size()==scope.selected.size(),HttpStatus.CONFLICT,"CANONICAL_COMPACT_NORMAL_PROOF_INVALID");
+        Map<Long,CompactRegistryPin> verified=new LinkedHashMap<>();
+        for(int i=0;i<scope.selected.size();i++){
+            CanonicalSourceBinding binding=scope.selected.get(i);SourceDocument source=scope.sources.get(binding.getDocumentId());JsonNode proof=proofs.get(i),identity=proof.path("projectionIdentity");
+            Set<String> keys=new HashSet<>();proof.fieldNames().forEachRemaining(keys::add);
+            require(proof.isObject()&&keys.equals(new HashSet<>(Arrays.asList("projectionSha256","producerKind","projectionIdentity","projectionRevisionSha256","sourceHash","source","sourceBinding","snapshotSha256","parentSha256")))
+                    &&NormalObservedContract.PRODUCER.equals(proof.path("producerKind").asText())&&Objects.equals(binding.getProjectionSha256(),proof.path("projectionSha256").asText())
+                    &&validDigest(proof.path("snapshotSha256").asText())&&validDigest(proof.path("parentSha256").asText()),HttpStatus.CONFLICT,"CANONICAL_COMPACT_NORMAL_PROOF_INVALID");
+            validateBindingPins(binding,proof);
+            require(NormalObservedContract.VERSION.equals(identity.path("version").asText())&&NormalObservedContract.PRODUCER.equals(identity.path("producerKind").asText())
+                    &&Objects.equals(String.valueOf(source.getId()),identity.path("documentId").asText())&&Objects.equals(VettingCorpus.sourceRole(source),identity.path("role").asText())
+                    &&Objects.equals(prepared.graphSha256.get(source.getId()),identity.path("candidateGraphSha256").asText())
+                    &&Objects.equals(prepared.generationSha256.get(source.getId()),identity.path("generationSha256").asText()),HttpStatus.CONFLICT,"CANONICAL_COMPACT_NORMAL_GRAPH_CHANGED");
+            OerDocumentIdentity routing=OerSourceMetadata.identity(source);require(routing!=null,HttpStatus.CONFLICT,"CANONICAL_SOURCE_STALE");String sourceClass=VettingCorpus.sourceClass(source);
+            com.fasterxml.jackson.databind.node.ObjectNode expectedBinding=JsonUtils.mapper().createObjectNode();expectedBinding.put("module",scope.module);expectedBinding.set("eligibleModules",JsonUtils.mapper().valueToTree(routing.getEligibleModules()));expectedBinding.put("sourcePurpose",routing.getSourcePurpose());expectedBinding.put("sourceClass",sourceClass==null?routing.getKind().toLowerCase(Locale.ROOT):sourceClass);expectedBinding.put("routingSha256",binding.getRoutingSha256());expectedBinding.put("scopePolicySha256",binding.getScopePolicySha256());
+            require(expectedBinding.equals(proof.path("sourceBinding")),HttpStatus.CONFLICT,"CANONICAL_BINDING_TYPED_PINS_CHANGED");for(Iterator<Map.Entry<String,JsonNode>> fields=expectedBinding.fields();fields.hasNext();){Map.Entry<String,JsonNode> field=fields.next();require(field.getValue().equals(identity.path(field.getKey())),HttpStatus.CONFLICT,"CANONICAL_BINDING_TYPED_PINS_CHANGED");}
+            com.fasterxml.jackson.databind.node.ObjectNode expectedSource=JsonUtils.mapper().createObjectNode();expectedSource.put("sourceSha256",source.getSourceSha256());expectedSource.put("sourceRevisionSha256",binding.getSourceRevisionSha256());expectedSource.put("filename",source.getFileName());expectedSource.put("sourceFilename",source.getFileName());expectedSource.put("parsedSourceHash",binding.getJavaParsedSourceHash());expectedSource.put("projectId",scope.project);expectedSource.put("documentId",String.valueOf(source.getId()));
+            require(expectedSource.equals(proof.path("source")),HttpStatus.CONFLICT,"CANONICAL_SOURCE_STALE");
+            verified.put(source.getId(),new CompactRegistryPin(proof.path("snapshotSha256").asText(),true,scope.registryPins.get(source.getId()).original));
+        }
+        assertCompactCurrent(scope);scope.registryPins.putAll(verified);prepared.attested=true;
+    }
+
     /** Pins and validated pure content identities for one run; validity is checked anew at every boundary. */
     public static final class CompactBindingScope {
         private final CanonicalEvidenceService owner;
@@ -900,6 +1062,12 @@ public class CanonicalEvidenceService {
         require(Objects.equals(content==null?streamedSnapshotSha256(selected.getId()):content,selected.getSnapshotBytesSha256()),HttpStatus.CONFLICT,"CANONICAL_FRAME_BINDING_CHANGED");
     }
     private String streamedSnapshotSha256(Long id){
+        return streamedSnapshotSha256(id,null);
+    }
+    private String streamedSnapshotSha256(Long id,String[] authority){
+        return streamedSnapshotSha256(id,authority,null);
+    }
+    private String streamedSnapshotSha256(Long id,String[] authority,com.fasterxml.jackson.databind.node.ObjectNode header){
         return entityManager.unwrap(org.hibernate.Session.class).doReturningWork(connection->{
             try(java.sql.PreparedStatement statement=connection.prepareStatement("select snapshot_json from canonical_source_binding where id=?")){
                 statement.setLong(1,id);
@@ -909,13 +1077,42 @@ public class CanonicalEvidenceService {
                     try(Reader source=rows.getCharacterStream(1);
                         Writer sink=new OutputStreamWriter(new java.security.DigestOutputStream(OutputStream.nullOutputStream(),digest),StandardCharsets.UTF_8)){
                         if(source==null)return null;
-                        source.transferTo(sink);
+                        if(authority==null)source.transferTo(sink);else readSnapshotAuthority(source,sink,authority,header);
                     }
                     return java.util.HexFormat.of().formatHex(digest.digest());
                 }
             }catch(java.security.NoSuchAlgorithmException impossible){throw new IllegalStateException(impossible);}
-            catch(IOException unreadable){throw new UncheckedIOException(unreadable);}
+            catch(IOException unreadable){if(authority!=null)throw new CanonicalEvidenceException(HttpStatus.BAD_GATEWAY,"CANONICAL_JSON_INVALID");throw new UncheckedIOException(unreadable);}
         });
+    }
+    /** Parse every token while hashing the same raw stream; only two root authority scalars survive. */
+    private static void readSnapshotAuthority(Reader source,Writer sink,String[] authority,com.fasterxml.jackson.databind.node.ObjectNode header)throws IOException{
+        Reader observed=new FilterReader(source){
+            @Override public int read(char[] value,int offset,int length)throws IOException{int count=super.read(value,offset,length);if(count>0)sink.write(value,offset,count);return count;}
+            @Override public int read()throws IOException{int value=super.read();if(value>=0)sink.write(value);return value;}
+        };
+        try(com.fasterxml.jackson.core.JsonParser parser=JsonUtils.mapper().getFactory().createParser(observed).enable(com.fasterxml.jackson.core.JsonParser.Feature.STRICT_DUPLICATE_DETECTION)){
+            require(parser.nextToken()==com.fasterxml.jackson.core.JsonToken.START_OBJECT,HttpStatus.BAD_GATEWAY,"CANONICAL_JSON_INVALID");com.fasterxml.jackson.core.JsonToken token;
+            while((token=parser.nextToken())!=com.fasterxml.jackson.core.JsonToken.END_OBJECT){
+                require(token==com.fasterxml.jackson.core.JsonToken.FIELD_NAME,HttpStatus.BAD_GATEWAY,"CANONICAL_JSON_INVALID");String field=parser.currentName();token=parser.nextToken();
+                if("schema".equals(field)||"producerKind".equals(field)){
+                    require(token==com.fasterxml.jackson.core.JsonToken.VALUE_STRING,HttpStatus.BAD_GATEWAY,"CANONICAL_JSON_INVALID");authority["schema".equals(field)?0:1]=parser.getText();if(header!=null)header.put(field,parser.getText());
+                }else if(header!=null&&Arrays.asList("projectionIdentity","source","projectionSha256","sourceHash","projectionRevisionSha256","adoptionStatus","humanConfirmed","sourceQualityAccepted","semanticScopeVerified","legalClosure").contains(field))header.set(field,compactAuthorityValue(parser,0,new int[]{512}));
+                else if(header!=null&&"manifest".equals(field)){
+                    require(token==com.fasterxml.jackson.core.JsonToken.START_OBJECT,HttpStatus.BAD_GATEWAY,"CANONICAL_JSON_INVALID");
+                    while(parser.nextToken()!=com.fasterxml.jackson.core.JsonToken.END_OBJECT){require(parser.currentToken()==com.fasterxml.jackson.core.JsonToken.FIELD_NAME,HttpStatus.BAD_GATEWAY,"CANONICAL_JSON_INVALID");String nested=parser.currentName();parser.nextToken();if("sourceBinding".equals(nested))header.set("sourceBinding",compactAuthorityValue(parser,0,new int[]{512}));else parser.skipChildren();}
+                }else parser.skipChildren();
+            }
+            require(parser.nextToken()==null,HttpStatus.BAD_GATEWAY,"CANONICAL_JSON_INVALID");
+        }
+    }
+    private static JsonNode compactAuthorityValue(com.fasterxml.jackson.core.JsonParser parser,int depth,int[] remaining)throws IOException{
+        require(depth<=3&&--remaining[0]>=0,HttpStatus.BAD_GATEWAY,"CANONICAL_JSON_INVALID");com.fasterxml.jackson.core.JsonToken token=parser.currentToken();
+        if(token==com.fasterxml.jackson.core.JsonToken.START_OBJECT){com.fasterxml.jackson.databind.node.ObjectNode value=JsonUtils.mapper().createObjectNode();int fields=0;while(parser.nextToken()!=com.fasterxml.jackson.core.JsonToken.END_OBJECT){require(parser.currentToken()==com.fasterxml.jackson.core.JsonToken.FIELD_NAME&&++fields<=32&&parser.currentName().length()<=128,HttpStatus.BAD_GATEWAY,"CANONICAL_JSON_INVALID");String key=parser.currentName();parser.nextToken();value.set(key,compactAuthorityValue(parser,depth+1,remaining));}return value;}
+        if(token==com.fasterxml.jackson.core.JsonToken.START_ARRAY){com.fasterxml.jackson.databind.node.ArrayNode value=JsonUtils.mapper().createArrayNode();while(parser.nextToken()!=com.fasterxml.jackson.core.JsonToken.END_ARRAY){require(value.size()<MODULES.size(),HttpStatus.BAD_GATEWAY,"CANONICAL_JSON_INVALID");value.add(compactAuthorityValue(parser,depth+1,remaining));}return value;}
+        if(token==com.fasterxml.jackson.core.JsonToken.VALUE_STRING){String value=parser.getText();require(value.length()<=4096,HttpStatus.BAD_GATEWAY,"CANONICAL_JSON_INVALID");return JsonUtils.mapper().getNodeFactory().textNode(value);}
+        if(token==com.fasterxml.jackson.core.JsonToken.VALUE_TRUE||token==com.fasterxml.jackson.core.JsonToken.VALUE_FALSE)return JsonUtils.mapper().getNodeFactory().booleanNode(token==com.fasterxml.jackson.core.JsonToken.VALUE_TRUE);
+        throw new CanonicalEvidenceException(HttpStatus.BAD_GATEWAY,"CANONICAL_JSON_INVALID");
     }
 
     private static final class BindingView {
