@@ -268,6 +268,7 @@ public class VettingReportWriter {
     }
     private void wordTable(XWPFDocument document,VettingReportPresentation.Table model) {
         if(!model.commentsHeader())wordLine(document,model.getTitle(),"Heading2",false);
+        separateAdjacentWordTables(document);
         XWPFTable table=document.createTable(model.commentsHeader()?2:1,model.getHeadings().size());table.setWidth("100%");
         table.getCTTbl().getTblPr().addNewTblLayout().setType(STTblLayoutType.FIXED);
         int[] widths=model.getWidths();
@@ -288,13 +289,16 @@ public class VettingReportWriter {
         for(List<String> values:model.getRows())setWordCells(table.createRow(),values,widths,false);
     }
     private void wordTable(XWPFDocument document,VettingReportPresentation.Table model,Set<String> known){for(String heading:model.getHeadings())knownEnglish(known,heading);wordTable(document,model);}
-    private XWPFTable wordRecord(XWPFDocument document) {
+    private void separateAdjacentWordTables(XWPFDocument document) {
         // Adjacent tables can share the first table's repeated header in Word renderers.
         List<IBodyElement> body=document.getBodyElements();
         if(!body.isEmpty()&&body.get(body.size()-1) instanceof XWPFTable) {
             XWPFParagraph boundary=document.createParagraph();boundary.setStyle("Normal");
             boundary.setSpacingBefore(0);boundary.setSpacingAfter(0);boundary.setSpacingBetween(1,LineSpacingRule.EXACT);
         }
+    }
+    private XWPFTable wordRecord(XWPFDocument document) {
+        separateAdjacentWordTables(document);
         XWPFTable table=document.createTable(1,1);table.setWidth("100%");table.setCellMargins(0,0,0,0);
         table.getCTTbl().getTblPr().addNewTblLayout().setType(STTblLayoutType.FIXED);
         table.getRow(0).getCell(0).setWidth("9986");table.getRow(0).setRepeatHeader(true);

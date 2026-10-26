@@ -100,6 +100,8 @@ class CanonicalRecheckAdviceRealSeamTest {
     final AtomicInteger unchangedSnapshotReads=new AtomicInteger(),snapshotResponseBytes=new AtomicInteger();
     final AtomicReference<Runnable> indexMutation=new AtomicReference<>(),retrieveMutation=new AtomicReference<>(),snapshotMutation=new AtomicReference<>(),chatMutation=new AtomicReference<>();
     final AtomicReference<Runnable> availabilityMutation=new AtomicReference<>();
+    final List<JsonNode> availabilityRequests=new CopyOnWriteArrayList<>();
+    final AtomicReference<java.util.function.Consumer<ObjectNode>> availabilityResponseMutation=new AtomicReference<>();
     final AtomicReference<Runnable> semanticPrepareMutation=new AtomicReference<>();
     final AtomicReference<Runnable> statusMutation=new AtomicReference<>();
     final AtomicInteger semanticPrepareCalls=new AtomicInteger(),semanticCatalogCalls=new AtomicInteger(),semanticScanCalls=new AtomicInteger(),semanticEntryReads=new AtomicInteger(),normalPublications=new AtomicInteger();
@@ -112,7 +114,7 @@ class CanonicalRecheckAdviceRealSeamTest {
         when(tokenObserver.observe(any())).thenAnswer(call->VettingTokenFixture.observe(call.getArgument(0)));
         snapshots.clear();rawSnapshots.clear();originals.clear();casTamperTargets.clear();casLedgers.clear();normalCasRoots.clear();events.clear();conditionalSnapshotTags.clear();perDocumentSnapshotReads.clear();healthMutation.set(null);
         indexMutation.set(null);retrieveMutation.set(null);snapshotMutation.set(null);chatMutation.set(null);normalMutation.set(null);
-        availabilityMutation.set(null);retrieveResponseMutation.set(null);
+        availabilityMutation.set(null);availabilityResponseMutation.set(null);availabilityRequests.clear();retrieveResponseMutation.set(null);
         semanticPrepareMutation.set(null);semanticPrepareCalls.set(0);semanticCatalogCalls.set(0);semanticScanCalls.set(0);semanticEntryReads.set(0);normalPublications.set(0);
         statusMutation.set(null);NormalSourceSql.bindingReads.clear();
         indexRequest.set(null);remoteIndexes.clear();canonicalProps.getSourcePageRenderEvidenceIdentities().clear();canonicalProps.getRetrievalBaseUrls().remove("vetting");
@@ -175,14 +177,22 @@ class CanonicalRecheckAdviceRealSeamTest {
                     response=JsonUtils.write(result).getBytes(StandardCharsets.UTF_8);
                 }else if("/index-canonical/availability".equals(path)){
                     JsonNode request=JsonUtils.parse(new String(readAll(exchange.getRequestBody()),StandardCharsets.UTF_8));events.add("availability:start");
+                    availabilityRequests.add(request.deepCopy());boolean bootstrap=request.path("coldBootstrap").asBoolean();
                     ObjectNode stored=remoteIndexes.get(request.path("projectId").asText());
                     assertEquals("advisory",request.path("module").asText());
-                    if(stored!=null){assertEquals(stored.path("signature"),request.path("expectedSignature"));assertEquals(stored.path("canonicalProjections"),request.path("projectionSha256"));}
+                    if(bootstrap){assertEquals("source-verified-cold-canonical-availability-v1",health.path("oer").path("indexAvailabilityBootstrapContract").asText());assertFalse(request.has("expectedSignature"));assertFalse(request.has("expectedGeneration"));}
+                    if(stored!=null){if(!bootstrap)assertEquals(stored.path("signature"),request.path("expectedSignature"));assertEquals(stored.path("canonicalProjections"),request.path("projectionSha256"));}
+                    if(stored==null&&health.path("oer").has("indexAvailabilityBootstrapContract")){
+                        status=404;response="{\"detail\":\"Project is not indexed\"}".getBytes(StandardCharsets.UTF_8);events.add("availability:end");
+                    }else{
                     ObjectNode result=stored==null?JsonUtils.mapper().createObjectNode():stored.deepCopy();
                     result.put("ready",stored!=null);result.put("readOnly",true);result.put("fullVectorIntegrityChecked",false);
+                    result.put("coldBootstrap",bootstrap);
                     result.put("indexAvailabilityContract","live-canonical-index-availability-v1");result.put("vectorPoints",stored==null?0:stored.path("indexed").asInt());
                     result.put("vectorDimension",stored==null?0:2);result.put("collection","authored-availability");result.putNull("indexGeneration");
+                    java.util.function.Consumer<ObjectNode> change=availabilityResponseMutation.getAndSet(null);if(change!=null)change.accept(result);
                     response=JsonUtils.write(result).getBytes(StandardCharsets.UTF_8);runOnce(availabilityMutation);events.add("availability:end");
+                    }
                 }else if("/index-canonical/status".equals(path)){
                     JsonNode request=JsonUtils.parse(new String(readAll(exchange.getRequestBody()),StandardCharsets.UTF_8));events.add("status:start");
                     runOnce(statusMutation);
@@ -444,6 +454,10 @@ class CanonicalRecheckAdviceRealSeamTest {
         AtomicInteger paid=new AtomicInteger();assertThrows(CancellationException.class,()->askUntilPaidBoundary(paid,null));
         assertTrue(hydrated.stream().allMatch(ids->ids.size()==1),"An old unlinked receipt must hydrate only checked ranked sources");
         assertEquals(Collections.singleton(42L),hydrated.stream().flatMap(Collection::stream).collect(java.util.stream.Collectors.toSet()));assertEquals(2,snapshotCounts().get("42"));assertEquals(2,snapshotReads.get());assertTrue(sourceReadCalls.get()>=2,"Complete catalog entry and exit proofs must surround the actual ready-index status");assertTrue(events.contains("status:end"));assertEquals(1,paid.get());assertEquals(0,chatCalls.get());assertEquals(0,history.count());
+        String generation=org.springframework.test.util.ReflectionTestUtils.invokeMethod(business,"sourceGeneration",documents.findScopeSourcesByProjectId(PROJECT));
+        assertTrue(canonicalRetrieval.sourceGenerationLinked(eager.indexKey,generation),"The unchanged legacy receipt must gain its exact source-generation attestation before paid work");
+        assertEquals(0,indexCalls.get(),"Attesting an existing unchanged ready index must not rebuild it");
+        ObjectNode receipt=JsonUtils.mapper().createObjectNode();receipt.put("fixture","authoredExistingUnattestedReceiptUpgrade");receipt.put("sourceGenerationLinked",true);receipt.put("canonicalReads",snapshotReads.get());receipt.put("sourceReadHttpCalls",sourceReadCalls.get());receipt.put("indexCalls",indexCalls.get());receipt.put("paidBoundaries",paid.get());receipt.put("modelCalls",chatCalls.get());receipt.put("historyRows",history.count());receipt.put("realModelOrSourceAcceptance",false);write("legacy-receipt-source-generation-upgrade.json",receipt);
     }
 
     @Test void missingReceiptKeepsTheEagerCompleteProofFallback() throws Exception {
@@ -1332,6 +1346,122 @@ class CanonicalRecheckAdviceRealSeamTest {
         }finally{NormalSourceSql.capture=false;}
         if(!"unsupported_catalog".equals(change))assertNull(statusMutation.get(),"The actual native status boundary must be exercised");
         assertEquals(0,indexCalls.get(),"A frontend status poll must never build an index");assertEquals(0,retrieveCalls.get());assertEquals(0,chatCalls.get());assertEquals(0,history.count());
+    }
+
+    @ParameterizedTest @org.junit.jupiter.params.provider.ValueSource(strings={"cold","unlinked","known_unlinked","parsed_drift","binding_drift","runtime_drift","generation_drift","malformed_mode","missing_index","capability_absent","invalidated"})
+    void complete33SourceReadinessBootstrapUsesLiveAvailabilityAndPreservesPinnedRecovery(String change)throws Exception {
+        if(!"capability_absent".equals(change))((ObjectNode)health.path("oer")).put("indexAvailabilityBootstrapContract","source-verified-cold-canonical-availability-v1");
+        prepareNormalConditionalFixture();SourceDocument template=documents.findById(43L).orElseThrow();
+        for(int ordinal=3;ordinal<=33;ordinal++){
+            SourceDocument next=new SourceDocument();org.springframework.beans.BeanUtils.copyProperties(template,next);next.setId(null);
+            next.setFileName("Authored readiness bootstrap source "+ordinal+".docx");next.setNormalCandidateJson(null);next.setVerifiedBusinessContentSha256(null);documents.saveAndFlush(next);
+        }
+        assertTrue(advice.prepareSources(PROJECT,"fullset").isComplete());advice.rebuildIndex(PROJECT,"fullset");
+        List<SourceDocument> selected=documents.findScopeSourcesByProjectId(PROJECT);
+        boolean unattested=Arrays.asList("unlinked","known_unlinked","generation_drift").contains(change);String key;
+        if(unattested){
+            List<CanonicalSourceBinding> complete=evidence.currentBindings(PROJECT,"advisory",selected.stream().map(SourceDocument::getId).collect(java.util.stream.Collectors.toList()));
+            try(OerBusinessEvidence.Session eager=business.load(PROJECT,"advisory",selected)){key=eager.indexKey;canonicalRetrieval.index(key,"advisory",complete);}
+            assertUnlinkedSourceGeneration(key);
+            if(!"unlinked".equals(change))assertTrue(canonicalRetrieval.indexAvailable(key,"advisory",evidence.currentDisplayBindings(PROJECT,"advisory",selected)).ready);
+        }else{key=remoteIndexes.keySet().iterator().next();clearLocalIndexReceipts();}
+        if("invalidated".equals(change)){
+            String recipe=health.path("oer").path("recipe").asText();((ObjectNode)health.path("oer")).put("recipe","AUTHORED invalid recipe");
+            assertFalse(canonicalRetrieval.indexStatus(key,"advisory",evidence.currentBindings(PROJECT,"advisory",selected.stream().map(SourceDocument::getId).collect(java.util.stream.Collectors.toList()))).ready);
+            ((ObjectNode)health.path("oer")).put("recipe",recipe);
+        }
+        resetCounters();availabilityRequests.clear();NormalSourceSql.reads.clear();NormalSourceSql.bindingReads.clear();
+        if("missing_index".equals(change))remoteIndexes.clear();
+        if("parsed_drift".equals(change)||"binding_drift".equals(change))availabilityMutation.set(()->mutate(43L,"parsed_drift".equals(change)?"db_parsed":"binding_revision"));
+        if("runtime_drift".equals(change))availabilityMutation.set(()->((ObjectNode)health.path("oer")).put("recipe","AUTHORED changed during readiness"));
+        if("generation_drift".equals(change))availabilityResponseMutation.set(result->result.put("indexGeneration","1".repeat(32)));
+        if("malformed_mode".equals(change))availabilityResponseMutation.set(result->result.put("coldBootstrap",false));
+        boolean ready=Arrays.asList("cold","unlinked","known_unlinked","capability_absent").contains(change);NormalSourceSql.capture=true;
+        try{
+            IndexStatusVO result=advice.status(PROJECT,"fullset");assertEquals(ready,result.isVectorReady());
+            if("missing_index".equals(change))assertTrue(snapshotReads.get()>=66,"A genuinely missing index retains the prior complete proof fallback");
+            else{assertEquals(0,snapshotReads.get());assertTrue(NormalSourceSql.reads.isEmpty());assertTrue(NormalSourceSql.bindingReads.isEmpty());}
+            int expectedAvailability="capability_absent".equals(change)||"invalidated".equals(change)?0:1;
+            assertEquals(expectedAvailability,availabilityRequests.size());
+            assertEquals("capability_absent".equals(change)?1:0,events.stream().filter("status:start"::equals).count(),"Supported readiness must never enter full vector-integrity status");
+            if(expectedAvailability==1){
+                JsonNode request=availabilityRequests.get(0);
+                assertEquals(!unattested,request.path("coldBootstrap").asBoolean());
+                if(unattested){assertEquals(SIGNATURE,request.path("expectedSignature").asText());assertEquals(!"unlinked".equals(change),request.has("expectedGeneration"));if(request.has("expectedGeneration"))assertTrue(request.path("expectedGeneration").isNull());}
+                else{assertFalse(request.has("expectedSignature"));assertFalse(request.has("expectedGeneration"));}
+            }
+            ObjectNode receipt=JsonUtils.mapper().createObjectNode();receipt.put("fixture","authored33SourceReadinessBootstrapActualHttp");receipt.put("change",change);receipt.put("ready",result.isVectorReady());receipt.put("canonicalReadsAtReady",snapshotReads.get());receipt.put("availabilityCallsAtReady",availabilityRequests.size());receipt.put("fullStatusCallsAtReady",events.stream().filter("status:start"::equals).count());
+            AtomicInteger paid=new AtomicInteger();
+            if(ready&&!"capability_absent".equals(change)){
+                assertTrue(currentAdviceReceiptGenerationKnown(key));
+                String generation=org.springframework.test.util.ReflectionTestUtils.invokeMethod(business,"sourceGeneration",documents.findScopeSourcesByProjectId(PROJECT));
+                assertTrue(canonicalRetrieval.sourceGenerationLinked(key,generation));
+                assertThrows(CancellationException.class,()->askUntilPaidBoundary(paid,null));assertEquals(1,paid.get());assertEquals(Collections.singleton("42"),snapshotCounts().keySet());
+            }
+            receipt.put("paidBoundaries",paid.get());receipt.put("canonicalReadsAfterAsk",snapshotReads.get());receipt.put("indexCalls",indexCalls.get());receipt.put("modelCalls",chatCalls.get());receipt.put("historyRows",history.count());receipt.put("realModelOrSourceAcceptance",false);write("readiness-bootstrap33-"+change+".json",receipt);
+            assertEquals(0,indexCalls.get());assertEquals(0,chatCalls.get());assertEquals(0,history.count());
+        }finally{NormalSourceSql.capture=false;}
+    }
+
+    @ParameterizedTest @org.junit.jupiter.params.provider.ValueSource(strings={"same_generation","same_null","different_generation","delayed_null","current_null"})
+    void concurrent33SourceRecoveryPreservesTheNewerKnownGeneration(String change)throws Exception {
+        ((ObjectNode)health.path("oer")).put("indexAvailabilityBootstrapContract","source-verified-cold-canonical-availability-v1");
+        prepareNormalConditionalFixture();SourceDocument template=documents.findById(43L).orElseThrow();
+        for(int ordinal=3;ordinal<=33;ordinal++){
+            SourceDocument next=new SourceDocument();org.springframework.beans.BeanUtils.copyProperties(template,next);next.setId(null);
+            next.setFileName("Authored concurrent recovery source "+ordinal+".docx");next.setNormalCandidateJson(null);next.setVerifiedBusinessContentSha256(null);documents.saveAndFlush(next);
+        }
+        assertTrue(advice.prepareSources(PROJECT,"fullset").isComplete());advice.rebuildIndex(PROJECT,"fullset");
+        List<SourceDocument> selected=documents.findScopeSourcesByProjectId(PROJECT);
+        List<CanonicalSourceBinding> complete=evidence.currentBindings(PROJECT,"advisory",selected.stream().map(SourceDocument::getId).collect(java.util.stream.Collectors.toList()));
+        String key;try(OerBusinessEvidence.Session eager=business.load(PROJECT,"advisory",selected)){key=eager.indexKey;canonicalRetrieval.index(key,"advisory",complete);}
+        assertUnlinkedSourceGeneration(key);assertFalse(currentAdviceReceiptGenerationKnown(key));
+        List<CanonicalSourceBinding> compact=evidence.currentDisplayBindings(PROJECT,"advisory",selected);
+        String sourceGeneration=org.springframework.test.util.ReflectionTestUtils.invokeMethod(business,"sourceGeneration",selected);
+        String delayedGeneration=Arrays.asList("same_null","delayed_null").contains(change)?null:"a".repeat(32);
+        String currentGeneration=Arrays.asList("same_null","current_null").contains(change)?null:"same_generation".equals(change)?delayedGeneration:"b".repeat(32);
+        boolean matching=Objects.equals(delayedGeneration,currentGeneration);
+        CountDownLatch firstResponseCaptured=new CountDownLatch(1),releaseFirstResponse=new CountDownLatch(1);
+        resetCounters();availabilityRequests.clear();NormalSourceSql.reads.clear();NormalSourceSql.bindingReads.clear();
+        availabilityResponseMutation.set(result->{if(delayedGeneration==null)result.putNull("indexGeneration");else result.put("indexGeneration",delayedGeneration);});
+        availabilityMutation.set(()->{
+            firstResponseCaptured.countDown();
+            try{assertTrue(releaseFirstResponse.await(60,TimeUnit.SECONDS),"The delayed response must be released after the concurrent generation is published");}
+            catch(InterruptedException interrupted){Thread.currentThread().interrupt();throw new IllegalStateException("Authored recovery wait interrupted",interrupted);}
+        });
+        ExecutorService caller=Executors.newSingleThreadExecutor();NormalSourceSql.capture=true;
+        try{
+            Future<IndexStatusVO> delayed=caller.submit(()->advice.status(PROJECT,"fullset"));
+            assertTrue(firstResponseCaptured.await(30,TimeUnit.SECONDS),"Recovery must capture the unknown-generation receipt and its response before availability publishes");
+            assertFalse(availabilityRequests.get(0).has("expectedGeneration"));assertEquals(SIGNATURE,availabilityRequests.get(0).path("expectedSignature").asText());
+            availabilityResponseMutation.set(result->{if(currentGeneration==null)result.putNull("indexGeneration");else result.put("indexGeneration",currentGeneration);});
+            assertTrue(canonicalRetrieval.indexAvailable(key,"advisory",compact).ready);
+            assertTrue(currentAdviceReceiptGenerationKnown(key));assertEquals(currentGeneration,currentAdviceReceiptIndexGeneration(key));assertUnlinkedSourceGeneration(key);
+            releaseFirstResponse.countDown();IndexStatusVO resumed=delayed.get(60,TimeUnit.SECONDS);
+            ObjectNode receipt=JsonUtils.mapper().createObjectNode();receipt.put("fixture","authored33SourceConcurrentRecoveryActualHttp");receipt.put("change",change);
+            receipt.put("matching",matching);receipt.put("resumedReady",resumed.isVectorReady());receipt.put("delayedGeneration",delayedGeneration);receipt.put("publishedGeneration",currentGeneration);receipt.put("retainedGeneration",currentAdviceReceiptIndexGeneration(key));
+            receipt.put("canonicalReads",snapshotReads.get());receipt.put("availabilityCalls",availabilityRequests.size());receipt.put("fullStatusCalls",events.stream().filter("status:start"::equals).count());
+            receipt.put("indexCalls",indexCalls.get());receipt.put("retrieveCalls",retrieveCalls.get());receipt.put("modelCalls",chatCalls.get());receipt.put("historyRows",history.count());receipt.put("realModelOrSourceAcceptance",false);write("concurrent-recovery33-"+change+".json",receipt);
+            assertEquals(currentGeneration,currentAdviceReceiptIndexGeneration(key),"A delayed response must retain the concurrently published known generation, including known null");
+            assertTrue(currentAdviceReceiptGenerationKnown(key));assertEquals(matching,resumed.isVectorReady(),"Only a generation matching the newer receipt may gain source attestation");
+            if(!matching){
+                assertUnlinkedSourceGeneration(key);
+                availabilityResponseMutation.set(result->{if(currentGeneration==null)result.putNull("indexGeneration");else result.put("indexGeneration",currentGeneration);});
+                assertTrue(advice.status(PROJECT,"fullset").isVectorReady(),"A fresh recovery must attest the preserved generation without rebuilding or hydrating the corpus");
+                JsonNode fresh=availabilityRequests.get(availabilityRequests.size()-1);assertTrue(fresh.has("expectedGeneration"));
+                if(currentGeneration==null)assertTrue(fresh.path("expectedGeneration").isNull());else assertEquals(currentGeneration,fresh.path("expectedGeneration").asText());
+            }
+            assertTrue(canonicalRetrieval.sourceGenerationLinked(key,sourceGeneration));assertEquals(currentGeneration,currentAdviceReceiptIndexGeneration(key));
+            assertEquals(0,snapshotReads.get());assertTrue(NormalSourceSql.reads.isEmpty());assertTrue(NormalSourceSql.bindingReads.isEmpty());
+            assertEquals(0,events.stream().filter("status:start"::equals).count());assertEquals(0,indexCalls.get());assertEquals(0,retrieveCalls.get());assertEquals(0,chatCalls.get());assertEquals(0,history.count());
+        }finally{releaseFirstResponse.countDown();NormalSourceSql.capture=false;caller.shutdownNow();assertTrue(caller.awaitTermination(10,TimeUnit.SECONDS));}
+    }
+
+    private String currentAdviceReceiptIndexGeneration(String key)throws Exception{
+        Object client=org.springframework.test.util.AopTestUtils.getUltimateTargetObject(canonicalRetrieval);
+        Map<?,?> states=(Map<?,?>)org.springframework.test.util.ReflectionTestUtils.getField(client,"receiptStates");
+        Object receipt=org.springframework.test.util.ReflectionTestUtils.getField(states.get(key),"receipt");
+        return receipt==null?"<missing>":(String)org.springframework.test.util.ReflectionTestUtils.getField(receipt,"indexGeneration");
     }
 
     @ParameterizedTest @org.junit.jupiter.params.provider.ValueSource(strings={"none","known_generation","db_parsed","binding_revision"})

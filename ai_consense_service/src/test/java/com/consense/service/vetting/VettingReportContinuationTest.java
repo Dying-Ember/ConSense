@@ -115,6 +115,32 @@ class VettingReportContinuationTest {
         orderedUnits(pages,"LIMITATION",300);assertEquals(before,JsonUtils.write(job));
     }
 
+    @Test void adjacentBusinessCommentTablesHaveCompactBoundariesAndRetainBothHeaderRows()throws Exception{
+        FindingVO insurance=finding("VT-INSURANCE","EXACT INSURANCE SOURCE QUOTATION");
+        insurance.setFileKey("INSURANCE");insurance.setBody(LocalizedText.same("Insurance narrative remains literal."));
+        FindingEvidence source=insurance.getEvidence().get(0);source.setDocumentId("insurance-source");source.setFileKey("INSURANCE");source.setFileName("13 - Appendix G302 - insurance.docx");
+        CoverageVO coverage=new CoverageVO(2,2,Arrays.asList(
+                new DocumentCoverageVO("ntt-source","NTT","03 - NTT.docx","PARSED",100,100,10,10,Collections.emptyList()),
+                new DocumentCoverageVO("insurance-source","INSURANCE","13 - Appendix G302 - insurance.docx","PARSED",100,100,10,10,Collections.emptyList())),Collections.emptyList());
+        VettingJobVO job=new VettingJobVO();job.setCoverage(coverage);String before=JsonUtils.write(Arrays.asList(insurance,job));
+        try(XWPFDocument word=new XWPFDocument(new ByteArrayInputStream(new VettingReportWriter().docx(project(),Collections.singletonList(insurance),job,"en")))){
+            List<XWPFTable> business=word.getTables().stream().filter(t->t.getRow(0).getTableCells().stream().anyMatch(c->c.getText().contains("Remarks by Project Team"))).collect(Collectors.toList());
+            assertEquals(2,business.size());assertTrue(business.get(0).getRow(0).getCell(1).getText().contains("03 - NTT.docx"));
+            assertTrue(business.get(1).getRow(0).getCell(1).getText().contains("13 - Appendix G302 - insurance.docx"));
+            List<IBodyElement> body=word.getBodyElements();int left=body.indexOf(business.get(0)),right=body.indexOf(business.get(1));
+            assertEquals(left+2,right,"Adjacent business tables need a paragraph so renderers retain each source's header identity");
+            assertTrue(body.get(left+1) instanceof XWPFParagraph);XWPFParagraph boundary=(XWPFParagraph)body.get(left+1);
+            assertEquals("",boundary.getText());assertEquals("Normal",boundary.getStyle());assertEquals(0,boundary.getSpacingBefore());assertEquals(0,boundary.getSpacingAfter());
+            assertEquals(LineSpacingRule.EXACT,boundary.getSpacingLineRule());assertEquals(1.0,boundary.getSpacingBetween(),0.001);assertFalse(boundary.isPageBreak());
+            for(XWPFTable table:business){assertTrue(table.getRow(0).isRepeatHeader());assertTrue(table.getRow(1).isRepeatHeader());
+                assertEquals(3,table.getRow(0).getTableCells().size());assertEquals(5,table.getRow(1).getTableCells().size());
+                for(int row=2;row<table.getNumberOfRows();row++)assertFalse(table.getRow(row).isRepeatHeader());}
+            assertTrue(business.get(1).getText().contains("Insurance narrative remains literal."));
+            assertTrue(word.getTables().stream().anyMatch(t->t.getText().contains("EXACT INSURANCE SOURCE QUOTATION")));
+        }
+        assertEquals(before,JsonUtils.write(Arrays.asList(insurance,job)));
+    }
+
     private void separateOwnedRecords(XWPFDocument word,XWPFTable first,XWPFTable second,String marker){
         List<IBodyElement> body=word.getBodyElements();int left=body.indexOf(first),right=body.indexOf(second);
         assertEquals(left+2,right,marker+": distinct record tables need one non-table body boundary");

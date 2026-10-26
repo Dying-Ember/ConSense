@@ -42,6 +42,8 @@ public class EnglishFileOutput {
             +"(?:\\s*(?:,|and|to)\\s*"+SUBCLAUSE_NUMBER+")*)?";
     private static final Pattern CLAUSE_REFERENCE=Pattern.compile("(?:[0-9]{1,3}\\.\\s+)?"+CLAUSE_CODE+SUBCLAUSE
             +"(?:\\s*(?:,|and|to)\\s*"+CLAUSE_CODE+SUBCLAUSE+")*");
+    // Package filenames containing only established document-role codes carry no human wording to translate.
+    private static final Pattern CODED_DOCUMENT_FILENAME=Pattern.compile("(?:[0-9]{1,3}(?:\\.[0-9]{1,3}){0,3}(?:\\([0-9]{1,3}\\))? - )?(?:NTT|SCT|SCC|GCT|GCC|PRE|GS|SL|BQ|SOR|FT|AA|SP)\\.(?:docx?|pdf)");
     /** Reader text only; unlisted schema fields, references and categorical values remain literal. */
     private static final Set<String> JSON_READER_TEXT=Set.of("name","fileName","contractNo","packageRef","contractNumber","projectOrContractTitle",
             "title","body","impact","suggestion","expected","reviewRemarks","actionTaken","remarks","previousRemarks",
@@ -225,7 +227,7 @@ public class EnglishFileOutput {
         return out;
     }
     private static boolean opaqueIdentifier(String text){return text.matches("[A-Z][A-Z0-9._:/#-]*")||text.matches("[A-Za-z][A-Za-z0-9._:/#-]*[0-9][A-Za-z0-9._:/#-]*")
-            ||CLAUSE_REFERENCE.matcher(text).matches()
+            ||CLAUSE_REFERENCE.matcher(text).matches()||CODED_DOCUMENT_FILENAME.matcher(text).matches()
             ||text.matches("[0-9][A-Za-z0-9._:/#-]*[._:/#-][A-Za-z0-9._:/#-]*");}
     private static List<String> digits(String text){List<String> values=new ArrayList<>();Matcher m=DIGITS.matcher(text);while(m.find())values.add(m.group());return values;}
     private Map<String,String> readCache(Path path,String key,List<String> texts){

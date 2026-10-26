@@ -142,25 +142,33 @@ public class OerBusinessEvidence {
         require("vetting".equals(module),"semantic full-scope consumption is configured for vetting only");Map<Long,SourceDocument> documents=selectedDocuments(projectId,selected);
         Map<Long,SourceDocument> admitted=new LinkedHashMap<>();List<CanonicalEvidenceService.CompactBindingScope> scopes=new ArrayList<>();
         Map<String,JsonNode> contexts=new LinkedHashMap<>();Map<String,List<String>> anchors=new LinkedHashMap<>();Map<String,String> headingLocations=new LinkedHashMap<>();
-        Map<String,ObservedSourceClauseLocators.Bound> locators=new LinkedHashMap<>();List<VettingRuleEngine.Source> rules=new ArrayList<>();
+        Map<String,ObservedSourceClauseLocators.Bound> locators=new LinkedHashMap<>();List<VettingRuleEngine.Source> rules=new ArrayList<>();int timedSources=0;
         for(SourceDocument captured:documents.values()){
+            long started=System.nanoTime(),prepared=-1,framed=-1,semantic=-1,closed=-1;
             boolean compact=payloadFree(captured)&&SourceContentDigests.stamped(captured);
             try{
                 SourceDocument source=compact?evidence.prepareVettingSource(captured):captured;
+                prepared=System.nanoTime();
                 source.setParseMessage(captured.getParseMessage());source.setPageCount(captured.getPageCount());source.setOcrUsed(captured.getOcrUsed());
                 CanonicalEvidenceService.CompactBindingScope scope;CurrentStage loaded=stage(projectId,module,Collections.singletonList(source.getId()),Collections.singletonList(source));
                 try(CurrentStage held=loaded){
                     require(held.frame!=null,"semantic preparation requires an owned source frame");evidence.prepareCompactIdentities(held.frame,Collections.singletonList(source));held.bindings=held.frame.bindings();
                     require(held.bindings.size()==1&&source.getId().equals(held.bindings.get(0).getDocumentId()),"selected binding order differs");
+                    framed=System.nanoTime();
                     prepareSemanticSource(projectId,module,source,held.bindings.get(0),held,contexts,anchors,headingLocations,locators,rules);
+                    semantic=System.nanoTime();
                     scope=evidence.compactBindings(held.frame,Collections.singletonList(source));
                 }
+                closed=System.nanoTime();
                 SourceDocument pins=CanonicalCurrentSourceReader.compactVerifiedSource(source);
                 if(compact)org.springframework.beans.BeanUtils.copyProperties(pins,captured);
                 admitted.put(source.getId(),pins);scopes.add(scope);
             }catch(com.consense.service.sources.CanonicalEvidenceException missing){
                 if(!compact||!"NORMAL_OBSERVED_SOURCE_EVIDENCE_MISSING".equals(missing.getMessage()))throw missing;
                 LOG.warn("Selected Vetting source {} has no usable observed evidence and remains unreviewed",captured.getId());
+            }finally{
+                if(timedSources++<33)LOG.info("Vetting source timing documentId={} totalMs={} prepareMs={} bindingMs={} semanticMs={} closeMs={}",captured.getId(),(System.nanoTime()-started)/1_000_000,
+                        prepared<0?-1:(prepared-started)/1_000_000,framed<0?-1:(framed-prepared)/1_000_000,semantic<0?-1:(semantic-framed)/1_000_000,closed<0?-1:(closed-semantic)/1_000_000);
             }
         }
         require(!admitted.isEmpty(),"no usable selected source observations");
@@ -405,7 +413,8 @@ public class OerBusinessEvidence {
             guard.run();return null;
         }
         guard.run();int count=catalog.path("coverage").path("totalOrigins").asInt();if(count<=0)return null;
-        OerCanonicalRetrievalClient.IndexState state=retrieval.advisoryCompactIndex(session.indexKey,bindings,count,Collections.emptySet(),generation,guard,guard,false,false);
+        OerCanonicalRetrievalClient.IndexState state=retrieval.advisoryRecoveryAvailability(session.indexKey,bindings,count,generation,guard);
+        if("canonical_index_bootstrap_unsupported".equals(state.reason))state=retrieval.advisoryCompactIndex(session.indexKey,bindings,count,Collections.emptySet(),generation,guard,guard,false,false);
         if(!state.ready)return null;
         session.queryScope=bindings;session.querySelection=currentSelected;session.querySourceGeneration=generation;session.queryChunkCount=count;
         session.initialAskExit=()->{guard.run();JsonNode closed=retrieval.readSources("advisory",demand,bindings);

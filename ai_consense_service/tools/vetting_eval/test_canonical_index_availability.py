@@ -47,7 +47,7 @@ class CanonicalAvailabilityTests(unittest.TestCase):
         self.assertTrue(result['ready'])
         self.assertFalse(result['fullVectorIntegrityChecked'])
         self.assertEqual('live-canonical-index-availability-v1', result['indexAvailabilityContract'])
-        self.assertEqual(2 * len(before[0]), result['metadataBytesRead'])
+        self.assertEqual(len(before[0]), result['metadataBytesRead'])
         self.assertEqual(before[:3], (path.read_bytes(), path.stat().st_mtime_ns, len(self.encodes)))
         self.assertEqual(before[3], self.db.collections)
         self.assertNotIn('chunks', result)

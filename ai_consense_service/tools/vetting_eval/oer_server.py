@@ -23,7 +23,7 @@ from structural_retrieval import StructuralRecipe
 from token_windows import WindowError, fail
 from window_runtime import WindowRuntime
 from workspace_root import resolve_workspace
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from typing import Annotated
 
 
@@ -54,6 +54,7 @@ class CanonicalIndexRequest(BaseModel):
 
 INDEX_STATUS_CONTRACT = 'read-only-existing-canonical-index-v1'
 INDEX_AVAILABILITY_CONTRACT = 'live-canonical-index-availability-v1'
+INDEX_AVAILABILITY_BOOTSTRAP_CONTRACT = 'source-verified-cold-canonical-availability-v1'
 StatusSha = Annotated[str, Field(min_length=64, max_length=64, pattern=r'^[0-9a-f]{64}$')]
 
 class CanonicalIndexStatusRequest(BaseModel):
@@ -65,8 +66,18 @@ class CanonicalIndexStatusRequest(BaseModel):
 
 
 class CanonicalIndexAvailabilityRequest(CanonicalIndexStatusRequest):
-    expectedSignature: StatusSha
+    expectedSignature: StatusSha | None = None
     expectedGeneration: Annotated[str, Field(min_length=32, max_length=32, pattern=r'^[0-9a-f]{32}$')] | None = None
+    coldBootstrap: bool = Field(default=False, strict=True)
+
+    @model_validator(mode='after')
+    def validate_expectations(self):
+        if self.coldBootstrap:
+            if {'expectedSignature', 'expectedGeneration'} & self.model_fields_set:
+                raise ValueError('Cold bootstrap requires omitted signature and generation expectations')
+        elif self.expectedSignature is None:
+            raise ValueError('Normal availability requires expectedSignature')
+        return self
 
 
 def configure_environment(environ, workspace):
@@ -264,6 +275,7 @@ def create_app(policy, *, backend=None, artifact_store=None, source_registry=Non
                          'canonicalProjectionEndpoint': '/project',
                          'indexStatusContract': INDEX_STATUS_CONTRACT,
                          'indexAvailabilityContract': INDEX_AVAILABILITY_CONTRACT,
+                          'indexAvailabilityBootstrapContract': INDEX_AVAILABILITY_BOOTSTRAP_CONTRACT,
                          'requestEvidence': 'private request/response and actual window/model events in service state',
                          'assetReturnContract': 'source-and-projection-bound-content-addressed-assets-v1',
                          'limitations': ['Health does not run either BGE model or certify source quality',
@@ -464,8 +476,9 @@ def create_app(policy, *, backend=None, artifact_store=None, source_registry=Non
                 with source_frame(), backend.LOCK:
                     stored = backend.read_project(key)
                     signed = stored['signature']
-                    fail(backend.digest(signed) == request.expectedSignature,
-                         'INDEX_AVAILABILITY_SIGNATURE', 'Current index signature differs from the expected normal index')
+                    if not request.coldBootstrap:
+                        fail(backend.digest(signed) == request.expectedSignature,
+                             'INDEX_AVAILABILITY_SIGNATURE', 'Current index signature differs from the expected normal index')
                     if 'expectedGeneration' in request.model_fields_set:
                         fail(stored.get('generation') == request.expectedGeneration,
                              'INDEX_AVAILABILITY_GENERATION', 'Index generation changed; refresh the current scope')
@@ -479,6 +492,7 @@ def create_app(policy, *, backend=None, artifact_store=None, source_registry=Non
                     metrics = owned['indexMetadata'][key]['metrics'] if owned is not None and key in owned['indexMetadata'] else {}
                     result = {'projectId': key, 'ready': True, 'readOnly': True,
                         'indexAvailabilityContract': INDEX_AVAILABILITY_CONTRACT,
+                         'coldBootstrap': request.coldBootstrap,
                         'fullVectorIntegrityChecked': False, 'indexed': stored['parentCount'],
                         'vectorPoints': live['pointCount'], 'vectorDimension': live['dimension'],
                         'signature': backend.digest(signed), 'indexGeneration': stored.get('generation'),

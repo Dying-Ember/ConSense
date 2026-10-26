@@ -17,8 +17,10 @@ const completed = () => ({ id: 'run-1', status: 'COMPLETED', phase: 'done', comp
   modelIdentity: { profileId: 'saved-minimax-profile', provider: 'saved-provider-protocol', model: 'Saved MiniMax model' },
   coverage: { reviewedDocuments: 1, totalDocuments: 2, warnings: ['Raw canonical UTF16 parser warning'], documents: [] } })
 
-async function mount({ locale = 'zh-Hans', files = [], findings = [], metrics = { total: 10 }, job = completed(), pendingDetails = false, pendingRefresh = false } = {}) {
+async function mount({ locale = 'zh-Hans', files = [], findings = [], metrics = { total: 10 }, job = completed(), pendingDetails = false, pendingRefresh = false, preparedExport = false, pendingExport = false } = {}) {
   const notifications = [], apiCalls = []
+  const revokedReports = [], preparedDecisions = [], pendingReport = deferred()
+  let reportSequence = 0
   const store = vue.reactive({ activeProjectId: 'project-a', locale, notify(message) { notifications.push(message) }, setBusy() {}, clearBusy() {}, captureLlmSelection: () => ({ profileId: null }) })
   const deferredDetail = deferred()
   let detailReads = 0, fullRunReads = 0
@@ -33,7 +35,15 @@ async function mount({ locale = 'zh-Hans', files = [], findings = [], metrics = 
       sourceProgress: async () => files.map(source => ({ id: source.documentId ?? source.key, fileName: source.fileName, parseStatus: source.parseStatus ?? source.status, parseMessage: source.parseMessage, pageCount: source.pageCount })),
       latestRunProgress: async () => job, getRun: async () => { fullRunReads++; return job },
       getRunDisplay: async () => { detailReads++; return pendingDetails || pendingRefresh && detailReads > 1 ? deferredDetail.promise : job },
-      exportReport: async (...args) => { apiCalls.push(['export', ...args]) }, evidence: async () => ({ located: true, items: [] }),
+      exportReport: async (id, name, format, onPrepared) => {
+        apiCalls.push(['export', id, name, format])
+        if (pendingExport) await pendingReport.promise
+        if (preparedExport && onPrepared) {
+          const prepared = { url: `blob:prepared-report-${++reportSequence}`, filename: name }
+          const accepted = onPrepared(prepared); preparedDecisions.push(accepted)
+          if (!accepted) revokedReports.push(prepared.url)
+        }
+      }, evidence: async () => ({ located: true, items: [] }),
       startRun: async (...args) => { apiCalls.push(['run', ...args]); return job } } },
     '@/advice/reviewHandoff': { reviewHandoffCopy: {} },
     '@/components/AppIcon.vue': { default: empty },
@@ -41,17 +51,73 @@ async function mount({ locale = 'zh-Hans', files = [], findings = [], metrics = 
     '@/components/CanonicalEvidencePanel.vue': { default: empty },
     '@/components/FixedBaselineEvidencePanel.vue': { default: empty },
     '@/components/AdviceSourceReader.vue': { default: empty }
-  }, globals: { URLSearchParams, window: { setTimeout, clearTimeout } } })
+  }, globals: { URLSearchParams, URL: { revokeObjectURL: url => revokedReports.push(url) }, window: { setTimeout, clearTimeout } } })
   const i18n = loaded.loadLocal(path.join(__dirname, '../src/i18n/index.ts')).i18n
   i18n.global.locale.value = locale
   const h = renderer(), app = h.createApp(loaded.default)
   app.use(i18n); app.mount(h.root); await settle()
-  return { ...h, notifications, apiCalls, detailReads: () => detailReads, fullRunReads: () => fullRunReads,
+  return { ...h, notifications, apiCalls, store, revokedReports, preparedDecisions, resolveExport: () => pendingReport.resolve(), detailReads: () => detailReads, fullRunReads: () => fullRunReads,
     dispose: () => app.unmount(), resolveDetails: async () => { deferredDetail.resolve(job); await settle() }, openSources: async () => {
     const button = find(h.root, node => node.tag === 'button' && text(node).trim() === i18n.global.t('vetting.actions.source'))
     assert.ok(button); button.props.onClick(); await settle()
   } }
 }
+
+test('generated report keeps a readable direct download and its actual format without another request', async () => {
+  const h = await mount({ locale: 'en', files: [file('SCC')], preparedExport: true })
+  const exportButton = () => find(h.root, node => node.tag === 'button' && text(node).trim() === 'Export report')
+  const download = () => find(h.root, node => node.tag === 'a' && Object.hasOwn(node.props ?? {}, 'data-ready-report-download'))
+  try {
+    await exportButton().props.onClick(); await settle()
+    assert.ok(download(), 'The report remains visibly downloadable when an automatic synthetic click is unavailable')
+    assert.equal(text(download()).trim(), 'Download PDF report')
+    assert.equal(download().props.href, 'blob:prepared-report-1')
+    assert.equal(download().props.download, 'ConSense_Vetting_Report.pdf')
+    assert.equal(closedAncestor(download()), false)
+    assert.equal(h.apiCalls.filter(call => call[0] === 'export').length, 1)
+    const format = find(h.root, node => node.tag === 'select' && node.props['aria-label'] === 'Report format')
+    format.props['onUpdate:modelValue']('docx'); await settle()
+    assert.equal(text(download()).trim(), 'Download PDF report', 'Changing the next format cannot relabel the already generated file')
+    await exportButton().props.onClick(); await settle()
+    assert.equal(text(download()).trim(), 'Download Word report')
+    assert.equal(download().props.download, 'ConSense_Vetting_Report.docx')
+    assert.deepEqual(h.revokedReports, ['blob:prepared-report-1'])
+    format.props['onUpdate:modelValue']('json'); await settle()
+    await exportButton().props.onClick(); await settle()
+    assert.equal(text(download()).trim(), 'Download JSON report')
+    assert.equal(h.apiCalls.filter(call => call[0] === 'export').length, 3)
+    h.store.activeProjectId = 'project-b'; await settle()
+    assert.equal(download(), undefined)
+    assert.deepEqual(h.revokedReports, ['blob:prepared-report-1', 'blob:prepared-report-2', 'blob:prepared-report-3'])
+    assert.ok(h.notifications.every(message => !/download started|saved/i.test(message)))
+  } finally { h.dispose() }
+})
+
+test('late generated reports cannot attach to another project or an unmounted view', async () => {
+  for (const change of ['project', 'unmount']) {
+    const h = await mount({ locale: 'en', files: [file('SCC')], preparedExport: true, pendingExport: true })
+    let disposed = false
+    try {
+      const pending = find(h.root, node => node.tag === 'button' && text(node).trim() === 'Export report').props.onClick()
+      await settle()
+      if (change === 'project') { h.store.activeProjectId = 'project-b'; await settle() }
+      else { h.dispose(); disposed = true }
+      h.resolveExport(); await pending; await settle()
+      assert.deepEqual(h.preparedDecisions, [false], `${change}: the old generation must reject ownership of its late URL`)
+      assert.deepEqual(h.revokedReports, ['blob:prepared-report-1'])
+      assert.equal(find(h.root, node => node.tag === 'a' && Object.hasOwn(node.props ?? {}, 'data-ready-report-download')), undefined)
+      assert.equal(h.apiCalls.filter(call => call[0] === 'export').length, 1)
+    } finally { if (!disposed) h.dispose() }
+  }
+})
+
+test('unmount releases an already prepared report URL', async () => {
+  const h = await mount({ locale: 'en', files: [file('SCC')], preparedExport: true })
+  await find(h.root, node => node.tag === 'button' && text(node).trim() === 'Export report').props.onClick(); await settle()
+  assert.deepEqual(h.preparedDecisions, [true])
+  h.dispose()
+  assert.deepEqual(h.revokedReports, ['blob:prepared-report-1'])
+})
 
 test('report exports omit interface language while vetting runs retain all three interface languages', async () => {
   for (const [locale, runLabel, exportLabel, notice] of [

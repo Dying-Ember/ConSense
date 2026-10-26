@@ -1,4 +1,4 @@
-import { api } from './client'
+import { api, type PreparedDownload } from './client'
 import type { FixedBaselineEvidence } from './fixedBaselineEvidence'
 import { reviewSourceBindings } from './source-locations'
 import type { ReviewBootstrap, ReviewGraph, ReviewHead, ReviewReading, ReviewRevision, ReviewRevisionSummary } from '@/drafting/source-review-types'
@@ -262,9 +262,10 @@ export const vettingApi = {
       expectedRunId: binding.runId, expectedSourceSnapshotSha256: binding.sourceSnapshotSha256,
       runSnapshotSha256: binding.runSnapshotSha256, items
     }),
-  exportReport: (projectId: string, fallbackName: string, format: VettingReportFormat = 'pdf') =>
+  exportReport: (projectId: string, fallbackName: string, format: VettingReportFormat = 'pdf', onPrepared?: (download: PreparedDownload) => boolean) =>
     api.download(`/vetting/${projectId}/report.${format}?lang=en`, fallbackName, {
       timeout: 600000,
+      onPrepared,
       jsonDocument: format === 'json' ? value => {
         if (!value || typeof value !== 'object') return false
         const report = value as Record<string, unknown>

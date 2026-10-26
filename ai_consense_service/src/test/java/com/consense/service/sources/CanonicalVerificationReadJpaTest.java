@@ -333,6 +333,25 @@ public class CanonicalVerificationReadJpaTest {
         assertEquals("CANONICAL_SOURCE_STALE",assertThrows(CanonicalEvidenceException.class,
                 ()->reader.captureSourceStamp(binding,"advisory",captured)).getMessage());
     }
+    @Test void checked_semantic_stamp_does_not_parse_the_already_checked_snapshot_again()throws Exception {
+        try(CanonicalEvidenceService.VerifiedBindingFrame frame=capturedFrame()){
+            SourceDocument captured=documents.findBusinessSourcesByProjectId(PROJECT).get(0);
+            JsonNode checked=JsonUtils.parse(binding.getSnapshotJson()),before=checked.deepCopy();
+            try(JsonParseCounter reads=new JsonParseCounter(JsonUtils.mapper().getFactory(),binding.getSnapshotJson())){
+                assertNotNull(reader.captureSourceStamp(binding,"advisory",captured,checked));
+                assertEquals(0,reads.sourceReads,"The current source gate must reuse the caller's checked snapshot");
+            }
+            assertEquals(before,checked);
+        }
+    }
+    @Test void checked_semantic_stamp_still_rejects_the_wrong_parsed_source_hash()throws Exception {
+        try(CanonicalEvidenceService.VerifiedBindingFrame frame=capturedFrame()){
+            SourceDocument captured=documents.findBusinessSourcesByProjectId(PROJECT).get(0);
+            JsonNode checked=JsonUtils.parse(binding.getSnapshotJson());binding.setJavaParsedSourceHash(repeat('b'));
+            assertEquals("CANONICAL_SOURCE_STALE",assertThrows(CanonicalEvidenceException.class,
+                    ()->reader.captureSourceStamp(binding,"advisory",captured,checked)).getMessage());
+        }
+    }
     private CanonicalEvidenceService.VerifiedBindingFrame capturedFrame()throws Exception {
         try(java.sql.Connection connection=dataSource.getConnection()){SourceContentDigestMigration.install(connection);}
         SourceDocument captured=documents.findBusinessSourcesByProjectId(PROJECT).get(0);

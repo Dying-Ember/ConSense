@@ -75,6 +75,52 @@ final class CanonicalJson {
         }
     }
     private interface CanonicalValue {void write(Writer out)throws IOException;}
+    private static final class CanonicalObject implements CanonicalValue {
+        final Map<String,CanonicalValue> fields;
+        CanonicalObject(Map<String,CanonicalValue> fields){this.fields=fields;}
+        @Override public void write(Writer out)throws IOException {
+            out.write('{');boolean first=true;for(Map.Entry<String,CanonicalValue> row:fields.entrySet()){if(!first)out.write(',');first=false;writeQuoted(out,row.getKey());out.write(':');row.getValue().write(out);}out.write('}');
+        }
+    }
+    /** One strict token tree serves every complete normal-source identity without rewriting number tokens. */
+    static final class NormalHashes {
+        private final CanonicalObject root;
+        final String projectionSha256;
+        private NormalHashes(CanonicalObject root)throws IOException {
+            this.root=root;Map<String,CanonicalValue> unsealed=new TreeMap<>(CanonicalJson::compareCodepoints);unsealed.putAll(root.fields);unsealed.remove("projectionSha256");
+            projectionSha256=digest(new CanonicalObject(unsealed));
+        }
+        String candidateGraphSha256(){return checkedDigest(required(object(required(root,"manifest")),"candidateGraph"));}
+        String manifestSha256(){return checkedDigest(required(root,"manifest"));}
+        long manifestByteCount(){
+            final long[] bytes={0};OutputStream count=new OutputStream(){
+                @Override public void write(int value){bytes[0]++;}
+                @Override public void write(byte[] value,int offset,int length){bytes[0]+=length;}
+            };
+            try(Writer out=new BufferedWriter(new OutputStreamWriter(count,StandardCharsets.UTF_8))){required(root,"manifest").write(out);}
+            catch(IOException invalid){throw invalidJson();}
+            return bytes[0];
+        }
+        String sourceHash(){
+            Map<String,CanonicalValue> source=new TreeMap<>(CanonicalJson::compareCodepoints);
+            source.put("canonical",required(root,"canonical"));source.put("projectionIdentity",required(root,"projectionIdentity"));return checkedDigest(new CanonicalObject(source));
+        }
+        String projectionRevisionSha256(String sourceHash){
+            Map<String,CanonicalValue> revision=new TreeMap<>(CanonicalJson::compareCodepoints);
+            revision.put("projectionIdentity",required(root,"projectionIdentity"));revision.put("sourceHash",out->writeQuoted(out,sourceHash));return checkedDigest(new CanonicalObject(revision));
+        }
+        private static CanonicalValue required(CanonicalObject object,String field){CanonicalValue value=object.fields.get(field);if(value==null)throw invalidJson();return value;}
+        private static CanonicalObject object(CanonicalValue value){if(!(value instanceof CanonicalObject))throw invalidJson();return (CanonicalObject)value;}
+        private static String checkedDigest(CanonicalValue value){try{return digest(value);}catch(IOException invalid){throw invalidJson();}}
+    }
+    static NormalHashes normalHashes(String raw){
+        try(JsonParser parser=FACTORY.createParser(raw)){
+            parser.nextToken();CanonicalValue root=readValue(parser,null);
+            if(parser.nextToken()!=null||!(root instanceof CanonicalObject))throw new IOException("Expected one object");
+            return new NormalHashes((CanonicalObject)root);
+        }catch(IOException|IllegalArgumentException invalid){throw invalidJson();}
+    }
+    private static CanonicalEvidenceException invalidJson(){return new CanonicalEvidenceException(org.springframework.http.HttpStatus.BAD_GATEWAY,"CANONICAL_JSON_INVALID");}
     private static final class LengthWriter extends Writer {
         private long length;
         @Override public void write(int value){length++;}
@@ -89,7 +135,7 @@ final class CanonicalJson {
         if(token==JsonToken.START_OBJECT){
             Map<String,CanonicalValue> fields=new TreeMap<>(CanonicalJson::compareCodepoints);
             while(p.nextToken()!=JsonToken.END_OBJECT){String key=p.getCurrentName();p.nextToken();if(key.equals(omit))skipValue(p);else fields.put(key,readValue(p,null));}
-            return out->{out.write('{');boolean first=true;for(Map.Entry<String,CanonicalValue> row:fields.entrySet()){if(!first)out.write(',');first=false;writeQuoted(out,row.getKey());out.write(':');row.getValue().write(out);}out.write('}');};
+            return new CanonicalObject(fields);
         }
         if(token==JsonToken.START_ARRAY){
             List<CanonicalValue> values=new ArrayList<>();while(p.nextToken()!=JsonToken.END_ARRAY)values.add(readValue(p,null));

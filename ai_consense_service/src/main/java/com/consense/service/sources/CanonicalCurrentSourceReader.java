@@ -84,6 +84,12 @@ public class CanonicalCurrentSourceReader {
     /** A selected complete source is checked once; its detached stamp then guards the same frame. */
     @Transactional(propagation=Propagation.REQUIRES_NEW,isolation=Isolation.READ_COMMITTED,readOnly=true)
     public SourceDocument captureSourceStamp(CanonicalSourceBinding binding,String module,SourceDocument captured){
+        return captureSourceStamp(binding,module,captured,null);
+    }
+
+    /** The binding reader already validated this exact source tree before entering the current-source gate. */
+    @Transactional(propagation=Propagation.REQUIRES_NEW,isolation=Isolation.READ_COMMITTED,readOnly=true)
+    public SourceDocument captureSourceStamp(CanonicalSourceBinding binding,String module,SourceDocument captured,com.fasterxml.jackson.databind.JsonNode checkedSnapshot){
         if(!SourceContentDigests.stamped(captured))return null;
         try{SourceContentDigests.verifyLoaded(captured);}catch(IllegalArgumentException stale){throw new CanonicalEvidenceException(HttpStatus.CONFLICT,"CANONICAL_SOURCE_STALE");}
         SourceDocument stamp=SourceDocumentRepository.scopeSnapshot(documents.findScopeMetadataById(binding.getDocumentId())
@@ -91,7 +97,8 @@ public class CanonicalCurrentSourceReader {
         validateCurrentDocument(binding.getProjectId(),binding.getDocumentId(),module,stamp);
         require(SourceContentDigests.stamped(stamp),HttpStatus.CONFLICT,"SOURCE_CONTENT_REVISION_UNAVAILABLE");
         requireCurrentStamp(captured,stamp);
-        checkSource(binding,module,captured);
+        if(checkedSnapshot==null)checkSource(binding,module,captured);
+        else checkSource(binding,module,captured,checkedSnapshot,NormalObservedContract.isNormal(checkedSnapshot));
         stamp.setVerifiedBusinessContentSha256(SourceContentDigests.actual(captured));
         return stamp;
     }

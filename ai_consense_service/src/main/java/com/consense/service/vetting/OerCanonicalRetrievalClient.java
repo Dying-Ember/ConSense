@@ -31,6 +31,7 @@ public class OerCanonicalRetrievalClient {
     private static final String RECIPE = "scope-bound-dual2048-cuda-fp32-no-fixed-cache-v1";
     private static final String INDEX_STATUS = "read-only-existing-canonical-index-v1";
     private static final String INDEX_AVAILABILITY = "live-canonical-index-availability-v1";
+    private static final String INDEX_AVAILABILITY_BOOTSTRAP = "source-verified-cold-canonical-availability-v1";
     private static final String SOURCE_PAGE_INDEX = "explicit-composite-index-pins-v1";
     public static final String SOURCE_READ = "source-bound-demand-read-v1";
     public static final String SEMANTIC_READ = "source-semantic-units-v1";
@@ -221,7 +222,7 @@ public class OerCanonicalRetrievalClient {
     private static final class Capability {
         final String fingerprint,sourceUnitPolicy,indexStatusContract,softwareIdentity;
         final boolean sourceRead,semanticRead;
-        boolean semanticDictionary,semanticTextFirst,semanticStream,indexAvailability;
+        boolean semanticDictionary,semanticTextFirst,semanticStream,indexAvailability,indexAvailabilityBootstrap;
         int dictionaryScanMaximumItems=256;
         Capability(String fingerprint,String policy,String indexStatusContract,boolean sourceRead,boolean semanticRead,String softwareIdentity){this.fingerprint=fingerprint;this.sourceUnitPolicy=policy;this.indexStatusContract=indexStatusContract;this.sourceRead=sourceRead;this.semanticRead=semanticRead;this.softwareIdentity=softwareIdentity;}
     }
@@ -449,6 +450,58 @@ public class OerCanonicalRetrievalClient {
             return new IndexState(published.ready,published.signature,result.path("indexed").asInt(),published.reason);
         }catch(RuntimeException unavailable){invalidate(operation);return new IndexState(false,null,count,unavailable.getMessage());}
     }
+    /** Recover source attestation with live readiness; full integrity remains an explicit status operation. */
+    IndexState advisoryRecoveryAvailability(String key,List<CanonicalSourceBinding> current,int expectedChunks,String sourceGeneration,Runnable guard){
+        String module="advisory";Operation operation=null;boolean supersededReceipt=false;
+        try{
+            require(expectedChunks>=0&&sha(sourceGeneration),"verified Advisory source denominator required");
+            operation=beginOperation(key,false,true);Receipt receipt=operation.receipt;
+            synchronized(operation.state){currentOperation(operation);}
+            Corpus selected=scalarCorpus(current,module);guard.run();
+            Capability before=stageHealth(null,false,module,selected);guard.run();
+            if(!before.indexAvailability||!before.indexAvailabilityBootstrap)return new IndexState(false,null,expectedChunks,"canonical_index_bootstrap_unsupported");
+            if(receipt!=null)require(module.equals(receipt.module)&&selected.fingerprint.equals(receipt.fingerprint)
+                    &&before.fingerprint.equals(receipt.health)&&before.sourceUnitPolicy.equals(receipt.sourceUnitPolicy),"current canonical scope or recipe changed");
+            bindContext(operation,module,selected,before);
+            ObjectNode request=JsonUtils.mapper().createObjectNode();request.put("projectId",key);request.put("module",module);
+            request.set("projectionSha256",JsonUtils.mapper().valueToTree(selected.projections));
+            if(receipt==null)request.put("coldBootstrap",true);
+            else{request.put("expectedSignature",receipt.signature);if(receipt.generationKnown){if(receipt.indexGeneration==null)request.putNull("expectedGeneration");else request.put("expectedGeneration",receipt.indexGeneration);}}
+            if(!selected.sourcePageEvidence.isEmpty())request.set("sourcePageEvidence",JsonUtils.mapper().valueToTree(selected.sourcePageEvidence));
+            guard.run();JsonNode result=statusReceipt(http.postJson(url(module,"/index-canonical/availability"),JsonUtils.write(request),properties.getVetting().getRetrievalTimeoutMs()));guard.run();
+            require(key.equals(result.path("projectId").asText())&&trueBoolean(result.path("ready"))&&trueBoolean(result.path("readOnly"))
+                    &&falseBoolean(result.path("fullVectorIntegrityChecked"))&&INDEX_AVAILABILITY.equals(result.path("indexAvailabilityContract").asText())
+                    &&result.path("coldBootstrap").isBoolean()&&result.path("coldBootstrap").asBoolean()==(receipt==null)
+                    &&module.equals(result.path("targetModule").asText())&&properties.getVetting().getExpectedRetrievalContract().equals(result.path("contract").asText())
+                    &&request.path("projectionSha256").equals(result.path("canonicalProjections"))&&sha(result.path("signature").asText())
+                    &&(receipt==null||receipt.signature.equals(result.path("signature").asText()))
+                    &&integer(result.path("indexed"))&&result.path("indexed").asInt()==expectedChunks
+                    &&integer(result.path("vectorPoints"))&&result.path("vectorPoints").asInt()>=0
+                    &&integer(result.path("vectorDimension"))&&result.path("vectorDimension").asInt()>=(expectedChunks==0?0:1)
+                    &&!JsonUtils.isBlankText(result.path("collection").asText())
+                    &&result.has("indexGeneration")&&(result.path("indexGeneration").isNull()
+                        ||result.path("indexGeneration").isTextual()&&result.path("indexGeneration").asText().matches("[a-f0-9]{32}")),"canonical bootstrap availability identity differs");
+            String generation=result.path("indexGeneration").isNull()?null:result.path("indexGeneration").asText();
+            require(receipt==null||!receipt.generationKnown||Objects.equals(receipt.indexGeneration,generation),"canonical index generation changed");
+            String frozen=properties.getVetting().getExpectedRetrievalSignature();require(JsonUtils.isBlankText(frozen)||frozen.equals(result.path("signature").asText()),"frozen index signature differs");
+            validateIndexPins(result,selected.sourcePageEvidence);scope(result.path("competitionScope"),module,selected.policy);
+            guard.run();Capability after=stageHealth(null,false,module,selected);guard.run();
+            require(before.fingerprint.equals(after.fingerprint)&&before.sourceUnitPolicy.equals(after.sourceUnitPolicy),"canonical availability runtime changed");
+            bindContext(operation,module,selected,after);
+            Receipt checked=new Receipt(result.path("signature").asText(),selected.fingerprint,before.fingerprint,module,before.sourceUnitPolicy,generation,true,sourceGeneration);
+            synchronized(operation.state){localAdmission(operation,selected,current,module);
+                if(operation.state.receipt!=null){
+                    require(sameReceipt(receipt,operation.state.receipt)||sameReceipt(checked,operation.state.receipt),"canonical index receipt changed before source attestation");
+                    if(operation.state.receipt.generationKnown&&!Objects.equals(generation,operation.state.receipt.indexGeneration)){
+                        supersededReceipt=true;throw new IllegalStateException("canonical recovery response was superseded by a known index generation");
+                    }
+                }
+                operation.state.receipt=checked;}
+            return new IndexState(true,checked.signature,expectedChunks,null);
+        }catch(RuntimeException rejected){if(!supersededReceipt)invalidate(operation);
+            String message=rejected.getMessage();if(rejected instanceof com.consense.common.BizException&&message!=null&&message.contains("HTTP 404 ")&&message.contains("Project is not indexed"))return new IndexState(false,null,expectedChunks,"canonical_index_missing");
+            throw rejected;}
+    }
     /** Same receipt identity as corpus(), without snapshots, payload maps or whole-source serialization. */
     private Corpus scalarCorpus(List<CanonicalSourceBinding> bindings,String module){
         require(bindings!=null&&!bindings.isEmpty(),"canonical selected bindings missing");
@@ -508,7 +561,7 @@ public class OerCanonicalRetrievalClient {
             Receipt checked=new Receipt(result.path("signature").asText(),selected.fingerprint,before.fingerprint,module,before.sourceUnitPolicy,
                     build||receipt==null?null:receipt.indexGeneration,!build&&receipt!=null&&receipt.generationKnown,sourceGeneration);
             synchronized(operation.state){localAdmission(operation,selected,current,module);
-                if(!build&&operation.state.receipt!=null){require(sameReceipt(checked,operation.state.receipt),"canonical index receipt changed before source attestation");
+                if(!build&&operation.state.receipt!=null){require(sameReceipt(receipt,operation.state.receipt)||sameReceipt(checked,operation.state.receipt),"canonical index receipt changed before source attestation");
                     if(operation.state.receipt.generationKnown&&!checked.generationKnown)checked=operation.state.receipt;}
                 operation.state.receipt=checked;if(build)operation.state.invalidated=false;}
             return new IndexState(true,checked.signature,expectedChunks,null);
@@ -1005,6 +1058,7 @@ public class OerCanonicalRetrievalClient {
                 SEMANTIC_READ.equals(sourceRead.path("semanticProjectionVersion").asText())&&contains(sourceRead.path("views"),"semantic_units")&&contains(sourceRead.path("operations"),"prepare"),
                 hash(JsonUtils.write(OerCanonicalSourceUnits.sorted(window.path("algorithms")))));
         capability.indexAvailability=INDEX_AVAILABILITY.equals(oer.path("indexAvailabilityContract").asText());
+        capability.indexAvailabilityBootstrap=INDEX_AVAILABILITY_BOOTSTRAP.equals(oer.path("indexAvailabilityBootstrapContract").asText());
         capability.semanticDictionary=contains(sourceRead.path("semanticReadVersions"),SEMANTIC_DICTIONARY);
         capability.semanticTextFirst=contains(sourceRead.path("semanticReadProfiles"),TEXT_FIRST_PROFILE);
         capability.semanticStream=contains(sourceRead.path("semanticScanStreamVersions"),SEMANTIC_SCAN_STREAM);

@@ -3,18 +3,19 @@
 const assert = require('node:assert/strict')
 const path = require('node:path')
 const { loadTypeScript } = require('./helpers/load-typescript.cjs')
-let responseBlob, downloadCount = 0, urlCount = 0, rejectedReports = 0
+let responseBlob, responseHeaders = {}, downloadCount = 0, urlCount = 0, rejectedReports = 0
 const requests = [], reported = [], downloaded = []
+const revoked = []
 const axios = {
   create: () => ({ get: async (url, config) => {
     requests.push({ url, config })
-    return { data: responseBlob, headers: {} }
+    return { data: responseBlob, headers: responseHeaders }
   } }),
   isAxiosError: () => false
 }
 const globals = {
   Blob,
-  URL: { createObjectURL: blob => { urlCount++; downloaded.push(blob); return 'blob:test-report' }, revokeObjectURL: () => {} },
+  URL: { createObjectURL: blob => { urlCount++; downloaded.push(blob); return `blob:test-report-${urlCount}` }, revokeObjectURL: url => revoked.push(url) },
   document: { createElement: () => ({ click: () => downloadCount++, remove: () => {} }), body: { appendChild: () => {} } },
   setTimeout: callback => callback()
 }
@@ -75,6 +76,29 @@ async function run() {
   }
   assert.equal(downloadCount, 3); assert.equal(urlCount, 3)
   assert.equal(reported.length, rejectedReports + 3)
+  const beforePrepared = requests.length, beforeSyntheticClicks = downloadCount
+  client.setLlmProfileResolver(() => 'qwen')
+  responseBlob = new Blob(['%PDF-prepared-report'], { type: 'application/pdf' })
+  responseHeaders = { 'content-disposition': "attachment; filename*=UTF-8''ConSense_20250101_Report.pdf" }
+  let prepared
+  await vettingApi.exportReport('project-A', 'ConSense_Vetting_Report.pdf', 'pdf', value => { prepared = value; return true })
+  assert.ok(prepared, 'A generated report remains available for a real visible download click')
+  assert.equal(prepared.filename, 'ConSense_20250101_Report.pdf')
+  assert.equal(downloadCount, beforeSyntheticClicks, 'Preparing the visible report link does not depend on a synthetic click')
+  assert.equal(requests.length, beforePrepared + 1, 'The prepared link reuses the one validated response')
+  assert.equal(requests.at(-1).config.timeout, 600000)
+  assert.equal(requests.at(-1).config.headers['X-ConSense-Llm-Profile'], 'qwen')
+  assert.ok(!revoked.includes(prepared.url), 'The visible report URL remains live beyond the old automatic timer')
+  const beforeDiscard = downloadCount
+  await vettingApi.exportReport('project-A', 'report.pdf', 'pdf', () => false)
+  assert.equal(downloadCount, beforeDiscard, 'A late response rejected by its old view cannot trigger an old-scope download')
+  assert.ok(revoked.includes(`blob:test-report-${urlCount}`), 'Rejected prepared URLs are released')
+  await assert.rejects(vettingApi.exportReport('project-A', 'report.pdf', 'pdf', () => { throw Error('Owner rejected the prepared report') }), /Owner rejected/)
+  assert.ok(revoked.includes(`blob:test-report-${urlCount}`), 'A throwing owner cannot leak a prepared URL')
+  let invalidPrepared = false
+  responseBlob = json({ code: 4091, message: 'Source set changed', data: null })
+  await assert.rejects(vettingApi.exportReport('project-A', 'report.json', 'json', () => { invalidPrepared = true; return true }), /Source set changed/)
+  assert.equal(invalidPrepared, false, 'The prepared-link path cannot bypass the original JSON/error validator')
   console.log('PASS: English v2 JSON/PDF/DOCX download; invalid schema, language, presentation flag, project/run/snapshot references, envelopes, malformed JSON and JSON on binary endpoints are rejected')
 }
 run().catch(error => { console.error(error); process.exitCode = 1 })

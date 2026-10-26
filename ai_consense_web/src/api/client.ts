@@ -79,7 +79,8 @@ function toMessage(error: unknown): string {
   return error instanceof Error ? error.message : '未知错误'
 }
 
-type DownloadOptions = { jsonDocument?: (value: unknown) => boolean; timeout?: number }
+export type PreparedDownload = { url: string; filename: string }
+type DownloadOptions = { jsonDocument?: (value: unknown) => boolean; timeout?: number; onPrepared?: (download: PreparedDownload) => boolean }
 
 /** JSON files require an explicit document validator; business envelopes remain errors. */
 async function requireBinary(blob: Blob, options: DownloadOptions = {}): Promise<Blob> {
@@ -125,6 +126,16 @@ export const api = {
       const match = /filename\*=UTF-8''([^;]+)/i.exec(disposition)
       const name = match ? decodeURIComponent(match[1]) : fallbackName
       const blobUrl = URL.createObjectURL(content)
+      if (options.onPrepared) {
+        try {
+          if (options.onPrepared({ url: blobUrl, filename: name })) return
+        } catch (error) {
+          URL.revokeObjectURL(blobUrl)
+          throw error
+        }
+        URL.revokeObjectURL(blobUrl)
+        return
+      }
       const link = document.createElement('a')
       link.href = blobUrl
       link.download = name

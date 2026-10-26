@@ -12,7 +12,6 @@ from pathlib import Path
 
 from artifact_store import ArtifactStore
 from competition_scope import MODULES, SOURCE_PURPOSES
-from native_observation import _strict_json
 from oer_source_registry import SourceRegistryError, _identity, _serialize
 from token_windows import paragraph_map, utf16_length
 
@@ -364,9 +363,8 @@ def validate_normal_observed(projection, *, artifact_store):
           'Only the explicit normal-observed authority is supported')
     descriptor = projection['observationManifestRef']
     raw_manifest = artifact_store.read_asset(descriptor)
-    manifest = _strict_json(raw_manifest)
-    _fail(_matches_serialized_bytes(manifest, raw_manifest)
-          and _matches_serialized_bytes(projection['manifest'], raw_manifest), 'NORMAL_OBSERVED_CAS_MANIFEST_MISMATCH',
+    manifest = projection['manifest']
+    _fail(_matches_serialized_bytes(manifest, raw_manifest), 'NORMAL_OBSERVED_CAS_MANIFEST_MISMATCH',
           'Every load requires the exact complete retained observation manifest bytes')
     code = _identity(projection['projectionIdentity']['projectionCodeSha256'], 'projectionCodeSha256')
     _fail(_serialized_equal(_assemble(manifest, descriptor, code), projection), 'NORMAL_OBSERVED_DERIVED_MISMATCH',

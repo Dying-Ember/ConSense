@@ -101,6 +101,37 @@ class EnglishFileOutputTest {
         assertThrows(BizException.class,()->output().text(title,"snapshot:persistent-und-file-title",()->{}));assertEquals(2,calls.get());
         assertEquals(List.of(title,title),submittedTexts);assertEquals(0,Files.walk(root).filter(p->p.getFileName().toString().endsWith(".json")).count());
     }
+    @Test void numberedDocumentCodeFilenamesRemainLiteralWithPersistentUnd() {
+        List<String> filenames=List.of("03 - NTT.docx","05 - SCT.docx","10 - SCC.docx","04 - GCT.pdf");
+        ArrayNode notes=JsonUtils.mapper().createArrayNode();for(String name:filenames){notes.add(name);languages.put(name,"und");}
+        JsonNode source=JsonUtils.mapper().createObjectNode().set("notes",notes);EnglishFileOutput exporter=output();
+        assertEquals(source,exporter.json(source,"snapshot:actual-coded-filenames",()->{}));
+        assertEquals(1,calls.get(),"Mechanical document codes do not need a readable-word language recheck");
+        assertEquals(filenames,submittedTexts);
+        assertEquals(source,exporter.json(source,"snapshot:actual-coded-filenames",()->{}));assertEquals(1,calls.get());
+    }
+    @Test void codedFilenameHandlingKeepsHumanTitlesAndForeignFilenamesInLanguageReview() {
+        String title="05.1(1) - SCT.A_Marking Scheme_DCMBI P04_v4_r1.docx";
+        String foreign="03 - CONTRAT.docx",suffix="03 - NTT Contrat.docx",nonLatin="03 - \u5408\u7ea6.docx";
+        languages.put(title,"und");recheckedLanguages.put(title,"en");
+        languages.put(foreign,"fr");translated.put(foreign,"03 - CONTRACT.docx");
+        languages.put(suffix,"fr");translated.put(suffix,"03 - NTT Contract.docx");
+        languages.put(nonLatin,"zh");translated.put(nonLatin,"03 - Contract.docx");
+        ArrayNode notes=JsonUtils.mapper().createArrayNode();for(String text:List.of(title,foreign,suffix,nonLatin))notes.add(text);
+        JsonNode source=JsonUtils.mapper().createObjectNode().set("notes",notes),before=source.deepCopy();
+        JsonNode result=output().json(source,"snapshot:non-code-filenames",()->{});
+        assertEquals(title,result.path("notes").get(0).asText());
+        assertEquals("English translation: 03 - CONTRACT.docx",result.path("notes").get(1).asText());
+        assertEquals("English translation: 03 - NTT Contract.docx",result.path("notes").get(2).asText());
+        assertEquals("English translation: 03 - Contract.docx",result.path("notes").get(3).asText());
+        assertEquals(before,source);assertEquals(2,calls.get());assertEquals(2,Collections.frequency(submittedTexts,title));
+        for(String foreignName:List.of(foreign,suffix,nonLatin))assertEquals(1,Collections.frequency(submittedTexts,foreignName));
+    }
+    @Test void codedFilenameWrapperDoesNotAcceptUnknownWordsOrUnboundedPrefixes() {
+        for(String text:List.of("03 - BONJOUR.docx","1234 - NTT.docx","03 - NTT extra.docx","03 - NTT.docx extra","03 - NTT.exe")){
+            languages.put(text,"und");assertThrows(BizException.class,()->output().text(text,"snapshot:non-opaque:"+text,()->{}));
+        }
+    }
     @Test void numberedClauseReferencesAreLanguageNeutralButNumberedForeignProseIsNot(){
         String clause="11. PRE.B6.APPEND5",foreign="1. Bonjour, paiement dans 14 jours.";
         languages.put(clause,"und");languages.put(foreign,"und");EnglishFileOutput exporter=output();

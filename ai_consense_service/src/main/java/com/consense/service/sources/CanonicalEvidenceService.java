@@ -941,7 +941,7 @@ public class CanonicalEvidenceService {
                 .orElseThrow(()->new CanonicalEvidenceException(HttpStatus.NOT_FOUND,"CANONICAL_BINDING_UNAVAILABLE"));
         require(binding.getSnapshotJson()!=null&&Utf8.sha256(binding.getSnapshotJson()).equals(binding.getSnapshotBytesSha256()),HttpStatus.CONFLICT,"CANONICAL_STORED_BYTES_CHANGED");
         JsonNode snapshot=validatedSnapshot(binding.getSnapshotJson(),projection);validateBindingPins(binding,snapshot);boolean collection=NativeDocumentCollectionContract.isCollection(snapshot);
-        SourceDocument sourceStamp=captured==null?null:sources.captureSourceStamp(binding,module,captured);
+        SourceDocument sourceStamp=captured==null?null:sources.captureSourceStamp(binding,module,captured,snapshot);
         if(captured==null&&NormalObservedContract.isNormal(snapshot))sourceStamp=sources.captureNormalSourceStamp(binding,module,snapshot);
         if(NormalObservedContract.isNormal(snapshot)||NativePdfSourceFamilyContract.isFamily(snapshot)||NativePdfCanonicalContract.isNativePdf(snapshot)||NativeCanonicalContract.isNative(snapshot)||NativeDocumentCollectionContract.isCollection(snapshot)){
             // Native compact snapshots refer to private proof. Re-read the registry so every

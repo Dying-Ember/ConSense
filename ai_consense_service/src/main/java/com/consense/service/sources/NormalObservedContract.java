@@ -76,7 +76,9 @@ public final class NormalObservedContract {
         require(raw!=null&&Utf8.byteCount(raw)<=maximum,"NORMAL_OBSERVED_TOO_LARGE");
         JsonNode p=parsed==null?JsonUtils.parse(raw):parsed,m=p.path("manifest"),g=m.path("candidateGraph"),b=m.path("sourceBinding"),i=p.path("projectionIdentity"),s=g.path("source");
         require(isNormal(p)&&SCHEMA.equals(p.path("schema").asText())&&PRODUCER.equals(p.path("producerKind").asText())
-            &&address!=null&&address.equals(p.path("projectionSha256").asText())&&address.equals(CanonicalJson.hash(raw,"projectionSha256")),"NORMAL_OBSERVED_SEAL_MISMATCH");
+            &&address!=null&&address.equals(p.path("projectionSha256").asText()),"NORMAL_OBSERVED_SEAL_MISMATCH");
+        CanonicalJson.NormalHashes hashes=CanonicalJson.normalHashes(raw);
+        require(address.equals(hashes.projectionSha256),"NORMAL_OBSERVED_SEAL_MISMATCH");
         keys(p,"schema","producerKind","projectionIdentity","sourceHash","projectionRevisionSha256","source","manifest","observationManifestRef","canonical","chunks","nonRetrievableUnits","assetRefs","unknowns","adoptionStatus","humanConfirmed","sourceQualityAccepted","semanticScopeVerified","legalClosure","projectionSha256");
         keys(m,"candidateGraph","sourceBinding","observer");keys(b,"module","eligibleModules","sourcePurpose","sourceClass","routingSha256","scopePolicySha256");
         require(JsonUtils.parse("{\"actor\":\"application\",\"method\":\"normal_parser_observation\",\"originalByteVerifier\":\"java_current_source_reader\"}").equals(m.path("observer")),"NORMAL_OBSERVED_AUTHORITY_MISMATCH");
@@ -85,8 +87,7 @@ public final class NormalObservedContract {
             &&"actual_source_candidate_generation".equals(g.path("status").asText())&&g.path("units").isArray()&&!g.path("units").isEmpty()
             &&g.path("relations").isArray()&&g.path("unknowns").isArray(),"NORMAL_OBSERVED_GRAPH_INVALID");
         NormalSourceCandidateGraph.validateParagraphReferences(g);
-        String mr=CanonicalJson.field(raw,"manifest"),ir=CanonicalJson.field(raw,"projectionIdentity");
-        String graphSha=CanonicalJson.fieldHash(mr,"candidateGraph"),manifestSha=CanonicalJson.hash(mr,null);
+        String graphSha=hashes.candidateGraphSha256(),manifestSha=hashes.manifestSha256();
         ObjectNode expectedIdentity=object();expectedIdentity.put("version",VERSION);expectedIdentity.put("producerKind",PRODUCER);
         sha(i.path("projectionCodeSha256").asText());expectedIdentity.set("projectionCodeSha256",i.path("projectionCodeSha256"));
         for(String key:Arrays.asList("documentId","role"))expectedIdentity.set(key,s.path(key));
@@ -98,13 +99,13 @@ public final class NormalObservedContract {
         for(String key:Arrays.asList("originalSourceSha256","javaParsedSourceHash","routingSha256","scopePolicySha256","generationSha256"))sha(i.path(key).asText());
         ObjectNode canonical=object();canonical.set("units",g.path("units"));canonical.set("relations",g.path("relations"));canonical.putArray("assetRefs");
         require(canonical.equals(p.path("canonical"))&&g.path("unknowns").equals(p.path("unknowns"))&&p.path("assetRefs").isArray()&&p.path("assetRefs").isEmpty(),"NORMAL_OBSERVED_COMPLETE_GRAPH_MISMATCH");
-        String sourceHash=hashFields("projectionIdentity",ir,"canonical",CanonicalJson.field(raw,"canonical"));
-        String projectionRevision=hashFields("sourceHash",CanonicalJson.scalar(sourceHash),"projectionIdentity",ir);
+        String sourceHash=hashes.sourceHash();
+        String projectionRevision=hashes.projectionRevisionSha256(sourceHash);
         require(sourceHash.equals(p.path("sourceHash").asText())&&projectionRevision.equals(p.path("projectionRevisionSha256").asText()),"NORMAL_OBSERVED_REVISION_MISMATCH");
         ObjectNode source=object();source.set("sourceSha256",s.path("originalSourceSha256"));source.put("sourceRevisionSha256",revision);
         source.set("filename",s.path("filename"));source.set("sourceFilename",s.path("filename"));source.set("parsedSourceHash",s.path("parsedSourceHash"));source.set("projectId",s.path("projectId"));source.set("documentId",s.path("documentId"));
         require(source.equals(p.path("source")),"NORMAL_OBSERVED_SOURCE_MISMATCH");
-        JsonNode descriptor=p.path("observationManifestRef");require(manifestSha.equals(descriptor.path("sha256").asText())&&descriptor.path("byteCount").asLong()==Utf8.byteCount(mr),"NORMAL_OBSERVED_MANIFEST_REF_MISMATCH");
+        JsonNode descriptor=p.path("observationManifestRef");require(manifestSha.equals(descriptor.path("sha256").asText())&&descriptor.path("byteCount").asLong()==hashes.manifestByteCount(),"NORMAL_OBSERVED_MANIFEST_REF_MISMATCH");
         ArrayNode nonText=JsonUtils.mapper().createArrayNode();Set<String> units=new HashSet<>(),blocks=new HashSet<>();int previous=-1,chunkOrdinal=0;
         require(p.path("chunks").isArray(),"NORMAL_OBSERVED_COMPLETE_CHUNKS_MISMATCH");
         for(JsonNode unit:g.path("units")){

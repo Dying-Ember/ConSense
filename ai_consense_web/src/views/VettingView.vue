@@ -4,7 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { vettingApi } from '@/api'
 import type { VettingParsedTextPage, VettingParsedTablesPage, VettingSourceReviewFile } from '@/api'
-import { ApiError } from '@/api/client'
+import { ApiError, type PreparedDownload } from '@/api/client'
 import type { Citation, DocumentScope, EvidenceBundle, Finding, FindingWriteBinding, FindingEvidence, VettingFile, VettingJob, VettingProgress, VettingMetrics, VettingReportFormat, VettingSemanticTopic, VettingSourceRole, VettingChecklist, VettingChecklistItem } from '@/api/types'
 import { useAppStore } from '@/stores/app'
 import { useLocalized } from '@/composables/useLocalized'
@@ -162,6 +162,17 @@ const versionCopy = {
 const exporting = ref(false)
 const pollingPaused = ref(false)
 const reportFormat = ref<VettingReportFormat>('pdf')
+const readyReport = ref<(PreparedDownload & { format: VettingReportFormat }) | null>(null)
+let reportGeneration = 0
+function releaseReadyReport() {
+  reportGeneration++
+  if (readyReport.value) URL.revokeObjectURL(readyReport.value.url)
+  readyReport.value = null
+}
+function reportDownloadLabel(format: VettingReportFormat) {
+  const name = format === 'docx' ? 'Word' : format.toUpperCase()
+  return sourceReaderCopy(`Download ${name} report`, `下载 ${name} 报告`, `下載 ${name} 報告`)
+}
 const uploadScope = ref<DocumentScope>('auto')
 let selectedUploadScope: DocumentScope = 'auto'
 const sourceRoleSaving = ref<string | null>(null)
@@ -840,6 +851,7 @@ watch(() => [projectId.value, uploading.value] as const, ([id, active], [previou
   if (id === previousId && wasActive && !active) void reload().then(() => restoreJob()).catch(() => undefined)
 })
 watch(projectId, () => {
+  releaseReadyReport()
   closeSourceOriginalPreview()
   closeParsedText()
   viewEpoch++
@@ -890,6 +902,7 @@ watch(projectId, () => {
 })
 
 onBeforeUnmount(() => {
+  releaseReadyReport()
   closeSourceOriginalPreview()
   closeParsedText()
   disposed = true
@@ -1141,11 +1154,17 @@ async function exportReport() {
   const id = projectId.value
   const format = reportFormat.value
   const epoch = viewEpoch
+  releaseReadyReport()
+  const generation = reportGeneration
   exporting.value = true
   try {
-    await vettingApi.exportReport(id, `ConSense_Vetting_Report.${format}`, format)
+    await vettingApi.exportReport(id, `ConSense_Vetting_Report.${format}`, format, prepared => {
+      if (disposed || epoch !== viewEpoch || id !== projectId.value || generation !== reportGeneration) return false
+      readyReport.value = { ...prepared, format }
+      return true
+    })
     if (!disposed && epoch === viewEpoch && id === projectId.value) {
-      store.notify(t('vetting.actions.exportStarted', { format: format.toUpperCase() }), 5000)
+      if (readyReport.value) store.notify(sourceReaderCopy('Report generated. Use the download link to save the file.', '报告已生成，请点击下载链接保存文件。', '報告已產生，請按下載連結儲存檔案。'), 5000)
       await restoreJob()
     }
   } finally {
@@ -1154,6 +1173,7 @@ async function exportReport() {
 }
 
 watch(() => job.value?.id, () => {
+  releaseReadyReport()
   checklistSequence++
   if (currentChecklistDirty.value || checklistSaving.value) checklistChanged.value = true
   else { checklist.value = null; checklistBaseline.value = []; checklistChanged.value = false }
@@ -1275,6 +1295,9 @@ function tagClass(group: string) {
         <button class="btn" type="button" :disabled="exportDisabled" @click="exportReport">
           <AppIcon name="download" :size="15" />{{ t('vetting.actions.export') }}<span v-if="exporting"> · {{ t('common.loading') }}</span>
         </button>
+        <a v-if="readyReport" class="btn" data-ready-report-download :href="readyReport.url" :download="readyReport.filename" :title="readyReport.filename">
+          <AppIcon name="download" :size="15" />{{ reportDownloadLabel(readyReport.format) }}
+        </a>
       </div>
     </div>
 
