@@ -1277,7 +1277,7 @@ public class DraftingService {
             if(edits.isEmpty())return documentVO(document,snapshotId(projectId,null));
             DocxTemplateEditor.DocxEditResult result=editor.applyWithParagraphBookmarks(previous.getDocxBytes(),new DocxTemplateEditor.SourceEditBatch(previous.getDocxSha256(),edits),Collections.emptyMap(),true);
             List<Map<String,Object>> bindings=DraftDocumentBindings.bodyEdited(DraftDocumentBindings.read(previous.getBindingsJson()),result);
-            List<Object> ledger=DraftNativeLayout.bodyLedger(previous.getLedgerJson(),result);
+            List<Object> ledger=DraftNativeLayout.bodyLedger(JsonUtils.write(DraftNativeLayout.savedLedger(previous,this::lineageArtifact)),result);
             Map<String,Object> cleanup=DraftBodyCleanup.receipt(previous.getId(),previous.getDocxBytes(),index,DraftDocumentBindings.read(previous.getBindingsJson()),patch.getScopeEdits(),result);if(cleanup!=null)ledger.add(cleanup);
             DraftTocFinalizer.Result complete=finalizeDraft(fileKey,previous.getSourceSha256(),result.getDocxBytes(),bindings,ledger);DocxTemplateEditor.TemplateIndex finalIndex=complete.index();
             DraftArtifact next=new DraftArtifact();next.setId(java.util.UUID.randomUUID().toString());next.setProjectId(projectId);next.setFileKey(fileKey);next.setSnapshotId(previous.getSnapshotId());next.setSourceSha256(previous.getSourceSha256());next.setParentRevisionId(previous.getId());
@@ -1931,7 +1931,7 @@ public class DraftingService {
         SourceDocument template=requireTemplate(projectId,fileKey);Long templateId=template.getId();
         if(template.getStoragePath()==null||!Objects.equals(sourceSha256,template.getSourceSha256())||!Objects.equals(sourceSha256,DraftPdfConverter.sha256(storageService.read(template.getStoragePath()))))throw new BizException(4090,"TEMPLATE_SOURCE_REVISION_CONFLICT: Reload the current original.");
         List<Map<String,Object>> bindings=DraftDocumentBindings.read(previous.getBindingsJson());
-        List<Object> ledger=JsonUtils.readList(previous.getLedgerJson(),Object.class);
+        List<Object> ledger=DraftNativeLayout.savedLedger(previous,this::lineageArtifact);
         DraftTocFinalizer.Result complete=finalizeDraft(fileKey,sourceSha256,previous.getDocxBytes(),bindings,ledger);
         // No database writes precede this clear. Re-read values, source and document after rendering.
         entityManager.clear();document=currentExportDocument(projectId,fileKey,expectedRevision);
@@ -1986,6 +1986,7 @@ public class DraftingService {
         result=englishFileOutput.docx(original,exportReference(fileKey,artifact),guard);
         guard.run();return result;
     }
+    private DraftArtifact lineageArtifact(String id){return artifactRepository.findById(id).orElse(null);}
     private DraftArtifact requireArtifact(DraftDocument document) {
         DraftArtifact artifact=artifactRepository.findById(document.getRevisionId()).orElseThrow(()->new BizException(4012,"GENERATED_ARTIFACT_MISSING"));
         if(!document.getProjectId().equals(artifact.getProjectId())||!document.getFileKey().equals(artifact.getFileKey())||!artifact.getDocxSha256().equals(DraftPdfConverter.sha256(artifact.getDocxBytes())))throw new BizException(4012,"GENERATED_ARTIFACT_HASH_MISMATCH");

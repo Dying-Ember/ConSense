@@ -3,6 +3,7 @@ package com.consense.service.drafting;
 import com.consense.common.JsonUtils;
 import com.consense.document.DocxTemplateEditor;
 import com.consense.document.DocxTemplateEditor.*;
+import com.consense.domain.DraftArtifact;
 import java.io.*;
 import java.util.*;
 
@@ -132,6 +133,19 @@ final class DraftNativeLayout {
     }
     private static Map<String,Object> nativeStories(DocxEditResult result){if(result.getNativeStoryLedger().isEmpty())return null;Map<String,String> parts=new LinkedHashMap<>();for(Map.Entry<String,String> entry:result.getIndex().getEntryHashes().entrySet())if(entry.getKey().matches("word/(header[0-9]+|footer[0-9]+)\\.xml")||Arrays.asList("word/_rels/document.xml.rels","[Content_Types].xml","word/styles.xml","word/settings.xml").contains(entry.getKey()))parts.put(entry.getKey(),entry.getValue());return DraftBusinessRules.map("kind","native_story","version",DraftNativeIdentity.INTEGRATION_VERSION,"status","applied","sourceSha256",result.getOriginalSourceSha256(),"docxSha256",result.getDocxSha256(),"compiledDocxSha256",result.getDocxSha256(),"entryHashes",parts,"actions",result.getNativeStoryLedger());}
     static List<Object> ledger(DocxEditResult result,Map<String,Object> layout){List<Object> rows=new ArrayList<>(result.getLedger());if(layout!=null)rows.add(layout);return rows;}
+    static List<Object> savedLedger(DraftArtifact artifact,java.util.function.Function<String,DraftArtifact> lookup){
+        List<Object> rows=JsonUtils.readList(artifact.getLedgerJson(),Object.class);Map<String,String> wanted=new LinkedHashMap<>();
+        for(Object raw:rows){Map<String,Object> receipt=DraftBusinessRules.asMap(raw);if("body_scope_cleanup".equals(receipt.get("kind"))&&!DraftBodyCleanup.verifiedSavedTransition(String.valueOf(receipt.get("savedDocxSha256")),artifact.getDocxSha256(),rows)){String id=String.valueOf(receipt.get("savedRevisionId")),hash=String.valueOf(receipt.get("savedDocxSha256"));if(!hash.matches("[a-f0-9]{64}")||id.isEmpty()||"null".equals(id)||wanted.containsKey(id)&&!hash.equals(wanted.get(id)))throw new IllegalStateException("BODY_SCOPE_SAVED_LINEAGE_UNVERIFIED");wanted.put(id,hash);}}
+        if(wanted.isEmpty())return rows;List<Object> recovered=new ArrayList<>(rows);Set<String> visited=new HashSet<>();DraftArtifact child=artifact;
+        while(!wanted.isEmpty()){
+            if(child==null||child.getId()==null||!visited.add(child.getId())||!Objects.equals(artifact.getProjectId(),child.getProjectId())||!Objects.equals(artifact.getFileKey(),child.getFileKey())||!Objects.equals(artifact.getSnapshotId(),child.getSnapshotId())||!Objects.equals(artifact.getSourceSha256(),child.getSourceSha256())||!Objects.equals(child.getDocxSha256(),DraftPdfConverter.sha256(child.getDocxBytes())))throw new IllegalStateException("BODY_SCOPE_SAVED_LINEAGE_UNVERIFIED");
+            if(wanted.containsKey(child.getId())){if(!wanted.remove(child.getId()).equals(child.getDocxSha256()))throw new IllegalStateException("BODY_SCOPE_SAVED_LINEAGE_UNVERIFIED");if(wanted.isEmpty())break;}
+            String parentId=child.getParentRevisionId();DraftArtifact parent=parentId==null?null:lookup.apply(parentId);if(parent==null||!parentId.equals(parent.getId())||!Objects.equals(artifact.getProjectId(),parent.getProjectId())||!Objects.equals(artifact.getFileKey(),parent.getFileKey())||!Objects.equals(artifact.getSnapshotId(),parent.getSnapshotId())||!Objects.equals(artifact.getSourceSha256(),parent.getSourceSha256())||!Objects.equals(parent.getDocxSha256(),DraftPdfConverter.sha256(parent.getDocxBytes())))throw new IllegalStateException("BODY_SCOPE_SAVED_LINEAGE_UNVERIFIED");
+            recovered.add(DraftBusinessRules.map("kind","saved_artifact_derivation","status","VERIFIED_IMMUTABLE_ARTIFACT_PARENT","projectId",artifact.getProjectId(),"fileKey",artifact.getFileKey(),"snapshotId",artifact.getSnapshotId(),"sourceSha256",artifact.getSourceSha256(),"parentRevisionId",parent.getId(),"revisionId",child.getId(),"parentDocxSha256",parent.getDocxSha256(),"docxSha256",child.getDocxSha256()));
+            recovered=DraftBodyCleanup.preserveHistory(parent.getLedgerJson(),recovered);child=parent;
+        }
+        return recovered;
+    }
     static Map<String,Object> savedInfo(String json,String key,String rendererKind,String sourceHash,String docxHash) {
         for(Object raw:JsonUtils.readList(json,Object.class)){Map<String,Object> row=DraftBusinessRules.asMap(raw);if("native_layout".equals(row.get("kind")))return new LinkedHashMap<>(row);}
         Map<String,Object> registry=rendererRegistry(rendererKind);if(registry==null||!("NTT".equals(key)||"SCT".equals(key)||"SCC".equals(key)))return null;
@@ -155,6 +169,8 @@ final class DraftNativeLayout {
             actions.add(action);
         }
         Map<String,Object> stories=DraftBusinessRules.asMap(current.get("nativeStories"));if(!stories.isEmpty()){Map<String,Object> nextStories=new LinkedHashMap<>(stories);nextStories.put("parentDocxSha256",stories.get("docxSha256"));nextStories.put("docxSha256",result.getDocxSha256());for(Map.Entry<String,Object> entry:DraftBusinessRules.asMap(stories.get("entryHashes")).entrySet())if(!Objects.equals(entry.getValue(),result.getIndex().getEntryHashes().get(entry.getKey()))){nextStories.put("status","native_story_part_changed");current.put("status","unavailable");}current.put("nativeStories",nextStories);}
-        current.put("actions",actions);return DraftBodyCleanup.preserveHistory(previousJson,withSourceRemovals(previousJson,result,current));
+        current.put("actions",actions);List<Object> rows=withSourceRemovals(previousJson,result,current);
+        if(Objects.equals(previous.get("docxSha256"),result.getOriginalSourceSha256())&&!result.getLedger().isEmpty()){List<Object> edits=JsonUtils.readList(JsonUtils.write(result.getLedger()),Object.class);List<String> operations=new ArrayList<>();for(AppliedEdit edit:result.getLedger())operations.add(edit.getOperationId());rows.add(DraftBusinessRules.map("kind","native_editor_derivation","status","VERIFIED_EDITOR_RESULT","parentDocxSha256",result.getOriginalSourceSha256(),"docxSha256",result.getDocxSha256(),"operationIds",operations,"nativeEdits",edits,"nativeEditsSha256",DraftAdoption.hash(JsonUtils.write(edits))));}
+        return DraftBodyCleanup.preserveHistory(previousJson,rows);
     }
 }

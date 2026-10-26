@@ -77,4 +77,21 @@ class DraftTocRefreshServiceTest {
         DraftingService service=mock(DraftingService.class);DraftingController controller=new DraftingController(service,null);Map<String,String> body=new LinkedHashMap<>();body.put("revisionId","r");body.put("docxSha256","h");Map<String,Object> response=new LinkedHashMap<>();when(service.refreshToc("p","SCC","r","h")).thenReturn(response);assertSame(response,controller.refreshToc("p","SCC",body).getData());verify(service).refreshToc("p","SCC","r","h");clearInvocations(service);body.put("businessValue","forbidden");assertThrows(BizException.class,()->controller.refreshToc("p","SCC",body));verifyNoInteractions(service);
         Transactional tx=DraftingService.class.getDeclaredMethod("refreshToc",String.class,String.class,String.class,String.class).getAnnotation(Transactional.class);assertNotNull(tx);assertEquals(Isolation.READ_COMMITTED,tx.isolation());assertFalse(tx.readOnly());
     }
+    private static DraftArtifact ancestor(Fixture f,String id,byte[] bytes,String parent){
+        DraftArtifact row=new DraftArtifact();row.setId(id);row.setProjectId(f.parent.getProjectId());row.setFileKey("SCC");row.setSnapshotId(f.parent.getSnapshotId());row.setSourceSha256(f.parent.getSourceSha256());row.setDocxBytes(bytes);row.setDocxSha256(DraftPdfConverter.sha256(bytes));row.setParentRevisionId(parent);row.setLedgerJson("[]");f.artifacts.put(id,row);return row;
+    }
+    private static void missingSavedBodyHistory(Fixture f)throws Exception {
+        DraftArtifact cleanup=ancestor(f,"cleanup-save",word("8"),null),toc=ancestor(f,"toc-save",word("9"),cleanup.getId());f.parent.setParentRevisionId(toc.getId());
+        f.parent.setLedgerJson(JsonUtils.write(Collections.singletonList(DraftBusinessRules.map("kind","body_scope_cleanup","savedRevisionId",cleanup.getId(),"savedDocxSha256",cleanup.getDocxSha256(),"compiledDocxSha256",cleanup.getDocxSha256()))));
+    }
+    @Test void refreshReconstructsTheExactImmutableCleanupToTocToManualBodyParentChain()throws Exception {
+        Fixture f=new Fixture();missingSavedBodyHistory(f);String frozen=f.parent.getLedgerJson();
+        doAnswer(call->{f.renderCalls++;List<Object> rows=call.getArgument(3);List<Map<String,Object>> edges=new ArrayList<>();for(Object raw:rows){Map<String,Object> row=DraftBusinessRules.asMap(raw);if("saved_artifact_derivation".equals(row.get("kind")))edges.add(row);}assertEquals(2,edges.size(),"A saved body child cannot lose its earlier cleanup/TOC ancestry");assertTrue(edges.stream().anyMatch(row->"toc-save".equals(row.get("parentRevisionId"))&&f.parent.getId().equals(row.get("revisionId"))));assertTrue(edges.stream().anyMatch(row->"cleanup-save".equals(row.get("parentRevisionId"))&&"toc-save".equals(row.get("revisionId"))));return f.finalized;}).when(f.tested).finalizeCompiledToc(any(byte[].class),anyString(),anyList(),anyList());
+        assertEquals(true,f.refresh().get("updated"));assertEquals(frozen,f.parent.getLedgerJson(),"Read-back must not rewrite the old immutable artifact");verifyNoInteractions(f.model);
+    }
+    @Test void incompleteForeignOrTamperedSavedParentChainsCannotReachRendering()throws Exception {
+        for(int fault=0;fault<8;fault++){Fixture f=new Fixture();missingSavedBodyHistory(f);DraftArtifact toc=f.artifacts.get("toc-save");switch(fault){case 0:f.artifacts.remove("toc-save");break;case 1:toc.setParentRevisionId(f.parent.getId());break;case 2:toc.setProjectId("foreign-project");break;case 3:toc.setSourceSha256("0".repeat(64));break;case 4:toc.setDocxSha256("0".repeat(64));break;case 5:toc.setSnapshotId("foreign-snapshot");break;case 6:toc.setFileKey("NTT");break;default:f.parent.setLedgerJson(f.parent.getLedgerJson().replace("cleanup-save","unrelated-stale-receipt"));}
+            assertThrows(IllegalStateException.class,f::refresh,"fault "+fault);assertEquals(0,f.renderCalls);f.noWrites();
+        }
+    }
 }
