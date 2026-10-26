@@ -13,6 +13,8 @@ import hashlib
 import importlib
 import json
 import os
+import time
+from collections import Counter
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -51,6 +53,7 @@ class CanonicalIndexRequest(BaseModel):
 
 
 INDEX_STATUS_CONTRACT = 'read-only-existing-canonical-index-v1'
+INDEX_AVAILABILITY_CONTRACT = 'live-canonical-index-availability-v1'
 StatusSha = Annotated[str, Field(min_length=64, max_length=64, pattern=r'^[0-9a-f]{64}$')]
 
 class CanonicalIndexStatusRequest(BaseModel):
@@ -59,6 +62,11 @@ class CanonicalIndexStatusRequest(BaseModel):
     projectionSha256: list[StatusSha] = Field(min_length=1, max_length=10000)
     module: Annotated[str, Field(pattern=r'^(vetting|advisory)$')] = 'vetting'
     sourcePageEvidence: dict[StatusSha, StatusSha] = Field(default_factory=dict, max_length=10000)
+
+
+class CanonicalIndexAvailabilityRequest(CanonicalIndexStatusRequest):
+    expectedSignature: StatusSha
+    expectedGeneration: Annotated[str, Field(min_length=32, max_length=32, pattern=r'^[0-9a-f]{32}$')] | None = None
 
 
 def configure_environment(environ, workspace):
@@ -215,13 +223,16 @@ def create_app(policy, *, backend=None, artifact_store=None, source_registry=Non
     def rejected(error):
         return HTTPException(422, {'kind': error.kind, 'message': str(error), 'metadata': error.metadata})
 
-    def scope_receipt(chunks):
-        result = assert_canonical_scope(chunks, policy, module=target_module)
-        return {'policyIdentity': policy.policyIdentity, 'inputContract': INPUT_CONTRACT,
-                'targetModule': target_module,
-                'suppliedChunks': len(chunks), 'indexedChunks': len(chunks),
-                'filtering': 'none; reject any excluded input',
-                'unclassified': result['unclassified'], 'sourceQualityChanged': False}
+    def scope_receipt(chunks=None):
+        if chunks is not None:
+            assert_canonical_scope(chunks, policy, module=target_module)
+        receipt = {'policyIdentity': {'manifestSha256': policy.policyIdentity['manifestSha256']},
+                   'inputContract': INPUT_CONTRACT,
+                   'targetModule': target_module, 'sourceQualityChanged': False}
+        if chunks is not None:
+            receipt.update(suppliedChunks=len(chunks), indexedChunks=len(chunks),
+                           filtering='none; reject any excluded input')
+        return receipt
 
     @contextmanager
     def source_frame():
@@ -252,6 +263,7 @@ def create_app(policy, *, backend=None, artifact_store=None, source_registry=Non
                          'parserCandidatesAcceptedByRetrieval': False,
                          'canonicalProjectionEndpoint': '/project',
                          'indexStatusContract': INDEX_STATUS_CONTRACT,
+                         'indexAvailabilityContract': INDEX_AVAILABILITY_CONTRACT,
                          'requestEvidence': 'private request/response and actual window/model events in service state',
                          'assetReturnContract': 'source-and-projection-bound-content-addressed-assets-v1',
                          'limitations': ['Health does not run either BGE model or certify source quality',
@@ -284,6 +296,53 @@ def create_app(policy, *, backend=None, artifact_store=None, source_registry=Non
         except WindowError as error:
             raise rejected(error) from error
 
+    def current_metadata(key):
+        loader = getattr(backend, 'load_project_metadata', None)
+        if loader is not None and backend.metadata_path(key).exists():
+            return loader(key)
+        stored = backend._projects.get(key)
+        if stored is None:
+            path = backend.metadata_path(key)
+            if path.exists():
+                stored = json.loads(path.read_text(encoding='utf-8'))
+                backend._projects[key] = stored
+        return stored
+
+    def unframed_metadata_exit(key, stored):
+        active = getattr(source_registry, '_validation_frame', None)
+        if active is not None:
+            return
+        expected = stored.get('_metadataFileIdentity')
+        if expected is not None:
+            path = backend.metadata_path(key)
+            digest, size = hashlib.sha256(), 0
+            with path.open('rb') as handle:
+                for block in iter(lambda: handle.read(1024 * 1024), b''):
+                    digest.update(block)
+                    size += len(block)
+            fail((str(path.resolve()), size, digest.hexdigest()) == expected,
+                 'INDEX_STATUS_METADATA_CHANGED', 'Persisted index metadata changed during status checks')
+
+    def selected_index_chunks(stored, request):
+        chunks = stored['chunks']
+        guard = getattr(source_registry, 'validate_index_scope', None)
+        if guard is not None:
+            guard(chunks, request.projectionSha256, module=request.module,
+                  sorted_order=not backend._windows_runtime.structural_recipe.enabled)
+        else:
+            expected = []
+            for address in request.projectionSha256:
+                snapshot = source_registry.load(address)
+                fail(canonical_scope_policy_sha(snapshot) == policy.policyIdentity['manifestSha256'],
+                     'PROJECTION_SCOPE_POLICY_MISMATCH', 'Current sources must bind this exact active scope')
+                expected.extend(source_registry.chunks(address, module=request.module))
+            if not backend._windows_runtime.structural_recipe.enabled:
+                expected.sort(key=lambda chunk: chunk['id'])
+            fail(chunks == expected, 'INDEX_STATUS_CURRENT_SOURCE_MISMATCH',
+                 'Complete persisted parents differ from the exact current selected sources')
+        assert_canonical_scope(chunks, policy, module=request.module)
+        return chunks
+
     def retrieve(request):
         try:
             # Inspect persisted originals before read_project can calculate a
@@ -291,11 +350,7 @@ def create_app(policy, *, backend=None, artifact_store=None, source_registry=Non
             with source_frame():
                 key = backend.project_key(request.projectId)
                 with backend.LOCK:
-                    stored = backend._projects.get(key)
-                    if stored is None:
-                        path = backend.metadata_path(key)
-                        if path.exists():
-                            stored = json.loads(path.read_text(encoding='utf-8'))
+                    stored = current_metadata(key)
                     if stored is not None:
                         assert_canonical_scope(stored['chunks'], policy, module=target_module)
                     return {**backend.retrieve(request), 'competitionScope': {
@@ -337,8 +392,7 @@ def create_app(policy, *, backend=None, artifact_store=None, source_registry=Non
                          == policy.policyIdentity['manifestSha256'], 'PROJECTION_SCOPE_POLICY_MISMATCH',
                          'Re-project sources reviewed against a different scope policy before indexing',
                          projectionSha256=address)
-                    chunks.extend(source_registry.chunks(address, module=request.module))
-                assert_canonical_scope(chunks, policy, module=request.module)
+                    chunks.extend(source_registry.chunks_from_loaded(snapshot, module=request.module))
                 body = backend.IndexRequest(projectId=request.projectId, chunks=chunks, rebuild=request.rebuild)
                 result = index(body)
                 return {**result, 'canonicalProjections': request.projectionSha256,
@@ -364,48 +418,22 @@ def create_app(policy, *, backend=None, artifact_store=None, source_registry=Non
                  'SOURCE_PAGE_INDEX_PINS_UNSUPPORTED', 'This runtime cannot validate source-page pins')
             token = pins_context.set(dict(sorted(request.sourcePageEvidence.items()))) if pins_context is not None else None
             try:
-                with source_frame():
-                    chunks = []
-                    for address in request.projectionSha256:
-                        snapshot = source_registry.load(address)
-                        fail(canonical_scope_policy_sha(snapshot) == policy.policyIdentity['manifestSha256'],
-                             'PROJECTION_SCOPE_POLICY_MISMATCH', 'Current sources must bind this exact active scope')
-                        chunks.extend(source_registry.chunks(address, module=request.module))
-                    assert_canonical_scope(chunks, policy, module=request.module)
-                    if not runtime.structural_recipe.enabled:
-                        chunks.sort(key=lambda chunk: chunk['id'])
-                    with backend.LOCK:
-                        # Never let a Java or Python memory receipt stand in for
-                        # the current persisted metadata and normal vector seal.
-                        backend._projects.pop(key, None)
-                        path = backend.metadata_path(key)
-                        def file_identity():
-                            digest = hashlib.sha256()
-                            with path.open('rb') as handle:
-                                for block in iter(lambda: handle.read(1024 * 1024), b''):
-                                    digest.update(block)
-                            stat = path.stat()
-                            return (stat.st_size, stat.st_mtime_ns, digest.hexdigest())
-                        before = file_identity() if path.exists() else None
-                        stored = backend.read_project(key)
-                        fail(stored['chunks'] == chunks, 'INDEX_STATUS_CURRENT_SOURCE_MISMATCH',
-                             'Complete persisted parents differ from the exact current selected sources')
-                        runtime.validate_metadata(stored)
-                        fail(runtime.signature_matches(stored['signature'], chunks), 'INDEX_STATUS_CURRENT_RUNTIME_MISMATCH',
-                             'Persisted signature differs from the exact current source/runtime recipe')
-                        signed = stored['signature']
-                        from index_integrity import verify_reuse
-                        collection = runtime.index_collection(key, signed, stored.get('generation'))
-                        verify_reuse(backend.database() if chunks else None, stored, key=key,
-                                     collection=collection, chunks=chunks, signature=signed)
-                        fail(before is not None and before == file_identity(), 'INDEX_STATUS_METADATA_CHANGED',
-                             'Persisted metadata changed during the read-only status operation')
-                        return {'projectId': key, 'ready': True, 'readOnly': True,
-                            'indexStatusContract': INDEX_STATUS_CONTRACT, 'indexed': len(chunks),
-                            'vectorPoints': stored['vectorPoints'], 'signature': backend.digest(signed),
-                            'contract': runtime.contract(), 'canonicalProjections': list(request.projectionSha256),
-                            'targetModule': request.module, 'sourcePageEvidence': dict(sorted(request.sourcePageEvidence.items())),
-                            'competitionScope': scope_receipt(chunks)}
+                with source_frame(), backend.LOCK:
+                    stored = backend.read_project(key)
+                    chunks = selected_index_chunks(stored, request)
+                    runtime.validate_metadata(stored)
+                    signed = stored['signature']
+                    from index_integrity import verify_reuse
+                    collection = runtime.index_collection(key, signed, stored.get('generation'))
+                    verify_reuse(backend.database() if chunks else None, stored, key=key,
+                                 collection=collection, chunks=chunks, signature=signed)
+                    unframed_metadata_exit(key, stored)
+                    return {'projectId': key, 'ready': True, 'readOnly': True,
+                        'indexStatusContract': INDEX_STATUS_CONTRACT, 'indexed': len(chunks),
+                        'vectorPoints': stored['vectorPoints'], 'signature': backend.digest(signed),
+                        'contract': runtime.contract(), 'canonicalProjections': list(request.projectionSha256),
+                        'targetModule': request.module, 'sourcePageEvidence': dict(sorted(request.sourcePageEvidence.items())),
+                        'competitionScope': scope_receipt()}
             finally:
                 if pins_context is not None:
                     pins_context.reset(token)
@@ -419,6 +447,65 @@ def create_app(policy, *, backend=None, artifact_store=None, source_registry=Non
             backend._projects.pop(key, None)
             raise HTTPException(422, {'kind': 'CANONICAL_INDEX_STATUS_UNAVAILABLE',
                 'message': 'Existing exact source-bound index could not be verified'}) from error
+
+    def canonical_index_availability(request):
+        key = backend.project_key(request.projectId)
+        started = time.perf_counter()
+        try:
+            fail(request.module == target_module and len(set(request.projectionSha256)) == len(request.projectionSha256)
+                 and set(request.sourcePageEvidence).issubset(request.projectionSha256),
+                 'INDEX_AVAILABILITY_SCOPE', 'Availability requires the exact selected module and unique source scope')
+            runtime = backend._windows_runtime
+            pins_context = getattr(runtime, 'source_page_index_pins', None)
+            fail(pins_context is not None or not request.sourcePageEvidence,
+                 'SOURCE_PAGE_INDEX_PINS_UNSUPPORTED', 'Current runtime cannot validate source-page pins')
+            token = pins_context.set(dict(sorted(request.sourcePageEvidence.items()))) if pins_context is not None else None
+            try:
+                with source_frame(), backend.LOCK:
+                    stored = backend.read_project(key)
+                    signed = stored['signature']
+                    fail(backend.digest(signed) == request.expectedSignature,
+                         'INDEX_AVAILABILITY_SIGNATURE', 'Current index signature differs from the expected normal index')
+                    if 'expectedGeneration' in request.model_fields_set:
+                        fail(stored.get('generation') == request.expectedGeneration,
+                             'INDEX_AVAILABILITY_GENERATION', 'Index generation changed; refresh the current scope')
+                    chunks = selected_index_chunks(stored, request)
+                    collection = runtime.index_collection(key, signed, stored.get('generation'))
+                    from index_integrity import verify_availability
+                    live = verify_availability(backend.database() if chunks else None, stored,
+                        key=key, collection=collection, signature=signed)
+                    frame = getattr(source_registry, '_validation_frame', None)
+                    owned = frame.get() if frame is not None else None
+                    metrics = owned['indexMetadata'][key]['metrics'] if owned is not None and key in owned['indexMetadata'] else {}
+                    result = {'projectId': key, 'ready': True, 'readOnly': True,
+                        'indexAvailabilityContract': INDEX_AVAILABILITY_CONTRACT,
+                        'fullVectorIntegrityChecked': False, 'indexed': stored['parentCount'],
+                        'vectorPoints': live['pointCount'], 'vectorDimension': live['dimension'],
+                        'signature': backend.digest(signed), 'indexGeneration': stored.get('generation'),
+                        'collection': collection, 'contract': runtime.contract(),
+                        'canonicalProjections': list(request.projectionSha256), 'targetModule': request.module,
+                        'sourcePageEvidence': dict(sorted(request.sourcePageEvidence.items())),
+                        'competitionScope': scope_receipt()}
+                unframed_metadata_exit(key, stored)
+                fail(live == verify_availability(backend.database() if chunks else None, stored,
+                    key=key, collection=collection, signature=signed),
+                     'INDEX_AVAILABILITY_CHANGED', 'Live index changed during availability checks')
+                result.update(metadataBytesRead=metrics.get('bytesRead', 0),
+                    metadataJsonDecodes=metrics.get('jsonDecodes', 0), elapsedSeconds=time.perf_counter() - started)
+                return result
+            finally:
+                if pins_context is not None:
+                    pins_context.reset(token)
+        except WindowError as error:
+            backend._projects.pop(key, None)
+            raise rejected(error) from error
+        except HTTPException:
+            backend._projects.pop(key, None)
+            raise
+        except (ValueError, OSError, KeyError, TypeError) as error:
+            backend._projects.pop(key, None)
+            raise HTTPException(422, {'kind': 'CANONICAL_INDEX_AVAILABILITY_UNAVAILABLE',
+                'message': 'Current source-bound index is unavailable'}) from error
 
     def canonical_snapshot(projection_sha256: str, module: str = 'vetting'):
         try:
@@ -447,6 +534,7 @@ def create_app(policy, *, backend=None, artifact_store=None, source_registry=Non
     project.__annotations__['request'] = ProjectionRequest
     canonical_index.__annotations__['request'] = CanonicalIndexRequest
     canonical_index_status.__annotations__['request'] = CanonicalIndexStatusRequest
+    canonical_index_availability.__annotations__['request'] = CanonicalIndexAvailabilityRequest
     index = journal.wrap('/index', index)
     retrieve = journal.wrap('/retrieve', retrieve)
     canonical_index = journal.wrap('/index-canonical', canonical_index)
@@ -457,6 +545,7 @@ def create_app(policy, *, backend=None, artifact_store=None, source_registry=Non
     app.post('/project')(project)
     app.post('/index-canonical')(canonical_index)
     app.post('/index-canonical/status')(canonical_index_status)
+    app.post('/index-canonical/availability')(canonical_index_availability)
     app.get('/canonical/{projection_sha256}')(canonical_snapshot)
     app.get('/canonical/{projection_sha256}/sources/{source_sha256}/assets/{asset_id}')(source_asset)
     return app

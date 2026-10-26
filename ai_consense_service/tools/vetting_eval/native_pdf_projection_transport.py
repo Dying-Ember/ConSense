@@ -15,13 +15,16 @@ from pathlib import Path
 
 from artifact_store import ArtifactStore, DESCRIPTOR_SCHEMA
 from canonical_projection import CanonicalProjectionError, _bytes, _fail, _hash
-from native_pdf_canonical_projection import SCHEMA, TABLE_PROJECTION_VERSIONS, _json, validate_native_pdf_projection
+from native_pdf_canonical_projection import (SCHEMA, TABLE_PROJECTION_VERSIONS, _json, validate_native_pdf_projection,
+    FONT_PROJECTION_VERSION, FONT_TABLE_PROJECTION_VERSION, SL_FONT_PROJECTION_VERSION, SL_FONT_TABLE_PROJECTION_VERSION)
 
 STORAGE_SHAPE = 'cas-native-pdf-joint-adopted-public-v1'
 VERSION = 'source-reviewed-native-pdf-cas-public-projection-v1'
 TABLE_VERSION = 'source-reviewed-native-pdf-cas-public-projection-v2'
 COMMITMENTS_VERSION = 'native-pdf-public-whole-prose-commitments-v1'
 MAX_SNAPSHOT_BYTES = 16777216
+FONT_TEXT_VERSIONS = {FONT_PROJECTION_VERSION, FONT_TABLE_PROJECTION_VERSION, SL_FONT_PROJECTION_VERSION, SL_FONT_TABLE_PROJECTION_VERSION}
+FONT_TEXT_CHANNEL = 'native_glyphs_with_verified_font_decoding_and_explicit_source_reviewed_separators'
 
 
 def _boundary(operation, code):
@@ -73,7 +76,8 @@ def _part(part, internal, descriptor, pointer):
                                             part['capturedGlyphIds'], internal, 'native_pdf_glyph_membership')
     public['nativeTextSpansRef'] = _ref(descriptor, pointer + '/nativeTextSpans',
                                       part['nativeTextSpans'], internal, 'native_pdf_literal_utf16_spans')
-    public['textChannel'] = 'literal_native_glyphs_with_explicit_source_reviewed_separators'
+    public['textChannel'] = (FONT_TEXT_CHANNEL if internal['projectionIdentity']['projectionVersion'] in FONT_TEXT_VERSIONS
+                             else 'literal_native_glyphs_with_explicit_source_reviewed_separators')
     public['offsetUnit'] = 'UTF16'
     return public
 

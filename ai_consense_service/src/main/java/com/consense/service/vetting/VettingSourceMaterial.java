@@ -213,13 +213,14 @@ public final class VettingSourceMaterial {
             return map("id",c.getId(),"file",nvl(c.getFileKey())+" · "+nvl(c.getFileName()),"role",c.getRole(),"clauseId",c.getClauseId(),"content",c.getContent(),"sourceQuality",c.getSourceQuality(),
                     "semanticMember",member,"semanticUnitRef",group,"semanticUnit",emittedGroups.add(group)?unit:null,
                     "unitReadStatus",unavailable.isEmpty()?"complete":"incomplete","unavailableMemberIds",unavailable,
-                    "nativeRows",Collections.emptyList(),"unresolvedNativeRowParts",Collections.emptyList(),"nativeRowsStatus","unknown","wordSourceScopeContext",wordScope);
+                    "nativeRows",Collections.emptyList(),"unresolvedNativeRowParts",Collections.emptyList(),"nativeRowsStatus","unknown",
+                    "supplementalSourceContextStatus",wordScope==null?"unknown":"omitted_from_model_packet; native observations remain in source records; unsubmitted context is unassessed");
         }
         if("source-semantic-units-v1".equals(raw.path("semanticProjectionVersion").asText()))
             return map("id",c.getId(),"file",nvl(c.getFileKey())+" · "+nvl(c.getFileName()),"role",c.getRole(),"clauseId",c.getClauseId(),
                     "content",c.getContent(),"sourceQuality",c.getSourceQuality(),"semanticUnit",raw.path("semanticUnit"),
                     "nativeRows",Collections.emptyList(),"unresolvedNativeRowParts",Collections.emptyList(),"nativeRowsStatus","unknown",
-                    "wordSourceScopeContext",wordScope);
+                    "supplementalSourceContextStatus",wordScope==null?"unknown":"omitted_from_model_packet; native observations remain in source records; unsubmitted context is unassessed");
         com.fasterxml.jackson.databind.node.ObjectNode structure=modelMaterial.project(c.getCanonicalEvidence(),raw,c.getRole());
         structure.set("canonicalScope",raw.path("canonicalScope").deepCopy());
         return map("id",c.getId(),"file",nvl(c.getFileKey())+" · "+nvl(c.getFileName()),"documentId",c.getDocumentId(),"sourceHash",c.getSourceHash(),

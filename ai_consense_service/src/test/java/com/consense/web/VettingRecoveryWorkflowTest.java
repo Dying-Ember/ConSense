@@ -78,8 +78,13 @@ class VettingRecoveryWorkflowTest {
         worker.submit(()->{}).get(10,TimeUnit.SECONDS);
     }
     @BeforeEach void fixture(){
+        // This isolated H2 schema disables Flyway; install the same content-digest write boundary used by live storage.
+        fixtureSql.execute((org.springframework.jdbc.core.ConnectionCallback<Void>)connection->{
+            try { com.consense.service.sources.SourceContentDigestMigration.install(connection);return null; }
+            catch(Exception failure) { throw new java.sql.SQLException(failure); }
+        });
         when(englishFiles.json(any(JsonNode.class),anyString(),any(Runnable.class))).thenAnswer(call->{call.<Runnable>getArgument(2).run();return call.<JsonNode>getArgument(0).deepCopy();});
-        when(englishFiles.docx(any(byte[].class),anyString(),any(Runnable.class))).thenAnswer(call->{call.<Runnable>getArgument(2).run();return call.<byte[]>getArgument(0).clone();});
+        when(englishFiles.docx(any(byte[].class),anyString(),any(Runnable.class),anySet())).thenAnswer(call->{call.<Runnable>getArgument(2).run();return call.<byte[]>getArgument(0).clone();});
         // Explicit renderer replacement: durable recovery/content only, not LibreOffice acceptance.
         doAnswer(call->VettingDocxPdfFixture.render(call.getArgument(0))).when(drafting).renderPdf(any(byte[].class));
         promptService.reset(com.consense.service.prompt.PromptCatalog.KEY_VETTING);
@@ -336,7 +341,21 @@ class VettingRecoveryWorkflowTest {
     }
     private SourceDocument bindOriginal(String project)throws Exception{SourceDocument source=documents.findByProjectIdOrderByIdAsc(project).get(0);Path file=Paths.get(props.getStorageRoot(),project,"SCC.txt");Files.createDirectories(file.getParent());byte[] bytes=source.getTextContent().getBytes(StandardCharsets.UTF_8);Files.write(file,bytes);source.setStoragePath(file.toString());source.setSourceSha256(com.consense.service.sources.OerSourceMetadata.originalSha256(bytes));return documents.saveAndFlush(source);}
     private static String reviewBody(JsonNode loaded,String remarks){return JsonUtils.write(Map.of("expectedRunId",loaded.path("runId").asText(),"expectedGeneratedRevisionSha256",loaded.path("generatedRevisionSha256").asText(),"expectedSourceSnapshotSha256",loaded.path("sourceSnapshotSha256").asText(),"reviewRemarks",remarks,"actionTaken","reviewed","addendumRequired",true));}
-    private String project(){Project p=new Project();p.setId("recovery-"+UUID.randomUUID());p.setNameEn("Recovery fixture");p.setContractNo("TEST");projects.saveAndFlush(p);SourceDocument d=new SourceDocument();d.setProjectId(p.getId());d.setCategory(SourceDocument.CATEGORY_VETTING_PACKAGE);d.setReviewRole("tender");d.setDocumentScope("package");d.setFileKey("SCC");d.setFileName("SCC.txt");d.setParseStatus("PARSED");d.setTextContent("SCC 9.1 The contractor shall protect the works and maintain insurance throughout the contract.");d.setOcrUsed(false);documents.saveAndFlush(d);return p.getId();}
+    private String project(){
+        Project p=new Project();p.setId("recovery-"+UUID.randomUUID());p.setNameEn("Recovery fixture");p.setContractNo("TEST");projects.saveAndFlush(p);
+        String body="SCC 9.1 The contractor shall protect the works and maintain insurance throughout the contract.";
+        byte[] bytes=body.getBytes(StandardCharsets.UTF_8);
+        StorageService.StoredFile original=storage.store(p.getId(),SourceDocument.CATEGORY_VETTING_PACKAGE,
+                new org.springframework.mock.web.MockMultipartFile("files","SCC.txt","text/plain",bytes));
+        DocumentParser.ParsedDocument parsed=parser.parse("SCC.txt",bytes);
+        assertEquals("PARSED",parsed.getParseStatus());
+        SourceDocument d=new SourceDocument();d.setProjectId(p.getId());d.setCategory(SourceDocument.CATEGORY_VETTING_PACKAGE);
+        d.setReviewRole("tender");d.setDocumentScope("package");d.setFileKey("SCC");d.setFileName("SCC.txt");
+        d.setStoragePath(original.getPath());d.setParseStatus(parsed.getParseStatus());d.setTextContent(parsed.getText());d.setOcrUsed(parsed.isOcrUsed());
+        com.consense.service.sources.OerSourceMetadata.captureOrdinary(d,parsed,bytes);
+        com.consense.service.sources.OerSourceMetadata.confirmSourceUse(d,true);
+        documents.saveAndFlush(d);return p.getId();
+    }
     private String start(String project)throws Exception{return JsonUtils.parse(http.perform(post("/api/vetting/"+project+"/runs")).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.code").value(0)).andReturn().getResponse().getContentAsString()).path("data").path("id").asText();}
     private JsonNode await(String project,String id,String status)throws Exception{
         long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(15);JsonNode progress;

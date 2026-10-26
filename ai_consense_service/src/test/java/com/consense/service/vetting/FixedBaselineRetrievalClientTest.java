@@ -257,6 +257,28 @@ class FixedBaselineRetrievalClientTest {
         assertThrows(IllegalStateException.class,()->f.client.assertCurrent(hits));
         assertThrows(IllegalStateException.class,()->f.client.readOnlyHitById("parent-a"));
     }
+    @Test void requestReadGuardChecksFreshOriginalIdentityBeforeEveryWait() throws Exception {
+        Fixture f=new Fixture(false);List<VectorStore.SearchHit> hits=f.search();Runnable guard=f.client.currentReadGuard(hits);
+        guard.run();Files.delete(f.original);assertThrows(IllegalStateException.class,guard::run);
+    }
+    @Test void intermediateGuardAvoidsWholeOriginalRehashButFinalGuardRejectsSameAttributeMutation() throws Exception {
+        Fixture f=new Fixture(false);List<VectorStore.SearchHit> hits=f.search();Runnable guard=f.client.currentReadGuard(hits);
+        java.nio.file.attribute.FileTime before=Files.getLastModifiedTime(f.original);
+        Files.write(f.original,"tampered source".getBytes(StandardCharsets.UTF_8));Files.setLastModifiedTime(f.original,before);
+        assertDoesNotThrow(guard::run,"Intermediate identity guards do not claim a fresh full byte hash");
+        assertThrows(IllegalStateException.class,()->f.client.assertCurrent(hits),"The final full original-byte guard remains mandatory");
+    }
+    @Test void requestReadGuardStillChecksExactSelectedCorpusBytesWithRestoredTimestamp() throws Exception {
+        Fixture f=new Fixture(false);List<VectorStore.SearchHit> hits=f.search();Runnable guard=f.client.currentReadGuard(hits);
+        java.nio.file.attribute.FileTime before=Files.getLastModifiedTime(f.corpus);
+        String text=new String(Files.readAllBytes(f.corpus),StandardCharsets.UTF_8);
+        Files.write(f.corpus,text.replace("Authored complete","Altered complete").getBytes(StandardCharsets.UTF_8));Files.setLastModifiedTime(f.corpus,before);
+        assertThrows(IllegalStateException.class,guard::run);
+    }
+    @Test void requestReadGuardKeepsPinnedMigrationArtifactsAndConfiguration() throws Exception {
+        Fixture f=new Fixture(false);f.enableMigration();List<VectorStore.SearchHit> hits=f.search();Runnable guard=f.client.currentReadGuard(hits);
+        guard.run();f.p.setQueryRuntimeSha256(sha("changed query pin"));assertThrows(IllegalStateException.class,guard::run);
+    }
     private static ObjectNode parent(String id,String text,int page) {
         ObjectNode p=JsonUtils.mapper().createObjectNode();p.put("id",id);p.put("content",text);p.put("role","standard");p.put("fileKey","GCC");p.put("documentId","GCC:GCC");p.put("anchor","GCC/P"+page);p.put("pageNo",page);
         p.put("sourceHash",SOURCE);p.put("originalSourceSha256",ORIGINAL);p.put("sourceQualityHash",sha("authored quality"));p.put("fullObservedParentPreserved",true);p.put("fixedDevelopmentBaseline",true);

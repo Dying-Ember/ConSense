@@ -11,7 +11,7 @@ const label = { zhHans: '核对条件', zhHant: '核對條件', en: 'Check condi
 const quote = '  A1: “shall NOT”\n\tHK$M 1.20; COMPLTION 😀\n'
 function input() {
   return { projectId: 'project-A', findingCode: 'F001', title: label, description: label, sourceSetStale: false,
-    evidence: [{ side: 'source', documentId: 12, fileKey: 'SCC', fileName: 'actual SCC.pdf', pageNo: 'P4', anchor: 'A1', sourceHash: 'old-source-hash', located: true, quote }],
+    evidence: [{ side: 'source', documentId: 12, fileKey: 'SCC', fileName: 'actual SCC.pdf', pageNo: 'P4', anchor: 'A1', sourceHash: 'old-source-hash', originalSourceSha256: 'a'.repeat(64), businessContentSha256: 'b'.repeat(64), located: true, quote }],
     reviewRemarks: 'PRIVATE TEAM EDIT', suggestion: 'SUGGESTED ANSWER', report: 'ENTIRE REPORT' }
 }
 function storage() {
@@ -31,6 +31,8 @@ test('claim applies once with exact literal quotations and only the authorized h
   assert.equal(result.status, 'claimed')
   assert.equal(result.handoff.evidence[0].quote, quote)
   assert.equal(result.handoff.evidence[0].sourceHash, 'old-source-hash')
+  assert.equal(result.handoff.evidence[0].originalSourceSha256, 'a'.repeat(64))
+  assert.equal(result.handoff.evidence[0].businessContentSha256, 'b'.repeat(64))
   assert.equal(result.handoff.reviewRemarks, undefined)
   assert.equal(result.handoff.suggestion, undefined)
   assert.equal(result.handoff.report, undefined)
@@ -43,7 +45,7 @@ test('fixed standard handoff retains baseline/source identity without matching i
   value.evidence[0].fixedBaselineEvidence = pointer
   const handoff = helper.createReviewHandoff(value, token, 1000)
   assert.equal(handoff.evidence[0].fixedBaselineEvidence.manifestSha256, pointer.manifestSha256)
-  assert.match(helper.reviewQuestion(handoff, value => value.en), /fixed_development_baseline/)
+  assert.doesNotMatch(helper.reviewQuestion(handoff, value => value.en), /fixed_development_baseline|manifestSha256/)
   assert.equal(helper.handoffSourceWarnings(handoff, [{ documentId: '12', included: true, sourceHash: 'new-project-hash' }], true).stale, false)
   assert.equal(helper.handoffSourceWarnings(handoff, [], true).unverified, true)
   pointer.manifestSha256 = 'invalid'
@@ -76,6 +78,8 @@ test('malformed storage and evidence reject; an unrelated token does not consume
     assert.equal(port.data.size, 0)
   }
   assert.equal(helper.claimReviewHandoff(port, [token], 'project-A', 2000).status, 'invalid')
+  const badDigest = input(); badDigest.evidence[0].businessContentSha256 = 'not-a-digest'
+  assert.throws(() => helper.createReviewHandoff(badDigest, token, 1000), /invalid_review_handoff/)
 })
 
 test('storage failure is an explicit failure and oversized quotations are never silently truncated', () => {
@@ -93,8 +97,7 @@ test('locale-specific editable questions retain exact quotes and identity while 
   for (const locale of ['zhHans', 'zhHant', 'en']) {
     const question = helper.reviewQuestion(handoff, value => value[locale])
     assert.ok(question.includes(quote))
-    assert.ok(question.includes('"documentId":12'))
-    assert.ok(question.includes('"sourceHash":"old-source-hash"'))
+    assert.doesNotMatch(question, /old-source-hash|"documentId"|[a-f0-9]{64}/)
     assert.ok(question.includes(helper.reviewHandoffCopy.prompt[locale]))
     assert.ok(question.includes(helper.reviewHandoffCopy.unverified[locale]))
     assert.doesNotMatch(question, /PRIVATE TEAM EDIT|SUGGESTED ANSWER|ENTIRE REPORT/)
@@ -112,6 +115,12 @@ test('current sources require document identity plus exact hash; unknown and sco
   assert.deepEqual(warnings([{ documentId: '12', included: false, sourceHash: 'old-source-hash' }]), { stale: false, unverified: false, unavailable: true })
   assert.deepEqual(warnings([{ documentId: 'other', included: true, sourceHash: 'old-source-hash' }]), { stale: false, unverified: true, unavailable: true })
   assert.deepEqual(warnings([], false), { stale: false, unverified: true, unavailable: false })
+  assert.deepEqual(warnings([{ documentId: '12', included: true, sourceHash: null, originalSourceSha256: 'a'.repeat(64), businessContentSha256: 'b'.repeat(64) }]), { stale: false, unverified: false, unavailable: false })
+  assert.deepEqual(warnings([{ documentId: '12', included: true, sourceHash: null, originalSourceSha256: 'a'.repeat(64), businessContentSha256: 'c'.repeat(64) }]), { stale: true, unverified: false, unavailable: false })
+  assert.deepEqual(warnings([{ documentId: '12', included: true, sourceHash: null, originalSourceSha256: 'c'.repeat(64), businessContentSha256: 'b'.repeat(64) }]), { stale: true, unverified: false, unavailable: false })
+  delete handoff.evidence[0].businessContentSha256
+  assert.deepEqual(warnings([{ documentId: '12', included: true, sourceHash: null, originalSourceSha256: 'a'.repeat(64), businessContentSha256: 'b'.repeat(64) }]), { stale: false, unverified: true, unavailable: false })
+  assert.deepEqual(warnings([{ documentId: '12', included: true, sourceHash: null, originalSourceSha256: 'c'.repeat(64), businessContentSha256: 'b'.repeat(64) }]), { stale: true, unverified: true, unavailable: false })
   handoff.sourceSetStale = true
   assert.equal(warnings([{ documentId: '12', included: true, sourceHash: 'old-source-hash' }]).stale, true)
 })

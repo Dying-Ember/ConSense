@@ -147,7 +147,7 @@ class NormalObservedStreamingTests(unittest.TestCase):
             self.assertEqual('NORMAL_OBSERVED_RELATION_INVALID', error.exception.code)
 
     def test_streaming_hash_and_comparison_preserve_exact_canonical_bytes(self):
-        from normal_observed_projection import _hash, _serialized_equal, _matches_serialized_bytes
+        from normal_observed_projection import _hash, _serialized_equal, _matches_serialized_bytes, _canonical_chunks
         values = [None, {}, [], {'z': '中文 🚀\n\x00', 'a': [1, 1.0, -0.0, 1e-7]},
                   {'z': ['large literal ' * 20000], 'a': {'nested': True}}]
         for value in values:
@@ -155,6 +155,7 @@ class NormalObservedStreamingTests(unittest.TestCase):
             with self.subTest(value_type=type(value).__name__):
                 with patch('normal_observed_projection._serialize', side_effect=AssertionError('No whole encoded copy')):
                     self.assertEqual(hashlib.sha256(raw).hexdigest(), _hash(value))
+                    self.assertEqual(len(raw), sum(len(part) for part in _canonical_chunks(value)))
                     self.assertTrue(_matches_serialized_bytes(value, raw))
                     self.assertTrue(_serialized_equal(value, copy.deepcopy(value)))
                     self.assertFalse(_matches_serialized_bytes(value, raw + b' '))
@@ -219,6 +220,116 @@ class NormalObservedHttpTests(unittest.TestCase):
         self.assertEqual(200, response.status_code, response.text)
         return response.json()['projection']
 
+    def test_producer_validates_once_before_retaining_manifest(self):
+        from normal_observed_projection import produce_normal_observed, _validate_manifest
+        from oer_source_registry import SourceRegistryError
+        with patch('normal_observed_projection._validate_manifest', wraps=_validate_manifest) as validate:
+            produce_normal_observed(self.body['candidateGraph'], self.body['sourceBinding'],
+                artifact_store=self.store)
+        self.assertEqual(1, validate.call_count)
+        invalid = copy.deepcopy(self.body)
+        invalid['candidateGraph']['relations'][0]['toUnitId'] = 'candidate-unit:' + '0' * 64
+        with patch.object(self.store, 'put_bytes', wraps=self.store.put_bytes) as retained:
+            with self.assertRaises(SourceRegistryError):
+                produce_normal_observed(invalid['candidateGraph'], invalid['sourceBinding'],
+                    artifact_store=self.store)
+        retained.assert_not_called()
+
+    def test_post_rechecks_published_bytes_without_rebuilding_then_get_rechecks_cas(self):
+        from normal_observed_projection import _assemble
+        with patch('normal_observed_projection._assemble', wraps=_assemble) as assembled:
+            projection = self.publish()
+        self.assertEqual(2, assembled.call_count)
+        address = projection['projectionSha256']
+        response = self.client.get('/canonical/' + address + '?module=vetting')
+        self.assertEqual(200, response.status_code, response.text)
+        self.assertEqual(_serialize(projection), response.content)
+        descriptor = projection['observationManifestRef']
+        path = self.store.root / descriptor['relativePath']
+        original = path.read_bytes()
+        try:
+            path.write_bytes(original.replace(b'Visible row A', b'changed row A'))
+            self.assertNotEqual(200, self.client.get('/canonical/' + address + '?module=vetting').status_code)
+        finally:
+            path.write_bytes(original)
+        self.assertEqual(200, self.client.get('/canonical/' + address + '?module=vetting').status_code)
+
+    def test_post_rejects_root_alias_or_manifest_changed_after_publish(self):
+        original_publish = self.registry.publish
+        for changed in ('root', 'alias', 'manifest'):
+            with self.subTest(changed=changed):
+                body = copy.deepcopy(self.body)
+                body['candidateGraph']['generationSha256'] = hashlib.sha256(changed.encode()).hexdigest()
+
+                def tamper(projection):
+                    receipt = original_publish(projection)
+                    if changed == 'root':
+                        path = self.registry._path(projection['projectionSha256'])
+                    elif changed == 'alias':
+                        path = self.registry._normal_revision_path(projection['projectionRevisionSha256'])
+                        path.unlink()
+                    else:
+                        path = self.store.root / projection['observationManifestRef']['relativePath']
+                    path.write_bytes(b'changed after publication')
+                    return receipt
+
+                with patch.object(self.registry, 'publish', side_effect=tamper):
+                    response = self.client.post('/normal-observed', json=body)
+                self.assertEqual(422, response.status_code, response.text)
+
+    def test_post_rejects_public_root_changed_after_readback_before_frame_exit(self):
+        original_verify = self.registry.verify_normal_publication
+
+        def tamper_after_readback(projection):
+            original_verify(projection)
+            self.registry._path(projection['projectionSha256']).write_bytes(b'changed before frame exit')
+
+        with patch.object(self.registry, 'verify_normal_publication', side_effect=tamper_after_readback):
+            response = self.client.post('/normal-observed', json=self.body)
+        self.assertEqual(422, response.status_code, response.text)
+
+    def test_post_rejects_revision_alias_resolution_loop(self):
+        from pathlib import Path
+        original_publish, original_resolve = self.registry.publish, Path.resolve
+        alias_path = None
+
+        def record_alias(projection):
+            nonlocal alias_path
+            receipt = original_publish(projection)
+            alias_path = self.registry._normal_revision_path(projection['projectionRevisionSha256'], pin=False)
+            return receipt
+
+        def resolve(path, *args, **kwargs):
+            if alias_path is not None and path == alias_path:
+                raise RuntimeError('Symlink loop')
+            return original_resolve(path, *args, **kwargs)
+
+        with patch.object(self.registry, 'publish', side_effect=record_alias), patch.object(Path, 'resolve', resolve):
+            response = self.client.post('/normal-observed', json=self.body)
+        self.assertEqual(422, response.status_code, response.text)
+        self.assertIn('CANONICAL_FRAME_SOURCE_CHANGED', response.text)
+
+    def test_post_rejects_revision_alias_resolution_loop_at_frame_exit(self):
+        from pathlib import Path
+        original_verify, original_resolve = self.registry.verify_normal_publication, Path.resolve
+        alias_path = None
+
+        def record_after_readback(projection):
+            nonlocal alias_path
+            original_verify(projection)
+            alias_path = self.registry._normal_revision_path(projection['projectionRevisionSha256'], pin=False)
+
+        def resolve(path, *args, **kwargs):
+            if alias_path is not None and path == alias_path:
+                raise RuntimeError('Symlink loop at frame exit')
+            return original_resolve(path, *args, **kwargs)
+
+        with patch.object(self.registry, 'verify_normal_publication', side_effect=record_after_readback), \
+                patch.object(Path, 'resolve', resolve):
+            response = self.client.post('/normal-observed', json=self.body)
+        self.assertEqual(422, response.status_code, response.text)
+        self.assertIn('CANONICAL_FRAME_SOURCE_CHANGED', response.text)
+
     def test_nonobject_cold_public_roots_report_schema_error(self):
         from oer_source_registry import SourceRegistryError
         from unified_source_registry import UnifiedCanonicalSourceRegistry
@@ -256,6 +367,8 @@ class NormalObservedHttpTests(unittest.TestCase):
         self.assertEqual('consense.normal-observed.v1', capability['schema'])
         self.assertEqual('/normal-observed', capability['projectionEndpoint'])
         self.assertEqual('actual-normal-source-unit-whole-page-observations-v3', capability['candidateGraphVersion'])
+        from normal_observed_projection import SUPPORTED_GRAPH_VERSIONS
+        self.assertEqual(list(SUPPORTED_GRAPH_VERSIONS), capability['supportedCandidateGraphVersions'])
         projection = self.publish()
         self.assertEqual('consense.normal-observed.v1', projection['schema'])
         self.assertEqual(self.body['candidateGraph'], projection['manifest']['candidateGraph'])
@@ -277,6 +390,28 @@ class NormalObservedHttpTests(unittest.TestCase):
         response = self.client.get('/canonical/' + projection['projectionSha256'] + '?module=advisory')
         self.assertEqual(200, response.status_code, response.text)
         self.assertEqual(_serialize(projection), response.content)
+        self.assertEqual([], self.encodes)
+        self.assertEqual([], self.predictions)
+
+    def test_compact_pdf_graph_roundtrips_without_source_quality_adoption(self):
+        from normal_observed_projection import COMPACT_PDF_GRAPH_VERSION
+        body = copy.deepcopy(self.body)
+        graph = body['candidateGraph']
+        graph['producerVersion'] = COMPACT_PDF_GRAPH_VERSION
+        graph['source']['filename'] = 'authored-reading.pdf'
+        projection = self.publish(body)
+        self.assertEqual(graph, projection['manifest']['candidateGraph'])
+        self.assertEqual(graph['units'][0]['tableGroup'], projection['chunks'][0]['tableGroup'])
+        for field in ('humanConfirmed', 'sourceQualityAccepted', 'semanticScopeVerified'):
+            self.assertIs(False, projection[field])
+        response = self.client.get('/canonical/' + projection['projectionSha256'] + '?module=vetting')
+        self.assertEqual(200, response.status_code, response.text)
+        self.assertEqual(_serialize(projection), response.content)
+        graph['units'][0]['parts'][0]['readingContext']['nativeDocxParagraph'] = {'$nativeParagraph': 0}
+        graph['nativeDocxOutline'] = {'paragraphs': [{'sourcePosition': {'story': 'body'}}]}
+        rejected = self.client.post('/normal-observed', json=body)
+        self.assertEqual(422, rejected.status_code, rejected.text)
+        self.assertIn('NORMAL_OBSERVED_PARAGRAPH_REF_INVALID', rejected.text)
         self.assertEqual([], self.encodes)
         self.assertEqual([], self.predictions)
 

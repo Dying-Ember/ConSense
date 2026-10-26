@@ -8,6 +8,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 import java.util.*;
 import java.util.function.BiPredicate;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
@@ -16,6 +17,12 @@ final class AdvisoryHarness {
     static final String POLICY = AdvisoryPromptPolicy.text();
     static final String POLICY_SHA = com.consense.service.vetting.VettingCorpus.hash(POLICY);
     private static final Pattern REFERENCE = Pattern.compile("\\[\\d+\\]");
+    private static final Pattern INTERNAL_SECTION_LINE = Pattern.compile("(?im)^[ \\t]*section[ \\t]+sec-[a-z0-9_-]+\\.?[ \\t]*\\r?$");
+    private static final Pattern INTERNAL_DELIBERATION_LINE = Pattern.compile("(?im)^[ \\t]*wait,[ \\t]*(?:let me check|looking at)\\b");
+    private static final Pattern PROJECT_APPLICATION_CLAIM = Pattern.compile("(?i)\\b(?:this|the|current)\\s+project\\s+(?:has\\s+)?(?:adopted|incorporated|is\\s+governed\\s+by|is\\s+subject\\s+to)\\b|\\b(?:under|for|in)\\s+(?:this|the|current)\\s+project(?:'s)?\\s+(?:contract|works)?\\b[^.!?\\n]{0,100}\\b(?:is|will\\s+be|shall\\s+be)\\s+entitled\\b|(?:本|该|這|該)项目.{0,18}(?:已|已经|已經)?(?:采用|採用|并入|併入|适用|適用)");
+    private static final String CLAUSE_ID="([A-Z0-9]+(?:\\.[A-Z0-9]+)+)";
+    private static final Pattern ACTOR_EXPLICIT=Pattern.compile("(?i)\\b(?:clause|paragraph|section)\\s+"+CLAUSE_ID+"\\b[^.!?\\n]{0,180}\\b(?:explicitly|expressly)\\s+(?:names?|identifies?|specifies?)\\s+(?:the\\s+)?(?:responsible\\s+party|actor|obligor)\\b");
+    private static final Pattern ACTOR_IMPLIED=Pattern.compile("(?i)\\b"+CLAUSE_ID+"\\b[^.!?\\n]{0,180}\\b(?:actor|responsible\\s+party|obligor)\\b[^.!?\\n]{0,120}\\b(?:implied|inferred|not\\s+(?:explicitly\\s+)?named)\\b");
     private static final String NAMED_OPERAND="[A-Z][A-Z0-9_-]*(?:[\\t ]+[A-Z][A-Z0-9_-]*){0,5}";
     private static final Pattern NAMED_ORDER=Pattern.compile("(?<![\\p{L}\\p{N}_])"+NAMED_OPERAND+"(?:[\\t ]*(?<![-=])[>＞](?!=)[\\t ]*"+NAMED_OPERAND+"){1,7}");
     private static final Pattern PRIORITY_RANK=Pattern.compile("(?m)^[\\t ]*[-*][\\t ]+\\*{0,2}((?i:最高优先级|次高优先级|最低优先级|highest priority|next priority|lowest priority))\\*{0,2}[\\t ]*[:：][\\t ]*("+NAMED_OPERAND+")");
@@ -54,11 +61,14 @@ final class AdvisoryHarness {
             + "Preserve the original natural question; select T6 for a requested diagram/flowchart without expecting detailed user instructions. "
             + "The first section must be kind=limits. The application renders source limits and quotes actual user statements as unverified assumptions before conclusions. "
             + "Each section has id, kind (limits/analysis/uncertainty/flowchart), language (en/zhHans/zhHant, same throughout), content, basisScope (project_contract/reference_only/insufficient), citations, gaps and checks. "
+            + "Section.content is final reader-facing prose, not a planning scratchpad: do not narrate internal deliberation or dump section IDs, JSON structure, self-checks or lookup metadata there. Keep real citation aliases beside the supported claims and state original page numbers in ordinary prose when requested. "
             + "No application output-language setting is supplied. Follow an explicit output-language request in the ORIGINAL user question; otherwise answer in that question's language and Chinese script. A Chinese question requesting English must receive English. Source language, supplemental prompt language, examples, retrieval text and clarification replies do not override the original question's output language. "
             + "Section IDs begin with an ASCII letter, followed by letters/digits/underscore/hyphen, maximum 64 characters (e.g. sec-limits). "
             + "For limits/uncertainty, basisScope MUST ALWAYS be insufficient, even when the answer envelope/request is reference_only or project_contract; content MUST be empty. Select gaps only from the schema enums. Put every source-verified fact or contractual interpretation in cited analysis. "
             + "Omit uncertainty sections when no actual affected gap or missing_evidence check remains; do not emit empty uncertainty placeholders. In explicit reference_only interpretation, absent project adoption is a disclosed scope limit, not an adoption gap, missingReason or clarification. Other genuinely missing source editions, amendments and necessary facts remain gaps. "
             + "A gap belongs to its section's affected determination. clarifications is an array of needed gap enums; the application renders necessary questions. missingReason is one gap enum or empty, never free prose. "
+            + "For each requested conclusion, assess whether the supplied source text is sufficient; if a necessary provision or continuation is missing, retain supported conclusions and name the closest existing gap enum in missingReason, clarifications or the affected uncertainty section. "
+            + "Start with the supplied text. Request extra source material only when necessary by returning evidenceRequests (at most four): {citation:\"[1]\",kind:\"clause\"|\"adjacent\"|\"table\",clause:\"exact missing clause identifier or empty\",reason:\"the specific missing support\"}. Each citation selects one supplied source revision and role; clause requests must name the exact identifier in that source, adjacent requests obtain nearby text, and table requests obtain the cited table's observed context. Do not request whole files or duplicate text already supplied. Use [] or omit evidenceRequests when the text suffices; retain independently supported analysis when another conclusion needs more evidence. Requests are lookup instructions, never evidence or proof that the requested material exists. "
             + "Do not invent additional hypothetical facts. User factual premises remain explicitly unverified; where more assumptions are necessary, report the affected gap and ask for the needed fact. "
             + "EVERY section, including each analysis, flowchart and uncertainty section after the opening, has its OWN required checks array with exactly R1..R10 records: ruleId, status (pass/fail/not_applicable/missing_evidence), short reason, citations of current real evidence IDs. Never rely on the opening section's checks for later sections. "
             + "Checks apply to this section; explain every not_applicable and localize each missing_evidence. "
@@ -73,6 +83,7 @@ final class AdvisoryHarness {
             + "State each rule's governing condition, actual trigger subject, applicability and exceptions in the SAME analysis unit as that rule, citing both the governing text and its supplied continuation. A general scope paragraph or a self-check claiming complete reading does not replace these qualifications. "
             + "Any paraphrase, summary or graph must preserve the source rule's actor and trigger subject, prerequisites, effect and exceptions within its stated scope; never attach a new prerequisite or alter the rule's effect. "
             + "Compare your explanation with the cited wording: even a complete and accurate quote does not justify a contradictory summary. If a faithful interpretation is unresolved, preserve the cited source wording and independently supported analysis, and localize only the unresolved interpretation through the existing uncertainty/gaps contract. "
+            + "When an operative sentence is an imperative without a named actor, state that the sentence does not expressly name a responsible party. A heading or another provision may support a separately cited contextual inference, but never describe that inference as a party explicitly named by the imperative sentence. Answer a direct who-question with this distinction before extra context. "
             + "For a derived precedence chain, its operative sentence must retain the governing applicability condition and cite the supplied qualifying text there, not merely in an earlier paragraph. If a shorthand order cannot carry the full conditions, replace only that order with separate complete condition-to-effect rules; retain other supported units. A local conditional phrase or passing check is not independent proof of semantic completeness. "
             + "During R5/R6 review, account separately for each operative effect in the supplied rule, including taking precedence AND substituting, exclusions AND their cross-reference incorporation exceptions. Do not reduce multiple source operations to a generic priority label; do not invent an operation or ask for evidence already supplied. "
             + "Source-role and upload-classification metadata alone establish neither the presence nor absence of signing, project adoption or incorporation, or the project's actual stage; require supporting current evidence and otherwise keep those states unknown. "
@@ -81,7 +92,7 @@ final class AdvisoryHarness {
             + "User-supplied hypothetical dates remain assumptions; conditional arithmetic must identify them and cannot establish actual project dates, adoption or a real amendment list. "
             + "Quoted temporal direction and precedence must agree with your explanation: before/prior to is not a look-back window without an explicit bounded interval in the source. Preserve the stated direction and any inclusion/exclusion; leave uncertain boundaries or calculation rules unresolved. "
             + "A publication cutoff is not the date of the last actual qualifying publication; do not invent that publication. Do not reverse the named prevailing document or correct the clause from usual practice. Recheck these source relations during repair as well as initial generation. "
-            + "Never convert a project question to reference_only. Overall grounded=false with necessary clarification can retain independently supported analysis; "
+            + "Never convert a project question or answer envelope to reference_only. In a project_contract session with unproven incorporation, an analysis section may use reference_only ONLY to explain cited standard text conditionally, with every cited source role=standard; the application labels that section as unconfirmed for project adoption and entitlement and keeps the overall answer insufficient with an adoption clarification. Never assert project adoption or entitlement in such a section. If formal clause ownership is not verified by the cited source pointer, describe the cited source item or quote its wording instead of assigning a formal clause number. Overall grounded=false with necessary clarification can retain independently supported analysis; "
             + "unsupported analysis must be omitted, with affected judgment and necessary question in uncertainty. "
             + "For T6 use a flowchart section with NONEMPTY content containing cited evidence-backed explanation, and flowchartPlan {nodes,edges}; never write raw Mermaid. "
             + "The flowchart section.citations MUST contain the union of all public aliases used in its explanation, checks, nodes and edges. Nested citations never substitute for section.citations. "
@@ -129,8 +140,11 @@ final class AdvisoryHarness {
         ObjectNode section=object("id",string().put("pattern","^"+SECTION_ID+"$").put("maxLength",64),"kind",string("limits","analysis","uncertainty","flowchart"),"language",string("en","zhHans","zhHant"),"content",string(),
                 "basisScope",string("project_contract","reference_only","insufficient"),"citations",array(reference),"gaps",array(string(GAPS.keySet().toArray(new String[0]))),"checks",array(check));
         section.with("properties").set("flowchartPlan",object("nodes",array(node),"edges",array(edge)));
-        return object("grounded",JsonUtils.mapper().createObjectNode().put("type","boolean"),"questionType",string("T1","T2","T3","T4","T5","T6","T7","T8"),
+        ObjectNode envelope=object("grounded",JsonUtils.mapper().createObjectNode().put("type","boolean"),"questionType",string("T1","T2","T3","T4","T5","T6","T7","T8"),
                 "basisScope",string("project_contract","reference_only","insufficient"),"missingReason",string(java.util.stream.Stream.concat(java.util.stream.Stream.of(""),GAPS.keySet().stream()).toArray(String[]::new)),"clarifications",array(string(GAPS.keySet().toArray(new String[0]))),"sections",array(section));
+        envelope.with("properties").set("evidenceRequests",array(object("citation",reference,"kind",string("clause","adjacent","table"),
+                "clause",string().put("maxLength",96),"reason",string().put("maxLength",240))).put("maxItems",4));
+        return envelope;
     }
     private static ObjectNode string(String... values) {
         ObjectNode node=JsonUtils.mapper().createObjectNode().put("type","string");
@@ -160,7 +174,8 @@ final class AdvisoryHarness {
                 if(child==null){List<String> allowed=new ArrayList<>();schema.path("properties").fieldNames().forEachRemaining(allowed::add);problems.add(path+": fields must be only "+JsonUtils.write(allowed));}
                 else shape(field.getValue(),child,path+"."+field.getKey(),problems);}
         } else if("array".equals(type)) {
-            if(!value.isArray()||value.size()>256){problems.add(path+": expected an array of at most 256 items");return;}
+            int maximum=schema.path("maxItems").asInt(256);
+            if(!value.isArray()||value.size()>maximum){problems.add(path+": expected an array of at most "+maximum+" items");return;}
             int index=0;for(JsonNode item:value)shape(item,schema.path("items"),path+"["+(index++)+"]",problems);
         } else if("boolean".equals(type)) {
             if(!value.isBoolean())problems.add(path+": expected a boolean");
@@ -219,6 +234,9 @@ final class AdvisoryHarness {
             if("fail".equals(check.status))problems.add(path+".status: a failed rule cannot be published");
         }
         boolean substantive="analysis".equals(section.kind)||"flowchart".equals(section.kind);
+        if(substantive&&(INTERNAL_SECTION_LINE.matcher(section.content).find()||INTERNAL_DELIBERATION_LINE.matcher(section.content).find()))
+            problems.add("section.content: internal drafting notes must not be published; provide final reader-facing prose with citations");
+        if(substantive)actorAttribution(section.content,problems);
         if(substantive)AdviceClauseAttribution.check(section,sources,problems);
         if(substantive)conditionedOrder(section,sources,problems);
         if(substantive){
@@ -230,7 +248,12 @@ final class AdvisoryHarness {
             if(!Arrays.asList("project_contract","reference_only").contains(section.basisScope))
                 problems.add("section.basisScope: "+section.kind+" must retain requested "+(referenceOnly?"reference_only":"project_contract")
                         +"; an insufficient answer envelope does not make a cited rule-only section insufficient. Retain the original evidence and incorporation checks; do not change basis to publish unsupported claims.");
-            else if(referenceOnly!= "reference_only".equals(section.basisScope)||!adopted.test(section.basisScope,cited))
+            else if(!referenceOnly&&"analysis".equals(section.kind)&&"reference_only".equals(section.basisScope)){
+                boolean standardsOnly=!cited.isEmpty()&&sources.stream().filter(s->cited.contains(s.getEvidenceId())).allMatch(s->"standard".equals(s.getSourceRole()));
+                if(!standardsOnly)problems.add("section.basisScope: conditional source-text analysis requires only cited standard sources");
+                if(PROJECT_APPLICATION_CLAIM.matcher(section.content).find())problems.add("section.content: conditional source-text analysis cannot assert project adoption or entitlement");
+                if(standardsOnly&&!adopted.test(section.basisScope,cited))problems.add("section.basisScope: cited standard source identity is not supported");
+            } else if(referenceOnly!= "reference_only".equals(section.basisScope)||!adopted.test(section.basisScope,cited))
                 problems.add("section.basisScope: adoption or requested basis is not supported");
         } else {
             if(!section.content.isEmpty())problems.add("section.content: limits/uncertainty must be empty application-rendered gaps");
@@ -253,6 +276,13 @@ final class AdvisoryHarness {
         if(!problems.isEmpty())throw invalid(String.join("; ",problems));
     }
     static String status(Section section,String rule) { return section.checks.stream().filter(c->rule.equals(c.ruleId)).map(c->c.status).findFirst().orElse(""); }
+    private static void actorAttribution(String content,List<String> problems) {
+        Matcher positive=ACTOR_EXPLICIT.matcher(content),negative=ACTOR_IMPLIED.matcher(content);
+        Set<String> implied=new HashSet<>();while(negative.find())implied.add(negative.group(1).toUpperCase(Locale.ROOT));
+        while(positive.find())if(implied.contains(positive.group(1).toUpperCase(Locale.ROOT))){
+            problems.add("section.content: contradictory actor attribution for the same clause; distinguish a party expressly named in the quoted wording from an actor inferred from separately cited context");return;
+        }
+    }
 
     /** Explicit notation/priority ranks share a source-syntax ownership gate; this is not a legal applicability decision. */
     static void conditionedOrder(Section section,List<CitationVO> sources,List<String> problems) {
@@ -443,8 +473,12 @@ final class AdvisoryHarness {
                 +gapLabel(gap,language)+"?";
     }
     static String content(Section section,List<CitationVO> sources,boolean referenceOnly,String question,List<String> background) {
-        if("analysis".equals(section.kind)||"flowchart".equals(section.kind))
-            return section.content.trim()+("flowchart".equals(section.kind)?"\n\n"+graph(section.flowchartPlan,section.citations,sources,section.language):"");
+        if("analysis".equals(section.kind)||"flowchart".equals(section.kind)){
+            String body=section.content.trim()+("flowchart".equals(section.kind)?"\n\n"+graph(section.flowchartPlan,section.citations,sources,section.language):"");
+            return !referenceOnly&&"reference_only".equals(section.basisScope)
+                    ?copy(section.language,"Conditional reading of cited standard text. Project adoption and entitlement are unconfirmed.","以下仅解释所引标准原文；项目采用及权利成立尚未确认。","以下僅解釋所引標準原文；項目採用及權利成立尚未確認。")+"\n\n"+body
+                    :body;
+        }
         StringBuilder out=new StringBuilder();
         String language=section.language;
         if("limits".equals(section.kind)) {

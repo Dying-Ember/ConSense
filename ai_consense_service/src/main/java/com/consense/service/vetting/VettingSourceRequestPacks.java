@@ -74,6 +74,9 @@ public final class VettingSourceRequestPacks {
     Result planForCompleteInputBudget(String topic,List<Chunk> rankedTender,VettingContextBuilder.Selection global,List<VettingRetrievalSourceUnits.Unit> units) {
         return plan(topic,rankedTender,global,Integer.MAX_VALUE,DEFAULT_EXTRA_PACKS,units);
     }
+    Result planBounded(String topic,List<Chunk> rankedTender,VettingContextBuilder.Selection global,List<VettingRetrievalSourceUnits.Unit> units) {
+        return plan(topic,rankedTender,global,DEFAULT_PER_PACK_CHARS,DEFAULT_EXTRA_PACKS,units);
+    }
 
     /** The supplied global selection is trusted production observation, but every transported payload is re-bound. */
     public Result plan(String topic,List<Chunk> rankedTender,VettingContextBuilder.Selection global,int perPackChars,int extraPackCap) {
@@ -290,7 +293,7 @@ public final class VettingSourceRequestPacks {
         if(supplied==null||!Objects.equals(payloads.get(supplied.getId()),JsonUtils.write(supplied)))throw new IllegalArgumentException("Full canonical source payload differs");return snapshot.get(supplied.getId());
     }
     private void validateSnapshot() {
-        for(String id:payloads.keySet())if(!payloads.get(id).equals(JsonUtils.write(external.get(id)))||!payloads.get(id).equals(JsonUtils.write(snapshot.get(id))))throw new IllegalArgumentException("Canonical corpus changed since snapshot");
+        for(String id:payloads.keySet())if(!payloads.get(id).equals(JsonUtils.write(external.get(id))))throw new IllegalArgumentException("Canonical corpus changed since snapshot");
     }
     private Chunk copy(String id) {return JsonUtils.read(payloads.get(id),Chunk.class);}
     private static void finishMissing(Request r,Set<String> global) {r.setGloballySubmittedIds(r.getRequiredChunkIds().stream().filter(global::contains).collect(Collectors.toList()));r.setMissingChunkIds(r.getRequiredChunkIds().stream().filter(id->!global.contains(id)).collect(Collectors.toList()));}

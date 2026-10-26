@@ -40,7 +40,7 @@ class VettingEnglishExportTest {
             assertEquals(QUOTE,snapshot.path("findings").get(0).path("evidence").get(0).path("quote").asText());
             assertEquals(REMARK,snapshot.path("findings").get(0).path("reviewRemarks").asText());assertEquals(QUOTE,f.findingQuote());
             assertEquals(REMARK,f.finding.getReviewRemarks());assertEquals("原项目名称",f.project.getNameEn());
-            verify(f.writer,times(6)).docx(any(Project.class),anyList(),any(VettingJobVO.class),eq("en"),nullable(VettingExportProbe.class),anyList());
+            verify(f.writer,times(6)).docx(any(Project.class),anyList(),any(VettingJobVO.class),eq("en"),nullable(VettingExportProbe.class),anyList(),anySet());
         }
     }
 
@@ -66,7 +66,7 @@ class VettingEnglishExportTest {
     @Test void translationFailureCannotReturnTheUntranslatedFileOrOverwriteHumanAndSourceRecords()throws Exception{
         try(Fixture f=new Fixture()){
             BizException failure=new BizException(4100,"English translation did not complete.");
-            when(f.english.docx(any(byte[].class),anyString(),any(Runnable.class))).thenThrow(failure);
+            when(f.english.docx(any(byte[].class),anyString(),any(Runnable.class),anySet())).thenThrow(failure);
             assertSame(failure,assertThrows(BizException.class,()->f.service.exportDocx("p","en")));
             when(f.english.json(any(JsonNode.class),anyString(),any(Runnable.class))).thenThrow(failure);
             assertSame(failure,assertThrows(BizException.class,()->f.service.exportJson("p","en")));
@@ -76,7 +76,7 @@ class VettingEnglishExportTest {
 
     @Test void aHumanSaveDuringTranslationIsRejectedByTheFinalCurrentSnapshotCheck()throws Exception{
         try(Fixture f=new Fixture()){
-            when(f.english.docx(any(byte[].class),anyString(),any(Runnable.class))).thenAnswer(i->{((Runnable)i.getArgument(2)).run();f.finding.setReviewRemarks("Concurrent human decision");return word("English translation: Prepared before the concurrent save.");});
+            when(f.english.docx(any(byte[].class),anyString(),any(Runnable.class),anySet())).thenAnswer(i->{((Runnable)i.getArgument(2)).run();f.finding.setReviewRemarks("Concurrent human decision");return word("English translation: Prepared before the concurrent save.");});
             BizException changed=assertThrows(BizException.class,()->f.service.exportDocx("p","en"));assertEquals(4104,changed.getCode());assertTrue(changed.getMessage().contains("human review changed"));
             assertEquals("Concurrent human decision",f.finding.getReviewRemarks());assertTrue(f.saved.values().stream().anyMatch(s->s.getPayloadJson().contains(REMARK)));
         }
@@ -89,18 +89,79 @@ class VettingEnglishExportTest {
         }
     }
 
+    @Test void compactReportExportChecksCurrentPinsWithoutReopeningTheCompleteCanonicalCorpus()throws Exception{
+        try(Fixture f=new Fixture()){
+            String identity=VettingCorpus.hash("current canonical scope");
+            CoverageVO coverage=JsonUtils.read(f.run.getCoverageJson(),CoverageVO.class);
+            coverage.setSourceStampSha256(VettingService.sourceStampHash(Collections.emptyList()));
+            coverage.setCanonicalCorpusIdentitySha256(identity);
+            f.run.setCoverageJson(JsonUtils.write(coverage));f.run.setSourceSnapshotSha256(org.springframework.test.util.ReflectionTestUtils.invokeMethod(VettingService.class,"compactSourceSetHash",Collections.emptyList()));
+            when(f.sources.findScopeSourcesByProjectId("p")).thenReturn(Collections.emptyList());
+            OerBusinessEvidence oer=mock(OerBusinessEvidence.class);when(oer.enabled()).thenReturn(true);
+            when(oer.currentDisplayIdentity(eq("p"),eq("vetting"),anyList())).thenReturn(identity);
+            f.service.setOerBusinessEvidence(oer);
+            assertTrue(f.service.exportDocx("p","en").length>0);
+            verify(oer,times(2)).currentDisplayIdentity(eq("p"),eq("vetting"),anyList());
+            verify(oer,never()).currentIdentity(eq("p"),eq("vetting"),anyList());
+            when(oer.currentDisplayIdentity(eq("p"),eq("vetting"),anyList())).thenReturn(VettingCorpus.hash("changed canonical scope"));
+            BizException stale=assertThrows(BizException.class,()->f.service.exportDocx("p","en"));assertEquals(4104,stale.getCode());
+        }
+    }
+
     @Test void missingEnglishBoundaryAndEmptyTranslatedBytesFailClosed()throws Exception{
         try(Fixture f=new Fixture()){
             f.service.setEnglishFileOutput(null);BizException absent=assertThrows(BizException.class,()->f.service.exportDocx("p","en"));assertEquals(4100,absent.getCode());assertTrue(absent.getMessage().contains("No untranslated report"));
             assertThrows(BizException.class,()->f.service.exportJson("p","en"));f.service.setEnglishFileOutput(f.english);
-            when(f.english.docx(any(byte[].class),anyString(),any(Runnable.class))).thenReturn(new byte[0]);assertThrows(BizException.class,()->f.service.exportDocx("p","en"));
+            when(f.english.docx(any(byte[].class),anyString(),any(Runnable.class),anySet())).thenReturn(new byte[0]);assertThrows(BizException.class,()->f.service.exportDocx("p","en"));
+        }
+    }
+    @Test void finalGuardChecksEveryHumanFieldWithoutPersistingOrReloadingAnotherFrozenPayload()throws Exception{
+        for(String field:Arrays.asList("status","action","addendum","checklist"))try(Fixture f=new Fixture()){
+            AtomicReference<String> checklistRemark=new AtomicReference<>("Original human countercheck");VettingChecklistService checklist=mock(VettingChecklistService.class);
+            when(checklist.resultsForRun(any(VettingRun.class))).thenAnswer(call->Collections.singletonList(new VettingChecklistCatalog.Result("APP-I-001","unchecked",checklistRemark.get())));f.service.setChecklistService(checklist);
+            when(f.english.json(any(JsonNode.class),anyString(),any(Runnable.class))).thenAnswer(call->{
+                ((Runnable)call.getArgument(2)).run();
+                if("status".equals(field))f.finding.setStatus("Handled");
+                if("action".equals(field))f.finding.setActionTaken("Concurrent human action");
+                if("addendum".equals(field))f.finding.setAddendumRequired(Boolean.TRUE);
+                if("checklist".equals(field))checklistRemark.set("Concurrent human countercheck");
+                return english((JsonNode)call.getArgument(0));
+            });
+            assertEquals(4104,assertThrows(BizException.class,()->f.service.exportJson("p","en")).getCode(),field);
+            assertEquals(1,f.saved.size(),"The final guard must not publish a new snapshot after a concurrent human change");
+            VettingReportSnapshotRepository snapshots=(VettingReportSnapshotRepository)org.springframework.test.util.ReflectionTestUtils.getField(f.service,"reportSnapshots");
+            verify(snapshots,times(1)).findById(anyString());verify(snapshots,times(1)).saveAndFlush(any(VettingReportSnapshot.class));
         }
     }
 
     @Test void anEnglishStableDownloadNameDoesNotRewriteTheStoredContractIdentity()throws Exception{
         try(Fixture f=new Fixture()){
             for(String format:List.of("docx","pdf","json"))assertEquals("ConSense_Vetting_Report."+format,f.service.reportFileName("p",format));assertEquals("原合约编号",f.project.getContractNo());
-            f.project.setContractNo("ABC-001");assertEquals("ConSense_Vetting_Report_ABC-001.docx",f.service.reportFileName("p","docx"));assertEquals("ABC-001",f.project.getContractNo());
+            f.project.setContractNo("ABC-001");assertEquals("ConSense_Vetting_Report.docx",f.service.reportFileName("p","docx"));assertEquals("ABC-001",f.project.getContractNo());
+            f.project.setContractNo("Contrat 42");assertEquals("ConSense_Vetting_Report.docx",f.service.reportFileName("p","docx"));
+        }
+    }
+
+    @Test void aFixedOriginalLostAfterRenderingPreservesItsCauseAndReturnsNoReportBytes()throws Exception {
+        try(Fixture f=new Fixture()){
+            ObjectNode parent=JsonUtils.mapper().createObjectNode().put("id","authored-fixed-parent").put("pageNo",1)
+                    .put("fixedBaselineManifestSha256",VettingCorpus.hash("authored manifest")).put("fixedBaselineVersion","authored")
+                    .put("originalSourceSha256",VettingCorpus.hash("authored original"));
+            parent.putObject("sourceQuality").put("family","SL");parent.putArray("originalPageNos").add(1);
+            FixedReferenceEvidence fixedEvidence=new FixedReferenceEvidence("authored-fixed-parent",0,parent,null,null);
+            ArrayNode evidence=(ArrayNode)JsonUtils.parse(f.finding.getEvidenceJson());
+            ((ObjectNode)evidence.get(0)).set("fixedBaselineEvidence",fixedEvidence.pointer());
+            f.finding.setEvidenceJson(JsonUtils.write(evidence));
+            FixedBaselineRetrievalClient fixed=mock(FixedBaselineRetrievalClient.class);
+            java.nio.file.NoSuchFileException missing=new java.nio.file.NoSuchFileException("authored-missing-sl.pdf");
+            IllegalStateException original=new IllegalStateException("fixed_reference_original_unavailable",missing);
+            com.consense.vector.VectorStore.SearchHit hit=fixedEvidence.asHit();
+            when(fixed.readOnlyHitById("authored-fixed-parent")).thenReturn(hit).thenThrow(original);when(fixed.evidence(hit)).thenReturn(fixedEvidence);
+            f.service.setFixedBaselineRetrievalClient(fixed);
+            BizException failure=assertThrows(BizException.class,()->f.service.exportPdf("p","en"));
+            assertEquals(4104,failure.getCode());assertSame(original,failure.getCause());assertSame(missing,failure.getCause().getCause());
+            verify(fixed,times(2)).readOnlyHitById("authored-fixed-parent");assertNotNull(f.rendered.get(),"The final source check must still reject loss after PDF rendering");assertEquals(1,f.saved.size());
+            assertEquals(REMARK,f.finding.getReviewRemarks());assertEquals(QUOTE,f.findingQuote());
         }
     }
 
@@ -115,7 +176,7 @@ class VettingEnglishExportTest {
 
     private static final class Fixture implements AutoCloseable {
         final Project project=VettingSharedDocxPdfExportTest.project();final VettingRun run=new VettingRun();final VettingFinding finding=new VettingFinding();
-        final VettingReportWriter writer=mock(VettingReportWriter.class);final EnglishFileOutput english=mock(EnglishFileOutput.class);final Map<String,VettingReportSnapshot> saved=new LinkedHashMap<>();
+        final VettingReportWriter writer=mock(VettingReportWriter.class);final EnglishFileOutput english=mock(EnglishFileOutput.class);final SourceDocumentRepository sources=mock(SourceDocumentRepository.class);final Map<String,VettingReportSnapshot> saved=new LinkedHashMap<>();
         final AtomicReference<byte[]> rendered=new AtomicReference<>();final AtomicReference<JsonNode> suppliedJson=new AtomicReference<>();final VettingService service;
         Fixture()throws Exception{
             project.setNameEn("原项目名称");project.setNameZhHans("原项目名称");project.setContractNo("原合约编号");
@@ -127,12 +188,13 @@ class VettingEnglishExportTest {
             FindingEvidence evidence=new FindingEvidence();evidence.setSide("source");evidence.setDocumentId("source-document");evidence.setFileName("原件.docx");evidence.setQuote(QUOTE);evidence.setLocated(true);evidence.setOriginalSourceSha256(VettingCorpus.hash("original"));EvidencePointer pointer=new EvidencePointer();pointer.setCanonicalChunkId("chunk");pointer.setParts(JsonUtils.mapper().createArrayNode().add(JsonUtils.mapper().createObjectNode().put("text","原始证据证明正文")));evidence.setCanonicalEvidence(pointer);finding.setEvidenceJson(JsonUtils.write(Collections.singletonList(evidence)));
             VettingRunRepository runs=mock(VettingRunRepository.class);when(runs.findFirstByProjectIdOrderByStartedAtDesc("p")).thenReturn(Optional.of(run));when(runs.lockById("run")).thenReturn(Optional.of(run));when(runs.saveAndFlush(any(VettingRun.class))).thenAnswer(i->i.getArgument(0));
             VettingRunRepository.ProgressView progress=mock(VettingRunRepository.ProgressView.class);when(progress.getId()).thenReturn("run");when(progress.getStatus()).thenReturn("COMPLETED");when(progress.getStartedAt()).thenReturn(run.getStartedAt());when(progress.getFinishedAt()).thenReturn(run.getFinishedAt());when(runs.findProgress("p","run")).thenReturn(Optional.of(progress));
-            VettingFindingRepository findings=mock(VettingFindingRepository.class);when(findings.findByProjectIdOrderByCodeAsc("p")).thenReturn(Collections.singletonList(finding));SourceDocumentRepository sources=mock(SourceDocumentRepository.class);when(sources.findBusinessSourcesByProjectId("p")).thenReturn(Collections.emptyList());
+            VettingFindingRepository findings=mock(VettingFindingRepository.class);when(findings.findByProjectIdOrderByCodeAsc("p")).thenReturn(Collections.singletonList(finding));when(sources.findBusinessSourcesByProjectId("p")).thenReturn(Collections.emptyList());
             PlatformTransactionManager tx=mock(PlatformTransactionManager.class);when(tx.getTransaction(any(TransactionDefinition.class))).thenAnswer(i->new SimpleTransactionStatus());
             service=new VettingService(projects,mock(StorageService.class),mock(DocumentParser.class),new ConsenseProperties(),sources,findings,runs,mock(VettingSemanticReview.class),writer,tx,mock(LlmProfiles.class));
             VettingReportSnapshotRepository snapshots=mock(VettingReportSnapshotRepository.class);when(snapshots.findById(anyString())).thenAnswer(i->Optional.ofNullable(saved.get(i.getArgument(0))));when(snapshots.saveAndFlush(any(VettingReportSnapshot.class))).thenAnswer(i->{VettingReportSnapshot s=i.getArgument(0);saved.put(s.getId(),s);return s;});service.setReportSnapshots(snapshots);
-            when(writer.docx(any(Project.class),anyList(),any(VettingJobVO.class),eq("en"),nullable(VettingExportProbe.class),anyList())).thenAnswer(i->word("原件中文段落"));
-            when(english.docx(any(byte[].class),anyString(),any(Runnable.class))).thenAnswer(i->{((Runnable)i.getArgument(2)).run();assertEquals("原件中文段落",text(i.getArgument(0)));return word("English translation: Original source wording presented in English.");});
+            when(writer.docx(any(Project.class),anyList(),any(VettingJobVO.class),eq("en"),nullable(VettingExportProbe.class),anyList(),anySet())).thenAnswer(i->word("原件中文段落"));
+            byte[] translated=word("English translation: Original source wording presented in English.");
+            when(english.docx(any(byte[].class),anyString(),any(Runnable.class),anySet())).thenAnswer(i->{((Runnable)i.getArgument(2)).run();assertEquals("原件中文段落",text(i.getArgument(0)));return translated.clone();});
             when(english.json(any(JsonNode.class),anyString(),any(Runnable.class))).thenAnswer(i->{((Runnable)i.getArgument(2)).run();JsonNode raw=i.getArgument(0);suppliedJson.set(raw.deepCopy());return english(raw);});service.setEnglishFileOutput(english);
             DraftingService renderer=mock(DraftingService.class);when(renderer.renderPdf(any(byte[].class))).thenAnswer(i->{rendered.set(((byte[])i.getArgument(0)).clone());return VettingDocxPdfFixture.render(rendered.get());});service.setDraftingIdentity(renderer);
         }

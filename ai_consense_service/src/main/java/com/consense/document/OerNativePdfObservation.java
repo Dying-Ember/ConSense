@@ -55,6 +55,7 @@ public final class OerNativePdfObservation {
             config.put("pageNumberConvention", "one_based_original_physical_page");
             config.put("glyphOrder", "operator_capture_order_not_reading_order");
             config.put("textChannel", "all_literal_pdfbox_glyph_unicode_no_normalization");
+            config.put("fontTextDecoding", PdfPageEvidence.TextResolution.VERSION);
             config.put("textOffsetConvention", "UTF16_start_inclusive_end_exclusive_null_unicode_empty_zero_span");
             config.put("formObservationScope", "whole_document_existing_fields_widgets_selected_normal_AP");
             config.put("appearanceCoordinates", "appearance_stream_local_matrix_no_page_box");
@@ -146,6 +147,7 @@ public final class OerNativePdfObservation {
     private static final class GlyphStripper extends PDFTextStripper {
         private final PDPage page; private final PdfPageEvidence evidence; private final int pageNo;
         private final PdfNativeSupport.PaintCollector paintCollector;
+        private final PdfNativeSupport.TextDecoder textDecoder = new PdfNativeSupport.TextDecoder();
         GlyphStripper(int pageNo, PDPage page, PdfPageEvidence evidence) throws IOException {
             this.pageNo = pageNo; this.page = page; this.evidence = evidence;
             paintCollector=new PdfNativeSupport.PaintCollector(page,evidence,JSON);
@@ -161,8 +163,9 @@ public final class OerNativePdfObservation {
             super.processOperator(operator,operands);
         }
         @Override protected void processTextPosition(TextPosition position) {
-            evidence.getGlyphs().add(PdfNativeSupport.glyph(position, getGraphicsState(), page,
-                    "pdf-page/" + pageNo + "/glyph/" + evidence.getGlyphs().size()));
+            PdfPageEvidence.PdfGlyph glyph = PdfNativeSupport.glyph(position, getGraphicsState(), page,
+                    "pdf-page/" + pageNo + "/glyph/" + evidence.getGlyphs().size());
+            glyph.setTextResolution(textDecoder.decode(position)); evidence.getGlyphs().add(glyph);
         }
     }
 

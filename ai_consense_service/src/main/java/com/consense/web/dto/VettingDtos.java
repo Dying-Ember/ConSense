@@ -37,7 +37,9 @@ public final class VettingDtos {
         private String documentScope,exclusionReason;
         private String documentId,originalSourceSha256,sourceHash,routingSha256;
         private boolean roleConfirmationAvailable,identityConfirmationAvailable;
-        public VettingFileVO(String key,LocalizedText role,String fileName,String basis,String status,boolean generated,boolean parsed,int pageCount,String parseStatus,String parseMessage,int textChars,boolean ocrUsed,List<String> warnings,String sourceRole,String documentScope,String exclusionReason){this(key,role,fileName,basis,status,generated,parsed,pageCount,parseStatus,parseMessage,textChars,ocrUsed,warnings,sourceRole,documentScope,exclusionReason,null,null,null,null,false,false);}
+        /** Optional trusted saved-observation revision, independent of the old text+structure sourceHash. */
+        private String businessContentSha256;
+        public VettingFileVO(String key,LocalizedText role,String fileName,String basis,String status,boolean generated,boolean parsed,int pageCount,String parseStatus,String parseMessage,int textChars,boolean ocrUsed,List<String> warnings,String sourceRole,String documentScope,String exclusionReason){this(key,role,fileName,basis,status,generated,parsed,pageCount,parseStatus,parseMessage,textChars,ocrUsed,warnings,sourceRole,documentScope,exclusionReason,null,null,null,null,false,false,null);}
         public VettingFileVO(String key,LocalizedText role,String fileName,String basis,String status,boolean generated,boolean parsed,int pageCount,String parseStatus,String parseMessage,int textChars,boolean ocrUsed,List<String> warnings,String sourceRole){this(key,role,fileName,basis,status,generated,parsed,pageCount,parseStatus,parseMessage,textChars,ocrUsed,warnings,sourceRole,null,null);}
     }
 
@@ -50,8 +52,11 @@ public final class VettingDtos {
         private String sourceRole;
         @javax.validation.constraints.NotNull @javax.validation.constraints.Pattern(regexp="[a-f0-9]{64}")
         private String expectedOriginalSourceSha256;
-        @javax.validation.constraints.NotNull @javax.validation.constraints.Pattern(regexp="[a-f0-9]{64}")
+        @javax.validation.constraints.Pattern(regexp="[a-f0-9]{64}")
         private String expectedSourceHash;
+        /** Alternative current-content pin for a source too large to hash in the file list. */
+        @javax.validation.constraints.Pattern(regexp="[a-f0-9]{64}")
+        private String expectedBusinessContentSha256;
         @javax.validation.constraints.NotNull @javax.validation.constraints.Pattern(regexp="[a-f0-9]{64}")
         private String expectedRoutingSha256;
     }
@@ -225,6 +230,8 @@ public final class VettingDtos {
         private String sourceRole;
         @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_EMPTY)
         private List<com.fasterxml.jackson.databind.JsonNode> nativePositions;
+        @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+        private String businessContentSha256;
         public EvidenceItemVO(String code,String pageNo,String text,String side,String documentId,String fileKey,String fileName,String anchor,String quote,boolean located,String sourceHash,List<Double> bbox,String packetId,String packetSourceSnapshotSha256,CanonicalEvidenceDtos.EvidencePointer canonicalEvidence,com.fasterxml.jackson.databind.JsonNode fixedBaselineEvidence,String originalSourceSha256) {
             this(code,pageNo,text,side,documentId,fileKey,fileName,anchor,quote,located,sourceHash,bbox,packetId,packetSourceSnapshotSha256,canonicalEvidence,fixedBaselineEvidence);this.originalSourceSha256=originalSourceSha256;
         }
@@ -285,9 +292,15 @@ public final class VettingDtos {
         /** Read-only link to this run's frozen identity observation; never baseline authority as a source quote. */
         @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
         private com.fasterxml.jackson.databind.JsonNode packageIdentityLink;
+        /** Database-maintained parsed-content revision captured with this finding, not the legacy sourceHash. */
+        @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+        private String businessContentSha256;
         /** Preserve the former Lombok full constructor as well as every existing shorter overload. */
         public FindingEvidence(String side,String documentId,String fileKey,String fileName,String pageNo,String anchor,String clauseId,String quote,boolean located,String sourceHash,List<Double> bbox,String packetId,String packetSourceSnapshotSha256,CanonicalEvidenceDtos.EvidencePointer canonicalEvidence,com.fasterxml.jackson.databind.JsonNode fixedBaselineEvidence,String originalSourceSha256,String sourceRole,List<com.fasterxml.jackson.databind.JsonNode> nativePositions) {
             this(side,documentId,fileKey,fileName,pageNo,anchor,clauseId,quote,located,sourceHash,bbox,packetId,packetSourceSnapshotSha256,canonicalEvidence,fixedBaselineEvidence,originalSourceSha256,sourceRole,nativePositions,null);
+        }
+        public FindingEvidence(String side,String documentId,String fileKey,String fileName,String pageNo,String anchor,String clauseId,String quote,boolean located,String sourceHash,List<Double> bbox,String packetId,String packetSourceSnapshotSha256,CanonicalEvidenceDtos.EvidencePointer canonicalEvidence,com.fasterxml.jackson.databind.JsonNode fixedBaselineEvidence,String originalSourceSha256,String sourceRole,List<com.fasterxml.jackson.databind.JsonNode> nativePositions,com.fasterxml.jackson.databind.JsonNode packageIdentityLink) {
+            this(side,documentId,fileKey,fileName,pageNo,anchor,clauseId,quote,located,sourceHash,bbox,packetId,packetSourceSnapshotSha256,canonicalEvidence,fixedBaselineEvidence,originalSourceSha256,sourceRole,nativePositions,packageIdentityLink,null);
         }
         public FindingEvidence(String side,String documentId,String fileKey,String fileName,String pageNo,String anchor,String quote,boolean located,String sourceHash,List<Double> bbox,String packetId,String packetSourceSnapshotSha256,CanonicalEvidenceDtos.EvidencePointer canonicalEvidence,com.fasterxml.jackson.databind.JsonNode fixedBaselineEvidence,String originalSourceSha256) {
             this(side,documentId,fileKey,fileName,pageNo,anchor,quote,located,sourceHash,bbox,packetId,packetSourceSnapshotSha256,canonicalEvidence,fixedBaselineEvidence);this.originalSourceSha256=originalSourceSha256;
@@ -331,6 +344,9 @@ public final class VettingDtos {
         private String reviewCompleteness="incomplete";
         @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
         private String canonicalCorpusIdentitySha256;
+        /** Exact admitted source subset, while documents retains every selected source. */
+        @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+        private List<Long> canonicalSourceDocumentIds;
         /** Server-produced current required-member dependencies for human checklist reuse; unknown stays explicit. */
         @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
         private com.fasterxml.jackson.databind.JsonNode checklistDependencyLedger;
@@ -343,8 +359,11 @@ public final class VettingDtos {
         /** Exact origin denominator and unreadable-source ledger for dictionary semantic reads. */
         @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
         private com.fasterxml.jackson.databind.JsonNode semanticSourceRead;
+        /** Current selected source revisions, checked without materializing saved bodies. */
+        @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+        private String sourceStampSha256;
         public CoverageVO(int totalDocuments,int reviewedDocuments,List<DocumentCoverageVO> documents,List<String> warnings,List<SemanticTopicVO> semanticTopics,String reviewCompleteness,String canonicalCorpusIdentitySha256,com.fasterxml.jackson.databind.JsonNode checklistDependencyLedger,com.fasterxml.jackson.databind.JsonNode packageIdentityReview,com.fasterxml.jackson.databind.JsonNode packageIdentityMirrorAudit) {
-            this(totalDocuments,reviewedDocuments,documents,warnings,semanticTopics,reviewCompleteness,canonicalCorpusIdentitySha256,checklistDependencyLedger,packageIdentityReview,packageIdentityMirrorAudit,null);
+            this(totalDocuments,reviewedDocuments,documents,warnings,semanticTopics,reviewCompleteness,canonicalCorpusIdentitySha256,null,checklistDependencyLedger,packageIdentityReview,packageIdentityMirrorAudit,null,null);
         }
         /** Keep the previous generated full constructor callable. */
         public CoverageVO(int totalDocuments,int reviewedDocuments,List<DocumentCoverageVO> documents,List<String> warnings,List<SemanticTopicVO> semanticTopics,String reviewCompleteness,String canonicalCorpusIdentitySha256,com.fasterxml.jackson.databind.JsonNode checklistDependencyLedger) {

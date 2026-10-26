@@ -530,7 +530,7 @@ public final class VettingContextBuilder {
         return null;
     }
     private static List<String> words(String text) { List<String> out=new ArrayList<>();Matcher matcher=WORD.matcher(nvl(text));while(matcher.find()) out.add(matcher.group().toLowerCase(Locale.ROOT));return out; }
-    private static int obligationSignals(Chunk c) { Matcher matcher=OPERATIVE.matcher(nvl(c.getContent()));int count=0;while(matcher.find()) count++;return count; }
+    static int obligationSignals(Chunk c) { Matcher matcher=OPERATIVE.matcher(nvl(c.getContent()));int count=0;while(matcher.find()) count++;return count; }
     private static boolean differentScope(Chunk a,Chunk b) {
         if(a.getId().equals(b.getId())) return false;String left=scope(a),right=scope(b);
         return left!=null&&right!=null?!left.equals(right):!Objects.equals(a.getDocumentId(),b.getDocumentId());

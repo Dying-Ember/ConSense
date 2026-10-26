@@ -3,6 +3,7 @@ package com.consense.service.vetting;
 import com.consense.common.JsonUtils;
 import com.consense.document.DocumentBlock;
 import com.consense.domain.SourceDocument;
+import com.consense.service.sources.SourceContentDigests;
 import com.consense.service.vetting.VettingCorpus.Chunk;
 import com.consense.service.vetting.VettingSemanticReview.Candidate;
 import com.consense.web.dto.VettingDtos.BusinessDetailsVO;
@@ -12,6 +13,30 @@ import java.util.*;
 import static org.junit.jupiter.api.Assertions.*;
 
 class VettingServiceTest {
+    @Test void findingContentRevisionIsBoundOnlyToMatchingOriginalAndParsedSnapshot() {
+        SourceDocument source=document(block("paragraph 1","Captured clause."));
+        source.setSourceSha256(VettingCorpus.hash("captured original bytes"));
+        source.setTextContentSha256(SourceContentDigests.field(source.getTextContent()));
+        source.setStructuredContentSha256(SourceContentDigests.field(source.getStructuredContentJson()));
+        source.setParseCoverageSha256(SourceContentDigests.field(source.getParseCoverageJson()));
+        source.setNormalCandidateSha256(SourceContentDigests.field(source.getNormalCandidateJson()));
+        source.setBusinessContentSha256(SourceContentDigests.combined(source.getTextContentSha256(),source.getStructuredContentSha256(),
+                source.getParseCoverageSha256(),source.getNormalCandidateSha256()));
+        FindingEvidence current=evidence(source.getFileName(),VettingCorpus.sourceHash(source),"paragraph 1","Captured clause.");
+        current.setOriginalSourceSha256(source.getSourceSha256());
+        FindingEvidence wrongParsed=evidence(source.getFileName(),VettingCorpus.hash("other parsed source"),"paragraph 1","Captured clause.");
+        wrongParsed.setOriginalSourceSha256(source.getSourceSha256());
+        FindingEvidence wrongOriginal=evidence(source.getFileName(),VettingCorpus.sourceHash(source),"paragraph 1","Captured clause.");
+        wrongOriginal.setOriginalSourceSha256(VettingCorpus.hash("other original bytes"));
+        VettingService.bindEvidenceContentRevisions(Arrays.asList(candidate(current),candidate(wrongParsed),candidate(wrongOriginal)),Collections.singletonList(source));
+        assertEquals(source.getBusinessContentSha256(),current.getBusinessContentSha256());
+        assertNull(wrongParsed.getBusinessContentSha256());assertNull(wrongOriginal.getBusinessContentSha256());
+        source.setTextContent("Changed after digest capture");
+        FindingEvidence changed=evidence(source.getFileName(),VettingCorpus.sourceHash(source),"paragraph 1","Changed after digest capture");
+        changed.setOriginalSourceSha256(source.getSourceSha256());
+        VettingService.bindEvidenceContentRevisions(Collections.singletonList(candidate(changed)),Collections.singletonList(source));
+        assertNull(changed.getBusinessContentSha256(),"A database stamp cannot certify changed in-memory content");
+    }
     @Test void ruleOriginalIdentityRejectsAnotherDocumentRevisionOrRawBindingAndDoesNotInventLegacySha() {
         SourceDocument captured=document(block("paragraph 1","Captured clause."));captured.setSourceSha256(VettingCorpus.hash("captured bytes"));
         for(String mismatch:Arrays.asList("document","parsed","raw")) {

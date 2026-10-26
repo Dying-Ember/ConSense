@@ -8,9 +8,11 @@ import com.consense.service.sources.CanonicalEvidenceService;
 import com.consense.service.sources.CanonicalSourcePageService;
 import com.consense.service.sources.CanonicalCurrentSourceReader;
 import com.consense.service.sources.NativeCanonicalContract;
+import com.consense.service.sources.NativeDocumentCollectionContract;
 import com.consense.service.sources.NativePdfCanonicalContract;
 import com.consense.service.sources.NativePdfSourceFamilyContract;
 import com.consense.service.sources.NormalObservedContract;
+import com.consense.service.sources.SourceContentDigests;
 import com.consense.service.vetting.VettingCorpus.Chunk;
 import com.consense.service.vetting.VettingCorpus.Part;
 import com.consense.vector.VectorStore;
@@ -27,6 +29,7 @@ import java.util.function.Supplier;
 /** Shared current-source corpus, with full sealed evidence beside a model/citation read-only view. */
 @Service @RequiredArgsConstructor
 public class OerBusinessEvidence {
+    private static final org.slf4j.Logger LOG=org.slf4j.LoggerFactory.getLogger(OerBusinessEvidence.class);
     private final CanonicalEvidenceService evidence;
     private final OerCanonicalRetrievalClient retrieval;
     private final CanonicalEvidenceProperties properties;
@@ -34,7 +37,7 @@ public class OerBusinessEvidence {
     @Autowired private CanonicalCurrentSourceReader currentSources;
 
     public boolean enabled(){return !JsonUtils.isBlankText(properties.getBaseUrl());}
-    public static final class Session {
+    public static final class Session implements AutoCloseable {
         public final String projectId,module,indexKey;
         public final List<Long> documentIds;
         private final String bindingFingerprint;
@@ -43,6 +46,16 @@ public class OerBusinessEvidence {
         private final Map<String,String> viewPayloads;
         private final Corpus chunks;
         private volatile boolean invalidated;
+        private OerBusinessEvidence readOwner;
+        private CurrentStage readStage;
+        private List<CanonicalSourceBinding> queryScope;
+        private Supplier<List<SourceDocument>> querySelection;
+        private String querySourceGeneration;
+        private Map<Long,CanonicalCurrentSourceReader.OriginalFileState> originalFileStates;
+        private String initialSourceGeneration;
+        private boolean closedSourceProof;
+        private Runnable initialAskExit;
+        private int queryChunkCount;
         private CanonicalEvidenceService.CompactBindingScope semanticScope;
         private OerCanonicalRetrievalClient.SemanticSources semanticSources;
         private Map<Long,SourceDocument> semanticDocuments;
@@ -52,7 +65,6 @@ public class OerBusinessEvidence {
         private Map<String,String> semanticHeadingLocations=Collections.emptyMap();
         private List<VettingRuleEngine.Source> semanticRuleSources;
         private boolean scanned;
-        private final Map<String,JsonNode> semanticGroups=new LinkedHashMap<>();
         private final List<JsonNode> semanticBlocked=new ArrayList<>();
         private Session(String project,String module,List<Long> ids,List<CanonicalSourceBinding> bindings,Map<String,Chunk> views,Map<String,String> pins){
             this.projectId=project;this.module=module;this.documentIds=Collections.unmodifiableList(new ArrayList<>(ids));
@@ -70,8 +82,21 @@ public class OerBusinessEvidence {
             documentIds=Collections.unmodifiableList(new ArrayList<>(documents.keySet()));bindingFingerprint=fingerprint(scope.bindings());sourceRenderPins=Collections.unmodifiableMap(new TreeMap<>(pins));
             byId=new LinkedHashMap<>();viewPayloads=new LinkedHashMap<>();chunks=new Corpus(this,new ArrayList<>());indexKey=project+"::semantic::"+module+"::"+sources.identitySha256();
         }
+        /** Only an explicitly opened initial read owns a frame; later operations open fresh stages. */
+        @Override public void close(){
+            CurrentStage held=readStage;if(held==null)return;OerBusinessEvidence owner=readOwner;
+            if(held.frame!=null)owner.evidence.assertFrameOwner(held.frame,projectId,module);
+            readStage=null;readOwner=null;
+            try{held.close();owner.complete(this,held);closedSourceProof=held.frame!=null&&(initialSourceGeneration!=null||queryScope!=null);}
+            catch(RuntimeException|Error changed){invalidated=true;throw changed;}
+        }
         public List<Chunk> chunks(){return chunks;}
-        public int chunkCount(){return chunks.size();}
+        public int chunkCount(){return queryScope==null?chunks.size():queryChunkCount;}
+        public void completeInitialAsk(){
+            close();if(initialAskExit!=null)try{initialAskExit.run();initialAskExit=null;closedSourceProof=true;}
+            catch(RuntimeException|Error changed){invalidated=true;throw changed;}
+        }
+        public boolean hasClosedSourceProof(){return initialAskExit==null&&(closedSourceProof||queryScope!=null&&readStage==null);}
         public String identitySha256(){return renderFingerprint(bindingFingerprint,sourceRenderPins);}
         public JsonNode semanticReadCoverage(){ObjectNode ledger=JsonUtils.mapper().createObjectNode();ledger.put("status",semanticBlocked.isEmpty()?"complete":"partial");ledger.put("totalOrigins",semanticSources.totalOrigins());ledger.put("readableOrigins",chunks.size());ledger.set("blockedOrigins",JsonUtils.mapper().valueToTree(semanticBlocked));return ledger;}
     }
@@ -82,59 +107,168 @@ public class OerBusinessEvidence {
         public Chunk get(int i){return views.get(i);}public int size(){return views.size();}
         public List<VettingRetrievalSourceUnits.Unit> sourceUnits(){return Collections.unmodifiableList(sourceUnits);}
     }
+    private static final class SharedSemanticSourceUnit {
+        final Chunk first;
+        final JsonNode template;
+        final VettingRetrievalSourceUnits.Unit unit;
+        final Set<String> declaredOrigins;
+        SharedSemanticSourceUnit(Chunk first,VettingRetrievalSourceUnits.Unit unit){
+            this.first=first;this.template=first.getCanonicalPayload().path("semanticUnit");this.unit=unit;
+            JsonNode hierarchy=template.get("hierarchyContext"),attachment=template.get("attachmentContext");
+            List<JsonNode> contexts=new ArrayList<>();
+            if(attachment!=null&&attachment.isObject()){
+                if(hierarchy!=null&&hierarchy.isObject())contexts.add(hierarchy);contexts.add(attachment);
+            }else contexts.add(hierarchy!=null&&hierarchy.isObject()&&completeTransport(hierarchy)?hierarchy:template);
+            Set<String> required=null;
+            for(JsonNode context:contexts){
+                if(!completeTransport(context))break;
+                Set<String> ids=new HashSet<>(VettingRetrievalSourceUnits.textIds(context.path("requiredMemberIds")));
+                if(required==null)required=ids;else required.retainAll(ids);
+            }
+            declaredOrigins=required==null?Collections.emptySet():required;
+        }
+        VettingRetrievalSourceUnits.Unit forOrigin(Chunk origin){
+            require(template==origin.getCanonicalPayload().path("semanticUnit"),"semantic dictionary group changed during scan");
+            require(Objects.equals(first.getDocumentId(),origin.getDocumentId())&&Objects.equals(first.getOriginalSourceSha256(),origin.getOriginalSourceSha256())
+                    &&Objects.equals(first.getSourceHash(),origin.getSourceHash())&&Objects.equals(first.getRole(),origin.getRole()),"semantic dictionary closure crosses source scope");
+            if(!declaredOrigins.isEmpty())require(declaredOrigins.contains(origin.getId()),"semantic dictionary closure omitted its origin");
+            return new VettingRetrievalSourceUnits.Unit(origin.getId(),unit);
+        }
+    }
     public static boolean canonicalCorpus(List<Chunk> corpus){return corpus instanceof Corpus;}
     public static Session session(List<Chunk> corpus){if(!(corpus instanceof Corpus))throw new IllegalArgumentException("Canonical corpus session required");return ((Corpus)corpus).session;}
     public static boolean isSemanticCorpus(List<Chunk> corpus){return canonicalCorpus(corpus)&&session(corpus).semanticScope!=null;}
     public Session loadSemantic(String projectId,String module,List<SourceDocument> selected){
         require("vetting".equals(module),"semantic full-scope consumption is configured for vetting only");Map<Long,SourceDocument> documents=selectedDocuments(projectId,selected);
-        Session result;CurrentStage loaded=stage(projectId,module,new ArrayList<>(documents.keySet()));
-        try(CurrentStage held=loaded){
-            require(held.frame!=null,"semantic preparation requires an owned source frame");evidence.prepareCompactIdentities(held.frame,selected);held.bindings=held.frame.bindings();Session cold=loadSession(projectId,module,documents,held);held.session=cold;
-            OerModelMaterial.Request material=new OerModelMaterial.Request(selected);Map<String,JsonNode> contexts=new LinkedHashMap<>();Map<String,List<String>> anchors=new LinkedHashMap<>();Map<String,String> headingLocations=new LinkedHashMap<>();Map<String,ObservedSourceClauseLocators.Bound> locators=new LinkedHashMap<>();
-            for(Chunk chunk:cold.chunks){EvidencePointer pointer=JsonUtils.read(JsonUtils.write(chunk.getCanonicalEvidence()),EvidencePointer.class);
-                anchors.put(chunk.getId(),chunk.getParts().stream().map(Part::getAnchor).collect(Collectors.toList()));
-                headingLocations.put(chunk.getId(),chunk.getClauseHeadingLocation());
-                JsonNode word=held.frame.wordSourceScopeContext(pointer.getDocumentId(),pointer.getProjectionSha256(),pointer.getCanonicalChunkId(),module);if(word!=null)pointer.setNativeWordSourceScopesContext(word);
-                contexts.put(chunk.getId(),VettingSourceMaterial.semantic(material.projectStandalone(pointer,chunk.getCanonicalPayload(),chunk.getRole()),Collections.emptyMap()));
-                ObservedSourceClauseLocators.Bound locator=ObservedSourceClauseLocators.capture(pointer,chunk.getCanonicalPayload(),chunk.getRole(),word);if(locator!=null)locators.put(chunk.getId(),locator);
+        Map<Long,SourceDocument> admitted=new LinkedHashMap<>();List<CanonicalEvidenceService.CompactBindingScope> scopes=new ArrayList<>();
+        Map<String,JsonNode> contexts=new LinkedHashMap<>();Map<String,List<String>> anchors=new LinkedHashMap<>();Map<String,String> headingLocations=new LinkedHashMap<>();
+        Map<String,ObservedSourceClauseLocators.Bound> locators=new LinkedHashMap<>();List<VettingRuleEngine.Source> rules=new ArrayList<>();
+        for(SourceDocument captured:documents.values()){
+            boolean compact=payloadFree(captured)&&SourceContentDigests.stamped(captured);
+            try{
+                SourceDocument source=compact?evidence.prepareVettingSource(captured):captured;
+                source.setParseMessage(captured.getParseMessage());source.setPageCount(captured.getPageCount());source.setOcrUsed(captured.getOcrUsed());
+                CanonicalEvidenceService.CompactBindingScope scope;CurrentStage loaded=stage(projectId,module,Collections.singletonList(source.getId()),Collections.singletonList(source));
+                try(CurrentStage held=loaded){
+                    require(held.frame!=null,"semantic preparation requires an owned source frame");evidence.prepareCompactIdentities(held.frame,Collections.singletonList(source));held.bindings=held.frame.bindings();
+                    require(held.bindings.size()==1&&source.getId().equals(held.bindings.get(0).getDocumentId()),"selected binding order differs");
+                    prepareSemanticSource(projectId,module,source,held.bindings.get(0),held,contexts,anchors,headingLocations,locators,rules);
+                    scope=evidence.compactBindings(held.frame,Collections.singletonList(source));
+                }
+                SourceDocument pins=CanonicalCurrentSourceReader.compactVerifiedSource(source);
+                if(compact)org.springframework.beans.BeanUtils.copyProperties(pins,captured);
+                admitted.put(source.getId(),pins);scopes.add(scope);
+            }catch(com.consense.service.sources.CanonicalEvidenceException missing){
+                if(!compact||!"NORMAL_OBSERVED_SOURCE_EVIDENCE_MISSING".equals(missing.getMessage()))throw missing;
+                LOG.warn("Selected Vetting source {} has no usable observed evidence and remains unreviewed",captured.getId());
             }
-            OerCanonicalRetrievalClient.SemanticSources sources=retrieval.prepareSemanticSources(module,held.bindings);
-            CanonicalEvidenceService.CompactBindingScope scope=evidence.compactBindings(held.frame,selected);
-            Map<Long,SourceDocument> catalog=new LinkedHashMap<>();for(SourceDocument original:documents.values()){
-                SourceDocument source=new SourceDocument();source.setId(original.getId());source.setProjectId(original.getProjectId());source.setFileName(original.getFileName());source.setFileKey(original.getFileKey());source.setReviewRole(original.getReviewRole());catalog.put(source.getId(),source);}
-            result=new Session(projectId,module,scope,sources,catalog,contexts,anchors,buildRuleSources(cold,selected),sourceRenderPins(held.bindings));
-            result.semanticHeadingLocations=Collections.unmodifiableMap(headingLocations);
-            result.semanticLocators=Collections.unmodifiableMap(locators);
         }
+        require(!admitted.isEmpty(),"no usable selected source observations");
+        CanonicalEvidenceService.CompactBindingScope scope=evidence.joinCompactScopes(scopes);List<CanonicalSourceBinding> bindings=scope.bindings();
+        OerCanonicalRetrievalClient.SemanticSources sources=retrieval.prepareSemanticSources(module,bindings);
+        // Native prepare already closed the exact actual-byte scope; retain fresh scalar revision checks.
+        evidence.assertCompactCurrent(scope);
+        Session result=new Session(projectId,module,scope,sources,admitted,contexts,anchors,rules,sourceRenderPins(bindings));
+        result.semanticHeadingLocations=Collections.unmodifiableMap(headingLocations);result.semanticLocators=Collections.unmodifiableMap(locators);
         current(result);return result;
     }
-    public List<Chunk> scan(Session session){
-        require(session!=null&&session.semanticScope!=null,"semantic scan requires its selected source session");current(session);if(session.scanned)return session.chunks;
-        List<Chunk> collected=new ArrayList<>();Set<String> ids=new HashSet<>();JsonNode cursor=null;int processed=0;Map<String,JsonNode> groups=new LinkedHashMap<>();List<JsonNode> blocked=new ArrayList<>();
-        do{ObjectNode demand=JsonUtils.mapper().createObjectNode();demand.put("operation","scan");demand.put("maxItems",64);demand.put("maxBytes",16777216);if(cursor!=null&&!cursor.isNull())demand.set("cursor",cursor);
-            if(session.semanticSources.dictionary())demand.set("knownSemanticGroups",JsonUtils.mapper().valueToTree(groups.keySet().stream().limit(10000).collect(Collectors.toList())));
-            evidence.assertCompactCurrent(session.semanticScope);JsonNode result=retrieval.readSemanticSources(session.semanticSources,demand);evidence.assertCompactCurrent(session.semanticScope);
+    private static boolean payloadFree(SourceDocument source){return source.getTextContent()==null&&source.getStructuredContentJson()==null
+            &&source.getParseCoverageJson()==null&&source.getNormalCandidateJson()==null;}
+    private SourceDocument semanticDocument(Session session,Long id){
+        SourceDocument captured=session.semanticDocuments.get(id);require(captured!=null,"selected semantic source missing");
+        SourceDocument source=currentSources.normalDocument(session.projectId,id,session.module);
+        currentSources.requireCurrentStamp(captured,source);return source;
+    }
+    private void completeSemanticDocument(Session session,CurrentStage held,Long id){
+        List<CanonicalSourceBinding> expected=session.semanticScope.bindings().stream().filter(b->id.equals(b.getDocumentId())).collect(Collectors.toList());
+        require(expected.size()==1&&fingerprint(expected).equals(fingerprint(held.bindings)),"selected semantic binding changed");
+        require(sourceRenderPins(expected).equals(sourceRenderPins(held.bindings)),"selected semantic render identity changed");
+    }
+    private void prepareSemanticSource(String projectId,String module,SourceDocument source,CanonicalSourceBinding binding,CurrentStage held,
+            Map<String,JsonNode> contexts,Map<String,List<String>> anchors,Map<String,String> headingLocations,
+            Map<String,ObservedSourceClauseLocators.Bound> locators,List<VettingRuleEngine.Source> rules){
+        require(source!=null,"semantic source binding is outside selected documents");
+        Session cold=loadSession(projectId,module,Collections.singletonMap(source.getId(),source),held,Collections.singletonList(binding));
+        OerModelMaterial.Request material=new OerModelMaterial.Request(Collections.singletonList(source));
+        for(Chunk chunk:cold.chunks){
+            require(!anchors.containsKey(chunk.getId()),"duplicate canonical chunk");
+            anchors.put(chunk.getId(),chunk.getParts().stream().map(Part::getAnchor).collect(Collectors.toList()));
+            headingLocations.put(chunk.getId(),chunk.getClauseHeadingLocation());
+            if(NormalObservedContract.isNormal(chunk.getCanonicalPayload()))continue;
+            EvidencePointer pointer=JsonUtils.read(JsonUtils.write(chunk.getCanonicalEvidence()),EvidencePointer.class);
+            JsonNode word=held.frame.wordSourceScopeContext(pointer.getDocumentId(),pointer.getProjectionSha256(),pointer.getCanonicalChunkId(),module);
+            if(word!=null)pointer.setNativeWordSourceScopesContext(word);
+            contexts.put(chunk.getId(),VettingSourceMaterial.semantic(material.projectStandalone(pointer,chunk.getCanonicalPayload(),chunk.getRole()),Collections.emptyMap()));
+            ObservedSourceClauseLocators.Bound locator=ObservedSourceClauseLocators.capture(pointer,chunk.getCanonicalPayload(),chunk.getRole(),word);
+            if(locator!=null)locators.put(chunk.getId(),locator);
+        }
+        rules.addAll(buildRuleSources(cold,Collections.singletonList(source)));
+    }
+    private final class SemanticScanAccumulator {
+        final Session session;final List<Chunk> collected=new ArrayList<>();final Set<String> ids=new HashSet<>();
+        final Map<String,JsonNode> groups=new LinkedHashMap<>();final List<JsonNode> blocked=new ArrayList<>();
+        JsonNode cursor;int processed,batch;
+        SemanticScanAccumulator(Session session){this.session=session;}
+        void accept(JsonNode result,long readElapsedMs){
+            evidence.assertCompactCurrent(session.semanticScope);
             require(!"unit_too_large".equals(result.path("coverage").path("status").asText()),"a complete semantic source unit exceeds the bounded read budget");
             boolean dictionary=OerCanonicalRetrievalClient.SEMANTIC_DICTIONARY.equals(result.path("semanticReadVersion").asText());
             if(dictionary){for(JsonNode row:result.path("units")){String group=row.path("groupId").asText();JsonNode prior=groups.putIfAbsent(group,row.path("unit"));require(prior==null||prior.equals(row.path("unit")),"semantic group changed during scan");}
                 for(JsonNode row:result.path("blockedOrigins")){require(ids.add(row.path("id").asText()),"semantic scan repeated blocked origin");blocked.add(row.deepCopy());}}
-            for(int i=0;i<result.path("origins").size();i++){JsonNode origin=result.path("origins").get(i);String group=dictionary?result.path("originUnits").path(origin.path("id").asText()).asText():null;JsonNode unit=dictionary?groups.get(group):result.path("units").get(i);require(unit!=null,"semantic scan group missing");Chunk chunk=semanticView(session,origin,unit);if(dictionary){((ObjectNode)chunk.getCanonicalPayload()).put("semanticUnitRef",group);((ObjectNode)chunk.getCanonicalPayload()).set("semanticUnit",unit);}require(ids.add(chunk.getId()),"semantic scan repeated an origin");collected.add(chunk);}
+            for(int i=0;i<result.path("origins").size();i++){JsonNode origin=result.path("origins").get(i);String group=dictionary?result.path("originUnits").path(origin.path("id").asText()).asText():null;JsonNode unit=dictionary?groups.get(group):result.path("units").get(i);require(unit!=null,"semantic scan group missing");Chunk chunk=semanticView(session,origin,unit,dictionary);if(dictionary)((ObjectNode)chunk.getCanonicalPayload()).put("semanticUnitRef",group);require(ids.add(chunk.getId()),"semantic scan repeated an origin");collected.add(chunk);}
             int next=result.path("coverage").path("processedOrigins").asInt();require(next==processed+result.path("origins").size()+(dictionary?result.path("blockedOrigins").size():0),"semantic scan skipped origins");processed=next;cursor=result.path("nextCursor");
-        }while(cursor!=null&&!cursor.isNull());
-        require(processed==session.semanticSources.totalOrigins(),"semantic scan did not cover its declared source scope");
-        Map<String,Chunk> byId=collected.stream().collect(Collectors.toMap(Chunk::getId,c->c,(a,b)->{throw new IllegalStateException("duplicate semantic origin");},LinkedHashMap::new));
-        List<VettingRetrievalSourceUnits.Unit> sourceUnits=new ArrayList<>();for(Chunk chunk:collected)sourceUnits.add(semanticSourceUnit(byId,collected,chunk));current(session);
-        session.semanticGroups.putAll(groups);session.semanticBlocked.addAll(blocked);
-        for(Chunk chunk:collected){session.byId.put(chunk.getId(),chunk);session.viewPayloads.put(chunk.getId(),JsonUtils.serializedSha256(chunk));session.chunks.owned.add(chunk);}
-        session.chunks.sourceUnits.addAll(sourceUnits);session.scanned=true;current(session);return session.chunks;
+            LOG.info("OER semantic source scan batch={} processedOrigins={}/{} readElapsedMs={}",++batch,processed,session.semanticSources.totalOrigins(),readElapsedMs);
+            evidence.assertCompactCurrent(session.semanticScope);
+        }
+    }
+    public List<Chunk> scan(Session session){
+        require(session!=null&&session.semanticScope!=null,"semantic scan requires its selected source session");current(session);if(session.scanned)return session.chunks;
+        SemanticScanAccumulator read=new SemanticScanAccumulator(session);
+        if(session.semanticSources.stream()){
+            long[] previous={System.nanoTime()};evidence.assertCompactCurrent(session.semanticScope);
+            retrieval.streamSemanticSources(session.semanticSources,page->{long now=System.nanoTime();read.accept(page,(now-previous[0])/1_000_000);previous[0]=System.nanoTime();});
+            evidence.assertCompactCurrent(session.semanticScope);
+        }else do{
+            ObjectNode demand=JsonUtils.mapper().createObjectNode();demand.put("operation","scan");demand.put("maxItems",session.semanticSources.scanMaximumItems());demand.put("maxBytes",16777216);
+            if(read.cursor!=null&&!read.cursor.isNull())demand.set("cursor",read.cursor);
+            if(session.semanticSources.dictionary())demand.set("knownSemanticGroups",JsonUtils.mapper().valueToTree(read.groups.keySet().stream().skip(Math.max(0,read.groups.size()-512)).collect(Collectors.toList())));
+            evidence.assertCompactCurrent(session.semanticScope);long started=System.nanoTime();
+            read.accept(retrieval.readSemanticSources(session.semanticSources,demand),(System.nanoTime()-started)/1_000_000);
+        }while(read.cursor!=null&&!read.cursor.isNull());
+        require(read.processed==session.semanticSources.totalOrigins(),"semantic scan did not cover its declared source scope");
+        List<Chunk> collected=read.collected;List<JsonNode> blocked=read.blocked;
+        long finalizeStarted=System.nanoTime();
+        Map<String,Chunk> byId=new LinkedHashMap<>();Map<String,Integer> sourceOrder=new HashMap<>();
+        for(int i=0;i<collected.size();i++){Chunk chunk=collected.get(i);require(byId.putIfAbsent(chunk.getId(),chunk)==null,"duplicate semantic origin");sourceOrder.put(chunk.getId(),i);}
+        List<VettingRetrievalSourceUnits.Unit> sourceUnits=new ArrayList<>();Map<String,SharedSemanticSourceUnit> sharedUnits=new HashMap<>();
+        for(Chunk chunk:collected){String group=chunk.getCanonicalPayload().path("semanticUnitRef").asText(null);
+            SharedSemanticSourceUnit shared=group==null?null:sharedUnits.get(group);
+            if(shared!=null)sourceUnits.add(shared.forOrigin(chunk));
+            else{VettingRetrievalSourceUnits.Unit unit=semanticSourceUnit(byId,sourceOrder,chunk);sourceUnits.add(unit);if(group!=null)sharedUnits.put(group,new SharedSemanticSourceUnit(chunk,unit));}}
+        long closuresBuilt=System.nanoTime();current(session);long sourceChecked=System.nanoTime();
+        Map<String,String> viewPayloads=semanticViewPayloads(collected);
+        for(Chunk chunk:collected)require(canonicalViewStatus(chunk)==null,"selected semantic view changed during scan");
+        long viewsStamped=System.nanoTime();
+        current(session);
+        session.semanticBlocked.addAll(blocked);
+        for(Chunk chunk:collected){session.byId.put(chunk.getId(),chunk);session.viewPayloads.put(chunk.getId(),viewPayloads.get(chunk.getId()));session.chunks.owned.add(chunk);}
+        session.chunks.sourceUnits.addAll(sourceUnits);session.scanned=true;
+        LOG.info("OER semantic scan finalized origins={} sharedGroups={} closureMs={} sourceCheckMs={} viewStampMs={} finalCheckMs={}",
+                collected.size(),sharedUnits.size(),(closuresBuilt-finalizeStarted)/1_000_000,(sourceChecked-closuresBuilt)/1_000_000,
+                (viewsStamped-sourceChecked)/1_000_000,(System.nanoTime()-viewsStamped)/1_000_000);
+        return session.chunks;
     }
     public void bindReviewEvidence(Session session,List<com.consense.web.dto.VettingDtos.FindingEvidence> quotes){
         if(session.semanticScope==null){bindRuleEvidence(session,quotes);return;}current(session);for(com.consense.web.dto.VettingDtos.FindingEvidence quote:quotes)if(quote.getFixedBaselineEvidence()==null&&quote.getCanonicalEvidence()==null)bindRuleEvidenceUnchecked(session,Collections.singletonList(quote));Map<String,EvidencePointer> originals=new HashMap<>();
+        Set<String> selectedIds=new LinkedHashSet<>();for(com.consense.web.dto.VettingDtos.FindingEvidence quote:quotes)if(quote.getCanonicalEvidence()!=null&&quote.getFixedBaselineEvidence()==null&&session.byId.containsKey(quote.getCanonicalEvidence().getCanonicalChunkId()))selectedIds.add(quote.getCanonicalEvidence().getCanonicalChunkId());
+        checkSemanticViews(session,selectedIds.stream().map(session.byId::get).collect(Collectors.toList()));
+        Map<String,JsonNode> fullMembers=selectedSemanticMembers(session,selectedIds);
         Set<com.consense.web.dto.VettingDtos.FindingEvidence> seen=Collections.newSetFromMap(new IdentityHashMap<>());
         for(com.consense.web.dto.VettingDtos.FindingEvidence quote:quotes){if(!seen.add(quote)||quote.getFixedBaselineEvidence()!=null)continue;EvidencePointer selected=quote.getCanonicalEvidence();if(selected==null)continue;
             Chunk captured=session.byId.get(selected.getCanonicalChunkId());
             if(captured==null||!Objects.equals(captured.getCanonicalEvidence(),selected)||!Objects.equals(quote.getDocumentId(),captured.getDocumentId())
-                    ||!Objects.equals(quote.getSourceHash(),selected.getJavaParsedSourceHash())||!VettingCorpus.normalize(captured.getContent()).contains(VettingCorpus.normalize(quote.getQuote()))){quote.setLocated(false);quote.setCanonicalEvidence(null);continue;}
+                    ||!Objects.equals(quote.getSourceHash(),selected.getJavaParsedSourceHash())||!VettingCorpus.normalize(captured.getContent()).contains(VettingCorpus.normalize(quote.getQuote()))
+                    ||session.semanticSources.textFirst()&&!VettingCorpus.normalize(fullMembers.get(selected.getCanonicalChunkId()).path("text").asText()).contains(VettingCorpus.normalize(quote.getQuote()))){quote.setLocated(false);quote.setCanonicalEvidence(null);continue;}
             String key=selected.getDocumentId()+"|"+selected.getProjectionSha256()+"|"+selected.getUnitId();EvidencePointer original=originals.computeIfAbsent(key,ignored->evidence.pointer(session.projectId,selected.getDocumentId(),selected.getProjectionSha256(),selected.getUnitId(),session.module));
             String text=VettingCorpus.normalize(quote.getQuote());boolean found=!text.isEmpty()&&VettingCorpus.normalize(java.util.stream.StreamSupport.stream(original.getParts().spliterator(),false).map(part->part.path("text").asText()).collect(Collectors.joining("\n"))).contains(text);
             if(found){quote.setCanonicalEvidence(JsonUtils.read(JsonUtils.write(original),EvidencePointer.class));quote.setSourceHash(original.getJavaParsedSourceHash());quote.setOriginalSourceSha256(original.getOriginalSourceSha256());
@@ -145,14 +279,35 @@ public class OerBusinessEvidence {
         }current(session);
     }
 
+    private Map<String,JsonNode> selectedSemanticMembers(Session session,Set<String> ids){
+        if(!session.semanticSources.textFirst()||ids.isEmpty())return Collections.emptyMap();
+        List<String> ordered=new ArrayList<>(ids);Map<String,JsonNode> full=new LinkedHashMap<>();
+        for(int start=0;start<ordered.size();start+=64){List<String> batch=ordered.subList(start,Math.min(ordered.size(),start+64));
+            ObjectNode demand=JsonUtils.mapper().createObjectNode();demand.put("operation","ids");demand.put("maxItems",batch.size());demand.put("maxBytes",16777216);demand.set("originIds",JsonUtils.mapper().valueToTree(batch));
+            JsonNode result=retrieval.readSemanticSources(session.semanticSources,demand);
+            for(int i=0;i<batch.size();i++){String id=batch.get(i);JsonNode member=result.path("origins").get(i);Chunk scanned=session.byId.get(id);
+                require(member!=null&&scanned!=null&&id.equals(member.path("id").asText()),"selected semantic member missing");
+                ObjectNode thin=(ObjectNode)scanned.getCanonicalPayload().deepCopy();thin.remove("semanticUnit");thin.remove("semanticUnitRef");
+                thin.fields().forEachRemaining(field->require(field.getValue().equals(member.path(field.getKey())),"selected semantic member differs from scanned text"));
+                full.put(id,member.deepCopy());
+            }
+        }
+        return full;
+    }
+
 
     private static final class CurrentStage implements AutoCloseable {
-        final CanonicalEvidenceService.VerifiedBindingFrame frame;List<CanonicalSourceBinding> bindings;Session session;
-        CurrentStage(CanonicalEvidenceService.VerifiedBindingFrame frame,List<CanonicalSourceBinding> bindings){this.frame=frame;this.bindings=bindings;}
-        @Override public void close(){if(frame!=null)try{frame.close();}catch(RuntimeException changed){if(session!=null)session.invalidated=true;throw changed;}}
+        final CanonicalEvidenceService.VerifiedBindingFrame frame;final boolean borrowed;List<CanonicalSourceBinding> bindings;Session session;
+        CurrentStage(CanonicalEvidenceService.VerifiedBindingFrame frame,List<CanonicalSourceBinding> bindings){this(frame,bindings,false);}
+        CurrentStage(CanonicalEvidenceService.VerifiedBindingFrame frame,List<CanonicalSourceBinding> bindings,boolean borrowed){this.frame=frame;this.bindings=bindings;this.borrowed=borrowed;}
+        @Override public void close(){if(frame!=null)try{if(borrowed)frame.beforeWait();else frame.close();}catch(RuntimeException changed){if(session!=null)session.invalidated=true;throw changed;}}
     }
     private CurrentStage stage(String project,String module,List<Long> ids){
-        CanonicalEvidenceService.VerifiedBindingFrame frame=evidence.verifiedBindings(project,module,ids);
+        return stage(project,module,ids,null);
+    }
+    private CurrentStage stage(String project,String module,List<Long> ids,List<SourceDocument> captured){
+        CanonicalEvidenceService.VerifiedBindingFrame frame=captured==null?evidence.verifiedBindings(project,module,ids)
+                :evidence.verifiedSemanticBindings(project,module,captured);
         // Direct legacy test adapters expose untrusted lists, never a reusable
         // source verdict. That path retains all original fresh reads.
         if(frame==null)return new CurrentStage(null,evidence.currentBindings(project,module,ids));
@@ -162,21 +317,206 @@ public class OerBusinessEvidence {
     private CurrentStage stage(Session session){
         require(!session.invalidated,"canonical session invalidated; reload current sources");
         CurrentStage stage=null;
-        try{stage=stage(session.projectId,session.module,session.documentIds);stage.session=session;checkViews(session,stage.bindings);return stage;}
+        try{
+            if(session.readStage!=null&&session.readStage.frame!=null){
+                require(session.readOwner==this,"initial read session owner differs");
+                evidence.assertFrameOwner(session.readStage.frame,session.projectId,session.module);
+                stage=new CurrentStage(session.readStage.frame,session.readStage.bindings,true);
+            }else if(session.queryScope!=null){
+                Set<String> loaded=session.byId.values().stream().map(Chunk::getDocumentId).collect(Collectors.toSet());
+                List<Long> ids=session.documentIds.stream().filter(id->loaded.contains(String.valueOf(id))).collect(Collectors.toList());
+                stage=ids.isEmpty()?new CurrentStage(null,Collections.emptyList()):stage(session.projectId,session.module,ids);
+                if(stage.frame!=null)stage.frame.deferWaitCasUntilClose();
+            }else stage=stage(session.projectId,session.module,session.documentIds,session.semanticScope==null?null:new ArrayList<>(session.semanticDocuments.values()));
+            stage.session=session;checkViews(session,stage.bindings);return stage;}
         catch(RuntimeException changed){session.invalidated=true;if(stage!=null)stage.close();throw changed;}
     }
     private void checkViews(Session session,List<CanonicalSourceBinding> bindings){
-        require(session.bindingFingerprint.equals(fingerprint(bindings)),"current bindings changed since corpus load");
-        require(session.sourceRenderPins.equals(sourceRenderPins(bindings)),"source render identities changed since corpus load");
-        for(Chunk view:session.chunks)require(Objects.equals(session.viewPayloads.get(view.getId()),JsonUtils.serializedSha256(view))
+        if(session.queryScope==null){
+            require(session.bindingFingerprint.equals(fingerprint(bindings)),"current bindings changed since corpus load");
+            require(session.sourceRenderPins.equals(sourceRenderPins(bindings)),"source render identities changed since corpus load");
+        }else{
+            currentQueryScope(session);Set<Long> ids=bindings.stream().map(CanonicalSourceBinding::getDocumentId).collect(Collectors.toSet());
+            List<CanonicalSourceBinding> expected=session.queryScope.stream().filter(binding->ids.contains(binding.getDocumentId())).collect(Collectors.toList());
+            require(expected.size()==bindings.size()&&fingerprint(expected).equals(fingerprint(bindings)),"hydrated source bindings changed");
+        }
+        Map<String,String> semanticPayloads=session.semanticScope==null?null:semanticViewPayloads(session.chunks);
+        if(session.initialSourceGeneration!=null&&session.readStage!=null)return;
+        for(Chunk view:session.chunks)require(Objects.equals(session.viewPayloads.get(view.getId()),semanticPayloads==null?JsonUtils.serializedSha256(view):semanticPayloads.get(view.getId()))
                 &&canonicalViewStatus(view)==null,"selected canonical view changed");
     }
 
     public Session load(String projectId,String module,List<SourceDocument> selected) {
+        try(Session session=openReadSession(projectId,module,selected)){return session;}
+    }
+    /** One initial Ask borrows this checked epoch until prompt assembly, then closes before paid work. */
+    public Session openReadSession(String projectId,String module,List<SourceDocument> selected) {
         Map<Long,SourceDocument> documents=selectedDocuments(projectId,selected);
-        CurrentStage loaded=stage(projectId,module,new ArrayList<>(documents.keySet()));Session session;
-        try(CurrentStage held=loaded){session=loadSession(projectId,module,documents,held);}
-        complete(session,loaded);return session;
+        CurrentStage loaded=stage(projectId,module,new ArrayList<>(documents.keySet()));
+        try{
+            Session session=loadSession(projectId,module,documents,loaded);loaded.session=session;
+            session.readOwner=this;session.readStage=loaded;return session;
+        }catch(RuntimeException|Error failure){
+            try{loaded.close();}catch(RuntimeException|Error closing){failure.addSuppressed(closing);}throw failure;
+        }
+    }
+    /** Whole selected documents remain available for a requested continuation; unrelated document graphs are released. */
+    public void retainAdviceSources(Session session,List<VectorStore.SearchHit> selected){
+        if(!session.hasClosedSourceProof()||session.queryScope==null)return;
+        Set<String> documents=new HashSet<>();for(VectorStore.SearchHit hit:selected)if(!fixedBaselineHit(hit))for(EvidencePointer pointer:canonicalPointers(hit))documents.add(String.valueOf(pointer.getDocumentId()));
+        session.byId.entrySet().removeIf(entry->!documents.contains(entry.getValue().getDocumentId()));
+        session.viewPayloads.keySet().retainAll(session.byId.keySet());session.chunks.owned.removeIf(view->!session.byId.containsKey(view.getId()));
+    }
+    /** A complete checked read/build receipt permits initial rank-before-hydration, including after process restart. */
+    public Session openQuerySession(String projectId,Supplier<List<SourceDocument>> currentSelected){
+        List<SourceDocument> selected=currentSelected.get();Map<Long,SourceDocument> documents=selectedDocuments(projectId,selected);
+        Map<Long,CanonicalCurrentSourceReader.OriginalFileState> originals=observeOriginals(selected);
+        List<CanonicalSourceBinding> bindings;String generation;
+        try{bindings=evidence.currentDisplayBindings(projectId,"advisory",selected,originals);generation=sourceGeneration(selected);}
+        catch(com.consense.service.sources.CanonicalEvidenceException legacy){
+            if(Arrays.asList("SOURCE_CONTENT_REVISION_UNAVAILABLE","CANONICAL_STORED_BYTES_CHANGED_OR_REVISION_UNAVAILABLE").contains(legacy.getMessage()))return sequentialAdvisoryRead(projectId,currentSelected,true,false).session;
+            throw legacy;
+        }
+        Session session=new Session(projectId,"advisory",new ArrayList<>(documents.keySet()),bindings,new LinkedHashMap<>(),sourceRenderPins(bindings));
+        session.originalFileStates=originals;
+        if(!retrieval.sourceGenerationLinked(session.indexKey,generation)){
+            AdvisoryRead recovered=recoverAdvisoryQuerySession(session,bindings,generation,currentSelected);
+            return recovered==null?sequentialAdvisoryRead(projectId,currentSelected,true,false).session:recovered.session;
+        }
+        session.queryScope=bindings;session.querySelection=currentSelected;session.querySourceGeneration=generation;
+        requireAdviceOriginalBytes(session,selected);
+        currentQueryScope(session);OerCanonicalRetrievalClient.IndexState available=retrieval.indexAvailable(session.indexKey,"advisory",bindings);
+        require(available.ready,"Current index is unavailable. Refresh the selected source index before asking again.");
+        session.queryChunkCount=available.chunkCount;currentQueryScope(session);return session;
+    }
+    /** A ready native index proves its complete catalog without hydrating every Java source tree. */
+    private AdvisoryRead recoverAdvisoryQuerySession(Session session,List<CanonicalSourceBinding> bindings,String generation,Supplier<List<SourceDocument>> currentSelected){
+        session.initialSourceGeneration=generation;
+        Runnable guard=()->{List<SourceDocument> current=currentSelected.get();assertSelectedScope(session,current);
+            List<CanonicalSourceBinding> live=evidence.currentDisplayBindings(session.projectId,"advisory",current,session.originalFileStates);
+            require(session.bindingFingerprint.equals(fingerprint(live))&&session.sourceRenderPins.equals(sourceRenderPins(live)),"cold Advisory source identity changed");};
+        guard.run();requireAdviceOriginalBytes(session,currentSelected.get());guard.run();
+        ObjectNode demand=JsonUtils.mapper().createObjectNode();demand.put("operation","catalog");demand.put("maxBytes",16777216);
+        JsonNode catalog;
+        try{catalog=retrieval.readSources("advisory",demand,bindings);}
+        catch(IllegalStateException unsupported){
+            if(unsupported.getMessage()==null||!unsupported.getMessage().contains("source-read capability unavailable")
+                    &&!unsupported.getMessage().contains("source catalog policy unknown"))throw unsupported;
+            guard.run();return null;
+        }
+        guard.run();int count=catalog.path("coverage").path("totalOrigins").asInt();if(count<=0)return null;
+        OerCanonicalRetrievalClient.IndexState state=retrieval.advisoryCompactIndex(session.indexKey,bindings,count,Collections.emptySet(),generation,guard,guard,false,false);
+        if(!state.ready)return null;
+        session.queryScope=bindings;session.querySelection=currentSelected;session.querySourceGeneration=generation;session.queryChunkCount=count;
+        session.initialAskExit=()->{guard.run();JsonNode closed=retrieval.readSources("advisory",demand,bindings);
+            require(catalog.path("sources").equals(closed.path("sources"))&&count==closed.path("coverage").path("totalOrigins").asInt(),"cold Advisory source catalog changed");guard.run();};
+        currentQueryScope(session);return new AdvisoryRead(session,state);
+    }
+    private static final class AdvisoryRead {
+        final Session session;final OerCanonicalRetrievalClient.IndexState state;
+        AdvisoryRead(Session session,OerCanonicalRetrievalClient.IndexState state){this.session=session;this.state=state;}
+    }
+    /** A cold process inspects one source at a time and retains only the complete scope identity/count. */
+    private AdvisoryRead sequentialAdvisoryRead(String projectId,Supplier<List<SourceDocument>> currentSelected,boolean buildMissing,boolean rebuild){
+        List<SourceDocument> selected=currentSelected.get();selectedDocuments(projectId,selected);List<CanonicalSourceBinding> bindings;
+        Map<Long,CanonicalCurrentSourceReader.OriginalFileState> originals=observeOriginals(selected);
+        try{bindings=evidence.currentDisplayBindings(projectId,"advisory",selected,originals);}
+        catch(com.consense.service.sources.CanonicalEvidenceException legacy){
+            if(!Arrays.asList("SOURCE_CONTENT_REVISION_UNAVAILABLE","CANONICAL_STORED_BYTES_CHANGED_OR_REVISION_UNAVAILABLE").contains(legacy.getMessage()))throw legacy;
+            require(currentSources!=null,"current source reader required for cold Advisory fingerprints");
+            for(SourceDocument document:selected){SourceDocument source=currentSources.currentDocument(projectId,document.getId(),"advisory");
+                try(CanonicalEvidenceService.VerifiedBindingFrame frame=evidence.verifiedBindings(projectId,"advisory",Collections.singletonList(source.getId()))){
+                    require(frame!=null,"cold Advisory preparation requires an owned frame");evidence.prepareCompactIdentities(frame,Collections.singletonList(source));}
+            }
+            selected=currentSelected.get();originals=observeOriginals(selected);bindings=evidence.currentDisplayBindings(projectId,"advisory",selected,originals);
+        }
+        Session session=new Session(projectId,"advisory",selected.stream().map(SourceDocument::getId).collect(Collectors.toList()),bindings,new LinkedHashMap<>(),sourceRenderPins(bindings));
+        session.originalFileStates=originals;
+        session.initialSourceGeneration=sourceGeneration(selected);
+        final List<CanonicalSourceBinding> captured=bindings;final String generation=session.initialSourceGeneration;
+        Runnable guard=()->{List<SourceDocument> current=currentSelected.get();assertSelectedScope(session,current);
+            List<CanonicalSourceBinding> live=evidence.currentDisplayBindings(projectId,"advisory",current,session.originalFileStates);
+            require(session.bindingFingerprint.equals(fingerprint(live))&&session.sourceRenderPins.equals(sourceRenderPins(live)),"cold Advisory source identity changed");};
+        guard.run();AdvisorySourceProof proof=verifySequentialAdvisory(session,captured);guard.run();
+        Runnable fullExit=()->{AdvisorySourceProof after=verifySequentialAdvisory(session,captured);require(proof.chunks==after.chunks&&proof.kinds.equals(after.kinds),"cold Advisory source denominator or producer changed");guard.run();};
+        boolean initialAsk=buildMissing&&!rebuild;Runnable operationExit=initialAsk?guard:fullExit;
+        OerCanonicalRetrievalClient.IndexState state=retrieval.advisoryCompactIndex(session.indexKey,captured,proof.chunks,proof.kinds,generation,guard,operationExit,rebuild,rebuild);
+        if(!state.ready&&buildMissing&&!rebuild)state=retrieval.advisoryCompactIndex(session.indexKey,captured,proof.chunks,proof.kinds,generation,guard,operationExit,true,false);
+        if(state.ready){session.queryScope=captured;session.querySelection=currentSelected;session.querySourceGeneration=generation;session.queryChunkCount=proof.chunks;session.closedSourceProof=true;currentQueryScope(session);}
+        if(initialAsk)session.initialAskExit=fullExit;
+        return new AdvisoryRead(session,state);
+    }
+    private static final class AdvisorySourceProof {int chunks;final Set<String> kinds=new HashSet<>();}
+    private AdvisorySourceProof verifySequentialAdvisory(Session session,List<CanonicalSourceBinding> bindings){
+        AdvisorySourceProof proof=new AdvisorySourceProof();
+        for(CanonicalSourceBinding expected:bindings){
+            try(CanonicalEvidenceService.VerifiedBindingFrame frame=evidence.verifiedBindings(session.projectId,"advisory",Collections.singletonList(expected.getDocumentId()))){
+                require(frame!=null,"sequential Advisory verification requires an owned frame");evidence.assertFrameOwner(frame,session.projectId,"advisory");
+                require(fingerprint(Collections.singletonList(expected)).equals(fingerprint(frame.bindings())),"sequential Advisory binding changed");
+                JsonNode snapshot=frame.snapshotForRead(expected.getDocumentId(),expected.getProjectionSha256(),"advisory");
+                require(snapshot.path("chunks").isArray(),"sequential Advisory chunks missing");proof.chunks=Math.addExact(proof.chunks,snapshot.path("chunks").size());
+                JsonNode root=JsonUtils.parse(frame.bindings().get(0).getSnapshotJson());
+                if(NormalObservedContract.isNormal(root))proof.kinds.add("normal");
+                else if(NativePdfSourceFamilyContract.isFamily(root))proof.kinds.add("family");
+                else if(NativePdfCanonicalContract.isNativePdf(root))proof.kinds.add("pdf");
+                if(NativeDocumentCollectionContract.isCollection(root)){proof.kinds.add("collection");proof.kinds.add("native");}
+                else if(NativeCanonicalContract.isNative(root))proof.kinds.add("native");
+            }
+        }
+        return proof;
+    }
+    public CurrentIndexStatus rebuildAdvisoryIndex(String projectId,Supplier<List<SourceDocument>> currentSelected){
+        AdvisoryRead read=sequentialAdvisoryRead(projectId,currentSelected,true,true);
+        return new CurrentIndexStatus(read.session.indexKey,read.state.chunkCount,read.session.documentIds.size(),read.state);
+    }
+    private static String sourceGeneration(List<SourceDocument> sources){
+        List<List<Object>> generations=new ArrayList<>();for(SourceDocument source:sources){
+            require(SourceContentDigests.stamped(source),"verified source content generation unavailable");
+            generations.add(Arrays.asList(source.getId(),source.getBusinessContentSha256()));
+        }return VettingCorpus.hash(JsonUtils.write(generations));
+    }
+    private Map<Long,CanonicalCurrentSourceReader.OriginalFileState> observeOriginals(List<SourceDocument> selected){
+        require(currentSources!=null,"current source reader required for Advisory original identity");
+        Map<Long,CanonicalCurrentSourceReader.OriginalFileState> states=new LinkedHashMap<>();
+        for(SourceDocument source:selected)states.put(source.getId(),currentSources.observeOriginal(source));
+        return Collections.unmodifiableMap(states);
+    }
+    private void requireAdviceOriginalBytes(Session session,List<SourceDocument> selected){
+        evidence.currentDisplayBindings(session.projectId,session.module,selected,session.originalFileStates);
+        for(SourceDocument source:selected){currentSources.requireOriginalFreshness(source,session.originalFileStates.get(source.getId()));
+            currentSources.requireOriginalBytes(source);currentSources.requireOriginalFreshness(source,session.originalFileStates.get(source.getId()));}
+        evidence.currentDisplayBindings(session.projectId,session.module,selected,session.originalFileStates);
+    }
+    public void assertAdviceOriginalsCurrent(Session session){
+        if(session.queryScope==null){current(session);return;}
+        List<SourceDocument> selected=session.querySelection.get();assertSelectedScope(session,selected);requireAdviceOriginalBytes(session,selected);currentQueryScope(session);
+    }
+    private String sourceGeneration(Session session){
+        List<SourceDocument> current=new ArrayList<>();for(Long id:session.documentIds)current.add(currentSources.currentStamp(session.projectId,id,session.module));
+        return sourceGeneration(current);
+    }
+    private List<CanonicalSourceBinding> currentQueryScope(Session session){
+        require(!session.invalidated,"canonical session invalidated; reload current sources");
+        try{List<SourceDocument> selected=session.querySelection.get();assertSelectedScope(session,selected);
+            List<CanonicalSourceBinding> current=evidence.currentDisplayBindings(session.projectId,session.module,selected,session.originalFileStates);
+            require(session.bindingFingerprint.equals(fingerprint(current))&&session.sourceRenderPins.equals(sourceRenderPins(current)),"selected canonical source identity changed");
+            require(session.querySourceGeneration.equals(sourceGeneration(selected))&&retrieval.sourceGenerationLinked(session.indexKey,session.querySourceGeneration),"source content generation changed since index build");
+            return current;
+        }catch(RuntimeException changed){session.invalidated=true;throw changed;}
+    }
+    private CanonicalEvidenceService.VerifiedBindingFrame hydrateQueryDocuments(Session session,List<Long> ids){
+        currentQueryScope(session);Set<Long> requested=new HashSet<>(ids);
+        for(Chunk view:session.byId.values())requested.add(Long.valueOf(view.getDocumentId()));
+        ids=session.documentIds.stream().filter(requested::contains).collect(Collectors.toList());
+        if(session.readStage!=null)session.close();
+        Map<Long,SourceDocument> selected=selectedDocuments(session.projectId,session.querySelection.get()),documents=new LinkedHashMap<>();
+        for(Long id:ids){require(selected.containsKey(id),"ranked source outside selected scope");documents.put(id,selected.get(id));}
+        CurrentStage loaded=stage(session.projectId,session.module,ids);
+        try{require(loaded.frame!=null,"checked ranked source frame required");loaded.frame.deferWaitCasUntilClose();Session views=loadSession(session.projectId,session.module,documents,loaded);
+            session.byId.clear();session.byId.putAll(views.byId);session.viewPayloads.clear();session.viewPayloads.putAll(views.viewPayloads);
+            session.chunks.owned.clear();session.chunks.owned.addAll(views.chunks);
+            loaded.session=session;session.readOwner=this;session.readStage=loaded;currentQueryScope(session);return loaded.frame;
+        }catch(RuntimeException|Error rejected){try{loaded.close();}catch(RuntimeException|Error closing){rejected.addSuppressed(closing);}throw rejected;}
     }
     private Map<Long,SourceDocument> selectedDocuments(String projectId,List<SourceDocument> selected){
         if(!enabled())throw new IllegalStateException("OER canonical business backend is not configured");
@@ -186,20 +526,21 @@ public class OerBusinessEvidence {
         return documents;
     }
     private Session loadSession(String projectId,String module,Map<Long,SourceDocument> documents,CurrentStage stage){
+        return loadSession(projectId,module,documents,stage,stage.bindings);
+    }
+    private Session loadSession(String projectId,String module,Map<Long,SourceDocument> documents,CurrentStage stage,List<CanonicalSourceBinding> bindings){
         List<Long> ids=new ArrayList<>(documents.keySet());
-        List<CanonicalSourceBinding> bindings=stage.bindings;
         Map<String,String> pins=sourceRenderPins(bindings);
         require(pins.isEmpty()||sourcePages!=null,"source page validator required for reviewed render identities");
         require(ids.equals(bindings.stream().map(CanonicalSourceBinding::getDocumentId).collect(Collectors.toList())),"selected binding order differs");
         Map<String,Chunk> views=new LinkedHashMap<>();for(CanonicalSourceBinding binding:bindings) {
-            JsonNode verifiedNormal=stage.frame==null?null:stage.frame.normalSnapshot(binding.getDocumentId(),binding.getProjectionSha256(),module);
-            JsonNode snapshot=verifiedNormal==null?JsonUtils.parse(binding.getSnapshotJson()):verifiedNormal;SourceDocument source=documents.get(binding.getDocumentId());
+            JsonNode snapshot=stage.frame==null?JsonUtils.parse(binding.getSnapshotJson()):stage.frame.snapshotForRead(binding.getDocumentId(),binding.getProjectionSha256(),module);SourceDocument source=documents.get(binding.getDocumentId());
             boolean normal=NormalObservedContract.isNormal(snapshot),family=!normal&&NativePdfSourceFamilyContract.isFamily(snapshot),nativePdf=!normal&&!family&&NativePdfCanonicalContract.isNativePdf(snapshot);
             JsonNode display=family?NativePdfSourceFamilyContract.displayDeclarations(snapshot):nativePdf?NativePdfCanonicalContract.displayDeclarations(snapshot):null;
             // A large native document has one root binding. Complete batches
             // are verified by the source service; the root is not a chunk.
             JsonNode payloads="consense.native-document.v1".equals(snapshot.path("schema").asText())
-                    ?(stage.frame==null?evidence.chunks(binding,module):stage.frame.snapshot(binding.getDocumentId(),binding.getProjectionSha256(),module).path("chunks")):snapshot.path("chunks");
+                    ?(stage.frame==null?evidence.chunks(binding,module):snapshot.path("chunks")):snapshot.path("chunks");
             Map<String,EvidencePointer> pointers=new LinkedHashMap<>();
             for(EvidencePointer verified:stage.frame==null?evidence.pointers(projectId,binding.getDocumentId(),binding.getProjectionSha256(),module)
                     :stage.frame.pointers(binding.getDocumentId(),binding.getProjectionSha256(),module)){
@@ -223,12 +564,54 @@ public class OerBusinessEvidence {
         public final String indexKey;public final int chunks,documentCount;
         public final OerCanonicalRetrievalClient.IndexState state;
         private CurrentIndexStatus(Session session,OerCanonicalRetrievalClient.IndexState state){
-            this.indexKey=session.indexKey;this.chunks=session.chunkCount();this.documentCount=session.documentIds.size();this.state=state;
+            this(session.indexKey,session.chunkCount(),session.documentIds.size(),state);
         }
+        private CurrentIndexStatus(String key,int count,int documents,OerCanonicalRetrievalClient.IndexState state){indexKey=key;chunks=count;documentCount=documents;this.state=state;}
+    }
+    /** Routine polling checks live scalar scope; it never constructs a full source Session. */
+    public CurrentIndexStatus currentIndexAvailability(String projectId,String module,Supplier<List<SourceDocument>> currentSelected){
+        Map<Long,SourceDocument> selected=selectedDocuments(projectId,currentSelected.get());
+        Map<Long,CanonicalCurrentSourceReader.OriginalFileState> originals=observeOriginals(new ArrayList<>(selected.values()));
+        Map<Long,String> contentRevisions=sourceContentRevisions(selected.values());
+        List<CanonicalSourceBinding> before;
+        try{before=evidence.currentDisplayBindings(projectId,module,new ArrayList<>(selected.values()),originals);}
+        catch(com.consense.service.sources.CanonicalEvidenceException legacy){
+            if("advisory".equals(module)&&Arrays.asList("SOURCE_CONTENT_REVISION_UNAVAILABLE","CANONICAL_STORED_BYTES_CHANGED_OR_REVISION_UNAVAILABLE").contains(legacy.getMessage()))return currentIndexStatus(projectId,module,currentSelected);
+            throw legacy;
+        }
+        Map<String,String> pins=sourceRenderPins(before);String identity=renderFingerprint(fingerprint(before),pins);
+        Object projections=before.stream().map(CanonicalSourceBinding::getProjectionSha256).collect(Collectors.toList());
+        String key=projectId+"::canonical::"+module+"::"+VettingCorpus.hash(JsonUtils.write(pins.isEmpty()?projections:Arrays.asList(projections,pins)));
+        if(!retrieval.sourceGenerationLinked(key,sourceGeneration(new ArrayList<>(selected.values()))))return currentIndexStatus(projectId,module,currentSelected);
+        for(SourceDocument source:selected.values()){currentSources.requireOriginalBytes(source);currentSources.requireOriginalFreshness(source,originals.get(source.getId()));}
+        OerCanonicalRetrievalClient.IndexState state=retrieval.indexAvailable(key,module,before);
+        Map<Long,SourceDocument> after=selectedDocuments(projectId,currentSelected.get());
+        require(new ArrayList<>(selected.keySet()).equals(new ArrayList<>(after.keySet())),"current selected scope changed during availability check");
+        require(contentRevisions.equals(sourceContentRevisions(after.values())),"current source content changed during availability check");
+        List<CanonicalSourceBinding> current=evidence.currentDisplayBindings(projectId,module,new ArrayList<>(after.values()),originals);
+        require(identity.equals(renderFingerprint(fingerprint(current),sourceRenderPins(current))),"current source identity changed during availability check");
+        retrieval.sourceGenerationLinked(key,sourceGeneration(new ArrayList<>(after.values())));
+        return new CurrentIndexStatus(key,state.chunkCount,selected.size(),state);
     }
     /** A status read owns one fresh frame; the selected catalog is fetched before health and after close. */
     public CurrentIndexStatus currentIndexStatus(String projectId,String module,Supplier<List<SourceDocument>> currentSelected){
         require(currentSelected!=null,"current selected scope reader required");
+        if("advisory".equals(module)){
+            List<SourceDocument> selected=currentSelected.get();Map<Long,SourceDocument> documents=selectedDocuments(projectId,selected);
+            Map<Long,CanonicalCurrentSourceReader.OriginalFileState> originals=observeOriginals(selected);List<CanonicalSourceBinding> bindings;
+            try{bindings=evidence.currentDisplayBindings(projectId,module,selected,originals);}
+            catch(com.consense.service.sources.CanonicalEvidenceException legacy){
+                if(!Arrays.asList("SOURCE_CONTENT_REVISION_UNAVAILABLE","CANONICAL_STORED_BYTES_CHANGED_OR_REVISION_UNAVAILABLE").contains(legacy.getMessage()))throw legacy;
+                AdvisoryRead fallback=sequentialAdvisoryRead(projectId,currentSelected,false,false);
+                return new CurrentIndexStatus(fallback.session.indexKey,fallback.state.chunkCount,fallback.session.documentIds.size(),fallback.state);
+            }
+            Session candidate=new Session(projectId,module,new ArrayList<>(documents.keySet()),bindings,new LinkedHashMap<>(),sourceRenderPins(bindings));
+            candidate.originalFileStates=originals;
+            AdvisoryRead read=recoverAdvisoryQuerySession(candidate,bindings,sourceGeneration(selected),currentSelected);
+            if(read==null)read=sequentialAdvisoryRead(projectId,currentSelected,false,false);
+            else{read.session.completeInitialAsk();currentQueryScope(read.session);}
+            return new CurrentIndexStatus(read.session.indexKey,read.state.chunkCount,read.session.documentIds.size(),read.state);
+        }
         Map<Long,SourceDocument> documents=selectedDocuments(projectId,currentSelected.get());
         CurrentStage loaded=stage(projectId,module,new ArrayList<>(documents.keySet()));Session session;
         OerCanonicalRetrievalClient.IndexState state;
@@ -254,13 +637,23 @@ public class OerBusinessEvidence {
         index(session,true);
     }
     private void index(Session session,boolean rebuild){
-        CurrentStage loaded=stage(session);
-        try(CurrentStage stage=loaded){if(rebuild){
+        require(session.queryScope==null,"Index builds require the complete eager source session");
+        CurrentStage loaded=stage(session);Runnable attest=null;
+        try(CurrentStage stage=loaded){
+            boolean linked=false;
+            if("advisory".equals(session.module)&&stage.frame!=null&&currentSources!=null)try{
+                sourceGeneration(session);linked=true;
+            }catch(com.consense.service.sources.CanonicalEvidenceException legacy){
+                if(!"SOURCE_CONTENT_REVISION_UNAVAILABLE".equals(legacy.getMessage()))throw legacy;
+            }
+            if(linked)attest=retrieval.indexAdvisory(session.indexKey,stage.frame,rebuild,()->sourceGeneration(session));
+            else if(rebuild){
                 if(stage.frame==null)retrieval.rebuild(session.indexKey,session.module,stage.bindings);
                 else retrieval.rebuild(session.indexKey,session.module,stage.frame);
             }else if(stage.frame==null)retrieval.index(session.indexKey,session.module,stage.bindings);
-            else retrieval.index(session.indexKey,session.module,stage.frame);}
-        complete(session,loaded);
+            else retrieval.index(session.indexKey,session.module,stage.frame);
+        }
+        complete(session,loaded);if(attest!=null)attest.run();
     }
     public OerCanonicalRetrievalClient.IndexState indexStatus(Session session){
         OerCanonicalRetrievalClient.IndexState state;
@@ -280,13 +673,62 @@ public class OerBusinessEvidence {
         try{require(!session.invalidated,"canonical session invalidated; reload current sources");
             require(selected!=null&&selected.stream().allMatch(d->d!=null&&session.projectId.equals(d.getProjectId())),"selected scope identity differs");
             require(session.documentIds.equals(selected.stream().map(SourceDocument::getId).collect(Collectors.toList())),"current selected scope changed");
+            if(session.initialSourceGeneration!=null)require(session.initialSourceGeneration.equals(sourceGeneration(selected)),"source content generation changed during initial Ask");
+            if(session.queryScope!=null)require(session.querySourceGeneration.equals(sourceGeneration(selected))
+                    &&retrieval.sourceGenerationLinked(session.indexKey,session.querySourceGeneration),"source content generation changed since index build");
         }catch(RuntimeException changed){session.invalidated=true;throw changed;}
     }
     public void ensureIndex(Session session){if(!indexStatus(session).ready)index(session);}
+    /** Questions use live availability; explicit index/status actions keep complete vector verification. */
+    public void ensureAvailable(Session session,Supplier<List<SourceDocument>> currentSelected){
+        if(session.queryScope!=null){currentQueryScope(session);return;}
+        List<CanonicalSourceBinding> compact;
+        List<SourceDocument> selected=currentSelected.get();assertSelectedScope(session,selected);
+        Map<Long,String> contentRevisions=sourceContentRevisions(selected);
+        try{compact=evidence.currentDisplayBindings(session.projectId,session.module,selected);}
+        catch(com.consense.service.sources.CanonicalEvidenceException legacy){
+            if(Arrays.asList("SOURCE_CONTENT_REVISION_UNAVAILABLE","CANONICAL_STORED_BYTES_CHANGED_OR_REVISION_UNAVAILABLE").contains(legacy.getMessage())){ensureIndex(session);return;}
+            throw legacy;
+        }
+        require(session.bindingFingerprint.equals(fingerprint(compact)),"selected canonical source identity changed");
+        OerCanonicalRetrievalClient.IndexState state=retrieval.indexAvailable(session.indexKey,session.module,compact,session.chunkCount());
+        selected=currentSelected.get();assertSelectedScope(session,selected);
+        require(contentRevisions.equals(sourceContentRevisions(selected)),"current source content changed during availability check");
+        require(session.bindingFingerprint.equals(fingerprint(evidence.currentDisplayBindings(session.projectId,session.module,selected))),"selected canonical source identity changed during availability check");
+        if(Arrays.asList("canonical_index_receipt_missing","canonical_index_availability_unsupported").contains(state.reason)){ensureIndex(session);return;}
+        require(state.ready,"Current index is unavailable. Refresh the selected source index before asking again.");
+    }
+    private static Map<Long,String> sourceContentRevisions(Collection<SourceDocument> selected){
+        Map<Long,String> revisions=new LinkedHashMap<>();for(SourceDocument source:selected)revisions.put(source.getId(),source.getBusinessContentSha256());return revisions;
+    }
     public void assertCurrent(Session session){current(session);}
+    public void assertSelectedViews(Session session,List<Chunk> selected){
+        current(session);if(session.semanticScope!=null){
+            List<Chunk> views=selected.stream().filter(c->!FixedVettingReferences.isFixed(c)).collect(Collectors.toList());checkSemanticViews(session,views);
+            evidence.revalidateCompactSelection(session.semanticScope,views.stream().map(c->c.getCanonicalEvidence().getDocumentId()).collect(Collectors.toCollection(LinkedHashSet::new)));
+            checkSemanticViews(session,views);
+        }
+    }
+    /** Publication checks the complete in-memory corpus once; intermediate reads check their selected views. */
+    public void assertCorpusIntegrity(Session session){current(session);if(session.semanticScope!=null){
+        ObjectNode demand=JsonUtils.mapper().createObjectNode();demand.put("operation","catalog");retrieval.readSemanticSources(session.semanticSources,demand);
+        current(session);checkSemanticViews(session,session.chunks);
+    }}
+    private static void checkSemanticViews(Session session,List<Chunk> views){
+        Map<String,String> payloads=semanticViewPayloads(views);
+        for(Chunk view:views)require(Objects.equals(session.viewPayloads.get(view.getId()),payloads.get(view.getId()))&&canonicalViewStatus(view)==null,"selected semantic view changed");
+    }
     public String currentIdentity(Session session){current(session);return session.identitySha256();}
     public String currentIdentity(String projectId,String module,List<SourceDocument> selected){
         List<CanonicalSourceBinding> bindings=evidence.currentBindings(projectId,module,selected.stream().map(SourceDocument::getId).collect(Collectors.toList()));
+        return renderFingerprint(fingerprint(bindings),sourceRenderPins(bindings));
+    }
+    public String currentDisplayIdentity(String projectId,String module,List<SourceDocument> selected){
+        List<CanonicalSourceBinding> bindings=evidence.currentDisplayBindings(projectId,module,selected);
+        return renderFingerprint(fingerprint(bindings),sourceRenderPins(bindings));
+    }
+    public String currentDisplayIdentity(Session session,List<SourceDocument> selected){
+        List<CanonicalSourceBinding> bindings=evidence.currentDisplayBindings(session.projectId,session.module,selected,session.originalFileStates);
         return renderFingerprint(fingerprint(bindings),sourceRenderPins(bindings));
     }
     /** Callers obtain the complete selected scope anew; fixed IDs alone cannot detect new package members. */
@@ -298,10 +740,10 @@ public class OerBusinessEvidence {
     }
     private List<CanonicalSourceBinding> current(Session session){
         require(!session.invalidated,"canonical session invalidated; reload current sources");
+        if(session.queryScope!=null){List<CanonicalSourceBinding> bindings=currentQueryScope(session);checkViews(session,bindings);return bindings;}
         if(session.semanticScope!=null)try{
             require(session.sourceRenderPins.equals(sourceRenderPins(session.semanticScope.bindings())),"source render identities changed");
-            for(Chunk view:session.chunks)require(Objects.equals(session.viewPayloads.get(view.getId()),JsonUtils.serializedSha256(view))&&canonicalViewStatus(view)==null,"selected semantic view changed");
-            evidence.assertCompactCurrent(session.semanticScope);ObjectNode demand=JsonUtils.mapper().createObjectNode();demand.put("operation","catalog");retrieval.readSemanticSources(session.semanticSources,demand);evidence.assertCompactCurrent(session.semanticScope);
+            evidence.assertCompactCurrent(session.semanticScope);
             return session.semanticScope.bindings();
         }catch(RuntimeException invalid){session.invalidated=true;throw invalid;}
         try {
@@ -309,6 +751,24 @@ public class OerBusinessEvidence {
             checkViews(session,bindings);
             return bindings;
         } catch(RuntimeException invalid){session.invalidated=true;throw invalid;}
+    }
+    /** Hash each shared dictionary template once while retaining a full stamp of every origin view. */
+    private static Map<String,String> semanticViewPayloads(List<Chunk> views){
+        Map<String,String> payloads=new LinkedHashMap<>();IdentityHashMap<JsonNode,String> sharedHashes=new IdentityHashMap<>();
+        for(Chunk view:views){JsonNode raw=view.getCanonicalPayload();String digest;
+            if(raw!=null&&raw.has("semanticUnitRef")&&raw.path("semanticUnit").isObject()){
+                JsonNode template=raw.path("semanticUnit");String shared=sharedHashes.computeIfAbsent(template,JsonUtils::serializedSha256);
+                ObjectNode origin=JsonUtils.mapper().createObjectNode();raw.fields().forEachRemaining(field->{if(!"semanticUnit".equals(field.getKey()))origin.set(field.getKey(),field.getValue());});
+                Chunk copy=new Chunk();org.springframework.beans.BeanUtils.copyProperties(view,copy);copy.setCanonicalPayload(origin);
+                digest=JsonUtils.serializedSha256(Arrays.asList(copy,shared));
+            }else digest=JsonUtils.serializedSha256(view);
+            payloads.put(view.getId(),digest);
+        }
+        sharedHashes.forEach((template,digest)->require(Objects.equals(digest,JsonUtils.serializedSha256(template)),"semantic dictionary group changed during validation"));
+        return payloads;
+    }
+    private static String viewPayload(Session session,Chunk view){
+        return session.semanticScope==null?JsonUtils.serializedSha256(view):semanticViewPayloads(Collections.singletonList(view)).get(view.getId());
     }
     private static String fingerprint(List<CanonicalSourceBinding> bindings){
         List<List<Object>> identities=new ArrayList<>();for(CanonicalSourceBinding b:bindings)
@@ -343,6 +803,12 @@ public class OerBusinessEvidence {
         return new VettingRetrievalSourceUnits.RankedChunks(seeds,units);
     }
     public JsonNode response(Session session,String query,String role){
+        if(session.queryScope!=null){
+            require(role==null,"initial Advisory query role must remain unfiltered");
+            try{return retrieval.retrieveAdvisory(session.indexKey,query,session.queryScope,session.querySourceGeneration,
+                    ()->currentQueryScope(session),ids->hydrateQueryDocuments(session,ids));}
+            catch(RuntimeException|Error rejected){try{session.close();}catch(RuntimeException|Error closing){rejected.addSuppressed(closing);}session.invalidated=true;throw rejected;}
+        }
         JsonNode response;
         CurrentStage loaded=stage(session);
         try(CurrentStage stage=loaded){response=stage.frame==null?retrieval.retrieve(session.indexKey,session.module,query,role,stage.bindings)
@@ -353,20 +819,62 @@ public class OerBusinessEvidence {
     /** Current selected source syntax only; capabilities are never reconstructed from compact model JSON. */
     Map<String,ObservedSourceClauseLocators.Bound> sourceClauseLocators(Session session,List<Chunk> selected,Map<String,JsonNode> wordContexts){
         current(session);Map<String,ObservedSourceClauseLocators.Bound> result=new LinkedHashMap<>();
+        if(session.semanticScope!=null)checkSemanticViews(session,selected.stream().filter(c->!FixedVettingReferences.isFixed(c)).collect(Collectors.toList()));
+        List<Chunk> deferred=new ArrayList<>();
         for(Chunk chunk:selected){
             if(FixedVettingReferences.isFixed(chunk))continue;
-            require(chunk!=null&&session.byId.containsKey(chunk.getId())&&Objects.equals(session.viewPayloads.get(chunk.getId()),JsonUtils.serializedSha256(chunk)),"selected source locator differs");
+            require(chunk!=null&&session.byId.containsKey(chunk.getId())&&Objects.equals(session.viewPayloads.get(chunk.getId()),viewPayload(session,chunk)),"selected source locator differs");
+            if(session.semanticScope!=null&&NormalObservedContract.PRODUCER.equals(chunk.getCanonicalEvidence().getProducerKind())){deferred.add(chunk);continue;}
             ObservedSourceClauseLocators.Bound locator=session.semanticScope!=null?session.semanticLocators.get(chunk.getId()):ObservedSourceClauseLocators.capture(chunk.getCanonicalEvidence(),chunk.getCanonicalPayload(),chunk.getRole(),wordContexts.get(chunk.getId()));
             if(locator!=null&&!locator.model(chunk).isEmpty())result.put(chunk.getId(),locator);
+        }
+        if(!deferred.isEmpty()){
+            Map<Long,List<Chunk>> groups=deferred.stream().collect(Collectors.groupingBy(c->c.getCanonicalEvidence().getDocumentId(),LinkedHashMap::new,Collectors.toList()));
+            for(Map.Entry<Long,List<Chunk>> group:groups.entrySet()){
+                SourceDocument source=semanticDocument(session,group.getKey());CurrentStage loaded=stage(session.projectId,session.module,Collections.singletonList(source.getId()),Collections.singletonList(source));
+                try(CurrentStage stage=loaded){require(stage.frame!=null,"selected semantic locator requires verified source frame");
+                for(Chunk chunk:group.getValue()){EvidencePointer pointer=stage.frame.selectedNormalPointer(chunk.getCanonicalEvidence().getDocumentId(),chunk.getCanonicalEvidence().getProjectionSha256(),chunk.getId(),session.module);
+                    JsonNode raw=stage.frame.selectedNormalChunk(pointer.getDocumentId(),pointer.getProjectionSha256(),chunk.getId(),session.module);
+                    JsonNode word=stage.frame.wordSourceScopeContext(pointer.getDocumentId(),pointer.getProjectionSha256(),chunk.getId(),session.module);
+                    ObservedSourceClauseLocators.Bound locator=ObservedSourceClauseLocators.capture(pointer,raw,chunk.getRole(),word);
+                    if(locator!=null&&!locator.model(chunk).isEmpty())result.put(chunk.getId(),locator);
+                }
+                completeSemanticDocument(session,stage,group.getKey());}
+            }
+            current(session);
         }
         return Collections.unmodifiableMap(result);
     }
 
     /** Selected model context only. Neither the corpus nor a source-verification verdict is retained here. */
     public Map<String,JsonNode> wordSourceScopeContexts(Session session,List<Chunk> selected){
-        if(session.semanticScope!=null){current(session);Map<String,JsonNode> contexts=new LinkedHashMap<>();for(Chunk chunk:selected){
-                if(FixedVettingReferences.isFixed(chunk))continue;require(session.byId.containsKey(chunk.getId())&&Objects.equals(session.viewPayloads.get(chunk.getId()),JsonUtils.serializedSha256(chunk)),"selected semantic context differs");
-                JsonNode context=session.semanticContexts.get(chunk.getId());if(context!=null)contexts.put(chunk.getId(),context.deepCopy());}
+        if(session.semanticScope!=null){current(session);Map<String,JsonNode> contexts=new LinkedHashMap<>();List<Chunk> deferred=new ArrayList<>();for(Chunk chunk:selected){
+                if(FixedVettingReferences.isFixed(chunk))continue;require(session.byId.containsKey(chunk.getId())&&Objects.equals(session.viewPayloads.get(chunk.getId()),viewPayload(session,chunk)),"selected semantic context differs");
+                JsonNode context=session.semanticContexts.get(chunk.getId());if(context!=null)contexts.put(chunk.getId(),context.deepCopy());
+                else if(NormalObservedContract.PRODUCER.equals(chunk.getCanonicalEvidence().getProducerKind()))deferred.add(chunk);}
+            if(!deferred.isEmpty()){
+                require(currentSources!=null,"selected semantic source reader required");
+                Map<Long,List<Chunk>> groups=deferred.stream().collect(Collectors.groupingBy(c->c.getCanonicalEvidence().getDocumentId(),LinkedHashMap::new,Collectors.toList()));
+                for(Map.Entry<Long,List<Chunk>> group:groups.entrySet()){
+                    SourceDocument source=semanticDocument(session,group.getKey());String sourceHash=VettingCorpus.sourceHash(source);
+                    OerModelMaterial.Request material=new OerModelMaterial.Request(Collections.singletonList(source));
+                    CurrentStage loaded=stage(session.projectId,session.module,Collections.singletonList(source.getId()),Collections.singletonList(source));
+                    try(CurrentStage stage=loaded){require(stage.frame!=null,"selected semantic material requires verified source frame");
+                    for(Chunk chunk:group.getValue()){EvidencePointer semantic=chunk.getCanonicalEvidence();Long documentId=semantic.getDocumentId();String projection=semantic.getProjectionSha256();
+                        EvidencePointer pointer=stage.frame.selectedNormalPointer(documentId,projection,chunk.getId(),session.module);
+                        if(sourcePages!=null)pointer=sourcePages.enrich(pointer);
+                        require(Objects.equals(session.sourceRenderPins.get(projection),pointer.getSourceRenderEvidenceIdentitySha256()),"selected source render pointer differs");
+                        JsonNode raw=stage.frame.selectedNormalChunk(documentId,projection,chunk.getId(),session.module);
+                        require(Objects.equals(source.getProjectId(),session.projectId)&&Objects.equals(source.getId(),documentId)
+                                &&Objects.equals(source.getSourceSha256(),pointer.getOriginalSourceSha256())&&Objects.equals(sourceHash,pointer.getJavaParsedSourceHash())
+                                &&Objects.equals(VettingCorpus.sourceRole(source),chunk.getRole()),"selected semantic current source differs");
+                        JsonNode word=stage.frame.wordSourceScopeContext(documentId,projection,chunk.getId(),session.module);if(word!=null)pointer.setNativeWordSourceScopesContext(word);
+                        contexts.put(chunk.getId(),VettingSourceMaterial.semantic(material.projectStandalone(pointer,raw,chunk.getRole()),Collections.emptyMap()));
+                    }
+                    completeSemanticDocument(session,stage,group.getKey());}
+                }
+                current(session);
+            }
             return contexts;}
         Objects.requireNonNull(selected,"Selected model chunks required");List<Chunk> words=new ArrayList<>();Set<String> ids=new HashSet<>();
         for(Chunk chunk:selected){
@@ -404,17 +912,23 @@ public class OerBusinessEvidence {
 
     /** One ranked hit carries the whole observed unit; its members receive no invented rerank scores. */
     public List<VectorStore.SearchHit> adviceHits(Session session,String question) {
+        return withWordSourceScopes(session,adviceTextHits(session,question));
+    }
+    public List<VectorStore.SearchHit> adviceTextHits(Session session,String question) {
         JsonNode result=response(session,question,null);List<VectorStore.SearchHit> out=new ArrayList<>();
         for(int i=0;i<result.path("hits").size();i++) {
             JsonNode hit=result.path("hits").get(i),unit=result.path("sourceUnits").path("units").get(i);
             out.add(businessHit(session,hit.path("id").asText(),unit,hit.path("score").asDouble(),"reranked_seed"));
-        }return withWordSourceScopes(session,out);
+        }return out;
     }
 
     /** Advisory declares its context needs; source selection and observed closure stay in shared OER. */
+    public List<VectorStore.SearchHit> advisoryTextContext(Session session,List<VectorStore.SearchHit> hits){
+        return withIncorporationContext(session,hits,true);
+    }
     public List<VectorStore.SearchHit> advisoryContext(Session session,List<VectorStore.SearchHit> hits,boolean includeSmallCorpus,int stuffingLimit){
         List<VectorStore.SearchHit> selected=withIncorporationContext(session,hits);
-        selected=withTableContext(session,selected);
+        selected=advisoryTableContext(session,selected);
         return includeSmallCorpus?withSmallCorpusContext(session,selected,stuffingLimit):selected;
     }
     public OerModelMaterial.Request modelMaterial(Session session,List<VectorStore.SearchHit> hits){
@@ -435,7 +949,7 @@ public class OerBusinessEvidence {
         for(VectorStore.SearchHit context:sourceHits(session,origins)){JsonNode unit=canonicalUnit(context);if(units.add(unit==null?context.getId():unit.path("unitId").asText(context.getId())))result.add(context);}
         return result;
     }
-    private List<VectorStore.SearchHit> withTableContext(Session session,List<VectorStore.SearchHit> hits){
+    public List<VectorStore.SearchHit> advisoryTableContext(Session session,List<VectorStore.SearchHit> hits){
         List<SourceDocument> sources=materialSources(session,hits,true);if(sources.isEmpty())return hits;
         OerModelMaterial.Request material=new OerModelMaterial.Request(sources);
         Map<List<String>,Set<String>> members=new LinkedHashMap<>();Set<String> present=new LinkedHashSet<>();
@@ -467,7 +981,10 @@ public class OerBusinessEvidence {
             boolean normal=NormalObservedContract.PRODUCER.equals(pointer.getProducerKind());if(normalOnly&&!normal)continue;
             require(Objects.equals(session.projectId,pointer.getProjectId())&&session.documentIds.contains(pointer.getDocumentId()),"model material pointer outside selected scope");
             SourceDocument source=byDocument.get(pointer.getDocumentId());
-            if(source==null){require(currentSources!=null,"current source reader required for selected model material");source=normal?currentSources.normalDocument(session.projectId,pointer.getDocumentId(),session.module):currentSources.currentDocument(session.projectId,pointer.getDocumentId(),session.module);byDocument.put(pointer.getDocumentId(),source);}
+            if(normal&&session.semanticScope!=null){
+                require(currentSources!=null,"current source reader required for selected model material");
+                if(source==null){source=semanticDocument(session,pointer.getDocumentId());byDocument.put(pointer.getDocumentId(),source);}
+            } else if(source==null){require(currentSources!=null,"current source reader required for selected model material");source=normal?currentSources.normalDocument(session.projectId,pointer.getDocumentId(),session.module):currentSources.currentDocument(session.projectId,pointer.getDocumentId(),session.module);byDocument.put(pointer.getDocumentId(),source);}
             require(Objects.equals(source.getProjectId(),pointer.getProjectId())&&Objects.equals(source.getId(),pointer.getDocumentId())
                     &&Objects.equals(source.getSourceSha256(),pointer.getOriginalSourceSha256())&&Objects.equals(VettingCorpus.sourceHash(source),pointer.getJavaParsedSourceHash())
                     &&Objects.equals(VettingCorpus.sourceRole(source),String.valueOf(hit.getPayload().get("sourceRole"))),"model material current source differs from selected pointer");
@@ -478,24 +995,57 @@ public class OerBusinessEvidence {
         return Arrays.asList(pointer.getProjectId(),String.valueOf(pointer.getDocumentId()),pointer.getOriginalSourceSha256(),pointer.getJavaParsedSourceHash(),pointer.getProjectionSha256(),role);
     }
     private List<VectorStore.SearchHit> withIncorporationContext(Session session,List<VectorStore.SearchHit> hits){
+        return withIncorporationContext(session,hits,false);
+    }
+    private List<VectorStore.SearchHit> withIncorporationContext(Session session,List<VectorStore.SearchHit> hits,boolean textOnly){
         List<VectorStore.SearchHit> libraries=hits.stream().filter(h->"standard".equals(String.valueOf(h.getPayload().get("sourceRole")))).collect(Collectors.toList());if(libraries.isEmpty())return hits;
-        List<String> origins=new ArrayList<>();for(Chunk chunk:session.chunks){
-            if(!"tender".equals(chunk.getRole()))continue;
-            String name=text(chunk.getFileName()).toLowerCase(Locale.ROOT).replace('_',' ').replace('-',' ');
-            if(name.contains("the specification")||name.contains("specification composition")||libraries.stream().anyMatch(h->referenceMention(chunk.getContent(),h.fileLabel())))origins.add(chunk.getId());
+        if(session.queryScope!=null){
+            Set<String> loaded=session.byId.values().stream().map(Chunk::getDocumentId).collect(Collectors.toSet());List<Long> requested=new ArrayList<>();
+            for(SourceDocument source:session.querySelection.get()){
+                String name=text(source.getFileName()).toLowerCase(Locale.ROOT).replace('_',' ').replace('-',' ');
+                if(!loaded.contains(String.valueOf(source.getId()))&&(name.matches(".*\\b(?:coc|scc)\\b.*")||name.contains("conditions of contract")||name.contains("specification composition")))requested.add(source.getId());
+            }
+            if(!requested.isEmpty())hydrateQueryDocuments(session,requested);
         }
-        List<VectorStore.SearchHit> contexts=origins.isEmpty()?Collections.emptyList():sourceHits(session,origins);
+        IncorporationOrigins selected=incorporationOrigins(session.chunks,libraries);
+        List<String> origins=selected.ids;
+        List<VectorStore.SearchHit> contexts=origins.isEmpty()?Collections.emptyList():textOnly?sourceTextHits(session,origins):sourceHits(session,origins);
+        List<String> requiredUnits=contexts.stream().map(context->canonicalUnit(context).path("unitId").asText()).distinct().collect(Collectors.toList());
         List<VectorStore.SearchHit> result=new ArrayList<>(hits);Set<String> units=new LinkedHashSet<>(),representedOrigins=new LinkedHashSet<>();
         for(VectorStore.SearchHit hit:hits){JsonNode unit=canonicalUnit(hit);if(unit!=null){units.add(unit.path("unitId").asText());recordCompleteMembers(unit,representedOrigins);}}
-        boolean complete=!origins.isEmpty();int contextChars=0;
+        boolean complete=selected.hasComposition&&(session.queryScope==null||session.byId.values().stream().map(Chunk::getDocumentId).distinct().count()==session.documentIds.size());int contextChars=0;
         for(VectorStore.SearchHit context:contexts){JsonNode unit=canonicalUnit(context);if(unit==null||!"complete_observed_unit".equals(unit.path("status").asText()))complete=false;
             String unitId=unit==null?context.getId():unit.path("unitId").asText();if(units.contains(unitId))continue;
             if(contextChars+context.text().length()>12000){complete=false;continue;}
             units.add(unitId);result.add(context);contextChars+=context.text().length();recordCompleteMembers(unit,representedOrigins);
         }
         complete=complete&&representedOrigins.containsAll(origins);List<VectorStore.SearchHit> annotated=new ArrayList<>();
-        for(VectorStore.SearchHit hit:result){Map<String,Object> payload=new LinkedHashMap<>(hit.getPayload());if("standard".equals(payload.get("sourceRole"))&&!fixedBaselineHit(hit))payload.put("applicabilityContextComplete",complete);annotated.add(new VectorStore.SearchHit(hit.getId(),hit.getScore(),payload));}
+        for(VectorStore.SearchHit hit:result){Map<String,Object> payload=new LinkedHashMap<>(hit.getPayload());if("standard".equals(payload.get("sourceRole"))&&!fixedBaselineHit(hit)){payload.put("applicabilityContextComplete",complete);payload.put("applicabilityContextRequiredUnits",requiredUnits);}annotated.add(new VectorStore.SearchHit(hit.getId(),hit.getScore(),payload));}
         return annotated;
+    }
+    static final class IncorporationOrigins {
+        final List<String> ids;final boolean hasComposition;
+        IncorporationOrigins(List<String> ids,boolean hasComposition){this.ids=ids;this.hasComposition=hasComposition;}
+    }
+    static IncorporationOrigins incorporationOrigins(List<Chunk> chunks,List<VectorStore.SearchHit> libraries){
+        Set<String> clauses=new LinkedHashSet<>();java.util.regex.Pattern clause=java.util.regex.Pattern.compile("(?i)\\b(?:clause\\s+|gcc[\\s-]*)?(\\d{1,2}\\.\\d{1,3})(?=\\b|\\()");
+        for(VectorStore.SearchHit library:libraries){String opening=(text(library.anchor())+" "+text(library.text()));for(java.util.regex.Matcher match=clause.matcher(opening.substring(0,Math.min(opening.length(),600)));match.find();)clauses.add(match.group(1));}
+        List<java.util.regex.Pattern> linkedClauses=clauses.stream().map(number->java.util.regex.Pattern.compile("(?i)\\b(?:gcc\\s+)?clause\\s+"+java.util.regex.Pattern.quote(number)+"(?=\\b|\\()"))
+                .collect(Collectors.toList());
+        List<String> composition=new ArrayList<>(),amendments=new ArrayList<>();String previousDocument=null;boolean continuation=false;
+        for(Chunk chunk:chunks){
+            if(!"tender".equals(chunk.getRole()))continue;
+            String name=text(chunk.getFileName()).toLowerCase(Locale.ROOT).replace('_',' ').replace('-',' ');
+            String content=text(chunk.getContent());boolean specification=name.contains("the specification")||name.contains("specification composition");
+            boolean conditions=name.matches(".*\\bcoc\\b.*")||name.contains("conditions of contract");
+            if(specification||conditions&&libraries.stream().anyMatch(h->referenceMention(content,h.fileLabel())))composition.add(chunk.getId());
+            boolean scc=name.matches(".*\\bscc\\b.*")||name.contains("special conditions of contract");
+            boolean linked=scc&&linkedClauses.stream().anyMatch(pattern->pattern.matcher(content).find());
+            if(linked||continuation&&Objects.equals(previousDocument,chunk.getDocumentId()))amendments.add(chunk.getId());
+            continuation=linked&&content.toLowerCase(Locale.ROOT).matches("(?s).*\\bfollowing\\s*:-?\\s*$");previousDocument=chunk.getDocumentId();
+        }
+        List<String> origins=new ArrayList<>(new LinkedHashSet<>(composition));for(String id:amendments)if(!origins.contains(id))origins.add(id);
+        return new IncorporationOrigins(origins,!composition.isEmpty());
     }
     private static void recordCompleteMembers(JsonNode unit,Set<String> representedOrigins){
         if(unit!=null&&"complete_observed_unit".equals(unit.path("status").asText()))for(JsonNode member:unit.path("requiredMemberIds"))representedOrigins.add(member.asText());
@@ -512,6 +1062,9 @@ public class OerBusinessEvidence {
     private static String text(String value){return value==null?"":value;}
     /** OER returns observed closure for explicitly requested origins in this same immutable corpus. */
     public List<VectorStore.SearchHit> sourceHits(Session session,List<String> originIds){
+        return withWordSourceScopes(session,sourceTextHits(session,originIds));
+    }
+    public List<VectorStore.SearchHit> sourceTextHits(Session session,List<String> originIds){
         require(originIds!=null&&new HashSet<>(originIds).size()==originIds.size(),"context origins invalid");
         for(String id:originIds)require(session.byId.containsKey(id),"context origin outside selected corpus");
         if(originIds.isEmpty()){current(session);return Collections.emptyList();}
@@ -531,7 +1084,7 @@ public class OerBusinessEvidence {
                 }
             }
         }
-        complete(session,loaded);current(session);return withWordSourceScopes(session,out);
+        complete(session,loaded);return out;
     }
     /** One synchronous adapter owns these lazy reads; rejected identities never parse the source. */
     private static final class RuleSourceRead {
@@ -694,7 +1247,7 @@ public class OerBusinessEvidence {
     private static Map<String,JsonNode> canonicalParents(Session session){Map<String,JsonNode> parents=new LinkedHashMap<>();session.byId.forEach((id,view)->parents.put(id,view.getCanonicalPayload()));return parents;}
     private static boolean completeTransport(JsonNode unit){return Arrays.asList("complete_observed_unit","complete_observed_hierarchy_context","complete_observed_attachment_context","complete_observed_context_union").contains(unit.path("status").asText());}
     /** Same public hierarchy/attachment union as transportUnit, without reconstructing source relations. */
-    private static VettingRetrievalSourceUnits.Unit semanticSourceUnit(Map<String,Chunk> byId,List<Chunk> chunks,Chunk chunk){
+    private static VettingRetrievalSourceUnits.Unit semanticSourceUnit(Map<String,Chunk> byId,Map<String,Integer> sourceOrder,Chunk chunk){
         JsonNode unit=chunk.getCanonicalPayload().path("semanticUnit"),hierarchy=unit.get("hierarchyContext"),attachment=unit.get("attachmentContext");
         List<JsonNode> selected=new ArrayList<>();if(attachment!=null&&attachment.isObject()){
             if(hierarchy!=null&&hierarchy.isObject())selected.add(hierarchy);selected.add(attachment);
@@ -702,11 +1255,21 @@ public class OerBusinessEvidence {
         Set<String> required=new LinkedHashSet<>();String reason=null;
         for(JsonNode context:selected){if(!completeTransport(context)){reason=context.path("reason").asText("public_source_context_unknown");break;}
             List<String> ids=VettingRetrievalSourceUnits.textIds(context.path("requiredMemberIds"));if(chunk.getCanonicalPayload().has("semanticUnitRef")){require(ids.contains(chunk.getId()),"semantic dictionary closure omitted its origin");for(String id:ids){Chunk member=byId.get(id);if(member!=null)require(Objects.equals(member.getDocumentId(),chunk.getDocumentId())&&Objects.equals(member.getOriginalSourceSha256(),chunk.getOriginalSourceSha256())&&Objects.equals(member.getSourceHash(),chunk.getSourceHash())&&Objects.equals(member.getRole(),chunk.getRole()),"semantic dictionary closure crosses source scope");}if(ids.stream().anyMatch(id->!byId.containsKey(id))){reason="semantic_closure_member_unavailable";break;}}for(JsonNode member:context.path("members")){
-                Chunk canonical=byId.get(member.path("id").asText());require(canonical!=null,"semantic closure member outside scanned scope");ObjectNode original=canonical.getCanonicalPayload().deepCopy();original.remove("semanticUnit");require(original.equals(member),"semantic closure member differs from scanned origin");}
+                Chunk canonical=byId.get(member.path("id").asText());require(canonical!=null,"semantic closure member outside scanned scope");
+                ObjectNode original=JsonUtils.mapper().createObjectNode();
+                canonical.getCanonicalPayload().fields().forEachRemaining(field->{if(!"semanticUnit".equals(field.getKey()))original.set(field.getKey(),field.getValue());});
+                require(original.equals(member),"semantic closure member differs from scanned origin");}
             required.addAll(ids);
         }
-        List<String> ordered=new ArrayList<>();if(reason==null)for(Chunk member:chunks)if(required.contains(member.getId()))ordered.add(member.getId());
-        ObjectNode trace=unit.deepCopy();trace.remove("members");for(String field:Arrays.asList("hierarchyContext","attachmentContext"))if(trace.path(field).isObject())((ObjectNode)trace.path(field)).remove("members");trace.put("selectionPolicy",OerCanonicalRetrievalClient.SEMANTIC_READ);
+        List<String> ordered=new ArrayList<>();if(reason==null){for(String id:required)if(sourceOrder.containsKey(id))ordered.add(id);ordered.sort(Comparator.comparingInt(sourceOrder::get));}
+        ObjectNode trace=JsonUtils.mapper().createObjectNode();
+        ((ObjectNode)unit).fields().forEachRemaining(field->{
+            if("members".equals(field.getKey()))return;
+            JsonNode value=field.getValue();
+            if(("hierarchyContext".equals(field.getKey())||"attachmentContext".equals(field.getKey()))&&value.isObject()){
+                ObjectNode context=JsonUtils.mapper().createObjectNode();value.fields().forEachRemaining(inner->{if(!"members".equals(inner.getKey()))context.set(inner.getKey(),inner.getValue().deepCopy());});trace.set(field.getKey(),context);
+            }else trace.set(field.getKey(),value.deepCopy());
+        });trace.put("selectionPolicy",OerCanonicalRetrievalClient.SEMANTIC_READ);
         return new VettingRetrievalSourceUnits.Unit(chunk.getId(),reason==null?"complete_observed_unit":"unknown",reason,ordered,JsonUtils.readMap(JsonUtils.write(trace)));
     }
     private static JsonNode transportUnit(JsonNode unit,Map<String,JsonNode> parents){
@@ -786,10 +1349,10 @@ public class OerBusinessEvidence {
         List<Integer> pages=pointer.getPhysicalPages();c.setPageNo(nativeDocx||normal&&pages.isEmpty()?null:pages.size()==1?"P"+pages.get(0):"P"+pages.get(0)+"–P"+pages.get(pages.size()-1));
         c.setBbox(parts.size()==1?parts.get(0).getBbox():null);c.setCanonicalPayload(raw.deepCopy());c.setCanonicalEvidence(pointer);return c;
     }
-    private static Chunk semanticView(Session session,JsonNode origin,JsonNode unit){
+    private static Chunk semanticView(Session session,JsonNode origin,JsonNode unit,boolean dictionary){
         CanonicalSourceBinding binding=null;for(CanonicalSourceBinding candidate:session.semanticScope.bindings())if(String.valueOf(candidate.getDocumentId()).equals(origin.path("documentId").asText()))binding=candidate;
         require(binding!=null,"semantic origin outside selected sources");SourceDocument source=session.semanticDocuments.get(binding.getDocumentId());
-        ObjectNode raw=origin.deepCopy();raw.set("semanticUnit",unit.deepCopy());Chunk chunk=new Chunk();chunk.setId(raw.path("id").asText());chunk.setDocumentId(raw.path("documentId").asText());chunk.setContent(raw.path("text").asText());chunk.setRole(raw.path("role").asText());
+        ObjectNode raw=origin.deepCopy();raw.set("semanticUnit",dictionary?unit:unit.deepCopy());Chunk chunk=new Chunk();chunk.setId(raw.path("id").asText());chunk.setDocumentId(raw.path("documentId").asText());chunk.setContent(raw.path("text").asText());chunk.setRole(raw.path("role").asText());
         chunk.setFileKey(source.getFileKey());chunk.setFileName(source.getFileName());chunk.setSourceHash(binding.getCanonicalSourceHash());chunk.setOriginalSourceSha256(binding.getOriginalSourceSha256());chunk.setSourceSha256(binding.getOriginalSourceSha256());
         chunk.setMetadataVersion(raw.path("metadataVersion").asText());chunk.setSegmentationVersion(raw.path("segmentationVersion").asText());chunk.setNativeTableMetadataVersion(raw.path("nativeTableMetadataVersion").asText());chunk.setSourceQualityMetadataVersion(raw.path("sourceQualityMetadataVersion").asText());chunk.setSourceQualityHash(raw.path("sourceQualityHash").asText());
         chunk.setClauseId(textOrNull(raw,"clauseId"));chunk.setClauseHeadingLocation(session.semanticHeadingLocations.get(chunk.getId()));chunk.setSourceQuality(unknownQuality(NormalObservedContract.PRODUCER.equals(raw.path("producerKind").asText())));chunk.setEligibleModules(JsonUtils.readList(JsonUtils.write(raw.path("eligibleModules")),String.class));

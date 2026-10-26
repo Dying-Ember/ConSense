@@ -1,4 +1,26 @@
 import { isSourceCheck, valueDependencies } from './value-dependencies.js';
+
+// Empty boolean options use the input control's standard Yes/No default;
+// explicit options still need matching polarity in both languages.
+function standardBooleanOptions(options) {
+  if (options == null || Array.isArray(options) && options.length === 0) return true;
+  if (!Array.isArray(options) || options.length !== 2) return false;
+  const seen = new Set();
+  for (const option of options) {
+    if (!option || Object.keys(option).length !== 3 || Object.keys(option).some(key => !['value', 'labelZh', 'labelEn'].includes(key)) || typeof option.labelZh !== 'string' || typeof option.labelEn !== 'string') return false;
+    const positive = option.value === true || option.value === 'true' || option.value === 'yes';
+    const negative = option.value === false || option.value === 'false' || option.value === 'no';
+    if ((!positive && !negative) || option.labelZh?.trim() !== (positive ? '是' : '否') || option.labelEn?.trim().toLowerCase() !== (positive ? 'yes' : 'no')) return false;
+    seen.add(positive);
+  }
+  return seen.size === 2;
+}
+
+function sameAnswerOptions(a, b) {
+  return JSON.stringify(a.options || []) === JSON.stringify(b.options || []) ||
+    a.type.kind === 'boolean' && b.type.kind === 'boolean' && standardBooleanOptions(a.options) && standardBooleanOptions(b.options);
+}
+
 export function createReviewReducer(data) {
   const copy = value => structuredClone(value);
   const edition = id => {
@@ -65,7 +87,7 @@ export function createReviewReducer(data) {
     if(isSourceCheck(v)!==isSourceCheck(other))return problem('MERGE_ROLE_MISMATCH');
     if(v.parentId!==other.parentId)return problem('MERGE_PARENT_MISMATCH');
     if(Boolean(v.optional)!==Boolean(other.optional))return problem('MERGE_OPTIONAL_MISMATCH');
-    if(JSON.stringify(v.options||[])!==JSON.stringify(other.options||[]))return problem('MERGE_OPTIONS_MISMATCH');
+    if(!sameAnswerOptions(v,other))return problem('MERGE_OPTIONS_MISMATCH');
     if(v.role.kind==='fixed'&&v.fixedValue!==other.fixedValue)return problem('MERGE_FIXED_VALUE_MISMATCH');
     const emptyUnresolved=c=>c?.kind==='rule'&&c.needsRebind===true&&Array.isArray(c.branches)&&!c.branches.length&&Array.isArray(c.inputIds)&&!c.inputIds.length&&Object.keys(c).every(key=>['kind','needsRebind','branches','inputIds'].includes(key));
     if(v.correction&&other.correction&&!(emptyUnresolved(v.correction)&&emptyUnresolved(other.correction)))return problem('MERGE_RULE_CONFLICT');

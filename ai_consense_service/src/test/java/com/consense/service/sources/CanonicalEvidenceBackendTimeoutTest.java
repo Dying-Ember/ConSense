@@ -37,6 +37,25 @@ class CanonicalEvidenceBackendTimeoutTest {
         assertTrue((System.nanoTime() - start) / 1_000_000 < 3000, "Configured bound must still end the request");
     }
 
+    @Test void coldSemanticPreparationUsesPublicationDeadlineWhileOrdinarySourceReadsStayBounded() throws Exception {
+        CanonicalEvidenceBackend backend=backend(500,100,2000,"{}".getBytes(StandardCharsets.UTF_8));
+        String prepare="{\"module\":\"vetting\",\"operation\":\"prepare\",\"view\":\"semantic_units\"}";
+        assertEquals("{}",assertDoesNotThrow(()->backend.sourceRead(prepare,"vetting",4096)));
+        for(String operation:new String[]{"scan","ids","catalog"}){
+            String request="{\"module\":\"vetting\",\"operation\":\""+operation+"\",\"view\":\"semantic_units\"}";
+            assertEquals("OER_EVIDENCE_UPSTREAM_UNAVAILABLE",assertThrows(CanonicalEvidenceException.class,()->backend.sourceRead(request,"vetting",4096)).getMessage());
+        }
+        assertEquals("OER_EVIDENCE_UPSTREAM_UNAVAILABLE",assertThrows(CanonicalEvidenceException.class,backend::health).getMessage());
+    }
+
+    @Test void coldSemanticPreparationStillStopsAtItsFinitePublicationDeadline() throws Exception {
+        CanonicalEvidenceBackend backend=backend(500,2000,100,"{}".getBytes(StandardCharsets.UTF_8));
+        long started=System.nanoTime();
+        assertEquals("OER_EVIDENCE_UPSTREAM_UNAVAILABLE",assertThrows(CanonicalEvidenceException.class,()->backend.sourceRead(
+                "{\"module\":\"advisory\",\"operation\":\"prepare\",\"view\":\"semantic_units\"}","advisory",4096)).getMessage());
+        assertTrue((System.nanoTime()-started)/1_000_000<3000,"Preparation must retain a finite deadline");
+    }
+
     @Test void complete_normal_publication_has_its_own_deadline_without_extending_health_reads() throws Exception {
         CanonicalEvidenceBackend backend=backend(500,100,2000,"{}".getBytes(StandardCharsets.UTF_8));
         assertEquals("{}",backend.normalObserved("{}","vetting"));

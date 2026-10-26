@@ -77,7 +77,8 @@ def _context(raw, original_sha):
              and isinstance(plan.get('documentFamily'), str) and plan['documentFamily']
              and plan['documentFamily'].upper() != 'DRAWING'
              and plan.get('identityStatus') in ('sha_verified', 'content_supported',
-                 'content_supported_non_drawing', 'format_supported_non_drawing'),
+                 'content_supported_non_drawing', 'format_supported_non_drawing',
+                 'human_confirmed_textual_material'),
              'non_drawing_reading_plan_required')
     return value
 
@@ -98,6 +99,73 @@ def capture_native_pdf_candidates(original_bytes, native_context, *, artifact_st
     with _CAPTURE_LOCK:
         return _capture(original_bytes, native_context, artifact_store,
                         max_pdf_bytes, max_reply_bytes)
+
+
+def _predecessor_methods(context, bundle, store, refs):
+    """Cold-read only the immediately preceding retained observation; never extract it."""
+    reference = context.get('predecessorBundleRef')
+    if reference is None:
+        return {}
+
+    def read(reference):
+        _require(isinstance(reference, dict) and type(reference.get('byteCount')) is int
+                 and 0 < reference['byteCount'] <= MAX_CONTEXT_BYTES, 'predecessor_reference_byte_limit_invalid')
+        value = json.loads(store.read_asset(reference))
+        refs.append(reference)
+        _require(isinstance(value, dict), 'predecessor_record_object_required')
+        return value
+
+    previous = read(reference)
+    _require(previous.get('schema') == SCHEMA
+             and previous.get('status') in ('candidate_observed', 'partial', 'failed')
+             and previous.get('source') == bundle['source']
+             and previous.get('originalRef') == bundle['originalRef'], 'predecessor_source_identity_differs')
+    _require(previous.get('codeRefs') == bundle['codeRefs']
+             and previous.get('providerVersions') == bundle['providerVersions'], 'predecessor_recipe_differs')
+    previous_context = _context(_encoded(read(previous['nativeContextRef'])), bundle['source']['sourceSha256'])
+    per_batch = {'selectedPhysicalPages', 'javaNativeEvidence', 'predecessorBundleRef'}
+    _require({key: value for key, value in previous_context.items() if key not in per_batch}
+             == {key: value for key, value in context.items() if key not in per_batch},
+             'predecessor_reading_context_differs')
+    selected = previous_context['selectedPhysicalPages']
+    _require(previous.get('selectedPhysicalPages') == selected
+             and selected[-1] + 1 == context['selectedPhysicalPages'][0]
+             and not set(selected).intersection(context['selectedPhysicalPages']), 'predecessor_pages_not_adjacent')
+    pages = [page for page in previous.get('pages', []) if page.get('physicalPageNo') == selected[-1]]
+    _require(len(pages) == 1, 'predecessor_last_page_unavailable')
+    page = pages[0]
+    _require(page.get('nativeGlyphNamespace') == 'pdfplumber/page/' + str(selected[-1])
+             and [row.get('method') for row in page.get('methods', [])] == list(METHODS), 'predecessor_method_set_differs')
+    observation = read(page['sourceObservationRef'])
+    _require(observation.get('physicalPageNo') == selected[-1]
+             and observation.get('nativeGlyphNamespace') == page.get('nativeGlyphNamespace')
+             and observation.get('frame') == page.get('frame'), 'predecessor_source_observation_differs')
+    if observation.get('failure') is not None:
+        return {}
+    source = dict(observation['observations'], sourceSha256=bundle['source']['sourceSha256'],
+        sectionId=bundle['source']['sourceSha256'], originalPage=selected[-1], localPage=selected[-1], status='succeeded')
+    methods = {}
+    for row in page['methods']:
+        if row.get('status') == 'failed':
+            continue
+        raw = read(row['rawRef']); method = row['method']; candidate = raw.get('candidate')
+        _require(row.get('status') == 'candidate_observed' and raw.get('failure') is None
+                 and row.get('provider') == METHODS[method]['provider']
+                 and raw.get('method') == method and raw.get('provider') == METHODS[method]['provider']
+                 and raw.get('physicalPageNo') == selected[-1]
+                 and raw.get('nativeGlyphNamespace') == page['nativeGlyphNamespace']
+                 and raw.get('sourceObservationRef') == page['sourceObservationRef']
+                 and isinstance(candidate, dict) and candidate == row.get('candidate')
+                 and candidate.get('sourceSha256') == bundle['source']['sourceSha256']
+                 and candidate.get('physicalPageNo') == selected[-1]
+                 and candidate.get('nativeGlyphNamespace') == page['nativeGlyphNamespace']
+                 and candidate.get('frame') == page['frame']
+                 and candidate.get('method') == method
+                 and candidate.get('provider') == METHODS[method]['provider'], 'predecessor_method_record_differs')
+        methods[method] = {'source': source, 'logical': dict(candidate, sectionId=source['sectionId'],
+            originalPage=selected[-1], localPage=selected[-1]), 'page': selected[-1],
+            'rawRef': row['rawRef'], 'sourceRef': page['sourceObservationRef']}
+    return methods
 
 
 def _capture(original_bytes, native_context, store, max_pdf_bytes, max_reply_bytes):
@@ -150,13 +218,14 @@ def _capture(original_bytes, native_context, store, max_pdf_bytes, max_reply_byt
             source['pageCount'] = actual_count
             reply['coverage']['sourcePageCount'] = actual_count
             _require(actual_count == context['source']['pageCount'], 'source_page_count_mismatch')
+            bundle['source'] = source
+            previous_methods = _predecessor_methods(context, bundle, store, refs)
             # Camelot needs a path. This owned copy contains complete unchanged
             # source bytes; no page extraction/crop or source-path replacement.
             with tempfile.TemporaryDirectory(prefix='native-pdf-candidate-', dir=store.root) as directory:
                 owned_root = Path(directory).resolve()
                 _require(owned_root.is_relative_to(store.root.resolve()), 'owned_directory_outside_store')
                 path = owned_root / 'original.pdf'; path.write_bytes(original_bytes)
-                previous_methods = {}
                 for number in selected:
                     page = document.pages[number - 1]
                     glyphs, geometry, observations, observation_error = [], {}, {}, None
@@ -201,7 +270,9 @@ def _capture(original_bytes, native_context, store, max_pdf_bytes, max_reply_byt
                                 logical_page = dict(candidate, sectionId=original_sha,
                                     originalPage=number, localPage=number)
                                 prior = previous_methods.get(method)
-                                if prior is not None:
+                                if prior is None:
+                                    candidate['observationGroups']['continuationStatus'] = 'unknown_predecessor_unavailable'
+                                else:
                                     try:
                                         continuation = observe_continuations(prior['source'], prior['logical'],
                                             source_page, logical_page, build_margin_profile([prior['source'], source_page]))
@@ -210,6 +281,8 @@ def _capture(original_bytes, native_context, store, max_pdf_bytes, max_reply_byt
                                                 anchorRawRef=prior['rawRef'], anchorSourceObservationRef=prior['sourceRef'],
                                                 sourceSha256=original_sha, method=method, provider=specification['provider'])
                                             candidate['observationGroups']['continuations'] = continuation
+                                        else:
+                                            candidate['observationGroups']['continuationStatus'] = continuation['status']
                                     except Exception as error:
                                         candidate['observationGroups']['continuationFailure'] = exception_record(error)
                                         candidate['observationGroups']['continuationStatus'] = 'unknown_optional_continuation_observation_failed'

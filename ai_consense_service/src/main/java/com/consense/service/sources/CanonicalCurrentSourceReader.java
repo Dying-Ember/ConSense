@@ -36,6 +36,35 @@ public class CanonicalCurrentSourceReader {
         SourceDocument stamp=validatedScope(projectId,id,module);
         require(SourceContentDigests.stamped(stamp),HttpStatus.CONFLICT,"SOURCE_CONTENT_REVISION_UNAVAILABLE");return stamp;
     }
+    /** An owned Vetting operation already proved originals; intermediate guards read one scalar catalog. */
+    @Transactional(propagation=Propagation.REQUIRES_NEW,isolation=Isolation.READ_COMMITTED,readOnly=true)
+    public java.util.Map<Long,SourceDocument> currentVettingMetadata(String projectId){
+        return currentModuleMetadata(projectId,"vetting");
+    }
+    @Transactional(propagation=Propagation.REQUIRES_NEW,isolation=Isolation.READ_COMMITTED,readOnly=true)
+    public java.util.Map<Long,SourceDocument> currentModuleMetadata(String projectId,String module){
+        require(Arrays.asList("vetting","advisory").contains(module),HttpStatus.BAD_REQUEST,"CANONICAL_MODULE_INVALID");
+        java.util.Map<Long,SourceDocument> result=new java.util.LinkedHashMap<>();
+        for(SourceDocument source:ProjectDocumentScope.selected(projectId,documents.findScopeSourcesByProjectId(projectId),"fullset",module))
+            require(result.putIfAbsent(source.getId(),source)==null,HttpStatus.CONFLICT,"CANONICAL_SOURCE_STALE");
+        return result;
+    }
+    public static final class OriginalFileState {
+        private final java.nio.file.Path path;private final Object key;private final long bytes;private final java.nio.file.attribute.FileTime modified;
+        private OriginalFileState(java.nio.file.Path path,java.nio.file.attribute.BasicFileAttributes attributes){this.path=path;key=attributes.fileKey();bytes=attributes.size();modified=attributes.lastModifiedTime();}
+        private boolean same(OriginalFileState other){return path.equals(other.path)&&java.util.Objects.equals(key,other.key)&&bytes==other.bytes&&modified.equals(other.modified);}
+    }
+    /** File metadata detects ordinary replacement promptly; actual SHA proof remains mandatory at entry/exit. */
+    public OriginalFileState observeOriginal(SourceDocument source){
+        try{java.nio.file.Path path=java.nio.file.Paths.get(source.getStoragePath()).toRealPath();
+            require(path.startsWith(java.nio.file.Paths.get(properties.getStorageRoot()).toRealPath()),HttpStatus.CONFLICT,"SOURCE_ORIGINAL_UNAVAILABLE");
+            java.nio.file.attribute.BasicFileAttributes attributes=java.nio.file.Files.readAttributes(path,java.nio.file.attribute.BasicFileAttributes.class);
+            require(attributes.isRegularFile(),HttpStatus.CONFLICT,"SOURCE_ORIGINAL_UNAVAILABLE");return new OriginalFileState(path,attributes);
+        }catch(CanonicalEvidenceException failure){throw failure;}catch(Exception failure){throw new CanonicalEvidenceException(HttpStatus.CONFLICT,"SOURCE_ORIGINAL_UNAVAILABLE");}
+    }
+    public void requireOriginalFreshness(SourceDocument source,OriginalFileState captured){
+        require(captured!=null&&captured.same(observeOriginal(source)),HttpStatus.CONFLICT,"SOURCE_ORIGINAL_METADATA_CHANGED");
+    }
     /** Preparation uses its own transaction so its post-write scalar read sees the new write stamp. */
     SourceDocument validatedScope(String projectId,Long id,String module){
         SourceDocument stamp=SourceDocumentRepository.scopeSnapshot(documents.findScopeMetadataById(id)
@@ -52,6 +81,41 @@ public class CanonicalCurrentSourceReader {
     @Transactional(propagation=Propagation.REQUIRES_NEW,isolation=Isolation.READ_COMMITTED,readOnly=true)
     public void assertSourceCurrent(CanonicalSourceBinding binding,String module){checkSource(binding,module);}
 
+    /** A selected complete source is checked once; its detached stamp then guards the same frame. */
+    @Transactional(propagation=Propagation.REQUIRES_NEW,isolation=Isolation.READ_COMMITTED,readOnly=true)
+    public SourceDocument captureSourceStamp(CanonicalSourceBinding binding,String module,SourceDocument captured){
+        if(!SourceContentDigests.stamped(captured))return null;
+        try{SourceContentDigests.verifyLoaded(captured);}catch(IllegalArgumentException stale){throw new CanonicalEvidenceException(HttpStatus.CONFLICT,"CANONICAL_SOURCE_STALE");}
+        SourceDocument stamp=SourceDocumentRepository.scopeSnapshot(documents.findScopeMetadataById(binding.getDocumentId())
+                .orElseThrow(()->new CanonicalEvidenceException(HttpStatus.NOT_FOUND,"SOURCE_DOCUMENT_UNAVAILABLE")));
+        validateCurrentDocument(binding.getProjectId(),binding.getDocumentId(),module,stamp);
+        require(SourceContentDigests.stamped(stamp),HttpStatus.CONFLICT,"SOURCE_CONTENT_REVISION_UNAVAILABLE");
+        requireCurrentStamp(captured,stamp);
+        checkSource(binding,module,captured);
+        stamp.setVerifiedBusinessContentSha256(SourceContentDigests.actual(captured));
+        return stamp;
+    }
+
+    /** A cold normal read verifies complete content once against the already checked projection. */
+    @Transactional(propagation=Propagation.REQUIRES_NEW,isolation=Isolation.READ_COMMITTED,readOnly=true)
+    public SourceDocument captureNormalSourceStamp(CanonicalSourceBinding binding,String module,com.fasterxml.jackson.databind.JsonNode checkedSnapshot){
+        SourceDocument stamp=validatedScope(binding.getProjectId(),binding.getDocumentId(),module);
+        if(!SourceContentDigests.stamped(stamp))return null;
+        SourceDocument document=readDocument(binding.getProjectId(),binding.getDocumentId(),module,true,true);
+        checkSource(binding,module,document,checkedSnapshot,true);
+        requireCurrentStamp(document,stamp);
+        stamp.setVerifiedBusinessContentSha256(SourceContentDigests.actual(document));
+        return stamp;
+    }
+
+    @Transactional(propagation=Propagation.REQUIRES_NEW,isolation=Isolation.READ_COMMITTED,readOnly=true)
+    public void assertSourceStampCurrent(CanonicalSourceBinding binding,String module,SourceDocument capturedStamp){
+        SourceDocument current=currentStamp(binding.getProjectId(),binding.getDocumentId(),module);
+        requireCurrentStamp(capturedStamp,current);
+        require(Objects.equals(binding.getOriginalSourceSha256(),current.getSourceSha256())
+                &&Objects.equals(binding.getRoutingSha256(),CanonicalEvidenceService.routingHash(current)),HttpStatus.CONFLICT,"CANONICAL_SOURCE_STALE");
+    }
+
     @Transactional(propagation=Propagation.REQUIRES_NEW,isolation=Isolation.READ_COMMITTED,readOnly=true)
     public void assertCurrent(CanonicalSourceBinding binding,String module){
         checkSource(binding,module);
@@ -64,8 +128,18 @@ public class CanonicalCurrentSourceReader {
     private void checkSource(CanonicalSourceBinding binding,String module){
         com.fasterxml.jackson.databind.JsonNode snapshot=binding.getSnapshotJson()==null?JsonUtils.mapper().nullNode():JsonUtils.parse(binding.getSnapshotJson());
         boolean normal=NormalObservedContract.isNormal(snapshot);
-        if(normal)require(Objects.equals(module,binding.getDeclaredModule()),HttpStatus.CONFLICT,"NORMAL_OBSERVED_MODULE_STATE_UNAVAILABLE");
         SourceDocument document=readDocument(binding.getProjectId(),binding.getDocumentId(),module,true,normal);
+        checkSource(binding,module,document,snapshot,normal);
+    }
+
+    private void checkSource(CanonicalSourceBinding binding,String module,SourceDocument document){
+        com.fasterxml.jackson.databind.JsonNode snapshot=binding.getSnapshotJson()==null?JsonUtils.mapper().nullNode():JsonUtils.parse(binding.getSnapshotJson());
+        boolean normal=NormalObservedContract.isNormal(snapshot);
+        checkSource(binding,module,document,snapshot,normal);
+    }
+    private void checkSource(CanonicalSourceBinding binding,String module,SourceDocument document,
+                             com.fasterxml.jackson.databind.JsonNode snapshot,boolean normal){
+        if(normal)require(Objects.equals(module,binding.getDeclaredModule()),HttpStatus.CONFLICT,"NORMAL_OBSERVED_MODULE_STATE_UNAVAILABLE");
         if(normal)require(NormalObservedPreparationService.currentGraph(document).equals(snapshot.path("manifest").path("candidateGraph")),HttpStatus.CONFLICT,"CANONICAL_SOURCE_STALE");
         require(Objects.equals(binding.getOriginalSourceSha256(),document.getSourceSha256())
                 &&Objects.equals(binding.getJavaParsedSourceHash(),VettingCorpus.sourceHash(document))
@@ -111,10 +185,14 @@ public class CanonicalCurrentSourceReader {
         for(SourceDocument candidate:current)if(Objects.equals(normalizedName(candidate),normalizedName(document))&&candidate.getId()!=null&&candidate.getId()>id)
             throw new CanonicalEvidenceException(HttpStatus.CONFLICT,"SOURCE_DOCUMENT_SUPERSEDED");
         require(document.getSourceSha256()!=null&&document.getSourceSha256().matches("[a-f0-9]{64}"),HttpStatus.BAD_REQUEST,"CANONICAL_SHA_INVALID");
+        requireOriginalBytes(document);
+        return document;
+    }
+    /** Entry/final proof; intermediate operation guards use OriginalFileState instead. */
+    public void requireOriginalBytes(SourceDocument document){
         try{
             require(document.getSourceSha256().equals(StorageService.storedSha256(Paths.get(properties.getStorageRoot()),document.getStoragePath())),HttpStatus.CONFLICT,"SOURCE_ORIGINAL_BYTES_CHANGED");
         }catch(CanonicalEvidenceException e){throw e;}catch(Exception error){throw new CanonicalEvidenceException(HttpStatus.CONFLICT,"SOURCE_ORIGINAL_UNAVAILABLE");}
-        return document;
     }
     private SourceDocument verificationDocument(Long id){
         org.springframework.util.Assert.notNull(id,"The given id must not be null!");
@@ -126,7 +204,16 @@ public class CanonicalCurrentSourceReader {
         SourceDocumentRepository.NormalObservationMetadata metadata=documents.findNormalObservationMetadataById(id)
                 .orElseThrow(()->new CanonicalEvidenceException(HttpStatus.NOT_FOUND,"SOURCE_DOCUMENT_UNAVAILABLE"));
         SourceDocument document=verificationSnapshot(metadata);
-        document.setParseCoverageJson(metadata.getParseCoverageJson());document.setNormalCandidateJson(metadata.getNormalCandidateJson());return document;
+        document.setParseCoverageJson(metadata.getParseCoverageJson());document.setNormalCandidateJson(metadata.getNormalCandidateJson());
+        SourceDocumentRepository.copyContentStamp(metadata,document);SourceContentDigests.verifyLoaded(document);return document;
+    }
+    /** Only an actually verified complete read can produce these payload-free source pins. */
+    public static SourceDocument compactVerifiedSource(SourceDocument document){
+        SourceContentDigests.verifyLoaded(document);
+        String content=SourceContentDigests.actual(document),parsed=VettingCorpus.sourceHash(document);
+        SourceDocument result=new SourceDocument();org.springframework.beans.BeanUtils.copyProperties(document,result);
+        result.setTextContent(null);result.setStructuredContentJson(null);result.setParseCoverageJson(null);result.setNormalCandidateJson(null);result.setNativePdfEvidenceJson(null);
+        result.setVerifiedBusinessContentSha256(content);result.setCalculatedSourceHash(parsed);return result;
     }
     private static SourceDocument verificationSnapshot(SourceDocumentRepository.VerificationMetadata metadata){
         // Detached scalar snapshot only; all shared source gates consume these exact committed fields.

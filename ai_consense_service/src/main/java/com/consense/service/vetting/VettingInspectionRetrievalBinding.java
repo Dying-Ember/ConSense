@@ -275,7 +275,7 @@ final class VettingInspectionRetrievalBinding {
         return out;
     }
 
-    private static void verifySource44Episode(JsonNode response,JsonNode row,JsonNode ranking,Map<String,JsonNode> returned)throws IOException {
+    static void verifySource44Episode(JsonNode response,JsonNode row,JsonNode ranking,Map<String,JsonNode> returned)throws IOException {
         JsonNode hits=response.path("hits"),episode=response.path("sourceUnits"),units=episode.path("units"),actual=ranking.path("allRerankedInTrueScoreOrder");
         require(SOURCE44_POLICY.equals(episode.path("policy").asText()) && SOURCE44_POLICY.equals(ranking.path("selectionPolicy").asText())
                 && "canonical_observed_structure_only".equals(episode.path("scope").asText()) && no(episode.path("derivedMembersCanBecomeOrigins"))
@@ -285,7 +285,14 @@ final class VettingInspectionRetrievalBinding {
         for(int i=0;i<actual.size();i++){JsonNode score=actual.get(i).path("score");String id=actual.get(i).path("id").asText();
             require(!id.isEmpty() && score.isNumber() && Double.isFinite(score.asDouble()) && score.asDouble()<=previous && scores.put(id,score)==null,"Source44 actual ranking score/order differs");
             previous=score.asDouble();ranks.put(id,i+1);}
-        ArrayList<String> rawIds=new ArrayList<>();for(int i=0;i<Math.min(actual.size(),row.path("request").path("limit").asInt());i++)rawIds.add(actual.get(i).path("id").asText());
+        List<String> selected=new ArrayList<>(ranks.keySet());
+        if(episode.has("ranking")) {
+            require(episode.path("ranking").equals(ranking.path("ranking"))&&JSON.valueToTree(selected).equals(episode.path("ranking").path("modelScoreOrderIds"))
+                    &&row.path("request").path("query").asText().trim().toLowerCase(Locale.ROOT).equals(episode.path("ranking").path("identifier").asText()),"Source44 explicit selection is not bound to the query/model order");
+            try{selected=VettingRetrievalSourceUnits.selectionOrder(episode);}catch(IllegalStateException e){throw new IOException("Source44 explicit selection differs",e);}
+            require(JSON.valueToTree(selected).equals(ranking.path("selectionOrderIds")),"Source44 recorded selection order differs");
+        } else require(!ranking.has("ranking"),"Source44 selection policy is missing from the response");
+        ArrayList<String> rawIds=new ArrayList<>();for(int i=0;i<Math.min(selected.size(),row.path("request").path("limit").asInt());i++)rawIds.add(selected.get(i));
         require(JSON.valueToTree(rawIds).equals(ranking.path("rawParentTopKIds")) && ranking.path("rawParentTopKIds").equals(episode.path("rawParentTopKIds")),"Source44 recorded raw policy differs");
         Set<String> unitIds=new HashSet<>();
         for(int i=0;i<hits.size();i++) {
@@ -294,6 +301,8 @@ final class VettingInspectionRetrievalBinding {
                     && scores.get(id).equals(hit.path("score")) && scores.get(id).equals(unit.path("seedScore"))
                     && count(unit,"originalRerankOrdinal",ranks.get(id)) && JSON.valueToTree(Collections.singletonList(id)).equals(unit.path("originIds"))
                     && no(unit.path("derivedMembersCanBecomeOrigins")) && unit.path("memberScores").isNull(),"Source44 scored seed/member boundary differs");
+            try{require(VettingRetrievalSourceUnits.selectionOrdinal(episode,unit,seed)==selected.indexOf(id)+1,"Source44 selected seed ordinal differs");}
+            catch(IllegalStateException e){throw new IOException("Source44 selected seed is not bound to the source clause",e);}
             sourcePayload(returned,seed);
             if("complete_observed_unit".equals(unit.path("status").asText())) {
                 require(!unit.path("unitId").asText().isEmpty() && unitIds.add(unit.path("unitId").asText()) && unit.path("members").isArray()

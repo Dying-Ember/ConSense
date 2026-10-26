@@ -12,13 +12,19 @@ import java.util.Collections;
 
 /** Reading methods follow confirmed identity; observed values and candidate relationships stay separate. */
 final class OerReadingPlan {
+    private static final List<String> CONFIRMED=Arrays.asList("sha_verified","content_supported","content_supported_non_drawing","format_supported_non_drawing","human_confirmed_textual_material");
     private final ObjectNode metadata=JsonUtils.mapper().createObjectNode();
     private final boolean formLayout;
+    private final boolean nativeFirst;
 
     OerReadingPlan(String sourceSha,String format,OerDocumentIdentity identity) {
+        this(sourceSha,format,identity,false);
+    }
+    OerReadingPlan(String sourceSha,String format,OerDocumentIdentity identity,boolean nativeFirst) {
         if(identity!=null && (!sourceSha.equals(identity.getSourceSha256()) || "DRAWING".equals(identity.getKind())
-                || !Arrays.asList("sha_verified","content_supported","content_supported_non_drawing","format_supported_non_drawing")
-                .contains(identity.getIdentityStatus()))) throw new IllegalArgumentException("Reading identity is unresolved or belongs to different original bytes");
+                || !CONFIRMED.contains(identity.getIdentityStatus())
+                || "human_confirmed_textual_material".equals(identity.getIdentityStatus())&&!manualReadingAllowed(identity))) throw new IllegalArgumentException("Reading identity is unresolved or belongs to different original bytes");
+        this.nativeFirst=nativeFirst;
         String family=identity==null?"UNKNOWN":identity.getKind(),version=identity==null?null:identity.getVersion();
         formLayout="pdf".equals(format) && Arrays.asList("AA","FT").contains(family);
         metadata.put("schemaVersion","oer-reading-plan-v1");metadata.put("sourceSha256",sourceSha);metadata.put("documentFamily",family);
@@ -27,15 +33,26 @@ final class OerReadingPlan {
         metadata.put("profile",formLayout?"generic_form":"generic_source");
         metadata.put("ruleBasis","actual native stories, numbering, controls and layout occurrences; no source values or fixed pages");
         ArrayNode tasks=metadata.putArray("tasks");
-        if("pdf".equals(format)){tasks.add("native_text_and_page_frame");tasks.add("native_widgets");tasks.add("actual_image_coverage");tasks.add("visual_gap_reading");}
+        if("pdf".equals(format)){tasks.add("native_text_and_page_frame");tasks.add(nativeFirst?"native_widget_metadata":"native_widgets");tasks.add("actual_image_coverage");tasks.add(nativeFirst?"visual_gap_reading_deferred":"visual_gap_reading");}
         else if("docx".equals(format)){tasks.add("native_stories");tasks.add("native_table_topology");tasks.add("native_numbering_and_revision");tasks.add("native_document_outline");metadata.put("textAuthority","original_ooxml");metadata.put("visualRole","layout_assistance_only");}
         else tasks.add("native_text_with_declared_format_limits");
-        if(formLayout)tasks.add("whole_form_layout_and_controls");
+        if(formLayout)tasks.add(nativeFirst?"whole_form_layout_and_controls_deferred":"whole_form_layout_and_controls");
         tasks.add("occurrence_and_relationship_inventory");metadata.put("sourceQualityStatus","unverified");
+        if(nativeFirst){metadata.put("readingMode","ordinary_native_first");metadata.put("optionalReadingStatus","deferred_native_first");}
     }
     ObjectNode metadata(){return metadata;}
     boolean requiresFormLayout(){return formLayout;}
-    boolean confirmedNonDrawing(){return !"legacy_unbound_generic".equals(metadata.path("identityStatus").asText());}
+    boolean nativeFirst(){return nativeFirst;}
+    boolean confirmedNonDrawing(){return CONFIRMED.contains(metadata.path("identityStatus").asText());}
+    boolean manuallyConfirmedText(){return "human_confirmed_textual_material".equals(metadata.path("identityStatus").asText());}
+    private static boolean manualReadingAllowed(OerDocumentIdentity identity){
+        return Arrays.asList("tender","standard","project_fact","package_manifest").contains(identity.getRole())
+                &&!Arrays.asList("DRAWING","BQ","SOR","GENERAL_SUMMARY","WORKS_PSS","SL_NON_TECHNICAL").contains(identity.getKind())
+                &&!Arrays.asList("standard_template","evaluation_answer","drawing").contains(identity.getSourcePurpose())
+                &&(identity.getEligibleModules()==null||identity.getEligibleModules().containsAll(Arrays.asList("vetting","advisory")))
+                &&identity.getCandidates().stream().noneMatch(candidate->"DRAWING".equals(candidate.getKind()))
+                &&identity.getIdentityEvidence().stream().anyMatch(evidence->"human_text_contract_material".equals(evidence.getBasis())&&("original:"+identity.getSourceSha256()).equals(evidence.getLocation()));
+    }
 
     void annotate(List<DocumentBlock> blocks) {
         Map<Integer,List<DocumentBlock>> containers=new HashMap<>();Map<List<Object>,List<DocumentBlock>> anchors=new HashMap<>();

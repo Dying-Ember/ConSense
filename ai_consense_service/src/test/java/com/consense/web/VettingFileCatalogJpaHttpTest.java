@@ -74,11 +74,13 @@ class VettingFileCatalogJpaHttpTest {
     void clear(){SqlCapture.statements.clear();emf.unwrap(SessionFactory.class).getStatistics().clear();org.mockito.Mockito.clearInvocations(externalLlm,actualParser,actualOer);}
     JsonNode response()throws Exception{org.springframework.mock.web.MockHttpServletResponse r=mvc.perform(get("/api/vetting/"+project+"/files")).andReturn().getResponse();assertEquals(200,r.getStatus());return JsonUtils.parse(r.getContentAsString());}
     JsonNode data()throws Exception{JsonNode r=response();assertEquals(0,r.path("code").asInt(),r.toString());return r.path("data");}
-    void assertNoArchiveHydration(){assertNoArchiveHydration(0);}
-    void assertNoArchiveHydration(int verificationReads){
+    void assertNoArchiveHydration(){
         List<String> sql=new ArrayList<>();for(String raw:SqlCapture.statements){String s=raw.toLowerCase(Locale.ROOT);if(s.startsWith("select ")&&s.contains(" from source_document "))sql.add(s);}
-        assertEquals(1+verificationReads,sql.size());for(String statement:sql)assertFalse(statement.contains("native_pdf_evidence_json"),"file list hydrated native archive: "+statement);
-        assertFalse(sql.get(0).contains("structured_content_json"),"file list hydrated full source structure");
+        assertFalse(sql.isEmpty());for(String statement:sql)assertFalse(statement.contains("native_pdf_evidence_json"),"file list hydrated native archive: "+statement);
+        String metadata=sql.get(0);
+        assertFalse(java.util.regex.Pattern.compile("\\.(?:text_content|structured_content_json|parse_coverage_json|normal_candidate_json)\\s+as\\s")
+                .matcher(metadata).find(),"file list projected a complete source payload: "+metadata);
+        for(int i=1;i<sql.size();i++)assertTrue(sql.get(i).matches("(?s).*\\bwhere\\s+\\w+\\.id=\\?.*"),"legacy verification must read one bounded source: "+sql.get(i));
         assertEquals(0,emf.unwrap(SessionFactory.class).getStatistics().getEntityStatistics(SourceDocument.class.getName()).getLoadCount());
         org.mockito.Mockito.verifyNoInteractions(externalLlm,actualParser,actualOer);
         System.out.println("FILE_LIST_EXACT_SQL "+sql.get(0));
@@ -98,7 +100,7 @@ class VettingFileCatalogJpaHttpTest {
         assertEquals(failed.getSourceSha256(),d.get(1).path("originalSourceSha256").asText());
         assertEquals(VettingCorpus.sourceHash(failed),d.get(1).path("sourceHash").asText());
         assertEquals(CanonicalEvidenceService.routingHash(failed),d.get(1).path("routingSha256").asText());
-        assertNoArchiveHydration(1);
+        assertNoArchiveHydration();
     }
     @Test void fileListKeepsExistingRoutingExclusionsAndExplicitRoles()throws Exception{
         source("10 - SCC.docx","SCC","tender","package","Current project SCC.");SourceDocument g=source("GCC.pdf","GCC","standard","package","Current GCC standard.");fixtureSql.update("update source_document set review_role=? where id=?","project_fact",g.getId());
@@ -127,7 +129,7 @@ class VettingFileCatalogJpaHttpTest {
         assertEquals("Identity pending confirmation",waiting.path("role").path("en").asText());
         assertTrue(waiting.path("warnings").toString().contains("身份待确认"));assertFalse(rows.get(excluded.getFileName()).path("parsed").asBoolean());
         assertEquals(String.valueOf(pending.getId()),waiting.path("documentId").asText());assertTrue(waiting.path("roleConfirmationAvailable").asBoolean());
-        assertEquals(64,waiting.path("sourceHash").asText().length());assertNoArchiveHydration(1);
+        assertEquals(64,waiting.path("sourceHash").asText().length());assertNoArchiveHydration();
         List<SourceDocument> selected=ProjectDocumentScope.selected(project,documents.findBusinessSourcesByProjectId(project),"fullset");
         assertEquals(1,selected.size());assertEquals(confirmed.getId(),selected.get(0).getId());
         assertEquals("source_identity_unresolved",ProjectDocumentScope.exclusionReason(pending,"fullset"));

@@ -9,6 +9,7 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
+import java.security.MessageDigest;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.zip.*;
@@ -22,13 +23,18 @@ class EnglishFileOutputTest {
     @TempDir Path root;
     final LlmClient client=mock(LlmClient.class);
     final Map<String,String> translated=new LinkedHashMap<>();
+    final Map<String,String> languages=new LinkedHashMap<>();
+    final Map<String,String> recheckedLanguages=new LinkedHashMap<>();
     final List<String> submittedTexts=new ArrayList<>();
+    final List<Integer> batchSizes=new ArrayList<>();
+    final List<JsonNode> submittedSchemas=new ArrayList<>();
+    final Set<Integer> emptyCalls=new HashSet<>();
     final AtomicInteger calls=new AtomicInteger();
     EnglishFileOutput output(){
         ConsenseProperties props=new ConsenseProperties();props.setStorageRoot(root.toString());when(client.available()).thenReturn(true);
         doAnswer(call->{
-            calls.incrementAndGet();List<LlmClient.ChatTurn> turns=call.getArgument(0);JsonNode input=JsonUtils.parse(turns.get(1).getContent());ArrayNode answer=JsonUtils.mapper().createArrayNode();
-            for(JsonNode item:input){String text=item.path("text").asText();submittedTexts.add(text);boolean changed=translated.containsKey(text);answer.addObject().put("id",item.path("id").asText()).put("translated",changed?1:0).put("text",changed?translated.get(text):"");}
+            int callNumber=calls.incrementAndGet();submittedSchemas.add(call.<JsonNode>getArgument(1).deepCopy());List<LlmClient.ChatTurn> turns=call.getArgument(0);JsonNode input=JsonUtils.parse(turns.get(1).getContent());batchSizes.add(input.size());if(emptyCalls.contains(callNumber))return "[]";ArrayNode answer=JsonUtils.mapper().createArrayNode();
+            for(JsonNode item:input){String text=item.path("text").asText();submittedTexts.add(text);boolean changed=translated.containsKey(text);String language=languages.getOrDefault(text,changed?"zh":"en");if(calls.get()>1)language=recheckedLanguages.getOrDefault(text,language);answer.addObject().put("id",item.path("id").asText()).put("sourceLanguage",language).put("translated",changed?1:0).put("text",changed?translated.get(text):"");}
             return JsonUtils.write(answer);
         }).when(client).chatStructured(anyList(),any());return new EnglishFileOutput(new AiGateway(client),new QwenChatUsagePreflight(props,null),props);
     }
@@ -49,7 +55,124 @@ class EnglishFileOutputTest {
     }
     @Test void semanticLanguageCheckAlsoTranslatesLatinScriptForeignText() {
         translated.put("Bonjour, paiement dans 14 jours.","Hello, payment is due within 14 days.");
+        languages.put("Bonjour, paiement dans 14 jours.","fr");
         assertEquals("English translation: Hello, payment is due within 14 days.",output().text("Bonjour, paiement dans 14 jours.","snapshot:french",()->{}));
+    }
+    @Test void foreignLatinNoOpDecisionCannotProduceOrCacheAnEnglishFile()throws Exception{
+        String french="Bonjour, paiement dans 14 jours.";languages.put(french,"fr");
+        assertThrows(BizException.class,()->output().text(french,"snapshot:french-no-op",()->{}));
+        assertEquals(0,Files.walk(root).filter(p->p.getFileName().toString().endsWith(".json")).count());
+    }
+    @Test void threeLetterEnglishLanguageCodeIsAcceptedForUnchangedEnglish(){
+        String source="Payment is due within 14 days.";languages.put(source,"eng");
+        assertEquals(source,output().text(source,"snapshot:english-639-3",()->{}));
+    }
+    @Test void undecidedEnglishHeadingsAreRecheckedOnceWithoutResubmittingTranslatedForeignText() throws Exception {
+        ArrayNode notes=JsonUtils.mapper().createArrayNode();List<String> headings=new ArrayList<>();
+        for(int i=0;i<22;i++){String heading="English clause heading "+i;headings.add(heading);notes.add(heading);languages.put(heading,"und");recheckedLanguages.put(heading,"en");}
+        String foreign="认证后 14 天付款。";notes.add(foreign);translated.put(foreign,"Payment is due 14 days after certification.");
+        JsonNode source=JsonUtils.mapper().createObjectNode().set("notes",notes);EnglishFileOutput exporter=output();
+        JsonNode result=exporter.json(source,"snapshot:uncertain-headings",()->{});
+        for(int i=0;i<headings.size();i++)assertEquals(headings.get(i),result.path("notes").get(i).asText());
+        assertEquals("English translation: Payment is due 14 days after certification.",result.path("notes").get(22).asText());
+        assertEquals(2,calls.get());assertEquals(headings,submittedTexts.subList(23,submittedTexts.size()));
+        assertEquals(result,exporter.json(source,"snapshot:uncertain-headings",()->{}));assertEquals(2,calls.get(),"a validated result is reused");
+    }
+    @Test void undecidedForeignWordsStillFailClosedAfterOneLanguageRecheck() throws Exception {
+        String source="Bonjour, paiement dans 14 jours.";languages.put(source,"und");recheckedLanguages.put(source,"fr");
+        assertThrows(BizException.class,()->output().text(source,"snapshot:undecided-french",()->{}));
+        assertEquals(2,calls.get());assertEquals(List.of(source,source),submittedTexts);
+        assertEquals(0,Files.walk(root).filter(p->p.getFileName().toString().endsWith(".json")).count());
+    }
+    @Test void readableFileTitlesRequireADecidedLanguageOnTheExistingRecheckWithoutRewritingThem(){
+        List<String> titles=List.of("03 - NTT.docx","05 - SCT.docx","05.1(1) - SCT.A_Marking Scheme_DCMBI P04_v4_r1.docx",
+                "05.1(2) - Marking Scheme (assessment std).docx","05.1(3) - Annex 1 to 6.pdf","10 - SCC.docx","11 - Appendices to SCC FLYSHEET.docx","04 - GCT.pdf");
+        ArrayNode notes=JsonUtils.mapper().createArrayNode();for(String title:titles){notes.add(title);languages.put(title,"und");recheckedLanguages.put(title,"en");}
+        JsonNode source=JsonUtils.mapper().createObjectNode().set("notes",notes);EnglishFileOutput exporter=output();
+        assertEquals(source,exporter.json(source,"snapshot:actual-eight-und-file-titles",()->{}));assertEquals(2,calls.get(),"The existing single language recheck is sufficient; no new model action is added");
+        JsonNode initial=submittedSchemas.get(0).path("items").path("properties").path("sourceLanguage");assertFalse(initial.has("enum"),"The initial batch still permits und for actual neutral references");
+        JsonNode allowed=submittedSchemas.get(1).path("items").path("properties").path("sourceLanguage").path("enum");
+        assertTrue(allowed.isArray(),"A readable-word recheck must constrain the provider to actual language codes");
+        Set<String> codes=new HashSet<>();allowed.forEach(value->codes.add(value.asText()));assertTrue(codes.containsAll(List.of("en","eng","fr","fra","zh","zho","mul")));assertFalse(codes.contains("und"));
+        assertEquals(source,exporter.json(source,"snapshot:actual-eight-und-file-titles",()->{}));assertEquals(2,calls.get(),"Only the validated complete delivery can be reused");
+    }
+    @Test void undecidedFileTitlesCannotBeTrustedOrCachedAfterTheSingleRecheck()throws Exception{
+        String title="05.1(2) - Marking Scheme (assessment std).docx";languages.put(title,"und");
+        assertThrows(BizException.class,()->output().text(title,"snapshot:persistent-und-file-title",()->{}));assertEquals(2,calls.get());
+        assertEquals(List.of(title,title),submittedTexts);assertEquals(0,Files.walk(root).filter(p->p.getFileName().toString().endsWith(".json")).count());
+    }
+    @Test void numberedClauseReferencesAreLanguageNeutralButNumberedForeignProseIsNot(){
+        String clause="11. PRE.B6.APPEND5",foreign="1. Bonjour, paiement dans 14 jours.";
+        languages.put(clause,"und");languages.put(foreign,"und");EnglishFileOutput exporter=output();
+        assertEquals(clause,exporter.text(clause,"snapshot:numbered-clause",()->{}));assertEquals(1,calls.get());
+        assertThrows(BizException.class,()->exporter.text(foreign,"snapshot:numbered-foreign-prose",()->{}));assertEquals(3,calls.get());
+    }
+    @Test void numberedSubclauseReferencesStayLiteralWithoutAdmittingForeignProse(){
+        List<String> references=List.of(
+                "2026-10-25T09:54:38Z", "3.S", "PRE.B2", "PRE.B3", "PRE.B4", "PRE.B6", "PRE.B7", "PRE.B8", "PRE.B9", "PRE.B10", "PRE.B11", "PRE.B12",
+                "PRE.B4.030 sub-clause 1", "1. PRE.B2.010", "1. PRE.B3.020", "1. PRE.B4.030 sub-clause 1",
+                "1. PRE.B6.035 sub-clause 10 and PRE.B9.210", "1. PRE.B7.070", "10. PRE.B6.810 sub-clause 1",
+                "11. PRE.B6.APPEND5", "2. PRE.B3.040", "2. PRE.B4.035 sub-clause 1", "2. PRE.B6.050",
+                "3. PRE.B4.035 sub-clause 3, PRE.B6.085 sub-clause 3(c)", "3. PRE.B6.060 sub-clause 1",
+                "4. PRE.B4.085 sub-clause 1(b)(i)", "4. PRE.B6.060 sub-clauses 4 and 5 and PRE.B8.1425 sub-clause 3",
+                "5. PRE.B6.060 sub-clauses 33 and 35", "6. PRE.B6.085 sub-clauses 1(e) and 1(f)",
+                "7. PRE.B6.300", "8. PRE.B6.590", "9. PRE.B6.650",
+                "1. PRE.B8.241 sub-clauses 1, 8 and 10, PRE.B8.APPEND10 and PRE.B8.APPEND11",
+                "2. PRE.B8.510, PRE.B8.520, PRE.B8.610, PRE.B8.892, PRE.B8.1995, PRE.B8.2810, PRE.B8.2820, PRE.B8.4030 and PRE.B8.APPEND9",
+                "3. PRE.B8.2540", "5. PRE.B8.4030 sub-clause 2(c)(ii)", "6. PRE.B8.APPEND12",
+                "1. PRE.B9.116", "2. PRE.B9.530 and PRE.B11.010 sub-clause 3",
+                "2. PRE.B10.710 and PRE.B10.720", "3. PRE.B10.710 sub-clauses 13 and 14, PRE.B10.720 sub-clause 3", "4. PRE.B10.1110",
+                "1. PRE.B11.010 and PRE.B12", "1. PRE.B12.720", "2. PRE.B12.730", "3. PRE.B12.920",
+                "4. PRE.B8.2710 to PRE.B8.2740", "1. PRE.B10.580 to PRE.B10.586",
+                "PRE.B8.2710 to PRE.B8.2740", "PRE.B6.060 sub-clauses 1 to 3");
+        String foreign="3. PRE.B4.035 sub-clause 3, PRE.B6.085 sub-clause 3(c) et paiement";
+        String foreignRange="1. PRE.B10.580 to PRE.B10.586 et paiement";
+        String foreignTail="1. PRE.B11.010 and PRE.B12 et paiement";
+        String englishTail="1. PRE.B11.010 and PRE.B12 requires payment";
+        references.forEach(reference->languages.put(reference,"und"));
+        for(String prose:List.of(foreign,foreignRange,foreignTail,englishTail))languages.put(prose,"und");
+        EnglishFileOutput exporter=output();
+        for(String reference:references)assertEquals(reference,exporter.text(reference,"snapshot:"+reference,()->{}));
+        assertEquals(references.size(),calls.get(),"mechanical references need no uncertain-language retry");
+        for(String prose:List.of(foreign,foreignRange,foreignTail,englishTail))
+            assertThrows(BizException.class,()->exporter.text(prose,"snapshot:"+prose,()->{}));
+        assertEquals(references.size()+8,calls.get(),"prose remains subject to the language retry and strict gate");
+    }
+    @Test void oneEmptyBatchIsSplitOnceAndAllReportSegmentsRemainChecked() throws Exception {
+        emptyCalls.add(2);ArrayNode notes=JsonUtils.mapper().createArrayNode();
+        for(int i=0;i<192;i++)notes.add("English report segment "+i);
+        String foreign="认证后 14 天付款。";notes.add(foreign);translated.put(foreign,"Payment is due 14 days after certification.");
+        JsonNode source=JsonUtils.mapper().createObjectNode().set("notes",notes);EnglishFileOutput exporter=output();
+        JsonNode result=exporter.json(source,"snapshot:full-report-empty-batch",()->{});
+        for(int i=0;i<192;i++)assertEquals(notes.get(i),result.path("notes").get(i));
+        assertEquals("English translation: Payment is due 14 days after certification.",result.path("notes").get(192).asText());
+        assertEquals(List.of(32,32,16,16,32,32,32,32,1),batchSizes);
+        assertEquals(9,calls.get());assertEquals(result,exporter.json(source,"snapshot:full-report-empty-batch",()->{}));assertEquals(9,calls.get());
+    }
+    @Test void aSecondEmptySplitCannotProduceOrCacheAnIncompleteReport() throws Exception {
+        emptyCalls.addAll(List.of(2,3));ArrayNode notes=JsonUtils.mapper().createArrayNode();
+        for(int i=0;i<65;i++)notes.add("English report segment "+i);
+        JsonNode source=JsonUtils.mapper().createObjectNode().set("notes",notes);
+        assertThrows(BizException.class,()->output().json(source,"snapshot:repeated-empty-batch",()->{}));
+        assertEquals(List.of(32,32,16),batchSizes);
+        assertEquals(0,Files.walk(root).filter(p->p.getFileName().toString().endsWith(".json")).count());
+    }
+    @Test void numericLeadingAsciiIdentifiersRemainLiteralButUndeterminedProseStillFailsClosed(){
+        String timestamp="2026-10-25T10:34:36Z",reference="1.A",prose="14 jours de paiement",wordWithDigit="1Bonjour";
+        for(String value:List.of(timestamp,reference,prose,wordWithDigit))languages.put(value,"und");
+        EnglishFileOutput exporter=output();
+        assertEquals(timestamp,exporter.text(timestamp,"snapshot:timestamp",()->{}));
+        assertEquals(reference,exporter.text(reference,"snapshot:reference",()->{}));
+        assertThrows(BizException.class,()->exporter.text(prose,"snapshot:prose",()->{}));
+        assertThrows(BizException.class,()->exporter.text(wordWithDigit,"snapshot:word-with-digit",()->{}));
+    }
+    @Test void previousPolicyEnglishParaphraseCacheCannotBypassValidation()throws Exception{
+        String english="Payment is due within 14 days.",paraphrase="Payment shall be made within 14 days.",reference="snapshot:old-english";
+        String key=HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(("english-delivery-copy-v6\nlegacy-deployment\n"+reference+"\n"+JsonUtils.write(List.of(english))).getBytes(StandardCharsets.UTF_8)));
+        String sourceSha=HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(english.getBytes(StandardCharsets.UTF_8)));
+        Path old=root.resolve("english-file-output/english-delivery-copy-v6");Files.createDirectories(old);
+        Files.writeString(old.resolve(key+".json"),JsonUtils.write(Map.of("policy","english-delivery-copy-v6","key",key,"segments",List.of(Map.of("id","T0","sourceTextSha256",sourceSha,"sourceLanguage","en","translated",1,"text",paraphrase)))));
+        translated.put(english,paraphrase);languages.put(english,"en");assertThrows(BizException.class,()->output().text(english,reference,()->{}));assertEquals(1,calls.get());
     }
     @Test void jsonIsAnIndependentPresentationWithEnglishTranslationLabelsAndUnchangedTypes() {
         translated.put("待核对","Requires review");translated.put("认证后 14 天付款。","Payment is due 14 days after certification.");
@@ -61,17 +184,19 @@ class EnglishFileOutputTest {
     @Test void jsonNeverSubmitsLanguageCodesIdentifiersReferencesOrCategoricalValuesEvenWhenTheModelWouldRewriteThem(){
         translated.put("en","English");translated.put("run-42","Changed run 42");translated.put("OPEN","Open state");translated.put("1(R5)","Clause 1 reference 5");
         translated.put("待核对","Requires review");translated.put("Bonjour, paiement dans 14 jours.","Hello, payment is due within 14 days.");
+        languages.put("Bonjour, paiement dans 14 jours.","fr");
         JsonNode source=JsonUtils.parse("{\"schemaVersion\":\"2.0\",\"language\":\"en\",\"reportLanguage\":\"en\",\"presentationVersion\":\"vetting-english-presentation-v2\",\"sourceRunId\":\"run-42\",\"id\":\"run-42\",\"status\":\"OPEN\",\"phase\":\"DONE\",\"code\":\"F01\",\"types\":[\"f2-iii\"],\"refs\":\"1(R5)\",\"anchor\":\"body/1/paragraph\",\"clauseId\":\"1(r5)\",\"referenceIds\":[\"R5\"],\"modelIdentity\":{\"profileId\":\"profile-42\",\"model\":\"model-42\"},\"canonicalEvidenceReference\":{\"canonicalChunkId\":\"chunk-42\"},\"inputBudget\":{\"status\":\"observed_tokens\",\"reason\":\"token_observation_missing\"},\"note\":\"待核对\",\"notes\":[\"Bonjour, paiement dans 14 jours.\"]}");
         ((com.fasterxml.jackson.databind.node.ObjectNode)source).put("sourceSnapshotSha256","abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789");
         String before=JsonUtils.write(source);JsonNode result=output().json(source,"snapshot:mechanical",()->{});
         assertEquals(List.of("待核对","Bonjour, paiement dans 14 jours."),submittedTexts);
         for(String field:List.of("schemaVersion","language","reportLanguage","presentationVersion","sourceRunId","sourceSnapshotSha256","id","status","phase","code","types","refs","anchor","clauseId","referenceIds","modelIdentity","canonicalEvidenceReference","inputBudget"))assertEquals(source.get(field),result.get(field),field);
-        assertEquals("English translation: Requires review",result.path("note").asText());assertEquals("English translation: Hello, payment is due within 14 days.",result.path("notes").get(0).asText());assertEquals(before,JsonUtils.write(source));assertEquals("english-delivery-copy-v5",EnglishFileOutput.POLICY);
+        assertEquals("English translation: Requires review",result.path("note").asText());assertEquals("English translation: Hello, payment is due within 14 days.",result.path("notes").get(0).asText());assertEquals(before,JsonUtils.write(source));assertEquals("english-delivery-copy-v7",EnglishFileOutput.POLICY);
     }
     @Test void jsonTranslationChangesOnlyTheReaderSlotWhenAnIdenticalStringIsAlsoAReference(){
-        translated.put("OPEN","Open for review");JsonNode source=JsonUtils.parse("{\"status\":\"OPEN\",\"id\":\"OPEN\",\"note\":\"OPEN\",\"canonicalEvidenceReference\":{\"title\":\"OPEN\"}}");
+        String french="Bonjour, paiement dans 14 jours.";translated.put(french,"Hello, payment is due within 14 days.");languages.put(french,"fr");
+        JsonNode source=JsonUtils.parse("{\"status\":\"OPEN\",\"id\":\"OPEN\",\"note\":\"Bonjour, paiement dans 14 jours.\",\"canonicalEvidenceReference\":{\"title\":\"Bonjour, paiement dans 14 jours.\"}}");
         JsonNode result=output().json(source,"snapshot:shared-text",()->{});
-        assertEquals(List.of("OPEN"),submittedTexts);assertEquals("English translation: Open for review",result.path("note").asText());
+        assertEquals(List.of(french),submittedTexts);assertEquals("English translation: Hello, payment is due within 14 days.",result.path("note").asText());
         assertEquals("OPEN",result.path("status").asText());assertEquals("OPEN",result.path("id").asText());assertEquals(source.get("canonicalEvidenceReference"),result.get("canonicalEvidenceReference"));
     }
     @Test void explicitNonEnglishMechanicalFieldsFailBeforeAnyModelSubmissionAndRetainTheOriginal(){
@@ -92,7 +217,7 @@ class EnglishFileOutputTest {
         assertEquals("English translation: Contract 42",result.path("project").path("contractNo").asText());assertEquals("English translation: Contract 42",result.path("packageIdentityPresentation").path("contractNumber").asText());assertEquals("English translation: Package 42",result.path("project").path("packageRef").asText());assertEquals("project-42",result.path("project").path("id").asText());assertEquals("合约 42",source.path("project").path("contractNo").asText());
     }
     @Test void missingDuplicateUnchangedForeignAndChangedNumbersNeverReturnPartialFiles() {
-        EnglishFileOutput.Translation row=new EnglishFileOutput.Translation();row.setId("T0");row.setTranslated(1);row.setText("Payment is due after 21 days.");
+        EnglishFileOutput.Translation row=new EnglishFileOutput.Translation();row.setId("T0");row.setSourceLanguage("zh");row.setTranslated(1);row.setText("Payment is due after 21 days.");
         assertThrows(BizException.class,()->EnglishFileOutput.validate(List.of("14 天付款"),List.of(row)));
         row.setTranslated(0);row.setText("");assertThrows(BizException.class,()->EnglishFileOutput.validate(List.of("14 天付款"),List.of(row)));
         assertThrows(BizException.class,()->EnglishFileOutput.validate(List.of("English"),List.of()));
@@ -114,13 +239,19 @@ class EnglishFileOutputTest {
         EnglishFileOutput exporter=output();assertThrows(BizException.class,()->exporter.docx("not a docx".getBytes(StandardCharsets.UTF_8),"snapshot:invalid",()->{}));assertEquals(0,calls.get());
     }
     @Test void numericRolesCannotBeExchangedEvenWhenTheSameDigitValuesRemain(){
-        EnglishFileOutput.Translation row=new EnglishFileOutput.Translation();row.setId("T0");row.setTranslated(1);row.setText("Party A pays after 21 days; Party B pays after 14 days.");
+        EnglishFileOutput.Translation row=new EnglishFileOutput.Translation();row.setId("T0");row.setSourceLanguage("zh");row.setTranslated(1);row.setText("Party A pays after 21 days; Party B pays after 14 days.");
         assertThrows(BizException.class,()->EnglishFileOutput.validate(List.of("甲方14天付款；乙方21天付款。"),List.of(row)));
         row.setText("Party A pays after 14 days; Party B pays after 21 days.");assertEquals(1,EnglishFileOutput.validate(List.of("甲方14天付款；乙方21天付款。"),List.of(row)).size());
     }
     @Test void aDeclaredTranslationCannotReturnTheUnchangedLatinForeignSentence(){
-        EnglishFileOutput.Translation row=new EnglishFileOutput.Translation();row.setId("T0");row.setTranslated(1);row.setText("Bonjour, paiement dans 14 jours.");
+        EnglishFileOutput.Translation row=new EnglishFileOutput.Translation();row.setId("T0");row.setSourceLanguage("fr");row.setTranslated(1);row.setText("Bonjour, paiement dans 14 jours.");
         assertThrows(BizException.class,()->EnglishFileOutput.validate(List.of("Bonjour, paiement dans 14 jours."),List.of(row)));
+    }
+    @Test void englishParaphrasesFailButMixedLanguageTranslationRemainsValid(){
+        EnglishFileOutput.Translation row=new EnglishFileOutput.Translation();row.setId("T0");row.setTranslated(1);row.setText("Payment shall be made within 14 days.");
+        for(String language:List.of("en","eng")){row.setSourceLanguage(language);assertThrows(BizException.class,()->EnglishFileOutput.validate(List.of("Payment is due within 14 days."),List.of(row)));}
+        row.setSourceLanguage("mul");row.setText("The contractor shall pay within 14 days.");
+        assertEquals(Map.of("The contractor shall 付款 14 天.","The contractor shall pay within 14 days."),EnglishFileOutput.validate(List.of("The contractor shall 付款 14 天."),List.of(row)));
     }
     @Test void nativeNumberingChartStringsCustomPropertiesAndNamespacedAuthorAreTranslated()throws Exception{
         translated.put("第%1章","Chapter %1");translated.put("工程甲","Works A");translated.put("待核对","Requires review");translated.put("作者甲","Author A");

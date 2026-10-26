@@ -45,7 +45,10 @@ class OerModelMaterialCanonicalTableTest {
         SourceDocumentRepository repository=mock(SourceDocumentRepository.class);
         AdviceService service=new AdviceService(null,null,null,null,null,repository,null,null,null,canonical,null);
         VectorStore.SearchHit seed=hits.values().stream().filter(hit->"Excluded library C".equals(hit.text())).findFirst().get();String unchanged=JsonUtils.write(seed);
-        List<VectorStore.SearchHit> selected=canonical.advisoryContext(session,Collections.singletonList(seed),false,0);
+        List<VectorStore.SearchHit> textFirst=canonical.advisoryTextContext(session,Collections.singletonList(seed));
+        assertEquals(Collections.singletonList(seed),textFirst);assertEquals(unchanged,JsonUtils.write(seed));
+        verifyNoInteractions(reader,repository);verify(canonical,never()).sourceHits(any(),anyList());
+        List<VectorStore.SearchHit> selected=canonical.advisoryTableContext(session,textFirst);
         assertEquals(4,selected.size());assertSame(seed,selected.get(0));assertEquals(unchanged,JsonUtils.write(seed));
         List<String> texts=new ArrayList<>(),locations=new ArrayList<>();
         for(VectorStore.SearchHit hit:selected){CitationVO citation=ReflectionTestUtils.invokeMethod(service,"toCitation",hit);texts.add(citation.getContent());locations.add(citation.getAnchor());

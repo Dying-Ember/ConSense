@@ -1,4 +1,5 @@
 import { api } from './client'
+import type { FixedBaselineEvidence } from './fixedBaselineEvidence'
 import { reviewSourceBindings } from './source-locations'
 import type { ReviewBootstrap, ReviewGraph, ReviewHead, ReviewReading, ReviewRevision, ReviewRevisionSummary } from '@/drafting/source-review-types'
 import type { DraftAutomationBinding, DraftAutomationRun } from '@/drafting/automation-types'
@@ -57,13 +58,28 @@ export { api, ApiError, setApiErrorReporter, captureLlmSelection, setLlmProfileR
 
 /* ------------------------------------------------------------ 项目 */
 
-export interface FixedSlSource { editionId: string; sha256: string }
+export interface FixedSlSource { editionId: string; sha256: string; label?: string }
 export interface FixedReferenceSelection { manifestSha256: string; slSources: FixedSlSource[] }
 export interface FixedReferenceSelectionStatus { manifestSha256: string; availableSlSources: FixedSlSource[]; selection: FixedReferenceSelection | null }
 export const fixedReferenceApi = {
   status: () => api.get<{ configured: boolean }>('/oer/fixed-baseline/status', { reportError: false }),
   selection: (projectId: string) => api.get<FixedReferenceSelectionStatus>(`/oer/fixed-baseline/projects/${encodeURIComponent(projectId)}/selection`, { reportError: false }),
-  save: (projectId: string, selection: FixedReferenceSelection) => api.put<FixedReferenceSelectionStatus>(`/oer/fixed-baseline/projects/${encodeURIComponent(projectId)}/selection`, selection, { reportError: false })
+  save: (projectId: string, selection: FixedReferenceSelection) => api.put<FixedReferenceSelectionStatus>(`/oer/fixed-baseline/projects/${encodeURIComponent(projectId)}/selection`, selection, { reportError: false }),
+  search: (projectId: string, module: 'vetting' | 'advisory', query: string) => api.post<FixedBaselineEvidence[]>('/oer/fixed-baseline/search', { projectId, module, query, limit: 10 }, { reportError: false, timeout: 120000 })
+}
+
+export interface SlLibraryVersion {
+  editionId: string; label?: string; technicalPages?: number | null; parsedPages?: number | null
+  clauseCount?: number | null; indexedChunks?: number | null; status: string
+}
+export interface SlLibraryStatus {
+  versions: SlLibraryVersion[]
+  job: { status: string; stage?: string; currentEdition?: string | null; processedPages?: number | null; totalPages?: number | null; message?: string }
+  retrievalAvailable: boolean
+}
+export const slLibraryApi = {
+  status: () => api.get<SlLibraryStatus>('/oer/sl-library/status', { reportError: false }),
+  build: () => api.post<unknown>('/oer/sl-library/build', {}, { reportError: false, timeout: 20000 })
 }
 
 export const projectApi = {
@@ -170,8 +186,34 @@ export const draftingApi = {
 
 /* ------------------------------------------------------------ 审查 */
 
+export interface VettingSourceReviewFile extends VettingFile { businessContentSha256?: string | null }
+export interface VettingParsedTextPage {
+  documentId: string; fileName: string; parseStatus: string
+  originalSourceSha256: string; routingSha256: string; businessContentSha256: string; textContentSha256: string
+  physicalPage: number | null; pageCount: number; textPart?: number; textPartCount?: number
+  status: 'saved_text' | 'no_saved_text' | 'detailed_parsing_not_started'
+  pageNumberAuthority: 'saved_parser_physical_page_markers' | 'unpaginated_saved_text'
+  text: string; semanticQuality: 'unknown'; canonicalAdoption: 'not_performed'
+}
+export interface VettingParsedTable {
+  method: string; physicalPage: number; rowCount: number; colCount: number
+  cells: Array<{ row: number; col: number; rowSpan: number; colSpan: number; text: string }>
+  continuationStatus: 'unknown'
+}
+export interface VettingParsedTablesPage {
+  documentId: string; physicalPage: number
+  originalSourceSha256: string; routingSha256: string; businessContentSha256: string
+  tableStatus: 'saved_tables' | 'no_saved_tables' | 'unavailable' | 'not_supported'
+  tables: VettingParsedTable[]
+  semanticQuality: 'unknown'; canonicalAdoption: 'not_performed'
+}
+
 export const vettingApi = {
-  files: (projectId: string) => api.get<VettingFile[]>(`/vetting/${projectId}/files`),
+  files: (projectId: string) => api.get<VettingSourceReviewFile[]>(`/vetting/${projectId}/files`),
+  parsedText: (projectId: string, documentId: string, pins: { originalSourceSha256: string; routingSha256: string; businessContentSha256: string }, page: number) =>
+    api.get<VettingParsedTextPage>(`/vetting/${encodeURIComponent(projectId)}/sources/${encodeURIComponent(documentId)}/parsed-text?${new URLSearchParams({ ...pins, page: String(page) })}`, { reportError: false }),
+  parsedTables: (projectId: string, documentId: string, pins: { originalSourceSha256: string; routingSha256: string; businessContentSha256: string }, page: number) =>
+    api.get<VettingParsedTablesPage>(`/vetting/${encodeURIComponent(projectId)}/sources/${encodeURIComponent(documentId)}/parsed-tables?${new URLSearchParams({ ...pins, page: String(page) })}`, { reportError: false }),
   sourceProgress: (projectId: string) => api.get<import('./types').VettingSourceProgress[]>(`/vetting/${projectId}/sources/progress`),
   confirmSourceRole: (projectId: string, documentId: string, request: VettingSourceRoleUpdate) =>
     api.put<VettingFile>(`/vetting/${encodeURIComponent(projectId)}/sources/${encodeURIComponent(documentId)}/role`, request, request.confirmTextContractMaterial ? { timeout: 7_200_000 } : undefined),
@@ -184,11 +226,13 @@ export const vettingApi = {
   run: (projectId: string, lang: string) =>
     api.post<VettingRunResult>(`/vetting/${projectId}/run?lang=${encodeURIComponent(lang)}`),
   startRun: (projectId: string, lang: string, llmSelection?: LlmSelection) =>
-    api.post<VettingJob>(`/vetting/${projectId}/runs?lang=${encodeURIComponent(lang)}`, undefined, { timeout: 30000, llmSelection }),
+    api.post<VettingJob>(`/vetting/${projectId}/runs?lang=${encodeURIComponent(lang)}`, undefined, { timeout: 300000, llmSelection }),
   latestRun: (projectId: string) =>
     api.get<VettingJob | null>(`/vetting/${projectId}/runs/latest`, { timeout: 15000 }),
   getRun: (projectId: string, id: string) =>
     api.get<VettingJob>(`/vetting/${projectId}/runs/${encodeURIComponent(id)}`, { timeout: 15000 }),
+  getRunDisplay: (projectId: string, id: string) =>
+    api.get<VettingJob>(`/vetting/${projectId}/runs/${encodeURIComponent(id)}/display`, { timeout: 15000 }),
   latestRunProgress: (projectId: string) =>
     api.get<VettingProgress | null>(`/vetting/${projectId}/runs/latest/progress`, { timeout: 15000 }),
   getRunProgress: (projectId: string, id: string) =>
@@ -219,8 +263,9 @@ export const vettingApi = {
       runSnapshotSha256: binding.runSnapshotSha256, items
     }),
   exportReport: (projectId: string, fallbackName: string, format: VettingReportFormat = 'pdf') =>
-    api.download(`/vetting/${projectId}/report.${format}?lang=en`, fallbackName,
-      format === 'json' ? { jsonDocument: value => {
+    api.download(`/vetting/${projectId}/report.${format}?lang=en`, fallbackName, {
+      timeout: 600000,
+      jsonDocument: format === 'json' ? value => {
         if (!value || typeof value !== 'object') return false
         const report = value as Record<string, unknown>
         const project = report.project as { id?: unknown } | null
@@ -233,7 +278,8 @@ export const vettingApi = {
           && report.sourceRunId === job.id && sha256(report.sourceReportSnapshotId) && sha256(report.sourceSnapshotSha256)
           && diagnostics?.retainedServerSide === true && diagnostics.sourceRunId === job.id && diagnostics.sourceReportSnapshotId === report.sourceReportSnapshotId
           && ['findings', 'commentsTables', 'checklistTables', 'checklistResults'].every(key => Array.isArray(report[key]))
-      } } : undefined)
+      } : undefined
+    })
 }
 
 /* ------------------------------------------------------------ 咨询 */
@@ -246,7 +292,7 @@ export const adviceApi = {
     api.post<AdviceSession>(`/advice/${encodeURIComponent(projectId)}/sessions`, { scope, basisScope }),
   sources: (projectId: string, scope: string) =>
     api.get<AdviceSourceDocument[]>(`/advice/${encodeURIComponent(projectId)}/sources?scope=${encodeURIComponent(scope)}`),
-  rebuildIndex: (projectId: string, scope = 'fullset') => api.post<IndexStatus>(`/advice/${encodeURIComponent(projectId)}/index/rebuild?scope=${encodeURIComponent(scope)}`, undefined, { reportError: false }),
+  rebuildIndex: (projectId: string, scope = 'fullset') => api.post<IndexStatus>(`/advice/${encodeURIComponent(projectId)}/index/rebuild?scope=${encodeURIComponent(scope)}`, undefined, { reportError: false, timeout: 2400000 }),
   indexStatus: (projectId: string, scope = 'fullset') => api.get<IndexStatus>(`/advice/${encodeURIComponent(projectId)}/index/status?scope=${encodeURIComponent(scope)}`, { reportError: false }),
   messages: (projectId: string, sessionId?: string) => api.get<ChatMessage[]>(`/advice/${projectId}/messages${sessionId ? '?sessionId=' + encodeURIComponent(sessionId) : ''}`),
   clearMessages: (projectId: string, sessionId?: string) => api.delete<void>(`/advice/${projectId}/messages${sessionId ? '?sessionId=' + encodeURIComponent(sessionId) : ''}`),

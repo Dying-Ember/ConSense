@@ -5,6 +5,7 @@ import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.*;
+import java.util.regex.*;
 import java.util.zip.*;
 import javax.xml.XMLConstants;
 import javax.xml.parsers.DocumentBuilderFactory;
@@ -41,15 +42,38 @@ public final class DocxTemplateEditor {
         return new DocxEditResult(result,load(result).index,model.index.sourceSha256,Collections.emptyList(),Collections.emptyList(),model.index.entryHashes,"libreoffice-latin-hints-v1",changes);
     }
     /** Source-bound named paragraphs; current paths are resolved only inside the frozen package. */
+    public static final class NativeHeadingGap {
+        private final String bookmark,sourceSha256;
+        public NativeHeadingGap(String bookmark,String sourceSha256){if(bookmark==null||!bookmark.matches("CS[A-Za-z0-9]{1,38}")||sourceSha256==null||!sourceSha256.matches("[a-f0-9]{64}"))throw error("HEADING_FLOW_IDENTITY_INVALID","heading-gap");this.bookmark=bookmark;this.sourceSha256=sourceSha256;}
+        public String getBookmark(){return bookmark;}public String getSourceSha256(){return sourceSha256;}
+    }
     public static final class NativeHeadingFlow {
-        private final String headingBookmark,bodyBookmark;private final int emptyParagraphs;
-        public NativeHeadingFlow(String headingBookmark,String bodyBookmark,int emptyParagraphs){if(headingBookmark==null||bodyBookmark==null||!headingBookmark.matches("CS[A-Za-z0-9]{1,38}")||!bodyBookmark.matches("CS[A-Za-z0-9]{1,38}")||headingBookmark.equals(bodyBookmark)||emptyParagraphs<0)throw error("HEADING_FLOW_IDENTITY_INVALID","heading-flow");this.headingBookmark=headingBookmark;this.bodyBookmark=bodyBookmark;this.emptyParagraphs=emptyParagraphs;}
-        public String getHeadingBookmark(){return headingBookmark;}public String getBodyBookmark(){return bodyBookmark;}public int getEmptyParagraphs(){return emptyParagraphs;}
+        private final String headingBookmark,bodyBookmark;private final int emptyParagraphs;private final List<NativeHeadingGap> sourceGaps;
+        public NativeHeadingFlow(String headingBookmark,String bodyBookmark,int emptyParagraphs){this(headingBookmark,bodyBookmark,emptyParagraphs,Collections.emptyList());}
+        public NativeHeadingFlow(String headingBookmark,String bodyBookmark,int emptyParagraphs,List<NativeHeadingGap> sourceGaps){if(headingBookmark==null||bodyBookmark==null||!headingBookmark.matches("CS[A-Za-z0-9]{1,38}")||!bodyBookmark.matches("CS[A-Za-z0-9]{1,38}")||headingBookmark.equals(bodyBookmark)||emptyParagraphs<0||sourceGaps==null||!sourceGaps.isEmpty()&&sourceGaps.size()!=emptyParagraphs||sourceGaps.stream().anyMatch(Objects::isNull))throw error("HEADING_FLOW_IDENTITY_INVALID","heading-flow");this.headingBookmark=headingBookmark;this.bodyBookmark=bodyBookmark;this.emptyParagraphs=emptyParagraphs;this.sourceGaps=Collections.unmodifiableList(new ArrayList<>(sourceGaps));}
+        public String getHeadingBookmark(){return headingBookmark;}public String getBodyBookmark(){return bodyBookmark;}public int getEmptyParagraphs(){return emptyParagraphs;}public List<NativeHeadingGap> getSourceGaps(){return sourceGaps;}
     }
     /** Validate the complete registered denominator, then add only measured heading page boundaries. */
     public DocxEditResult updateNativeHeadingBoundaries(byte[] sourceDocx,String expectedSha256,List<NativeHeadingFlow> flows,Set<String> splitHeadings){
         PackageModel model=load(sourceDocx);if(!model.index.sourceSha256.equals(expectedSha256))throw error("SOURCE_HASH_MISMATCH","heading-flow");
         if(flows==null||flows.isEmpty()||splitHeadings==null)throw error("HEADING_FLOW_SCOPE_REQUIRED","heading-flow");
+        Map<String,Element> headings=validateNativeHeadingFlows(model,flows,null);
+        if(!headings.keySet().containsAll(splitHeadings))throw error("HEADING_FLOW_TARGET_SET_MISMATCH","heading-flow");
+        if(splitHeadings.isEmpty())return new DocxEditResult(sourceDocx,model.index);
+        byte[] original=model.entries.get(MAIN);Document document=model.xmlParts.get(MAIN);if(!Arrays.equals(original,tocXmlKeepingOriginalDeclaration(document,original)))throw error("HEADING_BOUNDARY_XML_NOT_REVERSIBLE","heading-flow");
+        Map<Element,Element> previous=new LinkedHashMap<>();
+        for(String name:nativeHeadingRepairRoots(flows,splitHeadings)){Element heading=headings.get(name);List<Element> props=direct(heading,"pPr");Element old=props.isEmpty()?null:(Element)props.get(0).cloneNode(true);previous.put(heading,old);if(!props.isEmpty())for(Element value:new ArrayList<>(direct(props.get(0),"pageBreakBefore")))props.get(0).removeChild(value);pageBreakBeforeHeading(heading);}
+        byte[] changed=tocXmlKeepingOriginalDeclaration(document,original);
+        for(Map.Entry<Element,Element> entry:previous.entrySet()){Element current=direct(entry.getKey(),"pPr").get(0);if(entry.getValue()==null)entry.getKey().removeChild(current);else entry.getKey().replaceChild(entry.getValue(),current);}
+        if(!Arrays.equals(original,tocXmlKeepingOriginalDeclaration(document,original)))throw error("HEADING_BOUNDARY_XML_NOT_REVERSIBLE","heading-flow");
+        model.entries.put(MAIN,changed);byte[] result=write(model.entries);TemplateIndex index=load(result).index;for(Map.Entry<String,String> entry:model.index.entryHashes.entrySet())if(!MAIN.equals(entry.getKey())&&!entry.getValue().equals(index.entryHashes.get(entry.getKey())))throw error("HEADING_BOUNDARY_PART_CHANGED",entry.getKey());
+        return new DocxEditResult(result,index,model.index.sourceSha256,Collections.emptyList(),Collections.emptyList(),model.index.entryHashes);
+    }
+    /** Read-only TOC fallback authority; retained original guidance never certifies heading pagination. */
+    public int verifyNativeHeadingRetainedSourceGaps(byte[] sourceDocx,String expectedSha256,List<NativeHeadingFlow> flows){
+        PackageModel model=load(sourceDocx);if(!model.index.sourceSha256.equals(expectedSha256))throw error("SOURCE_HASH_MISMATCH","heading-flow");if(flows==null||flows.isEmpty())throw error("HEADING_FLOW_SCOPE_REQUIRED","heading-flow");Set<String> retained=new LinkedHashSet<>();validateNativeHeadingFlows(model,flows,retained);if(retained.isEmpty())throw error("HEADING_FLOW_RETAINED_GAP_REQUIRED","heading-flow");return retained.size();
+    }
+    private static Map<String,Element> validateNativeHeadingFlows(PackageModel model,List<NativeHeadingFlow> flows,Set<String> retained){
         Map<String,Element> names=new LinkedHashMap<>(),headings=new LinkedHashMap<>();
         Map<Element,String> owners=new IdentityHashMap<>();Set<String> bodyNames=new HashSet<>();
         Set<Element> gaps=Collections.newSetFromMap(new IdentityHashMap<>());
@@ -63,20 +87,19 @@ public final class DocxTemplateEditor {
             validateHeadingFlowParagraph(heading,true,flow.headingBookmark);validateHeadingFlowParagraph(body,false,flow.bodyBookmark);
             if(descendantText(heading,"t").trim().isEmpty()||descendantText(body,"t").trim().isEmpty())throw error("HEADING_FLOW_TEXT_MISSING",flow.headingBookmark);
             headings.put(flow.headingBookmark,heading);Node next=nextNativeFlowSibling(heading);int count=0;
-            while(next!=null&&next!=body){if(next instanceof Element){Element gap=(Element)next;if(!is(gap,"p")||!gaps.add(gap)||!descendantText(gap,"t").trim().isEmpty())throw error("HEADING_FLOW_CHAIN_CHANGED",flow.headingBookmark);validateHeadingFlowParagraph(gap,false,flow.headingBookmark);count++;}next=nextNativeFlowSibling(next);}
+            while(next!=null&&next!=body){if(next instanceof Element){Element gap=(Element)next;if(!is(gap,"p")||!gaps.add(gap))throw error("HEADING_FLOW_CHAIN_CHANGED",flow.headingBookmark);if(!descendantText(gap,"t").trim().isEmpty()){if(retained==null||flow.sourceGaps.size()!=flow.emptyParagraphs||count>=flow.sourceGaps.size())throw error("HEADING_FLOW_CHAIN_CHANGED",flow.headingBookmark);verifyOriginalHeadingGap(model,gap,flow.sourceGaps.get(count),retained);}validateHeadingFlowParagraph(gap,false,flow.headingBookmark);count++;}next=nextNativeFlowSibling(next);}
             if(next!=body||count!=flow.emptyParagraphs)throw error("HEADING_FLOW_CHAIN_CHANGED",flow.headingBookmark);
         }
         for(Element gap:gaps)if(owners.containsKey(gap))throw error("HEADING_FLOW_CHAIN_CHANGED","heading-flow");
-        if(!headings.keySet().containsAll(splitHeadings))throw error("HEADING_FLOW_TARGET_SET_MISMATCH","heading-flow");
-        if(splitHeadings.isEmpty())return new DocxEditResult(sourceDocx,model.index);
-        byte[] original=model.entries.get(MAIN);Document document=model.xmlParts.get(MAIN);if(!Arrays.equals(original,tocXmlKeepingOriginalDeclaration(document,original)))throw error("HEADING_BOUNDARY_XML_NOT_REVERSIBLE","heading-flow");
-        Map<Element,Element> previous=new LinkedHashMap<>();
-        for(String name:nativeHeadingRepairRoots(flows,splitHeadings)){Element heading=headings.get(name);List<Element> props=direct(heading,"pPr");Element old=props.isEmpty()?null:(Element)props.get(0).cloneNode(true);previous.put(heading,old);if(!props.isEmpty())for(Element value:new ArrayList<>(direct(props.get(0),"pageBreakBefore")))props.get(0).removeChild(value);pageBreakBeforeHeading(heading);}
-        byte[] changed=tocXmlKeepingOriginalDeclaration(document,original);
-        for(Map.Entry<Element,Element> entry:previous.entrySet()){Element current=direct(entry.getKey(),"pPr").get(0);if(entry.getValue()==null)entry.getKey().removeChild(current);else entry.getKey().replaceChild(entry.getValue(),current);}
-        if(!Arrays.equals(original,tocXmlKeepingOriginalDeclaration(document,original)))throw error("HEADING_BOUNDARY_XML_NOT_REVERSIBLE","heading-flow");
-        model.entries.put(MAIN,changed);byte[] result=write(model.entries);TemplateIndex index=load(result).index;for(Map.Entry<String,String> entry:model.index.entryHashes.entrySet())if(!MAIN.equals(entry.getKey())&&!entry.getValue().equals(index.entryHashes.get(entry.getKey())))throw error("HEADING_BOUNDARY_PART_CHANGED",entry.getKey());
-        return new DocxEditResult(result,index,model.index.sourceSha256,Collections.emptyList(),Collections.emptyList(),model.index.entryHashes);
+        return headings;
+    }
+    private static void verifyOriginalHeadingGap(PackageModel model,Element gap,NativeHeadingGap source,Set<String> retained){
+        if(headingFlowBookmark(model,source.bookmark)!=gap||!retained.add(source.bookmark))throw error("HEADING_FLOW_CHAIN_CHANGED",source.bookmark);
+        Element copy=(Element)gap.cloneNode(true);String markerId=null;NodeList starts=copy.getElementsByTagNameNS(W,"bookmarkStart");
+        for(int i=0;i<starts.getLength();i++){Element start=(Element)starts.item(i);if(source.bookmark.equals(start.getAttributeNS(W,"name")))markerId=start.getAttributeNS(W,"id");}
+        // Only the source CS range was added; every other original node and property must hash identically.
+        for(String kind:Arrays.asList("bookmarkStart","bookmarkEnd")){NodeList markers=copy.getElementsByTagNameNS(W,kind);for(int i=markers.getLength()-1;i>=0;i--){Element marker=(Element)markers.item(i);if(Objects.equals(markerId,marker.getAttributeNS(W,"id")))marker.getParentNode().removeChild(marker);}}
+        if(!source.sourceSha256.equals(hash(xml(copy))))throw error("HEADING_FLOW_RETAINED_SOURCE_CHANGED",source.bookmark);
     }
     /** Move the whole verified predecessor chain, so a repaired intro cannot strand its own heading. */
     public static Set<String> nativeHeadingRepairRoots(List<NativeHeadingFlow> flows,Set<String> measuredSplits){
@@ -210,19 +233,32 @@ public final class DocxTemplateEditor {
         for(TocPageReference reference:references)targets.add(reference.targetBookmark);
         if(references.isEmpty()||measuredPages==null||!targets.equals(measuredPages.keySet()))throw error("TOC_CACHE_TARGET_SET_MISMATCH","toc-cache");
         byte[] original=model.entries.get(MAIN);Document document=model.xmlParts.get(MAIN);
-        if(!Arrays.equals(original,tocXmlKeepingOriginalDeclaration(document,original)))throw error("TOC_CACHE_XML_NOT_REVERSIBLE","toc-cache");
-        Map<Element,String> before=new LinkedHashMap<>();
+        Map<Element,String> replacements=new LinkedHashMap<>();
         for(TocPageReference reference:references) {
             String page=measuredPages.get(reference.targetBookmark);
             if(page==null||!page.matches("[1-9][0-9]*")||page.length()!=reference.cachedPage.length())throw error("TOC_CACHE_WIDTH_UNSUPPORTED",reference.fieldStartId);
-            Element node=model.nodes.get(reference.cacheNodeId);before.put(node,node.getTextContent());node.setTextContent(page);
+            Element node=model.nodes.get(reference.cacheNodeId);replacements.put(node,page);
         }
-        byte[] changed=tocXmlKeepingOriginalDeclaration(document,original);
-        for(Map.Entry<Element,String> entry:before.entrySet())entry.getKey().setTextContent(entry.getValue());
-        if(!Arrays.equals(original,tocXmlKeepingOriginalDeclaration(document,original)))throw error("TOC_CACHE_XML_NOT_REVERSIBLE","toc-cache");
+        byte[] changed=tocCacheXmlKeepingOriginalTextSlots(document,original,replacements);
         model.entries.put(MAIN,changed);byte[] result=write(model.entries);TemplateIndex index=load(result).index;
         for(Map.Entry<String,String> entry:model.index.entryHashes.entrySet())if(!MAIN.equals(entry.getKey())&&!entry.getValue().equals(index.entryHashes.get(entry.getKey())))throw error("TOC_CACHE_PART_CHANGED",entry.getKey());
         return new DocxEditResult(result,index,model.index.sourceSha256,Collections.emptyList(),Collections.emptyList(),model.index.entryHashes);
+    }
+    /** DOM supplies the verified cache nodes; lexical slots preserve every other original UTF-8 byte. */
+    private static byte[] tocCacheXmlKeepingOriginalTextSlots(Document document,byte[] original,Map<Element,String> replacements){
+        String source=new String(original,StandardCharsets.UTF_8);if(!Arrays.equals(original,source.getBytes(StandardCharsets.UTF_8)))throw error("TOC_CACHE_XML_NOT_REVERSIBLE","toc-cache");
+        Set<String> tags=new LinkedHashSet<>();for(Element target:replacements.keySet())tags.add(target.getTagName());Map<Integer,String> values=new TreeMap<>(Collections.reverseOrder());Set<Element> matched=Collections.newSetFromMap(new IdentityHashMap<>());
+        for(String tag:tags){NodeList nodes=document.getElementsByTagName(tag);Matcher slots=Pattern.compile("<"+Pattern.quote(tag)+"(?:\\s[^<>]*?)?(?:/>|>([^<]*)</"+Pattern.quote(tag)+"\\s*>)").matcher(source);int ordinal=0;
+            while(slots.find()){
+                if(ordinal>=nodes.getLength())throw error("TOC_CACHE_XML_NOT_REVERSIBLE","toc-cache");Element node=(Element)nodes.item(ordinal++);String replacement=replacements.get(node);if(replacement==null)continue;
+                if(!matched.add(node)||slots.group(1)==null||!slots.group(1).matches("[1-9][0-9]*")||!slots.group(1).equals(node.getTextContent())||replacement.length()!=slots.group(1).length()||values.put(slots.start(1),replacement)!=null)throw error("TOC_CACHE_XML_NOT_REVERSIBLE","toc-cache");
+            }
+            if(ordinal!=nodes.getLength())throw error("TOC_CACHE_XML_NOT_REVERSIBLE","toc-cache");
+        }
+        if(matched.size()!=replacements.size())throw error("TOC_CACHE_XML_NOT_REVERSIBLE","toc-cache");StringBuilder changed=new StringBuilder(source);for(Map.Entry<Integer,String> entry:values.entrySet())changed.replace(entry.getKey(),entry.getKey()+entry.getValue().length(),entry.getValue());byte[] result=changed.toString().getBytes(StandardCharsets.UTF_8);
+        Map<Element,String> before=new LinkedHashMap<>();byte[] expected;
+        try{for(Map.Entry<Element,String> entry:replacements.entrySet()){before.put(entry.getKey(),entry.getKey().getTextContent());entry.getKey().setTextContent(entry.getValue());}expected=xml(document);}finally{for(Map.Entry<Element,String> entry:before.entrySet())entry.getKey().setTextContent(entry.getValue());}
+        try{if(!Arrays.equals(expected,xml(parse(result))))throw error("TOC_CACHE_XML_NOT_REVERSIBLE","toc-cache");}catch(EditException invalid){throw invalid;}catch(Exception invalid){throw error("TOC_CACHE_XML_NOT_REVERSIBLE","toc-cache");}return result;
     }
     /** This cache-only write preserves the source declaration; the complete remaining XML must still roundtrip exactly. */
     private static byte[] tocXmlKeepingOriginalDeclaration(Document document,byte[] original) {

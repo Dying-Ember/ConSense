@@ -13,6 +13,41 @@ from token_windows import digest, fail
 PROTOCOL='consense.persisted-vector-index-integrity.v1'
 
 
+def verify_availability(db, metadata, *, key, collection, signature):
+    """Live generation/schema/count check; full point integrity belongs to explicit status/build."""
+    fail(metadata.get('projectId') == key and metadata.get('collection') == collection
+         and metadata.get('signature') == signature
+         and type(metadata.get('parentCount')) is int
+         and metadata['parentCount'] == len(metadata.get('chunks', []))
+         and type(metadata.get('vectorPoints')) is int,
+         'INDEX_AVAILABILITY_IDENTITY', 'Current index generation and source counts must match')
+    seal = metadata.get('vectorIntegrity')
+    fail(isinstance(seal, dict) and set(seal) == {'schema', 'dimension', 'dtype', 'pointCount',
+         'embeddingSignatureSha256', 'pointsSha256', 'persistedPointsSha256', 'sealSha256'}
+         and seal.get('schema') == PROTOCOL
+         and seal['sealSha256'] == digest({k: v for k, v in seal.items() if k != 'sealSha256'})
+         and seal.get('embeddingSignatureSha256') == digest(signature)
+         and type(seal.get('pointCount')) is int and seal['pointCount'] == metadata['vectorPoints']
+         and type(seal.get('dimension')) is int
+         and len(metadata.get('windows', [])) == metadata['vectorPoints'],
+         'INDEX_VECTOR_SEAL_CHANGED', 'Normal indexing seal, signature and counts must remain intact')
+    if not metadata['chunks']:
+        fail(seal['dimension'] == 0 and seal['pointCount'] == 0,
+             'INDEX_POINT_SCOPE_EMPTY', 'Empty source scope requires no vector points')
+        return {'dimension': 0, 'pointCount': 0}
+    fail(seal['dimension'] > 0 and db.collection_exists(collection),
+         'INDEX_COLLECTION_MISSING', 'Current index collection is unavailable')
+    vectors = db.get_collection(collection).config.params.vectors
+    fail(not isinstance(vectors, dict) and getattr(vectors, 'size', None) == seal['dimension']
+         and str(getattr(vectors, 'distance', '')).lower() == 'cosine'
+         and getattr(vectors, 'multivector_config', None) is None,
+         'INDEX_VECTOR_SCHEMA', 'Live vector schema must match the sealed unnamed cosine dimension')
+    count = db.count(collection, exact=True).count
+    fail(type(count) is int and count == seal['pointCount'],
+         'INDEX_POINT_COUNT', 'Live exact vector count differs from the current normal index')
+    return {'dimension': seal['dimension'], 'pointCount': count}
+
+
 def vector_sha256(vector, dimension):
     fail(isinstance(vector,list) and len(vector)==dimension,
          'INDEX_VECTOR_DIMENSION','Each persisted vector requires the sealed exact dimension')

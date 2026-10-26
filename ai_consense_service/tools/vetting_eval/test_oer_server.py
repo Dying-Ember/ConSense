@@ -414,7 +414,7 @@ class OerHttpContractTest(unittest.TestCase):
     def test_request_receipts_capture_exact_pool_scores_and_terminal_failure(self):
         projection = self.project_fixture()
         supplied = {'projectId': 'oer-test',
-                    'projectionSha256': [projection['projectionSha256']], 'module': 'vetting'}
+                    'projectionSha256': [projection['projectionSha256']], 'module': 'vetting', 'rebuild': False}
         response = self.client.post('/index-canonical', json=supplied)
         self.assertEqual(200, response.status_code, response.text)
         root = self.backend.STATE / 'run-evidence'
@@ -424,7 +424,9 @@ class OerHttpContractTest(unittest.TestCase):
         self.assertEqual(supplied, json.loads((directory / 'request.json').read_text(encoding='utf-8')))
         events = [json.loads(line) for line in (directory / 'events.jsonl').read_text(encoding='utf-8').splitlines()]
         nested = next(e for e in events if e['stage'] == 'nested-operation-input')
-        self.assertEqual(projection['chunks'], nested['payload']['request']['chunks'])
+        self.assertEqual(len(projection['chunks']), nested['payload']['request']['chunkCount'])
+        self.assertEqual(sorted({chunk['sourceHash'] for chunk in projection['chunks']}), nested['payload']['request']['sourceHashes'])
+        self.assertNotIn('chunks', nested['payload']['request'])
         actual = self.query()
         self.assertEqual(200, actual.status_code, actual.text)
         directories = [p for p in root.iterdir() if p != directory]

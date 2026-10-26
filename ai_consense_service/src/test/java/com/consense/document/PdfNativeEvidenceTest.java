@@ -137,11 +137,13 @@ class PdfNativeEvidenceTest {
     }
     @Test void missingAppearanceIsNotSynthesizedIntoTheOcrRasterFromStoredValue() throws Exception {
         OcrClient ocr=mock(OcrClient.class,CALLS_REAL_METHODS);
-        DocumentParser.ParsedDocument parsed=parser(ocr,false).parse("missing-appearance.pdf",formPdf("Stored but not drawn","unused",false,false,false));
+        // Admit rendering so the blank raster, rather than disabled OCR, proves no /V appearance was synthesized.
+        when(ocr.available()).thenReturn(true);
+        DocumentParser.ParsedDocument parsed=parser(ocr,true).parse("missing-appearance.pdf",formPdf("Stored but not drawn","unused",false,false,false));
         PdfPageEvidence.PdfFormField field=parsed.getNativePdfEvidence().get(0).getFormFields().get(0);
         assertFalse(field.isAppearancePresent()); assertEquals("Stored but not drawn",field.getFieldValue());
         assertTrue(parsed.getText().isEmpty()); assertEquals("blank",parsed.getPages().get(0).getStatus());
-        assertTrue(parsed.getCoverage().getNeedsReviewPages().contains(1)); verifyNoInteractions(ocr);
+        assertTrue(parsed.getCoverage().getNeedsReviewPages().contains(1)); verify(ocr).available(); verifyNoMoreInteractions(ocr);
     }
     @Test void successfulOcrKeepsBlankConflictingMissingMatchingAndNontextWidgetsAsOriginalObservations() throws Exception {
         List<byte[]> fixtures = Arrays.asList(formPdf("Stored value","Visible value",false,true),

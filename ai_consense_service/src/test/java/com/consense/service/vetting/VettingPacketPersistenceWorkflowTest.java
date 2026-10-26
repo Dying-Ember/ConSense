@@ -3,18 +3,28 @@ package com.consense.service.vetting;
 import com.consense.common.JsonUtils;
 import com.consense.config.ConsenseProperties;
 import com.consense.document.DocumentBlock;
+import com.consense.document.OerDocumentIdentity;
 import com.consense.domain.*;
 import com.consense.repository.*;
+import com.consense.service.sources.OerSourceMetadata;
+import com.consense.service.sources.SourceContentDigests;
 import com.consense.service.vetting.VettingSemanticReview.*;
 import com.consense.service.export.EnglishFileOutput;
 import com.consense.web.dto.VettingDtos.*;
 import com.fasterxml.jackson.databind.JsonNode;
+import org.apache.poi.xwpf.usermodel.XWPFDocument;
 import org.junit.jupiter.api.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.*;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicReference;
@@ -28,14 +38,34 @@ import static org.mockito.Mockito.*;
 class VettingPacketPersistenceWorkflowTest {
     private static final String ID=UUID.randomUUID().toString();
     @DynamicPropertySource static void isolation(DynamicPropertyRegistry r){r.add("spring.datasource.url",()->"jdbc:h2:mem:packet_persistence_"+ID+";MODE=MySQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE");r.add("consense.storage-root",()->Paths.get("target/packet-persistence-uploads",ID).toAbsolutePath().toString());}
-    @Autowired VettingService service;@Autowired ConsenseProperties props;@Autowired ProjectRepository projects;@Autowired SourceDocumentRepository documents;@Autowired VettingFindingRepository findings;@Autowired VettingReportSnapshotRepository reportSnapshots;@MockBean VettingSemanticReview semantic;
+    @Autowired VettingService service;@Autowired ConsenseProperties props;@Autowired ProjectRepository projects;@Autowired SourceDocumentRepository documents;@Autowired VettingFindingRepository findings;@Autowired VettingReportSnapshotRepository reportSnapshots;@Autowired JdbcTemplate jdbc;@MockBean VettingSemanticReview semantic;
     @MockBean EnglishFileOutput englishFiles;
     @BeforeEach void settings(){
         props.getVetting().setMaxRiskFindings(20);props.getVetting().setServiceProbeDirectory(null);props.getVetting().setProbeDirectory(null);props.getVetting().setExportProbeDirectory(null);
         when(englishFiles.json(any(JsonNode.class),anyString(),any(Runnable.class))).thenAnswer(call->{call.<Runnable>getArgument(2).run();return call.getArgument(0);});
-        when(englishFiles.docx(any(byte[].class),anyString(),any(Runnable.class))).thenAnswer(call->{call.<Runnable>getArgument(2).run();return call.getArgument(0);});
+        when(englishFiles.docx(any(byte[].class),anyString(),any(Runnable.class),anySet())).thenAnswer(call->{call.<Runnable>getArgument(2).run();return call.getArgument(0);});
     }
-    private SourceDocument source(){Project p=new Project();p.setId("packet-"+UUID.randomUUID());p.setNameEn("Packet persistence fixture");p.setContractNo("TEST");projects.saveAndFlush(p);DocumentBlock block=new DocumentBlock();block.setId("fixture-block");block.setKind("paragraph");block.setLocation("body/fixture");block.setSource("fixture_saved_text");block.setText("The original register shall be retained.");SourceDocument s=new SourceDocument();s.setProjectId(p.getId());s.setCategory(SourceDocument.CATEGORY_VETTING_PACKAGE);s.setReviewRole("tender");s.setFileKey("OTHER");s.setFileName("source-fixture.txt");s.setParseStatus("PARSED");s.setTextContent(block.getText());s.setStructuredContentJson(JsonUtils.write(Collections.singletonList(block)));return documents.saveAndFlush(s);}
+    private SourceDocument source(){
+        Project p=new Project();p.setId("packet-"+UUID.randomUUID());p.setNameEn("Packet persistence fixture");p.setContractNo("TEST");projects.saveAndFlush(p);
+        DocumentBlock block=new DocumentBlock();block.setId("fixture-block");block.setKind("paragraph");block.setLocation("body/fixture");block.setSource("fixture_saved_text");block.setText("The original register shall be retained.");
+        SourceDocument s=new SourceDocument();s.setProjectId(p.getId());s.setCategory(SourceDocument.CATEGORY_VETTING_PACKAGE);s.setReviewRole("tender");s.setFileKey("SCT");s.setFileName("project-SCT.docx");s.setParseStatus("PARSED");s.setTextContent(block.getText());s.setStructuredContentJson(JsonUtils.write(Collections.singletonList(block)));s.setParseCoverageJson("{\"complete\":true}");
+        try(XWPFDocument original=new XWPFDocument();ByteArrayOutputStream bytes=new ByteArrayOutputStream()){
+            original.createParagraph().createRun().setText(block.getText());original.write(bytes);
+            byte[] content=bytes.toByteArray();Path path=Paths.get(props.getStorageRoot()).resolve(p.getId()).resolve(s.getFileName());
+            Files.createDirectories(path.getParent());Files.write(path,content);
+            s.setStoragePath(path.toString());s.setSourceSha256(OerSourceMetadata.originalSha256(content));
+        }catch(IOException failure){throw new UncheckedIOException(failure);}
+        OerDocumentIdentity identity=new OerDocumentIdentity();identity.setSourceSha256(s.getSourceSha256());identity.setKind("SCT");identity.setRole("tender");
+        identity.setSourcePurpose("project_document");identity.setIdentityStatus("content_supported");identity.setEligibleModules(Arrays.asList("vetting","advisory"));
+        s.setOerIdentityJson(JsonUtils.write(identity));NormalSourceCandidateGraph.capture(s);
+        s.setTextContentSha256(SourceContentDigests.field(s.getTextContent()));s.setStructuredContentSha256(SourceContentDigests.field(s.getStructuredContentJson()));
+        s.setParseCoverageSha256(SourceContentDigests.field(s.getParseCoverageJson()));s.setNormalCandidateSha256(SourceContentDigests.field(s.getNormalCandidateJson()));
+        s.setBusinessContentSha256(SourceContentDigests.combined(s.getTextContentSha256(),s.getStructuredContentSha256(),s.getParseCoverageSha256(),s.getNormalCandidateSha256()));
+        s=documents.saveAndFlush(s);
+        jdbc.update("update source_document set text_content_sha256=?,structured_content_sha256=?,parse_coverage_sha256=?,normal_candidate_sha256=?,business_content_sha256=? where id=?",
+                s.getTextContentSha256(),s.getStructuredContentSha256(),s.getParseCoverageSha256(),s.getNormalCandidateSha256(),s.getBusinessContentSha256(),s.getId());
+        return s;
+    }
     private Candidate candidate(SourceDocument s,String variant){String sha=VettingCorpus.hash("synthetic-bound-source-snapshot:"+variant);String packet="topic-1-packet-1-"+sha;Candidate c=new Candidate();c.setRuleId("semantic-risk");c.setSource("model");c.setType("risk");c.setSeverity("high");c.setTitle("Same synthetic finding");c.setComment("Same source quotation, distinct source input scope.");c.setImpact("Manual review");c.setSuggestion("Check original");c.setPacketId(packet);c.setSourceSnapshotSha256(sha);FindingEvidence e=new FindingEvidence("source",String.valueOf(s.getId()),s.getFileKey(),s.getFileName(),null,"body/fixture",s.getTextContent(),true,VettingCorpus.sourceHash(s),null);e.setPacketId(packet);e.setPacketSourceSnapshotSha256(sha);c.setEvidence(Collections.singletonList(e));return c;}
     private Result result(Candidate... cs){Result r=new Result();r.setModel("synthetic-review-fixture");r.getCandidates().addAll(Arrays.asList(cs));SemanticTopicVO a=new SemanticTopicVO();a.setTopicIndex(1);a.setStatus("completed");a.setGlobalCallStatus("completed");a.setAggregateReviewStatus("partial");a.setSourceRequestCount(2);a.setPendingSourceRequestCount(1);r.getTopicAudits().add(a);return r;}
     @Test void exactPacketMetadataSurvivesDatabaseListJsonSourceDialogAndCoverage() throws Exception {

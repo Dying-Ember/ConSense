@@ -130,4 +130,91 @@ inheritedScope.variables[2].editTargets = []
 assert.equal(editionReducer.isolatedSources(inheritedScope), true)
 assert.equal(editionReducer.mergeProblem(inheritedScope, 'old', 'keep').code, 'MERGE_SOURCE_SCOPE_CONFLICT')
 assert.equal(editionReducer.reduce(inheritedScope, action), inheritedScope)
+
+// Step 082: identical excavation-permit booleans arrived with two explicit spellings.
+const binaryOptions = values => values.map((value, index) => ({ value, labelZh: index ? '否' : '是', labelEn: index ? 'No' : 'Yes' }))
+const permit = base()
+for (const item of permit.variables.slice(0, 2)) {
+  item.type.kind = 'boolean'
+  item.nameZh = '工程是否涉及需要获取挖掘许可的工作'
+  item.sourceAnchors = [{ docId: '41', text: '[Guidance Note: Do not adopt this SCC Clause in contracts that do not involve works requiring excavation permits to be obtained.]' }]
+}
+permit.variables[0].options = binaryOptions(['yes', 'no'])
+permit.variables[1].options = binaryOptions(['true', 'false'])
+permit.variables[2].correction = { kind: 'rule', inputIds: ['old'], branches: [{ id: 'yes-case', mode: 'all', clauses: [{ inputId: 'old', operator: 'yes', value: true }] }, { id: 'exact-case', mode: 'all', clauses: [{ inputId: 'old', operator: 'eq', value: 'yes' }] }] }
+const permitBefore = structuredClone(permit)
+const permitResult = batchReducer.mergeMany(permit, ['old', 'keep'], 'keep', '2026-10-26T05:00:00Z', 'Sources compared; same affirmative permit requirement')
+assert.equal(permitResult.problem, null, 'Step 082: the real batch-merge entry must accept proven same-polarity yes/no and true/false boolean representations')
+assert.deepEqual(permit, permitBefore, 'Preview and commit cannot mutate the captured prior revision')
+assert.deepEqual(permitResult.state.variables[1].options, permitBefore.variables[1].options, 'Keep the human-selected definition options; do not rewrite project values')
+assert.deepEqual(JSON.parse(JSON.stringify(permitResult.state.variables[2].correction)), { kind: 'rule', inputIds: ['keep'], branches: [{ id: 'yes-case', mode: 'all', clauses: [{ inputId: 'keep', operator: 'yes', value: true }] }, { id: 'exact-case', mode: 'all', clauses: [{ inputId: 'keep', operator: 'eq', value: 'yes' }] }] }, 'Redirect condition identities while preserving every predicate, polarity and original comparison value')
+assert.equal(permitResult.state.variables[2].status, 'help', 'Existing item-match review protection survives the equivalent merge')
+assert.equal(permitResult.state.variables[2].editTargets[0].needsRebind, true)
+assert.deepEqual(Array.from(permitResult.state.requirements[0].nodeIds), ['keep'])
+assert.equal(batchReducer.mergeMany(permit, ['old', 'keep'], 'old').problem, null, 'Either explicit representation may be retained')
+for (const options of [[], null, undefined]) {
+  const implicit = structuredClone(permit); implicit.variables[0].options = options
+  const beforeImplicit = structuredClone(implicit)
+  const result = batchReducer.mergeMany(implicit, ['old', 'keep'], 'keep')
+  assert.equal(result.problem, null, 'Default boolean Yes/No options must merge with explicit standard true/false options')
+  assert.deepEqual(implicit, beforeImplicit, 'Default-option comparison must preserve the captured revision')
+  assert.deepEqual(result.state.variables[1].options, beforeImplicit.variables[1].options, 'Keep the selected explicit options')
+  const keepImplicit = batchReducer.mergeMany(implicit, ['old', 'keep'], 'old')
+  assert.equal(keepImplicit.problem, null, 'The default boolean definition may also be the retained identity')
+  assert.deepEqual(keepImplicit.state.variables[0].options, options, 'An explicit merge must not rewrite default options into stored values')
+  assert.equal(result.state.variables[2].correction.branches[0].clauses[0].inputId, 'keep', 'Retarget dependent conditions through the existing transaction')
+}
+for (const options of [binaryOptions([true, false]), binaryOptions(['yes', 'no']).reverse()]) {
+  const same = structuredClone(permit); same.variables[0].options = options
+  assert.equal(batchReducer.mergeMany(same, ['old', 'keep'], 'keep').problem, null)
+}
+for (const options of [
+  [{ value: 'yes', labelZh: '否', labelEn: 'No' }, { value: 'no', labelZh: '是', labelEn: 'Yes' }],
+  [{ value: 'yes', labelZh: '是', labelEn: 'No' }, { value: 'no', labelZh: '否', labelEn: 'Yes' }],
+  binaryOptions(['include', 'exclude']),
+  [{ value: 'yes', labelZh: '适用', labelEn: 'Applicable' }, { value: 'no', labelZh: '不适用', labelEn: 'Not applicable' }],
+  [binaryOptions(['yes', 'no'])[0]],
+  [...binaryOptions(['yes', 'no']), { value: 'unknown', labelZh: '未知', labelEn: 'Unknown' }],
+  binaryOptions(['yes', 'yes']),
+  [{ ...binaryOptions(['yes', 'no'])[0], disabled: true }, binaryOptions(['yes', 'no'])[1]],
+  [{ ...binaryOptions(['yes', 'no'])[0], labelZh: 1 }, binaryOptions(['yes', 'no'])[1]],
+  [{ ...binaryOptions(['yes', 'no'])[0], labelEn: null }, binaryOptions(['yes', 'no'])[1]],
+  { length: 0 }
+]) {
+  const ambiguous = structuredClone(permit); ambiguous.variables[0].options = options
+  assert.equal(batchReducer.mergeMany(ambiguous, ['old', 'keep'], 'keep').problem.code, 'MERGE_OPTIONS_MISMATCH', 'Reverse, custom, incomplete and ambiguous options remain rejected')
+  ambiguous.variables[1].options = []
+  assert.equal(batchReducer.mergeMany(ambiguous, ['old', 'keep'], 'keep').problem.code, 'MERGE_OPTIONS_MISMATCH', 'A default counterpart cannot make custom or partial options standard')
+}
+for (const kind of ['choice', 'multiselect', 'text']) {
+  const nonBoolean = structuredClone(permit); nonBoolean.variables[0].type.kind = nonBoolean.variables[1].type.kind = kind
+  assert.equal(batchReducer.mergeMany(nonBoolean, ['old', 'keep'], 'keep').problem.code, 'MERGE_OPTIONS_MISMATCH', 'Non-boolean options keep exact comparison')
+  nonBoolean.variables[0].options = []
+  assert.equal(batchReducer.mergeMany(nonBoolean, ['old', 'keep'], 'keep').problem.code, 'MERGE_OPTIONS_MISMATCH', 'The implicit Yes/No domain applies only to boolean types')
+}
+for (const [patch, code] of [
+  [{ type: { kind: 'text' } }, 'MERGE_TYPE_MISMATCH'],
+  [{ type: { kind: 'boolean', unit: 'days' } }, 'MERGE_UNIT_MISMATCH'],
+  [{ role: { kind: 'verification' } }, 'MERGE_ROLE_MISMATCH'],
+  [{ definitionKind: 'source_seed' }, 'MERGE_ROLE_MISMATCH'],
+  [{ parentId: 'another-row' }, 'MERGE_PARENT_MISMATCH'],
+  [{ optional: true }, 'MERGE_OPTIONAL_MISMATCH']
+]) {
+  const protectedState = structuredClone(permit); Object.assign(protectedState.variables[1], patch)
+  assert.equal(batchReducer.mergeMany(protectedState, ['old', 'keep'], 'keep').problem.code, code, 'Boolean spelling equivalence cannot relax another merge guard')
+}
+const booleanRules = structuredClone(permit)
+for (const item of booleanRules.variables.slice(0, 2)) item.correction = { kind: 'rule', branches: [{ clauses: [{ inputId: 'dependent', operator: 'known' }] }] }
+assert.equal(batchReducer.mergeMany(booleanRules, ['old', 'keep'], 'keep').problem.code, 'MERGE_RULE_CONFLICT')
+const booleanEditions = structuredClone(permit); booleanEditions.variables[0].docIds = ['42']; booleanEditions.variables[1].docIds = ['43']
+assert.equal(editionReducer.mergeMany(booleanEditions, ['old', 'keep'], 'keep').problem.code, 'MERGE_SOURCE_EDITION_CONFLICT')
+const booleanCycle = structuredClone(permit)
+for (const item of booleanCycle.variables.slice(0, 2)) item.role.kind = 'derived'
+booleanCycle.variables[0].correction = { kind: 'rule', branches: [{ clauses: [{ inputId: 'keep', operator: 'yes' }] }] }
+assert.equal(batchReducer.mergeMany(booleanCycle, ['old', 'keep'], 'keep').problem.code, 'MERGE_DEPENDENCY_CYCLE')
+const lateBooleanConflict = structuredClone(permit)
+lateBooleanConflict.variables.push({ ...node('third', 'boolean'), options: [{ value: 'yes', labelZh: '否', labelEn: 'No' }, { value: 'no', labelZh: '是', labelEn: 'Yes' }] })
+const lateBooleanBefore = structuredClone(lateBooleanConflict)
+assert.equal(batchReducer.mergeMany(lateBooleanConflict, ['old', 'keep', 'third'], 'keep').state, lateBooleanConflict, 'A later ambiguous boolean aborts the whole batch, including the earlier equivalent pair')
+assert.deepEqual(lateBooleanConflict, lateBooleanBefore)
 console.log('PASS: existing single-merge guards and source history; explicit three-question batch; atomic rollback, accumulated-rule conflicts and invalid selections')

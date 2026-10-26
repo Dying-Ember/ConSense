@@ -24,6 +24,8 @@ public class PdfPageEvidence {
 
     @Data public static class PdfGlyph {
         private String id, unicode, fontName, visibilityStatus;
+        /** Optional reader projection; unicode and original character codes stay literal. */
+        private TextResolution textResolution;
         private String coordinateSpace = "normalized_rendered_crop_top_left";
         /** A ligature/cluster may represent multiple Unicode characters with one glyph box. */
         private int[] characterCodes;
@@ -40,6 +42,53 @@ public class PdfPageEvidence {
         private String effectiveVisibilityStatus = "unknown_not_raster_verified";
         private List<String> limitations = new ArrayList<>();
         private boolean eligibleForNativeText;
+
+        /** One reader channel for ordinary text and normal/canonical source grouping. */
+        public String readerText() {
+            return textResolution != null && textResolution.matches(this) ? textResolution.getDecodedText() : unicode;
+        }
+    }
+
+    @Data public static class TextResolution {
+        public static final String SCHEMA = "consense.pdf-font-text-resolution.v1";
+        public static final String VERSION = "embedded-adobe-symbol-pua-v1";
+        public static final String RESOLVED = "resolved_embedded_symbol_selector";
+        public static final String MAPPING_SOURCE = "https://www.unicode.org/Public/MAPPINGS/VENDORS/ADOBE/symbol.txt";
+        private String schema = SCHEMA, decoderVersion = VERSION;
+        private String rawUnicode, fontName, selector, decodedText = "", resolutionStatus, mappingSource;
+        private int[] sourceCharacterCodes;
+        private String fontProgramSha256, toUnicodeSha256;
+        private Integer sourceGlyphId, selectorGlyphId, cmapPlatformId, cmapEncodingId;
+
+        public static boolean symbolFont(String name) {
+            return name != null && "Symbol".equalsIgnoreCase(name.replaceFirst("^[A-Z]{6}\\+", ""));
+        }
+
+        /** Only source-witnessed, unambiguous Adobe Symbol selectors are admitted. */
+        public static String symbolText(String raw) {
+            if ("\uF046".equals(raw)) return "\u03A6";
+            if ("\uF03E".equals(raw)) return ">";
+            if ("\uF0A3".equals(raw)) return "\u2264";
+            // F06D is ambiguous in Adobe's mapping (U+00B5 and U+03BC).
+            return null;
+        }
+
+        private boolean matches(PdfGlyph glyph) {
+            String expected = symbolText(glyph.getUnicode());
+            return SCHEMA.equals(schema) && VERSION.equals(decoderVersion) && RESOLVED.equals(resolutionStatus)
+                    && expected != null && expected.equals(decodedText) && MAPPING_SOURCE.equals(mappingSource)
+                    && java.util.Objects.equals(rawUnicode, glyph.getUnicode())
+                    && java.util.Objects.equals(fontName, glyph.getFontName()) && symbolFont(fontName)
+                    && "Type0".equals(glyph.getFontSubtype()) && Boolean.TRUE.equals(glyph.getFontEmbedded())
+                    && sourceCharacterCodes != null && sourceCharacterCodes.length == 1
+                    && sourceCharacterCodes[0] >= 0 && sourceCharacterCodes[0] <= 65535
+                    && java.util.Arrays.equals(sourceCharacterCodes, glyph.getCharacterCodes())
+                    && String.format(java.util.Locale.ROOT, "%04X", (int) rawUnicode.charAt(0)).equals(selector)
+                    && sourceGlyphId != null && sourceGlyphId > 0 && sourceGlyphId == sourceCharacterCodes[0] && sourceGlyphId.equals(selectorGlyphId)
+                    && Integer.valueOf(3).equals(cmapPlatformId) && Integer.valueOf(0).equals(cmapEncodingId)
+                    && fontProgramSha256 != null && fontProgramSha256.matches("[a-f0-9]{64}")
+                    && toUnicodeSha256 != null && toUnicodeSha256.matches("[a-f0-9]{64}");
+        }
     }
 
     @Data public static class PdfFormField {

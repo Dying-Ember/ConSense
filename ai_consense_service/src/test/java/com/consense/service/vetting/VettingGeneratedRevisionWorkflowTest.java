@@ -47,7 +47,7 @@ class VettingGeneratedRevisionWorkflowTest {
     @BeforeEach void resetFixture() {
         props.getVetting().setServiceProbeDirectory(null);props.getVetting().setProbeDirectory(null);props.getVetting().setExportProbeDirectory(null);props.getVetting().setMaxRiskFindings(20);
         when(englishFiles.json(any(JsonNode.class),anyString(),any(Runnable.class))).thenAnswer(call->{call.<Runnable>getArgument(2).run();return call.getArgument(0);});
-        when(englishFiles.docx(any(byte[].class),anyString(),any(Runnable.class))).thenAnswer(call->{call.<Runnable>getArgument(2).run();return call.getArgument(0);});
+        when(englishFiles.docx(any(byte[].class),anyString(),any(Runnable.class),anySet())).thenAnswer(call->{call.<Runnable>getArgument(2).run();return call.getArgument(0);});
     }
 
     @Test void sevenClassesPersistFilterCountAndExportAsInternalMetadata() throws Exception {

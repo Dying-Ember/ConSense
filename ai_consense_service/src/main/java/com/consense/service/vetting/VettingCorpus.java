@@ -18,6 +18,7 @@ import java.util.stream.Collectors;
 /** Immutable source snapshots and location-preserving chunks shared by retrieval and review. */
 public final class VettingCorpus {
     public static final String METADATA_VERSION = "owner-clause-v2";
+    private static final String SL_CHUNK_POLICY_VERSION = "sl-bound-observed-intervals-v1";
     /** Segmentation identity is separate from the unchanged owner metadata shape. */
     public static final String SEGMENTATION_VERSION = "standalone-section-boundary-v1";
     /** Native row payload changes require new retrieval identities even when source text is unchanged. */
@@ -158,7 +159,9 @@ public final class VettingCorpus {
             String clause = "", headingLocation = null; List<DocumentBlock> group = new ArrayList<>(); int length = 0;
             String digest = sourceHash(d);
             String owner = nvl(d.getFileKey()).trim().toUpperCase(Locale.ROOT);
+            Map<String,JsonNode> slOwners="SL".equals(owner)?slTechnicalOwners(candidate):Collections.emptyMap();
             List<DocumentBlock> sourceBlocks = blocks(d);
+            Map<String,String> locations=new HashMap<>();for(DocumentBlock block:sourceBlocks)locations.put(block.getId(),block.getLocation());
             Map<String,JsonNode> wordObservations=new HashMap<>();
             for(DocumentBlock word:sourceBlocks)if(!JsonUtils.isBlankText(word.getWordStructureVersion())) {
                 if(wordObservations.containsKey(word.getId())){wordObservations.put(word.getId(),null);continue;}
@@ -172,17 +175,19 @@ public final class VettingCorpus {
             for (DocumentBlock b : sourceBlocks) {
                 // A blank widget still carries /V, /AP, /AS and unknown/conflict observations.
                 if (nvl(b.getEffectiveText()).trim().isEmpty() && b.getPdfFormField() == null && b.getVisualRegion() == null && b.getNativeTableCandidate() == null && b.getParserPageGroup() == null && b.getWordNativeObjects().isEmpty() && b.getWordTextSpans().isEmpty() && b.getWordFields().isEmpty()) continue;
-                String detected = heading(b, owner, ownedHeading);
+                JsonNode slOwner=slOwners.get(b.getId());
+                String detected = "SL".equals(owner)?null:heading(b, owner, ownedHeading);
                 boolean supplementary = Arrays.asList("header", "footer", "footnote", "endnote").contains(b.getKind());
-                String nextClause = supplementary ? "" : detected != null ? detected : clause;
+                String nextClause = "SL".equals(owner)?slOwner==null?"":slOwner.path("reference").asText():supplementary ? "" : detected != null ? detected : clause;
+                String slHeading=slOwner==null?null:locations.get(slOwner.path("startBoundary").path("blockId").asText());
                 boolean continued = detected != null && detected.equals(clause) && continuedTitle(b);
-                boolean headingChanged = (detected != null && !continued) || supplementary;
+                boolean headingChanged = "SL".equals(owner)?!Objects.equals(nextClause,clause)||!Objects.equals(slHeading,headingLocation):(detected != null && !continued) || supplementary;
                 boolean pageChanged = !group.isEmpty() && !Objects.equals(b.getPageNo(), group.get(0).getPageNo());
                 if (!group.isEmpty() && (length + b.getEffectiveText().length() > 1400 || pageChanged || headingChanged)) {
                     emit(out, d, digest, clause, headingLocation, group, nativeTables, quality, wordObservations); group = new ArrayList<>(); length = 0;
                 }
                 clause = nextClause;
-                if (headingChanged) headingLocation = clause.isEmpty() ? null : b.getLocation();
+                if (headingChanged) headingLocation = "SL".equals(owner)?slHeading:clause.isEmpty() ? null : b.getLocation();
                 // Very long tables/pages are split with offsets into the same source block.
                 if (b.getEffectiveText().length() > 1400 && b.getPdfFormField() == null && b.getVisualRegion() == null && b.getWordNativeObjects().isEmpty()) {
                     if (!group.isEmpty()) { emit(out, d, digest, clause, headingLocation, group, nativeTables, quality, wordObservations); group.clear(); length = 0; }
@@ -205,6 +210,29 @@ public final class VettingCorpus {
         }
         return out;
     }
+    private static Map<String,JsonNode> slTechnicalOwners(JsonNode candidate){
+        Map<String,JsonNode> groups=new HashMap<>(),owners=new HashMap<>();Set<String> ambiguous=new HashSet<>();
+        if(candidate==null)return owners;
+        JsonNode inventory=candidate.path("nativePdfSourceGroups");
+        for(JsonNode group:inventory.path("groups"))groups.put(group.path("id").asText(),group);
+        for(JsonNode group:groups.values())if("source_clause".equals(group.path("kind").asText())&&NormalPdfSourceGroups.technicalLabel(group.path("reference").asText())&&group.path("scopeComplete").asBoolean()&&"unique_observed_source_reference".equals(group.path("referenceIdentityStatus").asText())){
+            for(JsonNode member:group.path("orderedBlockIds")){
+                String id=member.asText();JsonNode previous=owners.get(id);
+                if(previous==null||observedAncestor(previous,group,groups))owners.put(id,group);
+                else if(!observedAncestor(group,previous,groups))ambiguous.add(id);
+            }
+        }
+        for(JsonNode context:inventory.path("contextBlocks"))owners.remove(context.path("blockId").asText());
+        for(String id:ambiguous)owners.remove(id);
+        return owners;
+    }
+
+    private static boolean observedAncestor(JsonNode parent,JsonNode child,Map<String,JsonNode> groups){
+        Set<String> seen=new HashSet<>();String id=child.path("parentId").asText();
+        while(seen.add(id)&&groups.containsKey(id)){if(parent.path("id").asText().equals(id))return true;id=groups.get(id).path("parentId").asText();}
+        return false;
+    }
+
     /** Same native parent observation for ordinary chunks and normal canonical parts. */
     static ObjectNode wordObservation(DocumentBlock word){
         if(JsonUtils.isBlankText(word.getWordStructureVersion()))return null;
@@ -338,8 +366,9 @@ public final class VettingCorpus {
     private static void emit(List<Chunk> out, SourceDocument d, String digest, String clause, String headingLocation, List<DocumentBlock> blocks,
                              Map<String,TableRow> nativeTables, VettingSourceQuality.Info quality, Map<String,JsonNode> wordObservations) {
         String qualityHash = VettingSourceQuality.hash(quality);
+        String chunkPolicy=METADATA_VERSION+("SL".equalsIgnoreCase(nvl(d.getFileKey()).trim())?"|"+SL_CHUNK_POLICY_VERSION:"");
         Chunk c = new Chunk(); DocumentBlock b = blocks.get(0);
-        c.setId(UUID.nameUUIDFromBytes((METADATA_VERSION + "|" + SEGMENTATION_VERSION + "|" + NATIVE_TABLE_METADATA_VERSION + "|" + SOURCE_QUALITY_METADATA_VERSION + "|" + qualityHash + "|" + sourceRole(d) + "|" + d.getId() + "|" + digest + "|" + blocks.stream().map(DocumentBlock::getId).collect(Collectors.joining(","))).getBytes(StandardCharsets.UTF_8)).toString());
+        c.setId(UUID.nameUUIDFromBytes((chunkPolicy + "|" + SEGMENTATION_VERSION + "|" + NATIVE_TABLE_METADATA_VERSION + "|" + SOURCE_QUALITY_METADATA_VERSION + "|" + qualityHash + "|" + sourceRole(d) + "|" + d.getId() + "|" + digest + "|" + blocks.stream().map(DocumentBlock::getId).collect(Collectors.joining(","))).getBytes(StandardCharsets.UTF_8)).toString());
         c.setContent(blocks.stream().map(DocumentBlock::getEffectiveText).collect(Collectors.joining("\n")));
         c.setDocumentId(String.valueOf(d.getId())); c.setFileKey(nvl(d.getFileKey())); c.setFileName(d.getFileName());
         c.setRole(sourceRole(d));

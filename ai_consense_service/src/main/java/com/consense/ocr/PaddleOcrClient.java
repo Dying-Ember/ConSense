@@ -113,7 +113,9 @@ public class PaddleOcrClient implements OcrClient {
             throw new BizException("Native PDF Java evidence physical-page scope differs");
         NativePdfBatches batches=new NativePdfBatches(originalPdf,nativeContext,source,new ArrayList<>(required));
         List<Integer> pages=new ArrayList<>(required);
-        for(int start=0;start<pages.size();start+=NATIVE_PAGE_CAP)batches.observe(pages.subList(start,Math.min(start+NATIVE_PAGE_CAP,pages.size())));
+        // shortcut: Compact contexts use four-page batches; subdivide retained bundles if actual replies exceed the byte cap.
+        int pageCap="page-admission-frames-v1".equals(nativeContext.get("javaNativeEvidenceShape"))?4:NATIVE_PAGE_CAP;
+        for(int start=0;start<pages.size();start+=pageCap)batches.observe(pages.subList(start,Math.min(start+pageCap,pages.size())));
         return batches.result();
     }
 
@@ -136,6 +138,8 @@ public class PaddleOcrClient implements OcrClient {
         private final List<Integer> selected;
         private final ArrayNode records=JsonUtils.mapper().createArrayNode(),pages=JsonUtils.mapper().createArrayNode(),refs=JsonUtils.mapper().createArrayNode();
         private JsonNode singleResponse;
+        private JsonNode predecessorBundle;
+        private int predecessorLastPage;
         private BizException firstFailure;
         private boolean stopped,cleanupFailed;
 
@@ -147,6 +151,8 @@ public class PaddleOcrClient implements OcrClient {
             if(stopped){recordFailure(batch,"not_executed",null,null);return;}
             com.consense.document.DocumentParser.progress("正在核对表格与版面，物理页："+batch);
             Map<String,Object> scoped=new LinkedHashMap<>(context);scoped.put("selectedPhysicalPages",batch);
+            scoped.remove("predecessorBundleRef");
+            if(predecessorBundle!=null && predecessorLastPage+1==batch.get(0))scoped.put("predecessorBundleRef",predecessorBundle);
             if(context.get("javaNativeEvidence") instanceof List<?>) {
                 List<Object> evidence=new ArrayList<>();
                 for(Object page:(List<?>)context.get("javaNativeEvidence"))if(batch.contains(nativeEvidencePage(page)))evidence.add(page);
@@ -170,6 +176,10 @@ public class PaddleOcrClient implements OcrClient {
                 record=((ObjectNode)response).deepCopy();record.remove("pages");record.put("batchIndex",records.size());records.add(record);
                 ArrayNode observed=record.putArray("responseObservedPhysicalPages");for(JsonNode page:response.path("pages"))observed.add(page.path("physicalPageNo"));
                 refs.add(response.path("bundleRef"));
+                if(!response.path("pages").isEmpty()) {
+                    predecessorBundle=response.path("bundleRef").deepCopy();
+                    predecessorLastPage=batch.get(batch.size()-1);
+                }
                 for(JsonNode page:response.path("pages")) {
                     ObjectNode bound=((ObjectNode)page).deepCopy();bound.set("bundleRef",response.path("bundleRef"));
                     if(!bound.has("coverage") && response.has("coverage"))bound.set("coverage",response.path("coverage"));

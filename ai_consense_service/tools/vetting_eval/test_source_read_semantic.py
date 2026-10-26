@@ -1,5 +1,6 @@
 """Public compact reads over authored actual CAS, without models or a server."""
 import json
+import os
 import unittest
 from unittest.mock import patch
 
@@ -20,6 +21,63 @@ class SemanticSourceReadTests(unittest.TestCase):
         response = self.read('prepare', view='semantic_units', semanticReadVersion='source-semantic-dictionary-v2')
         self.assertEqual(200, response.status_code, response.text)
         return {key: response.json()[key] for key in ('readManifestSha256', 'readManifestToken', 'semanticReadVersion')}
+
+    def prepare_text_first(self):
+        response = self.read('prepare', view='semantic_units', semanticReadVersion='source-semantic-dictionary-v2',
+            semanticReadProfile='text-first-scan-v1')
+        self.assertEqual(200, response.status_code, response.text)
+        return {key: response.json()[key] for key in
+            ('readManifestSha256', 'readManifestToken', 'semanticReadVersion', 'semanticReadProfile')}
+
+    def test_text_first_scan_keeps_complete_reading_text_and_full_ids_are_available(self):
+        parents = self.normal()['chunks']
+        prepared = self.prepare_text_first()
+        scan = self.read('scan', view='semantic_units', **prepared, maxItems=1024)
+        self.assertEqual(200, scan.status_code, scan.text)
+        body = scan.json()
+        self.assertEqual([p['id'] for p in parents], [p['id'] for p in body['origins']])
+        self.assertEqual([p['content'] for p in parents], [p['text'] for p in body['origins']])
+        self.assertEqual('text-first-scan-v1', body['scopeIdentity']['semanticReadProfile'])
+        first = body['origins'][0]
+        self.assertNotIn('sourceContext', first)
+        self.assertNotIn('unknowns', first)
+        self.assertNotIn('sourceQuality', first)
+        self.assertIn('tableGroup', first)
+        self.assertEqual(parents[0]['parts'][0]['text'], first['parts'][0]['text'])
+        full = self.read('ids', view='semantic_units', **prepared, originIds=[first['id']])
+        self.assertEqual(200, full.status_code, full.text)
+        self.assertEqual(first['text'], full.json()['origins'][0]['text'])
+        self.assertIn('sourceContext', full.json()['origins'][0])
+        self.assertIn('sourceQuality', full.json()['origins'][0])
+        self.assertLess(len(scan.content), len(full.content) * len(parents))
+
+    def test_text_first_profile_is_bound_to_preparation_and_cursor(self):
+        self.publish()
+        thin = self.prepare_text_first()
+        full = self.prepare_dictionary()
+        first = self.read('scan', view='semantic_units', **thin, maxItems=1)
+        self.assertEqual(200, first.status_code, first.text)
+        self.assertIsNotNone(first.json()['nextCursor'])
+        mismatched = self.read('scan', view='semantic_units', **full, maxItems=1,
+            cursor=first.json()['nextCursor'])
+        self.assertEqual(422, mismatched.status_code)
+        self.assertEqual('SOURCE_READ_CURSOR_SCOPE_MISMATCH', mismatched.json()['detail']['kind'])
+        changed_profile = self.read('scan', view='semantic_units',
+            **{**thin, 'semanticReadProfile': 'full'}, maxItems=1)
+        self.assertEqual(422, changed_profile.status_code)
+
+    def test_text_first_retains_uncovered_native_pdf_table_text(self):
+        from source_read_server import _text_first_origin
+        origin = {'id': 'one', 'producerKind': 'native_pdf', 'text': 'Visible text',
+            'nativeTables': [{'fragments': [{'cells': [{'text': 'Hidden text'}]}]}],
+            'sourceContext': {'unknowns': []}}
+        self.assertIn('nativeTables', _text_first_origin(origin))
+        origin['nativeTables'][0]['fragments'][0]['cells'][0]['text'] = 'Visible text'
+        self.assertNotIn('nativeTables', _text_first_origin(origin))
+        origin['nativeTables'][0]['fragments'][0]['cells'][0]['text'] = ''
+        self.assertIn('nativeTables', _text_first_origin(origin))
+        origin['nativeTables'][0]['fragments'][0]['cells'] = []
+        self.assertIn('nativeTables', _text_first_origin(origin))
 
     def test_dictionary_cas_and_scan_share_groups_without_repeating_member_bodies(self):
         parents = self.publish()
@@ -66,6 +124,28 @@ class SemanticSourceReadTests(unittest.TestCase):
         self.assertEqual(1, len(resumed.json()['units']))
         forged = self.read('scan', view='semantic_units', **prepared, maxItems=1, knownSemanticGroups=['0' * 64])
         self.assertEqual(422, forged.status_code)
+
+    def test_dictionary_scan_uses_1024_only_for_versioned_scan_and_exact_byte_budget(self):
+        self.publish()
+        prepared = self.prepare_dictionary()
+        complete = self.read('scan', view='semantic_units', **prepared, maxItems=1024)
+        self.assertEqual(200, complete.status_code, complete.text)
+        self.assertIsNone(complete.json()['nextCursor'])
+        budget = len(complete.content) - 1
+        split = self.read('scan', view='semantic_units', **prepared, maxItems=1024, maxBytes=budget)
+        self.assertEqual(200, split.status_code, split.text)
+        self.assertLessEqual(len(split.content), budget)
+        self.assertIsNotNone(split.json()['nextCursor'])
+        exact = self.read('scan', view='semantic_units', **prepared, maxItems=1024,
+            maxBytes=len(complete.content))
+        self.assertEqual(200, exact.status_code, exact.text)
+        self.assertEqual(complete.json(), exact.json())
+        for changes in ({'view': 'semantic_units', 'semanticReadVersion': 'source-semantic-records-v1'},
+                        {'view': 'semantic_units', **prepared, 'operation': 'catalog'},
+                        {'view': 'semantic_units', **prepared, 'operation': 'ids', 'originIds': ['member']},
+                        {'view': 'canonical_units'}):
+            response = self.read(maxItems=1024, **changes)
+            self.assertEqual(422, response.status_code, response.text)
 
     def test_dictionary_small_budget_records_blocked_origins_and_advances_without_truncation(self):
         self.normal()
@@ -275,6 +355,60 @@ class SemanticSourceReadTests(unittest.TestCase):
         latest = sorted((r for r in receipts if r['endpoint'] == '/sources/read'), key=lambda r: r['createdAt'])[-1]
         self.assertEqual('failed', latest['terminalStatus'])
         self.assertIsNone(latest['response'])
+
+    def test_prepared_read_hashes_root_at_entry_and_after_cas_exit(self):
+        source = self.normal()
+        prepared = self.prepare()
+        root = self.registry._path(source['projectionSha256']).resolve()
+        observation_sha = source['observationManifestRef']['sha256']
+        stream = self.registry._stream_file_identity
+        read_uncached = self.store._read_uncached
+        root_reads, observation_reads = [], []
+
+        def trace_root(path, *, maximum):
+            if path.resolve() == root:
+                root_reads.append(path)
+            return stream(path, maximum=maximum)
+
+        def trace_cas(descriptor, *, retain):
+            if descriptor['sha256'] == observation_sha:
+                observation_reads.append(retain)
+            return read_uncached(descriptor, retain=retain)
+
+        with patch.object(self.registry, '_stream_file_identity', trace_root), \
+                patch.object(self.store, '_read_uncached', trace_cas):
+            response = self.read('scan', view='semantic_units', **prepared, maxItems=1)
+        self.assertEqual(200, response.status_code, response.text)
+        self.assertEqual(2, len(root_reads))
+        self.assertEqual([False, False], observation_reads)
+
+    def test_prepared_read_rejects_root_change_during_cas_exit(self):
+        source = self.normal()
+        prepared = self.prepare()
+        root = self.registry._path(source['projectionSha256'])
+        original, stamp = root.read_bytes(), root.stat()
+        observation_sha = source['observationManifestRef']['sha256']
+        read_uncached = self.store._read_uncached
+        observation_reads = 0
+
+        def change_root_during_cas_exit(descriptor, *, retain):
+            nonlocal observation_reads
+            if descriptor['sha256'] == observation_sha and not retain:
+                observation_reads += 1
+                if observation_reads == 2:
+                    root.write_bytes(bytes([original[0] ^ 1]) + original[1:])
+                    os.utime(root, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
+            return read_uncached(descriptor, retain=retain)
+
+        try:
+            with patch.object(self.store, '_read_uncached', change_root_during_cas_exit):
+                response = self.read('scan', view='semantic_units', **prepared, maxItems=1)
+            self.assertEqual(2, observation_reads)
+            self.assertEqual(422, response.status_code, response.text)
+            self.assertEqual('CANONICAL_FRAME_SOURCE_CHANGED', response.json()['detail']['kind'])
+        finally:
+            root.write_bytes(original)
+            os.utime(root, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
 
     def test_public_pdf_table_reference_is_resolved_to_complete_semantic_cells_at_prepare(self):
         from native_pdf_canonical_projection import produce_native_pdf

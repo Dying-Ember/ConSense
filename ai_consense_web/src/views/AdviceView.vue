@@ -50,6 +50,7 @@ const handoffError = ref<'invalid' | 'wrongProject' | null>(null)
 const scopeLoaded = ref(false)
 const indexError = ref('')
 const sourceChecking = ref(false)
+const indexChecking = ref(false)
 const preparingSources = ref(false)
 const preparation = ref<AdviceSourcePreparation | null>(null)
 const sourceErrorReason = ref<string | null>(null)
@@ -57,6 +58,8 @@ let viewEpoch = 0
 let reloadSequence = 0
 let scopeSequence = 0
 let indexSequence = 0
+type IndexCheck = { projectId: string; scope: string; basis: AdviceBasisScope; epoch: number; sequence: number; promise: Promise<void> }
+let activeIndexCheck: IndexCheck | null = null
 let rebuildSequence = 0
 let scopeEpoch = 0
 let askSequence = 0
@@ -75,7 +78,7 @@ const evidenceCopy = {
   referenceBasis: { zhHans: '仅解释固定标准（未确认项目采用）', zhHant: '僅解釋固定標準（未確認項目採用）', en: 'Fixed standard interpretation (adoption unconfirmed)' },
   binding: { zhHans: '会话固定绑定范围；更改用途请建立新会话。切换会话不会自动提问。', zhHant: '會話固定綁定範圍；更改用途請建立新會話。切換會話不會自動提問。', en: 'Session scope is fixed. Create a new session to change its purpose. Switching sessions does not submit a question.' },
   indexFailed: { zhHans: '当前范围的索引请求失败。请检查后端配置后刷新索引。', zhHant: '目前範圍的索引請求失敗。請檢查後端設定後重新整理索引。', en: 'The index request for this scope failed. Check backend configuration and refresh the index.' },
-  canonical_index_receipt_missing: { zhHans: '当前范围尚未建立可验证索引，请刷新索引。', zhHant: '目前範圍尚未建立可驗證索引，請重新整理索引。', en: 'No verified index receipt exists for this scope. Refresh the index.' },
+  canonical_index_receipt_missing: { zhHans: '此范围的索引状态尚未核验。已保存的索引可能仍可复用。可先提问，系统会检查并复用已有索引。仅在索引不存在或已过期时重建；重建会处理此范围的全部来源内容，可能需要数分钟。', zhHant: '此範圍的索引狀態尚未核驗。已儲存的索引可能仍可重用。可先提問，系統會檢查並重用已有索引。僅在索引不存在或已過期時重建；重建會處理此範圍的全部來源內容，可能需要數分鐘。', en: 'Index availability has not yet been verified for this scope. An existing saved index may still be reusable. Ask a question to check for and reuse an existing index. Rebuild only if the index is missing or outdated; rebuilding processes every source passage in this scope and can take several minutes.' },
   canonical_index_unavailable: { zhHans: '当前范围的索引或检索配置未通过核验，请检查后端配置后刷新索引。', zhHant: '目前範圍的索引或檢索設定未通過核驗，請檢查後端設定後重新整理索引。', en: 'Index or retrieval configuration verification failed for this scope. Check backend configuration and refresh the index.' },
   current_sources_unavailable: { zhHans: '当前范围的来源尚未就绪，请核对来源登记与解析状态。', zhHant: '目前範圍的來源尚未就緒，請核對來源登記與解析狀態。', en: 'Current sources for this scope are unavailable. Check source registration and parsing status.' },
   recheck: { zhHans: '重新检查来源', zhHant: '重新檢查來源', en: 'Recheck sources' },
@@ -207,9 +210,21 @@ function clearRebuildBusy(sequence?: number) {
   activeRebuildBusy = null
 }
 
+function currentIndexCheck(check: IndexCheck) {
+  return check.epoch === viewEpoch && check.projectId === projectId.value && check.scope === scope.value
+    && check.basis === basisScope.value && check.sequence === indexSequence
+}
+
+function invalidateIndexCheck() {
+  ++indexSequence
+  activeIndexCheck = null
+  indexChecking.value = false
+}
+
 function resetScopedState() {
   void stopCurrentRequest()
-  ++scopeEpoch; ++indexSequence; ++rebuildSequence; ++askSequence; ++reloadSequence; ++sourceCheckSequence; ++preparationSequence
+  if (!activeIndexCheck || !currentIndexCheck(activeIndexCheck)) invalidateIndexCheck()
+  ++scopeEpoch; ++rebuildSequence; ++askSequence; ++reloadSequence; ++sourceCheckSequence; ++preparationSequence
   indexStatus.value = null; indexError.value = ''
   sourceErrorReason.value = null
   sessionError.value = ''
@@ -218,20 +233,28 @@ function resetScopedState() {
   clearRebuildBusy()
 }
 
-async function reloadIndexStatus() {
-  const id = projectId.value, selectedScope = scope.value, epoch = viewEpoch, sequence = ++indexSequence
+function reloadIndexStatus(): Promise<void> {
+  if (activeIndexCheck && currentIndexCheck(activeIndexCheck)) return activeIndexCheck.promise
+  const id = projectId.value, selectedScope = scope.value, basis = basisScope.value, epoch = viewEpoch, sequence = ++indexSequence
   indexError.value = ''
   if (indexStatus.value?.indexReason !== 'current_sources_unavailable') indexStatus.value = null
-  if (!id || basisScope.value === 'reference_only') return
-  const current = () => epoch === viewEpoch && id === projectId.value && selectedScope === scope.value && sequence === indexSequence
-  try {
-    const status = await adviceApi.indexStatus(id, selectedScope)
-    if (!current()) return
-    if (status.sourceScope && status.sourceScope !== selectedScope) throw new Error('INDEX_SCOPE_MISMATCH')
-    indexStatus.value = status
-  } catch {
-    if (current()) indexError.value = pick(evidenceCopy.indexFailed)
-  }
+  if (!id || basis === 'reference_only') return Promise.resolve()
+  const check: IndexCheck = { projectId: id, scope: selectedScope, basis, epoch, sequence, promise: Promise.resolve() }
+  activeIndexCheck = check
+  indexChecking.value = true
+  check.promise = (async () => {
+    try {
+      const status = await adviceApi.indexStatus(id, selectedScope)
+      if (!currentIndexCheck(check)) return
+      if (status.sourceScope && status.sourceScope !== selectedScope) throw new Error('INDEX_SCOPE_MISMATCH')
+      indexStatus.value = status
+    } catch {
+      if (currentIndexCheck(check)) indexError.value = pick(evidenceCopy.indexFailed)
+    } finally {
+      if (activeIndexCheck === check) { activeIndexCheck = null; indexChecking.value = false }
+    }
+  })()
+  return check.promise
 }
 
 async function reload() {
@@ -306,7 +329,7 @@ async function prepareSources() {
   if (preparingSources.value || sourceChecking.value || !projectId.value || !sourcePreparationAvailable.value) return
   const id = projectId.value, selectedScope = scope.value, epoch = viewEpoch, selectedScopeEpoch = scopeEpoch, sequence = ++preparationSequence
   const current = () => id === projectId.value && epoch === viewEpoch && selectedScopeEpoch === scopeEpoch && sequence === preparationSequence
-  ++indexSequence; ++scopeSequence
+  invalidateIndexCheck(); ++scopeSequence
   preparingSources.value = true; preparation.value = null; sessionError.value = ''; indexError.value = ''
   try {
     const result = await adviceApi.prepareSources(id, selectedScope)
@@ -338,10 +361,13 @@ watch(projectId, () => {
 watch(() => [projectId.value, route.query.review], claimImportedDraft, { immediate: true })
 watch(() => [scope.value, basisScope.value], () => { resetScopedState(); messages.value = []; void reload(); void reloadScope(); void reloadIndexStatus() })
 watch(sessionId, () => {
-  resetScopedState(); messages.value = []
   const selected = sessions.value.find(item => item.id === sessionId.value)
+  const sameScope = !selected || (selected.scope === scope.value && selected.basisScope === basisScope.value)
+  const status = sameScope ? indexStatus.value : null
+  resetScopedState(); messages.value = []
+  if (sameScope) indexStatus.value = status
   if (selected) { scope.value = selected.scope; basisScope.value = selected.basisScope }
-  void reload(); void reloadScope(); void reloadIndexStatus()
+  void reload()
 })
 watch(() => messages.value.length, () => void scrollToBottom())
 onBeforeUnmount(() => { ++viewEpoch; ++scopeSequence; resetScopedState() })
@@ -478,7 +504,7 @@ async function ask(text?: string) {
 async function refreshIndex() {
   if (indexing.value || preparingSources.value || !projectId.value || basisScope.value === 'reference_only') return
   const id = projectId.value, selectedScope = scope.value, epoch = viewEpoch, selectedScopeEpoch = scopeEpoch, sequence = ++rebuildSequence
-  ++indexSequence // A pending status read must not overwrite the newer rebuild result.
+  invalidateIndexCheck() // A pending status read must not overwrite the newer rebuild result.
   indexError.value = ''
   indexing.value = true
   activeRebuildBusy = { sequence, message: t('advice.indexing') }
@@ -638,6 +664,9 @@ async function askPrecedence() {
       </div>
     </div>
 
+    <p v-if="indexChecking" class="small muted" role="status" data-advice-index-checking>{{ streamCopy('Checking source scope and index availability. Your question draft is retained.', '正在核对来源范围和索引状态，问题草稿已保留。', '正在核對來源範圍和索引狀態，問題草稿已保留。') }}</p>
+
+    <p class="small muted" data-sl-reference-scope>{{ pick({ en: 'SL reference retrieval uses the project editions saved in “SL editions and library” above; project adoption remains unconfirmed.', zhHans: 'SL 参考检索使用顶部“SL 版本与资料库”中本项目已保存的版本；项目采用状态仍待确认。', zhHant: 'SL 參考檢索使用頂部「SL 版本與資料庫」中本項目已儲存的版本；項目採用狀態仍待確認。' }) }}</p>
     <details v-if="basisScope !== 'reference_only'" class="surface source-scope section-gap">
       <summary>{{ t('advice.sourceScope.title') }} · {{ t('advice.sourceScope.includedCount', { count: scopeDocuments.filter(item => item.included).length }) }}</summary>
       <p class="muted small">{{ pick(evidenceCopy.project) }} ID: {{ projectId }} · {{ pick(evidenceCopy.session) }} ID: {{ sessionId || '—' }}</p>
@@ -839,7 +868,7 @@ async function askPrecedence() {
             <div v-if="activeCitation" class="source-view">
               <div class="sv-file">{{ activeCitation.fileLabel }} · {{ activeCitation.pageNo }}</div>
               <p v-if="activeCitation.fixedBaselineEvidence" class="warning-note">{{ streamCopy('This is a fixed standard original. Its source identity does not establish project adoption.', '这是固定标准原件，其来源身份本身不证明本项目采用。', '這是固定標準原件，其來源身份本身不證明本項目採用。') }}</p>
-              <AdviceSourceReader :project-id="projectId" :citation="activeCitation" :scope="activeSourceScope" />
+              <AdviceSourceReader :project-id="projectId" :citation="activeCitation" :scope="activeSourceScope" :auto-load="false" />
               <section class="source-context"><h4>{{ streamCopy('Quoted excerpt and related original images', '引用摘录及关联原图', '引用摘錄及關聯原圖') }}</h4>
               <div class="sv-para" v-html="highlightHtml(activeCitation.content)" />
               <button class="btn" type="button" @click="sourceDetails = !sourceDetails">{{ streamCopy('Show related original images / tables', '查看关联原图／整表', '查看關聯原圖／整表') }}</button>

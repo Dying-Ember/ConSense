@@ -35,6 +35,21 @@ class CanonicalIndexStatusTests(SourcePageIndexHttpTests):
         self.assertNotIn('chunks',result);self.assertNotIn('windows',result)
         self.assertLess(len(response.content),16777216)
 
+    def test_status_does_not_reload_chunks_and_returns_only_required_scope_fields(self):
+        indexed=self.index()
+        self.assertEqual(200,indexed.status_code,indexed.text)
+        self.assertNotIn('unclassified',indexed.json()['competitionScope'])
+        self.assertLess(len(indexed.content),8192)
+        registry=self.app.state.source_registry
+        with (patch.object(registry,'chunks',side_effect=AssertionError('status reloaded a projection')),
+              patch.object(registry,'chunks_from_loaded',wraps=registry.chunks_from_loaded) as checked):
+            response=self.status()
+        self.assertEqual(200,response.status_code,response.text)
+        self.assertEqual(1,checked.call_count)
+        self.assertEqual({'policyIdentity':{'manifestSha256':self.policy.policyIdentity['manifestSha256']},
+            'inputContract':'canonical-source-chunks-upstream-scope-and-parser-projection-v1',
+            'targetModule':'vetting','sourceQualityChanged':False},response.json()['competitionScope'])
+
     def test_warm_status_detects_changed_actual_vector_and_clears_ready_without_write(self):
         indexed=self.index();self.assertEqual(200,indexed.status_code,indexed.text)
         saved=self.backend._projects['AUTHORED-pins-index']

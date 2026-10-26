@@ -167,8 +167,11 @@ def project_key(value):
 
 
 def digest(value):
-    serialized = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(',', ':'))
-    return hashlib.sha256(serialized.encode('utf-8')).hexdigest()
+    result = hashlib.sha256()
+    encoder = json.JSONEncoder(ensure_ascii=False, sort_keys=True, separators=(',', ':'))
+    for part in encoder.iterencode(value):
+        result.update(part.encode('utf-8'))
+    return result.hexdigest()
 
 
 LATIN_TOKEN_PATTERN = r'[a-z0-9]+(?:[./()-][a-z0-9]+)*'
@@ -323,6 +326,54 @@ def signature(chunks):
     return window_runtime().signature(chunks)
 
 
+def load_project_metadata(key):
+    """Reuse resident parents; changed records decode once and owner exit hashes once."""
+    path = metadata_path(key)
+    metrics = {'bytesRead': 0, 'jsonDecodes': 0}
+    registry = getattr(window_runtime(), 'source_registry', None)
+    frame = registry._validation_frame.get() if registry is not None and hasattr(registry, '_validation_frame') else None
+    def stamp():
+        stat = path.stat()
+        return str(path.resolve()), stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns, stat.st_ino
+    def identity():
+        result, size = hashlib.sha256(), 0
+        resolved = str(path.resolve())
+        with path.open('rb') as stream:
+            for block in iter(lambda: stream.read(1024 * 1024), b''):
+                size += len(block)
+                result.update(block)
+        metrics['bytesRead'] += size
+        if str(path.resolve()) != resolved:
+            raise HTTPException(409, 'Index metadata locator changed')
+        return resolved, size, result.hexdigest()
+    if frame is not None and key in frame['indexMetadata']:
+        record = frame['indexMetadata'][key]
+        if stamp() != record['stamp']:
+            raise HTTPException(409, 'Index metadata changed during this operation')
+        return record['stored']
+    if not path.exists():
+        raise HTTPException(404, 'Project is not indexed')
+    before_stamp = stamp()
+    stored = _projects.get(key)
+    expected = stored.get('_metadataFileIdentity') if stored is not None else None
+    if stored is None or stored.get('_metadataFileStamp') != before_stamp or expected is None or frame is None:
+        raw = path.read_bytes()
+        metrics['bytesRead'] += len(raw)
+        actual = (str(path.resolve()), len(raw), hashlib.sha256(raw).hexdigest())
+        expected = actual
+        stored = json.loads(raw)
+        metrics['jsonDecodes'] += 1
+    if stamp() != before_stamp:
+        raise HTTPException(409, 'Index metadata changed while loading')
+    stored['_metadataFileIdentity'] = expected
+    stored['_metadataFileStamp'] = before_stamp
+    _projects[key] = stored
+    if frame is not None:
+        frame['indexMetadata'][key] = {'stored': stored, 'stamp': before_stamp,
+            'expected': expected, 'identity': identity, 'metrics': metrics}
+    return stored
+
+
 def read_project(key):
     global _migrated_index
     from migrated_qdrant_index import MigratedIndex, configured
@@ -333,12 +384,7 @@ def read_project(key):
             return _migrated_index.read(key, window_runtime(), database)
         except WindowError as error:
             raise HTTPException(409, {'kind':error.kind, 'message':str(error), 'metadata':error.metadata}) from error
-    stored = _projects.get(key)
-    if stored is None:
-        path = metadata_path(key)
-        if not path.exists():
-            raise HTTPException(404, 'Project is not indexed')
-        stored = json.loads(path.read_text(encoding='utf-8'))
+    stored = load_project_metadata(key)
     if stored.get('projectId') != key or not window_runtime().signature_matches(stored.get('signature',{}),stored['chunks']):
         raise HTTPException(409, 'Index signature changed; re-index current documents')
     if stored['chunks'] and not database().collection_exists(stored['collection']):

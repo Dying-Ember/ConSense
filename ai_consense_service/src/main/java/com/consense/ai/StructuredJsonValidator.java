@@ -42,10 +42,22 @@ final class StructuredJsonValidator {
     }
 
     static <T> List<T> decode(String raw, Class<T> elementType, Schema schema) {
+        return decodeArray(strictJson(raw),elementType,schema);
+    }
+
+    static <T> List<T> decodeRecords(String raw, Class<T> elementType, Schema schema) {
+        JsonNode root=strictJson(raw);
+        if(!root.isObject()||root.size()!=1||!root.has("records"))throw failure(SCHEMA_MISMATCH);
+        return decodeArray(root.get("records"),elementType,schema);
+    }
+
+    private static JsonNode strictJson(String raw) {
         if (raw == null || raw.trim().isEmpty()) throw failure(INVALID_JSON);
-        JsonNode root;
-        try { root = STRICT_MAPPER.readTree(raw); }
+        try { return STRICT_MAPPER.readTree(raw); }
         catch (Exception invalid) { throw failure(INVALID_JSON); }
+    }
+
+    private static <T> List<T> decodeArray(JsonNode root,Class<T> elementType,Schema schema) {
         if (root == null || !root.isArray()) throw failure(SCHEMA_MISMATCH);
         for (JsonNode item : root) {
             if (item == null || item.isNull() || item.isArray()) throw failure(SCHEMA_MISMATCH);

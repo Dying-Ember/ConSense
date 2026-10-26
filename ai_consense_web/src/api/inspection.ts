@@ -1,7 +1,7 @@
 import { api } from './client'
 
 export type InspectionRecord = Record<string, unknown>
-export interface InspectionDataset { id: string; label: string; projectId?: string; status?: string; scope?: string; vectorStatus?: string; vectorPointCount?: number; chunkCount?: number; windowCount?: number; documentCount?: number; provenance?: unknown }
+export interface InspectionDataset { id: string; label: string; projectId?: string; status?: string; unavailableReason?: string; scope?: string; vectorStatus?: string; vectorPointCount?: number; chunkCount?: number; windowCount?: number; documentCount?: number; provenance?: unknown }
 export interface InspectionRun { id: string; label: string; datasetId?: string; status?: string; provenance?: unknown }
 export interface InspectionCatalog { datasets: InspectionDataset[]; runs: InspectionRun[]; readOnly?: boolean; dataBoundary?: string }
 export interface InspectionPage<T = InspectionRecord> { items: T[]; page: number; pageSize: number; total: number; status?: string; stage?: string; available?: boolean; unavailableReason?: string; provenance?: unknown; scoreMeaning?: unknown; requestedCandidates?: number; finalRetrievalLimit?: unknown; actualRequest?: unknown; outputSchema?: unknown; profile?: unknown }

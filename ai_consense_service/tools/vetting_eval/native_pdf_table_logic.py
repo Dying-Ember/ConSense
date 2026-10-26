@@ -87,7 +87,7 @@ def _closed_physical_grid(table, cells):
     height, width = table.get('rowCount'), table.get('colCount')
     xs, ys, raw = table.get('gridXEdges'), table.get('gridYEdges'), table.get('rawGrid')
     if (type(height) is not int or type(width) is not int or height < 1 or width < 1
-            or len(cells) != height * width or table.get('extractionError')
+            or not cells or len(cells) > height * width or table.get('extractionError')
             or not isinstance(raw, list) or len(raw) != height
             or any(not isinstance(row, list) or len(row) != width for row in raw)):
         return None
@@ -99,18 +99,54 @@ def _closed_physical_grid(table, cells):
     if (not isinstance(table.get('bbox'), list) or any(type(v) not in (int, float) for v in table['bbox'])
             or table['bbox'] != [xs[0], ys[0], xs[-1], ys[-1]]):
         return None
-    occupied = set()
+    slots = None
+    if 'rawSlots' in table:
+        if not isinstance(table['rawSlots'], list) or len(table['rawSlots']) != height * width:
+            return None
+        slots = {}
+        for slot in table['rawSlots']:
+            if not isinstance(slot, dict) or not {'row', 'col', 'bbox', 'text', 'nativeCellPresent'} <= slot.keys():
+                return None
+            row, col = slot['row'], slot['col']
+            if (type(row) is not int or type(col) is not int or not 0 <= row < height or not 0 <= col < width
+                    or (row, col) in slots):
+                return None
+            slots[row, col] = slot
+    occupied, origins_at = set(), set()
     for cell in cells:
         row, col = cell.get('row'), cell.get('col')
+        rs, cs = cell.get('rowSpan'), cell.get('colSpan')
         if (type(row) is not int or type(col) is not int or not 0 <= row < height or not 0 <= col < width
-                or (row, col) in occupied or cell.get('spanKnown') is not True
-                or type(cell.get('rowSpan')) is not int or cell['rowSpan'] != 1
-                or type(cell.get('colSpan')) is not int or cell['colSpan'] != 1
+                or cell.get('spanKnown') is not True or type(rs) is not int or type(cs) is not int
+                or rs < 1 or cs < 1 or row + rs > height or col + cs > width
+                or (slots is None and (rs != 1 or cs != 1))
                 or not isinstance(cell.get('bbox'), list) or any(type(v) not in (int, float) for v in cell['bbox'])
-                or cell['bbox'] != [xs[col], ys[row], xs[col+1], ys[row+1]]
+                or cell['bbox'] != [xs[col], ys[row], xs[col+cs], ys[row+rs]]
                 or not isinstance(cell.get('text'), str) or raw[row][col] != cell['text']):
             return None
-        occupied.add((row, col))
+        footprint = {(r, c) for r in range(row, row + rs) for c in range(col, col + cs)}
+        if occupied.intersection(footprint):
+            return None
+        occupied.update(footprint); origins_at.add((row, col))
+        if slots is not None:
+            slot, raw_box = slots[row, col], cell.get('rawBbox')
+            slot_box = slot['bbox']
+            if (type(cell.get('providerRow')) is not int or cell['providerRow'] != row
+                    or type(cell.get('providerCol')) is not int or cell['providerCol'] != col
+                    or slot['nativeCellPresent'] is not True or slot['text'] != cell['text']
+                    or not isinstance(raw_box, list) or len(raw_box) != 4
+                    or any(type(v) not in (int, float) or not math.isfinite(v) for v in raw_box)
+                    or not isinstance(slot_box, list) or len(slot_box) != 4
+                    or any(type(v) not in (int, float) or not math.isfinite(v) for v in slot_box)
+                    or raw_box[0] >= raw_box[2] or raw_box[1] >= raw_box[3] or slot_box != raw_box):
+                return None
+    if len(occupied) != height * width:
+        return None
+    for row, col in occupied - origins_at:
+        slot = slots[row, col]
+        if (raw[row][col] is not None or slot['nativeCellPresent'] is not False
+                or slot['text'] is not None or slot['bbox'] is not None):
+            return None
     origins = [dict(copy.deepcopy(cell), physicalCellIds=[cell['physicalCellId']],
                     transform='same_provider_original_closed_physical_cell') for cell in cells]
     return {'tableId': table['tableId'] + ':physical-grid', 'rowCount': height, 'colCount': width,

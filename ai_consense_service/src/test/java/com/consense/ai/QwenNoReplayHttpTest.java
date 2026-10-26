@@ -11,6 +11,9 @@ import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import static org.junit.jupiter.api.Assertions.*;
 
 /** Eight finite loopback exchanges; synthetic credentials, no provider or model calls. */
@@ -39,5 +42,33 @@ class QwenNoReplayHttpTest {
                 assertFalse(sent.has("thinking"));assertFalse(sent.has("reasoning_split"));
             }finally{server.stop(0);}
         }
+    }
+
+    @Test @ExtendWith(OutputCaptureExtension.class)
+    void boundedHttp400DiagnosticClassifiesOnlyKnownErrorsWithoutLeakingBodies(CapturedOutput output) throws Exception {
+        HttpServer server=HttpServer.create(new InetSocketAddress("127.0.0.1",0),0);
+        AtomicInteger calls=new AtomicInteger();
+        server.createContext("/v1/chat/completions",exchange->{
+            int call=calls.incrementAndGet();exchange.getRequestBody().close();
+            String body=call==1
+                    ?"{\"error\":{\"code\":\"context_length_exceeded\",\"message\":\"SYNTHETIC_PROVIDER_SECRET\"}}"
+                    :"{\"error\":{\"code\":\"SYNTHETIC_PROVIDER_SECRET\",\"message\":\"SYNTHETIC_PROVIDER_SECRET\"}}";
+            byte[] bytes=body.getBytes(StandardCharsets.UTF_8);exchange.sendResponseHeaders(400,bytes.length);
+            exchange.getResponseBody().write(bytes);exchange.close();
+        });
+        server.start();
+        try {
+            String url="http://127.0.0.1:"+server.getAddress().getPort()+"/v1/chat/completions";
+            String input="{\"prompt\":\"SYNTHETIC_INPUT_SECRET\"}";
+            HttpSupport http=new HttpSupport();
+            for(int i=0;i<2;i++)assertEquals("Qwen chat HTTP 400",assertThrows(BizException.class,
+                    ()->http.postJsonBoundedWithoutReplay(url,input,2000,"Bearer SYNTHETIC_KEY_SECRET",1024,null)).getMessage());
+            assertEquals(2,calls.get());
+            assertTrue(output.getOut().contains("status=400, category=context_limit, requestBytes="+input.getBytes(StandardCharsets.UTF_8).length));
+            assertTrue(output.getOut().contains("status=400, category=unknown, requestBytes="+input.getBytes(StandardCharsets.UTF_8).length));
+            assertFalse(output.getAll().contains("SYNTHETIC_PROVIDER_SECRET"));
+            assertFalse(output.getAll().contains("SYNTHETIC_INPUT_SECRET"));
+            assertFalse(output.getAll().contains("SYNTHETIC_KEY_SECRET"));
+        }finally{server.stop(0);}
     }
 }

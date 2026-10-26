@@ -96,10 +96,11 @@ def semantic_member(parent, projection_sha256):
 
 
 def semantic_unit_template(unit):
-    """The closure's declarations and member addresses; text is stored once per origin."""
+    """Project closure declarations without expanding member bodies that are discarded."""
     return {key: (semantic_unit_template(value) if key in ('hierarchyContext', 'attachmentContext')
-                  else copy.deepcopy(value)) for key, value in unit.items()
-            if key not in ('members', 'originIds')}
+                  else semantic_value(value)) for key, value in unit.items()
+            if key not in _LAYOUT_FIELDS
+            and key not in ('members', 'originIds', 'sourceIdentity', 'headingLocation')}
 
 
 def semantic_unit(unit, projection_sha256, *, member_projector=None):
@@ -149,7 +150,10 @@ def _source_scope(p, fields):
 
 
 class SourceUnits:
-    def __init__(self, parents):
+    def __init__(self, parents, *, include_members=True):
+        if type(include_members) is not bool:
+            raise ValueError('include_members_mode_must_be_boolean')
+        self.include_members = include_members
         self.parents = {p['id']: p for p in parents}
         if len(self.parents) != len(parents):
             raise ValueError('duplicate_canonical_parent_id')
@@ -247,7 +251,8 @@ class SourceUnits:
             row['observedRanges'] = [self.block_range(key, block) for block in sorted(blocks)]
             row['blockIds'] = sorted(blocks)
             row['requiredMemberIds'] = sorted(ids)
-            row['members'] = [copy.deepcopy(self.parents[id_]) for id_ in sorted(ids)]
+            if self.include_members:
+                row['members'] = [copy.deepcopy(self.parents[id_]) for id_ in sorted(ids)]
             row['status'] = 'complete_observed_unit'
         except (ValueError, KeyError, TypeError, UnicodeError, WindowError) as error:
             row['reason'] = error.kind if isinstance(error, WindowError) else str(error)
@@ -408,7 +413,8 @@ class SourceUnits:
             blocks = sorted({part['blockId'] for p in members for part in p['parts']})
             ranges = [self.block_range(self.source(seed), block) for block in blocks]
             context.update(status='complete_observed_hierarchy_context',
-                           requiredMemberIds=[p['id'] for p in members], members=copy.deepcopy(members),
+                           requiredMemberIds=[p['id'] for p in members],
+                           members=copy.deepcopy(members) if self.include_members else [],
                            memberPayloadSha256=[{'id': p['id'], 'sha256': digest(p)} for p in members],
                            edgeDeclarations=[declarations[i] for i in sorted(declarations)],
                            blockIds=blocks, observedRanges=ranges)
@@ -607,7 +613,8 @@ class SourceUnits:
                 self.source(member); self.part_map(member)
             blocks = sorted({part['blockId'] for p in members for part in p['parts']})
             context.update(status='complete_observed_attachment_context',
-                           requiredMemberIds=[p['id'] for p in members], members=copy.deepcopy(members),
+                           requiredMemberIds=[p['id'] for p in members],
+                           members=copy.deepcopy(members) if self.include_members else [],
                            memberPayloadSha256=[{'id': p['id'], 'sha256': digest(p)} for p in members],
                            edgeDeclarations=[{'edgeId': declarations[i]['edgeId'],
                                               'relation': copy.deepcopy(declarations[i]['relation'])}

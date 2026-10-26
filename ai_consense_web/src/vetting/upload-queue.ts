@@ -1,6 +1,6 @@
 import { reactive } from 'vue'
 import { vettingApi } from '@/api'
-import type { VettingFile } from '@/api/types'
+import type { DocumentScope, VettingFile } from '@/api/types'
 
 export type UploadProgress = { total: number; completed: number; current: number; fileName: string; failed: number;
   state: 'running' | 'completed' | 'uncertain' | 'refresh_failed' | 'interrupted'; messages: string[] }
@@ -33,7 +33,7 @@ export function vettingUploadQueue(projectId: string): UploadQueue {
   return queue
 }
 
-export async function uploadVettingFiles(projectId: string, selected: File[]) {
+export async function uploadVettingFiles(projectId: string, selected: File[], documentScope: DocumentScope = 'auto') {
   const queue = vettingUploadQueue(projectId)
   if (!projectId || !selected.length || queue.running) return
   queue.running = true
@@ -47,7 +47,7 @@ export async function uploadVettingFiles(projectId: string, selected: File[]) {
       progress.current = index + 1; progress.fileName = file.name
       acknowledged = false
       persistProgress(projectId, queue)
-      const result = await vettingApi.uploadPackage(projectId, [file])
+      const result = await vettingApi.uploadPackage(projectId, [file], undefined, documentScope)
       acknowledged = true
       progress.completed++
       if (result.failed > 0 || result.accepted < 1) progress.failed++

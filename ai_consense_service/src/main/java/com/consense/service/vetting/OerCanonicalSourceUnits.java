@@ -34,12 +34,12 @@ final class OerCanonicalSourceUnits {
             }
             require(unit.has("hierarchyContext")==expected.has("hierarchyContext"),"source-unit hierarchy context missing or not advertised");
             require(unit.has("attachmentContext")==expected.has("attachmentContext"),"source-unit attachment context missing or not advertised");
-            Set<String> allowed=new HashSet<>();expected.fieldNames().forEachRemaining(allowed::add);allowed.add("originalRerankOrdinal");allowed.add("seedScore");
+            Set<String> allowed=new HashSet<>();expected.fieldNames().forEachRemaining(allowed::add);allowed.add("originalRerankOrdinal");allowed.add("seedScore");allowed.add("selectionOrdinal");
             unit.fieldNames().forEachRemaining(field->require(allowed.contains(field),"unknown source-unit field: "+field));
-            require(used.add(expected.path("unitId").asText()) && integer(unit.path("originalRerankOrdinal"))
-                    && unit.path("originalRerankOrdinal").asInt()>ordinal
+            int selectedOrdinal=VettingRetrievalSourceUnits.selectionOrdinal(episode,unit,result.path("hits").get(i).path("payload"));
+            require(used.add(expected.path("unitId").asText()) && selectedOrdinal>ordinal
                     && unit.path("seedScore").equals(result.path("hits").get(i).path("score")),"source-unit ranked seed differs");
-            ordinal=unit.path("originalRerankOrdinal").asInt();
+            ordinal=selectedOrdinal;
         }
     }
 

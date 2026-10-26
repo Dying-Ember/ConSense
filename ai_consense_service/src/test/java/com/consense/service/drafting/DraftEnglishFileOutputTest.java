@@ -47,19 +47,20 @@ class DraftEnglishFileOutputTest {
         assertEquals("\uFEFFEnglish translation: The original human record is retained.",new String(f.service.download(PROJECT,"NTT"),StandardCharsets.UTF_8));assertEquals(before,saved(f));
         ProjectService projects=(ProjectService)ReflectionTestUtils.getField(f.service,"projectService");projects.require(PROJECT).setContractNo("中文合约编号");
         String filename=f.service.downloadFileName(PROJECT,"NTT");assertEquals("ConSense_NTT_Draft.md",filename);
+        projects.require(PROJECT).setContractNo("Contrat 42");assertEquals("ConSense_NTT_Draft.md",f.service.downloadFileName(PROJECT,"NTT"));
+        projects.require(PROJECT).setContractNo("中文合约编号");
         assertFalse(EnglishFileOutput.hasNonEnglishText(filename));assertEquals("中文合约编号",projects.require(PROJECT).getContractNo());verifyNoInteractions(f.model);
     }
 
-    @Test void missingOptionalHelperKeepsLegacyEnglishBytesButRejectsNonEnglishDeliveries()throws Exception{
-        DraftingPlanGenerationStateTest.Fixture english=fixture("Original English condition remains unchanged.");
-        assertArrayEquals(english.artifacts.get("fixture-NTT").getDocxBytes(),english.service.exportWord(PROJECT,"NTT","fixture-NTT"));
-        assertEquals("\uFEFFOriginal English condition remains unchanged.",new String(english.service.download(PROJECT,"NTT"),StandardCharsets.UTF_8));
-        DraftingPlanGenerationStateTest.Fixture chinese=fixture("非英文人工记录");String before=saved(chinese);DraftingService service=spy(chinese.service);
-        for(String format:Arrays.asList("docx","pdf","md")){
-            BizException failure=assertThrows(BizException.class,()->{if("docx".equals(format))service.exportWord(PROJECT,"NTT","fixture-NTT");else if("pdf".equals(format))service.exportPdf(PROJECT,"NTT","fixture-NTT");else service.download(PROJECT,"NTT");},format);
-            assertTrue(failure.getMessage().contains("ENGLISH_FILE_OUTPUT_REQUIRED"),format);
+    @Test void missingTranslatorCannotCertifyAnyDeliveryLanguage()throws Exception{
+        for(String text:List.of("Original English condition remains unchanged.","Bonjour, paiement dans 14 jours.","非英文人工记录")){
+            DraftingPlanGenerationStateTest.Fixture f=fixture(text);String before=saved(f);DraftingService service=spy(f.service);
+            for(String format:Arrays.asList("docx","pdf","md")){
+                BizException failure=assertThrows(BizException.class,()->{if("docx".equals(format))service.exportWord(PROJECT,"NTT","fixture-NTT");else if("pdf".equals(format))service.exportPdf(PROJECT,"NTT","fixture-NTT");else service.download(PROJECT,"NTT");},format);
+                assertTrue(failure.getMessage().contains("ENGLISH_FILE_OUTPUT_REQUIRED"),format);
+            }
+            verify(service,never()).renderPdf(any(byte[].class));assertEquals(before,saved(f));verifyNoInteractions(f.model);
         }
-        verify(service,never()).renderPdf(any(byte[].class));assertEquals(before,saved(chinese));verifyNoInteractions(chinese.model);
     }
 
     @Test void changedRevisionDuringTranslationOrRenderingCannotPublishAnOldDerivedFile()throws Exception{

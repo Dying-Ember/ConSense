@@ -14,6 +14,15 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /** Authored admitted-source carriers. Tests actual Publication.accept before progress.section. */
 class AdviceClauseAttributionPublicationTest {
+    @Test void streamedSectionChecksCompleteSourceBoundaryBeforePublishing() throws Exception {
+        Fixture f=new Fixture();java.util.concurrent.atomic.AtomicInteger boundaries=new java.util.concurrent.atomic.AtomicInteger();
+        AdviceProgress progress=new AdviceProgress(){public boolean streaming(){return true;}
+            public void section(String text,List<String> refs,List<CitationVO> cited){assertTrue(boundaries.get()>f.published.size());f.published.add(text);}};
+        fixture(new AdviceService(null,null,null,null,null,null,null,null,null,null,null),
+                Collections.singletonList(source("1","AUTHORED supported source text",null,false)),false,progress,f,boundaries::incrementAndGet);
+        begin(f,false);accept(f,opening(f));assertEquals(1,boundaries.get());assertEquals(1,f.published.size());
+    }
+
     @Test void derivedOrderRecapLosingItsGoverningQualifierNeverReachesProgress() throws Exception {
         List<CitationVO> sources=Arrays.asList(source("1","For external works only, the following rules apply.",null,false),
                 source("2","Where the documents differ, ALPHA shall prevail over BETA and GAMMA; BETA shall prevail over GAMMA.",null,false));
@@ -382,9 +391,12 @@ class AdviceClauseAttributionPublicationTest {
     }
     private Fixture fixture(AdviceService service,List<CitationVO> sources,boolean chinese,AdviceProgress progress)throws Exception{return fixture(service,sources,chinese,progress,new Fixture());}
     private Fixture fixture(AdviceService service,List<CitationVO> sources,boolean chinese,AdviceProgress progress,Fixture f)throws Exception {
+        return fixture(service,sources,chinese,progress,f,()->{});
+    }
+    private Fixture fixture(AdviceService service,List<CitationVO> sources,boolean chinese,AdviceProgress progress,Fixture f,Runnable sourceBoundary)throws Exception {
         f.chinese=chinese;Class<?> context=Class.forName(AdviceService.class.getName()+"$QuestionContext");Constructor<?> qc=context.getDeclaredConstructor(String.class,List.class);qc.setAccessible(true);
-        Class<?> type=Class.forName(AdviceService.class.getName()+"$Publication");Constructor<?> pc=type.getDeclaredConstructor(AdviceService.class,List.class,boolean.class,AdviceProgress.class,Runnable.class,context);pc.setAccessible(true);
-        f.publication=pc.newInstance(service,sources,false,progress,(Runnable)()->{},qc.newInstance(chinese?"解释已提供的条文":"Explain the uploaded clause",Collections.emptyList()));return f;
+        Class<?> type=Class.forName(AdviceService.class.getName()+"$Publication");Constructor<?> pc=type.getDeclaredConstructor(AdviceService.class,List.class,boolean.class,AdviceProgress.class,Runnable.class,Runnable.class,context);pc.setAccessible(true);
+        f.publication=pc.newInstance(service,sources,false,progress,(Runnable)()->{},sourceBoundary,qc.newInstance(chinese?"解释已提供的条文":"Explain the uploaded clause",Collections.emptyList()));return f;
     }
     private void begin(Fixture f,boolean repair){ReflectionTestUtils.invokeMethod(f.publication,"beginAttempt",true,repair);}
     private void accept(Fixture f,AdvisoryHarness.Section section){ReflectionTestUtils.invokeMethod(f.publication,"accept",section);}

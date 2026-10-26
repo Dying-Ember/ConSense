@@ -47,6 +47,20 @@ class VettingChecklistDependenciesTest {
         JsonNode unknown=VettingChecklistDependencies.capture("project",session,Collections.singletonList(wire.document),Collections.singletonList(wire.document),Collections.emptyList(),Collections.emptyList());
         assertEquals("required_member_dependencies_unknown",unknown.path("items").path("APP-I-011").path("status").asText());
     }
+    @Test void oneParsedChecklistContextPreservesEveryHistoricalWholeGenerationBasis()throws Exception{
+        VettingChecklistCatalog.Item a=item("APP-authored-A","PRE.B3.040"),b=item("APP-authored-B","PRE.B4.030");
+        com.consense.domain.VettingRun run=run(a,JsonUtils.parse("{}"),b,JsonUtils.parse("{}"));
+        run.setCoverageJson("{\"authoredText\":\"Escaped \\\"quote\\\" and line\\nnext\",\"unrelated\":[]}");
+        Class<?> contextType=Class.forName(VettingChecklistService.class.getName()+"$ChecklistContext");
+        java.lang.reflect.Constructor<?> constructor=contextType.getDeclaredConstructor(com.consense.domain.VettingRun.class);constructor.setAccessible(true);Object context=constructor.newInstance(run);
+        java.lang.reflect.Method basis=contextType.getDeclaredMethod("basis",VettingChecklistCatalog.Item.class,JsonNode.class);basis.setAccessible(true);
+        java.lang.reflect.Field parsed=contextType.getDeclaredField("coverage");parsed.setAccessible(true);Object before=parsed.get(context);
+        for(VettingChecklistCatalog.Item requirement:VettingChecklistCatalog.items()){
+            String expected=VettingCorpus.hash(JsonUtils.write(Arrays.asList("manual-check-basis-v1",run.getProjectId(),run.getSourceSnapshotSha256(),run.getCoverageJson(),run.getResultJson(),run.getModelIdentityJson(),run.getRecoveryContractSha256(),
+                    requirement.getId(),requirement.getSection(),requirement.getClause(),requirement.getDescription(),requirement.getReviewScope(),requirement.getScopeNote())));
+            assertEquals(expected,basis.invoke(context,requirement,null),requirement.getId());assertSame(before,parsed.get(context));
+        }
+    }
 
     @Test void anotherClauseRevisionKeepsOnlyTheUnchangedItemsRequiredMemberBasis() {
         VettingChecklistCatalog.Item a=item("APP-I-authored-A","PRE.B3.040"),b=item("APP-I-authored-B","PRE.B4.030");

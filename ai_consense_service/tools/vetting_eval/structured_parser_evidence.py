@@ -424,6 +424,11 @@ def _text(block):
                 return None, None
             values.append(''.join(s['content'] for s in spans))
         return '\n'.join(values), 'lines/spans/content'
+    if isinstance(content, list) and content and all(
+            isinstance(item, dict) and item.get('type') in ('text', 'equation_inline')
+            and isinstance(item.get('content'), str) for item in content) and {
+                item['type'] for item in content} == {'text', 'equation_inline'}:
+        return ''.join(item['content'] for item in content), 'content/text+equation_inline/content'
     return None, None
 
 
@@ -743,6 +748,8 @@ def normalize_parser_run(parser, outputs, source, identity, page_map, *, artifac
                     'provenance': {'output': key, 'pointer': bp, 'textField': text_field},
                     'relationships': {k: copy.deepcopy(block[k]) for k in
                         ('continuation', 'cross_page', 'relations', 'merge_with', 'parent_id') if k in block}}
+            if text_field == 'content/text+equation_inline/content':
+                item['inlineEquationInterpretation'] = 'unknown'
             if label in ('table', 'table_body'):
                 item['table'] = _table(block, bid, bp, issues)
                 item['table']['provenance']['output'] = key

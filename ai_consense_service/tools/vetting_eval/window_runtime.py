@@ -24,11 +24,12 @@ from structural_retrieval import (StructuralRecipe, CONTRACT as STRUCTURAL_CONTR
 from preparation_cache import PreparationCache
 from checkpoint_identity import checkpoint_inventory
 from checkpoint_publication import CheckpointPublication
-from index_integrity import inspect_points, verify_reuse, vector_sha256, PROTOCOL as INDEX_INTEGRITY_PROTOCOL
+from index_integrity import inspect_points, verify_reuse, verify_availability, vector_sha256, PROTOCOL as INDEX_INTEGRITY_PROTOCOL
 from portable_index_signature import portable, matches as portable_signature_matches, legacy_candidate, migration_signature_version
 
 CONTRACT = "source-bound-window-points-full-parent-results-v1"
 SIGNATURE_VERSION = 5
+EXACT_CLAUSE_POLICY = 'full_dotted_identifier_bound_clause_first_v1'
 _loaded_source_hashes = {name:hashlib.sha256(Path(__file__).with_name(name).read_bytes()).hexdigest()
                         for name in ('window_runtime.py','token_windows.py','fixed_vector_cache.py','server.py','qdrant_backend.py','workspace_root.py','retrieval_source_units.py','embedding_compatibility.py','structural_retrieval.py','preparation_cache.py','checkpoint_identity.py','checkpoint_publication.py','index_integrity.py','migrated_qdrant_index.py','migrate_qdrant_server.py','fixed_development_baseline_runtime.py','verify_retrieval_offline.py','portable_index_signature.py')}
 
@@ -38,6 +39,40 @@ def file_identity(path):
     with p.open('rb')as f:
         for raw in iter(lambda:f.read(1024*1024),b''):h.update(raw);size+=len(raw)
     return {'relativePath':p.name,'bytes':size,'sha256':h.hexdigest()}
+
+
+def dense_scope_filter(bound,scope_ids):
+    """Use source hashes only when they select exactly the same bound windows."""
+    sources=set()
+    for row in bound.values():
+        value=row.get('sourceHash')
+        if not isinstance(value,str) or not re.fullmatch('[0-9a-f]{64}',value):
+            return 'parentId',sorted(scope_ids)
+        if row['parentId'] in scope_ids:sources.add(value)
+    if sources and len(sources)<len(scope_ids) and all(
+            (row['parentId'] in scope_ids)==(row['sourceHash'] in sources) for row in bound.values()):
+        return 'sourceHash',sorted(sources)
+    return 'parentId',sorted(scope_ids)
+
+
+def exact_clause_candidates(query,scope):
+    """Prefer declared clause ownership, never identifier mentions in body text."""
+    identifier=query.strip().casefold()
+    if not re.fullmatch(r'[a-z][a-z0-9]*(?:\.[a-z0-9]+)+',identifier) or not any(c.isdigit() for c in identifier):
+        return []
+    first,continuations,seen=[],[],set()
+    for row in scope:
+        if row.get('observedNodeKind') not in (None,'clause') or row.get('observedSourceRole') not in (None,'body','heading','body_interval_observation'):
+            continue
+        labels=[row[key] for key in ('observedClause','clauseId') if isinstance(row.get(key),str) and row[key].strip()]
+        if not labels or any(label.strip().casefold()!=identifier for label in labels):
+            continue
+        heading=row.get('clauseHeadingLocation') or (row.get('observedNodeId') if row.get('observedNodeKind')=='clause' else None)
+        if not heading:continue
+        source=(row.get('originalSourceSha256'),row.get('sourceHash'),row.get('documentId'),heading)
+        (continuations if source in seen else first).append(row);seen.add(source)
+    # One edition's continuation fragments must not consume every candidate slot.
+    return first+continuations
 
 
 class WindowRuntime:
@@ -169,9 +204,15 @@ class WindowRuntime:
 
     def signature(self,chunks):
         runtime=self.s.model_runtime('embedding')
+        registry=getattr(self,'source_registry',None)
+        frame=registry._validation_frame.get() if registry is not None and hasattr(registry,'_validation_frame') else None
+        owned=frame['corpusDigests'].get(id(chunks)) if frame is not None else None
+        corpus=owned[1] if owned is not None and owned[0] is chunks else self.s.digest(chunks)
+        if frame is not None and owned is None:
+            frame['corpusDigests'][id(chunks)]=(chunks,corpus,self.s.digest)
         return {'signatureVersion':self.signature_version(),'contract':self.contract(),'embedding':self.s.MODELS['embedding'],'runtime':runtime,
                 'structuralSelectionPolicy':self.selection_policy(),
-                'normalized':True,'corpus':self.s.digest(chunks),'windowRecipe':self.recipe('embedding').__dict__,
+                'normalized':True,'corpus':corpus,'windowRecipe':self.recipe('embedding').__dict__,
                 'embeddingPreprocessing':{'strip':True,'lowerCase':False,'version':'sentence-transformers-strip-no-lower-v1'},
                 'tokenizerAndModelFiles':self.logical_identity('embedding'),'algorithms':self.embedding_algorithms(),
                 **({'structuralRecipe':self.structural_recipe.identity(),'sourceOrderBasis':'canonical_request_order'} if self.structural_recipe.enabled else {})}
@@ -187,6 +228,7 @@ class WindowRuntime:
                 'structuralSelection':{'policy':self.selection_policy(),
                     **({'hierarchyContextPolicy':HIERARCHY_POLICY, 'attachmentContextPolicy':ATTACHMENT_POLICY} if self.structural_recipe.enabled else {}),
                     'topKScope':'unique_reliable_structural_units_or_unknown_single_seeds','closureMembersAreRanked':False,'scope':'canonical_observed_structure_only'},
+                'exactClausePriority':EXACT_CLAUSE_POLICY,
                 **({'structuralRecipe':self.structural_recipe.identity(),'longEmbeddingMaxTokens':self.inference_cap('embedding'),'contextRerankMaxTokens':self.inference_cap('reranker')} if self.structural_recipe.enabled else {}),
                 'limitations':'Max over groups favors long parents with more opportunities; observed structural context does not establish semantic completeness or quality improvement. Necessary-evidence recall and same-pool ranking require separate labels/evaluation.'}
 
@@ -239,6 +281,29 @@ class WindowRuntime:
             fail(w['parentId']in parents,'UNKNOWN_WINDOW_PARENT','Window references absent parent')
             grouped[w['parentId']].append(w)
         for id_,ww in grouped.items():verify_window_coverage(parents[id_],ww,self.recipe('embedding').max_tokens)
+        return parents,{w['id']:w for w in rows}
+
+    def validate_query_metadata(self,metadata):
+        if not self.structural_recipe.enabled:
+            return self.validate_metadata(metadata)
+        # read_project already checks the current complete source/runtime signature.
+        fail(metadata.get('contract')==self.contract(),'OLD_INDEX_CONTRACT','Index contract/mode differs from the configured recipe')
+        rows=metadata['windows'];chunks=metadata['chunks'];parents={p['id']:p for p in chunks}
+        fail(len(parents)==len(chunks),'INDEX_PARENT_IDS','Saved parents require unique identities')
+        fail(metadata['windowManifestSha256']==digest(rows) and metadata['vectorPoints']==len(rows),
+             'WINDOW_MANIFEST_MISMATCH','Saved window manifest/hash/count differs')
+        fail(len({w['id']for w in rows})==len(rows),'WINDOW_ID_COLLISION','Saved windows duplicate IDs')
+        for row in rows:
+            origins=row.get('originParentIds')
+            fail(row.get('granularity')in ('short','structure') and isinstance(origins,list) and bool(origins)
+                 and len(set(origins))==len(origins) and all(origin in parents for origin in origins)
+                 and row.get('retrievalSeedParentId')==origins[0],
+                 'UNKNOWN_WINDOW_PARENT','Dual window origins must bind current canonical parents')
+            if row['granularity']=='short':
+                fail(origins==[row['parentId']],'UNKNOWN_WINDOW_PARENT','Short window must bind its exact original parent')
+        signed=metadata['signature'];key=metadata['projectId']
+        collection=self.index_collection(key,signed,metadata.get('generation'))
+        verify_availability(self.s.database()if chunks else None,metadata,key=key,collection=collection,signature=signed)
         return parents,{w['id']:w for w in rows}
 
     def index_collection(self,key,signed,generation=None):
@@ -360,8 +425,15 @@ class WindowRuntime:
         if request.limit>request.candidates:raise s.HTTPException(422,'limit cannot exceed candidates')
         if request.role is not None and request.role not in s.ROLES:raise s.HTTPException(422,'Unsupported evidence role')
         key=s.project_key(request.projectId)
+        retrieval_started=time.perf_counter();query_sha=text_sha(request.query)
+        def phase(name,status,**counts):
+            self.emit('retrieval-phase',{'phase':name,'status':status,'querySha256':query_sha,
+                'elapsedSeconds':time.perf_counter()-retrieval_started,**counts})
         with s.LOCK:
-            metadata=s.read_project(key);parents,bound=self.validate_metadata(metadata)
+            phase('metadata','started');phase_started=time.perf_counter()
+            metadata=s.read_project(key)
+            try:parents,bound=self.validate_query_metadata(metadata)
+            except WindowError as error:raise s.HTTPException(503,{'kind':error.kind,'message':str(error),'metadata':error.metadata})from error
             source_selection=getattr(request,'sourceSha256',None)
             known_sources={c.get('originalSourceSha256')for c in metadata['chunks']if c.get('originalSourceSha256')}
             sl_sources={c.get('originalSourceSha256')for c in metadata['chunks']if c.get('fileKey')=='SL' or c.get('sourceQuality',{}).get('family')=='SL'}
@@ -372,33 +444,46 @@ class WindowRuntime:
             scope=[c for c in metadata['chunks']if (request.role is None or c['role']==request.role)
                    and (source_selection is None or c.get('originalSourceSha256')in source_selection)]
             source_receipt={'selectedSourceSha256':sorted(source_selection)}if source_selection is not None else {}
+            phase('metadata','completed',durationSeconds=time.perf_counter()-phase_started,
+                  parents=len(parents),windows=len(bound),selectedParents=len(scope),
+                  selectedSources=len(source_selection) if source_selection is not None else len(known_sources))
             if not scope:
                 hits,units=select_source_units(scope,[],request.limit,
                                               hierarchy_context=self.structural_recipe.enabled)
+                phase('complete','completed',returnedParents=0)
                 return {'hits':hits,'sourceUnits':units,'mode':self.contract(),'projectId':key,'indexSignature':s.digest(metadata['signature']),'emptyScope':True,**source_receipt}
             try:
-                started=time.perf_counter();tokenizer=self.tokenizer('embedding')
+                started=time.perf_counter();phase('query_embedding','started');phase_started=time.perf_counter()
+                tokenizer=self.tokenizer('embedding')
                 full_query=len(tokenizer(request.query.strip(),add_special_tokens=True,truncation=False)['input_ids'])
                 fail(full_query<=self.recipe('embedding').max_tokens,'QUERY_TOKEN_BUDGET_EXHAUSTED','Full embedding query exceeds frozen cap',fullTokens=full_query,maxTokens=self.recipe('embedding').max_tokens)
                 vector=s.encode_embeddings([request.query])[0]
+                phase('query_embedding','completed',durationSeconds=time.perf_counter()-phase_started)
                 scope_ids={c['id']for c in scope}
                 eligible={id_:w for id_,w in bound.items()if w['parentId']in scope_ids}
+                filter_key,filter_values=dense_scope_filter(bound,scope_ids) if source_selection is not None else (None,[])
                 def dense_lane(granularity=None):
                     lane={id_:w for id_,w in eligible.items()if granularity is None or w.get('granularity')==granularity}
                     conditions=[]
                     if request.role:conditions.append(models.FieldCondition(key='role',match=models.MatchValue(value=request.role)))
                     if granularity:conditions.append(models.FieldCondition(key='granularity',match=models.MatchValue(value=granularity)))
-                    if source_selection is not None:conditions.append(models.FieldCondition(key='parentId',match=models.MatchAny(any=sorted(scope_ids))))
+                    if source_selection is not None:conditions.append(models.FieldCondition(key=filter_key,match=models.MatchAny(any=filter_values)))
                     filt=models.Filter(must=conditions)if conditions else None
                     fetch_ordinal=0
                     def fetch(limit):
                         nonlocal fetch_ordinal
-                        fetch_ordinal+=1;points=s.database().query_points(metadata['collection'],query=vector.tolist(),limit=limit,query_filter=filt).points;result=[]
+                        fetch_ordinal+=1;fetch_started=time.perf_counter()
+                        counts={'granularity':granularity,'fetchOrdinal':fetch_ordinal,'filterKey':filter_key,
+                                'filterValues':len(filter_values),'requestedWindows':limit}
+                        phase('dense_fetch','started',**counts)
+                        points=s.database().query_points(metadata['collection'],query=vector.tolist(),limit=limit,query_filter=filt).points;result=[]
                         fail(len(points)==min(limit,len(lane)),'DENSE_WINDOW_SCOPE_INCOMPLETE','Vector provider returned fewer points than declared role/granularity scope')
                         for p in points:
                             id_=str(p.id);fail(id_ in lane,'UNKNOWN_DENSE_WINDOW','Dense point is outside bound role/granularity scope')
                             fail(p.payload=={**lane[id_],'indexSignature':s.digest(metadata['signature'])},'DENSE_POINT_PAYLOAD_MISMATCH','Dense window payload differs from bound manifest')
                             result.append((id_,float(p.score)))
+                        phase('dense_fetch','completed',durationSeconds=time.perf_counter()-fetch_started,
+                              returnedWindows=len(points),**counts)
                         self.emit('dense-window-fetch',{'granularity':granularity,'fetchOrdinal':fetch_ordinal,'requestedWindowLimit':limit,
                             'actualWindowHits':[{'windowId':id_,'parentId':bound[id_]['parentId'],'score':score}for id_,score in result]})
                         return result
@@ -412,22 +497,45 @@ class WindowRuntime:
                     dense_pools=[short,long];receipt={'lanes':{'short':short_receipt,'structure':long_receipt},'fusion':'independent_lane_rrf'}
                 else:
                     dense,receipt=dense_lane();dense_pools=[dense]
+                phase('lexical','started');phase_started=time.perf_counter()
                 terms=[s.tokens(c['content'])for c in scope];lexical=[];lexical_scores=[]
                 if any(terms):
                     lexical_scores=BM25Okapi(terms).get_scores(s.tokens(request.query));lexical=[scope[i]for i in np.argsort(-lexical_scores)[:request.candidates]if lexical_scores[i]>0]
+                phase('lexical','completed',durationSeconds=time.perf_counter()-phase_started,candidateParents=len(lexical))
                 self.emit('parent-bm25-candidates',{'allScopeScores':[{'id':c['id'],'score':float(v)}for c,v in zip(scope,lexical_scores)],'orderedCandidateIds':[c['id']for c in lexical]})
                 fused,lookup_={},{}
                 for found in(*dense_pools,lexical):
                     for rank,c in enumerate(found,1):fused[c['id']]=fused.get(c['id'],0)+1/(s.RRF_CONSTANT+rank);lookup_[c['id']]=c
-                candidate_ids=sorted(fused,key=lambda id_:(-fused[id_],id_))[:request.candidates];candidates=[lookup_[id_]for id_ in candidate_ids]
+                exact=exact_clause_candidates(request.query,scope);exact_ids={c['id']for c in exact}
+                for c in exact:lookup_[c['id']]=c
+                candidate_ids=([c['id']for c in exact]+[id_ for id_ in sorted(fused,key=lambda id_:(-fused[id_],id_))if id_ not in exact_ids])[:request.candidates]
+                candidates=[lookup_[id_]for id_ in candidate_ids]
                 self.emit('parent-rrf-candidates',{'constant':s.RRF_CONSTANT,'allFusedInOrder':[{'id':id_,'score':fused[id_]}for id_ in sorted(fused,key=lambda id_:(-fused[id_],id_))],'submittedParentIds':candidate_ids})
+                phase('rerank','started',candidateParents=len(candidates));phase_started=time.perf_counter()
                 ranked=self.rerank(request.query,candidates,scope)if self.structural_recipe.enabled else s.rerank_candidates(request.query,candidates)
+                phase('rerank','completed',durationSeconds=time.perf_counter()-phase_started,candidateParents=len(candidates))
                 scores=np.asarray(ranked).reshape(-1);order=sorted(range(len(candidates)),key=lambda i:(-float(scores[i]),candidates[i]['id']))
-                raw=[{'id':candidates[i]['id'],'score':float(scores[i]),'payload':candidates[i]}for i in order]
+                reranked=[{'id':candidates[i]['id'],'score':float(scores[i]),'payload':candidates[i]}for i in order]
+                raw=sorted(reranked,key=lambda hit:hit['id']not in exact_ids)
                 hits,units=select_source_units(scope,raw,request.limit,
                                               hierarchy_context=self.structural_recipe.enabled)
-                self.emit('parent-final-ranking',{'allRerankedInTrueScoreOrder':[{'id':h['id'],'score':h['score']}for h in raw], 'returnedIds':[h['id']for h in hits], 'rawParentTopKIds':units['rawParentTopKIds'],'selectionPolicy':units['policy']})
+                if exact:
+                    model_ranks={hit['id']:rank for rank,hit in enumerate(reranked,1)}
+                    units['ranking']={'policy':EXACT_CLAUSE_POLICY,'identifier':request.query.strip().casefold(),
+                        'modelScoreOrderIds':[hit['id']for hit in reranked],'selectionOrderIds':[hit['id']for hit in raw],
+                        'exactClauseCandidateIds':[hit['id']for hit in raw if hit['id']in exact_ids]}
+                    for unit in units['units']:
+                        unit['selectionOrdinal']=unit['originalRerankOrdinal']
+                        unit['originalRerankOrdinal']=model_ranks[unit['originIds'][0]]
+                    for skipped in units['skippedDuplicateUnitSeeds']:
+                        skipped['selectionOrdinal']=skipped['originalRerankOrdinal']
+                        skipped['originalRerankOrdinal']=model_ranks[skipped['id']]
+                self.emit('parent-final-ranking',{'allRerankedInTrueScoreOrder':[{'id':h['id'],'score':h['score']}for h in reranked],
+                    'exactClauseCandidateIds':[c['id']for c in exact],'selectionOrderIds':[h['id']for h in raw],
+                    **({'ranking':units['ranking']}if exact else {}),
+                    'returnedIds':[h['id']for h in hits], 'rawParentTopKIds':units['rawParentTopKIds'],'selectionPolicy':units['policy']})
                 self.emit('source-unit-closure',units)
+                phase('complete','completed',returnedParents=len(hits))
                 return {'hits':hits,'sourceUnits':units,'mode':self.contract(),'projectId':key,
                         'indexSignature':s.digest(metadata['signature']),'seconds':time.perf_counter()-started,'denseWindowExpansion':receipt,**source_receipt,
                         'scoreMeaning':'Observed structure-context relevance, compared with the same-pool short-window baseline; not evidence validity or defect probability'if self.structural_recipe.enabled else 'Max pair-window reranker score, not evidence validity or probability of a contract defect',

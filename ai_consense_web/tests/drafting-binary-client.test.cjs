@@ -34,6 +34,7 @@ async function run() {
   assert.equal(objectUrls, 1); assert.equal(downloads, 1)
   assert.equal(configurations[2].headers['X-ConSense-Llm-Profile'], 'minimax-cn')
   assert.equal(configurations[2].responseType, 'blob'); assert.equal(configurations[2].timeout, 300000)
+  assert.equal(configurations[3].timeout, 300000, 'Unrelated downloads retain the existing five-minute timeout')
   console.log('PASS: stale JSON preview rejected; stale JSON export rejected without download; PDF preview accepted; PDF export accepted')
 }
 run().catch(error => { console.error(error); process.exitCode = 1 })

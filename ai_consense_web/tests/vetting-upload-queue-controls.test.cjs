@@ -23,6 +23,7 @@ async function mount({ onUpload, onFiles, onProgress, timers = { setTimeout, cle
       },
       files: async () => { state.fileReads++; return onFiles ? onFiles(state) : state.files }, findings: async () => [], metrics: async () => ({ total: 0 }),
       latestRunProgress: async () => run, getRun: async () => ({ ...run, sourceSetStale: state.stale }),
+      getRunDisplay: async () => ({ ...run, sourceSetStale: state.stale }),
       uploadPackage: async (projectId, files, role, scope) => {
         calls.push({ projectId, names: JSON.parse(JSON.stringify(files.map(file => file.name))), role, scope }); state.stale = true
         const value = onUpload ? await onUpload(files[0], state) : result()
@@ -50,7 +51,7 @@ test('the queue preserves selected order and waits for each response and source 
     const operation = h.upload(['first.pdf', 'second.docx', 'third.docx']); await settle()
     assert.deepEqual(h.calls.map(call => call.names), [['first.pdf']], 'The original order is kept; no speculative second upload')
     assert.equal(h.calls[0].role, undefined, 'The review entry delegates source role to automatic routing')
-    assert.equal(h.calls[0].scope, undefined, 'The review entry delegates document scope to automatic routing')
+    assert.equal(h.calls[0].scope, 'auto', 'The review entry delegates document scope to automatic routing')
     assert.equal(find(h.root, node => node.tag === 'select' && (node.children ?? []).some(child => child.tag === 'option' && child.props?.value === 'project_fact')), undefined, 'Upload does not ask the user to assign a corpus role')
     assert.equal(find(h.root, node => node.tag === 'select' && (node.children ?? []).some(child => child.tag === 'option' && child.props?.value === 'works_pss')), undefined, 'Upload does not expose excluded material categories as user choices')
     assert.ok(text(h.root).includes('当前第 1 / 3 份：first.pdf'))

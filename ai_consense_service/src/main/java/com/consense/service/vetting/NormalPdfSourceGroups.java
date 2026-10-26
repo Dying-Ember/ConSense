@@ -13,15 +13,23 @@ import java.util.regex.*;
 /** Source syntax derived only from the existing native PDF block observations. */
 public final class NormalPdfSourceGroups {
     private static final String FRAME="normalized_rendered_crop_top_left",AP_FRAME="appearance_stream_local_matrix_no_page_box";
-    private static final String LABEL="(?:[\\p{L}]+\\s*)?\\d+(?:\\.\\d+)*";
-    private static final Pattern NUMBER=Pattern.compile("^\\s*("+LABEL+")(\\.)?(?=\\s|$)\\s*"),PAREN=Pattern.compile("^\\s*\\(([a-z0-9]+)\\)\\s*",Pattern.CASE_INSENSITIVE);
+    private static final String SL_LABEL="(?:TOL\\.)?(?:(?:[A-Z]{3}|AP)\\d+(?:\\.(?:APPEND\\d+|[A-Z]?\\d+|[A-Z]))*|[A-Z]{3}\\.[A-Z]\\d+\\.\\d+(?:\\.(?:[A-Z]?\\d+|[A-Z]))*)";
+    private static final String LABEL="(?:"+SL_LABEL+"|(?:[\\p{L}]+\\s*)?\\d+(?:\\.\\d+)*)";
+    private static final Pattern NUMBER=Pattern.compile("^\\s*("+LABEL+")(\\.)?(?=\\s|$)\\s*"),APPEND_ATTACHED=Pattern.compile("^\\s*((?:TOL\\.)?[A-Z]{3}\\d+\\.APPEND\\d+\\.(?:[A-Z]?\\d+|[A-Z]))(?=[A-Z])"),PAREN=Pattern.compile("^\\s*\\(([a-z0-9]+)\\)\\s*",Pattern.CASE_INSENSITIVE);
     private static final Pattern FIELD=Pattern.compile("^\\s*(?:clause|condition)\\s*("+LABEL+")(?:\\(([a-z0-9]+)\\)|([a-z]))?\\s*$",Pattern.CASE_INSENSITIVE);
     private static final Pattern REFERENCE=Pattern.compile("\\b(?:clause|condition)\\s+("+LABEL+"(?:\\([a-z0-9]+\\))*)",Pattern.CASE_INSENSITIVE),LOCAL=Pattern.compile("(?<![\\p{L}\\p{N}_])\\([a-z0-9]{1,8}\\)",Pattern.CASE_INSENSITIVE);
     private static final Pattern ABOVE=Pattern.compile("^\\s*(?:(?:,|and/or|and|or)\\s*\\([a-z0-9]{1,8}\\)\\s*)*above\\b",Pattern.CASE_INSENSITIVE);
     private static final Pattern GUIDANCE_OPEN=Pattern.compile("\\[\\s*guidance\\s+notes?\\b",Pattern.CASE_INSENSITIVE);
     private static final Pattern REFERENCE_TAIL=Pattern.compile("(?i)(?:\\b(?:clauses?|conditions?|sections?|paragraphs?|regulations?))\\s*$");
     private NormalPdfSourceGroups() { }
+    static boolean technicalLabel(String value){return value!=null&&value.matches(SL_LABEL);}
+    static String namedFormReference(String name){Matcher match=FIELD.matcher(name==null?"":name);if(!match.matches())return null;String token=match.group(2)!=null?match.group(2):match.group(3);return label(match.group(1))+(token==null?"":"("+token.toLowerCase(Locale.ROOT)+")");}
+    static boolean referenceLiteralMatches(String literal,String target,String owner){Matcher named=REFERENCE.matcher(literal==null?"":literal);if(named.matches())return label(named.group(1)).equals(target);return LOCAL.matcher(literal==null?"":literal).matches()&&Objects.equals(owner+(literal==null?"":literal.toLowerCase(Locale.ROOT)),target);}
     public static ObjectNode build(List<DocumentBlock> blocks,String sourceSha256,JsonNode coverage) {
+        return build(blocks,sourceSha256,coverage,false);
+    }
+    static ObjectNode buildReading(List<DocumentBlock> blocks,String sourceSha256,JsonNode coverage){return build(blocks,sourceSha256,coverage,true);}
+    private static ObjectNode build(List<DocumentBlock> blocks,String sourceSha256,JsonNode coverage,boolean retainOwnMembers) {
         ObjectNode out=object();out.put("version","native-pdf-source-groups-v1");out.put("sourceSha256",sourceSha256);
         ArrayNode groups=out.putArray("groups"),relations=out.putArray("relations"),context=out.putArray("contextBlocks"),issues=out.putArray("issues");
         out.put("scopeMeaning","Observed native source syntax only; visible ink, semantic and legal applicability and editing authority remain unknown");
@@ -45,6 +53,16 @@ public final class NormalPdfSourceGroups {
         boolean guidanceOpen=false;
         for(Map.Entry<Integer,List<DocumentBlock>> page:pages.entrySet()){
             List<Row> rows=rows(page.getValue(),issues,context);double base=Double.POSITIVE_INFINITY;
+            if(rows.stream().anyMatch(row->ws(row.text).matches("(?i)(?:.*>\\s*)?TABLE OF CONTENTS"))){
+                markActive(stack,tail,"native_table_of_contents_page_interrupts_scope");
+                for(Node active:stack)close(nodes,active,rows.get(0),"native_table_of_contents_page_boundary",sourceSha256);
+                if(tail!=null)close(nodes,tail,rows.get(0),"native_table_of_contents_page_boundary",sourceSha256);
+                stack.clear();tail=null;guidanceOpen=false;previousRow=null;previousPage=page.getKey();previousBase=false;
+                for(Row row:rows){row.ordinal=ordinal++;for(DocumentBlock block:row.blocks)context(context,block,"native_table_of_contents_page_context");}continue;
+            }
+            for(int i=0;i+1<rows.size();i++){Row row=rows.get(i),next=rows.get(i+1);
+                if(row.numeric!=null&&next.toc&&!NUMBER.matcher(next.text).find()){row.toc=true;row.numeric=null;row.paren=null;row.marker=null;}
+            }
             for(Row row:rows)row.table=tableProof(row,tables);
             for(Row row:rows)if(!row.wide&&row.table==null&&row.numeric!=null)base=Math.min(base,row.x);
             boolean baseKnown=Double.isFinite(base);
@@ -98,6 +116,9 @@ public final class NormalPdfSourceGroups {
                     Node parent=null;
                     if(row.numeric!=null){String key=row.numeric;int dot=key.lastIndexOf('.');String parentKey=dot<0?null:key.substring(0,dot);
                         if(parentKey!=null)for(Node candidate:stack)if(candidate.key.equals(parentKey))parent=candidate;
+                        // SL clause labels include item/revision segments with no separate printed heading.
+                        if(key.matches(SL_LABEL))for(Node candidate:stack)if(key.startsWith(candidate.key+".")&&(parent==null||candidate.key.length()>parent.key.length()))parent=candidate;
+                        if(parent==null&&key.matches("\\d+")&&row.marker.endsWith("."))for(Node candidate:stack)if(technicalLabel(candidate.key)&&row.markerX>candidate.markerX+row.tolerance)parent=candidate;
                     }else{
                         for(Node candidate:stack)if(row.markerX>candidate.markerX+row.tolerance)parent=candidate;
                         if(parent==null){issue(issues,row.first().getId(),"parenthesized_marker_without_observed_indent_parent");for(DocumentBlock block:row.blocks)context(context,block,"unknown_parenthesized_marker");markActive(stack,tail,"unknown_parenthesized_marker");continue;}
@@ -137,7 +158,7 @@ public final class NormalPdfSourceGroups {
             if(unknownPages.contains(node.end.path("sourcePosition").path("physicalPageNo").asInt(-1)))node.unknown.add("unresolved_native_observations_on_boundary_page");
             if(unlocatedNativeObservation)node.unknown.add("native_source_observation_physical_page_unknown");
         }
-        for(Node node:nodes){ObjectNode group=group(node,nodes,sourceSha256);groups.add(group);node.group=group;if(node.parent!=null){ObjectNode relation=relation("parent_tail".equals(node.kind)?"source_parent_tail":"source_parent",node.parent.id,node.id);relations.add(relation);((ArrayNode)group.get("relations")).add(relation.deepCopy());}}
+        for(Node node:nodes){ObjectNode group=group(node,nodes,sourceSha256);if(retainOwnMembers){ArrayNode own=group.putArray("observedOwnBlockIds");for(Row row:node.rows)for(DocumentBlock block:row.blocks)add(own,block.getId());}groups.add(group);node.group=group;if(node.parent!=null){ObjectNode relation=relation("parent_tail".equals(node.kind)?"source_parent_tail":"source_parent",node.parent.id,node.id);relations.add(relation);((ArrayNode)group.get("relations")).add(relation.deepCopy());}}
         forms(forms,nodes,groups,relations,sourceSha256,issues,context);
         references(nodes,labels,relations);
         for(Node node:nodes){ArrayNode linked=(ArrayNode)node.group.get("contextBlockIds");for(JsonNode relation:relations)if("source_explicit_note_target".equals(relation.path("type").asText()))for(Node candidate:nodes)if(candidate.id.equals(relation.path("targetGroupId").asText())&&descendant(candidate,node))add(linked,relation.path("fromBlockId").asText());ArrayNode required=(ArrayNode)node.group.get("requiredMemberBlockIds");for(JsonNode id:linked)add(required,id.asText());}
@@ -151,8 +172,8 @@ public final class NormalPdfSourceGroups {
         if(!box(block.getBbox())||block.getPdfGlyphs()==null||block.getPdfGlyphs().isEmpty())return false;
         StringBuilder text=new StringBuilder();Set<String> ids=new HashSet<>();
         for(PdfGlyph glyph:block.getPdfGlyphs()){
-            if(glyph.getId()==null||!glyph.getId().startsWith("pdf-page/"+block.getPageNo()+"/glyph/")||!ids.add(glyph.getId())||!FRAME.equals(glyph.getCoordinateSpace())||!glyph.isEligibleForNativeText()||!box(glyph.getBbox())||glyph.getUnicode()==null||Math.abs(glyph.getDirection())>.01)return false;
-            text.append(glyph.getUnicode());
+            if(glyph.getId()==null||!glyph.getId().startsWith("pdf-page/"+block.getPageNo()+"/glyph/")||!ids.add(glyph.getId())||!FRAME.equals(glyph.getCoordinateSpace())||!glyph.isEligibleForNativeText()||!box(glyph.getBbox())||glyph.readerText()==null||Math.abs(glyph.getDirection())>.01)return false;
+            text.append(glyph.readerText());
         }
         return compact(text.toString()).equals(compact(block.getText()));
     }
@@ -164,16 +185,16 @@ public final class NormalPdfSourceGroups {
         // A small-font marginal lane is accepted only where the same native row observes a
         // separate normal-font source marker. Original blocks and glyphs remain unchanged.
         List<MarginBand> margins=new ArrayList<>();
-        double headingX=rows.stream().filter(row->NUMBER.matcher(row.text).find()&&bold(row.glyphs)).mapToDouble(row->row.x).min().orElse(Double.NaN);
+        double headingX=rows.stream().filter(row->(NUMBER.matcher(row.text).find()||APPEND_ATTACHED.matcher(row.text).find())&&bold(row.glyphs)).mapToDouble(row->row.x).min().orElse(Double.NaN);
         double bodyEm=median(rows.stream().flatMap(r->r.glyphs.stream()).map(g->glyphEm(g,true)).collect(java.util.stream.Collectors.toList()),.01);
-        List<Double> bodyColumns=new ArrayList<>();for(Row row:rows){double first=row.glyphs.stream().filter(glyph->!compact(glyph.getUnicode()).isEmpty()&&glyphEm(glyph,true)>=bodyEm*.8).mapToDouble(glyph->glyph.getBbox()[0]).min().orElse(Double.NaN);if(Double.isFinite(first))bodyColumns.add(first);}Collections.sort(bodyColumns);
+        List<Double> bodyColumns=new ArrayList<>();for(Row row:rows){double first=row.glyphs.stream().filter(glyph->!compact(glyph.readerText()).isEmpty()&&glyphEm(glyph,true)>=bodyEm*.8).mapToDouble(glyph->glyph.getBbox()[0]).min().orElse(Double.NaN);if(Double.isFinite(first))bodyColumns.add(first);}Collections.sort(bodyColumns);
         for(Row row:rows){double largest=row.glyphs.stream().mapToDouble(g->glyphEm(g,true)).max().orElse(0);List<PdfGlyph> body=new ArrayList<>(),small=new ArrayList<>();for(PdfGlyph glyph:row.glyphs)(glyphEm(glyph,true)<largest*.8?small:body).add(glyph);
-            if(body.isEmpty()||small.isEmpty())continue;double start=body.stream().filter(g->!compact(g.getUnicode()).isEmpty()).mapToDouble(g->g.getBbox()[0]).min().orElse(Double.NaN),end=small.stream().filter(g->!compact(g.getUnicode()).isEmpty()).mapToDouble(g->g.getBbox()[0]+g.getBbox()[2]).max().orElse(1);
+            if(body.isEmpty()||small.isEmpty())continue;double start=body.stream().filter(g->!compact(g.readerText()).isEmpty()).mapToDouble(g->g.getBbox()[0]).min().orElse(Double.NaN),end=small.stream().filter(g->!compact(g.readerText()).isEmpty()).mapToDouble(g->g.getBbox()[0]+g.getBbox()[2]).max().orElse(1);
             boolean headingLane=!body.isEmpty()&&body.get(0).getFontName()!=null&&body.get(0).getFontName().toLowerCase(Locale.ROOT).contains("bold")&&Math.abs(start-headingX)<=row.tolerance&&!compact(text(body)).isEmpty();
             boolean literalAnchor=PAREN.matcher(text(body)).find()||headingLane,bodyLane=observedColumn(bodyColumns,start,row.tolerance,2);
             if(end+largest<start&&(literalAnchor||bodyLane))margins.add(new MarginBand(small.stream().mapToDouble(g->g.getBbox()[0]).min().orElse(start),start-largest,small.stream().mapToDouble(g->g.getBbox()[1]).min().orElse(row.y),small.stream().mapToDouble(g->g.getBbox()[1]+g.getBbox()[3]).max().orElse(row.y),!literalAnchor));
         }
-        for(MarginBand margin:margins)for(int direction=0;direction<2;direction++)for(int i=0;i<rows.size();i++){Row row=rows.get(direction==0?i:rows.size()-1-i);boolean main=false,small=false,other=false;double top=Double.POSITIVE_INFINITY,bottom=Double.NEGATIVE_INFINITY;for(PdfGlyph glyph:row.glyphs){double[] box=glyph.getBbox();if(glyphEm(glyph,true)<bodyEm*.8&&margin.horizontal(box,row.tolerance)){small=true;top=Math.min(top,box[1]);bottom=Math.max(bottom,box[1]+box[3]);}else if(!compact(glyph.getUnicode()).isEmpty()){other=true;if(box[0]>=margin.right&&glyphEm(glyph,true)>=bodyEm*.8)main=true;}}
+        for(MarginBand margin:margins)for(int direction=0;direction<2;direction++)for(int i=0;i<rows.size();i++){Row row=rows.get(direction==0?i:rows.size()-1-i);boolean main=false,small=false,other=false;double top=Double.POSITIVE_INFINITY,bottom=Double.NEGATIVE_INFINITY;for(PdfGlyph glyph:row.glyphs){double[] box=glyph.getBbox();if(glyphEm(glyph,true)<bodyEm*.8&&margin.horizontal(box,row.tolerance)){small=true;top=Math.min(top,box[1]);bottom=Math.max(bottom,box[1]+box[3]);}else if(!compact(glyph.readerText()).isEmpty()){other=true;if(box[0]>=margin.right&&glyphEm(glyph,true)>=bodyEm*.8)main=true;}}
             if(small&&(main||!other)&&top<=margin.bottom+row.emY*3&&bottom>=margin.top-row.emY*3){margin.top=Math.min(margin.top,top);margin.bottom=Math.max(margin.bottom,bottom);}}
         margins.removeIf(margin->{if(!margin.requiresSmallContext)return false;int observed=0;boolean label=false;for(Row row:rows){List<PdfGlyph> small=row.glyphs.stream().filter(glyph->glyphEm(glyph,true)<bodyEm*.8&&margin.contains(glyph.getBbox(),row.tolerance,row.emY)).collect(java.util.stream.Collectors.toList());String literal=ws(text(small));if(literal.isEmpty())continue;observed++;label|=literal.codePoints().anyMatch(Character::isLetter)&&!NUMBER.matcher(literal).find()&&!PAREN.matcher(literal).find();if(observed>=2&&label)return false;}return true;});
         List<Row> observed=new ArrayList<>();
@@ -194,12 +215,12 @@ public final class NormalPdfSourceGroups {
         }return observed;
     }
     private static boolean observedColumn(List<Double> columns,double x,double tolerance,int count){if(!Double.isFinite(x))return false;int low=0,high=columns.size();while(low<high){int middle=(low+high)>>>1;if(columns.get(middle)<x-tolerance)low=middle+1;else high=middle;}return low+count<=columns.size()&&columns.get(low+count-1)<=x+tolerance;}
-    private static boolean bold(List<PdfGlyph> glyphs){return !glyphs.isEmpty()&&glyphs.stream().filter(g->!compact(g.getUnicode()).isEmpty()).allMatch(g->g.getFontName()!=null&&g.getFontName().toLowerCase(Locale.ROOT).contains("bold"));}
-    private static void refresh(Row row){if(!row.glyphs.isEmpty()){String first=row.glyphs.stream().filter(glyph->!compact(glyph.getUnicode()).isEmpty()).findFirst().orElse(row.glyphs.get(0)).getId();for(DocumentBlock block:row.blocks)if(block.getPdfGlyphs().stream().anyMatch(glyph->first.equals(glyph.getId()))){row.syntaxFirst=block;break;}}row.x=row.glyphs.stream().mapToDouble(g->g.getBbox()[0]).min().orElse(row.x);row.y=row.glyphs.stream().mapToDouble(g->g.getBbox()[1]).min().orElse(row.y);row.text=text(row.glyphs);}
-    private static String text(List<PdfGlyph> glyphs){StringBuilder value=new StringBuilder();PdfGlyph before=null;for(PdfGlyph glyph:glyphs){String text=glyph.getUnicode();if(before!=null&&value.length()>0&&!Character.isWhitespace(value.charAt(value.length()-1))&&!text.isEmpty()&&!Character.isWhitespace(text.charAt(0))&&glyph.getBbox()[0]-before.getBbox()[0]-before.getBbox()[2]>glyphEm(glyph,true)*.3)value.append(' ');value.append(text);before=glyph;}return value.toString();}
-    private static void marker(Row row){Matcher numeric=NUMBER.matcher(row.text),paren=PAREN.matcher(row.text);if(numeric.find()&&(numeric.group(2)!=null||numeric.group(1).contains(".")||!row.text.substring(numeric.end()).isEmpty())){if(!row.toc&&(Character.isDigit(numeric.group(1).charAt(0))||row.heading)){row.numeric=label(numeric.group(1));row.marker=numeric.group().trim();}}else if(paren.find()){row.paren=paren.group(1).toLowerCase(Locale.ROOT);row.marker=paren.group().trim();}}
+    private static boolean bold(List<PdfGlyph> glyphs){return !glyphs.isEmpty()&&glyphs.stream().filter(g->!compact(g.readerText()).isEmpty()).allMatch(g->g.getFontName()!=null&&g.getFontName().toLowerCase(Locale.ROOT).contains("bold"));}
+    private static void refresh(Row row){if(!row.glyphs.isEmpty()){String first=row.glyphs.stream().filter(glyph->!compact(glyph.readerText()).isEmpty()).findFirst().orElse(row.glyphs.get(0)).getId();for(DocumentBlock block:row.blocks)if(block.getPdfGlyphs().stream().anyMatch(glyph->first.equals(glyph.getId()))){row.syntaxFirst=block;break;}}row.x=row.glyphs.stream().mapToDouble(g->g.getBbox()[0]).min().orElse(row.x);row.y=row.glyphs.stream().mapToDouble(g->g.getBbox()[1]).min().orElse(row.y);row.text=text(row.glyphs);}
+    private static String text(List<PdfGlyph> glyphs){StringBuilder value=new StringBuilder();PdfGlyph before=null;for(PdfGlyph glyph:glyphs){String text=glyph.readerText();if(before!=null&&value.length()>0&&!Character.isWhitespace(value.charAt(value.length()-1))&&!text.isEmpty()&&!Character.isWhitespace(text.charAt(0))&&glyph.getBbox()[0]-before.getBbox()[0]-before.getBbox()[2]>glyphEm(glyph,true)*.3)value.append(' ');value.append(text);before=glyph;}return value.toString();}
+    private static void marker(Row row){Matcher numeric=NUMBER.matcher(row.text),attached=APPEND_ATTACHED.matcher(row.text),paren=PAREN.matcher(row.text);if(numeric.find()&&(numeric.group(2)!=null||numeric.group(1).contains(".")||!row.text.substring(numeric.end()).isEmpty())){if(!row.toc&&(Character.isDigit(numeric.group(1).charAt(0))||row.heading)){row.numeric=label(numeric.group(1));row.marker=numeric.group().trim();}}else if(row.heading&&!row.toc&&attached.find()){row.numeric=label(attached.group(1));row.marker=attached.group().trim();}else if(paren.find()){row.paren=paren.group(1).toLowerCase(Locale.ROOT);row.marker=paren.group().trim();}}
     private static String label(String value){int paren=value.indexOf('(');return (paren<0?value:value.substring(0,paren)).replaceAll("\\s+","").toUpperCase(Locale.ROOT)+(paren<0?"":value.substring(paren).toLowerCase(Locale.ROOT));}
-    private static int markerGlyphEnd(Row row){int skip=compact(row.marker).length(),seen=0;for(int i=0;i<row.glyphs.size();i++){PdfGlyph glyph=row.glyphs.get(i);String value=compact(glyph.getUnicode());if(!value.isEmpty()&&seen>=skip)return i;seen+=value.length();}return row.glyphs.size();}
+    private static int markerGlyphEnd(Row row){int skip=compact(row.marker).length(),seen=0;for(int i=0;i<row.glyphs.size();i++){PdfGlyph glyph=row.glyphs.get(i);String value=compact(glyph.readerText());if(!value.isEmpty()&&seen>=skip)return i;seen+=value.length();}return row.glyphs.size();}
     private static double bodyX(Row row){if(row.marker==null)return row.x;int at=markerGlyphEnd(row);return at<row.glyphs.size()?row.glyphs.get(at).getBbox()[0]:Double.NaN;}
     private static double glyphEm(PdfGlyph glyph,boolean horizontal){double[] matrix=glyph.getTextMatrix(),position=glyph.getPdfboxPosition();return matrix!=null&&matrix.length>=4&&position!=null&&position.length>=10&&position[horizontal?8:9]>0?Math.abs(matrix[horizontal?0:3])/position[horizontal?8:9]:glyph.getBbox()[horizontal?2:3];}
     private static double continuationBase(List<Row> rows,List<Node> stack,Map<String,Set<Integer>> occurrences){
@@ -212,7 +233,7 @@ public final class NormalPdfSourceGroups {
     private static List<TableProof> tableProofs(ObjectNode methods,Map<String,Integer> ids){List<TableProof> out=new ArrayList<>();for(JsonNode group:methods.path("groups"))if(group.path("scopeComplete").asBoolean()&&"none_original_physical_cell_literals".equals(group.path("methodTable").path("textTransform").asText())){JsonNode carrier=group.path("methodGroupRef").path("methodBlockId");boolean unique=carrier.isTextual()&&!JsonUtils.isBlankText(carrier.asText())&&ids.getOrDefault(carrier.asText(),0)==1;for(JsonNode id:group.path("bodyBlockIds"))unique&=id.isTextual()&&!JsonUtils.isBlankText(id.asText())&&ids.getOrDefault(id.asText(),0)==1;if(unique)out.add(new TableProof(group));}return out;}
     private static TableProof tableProof(Row row,List<TableProof> tables){TableProof found=null;for(TableProof table:tables)if(table.page==row.page&&within(table.bounds,new double[]{row.x,row.y,0,0},row.tolerance)){
             double epsilon=.02/Math.min(table.width,table.height);Map.Entry<Double,List<CellProof>> physicalRow=table.rows.floorEntry(row.y+epsilon);if(physicalRow==null)continue;List<CellProof> cells=physicalRow.getValue();Map.Entry<Double,List<CellProof>> previous=table.rows.lowerEntry(physicalRow.getKey());if(previous!=null&&previous.getValue().stream().anyMatch(cell->cell.bounds[1]+cell.bounds[3]>=row.y-epsilon))continue;
-            Map<CellProof,List<PdfGlyph>> literals=new LinkedHashMap<>();boolean valid=true;for(PdfGlyph glyph:row.glyphs){boolean space=compact(glyph.getUnicode()).isEmpty();CellProof cellFound=null;for(CellProof cell:cells)if(within(cell.bounds,glyph.getBbox(),epsilon)){if(cellFound!=null){valid=false;break;}cellFound=cell;}if(!valid||cellFound==null){if(space){valid=true;continue;}valid=false;break;}literals.computeIfAbsent(cellFound,key->new ArrayList<>()).add(glyph);}
+            Map<CellProof,List<PdfGlyph>> literals=new LinkedHashMap<>();boolean valid=true;for(PdfGlyph glyph:row.glyphs){boolean space=compact(glyph.readerText()).isEmpty();CellProof cellFound=null;for(CellProof cell:cells)if(within(cell.bounds,glyph.getBbox(),epsilon)){if(cellFound!=null){valid=false;break;}cellFound=cell;}if(!valid||cellFound==null){if(space){valid=true;continue;}valid=false;break;}literals.computeIfAbsent(cellFound,key->new ArrayList<>()).add(glyph);}
             for(Map.Entry<CellProof,List<PdfGlyph>> entry:literals.entrySet()){String literal=ws(text(entry.getValue())),cell=entry.getKey().text;int at=cell.indexOf(literal),end=at+literal.length();if(literal.isEmpty()||at<0||cell.indexOf(literal,at+1)>=0||at>0&&Character.isLetterOrDigit(cell.codePointBefore(at))||end<cell.length()&&Character.isLetterOrDigit(cell.codePointAt(end)))valid=false;}
             if(valid&&!literals.isEmpty()){if(found!=null)return null;found=table;}
         }return found;}
@@ -236,8 +257,7 @@ public final class NormalPdfSourceGroups {
     }
     private static void forms(List<DocumentBlock> forms,List<Node> nodes,ArrayNode groups,ArrayNode relations,String sha,ArrayNode issues,ArrayNode context){
         Map<String,Integer> ids=new HashMap<>();for(DocumentBlock block:forms)ids.merge(block.getPdfFormField().getId(),1,Integer::sum);
-        for(DocumentBlock block:forms){PdfFormField field=block.getPdfFormField();Matcher match=FIELD.matcher(field.getFieldName()==null?"":field.getFieldName());if(!match.matches()){context(context,block,"native_form_context");continue;}
-            String token=match.group(2)!=null?match.group(2):match.group(3),key=label(match.group(1))+(token==null?"":"("+token.toLowerCase(Locale.ROOT)+")");
+        for(DocumentBlock block:forms){PdfFormField field=block.getPdfFormField();String key=namedFormReference(field.getFieldName());if(key==null){context(context,block,"native_form_context");continue;}
             List<Node> targets=new ArrayList<>();for(Node node:nodes)if("source_clause".equals(node.kind)&&key.equals(node.key)&&node.rows.get(0).page==block.getPageNo())targets.add(node);
             String display=appearance(field);boolean agreement=display!=null&&!compact(display).isEmpty()&&compact(display).equals(compact(field.getFieldValue()))&&compact(display).equals(compact(field.getAppearanceValue()));
             Node target=targets.size()==1?targets.get(0):null;boolean ownerKnown=target!=null&&ids.get(field.getId())==1&&Objects.equals(field.getPageNo(),block.getPageNo())&&agreement&&!field.isConflict()&&!target.unknown.contains("duplicate_source_reference");

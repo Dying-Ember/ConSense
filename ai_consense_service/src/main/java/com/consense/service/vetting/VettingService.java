@@ -14,7 +14,15 @@ import com.consense.service.ProjectService;
 import com.consense.service.StorageService;
 import com.consense.service.sources.ProjectDocumentScope;
 import com.consense.service.sources.OerSourceMetadata;
+import com.consense.service.sources.SourceContentDigests;
+import com.consense.service.sources.CanonicalEvidenceService;
+import com.consense.service.sources.CanonicalCurrentSourceReader;
+import com.consense.service.sources.CanonicalCurrentSourceReader.OriginalFileState;
+import com.fasterxml.jackson.core.JsonParser;
+import com.fasterxml.jackson.core.JsonToken;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.consense.service.vetting.VettingCorpus.Chunk;
 import com.consense.service.vetting.VettingSemanticReview.Candidate;
 import com.consense.web.dto.DraftingDtos.UploadResultVO;
@@ -29,14 +37,21 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.multipart.MultipartFile;
 import javax.annotation.PreDestroy;
+import javax.sql.DataSource;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.Reader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Instant;
+import java.sql.Clob;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.regex.*;
@@ -60,6 +75,9 @@ public class VettingService {
     private final VettingReportWriter reportWriter;
     private final PlatformTransactionManager transactionManager;
     private final com.consense.ai.LlmProfiles llmProfiles;
+    private DataSource fileListDataSource;
+    @org.springframework.beans.factory.annotation.Autowired(required=false)
+    public void setFileListDataSource(DataSource dataSource){this.fileListDataSource=dataSource;}
     private VettingCheckpointService checkpoints;
     private com.consense.repository.VettingReportSnapshotRepository reportSnapshots;
     private com.consense.service.export.EnglishFileOutput englishFiles;
@@ -79,6 +97,11 @@ public class VettingService {
     private com.consense.service.sources.CanonicalEvidenceService evidencePreparation;
     @org.springframework.beans.factory.annotation.Autowired
     public void setEvidencePreparation(com.consense.service.sources.CanonicalEvidenceService service){this.evidencePreparation=service;}
+    private com.consense.service.sources.SourceContentDigestPreparation sourceDigestPreparation;
+    @org.springframework.beans.factory.annotation.Autowired(required=false)
+    public void setSourceDigestPreparation(com.consense.service.sources.SourceContentDigestPreparation service){this.sourceDigestPreparation=service;}
+    @org.springframework.beans.factory.annotation.Autowired(required=false)
+    private CanonicalCurrentSourceReader currentSources;
     private boolean canonicalEnabled(){return oer!=null&&oer.enabled();}
     private com.consense.service.drafting.DraftingService draftingIdentity;
     @org.springframework.beans.factory.annotation.Autowired(required=false)
@@ -199,10 +222,16 @@ public class VettingService {
             com.consense.ai.ModelIdentity identity=JsonUtils.read(saved.getModelIdentityJson(),com.consense.ai.ModelIdentity.class);
             com.consense.ai.LlmOperation chat=Boolean.TRUE.equals(saved.getModelProfileExplicit())&&identity!=null?llmProfiles.resolve(identity.getProfileId()):llmProfiles.resolve(null);
             VettingLlmOperation selected=semantic.captureOperation(chat);
-            List<SourceDocument> snapshot=freshSourceSet(saved.getProjectId());
+            List<SourceDocument> selectedSources=canonicalEnabled()?freshSourceStamps(saved.getProjectId()):freshSourceSet(saved.getProjectId());
+            CoverageVO recoveredCoverage=JsonUtils.read(saved.getCoverageJson(),CoverageVO.class);
+            if(recoveredCoverage!=null&&!JsonUtils.isBlankText(recoveredCoverage.getSourceStampSha256())
+                    &&!Objects.equals(recoveredCoverage.getSourceStampSha256(),sourceStampHash(selectedSources)))
+                throw new BizException(4104,"The interrupted source preparation changed before its owned receipt was frozen; rerun is required.");
+            if(!Objects.equals(saved.getSourceSnapshotSha256(),compactSourceSetHash(selectedSources)))selectedSources=freshSourceSet(saved.getProjectId());
+            List<SourceDocument> snapshot=selectedSources;
             String supplement=semantic.configuredSupplement();
-            if(chat==null||!recoveryContract(supplement,selected).equals(saved.getRecoveryContractSha256())||!Objects.equals(saved.getSourceSnapshotSha256(),sourceSetHash(snapshot))
-                    ||!Objects.equals(saved.getModelIdentityJson(),JsonUtils.write(selected==null?chat.getIdentity():selected.getIdentity()))||sourceSetStale(saved))
+            if(chat==null||!recoveryContract(supplement,selected).equals(saved.getRecoveryContractSha256())||!sourceSnapshotMatches(saved.getSourceSnapshotSha256(),snapshot)
+                    ||!Objects.equals(saved.getModelIdentityJson(),JsonUtils.write(selected==null?chat.getIdentity():selected.getIdentity()))||sourceSetStale(saved,true,!compactSources(snapshot)))
                 throw new BizException(4101,"来源、模型或审查配方与检查点不兼容，需要重新运行；可靠包和人工记录已保留。");
             tx().execute(status->{VettingRun run=checkpoints.owned(saved.getId(),executionOwner);run.setRecoveryStatus("RESUMING");run.setPhase("recovering");run.setMessage("恢复已核验的来源包；结果不明的包将显式重试。");runRepository.saveAndFlush(run);return null;});
             completions.put(saved.getId(),done);if(probe.enabled())serviceProbes.put(saved.getId(),probe);
@@ -224,10 +253,12 @@ public class VettingService {
         return selected!=null&&selected.isQwen()?VettingCorpus.hash(prior+"|qwen-usage-preflight|"+selected.getQwen().getPolicySha256()):prior;
     }
     private void dispatch(VettingRun run,List<SourceDocument> snapshot,com.consense.ai.LlmOperation chat,VettingLlmOperation selected,CompletableFuture<RunResultVO> done,VettingServiceProbe probe,String supplement){
+        Map<Long,OriginalFileState> originalPins=new LinkedHashMap<>();
+        Runnable guard=()->{assertRunSourcesCurrent(run,snapshot);requireOriginalFreshness(snapshot,originalPins);};
         worker.execute(()->{try(com.consense.ai.LlmProfiles.Scope ignored=llmProfiles.bind(chat);VettingSemanticReview.OperationScope operation=semantic.bindOperation(selected);
                 VettingSemanticReview.SupplementScope supplemental=semantic.bindSupplement(supplement);
-                 VettingSemanticReview.CheckpointScope durable=semantic.bindCheckpoint(checkpoints==null?null:checkpoints.session(run.getId(),executionOwner,()->assertRunSourcesCurrent(run,snapshot)));
-                 com.consense.service.llm.QwenChatUsagePreflight.Operation.ActionScope usage=selected!=null&&selected.isQwen()?selected.getQwen().openAction("vetting:"+run.getId(),()->assertRunSourcesCurrent(run,snapshot)):null){executeRun(run.getId(),run.getProjectId(),run.getLang(),snapshot,done,probe);}
+                 VettingSemanticReview.CheckpointScope durable=semantic.bindCheckpoint(checkpoints==null?null:checkpoints.session(run.getId(),executionOwner,guard));
+                 com.consense.service.llm.QwenChatUsagePreflight.Operation.ActionScope usage=selected!=null&&selected.isQwen()?selected.getQwen().openAction("vetting:"+run.getId(),guard):null){executeRun(run,run.getProjectId(),run.getLang(),snapshot,originalPins,done,probe);}
             catch(RuntimeException failure){probe.originalFailure("worker_action_initialization_failed",failure);try{failRun(run.getId(),brief(failure),done,probe);}finally{probe.finish("action_initialization_failed",failure);serviceProbes.remove(run.getId(),probe);}}
             catch(Error failure){failFatalRun(run.getId(),failure,done,probe);throw failure;}
             finally{completions.remove(run.getId(),done);serviceProbes.remove(run.getId(),probe);}});
@@ -240,22 +271,37 @@ public class VettingService {
 
     public List<VettingFileVO> listFiles(String projectId) {
         projectService.require(projectId); List<VettingFileVO> out = new ArrayList<>();
-        List<SourceDocument> displayed=fileDisplaySourceSet(projectId);
+        List<FileDisplay> displayed=fileDisplaySourceSet(projectId);
         boolean active=displayed.stream().anyMatch(d->roleConfirmationEligible(d)||identityConfirmationEligible(d))
                 && runRepository.existsByProjectIdAndStatusIn(projectId,ACTIVE_STATES);
-        for(SourceDocument d:displayed) {
-            VettingFileVO row=fileVO(d);
-            if(validRoleHash(d.getSourceSha256()) && (roleConfirmationEligible(d)||identityConfirmationEligible(d)
-                    || Arrays.asList("PARSING","FAILED").contains(d.getParseStatus()))) {
+        for(FileDisplay display:displayed) {
+            SourceDocument d=display.source;
+            VettingFileVO row=fileVO(display);
+            if(validRoleHash(d.getSourceSha256())) {
+                row.setOriginalSourceSha256(d.getSourceSha256());row.setRoutingSha256(display.routingSha);
+            }
+            boolean needsLegacyHash=roleConfirmationEligible(display)||identityConfirmationEligible(display)
+                    ||Arrays.asList("PARSING","FAILED").contains(d.getParseStatus())
+                    ||!SourceContentDigests.stamped(d)&&!excluded(d);
+            // shortcut: parsing retries use the bounded legacy pins; reuse stamped CAS when a failed source exceeds the existing 1M-character cap.
+            if(validRoleHash(d.getSourceSha256())&&needsLegacyHash&&display.safeForLegacyHash()) {
                 SourceDocument bound=roleSourceSnapshot(d.getId());
-                if(Objects.equals(d.getProjectId(),bound.getProjectId()) && Objects.equals(d.getFileName(),bound.getFileName()) && Objects.equals(d.getTextContent(),bound.getTextContent())
-                        && com.consense.service.sources.CanonicalEvidenceService.routingHash(d).equals(com.consense.service.sources.CanonicalEvidenceService.routingHash(bound))
+                if(Objects.equals(d.getProjectId(),bound.getProjectId()) && Objects.equals(d.getFileName(),bound.getFileName())
+                        && Objects.equals(d.getSourceSha256(),bound.getSourceSha256())
+                        && (!SourceContentDigests.valid(d.getTextContentSha256()) || SourceContentDigests.field(bound.getTextContent()).equals(d.getTextContentSha256()))
+                        && display.routingSha.equals(CanonicalEvidenceService.routingHash(bound))
                         && Objects.equals(d.getParseStatus(),bound.getParseStatus())) {
                     row.setOriginalSourceSha256(bound.getSourceSha256());row.setSourceHash(VettingCorpus.sourceHash(bound));
                     row.setRoutingSha256(com.consense.service.sources.CanonicalEvidenceService.routingHash(bound));
                     row.setRoleConfirmationAvailable(!active&&roleConfirmationEligible(bound));
                     row.setIdentityConfirmationAvailable(!active&&identityConfirmationEligible(bound));
                 }
+            }
+            if(SourceContentDigests.stamped(d)) {
+                row.setOriginalSourceSha256(d.getSourceSha256());row.setRoutingSha256(display.routingSha);
+                row.setBusinessContentSha256(d.getBusinessContentSha256());
+                if(validRoleHash(d.getSourceSha256())&&!display.safeForLegacyHash()&&roleConfirmationEligible(display))
+                    row.setRoleConfirmationAvailable(!active);
             }
             out.add(row);
         } return out;
@@ -273,21 +319,44 @@ public class VettingService {
     }
     private VettingFileVO fileVO(SourceDocument d) {
         List<String> notes=parseWarnings(d);
+        return fileVO(d,nvl(d.getTextContent()).length(),reviewable(d),notes);
+    }
+    private VettingFileVO fileVO(FileDisplay display) {
+        SourceDocument d=display.source;
+        return fileVO(d,display.textChars,Arrays.asList("PARSED","PARTIAL").contains(d.getParseStatus())&&display.hasText&&!excluded(d),
+                parseWarnings(display.coverageHeader,display.hasCoverage,d));
+    }
+    private VettingFileVO fileVO(SourceDocument d,int textChars,boolean parsed,List<String> notes) {
         String exclusion=ProjectDocumentScope.exclusionReason(d,"fullset");
         if(exclusion!=null)notes.add("source_identity_unresolved".equals(exclusion)?"身份待确认，原文已保留；确认文件用途后可加入源集。":"该文件被来源身份或显式范围规则排除。");
         VettingFileVO row=new VettingFileVO(fileKey(d),roleLabel(VettingCorpus.sourceRole(d)),d.getFileName(),nvl(d.getParseMessage()),
-                d.getParseStatus(),false,reviewable(d),d.getPageCount()==null?0:d.getPageCount(),d.getParseStatus(),d.getParseMessage(),nvl(d.getTextContent()).length(),Boolean.TRUE.equals(d.getOcrUsed()),notes,VettingCorpus.sourceRole(d),d.getDocumentScope(),exclusion);
+                d.getParseStatus(),false,parsed,d.getPageCount()==null?0:d.getPageCount(),d.getParseStatus(),d.getParseMessage(),textChars,Boolean.TRUE.equals(d.getOcrUsed()),notes,VettingCorpus.sourceRole(d),d.getDocumentScope(),exclusion);
         row.setDocumentId(d.getId()==null?null:String.valueOf(d.getId()));return row;
     }
     private boolean roleConfirmationEligible(SourceDocument d) {
         return ProjectDocumentScope.reviewCategory(d) && ProjectDocumentScope.parseUsable(d)
                 && nvl(d.getTextContent()).codePoints().anyMatch(c->!Character.isWhitespace(c)&&!Character.isSpaceChar(c))
-                && JsonUtils.isBlankText(d.getReviewRole()) && "unknown".equals(VettingCorpus.sourceRole(d))
+                && roleConfirmationScopeEligible(d);
+    }
+    private boolean roleConfirmationEligible(FileDisplay display) {
+        SourceDocument d=display.source;
+        return ProjectDocumentScope.reviewCategory(d)&&Arrays.asList("PARSED","PARTIAL").contains(d.getParseStatus())
+                &&display.hasText&&roleConfirmationScopeEligible(d);
+    }
+    private boolean roleConfirmationScopeEligible(SourceDocument d) {
+        return JsonUtils.isBlankText(d.getReviewRole()) && "unknown".equals(VettingCorpus.sourceRole(d))
                 && "source_identity_unresolved".equals(ProjectDocumentScope.exclusionReason(d,"fullset","vetting"));
     }
     private boolean identityConfirmationEligible(SourceDocument d) {
-        if(!ProjectDocumentScope.reviewCategory(d)||!"IDENTITY_PENDING".equals(d.getParseStatus())
-                ||d.getTextContent()==null||!JsonUtils.isBlankText(d.getReviewRole())&&!Arrays.asList("tender","standard","project_fact","package_manifest").contains(d.getReviewRole())
+        return identityConfirmationEligible(d,d.getTextContent()!=null);
+    }
+    private boolean identityConfirmationEligible(FileDisplay display) {
+        return identityConfirmationEligible(display.source,display.hasTextValue);
+    }
+    private boolean identityConfirmationEligible(SourceDocument d,boolean hasTextValue) {
+        boolean failed="FAILED".equals(d.getParseStatus())&&Arrays.asList("unknown","tender","standard","project_fact","package_manifest").contains(VettingCorpus.sourceRole(d));
+        if(!ProjectDocumentScope.reviewCategory(d)||!failed&&!"IDENTITY_PENDING".equals(d.getParseStatus())
+                ||!hasTextValue||!JsonUtils.isBlankText(d.getReviewRole())&&!Arrays.asList("tender","standard","project_fact","package_manifest").contains(d.getReviewRole())
                 ||Arrays.asList("drawing","example","pricing","works_pss").contains(d.getDocumentScope()))return false;
         com.consense.document.OerDocumentIdentity identity=OerSourceMetadata.identity(d);
         return identity!=null&&!"source_identity_mismatch".equals(identity.getIdentityStatus())
@@ -316,10 +385,14 @@ public class VettingService {
     }
     public VettingFileVO confirmSourceRole(String projectId,Long documentId,SourceRoleConfirmationRequest request) {
         projectService.require(projectId);
+        boolean legacy=request!=null&&validRoleHash(request.getExpectedSourceHash());
+        boolean stamped=request!=null&&validRoleHash(request.getExpectedBusinessContentSha256());
         if(request==null || !Arrays.asList("tender","standard","project_fact","package_manifest").contains(request.getSourceRole())
-                || !validRoleHash(request.getExpectedOriginalSourceSha256()) || !validRoleHash(request.getExpectedSourceHash()) || !validRoleHash(request.getExpectedRoutingSha256()))
+                || !validRoleHash(request.getExpectedOriginalSourceSha256()) || legacy==stamped || !validRoleHash(request.getExpectedRoutingSha256())
+                || request.isConfirmTextContractMaterial()&&!legacy)
             throw new BizException(4101,"请选择有效文件用途，并刷新来源版本后确认。");
         if(request.isConfirmTextContractMaterial())return resumeIdentityPending(projectId,documentId,request);
+        if(stamped)return confirmSourceRoleStamped(projectId,documentId,request);
         synchronized(lock(projectId)) { return tx().execute(status->{
             if(runRepository.existsByProjectIdAndStatusIn(projectId,ACTIVE_STATES))throw new BizException(4104,"审查正在运行，请完成后再确认文件用途。");
             SourceDocument before=roleSourceSnapshot(documentId);
@@ -343,10 +416,51 @@ public class VettingService {
             String previousIdentity=after.getOerIdentityJson();OerSourceMetadata.confirmSourceUse(after,false);
             if(!Objects.equals(previousIdentity,after.getOerIdentityJson())&&sourceDocumentRepository.compareAndSetRoutingIdentity(documentId,projectId,after.getSourceSha256(),previousIdentity,after.getOerIdentityJson())!=1)
                 throw new BizException(4104,"来源许可已变化，本次用途确认未保存。");
-            VettingFileVO row=fileDisplaySourceSet(projectId).stream().filter(d->Objects.equals(d.getId(),documentId)).findFirst().map(this::fileVO)
+            VettingFileVO row=fileDisplaySourceSet(projectId).stream().filter(d->Objects.equals(d.source.getId(),documentId)).findFirst().map(this::fileVO)
                     .orElseThrow(()->new BizException(4104,"来源文件已变化，本次用途确认未保存。"));
             row.setOriginalSourceSha256(after.getSourceSha256());row.setSourceHash(VettingCorpus.sourceHash(after));
             row.setRoutingSha256(com.consense.service.sources.CanonicalEvidenceService.routingHash(after));return row;
+        }); }
+    }
+
+    private VettingFileVO confirmSourceRoleStamped(String projectId,Long documentId,SourceRoleConfirmationRequest request) {
+        synchronized(lock(projectId)) { return tx().execute(status->{
+            if(runRepository.existsByProjectIdAndStatusIn(projectId,ACTIVE_STATES))throw new BizException(4104,"审查正在运行，请完成后再确认文件用途。");
+            FileDisplay display=fileDisplaySourceSet(projectId).stream().filter(row->Objects.equals(row.source.getId(),documentId)).findFirst()
+                    .orElseThrow(()->new BizException(4104,"来源文件已变化，请刷新后确认用途。"));
+            SourceDocument before=display.source;
+            if(!roleConfirmationEligible(display)||!SourceContentDigests.stamped(before)
+                    ||!Objects.equals(request.getExpectedBusinessContentSha256(),before.getBusinessContentSha256())
+                    ||!Objects.equals(request.getExpectedOriginalSourceSha256(),before.getSourceSha256())
+                    ||!Objects.equals(request.getExpectedRoutingSha256(),display.routingSha))
+                throw new BizException(4104,"来源版本已变化，请刷新后确认用途。");
+            assertRoleSourceCurrent(before);
+            if(!storageService.matchesStoredBytes(before.getStoragePath(),before.getSourceSha256()))throw new BizException(4104,"原件字节已变化，不能确认当前用途。");
+            if(sourceDocumentRepository.compareAndSetReviewRoleStamped(before.getId(),projectId,before.getSourceSha256(),before.getBusinessContentSha256(),
+                    before.getCategory(),before.getFileName(),before.getOerIdentityJson(),before.getFileKey(),before.getReviewRole(),
+                    before.getDocumentScope(),before.getParseStatus(),before.getStoragePath(),request.getSourceRole())!=1)
+                throw new BizException(4104,"来源或审查状态已变化，请刷新后确认用途。");
+            SourceDocument after=sourceDocumentRepository.findScopeMetadataById(documentId).map(SourceDocumentRepository::scopeSnapshot)
+                    .orElseThrow(()->new BizException(4104,"来源文件已变化，本次用途确认未保存。"));
+            String chosen=after.getReviewRole();after.setReviewRole(before.getReviewRole());
+            if(!request.getSourceRole().equals(chosen)||!Objects.equals(request.getExpectedBusinessContentSha256(),after.getBusinessContentSha256())
+                    ||!Objects.equals(request.getExpectedRoutingSha256(),CanonicalEvidenceService.routingHash(after)))
+                throw new BizException(4104,"来源版本已变化，本次用途确认未保存。");
+            after.setReviewRole(chosen);assertRoleSourceCurrent(after);
+            if(runRepository.existsByProjectIdAndStatusIn(projectId,ACTIVE_STATES)||!storageService.matchesStoredBytes(after.getStoragePath(),after.getSourceSha256()))
+                throw new BizException(4104,"原件或审查状态已变化，本次用途确认未保存。");
+            String previousIdentity=after.getOerIdentityJson();OerSourceMetadata.confirmSourceUse(after,false,display.hasText);
+            if(!Objects.equals(previousIdentity,after.getOerIdentityJson())&&sourceDocumentRepository.compareAndSetRoutingIdentity(documentId,projectId,after.getSourceSha256(),previousIdentity,after.getOerIdentityJson())!=1)
+                throw new BizException(4104,"来源许可已变化，本次用途确认未保存。");
+            SourceDocument current=sourceDocumentRepository.findScopeMetadataById(documentId).map(SourceDocumentRepository::scopeSnapshot)
+                    .orElseThrow(()->new BizException(4104,"来源文件已变化，本次用途确认未保存。"));
+            if(!SourceContentDigests.stamped(current)||!Objects.equals(request.getExpectedBusinessContentSha256(),current.getBusinessContentSha256())
+                    ||!Objects.equals(request.getSourceRole(),current.getReviewRole())||!storageService.matchesStoredBytes(current.getStoragePath(),current.getSourceSha256()))
+                throw new BizException(4104,"来源版本已变化，本次用途确认未保存。");
+            VettingFileVO row=fileDisplaySourceSet(projectId).stream().filter(d->Objects.equals(d.source.getId(),documentId)).findFirst().map(this::fileVO)
+                    .orElseThrow(()->new BizException(4104,"来源文件已变化，本次用途确认未保存。"));
+            row.setOriginalSourceSha256(current.getSourceSha256());row.setRoutingSha256(CanonicalEvidenceService.routingHash(current));
+            row.setBusinessContentSha256(current.getBusinessContentSha256());return row;
         }); }
     }
 
@@ -355,7 +469,8 @@ public class VettingService {
         SourceDocument claimed;byte[] sourceBytes;
         synchronized(lock(projectId)) {
             SourceDocument before=roleSourceSnapshot(documentId);
-            if(!Objects.equals(projectId,before.getProjectId())||!identityConfirmationEligible(before))
+            if(!Objects.equals(projectId,before.getProjectId())||!identityConfirmationEligible(before)
+                    ||"FAILED".equals(before.getParseStatus())&&!"unknown".equals(VettingCorpus.sourceRole(before))&&!Objects.equals(VettingCorpus.sourceRole(before),request.getSourceRole()))
                 throw new BizException(4104,"此文件当前不能恢复详细解析，请刷新并核对身份和范围。");
             if(sourceDocumentRepository.existsCurrentParsingByProjectId(projectId))throw new BizException(4104,"仍有文件正在解析，请待完成后再确认其他文件。");
             assertRoleSourceCurrent(before);
@@ -382,10 +497,14 @@ public class VettingService {
         }
         SourceDocument outcome=new SourceDocument();outcome.setId(claimed.getId());outcome.setProjectId(claimed.getProjectId());outcome.setCategory(claimed.getCategory());
         outcome.setFileName(claimed.getFileName());outcome.setFileKey(claimed.getFileKey());outcome.setReviewRole(claimed.getReviewRole());outcome.setDocumentScope(claimed.getDocumentScope());outcome.setSourceSha256(claimed.getSourceSha256());
+        com.consense.document.OerDocumentIdentity readingIdentity=OerSourceMetadata.identity(claimed);
+        readingIdentity.setIdentityStatus("human_confirmed_textual_material");readingIdentity.setRole(claimed.getReviewRole());
+        readingIdentity.getIdentityEvidence().add(new com.consense.document.OerDocumentIdentity.Evidence("human_text_contract_material","original:"+claimed.getSourceSha256(),
+                "Explicit original-byte-bound textual reading confirmation; source family, edition, quality and legal applicability are not newly established"));
         String parseJobId=DocumentParseProbe.configured(props)?"parse-"+claimed.getSourceSha256().substring(0,12)+"-"+UUID.randomUUID():null;
         try (AutoCloseable progress=observeParseProgress(claimed)) {
-            DocumentParser.ParsedDocument parsed=parseJobId==null?documentParser.parse(claimed.getFileName(),sourceBytes)
-                    :documentParser.parse(claimed.getFileName(),sourceBytes,parseJobId,String.valueOf(documentId),claimed.getSourceSha256());
+            DocumentParser.ParsedDocument parsed=parseJobId==null?documentParser.parseOrdinary(claimed.getFileName(),sourceBytes,null,readingIdentity)
+                    :documentParser.parseOrdinary(claimed.getFileName(),sourceBytes,parseJobId,String.valueOf(documentId),claimed.getSourceSha256(),null,readingIdentity);
             if("FAILED".equals(parsed.getParseStatus())) {outcome.setParseStatus("FAILED");outcome.setParseMessage(truncate(parsed.getMessage(),1024));}
             else captureParsedSource(outcome,parsed,sourceBytes,true);
         } catch(Exception failure) {outcome.setParseStatus("FAILED");outcome.setParseMessage(truncate(brief(failure),1024));}
@@ -412,8 +531,7 @@ public class VettingService {
     }
     private void captureParsedSource(SourceDocument source,DocumentParser.ParsedDocument parsed,byte[] original,boolean confirmedText) {
         source.setParseStatus(parsed.getParseStatus());source.setParseMessage(truncate(parsed.getMessage(),1024));source.setPageCount(parsed.getPageCount());source.setOcrUsed(parsed.isOcrUsed());source.setTextContent(parsed.getText());
-        source.setStructuredContentJson(JsonUtils.write(parsed.getBlocks()));source.setParseCoverageJson(JsonUtils.write(parsed.getCoverage()));
-        OerSourceMetadata.capture(source,parsed,original);if(confirmedText)OerSourceMetadata.confirmSourceUse(source,true);NormalSourceCandidateGraph.capture(source);
+        OerSourceMetadata.captureOrdinary(source,parsed,original);if(confirmedText)OerSourceMetadata.confirmSourceUse(source,true);NormalSourceCandidateGraph.capture(source);
     }
 
     /** No transaction is held during parsing or OCR. */
@@ -459,11 +577,10 @@ public class VettingService {
                     d.setOcrUsed(false);d.setTextContent("");d.setStructuredContentJson("[]");
                     sourceDocumentRepository.saveAndFlush(d);messages.add(d.getFileName()+" · EXCLUDED · "+d.getParseMessage());continue;
                 }
-                DocumentParser.ParsedDocument observation=documentParser.observe(stored.getOriginalName(),sourceBytes);
+                DocumentParser.ParsedDocument observation=documentParser.observeOrdinary(stored.getOriginalName(),sourceBytes);
                 d.setParseStatus(observation.getParseStatus());d.setParseMessage(truncate(observation.getMessage(),1024));
                 d.setPageCount(observation.getPageCount());d.setOcrUsed(observation.isOcrUsed());d.setTextContent(observation.getText());
-                d.setStructuredContentJson(JsonUtils.write(observation.getBlocks()));d.setParseCoverageJson(JsonUtils.write(observation.getCoverage()));
-                boolean readable=com.consense.service.sources.OerSourceMetadata.captureObservation(d,observation,sourceBytes);
+                boolean readable=com.consense.service.sources.OerSourceMetadata.captureOrdinaryObservation(d,observation,sourceBytes);
                 String exclusion=com.consense.service.sources.ProjectDocumentScope.exclusionReason(d,"fullset","vetting");
                 if(!readable||exclusion!=null&&!"source_identity_unresolved".equals(exclusion)) {
                     d.setParseStatus(!readable?"IDENTITY_PENDING":"EXCLUDED");
@@ -477,8 +594,8 @@ public class VettingService {
                 if(DocumentParseProbe.configured(props)) {
                     rawSha256=DocumentParseProbe.sha256(sourceBytes);
                     parseJobId="parse-"+rawSha256.substring(0,12)+"-"+UUID.randomUUID();
-                    p=documentParser.parse(stored.getOriginalName(),sourceBytes,parseJobId,String.valueOf(d.getId()),rawSha256,observation,com.consense.service.sources.OerSourceMetadata.identity(d));
-                }else p=documentParser.parse(stored.getOriginalName(),sourceBytes,observation,com.consense.service.sources.OerSourceMetadata.identity(d));
+                    p=documentParser.parseOrdinary(stored.getOriginalName(),sourceBytes,parseJobId,String.valueOf(d.getId()),rawSha256,observation,com.consense.service.sources.OerSourceMetadata.identity(d));
+                }else p=documentParser.parseOrdinary(stored.getOriginalName(),sourceBytes,observation,com.consense.service.sources.OerSourceMetadata.identity(d));
                 }
                 sourceDocumentRepository.updateParseProgress(d.getId(),d.getSourceSha256(),"解析已返回，正在保存正文、结构与来源观察 · 更新于 "+Instant.now());
                 captureParsedSource(d,p,sourceBytes,false);
@@ -493,28 +610,63 @@ public class VettingService {
     public VettingJobVO startRun(String projectId,String lang) {
         projectService.require(projectId);
         synchronized(lock(projectId)) {
-            VettingRun latest=runRepository.findFirstByProjectIdOrderByStartedAtDesc(projectId).orElse(null);
+            VettingRun latest=sourceDigestPreparation==null?runRepository.findFirstByProjectIdOrderByStartedAtDesc(projectId).orElse(null):
+                    runRepository.findLatestProgress(projectId,org.springframework.data.domain.PageRequest.of(0,1)).stream().findFirst()
+                    .filter(row->ACTIVE_STATES.contains(row.getStatus())).flatMap(row->runRepository.findById(row.getId())).orElse(null);
             if(latest!=null && ACTIVE_STATES.contains(latest.getStatus())) return jobVO(latest);
             if(sourceDocumentRepository.existsCurrentParsingByProjectId(projectId))throw new BizException(4104,"仍有文件正在解析，请待完成后再开始审查。");
+            if(fixedBaseline!=null&&fixedBaseline.enabled()) {
+                try { fixedBaseline.projectSelection(projectId); }
+                catch(IllegalStateException failure) {
+                    if(failure.getMessage()!=null&&failure.getMessage().startsWith("Fixed development reference rejected: fixed_sl_selection_"))
+                        throw new BizException(4104,"Select and save at least one current SL edition in 'SL editions and library' before running Vetting. Refresh its status if the saved selection is stale.","fixed_sl_selection_required_or_stale",failure);
+                    throw failure;
+                }
+            }
             com.consense.ai.LlmOperation operation=llmProfiles.capture();
             VettingLlmOperation vettingOperation=semantic.captureOperation(operation);
             String supplement=semantic.configuredSupplement();
-            List<SourceDocument> snapshot=sourceSet(projectId);
-            if(canonicalEnabled()) {
+            List<SourceDocument> selectedSources=canonicalEnabled()&&sourceDigestPreparation!=null?freshSourceStamps(projectId):sourceSet(projectId);
+            if(!compactSources(selectedSources)&&canonicalEnabled()&&sourceDigestPreparation!=null)selectedSources=sourceSet(projectId);
+            final List<SourceDocument> snapshot=selectedSources;
+            boolean compact=compactSources(snapshot);
+            List<SourceDocument> admitted=snapshot;
+            List<SourceDocument> preparedStamps=null;
+            if(canonicalEnabled()&&!compact) {
                 // Freeze the prepared graph with its source, before run hashes and identity closures are captured.
-                for(SourceDocument document:snapshot){JsonNode prepared=evidencePreparation.prepareNormalCandidate(projectId,document.getId(),"vetting");
-                    if(prepared!=null)document.setNormalCandidateJson(JsonUtils.write(prepared));}
+                admitted=new ArrayList<>();
+                for(SourceDocument document:snapshot)try {
+                    JsonNode prepared=evidencePreparation.prepareNormalCandidate(projectId,document.getId(),"vetting");
+                    if(prepared!=null)document.setNormalCandidateJson(JsonUtils.write(prepared));
+                    admitted.add(document);
+                }catch(com.consense.service.sources.CanonicalEvidenceException unavailable){
+                    if(!missingObservedEvidence(unavailable))throw unavailable;
+                    log.warn("Selected Vetting source {} '{}' has no usable observed evidence and remains unreviewed (parseStatus={})",
+                            document.getId(),document.getFileName(),document.getParseStatus());
+                }
                 assertMaterialSourcesCurrent(projectId,snapshot);
+                preparedStamps=currentSourceStamps(projectId,snapshot);
+                Map<Long,SourceDocument> byId=new HashMap<>();for(SourceDocument stamp:preparedStamps)
+                    if(byId.put(stamp.getId(),stamp)!=null)throw new BizException(4104,"Duplicate source revision");
+                if(byId.size()!=snapshot.size())throw new BizException(4104,"Review source selection changed");
+                for(SourceDocument document:snapshot){SourceDocument stamp=byId.remove(document.getId());
+                    if(stamp==null)throw new BizException(4104,"Review source selection changed");
+                    if(SourceContentDigests.stamped(stamp))SourceContentDigests.rebindVerifiedCurrent(document,stamp);}
             }
-            if(!originalSourcesCurrent(snapshot))throw new BizException(4104,"审查原件字节与已保存版本不一致，请重新上传和解析后审查。");
-            if(snapshot.isEmpty()||(!canonicalEnabled()&&snapshot.stream().noneMatch(this::reviewable))) throw new BizException(4101,"审查源集没有可用正文，请上传并检查解析状态");
+            if(!compact&&!originalSourcesCurrent(snapshot))throw new BizException(4104,"审查原件字节与已保存版本不一致，请重新上传和解析后审查。");
+            if(snapshot.isEmpty()||(canonicalEnabled()?admitted.isEmpty():snapshot.stream().noneMatch(this::reviewable)))
+                throw new BizException(4101,"No reviewable source text is available. Check the selected files' parsing status.");
+            String sourceStamp=sourceDigestPreparation==null?null:sourceStampHash(preparedStamps==null?currentSourceStamps(projectId,snapshot):preparedStamps);
+            if(sourceDigestPreparation!=null&&sourceStamp==null)throw new BizException(4104,"Selected source content revisions are unavailable; repair the source digest before review.");
             VettingRun run=new VettingRun(); run.setId(UUID.randomUUID().toString()); run.setProjectId(projectId); run.setLang(normalizeLang(lang)); run.setStartedAt(Instant.now());
-            run.setSourceSnapshotSha256(sourceSetHash(snapshot));
+            run.setSourceSnapshotSha256(compact?compactSourceSetHash(snapshot):sourceSetHash(snapshot));
             run.setRecoveryContractSha256(recoveryContract(supplement,vettingOperation));run.setModelProfileExplicit(operation.isExplicit());run.setRecoveryStatus("NEW");
             if(checkpoints!=null){run.setExecutionOwner(executionOwner);run.setLeaseUntil(Instant.now().plusSeconds(VettingCheckpointService.LEASE_SECONDS));}
             run.setModelIdentityJson(JsonUtils.write(vettingOperation==null?operation.getIdentity():vettingOperation.getIdentity()));
             run.setStatus("QUEUED"); run.setPhase("queued"); run.setTotalUnits(topicCount()+2); run.setMessage("审查已排队，人工处置按问题指纹保留。");
             CoverageVO queuedCoverage=coverage(snapshot,Collections.emptyList(),Collections.emptySet(),Collections.emptyList(),false);
+            if(canonicalEnabled())queuedCoverage.setCanonicalSourceDocumentIds(admitted.stream().map(SourceDocument::getId).collect(Collectors.toList()));
+            queuedCoverage.setSourceStampSha256(sourceStamp);
             queuedCoverage.setPackageIdentityReview(freezePackageIdentity(packageAuthority(projectId),run.getSourceSnapshotSha256()));
             queuedCoverage.setPackageIdentityMirrorAudit(packageMirrorAudit(null,projectService.require(projectId)));
             run.setCoverageJson(JsonUtils.write(queuedCoverage));
@@ -542,6 +694,53 @@ public class VettingService {
     }
     public VettingJobVO latestRun(String projectId) { projectService.require(projectId); return runRepository.findFirstByProjectIdOrderByStartedAtDesc(projectId).map(this::jobVO).orElse(null); }
     public VettingJobVO getRun(String projectId,String id) { projectService.require(projectId); return runRepository.findById(id).filter(r -> projectId.equals(r.getProjectId())).map(this::jobVO).orElseThrow(() -> new BizException(4102,"审查任务不存在")); }
+    public JsonNode getRunDisplay(String projectId,String id) {
+        projectService.require(projectId);
+        VettingRun run=runRepository.findById(id).filter(r->projectId.equals(r.getProjectId()))
+                .orElseThrow(()->new BizException(4102,"审查任务不存在"));
+        VettingJobVO job=runSummary(run);
+        job.setSourceSetStale(sourceSetStale(run,true));
+        ObjectNode display=JsonUtils.mapper().valueToTree(job);
+        display.set("coverage",displayCoverage(JsonUtils.parse(run.getCoverageJson())));
+        return display;
+    }
+
+    private static ObjectNode displayCoverage(JsonNode source) {
+        ObjectNode coverage=displayFields(source,"totalDocuments","reviewedDocuments","documents","warnings","reviewCompleteness");
+        ArrayNode topics=coverage.putArray("semanticTopics");
+        for(JsonNode topic:source.path("semanticTopics")) {
+            ObjectNode shown=displayFields(topic,"topicIndex","topic","reviewKind","referenceIds","status","globalCallStatus",
+                    "aggregateReviewStatus","reviewCoverageScope","semanticScopeVerified","checkState","error","sourceRequestCount",
+                    "pendingSourceRequestCount","extraPacketCount","failedPacketCount","notSubmittedPacketCount","submittedChars",
+                    "budgetDroppedGroups","partialContextGroups","unresolvedSegments","issueAssessments","consistentAssessments",
+                    "insufficientContextAssessments","acceptedFindings","rejectedRecords");
+            shown.put("submittedChunkCount",topic.path("submittedChunkIds").size());
+            ArrayNode packets=shown.putArray("packetAudits");
+            for(JsonNode packet:topic.path("packetAudits")) {
+                ObjectNode summary=displayFields(packet,"packetId","packetIndex","kind","status","checkState","inputBudgetStatus",
+                        "actualGatewayCallStarted","failureKind","error","sourceObservationPacketId","sourceSnapshotSha256");
+                JsonNode observation=packet.path("inputBudgetMetadata").path("observation");
+                if(observation.isObject())summary.putObject("inputBudgetMetadata").set("observation",
+                        displayFields(observation,"inputTokens","outputReserveTokens","effectiveContextTokens"));
+                packets.add(summary);
+            }
+            ArrayNode requests=shown.putArray("sourceRequests");
+            for(JsonNode request:topic.path("sourceRequests")) {
+                ObjectNode summary=displayFields(request,"requestId","transportStatus","reviewExecutionStatus","unknownReason","packetId");
+                summary.put("requiredMemberCount",request.path("requiredChunkIds").size());
+                summary.put("missingMemberCount",request.path("missingChunkIds").size());
+                requests.add(summary);
+            }
+            topics.add(shown);
+        }
+        return coverage;
+    }
+
+    private static ObjectNode displayFields(JsonNode source,String... names) {
+        ObjectNode shown=JsonUtils.mapper().createObjectNode();
+        for(String name:names)if(source.has(name))shown.set(name,source.get(name));
+        return shown;
+    }
 
     public VettingProgressVO latestProgress(String projectId) {
         projectService.require(projectId);
@@ -559,27 +758,45 @@ public class VettingService {
                 JsonUtils.read(r.getModelIdentityJson(),com.consense.ai.ModelIdentity.class),r.getRecoveryStatus());
     }
 
-    private void executeRun(String id,String projectId,String lang,List<SourceDocument> snapshot,CompletableFuture<RunResultVO> done,VettingServiceProbe probe) {
+    private void executeRun(VettingRun dispatchedRun,String projectId,String lang,List<SourceDocument> snapshot,Map<Long,OriginalFileState> originalPins,CompletableFuture<RunResultVO> done,VettingServiceProbe probe) {
+        String id=dispatchedRun.getId();
         Throwable originalFailure=null;String outcome="aborted",stage="rules_progress";long stageStarted=System.nanoTime(),stageOverhead=probe.overheadNanos();
         long runStarted=stageStarted,runOverhead=stageOverhead;
         try {
             VettingRun capturedRun=runRepository.findById(id).orElseThrow(()->new BizException(4102,"Review run no longer exists"));
             CoverageVO capturedCoverage=JsonUtils.read(capturedRun.getCoverageJson(),CoverageVO.class);
-            final JsonNode frozenIdentity=capturedCoverage==null?null:capturedCoverage.getPackageIdentityReview();
-            if(frozenIdentity==null)throw new BizException(4104,"This run has no frozen package identity contract; rerun instead of upgrading historical results.");
-            Runnable sourceGuard=()->{assertMaterialSourcesCurrent(projectId,snapshot);assertPackageIdentityCurrent(projectId,frozenIdentity,capturedRun.getSourceSnapshotSha256());};
-            sourceGuard.run();
-            if(canonicalEnabled()) {
+            JsonNode queuedIdentity=capturedCoverage==null?null:capturedCoverage.getPackageIdentityReview();
+            if(queuedIdentity==null)throw new BizException(4104,"This run has no frozen package identity contract; rerun instead of upgrading historical results.");
+            boolean compact=compactSources(snapshot);
+            if(compact&&currentSources!=null)for(SourceDocument source:snapshot)originalPins.put(source.getId(),currentSources.observeOriginal(source));
+            assertMaterialSourcesCurrent(projectId,snapshot,!compact);assertPackageIdentityCurrent(projectId,queuedIdentity,capturedRun.getSourceSnapshotSha256());
+            List<SourceDocument> admitted=snapshot;
+            if(canonicalEnabled()&&!compact) {
                 stage="source_preparation";progress(id,0,"preparing","准备当前来源的完整原始观察；不代替原件质量确认。");
-                for(SourceDocument document:snapshot)evidencePreparation.prepareNormalObserved(projectId,document.getId(),"vetting");
+                admitted=new ArrayList<>();
+                for(SourceDocument document:snapshot)try {
+                    evidencePreparation.prepareNormalObservedForSemanticRead(projectId,document.getId(),"vetting");
+                    admitted.add(document);
+                }catch(com.consense.service.sources.CanonicalEvidenceException unavailable){
+                    if(!missingObservedEvidence(unavailable))throw unavailable;
+                    log.warn("Selected Vetting source {} '{}' has no usable observed evidence and remains unreviewed (parseStatus={})",
+                            document.getId(),document.getFileName(),document.getParseStatus());
+                }
                 assertMaterialSourcesCurrent(projectId,snapshot);
             }
-            progress(id,0,"rules","对可解析的招标合同条款执行规则检查。");
+            if(compact)progress(id,0,"preparing","Preparing the selected source observations one document at a time.");
             stage="rule_sources_construction";stageStarted=System.nanoTime();stageOverhead=probe.overheadNanos();
-            final OerBusinessEvidence.Session canonicalSession=canonicalEnabled()?oer.loadSemantic(projectId,"vetting",snapshot):null;
+            final OerBusinessEvidence.Session canonicalSession=canonicalEnabled()?oer.loadSemantic(projectId,"vetting",admitted):null;
+            if(compact){
+                admitted=snapshot.stream().filter(d->canonicalSession.documentIds.contains(d.getId())).collect(Collectors.toList());
+                freezePreparedSources(dispatchedRun,capturedRun,capturedCoverage,snapshot,canonicalSession);
+            }
+            final JsonNode frozenIdentity=capturedCoverage.getPackageIdentityReview();
+            Runnable sourceGuard=()->{assertMaterialSourcesCurrent(projectId,snapshot,!compact);requireOriginalFreshness(snapshot,originalPins);assertPackageIdentityCurrent(projectId,frozenIdentity,capturedRun.getSourceSnapshotSha256());};
+            sourceGuard.run();progress(id,0,"rules","对可解析的招标合同条款执行规则检查。");
             if(canonicalSession!=null){progress(id,0,"reading","按顺序读取本次声明范围的完整语义单元，保留条件、表格及未知状态。");oer.scan(canonicalSession);}
-            List<SourceDocument> docs=canonicalSession!=null?snapshot:snapshot.stream().filter(this::reviewable).collect(Collectors.toList());
-            List<VettingRuleEngine.Source> sources=canonicalSession!=null?oer.ruleSources(canonicalSession,snapshot):docs.stream().filter(this::contractSource).map(d -> new VettingRuleEngine.Source(String.valueOf(d.getId()),fileKey(d),d.getFileName(),VettingCorpus.sourceHash(d),VettingCorpus.blocks(d),d.getTextContent())).collect(Collectors.toList());
+            List<SourceDocument> docs=canonicalSession!=null?admitted:snapshot.stream().filter(this::reviewable).collect(Collectors.toList());
+            List<VettingRuleEngine.Source> sources=canonicalSession!=null?oer.ruleSources(canonicalSession,admitted):docs.stream().filter(this::contractSource).map(d -> new VettingRuleEngine.Source(String.valueOf(d.getId()),fileKey(d),d.getFileName(),VettingCorpus.sourceHash(d),VettingCorpus.blocks(d),d.getTextContent())).collect(Collectors.toList());
             List<VettingRuleEngine.Source> identitySources=canonicalSession!=null?sources:OerBusinessEvidence.ordinaryRuleSources(projectId,docs.stream().filter(this::contractSource).collect(Collectors.toList()));
             probe.elapsed(stage,stageStarted,stageOverhead,"Original reviewable/contractSource filters and Source construction only",true);
             probe.observe("rule_sources_constructed",()->VettingServiceProbe.map("sources",sources,"ruleSourceCount",sources.size(),"reviewableDocumentCount",docs.size(),
@@ -606,6 +823,7 @@ public class VettingService {
             probe.observe("semantic_result_raw_candidates",()->VettingServiceProbe.map("result",semanticResult,
                     "boundary","Actual returned candidates, warnings, reviewed IDs and topic audits before service sorting/source normalization"));
             candidates.addAll(semanticResult.getCandidates());
+            bindEvidenceContentRevisions(candidates,snapshot);
             IdentityHashMap<Candidate,List<Integer>> originalOrdinals=new IdentityHashMap<>();
             if(probe.enabled())for(int i=0;i<candidates.size();i++)originalOrdinals.computeIfAbsent(candidates.get(i),value->new ArrayList<>()).add(i);
             probe.observe("combined_candidates_before_sort",()->VettingServiceProbe.map("candidates",candidateOrder(candidates,originalOrdinals)));
@@ -638,6 +856,8 @@ public class VettingService {
             probe.observe("final_selected_candidates",()->VettingServiceProbe.map("candidatesByPublicationKey",unique,"riskCounter",riskFinal,"riskSkippedCount",skippedFinal,"warnings",warnings));
             stage="coverage_construction";stageStarted=System.nanoTime();stageOverhead=probe.overheadNanos();
             CoverageVO coverage=coverage(snapshot,chunks,semanticResult.getReviewedChunkIds(),warnings,true);
+            if(canonicalSession!=null)coverage.setCanonicalSourceDocumentIds(admitted.stream().map(SourceDocument::getId).collect(Collectors.toList()));
+            coverage.setSourceStampSha256(sourceStampHash(currentSourceStamps(projectId,snapshot)));
             if(canonicalSession!=null)coverage.setCanonicalCorpusIdentitySha256(canonicalSession.identitySha256());
             coverage.setSemanticTopics(semanticResult.getTopicAudits());
             coverage.setPackageIdentityReview(completedIdentity);
@@ -657,7 +877,9 @@ public class VettingService {
                 stageStarted=System.nanoTime();stageOverhead=probe.overheadNanos();
                 result=tx().execute(status -> {
                     if(canonicalSession!=null)oer.assertSelected(canonicalSession,freshSourceStamps(projectId));
+                    if(canonicalSession!=null)oer.assertCorpusIntegrity(canonicalSession);
                     sourceGuard.run();
+                    if(compact)assertMaterialSourcesCurrent(projectId,snapshot,true);
                     return mergeAndComplete(id,projectId,unique,coverage,semanticResult.getModel(),probe);
                 });
                 probe.elapsed(stage,stageStarted,stageOverhead,"Actual original REQUIRED tx.execute; includes own commit when no outer participant, otherwise outer commit is unobserved; lock acquisition excluded; observer wall excluded",true);
@@ -694,8 +916,8 @@ public class VettingService {
     private RunResultVO mergeAndComplete(String id,String projectId,Map<String,Candidate> candidates,CoverageVO coverage,String model,VettingServiceProbe probe) {
         projectService.require(projectId); VettingRun run=ownedRun(id);
         if(!ACTIVE_STATES.contains(run.getStatus())) throw new BizException(4101,"任务已停止，不能覆盖结果");
-        if(!runRepository.findFirstByProjectIdOrderByStartedAtDesc(projectId).map(latest->id.equals(latest.getId())).orElse(false))throw new BizException(4101,"项目已有新的审查任务，旧执行者不能发布当前结果");
-        if(sourceSetStale(run))throw new BizException(4104,"审查来源已变化，旧结果不能作为当前报告保存；可靠包仍保留。");
+        if(!isLatestRun(projectId,id))throw new BizException(4101,"项目已有新的审查任务，旧执行者不能发布当前结果");
+        if(sourceSetStale(run,false,false))throw new BizException(4104,"审查来源已变化，旧结果不能作为当前报告保存；可靠包仍保留。");
         assertPackageIdentityCurrent(projectId,coverage.getPackageIdentityReview(),run.getSourceSnapshotSha256());
         List<VettingFinding> previous=findingRepository.findByProjectIdOrderByCodeAsc(projectId);
         Map<String,Map<String,VettingFinding>> byFingerprintAndRevision=new LinkedHashMap<>(); int next=1;
@@ -730,7 +952,7 @@ public class VettingService {
         run.setStatus("COMPLETED"); run.setPhase("completed"); run.setCompletedUnits(run.getTotalUnits()); run.setFinishedAt(Instant.now()); run.setMessage("审查完成，共 "+current.size()+" 条发现；覆盖与限制见报告。");
         run.setResultJson(JsonUtils.write(result)); run.setCoverageJson(JsonUtils.write(coverage));
         run.setRecoveryStatus("COMPLETED");run.setExecutionOwner(null);run.setLeaseUntil(null);runRepository.saveAndFlush(run);
-        if(reportSnapshots!=null)saveReportSnapshot(projectService.require(projectId),run,current.stream().map(this::toVO).collect(Collectors.toList()));
+        if(reportSnapshots!=null)saveReportSnapshot(projectService.require(projectId),run,current.stream().map(f->toVO(f,run.getSourceSnapshotSha256())).collect(Collectors.toList()));
         probe.observe("merge_pending_commit_records",()->VettingServiceProbe.map("committed",false,"run",run,"currentRecords",current,
                 "findingVos",current.stream().map(this::toVO).collect(Collectors.toList()),"previousRecordsAfterMergeRefresh",previous,"result",result,
                 "boundary","Actual entities after original saveAll(previous), saveAll(current), and run.saveAndFlush; enclosing transaction has not committed yet"));
@@ -818,6 +1040,22 @@ public class VettingService {
                     .map(position->VettingCorpus.nativePosition(position,source.getSourceSha256())).filter(Objects::nonNull).collect(Collectors.toList()));
         }
     }
+    /** Bind a content stamp only to evidence that still names the captured parsed and original source. */
+    static void bindEvidenceContentRevisions(List<Candidate> candidates,List<SourceDocument> snapshot) {
+        Map<String,SourceDocument> sources=snapshot.stream().collect(Collectors.toMap(d->String.valueOf(d.getId()),d->d));
+        Map<String,String> parsedHashes=new HashMap<>();
+        for(SourceDocument source:snapshot)if(SourceContentDigests.stamped(source)
+                &&Objects.equals(SourceContentDigests.actual(source),source.getBusinessContentSha256()))
+            parsedHashes.put(String.valueOf(source.getId()),VettingCorpus.sourceHash(source));
+        for(Candidate candidate:candidates)for(FindingEvidence quote:candidate.getEvidence()==null?Collections.<FindingEvidence>emptyList():candidate.getEvidence()) {
+            SourceDocument source=sources.get(quote.getDocumentId());
+            if(source!=null&&parsedHashes.containsKey(quote.getDocumentId())
+                    &&Objects.equals(quote.getSourceHash(),parsedHashes.get(quote.getDocumentId()))
+                    &&SourceContentDigests.valid(source.getSourceSha256())
+                    &&Objects.equals(quote.getOriginalSourceSha256(),source.getSourceSha256()))
+                quote.setBusinessContentSha256(source.getBusinessContentSha256());
+        }
+    }
     private void apply(VettingFinding f,Candidate c) {
         // Refresh generated observations only. Human review records are owned by updateReview.
         List<FindingEvidence> sides=c.getEvidence()==null?Collections.emptyList():c.getEvidence(); FindingEvidence primary=sides.isEmpty()?null:sides.get(0);
@@ -864,14 +1102,18 @@ public class VettingService {
         return candidate.getId()!=null&&(existing.getId()==null||candidate.getId()>existing.getId());
     }
     private CoverageVO coverage(List<SourceDocument> snapshot,List<Chunk> chunks,Set<String> reviewed,List<String> extra,boolean rulesScanned) {
-        List<String> warnings=new ArrayList<>(extra); List<DocumentCoverageVO> documents=new ArrayList<>(); int processed=0;
+        List<String> warnings=new ArrayList<>(extra); List<DocumentCoverageVO> documents=new ArrayList<>(); int processed=0,unreviewed=0;
         boolean canonical=OerBusinessEvidence.canonicalCorpus(chunks);
+        Map<Long,FileDisplay> summaries=compactSources(snapshot)?runSourceSummaries(snapshot):Collections.emptyMap();
         warnings.add(canonical?"规则与语义仅处理已采用的 canonical 来源观察；未采用区域、整份原件完整性、编辑状态及采用关系保持声明的未知。字符分母仅为已采用观察的 UTF16 范围并集，不代表原件全文覆盖。":rulesScanned?"规则扫描全部可解析招标合同条款；标准文件仅作参考对照，项目事实和文件目录仅作上下文，均未当作实际合同执行规则检查。语义覆盖仅计实际成功的模型片段，未检索片段不代表完成语义审查。":"任务尚未完成规则和语义审查，当前覆盖仅反映源文件解析状态。");
         if(props.getVetting().isDiffAgainstBaseline()) warnings.add("本次未执行标准模板差异过滤，不能解读为只审查项目改动内容。");
         for(SourceDocument d:snapshot) {
-            List<String> notes=parseWarnings(d); boolean usable=canonical||reviewable(d); if(excluded(d)) notes.add("source_identity_unresolved".equals(com.consense.service.sources.ProjectDocumentScope.exclusionReason(d,"fullset"))?"身份待确认，原文已保留；确认文件用途后可加入源集。":"该文件被来源身份或显式范围规则排除。");
+            FileDisplay summary=summaries.get(d.getId());
+            List<String> notes=summary==null?parseWarnings(d):parseWarnings(summary.coverageHeader,summary.hasCoverage,d); if(excluded(d)) notes.add("source_identity_unresolved".equals(com.consense.service.sources.ProjectDocumentScope.exclusionReason(d,"fullset"))?"身份待确认，原文已保留；确认文件用途后可加入源集。":"该文件被来源身份或显式范围规则排除。");
             List<Chunk> parts=chunks.stream().filter(c -> String.valueOf(d.getId()).equals(c.getDocumentId())).collect(Collectors.toList()); List<Chunk> checked=parts.stream().filter(c -> reviewed.contains(c.getId())).collect(Collectors.toList());
-            int chars=canonical?OerBusinessEvidence.observedChars(parts):nvl(d.getTextContent()).length(),covered=canonical?OerBusinessEvidence.observedChars(checked):Math.min(chars,reviewedChars(d,checked));
+            boolean usable=canonical?!parts.isEmpty():summary==null?reviewable(d):summary.textChars>0&&Arrays.asList("PARSED","PARTIAL").contains(d.getParseStatus())&&!excluded(d);
+            if(!usable){unreviewed++;if(!"FAILED".equals(d.getParseStatus()))notes.add("No usable source evidence was available; this document was not reviewed.");}
+            int chars=canonical?OerBusinessEvidence.observedChars(parts):summary==null?nvl(d.getTextContent()).length():summary.textChars,covered=canonical?OerBusinessEvidence.observedChars(checked):summary==null?Math.min(chars,reviewedChars(d,checked)):0;
             notes.add("资料类型：" + roleLabel(VettingCorpus.sourceRole(d)).getZhHans());
             if(canonical)notes.add("片段与字符统计以已采用 canonical 观察为分母；未采用区域及原件完整性未确认。");
             else if(usable) notes.add(rulesScanned?(contractSource(d)?"规则已扫描全部可解析招标合同正文。":
@@ -879,7 +1121,8 @@ public class VettingService {
             if(usable && rulesScanned && checked.size()<parts.size()) notes.add("语义仅覆盖 "+checked.size()+"/"+parts.size()+" 片段，其他片段未进入成功的模型调用。");
             if(usable && !checked.isEmpty()) processed++;
             documents.add(new DocumentCoverageVO(String.valueOf(d.getId()),fileKey(d),d.getFileName(),d.getParseStatus(),chars,covered,parts.size(),checked.size(),notes));
-        } CoverageVO result=new CoverageVO(snapshot.size(),processed,documents,new ArrayList<>(new LinkedHashSet<>(warnings)));
+        } if(unreviewed>0)warnings.add(unreviewed+" selected source file(s) had no usable evidence and were not reviewed.");
+        CoverageVO result=new CoverageVO(snapshot.size(),processed,documents,new ArrayList<>(new LinkedHashSet<>(warnings)));
         if(OerBusinessEvidence.isSemanticCorpus(chunks)){JsonNode read=OerBusinessEvidence.session(chunks).semanticReadCoverage();result.setSemanticSourceRead(read);
             if(!read.path("blockedOrigins").isEmpty()){result.setReviewCompleteness("incomplete");result.getWarnings().add("部分来源单元超过有界读取预算，已保留原件与精确未完成范围；可读内容继续审查，不代表声明范围完整完成。"+JsonUtils.write(read));
                 for(DocumentCoverageVO document:documents){int denied=0;for(JsonNode row:read.path("blockedOrigins"))if(document.getDocumentId().equals(row.path("documentId").asText()))denied++;if(denied>0){document.setTotalSegments(document.getTotalSegments()+denied);document.getWarnings().add("另有 "+denied+" 个来源单元未读取，字符分母仅覆盖可读部分，缺失范围见 semanticSourceRead。");}}}}
@@ -924,20 +1167,122 @@ public class VettingService {
         for(SourceDocument d:documents)if(JsonUtils.isBlankText(d.getFileKey()))d.setFileKey(matchFileKey(d.getFileName()));
         return com.consense.service.sources.ProjectDocumentScope.selected(projectId,documents,"fullset");
     }
-    /** Display retains pending and excluded originals; business selection remains separate. */
-    private List<SourceDocument> fileDisplaySourceSet(String projectId) {
-        List<SourceDocument> documents=new ArrayList<>();
-        for(SourceDocumentRepository.FileDisplayMetadata metadata:sourceDocumentRepository.findFileDisplayMetadataByProjectId(projectId)) {
-            SourceDocument d=new SourceDocument();d.setId(metadata.getId());d.setProjectId(metadata.getProjectId());d.setCategory(metadata.getCategory());
-            d.setFileKey(metadata.getFileKey());d.setFileName(metadata.getFileName());d.setReviewRole(metadata.getReviewRole());d.setDocumentScope(metadata.getDocumentScope());
-            d.setParseStatus(metadata.getParseStatus());d.setParseMessage(metadata.getParseMessage());d.setOerIdentityJson(metadata.getOerIdentityJson());d.setSourceSha256(metadata.getSourceSha256());
-            d.setPageCount(metadata.getPageCount());d.setOcrUsed(metadata.getOcrUsed());d.setTextContent(metadata.getTextContent());d.setParseCoverageJson(metadata.getParseCoverageJson());
-            if(JsonUtils.isBlankText(d.getFileKey()))d.setFileKey(matchFileKey(d.getFileName()));
-            documents.add(d);
+    private static final class FileDisplay {
+        final SourceDocument source;
+        final int textChars,structureChars;
+        boolean hasText;
+        final boolean hasTextValue,hasCoverage;
+        String coverageHeader;
+        final String routingSha;
+        FileDisplay(SourceDocument source,SourceDocumentRepository.FileDisplayMetadata metadata) {
+            this.source=source;this.textChars=metadata.getTextChars()==null?0:metadata.getTextChars();
+            this.structureChars=metadata.getStructureChars()==null?0:metadata.getStructureChars();
+            this.hasTextValue=Boolean.TRUE.equals(metadata.getHasTextValue());
+            this.hasCoverage=Boolean.TRUE.equals(metadata.getHasCoverage());
+            this.routingSha=CanonicalEvidenceService.routingHash(source);
         }
-        return com.consense.service.sources.ProjectDocumentScope.currentCatalog(projectId,documents);
+        boolean safeForLegacyHash(){return (long)textChars+structureChars<=1_000_000;}
+    }
+    private Map<Long,FileDisplay> runSourceSummaries(List<SourceDocument> captured){
+        String project=captured.get(0).getProjectId();Map<Long,SourceDocument> selected=new LinkedHashMap<>();for(SourceDocument source:captured)selected.put(source.getId(),source);
+        Map<Long,FileDisplay> result=new LinkedHashMap<>();
+        for(SourceDocumentRepository.FileDisplayMetadata metadata:sourceDocumentRepository.findFileDisplayMetadataByProjectId(project)){
+            SourceDocument source=selected.get(metadata.getId());if(source==null)continue;
+            SourceDocument current=SourceDocumentRepository.scopeSnapshot(metadata);if(JsonUtils.isBlankText(current.getFileKey()))current.setFileKey(matchFileKey(current.getFileName()));
+            if(!ProjectDocumentScope.sameScopeRevision(source,current)||!Objects.equals(source.getBusinessContentSha256(),current.getBusinessContentSha256()))throw new BizException(4104,"Review coverage source revision changed");
+            source.setParseMessage(metadata.getParseMessage());source.setPageCount(metadata.getPageCount());source.setOcrUsed(metadata.getOcrUsed());
+            result.put(source.getId(),new FileDisplay(source,metadata));
+        }
+        if(result.size()!=captured.size())throw new BizException(4104,"Review coverage source selection changed");readCoverageHeaders(project,result);return result;
+    }
+    /** Display retains pending and excluded originals; business selection remains separate. */
+    private List<FileDisplay> fileDisplaySourceSet(String projectId) {
+        Map<Long,FileDisplay> byId=new LinkedHashMap<>();
+        for(SourceDocumentRepository.FileDisplayMetadata metadata:sourceDocumentRepository.findFileDisplayMetadataByProjectId(projectId)) {
+            SourceDocument d=SourceDocumentRepository.scopeSnapshot(metadata);d.setParseMessage(metadata.getParseMessage());
+            d.setPageCount(metadata.getPageCount());d.setOcrUsed(metadata.getOcrUsed());
+            FileDisplay display=new FileDisplay(d,metadata);
+            if(JsonUtils.isBlankText(d.getFileKey()))d.setFileKey(matchFileKey(d.getFileName()));
+            byId.put(d.getId(),display);
+        }
+        readTextPresence(projectId,byId);
+        readCoverageHeaders(projectId,byId);
+        List<SourceDocument> documents=byId.values().stream().map(display->display.source).collect(Collectors.toList());
+        return ProjectDocumentScope.currentCatalog(projectId,documents).stream().map(d->byId.get(d.getId())).collect(Collectors.toList());
+    }
+    private void readTextPresence(String projectId,Map<Long,FileDisplay> byId) {
+        if(byId.values().stream().noneMatch(d->d.textChars>0))return;
+        if(fileListDataSource==null)throw new IllegalStateException("Source file text reader unavailable");
+        try(Connection connection=fileListDataSource.getConnection()) {
+            String product=connection.getMetaData().getDatabaseProductName();
+            if("H2".equals(product)) {
+                try(PreparedStatement query=connection.prepareStatement("select id,text_content from source_document where project_id=? and category in ('VETTING_PACKAGE','VETTING_SUPPLEMENT')")) {
+                    query.setString(1,projectId);
+                    try(ResultSet rows=query.executeQuery()) {
+                        while(rows.next()) {
+                            FileDisplay display=byId.get(rows.getLong(1));if(display==null||display.textChars<=0)continue;
+                            Clob clob=rows.getClob(2);if(clob==null)continue;
+                            try(Reader reader=clob.getCharacterStream()) {
+                                char[] chars=new char[4096];int count;
+                                while(!display.hasText&&(count=reader.read(chars))!=-1)
+                                    for(int i=0;i<count;i++)if(!Character.isWhitespace(chars[i])&&!Character.isSpaceChar(chars[i])) {display.hasText=true;break;}
+                            } finally {clob.free();}
+                        }
+                    }
+                }
+            } else if("MySQL".equals(product)||"MariaDB".equals(product)) {
+                // Connector/J materializes getClob(); return bounded server-side slices instead.
+                try(PreparedStatement query=connection.prepareStatement("select substring(text_content,?,16384) from source_document where id=? and project_id=? and category in ('VETTING_PACKAGE','VETTING_SUPPLEMENT')")) {
+                    for(FileDisplay display:byId.values()) {
+                        if(display.textChars<=0)continue;
+                        long position=1;
+                        while(!display.hasText) {
+                            query.setLong(1,position);query.setLong(2,display.source.getId());query.setString(3,projectId);
+                            try(ResultSet rows=query.executeQuery()) {
+                                if(!rows.next())break;
+                                String chunk=rows.getString(1);if(chunk==null||chunk.isEmpty())break;
+                                for(int i=0;i<chunk.length();i++)if(!Character.isWhitespace(chunk.charAt(i))&&!Character.isSpaceChar(chunk.charAt(i))) {display.hasText=true;break;}
+                                position+=chunk.codePointCount(0,chunk.length());
+                            }
+                        }
+                    }
+                }
+            } else throw new SQLException("Unsupported source file text reader database: "+product);
+        } catch(IOException | SQLException error) {throw new IllegalStateException("Source file text availability unavailable",error);}
+    }
+    private void readCoverageHeaders(String projectId,Map<Long,FileDisplay> byId) {
+        if(fileListDataSource==null||byId.values().stream().noneMatch(d->d.hasCoverage))return;
+        try(Connection connection=fileListDataSource.getConnection()) {
+            String product=connection.getMetaData().getDatabaseProductName();
+            boolean h2="H2".equals(product);
+            if(!h2&&!"MySQL".equals(product)&&!"MariaDB".equals(product))throw new SQLException("Unsupported source file coverage reader database: "+product);
+            String sql="select id,"+(h2?"parse_coverage_json":"substring(parse_coverage_json,1,16384)")+",parse_coverage_sha256 from source_document where project_id=? and category in ('VETTING_PACKAGE','VETTING_SUPPLEMENT')";
+            try(PreparedStatement query=connection.prepareStatement(sql)) {
+                query.setString(1,projectId);
+                try(ResultSet rows=query.executeQuery()) {
+                    while(rows.next()) {
+                        FileDisplay display=byId.get(rows.getLong(1));
+                        if(display==null||!display.hasCoverage||!Objects.equals(display.source.getParseCoverageSha256(),rows.getString(3)))continue;
+                        if(!h2) {display.coverageHeader=rows.getString(2);continue;}
+                        Clob clob=rows.getClob(2);if(clob==null)continue;
+                        try(Reader reader=clob.getCharacterStream()) {
+                            char[] chars=new char[4096];StringBuilder header=new StringBuilder(16384);
+                            while(header.length()<16384) {
+                                int count=reader.read(chars,0,Math.min(chars.length,16384-header.length()));
+                                if(count<0)break;if(count>0)header.append(chars,0,count);
+                            }
+                            display.coverageHeader=header.toString();
+                        } catch(IOException | SQLException error) {log.warn("Source file coverage summary unavailable for document {}",display.source.getId(),error);}
+                        finally {clob.free();}
+                    }
+                }
+            }
+        } catch(SQLException error) {log.warn("Source file coverage summaries unavailable for project {}",projectId,error);}
     }
     private boolean reviewable(SourceDocument d) { return ("PARSED".equals(d.getParseStatus())||"PARTIAL".equals(d.getParseStatus())) && !JsonUtils.isBlankText(d.getTextContent()) && !excluded(d); }
+    private static boolean missingObservedEvidence(com.consense.service.sources.CanonicalEvidenceException failure) {
+        return "NORMAL_OBSERVED_SOURCE_EVIDENCE_MISSING".equals(failure.getMessage());
+    }
     private boolean contractSource(SourceDocument d) { return "tender".equals(VettingCorpus.sourceRole(d)); }
     private static String validatedRole(String role) {
         String value = nvl(role).trim().toLowerCase(Locale.ROOT);
@@ -955,11 +1300,43 @@ public class VettingService {
     private boolean excluded(SourceDocument document) { return com.consense.service.sources.ProjectDocumentScope.exclusionReason(document,"fullset")!=null; }
     private List<String> parseWarnings(SourceDocument d) {
         List<String> out=new ArrayList<>();
-        if(!JsonUtils.isBlankText(d.getParseCoverageJson())) try { ParseCoverage c=JsonUtils.read(d.getParseCoverageJson(),ParseCoverage.class); out.addAll(c.getLimitations()); if(!c.getFailedPages().isEmpty()) out.add("未完成解析的物理页："+c.getFailedPages()); if(!c.isComplete()) out.add("文档解析不完整，未解析部分不纳入审查。"); }
+        if("FAILED".equals(d.getParseStatus()))out.add("Parsing failed; this document was not reviewed.");
+        else if(!JsonUtils.isBlankText(d.getParseCoverageJson())) try { ParseCoverage c=JsonUtils.read(d.getParseCoverageJson(),ParseCoverage.class); out.addAll(c.getLimitations()); if(!c.getFailedPages().isEmpty()) out.add("未完成解析的物理页："+c.getFailedPages()); if(!c.isComplete()) out.add("文档解析不完整，未解析部分不纳入审查。"); }
         catch(Exception e) { out.add("解析覆盖记录无法读取，请重新解析。"); }
         else out.add("旧文件缺结构和覆盖记录，仅使用字符锚点，不推测Word页码。");
         if(Boolean.TRUE.equals(d.getOcrUsed())) out.add("OCR 不识别删除线、表格行列关系及图形含义；引文、删除状态和表格对应关系须对照原始物理页复核。");
         if(!"PARSED".equals(d.getParseStatus())&&!"PARTIAL".equals(d.getParseStatus())) out.add("没有可用的已解析正文："+nvl(d.getParseMessage())); return out;
+    }
+    private List<String> parseWarnings(String header,boolean hasCoverage,SourceDocument d) {
+        List<String> out=new ArrayList<>();
+        if(!hasCoverage)out.add("旧文件缺结构和覆盖记录，仅使用字符锚点，不推测Word页码。");
+        else if(header==null)out.add("解析覆盖摘要暂不可用，请对照已保存的解析状态。");
+        else {
+            boolean complete=false,sawComplete=false,sawLimitations=false,sawFailedPages=false,truncated=false;
+            List<Integer> failed=new ArrayList<>();int failedCount=0;
+            try(JsonParser parser=JsonUtils.mapper().getFactory().createParser(header)) {
+                if(parser.nextToken()!=JsonToken.START_OBJECT)throw new IOException("Coverage is not an object");
+                while(parser.nextToken()!=JsonToken.END_OBJECT) {
+                    if(parser.currentToken()!=JsonToken.FIELD_NAME)throw new IOException("Invalid coverage field");
+                    String field=parser.getCurrentName();JsonToken value=parser.nextToken();
+                    if("complete".equals(field)) {complete=parser.getBooleanValue();sawComplete=true;}
+                    else if("limitations".equals(field)&&value==JsonToken.START_ARRAY) {
+                        while(parser.nextToken()!=JsonToken.END_ARRAY)out.add(parser.getValueAsString());
+                        sawLimitations=true;
+                    } else if("failedPages".equals(field)&&value==JsonToken.START_ARRAY) {
+                        while(parser.nextToken()!=JsonToken.END_ARRAY) {if(failed.size()<20)failed.add(parser.getIntValue());failedCount++;}
+                        sawFailedPages=true;
+                    } else if(sawComplete&&sawLimitations&&sawFailedPages)break;
+                    else parser.skipChildren();
+                }
+            } catch(Exception e) {truncated=true;}
+            if(failedCount>0)out.add("未完成解析的物理页："+failed+(failedCount>failed.size()?"（另有 "+(failedCount-failed.size())+" 页）":""));
+            if(sawComplete&&!complete)out.add("文档解析不完整，未解析部分不纳入审查。");
+            if(truncated||!sawComplete)out.add("解析覆盖摘要不完整，请对照原件和已保存的解析状态。");
+        }
+        if(Boolean.TRUE.equals(d.getOcrUsed()))out.add("OCR 不识别删除线、表格行列关系及图形含义；引文、删除状态和表格对应关系须对照原始物理页复核。");
+        if(!"PARSED".equals(d.getParseStatus())&&!"PARTIAL".equals(d.getParseStatus()))out.add("没有可用的已解析正文："+nvl(d.getParseMessage()));
+        return out;
     }
 
     @Transactional(readOnly=true)
@@ -1015,7 +1392,7 @@ public class VettingService {
         if(!currentReviewRun(run)||!sourceSha.equals(run.getSourceSnapshotSha256()))throw new BizException(4104,"审查或原件版本已变化，请刷新后保存；原人工记录保持不变。");return run;
     }
     public boolean currentReviewRun(VettingRun run){
-        if(!"COMPLETED".equals(run.getStatus())||!runRepository.findFirstByProjectIdOrderByStartedAtDesc(run.getProjectId()).map(latest->run.getId().equals(latest.getId())).orElse(false)||sourceSetStale(run))return false;
+        if(!"COMPLETED".equals(run.getStatus())||!isLatestRun(run.getProjectId(),run.getId())||sourceSetStale(run))return false;
         try{assertFixedReferencesCurrent(run,activeFindings(run.getProjectId()).stream().filter(f->run.getId().equals(f.getRunId())).map(this::toVO).collect(Collectors.toList()));return true;}
         catch(BizException stale){if(stale.getCode()!=4104)throw stale;return false;}
     }
@@ -1024,7 +1401,7 @@ public class VettingService {
         List<FindingEvidence> saved=readEvidence(f); List<EvidenceItemVO> items=new ArrayList<>();
         for(FindingEvidence e:saved) {
             EvidenceItemVO item=new EvidenceItemVO(nvl(e.getFileKey())+" · "+nvl(e.getFileName()),e.getPageNo(),e.getQuote(),e.getSide(),e.getDocumentId(),e.getFileKey(),e.getFileName(),e.getAnchor(),e.getQuote(),e.isLocated(),e.getSourceHash(),e.getBbox(),e.getPacketId(),e.getPacketSourceSnapshotSha256(),e.getCanonicalEvidence(),e.getFixedBaselineEvidence(),e.getOriginalSourceSha256());
-            item.setSourceRole(e.getSourceRole());item.setNativePositions(e.getNativePositions());items.add(item);
+            item.setSourceRole(e.getSourceRole());item.setNativePositions(e.getNativePositions());item.setBusinessContentSha256(e.getBusinessContentSha256());items.add(item);
         }
         return new EvidenceVO(code+" · "+nvl(f.getRefs()),!saved.isEmpty()&&saved.stream().allMatch(FindingEvidence::isLocated),items);
     }
@@ -1050,6 +1427,12 @@ public class VettingService {
             if(!path.startsWith(root)||!Files.isRegularFile(path)) throw new BizException(4102,"审查原始文件不可用");
             byte[] bytes=Files.readAllBytes(path);
             if(!expectedOriginalSourceSha256.equals(OerSourceMetadata.originalSha256(bytes)))throw new BizException(4104,"原件字节与证据版本不一致，不能回取当前替换文件。");
+            if(unconfirmedOriginalReadable(d)) {
+                if(com.consense.document.OerSourceRouting.isDrawing(d.getDocumentScope(),d.getFileName(),bytes))throw new BizException(4104,"图纸原件不属于当前审查来源范围。");
+                SourceDocument known=new SourceDocument();OerSourceMetadata.captureKnownIdentity(known,bytes);
+                if(OerSourceMetadata.moduleExclusion(known,"vetting")!=null||OerSourceMetadata.moduleExclusion(known,"advisory")!=null)
+                    throw new BizException(4104,"已知排除原件不属于当前审查来源范围。");
+            }
             SourceDocument after=currentOriginalSource(projectId,documentId);
             if(!revision.equals(VettingCorpus.sourceHash(after))||!expectedOriginalSourceSha256.equals(after.getSourceSha256())
                     ||!Objects.equals(VettingCorpus.sourceRole(d),VettingCorpus.sourceRole(after)))throw new BizException(4104,"原件版本已变化，请刷新审查结果。");
@@ -1065,13 +1448,208 @@ public class VettingService {
         source.setFileKey(metadata.getFileKey());source.setFileName(metadata.getFileName());source.setReviewRole(metadata.getReviewRole());source.setDocumentScope(metadata.getDocumentScope());
         source.setParseStatus(metadata.getParseStatus());source.setOerIdentityJson(metadata.getOerIdentityJson());source.setSourceSha256(metadata.getSourceSha256());source.setStoragePath(metadata.getStoragePath());
         source.setTextContent(metadata.getTextContent());source.setStructuredContentJson(metadata.getStructuredContentJson());
-        if(ProjectDocumentScope.exclusionReason(source,"fullset","vetting")!=null)throw new BizException(4104,"原件不属于当前审查来源范围。");
+        String exclusion=ProjectDocumentScope.exclusionReason(source,"fullset","vetting");
+        if(exclusion!=null&&!retainedDrawingOriginalReadable(source)&&(!"source_identity_unresolved".equals(exclusion)||!unconfirmedOriginalReadable(source)))
+            throw new BizException(4104,"原件不属于当前审查来源范围。");
         String name=nvl(source.getFileName()).trim().toLowerCase(Locale.ROOT);
         boolean superseded=sourceDocumentRepository.findCatalogMetadataByProjectId(projectId).stream().anyMatch(d->d.getId()>documentId
                 &&(SourceDocument.CATEGORY_VETTING_PACKAGE.equals(d.getCategory())||SourceDocument.CATEGORY_VETTING_SUPPLEMENT.equals(d.getCategory()))
                 &&name.equals(nvl(d.getFileName()).trim().toLowerCase(Locale.ROOT)));
         if(superseded)throw new BizException(4104,"原件已被较新上传取代，请刷新审查结果。");
         return source;
+    }
+    /** Downloading a positively excluded original never admits it to parsing or business evidence. */
+    private boolean retainedDrawingOriginalReadable(SourceDocument source) {
+        if(!"EXCLUDED".equals(source.getParseStatus())||!"DRAWING".equals(source.getFileKey()))return false;
+        com.consense.document.OerDocumentIdentity identity=OerSourceMetadata.identity(source);
+        if(identity==null||!"DRAWING".equals(identity.getKind())||!"drawing".equals(identity.getSourcePurpose())
+                ||identity.getEligibleModules()==null||!identity.getEligibleModules().isEmpty()||identity.getIdentityEvidence()==null)return false;
+        boolean explicit="drawing".equals(source.getDocumentScope());
+        return (explicit?"explicit_scope":"format_supported").equals(identity.getIdentityStatus())
+                &&identity.getIdentityEvidence().stream().anyMatch(evidence->evidence!=null
+                    &&(explicit?"upload_document_scope":"native_drawing_format").equals(evidence.getBasis()));
+    }
+    /** Exact original inspection may precede purpose confirmation; this never selects a business source. */
+    private boolean unconfirmedOriginalReadable(SourceDocument source) {
+        if(!identityConfirmationEligible(source)&&!roleConfirmationEligible(source))return false;
+        return unconfirmedOriginalIdentityAllowed(source);
+    }
+    private boolean unconfirmedOriginalIdentityAllowed(SourceDocument source) {
+        com.consense.document.OerDocumentIdentity identity=OerSourceMetadata.identity(source);
+        return identity!=null&&!"source_identity_mismatch".equals(identity.getIdentityStatus())
+                &&!Arrays.asList("DRAWING","BQ","SOR","GENERAL_SUMMARY","WORKS_PSS","SL_NON_TECHNICAL").contains(identity.getKind())
+                &&!Arrays.asList("standard_template","evaluation_answer","drawing").contains(identity.getSourcePurpose())
+                &&OerSourceMetadata.moduleExclusion(source,"vetting")==null&&OerSourceMetadata.moduleExclusion(source,"advisory")==null
+                &&identity.getCandidates().stream().noneMatch(c->"DRAWING".equals(c.getKind()));
+    }
+    private static final int PARSED_TEXT_MAX_CHARS=2_000_000, PARSED_TEXT_PAGE_MAX_CHARS=65_536;
+    /** The revision header is explicitly the trusted business stamp, never the legacy sourceHash. */
+    public OriginalSource readerOriginal(String projectId,long documentId,String originalSha,String routingSha,String businessSha) {
+        projectService.require(projectId);
+        if(!validRoleHash(originalSha)||!validRoleHash(routingSha)||!validRoleHash(businessSha))throw new BizException(4101,"请刷新来源版本后阅读原件。");
+        SourceDocument before=readerOriginalSource(projectId,documentId,originalSha,routingSha,businessSha);
+        try {
+            Path root=Paths.get(props.getStorageRoot()).toAbsolutePath().normalize().toRealPath();
+            Path path=Paths.get(before.getStoragePath()).toAbsolutePath().normalize().toRealPath();
+            if(!path.startsWith(root)||!Files.isRegularFile(path))throw new BizException(4104,"登记原件不可用。");
+            byte[] bytes=Files.readAllBytes(path);
+            if(!originalSha.equals(OerSourceMetadata.originalSha256(bytes)))throw new BizException(4104,"原件字节已变化，请刷新来源后核对。");
+            assertReaderOriginalIdentity(before,bytes);
+            SourceDocument after=readerOriginalSource(projectId,documentId,originalSha,routingSha,businessSha);
+            if(!ProjectDocumentScope.sameScopeRevision(before,after)||!storageService.matchesStoredBytes(after.getStoragePath(),originalSha))
+                throw new BizException(4104,"阅读期间来源版本已变化，请刷新来源后核对。");
+            return new OriginalSource(path,before.getFileName(),bytes.length,businessSha,bytes,originalSha);
+        } catch(java.io.IOException|java.nio.file.InvalidPathException unavailable){throw new BizException(4104,"登记原件不可用。");}
+    }
+    /** Legacy rows without a content stamp may expose only their byte-verified registered original. */
+    public OriginalSource registeredOriginal(String projectId,long documentId,String originalSha,String routingSha) {
+        projectService.require(projectId);
+        if(!validRoleHash(originalSha)||!validRoleHash(routingSha))throw new BizException(4101,"Please refresh the source before opening its original.");
+        SourceDocument before=registeredOriginalSource(projectId,documentId,originalSha,routingSha);
+        try {
+            Path root=Paths.get(props.getStorageRoot()).toAbsolutePath().normalize().toRealPath();
+            Path path=Paths.get(before.getStoragePath()).toAbsolutePath().normalize().toRealPath();
+            if(!path.startsWith(root)||!Files.isRegularFile(path))throw new BizException(4104,"The registered original is unavailable.");
+            byte[] bytes=Files.readAllBytes(path);
+            if(!originalSha.equals(OerSourceMetadata.originalSha256(bytes)))throw new BizException(4104,"The registered original changed.");
+            assertReaderOriginalIdentity(before,bytes);
+            SourceDocument after=registeredOriginalSource(projectId,documentId,originalSha,routingSha);
+            if(!ProjectDocumentScope.sameScopeRevision(before,after)||!storageService.matchesStoredBytes(after.getStoragePath(),originalSha))
+                throw new BizException(4104,"The source changed while opening its original.");
+            return new OriginalSource(path,before.getFileName(),bytes.length,routingSha,bytes,originalSha);
+        } catch(java.io.IOException|java.nio.file.InvalidPathException unavailable){throw new BizException(4104,"The registered original is unavailable.");}
+    }
+    /** Saved parser observations only. No entity/structure/native payload, parser, adoption, or model call. */
+    public Map<String,Object> parsedText(String projectId,long documentId,String originalSha,String routingSha,String businessSha,int page) {
+        projectService.require(projectId);
+        if(!validRoleHash(originalSha)||!validRoleHash(routingSha)||!validRoleHash(businessSha)||page<1||page>100_000)
+            throw new BizException(4101,"请刷新来源版本，并选择有效页码后阅读保存的解析文字。");
+        SourceDocument before=parsedTextSource(projectId,documentId,originalSha,routingSha,businessSha);
+        assertSavedReaderOriginal(before,originalSha);
+        SourceDocumentRepository.ParsedTextMetadata saved=sourceDocumentRepository.findBoundedParsedText(documentId,projectId,originalSha,businessSha,PARSED_TEXT_MAX_CHARS)
+                .orElseThrow(()->new BizException(4104,"保存的解析文字版本已变化、不可用或超过阅读预算，请刷新来源或下载原件核对。"));
+        String text=saved.getTextContent();
+        if(text!=null&&text.length()>PARSED_TEXT_MAX_CHARS||!SourceContentDigests.field(text).equals(before.getTextContentSha256()))
+            throw new BizException(4104,"保存的解析文字与登记版本不一致，请刷新来源后核对。");
+        text=nvl(text);
+        int pageCount=saved.getPageCount()==null?0:saved.getPageCount();
+        if(pageCount>0&&page>pageCount)throw new BizException(4101,"所选页码超出保存的原件页数。");
+        String status="saved_text",authority="saved_parser_physical_page_markers",content="";
+        int textPartCount=0;
+        if("IDENTITY_PENDING".equals(before.getParseStatus()))status="detailed_parsing_not_started";
+        else if(!nvl(before.getFileName()).toLowerCase(Locale.ROOT).endsWith(".pdf")&&pageCount==0) {
+            authority="unpaginated_saved_text";
+            int from=0;
+            do {
+                int to=Math.min(text.length(),from+PARSED_TEXT_PAGE_MAX_CHARS);
+                if(to<text.length()) {
+                    int lineEnd=text.lastIndexOf('\n',to-1);
+                    if(lineEnd>=from+PARSED_TEXT_PAGE_MAX_CHARS/2)to=lineEnd+1;
+                    else if(Character.isHighSurrogate(text.charAt(to-1))&&Character.isLowSurrogate(text.charAt(to)))to--;
+                }
+                if(++textPartCount==page)content=text.substring(from,to);
+                from=to;
+            } while(from<text.length());
+            if(page>textPartCount)throw new BizException(4101,"所选文字段号超出保存文字的分段数。");
+        } else {
+            Matcher markers=Pattern.compile("(?m)^--- P([1-9][0-9]*) ---\\r?$").matcher(text);
+            int previous=0,start=-1,end=-1;
+            while(markers.find()) {
+                long physical;try{physical=Long.parseLong(markers.group(1));}catch(NumberFormatException invalid){throw new BizException(4104,"保存的解析分页标记不可核实，请下载原件核对。");}
+                if(physical<=previous||physical>100_000||pageCount>0&&physical>pageCount)
+                    throw new BizException(4104,"保存的解析分页标记存在歧义，请下载原件核对。");
+                if(start>=0&&end<0)end=markers.start();
+                if(physical==page)start=markers.end();previous=(int)physical;
+            }
+            if(start<0)status="no_saved_text";
+            else content=text.substring(start,end<0?text.length():end).replaceFirst("^\\r?\\n","").replaceFirst("\\n\\n$","");
+        }
+        if(content.length()>PARSED_TEXT_PAGE_MAX_CHARS)throw new BizException(4104,"本页保存文字超过阅读预算，请下载原件核对。");
+        SourceDocument after=parsedTextSource(projectId,documentId,originalSha,routingSha,businessSha);
+        if(!ProjectDocumentScope.sameScopeRevision(before,after)||!storageService.matchesStoredBytes(after.getStoragePath(),originalSha))
+            throw new BizException(4104,"阅读期间来源版本已变化，请刷新后重新核对。");
+        Map<String,Object> result=new LinkedHashMap<>();
+        result.put("documentId",String.valueOf(documentId));result.put("fileName",before.getFileName());result.put("parseStatus",before.getParseStatus());
+        result.put("originalSourceSha256",originalSha);result.put("routingSha256",routingSha);result.put("businessContentSha256",businessSha);
+        result.put("textContentSha256",before.getTextContentSha256());result.put("physicalPage",textPartCount>0?null:page);result.put("pageCount",pageCount);
+        if(textPartCount>0){result.put("textPart",page);result.put("textPartCount",textPartCount);}
+        result.put("status",status);result.put("pageNumberAuthority",authority);result.put("text",content);
+        result.put("semanticQuality","unknown");result.put("canonicalAdoption","not_performed");return result;
+    }
+    /** Reads bounded compact observations only; never loads a native archive or invokes a parser/provider. */
+    public Map<String,Object> parsedTables(String projectId,long documentId,String originalSha,String routingSha,String businessSha,int page){
+        projectService.require(projectId);
+        if(!validRoleHash(originalSha)||!validRoleHash(routingSha)||!validRoleHash(businessSha)||page<1||page>100_000)throw new BizException(4101,"Choose a valid saved source revision and physical page.");
+        SourceDocument before=parsedTextSource(projectId,documentId,originalSha,routingSha,businessSha);
+        assertSavedReaderOriginal(before,originalSha);
+        Map<String,Object> result=new LinkedHashMap<>();result.put("documentId",String.valueOf(documentId));result.put("physicalPage",page);result.put("originalSourceSha256",originalSha);result.put("routingSha256",routingSha);result.put("businessContentSha256",businessSha);result.put("tableStatus","unavailable");result.put("tables",Collections.emptyList());result.put("semanticQuality","unknown");result.put("canonicalAdoption","not_performed");
+        if(!"IDENTITY_PENDING".equals(before.getParseStatus())){
+            Optional<SourceDocumentRepository.ParsedReadingMetadata> saved=sourceDocumentRepository.findBoundedParsedReading(documentId,projectId,originalSha,businessSha,16*1024*1024);
+            if(saved.isPresent()){
+                SourceDocumentRepository.ParsedReadingMetadata row=saved.get();if(row.getPageCount()!=null&&row.getPageCount()>0&&page>row.getPageCount())throw new BizException(4101,"The selected page exceeds the registered original page count.");
+                if(SourceContentDigests.field(row.getStructuredContentJson()).equals(before.getStructuredContentSha256())&&SourceContentDigests.field(row.getParseCoverageJson()).equals(before.getParseCoverageSha256())){
+                    try{
+                        JsonNode coverage=JsonUtils.parse(row.getParseCoverageJson());
+                        if(coverage.has(NormalPdfReadingProjection.FIELD)){
+                            List<com.consense.document.DocumentBlock> blocks=JsonUtils.readList(row.getStructuredContentJson(),com.consense.document.DocumentBlock.class);
+                            JsonNode groups=NormalPdfReadingProjection.validate(blocks,originalSha,coverage);List<Map<String,Object>> tables=NormalPdfReadingProjection.tableReadings(groups,page);
+                            result.put("tables",tables);result.put("tableStatus",tables.isEmpty()?"no_saved_tables":"saved_tables");
+                        }else result.put("tableStatus","not_supported");
+                    }catch(RuntimeException invalid){result.put("tableStatus","unavailable");result.put("tables",Collections.emptyList());}
+                }
+            }
+        }
+        SourceDocument after=parsedTextSource(projectId,documentId,originalSha,routingSha,businessSha);
+        if(!ProjectDocumentScope.sameScopeRevision(before,after)||!storageService.matchesStoredBytes(after.getStoragePath(),originalSha))throw new BizException(4104,"The source revision changed while reading saved tables.");
+        return result;
+    }
+    private void assertSavedReaderOriginal(SourceDocument source,String originalSha){
+        if(!storageService.matchesStoredBytes(source.getStoragePath(),originalSha))throw new BizException(4104,"The registered original is unavailable or has changed.");
+        try{
+            Path original=Paths.get(source.getStoragePath()).toAbsolutePath().normalize().toRealPath();
+            if(!original.startsWith(Paths.get(props.getStorageRoot()).toAbsolutePath().normalize().toRealPath()))throw new BizException(4104,"The registered original is unavailable.");
+            try(java.io.InputStream input=Files.newInputStream(original)){assertReaderOriginalIdentity(source,input.readNBytes(64));}
+        }catch(java.io.IOException unavailable){throw new BizException(4104,"The registered original is unavailable.");}
+    }
+    private SourceDocument parsedTextSource(String projectId,long documentId,String originalSha,String routingSha,String businessSha) {
+        return savedSource(projectId,documentId,originalSha,routingSha,businessSha,false);
+    }
+    private SourceDocument readerOriginalSource(String projectId,long documentId,String originalSha,String routingSha,String businessSha) {
+        return savedSource(projectId,documentId,originalSha,routingSha,businessSha,true);
+    }
+    private SourceDocument registeredOriginalSource(String projectId,long documentId,String originalSha,String routingSha) {
+        FileDisplay display=fileDisplaySourceSet(projectId).stream().filter(row->Objects.equals(row.source.getId(),documentId)).findFirst()
+                .orElseThrow(()->new BizException(4104,"The registered original is no longer current."));
+        SourceDocument source=display.source;
+        String exclusion=ProjectDocumentScope.exclusionReason(source,"fullset","vetting");
+        if(source.getBusinessContentSha256()!=null||!originalSha.equals(source.getSourceSha256())
+                ||!routingSha.equals(display.routingSha)
+                ||exclusion!=null&&(!"source_identity_unresolved".equals(exclusion)
+                    ||!(roleConfirmationEligible(display)||identityConfirmationEligible(display))
+                    ||!unconfirmedOriginalIdentityAllowed(source)))
+            throw new BizException(4104,"The registered original identity or scope changed.");
+        return source;
+    }
+    private SourceDocument savedSource(String projectId,long documentId,String originalSha,String routingSha,String businessSha,boolean originalOnly) {
+        SourceDocument source=sourceDocumentRepository.findScopeMetadataById(documentId).map(SourceDocumentRepository::scopeSnapshot)
+                .filter(d->projectId.equals(d.getProjectId())&&ProjectDocumentScope.reviewCategory(d))
+                .orElseThrow(()->new BizException(4104,"当前项目的保存解析来源不可用，请刷新来源列表。"));
+        String exclusion=ProjectDocumentScope.exclusionReason(source,"fullset","vetting");
+        if(!Arrays.asList("PARSED","PARTIAL","IDENTITY_PENDING").contains(source.getParseStatus())
+                &&(!originalOnly||!Arrays.asList("PARSING","FAILED").contains(source.getParseStatus()))
+                ||exclusion!=null&&(!"source_identity_unresolved".equals(exclusion)||!unconfirmedOriginalIdentityAllowed(source))
+                ||!SourceContentDigests.stamped(source)||!originalSha.equals(source.getSourceSha256())
+                ||!routingSha.equals(CanonicalEvidenceService.routingHash(source))||!businessSha.equals(source.getBusinessContentSha256()))
+            throw new BizException(4104,"保存的解析来源范围、状态或可信版本不可用，请刷新来源或下载原件核对。");
+        assertRoleSourceCurrent(source);return source;
+    }
+    private void assertReaderOriginalIdentity(SourceDocument source,byte[] prefix) {
+        if(com.consense.document.OerSourceRouting.isDrawing(source.getDocumentScope(),source.getFileName(),prefix))
+            throw new BizException(4104,"图纸原件不属于当前审查来源范围。");
+        SourceDocument known=new SourceDocument();known.setSourceSha256(source.getSourceSha256());
+        known.setOerIdentityJson(JsonUtils.write(OerSourceMetadata.refreshedFixedIdentity(source,source.getSourceSha256())));
+        if(OerSourceMetadata.moduleExclusion(known,"vetting")!=null||OerSourceMetadata.moduleExclusion(known,"advisory")!=null)
+            throw new BizException(4104,"已知排除原件不属于当前审查来源范围。");
     }
     @lombok.Value public static class OriginalSource { Path path; String fileName; long size; String sourceRevision; byte[] bytes; String sha256; }
     public byte[] exportPdf(String projectId,String lang) { return exportObserved(projectId,lang,"pdf"); }
@@ -1099,8 +1677,9 @@ public class VettingService {
             };
             byte[] bytes;
             if("pdf".equals(format)||"docx".equals(format)) {
-                byte[] originalDocx=reportWriter.docx(c.project,c.findings,c.job,"en",probe.enabled()?probe:null,checklist);
-                byte[] docx=englishFiles.docx(originalDocx,sourceReference,frozenGuard);
+                Set<String> appAuthoredEnglish=new HashSet<>();
+                byte[] originalDocx=reportWriter.docx(c.project,c.findings,c.job,"en",probe.enabled()?probe:null,checklist,appAuthoredEnglish);
+                byte[] docx=englishFiles.docx(originalDocx,sourceReference,frozenGuard,appAuthoredEnglish);
                 if(docx==null||docx.length==0)throw new BizException(4100,"The English Word report was not completed.");
                 if("docx".equals(format))bytes=docx;
                 else {
@@ -1124,7 +1703,7 @@ public class VettingService {
                 try(VettingExportProbe.Timer timer=probe.measure("report_json_serialization","English presentation JSON serialization; the original frozen snapshot remains server-side")){bytes=JsonUtils.write(english).getBytes(StandardCharsets.UTF_8);}
             }
             frozenGuard.run();
-            ReportContext latest=reportContext(projectId);
+            ReportContext latest=reportContext(projectId,false);
             if(!Objects.equals(frozenId,latest.job.getReportSnapshotId()))throw new BizException(4104,"The source set or human review changed during English export. Generate the report again; original records are retained.");
             probe.returned(bytes);returnedNormally=true;return bytes;
         }catch(RuntimeException|Error e){operationFailure=e;probe.originalFailure("report_export_failure",e);throw e;}
@@ -1200,19 +1779,29 @@ public class VettingService {
         }catch(IOException failure){throw new BizException(4100,"Vetting PDF snapshot metadata could not be bound. The Word report remains available: "+failure.getMessage());}
     }
     private ReportContext reportContext(String projectId) {
+        return reportContext(projectId,true);
+    }
+    private ReportContext reportContext(String projectId,boolean persist) {
         projectService.require(projectId); synchronized(lock(projectId)) { return tx().execute(status -> {
-            Project p=projectService.require(projectId); VettingRun latest=runRepository.findFirstByProjectIdOrderByStartedAtDesc(projectId).orElseThrow(() -> new BizException(4103,"尚未完成审查，无法导出报告"));
-            VettingRun run=runRepository.lockById(latest.getId()).orElseThrow(()->new BizException(4103,"审查任务不存在"));
+            Project p=projectService.require(projectId);String latestId=sourceDigestPreparation==null
+                    ?runRepository.findFirstByProjectIdOrderByStartedAtDesc(projectId).map(VettingRun::getId).orElse(null)
+                    :runRepository.findLatestProgress(projectId,org.springframework.data.domain.PageRequest.of(0,1)).stream().findFirst().map(VettingRunRepository.ProgressView::getId).orElse(null);
+            if(latestId==null)throw new BizException(4103,"尚未完成审查，无法导出报告");
+            VettingRun run=runRepository.lockById(latestId).orElseThrow(()->new BizException(4103,"审查任务不存在"));
             if(!"COMPLETED".equals(run.getStatus())) throw new BizException(4103,"最近审查任务尚未成功完成，请等待或重新运行");
-            if(sourceSetStale(run)) throw new BizException(4104,"审查文件包或资料版本已变化，请重新审查后导出本次报告；原审查及人工核对记录仍保留。");
-            List<FindingVO> findings=activeFindings(projectId).stream().filter(f -> run.getId().equals(f.getRunId())).map(this::toVO).collect(Collectors.toList());
+            // shortcut: Frozen-report export checks current pins, not live CAS bytes; recheck bytes if exports consume live canonical content.
+            if(sourceSetStale(run,true)) throw new BizException(4104,"审查文件包或资料版本已变化，请重新审查后导出本次报告；原审查及人工核对记录仍保留。");
+            List<FindingVO> findings=activeFindings(projectId).stream().filter(f -> run.getId().equals(f.getRunId())).map(f->toVO(f,run.getSourceSnapshotSha256())).collect(Collectors.toList());
             assertFixedReferencesCurrent(run,findings);
-            return saveReportSnapshot(p,run,findings);
+            return saveReportSnapshot(p,run,findings,persist);
         }); }
     }
     private ReportContext saveReportSnapshot(Project project,VettingRun run,List<FindingVO> findings) {
+        return saveReportSnapshot(project,run,findings,true);
+    }
+    private ReportContext saveReportSnapshot(Project project,VettingRun run,List<FindingVO> findings,boolean persist) {
         findings=annotateSourceCandidateContainers(findings);
-        VettingJobVO job=jobVO(run);job.setReliablePackets(Collections.emptyList());job.setReportSnapshotId(null);
+        VettingJobVO job=runSummary(run);job.setCoverage(JsonUtils.read(run.getCoverageJson(),CoverageVO.class));job.setReportSnapshotId(null);
         if(job.getCoverage()!=null&&job.getCoverage().getPackageIdentityMirrorAudit()!=null)
             job.getCoverage().setPackageIdentityMirrorAudit(packageMirrorAudit(job.getCoverage().getPackageIdentityMirrorAudit().get("captured"),project));
         if(reportSnapshots!=null) {
@@ -1223,23 +1812,24 @@ public class VettingService {
             // Scalar reads use the database's actual timestamp precision after the caller's flush.
             job.setStartedAt(stored.getStartedAt());job.setFinishedAt(stored.getFinishedAt());
         }
-        List<VettingChecklistCatalog.Result> checklist=checklistService==null?Collections.emptyList():checklistService.resultsForRun(run.getProjectId(),run.getId());
+        List<VettingChecklistCatalog.Result> checklist=checklistService==null?Collections.emptyList():checklistService.resultsForRun(run);
         ReportSnapshotPayload current=new ReportSnapshotPayload();current.setProject(project);current.setJob(job);current.setFindings(findings);current.setChecklist(checklist);
         String payload=JsonUtils.write(current),id=VettingCorpus.hash("vetting-report-snapshot-v1\n"+payload);
-        if(reportSnapshots!=null) {
+        if(reportSnapshots!=null&&persist) {
             VettingReportSnapshot saved=reportSnapshots.findById(id).orElse(null);
             if(saved==null){saved=new VettingReportSnapshot();saved.setId(id);saved.setRunId(run.getId());saved.setPayloadJson(payload);saved.setCreatedAt(Instant.now());reportSnapshots.saveAndFlush(saved);}
             if(!id.equals(VettingCorpus.hash("vetting-report-snapshot-v1\n"+saved.getPayloadJson()))||!run.getId().equals(saved.getRunId()))throw new BizException(4103,"报告快照校验失败，不能导出");
-            current=JsonUtils.read(saved.getPayloadJson(),ReportSnapshotPayload.class);run.setReportSnapshotSha256(id);runRepository.saveAndFlush(run);
+            run.setReportSnapshotSha256(id);runRepository.saveAndFlush(run);
         }
         current.getJob().setReportSnapshotId(id);return new ReportContext(current.getProject(),current.getJob(),current.getFindings(),current.getChecklist());
     }
     public String pdfFileName(String id) { return reportFileName(id,"pdf"); }
-    public String reportFileName(String id,String format) { return com.consense.service.export.EnglishFileOutput.fileName("ConSense_Vetting_Report_"+nvl(projectService.require(id).getContractNo()).replaceAll("[\\\\/:*?\"<>|]","_")+"."+format,"ConSense_Vetting_Report."+format); }
+    public String reportFileName(String id,String format) { projectService.require(id);return "ConSense_Vetting_Report."+format; }
     private static final class ReportContext { final Project project; final VettingJobVO job; final List<FindingVO> findings;final List<VettingChecklistCatalog.Result> checklist; ReportContext(Project p,VettingJobVO j,List<FindingVO> f,List<VettingChecklistCatalog.Result> c){project=p;job=j;findings=f;checklist=c;} }
     @lombok.Data @lombok.NoArgsConstructor
     public static class ReportSnapshotPayload {private Project project;private VettingJobVO job;private List<FindingVO> findings;private List<VettingChecklistCatalog.Result> checklist;}
-    private VettingJobVO jobVO(VettingRun r) { VettingJobVO job=new VettingJobVO(r.getId(),r.getStatus(),r.getPhase(),r.getCompletedUnits(),r.getTotalUnits(),r.getMessage(),r.getStartedAt(),r.getFinishedAt(),JsonUtils.read(r.getResultJson(),RunResultVO.class),r.getError(),JsonUtils.read(r.getCoverageJson(),CoverageVO.class));job.setModelIdentity(JsonUtils.read(r.getModelIdentityJson(),com.consense.ai.ModelIdentity.class));job.setSourceSnapshotSha256(r.getSourceSnapshotSha256());job.setSourceSetStale(sourceSetStale(r));job.setRecoveryStatus(r.getRecoveryStatus());job.setReportSnapshotId(r.getReportSnapshotSha256());if(checkpoints!=null)job.setReliablePackets(checkpoints.reliable(r.getId()));return job; }
+    private VettingJobVO jobVO(VettingRun r) {VettingJobVO job=runSummary(r);job.setCoverage(JsonUtils.read(r.getCoverageJson(),CoverageVO.class));job.setSourceSetStale(sourceSetStale(r));if(checkpoints!=null)job.setReliablePackets(checkpoints.reliable(r.getId()));return job;}
+    private VettingJobVO runSummary(VettingRun r) {VettingJobVO job=new VettingJobVO(r.getId(),r.getStatus(),r.getPhase(),r.getCompletedUnits(),r.getTotalUnits(),r.getMessage(),r.getStartedAt(),r.getFinishedAt(),JsonUtils.read(r.getResultJson(),RunResultVO.class),r.getError(),null);job.setModelIdentity(JsonUtils.read(r.getModelIdentityJson(),com.consense.ai.ModelIdentity.class));job.setSourceSnapshotSha256(r.getSourceSnapshotSha256());job.setRecoveryStatus(r.getRecoveryStatus());job.setReportSnapshotId(r.getReportSnapshotSha256());return job;}
     private static String sourceSetHash(List<SourceDocument> documents) {
         List<String> records = documents.stream().map(d -> {List<Object> identity=new ArrayList<>(Arrays.asList(d.getId(),d.getFileName(),d.getFileKey(),
                 VettingCorpus.sourceRole(d),d.getDocumentScope(),d.getParseStatus(),VettingCorpus.sourceHash(d),
@@ -1248,18 +1838,66 @@ public class VettingService {
                 .sorted().collect(Collectors.toList());
         return VettingCorpus.hash("competition-review-package-v2\n"+JsonUtils.write(records));
     }
+    private static boolean compactSources(List<SourceDocument> documents){return documents!=null&&!documents.isEmpty()
+            &&documents.stream().allMatch(d->SourceContentDigests.stamped(d)&&d.getTextContent()==null&&d.getStructuredContentJson()==null
+            &&d.getParseCoverageJson()==null&&d.getNormalCandidateJson()==null);}
+    private static String compactSourceSetHash(List<SourceDocument> documents){String stamp=sourceStampHash(documents);
+        return stamp==null?null:VettingCorpus.hash("competition-review-package-v3-content-stamps\n"+stamp);}
+    private static boolean sourceSnapshotMatches(String recorded,List<SourceDocument> documents){
+        return SourceContentDigests.valid(recorded)&&(Objects.equals(recorded,compactSourceSetHash(documents))||!compactSources(documents)&&Objects.equals(recorded,sourceSetHash(documents)));}
+    private void freezePreparedSources(VettingRun dispatched,VettingRun captured,CoverageVO coverage,List<SourceDocument> snapshot,OerBusinessEvidence.Session session){
+        assertMaterialSourcesCurrent(captured.getProjectId(),snapshot,false);String prepared=compactSourceSetHash(snapshot),prior=captured.getSourceSnapshotSha256();
+        if(coverage.getCanonicalCorpusIdentitySha256()!=null&&(!Objects.equals(prior,prepared)
+                ||!Objects.equals(coverage.getCanonicalCorpusIdentitySha256(),session.identitySha256())))
+            throw new BizException(4104,"The prepared source scope differs from the recovered frozen run.");
+        coverage.setSourceStampSha256(sourceStampHash(snapshot));coverage.setCanonicalSourceDocumentIds(session.documentIds);
+        coverage.setCanonicalCorpusIdentitySha256(session.identitySha256());
+        coverage.setPackageIdentityReview(freezePackageIdentity(coverage.getPackageIdentityReview().get("authority"),prepared));
+        String raw=JsonUtils.write(coverage);
+        tx().execute(status->{VettingRun run=ownedRun(captured.getId());
+            if(!ACTIVE_STATES.contains(run.getStatus())||!Objects.equals(prior,run.getSourceSnapshotSha256()))throw new BizException(4104,"The queued review identity changed during preparation.");
+            run.setSourceSnapshotSha256(prepared);run.setCoverageJson(raw);run.setPhase("prepared");runRepository.saveAndFlush(run);return null;});
+        for(VettingRun run:Arrays.asList(captured,dispatched)){run.setSourceSnapshotSha256(prepared);run.setCoverageJson(raw);run.setPhase("prepared");}
+    }
+    static String sourceStampHash(List<SourceDocument> documents) {
+        if(documents==null||!documents.stream().allMatch(SourceContentDigests::stamped))return null;
+        List<String> records=documents.stream().map(d->JsonUtils.write(Arrays.asList(d.getId(),d.getProjectId(),d.getCategory(),
+                d.getFileName(),d.getFileKey(),d.getReviewRole(),d.getDocumentScope(),d.getParseStatus(),
+                d.getOerIdentityJson(),d.getSourceSha256(),d.getStoragePath(),d.getBusinessContentSha256())))
+                .sorted().collect(Collectors.toList());
+        return VettingCorpus.hash("vetting-selected-source-stamps-v1\n"+JsonUtils.write(records));
+    }
     private static String coverageContentHash(SourceDocument d){if(d.getCalculatedCoverageHash()==null)d.setCalculatedCoverageHash(VettingCorpus.hash(nvl(d.getParseCoverageJson())));return d.getCalculatedCoverageHash();}
     private static String normalCandidateContentHash(SourceDocument d){if(d.getCalculatedNormalCandidateHash()==null)d.setCalculatedNormalCandidateHash(VettingCorpus.hash(nvl(d.getNormalCandidateJson())));return d.getCalculatedNormalCandidateHash();}
-    private boolean sourceSetStale(VettingRun run) {
-        List<SourceDocument> current=canonicalEnabled()?freshSourceSet(run.getProjectId()):sourceSet(run.getProjectId());
-        if(!originalSourcesCurrent(current))return true;
+    private boolean sourceSetStale(VettingRun run) {return sourceSetStale(run,false);}
+    private boolean sourceSetStale(VettingRun run,boolean display) {
+        return sourceSetStale(run,display,true);
+    }
+    private boolean sourceSetStale(VettingRun run,boolean display,boolean verifyOriginal) {
         CoverageVO recorded=JsonUtils.read(run.getCoverageJson(),CoverageVO.class);
+        boolean compact=recorded!=null&&!JsonUtils.isBlankText(recorded.getSourceStampSha256());
+        List<SourceDocument> current=compact?freshSourceStamps(run.getProjectId()):canonicalEnabled()?freshSourceSet(run.getProjectId()):sourceSet(run.getProjectId());
+        if(verifyOriginal&&!originalSourcesCurrent(current))return true;
+        if(compact&&!Objects.equals(recorded.getSourceStampSha256(),sourceStampHash(current)))return true;
         if(!packageIdentityCurrent(run,recorded))return true;
+        boolean compactIdentity=compact&&Objects.equals(run.getSourceSnapshotSha256(),compactSourceSetHash(current));
         if(!JsonUtils.isBlankText(run.getSourceSnapshotSha256())){
-            if(!run.getSourceSnapshotSha256().equals(sourceSetHash(current)))return true;
+            if(compact&&!compactIdentity){
+                List<SourceDocument> legacy=canonicalEnabled()?freshSourceSet(run.getProjectId()):sourceSet(run.getProjectId());
+                if(!Objects.equals(run.getSourceSnapshotSha256(),sourceSetHash(legacy)))return true;
+            }else if(!compact&&!run.getSourceSnapshotSha256().equals(sourceSetHash(current)))return true;
             if(recorded!=null&&recorded.getCanonicalCorpusIdentitySha256()!=null){
                 if(!canonicalEnabled())return true;
-                try{return !recorded.getCanonicalCorpusIdentitySha256().equals(oer.currentIdentity(run.getProjectId(),"vetting",current));}
+                List<SourceDocument> canonicalCurrent=current;
+                List<Long> admittedIds=recorded.getCanonicalSourceDocumentIds();
+                if(admittedIds!=null){
+                    Set<Long> ids=new LinkedHashSet<>(admittedIds);
+                    canonicalCurrent=current.stream().filter(d->ids.contains(d.getId())).collect(Collectors.toList());
+                    if(ids.size()!=admittedIds.size()||canonicalCurrent.size()!=ids.size())return true;
+                }
+                try{return !recorded.getCanonicalCorpusIdentitySha256().equals(compactIdentity||display&&compact
+                        ?oer.currentDisplayIdentity(run.getProjectId(),"vetting",canonicalCurrent)
+                        :oer.currentIdentity(run.getProjectId(),"vetting",canonicalCurrent));}
                 catch(RuntimeException stale){return true;}
             }return false;
         }
@@ -1268,29 +1906,37 @@ public class VettingService {
                 .map(DocumentCoverageVO::getDocumentId).collect(Collectors.toSet());
         return !recordedIds.equals(current.stream().map(d->String.valueOf(d.getId())).collect(Collectors.toSet()));
     }
-    private void assertRunSourcesCurrent(VettingRun run,List<SourceDocument> captured){List<SourceDocument> stamps=freshSourceStamps(run.getProjectId());
+    private void assertRunSourcesCurrent(VettingRun run,List<SourceDocument> captured){List<SourceDocument> stamps=currentSourceStamps(run.getProjectId(),captured);
         boolean stamped=stamps.stream().allMatch(com.consense.service.sources.SourceContentDigests::stamped);
         List<SourceDocument> current=stamped?stamps:freshSourceSet(run.getProjectId());
-        if(!Objects.equals(run.getSourceSnapshotSha256(),sourceSetHash(stamped?captured:current))||!originalSourcesCurrent(current))
+        if(!sourceSnapshotMatches(run.getSourceSnapshotSha256(),stamped?captured:current)||!compactSources(captured)&&!originalSourcesCurrent(current))
             throw new BizException(4104,"审查来源或原件字节已变化，不能保存旧来源包；已保存结果仍保留。");
         if(stamped)requireCurrentSourceStamps(captured,current);else VettingSourceMaterial.requireCurrentDocuments(captured,current);
         CoverageVO recorded=JsonUtils.read(run.getCoverageJson(),CoverageVO.class);
         assertPackageIdentityCurrent(run.getProjectId(),recorded==null?null:recorded.getPackageIdentityReview(),run.getSourceSnapshotSha256());}
-    private void assertMaterialSourcesCurrent(String projectId,List<SourceDocument> captured){List<SourceDocument> stamps=freshSourceStamps(projectId);
+    private void assertMaterialSourcesCurrent(String projectId,List<SourceDocument> captured){assertMaterialSourcesCurrent(projectId,captured,true);}
+    private void assertMaterialSourcesCurrent(String projectId,List<SourceDocument> captured,boolean verifyOriginal){List<SourceDocument> stamps=currentSourceStamps(projectId,captured);
         boolean stamped=stamps.stream().allMatch(com.consense.service.sources.SourceContentDigests::stamped);
         List<SourceDocument> current=stamped?stamps:freshSourceSet(projectId);
-        if(!originalSourcesCurrent(current))throw new BizException(4104,"审查原件字节已变化，不能提交或保存旧来源材料。");
+        if(verifyOriginal&&!originalSourcesCurrent(current))throw new BizException(4104,"审查原件字节已变化，不能提交或保存旧来源材料。");
         if(stamped)requireCurrentSourceStamps(captured,current);else VettingSourceMaterial.requireCurrentDocuments(captured,current);}
     private void requireCurrentSourceStamps(List<SourceDocument> captured,List<SourceDocument> current){
         Map<Long,SourceDocument> byId=new HashMap<>();for(SourceDocument source:current)if(byId.put(source.getId(),source)!=null)throw new BizException(4104,"Duplicate source revision");
         if(captured.size()!=byId.size())throw new BizException(4104,"Review source selection changed");
         for(SourceDocument before:captured){SourceDocument after=byId.remove(before.getId());
             if(after==null)throw new BizException(4104,"Review source selection changed");
-            com.consense.service.sources.SourceContentDigests.requireCurrent(before,after);}
+            if(compactSources(Collections.singletonList(before))){
+                if(!ProjectDocumentScope.sameScopeRevision(before,after)||!SourceContentDigests.stamped(after)
+                        ||!Objects.equals(before.getBusinessContentSha256(),after.getBusinessContentSha256()))throw new BizException(4104,"Review source content or authorization changed");
+            }else com.consense.service.sources.SourceContentDigests.requireCurrent(before,after);}
     }
     private boolean originalSourcesCurrent(List<SourceDocument> documents){
         return documents.stream().allMatch(document->JsonUtils.isBlankText(document.getSourceSha256())
                 ||storageService.matchesStoredBytes(document.getStoragePath(),document.getSourceSha256()));
+    }
+    private void requireOriginalFreshness(List<SourceDocument> captured,Map<Long,OriginalFileState> pins){
+        if(pins.isEmpty())return;
+        for(SourceDocument source:captured)currentSources.requireOriginalFreshness(source,pins.get(source.getId()));
     }
     private void assertFixedReferencesCurrent(VettingRun run,List<FindingVO> findings){
         List<com.fasterxml.jackson.databind.JsonNode> references=new ArrayList<>();
@@ -1302,7 +1948,10 @@ public class VettingService {
                 com.fasterxml.jackson.databind.JsonNode current=fixedBaseline.evidence(fixedBaseline.readOnlyHitById(saved.path("parentId").asText())).pointer();
                 for(String key:Arrays.asList("evidenceBackend","parentId","manifestSha256","baselineVersion","sourceFamily","sourceRole","originalSourceSha256","originalPageNos","pageNo"))
                     if(!Objects.equals(saved.get(key),current.get(key)))throw new IllegalStateException("fixed reference identity changed");
-            }catch(RuntimeException stale){throw new BizException(4104,"固定开发基线证据已变化或不可用，不能导出旧引用作为当前报告；快照仍保留。");}
+            }catch(RuntimeException stale){
+                log.warn("Fixed reference export verification failed for run {} and parent {}",run.getId(),saved.path("parentId").asText(),stale);
+                throw new BizException(4104,"固定开发基线证据已变化或不可用，不能导出旧引用作为当前报告；快照仍保留。",null,stale);
+            }
         }
     }
     private List<VettingFinding> activeFindings(String id) { return findingRepository.findByProjectIdOrderByCodeAsc(id).stream().filter(f -> !Boolean.FALSE.equals(f.getActive())).collect(Collectors.toList()); }
@@ -1353,9 +2002,16 @@ public class VettingService {
     }
     private List<FindingEvidence> readEvidence(VettingFinding f) { try{return JsonUtils.readList(f.getEvidenceJson(),FindingEvidence.class);}catch(Exception e){log.warn("发现 {} 证据快照不可读",f.getCode());return Collections.emptyList();} }
     private FindingVO toVO(VettingFinding f) {
-        List<FindingEvidence> e=readEvidence(f); long located=e.stream().filter(FindingEvidence::isLocated).count(); String v=e.isEmpty()||located==0?"unverified":located==e.size()?"verified":"partial";
-        return new FindingVO(f.getCode(),JsonUtils.isBlankText(f.getTypes())?Collections.emptyList():Arrays.asList(f.getTypes().split(",")),f.getGroupKey(),f.getScope(),f.getSeverity(),f.getStatus(),LocalizedText.of(f.getTitleZhHans(),f.getTitleZhHant(),f.getTitleEn()),LocalizedText.of(f.getBodyZhHans(),f.getBodyZhHant(),f.getBodyEn()),LocalizedText.of(f.getImpactZhHans(),f.getImpactZhHant(),f.getImpactEn()),LocalizedText.of(f.getSuggestionZhHans(),f.getSuggestionZhHant(),f.getSuggestionEn()),f.getPatternText(),f.getRefs(),f.getLocation(),f.getExpected(),"verified".equals(v)?f.getEvidenceId():EVIDENCE_UNVERIFIED,f.getFileKey(),f.getPageNo(),f.getBucketKey(),f.getFingerprint(),f.getRunId(),f.getSource(),v,e,f.getReviewRemarks(),f.getActionTaken(),f.getAddendumRequired(),f.getReviewUpdatedAt(),generatedRevision(f),f.getRunId()==null?null:runRepository.findById(f.getRunId()).map(VettingRun::getSourceSnapshotSha256).orElse(null),JsonUtils.isBlankText(f.getBusinessDetailsJson())?null:JsonUtils.read(f.getBusinessDetailsJson(),BusinessDetailsVO.class));
+        String source=f.getRunId()==null?null:runRepository.findProgress(f.getProjectId(),f.getRunId()).map(VettingRunRepository.ProgressView::getSourceSnapshotSha256).orElse(null);
+        return toVO(f,source);
     }
+    private FindingVO toVO(VettingFinding f,String sourceSnapshot) {
+        List<FindingEvidence> e=readEvidence(f); long located=e.stream().filter(FindingEvidence::isLocated).count(); String v=e.isEmpty()||located==0?"unverified":located==e.size()?"verified":"partial";
+        return new FindingVO(f.getCode(),JsonUtils.isBlankText(f.getTypes())?Collections.emptyList():Arrays.asList(f.getTypes().split(",")),f.getGroupKey(),f.getScope(),f.getSeverity(),f.getStatus(),LocalizedText.of(f.getTitleZhHans(),f.getTitleZhHant(),f.getTitleEn()),LocalizedText.of(f.getBodyZhHans(),f.getBodyZhHant(),f.getBodyEn()),LocalizedText.of(f.getImpactZhHans(),f.getImpactZhHant(),f.getImpactEn()),LocalizedText.of(f.getSuggestionZhHans(),f.getSuggestionZhHant(),f.getSuggestionEn()),f.getPatternText(),f.getRefs(),f.getLocation(),f.getExpected(),"verified".equals(v)?f.getEvidenceId():EVIDENCE_UNVERIFIED,f.getFileKey(),f.getPageNo(),f.getBucketKey(),f.getFingerprint(),f.getRunId(),f.getSource(),v,e,f.getReviewRemarks(),f.getActionTaken(),f.getAddendumRequired(),f.getReviewUpdatedAt(),generatedRevision(f),sourceSnapshot,JsonUtils.isBlankText(f.getBusinessDetailsJson())?null:JsonUtils.read(f.getBusinessDetailsJson(),BusinessDetailsVO.class));
+    }
+    private boolean isLatestRun(String project,String id){return sourceDigestPreparation==null
+            ?runRepository.findFirstByProjectIdOrderByStartedAtDesc(project).map(run->id.equals(run.getId())).orElse(false)
+            :runRepository.findLatestProgress(project,org.springframework.data.domain.PageRequest.of(0,1)).stream().findFirst().map(run->id.equals(run.getId())).orElse(false);}
     private MetricsVO metricsOf(List<VettingFinding> f){return new MetricsVO(count(f,"reference"),count(f,"conflict"),count(f,"language"),count(f,"risk"),count(f,"gap"),count(f,"substantive"),count(f,"requirement"),f.size(),(int)f.stream().filter(v -> "inter".equals(v.getScope())).count());}
     private int count(List<VettingFinding> f,String group){return (int)f.stream().filter(v -> group.equals(v.getGroupKey())).count();}
     private String searchable(VettingFinding f){return Stream.of(f.getCode(),f.getTitleZhHans(),f.getTitleEn(),f.getBodyZhHans(),f.getBodyEn(),f.getRefs(),f.getLocation(),f.getPatternText(),f.getEvidenceJson()).filter(Objects::nonNull).collect(Collectors.joining(" "));}
@@ -1367,6 +2023,14 @@ public class VettingService {
         read.setPropagationBehavior(org.springframework.transaction.TransactionDefinition.PROPAGATION_REQUIRES_NEW);
         read.setIsolationLevel(org.springframework.transaction.TransactionDefinition.ISOLATION_READ_COMMITTED);read.setReadOnly(true);
         return read.execute(status->sourceSet(projectId));}
+    private List<SourceDocument> currentSourceStamps(String projectId,List<SourceDocument> captured){
+        List<SourceDocument> stamps=freshSourceStamps(projectId);
+        if(sourceDigestPreparation==null||stamps.stream().allMatch(SourceContentDigests::stamped))return stamps;
+        Map<Long,SourceDocument> byId=new HashMap<>();for(SourceDocument row:stamps)byId.put(row.getId(),row);
+        for(SourceDocument source:captured){SourceDocument current=byId.get(source.getId());
+            if(current!=null&&!SourceContentDigests.stamped(current))sourceDigestPreparation.prepareSourceStamp(source,"vetting");}
+        return freshSourceStamps(projectId);
+    }
     private List<SourceDocument> freshSourceStamps(String projectId){TransactionTemplate read=tx();
         read.setPropagationBehavior(org.springframework.transaction.TransactionDefinition.PROPAGATION_REQUIRES_NEW);
         read.setIsolationLevel(org.springframework.transaction.TransactionDefinition.ISOLATION_READ_COMMITTED);read.setReadOnly(true);

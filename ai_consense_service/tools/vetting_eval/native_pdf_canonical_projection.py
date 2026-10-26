@@ -18,7 +18,7 @@ from artifact_store import ArtifactStore
 from canonical_projection import (CanonicalProjectionError, MODULES, ROLES, _bytes,
                                   _fail, _fields, _hash, _name, _pages, _quality, _sha)
 from competition_scope import EXCLUDED_CLASSES, SL_CLASSES, SOURCE_PURPOSES, load_policy_bytes
-from native_pdf_observation import validate_native_pdf_bundle
+from native_pdf_observation import validate_native_pdf_bundle, reader_glyph_text, FONT_TEXT_VERSION
 from native_pdf_table_projection import (project_page_assets, project_table_groups, table_region_ids,
                                         VERSION as TABLE_VERSION)
 from parser_capture import rebuild_independent_capture_batch, rebuild_file_capture
@@ -36,7 +36,17 @@ VERSION = 'source-reviewed-native-pdf-prose-and-visual-layout-v2'
 TABLE_PROJECTION_VERSION = 'source-reviewed-native-pdf-prose-tables-and-page-assets-v3'
 SL_PROJECTION_VERSION = 'source-reviewed-native-pdf-sl-whole-unit-v1'
 SL_TABLE_PROJECTION_VERSION = 'source-reviewed-native-pdf-sl-whole-unit-tables-and-assets-v1'
-TABLE_PROJECTION_VERSIONS = {TABLE_PROJECTION_VERSION, SL_TABLE_PROJECTION_VERSION}
+FONT_PROJECTION_VERSION = 'source-reviewed-native-pdf-prose-and-visual-layout-font-text-v1'
+FONT_TABLE_PROJECTION_VERSION = 'source-reviewed-native-pdf-prose-tables-and-page-assets-font-text-v1'
+SL_FONT_PROJECTION_VERSION = 'source-reviewed-native-pdf-sl-whole-unit-font-text-v1'
+SL_FONT_TABLE_PROJECTION_VERSION = 'source-reviewed-native-pdf-sl-whole-unit-tables-and-assets-font-text-v1'
+FONT_PROJECTION_VERSIONS = {FONT_PROJECTION_VERSION, FONT_TABLE_PROJECTION_VERSION,
+                            SL_FONT_PROJECTION_VERSION, SL_FONT_TABLE_PROJECTION_VERSION}
+SL_PROJECTION_VERSIONS = {SL_PROJECTION_VERSION, SL_TABLE_PROJECTION_VERSION,
+                          SL_FONT_PROJECTION_VERSION, SL_FONT_TABLE_PROJECTION_VERSION}
+TABLE_PROJECTION_VERSIONS = {TABLE_PROJECTION_VERSION, SL_TABLE_PROJECTION_VERSION,
+                             FONT_TABLE_PROJECTION_VERSION, SL_FONT_TABLE_PROJECTION_VERSION}
+FONT_TEXT_CHANNEL = 'native_glyphs_with_verified_font_decoding_and_explicit_source_reviewed_separators'
 LEGACY_PROJECTION_DEPENDENCIES = ('artifact_store.py', 'canonical_projection.py', 'competition_scope.py',
                           'native_pdf_observation.py', 'parser_capture.py', 'source_reference.py',
                           'structured_parser_evidence.py', 'token_windows.py')
@@ -46,6 +56,8 @@ VERSION_DEPENDENCIES = {LEGACY_VERSION: LEGACY_PROJECTION_DEPENDENCIES, VERSION:
                        TABLE_PROJECTION_VERSION: (*PROJECTION_DEPENDENCIES, 'native_pdf_table_projection.py'),
                        SL_PROJECTION_VERSION: PROJECTION_DEPENDENCIES,
                        SL_TABLE_PROJECTION_VERSION: (*PROJECTION_DEPENDENCIES, 'native_pdf_table_projection.py')}
+for _version in FONT_PROJECTION_VERSIONS:
+    VERSION_DEPENDENCIES[_version] = (*PROJECTION_DEPENDENCIES, 'native_pdf_table_projection.py') if _version in TABLE_PROJECTION_VERSIONS else PROJECTION_DEPENDENCIES
 STORAGE_SHAPE = 'full-native-pdf-joint-internal-v1'
 RELATIONS = {'parent', 'continuation', 'qualifier', 'caption', 'header', 'sidebar', 'margin_note'}
 
@@ -446,7 +458,7 @@ def _layout(row, region, reference_page, dual, *, allow_table=False, native_fram
     return result
 
 
-def _native_text(row, glyphs):
+def _native_text(row, glyphs, *, font_text=False):
     order = _ids(row.get('glyphIdsInReadingOrder'), 'reviewed_glyph_reading_order_required', nonempty=True)
     _fail(set(order) == set(row['capturedGlyphIds']), 'reviewed_glyph_membership_incomplete')
     separators = row.get('separators')
@@ -463,12 +475,17 @@ def _native_text(row, glyphs):
     text, spans, end = [], [], 0
     for index, gid in enumerate(order):
         glyph, raw_span, pointer = glyphs[gid]
-        literal = '' if glyph['unicode'] is None else glyph['unicode']
+        literal = reader_glyph_text(glyph, font_text=font_text)
         length = utf16_length(literal)
         spans.append({'kind': 'native_glyph', 'glyphId': gid, 'rawObservationPointer': pointer,
              'originalUtf16Span': copy.deepcopy(raw_span), 'startOffset': end, 'endOffset': end + length,
              'unicodeStatus': 'null_unicode_zero_span_unknown' if glyph['unicode'] is None else 'literal_observed',
              'effectiveVisibilityStatus': glyph['effectiveVisibilityStatus'], 'operatorVisibilityStatus': glyph['visibilityStatus']})
+        if font_text and glyph.get('textResolution') is not None:
+            spans[-1].update(rawUnicode=glyph['unicode'], textResolution=copy.deepcopy(glyph['textResolution']),
+                             derivedText=literal)
+            if glyph['textResolution']['resolutionStatus'] == 'resolved_embedded_symbol_selector':
+                spans[-1]['unicodeStatus'] = 'resolved_original_embedded_symbol_font'
         text.append(literal); end += length
         pair = (gid, order[index + 1]) if index + 1 < len(order) else None
         if pair in by_pair:
@@ -479,7 +496,7 @@ def _native_text(row, glyphs):
     return ''.join(text), spans
 
 
-def _regions(manifest, native, dual, reference, required, *, raster_geometry=None):
+def _regions(manifest, native, dual, reference, required, *, raster_geometry=None, font_text=False):
     review = manifest.get('regionReview')
     _fields(review, {'schema', 'status', 'nativeBundleSha256', 'referenceSha256', 'regions', 'unadoptedGlyphs'}, 'illegal_native_pdf_region_review')
     _fail(review.get('schema') == REVIEW_SCHEMA and review.get('status') == 'source_reviewed_declared'
@@ -515,7 +532,7 @@ def _regions(manifest, native, dual, reference, required, *, raster_geometry=Non
               'source_review_attributes_required')
         geometry = (raster_geometry or {}).get(anchor['pageId'])
         _native_region_geometry(ids, glyphs, page, region, ref_pages[anchor['pageId']], raster_geometry=geometry)
-        text, spans = _native_text(row, glyphs)
+        text, spans = _native_text(row, glyphs, font_text=font_text)
         layout = _layout(row, region, ref_pages[anchor['pageId']], dual, allow_table=rid in table_regions,
                          native_frame=page['frame'], raster_geometry=geometry)
         used.update(ids)
@@ -529,6 +546,7 @@ def _regions(manifest, native, dual, reference, required, *, raster_geometry=Non
              'sourceReviewAnchor': copy.deepcopy(anchor), 'capturedGlyphIds': copy.deepcopy(ids), 'nativeTextSpans': spans,
              'visualLayoutParts': layout, 'geometryStatus': 'source_reviewed_region_and_declared_visual_transform_not_exact_glyph',
              'nativeEffectiveVisibility': 'unknown_not_raster_verified', 'apTextAdoption': 'not_supported'}
+        if font_text: result[rid]['textChannel'] = FONT_TEXT_CHANNEL
     unadopted = review.get('unadoptedGlyphs'); _fail(isinstance(unadopted, list), 'explicit_unadopted_glyph_inventory_required')
     _fail(len(unadopted) == len(observed)
           and all(isinstance(r, dict) and type(r.get('physicalPageNo')) is int for r in unadopted)
@@ -611,29 +629,36 @@ def _assemble(native, dual, manifest, descriptors, store, *, replay_identity=Non
     native_validation = validate_native_pdf_bundle(native, artifact_store=store)
     pages, quality = _scope(manifest, native)
     sl_binding = _sl_technical_unit(manifest, native, store)
+    declared_decoder = native['observation']['observerIdentity']['config'].get('fontTextDecoding') == FONT_TEXT_VERSION
+    font_text = declared_decoder
+    if replay_identity is not None:
+        _fail(isinstance(replay_identity, dict) and replay_identity.get('projectionVersion') in VERSION_DEPENDENCIES,
+              'unsupported_native_pdf_retained_producer_identity')
+        font_text = replay_identity['projectionVersion'] in FONT_PROJECTION_VERSIONS
+        _fail(not font_text or declared_decoder, 'font_text_recipe_requires_declared_native_decoder')
+    tables_declared = bool(manifest['tableGroups'] or manifest['assets'])
+    if sl_binding is not None:
+        version = ((SL_FONT_TABLE_PROJECTION_VERSION if tables_declared else SL_FONT_PROJECTION_VERSION) if font_text
+                   else (SL_TABLE_PROJECTION_VERSION if tables_declared else SL_PROJECTION_VERSION))
+    else:
+        version = ((FONT_TABLE_PROJECTION_VERSION if tables_declared else FONT_PROJECTION_VERSION) if font_text
+                   else (TABLE_PROJECTION_VERSION if tables_declared else VERSION))
+    if replay_identity is not None:
+        retained_version = replay_identity['projectionVersion']
+        _fail(retained_version == version or retained_version == LEGACY_VERSION and version == VERSION,
+              'native_pdf_recipe_identity_mismatch')
+        version = retained_version
     _fail(manifest.get('dualBundleSha256') == dual['bundleSha256'], 'stale_native_pdf_visual_adoption')
     dual_validation = _dual(dual, native, pages, store)
     reference, reference_validation = _reference(manifest, native, pages, store)
     parts = _regions(manifest, native, dual, reference, pages,
-                     raster_geometry=reference_validation.get('dpiCeilRasterGeometry'))
-    table_groups = project_table_groups(manifest, parts, reference, native)
+                     raster_geometry=reference_validation.get('dpiCeilRasterGeometry'), font_text=font_text)
+    table_groups = project_table_groups(manifest, parts, reference, native, font_text=font_text)
     assets = project_page_assets(manifest, reference, store)
     units, relations = _units(manifest, parts, reference, table_groups)
     _sl_whole_unit(sl_binding, manifest, units)
-    if sl_binding is not None:
-        version = SL_TABLE_PROJECTION_VERSION if table_groups or assets else SL_PROJECTION_VERSION
-    else:
-        version = TABLE_PROJECTION_VERSION if table_groups or assets else VERSION
-    if replay_identity is not None:
-        _fail(isinstance(replay_identity, dict)
-              and replay_identity.get('projectionVersion') in VERSION_DEPENDENCIES,
-              'unsupported_native_pdf_retained_producer_identity')
-        version = replay_identity['projectionVersion']
-        _fail((sl_binding is not None) == (version in {SL_PROJECTION_VERSION, SL_TABLE_PROJECTION_VERSION})
-              and (sl_binding is None or version == (SL_TABLE_PROJECTION_VERSION if table_groups or assets else SL_PROJECTION_VERSION)),
-              'sl_native_recipe_identity_mismatch')
-        _fail(not (table_groups or assets) or version in TABLE_PROJECTION_VERSIONS,
-              'native_pdf_table_adoption_requires_table_recipe_version')
+    _fail(not (table_groups or assets) or version in TABLE_PROJECTION_VERSIONS,
+          'native_pdf_table_adoption_requires_table_recipe_version')
     dependency_names = VERSION_DEPENDENCIES[version]
     identity = {'projectionVersion': version,
         'nativeBundleSha256': native['bundleSha256'], 'dualBundleSha256': dual['bundleSha256'],

@@ -189,6 +189,25 @@ public class AiGateway {
     public <T> List<T> completeStructuredJsonList(String systemPrompt, String userPrompt,
                                                  Class<T> elementType, JsonNode schema,List<String> rawOut,
                                                  Map<String,Long> phaseWallNanos) {
+        return completeStructuredJsonList(systemPrompt,userPrompt,elementType,schema,rawOut,phaseWallNanos,false);
+    }
+
+    /** Qwen JSON mode requires an object; the records value still obeys the original array schema. */
+    public <T> List<T> completeStructuredJsonRecords(String systemPrompt, String userPrompt,
+                                                    Class<T> elementType, JsonNode schema,List<String> rawOut,
+                                                    Map<String,Long> phaseWallNanos) {
+        return completeStructuredJsonList(systemPrompt,userPrompt,elementType,schema,rawOut,phaseWallNanos,true);
+    }
+
+    public static String structuredSystemPrompt(String systemPrompt,JsonNode schema,boolean recordsObject) {
+        return systemPrompt+(recordsObject
+                ? "\nReturn only one JSON object with exactly one key, \"records\". Its value must be an array conforming to this schema:\n"
+                : "\nReturn only a JSON array conforming to this schema:\n")+JsonUtils.write(schema);
+    }
+
+    private <T> List<T> completeStructuredJsonList(String systemPrompt, String userPrompt,
+                                                   Class<T> elementType, JsonNode schema,List<String> rawOut,
+                                                   Map<String,Long> phaseWallNanos,boolean recordsObject) {
         long started=System.nanoTime();
         final JsonNode suppliedSchema;
         final StructuredJsonValidator.Schema validatedSchema;
@@ -201,7 +220,7 @@ public class AiGateway {
         finally { recordTiming(phaseWallNanos,"availability_check",started); }
         String constrainedSystem;
         started=System.nanoTime();
-        try { constrainedSystem=systemPrompt + "\nReturn only a JSON array conforming to this schema:\n" + JsonUtils.write(suppliedSchema); }
+        try { constrainedSystem=structuredSystemPrompt(systemPrompt,suppliedSchema,recordsObject); }
         finally { recordTiming(phaseWallNanos,"schema_envelope_construction",started); }
         started=System.nanoTime();
         try { logPrompt("Structured model request", constrainedSystem, userPrompt); }
@@ -227,7 +246,8 @@ public class AiGateway {
         } finally { recordTiming(phaseWallNanos,"raw_content_capture_and_log",started); }
         // Invalid output is an incomplete topic. Never silently turn a malformed record into [].
         started=System.nanoTime();
-        try { return StructuredJsonValidator.decode(raw, elementType, validatedSchema); }
+        try { return recordsObject?StructuredJsonValidator.decodeRecords(raw,elementType,validatedSchema)
+                :StructuredJsonValidator.decode(raw, elementType, validatedSchema); }
         finally { recordTiming(phaseWallNanos,"parse_list",started); }
     }
 

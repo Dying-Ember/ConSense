@@ -23,6 +23,10 @@ public final class NativePdfCanonicalContract {
     public static final String INTERNAL_VERSION = "source-reviewed-native-pdf-prose-and-visual-layout-v1";
     public static final String INTERNAL_V2 = "source-reviewed-native-pdf-prose-and-visual-layout-v2";
     public static final String INTERNAL_V3 = "source-reviewed-native-pdf-prose-tables-and-page-assets-v3";
+    public static final String INTERNAL_FONT = "source-reviewed-native-pdf-prose-and-visual-layout-font-text-v1";
+    public static final String INTERNAL_FONT_TABLES = "source-reviewed-native-pdf-prose-tables-and-page-assets-font-text-v1";
+    public static final String FONT_TEXT_CHANNEL = "native_glyphs_with_verified_font_decoding_and_explicit_source_reviewed_separators";
+    private static final String RAW_TEXT_CHANNEL = "literal_native_glyphs_with_explicit_source_reviewed_separators";
     public static final String POSITION = "pdf_native_source_reviewed_region";
     public static final String GEOMETRY = "source_reviewed_region_and_declared_visual_transform_not_exact_glyph";
     public static final String BBOX = "source_reviewed_original_raster_normalized_xyxy";
@@ -206,7 +210,7 @@ public final class NativePdfCanonicalContract {
         JsonNode parts = chunk.path("parts"), spans = chunk.path("sourceSpans"); require(parts.isArray() && parts.size() > 0 && spans.isArray() && spans.size() == parts.size(), "PARTS");
         Set<String> blocks = new HashSet<>(), regions = new HashSet<>(); Set<Integer> physical = new TreeSet<>(); List<String> literal = new ArrayList<>(); JsonNode descriptor = null, internalSha = null; String sourceRevision = chunk.path("sourceRevisionSha256").asText();
         for (int index = 0; index < parts.size(); index++) {
-            JsonNode part = parts.get(index); part(part, sourceSha, sourceRevision); require(blocks.add(part.path("blockId").asText()) && regions.add(part.path("referenceRegionId").asText()), "PARTS");
+            JsonNode part = parts.get(index); part(part, sourceSha, sourceRevision, chunk.path("internalProjectionVersion").asText()); require(blocks.add(part.path("blockId").asText()) && regions.add(part.path("referenceRegionId").asText()), "PARTS");
             physical.add(part.path("physicalPageNo").asInt()); literal.add(part.path("text").asText());
             JsonNode ref = part.path("nativePdfRegionRef"); if (descriptor == null) { descriptor = ref.path("artifactDescriptor"); internalSha = ref.path("internalProjectionSha256"); }
             same(descriptor, ref.path("artifactDescriptor"), "REFERENCE"); same(internalSha, ref.path("internalProjectionSha256"), "REFERENCE");
@@ -246,10 +250,10 @@ public final class NativePdfCanonicalContract {
         }
     }
 
-    private static void part(JsonNode part, String source, String revision) {
+    private static void part(JsonNode part, String source, String revision, String internalVersion) {
         fields(part, set("blockId", "referenceRegionId", "physicalPageNo", "text", "startOffset", "endOffset", "anchor", "sourceSha256", "rawObservationSha256", "sourcePosition", "bbox", "bboxConvention", "sourceReviewAnchor", "visualLayoutParts", "geometryStatus", "nativeEffectiveVisibility", "apTextAdoption", "nativePdfRegionRef", "nativeGlyphMembershipRef", "nativeTextSpansRef", "textChannel", "offsetUnit"), "PARTS");
         require(part.path("blockId").asText().matches("native-pdf-region:[a-f0-9]{64}") && text(part.path("referenceRegionId")) && source.equals(part.path("sourceSha256").asText()) && positiveInt(part.path("physicalPageNo")) && part.path("text").isTextual() && nonnegativeInt(part.path("startOffset")) && part.path("startOffset").asInt() == 0 && nonnegativeInt(part.path("endOffset")) && part.path("endOffset").asInt() == part.path("text").asText().length(), "PARTS");
-        sha(part.path("rawObservationSha256")); require("UTF16".equals(part.path("offsetUnit").asText()) && "literal_native_glyphs_with_explicit_source_reviewed_separators".equals(part.path("textChannel").asText()) && "unknown_not_raster_verified".equals(part.path("nativeEffectiveVisibility").asText()) && "not_supported".equals(part.path("apTextAdoption").asText()) && "source_reviewed_region_and_declared_visual_transform_not_exact_glyph".equals(part.path("geometryStatus").asText()) && "source_reviewed_original_raster_normalized_xyxy".equals(part.path("bboxConvention").asText()), "UNKNOWNS");
+        sha(part.path("rawObservationSha256")); require("UTF16".equals(part.path("offsetUnit").asText()) && (fontTextInternal(internalVersion)?FONT_TEXT_CHANNEL:RAW_TEXT_CHANNEL).equals(part.path("textChannel").asText()) && "unknown_not_raster_verified".equals(part.path("nativeEffectiveVisibility").asText()) && "not_supported".equals(part.path("apTextAdoption").asText()) && "source_reviewed_region_and_declared_visual_transform_not_exact_glyph".equals(part.path("geometryStatus").asText()) && "source_reviewed_original_raster_normalized_xyxy".equals(part.path("bboxConvention").asText()), "UNKNOWNS");
         box(part.path("bbox"), 1, 1); int physical = part.path("physicalPageNo").asInt(); JsonNode position = part.path("sourcePosition"); fields(position, set("kind", "physicalPageNo", "sourceSha256", "sourceFrame"), "POSITION");
         require(POSITION.equals(position.path("kind").asText()) && source.equals(position.path("sourceSha256").asText()) && position.path("physicalPageNo").equals(part.path("physicalPageNo")), "POSITION"); frame(position.path("sourceFrame"));
         JsonNode anchor = part.path("sourceReviewAnchor"); require(anchor.isObject() && "pdf_physical_region".equals(anchor.path("kind").asText()) && source.equals(anchor.path("sourceSha256").asText()) && anchor.path("physicalPageNo").equals(part.path("physicalPageNo")) && text(anchor.path("pageId")), "POSITION"); sha(anchor.path("renditionSha256"));
@@ -330,6 +334,10 @@ public final class NativePdfCanonicalContract {
         JsonNode captures = value.path("nativeCaptureRefs"), observer = value.path("observerIdentity"); fields(captures, set("sourcePackage", "rawObservation", "observerSources", "appearanceArtifacts"), "CAPTURE");
         descriptor(captures.path("sourcePackage"), "exact_supplied_bytes"); descriptor(captures.path("rawObservation"), "exact_supplied_bytes"); same(source.path("sourceSha256"), captures.path("sourcePackage").path("sha256"), "CAPTURE"); same(source.path("byteCount"), captures.path("sourcePackage").path("byteCount"), "CAPTURE");
         require("pdfbox-native-observation-1".equals(observer.path("observerVersion").asText()) && "com.consense.document.OerNativePdfObservation".equals(observer.path("adapter").asText()), "CAPTURE"); sha(observer.path("configSha256"));
+        require(fontTextInternal(value.path("projectionIdentity").path("internalProjectionVersion").asText())
+                ? "embedded-adobe-symbol-pua-v1".equals(observer.path("config").path("fontTextDecoding").asText())
+                : !observer.path("config").has("fontTextDecoding")
+                    || "embedded-adobe-symbol-pua-v1".equals(observer.path("config").path("fontTextDecoding").asText()), "CAPTURE");
         JsonNode codes = observer.path("sourceCodeSha256"), sources = captures.path("observerSources"); require(codes.isObject() && sources.isObject() && names(codes).equals(OBSERVER_SOURCES) && names(sources).equals(OBSERVER_SOURCES), "CAPTURE");
         for (String name : OBSERVER_SOURCES) { descriptor(sources.path(name), "exact_supplied_bytes"); same(codes.path(name), sources.path(name).path("sha256"), "CAPTURE"); }
         require(captures.path("appearanceArtifacts").isArray(), "CAPTURE"); Set<String> ids = new HashSet<>(); for (JsonNode appearance : captures.path("appearanceArtifacts")) { fields(appearance, set("formId", "kind", "artifactDescriptor"), "CAPTURE"); require(text(appearance.path("formId")) && set("appearanceRawStreamBytesBase64", "appearanceDecodedStreamBytesBase64").contains(appearance.path("kind").asText()) && ids.add(appearance.path("formId").asText() + "\n" + appearance.path("kind").asText()), "CAPTURE"); descriptor(appearance.path("artifactDescriptor"), "exact_supplied_bytes"); }
@@ -363,8 +371,9 @@ public final class NativePdfCanonicalContract {
     private static void descriptor(JsonNode value, String scope) { fields(value, set("schema", "storage", "sha256", "byteCount", "relativePath", "identityScope"), "PROOF"); String hash = sha(value.path("sha256")); require("consense.artifact-descriptor.v1".equals(value.path("schema").asText()) && "content_addressed_disk".equals(value.path("storage").asText()) && nonnegativeLong(value.path("byteCount")) && ("sha256/" + hash.substring(0, 2) + "/" + hash + ".blob").equals(value.path("relativePath").asText()) && (scope == null ? set("exact_supplied_bytes", "canonical_json_object").contains(value.path("identityScope").asText()) : scope.equals(value.path("identityScope").asText())), "PROOF"); }
     // Known recipe/public pairings retain the original opaque producer identities.
     private static boolean knownInternal(String version){return INTERNAL_VERSION.equals(version)||selectedSourceInternal(version);}
-    private static boolean selectedSourceInternal(String version){return INTERNAL_V2.equals(version)||NativePdfSlScopeContract.PROSE.equals(version)||tableInternal(version);}
-    private static boolean tableInternal(String version){return INTERNAL_V3.equals(version)||NativePdfSlScopeContract.TABLES.equals(version);}
+    private static boolean selectedSourceInternal(String version){return INTERNAL_V2.equals(version)||INTERNAL_FONT.equals(version)||NativePdfSlScopeContract.PROSE.equals(version)||NativePdfSlScopeContract.FONT_PROSE.equals(version)||tableInternal(version);}
+    private static boolean tableInternal(String version){return INTERNAL_V3.equals(version)||INTERNAL_FONT_TABLES.equals(version)||NativePdfSlScopeContract.TABLES.equals(version)||NativePdfSlScopeContract.FONT_TABLES.equals(version);}
+    private static boolean fontTextInternal(String version){return INTERNAL_FONT.equals(version)||INTERNAL_FONT_TABLES.equals(version)||NativePdfSlScopeContract.FONT_PROSE.equals(version)||NativePdfSlScopeContract.FONT_TABLES.equals(version);}
     static String publicVersion(String internal){require(knownInternal(internal),"VERSION");return tableInternal(internal)?TABLE_VERSION:VERSION;}
 
     static void pageAssets(JsonNode assets,String source,Set<Integer> allowed,Set<String> images) {

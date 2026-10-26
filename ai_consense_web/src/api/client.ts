@@ -79,7 +79,7 @@ function toMessage(error: unknown): string {
   return error instanceof Error ? error.message : '未知错误'
 }
 
-type DownloadOptions = { jsonDocument?: (value: unknown) => boolean }
+type DownloadOptions = { jsonDocument?: (value: unknown) => boolean; timeout?: number }
 
 /** JSON files require an explicit document validator; business envelopes remain errors. */
 async function requireBinary(blob: Blob, options: DownloadOptions = {}): Promise<Blob> {
@@ -119,7 +119,7 @@ export const api = {
   /** 下载二进制（文稿 / 审查报告） */
   download: async (url: string, fallbackName: string, options: DownloadOptions = {}) => {
     try {
-      const response = await http.get(url, profileConfig({ responseType: 'blob', timeout: 300000 }))
+      const response = await http.get(url, profileConfig({ responseType: 'blob', timeout: options.timeout ?? 300000 }))
       const content = await requireBinary(response.data as Blob, options)
       const disposition = String(response.headers['content-disposition'] || '')
       const match = /filename\*=UTF-8''([^;]+)/i.exec(disposition)

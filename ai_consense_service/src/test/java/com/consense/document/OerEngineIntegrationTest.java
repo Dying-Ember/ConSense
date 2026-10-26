@@ -130,7 +130,11 @@ class OerEngineIntegrationTest {
         DocumentParser.ParsedDocument result=parser.parse("native-source.pdf",bytes,observation,identity);
         assertEquals(1,calls.size(),"the normal confirmed non-drawing parse must submit the original only once");
         com.fasterxml.jackson.databind.JsonNode context=JsonUtils.mapper().valueToTree(calls.get(0));assertEquals(1,context.path("source").path("pageCount").asInt());
-        assertEquals(JsonUtils.parse("[1]"),context.path("selectedPhysicalPages"));assertTrue(context.path("javaNativeEvidence").get(0).path("paintedVectorRegions").size()>0);
+        assertEquals(JsonUtils.parse("[1]"),context.path("selectedPhysicalPages"));
+        com.fasterxml.jackson.databind.JsonNode admission=context.path("javaNativeEvidence").get(0);
+        assertTrue(admission.path("selection").path("vectorGap").asBoolean());assertEquals(1,admission.path("pageNo").asInt());
+        assertEquals("normalized_rendered_crop_top_left",admission.path("coordinateSpace").asText());
+        for(String raw:new String[]{"glyphs","nativeBlocks","paintedVectorRegions","vectorPathOperators","formFields"})assertFalse(admission.has(raw),raw);
         List<DocumentBlock> methods=new ArrayList<>();for(DocumentBlock block:result.getBlocks())if("native_table_candidate".equals(block.getKind()))methods.add(block);
         assertEquals(3,methods.size());assertNotEquals(methods.get(0).getId(),methods.get(1).getId());
         for(DocumentBlock block:methods){assertNull(block.getBbox());assertNull(block.getVisualRegion());assertEquals("",block.getEffectiveText());}

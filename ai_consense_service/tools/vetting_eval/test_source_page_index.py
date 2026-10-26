@@ -4,6 +4,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from threading import RLock
 import unittest
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 from native_canonical_projection import produce_native
@@ -54,6 +55,16 @@ class SourcePageIndexHttpTests(unittest.TestCase):
         query = self.client.post('/retrieve', json={'projectId': 'AUTHORED-pins-index', 'query': 'Visible',
                                                    'candidates': 4, 'limit': 2})
         self.assertEqual(200, query.status_code, query.text)
+
+    def test_index_uses_one_validated_snapshot_for_scope_and_chunks(self):
+        registry = self.app.state.source_registry
+        with (patch.object(registry, 'load', wraps=registry.load) as loads,
+              patch.object(registry, 'chunks', side_effect=AssertionError('index reloaded a projection')),
+              patch.object(registry, 'chunks_from_loaded', wraps=registry.chunks_from_loaded) as chunks):
+            response = self.index()
+        self.assertEqual(200, response.status_code, response.text)
+        self.assertEqual(2, loads.call_count)
+        self.assertEqual(1, chunks.call_count)
 
     def test_native_docx_cannot_admit_page_pin_or_encode_from_missing_sidecar(self):
         response = self.index({self.projection['projectionSha256']: 'a' * 64})

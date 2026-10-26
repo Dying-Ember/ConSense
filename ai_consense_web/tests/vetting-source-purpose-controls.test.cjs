@@ -11,17 +11,19 @@ const row = (id, overrides = {}) => ({ documentId: id, key: 'SCT', fileName: `SC
 const job = { id: 'run-1', status: 'COMPLETED', phase: 'done', completedUnits: 1, totalUnits: 1, message: 'Done' }
 class ApiError extends Error { constructor(code) { super('Rejected'); this.code = code } }
 
-async function mount({ files = [row('101'), row('102'), row('103', { sourceRole: 'tender', parsed: true, roleConfirmationAvailable: false })], confirm, locale = 'zh-Hans' } = {}) {
+async function mount({ files = [row('101'), row('102'), row('103', { sourceRole: 'tender', parsed: true, roleConfirmationAvailable: false })], confirm, onProgress, timers = { setTimeout, clearTimeout }, locale = 'zh-Hans' } = {}) {
   const store = vue.reactive({ activeProjectId: 'project-a', locale, notify() {}, setBusy() {}, clearBusy() {}, captureLlmSelection: () => ({ profileId: null }) })
-  const calls = [], state = { files, stale: false }
+  const calls = [], state = { files, stale: false, progressReads: 0, fileReads: 0 }
   const empty = { render: () => null }
   const loaded = loadVue(path.join(__dirname, '../src/views/VettingView.vue'), { boundaries: {
     'vue-i18n': require('vue-i18n'), 'vue-router': { useRouter: () => ({ push: async () => undefined }) }, '@/stores/app': { useAppStore: () => store },
     '@/composables/useLocalized': { useLocalized: () => ({ currentKey: vue.ref('en'), pick: value => typeof value === 'string' ? value : value?.en ?? '' }) },
     '@/api/client': { ApiError },
     '@/api': { vettingApi: {
-      files: async () => state.files, findings: async () => [], metrics: async () => ({ total: 0 }),
+      sourceProgress: async () => { state.progressReads++; return onProgress ? onProgress(state) : [] },
+      files: async () => { state.fileReads++; return state.files }, findings: async () => [], metrics: async () => ({ total: 0 }),
       latestRunProgress: async () => job, getRun: async () => ({ ...job, sourceSetStale: state.stale }),
+      getRunDisplay: async () => ({ ...job, sourceSetStale: state.stale }),
       confirmSourceRole: async (projectId, documentId, request) => {
         calls.push({ type: 'confirm', projectId, documentId, request: JSON.parse(JSON.stringify(request)) })
         const updated = confirm ? await confirm(documentId, request) : { ...state.files.find(file => file.documentId === documentId), sourceRole: request.sourceRole, parsed: true, roleConfirmationAvailable: false, exclusionReason: null }
@@ -36,14 +38,14 @@ async function mount({ files = [row('101'), row('102'), row('103', { sourceRole:
     '@/advice/reviewHandoff': { reviewHandoffCopy: {} }, '@/components/AppIcon.vue': { default: empty },
     '@/components/AppModal.vue': { default: { props: ['open', 'title'], setup: (props, { slots }) => () => props.open ? vue.h('div', { class: 'test-modal' }, slots.default?.()) : null } },
     '@/components/CanonicalEvidencePanel.vue': { default: empty }, '@/components/FixedBaselineEvidencePanel.vue': { default: empty }, '@/components/AdviceSourceReader.vue': { default: empty }
-  }, globals: { URLSearchParams, window: { setTimeout, clearTimeout } } })
+  }, globals: { URLSearchParams, window: timers } })
   const i18n = loaded.loadLocal(path.join(__dirname, '../src/i18n/index.ts')).i18n; i18n.global.locale.value = locale
   const h = renderer(), app = h.createApp(loaded.default); app.use(i18n); app.mount(h.root); await settle()
   const button = label => find(h.root, node => node.tag === 'button' && text(node).trim() === i18n.global.t(label))
   button('vetting.actions.source').props.onClick(); await settle()
   const selects = () => all(h.root, node => node.tag === 'select' && node.props?.['aria-label']?.includes(i18n.global.t('vetting.sourcePurpose.label')))
-  const sourceRow = id => find(h.root, node => node.tag === 'tr' && text(node).includes(`SCT-${id}.docx`))
-  const confirmButton = id => find(sourceRow(id), node => node.tag === 'button')
+  const sourceRow = id => find(h.root, node => node.tag === 'tr' && text(node).includes(state.files.find(file => file.documentId === id)?.fileName ?? `SCT-${id}.docx`))
+  const confirmButton = id => find(sourceRow(id), node => node.tag === 'button' && Object.hasOwn(node.props, 'data-source-purpose-confirm'))
   return { ...h, calls, store, state, selects, button, sourceRow, confirmButton, dispose: () => app.unmount(), choose: async (id, role) => {
     find(sourceRow(id), node => node.tag === 'select').props.onChange({ target: { value: role } }); await settle()
   } }
@@ -66,9 +68,37 @@ test('explicit choice confirms exactly one stable document with all version pins
   } finally { h.dispose() }
 })
 
+test('large saved source keeps a readable purpose selector and confirms with its trusted content pin', async () => {
+  const h = await mount({ files: [row('201', { sourceHash: null, businessContentSha256: 'd'.repeat(64), status: 'PARTIAL', parseStatus: 'PARTIAL' })] })
+  try {
+    assert.equal(h.selects().length, 1)
+    await h.choose('201', 'tender'); await h.confirmButton('201').props.onClick(); await settle()
+    assert.deepEqual(h.calls, [{ type: 'confirm', projectId: 'project-a', documentId: '201', request: {
+      sourceRole: 'tender', expectedOriginalSourceSha256: 'a'.repeat(64), expectedBusinessContentSha256: 'd'.repeat(64), expectedRoutingSha256: 'c'.repeat(64)
+    } }])
+    assert.equal(h.state.files[0].sourceRole, 'tender')
+  } finally { h.dispose() }
+})
+
 test('no purpose action is offered for incomplete pins, ongoing parse, known roles or explicit exclusions', async () => {
   const h = await mount({ files: [row('1', { documentId: undefined }), row('2', { sourceHash: null }), row('3', { parseStatus: 'IDENTITY_OBSERVED' }), row('4', { sourceRole: 'tender' }), row('5', { exclusionReason: 'drawing_outside_scope', documentScope: 'drawing' }), row('6', { documentScope: 'pricing' }), row('7', { roleConfirmationAvailable: false })] })
   try { assert.equal(h.selects().length, 0); assert.equal(h.calls.length, 0) } finally { h.dispose() }
+})
+
+test('Vetting shows localized OER exclusion reasons instead of internal keys', async () => {
+  const files = ['evaluation_answer_isolated', 'drafting_standard_template', 'source_not_eligible_for_vetting'].map((exclusionReason, index) =>
+    row(String(index + 1), { exclusionReason, roleConfirmationAvailable: false }))
+  for (const [locale, reasons] of [
+    ['zh-Hans', ['评估答案仅作独立对照', '起草标准模板仅供起草使用', '此文件未获准用于审查']],
+    ['zh-Hant', ['評估答案僅作獨立對照', '起草標準範本僅供起草使用', '此檔案未獲准用於審查']],
+    ['en', ['Evaluation answer for separate comparison only', 'Drafting standard template for Drafting only', 'This file is not eligible for Vetting']]
+  ]) {
+    const h = await mount({ files, locale })
+    try {
+      reasons.forEach((reason, index) => assert.ok(text(h.sourceRow(String(index + 1))).includes(reason), `${locale}: ${reason}`))
+      assert.doesNotMatch(text(h.root), /advice\.sourceScope\.reasons\./)
+    } finally { h.dispose() }
+  }
 })
 
 test('a pending confirmation blocks conflicting mutations, report export and a second confirmation', async () => {
@@ -140,6 +170,60 @@ test('the real API call site sends stable ID and role pins via the existing JSON
 const pendingRow = (id, overrides = {}) => row(id, { status: 'IDENTITY_PENDING', parseStatus: 'IDENTITY_PENDING', textChars: 0,
   roleConfirmationAvailable: false, identityConfirmationAvailable: true, documentScope: 'package', ...overrides })
 
+test('manual confirmed-text parsing keeps visible page progress while the confirmation or retry is pending', async () => {
+  for (const initialStatus of ['IDENTITY_PENDING', 'FAILED']) {
+    const pending = deferred(), scheduled = new Map()
+    let nextId = 1, phase = 'idle'
+    const timers = {
+      setTimeout(callback, delay) { const id = nextId++; scheduled.set(id, { callback, delay }); return id },
+      clearTimeout(id) { scheduled.delete(id) }
+    }
+    const nextPoll = async () => {
+      assert.equal(scheduled.size, 1, 'The existing progress loop has one pending timer')
+      const [id, timer] = scheduled.entries().next().value
+      assert.equal(timer.delay, 3000)
+      scheduled.delete(id); timer.callback(); await settle()
+    }
+    const source = pendingRow('51', { fileName: 'complete-APB.pdf', pageCount: 61, status: initialStatus,
+      parseStatus: initialStatus, sourceRole: initialStatus === 'FAILED' ? 'tender' : 'unknown' })
+    const h = await mount({ files: [source], timers, locale: 'en', confirm: () => { phase = 'starting'; return pending.promise }, onProgress: () => {
+      if (phase === 'idle' || phase === 'starting') return [{ id: 51, fileName: source.fileName, pageCount: 61, parseStatus: initialStatus }]
+      return [{ id: 51, fileName: source.fileName, pageCount: 61, parseStatus: phase === 'done' ? 'PARTIAL' : 'PARSING',
+        parseMessage: phase === 'page-2' ? '第 2 / 61 页：渲染页面' : '第 1 / 61 页：等待视觉识别结果' }]
+    } })
+    try {
+      assert.equal(scheduled.size, 0, 'An idle source list does not keep polling')
+      if (initialStatus === 'IDENTITY_PENDING') await h.choose('51', 'tender')
+      find(h.sourceRow('51'), node => node.tag === 'input' && node.props.type === 'checkbox').props.onChange({ target: { checked: true } }); await settle()
+      const readsBefore = h.state.progressReads, operation = h.confirmButton('51').props.onClick(); await settle()
+      assert.ok(h.state.progressReads > readsBefore, 'Confirmation starts observing progress without waiting for its HTTP result')
+      assert.equal(h.calls.length, 1)
+      assert.equal(h.confirmButton('51').props.disabled, true)
+      phase = 'page-1'; await nextPoll()
+      const focus = () => find(h.root, node => node.props?.['data-vetting-current-file'] !== undefined)
+      assert.match(text(focus()), /complete-APB\.pdf/)
+      assert.match(text(focus()), /Current physical page:.*1\s*\/\s*61/)
+      assert.match(text(focus()), /Visual recognition/)
+      phase = 'page-2'; await nextPoll()
+      assert.match(text(focus()), /Current physical page:.*2\s*\/\s*61/)
+      assert.match(text(focus()), /Page rendering/)
+      assert.equal(h.calls.length, 1, 'Progress reads do not replay confirmation or upload')
+      phase = 'done'
+      const updated = { ...source, sourceRole: 'tender', status: 'PARTIAL', parseStatus: 'PARTIAL', parsed: true,
+        textChars: 200, identityConfirmationAvailable: false, sourceHash: 'd'.repeat(64), routingSha256: 'e'.repeat(64), exclusionReason: null }
+      h.state.files = [updated]
+      const fileReadsBeforeResponse = h.state.fileReads
+      await nextPoll()
+      assert.equal(h.state.fileReads, fileReadsBeforeResponse, 'Terminal progress cannot reload new pins before the pending mutation adopts its response')
+      pending.resolve(updated)
+      await operation; await settle(); await nextPoll()
+      assert.equal(scheduled.size, 0, 'Polling stops after the saved terminal state and response')
+      assert.equal(h.state.files[0].parseStatus, 'PARTIAL')
+      assert.equal(h.calls.length, 1)
+    } finally { h.dispose(); pending.resolve(source) }
+  }
+})
+
 test('pending identity requires a separate explicit text-material confirmation and preserves original access', async () => {
   const h = await mount({ files: [pendingRow('51')] })
   try {
@@ -162,7 +246,7 @@ test('pending identity requires a separate explicit text-material confirmation a
   } finally { h.dispose() }
 })
 
-test('source-list original links download non-PDF files with readable labels and retain the original identity', async () => {
+test('source-list originals keep downloads and PDF preview buttons with the original identity', async () => {
   const files = ['word-source.DOCX', 'legacy-source.DOC', 'outlook-message.msg', 'email-message.eml', 'plain-source.txt', 'pdf-source.PDF']
     .map((fileName, index) => pendingRow(String(51 + index), { fileName }))
   for (const [locale, downloadLabel, openLabel] of [
@@ -173,9 +257,10 @@ test('source-list original links download non-PDF files with readable labels and
       for (const source of files) {
         const sourceRow = find(h.root, node => node.tag === 'tr' && text(node).includes(source.fileName))
         const original = find(sourceRow, node => node.tag === 'a'), pdf = source.fileName.toLowerCase().endsWith('.pdf')
-        assert.ok(original); assert.equal(text(original).trim(), pdf ? openLabel : downloadLabel)
-        assert.equal(original.props.target, pdf ? '_blank' : undefined)
-        assert.equal(original.props.download, pdf ? undefined : source.fileName)
+        assert.ok(original); assert.equal(text(original).trim(), downloadLabel)
+        assert.equal(original.props.target, undefined)
+        assert.equal(original.props.download, source.fileName)
+        if (pdf) { const preview = find(sourceRow, node => node.tag === 'button' && Object.hasOwn(node.props, 'data-source-original-preview')); assert.ok(preview); assert.equal(text(preview).trim(), openLabel); assert.equal(preview.props.disabled, false) }
         const url = new URL(original.props.href, 'http://localhost')
         assert.equal(url.pathname, `/api/vetting/project-a/sources/${source.documentId}/original`)
         for (const key of ['sourceHash', 'originalSourceSha256', 'sourceRole']) assert.equal(url.searchParams.get(key), source[key])
@@ -326,5 +411,79 @@ test('existing upload roles do not bypass server permission, excluded scopes or 
     pendingRow('4', { sourceRole: 'tender', documentScope: 'drawing' }), pendingRow('5', { sourceRole: 'tender', documentScope: 'example' }),
     pendingRow('6', { sourceRole: 'tender', exclusionReason: 'example_answer' }),
     row('7', { sourceRole: 'tender', identityConfirmationAvailable: true })] })
+  try { assert.equal(h.selects().length, 0); assert.equal(h.calls.length, 0) } finally { h.dispose() }
+})
+
+test('failed textual originals have a visible retry with a fixed saved purpose and a fresh explicit material check', async () => {
+  for (const [locale, label] of [['zh-Hans', '重试解析'], ['zh-Hant', '重試解析'], ['en', 'Retry parsing']]) {
+    const failed = pendingRow('51', { fileName: 'SCT-51.docx', status: 'FAILED', parseStatus: 'FAILED', sourceRole: 'tender', exclusionReason: null })
+    const h = await mount({ locale, files: [failed], confirm: async (_id, request) => ({ ...failed, sourceRole: request.sourceRole,
+      status: 'PARTIAL', parseStatus: 'PARTIAL', parsed: true, identityConfirmationAvailable: false,
+      sourceHash: 'd'.repeat(64), routingSha256: 'e'.repeat(64) }) })
+    try {
+      assert.equal(text(h.confirmButton('51')).trim(), label)
+      assert.equal(h.selects()[0].props.value, 'tender')
+      assert.equal(h.selects()[0].props.disabled, true, 'Retry keeps the saved purpose')
+      assert.equal(h.confirmButton('51').props.disabled, true)
+      await h.confirmButton('51').props.onClick(); await settle(); assert.equal(h.calls.length, 0)
+      find(h.sourceRow('51'), node => node.tag === 'input' && node.props.type === 'checkbox').props.onChange({ target: { checked: true } }); await settle()
+      assert.equal(h.confirmButton('51').props.disabled, false)
+      await h.confirmButton('51').props.onClick(); await settle()
+      assert.equal(h.calls.length, 1); assert.equal(h.calls[0].request.sourceRole, 'tender')
+      assert.equal(h.calls[0].request.confirmTextContractMaterial, true)
+      assert.equal(h.calls[0].request.expectedOriginalSourceSha256, failed.originalSourceSha256)
+      assert.equal(h.state.files[0].parsed, true)
+    } finally { h.dispose() }
+  }
+})
+
+test('a failed source with unknown purpose needs an explicit valid purpose and text check before retry', async () => {
+  for (const role of ['tender', 'standard', 'project_fact', 'package_manifest']) {
+    const failureMessage = 'Preserved failed attempt: NORMAL_PDF_COMPACT_REFERENCE_LITERAL_TARGET'
+    const failed = pendingRow('51', { fileName: 'unconfirmed-annex.pdf', status: 'FAILED', parseStatus: 'FAILED', sourceRole: 'unknown', parseMessage: failureMessage })
+    const h = await mount({ locale: 'en', files: [failed], confirm: async (_id, request) => ({ ...failed, sourceRole: request.sourceRole,
+      status: 'PARTIAL', parseStatus: 'PARTIAL', parsed: true, identityConfirmationAvailable: false,
+      sourceHash: 'd'.repeat(64), routingSha256: 'e'.repeat(64) }) })
+    try {
+      assert.equal(h.selects().length, 1)
+      assert.equal(h.selects()[0].props.disabled, false, 'Unknown failed purpose is a human choice, not a fixed saved purpose')
+      assert.equal(h.selects()[0].props.value, '')
+      assert.equal(h.confirmButton('51').props.disabled, true)
+      await h.choose('51', role)
+      await h.confirmButton('51').props.onClick(); await settle()
+      assert.equal(h.calls.length, 0, 'Choosing a purpose alone cannot retry failed parsing')
+      assert.equal(h.state.files[0].parseStatus, 'FAILED'); assert.equal(h.state.files[0].parseMessage, failureMessage)
+      find(h.sourceRow('51'), node => node.tag === 'input' && node.props.type === 'checkbox').props.onChange({ target: { checked: true } }); await settle()
+      await h.choose('51', 'sample_answer'); await h.confirmButton('51').props.onClick(); await settle()
+      assert.equal(h.calls.length, 0, 'The four supported purposes cannot be bypassed by a forged selection')
+      await h.choose('51', role); await h.confirmButton('51').props.onClick(); await settle()
+      assert.equal(h.calls.length, 1); assert.equal(h.calls[0].documentId, '51')
+      assert.deepEqual(h.calls[0].request, { sourceRole: role, expectedOriginalSourceSha256: failed.originalSourceSha256,
+        expectedSourceHash: failed.sourceHash, expectedRoutingSha256: failed.routingSha256, confirmTextContractMaterial: true })
+      assert.equal(h.state.files[0].parseStatus, 'PARTIAL'); assert.equal(h.state.files[0].originalSourceSha256, failed.originalSourceSha256)
+      assert.equal(failed.parseStatus, 'FAILED'); assert.equal(failed.parseMessage, failureMessage)
+    } finally { h.dispose() }
+  }
+})
+
+test('failed PDF keeps its readable original preview before reconfirmation and never enables failed saved text', async () => {
+  const files = [pendingRow('51', { fileName: 'failed-original.pdf', status: 'FAILED', parseStatus: 'FAILED', sourceRole: 'tender', exclusionReason: null })]
+  const h = await mount({ locale: 'en', files })
+  try {
+    const sourceRow = find(h.root, node => node.tag === 'tr' && text(node).includes('failed-original.pdf'))
+    const preview = find(sourceRow, node => node.tag === 'button' && Object.hasOwn(node.props, 'data-source-original-preview'))
+    assert.equal(preview.props.disabled, false); assert.equal(text(preview).trim(), 'Open original')
+    const savedText = find(sourceRow, node => node.tag === 'button' && text(node).trim() === 'View parsed text')
+    assert.equal(savedText.props.disabled, true)
+    assert.match(find(sourceRow, node => node.tag === 'a').props.href, /sources\/51\/original\?sourceHash=/)
+    assert.equal(h.calls.length, 0)
+  } finally { h.dispose() }
+})
+
+test('failed sources without server permission or with excluded identity never offer retry parsing', async () => {
+  const failed = overrides => pendingRow(overrides.documentId, { parseStatus: 'FAILED', status: 'FAILED', sourceRole: 'tender', ...overrides })
+  const h = await mount({ files: [failed({ documentId: '1', identityConfirmationAvailable: false }),
+    failed({ documentId: '2', documentScope: 'drawing' }), failed({ documentId: '3', documentScope: 'pricing' }),
+    failed({ documentId: '4', sourceRole: 'sample_answer' }), failed({ documentId: '5', exclusionReason: 'evaluation_answer_isolated' })] })
   try { assert.equal(h.selects().length, 0); assert.equal(h.calls.length, 0) } finally { h.dispose() }
 })

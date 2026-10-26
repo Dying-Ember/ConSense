@@ -46,7 +46,11 @@ public final class QwenChatClient implements LlmClient {
         public String getGenerationJson(){return generationJson;} public String getProbeJson(){return probeJson;} public boolean isStream(){return stream;}
     }
     public PreparedRequest prepare(List<ChatTurn> turns,JsonNode schema,boolean stream) {
+        return prepare(turns,schema,stream,false);
+    }
+    public PreparedRequest prepare(List<ChatTurn> turns,JsonNode schema,boolean stream,boolean jsonObject) {
         com.fasterxml.jackson.databind.node.ObjectNode generation=delegate.prepareStructuredRequest(turns,schema,stream);
+        if(jsonObject)generation.putObject("response_format").put("type","json_object");
         com.fasterxml.jackson.databind.node.ObjectNode probe=generation.deepCopy();probe.put("max_tokens",1);probe.put("stream",false);
         return new PreparedRequest(JsonUtils.write(generation),JsonUtils.write(probe),stream);
     }
@@ -54,7 +58,15 @@ public final class QwenChatClient implements LlmClient {
     public String usageProbe(PreparedRequest prepared,Consumer<Runnable> cancel) {
         try {return http.postJsonBoundedWithoutReplay(cfg.getBaseUrl().replaceAll("/+$","")+"/v1/chat/completions",
                 prepared.probeJson,cfg.getTimeoutMs(),"Bearer "+cfg.getApiKey(),1024*1024,cancel);}
+        catch(BizException error){
+            java.util.regex.Matcher status=java.util.regex.Pattern.compile("Qwen chat HTTP ([1-5][0-9]{2})").matcher(error.getMessage()==null?"":error.getMessage());
+            throw new BizException(5001,status.matches()?"Qwen usage preflight HTTP "+status.group(1):"Qwen usage preflight transport failed");
+        }
         catch(RuntimeException error){throw new BizException(5001,"Qwen usage preflight transport failed ("+error.getClass().getSimpleName()+")");}
+    }
+    public static String safeUsageFailureKind(RuntimeException error){
+        java.util.regex.Matcher status=java.util.regex.Pattern.compile("Qwen usage preflight HTTP ([1-5][0-9]{2})").matcher(error.getMessage()==null?"":error.getMessage());
+        return status.matches()?"HTTP"+status.group(1):error.getClass().getSimpleName();
     }
     public String generate(PreparedRequest prepared,Consumer<String> delta,Consumer<Runnable> cancel) {return generate(prepared,delta,cancel,null);}
     public String generate(PreparedRequest prepared,Consumer<String> delta,Consumer<Runnable> cancel,Consumer<JsonNode> receipt) {

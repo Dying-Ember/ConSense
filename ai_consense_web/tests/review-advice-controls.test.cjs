@@ -121,7 +121,8 @@ async function harness({ stale = false, currentSources = [source], sourceGate, e
     globals: { sessionStorage, crypto: browserCrypto, Uint8Array, ArrayBuffer, URLSearchParams, URL: EvidenceURL, Blob, FormData, File, AbortController, TextDecoder, DOMException, fetch, structuredClone,
       DOMParser: readingWindow.DOMParser, XMLSerializer: readingWindow.XMLSerializer, NodeFilter: readingWindow.NodeFilter, Element: readingWindow.Element, HTMLElement: readingWindow.HTMLElement, Node: readingWindow.Node,
       localStorage: { getItem: () => null, setItem() {} }, document: { documentElement: { lang: '' }, getElementById: () => null },
-      window: { setTimeout(callback, ms) { const timer = setTimeout(callback, ms); timer.unref(); return timer }, clearTimeout }, console }
+      window: { setTimeout(callback, ms) { const timer = setTimeout(callback, ms); timer.unref(); return timer }, clearTimeout,
+        addEventListener: readingWindow.addEventListener.bind(readingWindow), removeEventListener: readingWindow.removeEventListener.bind(readingWindow) }, console }
   })
   const instance = pinia.createPinia(); pinia.setActivePinia(instance)
   const store = loaded.loadLocal(path.join(__dirname, '../src/stores/app.ts')).useAppStore()
@@ -164,7 +165,7 @@ test('PM seven classes, business facts and automatic checklist remain visible ap
     if (url.endsWith('/findings/F001/evidence')) return { ...evidence, items: evidence.items.map(item => ({ ...item, clauseId: 'PRE.B6.590(1)' })) }
     if (/\/findings(?:\?|$)/.test(url)) return [{ ...finding, group: 'gap', types: ['gap'], businessDetails: details }]
     if (url.endsWith('/metrics')) return { total: 3, reference: 0, conflict: 0, language: 0, risk: 0, gap: 1, substantive: 1, requirement: 1, crossFile: 0 }
-    if (/\/runs\/(latest\/progress|run-1)$/.test(url)) return { id: 'run-1', status: 'COMPLETED', completedUnits: 1, totalUnits: 1 }
+    if (/\/runs\/(latest\/progress|run-1\/display)$/.test(url)) return { id: 'run-1', status: 'COMPLETED', completedUnits: 1, totalUnits: 1 }
     if (url.endsWith('/checklist')) return { projectId: 'project-A', runId: 'run-1', runSnapshotSha256: 'snapshot', sourceSnapshotSha256: 'source', writable: true, items: rows,
       logicalGroups: [{ id: 'CK-019', section: 'PRE.B6', clause: 'PRE.B6.590', sourceItemIds: ['APP-I-026'] }], automaticResults: [group, failure] }
   } })
@@ -214,7 +215,8 @@ test('real Vetting entry hands off literal sources to editable Advice, localizes
     assert.doesNotMatch(text(h.root), /Quotation versions have not been verified/)
     const textarea = find(h.root, node => node.tag === 'textarea')
     assert.ok(textarea.value.includes(literalQuote))
-    assert.ok(textarea.value.includes('"sourceHash":"source-v1"'))
+    assert.match(textarea.value, /Original quotation to verify 1: SCC · actual SCC\.pdf · P4 · A1/)
+    assert.doesNotMatch(textarea.value, /sourceHash|source-v1|"documentId"|originalSourceSha256|businessContentSha256|[a-f0-9]{64}/)
     assert.doesNotMatch(textarea.value, /SUGGESTED ANSWER|TEAM REMARKS/)
     assert.equal(h.requests.some(request => request.method !== 'get'), false)
     assert.equal(h.requests.some(request => /index\/rebuild|\/ask$/.test(request.url)), false)
@@ -346,7 +348,9 @@ test('real Advice citation displays every explicit canonical member and complete
     assert.equal(h.canonicalRequests.length, 0, 'No selected citation means no image requests')
     const chip = find(h.root, node => node.tag === 'button' && node.props.class === 'citation')
     assert.ok(chip); chip.props.onClick(); await flushCanonical()
-    assert.ok(h.canonicalRequests.some(request => request.url.includes('/original?')), 'Citation loads its entire bound source before auxiliary images')
+    assert.equal(h.canonicalRequests.length, 0, 'Selecting a citation displays text without loading its complete original')
+    await button(h, 'Open original').props.onClick(); await flushCanonical()
+    assert.ok(h.canonicalRequests.some(request => request.url.includes('/original?')), 'The explicit original control loads its bound source')
     await button(h, 'Show related original images / tables').props.onClick(); await flushCanonical()
     assert.equal(findAll(h.root, node => node.props?.class === 'canonical-evidence-panel').length, 2)
     assert.deepEqual([...new Set(h.canonicalRequests.filter(request => request.url.includes('/units/')).map(request => decodeURIComponent(new URL(request.url, 'http://127.0.0.1').pathname.split('/').at(-1))))], ['table', 'heading'])
@@ -380,6 +384,8 @@ test('Advice normal citation click fetches its actual Java pointer and exact aut
   try {
     assert.equal(h.canonicalRequests.length, 0)
     find(h.root, node => node.tag === 'button' && node.props.class === 'citation').props.onClick(); await flushCanonical()
+    assert.equal(h.canonicalRequests.length, 0, 'The selected excerpt needs no pointer or complete original request')
+    await button(h, 'Open original').props.onClick(); await flushCanonical()
     assert.ok(h.canonicalRequests.some(request => request.url.includes('/units/')))
     assert.ok(h.canonicalRequests.some(request => request.url.includes('/original?')))
     assert.ok(find(h.root, node => node.tag === 'a' && node.props.download === bound.sourceFilename))
@@ -409,17 +415,20 @@ function indexReply(label, scope = 'fullset') {
   return { chunks: 1, message: localized(label), evidenceBackend: 'canonical', sourceScope: scope, indexReason: null }
 }
 
-test('Advice source catalog localizes unknown identity and distinguishes inclusion from readiness', async () => {
-  const h = await harness({ initialView: 'advice', currentSources: [source, { ...source, documentId: 'pending', sourceRole: 'unknownRole', included: false, exclusionReason: 'source_identity_unresolved', parseStatus: 'IDENTITY_PENDING' }] })
+test('Advice source catalog localizes excluded OER reasons and distinguishes inclusion from readiness', async () => {
+  const excluded = ['evaluation_answer_isolated', 'drafting_standard_template', 'source_not_eligible_for_advisory'].map((exclusionReason, index) =>
+    ({ ...source, documentId: `excluded-${index}`, included: false, exclusionReason }))
+  const h = await harness({ initialView: 'advice', currentSources: [source, { ...source, documentId: 'pending', sourceRole: 'unknownRole', included: false, exclusionReason: 'source_identity_unresolved', parseStatus: 'IDENTITY_PENDING' }, ...excluded] })
   try {
-    for (const [locale, role, count] of [
-      ['zh-Hans', '身份待确认', '纳入范围的文件：1（不代表来源已就绪）'],
-      ['zh-Hant', '身份待確認', '納入範圍的文件：1（不代表來源已就緒）'],
-      ['en', 'Identity pending confirmation', 'Included documents: 1 (source readiness is separate)']
+    for (const [locale, role, count, reasons] of [
+      ['zh-Hans', '身份待确认', '纳入范围的文件：1（不代表来源已就绪）', ['评估答案仅作独立对照', '起草标准模板仅供起草使用', '此文件未获准用于咨询']],
+      ['zh-Hant', '身份待確認', '納入範圍的文件：1（不代表來源已就緒）', ['評估答案僅作獨立對照', '起草標準範本僅供起草使用', '此檔案未獲准用於諮詢']],
+      ['en', 'Identity pending confirmation', 'Included documents: 1 (source readiness is separate)', ['Evaluation answer for separate comparison only', 'Drafting standard template for Drafting only', 'This file is not eligible for Advisory']]
     ]) {
       h.store.changeLocale(locale); await settle()
       assert.ok(text(h.root).includes(role), locale)
       assert.ok(text(h.root).includes(count), locale)
+      for (const reason of reasons) assert.ok(text(h.root).includes(reason), `${locale}: ${reason}`)
       assert.doesNotMatch(text(h.root), /vetting\.uploadRole\.|advice\.sourceScope\.reasons\./)
     }
   } finally { h.dispose() }
@@ -724,7 +733,7 @@ test('Advice status and rebuild use the selected scope; ABA and project changes 
     projectLate.resolve(indexReply('PROJECT A LATE', 'contract')); await settle()
     assert.match(text(h.root), /B CURRENT/); assert.doesNotMatch(text(h.root), /A CURRENT|OBSOLETE/)
     assert.doesNotMatch(text(h.root), /PROJECT A LATE/)
-    await button(h, 'Refresh evidence index').props.onClick(); await settle()
+    await button(h, 'Rebuild evidence index').props.onClick(); await settle()
     assert.ok(h.requests.some(request => request.method === 'post' && request.url === '/advice/project-B/index/rebuild?scope=fullset'))
   } finally { h.dispose() }
 })
@@ -738,7 +747,7 @@ test('scoped index APIs encode identifiers, default to fullset and reject a resp
     await h.adviceApi.rebuildIndex('project /?', 'contract &')
     assert.ok(h.requests.some(request => request.url === '/advice/project%20%2F%3F/index/status?scope=fullset'))
     assert.ok(h.requests.some(request => request.url === '/advice/project%20%2F%3F/index/rebuild?scope=contract%20%26'))
-    await button(h, 'Refresh evidence index').props.onClick(); await settle()
+    await button(h, 'Rebuild evidence index').props.onClick(); await settle()
     assert.doesNotMatch(text(h.root), /WRONG SCOPE/)
     assert.equal(h.store.toast.visible, false)
   } finally { h.dispose() }
@@ -752,20 +761,20 @@ test('late rebuild and its finally cannot replace scoped state, notify, or clear
     if (url === '/advice/project-A/index/status?scope=contract') return indexReply('CONTRACT STATUS', 'contract')
   } })
   try {
-    const oldRequest = button(h, 'Refresh evidence index').props.onClick(); await settle()
+    const oldRequest = button(h, 'Rebuild evidence index').props.onClick(); await settle()
     await selectScope(h, 'contract')
     assert.equal(h.store.busyMessage, '')
-    const currentRequest = button(h, 'Refresh evidence index').props.onClick(); await settle()
+    const currentRequest = button(h, 'Rebuild evidence index').props.onClick(); await settle()
     const busy = h.store.busyMessage
-    assert.ok(busy); assert.equal(button(h, 'Refresh evidence index').props.disabled, true)
+    assert.ok(busy); assert.equal(button(h, 'Rebuild evidence index').props.disabled, true)
     old.resolve(indexReply('OBSOLETE REBUILD')); await oldRequest; await settle()
     assert.equal(h.store.busyMessage, busy)
-    assert.equal(button(h, 'Refresh evidence index').props.disabled, true)
+    assert.equal(button(h, 'Rebuild evidence index').props.disabled, true)
     assert.doesNotMatch(text(h.root), /OBSOLETE REBUILD/)
     assert.equal(h.store.toast.visible, false)
     current.resolve(indexReply('CURRENT REBUILT', 'contract')); await currentRequest; await settle()
     assert.match(text(h.root), /CURRENT REBUILT/)
-    assert.equal(h.store.busyMessage, ''); assert.equal(button(h, 'Refresh evidence index').props.disabled, false)
+    assert.equal(h.store.busyMessage, ''); assert.equal(button(h, 'Rebuild evidence index').props.disabled, false)
     assert.equal(h.store.toast.message, 'CURRENT REBUILT')
   } finally { h.dispose() }
 })
@@ -778,10 +787,10 @@ test('newer rebuild result wins over pending status and a current failure is an 
     if (url.includes('/index/rebuild?')) return ++rebuilds === 1 ? indexReply('VERIFIED REBUILD') : Promise.reject(new Error('UNTRUSTED RAW MESSAGE'))
   } })
   try {
-    await button(h, 'Refresh evidence index').props.onClick(); await settle()
+    await button(h, 'Rebuild evidence index').props.onClick(); await settle()
     status.resolve(indexReply('OBSOLETE GET')); await settle()
     assert.match(text(h.root), /VERIFIED REBUILD/); assert.doesNotMatch(text(h.root), /OBSOLETE GET/)
-    await button(h, 'Refresh evidence index').props.onClick(); await settle()
+    await button(h, 'Rebuild evidence index').props.onClick(); await settle()
     assert.match(text(find(h.root, node => node.props?.role === 'alert')), /Check backend configuration and refresh the index/)
     assert.doesNotMatch(text(h.root), /UNTRUSTED RAW MESSAGE/)
     assert.equal(h.store.busyMessage, '')
@@ -799,7 +808,7 @@ test('stale status failures and unmounted rebuild completion leave current view 
   oldStatus.resolve(Promise.reject(new Error('OLD FAILURE'))); await settle()
   assert.match(text(h.root), /NEW SCOPE/)
   assert.equal(find(h.root, node => node.props?.role === 'alert'), undefined)
-  const rebuild = button(h, 'Refresh evidence index').props.onClick(); await settle()
+  const rebuild = button(h, 'Rebuild evidence index').props.onClick(); await settle()
   h.store.setBusy('OTHER OPERATION')
   h.dispose()
   oldRebuild.resolve(indexReply('UNMOUNTED', 'contract')); await rebuild; await settle()
@@ -861,6 +870,8 @@ test('a historical Advice citation keeps its saved pointer when current source v
   const h = await harness({ initialView: 'advice', adviceMessages: [message], canonicalRespond: async () => new Response(JSON.stringify({ code: 4300, message: 'SOURCE_ORIGINAL_BYTES_CHANGED' }), { status: 409 }) })
   try {
     find(h.root, node => node.tag === 'button' && node.props.class === 'citation').props.onClick(); await flushCanonical()
+    assert.equal(h.canonicalRequests.length, 0)
+    await button(h, 'Open original').props.onClick(); await flushCanonical()
     assert.match(text(h.root), /source file or its registered identity changed/)
     assert.equal(h.canonicalRequests.length, 1)
     assert.equal(h.createdUrls.length, 0)
@@ -926,6 +937,9 @@ test('Advice source tabs use saved numeric aliases or localized excerpts and pre
       assert.doesNotMatch(chips.map(text).join(' '), /body\/|word\/|Clause/)
       for (let index = 0; index < chips.length; index++) {
         chips[index].props.onClick(); await flushCanonical()
+        const before = reads.length
+        const open = button(h, ({ 'zh-Hans': '打开原件', 'zh-Hant': '開啟原檔', en: 'Open original' })[locale])
+        if (open) { await open.props.onClick(); await flushCanonical(); assert.equal(reads.length, before + 1) }
         assert.equal(reads.at(-1).anchor, snapshot[index].anchor)
         assert.equal(reads.at(-1).evidenceId, snapshot[index].evidenceId)
         assert.equal(reads.at(-1).content, snapshot[index].content)
@@ -943,6 +957,8 @@ test('Advice original reader keeps its warning content in a collapsed native det
   const h = await harness({ initialView: 'advice', adviceMessages: [message], answerRendererBoundaries: authoredOriginalReaderBoundaries(reads) })
   try {
     find(h.root, node => node.tag === 'button' && node.props.class === 'citation').props.onClick(); await flushCanonical()
+    assert.equal(reads.length, 0)
+    await button(h, 'Open original').props.onClick(); await flushCanonical()
     for (const [locale, summary] of [['zh-Hans', '定位与阅读界限'], ['zh-Hant', '定位與閱讀界限'], ['en', 'Location and reading limits']]) {
       h.store.changeLocale(locale); await settle()
       const warnings = find(h.root, node => node.tag === 'details' && node.props.class === 'source-limitations')
@@ -1011,7 +1027,7 @@ test('explicit session switch binds scope/basis and isolates late answer and his
     const scopeControl = find(h.root, node => node.tag === 'select' && node.props['aria-label'] === 'Documents in this advice scope')
     assert.equal(scopeControl.props.disabled, true)
     assert.equal(h.requests.filter(request => /\/(?:sources|index\/status)\?/.test(request.url)).length, projectReads)
-    assert.equal(button(h, 'Refresh evidence index'), undefined)
+    assert.equal(button(h, 'Rebuild evidence index'), undefined)
     assert.match(text(h.root), /fixed standards only[\s\S]*has not confirmed fixed retrieval readiness/)
     oldAsk.resolve({ sessionId: 'session-A', grounded: true, title: localized('A title'), content: localized('A late answer'), sources: [], citations: [] }); await asking; await settle()
     assert.doesNotMatch(text(h.root), /A late answer/)
@@ -1021,6 +1037,24 @@ test('explicit session switch binds scope/basis and isolates late answer and his
     assert.doesNotMatch(text(h.root), /A obsolete history/)
     assert.equal(h.requests.filter(request => request.url.endsWith('/ask/stream')).length, 1)
     assert.equal(h.requests.some(request => /\/findings\/.+\/(review|status)/.test(request.url) && request.method !== 'get'), false)
+  } finally { h.dispose() }
+})
+
+test('new advice session and same-scope switch do not repeat the visible index check', async () => {
+  const h = await harness({ initialView: 'advice', respondOverride: ({ method, url }) =>
+    method === 'get' && url.endsWith('/sessions') ? [sessions[0]] : url.includes('/index/status?') ? indexReply('AUTHORED index ready') : undefined })
+  try {
+    const statusReads = () => h.requests.filter(request => request.url === '/advice/project-A/index/status?scope=fullset').length
+    const initial = statusReads()
+    assert.equal(initial, 1, 'Mount checks the selected source scope once')
+    find(h.root, node => node.tag === 'textarea').props['onUpdate:modelValue']('What does SCC Clause 4.1 require?'); await settle()
+    await button(h, 'Ask').props.onClick(); await settle()
+    assert.equal(h.requests.filter(request => request.url.endsWith('/ask/stream')).length, 1)
+    assert.equal(statusReads(), initial, 'Creating a session must not queue a second index check beside the answer request')
+    sessionSelect(h).props['onUpdate:modelValue']('session-A'); await settle()
+    assert.equal(statusReads(), initial, 'A session switch within the same scope reuses its visible status')
+    assert.match(text(h.root), /AUTHORED index ready/)
+    assert.ok(h.requests.some(request => request.url.endsWith('/messages?sessionId=session-A')))
   } finally { h.dispose() }
 })
 
@@ -1088,7 +1122,9 @@ test('upload delegates scope to OER and an identity-only drawing retains its exc
     if (url.includes('/package/upload')) return { accepted: 1, parsed: 0, failed: 0, messages: ['Drawing excluded from parsing'] }
   } })
   try {
-    assert.equal(find(h.root, node => node.tag === 'select' && find(node, option => option.tag === 'option' && option.props.value === 'drawing')), undefined, 'The upload entry has no batch scope selector')
+    const scope = find(h.root, node => node.tag === 'select' && Object.hasOwn(node.props, 'data-upload-scope'))
+    assert.ok(scope, 'The explicit scope control stays visible')
+    assert.equal(scope.options[scope.selectedIndex].props.value, 'auto', 'OER decides scope until the user explicitly selects an override')
     const upload = find(h.root, node => node.tag === 'input' && node.props.type === 'file')
     await upload.props.onChange({ target: { files: [new File(['%PDF fixture'], 'drawing.pdf')], value: '' } }); await settle()
     const request = h.requests.find(request => request.url.includes('/package/upload'))
@@ -1123,6 +1159,8 @@ test('historical fixed answer retains its own source lane after a later project 
     const count = h.canonicalRequests.length
     button(h, 'ANSWER A FIXED').props.onClick(); await flushCanonical()
     assert.equal(findAll(h.root, node => node.tag === 'img').length, 0)
+    assert.equal(h.canonicalRequests.length, count, 'Changing citations displays text before fetching additional evidence')
+    await button(h, 'Show related original images / tables').props.onClick(); await flushCanonical()
     assert.equal(h.canonicalRequests.length, count + 1)
     assert.equal(h.canonicalRequests.at(-1).url, '/api/oer/fixed-baseline/evidence?id=11')
     assert.match(text(h.root), /does not establish project adoption/)
@@ -1249,7 +1287,7 @@ test('checklist retains a prior human decision as reference while the current un
     reuseStatus: 'history_only_dependency_or_generation_unknown', previousDecisionStatus: 'fulfilled',
     previousRemarks: 'AUTHORED prior review rationale', previousReviewedRunId: 'prior-run' }] }
   const h = await harness({ respondOverride: ({ url }) => {
-    if (url.endsWith('/runs/latest/progress') || url.endsWith('/runs/run-1')) return { id: 'run-1', status: 'COMPLETED', sourceSnapshotSha256: finding.sourceSnapshotSha256 }
+    if (url.endsWith('/runs/latest/progress') || url.endsWith('/runs/run-1/display')) return { id: 'run-1', status: 'COMPLETED', sourceSnapshotSha256: finding.sourceSnapshotSha256 }
     if (url.endsWith('/checklist')) return current
   } })
   try {
@@ -1278,7 +1316,7 @@ test('checklist explains required-material reuse separately from exact whole-rev
       reuseScope, reuseStatus, status: 'fulfilled', remarks: 'AUTHORED saved human check',
       reviewedRunId: 'prior-run', dependencySha256: 'internal-hash-never-render' }] }
     const h = await harness({ respondOverride: ({ url }) => {
-      if (url.endsWith('/runs/latest/progress') || url.endsWith('/runs/run-1')) return { id: 'run-1', status: 'COMPLETED', sourceSnapshotSha256: finding.sourceSnapshotSha256 }
+      if (url.endsWith('/runs/latest/progress') || url.endsWith('/runs/run-1/display')) return { id: 'run-1', status: 'COMPLETED', sourceSnapshotSha256: finding.sourceSnapshotSha256 }
       if (url.endsWith('/checklist')) return current
     } })
     try {
@@ -1303,7 +1341,7 @@ test('checklist explains required-material reuse separately from exact whole-rev
 test('checklist writes bind the loaded snapshot; 4104 retains the row and refresh archives it without carrying values forward', async () => {
   let current = JSON.parse(JSON.stringify(checklistFixture))
   const h = await harness({ respondOverride: ({ method, url }) => {
-    if (url.endsWith('/runs/latest/progress') || url.endsWith('/runs/run-1')) return { id: 'run-1', status: 'COMPLETED', sourceSnapshotSha256: finding.sourceSnapshotSha256 }
+    if (url.endsWith('/runs/latest/progress') || url.endsWith('/runs/run-1/display')) return { id: 'run-1', status: 'COMPLETED', sourceSnapshotSha256: finding.sourceSnapshotSha256 }
     if (url.endsWith('/checklist')) return method === 'put' ? { code: 4104, message: 'CHECKLIST_SNAPSHOT_CHANGED', data: null } : current
   } })
   try {
@@ -1339,7 +1377,7 @@ test('checklist late success after project ABA cannot alter the freshly loaded c
   const pending = deferred()
   let current = JSON.parse(JSON.stringify(checklistFixture))
   const h = await harness({ respondOverride: ({ method, url }) => {
-    if (url.endsWith('/runs/latest/progress') || url.endsWith('/runs/run-1')) return { id: 'run-1', status: 'COMPLETED', sourceSnapshotSha256: finding.sourceSnapshotSha256 }
+    if (url.endsWith('/runs/latest/progress') || url.endsWith('/runs/run-1/display')) return { id: 'run-1', status: 'COMPLETED', sourceSnapshotSha256: finding.sourceSnapshotSha256 }
     if (url.endsWith('/checklist')) return method === 'put' ? pending.promise : current
   } })
   try {
@@ -1385,7 +1423,7 @@ test('reference-only session skips project index reads and late project failures
     const reads = h.requests.filter(request => /\/(?:sources|index\/status)\?/.test(request.url)).length
     sessionSelect(h).props['onUpdate:modelValue']('session-B'); await settle()
     assert.equal(h.requests.filter(request => /\/(?:sources|index\/status)\?/.test(request.url)).length, reads)
-    assert.equal(button(h, 'Refresh evidence index'), undefined)
+    assert.equal(button(h, 'Rebuild evidence index'), undefined)
     oldStatus.resolve({ code: 4104, message: 'BGE-M3 unavailable', data: null }); await settle()
     assert.doesNotMatch(text(h.root), /BGE-M3|could not be loaded|Ready|Index ready/)
     assert.match(text(h.root), /fixed standards only[\s\S]*has not confirmed fixed retrieval readiness/)
@@ -1394,5 +1432,40 @@ test('reference-only session skips project index reads and late project failures
     assert.match(text(h.root), /fixed final-wire budget unavailable/)
     assert.equal(find(h.root, node => node.tag === 'textarea').value, 'Verify the fixed provision')
     assert.equal(h.requests.find(request => request.url.endsWith('/ask/stream')).body.basisScope, 'reference_only')
+  } finally { h.dispose() }
+})
+
+
+test('pending advice status is shared across manual recheck and same-scope sessions, then refreshed after settlement', async () => {
+  const first = deferred(), second = deferred()
+  let reads = 0
+  const h = await harness({ initialView: 'advice', respondOverride: ({ url }) => {
+    if (url === '/advice/project-A/index/status?scope=fullset') {
+      reads++
+      return reads === 1 ? first.promise : reads === 2 ? second.promise : indexReply('AUTHORED fresh after failure')
+    }
+  } })
+  try {
+    assert.equal(reads, 1)
+    assert.match(text(h.root), /Checking source scope and index availability/)
+    const checking = button(h, 'Recheck sources').props.onClick(); await settle()
+    assert.equal(reads, 1, 'A manual check joins the pending scope request')
+    assert.equal(button(h, 'Recheck sources').props.disabled, true)
+    await button(h, 'Create new session').props.onClick(); await settle()
+    assert.equal(reads, 1, 'A same-scope session keeps the pending scope check')
+    first.resolve(indexReply('AUTHORED shared current status')); await checking; await settle()
+    assert.match(text(h.root), /AUTHORED shared current status/)
+    assert.doesNotMatch(text(h.root), /Checking source scope and index availability/)
+    assert.equal(button(h, 'Recheck sources').props.disabled, false)
+    const refreshing = button(h, 'Recheck sources').props.onClick(); await settle()
+    assert.equal(reads, 2, 'A later explicit check makes a fresh request; this is not a result cache')
+    assert.match(text(h.root), /Checking source scope and index availability/)
+    second.resolve({ code: 500, message: 'AUTHORED pending status failure', data: null }); await refreshing; await settle()
+    assert.match(text(h.root), /index request for this scope failed/)
+    assert.doesNotMatch(text(h.root), /Checking source scope and index availability/)
+    assert.equal(button(h, 'Recheck sources').props.disabled, false)
+    await button(h, 'Recheck sources').props.onClick(); await settle()
+    assert.equal(reads, 3, 'A failed check does not poison the next explicit request')
+    assert.match(text(h.root), /AUTHORED fresh after failure/)
   } finally { h.dispose() }
 })

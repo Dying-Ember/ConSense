@@ -36,6 +36,7 @@ public final class OerModelMaterial {
         private final Map<String,SourceDocument> ordinarySources=new LinkedHashMap<>();
         private final Map<String,JsonNode> ordinaryGraphs=new HashMap<>();
         private final Map<String,NormalSourceCandidateGraph.NativeDocxTableIndex> ordinaryTables=new HashMap<>();
+        private final Map<String,NormalSourceCandidateGraph.SelectionIndex> ordinarySelections=new HashMap<>();
         private final Map<String,Boolean> ordinaryClauseScopes=new HashMap<>();
         private final Map<String,JsonNode> ordinaryGuidanceEvidence=new HashMap<>();
         private final Map<String,Map<String,Set<String>>> ordinaryGuidanceIndex=new HashMap<>();
@@ -68,7 +69,9 @@ public final class OerModelMaterial {
             if(pdf){graph=ordinaryGraphs.computeIfAbsent(chunk.getDocumentId(),id->com.consense.service.sources.NormalObservedPreparationService.currentGraph(source));if(!graph.has("nativePdfSourceGroups"))return null;selected=NormalSourceCandidateGraph.selectedPdfForModel(graph,chunk);projection="ordinary-native-pdf-source-groups-model-v1";}
             else{NormalSourceCandidateGraph.NativeDocxTableIndex tables=ordinaryTables.computeIfAbsent(chunk.getDocumentId(),id->new NormalSourceCandidateGraph.NativeDocxTableIndex(source));
                 boolean clauses=ordinaryClauseScopes.computeIfAbsent(chunk.getDocumentId(),id->!JsonUtils.parse(source.getParseCoverageJson()).path("nativeDocxOutline").path("sourceClauseScopes").path("ranges").isEmpty());
-                if(!word&&!tables.present()&&!clauses)return null;graph=ordinaryGraphs.computeIfAbsent(chunk.getDocumentId(),id->com.consense.service.sources.NormalObservedPreparationService.currentGraph(source));selected=NormalSourceCandidateGraph.selectedForModel(graph,chunk,tables);projection=clauses?"ordinary-word-source-scope-model-v1":tables.present()?NormalSourceCandidateGraph.NativeDocxTableIndex.PROJECTION:"ordinary-physical-word-table-model-v1";}
+                if(!word&&!tables.present()&&!clauses)return null;graph=ordinaryGraphs.computeIfAbsent(chunk.getDocumentId(),id->com.consense.service.sources.NormalObservedPreparationService.currentGraph(source));
+                selected=NormalSourceCandidateGraph.selectedForModel(graph,chunk,tables,ordinarySelections.computeIfAbsent(chunk.getDocumentId(),id->new NormalSourceCandidateGraph.SelectionIndex(graph)));
+                projection=clauses?"ordinary-word-source-scope-model-v1":tables.present()?NormalSourceCandidateGraph.NativeDocxTableIndex.PROJECTION:"ordinary-physical-word-table-model-v1";}
             if(selected.path("units").isEmpty()&&selected.path("unknowns").isEmpty())return null;
             ObjectNode identity=object();identity.set("source",graph.path("source").deepCopy());identity.set("generationSha256",graph.path("generationSha256").deepCopy());
             identity.set("coverageSha256",graph.path("coverageSha256").deepCopy());identity.put("projectionVersion",projection);

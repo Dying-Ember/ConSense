@@ -15,7 +15,10 @@ import com.consense.repository.SourceDocumentRepository;
 import com.consense.repository.VettingFindingRepository;
 import com.consense.repository.VettingRunRepository;
 import com.consense.repository.VettingReportSnapshotRepository;
+import com.consense.service.StorageService;
 import com.consense.service.export.EnglishFileOutput;
+import com.consense.service.sources.OerSourceMetadata;
+import com.consense.service.sources.SourceContentDigestMigration;
 import com.consense.web.dto.VettingDtos.*;
 import com.fasterxml.jackson.databind.JsonNode;
 import org.apache.pdfbox.pdmodel.PDDocument;
@@ -83,6 +86,8 @@ class VettingWorkflowTest {
     @Autowired private VettingFindingRepository findings;
     @Autowired private VettingRunRepository runs;
     @Autowired private VettingReportSnapshotRepository reportSnapshots;
+    @Autowired private StorageService storage;
+    @Autowired private org.springframework.jdbc.core.JdbcTemplate fixtureSql;
     @Autowired private ConsenseProperties props;
     @Autowired private VettingSemanticReview semantic;
     @SpyBean private com.consense.service.drafting.DraftingService drafting;
@@ -92,8 +97,12 @@ class VettingWorkflowTest {
 
     @BeforeEach
     void offlineModel() {
+        fixtureSql.execute((org.springframework.jdbc.core.ConnectionCallback<Void>) connection -> {
+            try { SourceContentDigestMigration.install(connection); return null; }
+            catch (Exception failure) { throw new java.sql.SQLException(failure); }
+        });
         when(englishFiles.json(any(JsonNode.class),anyString(),any(Runnable.class))).thenAnswer(call->{call.<Runnable>getArgument(2).run();return call.getArgument(0);});
-        when(englishFiles.docx(any(byte[].class),anyString(),any(Runnable.class))).thenAnswer(call->{call.<Runnable>getArgument(2).run();return call.getArgument(0);});
+        when(englishFiles.docx(any(byte[].class),anyString(),any(Runnable.class),anySet())).thenAnswer(call->{call.<Runnable>getArgument(2).run();return call.getArgument(0);});
         // Explicit renderer replacement: workflow persistence/dispatch only, not LibreOffice acceptance.
         org.mockito.Mockito.doAnswer(call->VettingDocxPdfFixture.render(call.getArgument(0))).when(drafting).renderPdf(any(byte[].class));
         semantic.setInputBudgetObserver(VettingTokenFixture::observe);
@@ -123,7 +132,7 @@ class VettingWorkflowTest {
                 assertTrue(stored.getParseMessage().contains("详细解析"));assertFalse(stored.getTextContent().isEmpty(),"Initial observation stays available");
                 entered.incrementAndGet();if(fail)throw new IllegalStateException("AUTHORED full parse failure");
                 return call.callRealMethod();
-            }).when(parser).parse(eq(name),any(byte[].class),any(DocumentParser.ParsedDocument.class),any(com.consense.document.OerDocumentIdentity.class));
+            }).when(parser).parseOrdinary(eq(name),any(byte[].class),any(DocumentParser.ParsedDocument.class),any(com.consense.document.OerDocumentIdentity.class));
             service.uploadPackage(projectId,Collections.singletonList(upload(name,"application/vnd.openxmlformats-officedocument.wordprocessingml.document",original)),"tender","package");
             assertEquals(1,entered.get());
             SourceDocument saved=documents.findAll().stream().filter(d->projectId.equals(d.getProjectId())&&name.equals(d.getFileName())).findFirst().orElseThrow(AssertionError::new);
@@ -259,7 +268,7 @@ class VettingWorkflowTest {
         assertEquals(4104,assertThrows(BizException.class,()->service.originalSource(projectId,source.getId(),revision,raw," ")).getCode());
         source.setCategory("advice");documents.saveAndFlush(source);
         assertThrows(BizException.class,()->service.originalSource(projectId,source.getId(),revision,raw,"tender"));
-        java.nio.file.Path outside=java.nio.file.Files.createTempFile("consense-outside-original-test-",".docx");
+        java.nio.file.Path outside=java.nio.file.Files.createTempFile(Paths.get("target").toAbsolutePath(),"consense-outside-original-test-",".docx");
         try {
             source.setCategory(SourceDocument.CATEGORY_VETTING_PACKAGE);source.setStoragePath(outside.toString());documents.saveAndFlush(source);
             assertThrows(BizException.class,()->service.originalSource(projectId,source.getId(),revision,raw,"tender"));
@@ -678,12 +687,15 @@ class VettingWorkflowTest {
     }
 
     private SourceDocument source(String projectId, String category, String fileKey, String name, String text) throws Exception {
-        DocumentParser.ParsedDocument parsed = parser.parse(name, name.endsWith(".docx") ? word(text) : text.getBytes(StandardCharsets.UTF_8));
+        byte[] original = name.endsWith(".docx") ? word(text) : text.getBytes(StandardCharsets.UTF_8);
+        StorageService.StoredFile stored = storage.store(projectId, category, upload(name, "application/octet-stream", original));
+        DocumentParser.ParsedDocument parsed = parser.parse(name, original);
         SourceDocument d = new SourceDocument(); d.setProjectId(projectId); d.setCategory(category);
         d.setReviewRole(SourceDocument.CATEGORY_PROJECT_INPUT.equals(category)?"project_fact":SourceDocument.CATEGORY_STANDARD_TEMPLATE.equals(category)?"standard":"tender");d.setDocumentScope("package");
-        d.setFileKey(fileKey); d.setFileName(name); d.setTextContent(parsed.getText());
+        d.setFileKey(fileKey); d.setFileName(name); d.setStoragePath(stored.getPath()); d.setTextContent(parsed.getText());
         d.setParseStatus(parsed.getParseStatus()); d.setPageCount(parsed.getPageCount()); d.setOcrUsed(parsed.isOcrUsed());
-        d.setStructuredContentJson(JsonUtils.write(parsed.getBlocks())); d.setParseCoverageJson(JsonUtils.write(parsed.getCoverage()));
+        OerSourceMetadata.captureOrdinary(d, parsed, original);
+        if (SourceDocument.CATEGORY_VETTING_PACKAGE.equals(category)) OerSourceMetadata.confirmSourceUse(d, true);
         return documents.saveAndFlush(d);
     }
 

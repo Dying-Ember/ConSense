@@ -6,6 +6,7 @@ import com.consense.config.ConsenseProperties;
 import com.consense.domain.QwenGenerationAction;
 import com.consense.repository.QwenGenerationActionRepository;
 import com.consense.service.llm.QwenChatUsagePreflight;
+import com.consense.service.sources.SourceContentDigestMigration;
 import com.fasterxml.jackson.databind.JsonNode;
 import java.io.ByteArrayOutputStream;
 import java.nio.file.Paths;
@@ -21,6 +22,7 @@ import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMock
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.context.*;
 import org.springframework.test.web.servlet.MockMvc;
@@ -47,6 +49,7 @@ class VettingQwenUsagePreflightWorkflowTest {
     }
     @Autowired MockMvc mvc; @Autowired ConsenseProperties props;
     @Autowired QwenGenerationActionRepository actions;
+    @Autowired JdbcTemplate fixtureSql;
     @Autowired com.consense.repository.SourceDocumentRepository sources;
     @Autowired com.consense.repository.VettingRunRepository runs; @Autowired VettingService service;
     @Autowired LlmProfiles profiles; @Autowired QwenChatUsagePreflight usage;
@@ -59,6 +62,10 @@ class VettingQwenUsagePreflightWorkflowTest {
     volatile CountDownLatch entered,release;
 
     @BeforeEach void resetWire() {
+        fixtureSql.execute((org.springframework.jdbc.core.ConnectionCallback<Void>) connection -> {
+            try { SourceContentDigestMigration.install(connection); return null; }
+            catch (Exception failure) { throw new java.sql.SQLException(failure); }
+        });
         bodies.clear();answers.clear();promptTokens=100;answerHook=null;entered=null;release=null;
         props.getQwenUsagePreflight().setEnabled(true);
         props.getQwenUsagePreflight().setVettingMaxPreflights(68);
@@ -75,12 +82,14 @@ class VettingQwenUsagePreflightWorkflowTest {
             assertEquals(1,dispatching.size(),"The reservation must be committed before every transport invocation");
             assertEquals(Boolean.FALSE,body.path("enable_thinking").booleanValue());
             assertFalse(body.path("stream").asBoolean());
+            if("qwen3.8-27b".equals(body.path("model").asText()))assertEquals("json_object",body.path("response_format").path("type").asText());
+            else assertFalse(body.has("response_format"));
             boolean probe=body.path("max_tokens").asInt()==1;
             if(probe) {
                 CountDownLatch start=entered,blocked=release;
                 if(start!=null&&start.getCount()>0){start.countDown();assertTrue(blocked.await(8,TimeUnit.SECONDS));}
             } else {assertEquals(16384,body.path("max_tokens").asInt());Runnable hook=answerHook;if(hook!=null)hook.run();}
-            String content=probe?"x":answers.poll();if(content==null)content="[]";
+            String content=probe?"x":answers.poll();if(content==null)content=body.has("response_format")?"{\"records\":[]}":"[]";
             return JsonUtils.write(Map.of("id",UUID.randomUUID().toString(),"object","chat.completion","model",body.path("model").asText(),
                 "choices",Collections.singletonList(Map.of("index",0,"finish_reason",probe?"length":"stop","message",Map.of("role","assistant","content",content))),
                 "usage",Map.of("prompt_tokens",promptTokens,"completion_tokens",probe?1:2,"total_tokens",promptTokens+(probe?1:2))));
@@ -108,36 +117,36 @@ class VettingQwenUsagePreflightWorkflowTest {
         for(String field:Arrays.asList("tokenizerIdentitySha256","chatTemplateIdentitySha256","effectiveContextIdentitySha256"))assertTrue(observation.path(field).isNull());
         assertFalse(observation.has("providerEstimate"));assertFalse(saved.path("coverage").path("semanticTopics").get(0).path("semanticScopeVerified").asBoolean());
         assertEquals("accepted",packet.path("executionLedger").path("mechanicallyAccepted").asText());
-        assertLedger(queued,1,1,Arrays.asList("planner","answer"));assertEquals(2,bodies.size());
+        assertLedger(queued,1,1,Arrays.asList("final","answer"));assertEquals(2,bodies.size());
         for(JsonNode body:bodies)assertEquals("qwen".equals(profile)?"qwen3.8-27b":"qwen3.8-flash",body.path("model").asText());
         verifyNoInteractions(local,miniMax);assertFalse(saved.toString().contains("QWEN_FAKE_ONLY"));
     }
     @Test void malformedFirstAnswerCountsOnlyTheTwoDistinctInputsAndTwoBoundAnswers()throws Exception {
-        answers.add("[]}");answers.add("[]");String project=project();upload(project);JsonNode queued=start(project,"qwen"),saved=await(project,queued.path("id").asText());
+        answers.add("[]}");answers.add("{\"records\":[]}");String project=project();upload(project);JsonNode queued=start(project,"qwen"),saved=await(project,queued.path("id").asText());
         assertEquals("COMPLETED",saved.path("status").asText());JsonNode attempts=packet(saved).path("attempts");assertEquals(2,attempts.size());
         assertEquals("[]}",attempts.get(0).path("rawResponse").asText());assertEquals("structured_output_invalid",attempts.get(0).path("status").asText());assertEquals("decoded",attempts.get(1).path("status").asText());
         JsonNode original=attempts.get(0).path("input"),repair=attempts.get(1).path("input");assertNotEquals(original.path("serializedInputSha256"),repair.path("serializedInputSha256"));
         assertEquals(original.path("sourceSnapshotSha256"),repair.path("sourceSnapshotSha256"));assertEquals(original.path("schema"),repair.path("schema"));
         assertTrue(repair.path("messages").get(1).path("content").asText().endsWith(original.path("messages").get(1).path("content").asText()));
-        assertLedger(queued,2,2,Arrays.asList("planner","answer","repair","answer"));assertEquals(4,bodies.size());verifyNoInteractions(local,miniMax);
+        assertLedger(queued,2,2,Arrays.asList("final","answer","repair","answer"));assertEquals(4,bodies.size());verifyNoInteractions(local,miniMax);
     }
     @Test void twoInvalidAnswersKeepBothFailuresAndNeverConsumeThirdAnswer()throws Exception {
         answers.add("[]}");answers.add("[{}]");answers.add("[]");String project=project();upload(project);JsonNode queued=start(project,"qwen-flash"),saved=await(project,queued.path("id").asText());
         assertEquals("FAILED",saved.path("status").asText());assertEquals(0,saved.path("reliablePackets").size());assertEquals(2,packet(saved).path("attempts").size());assertEquals(1,answers.size());
-        assertLedger(queued,2,2,Arrays.asList("planner","answer","repair","answer"));assertEquals(4,bodies.size());verifyNoInteractions(local,miniMax);
+        assertLedger(queued,2,2,Arrays.asList("final","answer","repair","answer"));assertEquals(4,bodies.size());verifyNoInteractions(local,miniMax);
     }
     @Test void durablePreflightCeilingStopsTheNewRepairInputBeforeAnotherPaidDispatch()throws Exception {
         props.getQwenUsagePreflight().setVettingMaxPreflights(1);props.getQwenUsagePreflight().setVettingMaxAnswers(2);props.getQwenUsagePreflight().setVettingMaxTotal(3);
-        answers.add("[]}");answers.add("[]");String project=project();upload(project);JsonNode queued=start(project,"qwen"),saved=await(project,queued.path("id").asText());
+        answers.add("[]}");answers.add("{\"records\":[]}");String project=project();upload(project);JsonNode queued=start(project,"qwen"),saved=await(project,queued.path("id").asText());
         assertEquals("FAILED",saved.path("status").asText());assertEquals("budget_unknown",packet(saved).path("inputBudgetStatus").asText());
         assertEquals(1,packet(saved).path("attempts").size());assertEquals("[]}",packet(saved).path("attempts").get(0).path("rawResponse").asText());
-        assertLedger(queued,1,1,Arrays.asList("planner","answer"));assertEquals(2,bodies.size());assertEquals(1,answers.size());verifyNoInteractions(local,miniMax);
+        assertLedger(queued,1,1,Arrays.asList("final","answer"));assertEquals(2,bodies.size());assertEquals(1,answers.size());verifyNoInteractions(local,miniMax);
     }
     @Test void retryCeilingPreservesFirstFailureWithoutRepairOrSecondAnswer()throws Exception {
         props.getQwenUsagePreflight().setVettingMaxPreflights(2);props.getQwenUsagePreflight().setVettingMaxAnswers(2);props.getQwenUsagePreflight().setVettingMaxTotal(2);
-        answers.add("[]}");answers.add("[]");String project=project();upload(project);JsonNode queued=start(project,"qwen"),saved=await(project,queued.path("id").asText());
+        answers.add("[]}");answers.add("{\"records\":[]}");String project=project();upload(project);JsonNode queued=start(project,"qwen"),saved=await(project,queued.path("id").asText());
         assertEquals("FAILED",saved.path("status").asText());assertEquals(1,packet(saved).path("attempts").size());assertEquals("[]}",packet(saved).path("attempts").get(0).path("rawResponse").asText());
-        assertLedger(queued,1,1,Arrays.asList("planner","answer"));assertEquals(2,bodies.size());assertEquals(1,answers.size());
+        assertLedger(queued,1,1,Arrays.asList("final","answer"));assertEquals(2,bodies.size());assertEquals(1,answers.size());
     }
     @Test void queuedProfilesRemainCapturedAndActiveReuseDoesNotSwitchTheFirstRun()throws Exception {
         String first=project(),second=project();upload(first);upload(second);entered=new CountDownLatch(1);release=new CountDownLatch(1);
@@ -145,18 +154,24 @@ class VettingQwenUsagePreflightWorkflowTest {
         JsonNode reused=start(first,"qwen-flash"),other=start(second,"qwen-flash");assertEquals(queued.path("id"),reused.path("id"));assertEquals(queued.path("modelIdentity"),reused.path("modelIdentity"));
         release.countDown();JsonNode saved=await(first,queued.path("id").asText()),next=await(second,other.path("id").asText());
         assertEquals("COMPLETED",saved.path("status").asText());assertEquals("COMPLETED",next.path("status").asText());assertEquals("qwen",saved.path("modelIdentity").path("profileId").asText());assertEquals("qwen-flash",next.path("modelIdentity").path("profileId").asText());
-        assertLedger(queued,1,1,Arrays.asList("planner","answer"));assertLedger(other,1,1,Arrays.asList("planner","answer"));assertEquals(4,bodies.size());
+        assertLedger(queued,1,1,Arrays.asList("final","answer"));assertLedger(other,1,1,Arrays.asList("final","answer"));assertEquals(4,bodies.size());
     }
     @Test void queuedPolicyDriftFailsBothRunsWithoutLeavingTheSecondQueuedForever()throws Exception {
         String first=project(),second=project();upload(first);upload(second);entered=new CountDownLatch(1);release=new CountDownLatch(1);
         JsonNode queued=start(first,"qwen");assertTrue(entered.await(5,TimeUnit.SECONDS));JsonNode other=start(second,"qwen");
         props.getQwenUsagePreflight().setVettingMaxTotal(101);release.countDown();
-        assertEquals("FAILED",await(first,queued.path("id").asText()).path("status").asText());assertEquals("FAILED",await(second,other.path("id").asText()).path("status").asText());
+        JsonNode firstSaved=await(first,queued.path("id").asText()),secondSaved=await(second,other.path("id").asText());
+        assertEquals("COMPLETED",firstSaved.path("status").asText());assertEquals("FAILED",secondSaved.path("status").asText());
+        assertEquals(0,firstSaved.path("coverage").path("reviewedDocuments").asInt());
+        assertEquals(0,firstSaved.path("reliablePackets").size());
+        assertEquals("budget_unknown",packet(firstSaved).path("inputBudgetStatus").asText());
+        assertEquals("not_submitted",packet(firstSaved).path("executionLedger").path("submitted").asText());
+        assertFalse(packet(firstSaved).path("actualGatewayCallStarted").asBoolean());
         QwenGenerationAction a=actions.findById("vetting:"+queued.path("id").asText()).orElseThrow();assertEquals(1,a.getTotal());assertEquals("DISPATCH_UNKNOWN",JsonUtils.parse(a.getReservationsJson()).get(0).path("state").asText());
         assertFalse(actions.findById("vetting:"+other.path("id").asText()).isPresent());assertEquals(1,bodies.size());verifyNoInteractions(local,miniMax);
     }
     @Test void sourceDriftAfterMalformedAnswerKeepsConsumedUnknownAndStopsRetry()throws Exception {
-        String project=project();upload(project);answers.add("[]}");answers.add("[]");answerHook=()->{com.consense.domain.SourceDocument d=sources.findByProjectIdOrderByIdAsc(project).get(0);d.setTextContent(d.getTextContent()+" changed source TEST ONLY");sources.saveAndFlush(d);};
+        String project=project();upload(project);answers.add("[]}");answers.add("{\"records\":[]}");answerHook=()->{com.consense.domain.SourceDocument d=sources.findByProjectIdOrderByIdAsc(project).get(0);d.setTextContent(d.getTextContent()+" changed source TEST ONLY");sources.saveAndFlush(d);};
         JsonNode queued=start(project,"qwen"),saved=await(project,queued.path("id").asText());assertEquals("FAILED",saved.path("status").asText());
         QwenGenerationAction a=actions.findById("vetting:"+queued.path("id").asText()).orElseThrow();assertEquals(2,a.getTotal());assertEquals(1,a.getPreflights());assertEquals(1,a.getAnswers());
         assertEquals("DISPATCH_UNKNOWN",JsonUtils.parse(a.getReservationsJson()).get(1).path("state").asText());assertEquals(2,bodies.size());assertEquals(1,answers.size());
@@ -164,7 +179,7 @@ class VettingQwenUsagePreflightWorkflowTest {
     @Test void checkpointRecoveryRetainsDeadlineAndRefusesPaidReplay()throws Exception {
         String project=project();upload(project);JsonNode queued=start(project,"qwen"),saved=await(project,queued.path("id").asText());assertEquals("COMPLETED",saved.path("status").asText());
         String id="vetting:"+queued.path("id").asText();QwenGenerationAction before=actions.findById(id).orElseThrow();JsonNode original=packet(saved).path("attempts").get(0).path("input");
-        QwenChatUsagePreflight.Operation operation=usage.capture(profiles.resolve("qwen"),"vetting");String suffix="\nReturn only a JSON array conforming to this schema:\n"+JsonUtils.write(original.path("schema"));
+        QwenChatUsagePreflight.Operation operation=usage.capture(profiles.resolve("qwen"),"vetting");String suffix="\nReturn only one JSON object with exactly one key, \"records\". Its value must be an array conforming to this schema:\n"+JsonUtils.write(original.path("schema"));
         String fullSystem=original.path("messages").get(0).path("content").asText();assertTrue(fullSystem.endsWith(suffix));
         VettingInputBudget.Input in=operation.input(fullSystem.substring(0,fullSystem.length()-suffix.length()),original.path("messages").get(1).path("content").asText(),original.path("schema"),original.path("sourceSnapshotSha256").asText());assertEquals(original.path("serializedInputSha256").asText(),in.getSerializedInputSha256());
         try(QwenChatUsagePreflight.Operation.ActionScope scope=operation.openAction(id,()->{})) {IllegalStateException rejected=assertThrows(IllegalStateException.class,()->operation.observe(in,"final",()->{}));assertEquals("qwen_generation_already_reserved_no_replay",rejected.getMessage());}

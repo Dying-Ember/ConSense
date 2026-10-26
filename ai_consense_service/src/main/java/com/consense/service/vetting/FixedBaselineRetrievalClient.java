@@ -15,6 +15,7 @@ import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.nio.file.attribute.BasicFileAttributes;
+import java.nio.file.attribute.FileTime;
 import java.security.MessageDigest;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -35,11 +36,11 @@ public class FixedBaselineRetrievalClient {
         Row(long offset,int length,String rawSha,String normalizedSha) { this.offset=offset;this.length=length;this.rawSha=rawSha;this.normalizedSha=normalizedSha; }
     }
     private static final class Pin {
-        final Path path; final long bytes, modified; final Object fileKey;
-        Pin(Path p) throws IOException { path=p; BasicFileAttributes a=Files.readAttributes(p,BasicFileAttributes.class);bytes=a.size();modified=a.lastModifiedTime().toMillis();fileKey=a.fileKey(); }
+        final Path path; final long bytes; final FileTime modified; final Object fileKey;
+        Pin(Path p) throws IOException { path=p; BasicFileAttributes a=Files.readAttributes(p,BasicFileAttributes.class);bytes=a.size();modified=a.lastModifiedTime();fileKey=a.fileKey(); }
         void current() throws IOException {
             BasicFileAttributes a=Files.readAttributes(path,BasicFileAttributes.class);
-            require(a.isRegularFile() && a.size()==bytes && a.lastModifiedTime().toMillis()==modified && Objects.equals(a.fileKey(),fileKey),"frozen_file_changed");
+            require(a.isRegularFile() && a.size()==bytes && a.lastModifiedTime().equals(modified) && Objects.equals(a.fileKey(),fileKey),"frozen_file_changed");
         }
     }
     private static final class Catalog {
@@ -182,6 +183,10 @@ public class FixedBaselineRetrievalClient {
     }
     public FixedReferenceEvidence evidence(VectorStore.SearchHit hit) {
         require(hit!=null&&hit.getPayload()!=null,"fixed_reference_hit_missing");Catalog c=ready();checkCurrent(c);
+        return evidence(c,hit);
+    }
+    private FixedReferenceEvidence evidence(Catalog c,VectorStore.SearchHit hit) {
+        require(hit!=null&&hit.getPayload()!=null,"fixed_reference_hit_missing");
         JsonNode p=JSON.valueToTree(hit.getPayload());
         require(properties.getManifestSha256().equals(p.path("fixedBaselineManifestSha256").asText())&&c.manifest.path("version").asText().equals(p.path("fixedBaselineVersion").asText()),"fixed_reference_hit_pin_mismatch");
         ObjectNode original=((ObjectNode)p).deepCopy();for(String key:LOCAL_FIELDS) original.remove(key);
@@ -193,9 +198,36 @@ public class FixedBaselineRetrievalClient {
         return makeEvidence(c,hit.getId(),hit.getScore(),original,unit,p.path("fixedReferenceOrigin").asBoolean());
     }
     public void assertCurrent(List<VectorStore.SearchHit> hits) {
-        Catalog c=ready();checkCurrent(c);List<JsonNode> selected=new ArrayList<>();
-        for(VectorStore.SearchHit h:hits)selected.add(evidence(h).getPayload());
+        currentReadGuard(hits).run();
+    }
+    /** Full entry proof; intermediate waits inspect file identity and exact selected rows. Saving still re-hashes originals. */
+    public Runnable currentReadGuard(List<VectorStore.SearchHit> hits) {
+        return currentReadGuard(hits,null);
+    }
+    public Runnable currentReadGuard(List<VectorStore.SearchHit> hits,java.util.function.Consumer<JsonNode> checkedManifest) {
+        Catalog c=ready();List<JsonNode> selected=new ArrayList<>();
+        for(VectorStore.SearchHit hit:hits)selected.add(evidence(c,hit).getPayload());
+        Map<Path,Pin> pins=new LinkedHashMap<>();
+        try {
+            for(JsonNode parent:selected){JsonNode descriptor=originalDescriptor(c,parent.path("originalSourceSha256").asText());
+                Path path=Paths.get(descriptor.path("path").asText()).toAbsolutePath().normalize();pins.putIfAbsent(path,new Pin(path));}
+            if(migrationConfigured()) {
+                for(String path:Arrays.asList(properties.getMigrationReceiptPath(),properties.getQueryRuntimePath())){
+                    Path file=Paths.get(path).toAbsolutePath().normalize();pins.putIfAbsent(file,new Pin(file));}
+                JsonNode receipt=pinned(properties.getMigrationReceiptPath(),properties.getMigrationReceiptSha256());
+                List<JsonNode> artifacts=new ArrayList<>();artifacts.add(receipt.path("candidateMetadata"));
+                for(String kind:Arrays.asList("embedding","reranker"))artifacts.add(c.manifest.path("modelPublications").path(kind));
+                for(JsonNode artifact:artifacts){Path file=Paths.get(artifact.path("path").asText()).toAbsolutePath().normalize();pins.putIfAbsent(file,new Pin(file));}
+            }
+        }catch(IOException unavailable){throw new IllegalStateException("fixed_reference_read_guard_unavailable",unavailable);}
         assertOriginals(c,selected);checkCurrent(c);
+        Runnable guard=()->{
+            require(enabled()&&c.configIdentity.equals(configIdentity()),"fixed_reference_configuration_changed");
+            try{c.manifestPin.current();c.corpusPin.current();for(Pin pin:pins.values())pin.current();}
+            catch(IOException unavailable){throw new IllegalStateException("fixed_reference_read_guard_unavailable",unavailable);}
+            for(JsonNode parent:selected)readParent(c,parent.path("id").asText());
+        };
+        guard.run();if(checkedManifest!=null)checkedManifest.accept(c.manifest.deepCopy());return guard;
     }
     public String toModelMaterial(List<VectorStore.SearchHit> hits,int maxCharacters) {
         assertCurrent(hits);
@@ -286,12 +318,7 @@ public class FixedBaselineRetrievalClient {
         for(JsonNode parent:selected) {
             readParent(c,parent.path("id").asText());
             String expected=parent.path("originalSourceSha256").asText();if(!checked.add(expected))continue;
-            JsonNode descriptor=null;
-            for(JsonNode source:originalSources(c.manifest))if(expected.equals(source.path("sha256").asText())) {
-                require(descriptor==null,"fixed_original_descriptor_ambiguous");descriptor=source;
-            }
-            require(descriptor!=null&&text(descriptor.path("path"))&&descriptor.path("bytes").isIntegralNumber()
-                    &&descriptor.path("bytes").asLong()>0&&shaText(expected),"fixed_original_descriptor_invalid");
+            JsonNode descriptor=originalDescriptor(c,expected);
             try {
                 Path path=Paths.get(descriptor.path("path").asText()).toAbsolutePath().normalize();Pin before=new Pin(path);
                 require(Files.isRegularFile(path)&&before.bytes==descriptor.path("bytes").asLong(),"fixed_original_size_changed");
@@ -302,6 +329,15 @@ public class FixedBaselineRetrievalClient {
                 before.current();require(count==before.bytes&&expected.equals(hex(digest.digest())),"fixed_original_sha_changed");
             }catch(IOException e){throw new IllegalStateException("fixed_reference_original_unavailable",e);}
         }
+    }
+    private JsonNode originalDescriptor(Catalog c,String expected) {
+        JsonNode descriptor=null;
+        for(JsonNode source:originalSources(c.manifest))if(expected.equals(source.path("sha256").asText())) {
+            require(descriptor==null,"fixed_original_descriptor_ambiguous");descriptor=source;
+        }
+        require(descriptor!=null&&text(descriptor.path("path"))&&descriptor.path("bytes").isIntegralNumber()
+                &&descriptor.path("bytes").asLong()>0&&shaText(expected),"fixed_original_descriptor_invalid");
+        return descriptor;
     }
     private void validateHealth(Catalog c,JsonNode h) {
         if(migrationConfigured()) { validateMigratedHealth(c,h);return; }

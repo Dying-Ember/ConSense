@@ -26,6 +26,26 @@ import static org.mockito.Mockito.*;
 
 /** Source-reviewed authored wire; mocked registry/client, no neural or online acceptance claim. */
 class OerBusinessEvidenceTest {
+    @Test void selectsContractCompositionAndLinkedAmendmentBeforeIncidentalGccMentions() {
+        List<Chunk> chunks=new ArrayList<>();
+        chunks.add(incorporationChunk("coc","3","09 - CoC.docx","The Hong Kong Housing Authority General Conditions of Contract for Building Works 2013 Edition (version 1.1)."));
+        for(int i=0;i<123;i++)chunks.add(incorporationChunk("incidental-"+i,"2","10 - SCC.docx","Clause 6.3 of the General Conditions of Contract governs another topic "+i));
+        chunks.add(incorporationChunk("variation","2","10 - SCC.docx","The Contract Manager may order such Variation pursuant to Clause 11.2 of the General Conditions of Contract under SCC11.305(4)."));
+        chunks.add(incorporationChunk("amendment","2","10 - SCC.docx","Clause 8.4(2)(b)(iv) of the General Conditions of Contract is amended by substituting with the following:-"));
+        chunks.add(incorporationChunk("replacement","2","10 - SCC.docx","(iv) a Variation other than one agreed under SCC11.305(4), or"));
+        List<VectorStore.SearchHit> standards=Arrays.asList(incorporationStandard("gcc-8.4","8.4 Extension of Time"),incorporationStandard("gcc-11.2","11.2 Variations"));
+        OerBusinessEvidence.IncorporationOrigins selected=OerBusinessEvidence.incorporationOrigins(chunks,standards);
+        assertTrue(selected.hasComposition);assertEquals(Arrays.asList("coc","variation","amendment","replacement"),selected.ids);
+    }
+
+    private static Chunk incorporationChunk(String id,String documentId,String fileName,String content){
+        Chunk chunk=new Chunk();chunk.setId(id);chunk.setDocumentId(documentId);chunk.setFileName(fileName);chunk.setRole("tender");chunk.setContent(content);return chunk;
+    }
+    private static VectorStore.SearchHit incorporationStandard(String id,String text){
+        Map<String,Object> payload=new LinkedHashMap<>();payload.put("content",text);payload.put("fileLabel","GCC 2013");payload.put("anchor","clause/"+id);payload.put("sourceRole","standard");
+        return new VectorStore.SearchHit(id,1d,payload);
+    }
+
     static final class Wire {
         final CanonicalEvidenceService registry=mock(CanonicalEvidenceService.class);
         final OerCanonicalRetrievalClient client=mock(OerCanonicalRetrievalClient.class);
@@ -201,6 +221,9 @@ class OerBusinessEvidenceTest {
         ReflectionTestUtils.setField(w.service,"sourcePages",pages);
         OerBusinessEvidence.Session pinned=w.load();assertNotEquals(unpinned.indexKey,pinned.indexKey);assertNotEquals(unpinned.identitySha256(),pinned.identitySha256());
         assertEquals(pinned.identitySha256(),w.service.currentIdentity("project","vetting",Collections.singletonList(w.document)));
+        CanonicalSourceBinding compact=new CanonicalSourceBinding();org.springframework.beans.BeanUtils.copyProperties(w.binding,compact);compact.setSnapshotJson(null);
+        when(w.registry.currentDisplayBindings("project","vetting",Collections.singletonList(w.document))).thenReturn(Collections.singletonList(compact));
+        assertEquals(pinned.identitySha256(),w.service.currentDisplayIdentity("project","vetting",Collections.singletonList(w.document)));
         List<VectorStore.SearchHit> hits=w.service.sourceHits(pinned,Collections.singletonList(pinned.chunks().get(0).getId()));
         List<?> pointers=(List<?>)hits.get(0).getPayload().get("canonicalEvidence");
         assertEquals(identity,((EvidencePointer)pointers.get(0)).getSourceRenderEvidenceIdentitySha256());

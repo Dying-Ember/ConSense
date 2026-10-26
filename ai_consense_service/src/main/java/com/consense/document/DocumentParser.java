@@ -110,6 +110,13 @@ public class DocumentParser {
 
     /** Only routing observations are collected here; this result is never a complete parse. */
     public ParsedDocument observe(String fileName, byte[] bytes) {
+        return observe(fileName,bytes,false);
+    }
+    /** Ordinary uploads retain native identity evidence without waiting for optional visual work. */
+    public ParsedDocument observeOrdinary(String fileName,byte[] bytes) {
+        return observe(fileName,bytes,true);
+    }
+    private ParsedDocument observe(String fileName, byte[] bytes,boolean nativeFirst) {
         String ext = extensionOf(fileName), sha = DocumentParseProbe.sha256(bytes);
         ParseCoverage coverage = new ParseCoverage();
         List<DocumentBlock> blocks = new ArrayList<>(); List<PageText> pages = new ArrayList<>();
@@ -134,23 +141,31 @@ public class DocumentParser {
                         PositionedStripper stripper = new PositionedStripper(1, pdf.getPage(0), frame);
                         stripper.setStartPage(1); stripper.setEndPage(1); text = normalize(stripper.getText(pdf)); blocks.addAll(stripper.blocks);
                         if (text.replaceAll("\\s", "").length() < props.getOcr().getTextLayerMinChars()) {
-                            PDFRenderer renderer = new PDFRenderer(pdf);
-                            renderer.setAnnotationsFilter(annotation -> !(annotation instanceof org.apache.pdfbox.pdmodel.interactive.annotation.PDAnnotationWidget)
-                                    || annotation.getNormalAppearanceStream() != null);
-                            BufferedImage image = renderer.renderImageWithDPI(0, 200, ImageType.RGB);
-                            if (!(text.isEmpty() && isWhitePage(image))) {
-                                if (!props.getOcr().isEnabled() || !ocrClient.available()) throw new IOException("Identity OCR disabled or unavailable");
-                                ByteArrayOutputStream out = new ByteArrayOutputStream(); ImageIO.write(image, "png", out);
-                                byte[] input = out.toByteArray(); OcrClient.OcrResult observed = ocrClient.observeIdentity(input,
-                                        pdfSourceContext(fileName, sha, pageCount, 1, pdf.getPage(0), image, input));
-                                if (observed == null) throw new IOException("Identity OCR returned no observation");
-                                cached.put(1, observed); imageHashes.put(1, DocumentParseProbe.sha256(input));
-                                blocks.addAll(ocrBlocks(observed, 1, image.getWidth(), image.getHeight()));
-                                if (text.isEmpty()) text = normalize(observed.getText());
-                                ocrUsed = true; coverage.setOcrPages(1);
+                            if(nativeFirst)coverage.getLimitations().add("First-page visual identity reading deferred; available native text retained and identity remains unconfirmed.");
+                            else if(!props.getOcr().isEnabled()||!ocrClient.available())throw new IOException("Identity OCR disabled or unavailable");
+                            else {
+                                PDFRenderer renderer = new PDFRenderer(pdf);
+                                renderer.setAnnotationsFilter(annotation -> !(annotation instanceof org.apache.pdfbox.pdmodel.interactive.annotation.PDAnnotationWidget)
+                                        || annotation.getNormalAppearanceStream() != null);
+                                BufferedImage image = renderer.renderImageWithDPI(0, 200, ImageType.RGB);
+                                try {
+                                    if (!(text.isEmpty() && isWhitePage(image))) {
+                                        ByteArrayOutputStream out = new ByteArrayOutputStream(); ImageIO.write(image, "png", out);
+                                        byte[] input = out.toByteArray(); OcrClient.OcrResult observed = ocrClient.observeIdentity(input,
+                                                pdfSourceContext(fileName, sha, pageCount, 1, pdf.getPage(0), image, input));
+                                        if (observed == null) throw new IOException("Identity OCR returned no observation");
+                                        cached.put(1, observed); imageHashes.put(1, DocumentParseProbe.sha256(input));
+                                        blocks.addAll(ocrBlocks(observed, 1, image.getWidth(), image.getHeight()));
+                                        if (text.isEmpty()) text = normalize(observed.getText());
+                                        ocrUsed = true; coverage.setOcrPages(1);
+                                    }
+                                } finally {image.flush();}
                             }
                         }
-                        pages.add(new PageText(1, text, ocrUsed ? "identity_ocr" : "identity_native")); coverage.setParsedPages(1);
+                        boolean missingNative=nativeFirst&&JsonUtils.isBlankText(text);
+                        pages.add(new PageText(1,text,missingNative?"identity_native_missing":ocrUsed?"identity_ocr":"identity_native"));
+                        coverage.setParsedPages(missingNative?0:1);
+                        if(missingNative){coverage.getFailedPages().add(1);coverage.getNeedsReviewPages().add(1);}
                     }
                 }
             } else if ("docx".equals(ext)) {
@@ -185,8 +200,16 @@ public class DocumentParser {
         return parse(fileName,bytes,observation,null);
     }
     public ParsedDocument parse(String fileName, byte[] bytes, ParsedDocument observation, OerDocumentIdentity identity) {
-        validateObservation(fileName, bytes, observation);
-        return parse(fileName, bytes, DocumentParseProbe.disabled(), observation, readingPlan(fileName,bytes,observation,identity));
+        OerReadingPlan plan=readingPlan(fileName,bytes,observation,identity);
+        // A verified human text confirmation starts a fresh read; every other identity still needs its live observation token.
+        if(observation!=null||!plan.manuallyConfirmedText())validateObservation(fileName, bytes, observation);
+        return parse(fileName, bytes, DocumentParseProbe.disabled(), observation, plan);
+    }
+    /** Same identity/token gates as rich parsing; optional PDF quality work is deferred. */
+    public ParsedDocument parseOrdinary(String fileName,byte[] bytes,ParsedDocument observation,OerDocumentIdentity identity) {
+        OerReadingPlan plan=readingPlan(fileName,bytes,observation,identity,true);
+        if(observation!=null||!plan.manuallyConfirmedText())validateObservation(fileName,bytes,observation);
+        return parse(fileName,bytes,DocumentParseProbe.disabled(),observation,plan);
     }
 
     private String ocrConfigIdentity() { return DocumentParseProbe.sha256(JsonUtils.write(props.getOcr()).getBytes(StandardCharsets.UTF_8)); }
@@ -205,17 +228,25 @@ public class DocumentParser {
         return parse(fileName,bytes,parseJobId,sourceId,expectedSourceSha256,observation,null);
     }
     public ParsedDocument parse(String fileName, byte[] bytes, String parseJobId, String sourceId, String expectedSourceSha256, ParsedDocument observation, OerDocumentIdentity identity) {
-        validateObservation(fileName, bytes, observation);
         OerReadingPlan plan=readingPlan(fileName,bytes,observation,identity);
+        if(observation!=null||!plan.manuallyConfirmedText())validateObservation(fileName, bytes, observation);
         return parse(fileName, bytes, DocumentParseProbe.start(props, parseJobId, sourceId, expectedSourceSha256, fileName, bytes), observation,plan);
     }
+    public ParsedDocument parseOrdinary(String fileName,byte[] bytes,String parseJobId,String sourceId,String expectedSourceSha256,ParsedDocument observation,OerDocumentIdentity identity) {
+        OerReadingPlan plan=readingPlan(fileName,bytes,observation,identity,true);
+        if(observation!=null||!plan.manuallyConfirmedText())validateObservation(fileName,bytes,observation);
+        return parse(fileName,bytes,DocumentParseProbe.start(props,parseJobId,sourceId,expectedSourceSha256,fileName,bytes),observation,plan);
+    }
     private OerReadingPlan readingPlan(String fileName,byte[] bytes,ParsedDocument observation,OerDocumentIdentity identity) {
+        return readingPlan(fileName,bytes,observation,identity,false);
+    }
+    private OerReadingPlan readingPlan(String fileName,byte[] bytes,ParsedDocument observation,OerDocumentIdentity identity,boolean nativeFirst) {
         String sha=DocumentParseProbe.sha256(bytes);
         if(identity==null && observation!=null) {
             OerDocumentIdentity candidate=new OerSourceRouting().route(fileName,sha,observation);
             if(!"unknown".equals(candidate.getIdentityStatus()))identity=candidate;
         }
-        return new OerReadingPlan(sha,extensionOf(fileName),identity);
+        return new OerReadingPlan(sha,extensionOf(fileName),identity,nativeFirst);
     }
 
     private ParsedDocument parse(String fileName,byte[] bytes,DocumentParseProbe probe) {
@@ -284,22 +315,28 @@ public class DocumentParser {
     private ParsedDocument parsePdf(String fileName,byte[] bytes,DocumentParseProbe probe,ParsedDocument initialObservation,OerReadingPlan readingPlan) throws Exception {
         try (PDDocument document = PDDocument.load(bytes)) {
             int totalPages = document.getNumberOfPages();
+            boolean nativeFirst=readingPlan.nativeFirst();
             String sourceSha = DocumentParseProbe.sha256(bytes);
             List<PageText> pages = new ArrayList<>(totalPages);
             List<DocumentBlock> blocks = new ArrayList<>();
             List<PdfPageEvidence> nativeEvidence = new ArrayList<>();
             for (int pageNo = 1; pageNo <= totalPages; pageNo++)
                 nativeEvidence.add(PdfNativeSupport.page(pageNo, document.getPage(pageNo - 1)));
-            PdfNativeSupport.collectForms(document, nativeEvidence);
             ParseCoverage coverage = new ParseCoverage();
             coverage.setTotalPages(totalPages);
-            for (PdfPageEvidence evidence : nativeEvidence) if (evidence.getPageNo() == 0)
+            try{PdfNativeSupport.collectForms(document,nativeEvidence,!nativeFirst);}
+            catch(IOException|RuntimeException failure){
+                if(!nativeFirst)throw failure;
+                coverage.getLimitations().add("Native form metadata incomplete; available page text remains readable: "+abbreviate(failure.getMessage(),120));
+            }
+            for (PdfPageEvidence evidence : nativeEvidence) if (evidence.getPageNo() == 0) {
                 coverage.getLimitations().add("Unassigned form widgets retained without inventing a physical page; form values and appearances need review.");
-            PDFRenderer renderer = new PDFRenderer(document);
-            // PageDrawer constructs missing annotation appearances by default. A stored
-            // AcroForm /V is not an original visible /AP; do not synthesize it for OCR.
-            renderer.setAnnotationsFilter(annotation -> !(annotation instanceof org.apache.pdfbox.pdmodel.interactive.annotation.PDAnnotationWidget)
-                    || annotation.getNormalAppearanceStream() != null);
+                if(nativeFirst)for(PdfPageEvidence.PdfFormField field:evidence.getFormFields()){
+                    DocumentBlock unassigned=block("pdf_form_widget",field.getId(),null,"","native_form");
+                    unassigned.setPdfFormField(field);unassigned.setNativeVisibilityStatus(field.getVisibilityStatus());blocks.add(unassigned);
+                }
+            }
+            PDFRenderer renderer = null;
             Boolean ocrReady = null;
             for (int pageNo = 1; pageNo <= totalPages; pageNo++) {
                 progress("第 "+pageNo+" / "+totalPages+" 页：读取文字、表格与版面");
@@ -323,7 +360,7 @@ public class DocumentParser {
                                 && "appearance_text_unverified".equals(field.getValueStatus()))
                             formBlock.setText(field.getAppearanceValue());
                         if (!JsonUtils.isBlankText(formBlock.getText())) effectiveForms.append('\n').append(formBlock.getText());
-                        if (field.isConflict() || (field.getFieldValue() != null && !field.getFieldValue().isEmpty()
+                        if ("appearance_deferred_native_first".equals(field.getValueStatus()) || field.isConflict() || (field.getFieldValue() != null && !field.getFieldValue().isEmpty()
                                 && !"appearance_text_unverified".equals(field.getValueStatus()))) {
                             if (!coverage.getNeedsReviewPages().contains(pageNo)) coverage.getNeedsReviewPages().add(pageNo);
                             coverage.getLimitations().add("Page " + pageNo + " form " + field.getId() + ": " + field.getValueStatus() + "; stored and appearance values retained separately.");
@@ -347,16 +384,37 @@ public class DocumentParser {
                     probe.event("pdf_native_extraction_failure",pageNo,DocumentParseProbe.map("failureChain",DocumentParseProbe.failures(e),"nativeBlocksBeforeDiscard",stripper.blocks));
                     List<DocumentBlock> nativeBlocks = new ArrayList<>(stripper.blocks);
                     nativeBlocks.addAll(formBlocks); pageEvidence.setNativeBlocks(nativeBlocks);
-                    text = "";
-                    pageBlocks = new ArrayList<>(formBlocks);
+                    text = nativeFirst?joinBlocks(nativeBlocks):"";
+                    pageBlocks = nativeFirst?nativeBlocks:new ArrayList<>(formBlocks);
                     requiresOcr = true;
                     coverage.getLimitations().add("Page " + pageNo + " native extraction failed: "
                             + abbreviate(e.getMessage(), 120));
                 }
                 String status = "native";
-                if (requiresOcr) {
+                if(requiresOcr&&nativeFirst&&(!readingPlan.confirmedNonDrawing()||!JsonUtils.isBlankText(text))){
+                    status="native_optional_deferred";
+                    if(!coverage.getNeedsReviewPages().contains(pageNo))coverage.getNeedsReviewPages().add(pageNo);
+                    if(JsonUtils.isBlankText(text))coverage.getFailedPages().add(pageNo);
+                    ObjectNode deferred=JsonUtils.mapper().createObjectNode();deferred.put("pageNo",pageNo).put("status","deferred_native_first")
+                            .put("nativeTextAvailable",!JsonUtils.isBlankText(text)).put("sourceQualityAccepted",false);
+                    coverage.getVisualCoverage().add(deferred);
+                    coverage.getLimitations().add("Page "+pageNo+" visual/layout reading deferred; native text is retained, and an unobserved page is not confirmed blank.");
+                } else if (requiresOcr) {
+                    BufferedImage image=null;
                     try {
-                        BufferedImage image;
+                        OcrClient actualOcr=probe.enabled()?new ObservedOcrClient(ocrClient,probe,pageNo):ocrClient;
+                        OcrClient.OcrResult cached=initialObservation==null?null:initialObservation.observedOcr.get(pageNo);
+                        boolean reusable=cached!=null&&ocrClient.canReuseIdentityObservation(cached);
+                        if(!reusable){
+                            if(ocrReady==null)ocrReady=props.getOcr().isEnabled()&&actualOcr.available();
+                            if(!ocrReady)throw new IOException("OCR disabled or service unavailable");
+                        }
+                        if(renderer==null){
+                            renderer=new PDFRenderer(document);
+                            // A stored /V must not synthesize an original visible /AP for OCR.
+                            renderer.setAnnotationsFilter(annotation -> !(annotation instanceof org.apache.pdfbox.pdmodel.interactive.annotation.PDAnnotationWidget)
+                                    || annotation.getNormalAppearanceStream()!=null);
+                        }
                         try(DocumentParseProbe.Timer timer=probe.measure("pdf_render",pageNo,"Original PDFRenderer RGB render at fixed 200 DPI")) {
                             progress("第 "+pageNo+" / "+totalPages+" 页：渲染页面");
                             image = renderer.renderImageWithDPI(pageNo - 1, 200, ImageType.RGB);
@@ -371,14 +429,11 @@ public class DocumentParser {
                             coverage.getBlankPages().add(pageNo);
                             status = "blank";
                         } else {
-                            OcrClient actualOcr=probe.enabled()?new ObservedOcrClient(ocrClient,probe,pageNo):ocrClient;
                             ByteArrayOutputStream buffer = new ByteArrayOutputStream();
                             try(DocumentParseProbe.Timer timer=probe.measure("pdf_ocr_input_png_encoding",pageNo,"PNG encoding of the actual OCR input")) {ImageIO.write(image, "png", buffer);}
                             byte[] input = buffer.toByteArray();
-                            OcrClient.OcrResult result = initialObservation != null && DocumentParseProbe.sha256(input).equals(initialObservation.observedImageHashes.get(pageNo))
-                                    ? initialObservation.observedOcr.get(pageNo) : null;
-                            boolean reused = result != null && ocrClient.canReuseIdentityObservation(result);
-                            if (!reused) result = null;
+                            boolean reused=reusable&&DocumentParseProbe.sha256(input).equals(initialObservation.observedImageHashes.get(pageNo));
+                            OcrClient.OcrResult result=reused?cached:null;
                             if (!reused) {
                                 if (ocrReady == null) ocrReady = props.getOcr().isEnabled() && actualOcr.available();
                                 if (!ocrReady) throw new IOException("OCR disabled or service unavailable");
@@ -420,12 +475,14 @@ public class DocumentParser {
                         if(e instanceof DocumentParseProbe.Failure)throw e;
                         probe.event("pdf_ocr_page_failure",pageNo,DocumentParseProbe.map("failureChain",DocumentParseProbe.failures(e)));
                         coverage.getFailedPages().add(pageNo);
+                        if(nativeFirst&&!coverage.getNeedsReviewPages().contains(pageNo))coverage.getNeedsReviewPages().add(pageNo);
                         coverage.getLimitations().add("Page " + pageNo + ": " + abbreviate(e.getMessage(), 180));
                         status = "ocr_failed";
                         log.warn("第 {} 页 OCR 未完成: {}", pageNo, e.getMessage());
-                    }
+                    } finally {if(image!=null)image.flush();}
                 }
-                if (!"ocr_failed".equals(status)) {
+                boolean pageParsed=!"ocr_failed".equals(status)&&!(nativeFirst&&JsonUtils.isBlankText(text));
+                if (pageParsed) {
                     coverage.setParsedPages(coverage.getParsedPages() + 1);
                 }
                 if (pageBlocks.isEmpty() && !JsonUtils.isBlankText(text)) {
@@ -434,34 +491,50 @@ public class DocumentParser {
                 pages.add(new PageText(pageNo, text, status));
                 blocks.addAll(pageBlocks);
                 probe.event("pdf_physical_page_output",pageNo,DocumentParseProbe.map("status",status,"text",text,"blocks",pageBlocks,
-                        "pageParsed",!"ocr_failed".equals(status),"coverageSoFar",coverage));
+                        "pageParsed",pageParsed,"coverageSoFar",coverage));
+                // Keep only block witnesses for clause derivation; page operators and invisible glyphs need no full-document archive.
+                if(nativeFirst)nativeEvidence.set(pageNo-1,null);
             }
             String text = joinPages(pages);
-            coverage.setComplete(coverage.getFailedPages().isEmpty());
-            progress("逐页文字读取完成，正在核对表格、表单与版面");
-            observeNativeTables(fileName,bytes,sourceSha,totalPages,nativeEvidence,blocks,coverage,readingPlan,probe);
+            coverage.setComplete(!nativeFirst&&coverage.getFailedPages().isEmpty());
+            if(nativeFirst){
+                ObjectNode deferred=JsonUtils.mapper().createObjectNode();deferred.put("sourceSha256",sourceSha).put("sourcePageCount",totalPages)
+                        .put("status","deferred_native_first").put("sourceQualityAccepted",false).put("canonicalAdopted",false);
+                com.fasterxml.jackson.databind.node.ArrayNode unknown=deferred.putArray("unobservedPhysicalPages");for(int pageNo=1;pageNo<=totalPages;pageNo++)unknown.add(pageNo);
+                coverage.setNativeTableCandidates(deferred);coverage.getLimitations().add("Optional native-table/layout work was not executed; table structure and continuation remain unknown.");
+                progress("原生文字读取完成，可选表格与版面观察待补");
+            }else{
+                progress("逐页文字读取完成，正在核对表格、表单与版面");
+                observeNativeTables(fileName,bytes,sourceSha,totalPages,nativeEvidence,blocks,coverage,readingPlan,probe);
+            }
             coverage.getLimitations().add("OCR selection uses a per-page text/image heuristic; text accuracy and diagram topology require review.");
             String message = "PDF 共 " + totalPages + " 页，已解析 " + coverage.getParsedPages()
                     + " 页，OCR " + coverage.getOcrPages() + " 页，确认空白 " + coverage.getBlankPages().size() + " 页"
                     + (coverage.isComplete() ? "" : "；未完成页 " + coverage.getFailedPages())
                     + (coverage.getOcrPages() > 0 ? "；OCR 文字质量待原页核对 " + coverage.getNeedsReviewPages() : "");
             return new ParsedDocument(text, pages, totalPages, coverage.getOcrPages() > 0,
-                    message, blocks, coverage, DocumentParseProbe.sha256(bytes), nativeEvidence);
+                    message, blocks, coverage, DocumentParseProbe.sha256(bytes), nativeFirst?Collections.emptyList():nativeEvidence);
         }
     }
 
     private void observeNativeTables(String fileName,byte[] original,String sha,int pageCount,List<PdfPageEvidence> nativeEvidence,
                                      List<DocumentBlock> blocks,ParseCoverage coverage,OerReadingPlan plan,DocumentParseProbe probe) {
-        List<Integer> selected=new ArrayList<>(),unselected=new ArrayList<>();List<PdfPageEvidence> observations=new ArrayList<>();
+        List<Integer> selected=new ArrayList<>(),unselected=new ArrayList<>();List<Map<String,Object>> observations=new ArrayList<>();
         java.util.Set<Integer> observedTablePages=new java.util.HashSet<>();
         for(DocumentBlock block:blocks)if("table".equals(block.getKind()) && block.getPageNo()!=null)observedTablePages.add(block.getPageNo());
         for(PdfPageEvidence page:nativeEvidence) {
             if(page.getPageNo()<1)continue;
-            boolean gap=page.getPlacedImageRegions().stream().anyMatch(region->region.path("requiresVisualObservation").asBoolean())
-                    || page.getPaintedVectorRegions().stream().anyMatch(region->region.path("requiresVisualObservation").asBoolean())
-                    || nativeTextLayoutGap(page)
-                    || observedTablePages.contains(page.getPageNo());
-            if(gap && !page.getGlyphs().isEmpty()){selected.add(page.getPageNo());observations.add(page);}else unselected.add(page.getPageNo());
+            boolean imageGap=page.getPlacedImageRegions().stream().anyMatch(region->region.path("requiresVisualObservation").asBoolean());
+            boolean vectorGap=page.getPaintedVectorRegions().stream().anyMatch(region->region.path("requiresVisualObservation").asBoolean());
+            boolean layoutGap=nativeTextLayoutGap(page),tableObserved=observedTablePages.contains(page.getPageNo());
+            boolean gap=imageGap||vectorGap||layoutGap||tableObserved;
+            if(gap && !page.getGlyphs().isEmpty()){
+                selected.add(page.getPageNo());
+                // The CPU provider rereads the original; it needs admission/frame witnesses, not duplicate Java glyphs.
+                observations.add(DocumentParseProbe.map("pageNo",page.getPageNo(),"coordinateSpace",page.getCoordinateSpace(),
+                        "cropBox",page.getCropBox(),"mediaBox",page.getMediaBox(),"rotation",page.getRotation(),"userUnit",page.getUserUnit(),
+                        "selection",DocumentParseProbe.map("imageGap",imageGap,"vectorGap",vectorGap,"layoutGap",layoutGap,"tableObserved",tableObserved)));
+            }else unselected.add(page.getPageNo());
         }
         ObjectNode state=JsonUtils.mapper().createObjectNode();state.put("sourceSha256",sha);state.put("sourcePageCount",pageCount);
         state.set("selectedPhysicalPages",JsonUtils.mapper().valueToTree(selected));state.set("unselectedPhysicalPages",JsonUtils.mapper().valueToTree(unselected));
@@ -470,7 +543,8 @@ public class DocumentParser {
         if(selected.isEmpty()){state.put("status","not_requested_no_observed_native_table_gap");return;}
         if(!plan.confirmedNonDrawing()){state.put("status","not_executed_identity_unbound");return;}
         Map<String,Object> context=DocumentParseProbe.map("source",DocumentParseProbe.map("sourceFilename",fileName,"sourceSha256",sha,
-                "mediaType","application/pdf","pageCount",pageCount),"selectedPhysicalPages",selected,"readingPlan",plan.metadata(),"javaNativeEvidence",observations);
+                "mediaType","application/pdf","pageCount",pageCount),"selectedPhysicalPages",selected,"readingPlan",plan.metadata(),
+                "javaNativeEvidenceShape","page-admission-frames-v1","javaNativeEvidence",observations);
         try(DocumentParseProbe.Timer timer=probe.measure("native_pdf_table_candidates",null,"Original-byte CPU candidate task in bounded complete-page batches; no adoption or Java reparse")) {
             probe.binary("native_pdf_actual_input",null,DocumentParseProbe.map("nativeContext",context,"boundary","Each transport batch receives the same exact complete original PDF; Java and provider glyph namespaces are independent"),original,"pdf");
             JsonNode response=ocrClient.observeNativePdf(original,context);
@@ -2056,6 +2130,7 @@ public class DocumentParser {
         private final PdfPageEvidence evidence;
         private final PdfNativeSupport.PaintCollector paintCollector;
         private final Map<TextPosition, PdfPageEvidence.PdfGlyph> glyphByPosition = new IdentityHashMap<>();
+        private final PdfNativeSupport.TextDecoder textDecoder = new PdfNativeSupport.TextDecoder();
 
         private PositionedStripper(int pageNo, PDPage page, PdfPageEvidence evidence) throws IOException {
             this.pageNo = pageNo;
@@ -2105,6 +2180,7 @@ public class DocumentParser {
         @Override protected void processTextPosition(TextPosition position) {
             PdfPageEvidence.PdfGlyph glyph = PdfNativeSupport.glyph(position, getGraphicsState(), page,
                     "pdf-page/" + pageNo + "/glyph/" + evidence.getGlyphs().size());
+            glyph.setTextResolution(textDecoder.decode(position));
             evidence.getGlyphs().add(glyph); glyphByPosition.put(position, glyph);
             // Invisible historical OCR remains raw evidence and cannot satisfy native coverage.
             if (glyph.isEligibleForNativeText()) super.processTextPosition(position);
@@ -2112,9 +2188,13 @@ public class DocumentParser {
 
         @Override
         protected void writeString(String text, List<TextPosition> positions) throws IOException {
+            List<PdfPageEvidence.PdfGlyph> lineGlyphs = new ArrayList<>();
+            for (TextPosition position : positions) if (glyphByPosition.containsKey(position)) lineGlyphs.add(glyphByPosition.get(position));
+            String readerText = PdfNativeSupport.readerLine(text, lineGlyphs);
             if (!JsonUtils.isBlankText(text)) {
                 DocumentBlock block = block("pdf_line", "pdf-page/" + pageNo + "/line/" + blocks.size(),
-                        pageNo, text, "native");
+                        pageNo, readerText, "native");
+                block.setOriginalText(normalize(text));
                 block.setNativeVisibilityStatus("operator_visible_unverified");
                 for (TextPosition position : positions) {
                     PdfPageEvidence.PdfGlyph glyph = glyphByPosition.get(position);
@@ -2143,7 +2223,7 @@ public class DocumentParser {
                 }
                 blocks.add(block);
             }
-            super.writeString(text, positions);
+            super.writeString(readerText, positions);
         }
     }
 

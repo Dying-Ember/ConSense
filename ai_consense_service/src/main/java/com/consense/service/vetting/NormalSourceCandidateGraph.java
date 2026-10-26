@@ -17,6 +17,7 @@ public final class NormalSourceCandidateGraph {
     public static final String SCHEMA="consense.canonical-candidate.v1";
     public static final String LEGACY_VERSION="actual-normal-source-unit-whole-page-observations-v2";
     public static final String VERSION="actual-normal-source-unit-whole-page-observations-v3";
+    public static final String COMPACT_PDF_VERSION="actual-normal-source-unit-compact-pdf-observations-v4";
     private static final String PARAGRAPH_REF="$nativeParagraph";
     private static final String SECTION_REF="$nativeSection";
     private static final Pattern ROW=Pattern.compile("^(.+)/table-row/(\\d+)$");
@@ -24,7 +25,7 @@ public final class NormalSourceCandidateGraph {
     private static final Pattern SOURCE_BRANCH=Pattern.compile("(?i)^[\\p{Z}\\s]*(?:\\(|\\[)?[\\p{Z}\\s]*(alternative|option)(?=[\\p{Z}\\s(])[\\p{Z}\\s]*(?:\\(([a-z0-9]+)\\)|([a-z0-9]+))(?=[\\p{Z}\\s]|[-:.)]|$)");
     private NormalSourceCandidateGraph() { }
     public static void capture(SourceDocument source) { source.setNormalCandidateJson(JsonUtils.write(build(source))); }
-    public static boolean supportedVersion(String version){return VERSION.equals(version)||LEGACY_VERSION.equals(version);}
+    public static boolean supportedVersion(String version){return VERSION.equals(version)||LEGACY_VERSION.equals(version)||COMPACT_PDF_VERSION.equals(version);}
 
     public static JsonNode requireBound(SourceDocument source) {
         JsonNode graph=bound(source);
@@ -70,6 +71,7 @@ public final class NormalSourceCandidateGraph {
         return value.deepCopy();
     }
     public static void validateParagraphReferences(JsonNode graph){
+        if(COMPACT_PDF_VERSION.equals(graph.path("producerVersion").asText())){scopeNeed(!containsNativeContextReference(graph),"compact_pdf_foreign_native_docx_reference");return;}
         if(!VERSION.equals(graph.path("producerVersion").asText()))return;
         Map<String,Set<Integer>> validated=new HashMap<>();
         for(JsonNode unit:graph.path("units"))for(JsonNode part:unit.path("parts"))for(String key:Arrays.asList("nativeDocxParagraph","nativeDocxParagraphs","nativeDocxSection"))
@@ -176,21 +178,51 @@ public final class NormalSourceCandidateGraph {
         return selected;
     }
 
+    /** One verified graph per request; selection and validation still run for every selected chunk. */
+    public static final class SelectionIndex {
+        private final JsonNode graph;
+        private final Map<String,JsonNode> blocks=new LinkedHashMap<>(),members=new LinkedHashMap<>(),ranges=new LinkedHashMap<>();
+        private final Set<String> duplicateBlocks=new HashSet<>();
+        private final Map<String,List<JsonNode>> retained=new HashMap<>(),containing=new HashMap<>();
+        private final Map<String,Set<String>> rangeMembers=new HashMap<>();
+        private final Map<List<String>,List<JsonNode>> positions=new HashMap<>();
+        private final String scopeFailure;
+        public SelectionIndex(JsonNode graph){
+            this.graph=Objects.requireNonNull(graph);
+            for(JsonNode unit:graph.path("units"))for(JsonNode part:unit.path("parts"))
+                if(blocks.putIfAbsent(part.path("blockId").asText(),part)!=null)duplicateBlocks.add(part.path("blockId").asText());
+            String failure=null;JsonNode inventory=graph.path("nativeDocxOutline").path("sourceClauseScopes");
+            if(inventory.isObject())try{
+                scopeNeed("docx-source-clause-scopes-v1".equals(inventory.path("version").asText())&&graph.path("source").path("originalSourceSha256").equals(inventory.path("sourceSha256")),"source_scope_identity_mismatch");
+                for(JsonNode member:inventory.path("members")){
+                    String id=member.path("id").asText();scopeNeed(!id.isEmpty()&&members.putIfAbsent(id,member)==null,"duplicate_source_member_identity");
+                    for(JsonNode block:member.path("retainedBlockIds"))retained.computeIfAbsent(block.asText(),k->new ArrayList<>()).add(member);
+                    positions.computeIfAbsent(scopePosition(member.path("sourcePosition")),k->new ArrayList<>()).add(member);
+                }
+                for(JsonNode range:inventory.path("ranges")){
+                    String id=range.path("id").asText();scopeNeed(!id.isEmpty()&&ranges.putIfAbsent(id,range)==null,"duplicate_source_range_identity");
+                    Set<String> ids=scopeIds(range.path("orderedMemberIds"));rangeMembers.put(id,ids);
+                    for(String member:ids)containing.computeIfAbsent(member,k->new ArrayList<>()).add(range);
+                }
+                scopeNeed(duplicateBlocks.isEmpty(),"duplicate_source_block_identity");
+            }catch(IllegalArgumentException invalid){failure=invalid.getMessage();}
+            scopeFailure=failure;
+        }
+        private void requireGraph(JsonNode selected){scopeNeed(graph==selected,"selection_index_graph_differs");}
+    }
+
     /** Source interval observations remain unranked context; they never change the selected quotation. */
-    private static ObjectNode selectedWordScopes(JsonNode graph,Chunk chunk){
+    private static ObjectNode selectedWordScopes(JsonNode graph,Chunk chunk){return selectedWordScopes(graph,chunk,new SelectionIndex(graph));}
+    private static ObjectNode selectedWordScopes(JsonNode graph,Chunk chunk,SelectionIndex index){
+        index.requireGraph(graph);
         JsonNode inventory=graph.path("nativeDocxOutline").path("sourceClauseScopes");if(!inventory.isObject())return null;
         ObjectNode out=object();for(String key:Arrays.asList("version","sourceSha256","familyCandidate"))if(inventory.has(key))out.set(key,inventory.path(key).deepCopy());
         ArrayNode selected=out.putArray("ranges"),observed=out.putArray("members"),issues=out.putArray("issues");
         try{
-            scopeNeed("docx-source-clause-scopes-v1".equals(inventory.path("version").asText())&&graph.path("source").path("originalSourceSha256").equals(inventory.path("sourceSha256")),"source_scope_identity_mismatch");
-            Map<String,JsonNode> members=new LinkedHashMap<>(),ranges=new LinkedHashMap<>(),blocks=new HashMap<>();Map<String,List<JsonNode>> retained=new HashMap<>(),containing=new HashMap<>();Map<String,Set<String>> rangeMembers=new HashMap<>();Map<List<String>,List<JsonNode>> positions=new HashMap<>();
-            for(JsonNode member:inventory.path("members")){
-                String id=member.path("id").asText();scopeNeed(!id.isEmpty()&&members.putIfAbsent(id,member)==null,"duplicate_source_member_identity");
-                for(JsonNode block:member.path("retainedBlockIds"))retained.computeIfAbsent(block.asText(),k->new ArrayList<>()).add(member);
-                positions.computeIfAbsent(scopePosition(member.path("sourcePosition")),k->new ArrayList<>()).add(member);
-            }
-            for(JsonNode range:inventory.path("ranges")){String id=range.path("id").asText();scopeNeed(!id.isEmpty()&&ranges.putIfAbsent(id,range)==null,"duplicate_source_range_identity");Set<String> ids=scopeIds(range.path("orderedMemberIds"));rangeMembers.put(id,ids);for(String member:ids)containing.computeIfAbsent(member,k->new ArrayList<>()).add(range);}
-            for(JsonNode unit:graph.path("units"))for(JsonNode part:unit.path("parts"))scopeNeed(blocks.putIfAbsent(part.path("blockId").asText(),part)==null,"duplicate_source_block_identity");
+            if(index.scopeFailure!=null)throw new IllegalArgumentException(index.scopeFailure);
+            Map<String,JsonNode> members=index.members,ranges=index.ranges,blocks=index.blocks;
+            Map<String,List<JsonNode>> retained=index.retained,containing=index.containing;
+            Map<String,Set<String>> rangeMembers=index.rangeMembers;Map<List<String>,List<JsonNode>> positions=index.positions;
             Set<String> touched=new LinkedHashSet<>(),invalidCarrierMappings=new HashSet<>();Map<String,Map<String,int[]>> carrierMappings=new HashMap<>();
             for(Part part:chunk.getParts()==null?Collections.<Part>emptyList():chunk.getParts())for(JsonNode member:retained.getOrDefault(part.getBlockId(),Collections.emptyList())){
                 JsonNode block=blocks.get(part.getBlockId()),position=member.path("sourcePosition");scopeNeed(block!=null,"source_scope_carrier_missing");
@@ -241,7 +273,9 @@ public final class NormalSourceCandidateGraph {
     }
 
     /** Selected context from this complete normal graph; it never changes a canonical quotation. */
-    public static ObjectNode wordSourceScopeContext(JsonNode graph,JsonNode parts){
+    public static ObjectNode wordSourceScopeContext(JsonNode graph,JsonNode parts){return wordSourceScopeContext(graph,parts,new SelectionIndex(graph));}
+    public static ObjectNode wordSourceScopeContext(JsonNode graph,JsonNode parts,SelectionIndex index){
+        index.requireGraph(graph);
         if(!graph.path("nativeDocxOutline").path("sourceClauseScopes").isObject())return null;
         scopeNeed("actual_source_candidate_generation".equals(graph.path("status").asText())&&parts.isArray()&&!parts.isEmpty(),"word_selected_source_generation_missing");
         Chunk selected=new Chunk();List<Part> ranges=new ArrayList<>();
@@ -250,7 +284,7 @@ public final class NormalSourceCandidateGraph {
                     &&raw.path("startOffset").canConvertToInt()&&raw.path("endOffset").canConvertToInt()&&raw.path("sourcePosition").isObject(),"word_selected_source_part_unknown");
             Part range=new Part();range.setBlockId(raw.path("blockId").asText());range.setText(raw.path("text").asText());range.setStartOffset(raw.path("startOffset").asInt());range.setEndOffset(raw.path("endOffset").asInt());range.setSourcePosition(raw.path("sourcePosition").deepCopy());ranges.add(range);
         }
-        selected.setParts(ranges);ObjectNode context=selectedWordScopes(graph,selected);
+        selected.setParts(ranges);ObjectNode context=selectedWordScopes(graph,selected,index);
         for(String field:Arrays.asList("source","generationSha256","coverageSha256"))context.set(field,graph.path(field).deepCopy());return context;
     }
     private static void scopeNeed(boolean valid,String reason){if(!valid)throw new IllegalArgumentException(reason);}
@@ -395,7 +429,9 @@ public final class NormalSourceCandidateGraph {
     }
 
     /** Model-only physical Word rows. Persisted graphs, chunks and their selections are never changed. */
-    static JsonNode selectedForModel(JsonNode graph,Chunk chunk) {
+    static JsonNode selectedForModel(JsonNode graph,Chunk chunk) {return selectedForModel(graph,chunk,new SelectionIndex(graph));}
+    static JsonNode selectedForModel(JsonNode graph,Chunk chunk,SelectionIndex selection) {
+        selection.requireGraph(graph);
         JsonNode source=graph.path("source");
         if(!"actual_source_candidate_generation".equals(graph.path("status").asText())
                 ||!Objects.equals(source.path("documentId").asText(),chunk.getDocumentId())
@@ -405,9 +441,7 @@ public final class NormalSourceCandidateGraph {
                 ||chunk.getSourceSha256()!=null&&!Objects.equals(source.path("originalSourceSha256").asText(),chunk.getSourceSha256())
                 ||chunk.getCandidateStructure()==null||!graph.path("generationSha256").equals(chunk.getCandidateStructure().path("generationSha256")))
             throw new IllegalArgumentException("Ordinary model source generation differs");
-        Map<String,JsonNode> byId=new LinkedHashMap<>();Set<String> duplicates=new HashSet<>();
-        for(JsonNode unit:graph.path("units"))for(JsonNode part:unit.path("parts"))
-            if(byId.putIfAbsent(part.path("blockId").asText(),part)!=null)duplicates.add(part.path("blockId").asText());
+        Map<String,JsonNode> byId=selection.blocks;Set<String> duplicates=selection.duplicateBlocks;
         List<String> body=new ArrayList<>();Set<List<String>> touched=new LinkedHashSet<>();
         ObjectNode out=declarations();out.put("status","observed_model_only_word_table_context");
         out.put("generationSha256",graph.path("generationSha256").asText());out.set("source",source.deepCopy());
@@ -482,13 +516,16 @@ public final class NormalSourceCandidateGraph {
 
     /** The legacy selector remains the gate, including for mixed/story carrier context. */
     static JsonNode selectedForModel(JsonNode graph,Chunk chunk,NativeDocxTableIndex index) {
-        JsonNode legacy=selectedForModel(graph,chunk);
+        return selectedForModel(graph,chunk,index,new SelectionIndex(graph));
+    }
+    static JsonNode selectedForModel(JsonNode graph,Chunk chunk,NativeDocxTableIndex index,SelectionIndex selection) {
+        JsonNode legacy=selectedForModel(graph,chunk,selection);
         index.requireCurrent(graph);
         ObjectNode out=(ObjectNode)legacy.deepCopy();
         if(index.present){out.put("status","observed_model_only_native_docx_table_context");out.putArray("unknowns");
             ArrayNode units=out.putArray("units");Set<NativeDocxTableIndex.Member> roots=new LinkedHashSet<>();
             for(Part part:chunk.getParts())roots.addAll(index.carriers.getOrDefault(part.getBlockId(),Collections.emptySet()));for(NativeDocxTableIndex.Member root:roots)units.add(index.unit(root));}
-        JsonNode scopes=selectedWordScopes(graph,chunk);if(scopes!=null){
+        JsonNode scopes=selectedWordScopes(graph,chunk,selection);if(scopes!=null){
             for(JsonNode issue:scopes.path("issues"))((ArrayNode)out.path("unknowns")).add(issue.deepCopy());
             Map<String,JsonNode> members=new HashMap<>();for(JsonNode member:scopes.path("members"))members.put(member.path("id").asText(),member);
             ArrayNode frameMembers=JsonUtils.mapper().createArrayNode();Set<String> frameIds=new HashSet<>();for(JsonNode frame:scopes.path("referenceFrames")){for(String key:Arrays.asList("orderedMemberIds","contextMemberIds","anchorMemberIds"))frameIds.addAll(scopeIds(frame.path(key)));for(String key:Arrays.asList("startBoundary","endBoundary"))if(frame.path(key).hasNonNull("memberId"))frameIds.add(frame.path(key).path("memberId").asText());}for(JsonNode member:scopes.path("members"))if(frameIds.contains(member.path("id").asText()))frameMembers.add(member.deepCopy());
@@ -704,7 +741,10 @@ public final class NormalSourceCandidateGraph {
         return Arrays.asList(position.path("partName").asText(),position.path("partSha256").asText(),location.toString(),row.group(1));
     }
 
-    private static ObjectNode build(SourceDocument source) {return build(source,VERSION);}
+    private static ObjectNode build(SourceDocument source) {
+        JsonNode coverage=JsonUtils.isBlankText(source.getParseCoverageJson())?object():JsonUtils.parse(source.getParseCoverageJson());
+        return build(source,coverage.has(NormalPdfReadingProjection.FIELD)?COMPACT_PDF_VERSION:VERSION);
+    }
     private static ObjectNode build(SourceDocument source,String version) {
         ObjectNode graph=declarations();graph.put("producerVersion",version);graph.put("status","actual_source_candidate_generation");
         ObjectNode identity=object();identity.put("projectId",source.getProjectId());identity.put("documentId",String.valueOf(source.getId()));
@@ -712,6 +752,7 @@ public final class NormalSourceCandidateGraph {
         identity.put("filename",source.getFileName());identity.put("role",VettingCorpus.sourceRole(source));identity.put("scope",source.getDocumentScope());
         identity.put("identitySha256",VettingCorpus.hash(nvl(source.getOerIdentityJson())));graph.set("source",identity);
         JsonNode coverage=JsonUtils.isBlankText(source.getParseCoverageJson())?object():JsonUtils.parse(source.getParseCoverageJson());
+        scopeNeed(COMPACT_PDF_VERSION.equals(version)==coverage.has(NormalPdfReadingProjection.FIELD),"compact_pdf_recipe_and_producer_differ");
         graph.put("coverageSha256",VettingCorpus.hash(nvl(source.getParseCoverageJson())));
         if(coverage.has("readingPlan"))graph.set("readingPlan",coverage.get("readingPlan").deepCopy());
         if(coverage.has("nativeDocxOutline"))graph.set("nativeDocxOutline",VERSION.equals(version)?coverage.get("nativeDocxOutline"):coverage.get("nativeDocxOutline").deepCopy());
@@ -791,7 +832,8 @@ public final class NormalSourceCandidateGraph {
             }
         }
         boolean pdf=blocks.stream().anyMatch(block->block.getPageNo()!=null&&block.getPageNo()>0&&("native".equals(block.getSource())||block.getNativeTableCandidate()!=null||block.getPdfFormField()!=null));
-        if(pdf&&source.getSourceSha256()!=null&&source.getSourceSha256().matches("[a-f0-9]{64}")){ObjectNode pdfGroups=NormalPdfSourceGroups.build(blocks,source.getSourceSha256(),coverage);graph.set("nativePdfSourceGroups",pdfGroups);}
+        if(COMPACT_PDF_VERSION.equals(version))graph.set("nativePdfSourceGroups",NormalPdfReadingProjection.validate(blocks,source.getSourceSha256(),coverage));
+        else if(pdf&&source.getSourceSha256()!=null&&source.getSourceSha256().matches("[a-f0-9]{64}")){ObjectNode pdfGroups=NormalPdfSourceGroups.build(blocks,source.getSourceSha256(),coverage);graph.set("nativePdfSourceGroups",pdfGroups);}
         validateParagraphReferences(graph);graph.put("generationSha256",JsonUtils.serializedSha256(graph));return graph;
     }
 

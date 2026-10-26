@@ -79,6 +79,7 @@ class AdviceCanonicalIntegrationTest {
     @MockBean com.consense.service.vetting.VettingTokenBudgetCliObserver counter;
     private final List<String> prompts=new ArrayList<>();
     private List<VectorStore.SearchHit> selectedHits,contextHits;
+    private JsonNode admittedContext;
     private OerBusinessEvidence.Session loaded;
     private final Map<String,VettingCorpus.Chunk> additionalChunks=new LinkedHashMap<>();
     private Object originalFixedBaseline;
@@ -89,7 +90,7 @@ class AdviceCanonicalIntegrationTest {
         assertNotNull(captured);assertNull(captured.getUnavailableReason());assertSame(local,captured.getClient());
         assertEquals("canonical-test-chat",captured.getIdentity().getModel());
         com.consense.service.advice.AdviceBudgetFixture.bind(counter,local);
-        prompts.clear();selectedHits=new ArrayList<>();contextHits=new ArrayList<>();loaded=null;additionalChunks.clear();
+        prompts.clear();selectedHits=new ArrayList<>();contextHits=new ArrayList<>();admittedContext=null;loaded=null;additionalChunks.clear();
         originalFixedBaseline=ReflectionTestUtils.getField(advice,"fixedBaseline");
         adviceModel.setMinimaxWire("chat");
         ReflectionTestUtils.setField(advice,"adviceResponses",originalResponses);
@@ -100,7 +101,7 @@ class AdviceCanonicalIntegrationTest {
         });
         when(canonical.indexStatus(any())).thenAnswer(call->indexState(true,SHA,((OerBusinessEvidence.Session)call.getArgument(0)).chunkCount(),null));
         // Current scalar status seam replaces the historical load/indexStatus pair; authored carrier only.
-        when(canonical.currentIndexStatus(anyString(),eq("advisory"),any())).thenAnswer(call->{
+        when(canonical.currentIndexAvailability(anyString(),eq("advisory"),any())).thenAnswer(call->{
             java.util.function.Supplier<List<SourceDocument>> reader=call.getArgument(2);
             OerBusinessEvidence.Session s=canonical.load(call.getArgument(0),"advisory",reader.get());
             Constructor<OerBusinessEvidence.CurrentIndexStatus> c=OerBusinessEvidence.CurrentIndexStatus.class.getDeclaredConstructor(OerBusinessEvidence.Session.class,OerCanonicalRetrievalClient.IndexState.class);
@@ -112,14 +113,27 @@ class AdviceCanonicalIntegrationTest {
         doAnswer(call->{assertFalse(TransactionSynchronizationManager.isActualTransactionActive());return null;}).when(canonical).index(any());
         when(canonical.adviceHits(any(),anyString())).thenAnswer(call->{assertFalse(TransactionSynchronizationManager.isActualTransactionActive());return selectedHits;});
         when(canonical.sourceHits(any(),anyList())).thenAnswer(call->contextHits);
-        when(canonical.advisoryContext(any(),anyList(),anyBoolean(),anyInt())).thenCallRealMethod();
+        when(canonical.advisoryContext(any(),anyList(),anyBoolean(),anyInt())).thenAnswer(call->{Object result=call.callRealMethod();admittedContext=JsonUtils.mapper().valueToTree(result);return result;});
+        when(canonical.advisoryTableContext(any(),anyList())).thenCallRealMethod();
         when(canonical.modelMaterial(any(),anyList())).thenAnswer(call->new com.consense.service.vetting.OerModelMaterial.Request(Collections.emptyList()));
         doAnswer(call->{OerBusinessEvidence.Session s=call.getArgument(0);List<SourceDocument> fresh=call.getArgument(1);
-            if(!s.documentIds.equals(ids(fresh)))throw new IllegalStateException("AUTHORED SOURCE SET CHANGED");
-            for(SourceDocument d:fresh)if(s.chunks().stream().noneMatch(c->String.valueOf(d.getId()).equals(c.getDocumentId())&&Objects.equals(d.getTextContent(),c.getContent())))throw new IllegalStateException("AUTHORED SOURCE REVISION CHANGED");
+            assertAuthoredSourcesCurrent(s,fresh);
             return null;
         }).when(canonical).assertSelected(any(),anyList());
-        doAnswer(call->{canonical.assertSelected(call.getArgument(0),call.getArgument(1));return null;}).when(canonical).assertSelectedScope(any(),anyList());
+        when(canonical.currentDisplayIdentity(anyString(),eq("advisory"),anyList())).thenAnswer(call->{
+            List<SourceDocument> selected=call.getArgument(2);
+            assertNotNull(loaded);assertEquals(loaded.projectId,call.getArgument(0));
+            if(!loaded.documentIds.equals(ids(selected)))throw new IllegalStateException("AUTHORED SOURCE SET CHANGED");
+            List<SourceDocument> fresh=new ArrayList<>();
+            Map<Long,SourceDocument> complete=new LinkedHashMap<>();for(SourceDocument d:documents.findBusinessSourcesByProjectId(loaded.projectId))complete.put(d.getId(),d);
+            for(SourceDocument d:selected){if(!Objects.equals(loaded.projectId,d.getProjectId())||!complete.containsKey(d.getId()))throw new IllegalStateException("AUTHORED SOURCE PROJECT CHANGED");fresh.add(complete.get(d.getId()));}
+            assertAuthoredSourcesCurrent(loaded,fresh);return loaded.identitySha256();
+        });
+        doAnswer(call->{OerBusinessEvidence.Session s=call.getArgument(0);List<SourceDocument> fresh=call.getArgument(1);
+            if(fresh.stream().anyMatch(d->!Objects.equals(s.projectId,d.getProjectId())))throw new IllegalStateException("AUTHORED SOURCE PROJECT CHANGED");
+            if(!s.documentIds.equals(ids(fresh)))throw new IllegalStateException("AUTHORED SOURCE SET CHANGED");
+            return null;
+        }).when(canonical).assertSelectedScope(any(),anyList());
 
         when(local.available()).thenReturn(true);when(local.chatModel()).thenReturn("canonical-test-chat");
         when(local.chat(anyList())).thenAnswer(call->{
@@ -131,11 +145,29 @@ class AdviceCanonicalIntegrationTest {
 
     @AfterEach void restoreSmallCorpusConfiguration(){deployment.getVector().setStuffingLimit(30000);ReflectionTestUtils.setField(advice,"fixedBaseline",originalFixedBaseline);}
 
+    @Test void projectAnswerAvoidsDuplicateSelectedScopeChecks() throws Exception {
+        String p=project();SourceDocument d=source(p,"SCC","SCC.txt","tender","AUTHORED current clause");
+        selectedHits=Collections.singletonList(hit(d,"tender",d.getTextContent(),"complete_observed_unit",null,"ranked"));
+        assertTrue(data(ask(p,"fullset")).path("grounded").asBoolean());
+        verify(canonical,times(4)).assertSelected(eq(loaded),anyList());
+    }
+
+    @Test void projectAnswerStillRejectsSourceChangeAfterModelCall() throws Exception {
+        String p=project();SourceDocument d=source(p,"SCC","SCC.txt","tender","AUTHORED current clause");
+        selectedHits=Collections.singletonList(hit(d,"tender",d.getTextContent(),"complete_observed_unit",null,"ranked"));
+        when(local.chat(anyList())).thenAnswer(call->{
+            SourceDocument changed=documents.findById(d.getId()).orElseThrow();changed.setTextContent("AUTHORED changed clause");documents.saveAndFlush(changed);
+            return "{\"grounded\":true,\"answer\":\"AUTHORED outdated answer\",\"citations\":[\"[1]\"]}";
+        });
+        mvc.perform(ask(p,"fullset")).andExpect(jsonPath("$.code").value(4204));
+        assertEquals(0,data(get("/api/advice/{p}/messages",p)).size());
+    }
+
     @Test void smallCanonicalCorpusAppendsBodyWithItsOwnAliasAndExactPointerAndCountsTheWholeWire() throws Exception {
         String p=project();SourceDocument d=source(p,"SCC","observed clauses.txt","tender","AUTHORED complete operative provision");
         VectorStore.SearchHit title=smallCorpusTitle(d),body=smallCorpusBody(d);selectedHits=Collections.singletonList(title);contextHits=Collections.singletonList(body);
         String titleBefore=JsonUtils.write(title),bodyBefore=JsonUtils.write(body);ResponsesHttp http=responses(262144);
-        http.generations.add("{\"grounded\":true,\"answer\":\"AUTHORED cited body\",\"citations\":[\"[2]\"]}");
+        http.generations.add("{\"grounded\":true,\"answer\":\"AUTHORED cited body\",\"citations\":[\"[1]\",\"[2]\"]}");
         JsonNode answer=data(responsesAsk(p));assertTrue(answer.path("grounded").asBoolean());assertEquals(2,answer.path("sources").size());
         JsonNode first=answer.path("sources").get(0),second=answer.path("sources").get(1);assertEquals("[1]",first.path("evidenceId").asText());assertEquals(title.text(),first.path("content").asText());assertEquals(title.getScore(),first.path("score").asDouble());
         assertEquals("[2]",second.path("evidenceId").asText());assertEquals(body.text(),second.path("content").asText());assertEquals(0d,second.path("score").asDouble());assertEquals("unranked_context",second.path("scoreMeaning").asText());
@@ -155,14 +187,15 @@ class AdviceCanonicalIntegrationTest {
     @Test void smallCanonicalBodyIsAppendedAfterExistingFixedAliasWithoutChangingEitherRankedHit() throws Exception {
         String p=project();SourceDocument d=source(p,"SCC","observed clauses.txt","tender","AUTHORED body after fixed");VectorStore.SearchHit title=smallCorpusTitle(d),body=smallCorpusBody(d);
         selectedHits=Collections.singletonList(title);contextHits=Collections.singletonList(body);VectorStore.SearchHit fixed=fixedFixture();String before=JsonUtils.write(fixed);
-        JsonNode answer=data(ask(p,"contract"));assertEquals(3,answer.path("sources").size());assertEquals("[1]",answer.path("sources").get(0).path("evidenceId").asText());
-        assertEquals("[2]",answer.path("sources").get(1).path("evidenceId").asText());assertEquals(fixed.text(),answer.path("sources").get(1).path("content").asText());assertEquals(fixed.getScore(),answer.path("sources").get(1).path("score").asDouble());
-        assertEquals("[3]",answer.path("sources").get(2).path("evidenceId").asText());assertEquals(body.text(),answer.path("sources").get(2).path("content").asText());assertEquals(before,JsonUtils.write(fixed));
+        when(local.chat(anyList())).thenReturn("{\"grounded\":true,\"answer\":\"AUTHORED cited sources\",\"citations\":[\"[1]\",\"[3]\"]}");
+        JsonNode answer=data(ask(p,"contract"));assertEquals(3,admittedContext.size());assertEquals(fixed.text(),admittedContext.get(1).path("payload").path("content").asText());assertEquals(fixed.getScore(),admittedContext.get(1).path("score").asDouble());
+        assertEquals(2,answer.path("sources").size());assertEquals("[1]",answer.path("sources").get(0).path("evidenceId").asText());assertEquals(title.text(),answer.path("sources").get(0).path("content").asText());assertEquals(title.getScore(),answer.path("sources").get(0).path("score").asDouble());
+        assertEquals("[3]",answer.path("sources").get(1).path("evidenceId").asText());assertEquals(body.text(),answer.path("sources").get(1).path("content").asText());assertEquals(before,JsonUtils.write(fixed));
     }
 
     @Test void fixedHitsCannotActivateSmallCorpusCompletionWhenCanonicalRetrievalReturnedNothing() throws Exception {
         String p=project();SourceDocument d=source(p,"SCC","observed clauses.txt","tender","AUTHORED unranked only");contextHits=Collections.singletonList(smallCorpusBody(d));VectorStore.SearchHit fixed=fixedFixture();
-        JsonNode answer=data(ask(p,"contract"));assertEquals(1,answer.path("sources").size());assertEquals(fixed.text(),answer.path("sources").get(0).path("content").asText());verify(canonical,never()).sourceHits(any(),anyList());
+        JsonNode answer=data(ask(p,"contract"));assertFalse(answer.path("grounded").asBoolean());assertTrue(answer.path("sources").isEmpty());assertEquals(1,admittedContext.size());assertEquals(fixed.text(),admittedContext.get(0).path("payload").path("content").asText());verify(canonical,never()).sourceHits(any(),anyList());
     }
 
     @Test void smallCorpusCeilingCountsAllPermittedBodyRatherThanOnlyTheRankedTitle() throws Exception {
@@ -172,15 +205,16 @@ class AdviceCanonicalIntegrationTest {
 
     @Test void smallCorpusCompletionUsesOnlyTheCurrentPermittedScope() throws Exception {
         String p=project();SourceDocument d=source(p,"SCC","contract clauses.txt","tender","AUTHORED permitted body");VectorStore.SearchHit title=smallCorpusTitle(d),body=smallCorpusBody(d);selectedHits=Collections.singletonList(title);contextHits=Collections.singletonList(body);
+        when(local.chat(anyList())).thenReturn("{\"grounded\":true,\"answer\":\"AUTHORED cited sources\",\"citations\":[\"[1]\",\"[2]\"]}");
         SourceDocument excluded=source(p,"SCC","unfilled template.txt","tender","EXCLUDED TEMPLATE","STANDARD_TEMPLATE"),bq=source(p,"BQ","pricing.txt","tender","EXCLUDED PRICING"),offScope=source(p,"NTT","tender notice.txt","tender","EXCLUDED TENDER SCOPE");
         JsonNode answer=data(ask(p,"contract"));assertEquals(Collections.singletonList(d.getId()),loaded.documentIds);assertEquals(2,answer.path("sources").size());
         verify(canonical).sourceHits(eq(loaded),eq(Collections.singletonList(body.getId())));for(SourceDocument notAllowed:Arrays.asList(excluded,bq,offScope))assertFalse(answer.path("sources").toString().contains("chunk-"+notAllowed.getId()));
     }
 
     @Test void explicitFixedReferenceOnlyNeverLoadsOrCompletesProjectCorpus() throws Exception {
-        String p=project();source(p,"SCC","project clauses.txt","tender","AUTHORED project text");fixedFixture();
+        String p=project();source(p,"SCC","project clauses.txt","tender","AUTHORED project text");VectorStore.SearchHit reference=fixedFixture();
         JsonNode answer=data(post("/api/advice/{p}/ask",p).contentType(MediaType.APPLICATION_JSON).content("{\"question\":\"Explain this reference only?\",\"scope\":\"contract\",\"basisScope\":\"reference_only\"}"));
-        assertEquals(1,answer.path("sources").size());verify(canonical,never()).load(anyString(),anyString(),anyList());verify(canonical,never()).sourceHits(any(),anyList());
+        assertTrue(String.join("\n",prompts).contains(reference.text()));assertTrue(answer.path("sources").isEmpty());verify(canonical,never()).load(anyString(),anyString(),anyList());verify(canonical,never()).sourceHits(any(),anyList());
     }
 
     @Test void completeSmallCorpusRemainsSubjectToTheFullWireBudgetAndSourceChangeGuard() throws Exception {
@@ -298,10 +332,10 @@ class AdviceCanonicalIntegrationTest {
     @Test void missingAdoptionOriginsAndUnknownUnitCannotEstablishProjectApplicability() throws Exception {
         String p=project();SourceDocument library=source(p,"SL","Specification Library SL2022.txt","standard","LIBRARY");
         selectedHits=Collections.singletonList(hit(library,"standard","LIBRARY CLAUSE TEST","complete_observed_unit",null,"ranked"));
-        JsonNode missing=data(ask(p,"fullset"));assertFalse(missing.path("grounded").asBoolean());assertFalse(missing.path("sources").get(0).path("applicabilityContextComplete").asBoolean());
+        JsonNode missing=data(ask(p,"fullset"));assertFalse(missing.path("grounded").asBoolean());assertTrue(missing.path("sources").isEmpty());assertFalse(admittedContext.get(0).path("payload").path("applicabilityContextComplete").asBoolean());
         selectedHits=Collections.singletonList(hit(library,"standard","VISIBLE BUT INCOMPLETE","unknown","observed_block_start_or_gap_unknown","ranked"));
         when(local.chat(anyList())).thenReturn("{\"grounded\":true,\"answer\":\"TEST\",\"citations\":[\"[1]\"],\"basisScope\":\"reference_only\"}");
-        JsonNode uncertain=data(ask(p,"fullset"));assertFalse(uncertain.path("grounded").asBoolean());assertEquals("unknown",uncertain.path("sources").get(0).path("canonicalSourceUnit").path("status").asText());
+        JsonNode uncertain=data(ask(p,"fullset"));assertFalse(uncertain.path("grounded").asBoolean());assertTrue(uncertain.path("sources").isEmpty());assertEquals("unknown",admittedContext.get(0).path("payload").path("canonicalSourceUnit").path("status").asText());
     }
 
     @Test void missingOrPartialResolvedContextCannotPassTheAdoptionGate() throws Exception {
@@ -310,9 +344,9 @@ class AdviceCanonicalIntegrationTest {
         source(p,"SP","The Specification part two.txt","tender","Specification Library edition and amendments");
         selectedHits=Collections.singletonList(hit(library,"standard","LIBRARY","complete_observed_unit",null,"ranked"));
         when(local.chat(anyList())).thenReturn("{\"grounded\":true,\"answer\":\"TEST\",\"citations\":[\"[1]\",\"[2]\"]}");
-        JsonNode empty=data(ask(p,"fullset"));assertFalse(empty.path("grounded").asBoolean());assertFalse(empty.path("sources").get(0).path("applicabilityContextComplete").asBoolean());
+        JsonNode empty=data(ask(p,"fullset"));assertFalse(empty.path("grounded").asBoolean());assertTrue(empty.path("sources").isEmpty());assertFalse(admittedContext.get(0).path("payload").path("applicabilityContextComplete").asBoolean());
         contextHits=Collections.singletonList(hit(first,"tender",first.getTextContent(),"complete_observed_unit",null,"context"));
-        JsonNode partial=data(ask(p,"fullset"));assertFalse(partial.path("grounded").asBoolean());assertFalse(partial.path("sources").get(0).path("applicabilityContextComplete").asBoolean());
+        JsonNode partial=data(ask(p,"fullset"));assertFalse(partial.path("grounded").asBoolean());assertTrue(partial.path("sources").isEmpty());assertFalse(admittedContext.get(0).path("payload").path("applicabilityContextComplete").asBoolean());
     }
 
     @Test void referenceOnlyNeedsAnActualStandardCitation() throws Exception {
@@ -331,13 +365,13 @@ class AdviceCanonicalIntegrationTest {
         StringBuilder text=new StringBuilder("Specification Library ");while(text.length()<31000)text.append("COMPLETE UNIT TEST ");
         SourceDocument composition=source(p,"SP","24 - The Specification.txt","tender",text.toString());
         contextHits=Collections.singletonList(hit(composition,"tender",text.toString(),"complete_observed_unit",null,"context"));
-        JsonNode response=data(ask(p,"fullset"));assertFalse(response.path("grounded").asBoolean());assertEquals(1,response.path("sources").size());assertFalse(String.join("\n",prompts).contains("COMPLETE UNIT TEST"));
+        JsonNode response=data(ask(p,"fullset"));assertFalse(response.path("grounded").asBoolean());assertTrue(response.path("sources").isEmpty());assertEquals(1,admittedContext.size());assertFalse(String.join("\n",prompts).contains("COMPLETE UNIT TEST"));
     }
 
     @Test void completeSmallCorpusContextDoesNotUpgradeTheExistingIncompleteAdoptionFlag() throws Exception {
         String p=project();SourceDocument library=source(p,"SL","Specification Library SL2022.txt","standard","LIBRARY");String text="Specification Library "+"AUTHORED complete context ".repeat(520);SourceDocument composition=source(p,"SP","24 - The Specification.txt","tender",text);
         selectedHits=Collections.singletonList(hit(library,"standard","LIBRARY","complete_observed_unit",null,"ranked"));contextHits=Collections.singletonList(smallCorpusBody(composition));
-        JsonNode response=data(ask(p,"fullset"));assertFalse(response.path("grounded").asBoolean());assertEquals(2,response.path("sources").size());assertFalse(response.path("sources").get(0).path("applicabilityContextComplete").asBoolean(true));assertEquals(text,response.path("sources").get(1).path("content").asText());assertEquals("unranked_context",response.path("sources").get(1).path("scoreMeaning").asText());
+        JsonNode response=data(ask(p,"fullset"));assertFalse(response.path("grounded").asBoolean());assertTrue(response.path("sources").isEmpty());assertEquals(2,admittedContext.size());assertFalse(admittedContext.get(0).path("payload").path("applicabilityContextComplete").asBoolean(true));assertEquals(text,admittedContext.get(1).path("payload").path("content").asText());assertEquals("unranked_context",admittedContext.get(1).path("payload").path("scoreKind").asText());
     }
 
     @Test void sourceAddedDuringChatRejectsTheOldAnswerAndDoesNotSaveEitherMessage() throws Exception {
@@ -439,7 +473,7 @@ class AdviceCanonicalIntegrationTest {
     @Test void responsesMalformedJsonRetryRecountsCompleteMaterialsBeforeSecondGeneration() throws Exception {
         String p=project();SourceDocument d=source(p,"SCC","SCC.txt","tender","COMPLETE RETRY MATERIAL");selectedHits=Collections.singletonList(hit(d,"tender",d.getTextContent(),"complete_observed_unit",null,"ranked"));ResponsesHttp http=responses(262144);http.generations.add("not JSON");
         assertTrue(data(responsesAsk(p)).path("grounded").asBoolean());assertEquals(4,http.bodies.size());JsonNode first=JsonUtils.parse(http.bodies.get(1)),retryCounter=JsonUtils.parse(http.bodies.get(2)),retryGeneration=JsonUtils.parse(http.bodies.get(3));
-        String repair=retryGeneration.path("input").get(0).path("content").asText();assertTrue(repair.startsWith(first.path("input").get(0).path("content").asText()));assertTrue(repair.contains("one admitted repair"));assertTrue(repair.contains("No units were published"));assertTrue(repair.contains("ALL sections beginning with kind=limits"));for(String field:Arrays.asList("model","instructions","input","reasoning"))assertEquals(retryCounter.get(field),retryGeneration.get(field));assertEquals(2,data(get("/api/advice/{p}/messages",p)).size());verifyNoInteractions(miniMaxChat);verify(local,never()).chat(anyList());
+        String repair=retryGeneration.path("input").get(0).path("content").asText();assertTrue(repair.startsWith(first.path("input").get(0).path("content").asText()));assertTrue(repair.contains(AdviceResponsesTransport.RETRY_INSTRUCTION));assertTrue(repair.contains("not JSON"));for(String field:Arrays.asList("model","instructions","input","reasoning"))assertEquals(retryCounter.get(field),retryGeneration.get(field));assertEquals(2,data(get("/api/advice/{p}/messages",p)).size());verifyNoInteractions(miniMaxChat);verify(local,never()).chat(anyList());
     }
     private String project() throws Exception {String p="canonical-advice-"+UUID.randomUUID();mvc.perform(post("/api/projects").contentType(MediaType.APPLICATION_JSON).content("{\"id\":\""+p+"\",\"nameZhHans\":\"AUTHORED ADVICE TEST\"}")).andExpect(jsonPath("$.code").value(0));return p;}
     private SourceDocument source(String p,String key,String name,String role,String text){return source(p,key,name,role,text,"VETTING_PACKAGE");}
@@ -449,10 +483,16 @@ class AdviceCanonicalIntegrationTest {
     private MockHttpServletRequestBuilder ask(String p,String scope){return post("/api/advice/{p}/ask",p).contentType(MediaType.APPLICATION_JSON).content("{\"question\":\"Explain the TEST ONLY evidence?\",\"scope\":\""+scope+"\"}");}
     private JsonNode data(MockHttpServletRequestBuilder request) throws Exception{return JsonUtils.parse(mvc.perform(request).andExpect(jsonPath("$.code").value(0)).andReturn().getResponse().getContentAsString()).path("data");}
     private List<Long> ids(List<SourceDocument> sources){List<Long> ids=new ArrayList<>();for(SourceDocument source:sources)ids.add(source.getId());return ids;}
+    private void assertAuthoredSourcesCurrent(OerBusinessEvidence.Session s,List<SourceDocument> fresh){
+        if(fresh.stream().anyMatch(d->!Objects.equals(s.projectId,d.getProjectId())))throw new IllegalStateException("AUTHORED SOURCE PROJECT CHANGED");
+        if(!s.documentIds.equals(ids(fresh)))throw new IllegalStateException("AUTHORED SOURCE SET CHANGED");
+        for(SourceDocument d:fresh)if(s.chunks().stream().noneMatch(c->String.valueOf(d.getId()).equals(c.getDocumentId())&&Objects.equals(d.getTextContent(),c.getContent())))throw new IllegalStateException("AUTHORED SOURCE REVISION CHANGED");
+    }
     private OerBusinessEvidence.Session session(String p,List<SourceDocument> selected) throws Exception {
         List<CanonicalSourceBinding> bindings=new ArrayList<>();Map<String,VettingCorpus.Chunk> views=new LinkedHashMap<>();
+        Map<Long,SourceDocument> complete=new LinkedHashMap<>();for(SourceDocument d:documents.findBusinessSourcesByProjectId(p))complete.put(d.getId(),d);
         for(SourceDocument d:selected){CanonicalSourceBinding b=new CanonicalSourceBinding();b.setProjectId(p);b.setDocumentId(d.getId());b.setProjectionSha256(VettingCorpus.hash("TEST projection "+d.getId()));b.setSnapshotJson("{}");bindings.add(b);
-            VettingCorpus.Chunk c=new VettingCorpus.Chunk();c.setId("chunk-"+d.getId());c.setDocumentId(String.valueOf(d.getId()));c.setFileName(d.getFileName());c.setRole(d.getReviewRole());c.setContent(d.getTextContent());views.put(c.getId(),c);}
+            VettingCorpus.Chunk c=new VettingCorpus.Chunk();c.setId("chunk-"+d.getId());c.setDocumentId(String.valueOf(d.getId()));c.setFileName(d.getFileName());c.setRole(d.getReviewRole());c.setContent(complete.get(d.getId()).getTextContent());views.put(c.getId(),c);}
         for(VettingCorpus.Chunk extra:additionalChunks.values())if(ids(selected).stream().map(String::valueOf).anyMatch(extra.getDocumentId()::equals))views.put(extra.getId(),extra);
         Constructor<OerBusinessEvidence.Session> constructor=OerBusinessEvidence.Session.class.getDeclaredConstructor(String.class,String.class,List.class,List.class,Map.class,Map.class);constructor.setAccessible(true);return constructor.newInstance(p,"advisory",ids(selected),bindings,views,Collections.emptyMap());
     }

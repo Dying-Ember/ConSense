@@ -4,6 +4,8 @@ from __future__ import annotations
 import argparse
 import hashlib
 import importlib
+import json
+import math
 import os
 import re
 from pathlib import Path
@@ -21,6 +23,34 @@ from oer_native_server import NativeOerWindowRuntime
 from oer_server import assert_canonical_scope, configure_environment, create_app
 from token_windows import WindowError, fail
 from workspace_root import resolve_workspace
+
+
+STRICT_REQUEST_JSON = 'consense.strict-request-json.v1'
+
+
+def _strict_request_json(raw):
+    def pairs(values):
+        result = {}
+        for key, value in values:
+            if key in result:
+                raise ValueError('Duplicate JSON key')
+            result[key] = value
+        return result
+    value = json.loads(raw.decode('utf-8-sig'), object_pairs_hook=pairs,
+        parse_constant=lambda value: (_ for _ in ()).throw(ValueError('Nonfinite JSON number')))
+    pending = [value]
+    while pending:
+        item = pending.pop()
+        if isinstance(item, str):
+            item.encode('utf-8')
+        elif isinstance(item, float) and not math.isfinite(item):
+            raise ValueError('Nonfinite JSON number')
+        elif isinstance(item, dict):
+            pending.extend(item.keys())
+            pending.extend(item.values())
+        elif isinstance(item, list):
+            pending.extend(item)
+    return value
 
 
 HERE = Path(__file__).resolve().parent
@@ -94,8 +124,8 @@ class _WireLimits:
             body.extend(incoming)
             if not event.get('more_body', False): break
         if scope['path'] in self.strict_json_paths and body:
-            try: _json(bytes(body))
-            except ValueError:
+            try: scope[STRICT_REQUEST_JSON] = _strict_request_json(bytes(body))
+            except (ValueError, UnicodeError):
                 return await reject(422, 'NATIVE_PDF_REQUEST_JSON_INVALID', 'Request JSON must be strict and unambiguous')
         delivered = False
         async def replay():
@@ -104,6 +134,11 @@ class _WireLimits:
                 delivered = True
                 return {'type': 'http.request', 'body': bytes(body), 'more_body': False}
             return await receive()
+        # This exact route owns finite NDJSON frames and requires a final proof record.
+        # Buffering the complete response would turn a full-source stream into one huge envelope.
+        if (scope['path'] == '/sources/read' and
+                dict(scope.get('headers', [])).get(b'accept') == b'application/x-ndjson'):
+            return await self.app(scope, replay, send)
         events, size, oversized = [], 0, False
         async def bounded_send(event):
             nonlocal size, oversized

@@ -80,8 +80,33 @@ public interface SourceDocumentRepository extends JpaRepository<SourceDocument, 
             + "and lower(trim(coalesce(newer.fileName,''))) = lower(trim(coalesce(d.fileName,''))))")
     boolean existsCurrentParsingByProjectId(@Param("projectId") String projectId);
 
-    /** File display and scope inputs only. Complete native archives/structure are not listing inputs. */
-    interface FileDisplayMetadata extends CatalogMetadata {
+    /** File cards only: bounded coverage header and database-maintained content stamps. */
+    interface FileDisplayMetadata extends ScopeMetadata {
+        String getParseMessage();
+        Integer getPageCount();
+        Boolean getOcrUsed();
+        Integer getTextChars();
+        Integer getStructureChars();
+        Boolean getHasTextValue();
+        Boolean getHasCoverage();
+    }
+
+    @Query("select d.id as id, d.projectId as projectId, d.category as category, "
+            + "d.fileKey as fileKey, d.fileName as fileName, d.reviewRole as reviewRole, "
+            + "d.documentScope as documentScope, d.parseStatus as parseStatus, d.parseMessage as parseMessage, "
+            + "d.oerIdentityJson as oerIdentityJson, d.sourceSha256 as sourceSha256, d.storagePath as storagePath, "
+            + "d.pageCount as pageCount, d.ocrUsed as ocrUsed, length(d.textContent) as textChars, "
+            + "length(d.structuredContentJson) as structureChars, "
+            + "case when d.textContent is not null then true else false end as hasTextValue, "
+            + "case when d.parseCoverageJson is not null and length(d.parseCoverageJson)>0 then true else false end as hasCoverage, "
+            + "d.textContentSha256 as textContentSha256,d.structuredContentSha256 as structuredContentSha256, "
+            + "d.parseCoverageSha256 as parseCoverageSha256,d.normalCandidateSha256 as normalCandidateSha256, "
+            + "d.businessContentSha256 as businessContentSha256 from SourceDocument d "
+            + "where d.projectId = :projectId and d.category in ('VETTING_PACKAGE','VETTING_SUPPLEMENT') order by d.id asc")
+    List<FileDisplayMetadata> findFileDisplayMetadataByProjectId(@Param("projectId") String projectId);
+
+    /** Source lists need exact revision hashes, never the separate candidate graph or native archive. */
+    interface SourceListMetadata extends CatalogMetadata {
         String getReviewRole();
         String getDocumentScope();
         String getParseStatus();
@@ -92,19 +117,6 @@ public interface SourceDocumentRepository extends JpaRepository<SourceDocument, 
         Boolean getOcrUsed();
         String getTextContent();
         String getParseCoverageJson();
-    }
-
-    @Query("select d.id as id, d.projectId as projectId, d.category as category, "
-            + "d.fileKey as fileKey, d.fileName as fileName, d.reviewRole as reviewRole, "
-            + "d.documentScope as documentScope, d.parseStatus as parseStatus, d.parseMessage as parseMessage, "
-            + "d.oerIdentityJson as oerIdentityJson, d.sourceSha256 as sourceSha256, "
-            + "d.pageCount as pageCount, d.ocrUsed as ocrUsed, d.textContent as textContent, "
-            + "d.parseCoverageJson as parseCoverageJson from SourceDocument d "
-            + "where d.projectId = :projectId order by d.id asc")
-    List<FileDisplayMetadata> findFileDisplayMetadataByProjectId(@Param("projectId") String projectId);
-
-    /** Source lists need exact revision hashes, never the separate candidate graph or native archive. */
-    interface SourceListMetadata extends FileDisplayMetadata {
         String getStructuredContentJson();
     }
 
@@ -180,6 +192,22 @@ public interface SourceDocumentRepository extends JpaRepository<SourceDocument, 
             + "d.structuredContentSha256 as structuredContentSha256,d.parseCoverageSha256 as parseCoverageSha256,"
             + "d.normalCandidateSha256 as normalCandidateSha256,d.businessContentSha256 as businessContentSha256 from SourceDocument d where d.id=:id")
     Optional<ScopeMetadata> findScopeMetadataById(@Param("id") Long id);
+
+    /** Bounded saved-text reader: never materialize structure, native archives, or candidate graphs. */
+    interface ParsedTextMetadata { String getTextContent(); Integer getPageCount(); }
+    @Query("select d.textContent as textContent,d.pageCount as pageCount from SourceDocument d "
+            + "where d.id=:id and d.projectId=:projectId and d.sourceSha256=:originalSha "
+            + "and d.businessContentSha256=:businessSha and (d.textContent is null or length(d.textContent)<=:maxChars)")
+    Optional<ParsedTextMetadata> findBoundedParsedText(@Param("id") Long id,@Param("projectId") String projectId,
+            @Param("originalSha") String originalSha,@Param("businessSha") String businessSha,@Param("maxChars") int maxChars);
+
+    interface ParsedReadingMetadata { String getStructuredContentJson(); String getParseCoverageJson(); Integer getPageCount(); }
+    @Query("select d.structuredContentJson as structuredContentJson,d.parseCoverageJson as parseCoverageJson,d.pageCount as pageCount from SourceDocument d "
+            + "where d.id=:id and d.projectId=:projectId and d.sourceSha256=:originalSha and d.businessContentSha256=:businessSha "
+            + "and d.structuredContentJson is not null and d.parseCoverageJson is not null "
+            + "and length(d.structuredContentJson)<=:maxChars and length(d.parseCoverageJson)<=:maxChars")
+    Optional<ParsedReadingMetadata> findBoundedParsedReading(@Param("id") Long id,@Param("projectId") String projectId,
+            @Param("originalSha") String originalSha,@Param("businessSha") String businessSha,@Param("maxChars") int maxChars);
 
     default List<SourceDocument> findScopeSourcesByProjectId(String projectId) {
         List<SourceDocument> result=new ArrayList<>();
@@ -287,7 +315,7 @@ public interface SourceDocumentRepository extends JpaRepository<SourceDocument, 
     Optional<VerificationMetadata> findVerificationMetadataById(@Param("id") Long id);
 
     /** Normal observations need coverage/generation, never the separate native archive. */
-    interface NormalObservationMetadata extends VerificationMetadata {
+    interface NormalObservationMetadata extends VerificationMetadata, ScopeMetadata {
         String getParseCoverageJson();
         String getNormalCandidateJson();
     }
@@ -296,8 +324,23 @@ public interface SourceDocumentRepository extends JpaRepository<SourceDocument, 
             + "d.documentScope as documentScope, d.parseStatus as parseStatus, d.oerIdentityJson as oerIdentityJson, "
             + "d.sourceSha256 as sourceSha256, d.storagePath as storagePath, d.textContent as textContent, "
             + "d.structuredContentJson as structuredContentJson, d.parseCoverageJson as parseCoverageJson, "
-            + "d.normalCandidateJson as normalCandidateJson from SourceDocument d where d.id = :id")
+            + "d.normalCandidateJson as normalCandidateJson,d.textContentSha256 as textContentSha256,"
+            + "d.structuredContentSha256 as structuredContentSha256,d.parseCoverageSha256 as parseCoverageSha256,"
+            + "d.normalCandidateSha256 as normalCandidateSha256,d.businessContentSha256 as businessContentSha256 from SourceDocument d where d.id = :id")
     Optional<NormalObservationMetadata> findNormalObservationMetadataById(@Param("id") Long id);
+
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query("update SourceDocument d set d.normalCandidateJson=:candidate where d.id=:id and d.projectId=:project "
+            + "and d.businessContentSha256=:stamp and d.sourceSha256=:original and d.oerIdentityJson=:identity "
+            + "and ((d.category is null and :category is null) or d.category=:category) "
+            + "and ((d.fileKey is null and :fileKey is null) or d.fileKey=:fileKey) "
+            + "and ((d.reviewRole is null and :role is null) or d.reviewRole=:role) "
+            + "and ((d.documentScope is null and :scope is null) or d.documentScope=:scope) "
+            + "and ((d.parseStatus is null and :status is null) or d.parseStatus=:status)")
+    int compareAndSetNormalCandidateWithStamp(@Param("id") Long id,@Param("project") String project,
+            @Param("stamp") String stamp,@Param("original") String original,@Param("identity") String identity,
+            @Param("category") String category,@Param("fileKey") String fileKey,@Param("role") String role,
+            @Param("scope") String scope,@Param("status") String status,@Param("candidate") String candidate);
 
     @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Query("update SourceDocument d set d.normalCandidateJson = :candidate where d.id = :id "
@@ -350,6 +393,25 @@ public interface SourceDocumentRepository extends JpaRepository<SourceDocument, 
     int compareAndSetReviewRole(@Param("id") Long id,@Param("project") String project,@Param("original") String original,
             @Param("category") String category,@Param("name") String name,@Param("identity") String identity,@Param("text") String text,
             @Param("structure") String structure,@Param("fileKey") String fileKey,@Param("previousRole") String previousRole,
+            @Param("scope") String scope,@Param("status") String status,@Param("storage") String storage,@Param("nextRole") String nextRole);
+
+    /** Large saved sources use database-maintained content fingerprints without loading their LOBs. */
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query("update SourceDocument d set d.reviewRole = :nextRole where d.id = :id and d.projectId = :project "
+            + "and d.sourceSha256 = :original and d.businessContentSha256 = :business "
+            + "and d.category = :category and d.fileName = :name "
+            + "and ((d.oerIdentityJson is null and :identity is null) or d.oerIdentityJson = :identity) "
+            + "and ((d.fileKey is null and :fileKey is null) or d.fileKey = :fileKey) "
+            + "and ((d.reviewRole is null and :previousRole is null) or d.reviewRole = :previousRole) "
+            + "and ((d.documentScope is null and :scope is null) or d.documentScope = :scope) "
+            + "and d.parseStatus = :status and d.storagePath = :storage "
+            + "and not exists (select newer.id from SourceDocument newer where newer.projectId = d.projectId "
+            + "and newer.category in ('VETTING_PACKAGE','VETTING_SUPPLEMENT') and newer.id > d.id "
+            + "and lower(trim(newer.fileName)) = lower(trim(d.fileName))) "
+            + "and not exists (select run.id from VettingRun run where run.projectId = d.projectId and run.status in ('QUEUED','RUNNING'))")
+    int compareAndSetReviewRoleStamped(@Param("id") Long id,@Param("project") String project,@Param("original") String original,
+            @Param("business") String business,@Param("category") String category,@Param("name") String name,
+            @Param("identity") String identity,@Param("fileKey") String fileKey,@Param("previousRole") String previousRole,
             @Param("scope") String scope,@Param("status") String status,@Param("storage") String storage,@Param("nextRole") String nextRole);
 
     Optional<SourceDocument> findFirstByProjectIdAndFileKey(String projectId, String fileKey);

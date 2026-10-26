@@ -209,6 +209,7 @@ class ObservedSourceClauseLocatorsTest {
         VettingSemanticReview.Record record=new VettingSemanticReview.Record();record.setComment(comment);record.setEvidence(Collections.singletonList(evidence));return record;
     }
     private static Fixture fixture()throws Exception{return fixture("NTT1 "+QUOTE);}
+    static SourceDocument authoredSource()throws Exception{return fixture().source;}
     private static Fixture fixture(String selectedText)throws Exception{return fixture("NTT","tender",selectedText,null);}
     private static Fixture fixture(String family,String role,String selectedText,String preceding)throws Exception{
         OcrClient ocr=mock(OcrClient.class);byte[] bytes;
@@ -229,10 +230,10 @@ class ObservedSourceClauseLocatorsTest {
         EvidencePointer pointer=(EvidencePointer)selectedPointer.invoke(null,CanonicalWordSourceContextTest.binding(source),graph,canonical);
         Method view=OerBusinessEvidence.class.getDeclaredMethod("view",JsonNode.class,EvidencePointer.class,SourceDocument.class);view.setAccessible(true);
         Chunk chunk=(Chunk)view.invoke(null,canonical,pointer,source);assertNull(OerBusinessEvidence.canonicalViewStatus(chunk));
-        return new Fixture(graph,canonical,pointer,chunk,pointer.getNativeWordSourceScopesContext());
+        return new Fixture(source,graph,canonical,pointer,chunk,pointer.getNativeWordSourceScopesContext());
     }
     private static final class Fixture {
-        final JsonNode graph,canonical,word;final EvidencePointer pointer;final Chunk chunk;
-        Fixture(JsonNode graph,JsonNode canonical,EvidencePointer pointer,Chunk chunk,JsonNode word){this.graph=graph;this.canonical=canonical;this.pointer=pointer;this.chunk=chunk;this.word=word;}
+        final SourceDocument source;final JsonNode graph,canonical,word;final EvidencePointer pointer;final Chunk chunk;
+        Fixture(SourceDocument source,JsonNode graph,JsonNode canonical,EvidencePointer pointer,Chunk chunk,JsonNode word){this.source=source;this.graph=graph;this.canonical=canonical;this.pointer=pointer;this.chunk=chunk;this.word=word;}
     }
 }

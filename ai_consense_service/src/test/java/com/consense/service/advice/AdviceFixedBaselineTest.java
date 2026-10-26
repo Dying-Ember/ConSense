@@ -68,6 +68,7 @@ class AdviceFixedBaselineTest {
         ReflectionTestUtils.setField(advice,"tokenObserver",counter);
         when(messages.save(any())).thenAnswer(call->{ChatMessage row=call.getArgument(0);if(row.getId()==null){row.setId(ids.incrementAndGet());saved.add(row);}return row;});
         when(fixed.enabled()).thenReturn(true);when(fixed.frozenManifest()).thenReturn(JsonUtils.parse("{\"version\":\"AUTHORED-FROZEN-05\",\"developmentBaseline\":true}"));
+        when(fixed.currentReadGuard(anyList(),any())).thenAnswer(call->{List<VectorStore.SearchHit> hits=call.getArgument(0);java.util.function.Consumer<JsonNode> capture=call.getArgument(1);capture.accept(fixed.frozenManifest());return (Runnable)()->fixed.assertCurrent(hits);});
         JsonNode payload=JsonUtils.parse("{\"id\":\"fixed:authored\",\"content\":\"AUTHORED complete standard text including the exception.\",\"fileLabel\":\"GCC authored standard\",\"fileKey\":\"GCC\",\"pageNo\":42,\"originalPageNos\":[42],\"anchor\":\"AUTHORED clause\",\"sourceHash\":\"AUTHORED-SOURCE-SHA\",\"originalSourceSha256\":\"AUTHORED-SOURCE-SHA\",\"sourceRole\":\"standard\",\"sourceQuality\":{\"family\":\"GCC\",\"finalQualityAccepted\":false},\"fixedDevelopmentBaseline\":true,\"fixedBaselineManifestSha256\":\"AUTHORED-MANIFEST-SHA\",\"fixedBaselineVersion\":\"05\",\"rawAudit\":\"RAW_AUDIT_SENTINEL\"}");
         Constructor<FixedReferenceEvidence> constructor=FixedReferenceEvidence.class.getDeclaredConstructor(String.class,double.class,JsonNode.class,JsonNode.class,JsonNode.class);constructor.setAccessible(true);
         JsonNode unit=JsonUtils.parse("{\"status\":\"complete_observed_unit\",\"requiredMemberIds\":[\"fixed:authored\"],\"presentMemberIds\":[\"fixed:authored\"],\"missingMemberIds\":[],\"qualifiersComplete\":\"unknown\"}");
@@ -125,6 +126,7 @@ class AdviceFixedBaselineTest {
         SourceDocument source=new SourceDocument();source.setId(1L);source.setProjectId("authored-project");source.setFileKey("SCC");source.setFileName("project SCC.txt");source.setCategory(SourceDocument.CATEGORY_VETTING_PACKAGE);source.setReviewRole("tender");source.setTextContent("AUTHORED project condition");source.setParseStatus("PARSED");source.setCreatedAt(Instant.now());
         AdviceSourceFixture.bind(source,source.getTextContent().getBytes(java.nio.charset.StandardCharsets.UTF_8));
         when(documents.findBusinessSourcesByProjectId("authored-project")).thenReturn(Collections.singletonList(source));
+        when(documents.findScopeSourcesByProjectId("authored-project")).thenReturn(Collections.singletonList(source));
         when(canonical.load(anyString(),eq("advisory"),anyList())).thenThrow(new IllegalStateException("AUTHORED missing canonical binding"));
         BizException failure=assertThrows(BizException.class,()->advice.ask("authored-project",new AskRequest("Project applicability?","contract")));
         assertEquals(4204,failure.getCode());verify(fixed,never()).searchForProject(anyString(),anyString(),anyString(),anyInt());verify(ai,never()).completeJson(anyString(),anyString(),any());assertTrue(saved.isEmpty());

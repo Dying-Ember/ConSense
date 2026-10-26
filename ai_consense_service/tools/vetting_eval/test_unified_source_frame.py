@@ -1,5 +1,6 @@
 """Request-frame authored real-CAS contract probes; no live services/models/GPU."""
 import json
+from contextlib import contextmanager
 import os
 from concurrent.futures import ThreadPoolExecutor
 from threading import Barrier
@@ -20,6 +21,25 @@ from test_native_canonical_projection import fixture as docx_fixture
 from test_native_pdf_canonical_projection import fixture as pdf_fixture
 from test_oer_server import OerHttpContractTest
 from test_token_windows import CharacterTokenizer
+
+
+@contextmanager
+def actual_cas_trace(store, trace):
+    """Record complete actual hashes by ownership phase, independently of buffering."""
+    active = [False]
+    verified, uncached = store._read_verified, store._read_uncached
+    def entry(descriptor, *, retain):
+        prior = active[0]
+        active[0] = True
+        try:
+            return verified(descriptor, retain=retain)
+        finally:
+            active[0] = prior
+    def read(descriptor, *, retain):
+        trace.append((descriptor['sha256'], descriptor['byteCount'], active[0]))
+        return uncached(descriptor, retain=retain)
+    with patch.object(store, '_read_verified', entry), patch.object(store, '_read_uncached', read):
+        yield
 
 
 class SourceFrameTests(unittest.TestCase):
@@ -110,7 +130,7 @@ class SourceFrameTests(unittest.TestCase):
                     with self.registry.validation_frame(software_guard=self.rt.algorithms):
                         self.assertEqual(source, self.registry.load(address))
                 roots = [call for call in serialize.call_args_list if isinstance(call.args[0], dict)
-                         and call.args[0].get('projectionSha256') == address]
+                         and call.args[0].get('projectionSha256') == address and 'canonical' in call.args[0]]
                 self.assertEqual(0, len(roots))
             self.assertEqual(1, validate.call_count)
         result = next(iter(self.registry._derived_results.values()))
@@ -134,12 +154,8 @@ class SourceFrameTests(unittest.TestCase):
         address = self.single_address()
         traces = []
         current = []
-        read = self.store._read_uncached
-        def trace(descriptor, *, retain):
-            current.append((descriptor['sha256'], descriptor['byteCount'], retain))
-            return read(descriptor, retain=retain)
         with patch.object(self.registry, 'validator', wraps=self.registry.validator) as validate:
-            with patch.object(self.store, '_read_uncached', trace):
+            with actual_cas_trace(self.store, current):
                 for _ in range(2):
                     current.clear()
                     with self.registry.validation_frame(software_guard=self.rt.algorithms):
@@ -149,8 +165,9 @@ class SourceFrameTests(unittest.TestCase):
             self.assertEqual(1, validate.call_count)
         self.assertEqual(traces[0], traces[1])
         self.assertTrue(traces[0])
-        self.assertEqual({(sha, size) for sha, size, retain in traces[0] if retain},
-                         {(sha, size) for sha, size, retain in traces[0] if not retain})
+        for trace in traces:
+            self.assertEqual([(sha, size) for sha, size, entry in trace if entry],
+                             [(sha, size) for sha, size, entry in trace if not entry])
         self.assertIsNone(self.registry._validation_frame.get())
         self.registry.load(address)  # unframed normal validation remains supported
 
@@ -394,12 +411,8 @@ class SourceFrameTests(unittest.TestCase):
         response = self.index(sources)
         self.assertEqual(200, response.status_code, response.text)
         traces, current = [], []
-        read = self.store._read_uncached
-        def trace(descriptor, *, retain):
-            current.append((descriptor['sha256'], descriptor['byteCount'], retain))
-            return read(descriptor, retain=retain)
         with patch.object(self.registry.pdf_registry, 'validator', wraps=self.registry.pdf_registry.validator) as validate:
-            with patch.object(self.store, '_read_uncached', trace):
+            with actual_cas_trace(self.store, current):
                 for request in range(2):
                     current.clear()
                     response = self.query()
@@ -410,8 +423,9 @@ class SourceFrameTests(unittest.TestCase):
                     self.assertIsNone(self.registry._validation_frame.get())
         self.assertEqual(traces[0], traces[1])
         self.assertTrue(traces[0])
-        self.assertEqual({(sha, size) for sha, size, retain in traces[0] if retain},
-                         {(sha, size) for sha, size, retain in traces[0] if not retain})
+        for trace in traces:
+            self.assertEqual([(sha, size) for sha, size, entry in trace if entry],
+                             [(sha, size) for sha, size, entry in trace if not entry])
 
     def test_late_retrieval_cas_mutation_is_rejected_and_journalled(self):
         sources = self.publish_all()

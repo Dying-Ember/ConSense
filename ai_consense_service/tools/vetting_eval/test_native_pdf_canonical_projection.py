@@ -10,7 +10,8 @@ import unittest
 from artifact_store import ArtifactStore
 from canonical_projection import CanonicalProjectionError, _bytes, _hash
 from native_pdf_observation import capture_native_pdf_observation
-from native_pdf_canonical_projection import ADOPTION_SCHEMA, produce_native_pdf, validate_native_pdf_projection
+from native_pdf_canonical_projection import (ADOPTION_SCHEMA, produce_native_pdf, validate_native_pdf_projection,
+    FONT_PROJECTION_VERSION, FONT_TEXT_CHANNEL, VERSION, _assemble)
 from parser_capture import combine_parser_captures
 from structured_parser_evidence import build_dual_parser_evidence, normalize_parser_run, read_artifact_record
 from test_native_pdf_fixture import actual_native_pdf_fixture
@@ -153,6 +154,25 @@ class NativePdfCanonicalProjectionTest(unittest.TestCase):
         self.manifest['nativeBundleSha256'] = native['bundleSha256']
         self.manifest['regionReview']['nativeBundleSha256'] = native['bundleSha256']
         return native
+
+    def test_declared_font_channel_has_new_recipe_and_old_recipe_replay_stays_literal(self):
+        # Config-only authored mutation exercises routing, not fresh PDFBox execution.
+        from test_native_pdf_observation import identity
+        def mutate(observation):
+            observation['observerIdentity']['config']['fontTextDecoding'] = 'embedded-adobe-symbol-pua-v1'
+            identity(observation)
+        native = self.recapture_mutation(mutate)
+        self.manifest['sourceRevisionSha256'] = native['source']['sourceRevisionSha256']
+        projection = self.produce(native=native)
+        self.assertEqual(FONT_PROJECTION_VERSION, projection['projectionIdentity']['projectionVersion'])
+        self.assertEqual(FONT_TEXT_CHANNEL, projection['chunks'][0]['parts'][0]['textChannel'])
+        self.assertEqual(projection, validate_native_pdf_projection(projection, artifact_store=self.store))
+        old_identity = copy.deepcopy(projection['projectionIdentity']); old_identity['projectionVersion'] = VERSION
+        old = _assemble(native,self.dual,self.manifest,projection['evidenceDescriptors'],self.store,replay_identity=old_identity)
+        self.assertEqual(VERSION, old['projectionIdentity']['projectionVersion'])
+        self.assertNotIn('textChannel',old['chunks'][0]['parts'][0])
+        self.assertEqual(projection['chunks'][0]['content'],old['chunks'][0]['content'])
+        self.assertEqual(old,validate_native_pdf_projection(old,artifact_store=self.store))
 
     def test_known_hidden_alpha_and_outcrop_glyphs_cannot_enter_adopted_prose(self):
         page = self.native['observation']['pageObservations'][0]

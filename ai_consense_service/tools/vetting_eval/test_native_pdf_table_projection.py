@@ -6,7 +6,9 @@ import unittest
 
 from artifact_store import ArtifactStore
 from canonical_projection import CanonicalProjectionError, _bytes, _hash
-from native_pdf_canonical_projection import produce_native_pdf, validate_native_pdf_projection
+from native_pdf_canonical_projection import produce_native_pdf, validate_native_pdf_projection, FONT_TABLE_PROJECTION_VERSION
+from native_pdf_observation import capture_native_pdf_observation, _source_symbol_fonts, _text_resolution
+from native_pdf_table_projection import project_table_groups
 from native_pdf_projection_transport import publish_native_pdf_transport, hydrate_native_pdf_transport
 from native_pdf_source_registry import NativePdfCanonicalSourceRegistry
 from test_native_pdf_canonical_projection import fixture
@@ -51,6 +53,50 @@ class NativePdfTableProjectionTest(unittest.TestCase):
         self.assertEqual(['r1', 'r2'], chunk['nativeTables'][0]['completeness']['required'])
         self.assertEqual(2, len(projection['assetRefs'])); self.assertFalse(projection['semanticScopeVerified'])
         self.assertEqual(projection, validate_native_pdf_projection(projection, artifact_store=self.store))
+
+    def test_font_table_recipe_routes_transport_and_retains_blank_source_state(self):
+        from test_native_pdf_fixture import actual_native_pdf_fixture
+        from test_native_pdf_observation import identity
+        raw, original, sources = actual_native_pdf_fixture(); observation=json.loads(raw)
+        observation['observerIdentity']['config']['fontTextDecoding']='embedded-adobe-symbol-pua-v1'
+        identity(observation)
+        self.native=capture_native_pdf_observation(_bytes(observation),original,sources,artifact_store=self.store)
+        self.manifest.update(nativeBundleSha256=self.native['bundleSha256'],sourceRevisionSha256=self.native['source']['sourceRevisionSha256'])
+        self.manifest['regionReview']['nativeBundleSha256']=self.native['bundleSha256']
+        projection=self.produce()
+        self.assertEqual(FONT_TABLE_PROJECTION_VERSION,projection['projectionIdentity']['projectionVersion'])
+        cells=projection['chunks'][0]['nativeTables'][0]['fragments'][0]['cells']
+        self.assertEqual(['Visible fi cafe',''],[cell['text'] for cell in cells])
+        self.assertEqual('source_reviewed_blank',cells[1]['valueState'])
+        self.assertEqual('same_version_native_glyphs_with_verified_font_decoding',cells[0]['textChannel'])
+        public=publish_native_pdf_transport(projection,artifact_store=self.store)
+        self.assertEqual(projection,hydrate_native_pdf_transport(public,artifact_store=self.store))
+        for mutation in ('channel','decoder','span_pointer'):
+            changed=copy.deepcopy(public)
+            if mutation=='channel': changed['chunks'][0]['parts'][0]['textChannel']='literal_native_glyphs_with_explicit_source_reviewed_separators'
+            elif mutation=='decoder': changed['observerIdentity']['config']['fontTextDecoding']='font-name-only'
+            else: changed['chunks'][0]['parts'][0]['nativeTextSpansRef']['jsonPointer']='/chunks/0/parts/1/nativeTextSpans'
+            changed['projectionSha256']=_hash({k:v for k,v in changed.items() if k!='projectionSha256'})
+            with self.subTest(mutation=mutation),self.assertRaises(CanonicalProjectionError):
+                hydrate_native_pdf_transport(changed,artifact_store=self.store)
+
+    def test_table_component_decodes_only_new_channel_with_original_glyph_membership(self):
+        # Direct component metadata fixture, not a source/Java observation mutation.
+        from test_native_pdf_font_text import metadata_pdf, glyph
+        projection=self.produce(); native=copy.deepcopy(self.native)
+        fonts=_source_symbol_fonts(metadata_pdf(),[1])[1]
+        replacement=glyph(fonts['Symbol'][0]); _text_resolution(replacement,enabled=True,fonts=fonts)
+        native['observation']['pageObservations'][0]['nativePdfEvidence']['glyphs'][0].update(
+            {key:value for key,value in replacement.items() if key!='id'})
+        parts={part['referenceRegionId']:part for part in projection['canonical']['units'][0]['parts']}
+        reference=json.loads(self.store.read_asset(self.manifest['reference']['artifactDescriptor']))
+        raw=project_table_groups(self.manifest,parts,reference,native)
+        decoded=project_table_groups(self.manifest,parts,reference,native,font_text=True)
+        raw_cell=raw['AUTHORED-group']['fragments'][0]['cells'][0]
+        decoded_cell=decoded['AUTHORED-group']['fragments'][0]['cells'][0]
+        self.assertEqual('\uf046',raw_cell['text'][0]); self.assertEqual('Φ',decoded_cell['text'][0])
+        self.assertEqual(raw_cell['glyphIds'],decoded_cell['glyphIds'])
+        self.assertEqual(raw['AUTHORED-group']['completeness'],decoded['AUTHORED-group']['completeness'])
 
     def test_public_transport_and_registry_return_exact_original_page(self):
         internal = self.produce(); public = publish_native_pdf_transport(internal, artifact_store=self.store)

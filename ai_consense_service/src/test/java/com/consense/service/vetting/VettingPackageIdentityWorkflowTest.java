@@ -40,7 +40,7 @@ class VettingPackageIdentityWorkflowTest {
     @MockBean EnglishFileOutput englishFiles;
     @BeforeEach void setup()throws Exception {
         when(englishFiles.json(any(JsonNode.class),anyString(),any(Runnable.class))).thenAnswer(call->{call.<Runnable>getArgument(2).run();return call.getArgument(0);});
-        when(englishFiles.docx(any(byte[].class),anyString(),any(Runnable.class))).thenAnswer(call->{call.<Runnable>getArgument(2).run();return call.getArgument(0);});
+        when(englishFiles.docx(any(byte[].class),anyString(),any(Runnable.class),anySet())).thenAnswer(call->{call.<Runnable>getArgument(2).run();return call.getArgument(0);});
         props.getVetting().setServiceProbeDirectory(null);props.getVetting().setProbeDirectory(null);props.getVetting().setExportProbeDirectory(null);
         when(storage.matchesStoredBytes(eq("AUTHORED_STORAGE"),anyString())).thenReturn(true);
         authority("PKG-1","INPUT");when(semantic.reviewWithProgress(isNull(),anyString(),anyList(),eq("en"),any(ReviewProgress.class),anyList(),any(Runnable.class))).thenReturn(empty());

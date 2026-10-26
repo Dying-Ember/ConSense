@@ -147,6 +147,41 @@ class VettingProgressJpaHttpTest {
         System.out.println("CHANGED_SOURCE_REPORT_GATE_SQL "+JsonUtils.write(SqlCapture.statements));
     }
 
+    @Test void browserDetailKeepsFreshnessAndReadableCoverageWithoutRawAuditArrays()throws Exception {
+        jdbc.update("UPDATE source_document SET structured_content_json='[]' WHERE id=101");
+        String raw="RAW_AUDIT_PAYLOAD_"+"x".repeat(1_000_000);
+        com.fasterxml.jackson.databind.node.ObjectNode coverage=JsonUtils.mapper().createObjectNode();
+        coverage.put("totalDocuments",1).put("reviewedDocuments",1).putArray("warnings").add("Bounded review requires human countercheck.");
+        coverage.putArray("documents").addObject().put("documentId","101").put("fileName","SCC.txt");
+        coverage.putObject("semanticSourceRead").put("raw",raw);
+        coverage.putObject("checklistDependencyLedger").put("raw",raw);
+        com.fasterxml.jackson.databind.node.ObjectNode topic=coverage.putArray("semanticTopics").addObject();
+        topic.put("topicIndex",1).put("topic","Authored review").put("submittedChars",42).putArray("submittedChunkIds").add("chunk-1");
+        com.fasterxml.jackson.databind.node.ObjectNode packet=topic.putArray("packetAudits").addObject();
+        packet.put("packetId","packet-1").put("packetIndex",1).put("status","completed").putArray("attempts").addObject().put("rawResponse",raw);
+        packet.putObject("inputBudgetMetadata").putObject("observation").put("inputTokens",123);
+        com.fasterxml.jackson.databind.node.ObjectNode request=topic.putArray("sourceRequests").addObject();
+        request.put("requestId","request-1").put("transportStatus","already_global").put("reviewExecutionStatus","decoded");
+        request.putArray("requiredChunkIds").add("chunk-1");request.putArray("missingChunkIds");
+        request.putObject("sourceTrace").put("raw",raw);
+        String persisted=JsonUtils.write(coverage),snapshot="b".repeat(64);
+        jdbc.update("UPDATE vetting_run SET status='COMPLETED',source_snapshot_sha256=?,coverage_json=?,result_json=?,report_snapshot_sha256=? WHERE id=?",
+                "2ffe526969820c96e5fbe4305cbd473e9c7c029a06055ea53a0145f06ffd4252",persisted,"{\"total\":2,\"model\":\"Authored model\"}",snapshot,RUN);
+        clearFeedback();JsonNode response=call("/runs/"+RUN+"/display"),data=response.path("data");
+        assertEquals(0,response.path("code").asInt(),response.toString());assertEquals("COMPLETED",data.path("status").asText());
+        assertFalse(data.path("sourceSetStale").asBoolean());assertEquals(snapshot,data.path("reportSnapshotId").asText());
+        assertEquals(2,data.path("result").path("total").asInt());
+        assertEquals("Bounded review requires human countercheck.",data.path("coverage").path("warnings").get(0).asText());
+        JsonNode shown=data.path("coverage").path("semanticTopics").get(0);
+        assertEquals(1,shown.path("submittedChunkCount").asInt());assertEquals(123,shown.path("packetAudits").get(0).path("inputBudgetMetadata").path("observation").path("inputTokens").asInt());
+        assertEquals(1,shown.path("sourceRequests").get(0).path("requiredMemberCount").asInt());
+        assertTrue(JsonUtils.write(response).length()<20_000,"The browser receives readable summaries, not raw model/source audit payloads");
+        assertEquals(persisted,jdbc.queryForObject("SELECT coverage_json FROM vetting_run WHERE id=?",String.class,RUN));
+        assertEquals(0,selects("vetting_packet_checkpoint").size());
+        jdbc.update("UPDATE source_document SET text_content='Changed contractual obligations.' WHERE id=101");
+        assertTrue(call("/runs/"+RUN+"/display").path("data").path("sourceSetStale").asBoolean());
+    }
+
     private JsonNode call(String suffix)throws Exception{return callPath("/api/vetting/"+PROJECT+suffix);}
     private JsonNode callPath(String path)throws Exception{org.springframework.mock.web.MockHttpServletResponse response=mvc.perform(get(path)).andReturn().getResponse();assertEquals(200,response.getStatus());return JsonUtils.parse(response.getContentAsString());}
     private void clearFeedback(){SqlCapture.statements.clear();emf.unwrap(SessionFactory.class).getStatistics().clear();org.mockito.Mockito.clearInvocations(externalLlm,actualParser,actualOer);}

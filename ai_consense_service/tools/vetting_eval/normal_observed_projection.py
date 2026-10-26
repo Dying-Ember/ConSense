@@ -24,6 +24,8 @@ VERSION = 'complete-bound-normal-observations-v1'
 GRAPH_SCHEMA = 'consense.canonical-candidate.v1'
 GRAPH_VERSION = 'actual-normal-source-unit-whole-page-observations-v3'
 LEGACY_GRAPH_VERSION = 'actual-normal-source-unit-whole-page-observations-v2'
+COMPACT_PDF_GRAPH_VERSION = 'actual-normal-source-unit-compact-pdf-observations-v4'
+SUPPORTED_GRAPH_VERSIONS = (LEGACY_GRAPH_VERSION, GRAPH_VERSION, COMPACT_PDF_GRAPH_VERSION)
 OBSERVER = {'actor': 'application', 'method': 'normal_parser_observation',
             'originalByteVerifier': 'java_current_source_reader'}
 DECLARATIONS = {'adoptionStatus': 'candidate_unverified', 'humanConfirmed': False,
@@ -125,7 +127,7 @@ def _expand_paragraph_contexts(graph, value):
 
 
 def _validate_paragraph_references(graph):
-    if graph.get('producerVersion') != GRAPH_VERSION:
+    if graph.get('producerVersion') not in (GRAPH_VERSION, COMPACT_PDF_GRAPH_VERSION):
         return
     outline = graph.get('nativeDocxOutline') or {}
     _fail(isinstance(outline, dict), 'NORMAL_OBSERVED_PARAGRAPH_REF_INVALID', 'The paragraph inventory must be an object')
@@ -185,7 +187,7 @@ def _validate_manifest(manifest):
           'Only explicit application normal-parser observations are supported')
     graph, binding = manifest['candidateGraph'], manifest['sourceBinding']
     _fail(isinstance(graph, dict) and graph.get('schema') == GRAPH_SCHEMA
-          and graph.get('producerVersion') in (GRAPH_VERSION, LEGACY_GRAPH_VERSION)
+          and graph.get('producerVersion') in SUPPORTED_GRAPH_VERSIONS
           and graph.get('status') == 'actual_source_candidate_generation'
           and all(graph.get(key) == value and type(graph.get(key)) is type(value)
                   for key, value in DECLARATIONS.items()), 'NORMAL_OBSERVED_GRAPH_AUTHORITY_INVALID',
@@ -278,8 +280,9 @@ def _validate_manifest(manifest):
               'NORMAL_OBSERVED_RELATION_INVALID', 'Keep observed and unknown relations without granting confirmation')
 
 
-def _assemble(manifest, descriptor, code_sha):
-    _validate_manifest(manifest)
+def _assemble(manifest, descriptor, code_sha, *, prevalidated=False):
+    if not prevalidated:
+        _validate_manifest(manifest)
     graph, binding = manifest['candidateGraph'], manifest['sourceBinding']
     source, graph_sha, manifest_sha = graph['source'], _hash(graph), _hash(manifest)
     revision = _hash({'originalSourceSha256': source['originalSourceSha256'],
@@ -351,7 +354,8 @@ def produce_normal_observed(candidate_graph, source_binding, *, artifact_store):
                 'observer': copy.deepcopy(OBSERVER)}
     _validate_manifest(manifest)
     descriptor = artifact_store.put_bytes(_serialize(manifest), identity_scope='complete_normal_observation_manifest')
-    return _assemble(manifest, descriptor, hashlib.sha256(Path(__file__).read_bytes()).hexdigest())
+    return _assemble(manifest, descriptor, hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+                     prevalidated=True)
 
 
 def validate_normal_observed(projection, *, artifact_store):

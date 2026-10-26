@@ -174,7 +174,7 @@ function onLocaleChange(event: Event) {
         </button>
       </label>
 
-      <FixedReferenceSelection :project-id="store.activeProjectId" :locale="store.locale" />
+      <FixedReferenceSelection v-if="route.name === 'vetting' || route.name === 'advice'" :project-id="store.activeProjectId" :locale="store.locale" :module="route.name === 'advice' ? 'advisory' : 'vetting'" />
       <label class="lang-switcher">
         <AppIcon name="globe" :size="16" />
         <span class="switcher-label" style="margin-left: 6px">{{ t('topbar.language') }}</span>

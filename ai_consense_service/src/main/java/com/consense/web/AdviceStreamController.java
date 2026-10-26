@@ -72,7 +72,7 @@ public class AdviceStreamController {
                 } finally { requests.remove(requestId, job); sessions.remove(sessionKey, job); }
             });
             job.future = future;
-            if (job.cancelled.get()) { future.cancel(true); job.cleanup.run(); }
+            if (job.cancelled.get()) { future.cancel(false); job.cleanup.run(); }
         } catch (RuntimeException failure) {
             requests.remove(requestId, job); sessions.remove(sessionKey, job); job.cancel(true);
             if (failure instanceof RejectedExecutionException) throw new BizException(4201, "The consultation queue is full. Please retry later.");
@@ -95,7 +95,7 @@ public class AdviceStreamController {
 
     private static final class Job implements AdviceProgress {
         private final String projectId, sessionId, requestId;
-        private final SseEmitter emitter = new SseEmitter(600000L);
+        private final SseEmitter emitter = new SseEmitter(TimeUnit.MINUTES.toMillis(30));
         private final AtomicBoolean cancelled = new AtomicBoolean(), committed = new AtomicBoolean();
         private final List<Runnable> cancellations = new CopyOnWriteArrayList<>();
         private volatile Future<?> future;
@@ -130,7 +130,8 @@ public class AdviceStreamController {
         private void cancel(boolean close) {
             if (!committed.get() && cancelled.compareAndSet(false, true)) {
                 cancellations.forEach(action -> { try { action.run(); } catch (RuntimeException ignored) { } });
-                Future<?> task = future; if (task != null) task.cancel(true);
+                // Interrupting H2 file reads can close the database's shared file channel.
+                Future<?> task = future; if (task != null) task.cancel(false);
                 cleanup.run();
             }
             if (close) emitter.complete();

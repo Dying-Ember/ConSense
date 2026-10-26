@@ -12,7 +12,34 @@ import java.util.*;
 public final class NormalObservedContract {
     public static final String SCHEMA="consense.normal-observed.v1",PRODUCER="normal_observed",VERSION="complete-bound-normal-observations-v1";
     public static final int MAX_BYTES=1024*1024*1024;
+    static final String REQUEST_BOUND_FORMAT="request-bound-normal-projection-v1";
     private NormalObservedContract(){}
+    static boolean requestBoundPublication(JsonNode health){
+        JsonNode formats=health.path("normalObserved").path("publicationResponseFormats");
+        if(formats.isArray())for(JsonNode format:formats)if(format.isTextual()&&REQUEST_BOUND_FORMAT.equals(format.asText()))return true;
+        return false;
+    }
+    static final class Publication {
+        final String raw;final JsonNode projection,header;
+        Publication(String raw,JsonNode projection,JsonNode header){this.raw=raw;this.projection=projection;this.header=header;}
+    }
+    /** Restore only explicitly negotiated references to this request's already current source observations. */
+    static Publication publication(CanonicalJson.NormalReceipt receipt,JsonNode graph,JsonNode binding,boolean requestBound){
+        JsonNode projection=JsonUtils.parse(receipt.projection);String raw=receipt.projection;
+        if(requestBound){
+            require(REQUEST_BOUND_FORMAT.equals(receipt.header.path("responseFormat").asText()),"NORMAL_OBSERVED_RESPONSE_FORMAT_MISMATCH");
+            JsonNode manifest=projection.path("manifest"),canonical=projection.path("canonical");
+            require(projection.isObject()&&manifest.isObject()&&manifest.size()==1&&manifest.path("$requestManifest").isTextual()
+                &&manifest.path("$requestManifest").equals(projection.path("projectionIdentity").path("observationManifestSha256"))
+                &&canonical.isObject()&&canonical.size()==1&&canonical.path("$requestCanonical").isTextual()
+                &&canonical.path("$requestCanonical").equals(projection.path("sourceHash")),"NORMAL_OBSERVED_RESPONSE_REFERENCE_MISMATCH");
+            ObjectNode restoredManifest=object();restoredManifest.set("candidateGraph",graph);restoredManifest.set("sourceBinding",binding);
+            restoredManifest.set("observer",JsonUtils.parse("{\"actor\":\"application\",\"method\":\"normal_parser_observation\",\"originalByteVerifier\":\"java_current_source_reader\"}"));
+            ObjectNode restoredCanonical=object();restoredCanonical.set("units",graph.path("units"));restoredCanonical.set("relations",graph.path("relations"));restoredCanonical.putArray("assetRefs");
+            ((ObjectNode)projection).set("manifest",restoredManifest);((ObjectNode)projection).set("canonical",restoredCanonical);raw=CanonicalJson.publicationWire(projection);
+        }else require(!receipt.header.has("responseFormat"),"NORMAL_OBSERVED_RESPONSE_FORMAT_MISMATCH");
+        return new Publication(raw,projection,receipt.header);
+    }
     public static int maximumBytes(int configured){
         if(configured<=0||configured>MAX_BYTES)throw new CanonicalEvidenceException(HttpStatus.SERVICE_UNAVAILABLE,"OER_EVIDENCE_CONFIG_INVALID");
         return configured;
@@ -31,6 +58,14 @@ public final class NormalObservedContract {
             &&n.path("maximumMessageBytes").asInt()>0&&n.path("maximumMessageBytes").asInt()<=MAX_BYTES,"NORMAL_OBSERVED_CAPABILITY_MISMATCH");
         for(String key:Arrays.asList("humanConfirmed","sourceQualityAccepted","semanticScopeVerified"))require(n.path(key).isBoolean()&&!n.path(key).asBoolean(),"NORMAL_OBSERVED_AUTHORITY_MISMATCH");
         require("candidate_unverified".equals(n.path("adoptionStatus").asText()),"NORMAL_OBSERVED_AUTHORITY_MISMATCH");
+    }
+    public static void validateGraphCapability(JsonNode oer,JsonNode graph){
+        validateCapability(oer);
+        String version=graph.path("producerVersion").asText();
+        if(NormalSourceCandidateGraph.VERSION.equals(version)||NormalSourceCandidateGraph.LEGACY_VERSION.equals(version))return;
+        JsonNode supported=oer.path("normalObserved").path("supportedCandidateGraphVersions");
+        require(NormalSourceCandidateGraph.supportedVersion(version)&&supported.isArray()
+            &&java.util.stream.StreamSupport.stream(supported.spliterator(),false).anyMatch(v->v.isTextual()&&version.equals(v.asText())),"NORMAL_OBSERVED_CAPABILITY_MISMATCH");
     }
     public static JsonNode validate(String raw,String address){return validate(raw,address,MAX_BYTES);}
     public static JsonNode validate(String raw,String address,int maximum){

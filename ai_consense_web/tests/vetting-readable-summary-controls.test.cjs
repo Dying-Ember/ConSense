@@ -21,7 +21,7 @@ async function mount({ locale = 'zh-Hans', files = [], findings = [], metrics = 
   const notifications = [], apiCalls = []
   const store = vue.reactive({ activeProjectId: 'project-a', locale, notify(message) { notifications.push(message) }, setBusy() {}, clearBusy() {}, captureLlmSelection: () => ({ profileId: null }) })
   const deferredDetail = deferred()
-  let detailReads = 0
+  let detailReads = 0, fullRunReads = 0
   const empty = { render: () => null }
   const loaded = loadVue(path.join(__dirname, '../src/views/VettingView.vue'), { boundaries: {
     'vue-i18n': require('vue-i18n'),
@@ -31,7 +31,8 @@ async function mount({ locale = 'zh-Hans', files = [], findings = [], metrics = 
     '@/api/client': { ApiError: class ApiError extends Error {} },
     '@/api': { vettingApi: { files: async () => files, findings: async () => findings, metrics: async () => metrics,
       sourceProgress: async () => files.map(source => ({ id: source.documentId ?? source.key, fileName: source.fileName, parseStatus: source.parseStatus ?? source.status, parseMessage: source.parseMessage, pageCount: source.pageCount })),
-      latestRunProgress: async () => job, getRun: async () => { detailReads++; return pendingDetails || pendingRefresh && detailReads > 1 ? deferredDetail.promise : job },
+      latestRunProgress: async () => job, getRun: async () => { fullRunReads++; return job },
+      getRunDisplay: async () => { detailReads++; return pendingDetails || pendingRefresh && detailReads > 1 ? deferredDetail.promise : job },
       exportReport: async (...args) => { apiCalls.push(['export', ...args]) }, evidence: async () => ({ located: true, items: [] }),
       startRun: async (...args) => { apiCalls.push(['run', ...args]); return job } } },
     '@/advice/reviewHandoff': { reviewHandoffCopy: {} },
@@ -45,7 +46,8 @@ async function mount({ locale = 'zh-Hans', files = [], findings = [], metrics = 
   i18n.global.locale.value = locale
   const h = renderer(), app = h.createApp(loaded.default)
   app.use(i18n); app.mount(h.root); await settle()
-  return { ...h, notifications, apiCalls, dispose: () => app.unmount(), resolveDetails: async () => { deferredDetail.resolve(job); await settle() }, openSources: async () => {
+  return { ...h, notifications, apiCalls, detailReads: () => detailReads, fullRunReads: () => fullRunReads,
+    dispose: () => app.unmount(), resolveDetails: async () => { deferredDetail.resolve(job); await settle() }, openSources: async () => {
     const button = find(h.root, node => node.tag === 'button' && text(node).trim() === i18n.global.t('vetting.actions.source'))
     assert.ok(button); button.props.onClick(); await settle()
   } }
@@ -78,7 +80,8 @@ test('reader summary keeps snapshot documents, total findings and filtered pendi
     try {
       const main = visibleText(h.root)
       for (const expected of [coverageText, findingText, pendingText, riskText, 'Saved MiniMax model']) assert.ok(main.includes(expected), expected)
-      for (const raw of ['a'.repeat(64), 'saved-provider-protocol', 'saved-minimax-profile', 'Raw canonical UTF16 parser warning', 'Raw worker completion message']) {
+      assert.ok(!text(h.root).includes('a'.repeat(64)), 'Report snapshot identity stays in the saved run, outside reader controls')
+      for (const raw of ['saved-provider-protocol', 'saved-minimax-profile', 'Raw canonical UTF16 parser warning', 'Raw worker completion message']) {
         assert.ok(text(h.root).includes(raw), `Raw record retained: ${raw}`)
         assert.ok(!main.includes(raw), `Raw record initially folded: ${raw}`)
         assert.ok(all(h.root, node => node.text?.includes(raw)).every(closedAncestor), `Raw record has a closed details ancestor: ${raw}`)
@@ -213,11 +216,77 @@ test('expanded source request states keep full input identities optional while s
   }
 })
 
+test('bounded review and pending topic counts remain visible before opening the call ledger', async () => {
+  const topic = (topicIndex, name, aggregateReviewStatus, reviewKind = 'topic') => ({
+    topicIndex, topic: name, reviewKind, aggregateReviewStatus, status: 'completed', checkState: 'not_completed',
+    sourceRequestCount: 1, pendingSourceRequestCount: aggregateReviewStatus === 'observed_requests_decoded_scope_unknown' ? 0 : 1,
+    submittedChunkIds: [], submittedChars: 0, issueAssessments: 0, consistentAssessments: 0, insufficientContextAssessments: 0,
+    acceptedFindings: 0, rejectedRecords: 0, budgetDroppedGroups: 0, partialContextGroups: 0, unresolvedSegments: 0
+  })
+  const job = completed()
+  job.coverage.semanticTopics = [
+    topic(1, 'Performance obligations', 'observed_requests_decoded_scope_unknown'),
+    topic(2, 'Payment reference', 'partial', 'project_reference'),
+    topic(3, 'Insurance', 'failed'),
+    topic(4, 'Unverified scope', undefined),
+    { ...topic(5, 'Complete source scan blocked', 'incomplete', 'full_scope'), reviewCoverageScope: 'bounded_first_pass_origins_pending' }
+  ]
+  for (const [locale, firstPass, counts, kind, incomplete, fullScope] of [
+    ['zh-Hans', '这是有界首轮审查，不是完整合约结论；5 / 5 个主题仍待处理或核对', '待核对 5 · 失败 1', '项目资料对照', '审查未完成：部分来源未读取', '来源范围与跨文件审查'],
+    ['zh-Hant', '這是有界首輪審查，不是完整合約結論；5 / 5 個主題仍待處理或核對', '待核對 5 · 失敗 1', '項目資料對照', '審查未完成：部分來源未讀取', '來源範圍與跨檔案審查'],
+    ['en', 'This is a bounded first review, not a complete contract conclusion; 5 / 5 topics still need follow-up or review', 'Needs review 5 · failed 1', 'Project information comparison', 'Review incomplete: some sources unread', 'Source scope and cross-file review']
+  ]) {
+    const h = await mount({ locale, job })
+    try {
+      const notice = find(h.root, node => node.tag === 'p' && node.props?.role === 'status' && text(node).includes(firstPass))
+      assert.ok(notice, locale)
+      assert.equal(closedAncestor(notice), false, 'The bounded conclusion is visible without opening technical details')
+      const summary = find(h.root, node => node.tag === 'summary' && text(node).includes(counts))
+      assert.ok(summary, locale)
+      assert.equal(summary.parent.tag, 'details')
+      assert.equal(closedAncestor(summary.parent), false, 'The ledger control is not hidden inside another disclosure')
+      assert.ok(visibleText(h.root).includes(counts))
+      assert.ok(!visibleText(h.root).includes('Payment reference'), 'The detailed rows remain optional')
+      summary.parent.props.open = true
+      const row = find(summary.parent, node => node.tag === 'tr' && text(node).includes('Payment reference'))
+      assert.ok(row)
+      const titleCell = find(row, node => node.tag === 'td')
+      assert.equal(titleCell.children[0].tag, 'strong')
+      assert.equal(text(titleCell.children[0]), 'Payment reference', 'The readable topic is the row title')
+      assert.ok(visibleText(titleCell).includes(`#2 · ${kind}`), 'The index and review kind are secondary context')
+      const incompleteRow = find(summary.parent, node => node.tag === 'tr' && text(node).includes('Complete source scan blocked'))
+      assert.ok(visibleText(incompleteRow).includes(incomplete))
+      assert.ok(visibleText(incompleteRow).includes(fullScope))
+    } finally { h.dispose() }
+  }
+})
+
+test('ordinary observed requests show pending review without claiming a bounded first pass', async () => {
+  const job = completed()
+  job.coverage.semanticTopics = [{ topicIndex: 1, topic: 'Observed ordinary review', reviewKind: 'topic', status: 'completed',
+    aggregateReviewStatus: 'observed_requests_decoded_scope_unknown', semanticScopeVerified: false,
+    submittedChunkIds: [], submittedChars: 0, issueAssessments: 0, consistentAssessments: 0, insufficientContextAssessments: 0,
+    acceptedFindings: 0, rejectedRecords: 0, budgetDroppedGroups: 0, partialContextGroups: 0, unresolvedSegments: 0 }]
+  const h = await mount({ locale: 'en', job })
+  try {
+    const main = visibleText(h.root)
+    assert.ok(main.includes('This record covers observed source requests only; 1 / 1 topics still need follow-up or review'))
+    assert.ok(main.includes('Needs review 1 · failed 0'))
+    assert.ok(!main.includes('bounded first review'), 'An ordinary run must not inherit the bounded-first-pass warning')
+  } finally { h.dispose() }
+})
+
 test('progress alone cannot publish a completed summary or enable export before source verification', async () => {
   const h = await mount({ pendingDetails: true })
   try {
+    assert.equal(h.detailReads(), 1, 'Terminal progress requests the compact reader display')
+    assert.equal(h.fullRunReads(), 0, 'The full audit record is not loaded into the reader')
     assert.ok(!visibleText(h.root).includes('审查意见共'))
     assert.equal(find(h.root, node => node.tag === 'button' && text(node).trim() === '导出审查报告').props.disabled, true)
+    await h.resolveDetails()
+    assert.ok(visibleText(h.root).includes('审查意见共 10 条'))
+    assert.equal(find(h.root, node => node.tag === 'button' && text(node).trim() === '导出审查报告').props.disabled, false)
+    assert.equal(h.fullRunReads(), 0)
   } finally { h.dispose() }
 })
 
@@ -285,6 +354,34 @@ test('source status labels distinguish pending parsing from purpose confirmation
       assert.ok(visibleText(legacy).includes(unresolved)); assert.ok(!find(legacy, node => node.tag === 'select'), 'Missing backend eligibility is not inferred from PARSED')
       const badge = find(limited, node => String(node.props?.class).split(' ').includes('tag'))
       assert.ok(visibleText(limited).includes(partial)); assert.ok(badge.props.class.includes('warn')); assert.ok(!badge.props.class.includes('ok'), 'Partial content is not shown as a complete parse')
+    } finally { h.dispose() }
+  }
+})
+
+
+test('review status stays above all historical source records for the complete package', async () => {
+  for (const status of ['RUNNING', 'FAILED']) {
+    const job = { ...completed(), status, phase: 'prepare', completedUnits: 0, totalUnits: 33,
+      message: status === 'FAILED' ? 'Source preparation failed' : 'Preparing complete source package',
+      error: status === 'FAILED' ? 'Source preparation failed' : undefined }
+    const files = Array.from({ length: 35 }, (_, index) => file('SOURCE-' + (index + 1), {
+      status: index === 0 ? 'FAILED' : 'PARSED', parseStatus: index === 0 ? 'FAILED' : 'PARSED',
+      parseMessage: 'Saved processing result ' + (index + 1)
+    }))
+    const h = await mount({ locale: 'en', files, job })
+    try {
+      const screen = find(h.root, node => node.tag === 'section' && node.props?.class === 'screen')
+      const panel = find(screen, node => String(node.props?.class).split(' ').includes('vetting-run-panel'))
+      const historyRow = find(screen, node => node.tag === 'p' && text(node).includes('Saved processing result 35'))
+      assert.ok(panel && historyRow, 'The task and all historical records are retained')
+      let history = historyRow
+      while (history.parent !== screen) history = history.parent
+      assert.equal(panel.parent, screen, 'The task is a top-level visible section')
+      assert.ok(screen.children.indexOf(panel) < screen.children.indexOf(history), 'The task must precede the complete source-processing history')
+      assert.equal(closedAncestor(panel), false, 'Task status stays outside collapsed details')
+      assert.equal(panel.props['aria-live'], 'polite')
+      assert.ok(visibleText(panel).includes(status === 'FAILED' ? 'Source preparation failed' : 'Preparing complete source package'))
+      assert.ok(visibleText(panel).includes('0 / 33'), 'Document progress stays immediately visible')
     } finally { h.dispose() }
   }
 })

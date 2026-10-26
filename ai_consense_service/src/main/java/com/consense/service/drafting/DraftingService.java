@@ -1281,17 +1281,16 @@ public class DraftingService {
         DraftArtifact artifact=requireArtifact(document);
         String original=nvl(document.getContent());Runnable guard=exportGuard(projectId,fileKey,artifact);
         guard.run();String translated;
-        if(englishFileOutput==null){requireEnglishOutput(original);translated=original;}
-        else translated=englishFileOutput.text(original,exportReference(fileKey,artifact),guard);
+        if(englishFileOutput==null)throw new BizException(4012,"ENGLISH_FILE_OUTPUT_REQUIRED: Configure English translation before exporting this draft.");
+        translated=englishFileOutput.text(original,exportReference(fileKey,artifact),guard);
         guard.run();
         // 带 BOM，方便 Windows 下用记事本 / Word 直接打开不乱码
         return ("\uFEFF" + translated).getBytes(StandardCharsets.UTF_8);
     }
 
     public String downloadFileName(String projectId, String fileKey) {
-        Project project = projectService.require(projectId);
-        return EnglishFileOutput.fileName("ConSense_" + fileKey + "_" + nvl(project.getContractNo()) + ".md",
-                "ConSense_"+fileKey+"_Draft.md");
+        projectService.require(projectId);
+        return EnglishFileOutput.fileName("ConSense_"+fileKey+"_Draft.md","ConSense_Draft.md");
     }
 
     /**
@@ -1966,12 +1965,9 @@ public class DraftingService {
     private String exportReference(String fileKey,DraftArtifact artifact){return "Drafting "+fileKey+" revision "+artifact.getId()+" SHA256 "+artifact.getDocxSha256();}
     private byte[] englishWord(String fileKey,DraftArtifact artifact,Runnable guard) {
         guard.run();byte[] original=artifact.getDocxBytes().clone();byte[] result;
-        if(englishFileOutput==null){if(EnglishFileOutput.docxNeedsTranslation(original))throw new BizException(4012,"ENGLISH_FILE_OUTPUT_REQUIRED: Configure English translation before exporting this draft.");result=original;}
-        else result=englishFileOutput.docx(original,exportReference(fileKey,artifact),guard);
+        if(englishFileOutput==null)throw new BizException(4012,"ENGLISH_FILE_OUTPUT_REQUIRED: Configure English translation before exporting this draft.");
+        result=englishFileOutput.docx(original,exportReference(fileKey,artifact),guard);
         guard.run();return result;
-    }
-    private void requireEnglishOutput(String text) {
-        if(EnglishFileOutput.hasNonEnglishText(text))throw new BizException(4012,"ENGLISH_FILE_OUTPUT_REQUIRED: Configure English translation before exporting this draft.");
     }
     private DraftArtifact requireArtifact(DraftDocument document) {
         DraftArtifact artifact=artifactRepository.findById(document.getRevisionId()).orElseThrow(()->new BizException(4012,"GENERATED_ARTIFACT_MISSING"));

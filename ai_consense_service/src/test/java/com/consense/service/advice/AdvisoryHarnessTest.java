@@ -10,12 +10,36 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class AdvisoryHarnessTest {
     private final List<CitationVO> sources=Collections.singletonList(new CitationVO("SCC project",null,"clause","AUTHORED only",1,"[1]","1","sha","tender",true));
+    private CitationVO standard(String alias){return new CitationVO("GCC standard",null,"source item","AUTHORED standard wording",42,alias,"fixed","sha","standard",false);}
     private AdvisoryHarness.Section analysis(){return JsonUtils.mapper().convertValue(JsonUtils.parse(AdviceBudgetFixture.contract("{\"grounded\":true,\"answer\":\"Supported limited explanation [1]\",\"citations\":[\"[1]\"]}")).path("sections").get(1),AdvisoryHarness.Section.class);}
     @Test void approvedPolicyIsMandatoryEvenWithCustomInstructionsButCustomTextIsRetained(){
         String system=AdvisoryHarness.system("AUTHORED CUSTOM preserve this");assertTrue(system.contains("合约咨询专家型智能体"));assertTrue(system.contains("AUTHORED CUSTOM preserve this"));
         assertTrue(system.contains("Mandatory application contract"));assertEquals("c0b67e64c8fac02badb7c2fbd36b4e61bbf5735a43936e062b7f72e96d3c1eb7",AdvisoryHarness.POLICY_SHA);
     }
     @Test void sectionCanPassItsOwnEvidenceAndAdoptionGate(){assertDoesNotThrow(()->AdvisoryHarness.validate(analysis(),sources,false,(basis,refs)->refs.equals(Collections.singletonList("[1]"))));}
+    @Test void internalDraftingSpillCannotPublishButOrdinaryCitedProseCan(){
+        AdvisoryHarness.Section section=analysis();
+        section.setContent("The cited wording is AUTHORED only [1].\nSection sec-com7-d010-9-analysis.");
+        assertTrue(assertThrows(IllegalArgumentException.class,()->AdvisoryHarness.validate(section,sources,false,(basis,refs)->true)).getMessage().contains("internal drafting notes"));
+        section.setContent("The cited wording is AUTHORED only [1].\nWait, let me check the source.");
+        assertTrue(assertThrows(IllegalArgumentException.class,()->AdvisoryHarness.validate(section,sources,false,(basis,refs)->true)).getMessage().contains("internal drafting notes"));
+        section.setContent("The cited wording is AUTHORED only [1].\nWait, looking at [1] again.");
+        assertTrue(assertThrows(IllegalArgumentException.class,()->AdvisoryHarness.validate(section,sources,false,(basis,refs)->true)).getMessage().contains("internal drafting notes"));
+        section.setContent("Final decision: The cited wording is AUTHORED only [1]. The reader should check the contract.");
+        assertDoesNotThrow(()->AdvisoryHarness.validate(section,sources,false,(basis,refs)->true));
+        assertEquals("Final decision: The cited wording is AUTHORED only [1]. The reader should check the contract.",AdvisoryHarness.content(section,sources,false,"What does it say?",Collections.emptyList()));
+    }
+    @Test void sameClauseCannotBothExplicitlyNameAndOnlyImplyItsActor(){
+        AdvisoryHarness.Section section=analysis();
+        section.setContent("Clause ABC1.2.3 explicitly names the responsible party for the work. The clause says: \"Design and manufacture the gatesets\" [1]. "
+                +"However, within the quoted text of ABC1.2.3 itself, the actor is implied rather than named [1].");
+        String diagnosis=assertThrows(IllegalArgumentException.class,()->AdvisoryHarness.validate(section,sources,false,(basis,refs)->true)).getMessage();
+        assertTrue(diagnosis.contains("contradictory actor attribution"),diagnosis);
+        section.setContent("The cited ABC1.2.3 wording gives a design-and-manufacture directive but does not name its actor [1]. A role inferred from surrounding context needs separate support.");
+        assertDoesNotThrow(()->AdvisoryHarness.validate(section,sources,false,(basis,refs)->true));
+        section.setContent("Clause ABC1.2.3 explicitly names the responsible party for one duty [1]. The wording of XYZ4.5.6 has an actor implied rather than named [1].");
+        assertDoesNotThrow(()->AdvisoryHarness.validate(section,sources,false,(basis,refs)->true));
+    }
     @Test void runtimeLocalizesDateAndVersionChecksWithoutOverridingFrozenPolicy(){
         String system=AdvisoryHarness.system("AUTHORED supplemental prompt",sources,"Explain the cited mechanism");
         assertTrue(system.startsWith(AdvisoryHarness.POLICY));
@@ -121,6 +145,30 @@ class AdvisoryHarnessTest {
         assertThrows(IllegalArgumentException.class,()->AdvisoryHarness.validate(analysis(),sources,false,(b,r)->false));
         AdvisoryHarness.Section section=analysis();section.setContent("False citation [2]");assertThrows(IllegalArgumentException.class,()->AdvisoryHarness.validate(section,sources,false,(b,r)->true));
         AdvisoryHarness.Section switched=analysis();switched.setBasisScope("reference_only");assertThrows(IllegalArgumentException.class,()->AdvisoryHarness.validate(switched,sources,false,(b,r)->true));
+    }
+    @Test void projectQuestionCanRetainOnlyCitedConditionalStandardTextWithVisibleScope(){
+        AdvisoryHarness.Section section=analysis();section.setBasisScope("reference_only");section.setContent("The cited standard text conditionally permits an order [1]. Project adoption remains unconfirmed.");
+        List<CitationVO> standard=Collections.singletonList(standard("[1]"));
+        assertDoesNotThrow(()->AdvisoryHarness.validate(section,standard,false,(basis,refs)->"reference_only".equals(basis)&&refs.equals(Collections.singletonList("[1]"))));
+        String rendered=AdvisoryHarness.content(section,standard,false,"Can the manager order a change?",Collections.emptyList());
+        assertTrue(rendered.startsWith("Conditional reading of cited standard text. Project adoption and entitlement are unconfirmed."));
+        assertTrue(rendered.contains("conditionally permits an order [1]"));
+        assertFalse(AdvisoryHarness.content(section,standard,true,"Explain the standard",Collections.emptyList()).startsWith("Conditional reading"));
+    }
+    @Test void conditionalStandardLaneRejectsTenderOnlyAndMixedCitations(){
+        AdvisoryHarness.Section section=analysis();section.setBasisScope("reference_only");
+        assertTrue(assertThrows(IllegalArgumentException.class,()->AdvisoryHarness.validate(section,sources,false,(basis,refs)->true)).getMessage().contains("only cited standard sources"));
+        section.setCitations(Arrays.asList("[1]","[2]"));
+        List<CitationVO> mixed=Arrays.asList(standard("[1]"),new CitationVO("SCC project",null,"clause","AUTHORED tender wording",1,"[2]","2","sha","tender",true));
+        assertTrue(assertThrows(IllegalArgumentException.class,()->AdvisoryHarness.validate(section,mixed,false,(basis,refs)->true)).getMessage().contains("only cited standard sources"));
+    }
+    @Test void conditionalStandardLaneRejectsProjectAdoptionAndEntitlementClaims(){
+        AdvisoryHarness.Section section=analysis();section.setBasisScope("reference_only");
+        List<CitationVO> standard=Collections.singletonList(standard("[1]"));
+        for(String claim:Arrays.asList("This project adopted the GCC [1].","Under this project contract, the Contractor is entitled to an EOT [1].")){
+            section.setContent(claim);
+            assertTrue(assertThrows(IllegalArgumentException.class,()->AdvisoryHarness.validate(section,standard,false,(basis,refs)->true)).getMessage().contains("cannot assert project adoption or entitlement"));
+        }
     }
     @Test void relabellingUnsupportedConclusionsAsLimitsOrUncertaintyCannotPublishThem(){
         for(String kind:Arrays.asList("limits","uncertainty")) {
@@ -229,7 +277,7 @@ class AdvisoryHarnessTest {
         for(String kind:Arrays.asList("analysis","flowchart"))for(boolean referenceOnly:Arrays.asList(false,true)){
             AdvisoryHarness.Section section=substantiveScopeFixture(kind,referenceOnly?"project_contract":"reference_only");String before=JsonUtils.write(section);java.util.concurrent.atomic.AtomicInteger calls=new java.util.concurrent.atomic.AtomicInteger();
             String actual=assertThrows(IllegalArgumentException.class,()->AdvisoryHarness.validate(section,sources,referenceOnly,(b,r)->{calls.incrementAndGet();return true;})).getMessage();
-            assertEquals("section.basisScope: adoption or requested basis is not supported",actual);assertEquals(0,calls.get());assertEquals(before,JsonUtils.write(section));
+            assertEquals(!referenceOnly&&"analysis".equals(kind)?"section.basisScope: conditional source-text analysis requires only cited standard sources":"section.basisScope: adoption or requested basis is not supported",actual);assertEquals(0,calls.get());assertEquals(before,JsonUtils.write(section));
         }
     }
     @Test void validSupportedSubstantiveScopeStillCallsIncorporationAndPreservesTheWholeSection(){

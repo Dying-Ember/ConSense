@@ -28,6 +28,8 @@ public interface CanonicalSourceBindingRepository extends JpaRepository<Canonica
     List<CompactMetadata> findCompactByDocument(@Param("project") String project,@Param("document") Long document,Pageable pageable);
     @Query("select "+COMPACT_FIELDS+" from CanonicalSourceBinding b where b.projectId=:project and b.documentId=:document and b.id<:before order by b.id desc")
     List<CompactMetadata> findCompactByDocumentBefore(@Param("project") String project,@Param("document") Long document,@Param("before") Long before,Pageable pageable);
+    @Query("select "+COMPACT_FIELDS+" from CanonicalSourceBinding b where b.id=:id")
+    Optional<CompactMetadata> findCompactById(@Param("id") Long id);
     Optional<CanonicalSourceBinding> findByProjectIdAndDocumentIdAndProjectionSha256(String projectId,Long documentId,String projectionSha256);
     List<CanonicalSourceBinding> findByProjectIdAndDocumentIdOrderByIdDesc(String projectId,Long documentId);
     List<CanonicalSourceBinding> findByProjectIdAndDocumentIdOrderByIdDesc(String projectId,Long documentId,Pageable pageable);

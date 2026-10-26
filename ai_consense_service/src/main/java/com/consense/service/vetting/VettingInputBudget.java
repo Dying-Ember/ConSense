@@ -76,6 +76,9 @@ public final class VettingInputBudget {
                 // Preserve the former NativeHttp reason; only this direct, safe typed failure carries diagnostics.
                 result.setReason("token_observer_failed_IllegalStateException");
                 result.setFailureDiagnostics(new LinkedHashMap<>(((VettingResponsesTransport.TypedTransportException)failure).getDiagnosticMetadata()));
+            } else if(input.getQwenWire()!=null&&failure instanceof com.consense.common.BizException){
+                String kind=com.consense.ai.QwenChatClient.safeUsageFailureKind((RuntimeException)failure);
+                result.setReason(kind.matches("HTTP[1-5][0-9]{2}")?"qwen_preflight_http_"+kind.substring(4):"qwen_preflight_transport_failed");
             } else result.setReason("token_observer_failed_"+failure.getClass().getSimpleName());
             return result;
         }

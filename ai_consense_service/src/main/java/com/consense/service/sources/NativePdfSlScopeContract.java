@@ -13,6 +13,8 @@ import java.util.Set;
 final class NativePdfSlScopeContract {
     static final String PROSE = "source-reviewed-native-pdf-sl-whole-unit-v1";
     static final String TABLES = "source-reviewed-native-pdf-sl-whole-unit-tables-and-assets-v1";
+    static final String FONT_PROSE = "source-reviewed-native-pdf-sl-whole-unit-font-text-v1";
+    static final String FONT_TABLES = "source-reviewed-native-pdf-sl-whole-unit-tables-and-assets-font-text-v1";
     static final Set<String> CLASSES = set("sl_library", "sl_technical_library", "specification_library");
     static final Set<String> IDENTITY_FIELDS = set("sourceEditionId", "sourceUnitId", "slUnitScopeManifestSha256");
 
@@ -20,7 +22,7 @@ final class NativePdfSlScopeContract {
 
     static boolean isSl(JsonNode identity) {
         String version = identity.path("internalProjectionVersion").asText();
-        return PROSE.equals(version) || TABLES.equals(version);
+        return PROSE.equals(version) || TABLES.equals(version) || FONT_PROSE.equals(version) || FONT_TABLES.equals(version);
     }
 
     static Set<String> chunkFields(Set<String> ordinary, JsonNode chunk) {

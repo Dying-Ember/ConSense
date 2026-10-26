@@ -43,6 +43,8 @@ class PaddleNativePdfTransportTest {
             assertEquals("candidate_observed",result.path("status").asText());
             assertFalse(result.path("sourceQualityAccepted").asBoolean());
             if(count==65) {
+                assertFalse(fixture.requests.get(0).has("predecessorBundleRef"));
+                assertEquals("batch-1",fixture.requests.get(1).path("predecessorBundleRef").path("bundleSha256").asText());
                 assertEquals(2,result.path("batchResults").size());
                 assertEquals(2,result.path("bundleRef").path("batchBundleRefs").size());
                 assertEquals("batch-1",result.path("pages").get(0).path("bundleRef").path("bundleSha256").asText());
@@ -63,18 +65,54 @@ class PaddleNativePdfTransportTest {
         }
     }
 
+    @Test void compactPageAdmissionUsesSmallReplyBatchesAndRetainsActualAdjacentPredecessors() throws Exception {
+        Fixture fixture=new Fixture();Map<String,Object> context=context(9);
+        context.put("javaNativeEvidenceShape","page-admission-frames-v1");
+        for(Map<String,Object> page:evidence(context)){page.remove("glyphs");page.remove("vectorPathOperators");page.remove("paintedVectorRegions");}
+        JsonNode result=fixture.client.observeNativePdf(PDF,context);
+        assertEquals(3,fixture.requests.size());assertEquals(9,result.path("pages").size());
+        assertEquals(JsonUtils.parse("[1,2,3,4]"),fixture.requests.get(0).path("selectedPhysicalPages"));
+        assertEquals(JsonUtils.parse("[5,6,7,8]"),fixture.requests.get(1).path("selectedPhysicalPages"));
+        assertEquals(JsonUtils.parse("[9]"),fixture.requests.get(2).path("selectedPhysicalPages"));
+        assertEquals("batch-1",fixture.requests.get(1).path("predecessorBundleRef").path("bundleSha256").asText());
+        assertEquals("batch-2",fixture.requests.get(2).path("predecessorBundleRef").path("bundleSha256").asText());
+        assertTemporaryBodiesDeleted(fixture);
+    }
+
     @Test void largeContextUsesJsonFilePartAndSplitsByUtf8BytesWithoutDroppingEvidence() throws Exception {
         Fixture fixture=new Fixture();Map<String,Object> context=context(2);
         String unicode="界".repeat(6*1024*1024);
         for(Map<String,Object> evidence:evidence(context))evidence.put("fullRawUnicode",unicode);
         JsonNode result=fixture.client.observeNativePdf(PDF,context);
         assertEquals(2,fixture.requests.size());assertEquals(2,result.path("pages").size());
+        assertFalse(fixture.requests.get(0).has("predecessorBundleRef"));
+        assertEquals("batch-1",fixture.requests.get(1).path("predecessorBundleRef").path("bundleSha256").asText(),
+                "The actual preceding sub-batch must survive recursive byte splitting");
         for(int index=0;index<2;index++) {
             assertTrue(fixture.contextLengths.get(index)>8L*1024*1024);
             assertTrue(fixture.contextLengths.get(index)<=CONTEXT_CAP);
             assertEquals(unicode,fixture.requests.get(index).path("javaNativeEvidence").get(0).path("fullRawUnicode").asText());
         }
         assertTemporaryBodiesDeleted(fixture);
+    }
+
+    @Test void predecessorIsRequestOwnedAndNeverBridgesUnselectedPhysicalPages() throws Exception {
+        for(boolean adjacent:new boolean[]{true,false}) {
+            Fixture fixture=new Fixture();Map<String,Object> context=context(adjacent?65:66);
+            context.put("predecessorBundleRef",Map.of("bundleSha256","untrusted-caller-predecessor"));
+            if(!adjacent) {
+                @SuppressWarnings("unchecked") List<Integer> selected=(List<Integer>)context.get("selectedPhysicalPages");
+                selected.remove(Integer.valueOf(65));
+                evidence(context).removeIf(page->Integer.valueOf(65).equals(page.get("pageNo")));
+            }
+            JsonNode result=fixture.client.observeNativePdf(PDF,context);
+            assertEquals("candidate_observed",result.path("status").asText());
+            assertEquals(2,fixture.requests.size());
+            assertFalse(fixture.requests.get(0).has("predecessorBundleRef"));
+            if(adjacent)assertEquals("batch-1",fixture.requests.get(1).path("predecessorBundleRef").path("bundleSha256").asText());
+            else assertFalse(fixture.requests.get(1).has("predecessorBundleRef"),"Missing source page 65 must remain unknown");
+            assertTemporaryBodiesDeleted(fixture);
+        }
     }
 
     @Test void exact32MiBBoundaryPassesAndSinglePageOneByteOverflowFailsBeforeDispatch() throws Exception {

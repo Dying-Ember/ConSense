@@ -90,7 +90,7 @@ def create_unified_app(policy, *, backend=None, artifact_store=None, target_modu
         target_module=target_module, source_registry=registry, runtime_factory=UnifiedOerWindowRuntime,
         app=app, maximum_message_bytes=native_maximum, normal_maximum_message_bytes=maximum_message_bytes,
         strict_json_paths=('/project', '/project/native', '/project/native-collection', '/project/native-pdf', FAMILY_ENDPOINT, NORMAL_OBSERVED_ENDPOINT,
-                           '/index', '/index-canonical', '/index-canonical/status', '/retrieve', SOURCE_READ_ENDPOINT))
+                           '/index', '/index-canonical', '/index-canonical/status', '/index-canonical/availability', '/retrieve', SOURCE_READ_ENDPOINT))
     install_native_pdf_source_family_route(app, registry, artifact_store, policy,
         target_module=target_module, maximum_message_bytes=native_maximum,
         software_guard=backend._windows_runtime.algorithms)

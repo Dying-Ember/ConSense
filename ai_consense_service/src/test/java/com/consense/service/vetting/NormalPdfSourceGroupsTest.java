@@ -190,6 +190,194 @@ class NormalPdfSourceGroupsTest {
         assertEquals("d",group(result,"source_clause","4.2").path("endBoundary").path("blockId").asText());
     }
 
+    @Test void slTechnicalHeadingsRetainLetteredClauseIdsAndObservedChapterParents() {
+        List<DocumentBlock> blocks=new ArrayList<>();
+        String[] labels={"FWP3.1.5", "FWP3.1.5.010.9", "FWP3.1.5.030.B", "COM11.D010.9", "TOL.CON3.060.9"};
+        for(int i=0;i<labels.length;i++){DocumentBlock heading=line("sl"+i,1,.10,.10+i*.10,labels[i]+" SOURCE HEADING");bold(heading);blocks.add(heading);}
+        JsonNode result=build(blocks);
+        for(String label:labels){JsonNode observed=group(result,"source_clause",label);assertFalse(observed.path("semanticScopeVerified").asBoolean());}
+        JsonNode chapter=group(result,"source_clause",labels[0]);
+        assertEquals(chapter.path("id"),group(result,"source_clause",labels[1]).path("parentId"));
+        assertEquals(chapter.path("id"),group(result,"source_clause",labels[2]).path("parentId"));
+        assertEquals("sl3",chapter.path("endBoundary").path("blockId").asText());
+        assertTrue(group(result,"source_clause",labels[1]).path("scopeComplete").asBoolean());
+    }
+
+    @Test void slClauseReferencesAndContentsDoNotCreateTechnicalHeadings() {
+        DocumentBlock chapter=line("chapter",1,.10,.10,"FWP3.1.5 STRAINERS");bold(chapter);
+        DocumentBlock reference=line("reference",1,.15,.15,"FWP3.1.5.030.B is the cited provision.");
+        DocumentBlock contents=line("contents",1,.10,.20,"COM11.D010.9 RFID SYSTEM ........ 12");bold(contents);
+        DocumentBlock peer=line("peer",1,.10,.30,"FWP3.1.6 NEXT SECTION");bold(peer);
+        JsonNode result=build(Arrays.asList(chapter,reference,contents,peer));
+        assertTrue(groups(result,"source_clause","FWP3.1.5.030.B").isEmpty());
+        assertTrue(groups(result,"source_clause","COM11.D010.9").isEmpty());
+        assertEquals("peer",group(result,"source_clause","FWP3.1.5").path("endBoundary").path("blockId").asText());
+    }
+
+    @Test void slCivilLabelsShareHeadingReferenceAndNamedFormGrammar() {
+        String[] labels={"BRI.D010.9","BRI.D010.10","MAR.M010.9","MAR.M010.10","STW.M010.9","STW.M010.10","GIN.T070.9","GIN.T070.10","TOL.BRI.D010.10","COM7.110","COM11.D010.9","TOL.CON3.060.9"};
+        for(String label:labels){
+            assertTrue(NormalPdfSourceGroups.technicalLabel(label),label);
+            assertEquals(label,NormalPdfSourceGroups.namedFormReference("Clause "+label));
+            assertTrue(NormalPdfSourceGroups.referenceLiteralMatches("Clause "+label,label,"unrelated"));
+        }
+        for(String label:new String[]{"BRI.D010","MAR.M010","STW.M010.","GIN.T070.X","BRI..D010.10","BRI.D010.10junk"}){
+            assertFalse(NormalPdfSourceGroups.technicalLabel(label),label);
+            assertNull(NormalPdfSourceGroups.namedFormReference("Clause "+label));
+        }
+        assertTrue(NormalPdfSourceGroups.technicalLabel("COM7"),"Existing printed worksection roots remain supported");
+        DocumentBlock first=line("civil",1,.10,.10,"BRI.D010.9 FIRST SOURCE HEADING");bold(first);
+        DocumentBlock child=line("civil-child",1,.10,.20,"BRI.D010.9.1 CHILD SOURCE HEADING");bold(child);
+        DocumentBlock next=line("civil-next",1,.10,.30,"MAR.M010.10 NEXT SOURCE HEADING");bold(next);
+        JsonNode result=build(Arrays.asList(first,child,next)),parent=group(result,"source_clause","BRI.D010.9");
+        assertEquals(parent.path("id"),group(result,"source_clause","BRI.D010.9.1").path("parentId"));
+        assertEquals("civil-next",parent.path("endBoundary").path("blockId").asText());
+        assertTrue(parent.path("scopeComplete").asBoolean());
+    }
+
+    @Test void slAppendixLabelsAndAttachedTitlesRemainDistinctFromBodyReferences() {
+        for(String label:new String[]{"COM11.APPEND1.9","COM11.APPEND10.9","AP1.A010.B"}){
+            assertTrue(NormalPdfSourceGroups.technicalLabel(label),label);
+            assertEquals(label,NormalPdfSourceGroups.namedFormReference("Clause "+label));
+        }
+        DocumentBlock prior=line("prior",1,.10,.10,"COM11.T030.9 PROCEDURE");bold(prior);
+        DocumentBlock appendix=line("appendix",1,.10,.20,"COM11.APPEND1.9CONCEPTUAL WORKFLOW");bold(appendix);
+        DocumentBlock reference=line("reference",1,.15,.25,"COM5.M090 for CM's information.");
+        DocumentBlock standards=line("standards",1,.10,.30,"AP1.A010.B LIST OF TECHNICAL STANDARDS");bold(standards);
+        JsonNode result=build(Arrays.asList(prior,appendix,reference,standards));
+        assertEquals(1,groups(result,"source_clause","COM11.APPEND1.9").size());
+        assertEquals(1,groups(result,"source_clause","AP1.A010.B").size());
+        assertTrue(groups(result,"source_clause","COM5.M090").isEmpty());
+    }
+
+    @Test void slCivilCitationsAndWrappedContentsDoNotBecomeClauses() {
+        DocumentBlock first=line("first",1,.10,.10,"BRI.D010.10 FIRST SOURCE HEADING");bold(first);
+        DocumentBlock reference=line("reference",1,.160,.15,"GIN.T070.10 is the cited provision.");
+        DocumentBlock wrapped=line("wrapped",1,.10,.20,"MAR.M010.10 WRAPPED CONTENTS TITLE");bold(wrapped);
+        DocumentBlock leader=line("leader",1,.10,.23,"CONTENTS CONTINUATION ........ 12");
+        DocumentBlock peer=line("peer",1,.10,.30,"STW.M010.10 REAL SOURCE HEADING");bold(peer);
+        DocumentBlock contents=line("contents",1,.10,.35,"GIN.T080.10 OTHER CONTENTS ........ 13");bold(contents);
+        DocumentBlock last=line("last",1,.10,.40,"STW.M020.10 NEXT SOURCE HEADING");bold(last);
+        JsonNode result=build(Arrays.asList(first,reference,wrapped,leader,peer,contents,last));
+        for(String label:new String[]{"GIN.T070.10","MAR.M010.10","GIN.T080.10"})assertTrue(groups(result,"source_clause",label).isEmpty(),label);
+        assertEquals(Arrays.asList("first","reference"),strings(group(result,"source_clause","BRI.D010.10").path("orderedBlockIds")));
+        assertEquals("peer",group(result,"source_clause","BRI.D010.10").path("endBoundary").path("blockId").asText());
+        assertEquals("last",group(result,"source_clause","STW.M010.10").path("endBoundary").path("blockId").asText());
+    }
+
+    @Test void slContentsPagePreservesContextAndInterruptsPreviousClauseScope() {
+        for(String title:new String[]{"TABLE OF CONTENTS","Civil Engineering > Table of Contents"}){
+            DocumentBlock first=line("first",1,.10,.10,"BRI.D010.9 FIRST SOURCE HEADING");bold(first);
+            DocumentBlock contents=line("contents",2,.10,.20,"MAR.M010.10 CONTENTS TITLE WITHOUT LEADERS");bold(contents);
+            DocumentBlock next=line("next",3,.10,.10,"STW.M010.10 NEXT SOURCE HEADING");bold(next);
+            JsonNode result=build(Arrays.asList(first,line("contents-title",2,.10,.05,title),contents,line("contents-detail",2,.165,.25,"Unnumbered contents text"),next));
+            assertTrue(groups(result,"source_clause","MAR.M010.10").isEmpty());
+            JsonNode previous=group(result,"source_clause","BRI.D010.9");
+            assertEquals(Collections.singletonList("first"),strings(previous.path("orderedBlockIds")));
+            assertEquals("contents-title",previous.path("endBoundary").path("blockId").asText());
+            assertFalse(previous.path("scopeComplete").asBoolean());
+            assertEquals(3,result.path("contextBlocks").size());
+            for(JsonNode context:result.path("contextBlocks"))assertEquals("native_table_of_contents_page_context",context.path("role").asText());
+            group(result,"source_clause","STW.M010.10");
+        }
+    }
+
+    @Test void slClauseContinuationKeepsAdjacentTextAndRejectsMissingPages() {
+        for(int page:new int[]{2,3}){
+            DocumentBlock first=line("first",1,.10,.10,"COM11.D010.9 RFID SYSTEM");bold(first);
+            DocumentBlock next=line("next",page,.10,.30,"COM11.D020.9 MAIN COMPONENTS");bold(next);
+            List<DocumentBlock> blocks=Arrays.asList(first,line("header1",1,.10,.03,"TECHNICAL SOURCE"),
+                    line("body",1,.165,.16,"The specified condition continues"),line("header2",page,.10,.03,"TECHNICAL SOURCE"),
+                    line("continued",page,.165,.10,"on the following physical page."),next);
+            JsonNode clause=group(build(blocks),"source_clause","COM11.D010.9");
+            if(page==2){assertTrue(clause.path("scopeComplete").asBoolean());assertEquals(Arrays.asList("first","body","continued"),strings(clause.path("orderedBlockIds")));assertEquals("next",clause.path("endBoundary").path("blockId").asText());}
+            else{assertFalse(clause.path("scopeComplete").asBoolean());assertFalse(strings(clause.path("orderedBlockIds")).contains("continued"));}
+        }
+    }
+
+    @Test void slOrdinaryChunksUseOnlyBoundCompleteTechnicalIntervals() {
+        DocumentBlock first=line("first",1,.10,.10,"COM11.D010.9 RFID SYSTEM");bold(first);first.setLocation("pdf-page/1/line/0");
+        DocumentBlock next=line("next",2,.10,.30,"COM11.D020.9 MAIN COMPONENTS");bold(next);next.setLocation("pdf-page/2/line/1");
+        List<DocumentBlock> blocks=Arrays.asList(first,line("body",1,.165,.16,"The specified condition continues"),
+                line("continued",2,.165,.10,"on the following physical page."),next);
+        com.consense.domain.SourceDocument source=new com.consense.domain.SourceDocument();
+        source.setId(42L);source.setProjectId("authored-sl");source.setFileKey("SL");source.setFileName("SL-authored.pdf");source.setReviewRole("standard");
+        source.setSourceSha256(SHA);source.setStructuredContentJson(JsonUtils.write(blocks));source.setTextContent("Authored technical intervals");source.setParseCoverageJson("{\"complete\":false}");
+        NormalSourceCandidateGraph.capture(source);
+        List<VettingCorpus.Chunk> chunks=VettingCorpus.chunks(Collections.singletonList(source));
+        for(VettingCorpus.Chunk chunk:chunks){
+            if(chunk.getContent().contains("MAIN COMPONENTS")){assertNull(chunk.getClauseId(),"The incomplete last interval cannot inherit the preceding technical clause");continue;}
+            assertEquals("COM11.D010.9",chunk.getClauseId());assertEquals(first.getLocation(),chunk.getClauseHeadingLocation());
+            assertEquals(VettingCorpus.METADATA_VERSION,chunk.getMetadataVersion());
+            assertNull(chunk.getCanonicalEvidence());
+        }
+        source.setNormalCandidateJson(null);
+        for(VettingCorpus.Chunk chunk:VettingCorpus.chunks(Collections.singletonList(source)))assertNull(chunk.getClauseId(),"A filename or free-standing label cannot replace source-bound native intervals");
+    }
+
+    @Test void slOrdinaryChunksDoNotExtendBeyondTheObservedInterval() {
+        DocumentBlock first=line("first",1,.10,.10,"COM11.D010.9 RFID SYSTEM");bold(first);first.setLocation("first");
+        DocumentBlock peer=line("peer",1,.10,.20,"1. Separate observed section");peer.setLocation("peer");
+        DocumentBlock next=line("next",1,.10,.30,"COM11.D020.9 MAIN COMPONENTS");bold(next);next.setLocation("next");
+        List<DocumentBlock> blocks=Arrays.asList(first,line("body",1,.165,.15,"Technical condition."),peer,line("outside",1,.115,.25,"Separate source content."),next);
+        com.consense.domain.SourceDocument source=new com.consense.domain.SourceDocument();source.setId(43L);source.setFileKey("SL");source.setFileName("SL-authored.pdf");
+        source.setSourceSha256(SHA);source.setStructuredContentJson(JsonUtils.write(blocks));source.setTextContent("Authored separate source intervals");source.setParseCoverageJson("{\"complete\":false}");
+        NormalSourceCandidateGraph.capture(source);
+        List<VettingCorpus.Chunk> chunks=VettingCorpus.chunks(Collections.singletonList(source));
+        for(VettingCorpus.Chunk chunk:chunks)if(chunk.getContent().contains("Separate"))assertNull(chunk.getClauseId(),"Content beyond an explicit native interval end cannot inherit its clause identifier");
+        ObjectNode stale=(ObjectNode)JsonUtils.parse(source.getNormalCandidateJson());stale.remove("nativePdfSourceGroups");source.setNormalCandidateJson(JsonUtils.write(stale));
+        for(VettingCorpus.Chunk chunk:VettingCorpus.chunks(Collections.singletonList(source)))assertNull(chunk.getClauseId(),"A stale stored graph must be reconstructed before it can assign technical intervals");
+    }
+
+    @Test void slNumberedItemsRemainInsideTheIndentedTechnicalClause() {
+        DocumentBlock first=line("first",1,.10,.10,"COM11.D010.9 RFID SYSTEM");bold(first);
+        DocumentBlock next=line("next",1,.10,.35,"COM11.D020.9 MAIN COMPONENTS");bold(next);
+        List<DocumentBlock> blocks=Arrays.asList(first,line("one",1,.165,.15,"1. First requirement"),line("body",1,.18,.20,"Observed continuation."),line("two",1,.165,.25,"2. Second requirement"),next);
+        JsonNode result=build(blocks),clause=group(result,"source_clause","COM11.D010.9");
+        assertEquals(Arrays.asList("first","one","body","two"),strings(clause.path("orderedBlockIds")));
+        assertTrue(clause.path("scopeComplete").asBoolean());assertEquals("next",clause.path("endBoundary").path("blockId").asText());
+        assertEquals(clause.path("id"),group(result,"source_clause","1").path("parentId"));
+        assertEquals(clause.path("id"),group(result,"source_clause","2").path("parentId"));
+    }
+
+    @Test void slOrdinaryChunksReturnToObservedChapterTailAndPreserveOtherDocumentIds() {
+        DocumentBlock chapter=line("chapter",1,.10,.10,"COM11 RFID SYSTEMS");bold(chapter);
+        DocumentBlock child=line("child",1,.10,.18,"COM11.D010.9 COMPONENTS");bold(child);
+        DocumentBlock peer=line("peer",1,.10,.35,"COM12 OTHER SYSTEMS");bold(peer);
+        List<DocumentBlock> blocks=Arrays.asList(chapter,line("intro",1,.13,.14,"Source introduction."),child,
+                line("detail",1,.165,.22,"Component requirement."),line("tail1",1,.13,.26,"Chapter content resumes"),line("tail2",1,.13,.28,"with another source line."),peer);
+        for(DocumentBlock block:blocks)block.setLocation(block.getId());
+        com.consense.domain.SourceDocument source=new com.consense.domain.SourceDocument();source.setId(44L);source.setFileKey("SL");source.setFileName("SL-authored.pdf");
+        source.setSourceSha256(SHA);source.setStructuredContentJson(JsonUtils.write(blocks));source.setTextContent("Authored chapter and child intervals");source.setParseCoverageJson("{\"complete\":false}");NormalSourceCandidateGraph.capture(source);
+        List<VettingCorpus.Chunk> chunks=VettingCorpus.chunks(Collections.singletonList(source));
+        assertEquals(4,chunks.size());assertEquals("COM11",chunks.get(0).getClauseId());assertEquals(2,chunks.get(0).getParts().size());
+        assertEquals("COM11.D010.9",chunks.get(1).getClauseId());assertEquals(2,chunks.get(1).getParts().size());
+        assertEquals("COM11",chunks.get(2).getClauseId());assertEquals("chapter",chunks.get(2).getClauseHeadingLocation());assertEquals(2,chunks.get(2).getParts().size());assertNull(chunks.get(3).getClauseId());
+        source.setFileKey("SCC");
+        for(VettingCorpus.Chunk chunk:VettingCorpus.chunks(Collections.singletonList(source))){
+            String ids=chunk.getParts().stream().map(VettingCorpus.Part::getBlockId).collect(java.util.stream.Collectors.joining(","));
+            String oldSeed=VettingCorpus.METADATA_VERSION+"|"+VettingCorpus.SEGMENTATION_VERSION+"|"+VettingCorpus.NATIVE_TABLE_METADATA_VERSION+"|"+VettingCorpus.SOURCE_QUALITY_METADATA_VERSION+"|"+chunk.getSourceQualityHash()+"|"+chunk.getRole()+"|"+source.getId()+"|"+chunk.getSourceHash()+"|"+ids;
+            assertEquals(UUID.nameUUIDFromBytes(oldSeed.getBytes(java.nio.charset.StandardCharsets.UTF_8)).toString(),chunk.getId());
+        }
+    }
+
+    @Test void resolvedSymbolTextWithLayoutWhitespaceRemainsAValidSourceLine() {
+        DocumentBlock first=line("first",1,.10,.10,"COM11.D010.9 SYMBOL CONDITION");bold(first);
+        DocumentBlock body=line("body",1,.165,.15,"\u03A6 \t\u2264");
+        DocumentBlock next=line("next",1,.10,.30,"COM11.D020.9 NEXT CONDITION");bold(next);
+        for(PdfPageEvidence.PdfGlyph glyph:body.getPdfGlyphs())if("\u03A6".equals(glyph.getUnicode())||"\u2264".equals(glyph.getUnicode())){
+            String raw="\u03A6".equals(glyph.getUnicode())?"\uF046":"\uF0A3";
+            glyph.setUnicode(raw);glyph.setCharacterCodes(new int[]{41});glyph.setFontName("Symbol");glyph.setFontSubtype("Type0");glyph.setFontEmbedded(true);
+            PdfPageEvidence.TextResolution resolution=new PdfPageEvidence.TextResolution();resolution.setRawUnicode(raw);resolution.setSourceCharacterCodes(new int[]{41});resolution.setFontName("Symbol");
+            resolution.setSelector(String.format(Locale.ROOT,"%04X",(int)raw.charAt(0)));resolution.setDecodedText(PdfPageEvidence.TextResolution.symbolText(raw));resolution.setResolutionStatus(PdfPageEvidence.TextResolution.RESOLVED);resolution.setMappingSource(PdfPageEvidence.TextResolution.MAPPING_SOURCE);
+            resolution.setFontProgramSha256(SHA);resolution.setToUnicodeSha256(SHA);resolution.setSourceGlyphId(41);resolution.setSelectorGlyphId(41);resolution.setCmapPlatformId(3);resolution.setCmapEncodingId(0);glyph.setTextResolution(resolution);
+        }
+        JsonNode result=build(Arrays.asList(first,body,next));
+        assertEquals(Arrays.asList("first","body"),strings(group(result,"source_clause","COM11.D010.9").path("orderedBlockIds")));
+        assertTrue(group(result,"source_clause","COM11.D010.9").path("scopeComplete").asBoolean());
+        assertEquals("\uF046",body.getPdfGlyphs().get(0).getUnicode());assertEquals("\u03A6 \t\u2264",body.getText());
+    }
+
     private static void bold(DocumentBlock block){block.getPdfGlyphs().forEach(glyph->glyph.setFontName("Times New Roman,Bold"));}
     private List<DocumentBlock> parentTail(){return new ArrayList<>(Arrays.asList(line("two",1,.10,.10,"2. Documents not issued:"),line("a",1,.15,.15,"(a) Available documents."),line("b",1,.15,.20,"(b) Other drawings."),line("inspection",1,.115,.25,"These documents may be inspected"),line("hours",1,.115,.27,"during normal office hours."),line("three",1,.10,.32,"3. Next root")));}
     private JsonNode build(List<DocumentBlock> blocks){ObjectNode coverage=JsonUtils.mapper().createObjectNode();coverage.put("complete",false);return NormalPdfSourceGroups.build(blocks,SHA,coverage);}

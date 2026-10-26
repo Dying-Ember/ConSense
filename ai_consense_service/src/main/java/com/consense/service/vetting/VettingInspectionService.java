@@ -206,7 +206,14 @@ public class VettingInspectionService {
     }
     private Dataset dataset(String id) throws IOException {
         if(CORRECTED_DATASET.equals(id)||FRESH44_DATASET.equals(id)){Dataset corrected=CORRECTED_DATASET.equals(id)?correctedSourceDataset():fresh44SourceDataset();if(corrected==null)throw notFound("Corrected source index is not terminally bound");return corrected;}
-        Dataset d=datasets.get(id);if(d==null) throw notFound("Unknown dataset");load(d);return d;
+        Dataset d=datasets.get(id);if(d==null) throw notFound("Unknown dataset");
+        if(absentSavedDataset(id))throw notFound("Saved experiment is unavailable on this host");
+        load(d);return d;
+    }
+    private boolean absentSavedDataset(String id){
+        Dataset d=datasets.get(id);
+        return d!=null&&!CORRECTED_DATASET.equals(id)&&!FRESH44_DATASET.equals(id)
+                &&!Files.isRegularFile(workspace.resolve(d.resultRelative));
     }
     private Path descriptor(JsonNode n) throws IOException {
         if(!n.hasNonNull("path") || !n.hasNonNull("sha256")) throw new IOException("Missing artifact descriptor");
@@ -236,6 +243,7 @@ public class VettingInspectionService {
         try(BufferedReader in=Files.newBufferedReader(d.corpus,StandardCharsets.UTF_8)) {String line;while((line=in.readLine())!=null)if(!line.trim().isEmpty())visitor.accept(JSON.readTree(line));}
     }
     public Map<String,Object> chunks(String datasetId,int page,int size,String q,String doc,String role)throws IOException {
+        if(absentSavedDataset(datasetId))return page(Collections.emptyList(),page,size,"unavailable","saved_experiment_not_present_on_this_host");
         if(HIST_DATASET.equals(datasetId)){JsonNode h=history();if(h==null)throw notFound("Historical dataset unavailable");List<JsonNode> rows=new ArrayList<>();String query=q==null?"":q.toLowerCase(Locale.ROOT);for(JsonNode c:h.path("chunks"))if((doc==null||doc.isEmpty()||doc.equals(c.path("documentId").asText()))&&(role==null||role.isEmpty()||role.equals(c.path("role").asText()))&&(query.isEmpty()||c.path("content").asText().toLowerCase(Locale.ROOT).contains(query)))rows.add(c);Map<String,Object> result=page(rows,page,size,"available",null);result.put("provenance",historyProvenance(h));return result;}
         Dataset d=dataset(datasetId);int number=Math.max(1,page),limit=Math.max(1,Math.min(100,size));long from=(long)(number-1)*limit;
         List<JsonNode> items=new ArrayList<>();long[] count={0};String needle=q==null?"":q.toLowerCase(Locale.ROOT);
@@ -289,7 +297,7 @@ public class VettingInspectionService {
         if(d.sourceDocuments!=null)array(d.sourceDocuments,null,s->{ObjectNode x=byId.get(s.path("id").asText());if(x==null)return;for(String f:Arrays.asList("parseStatus","parseMessage","pageCount","ocrUsed","contentType","sizeBytes"))x.set(f,s.path(f));if(s.hasNonNull("parseCoverageJson"))try{x.set("parseCoverage",JSON.readTree(s.path("parseCoverageJson").asText()));}catch(IOException ignored){x.put("coverageStatus","unavailable_invalid_saved_json");}x.put("originalUrl",originalUrl(d.id,x.path("id").asText()));x.put("pageStatus",s.path("pageCount").asInt()>0?"recorded_pages":"physical_pages_unknown");});
         List<JsonNode> out=new ArrayList<>(byId.values());documentCache.put(d.id,out);return out;
     }
-    public Map<String,Object> documents(String id,int page,int size)throws IOException {if(HIST_DATASET.equals(id)){JsonNode h=history();if(h==null)throw notFound("Historical dataset unavailable");Map<String,ObjectNode> docs=new LinkedHashMap<>();for(JsonNode c:h.path("chunks")){String key=c.path("documentId").asText();ObjectNode x=docs.computeIfAbsent(key,k->{ObjectNode v=JSON.createObjectNode();v.put("id",k);for(String f:Arrays.asList("fileName","fileKey","role","sourceHash"))v.set(f,c.path(f));v.put("pageStatus","historical_submitted_excerpts_only");v.put("chunkCount",0);return v;});x.put("chunkCount",x.path("chunkCount").asInt()+1);}return page(new ArrayList<>(docs.values()),page,size,"available",null);}Dataset d=dataset(id);Map<String,Object> out=page(documents(d),page,size,"available",null);out.put("provenance",provenance(d));return out;}
+    public Map<String,Object> documents(String id,int page,int size)throws IOException {if(absentSavedDataset(id))return page(Collections.emptyList(),page,size,"unavailable","saved_experiment_not_present_on_this_host");if(HIST_DATASET.equals(id)){JsonNode h=history();if(h==null)throw notFound("Historical dataset unavailable");Map<String,ObjectNode> docs=new LinkedHashMap<>();for(JsonNode c:h.path("chunks")){String key=c.path("documentId").asText();ObjectNode x=docs.computeIfAbsent(key,k->{ObjectNode v=JSON.createObjectNode();v.put("id",k);for(String f:Arrays.asList("fileName","fileKey","role","sourceHash"))v.set(f,c.path(f));v.put("pageStatus","historical_submitted_excerpts_only");v.put("chunkCount",0);return v;});x.put("chunkCount",x.path("chunkCount").asInt()+1);}return page(new ArrayList<>(docs.values()),page,size,"available",null);}Dataset d=dataset(id);Map<String,Object> out=page(documents(d),page,size,"available",null);out.put("provenance",provenance(d));return out;}
     private JsonNode source(Dataset d,String id)throws IOException {
         return source(d.sourceDocuments,id);
     }
@@ -305,6 +313,7 @@ public class VettingInspectionService {
     }
     private static Integer pageNumber(JsonNode n) {if(n.isInt()&&n.asInt()>0)return n.asInt();String x=n.asText("");if(x.matches("P?[1-9][0-9]*"))try{return Integer.valueOf(x.replace("P",""));}catch(NumberFormatException ignored){}return null;}
     public Map<String,Object> pages(String datasetId,String doc,int page,int size)throws IOException {
+        if(absentSavedDataset(datasetId))return page(Collections.emptyList(),page,size,"unavailable","saved_experiment_not_present_on_this_host");
         if(HIST_DATASET.equals(datasetId))return page(Collections.emptyList(),page,size,"unavailable","historical_capture_contains_submitted_excerpts_not_complete_parsed_page_records");
         Dataset d=dataset(datasetId);JsonNode s=source(d,doc);if(s==null)return page(Collections.emptyList(),page,size,"unavailable","saved_parse_document_unavailable");
         int count=s.path("pageCount").asInt();List<Object> out=new ArrayList<>();Map<Integer,Integer> totals=new TreeMap<>(),ocr=new TreeMap<>();

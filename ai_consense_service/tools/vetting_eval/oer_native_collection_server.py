@@ -13,6 +13,7 @@ import hashlib
 import importlib
 import os
 from pathlib import Path
+from fastapi import Header
 
 from artifact_store import ArtifactStore
 from competition_scope import load_policy
@@ -153,15 +154,27 @@ def create_collection_app(policy, *, backend=None, artifact_store=None, target_m
             'X-Projection-Sha256': address, 'Cache-Control': 'private, no-cache',
             'ETag': '"' + hashlib.sha256(raw).hexdigest() + '"', 'X-Content-Type-Options': 'nosniff'})
 
-    def canonical_snapshot(projection_sha256: str, module: str = 'vetting'):
+    def canonical_snapshot(projection_sha256: str, module: str = 'vetting',
+                           if_none_match: str | None = Header(default=None)):
         try:
             # Only an explicitly composed caller supplies this frame. Build the
             # complete bounded response within it and return after every source,
             # actual-CAS and runtime exit guard succeeds, before ASGI can send.
             with canonical_snapshot_frame() if canonical_snapshot_frame is not None else nullcontext():
-                wire, chunks = registry.wire(projection_sha256, module=module)
+                conditional = getattr(registry, 'normal_conditional_wire', None)
+                unchanged = conditional(projection_sha256, module=module, if_none_match=if_none_match) \
+                    if if_none_match is not None and callable(conditional) else None
+                wire, chunks = unchanged[:2] if unchanged is not None else registry.wire(projection_sha256, module=module)
                 assert_canonical_scope(chunks, policy, module=module)
-                reply = response(wire, projection_sha256)
+                if unchanged is not None:
+                    reply = Response(status_code=304, media_type='application/json', headers={
+                        'X-Projection-Sha256': projection_sha256, 'Cache-Control': 'private, no-cache',
+                        'ETag': unchanged[2], 'X-Content-Type-Options': 'nosniff'})
+                else:
+                    reply = response(wire, projection_sha256)
+                    if if_none_match == reply.headers['etag']:
+                        reply = Response(status_code=304, headers={key: value for key, value in reply.headers.items()
+                            if key != 'content-length'})
             return reply
         except (WindowError, ValueError, OSError) as error:
             raise HTTPException(404, 'Canonical source revision is unavailable') from error

@@ -39,6 +39,11 @@ class VettingRetrievalSourceUnitsTest {
         VettingSourceRequestPacks.Result plan=new VettingSourceRequestPacks(all).planForCompleteInputBudget("record",ranked,global,VettingRetrievalSourceUnits.attached(ranked));
         assertEquals(Collections.singletonList(head.getId()),plan.getOriginalRankedIds());assertEquals(Collections.singletonList(head.getId()),plan.getOriginalRetrievedIds());
         VettingSourceRequestPacks.Request unit=plan.getRequests().stream().filter(r->"retrieved_structural_unit".equals(r.getKind())).findFirst().get();assertEquals(Arrays.asList("a-head","a-tail"),unit.getRequiredChunkIds());
+        VettingSourceRequestPacks.Result bounded=new VettingSourceRequestPacks(all).planBounded("record",ranked,global,VettingRetrievalSourceUnits.attached(ranked));
+        VettingSourceRequestPacks.Request boundedUnit=bounded.getRequests().stream().filter(r->"retrieved_structural_unit".equals(r.getKind())).findFirst().get();
+        assertEquals(Arrays.asList("a-head","a-tail"),boundedUnit.getRequiredChunkIds());
+        assertTrue(bounded.getExtraPacks().stream().anyMatch(p->p.getChunks().containsAll(Arrays.asList(head,tail))));
+        assertTrue(bounded.getRequests().stream().noneMatch(r->r.getEligibleOriginIds().contains(tail.getId())));
         assertEquals(VettingRetrievalSourceUnits.POLICY,unit.getSourceTrace().get("selectionPolicy"));
         assertEquals(VettingRetrievalSourceUnits.POLICY,unit.getOriginObservation().get("selectionPolicy"));
         List<VettingInputBudget.Input> seen=new ArrayList<>();VettingTokenAwareRequestPacks.Plan tokens=new VettingTokenAwareRequestPacks(all).repack(plan,global,factory(),in->{seen.add(in);VettingInputBudget.Observation o=VettingInputBudgetTest.fixtureObservation(in);o.setEffectiveContextTokens(100000);return o;});

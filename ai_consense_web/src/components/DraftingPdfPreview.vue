@@ -11,7 +11,7 @@ import { findPdfTextMatches, selectPdfTextRange, type PdfTextMatch, type PdfText
 import { wordsInBox, type SourcePageWord, type SourcePageSelection } from '@/drafting/source-page-selection'
 
 const props = defineProps<{ source: string; title: string; locale: AppLocale; initialPage?: number; immersive?: boolean; locations?: PdfBindingLocation[]; selectedBindingId?: string; locationRequest?: number; selectWords?: boolean; focusText?: string; focusRequest?: number }>()
-const emit = defineEmits<{ binding: [id: string]; locationUnavailable: [id: string]; rangeUnavailable: [id: string]; rangeAvailable: [id: string]; selection: [value: SourcePageSelection]; focusUnavailable: [reason: 'not_found' | 'unreadable'] }>()
+const emit = defineEmits<{ loaded: [pages: number]; binding: [id: string]; locationUnavailable: [id: string]; rangeUnavailable: [id: string]; rangeAvailable: [id: string]; selection: [value: SourcePageSelection]; focusUnavailable: [reason: 'not_found' | 'unreadable'] }>()
 const w = (key: DraftWord) => draftWord(key, props.locale)
 const canvas = ref<HTMLCanvasElement>()
 const surface = ref<HTMLElement>()
@@ -111,7 +111,7 @@ GlobalWorkerOptions.workerSrc = pdfWorkerUrl
 const preview = createPdfPreview<PDFDocumentProxy>({
   load: source => {
     const task=getDocument({url:source});const version=++loadVersion;focusVersion++;loadedPdf=undefined
-    void task.promise.then(pdf=>{if(!disposed&&version===loadVersion){loadedPdf=pdf;if(props.focusText)void focusPassage()}}).catch(()=>{})
+    void task.promise.then(pdf=>{if(!disposed&&version===loadVersion){loadedPdf=pdf;emit('loaded',pdf.numPages);if(props.focusText)void focusPassage()}}).catch(()=>{})
     return task
   },
   async render(document, pageNumber, current) {
@@ -307,6 +307,7 @@ watch(() => props.source, source => {
   surface.value?.scrollTo({ top: 0, left: 0 })
   void preview.open(source, props.initialPage)
 }, { immediate: true })
+watch(() => props.initialPage, page => { if (page !== undefined) void preview.showPage(page) })
 watch(() => props.immersive, async expanded => {
   if (expanded) { normalZoom = zoom.value; zoom.value = undefined }
   else zoom.value = normalZoom

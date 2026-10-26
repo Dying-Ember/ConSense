@@ -60,6 +60,43 @@ class NativePdfCanonicalContractTest {
         rejected(v -> chunk(v).remove("nativeTableMetadataVersion"), "CHUNK");
     }
 
+    @Test void exactFontTextRecipesKeepProseTableAndSlPublicPairings() {
+        for (String version : new String[]{NativePdfCanonicalContract.INTERNAL_FONT, NativePdfSlScopeContract.FONT_PROSE})
+            assertEquals(NativePdfCanonicalContract.VERSION, NativePdfCanonicalContract.publicVersion(version));
+        for (String version : new String[]{NativePdfCanonicalContract.INTERNAL_FONT_TABLES, NativePdfSlScopeContract.FONT_TABLES})
+            assertEquals(NativePdfCanonicalContract.TABLE_VERSION, NativePdfCanonicalContract.publicVersion(version));
+        for (String version : new String[]{NativePdfSlScopeContract.FONT_PROSE, NativePdfSlScopeContract.FONT_TABLES}) {
+            ObjectNode identity = JsonUtils.mapper().createObjectNode().put("internalProjectionVersion", version);
+            assertTrue(NativePdfSlScopeContract.isSl(identity));
+        }
+        assertThrows(CanonicalEvidenceException.class, () -> NativePdfCanonicalContract.publicVersion(NativePdfCanonicalContract.INTERNAL_FONT + "-unknown"));
+    }
+
+    @Test void fontReaderChannelAndObserverConfigMustMatchTheirExactRecipe() throws Exception {
+        ObjectNode value = fixture();
+        object(value, "/projectionIdentity").put("internalProjectionVersion", NativePdfCanonicalContract.INTERNAL_FONT);
+        object(value, "/projectionIdentity/projectionDependencySha256").put("pdf_selected_source.py", OTHER_SHA).put("selected_source_raster.py", OTHER_SHA);
+        object(value, "/observerIdentity/config").put("fontTextDecoding", "embedded-adobe-symbol-pua-v1");
+        for (JsonNode row : value.path("chunks")) {
+            ObjectNode chunk = (ObjectNode) row; chunk.put("internalProjectionVersion", NativePdfCanonicalContract.INTERNAL_FONT);
+            object(chunk, "/projectionDependencySha256").put("pdf_selected_source.py", OTHER_SHA).put("selected_source_raster.py", OTHER_SHA);
+            for (JsonNode part : chunk.path("parts")) ((ObjectNode) part).put("textChannel", NativePdfCanonicalContract.FONT_TEXT_CHANNEL);
+        }
+        // Declaration checks only: Python still verifies original font bytes and all actual CAS.
+        assertDoesNotThrow(() -> NativePdfCanonicalContract.validateEnvelope(value));
+        part(value, 0).put("textChannel", "literal_native_glyphs_with_explicit_source_reviewed_separators");
+        assertThrows(CanonicalEvidenceException.class, () -> NativePdfCanonicalContract.validateEnvelope(value));
+        part(value, 0).put("textChannel", NativePdfCanonicalContract.FONT_TEXT_CHANNEL);
+        object(value, "/observerIdentity/config").remove("fontTextDecoding");
+        assertThrows(CanonicalEvidenceException.class, () -> NativePdfCanonicalContract.validateEnvelope(value));
+        ObjectNode legacy = fixture();
+        object(legacy, "/observerIdentity/config").put("fontTextDecoding", "embedded-adobe-symbol-pua-v1");
+        assertDoesNotThrow(() -> NativePdfCanonicalContract.validateEnvelope(legacy), "Retained raw recipes keep raw text even with a newer auxiliary capture channel");
+        part(legacy, 0).put("textChannel", NativePdfCanonicalContract.FONT_TEXT_CHANNEL);
+        assertThrows(CanonicalEvidenceException.class, () -> NativePdfCanonicalContract.validateEnvelope(legacy));
+        rejected(v -> object(v, "/observerIdentity/config").put("fontTextDecoding", "unsupported decoder"), "CAPTURE");
+    }
+
     @Test void publicContentCannotReplaceOrTrimLiteralParts() throws Exception {
         rejected(v -> chunk(v).put("content", "Answer text"), "TEXT");
         rejected(v -> part(v, 0).put("text", "Visible fi cafe "), "PARTS");

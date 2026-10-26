@@ -29,6 +29,13 @@ AP_COORDINATES = 'appearance_stream_local_matrix_no_page_box'
 FRAME_CONVENTION = 'pdf_default_user_space_xywh_unscaled_user_unit'
 OBSERVER_SOURCES = {'OerNativePdfObservation.java', 'PdfNativeSupport.java', 'PdfPageEvidence.java'}
 FRAME_READER_VERSION = '6.19.0'  # Existing requirements.txt pin; no fallback PDF engine.
+FONT_TEXT_VERSION = 'embedded-adobe-symbol-pua-v1'
+FONT_TEXT_SCHEMA = 'consense.pdf-font-text-resolution.v1'
+SYMBOL_MAPPING_SOURCE = 'https://www.unicode.org/Public/MAPPINGS/VENDORS/ADOBE/symbol.txt'
+SYMBOL_TEXT = {'\uf046': '\u03a6', '\uf03e': '>', '\uf0a3': '\u2264'}
+FONT_TEXT_FIELDS = {'schema', 'decoderVersion', 'rawUnicode', 'sourceCharacterCodes', 'fontName',
+                    'selector', 'decodedText', 'resolutionStatus', 'mappingSource', 'fontProgramSha256',
+                    'toUnicodeSha256', 'sourceGlyphId', 'selectorGlyphId', 'cmapPlatformId', 'cmapEncodingId'}
 
 
 class NativePdfObservationError(ValueError):
@@ -83,6 +90,173 @@ def _sha_string(value, label):
 
 
 def _f32(value): return struct.unpack('>f', struct.pack('>f', float(value)))[0]
+
+
+def _symbol_font(name):
+    return isinstance(name, str) and re.sub(r'^[A-Z]{6}\+', '', name).lower() == 'symbol'
+
+
+def _symbol_cmap(font_bytes):
+    """Read only actual embedded SFNT Windows Symbol cmap, without a system font."""
+    def u16(offset):
+        _require(0 <= offset <= len(font_bytes) - 2, 'Truncated embedded font cmap')
+        return struct.unpack_from('>H', font_bytes, offset)[0]
+    def u32(offset):
+        _require(0 <= offset <= len(font_bytes) - 4, 'Truncated embedded font cmap')
+        return struct.unpack_from('>I', font_bytes, offset)[0]
+    _require(font_bytes[:4] in {b'\x00\x01\x00\x00', b'true'}, 'Embedded TrueType SFNT required')
+    tables, glyph_counts = [], []
+    for index in range(u16(4)):
+        entry = 12 + 16 * index
+        if font_bytes[entry:entry + 4] == b'cmap':
+            offset, length = u32(entry + 8), u32(entry + 12)
+            _require(offset + length <= len(font_bytes), 'Embedded cmap table exceeds font bytes')
+            tables.append((offset, length))
+        elif font_bytes[entry:entry + 4] == b'maxp':
+            offset, length = u32(entry + 8), u32(entry + 12)
+            _require(length >= 6 and offset + length <= len(font_bytes), 'Truncated embedded maxp table')
+            glyph_counts.append(u16(offset + 4))
+    _require(len(tables) == 1, 'One actual embedded cmap table required')
+    _require(len(glyph_counts) == 1 and glyph_counts[0] > 0, 'Actual embedded glyph count required')
+    base, length = tables[0]; records = []
+    _require(length >= 4 and u16(base) == 0, 'Unsupported embedded cmap header')
+    for index in range(u16(base + 2)):
+        entry = base + 4 + 8 * index
+        _require(entry + 8 <= base + length, 'Embedded cmap record exceeds table')
+        if (u16(entry), u16(entry + 2)) == (3, 0): records.append(base + u32(entry + 4))
+    _require(len(records) == 1, 'One actual Windows Symbol cmap required')
+    start = records[0]; kind = u16(start)
+    size = u16(start + 2) if kind == 4 else u32(start + 4) if kind == 12 else 0
+    _require(size > 0 and base <= start < start + size <= base + length,
+             'Unsupported/truncated Windows Symbol cmap')
+    result = {}
+    if kind == 4:
+        count = u16(start + 6) // 2
+        _require(count > 0 and start + 16 + 8 * count <= start + size, 'Truncated cmap format 4 arrays')
+        ends, starts, deltas, ranges = start + 14, start + 16 + 2 * count, start + 16 + 4 * count, start + 16 + 6 * count
+        for selector in SYMBOL_TEXT:
+            code = ord(selector); gid = 0
+            for index in range(count):
+                lo, hi = u16(starts + 2 * index), u16(ends + 2 * index)
+                if lo <= code <= hi:
+                    distance = u16(ranges + 2 * index)
+                    if distance:
+                        address = ranges + 2 * index + distance + 2 * (code - lo)
+                        _require(start <= address <= start + size - 2, 'cmap glyph address exceeds subtable')
+                        gid = u16(address)
+                        if gid: gid = (gid + u16(deltas + 2 * index)) & 65535
+                    else: gid = (code + u16(deltas + 2 * index)) & 65535
+                    break
+            result[selector] = gid
+    else:
+        count = u32(start + 12)
+        _require(16 + 12 * count <= size, 'Truncated cmap format 12 groups')
+        for selector in SYMBOL_TEXT:
+            code = ord(selector); gid = 0
+            for index in range(count):
+                entry = start + 16 + 12 * index
+                lo, hi, first = u32(entry), u32(entry + 4), u32(entry + 8)
+                if lo <= code <= hi: gid = first + code - lo; break
+            result[selector] = gid
+    return result, glyph_counts[0]
+
+
+def _source_symbol_fonts(source_bytes, selected):
+    """Independently bind receipts to original resource fonts, not receipt hashes.
+
+    This checks font metadata, not which operator selected a resource. Existing
+    glyphSourceMembershipVerified=False still applies. Same-name ambiguous or
+    unsupported resource fonts cannot certify a resolved glyph.
+    """
+    import pypdf
+    from pypdf import PdfReader
+    from pypdf._cmap import _parse_to_unicode
+    _require(pypdf.__version__ == FRAME_READER_VERSION, 'Declared pypdf font reader required')
+    reader = PdfReader(io.BytesIO(source_bytes), strict=True)
+    result = {}
+    for physical in selected:
+        fonts, seen = {}, set()
+        def resources(value):
+            if value is None: return
+            value = value.get_object()
+            if id(value) in seen: return
+            seen.add(id(value))
+            for ref in value.get('/Font', {}).get_object().values() if '/Font' in value else []:
+                font = ref.get_object(); name = str(font.get('/BaseFont', ''))[1:]
+                if not _symbol_font(name): continue
+                proof = None
+                try:
+                    descendant = font['/DescendantFonts'][0].get_object()
+                    _require(font.get('/Subtype') == '/Type0' and font.get('/Encoding') == '/Identity-H'
+                             and descendant.get('/Subtype') == '/CIDFontType2'
+                             and descendant.get('/CIDToGIDMap') == '/Identity', 'Unsupported original Symbol font encoding')
+                    program = descendant['/FontDescriptor'].get_object()['/FontFile2'].get_object().get_data()
+                    unicode_stream = font['/ToUnicode'].get_object().get_data()
+                    mapping, _ = _parse_to_unicode(font)
+                    cmap, glyph_count = _symbol_cmap(program)
+                    proof = {'fontProgramSha256': _sha(program), 'toUnicodeSha256': _sha(unicode_stream),
+                             'cmap': cmap, 'glyphCount': glyph_count, 'toUnicode': mapping}
+                except (ValueError, KeyError, TypeError, AttributeError, IndexError, struct.error):
+                    pass  # Unsupported original metadata remains non-adopting.
+                if proof not in fonts.setdefault(name, []): fonts[name].append(proof)
+            for ref in value.get('/XObject', {}).get_object().values() if '/XObject' in value else []:
+                obj = ref.get_object()
+                if obj.get('/Subtype') == '/Form': resources(obj.get('/Resources'))
+        resources(reader.pages[physical - 1].get('/Resources'))
+        result[physical] = fonts
+    return result
+
+
+def _text_resolution(glyph, *, enabled, fonts=None, appearance=False):
+    receipt = glyph.get('textResolution'); raw = glyph['unicode']
+    private = isinstance(raw, str) and len(raw) == 1 and 0xe000 <= ord(raw) <= 0xf8ff
+    if not enabled or appearance or not private:
+        _require(receipt is None, 'Text resolution requires the declared decoder and a main-page private-use glyph')
+        return
+    _require(isinstance(receipt, dict) and set(receipt) == FONT_TEXT_FIELDS
+             and receipt.get('schema') == FONT_TEXT_SCHEMA and receipt.get('decoderVersion') == FONT_TEXT_VERSION
+             and receipt.get('rawUnicode') == raw and receipt.get('sourceCharacterCodes') == glyph['characterCodes']
+             and receipt.get('fontName') == glyph['fontName'] and receipt.get('selector') == format(ord(raw), '04X'),
+             'Font text receipt differs from literal glyph identity or declared decoder')
+    _require(isinstance(receipt['sourceCharacterCodes'], list)
+             and all(type(code) is int and code >= 0 for code in receipt['sourceCharacterCodes']),
+             'Font receipt source codes must retain literal integer types')
+    status = receipt.get('resolutionStatus')
+    _require(status in {'resolved_embedded_symbol_selector', 'unresolved_unsupported_selector',
+                        'unresolved_font_not_verified', 'unresolved_source_font_mapping',
+                        'unresolved_embedded_cmap_mismatch', 'unresolved_font_metadata_error'}, 'Unknown font text resolution status')
+    for key in ('fontProgramSha256', 'toUnicodeSha256'):
+        if receipt[key] is not None: _sha_string(receipt[key], key)
+    for key in ('sourceGlyphId', 'selectorGlyphId', 'cmapPlatformId', 'cmapEncodingId'):
+        _require(receipt[key] is None or type(receipt[key]) is int and receipt[key] >= 0, 'Font receipt numeric metadata invalid')
+    if status != 'resolved_embedded_symbol_selector':
+        _require(receipt['decodedText'] == '' and receipt['mappingSource'] is None,
+                 'Unresolved font text cannot adopt a replacement character')
+        return
+    codes = glyph['characterCodes']
+    _require(raw in SYMBOL_TEXT and receipt['decodedText'] == SYMBOL_TEXT[raw]
+             and receipt['mappingSource'] == SYMBOL_MAPPING_SOURCE and _symbol_font(glyph['fontName'])
+             and glyph['fontSubtype'] == 'Type0' and glyph['fontEmbedded'] is True
+             and len(codes) == 1 and 0 <= codes[0] <= 65535
+             and type(receipt['cmapPlatformId']) is int and receipt['cmapPlatformId'] == 3
+             and type(receipt['cmapEncodingId']) is int and receipt['cmapEncodingId'] == 0,
+             'Resolved Symbol text lacks supported original glyph/font identity')
+    candidates = (fonts or {}).get(glyph['fontName'], [])
+    _require(len(candidates) == 1 and candidates[0] is not None,
+             'Resolved Symbol text requires an unambiguous actual original embedded font')
+    proof = candidates[0]; code = codes[0]; gid = proof['cmap'][raw]
+    _require(proof['toUnicode'].get(chr(code)) == raw and 0 < code < proof['glyphCount'] and code == gid
+             and receipt['sourceGlyphId'] == code and receipt['selectorGlyphId'] == gid
+             and all(receipt[key] == proof[key] for key in ('fontProgramSha256', 'toUnicodeSha256')),
+             'Font text receipt differs from actual original ToUnicode, embedded font or selector glyph')
+
+
+def reader_glyph_text(glyph, *, font_text=False):
+    """Use only after cold bundle validation; retain raw Unicode in the observation."""
+    receipt = glyph.get('textResolution')
+    if font_text and receipt is not None and receipt['resolutionStatus'] == 'resolved_embedded_symbol_selector':
+        return receipt['decodedText']
+    return glyph['unicode'] or ''
 
 
 def _source_frames(source_bytes, selected):
@@ -234,7 +408,9 @@ def _forms(forms, physical, source_count, glyph_ids, form_ids, *, label):
         _require(form['visibilityStatus'] == visibility, label+' widget flags/page visibility observation differs')
         ap_glyphs = form.get('appearanceGlyphs')
         _require(isinstance(ap_glyphs,list), label+' AP glyphs must be retained')
-        for glyph in ap_glyphs: _glyph(glyph,glyph_ids,label=label+'.'+form['id'],appearance=True)
+        for glyph in ap_glyphs:
+            _glyph(glyph,glyph_ids,label=label+'.'+form['id'],appearance=True)
+            _text_resolution(glyph,enabled=False,appearance=True)
         _channel(form.get('appearanceGlyphOrderChannel'),ap_glyphs,label=label+'.AP',appearance=True)
         _require(form.get('appearanceCoordinateStatus') == 'stream_local_no_established_widget_page_transform',
                  label+' cannot infer AP original-page transform')
@@ -336,6 +512,9 @@ def _validate_native_pdf_export(export, source_bytes, observer_sources):
     _require(isinstance(selected,list) and selected and len(set(selected)) == len(selected)
              and all(type(v) is int and v >= 1 for v in selected) and selected == sorted(selected), 'Explicit increasing unique actual physical page selection required')
     config = observer['config']; invocation = export.get('invocation')
+    _require('fontTextDecoding' not in config or config.get('fontTextDecoding') == FONT_TEXT_VERSION,
+             'Unsupported declared font text decoder')
+    font_text = config.get('fontTextDecoding') == FONT_TEXT_VERSION
     _require(config.get('selectedPhysicalPages') == selected and config.get('pageNumberConvention') == 'one_based_original_physical_page'
              and config.get('glyphOrder') == ORDERING and config.get('textChannel') == 'all_literal_pdfbox_glyph_unicode_no_normalization'
              and config.get('textOffsetConvention') == 'UTF16_start_inclusive_end_exclusive_null_unicode_empty_zero_span'
@@ -355,6 +534,10 @@ def _validate_native_pdf_export(export, source_bytes, observer_sources):
     pages = export.get('pageObservations')
     _require(isinstance(pages,list) and [p.get('physicalPage') for p in pages] == selected,
              'Full selected page observations must retain actual page order')
+    resolved = [glyph for page in pages for glyph in page['nativePdfEvidence']['glyphs']
+                if isinstance(glyph.get('textResolution'), dict)
+                and glyph['textResolution'].get('resolutionStatus') == 'resolved_embedded_symbol_selector']
+    source_fonts = _source_symbol_fonts(source_bytes, selected) if font_text and resolved else {}
     glyph_ids,form_ids = set(),set()
     total_glyphs,utf16_chars = 0,0
     for page in pages:
@@ -376,7 +559,9 @@ def _validate_native_pdf_export(export, source_bytes, observer_sources):
         _require(isinstance(evidence.get('limitations'),list) and evidence['limitations'], 'Operator visibility limitations required')
         glyphs = evidence.get('glyphs')
         _require(isinstance(glyphs,list), 'Complete glyph capture array required')
-        for glyph in glyphs: _glyph(glyph,glyph_ids,label='page '+str(physical))
+        for glyph in glyphs:
+            _glyph(glyph,glyph_ids,label='page '+str(physical))
+            _text_resolution(glyph,enabled=font_text,fonts=source_fonts.get(physical))
         _channel(page.get('glyphOrderChannel'),glyphs,label='page '+str(physical))
         relations = page.get('lineRelations')
         _require(isinstance(relations,dict) and relations.get('status') == 'not_observed' and relations.get('lines') == []
@@ -396,7 +581,7 @@ def _validate_native_pdf_export(export, source_bytes, observer_sources):
                      f['appearanceStreamObservationStatus'].startswith('partial_') for f in all_forms)
     _require(not (partial_pages or partial_ap) or export['observationStatus'] == 'partial_capture_preserved',
              'Partial page/AP operators cannot be promoted to complete capture')
-    return {'schema':'consense.native-pdf-observation-validation.v1','producerKind':PRODUCER,
+    validation = {'schema':'consense.native-pdf-observation-validation.v1','producerKind':PRODUCER,
             'sourceSha256':source['sourceSha256'],'sourceRevisionSha256':source_rev,
             'observerIdentitySha256':observer_hash,'originalBytesVerified':True,'observerSourceBytesVerified':True,
             'frameReaderIdentity':{'library':'pypdf','version':FRAME_READER_VERSION,
@@ -413,6 +598,13 @@ def _validate_native_pdf_export(export, source_bytes, observer_sources):
             'glyphSourceMembershipVerified':False,'formSourceMembershipVerified':False,'effectiveRenderingVerified':False,
             'readingOrderVerified':False,'semanticQuality':'unknown','semanticScopeVerified':False,'humanConfirmed':False,
             'canonicalAdoption':'not_performed'}
+    if font_text:
+        validation['fontTextDecoding'] = {'decoderVersion': FONT_TEXT_VERSION,
+            'resolvedGlyphCount': len(resolved), 'unresolvedGlyphCount': sum(
+                glyph.get('textResolution') is not None for page in pages for glyph in page['nativePdfEvidence']['glyphs']) - len(resolved),
+            'proofScope': 'actual_original_embedded_font_toUnicode_and_selector_cmap_not_operator_membership',
+            'rawUnicodeAndUtf16Preserved': True}
+    return validation
 
 
 def _appearance_streams(export):

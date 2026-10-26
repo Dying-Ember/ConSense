@@ -514,7 +514,8 @@ export interface UploadResult {
 export interface VettingSourceRoleUpdate {
   sourceRole: VettingSourceRole
   expectedOriginalSourceSha256: string
-  expectedSourceHash: string
+  expectedSourceHash?: string
+  expectedBusinessContentSha256?: string
   expectedRoutingSha256: string
   confirmTextContractMaterial?: boolean
 }
@@ -532,6 +533,7 @@ export interface VettingFile {
   originalSourceSha256?: string | null
   sourceHash?: string | null
   routingSha256?: string | null
+  businessContentSha256?: string | null
   roleConfirmationAvailable?: boolean
   identityConfirmationAvailable?: boolean
   documentScope?: DocumentScope
@@ -569,6 +571,7 @@ export interface FindingEvidence {
   located: boolean
   sourceHash?: string
   originalSourceSha256?: string | null
+  businessContentSha256?: string | null
   bbox?: number[] | null
   packetId?: string | null
   packetSourceSnapshotSha256?: string | null
@@ -669,10 +672,11 @@ export interface VettingCoverage {
 }
 
 export interface VettingSemanticTopic {
+  submittedChunkCount?: number
   checkState?: VettingCheckState
   topicIndex: number
   topic: string
-  reviewKind?: 'topic' | 'project_reference'
+  reviewKind?: 'topic' | 'project_reference' | 'full_scope'
   selectionStrategy?: string
   referenceIds?: string[]
   status: string
@@ -687,7 +691,7 @@ export interface VettingSemanticTopic {
   semanticScopeVerified?: boolean
   packetAudits?: VettingSemanticPacket[]
   sourceRequests?: VettingSourceRequestAudit[]
-  submittedChunkIds: string[]
+  submittedChunkIds?: string[]
   submittedChars: number
   budgetDroppedGroups: number
   partialContextGroups: number
@@ -730,6 +734,8 @@ export interface VettingSemanticPacket {
 }
 
 export interface VettingSourceRequestAudit {
+  requiredMemberCount?: number
+  missingMemberCount?: number
   requestId: string
   kind?: string
   observationId?: string | null
@@ -805,6 +811,7 @@ export interface EvidenceSnippet {
   located?: boolean
   sourceHash?: string
   originalSourceSha256?: string | null
+  businessContentSha256?: string | null
   bbox?: number[] | null
   packetId?: string | null
   packetSourceSnapshotSha256?: string | null
@@ -912,6 +919,8 @@ export interface AdviceSourceDocument {
   documentScope?: DocumentScope
   documentId: string
   sourceHash?: string | null
+  originalSourceSha256?: string | null
+  businessContentSha256?: string | null
   fileKey: string
   fileName: string
   sourceRole: VettingSourceRole | 'unknown'

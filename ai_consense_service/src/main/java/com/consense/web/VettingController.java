@@ -4,6 +4,7 @@ import com.consense.common.ApiResponse;
 import com.consense.service.vetting.VettingService;
 import com.consense.web.dto.DraftingDtos.UploadResultVO;
 import com.consense.web.dto.VettingDtos.*;
+import com.fasterxml.jackson.databind.JsonNode;
 import lombok.RequiredArgsConstructor;
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.http.HttpHeaders;
@@ -69,6 +70,11 @@ public class VettingController {
         return ApiResponse.ok(vettingService.getRun(projectId, id));
     }
 
+    @GetMapping("/runs/{id}/display")
+    public ApiResponse<JsonNode> getRunDisplay(@PathVariable String projectId, @PathVariable String id) {
+        return ApiResponse.ok(vettingService.getRunDisplay(projectId, id));
+    }
+
     @GetMapping("/runs/latest/progress")
     public ApiResponse<VettingProgressVO> latestProgress(@PathVariable String projectId) {
         return ApiResponse.ok(vettingService.latestProgress(projectId));
@@ -127,6 +133,48 @@ public class VettingController {
                 .header("X-Source-Revision",source.getSourceRevision()).header("X-Source-SHA256",source.getSha256())
                 .header(HttpHeaders.CACHE_CONTROL,"no-store").header("X-Content-Type-Options","nosniff")
                 .body(new ByteArrayResource(source.getBytes()));
+    }
+
+    @GetMapping("/sources/{documentId}/parsed-text")
+    public ApiResponse<java.util.Map<String,Object>> parsedText(@PathVariable String projectId,@PathVariable long documentId,
+            @RequestParam String originalSourceSha256,@RequestParam String routingSha256,@RequestParam String businessContentSha256,
+            @RequestParam(defaultValue="1") int page) {
+        return ApiResponse.ok(vettingService.parsedText(projectId,documentId,originalSourceSha256,routingSha256,businessContentSha256,page));
+    }
+
+    @GetMapping("/sources/{documentId}/parsed-tables")
+    public ApiResponse<java.util.Map<String,Object>> parsedTables(@PathVariable String projectId,@PathVariable long documentId,
+            @RequestParam String originalSourceSha256,@RequestParam String routingSha256,@RequestParam String businessContentSha256,
+            @RequestParam(defaultValue="1") int page) {
+        return ApiResponse.ok(vettingService.parsedTables(projectId,documentId,originalSourceSha256,routingSha256,businessContentSha256,page));
+    }
+
+    @GetMapping("/sources/{documentId}/reader-original")
+    public ResponseEntity<ByteArrayResource> readerOriginal(@PathVariable String projectId,@PathVariable long documentId,
+            @RequestParam String originalSourceSha256,@RequestParam String routingSha256,@RequestParam String businessContentSha256) {
+        VettingService.OriginalSource source=vettingService.readerOriginal(projectId,documentId,originalSourceSha256,routingSha256,businessContentSha256);
+        boolean pdf=source.getFileName().toLowerCase(java.util.Locale.ROOT).endsWith(".pdf");
+        boolean docx=source.getFileName().toLowerCase(java.util.Locale.ROOT).endsWith(".docx");
+        return ResponseEntity.ok().contentLength(source.getSize())
+                .contentType(pdf?MediaType.APPLICATION_PDF:docx?MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.wordprocessingml.document"):MediaType.APPLICATION_OCTET_STREAM)
+                .header(HttpHeaders.CONTENT_DISPOSITION,(pdf?"inline":"attachment")+"; filename*=UTF-8''"+urlEncode(source.getFileName()))
+                .header("X-Source-Revision",source.getSourceRevision()).header("X-Source-Revision-Kind","business_content_sha256")
+                .header("X-Source-SHA256",source.getSha256()).header(HttpHeaders.CACHE_CONTROL,"no-store")
+                .header("X-Content-Type-Options","nosniff").body(new ByteArrayResource(source.getBytes()));
+    }
+
+    @GetMapping("/sources/{documentId}/registered-original")
+    public ResponseEntity<ByteArrayResource> registeredOriginal(@PathVariable String projectId,@PathVariable long documentId,
+            @RequestParam String originalSourceSha256,@RequestParam String routingSha256) {
+        VettingService.OriginalSource source=vettingService.registeredOriginal(projectId,documentId,originalSourceSha256,routingSha256);
+        boolean pdf=source.getFileName().toLowerCase(java.util.Locale.ROOT).endsWith(".pdf");
+        boolean docx=source.getFileName().toLowerCase(java.util.Locale.ROOT).endsWith(".docx");
+        return ResponseEntity.ok().contentLength(source.getSize())
+                .contentType(pdf?MediaType.APPLICATION_PDF:docx?MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.wordprocessingml.document"):MediaType.APPLICATION_OCTET_STREAM)
+                .header(HttpHeaders.CONTENT_DISPOSITION,(pdf?"inline":"attachment")+"; filename*=UTF-8''"+urlEncode(source.getFileName()))
+                .header("X-Source-Revision",source.getSourceRevision()).header("X-Source-Revision-Kind","routing_sha256")
+                .header("X-Source-SHA256",source.getSha256()).header(HttpHeaders.CACHE_CONTROL,"no-store")
+                .header("X-Content-Type-Options","nosniff").body(new ByteArrayResource(source.getBytes()));
     }
 
     @GetMapping("/report.pdf")

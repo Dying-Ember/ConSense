@@ -43,6 +43,7 @@ class CanonicalBindingFrameComparisonTest {
         when(fixture.repository.findCompactByDocument(anyString(),anyLong(),any())).thenAnswer(call->Collections.singletonList(metadata(fixture.current.get())));
         com.consense.domain.SourceDocument source=new com.consense.domain.SourceDocument();source.setId(22L);source.setProjectId("frame-project");
         when(fixture.reader.currentStamp("frame-project",22L,"vetting")).thenReturn(source);
+        when(fixture.reader.currentVettingMetadata("frame-project")).thenReturn(Collections.singletonMap(22L,source));
         // The frame retained its own immutable copy before these authored digests were added.
         Field views=fixture.frame.getClass().getDeclaredField("views");views.setAccessible(true);Object view=((Map<?,?>)views.get(fixture.frame)).get(22L);Field binding=view.getClass().getDeclaredField("binding");binding.setAccessible(true);
         CanonicalSourceBinding retained=(CanonicalSourceBinding)binding.get(view);retained.setSnapshotBytesSha256(fixture.original.getSnapshotBytesSha256());retained.setSnapshotContentSha256(fixture.original.getSnapshotContentSha256());

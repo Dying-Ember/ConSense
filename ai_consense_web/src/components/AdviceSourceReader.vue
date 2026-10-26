@@ -1,8 +1,6 @@
 <script setup lang="ts">
 import { nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { getDocument, GlobalWorkerOptions } from 'pdfjs-dist'
-import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import DraftingPdfPreview from '@/components/DraftingPdfPreview.vue'
 import type { Citation } from '@/api/types'
 import type { AppLocale } from '@/i18n'
@@ -10,18 +8,15 @@ import type { NativeDocxPosition } from '@/api/canonicalEvidence'
 import { loadAdviceOriginal } from '@/advice/sourceOriginal'
 import { readAdviceDocx } from '@/advice/docxSourceReading'
 
-const props = defineProps<{ projectId: string; citation: Citation; scope?: string; sourceModule?: 'advisory' | 'vetting' }>()
+const props = defineProps<{ projectId: string; citation: Citation; scope?: string; sourceModule?: 'advisory' | 'vetting'; autoLoad?: boolean }>()
 const { locale } = useI18n()
-const status = ref<'loading' | 'ready' | 'error'>('loading'), error = ref(''), warnings = ref<string[]>([])
+const status = ref<'idle' | 'loading' | 'ready' | 'error'>('idle'), error = ref(''), warnings = ref<string[]>([])
 const sourceUrl = ref(''), filename = ref(''), format = ref(''), html = ref(''), pages = ref<number[]>([])
 const page = ref(1), reader = ref<HTMLElement>(), revision = ref(0)
-let epoch = 0, abort: AbortController | undefined, pendingPdf: ReturnType<typeof getDocument> | undefined
-GlobalWorkerOptions.workerSrc = pdfWorkerUrl
+let epoch = 0, abort: AbortController | undefined
 const copy = (en: string, hans: string, hant: string) => locale.value.startsWith('en') ? en : locale.value === 'zh-Hant' ? hant : hans
 function release() {
   abort?.abort(); abort = undefined
-  if (pendingPdf) void pendingPdf.destroy().catch(() => {})
-  pendingPdf = undefined
   if (sourceUrl.value) URL.revokeObjectURL(sourceUrl.value)
   sourceUrl.value = ''; html.value = ''; pages.value = []; warnings.value = []; error.value = ''
 }
@@ -40,15 +35,11 @@ async function load() {
     filename.value = original.filename; format.value = original.type
     sourceUrl.value = URL.createObjectURL(new Blob([original.bytes], { type: original.type === 'pdf' ? 'application/pdf' : original.type === 'docx' ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' : 'application/octet-stream' }))
     if (original.type === 'pdf') {
-      const task = getDocument({ data: new Uint8Array(original.bytes.slice(0)) }); pendingPdf = task
-      const document = await task.promise
-      if (current !== epoch) { void document.destroy().catch(() => {}); return }
-      const physical = original.pages.filter(value => Number.isSafeInteger(value) && value > 0 && value <= document.numPages)
+      const physical = original.pages.filter(value => Number.isSafeInteger(value) && value > 0)
       pages.value = [...new Set(physical)]; page.value = pages.value[0] ?? 1
       if (!physical.length || physical.length !== original.pages.length) warnings.value.push(copy('The citation physical page could not be verified. The complete original opens at its first valid page.', '引用的物理页无法核实；完整原件打开到首个有效页面。', '引用的實體頁無法核實；完整原件開啟到首個有效頁面。'))
       // shortcut: Physical pages only; add highlights when original crop/rotation geometry is verified.
       warnings.value.push(copy('Located by the original physical page. Precise highlighting is unavailable because the original crop/rotation coordinate mapping is not verified.', '按原件物理页定位；原始裁切／旋转坐标映射尚未核实，暂不显示精确高亮。', '按原件實體頁定位；原始裁切／旋轉座標映射尚未核實，暫不顯示精確標示。'))
-      await task.destroy(); if (pendingPdf === task) pendingPdf = undefined
     } else if (original.type === 'docx') {
       const positions = [...(original.nativePositions ?? []), ...original.pointers.flatMap(pointer => pointer.parts.flatMap(part => part.sourcePosition ? [part.sourcePosition] : []))]
         .filter((position): position is NativeDocxPosition => position.kind === 'docx_native')
@@ -74,13 +65,23 @@ async function load() {
     sourceUrl.value = ''
   }
 }
-watch(() => [props.projectId, props.citation, props.scope, props.sourceModule], () => { void load() }, { immediate: true })
+function originalPdfLoaded(count: number) {
+  const valid = pages.value.filter(value => value <= count)
+  if (valid.length !== pages.value.length) warnings.value.push(copy('The citation physical page could not be verified. The complete original opens at its first valid page.', '引用的物理页无法核实；完整原件打开到首个有效页面。', '引用的實體頁無法核實；完整原件開啟到首個有效頁面。'))
+  pages.value = valid
+  if (!valid.includes(page.value)) page.value = valid[0] ?? 1
+}
+watch(() => [props.projectId, props.citation, props.scope, props.sourceModule, props.autoLoad], () => {
+  if (props.autoLoad !== false) { void load(); return }
+  ++epoch; release(); status.value = 'idle'
+}, { immediate: true })
 onBeforeUnmount(() => { ++epoch; release() })
 </script>
 
 <template>
   <section class="advice-source-reader" :aria-label="copy('Original source', '源文件', '原始檔案')" :aria-busy="status === 'loading'">
-    <p v-if="status === 'loading'" role="status">{{ copy('Loading and checking original source…', '正在加载并核对源文件…', '正在載入並核對原始檔案…') }}</p>
+    <button v-if="status === 'idle'" type="button" class="btn" @click="load">{{ copy('Open original', '打开原件', '開啟原檔') }}</button>
+    <p v-else-if="status === 'loading'" role="status">{{ copy('Loading and checking original source…', '正在加载并核对源文件…', '正在載入並核對原始檔案…') }}</p>
     <div v-else-if="status === 'error'" role="alert">
       <p>{{ copy('The cited source is unavailable or its identity has changed. It has not been replaced by a newer file.', '引用源文件不可用或身份已变化，未替换为新版文件。', '引用原始檔案不可用或身份已變更，未替換為新版檔案。') }}</p>
       <p class="source-error">{{ error }}</p><button type="button" class="btn" @click="load">{{ copy('Retry', '重试', '重試') }}</button>
@@ -90,7 +91,7 @@ onBeforeUnmount(() => { ++epoch; release() })
       <details v-if="warnings.length" class="source-limitations"><summary>{{ copy('Location and reading limits', '定位与阅读界限', '定位與閱讀界限') }}</summary><ul><li v-for="warning in warnings" :key="warning">{{ warning }}</li></ul></details>
       <template v-if="format === 'pdf'">
         <nav v-if="pages.length > 1" class="cited-pages" :aria-label="copy('Cited pages', '引用页', '引用頁')"><button v-for="physical in pages" :key="physical" class="btn" type="button" :aria-pressed="page === physical" @click="page = physical">{{ copy('Physical page', '物理页', '實體頁') }} {{ physical }}</button></nav>
-        <DraftingPdfPreview :key="`${revision}:${page}`" :source="sourceUrl" :title="filename" :locale="locale as AppLocale" :initial-page="page" />
+        <DraftingPdfPreview :key="revision" :source="sourceUrl" :title="filename" :locale="locale as AppLocale" :initial-page="page" @loaded="originalPdfLoaded" />
       </template>
       <div v-else-if="format === 'docx'" ref="reader" class="docx-source-flow" tabindex="0" v-html="html"></div>
     </template>

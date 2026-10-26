@@ -93,7 +93,10 @@ class CanonicalSourceRegistry:
         return snapshot
 
     def chunks(self, projection_sha256, *, module='vetting'):
-        snapshot = self.load(projection_sha256)
+        return self.chunks_from_loaded(self.load(projection_sha256), module=module)
+
+    def chunks_from_loaded(self, snapshot, *, module='vetting'):
+        """Check module eligibility on a snapshot already loaded in this source frame."""
         declared = snapshot['projectionIdentity'].get('module')
         shared_review = (module in ('vetting', 'advisory') and declared in ('vetting', 'advisory')
                          and all(module in chunk.get('eligibleModules', []) for chunk in snapshot['chunks']))

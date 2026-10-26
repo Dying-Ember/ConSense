@@ -10,11 +10,20 @@ import hashlib
 import hmac
 import json
 import os
+import re
 from collections import OrderedDict
+from contextvars import copy_context
+from pathlib import Path
 from threading import RLock
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
+from fastapi import Header, Request
+from fastapi.responses import StreamingResponse
+from fastapi.routing import APIRoute
+from starlette.concurrency import run_in_threadpool
+from anyio import CancelScope
+from oer_native_pdf_server import STRICT_REQUEST_JSON
 
 from oer_server import assert_canonical_scope, canonical_scope_policy_sha
 from oer_source_registry import _serialize
@@ -26,6 +35,8 @@ ENDPOINT = '/sources/read'
 CONTRACT = 'source-bound-demand-read-v1'
 MAX_BYTES = 16 * 1024 * 1024
 DICTIONARY_VERSION = 'source-semantic-dictionary-v2'
+TEXT_FIRST_PROFILE = 'text-first-scan-v1'
+STREAM_VERSION = 'source-semantic-stream-v1'
 Sha = Annotated[str, Field(min_length=64, max_length=64, pattern=r'^[0-9a-f]{64}$')]
 OriginId = Annotated[str, Field(min_length=1, max_length=2048)]
 LIMITATIONS = {
@@ -33,7 +44,7 @@ LIMITATIONS = {
     'normalWordScope': 'unknown; selectedWordScopes/wordSourceScopeContext conditions, guidance and branches are not equivalent to SourceUnits',
     'semanticScopeVerified': False,
     'qualifiersComplete': 'unknown',
-    'catalogInternalRead': 'existing registry validates complete public roots and actual CAS; compact metadata-only internal reads are not yet supported',
+    'catalogInternalRead': 'compact normal-source metadata with fresh complete-byte guards; legacy sources retain full validation',
 }
 SEMANTIC_LIMITATIONS = {**LIMITATIONS,
     'catalogInternalRead': 'prepared manifest metadata only; no source graph construction',
@@ -46,6 +57,8 @@ CAPABILITY = {
     'operations': ['catalog', 'ids', 'scan', 'prepare'], 'views': ['canonical_units', 'semantic_units'],
     'semanticProjectionVersion': SEMANTIC_VERSION,
     'semanticReadVersions': ['source-semantic-records-v1', DICTIONARY_VERSION],
+    'semanticReadProfiles': ['full', TEXT_FIRST_PROFILE],
+    'semanticScanStreamVersions': [STREAM_VERSION],
     'semanticLimitations': SEMANTIC_LIMITATIONS,
     'semanticPreparation': {'operation': 'prepare', 'view': 'semantic_units',
         'subsequentRequestFields': ['readManifestSha256', 'readManifestToken'],
@@ -54,12 +67,23 @@ CAPABILITY = {
         'repeatedPreparation': 'bounded_derived_addresses_only_fresh_actual_byte_validation',
         'graphReloadOnPreparedRead': False, 'actualBytesStillStreamed': True},
     'sourceUnitPolicy': POLICY, 'maximumResponseBytes': MAX_BYTES,
-    'maximumItems': 256, 'originOrder': 'request_projection_order_then_registered_source_order',
+    'maximumItems': 256, 'dictionaryScanMaximumItems': 1024,
+    'originOrder': 'request_projection_order_then_registered_source_order',
     'scanCoverage': 'every_canonical_origin_once; related_members_may_repeat',
     'cursorBinding': 'source_revisions_order_module_policy_software_signed_per_process',
     'sourceValidation': 'fresh_registry_request_frame_entry_and_exit',
     'limitations': LIMITATIONS,
 }
+
+
+class _SourceReadRoute(APIRoute):
+    def get_route_handler(self):
+        original = super().get_route_handler()
+        async def parsed_request(request):
+            if STRICT_REQUEST_JSON in request.scope:
+                request._json = request.scope[STRICT_REQUEST_JSON]
+            return await original(request)
+        return parsed_request
 
 
 class SourceReadRequest(BaseModel):
@@ -69,18 +93,74 @@ class SourceReadRequest(BaseModel):
     operation: Literal['catalog', 'ids', 'scan', 'prepare']
     originIds: list[OriginId] = Field(default_factory=list, max_length=256)
     cursor: Annotated[str, Field(min_length=1, max_length=8192)] | None = None
-    maxItems: int = Field(default=64, ge=1, le=256)
+    maxItems: int = Field(default=64, ge=1, le=1024)
     maxBytes: int = Field(default=4194304, ge=1024, le=MAX_BYTES)
     view: Annotated[str, Field(min_length=1, max_length=128)] = 'canonical_units'
     readManifestSha256: list[Sha] = Field(default_factory=list, max_length=10000)
     readManifestToken: Annotated[str, Field(min_length=64, max_length=64, pattern=r'^[0-9a-f]{64}$')] | None = None
     semanticReadVersion: Literal['source-semantic-records-v1', 'source-semantic-dictionary-v2'] = 'source-semantic-records-v1'
+    semanticReadProfile: Literal['full', 'text-first-scan-v1'] = 'full'
     knownSemanticGroups: list[Sha] = Field(default_factory=list, max_length=10000)
 
 
 def _unique(chunks, key):
     values = {chunk.get(key) for chunk in chunks}
     return next(iter(values)) if len(values) == 1 else None
+
+
+def _source_unknowns(snapshot, parent):
+    rows = [row for row in snapshot.get('unknowns', [])
+            if not isinstance(row, dict) or row.get('unitId') in (None, parent.get('unitId'))]
+    pages, parts = parent.get('physicalPages'), parent.get('parts')
+    if not (snapshot.get('producerKind') == parent.get('producerKind') == 'normal_observed'
+            and isinstance(pages, list) and pages
+            and all(type(page) is int and page > 0 for page in pages)
+            and isinstance(parts, list) and parts
+            and all(isinstance(part, dict) and type(part.get('physicalPageNo')) is int
+                    and part['physicalPageNo'] > 0 for part in parts)
+            and pages == sorted({part['physicalPageNo'] for part in parts})):
+        return rows
+    # Only exact page diagnostics can be scoped; whole-source and future declarations remain visible.
+    paths = {'physical_page.' + str(page) for page in pages}
+    return [row for row in rows if not (isinstance(row, dict)
+        and set(row) == {'path', 'reason', 'status'} and isinstance(row['path'], str)
+        and re.fullmatch(r'physical_page\.[1-9][0-9]*', row['path']) and row['path'] not in paths)]
+
+
+def _table_text_is_in_reading_text(origin):
+    """Drop native PDF table shape only when every cell text is already in source reading order."""
+    if origin.get('producerKind') != 'native_pdf' or not isinstance(origin.get('text'), str):
+        return False
+    tables = origin.get('nativeTables')
+    if not isinstance(tables, list) or not tables:
+        return False
+    position = 0
+    matched_text = False
+    for table in tables:
+        if not isinstance(table, dict) or not isinstance(table.get('fragments'), list):
+            return False
+        for fragment in table['fragments']:
+            if not isinstance(fragment, dict) or not isinstance(fragment.get('cells'), list):
+                return False
+            for cell in fragment['cells']:
+                if not isinstance(cell, dict) or not isinstance(cell.get('text'), str):
+                    return False
+                value = cell['text']
+                if value:
+                    position = origin['text'].find(value, position)
+                    if position < 0:
+                        return False
+                    matched_text = True
+                    position += len(value)
+    return matched_text
+
+
+def _text_first_origin(origin):
+    projected = {key: value for key, value in origin.items()
+                 if key not in ('sourceContext', 'unknowns', 'sourceQuality')}
+    if _table_text_is_in_reading_text(origin):
+        projected.pop('nativeTables', None)
+    return projected
 
 
 def _source(address, snapshot, chunks):
@@ -145,13 +225,15 @@ def install_source_read_route(app, registry, policy, *, target_module, software_
             'softwareIdentitySha256': software_sha(), 'semanticProjectionVersion': SEMANTIC_VERSION}
         if request.semanticReadVersion == DICTIONARY_VERSION:
             binding['semanticReadVersion'] = DICTIONARY_VERSION
+        if request.semanticReadProfile == TEXT_FIRST_PROFILE:
+            binding['semanticReadProfile'] = TEXT_FIRST_PROFILE
         return hmac.new(secret, _serialize(binding), hashlib.sha256).hexdigest()
 
     def cas_json(address, maximum):
         # stat supplies only a finite allocation bound, never a validity verdict.
         path = registry.artifact_store.root / 'sha256' / address[:2] / (address + '.blob')
         size = path.stat().st_size
-        fail(size <= maximum, 'SOURCE_READ_MANIFEST_TOO_LARGE', 'Prepared read metadata exceeds its aggregate finite bound')
+        fail(size <= maximum, 'SOURCE_READ_MANIFEST_TOO_LARGE', 'Prepared source manifest exceeds its per-manifest finite bound')
         descriptor = {'schema': 'consense.artifact-descriptor.v1', 'storage': 'content_addressed_disk',
             'sha256': address, 'byteCount': size, 'relativePath': 'sha256/' + address[:2] + '/' + address + '.blob',
             'identityScope': 'prepared_source_semantic_read'}
@@ -198,14 +280,14 @@ def install_source_read_route(app, registry, policy, *, target_module, software_
                 fail(source['documentId'] not in documents, 'SOURCE_READ_AMBIGUOUS_DOCUMENT',
                      'Prepare one exact revision per document in a semantic read scope')
                 documents.add(source['documentId'])
-                catalog, entries = SourceUnits(parents), []
+                catalog = SourceUnits(parents, include_members=request.semanticReadVersion != DICTIONARY_VERSION)
+                entries = []
                 projected_members, referenced_trees = {}, {}
                 def member(parent):
                     if parent['id'] not in projected_members:
                         projected = semantic_member(parent, address)
                         projected['sourceContext'] = semantic_value({
-                            'unknowns': [row for row in snapshot.get('unknowns', [])
-                                if not isinstance(row, dict) or row.get('unitId') in (None, parent.get('unitId'))],
+                            'unknowns': _source_unknowns(snapshot, parent),
                             'limitations': snapshot.get('limitations', []),
                             'visualReturnStatus': snapshot.get('visualReturnStatus'),
                             'sourceQualityVerified': False,
@@ -240,13 +322,16 @@ def install_source_read_route(app, registry, policy, *, target_module, software_
                     if request.semanticReadVersion == DICTIONARY_VERSION:
                         projected = member(parent)
                         descriptor = registry.artifact_store.put_bytes(_serialize(projected), identity_scope='source_semantic_member_v2')
-                        template = semantic_unit_template(semantic_unit(catalog.resolve(parent), address, member_projector=member))
+                        template = semantic_unit_template(catalog.resolve(parent))
                         template['documentId'] = projected['documentId']
-                        group_sha = hashlib.sha256(_serialize(template)).hexdigest()
+                        raw_template = _serialize(template)
+                        group_sha = hashlib.sha256(raw_template).hexdigest()
                         if group_sha not in groups:
-                            groups[group_sha] = registry.artifact_store.put_bytes(_serialize(template), identity_scope='source_semantic_group_v2')
+                            groups[group_sha] = registry.artifact_store.put_bytes(raw_template, identity_scope='source_semantic_group_v2')
                         entries.append({'id': parent['id'], 'documentId': projected['documentId'], 'sourceHash': projected['sourceHash'], 'unitId': template['unitId'], 'groupId': group_sha,
                             'recordRef': descriptor})
+                        projected_members.pop(parent['id'])
+                        del projected
                         # No per-origin closure tree survives the preparation loop.
                         catalog.cache.clear()
                         catalog.hierarchy_cache.clear()
@@ -268,12 +353,18 @@ def install_source_read_route(app, registry, policy, *, target_module, software_
                     'casDependencies': list(assets.values()), 'sourceQualityVerified': False}
                 if request.semanticReadVersion == DICTIONARY_VERSION:
                     manifest.update(schema='consense.source-semantic-read-manifest.v2', semanticReadVersion=DICTIONARY_VERSION, groups=groups)
+                if request.semanticReadProfile == TEXT_FIRST_PROFILE:
+                    manifest['semanticReadProfile'] = TEXT_FIRST_PROFILE
                 raw = _serialize(manifest)
                 fail(len(raw) <= MAX_BYTES, 'SOURCE_READ_MANIFEST_TOO_LARGE',
                      'Prepared source metadata exceeds its finite bound')
                 descriptor = registry.artifact_store.put_bytes(raw, identity_scope='source_semantic_read_manifest')
                 manifests.append(descriptor['sha256']); sources.append(source)
                 origin_ids.extend(entry['id'] for entry in entries)
+                projected_members.clear()
+                referenced_trees.clear()
+                registry.artifact_store.release_bytes(assets.values())
+                del snapshot, parents, catalog
             fail(len(set(origin_ids)) == len(origin_ids), 'SOURCE_READ_AMBIGUOUS_ORIGIN',
                  'Origin IDs must be unique across the prepared sources')
         # A manifest is published to a caller only after all actual source,
@@ -288,6 +379,8 @@ def install_source_read_route(app, registry, policy, *, target_module, software_
             'limitations': SEMANTIC_LIMITATIONS, 'sourceQualityVerified': False}
         if request.semanticReadVersion == DICTIONARY_VERSION:
             result['semanticReadVersion'] = DICTIONARY_VERSION
+        if request.semanticReadProfile == TEXT_FIRST_PROFILE:
+            result['semanticReadProfile'] = TEXT_FIRST_PROFILE
         fail(len(_serialize(result)) <= request.maxBytes, 'SOURCE_READ_BUDGET_EXCEEDED',
              'Preparation receipt exceeds maxBytes', maxBytes=request.maxBytes)
         prepared_addresses[preparation_key] = manifests
@@ -308,7 +401,13 @@ def install_source_read_route(app, registry, policy, *, target_module, software_
         ledger['blockedOriginIds'] = []
         if request.operation == 'catalog':
             return result
-        by_id = {entry['id']: entry for entry in entries}
+        def scalar_bytes():
+            return sum(len(_serialize(ledger[key])) for key in
+                ('status', 'returnedOrigins', 'processedOrigins', 'remainingOrigins')) + len(_serialize(result['nextCursor']))
+        def appended_bytes(container, value):
+            return len(_serialize(value)) + bool(container)
+        response_bytes = len(_serialize(result))
+        by_id = {entry['id']: entry for entry in entries} if request.operation == 'ids' else {}
         fail(all(id_ in by_id for id_ in request.originIds), 'SOURCE_READ_ORIGIN_OUTSIDE_SCOPE', 'Origin outside prepared scope')
         selected = ([by_id[id_] for id_ in request.originIds] if request.operation == 'ids'
                     else entries[start:start + request.maxItems])
@@ -326,21 +425,35 @@ def install_source_read_route(app, registry, policy, *, target_module, software_
             new_group = group_id not in known
             required = descriptor['byteCount'] + (group_ref['byteCount'] if new_group else 0)
             origin, group = None, None
-            if required <= MAX_BYTES:
+            readable = (descriptor['byteCount'] <= MAX_BYTES and
+                (not new_group or group_ref['byteCount'] <= MAX_BYTES))
+            if readable and (required <= MAX_BYTES or request.semanticReadProfile == TEXT_FIRST_PROFILE):
                 origin = _strict_json(registry.artifact_store.read_asset(descriptor))
+                registry.artifact_store.release_bytes((descriptor,))
                 fail(origin['id'] == entry['id'], 'SOURCE_READ_PREPARATION_STALE', 'Member differs from its prepared address')
+                if request.operation == 'scan' and request.semanticReadProfile == TEXT_FIRST_PROFILE:
+                    origin = _text_first_origin(origin)
+                added = appended_bytes(result['origins'], origin)
                 if new_group:
                     group = _strict_json(registry.artifact_store.read_asset(group_ref))
+                    registry.artifact_store.release_bytes((group_ref,))
                     fail(group['unitId'] == entry['unitId'] and group['documentId'] == origin['documentId'],
                          'SOURCE_READ_PREPARATION_STALE', 'Group differs from its prepared address')
-                    result['units'].append({'groupId': group_id, 'unit': group})
+                    row = {'groupId': group_id, 'unit': group}
+                    added += appended_bytes(result['units'], row)
+                    result['units'].append(row)
+                added += len(_serialize(entry['id'])) + 1 + len(_serialize(group_id)) + bool(result['originUnits'])
+                added += appended_bytes(ledger['returnedOriginIds'], entry['id'])
+                added += appended_bytes(ledger['requestedOriginIds'], entry['id'])
+                before_progress = scalar_bytes()
                 result['origins'].append(origin)
                 result['originUnits'][entry['id']] = group_id
                 ledger['returnedOriginIds'].append(entry['id'])
                 ledger['requestedOriginIds'].append(entry['id'])
                 progress()
-                required = len(_serialize(result))
+                required = response_bytes + added + scalar_bytes() - before_progress
                 if required <= request.maxBytes:
+                    response_bytes = required
                     known.add(group_id)
                     continue
                 result['origins'].pop()
@@ -350,190 +463,260 @@ def install_source_read_route(app, registry, policy, *, target_module, software_
                 if new_group:
                     result['units'].pop()
                 progress()
+                response_bytes += scalar_bytes() - before_progress
                 if result['origins'] or result['blockedOrigins']:
                     break
             fail(request.operation != 'ids', 'SOURCE_READ_BUDGET_EXCEEDED',
                  'Requested member/group exceeds the finite read budget; no text is truncated', originId=entry['id'])
-            result['blockedOrigins'].append({'id': entry['id'], 'documentId': entry['documentId'], 'sourceHash': entry['sourceHash'], 'unitId': entry['unitId'], 'groupId': group_id,
-                'reason': 'semantic_member_or_group_too_large', 'requiredBytes': required, 'maxBytes': request.maxBytes})
+            blocked = {'id': entry['id'], 'documentId': entry['documentId'], 'sourceHash': entry['sourceHash'], 'unitId': entry['unitId'], 'groupId': group_id,
+                'reason': 'semantic_member_or_group_too_large', 'requiredBytes': required, 'maxBytes': request.maxBytes}
+            added = appended_bytes(result['blockedOrigins'], blocked)
+            added += appended_bytes(ledger['blockedOriginIds'], entry['id'])
+            added += appended_bytes(ledger['requestedOriginIds'], entry['id'])
+            before_progress = scalar_bytes()
+            result['blockedOrigins'].append(blocked)
             ledger['blockedOriginIds'].append(entry['id'])
             ledger['requestedOriginIds'].append(entry['id'])
             progress()
-            fail(len(_serialize(result)) <= request.maxBytes, 'SOURCE_READ_BUDGET_EXCEEDED', 'Blocked-source ledger exceeds maxBytes')
+            response_bytes += added + scalar_bytes() - before_progress
+            fail(response_bytes <= request.maxBytes, 'SOURCE_READ_BUDGET_EXCEEDED', 'Blocked-source ledger exceeds maxBytes')
         return result
 
-    def semantic_read(request):
-        if request.operation == 'prepare':
-            return prepare(request)
+    def semantic_plan(request):
         fail(len(request.readManifestSha256) == len(request.projectionSha256) and request.readManifestToken is not None,
              'SOURCE_READ_BOUNDED_UNAVAILABLE',
              'Explicit prepare is required before a bounded semantic read; no legacy full-graph fallback is performed')
         fail(hmac.compare_digest(request.readManifestToken, preparation_token(request, request.readManifestSha256)),
              'SOURCE_READ_PREPARATION_STALE', 'Preparation belongs to another process, scope, source order, policy or software')
-        with registry.validation_frame(software_guard=software_guard):
-            sources, entries, metadata_bytes, groups = [], [], 0, {}
-            for address, prepared in zip(request.projectionSha256, request.readManifestSha256):
-                manifest, size = cas_json(prepared, MAX_BYTES - metadata_bytes)
-                metadata_bytes += size
-                dictionary = request.semanticReadVersion == DICTIONARY_VERSION
-                fail(manifest['schema'] == ('consense.source-semantic-read-manifest.v2' if dictionary else 'consense.source-semantic-read-manifest.v1')
-                     and manifest['projectionSha256'] == address
-                     and manifest['module'] == request.module
-                     and manifest['scopePolicySha256'] == policy.policyIdentity['manifestSha256']
-                     and manifest['softwareIdentitySha256'] == software_sha()
-                     and manifest['sourceUnitPolicy'] == POLICY
-                     and manifest['semanticProjectionVersion'] == SEMANTIC_VERSION,
-                     'SOURCE_READ_PREPARATION_STALE', 'Prepared read identities do not match the current request')
-                registry.verify_prepared_read_dependencies(manifest['fileDependencies'], manifest['casDependencies'])
-                sources.append(manifest['source']); entries.extend(manifest['origins'])
-                if dictionary:
-                    for key, descriptor in manifest['groups'].items():
-                        fail(key == descriptor['sha256'] and (key not in groups or groups[key] == descriptor),
-                             'SOURCE_READ_PREPARATION_STALE', 'Group address is ambiguous')
-                        groups[key] = descriptor
-            by_id = {entry['id']: entry for entry in entries}
-            fail(len(by_id) == len(entries), 'SOURCE_READ_AMBIGUOUS_ORIGIN', 'Prepared origin IDs must be unique')
-            scope = {'sources': sources, 'module': request.module, 'policyIdentity': policy.policyIdentity,
-                'sourceUnitPolicy': POLICY, 'view': request.view, 'semanticProjectionVersion': SEMANTIC_VERSION,
-                'readManifestSha256': request.readManifestSha256, 'softwareIdentitySha256': software_sha(),
-                'originOrderSha256': hashlib.sha256(_serialize([entry['id'] for entry in entries])).hexdigest()}
-            if request.semanticReadVersion == DICTIONARY_VERSION:
-                scope['semanticReadVersion'] = DICTIONARY_VERSION
-            scope_sha = hashlib.sha256(_serialize(scope)).hexdigest()
-            start = offset(request.cursor, scope_sha, len(entries))
-            ledger = {'status': 'catalog' if request.operation == 'catalog' else 'complete',
-                'totalOrigins': len(entries), 'requestedOriginIds': [], 'returnedOriginIds': [],
-                'returnedOrigins': 0, 'processedOrigins': start, 'remainingOrigins': len(entries) - start}
-            result = {'contract': CONTRACT, 'module': request.module, 'operation': request.operation,
-                'view': request.view, 'projectionSha256': request.projectionSha256,
-                'semanticProjectionVersion': SEMANTIC_VERSION, 'sourceUnitPolicy': POLICY,
-                'scopeIdentity': {**scope, 'scopeSha256': scope_sha}, 'sources': sources,
-                'readManifestSha256': request.readManifestSha256, 'readManifestToken': request.readManifestToken,
-                'origins': [], 'units': [], 'nextCursor': None, 'coverage': ledger,
-                'limitations': SEMANTIC_LIMITATIONS, 'sourceQualityVerified': False}
-            if request.semanticReadVersion == DICTIONARY_VERSION:
-                result = dictionary_read(request, result, entries, groups, start, scope_sha)
-                fail(len(_serialize(result)) <= request.maxBytes, 'SOURCE_READ_BUDGET_EXCEEDED', 'Semantic dictionary exceeds maxBytes')
-                return result
-            if request.operation != 'catalog':
-                fail(all(origin in by_id for origin in request.originIds), 'SOURCE_READ_ORIGIN_OUTSIDE_SCOPE',
-                     'Every requested ID must belong to the prepared source scope')
-                selected = ([by_id[origin] for origin in request.originIds] if request.operation == 'ids'
-                            else entries[start:start + request.maxItems])
-                if request.operation == 'ids':
-                    ledger['requestedOriginIds'] = list(request.originIds)
-                from native_observation import _strict_json
-                for entry in selected:
-                    descriptor = entry['recordRef']
-                    required_bytes = descriptor['byteCount']
-                    record = None
-                    if required_bytes <= MAX_BYTES:
-                        record = _strict_json(registry.artifact_store.read_asset(descriptor))
-                        fail(record['origin']['id'] == entry['id'] and record['unit']['unitId'] == entry['unitId'],
-                             'SOURCE_READ_PREPARATION_STALE', 'Prepared whole-unit record differs from its manifest')
-                        result['origins'].append(record['origin']); result['units'].append(record['unit'])
-                        ledger['returnedOriginIds'].append(entry['id']); ledger['returnedOrigins'] += 1
-                        ledger['processedOrigins'] = start + ledger['returnedOrigins']
-                        ledger['remainingOrigins'] = len(entries) - ledger['processedOrigins']
-                        if request.operation == 'scan':
-                            ledger['requestedOriginIds'].append(entry['id'])
-                            result['nextCursor'] = cursor(scope_sha, ledger['processedOrigins']) if ledger['remainingOrigins'] else None
-                            ledger['status'] = 'partial' if result['nextCursor'] else 'complete'
-                        required_bytes = len(_serialize(result))
-                    if record is not None and required_bytes <= request.maxBytes:
-                        continue
-                    fail(request.operation != 'ids', 'SOURCE_READ_BUDGET_EXCEEDED',
-                         'Complete semantic units exceed maxBytes; no unit is truncated',
-                         originId=entry['id'], requiredBytes=required_bytes, maxBytes=request.maxBytes)
-                    if record is not None:
-                        result['origins'].pop(); result['units'].pop()
-                        ledger['returnedOriginIds'].pop(); ledger['requestedOriginIds'].pop()
-                        ledger['returnedOrigins'] -= 1; ledger['processedOrigins'] -= 1; ledger['remainingOrigins'] += 1
-                    result['nextCursor'] = cursor(scope_sha, ledger['processedOrigins'])
-                    ledger['status'] = 'partial' if result['units'] else 'unit_too_large'
-                    if not result['units']:
-                        result['blockedOrigin'] = {'id': entry['id'], 'unitId': entry['unitId'],
-                            'requiredBytes': required_bytes, 'maxBytes': request.maxBytes}
-                    break
-            fail(len(_serialize(result)) <= request.maxBytes, 'SOURCE_READ_BUDGET_EXCEEDED',
-                 'Compact semantic catalog/coverage exceeds maxBytes', maxBytes=request.maxBytes)
+        sources, entries, groups = [], [], {}
+        for address, prepared in zip(request.projectionSha256, request.readManifestSha256):
+            manifest, _ = cas_json(prepared, MAX_BYTES)
+            dictionary = request.semanticReadVersion == DICTIONARY_VERSION
+            fail(manifest['schema'] == ('consense.source-semantic-read-manifest.v2' if dictionary else 'consense.source-semantic-read-manifest.v1')
+                 and manifest['projectionSha256'] == address
+                 and manifest['module'] == request.module
+                 and manifest.get('semanticReadProfile', 'full') == request.semanticReadProfile
+                 and manifest['scopePolicySha256'] == policy.policyIdentity['manifestSha256']
+                 and manifest['softwareIdentitySha256'] == software_sha()
+                 and manifest['sourceUnitPolicy'] == POLICY
+                 and manifest['semanticProjectionVersion'] == SEMANTIC_VERSION,
+                 'SOURCE_READ_PREPARATION_STALE', 'Prepared read identities do not match the current request')
+            registry.verify_prepared_read_dependencies(manifest['fileDependencies'], manifest['casDependencies'])
+            sources.append(manifest['source']); entries.extend(manifest['origins'])
+            if dictionary:
+                for key, descriptor in manifest['groups'].items():
+                    fail(key == descriptor['sha256'] and (key not in groups or groups[key] == descriptor),
+                         'SOURCE_READ_PREPARATION_STALE', 'Group address is ambiguous')
+                    groups[key] = descriptor
+        by_id = {entry['id']: entry for entry in entries}
+        fail(len(by_id) == len(entries), 'SOURCE_READ_AMBIGUOUS_ORIGIN', 'Prepared origin IDs must be unique')
+        scope = {'sources': sources, 'module': request.module, 'policyIdentity': policy.policyIdentity,
+            'sourceUnitPolicy': POLICY, 'view': request.view, 'semanticProjectionVersion': SEMANTIC_VERSION,
+            'readManifestSha256': request.readManifestSha256, 'softwareIdentitySha256': software_sha(),
+            'originOrderSha256': hashlib.sha256(_serialize([entry['id'] for entry in entries])).hexdigest()}
+        if request.semanticReadVersion == DICTIONARY_VERSION:
+            scope['semanticReadVersion'] = DICTIONARY_VERSION
+        if request.semanticReadProfile == TEXT_FIRST_PROFILE:
+            scope['semanticReadProfile'] = TEXT_FIRST_PROFILE
+        scope_sha = hashlib.sha256(_serialize(scope)).hexdigest()
+        return sources, entries, groups, scope, scope_sha
+
+    def semantic_page(request, prepared):
+        sources, entries, groups, scope, scope_sha = prepared
+        start = offset(request.cursor, scope_sha, len(entries))
+        ledger = {'status': 'catalog' if request.operation == 'catalog' else 'complete',
+            'totalOrigins': len(entries), 'requestedOriginIds': [], 'returnedOriginIds': [],
+            'returnedOrigins': 0, 'processedOrigins': start, 'remainingOrigins': len(entries) - start}
+        result = {'contract': CONTRACT, 'module': request.module, 'operation': request.operation,
+            'view': request.view, 'projectionSha256': request.projectionSha256,
+            'semanticProjectionVersion': SEMANTIC_VERSION, 'sourceUnitPolicy': POLICY,
+            'scopeIdentity': {**scope, 'scopeSha256': scope_sha}, 'sources': sources,
+            'readManifestSha256': request.readManifestSha256, 'readManifestToken': request.readManifestToken,
+            'origins': [], 'units': [], 'nextCursor': None, 'coverage': ledger,
+            'limitations': SEMANTIC_LIMITATIONS, 'sourceQualityVerified': False}
+        if request.semanticReadVersion == DICTIONARY_VERSION:
+            result = dictionary_read(request, result, entries, groups, start, scope_sha)
+            if request.semanticReadProfile == TEXT_FIRST_PROFILE:
+                result['semanticReadProfile'] = TEXT_FIRST_PROFILE
+            fail(len(_serialize(result)) <= request.maxBytes, 'SOURCE_READ_BUDGET_EXCEEDED', 'Semantic dictionary exceeds maxBytes')
             return result
+        if request.operation != 'catalog':
+            by_id = {entry['id']: entry for entry in entries}
+            fail(all(origin in by_id for origin in request.originIds), 'SOURCE_READ_ORIGIN_OUTSIDE_SCOPE',
+                 'Every requested ID must belong to the prepared source scope')
+            selected = ([by_id[origin] for origin in request.originIds] if request.operation == 'ids'
+                        else entries[start:start + request.maxItems])
+            if request.operation == 'ids':
+                ledger['requestedOriginIds'] = list(request.originIds)
+            from native_observation import _strict_json
+            for entry in selected:
+                descriptor = entry['recordRef']
+                required_bytes = descriptor['byteCount']
+                record = None
+                if required_bytes <= MAX_BYTES:
+                    record = _strict_json(registry.artifact_store.read_asset(descriptor))
+                    fail(record['origin']['id'] == entry['id'] and record['unit']['unitId'] == entry['unitId'],
+                         'SOURCE_READ_PREPARATION_STALE', 'Prepared whole-unit record differs from its manifest')
+                    result['origins'].append(record['origin']); result['units'].append(record['unit'])
+                    ledger['returnedOriginIds'].append(entry['id']); ledger['returnedOrigins'] += 1
+                    ledger['processedOrigins'] = start + ledger['returnedOrigins']
+                    ledger['remainingOrigins'] = len(entries) - ledger['processedOrigins']
+                    if request.operation == 'scan':
+                        ledger['requestedOriginIds'].append(entry['id'])
+                        result['nextCursor'] = cursor(scope_sha, ledger['processedOrigins']) if ledger['remainingOrigins'] else None
+                        ledger['status'] = 'partial' if result['nextCursor'] else 'complete'
+                    required_bytes = len(_serialize(result))
+                if record is not None and required_bytes <= request.maxBytes:
+                    continue
+                fail(request.operation != 'ids', 'SOURCE_READ_BUDGET_EXCEEDED',
+                     'Complete semantic units exceed maxBytes; no unit is truncated',
+                     originId=entry['id'], requiredBytes=required_bytes, maxBytes=request.maxBytes)
+                if record is not None:
+                    result['origins'].pop(); result['units'].pop()
+                    ledger['returnedOriginIds'].pop(); ledger['requestedOriginIds'].pop()
+                    ledger['returnedOrigins'] -= 1; ledger['processedOrigins'] -= 1; ledger['remainingOrigins'] += 1
+                result['nextCursor'] = cursor(scope_sha, ledger['processedOrigins'])
+                ledger['status'] = 'partial' if result['units'] else 'unit_too_large'
+                if not result['units']:
+                    result['blockedOrigin'] = {'id': entry['id'], 'unitId': entry['unitId'],
+                        'requiredBytes': required_bytes, 'maxBytes': request.maxBytes}
+                break
+        fail(len(_serialize(result)) <= request.maxBytes, 'SOURCE_READ_BUDGET_EXCEEDED',
+             'Compact semantic catalog/coverage exceeds maxBytes', maxBytes=request.maxBytes)
+        return result
+
+    def semantic_read(request):
+        if request.operation == 'prepare':
+            return prepare(request)
+        with registry.validation_frame(software_guard=software_guard):
+            return semantic_page(request, semantic_plan(request))
+
+    def validate_request(request):
+        fail(request.view in ('canonical_units', 'semantic_units'), 'SOURCE_READ_VIEW_UNSUPPORTED',
+             'Only canonical_units and semantic_units are implemented; complete normal Word scope remains unknown',
+             view=request.view, limitations=LIMITATIONS)
+        fail(request.module == target_module, 'SOURCE_READ_TARGET_MODULE_MISMATCH',
+             'Use the OER process for the requested module')
+        fail(len(set(request.projectionSha256)) == len(request.projectionSha256),
+             'DUPLICATE_CANONICAL_REVISION', 'Source addresses must be unique')
+        fail(len(set(request.originIds)) == len(request.originIds),
+             'SOURCE_READ_DUPLICATE_ORIGIN', 'Each requested origin must appear only once')
+        fail(request.maxItems <= (1024 if request.view == 'semantic_units' and
+             request.operation == 'scan' and request.semanticReadVersion == DICTIONARY_VERSION else 256),
+             'SOURCE_READ_OPERATION_INVALID', 'Only dictionary-v2 scan supports more than 256 items')
+        fail(request.semanticReadProfile == 'full' or
+             (request.view == 'semantic_units' and request.semanticReadVersion == DICTIONARY_VERSION),
+             'SOURCE_READ_OPERATION_INVALID', 'Text-first scan needs semantic dictionary-v2')
+        fail((request.operation == 'ids' and request.originIds and request.cursor is None
+              and len(request.originIds) <= request.maxItems)
+             or (request.operation != 'ids' and not request.originIds
+                 and (request.operation == 'scan' or request.cursor is None)),
+             'SOURCE_READ_OPERATION_INVALID', 'ids needs bounded originIds without a cursor; catalog/scan do not accept originIds')
 
     def read(request):
         try:
-            fail(request.view in ('canonical_units', 'semantic_units'), 'SOURCE_READ_VIEW_UNSUPPORTED',
-                 'Only canonical_units and semantic_units are implemented; complete normal Word scope remains unknown',
-                 view=request.view, limitations=LIMITATIONS)
-            fail(request.module == target_module, 'SOURCE_READ_TARGET_MODULE_MISMATCH',
-                 'Use the OER process for the requested module')
-            fail(len(set(request.projectionSha256)) == len(request.projectionSha256),
-                 'DUPLICATE_CANONICAL_REVISION', 'Source addresses must be unique')
-            fail(len(set(request.originIds)) == len(request.originIds),
-                 'SOURCE_READ_DUPLICATE_ORIGIN', 'Each requested origin must appear only once')
-            fail((request.operation == 'ids' and request.originIds and request.cursor is None
-                  and len(request.originIds) <= request.maxItems)
-                 or (request.operation != 'ids' and not request.originIds
-                     and (request.operation == 'scan' or request.cursor is None)),
-                 'SOURCE_READ_OPERATION_INVALID', 'ids needs bounded originIds without a cursor; catalog/scan do not accept originIds')
+            validate_request(request)
             if request.view == 'semantic_units':
                 return semantic_read(request)
             fail(request.operation != 'prepare' and not request.readManifestSha256 and request.readManifestToken is None,
                  'SOURCE_READ_OPERATION_INVALID', 'Preparation bindings belong only to semantic_units')
             with registry.validation_frame(software_guard=software_guard):
-                sources, parents = [], []
+                sources, origin_order, origin_sources, document_sources = [], [], {}, {}
                 for address in request.projectionSha256:
-                    snapshot = registry.load(address)
+                    metadata_reader = getattr(registry, 'source_metadata', None)
+                    snapshot = (metadata_reader(address, module=request.module) if metadata_reader is not None
+                                else registry.load(address))
                     fail(canonical_scope_policy_sha(snapshot) == policy.policyIdentity['manifestSha256'],
                          'PROJECTION_SCOPE_POLICY_MISMATCH', 'Source was prepared against another scope policy')
                     # Keep the existing module/eligibility gate and actual source order.
                     registry._module(snapshot, request.module)
                     chunks = snapshot['chunks']
-                    sources.append(_source(address, snapshot, chunks))
-                    parents.extend(chunks)
-                assert_canonical_scope(parents, policy, module=request.module)
-                fail(len({p['id'] for p in parents}) == len(parents),
-                     'SOURCE_READ_AMBIGUOUS_ORIGIN', 'Origin IDs must be unique across the requested sources')
+                    assert_canonical_scope(chunks, policy, module=request.module)
+                    sources.append(snapshot.get('sourceSummary') or _source(address, snapshot, chunks))
+                    for parent in chunks:
+                        fail(parent['id'] not in origin_sources, 'SOURCE_READ_AMBIGUOUS_ORIGIN',
+                             'Origin IDs must be unique across the requested sources')
+                        origin_order.append(parent['id'])
+                        origin_sources[parent['id']] = address
+                        document_sources.setdefault(parent.get('documentId'), set()).add(address)
+                    del snapshot, chunks
                 scope = {'sources': sources, 'module': request.module, 'view': request.view, 'policyIdentity': policy.policyIdentity,
-                         'sourceUnitPolicy': POLICY, 'softwareIdentitySha256': hashlib.sha256(_serialize(software_guard())).hexdigest(),
-                         'originOrderSha256': hashlib.sha256(_serialize([p['id'] for p in parents])).hexdigest()}
+                         'sourceUnitPolicy': POLICY, 'softwareIdentitySha256': software_sha(),
+                         'originOrderSha256': hashlib.sha256(_serialize(origin_order)).hexdigest()}
                 scope_sha = hashlib.sha256(_serialize(scope)).hexdigest()
-                start = offset(request.cursor, scope_sha, len(parents))
+                start = offset(request.cursor, scope_sha, len(origin_order))
                 result = {'contract': CONTRACT, 'module': request.module, 'operation': request.operation,
                     'view': request.view, 'projectionSha256': request.projectionSha256,
                     'sourceUnitPolicy': POLICY, 'scopeIdentity': {**scope, 'scopeSha256': scope_sha},
                     'sources': sources, 'origins': [], 'units': [], 'nextCursor': None,
                     'coverage': {'status': 'catalog' if request.operation == 'catalog' else 'complete',
-                        'totalOrigins': len(parents), 'requestedOriginIds': [], 'returnedOriginIds': [],
-                        'returnedOrigins': 0, 'processedOrigins': start, 'remainingOrigins': len(parents) - start},
+                        'totalOrigins': len(origin_order), 'requestedOriginIds': [], 'returnedOriginIds': [],
+                        'returnedOrigins': 0, 'processedOrigins': start, 'remainingOrigins': len(origin_order) - start},
                     'limitations': LIMITATIONS, 'sourceQualityVerified': False}
                 if request.operation != 'catalog':
-                    catalog = SourceUnits(parents)
-                    fail(all(origin in catalog.parents for origin in request.originIds),
+                    fail(all(len(addresses) == 1 for addresses in document_sources.values()),
+                         'SOURCE_READ_AMBIGUOUS_DOCUMENT',
+                         'Complete-unit reads require one exact root per document; shared document roots need an explicit complete source family')
+                    fail(all(origin in origin_sources for origin in request.originIds),
                          'SOURCE_READ_ORIGIN_OUTSIDE_SCOPE', 'Every requested ID must belong to the exact registered source scope')
-                    selected = ([catalog.parents[origin] for origin in request.originIds] if request.operation == 'ids'
-                                else parents[start:start + request.maxItems])
+                    selected = list(request.originIds) if request.operation == 'ids' else origin_order[start:start + request.maxItems]
                     if request.operation == 'ids':
                         result['coverage']['requestedOriginIds'] = list(request.originIds)
-                    for seed in selected:
-                        unit = catalog.resolve(seed)
+                    resolved = {}
+                    body_bytes = 0
+                    planned_bytes = 0
+                    def response_bytes():
+                        envelope = {**result, 'origins': [], 'units': []}
+                        count = len(result['origins'])
+                        return len(_serialize(envelope)) + body_bytes + 2 * max(count - 1, 0)
+                    current_address, catalog = None, None
+                    for origin in selected:
+                        address = origin_sources[origin]
+                        if origin not in resolved:
+                            if current_address != address:
+                                snapshot = registry.load(address)
+                                registry._module(snapshot, request.module)
+                                assert_canonical_scope(snapshot['chunks'], policy, module=request.module)
+                                catalog = SourceUnits(snapshot['chunks'])
+                                current_address = address
+                                if request.operation == 'ids':
+                                    # Interleaved caller IDs retain order without reopening a document.
+                                    for selected_id in selected:
+                                        if origin_sources[selected_id] == address and selected_id not in resolved:
+                                            seed = catalog.parents[selected_id]
+                                            unit = catalog.resolve(seed)
+                                            size = len(_serialize(seed)) + len(_serialize(unit))
+                                            planned_bytes += size
+                                            fail(planned_bytes <= request.maxBytes, 'SOURCE_READ_BUDGET_EXCEEDED',
+                                                 'Complete selected units exceed the bounded response budget',
+                                                 originId=selected_id, maxBytes=request.maxBytes)
+                                            resolved[selected_id] = (seed, unit, size)
+                                del snapshot
+                            if origin not in resolved:
+                                seed = catalog.parents[origin]
+                                unit = catalog.resolve(seed)
+                                resolved[origin] = (seed, unit, len(_serialize(seed)) + len(_serialize(unit)))
+                        seed, unit, added_bytes = resolved.pop(origin)
+                        body_bytes += added_bytes
                         result['origins'].append(seed)
                         result['units'].append(unit)
                         ledger = result['coverage']
                         ledger['returnedOriginIds'].append(seed['id'])
                         ledger['returnedOrigins'] += 1
                         ledger['processedOrigins'] = start + ledger['returnedOrigins']
-                        ledger['remainingOrigins'] = len(parents) - ledger['processedOrigins']
+                        ledger['remainingOrigins'] = len(origin_order) - ledger['processedOrigins']
                         if request.operation == 'scan':
                             ledger['requestedOriginIds'].append(seed['id'])
                             result['nextCursor'] = (cursor(scope_sha, ledger['processedOrigins']) if ledger['remainingOrigins'] else None)
                             ledger['status'] = 'partial' if result['nextCursor'] else 'complete'
-                        required_bytes = len(_serialize(result))
+                        required_bytes = response_bytes()
                         if required_bytes <= request.maxBytes:
                             continue
                         fail(request.operation != 'ids', 'SOURCE_READ_BUDGET_EXCEEDED',
                              'The complete requested source units exceed maxBytes; request fewer IDs or a larger bounded budget',
                              originId=seed['id'], requiredBytes=required_bytes, maxBytes=request.maxBytes)
                         result['origins'].pop(); result['units'].pop()
+                        body_bytes -= added_bytes
                         ledger['returnedOriginIds'].pop(); ledger['requestedOriginIds'].pop()
                         ledger['returnedOrigins'] -= 1
                         ledger['processedOrigins'] -= 1; ledger['remainingOrigins'] += 1
@@ -544,7 +727,8 @@ def install_source_read_route(app, registry, policy, *, target_module, software_
                                 'documentId': seed.get('documentId'), 'anchor': seed.get('anchor'),
                                 'requiredBytes': required_bytes, 'maxBytes': request.maxBytes}
                         break
-                fail(len(_serialize(result)) <= request.maxBytes, 'SOURCE_READ_BUDGET_EXCEEDED',
+                required_bytes = response_bytes() if request.operation != 'catalog' else len(_serialize(result))
+                fail(required_bytes <= request.maxBytes, 'SOURCE_READ_BUDGET_EXCEEDED',
                      'The compact source catalog/coverage exceeds maxBytes; request fewer sources or a larger bounded budget',
                      maxBytes=request.maxBytes)
                 return result
@@ -554,5 +738,96 @@ def install_source_read_route(app, registry, policy, *, target_module, software_
             raise HTTPException(422, {'kind': getattr(error, 'code', 'SOURCE_READ_UNAVAILABLE'),
                 'message': str(error), 'sourceQualityChanged': False}) from error
 
-    read.__annotations__['request'] = SourceReadRequest
-    app.post(ENDPOINT)(app.state.request_evidence.wrap(ENDPOINT, read))
+    def stream_line(value):
+        raw = _serialize(value) + b'\n'
+        fail(len(raw) <= MAX_BYTES, 'SOURCE_READ_STREAM_FRAME_TOO_LARGE',
+             'A semantic stream frame exceeds the finite line bound')
+        return raw
+
+    def locator_stamp(path):
+        stat = path.stat()
+        return str(path.resolve()), stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns, stat.st_ino
+
+    def stream_frames(request):
+        journal = app.state.request_evidence
+        summary = {'module': request.module, 'operation': 'scan', 'view': request.view,
+            'projectionSha256': request.projectionSha256, 'semanticReadVersion': request.semanticReadVersion,
+            'semanticReadProfile': request.semanticReadProfile, 'streamVersion': STREAM_VERSION,
+            'recording': 'summary_only; complete members remain in sealed CAS'}
+        try:
+            with journal.operation(ENDPOINT, summary):
+                page_count, processed, total, scope_sha = 0, 0, 0, None
+                with registry.validation_frame(software_guard=software_guard):
+                    prepared = semantic_plan(request)
+                    total = len(prepared[1])
+                    scope_sha = prepared[4]
+                    frame = registry._validation_frame.get()
+                    locators = {filename: locator_stamp(Path(filename)) for filename in frame['locations']}
+                    def cheap_check():
+                        # Stamps are early-abort hints only; final actual-byte proof remains authoritative.
+                        fail(all(locator_stamp(Path(filename)) == expected for filename, expected in locators.items()),
+                             'SOURCE_READ_STREAM_SOURCE_CHANGED', 'Source locator changed during the owned scan')
+                    known = OrderedDict.fromkeys(request.knownSemanticGroups[-512:])
+                    current = request.model_copy(deep=True)
+                    while True:
+                        cheap_check()
+                        result = semantic_page(current, prepared)
+                        next_processed = result['coverage']['processedOrigins']
+                        fail(next_processed > processed or total == 0, 'SOURCE_READ_STREAM_NO_PROGRESS',
+                             'A semantic stream must advance through the finite origin scope')
+                        fail(next_processed <= total, 'SOURCE_READ_STREAM_COVERAGE', 'Stream exceeded its source scope')
+                        processed = next_processed
+                        page_count += 1
+                        encoded = stream_line({'type': 'page', 'sequence': page_count, 'data': result})
+                        next_cursor = result['nextCursor']
+                        for row in result['units']:
+                            known[row['groupId']] = None
+                            while len(known) > 512:
+                                known.popitem(last=False)
+                        cheap_check()
+                        del result
+                        yield encoded
+                        if next_cursor is None:
+                            break
+                        current = current.model_copy(update={'cursor': next_cursor,
+                            'knownSemanticGroups': list(known)})
+                    fail(processed == total, 'SOURCE_READ_STREAM_COVERAGE', 'Owned scan ended before complete source coverage')
+                    cheap_check()
+                # Only this record can certify successful source/CAS/software exit guards.
+                complete = {'type': 'complete', 'pageCount': page_count, 'totalOrigins': total,
+                    'processedOrigins': processed, 'scopeSha256': scope_sha,
+                    'readManifestToken': request.readManifestToken, 'proofComplete': True}
+                journal.observe('source-semantic-stream-complete', {**complete, 'streamVersion': STREAM_VERSION})
+                yield stream_line(complete)
+        except Exception as error:
+            yield stream_line({'type': 'error', 'kind': getattr(error, 'kind', getattr(error, 'code', 'SOURCE_READ_STREAM_FAILED')),
+                'message': 'The owned semantic scan did not complete its source proof', 'proofComplete': False})
+
+    async def streamed_body(request):
+        context = copy_context()
+        iterator = stream_frames(request)
+        def advance():
+            return next(iterator, None)
+        try:
+            while (line := await run_in_threadpool(context.run, advance)) is not None:
+                yield line
+        finally:
+            with CancelScope(shield=True):
+                await run_in_threadpool(context.run, iterator.close)
+
+    recorded_read = app.state.request_evidence.wrap(ENDPOINT, read)
+    def dispatch(request: SourceReadRequest, accept: str | None = Header(default=None)):
+        if accept != 'application/x-ndjson':
+            return recorded_read(request)
+        try:
+            validate_request(request)
+            fail(request.operation == 'scan' and request.view == 'semantic_units'
+                 and request.semanticReadVersion == DICTIONARY_VERSION and request.cursor is None,
+                 'SOURCE_READ_STREAM_OPERATION_INVALID', 'Streaming requires one complete prepared dictionary scan')
+            current = request.model_copy(deep=True, update={'maxBytes': min(request.maxBytes, MAX_BYTES - 256)})
+            return StreamingResponse(streamed_body(current), media_type='application/x-ndjson')
+        except WindowError as error:
+            raise HTTPException(422, {'kind': error.kind, 'message': str(error), 'metadata': error.metadata}) from error
+
+    dispatch.__annotations__['request'] = SourceReadRequest
+    app.router.add_api_route(ENDPOINT, dispatch, methods=['POST'], route_class_override=_SourceReadRoute)

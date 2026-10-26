@@ -36,14 +36,32 @@ class VettingServiceLifecycleWorkflowTest {
     @Autowired DocumentParser parser;
     @Autowired ProjectRepository projects;
     @Autowired SourceDocumentRepository documents;
+    @Autowired com.consense.service.StorageService storage;
     @Autowired VettingRunRepository runs;
     @Autowired org.springframework.transaction.PlatformTransactionManager transactionManager;
+    @Autowired org.springframework.jdbc.core.JdbcTemplate jdbc;
     @SpyBean VettingFindingRepository findings;
     @MockBean VettingSemanticReview semantic;
     @MockBean com.consense.service.sources.CanonicalEvidenceService evidencePreparation;
     @MockBean com.consense.service.sources.NormalObservedPreparationService normalPreparation;
     @SpyBean OerBusinessEvidence oer;
+    private com.consense.service.sources.SourceContentDigestPreparation legacyFixtureDigests;
+    private void useLegacyFullPreparationAdapter(){
+        VettingService target=org.springframework.test.util.AopTestUtils.getUltimateTargetObject(service);
+        legacyFixtureDigests=(com.consense.service.sources.SourceContentDigestPreparation)org.springframework.test.util.ReflectionTestUtils.getField(target,"sourceDigestPreparation");
+        target.setSourceDigestPreparation(null);
+    }
+    @AfterEach void restoreCurrentSourceDigestAdapter(){
+        if(legacyFixtureDigests!=null)org.springframework.test.util.AopTestUtils.<VettingService>getUltimateTargetObject(service).setSourceDigestPreparation(legacyFixtureDigests);
+    }
     @BeforeEach void resetFixture(){props.getVetting().setServiceProbeDirectory(null);props.getVetting().setProbeDirectory(null);props.getVetting().setExportProbeDirectory(null);props.getVetting().setMaxRiskFindings(1);props.getDocument().setProbeDirectory(null);}
+
+    @BeforeEach void installSourceDigestTrigger() {
+        jdbc.execute((org.springframework.jdbc.core.ConnectionCallback<Void>) connection -> {
+            try {com.consense.service.sources.SourceContentDigestMigration.install(connection);return null;}
+            catch(Exception failure){throw new java.sql.SQLException(failure);}
+        });
+    }
 
     @BeforeEach void persistPreparedCandidate(){
         when(normalPreparation.prepare(anyString(),anyLong(),eq("vetting"))).thenAnswer(call->{
@@ -54,10 +72,11 @@ class VettingServiceLifecycleWorkflowTest {
     }
 
     @Test void canonicalRunFreezesThePersistedPreparedGraphBeforeLoadingTheCorpus() throws Exception {
+        useLegacyFullPreparationAdapter();
         String project=project();SourceDocument doc=source(project,"SCT","SCT.txt","SCT 1.1 Preserve the source while preparing its observations.");
         doReturn(true).when(oer).enabled();
         doAnswer(call->{normalPreparation.prepare(project,doc.getId(),"vetting");return true;})
-                .when(evidencePreparation).prepareNormalObserved(project,doc.getId(),"vetting");
+                .when(evidencePreparation).prepareNormalObservedForSemanticRead(project,doc.getId(),"vetting");
         doAnswer(call->{
             List<SourceDocument> captured=call.getArgument(2);assertEquals(1,captured.size());
             SourceDocument persisted=documents.findById(doc.getId()).orElseThrow(AssertionError::new);
@@ -72,6 +91,7 @@ class VettingServiceLifecycleWorkflowTest {
     }
 
     @Test void sourceCoverageChangedDuringPreparationCannotBeIncludedInTheFrozenRun() throws Exception {
+        useLegacyFullPreparationAdapter();
         String project=project();SourceDocument doc=source(project,"SCT","SCT.txt","SCT 1.1 Reject a concurrent source coverage change.");
         doReturn(true).when(oer).enabled();
         when(normalPreparation.prepare(project,doc.getId(),"vetting")).thenAnswer(call->{
@@ -81,23 +101,58 @@ class VettingServiceLifecycleWorkflowTest {
         });
         assertThrows(IllegalArgumentException.class,()->service.startRun(project,"en"));
         assertFalse(runs.findFirstByProjectIdOrderByStartedAtDesc(project).isPresent());
-        verify(oer,never()).loadSemantic(anyString(),anyString(),anyList());verify(evidencePreparation,never()).prepareNormalObserved(anyString(),anyLong(),anyString());
+        verify(oer,never()).loadSemantic(anyString(),anyString(),anyList());verify(evidencePreparation,never()).prepareNormalObservedForSemanticRead(anyString(),anyLong(),anyString());
     }
 
     @Test void canonicalRunPreparesItsSelectedNormalSourceBeforeLoadingTheCorpus() throws Exception {
+        useLegacyFullPreparationAdapter();
         String project=project();SourceDocument doc=source(project,"SCT","SCT.txt","SCT 1.1 Retain the complete original source.");
         doReturn(true).when(oer).enabled();
-        doAnswer(call->{verify(evidencePreparation).prepareNormalObserved(project,doc.getId(),"vetting");throw new IllegalStateException("authored stop after prepared corpus boundary");})
+        doAnswer(call->{verify(evidencePreparation).prepareNormalObservedForSemanticRead(project,doc.getId(),"vetting");throw new IllegalStateException("authored stop after prepared corpus boundary");})
                 .when(oer).loadSemantic(eq(project),eq("vetting"),anyList());
         BizException error=assertThrows(BizException.class,()->service.run(project,"en"));
         assertTrue(error.getMessage().contains("authored stop after prepared corpus boundary"));
         assertEquals("FAILED",service.latestRun(project).getStatus());verify(semantic,never()).reviewWithProgress(any(),anyString(),anyList(),anyString(),any(ReviewProgress.class),anyList(),any(Runnable.class));
     }
 
+    @Test void failedSelectedSourceStaysInCoverageWithoutEnteringCanonicalReview() throws Exception {
+        VettingService target=org.springframework.test.util.AopTestUtils.getUltimateTargetObject(service);
+        com.consense.service.sources.SourceContentDigestPreparation stamps=
+                (com.consense.service.sources.SourceContentDigestPreparation)org.springframework.test.util.ReflectionTestUtils.getField(target,"sourceDigestPreparation");
+        target.setSourceDigestPreparation(null);
+        try {
+            String project=project();
+            SourceDocument readable=source(project,"SCT","SCT-readable.txt","SCT 1.1 Review the readable tender clause.");
+            SourceDocument failed=source(project,"GCT","GCT-failed.txt","GCT observation retained before detail parsing failed.");
+            failed.setParseStatus("FAILED");failed.setStructuredContentJson(null);failed.setParseCoverageJson(null);documents.saveAndFlush(failed);
+            doReturn(true).when(oer).enabled();
+            com.consense.service.sources.CanonicalEvidenceException unavailable=
+                    new com.consense.service.sources.CanonicalEvidenceException(org.springframework.http.HttpStatus.CONFLICT,"NORMAL_OBSERVED_SOURCE_EVIDENCE_MISSING");
+            doThrow(unavailable).when(evidencePreparation).prepareNormalCandidate(project,failed.getId(),"vetting");
+            doThrow(unavailable).when(evidencePreparation).prepareNormalObservedForSemanticRead(project,failed.getId(),"vetting");
+            doAnswer(call->{
+                List<SourceDocument> admitted=call.getArgument(2);
+                assertEquals(Collections.singletonList(readable.getId()),admitted.stream().map(SourceDocument::getId).collect(Collectors.toList()));
+                throw new IllegalStateException("authored stop after verifying admitted corpus");
+            }).when(oer).loadSemantic(eq(project),eq("vetting"),anyList());
+            BizException stopped=assertThrows(BizException.class,()->service.run(project,"en"));
+            assertTrue(stopped.getMessage().contains("authored stop after verifying admitted corpus"),stopped.getMessage());
+            CoverageVO coverage=service.latestRun(project).getCoverage();
+            assertEquals(2,coverage.getTotalDocuments());
+            assertEquals(Collections.singletonList(readable.getId()),coverage.getCanonicalSourceDocumentIds());
+            DocumentCoverageVO failedCoverage=coverage.getDocuments().stream().filter(row->String.valueOf(failed.getId()).equals(row.getDocumentId())).findFirst().orElseThrow(AssertionError::new);
+            assertEquals("FAILED",failedCoverage.getParseStatus());
+            assertEquals(0,failedCoverage.getReviewedSegments());
+            assertTrue(failedCoverage.getWarnings().stream().anyMatch(warning->warning.contains("not reviewed")),failedCoverage.getWarnings().toString());
+            verify(evidencePreparation).prepareNormalObservedForSemanticRead(project,failed.getId(),"vetting");
+        } finally {target.setSourceDigestPreparation(stamps);}
+    }
+
     @Test void failedNormalPreparationRetainsFailureAndDoesNotLoadOrReviewUnpreparedSources() throws Exception {
+        useLegacyFullPreparationAdapter();
         String project=project();SourceDocument doc=source(project,"SCT","SCT.txt","SCT 1.1 Retain the original source when preparation fails.");
         doReturn(true).when(oer).enabled();
-        doThrow(new IllegalStateException("authored preparation unavailable")).when(evidencePreparation).prepareNormalObserved(project,doc.getId(),"vetting");
+        doThrow(new IllegalStateException("authored preparation unavailable")).when(evidencePreparation).prepareNormalObservedForSemanticRead(project,doc.getId(),"vetting");
         BizException error=assertThrows(BizException.class,()->service.run(project,"en"));
         assertTrue(error.getMessage().contains("authored preparation unavailable"));
         verify(oer,never()).loadSemantic(anyString(),anyString(),anyList());verify(semantic,never()).reviewWithProgress(any(),anyString(),anyList(),anyString(),any(ReviewProgress.class),anyList(),any(Runnable.class));
@@ -109,7 +164,11 @@ class VettingServiceLifecycleWorkflowTest {
         when(semantic.reviewWithProgress(isNull(),eq(project),anyList(),eq("en"),any(ReviewProgress.class),anyList(),any(Runnable.class))).thenAnswer(call->{
             SourceDocument fresh=documents.findById(doc.getId()).orElseThrow(AssertionError::new);fresh.setParseCoverageJson("{\"changedAfterSemanticReturn\":true}");documents.saveAndFlush(fresh);return result(doc,false);
         });
-        BizException error=assertThrows(BizException.class,()->service.run(project,"en"));assertTrue(error.getMessage().contains("source generation changed"));assertEquals("FAILED",service.latestRun(project).getStatus());assertTrue(findings.findByProjectIdOrderByCodeAsc(project).isEmpty());
+        BizException error=assertThrows(BizException.class,()->service.run(project,"en"));
+        assertEquals(4101,error.getCode());
+        assertEquals("Source content or authorization changed",error.getMessage());
+        verify(semantic).reviewWithProgress(isNull(),eq(project),anyList(),eq("en"),any(ReviewProgress.class),anyList(),any(Runnable.class));
+        assertEquals("FAILED",service.latestRun(project).getStatus());assertTrue(findings.findByProjectIdOrderByCodeAsc(project).isEmpty());
     }
 
     @Test void defaultOffAndObservedRerunKeepSelectionAndAllHumanFields() throws Exception {
@@ -213,7 +272,21 @@ class VettingServiceLifecycleWorkflowTest {
     private static Result result(SourceDocument doc,boolean extra){Result r=new Result();r.setModel("fixture-only");r.setPlannedCallCount(3);Candidate high=candidate(doc,"A","high");r.getCandidates().add(high);if(extra){r.getCandidates().add(candidate(doc,"A","high"));r.getCandidates().add(candidate(doc,"B","medium"));r.getCandidates().add(candidate(doc,"C","low"));}return r;}
     private static Candidate candidate(SourceDocument doc,String suffix,String severity){Candidate c=new Candidate();c.setRuleId("fixture-"+suffix);c.setType("risk");c.setSeverity(severity);c.setTitle("Fixture "+suffix);c.setComment("Fixture output, not a real contract assertion");c.setSource("model");c.setEvidence(Collections.singletonList(new FindingEvidence("source",String.valueOf(doc.getId()),doc.getFileKey(),doc.getFileName(),null,"body fixture",doc.getTextContent(),true,VettingCorpus.sourceHash(doc),null)));return c;}
     private String project(){Project p=new Project();p.setId("lifecycle-"+UUID.randomUUID());p.setNameEn("Lifecycle fixture");p.setContractNo("TEST");projects.saveAndFlush(p);return p.getId();}
-    private SourceDocument source(String project,String key,String name,String text) throws Exception{DocumentParser.ParsedDocument parsed=parser.parse(name,text.getBytes(StandardCharsets.UTF_8));SourceDocument d=new SourceDocument();d.setProjectId(project);d.setCategory(SourceDocument.CATEGORY_VETTING_PACKAGE);d.setReviewRole("tender");d.setDocumentScope("package");d.setFileKey(key);d.setFileName(name);d.setTextContent(parsed.getText());d.setParseStatus(parsed.getParseStatus());d.setPageCount(parsed.getPageCount());d.setOcrUsed(false);d.setStructuredContentJson(JsonUtils.write(parsed.getBlocks()));d.setParseCoverageJson(JsonUtils.write(parsed.getCoverage()));return documents.saveAndFlush(d);}
+    private SourceDocument source(String project,String key,String name,String text) throws Exception {
+        byte[] original=text.getBytes(StandardCharsets.UTF_8);
+        DocumentParser.ParsedDocument parsed=parser.parse(name,original);
+        SourceDocument d=new SourceDocument();d.setProjectId(project);d.setCategory(SourceDocument.CATEGORY_VETTING_PACKAGE);
+        d.setReviewRole("tender");d.setDocumentScope("package");d.setFileKey(key);d.setFileName(name);
+        d.setTextContent(parsed.getText());d.setParseStatus(parsed.getParseStatus());d.setPageCount(parsed.getPageCount());
+        d.setOcrUsed(false);d.setStructuredContentJson(JsonUtils.write(parsed.getBlocks()));d.setParseCoverageJson(JsonUtils.write(parsed.getCoverage()));
+        com.consense.service.StorageService.StoredFile stored=storage.store(project,SourceDocument.CATEGORY_VETTING_PACKAGE,
+                new org.springframework.mock.web.MockMultipartFile("files",name,"text/plain",original));
+        d.setStoragePath(stored.getPath());d.setSourceSha256(com.consense.service.sources.OerSourceMetadata.originalSha256(original));
+        com.consense.document.OerDocumentIdentity identity=new com.consense.document.OerDocumentIdentity();
+        identity.setSourceSha256(d.getSourceSha256());identity.setIdentityStatus("format_supported_non_drawing");
+        identity.setEligibleModules(Arrays.asList("vetting","advisory"));d.setOerIdentityJson(JsonUtils.write(identity));
+        return documents.saveAndFlush(d);
+    }
     private static VettingRun run(String project,String status){VettingRun r=new VettingRun();r.setId(UUID.randomUUID().toString());r.setProjectId(project);r.setLang("en");r.setStartedAt(Instant.now());r.setStatus(status);r.setPhase("fixture");return r;}
     private static Path probeRoot(String project){return Paths.get("target","lifecycle-probes",ID,project).toAbsolutePath();}
     private static List<JsonNode> events(Path root,String runId) throws Exception {List<JsonNode> out=new ArrayList<>();if(!Files.exists(root)||!Files.isDirectory(root))return out;

@@ -6,6 +6,7 @@ import com.consense.config.ConsenseProperties;
 import com.consense.service.sources.CanonicalCurrentSourceReader;
 import com.consense.service.sources.CanonicalEvidenceService;
 import com.consense.service.sources.CanonicalEvidenceException;
+import com.consense.service.sources.SourceContentDigestMigration;
 import com.consense.service.advice.AdviceService;
 import com.consense.service.vetting.VettingService;
 import com.consense.service.vetting.VettingCorpus;
@@ -16,8 +17,10 @@ import java.nio.charset.StandardCharsets;
 import java.util.*;
 import org.hibernate.SessionFactory;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.ConnectionCallback;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.test.util.AopTestUtils;
 import static org.junit.jupiter.api.Assertions.*;
@@ -31,6 +34,9 @@ class BusinessSourceJpaBoundaryTest extends VettingFileCatalogJpaHttpTest {
     @Autowired ConsenseProperties props;
     @Autowired CanonicalCurrentSourceReader current;
     @Autowired CanonicalEvidenceService registration;
+    @BeforeEach void installDigestTrigger(){
+        jdbc.execute((ConnectionCallback<Void>)connection->{try{SourceContentDigestMigration.install(connection);return null;}catch(Exception error){throw new java.sql.SQLException(error);}});
+    }
 
     SourceDocument complete(String name,String key){
         SourceDocument d=source(name,key,"Source literal \uD83D\uDE00\t with trailing text " + String.join("",Collections.nCopies(2000,"full contract ")));
@@ -43,16 +49,30 @@ class BusinessSourceJpaBoundaryTest extends VettingFileCatalogJpaHttpTest {
         d.setOerIdentityJson("{\"sourceSha256\":\""+d.getSourceSha256()+"\",\"sourcePurpose\":\"project_document\",\"eligibleModules\":[\"vetting\",\"advisory\"]}");
         return documents.saveAndFlush(d);
     }
-    void businessSql(){
+    void businessSql(){businessSql(false);}
+    void businessSql(boolean selectedPrefilter){
         List<String> statements=new ArrayList<>();
         for(String s:SqlCapture.statements){String lower=s.toLowerCase(Locale.ROOT);if(lower.startsWith("select ")&&lower.contains(" from source_document "))statements.add(lower);}
-        assertEquals(1,statements.size(),statements.toString());String sql=statements.get(0);
+        assertEquals(selectedPrefilter?2:1,statements.size(),statements.toString());String sql=statements.get(statements.size()-1);
+        if(selectedPrefilter){String metadata=statements.get(0);
+            assertFalse(java.util.regex.Pattern.compile("\\.(?:text_content|structured_content_json|parse_coverage_json|normal_candidate_json|native_pdf_evidence_json)\\s+as\\s")
+                    .matcher(metadata).find(),"business selection prefilter projected payload: "+metadata);
+        }
         assertFalse(sql.contains("native_pdf_evidence_json"),"business source read hydrated unused native archive: "+sql);
         assertTrue(sql.contains("text_content"),"complete business text must remain");
         assertTrue(sql.contains("structured_content_json"),"complete business structure must remain");
         assertTrue(sql.contains("oer_identity_json"),"source routing identity must remain");
         assertEquals(0,emf.unwrap(SessionFactory.class).getStatistics().getEntityStatistics(SourceDocument.class.getName()).getLoadCount());
         System.out.println("BUSINESS_SOURCE_EXACT_SQL "+sql);
+    }
+    void catalogSql(){
+        List<String> statements=new ArrayList<>();
+        for(String s:SqlCapture.statements){String lower=s.toLowerCase(Locale.ROOT);if(lower.startsWith("select ")&&lower.contains(" from source_document "))statements.add(lower);}
+        assertEquals(1,statements.size(),statements.toString());String sql=statements.get(0);Set<String> columns=new HashSet<>();
+        for(String item:sql.substring(sql.indexOf("select ")+7,sql.indexOf(" from ")).split(",")){String selected=item.trim().split("\\s+")[0];columns.add(selected.substring(selected.lastIndexOf('.')+1));}
+        for(String large:Arrays.asList("text_content","structured_content_json","parse_coverage_json","normal_candidate_json","native_pdf_evidence_json"))assertFalse(columns.contains(large),large);
+        assertTrue(columns.contains("business_content_sha256"));
+        assertEquals(0,emf.unwrap(SessionFactory.class).getStatistics().getEntityStatistics(SourceDocument.class.getName()).getLoadCount());
     }
     void exact(SourceDocument expected,SourceDocument actual){
         assertEquals(expected.getId(),actual.getId());assertEquals(expected.getProjectId(),actual.getProjectId());
@@ -66,11 +86,14 @@ class BusinessSourceJpaBoundaryTest extends VettingFileCatalogJpaHttpTest {
         assertEquals(VettingCorpus.sourceHash(expected),VettingCorpus.sourceHash(actual));
         assertNull(actual.getNativePdfEvidenceJson(),"business snapshot must not contain the unused archive");
     }
-    @Test void adviceSourcesReachesRealJpaWithoutNativeArchiveHydration()throws Exception{
+    @Test void adviceSourcesReachesRealJpaWithoutSourceClobHydration()throws Exception{
         SourceDocument expected=complete("10 - SCC.docx","SCC");clear();
         JsonNode r=JsonUtils.parse(mvc.perform(get("/api/advice/"+project+"/sources")).andReturn().getResponse().getContentAsString());
         assertEquals(0,r.path("code").asInt(),r.toString());assertEquals(1,r.path("data").size());
-        assertEquals(VettingCorpus.sourceHash(expected),r.path("data").get(0).path("sourceHash").asText());businessSql();
+        assertFalse(r.path("data").get(0).hasNonNull("sourceHash"));
+        assertEquals(expected.getSourceSha256(),r.path("data").get(0).path("originalSourceSha256").asText());
+        assertEquals(jdbc.queryForObject("select business_content_sha256 from source_document where id=?",String.class,expected.getId()),
+                r.path("data").get(0).path("businessContentSha256").asText());catalogSql();
     }
     @Test void freshAdviceSelectionPreservesCompleteInputsAndReadsChangedRevision(){
         SourceDocument expected=complete("10 - SCC.docx","SCC");clear();
@@ -86,7 +109,7 @@ class BusinessSourceJpaBoundaryTest extends VettingFileCatalogJpaHttpTest {
     @Test void vettingSourceSetPreservesCompleteVerificationInputsAndStoredArchive(){
         SourceDocument expected=complete("10 - SCC.docx","SCC");String archive=expected.getNativePdfEvidenceJson();clear();
         List<SourceDocument> selected=ReflectionTestUtils.invokeMethod((Object)AopTestUtils.getTargetObject(vetting),"sourceSet",project);
-        assertEquals(1,selected.size());exact(expected,selected.get(0));businessSql();
+        assertEquals(1,selected.size());exact(expected,selected.get(0));businessSql(true);
         assertEquals(archive,jdbc.queryForObject("select native_pdf_evidence_json from source_document where id=?",String.class,expected.getId()));
         org.mockito.Mockito.verifyNoInteractions(externalLlm,actualParser,actualOer);
     }
@@ -94,7 +117,7 @@ class BusinessSourceJpaBoundaryTest extends VettingFileCatalogJpaHttpTest {
         complete("10 - SCC.docx","SCC");SourceDocument newer=complete(" 10 - scc.DOCX ","SCC");newer.setParseStatus("FAILED");newer.setTextContent(null);documents.saveAndFlush(newer);
         SourceDocument excluded=complete("07 - GCC.pdf","GCC");excluded.setOerIdentityJson("{\"sourceSha256\":\""+excluded.getSourceSha256()+"\",\"sourcePurpose\":\"project_document\",\"eligibleModules\":[\"advisory\"]}");documents.saveAndFlush(excluded);
         clear();List<SourceDocument> selected=ReflectionTestUtils.invokeMethod((Object)AopTestUtils.getTargetObject(vetting),"sourceSet",project);
-        assertEquals(1,selected.size());assertEquals(newer.getId(),selected.get(0).getId());assertEquals("FAILED",selected.get(0).getParseStatus());assertNull(selected.get(0).getTextContent());businessSql();
+        assertEquals(1,selected.size());assertEquals(newer.getId(),selected.get(0).getId());assertEquals("FAILED",selected.get(0).getParseStatus());assertNull(selected.get(0).getTextContent());businessSql(true);
         clear();List<SourceDocument> adviceSelected=ReflectionTestUtils.invokeMethod((Object)AopTestUtils.getTargetObject(advice),"freshSelectedDocuments",project,"fullset");
         assertEquals(2,adviceSelected.size());assertEquals(newer.getId(),adviceSelected.get(0).getId());businessSql();
     }

@@ -31,6 +31,30 @@ class AdviceQwenWireObservationTest {
     private static final String SECRET="AUTHORED-QWEN-SECRET",SOURCE=VettingCorpus.hash("AUTHORED SOURCE");
     private static final String USER="完整原题☃\nDeclared ownership for this alias (source observations): {\"clauseId\":null,\"ownerStatus\":\"unknown\"}\nComplete source with  two spaces.\n";
 
+    @Test void draftAndSupplementUseDistinctPaidPhasesAndPublishOnlyValidatedSections() throws Exception {
+        Fixture f=new Fixture(Files.createDirectory(root.resolve("unpublished-draft")),false,true);
+        try(QwenChatUsagePreflight.Operation.ActionScope action=f.operation.openAction("test:advice-wire",()->{})){
+            AdviceService.AnswerRecord draft=ReflectionTestUtils.invokeMethod(f.service,"completeAdvice","AUTHORED system",USER,null,null,f.operation,SOURCE,(Runnable)()->{},f.publication,"Explain the uploaded clause","draft",false);
+            assertNotNull(draft);assertTrue(f.sections.isEmpty());
+            AdviceService.AnswerRecord finalAnswer=ReflectionTestUtils.invokeMethod(f.service,"completeAdvice","AUTHORED system",USER+"\nAdditional current source [2]",null,null,f.operation,SOURCE,(Runnable)()->{},f.publication,"Explain the uploaded clause","supplement",false);
+            assertNotNull(finalAnswer);assertTrue(f.sections.isEmpty());
+            ReflectionTestUtils.invokeMethod(f.publication,"publishValidated");
+            assertFalse(f.sections.isEmpty());
+        }
+        verify(f.ledger).reserve(anyString(),anyString(),eq("draft-preflight-0"),anyString(),eq(false));
+        verify(f.ledger).reserve(anyString(),anyString(),eq("draft-answer-0"),anyString(),eq(true));
+        verify(f.ledger).reserve(anyString(),anyString(),eq("supplement-preflight-0"),anyString(),eq(false));
+        verify(f.ledger).reserve(anyString(),anyString(),eq("supplement-answer-0"),anyString(),eq(true));
+    }
+    @Test void malformedCompleteDraftKeepsOutputInvalidAndPublishesNoSections() throws Exception {
+        Fixture f=new Fixture(Files.createDirectory(root.resolve("invalid-unpublished-draft")),false,true);
+        f.answers.add("{");f.answers.add("{");
+        try(QwenChatUsagePreflight.Operation.ActionScope action=f.operation.openAction("test:advice-wire",()->{})){
+            com.consense.common.BizException failure=assertThrows(com.consense.common.BizException.class,()->ReflectionTestUtils.invokeMethod(f.service,"completeAdvice","AUTHORED system",USER,null,null,f.operation,SOURCE,(Runnable)()->{},f.publication,"Explain the uploaded clause","draft",false));
+            assertEquals(4205,failure.getCode());assertTrue(failure.getMessage().contains("output_invalid"));assertTrue(f.sections.isEmpty());
+        }
+    }
+
     @Test void actualSealedEntitiesExistBeforeDispatchAndExactlyMatchBothLedgerRequestHashes() throws Exception {
         for(boolean streaming:Arrays.asList(false,true)){
             Fixture f=new Fixture(Files.createDirectory(root.resolve("enabled-"+streaming)),true,streaming);f.complete("AUTHORED system",USER);
@@ -54,6 +78,16 @@ class AdviceQwenWireObservationTest {
         Fixture enabled=new Fixture(Files.createDirectory(root.resolve("enabled")),true,false),disabled=new Fixture(Files.createDirectory(root.resolve("disabled")),false,false);
         enabled.complete("AUTHORED system",USER);disabled.complete("AUTHORED system",USER);
         assertEquals(enabled.bodies,disabled.bodies);assertTrue(attempts(disabled.directory).isEmpty());assertNull(disabled.settings.getWireObservationRoot());
+    }
+
+    @Test void streamedAnswerRepairUsesACompleteNonstreamingQwenRequest() throws Exception {
+        Fixture f=new Fixture(Files.createDirectory(root.resolve("full-repair")),true,true);
+        ObjectNode first=(ObjectNode)JsonUtils.parse(f.contract());first.put("basisScope","reference_only");
+        f.answers.add(JsonUtils.write(first));f.answers.add(f.contract());f.complete("AUTHORED system",USER);
+        assertEquals(4,f.bodies.size());assertTrue(JsonUtils.parse(f.bodies.get(1)).path("stream").asBoolean());
+        assertFalse(JsonUtils.parse(f.bodies.get(3)).path("stream").asBoolean());
+        assertTrue(JsonUtils.parse(f.bodies.get(3)).path("messages").get(1).path("content").asText().contains("full complete answer"));
+        assertEquals(2,attempts(f.directory).size());
     }
 
     @Test void knownCredentialReflectionIsRejectedBeforeAnyEntityOrPaidDispatch() throws Exception {
@@ -116,8 +150,8 @@ class AdviceQwenWireObservationTest {
 
     private final class Fixture {
         final Path directory;final boolean enabled,streaming,requireSavedBeforeDispatch;final ConsenseProperties props=new ConsenseProperties();final AdviceModelProperties settings=new AdviceModelProperties();
-        final HttpSupport http=mock(HttpSupport.class);final QwenGenerationLedger ledger=mock(QwenGenerationLedger.class);final List<String> bodies=new ArrayList<>(),authorizations=new ArrayList<>();
-        final QwenChatUsagePreflight.Operation operation;final AdviceService service;final Object publication;
+        final HttpSupport http=mock(HttpSupport.class);final QwenGenerationLedger ledger=mock(QwenGenerationLedger.class);final List<String> bodies=new ArrayList<>(),authorizations=new ArrayList<>();final Queue<String> answers=new ArrayDeque<>();
+        final QwenChatUsagePreflight.Operation operation;final AdviceService service;final Object publication;final List<String> sections=new ArrayList<>();
         Fixture(Path path,boolean observe,boolean stream)throws Exception{this(path,observe,stream,"qwen",false,true);}
         Fixture(Path path,boolean observe,boolean stream,String profile,boolean productionCopy,boolean requireSaved)throws Exception{
             directory=path.toAbsolutePath();enabled=observe;streaming=stream;requireSavedBeforeDispatch=requireSaved;if(observe)settings.setWireObservationRoot(directory.toString());
@@ -127,15 +161,16 @@ class AdviceQwenWireObservationTest {
             operation=new QwenChatUsagePreflight(props,ledger).capture(selected,"advice",0);service=new AdviceService(null,null,null,null,props,null,null,null,null,null,null);ReflectionTestUtils.setField(service,"adviceSettings",settings);
             Class<?> context=Class.forName(AdviceService.class.getName()+"$QuestionContext");Constructor<?> qc=context.getDeclaredConstructor(String.class,List.class);qc.setAccessible(true);
             Class<?> type=Class.forName(AdviceService.class.getName()+"$Publication");Constructor<?> pc=type.getDeclaredConstructor(AdviceService.class,List.class,boolean.class,AdviceProgress.class,Runnable.class,context);pc.setAccessible(true);
-            AdviceProgress progress=new AdviceProgress(){public boolean streaming(){return streaming;}};
+            AdviceProgress progress=new AdviceProgress(){public boolean streaming(){return streaming;}public void section(String content,List<String> aliases,List<CitationVO> sources){sections.add(content);}};
             CitationVO source=new CitationVO("Authored source",null,"body/authored","Keep a record.",1,"[1]","1",SOURCE,"tender",true);
             publication=pc.newInstance(service,Collections.singletonList(source),false,progress,(Runnable)()->{},qc.newInstance("Explain the uploaded clause",Collections.emptyList()));
-            doAnswer(call->{String body=call.getArgument(1);authorizations.add(call.getArgument(3));beforeDispatch(body);return envelope(JsonUtils.parse(body).path("max_tokens").asInt()==1?"{":contract());})
+            doAnswer(call->{String body=call.getArgument(1);authorizations.add(call.getArgument(3));beforeDispatch(body);return envelope(JsonUtils.parse(body).path("max_tokens").asInt()==1?"{":nextAnswer());})
                     .when(http).postJsonBoundedWithoutReplay(anyString(),anyString(),anyLong(),anyString(),anyInt(),any());
-            doAnswer(call->{String body=call.getArgument(1);authorizations.add(call.getArgument(3));beforeDispatch(body);Consumer<String> events=call.getArgument(6);String event="{\"model\":\"qwen3.8-27b\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":"+JsonUtils.write(contract())+"},\"finish_reason\":\"stop\"}]}";events.accept(event);events.accept("[DONE]");return "data: "+event+"\n\ndata: [DONE]\n\n";})
+            doAnswer(call->{String body=call.getArgument(1);authorizations.add(call.getArgument(3));beforeDispatch(body);Consumer<String> events=call.getArgument(6);String event="{\"model\":\"qwen3.8-27b\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":"+JsonUtils.write(nextAnswer())+"},\"finish_reason\":\"stop\"}]}";events.accept(event);events.accept("[DONE]");return "data: "+event+"\n\ndata: [DONE]\n\n";})
                     .when(http).postJsonStream(anyString(),anyString(),anyLong(),anyString(),anyInt(),eq(true),any(),any());
         }
-        void beforeDispatch(String body)throws Exception{if(enabled&&requireSavedBeforeDispatch){List<Path> saved=attempts(directory);assertEquals(1,saved.size(),"All sealed entities must be saved before the first paid dispatch");for(String name:Arrays.asList("bound-input.utf8.json","preflight-request.utf8.json","generation-request.utf8.json","request-receipt.json"))assertTrue(Files.isRegularFile(saved.get(0).resolve(name)));}bodies.add(body);}
+        String nextAnswer(){return answers.isEmpty()?contract():answers.remove();}
+        void beforeDispatch(String body)throws Exception{if(enabled&&requireSavedBeforeDispatch){List<Path> saved=attempts(directory);assertFalse(saved.isEmpty(),"All sealed entities must be saved before the first paid dispatch");for(Path attempt:saved)for(String name:Arrays.asList("bound-input.utf8.json","preflight-request.utf8.json","generation-request.utf8.json","request-receipt.json"))assertTrue(Files.isRegularFile(attempt.resolve(name)));}bodies.add(body);}
         void complete(String system,String user){try(QwenChatUsagePreflight.Operation.ActionScope action=operation.openAction("test:advice-wire",()->{})){AdviceService.AnswerRecord answer=ReflectionTestUtils.invokeMethod(service,"completeAdvice",system,user,null,null,operation,SOURCE,(Runnable)()->{},publication,"Explain the uploaded clause");assertNotNull(answer);}}
         String contract(){return AdviceBudgetFixture.contract("{\"grounded\":true,\"answer\":\"Supported wording [1].\",\"citations\":[\"[1]\"]}");}
         String envelope(String content){ObjectNode root=JsonUtils.mapper().createObjectNode();root.put("object","chat.completion");root.put("model",operation.getIdentity().getModel());ObjectNode choice=root.putArray("choices").addObject();choice.put("index",0);choice.put("finish_reason","stop");choice.putObject("message").put("role","assistant").put("content",content);root.putObject("usage").put("prompt_tokens",42).put("completion_tokens",1).put("total_tokens",43);return JsonUtils.write(root);}

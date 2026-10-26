@@ -10,7 +10,7 @@ import unittest
 from unittest.mock import patch
 
 from artifact_store import ArtifactStore
-from native_pdf_candidates import capture_native_pdf_candidates
+from native_pdf_candidates import capture_native_pdf_candidates, _context
 
 
 def authored_pdf():
@@ -45,8 +45,161 @@ def context(raw, **changes):
     return json.dumps(value, ensure_ascii=False).encode()
 
 
+class NativePdfReadingContextBoundaryTest(unittest.TestCase):
+    """Pure context admission checks; no provider, PDF parser or model is invoked."""
+    def test_explicit_manual_text_status_keeps_actual_source_family_and_unknown_quality(self):
+        raw = b'authored immutable context input'
+        value = json.loads(context(raw))
+        value['readingPlan'].update(documentFamily='APH', identityStatus='human_confirmed_textual_material',
+                                    versionStatus='unknown', sourceQualityStatus='unverified')
+        actual = _context(json.dumps(value), hashlib.sha256(raw).hexdigest())
+        self.assertEqual('APH', actual['readingPlan']['documentFamily'])
+        self.assertEqual('human_confirmed_textual_material', actual['readingPlan']['identityStatus'])
+        self.assertEqual('unknown', actual['readingPlan']['versionStatus'])
+        self.assertEqual('unverified', actual['readingPlan']['sourceQualityStatus'])
+
+    def test_manual_text_status_cannot_override_source_plan_or_drawing_boundaries(self):
+        raw = b'authored immutable context input'
+        baseline = json.loads(context(raw))
+        baseline['readingPlan'].update(documentFamily='APH', identityStatus='human_confirmed_textual_material')
+        for key, replacement in (('identityStatus', 'human_confirmed_source_use'), ('identityStatus', 'pending'),
+                                 ('documentFamily', 'DRAWING'), ('documentFamily', ''),
+                                 ('sourceSha256', '0' * 64), ('schemaVersion', 'foreign-reading-plan')):
+            value = copy.deepcopy(baseline)
+            value['readingPlan'][key] = replacement
+            with self.subTest(key=key, replacement=replacement), self.assertRaisesRegex(ValueError, 'non_drawing_reading_plan_required'):
+                _context(json.dumps(value), hashlib.sha256(raw).hexdigest())
+        with self.assertRaisesRegex(ValueError, 'source_sha_mismatch'):
+            _context(json.dumps(baseline), '0' * 64)
+
+
+class NativePdfBatchBoundaryTest(unittest.TestCase):
+    """Authored transport controls only; providers and continuation are spies."""
+    def setUp(self):
+        self.root = tempfile.TemporaryDirectory()
+        self.addCleanup(self.root.cleanup)
+        self.store = ArtifactStore(Path(self.root.name) / 'artifacts')
+        self.raw = b'%PDF-authored-cross-batch-control-not-a-source-fixture'
+        self.extractions, self.observations, self.continuations = [], [], []
+        self.failed_method = None
+
+    def capture(self, selected, predecessor=None, **changes):
+        class Page:
+            def __init__(self, number): self.number = number
+            def close(self): pass
+        class Document:
+            pages = [Page(number) for number in range(1, 101)]
+            def __enter__(self): return self
+            def __exit__(self, *ignored): return False
+        def observe(page):
+            self.observations.append(page.number)
+            return {}, [], {'glyphs': [], 'graphics': []}
+        def extract(number, method):
+            self.extractions.append((number, method))
+            if self.failed_method == (number, method):
+                raise RuntimeError('AUTHORED predecessor method failure')
+            return [], {}
+        def continuation(previous_source, previous_logical, source, logical, profile):
+            self.continuations.append((previous_source['originalPage'], source['originalPage'], logical['method']))
+            return {'groups': [{'authored': 'complete boundary proposal'}],
+                    'status': 'observed_authored_boundary_control'}
+        request = json.loads(context(self.raw))
+        request['source']['pageCount'] = 100
+        request['selectedPhysicalPages'] = selected
+        if predecessor is not None:
+            request['predecessorBundleRef'] = predecessor
+        request.update(changes)
+        with patch('native_pdf_candidates._open_pdf', return_value=Document()), \
+                patch('native_pdf_candidates.observe_source_page', side_effect=observe), \
+                patch('native_pdf_candidates.extract_pdfplumber', side_effect=lambda page, method, *_: extract(page.number, method)), \
+                patch('native_pdf_candidates.extract_camelot', side_effect=lambda path, number, method, *_: extract(number, method)), \
+                patch('native_pdf_candidates.recover_page', side_effect=lambda *_: {'logicalTables': [], 'observationGroups': {'groups': []}}), \
+                patch('native_pdf_candidates.observe_continuations', side_effect=continuation):
+            return capture_native_pdf_candidates(self.raw, json.dumps(request).encode(), artifact_store=self.store)
+
+    def test_64_65_and_byte_split_reuse_exact_predecessor_without_reextracting_it(self):
+        # Java's page-count and context-byte split paths both call this seam.
+        for left, right in ((64, 65), (2, 3)):
+            with self.subTest(boundary=(left, right)):
+                joined = self.capture([left, right])
+                self.continuations.clear()
+                first = self.capture([left])
+                self.continuations.clear(); self.extractions.clear(); self.observations.clear()
+                second = self.capture([right], first['bundleRef'])
+                self.assertEqual('candidate_observed', second['status'])
+                self.assertEqual(3, len(self.continuations))
+                self.assertEqual([right], self.observations)
+                self.assertEqual([(right, method['method']) for method in second['pages'][0]['methods']], self.extractions)
+                for before, after in zip(joined['pages'][1]['methods'], second['pages'][0]['methods']):
+                    old = before['candidate']['observationGroups']['continuations']
+                    new = after['candidate']['observationGroups']['continuations']
+                    self.assertEqual(old['groups'], new['groups'])
+                    self.assertEqual(left, new['anchorPhysicalPageNo'])
+                    self.assertEqual(first['pages'][0]['sourceObservationRef'], new['anchorSourceObservationRef'])
+
+    def test_wrong_source_recipe_reading_context_and_raw_method_reject_before_current_extraction(self):
+        first = self.capture([64])
+        bundle = json.loads(self.store.read_asset(first['bundleRef']))
+        for mutation in ('source', 'recipe', 'provider', 'reading_context', 'source_context', 'raw_method'):
+            with self.subTest(mutation=mutation):
+                altered = copy.deepcopy(bundle)
+                changes = {}
+                if mutation == 'source': altered['source']['sourceSha256'] = '0' * 64
+                if mutation == 'recipe': altered['codeRefs']['native_pdf_table_logic.py'] = self.store.put_bytes(b'changed recipe')
+                if mutation == 'provider': altered['providerVersions']['pdfplumber'] = 'different-version'
+                if mutation == 'reading_context':
+                    plan = json.loads(context(self.raw))['readingPlan']
+                    plan['scope'] = 'different source scope'; changes['readingPlan'] = plan
+                if mutation == 'source_context': changes['additionalMetadata'] = 'different source context'
+                if mutation == 'raw_method': altered['pages'][0]['methods'][0]['rawRef'] = altered['pages'][0]['methods'][1]['rawRef']
+                reference = self.store.put_bytes(json.dumps(altered).encode())
+                self.extractions.clear(); self.observations.clear()
+                reply = self.capture([65], reference, **changes)
+                self.assertEqual('failed', reply['status'])
+                self.assertEqual([], reply['pages'])
+                self.assertEqual([], self.extractions)
+                self.assertEqual([], self.observations)
+
+    def test_non_adjacent_or_overlapping_predecessor_rejects_before_current_extraction(self):
+        first = self.capture([64])
+        for selected in ([66], [64], [63]):
+            with self.subTest(selected=selected):
+                self.extractions.clear()
+                reply = self.capture(selected, first['bundleRef'])
+                self.assertEqual('failed', reply['status'])
+                self.assertEqual([], self.extractions)
+
+    def test_missing_or_corrupt_predecessor_cas_never_falls_back_to_extraction(self):
+        for corruption in ('missing', 'corrupt'):
+            with self.subTest(corruption=corruption):
+                first = self.capture([64])
+                ref = first['bundleRef']
+                path = self.store.root / ref['relativePath']
+                if corruption == 'missing': path.unlink()
+                else: path.write_bytes(b'authored CAS corruption')
+                self.extractions.clear()
+                reply = self.capture([65], ref)
+                self.assertEqual('failed', reply['status'])
+                self.assertEqual([], reply['pages'])
+                self.assertEqual([], self.extractions)
+
+    def test_last_failed_method_and_absent_reference_mark_boundary_unknown_without_stale_fallback(self):
+        self.failed_method = (64, 'camelot_network')
+        first = self.capture([63, 64])
+        self.failed_method = None
+        self.continuations.clear()
+        second = self.capture([65], first['bundleRef'])
+        self.assertEqual('candidate_observed', second['status'])
+        self.assertEqual([(64, 65, method) for method in ('pdfplumber_lines_lines', 'camelot_stream')], self.continuations)
+        missing = next(method for method in second['pages'][0]['methods'] if method['method'] == 'camelot_network')
+        self.assertEqual('unknown_predecessor_unavailable', missing['candidate']['observationGroups']['continuationStatus'])
+        unbound = self.capture([65])
+        self.assertTrue(all(method['candidate']['observationGroups']['continuationStatus'] == 'unknown_predecessor_unavailable'
+                            for method in unbound['pages'][0]['methods']))
+
+
 class NativePdfCandidatesTest(unittest.TestCase):
-    def saved_com11_reply(self, selected):
+    def saved_com11_reply(self, selected, predecessor=None, replayed=None):
         root_value = os.environ.get('CONSENSE_SL_NOTE9_FIXTURE')
         if not root_value:
             self.skipTest('Explicit actual saved COM11 fixture not supplied')
@@ -67,6 +220,7 @@ class NativePdfCandidatesTest(unittest.TestCase):
             def __enter__(self): return self
             def __exit__(self, *ignored): return False
         def observe(page):
+            if replayed is not None: replayed.append(('source', page.number))
             saved = records['source-observations.pages.jsonl'][page.number]
             geometry = {key: copy.deepcopy(saved[key]) for key in ('pageWidth','pageHeight','rotation',
                 'pdfplumberPageWidth','pdfplumberPageHeight','pdfplumberMediaBox','pdfplumberCropBox',
@@ -76,6 +230,7 @@ class NativePdfCandidatesTest(unittest.TestCase):
                 'sourceCharsAreNativeTextLayerObservations','sourceTextLayerQualityAccepted')}
             return geometry, observed['glyphs'], observed
         def tables(number, method):
+            if replayed is not None: replayed.append((method, number))
             record=records[method + '.pages.jsonl'][number]
             values=copy.deepcopy(record['tables'])
             # The old complete-section recorder added this declared namespace after extraction.
@@ -90,6 +245,7 @@ class NativePdfCandidatesTest(unittest.TestCase):
             'selectedPhysicalPages':selected,'readingPlan': {'schemaVersion':'oer-reading-plan-v1',
                 'sourceSha256':fixture['sourceSha256'],'documentFamily':'SL','identityStatus':'sha_verified'},
             'javaNativeEvidence':[]}
+        if predecessor is not None: request['predecessorBundleRef'] = predecessor
         with patch('native_pdf_candidates._open_pdf', return_value=SavedDocument()), \
              patch('native_pdf_candidates.observe_source_page', side_effect=observe), \
              patch('native_pdf_candidates.extract_pdfplumber', side_effect=lambda page,method,*rest: tables(page.number,method)), \
@@ -97,6 +253,22 @@ class NativePdfCandidatesTest(unittest.TestCase):
             reply = capture_native_pdf_candidates(raw, json.dumps(request).encode(), artifact_store=self.store)
         self.assertEqual('candidate_observed',reply['status'])
         return reply
+
+    def test_saved_com11_cross_batch_note_nine_matches_same_input_without_reextracting_anchor(self):
+        joined = self.saved_com11_reply([19, 20])
+        first = self.saved_com11_reply([19])
+        replayed = []
+        second = self.saved_com11_reply([20], first['bundleRef'], replayed)
+        self.assertEqual([('source', 20), ('pdfplumber_lines_lines', 20),
+                          ('camelot_network', 20), ('camelot_stream', 20)], replayed)
+        for before, after in zip(joined['pages'][1]['methods'], second['pages'][0]['methods']):
+            old = before['candidate']['observationGroups'].get('continuations')
+            new = after['candidate']['observationGroups'].get('continuations')
+            self.assertEqual(old is None, new is None)
+            if old is not None:
+                self.assertEqual(old['groups'], new['groups'])
+                self.assertEqual(19, new['anchorPhysicalPageNo'])
+                self.assertEqual(first['pages'][0]['sourceObservationRef'], new['anchorSourceObservationRef'])
 
     def test_saved_com11_note_nine_suffix_reaches_its_actual_anchor_without_a_second_table(self):
         reply = self.saved_com11_reply([15,19,20,24,25,29,33])
@@ -148,7 +320,8 @@ class NativePdfCandidatesTest(unittest.TestCase):
             self.assertIn('AUTHORED OPTIONAL CONTINUATION FAILURE',json.dumps(observed['continuationFailure']))
             self.assertEqual('unknown_optional_continuation_observation_failed',observed.pop('continuationStatus'))
             observed.pop('continuationFailure')
-            self.assertEqual(old['candidate'],candidate,'An optional suffix failure must not clear or change the existing main table')
+            previous=copy.deepcopy(old['candidate']);previous['observationGroups'].pop('continuationStatus',None)
+            self.assertEqual(previous,candidate,'An optional suffix failure must not clear or change the existing main table')
 
     def setUp(self):
         self.root = tempfile.TemporaryDirectory()

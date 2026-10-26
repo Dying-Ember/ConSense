@@ -32,10 +32,18 @@ def write(path, value):
         json.dump(value, stream, ensure_ascii=False, indent=2); stream.write('\n')
     return desc(path)
 
-def settings(manifest, state, batch_size, dtype='float32'):
+def state_path(state, owned_root=None):
     root = Path(state).resolve()
-    if not root.is_relative_to(Path('C:/Users/Administrator/.codex/local-state/consense-oer/fixed-best-baseline-20261012').resolve()):
+    allowed = Path('C:/Users/Administrator/.codex/local-state/consense-oer/fixed-best-baseline-20261012') if owned_root is None else Path(owned_root)
+    if owned_root is not None and (not allowed.is_absolute() or not Path(state).is_absolute()):
+        raise ValueError('Explicit owned baseline paths must be absolute')
+    if not root.is_relative_to(allowed.resolve()) or owned_root is not None and root == allowed.resolve():
         raise ValueError('Only task-owned new baseline state is allowed')
+    return root
+
+
+def settings(manifest, state, batch_size, dtype='float32', *, owned_root=None):
+    root = state_path(state, owned_root)
     os.environ.update({'CONSENSE_WORKSPACE_ROOT': manifest['inputPlanWorkspace'],
         'CONSENSE_RETRIEVAL_DATA': str(root), 'CONSENSE_MODEL_DEVICE':'cuda',
         'CONSENSE_MODEL_DTYPE':dtype, 'CONSENSE_MODEL_SERIAL_OFFLOAD':'1',

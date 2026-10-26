@@ -160,6 +160,34 @@ class StructuredJsonValidatorTest {
         verify(provider,times(1)).chatStructured(anyList(),any());verify(provider,never()).chat(anyList());
     }
 
+    @Test void jsonObjectRecordsRetainRawProviderAnswerAndOriginalArraySchema() {
+        String raw="{\"records\":["+issue()+"]}";LlmClient provider=provider(raw);List<String> captured=new ArrayList<>();
+        List<JsonNode> records=new AiGateway(provider).completeStructuredJsonRecords("system","source",JsonNode.class,actualSchema("submitted-1"),captured,null);
+        assertEquals(1,records.size());assertEquals(Collections.singletonList(raw),captured);
+        verify(provider).chatStructured(argThat(turns->turns.get(0).getContent().contains("one JSON object with exactly one key")),any());
+    }
+
+    static Stream<Arguments> invalidJsonObjectRecords() {
+        String row=issue().toString();
+        return Stream.of(
+                Arguments.of("explanatory prose ending in empty array","The assessment follows. []",INVALID_JSON),
+                Arguments.of("trailing second value","{\"records\":[]} []",INVALID_JSON),
+                Arguments.of("duplicate records key","{\"records\":[],\"records\":[]}",INVALID_JSON),
+                Arguments.of("extra key","{\"records\":[],\"comment\":\"x\"}",SCHEMA_MISMATCH),
+                Arguments.of("bare array","[]",SCHEMA_MISMATCH),
+                Arguments.of("non-array records","{\"records\":{}}",SCHEMA_MISMATCH),
+                Arguments.of("invalid record","{\"records\":[{}]}",SCHEMA_MISMATCH),
+                Arguments.of("nested array","{\"records\":[["+row+"]]}",SCHEMA_MISMATCH));
+    }
+
+    @ParameterizedTest(name="{0}") @MethodSource("invalidJsonObjectRecords")
+    void jsonObjectModeNeverExtractsTrailingArrayOrAcceptsPartialRecords(String name,String raw,StructuredOutputValidationException.Reason reason) {
+        LlmClient provider=provider(raw);List<String> captured=new ArrayList<>();
+        StructuredOutputValidationException failure=assertThrows(StructuredOutputValidationException.class,
+                ()->new AiGateway(provider).completeStructuredJsonRecords("system","source",JsonNode.class,actualSchema("submitted-1"),captured,null),name);
+        assertEquals(reason,failure.getReason(),name);assertEquals(Collections.singletonList(raw),captured);
+    }
+
     static Stream<Arguments> unsupportedOrInvalidSchemas() {
         return Stream.of(
                 Arguments.of("pattern","{\"type\":\"array\",\"items\":{\"type\":\"string\",\"pattern\":\"x\"}}",UNSUPPORTED_SCHEMA),

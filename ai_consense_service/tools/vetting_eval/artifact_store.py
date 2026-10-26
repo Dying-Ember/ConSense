@@ -57,6 +57,17 @@ class ArtifactStore:
     def put_bytes(self, value, *, identity_scope='exact_supplied_bytes'):
         if not isinstance(value, bytes):
             raise ArtifactStoreError('put_bytes requires bytes')
+        if not isinstance(identity_scope, str) or not identity_scope:
+            raise ArtifactStoreError('Artifact identity scope must be explicit')
+        sha = hashlib.sha256(value).hexdigest()
+        descriptor = {'schema': DESCRIPTOR_SCHEMA, 'storage': 'content_addressed_disk',
+                      'sha256': sha, 'byteCount': len(value),
+                      'relativePath': 'sha256/' + sha[:2] + '/' + sha + '.blob',
+                      'identityScope': identity_scope}
+        if self._path(descriptor).exists():
+            # Verify existing bytes in the owner's session, including its exit rehash.
+            self.verify(descriptor)
+            return descriptor
         from io import BytesIO
         return self.put_stream(BytesIO(value), identity_scope=identity_scope)
 
@@ -186,6 +197,16 @@ class ArtifactStore:
     def verify(self, descriptor):
         """Stream the entire stored content and verify its portable descriptor."""
         return self._read(descriptor, retain=False)
+
+    def release_bytes(self, descriptors):
+        """Drop consumed bodies while retaining every successful-exit dependency."""
+        cache = self._read_session.get()
+        if cache is None:
+            return
+        for descriptor in descriptors:
+            key = (str(self._path(descriptor)), descriptor['sha256'], descriptor['byteCount'])
+            if key in cache:
+                cache[key] = (cache[key][0], None)
 
     def read_asset(self, descriptor):
         """Read actual bytes only after full SHA-256 and byte count verification."""

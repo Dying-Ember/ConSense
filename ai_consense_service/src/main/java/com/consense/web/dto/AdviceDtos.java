@@ -142,6 +142,8 @@ public final class AdviceDtos {
         private String documentScope;
         private String parseStatus;
         private String sourceHash;
+        private String originalSourceSha256;
+        private String businessContentSha256;
         private boolean included;
         private String exclusionReason;
     }

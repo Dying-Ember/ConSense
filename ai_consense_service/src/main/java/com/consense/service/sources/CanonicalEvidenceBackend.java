@@ -1,6 +1,7 @@
 package com.consense.service.sources;
 
 import com.consense.common.Utf8;
+import com.consense.common.JsonUtils;
 import com.consense.config.CanonicalEvidenceProperties;
 import okhttp3.*;
 import org.springframework.http.HttpStatus;
@@ -8,8 +9,12 @@ import org.springframework.stereotype.Component;
 import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.nio.ByteBuffer;
+import java.nio.CharBuffer;
+import java.nio.charset.CharsetDecoder;
 import java.nio.charset.CodingErrorAction;
+import java.nio.charset.CoderResult;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 
 /** Only fixed registry paths against an operator-configured base; never a caller URL. */
 @Component
@@ -18,14 +23,25 @@ public class CanonicalEvidenceBackend {
     public CanonicalEvidenceBackend(CanonicalEvidenceProperties properties){this.properties=properties;}
     public static class Reply {
         public final byte[] bytes;
+        public final boolean notModified;
         public final String contentType,etag,sourceSha256,projectionSha256,sourceRevisionSha256,evidenceIdentitySha256;
         Reply(byte[] bytes,String type,String etag,String source,String projection){this(bytes,type,etag,source,projection,null,null);}
         Reply(byte[] bytes,String type,String etag,String source,String projection,String revision,String evidence){
+            this(bytes,type,etag,source,projection,revision,evidence,false);}
+        Reply(byte[] bytes,String type,String etag,String source,String projection,String revision,String evidence,boolean notModified){
             this.bytes=bytes;this.contentType=type;this.etag=etag;this.sourceSha256=source;this.projectionSha256=projection;
-            this.sourceRevisionSha256=revision;this.evidenceIdentitySha256=evidence;}
-        public String json(){try{return StandardCharsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPORT)
-                .onUnmappableCharacter(CodingErrorAction.REPORT).decode(ByteBuffer.wrap(bytes)).toString();}
-            catch(java.nio.charset.CharacterCodingException invalid){throw new CanonicalEvidenceException(HttpStatus.BAD_GATEWAY,"CANONICAL_JSON_INVALID");}}
+            this.sourceRevisionSha256=revision;this.evidenceIdentitySha256=evidence;this.notModified=notModified;}
+        public String json(){requireUtf8(bytes);return new String(bytes,StandardCharsets.UTF_8);}
+        /** Validate strictly with bounded scratch space before the compact String constructor. */
+        static void requireUtf8(byte[] bytes){
+            CharsetDecoder decoder=StandardCharsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPORT)
+                .onUnmappableCharacter(CodingErrorAction.REPORT);
+            ByteBuffer input=ByteBuffer.wrap(bytes);CharBuffer output=CharBuffer.allocate(8192);CoderResult result;
+            try{
+                do{result=decoder.decode(input,output,true);if(result.isError())result.throwException();output.clear();}while(result.isOverflow());
+                do{result=decoder.flush(output);if(result.isError())result.throwException();output.clear();}while(result.isOverflow());
+            }catch(java.nio.charset.CharacterCodingException invalid){throw new CanonicalEvidenceException(HttpStatus.BAD_GATEWAY,"CANONICAL_JSON_INVALID");}
+        }
     }
     public int normalMaximumBytes(){return NormalObservedContract.maximumBytes(properties.getMaxSnapshotBytes());}
     public String health(){return get(null,null,null,null,false,null,properties.getMaxSnapshotBytes()).json();}
@@ -35,17 +51,42 @@ public class CanonicalEvidenceBackend {
         return execute(new Request.Builder().url(normalBase(module).newBuilder().addPathSegment("canonical").addPathSegment(projection).addQueryParameter("module",module).build())
                 .tag(Integer.class,normalTimeout()).get().build(),normalMaximumBytes()).json();
     }
+    /** A conditional read still requires the registry's complete source/CAS checks before 304. */
+    public Reply snapshotIfChanged(String projection,String module,String wireSha256,boolean normal){
+        if(projection==null||!projection.matches("[a-f0-9]{64}")||wireSha256==null||!wireSha256.matches("[a-f0-9]{64}"))
+            throw new CanonicalEvidenceException(HttpStatus.BAD_REQUEST,"CANONICAL_SHA_INVALID");
+        Request.Builder request=new Request.Builder().url(normalBase(module).newBuilder().addPathSegment("canonical")
+                .addPathSegment(projection).addQueryParameter("module",module).build()).header("If-None-Match","\""+wireSha256+"\"");
+        if(normal)request.tag(Integer.class,normalTimeout());
+        Reply reply=execute(request.get().build(),normal?normalMaximumBytes():Math.min(properties.getMaxSnapshotBytes(),NativeDocumentCollectionContract.MAX_BYTES));
+        if(reply.notModified&&!projection.equals(reply.projectionSha256))
+            throw new CanonicalEvidenceException(HttpStatus.BAD_GATEWAY,"CANONICAL_CONDITIONAL_IDENTITY_MISMATCH");
+        return reply;
+    }
     public String normalObserved(String request,String module){
+        return normalObservedReply(request,module).json();
+    }
+    /** Keep the complete normal reply in bytes until its small receipt and projection are separated. */
+    public Reply normalObservedReply(String request,String module){
         int maximum=normalMaximumBytes();
         int timeout=normalTimeout();
-        if(Utf8.byteCount(request)>maximum)throw new CanonicalEvidenceException(HttpStatus.BAD_REQUEST,"NORMAL_OBSERVED_TOO_LARGE");
-        byte[] bytes=Utf8.bytes(request);
+        long length=Utf8.byteCount(request);
+        if(length>maximum)throw new CanonicalEvidenceException(HttpStatus.BAD_REQUEST,"NORMAL_OBSERVED_TOO_LARGE");
         HttpUrl base=normalBase(module);
         if(maximum<=0)
             throw new CanonicalEvidenceException(HttpStatus.SERVICE_UNAVAILABLE,"OER_EVIDENCE_CONFIG_INVALID");
+        RequestBody body=new RequestBody(){
+            @Override public MediaType contentType(){return MediaType.parse("application/json; charset=utf-8");}
+            @Override public long contentLength(){return length;}
+            @Override public void writeTo(okio.BufferedSink sink)throws IOException{
+                // Closing finishes a trailing unmatched surrogate, while the wrapper leaves OkHttp's sink open.
+                OutputStream output=new FilterOutputStream(sink.outputStream()){@Override public void close()throws IOException{flush();}};
+                try(Writer writer=new BufferedWriter(new OutputStreamWriter(output,StandardCharsets.UTF_8))){writer.write(request);}
+            }
+        };
         Request wire=new Request.Builder().url(base.newBuilder().addPathSegment("normal-observed").build()).tag(Integer.class,timeout)
-                .post(RequestBody.create(MediaType.parse("application/json; charset=utf-8"),bytes)).build();
-        return execute(wire,maximum).json();
+                .post(body).build();
+        return execute(wire,maximum);
     }
     /** Bounded source reads use the module process; callers send addresses, never a complete graph. */
     public String sourceRead(String request,String module,int maximumBytes){
@@ -53,9 +94,46 @@ public class CanonicalEvidenceBackend {
             throw new CanonicalEvidenceException(HttpStatus.BAD_REQUEST,"OER_SOURCE_READ_BUDGET_INVALID");
         int maximum=Math.min(maximumBytes,properties.getMaxSnapshotBytes());
         if(maximum<1024)throw new CanonicalEvidenceException(HttpStatus.SERVICE_UNAVAILABLE,"OER_EVIDENCE_CONFIG_INVALID");
+        Request.Builder wire=new Request.Builder().url(normalBase(module).newBuilder().addPathSegment("sources").addPathSegment("read").build());
+        try{
+            com.fasterxml.jackson.databind.JsonNode body=JsonUtils.mapper().reader().with(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_TRAILING_TOKENS).readTree(request);
+            if(body!=null&&module.equals(body.path("module").asText())&&java.util.Arrays.asList("vetting","advisory").contains(module)
+                    &&"prepare".equals(body.path("operation").asText())&&"semantic_units".equals(body.path("view").asText()))
+                wire.tag(Integer.class,normalTimeout());
+        }catch(IOException malformed){/* Invalid requests retain the ordinary transport budget. */}
+        return execute(wire.post(RequestBody.create(MediaType.parse("application/json; charset=utf-8"),Utf8.bytes(request))).build(),maximum).json();
+    }
+    /** One owned semantic scan; only a single bounded UTF-8 frame is retained by the transport. */
+    public void sourceReadStream(String request,String module,int maximumBytes,Consumer<String> frame){
+        if(request==null||Utf8.byteCount(request)>65536||maximumBytes<1024||maximumBytes>16*1024*1024||frame==null)
+            throw new CanonicalEvidenceException(HttpStatus.BAD_REQUEST,"OER_SOURCE_READ_BUDGET_INVALID");
+        int maximum=Math.min(maximumBytes,properties.getMaxSnapshotBytes());
+        if(maximum<1024)throw new CanonicalEvidenceException(HttpStatus.SERVICE_UNAVAILABLE,"OER_EVIDENCE_CONFIG_INVALID");
         Request wire=new Request.Builder().url(normalBase(module).newBuilder().addPathSegment("sources").addPathSegment("read").build())
+                .header("Accept","application/x-ndjson").tag(Integer.class,normalTimeout())
                 .post(RequestBody.create(MediaType.parse("application/json; charset=utf-8"),Utf8.bytes(request))).build();
-        return execute(wire,maximum).json();
+        executeStream(wire,maximum,frame);
+    }
+    protected void executeStream(Request request,int maximum,Consumer<String> frame){
+        int timeout=request.tag(Integer.class);
+        OkHttpClient client=new OkHttpClient.Builder().followRedirects(false).followSslRedirects(false).retryOnConnectionFailure(false)
+                .readTimeout(timeout,TimeUnit.MILLISECONDS).callTimeout(timeout,TimeUnit.MILLISECONDS).build();
+        Call call=client.newCall(request);if(Thread.currentThread().isInterrupted())call.cancel();
+        try(Response response=call.execute()){
+            String type=response.header("Content-Type","").split(";",2)[0].trim();
+            if(response.code()!=200||response.body()==null||!"application/x-ndjson".equalsIgnoreCase(type))
+                throw new CanonicalEvidenceException(HttpStatus.BAD_GATEWAY,"OER_SOURCE_STREAM_PROTOCOL_INVALID");
+            okio.BufferedSource input=response.body().source();
+            while(!input.exhausted()){
+                if(Thread.currentThread().isInterrupted())throw new InterruptedIOException("Source stream cancelled");
+                long newline=input.indexOf((byte)'\n',0,(long)maximum+1);
+                if(newline<0)throw new CanonicalEvidenceException(HttpStatus.BAD_GATEWAY,"OER_SOURCE_STREAM_FRAME_INVALID");
+                byte[] line=input.readByteArray(newline);input.skip(1);Reply.requireUtf8(line);
+                if(line.length==0)throw new CanonicalEvidenceException(HttpStatus.BAD_GATEWAY,"OER_SOURCE_STREAM_FRAME_INVALID");
+                frame.accept(new String(line,StandardCharsets.UTF_8));
+            }
+        }catch(IOException error){throw new CanonicalEvidenceException(HttpStatus.BAD_GATEWAY,"OER_EVIDENCE_UPSTREAM_UNAVAILABLE");}
+        finally{call.cancel();}
     }
     private int normalTimeout(){int timeout=properties.getNormalPublicationTimeoutMs();if(timeout<=0)throw new CanonicalEvidenceException(HttpStatus.SERVICE_UNAVAILABLE,"OER_EVIDENCE_CONFIG_INVALID");return timeout;}
     private HttpUrl normalBase(String module){
@@ -84,10 +162,7 @@ public class CanonicalEvidenceBackend {
                 ||evidence==null||!evidence.matches("[a-f0-9]{64}")||!java.util.Arrays.asList("vetting","advisory").contains(module)
                 ||asset!=null&&!asset.matches("source-render:[a-f0-9]{64}"))
             throw new CanonicalEvidenceException(HttpStatus.BAD_REQUEST,"CANONICAL_SOURCE_PAGE_ADDRESS_INVALID");
-        HttpUrl base=HttpUrl.parse(properties.getBaseUrl()==null?"":properties.getBaseUrl());
-        if(base==null||!base.username().isEmpty()||!base.password().isEmpty()||base.query()!=null||base.fragment()!=null
-                ||!base.encodedPath().equals("/")||properties.getTimeoutMs()<=0)
-            throw new CanonicalEvidenceException(HttpStatus.SERVICE_UNAVAILABLE,"OER_EVIDENCE_CONFIG_INVALID");
+        HttpUrl base=normalBase(module);
         HttpUrl.Builder url=base.newBuilder().addPathSegment("canonical").addPathSegment(projection).addPathSegment("sources")
                 .addPathSegment(source).addPathSegment("source-pages");
         if(asset!=null)url.addPathSegment(asset);
@@ -95,7 +170,7 @@ public class CanonicalEvidenceBackend {
         return request(url.build(),asset==null?properties.getMaxSnapshotBytes():properties.getMaxAssetBytes());
     }
     private Reply get(String projection,String source,String asset,Integer ordinal,boolean envelope,String module,int maximum){
-        HttpUrl base=HttpUrl.parse(properties.getBaseUrl()==null?"":properties.getBaseUrl());
+        HttpUrl base=module==null?HttpUrl.parse(properties.getBaseUrl()==null?"":properties.getBaseUrl()):normalBase(module);
         if(base==null||!base.username().isEmpty()||!base.password().isEmpty()||base.query()!=null||base.fragment()!=null
                 ||!base.encodedPath().equals("/")||maximum<=0||properties.getTimeoutMs()<=0)
             throw new CanonicalEvidenceException(HttpStatus.SERVICE_UNAVAILABLE,"OER_EVIDENCE_CONFIG_INVALID");
@@ -113,12 +188,19 @@ public class CanonicalEvidenceBackend {
         return execute(new Request.Builder().url(url).get().build(),maximum);
     }
     protected Reply execute(Request request,int maximum){
-        // Complete normal graphs and their sealed read-back share a budget; health and other reads keep their own.
+        // Complete normal graphs, their sealed read-back and cold semantic preparation share a budget.
         Integer normalTimeout=request.tag(Integer.class);int timeout=normalTimeout==null?properties.getTimeoutMs():normalTimeout;
         OkHttpClient client=new OkHttpClient.Builder().followRedirects(false).followSslRedirects(false).retryOnConnectionFailure(false)
                 .readTimeout(timeout,TimeUnit.MILLISECONDS)
                 .callTimeout(timeout,TimeUnit.MILLISECONDS).build();
         try(Response response=client.newCall(request).execute()){
+            if(response.code()==304){
+                String expected=request.header("If-None-Match");
+                if(expected==null||!expected.equals(response.header("ETag")))
+                    throw new CanonicalEvidenceException(HttpStatus.BAD_GATEWAY,"CANONICAL_CONDITIONAL_IDENTITY_MISMATCH");
+                return new Reply(new byte[0],response.header("Content-Type"),response.header("ETag"),response.header("X-Source-Sha256"),
+                        response.header("X-Projection-Sha256"),response.header("X-Source-Revision-Sha256"),response.header("X-Evidence-Identity-Sha256"),true);
+            }
             if(!response.isSuccessful()||response.body()==null)throw new CanonicalEvidenceException(HttpStatus.BAD_GATEWAY,"OER_EVIDENCE_UPSTREAM_UNAVAILABLE");
             return new Reply(readBody(response.body(),maximum),response.header("Content-Type"),response.header("ETag"),response.header("X-Source-Sha256"),response.header("X-Projection-Sha256"),
                     response.header("X-Source-Revision-Sha256"),response.header("X-Evidence-Identity-Sha256"));

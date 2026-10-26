@@ -8,9 +8,10 @@ from unittest.mock import patch
 
 from artifact_store import ArtifactStore
 from canonical_projection import CanonicalProjectionError, _bytes, _hash
-from native_pdf_canonical_projection import produce_native_pdf
+from native_pdf_canonical_projection import (produce_native_pdf, FONT_PROJECTION_VERSION,
+    FONT_TABLE_PROJECTION_VERSION, SL_FONT_PROJECTION_VERSION, SL_FONT_TABLE_PROJECTION_VERSION)
 from native_pdf_projection_transport import (MAX_SNAPSHOT_BYTES, STORAGE_SHAPE, VERSION,
-    hydrate_native_pdf_transport, publish_native_pdf_transport, validate_native_pdf_transport)
+    hydrate_native_pdf_transport, publish_native_pdf_transport, validate_native_pdf_transport, _part, FONT_TEXT_CHANNEL)
 from native_projection_transport import validate_native_transport
 from test_native_pdf_canonical_projection import fixture
 
@@ -71,6 +72,22 @@ class NativePdfProjectionTransportTest(unittest.TestCase):
         self.assertEqual('not_published_by_native_pdf_transport', self.public['visualReturnStatus'])
         self.assertEqual(self.internal['canonical']['relations'], self.public['canonical']['relations'])
         self.assertEqual(self.internal['captureCompleteness'], self.public['captureCompleteness'])
+
+    def test_font_text_recipes_keep_distinct_reader_channel_and_exact_cold_pointers(self):
+        original = self.internal['chunks'][0]['parts'][0]
+        descriptor = self.public['internalProjectionRef']['artifactDescriptor']
+        for version in (FONT_PROJECTION_VERSION, FONT_TABLE_PROJECTION_VERSION,
+                        SL_FONT_PROJECTION_VERSION, SL_FONT_TABLE_PROJECTION_VERSION):
+            with self.subTest(version=version):
+                declared = copy.deepcopy(self.internal)
+                declared['projectionIdentity']['projectionVersion'] = version
+                public = _part(original, declared, descriptor, '/chunks/0/parts/0')
+                self.assertEqual(FONT_TEXT_CHANNEL, public['textChannel'])
+                self.assertEqual(original['text'], public['text'])
+                self.assertEqual(original['nativeTextSpans'], self.resolve(public['nativeTextSpansRef']))
+                self.assertEqual(original, self.resolve(public['nativePdfRegionRef']))
+        legacy = _part(original, self.internal, descriptor, '/chunks/0/parts/0')
+        self.assertEqual('literal_native_glyphs_with_explicit_source_reviewed_separators', legacy['textChannel'])
 
     def test_public_identity_and_whole_unit_commitments_recompute(self):
         self.assertEqual(_hash({'projectionIdentity': self.public['projectionIdentity'], 'canonical': self.public['canonical']}),

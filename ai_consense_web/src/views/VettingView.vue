@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { vettingApi } from '@/api'
+import type { VettingParsedTextPage, VettingParsedTablesPage, VettingSourceReviewFile } from '@/api'
 import { ApiError } from '@/api/client'
-import type { Citation, EvidenceBundle, Finding, FindingWriteBinding, FindingEvidence, VettingFile, VettingJob, VettingProgress, VettingMetrics, VettingReportFormat, VettingSemanticTopic, VettingSourceRole, VettingChecklist, VettingChecklistItem } from '@/api/types'
+import type { Citation, DocumentScope, EvidenceBundle, Finding, FindingWriteBinding, FindingEvidence, VettingFile, VettingJob, VettingProgress, VettingMetrics, VettingReportFormat, VettingSemanticTopic, VettingSourceRole, VettingChecklist, VettingChecklistItem } from '@/api/types'
 import { useAppStore } from '@/stores/app'
 import { useLocalized } from '@/composables/useLocalized'
 import AppIcon from '@/components/AppIcon.vue'
@@ -15,6 +16,7 @@ import AdviceSourceReader from '@/components/AdviceSourceReader.vue'
 import { createReviewHandoff, newReviewHandoffToken, removeReviewHandoff, reviewHandoffCopy, storeReviewHandoff } from '@/advice/reviewHandoff'
 import { uploadVettingFiles, vettingUploadQueue } from '@/vetting/upload-queue'
 
+const DraftingPdfPreview = defineAsyncComponent(() => import('@/components/DraftingPdfPreview.vue').then(module => module.default))
 const { t } = useI18n()
 const store = useAppStore()
 const projectId = computed(() => store.activeProjectId)
@@ -22,7 +24,7 @@ const router = useRouter()
 const { pick, currentKey } = useLocalized()
 
 function reviewScopeStatus(topic: VettingSemanticTopic): string {
-  const known = ['failed', 'not_submitted', 'partial', 'observed_requests_decoded_scope_unknown']
+  const known = ['failed', 'not_submitted', 'partial', 'incomplete', 'observed_requests_decoded_scope_unknown']
   return topic.aggregateReviewStatus && known.includes(topic.aggregateReviewStatus) ? topic.aggregateReviewStatus : 'unknown'
 }
 
@@ -54,11 +56,12 @@ function readerJobMessage(value?: string | null): string {
   return key ? t(key) : value ?? ''
 }
 
-const files = ref<VettingFile[]>([])
+const files = ref<VettingSourceReviewFile[]>([])
 const findings = ref<Finding[]>([])
 const metrics = ref<VettingMetrics | null>(null)
 type ObservedJob = VettingJob & { sourceVerification?: 'NOT_CHECKED' }
 const job = ref<ObservedJob | null>(null)
+let preparedSourceListRun: string | null = null
 const starting = ref(false)
 const uploadQueue = computed(() => projectId.value ? vettingUploadQueue(projectId.value) : null)
 const uploading = computed(() => uploadQueue.value?.running ?? false)
@@ -118,11 +121,11 @@ async function pollSourceProgress() {
     if (disposed || epoch !== viewEpoch || id !== projectId.value || sequence !== sourceProgressSequence) return
     const finished = sourceProgress.value.some(previous => previous.parseStatus === 'PARSING'
       && rows.some(row => row.id === previous.id && row.parseStatus !== 'PARSING'))
-    if (finished) await reload()
+    if (finished && sourceRoleSaving.value === null) await reload()
     if (disposed || epoch !== viewEpoch || id !== projectId.value || sequence !== sourceProgressSequence) return
     sourceProgress.value = rows
     sourceProgressFailed.value = false
-    if (rows.some(row => row.parseStatus === 'PARSING') || uploading.value) {
+    if (rows.some(row => row.parseStatus === 'PARSING') || uploading.value || sourceRoleSaving.value !== null) {
       sourceProgressTimer = window.setTimeout(() => { void pollSourceProgress() }, 3000)
     }
   } catch {
@@ -159,6 +162,8 @@ const versionCopy = {
 const exporting = ref(false)
 const pollingPaused = ref(false)
 const reportFormat = ref<VettingReportFormat>('pdf')
+const uploadScope = ref<DocumentScope>('auto')
+let selectedUploadScope: DocumentScope = 'auto'
 const sourceRoleSaving = ref<string | null>(null)
 const sourceRoleDrafts = ref<Record<string, string>>({})
 const sourceIdentityConfirmations = ref<Record<string, boolean>>({})
@@ -196,6 +201,23 @@ const selectedCode = ref<string | null>(null)
 const drawerOpen = ref(false)
 const evidence = ref<EvidenceBundle | null>(null)
 const sourceCitation = ref<Citation | null>(null)
+const parsedTextFile = ref<VettingSourceReviewFile | null>(null)
+const parsedTextResult = ref<VettingParsedTextPage | null>(null)
+const parsedTextPage = ref(1), parsedTextLoading = ref(false), parsedTextError = ref('')
+const parsedTextIsPart = computed(() => parsedTextResult.value?.pageNumberAuthority === 'unpaginated_saved_text'
+  || !!(parsedTextFile.value && !parsedTextFile.value.fileName.toLowerCase().endsWith('.pdf') && !parsedTextFile.value.pageCount))
+const parsedTablesResult = ref<VettingParsedTablesPage | null>(null)
+const parsedTablesLoading = ref(false), parsedTablesError = ref('')
+const parsedTableRows = computed(() => parsedTablesResult.value?.tables.map(table => {
+  const rows: Array<typeof table.cells> = Array.from({ length: table.rowCount }, () => [])
+  for (const cell of table.cells) rows[cell.row]!.push(cell)
+  for (const row of rows) row.sort((a, b) => a.col - b.col)
+  return { ...table, rows }
+}) ?? [])
+const sourceOriginalPreview = ref<{ file: VettingSourceReviewFile; source: string; page: number } | null>(null)
+const sourceOriginalPanel = ref<HTMLElement | null>(null), parsedTextPanel = ref<HTMLElement | null>(null), sourceSetPanel = ref<HTMLElement | null>(null)
+let parsedTextSequence = 0
+const sourceReaderCopy = (en: string, hans: string, hant: string) => (store.locale ?? 'en').startsWith('en') ? en : store.locale === 'zh-Hant' ? hant : hans
 
 const GROUPS = ['reference', 'conflict', 'language', 'risk', 'gap', 'substantive', 'requirement'] as const
 
@@ -263,10 +285,14 @@ function sourcePurposeLabel(file: VettingFile) {
   return pick(file.role)
 }
 function sourceRoleVersion(file: VettingFile) {
-  return [file.documentId, file.originalSourceSha256, file.sourceHash, file.routingSha256].join('|')
+  return [file.documentId, file.originalSourceSha256, file.sourceHash, file.businessContentSha256, file.routingSha256].join('|')
 }
 function isPendingSourceIdentity(file: VettingFile) {
-  return (file.parseStatus ?? file.status) === 'IDENTITY_PENDING'
+  return ['IDENTITY_PENDING', 'FAILED'].includes(file.parseStatus ?? file.status)
+}
+function sourceRoleChoice(file: VettingFile) {
+  return (file.parseStatus ?? file.status) === 'FAILED' && SOURCE_ROLES.includes(file.sourceRole as VettingSourceRole)
+    ? file.sourceRole : sourceRoleDrafts.value[sourceRoleVersion(file)]
 }
 function canConfirmSourceRole(file: VettingFile) {
   return (isPendingSourceIdentity(file)
@@ -274,14 +300,192 @@ function canConfirmSourceRole(file: VettingFile) {
     : file.roleConfirmationAvailable === true && file.sourceRole === 'unknown')
     && (!file.exclusionReason || file.exclusionReason === 'source_identity_unresolved')
     && !['drawing', 'pricing', 'works_pss', 'example'].includes(file.documentScope ?? '')
-    && ['PARSED', 'PARTIAL', 'IDENTITY_PENDING'].includes(file.parseStatus ?? file.status) && /^\d+$/.test(file.documentId ?? '')
-    && [file.originalSourceSha256, file.sourceHash, file.routingSha256].every(value => /^[a-f0-9]{64}$/.test(value ?? ''))
+    && ['PARSED', 'PARTIAL', 'IDENTITY_PENDING', 'FAILED'].includes(file.parseStatus ?? file.status) && /^\d+$/.test(file.documentId ?? '')
+    && [file.originalSourceSha256, file.routingSha256].every(value => /^[a-f0-9]{64}$/.test(value ?? ''))
+    && (isPendingSourceIdentity(file) ? /^[a-f0-9]{64}$/.test(file.sourceHash ?? '')
+      : [file.sourceHash, file.businessContentSha256].some(value => /^[a-f0-9]{64}$/.test(value ?? '')))
 }
 function sourceFileOriginalUrl(file: VettingFile) {
   if (!projectId.value || !/^\d+$/.test(file.documentId ?? '') || !file.documentId || !file.originalSourceSha256 || !file.sourceHash || !file.sourceRole
     || ![file.originalSourceSha256, file.sourceHash].every(value => /^[a-f0-9]{64}$/.test(value))
     || !['unknown', ...SOURCE_ROLES].includes(file.sourceRole ?? '')) return null
   return `/api/vetting/${encodeURIComponent(projectId.value)}/sources/${encodeURIComponent(file.documentId)}/original?${new URLSearchParams({ sourceHash: file.sourceHash, originalSourceSha256: file.originalSourceSha256, sourceRole: file.sourceRole })}`
+}
+function sourceReaderAvailable(file: VettingFile) {
+  return ['PARSED', 'PARTIAL', 'IDENTITY_PENDING'].includes(file.parseStatus ?? file.status)
+    && (!file.exclusionReason || file.exclusionReason === 'source_identity_unresolved')
+    && !['drawing', 'pricing', 'works_pss', 'example'].includes(file.documentScope ?? '')
+}
+function sourceReaderPins(file: VettingSourceReviewFile) {
+  if (!/^\d+$/.test(file.documentId ?? '') || ![file.originalSourceSha256, file.routingSha256, file.businessContentSha256].every(value => /^[a-f0-9]{64}$/.test(value ?? ''))) return null
+  return { originalSourceSha256: file.originalSourceSha256!, routingSha256: file.routingSha256!, businessContentSha256: file.businessContentSha256! }
+}
+function sourceReaderVersion(file: VettingSourceReviewFile) {
+  return [file.documentId, file.fileName, file.parseStatus ?? file.status, file.originalSourceSha256, file.routingSha256, file.businessContentSha256, file.sourceHash].join('|')
+}
+function sourceStampedOriginalUrl(file: VettingSourceReviewFile) {
+  const pins = sourceReaderPins(file)
+  return projectId.value && pins ? `/api/vetting/${encodeURIComponent(projectId.value)}/sources/${encodeURIComponent(file.documentId!)}/reader-original?${new URLSearchParams(pins)}` : null
+}
+function sourceRegisteredOriginalUrl(file: VettingSourceReviewFile) {
+  if (!projectId.value || !/^\d+$/.test(file.documentId ?? '') || file.businessContentSha256 || file.exclusionReason
+    || !SOURCE_ROLES.includes(file.sourceRole as typeof SOURCE_ROLES[number])
+    || ![file.originalSourceSha256, file.routingSha256].every(value => /^[a-f0-9]{64}$/.test(value ?? ''))) return null
+  return `/api/vetting/${encodeURIComponent(projectId.value)}/sources/${encodeURIComponent(file.documentId!)}/registered-original?${new URLSearchParams({ originalSourceSha256: file.originalSourceSha256!, routingSha256: file.routingSha256! })}`
+}
+function sourceReaderOriginalUrl(file: VettingSourceReviewFile, page = 1) {
+  if (!projectId.value || !sourceReaderAvailable(file) && (file.parseStatus ?? file.status) !== 'FAILED') return null
+  if ((file.exclusionReason && file.exclusionReason !== 'source_identity_unresolved')
+    || ['drawing', 'pricing', 'works_pss', 'example'].includes(file.documentScope ?? '')) return null
+  const base = sourceStampedOriginalUrl(file) ?? sourceFileOriginalUrl(file) ?? sourceRegisteredOriginalUrl(file)
+  return base && file.fileName.toLowerCase().endsWith('.pdf') ? `${base}#page=${page}` : base
+}
+function sourceFileDownloadUrl(file: VettingSourceReviewFile) {
+  if ((file.parseStatus ?? file.status) === 'EXCLUDED' && file.key === 'DRAWING'
+    && ['drawing_outside_scope', 'source_not_eligible_for_vetting'].includes(file.exclusionReason ?? '')) return sourceFileOriginalUrl(file)
+  if ((file.exclusionReason && file.exclusionReason !== 'source_identity_unresolved')
+    || ['drawing', 'pricing', 'works_pss', 'example'].includes(file.documentScope ?? '')) return null
+  if (['PARSING', 'FAILED'].includes(file.parseStatus ?? file.status)) return sourceStampedOriginalUrl(file) ?? sourceFileOriginalUrl(file) ?? sourceRegisteredOriginalUrl(file)
+  return sourceReaderOriginalUrl(file) ?? sourceFileOriginalUrl(file) ?? sourceRegisteredOriginalUrl(file)
+}
+function closeSourceOriginalPreview() {
+  sourceOriginalPreview.value = null
+  void nextTick(() => { if (parsedTextFile.value && !sourceOriginalPreview.value) parsedTextPanel.value?.focus?.() })
+}
+async function openSourceSet() {
+  const id = projectId.value, epoch = viewEpoch
+  closeSourceOriginalPreview(); closeParsedText(); sourceOpen.value = false
+  if (reviewActive.value) {
+    try { await reload() } catch { sourceRoleFeedback.value = t('vetting.sourcePurpose.refreshFailed') }
+    if (disposed || epoch !== viewEpoch || id !== projectId.value) return
+  }
+  sourceOpen.value = true
+  void nextTick(() => sourceSetPanel.value?.focus?.())
+}
+function openSourceOriginalPreview(file: VettingSourceReviewFile, page = 1) {
+  const current = files.value.find(row => row.documentId === file.documentId)
+  if (!current || sourceReaderVersion(current) !== sourceReaderVersion(file) || !current.fileName.toLowerCase().endsWith('.pdf')
+    || !Number.isInteger(page) || page < 1 || page > 100000 || current.pageCount > 0 && page > current.pageCount) return
+  const source = sourceReaderOriginalUrl(current)
+  if (!source) return
+  sourceOpen.value = false
+  sourceOriginalPreview.value = { file: { ...current }, source: source.replace(/#page=\d+$/, ''), page }
+  void nextTick(() => sourceOriginalPanel.value?.focus?.())
+}
+watch(() => files.value.map(file => [sourceReaderVersion(file), sourceReaderAvailable(file)]), () => {
+  const textFile = parsedTextFile.value
+  if (textFile) {
+    const currentTextFile = files.value.find(file => file.documentId === textFile.documentId)
+    if (!currentTextFile || !sourceReaderAvailable(currentTextFile) || sourceReaderVersion(currentTextFile) !== sourceReaderVersion(textFile)) closeParsedText()
+  }
+  const opened = sourceOriginalPreview.value
+  if (!opened) return
+  const current = files.value.find(file => file.documentId === opened.file.documentId)
+  if (!current || !sourceReaderAvailable(current) || sourceReaderVersion(current) !== sourceReaderVersion(opened.file)) closeSourceOriginalPreview()
+})
+function closeParsedText() {
+  ++parsedTextSequence; parsedTextFile.value = null; parsedTextResult.value = null; parsedTextError.value = ''; parsedTextLoading.value = false
+  parsedTablesResult.value = null; parsedTablesError.value = ''; parsedTablesLoading.value = false
+}
+function validSavedTables(result: VettingParsedTablesPage, page: number) {
+  if (!result || !['saved_tables', 'no_saved_tables', 'unavailable', 'not_supported'].includes(result.tableStatus)
+    || result.semanticQuality !== 'unknown' || result.canonicalAdoption !== 'not_performed'
+    || !Array.isArray(result.tables) || result.tables.length > 10
+    || (result.tableStatus === 'saved_tables') !== (result.tables.length > 0)) return false
+  let textLength = 0
+  for (const table of result.tables) {
+    if (!table || typeof table.method !== 'string' || table.physicalPage !== page || table.continuationStatus !== 'unknown'
+      || !Number.isInteger(table.rowCount) || table.rowCount < 1 || table.rowCount > 100
+      || !Number.isInteger(table.colCount) || table.colCount < 1 || table.colCount > 30
+      || !Array.isArray(table.cells) || !table.cells.length || table.cells.length > 2000) return false
+    const covered = new Set<number>()
+    for (const cell of table.cells) {
+      if (!cell || ![cell.row, cell.col, cell.rowSpan, cell.colSpan].every(Number.isInteger)
+        || cell.row < 0 || cell.col < 0 || cell.rowSpan < 1 || cell.colSpan < 1
+        || cell.row + cell.rowSpan > table.rowCount || cell.col + cell.colSpan > table.colCount || typeof cell.text !== 'string') return false
+      textLength += cell.text.length
+      if (textLength > 200000) return false
+      for (let row = cell.row; row < cell.row + cell.rowSpan; row++) for (let col = cell.col; col < cell.col + cell.colSpan; col++) {
+        const slot = row * table.colCount + col
+        if (covered.has(slot)) return false
+        covered.add(slot)
+      }
+    }
+    if (covered.size !== table.rowCount * table.colCount) return false
+  }
+  return true
+}
+function savedTableMethodLabel(method: string) {
+  return method === 'pdfplumber_lines_lines'
+    ? sourceReaderCopy('Native cell grid', '原生单元格网格', '原生儲存格網格')
+    : sourceReaderCopy('Saved cell grid', '保存的单元格网格', '已存的儲存格網格')
+}
+async function loadParsedText() {
+  const file = parsedTextFile.value, id = projectId.value, epoch = viewEpoch, sequence = ++parsedTextSequence
+  if (!file || !id) return
+  const knownPartCount = parsedTextResult.value?.textPartCount
+  parsedTextResult.value = null; parsedTextError.value = ''; parsedTextLoading.value = false
+  parsedTablesResult.value = null; parsedTablesError.value = ''; parsedTablesLoading.value = false
+  const pins = sourceReaderPins(file), page = parsedTextPage.value
+  if (!pins) { parsedTextError.value = sourceReaderCopy('No trusted saved-text revision is available. Refresh the sources; no parsing or repair has been started.', '没有可核验的保存文字版本，请刷新来源；未启动解析或修复。', '沒有可核驗的已存文字版本，請重新整理來源；未啟動解析或修復。'); return }
+  if (!Number.isInteger(page) || page < 1 || page > 100000 || !!knownPartCount && page > knownPartCount) {
+    parsedTextError.value = parsedTextIsPart.value
+      ? sourceReaderCopy('Choose a valid text part.', '请选择有效文字段号。', '請選擇有效文字段號。')
+      : sourceReaderCopy('Choose a valid physical page.', '请选择有效物理页。', '請選擇有效實體頁。')
+    return
+  }
+  if (!parsedTextIsPart.value) { parsedTablesLoading.value = true
+  void (async () => {
+    try {
+      const result = await vettingApi.parsedTables(id, file.documentId!, pins, page)
+      if (disposed || epoch !== viewEpoch || id !== projectId.value || sequence !== parsedTextSequence) return
+      const current = files.value.find(row => row.documentId === file.documentId)
+      if (!current || sourceReaderVersion(current) !== sourceReaderVersion(file) || !result
+        || result.documentId !== file.documentId || result.physicalPage !== page
+        || result.originalSourceSha256 !== pins.originalSourceSha256 || result.routingSha256 !== pins.routingSha256 || result.businessContentSha256 !== pins.businessContentSha256
+        || !validSavedTables(result, page)) throw new Error('SOURCE_READER_CHANGED')
+      parsedTablesResult.value = result
+    } catch {
+      if (!disposed && epoch === viewEpoch && id === projectId.value && sequence === parsedTextSequence)
+        parsedTablesError.value = sourceReaderCopy('Saved table observations are unavailable, outside the reading limit, or their source changed. Compare the registered original.', '保存的表格观察不可用、超出阅读预算或来源已变化。请核对登记原件。', '已存的表格觀察不可用、超出閱讀預算或來源已變更。請核對登記原檔。')
+    } finally { if (sequence === parsedTextSequence) parsedTablesLoading.value = false }
+  })() }
+  parsedTextLoading.value = true
+  try {
+    const result = await vettingApi.parsedText(id, file.documentId!, pins, page)
+    if (disposed || epoch !== viewEpoch || id !== projectId.value || sequence !== parsedTextSequence) return
+    const current = files.value.find(row => row.documentId === file.documentId)
+    const isPart = result.pageNumberAuthority === 'unpaginated_saved_text'
+    if (!current || sourceReaderVersion(current) !== sourceReaderVersion(file)
+      || result.documentId !== file.documentId || result.fileName !== file.fileName || result.parseStatus !== (file.parseStatus ?? file.status)
+      || result.originalSourceSha256 !== pins.originalSourceSha256 || result.routingSha256 !== pins.routingSha256 || result.businessContentSha256 !== pins.businessContentSha256
+      || (isPart ? result.physicalPage !== null || result.pageCount !== 0 || result.textPart !== page || !Number.isInteger(result.textPartCount)
+        || (result.textPartCount ?? 0) < page || (result.textPartCount ?? 0) > 100000
+        : result.physicalPage !== page || result.textPart !== undefined || result.textPartCount !== undefined)
+      || !Number.isInteger(result.pageCount) || result.pageCount < 0 || !/^[a-f0-9]{64}$/.test(result.textContentSha256)
+      || !['saved_text', 'no_saved_text', 'detailed_parsing_not_started'].includes(result.status)
+      || (result.parseStatus === 'IDENTITY_PENDING') !== (result.status === 'detailed_parsing_not_started')
+      || !['saved_parser_physical_page_markers', 'unpaginated_saved_text'].includes(result.pageNumberAuthority)
+      || typeof result.text !== 'string' || result.text.length > 65536 || result.status !== 'saved_text' && result.text !== ''
+      || result.semanticQuality !== 'unknown' || result.canonicalAdoption !== 'not_performed') throw new Error('SOURCE_READER_CHANGED')
+    parsedTextResult.value = result
+  } catch {
+    if (!disposed && epoch === viewEpoch && id === projectId.value && sequence === parsedTextSequence)
+      parsedTextError.value = sourceReaderCopy('The saved text is unavailable, outside the reading limit, or its source changed. Refresh the sources and compare the registered original.', '保存文字不可用、超出阅读预算或来源已变化。请刷新来源，并核对登记原件。', '已存文字不可用、超出閱讀預算或來源已變更。請重新整理來源，並核對登記原檔。')
+  } finally { if (sequence === parsedTextSequence) parsedTextLoading.value = false }
+}
+function moveParsedTextPart(direction: -1 | 1) {
+  const current = parsedTextResult.value
+  if (!current || !parsedTextIsPart.value || !current.textPartCount || !current.textPart) return
+  const next = current.textPart + direction
+  if (next < 1 || next > current.textPartCount) return
+  parsedTextPage.value = next; void loadParsedText()
+}
+function openParsedText(file: VettingSourceReviewFile) {
+  if (!sourceReaderAvailable(file) || !sourceReaderPins(file)) return
+  sourceOpen.value = false; closeSourceOriginalPreview()
+  closeParsedText(); parsedTextFile.value = { ...file }; parsedTextPage.value = 1; void loadParsedText()
+  void nextTick(() => parsedTextPanel.value?.focus?.())
 }
 async function refreshSources() {
   if (sourceRoleSaving.value !== null || uploading.value) return
@@ -300,20 +504,24 @@ async function refreshSources() {
 }
 async function confirmSourceRole(file: VettingFile) {
   const version = sourceRoleVersion(file)
-  const chosen = SOURCE_ROLES.find(role => role === sourceRoleDrafts.value[version])
+  const chosen = SOURCE_ROLES.find(role => role === sourceRoleChoice(file))
   const resumeParsing = isPendingSourceIdentity(file)
   if (sourceRoleBlocked.value || !canConfirmSourceRole(file) || !chosen || !file.documentId
     || (resumeParsing && sourceIdentityConfirmations.value[version] !== true)
-    || !file.originalSourceSha256 || !file.sourceHash || !file.routingSha256) return
+    || !file.originalSourceSha256 || !file.routingSha256) return
   const id = projectId.value, epoch = viewEpoch, documentId = file.documentId
+  const legacy = /^[a-f0-9]{64}$/.test(file.sourceHash ?? '')
   const binding = { sourceRole: chosen, expectedOriginalSourceSha256: file.originalSourceSha256,
-    expectedSourceHash: file.sourceHash, expectedRoutingSha256: file.routingSha256,
+    ...(legacy ? { expectedSourceHash: file.sourceHash! } : { expectedBusinessContentSha256: file.businessContentSha256! }),
+    expectedRoutingSha256: file.routingSha256,
     ...(resumeParsing ? { confirmTextContractMaterial: true } : {}) }
   sourceRoleSaving.value = documentId
   sourceRoleFeedback.value = ''
   let saved = false
   try {
-    const updated = await vettingApi.confirmSourceRole(id, documentId, binding)
+    const operation = vettingApi.confirmSourceRole(id, documentId, binding)
+    if (resumeParsing) void pollSourceProgress()
+    const updated = await operation
     if (disposed || epoch !== viewEpoch || id !== projectId.value) return
     // A successful mutation invalidates the displayed report until a current source check says otherwise.
     if (job.value) job.value = { ...job.value, sourceSetStale: true }
@@ -323,7 +531,7 @@ async function confirmSourceRole(file: VettingFile) {
       || updated.originalSourceSha256 !== binding.expectedOriginalSourceSha256
       || (resumeParsing ? !/^[a-f0-9]{64}$/.test(updated.sourceHash ?? '') || !/^[a-f0-9]{64}$/.test(updated.routingSha256 ?? '')
         || !['PARSING', 'PARSED', 'PARTIAL', 'FAILED', 'PARSE_FAILED'].includes(updated.parseStatus ?? updated.status)
-        : updated.sourceHash !== binding.expectedSourceHash)) {
+        : legacy ? updated.sourceHash !== file.sourceHash : updated.businessContentSha256 !== file.businessContentSha256)) {
       sourceRoleFeedback.value = t('vetting.sourcePurpose.changed')
       sourceRoleNeedsRefresh.value = true
       return
@@ -361,6 +569,9 @@ function isExcludedDrawing(file: VettingFile) {
 const excludedDrawings = computed(() => files.value.filter(isExcludedDrawing))
 const sourceWarnings = computed(() => files.value.filter((file) => !isExcludedDrawing(file) && (!file.parsed || file.warnings?.length)))
 const pendingListFindings = computed(() => findings.value.filter((finding) => finding.status?.toUpperCase() !== 'HANDLED').length)
+const pendingReviewTopics = computed(() => coverage.value?.semanticTopics?.filter(topic => topic.aggregateReviewStatus !== 'complete' || topic.semanticScopeVerified !== true).length ?? 0)
+const failedReviewTopics = computed(() => coverage.value?.semanticTopics?.filter(topic => reviewScopeStatus(topic) === 'failed').length ?? 0)
+const hasBoundedFirstPass = computed(() => coverage.value?.semanticTopics?.some(topic => topic.reviewCoverageScope === 'bounded_first_pass_origins_pending') ?? false)
 const hasCoverageLimits = computed(() => !!coverage.value?.warnings?.length || !!sourceWarnings.value.length
   || (!!coverage.value && coverage.value.reviewedDocuments < coverage.value.totalDocuments))
 const evidenceItems = computed<FindingEvidence[]>(() => {
@@ -370,7 +581,7 @@ const evidenceItems = computed<FindingEvidence[]>(() => {
       fileKey: item.fileKey ?? item.code, fileName: item.fileName ?? '',
       clauseId: item.clauseId,
       pageNo: item.pageNo, anchor: item.anchor, quote: item.quote ?? item.text,
-      located: item.located ?? evidence.value!.located, sourceHash: item.sourceHash, originalSourceSha256: item.originalSourceSha256, sourceRole: item.sourceRole, nativePositions: item.nativePositions, bbox: item.bbox,
+      located: item.located ?? evidence.value!.located, sourceHash: item.sourceHash, originalSourceSha256: item.originalSourceSha256, businessContentSha256: item.businessContentSha256, sourceRole: item.sourceRole, nativePositions: item.nativePositions, bbox: item.bbox,
       packetId: item.packetId, packetSourceSnapshotSha256: item.packetSourceSnapshotSha256,
       canonicalEvidence: item.canonicalEvidence, fixedBaselineEvidence: item.fixedBaselineEvidence
     }))
@@ -470,13 +681,13 @@ async function reload(owner?: { sequence: number; runId: string }) {
   const id = projectId.value
   const epoch = viewEpoch
   const seq = ++reloadSequence
-  if (!id) return
+  if (!id) return false
   loading.value = true
   try {
     const [fileList, findingList, metricData] = await Promise.all([
       vettingApi.files(id), vettingApi.findings(id, { ...filters.value }), vettingApi.metrics(id)
     ])
-    if (disposed || epoch !== viewEpoch || seq !== reloadSequence || id !== projectId.value || (owner && !ownsJob(id, epoch, owner.sequence, owner.runId))) return
+    if (disposed || epoch !== viewEpoch || seq !== reloadSequence || id !== projectId.value || (owner && !ownsJob(id, epoch, owner.sequence, owner.runId))) return false
     files.value = fileList
     findings.value = findingList
     metrics.value = metricData
@@ -493,6 +704,7 @@ async function reload(owner?: { sequence: number; runId: string }) {
         }
       }
     }
+    return true
   } finally {
     if (seq === reloadSequence && epoch === viewEpoch) loading.value = false
   }
@@ -538,6 +750,7 @@ async function acceptJob(value: VettingJob, id: string, epoch: number, sequence:
       const message = value.error || value.message || t('vetting.job.failed')
       // Known technical failures already have one reader-facing alert on this page.
       if (!jobFailureMessageKey(message)) store.notify(readerJobMessage(message), 6000)
+      try { await reload({ sequence, runId: value.id }) } catch { /* The visible refresh control remains available. */ }
     }
   }
 }
@@ -555,11 +768,18 @@ async function acceptProgress(value: VettingProgress, id: string, epoch: number,
   }
   pollingPaused.value = false
   if (isActiveJob(value)) {
+    if (!['queued', 'preparing', 'recovering'].includes(value.phase) && preparedSourceListRun !== value.id) {
+      try {
+        if (await reload({ sequence, runId: value.id }) && ownsJob(id, epoch, sequence, value.id) && readSequence === jobReadSequence)
+          preparedSourceListRun = value.id
+      } catch { /* Retry on the next progress read. */ }
+    }
+    if (!ownsJob(id, epoch, sequence, value.id) || readSequence !== jobReadSequence) return
     schedulePoll(id, value.id, epoch, sequence)
     return
   }
   stopPolling()
-  const detail = await vettingApi.getRun(id, value.id)
+  const detail = await vettingApi.getRunDisplay(id, value.id)
   if (!ownsJob(id, epoch, sequence, value.id) || readSequence !== jobReadSequence) return
   if (detail.id !== value.id) throw new Error('Vetting detail belongs to another run')
   await acceptJob(detail, id, epoch, sequence, notifyCompletion)
@@ -620,12 +840,15 @@ watch(() => [projectId.value, uploading.value] as const, ([id, active], [previou
   if (id === previousId && wasActive && !active) void reload().then(() => restoreJob()).catch(() => undefined)
 })
 watch(projectId, () => {
+  closeSourceOriginalPreview()
+  closeParsedText()
   viewEpoch++
   jobSequence++
   evidenceSequence++
   stopPolling()
   if (searchTimer) window.clearTimeout(searchTimer)
   job.value = null
+  preparedSourceListRun = null
   files.value = []
   sourceRoleSaving.value = null
   sourceRoleDrafts.value = {}
@@ -667,6 +890,8 @@ watch(projectId, () => {
 })
 
 onBeforeUnmount(() => {
+  closeSourceOriginalPreview()
+  closeParsedText()
   disposed = true
   if (sourceProgressTimer) window.clearTimeout(sourceProgressTimer)
   viewEpoch++
@@ -871,6 +1096,12 @@ async function runVetting() {
     if (!ownsJob(id, epoch, sequence)) return
     await acceptJob(value, id, epoch, sequence, true)
     if (!ownsJob(id, epoch, sequence, value.id)) return
+    if (isActiveJob(value)) {
+      try {
+        const currentFiles = await vettingApi.files(id)
+        if (ownsJob(id, epoch, sequence, value.id)) files.value = currentFiles
+      } catch { /* A later progress read retries the source-list refresh. */ }
+    }
   } finally {
     if (ownsJob(id, epoch, sequence)) starting.value = false
   }
@@ -879,6 +1110,10 @@ async function runVetting() {
 async function refreshUploadStatus() {
   await pollSourceProgress()
   try { await reload() } catch { store.notify(t('vetting.uploadProgress.refreshFailed')) }
+}
+function chooseUploadFiles() {
+  selectedUploadScope = uploadScope.value
+  packageInput.value?.click()
 }
 async function uploadPackage(event: Event) {
   const selected = Array.from((event.target as HTMLInputElement).files ?? [])
@@ -893,7 +1128,7 @@ async function uploadPackage(event: Event) {
   store.setBusy(t('vetting.uploadProgress.title'))
   ;(event.target as HTMLInputElement).value = ''
   try {
-    const operation = uploadVettingFiles(id, selected)
+    const operation = uploadVettingFiles(id, selected, selectedUploadScope)
     void pollSourceProgress()
     await operation
   } finally {
@@ -1013,12 +1248,19 @@ function tagClass(group: string) {
         <p>{{ t('vetting.subtitle') }}</p>
       </div>
       <div class="row">
-        <button class="btn" type="button" @click="sourceOpen = true">
+        <button class="btn" type="button" @click="openSourceSet">
           <AppIcon name="layers" :size="15" />{{ t('vetting.actions.source') }}
         </button>
+        <label class="upload-role">{{ t('vetting.documentScope.uploadBatchLabel') }}
+          <select v-model="uploadScope" data-upload-scope :disabled="running || sourceRoleSaving !== null || uploading || hasUnsavedReview || reviewSaving || checklistDirty || checklistSaving !== null">
+            <option value="auto">{{ t('vetting.documentScope.auto') }}</option>
+            <option value="package">{{ t('vetting.documentScope.package') }}</option>
+            <option value="drawing">{{ t('vetting.documentScope.drawing') }}</option>
+          </select>
+        </label>
         <input ref="packageInput" type="file" multiple class="hidden"
                accept=".pdf,.doc,.docx,.txt,.md,.msg,.eml,.emlx" @change="uploadPackage" />
-        <button class="btn" type="button" :disabled="running || sourceRoleSaving !== null || uploading || hasUnsavedReview || reviewSaving || checklistDirty || checklistSaving !== null" @click="packageInput?.click()">
+        <button class="btn" type="button" :disabled="running || sourceRoleSaving !== null || uploading || hasUnsavedReview || reviewSaving || checklistDirty || checklistSaving !== null" @click="chooseUploadFiles">
           <AppIcon name="upload" :size="15" />{{ t('vetting.actions.upload') }}
         </button>
         <button class="btn primary" type="button" :disabled="running || sourceRoleSaving !== null || uploading || reviewSaving || statusSaving || hasUnsavedReview || checklistDirty || checklistSaving !== null || !files.some(file => file.parsed)" @click="runVetting">
@@ -1037,6 +1279,54 @@ function tagClass(group: string) {
     </div>
 
     <p class="small" data-generated-output-language>{{ t('common.generatedOutputLanguage') }}</p>
+    <p class="small muted" data-sl-reference-scope>{{ sourceReaderCopy('SL reference retrieval uses the project editions saved in “SL editions and library” above; project adoption remains unconfirmed.', 'SL 参考检索使用顶部“SL 版本与资料库”中本项目已保存的版本；项目采用状态仍待确认。', 'SL 參考檢索使用頂部「SL 版本與資料庫」中本項目已儲存的版本；項目採用狀態仍待確認。') }}</p>
+
+    <div v-if="job || pollingPaused" class="surface section-gap vetting-run-panel" aria-live="polite">
+      <div class="surface-body">
+        <div class="row">
+          <strong>{{ t('vetting.job.title') }}</strong>
+          <span v-if="job" class="tag" :class="job.status === 'FAILED' ? 'danger' : 'info'">
+            {{ t(`vetting.job.status.${job.status}`) }}
+          </span>
+          <span v-if="job?.totalUnits" class="mono muted small">{{ t('vetting.job.progressLabel') }}: {{ job.completedUnits }} / {{ job.totalUnits }}</span>
+          <span class="spacer" />
+          <button v-if="pollingPaused" class="btn" type="button" @click="retryPolling">
+            <AppIcon name="refresh" :size="14" />{{ t('vetting.job.resume') }}
+          </button>
+        </div>
+        <p v-if="job?.status === 'COMPLETED' && !jobDetailsPending" class="warning-note">{{ t('vetting.job.executionCompleteNote') }}</p>
+        <div v-if="job?.status === 'COMPLETED' && !jobDetailsPending" class="small">
+          <p v-if="coverage">{{ t('vetting.job.documentSummary', { reviewed: coverage.reviewedDocuments, total: coverage.totalDocuments }) }}</p>
+          <p>{{ t('vetting.job.findingSummary', { total: metrics?.total ?? job.result?.total ?? t('vetting.coverage.unknownCount'), listed: findings.length, pending: pendingListFindings }) }}</p>
+        </div>
+        <p v-if="running && job?.status !== 'FAILED' && job?.message" class="small">{{ readerJobMessage(job.message) }}</p>
+        <template v-if="job?.status === 'FAILED'">
+          <p v-for="message in jobFailureMessages" :key="message" class="run-error" role="alert">{{ message }}</p>
+        </template>
+        <p v-if="job?.recoveryStatus === 'NEEDS_RERUN'" class="warning-note">{{ t('vetting.recovery.NEEDS_RERUN') }}</p>
+        <p v-if="job" class="muted small">{{ recordedJobModel ? `${t('llm.recordedModel')}: ${recordedJobModel}` : t('llm.identityUnknown') }}</p>
+        <details v-if="job" class="small section-gap">
+          <summary>{{ t('vetting.job.executionDetails') }}</summary>
+          <p v-if="!running && job.status !== 'FAILED' && job.message">{{ job.message }}</p>
+          <template v-if="job.status === 'FAILED'">
+            <h5>{{ t('vetting.job.rawFailureRecord') }}</h5>
+            <pre v-if="job.message">{{ job.message }}</pre>
+            <pre v-if="job.error && job.error !== job.message">{{ job.error }}</pre>
+          </template>
+          <p v-if="job.recoveryStatus">{{ t(`vetting.recovery.${job.recoveryStatus}`) }}</p>
+          <p v-if="jobModelIdentity" class="muted">{{ jobModelIdentity.profileId }} · {{ jobModelIdentity.provider }}</p>
+          <p v-if="jobModelIdentity" class="muted">{{ t('llm.identityNote') }}</p>
+          <details v-if="job.reliablePackets?.length"><summary>{{ t('vetting.recovery.reliablePackets') }} · {{ job.reliablePackets.length }}</summary>
+            <div v-for="saved in job.reliablePackets" :key="saved.packet.packetId" class="small section-gap"><strong>{{ checkStateLabel(saved.packet.checkState) }}</strong> · {{ saved.packet.status }}<p class="mono" style="overflow-wrap:anywhere">{{ saved.packet.packetId }} · {{ saved.packet.sourceSnapshotSha256 }}</p><p v-for="warning in saved.warnings" :key="warning" class="warning-note">{{ warning }}</p><details><summary>{{ t('vetting.drawer.evidence') }}</summary><pre>{{ JSON.stringify(saved, null, 2) }}</pre></details></div>
+          </details>
+        </details>
+        <progress v-if="reviewActive && jobPercent !== null" class="vetting-progress" :value="jobPercent" max="100" :aria-label="t('vetting.job.title')" />
+        <p v-if="pollingPaused" class="warning-note">{{ t(jobDetailsPending ? 'vetting.job.sourceCheckPaused' : 'vetting.job.connectionPaused') }}</p>
+        <p v-else-if="jobDetailsPending" class="muted small" role="status">{{ t('vetting.job.checkingSources') }}</p>
+        <p v-else-if="reviewActive" class="muted small">{{ t('vetting.job.background') }}</p>
+        <p v-if="job?.status === 'COMPLETED' && !jobDetailsPending" class="muted small">{{ t('vetting.review.retained') }}</p>
+      </div>
+    </div>
 
     <div v-if="uploadProgress || sourceProgress.some(row => row.parseStatus === 'PARSING' || row.parseStatus === 'FAILED')" class="surface section-gap" aria-live="polite">
       <div class="surface-body">
@@ -1149,54 +1439,8 @@ function tagClass(group: string) {
       </div>
     </details>
 
-    <div v-if="job || pollingPaused" class="surface section-gap vetting-run-panel" aria-live="polite">
-      <div class="surface-body">
-        <div class="row">
-          <strong>{{ t('vetting.job.title') }}</strong>
-          <span v-if="job" class="tag" :class="job.status === 'FAILED' ? 'danger' : 'info'">
-            {{ t(`vetting.job.status.${job.status}`) }}
-          </span>
-          <span v-if="job?.totalUnits" class="mono muted small">{{ t('vetting.job.progressLabel') }}: {{ job.completedUnits }} / {{ job.totalUnits }}</span>
-          <span class="spacer" />
-          <button v-if="pollingPaused" class="btn" type="button" @click="retryPolling">
-            <AppIcon name="refresh" :size="14" />{{ t('vetting.job.resume') }}
-          </button>
-        </div>
-        <p v-if="job?.status === 'COMPLETED' && !jobDetailsPending" class="warning-note">{{ t('vetting.job.executionCompleteNote') }}</p>
-        <div v-if="job?.status === 'COMPLETED' && !jobDetailsPending" class="small">
-          <p v-if="coverage">{{ t('vetting.job.documentSummary', { reviewed: coverage.reviewedDocuments, total: coverage.totalDocuments }) }}</p>
-          <p>{{ t('vetting.job.findingSummary', { total: metrics?.total ?? job.result?.total ?? t('vetting.coverage.unknownCount'), listed: findings.length, pending: pendingListFindings }) }}</p>
-        </div>
-        <p v-if="running && job?.status !== 'FAILED' && job?.message" class="small">{{ readerJobMessage(job.message) }}</p>
-        <template v-if="job?.status === 'FAILED'">
-          <p v-for="message in jobFailureMessages" :key="message" class="run-error" role="alert">{{ message }}</p>
-        </template>
-        <p v-if="job?.recoveryStatus === 'NEEDS_RERUN'" class="warning-note">{{ t('vetting.recovery.NEEDS_RERUN') }}</p>
-        <p v-if="job" class="muted small">{{ recordedJobModel ? `${t('llm.recordedModel')}: ${recordedJobModel}` : t('llm.identityUnknown') }}</p>
-        <details v-if="job" class="small section-gap">
-          <summary>{{ t('vetting.job.executionDetails') }}</summary>
-          <p v-if="!running && job.status !== 'FAILED' && job.message">{{ job.message }}</p>
-          <template v-if="job.status === 'FAILED'">
-            <h5>{{ t('vetting.job.rawFailureRecord') }}</h5>
-            <pre v-if="job.message">{{ job.message }}</pre>
-            <pre v-if="job.error && job.error !== job.message">{{ job.error }}</pre>
-          </template>
-          <p v-if="job.recoveryStatus">{{ t(`vetting.recovery.${job.recoveryStatus}`) }}</p>
-          <p v-if="job.reportSnapshotId" class="mono" style="overflow-wrap:anywhere">{{ t('vetting.report.snapshot') }}: {{ job.reportSnapshotId }}</p>
-          <p v-if="jobModelIdentity" class="muted">{{ jobModelIdentity.profileId }} · {{ jobModelIdentity.provider }}</p>
-          <p v-if="jobModelIdentity" class="muted">{{ t('llm.identityNote') }}</p>
-          <details v-if="job.reliablePackets?.length"><summary>{{ t('vetting.recovery.reliablePackets') }} · {{ job.reliablePackets.length }}</summary>
-            <div v-for="saved in job.reliablePackets" :key="saved.packet.packetId" class="small section-gap"><strong>{{ checkStateLabel(saved.packet.checkState) }}</strong> · {{ saved.packet.status }}<p class="mono" style="overflow-wrap:anywhere">{{ saved.packet.packetId }} · {{ saved.packet.sourceSnapshotSha256 }}</p><p v-for="warning in saved.warnings" :key="warning" class="warning-note">{{ warning }}</p><details><summary>{{ t('vetting.drawer.evidence') }}</summary><pre>{{ JSON.stringify(saved, null, 2) }}</pre></details></div>
-          </details>
-        </details>
-        <progress v-if="reviewActive && jobPercent !== null" class="vetting-progress" :value="jobPercent" max="100" :aria-label="t('vetting.job.title')" />
-        <p v-if="pollingPaused" class="warning-note">{{ t(jobDetailsPending ? 'vetting.job.sourceCheckPaused' : 'vetting.job.connectionPaused') }}</p>
-        <p v-else-if="jobDetailsPending" class="muted small" role="status">{{ t('vetting.job.checkingSources') }}</p>
-        <p v-else-if="reviewActive" class="muted small">{{ t('vetting.job.background') }}</p>
-        <p v-if="job?.status === 'COMPLETED' && !jobDetailsPending" class="muted small">{{ t('vetting.review.retained') }}</p>
-      </div>
-    </div>
-
+    <p v-if="hasBoundedFirstPass && coverage?.semanticTopics?.length" class="warning-note section-gap" role="status">{{ t('vetting.coverage.firstPassScope', { pending: pendingReviewTopics, total: coverage.semanticTopics.length }) }}</p>
+    <p v-else-if="coverage?.semanticTopics?.length" class="muted small section-gap" role="status">{{ t('vetting.coverage.observedScope', { pending: pendingReviewTopics, total: coverage.semanticTopics.length }) }}</p>
     <p v-if="hasCoverageLimits" class="warning-note section-gap">{{ t('vetting.coverage.readerLimit') }}</p>
     <p v-if="excludedDrawings.length" class="muted small section-gap">{{ t('vetting.coverage.drawingExcludedSummary', { count: excludedDrawings.length }) }}</p>
     <details v-if="coverage || sourceWarnings.length" class="surface section-gap coverage-panel">
@@ -1232,7 +1476,7 @@ function tagClass(group: string) {
     </details>
 
     <details v-if="coverage?.semanticTopics?.length" class="surface section-gap coverage-panel">
-      <summary>{{ t('vetting.coverage.callLedger') }}</summary>
+      <summary>{{ t('vetting.coverage.callLedger') }} <span class="tag" :class="pendingReviewTopics ? 'warn' : 'neutral'">{{ t('vetting.coverage.topicSummary', { pending: pendingReviewTopics, failed: failedReviewTopics }) }}</span></summary>
       <div class="coverage-body">
         <p class="muted small">{{ t('vetting.coverage.callLedgerNote') }}</p>
         <p class="warning-note">{{ t('vetting.coverage.pendingScopeNote') }}</p>
@@ -1241,10 +1485,10 @@ function tagClass(group: string) {
             <thead><tr><th>{{ t('vetting.coverage.callTopic') }}</th><th>{{ t('vetting.coverage.reviewScope') }}</th><th>{{ t('vetting.coverage.sourceRequests') }}</th><th>{{ t('vetting.coverage.callSubmitted') }}</th><th>{{ t('vetting.coverage.callAssessments') }}</th><th>{{ t('vetting.coverage.callFindings') }}</th><th>{{ t('vetting.coverage.callContext') }}</th></tr></thead>
             <tbody>
               <tr v-for="(topic, topicRow) in coverage.semanticTopics" :key="`${topic.reviewKind ?? 'topic'}:${topic.topicIndex}:${topicRow}`">
-                <td><strong>#{{ topic.topicIndex }}</strong><span v-if="topic.reviewKind === 'project_reference'" class="tag neutral">{{ t('vetting.coverage.projectReference') }}</span><div class="small muted">{{ topic.topic }}</div><div v-if="topic.referenceIds?.length" class="small">{{ topic.referenceIds.join(' · ') }}</div></td>
+                <td><strong class="vetting-topic-title">{{ topic.topic }}</strong><div class="small muted">#{{ topic.topicIndex }} · {{ t(topic.reviewKind === 'project_reference' ? 'vetting.coverage.projectReference' : topic.reviewKind === 'full_scope' ? 'vetting.coverage.fullScopeReview' : 'vetting.coverage.semanticTopic') }}</div><div v-if="topic.referenceIds?.length" class="small">{{ topic.referenceIds.join(' · ') }}</div></td>
                 <td>
                   <strong>{{ checkStateLabel(topic.checkState) }}</strong>
-                  <span class="tag" :class="['failed', 'partial', 'not_submitted'].includes(reviewScopeStatus(topic)) ? 'warn' : 'neutral'">{{ t(`vetting.coverage.aggregateStates.${reviewScopeStatus(topic)}`) }}</span>
+                  <span class="tag" :class="['failed', 'partial', 'incomplete', 'not_submitted'].includes(reviewScopeStatus(topic)) ? 'warn' : 'neutral'">{{ t(`vetting.coverage.aggregateStates.${reviewScopeStatus(topic)}`) }}</span>
                   <div class="small muted">{{ t('vetting.coverage.globalCall') }}: {{ callStatusLabel(topic.globalCallStatus ?? topic.status) }}</div>
                   <div v-if="topic.error" class="warning-note">{{ topic.error }}</div>
                 </td>
@@ -1274,7 +1518,7 @@ function tagClass(group: string) {
                     <div v-for="request in topic.sourceRequests" :key="request.requestId" class="small section-gap">
                       <div>{{ requestStateLabel(request.transportStatus, 'transportStates') }} · {{ requestStateLabel(request.reviewExecutionStatus, 'requestStates') }}</div>
                       <div v-if="request.unknownReason" class="warning-note">{{ request.unknownReason }}</div>
-                      <div>{{ t('vetting.coverage.requiredMembers') }}: {{ request.requiredChunkIds?.length ?? t('vetting.coverage.unknownCount') }} · {{ t('vetting.coverage.missingMembers') }}: {{ request.missingChunkIds?.length ?? t('vetting.coverage.unknownCount') }}</div>
+                  <div>{{ t('vetting.coverage.requiredMembers') }}: {{ request.requiredMemberCount ?? request.requiredChunkIds?.length ?? t('vetting.coverage.unknownCount') }} · {{ t('vetting.coverage.missingMembers') }}: {{ request.missingMemberCount ?? request.missingChunkIds?.length ?? t('vetting.coverage.unknownCount') }}</div>
                       <details v-if="request.packetId" class="evidence-technical-details">
                         <summary>{{ t('vetting.coverage.packetIdentity') }}</summary>
                         <div class="mono" style="overflow-wrap:anywhere">{{ t('vetting.coverage.fullInputPacket') }}: {{ request.packetId }}</div>
@@ -1282,7 +1526,7 @@ function tagClass(group: string) {
                     </div>
                   </details>
                 </td>
-                <td>{{ topic.submittedChunkIds.length }} / {{ topic.submittedChars }}</td>
+                <td>{{ topic.submittedChunkCount ?? topic.submittedChunkIds?.length ?? t('vetting.coverage.unknownCount') }} / {{ topic.submittedChars }}</td>
                 <td>{{ topic.issueAssessments }} / {{ topic.consistentAssessments }} / {{ topic.insufficientContextAssessments }}</td>
                 <td>{{ topic.acceptedFindings }} / {{ topic.rejectedRecords }}</td>
                 <td>{{ topic.budgetDroppedGroups }} / {{ topic.partialContextGroups }} / {{ topic.unresolvedSegments }}</td>
@@ -1642,9 +1886,65 @@ function tagClass(group: string) {
       <AdviceSourceReader v-if="sourceCitation" :project-id="projectId" :citation="sourceCitation" source-module="vetting" />
     </AppModal>
 
+    <AppModal :open="parsedTextFile !== null && sourceOriginalPreview === null" :title="`${sourceReaderCopy('View parsed text', '查看解析文字', '查看解析文字')} — ${parsedTextFile?.fileName ?? ''}`" wide @close="closeParsedText">
+      <section v-if="parsedTextFile" ref="parsedTextPanel" tabindex="-1" class="parsed-source-reader" data-parsed-source-reader>
+        <p>{{ sourceReaderCopy('Saved parser observations for comparison with the original. Accuracy and completeness are unconfirmed; reading does not add this file to the review scope.', '以下为已保存的解析文字，供与原件核对；准确性和完整性尚未确认，阅读不会将文件加入审查范围。', '以下為已存的解析文字，供與原檔核對；準確性和完整性尚未確認，閱讀不會將檔案加入審查範圍。') }}</p>
+        <p><strong>{{ sourceParseLabel(parsedTextFile.parseStatus ?? parsedTextFile.status) }}</strong>
+          <template v-if="(parsedTextResult?.pageCount ?? parsedTextFile.pageCount) > 0"> · {{ sourceReaderCopy('Original pages', '原件页数', '原檔頁數') }}: {{ parsedTextResult?.pageCount ?? parsedTextFile.pageCount }}</template>
+        </p>
+        <div class="row parsed-source-actions">
+          <label>{{ parsedTextIsPart ? sourceReaderCopy('Text part', '文字分段', '文字分段') : sourceReaderCopy('Physical page', '物理页', '實體頁') }}
+            <input v-model.number="parsedTextPage" type="number" min="1" :max="parsedTextIsPart ? (parsedTextResult?.textPartCount ?? 100000) : ((parsedTextResult?.pageCount ?? parsedTextFile.pageCount) || 100000)"
+              :aria-label="parsedTextIsPart ? sourceReaderCopy('Text part', '文字分段', '文字分段') : sourceReaderCopy('Physical page', '物理页', '實體頁')" @keydown.enter="loadParsedText" />
+          </label>
+          <button class="btn" type="button" :disabled="parsedTextLoading" @click="loadParsedText">{{ parsedTextIsPart ? sourceReaderCopy('Go to part', '跳转到此段', '跳至此段') : sourceReaderCopy('Go to page', '跳转到本页', '跳至此頁') }}</button>
+          <button v-if="parsedTextIsPart" class="btn" type="button" :disabled="parsedTextLoading || !parsedTextResult?.textPart || parsedTextResult.textPart <= 1" @click="moveParsedTextPart(-1)">{{ sourceReaderCopy('Previous part', '上一段', '上一段') }}</button>
+          <button v-if="parsedTextIsPart" class="btn" type="button" :disabled="parsedTextLoading || !parsedTextResult?.textPartCount || (parsedTextResult?.textPart ?? 0) >= parsedTextResult.textPartCount" @click="moveParsedTextPart(1)">{{ sourceReaderCopy('Next part', '下一段', '下一段') }}</button>
+          <button v-if="parsedTextFile.fileName.toLowerCase().endsWith('.pdf') && sourceReaderOriginalUrl(parsedTextFile)" class="btn" type="button"
+            @click="openSourceOriginalPreview(parsedTextFile, parsedTextResult?.physicalPage ?? parsedTablesResult?.physicalPage ?? parsedTextPage)">
+            {{ sourceReaderCopy('Open original at page', '打开对应原件页', '開啟對應原檔頁') }}</button>
+          <a v-if="sourceReaderOriginalUrl(parsedTextFile)" class="btn" :href="sourceReaderOriginalUrl(parsedTextFile)!" :download="parsedTextFile.fileName">
+            {{ sourceReaderCopy('Download original', '下载原件', '下載原檔') }}</a>
+        </div>
+        <section v-if="!parsedTextIsPart" class="parsed-source-tables" data-parsed-tables>
+          <p><strong>{{ sourceReaderCopy('Saved parser table observation — unconfirmed', '保存的解析表格观察——尚未确认', '已存的解析表格觀察——尚未確認') }}</strong></p>
+          <p>{{ sourceReaderCopy('Header and continuation relationships are unconfirmed. Compare each physical page with the original.', '表头及续表关系尚未确认，请逐物理页核对原件。', '表頭及續表關係尚未確認，請逐實體頁核對原檔。') }}</p>
+          <p v-if="parsedTablesLoading" role="status">{{ sourceReaderCopy('Loading saved table observations…', '正在读取保存的表格观察…', '正在讀取已存的表格觀察…') }}</p>
+          <p v-else-if="parsedTablesError" role="alert">{{ parsedTablesError }}</p>
+          <template v-else-if="parsedTablesResult">
+            <p v-if="parsedTablesResult.tableStatus === 'no_saved_tables'" role="status">{{ sourceReaderCopy('No saved table observations are available for this page. This does not confirm that the original has no table.', '本页没有可用的保存表格观察，不代表已确认原件没有表格。', '此頁沒有可用的已存表格觀察，不代表已確認原檔沒有表格。') }}</p>
+            <p v-else-if="parsedTablesResult.tableStatus !== 'saved_tables'" role="status">{{ sourceReaderCopy('Saved table observations are unavailable for this capture. Compare the registered original.', '本次保存结果不提供可用的表格观察，请核对登记原件。', '此次已存結果未提供可用的表格觀察，請核對登記原檔。') }}</p>
+            <div v-for="(table, tableIndex) in parsedTableRows" :key="`${tableIndex}:${table.method}`" class="parsed-source-table-wrap">
+              <table class="parsed-source-table" data-saved-parser-table>
+                <caption>{{ savedTableMethodLabel(table.method) }} · {{ sourceReaderCopy('Physical page', '物理页', '實體頁') }} {{ table.physicalPage }} · {{ tableIndex + 1 }}</caption>
+                <tbody>
+                  <tr v-for="(row, rowIndex) in table.rows" :key="rowIndex">
+                    <td v-for="cell in row" :key="cell.col" :rowspan="cell.rowSpan" :colspan="cell.colSpan">{{ cell.text }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </template>
+        </section>
+        <p><strong>{{ sourceReaderCopy('Saved native text', '保存的原生文字', '已存的原生文字') }}</strong></p>
+        <p>{{ sourceReaderCopy('Text extraction can flatten columns and mix their reading order. Compare table values and relationships with the original.', '文字提取可能压平分栏并混合阅读顺序；表格数值及关系须核对原件。', '文字擷取可能壓平分欄並混合閱讀順序；表格數值及關係須核對原檔。') }}</p>
+        <p v-if="parsedTextLoading" role="status">{{ parsedTextIsPart ? sourceReaderCopy('Loading this text part…', '正在读取此段文字…', '正在讀取此段文字…') : sourceReaderCopy('Loading this saved page…', '正在读取本页保存文字…', '正在讀取此頁已存文字…') }}</p>
+        <p v-else-if="parsedTextError" role="alert">{{ parsedTextError }}</p>
+        <template v-else-if="parsedTextResult">
+          <p v-if="parsedTextResult.status === 'detailed_parsing_not_started'" role="status">{{ sourceReaderCopy('Detailed parsing has not started. Open the original, then confirm its identity and purpose before parsing.', '详细解析尚未开始。可先打开原件，核对身份和用途后再确认解析。', '詳細解析尚未開始。可先開啟原檔，核對身分和用途後再確認解析。') }}</p>
+          <p v-else-if="parsedTextResult.status === 'no_saved_text'" role="status">{{ sourceReaderCopy('No saved text is available for this physical page. This does not confirm that the original page is blank.', '本物理页没有可用的保存文字，不代表已确认原件为空白。', '此實體頁沒有可用的已存文字，不代表已確認原檔為空白。') }}</p>
+          <template v-else>
+            <p>{{ parsedTextIsPart ? `${sourceReaderCopy('Text part', '文字分段', '文字分段')} ${parsedTextResult.textPart} / ${parsedTextResult.textPartCount} · ${sourceReaderCopy('Sequential saved text; original physical pages are unknown', '保存文字按顺序分段；原件物理页码未知', '已存文字按順序分段；原檔實體頁碼未知')}` : `${sourceReaderCopy('Saved parser page', '保存的解析页', '已存的解析頁')} ${parsedTextResult.physicalPage}` }}</p>
+            <p v-if="parsedTextResult.text === ''" role="status">{{ sourceReaderCopy('The saved text is empty; the original content has not been confirmed blank.', '保存文字为空，尚未确认原件内容为空白。', '已存文字為空，尚未確認原檔內容為空白。') }}</p>
+            <pre class="parsed-source-text" data-parsed-text>{{ parsedTextResult.text }}</pre>
+          </template>
+        </template>
+      </section>
+    </AppModal>
+
     <!-- 审查源集 -->
     <AppModal class="vetting-source-modal" :open="sourceOpen" :title="t('vetting.actions.source')" wide @close="sourceOpen = false">
-      <div class="row section-gap">
+      <div ref="sourceSetPanel" tabindex="-1" class="row section-gap">
         <p class="muted small">{{ t('vetting.sourcePurpose.note') }}</p>
         <button class="btn" type="button" :disabled="sourceRoleSaving !== null || uploading" @click="refreshSources">{{ t('vetting.sourcePurpose.refresh') }}</button>
       </div>
@@ -1665,19 +1965,22 @@ function tagClass(group: string) {
               <td>
                 <strong>{{ file.fileName || file.key }}</strong>
                 <div v-if="!['OTHER', 'DRAWING'].includes(file.key)" class="mono muted small">{{ file.key }}</div>
-                <a v-if="sourceFileOriginalUrl(file)" :href="sourceFileOriginalUrl(file)!" class="small"
-                  :target="file.fileName.toLowerCase().endsWith('.pdf') ? '_blank' : undefined"
-                  :download="file.fileName.toLowerCase().endsWith('.pdf') ? undefined : file.fileName" rel="noopener noreferrer">
-                  {{ t(file.fileName.toLowerCase().endsWith('.pdf') ? 'vetting.drawer.openOriginal' : 'vetting.drawer.downloadOriginal') }}
-                </a>
+                <div class="source-reader-buttons">
+                <button v-if="file.fileName.toLowerCase().endsWith('.pdf')" class="btn small" type="button" :disabled="!sourceReaderOriginalUrl(file)"
+                  data-source-original-preview @click="openSourceOriginalPreview(file)">{{ t('vetting.drawer.openOriginal') }}</button>
+                <a v-if="sourceFileDownloadUrl(file)" :href="sourceFileDownloadUrl(file)!" class="btn small" :download="file.fileName" data-source-original-download>
+                  {{ t('vetting.drawer.downloadOriginal') }}</a>
+                <button class="btn small" type="button" :disabled="!sourceReaderAvailable(file) || !sourceReaderPins(file)" @click="openParsedText(file)">{{ sourceReaderCopy('View parsed text', '查看解析文字', '查看解析文字') }}</button>
+                <span v-if="sourceReaderAvailable(file) && !sourceReaderPins(file)" class="small muted">{{ sourceReaderCopy('Saved text unavailable; use the original.', '保存文字不可用，请查看原件。', '已存文字不可用，請查看原檔。') }}</span>
+                </div>
               </td>
               <td>
                 {{ sourcePurposeLabel(file) }}
                 <div v-if="canConfirmSourceRole(file)" class="section-gap">
-                  <p v-if="isPendingSourceIdentity(file)" class="small">{{ t('vetting.sourcePurpose.identityNote') }}</p>
+                  <p v-if="isPendingSourceIdentity(file)" class="small">{{ t(`vetting.sourcePurpose.${(file.parseStatus ?? file.status) === 'FAILED' ? 'retryNote' : 'identityNote'}`) }}</p>
                   <label class="small">{{ t('vetting.sourcePurpose.label') }}
-                    <select :value="sourceRoleDrafts[sourceRoleVersion(file)] || ''" :aria-label="`${file.fileName} ${t('vetting.sourcePurpose.label')}`"
-                      :disabled="sourceRoleBlocked" @change="sourceRoleDrafts[sourceRoleVersion(file)] = ($event.target as HTMLSelectElement).value">
+                    <select :value="sourceRoleChoice(file) || ''" :aria-label="`${file.fileName} ${t('vetting.sourcePurpose.label')}`"
+                      :disabled="sourceRoleBlocked || (file.parseStatus ?? file.status) === 'FAILED' && SOURCE_ROLES.includes(file.sourceRole as VettingSourceRole)" @change="sourceRoleDrafts[sourceRoleVersion(file)] = ($event.target as HTMLSelectElement).value">
                       <option value="" disabled>{{ t('vetting.sourcePurpose.choose') }}</option>
                       <option v-for="role in SOURCE_ROLES" :key="role" :value="role">{{ t(`vetting.uploadRole.${role}`) }}</option>
                     </select>
@@ -1687,8 +1990,9 @@ function tagClass(group: string) {
                       @change="sourceIdentityConfirmations[sourceRoleVersion(file)] = ($event.target as HTMLInputElement).checked" />
                     {{ t('vetting.sourcePurpose.identityConfirm') }}
                   </label>
-                  <button class="btn" type="button" :disabled="sourceRoleBlocked || !SOURCE_ROLES.includes(sourceRoleDrafts[sourceRoleVersion(file)] as VettingSourceRole) || (isPendingSourceIdentity(file) && sourceIdentityConfirmations[sourceRoleVersion(file)] !== true)"
-                    @click="confirmSourceRole(file)">{{ sourceRoleSaving === file.documentId ? t('common.loading') : t(`vetting.sourcePurpose.${isPendingSourceIdentity(file) ? 'confirmAndParse' : 'confirm'}`) }}</button>
+                  <button class="btn" type="button" :disabled="sourceRoleBlocked || !SOURCE_ROLES.includes(sourceRoleChoice(file) as VettingSourceRole) || (isPendingSourceIdentity(file) && sourceIdentityConfirmations[sourceRoleVersion(file)] !== true)"
+                    data-source-purpose-confirm
+                    @click="confirmSourceRole(file)">{{ sourceRoleSaving === file.documentId ? t('common.loading') : t(`vetting.sourcePurpose.${(file.parseStatus ?? file.status) === 'FAILED' ? 'retryParsing' : isPendingSourceIdentity(file) ? 'confirmAndParse' : 'confirm'}`) }}</button>
                 </div>
               </td>
               <td>
@@ -1716,11 +2020,31 @@ function tagClass(group: string) {
         </table>
       </div>
     </AppModal>
+
+    <AppModal class="source-original-modal" :open="sourceOriginalPreview !== null" :title="`${t('vetting.drawer.openOriginal')} — ${sourceOriginalPreview?.file.fileName ?? ''}`" wide @close="closeSourceOriginalPreview">
+      <section v-if="sourceOriginalPreview" ref="sourceOriginalPanel" tabindex="-1" class="source-original-pdf-reader" data-source-original-pdf-reader>
+        <div class="row source-reader-buttons">
+          <button v-if="parsedTextFile" class="btn" type="button" @click="closeSourceOriginalPreview">{{ sourceReaderCopy('Back to parsed text', '返回解析文字', '返回解析文字') }}</button>
+          <a class="btn" :href="sourceOriginalPreview.source" :download="sourceOriginalPreview.file.fileName">{{ t('vetting.drawer.downloadOriginal') }}</a>
+        </div>
+        <DraftingPdfPreview :key="sourceOriginalPreview.source" :source="sourceOriginalPreview.source"
+          :title="sourceOriginalPreview.file.fileName" :locale="store.locale" :initial-page="sourceOriginalPreview.page" />
+      </section>
+    </AppModal>
   </section>
 </template>
 
 <style scoped>
 .vetting-source-modal :deep(.modal.wide) { width: min(1520px, 100%); }
+.source-reader-buttons, .parsed-source-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-block: 8px; }
+.parsed-source-actions input { width: 100px; margin-inline-start: 8px; }
+.parsed-source-text { white-space: pre-wrap; overflow-wrap: anywhere; padding: 16px; border: 1px solid var(--line, #cbd5e1); background: var(--surface, #fff); font: inherit; line-height: 1.65; }
+.parsed-source-table-wrap { overflow-x: auto; margin-block: 12px; }
+.parsed-source-table { width: 100%; border-collapse: collapse; }
+.parsed-source-table caption { text-align: start; margin-block-end: 8px; }
+.parsed-source-table td { border: 1px solid var(--line, #cbd5e1); padding: 8px; white-space: pre-wrap; overflow-wrap: anywhere; vertical-align: top; }
+.source-original-modal :deep(.modal.wide) { width: min(1400px, 100%); }
+.source-original-pdf-reader :deep(.pdf-pages) { height: min(58vh, 860px); }
 .source-identity-confirm { display: flex; align-items: flex-start; gap: 8px; margin: 8px 0; min-width: 220px; max-width: 320px; white-space: normal; }
 .source-identity-confirm input { flex: none; width: auto; margin-top: 3px; }
 .vetting-source-table table { min-width: 860px; }
@@ -1732,6 +2056,7 @@ function tagClass(group: string) {
 .vetting-call-table table { min-width: 1050px; }
 .vetting-call-table th:first-child, .vetting-call-table td:first-child { width: 250px; }
 .vetting-call-table th:nth-child(3), .vetting-call-table td:nth-child(3) { min-width: 300px; width: 300px; overflow-wrap: anywhere; }
+.vetting-topic-title { display: block; font-size: 14px; line-height: 1.4; overflow-wrap: anywhere; }
 .report-format { width: auto; min-width: 112px; }
 .upload-role { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
 .upload-role select { width: auto; min-width: 150px; }

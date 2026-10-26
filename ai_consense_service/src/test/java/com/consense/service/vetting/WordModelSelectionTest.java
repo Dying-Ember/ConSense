@@ -41,12 +41,41 @@ class WordModelSelectionTest {
         assertEquals(before,JsonUtils.write(session.chunks()));verify(local,never()).chat(anyList());verify(w.registry,atLeast(3)).revalidateFrame(any());
     }
 
+    @Test void planningPreviewsReuseOnlySelectedSourceMaterialAndFinalInputReadsCurrentRevision()throws Exception{
+        Wire w=new Wire();OerBusinessEvidence.Session session=w.load();Chunk seed=w.seed(session);
+        Chunk other=session.chunks().stream().filter(c->!seed.getId().equals(c.getId())).findFirst().orElseThrow();
+        OerBusinessEvidence observed=spy(w.service);LlmClient local=mock(LlmClient.class);when(local.chatModel()).thenReturn("authored-uninvoked");
+        VettingSemanticReview review=new VettingSemanticReview(new AiGateway(local),new ConsenseProperties(),mock(VettingRetrievalClient.class));review.setOerBusinessEvidence(observed);
+        Method prepare=VettingSemanticReview.class.getDeclaredMethod("previewMaterial",List.class,List.class);prepare.setAccessible(true);
+        Object preview=prepare.invoke(review,session.chunks(),Arrays.asList(seed,other));
+        Method previewInput=VettingSemanticReview.class.getDeclaredMethod("completeInput",VettingContextBuilder.Selection.class,String.class,String.class,boolean.class,List.class,FixedVettingReferences.class,List.class,Runnable.class,List.class,preview.getClass());previewInput.setAccessible(true);
+        Method freshInput=VettingSemanticReview.class.getDeclaredMethod("completeInput",VettingContextBuilder.Selection.class,String.class,String.class,boolean.class,List.class,FixedVettingReferences.class,List.class,Runnable.class,List.class);freshInput.setAccessible(true);
+        VettingContextBuilder.Selection first=new VettingContextBuilder.Selection();first.setChunks(Collections.singletonList(seed));first.setContentChars(seed.getContent().length());
+        VettingContextBuilder.Selection second=new VettingContextBuilder.Selection();second.setChunks(Collections.singletonList(other));second.setContentChars(other.getContent().length());
+        Object[] args={first,"authored scope probe","en",false,null,FixedVettingReferences.empty(),null,(Runnable)()->{},session.chunks()};
+        VettingInputBudget.Input firstPreview=(VettingInputBudget.Input)previewInput.invoke(review,first,"authored scope probe","en",false,null,FixedVettingReferences.empty(),null,(Runnable)()->{},session.chunks(),preview);
+        VettingInputBudget.Input secondPreview=(VettingInputBudget.Input)previewInput.invoke(review,second,"authored scope probe","en",false,null,FixedVettingReferences.empty(),null,(Runnable)()->{},session.chunks(),preview);
+        assertEquals(seed.getContent(),VettingTokenFixture.excerpts(firstPreview.getMessages().get(1).getContent()).get(0).path("content").asText());
+        assertEquals(other.getContent(),VettingTokenFixture.excerpts(secondPreview.getMessages().get(1).getContent()).get(0).path("content").asText());
+        verify(observed,times(1)).wordSourceScopeContexts(eq(session),anyList());verify(observed,times(1)).sourceClauseLocators(eq(session),anyList(),anyMap());
+        assertEquals(JsonUtils.write(firstPreview),JsonUtils.write(freshInput.invoke(review,args)));
+        verify(observed,times(2)).wordSourceScopeContexts(eq(session),anyList());verify(observed,times(2)).sourceClauseLocators(eq(session),anyList(),anyMap());
+        w.binding.setSourceRevisionSha256(VettingCorpus.hash("changed after planning"));
+        assertInstanceOf(IllegalStateException.class,assertThrows(InvocationTargetException.class,()->freshInput.invoke(review,args)).getCause());
+    }
+
     @Test void advisoryRankedAndExplicitContextHitsEnrichOnlyDetachedSelectedPointers()throws Exception{
         Wire w=new Wire();OerBusinessEvidence.Session session=w.load();Chunk seed=w.seed(session);String before=JsonUtils.write(session.chunks());
         ObjectNode result=JsonUtils.mapper().createObjectNode();result.putArray("hits").addObject().put("id",seed.getId()).put("score",0.5);
         result.putObject("sourceUnits").putArray("units").addObject().put("status","unknown").put("qualifiersComplete","unknown");
         when(w.client.retrieve(anyString(),eq("vetting"),anyString(),nullable(String.class),any(CanonicalEvidenceService.VerifiedBindingFrame.class))).thenReturn(result);
         when(w.client.sourceUnitPolicy(anyString(),anyString(),anyList())).thenReturn(VettingRetrievalSourceUnits.POLICY);
+        OerBusinessEvidence textOnly=spy(w.service);
+        for(List<VectorStore.SearchHit> hits:Arrays.asList(textOnly.adviceTextHits(session,"query"),textOnly.sourceTextHits(session,Collections.singletonList(seed.getId())))){
+            assertEquals(1,hits.size());List<?> pointers=(List<?>)hits.get(0).getPayload().get("canonicalEvidence");assertFalse(pointers.isEmpty());
+            assertNull(((EvidencePointer)pointers.get(0)).getNativeWordSourceScopesContext());
+        }
+        verify(textOnly,never()).wordSourceScopeContexts(any(),anyList());
         for(List<VectorStore.SearchHit> hits:Arrays.asList(w.service.adviceHits(session,"query"),w.service.sourceHits(session,Collections.singletonList(seed.getId())))){
             assertEquals(1,hits.size());List<?> pointers=(List<?>)hits.get(0).getPayload().get("canonicalEvidence");assertFalse(pointers.isEmpty());
             EvidencePointer pointer=(EvidencePointer)pointers.get(0);assertNotNull(pointer.getNativeWordSourceScopesContext());
@@ -78,11 +107,13 @@ class WordModelSelectionTest {
         frame.close();assertThrows(RuntimeException.class,()->frame.wordSourceScopeContext(97L,projection,chunk,"vetting"));
     }
 
-    private static final class Wire {
-        final SourceDocument source=CanonicalWordSourceContextTest.source();final JsonNode graph=NormalSourceCandidateGraph.requireBound(source);
-        final CanonicalSourceBinding binding=CanonicalWordSourceContextTest.binding(source);final ObjectNode snapshot=JsonUtils.mapper().createObjectNode();
+    static final class Wire {
+        final SourceDocument source;final JsonNode graph;
+        final CanonicalSourceBinding binding;final ObjectNode snapshot=JsonUtils.mapper().createObjectNode();
         final CanonicalEvidenceService registry=mock(CanonicalEvidenceService.class);final OerCanonicalRetrievalClient client=mock(OerCanonicalRetrievalClient.class);final OerBusinessEvidence service;
-        Wire()throws Exception{
+        Wire()throws Exception{this(CanonicalWordSourceContextTest.source());}
+        Wire(SourceDocument source)throws Exception{
+            this.source=source;graph=NormalSourceCandidateGraph.requireBound(source);binding=CanonicalWordSourceContextTest.binding(source);
             snapshot.put("schema",NormalObservedContract.SCHEMA);snapshot.putObject("manifest").set("candidateGraph",graph);snapshot.putObject("source").put("sourceFilename",source.getFileName());snapshot.putArray("unknowns");
             com.fasterxml.jackson.databind.node.ArrayNode chunks=snapshot.putArray("chunks");for(JsonNode unit:graph.path("units"))chunks.add(CanonicalWordSourceContextTest.canonical(graph,unit));
             binding.setSnapshotJson(JsonUtils.write(snapshot));binding.setSnapshotBytesSha256(VettingCorpus.hash(binding.getSnapshotJson()));

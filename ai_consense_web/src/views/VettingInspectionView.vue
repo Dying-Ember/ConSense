@@ -78,6 +78,13 @@ function unitRecord(row: InspectionRecord): InspectionRecord { return row.source
 function unitMemberCount(row: InspectionRecord): number { const members = unitRecord(row).members; return Array.isArray(members) ? members.length : 0 }
 function empty() { return { items: [], total: 0, page: page.value, pageSize: pageSize.value } }
 function humanReason(value: unknown) { return inspectionReason(store.locale, value) }
+function unavailableDataset() {
+  if (tab.value === 'retrieval' || dataset.value?.status !== 'unavailable') return false
+  datasetRequest++; requestId++; loading.value = false
+  documents.value = []; documentId.value = ''; role.value = ''; clearSelection(); error.value = ''
+  list.value = { ...empty(), status: 'unavailable', unavailableReason: dataset.value.unavailableReason || 'recorded_artifact_missing_or_identity_failed' }
+  return true
+}
 function defaultOcrDocument() {
   const candidates = documents.value.filter(d => /pdf/i.test(String(d.contentType ?? d.fileName ?? '')) && Number(d.pageCount) > 0)
   return [...candidates].sort((a,b) => {
@@ -98,10 +105,11 @@ async function refreshCatalog() {
     const queryRun = typeof route.query.run === 'string' ? route.query.run : ''
     const requestedRun = data.runs.find(x => x.id === queryRun)
     const requestedRunDataset = requestedRun?.datasetId
-    datasetId.value = data.datasets.some(x => x.id === queryDataset) ? queryDataset : requestedRunDataset && data.datasets.some(x => x.id === requestedRunDataset) ? requestedRunDataset : data.datasets.some(x => x.id === datasetId.value) ? datasetId.value : data.datasets[0]?.id ?? ''
+    datasetId.value = data.datasets.some(x => x.id === queryDataset) ? queryDataset : requestedRunDataset && data.datasets.some(x => x.id === requestedRunDataset) ? requestedRunDataset : data.datasets.some(x => x.id === datasetId.value && x.status === 'available') ? datasetId.value : data.datasets.find(x => x.status === 'available')?.id ?? data.datasets[0]?.id ?? ''
     const matchingRuns = data.runs.filter(x => x.datasetId === datasetId.value)
     runId.value = matchingRuns.some(x => x.id === queryRun) ? queryRun : matchingRuns.some(x => x.id === oldRun) ? oldRun : matchingRuns[0]?.id ?? ''
     if (oldDataset === datasetId.value && oldRun === runId.value) void loadList()
+    unavailableDataset()
     if (!datasetId.value && tab.value !== 'retrieval') list.value = empty()
   } catch { if (!disposed) catalogError.value = true }
 }
@@ -109,9 +117,10 @@ async function loadDocuments() {
   const n = ++datasetRequest, id = datasetId.value
   documents.value = []; documentId.value = ''; role.value = ''; page.value = 1; clearSelection()
   if (!id) { list.value = empty(); return }
+  if (unavailableDataset()) return
   try {
     const data = await inspectionApi.documents(id)
-    if (disposed || n !== datasetRequest) return
+    if (disposed || n !== datasetRequest || dataset.value?.status === 'unavailable') return
     const all = [...(data.items ?? [])]
     for (let p = 2; all.length < data.total; p++) {
       const next = await inspectionApi.documents(id, p)
@@ -145,6 +154,7 @@ async function loadTasks() {
 async function loadList() {
   const n = ++requestId; loading.value = true; error.value = ''; clearSelection()
   try {
+    if (unavailableDataset()) return
     let result: InspectionPage
     if (tab.value === 'chunks' && datasetId.value) result = await inspectionApi.chunks(datasetId.value, page.value, pageSize.value, search.value.trim(), documentId.value, role.value)
     else if (tab.value === 'ocr' && datasetId.value && documentId.value) result = await inspectionApi.pages(datasetId.value, documentId.value, page.value, pageSize.value)
@@ -155,6 +165,7 @@ async function loadList() {
   finally { if (!disposed && n === requestId) loading.value = false }
 }
 async function inspect(row: InspectionRecord) {
+  if (unavailableDataset()) return
   const n = ++detailId; detailLoading.value = true; selected.value = null
   try {
     let result: InspectionRecord

@@ -85,6 +85,7 @@ public class QwenGenerationLedger {
                 String key=e.getKey();Object v=e.getValue();
                 if(Arrays.asList("requestSha256","responseSha256","stableObservationSha256").contains(key)&&v instanceof String&&sha((String)v))safe.put(key,(String)v);
                 else if(Arrays.asList("promptTokens","completionTokens","totalTokens").contains(key)&&v instanceof Number&&((Number)v).longValue()>=0)safe.put(key,((Number)v).longValue());
+                else if("probeRequestBytes".equals(key)&&v instanceof Number&&((Number)v).longValue()>0)safe.put(key,((Number)v).longValue());
                 else if("failureKind".equals(key)&&v instanceof String&&((String)v).matches("[A-Za-z0-9_]{1,80}"))safe.put(key,(String)v);
                 else if("finishReason".equals(key)&&Arrays.asList("stop","length").contains(v))safe.put(key,(String)v);
             }}

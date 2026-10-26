@@ -71,6 +71,21 @@ class NativePdfObservationTests(unittest.TestCase):
         self.assertEqual('environment_dependent_unverified',result['localFontResolution'])
         self.assertEqual(FRAME_READER_VERSION,result['frameReaderIdentity']['version'])
 
+    def test_font_text_resolution_cannot_self_certify_without_original_embedded_font_proof(self):
+        changed = copy.deepcopy(self.export)
+        glyph = changed['pageObservations'][0]['nativePdfEvidence']['glyphs'][0]
+        glyph['textResolution'] = {
+            'schema': 'consense.pdf-font-text-resolution.v1',
+            'decoderVersion': 'embedded-adobe-symbol-pua-v1',
+            'rawUnicode': glyph['unicode'], 'sourceCharacterCodes': glyph['characterCodes'],
+            'fontName': glyph['fontName'], 'selector': 'F046', 'decodedText': 'Φ',
+            'resolutionStatus': 'resolved_embedded_symbol_selector',
+            'mappingSource': 'https://www.unicode.org/Public/MAPPINGS/VENDORS/ADOBE/symbol.txt',
+            'fontProgramSha256': 'a' * 64, 'toUnicodeSha256': 'b' * 64,
+            'sourceGlyphId': 7, 'selectorGlyphId': 7, 'cmapPlatformId': 3, 'cmapEncodingId': 0,
+        }
+        self.reject(changed)
+
     def test_capture_preserves_exact_original_observer_code_and_ap_bytes(self):
         bundle = self.capture()
         self.assertEqual(self.source,self.store.read_asset(bundle['sourcePackage']))
@@ -162,6 +177,9 @@ class NativePdfObservationTests(unittest.TestCase):
             with self.subTest(key=key):
                 changed = copy.deepcopy(self.export); changed['observerIdentity']['config'][key] = value
                 self.reject(identity(changed))
+        for value in (None, 'font-name-only', True):
+            changed = copy.deepcopy(self.export); changed['observerIdentity']['config']['fontTextDecoding'] = value
+            self.reject(identity(changed))
         for key in ['apacheFontBox','pdfBoxFontMapperClass']:
             changed = copy.deepcopy(self.export); changed['observerIdentity']['dependencyVersions'].pop(key)
             self.reject(identity(changed))

@@ -44,12 +44,8 @@ class CanonicalSnapshotGetTests(unittest.TestCase):
     def test_two_actual_snapshot_gets_reconstruct_once_with_fresh_complete_cas(self):
         source = self.single_root()
         traces, current, responses = [], [], []
-        read = self.store._read_uncached
-        def traced(descriptor, *, retain):
-            current.append((descriptor['sha256'], descriptor['byteCount'], retain))
-            return read(descriptor, retain=retain)
         with patch.object(self.registry, '_load_current', wraps=self.registry._load_current) as derive:
-            with patch.object(self.store, '_read_uncached', traced):
+            with source_frame_tests.actual_cas_trace(self.store, current):
                 for _ in range(2):
                     current.clear()
                     response = self.client.get(self.url(source))
@@ -64,8 +60,9 @@ class CanonicalSnapshotGetTests(unittest.TestCase):
             self.assertEqual(1, derive.call_count, 'Actual GET must use the production frame across requests')
         self.assertEqual(traces[0], traces[1])
         self.assertTrue(traces[0])
-        self.assertEqual([(sha, size) for sha, size, retain in traces[0] if retain],
-                         [(sha, size) for sha, size, retain in traces[0] if not retain])
+        for trace in traces:
+            self.assertEqual([(sha, size) for sha, size, entry in trace if entry],
+                             [(sha, size) for sha, size, entry in trace if not entry])
         self.assertIsNone(self.registry._validation_frame.get())
         self.assertIsNone(self.store._read_session.get())
         self.assert_no_inference()
@@ -76,6 +73,81 @@ class CanonicalSnapshotGetTests(unittest.TestCase):
             for _ in range(2):
                 self.assertEqual(200, self.client.get(self.url(source)).status_code)
             self.assertEqual(4, guard.call_count)
+        self.assert_no_inference()
+
+    def test_conditional_get_revalidates_complete_cas_and_sends_no_snapshot_body(self):
+        from normal_observed_projection import produce_normal_observed
+        from test_normal_observed import fixture
+        body = fixture(self.policy)
+        normal = produce_normal_observed(body['candidateGraph'], body['sourceBinding'], artifact_store=self.store)
+        pdf = self.publish_pdf()
+        for source in (self.single, self.collection, normal):
+            self.registry.publish(source)
+        for source in (self.single, pdf, self.collection, normal):
+            module = 'vetting' if source is normal else 'advisory'
+            url = self.url(source, module)
+            full = self.client.get(url)
+            self.assertEqual(200, full.status_code, full.text)
+            reads = []
+            with source_frame_tests.actual_cas_trace(self.store, reads), \
+                    patch.object(self.rt, 'algorithms', wraps=self.rt.algorithms) as guard:
+                checked = self.client.get(url, headers={'If-None-Match': full.headers['etag']})
+            self.assertEqual(304, checked.status_code, checked.text)
+            self.assertEqual(b'', checked.content)
+            self.assertEqual(full.headers['etag'], checked.headers['etag'])
+            self.assertEqual(source['projectionSha256'], checked.headers['x-projection-sha256'])
+            self.assertEqual(2, guard.call_count)
+            self.assertTrue(reads)
+            self.assertEqual([(sha, size) for sha, size, entry in reads if entry],
+                             [(sha, size) for sha, size, entry in reads if not entry])
+            changed = self.client.get(url, headers={'If-None-Match': '"' + '0' * 64 + '"'})
+            self.assertEqual(200, changed.status_code)
+            self.assertEqual(full.content, changed.content)
+            print('CONDITIONAL_SNAPSHOT_BYTES', json.dumps({'schema': source['schema'],
+                'fullBodyBytes': len(full.content), 'unchangedBodyBytes': len(checked.content),
+                'casReadHashCalls': len(reads)}))
+        self.assert_no_inference()
+
+    def test_matching_etag_cannot_hide_deleted_or_corrupt_cas(self):
+        source = self.single_root()
+        headers = {'If-None-Match': self.client.get(self.url(source)).headers['etag']}
+        entry = next(iter(self.registry._derived_results.values()))
+        descriptor = json.loads(entry.dependencies[-1])
+        path = self.store.root / descriptor['relativePath']
+        before, stat = path.read_bytes(), path.stat()
+        try:
+            path.unlink()
+            self.assertEqual(404, self.client.get(self.url(source), headers=headers).status_code)
+            path.write_bytes(bytes([before[0] ^ 1]) + before[1:])
+            os.utime(path, ns=(stat.st_atime_ns, stat.st_mtime_ns))
+            self.assertEqual(404, self.client.get(self.url(source), headers=headers).status_code)
+        finally:
+            path.write_bytes(before)
+        self.assert_no_inference()
+
+    def test_matching_etag_still_rejects_root_change_at_final_exit_before_304(self):
+        source = self.single_root()
+        headers = {'If-None-Match': self.client.get(self.url(source)).headers['etag']}
+        path = self.registry._path(source['projectionSha256'])
+        before, stat = path.read_bytes(), path.stat()
+        read, changed = self.store._read_uncached, False
+        def mutate(descriptor, *, retain):
+            nonlocal changed
+            if not retain and not changed:
+                path.write_bytes(before[:-1] + bytes([before[-1] ^ 1]))
+                os.utime(path, ns=(stat.st_atime_ns, stat.st_mtime_ns))
+                changed = True
+            return read(descriptor, retain=retain)
+        observer, client = self.response_observer()
+        try:
+            with client, patch.object(self.store, '_read_uncached', mutate):
+                response = client.get(self.url(source), headers=headers)
+            self.assertTrue(changed)
+            self.assert_refusal_before_success(observer, response)
+            self.assertNotIn(304, [event['status'] for event in observer.events
+                                  if event['type'] == 'http.response.start'])
+        finally:
+            path.write_bytes(before)
         self.assert_no_inference()
 
     def test_docx_pdf_and_collection_keep_complete_response_headers_and_ownership(self):

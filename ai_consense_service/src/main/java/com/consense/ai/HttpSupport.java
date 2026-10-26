@@ -13,6 +13,7 @@ import org.springframework.stereotype.Component;
 
 import java.io.IOException;
 import java.util.Collections;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
@@ -103,7 +104,14 @@ public class HttpSupport {
         Call call=client.newCall(builder.build());if(onCancel!=null)onCancel.accept(call::cancel);
         if(Thread.currentThread().isInterrupted())call.cancel();
         try(Response response=call.execute()) {
-            if(response.code()!=200)throw new BizException("Qwen chat HTTP "+response.code());
+            if(response.code()!=200){
+                if(authHeader!=null){
+                    long requestBytes=-1;
+                    try{requestBytes=call.request().body().contentLength();}catch(IOException ignored){/* Length is diagnostic only. */}
+                    log.warn("Bounded model HTTP rejection: status={}, category={}, requestBytes={}",response.code(),boundedModelErrorCategory(response),requestBytes);
+                }
+                throw new BizException("Qwen chat HTTP "+response.code());
+            }
             if(response.body()==null)throw new BizException("Qwen chat response missing");
             java.io.ByteArrayOutputStream bytes=new java.io.ByteArrayOutputStream();
             try(java.io.InputStream input=response.body().byteStream()) {
@@ -114,6 +122,22 @@ public class HttpSupport {
                     .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT).decode(java.nio.ByteBuffer.wrap(bytes.toByteArray())).toString();
         }catch(IOException failure){throw new BizException("Qwen chat transport "+(call.isCanceled()?"cancelled":failure.getClass().getSimpleName()));}
         finally {call.cancel();}
+    }
+
+    private static String boundedModelErrorCategory(Response response) {
+        if(response.code()!=400||response.body()==null||response.body().contentLength()>4096)return "unknown";
+        try {
+            byte[] bytes=response.body().byteStream().readNBytes(4097);
+            if(bytes.length>4096)return "unknown";
+            JsonNode root=OVERLOAD_ERROR_READER.readValue(bytes),error=root.path("error");
+            if(!error.isObject())return "unknown";
+            String code=error.path("code").asText("").toLowerCase(Locale.ROOT);
+            if("context_length_exceeded".equals(code)||"input_length_exceeded".equals(code)||"token_limit_exceeded".equals(code))return "context_limit";
+            if("invalid_parameter".equals(code)||"invalid_argument".equals(code))return "invalid_parameter";
+            String message=error.path("message").asText("").toLowerCase(Locale.ROOT);
+            if(message.contains("token length exceed model limit")||message.contains("maximum context length")||message.contains("context length exceeded"))return "context_limit_indicated";
+            return "invalid_request_error".equals(error.path("type").asText(""))?"invalid_request":"unknown";
+        }catch(IOException|RuntimeException invalid){return "unknown";}
     }
 
     /** MiniMax opt-in: retry only a complete HTTP 529 overloaded_error response. */

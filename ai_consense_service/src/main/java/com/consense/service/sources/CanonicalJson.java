@@ -12,6 +12,42 @@ import java.util.*;
 final class CanonicalJson {
     private CanonicalJson(){}
     private static final JsonFactory FACTORY=new JsonFactory().enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
+    static final class NormalReceipt {
+        final String projection;
+        final com.fasterxml.jackson.databind.JsonNode header;
+        NormalReceipt(String projection,com.fasterxml.jackson.databind.JsonNode header){this.projection=projection;this.header=header;}
+    }
+    /** Validate every wire token but retain only the projection span and receipt checks. */
+    static NormalReceipt normalObservedReceipt(byte[] bytes){
+        CanonicalEvidenceBackend.Reply.requireUtf8(bytes);
+        try{
+            // The String receipt path accepted UTF-8 JSON only, without a BOM. Do not let byte-parser autodetection widen it.
+            int first=0;while(first<bytes.length&&(bytes[first]==' '||bytes[first]=='\n'||bytes[first]=='\r'||bytes[first]=='\t'))first++;
+            if(first==bytes.length||bytes[first]!='{')throw new IOException("Expected UTF-8 object");
+            for(int n=0;n<Math.min(4,bytes.length);n++)if(bytes[n]==0)throw new IOException("Expected UTF-8 object");
+            com.fasterxml.jackson.databind.node.ObjectNode header=com.consense.common.JsonUtils.mapper().createObjectNode();
+            Set<String> retained=new HashSet<>(Arrays.asList("projectionSha256","chunks","immutable","qualityVerifiedByRegistry","sourceQualityChangedByRegistry","responseFormat"));
+            int start=-1,end=-1;
+            try(JsonParser parser=FACTORY.createParser(bytes)){
+                if(parser.nextToken()!=JsonToken.START_OBJECT)throw new IOException("Expected object");
+                JsonToken token;
+                while((token=parser.nextToken())!=JsonToken.END_OBJECT){
+                    if(token!=JsonToken.FIELD_NAME)throw new IOException("Expected receipt field");
+                    String name=parser.currentName();token=parser.nextToken();
+                    if("projection".equals(name)){
+                        if(token!=JsonToken.START_OBJECT)throw new IOException("Expected projection object");
+                        start=Math.toIntExact(parser.getTokenLocation().getByteOffset());parser.skipChildren();
+                        end=Math.toIntExact(parser.getCurrentLocation().getByteOffset());
+                    }else if(retained.contains(name)){
+                        if(token!=null&&token.isScalarValue())header.set(name,com.consense.common.JsonUtils.mapper().readTree(parser));
+                        else{skipValue(parser);header.putNull(name);}
+                    }else skipValue(parser);
+                }
+                if(start<0||end<=start||end>bytes.length||parser.nextToken()!=null)throw new IOException("Missing projection or trailing JSON");
+            }
+            return new NormalReceipt(new String(bytes,start,end-start,StandardCharsets.UTF_8),header);
+        }catch(IOException|IllegalArgumentException error){throw new CanonicalEvidenceException(org.springframework.http.HttpStatus.BAD_GATEWAY,"CANONICAL_JSON_INVALID");}
+    }
     static String hash(String json,String omitRootField) {
         try(JsonParser parser=FACTORY.createParser(json)) {
             parser.nextToken();CanonicalValue value=readValue(parser,omitRootField);
@@ -100,6 +136,44 @@ final class CanonicalJson {
     static String nodeHash(com.fasterxml.jackson.databind.JsonNode value) {
         try{return com.consense.common.Utf8.sha256(nodeCanonical(value));}
         catch(IOException error){throw new CanonicalEvidenceException(org.springframework.http.HttpStatus.BAD_GATEWAY,"CANONICAL_JSON_INVALID");}
+    }
+    /** Reconstruct a negotiated wire view with Python's canonical scalar spelling and one enclosing output. */
+    static String nodeWire(com.fasterxml.jackson.databind.JsonNode value){
+        try{LengthWriter length=new LengthWriter();writeNode(length,value);
+            StringWriter out=new StringWriter(Math.toIntExact(length.length));writeNode(out,value);return out.toString();}
+        catch(IOException|IllegalArgumentException invalid){throw new CanonicalEvidenceException(org.springframework.http.HttpStatus.BAD_GATEWAY,"CANONICAL_JSON_INVALID");}
+    }
+    /** Stored normal snapshots expose their two authority headers within the bounded display-read prefix. */
+    static String publicationWire(com.fasterxml.jackson.databind.JsonNode value){
+        try{LengthWriter length=new LengthWriter();writePublication(length,value);
+            StringWriter out=new StringWriter(Math.toIntExact(length.length));writePublication(out,value);return out.toString();}
+        catch(IOException|IllegalArgumentException invalid){throw new CanonicalEvidenceException(org.springframework.http.HttpStatus.BAD_GATEWAY,"CANONICAL_JSON_INVALID");}
+    }
+    private static void writePublication(Writer out,com.fasterxml.jackson.databind.JsonNode value)throws IOException{
+        if(!value.isObject()||!value.has("schema")||!value.has("producerKind"))throw new IOException("Missing publication authority header");
+        out.write('{');boolean first=true;
+        for(String header:Arrays.asList("schema","producerKind")){
+            if(!first)out.write(',');first=false;writeQuoted(out,header);out.write(':');writeNode(out,value.get(header));
+        }
+        Map<String,com.fasterxml.jackson.databind.JsonNode> fields=new TreeMap<>(CanonicalJson::compareCodepoints);
+        value.fields().forEachRemaining(row->{if(!"schema".equals(row.getKey())&&!"producerKind".equals(row.getKey()))fields.put(row.getKey(),row.getValue());});
+        for(Map.Entry<String,com.fasterxml.jackson.databind.JsonNode> row:fields.entrySet()){
+            out.write(',');writeQuoted(out,row.getKey());out.write(':');writeNode(out,row.getValue());
+        }out.write('}');
+    }
+    private static void writeNode(Writer out,com.fasterxml.jackson.databind.JsonNode value)throws IOException{
+        if(value.isObject()){
+            Map<String,com.fasterxml.jackson.databind.JsonNode> fields=new TreeMap<>(CanonicalJson::compareCodepoints);value.fields().forEachRemaining(row->fields.put(row.getKey(),row.getValue()));
+            out.write('{');boolean first=true;for(Map.Entry<String,com.fasterxml.jackson.databind.JsonNode> row:fields.entrySet()){
+                if(!first)out.write(',');first=false;writeQuoted(out,row.getKey());out.write(':');writeNode(out,row.getValue());}out.write('}');return;
+        }
+        if(value.isArray()){out.write('[');boolean first=true;for(com.fasterxml.jackson.databind.JsonNode item:value){if(!first)out.write(',');first=false;writeNode(out,item);}out.write(']');return;}
+        if(value.isFloatingPointNumber()){out.write(pythonFloat(value.asText()));return;}
+        if(value.isIntegralNumber()){out.write(value.bigIntegerValue().toString());return;}
+        if(value.isTextual()){writeQuoted(out,value.asText());return;}
+        if(value.isBoolean()){out.write(value.asBoolean()?"true":"false");return;}
+        if(value.isNull()){out.write("null");return;}
+        throw new IOException("Unsupported parsed declaration node");
     }
     private static String nodeCanonical(com.fasterxml.jackson.databind.JsonNode value)throws IOException {
         if(value.isObject()){Map<String,String> fields=new HashMap<>();java.util.Iterator<Map.Entry<String,com.fasterxml.jackson.databind.JsonNode>> rows=value.fields();while(rows.hasNext()){Map.Entry<String,com.fasterxml.jackson.databind.JsonNode> row=rows.next();fields.put(row.getKey(),nodeCanonical(row.getValue()));}return rawObject(fields);}

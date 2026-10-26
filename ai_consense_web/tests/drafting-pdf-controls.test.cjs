@@ -56,8 +56,9 @@ const loaded = loadVue(path.join(__dirname, '../src/components/DraftingPdfPrevie
 })
 const component = loaded.default
 const { draftWord } = loaded.loadLocal(path.join(__dirname, '../src/drafting/words.ts'))
-const source = vue.ref('original'), immersive = vue.ref(false), locale = vue.ref('en')
-const app = vue.createApp({ render: () => vue.h(component, { source: source.value, title: 'Contract PDF', locale: locale.value, immersive: immersive.value }) })
+const source = vue.ref('original'), immersive = vue.ref(false), locale = vue.ref('en'), initialPage = vue.ref(1)
+const loadedPages = []
+const app = vue.createApp({ render: () => vue.h(component, { source: source.value, title: 'Contract PDF', locale: locale.value, immersive: immersive.value, initialPage: initialPage.value, onLoaded: pages => loadedPages.push(pages) }) })
 const button = key => [...document.querySelectorAll('button')].find(node => node.textContent.trim() === draftWord(key, locale.value))
 const reader = () => document.querySelector('.pdf-surface')
 const canvas = () => document.querySelector('canvas')
@@ -80,6 +81,14 @@ function jump(number) {
   assert.equal(document.querySelector('label').htmlFor, document.querySelector('input').id)
   assert.equal(reader().tabIndex, 0, 'The scrollable reader is reachable by keyboard')
   console.log('PASS: the actual reader renders a full, high resolution page fitted to its available width')
+
+  assert.deepEqual(loadedPages, [8], 'Page-count validation reuses the document already opened by the preview')
+  initialPage.value = 3; await settled()
+  assert.equal(renders.at(-1).pageNumber, 3)
+  assert.equal(loads.length, 1, 'A changed cited page renders from the same open PDF')
+  initialPage.value = 1; await settled()
+  assert.equal(loads.length, 1)
+  console.log('PASS: cited page changes and page-count reporting do not parse a second PDF')
 
   reader().scrollTop = 350
   jump(5); await settled()

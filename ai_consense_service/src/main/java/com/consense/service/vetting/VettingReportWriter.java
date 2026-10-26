@@ -52,15 +52,23 @@ public class VettingReportWriter {
         return docx(project,findings,job,lang,probe,Collections.emptyList());
     }
     byte[] docx(Project project,List<FindingVO> findings,VettingJobVO job,String lang,VettingExportProbe probe,List<VettingChecklistCatalog.Result> checklist) {
+        return docx(project,findings,job,lang,probe,checklist,new HashSet<>());
+    }
+    byte[] docx(Project project,List<FindingVO> findings,VettingJobVO job,String lang,VettingExportProbe probe,List<VettingChecklistCatalog.Result> checklist,Set<String> appAuthoredEnglish) {
         List<Block> outline;
         try(VettingExportProbe.Timer timer=VettingExportProbe.measure(probe,"report_outline_construction","Original shared report outline construction")){outline=outline(project,findings,job,lang);}
+        if("en".equalsIgnoreCase(lang)) {
+            for(VettingReportPresentation.SectionSummary summary:VettingReportPresentation.sectionSummaries(findings,job==null?null:job.getCoverage()))knownEnglish(appAuthoredEnglish,VettingReportPresentation.readerSummary(summary));
+            for(Block block:outline)for(String line:block.text.split("\n",-1))if(appOwnedReaderEnglish(line))knownEnglish(appAuthoredEnglish,line);
+        }
         try(VettingExportProbe.Timer timer=VettingExportProbe.measure(probe,"docx_ooxml_generation","Original DOCX structure generation/write; not Microsoft Word pagination or visual layout QA")) {
         try (XWPFDocument document = new XWPFDocument(); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
             setupWord(document);
-            writeBusinessWord(document,project,findings,job,checklist);
+            writeBusinessWord(document,project,findings,job,checklist,appAuthoredEnglish);
             XWPFParagraph appendix=document.createParagraph();appendix.setPageBreak(true);
             appendix.setStyle("Heading1");appendix.createRun().setText("APPENDIX II - Review scope and evidence records");
-            wordTable(document,VettingReportPresentation.readerEvidenceIndex(findings,job==null?null:job.getCoverage()));
+            knownEnglish(appAuthoredEnglish,"APPENDIX II - Review scope and evidence records");
+            wordTable(document,VettingReportPresentation.readerEvidenceIndex(findings,job==null?null:job.getCoverage()),appAuthoredEnglish);
             XWPFTable record=null;
             for (Block block : outline) {
                 XWPFParagraph paragraph;
@@ -99,6 +107,7 @@ public class VettingReportWriter {
             page.setAlignment(ParagraphAlignment.CENTER);
             XWPFRun label = page.createRun(); setWordFont(label); label.setFontSize(FURNITURE_SIZE);
             label.setText(tr(lang, "第 ", "第 ", "Page "));
+            if("en".equalsIgnoreCase(lang)){knownEnglish(appAuthoredEnglish,"Page ");knownEnglish(appAuthoredEnglish," of ");}
             wordPageField(page,"PAGE");
             XWPFRun separator = page.createRun(); setWordFont(separator); separator.setText("en".equalsIgnoreCase(lang)?" of ":" / "); separator.setFontSize(FURNITURE_SIZE);
             wordPageField(page,"NUMPAGES");
@@ -108,6 +117,8 @@ public class VettingReportWriter {
             contractLabel.setText("Contract No. "+reportIdentity(job,"number"));
             document.getProperties().getCoreProperties().setTitle(tr(lang, "招标文件审查报告", "招標文件審查報告", "Tender Document Vetting Report"));
             document.getProperties().getCoreProperties().setCreator("ConSense");
+            if("en".equalsIgnoreCase(lang))knownEnglish(appAuthoredEnglish,"Tender Document Vetting Report");
+            knownEnglish(appAuthoredEnglish,"ConSense");
             if(job!=null&&!JsonUtils.isBlankText(job.getReportSnapshotId()))document.getProperties().getCoreProperties().setIdentifier(job.getReportSnapshotId());
             // Frozen report time and ZIP timestamps keep separate Word/PDF requests on the same DOCX bytes.
             Date frozenTime=Date.from(job!=null&&job.getFinishedAt()!=null?job.getFinishedAt():job!=null&&job.getStartedAt()!=null?job.getStartedAt():Instant.EPOCH);
@@ -192,22 +203,62 @@ public class VettingReportWriter {
         return job==null?Collections.emptyList():VettingChecklistAutomaticResults.aggregate(job.getStatus(),
                 com.consense.common.JsonUtils.mapper().valueToTree(job.getCoverage()),com.consense.common.JsonUtils.mapper().valueToTree(job.getResult()));
     }
-    private void writeBusinessWord(XWPFDocument document,Project project,List<FindingVO> findings,VettingJobVO job,List<VettingChecklistCatalog.Result> checklist) {
-        wordLine(document,"Comments on Tender Documentation","Title",false);
+    private void writeBusinessWord(XWPFDocument document,Project project,List<FindingVO> findings,VettingJobVO job,List<VettingChecklistCatalog.Result> checklist,Set<String> appAuthoredEnglish) {
+        wordLine(document,"Comments on Tender Documentation","Title",false,appAuthoredEnglish);
         XWPFTable metadata=document.createTable(4,3);metadata.setWidth("100%");
         String[][] fields={{"Contract Title",reportIdentity(job,"title")},{"Contract No.",reportIdentity(job,"number")},{"Contract Manager","Not provided"},{"Surveyor","Not provided"}};
+        for(String[] field:fields)knownEnglish(appAuthoredEnglish,field[0]);
+        knownEnglish(appAuthoredEnglish,"Not provided");
         for(int i=0;i<fields.length;i++)setWordCells(metadata.getRow(i),Arrays.asList(fields[i][0],":",fields[i][1]),new int[]{25,3,72},false);
         CTTblBorders border=metadata.getCTTbl().getTblPr().addNewTblBorders();
         for(CTBorder b:Arrays.asList(border.addNewTop(),border.addNewBottom(),border.addNewLeft(),border.addNewRight(),border.addNewInsideH(),border.addNewInsideV()))b.setVal(STBorder.NONE);
-        wordLine(document,"Comments below are review suggestions. Source quotations and the review scope are retained in Appendix II. Project team remarks are recorded independently.","Normal",false);
-        for(VettingReportPresentation.Table table:VettingReportPresentation.readerComments(findings,job==null?null:job.getCoverage()))wordTable(document,table);
-        wordLine(document,"The project team may record whether an amendment is required for incorporation into a tender addendum in the remarks column.","Normal",false);
-        wordLine(document,"APPENDIX I","Heading1",true);
-        wordLine(document,"Checklist for the Contract Team for Counterchecking Various PSS Clauses of PRE Worksection and Bills No. 1 and 2","Heading2",false);
-        wordLine(document,"Automatic suggestions are separate from saved human counterchecks. A saved human decision may be fulfilled, not fulfilled with a reason, or not applicable. Unchecked items remain unknown; no findings or a handled comment does not confirm fulfilment.","Normal",false);
-        wordLine(document,"Pricing-document counterchecks are retained from the sample for structure only and do not expand the competition review scope; automated review excludes pricing documents and works-related project-specific specifications.","Normal",false);
-        for(VettingReportPresentation.Table table:VettingReportPresentation.readerChecklist(checklist,automaticChecklist(job)))wordTable(document,table);
+        wordLine(document,"Comments below are review suggestions. Source quotations and the review scope are retained in Appendix II. Project team remarks are recorded independently.","Normal",false,appAuthoredEnglish);
+        for(VettingReportPresentation.Table table:VettingReportPresentation.readerComments(findings,job==null?null:job.getCoverage()))wordTable(document,table,appAuthoredEnglish);
+        wordLine(document,"The project team may record whether an amendment is required for incorporation into a tender addendum in the remarks column.","Normal",false,appAuthoredEnglish);
+        wordLine(document,"APPENDIX I","Heading1",true,appAuthoredEnglish);
+        wordLine(document,"Checklist for the Contract Team for Counterchecking Various PSS Clauses of PRE Worksection and Bills No. 1 and 2","Heading2",false,appAuthoredEnglish);
+        wordLine(document,"Automatic suggestions are separate from saved human counterchecks. A saved human decision may be fulfilled, not fulfilled with a reason, or not applicable. Unchecked items remain unknown; no findings or a handled comment does not confirm fulfilment.","Normal",false,appAuthoredEnglish);
+        wordLine(document,"Pricing-document counterchecks are retained from the sample for structure only and do not expand the competition review scope; automated review excludes pricing documents and works-related project-specific specifications.","Normal",false,appAuthoredEnglish);
+        for(VettingChecklistCatalog.Item item:VettingChecklistCatalog.items()){
+            knownEnglish(appAuthoredEnglish,item.getSection());knownEnglish(appAuthoredEnglish,item.getClause());
+            if(item.getTemplatePage()==14)for(String description:item.getDescription().split(" Suggested actions: ",2))knownEnglish(appAuthoredEnglish,description);
+            else knownEnglish(appAuthoredEnglish,item.getDescription());
+        }
+        for(VettingReportPresentation.Table table:VettingReportPresentation.readerChecklist(checklist,automaticChecklist(job)))wordTable(document,table,appAuthoredEnglish);
     }
+    private static void knownEnglish(Set<String> known,String text){Collections.addAll(known,text.split("[\\r\\n]+",-1));}
+    private static final Set<String> APP_READER_ENGLISH=Set.of(
+            "Supporting source quotations","Additional recorded source checks","Review limitations and unreviewed scope","Package identity coordination",
+            "The numbered comments are review suggestions. Existing recorded source clauses are retained. Recorded source positions and located quotations do not confirm formal clause ownership or the legal conclusion. Candidate equivalence remains unconfirmed.",
+            "No findings were recorded; this does not establish that the documents have no issues.",
+            "The saved source review is incomplete or its completeness is unconfirmed.",
+            "No substantive source-check record is available. Review scope remains unknown.",
+            "These states cover only the recorded source excerpts. Any unconfirmed applicability, incomplete qualifying conditions, omitted requests and unreviewed source portions still require confirmation.",
+            "Only the available reviewed excerpts support these comments. An empty model response or a completed request does not establish a substantive countercheck or confirm that the documents have no issues.",
+            "Affected sources (occurrences):","Whole review","Recorded occurrences: {n}.","Total recorded occurrences: {n}.",
+            "Recorded coverage within the saved source scope: excerpts {n}/{n}; characters {n}/{n}. These figures describe only recorded source observations, not completeness of the entire original or a substantive pass.",
+            "Page {n} visual/layout reading deferred; native text is retained, and an unobserved page is not confirmed blank.",
+            "Page {n} visual regions, writing states and native/visual relationships remain source-unverified.",
+            "Page {n} form pdf-form/{n}/widget/{n}: appearance_deferred_native_first; stored and appearance values retained separately.",
+            "Semantic review covered only {n}/{n} excerpts; other excerpts were not included in successful model calls.",
+            "Unresolved Word numbering: {n}; unresolved font symbols: {n}; structural warnings: {n}. Original properties and locations are retained; unresolved values must not be treated as absent.",
+            "Explicit strikethrough and tracked deletions are recorded; inherited formatting still requires source review.",
+            "OCR does not identify strikethrough, table row/column relationships or the meaning of graphics. Quotations, deletion status and table associations must be checked against the original physical pages.",
+            "OCR selection uses a per-page text/image heuristic; text accuracy and diagram topology require review.",
+            "OCR text quality is independently unverified; original-page review is required for text, footnotes, numbering and blank-field relationships. Physical extraction completion is not quality confirmation.",
+            "Optional native-table/layout work was not executed; table structure and continuation remain unknown.",
+            "Standard-template difference filtering was not performed. This review cannot be interpreted as checking only project changes.",
+            "Document parsing is incomplete; unparsed portions are excluded from review.",
+            "Repeated Word paragraph and section layout declarations are omitted from ordinary storage; the original file remains available for reparse. Reading text, native locations, table cells and observed clause ranges are retained.",
+            "Rules and semantic review process only adopted source observations. Unadopted regions, completeness of the entire original, editing status and adoption relationships retain their recorded unknowns. Character counts use only the union of character ranges in adopted observations and do not establish full coverage of the original.",
+            "Segment and character statistics use only adopted source observations as the denominator; unadopted regions and original-source completeness are unconfirmed.",
+            "Source role: Package manifest and scope inventory","Source role: Tender provisions",
+            "DOCX locations are body/table positions; physical Word pages are unknown until rendering.");
+    private static boolean appOwnedReaderEnglish(String text){
+        // Only digits vary in these exact application templates; filenames, quotes and arbitrary suffixes never match.
+        return APP_READER_ENGLISH.contains(text.replaceAll("[0-9]+","{n}"));
+    }
+    private void wordLine(XWPFDocument document,String text,String style,boolean pageBreak,Set<String> known){knownEnglish(known,text);wordLine(document,text,style,pageBreak);}
     private void wordLine(XWPFDocument document,String text,String style,boolean pageBreak) {
         XWPFParagraph p=document.createParagraph();p.setStyle(style);p.setPageBreak(pageBreak);
         p.setSpacingAfter("Title".equals(style)?180:100);p.setSpacingBetween(1.15);
@@ -236,6 +287,7 @@ public class VettingReportWriter {
         } else {setWordCells(table.getRow(0),model.getHeadings(),widths,true);table.getRow(0).setRepeatHeader(true);}
         for(List<String> values:model.getRows())setWordCells(table.createRow(),values,widths,false);
     }
+    private void wordTable(XWPFDocument document,VettingReportPresentation.Table model,Set<String> known){for(String heading:model.getHeadings())knownEnglish(known,heading);wordTable(document,model);}
     private XWPFTable wordRecord(XWPFDocument document) {
         // Adjacent tables can share the first table's repeated header in Word renderers.
         List<IBodyElement> body=document.getBodyElements();
@@ -342,7 +394,7 @@ public class VettingReportWriter {
         if(coverage==null)blocks.add(new Block(0,"No verifiable review coverage is available. Completeness and unreviewed scope remain unknown."));
         else {
             for(VettingReportPresentation.SectionSummary summary:VettingReportPresentation.sectionSummaries(findings,coverage))
-                blocks.add(new Block(0,available(summary.getFileName(),lang)+": "+VettingReportPresentation.readerSummary(summary)));
+                blocks.add(new Block(0,available(summary.getFileName(),lang)+"\n"+VettingReportPresentation.readerSummary(summary)));
             for(DocumentCoverageVO document:safe(coverage.getDocuments()))if(document!=null)
                 blocks.add(new Block(0,readerCoverage(document,lang)));
             blocks.add(new Block(0,"complete".equals(coverage.getReviewCompleteness())?"The saved review scope is marked complete. Completeness of the original and substantive correctness remain unconfirmed.":"The saved source review is incomplete or its completeness is unconfirmed."));
@@ -377,19 +429,35 @@ public class VettingReportWriter {
                 for(String scope:state.getValue())blocks.add(new Block(0,"- "+scope+"."));
             }
             blocks.add(new Block(0,"These states cover only the recorded source excerpts. Any unconfirmed applicability, incomplete qualifying conditions, omitted requests and unreviewed source portions still require confirmation."));
-            LinkedHashSet<String> limitations=new LinkedHashSet<>();
-            for(String value:safe(coverage.getWarnings()))limitations.add(readerWarning(value,lang));
-            for(DocumentCoverageVO doc:safe(coverage.getDocuments()))for(String value:safe(doc.getWarnings()))limitations.add(available(doc.getFileName(),lang)+": "+readerWarning(value,lang));
-            for(String value:limitations)blocks.add(new Block(0,value));
+            for(String value:readerWarnings(coverage,lang))blocks.add(new Block(0,value));
             blocks.add(new Block(0,"Only the available reviewed excerpts support these comments. An empty model response or a completed request does not establish a substantive countercheck or confirm that the documents have no issues."));
         }
         return blocks;
+    }
+    private List<String> readerWarnings(CoverageVO coverage,String lang) {
+        Map<String,Map<Integer,Integer>> groups=new LinkedHashMap<>();
+        for(String value:safe(coverage.getWarnings()))groups.computeIfAbsent(readerWarning(value,lang),ignored->new LinkedHashMap<>()).merge(-1,1,Integer::sum);
+        List<DocumentCoverageVO> documents=safe(coverage.getDocuments());
+        for(int index=0;index<documents.size();index++) {
+            DocumentCoverageVO document=documents.get(index);if(document==null)continue;
+            for(String value:safe(document.getWarnings()))groups.computeIfAbsent(readerWarning(value,lang),ignored->new LinkedHashMap<>()).merge(index,1,Integer::sum);
+        }
+        List<String> warnings=new ArrayList<>();
+        for(Map.Entry<String,Map<Integer,Integer>> group:groups.entrySet()) {
+            List<String> sources=new ArrayList<>();int total=0;
+            for(Map.Entry<Integer,Integer> source:group.getValue().entrySet()) {
+                String label=source.getKey()<0?"Whole review":available(documents.get(source.getKey()).getFileName(),lang);
+                sources.add(label+"\nRecorded occurrences: "+source.getValue()+".");total+=source.getValue();
+            }
+            warnings.add(group.getKey()+"\nAffected sources (occurrences):\n"+String.join("\n",sources)+"\nTotal recorded occurrences: "+total+".");
+        }
+        return warnings;
     }
     private String readerCoverage(DocumentCoverageVO document,String lang) {
         String unknown=tr(lang,"未记录","未記錄","not recorded");
         String excerpts=document.getTotalSegments()>0?document.getReviewedSegments()+"/"+document.getTotalSegments():unknown;
         String characters=document.getTextChars()>0?document.getReviewedChars()+"/"+document.getTextChars():unknown;
-        return available(document.getFileName(),lang)+": "+tr(lang,
+        return available(document.getFileName(),lang)+"\n"+tr(lang,
                 "保存来源范围内的已记录覆盖：片段 "+excerpts+"；字符 "+characters+"。这些数字仅描述已记录的来源观察，不代表整份原件完整或实质核对通过。",
                 "保存來源範圍內的已記錄覆蓋：片段 "+excerpts+"；字元 "+characters+"。這些數字僅描述已記錄的來源觀察，不代表整份原件完整或實質核對通過。",
                 "Recorded coverage within the saved source scope: excerpts "+excerpts+"; characters "+characters+". These figures describe only recorded source observations, not completeness of the entire original or a substantive pass.");

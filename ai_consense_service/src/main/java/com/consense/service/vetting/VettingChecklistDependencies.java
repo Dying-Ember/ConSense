@@ -48,7 +48,8 @@ final class VettingChecklistDependencies {
                     ||JsonUtils.isBlankText(identity.getVersion())||"UNKNOWN".equals(identity.getKind())){unknown="confirmed_source_family_or_edition_unavailable";break;}
             if(!"tender".equals(role)){
                 if(!"PARSED".equals(source.getParseStatus())){unknown="required_standard_fact_or_manifest_coverage_unknown";break;}
-                context.set(logicalSource(source),JsonUtils.mapper().valueToTree(Arrays.asList(role,identity,source.getSourceSha256(),VettingCorpus.sourceHash(source),source.getParseCoverageJson())));
+                context.set(logicalSource(source),JsonUtils.mapper().valueToTree(Arrays.asList(role,identity,source.getSourceSha256(),VettingCorpus.sourceHash(source),
+                        source.getParseCoverageJson()==null?Arrays.asList("database_coverage_revision",source.getParseCoverageSha256()):source.getParseCoverageJson())));
             }
         }
         if(unknown==null){
@@ -138,7 +139,10 @@ final class VettingChecklistDependencies {
 
     static String requirementHash(VettingChecklistCatalog.Item item){return VettingCorpus.hash(JsonUtils.write(Arrays.asList(item.getId(),item.getSection(),item.getClause(),item.getDescription(),item.getReviewScope(),item.getScopeNote())));}
     static JsonNode itemLedger(String coverage,String project,VettingChecklistCatalog.Item item){
-        if(JsonUtils.isBlankText(coverage))return null;JsonNode ledger=JsonUtils.parse(coverage).path("checklistDependencyLedger");
+        return JsonUtils.isBlankText(coverage)?null:itemLedger(JsonUtils.parse(coverage),project,item);
+    }
+    static JsonNode itemLedger(JsonNode coverage,String project,VettingChecklistCatalog.Item item){
+        if(coverage==null)return null;JsonNode ledger=coverage.path("checklistDependencyLedger");
         JsonNode row=ledger.path("items").path(item.getId());return VERSION.equals(ledger.path("producerVersion").asText())&&project.equals(ledger.path("projectId").asText())
                 &&requirementHash(item).equals(row.path("requirementSha256").asText())?row:null;
     }

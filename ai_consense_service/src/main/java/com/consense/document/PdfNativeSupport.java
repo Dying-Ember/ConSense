@@ -3,11 +3,16 @@ package com.consense.document;
 import org.apache.pdfbox.cos.COSDictionary;
 import org.apache.pdfbox.cos.COSBase;
 import org.apache.pdfbox.cos.COSNumber;
+import org.apache.pdfbox.cos.COSStream;
 import org.apache.pdfbox.contentstream.operator.Operator;
 import org.apache.pdfbox.cos.COSName;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDPage;
 import org.apache.pdfbox.pdmodel.common.PDRectangle;
+import org.apache.pdfbox.pdmodel.font.PDFont;
+import org.apache.pdfbox.pdmodel.font.PDType0Font;
+import org.apache.pdfbox.pdmodel.font.PDCIDFontType2;
+import org.apache.fontbox.ttf.CmapSubtable;
 import org.apache.pdfbox.pdmodel.graphics.state.PDGraphicsState;
 import org.apache.pdfbox.pdmodel.graphics.state.RenderingMode;
 import org.apache.pdfbox.pdmodel.interactive.annotation.PDAnnotation;
@@ -23,6 +28,9 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Arrays;
+import java.util.IdentityHashMap;
+import java.util.Map;
+import java.security.MessageDigest;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -30,6 +38,107 @@ import com.fasterxml.jackson.databind.JsonNode;
 /** Read existing PDF operators/appearance streams; never regenerate a form appearance. */
 final class PdfNativeSupport {
     private PdfNativeSupport() {}
+
+    /** Request-owned verified font metadata; no font handles or verdicts outlive a page capture. */
+    static final class TextDecoder {
+        private final Map<PDFont, FontProof> fonts = new IdentityHashMap<>();
+        PdfPageEvidence.TextResolution decode(TextPosition position) {
+            String raw = position.getUnicode();
+            if (raw == null || raw.length() != 1 || Character.getType(raw.charAt(0)) != Character.PRIVATE_USE) return null;
+            PdfPageEvidence.TextResolution result = new PdfPageEvidence.TextResolution();
+            int[] codes = position.getCharacterCodes();
+            result.setRawUnicode(raw); result.setSourceCharacterCodes(codes == null ? null : codes.clone());
+            result.setFontName(position.getFont() == null ? null : position.getFont().getName());
+            result.setSelector(String.format(java.util.Locale.ROOT, "%04X", (int) raw.charAt(0)));
+            result.setResolutionStatus("unresolved_unsupported_selector");
+            String decoded = PdfPageEvidence.TextResolution.symbolText(raw);
+            if (decoded == null) return result;
+            PDFont font = position.getFont();
+            result.setResolutionStatus("unresolved_font_not_verified");
+            if (!(font instanceof PDType0Font) || !font.isEmbedded()
+                    || !PdfPageEvidence.TextResolution.symbolFont(font.getName())
+                    || codes == null || codes.length != 1
+                    || !(((PDType0Font) font).getDescendantFont() instanceof PDCIDFontType2)) return result;
+            try {
+                FontProof proof = fonts.get(font);
+                if (proof == null) { proof = new FontProof((PDType0Font) font); fonts.put(font, proof); }
+                int code = position.getCharacterCodes()[0];
+                result.setResolutionStatus("unresolved_source_font_mapping");
+                if (!raw.equals(font.toUnicode(code))) return result;
+                int sourceGlyph = ((PDType0Font) font).codeToGID(code), selectorGlyph = proof.cmap.getGlyphId(raw.charAt(0));
+                result.setSourceGlyphId(sourceGlyph); result.setSelectorGlyphId(selectorGlyph);
+                result.setCmapPlatformId(3); result.setCmapEncodingId(0);
+                result.setFontProgramSha256(proof.fontHash); result.setToUnicodeSha256(proof.unicodeHash);
+                result.setResolutionStatus("unresolved_embedded_cmap_mismatch");
+                if (sourceGlyph <= 0 || sourceGlyph != code || sourceGlyph != selectorGlyph) return result;
+                result.setDecodedText(decoded); result.setResolutionStatus(PdfPageEvidence.TextResolution.RESOLVED);
+                result.setMappingSource(PdfPageEvidence.TextResolution.MAPPING_SOURCE);
+            } catch (IOException | RuntimeException failure) {
+                result.setResolutionStatus("unresolved_font_metadata_error");
+            }
+            return result;
+        }
+    }
+
+    private static final class FontProof {
+        final CmapSubtable cmap; final String fontHash, unicodeHash;
+        FontProof(PDType0Font font) throws IOException {
+            PDCIDFontType2 descendant = (PDCIDFontType2) font.getDescendantFont();
+            if (!COSName.IDENTITY_H.equals(font.getCOSObject().getDictionaryObject(COSName.ENCODING))
+                    || !COSName.IDENTITY.equals(descendant.getCOSObject().getDictionaryObject(COSName.CID_TO_GID_MAP)))
+                throw new IOException("Verified Identity-H and identity CID-to-GID source encoding required");
+            if (!descendant.isEmbedded() || descendant.getTrueTypeFont().getCmap() == null
+                    || font.getFontDescriptor() == null || font.getFontDescriptor().getFontFile2() == null)
+                throw new IOException("Embedded TrueType Symbol program is required");
+            cmap = descendant.getTrueTypeFont().getCmap().getSubtable(3, 0);
+            if (cmap == null) throw new IOException("Embedded Windows Symbol cmap is required");
+            COSBase unicode = font.getCOSObject().getDictionaryObject(COSName.TO_UNICODE);
+            if (!(unicode instanceof COSStream)) throw new IOException("Literal ToUnicode stream is required");
+            fontHash = streamHash(font.getFontDescriptor().getFontFile2().getCOSObject());
+            unicodeHash = streamHash((COSStream) unicode);
+        }
+    }
+
+    private static String streamHash(COSStream stream) throws IOException {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            try (java.io.InputStream input = stream.createInputStream()) {
+                byte[] chunk = new byte[65536]; int count;
+                while ((count = input.read(chunk)) != -1) digest.update(chunk, 0, count);
+            }
+            StringBuilder out = new StringBuilder(); for (byte value : digest.digest()) out.append(String.format("%02x", value & 255));
+            return out.toString();
+        } catch (java.security.NoSuchAlgorithmException impossible) { throw new IllegalStateException(impossible); }
+    }
+
+    /** Bind each non-whitespace glyph literally and retain PDFBox's whitespace separators verbatim. */
+    static String readerLine(String raw, List<PdfPageEvidence.PdfGlyph> glyphs) {
+        StringBuilder reader = new StringBuilder(); int cursor = 0;
+        for (PdfPageEvidence.PdfGlyph glyph : glyphs) {
+            String original = glyph.getUnicode(); if (original == null) continue;
+            String decoded = glyph.readerText();
+            for (int index = 0; index < original.length();) {
+                int code = original.codePointAt(index); index += Character.charCount(code);
+                if (Character.isWhitespace(code) || Character.isSpaceChar(code)) continue;
+                while (cursor < raw.length()) {
+                    int separator = raw.codePointAt(cursor);
+                    if (!Character.isWhitespace(separator) && !Character.isSpaceChar(separator)) break;
+                    reader.appendCodePoint(separator); cursor += Character.charCount(separator);
+                }
+                if (cursor >= raw.length() || raw.codePointAt(cursor) != code) return raw;
+                // Verified selectors are exactly one BMP source character; other literals are untouched.
+                if (original.length() == 1 && !original.equals(decoded)) reader.append(decoded);
+                else reader.appendCodePoint(code);
+                cursor += Character.charCount(code);
+            }
+        }
+        while (cursor < raw.length()) {
+            int separator = raw.codePointAt(cursor);
+            if (!Character.isWhitespace(separator) && !Character.isSpaceChar(separator)) return raw;
+            reader.appendCodePoint(separator); cursor += Character.charCount(separator);
+        }
+        return reader.toString();
+    }
 
     /** A painted path is an observation gap, never proof of a table, control, or drawing identity. */
     static final class PaintCollector {
@@ -136,6 +245,9 @@ final class PdfNativeSupport {
     }
 
     static void collectForms(PDDocument document, List<PdfPageEvidence> pages) throws IOException {
+        collectForms(document,pages,true);
+    }
+    static void collectForms(PDDocument document, List<PdfPageEvidence> pages,boolean observeAppearances) throws IOException {
         // getAcroForm() can apply PDFBox fixups. Use the existing dictionary without viewer synthesis.
         COSDictionary dictionary = (COSDictionary) document.getDocumentCatalog().getCOSObject().getDictionaryObject(COSName.ACRO_FORM);
         if (dictionary == null) return;
@@ -165,7 +277,11 @@ final class PdfNativeSupport {
                     item.setAppearanceState(widget.getAppearanceState() == null ? null : widget.getAppearanceState().getName());
                     PDAppearanceStream appearance = widget.getNormalAppearanceStream();
                     item.setAppearancePresent(appearance != null);
-                    if (appearance != null) {
+                    if(appearance!=null&&!observeAppearances){
+                        item.setAppearanceStreamObservationStatus("deferred_native_first");
+                        item.setAppearanceGlyphObservationStatus("deferred_native_first");
+                        item.getLimitations().add("Existing AP is present but its bytes and glyphs were not read in ordinary native-first mode; stored /V is not visible text.");
+                    }else if (appearance != null) {
                         item.setAppearanceBbox(rect(appearance.getBBox())); item.setAppearanceMatrix(matrix(appearance.getMatrix()));
                         item.setAppearanceStreamObservationStatus("existing_normal_AP_bytes_observed");
                         try (java.io.InputStream raw = appearance.getCOSObject().createRawInputStream();
@@ -198,12 +314,12 @@ final class PdfNativeSupport {
                 item.setConflict(item.isAppearancePresent() && !appearance.isEmpty() && !value.equals(appearance));
                 boolean partialAppearance = item.getAppearanceStreamObservationStatus().startsWith("partial_")
                         || item.getAppearanceGlyphObservationStatus().startsWith("partial_");
-                item.setValueStatus(partialAppearance ? "appearance_observation_partial_unknown" : item.isConflict() ? "field_appearance_conflict"
+                item.setValueStatus(item.isAppearancePresent()&&!observeAppearances?"appearance_deferred_native_first":partialAppearance ? "appearance_observation_partial_unknown" : item.isConflict() ? "field_appearance_conflict"
                         : !visible ? "not_visible" : !item.isAppearancePresent() ? "appearance_missing"
                         : page == null ? "widget_page_unknown"
                         : appearance.isEmpty() ? "empty_or_non_text_appearance" : "appearance_text_unverified");
                 item.getLimitations().add("Stored field value and existing appearance are independent evidence; no appearance regeneration or visual confirmation was performed.");
-                item.getLimitations().add("Only the selected existing normal AP stream is interpreted; rollover/down and other appearance states remain unobserved in retained original PDF bytes.");
+                item.getLimitations().add(observeAppearances?"Only the selected existing normal AP stream is interpreted; rollover/down and other appearance states remain unobserved in retained original PDF bytes.":"Appearance interpretation is deferred; original AP streams remain in the retained PDF.");
                 PdfPageEvidence owner;
                 if (pageNo > 0) owner = pages.get(pageNo - 1);
                 else {

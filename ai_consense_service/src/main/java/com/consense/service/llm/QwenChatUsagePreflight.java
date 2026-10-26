@@ -48,12 +48,13 @@ public final class QwenChatUsagePreflight {
         if("vetting".equals(module))return new QwenGenerationLedger.Limits(p.getVettingMaxPreflights(),p.getVettingMaxAnswers(),p.getVettingMaxTotal(),p.getActionLifetimeMs());
         if("file-export".equals(module))return new QwenGenerationLedger.Limits(24,24,48,p.getActionLifetimeMs());
         if(!"advice".equals(module)||h<0||h>100)throw new IllegalArgumentException("Qwen bounded action scope required");
-        return new QwenGenerationLedger.Limits(h+2,2,h+4,p.getActionLifetimeMs());
+        return new QwenGenerationLedger.Limits(h+4,4,h+8,p.getActionLifetimeMs());
     }
     private String policySha(String module,int h) {
         QwenGenerationLedger.Limits l=limits(module,h);
         return hash(JsonUtils.write(Arrays.asList(VERSION,KIND,CONTEXT,OUTPUT,MARGIN,module,h,l.preflights,l.answers,l.total,l.lifetimeMs,
-                "cap1_is_real_generation_no_replay_no_refund","exact_response_model_required","complete_input_output_margin_policy")));
+                "cap1_is_real_generation_no_replay_no_refund","exact_response_model_required","complete_input_output_margin_policy",
+                "vetting".equals(module)?"qwen-27b-json-object-records-v1":"advice".equals(module)?"qwen-27b-json-object-answer-v1":"ordinary-structured-output")));
     }
     public final class Operation {
         private final LlmOperation chat;
@@ -94,9 +95,16 @@ public final class QwenChatUsagePreflight {
             @Override public void close(){if(previous==null)action.remove();else action.set(previous);}
         }
         public VettingInputBudget.Input input(String system,String user,JsonNode schema,String sourceSha) {
-            VettingInputBudget.Input in=VettingInputBudget.input("qwen-chat-completions",identity.getModel(),profileSha,system,user,schema,OUTPUT,sourceSha);
+            VettingInputBudget.Input in;
+            if(vettingJsonRecords()) {
+                in=VettingInputBudget.chatInput("qwen-chat-completions",identity.getModel(),profileSha,
+                        Arrays.asList(LlmClient.ChatTurn.system(AiGateway.structuredSystemPrompt(system,schema,true)),LlmClient.ChatTurn.user(user)),OUTPUT,sourceSha);
+                in.setSchema(schema.deepCopy());VettingInputBudget.rebind(in);
+            } else in=VettingInputBudget.input("qwen-chat-completions",identity.getModel(),profileSha,system,user,schema,OUTPUT,sourceSha);
             return seal(in,false).input;
         }
+        private boolean vettingJsonRecords(){return "vetting".equals(module)&&"qwen".equals(chat.getIdentity().getProfileId());}
+        private boolean jsonObjectWire(){return vettingJsonRecords()||"advice".equals(module)&&"qwen".equals(chat.getIdentity().getProfileId());}
         /** Advice supplies its actual final session/schema/retry envelope exactly once. */
         public PreparedRequest prepareChat(List<LlmClient.ChatTurn> turns,JsonNode schema,String sourceSha,boolean stream) {
             VettingInputBudget.Input in=VettingInputBudget.chatInput("qwen-chat-completions",identity.getModel(),profileSha,turns,OUTPUT,sourceSha);
@@ -104,7 +112,7 @@ public final class QwenChatUsagePreflight {
         }
         private PreparedRequest seal(VettingInputBudget.Input in,boolean stream) {
             assertCurrent();if(!VettingInputBudget.validBinding(in)||in.getWire()!=null||in.getQwenWire()!=null||!sha(in.getSourceSnapshotSha256()))throw new IllegalArgumentException("Qwen complete input binding required");
-            QwenChatClient.PreparedRequest bytes=client.prepare(in.getMessages(),in.getSchema(),stream);WireIdentity wire=new WireIdentity();
+            QwenChatClient.PreparedRequest bytes=client.prepare(in.getMessages(),in.getSchema(),stream,jsonObjectWire());WireIdentity wire=new WireIdentity();
             wire.setVersion(VERSION);wire.setKind(KIND);wire.setProfileSha256(profileSha);wire.setPolicySha256(policySha);
             wire.setGenerationEntitySha256(hash(bytes.getGenerationJson()));wire.setPreflightEntitySha256(hash(bytes.getProbeJson()));
             ObjectNode common=strict(bytes.getGenerationJson());common.remove(Arrays.asList("max_tokens","stream"));wire.setCommonInputSha256(hash(JsonUtils.write(Arrays.asList(common,in.getSchema(),in.getSourceSnapshotSha256()))));
@@ -119,7 +127,7 @@ public final class QwenChatUsagePreflight {
         }
         private ActionContext current(Runnable guard) {
             ActionContext context=action.get();if(context==null)throw new IllegalStateException("qwen_durable_action_required");
-            context.checkCancelled();context.guard.run();if(guard!=null)guard.run();assertCurrent();context.checkCancelled();return context;
+            context.checkCancelled();context.guard.run();if(guard!=null&&guard!=context.guard)guard.run();assertCurrent();context.checkCancelled();return context;
         }
         public VettingInputBudget.Observation observe(VettingInputBudget.Input in,String phase,Runnable guard){return observe(in,phase,guard,null);}
         public VettingInputBudget.Observation observe(VettingInputBudget.Input in,String phase,Runnable guard,Consumer<Runnable> cancel) {
@@ -132,6 +140,7 @@ public final class QwenChatUsagePreflight {
                 return JsonUtils.read(saved,VettingInputBudget.Observation.class);
             }
             QwenGenerationLedger.Reservation reservation=ledger.reserve(context.id,identity.getConfigurationSha256(),phase,in.getSerializedInputSha256(),false);
+            int probeRequestBytes=request.bytes.getProbeJson().getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
             String raw=null;boolean terminal=false;
             try {
                 current(guard);ledger.dispatch(reservation);raw=client.usageProbe(request.bytes,cancel);current(guard);
@@ -151,14 +160,14 @@ public final class QwenChatUsagePreflight {
                 WireIdentity w=in.getQwenWire();UsageEstimate estimate=new UsageEstimate();estimate.setKind(KIND);estimate.setVersion(VERSION);estimate.setProfileSha256(profileSha);estimate.setPolicySha256(policySha);
                 estimate.setGenerationEntitySha256(w.getGenerationEntitySha256());estimate.setPreflightEntitySha256(w.getPreflightEntitySha256());estimate.setCommonInputSha256(w.getCommonInputSha256());
                 estimate.setResponseSha256(hash(raw));estimate.setConfiguredContextTokens(CONTEXT);estimate.setSafetyMarginTokens(MARGIN);estimate.setCompletionTokens(completion);estimate.setFinishReason(choice.path("finish_reason").asText());out.setQwenUsageEstimate(estimate);
-                Map<String,Object> receipt=new LinkedHashMap<>();receipt.put("requestSha256",w.getPreflightEntitySha256());receipt.put("responseSha256",hash(raw));receipt.put("promptTokens",input);receipt.put("completionTokens",completion);
+                Map<String,Object> receipt=new LinkedHashMap<>();receipt.put("requestSha256",w.getPreflightEntitySha256());receipt.put("probeRequestBytes",probeRequestBytes);receipt.put("responseSha256",hash(raw));receipt.put("promptTokens",input);receipt.put("completionTokens",completion);
                 if(usage.has("total_tokens"))receipt.put("totalTokens",usage.path("total_tokens").longValue());receipt.put("finishReason",estimate.getFinishReason());receipt.put("stableObservationSha256",hash(JsonUtils.write(stableObservation(out))));
                 ledger.complete(reservation,receipt);terminal=true;current(guard);
                 // Reuse token accounting only after the paid receipt and exit guards have succeeded.
                 if(Arrays.asList("provider_estimated_fit","over_budget").contains(checkEstimate(in,out,new VettingInputBudget.Result()).getStatus())&&context.observations.size()<limits.preflights)
                     context.observations.put(in.getSerializedInputSha256(),JsonUtils.write(out));
                 return out;
-            }catch(RuntimeException error){if(!terminal){Map<String,Object> failure=new LinkedHashMap<>();failure.put("failureKind",error.getClass().getSimpleName());failure.put("requestSha256",in.getQwenWire().getPreflightEntitySha256());if(raw!=null)failure.put("responseSha256",hash(raw));ledger.unknown(reservation,failure);}throw error;}
+            }catch(RuntimeException error){if(!terminal){Map<String,Object> failure=new LinkedHashMap<>();failure.put("failureKind",QwenChatClient.safeUsageFailureKind(error));failure.put("requestSha256",in.getQwenWire().getPreflightEntitySha256());failure.put("probeRequestBytes",probeRequestBytes);if(raw!=null)failure.put("responseSha256",hash(raw));ledger.unknown(reservation,failure);}throw error;}
         }
         public VettingInputBudget.Result observe(PreparedRequest request,String phase,Runnable guard,Consumer<Runnable> cancel) {
             return VettingInputBudget.check(request.input,in->observe(in,phase,guard,cancel));
@@ -188,7 +197,9 @@ public final class QwenChatUsagePreflight {
                 public List<float[]> embed(List<String> texts){throw new UnsupportedOperationException();}
                 public boolean available(){return true;}public String chatModel(){return identity.getModel();}public String embedModel(){return "";}
             };
-            return new AiGateway(preparedClient).completeStructuredJsonList(system,user,type,schema,rawOut,timings);
+            AiGateway gateway=new AiGateway(preparedClient);
+            return vettingJsonRecords()?gateway.completeStructuredJsonRecords(system,user,type,schema,rawOut,timings)
+                    :gateway.completeStructuredJsonList(system,user,type,schema,rawOut,timings);
         }
         private final class ActionContext {
             final String id;final Runnable guard;

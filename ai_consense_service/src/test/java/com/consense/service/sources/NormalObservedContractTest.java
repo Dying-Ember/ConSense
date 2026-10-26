@@ -28,6 +28,16 @@ class NormalObservedContractTest {
         assertDoesNotThrow(()->NormalObservedContract.validateCapability(current));
         String raw=resource("authored-projection.json");assertEquals(JsonUtils.parse(raw),NormalObservedContract.validate(raw,JsonUtils.parse(raw).path("projectionSha256").asText()));
     }
+    @Test void compactPdfPublicationRequiresExplicitBackendSupport()throws Exception{
+        ObjectNode health=(ObjectNode)JsonUtils.parse(resource("authored-current-v3-capability.json")).path("oer").deepCopy();
+        ObjectNode graph=JsonUtils.mapper().createObjectNode().put("producerVersion","actual-normal-source-unit-compact-pdf-observations-v4");
+        assertThrows(CanonicalEvidenceException.class,()->NormalObservedContract.validateGraphCapability(health,graph));
+        ((ObjectNode)health.path("normalObserved")).putArray("supportedCandidateGraphVersions").add(graph.path("producerVersion").asText());
+        assertDoesNotThrow(()->NormalObservedContract.validateGraphCapability(health,graph));
+        graph.put("producerVersion","future");
+        ((com.fasterxml.jackson.databind.node.ArrayNode)health.path("normalObserved").path("supportedCandidateGraphVersions")).add("future");
+        assertThrows(CanonicalEvidenceException.class,()->NormalObservedContract.validateGraphCapability(health,graph));
+    }
     @Test void recomputingOuterSealCannotGrantQualityOrDropACompleteMember()throws Exception{
         JsonNode original=JsonUtils.parse(resource("authored-projection.json"));
         for(String defect:new String[]{"quality","member","unknown","empty","position","content","routing","adoption"}){

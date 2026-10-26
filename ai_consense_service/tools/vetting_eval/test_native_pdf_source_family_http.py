@@ -20,6 +20,7 @@ import test_native_pdf_source_family as family_fixture
 import native_pdf_source_family as family_producer
 from test_token_windows import CharacterTokenizer
 import test_oer_server as base_tests
+from test_unified_source_frame import actual_cas_trace
 
 
 class NativePdfSourceFamilyHttpTests(unittest.TestCase):
@@ -120,28 +121,26 @@ class NativePdfSourceFamilyHttpTests(unittest.TestCase):
     def test_fresh_normal_get_and_warm_normal_get_rehash_the_same_complete_actual_cas(self):
         self.published()
         fresh = create_unified_app(self.policy, backend=self.backend, artifact_store=self.store)
-        original_read = self.store._read_uncached
         traces = []
         with TestClient(fresh) as client, patch.object(family_producer, 'validate_native_pdf_transport',
                 wraps=family_producer.validate_native_pdf_transport) as child:
             counts = []
             for module in ('vetting', 'advisory'):
                 trace = []
-                def read(descriptor, *, retain):
-                    trace.append((descriptor['sha256'], descriptor['byteCount'], retain))
-                    return original_read(descriptor, retain=retain)
-                with patch.object(self.store, '_read_uncached', side_effect=read):
+                with actual_cas_trace(self.store, trace):
                     response = client.get('/canonical/' + self.expected['projectionSha256'] + '?module=' + module)
                 self.assertEqual(200, response.status_code, response.text)
                 self.assertEqual(_serialize(self.expected), response.content)
                 traces.append(trace)
                 counts.append(child.call_count)
         self.assertEqual([2, 2], counts, 'Warm request must not reconstruct either complete child')
-        self.assertEqual(set(traces[0]), set(traces[1]))
+        # Cold reconstruction may reread shared bodies after per-document release.
+        self.assertEqual(sorted({(sha, size) for sha, size, _ in traces[0]}),
+                         sorted({(sha, size) for sha, size, _ in traces[1]}))
         for trace in traces:
             self.assertTrue(trace)
-            entry = {(sha, size) for sha, size, retain in trace if retain}
-            exit_reads = {(sha, size) for sha, size, retain in trace if not retain}
+            entry = list(dict.fromkeys((sha, size) for sha, size, is_entry in trace if is_entry))
+            exit_reads = [(sha, size) for sha, size, is_entry in trace if not is_entry]
             self.assertEqual(entry, exit_reads)
         members = {(sha, size) for sha, size, _ in traces[0]}
         print('AUTHORED_FAMILY_NORMAL_HTTP_CAS_PROOF=' + json.dumps({

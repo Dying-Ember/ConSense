@@ -13,6 +13,7 @@ final class VettingRetrievalSourceUnits {
     static final String TYPED_PARENT_POLICY="unique-source-structural-unit-seeds-typed-parent-context-v2";
     static final String ATTACHMENT_POLICY="unique-source-structural-unit-seeds-typed-parent-attachment-context-v3";
     static final String SHARED_NOTE_POLICY="unique-source-structural-unit-seeds-typed-parent-shared-note-context-v4";
+    static final String EXACT_CLAUSE_POLICY="full_dotted_identifier_bound_clause_first_v1";
     static boolean attachmentPolicy(String policy){return ATTACHMENT_POLICY.equals(policy)||SHARED_NOTE_POLICY.equals(policy);}
     static boolean supportsPolicy(String policy){return POLICY.equals(policy)||TYPED_PARENT_POLICY.equals(policy)||attachmentPolicy(policy);}
     static final List<String> FIELDS=Arrays.asList("documentId","sourceHash","role","metadataVersion","segmentationVersion","nativeTableMetadataVersion","sourceQualityMetadataVersion","sourceQualityHash");
@@ -21,6 +22,7 @@ final class VettingRetrievalSourceUnits {
         final List<String> ids;
         final Map<String,Object> trace;
         Unit(String origin,String status,String reason,List<String> ids,Map<String,Object> trace){this.originId=origin;this.status=status;this.reason=reason;this.ids=Collections.unmodifiableList(ids);this.trace=Collections.unmodifiableMap(trace);}
+        Unit(String origin,Unit shared){this.originId=origin;this.status=shared.status;this.reason=shared.reason;this.ids=shared.ids;this.trace=shared.trace;}
     }
     static final class RankedChunks extends ArrayList<Chunk> {
         final List<Unit> units;
@@ -44,7 +46,8 @@ final class VettingRetrievalSourceUnits {
             require(u.path("derivedMembersCanBecomeOrigins").isBoolean()&&!u.path("derivedMembersCanBecomeOrigins").asBoolean()&&u.path("memberScores").isNull(),"unranked source members cannot receive scores or become origins");
             require(u.path("sourceIdentity").equals(identity(seed)),"source-unit identity differs from original ranked seed");
             JsonNode hit=root.path("hits").get(i);
-            require(u.path("originalRerankOrdinal").isIntegralNumber()&&u.path("originalRerankOrdinal").canConvertToInt()&&u.path("originalRerankOrdinal").asInt()>previousOrdinal&&u.path("seedScore").equals(hit.path("score")),"source-unit seed rank/score differs");previousOrdinal=u.path("originalRerankOrdinal").asInt();
+            int selectedOrdinal=selectionOrdinal(episode,u,hit.path("payload"));
+            require(selectedOrdinal>previousOrdinal&&u.path("seedScore").equals(hit.path("score")),"source-unit seed rank/score differs");previousOrdinal=selectedOrdinal;
             String status=u.path("status").asText(),reason=null;List<String> ids=textIds(u.path("requiredMemberIds"));
             if("complete_observed_unit".equals(status)) {
                 List<String> expected=members(seed,u,corpus);
@@ -61,6 +64,36 @@ final class VettingRetrievalSourceUnits {
             units.add(new Unit(seed.getId(),status,reason,new ArrayList<>(ids),trace));
         }
         return new RankedChunks(ranked,units);
+    }
+    static List<String> selectionOrder(JsonNode episode) {
+        JsonNode ranking=episode.path("ranking");
+        require(EXACT_CLAUSE_POLICY.equals(ranking.path("policy").asText()),"unknown explicit selection ranking policy");
+        String identifier=ranking.path("identifier").asText();
+        require(identifier.matches("[a-z][a-z0-9]*(?:\\.[a-z0-9]+)+")&&identifier.matches(".*[0-9].*"),"exact selection identifier differs");
+        List<String> model=textIds(ranking.path("modelScoreOrderIds")),selected=textIds(ranking.path("selectionOrderIds")),exact=textIds(ranking.path("exactClauseCandidateIds"));
+        require(!exact.isEmpty()&&new HashSet<>(model).equals(new HashSet<>(selected))&&model.containsAll(exact),"selection/model candidate identities differ");
+        List<String> expected=new ArrayList<>();for(String id:model)if(exact.contains(id))expected.add(id);for(String id:model)if(!exact.contains(id))expected.add(id);
+        require(expected.equals(selected),"exact clause selection changed the relative model order");
+        return selected;
+    }
+    static int selectionOrdinal(JsonNode episode,JsonNode unit,JsonNode seed) {
+        JsonNode original=unit.path("originalRerankOrdinal");
+        require(original.isIntegralNumber()&&original.canConvertToInt()&&original.asInt()>0,"source-unit original model rank differs");
+        if(!episode.has("ranking")){require(!unit.has("selectionOrdinal"),"selection ordinal requires an explicit ranking policy");return original.asInt();}
+        List<String> selected=selectionOrder(episode),model=textIds(episode.path("ranking").path("modelScoreOrderIds")),exact=textIds(episode.path("ranking").path("exactClauseCandidateIds"));
+        String id=seed.path("id").asText(),identifier=episode.path("ranking").path("identifier").asText();
+        require(selected.contains(id)&&original.asInt()==model.indexOf(id)+1&&unit.path("selectionOrdinal").isIntegralNumber()
+                &&unit.path("selectionOrdinal").canConvertToInt()&&unit.path("selectionOrdinal").asInt()==selected.indexOf(id)+1,"source-unit selection/model ordinal differs");
+        require(exact.contains(id)==exactClauseOwner(identifier,seed),"exact selection is not bound to the source clause");
+        return unit.path("selectionOrdinal").asInt();
+    }
+    private static boolean exactClauseOwner(String identifier,JsonNode seed) {
+        String kind=seed.path("observedNodeKind").asText(""),role=seed.path("observedSourceRole").asText("");
+        if(!kind.isEmpty()&&!"clause".equals(kind)||!role.isEmpty()&&!Arrays.asList("body","heading","body_interval_observation").contains(role))return false;
+        boolean label=false;for(String key:Arrays.asList("observedClause","clauseId"))if(seed.path(key).isTextual()&&!seed.path(key).asText().trim().isEmpty()) {
+            label=true;if(!identifier.equals(seed.path(key).asText().trim().toLowerCase(Locale.ROOT)))return false;
+        }
+        return label&&(!seed.path("clauseHeadingLocation").asText("").isEmpty()||"clause".equals(kind)&&!seed.path("observedNodeId").asText("").isEmpty());
     }
     private static List<String> members(Chunk seed,JsonNode unit,Map<String,Chunk> corpus) {
         JsonNode scope=identity(seed);require(completeScope(seed),"source-unit identity/quality/version is unknown");

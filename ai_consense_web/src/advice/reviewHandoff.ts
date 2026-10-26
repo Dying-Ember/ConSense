@@ -41,7 +41,6 @@ export const reviewHandoffCopy = {
   finding: { zhHans: '审查发现', zhHant: '審查發現', en: 'Review finding' },
   quotation: { zhHans: '待核查的原文引用', zhHant: '待核查的原文引用', en: 'Original quotation to verify' },
   request: { zhHans: '请核对引用与当前版本，再回答这个问题。', zhHant: '請核對引用與目前版本，再回答這個問題。', en: 'Check the quotations against the current version before answering this question.' },
-  identity: { zhHans: '来源身份', zhHant: '來源身份', en: 'Source identity' }
 } satisfies Record<string, LocalizedText>
 
 function text(value: unknown): value is string { return typeof value === 'string' }
@@ -60,6 +59,7 @@ function evidenceValid(value: unknown): value is FindingEvidence {
     && typeof value.located === 'boolean'
     && (value.documentId == null || text(value.documentId) || typeof value.documentId === 'number' && Number.isFinite(value.documentId))
     && ['sourceHash', 'pageNo', 'anchor'].every(key => value[key] == null || text(value[key]))
+    && ['originalSourceSha256', 'businessContentSha256'].every(key => value[key] == null || text(value[key]) && /^[0-9a-f]{64}$/.test(value[key]))
 }
 function valid(value: unknown): value is ReviewHandoff {
   return object(value) && value.schema === SCHEMA && text(value.token) && /^[a-zA-Z0-9-]{16,80}$/.test(value.token)
@@ -79,6 +79,7 @@ export function createReviewHandoff(input: {
     evidence: input.evidence.map(item => ({
       side: item.side, documentId: item.documentId, fileKey: item.fileKey, fileName: item.fileName,
       pageNo: item.pageNo, anchor: item.anchor, quote: item.quote, located: item.located, sourceHash: item.sourceHash,
+      originalSourceSha256: item.originalSourceSha256, businessContentSha256: item.businessContentSha256,
       ...(item.fixedBaselineEvidence ? { fixedBaselineEvidence: { ...item.fixedBaselineEvidence } } : {})
     }))
   }
@@ -127,14 +128,14 @@ export function reviewQuestion(handoff: ReviewHandoff, pick: (value: LocalizedTe
   lines.push('', pick(reviewHandoffCopy.unverified))
   handoff.evidence.forEach((item, index) => {
     lines.push('', `${pick(reviewHandoffCopy.quotation)} ${index + 1}: ${[item.fileKey, item.fileName, item.pageNo, item.anchor].filter(Boolean).join(' · ')}`,
-      `${pick(reviewHandoffCopy.identity)}: ${JSON.stringify({ documentId: item.documentId ?? null, sourceHash: item.sourceHash ?? null, ...(item.fixedBaselineEvidence ? { fixedBaselineEvidence: item.fixedBaselineEvidence } : {}) })}`, item.quote)
+      item.quote)
   })
   // Keep the last quotation's literal trailing whitespace inside the draft even when the composer trims its envelope.
   lines.push('', pick(reviewHandoffCopy.request))
   return lines.join('\n')
 }
 
-export function handoffSourceWarnings(handoff: ReviewHandoff, documents: { documentId: string; included: boolean; sourceHash?: string | null }[], loaded: boolean) {
+export function handoffSourceWarnings(handoff: ReviewHandoff, documents: { documentId: string; included: boolean; sourceHash?: string | null; originalSourceSha256?: string | null; businessContentSha256?: string | null }[], loaded: boolean) {
   let unavailable = false
   let unverified = handoff.evidence.length === 0
   let stale = handoff.sourceSetStale
@@ -142,8 +143,12 @@ export function handoffSourceWarnings(handoff: ReviewHandoff, documents: { docum
     if (item.fixedBaselineEvidence) { unverified = true; continue }
     const current = documents.find(document => item.documentId != null && document.documentId === String(item.documentId))
     if (loaded && (!current || !current.included)) unavailable = true
-    if (!item.sourceHash || !current?.sourceHash) unverified = true
-    else if (current.sourceHash !== item.sourceHash) stale = true
+    if (item.businessContentSha256 && current?.businessContentSha256) {
+      if (current.businessContentSha256 !== item.businessContentSha256) stale = true
+    } else if (item.sourceHash && current?.sourceHash) {
+      if (current.sourceHash !== item.sourceHash) stale = true
+    } else unverified = true
+    if (item.originalSourceSha256 && current?.originalSourceSha256 && current.originalSourceSha256 !== item.originalSourceSha256) stale = true
   }
   return { stale, unverified, unavailable }
 }

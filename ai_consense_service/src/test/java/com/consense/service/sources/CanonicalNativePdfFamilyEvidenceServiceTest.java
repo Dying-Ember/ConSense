@@ -29,10 +29,24 @@ class CanonicalNativePdfFamilyEvidenceServiceTest {
             ObjectNode algorithms=health.putObject("retrieval").putObject("sourceWindows").putObject("algorithms");root.path("manifest").path("software").fields().forEachRemaining(e->algorithms.set(e.getKey(),e.getValue().path("sha256")));
             for(String f:Arrays.asList("unified_source_registry.py","retrieval_source_units.py","oer_unified_server.py"))algorithms.put(f,"a".repeat(64));
             when(backend.health()).thenAnswer(i->JsonUtils.write(health));when(backend.snapshot(anyString(),anyString())).thenReturn(raw);
+            when(backend.snapshotIfChanged(anyString(),anyString(),anyString(),anyBoolean())).thenAnswer(i->new CanonicalEvidenceBackend.Reply(
+                com.consense.common.Utf8.bytes(raw),"application/json","\""+com.consense.common.Utf8.sha256(raw)+"\"",document.getSourceSha256(),root.path("projectionSha256").asText()));
             when(repository.findByProjectIdAndDocumentIdAndProjectionSha256(anyString(),anyLong(),anyString())).thenAnswer(i->rows.stream().findFirst());
+            when(repository.findById(anyLong())).thenAnswer(i->rows.stream().filter(b->b.getId().equals(i.getArgument(0))).findFirst());
+            when(repository.findCompactByDocument(anyString(),anyLong(),any(org.springframework.data.domain.Pageable.class))).thenAnswer(i->rows.stream()
+                .filter(b->b.getProjectId().equals(i.getArgument(0))&&b.getDocumentId().equals(i.getArgument(1)))
+                .sorted(Comparator.comparing(CanonicalSourceBinding::getId).reversed()).limit(((org.springframework.data.domain.Pageable)i.getArgument(2)).getPageSize())
+                .map(Wire::metadata).collect(java.util.stream.Collectors.toList()));
+            when(repository.findCompactByDocumentBefore(anyString(),anyLong(),anyLong(),any(org.springframework.data.domain.Pageable.class))).thenAnswer(i->rows.stream()
+                .filter(b->b.getProjectId().equals(i.getArgument(0))&&b.getDocumentId().equals(i.getArgument(1))&&b.getId()<(Long)i.getArgument(2))
+                .sorted(Comparator.comparing(CanonicalSourceBinding::getId).reversed()).limit(((org.springframework.data.domain.Pageable)i.getArgument(3)).getPageSize())
+                .map(Wire::metadata).collect(java.util.stream.Collectors.toList()));
             when(repository.findByProjectIdAndDocumentIdOrderByIdDesc(anyString(),anyLong(),any(org.springframework.data.domain.Pageable.class))).thenAnswer(i->rows.stream().sorted(Comparator.comparing(CanonicalSourceBinding::getId).reversed()).limit(1).collect(java.util.stream.Collectors.toList()));
             when(repository.findByProjectIdAndDocumentIdAndIdLessThanOrderByIdDesc(anyString(),anyLong(),anyLong(),any(org.springframework.data.domain.Pageable.class))).thenAnswer(i->rows.stream().filter(b->b.getId()<(Long)i.getArgument(2)).sorted(Comparator.comparing(CanonicalSourceBinding::getId).reversed()).limit(1).collect(java.util.stream.Collectors.toList()));
             when(repository.saveAndFlush(any())).thenAnswer(i->{CanonicalSourceBinding row=i.getArgument(0);row.setId(1L);rows.add(row);return row;});service=new CanonicalEvidenceService(repository,backend,reader);
+        }
+        private static CanonicalSourceBindingRepository.CompactMetadata metadata(CanonicalSourceBinding row){
+            return mock(CanonicalSourceBindingRepository.CompactMetadata.class,call->CanonicalSourceBinding.class.getMethod(call.getMethod().getName()).invoke(row));
         }
         CanonicalEvidenceService.ReviewedRegistration review(String adoption,String reference,String composition,String componentSet){return new CanonicalEvidenceService.ReviewedRegistration(root.path("projectionSha256").asText(),document.getSourceSha256(),VettingCorpus.sourceHash(document),root.path("source").path("sourceRevisionSha256").asText(),root.path("manifest").path("scope").path("scopePolicySha256").asText(),adoption,reference,composition,componentSet,"advisory");}
         CanonicalSourceBinding register(){return service.registerReviewed("family-project",9001L,review(null,null,root.path("projectionIdentity").path("compositionSha256").asText(),root.path("projectionIdentity").path("componentSetSha256").asText()));}
@@ -53,9 +67,10 @@ class CanonicalNativePdfFamilyEvidenceServiceTest {
     @Test void frameCopiesNewPinsAndEveryPointerBeforeFreshExitCheck()throws Exception{
         Wire w=new Wire();CanonicalSourceBinding row=w.register();clearInvocations(w.backend);
         try(CanonicalEvidenceService.VerifiedBindingFrame frame=w.service.verifiedBindings("family-project","advisory",Collections.singletonList(9001L))){
-            assertEquals(row.getFamilyCompositionSha256(),frame.bindings().get(0).getFamilyCompositionSha256());assertEquals(2,frame.pointers(9001L,row.getProjectionSha256(),"advisory").size());frame.pointers(9001L,row.getProjectionSha256(),"advisory");verify(w.backend,times(1)).snapshot(anyString(),anyString());
+            assertEquals(row.getFamilyCompositionSha256(),frame.bindings().get(0).getFamilyCompositionSha256());assertEquals(row.getFamilyComponentSetSha256(),frame.bindings().get(0).getFamilyComponentSetSha256());assertEquals(2,frame.pointers(9001L,row.getProjectionSha256(),"advisory").size());frame.pointers(9001L,row.getProjectionSha256(),"advisory");verify(w.backend,times(1)).snapshot(anyString(),anyString());
         }
-        verify(w.backend,times(2)).snapshot(anyString(),anyString());
+        verify(w.backend,times(1)).snapshot(anyString(),anyString());
+        verify(w.backend).snapshotIfChanged(row.getProjectionSha256(),"advisory",com.consense.common.Utf8.sha256(w.raw),false);
     }
     @Test void frameRejectsNewPinChangesAfterRemoteWaitWithoutChangingProjectionSha()throws Exception{
         for(boolean composition:new boolean[]{true,false}){Wire w=new Wire();CanonicalSourceBinding row=w.register();CanonicalEvidenceService.VerifiedBindingFrame frame=w.service.verifiedBindings("family-project","advisory",Collections.singletonList(9001L));

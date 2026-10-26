@@ -6,12 +6,23 @@ import com.consense.config.ConsenseProperties;
 import com.consense.service.vetting.*;
 import com.fasterxml.jackson.databind.JsonNode;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import java.nio.file.Path;
 import java.util.*;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 import static org.mockito.ArgumentMatchers.*;
 
 class QwenChatUsagePreflightTest {
+    @Test void advisoryActionHasFourSealedAnswersForOneDraftAndOneSupplementWithRepairs() {
+        QwenChatUsagePreflight.Operation op=usage.capture(chat("qwen"),"advice",3);
+        try(QwenChatUsagePreflight.Operation.ActionScope ignored=op.openAction("advice:bounded",()->{})) { }
+        org.mockito.ArgumentCaptor<QwenGenerationLedger.Limits> limits=org.mockito.ArgumentCaptor.forClass(QwenGenerationLedger.Limits.class);
+        verify(ledger).open(eq("advice:bounded"),anyString(),limits.capture());
+        assertEquals(7,limits.getValue().preflights);
+        assertEquals(4,limits.getValue().answers);
+        assertEquals(11,limits.getValue().total);
+    }
     @Test void englishFileExportUsesItsOwnFinitePaidActionBudget() {
         QwenChatUsagePreflight.Operation op=usage.capture(chat("qwen"),"file-export");
         try(QwenChatUsagePreflight.Operation.ActionScope ignored=op.openAction("file-export:authored",()->{})) { }
@@ -20,6 +31,7 @@ class QwenChatUsagePreflightTest {
         assertEquals(24,limits.getValue().preflights);assertEquals(24,limits.getValue().answers);assertEquals(48,limits.getValue().total);
     }
     private final ConsenseProperties props=new ConsenseProperties();
+    @TempDir Path files;
     private final HttpSupport http=mock(HttpSupport.class);
     private final QwenGenerationLedger ledger=mock(QwenGenerationLedger.class);
     private final QwenChatUsagePreflight usage=new QwenChatUsagePreflight(props,ledger);
@@ -35,7 +47,7 @@ class QwenChatUsagePreflightTest {
         n.putObject("usage").put("prompt_tokens",prompt).put("completion_tokens",1).put("total_tokens",prompt+1);return JsonUtils.write(n);
     }
     private void answer() {
-        doAnswer(call->{JsonNode body=JsonUtils.parse(call.getArgument(1));return envelope(body.path("model").asText(),body.path("max_tokens").asInt(),42,body.path("max_tokens").asInt()==1?"{":"[]");})
+        doAnswer(call->{JsonNode body=JsonUtils.parse(call.getArgument(1));return envelope(body.path("model").asText(),body.path("max_tokens").asInt(),42,body.path("max_tokens").asInt()==1?"{":body.has("response_format")?"{\"records\":[]}":"[]");})
                 .when(http).postJsonBoundedWithoutReplay(anyString(),anyString(),anyLong(),anyString(),anyInt(),any());
     }
     @Test void bothProfilesSealOnlyCapAndStreamDifferencesAndReserveBeforeDispatch() {
@@ -46,12 +58,16 @@ class QwenChatUsagePreflightTest {
                 VettingInputBudget.Input in=op.input("SYSTEM AUTHORED","WHOLE SOURCE AUTHORED",schema,SOURCE);
                 VettingInputBudget.Result b=VettingInputBudget.check(in,input->op.observe(input,"final",()->{}));
                 assertTrue(b.isExtraDispatchPermitted());assertFalse(b.getObservation().isCompleteChatTemplateAndSchemaObserved());assertNull(b.getObservation().getTokenizerIdentitySha256());
-                assertEquals(0,op.complete(in,b,"SYSTEM AUTHORED","WHOLE SOURCE AUTHORED",schema,Map.class,new ArrayList<>(),new LinkedHashMap<>(),null).size());
+                List<String> raw=new ArrayList<>();
+                assertEquals(0,op.complete(in,b,"SYSTEM AUTHORED","WHOLE SOURCE AUTHORED",schema,Map.class,raw,new LinkedHashMap<>(),null).size());
+                assertEquals(Collections.singletonList("qwen".equals(profile)?"{\"records\":[]}":"[]"),raw);
             }
         }
         org.mockito.InOrder order=inOrder(ledger,http);order.verify(ledger).open(eq("test:qwen"),anyString(),any());order.verify(ledger).reserve(eq("test:qwen"),anyString(),eq("final"),anyString(),eq(false));order.verify(ledger).dispatch(any());order.verify(http).postJsonBoundedWithoutReplay(anyString(),anyString(),anyLong(),anyString(),anyInt(),any());
         org.mockito.ArgumentCaptor<String> bodies=org.mockito.ArgumentCaptor.forClass(String.class);verify(http,times(4)).postJsonBoundedWithoutReplay(anyString(),bodies.capture(),anyLong(),anyString(),anyInt(),any());
         for(int i=0;i<4;i+=2){com.fasterxml.jackson.databind.node.ObjectNode probe=(com.fasterxml.jackson.databind.node.ObjectNode)JsonUtils.parse(bodies.getAllValues().get(i));com.fasterxml.jackson.databind.node.ObjectNode actual=(com.fasterxml.jackson.databind.node.ObjectNode)JsonUtils.parse(bodies.getAllValues().get(i+1));assertEquals(1,probe.path("max_tokens").asInt());assertEquals(16384,actual.path("max_tokens").asInt());probe.remove(Arrays.asList("max_tokens","stream"));actual.remove(Arrays.asList("max_tokens","stream"));assertEquals(actual,probe);}
+        org.mockito.ArgumentCaptor<Map<String,Object>> receipts=org.mockito.ArgumentCaptor.forClass(Map.class);verify(ledger,times(4)).complete(any(),receipts.capture());
+        for(int i=0;i<4;i+=2)assertEquals(bodies.getAllValues().get(i).getBytes(java.nio.charset.StandardCharsets.UTF_8).length,receipts.getAllValues().get(i).get("probeRequestBytes"));
     }
     @Test void identicalFinalInputReusesPaidObservationAcrossPlannerFinalAndRepair() {
         answer();QwenChatUsagePreflight.Operation op=usage.capture(chat("qwen"),"vetting");
@@ -92,6 +108,15 @@ class QwenChatUsagePreflightTest {
         }
         verify(http,times(1)).postJsonBoundedWithoutReplay(anyString(),anyString(),anyLong(),anyString(),anyInt(),any());verify(ledger,times(1)).reserve(anyString(),anyString(),anyString(),anyString(),eq(false));
     }
+    @Test void sameActionAndCallGuardRunsOnceAtEachPreflightBoundary() {
+        answer();QwenChatUsagePreflight.Operation op=usage.capture(chat("qwen"),"advice");Runnable guard=mock(Runnable.class);
+        try(QwenChatUsagePreflight.Operation.ActionScope action=op.openAction("test:same-guard",guard)) {
+            clearInvocations(guard);
+            VettingInputBudget.Input in=op.input("SYS","WHOLE",JsonUtils.parse("{\"type\":\"array\"}"),SOURCE);
+            op.observe(in,"final",guard);
+            verify(guard,times(4)).run();
+        }
+    }
     @Test void malformedUsageCannotPopulateTheReusableObservation() {
         QwenChatUsagePreflight.Operation op=usage.capture(chat("qwen"),"vetting");when(http.postJsonBoundedWithoutReplay(anyString(),anyString(),anyLong(),anyString(),anyInt(),any())).thenReturn(envelope("qwen3.8-flash",1,42,"{"));
         try(QwenChatUsagePreflight.Operation.ActionScope action=op.openAction("test:never-cache-unknown",()->{})) {
@@ -107,6 +132,29 @@ class QwenChatUsagePreflightTest {
             assertFalse(VettingInputBudget.check(in,i->op.observe(i,"planner",()->{})).isExtraDispatchPermitted());assertFalse(VettingInputBudget.check(in,i->op.observe(i,"final",()->{})).isExtraDispatchPermitted());
         }
         verify(http,times(2)).postJsonBoundedWithoutReplay(anyString(),anyString(),anyLong(),anyString(),anyInt(),any());verify(ledger,times(2)).unknown(any(),anyMap());verify(ledger,never()).complete(any(),anyMap());
+    }
+    @Test void rejectedPreflightPreservesOnlySafeHttpStatusInBudgetAndLedger() {
+        QwenChatUsagePreflight.Operation op=usage.capture(chat("qwen"),"file-export");
+        when(http.postJsonBoundedWithoutReplay(anyString(),anyString(),anyLong(),anyString(),anyInt(),any())).thenThrow(new com.consense.common.BizException("Qwen chat HTTP 400"));
+        try(QwenChatUsagePreflight.Operation.ActionScope action=op.openAction("test:http-status",()->{})) {
+            VettingInputBudget.Input in=op.input("SYS","WHOLE",JsonUtils.parse("{\"type\":\"array\"}"),SOURCE);
+            VettingInputBudget.Result budget=VettingInputBudget.check(in,i->op.observe(i,"language-0",()->{}));
+            assertEquals("budget_unknown",budget.getStatus());assertEquals("qwen_preflight_http_400",budget.getReason());assertFalse(budget.isExtraDispatchPermitted());
+        }
+        org.mockito.ArgumentCaptor<Map<String,Object>> receipts=org.mockito.ArgumentCaptor.forClass(Map.class);verify(ledger).unknown(any(),receipts.capture());
+        assertEquals("HTTP400",receipts.getValue().get("failureKind"));assertFalse(receipts.getValue().toString().contains("Qwen chat"));
+        org.mockito.ArgumentCaptor<String> body=org.mockito.ArgumentCaptor.forClass(String.class);verify(http).postJsonBoundedWithoutReplay(anyString(),body.capture(),anyLong(),anyString(),anyInt(),any());
+        assertEquals(body.getValue().getBytes(java.nio.charset.StandardCharsets.UTF_8).length,receipts.getValue().get("probeRequestBytes"));
+    }
+    @Test void englishExportReportsPreflightFailureWithoutClaimingAnObservedBudgetOverrun() {
+        LlmOperation selected=chat("qwen");props.setStorageRoot(files.toString());
+        LlmClient local=mock(LlmClient.class);LlmProfiles profiles=new LlmProfiles(props,local,local,selected.getClient(),local);
+        com.consense.service.export.EnglishFileOutput output=new com.consense.service.export.EnglishFileOutput(new AiGateway(local,profiles),usage,props);
+        when(http.postJsonBoundedWithoutReplay(anyString(),anyString(),anyLong(),anyString(),anyInt(),any())).thenThrow(new com.consense.common.BizException("Qwen chat HTTP 400"));
+        try(LlmProfiles.Scope ignored=profiles.bind(profiles.resolve("qwen"))) {
+            com.consense.common.BizException error=assertThrows(com.consense.common.BizException.class,()->output.text("中文","snapshot:test",()->{}));
+            assertEquals("The English translation model usage check failed (HTTP 400). No file was returned.",error.getMessage());
+        }
     }
     @Test void aCompletedReceiptWithAFailedExitGuardIsNotReused() {
         answer();QwenChatUsagePreflight.Operation op=usage.capture(chat("qwen"),"vetting");java.util.concurrent.atomic.AtomicInteger calls=new java.util.concurrent.atomic.AtomicInteger();Runnable guard=()->{if(calls.incrementAndGet()==4)throw new IllegalStateException("AUTHORED source changed after receipt");};

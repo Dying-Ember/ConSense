@@ -38,7 +38,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         "consense.ocr.enabled=false","consense.vector.provider=memory","consense.llm.enabled=true","consense.llm.chat-model=session-test-chat",
         "consense.llm.num-ctx=262144",
         "consense.llm.structured-thinking=false",
-        "consense.advice.history-max-exchanges=2","consense.advice.history-max-messages=4","consense.advice.history-max-tokens=1024",
+        "consense.advice.history-max-exchanges=2","consense.advice.history-max-messages=4","consense.advice.history-max-tokens=8192",
         "consense.minimax-cn.enabled=true","consense.minimax-cn.base-url=https://session-test.invalid",
         "consense.minimax-cn.api-key=session-test-only"})
 @ActiveProfiles("h2") @AutoConfigureMockMvc
@@ -144,8 +144,9 @@ class AdviceSessionIntegrationTest {
             answer="{\"grounded\":true,\"answer\":\"AUTHORED final supported analysis TEST ONLY [1]\",\"citations\":[\"[1]\"]}";
             doAnswer(call->{dispatched.add(call.getArgument(0));return com.consense.service.advice.AdviceBudgetFixture.contract(answer);}).when(local).chatStructured(anyList(),any());
             assertTrue(data(post("/api/advice/{id}/ask",project).contentType(MediaType.APPLICATION_JSON).content(body)).path("grounded").asBoolean());
-            assertEquals(2,counted.size());assertEquals(1,dispatched.size());
-            String historyMaterial=counted.get(0).getMessages().get(1).getContent(),fullPrompt=dispatched.get(0).get(1).getContent();
+            assertEquals(1,counted.size(),"Only the final complete prompt is counted");assertEquals(1,dispatched.size());
+            String fullPrompt=dispatched.get(0).get(1).getContent();
+            String historyMaterial=fullPrompt.substring(0,fullPrompt.length()-currentTask.length());
             assertTrue(historyMaterial.startsWith("\n\nConversation context only"));
             JsonNode actualHistory=JsonUtils.parse(historyMaterial.substring(historyMaterial.indexOf('\n',2)+1));
             List<LlmClient.ChatTurn> expected=new ArrayList<>();
@@ -156,7 +157,7 @@ class AdviceSessionIntegrationTest {
             assertEquals(JsonUtils.parse(JsonUtils.write(expected)),actualHistory,"Keep the same whole recent exchanges, including the sibling after the clarification target");
             assertEquals(historyMaterial+currentTask,fullPrompt,"The exact current source/task/background block follows the exact counted history block");
             assertTrue(historyMaterial.contains("Answer only from the current evidence IDs in the current task."));
-            assertEquals(JsonUtils.write(counted.get(1).getMessages()),JsonUtils.write(dispatched.get(0)),"Count the reordered full input actually dispatched");
+            assertEquals(JsonUtils.write(counted.get(0).getMessages()),JsonUtils.write(dispatched.get(0)),"Count the complete input actually dispatched");
             JsonNode after=history(project,session);assertEquals(8,after.size());
             for(int index=0;index<before.size();index++)assertEquals(before.get(index),after.get(index),"Historical messages and citations stay unchanged");
         } finally {adviceSettings.setHistoryMaxExchanges(originalLimit);overrideTokens.set(0);}
@@ -212,7 +213,7 @@ class AdviceSessionIntegrationTest {
         mvc.perform(reply(project,session,parent)).andExpect(jsonPath("$.code").value(4204));
     }
 
-    @Test void historyTokenCapDropsWholeOldExchangesAndNeverCutsAStoredAnswer() throws Exception {
+    @Test void conservativeHistoryByteCapDropsWholeOldExchangesAndNeverCutsAStoredAnswer() throws Exception {
         String project=project();source(project,"CURRENT BASIS TEST ONLY");rebuild(project);String session=session(project,"contract","project_contract");
         answer="{\"grounded\":true,\"answer\":\""+String.join("",Collections.nCopies(9000,"X"))+" END OF COMPLETE ANSWER TEST ONLY\",\"citations\":[\"[1]\"]}";
         JsonNode old=ask(project,session,"LONG OLD EXCHANGE TEST ONLY");
@@ -347,7 +348,7 @@ class AdviceSessionIntegrationTest {
         java.util.concurrent.atomic.AtomicInteger generations=e1Provider(JsonUtils.write(raw));
         List<JsonNode> events=e1Events(project,session,"contract","project_contract","Explain the relationship of the selected requirements in English.");
         JsonNode response=e1Complete(events),checks=e1AssertExchange(project,session,events,"en");
-        assertEquals(1,generations.get());assertEquals(2,response.path("sources").size(),"Complete response retains both retrieved sources; the application scope below counts only the cited file");
+        assertEquals(1,generations.get());assertEquals(1,response.path("sources").size(),"Only the published citation enters the completion event and saved history");
         assertEquals(1,prompts.size());assertTrue(prompts.get(0).contains(cited.getTextContent()));assertTrue(prompts.get(0).contains(other.getTextContent()),"Both retrieved sources were available to the captured model request");
         String content=response.path("content").path("en").asText();
         assertTrue(content.contains("selected project sources"));assertTrue(content.contains("cites provisions from 1 file."));
@@ -393,6 +394,7 @@ class AdviceSessionIntegrationTest {
         java.lang.reflect.Constructor<com.consense.service.vetting.FixedReferenceEvidence> constructor=com.consense.service.vetting.FixedReferenceEvidence.class.getDeclaredConstructor(String.class,double.class,JsonNode.class,JsonNode.class,JsonNode.class);
         constructor.setAccessible(true);com.consense.service.vetting.FixedReferenceEvidence evidence=constructor.newInstance("fixed:authored-scope",0.9,payload,null,unit);
         when(fixedScopeReferences.enabled()).thenReturn(true);when(fixedScopeReferences.frozenManifest()).thenReturn(JsonUtils.parse("{\"version\":\"AUTHORED\",\"developmentBaseline\":true}"));
+        when(fixedScopeReferences.currentReadGuard(anyList(),any())).thenAnswer(call->{List<com.consense.vector.VectorStore.SearchHit> selected=call.getArgument(0);java.util.function.Consumer<JsonNode> capture=call.getArgument(1);capture.accept(fixedScopeReferences.frozenManifest());return (Runnable)()->fixedScopeReferences.assertCurrent(selected);});
         when(fixedScopeReferences.searchForProject(anyString(),eq("advisory"),anyString(),eq(10))).thenReturn(Collections.singletonList(evidence.asHit()));
         when(fixedScopeReferences.evidence(any())).thenReturn(evidence);when(fixedScopeReferences.toModelMaterial(anyList(),eq(200000))).thenReturn(JsonUtils.write(payload));
         String project=project(),session=session(project,"fullset","reference_only");

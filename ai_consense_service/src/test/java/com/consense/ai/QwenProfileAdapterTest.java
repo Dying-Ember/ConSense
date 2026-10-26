@@ -89,6 +89,33 @@ class QwenProfileAdapterTest {
         assertEquals("[REDACTED]",JsonUtils.parse(partial.getModelContent()).path("value").asText());
         assertFalse(partial.getRawResponse().contains("\\u0073"));
     }
+    @Test void usageProbeKeepsOnlyAnAllowlistedHttpStatus() {
+        ConsenseProperties.Llm cfg=new ConsenseProperties().getQwen();cfg.setApiKey("synthetic-secret");HttpSupport http=mock(HttpSupport.class);
+        QwenChatClient client=new QwenChatClient(cfg,http);
+        QwenChatClient.PreparedRequest request=client.prepare(Collections.singletonList(LlmClient.ChatTurn.user("TEST ONLY")),JsonUtils.mapper().createObjectNode(),false);
+        for(String raw:Arrays.asList("Qwen chat HTTP 400","Qwen chat HTTP 401 synthetic-secret","synthetic-secret")) {
+            reset(http);when(http.postJsonBoundedWithoutReplay(anyString(),anyString(),anyLong(),anyString(),anyInt(),any())).thenThrow(new BizException(raw));
+            BizException error=assertThrows(BizException.class,()->client.usageProbe(request,null));
+            assertEquals("Qwen chat HTTP 400".equals(raw)?"HTTP400":"BizException",QwenChatClient.safeUsageFailureKind(error));
+            assertFalse(error.getMessage().contains(cfg.getApiKey()));
+            assertFalse(error.getMessage().contains(raw));
+        }
+    }
+
+    @Test void vettingJsonObjectModeIsSealedIntoBothPaidRequests() {
+        ConsenseProperties.Llm cfg=new ConsenseProperties().getQwen();cfg.setApiKey("synthetic-secret");
+        QwenChatClient client=new QwenChatClient(cfg,mock(HttpSupport.class));
+        QwenChatClient.PreparedRequest records=client.prepare(Collections.singletonList(LlmClient.ChatTurn.system("Return JSON.")),
+                JsonUtils.parse("{\"type\":\"array\"}"),false,true);
+        com.fasterxml.jackson.databind.node.ObjectNode generation=(com.fasterxml.jackson.databind.node.ObjectNode)JsonUtils.parse(records.getGenerationJson());
+        com.fasterxml.jackson.databind.node.ObjectNode probe=(com.fasterxml.jackson.databind.node.ObjectNode)JsonUtils.parse(records.getProbeJson());
+        assertEquals("json_object",generation.path("response_format").path("type").asText());
+        assertEquals("json_object",probe.path("response_format").path("type").asText());
+        assertEquals(1,probe.path("max_tokens").asInt());
+        generation.remove(Arrays.asList("max_tokens","stream"));probe.remove(Arrays.asList("max_tokens","stream"));assertEquals(generation,probe);
+        assertFalse(JsonUtils.parse(client.prepare(Collections.singletonList(LlmClient.ChatTurn.system("Return JSON.")),
+                JsonUtils.parse("{\"type\":\"array\"}"),false).getGenerationJson()).has("response_format"));
+    }
 
     @Test void centralConfigurationLookupAndChatSelectionPreserveDeploymentEmbeddings() {
         ConsenseProperties props=new ConsenseProperties();LlmClient local=mock(LlmClient.class),miniMax=mock(LlmClient.class),qwen=mock(LlmClient.class),flash=mock(LlmClient.class);

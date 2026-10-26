@@ -88,6 +88,19 @@ class VettingTokenAwareRequestPacksTest {
         for(String id:Arrays.asList("later","unread"))assertTrue(plan.getSourcePlan().getRequests().stream().filter(r->r.getRequiredChunkIds().contains(id)).allMatch(r->"budget_unknown".equals(r.getStatus())&&"action_budget_exhausted".equals(r.getUnknownReason())&&r.getMissingChunkIds().contains(id)));
         assertTrue(plan.getSourcePlan().getRequests().stream().filter(r->r.getRequiredChunkIds().equals(Collections.singletonList("global"))).allMatch(r->"already_global".equals(r.getStatus())));assertFalse(plan.isPreviewIsFinalDispatchAuthority());
     }
+    @Test void repeatedQwenPreflightTransportFailureStopsFurtherPaidPreviewsWithoutLosingRequests() {
+        List<Chunk> chunks=independent();VettingContextBuilder.Selection g=global(chunks);Result original=independentPlan(chunks,g,8);
+        AtomicInteger factories=new AtomicInteger(),observers=new AtomicInteger();
+        VettingTokenAwareRequestPacks.Plan plan=new VettingTokenAwareRequestPacks(chunks).repack(original,g,p->{
+            factories.incrementAndGet();VettingInputBudget.Input input=factory().build(p);
+            input.setQwenWire(new com.consense.service.llm.QwenChatUsagePreflight.WireIdentity());VettingInputBudget.rebind(input);return input;
+        },in->{observers.incrementAndGet();throw new com.consense.common.BizException(5001,"Qwen usage preflight transport failed");});
+        assertEquals(2,observers.get());assertEquals(2,factories.get());assertEquals(2,plan.getActualPreviewObserverCalls());
+        assertEquals(original.getRequests().size(),plan.getSourcePlan().getRequests().size());assertTrue(plan.getSourcePlan().getExtraPacks().isEmpty());
+        assertTrue(plan.getSourcePlan().getRequests().stream().allMatch(r->"budget_unknown".equals(r.getStatus())
+                &&"qwen_preflight_transport_failed".equals(r.getUnknownReason())&&!r.getMissingChunkIds().isEmpty()));
+        assertEquals("qwen_preflight_transport_failed",plan.getRelatedGroups().get(plan.getRelatedGroups().size()-1).getOutcome());
+    }
     @Test void aFullPackCapOnlyObservesExistingUnionsAndStillAdmitsAUnionThatFits() {
         List<Chunk> chunks=independent();VettingContextBuilder.Selection g=global(chunks);List<List<String>> candidates=new ArrayList<>();List<Integer> indexes=new ArrayList<>();
         VettingTokenAwareRequestPacks.Plan plan=new VettingTokenAwareRequestPacks(chunks).repack(independentPlan(chunks,g,1),g,p->{indexes.add(p.getIndex());candidates.add(p.getChunks().stream().map(Chunk::getId).collect(java.util.stream.Collectors.toList()));return factory().build(p);},this::observed);

@@ -48,6 +48,7 @@ async function run() {
   assert.equal(downloadCount, 1)
   assert.equal(downloaded[0], responseBlob)
   assert.equal(requests[0].url, '/vetting/project-A/report.json?lang=en')
+  assert.equal(requests[0].config.timeout, 600000)
   assert.equal(requests[0].config.headers['X-ConSense-Llm-Profile'], 'minimax-cn')
   await reject({ code: 4091, message: 'Source set changed', data: null }, /Source set changed/)
   await reject({ code: 0, message: 'Unexpected envelope', data: report() }, /Unexpected envelope/)
@@ -70,6 +71,7 @@ async function run() {
     responseBlob = new Blob([bytes], { type })
     await vettingApi.exportReport('project-A', `report.${format}`, format)
     assert.equal(requests.at(-1).url, `/vetting/project-A/report.${format}?lang=en`)
+    assert.equal(requests.at(-1).config.timeout, 600000)
   }
   assert.equal(downloadCount, 3); assert.equal(urlCount, 3)
   assert.equal(reported.length, rejectedReports + 3)

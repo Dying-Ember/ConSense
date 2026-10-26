@@ -8,6 +8,7 @@ from __future__ import annotations
 import copy
 
 from canonical_projection import _fail, _fields, _name
+from native_pdf_observation import reader_glyph_text
 
 
 VERSION = 'source-reviewed-native-pdf-whole-table-groups-v1'
@@ -25,7 +26,7 @@ def _integer(value, code, minimum=0):
     return value
 
 
-def project_table_groups(manifest, parts, reference, native):
+def project_table_groups(manifest, parts, reference, native, *, font_text=False):
     refs = {region['regionId']: region for region in reference['regions']}
     tables = {table['tableId']: table for table in reference.get('tables', [])}
     glyphs = {glyph['id']: glyph for page in native['observation']['pageObservations']
@@ -89,7 +90,7 @@ def project_table_groups(manifest, parts, reference, native):
                 text_parts = []
                 for span in parts[rid]['nativeTextSpans']:
                     if span['kind'] == 'native_glyph' and span['glyphId'] in member_set:
-                        text_parts.append(glyphs[span['glyphId']]['unicode'] or '')
+                        text_parts.append(reader_glyph_text(glyphs[span['glyphId']], font_text=font_text))
                     elif span['kind'] == 'reviewed_separator_not_glyph_observation':
                         separator = span['separator']
                         if separator['afterGlyphId'] in member_set and separator['beforeGlyphId'] in member_set:
@@ -98,6 +99,11 @@ def project_table_groups(manifest, parts, reference, native):
                 cells.append({**copy.deepcopy(cell), 'text': text, 'textChannel': 'same_version_literal_native_glyphs',
                               'sourceRegionId': rid, 'sourceAnchor': copy.deepcopy(parts[rid]['sourceReviewAnchor']),
                               'unicodeStatus': 'unknown_null_unicode_present' if any(glyphs[m]['unicode'] is None for m in members) else 'literal_observed'})
+                if font_text:
+                    cells[-1]['textChannel'] = 'same_version_native_glyphs_with_verified_font_decoding'
+                    if any(glyphs[m].get('textResolution', {}).get('resolutionStatus') == 'resolved_embedded_symbol_selector'
+                           for m in members if glyphs[m].get('textResolution') is not None):
+                        cells[-1]['unicodeStatus'] = 'resolved_original_embedded_symbol_font'
             _fail(used_slots == {(r, c) for r in range(rows) for c in range(cols)}, 'native_pdf_table_column_or_row_missing')
             _fail(used_glyphs == set(parts[rid]['capturedGlyphIds']), 'native_pdf_table_original_glyph_missing')
             row_refs |= {(rid, row) for row in range(rows) if row not in header}

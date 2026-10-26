@@ -27,6 +27,92 @@ def _save(path, value):
             'byteCount': len(raw)}
 
 
+def _index_summary(request):
+    # Canonical roots and index metadata already own the complete source graph.
+    return {'projectId': request.projectId, 'rebuild': request.rebuild,
+            'chunkCount': len(request.chunks),
+            'sourceHashes': sorted({chunk.sourceHash for chunk in request.chunks}),
+            'originalSourceSha256': sorted({value for chunk in request.chunks
+                                          if (value := getattr(chunk, 'originalSourceSha256', None))}),
+            'projectionSha256': sorted({value for chunk in request.chunks
+                                      if (value := getattr(chunk, 'projectionSha256', None))}),
+            'recording': 'summary_only; complete sources remain in canonical and index storage'}
+
+
+def _identity_summary(value):
+    if not isinstance(value, dict):
+        return {}
+    fields = ('schema', 'producerKind', 'producerVersion', 'projectionSha256',
+        'projectionRevisionSha256', 'sourceHash', 'projectionIdentity',
+        'observationManifestRef', 'rootRef', 'sourceBinding', 'responseFormat')
+    result = {key: value[key] for key in fields if key in value}
+    if isinstance(value.get('source'), dict):
+        result['source'] = {key: value['source'][key] for key in (
+            'documentId', 'sourceSha256', 'originalSourceSha256', 'parsedSourceHash',
+            'sourceRevisionSha256', 'fileName', 'sourceEditionId') if key in value['source']}
+    for key in ('chunks', 'units', 'assets', 'nonRetrievableUnits', 'unknowns', 'origins'):
+        if isinstance(value.get(key), (list, dict)):
+            result[key + 'Count'] = len(value[key])
+    return result
+
+
+def _unit_summary(value):
+    if not isinstance(value, dict):
+        return {}
+    fields = ('id', 'unitId', 'documentId', 'sourceHash', 'projectionSha256', 'originIds',
+        'evidenceRef', 'complete', 'status', 'originalRerankOrdinal', 'score')
+    return {key: value[key] for key in fields if key in value}
+
+
+def _request_summary(endpoint, request):
+    if endpoint == '/index':
+        return _index_summary(request)
+    if endpoint == '/normal-observed':
+        return {'sourceBinding': request.sourceBinding,
+            'candidateGraph': _identity_summary(request.candidateGraph),
+            'responseFormat': request.responseFormat, 'recording': 'summary_only'}
+    if endpoint in ('/project', '/project/native', '/project/native-collection', '/project/native-pdf', '/project/native-pdf-family'):
+        result = {'recording': 'summary_only'}
+        descriptors = ('sourceFamilySpecRef', 'internalProjectionDescriptor', 'nativeBundleRef', 'dualBundleRef', 'adoptionManifestRef')
+        for name in ('bundle', 'adoptionManifest', 'sourceBinding', *descriptors, 'children', 'sources'):
+            value = getattr(request, name, None)
+            if isinstance(value, dict):
+                result[name] = value if name in descriptors else _identity_summary(value)
+            elif isinstance(value, list):
+                result[name] = [_identity_summary(item) for item in value]
+        return result
+    return request.model_dump(exclude_none=True)
+
+
+def _response_summary(endpoint, result):
+    if endpoint not in ('/sources/read', '/retrieve', '/project', '/normal-observed',
+            '/project/native', '/project/native-collection', '/project/native-pdf', '/project/native-pdf-family'):
+        return result
+    fields = ('contract', 'view', 'operation', 'module', 'projectId', 'mode', 'projectionSha256',
+        'projectionRevisionSha256', 'canonicalProjections', 'readManifestSha256', 'semanticProjectionVersion',
+        'semanticReadVersion', 'semanticReadProfile', 'sourceUnitPolicy', 'coverage', 'blockedOrigin',
+        'sourceQualityVerified', 'sourceQualityChangedByRegistry', 'indexSignature', 'seconds',
+        'cached', 'chunks', 'assets', 'immutable', 'qualityVerifiedByRegistry', 'responseFormat')
+    summary = {key: result[key] for key in fields if key in result}
+    summary['recording'] = 'summary_only; complete sources and members remain in canonical, CAS and index storage'
+    if 'projection' in result:
+        summary['projection'] = _identity_summary(result['projection'])
+    if 'sources' in result:
+        summary['sources'] = result['sources']
+    for name in ('origins', 'units', 'hits'):
+        if isinstance(result.get(name), list):
+            summary[name] = [_unit_summary(value) for value in result[name]]
+    if isinstance(result.get('sourceUnits'), dict):
+        units = result['sourceUnits']
+        summary['sourceUnits'] = {'policy': units.get('policy'),
+            'units': [_unit_summary(value) for value in units.get('units', [])],
+            'rawParentTopKIds': units.get('rawParentTopKIds', [])}
+    for name in ('groups', 'members'):
+        if name in result:
+            summary[name + 'Count'] = len(result[name])
+    return summary
+
+
 def _inspect_events(path):
     digest, count, byte_count, malformed = hashlib.sha256(), 0, 0, False
     with path.open('rb') as stream:
@@ -54,6 +140,27 @@ class RequestEvidence:
         record = self.active.get()
         if record is None:
             return
+        if stage == 'window-index-upsert':
+            payload = {**{key: value for key, value in payload.items() if key != 'vectors'},
+                       'vectorCount': len(payload.get('vectors', [])),
+                       'recording': 'progress_only; vector integrity remains in the index seal'}
+        elif stage == 'dual-granularity-source-plan':
+            coverage = payload.get('coverage', {})
+            payload = {'pointCount': len(payload.get('points', [])),
+                       'contextCount': len(payload.get('contexts', [])),
+                       'bindingCount': len(payload.get('bindings', [])),
+                       'coverage': {key: value for key, value in coverage.items()
+                                    if not isinstance(value, (list, dict))},
+                       'contextUnavailableCount': len(coverage.get('contextUnavailable', [])),
+                       'recording': 'summary_only; complete plan remains in index metadata'}
+        elif stage == 'source-window-plan':
+            payload = {key: value for key, value in payload.items() if key != 'windowBindings'}
+            payload['recording'] = 'summary_only; complete windows remain in index metadata'
+        elif stage == 'source-unit-closure':
+            payload = {'policy': payload.get('policy'),
+                'units': [_unit_summary(value) for value in payload.get('units', [])],
+                'rawParentTopKIds': payload.get('rawParentTopKIds', []),
+                'recording': 'summary_only; complete units remain in canonical and index storage'}
         next_ordinal = record['events'] + 1
         raw = _encode({'ordinal': next_ordinal, 'stage': stage,
                        'elapsedSeconds': time.perf_counter() - record['started'],
@@ -100,10 +207,10 @@ class RequestEvidence:
     def wrap(self, endpoint, operation):
         @wraps(operation)
         def recorded(request):
-            value = request.model_dump(exclude_none=True)
+            value = _request_summary(endpoint, request)
             with self.operation(endpoint, value) as record:
                 result = operation(request)
                 if record is not None:
-                    record['response'] = _save(record['directory'] / 'response.json', result)
+                    record['response'] = _save(record['directory'] / 'response.json', _response_summary(endpoint, result))
                 return result
         return recorded

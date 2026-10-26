@@ -29,6 +29,17 @@ class AdviceStreamControllerTest {
     private static final String BODY = "{\"question\":\"Which clause applies?\",\"scope\":\"contract\",\"basisScope\":\"project_contract\",\"sessionId\":\"session-A\"}";
     private LlmProfiles profiles() { return new LlmProfiles(new ConsenseProperties(), mock(LlmClient.class), mock(LlmClient.class)); }
 
+    @Test void streamDeadlineCoversOneTwentyMinuteQwenCallAndRemainsBounded() {
+        AdviceStreamController controller = new AdviceStreamController(mock(AdviceService.class), profiles());
+        try {
+            AskRequest request = new AskRequest("Which clause applies?", "contract", null, "project_contract", "session-A");
+            Long timeout = controller.ask("project-A", ID, request).getTimeout();
+            assertNotNull(timeout);
+            assertTrue(timeout > TimeUnit.MINUTES.toMillis(20));
+            assertTrue(timeout <= TimeUnit.MINUTES.toMillis(30));
+        } finally { controller.shutdown(); }
+    }
+
     @Test void sourceFailureReasonSurvivesTheSseBoundaryWithoutItsPrivateCause() throws Exception {
         AdviceService advice=mock(AdviceService.class);LlmProfiles profiles=profiles();
         doThrow(new com.consense.common.BizException(4204,"Current canonical source bindings are unavailable for the selected advice scope. Complete source review and registration before asking.","source_unregistered",new IllegalStateException("AUTHORED_PRIVATE_CAUSE")))
@@ -69,10 +80,13 @@ class AdviceStreamControllerTest {
 
     @Test void stopCallsProviderCancellationAndReleasesSessionForAnotherRequest() throws Exception {
         AdviceService advice = mock(AdviceService.class); LlmProfiles profiles = profiles();
-        CountDownLatch entered = new CountDownLatch(1), cancelled = new CountDownLatch(1);
+        CountDownLatch entered = new CountDownLatch(1), cancelled = new CountDownLatch(1), release = new CountDownLatch(1), done = new CountDownLatch(1);
+        AtomicBoolean interrupted = new AtomicBoolean();
         doAnswer(call -> {
             AdviceProgress progress = call.getArgument(2); progress.onCancel(cancelled::countDown); entered.countDown();
-            try { new CountDownLatch(1).await(5, TimeUnit.SECONDS); } catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); }
+            try { release.await(5, TimeUnit.SECONDS); }
+            catch (InterruptedException stopped) { interrupted.set(true); Thread.currentThread().interrupt(); }
+            finally { done.countDown(); }
             progress.checkCancelled(); return null;
         }).when(advice).ask(anyString(), any(AskRequest.class), any(AdviceProgress.class));
         AdviceStreamController controller = new AdviceStreamController(advice, profiles);
@@ -82,7 +96,10 @@ class AdviceStreamControllerTest {
             assertTrue(entered.await(3, TimeUnit.SECONDS));
             mvc.perform(post("/api/advice/project-A/ask/stream/" + ID + "/stop").param("sessionId", "session-A")).andExpect(status().isOk());
             assertTrue(cancelled.await(1, TimeUnit.SECONDS));
+            release.countDown();
+            assertTrue(done.await(3, TimeUnit.SECONDS));
+            assertFalse(interrupted.get(), "Stopping a request must not interrupt a worker that may be reading H2");
             mvc.perform(post("/api/advice/project-A/ask/stream").header("X-ConSense-Advice-Request", ID + "2").contentType("application/json").content(BODY)).andExpect(request().asyncStarted());
-        } finally { controller.shutdown(); }
+        } finally { release.countDown(); controller.shutdown(); }
     }
 }

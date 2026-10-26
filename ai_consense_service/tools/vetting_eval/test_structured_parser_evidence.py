@@ -534,6 +534,50 @@ class StructuredParserEvidenceContractTest(unittest.TestCase):
         self.assertEqual(page['blocks'][0]['content'], block['declaredContentObservations'])
         self.assertEqual('content/text/content', block['provenance']['textField'])
 
+    def test_mineru_mixed_inline_retains_condition_literals_order_and_raw_bytes(self):
+        segments = [{'type': 'text', 'content': 'Unless amended, at sizes up to and including '},
+                    {'type': 'equation_inline', 'content': r'50\mathrm{mm}'},
+                    {'type': 'text', 'content': '; above this limit use the other material.\n'}]
+        page = mineru_page(); page['blocks'][0]['content'] = copy.deepcopy(segments)
+        raw = json.dumps({'schema': 'docvortex.middle', 'schema_version': '2.0',
+                          'pages': [page]}, ensure_ascii=False).encode('utf-8')
+        result = run('mineru', outputs={'middle_json': raw})
+        block = result['pages'][0]['blocks'][0]
+        self.assertEqual(''.join(item['content'] for item in segments), block['text'])
+        self.assertEqual(segments, block['declaredContentObservations'])
+        self.assertEqual('content/text+equation_inline/content', block['provenance']['textField'])
+        self.assertEqual('unknown', block['inlineEquationInterpretation'])
+        self.assertEqual('needs_review', block['qualityStatus'])
+        self.assertEqual(raw, read_artifact_record(result['rawOutputs']['middle_json']))
+        self.assertFalse(result['humanConfirmed']); self.assertIsNone(result['canonicalSelection'])
+
+    def test_mixed_inline_keeps_existing_string_and_line_span_precedence(self):
+        segments = [{'type': 'text', 'content': 'Authored inline '},
+                    {'type': 'equation_inline', 'content': r'50\mathrm{mm}'}]
+        for fields, expected, field in (
+                ({'block_content': 'Explicit block text'}, 'Explicit block text', 'block_content'),
+                ({'lines': [{'spans': [{'content': 'Observed line 50 mm'}]}]},
+                 'Observed line 50 mm', 'lines/spans/content'),
+                ({'lines': []}, '', 'lines/spans/content'),
+                ({'lines': [{'spans': [{'content': None}]}]}, None, None)):
+            with self.subTest(fields=fields):
+                page = mineru_page(); page['blocks'][0].update(content=copy.deepcopy(segments), **fields)
+                block = run('mineru', outputs={'middle_json': {'schema': 'docvortex.middle',
+                    'schema_version': '2.0', 'pages': [page]}})['pages'][0]['blocks'][0]
+                self.assertEqual(expected, block['text']); self.assertEqual(field, block['provenance']['textField'])
+                self.assertNotIn('inlineEquationInterpretation', block)
+
+    def test_inline_only_or_unsupported_typed_content_remains_unavailable(self):
+        for content in ([], [{'type': 'equation_inline', 'content': '50'}],
+                        [{'type': 'text', 'content': 'condition'}, {'type': 'unknown', 'content': '50'}],
+                        [{'type': 'text', 'content': 'condition'}, {'type': 'equation_inline', 'content': None}],
+                        [{'type': 'text', 'content': 'condition'}, {'type': 'image', 'content': '50'}]):
+            with self.subTest(content=content):
+                page = mineru_page(); page['blocks'][0]['content'] = content
+                block = run('mineru', outputs={'middle_json': {'schema': 'docvortex.middle',
+                    'schema_version': '2.0', 'pages': [page]}})['pages'][0]['blocks'][0]
+                self.assertIsNone(block['text']); self.assertNotIn('inlineEquationInterpretation', block)
+
     def test_mineru_middle_table_body_content_is_a_whole_group_with_html_and_asset_observation(self):
         page = mineru_page(table=True)
         page['blocks'][0]['content'] = [{'type': 'table_body', 'image_path': 'images/page_0_table_6.jpg', 'content': HTML}]

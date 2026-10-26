@@ -23,16 +23,44 @@ public class NormalObservedPreparationService {
 
     @Transactional(propagation=Propagation.REQUIRES_NEW,isolation=Isolation.READ_COMMITTED)
     public JsonNode prepare(String project,Long id,String module){
+        return currentGraph(prepareSource(project,id,module,null));
+    }
+    /** The returned complete read owns the exact candidate CAS; callers must release it after adaptation. */
+    @Transactional(propagation=Propagation.REQUIRES_NEW,isolation=Isolation.READ_COMMITTED)
+    public SourceDocument prepareSource(String project,Long id,String module,SourceDocument expected){
         SourceDocument source=sources.normalDocument(project,id,module);
+        if(expected!=null)require(ProjectDocumentScope.sameScopeRevision(expected,source)
+                &&SourceContentDigests.stamped(expected)&&SourceContentDigests.stamped(source)
+                &&java.util.Objects.equals(expected.getBusinessContentSha256(),source.getBusinessContentSha256()),"CANONICAL_SOURCE_STALE");
         requireEvidence(source);
+        if(!JsonUtils.isBlankText(source.getNormalCandidateJson())){
+            JsonNode retained=null;
+            try{retained=NormalSourceCandidateGraph.requireBound(source);}catch(RuntimeException stale){/* Rebuild stale saved candidates below. */}
+            if(retained!=null){
+                require(Utf8.byteCount(source.getNormalCandidateJson())<=NormalObservedContract.maximumBytes(properties.getMaxSnapshotBytes()),"NORMAL_OBSERVED_TOO_LARGE");
+                SourceDocument current=sources.validatedScope(project,id,module);
+                if(SourceContentDigests.stamped(current)){
+                    sources.requireCurrentStamp(source,current);
+                    return source;
+                }
+            }
+        }
+        String beforeStamp=source.getBusinessContentSha256();boolean stamped=SourceContentDigests.stamped(source);
         NormalSourceCandidateGraph.capture(source);String raw=source.getNormalCandidateJson();
         require(Utf8.byteCount(raw)<=NormalObservedContract.maximumBytes(properties.getMaxSnapshotBytes()),"NORMAL_OBSERVED_TOO_LARGE");
+        if(stamped){
+            require(documents.compareAndSetNormalCandidateWithStamp(id,project,beforeStamp,source.getSourceSha256(),source.getOerIdentityJson(),
+                    source.getCategory(),source.getFileKey(),source.getReviewRole(),source.getDocumentScope(),source.getParseStatus(),raw)==1,"CANONICAL_SOURCE_STALE");
+            SourceDocument current=sources.validatedScope(project,id,module);
+            require(java.util.Objects.equals(current.getNormalCandidateSha256(),SourceContentDigests.field(raw)),"CANONICAL_SOURCE_STALE");
+            SourceContentDigests.rebindVerifiedCurrent(source,current);return source;
+        }
         SourceDocument fresh=sources.normalDocument(project,id,module);
         require(sameGeneration(source,fresh),"CANONICAL_SOURCE_STALE");
         require(documents.compareAndSetNormalCandidate(id,project,source.getSourceSha256(),source.getOerIdentityJson(),
                 source.getTextContent(),source.getStructuredContentJson(),source.getParseCoverageJson(),source.getCategory(),source.getFileKey(),source.getReviewRole(),source.getDocumentScope(),source.getParseStatus(),raw)==1,"CANONICAL_SOURCE_STALE");
         fresh=sources.normalDocument(project,id,module);require(sameGeneration(source,fresh),"CANONICAL_SOURCE_STALE");
-        return JsonUtils.parse(raw);
+        source.setNormalCandidateJson(raw);return source;
     }
     public static void requireEvidence(SourceDocument source){
         require(ProjectDocumentScope.parseUsable(source)&&!JsonUtils.isBlankText(source.getStructuredContentJson())

@@ -8,6 +8,7 @@ import com.consense.domain.CanonicalSourceBinding;
 import com.consense.service.sources.NativeCanonicalFixture;
 import com.consense.service.sources.NativeCanonicalContract;
 import com.consense.service.sources.CanonicalEvidenceBackend;
+import com.consense.service.sources.CanonicalEvidenceService;
 import com.consense.service.sources.NativeDocumentCollectionFixture;
 import com.consense.service.sources.CanonicalEvidenceException;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -27,6 +28,29 @@ import static org.mockito.Mockito.*;
 class OerCanonicalRetrievalClientTest {
     private static final String INPUT="canonical-source-chunks-upstream-scope-and-parser-projection-v1";
     private static final String KEY="test-canonical";
+    @Test void frameBackedCorpusBorrowsItsVerifiedChunkTree() throws Exception {
+        Wire wire=new Wire();
+        CanonicalEvidenceService owner=mock(CanonicalEvidenceService.class);
+        Class<?> viewType=Class.forName(CanonicalEvidenceService.class.getName()+"$BindingView");
+        java.lang.reflect.Constructor<?> view=viewType.getDeclaredConstructor(CanonicalSourceBinding.class,JsonNode.class,boolean.class);
+        view.setAccessible(true);
+        java.lang.reflect.Constructor<CanonicalEvidenceService.VerifiedBindingFrame> frameConstructor=
+                CanonicalEvidenceService.VerifiedBindingFrame.class.getDeclaredConstructor(
+                        CanonicalEvidenceService.class,CanonicalEvidenceService.class,String.class,String.class,List.class);
+        frameConstructor.setAccessible(true);
+        try(CanonicalEvidenceService.VerifiedBindingFrame frame=frameConstructor.newInstance(owner,owner,KEY,"vetting",
+                Collections.singletonList(view.newInstance(wire.binding,wire.snapshot,false)))){
+            java.lang.reflect.Method build=OerCanonicalRetrievalClient.class.getDeclaredMethod("corpus",List.class,String.class,
+                    CanonicalEvidenceService.VerifiedBindingFrame.class);
+            build.setAccessible(true);
+            Object corpus=build.invoke(wire.client,frame.bindings(),"vetting",frame);
+            java.lang.reflect.Field chunks=corpus.getClass().getDeclaredField("chunks");chunks.setAccessible(true);
+            @SuppressWarnings("unchecked") Map<String,JsonNode> parents=(Map<String,JsonNode>)chunks.get(corpus);
+            JsonNode original=wire.snapshot.path("chunks").get(0);
+            assertSame(original,parents.get(original.path("id").asText()),
+                    "An owned frame must not copy or reparse the complete verified source tree");
+        }
+    }
     @Test void portableStructuralHealthUsesExplicitV6WithoutRelaxingOldVersionPins() throws Exception {
         Wire wire=new Wire();wire.health.put("indexSignatureVersion",6);
         ((ObjectNode)wire.health.path("retrieval").path("sourceWindows").path("algorithms")).put("portable_index_signature.py",VettingCorpus.hash("authored portable adapter"));
@@ -45,6 +69,37 @@ class OerCanonicalRetrievalClientTest {
         assertFalse(first.has("rebuild"));assertTrue(second.path("rebuild").asBoolean());
         assertEquals(first.path("projectionSha256"),second.path("projectionSha256"));
         assertEquals(first.path("projectId"),second.path("projectId"));
+    }
+    @Test void advisoryAvailabilityUsesCompactPinsWithoutSnapshotReadsAndChecksGeneration()throws Exception {
+        Wire wire=new Wire();wire.advisory();
+        wire.binding.setScopePolicySha256(wire.snapshot.path("manifest").path("scope").path("scopePolicySha256").asText());
+        ((ObjectNode)wire.health.path("oer")).put("indexAvailabilityContract","live-canonical-index-availability-v1");
+        wire.client.index(KEY,"advisory",Collections.singletonList(wire.binding));
+        CanonicalSourceBinding compact=new CanonicalSourceBinding();org.springframework.beans.BeanUtils.copyProperties(wire.binding,compact);compact.setSnapshotJson(null);
+        ObjectNode available=wire.index.deepCopy();available.put("ready",true);available.put("readOnly",true);available.put("fullVectorIntegrityChecked",false);
+        available.put("indexAvailabilityContract","live-canonical-index-availability-v1");available.put("vectorPoints",3);available.put("vectorDimension",2);
+        available.put("collection","authored-availability");available.put("indexGeneration","a".repeat(32));
+        when(wire.http.postJson(endsWith("/index-canonical/availability"),anyString(),anyLong())).thenAnswer(call->JsonUtils.write(available));
+        clearInvocations(wire.backend,wire.http);
+        OerCanonicalRetrievalClient.IndexState current=wire.client.indexAvailable(KEY,"advisory",Collections.singletonList(compact));
+        assertTrue(current.ready);assertEquals(wire.snapshot.path("chunks").size(),current.chunkCount);
+        ArgumentCaptor<String> body=ArgumentCaptor.forClass(String.class);
+        verify(wire.http).postJson(endsWith("/index-canonical/availability"),body.capture(),anyLong());
+        assertTrue(body.getValue().length()<2048);assertFalse(body.getValue().contains("chunks"));assertFalse(body.getValue().contains("snapshot"));
+        verify(wire.http,never()).postJson(endsWith("/index-canonical/status"),anyString(),anyLong());verifyNoInteractions(wire.backend);
+        available.put("indexGeneration","b".repeat(32));
+        assertFalse(wire.client.indexAvailable(KEY,"advisory",Collections.singletonList(compact),wire.snapshot.path("chunks").size()).ready);
+    }
+    @Test void advisoryAvailabilityRejectsBindingMutationDuringTheLiveWait()throws Exception {
+        Wire wire=new Wire();wire.advisory();
+        wire.binding.setScopePolicySha256(wire.snapshot.path("manifest").path("scope").path("scopePolicySha256").asText());
+        ((ObjectNode)wire.health.path("oer")).put("indexAvailabilityContract","live-canonical-index-availability-v1");
+        wire.client.index(KEY,"advisory",Collections.singletonList(wire.binding));
+        CanonicalSourceBinding compact=new CanonicalSourceBinding();org.springframework.beans.BeanUtils.copyProperties(wire.binding,compact);compact.setSnapshotJson(null);
+        ObjectNode available=wire.index.deepCopy();available.put("ready",true);available.put("readOnly",true);available.put("fullVectorIntegrityChecked",false);
+        available.put("indexAvailabilityContract","live-canonical-index-availability-v1");available.put("vectorPoints",3);available.put("vectorDimension",2);available.put("collection","authored-availability");available.putNull("indexGeneration");
+        when(wire.http.postJson(endsWith("/index-canonical/availability"),anyString(),anyLong())).thenAnswer(call->{compact.setJavaParsedSourceHash("f".repeat(64));return JsonUtils.write(available);});
+        assertFalse(wire.client.indexAvailable(KEY,"advisory",Collections.singletonList(compact),wire.snapshot.path("chunks").size()).ready);
     }
     private static final class Wire {
         final HttpSupport http=mock(HttpSupport.class);
@@ -165,6 +220,76 @@ class OerCanonicalRetrievalClientTest {
             ObjectNode demand=JsonUtils.mapper().createObjectNode();demand.put("operation","ids");demand.putArray("originIds").add(returned.path("origins").get(0).path("id").asText());
             if("none".equals(mutation))assertEquals(returned,wire.client.readSemanticSources(scope,demand));else assertThrows(RuntimeException.class,()->wire.client.readSemanticSources(scope,demand),mutation);
         }
+    }
+    @Test void dictionaryScanCeilingIsNegotiatedAndOtherOperationsRemainAt256()throws Exception{
+        for(boolean advertised:new boolean[]{false,true}){
+            Wire wire=new Wire();ObjectNode prepared=semanticFixture(wire,"prepare");ObjectNode capability=(ObjectNode)wire.health.path("oer").path("sourceRead");
+            capability.putArray("semanticReadVersions").add(OerCanonicalRetrievalClient.SEMANTIC_DICTIONARY);
+            if(advertised)capability.put("dictionaryScanMaximumItems",1024);
+            prepared.put("semanticReadVersion",OerCanonicalRetrievalClient.SEMANTIC_DICTIONARY);
+            ((ObjectNode)prepared.path("scopeIdentity")).put("semanticReadVersion",OerCanonicalRetrievalClient.SEMANTIC_DICTIONARY);sealReadScope(prepared);
+            when(wire.backend.sourceRead(anyString(),eq("vetting"),anyInt())).thenAnswer(call->{
+                if("prepare".equals(JsonUtils.parse(call.getArgument(0)).path("operation").asText()))return JsonUtils.write(prepared);
+                throw new IllegalStateException("AUTHORED wire accepted");
+            });
+            OerCanonicalRetrievalClient.SemanticSources scope=wire.client.prepareSemanticSources("vetting",Collections.singletonList(wire.binding));
+            assertEquals(advertised?1024:256,scope.scanMaximumItems());
+            ObjectNode scan=JsonUtils.mapper().createObjectNode().put("operation","scan").put("maxItems",1024);
+            assertTrue(assertThrows(IllegalStateException.class,()->wire.client.readSemanticSources(scope,scan)).getMessage()
+                .endsWith(advertised?"AUTHORED wire accepted":"semantic read operation/budget invalid"));
+            ObjectNode catalog=JsonUtils.mapper().createObjectNode().put("operation","catalog").put("maxItems",1024);
+            assertTrue(assertThrows(IllegalStateException.class,()->wire.client.readSemanticSources(scope,catalog)).getMessage().endsWith("semantic read operation/budget invalid"));
+            ObjectNode ids=JsonUtils.mapper().createObjectNode().put("operation","ids").put("maxItems",1024);
+            ids.putArray("originIds").add("AUTHORED origin");
+            assertTrue(assertThrows(IllegalStateException.class,()->wire.client.readSemanticSources(scope,ids)).getMessage().endsWith("semantic read operation/budget invalid"));
+        }
+    }
+    @Test void semanticStreamRequiresOrderedPagesCompleteExitProofAndUnchangedSourceIdentity()throws Exception{
+        for(String mutation:Arrays.asList("none","disconnect","missing_complete","complete_early","sequence","scope","token","counts","proof","late_page","source","software")){
+            Wire wire=new Wire();List<ObjectNode> pages=new ArrayList<>();
+            for(int i=0;i<wire.snapshot.path("chunks").size();i++)pages.add(semanticStreamPage(wire,i));
+            ObjectNode prepared=semanticFixture(wire,"prepare");prepared.put("semanticReadVersion",OerCanonicalRetrievalClient.SEMANTIC_DICTIONARY);
+            ObjectNode capability=(ObjectNode)wire.health.path("oer").path("sourceRead");capability.putArray("semanticReadVersions").add(OerCanonicalRetrievalClient.SEMANTIC_DICTIONARY);
+            capability.putArray("semanticScanStreamVersions").add(OerCanonicalRetrievalClient.SEMANTIC_SCAN_STREAM);
+            when(wire.backend.sourceRead(anyString(),eq("vetting"),anyInt())).thenReturn(JsonUtils.write(prepared));
+            OerCanonicalRetrievalClient.SemanticSources selected=wire.client.prepareSemanticSources("vetting",Collections.singletonList(wire.binding));assertTrue(selected.stream());
+            ObjectNode complete=JsonUtils.mapper().createObjectNode().put("type","complete").put("pageCount",pages.size()).put("totalOrigins",pages.size()).put("processedOrigins",pages.size())
+                    .put("scopeSha256",pages.get(0).path("scopeIdentity").path("scopeSha256").asText()).put("readManifestToken",prepared.path("readManifestToken").asText()).put("proofComplete",true);
+            if("scope".equals(mutation))complete.put("scopeSha256",VettingCorpus.hash("changed scope"));
+            if("token".equals(mutation))complete.put("readManifestToken",VettingCorpus.hash("changed token"));
+            if("counts".equals(mutation))complete.put("processedOrigins",pages.size()-1);
+            if("proof".equals(mutation))complete.put("proofComplete",false);
+            if("source".equals(mutation))((ObjectNode)pages.get(0).path("origins").get(0).path("evidenceRef")).put("originalSourceSha256",VettingCorpus.hash("changed source"));
+            doAnswer(call->{java.util.function.Consumer<String> frame=call.getArgument(3);
+                JsonNode request=JsonUtils.parse(call.getArgument(0));assertEquals("scan",request.path("operation").asText());assertFalse(request.has("candidateGraph"));assertFalse(request.has("cursor"));
+                if("complete_early".equals(mutation))frame.accept(JsonUtils.write(complete));
+                for(int i=0;i<pages.size();i++){
+                    ObjectNode row=JsonUtils.mapper().createObjectNode().put("type","page").put("sequence","sequence".equals(mutation)?i+2:i+1);row.set("data",pages.get(i));frame.accept(JsonUtils.write(row));
+                    if("disconnect".equals(mutation))throw new IllegalStateException("AUTHORED disconnected before exit proof");
+                }
+                if(!"missing_complete".equals(mutation))frame.accept(JsonUtils.write(complete));
+                if("late_page".equals(mutation))frame.accept(JsonUtils.write(JsonUtils.mapper().createObjectNode().put("type","page").put("sequence",pages.size()+1).set("data",pages.get(0))));
+                if("software".equals(mutation))((ObjectNode)wire.health.path("retrieval").path("sourceWindows").path("algorithms")).put("source_read_server.py",VettingCorpus.hash("changed runtime"));
+                return null;
+            }).when(wire.backend).sourceReadStream(anyString(),eq("vetting"),eq(16777216),any());
+            List<JsonNode> consumed=new ArrayList<>();
+            if("none".equals(mutation)){wire.client.streamSemanticSources(selected,consumed::add);assertEquals(pages,consumed);}
+            else assertThrows(RuntimeException.class,()->wire.client.streamSemanticSources(selected,consumed::add),mutation);
+            verify(wire.backend,times(1)).sourceReadStream(anyString(),eq("vetting"),eq(16777216),any());
+            verify(wire.backend,times(1)).sourceRead(anyString(),eq("vetting"),eq(16777216));
+        }
+    }
+    private ObjectNode semanticStreamPage(Wire wire,int index){
+        ObjectNode page=semanticFixture(wire,"ids"),origin=semanticMember(wire,wire.snapshot.path("chunks").get(index));page.put("operation","scan");
+        page.put("semanticReadVersion",OerCanonicalRetrievalClient.SEMANTIC_DICTIONARY);((ObjectNode)page.path("scopeIdentity")).put("semanticReadVersion",OerCanonicalRetrievalClient.SEMANTIC_DICTIONARY);sealReadScope(page);
+        page.putArray("origins").add(origin);ObjectNode template=JsonUtils.mapper().createObjectNode().put("unitId",VettingCorpus.hash("AUTHORED stream unit "+index)).put("documentId",origin.path("documentId").asText())
+                .put("derivedMembersCanBecomeOrigins",false).put("semanticScopeVerified",false).put("qualifiersComplete","unknown").put("status","unknown").put("reason","AUTHORED unknown boundary");template.putArray("requiredMemberIds");
+        String group=VettingCorpus.hash(JsonUtils.write(OerCanonicalSourceUnits.sorted(template)));page.putArray("units").addObject().put("groupId",group).set("unit",template);
+        page.putObject("originUnits").put(origin.path("id").asText(),group);page.putArray("blockedOrigins");
+        int total=wire.snapshot.path("chunks").size(),processed=index+1;ObjectNode coverage=(ObjectNode)page.path("coverage");
+        coverage.putArray("requestedOriginIds").add(origin.path("id").asText());coverage.putArray("returnedOriginIds").add(origin.path("id").asText());coverage.putArray("blockedOriginIds");
+        coverage.put("returnedOrigins",1).put("processedOrigins",processed).put("remainingOrigins",total-processed).put("status",processed==total?"complete":"partial");
+        if(processed<total)page.put("nextCursor",sourceCursor(page,processed));else page.putNull("nextCursor");return page;
     }
     private static void stripDictionaryMembers(ObjectNode unit){unit.remove(Arrays.asList("members","originIds"));for(String field:Arrays.asList("hierarchyContext","attachmentContext"))if(unit.path(field).isObject())stripDictionaryMembers((ObjectNode)unit.path(field));}
     @Test void semanticReadsRejectChangedScopeSourcePinsAndOmittedClosureMembers()throws Exception{
@@ -846,15 +971,26 @@ class OerCanonicalRetrievalClientTest {
     @Test void finalHealthWaitUsesRealFrameFreshBindingGuardBeforeReturningAnyAcceptedResult() throws Exception {
         for(String kind:Arrays.asList("index","status","query","policy"))for(boolean changed:Arrays.asList(false,true)){
             Wire w=new Wire(true);CanonicalEvidenceBackend backend=mock(CanonicalEvidenceBackend.class);
+            w.binding.setDeclaredModule("vetting");
             when(backend.snapshot(eq(w.binding.getProjectionSha256()),eq("vetting"))).thenAnswer(call->w.binding.getSnapshotJson());
             com.consense.repository.CanonicalSourceBindingRepository repository=mock(com.consense.repository.CanonicalSourceBindingRepository.class);
             com.consense.service.sources.CanonicalCurrentSourceReader reader=mock(com.consense.service.sources.CanonicalCurrentSourceReader.class);
+            com.consense.repository.CanonicalSourceBindingRepository.CompactMetadata compact=
+                    mock(com.consense.repository.CanonicalSourceBindingRepository.CompactMetadata.class,call->
+                            call.getMethod().getName().startsWith("get")
+                                    ?CanonicalSourceBinding.class.getMethod(call.getMethod().getName()).invoke(w.binding):null);
             java.util.concurrent.atomic.AtomicBoolean finalHealthReturned=new java.util.concurrent.atomic.AtomicBoolean(),acceptedBeforeClose=new java.util.concurrent.atomic.AtomicBoolean();
             java.util.concurrent.atomic.AtomicInteger freshBindingReads=new java.util.concurrent.atomic.AtomicInteger(),healthCalls=new java.util.concurrent.atomic.AtomicInteger();
             when(repository.findByProjectIdAndDocumentIdOrderByIdDesc(eq(KEY),eq(42L),any(org.springframework.data.domain.Pageable.class))).thenAnswer(call->{
                 if(finalHealthReturned.get())freshBindingReads.incrementAndGet();return Collections.singletonList(w.binding);
             });
-            when(repository.findByProjectIdAndDocumentIdAndProjectionSha256(eq(KEY),eq(42L),eq(w.binding.getProjectionSha256()))).thenAnswer(call->Optional.of(w.binding));
+            when(repository.findCompactByDocument(eq(KEY),eq(42L),any(org.springframework.data.domain.Pageable.class))).thenAnswer(call->{
+                if(finalHealthReturned.get())freshBindingReads.incrementAndGet();return Collections.singletonList(compact);
+            });
+            when(repository.findByProjectIdAndDocumentIdAndProjectionSha256(eq(KEY),eq(42L),eq(w.binding.getProjectionSha256()))).thenAnswer(call->{
+                CanonicalSourceBinding retained=new CanonicalSourceBinding();org.springframework.beans.BeanUtils.copyProperties(w.binding,retained);
+                return Optional.of(retained);
+            });
             com.consense.service.sources.CanonicalEvidenceService service=new com.consense.service.sources.CanonicalEvidenceService(repository,backend,reader);
             OerCanonicalRetrievalClient client=new OerCanonicalRetrievalClient(w.http,w.properties,w.config,backend);
             if(!"index".equals(kind))client.index(KEY,"vetting",Collections.singletonList(w.binding));

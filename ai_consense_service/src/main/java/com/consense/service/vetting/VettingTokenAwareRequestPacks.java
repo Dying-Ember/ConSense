@@ -52,7 +52,8 @@ public final class VettingTokenAwareRequestPacks {
         final Map<String,VettingInputBudget.Result> budgets=new LinkedHashMap<>();
         final Map<String,String> inputs=new LinkedHashMap<>();
         String observationIdentity;
-        boolean actionBudgetExhausted;
+        String unavailableReason;
+        int qwenPreflightFailures;
     }
     public VettingTokenAwareRequestPacks(List<Chunk> corpus) {
         if(corpus==null)throw new IllegalArgumentException("Canonical source corpus required");
@@ -98,25 +99,25 @@ public final class VettingTokenAwareRequestPacks {
             if(group.stream().allMatch(r->"already_global".equals(r.getStatus()))&&plan.getGlobalInputBudget().isExtraDispatchPermitted()) {
                 for(Request r:group)r.setTokenEnvelopeMeasured(exactMeasurement(plan.getGlobalInputBudget()));trace.setOutcome("already_global");continue;
             }
-            if(memo.actionBudgetExhausted){pendingBudgetExhausted(plan,out,group);trace.setOutcome("action_budget_exhausted");continue;}
+            if(memo.unavailableReason!=null){pendingBudgetUnavailable(plan,out,group,memo.unavailableReason);trace.setOutcome(memo.unavailableReason);continue;}
             Pack chosen=null;VettingInputBudget.Result chosenBudget=null;boolean unknown=false;
             for(Pack p:out.getExtraPacks()) {
                 Pack candidate=p;for(Request r:group)candidate=union(candidate,r);
                 VettingInputBudget.Result budget=observe(candidate,factory,observer,plan,memo);for(Request r:group)attempt(plan,r,candidate,budget);
-                if(memo.actionBudgetExhausted)break;
+                if(memo.unavailableReason!=null)break;
                 if(budget.isExtraDispatchPermitted()){chosen=candidate;chosenBudget=budget;break;}unknown|="budget_unknown".equals(budget.getStatus());
             }
             if(chosen!=null){publish(out,plan,chosen,chosenBudget,group);trace.setOutcome("transported_related_group");continue;}
-            if(memo.actionBudgetExhausted){pendingBudgetExhausted(plan,out,group);trace.setOutcome("action_budget_exhausted");continue;}
+            if(memo.unavailableReason!=null){pendingBudgetUnavailable(plan,out,group,memo.unavailableReason);trace.setOutcome(memo.unavailableReason);continue;}
             if(out.getExtraPacks().size()>=out.getExtraPackCap()) {
                 if(group.size()>1)fallback(plan,out,group,factory,observer,memo,false);
                 else for(Request r:group)pendingUnlessPublished(out,r,unknown?"budget_unknown":"omitted_pack_cap",unknown?"complete_input_budget_observation_unknown":null);
-                trace.setOutcome(memo.actionBudgetExhausted?"action_budget_exhausted":"omitted_pack_cap");continue;
+                trace.setOutcome(memo.unavailableReason!=null?memo.unavailableReason:"omitted_pack_cap");continue;
             }
             Pack whole=empty(out.getExtraPacks().size()+1);for(Request r:group)whole=union(whole,r);
             VettingInputBudget.Result wholeBudget=observe(whole,factory,observer,plan,memo);trace.setCompleteGroupBudget(copyBudget(wholeBudget));trace.setOutcome(wholeBudget.getStatus());
             for(Request r:group)attempt(plan,r,whole,wholeBudget);
-            if(memo.actionBudgetExhausted){pendingBudgetExhausted(plan,out,group);trace.setOutcome("action_budget_exhausted");continue;}
+            if(memo.unavailableReason!=null){pendingBudgetUnavailable(plan,out,group,memo.unavailableReason);trace.setOutcome(memo.unavailableReason);continue;}
             if(wholeBudget.isExtraDispatchPermitted()) {
                 publish(out,plan,whole,wholeBudget,group);trace.setOutcome("transported_related_group");continue;
             }
@@ -152,22 +153,22 @@ public final class VettingTokenAwareRequestPacks {
             if(members.stream().anyMatch(r->plan.getOriginalRequestSourceUnknownReasons().containsKey(r.getId())||"unknown".equals(plan.getOriginalRequestTransportStatuses().get(r.getId())))) {
                 trace.setOutcome("unknown_source_condition");for(Request r:members)pendingUnlessPublished(out,r,"budget_unknown","attached_condition_source_request_unknown");continue;
             }
-            if(memo.actionBudgetExhausted){pendingBudgetExhausted(plan,out,members);trace.setOutcome("action_budget_exhausted");continue;}
+            if(memo.unavailableReason!=null){pendingBudgetUnavailable(plan,out,members,memo.unavailableReason);trace.setOutcome(memo.unavailableReason);continue;}
             Pack chosen=null;VettingInputBudget.Result chosenBudget=null;boolean unknown=false;
             for(Pack p:out.getExtraPacks()) {
                 Pack candidate=p;for(Request r:members)candidate=union(candidate,r);
                 VettingInputBudget.Result budget=observe(candidate,factory,observer,plan,memo);trace.getCandidateBudgets().add(copyBudget(budget));for(Request r:members)attempt(plan,r,candidate,budget);
-                if(memo.actionBudgetExhausted)break;
+                if(memo.unavailableReason!=null)break;
                 if(budget.isExtraDispatchPermitted()){chosen=candidate;chosenBudget=budget;break;}unknown|="budget_unknown".equals(budget.getStatus());
             }
             if(chosen!=null){publish(out,plan,chosen,chosenBudget,members);trace.setOutcome("transported_direct_condition_bundle");trace.setSelectedPackIndex(chosen.getIndex());continue;}
-            if(memo.actionBudgetExhausted){pendingBudgetExhausted(plan,out,members);trace.setOutcome("action_budget_exhausted");continue;}
+            if(memo.unavailableReason!=null){pendingBudgetUnavailable(plan,out,members,memo.unavailableReason);trace.setOutcome(memo.unavailableReason);continue;}
             if(out.getExtraPacks().size()>=out.getExtraPackCap()) {
                 trace.setOutcome(unknown?"budget_unknown":"omitted_pack_cap");for(Request r:members)pendingUnlessPublished(out,r,unknown?"budget_unknown":"omitted_pack_cap",unknown?"complete_joint_condition_input_budget_unknown":null);continue;
             }
             Pack whole=empty(out.getExtraPacks().size()+1);for(Request r:members)whole=union(whole,r);
             VettingInputBudget.Result wholeBudget=observe(whole,factory,observer,plan,memo);trace.getCandidateBudgets().add(copyBudget(wholeBudget));for(Request r:members)attempt(plan,r,whole,wholeBudget);
-            if(memo.actionBudgetExhausted){pendingBudgetExhausted(plan,out,members);trace.setOutcome("action_budget_exhausted");continue;}
+            if(memo.unavailableReason!=null){pendingBudgetUnavailable(plan,out,members,memo.unavailableReason);trace.setOutcome(memo.unavailableReason);continue;}
             if(!wholeBudget.isExtraDispatchPermitted()) {
                 trace.setOutcome(wholeBudget.getStatus());for(Request r:members)pendingUnlessPublished(out,r,wholeBudget.getStatus(),"budget_unknown".equals(wholeBudget.getStatus())?"complete_joint_condition_input_budget_unknown":null);continue;
             }
@@ -179,8 +180,8 @@ public final class VettingTokenAwareRequestPacks {
         return out.getExtraPacks().stream().anyMatch(p->p.getRequestIds().contains(r.getId())&&p.getChunks().stream().map(Chunk::getId).collect(Collectors.toSet()).containsAll(r.getRequiredChunkIds()));
     }
     private static void pendingUnlessPublished(Result out,Request r,String status,String reason){if(!published(out,r))pending(r,status,reason);}
-    private static void pendingBudgetExhausted(Plan plan,Result out,List<Request> requests){for(Request r:requests)
-        if(!("already_global".equals(r.getStatus())&&plan.getGlobalInputBudget().isExtraDispatchPermitted()))pendingUnlessPublished(out,r,"budget_unknown","action_budget_exhausted");}
+    private static void pendingBudgetUnavailable(Plan plan,Result out,List<Request> requests,String reason){for(Request r:requests)
+        if(!("already_global".equals(r.getStatus())&&plan.getGlobalInputBudget().isExtraDispatchPermitted()))pendingUnlessPublished(out,r,"budget_unknown",reason);}
     private static List<List<Request>> related(List<Request> requests) {
         List<List<Request>> groups=new ArrayList<>();
         for(Request request:requests) {
@@ -206,7 +207,7 @@ public final class VettingTokenAwareRequestPacks {
         for(Request r:group){r.setStatus("transported_extra_pack");r.setUnknownReason(null);r.setPackIndex(firstPublished.getOrDefault(r.getId(),pack.getIndex()));r.setTokenEnvelopeMeasured(exactMeasurement(budget));r.setSubmittedChunkIds(new ArrayList<>(r.getRequiredChunkIds()));r.getMissingChunkIds().clear();}
     }
     private VettingInputBudget.Result observe(Pack candidate,InputFactory factory,VettingInputBudget.Observer observer,Plan plan,PreviewMemo memo) {
-        if(memo.actionBudgetExhausted){VettingInputBudget.Result budget=new VettingInputBudget.Result();budget.setReason("action_budget_exhausted");return budget;}
+        if(memo.unavailableReason!=null){VettingInputBudget.Result budget=new VettingInputBudget.Result();budget.setReason(memo.unavailableReason);return budget;}
         Pack supplied=JsonUtils.read(JsonUtils.write(candidate),Pack.class);String before=JsonUtils.write(supplied);VettingInputBudget.Input input;
         try{input=factory.build(supplied);}catch(java.util.concurrent.CancellationException cancelled){throw cancelled;}catch(Exception failure){VettingInputBudget.Result out=new VettingInputBudget.Result();out.setReason("complete_input_factory_failed_"+failure.getClass().getSimpleName());return out;}
         if(input==null||!before.equals(JsonUtils.write(supplied))||!VettingCorpus.hash(JsonUtils.write(candidate.getChunks())).equals(input.getSourceSnapshotSha256()))throw new IllegalArgumentException("Complete Input/candidate source identity differs");
@@ -216,7 +217,13 @@ public final class VettingTokenAwareRequestPacks {
             plan.setPreviewCacheHits(plan.getPreviewCacheHits()+1);return copyBudget(memo.budgets.get(sha));
         }
         VettingInputBudget.Result budget=VettingInputBudget.check(input,observer);if(observer!=null)plan.setActualPreviewObserverCalls(plan.getActualPreviewObserverCalls()+1);
-        if("action_budget_exhausted".equals(budget.getReason()))memo.actionBudgetExhausted=true;
+        if("action_budget_exhausted".equals(budget.getReason()))memo.unavailableReason=budget.getReason();
+        else if(input.getQwenWire()!=null) {
+            String reason=budget.getReason();
+            if("qwen_preflight_transport_failed".equals(reason)||reason!=null&&reason.startsWith("qwen_preflight_http_")) {
+                if(++memo.qwenPreflightFailures>=2)memo.unavailableReason=reason;
+            } else if("provider_estimated_fit".equals(budget.getStatus())||"over_budget".equals(budget.getStatus()))memo.qwenPreflightFailures=0;
+        }
         if(!"budget_unknown".equals(budget.getStatus())) {
             String identity=observationIdentity(input,budget.getObservation());
             if(memo.observationIdentity==null)memo.observationIdentity=identity;

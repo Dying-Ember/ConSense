@@ -71,7 +71,14 @@ public final class OerSourceMetadata {
 
     /** Persist first-pass identity separately from full parser completion. */
     public static boolean captureObservation(SourceDocument document, DocumentParser.ParsedDocument observation, byte[] originalBytes) {
-        capture(document, observation, originalBytes);
+        return captureObservation(document,observation,originalBytes,false);
+    }
+    /** Ordinary uploads keep the live observation token transient and persist only compact PDF reading evidence. */
+    public static boolean captureOrdinaryObservation(SourceDocument document,DocumentParser.ParsedDocument observation,byte[] originalBytes){
+        return captureObservation(document,observation,originalBytes,true);
+    }
+    private static boolean captureObservation(SourceDocument document,DocumentParser.ParsedDocument observation,byte[] originalBytes,boolean ordinary){
+        if(ordinary)captureOrdinary(document,observation,originalBytes);else capture(document, observation, originalBytes);
         OerDocumentIdentity identity = identity(document);
         List<OerDocumentIdentity.Evidence> hints = OerSourceRouting.drawingMetadata(originalBytes);
         for (OerDocumentIdentity.Evidence hint : hints) {
@@ -104,8 +111,23 @@ public final class OerSourceMetadata {
         persist(document,parsed,digest,router);
     }
 
+    /** Ordinary readers retain derived reading evidence without repeated native layout archives. */
+    public static void captureOrdinary(SourceDocument document, DocumentParser.ParsedDocument parsed, byte[] originalBytes) {
+        String digest=originalSha256(originalBytes);
+        if(document.getSourceSha256()!=null&&!digest.equals(document.getSourceSha256()))
+            throw new IllegalArgumentException("Uploaded source identity changed before ordinary capture");
+        boolean compact=com.consense.service.vetting.NormalPdfReadingProjection.capture(document,parsed,digest)
+                ||com.consense.service.vetting.NormalDocxReadingProjection.capture(document,parsed,digest);
+        if(!compact){document.setStructuredContentJson(JsonUtils.write(parsed.getBlocks()));document.setParseCoverageJson(JsonUtils.write(parsed.getCoverage()));}
+        persist(document,parsed,digest,FixedRegistry.ROUTER,!compact);
+    }
+
     private static void persist(SourceDocument document, DocumentParser.ParsedDocument parsed,
                                 String digest, OerSourceRouting router) {
+        persist(document,parsed,digest,router,true);
+    }
+    private static void persist(SourceDocument document, DocumentParser.ParsedDocument parsed,
+                                 String digest, OerSourceRouting router, boolean retainNativeArchive) {
         OerDocumentIdentity identity = router.route(document.getFileName(), digest, parsed);
         OerDocumentIdentity previous = document.getOerIdentityJson() == null ? null : identity(document);
         if (previous != null && digest.equals(previous.getSourceSha256())) {
@@ -121,7 +143,7 @@ public final class OerSourceMetadata {
         identity=retainTextContractConfirmation(document,identity);
         document.setSourceSha256(digest);
         document.setOerIdentityJson(JsonUtils.write(identity));
-        document.setNativePdfEvidenceJson(parsed == null || parsed.getNativePdfEvidence() == null ? null
+        document.setNativePdfEvidenceJson(!retainNativeArchive || parsed == null || parsed.getNativePdfEvidence() == null ? null
                 : JsonUtils.write(parsed.getNativePdfEvidence()));
         if (!SourceDocument.CATEGORY_STANDARD_TEMPLATE.equals(document.getCategory())
                 && !"UNKNOWN".equals(identity.getKind()) && !"EVALUATION_ANSWER".equals(identity.getKind()))
@@ -132,15 +154,22 @@ public final class OerSourceMetadata {
 
     /** Explicit role plus verified textual identity grants module use, never family, edition or clause ownership. */
     public static void confirmSourceUse(SourceDocument document,boolean textMaterialConfirmed) {
+        confirmSourceUse(document,textMaterialConfirmed,ProjectDocumentScope.parseUsable(document));
+    }
+    /** The large-source role path proves nonblank saved text in a database scalar read. */
+    public static void confirmSourceUse(SourceDocument document,boolean textMaterialConfirmed,boolean savedTextUsable) {
         OerDocumentIdentity identity=identity(document);
-        if(!sourceUseAllowed(document,identity)||!textMaterialConfirmed&&!observedNonDrawing(identity)&&!hasSourceUseConfirmation(identity,document.getSourceSha256()))
+        if(!sourceUseAllowed(document,identity,savedTextUsable)||!textMaterialConfirmed&&!observedNonDrawing(identity)&&!hasSourceUseConfirmation(identity,document.getSourceSha256()))
             throw new IllegalArgumentException("Source-use confirmation cannot override missing textual identity, exclusions or incomplete parsing");
         grantSourceUse(document,identity,textMaterialConfirmed?"human_text_contract_material":"human_source_role",null);
         document.setOerIdentityJson(JsonUtils.write(identity));
     }
     private static boolean sourceUseAllowed(SourceDocument document,OerDocumentIdentity identity) {
+        return sourceUseAllowed(document,identity,ProjectDocumentScope.parseUsable(document));
+    }
+    private static boolean sourceUseAllowed(SourceDocument document,OerDocumentIdentity identity,boolean savedTextUsable) {
         return identity!=null&&document.getSourceSha256()!=null&&document.getSourceSha256().matches("[a-f0-9]{64}")&&document.getSourceSha256().equals(identity.getSourceSha256())
-                &&ProjectDocumentScope.reviewCategory(document)&&ProjectDocumentScope.parseUsable(document)
+                &&ProjectDocumentScope.reviewCategory(document)&&savedTextUsable&&Arrays.asList("PARSED","PARTIAL").contains(document.getParseStatus())
                 &&Arrays.asList("tender","standard","project_fact","package_manifest").contains(document.getReviewRole())
                 &&!Arrays.asList("drawing","example","pricing","works_pss").contains(document.getDocumentScope())
                 &&!Arrays.asList("DRAWING","BQ","SOR","GENERAL_SUMMARY","WORKS_PSS","SL_NON_TECHNICAL").contains(identity.getKind())
