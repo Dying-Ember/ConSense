@@ -12,6 +12,7 @@ import okio.BufferedSink;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
+import java.io.InterruptedIOException;
 import java.util.Collections;
 import java.util.Locale;
 import java.util.Map;
@@ -24,6 +25,43 @@ import java.util.function.Consumer;
 @Slf4j
 @Component
 public class HttpSupport {
+
+    /** Fixed transport facts only: no provider message, URL, credential, body or external cause. */
+    public static final class ModelRequestFailure extends BizException {
+        public enum Category { HTTP, TIMEOUT, CONNECTION_FAILED, CANCELLED }
+        public enum Phase { TRANSPORT, PREFLIGHT, GENERATION }
+        private final Category category;
+        private final int httpStatus;
+        private final Phase phase;
+        private ModelRequestFailure(Category category,int status,Phase phase,String label) {
+            super(phase==Phase.TRANSPORT?4000:5001,label+(category==Category.HTTP?" HTTP "+status:" "+description(category.name())));
+            this.category=category;this.httpStatus=status;this.phase=phase;
+        }
+        public ModelRequestFailure atPhase(Phase selected) {
+            return new ModelRequestFailure(category,httpStatus,selected,selected==Phase.PREFLIGHT?"Qwen usage preflight":"Qwen chat");
+        }
+        public String failureKind(){return category==Category.HTTP?"HTTP"+httpStatus:category.name();}
+        public boolean isCancellation(){return category==Category.CANCELLED;}
+        public String phase(){return phase.name().toLowerCase(Locale.ROOT);}
+        public String description(){return description(failureKind());}
+        public Map<String,Object> diagnostics(){
+            Map<String,Object> safe=new java.util.LinkedHashMap<>();safe.put("failureKind",failureKind());safe.put("failurePhase",phase());
+            if(category==Category.HTTP)safe.put("httpStatus",httpStatus);return safe;
+        }
+        public static String description(String kind){
+            if("TIMEOUT".equals(kind)||"HTTP408".equals(kind)||"HTTP504".equals(kind))return "timed out";
+            if("CONNECTION_FAILED".equals(kind))return "connection failed";
+            if("CANCELLED".equals(kind))return "cancelled";
+            if("HTTP429".equals(kind))return "rate limited";
+            if(kind!=null&&kind.matches("HTTP5[0-9]{2}"))return "provider busy";
+            return "request rejected";
+        }
+    }
+    private static ModelRequestFailure modelHttpFailure(int status,String label){return new ModelRequestFailure(ModelRequestFailure.Category.HTTP,status,ModelRequestFailure.Phase.TRANSPORT,label);}
+    private static RuntimeException modelTransportFailure(IOException error,boolean cancellationRequested,String label){
+        if(cancellationRequested||Thread.currentThread().isInterrupted())return new ModelRequestFailure(ModelRequestFailure.Category.CANCELLED,0,ModelRequestFailure.Phase.TRANSPORT,label);
+        return new ModelRequestFailure(error instanceof InterruptedIOException?ModelRequestFailure.Category.TIMEOUT:ModelRequestFailure.Category.CONNECTION_FAILED,0,ModelRequestFailure.Phase.TRANSPORT,label);
+    }
 
     public static final MediaType JSON = MediaType.get("application/json; charset=utf-8");
     private static final ObjectReader OVERLOAD_ERROR_READER = new ObjectMapper()
@@ -82,14 +120,16 @@ public class HttpSupport {
                 .readTimeout(timeoutMs, TimeUnit.MILLISECONDS).writeTimeout(timeoutMs, TimeUnit.MILLISECONDS)
                 .callTimeout(timeoutMs + 5_000, TimeUnit.MILLISECONDS).build();
         Call call = client.newCall(builder.build());
-        if (onCancel != null) onCancel.accept(call::cancel);
-        if (Thread.currentThread().isInterrupted()) call.cancel();
+        java.util.concurrent.atomic.AtomicBoolean cancellationRequested=new java.util.concurrent.atomic.AtomicBoolean();
+        Runnable cancel=()->{cancellationRequested.set(true);call.cancel();};
+        if (onCancel != null) onCancel.accept(cancel);
+        if (Thread.currentThread().isInterrupted()) cancel.run();
         try (Response response = call.execute()) {
-            if (!response.isSuccessful()) throw new BizException("Streaming model HTTP " + response.code());
+            if (!response.isSuccessful()) throw modelHttpFailure(response.code(),"Streaming model");
             if (response.body() == null) throw new BizException("Streaming model returned no response body");
             return ProviderStreamReader.read(response.body().byteStream(), cap, sse, event);
         } catch (IOException error) {
-            throw new BizException("Streaming model transport failed: " + (call.isCanceled() ? "cancelled" : error.getClass().getSimpleName()));
+            throw modelTransportFailure(error,cancellationRequested.get(),"Streaming model");
         } finally { call.cancel(); }
     }
 
@@ -101,8 +141,9 @@ public class HttpSupport {
         OkHttpClient client=shared.newBuilder().retryOnConnectionFailure(false).followRedirects(false).followSslRedirects(false)
                 .connectTimeout(Math.min(timeoutMs,5000),TimeUnit.MILLISECONDS).readTimeout(timeoutMs,TimeUnit.MILLISECONDS)
                 .writeTimeout(timeoutMs,TimeUnit.MILLISECONDS).callTimeout(timeoutMs,TimeUnit.MILLISECONDS).build();
-        Call call=client.newCall(builder.build());if(onCancel!=null)onCancel.accept(call::cancel);
-        if(Thread.currentThread().isInterrupted())call.cancel();
+        Call call=client.newCall(builder.build());java.util.concurrent.atomic.AtomicBoolean cancellationRequested=new java.util.concurrent.atomic.AtomicBoolean();
+        Runnable cancel=()->{cancellationRequested.set(true);call.cancel();};if(onCancel!=null)onCancel.accept(cancel);
+        if(Thread.currentThread().isInterrupted())cancel.run();
         try(Response response=call.execute()) {
             if(response.code()!=200){
                 if(authHeader!=null){
@@ -110,7 +151,7 @@ public class HttpSupport {
                     try{requestBytes=call.request().body().contentLength();}catch(IOException ignored){/* Length is diagnostic only. */}
                     log.warn("Bounded model HTTP rejection: status={}, category={}, requestBytes={}",response.code(),boundedModelErrorCategory(response),requestBytes);
                 }
-                throw new BizException("Qwen chat HTTP "+response.code());
+                throw modelHttpFailure(response.code(),"Qwen chat");
             }
             if(response.body()==null)throw new BizException("Qwen chat response missing");
             java.io.ByteArrayOutputStream bytes=new java.io.ByteArrayOutputStream();
@@ -120,7 +161,7 @@ public class HttpSupport {
             }
             return java.nio.charset.StandardCharsets.UTF_8.newDecoder().onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
                     .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT).decode(java.nio.ByteBuffer.wrap(bytes.toByteArray())).toString();
-        }catch(IOException failure){throw new BizException("Qwen chat transport "+(call.isCanceled()?"cancelled":failure.getClass().getSimpleName()));}
+        }catch(IOException failure){throw modelTransportFailure(failure,cancellationRequested.get(),"Qwen chat");}
         finally {call.cancel();}
     }
 
@@ -170,8 +211,7 @@ public class HttpSupport {
                 status = response.code();
                 body = response.body() == null ? "" : response.body().string();
             } catch (IOException failed) {
-                throw new BizException("无法连接 " + request.url().host() + ":" + request.url().port()
-                        + "，请确认本地服务已启动（" + failed.getMessage() + "）");
+                throw modelTransportFailure(failed,Thread.currentThread().isInterrupted(),"Model request");
             }
             if (status >= 200 && status < 300) return body;
             if (attempt < attempts && explicitOverload(status, body)) {
@@ -186,8 +226,7 @@ public class HttpSupport {
                 }
                 continue;
             }
-            throw new BizException("调用 " + request.url().encodedPath()
-                    + " 失败: HTTP " + status + " " + truncate(body));
+            throw modelHttpFailure(status,"Model request");
         }
         throw new IllegalStateException("HTTP overload attempt limit exceeded");
     }

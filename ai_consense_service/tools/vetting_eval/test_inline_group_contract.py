@@ -61,6 +61,10 @@ class InlineGroupContractTests(unittest.TestCase):
             if identity_scope == 'source_semantic_read_manifest':
                 body = json.loads(raw)
                 body['schema'] = 'consense.source-semantic-read-manifest.v2'
+                for entry in body['origins']:
+                    descriptor = entry.pop('scanRecordRef')
+                    entry['recordRef'] = (put(_serialize(descriptor['origin']), identity_scope='source_semantic_member_v2')
+                        if descriptor.get('storage') == 'inline_prepared_manifest' else descriptor)
                 raw = _serialize(body)
             return put(raw, identity_scope=identity_scope)
 

@@ -28,8 +28,8 @@ public final class QwenChatClient implements LlmClient {
     @Override public String chatStructured(List<ChatTurn> turns,JsonNode schema){return safeCall(()->delegate.chatStructured(turns,schema));}
     @Override public boolean supportsStreaming(){return delegate.supportsStreaming();}
     @Override public String chatStructuredStream(List<ChatTurn> turns,JsonNode schema,Consumer<String> onDelta,Consumer<Runnable> onCancel) {
-        ProviderStreamReader.SafeDelta safe=new ProviderStreamReader.SafeDelta(cfg.getApiKey(),onDelta);
-        String result=safeCall(()->delegate.chatStructuredStream(turns,schema,safe,onCancel));safe.finish();return result;
+        ProviderStreamReader.SafeDelta safe=new ProviderStreamReader.SafeDelta(cfg.getApiKey(),applicationCallback(onDelta));
+        return safeCall(()->{String result=delegate.chatStructuredStream(turns,schema,safe,onCancel);safe.finish();return result;});
     }
     @Override public List<float[]> embed(List<String> texts){throw new BizException(5001,"Qwen chat selection does not provide deployment embeddings.");}
     @Override public boolean available() {
@@ -58,6 +58,8 @@ public final class QwenChatClient implements LlmClient {
     public String usageProbe(PreparedRequest prepared,Consumer<Runnable> cancel) {
         try {return http.postJsonBoundedWithoutReplay(cfg.getBaseUrl().replaceAll("/+$","")+"/v1/chat/completions",
                 prepared.probeJson,cfg.getTimeoutMs(),"Bearer "+cfg.getApiKey(),1024*1024,cancel);}
+        catch(HttpSupport.ModelRequestFailure error){if(error.isCancellation())throw new java.util.concurrent.CancellationException("Qwen usage preflight cancelled");throw error.atPhase(HttpSupport.ModelRequestFailure.Phase.PREFLIGHT);}
+        catch(java.util.concurrent.CancellationException cancelled){throw new java.util.concurrent.CancellationException("Qwen usage preflight cancelled");}
         catch(BizException error){
             java.util.regex.Matcher status=java.util.regex.Pattern.compile("Qwen chat HTTP ([1-5][0-9]{2})").matcher(error.getMessage()==null?"":error.getMessage());
             throw new BizException(5001,status.matches()?"Qwen usage preflight HTTP "+status.group(1):"Qwen usage preflight transport failed");
@@ -65,13 +67,15 @@ public final class QwenChatClient implements LlmClient {
         catch(RuntimeException error){throw new BizException(5001,"Qwen usage preflight transport failed ("+error.getClass().getSimpleName()+")");}
     }
     public static String safeUsageFailureKind(RuntimeException error){
+        if(error instanceof HttpSupport.ModelRequestFailure)return ((HttpSupport.ModelRequestFailure)error).failureKind();
+        if(error instanceof java.util.concurrent.CancellationException)return "CANCELLED";
         java.util.regex.Matcher status=java.util.regex.Pattern.compile("Qwen usage preflight HTTP ([1-5][0-9]{2})").matcher(error.getMessage()==null?"":error.getMessage());
         return status.matches()?"HTTP"+status.group(1):error.getClass().getSimpleName();
     }
     public String generate(PreparedRequest prepared,Consumer<String> delta,Consumer<Runnable> cancel) {return generate(prepared,delta,cancel,null);}
     public String generate(PreparedRequest prepared,Consumer<String> delta,Consumer<Runnable> cancel,Consumer<JsonNode> receipt) {
-        ProviderStreamReader.SafeDelta safe=new ProviderStreamReader.SafeDelta(cfg.getApiKey(),delta==null?ignored->{}:delta);
-        String result=safeCall(()->delegate.sendPreparedQwen(prepared.generationJson,prepared.stream,safe,cancel,raw->{if(receipt!=null)receipt.accept(responseReceipt(raw));}));safe.finish();return result;
+        ProviderStreamReader.SafeDelta safe=new ProviderStreamReader.SafeDelta(cfg.getApiKey(),applicationCallback(delta==null?ignored->{}:delta));
+        return safeCall(()->{String result=delegate.sendPreparedQwen(prepared.generationJson,prepared.stream,safe,cancel,raw->{if(receipt!=null)receipt.accept(responseReceipt(raw));});safe.finish();return result;});
     }
     private JsonNode responseReceipt(String raw) {
         com.fasterxml.jackson.databind.node.ObjectNode safe=JsonUtils.mapper().createObjectNode();
@@ -84,8 +88,17 @@ public final class QwenChatClient implements LlmClient {
         safe.put("usageUnavailable",!safe.path("usage").isObject()||safe.path("usage").isEmpty());safe.put("scope","provider_response_reported");return safe;
     }
 
+    /** Only this application-owned callback boundary may preserve its original typed failure. */
+    private static final class CallbackFailure extends RuntimeException {
+        private final RuntimeException failure;
+        private CallbackFailure(RuntimeException failure){super("Qwen application callback failed");this.failure=failure;}
+    }
+    private Consumer<String> applicationCallback(Consumer<String> callback){return value->{try{callback.accept(value);}catch(RuntimeException failure){throw new CallbackFailure(failure);}};}
     private String safeCall(Supplier<String> request) {
         try {return redactContent(request.get());}
+        catch(CallbackFailure callback){throw callback.failure;}
+        catch(HttpSupport.ModelRequestFailure error){if(error.isCancellation())throw new java.util.concurrent.CancellationException("Qwen generation cancelled");throw error.atPhase(HttpSupport.ModelRequestFailure.Phase.GENERATION);}
+        catch(java.util.concurrent.CancellationException cancelled){throw new java.util.concurrent.CancellationException("Qwen generation cancelled");}
         catch(IncompleteModelResponseException e) {
             String raw=redactRaw(e.getRawResponse());JsonNode envelope=null;
             try {envelope=JsonUtils.parse(raw);}catch(RuntimeException ignored) {/* Preserve invalid-envelope failure. */}

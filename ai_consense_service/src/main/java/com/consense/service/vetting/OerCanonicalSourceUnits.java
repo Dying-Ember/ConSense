@@ -48,6 +48,49 @@ final class OerCanonicalSourceUnits {
         if(context!=null)observed.set("hierarchyContext",context);return observed;
     }
 
+    /** Admit exact registered seed/member bytes without claiming that a selected subset proves closure. */
+    static void validateRankedText(JsonNode result,Map<String,JsonNode> parents,List<String> ranked){
+        JsonNode episode=result.path("sourceUnits");
+        require(VettingRetrievalSourceUnits.supportsPolicy(episode.path("policy").asText())
+                &&"canonical_observed_structure_only".equals(episode.path("scope").asText())
+                &&"canonical_parent_id_lexical".equals(episode.path("memberOrder").asText())
+                &&"unknown".equals(episode.path("qualifiersComplete").asText())
+                &&ids(episode.path("originalHitIds")).equals(ranked)&&episode.path("units").isArray()
+                &&episode.path("units").size()==ranked.size()&&falseBoolean(episode.path("derivedMembersCanBecomeOrigins"))
+                &&falseBoolean(episode.path("semanticScopeVerified")),"source-unit episode differs");
+        ArrayNode deferred=JsonUtils.mapper().createArrayNode();Set<String> used=new HashSet<>();int previous=0;
+        for(int i=0;i<ranked.size();i++){
+            JsonNode unit=episode.path("units").get(i),seed=parents.get(ranked.get(i));
+            require(ids(unit.path("originIds")).equals(Collections.singletonList(ranked.get(i)))
+                    &&identity(seed).equals(unit.path("sourceIdentity"))&&unit.path("unitId").isTextual()
+                    &&sha(unit.path("unitId").asText())&&used.add(unit.path("unitId").asText()),"source-unit ranked seed differs");
+            validateSuppliedText(unit,parents,seed,true);
+            for(String context:Arrays.asList("hierarchyContext","attachmentContext"))if(unit.has(context))validateSuppliedText(unit.path(context),parents,seed,false);
+            int ordinal=VettingRetrievalSourceUnits.selectionOrdinal(episode,unit,seed);
+            require(ordinal>previous&&unit.path("seedScore").equals(result.path("hits").get(i).path("score")),"source-unit ranked seed differs");previous=ordinal;
+            ObjectNode text=JsonUtils.mapper().createObjectNode();text.putArray("originIds").add(ranked.get(i));text.put("kind","unknown");text.put("status","unknown");
+            text.put("reason","additional_source_context_deferred");text.putArray("requiredMemberIds");text.putArray("members");text.putArray("observedRanges");
+            text.set("sourceIdentity",identity(seed));text.set("clauseId",nullable(seed,"clauseId"));text.set("headingLocation",nullable(seed,"clauseHeadingLocation"));text.putArray("blockIds");
+            text.put("derivedMembersCanBecomeOrigins",false);text.putNull("memberScores");text.put("qualifiersComplete","unknown");text.put("semanticScopeVerified",false);
+            ObjectNode address=JsonUtils.mapper().createObjectNode();for(String field:Arrays.asList("kind","sourceIdentity","clauseId","headingLocation","blockIds","requiredMemberIds"))address.set(field,text.path(field));
+            address.put("fallbackSeedId",ranked.get(i));text.put("unitId",VettingCorpus.hash(JsonUtils.write(sorted(address))));
+            text.set("originalRerankOrdinal",unit.path("originalRerankOrdinal"));text.set("seedScore",unit.path("seedScore"));if(unit.has("selectionOrdinal"))text.set("selectionOrdinal",unit.path("selectionOrdinal"));deferred.add(text);
+        }
+        ((ObjectNode)episode).set("units",deferred);
+    }
+    private static void validateSuppliedText(JsonNode envelope,Map<String,JsonNode> parents,JsonNode seed,boolean origin){
+        require(envelope.isObject()&&falseBoolean(envelope.path("derivedMembersCanBecomeOrigins"))
+                &&falseBoolean(envelope.path("semanticScopeVerified"))&&"unknown".equals(envelope.path("qualifiersComplete").asText())
+                &&envelope.path("members").isArray(),"source-unit text envelope differs");
+        List<String> requested=ids(envelope.path("requiredMemberIds"));Set<String> supplied=new LinkedHashSet<>();
+        for(JsonNode body:envelope.path("members")){
+            String id=body.path("id").asText();JsonNode current=parents.get(id);
+            require(current!=null&&supplied.add(id)&&current.equals(body)&&scopeIdentity(current).equals(scopeIdentity(seed)),"source-unit supplied member differs");
+        }
+        require(supplied.equals(new LinkedHashSet<>(requested)),"source-unit required members differ");
+        if(origin&&"complete_observed_unit".equals(envelope.path("status").asText()))require(supplied.contains(seed.path("id").asText()),"source-unit origin member missing");
+    }
+
     static ObjectNode resolveAttached(Map<String,JsonNode> parents,JsonNode seed) {return resolveAttached(parents,seed,false);}
 
     static ObjectNode resolveAttached(Map<String,JsonNode> parents,JsonNode seed,boolean sharedNotes) {

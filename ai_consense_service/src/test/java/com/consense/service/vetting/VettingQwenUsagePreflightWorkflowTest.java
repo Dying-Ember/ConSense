@@ -132,7 +132,10 @@ class VettingQwenUsagePreflightWorkflowTest {
     }
     @Test void twoInvalidAnswersKeepBothFailuresAndNeverConsumeThirdAnswer()throws Exception {
         answers.add("[]}");answers.add("[{}]");answers.add("[]");String project=project();upload(project);JsonNode queued=start(project,"qwen-flash"),saved=await(project,queued.path("id").asText());
-        assertEquals("FAILED",saved.path("status").asText());assertEquals(0,saved.path("reliablePackets").size());assertEquals(2,packet(saved).path("attempts").size());assertEquals(1,answers.size());
+        assertEquals("COMPLETED",saved.path("status").asText(),"Exhausted received-output rejections retain the existing partial task result");
+        assertEquals("failed",packet(saved).path("status").asText());assertEquals("not_completed",packet(saved).path("checkState").asText());assertFalse(packet(saved).path("semanticScopeVerified").asBoolean());
+        assertEquals(0,saved.path("reliablePackets").size());assertEquals(2,packet(saved).path("attempts").size());assertEquals(1,answers.size());
+        assertEquals("[]}",packet(saved).path("attempts").get(0).path("rawResponse").asText());assertEquals("[{}]",packet(saved).path("attempts").get(1).path("rawResponse").asText());
         assertLedger(queued,2,2,Arrays.asList("final","answer","repair","answer"));assertEquals(4,bodies.size());verifyNoInteractions(local,miniMax);
     }
     @Test void durablePreflightCeilingStopsTheNewRepairInputBeforeAnotherPaidDispatch()throws Exception {

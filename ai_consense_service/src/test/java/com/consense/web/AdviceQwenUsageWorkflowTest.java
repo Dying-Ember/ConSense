@@ -32,16 +32,91 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         "consense.qwen-flash.enabled=true","consense.qwen-flash.api-key=AUTHORED-KEY-ONLY","consense.qwen-flash.structured-max-tokens=16384",
         "consense.advice.history-max-exchanges=2","consense.advice.history-max-messages=4","consense.advice.history-max-tokens=1024"})
 @ActiveProfiles("h2") @AutoConfigureMockMvc
+@org.springframework.context.annotation.Import(AdviceQwenUsageWorkflowTest.LocalTransportConfiguration.class)
 class AdviceQwenUsageWorkflowTest {
+    private static final AtomicReference<com.sun.net.httpserver.HttpHandler> LOOPBACK_HANDLER=new AtomicReference<>();
+    private static final com.sun.net.httpserver.HttpServer LOOPBACK_SERVER=loopbackServer();
+    private static final AtomicInteger ALLOWED_LOCAL_REQUESTS=new AtomicInteger(),BLOCKED_REQUESTS=new AtomicInteger();
+    @org.springframework.boot.test.context.TestConfiguration(proxyBeanMethods=false)
+    static class LocalTransportConfiguration {
+        @org.springframework.context.annotation.Bean @org.springframework.context.annotation.Primary
+        HttpSupport guardedHttpSupport(){return new GuardedHttpSupport();}
+    }
+    static class GuardedHttpSupport extends HttpSupport {
+        GuardedHttpSupport(){
+            okhttp3.OkHttpClient original=(okhttp3.OkHttpClient)org.springframework.test.util.ReflectionTestUtils.getField(this,"shared");
+            okhttp3.OkHttpClient guarded=original.newBuilder().proxy(java.net.Proxy.NO_PROXY).retryOnConnectionFailure(false).followRedirects(false).followSslRedirects(false).addInterceptor(chain->{
+                okhttp3.HttpUrl url=chain.request().url();
+                if(!"http".equals(url.scheme())||!"127.0.0.1".equals(url.host())||url.port()!=LOOPBACK_SERVER.getAddress().getPort()||!"/v1/chat/completions".equals(url.encodedPath())||url.query()!=null||!"POST".equals(chain.request().method())){
+                    BLOCKED_REQUESTS.incrementAndGet();throw new IllegalStateException("Authored transport blocked an unapproved destination before DNS or connection");
+                }
+                ALLOWED_LOCAL_REQUESTS.incrementAndGet();return chain.proceed(chain.request());
+            }).build();
+            org.springframework.test.util.ReflectionTestUtils.setField(this,"shared",guarded);
+        }
+    }
+    private static com.sun.net.httpserver.HttpServer loopbackServer(){try{
+        com.sun.net.httpserver.HttpServer server=com.sun.net.httpserver.HttpServer.create(new java.net.InetSocketAddress("127.0.0.1",0),0);
+        server.createContext("/v1/chat/completions",exchange->{com.sun.net.httpserver.HttpHandler handler=LOOPBACK_HANDLER.get();if(handler==null){exchange.sendResponseHeaders(503,-1);exchange.close();}else handler.handle(exchange);});server.start();return server;
+    }catch(java.io.IOException failure){throw new ExceptionInInitializerError(failure);}}
+    private static String loopbackUrl(){return "http://127.0.0.1:"+LOOPBACK_SERVER.getAddress().getPort();}
+    @AfterAll static void stopLoopbackServer(){LOOPBACK_SERVER.stop(0);}
+    @Test @org.junit.jupiter.api.extension.ExtendWith(org.springframework.boot.test.system.OutputCaptureExtension.class)
+    void actualHttpGenerationFailureKeepsSafeCategoryAndPhaseInAdviceAndLedger(org.springframework.boot.test.system.CapturedOutput output)throws Exception {
+        AtomicInteger probes=new AtomicInteger(),answers=new AtomicInteger();
+        LOOPBACK_HANDLER.set(exchange->{JsonNode body=JsonUtils.mapper().readTree(exchange.getRequestBody());boolean probe=body.path("max_tokens").asInt()==1;String text;
+            if(probe){probes.incrementAndGet();text=envelope(body.path("model").asText(),"length","{");}
+            else{answers.incrementAndGet();text="{\"error\":{\"code\":\"rate_limit\",\"message\":\"SYNTHETIC_PROVIDER_MESSAGE_SECRET\"}}";}
+            byte[] bytes=text.getBytes(java.nio.charset.StandardCharsets.UTF_8);exchange.sendResponseHeaders(probe?200:429,bytes.length);exchange.getResponseBody().write(bytes);exchange.close();});
+        try{
+            doAnswer(c->{assertEquals(loopbackUrl()+"/v1/chat/completions",c.getArgument(0),"Actual HTTP fixture must fail closed before any non-loopback dispatch");return c.callRealMethod();}).when(http).postJsonBoundedWithoutReplay(anyString(),anyString(),anyLong(),anyString(),anyInt(),any());
+            String project=preparedProject(),session=session(project);JsonNode result=JsonUtils.parse(mvc.perform(ask(project,session,"qwen","AUTHORED safe failure classification")).andReturn().getResponse().getContentAsString());
+            assertEquals(4203,result.path("code").asInt());assertEquals(1,probes.get());assertEquals(1,answers.get());assertEquals(2,ALLOWED_LOCAL_REQUESTS.get());assertEquals(0,BLOCKED_REQUESTS.get());
+            List<QwenGenerationAction> rows=actions.findAll();assertEquals(1,rows.size());JsonNode reservations=JsonUtils.parse(rows.get(0).getReservationsJson());JsonNode answer=null;for(JsonNode row:reservations)if("answer_generation".equals(row.path("kind").asText()))answer=row;
+            assertNotNull(answer);System.out.println("AUTHORED_QWEN_ADVICE_FAILURE code="+result.path("code").asInt()+" category="+answer.path("receipt").path("failureKind").asText()+" phase="+answer.path("phase").asText()+" probes="+probes.get()+" answers="+answers.get());
+            assertEquals(0,messages.findByProjectIdOrderByIdAsc(project).size());assertFalse(output.getAll().contains("SYNTHETIC_PROVIDER_MESSAGE_SECRET"));assertFalse(output.getAll().contains("AUTHORED-KEY-ONLY"));assertFalse(output.getAll().contains(properties.getQwen().getBaseUrl()));
+            assertTrue(result.path("message").asText().contains("rate limited"));assertEquals("HTTP429",answer.path("receipt").path("failureKind").asText());assertEquals("DISPATCH_UNKNOWN",answer.path("state").asText());
+        }finally{LOOPBACK_HANDLER.set(null);}
+    }
+    @Test @org.junit.jupiter.api.extension.ExtendWith(org.springframework.boot.test.system.OutputCaptureExtension.class)
+    void actualHttpPreflightFailureKeepsSafeCategoryAndSendsNoAnswer(org.springframework.boot.test.system.CapturedOutput output)throws Exception{
+        AtomicInteger probes=new AtomicInteger(),answers=new AtomicInteger();
+        LOOPBACK_HANDLER.set(exchange->{JsonNode body=JsonUtils.mapper().readTree(exchange.getRequestBody());if(body.path("max_tokens").asInt()==1)probes.incrementAndGet();else answers.incrementAndGet();byte[] bytes="SYNTHETIC_PREFLIGHT_BODY_SECRET".getBytes(java.nio.charset.StandardCharsets.UTF_8);exchange.sendResponseHeaders(503,bytes.length);exchange.getResponseBody().write(bytes);exchange.close();});
+        try{
+            doAnswer(c->{assertEquals(loopbackUrl()+"/v1/chat/completions",c.getArgument(0));return c.callRealMethod();}).when(http).postJsonBoundedWithoutReplay(anyString(),anyString(),anyLong(),anyString(),anyInt(),any());
+            String project=preparedProject(),session=session(project);JsonNode result=JsonUtils.parse(mvc.perform(ask(project,session,"qwen","AUTHORED preflight failure classification")).andReturn().getResponse().getContentAsString());
+            assertEquals(4205,result.path("code").asInt());assertTrue(result.path("message").asText().contains("provider busy"));assertEquals(1,probes.get());assertEquals(0,answers.get());assertEquals(1,ALLOWED_LOCAL_REQUESTS.get());assertEquals(0,BLOCKED_REQUESTS.get());
+            List<QwenGenerationAction> rows=actions.findAll();assertEquals(1,rows.size());assertEquals(0,rows.get(0).getAnswers());JsonNode reservation=JsonUtils.parse(rows.get(0).getReservationsJson()).get(0);
+            assertEquals("HTTP503",reservation.path("receipt").path("failureKind").asText());assertEquals("DISPATCH_UNKNOWN",reservation.path("state").asText());assertEquals("final",reservation.path("phase").asText());
+            assertEquals(0,messages.findByProjectIdOrderByIdAsc(project).size());assertFalse(output.getAll().contains("SYNTHETIC_PREFLIGHT_BODY_SECRET"));assertFalse(output.getAll().contains("AUTHORED-KEY-ONLY"));assertFalse(output.getAll().contains(properties.getQwen().getBaseUrl()));
+        }finally{LOOPBACK_HANDLER.set(null);}
+    }
+    @Test @org.junit.jupiter.api.extension.ExtendWith(org.springframework.boot.test.system.OutputCaptureExtension.class)
+    void stoppingActualHttpPreflightKeepsCancellationAndNeverStartsAnswer(org.springframework.boot.test.system.CapturedOutput output)throws Exception{
+        AtomicInteger probes=new AtomicInteger(),answers=new AtomicInteger();CountDownLatch entered=new CountDownLatch(1),release=new CountDownLatch(1);
+        LOOPBACK_HANDLER.set(exchange->{JsonNode body=JsonUtils.mapper().readTree(exchange.getRequestBody());if(body.path("max_tokens").asInt()==1)probes.incrementAndGet();else answers.incrementAndGet();entered.countDown();try{release.await(5,TimeUnit.SECONDS);}catch(InterruptedException interrupted){Thread.currentThread().interrupt();}finally{exchange.close();}});
+        try{
+            doAnswer(c->{assertEquals(loopbackUrl()+"/v1/chat/completions",c.getArgument(0));return c.callRealMethod();}).when(http).postJsonBoundedWithoutReplay(anyString(),anyString(),anyLong(),anyString(),anyInt(),any());
+            String project=preparedProject(),session=session(project),id=UUID.randomUUID().toString().replace("-","");
+            mvc.perform(post("/api/advice/{id}/ask/stream",project).header("X-ConSense-Llm-Profile","qwen").header("X-ConSense-Advice-Request",id).contentType("application/json").content(body(session,"AUTHORED actual preflight cancellation"))).andExpect(request().asyncStarted());
+            assertTrue(entered.await(3,TimeUnit.SECONDS));data(post("/api/advice/{id}/ask/stream/{request}/stop",project,id).param("sessionId",session));
+            long until=System.nanoTime()+TimeUnit.SECONDS.toNanos(3);while(System.nanoTime()<until&&actions.findAll().stream().anyMatch(a->a.getReservationsJson().contains("DISPATCHING")))Thread.sleep(20);
+            List<QwenGenerationAction> rows=actions.findAll();assertEquals(1,rows.size());assertEquals(0,rows.get(0).getAnswers());JsonNode reservation=JsonUtils.parse(rows.get(0).getReservationsJson()).get(0);
+            assertEquals("DISPATCH_UNKNOWN",reservation.path("state").asText());assertEquals("CANCELLED",reservation.path("receipt").path("failureKind").asText());assertEquals(1,probes.get());assertEquals(0,answers.get());assertEquals(1,ALLOWED_LOCAL_REQUESTS.get());assertEquals(0,BLOCKED_REQUESTS.get());
+            assertEquals(0,messages.findByProjectIdOrderByIdAsc(project).size());assertFalse(output.getAll().contains("Advice model request failed"));assertFalse(output.getAll().contains("AUTHORED-KEY-ONLY"));assertFalse(output.getAll().contains(properties.getQwen().getBaseUrl()));
+        }finally{release.countDown();LOOPBACK_HANDLER.set(null);}
+    }
+
     private static final String DB=UUID.randomUUID().toString();
-    @DynamicPropertySource static void resources(DynamicPropertyRegistry r){r.add("spring.datasource.url",()->"jdbc:h2:mem:qwen_advice_"+DB+";MODE=MySQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE");r.add("consense.storage-root",()->java.nio.file.Paths.get("target","qwen-advice-source",DB).toAbsolutePath().toString());}
+    @DynamicPropertySource static void resources(DynamicPropertyRegistry r){r.add("spring.datasource.url",()->"jdbc:h2:mem:qwen_advice_"+DB+";MODE=MySQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE");r.add("consense.storage-root",()->java.nio.file.Paths.get("target","qwen-advice-source",DB).toAbsolutePath().toString());r.add("consense.qwen.base-url",AdviceQwenUsageWorkflowTest::loopbackUrl);r.add("consense.qwen-flash.base-url",AdviceQwenUsageWorkflowTest::loopbackUrl);}
     @Autowired MockMvc mvc;@Autowired SourceDocumentRepository sources;@Autowired ChatMessageRepository messages;@Autowired QwenGenerationActionRepository actions;
     @Autowired StorageService storage;@Autowired ConsenseProperties properties;@Autowired QwenGenerationLedger ledger;@Autowired LlmProfiles profiles;
-    @MockBean(name="llmClient") LlmClient local;@MockBean HttpSupport http;
+    @MockBean(name="llmClient") LlmClient local;@org.springframework.boot.test.mock.mockito.SpyBean(name="guardedHttpSupport") HttpSupport http;
     private final List<JsonNode> sent=Collections.synchronizedList(new ArrayList<>());
     private final AtomicInteger answerNumber=new AtomicInteger();private boolean invalidFirst,wrongProbe;
     @BeforeEach void setup(){
         sent.clear();answerNumber.set(0);invalidFirst=false;wrongProbe=false;actions.deleteAll();
+        ALLOWED_LOCAL_REQUESTS.set(0);BLOCKED_REQUESTS.set(0);
         when(local.available()).thenReturn(true);when(local.chatModel()).thenReturn("AUTHORED-LOCAL");when(local.embedModel()).thenReturn("AUTHORED-EMBED");
         doAnswer(c->{List<float[]> result=new ArrayList<>();for(Object ignored:c.<List<?>>getArgument(0))result.add(new float[]{1,0});return result;}).when(local).embed(anyList());
         doAnswer(c->{JsonNode body=JsonUtils.parse(c.getArgument(1));sent.add(body);boolean probe=body.path("max_tokens").asInt()==1;
@@ -54,12 +129,27 @@ class AdviceQwenUsageWorkflowTest {
             String project=project();source(project);data(post("/api/advice/{id}/index/rebuild",project));String session=session(project);
             JsonNode first=data(ask(project,session,profile,"FIRST AUTHORED QUESTION"));assertTrue(first.path("grounded").asBoolean());assertEquals(profile,first.path("modelIdentity").path("profileId").asText());assertEquals("configured_qwen_usage_preflight_policy",first.path("modelIdentity").path("identityScope").asText());
             int before=sent.size();JsonNode second=data(ask(project,session,profile,"FOLLOW UP AUTHORED QUESTION"));assertTrue(second.path("grounded").asBoolean());
-            assertEquals(3,sent.size()-before,"Whole-history probe, full-request probe and actual answer are all generations");
-            assertTrue(sent.get(before).path("messages").get(1).path("content").asText().contains("FIRST AUTHORED QUESTION"));
-            assertTrue(sent.get(before+1).path("messages").get(1).path("content").asText().contains("AUTHORED WHOLE SOURCE"));
+            assertEquals(2,sent.size()-before,"The final whole-prompt probe includes bounded history and evidence before its answer");
+            for(int index=before;index<sent.size();index++){
+                String material=sent.get(index).path("messages").get(1).path("content").asText();assertTrue(material.contains("FIRST AUTHORED QUESTION"));assertTrue(material.contains("AUTHORED WHOLE SOURCE"));
+            }
+            assertEquals(1,sent.get(before).path("max_tokens").asInt());assertEquals(16384,sent.get(before+1).path("max_tokens").asInt());
         }
-        assertEquals(4,actions.count());assertEquals(10,actions.findAll().stream().mapToInt(QwenGenerationAction::getTotal).sum());
-        for(QwenGenerationAction action:actions.findAll()){assertTrue(action.getMaxTotal()==6);assertEquals(action.getTotal(),action.getPreflights()+action.getAnswers());for(JsonNode row:JsonUtils.parse(action.getReservationsJson())){assertEquals("COMPLETED",row.path("state").asText());assertTrue(row.path("receipt").path("requestSha256").asText().matches("[a-f0-9]{64}"));assertTrue(row.path("receipt").path("responseSha256").asText().matches("[a-f0-9]{64}"));}}
+        assertEquals(4,actions.count());assertEquals(8,actions.findAll().stream().mapToInt(QwenGenerationAction::getTotal).sum());
+        List<org.junit.jupiter.api.function.Executable> ledgerAssertions=new ArrayList<>();
+        for(QwenGenerationAction action:actions.findAll()){
+            System.out.println("AUTHORED_QWEN_HISTORY_LIMITS preflightMax="+action.getMaxPreflights()+" answerMax="+action.getMaxAnswers()+" totalMax="+action.getMaxTotal());
+            ledgerAssertions.add(()->assertEquals(6,action.getMaxPreflights(),"Existing whole-Advice preflight ceiling"));
+            ledgerAssertions.add(()->assertEquals(4,action.getMaxAnswers(),"Existing whole-Advice answer ceiling"));
+            ledgerAssertions.add(()->assertEquals(10,action.getMaxTotal(),"Existing whole-Advice total ceiling"));
+            ledgerAssertions.add(()->assertEquals(action.getTotal(),action.getPreflights()+action.getAnswers(),"Paid total must equal the recorded preflights plus answers"));
+            for(JsonNode row:JsonUtils.parse(action.getReservationsJson())){
+                ledgerAssertions.add(()->assertEquals("COMPLETED",row.path("state").asText(),"Successful authored generation reservation state"));
+                ledgerAssertions.add(()->assertTrue(row.path("receipt").path("requestSha256").asText().matches("[a-f0-9]{64}"),"Successful authored generation has a safe request hash"));
+                ledgerAssertions.add(()->assertTrue(row.path("receipt").path("responseSha256").asText().matches("[a-f0-9]{64}"),"Successful authored generation has a safe response hash"));
+            }
+        }
+        assertAll("Whole-Advice ledger proof",ledgerAssertions);
         assertWirePairs();
     }
     @Test void repairGetsItsOwnPreflightAndAnswerWhileOriginalMaxTwoRemains() throws Exception {

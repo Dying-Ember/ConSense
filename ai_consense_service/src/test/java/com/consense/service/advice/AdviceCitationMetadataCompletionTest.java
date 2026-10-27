@@ -12,6 +12,14 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /** Authored protocol counterexamples; no model, source-quality or legal acceptance. */
 class AdviceCitationMetadataCompletionTest {
+    @Test void admittedSeedTextCanCompleteExplicitCitationMetadataWhileContextStaysUnknown()throws Exception{
+        List<CitationVO> selected=sources();for(CitationVO source:selected){source.setCanonicalEvidence(Collections.singletonList(new com.consense.web.dto.CanonicalEvidenceDtos.EvidencePointer()));
+            source.setCanonicalSourceUnit(JsonUtils.parse("{\"status\":\"unknown\",\"reason\":\"additional_source_context_deferred\",\"semanticScopeVerified\":false}"));}
+        Object publication=publication(selected,new HashSet<>(Arrays.asList("[1]","[2]")));begin(publication,false,false);
+        AdviceService.AnswerRecord answer=answer("Supported [1] and explicit [2].");ReflectionTestUtils.invokeMethod(publication,"finish",answer,"Explain the clause",false);
+        assertTrue(errors(publication).isEmpty(),errors(publication).toString());assertEquals(Arrays.asList("[1]","[2]"),answer.getSections().get(1).getCitations());
+        assertEquals("unknown",selected.get(0).getCanonicalSourceUnit().path("status").asText());assertFalse(selected.get(0).getCanonicalSourceUnit().path("semanticScopeVerified").asBoolean());
+    }
     @Test void synchronousCompletionChangesOnlyOuterMetadataAndKeepsRawAttempt() throws Exception {
         Object publication=publication(sources());begin(publication,false,false);
         AdviceService.AnswerRecord answer=answer("Supported [1] and explicit [2].");
@@ -156,5 +164,11 @@ class AdviceCitationMetadataCompletionTest {
         Class<?> context=Arrays.stream(AdviceService.class.getDeclaredClasses()).filter(type->type.getSimpleName().equals("QuestionContext")).findFirst().get();Constructor<?> qc=context.getDeclaredConstructor(String.class,List.class);qc.setAccessible(true);
         Class<?> type=Arrays.stream(AdviceService.class.getDeclaredClasses()).filter(item->item.getSimpleName().equals("Publication")).findFirst().get();Constructor<?> pc=type.getDeclaredConstructor(AdviceService.class,List.class,boolean.class,AdviceProgress.class,Runnable.class,context);pc.setAccessible(true);
         return pc.newInstance(service,sources,false,AdviceProgress.NONE,(Runnable)()->{},qc.newInstance("Explain the clause",Collections.emptyList()));
+    }
+    private Object publication(List<CitationVO> sources,Set<String> textAliases)throws Exception{
+        AdviceService service=new AdviceService(null,null,null,null,null,null,null,null,null,null,null);
+        Class<?> context=Arrays.stream(AdviceService.class.getDeclaredClasses()).filter(type->type.getSimpleName().equals("QuestionContext")).findFirst().get();Constructor<?> qc=context.getDeclaredConstructor(String.class,List.class);qc.setAccessible(true);
+        Class<?> type=Class.forName(AdviceService.class.getName()+"$Publication");Constructor<?> pc=type.getDeclaredConstructor(AdviceService.class,List.class,boolean.class,AdviceProgress.class,Runnable.class,Runnable.class,Runnable.class,Set.class,context);pc.setAccessible(true);
+        return pc.newInstance(service,sources,false,AdviceProgress.NONE,(Runnable)()->{},(Runnable)()->{},(Runnable)()->{},textAliases,qc.newInstance("Explain the clause",Collections.emptyList()));
     }
 }

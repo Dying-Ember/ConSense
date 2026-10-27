@@ -896,7 +896,7 @@ public class OerCanonicalRetrievalClient {
             // Availability rechecks the complete selected registry roots, without returning their trees to Java.
             IndexState available=indexAvailable(indexKey,module,current);require(available.ready&&receipt.signature.equals(available.signature),"current canonical index unavailable after ranking");
             if(frame!=null)frame.revalidate();guard.run();
-            try{validateQueryResult(result,indexKey,module,receipt,checked,null);}
+            try{validateQueryResult(result,indexKey,module,receipt,checked,null,compact instanceof RankedTextParents);}
             finally{if(compact!=null)checked.chunks.clear();}
             require(selected.sourcePageEvidence.equals(sourcePageEvidence(current)),"source page evidence changed during retrieval");
             return publishQuery(operation,result,selected,current,module);
@@ -904,6 +904,13 @@ public class OerCanonicalRetrievalClient {
     }
 
     private void validateQueryResult(JsonNode result,String indexKey,String module,Receipt receipt,Corpus corpus,String role){
+        validateQueryResult(result,indexKey,module,receipt,corpus,role,false);
+    }
+    /** Selected current text proves its exact bytes, while complete source context remains deferred. */
+    static final class RankedTextParents extends LinkedHashMap<String,JsonNode>{
+        RankedTextParents(Map<String,JsonNode> chunks){super(chunks);}
+    }
+    private void validateQueryResult(JsonNode result,String indexKey,String module,Receipt receipt,Corpus corpus,String role,boolean rankedText){
         ConsenseProperties.Vetting config=properties.getVetting();
         require(indexKey.equals(result.path("projectId").asText()) && receipt.signature.equals(result.path("indexSignature").asText())
                 && VettingRetrievalHealth.structuralContract(result.path("mode").asText())
@@ -920,7 +927,7 @@ public class OerCanonicalRetrievalClient {
             previous=hit.path("score").asDouble(); ranked.add(id);
         }
         require(receipt.sourceUnitPolicy.equals(result.path("sourceUnits").path("policy").asText()),"canonical source-unit policy differs from indexed capability");
-        validateUnits(result,corpus,ranked);
+        if(rankedText)OerCanonicalSourceUnits.validateRankedText(result,corpus.chunks,ranked);else validateUnits(result,corpus,ranked);
     }
 
     private void revalidateCurrent(Operation operation,String module,List<CanonicalSourceBinding> current,CanonicalEvidenceService.VerifiedBindingFrame frame,Corpus corpus,Capability health){

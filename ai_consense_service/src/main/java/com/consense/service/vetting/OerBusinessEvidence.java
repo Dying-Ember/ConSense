@@ -55,6 +55,7 @@ public class OerBusinessEvidence {
         private String initialSourceGeneration;
         private boolean closedSourceProof;
         private Runnable initialAskExit;
+        private Runnable adviceTextByteGuard;
         private int queryChunkCount;
         private CanonicalEvidenceService.CompactBindingScope semanticScope;
         private OerCanonicalRetrievalClient.SemanticSources semanticSources;
@@ -542,8 +543,20 @@ public class OerBusinessEvidence {
             currentSources.requireOriginalBytes(source);currentSources.requireOriginalFreshness(source,session.originalFileStates.get(source.getId()));}
         evidence.currentDisplayBindings(session.projectId,session.module,selected,session.originalFileStates);
     }
+    /** A native byte proof occurs once after each paid preflight, never once per answer section. */
+    public void assertAdviceDispatchCurrent(Session session){if(session.adviceTextByteGuard!=null)session.adviceTextByteGuard.run();}
+    /** A caller may whitelist an alias only from a locally retained, exact selected-text view. */
+    public boolean admitsAdviceText(Session session,EvidencePointer pointer,String content,JsonNode unit){
+        if(session==null||session.invalidated||session.adviceTextByteGuard==null||pointer==null||unit==null)return false;
+        Chunk view=session.byId.get(pointer.getCanonicalChunkId());return view!=null&&Objects.equals(content,view.getContent())
+                &&unit.path("originIds").isArray()&&unit.path("originIds").size()==1&&Objects.equals(pointer.getCanonicalChunkId(),unit.path("originIds").get(0).asText())
+                &&"unknown".equals(unit.path("status").asText())&&"additional_source_context_deferred".equals(unit.path("reason").asText())
+                &&Objects.equals(session.viewPayloads.get(view.getId()),JsonUtils.serializedSha256(view))
+                &&JsonUtils.mapper().valueToTree(pointer).equals(JsonUtils.mapper().valueToTree(view.getCanonicalEvidence()));
+    }
     public void assertAdviceOriginalsCurrent(Session session){
         if(session.queryScope==null){current(session);return;}
+        if(session.adviceTextByteGuard!=null){session.adviceTextByteGuard.run();return;}
         List<SourceDocument> selected=session.querySelection.get();assertSelectedScope(session,selected);requireAdviceOriginalBytes(session,selected);currentQueryScope(session);
     }
     private String sourceGeneration(Session session){
@@ -990,27 +1003,32 @@ public class OerBusinessEvidence {
         if(session.readStage!=null||!session.byId.isEmpty()){logAdviceAdmission(ids.size(),ids.size(),result.path("hits").size(),session.byId.size(),"fallback_loaded_session");return null;}
         Set<Long> requested=new LinkedHashSet<>(ids);List<SourceDocument> selected=session.querySelection.get().stream().filter(source->requested.contains(source.getId())).collect(Collectors.toList());
         List<CanonicalSourceBinding> bindings=evidence.compactNormalCandidates(session.projectId,session.module,selected);if(bindings==null){logAdviceAdmission(ids.size(),ids.size(),result.path("hits").size(),0,"fallback_non_normal_or_unstamped");return null;}
-        currentQueryScope(session);boolean supported=retrieval.compactNormalPreparationAvailable(session.module,bindings);currentQueryScope(session);if(!supported){logAdviceAdmission(ids.size(),bindings.size(),result.path("hits").size(),0,"fallback_capability_unavailable");return null;}
-        Map<Long,CanonicalSourceBinding> byDocument=new LinkedHashMap<>();bindings.forEach(binding->byDocument.put(binding.getDocumentId(),binding));
-        Set<String> retained=new LinkedHashSet<>();for(JsonNode hit:result.path("hits"))retained.add(hit.path("id").asText());
-        for(JsonNode unit:result.path("sourceUnits").path("units"))for(JsonNode envelope:Arrays.asList(unit,unit.path("hierarchyContext"),unit.path("attachmentContext")))
+        currentQueryScope(session);Set<String> retained=new LinkedHashSet<>(),seeds=new LinkedHashSet<>();
+        for(JsonNode hit:result.path("hits")){String id=hit.path("id").asText();require(!id.isEmpty()&&seeds.add(id),"duplicate ranked origin");retained.add(id);}
+        for(JsonNode unit:result.path("sourceUnits").path("units"))for(JsonNode envelope:Arrays.asList(unit,unit.path("hierarchyContext"),unit.path("attachmentContext"))){
             for(JsonNode id:envelope.path("requiredMemberIds"))retained.add(id.asText());
-        Map<Long,JsonNode> headers=new LinkedHashMap<>();Map<String,JsonNode> parents=new LinkedHashMap<>();Map<String,EvidencePointer> pointers=new LinkedHashMap<>();
-        CanonicalEvidenceService.CompactNormalPreparation prepared=evidence.prepareCompactNormalSources(session.projectId,session.module,selected,bindings,(source,graph)->{
-            CanonicalSourceBinding binding=byDocument.get(source.getId());JsonNode header=headers.get(source.getId());
-            for(JsonNode unit:graph.path("units"))if(!NormalObservedContract.noObservedText(unit.path("text").asText())){
-                JsonNode chunk=NormalObservedContract.compactChunk(unit,graph,header);String id=chunk.path("id").asText();require(parents.putIfAbsent(id,chunk)==null,"duplicate normal source origin");
-                if(retained.contains(id)){EvidencePointer pointer=CanonicalEvidenceService.compactNormalPointer(binding,header,graph,chunk,session.module);
-                    if(sourcePages!=null)pointer=sourcePages.enrich(pointer);require(Objects.equals(session.sourceRenderPins.get(binding.getProjectionSha256()),pointer.getSourceRenderEvidenceIdentitySha256()),"source render pointer differs from reviewed identity");pointers.put(id,pointer);}
-            }
-        },null,headers);
-        if(prepared==null){parents.clear();logAdviceAdmission(ids.size(),bindings.size(),result.path("hits").size(),0,"fallback_registered_authority_not_normal");return null;}
-        OerCanonicalRetrievalClient.SemanticSources proof=retrieval.prepareCompactNormalSources(session.module,prepared.bindings());evidence.attestCompactNormalSources(prepared,proof.normalProofs());
-        CanonicalEvidenceService.CompactBindingScope scope=prepared.scope();evidence.revalidateCompactSelection(scope,requested);
-        Map<Long,SourceDocument> sources=prepared.sources();require(pointers.keySet().equals(retained),"ranked source closure contains an unavailable member");
-        for(String id:retained){EvidencePointer pointer=pointers.get(id);Chunk view=view(parents.get(id),pointer,sources.get(pointer.getDocumentId()));require(canonicalViewStatus(view)==null,"compact normal view differs");session.byId.put(id,view);session.chunks.owned.add(view);session.viewPayloads.put(id,JsonUtils.serializedSha256(view));}
-        Runnable previous=session.initialAskExit;session.initialAskExit=()->{evidence.revalidateCompactSelection(scope,requested);if(previous!=null)previous.run();currentQueryScope(session);};
-        headers.clear();return parents;
+            for(JsonNode member:envelope.path("members"))retained.add(member.path("id").asText());
+        }
+        CanonicalEvidenceService.SelectedNormalTextSources text=evidence.selectedNormalTextSources(session.projectId,session.module,selected,bindings,retained);
+        if(text==null){logAdviceAdmission(ids.size(),bindings.size(),result.path("hits").size(),0,"fallback_registered_authority_not_normal");return null;}
+        CanonicalEvidenceService.CompactBindingScope scope=text.scope();Map<Long,SourceDocument> sources=text.sources();Map<Long,JsonNode> headers=text.headers();
+        Map<String,JsonNode> parents=text.chunks();Map<Long,CanonicalSourceBinding> byDocument=new LinkedHashMap<>();bindings.forEach(binding->byDocument.put(binding.getDocumentId(),binding));
+        ObjectNode demand=JsonUtils.mapper().createObjectNode();demand.put("operation","catalog");demand.put("maxBytes",16777216);
+        evidence.assertCompactCurrent(scope);JsonNode catalog=retrieval.readSources(session.module,demand,bindings);evidence.assertCompactCurrent(scope);currentQueryScope(session);
+        for(String id:seeds){JsonNode raw=parents.get(id);require(raw!=null,"ranked source origin unavailable");Long document=Long.valueOf(raw.path("documentId").asText());CanonicalSourceBinding binding=byDocument.get(document);
+            require(binding!=null,"ranked source outside selected documents");EvidencePointer pointer=CanonicalEvidenceService.compactNormalPointer(binding,headers.get(document),raw,session.module);
+            if(sourcePages!=null)pointer=sourcePages.enrich(pointer);require(Objects.equals(session.sourceRenderPins.get(binding.getProjectionSha256()),pointer.getSourceRenderEvidenceIdentitySha256()),"source render pointer differs from reviewed identity");
+            Chunk view=view(raw,pointer,sources.get(document));require(canonicalViewStatus(view)==null,"selected normal text view differs");session.byId.put(id,view);session.chunks.owned.add(view);session.viewPayloads.put(id,JsonUtils.serializedSha256(view));
+        }
+        Runnable byteGuard=()->{List<CanonicalSourceBinding> current=currentQueryScope(session);evidence.assertCompactCurrent(scope);
+            Set<Long> disclosed=new LinkedHashSet<>(requested);for(Chunk view:session.byId.values())disclosed.add(Long.valueOf(view.getDocumentId()));
+            List<SourceDocument> additional=session.querySelection.get().stream().filter(source->disclosed.contains(source.getId())&&!requested.contains(source.getId())).collect(Collectors.toList());
+            if(!additional.isEmpty())requireAdviceOriginalBytes(session,additional);
+            List<CanonicalSourceBinding> admitted=current.stream().filter(binding->disclosed.contains(binding.getDocumentId())).collect(Collectors.toList());JsonNode closed=retrieval.readSources(session.module,demand,admitted);
+            for(JsonNode source:catalog.path("sources")){boolean found=false;for(JsonNode after:closed.path("sources"))if(source.equals(after))found=true;require(found,"selected Advisory source catalog changed");}
+            if(!additional.isEmpty())requireAdviceOriginalBytes(session,additional);evidence.assertCompactCurrent(scope);currentQueryScope(session);};
+        session.adviceTextByteGuard=byteGuard;Runnable previous=session.initialAskExit;session.initialAskExit=()->{byteGuard.run();if(previous!=null)previous.run();evidence.assertCompactCurrent(scope);currentQueryScope(session);};
+        return new OerCanonicalRetrievalClient.RankedTextParents(parents);
     }
     private static void logAdviceAdmission(int sources,int projections,int hits,int views,String reason){LOG.info("Advisory selected-proof admission selectedSources={} selectedProjections={} rankedHits={} retainedViews={} reason={}",sources,projections,hits,views,reason);}
     /** Explicit model evidence requests may now load their complete source documents. */
@@ -1022,7 +1040,9 @@ public class OerBusinessEvidence {
 
     /** Advisory declares its context needs; source selection and observed closure stay in shared OER. */
     public List<VectorStore.SearchHit> advisoryTextContext(Session session,List<VectorStore.SearchHit> hits){
-        return withIncorporationContext(session,hits,true);
+        if(session.adviceTextByteGuard==null)return withIncorporationContext(session,hits,true);
+        List<VectorStore.SearchHit> deferred=new ArrayList<>();for(VectorStore.SearchHit hit:hits){Map<String,Object> payload=new LinkedHashMap<>(hit.getPayload());
+            if("standard".equals(payload.get("sourceRole"))&&!fixedBaselineHit(hit)){payload.put("applicabilityContextComplete",false);payload.put("applicabilityContextRequiredUnits",Collections.emptyList());}deferred.add(new VectorStore.SearchHit(hit.getId(),hit.getScore(),payload));}return deferred;
     }
     public List<VectorStore.SearchHit> advisoryContext(Session session,List<VectorStore.SearchHit> hits,boolean includeSmallCorpus,int stuffingLimit){
         List<VectorStore.SearchHit> selected=withIncorporationContext(session,hits);

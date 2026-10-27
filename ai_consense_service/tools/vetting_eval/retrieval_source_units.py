@@ -70,7 +70,7 @@ def semantic_value(value):
     return copy.deepcopy(value)
 
 
-def semantic_member(parent, projection_sha256):
+def _semantic_member(parent, projection_sha256, *, text_scan=False):
     """A compact exact-text member plus immutable evidence address."""
     fields = ('id', 'unitId', 'producerKind', 'documentId', 'role', 'module',
         'eligibleModules', 'sourceOrder', 'kind', 'canonicalScope', 'clauseId',
@@ -82,7 +82,8 @@ def semantic_member(parent, projection_sha256):
         'nativeTableMetadataVersion', 'sourceQualityMetadataVersion', 'physicalPages',
         'sourceQualityAccepted', 'sourceReviewAccepted', 'legalClosure',
         'sourceBlockComplete', 'originalGeometryStatus', 'reviewStatus', 'visualReturnStatus')
-    result = {field: semantic_value(parent[field]) for field in fields if field in parent}
+    result = {field: semantic_value(parent[field]) for field in fields if field in parent
+              and (not text_scan or field not in ('sourceQuality', 'unknowns'))}
     result['text'] = parent['content']
     result['semanticProjectionVersion'] = SEMANTIC_VERSION
     result['evidenceRef'] = {'projectionSha256': projection_sha256,
@@ -93,6 +94,15 @@ def semantic_member(parent, projection_sha256):
         'sourceRevisionSha256': parent.get('sourceRevisionSha256'),
         'originalSourceSha256': parent.get('originalSourceSha256')}
     return result
+
+
+def semantic_member(parent, projection_sha256):
+    return _semantic_member(parent, projection_sha256)
+
+
+def semantic_scan_member(parent, projection_sha256):
+    """Exact normal text-scan fields without building discarded full declarations."""
+    return _semantic_member(parent, projection_sha256, text_scan=True)
 
 
 def semantic_unit_template(unit):

@@ -79,6 +79,7 @@ public final class VettingInputBudget {
             } else if(input.getQwenWire()!=null&&failure instanceof com.consense.common.BizException){
                 String kind=com.consense.ai.QwenChatClient.safeUsageFailureKind((RuntimeException)failure);
                 result.setReason(kind.matches("HTTP[1-5][0-9]{2}")?"qwen_preflight_http_"+kind.substring(4):"qwen_preflight_transport_failed");
+                if(failure instanceof com.consense.ai.HttpSupport.ModelRequestFailure)result.setFailureDiagnostics(((com.consense.ai.HttpSupport.ModelRequestFailure)failure).diagnostics());
             } else result.setReason("token_observer_failed_"+failure.getClass().getSimpleName());
             return result;
         }

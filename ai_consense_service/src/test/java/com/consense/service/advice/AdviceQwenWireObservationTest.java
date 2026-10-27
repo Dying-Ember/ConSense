@@ -82,12 +82,19 @@ class AdviceQwenWireObservationTest {
 
     @Test void streamedAnswerRepairUsesACompleteNonstreamingQwenRequest() throws Exception {
         Fixture f=new Fixture(Files.createDirectory(root.resolve("full-repair")),true,true);
-        ObjectNode first=(ObjectNode)JsonUtils.parse(f.contract());first.put("basisScope","reference_only");
-        f.answers.add(JsonUtils.write(first));f.answers.add(f.contract());f.complete("AUTHORED system",USER);
+        f.answers.add("{\"basisScope\":}");f.answers.add(f.contract());f.complete("AUTHORED system",USER);
         assertEquals(4,f.bodies.size());assertTrue(JsonUtils.parse(f.bodies.get(1)).path("stream").asBoolean());
         assertFalse(JsonUtils.parse(f.bodies.get(3)).path("stream").asBoolean());
         assertTrue(JsonUtils.parse(f.bodies.get(3)).path("messages").get(1).path("content").asText().contains("full complete answer"));
         assertEquals(2,attempts(f.directory).size());
+    }
+    @Test void lateGlobalBasisRejectionCannotResubmitAnAlreadyPublishedPrefix() throws Exception{
+        Fixture f=new Fixture(Files.createDirectory(root.resolve("late-basis-prefix")),true,true);
+        ObjectNode first=(ObjectNode)JsonUtils.parse(f.contract());first.put("basisScope","reference_only");f.answers.add(JsonUtils.write(first));f.answers.add(f.contract());
+        com.consense.common.BizException rejected=assertThrows(com.consense.common.BizException.class,()->f.complete("AUTHORED system",USER));
+        assertEquals(4205,rejected.getCode());assertTrue(rejected.getMessage().contains("application-owned accepted section ID"));assertFalse(f.sections.isEmpty(),"The earlier validated prefix remains visible; no completed answer may be returned");
+        assertEquals(4,f.bodies.size(),"Two admitted attempts use exactly two preflights and two answers");assertEquals(2,attempts(f.directory).size());assertTrue(f.answers.isEmpty());
+        assertTrue(JsonUtils.parse(f.bodies.get(3)).path("stream").asBoolean(),"A published prefix retains its existing streaming repair and immutable-ID guard");
     }
 
     @Test void knownCredentialReflectionIsRejectedBeforeAnyEntityOrPaidDispatch() throws Exception {

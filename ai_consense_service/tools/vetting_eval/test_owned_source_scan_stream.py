@@ -88,7 +88,8 @@ class OwnedSemanticScanTests(unittest.TestCase):
             return original_read(descriptor, retain=retain)
         def decode(raw):
             value = original_json(raw)
-            if value.get('schema') in ('consense.source-semantic-read-manifest.v2', 'consense.source-semantic-read-manifest.v3'):
+            if value.get('schema') in ('consense.source-semantic-read-manifest.v2', 'consense.source-semantic-read-manifest.v3',
+                                      'consense.source-semantic-read-manifest.v4'):
                 manifest_decodes[value['projectionSha256']] += 1
             return value
         with patch.object(self.registry, '_stream_file_identity', side_effect=identity), \

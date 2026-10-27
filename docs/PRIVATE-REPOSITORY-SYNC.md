@@ -1,5 +1,13 @@
 # 私仓源码整合记录与后续同步
 
+## User-confirmed public source publication (2026-10-27)
+
+The user additionally approved publishing the six reviewed paths in the two newer Drafting parents `b86bcda0a5b4e34dfbd0073fe482f9c2da145f8a` and `4408e666d3d715dd2f985e73a4700ce4e74b236e`. Preserve these existing main commits when delivering subsequent reviewed OER changes. The narrow parent review found no original/model/key payload additions; its scope and accepted incomplete-draft limits remain distinct from OER acceptance. This resolves the newer-parent publication boundary and must not cause a repeat visibility or same-scope approval question.
+
+The connected repository `Dying-Ember/ConSense` was verified as public. The user explicitly authorized publishing the reviewed source to that existing public repository. The approved35-path Drafting plus17-path OER snapshot was published as `cb081ed0253a0f7c7e28397f7db7e12d5905e568`, with the exact approved tree `d7652ff430aed9dab96b44c6692c0e842e86d5a0`. Actual remote main, local HEAD, main and origin/main were read back at the same commit. Local unpublished history was preserved at `refs/codex/preserved-main/stage42-approved-20261027`, and all22then-dirty working files plus the index were byte-preserved. No checkout, reset, force push or working-file rewrite was used for alignment.
+
+Reviewed source publication and runtime/business acceptance remain separate. Originals, models, credentials, private configurations, databases, indexes and operational evidence remain local and excluded from publication. The older private-repository wording below describes the earlier destination assumption; it must not cause the same resolved visibility question to be asked again for the authorized reviewed-source delivery. New working-tree changes must still complete their own scope, tests and acceptance checks before being reported as delivered.
+
 ## 现行规则：本机与远端统一 main 热修（2026-10-23）
 
 实际工作目录为 `D:/R&D/ConSense`。后续开发、修复和热修直接在本机 `main` 完成，跟踪 `origin/main`；既有工作分支、原型分支和旧worktree作为历史参考。除用户明确另行指定，后续修改沿同一条main提交链推进。

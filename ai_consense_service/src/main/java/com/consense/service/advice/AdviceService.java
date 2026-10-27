@@ -352,6 +352,8 @@ public class AdviceService {
             throw new BizException(4204,"The clarification was issued against a different source version. Start a new question against the current evidence.");
         List<CitationVO> sources = new ArrayList<>();
         for(int i=0;i<hits.size();i++){CitationVO source=toCitation(hits.get(i));source.setEvidenceId("["+(i+1)+"]");sources.add(source);}
+        final Set<String> textAliases=new LinkedHashSet<>();if(session!=null)for(CitationVO source:sources)
+            if(source.getCanonicalEvidence()!=null&&source.getCanonicalEvidence().size()==1&&canonical.admitsAdviceText(session,source.getCanonicalEvidence().get(0),source.getContent(),source.getCanonicalSourceUnit()))textAliases.add(source.getEvidenceId());
 
         if (hits.isEmpty()) {
             if(initialRead!=null)initialRead.completeInitialAsk();
@@ -382,7 +384,10 @@ public class AdviceService {
         Runnable sourceBoundary=generationBoundary(qwen!=null,
                 ()->{if(session!=null){if(qwen!=null&&session.hasClosedSourceProof())assertCompactSelection(session,scope);else assertCurrentSelection(session,scope);}},
                 ()->{if(session!=null)assertCompactSelection(session,scope);});
-        Publication publication=new Publication(sources,fixedReferenceOnly,progress,currentGuard,sourceBoundary,questionContext);
+        Runnable beforePaidBoundary=()->{if(qwen!=null&&session!=null)try{canonical.assertAdviceDispatchCurrent(session);}
+            catch(java.util.concurrent.CancellationException cancelled){throw cancelled;}
+            catch(RuntimeException changed){throw sourceFailure(4204,"The selected advice evidence changed before model generation. Refresh the selected scope and ask again.",changed,"source_stale");}};
+        Publication publication=new Publication(sources,fixedReferenceOnly,progress,currentGuard,sourceBoundary,beforePaidBoundary,textAliases,questionContext);
         List<Map<String,Object>> stagedAttempts=new ArrayList<>();
         String supplementOutcome="not_requested";
         AnswerRecord answer;
@@ -409,7 +414,7 @@ public class AdviceService {
                         for(int i=0;i<admitted.size();i++){CitationVO source=toCitation(admitted.get(i));source.setEvidenceId("["+(expanded.size()+1)+"]");expanded.add(source);}
                         String expandedSystem=AdvisoryHarness.system(promptService.system(PromptCatalog.KEY_ADVICE),expanded,questionContext.originalQuestion);
                         String expandedUser=userPrompt+"\n\nAdditional current-source text from the same selected document revision and role follows. Reconsider the source-text gap, answer the whole original question, and cite only the final public aliases. The earlier draft is not evidence.\n\n"+String.join("\n\n",entries);
-                        Publication expandedPublication=new Publication(expanded,fixedReferenceOnly,progress,currentGuard,sourceBoundary,questionContext);
+                        Publication expandedPublication=new Publication(expanded,fixedReferenceOnly,progress,currentGuard,sourceBoundary,beforePaidBoundary,textAliases,questionContext);
                         attemptedSupplement=expandedPublication;
                         progress.phase("supplementing");
                         AnswerRecord expandedAnswer=completeAdvice(expandedSystem,expandedUser,selectedOperation,responsesOperation,qwen,requestSourceIdentity,currentGuard,expandedPublication,questionContext.originalQuestion,"supplement",false);
@@ -437,6 +442,11 @@ public class AdviceService {
             // Responses checks current sources around counting and generation inside this call.
             // Preserve that safe source failure; it is not a provider/model failure.
             if(e instanceof BizException&&Arrays.asList(4202,4204,4205).contains(((BizException)e).getCode()))throw (BizException)e;
+            if(qwen!=null&&e instanceof com.consense.ai.HttpSupport.ModelRequestFailure){
+                com.consense.ai.HttpSupport.ModelRequestFailure failure=(com.consense.ai.HttpSupport.ModelRequestFailure)e;
+                log.warn("Advice model request failed: phase={}, category={}, status={}",failure.phase(),failure.failureKind(),failure.diagnostics().get("httpStatus"));
+                throw new BizException(4203,"Qwen "+failure.phase()+" "+failure.description()+". No answer was published.");
+            }
             // External exception text may contain credentials; retain only the safe failure type/profile.
             log.warn("Advice model call failed ({}).", e.getClass().getSimpleName());
             ModelIdentity selected = ai.modelIdentity();
@@ -1274,7 +1284,7 @@ public class AdviceService {
         if(allowStreaming&&publication.progress.streaming()&&!streaming)publication.progress.phase("stream_unavailable");
         AdviceWireObservation qwenObservation=qwen==null||adviceSettings==null?null:AdviceWireObservation.configured(adviceSettings);
         for(int attempt=0;attempt<2;attempt++) {
-            boolean attemptStreaming=streaming;
+            boolean attemptStreaming=streaming&&(qwen==null||attempt==0||!publication.accepted.isEmpty());
             guard.run();publication.beginAttempt(attemptStreaming,attempt==1);publication.progress.phase("budget");
             com.consense.ai.StructuredJsonSections units=attemptStreaming?new com.consense.ai.StructuredJsonSections(publication::acceptNode):null;
             com.consense.ai.StructuredJsonSections.InvalidJsonException[] syntaxFailure={null};
@@ -1292,8 +1302,12 @@ public class AdviceService {
                     qwen.assertObservationCredential(observationSecret);qwenObservation.beginQwen(request,attempt,observationSecret);
                 }
                 VettingInputBudget.Result budget=qwen.observe(request,phasePrefix==null?(attempt==0?"final":"repair"):phasePrefix+"-preflight-"+attempt,guard,publication.progress::onCancel);
-                if(!budget.isExtraDispatchPermitted())throw new BizException(4205,"Advice "+budget.getStatus()+": "+budget.getReason()+". Paid preflight reservations remain recorded; no business answer was submitted.");
-                guard.run();publication.sourceBoundary.run();
+                if(!budget.isExtraDispatchPermitted()){
+                    if(budget.getFailureDiagnostics()!=null&&budget.getFailureDiagnostics().get("failureKind") instanceof String)
+                        throw new BizException(4205,"Qwen usage preflight "+com.consense.ai.HttpSupport.ModelRequestFailure.description((String)budget.getFailureDiagnostics().get("failureKind"))+". No business answer was submitted; paid preflight reservations remain recorded.");
+                    throw new BizException(4205,"Advice "+budget.getStatus()+": "+budget.getReason()+". Paid preflight reservations remain recorded; no business answer was submitted.");
+                }
+                guard.run();publication.sourceBoundary.run();publication.beforePaidBoundary.run();
                 publication.progress.phase("generating");raw=qwen.generate(request,budget,(phasePrefix==null?"answer":phasePrefix+"-answer")+"-"+attempt,guard,attemptStreaming?onDelta:null,publication.progress::onCancel);
             } else if(responses!=null) {
                 AdviceResponsesTransport.PreparedRequest request=attemptStreaming?responses.prepareStream(system,user+repair,sourceIdentity,attempt):responses.prepare(system,user+repair,sourceIdentity,attempt);
@@ -1359,6 +1373,8 @@ public class AdviceService {
         private final AdviceProgress progress;
         private final Runnable guard;
         private final Runnable sourceBoundary;
+        private final Runnable beforePaidBoundary;
+        private final Set<String> textAliases;
         private final QuestionContext question;
         private final JsonNode schema;
         private final List<AdvisoryHarness.Section> accepted=new ArrayList<>();
@@ -1370,7 +1386,8 @@ public class AdviceService {
         private boolean live,opening;
         private String language;
         Publication(List<CitationVO> sources,boolean referenceOnly,AdviceProgress progress,Runnable guard,QuestionContext question){this(sources,referenceOnly,progress,guard,()->{},question);}
-        Publication(List<CitationVO> sources,boolean referenceOnly,AdviceProgress progress,Runnable guard,Runnable sourceBoundary,QuestionContext question){this.sources=sources;this.referenceOnly=referenceOnly;this.progress=progress;this.guard=guard;this.sourceBoundary=sourceBoundary;this.question=question;this.schema=AdvisoryHarness.schema(sources);}
+        Publication(List<CitationVO> sources,boolean referenceOnly,AdviceProgress progress,Runnable guard,Runnable sourceBoundary,QuestionContext question){this(sources,referenceOnly,progress,guard,sourceBoundary,()->{},Collections.emptySet(),question);}
+        Publication(List<CitationVO> sources,boolean referenceOnly,AdviceProgress progress,Runnable guard,Runnable sourceBoundary,Runnable beforePaidBoundary,Set<String> textAliases,QuestionContext question){this.sources=sources;this.referenceOnly=referenceOnly;this.progress=progress;this.guard=guard;this.sourceBoundary=sourceBoundary;this.beforePaidBoundary=beforePaidBoundary;this.textAliases=Collections.unmodifiableSet(new LinkedHashSet<>(textAliases));this.question=question;this.schema=AdvisoryHarness.schema(sources);}
         String content(AdvisoryHarness.Section section){return AdvisoryHarness.content(section,sources,referenceOnly,question.originalQuestion,question.background);}
         void publishValidated(){
             if(!progress.streaming())return;
@@ -1398,7 +1415,7 @@ public class AdviceService {
             List<String> declared;
             try{declared=AdvisoryHarness.refs(raw.getCitations(),sources);}catch(IllegalArgumentException invalid){return raw;}
             // A directory mention cannot create project adoption, and an empty/invalid array cannot be promoted.
-            if(declared.isEmpty()||!incorporationSupported(raw.getBasisScope(),declared,sources))return raw;
+            if(declared.isEmpty()||!incorporationSupported(raw.getBasisScope(),declared,sources,textAliases))return raw;
             List<String> explicit=AdvisoryHarness.explicitBodyAliases(raw.getContent());
             Set<String> allowed=sources.stream().map(CitationVO::getEvidenceId).collect(Collectors.toSet());
             if(!allowed.containsAll(explicit))return raw;
@@ -1426,7 +1443,7 @@ public class AdviceService {
                 // Alias violations reject this unit; independently valid units can still be retained.
                 AdvisoryHarness.shape(JsonUtils.mapper().valueToTree(section),schema.path("properties").path("sections").path("items"));
                 AdvisoryHarness.Section candidate=completeCitationMetadata(section,true);
-                AdvisoryHarness.validate(candidate,sources,referenceOnly,(basis,refs)->incorporationSupported(basis,refs,sources));
+                AdvisoryHarness.validate(candidate,sources,referenceOnly,(basis,refs)->incorporationSupported(basis,refs,sources,textAliases));
                 if(!AdvisoryHarness.languageMatches(question.originalQuestion,section.getLanguage()))throw AdvisoryHarness.invalid("Answer language must follow the original question's explicit request or language");
                 if(language!=null&&!Objects.equals(language,section.getLanguage()))throw AdvisoryHarness.invalid("Answer units and repairs must retain one requested language");
                 if(proposed.size()==1)opening=true;
@@ -1445,7 +1462,7 @@ public class AdviceService {
             AdvisoryHarness.shape(JsonUtils.mapper().valueToTree(answer),AdvisoryHarness.schema());
             String declared=declaredLanguage(answer);if(!AdvisoryHarness.languageMatches(this.question.originalQuestion,declared))throw AdvisoryHarness.invalid("Answer language must follow the original question's explicit request or language");
             if(language!=null&&!Objects.equals(language,declared))throw AdvisoryHarness.invalid("Answer repair must retain the validated opening language");
-            for(AdvisoryHarness.Section section:composed){guard.run();try{AdvisoryHarness.shape(JsonUtils.mapper().valueToTree(section),schema.path("properties").path("sections").path("items"));AdvisoryHarness.validate(section,sources,referenceOnly,(basis,refs)->incorporationSupported(basis,refs,sources));}
+            for(AdvisoryHarness.Section section:composed){guard.run();try{AdvisoryHarness.shape(JsonUtils.mapper().valueToTree(section),schema.path("properties").path("sections").path("items"));AdvisoryHarness.validate(section,sources,referenceOnly,(basis,refs)->incorporationSupported(basis,refs,sources,textAliases));}
                 catch(IllegalArgumentException invalid){if(accepted.stream().anyMatch(s->Objects.equals(s.getId(),section.getId())))
                     throw new BizException(4205,"Advice accepted section failed final validation; this answer is invalidated. Retry the question.");errors.add(section.getId()+": "+invalid.getMessage());}}
             if(accepted.stream().anyMatch(s->answer.getSections().stream().noneMatch(p->JsonUtils.write(s).equals(JsonUtils.write(p)))))
@@ -1805,8 +1822,14 @@ public class AdviceService {
         List<VectorStore.SearchHit> annotated=new ArrayList<>();for(VectorStore.SearchHit hit:result){Map<String,Object> payload=new LinkedHashMap<>(hit.getPayload());if("standard".equals(payload.get("sourceRole")))payload.put("applicabilityContextComplete",complete);annotated.add(new VectorStore.SearchHit(hit.getId(),hit.getScore(),payload));}return annotated;
     }
     private boolean incorporationSupported(String basisScope,List<String> citations,List<CitationVO> sources) {
+        return incorporationSupported(basisScope,citations,sources,Collections.emptySet());
+    }
+    private boolean incorporationSupported(String basisScope,List<String> citations,List<CitationVO> sources,Set<String> textAliases) {
         List<CitationVO> cited=sources.stream().filter(s->citations.contains(s.getEvidenceId())).collect(Collectors.toList());
-        if(cited.stream().anyMatch(s->s.getCanonicalSourceUnit()!=null&&!"complete_observed_unit".equals(s.getCanonicalSourceUnit().path("status").asText())))return false;
+        if(cited.stream().anyMatch(s->{JsonNode unit=s.getCanonicalSourceUnit();return unit!=null&&!"complete_observed_unit".equals(unit.path("status").asText())
+                &&!(textAliases.contains(s.getEvidenceId())&&"unknown".equals(unit.path("status").asText())&&"additional_source_context_deferred".equals(unit.path("reason").asText())
+                    &&unit.path("semanticScopeVerified").isBoolean()&&!unit.path("semanticScopeVerified").asBoolean()
+                    &&s.getCanonicalEvidence()!=null&&s.getCanonicalEvidence().size()==1);}))return false;
         if("reference_only".equals(basisScope))return cited.stream().anyMatch(s->"standard".equals(s.getSourceRole()));
         if(cited.stream().noneMatch(s->"tender".equals(s.getSourceRole())))return false;
         for(CitationVO reference:cited)if("standard".equals(reference.getSourceRole())

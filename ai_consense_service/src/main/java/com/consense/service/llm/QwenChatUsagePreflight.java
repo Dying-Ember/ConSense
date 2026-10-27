@@ -186,7 +186,8 @@ public final class QwenChatUsagePreflight {
                     if(metadata!=null)metadata.accept(safe);
                 });current(guard);
                 ledger.complete(reservation,receipt);terminal=true;current(guard);return text;
-            }catch(RuntimeException error){if(!terminal){receipt.put("failureKind",error.getClass().getSimpleName());ledger.unknown(reservation,receipt);}throw error;}
+            }catch(RuntimeException error){if(!terminal){receipt.put("failureKind",QwenChatClient.safeUsageFailureKind(error));ledger.unknown(reservation,receipt);}
+                if(metadata!=null&&error instanceof com.consense.ai.HttpSupport.ModelRequestFailure)metadata.accept(JsonUtils.mapper().valueToTree(((com.consense.ai.HttpSupport.ModelRequestFailure)error).diagnostics()));throw error;}
         }
         public <T> List<T> complete(VettingInputBudget.Input in,VettingInputBudget.Result budget,String system,String user,JsonNode schema,Class<T> type,List<String> rawOut,Map<String,Long> timings,Consumer<JsonNode> metadata) {
             PreparedRequest request=bound(in);VettingInputBudget.Input regenerated=input(system,user,schema,in.getSourceSnapshotSha256());
