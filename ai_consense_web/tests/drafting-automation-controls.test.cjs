@@ -5,13 +5,15 @@ const piniaRuntime = require('pinia')
 const { loadVue } = require('./helpers/load-vue.cjs')
 const { renderer, find, text, settle, deferred } = require('./helpers/render-controls.cjs')
 const copy = value => JSON.parse(JSON.stringify(value))
+const templateSource = { id: '41', sourceDocumentId: 41, docId: 'ntt', editionId: 'NTT-TEST', fileKey: 'NTT', fileName: 'NTT TEST.docx', format: 'docx', sourceSha256: 'a'.repeat(64), analysisRevision: 'TEST-analysis', evidenceStatus: 'bound', parseStatus: 'PARSED', canEdit: true }
 const run = (projectId = 'A', patch = {}) => ({ id: 'task-' + projectId, projectId, status: 'RUNNING', phase: 'PREPARING_SOURCES', message: 'Checking exact TEST source revisions', currentFile: 'NTT TEST.docx', completedItems: 0, totalItems: 12, failedItems: 0, unresolvedItems: 0, requirementsCount: 0, nodesCount: 0, resultRevisionId: null, updatedAt: '2026-10-22T00:00:00Z', ...patch })
 function harness(initial = null, overrides = {}) {
   let backend = initial, profile = 'qwen-27b', nextTimer = 0, reviewRefreshes = 0
   const timers = new Map(), calls = [], signals = []
   const api = {
     catalog: async () => ({ ruleVersion: 'TEST', groups: [] }), variables: async () => [],
-    templates: async () => [{ key: 'NTT', tag: 'ok', fileName: 'NTT TEST.docx' }], inputs: async () => [], documents: async () => [], extractTrace: async () => null,
+    templates: async () => [{ id: 'STD-NTT', key: 'NTT', tag: 'ok', fileName: 'NTT TEST.docx' }], inputs: async () => [], documents: async () => [], extractTrace: async () => null,
+    reviewSources: async () => [copy(templateSource)],
     plan: async () => ({ actions: [], unresolved: [] }),
     reviewHead: async () => ({ currentRevisionId: 'confirmed-TEST', draftRevisionId: 'draft-TEST', current: null, draft: null, sources: [] }),
     reviewRevision: async (_id, revisionId) => ({ id: revisionId, graph: { graph: { variables: [] }, sources: [] } }),
@@ -46,10 +48,11 @@ function harness(initial = null, overrides = {}) {
 }
 ;(async () => {
   const h = harness(); await settle()
-  assert.deepEqual(h.calls, [['latest', 'A']], 'Opening the page only reads the persisted task')
+  assert.deepEqual(h.calls, [['latest', 'A']], 'Opening the page only reads the persisted automation task')
   assert.doesNotMatch(text(h.root), /budget for this run|Prepare or continue template review|Start a new review from current sources/)
+  assert.match(text(h.control('data-start-automation')), /Identify selected sources and build graph/)
   await h.click('data-start-automation'); assert.equal(h.calls.filter(call => call[0] === 'start').length, 1)
-  assert.deepEqual(h.calls.find(call => call[0] === 'start').slice(2), [{ expectedCurrentRevisionId: 'confirmed-TEST', expectedDraftRevisionId: 'draft-TEST' }, { profileId: 'qwen-27b' }])
+  assert.deepEqual(h.calls.find(call => call[0] === 'start').slice(2), [{ expectedCurrentRevisionId: 'confirmed-TEST', expectedDraftRevisionId: 'draft-TEST', sourceIds: ['41'] }, { profileId: 'qwen-27b' }])
   assert.match(text(h.control('data-automation-progress')), /Checking source files.*Checking exact TEST source revisions.*NTT TEST.docx.*0 \/ 12/)
   assert.equal(h.control('data-automation-historical'), undefined)
   assert.equal(h.control('data-automation-groups'), undefined, 'Legacy runs do not invent group progress')

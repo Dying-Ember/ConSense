@@ -34,6 +34,10 @@ public interface SourceDocumentRepository extends JpaRepository<SourceDocument, 
     @Query("select d.id,d.category,d.fileKey,d.sourceSha256,d.parseStatus,d.storagePath from SourceDocument d where d.projectId=:projectId and d.category in ('STANDARD_TEMPLATE','PROJECT_INPUT') order by d.id")
     List<Object[]> findDraftAutomationStamp(@Param("projectId") String projectId);
 
+    /** Frozen work sources and retained graph dependencies only; unrelated uploads cannot cancel a run. */
+    @Query("select d.id,d.category,d.fileKey,d.sourceSha256,d.parseStatus,d.storagePath,d.businessContentSha256,d.textContentSha256,d.structuredContentSha256,d.parseCoverageSha256,d.normalCandidateSha256 from SourceDocument d where d.projectId=:projectId and d.id in :ids order by d.id")
+    List<Object[]> findDraftAutomationStamp(@Param("projectId") String projectId,@Param("ids") List<Long> ids);
+
     List<SourceDocument> findByProjectIdAndCategoryOrderByIdAsc(String projectId, String category);
 
     List<SourceDocument> findByProjectIdOrderByIdAsc(String projectId);

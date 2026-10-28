@@ -62,17 +62,23 @@ public class DraftAutomationService {
     }
 
     public Map<String,Object> start(String projectId,String expectedCurrent,String expectedDraft) {
+        return start(projectId,expectedCurrent,expectedDraft,null);
+    }
+    public Map<String,Object> start(String projectId,String expectedCurrent,String expectedDraft,List<String> sourceIds) {
         LlmOperation selected=profiles.capture();requireProfile(selected);
         DraftAutomationRun run=tx.execute(s->{
             lockProject(projectId);
-            List<DraftAutomationRun> active=runs.findByProjectIdAndStatusIn(projectId,ACTIVE);
-            if(!active.isEmpty())return active.get(0);
             checkHead(projectId,expectedCurrent,expectedDraft);
+            Set<String> work=selectSources(sources.findDraftAutomationStamp(projectId),sourceIds);
+            List<DraftAutomationRun> active=runs.findByProjectIdAndStatusIn(projectId,ACTIVE);
+            if(!active.isEmpty()){DraftAutomationRun prior=active.get(0);Set<String> priorWork=selectedSources(prior.getManifestJson());boolean sameScope=priorWork==null?sourceIds==null&&Objects.equals(prior.getSourceStampJson(),stamp(projectId)):work.equals(priorWork);if(!Objects.equals(expectedCurrent,prior.getExpectedCurrentRevisionId())||!Objects.equals(expectedDraft,prior.getExpectedDraftRevisionId())||!sameScope)throw conflict("此项目已有另一来源范围或图谱版本的识别任务，请先停止它再开始。");return prior;}
+            Set<String> protectedIds=new TreeSet<>(work);protectedIds.addAll(graphs.automationSourceDependencies(projectId,expectedDraft==null?expectedCurrent:expectedDraft));
             DraftAutomationRun row=new DraftAutomationRun();row.setId(UUID.randomUUID().toString());row.setProjectId(projectId);
             row.setStatus("QUEUED");row.setPhase("PREPARING_SOURCES");row.setMessage("已排队，准备读取已识别模板的完整来源。");
             row.setProfileId(selected.getIdentity().getProfileId());row.setConfigurationSha256(selected.getIdentity().getConfigurationSha256());
             row.setExpectedCurrentRevisionId(expectedCurrent);row.setExpectedDraftRevisionId(expectedDraft);
-            row.setSourceStampJson(stamp(projectId));row.setCreatedAt(Instant.now());row.setUpdatedAt(row.getCreatedAt());return runs.saveAndFlush(row);
+            row.setManifestJson(JsonUtils.write(DraftReviewGraph.obj("sourceSelection",DraftReviewGraph.obj("version",1,"sourceIds",new ArrayList<>(work),"protectedSourceIds",new ArrayList<>(protectedIds)))));
+            row.setSourceStampJson(stamp(projectId,protectedIds));row.setCreatedAt(Instant.now());row.setUpdatedAt(row.getCreatedAt());return runs.saveAndFlush(row);
         });
         if("QUEUED".equals(run.getStatus())){
             LlmOperation original=profiles.resolve(run.getProfileId());requireProfile(original);
@@ -105,8 +111,9 @@ public class DraftAutomationService {
             if(!"INTERRUPTED".equals(row.getStatus())&&!(saved&&"PARTIAL".equals(row.getStatus())))throw conflict("只有中断任务或仍有未派发分组的部分结果可继续；已发送调用不会重发。");
             if(!runs.findByProjectIdAndStatusIn(projectId,ACTIVE).isEmpty())throw conflict("此项目已有识别任务正在执行。");
             checkHead(projectId,expectedCurrent,expectedDraft);
+            Set<String> protectedIds=protectedSources(row.getManifestJson());if(protectedIds!=null&&!protectedIds.containsAll(graphs.automationSourceDependencies(projectId,expectedDraft==null?expectedCurrent:expectedDraft)))throw conflict("当前人工图谱新增了原任务保护范围外的原件依赖，请新建识别任务；原有结果、来源选择和累计调用预算保留。");
             if(System.currentTimeMillis()-row.getCreatedAt().toEpochMilli()>=LIFETIME)throw conflict("原识别任务的6小时时限已到，不能继续；已有结果和调用记录保留。");
-            if(!Objects.equals(row.getSourceStampJson(),stamp(projectId)))throw conflict("模板或来源已变化，不能继续旧任务。");
+            if(!Objects.equals(row.getSourceStampJson(),stamp(projectId,protectedSources(row.getManifestJson()))))throw conflict("模板或来源已变化，不能继续旧任务。");
             if(budgetCalls(receipts(id))>=MAX_CALLS&&!(saved&&!continuationTasks(row.getManifestJson()).isEmpty()))throw conflict("原识别任务的累计调用预算已用完；已有结果保留。");
             if(saved){
                 Map<String,Object> manifest=JsonUtils.readMap(row.getManifestJson());if(!GROUP_EXECUTION.equals(manifest.get("execution")))throw conflict("此结果不是可继续的分组任务。");
@@ -154,13 +161,13 @@ public class DraftAutomationService {
         DraftAutomationRun run=runs.findById(id).orElse(null);if(run==null)return;
         try(LlmProfiles.Scope ignored=profiles.bind(selected)) {
             guard(run,false);change(id,row->{row.setStatus("RUNNING");row.setPhase("PREPARING_SOURCES");row.setMessage("读取模板专用OER已存的指导说明、修改标记、控制范围和条件；此处不重复解析文件。");});
-            List<JsonNode> readings=new ArrayList<>();Map<String,Object> base=graphs.automationInput(run.getProjectId(),run.getExpectedCurrentRevisionId(),run.getExpectedDraftRevisionId(),readings);
+            List<JsonNode> readings=new ArrayList<>();Set<String> work=selectedSources(run.getManifestJson());Map<String,Object> base=graphs.automationInput(run.getProjectId(),run.getExpectedCurrentRevisionId(),run.getExpectedDraftRevisionId(),work,readings);
             Map<String,Object> restoration=map(map(base.get("graph")).get("baselineRestoration"));
             final boolean fixedCandidates=DraftFixedBaseline.installed(base);
             if(run.getExpectedCurrentRevisionId()==null&&run.getExpectedDraftRevisionId()==null&&(fixedCandidates||"complete_requires_review".equals(restoration.get("status")))){
                 final int definitions=DraftReviewGraph.nodes(base).size(),roots=DraftReviewGraph.fields(base).size();
                 final long conditions=DraftReviewGraph.nodes(base).stream().filter(node->!map(node.get("applicability")).isEmpty()).count();
-                String manifest=JsonUtils.write(fixedCandidates?DraftReviewGraph.obj("execution","fixed-catalog-candidates-v1","ruleVersion",DraftBusinessRules.RULE_VERSION,"definitions",definitions,"conditions",conditions,"modelCalls",0,"coverage","requires_review"):Collections.singletonMap("completeBaselineId",restoration.get("baselineId")));if(run.getManifestJson()!=null&&!executionManifest(run.getManifestJson()).equals(manifest))throw conflict("同版基线已变化，请重新读取。");
+                String manifest=preserveFirstProbeFailure(JsonUtils.write(fixedCandidates?DraftReviewGraph.obj("execution","fixed-catalog-candidates-v1","ruleVersion",DraftBusinessRules.RULE_VERSION,"definitions",definitions,"conditions",conditions,"modelCalls",0,"coverage","requires_review"):Collections.singletonMap("completeBaselineId",restoration.get("baselineId"))),run.getManifestJson());String previous=executionManifest(run.getManifestJson());if(hasExecutionPlan(previous)&&!previous.equals(executionManifest(manifest)))throw conflict("同版基线已变化，请重新读取。");
                 change(id,row->{row.setManifestJson(preserveFirstProbeFailure(manifest,row.getManifestJson()));row.setTotalItems(0);row.setPhase("SAVING_GRAPH");row.setMessage(fixedCandidates?"恢复当前精确原件的内置固定定义和条件候选；本步骤不调用模型。":"恢复已完整核对的同版图谱，并重新绑定当前原件。");});
                 tx.executeWithoutResult(s->{lockProject(run.getProjectId());guard(run,false);Map<String,Object> saved=graphs.save(run.getProjectId(),base,run.getExpectedCurrentRevisionId(),run.getExpectedDraftRevisionId(),true);DraftAutomationRun row=runs.lockRun(id).orElseThrow(IllegalStateException::new);row.setResultRevisionId(String.valueOf(saved.get("id")));row.setStatus(fixedCandidates?"PARTIAL":"COMPLETED");row.setPhase(fixedCandidates?"FIXED_BASELINE_READY":"READY_FOR_REVIEW");if(fixedCandidates){row.setNodesCount(definitions);row.setUnresolvedItems(roots);}row.setMessage(fixedCandidates?"已恢复 "+definitions+" 项固定定义候选和 "+conditions+" 项明确条件；模型调用为 0。请先按组核对确认，再提取项目取值；修改范围和例外继续单独核对。":"已恢复人工标记完整的同版图谱；请核对当前原件的修改范围，再单独处理项目取值。");row.setUpdatedAt(Instant.now());runs.save(row);});
                 return;
@@ -197,10 +204,11 @@ public class DraftAutomationService {
     private String groupManifest(DraftAutomaticDiscovery.Plan plan,List<Map<String,Object>> groups){Map<String,Object> manifest=new LinkedHashMap<>();manifest.put("execution",GROUP_EXECUTION);manifest.put("plan",plan.descriptor());manifest.put("groups",groups);manifest.put("concurrency",groupConcurrency);return JsonUtils.write(manifest);}
     private List<Map<String,Object>> executionGroups(String existing,DraftAutomaticDiscovery.Plan plan){return executionGroups(existing,plan,false);}
     private List<Map<String,Object>> executionGroups(String existing,DraftAutomaticDiscovery.Plan plan,boolean continuing){
-        existing=executionManifest(existing);
-        if(existing!=null&&existing.equals(JsonUtils.write(plan.descriptor())))return null;
+        String previous=existing;existing=executionManifest(existing);if(!hasExecutionPlan(existing))existing=null;
+        if(existing!=null&&sameExecutionPlan(existing,executionManifest(preserveFirstProbeFailure(JsonUtils.write(plan.descriptor()),previous))))return null;
         List<Map<String,Object>> groups=DraftAutomaticDiscovery.planGroups(plan);
-        if(existing!=null&&!existing.equals(groupManifest(plan,groups))&&!(continuing&&savedPlanCompatible(existing,groupManifest(plan,groups))))throw conflict("来源、分组、模型执行配置或业务根定义／核心状态已变化，不能续用旧计划；处理节点的人工修改仍保留，已发送调用不会重发。");
+        String current=executionManifest(preserveFirstProbeFailure(groupManifest(plan,groups),previous));
+        if(existing!=null&&!sameExecutionPlan(existing,current)&&!(continuing&&savedPlanCompatible(existing,current)))throw conflict("来源、分组、模型执行配置或业务根定义／核心状态已变化，不能续用旧计划；处理节点的人工修改仍保留，已发送调用不会重发。");
         Set<Object> covered=new HashSet<>();for(Map<String,Object> group:groups)for(Object id:list(group.get("taskIds")))if(!covered.add(id))throw conflict("分组来源任务重复，不能开始识别。");
         Set<Object> expected=new HashSet<>();for(Map<String,Object> task:plan.tasks())expected.add(task.get("taskId"));if(!expected.equals(covered))throw conflict("分组来源覆盖不完整，不能开始识别。");
         return groups;
@@ -209,8 +217,9 @@ public class DraftAutomationService {
     /** Workers receive immutable run identity, never coordinator-owned JPA entities. */
     private static final class RunBinding {
         final String id,projectId,profileId,configurationSha256,currentRevision,draftRevision,sourceStamp;
+        final Set<String> protectedSources;
         final long createdAt;
-        RunBinding(DraftAutomationRun run){id=run.getId();projectId=run.getProjectId();profileId=run.getProfileId();configurationSha256=run.getConfigurationSha256();currentRevision=run.getExpectedCurrentRevisionId();draftRevision=run.getExpectedDraftRevisionId();sourceStamp=run.getSourceStampJson();createdAt=run.getCreatedAt().toEpochMilli();}
+        RunBinding(DraftAutomationRun run){id=run.getId();projectId=run.getProjectId();profileId=run.getProfileId();configurationSha256=run.getConfigurationSha256();currentRevision=run.getExpectedCurrentRevisionId();draftRevision=run.getExpectedDraftRevisionId();sourceStamp=run.getSourceStampJson();protectedSources=protectedSources(run.getManifestJson());createdAt=run.getCreatedAt().toEpochMilli();}
     }
     private static final class GroupCall {
         final Map<String,Object> group;final int reserved;final AtomicInteger dispatched=new AtomicInteger();
@@ -221,10 +230,14 @@ public class DraftAutomationService {
 
     /** Saving a discovered root changes only its existence flag, never its definition or source identity. */
     static boolean savedPlanCompatible(String previous,String current){
-        JsonNode before=JsonUtils.parse(previous),after=JsonUtils.parse(current);if(!GROUP_EXECUTION.equals(before.path("execution").asText())||!before.path("plan").path("knownRoots").isArray()||!after.path("plan").path("knownRoots").isArray())return false;
+        JsonNode before=JsonUtils.parse(previous),after=JsonUtils.parse(current);upgradeLegacyPlanSources(before,after);if(!GROUP_EXECUTION.equals(before.path("execution").asText())||!before.path("plan").path("knownRoots").isArray()||!after.path("plan").path("knownRoots").isArray())return false;
         JsonNode oldRoots=before.path("plan").path("knownRoots"),newRoots=after.path("plan").path("knownRoots");if(oldRoots.size()!=newRoots.size())return false;
         for(int i=0;i<oldRoots.size();i++){JsonNode old=oldRoots.path(i),next=newRoots.path(i);if(old.path("existing").isBoolean()&&!old.path("existing").asBoolean()&&next.path("existing").isBoolean()&&next.path("existing").asBoolean())((com.fasterxml.jackson.databind.node.ObjectNode)next).put("existing",false);}
         return before.equals(after);
+    }
+    static boolean sameExecutionPlan(String previous,String current){JsonNode before=JsonUtils.parse(previous),after=JsonUtils.parse(current);upgradeLegacyPlanSources(before,after);return before.equals(after);}
+    private static void upgradeLegacyPlanSources(JsonNode before,JsonNode after){
+        if(before.has("sourceSelection")||after.has("sourceSelection"))return;JsonNode old=before.has("plan")?before.path("plan"):before,next=after.has("plan")?after.path("plan"):after;if(old.has("sourceIds")||!next.path("sourceIds").isArray()||!old.path("coverage").path("sources").isArray())return;Set<String> sources=new TreeSet<>(),selected=new TreeSet<>();for(JsonNode source:old.path("coverage").path("sources"))sources.add(source.path("sourceId").asText());for(JsonNode source:next.path("sourceIds"))selected.add(source.asText());if(sources.equals(selected))((com.fasterxml.jackson.databind.node.ObjectNode)old).set("sourceIds",next.path("sourceIds").deepCopy());
     }
     static Set<String> continuationTasks(String manifest){Set<String> result=new LinkedHashSet<>();if(manifest!=null)for(Object id:list(map(JsonUtils.readMap(manifest).get("continuation")).get("taskIds")))result.add(text(id));return result;}
     private static String continuationStop(String manifest){Map<String,Object> cycle=map(JsonUtils.readMap(manifest).get("continuation"));List<String> reasons=new ArrayList<>();for(Object value:list(map(cycle.get("stop")).get("reasons")))reasons.add(text(value));return String.join(", ",reasons);}
@@ -354,13 +367,23 @@ public class DraftAutomationService {
     private static List<String> probeReasons(Map<String,Object> receipt){List<String> reasons=new ArrayList<>();for(Object value:list(receipt.get("stopReasons")))if(value!=null&&!text(value).isEmpty()&&!reasons.contains(text(value)))reasons.add(text(value));if(reasons.isEmpty()&&"unknown".equals(receipt.get("status")))reasons.add("PROVIDER_RESULT_UNKNOWN");return reasons;}
     static String firstProbeReason(String manifest,String fallback){if(manifest==null)return fallback;List<?> reasons=list(map(JsonUtils.readMap(manifest).get("firstProbeFailure")).get("reasons"));List<String> shown=new ArrayList<>();for(Object value:reasons)if(value!=null&&!text(value).isEmpty()&&shown.size()<3)shown.add(text(value));return shown.isEmpty()?fallback:String.join(", ",shown);}
     static String executionManifest(String manifest){if(manifest==null)return null;Map<String,Object> execution=JsonUtils.readMap(manifest);boolean changed=false;for(String key:Arrays.asList("firstProbeFailure","continuation","lastContinuation"))changed|=execution.remove(key)!=null;return changed?JsonUtils.write(execution):manifest;}
-    static String preserveFirstProbeFailure(String manifest,String previous){if(previous==null)return manifest;Map<String,Object> saved=JsonUtils.readMap(previous),updated=JsonUtils.readMap(manifest);for(String key:Arrays.asList("firstProbeFailure","continuation","lastContinuation"))if(saved.containsKey(key))updated.put(key,saved.get(key));return JsonUtils.write(updated);}
+    static String preserveFirstProbeFailure(String manifest,String previous){if(previous==null)return manifest;Map<String,Object> saved=JsonUtils.readMap(previous),updated=JsonUtils.readMap(manifest);for(String key:Arrays.asList("firstProbeFailure","continuation","lastContinuation","sourceSelection"))if(saved.containsKey(key))updated.put(key,saved.get(key));return JsonUtils.write(updated);}
+    static boolean hasExecutionPlan(String manifest){if(manifest==null)return false;Map<String,Object> saved=JsonUtils.readMap(manifest);return saved.containsKey("execution")||saved.containsKey("tasks")||saved.containsKey("completeBaselineId");}
+    static Set<String> selectedSources(String manifest){return sourceSelectionIds(manifest,"sourceIds");}
+    static Set<String> protectedSources(String manifest){Set<String> protectedIds=sourceSelectionIds(manifest,"protectedSourceIds");if(protectedIds!=null&&!protectedIds.containsAll(selectedSources(manifest)))throw conflict("识别任务的来源保护范围缺失。");return protectedIds;}
+    private static Set<String> sourceSelectionIds(String manifest,String field){if(manifest==null)return null;Map<String,Object> selection=map(JsonUtils.readMap(manifest).get("sourceSelection"));if(selection.isEmpty())return null;if(number(selection.get("version"))!=1)throw conflict("识别任务的来源选择版本不受支持。");Set<String> ids=new TreeSet<>();for(Object raw:list(selection.get(field))){String id=text(raw);if(!(raw instanceof String)||!id.matches("[1-9][0-9]*")||!ids.add(id))throw conflict("识别任务的来源选择记录无效。");try{Long.parseLong(id);}catch(NumberFormatException invalid){throw conflict("识别任务的来源选择记录无效。");}}if(ids.isEmpty())throw conflict("识别任务的来源选择记录缺失。");return Collections.unmodifiableSet(ids);}
+    static Set<String> selectSources(List<Object[]> metadata,List<String> requested){
+        Set<String> eligible=new TreeSet<>();for(Object[] row:metadata)if(row.length>=6&&"STANDARD_TEMPLATE".equals(row[1])&&Arrays.asList("NTT","SCT","SCC").contains(row[2])&&Arrays.asList("PARSED","PARTIAL").contains(row[4])&&text(row[3])!=null&&text(row[3]).matches("(?i)[0-9a-f]{64}")&&row[5] instanceof String&&!((String)row[5]).trim().isEmpty())eligible.add(text(row[0]));
+        if(requested==null){if(eligible.isEmpty())throw new BizException(4007,"请先上传并识别模板文件，再开始识别变量。");return eligible;}
+        Set<String> work=new TreeSet<>();if(requested.isEmpty()||requested.size()>MAX_TASKS)throw new BizException(4007,"AUTOMATION_SOURCE_SELECTION_INVALID");for(String id:requested){if(id==null||!id.matches("[1-9][0-9]*")||!work.add(id)||!eligible.contains(id))throw new BizException(4007,"所选来源不属于当前项目的已识别模板："+id);}return work;
+    }
     private void updateCounts(String id,List<Map<String,Object>> receipts){change(id,row->{int completed=0,failed=0,unresolved=0,nodes=0,requirements=0;for(Map<String,Object> receipt:receipts){if(isGroup(receipt))continue;completed++;String status=text(receipt.get("status"));if(Arrays.asList("failed","blocked").contains(status))failed++;if(!Arrays.asList("completed","reviewed_no_requirement").contains(status))unresolved++;nodes+=list(receipt.get("nodes")).size();requirements+=list(receipt.get("requirements")).size();}row.setCompletedItems(completed);row.setFailedItems(failed);row.setUnresolvedItems(unresolved);row.setRequirementsCount(requirements);row.setNodesCount(nodes);});}
     private void guard(DraftAutomationRun run,boolean allowCancel){guard(new RunBinding(run),allowCancel);}
-    private void guard(RunBinding run,boolean allowCancel){projects.require(run.projectId);if(!allowCancel&&cancelled(run.id))throw conflict("任务已请求停止。");checkHead(run.projectId,run.currentRevision,run.draftRevision);if(!Objects.equals(run.sourceStamp,stamp(run.projectId)))throw conflict("识别期间文件已变化，已停止，避免覆盖新的来源或人工修改。");}
+    private void guard(RunBinding run,boolean allowCancel){projects.require(run.projectId);if(!allowCancel&&cancelled(run.id))throw conflict("任务已请求停止。");checkHead(run.projectId,run.currentRevision,run.draftRevision);if(!Objects.equals(run.sourceStamp,stamp(run.projectId,run.protectedSources)))throw conflict("识别期间文件已变化，已停止，避免覆盖新的来源或人工修改。");}
     private boolean cancelled(String id){return runs.findById(id).map(DraftAutomationRun::isCancelRequested).orElse(true);}
     private void checkHead(String projectId,String expectedCurrent,String expectedDraft){DraftTemplateGraphHead head=heads.findById(projectId).orElseGet(DraftTemplateGraphHead::new);if(!Objects.equals(expectedCurrent,head.getCurrentRevisionId())||!Objects.equals(expectedDraft,head.getDraftRevisionId()))throw conflict("图谱已被修改，请刷新后重新识别；原有人工结果保留。");}
     private String stamp(String projectId){return JsonUtils.write(sources.findDraftAutomationStamp(projectId));}
+    private String stamp(String projectId,Set<String> protectedIds){if(protectedIds==null)return stamp(projectId);List<Long> ids=new ArrayList<>();for(String id:protectedIds)ids.add(Long.valueOf(id));List<Object[]> rows=sources.findDraftAutomationStamp(projectId,ids);if(rows.size()!=ids.size())throw conflict("所选来源或已有图谱依赖的原件已不存在。");return JsonUtils.write(rows);}
     private void lockProject(String projectId){if(entityManager.find(Project.class,projectId,LockModeType.PESSIMISTIC_WRITE)==null)throw conflict("项目已不存在。");}
     private DraftAutomationRun require(String projectId,String id){return runs.findById(id).filter(row->projectId.equals(row.getProjectId())).orElseThrow(()->new BizException(4011,"识别任务不存在。"));}
     private void requireProfile(LlmOperation selected){if(selected==null||selected.getUnavailableReason()!=null)throw new BizException(5001,"请选择已配置的可用模型后开始变量识别。");}
@@ -369,7 +392,7 @@ public class DraftAutomationService {
     private void fail(String id,String status,String message){change(id,row->{row.setStatus(row.getResultRevisionId()!=null&&!"CANCELLED".equals(status)?"PARTIAL":status);row.setMessage(message);});}
     private boolean isQwen(DraftAutomationRun run){return Arrays.asList("qwen","qwen-flash").contains(run.getProfileId());}
     private Map<String,Object> view(DraftAutomationRun row){Map<String,Object> out=new LinkedHashMap<>();out.put("id",row.getId());out.put("projectId",row.getProjectId());out.put("status",row.getStatus());out.put("phase",row.getPhase());out.put("message",row.getMessage());out.put("currentFile",row.getCurrentFile());out.put("completedItems",row.getCompletedItems());out.put("totalItems",row.getTotalItems());out.put("failedItems",row.getFailedItems());out.put("unresolvedItems",row.getUnresolvedItems());out.put("requirementsCount",row.getRequirementsCount());out.put("nodesCount",row.getNodesCount());out.put("resultRevisionId",row.getResultRevisionId());out.put("updatedAt",row.getUpdatedAt());
-        Map<String,Object> manifest=row.getManifestJson()==null?Collections.emptyMap():JsonUtils.readMap(row.getManifestJson());if(GROUP_EXECUTION.equals(manifest.get("execution"))){Set<String> groups=new HashSet<>();for(Object group:list(manifest.get("groups")))groups.add(text(map(group).get("taskId")));int completed=0,inFlight=0,pending=0;
+        Map<String,Object> manifest=row.getManifestJson()==null?Collections.emptyMap():JsonUtils.readMap(row.getManifestJson());Set<String> sourceIds=selectedSources(row.getManifestJson());if(sourceIds!=null)out.put("sourceIds",new ArrayList<>(sourceIds));if(GROUP_EXECUTION.equals(manifest.get("execution"))){Set<String> groups=new HashSet<>();for(Object group:list(manifest.get("groups")))groups.add(text(map(group).get("taskId")));int completed=0,inFlight=0,pending=0;
             // Poll only group states; loading receipt LOBs here would copy every model response on each UI refresh.
             if(!groups.isEmpty())for(Object[] count:entityManager.createQuery("select i.status, count(i) from DraftAutomationItem i where i.runId = :runId and i.taskId in :taskIds group by i.status",Object[].class).setParameter("runId",row.getId()).setParameter("taskIds",groups).getResultList()){if(Arrays.asList("DONE","UNKNOWN").contains(count[0]))completed+=number(count[1]);if("IN_FLIGHT".equals(count[0]))inFlight+=number(count[1]);if("PENDING".equals(count[0]))pending+=number(count[1]);}
             Map<String,Object> progress=new LinkedHashMap<>();progress.put("total",groups.size());progress.put("completed",completed);progress.put("inFlight",inFlight);progress.put("pending",pending);progress.put("concurrency",manifest.get("concurrency"));progress.put("sourceTasksTotal",list(map(manifest.get("plan")).get("tasks")).size());out.put("groupProgress",progress);

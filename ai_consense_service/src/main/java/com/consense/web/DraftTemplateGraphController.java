@@ -21,14 +21,14 @@ import org.springframework.http.ResponseEntity;
 public class DraftTemplateGraphController {
     private final DraftTemplateGraphService service;
     private final DraftAutomationService automation;
-    @PostMapping("/automation") public ApiResponse<Map<String,Object>> startAutomation(@PathVariable String projectId,@RequestBody Map<String,Object> body){requireAutomationExpected(body);return ApiResponse.ok(automation.start(projectId,text(body.get("expectedCurrentRevisionId")),text(body.get("expectedDraftRevisionId"))));}
+    @PostMapping("/automation") public ApiResponse<Map<String,Object>> startAutomation(@PathVariable String projectId,@RequestBody Map<String,Object> body){requireAutomationExpected(body);String current=text(body.get("expectedCurrentRevisionId")),draft=text(body.get("expectedDraftRevisionId"));return ApiResponse.ok(body.containsKey("sourceIds")?automation.start(projectId,current,draft,automationSourceIds(body.get("sourceIds"))):automation.start(projectId,current,draft));}
     @GetMapping("/automation/latest") public ApiResponse<Map<String,Object>> latestAutomation(@PathVariable String projectId){return ApiResponse.ok(automation.latest(projectId));}
     @GetMapping("/automation/{id}") public ApiResponse<Map<String,Object>> automation(@PathVariable String projectId,@PathVariable String id){return ApiResponse.ok(automation.get(projectId,id));}
     @GetMapping("/automation/{id}/diagnostics.json") public ResponseEntity<ByteArrayResource> automationDiagnostics(@PathVariable String projectId,@PathVariable String id){
         byte[] bytes=automation.diagnostics(projectId,id);String fileName="draft-automation-"+id.replaceAll("[^A-Za-z0-9_-]","_")+"-diagnostics.json";
         return ResponseEntity.ok().header(HttpHeaders.CONTENT_DISPOSITION,"attachment; filename*=UTF-8''"+fileName).header(HttpHeaders.CACHE_CONTROL,"no-store").contentType(MediaType.APPLICATION_JSON).contentLength(bytes.length).body(new ByteArrayResource(bytes));
     }
-    @PostMapping("/automation/{id}/resume") public ApiResponse<Map<String,Object>> resumeAutomation(@PathVariable String projectId,@PathVariable String id,@RequestBody Map<String,Object> body){requireAutomationExpected(body);return ApiResponse.ok(automation.resume(projectId,id,text(body.get("expectedCurrentRevisionId")),text(body.get("expectedDraftRevisionId"))));}
+    @PostMapping("/automation/{id}/resume") public ApiResponse<Map<String,Object>> resumeAutomation(@PathVariable String projectId,@PathVariable String id,@RequestBody Map<String,Object> body){requireAutomationExpected(body);if(body.containsKey("sourceIds"))throw new BizException(4007,"AUTOMATION_SOURCE_SELECTION_IMMUTABLE_USE_NEW_RUN");return ApiResponse.ok(automation.resume(projectId,id,text(body.get("expectedCurrentRevisionId")),text(body.get("expectedDraftRevisionId"))));}
     @PostMapping("/automation/{id}/cancel") public ApiResponse<Map<String,Object>> cancelAutomation(@PathVariable String projectId,@PathVariable String id){return ApiResponse.ok(automation.cancel(projectId,id));}
     @GetMapping public ApiResponse<Map<String,Object>> current(@PathVariable String projectId){return ApiResponse.ok(service.current(projectId));}
     @PostMapping public ApiResponse<Map<String,Object>> save(@PathVariable String projectId,@RequestBody Map<String,Object> body){
@@ -54,6 +54,10 @@ public class DraftTemplateGraphController {
         return ResponseEntity.ok().header(HttpHeaders.CONTENT_DISPOSITION,"inline; filename*=UTF-8''"+encoded).contentType(type).body(new ByteArrayResource((byte[])source.get("bytes")));
     }
     private static String text(Object value){return value==null?null:String.valueOf(value);}
+    static List<String> automationSourceIds(Object value){
+        if(!(value instanceof List)||((List<?>)value).isEmpty()||((List<?>)value).size()>512)throw new BizException(4007,"AUTOMATION_SOURCE_SELECTION_INVALID");
+        List<String> ids=new ArrayList<>();for(Object id:(List<?>)value){if(!(id instanceof String)||!((String)id).matches("[1-9][0-9]*")||ids.contains(id))throw new BizException(4007,"AUTOMATION_SOURCE_SELECTION_INVALID");try{Long.parseLong((String)id);}catch(NumberFormatException invalid){throw new BizException(4007,"AUTOMATION_SOURCE_SELECTION_INVALID");}ids.add((String)id);}return ids;
+    }
     private static void requireAutomationExpected(Map<String,Object> body){requireExpected(body);if(!body.containsKey("expectedDraftRevisionId"))throw new BizException(4090,"Expected draft graph revision is required, including null.");}
     private static void requireExpected(Map<String,Object> body){if(!body.containsKey("expectedCurrentRevisionId"))throw new BizException(4090,"Expected current graph revision is required, including null for a new graph.");}
 }

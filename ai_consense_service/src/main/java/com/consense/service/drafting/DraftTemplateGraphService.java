@@ -533,10 +533,14 @@ public class DraftTemplateGraphService {
 
     /** One source read per worker preparation; the compact identities bind the eventual single save. */
     Map<String,Object> automationInput(String projectId,String expectedCurrent,String expectedDraft,List<JsonNode> readings) {
+        return automationInput(projectId,expectedCurrent,expectedDraft,null,readings);
+    }
+    Map<String,Object> automationInput(String projectId,String expectedCurrent,String expectedDraft,Set<String> sourceIds,List<JsonNode> readings) {
         projects.require(projectId);DraftTemplateGraphHead selected=head(projectId);
         expected(selected.getCurrentRevisionId(),expectedCurrent);expected(selected.getDraftRevisionId(),expectedDraft);
         List<Map<String,Object>> identities=new ArrayList<>();
         for(SourceDocument source:templateSources(projectId)) {
+            if(sourceIds!=null&&!sourceIds.contains(String.valueOf(source.getId())))continue;
             JsonNode reading=sourceReader.readingCompact(source);readings.add(reading);
             Map<String,Object> identity=new LinkedHashMap<>();
             for(String key:Arrays.asList("id","sourceDocumentId","category","fileKey","fileName","parseStatus","sourceSha256","sourceHash","format","canEdit","docId","editionId","coverage","analysisRevision","analysisInputSha256","analysisSha256","evidenceStatus","catalogueSourceVerified","editableCoordinates"))
@@ -544,9 +548,19 @@ public class DraftTemplateGraphService {
             identities.add(identity);
         }
         if(identities.isEmpty())throw new BizException(4007,"请先上传并识别模板文件，再开始识别变量。");
+        if(sourceIds!=null&&!sourceIds.equals(identities.stream().map(identity->String.valueOf(identity.get("sourceDocumentId"))).collect(java.util.stream.Collectors.toSet())))throw conflict("所选模板已不存在或不再可用，请重新选择。");
         String baseId=expectedDraft==null?expectedCurrent:expectedDraft;
-        if(baseId!=null){DraftTemplateGraphRevision base=requireRevision(projectId,baseId);requireSourcesCurrent(base);Map<String,Object> graph=JsonUtils.readMap(base.getGraphJson());state(graph).remove("sourceTaskCoverage");return graph;}
-        return DraftFixedBaseline.restore(restoreEditionBaseline(map("kind","consense-template-graph-v1","graph",map("variables",new ArrayList<>(),"sourceReviews",new LinkedHashMap<>(),"events",new ArrayList<>(),"nextId",1,"blank",true,"guidanceMode","recognized"),"sources",identities,"selectedDocuments",selected(identities))));
+        if(baseId!=null){DraftTemplateGraphRevision base=requireRevision(projectId,baseId);requireSourcesCurrent(base);Map<String,Object> graph=JsonUtils.readMap(base.getGraphJson());mergeAutomationIdentities(graph,identities);return graph;}
+        Map<String,Object> graph=map("kind","consense-template-graph-v1","graph",map("variables",new ArrayList<>(),"sourceReviews",new LinkedHashMap<>(),"events",new ArrayList<>(),"nextId",1,"blank",true,"guidanceMode","recognized"),"sources",new ArrayList<>(),"selectedDocuments",new LinkedHashMap<>());
+        mergeAutomationIdentities(graph,identities);return DraftFixedBaseline.restore(restoreEditionBaseline(graph));
+    }
+    Set<String> automationSourceDependencies(String projectId,String revisionId){
+        Set<String> result=new TreeSet<>();if(revisionId!=null)for(JsonNode source:JsonUtils.parse(requireRevision(projectId,revisionId).getSourcesJson())){String id=source.path("sourceDocumentId").asText();if(!id.matches("[1-9][0-9]*"))throw conflict("已有图谱的原件身份不完整，不能开始增量识别。");result.add(id);}return result;
+    }
+    static void mergeAutomationIdentities(Map<String,Object> graph,List<Map<String,Object>> identities){
+        Map<String,Object> byId=new LinkedHashMap<>();for(Object raw:list(graph.get("sources")))byId.put(String.valueOf(asMap(raw).get("id")),raw);for(Map<String,Object> identity:identities)byId.put(String.valueOf(identity.get("id")),identity);graph.put("sources",new ArrayList<>(byId.values()));
+        Map<String,Object> chosen=new LinkedHashMap<>(asMap(graph.get("selectedDocuments")));Map<String,List<Map<String,Object>>> families=new LinkedHashMap<>();for(Map<String,Object> identity:identities){String family=string(identity.get("fileKey"));if(Arrays.asList("NTT","SCT","SCC").contains(family))families.computeIfAbsent(family,key->new ArrayList<>()).add(identity);}
+        for(Map.Entry<String,List<Map<String,Object>>> entry:families.entrySet())if(!chosen.containsKey(entry.getKey())){if(entry.getValue().size()!=1)throw conflict("同一模板族有多份原件，请明确选择条款版本后再识别："+entry.getKey());chosen.put(entry.getKey(),entry.getValue().get(0).get("id"));}graph.put("selectedDocuments",chosen);
     }
     private Map<String,Object> restoreEditionBaseline(Map<String,Object> current){
         if(templateBaselines==null||templateBaselineSources==null)return current;Set<String> found=new LinkedHashSet<>();String edition=editionFingerprint(current);org.springframework.data.domain.PageRequest page=org.springframework.data.domain.PageRequest.of(0,20);
@@ -595,7 +609,7 @@ public class DraftTemplateGraphService {
         for(Map<String,Object> source:actual)byDoc.put(String.valueOf(source.get("id")),source);
         for(Map<String,Object> source:actual){String alias=string(source.get("docId"));if(alias==null||ambiguousDocs.contains(alias))continue;Map<String,Object> previous=byDoc.putIfAbsent(alias,source);if(previous!=null&&previous!=source){byDoc.remove(alias);ambiguousDocs.add(alias);}}
         for(Object raw:list(graph.get("sources"))){Map<String,Object> supplied=asMap(raw),current=byDoc.get(String.valueOf(supplied.get("id")));if(current==null)throw conflict("Graph source is no longer available.");for(String key:Arrays.asList("sourceSha256","sourceHash","analysisRevision","analysisInputSha256","analysisSha256","evidenceStatus"))if(!Objects.equals(current.get(key),supplied.get(key)))throw conflict("Graph source binding differs from current original or analysis.");}
-        graph.put("kind","consense-template-graph-v1");graph.put("sources",actual);if(!(graph.get("selectedDocuments") instanceof Map))graph.put("selectedDocuments",selected(actual));
+        graph.put("kind","consense-template-graph-v1");graph.put("sources",actual);DraftAutomaticDiscovery.qualifySourceAudit(graph);if(!(graph.get("selectedDocuments") instanceof Map))graph.put("selectedDocuments",selected(actual));
         for(Map.Entry<String,Object> entry:asMap(graph.get("selectedDocuments")).entrySet()){Map<String,Object> chosen=byDoc.get(String.valueOf(entry.getValue()));if(chosen==null||!entry.getKey().equals(chosen.get("fileKey")))throw conflict("Selected document does not belong to this template family.");entry.setValue(chosen.get("id"));}
         Map<Long,DraftReviewSources.BoundSource> boundSources=new HashMap<>();Set<String> targetIds=new HashSet<>();for(Object raw:list(state(graph).get("variables"))) {
             Map<String,Object> node=asMap(raw);String nodeId=id(node);if(nodeId.length()>64)throw new BizException(4007,"GRAPH_INPUT_ID_TOO_LONG");

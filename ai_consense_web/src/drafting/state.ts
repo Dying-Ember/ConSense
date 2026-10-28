@@ -6,7 +6,7 @@ import type { BodyDraft } from './body-edit'
 export type DraftValue = string | number | boolean | null | DraftValue[] | { [key: string]: DraftValue }
 export type Applicability = 'yes' | 'no' | 'unknown'
 export type DraftViewState = { step: 'inputs' | 'review' | 'variables' | 'preview'; activeFile: string; review?: { layout: 'list' | 'focus'; groupId: string }; reading?: { fileKey: string; selectedKey: string; selectedActionId: string } }
-export const projectDrafts = new Map<string, { values: Record<string, DraftValue>; baseline: Record<string, string>; notes?: Record<string, string>; intentionalEmpty?: Record<string, boolean>; emptyBaseline?: Record<string, boolean>; documents?: Record<string, { content: string; baseline: string; body?: BodyDraft }>; view?: DraftViewState }>()
+export const projectDrafts = new Map<string, { values: Record<string, DraftValue>; baseline: Record<string, string>; notes?: Record<string, string>; intentionalEmpty?: Record<string, boolean>; emptyBaseline?: Record<string, boolean>; documents?: Record<string, { content: string; baseline: string; body?: BodyDraft }>; view?: DraftViewState; automationSourceSelection?: Record<string, boolean> }>()
 
 /** Stale snapshots remain readable, but the server requires a current draft for edits and binary output. */
 export function documentCapabilities(document: Pick<DraftDocument, 'generated' | 'stale'> | undefined, contentDirty: boolean) {

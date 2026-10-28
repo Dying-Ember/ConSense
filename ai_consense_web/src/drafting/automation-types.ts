@@ -2,6 +2,9 @@ export interface DraftAutomationBinding {
   expectedCurrentRevisionId: string | null
   expectedDraftRevisionId: string | null
 }
+export interface DraftAutomationStart extends DraftAutomationBinding {
+  sourceIds?: string[]
+}
 
 export interface DraftAutomaticRequirement {
   id: string; sourceId: string; sourceSha256: string; sourceQuote: string

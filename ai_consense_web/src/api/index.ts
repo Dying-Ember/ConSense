@@ -1,8 +1,8 @@
 import { api, type PreparedDownload } from './client'
 import type { FixedBaselineEvidence } from './fixedBaselineEvidence'
 import { reviewSourceBindings } from './source-locations'
-import type { ReviewBootstrap, ReviewGraph, ReviewHead, ReviewReading, ReviewRevision, ReviewRevisionSummary } from '@/drafting/source-review-types'
-import type { DraftAutomationBinding, DraftAutomationRun } from '@/drafting/automation-types'
+import type { ReviewBootstrap, ReviewGraph, ReviewHead, ReviewReading, ReviewRevision, ReviewRevisionSummary, ReviewSource } from '@/drafting/source-review-types'
+import type { DraftAutomationBinding, DraftAutomationRun, DraftAutomationStart } from '@/drafting/automation-types'
 import type {
   AskResponse,
   AdviceSourceDocument,
@@ -93,7 +93,7 @@ export const projectApi = {
 /* ------------------------------------------------------------ 起草 */
 
 export const draftingApi = {
-  automationStart: (projectId: string, body: DraftAutomationBinding, llmSelection: LlmSelection) => api.post<DraftAutomationRun>(`/drafting/${projectId}/graph/automation`, body, { timeout: 30000, llmSelection, reportError: false }),
+  automationStart: (projectId: string, body: DraftAutomationStart, llmSelection: LlmSelection) => api.post<DraftAutomationRun>(`/drafting/${projectId}/graph/automation`, body, { timeout: 30000, llmSelection, reportError: false }),
   automationLatest: (projectId: string, signal?: AbortSignal) => api.get<DraftAutomationRun | null>(`/drafting/${projectId}/graph/automation/latest`, { timeout: 30000, signal, llmSelection: { profileId: null }, reportError: false }),
   automationGet: (projectId: string, runId: string, signal?: AbortSignal) => api.get<DraftAutomationRun>(`/drafting/${projectId}/graph/automation/${encodeURIComponent(runId)}`, { timeout: 30000, signal, llmSelection: { profileId: null }, reportError: false }),
   automationResume: (projectId: string, runId: string, body: DraftAutomationBinding, llmSelection: LlmSelection) => api.post<DraftAutomationRun>(`/drafting/${projectId}/graph/automation/${encodeURIComponent(runId)}/resume`, body, { timeout: 30000, llmSelection, reportError: false }),
@@ -105,6 +105,7 @@ export const draftingApi = {
   } }),
   confirmIdentity: (projectId: string, body: DraftIdentityConfirmation) => api.post<Project>(`/drafting/${projectId}/identity/confirm`, body, { reportError: false }),
   reviewHead: (projectId: string) => api.get<ReviewHead>(`/drafting/${projectId}/graph`),
+  reviewSources: (projectId: string) => api.get<ReviewSource[]>(`/drafting/${projectId}/graph/sources`, { reportError: false }),
   reviewBootstrap: (projectId: string) => api.post<ReviewBootstrap>(`/drafting/${projectId}/graph/bootstrap`),
   reviewExtract: (projectId: string, revisionId: string, llmSelection?: LlmSelection) => api.post<DraftVariable[]>(`/drafting/${projectId}/graph/revisions/${encodeURIComponent(revisionId)}/extract`, undefined, { timeout: 7200000, llmSelection }),
   reviewDiscover: (projectId: string, revisionId: string, expectedCurrentRevisionId: string | null, maxItems: number, llmSelection?: LlmSelection) => api.post<ReviewRevision>(`/drafting/${projectId}/graph/revisions/${encodeURIComponent(revisionId)}/discover`, { expectedCurrentRevisionId, maxItems }, { timeout: 7200000, llmSelection }),

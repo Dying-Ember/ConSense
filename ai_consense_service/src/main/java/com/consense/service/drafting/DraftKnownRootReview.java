@@ -28,16 +28,16 @@ final class DraftKnownRootReview {
         state(fresh).put("variables",new ArrayList<>());
         Map<String,JsonNode> bySource=new LinkedHashMap<>();for(JsonNode reading:readings)if(bySource.put(reading.path("id").asText(),reading)!=null)throw invalid("KNOWN_ROOT_REVIEW_SOURCE_AMBIGUOUS");
         DraftKnownRoots.Result rebuilt=DraftKnownRoots.build(bySource,DraftReviewDiscovery.sourceTasks(readings),DraftDiscoveryGroups.currentTemplateIndexes(bySource),fresh);
-        Map<String,Map<String,Object>> actual=index(nodes(result)),expected=index(rebuilt.roots());Set<String> selected=new LinkedHashSet<>();
+        Map<String,Map<String,Object>> actual=index(nodes(result)),expected=index(rebuilt.roots());Map<String,Map<String,Map<String,Object>>> proofDefinitions=new HashMap<>();Set<String> selected=new LinkedHashSet<>();
         for(String id:selectedIds){Map<String,Object> root=actual.get(id);if(root!=null&&candidate(result,root)){
             if(!expected.containsKey(id))throw invalid("KNOWN_ROOT_REVIEW_CURRENT_REFERENCE_REQUIRED: "+id);
             selected.add(id);for(Map<String,Object> child:expected.values())if(descendsFrom(text(child.get("id")),id,expected))selected.add(text(child.get("id")));
         }}
         if(selected.isEmpty())return result;
         for(String id:selected){Map<String,Object> node=actual.get(id),definition=expected.get(id);
-            if(node==null||!rebuilt.accepts(node)||!sourceProofsEqual(node,definition))throw invalid("KNOWN_ROOT_REVIEW_DEFINITION_CHANGED: "+id);
+            if(node==null||!rebuilt.accepts(node)||!sourceProofsEqual(node,ownSourceDefinition(node,bySource,fresh,proofDefinitions)))throw invalid("KNOWN_ROOT_REVIEW_DEFINITION_CHANGED: "+id);
             for(Object raw:list(map(definition.get("applicability")).get("clauses"))){String dependency=text(map(raw).get("inputId"));
-                if(!selected.contains(dependency)&&!reviewedPrerequisite(actual.get(dependency),expected.get(dependency)))throw invalid("KNOWN_ROOT_REVIEW_DEPENDENCY_REQUIRED: "+dependency);
+                if(!selected.contains(dependency)&&!reviewedPrerequisite(actual.get(dependency),ownSourceDefinition(actual.get(dependency),bySource,fresh,proofDefinitions)))throw invalid("KNOWN_ROOT_REVIEW_DEPENDENCY_REQUIRED: "+dependency);
             }
         }
         for(String id:selected){Map<String,Object> node=actual.get(id),alignment=map(node.get("catalogAlignment"));alignment.put("confirmed",true);alignment.put("reason",reason.trim());node.put("status","confirmed");node.put("definitionReview",obj("confirmed",true,"basis",null));}
@@ -45,6 +45,17 @@ final class DraftKnownRootReview {
         validate(result);return result;
     }
 
+    private static Map<String,Object> ownSourceDefinition(Map<String,Object> node,Map<String,JsonNode> readings,Map<String,Object> fresh,Map<String,Map<String,Map<String,Object>>> cache) {
+        if(node==null)return null;Set<String> sourceIds=new TreeSet<>();
+        for(Object raw:list(map(node.get("currentDefinitionReference")).get("sourceReferences"))){String source=text(map(raw).get("sourceId"));if(source.isEmpty()||!readings.containsKey(source))return null;sourceIds.add(source);}
+        if(sourceIds.isEmpty())return null;
+        // New templates may add proofs; confirmation still revalidates every proof of this saved source cohort.
+        Map<String,Map<String,Object>> definitions=cache.computeIfAbsent(String.join("\n",sourceIds),ignored->{
+            Map<String,JsonNode> sources=new LinkedHashMap<>();for(Map.Entry<String,JsonNode> source:readings.entrySet())if(sourceIds.contains(source.getKey()))sources.put(source.getKey(),source.getValue());
+            List<JsonNode> current=new ArrayList<>(sources.values());return index(DraftKnownRoots.build(sources,DraftReviewDiscovery.sourceTasks(current),DraftDiscoveryGroups.currentTemplateIndexes(sources),fresh).roots());
+        });
+        return definitions.get(text(node.get("id")));
+    }
     private static boolean reviewedPrerequisite(Map<String,Object> actual,Map<String,Object> expected) {
         if(actual==null||expected==null||!"confirmed".equals(actual.get("status"))||!DraftCatalogAlignment.reviewed(actual)||!Boolean.TRUE.equals(map(actual.get("definitionReview")).get("confirmed"))||!sourceProofsEqual(actual,expected))return false;
         Map<String,Object> normalized=JsonUtils.readMap(JsonUtils.write(actual));
