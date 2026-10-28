@@ -1,5 +1,23 @@
 # Drafting 分组、并发与前端反馈验证（2026-10-28）
 
+## 当前检查点：build31、通信候选与内置浏览器续跑（2026-10-29）
+
+build31已实际替换本任务build30：Java26224／18204、exec12679，04:51:26上海日志就绪；JAR SHA256 `AE1B061DB410682BED5423BC7F082204104404AD2FE7C8F889E4FE4A2FA83E5D`。以runtime30冻结src/pom为基底，仅覆盖AutomaticDiscovery、AutomationService、CurrentTemplateAlignment、KnownRoots、TemplateGraphService、DraftingService六个生产文件，其余376个生产／资源文件逐字保持。核验旧Java50084及JAR后通过原exec52195中断，确认退出；原DB、uploads、home/temp、8GiB及模型设置保持。frontend18 Node39904／5185继续使用，其他模块服务未操作。配置仅另存日志名；本机回执在`template-variation-probe/build31-replacement.json`。
+
+该runtime闭包的新空target组合test→package实际执行31套件300项，299通过、1原件capture假设跳过，0失败／错误，44.942秒；29个打包outer/inner class与本次编译字节一致。唯一跳过是`DraftingPlanGenerationStateTest.actualThreeOriginalGenerationAndImmediatePlanHaveTheSameSourceApplicationStates`，不能当原件或生成验收通过。组合清单、SHA、XML分母及日志在本机`build31/source-overlay.json`及`build31/evidence/`。此前03门111项、05门112项、采用延迟37项和独立149项与本门重叠，不相加；所有实际失败及准备失败保留。
+
+本次受限续跑允许在当前原生证据核验下补充同一业务根的只读参考，严格保留原任务／来源／分组身份、旧回执、原累计预算及寿命。新增初始请求超限预检与实际派发共用payload、system prompt及wire encoding；仅saved continuation的原PENDING组在派发和预算预留前受检。准确红测试证明旧实现0dispatch也可能推进结果并丢失PENDING；修复后保留执行descriptor/groups、items、head及结果。fresh resume仍可能按既有流程新增未派发continuation，不能称任何情况下整份manifest零写入；其他before_dispatch及UNKNOWN不因此获得重发资格。
+
+通过内置浏览器已上传另一套模拟通信的15份可上传DOCX，答案／辅助材料未上传。只对13项已确认定义启动候选提取；前端过程显示15份各一主调用、12条接收／1条未通过校验。页面12条候选涉及11个不同变量；独立逐条对原DOCX核查，按“业务值有同源原文直接支持”口径11／12有支持。唯一明确无依据项以Bill表格存在推断纸本格式，不能因值碰巧与另一通信相同而计作正确。此为已提取候选的有限证据支持比例，不是整体准确率或召回率。消防业务范围有原文支持，SCT／SCC跨版条号映射仍有冲突，不能计为最终引用正确。
+
+人工经页面只采用有明确通信依据的10个不同业务值，另按原件预览采用合约身份，保存并应用后为11／79已采用、68待核；重启及刷新后仍保留。NSC及标准双信封采用后，两个不适用的替换文字子项隐藏，旧记录保留。无依据的候选未采用；未知事项、未确认重复节点及消防条号冲突没有用false或测试值填平。所有操作只走前端，没有产品API或数据库写入旁路。
+
+候选页完整修改影响现默认收起，数量和“尚未执行”明确显示；键盘展开仍保留原文、来源、条件及范围，实际全页截图恢复。采用值后的正常plan路径去掉同一请求重复来源／快照计算，无跨请求缓存；原件或通信变化下次请求仍改变hash并标记stale。内置浏览器同项目同外墙候选的两次单次观测，总保存／刷新跨度从50.464497秒到17.259241秒，plan请求从38.600936秒到5.557724秒，均HTTP200。两次之间采用状态和本机负载可能变化，不作为严格独占基准、总体平均或LLM提速比例。新plan页面响应约3.4MB的冗余结构另在只读调查，尚未作为运行修复通过。
+
+UTC `2026-10-28T20:54:00.196Z`经内置浏览器点击原run `448e2ab2-28ac-4b7a-96d1-abb50c67cfd9`的“继续尚未派发的分组”。它实际从56／88、15／30推进到61／88、17／30，新增两组各一次真实调用，累计24→26调用；随后探针自动早停并保存，0在途，剩13组未派发。新首因包括`DISCOVERY_SOURCE_QUOTE_NOT_IN_INSTRUCTION`及其派生的requirement／coverage错误；原始回复及接收链正在逐项审查，不能放宽引用守卫或直接把它称为模型整体能力失败。新明确BQ owner落在此前DONE组，正确地没有重发；本次两个新包knownRoots仍为空，因此不能称这次已实际验证BQ alias修复的模型效果。
+
+本轮新诊断由内置浏览器实际下载后封存为`downloads/build31-sct-continued-stopped-diagnostics.json`，SHA256 `6785FF07DD0D1D7614595C1CE313CE6675873BDC88494E198B50FB8D8E3D9396`；截图176／177记录新停止及下载。完整点击、效果、失败、人工纠正及修复分叉在本机`template-variation-probe/操作记录.md`，本检查点覆盖步骤193—215及其后新终态证据。三份Word仍未生成；SCT剩余组、SCC、完整人工校核与三文件验收继续，goal保持ACTIVE。下方build30及更早段落按各自时间作为历史读取。
+
 ## 最新部署检查点（2026-10-29 03:34上海时间）
 
 build30已实际启动：Java50084／18204、exec52195，03:33:53本地日志确认启动完成；JAR SHA256 `954F46586C91A324B13F96ED58EFEAAFCB55180F0450CFEF8AA03658C38D54B6`。从冻结build29只覆盖TemplateGraphService、AutomaticDiscovery、DiscoveryReferences、BusinessRules四个生产文件，定义路由仍保留旧版。核对旧Java8336命令与build29 JAR后经原exec19891中断退出，原DB、uploads、home/temp、8GiB及模型配置保持；前端frontend17 Node39228／5185不变。启动/进程/JAR回执在本机`build30-replacement.json`，未操作其他模块服务。内置浏览器已刷新，当前待重新读回并验证旧run续跑；尚不能报告续跑兼容、修复后模型效果或新版合并页面验收通过。
