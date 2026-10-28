@@ -2,6 +2,12 @@
 
 This is an intermediate source-integration record. The Drafting worktree and the two review tasks remain active; it is not a claim that all local changes have been published or that the product has passed business acceptance. The coordination task must update this checkpoint when the final tested tree and remote commit are known.
 
+## Drafting seven-path candidate: failed gate and open review findings (29 October)
+
+A frozen seven-path candidate on base `795e473f797d0c0478baadef6b750cd846dcd139` ran an isolated 14-suite combined gate: 109 of 110 tests passed, with one failure and no errors or skips. The failed saved-group resume assertion retained `saved-result` instead of `continued-result`. A separate diagnostic recorded `GRAPH_CATALOG_REVIEW_REASON_REQUIRED`; after supplying the manual catalog review status and reason in a diagnostic-only fixture, two suites passed all 12 tests. This does not make the original candidate gate pass: the candidate needs a new frozen snapshot and a complete rerun. The manifest, original gate, failure diagnostic and diagnostic-only rerun are retained locally under `.local/drafting-seven-independent-20261029-02/evidence/` as `manifest.json`, `java-gate.log`, `diagnostic.log` and `diagnostic-valid-fixture.log`.
+
+Independent source review also identified two issues handed to the owning session: compatibility when an old grouped plan has source IDs only in `coverage.sources`, and a risk that newly added context crossing 96,000 characters can mark undispatched groups DONE. The latter is inferred from code and has not been reproduced in an actual run. Broad BQ matching of negative or unrelated sentences may yield a false candidate and remains under review. These items are not closed by the diagnostic fixture. Other sessions remain active; this seven-path candidate and their subsequent work were not included in the remote snapshot recorded below. Later source, runtime and validation status must be established by their subsequent receipts.
+
 ## Candidate impact disclosure software gate (29 October)
 
 On baseline `795e473f`, the two frozen Drafting candidate-impact paths passed 20 frontend test files, type checking and a Vite build in an isolated snapshot. The initial test snapshot omitted the baseline backend catalog fixture and the initial build hit a system TEMP permission failure; both failures and the successful rerun after restoring the same-baseline fixture and using isolated TEMP are retained under `.local/source-sync-impact-validation-20261029/`. Browser and business validation remain separate.
