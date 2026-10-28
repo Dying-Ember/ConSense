@@ -12,6 +12,49 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /** Authored source-bound text fixtures; no source reads, retrieval models or LLM calls. */
 class OerReviewTextContextTest {
+    @Test void namedAppendixProjectVariantRetainsItsUnownedStorageParagraph() {
+        assertAppendixStorage(false);
+    }
+    @Test void namedAppendixProjectVariantRetainsItsDeclaredStorageParagraph() {
+        assertAppendixStorage(true);
+    }
+    private static void assertAppendixStorage(boolean declared) {
+        String clause=declared?"PRE.B8.APPEND12.P":null,heading=declared?"heading:append12":null;
+        VettingCorpus.Chunk seed=chunk("seed",0,"The material-control requirements appear later in this source.",null,null);
+        VettingCorpus.Chunk preceding=chunk("preceding",1,"PRE.B8.100.P Unrelated preceding requirements","PRE.B8.100.P","heading:preceding");
+        VettingCorpus.Chunk appendix=chunk("appendix",40,"PRE.B8.APPEND12.P Guidelines on Scope and Contents of Quality Control System",clause,heading);
+        VettingCorpus.Chunk storage=chunk("storage",41,"3.3. Storage",clause,heading);
+        VettingCorpus.Chunk body=chunk("storage-a",42,"a. Submit the authored material storage plan to the CM within three months from commencement and update it when the storage arrangements change.",clause,heading);
+        VettingCorpus.Chunk next=chunk("next",43,"PRE.B8.APPEND13.P Unrelated next appendix","PRE.B8.APPEND13.P","heading:next");
+        List<VettingCorpus.Chunk> corpus=Arrays.asList(seed,preceding,appendix,storage,body,next);
+        List<VettingCorpus.Chunk> selected=select(corpus,Collections.singletonList(seed),unknown(seed),"Retrieve PRE.B8.APPEND12 for the material storage plan submission time.",2000);
+        assertTrue(ids(selected).containsAll(Arrays.asList("appendix","storage","storage-a")),"The explicitly requested appendix must supply its operative storage paragraph");
+        assertFalse(ids(selected).contains("next"));assertEquals(JsonUtils.write(body),JsonUtils.write(find(selected,"storage-a")));
+        assertFalse(ids(select(corpus,Collections.singletonList(seed),unknown(seed),"Retrieve PRE.B8.APPEND120 for the material storage plan submission time.",2000)).contains("storage-a"),"An appendix prefix must not match another number");
+    }
+
+    @Test void assignedExcavationClauseBodyOutranksUnrelatedSeedsWithinSameBudget() {
+        List<VettingCorpus.Chunk> corpus=new ArrayList<>(),seeds=new ArrayList<>(),target=new ArrayList<>();
+        for(int i=0;i<9;i++){
+            VettingCorpus.Chunk noise=chunk("noise-"+i,i,sized("Unrelated pricing context "+i+": ",1000),"PRE.B1."+(10+i)+".P","heading:noise-"+i);
+            corpus.add(noise);seeds.add(noise);
+        }
+        String[] text={"PRE.B6.810.P EXCAVATION PERMIT FOR WORKS","1. The following authored Site portions are subject to the specified excavation permit arrangements:",
+                "a. On-Site approach works.","b. Areas outside the Site boundary for associated road works.","c. Areas outside the Site boundary for temporary perimeter works.",
+                "d. Areas outside the Site boundary for utility connections.","e. Areas outside the Site boundary for monitoring stations.","f. Areas outside the Site boundary for utility diversions.","g. Areas outside the Site boundary for public landscaping."};
+        int[] lengths={52,267,181,142,213,142,74,90,86};
+        for(int i=0;i<text.length;i++)target.add(chunk("excavation-"+i,20+i,sized(text[i],lengths[i]),"PRE.B6.810.P","heading:excavation"));
+        corpus.addAll(target);seeds.add(target.get(0));
+        corpus.add(chunk("next",29,"PRE.B6.820.P Other requirements","PRE.B6.820.P","heading:next"));
+        assertEquals(1247,target.stream().mapToInt(c->c.getContent().length()).sum());
+        assertEquals(9052,seeds.stream().mapToInt(c->c.getContent().length()).sum());
+        List<VettingCorpus.Chunk> selected=select(corpus,seeds,unknown(target.get(0)),"PRE.B6; 10. PRE.B6.810 sub-clause 1; 11. PRE.B6.APPEND5; Site portions SCC22.3(11), outside Site excavation permits; contractor design items PRE.B6.085(1)(e)(f), design intent and drawing number references Appendix B",10000);
+        assertTrue(ids(selected).containsAll(ids(target)),"The complete 1247-character assigned clause fits when one unrelated seed is deferred");
+        assertTrue(selected.stream().mapToInt(c->c.getContent().length()).sum()<=10000);assertFalse(ids(selected).contains("next"));
+        for(VettingCorpus.Chunk original:target)assertEquals(JsonUtils.write(original),JsonUtils.write(find(selected,original.getId())));
+    }
+    private static String sized(String prefix,int length){assertTrue(prefix.length()<=length);return prefix+"x".repeat(length-prefix.length());}
+
     @Test void technicalIdentifiersRetainFourDigitComponentsAndTheirUnownedItems() {
         VettingCorpus.Chunk title=chunk("title",0,"PRE.B8.1422.P PROVISION OF BUILDER'S WORK",null,null);
         VettingCorpus.Chunk first=chunk("first",1,"1. Prepare the required builder's work details.",null,null);

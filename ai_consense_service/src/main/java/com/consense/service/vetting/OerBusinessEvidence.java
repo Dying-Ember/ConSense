@@ -1065,7 +1065,7 @@ public class OerBusinessEvidence {
         ReviewTextChunks(List<Chunk> chunks,Collection<String> rankedIds){super(chunks);this.rankedIds=new LinkedHashSet<>(rankedIds);}
     }
     static boolean rankedReviewOrigin(List<Chunk> chunks,Chunk chunk){return !(chunks instanceof ReviewTextChunks)||((ReviewTextChunks)chunks).rankedIds.contains(chunk.getId());}
-    private static final String REVIEW_TECHNICAL_LABEL="(?:[A-Z]{1,8}\\.[A-Z]?|[A-Z]{2,8})[0-9]+(?:\\.[0-9]+)*(?:\\.P)?";
+    private static final String REVIEW_TECHNICAL_LABEL="(?:[A-Z]{1,8}\\.[A-Z]?|[A-Z]{2,8})[0-9]+(?:\\.[0-9]+)*(?:\\.APPEND[0-9]+)?(?:\\.P)?";
     private static final java.util.regex.Pattern REVIEW_HEADING=java.util.regex.Pattern.compile(
             "(?i)^\\s*(?:(clause)\\s+)?((?:"+REVIEW_TECHNICAL_LABEL+")|[A-Z]?[0-9]{1,3}(?:\\.[0-9]{1,3})*)(?=\\s|[.)](?:\\s|$)|$)");
     private static final class ReviewTextIndex {
@@ -1091,9 +1091,8 @@ public class OerBusinessEvidence {
     private static List<Chunk> reviewTextContext(ReviewTextIndex index,List<Chunk> seeds,JsonNode result,String query,int maxChars,ReviewTextStats stats){
         LinkedHashMap<String,Chunk> selected=new LinkedHashMap<>();int[] remaining={Math.max(0,maxChars)};
         Map<String,Boolean> requestedClauses=new HashMap<>();
-        for(Chunk seed:seeds)addReviewText(selected,seed,remaining,stats);
         for(Chunk seed:seeds){
-            List<Object> key=reviewSourceKey(seed);if(key==null||!selected.containsKey(seed.getId()))continue;
+            List<Object> key=reviewSourceKey(seed);if(key==null)continue;
             List<Chunk> rows=index.sources.get(key);if(rows==null)continue;
             int position=rows.indexOf(index.byId.get(seed.getId()));boolean ordered=index.ordered.contains(key);if(position<0)continue;
             if(ordered){
@@ -1105,6 +1104,13 @@ public class OerBusinessEvidence {
                 int requests=0;for(Integer start:requested.values()){if(requests++>=4)break;
                     for(Chunk context:reviewClauseText(rows,start))addReviewText(selected,context,remaining,stats);}
             }
+        }
+        // Assigned clause text must fit before unrelated ranked seeds consume its allowance.
+        for(Chunk seed:seeds)addReviewText(selected,seed,remaining,stats);
+        for(Chunk seed:seeds){
+            List<Object> key=reviewSourceKey(seed);if(key==null||!selected.containsKey(seed.getId()))continue;
+            List<Chunk> rows=index.sources.get(key);if(rows==null)continue;
+            int position=rows.indexOf(index.byId.get(seed.getId()));boolean ordered=index.ordered.contains(key);if(position<0)continue;
             int observed=0;
             for(JsonNode unit:result.path("sourceUnits").path("units")){
                 if(!completeTransport(unit)||!VettingRetrievalSourceUnits.textIds(unit.path("originIds")).contains(seed.getId()))continue;
@@ -1141,16 +1147,19 @@ public class OerBusinessEvidence {
         if(clause.isEmpty())return Collections.singletonList(rows.get(seed));
         List<Chunk> out=new ArrayList<>();Chunk first=rows.get(start);
         for(int i=start;i<rows.size()&&out.size()<64;i++){
-            Chunk row=rows.get(i);if(i>start&&!unownedNumberedTechnicalItem(first,row)&&(differentReviewClause(first,row)
+            Chunk row=rows.get(i);if(i>start&&!numberedTechnicalItem(first,row)&&(differentReviewClause(first,row)
                     ||!reviewHeading(row).isEmpty()&&(!clause.equals(reviewHeading(row))
                         ||JsonUtils.isBlankText(first.getClauseHeadingLocation())||!Objects.equals(first.getClauseHeadingLocation(),row.getClauseHeadingLocation()))))break;
             out.add(row);
         }
         return out;
     }
-    private static boolean unownedNumberedTechnicalItem(Chunk heading,Chunk item){
-        return reviewClause(heading).matches(REVIEW_TECHNICAL_LABEL)&&JsonUtils.isBlankText(item.getClauseId())
-                &&JsonUtils.isBlankText(item.getClauseHeadingLocation())&&reviewHeading(item).matches("[0-9]{1,3}(?:\\.[0-9]{1,3})*");
+    private static boolean numberedTechnicalItem(Chunk heading,Chunk item){
+        boolean unowned=JsonUtils.isBlankText(item.getClauseId())&&JsonUtils.isBlankText(item.getClauseHeadingLocation());
+        boolean sameOwner=reviewClause(heading).equals(reviewClause(item))&&!JsonUtils.isBlankText(heading.getClauseHeadingLocation())
+                &&heading.getClauseHeadingLocation().equals(item.getClauseHeadingLocation());
+        return reviewClause(heading).matches(REVIEW_TECHNICAL_LABEL)&&(unowned||sameOwner)
+                &&reviewHeading(item).matches("[0-9]{1,3}(?:\\.[0-9]{1,3})*");
     }
     private static boolean differentReviewClause(Chunk left,Chunk right){
         String a=reviewClause(left),b=reviewClause(right);
