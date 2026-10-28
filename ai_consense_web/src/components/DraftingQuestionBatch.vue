@@ -76,6 +76,7 @@ const mergeReason = computed(() => {
     MERGE_OPTIONS_MISMATCH: t('可选取值不同。互斥处理请使用“同一变量的分支处理”。', 'Value options differ. Use branch handling for alternative treatments.'),
     MERGE_FIXED_VALUE_MISMATCH: t('固定内容不同，需分别核对。', 'Fixed wording differs; review it separately.'),
     MERGE_RULE_CONFLICT: t('两项都有处理规则，不能拍扁；请在“同一变量的分支处理”逐处归属。', 'Both items have rules. Assign their passages in branch handling before considering a duplicate merge.'),
+    MERGE_APPLICABILITY_CONFLICT: t('适用条件不同或仅一项有条件；请先核对适用范围，不能通过合并丢弃或扩展条件。', 'Applicability differs or is present on only one item. Review the scope first; merging must not discard or extend its conditions.'),
     MERGE_SOURCE_EDITION_CONFLICT: t('包含不同版次的SCC，不能共用一套修改。', 'Different SCC editions cannot share amendments.'),
     MERGE_SOURCE_SCOPE_CONFLICT: t('相关条件或取值跨越不相容来源版次。', 'Related conditions or values cross incompatible source editions.'),
     MERGE_DEPENDENCY_CYCLE: t('合并后会产生派生答案循环；请先核对派生规则及资料归属。', 'The merge would create a derived-answer cycle. Review the value rules and record membership first.')

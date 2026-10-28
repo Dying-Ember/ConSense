@@ -267,10 +267,34 @@ const definitionGraphReason = ref(''), definitionGraphAcknowledged = ref(false),
 const definitionGroupSelection = ref<string[]>([])
 const fixedCandidateFieldIds = computed(() => new Set(workingReview(head.value)?.definitionGraphReview?.fixedCandidateFieldIds ?? []))
 const supportsDefinitionGroups = computed(() => Array.isArray(workingReview(head.value)?.definitionGraphReview?.confirmedFieldIds) && Array.isArray(workingReview(head.value)?.definitionGraphReview?.pendingFieldIds))
-const definitionGroupOptions = computed(() => {
+const definitionGroupPending = computed(() => {
   const confirmed = new Set(workingReview(head.value)?.definitionGraphReview?.confirmedFieldIds ?? [])
-  return state.value.variables.filter(item => businessVariable(item) && !item.parentId && ['input','decision','content'].includes(item.role?.kind) && (fixedCandidateFieldIds.value.has(item.id) || item.definitionReview?.confirmed === true || item.catalogAlignment?.status === 'matched' && item.catalogAlignment?.confirmed === true) && !confirmed.has(item.id))
+  return state.value.variables.filter(item => businessVariable(item) && !item.parentId && !confirmed.has(item.id))
 })
+const definitionAlignmentReviewed = (item: ReviewObject) => !item.catalogAlignment || item.catalogAlignment.confirmed === true || item.pdfReferenceAlignment?.confirmed === true
+const definitionGroupOptions = computed(() => {
+  const revision = workingReview(head.value), review = revision?.definitionGraphReview
+  if (revision?.sourceStale) return []
+  const current = new Set(review?.currentDefinitionReviewFieldIds ?? [])
+  const ready = Array.isArray(review?.definitionGroupReadyFieldIds) ? new Set(review.definitionGroupReadyFieldIds) : undefined
+  const matched = (item: ReviewObject) => item.catalogAlignment?.status === 'matched' && item.catalogAlignment?.confirmed === true
+  const children = new Map<string, ReviewVariable[]>()
+  if (!ready) for (const item of state.value.variables) if (businessVariable(item) && item.parentId) children.set(item.parentId, [...(children.get(item.parentId) ?? []), item])
+  const matchedTree = (item: ReviewVariable, seen = new Set<string>()): boolean => {
+    if (seen.has(item.id) || !matched(item)) return false
+    seen.add(item.id)
+    return (children.get(item.id) ?? []).every(child => matchedTree(child, seen))
+  }
+  return definitionGroupPending.value.filter(item => {
+    const fixed = fixedCandidateFieldIds.value.has(item.id)
+    if (!fixed && !definitionAlignmentReviewed(item)) return false
+    if (ready) return ready.has(item.id) && (fixed || matched(item) || current.has(item.id) && item.definitionReview?.confirmed === true)
+    if (current.has(item.id) && item.definitionReview?.confirmed === true) return true
+    return fixed ? !children.has(item.id) : matchedTree(item)
+  })
+})
+const definitionAlignmentPending = computed(() => definitionGroupPending.value.filter(item => !fixedCandidateFieldIds.value.has(item.id) && !definitionAlignmentReviewed(item)))
+watch(definitionGroupOptions, options => { const available=new Set(options.map(item=>item.id));definitionGroupSelection.value=definitionGroupSelection.value.filter(id=>available.has(id)) })
 const definitionBaselineReuseBlocked = computed(() => !!state.value.fixedRuleBaseline || definitionGroupSelection.value.some(id => fixedCandidateFieldIds.value.has(id)))
 watch(definitionBaselineReuseBlocked, blocked => { if (blocked) { definitionReuseForEdition.value=false; definitionCompleteEdition.value=false } })
 watch(() => props.projectId, () => { definitionGroupSelection.value = [] })
@@ -919,6 +943,7 @@ defineExpose({ prepareCandidates, refresh, save, reviewRelations, selectSource, 
       <template v-if="workingReview(head)?.status === 'DRAFT'">
         <p v-if="!supportsDefinitionGroups" class="review-error">{{ t('当前服务尚不支持按组确认；请使用前后端版本一致的服务。现有草稿保留。','The current service does not support group confirmation. Use matching frontend and backend versions; the draft is retained.') }}</p>
         <p>{{ t('选择要确认的一组变量，核对定义、前提条件和明细，填写理由并勾选确认。内置候选可直接在此按组确认；其他变量须先核对对应或定义并保存草稿。系统会校验每项及其来源；未决关系不自动采用。','Select a group and review its definitions, prerequisites and details, then enter a reason and acknowledge the review. Built-in candidates can be confirmed here as a group; review and save other variable alignments or definitions first. The service checks each definition and source; unresolved relationships are not adopted automatically.') }}</p>
+        <p v-if="definitionAlignmentPending.length" class="source-note" data-definition-alignment-pending>{{ definitionAlignmentPending.length }} {{ t('个变量尚未完成固定对应审核；请先核对对应并保存，再加入这组。','variables need alignment review. Review and save their correspondence before adding them to this group.') }} <button type="button" class="btn" data-definition-open-alignment :disabled="busy || formDirty || splitDirty" @click="catalogOpen || openCatalog()">{{ t('变量基准对齐审核','Review baseline alignment') }}</button></p>
         <details v-if="definitionGroupOptions.length"><summary>{{ t('选择待确认的变量定义','Select variable definitions awaiting confirmation') }} · {{ definitionGroupSelection.length }} / {{ definitionGroupOptions.length }}</summary>
           <button type="button" class="btn" data-definition-select-all @click="definitionGroupSelection=definitionGroupOptions.map(item=>item.id)">{{ t('全选这组','Select this group') }}</button>
           <button type="button" class="btn" @click="definitionGroupSelection=[]">{{ t('清除选择','Clear selection') }}</button>

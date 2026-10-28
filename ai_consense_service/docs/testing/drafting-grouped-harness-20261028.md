@@ -1,5 +1,57 @@
 # Drafting 分组、并发与前端反馈验证（2026-10-28）
 
+## 最新部署检查点（2026-10-29 03:34上海时间）
+
+build30已实际启动：Java50084／18204、exec52195，03:33:53本地日志确认启动完成；JAR SHA256 `954F46586C91A324B13F96ED58EFEAAFCB55180F0450CFEF8AA03658C38D54B6`。从冻结build29只覆盖TemplateGraphService、AutomaticDiscovery、DiscoveryReferences、BusinessRules四个生产文件，定义路由仍保留旧版。核对旧Java8336命令与build29 JAR后经原exec19891中断退出，原DB、uploads、home/temp、8GiB及模型配置保持；前端frontend17 Node39228／5185不变。启动/进程/JAR回执在本机`build30-replacement.json`，未操作其他模块服务。内置浏览器已刷新，当前待重新读回并验证旧run续跑；尚不能报告续跑兼容、修复后模型效果或新版合并页面验收通过。
+
+与build30生产范围一致、不含新domestic路由的独立树`5358623e5973292452175133c8ac6734a32b70c1`从空target编译，51套件560项中558通过、2实际源skip，无失败/错误；日志在`.local/source-sync-build30-20261029-033030/backend-regression.log`。该门与下方52套件564项高度重叠，不相加；其ContinuationIsolation 3、SourceSelectionIsolation 12、GroupScopeDuty 12、BusinessRules 16、VO/fixed 9均实际执行。打包跳过测试，直接Java Maven launcher成功24.824秒；初次mvn.cmd因D路径中的&转义失败，保留build.log，重试成功在build-retry.log。软件门、构建、运行启动与业务验收分别记录。当前仍没有通信、项目值采用或三份Word，goal为ACTIVE；下文各检查点保留其历史时间。
+
+## 运行与软件门更新（2026-10-29 03:26上海时间）
+
+前端已受控替换为frontend17，Node39228／5185、exec14918；核验旧frontend16 Node46056身份后经原exec29273中断退出，其余服务未操作。四个生产前端文件及四个测试来自冻结清单，实际回执在本机`frontend17-replacement.json`。内置浏览器热重载后重新打开图谱，已保存13项定义仍可回读；新版合并行为尚未在页面重新验收，不能把此前旧界面的人工合并当成新修复通过。后端仍是Java8336/build29，0模型在途。
+
+最终统一源码树`644f376109fe0b6d8ea2f908f22d63bbc15a364b`从不存在的全新target开始，实际编译331个生产源及644个测试源，通过52套件：564项中562通过、2项因缺真实比赛sourceDir跳过，无失败/错误。前端20个定向测试文件、typecheck和build通过。日志位于本机`.local/source-sync-final-empty-20261029-032707/`。此前overlay门因mtime导致新Auto源配旧class的两失败记录保留，不算新生产代码失败或模型失败；最终class身份日志确认新Auto/References包含scopeRepairProtocol。软件门不能代替真实原件、模型或业务验收，两项Bill/edition原件跳过仍未通过。
+
+为继续旧任务20个未派发组，下一运行候选build30仅覆盖VO、Auto/References及SCT4父前提修复，暂保留build29的定义路由，避免新增domestic owner和重分组破坏旧计划或重发17次调用。新增domestic路由已在上述源码门验证，尚不纳入当前旧run运行包；计划另批部署与前端实际模型验证，不将其源码测试称作自动准确率改善。全部失败、回执及未完成状态保留，goal继续ACTIVE。下方frontend16及首次早停记录按各段操作时的历史状态读取。
+
+## 最新检查点：消防人工纠正及增量续跑通过页面执行；SCT 第二次同协议错误早停（2026-10-29）
+
+运行仍为 build29/frontend16。本轮通过内置浏览器完成消防选择的准确画词、两个互斥 Replace、重复输入归并、保存、刷新回读及仅该定义的组确认。两个模型节点的当前来源、observation、discoverySourceKey及稳定值均相同，但local ID及标签不同；人工保留fire_scope为主，将旧n1归入历史。PDF实际选区为`*SCC20.2/ *SCC20.3.`，两条件分别替换为`SCC20.2.`或`SCC20.3.`，保留句点和后续正文。旧界面因标签差异初次拒绝合并，统一等价标签后才成功。已确认定义从12增至13，其余确认保留；没有采用项目答案。步骤172—180及截图135—144在本机图文操作记录，不能把人工纠正写成自动正确率。
+
+UTC `2026-10-28T19:07:32.142Z` 实际点击原run `448e2ab2-28ac-4b7a-96d1-abb50c67cfd9` 的“继续尚未派发的分组”，不是全量重跑。任务从30/88、7/30推进至37/88、10/30后再次PARTIAL，0在途，20组未派发。新增三组各2次实际模型调用，累计10组17调用；89要求、54编译节点、35待核均不代表正确率。lastContinuation从`2026-10-28T19:07:39.873748400Z`至`19:09:16.118025600Z`，新resultRevision为`7baec3ba-325c-46ed-abc5-81c4fdf24081`。新增停止组为`group-2ab7e0f4a80fb57b8bf83837`，探针时间`19:08:30.349038Z`；明确不是旧firstProbeFailure被误重放。新前端下载诊断封存`downloads/build29-sct-continued-stopped-diagnostics.json`，SHA256 `B59FB03C885590AB4B433F5F50CFDBD3392FAC998FAB206A485544BD37960F5B`，截图145—147。
+
+重复首因已归为两个窄harness接缝：SCT4当前原生指导明确询问domestic blocks，但固定定义路由只登记SCT6的同业务指导，因此该组没有收到已存在domesticBlocks定义；模型又建本地输入。随后scope_disposition_repair对known与local两条合法输出路径缺少针对性指引，模型重复把local输入放进只允许supplied known root的scopeRules，编译器正确拒绝。定义路由和补修提示正在修复并准备定向软件回归，尚未部署或真实模型重验。SCT的预制墙付款许可与NTT的预制墙投标基础是不同事实，不因主题相近强合并。未再派发剩余20组。
+
+并行小修包括合并保留主项未变的固定对应、清除过期定义确认、服务端只读当前性/准备资格、两变量适用条件不一致时阻挡，以及外部适用条件引用迁移后明确回到待核。准备资格只表达定义前提，完整来源/依赖仍在显式确认时校验；它不是完整标准树或原件证明通过。合成测试、联合软件门和真实页面验收分开报告，部署前不以这些源码替代业务通过。本轮仍没有上传通信、提取/采用项目值或生成三份Word，goal保持ACTIVE。下方build29首次早停及更早记录均按其历史时间读取。
+
+## 当前检查点：build29 已前端实跑并在新原子变量的范围协议错误处早停（2026-10-29）
+
+build29 已替换本任务的 build28 后端，前端仍为此前 frontend16/5185。替换回执为 `.local/drafting-harness-main-20261028-v1/template-variation-probe/build29-replacement.json`：UTC `2026-10-28T18:24:42.0697014Z`，核验旧 Java45820/build28 身份后替换，沿用原 DB/uploads/home/temp 和 8GiB 堆；新 JAR SHA256 为 `611B1D31ABD56D909E7CA8A951F4A99DB7297CDF370D85EFF019FE47DCFE03B2`。回执没有新 PID、exec ID 或 package 耗时，本文不补写这些信息。生产覆盖仅为 `DraftReviewDiscovery.java`、`DraftAutomaticDiscovery.java`、`DraftDiscoveryGroups.java`、`DraftDiscoveryEvidence.java` 四文件，最终 SHA 清单在 `.local/drafting-harness-main-20261028-v1/build29/source-overlay-final.json`。
+
+本批软件门实际执行395项，393通过、2跳过，日志 `.local/source-sync-anchor-regate-20261029-022001/combined-regression.log`。两项跳过需要真实 sourceDir 的原件用例，因此不能写成真实 SCT 的14个插入点已通过。旧编译／测试失败及各轮门均保留，重叠门不相加；这些是软件验证，不是模型正确率或端到端业务通过。合并后的定义确认资格及固定对应恢复前端补丁仍待测试部署，当前旧界面上的人工绕行成功不能作为新补丁验收。
+
+实际业务操作继续走原 v23 项目的内置浏览器。页面重新仅勾选 SCT24，NTT23、SCC25 不选，点击新识别按钮后产生 run `448e2ab2-28ac-4b7a-96d1-abb50c67cfd9`；没有继续旧 run。诊断冻结 selectedSourceIds 为 `[24]`、protectedSourceIds 为 `[23,24,25]`，模型为 `qwen3.8-27b`，profile `qwen`，provider `openai`（兼容配置），配置 SHA256 `41e37dfb2f09f795d7d9e0fea30ab9110e20b973023800f706c533bb2bd26340`，matchesCurrentConfiguration=true。createdAt `2026-10-28T18:26:06.418758Z`、updatedAt `2026-10-28T18:30:11.538097Z` 是服务运行记录跨度，不是点击时刻或纯模型耗时。
+
+终态是 PARTIAL／READY_FOR_REVIEW：30/88来源事项、7/30组，真实模型调用合计11次，剩余23组未派发，未点击“继续尚未派发的分组”。failedItems=0、unresolvedItems=28、requirementsCount=80、nodesCount=51；这些数量不代表正确率。首停组 `group-9928bd91ca7e970e23468bde` 在 `2026-10-28T18:28:54.689885600Z` 触发 `SCOPE_RULE_KNOWN_VALUE_REFERENCE_REQUIRED`。本次 resultRevision 为 `a66e0cd3-1997-4474-b9a3-9c471e65fd3e`，输入底稿 expectedDraftRevision 为 `906ac757-a2e6-4754-9bff-aa984a12316c`。
+
+| 实际结束组 | 模型调用 | 补证轮 |
+|---|---:|---:|
+| group-42027cbeec2ade43a9656e70 | 2 | 1 |
+| group-0327020e86f2ef86a2a424aa | 1 | 0 |
+| group-45526a19c0e07e60f7b38d26 | 1 | 0 |
+| group-3df8e3d8489d41bd69e9ca67 | 1 | 0 |
+| group-4f9e13abc180ad3a5886ec52 | 2 | 1 |
+| group-9928bd91ca7e970e23468bde | 2 | 1 |
+| group-7e32b2bde4716dac42289ef5 | 2 | 1 |
+
+同源固定定义路径有局部实证：BQ `/items/88` 的输入实际收到 `electronicTendering` 及其完整值域，原始回复没有另建 BQ 业务变量，四条 L10Pro/Hardcopy 的 keep/delete 条件仍保留；该组2次调用、1轮补证。这个结果支持减少早期无关同源根污染和重复业务定义，不能把四条条件误写成本轮相较 build28 新增的成果，也不代表当前范围已完成原生绑定或可执行。
+
+Bill `/items/89` 两处指导均引用 `billNos`，14个空字段仍返回 check；实际1次调用、0补证，没有请求宿主正文。build29 已交付合法空插入点的 `fieldLabel/insertionPoint/memberId` 导航及按需 scope/member 取证路径：scope 请求仍可保留空 text、scopeComplete=false 与合法零长 ranges，宿主全文须显式请求 member；插入接缝共用 singleInsertionAnchor guard，拒绝混合 memberRanges 或错误单位。但本轮模型没有使用新增按需取证链，不能声称真实模型已验证14点插入或该工具链已通过。
+
+本轮首停已定位为新的模型协议错误，未放宽编译器：`/items/93` 的当前指导为“Select either SCC20.2 for fire services installation, or SCC20.3 for fire services and water pump installation”，输入 knownRoots、fixedContext.fields、fixedRootRouteCandidates、restoredDefinitionReferences 均空；fixedDefinitionCandidates 仅提供词汇导航。模型首答新建合法待核原子输入 `fire_scope`，但没有范围处理；scope_disposition_repair 的第二次调用又生成 `sr_t1_s1_check`、`sr_t2_s1_check`、`sr_t3_s1_check`，三条均在 scopeRules.when.clauses 中引用本地 `fire_scope`，operator=unknown，未提供 valueSourceId。实际提示词明确 scopeRules 的 inputId/valueSourceId 只能使用 supplied knownRoots aliases，新 local facts 应走原子 branches/effects。因此 `ScopeRuleDraft.requireKnownValue` 拒绝这些规则是正确守卫，不能归因于 owner-filter 丢根或通过放行任意 local ID 解决。合法原子输入及其 requirement 仍在 `/items/13/receipt/nodes/0`，internal ID `discovery-group-1d6bec798ea964e1-fire_scope`，pending、editTargets为空，两个 marker 子项52/53及未决状态保留。根线程正在通过前端人工校正，后续从该分叉单独记录，本检查点不提前宣告通过。
+
+原始诊断通过页面“准备本次运行诊断→下载诊断 JSON”实际下载并封存于 `.local/drafting-harness-main-20261028-v1/template-variation-probe/downloads/build29-sct-stopped-diagnostics.json`，SHA256 `4271BA11839C44D38004B70A4B9BF2FF8AD1D1AB003DA5608FA4A9EEE9E7B9F2`。操作记录166—171及截图131—134保留选择、运行、自动早停、下载；没有产品 API／数据库旁路。本次尚未上传项目通信、提取或采用项目值、生成三份 Word，goal 继续 ACTIVE。以下 build28 及更早检查点均按历史记录读取。
+
 ## 当前检查点：build28 软件门通过，SCT 前端新探针因重复业务定义再次早停（2026-10-29）
 
 build28 新任务 `b242fe17-4f3b-4559-a293-9ae285067212` 已通过内置浏览器实际运行至 23/88 来源事项、6/30 组并自动 PARTIAL，处理中 0，未继续派发剩余 24 组。停止原因为 `supplied_business_definition_duplicated` 和 `node_without_supported_requirement_mapping`；6 个已返回组各实际调用 1 次，无补证轮。原始诊断已通过页面“准备本次运行诊断→下载诊断 JSON”实际下载，封存 `.local/drafting-harness-main-20261028-v1/template-variation-probe/downloads/build28-sct-stopped-diagnostics.json`。结果 revision 为 `d2a4076c-2c20-47a4-8b6e-dff1f1475515`，createdAt/updatedAt 为 `2026-10-28T17:41:22.067485Z` / `2026-10-28T17:43:06.868753Z`；这是服务任务记录，不等于纯模型耗时。48 requirements、27 compiled nodes 不是正确率。Bill 原始回复已明确引用 `billNos`，但其具体范围仍为 check；BQ 条件及首停重复节点正在按原始输入/回复调查，尚不能声称整体质量提高。截图119—121保留运行、早停及下载；未上传通信、未采用项目值或生成 Word。

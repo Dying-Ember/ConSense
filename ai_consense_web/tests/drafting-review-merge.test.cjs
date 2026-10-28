@@ -2,6 +2,7 @@ const assert = require('node:assert/strict')
 const path = require('node:path')
 const { loadTypeScript } = require('./helpers/load-typescript.cjs')
 const { createReviewReducer } = loadTypeScript(path.join(__dirname, '../src/drafting/source-review/reducer.js'), { globals: { structuredClone }, dependencies: { './value-dependencies.js': './value-dependencies.js' } })
+const { valueDependencies } = loadTypeScript(path.join(__dirname, '../src/drafting/source-review/value-dependencies.js'))
 const node = (id, kind = 'text') => ({ id, nameZh: id, nameEn: id, parentId: null, type: { kind }, role: { kind: 'input' }, docIds: ['41'], status: 'confirmed', options: [], sourceUnitIds: [], relatedInputIds: [], sourceAnchors: [], editTargets: [], evidence: [], targets: [], relations: [] })
 const base = () => ({ variables: [node('old'), node('keep'), { ...node('dependent'), editTargets: [{ id: 'target', valueSourceId: 'old', itemKey: 'old' }] }], requirements: [{ id: 'req', nodeIds: ['old', 'keep'], sourceQuote: 'Original guidance' }], sourceReviews: {}, events: [] })
 const reduce = createReviewReducer({ sources: [{ id: '41', fileKey: 'NTT', format: 'docx' }] }).reduce
@@ -229,5 +230,192 @@ for (const position of [0, 1]) {
   const reviewed = reduce(editorial, action)
   assert.notEqual(reviewed, editorial, 'Explicit human business classification enables the existing compatible merge')
   assert.equal(reviewed.variables[0].editorialSuggestion?.kind ?? reviewed.variables[1].editorialSuggestion?.kind, 'editorial', 'The original classification suggestion remains in the saved graph history')
+}
+const reviewedCatalog = { status: 'matched', confirmed: true, baselineKey: 'electronicTendering', baselineVersion: 'test', reason: 'Previously reviewed BQ issue-format definition' }
+const reviewedMerge = base(), donor = reviewedMerge.variables[0], primary = reviewedMerge.variables[1]
+donor.docIds = ['44']; donor.catalogAlignment = { status: 'unreviewed', confirmed: false }; donor.modelLocalId = 'n1'
+primary.catalogAlignment = structuredClone(reviewedCatalog); primary.currentDefinitionReference = { baselineKey: 'electronicTendering', sourceReferences: [{ sourceId: '41' }] }
+for (const [item, docId] of [[donor, '44'], [primary, '41']]) {
+  item.type = { kind: 'choice' }; item.options = [{ value: 'L10Pro', labelZh: '电子', labelEn: 'Electronic' }, { value: 'Hardcopy', labelZh: '纸质', labelEn: 'Hardcopy' }]
+  item.definitionReview = { confirmed: true, basis: 'old-' + item.id }
+  item.sourceAnchors = [1, 2, 3].map(index => ({ docId, text: item.id + ' source ' + index }))
+}
+const mergeWithSct = createReviewReducer({ sources: [{ id: '41', fileKey: 'NTT', format: 'docx' }, { id: '44', fileKey: 'SCT', format: 'docx' }] })
+const reviewedBefore = structuredClone(reviewedMerge), retained = mergeWithSct.mergeMany(reviewedMerge, ['old', 'keep'], 'keep').state
+assert.deepEqual(reviewedMerge, reviewedBefore, 'The source revision and original review receipts stay immutable')
+assert.deepEqual(retained.variables[1].catalogAlignment, reviewedCatalog, 'Explicit same-fact merging retains the chosen primary fixed identity')
+assert.deepEqual(retained.variables[1].type, primary.type); assert.deepEqual(retained.variables[1].options, primary.options, 'The retained BQ answer domain is unchanged')
+assert.equal(retained.variables[1].definitionReview, undefined, 'Added sources invalidate the old definition confirmation and its basis')
+assert.equal(retained.variables[1].sourceAnchors.length, 6)
+assert.deepEqual(Array.from(retained.variables[1].docIds), ['41', '44'])
+assert.deepEqual(retained.variables[1].currentDefinitionReference, primary.currentDefinitionReference)
+assert.equal(retained.variables[0].modelLocalId, 'n1'); assert.deepEqual(retained.variables[0].definitionReview, donor.definitionReview)
+assert.equal(retained.variables[0].status, 'excluded'); assert.equal(retained.variables[1].manual, true)
+assert.equal(retained.variables[2].editTargets[0].needsRebind, true, 'Catalog retention does not relax dependent range review')
+for (const mainAlignment of [undefined, { status: 'unreviewed', confirmed: false }, { ...reviewedCatalog, confirmed: false }]) {
+  const state = base(); state.variables[0].catalogAlignment = structuredClone(reviewedCatalog)
+  if (mainAlignment) state.variables[1].catalogAlignment = structuredClone(mainAlignment)
+  state.variables[1].definitionReview = { confirmed: true, basis: 'stale' }
+  const result = batchReducer.mergeMany(state, ['old', 'keep'], 'keep')
+  assert.equal(result.problem, null); assert.equal(result.state.variables[1].catalogAlignment.confirmed, false, 'An unreviewed primary never inherits the donor confirmation')
+  assert.equal(result.state.variables[1].definitionReview, undefined)
+}
+for (const values of [{ nameEn: 'Changed subject' }, { questionEn: 'A different independently answerable fact?' }, { questionZh: '不同业务事实？' }, { definitionScope: 'Different contractual scope' }, { unit: 'different-unit' }]) {
+  const state = base(); state.variables[1].catalogAlignment = structuredClone(reviewedCatalog); state.variables[0].catalogAlignment = structuredClone(reviewedCatalog)
+  const edited = reduce(state, { type: 'EDIT', id: 'keep', values })
+  assert.equal(edited.variables[1].catalogAlignment.confirmed, false, 'A changed primary core must first lose its old catalog confirmation')
+  const result = batchReducer.mergeMany(edited, ['old', 'keep'], 'keep')
+  assert.equal(result.problem, null); assert.equal(result.state.variables[1].catalogAlignment.confirmed, false, 'Merging a reviewed donor cannot restore a changed primary definition')
+}
+for (const kind of ['record', 'list']) {
+  const state = base(); state.variables[0].type.kind = state.variables[1].type.kind = kind; state.variables[1].catalogAlignment = structuredClone(reviewedCatalog)
+  state.variables[2].parentId = 'old'; state.variables[2].editTargets = []
+  const result = batchReducer.mergeMany(state, ['old', 'keep'], 'keep')
+  assert.equal(result.problem, null); assert.equal(result.state.variables[2].parentId, 'keep')
+  assert.equal(result.state.variables[1].catalogAlignment.confirmed, false, 'Merged detail membership requires baseline review; scalar identity retention must not cover record/list shapes')
+}
+const changedCondition = base(); changedCondition.variables[1].catalogAlignment = structuredClone(reviewedCatalog)
+changedCondition.variables[0].correction = { kind: 'rule', inputIds: ['dependent'], branches: [{ id: 'condition', mode: 'all', clauses: [{ inputId: 'dependent', operator: 'known' }] }] }
+const conditionMerge = batchReducer.mergeMany(changedCondition, ['old', 'keep'], 'keep')
+assert.equal(conditionMerge.problem, null); assert.equal(conditionMerge.state.variables[1].catalogAlignment.confirmed, false, 'A copied condition changes the retained definition prerequisites and still needs alignment review')
+const applicableBase = base()
+for (const item of applicableBase.variables.slice(0, 2)) item.catalogAlignment = structuredClone(reviewedCatalog)
+applicableBase.variables.push({ ...node('prerequisite', 'boolean'), catalogAlignment: { status: 'matched', confirmed: true, baselineKey: 'prerequisite', baselineVersion: 'test' } })
+const applicability = { kind: 'fixed_catalog', ruleVersion: 'test', targetBaselineKey: 'electronicTendering', bindingFingerprint: 'current-source-basis', mode: 'all', confirmed: true, reason: 'Compared the current template scope', clauses: [{ baselineKey: 'prerequisite', inputId: 'prerequisite', operator: 'eq', value: true }] }
+const setApplicability = (state, id, rule = applicability) => {
+  const result = reduce(state, { type: 'SET_FIXED_APPLICABILITY', id, applicability: rule })
+  assert.notEqual(result, state, 'Applicability fixtures must pass the real reviewer action guards')
+  assert.deepEqual(result.variables.find(item => item.id === id).applicability, rule)
+  return result
+}
+const donorApplicability = setApplicability(applicableBase, 'old'), primaryApplicability = setApplicability(applicableBase, 'keep')
+const conflictingApplicability = setApplicability(donorApplicability, 'keep', { ...applicability, clauses: [{ ...applicability.clauses[0], value: false }] })
+for (const state of [donorApplicability, primaryApplicability, conflictingApplicability]) {
+  const snapshot = structuredClone(state)
+  assert.equal(batchReducer.mergeProblem(state, 'old', 'keep').code, 'MERGE_APPLICABILITY_CONFLICT')
+  assert.equal(reduce(state, action), state, 'A single merge cannot drop or extend either variable applicability')
+  const result = batchReducer.mergeMany(state, ['old', 'keep'], 'keep')
+  assert.equal(result.problem.code, 'MERGE_APPLICABILITY_CONFLICT'); assert.equal(result.state, state)
+  assert.deepEqual(structuredClone(state), snapshot, 'Rejected applicability merges preserve both variables, conditions and confirmations')
+}
+const equivalentApplicability = Object.fromEntries(Object.entries(applicability).reverse())
+// Synthetic equal fingerprints cover structural comparison only; real source binding remains a server check.
+equivalentApplicability.clauses = applicability.clauses.map(clause => Object.fromEntries(Object.entries(clause).reverse()))
+const identicalApplicability = setApplicability(donorApplicability, 'keep', equivalentApplicability)
+identicalApplicability.variables[0].definitionReview = { confirmed: true, basis: 'donor-history' }
+identicalApplicability.variables[1].definitionReview = { confirmed: true, basis: 'primary-history' }
+const sameApplicability = batchReducer.mergeMany(identicalApplicability, ['old', 'keep'], 'keep')
+assert.equal(sameApplicability.problem, null, 'Identical applicability permits the existing same-fact merge independent of object key order')
+assert.equal(JSON.stringify(sameApplicability.state.variables[1].applicability), JSON.stringify(identicalApplicability.variables[1].applicability), 'The retained primary keeps its original applicability and serialization')
+assert.equal(sameApplicability.state.variables[1].catalogAlignment.confirmed, true)
+assert.equal(sameApplicability.state.variables[1].definitionReview, undefined, 'The expanded source cohort still requires a fresh definition review')
+assert.deepEqual(sameApplicability.state.variables[0].definitionReview, identicalApplicability.variables[0].definitionReview, 'The excluded donor keeps its history')
+const unreviewedApplicablePrimary = reduce(identicalApplicability, { type: 'EDIT', id: 'keep', values: { catalogAlignment: { ...reviewedCatalog, confirmed: false } } })
+const noInheritedApplicabilityReview = batchReducer.mergeMany(unreviewedApplicablePrimary, ['old', 'keep'], 'keep')
+assert.equal(noInheritedApplicabilityReview.problem, null)
+assert.equal(noInheritedApplicabilityReview.state.variables[1].catalogAlignment.confirmed, false, 'Equal conditions do not transfer the donor catalog confirmation')
+for (const primaryConfirmed of [false, true]) for (const externalStatus of ['confirmed', 'help', 'changed', 'pending']) {
+  const initial = base()
+  for (const item of initial.variables.slice(0, 2)) {
+    item.type = { kind: 'boolean' }; item.catalogAlignment = { status: 'matched', confirmed: item.id === 'old' || primaryConfirmed, baselineKey: 'twoEnvelopeTendering', baselineVersion: 'test' }
+  }
+  const external = initial.variables[2]
+  external.catalogAlignment = { status: 'matched', confirmed: true, baselineKey: 'otherTenderingArrangement', baselineVersion: 'test' }
+  external.sourceAnchors = [{ docId: '41', text: 'Original alternative tender procedure' }]; external.editTargets = [{ id: 'independent-target', docId: '41', text: 'Retained source treatment', action: 'check' }]
+  const externalRule = { ...applicability, targetBaselineKey: 'otherTenderingArrangement', bindingFingerprint: 'previous-source-proof', clauses: [{ baselineKey: 'twoEnvelopeTendering', inputId: 'old', operator: 'eq', value: false }] }
+  let reviewedExternal = setApplicability(initial, external.id, externalRule)
+  if (externalStatus === 'help') reviewedExternal = reduce(reviewedExternal, { type: 'HELP', id: external.id, reason: 'The original scope still needs clarification' })
+  if (externalStatus === 'changed') reviewedExternal = reduce(reviewedExternal, { type: 'EDIT', id: external.id, values: { nameEn: 'Revised alternative tender procedure' } })
+  if (externalStatus === 'confirmed') reviewedExternal = reduce(reviewedExternal, { type: 'REVIEW', id: external.id })
+  assert.equal(reviewedExternal.variables[2].status, externalStatus, 'The fixture establishes the external state through real review actions')
+  reviewedExternal.variables[2].definitionReview = { confirmed: true, basis: 'external-reviewed-before-merge' }
+  reviewedExternal.variables.push({ ...node('unrelated'), definitionReview: { confirmed: true, basis: 'unrelated-basis' } }, { ...structuredClone(reviewedExternal.variables[2]), id: 'archived-external', status: 'excluded', parentId: 'old', relatedInputIds: ['old'], correction: { kind: 'rule', inputIds: ['old'], branches: [{ id: 'historical', scopeId: 'old', clauses: [{ inputId: 'old', operator: 'known' }] }] }, editTargets: [{ id: 'historic-target', docId: '41', text: 'Original historical target', valueSourceId: 'old', listId: 'old', itemKey: 'old' }] })
+  const originalExternal = structuredClone(reviewedExternal.variables[2]), archived = structuredClone(reviewedExternal.variables.at(-1)), untouched = structuredClone(reviewedExternal.variables.at(-2)), snapshot = structuredClone(reviewedExternal)
+  assert.ok(valueDependencies(reviewedExternal).some(edge => edge.kind === 'applicability' && edge.from === 'old' && edge.to === external.id))
+  const result = batchReducer.mergeMany(reviewedExternal, ['old', 'keep'], 'keep')
+  assert.equal(result.problem, null)
+  const after = result.state.variables.find(item => item.id === external.id)
+  assert.deepEqual(structuredClone(after.applicability.clauses), [{ ...externalRule.clauses[0], inputId: 'keep' }], 'The external condition keeps its value and meaning while referencing the retained variable')
+  assert.equal(after.applicability.confirmed, false); assert.equal(after.applicability.bindingFingerprint, undefined); assert.equal(after.definitionReview, undefined); assert.equal(after.status, externalStatus === 'confirmed' ? 'pending' : externalStatus)
+  assert.equal(after.reason, originalExternal.reason, 'Migrating applicability does not hide an existing request for help or its reason')
+  assert.equal(after.applicability.reason, externalRule.reason); assert.deepEqual(after.sourceAnchors, originalExternal.sourceAnchors); assert.deepEqual(after.editTargets, originalExternal.editTargets)
+  assert.ok(valueDependencies(result.state).some(edge => edge.kind === 'applicability' && edge.from === 'keep' && edge.to === external.id), 'The pending applicability relationship remains visible after merging')
+  assert.equal(valueDependencies(result.state).some(edge => edge.from === 'old'), false)
+  assert.deepEqual(structuredClone(result.state.variables.find(item => item.id === archived.id)), archived, 'Excluded historical conditions are not rewritten')
+  assert.deepEqual(structuredClone(result.state.variables.find(item => item.id === untouched.id)), untouched, 'Unrelated confirmations remain current')
+  assert.deepEqual(structuredClone(reviewedExternal), snapshot, 'The original graph and source evidence remain immutable')
+  const main = result.state.variables.find(item => item.id === 'keep')
+  assert.equal(main.catalogAlignment.confirmed, primaryConfirmed, 'Remapping an external reference never inherits donor alignment')
+  const realigned = reduce(result.state, { type: 'EDIT', id: 'keep', values: { catalogAlignment: { ...main.catalogAlignment, confirmed: true } } })
+  const primaryReviewed = reduce(realigned, { type: 'CONFIRM_DEFINITION', id: 'keep' })
+  assert.notEqual(primaryReviewed, realigned); assert.equal(primaryReviewed.variables.find(item => item.id === 'keep').definitionReview.confirmed, true, 'The fixture actually reconfirms the retained primary')
+  const stillPending = primaryReviewed.variables.find(item => item.id === external.id)
+  assert.equal(stillPending.applicability.confirmed, false); assert.equal(stillPending.applicability.bindingFingerprint, undefined); assert.equal(stillPending.definitionReview, undefined, 'Confirming the primary cannot silently restore an external condition basis')
+  assert.equal(reduce(primaryReviewed, { type: 'SET_FIXED_APPLICABILITY', id: external.id, applicability: { ...externalRule, clauses: [{ ...externalRule.clauses[0], inputId: 'keep' }] } }), primaryReviewed, 'The existing condition cannot be overwritten without a separate explicit review')
+}
+const donorHistory = base()
+donorHistory.variables[0].relatedInputIds = ['old', 'dependent']
+donorHistory.variables[0].editTargets = [{ id: 'donor-own-target', docId: '41', text: 'Donor original target', action: 'fill', valueSourceId: 'old' }]
+donorHistory.variables.push({ ...node('active-child'), parentId: 'old', relatedInputIds: ['old'], correction: { kind: 'rule', inputIds: ['old'], branches: [{ id: 'active-branch', scopeId: 'old', clauses: [{ inputId: 'old', operator: 'known' }] }] }, editTargets: [{ id: 'active-target', docId: '41', valueSourceId: 'old', listId: 'old', itemKey: 'old' }] })
+const donorHistorySnapshot = structuredClone(donorHistory), preservedDonor = structuredClone(donorHistory.variables[0])
+const remappedHistory = batchReducer.mergeMany(donorHistory, ['old', 'keep'], 'keep')
+assert.equal(remappedHistory.problem, null)
+const archivedDonor = remappedHistory.state.variables[0], retainedHistory = remappedHistory.state.variables[1], activeChild = remappedHistory.state.variables.at(-1)
+assert.deepEqual(structuredClone(archivedDonor), { ...preservedDonor, status: 'excluded', replacedBy: ['keep'], reason: '人工合并 / Merged during review' }, 'The newly excluded donor retains its original references and targets')
+assert.equal(archivedDonor.editTargets[0].valueSourceId, 'old'); assert.equal(retainedHistory.editTargets[0].valueSourceId, 'keep'); assert.notEqual(archivedDonor.editTargets[0], retainedHistory.editTargets[0], 'The active target is a copy, so remapping it cannot rewrite donor history')
+assert.equal(activeChild.parentId, 'keep'); assert.deepEqual(Array.from(activeChild.relatedInputIds), ['keep']); assert.deepEqual(Array.from(activeChild.correction.inputIds), ['keep'])
+assert.equal(activeChild.correction.branches[0].scopeId, 'keep'); assert.equal(activeChild.correction.branches[0].clauses[0].inputId, 'keep')
+for (const key of ['valueSourceId', 'listId', 'itemKey']) assert.equal(activeChild.editTargets[0][key], 'keep')
+assert.equal(activeChild.editTargets[0].needsRebind, true); assert.equal(activeChild.status, 'help', 'Active item matching still requires review after remapping')
+assert.deepEqual(donorHistory, donorHistorySnapshot, 'Remapping active copies leaves the original revision intact')
+for (const [mainDoc, donorDoc] of [['42', '43'], ['43', '42']]) {
+  const state = structuredClone(reviewedMerge); state.variables[1].docIds = [mainDoc]; state.variables[0].docIds = [donorDoc]
+  state.variables[1].sourceAnchors = [{ docId: mainDoc, text: 'Primary SCC source' }]; state.variables[0].sourceAnchors = [{ docId: donorDoc, text: 'Other SCC edition' }]
+  if (mainDoc === '43') state.variables[1].pdfReferenceAlignment = { confirmed: true, sourceSha256: 'pdf-edition' }
+  const snapshot = structuredClone(state), result = editionReducer.mergeMany(state, ['old', 'keep'], 'keep')
+  assert.equal(result.problem.code, 'MERGE_SOURCE_EDITION_CONFLICT'); assert.equal(result.state, state); assert.deepEqual(state, snapshot, 'Existing catalog or PDF review never permits merging SCC editions')
+}
+const reordered = structuredClone(reviewedMerge); reordered.variables[1].type = { kind: 'choice', zh: '单选', en: 'Choice' }; reordered.variables[1].role = { kind: 'input', zh: '变量' }
+const reorderedOptions = reordered.variables[1].options.map(option => ({ labelEn: option.labelEn, labelZh: option.labelZh, value: option.value }))
+const equivalentValues = { type: { en: 'Choice', zh: '单选', kind: 'choice' }, role: { zh: '变量', kind: 'input' }, options: reorderedOptions }, equivalentValuesJson = JSON.stringify(equivalentValues), reorderedJson = JSON.stringify(reordered)
+const equivalentEdit = reduce(reordered, { type: 'EDIT', id: 'keep', values: equivalentValues })
+assert.equal(equivalentEdit.variables[1].catalogAlignment.confirmed, true, 'Object key order does not change the reviewed definition')
+assert.deepEqual(equivalentEdit.variables[1].definitionReview, reordered.variables[1].definitionReview)
+for (const key of ['type', 'role', 'options']) assert.equal(JSON.stringify(equivalentEdit.variables[1][key]), JSON.stringify(reordered.variables[1][key]), 'Equivalent EDIT values preserve the saved serialization used by the backend basis: ' + key)
+assert.equal(JSON.stringify(equivalentValues), equivalentValuesJson, 'EDIT does not reorder its action input'); assert.equal(JSON.stringify(reordered), reorderedJson, 'EDIT does not rewrite the prior saved state')
+assert.equal(equivalentEdit.variables[2].editTargets[0].needsRebind, undefined, 'Reordered option keys do not invalidate dependent ranges')
+const equivalentMerge = mergeWithSct.mergeMany(equivalentEdit, ['old', 'keep'], 'keep')
+assert.equal(equivalentMerge.problem, null); assert.equal(equivalentMerge.state.variables[1].catalogAlignment.confirmed, true, 'Equivalent option objects remain merge-compatible')
+for (const values of [{ options: [...reorderedOptions].reverse() }, { options: reorderedOptions.map((option, index) => index ? option : { ...option, value: 'Different value' }) }, { questionEn: 'A different question' }]) {
+  const changed = reduce(reordered, { type: 'EDIT', id: 'keep', values })
+  assert.equal(changed.variables[1].catalogAlignment.confirmed, false, 'Array order and actual content changes remain significant')
+  assert.equal(changed.variables[1].definitionReview, undefined, 'A changed definition cannot retain its old review basis')
+}
+for (const alignment of [undefined, { status: 'new', confirmed: true, reason: 'Local fact' }, reviewedCatalog]) {
+  const state = base(), main = state.variables[1]; main.definitionReview = { confirmed: true, basis: 'before-link' }; main.sourceAnchors = [{ docId: '41', text: 'Original proof' }]
+  if (alignment) main.catalogAlignment = structuredClone(alignment)
+  const linked = reduce(state, { type: 'LINK', id: 'keep', anchor: { docId: '41', text: 'Additional current proof' } })
+  assert.equal(linked.variables[1].definitionReview, undefined); assert.deepEqual(linked.variables[1].catalogAlignment, main.catalogAlignment, 'Adding proof changes the cohort, not its fixed identity')
+  const unlinked = reduce(state, { type: 'UNLINK', id: 'keep', index: 0 })
+  assert.equal(unlinked.variables[1].definitionReview, undefined); assert.deepEqual(unlinked.variables[1].catalogAlignment, main.catalogAlignment)
+  assert.equal(state.variables[1].definitionReview.basis, 'before-link', 'Original source-review receipts remain unchanged')
+}
+const targetScope = base(); targetScope.variables[1].definitionReview = { confirmed: true, basis: 'same-documents' }
+const sameDocumentTarget = mergeWithSct.reduce(targetScope, { type: 'TARGETS', id: 'keep', targets: [{ id: 't1', docId: '41', action: 'check' }] })
+assert.deepEqual(sameDocumentTarget.variables[1].definitionReview, targetScope.variables[1].definitionReview, 'A range-only edit does not pretend that the variable definition changed')
+const newDocumentTarget = mergeWithSct.reduce(targetScope, { type: 'TARGETS', id: 'keep', targets: [{ id: 't2', docId: '44', action: 'check' }] })
+assert.equal(newDocumentTarget.variables[1].definitionReview, undefined, 'Adding a document changes the manual definition source basis')
+for (const alignment of [undefined, { status: 'new', confirmed: true, reason: 'Local fact' }, reviewedCatalog]) {
+  const state = base(), main = state.variables[1]
+  main.definitionOrigin = { kind: 'manual', reason: 'Original definition evidence' }; main.definitionReview = { confirmed: true, basis: 'before-origin-edit' }
+  main.editorialReview = { kind: 'business_value', confirmed: true }
+  if (alignment) main.catalogAlignment = structuredClone(alignment)
+  const equivalent = reduce(state, { type: 'EDIT', id: 'keep', values: { definitionOrigin: { reason: 'Original definition evidence', kind: 'manual' }, editorialReview: { confirmed: true, kind: 'business_value' } } })
+  assert.deepEqual(equivalent.variables[1].definitionReview, main.definitionReview, 'Equivalent origin and editorial objects retain the review regardless of key order')
+  for (const key of ['definitionOrigin', 'editorialReview']) assert.equal(JSON.stringify(equivalent.variables[1][key]), JSON.stringify(main[key]), 'Equivalent review evidence preserves its backend basis serialization: ' + key)
+  const changed = reduce(equivalent, { type: 'EDIT', id: 'keep', values: { definitionOrigin: { kind: 'manual', reason: 'Different definition evidence' } } })
+  assert.equal(changed.variables[1].definitionReview, undefined, 'Changing manual definition evidence invalidates its saved definition basis')
+  assert.deepEqual(changed.variables[1].catalogAlignment, main.catalogAlignment, 'A definition evidence edit does not revoke an unchanged fixed identity')
+  assert.deepEqual(main.definitionReview, { confirmed: true, basis: 'before-origin-edit' }, 'The previous review receipt remains immutable')
 }
 console.log('PASS: existing single-merge guards and source history; explicit three-question batch; atomic rollback, accumulated-rule conflicts and invalid selections')

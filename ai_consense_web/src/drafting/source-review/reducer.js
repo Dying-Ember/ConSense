@@ -17,9 +17,19 @@ function standardBooleanOptions(options) {
 }
 
 function sameAnswerOptions(a, b) {
-  return JSON.stringify(a.options || []) === JSON.stringify(b.options || []) ||
+  return sameCoreValue(a.options || [], b.options || []) ||
     a.type.kind === 'boolean' && b.type.kind === 'boolean' && standardBooleanOptions(a.options) && standardBooleanOptions(b.options);
 }
+
+function sameCoreValue(a, b) {
+  if(a===b)return true;
+  if(a==null||b==null||typeof a!=='object'||typeof b!=='object')return false;
+  if(Array.isArray(a)||Array.isArray(b))return Array.isArray(a)&&Array.isArray(b)&&a.length===b.length&&a.every((value,index)=>sameCoreValue(value,b[index]));
+  if(Object.prototype.toString.call(a)!=='[object Object]'||Object.prototype.toString.call(b)!=='[object Object]')return false;
+  const keys=Object.keys(a);return keys.length===Object.keys(b).length&&keys.every(key=>Object.prototype.hasOwnProperty.call(b,key)&&sameCoreValue(a[key],b[key]));
+}
+const catalogCoreKeys = ['parentId','nameZh','nameEn','questionZh','questionEn','type','role','optional','options','unit','fixedValue','definitionScope'];
+const catalogCore = node => [catalogCoreKeys.map(key=>node[key]), ['status','baselineKey','baselineVersion','scope'].map(key=>node.catalogAlignment?.[key]), node.correction??null, node.applicability??null];
 
 export function createReviewReducer(data) {
   const copy = value => structuredClone(value);
@@ -51,28 +61,37 @@ export function createReviewReducer(data) {
   }
   function mergeInto(s, id, targetId) {
     const v=s.variables.find(x=>x.id===id),other=s.variables.find(x=>x.id===targetId);
+    const retainedAlignment=!['record','list'].includes(other.type.kind)&&other.catalogAlignment?.status==='matched'&&other.catalogAlignment?.confirmed===true&&other.catalogAlignment.baselineKey&&other.catalogAlignment.baselineVersion?copy(other.catalogAlignment):null,retainedCore=retainedAlignment?copy(catalogCore(other)):null;
     v.status='excluded';v.replacedBy=[other.id];v.reason='人工合并 / Merged during review';
     other.docIds=[...new Set([...other.docIds,...v.docIds])];
     other.sourceUnitIds=[...new Set([...(other.sourceUnitIds||[]),...(v.sourceUnitIds||[])])];
     other.evidence=[...other.evidence,...v.evidence].filter((x,i,a)=>a.findIndex(y=>y.docId===x.docId&&y.quote===x.quote)===i);
     other.targets=[...other.targets,...v.targets].filter((x,i,a)=>a.findIndex(y=>y.docId===x.docId&&y.labelZh===x.labelZh)===i);
     other.sourceAnchors=[...(other.sourceAnchors||[]),...(v.sourceAnchors||[])];
-    other.editTargets=[...(other.editTargets||[]),...(v.editTargets||[])];
+    other.editTargets=[...(other.editTargets||[]),...copy(v.editTargets||[])];
     other.relatedInputIds=[...new Set([...(other.relatedInputIds||[]),...(v.relatedInputIds||[])])];
     other.relations=[...other.relations,...v.relations].filter((x,i,a)=>a.findIndex(y=>JSON.stringify(x)===JSON.stringify(y))===i);
     if(!other.correction&&v.correction)other.correction=copy(v.correction);
     if(other.catalogAlignment||v.catalogAlignment)other.catalogAlignment={...copy(other.catalogAlignment||v.catalogAlignment),confirmed:false};
+    delete other.definitionReview;
     if(v.role.kind==='fixed'&&other.role.kind!=='fixed'){other.role=copy(v.role);other.fixedValue=v.fixedValue;}
     other.status='changed';other.manual=true;
     for (const x of s.variables) {
+      if(x.status==='excluded')continue;
       if(x.parentId===v.id){x.parentId=other.id;if(x.status==='confirmed')x.status='pending';}
       x.relatedInputIds=[...new Set((x.relatedInputIds||[]).map(id=>id===v.id?other.id:id))].filter(id=>id!==x.id);
+      if(x.id!==other.id&&(x.applicability?.clauses||[]).some(clause=>clause.inputId===v.id)){
+        x.applicability.clauses=x.applicability.clauses.map(clause=>clause.inputId===v.id?{...clause,inputId:other.id}:clause);
+        x.applicability.confirmed=false;delete x.applicability.bindingFingerprint;delete x.definitionReview;if(x.status==='confirmed')x.status='pending';
+      }
       if(x.correction?.inputIds) x.correction.inputIds=[...new Set(x.correction.inputIds.map(id=>id===v.id?other.id:id))];
       if(x.correction?.branches)for(const branch of x.correction.branches){branch.clauses=branch.clauses.map(c=>({...c,inputId:c.inputId===v.id?other.id:c.inputId}));if(branch.scopeId===v.id)branch.scopeId=other.id;}
       else if(x.correction?.clauses)x.correction.clauses=x.correction.clauses.map(c=>({...c,inputId:c.inputId===v.id?other.id:c.inputId}));
       for(const target of x.editTargets||[]){if(target.valueSourceId===v.id)target.valueSourceId=other.id;if(target.listId===v.id)target.listId=other.id;if(target.itemKey===v.id){target.itemKey=other.id;target.needsRebind=true;x.status='help';}}
     }
     for(const requirement of s.requirements||[])requirement.nodeIds=[...new Set((requirement.nodeIds||[]).map(id=>id===v.id?other.id:id))];
+    // Scalar identity can survive added evidence; record/list membership and the expanded cohort still need review.
+    if(retainedAlignment&&sameCoreValue(retainedCore,catalogCore(other)))other.catalogAlignment=retainedAlignment;
   }
   function mergeProblem(state, id, targetId) {
     const v=state.variables.find(x=>x.id===id),other=state.variables.find(x=>x.id===targetId);
@@ -90,6 +109,7 @@ export function createReviewReducer(data) {
     if(Boolean(v.optional)!==Boolean(other.optional))return problem('MERGE_OPTIONAL_MISMATCH');
     if(!sameAnswerOptions(v,other))return problem('MERGE_OPTIONS_MISMATCH');
     if(v.role.kind==='fixed'&&v.fixedValue!==other.fixedValue)return problem('MERGE_FIXED_VALUE_MISMATCH');
+    if(!sameCoreValue(v.applicability??null,other.applicability??null))return problem('MERGE_APPLICABILITY_CONFLICT');
     const emptyUnresolved=c=>c?.kind==='rule'&&c.needsRebind===true&&Array.isArray(c.branches)&&!c.branches.length&&Array.isArray(c.inputIds)&&!c.inputIds.length&&Object.keys(c).every(key=>['kind','needsRebind','branches','inputIds'].includes(key));
     if(v.correction&&other.correction&&!(emptyUnresolved(v.correction)&&emptyUnresolved(other.correction)))return problem('MERGE_RULE_CONFLICT');
     if(!compatible(other,v))return problem('MERGE_SOURCE_EDITION_CONFLICT');
@@ -145,12 +165,14 @@ export function createReviewReducer(data) {
       s.variables=[];s.sourceReviews={};s.events=[];s.nextId=1;s.blank=true;s.guidanceMode=action.guidanceMode||'empty';
       event('已从空白开始核对','Started an empty review');
     } else if (action.type === 'EDIT') {
+      const changedValues=Object.fromEntries(Object.entries(action.values).filter(([key,value])=>!sameCoreValue(value,v[key])));
       const classificationOriginal=action.values.role?.kind==='verification'&&v.role?.kind!=='verification'?copy(v):null;
+      const definitionChanged=catalogCoreKeys.some(key=>action.values[key]!==undefined&&!sameCoreValue(action.values[key],v[key]));
       revisit(v.id);
-      if(action.values.editorialReview || action.values.role && action.values.role.kind!==v.role.kind)delete v.definitionReview;
+      if(definitionChanged||['editorialReview','catalogAlignment','definitionOrigin'].some(key=>action.values[key]!==undefined&&!sameCoreValue(action.values[key],v[key])))delete v.definitionReview;
       const before = [v.nameZh,v.nameEn,v.type.zh,v.role.zh].join(' · ');
-      const ownAnswerChanged=(action.values.type&&(action.values.type.kind!==v.type.kind||(action.values.type.unit||'')!==(v.type.unit||'')))||(action.values.options&&JSON.stringify(action.values.options)!==JSON.stringify(v.options||[]));
-      if(!action.values.catalogAlignment&&v.catalogAlignment?.confirmed&&['nameZh','nameEn','type','options','optional','parentId','definitionScope'].some(key=>action.values[key]!==undefined&&JSON.stringify(action.values[key])!==JSON.stringify(v[key])))v.catalogAlignment={...v.catalogAlignment,confirmed:false};
+      const ownAnswerChanged=(action.values.type&&(action.values.type.kind!==v.type.kind||(action.values.type.unit||'')!==(v.type.unit||'')))||(action.values.options&&!sameCoreValue(action.values.options,v.options||[]));
+      if(!action.values.catalogAlignment&&v.catalogAlignment?.confirmed&&definitionChanged)v.catalogAlignment={...v.catalogAlignment,confirmed:false};
       if(action.values.parentId!==undefined&&action.values.parentId!==v.parentId){
         const moved=new Set([v.id]);let changed=true;
         while(changed){changed=false;for(const x of s.variables)if(moved.has(x.parentId)&&!moved.has(x.id)){moved.add(x.id);changed=true;}}
@@ -186,7 +208,7 @@ export function createReviewReducer(data) {
         const parent=find(v.parentId);if(parent?.catalogAlignment?.confirmed)parent.catalogAlignment={...parent.catalogAlignment,confirmed:false};
       }
       if(ownAnswerChanged||action.values.role?.kind==='fixed'||noLongerValue)for(const x of s.variables){if(x.status!=='excluded'&&x.correction&&correctionInputs(x.correction).includes(v.id)){x.correction.needsRebind=true;x.status='help';}}
-      Object.assign(v,action.values,{status:'changed',manual:true});
+      Object.assign(v,changedValues,{status:'changed',manual:true});
       if(classification){classification.classifiedRole=copy(v.role);classification.classifiedAlignment=copy(v.catalogAlignment??null);}
       if(noLongerValue)for(const x of s.variables)if(x.status!=='excluded'){
         if(x.correction&&correctionInputs(x.correction).includes(v.id)){x.correction={kind:'rule',needsRebind:true,branches:[],inputIds:[],supersededCorrection:copy(x.correction)};x.status='help';}
@@ -271,19 +293,19 @@ export function createReviewReducer(data) {
       event('补充了一个遗漏的问题','Added a missing question',[action.values.nameZh,action.reason]);
     } else if (action.type === 'LINK') {
       if(!compatible(v,{docIds:[action.anchor.docId]})||!canShareSources(old,v,[action.anchor.docId]))return old;
-      revisit(v.id);v.sourceAnchors=[...(v.sourceAnchors||[]),action.anchor];v.status='changed';v.manual=true;v.missingSource=false;
+      revisit(v.id);delete v.definitionReview;v.sourceAnchors=[...(v.sourceAnchors||[]),action.anchor];v.status='changed';v.manual=true;v.missingSource=false;
       v.docIds=[...new Set([...v.docIds,action.anchor.docId])];
       v.evidence.push({docId:action.anchor.docId,locationZh:`原文段落`,locationEn:`Source passage`,quote:action.anchor.text});
       event('重新关联了原文','Linked a source passage',[v.nameZh,action.anchor.text]);
     } else if (action.type === 'UNLINK') {
       const removed=v.sourceAnchors?.[action.index];if(!removed)return old;
-      revisit(v.id);v.sourceAnchors.splice(action.index,1);v.manual=true;v.status='changed';
+      revisit(v.id);delete v.definitionReview;v.sourceAnchors.splice(action.index,1);v.manual=true;v.status='changed';
       v.evidence=v.evidence.filter(e=>e.docId!==removed.docId||e.quote!==removed.text||v.sourceAnchors.some(a=>a.docId===e.docId&&a.text===e.quote));
       v.missingSource=!v.sourceAnchors.length&&!v.sourceUnitIds?.length;
       event('移除了关联错误的原文，仍保留在调整记录中','Removed an incorrect source link; retained it in the change history',[v.nameZh,removed.docId,removed.text]);
     } else if (action.type === 'TARGETS') {
       const docs=[...new Set([...v.docIds,...action.targets.map(t=>t.docId)])];
-      if(!canShareSources(old,v,docs))return old;v.docIds=docs;
+      if(!canShareSources(old,v,docs))return old;if(!sameCoreValue(v.docIds,docs))delete v.definitionReview;v.docIds=docs;
       revisit(v.id);v.editTargets=action.targets;v.status='changed';v.manual=true;
       if(!isolatedSources(s))return old;
       event('调整了需要修改的原文位置','Changed the text to be amended',[v.nameZh,`${action.targets.length} 处 / passages`]);

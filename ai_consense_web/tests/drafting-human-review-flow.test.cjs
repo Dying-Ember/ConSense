@@ -27,10 +27,11 @@ const api = {
   inputs: async () => [{ id: 42, status: 'PARSED', fileName: correspondence.fileName }], documents: async () => [], extractTrace: async () => null,
   plan: async (_id, values) => { plans.push(values); return { actions: [], unresolved: workingDraftMode ? [{kind: 'InputMissing', inputKeys: ['contractTitle'], message: label('Missing identity')}] : [] } },
   reviewHead: async () => ({ currentRevisionId: current?.id ?? null, draftRevisionId: draft?.id ?? null, current: copy(current ?? null), draft: copy(draft ?? null), sources: [source, correspondence] }),
+  reviewSources: async () => copy([source, correspondence]),
   automationLatest: async () => null,
   reviewRevision: async (_id, revisionId) => { assert.equal(revisionId, draft.id); return copy(draft) },
   automationStart: async (_id, binding, profile) => {
-    calls.push('automation'); assert.deepEqual(copy(binding), { expectedCurrentRevisionId: null, expectedDraftRevisionId: null }); assert.ok(profile)
+    calls.push('automation'); assert.deepEqual(copy(binding), { expectedCurrentRevisionId: null, expectedDraftRevisionId: null, sourceIds: ['41'] }); assert.ok(profile)
     draft = saveRevision(graph); candidateRun = 'run-TEST'; candidate = { value: 'Unadopted source candidate', sourceDocumentId: 42, fileName: correspondence.fileName, sourceHash: 'logical-TEST', sourceQuote: 'TEST ONLY exact evidence', reason: 'TEST ONLY candidate reason', confidence: .8, graphRevisionId: draft.id, fieldDefinitionHash: 'definition-TEST', extractionRunId: candidateRun, originalSha256: correspondence.sourceSha256 }
     return { id: 'automation-TEST', projectId: _id, status: 'COMPLETED', phase: 'READY_FOR_REVIEW', message: 'TEST task finished', currentFile: null, completedItems: 1, totalItems: 1, failedItems: 0, unresolvedItems: 1, requirementsCount: 1, nodesCount: 1, resultRevisionId: draft.id, updatedAt: '2026-10-22T10:00:00Z' }
   },
@@ -64,6 +65,9 @@ const title = async label => { const node = find(host.root, node => node.tag ===
   assert.doesNotMatch(text(host.root), /2 Identify|Next: identify requirements/)
   assert.deepEqual(calls, [], 'Opening merged sources never starts discovery or extraction')
   assert.equal(control('data-discovery-budget'), undefined, 'Users do not manage model batches')
+  assert.ok(control('data-automation-source-id', '41'), 'The template original is available to this identification')
+  assert.equal(control('data-automation-source-id', '42'), undefined, 'Project correspondence is not selected as a template original')
+  assert.equal(control('data-start-automation').props.disabled, false, 'The explicit source list must finish loading before starting identification')
   await click('data-start-automation')
   assert.deepEqual(calls, ['automation']); assert.equal(patches.length, 0)
   await title('3 Adopt and plan')

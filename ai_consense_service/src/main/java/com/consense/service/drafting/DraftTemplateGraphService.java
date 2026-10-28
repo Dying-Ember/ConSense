@@ -686,9 +686,8 @@ public class DraftTemplateGraphService {
         for(Object child:list(field.get("children")))stampDefinitionReview(asMap(child),nodes);
     }
     private void prepareSelectedDefinition(Map<String,Object> field,Map<String,Map<String,Object>> nodes){
-        Map<String,Object> review=asMap(field.get("definitionReview")),alignment=asMap(field.get("catalogAlignment"));
-        if(!Boolean.TRUE.equals(review.get("confirmed"))||!Objects.equals(review.get("basis"),definitionBasis(field))){
-            if(!"matched".equals(alignment.get("status"))||!Boolean.TRUE.equals(alignment.get("confirmed")))throw new BizException(4007,"GRAPH_DEFINITION_REVIEW_REQUIRED: "+id(field)+" · 请确认变量定义或固定变量对应后保存。 / Confirm and save the variable definition or its baseline match.");
+        if(!definitionReviewCurrent(field)){
+            if(!definitionMatchConfirmed(field))throw new BizException(4007,"GRAPH_DEFINITION_REVIEW_REQUIRED: "+id(field)+" · 请确认变量定义或固定变量对应后保存。 / Confirm and save the variable definition or its baseline match.");
             Map<String,Object> node=nodes.get(id(field));if(node==null)throw new BizException(4007,"GRAPH_DEFINITION_SELECTION_INVALID");node.put("definitionReview",map("confirmed",true,"basis",null));
         }
         for(Object child:list(field.get("children")))prepareSelectedDefinition(asMap(child),nodes);
@@ -784,16 +783,37 @@ public class DraftTemplateGraphService {
         Map<String,Object> stored=asMap(state(graph).get("definitionGraphReview")),scopes=asMap(stored.get("fieldScopes"));
         String wholeFingerprint=Boolean.TRUE.equals(stored.get("confirmed"))?definitionGraphFingerprint(graph):null;
         boolean whole="CONFIRMED".equals(revision.getStatus())||wholeFingerprint!=null&&wholeFingerprint.equals(stored.get("fingerprint"));
-        List<Object> confirmedFields=new ArrayList<>(),pendingFields=new ArrayList<>(),fixedCandidates=new ArrayList<>();
+        List<Object> confirmedFields=new ArrayList<>(),pendingFields=new ArrayList<>(),fixedCandidates=new ArrayList<>(),currentDefinitionReviews=new ArrayList<>(),groupReadyFields=new ArrayList<>();
         for(Map<String,Object> field:DraftReviewGraph.fields(graph)){
-            String key=id(field);boolean accepted=whole||scopes.containsKey(key)&&definitionReviewsCurrent(field)&&Objects.equals(scopes.get(key),definitionScopeFingerprint(graph,field));
+            String key=id(field);boolean exactCandidate=!stale&&DraftFixedBaseline.exactSource(graph,field),candidate=exactCandidate||!stale&&DraftKnownRootReview.candidate(graph,field);
+            DefinitionReviewStatus review=stale?new DefinitionReviewStatus(false,false):definitionReviewsCurrent(graph,field,candidate?field:null,exactCandidate);
+            if(review.current)currentDefinitionReviews.add(key);if(review.ready)groupReadyFields.add(key);
+            boolean accepted=whole||scopes.containsKey(key)&&review.current&&Objects.equals(scopes.get(key),definitionScopeFingerprint(graph,field));
             (accepted&&!stale?confirmedFields:pendingFields).add(key);
-            if(!stale&&(DraftFixedBaseline.exactSource(graph,field)||DraftKnownRootReview.candidate(graph,field)))fixedCandidates.add(key);
+            if(candidate)fixedCandidates.add(key);
         }
         boolean confirmed="CONFIRMED".equals(revision.getStatus())||Boolean.TRUE.equals(stored.get("confirmed"))||!scopes.isEmpty();
-        return map("confirmed",confirmed,"valid",!stale&&(whole||!confirmedFields.isEmpty()),"confirmedFieldIds",confirmedFields,"pendingFieldIds",pendingFields,"fixedCandidateFieldIds",fixedCandidates,"baselineReuseSupported",templateBaselines!=null&&templateBaselineSources!=null,"completeBaselineReuseSupported",templateBaselines!=null&&templateBaselineSources!=null,"reason",stored.get("reason"),"confirmedAt",stored.get("confirmedAt"),"unresolvedRelationCount",unresolvedGraphRelations(graph));
+        return map("confirmed",confirmed,"valid",!stale&&(whole||!confirmedFields.isEmpty()),"confirmedFieldIds",confirmedFields,"pendingFieldIds",pendingFields,"fixedCandidateFieldIds",fixedCandidates,"currentDefinitionReviewFieldIds",currentDefinitionReviews,"definitionGroupReadyFieldIds",groupReadyFields,"baselineReuseSupported",templateBaselines!=null&&templateBaselineSources!=null,"completeBaselineReuseSupported",templateBaselines!=null&&templateBaselineSources!=null,"reason",stored.get("reason"),"confirmedAt",stored.get("confirmedAt"),"unresolvedRelationCount",unresolvedGraphRelations(graph));
     }
-    private boolean definitionReviewsCurrent(Map<String,Object> field){Map<String,Object> review=asMap(field.get("definitionReview"));if(!Boolean.TRUE.equals(review.get("confirmed"))||!Objects.equals(review.get("basis"),definitionBasis(field)))return false;for(Object child:list(field.get("children")))if(!definitionReviewsCurrent(asMap(child)))return false;return true;}
+    private boolean definitionReviewCurrent(Map<String,Object> field){Map<String,Object> review=asMap(field.get("definitionReview"));return Boolean.TRUE.equals(review.get("confirmed"))&&Objects.equals(review.get("basis"),definitionBasis(field));}
+    private boolean definitionMatchConfirmed(Map<String,Object> field){Map<String,Object> alignment=asMap(field.get("catalogAlignment"));return "matched".equals(alignment.get("status"))&&Boolean.TRUE.equals(alignment.get("confirmed"));}
+    /** Read preparation hints only; the explicit confirmation still validates source proofs and dependencies. */
+    private DefinitionReviewStatus definitionReviewsCurrent(Map<String,Object> graph,Map<String,Object> field,Map<String,Object> candidateRoot,boolean exactCandidate){
+        boolean current=definitionReviewCurrent(field),ready=current||definitionMatchConfirmed(field)||candidatePreparedField(graph,field,candidateRoot,exactCandidate);
+        if(current||ready)for(Object child:list(field.get("children"))){DefinitionReviewStatus status=definitionReviewsCurrent(graph,asMap(child),candidateRoot,exactCandidate);current&=status.current;ready&=status.ready;if(!current&&!ready)break;}
+        return new DefinitionReviewStatus(current,ready);
+    }
+    private boolean candidatePreparedField(Map<String,Object> graph,Map<String,Object> field,Map<String,Object> root,boolean exactCandidate){
+        if(root==null)return false;if(Objects.equals(id(field),id(root)))return true;
+        String key=string(asMap(field.get("catalogAlignment")).get("baselineKey")),rootKey=string(asMap(root.get("catalogAlignment")).get("baselineKey"));
+        if(key==null||rootKey==null||!key.startsWith(rootKey+"."))return false;
+        if(exactCandidate)return DraftFixedBaseline.exactSource(graph,field);
+        Map<String,Object> child=new LinkedHashMap<>(field);child.remove("parentId");return DraftKnownRootReview.candidate(graph,child);
+    }
+    private static final class DefinitionReviewStatus {
+        final boolean current,ready;
+        DefinitionReviewStatus(boolean current,boolean ready){this.current=current;this.ready=ready;}
+    }
     private String definitionScopeFingerprint(Map<String,Object> graph,Map<String,Object> field) {
         Map<String,Map<String,Object>> nodes=new HashMap<>(),projected=new HashMap<>();for(Map<String,Object> node:DraftReviewGraph.nodes(graph))nodes.put(id(node),node);indexProjectedField(field,projected);
         SortedMap<String,Object> parts=new TreeMap<>(),relations=new TreeMap<>(),sources=new TreeMap<>();Set<String> visited=new HashSet<>(),sourceIds=new HashSet<>();Deque<String> queue=new ArrayDeque<>();queue.add(id(field));

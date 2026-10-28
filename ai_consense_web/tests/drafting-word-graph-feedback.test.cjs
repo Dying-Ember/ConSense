@@ -165,17 +165,22 @@ const pick = async (start, end) => { selection = anchor(start, end); await click
   assert.deepEqual(convertedOld.correction,priorRule);assert.equal(convertedOld.editTargets[0].branchId,'old-case');assert.equal(convertedOld.editTargets[0].needsRebind,true)
   const graphConfirmations=[]
   saved.definitionGraphReview={confirmed:false,valid:false,unresolvedRelationCount:1}
-  api.reviewConfirmDefinitions=async(...args)=>{graphConfirmations.push(copy(args));saved={...copy(saved),id:'definitions-1',definitionGraphReview:{confirmed:true,valid:true,reason:args[3],unresolvedRelationCount:1,confirmedFieldIds:args[5],pendingFieldIds:['existing']}};return copy(saved)}
+  api.reviewConfirmDefinitions=async(...args)=>{graphConfirmations.push(copy(args));saved={...copy(saved),id:'definitions-1',definitionGraphReview:{confirmed:true,valid:true,reason:args[3],unresolvedRelationCount:1,confirmedFieldIds:args[5],pendingFieldIds:['existing'],currentDefinitionReviewFieldIds:copy(args[5]),definitionGroupReadyFieldIds:copy(args[5])}};return copy(saved)}
   await editor.value.refresh(false);await settle()
   assert.equal(control('data-definition-graph-confirm').props.disabled,true,'Graph confirmation requires an explicit reason and acknowledgement')
   await click('data-definition-select-all')
   control('data-definition-graph-reason').props['onUpdate:modelValue']('Checked the usable variables and relations');await settle()
   control('data-definition-graph-acknowledged').props['onUpdate:modelValue'](true);await settle()
   assert.equal(control('data-definition-graph-confirm').props.disabled,true,'An older backend cannot accidentally interpret a group as whole-graph consent')
-  saved.definitionGraphReview={confirmed:false,valid:false,unresolvedRelationCount:1,confirmedFieldIds:[],pendingFieldIds:['review-1','root','conditional']};await editor.value.refresh(false);await settle();await click('data-definition-graph-confirm')
+  saved.definitionGraphReview={confirmed:false,valid:false,unresolvedRelationCount:1,confirmedFieldIds:[],pendingFieldIds:['review-1','root','conditional']};await editor.value.refresh(false);await settle()
+  assert.equal(control('data-definition-group-choice','review-1'),undefined,'An older service without current-basis eligibility cannot promote a saved manual confirmation')
+  assert.ok(control('data-definition-group-choice','root'));assert.ok(control('data-definition-group-choice','conditional'),'Confirmed matched definitions retain explicit group confirmation on an older service')
+  assert.equal(graphConfirmations.length,0,'Checking old-service eligibility does not submit a partial or whole-graph confirmation')
+  saved.definitionGraphReview.currentDefinitionReviewFieldIds=['review-1'];saved.definitionGraphReview.definitionGroupReadyFieldIds=['review-1','root','conditional']
+  await editor.value.refresh(false);await settle();await click('data-definition-select-all');await click('data-definition-graph-confirm')
   assert.deepEqual(graphConfirmations,[['WORD-GRAPH-TEST','draft-2',null,'Checked the usable variables and relations',true,['review-1','root','conditional']]])
   assert.match(text(host.root),/confirmed group is available for project candidate extraction/i);assert.equal(confirms.length,0,'Confirming variable graph does not confirm amendment ranges')
-  saved.id='draft-2';saved.definitionGraphReview={confirmed:false,valid:false,unresolvedRelationCount:0,confirmedFieldIds:[],pendingFieldIds:['review-1','root','conditional'],baselineReuseSupported:true,completeBaselineReuseSupported:true};await editor.value.refresh(false);await settle();await click('data-definition-select-all')
+  saved.id='draft-2';saved.definitionGraphReview={confirmed:false,valid:false,unresolvedRelationCount:0,confirmedFieldIds:[],pendingFieldIds:['review-1','root','conditional'],currentDefinitionReviewFieldIds:['review-1'],definitionGroupReadyFieldIds:['review-1','root','conditional'],baselineReuseSupported:true,completeBaselineReuseSupported:true};await editor.value.refresh(false);await settle();await click('data-definition-select-all')
   control('data-definition-graph-reason').props['onUpdate:modelValue']('Reviewed this complete edition');control('data-definition-graph-acknowledged').props['onUpdate:modelValue'](true);control('data-definition-reuse-edition').props['onUpdate:modelValue'](true);await settle()
   control('data-definition-complete-edition').props['onUpdate:modelValue'](true);await settle();await click('data-definition-graph-confirm')
   assert.deepEqual(graphConfirmations.at(-1),['WORD-GRAPH-TEST','draft-2',null,'Reviewed this complete edition',true,['review-1','root','conditional'],true,true])

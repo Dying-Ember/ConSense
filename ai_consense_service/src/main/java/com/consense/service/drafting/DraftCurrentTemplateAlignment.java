@@ -125,6 +125,9 @@ final class DraftCurrentTemplateAlignment {
         private String businessDefinition(String instruction,Map<String,Object> payload) {
             if(!"SCT".equals(reading.path("fileKey").asText()))return "";
             if(instruction.equals(standardInstruction(189,190)))return "billNos";
+            // Match the complete registered wording, not the current paragraph number or a shared topic.
+            // These notes ask the same domestic-block fact; their clauses and edit scopes remain separate.
+            if(instruction.equals(standardInstruction(547))||instruction.equals(standardInstruction(859))||instruction.equals(standardInstruction(895)))return "domesticBlocks";
             boolean electronic=false,paper=false;
             for(Object raw:list(payload.get("scopeCandidates"))) {
                 JsonNode scope=JsonUtils.mapper().valueToTree(raw);String full=scope.path("text").asText();

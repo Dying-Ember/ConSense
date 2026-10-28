@@ -94,6 +94,7 @@ final class DraftDiscoveryReferences {
         for(JsonNode row:supplement.path("currentSourceContext")){String source=sourceOf(row.path("sourceTaskId").asText());field(row,"sourceTaskId","task",source,true);contextFields(row.path("context"),source);}
         for(JsonNode row:supplement.path("sourceSearchResults")){String source=sourceOf(row.path("sourceTaskId").asText());field(row,"sourceTaskId","task",source,true);contextFields(row.path("search"),source);}
         for(JsonNode row:supplement.path("repairRequests")){String source=sourceOf(row.path("sourceTaskId").asText());field(row,"sourceTaskId","task",source,true);array(row,"sourceTaskIds","task",source);array(row,"scopeIds","scope",source);}
+        for(String field:Arrays.asList("localEffectsExample","knownScopeRuleExample"))draftFields(supplement.path("scopeRepairProtocol").path(field),true);
     }
     private void contextFields(JsonNode context,String fallback){String source=context.path("sourceId").asText(fallback);for(String field:Arrays.asList("items","results"))for(JsonNode row:context.path(field))evidenceFields(row,source,row.path("kind").asText());}
     private void evidenceFields(JsonNode row,String source,String kind){
