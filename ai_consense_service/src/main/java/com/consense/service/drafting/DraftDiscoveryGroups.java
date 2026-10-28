@@ -157,6 +157,7 @@ final class DraftDiscoveryGroups {
                 String ref=piece.source+"|"+kind+"|"+id;Map<String,Object> projected=obj("ref",ref,"sourceId",piece.source,"kind",kind,"id",id);
                 for(String field:Arrays.asList("text","status","scopeComplete","captureComplete","sourceInsertionAnchorComplete","sourceSyntaxKnown","sourceSyntaxComplete","semanticStatus","targetScopeStatus","guidanceNoteId","guidanceNoteIds","conditionId","conditionIds","parentConditionId","childConditionId","parentGuidanceNoteId","childGuidanceNoteId","parentGroupId","childGroupId","groupIds","ownerReference","basis","projectValueSupplied","referenceCandidates"))if(row.has(field)&&!DraftDiscoveryEvidence.internalConditionStatus(field,row.get(field)))projected.put(field,JsonUtils.mapper().convertValue(row.get(field),Object.class));
                 if("scope".equals(kind)&&!evidence.containsKey(ref)){
+                    if(row.path("observation").path("fieldLabel").isTextual())projected.put("fieldLabel",row.path("observation").path("fieldLabel").asText());
                     Map<String,Object> point=DraftReviewDiscovery.insertionPointContext(piece.reading,row.path("observation"));
                     for(String field:Arrays.asList("fieldLabel","insertionPoint","memberId"))if(point.containsKey(field))projected.put(field,point.get(field));
                 }

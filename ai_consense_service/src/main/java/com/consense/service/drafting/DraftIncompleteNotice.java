@@ -22,14 +22,13 @@ final class DraftIncompleteNotice {
             String name=text(node.get("nameEn"));if(name.isEmpty())name=text(node.get("nameZh"));if(name.isEmpty())name="Question requiring review";
             if("source_seed".equals(text(node.get("definitionKind")))){
                 Set<String> descriptions=new LinkedHashSet<>();
-                for(Object raw:list(node.get("sourceAnchors"))){Map<String,Object> anchor=map(raw);String file=documents.getOrDefault(text(anchor.get("docId")),"");String quote=text(anchor.get("text")).replaceAll("\\s+"," ").trim();
-                    if(quote.length()>240)quote=quote.substring(0,quote.offsetByCodePoints(0,Math.min(240,quote.codePointCount(0,quote.length()))))+"…";
+                for(Object raw:list(node.get("sourceAnchors"))){Map<String,Object> anchor=map(raw);String file=documents.getOrDefault(text(anchor.get("docId")),"");String quote=excerpt(anchor.get("text"));
                     if(!file.isEmpty()||!quote.isEmpty())descriptions.add(file+(quote.isEmpty()?"":" — “"+quote+"”"));
                 }
                 name="Review source guidance"+(descriptions.isEmpty()?"":" — "+String.join("; ",descriptions));
             }
             labels.put(text(node.get("id")),name);
-            for(Object raw:list(node.get("editTargets"))){Map<String,Object> target=map(raw);String file=documents.getOrDefault(text(target.get("docId")),"");String quote=text(target.get("text")).replaceAll("\\s+"," ").trim();
+            for(Object raw:list(node.get("editTargets"))){Map<String,Object> target=map(raw);String file=documents.getOrDefault(text(target.get("docId")),"");String quote=excerpt(target.get("text"));
                 labels.put(text(target.get("id")),name+(file.isEmpty()?"":" — "+file)+(quote.isEmpty()?"":" — “"+quote+"”"));
             }
         }
@@ -54,6 +53,7 @@ final class DraftIncompleteNotice {
         otherDocuments.forEach((key,count)->result.add(count+" outstanding records remain in "+key+". See that document's list; the package remains incomplete."));
         return result;
     }
+    private static String excerpt(Object value){String quote=text(value).replaceAll("\\s+"," ").trim();return quote.codePointCount(0,quote.length())>240?quote.substring(0,quote.offsetByCodePoints(0,240))+"…":quote;}
     private static String reason(String kind){
         switch(kind){
             case "SourceFormat":return "Review the source layout, headers, footers and project identity; existing content is retained pending review.";

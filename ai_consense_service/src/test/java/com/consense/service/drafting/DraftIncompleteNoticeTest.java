@@ -8,6 +8,30 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
 class DraftIncompleteNoticeTest {
+    @Test void longTargetExcerptsShareTheSourceSummaryLimitWithoutMergingIdentitiesOrMutatingInputs(){
+        String quote="A".repeat(239)+"\uD83D\uDE00"+" \n TAIL_MUST_STAY_IN_GRAPH".repeat(300),excerpt="A".repeat(239)+"\uD83D\uDE00…";
+        Map<String,Object> graph=DraftReviewGraph.obj("graph",DraftReviewGraph.obj("variables",Arrays.asList(
+                DraftReviewGraph.obj("id","owner","nameEn","Same visible subject","editTargets",Arrays.asList(DraftReviewGraph.obj("id","target-a","text",quote),DraftReviewGraph.obj("id","target-b","text",quote))),
+                DraftReviewGraph.obj("id","seed","definitionKind","source_seed","sourceAnchors",Collections.singletonList(DraftReviewGraph.obj("text",quote))))));
+        Map<String,Object> plan=DraftReviewGraph.obj("unresolved",Arrays.asList(
+                DraftReviewGraph.obj("kind","ConditionUnknown","inputKeys",Collections.singletonList("target-a")),
+                DraftReviewGraph.obj("kind","NodeReviewRequired","inputKeys",Collections.singletonList("target-a")),
+                DraftReviewGraph.obj("kind","ConditionUnknown","inputKeys",Collections.singletonList("target-b")),
+                DraftReviewGraph.obj("kind","ManualCheck"),DraftReviewGraph.obj("kind","ManualCheck"),
+                DraftReviewGraph.obj("kind","NodeReviewRequired","inputKeys",Collections.singletonList("seed"))));
+        String graphBefore=com.consense.common.JsonUtils.write(graph),planBefore=com.consense.common.JsonUtils.write(plan);
+        List<String> items=DraftIncompleteNotice.outstanding(graph,plan);
+        assertEquals(5,items.size(),"Distinct target identities and unidentified issues remain separate.");
+        for(int index:new int[]{0,1,4}){
+            String item=items.get(index);assertTrue(item.contains("“"+excerpt+"”"),"Target and source-seed quotations use the same 240-codepoint summary.");
+            assertFalse(item.contains("TAIL_MUST_STAY_IN_GRAPH"));String shown=item.substring(item.indexOf('“')+1,item.lastIndexOf('”'));
+            assertEquals(241,shown.codePointCount(0,shown.length()));
+        }
+        assertTrue(items.get(0).contains("Review the unresolved or conflicting applicability conditions."));
+        assertTrue(items.get(0).contains("Review the guidance and modification scope."));
+        assertEquals(items.get(2),items.get(3),"Equal unidentified explanations must not merge.");
+        assertEquals(graphBefore,com.consense.common.JsonUtils.write(graph));assertEquals(planBefore,com.consense.common.JsonUtils.write(plan));
+    }
     @Test void deliveryReceiptBindsOnlyNewNoticeParagraphsAndSurvivesReconciliation() throws Exception {
         byte[] original;try(XWPFDocument source=new XWPFDocument();ByteArrayOutputStream out=new ByteArrayOutputStream()){
             source.createParagraph().createRun().setText("Original contract wording");source.write(out);original=out.toByteArray();

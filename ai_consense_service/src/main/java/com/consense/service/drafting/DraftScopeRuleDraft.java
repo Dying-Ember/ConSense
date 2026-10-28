@@ -51,7 +51,7 @@ final class DraftScopeRuleDraft {
                     if(when.path("clauses").size()>100)throw invalid("SCOPE_RULE_CLAUSE_LIMIT_100");
                     for(JsonNode clause:when.path("clauses")) {
                         fields(clause,set("inputId","operator","value"),"SCOPE_RULE_CLAUSE_FIELD_UNSUPPORTED");
-                        String input=requiredText(clause,"inputId"),operator=requiredText(clause,"operator");requireKnownValue(input,visibleRoots);inputs.add(input);
+                        String input=requiredText(clause,"inputId"),operator=requiredText(clause,"operator");inputs.add(input);
                         if(!OPERATORS.contains(operator))throw invalid("SCOPE_RULE_OPERATOR_UNSUPPORTED");
                         if(!check&&"unknown".equals(operator))throw invalid("SCOPE_RULE_UNKNOWN_VALUE_IS_NOT_AUTHORITY");
                         if(VALUE_OPERATORS.contains(operator)&&(!clause.hasNonNull("value")||!clause.path("value").isValueNode()))throw invalid("SCOPE_RULE_COMPARISON_VALUE_REQUIRED");
@@ -60,12 +60,14 @@ final class DraftScopeRuleDraft {
                 if(!check&&(when.isMissingNode()||when.isNull()||when.path("clauses").isEmpty()))throw invalid("SCOPE_RULE_NONEMPTY_CONDITION_REQUIRED");
                 if(rule.hasNonNull("replacementEn")&&(!rule.path("replacementEn").isTextual()||rule.path("replacementEn").asText().trim().isEmpty()))throw invalid("SCOPE_RULE_REPLACEMENT_TEXT_REQUIRED");
                 if(rule.hasNonNull("refinedQuote")&&(!rule.path("refinedQuote").isTextual()||rule.path("refinedQuote").asText().isEmpty()))throw invalid("SCOPE_RULE_REFINED_QUOTE_REQUIRED");
-                String valueSource="";if(rule.hasNonNull("valueSourceId")){valueSource=requiredText(rule,"valueSourceId");requireKnownValue(valueSource,visibleRoots);}
+                String valueSource="";if(rule.hasNonNull("valueSourceId"))valueSource=requiredText(rule,"valueSourceId");
                 boolean canonicalUnused="unused".equals(action)&&rule.hasNonNull("replacementEn")&&"Not used".equals(rule.path("replacementEn").asText().trim());
                 if((rule.hasNonNull("replacementEn")&&!canonicalUnused||!valueSource.isEmpty())&&!set("replace","fill","insert").contains(action))throw invalid("SCOPE_RULE_ACTION_VALUE_UNEXPECTED");
                 if(nodes.size()>=100)throw invalid("SCOPE_RULE_COMBINED_NODE_LIMIT_100");
                 String requirementId="csr-"+DraftAdoption.hash(id+"\n"+owner+"\n"+scope).substring(0,20);
                 if(requirementIds.contains(requirementId))throw invalid("SCOPE_RULE_REQUIREMENT_ID_COLLISION");
+                // Check the complete shape before classifying a missing value as a repairable namespace error.
+                for(String input:inputs)requireKnownValue(input,visibleRoots);if(!valueSource.isEmpty())requireKnownValue(valueSource,visibleRoots);
 
                 String excerpt=quote.replaceAll("\\s+"," ").trim();if(excerpt.length()>90)excerpt=excerpt.substring(0,90)+"…";
                 ObjectNode node=JsonUtils.mapper().createObjectNode().put("id",id).put("sourceTaskId",owner)

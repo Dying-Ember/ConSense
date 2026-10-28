@@ -90,15 +90,26 @@ final class DraftDiscoveryProbe {
         accepted(request,accepted,Collections.emptySet());
     }
     static void accepted(Request request,Map<String,Object> accepted,Set<String> repairableRequirementIds) {
+        accepted(request,accepted,repairableRequirementIds,Collections.emptySet());
+    }
+    static void accepted(Request request,Map<String,Object> accepted,Set<String> repairableRequirementIds,Set<String> repairableLocalScopeRuleIds) {
         request.acceptedBusinessOwners.clear();request.acceptedValueIds.clear();request.acceptedReferences.clear();
         Set<Map<String,Object>> deferred=deferredRequirementQuoteIssues(request,accepted,repairableRequirementIds);
+        int deferredQuotes=deferred.size();deferred.addAll(deferredLocalScopeIssues(request,accepted,repairableLocalScopeRuleIds));
         Map<String,Object> counts=obj("nodes",0,"requirements",0,"branches",0,"effects",0,"compiledNodes",0,"compiledRequirements",0,"compiledBranches",0,"compiledEffects",0,"retainedUnresolvedEffects",0,"completeScopeEffects",0,"verificationRequirements",0,"scopeDuties",0,"missingScopeDuties",0,"unrepresentedScopeDuties",0);
         collect(request,accepted,counts,deferred);request.summary.put("accepted",counts);
-        Map<String,Object> raw=map(request.summary.get("raw"));for(String part:Arrays.asList("nodes","requirements","branches","effects")){String title=Character.toUpperCase(part.charAt(0))+part.substring(1);int lost=Math.max(0,number(raw.get(part))-(number(counts.get(part))-number(counts.get("compiled"+title))));if(lost>0){request.summary.put("removed"+title,lost);reason(request,"response_parts_not_retained",obj("part",part),!("requirements".equals(part)&&lost==deferred.size()));}}
+        Map<String,Object> raw=map(request.summary.get("raw"));for(String part:Arrays.asList("nodes","requirements","branches","effects")){String title=Character.toUpperCase(part.charAt(0))+part.substring(1);int lost=Math.max(0,number(raw.get(part))-(number(counts.get(part))-number(counts.get("compiled"+title))));if(lost>0){request.summary.put("removed"+title,lost);reason(request,"response_parts_not_retained",obj("part",part),!("requirements".equals(part)&&lost==deferredQuotes));}}
         for(String owner:request.collapsedBusiness){BusinessExpectation expected=request.business.get(owner);if(expected==null||intersects(expected.tasks,request.acceptedBusinessOwners))continue;
             boolean shared=false;for(String task:expected.tasks)shared|=intersects(request.acceptedReferences.getOrDefault(task,Collections.emptySet()),request.acceptedValueIds);
             if(!shared&&request.reportedBusiness.add(owner)){request.summary.computeIfAbsent("businessReferenceFailures",key->new ArrayList<>());DraftBusinessRules.list(request.summary.get("businessReferenceFailures")).add(expected.summary("All supplied local tasks claimed identified with verification only, without a business input or a valid shared value reference."));reason(request,BUSINESS_REFERENCE_COLLAPSE,obj("taskId",owner,"part","business_definition"),true);}
         }
+    }
+    /** The caller proves a unique owned rule and every bad reference is an accepted local from that reply. */
+    private static Set<Map<String,Object>> deferredLocalScopeIssues(Request request,Map<String,Object> accepted,Set<String> allowed){
+        Set<Map<String,Object>> deferred=Collections.newSetFromMap(new IdentityHashMap<>());request.summary.remove("deferredLocalScopeRepairs");if(!request.grouped||allowed==null||allowed.isEmpty())return deferred;
+        Map<String,Integer> counts=new HashMap<>();for(Object raw:list(accepted.get("issues"))){Map<String,Object> issue=map(raw);if("SCOPE_RULE_KNOWN_VALUE_REFERENCE_REQUIRED".equals(issue.get("reason")))counts.merge(text(issue.get("scopeRuleId")),1,Integer::sum);}
+        List<Object> repairs=new ArrayList<>();for(Object raw:list(accepted.get("issues"))){Map<String,Object> issue=map(raw);String id=text(issue.get("scopeRuleId")),owner=text(issue.get("sourceTaskId")),scope=text(issue.get("scopeId"));if(!"SCOPE_RULE_KNOWN_VALUE_REFERENCE_REQUIRED".equals(issue.get("reason"))||!allowed.contains(id)||counts.getOrDefault(id,0)!=1||!request.tasks.contains(owner)||!request.scopes.getOrDefault(owner,Collections.emptySet()).contains(scope))continue;deferred.add(issue);repairs.add(obj("sourceTaskId",owner,"scopeRuleId",id,"scopeId",scope,"reason",issue.get("reason"),"status","awaiting_bounded_repair"));}
+        if(!repairs.isEmpty())request.summary.put("deferredLocalScopeRepairs",repairs);return deferred;
     }
     /** The caller proves kind/node references and unique model IDs; this round verifies the actual source rejection. */
     private static Set<Map<String,Object>> deferredRequirementQuoteIssues(Request request,Map<String,Object> accepted,Set<String> allowed){
