@@ -6,6 +6,8 @@ This is an intermediate source-integration record. The Drafting worktree and the
 
 The Candidate22 English-record export closure (two production files, one HTTP test and its checkpoint) was published as `d97f8134cee29528910aabaf86bf9303da006b03`. Its Git tree matched the locally prepared commit exactly, and local HEAD, main, origin/main and the actual remote main were checked at that commit. The historical local commit is retained under `refs/codex/preserved-main/candidate22-local-20261028`. The separate [English export and Advice checkpoint](oer-workflow-english-records-checkpoint-20261028.md) records the software and actual browser-export boundaries.
 
+The 193-path Drafting and documentation snapshot was subsequently published as `0740da05c0a56e6c50bcf5f396401afde9528dc1`. All 192 added or modified blob identities and the complete tree `aae9bfce44edb12959da93d1899d5c7638230767` matched the locally prepared commit; one obsolete fixture was deleted. Local HEAD, main, origin/main and actual remote main were checked at that commit, while later concurrent work remained preserved. The local pre-publication commit is retained at `refs/codex/preserved-main/drafting-local-20261029`. Publication is a source snapshot, not full-suite or business acceptance.
+
 ## Drafting integration checks in progress
 
 An isolated snapshot was captured from parent `58efb2b7a5c4411dad89cb8ab64b2edf79ca0fd4`, tree `b12d6a14744937a396275deb27bc8f3149931dc1`. Subsequent tests overlaid specifically repaired test files, and the frontend edition tests also overlaid the exact handed-off component; they do not establish acceptance of that tree or of the later, still-changing worktree.

@@ -28,8 +28,16 @@ final class VettingReviewDirections {
             StringBuilder out=new StringBuilder("Assigned review direction: ").append(id).append(". ").append(title)
                     .append("\nAssess only these assigned checklist requirements. Preserve a separate disposition for each assessed row. ")
                     .append("Omit an unassessed row; never infer fulfilment from an empty findings list.\n");
-            for(VettingChecklistCatalog.Item item:items)out.append(item.getId()).append(" | ").append(item.getSection()).append(" | ")
-                    .append(item.getClause()).append(" | ").append(item.getDescription()).append('\n');
+            for(VettingChecklistCatalog.Item item:items){
+                out.append(item.getId()).append(" | ").append(item.getSection()).append(" | ")
+                        .append(item.getClause()).append(" | ").append(item.getDescription()).append('\n');
+                if("mixed_contract_pricing".equals(item.getReviewScope()))out.append("Scope for ").append(item.getId())
+                        .append(" (").append(item.getReviewScope()).append("): ").append(item.getScopeNote())
+                        .append(" Assess the supported contract-text checks independently. ")
+                        .append("Do not withhold a supported contract-text assessment merely because excluded pricing or drawing evidence is unavailable. ")
+                        .append("State that the excluded part is not assessed. If an in-scope conclusion itself needs missing evidence, retain insufficient_context and name the missing evidence. ")
+                        .append("Do not mark the entire row fulfilled from a partial check.\n");
+            }
             if(items.isEmpty())out.append("This is a general review direction; checklistAssessments must be an empty array.\n");
             return out.toString();
         }

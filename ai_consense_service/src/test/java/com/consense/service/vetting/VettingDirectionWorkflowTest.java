@@ -16,6 +16,32 @@ import static org.mockito.Mockito.*;
 
 /** Ordinary authored software checks; no provider, original, index or business endpoint is used. */
 class VettingDirectionWorkflowTest {
+    @Test @SuppressWarnings("unchecked") void mixedScopeInstructionsReachTheActualTextPacketAndKeepUnknownContractEvidencePending()throws Exception{
+        AiGateway ai=mock(AiGateway.class);VettingRetrievalClient retrieval=mock(VettingRetrievalClient.class);
+        VettingSemanticReview review=new VettingSemanticReview(ai,new ConsenseProperties(),retrieval);
+        java.lang.reflect.Field field=VettingSemanticReview.class.getDeclaredField("activeDirection");field.setAccessible(true);
+        ThreadLocal<VettingReviewDirections.Direction> active=(ThreadLocal<VettingReviewDirections.Direction>)field.get(review);
+        java.lang.reflect.Method packet=VettingSemanticReview.class.getDeclaredMethod("textFirstPacket",String.class,VettingContextBuilder.Selection.class);packet.setAccessible(true);
+        Chunk tender=chunk("scope-source","The Contractor shall provide the builder's works expressly required by this tender.");
+        VettingContextBuilder.Selection selection=VettingSemanticReview.directionSelection(Collections.singletonList(tender),Collections.emptyList(),1000);
+        List<VettingReviewDirections.Direction> plan=VettingReviewDirections.plan(new String[0]);
+        for(String id:Arrays.asList("APP-I-007","APP-I-027","APP-I-048","APP-I-055")){
+            VettingReviewDirections.Direction direction=plan.stream().filter(d->d.itemIds().contains(id)).findFirst().orElseThrow();
+            VettingChecklistCatalog.Item item=direction.items.stream().filter(i->id.equals(i.getId())).findFirst().orElseThrow();
+            active.set(direction);
+            try{
+                String user=(String)packet.invoke(review,direction.title,selection);
+                assertTrue(user.contains(item.getId()+" | "+item.getSection()+" | "+item.getClause()+" | "+item.getDescription()),"The complete official requirement is retained");
+                assertTrue(user.contains("Scope for "+id+" ("+item.getReviewScope()+"): "+item.getScopeNote()),id+" must carry its existing scope policy into the actual packet");
+                assertTrue(user.contains("Do not withhold a supported contract-text assessment merely because excluded pricing or drawing evidence is unavailable."));
+                assertTrue(user.contains("retain insufficient_context and name the missing evidence"));
+                assertTrue(user.contains("Do not mark the entire row fulfilled from a partial check."));
+                assertEquals(1,user.split(java.util.regex.Pattern.quote(tender.getContent()),-1).length-1,"Scope guidance must not repeat or alter source evidence");
+            }finally{active.remove();}
+        }
+        assertFalse(plan.get(0).instructions().contains("Scope for "),"Unrelated in-scope rows do not receive redundant mixed-scope instructions");
+        assertEquals(Collections.singletonList(tender),selection.getChunks());verifyNoInteractions(ai,retrieval);
+    }
     @Test void explicitProjectLocatorsComeFromAssignedClausesRatherThanGeneralQueryHints(){
         List<VettingReviewDirections.Direction> plan=VettingReviewDirections.plan(new String[]{"APU.A010 GCC1.1 general discussion"});
         assertEquals(Collections.singletonList("APB.A010"),plan.stream().filter(d->d.itemIds().contains("APP-I-056")).findFirst().orElseThrow().explicitProjectClauses());
