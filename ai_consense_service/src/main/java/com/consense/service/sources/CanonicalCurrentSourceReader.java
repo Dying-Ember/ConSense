@@ -36,6 +36,32 @@ public class CanonicalCurrentSourceReader {
         SourceDocument stamp=validatedScope(projectId,id,module);
         require(SourceContentDigests.stamped(stamp),HttpStatus.CONFLICT,"SOURCE_CONTENT_REVISION_UNAVAILABLE");return stamp;
     }
+    static final class NormalPointerProof {
+        final SourceDocument stamp;final String graph;
+        NormalPointerProof(SourceDocument stamp,String graph){this.stamp=stamp;this.graph=graph;}
+    }
+    /** Public citations have no earlier semantic frame: prove actual fields through bounded readers. */
+    @Transactional(propagation=Propagation.REQUIRES_NEW,isolation=Isolation.READ_COMMITTED,readOnly=true)
+    public NormalPointerProof normalPointerProof(SourceDocument captured,String module,String parsedHash){
+        SourceDocument before=currentStamp(captured.getProjectId(),captured.getId(),module);
+        require(ProjectDocumentScope.sameScopeRevision(captured,before),HttpStatus.CONFLICT,"CANONICAL_SOURCE_STALE");
+        NormalPointerStream.SourceProof proof=entityManager.unwrap(org.hibernate.Session.class).doReturningWork(connection->{
+            try(java.sql.PreparedStatement statement=connection.prepareStatement("select text_content,structured_content_json,parse_coverage_json,normal_candidate_json from source_document where id=? and project_id=?")){
+                statement.setLong(1,captured.getId());statement.setString(2,captured.getProjectId());
+                try(java.sql.ResultSet row=statement.executeQuery()){
+                    require(row.next(),HttpStatus.NOT_FOUND,"SOURCE_DOCUMENT_UNAVAILABLE");
+                    try(java.io.Reader text=row.getCharacterStream(1);java.io.Reader structure=row.getCharacterStream(2);java.io.Reader coverage=row.getCharacterStream(3);java.io.Reader candidate=row.getCharacterStream(4)){
+                        return NormalPointerStream.source(text,structure,coverage,candidate);
+                    }
+                }
+            }catch(java.io.IOException invalid){throw new CanonicalEvidenceException(HttpStatus.CONFLICT,"CANONICAL_SOURCE_STALE");}
+        });
+        String[] expected={before.getTextContentSha256(),before.getStructuredContentSha256(),before.getParseCoverageSha256(),before.getNormalCandidateSha256()};
+        require(java.util.Arrays.equals(expected,proof.fields)&&Objects.equals(before.getBusinessContentSha256(),proof.business())
+                &&Objects.equals(parsedHash,proof.parsed)&&Objects.equals(proof.coverage,proof.graphCoverage),HttpStatus.CONFLICT,"CANONICAL_SOURCE_STALE");
+        before.setVerifiedBusinessContentSha256(proof.business());before.setCalculatedSourceHash(proof.parsed);
+        requireCurrentStamp(before,currentStamp(captured.getProjectId(),captured.getId(),module));return new NormalPointerProof(before,proof.graph);
+    }
     /** An owned Vetting operation already proved originals; intermediate guards read one scalar catalog. */
     @Transactional(propagation=Propagation.REQUIRES_NEW,isolation=Isolation.READ_COMMITTED,readOnly=true)
     public java.util.Map<Long,SourceDocument> currentVettingMetadata(String projectId){

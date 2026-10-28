@@ -12,6 +12,46 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /** Authored provider responses exercise the real retry, schema and quotation gates. */
 class VettingEvidenceRepairTest {
+    @Test void actualRepairCallerAcceptsTheSameWhitespaceNormalizedQuoteAsTheOrdinaryGate() {
+        VettingBusinessShapeRepairTest.Fixture f=new VettingBusinessShapeRepairTest.Fixture();
+        String quote=VettingCorpus.normalize(f.source.getContent());
+        String originalText="\u00a0"+f.source.getContent().replace(" ","\n  ")+"\u2003";f.source.setContent(originalText);
+        assertFalse(originalText.contains(quote));assertTrue(VettingCorpus.evidence(f.source,"source",quote).isLocated());
+        JsonNode original=JsonUtils.parse(f.raw("amend",false,quote));((ObjectNode)original.get(0)).remove("evidence");
+        VettingSemanticReview.Result result=f.review(f.wire(JsonUtils.write(original),patch(0,"R1",quote)));
+        assertEquals(2,result.getActualGatewayCallCount());
+        assertEquals(1,result.getCandidates().size(),"Evidence repair must apply the same existing whitespace policy as the ordinary quote gate");
+        assertEquals("decoded",packet(result).getAttempts().get(1).getStatus());assertEquals(originalText,f.source.getContent());
+    }
+    @ParameterizedTest @ValueSource(strings={"semantic_rewrite","cross_chunk"})
+    void normalizedRepairStillRejectsChangedWordingAndJoinedChunks(String kind){
+        VettingBusinessShapeRepairTest.Fixture f=new VettingBusinessShapeRepairTest.Fixture();String originalText=f.source.getContent();
+        List<VettingCorpus.Chunk> sources="cross_chunk".equals(kind)?org.springframework.test.util.ReflectionTestUtils.invokeMethod(f.harness,"corpus"):f.corpus;
+        String quote="cross_chunk".equals(kind)?sources.get(0).getContent()+" "+sources.get(1).getContent():originalText.replace("shall","may");
+        assertNotEquals(originalText,quote);assertFalse(VettingCorpus.evidence(f.source,"source",quote).isLocated());
+        JsonNode original=JsonUtils.parse(f.raw("amend",false,originalText));((ObjectNode)original.get(0)).remove("evidence");
+        VettingResponsesTransportTest.Http wire=f.wire(JsonUtils.write(original),patch(0,"R1",quote));
+        VettingSemanticReview.Result result=org.springframework.test.util.ReflectionTestUtils.invokeMethod(f.harness,"review",sources,f.props,wire,org.mockito.Mockito.mock(com.consense.ai.LlmClient.class));
+        assertEquals(2,result.getActualGatewayCallCount());assertTrue(result.getCandidates().isEmpty());assertEquals(2,packet(result).getAttempts().size());
+        assertEquals(originalText,f.source.getContent());if("cross_chunk".equals(kind))assertTrue(VettingBusinessShapeRepairTest.user(packet(result).getAttempts().get(1).getInput()).contains(sources.get(1).getContent()),"Both separately supplied chunks must remain available without permitting joined quotation text");
+    }
+    @Test void disabledPayloadProbesStillLocateOriginalRelaxedPatchAndMergeFailures(){
+        ch.qos.logback.classic.Logger logger=(ch.qos.logback.classic.Logger)org.slf4j.LoggerFactory.getLogger(VettingReviewProbe.class);
+        ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> trace=new ch.qos.logback.core.read.ListAppender<>();trace.start();logger.addAppender(trace);
+        try{
+            for(String kind:Arrays.asList("relaxed","patch","merge")){
+                VettingBusinessShapeRepairTest.Fixture f=new VettingBusinessShapeRepairTest.Fixture();JsonNode original=JsonUtils.parse(f.raw("amend",false,f.source.getContent()));ObjectNode first=(ObjectNode)original.get(0);first.remove("evidence");first.put("comment","PRIVATE_MODEL_VALUE_SENTINEL");
+                if("relaxed".equals(kind))first.remove("title");
+                String repaired="relaxed".equals(kind)?f.raw("amend",false,f.source.getContent()):patch(0,"R1","patch".equals(kind)?"short":"PRIVATE_QUOTE_SENTINEL is not supplied source text.");
+                f.review(f.wire(JsonUtils.write(original),repaired));
+            }
+            String logs=trace.list.stream().map(ch.qos.logback.classic.spi.ILoggingEvent::getFormattedMessage).reduce("",(a,b)->a+"\n"+b);
+            for(String purpose:Arrays.asList("original","relaxed_eligibility","evidence_patch","merged"))assertTrue(logs.contains("purpose="+purpose),purpose);
+            assertTrue(logs.contains("schemaPath=$[0].evidence[0].quote"));assertTrue(logs.contains("constraint=minLength"));assertTrue(logs.contains("reason=quote_mismatch"));
+            assertTrue(logs.contains("directionIndex=1"));assertTrue(logs.contains("attemptOrdinal=2"));assertTrue(logs.contains("quoteOrdinal=1"));assertTrue(logs.contains("rawMatch=false"));assertTrue(logs.contains("normalizedMatch=false"));
+            assertFalse(logs.contains("PRIVATE_MODEL_VALUE_SENTINEL"));assertFalse(logs.contains("PRIVATE_QUOTE_SENTINEL"));
+        }finally{logger.detachAppender(trace);}
+    }
     @Test void missingOnlyEvidenceUsesTheExistingRetryForAnEvidencePatch() {
         VettingBusinessShapeRepairTest.Fixture f=new VettingBusinessShapeRepairTest.Fixture();
         JsonNode original=JsonUtils.parse(f.raw("amend",false,f.source.getContent()));

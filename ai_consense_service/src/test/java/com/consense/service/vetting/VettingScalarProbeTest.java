@@ -11,6 +11,16 @@ import org.slf4j.LoggerFactory;
 import static org.junit.jupiter.api.Assertions.*;
 
 class VettingScalarProbeTest {
+    @Test void schemaSummaryKeepsOnlyBoundedTrustedPathsAndFixedCodes(){
+        Logger logger=(Logger)LoggerFactory.getLogger(VettingReviewProbe.class);ListAppender<ILoggingEvent> trace=new ListAppender<>();trace.start();logger.addAppender(trace);
+        try{
+            VettingReviewProbe.Call call=VettingReviewProbe.start(new ConsenseProperties(),"run-fixture","project-fixture").call(22,null,null);
+            call.summary("schema_failure",VettingReviewProbe.map("directionIndex",21,"attemptOrdinal",2,"purpose","evidence_patch","schemaPath","$[0].evidence[0].quote","constraint","maxLength","expectedType","string","actualType","STRING","actualLength",1201));
+            String valid=trace.list.get(trace.list.size()-1).getFormattedMessage();assertTrue(valid.contains("directionIndex=21"));assertTrue(valid.contains("attemptOrdinal=2"));assertTrue(valid.contains("purpose=evidence_patch"));assertTrue(valid.contains("schemaPath=$[0].evidence[0].quote"));
+            call.summary("schema_failure",VettingReviewProbe.map("schemaPath","$[0].PRIVATE_PATH_SENTINEL\nsecret","purpose","PRIVATE_VALUE_SENTINEL with spaces","raw","PRIVATE_BODY_SENTINEL"));
+            String invalid=trace.list.get(trace.list.size()-1).getFormattedMessage();assertFalse(invalid.contains("PRIVATE_"));assertTrue(invalid.length()<1000);
+        }finally{logger.detachAppender(trace);}
+    }
     @Test void disabledFileProbesStillDescribeStagesWithoutReadingBodiesOrSuppliers(){
         Logger logger=(Logger)LoggerFactory.getLogger(VettingReviewProbe.class);ListAppender<ILoggingEvent> trace=new ListAppender<>();trace.start();logger.addAppender(trace);
         try {
@@ -33,7 +43,7 @@ class VettingScalarProbeTest {
         try{
             Map<String,Object> values=new LinkedHashMap<>();values.put("queryFingerprint","0123456789abcdef");values.put("sessionFingerprint","invalid secret hash");values.put("reason","unsafe body\n".repeat(1000));values.put("apiKey","KEY_SENTINEL");values.put("body",List.of("SOURCE_SENTINEL"));values.put("notFinite",Double.NaN);for(int i=0;i<80;i++)values.put("count"+i,i);
             VettingReviewProbe.start(new ConsenseProperties(),"run-fixture","project-fixture").call(1,null,null).summary("bounded",values);
-            String row=trace.list.get(trace.list.size()-1).getFormattedMessage();assertTrue(row.contains("queryFingerprint=0123456789abcdef"));assertTrue(row.contains("reason=unknown_code"));assertFalse(row.contains("KEY_SENTINEL"));assertFalse(row.contains("SOURCE_SENTINEL"));assertFalse(row.contains("unsafe body"));assertFalse(row.contains("sessionFingerprint="));assertFalse(row.contains("count30="));assertTrue(row.length()<2000);
+            String row=trace.list.stream().map(ILoggingEvent::getFormattedMessage).filter(message->message.contains("stage=bounded ")).findFirst().orElseThrow();assertTrue(row.contains("queryFingerprint=0123456789abcdef"));assertTrue(row.contains("reason=unknown_code"));assertFalse(row.contains("KEY_SENTINEL"));assertFalse(row.contains("SOURCE_SENTINEL"));assertFalse(row.contains("unsafe body"));assertFalse(row.contains("sessionFingerprint="));assertFalse(row.contains("count30="));assertTrue(row.length()<2000);
         }finally{logger.detachAppender(trace);}
     }
     @Test void faultySummaryInputAndLoggerCannotChangeTheCallerResult(){

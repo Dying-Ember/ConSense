@@ -12,6 +12,7 @@ import com.consense.service.vetting.VettingCorpus;
 import com.consense.service.vetting.NormalSourceCandidateGraph;
 import com.consense.web.dto.CanonicalEvidenceDtos.EvidencePointer;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -538,6 +539,9 @@ public class CanonicalEvidenceService {
     /** Read all registered bytes without reconstructing unrequested source graphs or parents. */
     @Transactional(propagation=Propagation.REQUIRES_NEW,isolation=Isolation.READ_COMMITTED,readOnly=true)
     public SelectedNormalTextSources selectedNormalTextSources(String project,String module,List<SourceDocument> selected,List<CanonicalSourceBinding> candidates,Set<String> selectedIds){
+        return selectedNormalTextSources(project,module,selected,candidates,selectedIds,false,null);
+    }
+    private SelectedNormalTextSources selectedNormalTextSources(String project,String module,List<SourceDocument> selected,List<CanonicalSourceBinding> candidates,Set<String> selectedIds,boolean units,Map<Long,String> graphProofs){
         validModule(module);require(Arrays.asList("advisory","vetting").contains(module)&&selected!=null&&candidates!=null&&selected.size()==candidates.size()&&!selected.isEmpty()
                 &&selectedIds!=null&&!selectedIds.isEmpty()&&entityManager!=null,HttpStatus.BAD_REQUEST,"CANONICAL_SELECTED_DOCUMENTS_INVALID");
         for(String id:selectedIds)require(id!=null&&!id.trim().isEmpty(),HttpStatus.BAD_REQUEST,"CANONICAL_SELECTED_DOCUMENTS_INVALID");
@@ -559,8 +563,10 @@ public class CanonicalEvidenceService {
             List<List<Object>> capturedHistory=candidates instanceof CompactNormalCandidates?((CompactNormalCandidates)candidates).prefixes.get(captured.getId()):Collections.singletonList(bindingState(binding));
             require(capturedHistory!=null&&capturedHistory.equals(compactHistory(project,captured.getId(),binding.getId())),HttpStatus.CONFLICT,"CANONICAL_COMPACT_BINDING_CHANGED");
             String[] authority=new String[2];com.fasterxml.jackson.databind.node.ObjectNode header=JsonUtils.mapper().createObjectNode();Map<String,JsonNode> localChunks=new LinkedHashMap<>();
-            require(Objects.equals(binding.getSnapshotBytesSha256(),streamedSnapshotSha256(binding.getId(),authority,header,selectedIds,localChunks)),HttpStatus.CONFLICT,"CANONICAL_STORED_BYTES_CHANGED");
+            String[] graphProof=graphProofs==null?null:new String[1];
+            require(Objects.equals(binding.getSnapshotBytesSha256(),streamedSnapshotSha256(binding.getId(),authority,header,units?null:selectedIds,localChunks,units?selectedIds:null,graphProof)),HttpStatus.CONFLICT,"CANONICAL_STORED_BYTES_CHANGED");
             if(!NormalObservedContract.SCHEMA.equals(authority[0])||!NormalObservedContract.PRODUCER.equals(authority[1]))return null;
+            if(graphProofs!=null)graphProofs.put(binding.getDocumentId(),graphProof[0]);
             SourceDocument stamp=new SourceDocument();org.springframework.beans.BeanUtils.copyProperties(source,stamp);
             stamp.setVerifiedBusinessContentSha256(source.getBusinessContentSha256());stamp.setCalculatedSourceHash(binding.getJavaParsedSourceHash());
             JsonNode identity=header.path("projectionIdentity");String graphSha=identity.path("candidateGraphSha256").asText(),generation=identity.path("generationSha256").asText();
@@ -577,7 +583,9 @@ public class CanonicalEvidenceService {
             require(stamps.putIfAbsent(source.getId(),stamp)==null,HttpStatus.CONFLICT,"CANONICAL_SELECTED_DOCUMENTS_INVALID");
             histories.put(source.getId(),history);headers.put(source.getId(),header);registryPins.put(source.getId(),new CompactRegistryPin(null,true,sources.observeOriginal(stamp)));
         }
-        require(chunks.keySet().equals(selectedIds),HttpStatus.CONFLICT,"CANONICAL_CHUNK_UNAVAILABLE");
+        Set<String> found=units?chunks.values().stream().map(chunk->chunk.path("unitId").asText()).collect(java.util.stream.Collectors.toSet()):chunks.keySet();
+        require(found.equals(selectedIds),HttpStatus.CONFLICT,"CANONICAL_CHUNK_UNAVAILABLE");
+        if(units)require(chunks.size()==selectedIds.size(),HttpStatus.CONFLICT,"CANONICAL_UNIT_AMBIGUOUS");
         CompactBindingScope scope=new CompactBindingScope(this,project,module,retained,histories,stamps,registryPins);assertCompactCurrent(scope);
         return new SelectedNormalTextSources(scope,headers,chunks);
     }
@@ -824,6 +832,7 @@ public class CanonicalEvidenceService {
 
     @Transactional(propagation=Propagation.REQUIRES_NEW,isolation=Isolation.READ_COMMITTED,readOnly=true)
     public EvidencePointer pointer(String projectId,Long documentId,String projection,String unitId,String module){
+        EvidencePointer compact=normalPointer(projectId,documentId,projection,unitId,module);if(compact!=null)return compact;
         BindingView view=readBindingView(projectId,documentId,projection,module);CanonicalSourceBinding binding=view.binding;
         JsonNode snapshot=view.snapshot,chunk=null;JsonNode candidates=snapshot.path("chunks");
         for(JsonNode candidate:candidates)if(unitId.equals(candidate.path("unitId").asText())){require(chunk==null,HttpStatus.CONFLICT,"CANONICAL_UNIT_AMBIGUOUS");chunk=candidate;}
@@ -832,6 +841,55 @@ public class CanonicalEvidenceService {
         EvidencePointer pointer=pointer(binding,snapshot,chunk,module,view.collection?NativeDocumentCollectionContract.unitUnknowns(snapshot,unitId):unknowns(snapshot));
         pointer.setNativeWordSourceScopesContext(wordSourceScopeContext(binding,snapshot,chunk));
         assertCurrent(binding,module,view.sourceStamp);return pointer;
+    }
+    private EvidencePointer normalPointer(String project,Long document,String projection,String unit,String module){
+        if(entityManager==null||!Arrays.asList("vetting","advisory").contains(module))return null;
+        validSha(projection);validModule(module);require(unit!=null&&!unit.isBlank(),HttpStatus.BAD_REQUEST,"CANONICAL_UNIT_SELECTION_INVALID");
+        SourceDocument source=sources.currentModuleMetadata(project,module).get(document);
+        require(source!=null,HttpStatus.CONFLICT,"CANONICAL_SOURCE_STALE");
+        if(!SourceContentDigests.stamped(source)){requireNonNormalPointerFallback(project,document,module);return null;}
+        List<CanonicalSourceBinding> candidates=compactNormalCandidates(project,module,Collections.singletonList(source));
+        if(candidates==null){requireNonNormalPointerFallback(project,document,module);return null;}
+        CanonicalSourceBinding binding=candidates.get(0);require(Objects.equals(projection,binding.getProjectionSha256()),HttpStatus.CONFLICT,"CANONICAL_ADOPTION_SUPERSEDED");
+        Map<Long,String> graphProofs=new HashMap<>();
+        SelectedNormalTextSources selected=selectedNormalTextSources(project,module,Collections.singletonList(source),candidates,Collections.singleton(unit),true,graphProofs);
+        if(selected==null){requireNonNormalPointerFallback(project,document,module);return null;}
+        CanonicalCurrentSourceReader.NormalPointerProof current=sources.normalPointerProof(source,module,binding.getJavaParsedSourceHash());
+        require(current!=null&&Objects.equals(current.graph,graphProofs.get(document)),HttpStatus.CONFLICT,"CANONICAL_SOURCE_STALE");
+        JsonNode chunk=selected.chunks().values().iterator().next(),header=selected.headers().get(document);
+        require(unit.equals(chunk.path("unitId").asText())&&NormalObservedContract.canonicalChunkId(binding.getProjectionRevisionSha256(),unit).equals(chunk.path("id").asText()),HttpStatus.CONFLICT,"CANONICAL_UNIT_AMBIGUOUS");
+        assertCompactCurrent(selected.scope());
+        boolean verified=backend.verifyNormalSnapshot(projection,module,binding.getOriginalSourceSha256(),binding.getSnapshotBytesSha256(),reader->{
+            String[] authority=new String[2],graph=new String[1];ObjectNode fresh=JsonUtils.mapper().createObjectNode();Map<String,JsonNode> chunks=new HashMap<>();
+            readSnapshotAuthority(reader,Writer.nullWriter(),authority,fresh,null,chunks,Collections.singleton(unit),graph);
+            require(NormalObservedContract.SCHEMA.equals(authority[0])&&NormalObservedContract.PRODUCER.equals(authority[1])&&header.equals(fresh)
+                    &&chunks.size()==1&&chunk.equals(chunks.get(chunk.path("id").asText()))&&Objects.equals(current.graph,graph[0]),HttpStatus.CONFLICT,"CANONICAL_STORED_BYTES_CHANGED");
+        });
+        require(verified,HttpStatus.BAD_GATEWAY,"CANONICAL_COMPACT_NORMAL_PROOF_REQUIRED");
+        sources.requireCurrentStamp(current.stamp,sources.currentStamp(project,document,module));assertCompactCurrent(selected.scope());
+        return compactNormalPointer(binding,header,chunk,module);
+    }
+
+    /** Missing normal proof cannot silently re-enter the full snapshot/entity reader. */
+    private void requireNonNormalPointerFallback(String project,Long document,String module){
+        Long before=null;boolean foreignNormal=false;
+        while(true){
+            List<CanonicalSourceBindingRepository.CompactMetadata> page=before==null
+                ?bindings.findCompactByDocument(project,document,org.springframework.data.domain.PageRequest.of(0,1))
+                :bindings.findCompactByDocumentBefore(project,document,before,org.springframework.data.domain.PageRequest.of(0,1));
+            if(page.isEmpty()){require(!foreignNormal,HttpStatus.FORBIDDEN,"CANONICAL_MODULE_NOT_ELIGIBLE");return;}
+            require(page.size()==1,HttpStatus.CONFLICT,"CANONICAL_BINDING_REVISION_ORDER_INVALID");
+            CanonicalSourceBinding binding=compactBinding(page.get(0));
+            require(binding.getId()!=null&&(before==null||binding.getId()<before),HttpStatus.CONFLICT,"CANONICAL_BINDING_REVISION_ORDER_INVALID");
+            String[] authority=new String[2];String actual=streamedSnapshotSha256(binding.getId(),authority);
+            require(validDigest(binding.getSnapshotBytesSha256())&&Objects.equals(binding.getSnapshotBytesSha256(),actual),HttpStatus.CONFLICT,"CANONICAL_STORED_BYTES_CHANGED");
+            CanonicalSourceBinding after=compactBinding(bindings.findCompactById(binding.getId())
+                .orElseThrow(()->new CanonicalEvidenceException(HttpStatus.CONFLICT,"CANONICAL_BINDING_REVISION_ORDER_INVALID")));
+            require(bindingState(binding).equals(bindingState(after)),HttpStatus.CONFLICT,"CANONICAL_COMPACT_BINDING_CHANGED");
+            if(!NormalObservedContract.SCHEMA.equals(authority[0])||!NormalObservedContract.PRODUCER.equals(authority[1]))return;
+            require(!Objects.equals(module,binding.getDeclaredModule()),HttpStatus.CONFLICT,"CANONICAL_COMPACT_NORMAL_PROOF_REQUIRED");
+            foreignNormal=true;before=binding.getId();
+        }
     }
 
     @Transactional(propagation=Propagation.REQUIRES_NEW,isolation=Isolation.READ_COMMITTED,readOnly=true)
@@ -1205,6 +1263,9 @@ public class CanonicalEvidenceService {
         return streamedSnapshotSha256(id,authority,header,null,null);
     }
     private String streamedSnapshotSha256(Long id,String[] authority,com.fasterxml.jackson.databind.node.ObjectNode header,Set<String> selectedIds,Map<String,JsonNode> selectedChunks){
+        return streamedSnapshotSha256(id,authority,header,selectedIds,selectedChunks,null,null);
+    }
+    private String streamedSnapshotSha256(Long id,String[] authority,com.fasterxml.jackson.databind.node.ObjectNode header,Set<String> selectedIds,Map<String,JsonNode> selectedChunks,Set<String> selectedUnits,String[] graphProof){
         return entityManager.unwrap(org.hibernate.Session.class).doReturningWork(connection->{
             try(java.sql.PreparedStatement statement=connection.prepareStatement("select snapshot_json from canonical_source_binding where id=?")){
                 statement.setLong(1,id);
@@ -1214,7 +1275,7 @@ public class CanonicalEvidenceService {
                     try(Reader source=rows.getCharacterStream(1);
                         Writer sink=new OutputStreamWriter(new java.security.DigestOutputStream(OutputStream.nullOutputStream(),digest),StandardCharsets.UTF_8)){
                         if(source==null)return null;
-                        if(authority==null)source.transferTo(sink);else readSnapshotAuthority(source,sink,authority,header,selectedIds,selectedChunks);
+                        if(authority==null)source.transferTo(sink);else readSnapshotAuthority(source,sink,authority,header,selectedIds,selectedChunks,selectedUnits,graphProof);
                     }
                     return java.util.HexFormat.of().formatHex(digest.digest());
                 }
@@ -1227,6 +1288,9 @@ public class CanonicalEvidenceService {
         readSnapshotAuthority(source,sink,authority,header,null,null);
     }
     private static void readSnapshotAuthority(Reader source,Writer sink,String[] authority,com.fasterxml.jackson.databind.node.ObjectNode header,Set<String> selectedIds,Map<String,JsonNode> selectedChunks)throws IOException{
+        readSnapshotAuthority(source,sink,authority,header,selectedIds,selectedChunks,null,null);
+    }
+    private static void readSnapshotAuthority(Reader source,Writer sink,String[] authority,com.fasterxml.jackson.databind.node.ObjectNode header,Set<String> selectedIds,Map<String,JsonNode> selectedChunks,Set<String> selectedUnits,String[] graphProof)throws IOException{
         Reader observed=new FilterReader(source){
             @Override public int read(char[] value,int offset,int length)throws IOException{int count=super.read(value,offset,length);if(count>0)sink.write(value,offset,count);return count;}
             @Override public int read()throws IOException{int value=super.read();if(value>=0)sink.write(value);return value;}
@@ -1240,14 +1304,14 @@ public class CanonicalEvidenceService {
                 }else if(header!=null&&Arrays.asList("projectionIdentity","source","projectionSha256","sourceHash","projectionRevisionSha256","adoptionStatus","humanConfirmed","sourceQualityAccepted","semanticScopeVerified","legalClosure").contains(field))header.set(field,compactAuthorityValue(parser,0,new int[]{512}));
                 else if(header!=null&&"manifest".equals(field)){
                     require(token==com.fasterxml.jackson.core.JsonToken.START_OBJECT,HttpStatus.BAD_GATEWAY,"CANONICAL_JSON_INVALID");
-                    while(parser.nextToken()!=com.fasterxml.jackson.core.JsonToken.END_OBJECT){require(parser.currentToken()==com.fasterxml.jackson.core.JsonToken.FIELD_NAME,HttpStatus.BAD_GATEWAY,"CANONICAL_JSON_INVALID");String nested=parser.currentName();parser.nextToken();if("sourceBinding".equals(nested))header.set("sourceBinding",compactAuthorityValue(parser,0,new int[]{512}));else parser.skipChildren();}
-                }else if(selectedIds!=null&&"chunks".equals(field)){
+                    while(parser.nextToken()!=com.fasterxml.jackson.core.JsonToken.END_OBJECT){require(parser.currentToken()==com.fasterxml.jackson.core.JsonToken.FIELD_NAME,HttpStatus.BAD_GATEWAY,"CANONICAL_JSON_INVALID");String nested=parser.currentName();parser.nextToken();if("sourceBinding".equals(nested))header.set("sourceBinding",compactAuthorityValue(parser,0,new int[]{512}));else if("candidateGraph".equals(nested)&&graphProof!=null)graphProof[0]=NormalPointerStream.identity(parser);else parser.skipChildren();}
+                }else if((selectedIds!=null||selectedUnits!=null)&&"chunks".equals(field)){
                     require(token==com.fasterxml.jackson.core.JsonToken.START_ARRAY&&selectedChunks!=null,HttpStatus.BAD_GATEWAY,"CANONICAL_JSON_INVALID");
                     while(parser.nextToken()!=com.fasterxml.jackson.core.JsonToken.END_ARRAY){
                         require(parser.currentToken()==com.fasterxml.jackson.core.JsonToken.START_OBJECT,HttpStatus.BAD_GATEWAY,"CANONICAL_JSON_INVALID");
                         JsonNode chunk=JsonUtils.mapper().readTree(parser);
                         require(chunk!=null&&chunk.isObject()&&chunk.path("id").isTextual()&&!chunk.path("id").asText().isEmpty(),HttpStatus.BAD_GATEWAY,"CANONICAL_JSON_INVALID");
-                        String id=chunk.path("id").asText();if(selectedIds.contains(id))require(selectedChunks.putIfAbsent(id,chunk)==null,HttpStatus.CONFLICT,"CANONICAL_CHUNK_AMBIGUOUS");
+                        String id=chunk.path("id").asText();if(selectedIds!=null&&selectedIds.contains(id)||selectedUnits!=null&&selectedUnits.contains(chunk.path("unitId").asText()))require(selectedChunks.putIfAbsent(id,chunk)==null,HttpStatus.CONFLICT,"CANONICAL_CHUNK_AMBIGUOUS");
                     }
                 }else parser.skipChildren();
             }

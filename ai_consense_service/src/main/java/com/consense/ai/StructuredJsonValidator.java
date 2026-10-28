@@ -50,24 +50,25 @@ final class StructuredJsonValidator {
 
     static <T> List<T> decodeRecords(String raw, Class<T> elementType, Schema schema) {
         JsonNode root=strictJson(raw);
-        if(!root.isObject()||root.size()!=1||!root.has("records"))throw failure(SCHEMA_MISMATCH);
+        if(!root.isObject()||root.size()!=1||!root.has("records"))throw mismatch("$","records_wrapper",null,root);
         return decodeArray(root.get("records"),elementType,schema);
     }
 
     private static JsonNode strictJson(String raw) {
-        if (raw == null || raw.trim().isEmpty()) throw failure(INVALID_JSON);
+        if (raw == null || raw.trim().isEmpty()) throw jsonFailure(raw);
         try { return STRICT_MAPPER.readTree(raw); }
-        catch (Exception invalid) { throw failure(INVALID_JSON); }
+        catch (Exception invalid) { throw jsonFailure(raw); }
     }
 
     private static <T> List<T> decodeArray(JsonNode root,Class<T> elementType,Schema schema) {
         String rejectionReason = "none";
         try {
-            if (root == null || !root.isArray()) throw failure(SCHEMA_MISMATCH);
-            for (JsonNode item : root) {
-                if (item == null || item.isNull() || item.isArray()) throw failure(SCHEMA_MISMATCH);
+            if (root == null || !root.isArray()) throw mismatch("$","root_array",schema,root);
+            int ordinal=0;for (JsonNode item : root) {
+                if (item == null || item.isNull() || item.isArray()) throw mismatch("$["+ordinal+"]","flat_array_item",schema.items,item);
+                ordinal++;
             }
-            validate(root, schema);
+            validate(root, schema,"$");
             try {
                 return STRICT_MAPPER.convertValue(root,
                         STRICT_MAPPER.getTypeFactory().constructCollectionType(List.class, elementType));
@@ -175,47 +176,63 @@ final class StructuredJsonValidator {
         return value.intValue();
     }
 
-    private static void validate(JsonNode value, Schema schema) {
+    private static void validate(JsonNode value, Schema schema,String path) {
         if (value.isNull() && schema.nullable) return;
         switch (schema.type) {
             case "array":
-                if (!value.isArray()) throw failure(SCHEMA_MISMATCH);
-                checkBounds(value.size(), schema);
-                if (schema.items != null) for (JsonNode item : value) validate(item, schema.items);
+                if (!value.isArray()) throw mismatch(path,"type",schema,value);
+                checkBounds(value.size(),schema,path,value,"minItems","maxItems");
+                if (schema.items != null){int ordinal=0;for (JsonNode item : value)validate(item,schema.items,path+"["+(ordinal++)+"]");}
                 break;
             case "object":
-                if (!value.isObject()) throw failure(SCHEMA_MISMATCH);
-                for (String required : schema.required) if (!value.has(required)) throw failure(SCHEMA_MISMATCH);
+                if (!value.isObject()) throw mismatch(path,"type",schema,value);
+                for (String required : schema.required) if (!value.has(required)) throw mismatch(propertyPath(path,required),"required",schema.properties.get(required),null);
                 Iterator<Map.Entry<String, JsonNode>> fields = value.fields();
                 while (fields.hasNext()) {
                     Map.Entry<String, JsonNode> field = fields.next();
                     Schema property = schema.properties.get(field.getKey());
-                    if (property != null) validate(field.getValue(), property);
-                    else if (!schema.allowAdditional) throw failure(SCHEMA_MISMATCH);
+                    if (property != null) validate(field.getValue(),property,propertyPath(path,field.getKey()));
+                    else if (!schema.allowAdditional) throw mismatch(propertyPath(path,"__unexpected__"),"additionalProperties",null,field.getValue());
                 }
                 break;
             case "integer":
                 if (!value.isIntegralNumber() || !value.canConvertToInt() || value.intValue() < 0)
-                    throw failure(SCHEMA_MISMATCH);
-                checkBounds(value.intValue(), schema);
+                    throw mismatch(path,"integer_type_or_range",schema,value);
+                checkBounds(value.intValue(),schema,path,value,"minimum","maximum");
                 break;
             case "string":
-                if (!value.isTextual()) throw failure(SCHEMA_MISMATCH);
+                if (!value.isTextual()) throw mismatch(path,"type",schema,value);
                 String text = value.textValue();
-                checkBounds(text.codePointCount(0, text.length()), schema);
-                if (schema.allowedStrings != null && !schema.allowedStrings.contains(text)) throw failure(SCHEMA_MISMATCH);
+                checkBounds(text.codePointCount(0,text.length()),schema,path,value,"minLength","maxLength");
+                if (schema.allowedStrings != null && !schema.allowedStrings.contains(text)) throw mismatch(path,"enum",schema,value);
                 break;
             default: throw failure(UNSUPPORTED_SCHEMA);
         }
     }
 
-    private static void checkBounds(int size, Schema schema) {
-        if ((schema.minimum != null && size < schema.minimum) || (schema.maximum != null && size > schema.maximum))
-            throw failure(SCHEMA_MISMATCH);
+    private static void checkBounds(int size,Schema schema,String path,JsonNode value,String minimum,String maximum) {
+        if(schema.minimum!=null&&size<schema.minimum)throw mismatch(path,minimum,schema,value);
+        if(schema.maximum!=null&&size>schema.maximum)throw mismatch(path,maximum,schema,value);
     }
 
     private static StructuredOutputValidationException failure(StructuredOutputValidationException.Reason reason) {
-        return new StructuredOutputValidationException(reason);
+        return diagnostic(reason,"$","schema_or_mapping",null,null,-1);
+    }
+    private static StructuredOutputValidationException jsonFailure(String raw){return diagnostic(INVALID_JSON,"$","invalid_json",null,null,raw==null?-1:raw.length());}
+    private static StructuredOutputValidationException mismatch(String path,String constraint,Schema schema,JsonNode value){
+        int length=value==null?-1:value.isTextual()?value.textValue().codePointCount(0,value.textValue().length()):value.isContainerNode()?value.size():-1;
+        return diagnostic(SCHEMA_MISMATCH,path,constraint,schema,value,length);
+    }
+    private static String propertyPath(String path,String property){return path+"."+(property.matches("[A-Za-z_][A-Za-z0-9_]{0,47}")?property:"__schema_property__");}
+    private static StructuredOutputValidationException diagnostic(StructuredOutputValidationException.Reason reason,String path,String constraint,Schema schema,JsonNode value,int length){
+        String safePath=path.length()<=160&&path.matches("\\$(?:\\[[0-9]{1,6}\\]|\\.[A-Za-z_][A-Za-z0-9_]{0,47}){0,24}")?path:"$.path_limit";
+        Map<String,Object> fields=new LinkedHashMap<>();fields.put("schemaPath",safePath);fields.put("constraint",constraint);
+        fields.put("expectedType",schema==null?"unspecified":schema.type);fields.put("actualType",value==null?"MISSING":value.getNodeType().name());fields.put("actualLength",length);
+        fields.put("minimum",schema==null||schema.minimum==null?-1:schema.minimum);fields.put("maximum",schema==null||schema.maximum==null?-1:schema.maximum);
+        try{LOG.info("Structured validation failure reason={} schemaPath={} constraint={} expectedType={} actualType={} actualLength={} minimum={} maximum={} threadId={}",
+                reason.name(),safePath,constraint,fields.get("expectedType"),fields.get("actualType"),length,fields.get("minimum"),fields.get("maximum"),Thread.currentThread().getId());}
+        catch(Throwable ignored){/* Scalar diagnostics cannot change validation. */}
+        return new StructuredOutputValidationException(reason,fields);
     }
 
     private static Set<String> keys(String... names) { return new HashSet<>(Arrays.asList(names)); }

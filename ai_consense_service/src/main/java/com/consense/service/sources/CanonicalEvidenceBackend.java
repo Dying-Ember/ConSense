@@ -63,6 +63,48 @@ public class CanonicalEvidenceBackend {
             throw new CanonicalEvidenceException(HttpStatus.BAD_GATEWAY,"CANONICAL_CONDITIONAL_IDENTITY_MISMATCH");
         return reply;
     }
+    @FunctionalInterface public interface NormalSnapshotVerifier {void verify(Reader reader)throws IOException;}
+    /** A 200 reply is checked through a bounded stream, never a complete byte[] or String. */
+    public boolean verifyNormalSnapshot(String projection,String module,String original,String wireSha256,NormalSnapshotVerifier verifier){
+        if(projection==null||!projection.matches("[a-f0-9]{64}")||original==null||!original.matches("[a-f0-9]{64}")
+                ||wireSha256==null||!wireSha256.matches("[a-f0-9]{64}")||verifier==null)
+            throw new CanonicalEvidenceException(HttpStatus.BAD_REQUEST,"CANONICAL_SHA_INVALID");
+        String expected="\""+wireSha256+"\"";
+        Request request=new Request.Builder().url(normalBase(module).newBuilder().addPathSegment("canonical").addPathSegment(projection).addQueryParameter("module",module).build())
+                .header("If-None-Match",expected).get().build();
+        int timeout=normalTimeout(),maximum=normalMaximumBytes();
+        OkHttpClient client=new OkHttpClient.Builder().followRedirects(false).followSslRedirects(false).retryOnConnectionFailure(false)
+                .readTimeout(timeout,TimeUnit.MILLISECONDS).callTimeout(timeout,TimeUnit.MILLISECONDS).build();
+        try(Response response=client.newCall(request).execute()){
+            // Normal canonical replies bind the source in the verified body/CAS, without a source header.
+            String source=response.header("X-Source-Sha256");
+            if(!projection.equals(response.header("X-Projection-Sha256"))||source!=null&&!original.equals(source))
+                throw new CanonicalEvidenceException(HttpStatus.BAD_GATEWAY,"CANONICAL_CONDITIONAL_IDENTITY_MISMATCH");
+            if(response.code()==304){
+                if(!expected.equals(response.header("ETag")))throw new CanonicalEvidenceException(HttpStatus.BAD_GATEWAY,"CANONICAL_CONDITIONAL_IDENTITY_MISMATCH");
+                return true;
+            }
+            if(response.code()!=200||response.body()==null)throw new CanonicalEvidenceException(HttpStatus.BAD_GATEWAY,"OER_EVIDENCE_UPSTREAM_UNAVAILABLE");
+            if(response.body().contentLength()>maximum)throw new CanonicalEvidenceException(HttpStatus.BAD_GATEWAY,"OER_EVIDENCE_TOO_LARGE");
+            java.security.MessageDigest digest;
+            try{digest=java.security.MessageDigest.getInstance("SHA-256");}catch(java.security.NoSuchAlgorithmException impossible){throw new IllegalStateException(impossible);}
+            InputStream limited=new FilterInputStream(response.body().byteStream()){
+                long bytes;
+                private void count(int size){if(size>0&&(bytes+=size)>maximum)throw new CanonicalEvidenceException(HttpStatus.BAD_GATEWAY,"OER_EVIDENCE_TOO_LARGE");}
+                @Override public int read(byte[] value,int offset,int length)throws IOException {int size=in.read(value,offset,length);count(size);return size;}
+                @Override public int read()throws IOException {int value=in.read();if(value>=0)count(1);return value;}
+            };
+            CharsetDecoder decoder=StandardCharsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPORT).onUnmappableCharacter(CodingErrorAction.REPORT);
+            try(Reader reader=new InputStreamReader(new java.security.DigestInputStream(limited,digest),decoder)){
+                Reader owned=new FilterReader(reader){@Override public void close(){/* The transport owns and closes the stream. */}};
+                verifier.verify(owned);
+                if(owned.read()!=-1)throw new CanonicalEvidenceException(HttpStatus.BAD_GATEWAY,"CANONICAL_CONDITIONAL_IDENTITY_MISMATCH");
+            }
+            String actual="\""+java.util.HexFormat.of().formatHex(digest.digest())+"\"";
+            if(!actual.equals(response.header("ETag")))throw new CanonicalEvidenceException(HttpStatus.BAD_GATEWAY,"CANONICAL_CONDITIONAL_IDENTITY_MISMATCH");
+            return true;
+        }catch(IOException invalid){throw new CanonicalEvidenceException(HttpStatus.BAD_GATEWAY,"OER_EVIDENCE_UPSTREAM_UNAVAILABLE");}
+    }
     public String normalObserved(String request,String module){
         return normalObservedReply(request,module).json();
     }

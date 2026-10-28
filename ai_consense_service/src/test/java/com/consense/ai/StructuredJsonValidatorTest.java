@@ -26,6 +26,30 @@ import static org.mockito.Mockito.*;
 
 /** Schema/JSON protocol fixtures only; acceptance does not assert source truth or model quality. */
 class StructuredJsonValidatorTest {
+    @Test void sharedFailureLogExposesTheNestedConstraintWithoutModelValues() {
+        Logger logger=(Logger)LoggerFactory.getLogger(StructuredJsonValidator.class);ListAppender<ILoggingEvent> trace=new ListAppender<>();trace.start();logger.addAppender(trace);
+        try {
+            ObjectNode record=issue();String privateValue="PRIVATE_QUOTE_SENTINEL".repeat(80);evidence(record).put("quote",privateValue);
+            StructuredOutputValidationException invalid=assertThrows(StructuredOutputValidationException.class,()->decode(array(record)));
+            assertEquals(SCHEMA_MISMATCH,invalid.getReason());
+            String logs=trace.list.stream().map(ILoggingEvent::getFormattedMessage).reduce("",(a,b)->a+"\n"+b);
+            assertTrue(logs.contains("schemaPath=$[0].evidence[0].quote"));assertTrue(logs.contains("constraint=maxLength"));
+            assertTrue(logs.contains("expectedType=string"));assertTrue(logs.contains("actualType=STRING"));assertTrue(logs.contains("maximum=1200"));
+            assertFalse(logs.contains("PRIVATE_QUOTE_SENTINEL"));assertTrue(logs.length()<2000);
+        } finally {logger.detachAppender(trace);}
+    }
+    @Test void unknownPropertyNamesAndMalformedJsonAreNeverCopiedIntoFailureLogs(){
+        Logger logger=(Logger)LoggerFactory.getLogger(StructuredJsonValidator.class);ListAppender<ILoggingEvent> trace=new ListAppender<>();trace.start();logger.addAppender(trace);
+        try{
+            ObjectNode record=issue();record.put("PRIVATE_UNKNOWN_PROPERTY_SENTINEL","PRIVATE_UNKNOWN_VALUE_SENTINEL");
+            assertThrows(StructuredOutputValidationException.class,()->decode(array(record)));
+            assertThrows(StructuredOutputValidationException.class,()->decode("PRIVATE_INVALID_JSON_SENTINEL"));
+            assertThrows(StructuredOutputValidationException.class,()->AiGateway.decodeStructuredJson("{\"PRIVATE_WRAPPER_SENTINEL\":[]}",JsonNode.class,actualSchema("submitted-1"),true));
+            String logs=trace.list.stream().map(ILoggingEvent::getFormattedMessage).reduce("",(a,b)->a+"\n"+b);
+            assertTrue(logs.contains("schemaPath=$[0].__unexpected__"));assertTrue(logs.contains("constraint=additionalProperties"));assertTrue(logs.contains("constraint=invalid_json"));assertTrue(logs.contains("constraint=records_wrapper"));
+            assertFalse(logs.contains("PRIVATE_"));assertTrue(logs.length()<3000);
+        }finally{logger.detachAppender(trace);}
+    }
     private static JsonNode actualSchema(String... ids) {
         try {
             Method method=Class.forName("com.consense.service.vetting.VettingOutputSchema")
@@ -310,16 +334,17 @@ class StructuredJsonValidatorTest {
                     ()->StructuredJsonValidator.decode("\"MODEL_SENTINEL\"",JsonNode.class,schema)).getReason());
             assertEquals(INVALID_JSON,assertThrows(StructuredOutputValidationException.class,
                     ()->StructuredJsonValidator.decode("{MODEL_SENTINEL",JsonNode.class,schema)).getReason());
-            assertEquals(4,trace.list.size());
-            assertTrue(trace.list.get(0).getFormattedMessage().contains("rootType=ARRAY arrayItems=0"));
-            assertTrue(trace.list.get(0).getFormattedMessage().contains("rejectionReason=none"));
-            assertTrue(trace.list.get(1).getFormattedMessage().contains("rootType=OBJECT arrayItems=-1"));
-            assertTrue(trace.list.get(1).getFormattedMessage().contains("rejectionReason=SCHEMA_MISMATCH"));
-            assertTrue(trace.list.get(2).getFormattedMessage().contains("rootType=ARRAY arrayItems=1"));
-            assertTrue(trace.list.get(3).getFormattedMessage().contains("rootType=STRING arrayItems=-1"));
+            List<ILoggingEvent> roots=new ArrayList<>();for(ILoggingEvent event:trace.list)if(event.getFormattedMessage().startsWith("Structured array decode"))roots.add(event);
+            assertEquals(4,roots.size());
+            assertTrue(roots.get(0).getFormattedMessage().contains("rootType=ARRAY arrayItems=0"));
+            assertTrue(roots.get(0).getFormattedMessage().contains("rejectionReason=none"));
+            assertTrue(roots.get(1).getFormattedMessage().contains("rootType=OBJECT arrayItems=-1"));
+            assertTrue(roots.get(1).getFormattedMessage().contains("rejectionReason=SCHEMA_MISMATCH"));
+            assertTrue(roots.get(2).getFormattedMessage().contains("rootType=ARRAY arrayItems=1"));
+            assertTrue(roots.get(3).getFormattedMessage().contains("rootType=STRING arrayItems=-1"));
             for(ILoggingEvent event:trace.list) {
                 String message=event.getFormattedMessage();assertEquals(Level.INFO,event.getLevel());
-                assertTrue(message.contains("expectedMinItems=0 expectedMaxItems=2"));
+                if(message.startsWith("Structured array decode"))assertTrue(message.contains("expectedMinItems=0 expectedMaxItems=2"));
                 assertTrue(message.contains("threadId="+Thread.currentThread().getId()));assertTrue(message.length()<300);
                 for(String secret:List.of("SCHEMA_SENTINEL","SOURCE_SENTINEL","MODEL_SENTINEL"))assertFalse(message.contains(secret));
                 assertNull(event.getThrowableProxy());

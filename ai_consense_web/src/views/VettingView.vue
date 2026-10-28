@@ -1520,7 +1520,7 @@ function tagClass(group: string) {
                 <p>{{ evidenceItem.fileName }} · {{ evidenceItem.pageNo }} · {{ evidenceItem.clauseId }} · {{ evidenceItem.anchor }}</p>
                 <div class="quote">{{ evidenceItem.quote }}</div>
                 <FixedBaselineEvidencePanel v-if="evidenceItem.fixedBaselineEvidence" :pointer="evidenceItem.fixedBaselineEvidence" :locale="store.locale" />
-                <CanonicalEvidencePanel v-else-if="evidenceItem.canonicalEvidence" :pointer="evidenceItem.canonicalEvidence" :locale="store.locale" />
+                <CanonicalEvidencePanel v-else-if="evidenceItem.canonicalEvidence" :pointer="evidenceItem.canonicalEvidence" :locale="store.locale" deferred />
               </div>
             </div>
           </div>
@@ -1922,7 +1922,7 @@ function tagClass(group: string) {
                 </a>
                 <p v-if="!item.located" class="warning-note">{{ t('vetting.drawer.notLocated') }}</p>
                 <FixedBaselineEvidencePanel v-if="item.fixedBaselineEvidence" :pointer="item.fixedBaselineEvidence" :locale="store.locale" />
-                <CanonicalEvidencePanel v-else-if="item.canonicalEvidence" :pointer="item.canonicalEvidence" :locale="store.locale" />
+                <CanonicalEvidencePanel v-else-if="drawerOpen && item.canonicalEvidence" :pointer="item.canonicalEvidence" :locale="store.locale" deferred />
                 <p v-if="selectedFinding.source === 'rule'" class="muted small">{{ t('vetting.coverage.ruleEvidence') }}</p>
                 <details v-if="item.packetId || item.packetSourceSnapshotSha256" class="small evidence-technical-details">
                   <summary>{{ t('vetting.coverage.packetIdentity') }}</summary>

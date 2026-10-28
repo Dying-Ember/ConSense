@@ -3,13 +3,14 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { CanonicalEvidenceError, evidenceCoverage, fetchCanonicalAsset, fetchCanonicalPointer, isNativeEvidence, isNormalObservedEvidence, orderedEvidenceAssets, orderedEvidenceParts } from '../api/canonicalEvidence'
 import type { CanonicalEvidenceAddress, CanonicalEvidenceAsset, CanonicalEvidencePointer } from '../api/canonicalEvidence'
 
-const props = withDefaults(defineProps<{ pointer: CanonicalEvidenceAddress | null; locale?: 'zh-Hans' | 'zh-Hant' | 'en' }>(), { locale: 'zh-Hans' })
+const props = withDefaults(defineProps<{ pointer: CanonicalEvidenceAddress | null; locale?: 'zh-Hans' | 'zh-Hant' | 'en'; deferred?: boolean }>(), { locale: 'zh-Hans', deferred: false })
 const copy = {
   sourcePage: ['完整原页渲染', '完整原頁渲染', 'Full original page render'],
   sourceImage: ['来源图像', '來源圖像', 'Source image'],
   technical: ['技术详情（来源标识与位置）', '技術詳情（來源標識與位置）', 'Technical details (source identity and positions)'],
   unresolved: ['仍有未确认的来源或显示限制，请结合原件核对后采用。', '仍有未確認的來源或顯示限制，請結合原件核對後採用。', 'Source or display limitations remain unresolved. Check the original before relying on this evidence.'],
   title: ['原件证据', '原件證據', 'Original source evidence'], loading: ['正在读取绑定的原件证据…', '正在讀取綁定的原件證據…', 'Loading bound source evidence…'],
+  viewContext: ['查看原文上下文', '查看原文上下文', 'View source context'],
   empty: ['请选择明确的 canonical 原件位置。', '請選擇明確的 canonical 原件位置。', 'Select an explicit canonical source address.'],
   source: ['来源文件', '來源文件', 'Source file'], pages: ['原 PDF 物理页', '原 PDF 物理頁', 'Original PDF physical pages'],
   notHuman: ['未经过人工确认；unknown 属性继续保留。', '未經過人工確認；unknown 屬性繼續保留。', 'Not human-confirmed; unknown attributes remain unknown.'],
@@ -59,10 +60,14 @@ function imageFailed(assetId: string, url: string | null) {
   view.url = null; view.status = 'error'; view.error = 'IMAGE_DECODE_FAILED'
 }
 
-async function load() {
-  const current = ++epoch
+function resetSourceContext() {
+  ++epoch
   active?.abort(); active = null; clearAssets()
   resolved.value = null; error.value = ''; loading.value = false
+}
+async function load() {
+  resetSourceContext()
+  const current = epoch
   if (!props.pointer) return
   // Capture primitives so a parent mutation cannot change request identity mid-flight.
   const address = Object.freeze({ ...props.pointer })
@@ -87,8 +92,8 @@ async function load() {
   } catch (caught) { if (current === epoch) error.value = reason(caught) }
   finally { if (current === epoch) loading.value = false }
 }
-watch(() => props.pointer, load, { immediate: true, deep: true })
-onBeforeUnmount(() => { ++epoch; active?.abort(); clearAssets() })
+watch(() => [props.pointer, props.deferred], () => { if (props.deferred) resetSourceContext(); else void load() }, { immediate: true, deep: true })
+onBeforeUnmount(resetSourceContext)
 </script>
 
 <template>
@@ -97,7 +102,7 @@ onBeforeUnmount(() => { ++epoch; active?.abort(); clearAssets() })
     <p v-if="!pointer">{{ label('empty') }}</p>
     <p v-if="loading" role="status">{{ label('loading') }}</p>
     <p v-if="error" role="alert">{{ displayReason(error) }}</p>
-    <button v-if="pointer && !loading" type="button" @click="load">{{ label('retry') }}</button>
+    <button v-if="pointer && !loading" type="button" @click="load">{{ label(deferred && !resolved && !error ? 'viewContext' : 'retry') }}</button>
     <template v-if="resolved">
       <dl class="source-identity">
         <dt>{{ label('source') }}</dt><dd>{{ resolved.sourceFilename }}</dd>

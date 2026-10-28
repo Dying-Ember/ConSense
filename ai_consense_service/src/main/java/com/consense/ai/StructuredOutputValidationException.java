@@ -1,6 +1,7 @@
 package com.consense.ai;
 
 import com.consense.common.BizException;
+import java.util.*;
 
 /** Fixed diagnostics only; raw model/source text belongs to the existing response probe. */
 public final class StructuredOutputValidationException extends BizException {
@@ -13,13 +14,19 @@ public final class StructuredOutputValidationException extends BizException {
     }
 
     private final Reason reason;
+    private final Map<String,Object> diagnostics;
 
     public StructuredOutputValidationException(Reason reason) {
+        this(reason,Collections.emptyMap());
+    }
+    StructuredOutputValidationException(Reason reason,Map<String,Object> diagnostics) {
         super(5002, message(reason));
         this.reason = reason;
+        this.diagnostics=Collections.unmodifiableMap(new LinkedHashMap<>(diagnostics));
     }
 
     public Reason getReason() { return reason; }
+    public Map<String,Object> getDiagnostics() { return diagnostics; }
 
     public String getFailureKind() { return "structured_output_invalid"; }
 

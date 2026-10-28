@@ -66,7 +66,8 @@ final class VettingReviewProbe {
                 else if(value instanceof String) {
                     String code=(String)value;
                     if(("queryFingerprint".equals(key)||"sessionFingerprint".equals(key))&&code.matches("[a-f0-9]{12,16}"))safe.put(key,code);
-                    else if(Arrays.asList("reason","status","outcome","phase","role","format","failureKind").contains(key))safe.put(key,code.matches("[A-Za-z][A-Za-z0-9_]{0,63}")?code:"unknown_code");
+                    else if("schemaPath".equals(key)&&code.length()<=160&&code.matches("\\$(?:\\[[0-9]{1,6}\\]|\\.[A-Za-z_][A-Za-z0-9_]{0,47}){0,24}"))safe.put(key,code);
+                    else if(Arrays.asList("reason","status","outcome","phase","role","format","failureKind","purpose","constraint","expectedType","actualType").contains(key))safe.put(key,code.matches("[A-Za-z][A-Za-z0-9_]{0,63}")?code:"unknown_code");
                 }
             }
             log.info("ConSense stage kind={} run={} operation={} call={}/{} direction={} role={} stage={} thread={} values={}",

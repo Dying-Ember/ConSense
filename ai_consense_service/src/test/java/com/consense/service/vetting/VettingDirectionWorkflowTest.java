@@ -150,6 +150,8 @@ class VettingDirectionWorkflowTest {
     @Test void generalDirectionDoesNotSearchTheStandardLibraryEagerly()throws Exception{exerciseInitialCounterpart(true,true,false);}
     @Test void selectedReferenceScopeChangeStopsKnownCounterpartPublication()throws Exception{exerciseInitialCounterpart(true,false,true);}
     @Test void matchingProjectCounterpartPrecedesTheLibraryCopyWithoutClaimingAdoption()throws Exception{exerciseInitialCounterpart(true,false,false,true);}
+    @Test void actualCallerKeepsNamedRankedCounterpartBeforeAFullProjectContext()throws Exception{exerciseInitialCounterpart(true,false,false,true,true);}
+    @Test void actualAppendixUCallerKeepsNamedSeedAndOperativeTextBeforeBulkTableRows()throws Exception{exerciseInitialCounterpart(true,false,false,true,true,true);}
     @Test void allRankedTenderOriginsPrecedeBulkNamedCounterparts(){
         Chunk a=chunk("a","aaa"),b=chunk("b","bbb"),gcc=chunk("gcc","cc"),gct=chunk("gct","tt");gcc.setRole("standard");gct.setRole("standard");
         List<Chunk> named=Arrays.asList(gcc,gct);
@@ -168,13 +170,39 @@ class VettingDirectionWorkflowTest {
         List<Chunk> references=new ArrayList<Chunk>();
         for(int i=0;i<20;i++){Chunk reference=chunk("counterpart-"+i,String.join("",Collections.nCopies(600,"r")));
             reference.setRole(i==0?"package_manifest":i%2==0?"tender":"standard");references.add(reference);references.add(reference);}
-        VettingContextBuilder.Selection selection=VettingSemanticReview.directionSelection(VettingSemanticReview.directionEvidenceOrder(project,references,references,Collections.emptyList(),6000),Collections.emptyList(),6000);
-        assertEquals(Arrays.asList(first,second,third,context),selection.getChunks().subList(0,4),"Every ranked seed and its related project text precede bulk counterpart context");
+        List<Chunk> rankedReferences=new OerBusinessEvidence.ReviewTextChunks(references,Collections.singleton(references.get(0).getId()));
+        VettingContextBuilder.Selection selection=VettingSemanticReview.directionSelection(VettingSemanticReview.directionEvidenceOrder(project,rankedReferences,rankedReferences,Collections.emptyList(),6000),Collections.emptyList(),6000);
+        assertEquals(Arrays.asList(first,second,third,references.get(0),context),selection.getChunks().subList(0,5),"Ranked project and counterpart seeds precede both sources' bulk context");
         Set<String> ids=new HashSet<String>();int tender=0,standard=0,manifest=0,chars=0;
         for(Chunk selected:selection.getChunks()){assertTrue(ids.add(selected.getId()),"Repeated counterpart IDs must consume the budget once");chars+=selected.getContent().length();
             if("tender".equals(selected.getRole()))tender++;else if("standard".equals(selected.getRole()))standard++;else if("package_manifest".equals(selected.getRole()))manifest++;}
         assertEquals(5,tender);assertEquals(2,standard);assertEquals(1,manifest);assertEquals(5477,chars);assertEquals(chars,selection.getContentChars());assertTrue(chars<=6000);
         for(Chunk original:Arrays.asList(first,second,third,context))assertSame(original,selection.getChunks().stream().filter(c->c.getId().equals(original.getId())).findFirst().orElseThrow(AssertionError::new));
+    }
+    @Test void requiredManifestBodyKeepsItsPriorityWhenANamedCounterpartCannotFit(){
+        Chunk tender=chunk("tender-anchor","The reference drawings listed in Appendix U do not form part of the Contract.");
+        Chunk heading=chunk("list-heading","APU.A010.P");heading.setRole("package_manifest");
+        Chunk body=chunk("list-body","These drawings are for reference only and are not part of the Drawings or Contract.");body.setRole("package_manifest");
+        Chunk bulk=chunk("bulk-project","p".repeat(9800));
+        List<Chunk> required=new OerBusinessEvidence.ReviewTextChunks(Arrays.asList(heading,body),Collections.singleton(heading.getId()));
+        List<Chunk> project=VettingSemanticReview.requiredProjectTextFirst(new OerBusinessEvidence.ReviewTextChunks(Arrays.asList(tender,bulk),Collections.singleton(tender.getId())),required);
+        Chunk oversized=chunk("named-reference","r".repeat(10000));oversized.setRole("standard");
+        List<Chunk> named=Collections.singletonList(oversized);
+        VettingContextBuilder.Selection selected=VettingSemanticReview.directionSelection(VettingSemanticReview.directionEvidenceOrder(project,named,named,required,10000),Collections.emptyList(),10000);
+        assertTrue(selected.getChunks().containsAll(Arrays.asList(tender,heading,body)));assertFalse(selected.getChunks().contains(oversized));
+        assertEquals("package_manifest",body.getRole());assertSame(body,selected.getChunks().stream().filter(c->c.getId().equals(body.getId())).findFirst().orElseThrow());
+        assertTrue(selected.getContentChars()<=10000);assertEquals(10000,oversized.getContent().length());
+    }
+    @Test void followupKeepsItsAffectedTextAndNamedGccSeedBeforeBulkContext(){
+        Chunk affected=chunk("affected","Affected programme submission provision.");
+        Chunk seed=chunk("retrieved-seed","The matching project Letter of Acceptance specifies the submission period.");
+        Chunk bulk=chunk("bulk","p".repeat(19900));
+        Chunk gcc=chunk("named-gcc","GCC 5.7: Submit the programme within fourteen days unless otherwise specified.");gcc.setRole("standard");
+        List<Chunk> project=new OerBusinessEvidence.ReviewTextChunks(Arrays.asList(seed,bulk),Collections.singleton(seed.getId()));
+        List<Chunk> named=Collections.singletonList(gcc),required=Collections.singletonList(affected);
+        VettingContextBuilder.Selection selected=VettingSemanticReview.directionSelection(VettingSemanticReview.directionEvidenceOrder(project,named,named,required,20000),required,20000);
+        assertTrue(selected.getChunks().containsAll(Arrays.asList(affected,seed,gcc)));assertFalse(selected.getChunks().contains(bulk));
+        assertTrue(selected.getContentChars()<=20000);assertEquals(19900,bulk.getContent().length());
     }
     @Test void knownReferenceQueriesUseOnlyAssignedNamesAndPreserveExplicitClauseIdentifiers(){
         VettingReviewDirections.Direction programme=VettingReviewDirections.plan(new String[0]).stream().filter(d->d.itemIds().contains("APP-I-017")).findFirst().orElseThrow();
@@ -190,12 +218,30 @@ class VettingDirectionWorkflowTest {
         exerciseInitialCounterpart(available,general,selectionChanged,false);
     }
     private void exerciseInitialCounterpart(boolean available,boolean general,boolean selectionChanged,boolean projectCopy)throws Exception{
+        exerciseInitialCounterpart(available,general,selectionChanged,projectCopy,false);
+    }
+    private void exerciseInitialCounterpart(boolean available,boolean general,boolean selectionChanged,boolean projectCopy,boolean fullProjectContext)throws Exception{
+        exerciseInitialCounterpart(available,general,selectionChanged,projectCopy,fullProjectContext,false);
+    }
+    private void exerciseInitialCounterpart(boolean available,boolean general,boolean selectionChanged,boolean projectCopy,boolean fullProjectContext,boolean fullRequiredManifest)throws Exception{
         ConsenseProperties props=new ConsenseProperties();props.getQwen().setEnabled(true);props.getQwen().setApiKey("AUTHORED_TEST_CREDENTIAL");props.getVetting().setSemanticContextChars(180);
         Chunk tender=chunk("tender","The programme shall be submitted within the period stated in the project Letter of Acceptance.");
         Chunk unrelated=chunk("extra","Unrelated project text. ".repeat(20));
         Chunk gcc=chunk("gcc","GCC 5.7: Submit the programme within 14 days of the Letter of Acceptance, unless otherwise stated.");gcc.setRole("standard");gcc.setFileKey("GCC");
         Chunk projectGcc=chunk("project-gcc","Project-supplied GCC 5.7: Use the programme period expressly stated in the Letter of Acceptance.");projectGcc.setRole("standard");projectGcc.setFileKey("GCC");
         props.getVetting().setSemanticContextChars(tender.getContent().length()+(projectCopy?projectGcc:gcc).getContent().length()+5);
+        Chunk secondTender=chunk("second-tender","The project Letter of Acceptance states the programme submission period.");
+        Chunk counterpartContext=chunk("counterpart-context","Named reference context. ".repeat(500));
+        if(fullProjectContext){props.getVetting().setSemanticContextChars(10000);unrelated.setContent("p".repeat(10000-tender.getContent().length()-secondTender.getContent().length()));}
+        Chunk manifestHeading=chunk("ap-u-heading","APU.A010.P");manifestHeading.setRole("package_manifest");manifestHeading.setFileKey("APU");
+        Chunk manifestBody=chunk("ap-u-body","The listed reference drawings are not part of the Drawings or Contract.");manifestBody.setRole("package_manifest");manifestBody.setFileKey("APU");
+        List<Chunk> manifestText=new ArrayList<>(Arrays.asList(manifestHeading,manifestBody));
+        if(fullRequiredManifest){
+            gcc.setContent("GCC 1.1: Drawings means the Contract drawings and their agreed modifications.");
+            projectGcc.setContent("Project GCC 1.1: Drawings means the Contract drawings issued under the Contract.");
+            int remaining=10000-tender.getContent().length()-secondTender.getContent().length()-manifestHeading.getContent().length()-manifestBody.getContent().length();
+            for(int i=0;remaining>0;i++){int chars=Math.min(96,remaining);Chunk row=chunk("ap-u-table-"+i,"t".repeat(chars));row.setRole("package_manifest");row.setFileKey("APU");manifestText.add(row);remaining-=chars;}
+        }
         ObjectNode raw=JsonUtils.mapper().valueToTree(gcc);raw.putObject("sourceQuality").put("family","GCC");
         FixedReferenceEvidence proof=new FixedReferenceEvidence(gcc.getId(),0.9,raw,null,null);com.consense.vector.VectorStore.SearchHit hit=proof.asHit();
         HttpSupport http=mock(HttpSupport.class);List<String> users=new ArrayList<>();List<String> standardQueries=new ArrayList<>();List<String> counterpartProjectQueries=new ArrayList<>();
@@ -217,10 +263,12 @@ class VettingDirectionWorkflowTest {
         OerBusinessEvidence oer=mock(OerBusinessEvidence.class);review.setOerBusinessEvidence(oer);
         java.lang.reflect.Constructor<OerBusinessEvidence.Session> ctor=OerBusinessEvidence.Session.class.getDeclaredConstructor(String.class,String.class,List.class,List.class,Map.class,Map.class);ctor.setAccessible(true);
         OerBusinessEvidence.Session session=ctor.newInstance("authored","vetting",Collections.singletonList(1L),Collections.emptyList(),new LinkedHashMap<>(),Collections.emptyMap());
-        List<Chunk> corpus=corpus(session,Arrays.asList(tender,unrelated,projectGcc));
+        List<Chunk> corpusChunks=new ArrayList<>(Arrays.asList(tender,secondTender,unrelated,projectGcc,counterpartContext));if(fullRequiredManifest)corpusChunks.addAll(manifestText);
+        List<Chunk> corpus=corpus(session,corpusChunks);
+        when(oer.retrieveRequiredProjectText(eq(session),eq("APU.A010"),any(),anyInt())).thenReturn(fullRequiredManifest?new OerBusinessEvidence.ReviewTextChunks(manifestText,Collections.singleton(manifestHeading.getId())):Collections.emptyList());
         when(oer.retrieveReviewText(eq(session),anyString(),nullable(String.class),any(),anyInt())).thenAnswer(call->{String query=call.getArgument(1),role=call.getArgument(2);
-            if(role==null){counterpartProjectQueries.add(query);return projectCopy?Collections.singletonList(projectGcc):Collections.emptyList();}
-            boolean target=general?query.contains("payment interim certificates"):query.contains("programme submission period GCC 5.7");return target?new OerBusinessEvidence.ReviewTextChunks(Arrays.asList(tender,unrelated),Collections.singleton(tender.getId())):Collections.emptyList();});
+            if(role==null){counterpartProjectQueries.add(query);return projectCopy?(fullProjectContext?new OerBusinessEvidence.ReviewTextChunks(Arrays.asList(counterpartContext,projectGcc),Collections.singleton(projectGcc.getId())):Collections.singletonList(projectGcc)):Collections.emptyList();}
+            boolean target=fullRequiredManifest?query.contains("contractual execution requirements in Appendices A B C versus Appendix U"):general?query.contains("payment interim certificates"):query.contains("programme submission period GCC 5.7");return target?new OerBusinessEvidence.ReviewTextChunks(fullProjectContext?Arrays.asList(tender,secondTender,unrelated):Arrays.asList(tender,unrelated),fullProjectContext?Arrays.asList(tender.getId(),secondTender.getId()):Collections.singleton(tender.getId())):Collections.emptyList();});
         java.lang.reflect.Method run=VettingSemanticReview.class.getDeclaredMethod("reviewDirections",String.class,VettingSemanticReview.Result.class,List.class,List.class,String.class,List.class,Runnable.class,VettingReviewProbe.class);run.setAccessible(true);
         LlmOperation chat=profiles.resolve("qwen");VettingLlmOperation operation=review.captureOperation(chat);VettingSemanticReview.Result result;
         try(LlmProfiles.Scope profile=profiles.bind(chat);VettingSemanticReview.OperationScope bound=review.bindOperation(operation);QwenChatUsagePreflight.Operation.ActionScope action=operation.getQwen().openAction("AUTHORED initial counterpart",()->{})){
@@ -229,8 +277,15 @@ class VettingDirectionWorkflowTest {
         if(selectionChanged){assertTrue(users.isEmpty());assertTrue(result.getWarnings().stream().anyMatch(w->w.contains("Fixed reference editions changed")));return;}
         assertEquals(1,users.size());String prompt=users.get(0);assertTrue(prompt.contains(tender.getContent()));
         if(general){assertTrue(standardQueries.isEmpty());assertTrue(counterpartProjectQueries.isEmpty());assertTrue(prompt.contains("Assigned review direction: GENERAL-"));return;}
-        assertTrue(standardQueries.contains("GCC 5.7"));assertTrue(counterpartProjectQueries.contains("GCC 5.7"));
+        assertTrue(standardQueries.contains(fullRequiredManifest?"GCC 1.1":"GCC 5.7"));assertTrue(counterpartProjectQueries.contains(fullRequiredManifest?"GCC 1.1":"GCC 5.7"));
         assertFalse(prompt.contains("Standard references have not yet been searched"));
+        if(fullProjectContext){
+            System.out.println("AUTHORED_FULL_CONTEXT requiredManifest="+fullRequiredManifest+" namedCounterpartAdmitted="+(prompt.contains(projectGcc.getContent())?1:0)+" budgetChars=10000");
+            assertTrue(prompt.contains(projectGcc.getContent()),"The actual named-reference caller must retain its ranked counterpart before bulk project context");
+            assertTrue(prompt.contains(secondTender.getContent()));assertFalse(prompt.contains(unrelated.getContent()));assertFalse(prompt.contains(counterpartContext.getContent()));
+            if(fullRequiredManifest){assertTrue(prompt.contains("Assigned review direction: CHECKLIST-21"));assertTrue(prompt.contains(manifestBody.getContent()));assertTrue(prompt.contains("package_manifest"));}
+            assertTrue(result.getTopicAudits().stream().flatMap(t->t.getPacketAudits().stream()).allMatch(p->p.getSubmittedChars()<=10000));return;
+        }
         if(available){assertTrue(prompt.contains((projectCopy?projectGcc:gcc).getContent()));if(projectCopy)assertFalse(prompt.contains(gcc.getContent()));assertFalse(prompt.contains(unrelated.getContent()));assertFalse(prompt.contains("Requested standard reference text was not supplied"));assertTrue(prompt.contains("retrieval alone does not establish a matching clause, project adoption or completeness"));}
         else{assertFalse(prompt.contains(gcc.getContent()));assertTrue(prompt.contains("Requested standard reference text was not supplied"));assertTrue(prompt.contains("remain pending"));}
         assertTrue(result.getTopicAudits().stream().flatMap(t->t.getPacketAudits().stream()).allMatch(p->p.getSubmittedChars()<=props.getVetting().getSemanticContextChars()));
