@@ -701,7 +701,7 @@ public class DraftTemplateGraphService {
             scopeReferences(node.get("correction"),queue);scopeReferences(node.get("applicability"),queue);scopeReferences(node.get("factProjectionReview"),queue);
         }
     }
-    private String definitionBasis(Map<String,Object> field) {return "v1:"+DraftAdoption.hash(JsonUtils.write(definitionMeaning(field)));}
+    private static String definitionBasis(Map<String,Object> field) {return "v1:"+DraftAdoption.hash(JsonUtils.write(definitionMeaning(field)));}
     private void preserveDefinitionGraphReview(String projectId,DraftTemplateGraphHead head,Map<String,Object> graph) {
         Map<String,Object> current=asMap(state(graph).get("definitionGraphReview"));if(current.isEmpty())return;
         String prior=head.getDraftRevisionId()!=null?head.getDraftRevisionId():head.getCurrentRevisionId();
@@ -795,7 +795,7 @@ public class DraftTemplateGraphService {
         boolean confirmed="CONFIRMED".equals(revision.getStatus())||Boolean.TRUE.equals(stored.get("confirmed"))||!scopes.isEmpty();
         return map("confirmed",confirmed,"valid",!stale&&(whole||!confirmedFields.isEmpty()),"confirmedFieldIds",confirmedFields,"pendingFieldIds",pendingFields,"fixedCandidateFieldIds",fixedCandidates,"currentDefinitionReviewFieldIds",currentDefinitionReviews,"definitionGroupReadyFieldIds",groupReadyFields,"baselineReuseSupported",templateBaselines!=null&&templateBaselineSources!=null,"completeBaselineReuseSupported",templateBaselines!=null&&templateBaselineSources!=null,"reason",stored.get("reason"),"confirmedAt",stored.get("confirmedAt"),"unresolvedRelationCount",unresolvedGraphRelations(graph));
     }
-    private boolean definitionReviewCurrent(Map<String,Object> field){Map<String,Object> review=asMap(field.get("definitionReview"));return Boolean.TRUE.equals(review.get("confirmed"))&&Objects.equals(review.get("basis"),definitionBasis(field));}
+    static boolean definitionReviewCurrent(Map<String,Object> field){Map<String,Object> review=asMap(field.get("definitionReview"));return Boolean.TRUE.equals(review.get("confirmed"))&&Objects.equals(review.get("basis"),definitionBasis(field));}
     private boolean definitionMatchConfirmed(Map<String,Object> field){Map<String,Object> alignment=asMap(field.get("catalogAlignment"));return "matched".equals(alignment.get("status"))&&Boolean.TRUE.equals(alignment.get("confirmed"));}
     /** Read preparation hints only; the explicit confirmation still validates source proofs and dependencies. */
     private DefinitionReviewStatus definitionReviewsCurrent(Map<String,Object> graph,Map<String,Object> field,Map<String,Object> candidateRoot,boolean exactCandidate){

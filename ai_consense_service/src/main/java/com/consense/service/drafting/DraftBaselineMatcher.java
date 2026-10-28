@@ -8,6 +8,7 @@ import static com.consense.service.drafting.DraftReviewGraph.*;
 /** Post-atomic suggestions only; neither model output nor a matching label adopts a definition or value. */
 final class DraftBaselineMatcher {
     private static final String METHOD="post_atomic_semantic";
+    private static final java.util.regex.Pattern SHORT_ACRONYM=java.util.regex.Pattern.compile("(?<![A-Za-z0-9])[A-Z]{2,3}(?![A-Za-z0-9])");
     private DraftBaselineMatcher() { }
 
     /** Small searchable index; it proposes identities, never grants a match. */
@@ -23,13 +24,20 @@ final class DraftBaselineMatcher {
         return searchIndex(Collections.singletonList(query.toString()));
     }
     static Map<String,Object> searchIndex(List<?> queries) {
-        Set<String> terms=new LinkedHashSet<>();for(Object query:queries)for(String token:text(query).toLowerCase(Locale.ROOT).split("[^\\p{L}\\p{N}]+"))if(token.length()>=4&&!Arrays.asList("that","with","from","this","project","whether","does","what","which","question","included","required").contains(token))terms.add(token.endsWith("s")&&token.length()>5?token.substring(0,token.length()-1):token);
+        Set<String> terms=new LinkedHashSet<>(),shortTerms=new LinkedHashSet<>();for(Object query:queries)for(String token:text(query).toLowerCase(Locale.ROOT).split("[^\\p{L}\\p{N}]+")){if(token.length()>=4&&!Arrays.asList("that","with","from","this","project","whether","does","what","which","question","included","required").contains(token))terms.add(token.endsWith("s")&&token.length()>5?token.substring(0,token.length()-1):token);else if(token.matches("[a-z]{2,3}"))shortTerms.add(token);}
         List<Map<String,Object>> ranked=new ArrayList<>();for(Map.Entry<String,Map<String,Object>> entry:definitions().entrySet()) {
             Map<String,Object> definition=entry.getValue();String haystack=(entry.getKey()+" "+JsonUtils.write(definition.get("label"))+" "+JsonUtils.write(definition.get("options"))).toLowerCase(Locale.ROOT);int score=0;for(String term:terms)if(haystack.contains(term))score++;
+            if(!shortTerms.isEmpty()){Set<String> declared=shortAcronyms(definition);for(String term:shortTerms)if(declared.contains(term))score++;}
             if(score>0)ranked.add(obj("key",entry.getKey(),"parentKey",parentKey(entry.getKey()),"label",definition.get("label"),"score",score));
         }
         ranked.sort((a,b)->Integer.compare((Integer)b.get("score"),(Integer)a.get("score")));List<Object> fields=new ArrayList<>();for(Map<String,Object> row:ranked){row.remove("score");fields.add(row);if(fields.size()==12)break;}
         return obj("ruleVersion",DraftBusinessRules.RULE_VERSION,"fields",fields,"complete",false,"notice","Search suggestions are incomplete; the full catalog remains available for human review.");
+    }
+    private static Set<String> shortAcronyms(Map<String,Object> definition) {
+        StringBuilder visible=new StringBuilder();for(Object label:map(definition.get("label")).values())visible.append(' ').append(text(label));
+        for(Object raw:list(definition.get("options"))){Map<String,Object> option=map(raw);visible.append(' ').append(text(option.get("value")));for(Object label:map(option.get("label")).values())visible.append(' ').append(text(label));}
+        // Short queries use declared visible acronyms, never fragments of legacy camel-case keys.
+        Set<String> result=new LinkedHashSet<>();java.util.regex.Matcher matcher=SHORT_ACRONYM.matcher(visible);while(matcher.find())result.add(matcher.group().toLowerCase(Locale.ROOT));return result;
     }
 
     /** Return only requested identities and a bounded selection of existing fixed source context. */

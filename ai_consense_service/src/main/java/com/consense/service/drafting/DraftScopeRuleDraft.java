@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.util.*;
+import java.util.function.Function;
 import static com.consense.service.drafting.DraftReviewGraph.*;
 
 /** Mechanical scope-rule projection only; ReviewDiscovery still validates current-source authority. */
@@ -17,6 +18,9 @@ final class DraftScopeRuleDraft {
     private static final Set<String> RULE_FIELDS=set("id","sourceTaskId","scopeId","when","action","replacementEn","valueSourceId","refinedQuote");
 
     static Result compile(JsonNode response,Map<String,String> instructionQuotes,Map<String,Map<String,Object>> knownRoots) {
+        return compile(response,instructionQuotes,knownRoots,rule->knownRoots);
+    }
+    static Result compile(JsonNode response,Map<String,String> instructionQuotes,Map<String,Map<String,Object>> knownRoots,Function<JsonNode,Map<String,Map<String,Object>>> suppliedRoots) {
         if(response==null||!response.isObject())throw invalid("SCOPE_RULE_RESPONSE_OBJECT_REQUIRED");
         ObjectNode projected=response.deepCopy();List<Map<String,Object>> compilations=new ArrayList<>();List<Object> issues=new ArrayList<>();
         if(!response.has("scopeRules"))return new Result(projected,compilations,issues);
@@ -27,15 +31,16 @@ final class DraftScopeRuleDraft {
         }
         ArrayNode nodes=projected.has("nodes")?(ArrayNode)projected.get("nodes"):projected.putArray("nodes");
         ArrayNode requirements=projected.has("requirements")?(ArrayNode)projected.get("requirements"):projected.putArray("requirements");
-        Set<String> occupied=new HashSet<>(knownRoots.keySet()),requirementIds=new HashSet<>();Map<String,Integer> ruleCounts=new HashMap<>();
+        Set<String> occupied=new HashSet<>(),requirementIds=new HashSet<>();Map<String,Integer> ruleCounts=new HashMap<>();
         for(JsonNode node:nodes)occupied.add(node.path("id").asText());for(JsonNode requirement:requirements)requirementIds.add(requirement.path("id").asText());
         for(JsonNode rule:response.path("scopeRules")){String id=rule.path("id").asText();ruleCounts.put(id,ruleCounts.getOrDefault(id,0)+1);}
         int index=0;for(JsonNode rule:response.path("scopeRules")) {
             int ruleIndex=index++;String id=rule.path("id").asText(),owner=rule.path("sourceTaskId").asText(),scope=rule.path("scopeId").asText();
+            Map<String,Map<String,Object>> visibleRoots=suppliedRoots.apply(rule);
             try {
                 fields(rule,RULE_FIELDS,"SCOPE_RULE_FIELD_UNSUPPORTED");
                 if(!rule.path("id").isTextual()||!id.matches("[A-Za-z0-9][A-Za-z0-9_-]{0,63}"))throw invalid("SCOPE_RULE_ID_INVALID");
-                if(ruleCounts.get(id)!=1||occupied.contains(id))throw invalid("SCOPE_RULE_ID_DUPLICATED");
+                if(ruleCounts.get(id)!=1||occupied.contains(id)||visibleRoots.containsKey(id))throw invalid("SCOPE_RULE_ID_DUPLICATED");
                 owner=requiredText(rule,"sourceTaskId");scope=requiredText(rule,"scopeId");
                 String quote=instructionQuotes.get(owner);if(quote==null||quote.trim().isEmpty())throw invalid("SCOPE_RULE_OWNER_INSTRUCTION_REQUIRED");
                 String action=requiredText(rule,"action");if(!ACTIONS.contains(action))throw invalid("SCOPE_RULE_ACTION_UNSUPPORTED");
@@ -46,7 +51,7 @@ final class DraftScopeRuleDraft {
                     if(when.path("clauses").size()>100)throw invalid("SCOPE_RULE_CLAUSE_LIMIT_100");
                     for(JsonNode clause:when.path("clauses")) {
                         fields(clause,set("inputId","operator","value"),"SCOPE_RULE_CLAUSE_FIELD_UNSUPPORTED");
-                        String input=requiredText(clause,"inputId"),operator=requiredText(clause,"operator");requireKnownValue(input,knownRoots);inputs.add(input);
+                        String input=requiredText(clause,"inputId"),operator=requiredText(clause,"operator");requireKnownValue(input,visibleRoots);inputs.add(input);
                         if(!OPERATORS.contains(operator))throw invalid("SCOPE_RULE_OPERATOR_UNSUPPORTED");
                         if(!check&&"unknown".equals(operator))throw invalid("SCOPE_RULE_UNKNOWN_VALUE_IS_NOT_AUTHORITY");
                         if(VALUE_OPERATORS.contains(operator)&&(!clause.hasNonNull("value")||!clause.path("value").isValueNode()))throw invalid("SCOPE_RULE_COMPARISON_VALUE_REQUIRED");
@@ -55,7 +60,7 @@ final class DraftScopeRuleDraft {
                 if(!check&&(when.isMissingNode()||when.isNull()||when.path("clauses").isEmpty()))throw invalid("SCOPE_RULE_NONEMPTY_CONDITION_REQUIRED");
                 if(rule.hasNonNull("replacementEn")&&(!rule.path("replacementEn").isTextual()||rule.path("replacementEn").asText().trim().isEmpty()))throw invalid("SCOPE_RULE_REPLACEMENT_TEXT_REQUIRED");
                 if(rule.hasNonNull("refinedQuote")&&(!rule.path("refinedQuote").isTextual()||rule.path("refinedQuote").asText().isEmpty()))throw invalid("SCOPE_RULE_REFINED_QUOTE_REQUIRED");
-                String valueSource="";if(rule.hasNonNull("valueSourceId")){valueSource=requiredText(rule,"valueSourceId");requireKnownValue(valueSource,knownRoots);}
+                String valueSource="";if(rule.hasNonNull("valueSourceId")){valueSource=requiredText(rule,"valueSourceId");requireKnownValue(valueSource,visibleRoots);}
                 boolean canonicalUnused="unused".equals(action)&&rule.hasNonNull("replacementEn")&&"Not used".equals(rule.path("replacementEn").asText().trim());
                 if((rule.hasNonNull("replacementEn")&&!canonicalUnused||!valueSource.isEmpty())&&!set("replace","fill","insert").contains(action))throw invalid("SCOPE_RULE_ACTION_VALUE_UNEXPECTED");
                 if(nodes.size()>=100)throw invalid("SCOPE_RULE_COMBINED_NODE_LIMIT_100");

@@ -91,11 +91,18 @@ public final class DraftReviewDiscovery {
         return sourceGroupNodes(readings,tasks,groupId,response,rejected,supplementalByTask,Collections.emptyMap());
     }
     static List<Map<String,Object>> sourceGroupNodes(List<JsonNode> readings,List<Map<String,Object>> tasks,String groupId,JsonNode response,List<Object> rejected,Map<String,List<Object>> supplementalByTask,Map<String,Map<String,Object>> knownRoots) {
+        return sourceGroupNodes(readings,tasks,groupId,response,rejected,supplementalByTask,knownRoots,null);
+    }
+    interface SuppliedReferences {
+        boolean alias(JsonNode node,JsonNode part,String key);
+        boolean local(JsonNode node,JsonNode part,String key);
+    }
+    static List<Map<String,Object>> sourceGroupNodes(List<JsonNode> readings,List<Map<String,Object>> tasks,String groupId,JsonNode response,List<Object> rejected,Map<String,List<Object>> supplementalByTask,Map<String,Map<String,Object>> knownRoots,SuppliedReferences supplied) {
         if(groupId==null||groupId.trim().isEmpty())throw invalid("DISCOVERY_GROUP_ID_REQUIRED");Map<String,Item> items=groupItems(readings,tasks,supplementalByTask);Map<String,Object> sources=new LinkedHashMap<>();
         for(Item item:items.values()){JsonNode reading=item.reading;sources.put(reading.path("id").asText(),obj("id",reading.path("id").asText(),"fileKey",reading.path("fileKey").asText(),"docId",reading.path("docId").asText(),"editionId",reading.path("editionId").asText()));}
         Map<String,Object> local=obj("sources",new ArrayList<>(sources.values()),"graph",obj("variables",new ArrayList<>(),"events",new ArrayList<>()));
         List<Map<String,Object>> support=new ArrayList<>();for(Map<String,Object> known:knownRoots.values()){Map<String,Object> core=JsonUtils.readMap(JsonUtils.write(known));core.remove("correction");core.put("editTargets",Collections.emptyList());core.put("relatedInputIds",Collections.emptyList());support.add(core);}
-        return validated(local,nodes(items,"discovery-group-"+DraftAdoption.hash(groupId).substring(0,16)+"-",response,rejected,true,knownRoots),rejected,support);
+        return validated(local,nodes(items,"discovery-group-"+DraftAdoption.hash(groupId).substring(0,16)+"-",response,rejected,true,knownRoots,supplied),rejected,support);
     }
     private static Map<String,Item> groupItems(List<JsonNode> readings,List<Map<String,Object>> tasks,Map<String,List<Object>> supplementalByTask) {
         Map<String,JsonNode> sources=new LinkedHashMap<>();for(JsonNode reading:readings)if(sources.put(reading.path("id").asText(),reading)!=null)throw invalid("DISCOVERY_GROUP_SOURCE_AMBIGUOUS");
@@ -203,41 +210,45 @@ public final class DraftReviewDiscovery {
         return nodes(taskItems,namespace,response,rejected,grouped,Collections.emptyMap());
     }
     private static List<Map<String,Object>> nodes(Map<String,Item> taskItems,String namespace,JsonNode response,List<Object> rejected,boolean grouped,Map<String,Map<String,Object>> knownRoots) {
+        return nodes(taskItems,namespace,response,rejected,grouped,knownRoots,null);
+    }
+    private static List<Map<String,Object>> nodes(Map<String,Item> taskItems,String namespace,JsonNode response,List<Object> rejected,boolean grouped,Map<String,Map<String,Object>> knownRoots,SuppliedReferences supplied) {
         if(!response.isObject()||!response.path("nodes").isArray())throw invalid("DISCOVERY_NODES_ARRAY_REQUIRED");
         if(response.path("nodes").size()>100)throw invalid("DISCOVERY_ITEM_NODE_LIMIT_100");
-        Map<String,String> names=new LinkedHashMap<>();for(Map.Entry<String,Map<String,Object>> entry:knownRoots.entrySet())names.put(entry.getKey(),text(entry.getValue().get("id")));
+        Map<String,String> localNames=new LinkedHashMap<>();
         Map<String,Integer> counts=new HashMap<>();for(JsonNode raw:response.path("nodes")){String id=raw.path("id").asText();counts.put(id,counts.getOrDefault(id,0)+1);}
         Set<String> assigned=new HashSet<>();
-        for(String id:counts.keySet())if(!names.containsKey(id)&&id.matches("[A-Za-z0-9][A-Za-z0-9_-]{0,23}")&&counts.get(id)==1){names.put(id,namespace+id);assigned.add(namespace+id);}
-        for(String id:counts.keySet())if(!names.containsKey(id)&&counts.get(id)==1&&id.matches("[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}")) {
-            String internal=namespace+"id-"+DraftAdoption.hash(id).substring(0,20);if(assigned.add(internal))names.put(id,internal);
+        for(String id:counts.keySet())if(id.matches("[A-Za-z0-9][A-Za-z0-9_-]{0,23}")&&counts.get(id)==1){localNames.put(id,namespace+id);assigned.add(namespace+id);}
+        for(String id:counts.keySet())if(!localNames.containsKey(id)&&counts.get(id)==1&&id.matches("[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}")) {
+            String internal=namespace+"id-"+DraftAdoption.hash(id).substring(0,20);if(assigned.add(internal))localNames.put(id,internal);
         }
+        Map<String,String> names=new LinkedHashMap<>(localNames);for(Map.Entry<String,Map<String,Object>> entry:knownRoots.entrySet())names.put(entry.getKey(),text(entry.getValue().get("id")));
         List<Map<String,Object>> result=new ArrayList<>();
         for(JsonNode raw:response.path("nodes")) {
             try {
             String taskId=grouped?raw.path("sourceTaskId").asText():"";Item item=taskItems.get(taskId);if(item==null)throw invalid("DISCOVERY_GROUP_NODE_TASK_NOT_SUPPLIED");
             String localId=raw.path("id").asText();if(!names.containsKey(localId)||counts.get(localId)!=1)throw invalid("DISCOVERY_LOCAL_ID_INVALID_OR_DUPLICATED");
-            Map<String,Object> known=knownRoots.get(localId);if(known!=null&&!list(map(known.get("currentDefinitionReference")).get("taskIds")).contains(taskId))throw invalid("DISCOVERY_KNOWN_ROOT_OWNER_NOT_AUTHORIZED");
+            Map<String,Object> known=supplied==null||supplied.alias(raw,raw,localId)?knownRoots.get(localId):null;String resolvedId=groupReference(names,localNames,knownRoots,supplied,raw,raw,localId);if(known!=null&&!list(map(known.get("currentDefinitionReference")).get("taskIds")).contains(taskId))throw invalid("DISCOVERY_KNOWN_ROOT_OWNER_NOT_AUTHORIZED");
             if(known!=null)validateKnownCore(raw,known);
             String kind=known==null?raw.path("type").asText():text(map(known.get("type")).get("kind")),role=known==null?raw.path("role").asText():text(map(known.get("role")).get("kind")),quote=raw.path("sourceQuote").asText(known==null?"":text(map(map(known.get("currentDefinitionReference")).get("taskQuotes")).get(taskId)));
             if(!TYPES.contains(kind)||!ROLES.contains(role))throw invalid("DISCOVERY_TYPE_OR_ROLE_UNSUPPORTED");
             Map<String,Object> quoteSource=resolveQuote(item,quote,raw.path("sourceObservationId").asText(),true);
             if(quoteSource==null)throw invalid("DISCOVERY_SOURCE_QUOTE_NOT_IN_INSTRUCTION");
             String nameZh=known==null?raw.path("nameZh").asText():text(known.get("nameZh")),nameEn=known==null?raw.path("nameEn").asText():text(known.get("nameEn"));if(nameZh.trim().isEmpty()&&nameEn.trim().isEmpty())throw invalid("DISCOVERY_NAME_REQUIRED");
-            Map<String,Object> node=known==null?base(item,names.get(localId),kind,role):JsonUtils.readMap(JsonUtils.write(known));
+            Map<String,Object> node=known==null?base(item,resolvedId,kind,role):JsonUtils.readMap(JsonUtils.write(known));
             if(grouped){node.put("sourceTaskId",taskId);node.put("modelLocalId",raw.path("id").asText());}else if(!raw.path("id").asText().matches("[A-Za-z0-9][A-Za-z0-9_-]{0,23}"))node.put("modelLocalId",raw.path("id").asText());
             if(quoteSource.containsKey("anchor")){List<Object> anchors=new ArrayList<>(list(node.get("sourceAnchors")));anchors.add(quoteSource.get("anchor"));node.put("sourceAnchors",anchors);}
             node.put("semanticQuoteEvidence",quoteSource);
             if(known==null){node.put("definitionKind","discovered");node.put("nameZh",nameZh);node.put("nameEn",nameEn);node.put("questionZh",raw.path("questionZh").asText(nameZh));node.put("questionEn",raw.path("questionEn").asText(nameEn));
                 if(question(node))node.put("catalogAlignment",obj("status","unreviewed","confirmed",false,"reason",""));
-                node.put("parentId",reference(names,raw.path("parentId").asText("")));node.put("optional",raw.path("optional").asBoolean(false));node.put("semanticSourceQuote",quote);}
+                node.put("parentId",groupReference(names,localNames,knownRoots,supplied,raw,raw,raw.path("parentId").asText("")));node.put("optional",raw.path("optional").asBoolean(false));node.put("semanticSourceQuote",quote);}
             if(raw.has("fixedValue")){String fixed=raw.path("fixedValue").asText();if(fixed.isEmpty()||!item.text.contains(fixed))throw invalid("DISCOVERY_FIXED_LITERAL_NOT_IN_SOURCE");node.put("fixedValue",fixed);}
             List<Object> options=new ArrayList<>();for(JsonNode option:raw.path("options"))options.add(obj("value",option.path("value").asText(),"labelZh",option.path("labelZh").asText(),"labelEn",option.path("labelEn").asText()));if(known==null)node.put("options",options);
             try {
             List<Object> branches=new ArrayList<>();Set<String> refs=new LinkedHashSet<>();
             for(JsonNode branch:raw.path("branches")) {
-                Map<String,Object> converted=obj("id",known==null?branch.path("id").asText():knownBranchId(namespace,localId,branch.path("id").asText()),"mode",branch.path("mode").asText(),"scopeId",reference(names,branch.path("scopeId").asText("")),"scopeMode",branch.path("scopeMode").asText(""),"resultValue",branch.path("resultValue").asText(),"effectZh",branch.path("effectZh").asText(),"effectEn",branch.path("effectEn").asText());
-                List<Object> clauses=new ArrayList<>();for(JsonNode clause:branch.path("clauses")){String ref=reference(names,clause.path("inputId").asText());if(ref==null)throw invalid("DISCOVERY_INPUT_REFERENCE_REQUIRED");refs.add(ref);clauses.add(obj("inputId",ref,"operator",clause.path("operator").asText(),"value",clause.has("value")?JsonUtils.mapper().convertValue(clause.get("value"),Object.class):null));}
+                Map<String,Object> converted=obj("id",known==null?branch.path("id").asText():knownBranchId(namespace,localId,branch.path("id").asText()),"mode",branch.path("mode").asText(),"scopeId",groupReference(names,localNames,knownRoots,supplied,raw,branch,branch.path("scopeId").asText("")),"scopeMode",branch.path("scopeMode").asText(""),"resultValue",branch.path("resultValue").asText(),"effectZh",branch.path("effectZh").asText(),"effectEn",branch.path("effectEn").asText());
+                List<Object> clauses=new ArrayList<>();for(JsonNode clause:branch.path("clauses")){String ref=groupReference(names,localNames,knownRoots,supplied,raw,branch,clause.path("inputId").asText());if(ref==null)throw invalid("DISCOVERY_INPUT_REFERENCE_REQUIRED");refs.add(ref);clauses.add(obj("inputId",ref,"operator",clause.path("operator").asText(),"value",clause.has("value")?JsonUtils.mapper().convertValue(clause.get("value"),Object.class):null));}
                 converted.put("clauses",clauses);branches.add(converted);if(converted.get("scopeId")!=null)refs.add(text(converted.get("scopeId")));
             }
             node.put("correction",branches.isEmpty()?null:obj("kind","rule","branches",branches,"inputIds",new ArrayList<>(refs),"needsRebind",false));
@@ -265,7 +276,7 @@ public final class DraftReviewDiscovery {
                 if(completeScopeEcho)target.put("refinementDisposition","complete_observed_scope_echo");
                 if(refinementRequested){target.put("observedScopeComplete",sourceComplete);target.put("scopeReviewReason",refinement!=null?"Review the suggested exact character-level range within the complete observed scope.":"The character-level suggestion was not unique or could not be bound inside the observed scope; review the original scope.");if(refinement!=null)target.put("refinementCandidate",refinement);else target.put("refinementIssue","UNIQUE_SOURCE_BOUND_SUBRANGE_REQUIRED");}
                 if(!quoteMatches){target.put("scopeQuoteIssue","EXPLICIT_SCOPE_QUOTE_MISMATCH");target.put("scopeReviewReason","The supplied quote does not match the current named scope; it was retained for review rather than replaced.");if(!effect.path("quote").isTextual())target.put("modelQuote",effect.path("quote").deepCopy());List<Object> parts=new ArrayList<>(list(node.get("discoveryRejectedParts")));parts.add(obj("part","effects","modelLocalId",raw.path("id").asText(),"effectIndex",ordinal-1,"sourceScopeId",effect.path("scopeId").asText(),"reason","EXPLICIT_SCOPE_QUOTE_MISMATCH","retained","original_model_response"));node.put("discoveryRejectedParts",parts);}
-                String branchId=effect.path("branchId").asText("");target.put("branchId",known==null||branchId.isEmpty()?branchId:knownBranchId(namespace,localId,branchId));String value=reference(names,effect.path("valueSourceId").asText(""));target.put("valueSourceId",value);if(value!=null)refs.add(value);
+                String branchId=effect.path("branchId").asText("");target.put("branchId",known==null||branchId.isEmpty()?branchId:knownBranchId(namespace,localId,branchId));String value=groupReference(names,localNames,knownRoots,supplied,raw,effect,effect.path("valueSourceId").asText(""));target.put("valueSourceId",value);if(value!=null)refs.add(value);
                 if(effect.hasNonNull("replacementEn"))target.put("replacementEn",effect.path("replacementEn").asText(""));targets.add(target);documents.add(effectItem.reading.path("id").asText());
             }
             node.put("editTargets",targets);node.put("docIds",new ArrayList<>(documents));node.put("relatedInputIds",new ArrayList<>(refs));
@@ -612,6 +623,7 @@ public final class DraftReviewDiscovery {
             }
         }return result;
     }
+    private static String groupReference(Map<String,String> names,Map<String,String> locals,Map<String,Map<String,Object>> roots,SuppliedReferences supplied,JsonNode node,JsonNode part,String id){if(supplied==null)return reference(names,id);if(id.isEmpty())return null;if(supplied.alias(node,part,id)&&roots.containsKey(id))return text(roots.get(id).get("id"));if(supplied.local(node,part,id)&&locals.containsKey(id))return locals.get(id);throw invalid("DISCOVERY_FOREIGN_REFERENCE: "+id);}
     private static String reference(Map<String,String> names,String id){if(id.isEmpty())return null;String target=names.get(id);if(target==null)throw invalid("DISCOVERY_FOREIGN_REFERENCE: "+id);return target;}
     private static List<String> ids(List<Map<String,Object>> nodes){List<String> ids=new ArrayList<>();for(Map<String,Object> node:nodes)ids.add(text(node.get("id")));return ids;}
     private static Map<String,Object> event(String kind,String zh,String en,Map<String,Object> data){String detail=data.containsKey("reason")?text(data.get("reason")):data.containsKey("attempted")?"Requested "+data.get("requestedItems")+"; attempted "+data.get("attempted")+"; failed "+data.get("failed")+"; remaining "+data.get("skippedBudget"):"Source items added: "+data.get("added")+"; model calls: 0";return obj("kind",kind,"zh",zh,"en",en,"details",Collections.singletonList(detail),"time",Instant.now().toString(),"data",data);}

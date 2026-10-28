@@ -66,7 +66,9 @@ final class DraftKnownRoots {
             String id=text(node.get("id"));roots.put(id,node);owners.put(id,taskIds);quotes.put(id,taskQuotes);Set<String> identities=new HashSet<>();for(Object raw:references){Map<String,Object> ref=map(raw);String sourceIdentity=identity(ref.get("sourceId"),ref.get("sourceSha256"));identities.add(sourceIdentity);proofRoots.computeIfAbsent(sourceIdentity+"\n"+text(ref.get("sourceObservationId")),ignored->new HashSet<>()).add(id);}rootSources.put(id,identities);Set<String> required=new TreeSet<>();closure(key,definitions,required);required.retainAll(active);Set<String> requiredIds=new TreeSet<>();for(String dependency:required)requiredIds.add(text(ids.get(dependency)));dependencies.put(id,requiredIds);
         }
         Map<String,Set<String>> readers=new HashMap<>();for(Map.Entry<String,Set<String>> entry:relatedProofs.entrySet())for(String proof:entry.getValue())for(String root:proofRoots.getOrDefault(proof,Collections.emptySet()))if(!owners.get(root).contains(entry.getKey()))readers.computeIfAbsent(root,ignored->new HashSet<>()).add(entry.getKey());
-        return new Result(roots,owners,quotes,dependencies,taskSources,rootSources,definitions.keySet(),readers);
+        Set<String> reviewedDefinitions=new HashSet<>();Deque<Map<String,Object>> fields=new ArrayDeque<>(DraftReviewGraph.fields(baseGraph));
+        while(!fields.isEmpty()){Map<String,Object> field=fields.removeFirst();String id=text(field.get("id"));Map<String,Object> root=roots.get(id),alignment=map(field.get("catalogAlignment")),reference=root==null?Collections.emptyMap():map(root.get("currentDefinitionReference"));if(root!=null&&"matched".equals(alignment.get("status"))&&Boolean.TRUE.equals(alignment.get("confirmed"))&&DraftBusinessRules.RULE_VERSION.equals(alignment.get("baselineVersion"))&&Objects.equals(reference.get("baselineKey"),alignment.get("baselineKey"))&&DraftTemplateGraphService.definitionReviewCurrent(field)&&DraftBusinessRules.RULE_VERSION.equals(reference.get("ruleVersion")))reviewedDefinitions.add(id);for(Object child:list(field.get("children")))fields.add(map(child));}
+        return new Result(roots,owners,quotes,dependencies,taskSources,rootSources,definitions.keySet(),readers,reviewedDefinitions);
     }
 
     private static Set<String> allowedSources(Map<String,JsonNode> readings,Map<String,Object> baseGraph) {
@@ -82,12 +84,13 @@ final class DraftKnownRoots {
     }
 
     static final class Result {
-        private final Map<String,Map<String,Object>> roots;private final Map<String,Set<String>> owners,dependencies,rootSources,readers;private final Map<String,Map<String,String>> quotes;private final Map<String,String> taskSources,wireIds=new LinkedHashMap<>();
+        private final Map<String,Map<String,Object>> roots;private final Map<String,Set<String>> owners,dependencies,rootSources,readers;private final Map<String,Map<String,String>> quotes;private final Map<String,String> taskSources,wireIds=new LinkedHashMap<>();private final Set<String> reviewedDefinitions;
         Result(Map<String,Map<String,Object>> roots,Map<String,Set<String>> owners,Map<String,Map<String,String>> quotes,Map<String,Set<String>> dependencies,Map<String,String> taskSources,Map<String,Set<String>> rootSources,Set<String> definitionKeys){
-            this(roots,owners,quotes,dependencies,taskSources,rootSources,definitionKeys,Collections.emptyMap());
+            this(roots,owners,quotes,dependencies,taskSources,rootSources,definitionKeys,Collections.emptyMap(),Collections.emptySet());
         }
-        private Result(Map<String,Map<String,Object>> roots,Map<String,Set<String>> owners,Map<String,Map<String,String>> quotes,Map<String,Set<String>> dependencies,Map<String,String> taskSources,Map<String,Set<String>> rootSources,Set<String> definitionKeys,Map<String,Set<String>> readers){
+        private Result(Map<String,Map<String,Object>> roots,Map<String,Set<String>> owners,Map<String,Map<String,String>> quotes,Map<String,Set<String>> dependencies,Map<String,String> taskSources,Map<String,Set<String>> rootSources,Set<String> definitionKeys,Map<String,Set<String>> readers,Set<String> reviewedDefinitions){
             this.roots=roots;this.owners=owners;this.quotes=quotes;this.dependencies=dependencies;this.taskSources=taskSources;this.rootSources=rootSources;this.readers=readers;
+            this.reviewedDefinitions=Collections.unmodifiableSet(new HashSet<>(reviewedDefinitions));
             Set<String> seen=new HashSet<>();
             for(Map.Entry<String,Map<String,Object>> entry:roots.entrySet()){
                 String key=text(map(entry.getValue().get("currentDefinitionReference")).get("baselineKey"));
@@ -112,6 +115,14 @@ final class DraftKnownRoots {
         Map<String,Map<String,Object>> forTasks(Collection<?> taskIds) {
             Set<String> requested=new HashSet<>();for(Object task:taskIds)requested.add(text(task));Set<String> available=new HashSet<>();for(String id:roots.keySet())if(!Collections.disjoint(owners.get(id),requested)||!Collections.disjoint(readers.getOrDefault(id,Collections.emptySet()),requested))available.addAll(dependencies.get(id));
             Map<String,Map<String,Object>> result=new LinkedHashMap<>();for(String id:roots.keySet())if(available.contains(id)){Map<String,Object> node=copy(roots.get(id)),reference=map(node.get("currentDefinitionReference"));Set<String> allowed=new TreeSet<>(owners.get(id));allowed.retainAll(requested);Map<String,String> localQuotes=new TreeMap<>();for(String task:allowed)localQuotes.put(task,quotes.get(id).get(task));reference.put("taskIds",new ArrayList<>(allowed));reference.put("taskQuotes",localQuotes);result.put(wireIds.get(id),node);}return result;
+        }
+        Map<String,Map<String,Object>> forTasks(Collection<?> taskIds,Collection<?> candidateKeys){
+            Map<String,Map<String,Object>> result=forTasks(taskIds);Set<String> extra=new LinkedHashSet<>();
+            for(Object key:candidateKeys)for(String id:roots.keySet())if(wireIds.get(id).equals(text(key))&&reviewedDefinitions.contains(id)){
+                String seed=id;Set<String> parents=new HashSet<>();while(roots.containsKey(seed)&&!text(roots.get(seed).get("parentId")).isEmpty()&&parents.add(seed))seed=text(roots.get(seed).get("parentId"));if(!roots.containsKey(seed)||!text(roots.get(seed).get("parentId")).isEmpty())continue;
+                Set<String> needed=new LinkedHashSet<>(dependencies.get(seed));needed.removeIf(root->result.containsKey(wireIds.get(root)));if(!reviewedDefinitions.containsAll(needed))continue;Set<String> expanded=new LinkedHashSet<>(extra);expanded.addAll(needed);if(expanded.size()<=8)extra=expanded;
+            }
+            for(String id:extra){Map<String,Object> node=copy(roots.get(id)),reference=map(node.get("currentDefinitionReference"));reference.put("taskIds",Collections.emptyList());reference.put("taskQuotes",Collections.emptyMap());result.put(wireIds.get(id),node);}return result;
         }
         List<Map<String,Object>> descriptor(){List<Map<String,Object>> result=new ArrayList<>();for(Map<String,Object> node:roots.values()){Map<String,Object> reference=map(node.get("currentDefinitionReference"));result.add(copy(obj("id",node.get("id"),"wireId",wireIds.get(text(node.get("id"))),"baselineKey",reference.get("baselineKey"),"definitionSha256",DraftAdoption.hash(JsonUtils.write(core(node))),"sourceReferences",reference.get("sourceReferences"),"taskIds",reference.get("taskIds"),"prerequisiteForTaskIds",reference.get("prerequisiteForTaskIds"),"existing",reference.get("existing"))));}return result;}
     }
