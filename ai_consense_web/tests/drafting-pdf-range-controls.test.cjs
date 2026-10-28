@@ -67,13 +67,14 @@ const loaded = loadVue(path.join(__dirname, '../src/components/DraftingPdfPrevie
 })
 const geometry = pageNumber => ({ kind: 'point', pageNumber, x: 80, y: 200, pageWidth: 612, pageHeight: 792, unit: 'pt', origin: 'top-left', pageBox: 'crop', rotation: 0 })
 const source = vue.ref('saved-current'), selected = vue.ref('SYNTHETIC-exact'), request = vue.ref(0), selectWords=vue.ref(false), immersive=vue.ref(false), selections=[]
-const focusText=vue.ref(''),focusFailures=[]
+const focusText=vue.ref(''),focusPage=vue.ref(),focusFailures=[]
 const locations = vue.ref([
   { bindingId: 'SYNTHETIC-exact', label: 'Saved paragraph', text: 'saved contract\nparagraph.', geometry: geometry(1) },
   { bindingId: 'SYNTHETIC-ambiguous', label: 'Repeated paragraph', text: 'same target', geometry: geometry(2) },
   { bindingId: 'SYNTHETIC-not-found', label: 'Absent paragraph', text: 'saved absent paragraph.', geometry: geometry(3) }
 ])
-const app = vue.createApp({ render: () => vue.h(loaded.default, { source: source.value, title: 'Synthetic saved PDF', locale: 'en', locations: locations.value, selectedBindingId: selected.value, locationRequest: request.value, selectWords:selectWords.value,immersive:immersive.value,focusText:focusText.value,onFocusUnavailable:reason=>focusFailures.push(reason),onSelection:value=>selections.push(value), onBinding: id => inspected.push(id), onRangeUnavailable: id => { warnings.push(id); unavailableRanges.add(id) }, onRangeAvailable: id => { available.push(id); unavailableRanges.delete(id) }, onLocationUnavailable: id => missingPoints.push(id) }) })
+const pdf = vue.ref()
+const app = vue.createApp({ render: () => vue.h(loaded.default, { ref: pdf, source: source.value, title: 'Synthetic saved PDF', locale: 'en', locations: locations.value, selectedBindingId: selected.value, locationRequest: request.value, selectWords:selectWords.value,immersive:immersive.value,focusText:focusText.value,focusPage:focusPage.value,onFocusUnavailable:reason=>focusFailures.push(reason),onSelection:value=>selections.push(value), onBinding: id => inspected.push(id), onRangeUnavailable: id => { warnings.push(id); unavailableRanges.add(id) }, onRangeAvailable: id => { available.push(id); unavailableRanges.delete(id) }, onLocationUnavailable: id => missingPoints.push(id) }) })
 const ranges = () => [...document.querySelectorAll('.pdf-binding-range')]
 const anchors = () => [...document.querySelectorAll('.pdf-binding-point')]
 async function settled() { await settle(); await new Promise(resolve => setTimeout(resolve, 5)); await settle() }
@@ -110,6 +111,26 @@ const click = text => [...document.querySelectorAll('button')].find(button => bu
   assert.equal(reads.length,readsBeforeExpansion,'Immersive layout reuses cached page text')
   assert.ok(selections.slice(eventsBeforeExpansion).every(value=>value.words.length===1),'Resizing does not publish an empty selection')
   assert.equal(renders.at(-1).page,1,'Immersive entry and exit keep the current page')
+  const rendersBeforeClear=renders.length, readsBeforeClear=reads.length, selectionCount=selections.length, surface=document.querySelector('.pdf-surface')
+  surface.scrollTop=37
+  paper.dispatchEvent(new window.MouseEvent('pointerdown',{button:0,clientX:110,clientY:240,bubbles:true}))
+  paper.dispatchEvent(new window.MouseEvent('pointermove',{clientX:165,clientY:265,bubbles:true}))
+  await settled()
+  assert.ok(document.querySelector('.source-selection-box'),'The fixture has an active drag')
+  pdf.value.clearSelection();await settled()
+  assert.equal(document.querySelector('.source-selection-box'),null,'Clearing also cancels the in-progress selection')
+  assert.equal(document.querySelector('[data-source-word="0"]').getAttribute('aria-checked'),'false')
+  assert.equal(selections.length,selectionCount+1)
+  assert.equal(selections.at(-1).words.length,0)
+  assert.equal(selections.at(-1).page,1)
+  assert.equal(surface.scrollTop,37,'Clearing does not move the reader')
+  assert.equal(renders.length,rendersBeforeClear,'Clearing does not rerender or reset the page')
+  assert.equal(reads.length,readsBeforeClear,'Clearing does not reload source content')
+  paper.dispatchEvent(new window.MouseEvent('pointerup',{clientX:165,clientY:265,bubbles:true}));await settled()
+  assert.equal(selections.length,selectionCount+1,'A stale pointer-up cannot recreate the discarded selection')
+  document.querySelector('[data-source-word="1"]').dispatchEvent(new window.KeyboardEvent('keydown',{key:' ',bubbles:true}));await settled()
+  assert.equal(selections.at(-1).words.length,1,'A new selection does not retain earlier words')
+  assert.notEqual(selections.at(-1).words[0].text,'preface')
   selectWords.value=false;await settled();assert.equal(document.querySelectorAll('[data-source-word]').length,0)
   console.log('PASS: original-page word selection supports keyboard and exact geometry without changing existing binding navigation')
 
@@ -148,6 +169,15 @@ const click = text => [...document.querySelectorAll('button')].find(button => bu
   assert.equal(anchors()[0].textContent, '⌖')
   assert.ok(warnings.includes('SYNTHETIC-ambiguous'))
   assert.equal(missingPoints.length, 0, 'Range ambiguity does not remove the independently verified paragraph anchor')
+  selectWords.value=true;await settled()
+  document.querySelector('[data-source-word="0"]').dispatchEvent(new window.KeyboardEvent('keydown',{key:' ',bubbles:true}));await settled()
+  assert.equal(selections.at(-1).page,2)
+  const renderCountOnPageTwo=renders.length
+  pdf.value.clearSelection();await settled()
+  assert.equal(selections.at(-1).page,2,'Clearing a later page preserves its current page identity')
+  assert.equal(document.querySelector('input[type="number"]').value,'2')
+  assert.equal(renders.length,renderCountOnPageTwo,'Clearing a later page does not navigate or rerender')
+  selectWords.value=false;await settled()
   selected.value = 'SYNTHETIC-not-found'; request.value++; await settled()
   assert.equal(ranges().length, 0); assert.equal(anchors().length, 1)
   assert.ok(warnings.includes('SYNTHETIC-not-found'))
@@ -164,6 +194,15 @@ const click = text => [...document.querySelectorAll('button')].find(button => bu
   matchingPage.value='3';matchingPage.dispatchEvent(new window.Event('change',{bubbles:true}));await settled()
   assert.equal(renders.at(-1).page,3)
   assert.equal(document.querySelectorAll('.source-focus-range').length,1)
+  focusPage.value=1;await settled()
+  assert.equal(renders.at(-1).page,1,'A saved PDF page limits navigation to that page')
+  assert.match(document.querySelector('[data-source-text-matches]').textContent,/1 text matches/)
+  assert.equal(document.querySelector('[aria-label="Matching page"]'),null,'Matching text on other pages is not treated as the selected occurrence')
+  focusPage.value=99;await settled()
+  assert.equal(focusFailures.at(-1),'not_found','An invalid saved page cannot be silently located on another page')
+  assert.equal(document.querySelector('[data-source-text-matches]'),null)
+  focusFailures.length=0
+  focusPage.value=undefined;await settled()
   focusText.value='THIS PASSAGE DOES NOT EXIST';await settled()
   assert.deepEqual(focusFailures,['not_found'],'Missing source text has a distinct diagnosis')
   assert.equal(document.querySelector('[data-source-text-matches]'),null,'Obsolete matches disappear when the linked passage changes')

@@ -1,5 +1,6 @@
 import type { DraftCatalog, DraftField, LocalizedText } from '@/api/types'
 import type { ReviewObject, ReviewState, ReviewVariable } from './source-review-types'
+import { pendingEditorial } from './source-review/value-dependencies.js'
 
 export type BaselineVariable = DraftField & { baselineKey: string; baselineVersion: string; parentKey: string; groupLabel: LocalizedText }
 export type BaselineProposal = ReviewObject & { baselineKey: string; field?: BaselineVariable; compatible: boolean; issues: string[] }
@@ -16,7 +17,7 @@ export function baselineVariables(catalog: DraftCatalog): BaselineVariable[] {
   for (const group of catalog.groups) for (const field of group.fields) append(field, '', group.label)
   return result
 }
-export const businessVariable = (node: ReviewObject) => node.status !== 'excluded' && node.definitionKind !== 'source_seed' && node.role?.kind !== 'verification'
+export const businessVariable = (node: ReviewObject) => node.status !== 'excluded' && node.definitionKind !== 'source_seed' && ['input','decision','content'].includes(node.role?.kind) && !(node.editorialReview?.confirmed === true && node.editorialReview?.kind === 'editorial') && !pendingEditorial(node)
 export function baselineCompatibilityIssues(node: ReviewVariable, baseline: BaselineVariable, state: ReviewState, scope = node.catalogAlignment?.scope ?? ''): string[] {
   const issues: string[] = []
   if (node.role?.kind && !['input', 'decision', 'content'].includes(node.role.kind) || !businessVariable(node)) issues.push('role_mismatch')

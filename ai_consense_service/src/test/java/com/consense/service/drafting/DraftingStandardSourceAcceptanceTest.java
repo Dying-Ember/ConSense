@@ -34,7 +34,7 @@ class DraftingStandardSourceAcceptanceTest {
     }
     Map<String,Object> adopted() {
         Map<String,Object> values=new LinkedHashMap<>();
-        values.put("foundationIncluded",true);values.put("periodAtLeast39Months",true);
+        values.put("combinedContractWithFoundationWorks",true);values.put("periodAtLeast39Months",true);
         values.put("twoEnvelopeTendering",true);values.put("electronicTendering","L10Pro");
         values.put("subcontractArrangement","NSC");values.put("wtoGpaApplies",true);
         values.put("railwayProtectionAreaWorks",false);values.put("precastFacadeTenderBasis",false);
@@ -55,7 +55,7 @@ class DraftingStandardSourceAcceptanceTest {
         Map<String,Object> values=adopted();
         String yes=apply("NTT",values,"bond-g1a");
         assertTrue(yes.contains("Appendix G1a to Conditions of Contract"),"Actual NTT10 must be edited, not merely a plan flag.");
-        values.put("foundationIncluded",false);values.remove("periodAtLeast39Months");
+        values.put("combinedContractWithFoundationWorks",false);values.remove("periodAtLeast39Months");
         String no=apply("NTT",values,"bond-g1");
         assertTrue(no.contains("Appendix G1 to Conditions of Contract"),"An explicit false selects G1 even with unknown duration.");
     }

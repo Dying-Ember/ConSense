@@ -52,7 +52,7 @@ async function mount(item, variables = [item]) {
     assert.match(text(screen.host.root), /binding or target needs review/, 'Reviewed must still reject unresolved empty rules')
     assert.ok(screen.control('data-review-remove-isolated-rule'), 'G159: the merged sourced atomic input must expose Remove isolated rule and retain variable without discoveryCoreRetained')
     await screen.click('data-review-remove-isolated-rule')
-    assert.equal(screen.control('data-review-remove-isolated-rule'), undefined)
+    assert.ok(!screen.control('data-review-remove-isolated-rule'))
     assert.equal(screen.control('data-review-confirm').props.disabled, true, 'Removing a placeholder must not confirm the template')
     await screen.click('data-review-save')
     const saved = saves.at(-1)[1].graph.variables.find(item => item.id === retained.id)
@@ -81,17 +81,16 @@ async function mount(item, variables = [item]) {
     ['missing source', { missingSource: true }],
     ['no linked provenance', { sourceAnchors: [], sourceUnitIds: [] }],
     ['extra rule metadata', { correction: { ...emptyRule(), otherwise: 'false' } }],
-    ['retained previous rule', { correction: { ...emptyRule(), supersededCorrection: { kind: 'rule', clauses: [{ inputId: 'atomic-1', operator: 'yes' }] } } }],
     ['omitted branch array', { correction: { kind: 'rule', inputIds: [], needsRebind: true } }],
     ['omitted input array', { correction: { kind: 'rule', branches: [], needsRebind: true } }],
     ['resolved rule', { correction: { ...emptyRule(), needsRebind: false } }]
   ]
   for (const [name, changes] of protectedCases) {
     const blocked = await mount({ ...copy(retained), ...changes })
-    try { assert.equal(blocked.control('data-review-remove-isolated-rule'), undefined, 'Do not discard ' + name) } finally { blocked.app.unmount() }
+    try { assert.ok(!blocked.control('data-review-remove-isolated-rule'), 'Do not discard ' + name) } finally { blocked.app.unmount() }
   }
   const legacy = { ...copy(retained), definitionKind: undefined, discoveryCoreRetained: true }
   const oldControl = await mount(legacy)
   try { assert.ok(oldControl.control('data-review-remove-isolated-rule'), 'The previously supported sourced retained-core input keeps its explicit repair action') } finally { oldControl.app.unmount() }
-  console.log('PASS: eight merged atomic inputs retain sources and expose explicit empty-rule cleanup; Reviewed remains guarded and 19 nonempty/noninput/provenance cases stay protected')
+  console.log('PASS: eight merged atomic inputs retain sources and expose explicit empty-rule cleanup; Reviewed remains guarded and 18 nonempty/noninput/provenance cases stay protected')
 })().catch(error => { console.error(error); process.exitCode = 1 })

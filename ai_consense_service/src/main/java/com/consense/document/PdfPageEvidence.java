@@ -2,6 +2,7 @@ package com.consense.document;
 
 import lombok.Data;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -15,8 +16,16 @@ public class PdfPageEvidence {
     private double userUnit;
     private String coordinateSpace = "normalized_rendered_crop_top_left";
     private List<PdfGlyph> glyphs = new ArrayList<>();
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private String glyphsRetainedIn;
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private List<String> glyphIds;
     private List<PdfFormField> formFields = new ArrayList<>();
     private List<DocumentBlock> nativeBlocks = new ArrayList<>();
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private String nativeBlocksRetainedIn;
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private List<String> nativeBlockIds;
     private List<JsonNode> placedImageRegions = new ArrayList<>();
     private List<JsonNode> vectorPathOperators = new ArrayList<>();
     private List<JsonNode> paintedVectorRegions = new ArrayList<>();

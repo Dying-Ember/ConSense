@@ -29,6 +29,21 @@ class OerTemplateEvidenceTest {
         assertEquals(evidence,OerTemplateEvidence.analyse("SCC",parsed));
     }
 
+    @Test void streamedCompactReadingKeepsTheSameBindingAndRejectsChangedGlyphs() {
+        DocumentBlock block=pdfLine("page-one",1,"Special Conditions of Contract",0,.2);
+        ParseCoverage coverage=new ParseCoverage();coverage.setTotalPages(1);
+        DocumentParser.ParsedDocument parsed=new DocumentParser.ParsedDocument("text",Collections.emptyList(),1,false,"fixture",Collections.singletonList(block),coverage,SHA,Collections.emptyList());
+        JsonNode evidence=OerTemplateEvidence.analyse("SCC",parsed),full=tree(parsed.getBlocks());ObjectNode saved=tree(coverage).deepCopy();saved.set("templateEvidence",evidence);
+        assertEquals(evidence,OerTemplateEvidence.requireBound("SCC",SHA,full,saved,evidence));
+        JsonNode compact=OerTemplateEvidence.compactBoundBlocks("SCC",SHA,new java.io.StringReader(JsonUtils.write(full)),saved,evidence);
+        assertEquals(full.get(0).path("text"),compact.get(0).path("text"));assertFalse(compact.get(0).has("pdfGlyphs"));
+        JsonNode changed=full.deepCopy();((ObjectNode)changed.get(0).path("pdfGlyphs").get(0)).put("unicode","X");
+        assertThrows(IllegalArgumentException.class,()->OerTemplateEvidence.compactBoundBlocks("SCC",SHA,new java.io.StringReader(JsonUtils.write(changed)),saved,evidence));
+        assertThrows(IllegalArgumentException.class,()->OerTemplateEvidence.compactBoundBlocks("SCC",OTHER,new java.io.StringReader(JsonUtils.write(full)),saved,evidence));
+        ObjectNode tampered=evidence.deepCopy();tampered.put("testTamper",true);
+        assertThrows(IllegalArgumentException.class,()->OerTemplateEvidence.compactBoundBlocks("SCC",SHA,new java.io.StringReader(JsonUtils.write(full)),saved,tampered));
+    }
+
     @Test void oldOrMissingAnalysisRevisionIsStaleEvenWhenTheSourceAndStoredInputsHaveNotChanged() {
         DocumentParser.ParsedDocument parsed=word(p("a","Special Conditions of Contract"));JsonNode evidence=OerTemplateEvidence.analyse("SCC",parsed);ObjectNode old=evidence.deepCopy();((ObjectNode)old.path("sourceBinding")).put("analysisRevision","old-rules");
         assertEquals("TEMPLATE_EVIDENCE_REVISION_STALE",assertThrows(IllegalArgumentException.class,()->OerTemplateEvidence.requireBound("SCC",SHA,tree(parsed.getBlocks()),tree(parsed.getCoverage()),old)).getMessage());

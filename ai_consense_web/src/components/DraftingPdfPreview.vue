@@ -10,7 +10,7 @@ import type { PdfBindingLocation } from '@/drafting/document-bindings'
 import { findPdfTextMatches, selectPdfTextRange, type PdfTextMatch, type PdfTextRectangle } from '@/drafting/pdf-text-ranges'
 import { wordsInBox, type SourcePageWord, type SourcePageSelection } from '@/drafting/source-page-selection'
 
-const props = defineProps<{ source: string; title: string; locale: AppLocale; initialPage?: number; immersive?: boolean; locations?: PdfBindingLocation[]; selectedBindingId?: string; locationRequest?: number; selectWords?: boolean; focusText?: string; focusRequest?: number }>()
+const props = defineProps<{ source: string; title: string; locale: AppLocale; initialPage?: number; immersive?: boolean; locations?: PdfBindingLocation[]; selectedBindingId?: string; locationRequest?: number; selectWords?: boolean; focusText?: string; focusPage?: number; focusRequest?: number }>()
 const emit = defineEmits<{ loaded: [pages: number]; binding: [id: string]; locationUnavailable: [id: string]; rangeUnavailable: [id: string]; rangeAvailable: [id: string]; selection: [value: SourcePageSelection]; focusUnavailable: [reason: 'not_found' | 'unreadable'] }>()
 const w = (key: DraftWord) => draftWord(key, props.locale)
 const canvas = ref<HTMLCanvasElement>()
@@ -34,6 +34,10 @@ function publishSelection(indices: number[]) {
   emit('selection',wordSelection)
   void nextTick().then(()=>{if(pickedWords.value.length)selectionMenuHost.value?.scrollIntoView?.({block:'nearest',inline:'nearest'})})
 }
+function clearSelection() {
+  dragStart.value=undefined;dragBox.value=undefined;publishSelection([])
+}
+defineExpose({ clearSelection })
 function pointerPosition(event: PointerEvent) {
   const box=paper.value!.getBoundingClientRect();return {x:(event.clientX-box.left)/renderedScale.value,y:(event.clientY-box.top)/renderedScale.value}
 }
@@ -93,7 +97,9 @@ async function focusPassage(){
   searching.value=true
   try{
     const found: { page: number; count: number }[] = []
-    for(let page=1;page<=pdf.numPages;page++){
+    if(props.focusPage!==undefined&&(!Number.isInteger(props.focusPage)||props.focusPage<1||props.focusPage>pdf.numPages)){emit('focusUnavailable','not_found');return}
+    const first=props.focusPage??1,last=props.focusPage??pdf.numPages
+    for(let page=first;page<=last;page++){
       const content=await pageText(pdf,page)
       if(disposed||version!==focusVersion||source!==props.source)return
       const matches=findPdfTextMatches(content.items.flatMap(item=>'str' in item?[item.str]:[]),quote)
@@ -105,7 +111,7 @@ async function focusPassage(){
   }catch{if(!disposed&&version===focusVersion&&source===props.source)emit('focusUnavailable','unreadable')}
   finally{if(version===focusVersion)searching.value=false}
 }
-watch(()=>[props.focusText,props.focusRequest],()=>{void focusPassage()})
+watch(()=>[props.focusText,props.focusPage,props.focusRequest],()=>{void focusPassage()})
 GlobalWorkerOptions.workerSrc = pdfWorkerUrl
 
 const preview = createPdfPreview<PDFDocumentProxy>({
@@ -364,7 +370,7 @@ onBeforeUnmount(() => {
         <div v-for="(rectangle,index) in focusRectangles" :key="`focus-${index}`" class="source-focus-range" :style="{left:rectangle.x*renderedScale+'px',top:rectangle.y*renderedScale+'px',width:rectangle.width*renderedScale+'px',height:rectangle.height*renderedScale+'px'}" />
         <span v-for="(word,index) in pageWords" :key="`${state.page}-${index}`" :data-source-word="index" class="source-page-word" :class="{picked:pickedWords.includes(index)}" role="checkbox" :aria-checked="pickedWords.includes(index)" :aria-label="word.text" tabindex="0" :style="{left:word.rectangle.x*renderedScale+'px',top:word.rectangle.y*renderedScale+'px',width:word.rectangle.width*renderedScale+'px',height:word.rectangle.height*renderedScale+'px'}" @keydown.space.prevent="publishSelection(pickedWords.includes(index)?pickedWords.filter(id=>id!==index):[...pickedWords,index])" @dblclick.prevent="publishSelection([index])">{{ word.text }}</span>
         <div v-if="dragBox" class="source-selection-box" :style="{left:dragBox.x*renderedScale+'px',top:dragBox.y*renderedScale+'px',width:dragBox.width*renderedScale+'px',height:dragBox.height*renderedScale+'px'}" />
-        <div v-if="pickedWords.length" ref="selectionMenuHost" data-source-selection-menu class="source-selection-menu" :style="selectionMenu" @pointerdown.stop><slot name="selection" :clear="()=>publishSelection([])" /></div>
+        <div v-if="pickedWords.length" ref="selectionMenuHost" data-source-selection-menu class="source-selection-menu" :style="selectionMenu" @pointerdown.stop><slot name="selection" :clear="clearSelection" /></div>
         <button v-for="highlight in pageHighlights" :key="`${highlight.location.bindingId}:${highlight.index}`" type="button" class="pdf-binding-range" :class="{ selected: selectedBindingId === highlight.location.bindingId }" :data-pdf-binding="highlight.location.bindingId" :title="highlight.location.label" :aria-label="highlight.location.label" :aria-pressed="selectedBindingId === highlight.location.bindingId" :style="{ left: `${highlight.rectangle.x * renderedScale}px`, top: `${highlight.rectangle.y * renderedScale}px`, width: `${highlight.rectangle.width * renderedScale}px`, height: `${highlight.rectangle.height * renderedScale}px` }" @click="emit('binding', highlight.location.bindingId)" />
         <button v-for="location in pageAnchors" :key="location.bindingId" type="button" class="pdf-binding-point" :class="{ selected: selectedBindingId === location.bindingId }" :data-pdf-binding="location.bindingId" :title="`${location.label} · ${w('pdfParagraphAnchor')}`" :aria-label="`${location.label} · ${w('pdfParagraphAnchor')}`" :aria-pressed="selectedBindingId === location.bindingId" :style="{ left: `${location.geometry.x / location.geometry.pageWidth * 100}%`, top: `${location.geometry.y / location.geometry.pageHeight * 100}%` }" @click="emit('binding', location.bindingId)">⌖</button>
       </div>

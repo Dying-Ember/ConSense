@@ -16,6 +16,7 @@ const api = {
   reviewReading: async () => ({ ...source, paragraphs: [], guidanceNotes: [], sourceMembers: [], markerCandidates: [], groups: [], conditions: [], issues: [], blocks: [] }),
   reviewPreview: async () => { throw Error('Authored fixture has no PDF') },
   baselineCatalog: async () => { calls.push('baseline'); if (failCatalog) throw Error('HTTP 404'); return copy(catalog) },
+  baselineReference: async (_project,key) => ({ruleVersion:catalog.ruleVersion,baselineKey:key,referenceKind:'historical_catalog_reference_only',editableAuthority:false,sourceContext:[{document:'SCC',paragraph:698,text:'Impact Absorbing Surfacing Materials',referenceFormat:'docx'}]}),
   reviewSave: async (project, graph, expectedCurrent, expectedDraft) => { assert.equal(expectedCurrent,currentId); assert.equal(expectedDraft,revision.id); writes.push(copy(graph)); revision = { ...revision, id: 'saved-' + writes.length, graph: copy(graph) }; return copy(revision) },
   reviewConfirm: async (...args) => { confirmations.push(args); currentId = args[1] },
   reviewCandidates: async () => ({ variables: [] })
@@ -34,11 +35,11 @@ const click = async (key,value) => { const node=control(key,value); assert.ok(no
 ;(async () => {
   const fields = model.baselineVariables(catalog)
   assert.deepEqual(Array.from(fields, field=>field.baselineKey), ['contractPeriodMonths','foundationIncluded','designResponsibilities','designResponsibilities.component','designResponsibilities.design','designResponsibilities.execution','designResponsibilities.scope'])
-  const node = { id:'n',optional:true,type:{kind:'number',unit:'days'},options:[],nameZh:'合约工期（月）',nameEn:'Contract period (months)' }
+  const node = { id:'n',role:{kind:'input'},optional:true,type:{kind:'number',unit:'days'},options:[],nameZh:'合约工期（月）',nameEn:'Contract period (months)' }
   assert.equal(model.compatibleBaseline(node,fields[0],initial.graph),false,'Different units cannot be matched by name')
   node.type.unit='months'; assert.equal(model.compatibleBaseline(node,fields[0],initial.graph),true)
   assert.equal(model.suggestedBaselines(node,fields,initial.graph).length,1)
-  assert.equal(model.compatibleBaseline({type:{kind:'boolean'},options:[]},fields[1],initial.graph),true,'Baseline Boolean choices do not prevent matching an identified Boolean')
+  assert.equal(model.compatibleBaseline({type:{kind:'boolean'},role:{kind:'input'},options:[]},fields[1],initial.graph),true,'Baseline Boolean choices do not prevent matching an identified Boolean')
   assert.equal(model.compatibleBaseline({...node,optional:false},fields[0],initial.graph),false,'Optionality must match')
   const child=model.baselineNode(fields[3],catalog.ruleVersion,'人工确认','parent')
   assert.equal(model.compatibleBaseline(child,fields[3],{variables:[{id:'parent',catalogAlignment:{baselineKey:'designResponsibilities'}}]}),true)
@@ -68,6 +69,7 @@ const click = async (key,value) => { const node=control(key,value); assert.ok(no
   await click('data-review-catalog'); await click('data-catalog-tab','new')
   await click('data-picker-option',manual.id)
   await click('data-picker-option','contractPeriodMonths')
+  await click('data-catalog-reference');assert.match(text(host.root),/Impact Absorbing Surfacing Materials/);assert.match(text(host.root),/段号不是印刷页码/)
   await set('data-catalog-reason','实际工期，单位月，定义与基准一致')
   app.unmount(); failHead=true; app=mount(); await settle()
   assert.ok(control('data-source-question-drawer'),'A cached no-source graph remains visible during a backend failure')

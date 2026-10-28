@@ -345,7 +345,7 @@ public final class DraftClauseRules {
             String body = text.substring(ten[0], ten[1]);
             if (Pattern.compile("\\*?G1\\s*/\\s*\\*?G1a\\b").matcher(body).find()) {
                 Object trigger = decisions.get("g1aTrigger");
-                if (!(trigger instanceof Boolean)) throw new BizException(4007, "请确认合约类型和39个月工期条件");
+                if (!(trigger instanceof Boolean)) throw new BizException(4007, "请确认是否属于含基础工程的联合合约及39个月工期条件");
                 body = body.replaceAll("\\*?G1\\s*/\\s*\\*?G1a\\b", Boolean.TRUE.equals(trigger) ? "G1a" : "G1");
                 body = body.replaceAll("(?is)\\(\\s*Use Appendix G1a\\b.*?39 months or more\\s*\\)\\.?", "");
                 text = text.substring(0, ten[0]) + body + text.substring(ten[1]);

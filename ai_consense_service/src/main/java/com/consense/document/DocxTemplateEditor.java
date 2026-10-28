@@ -374,6 +374,9 @@ public final class DocxTemplateEditor {
     }
 
     private static SourceEditBatch validateOperations(PackageModel model,SourceEditBatch batch) {
+        return validateOperations(model,batch,true);
+    }
+    private static SourceEditBatch validateOperations(PackageModel model,SourceEditBatch batch,boolean checkOverlap) {
         Set<String> ids=new HashSet<>();
         for(Edit edit:batch.edits)if(edit==null||edit.operationId==null||edit.operationId.trim().isEmpty()||!ids.add(edit.operationId))throw error("INVALID_OPERATION_ID","batch");
         batch=expand(batch);
@@ -392,18 +395,24 @@ public final class DocxTemplateEditor {
             }
             else if(insertion(edit))validateInsertion(model,target,edit);
             else validateStructural(target,edit);
-            for(Edit other:batch.edits) {
-                if(other==edit)continue;Element otherTarget=model.nodes.get(other.targetId);
-                if(otherTarget==null)continue;
-                if(target==otherTarget) {
-                    if(insertion(edit)||insertion(other)) {
-                        // A text-only paragraph clear keeps this sibling anchor and style donor intact.
-                        if((destructive(edit)||destructive(other))&&edit.type!=EditType.CLEAR_PARAGRAPH&&other.type!=EditType.CLEAR_PARAGRAPH)throw error("OVERLAPPING_OPERATIONS",edit.operationId);
-                    }else if(!textEdit(edit)||!textEdit(other)||overlappingSpans(edit.start,edit.end,other.start,other.end))throw error("OVERLAPPING_OPERATIONS",edit.operationId);
-                }else if(contains(target,otherTarget)||contains(otherTarget,target))throw error("OVERLAPPING_OPERATIONS",edit.operationId);
-            }
+            if(checkOverlap)for(Edit other:batch.edits)if(other!=edit&&operationsOverlap(model,edit,other))throw error("OVERLAPPING_OPERATIONS",edit.operationId);
         }
         return batch;
+    }
+    /** Read-only cross-batch query validates bindings; intra-batch overlap remains an apply-time check. */
+    public Set<String> conflictingOperationIds(byte[] sourceDocx,SourceEditBatch first,SourceEditBatch second) {
+        PackageModel model=load(sourceDocx);
+        if(first==null||second==null||!model.index.sourceSha256.equals(first.expectedSourceSha256)||!model.index.sourceSha256.equals(second.expectedSourceSha256))throw error("SOURCE_HASH_MISMATCH","batch");
+        first=validateOperations(model,first,false);second=validateOperations(model,second,false);Set<String> conflicts=new LinkedHashSet<>();
+        for(Edit left:first.edits)for(Edit right:second.edits)if(operationsOverlap(model,left,right)){conflicts.add(left.operationId);conflicts.add(right.operationId);}
+        return Collections.unmodifiableSet(conflicts);
+    }
+    private static boolean operationsOverlap(PackageModel model,Edit edit,Edit other) {
+        Element target=model.nodes.get(edit.targetId),otherTarget=model.nodes.get(other.targetId);if(target==null||otherTarget==null)return false;
+        if(target!=otherTarget)return contains(target,otherTarget)||contains(otherTarget,target);
+        // A text-only paragraph clear keeps this sibling anchor and style donor intact.
+        if(insertion(edit)||insertion(other))return (destructive(edit)||destructive(other))&&edit.type!=EditType.CLEAR_PARAGRAPH&&other.type!=EditType.CLEAR_PARAGRAPH;
+        return !textEdit(edit)||!textEdit(other)||overlappingSpans(edit.start,edit.end,other.start,other.end);
     }
 
     public static final class NativeLayoutBoundary {
@@ -903,6 +912,8 @@ public final class DocxTemplateEditor {
             this.expectedSourceSha256=expectedSourceSha256;
             this.edits=Collections.unmodifiableList(new ArrayList<>(Objects.requireNonNull(edits,"edits")));
         }
+        public String getExpectedSourceSha256(){return expectedSourceSha256;}
+        public List<Edit> getEdits(){return edits;}
     }
     public enum EditType { REPLACE_SPAN, INSERT_TEXT, CLEAR_EDITORIAL_CELL, CLEAR_PARAGRAPH, CLEAR_PARAGRAPH_AND_NUMBERING, DELETE_PARAGRAPH, DELETE_ROW, DELETE_TABLE, REMOVE_NODES, KEEP_ROW_TOGETHER, INSERT_BEFORE, INSERT_AFTER }
     public static final class Edit {

@@ -106,6 +106,16 @@ export interface DraftVariable {
   adoptionState?: string
   validationIssue?: string | null
   candidates?: DraftCandidate[]
+  adoptedSourceCount?: number | null
+  compositeBillSuggestion?: DraftCompositeBillSuggestion | null
+}
+
+export interface DraftCompositeBillSuggestion {
+  value: string
+  runId: string
+  memberIndexes: number[]
+  mergeHash: string
+  partial: boolean
 }
 
 export interface DraftCandidate {
@@ -120,6 +130,8 @@ export interface DraftCandidate {
   sourceQuote?: string
   reason?: string
   confidence?: number
+  completenessStatus?: 'complete' | 'needs_review' | null
+  completenessIssues?: string[] | null
 }
 export interface DraftReviewCandidates {
   runId: string | null
@@ -133,7 +145,8 @@ export interface DraftReviewCandidates {
 }
 
 export interface DraftCondition {
-  all: Array<{ field: string; operator: 'eq' | 'gt' | 'includes' | 'in' | 'countGt' | 'includesComponent' | 'unknown'; value: unknown }>
+  reviewRequired?: boolean
+  all: Array<{ field: string; operator: 'eq' | 'gt' | 'includes' | 'in' | 'countGt' | 'includesComponent' | 'unknown'; value: unknown; componentKey?: string; identityKey?: string }>
 }
 
 export interface DraftTarget {
@@ -230,6 +243,7 @@ export interface DraftVariablePatch {
   reviewed?: boolean
   candidateIndex?: number
   candidateSnapshot?: DraftCandidateIdentity
+  compositeBill?: { runId: string; memberIndexes: number[]; mergeHash: string; expectedValue: string; expectedConfirmed: boolean; expectedManuallyEdited: boolean; expectedReviewRequired: boolean }
   suggestionSnapshot?: { value: string; source: string | null; candidates: DraftCandidateIdentity[]; reviewRequired: boolean; graphRevisionId?: string | null; fieldDefinitionHash?: string | null }
 }
 
@@ -245,6 +259,8 @@ export interface DraftCandidateIdentity {
   sourceDocumentId: string | number | null
   sourceHash: string | null
   sourceQuote: string | null
+  completenessStatus?: 'complete' | 'needs_review' | null
+  completenessIssues?: string[] | null
 }
 
 /** 手工新增 FILE 变量的请求体 */

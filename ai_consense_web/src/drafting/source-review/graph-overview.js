@@ -5,7 +5,7 @@ function create() {
   function project(state, { sources = [] } = {}) {
     const edition = id => {
       const source = sources.find(item => [String(item.id), item.docId, item.editionId].includes(String(id)));
-      return source?.fileKey === 'SCC' ? source.format : id === 'scc-word' ? 'docx' : id === 'scc-pdf' ? 'pdf' : null;
+      return source?.fileKey === 'SCC' ? String(source.id) : id === 'scc-word' || id === 'scc-pdf' ? id : null;
     };
     if (!Array.isArray(state?.variables)) throw TypeError('A review state with variables is required.');
     const nodes = state.variables.slice(), byId = new Map(nodes.map(node => [node.id, node]));

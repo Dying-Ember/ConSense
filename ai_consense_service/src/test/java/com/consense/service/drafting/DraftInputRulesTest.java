@@ -9,7 +9,7 @@ import static org.junit.jupiter.api.Assertions.*;
 class DraftInputRulesTest {
     @Test void competitionCatalogKeepsLegacyKeysAndDerivedValuesOutOfInputs() {
         assertEquals(21,DraftBlueprint.INPUTS.stream().filter(s -> !s.hidden).map(s -> s.group).distinct().count());
-        for(String key:Arrays.asList("contractTitle","foundationIncluded","periodAtLeast39Months","billNos","subcontractArrangement","subcontractors","twoEnvelopeTendering","electronicTendering"))assertNotNull(DraftBlueprint.find(key));
+        for(String key:Arrays.asList("contractTitle","foundationIncluded","combinedContractWithFoundationWorks","periodAtLeast39Months","billNos","subcontractArrangement","subcontractors","twoEnvelopeTendering","electronicTendering"))assertNotNull(DraftBlueprint.find(key));
         assertEquals(1,DraftBlueprint.INPUTS.stream().filter(s -> s.key.equals("targetOverrides")).count());
         assertNull(DraftBlueprint.find("fundingArrangement"));
         assertNull(DraftBlueprint.find("appendixG1a"));
@@ -23,7 +23,7 @@ class DraftInputRulesTest {
     }
     @Test void g1aRequiresBothTrue() {
         for (boolean a : new boolean[]{false,true}) for (boolean b : new boolean[]{false,true})
-            assertEquals(a && b,DraftInputRules.derived(Arrays.asList(v("foundationIncluded",String.valueOf(a)),v("periodAtLeast39Months",String.valueOf(b))),"").get("g1aTrigger"));
+            assertEquals(a && b,DraftInputRules.derived(Arrays.asList(v("combinedContractWithFoundationWorks",String.valueOf(a)),v("periodAtLeast39Months",String.valueOf(b))),"").get("g1aTrigger"));
     }
     @Test void billsNeedNumberDescriptionAndUniqueNumbers() {
         assertThrows(RuntimeException.class, () -> DraftInputRules.normalize(DraftBlueprint.find("billNos"),"[\"1 Preliminaries\"]"));

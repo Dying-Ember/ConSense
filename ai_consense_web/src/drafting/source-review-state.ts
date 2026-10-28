@@ -1,8 +1,8 @@
 import type { ReviewAnchor, ReviewGraph, ReviewHead, ReviewObject, ReviewReading, ReviewSpan, ReviewState, ReviewVariable } from './source-review-types'
-import { isSourceCheck, valueDependencies } from './source-review/value-dependencies.js'
+import { isSourceCheck, isTreatmentRule, valueDependencies } from './source-review/value-dependencies.js'
 
 // Retain unsaved source work through project switches and locale remounts.
-type ReviewDraft = { graph: ReviewGraph; head: ReviewHead; dirty: boolean; selectedId: string; sourceId: string; form: ReviewObject; formBase: string; formOpen: boolean; split?: { names: ReviewObject; first?: ReviewAnchor; second?: ReviewAnchor } }
+type ReviewDraft = { graph: ReviewGraph; head: ReviewHead; dirty: boolean; selectedId: string; sourceId: string; form: ReviewObject; formBase: string; formOpen: boolean; scopeBinding?: { integrity: Record<string, string>; entries: Record<string, string> }; split?: { names: ReviewObject; first?: ReviewAnchor; second?: ReviewAnchor } }
 const draftStorage = globalThis as typeof globalThis & { __consenseSourceDrafts?: Map<string, ReviewDraft>; __consenseCandidateDrafts?: Map<string, { form: ReviewObject; formBase: string; editing: string }> }
 export const sourceReviewDrafts = draftStorage.__consenseSourceDrafts ??= new Map<string, ReviewDraft>()
 
@@ -55,10 +55,14 @@ export function reviewProblem(item: ReviewVariable, state: ReviewState): string 
   if (!item.nameZh?.trim() || !item.nameEn?.trim()) return '请补齐中英文名称。 / Supply both names.'
   const manualDefinition = item.definitionOrigin?.kind === 'manual' && item.definitionOrigin.reason?.trim() && item.role?.kind === 'input' && !item.correction && !item.editTargets?.length
   if (!manualDefinition && (item.missingSource || !item.sourceAnchors?.length && !item.sourceUnitIds?.length)) return '请先关联准确原文，或为独立人工变量填写新增理由。 / Link the exact source, or give a reason for an independent manual variable.'
-  if (item.catalogAlignment && (!item.catalogAlignment.confirmed || item.catalogAlignment.status === 'ambiguous')) return '请先完成人工变量对齐审核。 / Complete the variable alignment review.'
+  if (!isSourceCheck(item) && item.catalogAlignment && (!item.catalogAlignment.confirmed || item.catalogAlignment.status === 'ambiguous')) return '请先完成人工变量对齐审核。 / Complete the variable alignment review.'
   if (['choice','multiselect'].includes(item.type.kind) && (!item.options?.length || new Set(item.options.map(option=>String(option.value))).size!==item.options.length)) return '请填写不重复的选项。 / Supply unique options.'
-  if (item.correction?.needsRebind || item.editTargets?.some(target => target.needsRebind || target.nativeBinding && target.nativeBinding.status !== 'bound')) return '关联或目标待重新核对。 / A binding or target needs review.'
   const byId = new Map(state.variables.map(value => [value.id, value]))
+  const retainedBranches = item.correction?.branches ?? (item.correction?.clauses?.length ? [item.correction] : [])
+  const valueReferences = [item.parentId, ...(item.applicability?.clauses ?? []).map((clause: ReviewObject) => clause.inputId), ...retainedBranches.flatMap((branch: ReviewObject) => [branch.scopeId, ...(branch.clauses ?? []).map((clause: ReviewObject) => clause.inputId)]), ...(item.editTargets ?? []).flatMap(target => [target.valueSourceId, target.listId, target.itemKey])]
+  if (valueReferences.some(id => id && isTreatmentRule(byId.get(id)))) return '处理规则不能提供变量值、条件、清单或明细匹配值；旧引用仍保留，请重新选择业务变量。 / A treatment rule cannot supply a variable value, condition, list or item match. The retained reference needs an answerable variable.'
+  if (item.correction?.needsRebind || item.editTargets?.some(target => target.needsRebind || target.nativeBinding && target.nativeBinding.status !== 'bound')) return '关联或目标待重新核对。 / A binding or target needs review.'
+  if (item.editTargets?.some(target => target.action === 'check')) return '请先选择修改范围的处理方式。 / Choose a treatment for each affected passage.'
   for (const target of item.editTargets ?? []) {
     const spans = targetSpans(target)
     if (['fill', 'replace'].includes(target.action) && spans.length > 1 && (!Number.isInteger(target.replacementPlacement?.spanIndex) || target.replacementPlacement.spanIndex < 0 || target.replacementPlacement.spanIndex >= spans.length)) return '请明确新文字放在哪个选区；其他已选区将清空。 / Choose the replacement span; the other selected spans will be cleared.'

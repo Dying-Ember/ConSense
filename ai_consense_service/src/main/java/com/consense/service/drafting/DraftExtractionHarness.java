@@ -356,6 +356,9 @@ public class DraftExtractionHarness {
         return node;
     }
 
+    ExtractionDecisionVO reviewCandidate(ExtractionPartVO part,ExtractionAttemptVO attempt,int index,JsonNode item,String originalSource) {
+        return decide(part,attempt,index,item,originalSource);
+    }
     private ExtractionDecisionVO decide(ExtractionPartVO part,ExtractionAttemptVO attempt,int index,JsonNode item,String originalSource) {
         String supplied=attempt.getContext()==null?part.getSourceText():attempt.getContext().getSourceText();
         String key=item.path("key").asText();JsonNode raw=item.get("value");

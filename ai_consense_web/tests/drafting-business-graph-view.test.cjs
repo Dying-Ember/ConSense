@@ -206,7 +206,7 @@ async function visibleParentChildStructureDistinguishesVariablesFromConditionsAn
   base.plan.inputValues.billNos = JSON.stringify(base.values.billNos)
   const before = JSON.stringify(base.values)
   base.catalog.groups.push({ id: 'contractType', label: label('Contract type and duration'), fields: [
-    { key: 'foundationIncluded', kind: 'boolean', label: label('Combined contract includes foundation') },
+    { key: 'combinedContractWithFoundationWorks', kind: 'boolean', label: label('Combined contract includes foundation') },
     { key: 'periodAtLeast39Months', kind: 'boolean', label: label('Period at least 39 months') },
     { key: 'contractPeriodMonths', kind: 'number', optional: true, label: label('Contract period in months') }
   ] }, { id: 'identity', label: label('Contract identity'), fields: [{ key: 'contractTitle', kind: 'contract', label: label('Contract number and title'), columnFields: [{ key: 'number', kind: 'text', label: label('Contract number') }, { key: 'title', kind: 'text', label: label('Contract title') }] }] })
@@ -215,7 +215,7 @@ async function visibleParentChildStructureDistinguishesVariablesFromConditionsAn
   const parent = h.element.querySelector('[data-graph-parent="contractType"]')
   assert(parent, 'Confirmed composite contract type is visibly labeled as a parent variable')
   assert.match(parent.textContent, /Parent variable/)
-  for (const key of ['foundationIncluded', 'periodAtLeast39Months']) assert.equal(h.element.querySelector(`[data-graph-input="${key}"]`).getAttribute('data-graph-input-kind'), 'subvariable', 'The existing composing inputs retain their keys but are visibly child variables')
+  for (const key of ['combinedContractWithFoundationWorks', 'periodAtLeast39Months']) assert.equal(h.element.querySelector(`[data-graph-input="${key}"]`).getAttribute('data-graph-input-kind'), 'subvariable', 'The existing composing inputs retain their keys but are visibly child variables')
   assert.equal(h.element.querySelector('[data-graph-input="contractPeriodMonths"]').getAttribute('data-graph-input-kind'), 'supporting-value', 'Optional month fact is related to the parent without inventing a third independent boolean decision')
   assert(h.element.querySelector('[data-graph-pool-group="billing"]'), 'Ordinary catalogue groups remain clearly labeled groups')
   assert.equal(h.element.querySelector('[data-graph-parent="billing"]'), null, 'A display group must not become a fabricated business parent')

@@ -48,27 +48,22 @@ final class DraftDocumentBindings {
         Map<String,String> names=new LinkedHashMap<>();for(Map<String,Object> row:rows)names.put(String.valueOf(row.get("sourceParagraphId")),String.valueOf(row.get("bookmarkName")));return names;
     }
     static void associateTargets(String fileKey,TemplateIndex source,Map<String,Object> plan,List<Map<String,Object>> rows) {
-        if(plan.containsKey("graphRevisionId")) {
-            for(Map<String,Object> row:rows) {
-                Set<String> fields=new LinkedHashSet<>(),actions=new LinkedHashSet<>();
-                for(Object raw:DraftReviewGraph.list(plan.get("actions"))) {
-                    Map<String,Object> action=DraftReviewGraph.map(raw),binding=DraftReviewGraph.map(action.get("nativeBinding"));
-                    if(!fileKey.equals(action.get("document"))||!source.getSourceSha256().equals(binding.get("sourceSha256"))||!"bound".equals(binding.get("status")))continue;
-                    for(Object selected:DraftReviewGraph.list(binding.get("spans")))if(Objects.equals(row.get("sourceParagraphId"),DraftReviewGraph.map(selected).get("paragraphId"))) {
-                        actions.add(String.valueOf(action.get("id")));for(Object key:DraftReviewGraph.list(action.get("inputKeys")))fields.add(String.valueOf(key));
-                        for(Object key:DraftReviewGraph.list(action.get("fieldKeys")))fields.add(String.valueOf(key));
-                    }
-                }
-                row.put("fieldKeys",new ArrayList<>(fields));row.put("actionIds",new ArrayList<>(actions));if(!actions.isEmpty())row.put("applicationStatus","unapplied");
-            }
-            return;
-        }
-        if(!DraftTemplateReadingSources.catalogueSourceVerified(fileKey,source.getSourceSha256()))return;
+        boolean graphPlan=plan.containsKey("graphRevisionId"),catalogue=DraftTemplateReadingSources.catalogueSourceVerified(fileKey,source.getSourceSha256());
+        Map<String,String> fixedFields=fixedAssociationInputs(plan);
+        if(!graphPlan&&!catalogue)return;
         for(Map<String,Object> row:rows) {
             int ordinal=((Number)row.get("sourceParagraphOrdinal")).intValue();Set<String> fields=new LinkedHashSet<>(),actions=new LinkedHashSet<>();
             for(Object entry:DraftBusinessRules.list(plan.get("actions"))) {
                 Map<String,Object> action=DraftBusinessRules.asMap(entry);
                 if(!fileKey.equals(action.get("document")))continue;
+                boolean fixed="fixed_catalog".equals(action.get("executionKind"));
+                if(graphPlan&&!fixed) {
+                    Map<String,Object> binding=DraftBusinessRules.asMap(action.get("nativeBinding"));
+                    if(!source.getSourceSha256().equals(binding.get("sourceSha256"))||!"bound".equals(binding.get("status")))continue;
+                    for(Object selected:DraftBusinessRules.list(binding.get("spans")))if(Objects.equals(row.get("sourceParagraphId"),DraftBusinessRules.asMap(selected).get("paragraphId"))){actions.add(String.valueOf(action.get("id")));for(Object key:DraftBusinessRules.list(action.get("inputKeys")))fields.add(String.valueOf(key));for(Object key:DraftBusinessRules.list(action.get("fieldKeys")))fields.add(String.valueOf(key));}
+                    continue;
+                }
+                if(!catalogue||graphPlan&&(!Boolean.TRUE.equals(DraftBusinessRules.asMap(plan.get("fixedRuleCoverage")).get("registered"))||!source.getSourceSha256().equals(DraftFormattedRules.verifiedSourceHash(fileKey))))continue;
                 Set<Integer> targets=paragraphOrdinals(String.valueOf(action.get("paragraphs")));
                 String actionId=String.valueOf(action.get("id"));int[] exact=DraftSourceAnchors.associationScope(actionId);
                 if(exact!=null){targets.clear();for(int target:exact)targets.add(target);}
@@ -79,11 +74,20 @@ final class DraftDocumentBindings {
                     targets.add(negative.toc);
                 }
                 if(!targets.contains(ordinal))continue;
-                actions.add(actionId);for(Object key:DraftSourceAnchors.associationInputs(actionId,ordinal,DraftBusinessRules.list(action.get("inputKeys"))))fields.add(String.valueOf(key));
+                actions.add(actionId);
+                for(Object key:DraftSourceAnchors.associationInputs(actionId,ordinal,DraftBusinessRules.list(action.get(graphPlan?"catalogInputKeys":"inputKeys")))) {
+                    String field=graphPlan?fixedFields.get(String.valueOf(key)):String.valueOf(key);if(field!=null)fields.add(field);
+                }
             }
             row.put("fieldKeys",new ArrayList<>(fields));row.put("actionIds",new ArrayList<>(actions));
             if(!actions.isEmpty())row.put("applicationStatus","unapplied");
         }
+    }
+    /** Canonical-to-graph names for read-only sidecars; this never creates an editable nativeBinding. */
+    private static Map<String,String> fixedAssociationInputs(Map<String,Object> plan) {
+        Map<String,String> result=new LinkedHashMap<>();Set<String> ambiguous=new HashSet<>();
+        for(Object raw:DraftBusinessRules.list(plan.get("actions"))){Map<String,Object> action=DraftBusinessRules.asMap(raw);if(!"fixed_catalog".equals(action.get("executionKind")))continue;List<Object> canonical=DraftBusinessRules.list(action.get("catalogInputKeys")),graph=DraftBusinessRules.list(action.get("inputKeys"));if(canonical.size()!=graph.size())continue;for(int i=0;i<canonical.size();i++){String key=String.valueOf(canonical.get(i)),id=String.valueOf(graph.get(i)),previous=result.putIfAbsent(key,id);if(previous!=null&&!previous.equals(id))ambiguous.add(key);}}
+        for(String key:ambiguous)result.remove(key);return result;
     }
     private static Set<Integer> paragraphOrdinals(String text) {
         Set<Integer> ordinals=new LinkedHashSet<>();java.util.regex.Matcher range=java.util.regex.Pattern.compile("P(\\d+)(?:\\s*[–—-]\\s*P?(\\d+))?").matcher(text);

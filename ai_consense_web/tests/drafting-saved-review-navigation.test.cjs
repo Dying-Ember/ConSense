@@ -12,11 +12,15 @@ const paragraph = { id: 'p1', ordinal: 1, text: 'TEST ONLY requirement', paragra
 const item = { id: 'TEST-question', nameZh: '测试变量', nameEn: 'TEST variable', docIds: ['41'], type: { kind: 'text' }, role: { kind: 'input' }, status: 'pending', options: [], sourceAnchors: [{ docId: '41', text: paragraph.text, sourceSha256: source.sourceSha256, native: { paragraphId: 'p1', paragraphSha256: paragraph.paragraphSha256, start: 0, end: paragraph.text.length, expectedText: paragraph.text } }], editTargets: [], sourceUnitIds: [], relatedInputIds: [], relations: [], targets: [], evidence: [] }
 const graph = { kind: 'consense-template-graph-v1', graph: { variables: [item], events: [], sourceReviews: {}, nextId: 1, blank: false, guidanceMode: 'minimum' }, sources: [source], selectedDocuments: { NTT: '41' } }
 
-function harness({ strictCandidateRevision = false, staleSources = false } = {}) {
+function harness({ strictCandidateRevision = false, staleSources = false, relationshipRecords = false } = {}) {
   let revision = { id: 'TEST-draft-1', status: 'DRAFT', graph: copy(graph), sourceStale: false }, number = 1
+  if (relationshipRecords) {
+    revision.graph.graph.variables.push({ ...copy(item), id: 'TEST-related', nameEn: 'Related source question' })
+    revision.graph.graph.relationProposals = [{ fromId: item.id, toId: 'TEST-related', kind: 'same_fact', fromQuote: paragraph.text, toQuote: 'Other original passage', reason: 'Retained relationship after historical graph restoration', status: 'pending', executable: false }]
+  }
   let failCatalog = false, barrier, correctionBarrier, catalogReads = 0
   let candidateRun = 'TEST-original-run', adoptedCount = 0
-  const writes = [], modelCalls = [], candidate = { value: 'TEST candidate', fileName: 'TEST ONLY evidence.docx', sourceDocumentId: 42, sourceQuote: 'TEST ONLY exact evidence', extractionRunId: candidateRun, originalSha256: 'c'.repeat(64), fieldDefinitionHash: 'TEST-definition', graphRevisionId: revision.id }
+  const writes = [], reviewGraphs = [], modelCalls = [], candidate = { value: 'TEST candidate', fileName: 'TEST ONLY evidence.docx', sourceDocumentId: 42, sourceQuote: 'TEST ONLY exact evidence', extractionRunId: candidateRun, originalSha256: 'c'.repeat(64), fieldDefinitionHash: 'TEST-definition', graphRevisionId: revision.id }
   const field = { key: item.id, kind: 'text', label: label('TEST variable') }
   const variable = () => ({ key: item.id, label: field.label, kind: 'text', value: '', confirmed: false, manuallyEdited: false, graphRevisionId: revision.id, fieldDefinitionHash: 'TEST-definition', candidates: [copy(candidate)] })
   const candidateResult = () => ({ runId: candidateRun, graphRevisionId: revision.id, evidenceRevision: 'TEST-evidence', stale: staleSources, variables: [variable()] })
@@ -32,7 +36,7 @@ function harness({ strictCandidateRevision = false, staleSources = false } = {})
     reviewReading: async () => ({ ...source, paragraphs: [paragraph], blocks: [], guidanceNotes: [], sourceMembers: [], markerCandidates: [], groups: [], conditions: [], issues: [] }),
     reviewCandidates: async () => candidateResult(),
     reviewCorrectCandidate: async (_id, targetRevision, key, patch) => { assert.equal(targetRevision, revision.id); assert.equal(patch.expectedRunId, candidateRun); writes.push({ kind: 'correctCandidate', targetRevision, key, patch: copy(patch) }); if (correctionBarrier) await correctionBarrier.promise; candidateRun = 'TEST-corrected-run'; Object.assign(candidate, { value: patch.value, sourceQuote: patch.sourceQuote, graphRevisionId: targetRevision, extractionRunId: candidateRun }); return candidateResult() },
-    reviewSave: async (_id, proposed) => { writes.push('reviewSave'); revision = { ...revision, id: `TEST-draft-${++number}`, parentRevisionId: revision.id, graph: copy(proposed) }; return copy(revision) },
+    reviewSave: async (_id, proposed) => { writes.push('reviewSave'); reviewGraphs.push(copy(proposed)); revision = { ...revision, id: `TEST-draft-${++number}`, parentRevisionId: revision.id, graph: copy(proposed) }; return copy(revision) },
     reviewConfirm: async () => { writes.push('confirm'); throw Error('Navigation must not confirm') },
     updateVariable: async (_id, _key, patch) => { writes.push(copy(patch)); if (strictCandidateRevision && candidate.graphRevisionId !== revision.id) throw Error('GRAPH_REVISION_CONFLICT: Candidate belongs to another graph revision; identify again.'); adoptedCount++; return { ...variable(), value: candidate.value, confirmed: true } },
     automationStart: async () => { modelCalls.push('automation'); throw Error('Navigation must not start automation') },
@@ -53,7 +57,7 @@ function harness({ strictCandidateRevision = false, staleSources = false } = {})
   const host = renderer(), app = host.createApp(loaded.default); app.use(pinia); app.use(loaded.loadLocal(path.join(__dirname, '../src/i18n/index.ts')).i18n); app.mount(host.root)
   const control = (attr, value) => find(host.root, node => value === undefined ? node.props?.[attr] !== undefined : node.props?.[attr] === value)
   const button = title => find(host.root, node => node.tag === 'button' && text(node).trim() === title)
-  const h = { get root() { return host.root }, store, writes, modelCalls, candidate, control, button,
+  const h = { get root() { return host.root }, store, writes, reviewGraphs, modelCalls, candidate, control, button,
     get reads() { return catalogReads }, get adoptions() { return adoptedCount }, failRead(value) { failCatalog = value }, pause() { barrier = deferred(); return barrier },
     pauseCorrection() { correctionBarrier = deferred(); return correctionBarrier },
     cached() { return loaded.loadLocal(path.join(__dirname, '../src/drafting/state.ts')).projectDrafts.get('TEST-P1') },
@@ -85,6 +89,22 @@ async function run() {
     assert.deepEqual(adoption.candidateSnapshot, { ...saved.candidate, sourceHash: null }, 'Reading a saved revision preserves original candidate provenance and extraction identity')
     console.log('PASS: real review-save and both step-3 controls align DRAFT values without reload, confirmation, model runs or candidate rewrite')
   } finally { saved.dispose() }
+
+  const relationships = harness({ relationshipRecords: true })
+  try {
+    await settle(); await relationships.saveReview()
+    assert.equal(relationships.reviewGraphs[0].graph.automaticDiscovery, undefined, 'A restored historical graph need not have automatic-discovery metadata')
+    assert.ok(relationships.control('data-automation-results'), 'Saved relationship records are shown for the new revision without automatic-discovery metadata')
+    await relationships.title('Relationships')
+    const results=relationships.control('data-automation-results')
+    assert.match(text(results), /Retained relationship after historical graph restoration/)
+    find(results, node => node.tag === 'textarea').props['onUpdate:modelValue']('Both original passages reviewed'); await settle()
+    await relationships.title('Save this review')
+    assert.deepEqual(relationships.writes, ['reviewSave', 'reviewSave'], 'The relation action reaches SourceReview with the newly saved revision ID')
+    assert.deepEqual(relationships.reviewGraphs[1].graph.relationProposals[0].review, { decision: 'implemented', reason: 'Both original passages reviewed', basis: null })
+    assert.deepEqual(relationships.modelCalls, [])
+    console.log('PASS: historical graphs with retained relationships refresh the result revision and keep the manual review bridge usable')
+  } finally { relationships.dispose() }
 
   const dirty = harness()
   try {

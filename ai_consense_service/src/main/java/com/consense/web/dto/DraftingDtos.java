@@ -97,6 +97,10 @@ public final class DraftingDtos {
         private boolean manuallyEdited;
         private boolean reviewRequired;
         private List<CandidateVO> candidates;
+        @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+        private Integer adoptedSourceCount;
+        @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+        private CompositeBillSuggestion compositeBillSuggestion;
         private String adoptionState;
         private String validationIssue;
         private String graphRevisionId;
@@ -130,6 +134,7 @@ public final class DraftingDtos {
         private String result;
         private Integer candidateIndex;
         private CandidateVO candidateSnapshot;
+        private CompositeBillRequest compositeBill;
         private SuggestionSnapshot suggestionSnapshot;
         private Boolean reviewed;
         private String graphRevisionId;
@@ -177,10 +182,34 @@ public final class DraftingDtos {
         private String fieldDefinitionHash;
         private String extractionRunId;
         private String originalSha256;
+        @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+        private String completenessStatus;
+        @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+        private List<String> completenessIssues;
         public CandidateVO(String value,Long sourceDocumentId,String fileName,String sourceHash,String sourceQuote,String reason,Double confidence) {
             this.value=value;this.sourceDocumentId=sourceDocumentId;this.fileName=fileName;this.sourceHash=sourceHash;
             this.sourceQuote=sourceQuote;this.reason=reason;this.confidence=confidence;
         }
+    }
+
+    @Data @NoArgsConstructor @AllArgsConstructor
+    public static class CompositeBillSuggestion {
+        private String value;
+        private String runId;
+        private List<Integer> memberIndexes;
+        private String mergeHash;
+        private boolean partial;
+    }
+
+    @Data @NoArgsConstructor @AllArgsConstructor
+    public static class CompositeBillRequest {
+        private String runId;
+        private List<Integer> memberIndexes;
+        private String mergeHash;
+        private String expectedValue;
+        private Boolean expectedConfirmed;
+        private Boolean expectedManuallyEdited;
+        private Boolean expectedReviewRequired;
     }
 
     /** A plan preview does not mutate saved project inputs. */

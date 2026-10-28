@@ -38,9 +38,29 @@ final class DraftFormattedRules {
         return compile(original,key,plan,bookmarks,null);
     }
     static DocxEditResult compile(byte[] original,String key,Map<String,Object> plan,Map<String,String> bookmarks,NativeLayoutPlan layout) {
-        DocxTemplateEditor editor=new DocxTemplateEditor();TemplateIndex index=editor.inspect(original);List<Edit> edits=new ArrayList<>();
-        DraftSourceEditCompiler compiler=new DraftSourceEditCompiler(index,key,layout);
-        DraftClauseRules.apply(compiler.projection(),key,plan,compiler);
+        DocxTemplateEditor editor=new DocxTemplateEditor();TemplateIndex index=editor.inspect(original);
+        return editor.applyWithParagraphBookmarks(original,compileBatch(index,key,plan,layout),bookmarks,!bookmarks.isEmpty(),layout);
+    }
+    static String verifiedSourceHash(String key){return String.valueOf(DraftBusinessRules.asMap(DraftBusinessRules.asMap(GUIDANCE.get("originalSourceDocuments")).get(key)).getOrDefault("sourceSha256",""));}
+    static SourceEditBatch compileBatch(TemplateIndex index,String key,Map<String,Object> plan,NativeLayoutPlan layout) {
+        return compileBatch(index,key,plan,layout,true);
+    }
+    static SourceEditBatch compileBatch(TemplateIndex index,String key,Map<String,Object> plan,NativeLayoutPlan layout,boolean includeEditorial) {
+        PreparedBatch prepared=prepareBatch(index,key,plan,layout);return includeEditorial?prepared.withEditorial():prepared.business();
+    }
+    static PreparedBatch prepareBatch(TemplateIndex index,String key,Map<String,Object> plan,NativeLayoutPlan layout) {
+        DraftSourceEditCompiler compiler=new DraftSourceEditCompiler(index,key,layout);DraftClauseRules.apply(compiler.projection(),key,plan,compiler);
+        return new PreparedBatch(index,key,plan,compiler);
+    }
+    static final class PreparedBatch {
+        final TemplateIndex index;final String key;final Map<String,Object> plan;final DraftSourceEditCompiler compiler;
+        PreparedBatch(TemplateIndex index,String key,Map<String,Object> plan,DraftSourceEditCompiler compiler){this.index=index;this.key=key;this.plan=plan;this.compiler=compiler;}
+        SourceEditBatch business(){return new SourceEditBatch(index.getSourceSha256(),compiler.edits());}
+        SourceEditBatch withEditorial(){return editorialBatch(this);}
+    }
+    private static SourceEditBatch editorialBatch(PreparedBatch prepared) {
+        TemplateIndex index=prepared.index;String key=prepared.key;Map<String,Object> plan=prepared.plan;DraftSourceEditCompiler compiler=prepared.compiler;
+        List<Edit> edits=new ArrayList<>();
         List<Map<String,Object>> verified=new ArrayList<>();
         for(Object raw:DraftBusinessRules.list(GUIDANCE.get("operations"))) {
             Map<String,Object> op=DraftBusinessRules.asMap(raw);if(!key.equals(op.get("sourceKey")))continue;
@@ -63,7 +83,7 @@ final class DraftFormattedRules {
             else throw new BizException(4012,"UNSUPPORTED_GUIDANCE_OPERATION: "+id);
         }
         if("SCT".equals(key))keepVerifiedFractionTogether(index,selected,edits,plan);
-        return editor.applyWithParagraphBookmarks(original,new SourceEditBatch(index.getSourceSha256(),edits),bookmarks,!bookmarks.isEmpty(),layout);
+        return new SourceEditBatch(index.getSourceSha256(),edits);
     }
     private static void keepVerifiedFractionTogether(TemplateIndex index,Set<String> selected,List<Edit> edits,Map<String,Object> plan) {
         // The audited fraction splits after earlier branches are removed. The assessed renderer ignores

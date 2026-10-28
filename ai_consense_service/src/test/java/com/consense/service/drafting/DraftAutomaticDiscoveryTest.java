@@ -14,7 +14,76 @@ import static org.mockito.Mockito.*;
 import static com.consense.service.drafting.DraftReviewGraph.*;
 
 class DraftAutomaticDiscoveryTest {
+    @Test void restoredMeaningsAreAvailableBeforeDiscoveryAndInCrossBaselineRelationsWithoutProjectAnswers() {
+        String quote="Provide the project name.";ObjectNode source=source("1");member(source,"body",quote,"main");guidance(source,"body",quote);List<JsonNode> readings=Collections.singletonList(source);
+        DraftAutomaticDiscovery.Plan original=DraftAutomaticDiscovery.plan(readings);Map<String,Object> base=DraftAutomaticDiscovery.finish(graph(),original,Collections.singletonList(atomicReceipt(original,Collections.singletonList(node("known",quote)))));
+        Map<String,Object> known=nodes(base).get(0);known.put("status","confirmed");known.put("adoptedValue","PROJECT_ANSWER_MUST_STAY_PRIVATE");String knownId=text(known.get("id"));
+        base.put("sources",Collections.singletonList(obj("id","1","sourceSha256",SHA)));map(base.get("graph")).put("baselineRestoration",obj("status","partial_requires_review","fieldIds",Collections.singletonList(knownId)));
+        DraftAutomaticDiscovery.Plan plan=DraftAutomaticDiscovery.plan(readings,base);
+        Map<String,Object> fresh=DraftAutomaticDiscovery.process((system,user)->{assertEquals(knownId,JsonUtils.parse(user).path("restoredDefinitionReferences").path(0).path("id").asText());assertFalse(user.contains("PROJECT_ANSWER_MUST_STAY_PRIVATE"));return JsonUtils.write(obj("nodes",Collections.singletonList(node("fresh",quote)),"requirements",Collections.singletonList(obj("id","identity","sourceQuote",quote,"kind","input","nodeIds",Collections.singletonList("fresh")))));},plan,plan.tasks().get(0));
+        Map<String,Object> relationTask=DraftAutomaticDiscovery.planRelations(plan,Collections.singletonList(fresh)).get(0);assertTrue(list(relationTask.get("catalogNodeIds")).contains(knownId));assertFalse(list(relationTask.get("nodeIds")).contains(knownId));
+        Map<String,Object> relation=DraftAutomaticDiscovery.processRelation((system,user)->{assertTrue(user.contains(knownId));assertFalse(user.contains("PROJECT_ANSWER_MUST_STAY_PRIVATE"));return "{\"relations\":[],\"nodeClassifications\":[]}";},plan,Collections.singletonList(fresh),relationTask);
+        assertNotEquals("failed",relation.get("status"));
+    }
+    @Test void changedEditionCanRequestCurrentEvidenceWithoutLosingThePriorDraft() {
+        ObjectNode source=source("1");String quote="Provide the project name.";member(source,"body",quote,"main");member(source,"context","The project name is an independent contract identity.","main");guidance(source,"body",quote);
+        DraftAutomaticDiscovery.Plan plan=DraftAutomaticDiscovery.plan(Collections.singletonList(source));int[] calls={0};
+        Map<String,Object> result=DraftAutomaticDiscovery.process((system,user)->{
+            JsonNode payload=JsonUtils.parse(user);
+            if(++calls[0]==1)return JsonUtils.write(obj("nodes",Collections.singletonList(node("name",quote)),"requirements",Collections.singletonList(obj("id","identity","sourceQuote",quote,"kind","input","nodeIds",Collections.singletonList("name"))),"notes",Collections.singletonList("The editing range remains unconfirmed."),"sourceContextRequests",Collections.singletonList(obj("kind","member","id","context"))));
+            assertFalse(payload.path("priorDraft").path("nodes").isEmpty());assertEquals("context",payload.path("currentSourceContext").path("items").path(0).path("id").asText());
+            return "{\"nodes\":[],\"requirements\":[],\"notes\":[]}";
+        },plan,plan.tasks().get(0));
+        assertEquals(2,calls[0]);assertEquals(1,list(result.get("nodes")).size());assertEquals(1,list(result.get("requirements")).size());assertTrue(JsonUtils.write(result.get("notes")).contains("unconfirmed"));
+    }
+
+    @Test void newRunCannotSilentlyRemoveExistingScopeUncertainty() {
+        String quote="Provide the project name.";ObjectNode source=source("1");member(source,"body",quote,"main");guidance(source,"body",quote);DraftAutomaticDiscovery.Plan plan=DraftAutomaticDiscovery.plan(Collections.singletonList(source));
+        Map<String,Object> base=graph();map(base.get("graph")).put("automaticDiscoveryIssues",Collections.singletonList(obj("sourceId","1","scopeId","historic-scope","reason","scope_binding_unresolved")));
+        Map<String,Object> result=DraftAutomaticDiscovery.finish(base,plan,Collections.singletonList(atomicReceipt(plan,Collections.singletonList(node("name",quote)))));
+        assertTrue(list(map(result.get("graph")).get("automaticDiscoveryIssues")).stream().anyMatch(raw->"scope_binding_unresolved".equals(map(raw).get("reason"))));
+    }
     private static final String SHA=String.join("",Collections.nCopies(64,"a"));
+
+    @Test void exactEditionMayRequestOnlyShownFixedDefinitionsBeforeAtomicDiscovery() {
+        ObjectNode source=source("1");String sha="60bd8796aa828863c7edfe8617b7a5c56ee383afe8ba87a089e820f0fd9a982c",quote="The contract period is 39 months or more.";source.put("sourceSha256",sha);member(source,"body",quote,"main");((ObjectNode)source.path("sourceMembers").path(0).path("sourcePosition")).put("sourceSha256",sha);guidance(source,"body",quote);
+        DraftAutomaticDiscovery.Plan plan=DraftAutomaticDiscovery.plan(Collections.singletonList(source));int[] calls={0};
+        Map<String,Object> receipt=DraftAutomaticDiscovery.process((system,user)->{calls[0]++;JsonNode payload=JsonUtils.parse(user);if(calls[0]==1){assertTrue(payload.path("fixedBaselineIndex").path("fields").toString().contains("periodAtLeast39Months"));return JsonUtils.write(obj("baselineContextRequests",Arrays.asList("periodAtLeast39Months","inventedKey")));}
+            assertEquals("periodAtLeast39Months",payload.path("fixedContext").path("fields").path(0).path("key").asText());assertFalse(user.contains("inventedKey"));return JsonUtils.write(obj("nodes",Collections.singletonList(node("duration",quote)),"requirements",Collections.singletonList(obj("id","duration","sourceQuote",quote,"kind","input","nodeIds",Collections.singletonList("duration")))));},plan,plan.tasks().get(0));
+        assertEquals(2,calls[0]);assertEquals(2,receipt.get("modelCalls"));assertEquals("completed",receipt.get("status"));assertEquals(1,list(receipt.get("nodes")).size());assertEquals(1,list(receipt.get("baselineEvidenceRounds")).size());
+    }
+
+    @Test void changedSccEditionCanRequestFixedDefinitionsWithoutInheritingHistoricalAuthority() {
+        ObjectNode source=source("1");source.put("fileKey","SCC");String quote="The contract period is 39 months or more.";member(source,"body",quote,"main");guidance(source,"body",quote);DraftAutomaticDiscovery.Plan plan=DraftAutomaticDiscovery.plan(Collections.singletonList(source));
+        int[] calls={0};Map<String,Object> receipt=DraftAutomaticDiscovery.process((system,user)->{JsonNode payload=JsonUtils.parse(user);if(++calls[0]==1){JsonNode index=payload.path("fixedBaselineIndex");assertTrue(index.path("fields").toString().contains("periodAtLeast39Months"));assertEquals("fixed_definition_reference",index.path("referenceKind").asText());assertFalse(index.path("editableAuthority").asBoolean());assertFalse(payload.has("fixedContext"));assertTrue(system.contains("never current-source evidence"));return JsonUtils.write(obj("baselineContextRequests",Collections.singletonList("periodAtLeast39Months")));}
+            assertEquals(1,payload.path("fixedContext").path("fields").size());assertEquals("periodAtLeast39Months",payload.path("fixedContext").path("fields").path(0).path("key").asText());assertFalse(payload.path("fixedContext").path("editableAuthority").asBoolean());assertFalse(payload.path("sourceTask").has("fixedActionReferences"));return "{\"nodes\":[],\"requirements\":[]}";},plan,plan.tasks().get(0));assertEquals(2,calls[0]);assertEquals("reviewed_no_requirement",receipt.get("status"));
+    }
+
+    @Test void aDefinitionSearchReturnsNavigationBeforeAnExplicitSingleItemRead() {
+        ObjectNode source=source("1");source.put("fileKey","SCC");String quote="Select the BQ issue format.";member(source,"body",quote,"main");guidance(source,"body",quote);DraftAutomaticDiscovery.Plan plan=DraftAutomaticDiscovery.plan(Collections.singletonList(source));int[] calls={0};String[] key={null};
+        Map<String,Object> receipt=DraftAutomaticDiscovery.process((system,user)->{JsonNode payload=JsonUtils.parse(user);if(++calls[0]==1)return JsonUtils.write(obj("baselineSearchRequests",Collections.singletonList("tender issue format")));
+            if(calls[0]==2){assertTrue(payload.path("fixedContext").path("fields").isEmpty());assertFalse(payload.path("fixedSearchResults").path("fields").isEmpty());assertFalse(payload.path("fixedSearchResults").path("editableAuthority").asBoolean());key[0]=payload.path("fixedSearchResults").path("fields").path(0).path("key").asText();return JsonUtils.write(obj("baselineContextRequests",Collections.singletonList(key[0])));}
+            assertEquals(1,payload.path("fixedContext").path("fields").size());assertEquals(key[0],payload.path("fixedContext").path("fields").path(0).path("key").asText());assertFalse(payload.path("fixedContext").path("editableAuthority").asBoolean());return "{\"nodes\":[],\"requirements\":[]}";},plan,plan.tasks().get(0));
+        assertEquals(3,calls[0]);assertEquals(3,receipt.get("modelCalls"));assertTrue(list(receipt.get("nodes")).isEmpty());
+    }
+
+    @Test void historicalFixedContextStillCannotProveANodeInTheChangedCurrentSource() {
+        ObjectNode source=source("1");source.put("fileKey","SCC");String quote="Project manager must state whether IASM surfacing materials form part of this project.";member(source,"body",quote,"main");guidance(source,"body",quote);DraftAutomaticDiscovery.Plan plan=DraftAutomaticDiscovery.plan(Collections.singletonList(source));int[] calls={0};
+        Map<String,Object> receipt=DraftAutomaticDiscovery.process((system,user)->{JsonNode payload=JsonUtils.parse(user);if(++calls[0]==1){assertTrue(payload.path("fixedBaselineIndex").path("fields").toString().contains("iasmIncluded"));return JsonUtils.write(obj("baselineContextRequests",Collections.singletonList("iasmIncluded")));}
+            JsonNode excerpt=payload.path("fixedContext").path("fields").path(0).path("sourceContext").path(0);assertEquals("fixed_catalog_embedded_reference",excerpt.path("sourceKind").asText());assertEquals("9aa2fa06683652548e72dbf955c3f236d86cb0958a8fdf3b1ff6cf75b65c7208",excerpt.path("referenceSourceSha256").asText());String historical=excerpt.path("text").asText();assertFalse(historical.isEmpty());assertFalse(quote.contains(historical));return JsonUtils.write(obj("nodes",Collections.singletonList(node("borrowed",historical)),"requirements",Collections.emptyList()));},plan,plan.tasks().get(0));
+        assertEquals(2,calls[0]);assertTrue(list(receipt.get("nodes")).isEmpty());assertTrue(JsonUtils.write(receipt.get("issues")).contains("DISCOVERY_SOURCE_QUOTE_NOT_IN_INSTRUCTION"));
+    }
+
+    @Test void unboundEvidenceCannotUseFixedSourceIdentityEvenWhenItsHashIsKnown() {
+        ObjectNode source=source("1");String sha="60bd8796aa828863c7edfe8617b7a5c56ee383afe8ba87a089e820f0fd9a982c",quote="The contract period is 39 months or more.";source.put("sourceSha256",sha);source.put("evidenceStatus","invalid");member(source,"body",quote,"main");((ObjectNode)source.path("sourceMembers").path(0).path("sourcePosition")).put("sourceSha256",sha);guidance(source,"body",quote);DraftAutomaticDiscovery.Plan plan=DraftAutomaticDiscovery.plan(Collections.singletonList(source));
+        assertTrue(plan.tasks().isEmpty());assertEquals(1,plan.coverage().get("sourceIssues"));
+    }
+
+    @Test void unavailableFollowUpKeepsAlreadySupportedAtomicResultsForReview() {
+        ObjectNode source=source("1");String sha="60bd8796aa828863c7edfe8617b7a5c56ee383afe8ba87a089e820f0fd9a982c",quote="The contract period is 39 months or more.";source.put("sourceSha256",sha);member(source,"body",quote,"main");((ObjectNode)source.path("sourceMembers").path(0).path("sourcePosition")).put("sourceSha256",sha);guidance(source,"body",quote);DraftAutomaticDiscovery.Plan plan=DraftAutomaticDiscovery.plan(Collections.singletonList(source));int[] calls={0};
+        Map<String,Object> result=DraftAutomaticDiscovery.process((system,user)->{if(++calls[0]>1)throw new IllegalStateException("synthetic context failure");return JsonUtils.write(obj("nodes",Collections.singletonList(node("duration",quote)),"requirements",Collections.singletonList(obj("id","duration","sourceQuote",quote,"kind","input","nodeIds",Collections.singletonList("duration"))),"baselineContextRequests",Collections.singletonList("periodAtLeast39Months")));},plan,plan.tasks().get(0));
+        assertEquals(2,calls[0]);assertEquals("partial",result.get("status"));assertEquals(1,list(result.get("nodes")).size());assertEquals(1,list(result.get("requirements")).size());assertEquals("failed",map(list(result.get("baselineEvidenceRounds")).get(0)).get("status"));
+    }
 
     @Test void completedObservationsRetireUntouchedSourcePlaceholdersWithoutLosingEvidence() {
         ObjectNode source=source("1");String quote="Provide project name.";member(source,"body",quote,"main");guidance(source,"body",quote);
@@ -117,12 +186,19 @@ class DraftAutomaticDiscoveryTest {
         String first=JsonUtils.mapper().valueToTree(receipts.get(0)).path("nodes").path(0).path("id").asText(),second=JsonUtils.mapper().valueToTree(receipts.get(1)).path("nodes").path(0).path("id").asText();assertNotEquals(first,second);
         Map<String,Object> relationTask=DraftAutomaticDiscovery.planRelations(plan,receipts).get(0);when(ai.complete(anyString(),anyString())).thenReturn(JsonUtils.write(obj("relations",Arrays.asList(obj("fromId",first,"toId",second,"kind","same_fact","fromQuote",quote,"toQuote",quote,"reason","Source-supported candidate only."),obj("fromId",first,"toId","foreign","kind","dependency","fromQuote",quote,"toQuote",quote)))));
         Map<String,Object> relation=DraftAutomaticDiscovery.processRelation(ai,plan,receipts,relationTask);assertEquals("partial",relation.get("status"));receipts.add(relation);
-        JsonNode graph=JsonUtils.mapper().valueToTree(DraftAutomaticDiscovery.finish(graph(),plan,receipts)).path("graph");assertEquals(2,graph.path("variables").size());assertEquals(1,graph.path("relationProposals").size());assertFalse(graph.path("relationProposals").path(0).path("executable").asBoolean());assertEquals("pending",graph.path("relationProposals").path(0).path("status").asText());assertEquals("partial",graph.path("automaticDiscovery").path("scanStatus").asText());
+        JsonNode graph=JsonUtils.mapper().valueToTree(DraftAutomaticDiscovery.finish(graph(),plan,receipts)).path("graph");assertEquals(2,graph.path("variables").size());assertEquals(1,graph.path("relationProposals").size());assertFalse(graph.path("relationProposals").path(0).path("executable").asBoolean());assertEquals("pending",graph.path("relationProposals").path(0).path("status").asText());assertEquals("partial",graph.path("automaticDiscovery").path("scanStatus").asText());assertTrue(graph.path("automaticDiscoveryIssues").toString().contains("relation_source_or_reference_invalid"));assertTrue(graph.path("automaticDiscoveryIssues").toString().contains(text(relationTask.get("taskId"))));
     }
 
     @Test void rejectsTaskAndReceiptIdentityChangesAndDoesNotMutateBaseGraph() {
         ObjectNode source=source("1");member(source,"body","Provide project name.","main");guidance(source,"body","Provide project name.");DraftAutomaticDiscovery.Plan plan=DraftAutomaticDiscovery.plan(Collections.singletonList(source));Map<String,Object> altered=new LinkedHashMap<>(plan.tasks().get(0));altered.put("sourceSha256","changed");assertThrows(BizException.class,()->DraftAutomaticDiscovery.process(mock(AiGateway.class),plan,altered));
         AiGateway ai=mock(AiGateway.class);when(ai.complete(anyString(),anyString())).thenReturn("{\"requirements\":[],\"nodes\":[]}");Map<String,Object> receipt=DraftAutomaticDiscovery.process(ai,plan,plan.tasks().get(0));Map<String,Object> base=graph();String before=JsonUtils.write(base);DraftAutomaticDiscovery.finish(base,plan,Collections.singletonList(receipt));assertEquals(before,JsonUtils.write(base));receipt.put("sourceId","other");assertThrows(BizException.class,()->DraftAutomaticDiscovery.finish(base,plan,Collections.singletonList(receipt)));
+    }
+
+    @Test void laterDiscoveryDoesNotEraseExistingReviewedOrRestoredRelations() {
+        Map<String,Object> base=graph();Map<String,Object> relation=obj("fromId","existing-a","toId","existing-b","kind","dependency","status","pending","reason","Previously restored");state(base).put("relationProposals",Collections.singletonList(relation));
+        DraftAutomaticDiscovery.Plan plan=DraftAutomaticDiscovery.plan(Collections.emptyList());Map<String,Object> result=DraftAutomaticDiscovery.finish(base,plan,Collections.emptyList());
+        assertEquals(Collections.singletonList(relation),list(state(result).get("relationProposals")));assertEquals(Collections.singletonList(relation),list(state(base).get("relationProposals")));
+        assertEquals(1,list(state(DraftAutomaticDiscovery.finish(result,plan,Collections.emptyList())).get("relationProposals")).size());
     }
 
     @Test void reidentificationKeepsDifferentReviewedDefinitionsAndRemapsTheCompleteNewAtomicGroup() {
@@ -174,7 +250,8 @@ class DraftAutomaticDiscoveryTest {
         map(map(list(proposed.get("sourceAnchors")).get(0)).get("sourceObservation")).put("inputId",oldGroup);
         proposed.put("superseded",Collections.singletonList(obj("inputId",oldChild,"parentId",oldGroup)));proposed.put("customAudit",obj("inputId",oldChild));
         Map<String,Object> finished=DraftAutomaticDiscovery.finish(base,plan,Collections.singletonList(rerun));assertEquals(6,nodes(finished).size());
-        List<?> refs=list(map(list(state(finished).get("requirements")).get(0)).get("nodeIds"));String newGroup=text(refs.get(0)),newChild=text(refs.get(1));
+        List<?> retainedRequirements=list(state(finished).get("requirements"));assertEquals(2,retainedRequirements.size());assertEquals(JsonUtils.write(list(state(base).get("requirements")).get(0)),JsonUtils.write(retainedRequirements.get(0)));
+        List<?> refs=list(map(retainedRequirements.get(1)).get("nodeIds"));assertEquals(3,refs.size());String newGroup=text(refs.get(0)),newChild=text(refs.get(1));
         Map<String,Object> isolatedGroup=nodes(finished).stream().filter(n->newGroup.equals(n.get("id"))).findFirst().orElseThrow(),isolatedChild=nodes(finished).stream().filter(n->newChild.equals(n.get("id"))).findFirst().orElseThrow(),isolatedOutcome=nodes(finished).stream().filter(n->refs.get(2).equals(n.get("id"))).findFirst().orElseThrow();
         assertEquals(newGroup,isolatedChild.get("parentId"));assertEquals(newGroup,map(list(map(isolatedOutcome.get("correction")).get("branches")).get(0)).get("scopeId"));
         assertEquals(newGroup,map(list(isolatedGroup.get("editTargets")).get(0)).get("valueSourceId"));Map<String,Object> isolatedTarget=map(list(isolatedOutcome.get("editTargets")).get(0));assertEquals(newGroup,isolatedTarget.get("listId"));assertEquals(newChild,isolatedTarget.get("itemKey"));assertEquals(newChild,isolatedTarget.get("valueSourceId"));

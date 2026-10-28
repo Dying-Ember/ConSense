@@ -36,6 +36,11 @@ public class DraftingController {
         return ApiResponse.ok(draftingService.baselineCatalog(projectId));
     }
 
+    @GetMapping("/baseline-catalog/reference")
+    public ApiResponse<Map<String,Object>> baselineReference(@PathVariable String projectId,@RequestParam String key) {
+        return ApiResponse.ok(draftingService.baselineReference(projectId,key));
+    }
+
     @GetMapping("/plan")
     public ApiResponse<Map<String,Object>> plan(@PathVariable String projectId) {
         return ApiResponse.ok(draftingService.plan(projectId, null));

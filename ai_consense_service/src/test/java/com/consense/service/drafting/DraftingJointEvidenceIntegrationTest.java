@@ -283,7 +283,7 @@ class DraftingJointEvidenceIntegrationTest {
     }
 
     @Test void structurallyInsufficientAcceptedContextIsNotExpandedForJointReview() throws Exception {
-        String key="foundationIncluded",yes="Foundation included: Yes.",no="Foundation included: No.";
+        String key="combinedContractWithFoundationWorks",yes="Tender is for combined contracts with foundation works: Yes.",no="Tender is for combined contracts with foundation works: No.";
         primaryOverride=user->{
             String quote=user.contains(yes)?yes:user.contains(no)?no:null;
             return quote==null?"[]":JsonUtils.write(Collections.singletonList(DraftBusinessRules.map("key",key,"value",quote.equals(yes),"sourceQuote",quote,"reason","TEST ONLY direct Boolean response","confidence",0.95)));

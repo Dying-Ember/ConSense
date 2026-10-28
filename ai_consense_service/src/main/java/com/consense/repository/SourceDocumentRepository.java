@@ -130,19 +130,53 @@ public interface SourceDocumentRepository extends JpaRepository<SourceDocument, 
     List<SourceListMetadata> findSourceListMetadataByProjectId(@Param("projectId") String projectId);
 
     /** Draft review still verifies complete text, structure and originals, within its own categories. */
-    interface DraftReviewMetadata extends SourceListMetadata { String getStoragePath(); }
+    interface DraftReviewMetadata extends SourceListMetadata,ScopeMetadata { String getStoragePath(); }
     @Query("select d.id as id,d.projectId as projectId,d.category as category,d.fileKey as fileKey,d.fileName as fileName,"
             + "d.reviewRole as reviewRole,d.documentScope as documentScope,d.parseStatus as parseStatus,d.parseMessage as parseMessage,"
             + "d.oerIdentityJson as oerIdentityJson,d.sourceSha256 as sourceSha256,d.pageCount as pageCount,d.ocrUsed as ocrUsed,"
-            + "d.textContent as textContent,d.parseCoverageJson as parseCoverageJson,d.structuredContentJson as structuredContentJson,"
+            + "d.textContent as textContent,d.parseCoverageJson as parseCoverageJson,"
+            + "d.textContentSha256 as textContentSha256,d.structuredContentSha256 as structuredContentSha256,"
+            + "d.parseCoverageSha256 as parseCoverageSha256,d.normalCandidateSha256 as normalCandidateSha256,d.businessContentSha256 as businessContentSha256,"
             + "d.storagePath as storagePath from SourceDocument d where d.projectId=:projectId "
             + "and d.category in ('STANDARD_TEMPLATE','PROJECT_INPUT') order by d.id")
     List<DraftReviewMetadata> findDraftReviewMetadataByProjectId(@Param("projectId") String projectId);
 
+    @Query("select d.id as id,d.projectId as projectId,d.category as category,d.fileKey as fileKey,d.fileName as fileName,"
+            + "d.reviewRole as reviewRole,d.documentScope as documentScope,d.parseStatus as parseStatus,d.parseMessage as parseMessage,"
+            + "d.oerIdentityJson as oerIdentityJson,d.sourceSha256 as sourceSha256,d.pageCount as pageCount,d.ocrUsed as ocrUsed,"
+            + "d.textContent as textContent,d.parseCoverageJson as parseCoverageJson,"
+            + "d.textContentSha256 as textContentSha256,d.structuredContentSha256 as structuredContentSha256,"
+            + "d.parseCoverageSha256 as parseCoverageSha256,d.normalCandidateSha256 as normalCandidateSha256,d.businessContentSha256 as businessContentSha256,"
+            + "d.storagePath as storagePath from SourceDocument d where d.projectId=:projectId and d.category=:category order by d.id")
+    List<DraftReviewMetadata> findDraftReviewMetadataByProjectIdAndCategory(@Param("projectId") String projectId,@Param("category") String category);
+
+    @Query("select d.id as id,d.projectId as projectId,d.category as category,d.fileKey as fileKey,d.fileName as fileName,"
+            + "d.reviewRole as reviewRole,d.documentScope as documentScope,d.parseStatus as parseStatus,d.parseMessage as parseMessage,"
+            + "d.oerIdentityJson as oerIdentityJson,d.sourceSha256 as sourceSha256,d.pageCount as pageCount,d.ocrUsed as ocrUsed,"
+            + "d.textContent as textContent,d.parseCoverageJson as parseCoverageJson,"
+            + "d.textContentSha256 as textContentSha256,d.structuredContentSha256 as structuredContentSha256,"
+            + "d.parseCoverageSha256 as parseCoverageSha256,d.normalCandidateSha256 as normalCandidateSha256,d.businessContentSha256 as businessContentSha256,"
+            + "d.storagePath as storagePath from SourceDocument d where d.projectId=:projectId and d.id=:sourceId")
+    Optional<DraftReviewMetadata> findDraftReviewMetadataByProjectIdAndId(@Param("projectId") String projectId,@Param("sourceId") Long sourceId);
+
+    default Optional<SourceDocument> findDraftReviewSourceByProjectIdAndId(String projectId,Long sourceId) {
+        return findDraftReviewMetadataByProjectIdAndId(projectId,sourceId).map(metadata->{
+            SourceDocument source=sourceListSnapshot(metadata);source.setStoragePath(metadata.getStoragePath());copyContentStamp(metadata,source);return source;
+        });
+    }
+
     default List<SourceDocument> findDraftReviewSourcesByProjectId(String projectId) {
         List<SourceDocument> result=new ArrayList<>();
         for(DraftReviewMetadata metadata:findDraftReviewMetadataByProjectId(projectId)) {
-            SourceDocument source=sourceListSnapshot(metadata);source.setStoragePath(metadata.getStoragePath());result.add(source);
+            SourceDocument source=sourceListSnapshot(metadata);source.setStoragePath(metadata.getStoragePath());copyContentStamp(metadata,source);result.add(source);
+        }
+        return result;
+    }
+
+    default List<SourceDocument> findDraftReviewSourcesByProjectIdAndCategory(String projectId,String category) {
+        List<SourceDocument> result=new ArrayList<>();
+        for(DraftReviewMetadata metadata:findDraftReviewMetadataByProjectIdAndCategory(projectId,category)) {
+            SourceDocument source=sourceListSnapshot(metadata);source.setStoragePath(metadata.getStoragePath());copyContentStamp(metadata,source);result.add(source);
         }
         return result;
     }

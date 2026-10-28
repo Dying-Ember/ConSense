@@ -49,11 +49,11 @@ class DraftSnapshotBulkReadTest {
             when(bindings.findById(anyString())).thenAnswer(inv->Optional.ofNullable(definitions.get(inv.getArgument(0))));
             when(variables.findByProjectIdOrderBySortOrderAsc(PROJECT)).thenAnswer(inv->{List<DraftVariable> rows=new ArrayList<>(values.values());if(reverseRepositoryOrder)Collections.reverse(rows);return rows;});
             when(bindings.findByProjectId(PROJECT)).thenAnswer(inv->{List<DraftGraphInputBinding> rows=new ArrayList<>(definitions.values());if(reverseRepositoryOrder)Collections.reverse(rows);return rows;});
-            when(sources.findById(1L)).thenReturn(Optional.of(original));
+            when(sources.findDraftReviewSourceByProjectIdAndId(PROJECT,1L)).thenReturn(Optional.of(original));
             when(sources.findByProjectIdAndCategoryOrderByIdAsc(PROJECT,SourceDocument.CATEGORY_PROJECT_INPUT)).thenReturn(Collections.singletonList(correspondence));
             when(reader.archive(original)).thenAnswer(inv->JsonUtils.mapper().valueToTree(map("sourceDocumentId",1L,"sourceSha256",originalSha)));
             when(reader.archive(correspondence)).thenAnswer(inv->JsonUtils.mapper().valueToTree(map("sourceDocumentId",2L,"sourceSha256",correspondenceSha)));
-            service=new DraftTemplateGraphService(mock(ProjectService.class),sources,revisions,heads,bindings,variables,mock(DraftExtractionRunRepository.class),reader,mock(AiGateway.class),mock(EntityManager.class),mock(PlatformTransactionManager.class));
+            service=new DraftTemplateGraphService(mock(ProjectService.class),sources,revisions,heads,bindings,variables,mock(DraftExtractionRunRepository.class),reader,mock(AiGateway.class),mock(DraftExtractionHarness.class),mock(EntityManager.class),mock(PlatformTransactionManager.class));
         }
         void value(String key,String text,Boolean confirmed,Boolean review,String adoptedSources){DraftVariable value=new DraftVariable();value.setProjectId(PROJECT);value.setVarKey(key);value.setValueText(text);value.setConfirmed(confirmed);value.setReviewRequired(review);value.setAdoptedSourcesJson(adoptedSources);values.put(key,value);}
         void binding(String key,String adopted){DraftGraphInputBinding binding=new DraftGraphInputBinding();binding.setId(DraftAdoption.hash(PROJECT+"\n"+key));binding.setProjectId(PROJECT);binding.setVarKey(key);binding.setDefinitionSha256("current-"+key);binding.setAdoptedDefinitionSha256(adopted);definitions.put(binding.getId(),binding);}

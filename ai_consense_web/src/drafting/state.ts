@@ -50,11 +50,22 @@ export function hasAnswer(value: unknown): boolean {
   return true
 }
 
+/** Keep visible draft values separate from the adopted facts used in graph conditions. */
+export function trustedConditionValues(fields: DraftField[], values: Record<string, DraftValue>, variables: Map<string, DraftVariable>, revisionId: string, dirty: (field: DraftField) => boolean): Record<string, DraftValue> {
+  const result: Record<string, DraftValue> = Object.fromEntries(Object.keys(values).map(key=>[key,null]))
+  for (const field of fields) {
+    const variable=variables.get(field.key)
+    if (variable && variable.graphRevisionId===revisionId && variable.confirmed===true && !variable.reviewRequired && !variable.validationIssue && variable.adoptionState!=='conflict' && !dirty(field) && !validationIssue(field,values[field.key])) result[field.key]=values[field.key] ?? null
+  }
+  return result
+}
+
 function canonical(value: unknown): unknown {
   return value === true || value === 'true' || value === '是' ? true : value === false || value === 'false' || value === '否' ? false : value
 }
 
 export function applicability(condition: DraftCondition | undefined, values: Record<string, DraftValue>): Applicability {
+  if (condition?.reviewRequired) return 'unknown'
   if (!condition?.all?.length) return 'yes'
   const results = condition.all.map(term => {
     const actual = values[term.field]
@@ -62,12 +73,15 @@ export function applicability(condition: DraftCondition | undefined, values: Rec
     if (term.operator === 'in') return !hasAnswer(actual) ? 'unknown' : Array.isArray(term.value) && term.value.some(value => canonical(value) === canonical(actual)) ? 'yes' : 'no'
     if (term.operator === 'includesComponent') {
       if (!Array.isArray(actual)) return 'unknown'
-      if (actual.some(row => row && typeof row === 'object' && !Array.isArray(row) && row.component === term.value)) return 'yes'
-      return actual.some(row => !row || typeof row !== 'object' || Array.isArray(row) || !hasAnswer(row.component)) ? 'unknown' : 'no'
+      const key=term.componentKey === undefined ? 'component' : term.componentKey
+      if (!key) return 'unknown'
+      if (actual.some(row => row && typeof row === 'object' && !Array.isArray(row) && row[key] === term.value)) return 'yes'
+      return actual.some(row => !row || typeof row !== 'object' || Array.isArray(row) || !hasAnswer(row[key])) ? 'unknown' : 'no'
     }
     if (term.operator === 'countGt') {
       if (!Array.isArray(actual)) return 'unknown'
-      const identifiers = actual.map(row => row && typeof row === 'object' && !Array.isArray(row) ? String(row.serial ?? row.number ?? '').trim().toUpperCase() : String(row ?? '').trim().toUpperCase())
+      if (term.identityKey === '') return 'unknown'
+      const identifiers = actual.map(row => row && typeof row === 'object' && !Array.isArray(row) ? String(term.identityKey === undefined ? row.serial ?? row.number ?? '' : row[term.identityKey] ?? '').trim().toUpperCase() : String(row ?? '').trim().toUpperCase())
       if (identifiers.some(id => !id) || new Set(identifiers).size !== identifiers.length) return 'unknown'
       return actual.length > Number(term.value) ? 'yes' : 'no'
     }
@@ -146,6 +160,9 @@ export function actionForUnresolved(issue: DraftUnresolved, actions: DraftPlanAc
 function candidateIdentity(candidate: DraftCandidate): DraftCandidateIdentity {
   if (candidate.graphRevisionId) return { ...clone(candidate), sourceDocumentId: candidate.sourceDocumentId ?? null, sourceHash: candidate.sourceHash ?? null, sourceQuote: candidate.sourceQuote ?? null }
   return { value: candidate.value, sourceDocumentId: candidate.sourceDocumentId ?? null, sourceHash: candidate.sourceHash ?? null, sourceQuote: candidate.sourceQuote ?? null, ...(candidate.originalSha256 !== undefined ? { originalSha256: candidate.originalSha256 } : {}), ...(candidate.extractionRunId !== undefined ? { extractionRunId: candidate.extractionRunId } : {}) }
+}
+export function incompleteCandidateBlocksAdoption(dirty: boolean, candidateIndex?: number, candidates?: DraftCandidate[]): boolean {
+  return candidateIndex === undefined ? !dirty && !!candidates?.some(candidate => candidate.completenessStatus === 'needs_review') : candidates?.[candidateIndex]?.completenessStatus === 'needs_review'
 }
 export function adoptionPatch(raw: string, baseline: string, reviewRequired: boolean, candidateIndex?: number, displayed?: Pick<DraftVariable, 'source' | 'candidates' | 'graphRevisionId' | 'fieldDefinitionHash'>): DraftVariablePatch {
   if (candidateIndex !== undefined) {

@@ -87,4 +87,12 @@ check('parent membership, all prerequisites and catalogue-only targets remain di
   }
 })
 
+check('the graph retains a visible unadopted value while its dependent applicability stays unknown', () => {
+  const schema=catalog()
+  schema.groups[0].fields.push(field('dependent','text',{condition:{all:[{field:'foundationIncluded',operator:'eq',value:true}]}}))
+  const graph=buildBusinessGraph({catalog:schema,plan:null,values:{foundationIncluded:false},conditionValues:{foundationIncluded:null}})
+  assert.equal(graph.inputs.find(input=>input.key==='foundationIncluded').value,false)
+  assert.equal(graph.inputs.find(input=>input.key==='dependent').applicability,'unknown')
+})
+
 console.log(`${checks} business graph model checks passed`)

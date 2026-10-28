@@ -10,15 +10,16 @@ const { settle } = require('./helpers/render-controls.cjs')
 const copy = value => JSON.parse(JSON.stringify(value))
 const label = title => ({ en: title, zhHans: title, zhHant: title })
 const field = (key, kind = 'text', extra = {}) => ({ key, kind, label: label(key), ...extra })
-const fields = [field('review-18'), field('review-preview'), field('review-candidate'), field('review-number', 'number'), field('review-date', 'date'), field('review-choice', 'choice', { options: [{ value: 'A', label: label('A') }] }), field('contractTitle', 'contract')]
+const fields = [field('review-18'), field('review-preview'), field('review-candidate'), field('review-number', 'number'), field('review-date', 'date'), field('review-choice', 'choice', { options: [{ value: 'A', label: label('A') }] }), field('contractTitle', 'contract'), field('unconfirmed-parent','boolean'), field('conditional-child','text',{condition:{all:[{field:'unconfirmed-parent',operator:'eq',value:true}]}})]
 const schema = { ruleVersion: 'TEST', graphRevisionId: 'TEST-draft', groups: [{ id: 'TEST-group', label: label('TEST group'), fields }] }
 const source = { id: '41', fileKey: 'NTT', fileName: 'TEST ONLY template.docx', format: 'docx', sourceSha256: 'a'.repeat(64), parseStatus: 'PARSED', canEdit: true, evidenceStatus: 'bound' }
 const revision = { id: schema.graphRevisionId, status: 'DRAFT', sourceStale: false, graph: { kind: 'consense-template-graph-v1', graph: { variables: [], events: [] }, selectedDocuments: { NTT: '41' }, sources: [source] } }
 const values = Object.fromEntries(fields.map(item => [item.key, '']))
+values['unconfirmed-parent']='false'
 const patches = [], corrections = [], modelCalls = []
 let candidateRun = 'TEST-run'
 let candidate = { value: 'TEST initial single line', sourceDocumentId: 42, fileName: 'TEST ONLY evidence.docx', sourceQuote: 'TEST exact quotation', fieldDefinitionHash: 'TEST-candidate-definition', graphRevisionId: revision.id, extractionRunId: candidateRun }
-const variable = item => ({ key: item.key, kind: item.kind, label: item.label, value: values[item.key], confirmed: !!values[item.key], manuallyEdited: !!values[item.key], graphRevisionId: revision.id, fieldDefinitionHash: 'TEST-definition-' + item.key, candidates: item.key === 'review-candidate' ? [copy(candidate)] : [] })
+const variable = item => ({ key: item.key, kind: item.kind, label: item.label, value: values[item.key], confirmed: item.key === 'unconfirmed-parent' ? false : !!values[item.key], manuallyEdited: item.key === 'unconfirmed-parent' ? false : !!values[item.key], graphRevisionId: revision.id, fieldDefinitionHash: 'TEST-definition-' + item.key, candidates: item.key === 'review-candidate' ? [copy(candidate)] : [] })
 const candidates = () => ({ runId: candidateRun, graphRevisionId: revision.id, evidenceRevision: 'TEST-evidence', variables: [variable(fields[2])], catalog: schema, candidateDefinitions: { 'TEST-candidate-definition': fields[2] } })
 const api = {
   automationLatest: async () => null, catalog: async () => schema,
@@ -54,6 +55,8 @@ async function input(node, value) { assert.ok(node, 'Rendered input'); node.valu
 ;(async () => {
   try {
     await settle(); await click(button('3 Adopt and plan'))
+    assert.ok(document.querySelector('[data-variable="conditional-child"]'),'An unconfirmed false candidate does not hide a dependent input')
+    assert.equal(document.getElementById('input-unconfirmed-parent').value,'false','The unconfirmed candidate stays visible')
     const initial = document.getElementById('input-review-18')
     await input(initial, multiline)
     assert.equal(initial.value.length, 2402, 'A first paste into empty dynamic text preserves all 2402 characters before any save')
@@ -95,13 +98,14 @@ async function input(node, value) { assert.ok(node, 'Rendered input'); node.valu
 
     const Component = loaded.loadLocal(path.join(__dirname, '../src/components/DraftingInputField.vue')).default
     const record = field('dynamic-record', 'object', { columnFields: [field('dynamic-detail')] })
-    const list = field('dynamic-list', 'list', { columnFields: [field('dynamic-cell')] })
+    const list = field('dynamic-list', 'list', { columnFields: [field('dynamic-cell', 'text', { condition: { reviewRequired: true, all: [] } })] })
     const nestedValues = vue.reactive({ record: {}, list: [{ _itemId: 'TEST-row' }] })
     const nested = vue.createApp({ render: () => vue.h('div', [vue.h(Component, { field: record, value: nestedValues.record, values: {}, locale: 'en', multilineText: true, 'onUpdate': value => { nestedValues.record = value } }), vue.h(Component, { field: list, value: nestedValues.list, values: {}, locale: 'en', multilineText: true, rowIdentityKey: '_itemId', 'onUpdate': value => { nestedValues.list = value } })]) })
     nested.mount('#nested')
     try {
       const recordInput = document.getElementById('input-dynamic-record-dynamic-detail'), rowInput = document.getElementById('input-dynamic-list-1-dynamic-cell')
       assert.equal(recordInput.tagName, 'TEXTAREA'); assert.equal(rowInput.tagName, 'TEXTAREA')
+      assert.match(document.querySelector('#nested [data-applicability-review-required]').textContent, /needs review.*existing answer is retained/i)
       await input(recordInput, multiline); await input(rowInput, multiline)
       assert.equal(nestedValues.record['dynamic-detail'], multiline); assert.equal(nestedValues.list[0]['dynamic-cell'], multiline); assert.equal(nestedValues.list[0]._itemId, 'TEST-row')
     } finally { nested.unmount() }

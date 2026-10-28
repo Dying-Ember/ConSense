@@ -37,7 +37,7 @@ function create(Overview) {
 
   function build(state, { docId, includeExcluded = true, query = '', sources = [] } = {}) {
     if (!Overview) throw Error('GraphOverview must load before GraphBusinessView.');
-    const edition = id => { const source = sources.find(item => [String(item.id), item.docId, item.editionId].includes(String(id))); return source?.fileKey === 'SCC' ? source.format : id === 'scc-word' ? 'docx' : id === 'scc-pdf' ? 'pdf' : null; };
+    const edition = id => { const source = sources.find(item => [String(item.id), item.docId, item.editionId].includes(String(id))); return source?.fileKey === 'SCC' ? String(source.id) : id === 'scc-word' || id === 'scc-pdf' ? id : null; };
     const documents = sources.map(source => [String(source.id), source.fileName, `${source.fileKey ?? source.category ?? ''} · ${source.format}`]);
     const graph = Overview.project(state, { sources }), allActions = [], allEdges = graph.edges.map((edge, index) => ({ ...edge, id: 'relation:' + index, relation: edge }));
     const allById = new Map(graph.nodes.map(node => [node.id, node]));

@@ -1,12 +1,77 @@
 package com.consense.service.drafting;
 
 import com.consense.common.BizException;
+import com.consense.common.JsonUtils;
 import java.util.*;
 import org.junit.jupiter.api.Test;
 import static com.consense.service.drafting.DraftReviewGraph.*;
 import static org.junit.jupiter.api.Assertions.*;
 
 class DraftCatalogAlignmentTest {
+    @Test void confirmedCatalogIdentityCannotTurnSourceOrHumanClassifiedEditorialIntoBusinessValue() {
+        Map<String,Object> node=input("fact","boolean");node.put("catalogAlignment",alignment("foundationIncluded"));Map<String,Object> graph=graph(node);
+        assertDoesNotThrow(()->DraftCatalogAlignment.validate(graph));
+        node.put("definitionKind","source_seed");assertThrows(BizException.class,()->DraftCatalogAlignment.validate(graph));assertTrue(DraftCatalogAlignment.confirmedDefinitions(graph).isEmpty());node.remove("definitionKind");
+        node.put("editorialReview",obj("kind","editorial","confirmed",true));assertThrows(BizException.class,()->DraftCatalogAlignment.validate(graph));assertTrue(DraftCatalogAlignment.confirmedDefinitions(graph).isEmpty());
+        node.put("editorialReview",obj("kind","business_value","confirmed",true));assertDoesNotThrow(()->DraftCatalogAlignment.validate(graph));assertTrue(DraftCatalogAlignment.confirmedDefinitions(graph).containsKey("fact"));
+    }
+    @Test void manualFactProjectionNeedsReasonAndKeepsAllOtherGuards() {
+        Map<String,Object> fixed=DraftBusinessRules.fields().stream().filter(f->"electronicTendering".equals(f.get("key"))).findFirst().get();
+        Map<String,Object> root=input("issue","choice");root.put("options",fixed.get("options"));root.put("catalogAlignment",alignment("electronicTendering"));
+        Map<String,Object> local=input("alternative","boolean");local.put("role",obj("kind","derived"));
+        Map<String,Object> correction=obj("kind","rule","otherwise","needs_review","branches",Arrays.asList(
+            obj("id","selected","mode","all","clauses",Collections.singletonList(obj("inputId","issue","operator","eq","value","L10Pro")),"resultValue",true),
+            obj("id","other","mode","all","clauses",Collections.singletonList(obj("inputId","issue","operator","eq","value","Hardcopy")),"resultValue",false)));
+        Map<String,Object> review=obj("rootId","issue","baselineKey","electronicTendering","branchValue","L10Pro","branchPolarity",true,"exhaustiveConfirmed",true,
+            "origin","manual","reason","Compared both alternatives against the current source", "original",obj("role",obj("kind","input"),"correction",null),"convertedCorrection",correction);
+        local.put("correction",correction);local.put("factProjectionReview",review);Map<String,Object> graph=graph(root,local);
+        assertDoesNotThrow(()->validate(graph));
+        review.put("reason","  ");assertThrows(BizException.class,()->validate(graph));review.put("reason","Compared both alternatives");
+        review.remove("origin");assertThrows(BizException.class,()->validate(graph));review.put("origin","unexpected");assertThrows(BizException.class,()->validate(graph));review.put("origin","manual");
+        review.put("exhaustiveConfirmed",false);assertThrows(BizException.class,()->validate(graph));review.put("exhaustiveConfirmed",true);
+        map(root.get("catalogAlignment")).put("confirmed",false);assertThrows(BizException.class,()->validate(graph));map(root.get("catalogAlignment")).put("confirmed",true);
+        map(list(correction.get("branches")).get(1)).put("resultValue",true);assertThrows(BizException.class,()->validate(graph));
+    }
+    @Test void fixedReferenceIsSmallVersionedWordEvidenceAndNeverEditingAuthority() {
+        Map<String,Object> reference=DraftCatalogAlignment.reference("iasmIncluded");assertEquals("iasmIncluded",reference.get("baselineKey"));assertEquals(DraftBusinessRules.RULE_VERSION,reference.get("ruleVersion"));assertEquals(false,reference.get("editableAuthority"));assertEquals("historical_catalog_reference_only",reference.get("referenceKind"));
+        List<?> sources=list(reference.get("sourceContext"));assertTrue(sources.size()<=3);Map<String,Object> definition=sources.stream().map(DraftReviewGraph::map).filter(source->Integer.valueOf(698).equals(source.get("paragraph"))).findFirst().get();assertEquals("SCC",definition.get("document"));assertEquals("9aa2fa06683652548e72dbf955c3f236d86cb0958a8fdf3b1ff6cf75b65c7208",definition.get("referenceSourceSha256"));assertTrue(text(definition.get("text")).contains("Impact Absorbing Surfacing Materials"));assertFalse(JsonUtils.write(reference).contains("sourcePosition"));
+        assertThrows(BizException.class,()->DraftCatalogAlignment.reference("contractTitle"));assertThrows(BizException.class,()->DraftCatalogAlignment.reference("nonexistent"));assertThrows(BizException.class,()->DraftCatalogAlignment.reference("../../other"));
+    }
+    @Test void confirmedFactProjectionUsesSharedChoiceAndPreservesOldAnswerAndTargets() {
+        Map<String,Object> fixed=DraftBusinessRules.fields().stream().filter(f->"electronicTendering".equals(f.get("key"))).findFirst().get();Map<String,Object> root=input("issue","choice");root.put("options",fixed.get("options"));root.put("catalogAlignment",alignment("electronicTendering"));
+        Map<String,Object> local=input("local","boolean");local.put("role",obj("kind","derived"));local.put("docIds",Collections.singletonList("ntt"));local.put("sourceAnchors",Collections.singletonList(obj("docId","ntt","text","Alternative A")));local.put("editTargets",Collections.singletonList(obj("id","target","docId","ntt","action","delete","text","Alternative A","needsRebind",true)));
+        Map<String,Object> correction=obj("kind","rule","otherwise","needs_review","branches",Arrays.asList(obj("id","projection-selected","mode","all","clauses",Collections.singletonList(obj("inputId","issue","operator","eq","value","L10Pro")),"resultValue",true),obj("id","projection-other","mode","all","clauses",Collections.singletonList(obj("inputId","issue","operator","eq","value","Hardcopy")),"resultValue",false)));
+        Map<String,Object> oldAlignment=obj("proposedMatches",Collections.singletonList(obj("baselineKey","electronicTendering","semanticStatus","uncertain","factProjection",obj("branchValue","L10Pro","branchPolarity",true))));
+        Map<String,Object> review=obj("rootId","issue","baselineKey","electronicTendering","branchValue","L10Pro","branchPolarity",true,"exhaustiveConfirmed",true,"original",obj("role",obj("kind","input"),"correction",null,"catalogAlignment",oldAlignment),"convertedCorrection",correction);local.put("correction",correction);local.put("factProjectionReview",review);
+        Map<String,Object> second=JsonUtils.readMap(JsonUtils.write(local));second.put("id","local-b");map(list(second.get("sourceAnchors")).get(0)).put("text","Alternative B");Map<String,Object> secondTarget=map(list(second.get("editTargets")).get(0));secondTarget.put("id","target-b");secondTarget.put("text","Alternative B");
+        Map<String,Object> secondReview=map(second.get("factProjectionReview"));secondReview.put("branchPolarity",false);Map<String,Object> secondCandidate=map(list(map(map(secondReview.get("original")).get("catalogAlignment")).get("proposedMatches")).get(0));map(secondCandidate.get("factProjection")).put("branchPolarity",false);
+        Map<String,Object> secondCorrection=JsonUtils.readMap(JsonUtils.write(correction));map(list(secondCorrection.get("branches")).get(0)).put("resultValue",false);map(list(secondCorrection.get("branches")).get(1)).put("resultValue",true);second.put("correction",secondCorrection);secondReview.put("convertedCorrection",secondCorrection);
+        Map<String,Object> middle=input("middle","boolean");middle.put("role",obj("kind","derived"));middle.put("correction",obj("kind","rule","branches",Arrays.asList(obj("id","yes","mode","all","clauses",Collections.singletonList(obj("inputId","local","operator","yes")),"resultValue",true),obj("id","no","mode","all","clauses",Collections.singletonList(obj("inputId","local","operator","no")),"resultValue",false))));
+        Map<String,Object> consumer=input("downstream","boolean");consumer.put("docIds",Collections.singletonList("ntt"));consumer.put("correction",obj("kind","rule","branches",Collections.singletonList(obj("id","case-a","mode","all","clauses",Collections.singletonList(obj("inputId","middle","operator","yes"))))));consumer.put("editTargets",Collections.singletonList(obj("id","target-downstream","docId","ntt","action","delete","branchId","case-a","text","Downstream","nativeBinding",obj("status","bound"))));
+        Map<String,Object> graph=graph(root,local,second,middle,consumer);graph.put("sources",Collections.singletonList(obj("id","ntt","fileKey","NTT","format","docx")));graph.put("selectedDocuments",obj("NTT","ntt"));
+        Map<String,Object> history=obj("local",obj("value",false,"status","confirmed","sourceRef","historic-source","evidenceFingerprint","first-source"));Map<String,Object> result=plan(graph,obj("issue","L10Pro"),history,false);assertFalse(map(result.get("derived")).containsKey("local"));assertEquals(false,map(result.get("derived")).get("local-b"));assertFalse(map(result.get("inputValues")).containsKey("local"));assertEquals(false,map(history.get("local")).get("value"));assertTrue(JsonUtils.write(result.get("unresolved")).contains("HistoricalProjectionAnswerConflict"));assertEquals("pending",map(list(result.get("actions")).get(0)).get("action"));assertEquals("Alternative A",map(list(result.get("actions")).get(0)).get("sourceText"));assertEquals("Alternative B",map(list(result.get("actions")).get(1)).get("sourceText"));
+        Map<String,Object> conflict=list(result.get("unresolved")).stream().map(DraftReviewGraph::map).filter(issue->"HistoricalProjectionAnswerConflict".equals(issue.get("kind"))).findFirst().get();assertEquals("issue",conflict.get("rootId"));assertEquals("L10Pro",conflict.get("rootValue"));assertEquals(false,conflict.get("oldValue"));assertEquals(true,conflict.get("derivedValue"));
+        assertEquals(true,map(list(result.get("actions")).get(2)).get("historicalProjectionBlocked"));assertEquals(false,map(list(result.get("actions")).get(2)).get("overrideable"));assertEquals("pending",map(list(result.get("actions")).get(2)).get("action"));
+        local.put("status","pending");Map<String,Object> pendingResult=plan(graph,obj("issue","L10Pro"),history,true),pendingIssue=list(pendingResult.get("unresolved")).stream().map(DraftReviewGraph::map).filter(issue->"HistoricalProjectionAnswerConflict".equals(issue.get("kind"))).findFirst().get();assertEquals(true,pendingIssue.get("derivedValue"));assertFalse(map(pendingResult.get("derived")).containsKey("local"));local.put("status","confirmed");
+        assertEquals("first-source",conflict.get("evidenceFingerprint"));review.put("historicalAnswerResolution",obj("confirmed",true,"decision","use_derived","rootValue","L10Pro","oldValue",false,"evidenceFingerprint","first-source","reason","Compared the preserved answer and source"));assertEquals(true,map(plan(graph,obj("issue","L10Pro"),history,false).get("derived")).get("local"));assertFalse(map(plan(graph,obj("issue","Hardcopy"),history,false).get("derived")).containsKey("local"));assertFalse(map(plan(graph,obj("issue","L10Pro"),obj("local",obj("value",true,"evidenceFingerprint","first-source")),false).get("derived")).containsKey("local"));assertFalse(map(plan(graph,obj("issue","L10Pro"),obj("local",obj("value",false,"evidenceFingerprint","changed-source")),false).get("derived")).containsKey("local"));
+        Map<String,Object> paper=map(plan(graph,obj("issue","Hardcopy")).get("derived"));assertEquals(false,paper.get("local"));assertEquals(true,paper.get("local-b"));assertFalse(map(plan(graph,Collections.emptyMap()).get("derived")).containsKey("local"));
+        Map<String,Object> firstTarget=map(list(local.get("editTargets")).get(0));firstTarget.put("branchId","projection-selected");firstTarget.remove("needsRebind");firstTarget.put("nativeBinding",obj("status","bound","spans",Collections.singletonList(obj("paragraphId","p-a"))));secondTarget.put("branchId","projection-other");secondTarget.remove("needsRebind");secondTarget.put("nativeBinding",obj("status","bound","spans",Collections.singletonList(obj("paragraphId","p-b"))));
+        List<?> electronicActions=list(plan(graph,obj("issue","L10Pro")).get("actions")),paperActions=list(plan(graph,obj("issue","Hardcopy")).get("actions"));assertEquals("delete",map(electronicActions.get(0)).get("action"));assertEquals("not_adopted",map(electronicActions.get(1)).get("action"));assertEquals("not_adopted",map(paperActions.get(0)).get("action"));assertEquals("delete",map(paperActions.get(1)).get("action"));assertNotEquals(map(firstTarget.get("nativeBinding")).get("spans"),map(secondTarget.get("nativeBinding")).get("spans"));
+        review.put("exhaustiveConfirmed",false);assertThrows(BizException.class,()->validate(graph));review.put("exhaustiveConfirmed",true);
+        Map<String,Object> candidate=map(list(oldAlignment.get("proposedMatches")).get(0));candidate.put("semanticStatus","conflict");assertThrows(BizException.class,()->validate(graph));candidate.put("semanticStatus","uncertain");
+        graph.put("sources",Arrays.asList(obj("id","ntt","fileKey","NTT","format","docx"),obj("id","pdf","fileKey","SCC","format","pdf")));local.put("docIds",Arrays.asList("ntt","pdf"));assertThrows(BizException.class,()->validate(graph));local.put("docIds",Collections.singletonList("ntt"));
+        local.put("correction",obj("kind","rule","needsRebind",true,"branches",Collections.emptyList()));assertDoesNotThrow(()->validate(graph));assertTrue(ruleNeedsReview(local));
+    }
+    @Test void onlyTheVerifiedSccOriginalProjectsEditionSpecificCatalogRules() {
+        Map<String,Object> node=input("fact","boolean");node.put("catalogAlignment",alignment("foundationIncluded"));node.put("docIds",Collections.singletonList("pdf-id"));
+        Map<String,Object> graph=graph(node);graph.put("sources",Arrays.asList(obj("id","pdf-id","fileKey","SCC","format","pdf","sourceSha256","b","evidenceStatus","bound"),obj("id","word-id","fileKey","SCC","format","docx","sourceSha256","9aa2fa06683652548e72dbf955c3f236d86cb0958a8fdf3b1ff6cf75b65c7208","evidenceStatus","bound")));graph.put("selectedDocuments",obj("SCC","pdf-id"));
+        assertDoesNotThrow(()->validate(graph));assertFalse(fields(graph).get(0).containsKey("baselineDefinition"));assertEquals("foundationIncluded",map(node.get("catalogAlignment")).get("baselineKey"));
+        node.put("docIds",Collections.singletonList("word-id"));map(graph.get("selectedDocuments")).put("SCC","word-id");assertTrue(fields(graph).get(0).containsKey("baselineDefinition"));
+        Map<String,Object> word=map(list(graph.get("sources")).get(1));word.put("sourceSha256","other-word-version");assertFalse(fields(graph).get(0).containsKey("baselineDefinition"));word.put("sourceSha256","9aa2fa06683652548e72dbf955c3f236d86cb0958a8fdf3b1ff6cf75b65c7208");word.put("evidenceStatus","invalid");assertFalse(fields(graph).get(0).containsKey("baselineDefinition"));word.put("evidenceStatus","bound");
+        node.put("docIds",Arrays.asList("word-id","pdf-id"));assertFalse(DraftCatalogAlignment.confirmedDefinitions(graph).containsKey("fact"));
+        map(list(graph.get("sources")).get(0)).put("editionId","pdf-edition");node.put("docIds",Collections.emptyList());
+        for(String group:Arrays.asList("sourceAnchors","editTargets","evidence")){node.put(group,Collections.singletonList(obj("docId","pdf-edition")));assertTrue(DraftCatalogAlignment.hasUnverifiedSccSource(graph,node));node.put(group,Collections.emptyList());}
+    }
     Map<String,Object> input(String id,String kind) {return obj("id",id,"nameEn",id,"type",obj("kind",kind),"role",obj("kind","input"),"status","confirmed","docIds",Collections.emptyList(),"sourceAnchors",Collections.emptyList(),"editTargets",Collections.emptyList());}
     Map<String,Object> alignment(String key) {return obj("status","matched","baselineKey",key,"baselineVersion",DraftBusinessRules.RULE_VERSION,"confirmed",true,"reason","Human reviewed exact definition");}
     Map<String,Object> graph(Map<String,Object>... nodes) {return obj("graph",obj("variables",Arrays.asList(nodes)));}
@@ -14,9 +79,10 @@ class DraftCatalogAlignmentTest {
         Map<String,Object> field=DraftBusinessRules.fields().stream().filter(item->"foundationIncluded".equals(item.get("key"))).findFirst().get();
         assertEquals("Foundation works included",map(field.get("label")).get("en"));
         assertTrue(DraftBusinessRules.standardParagraph("NTT",486).contains("combined contracts with foundation works"));
-        assertEquals("G1a",map(DraftBusinessRules.plan(obj("foundationIncluded",true,"contractPeriodMonths",39)).get("derived")).get("bondAppendix"));
-        assertEquals("G1",map(DraftBusinessRules.plan(obj("foundationIncluded",true,"contractPeriodMonths",38)).get("derived")).get("bondAppendix"));
-        assertEquals("G1",map(DraftBusinessRules.plan(obj("foundationIncluded",false)).get("derived")).get("bondAppendix"));
+        assertNull(map(DraftBusinessRules.plan(obj("foundationIncluded",true,"contractPeriodMonths",39)).get("derived")).get("bondAppendix"));
+        assertEquals("G1a",map(DraftBusinessRules.plan(obj("combinedContractWithFoundationWorks",true,"contractPeriodMonths",39)).get("derived")).get("bondAppendix"));
+        assertEquals("G1",map(DraftBusinessRules.plan(obj("combinedContractWithFoundationWorks",true,"contractPeriodMonths",38)).get("derived")).get("bondAppendix"));
+        assertEquals("G1",map(DraftBusinessRules.plan(obj("combinedContractWithFoundationWorks",false)).get("derived")).get("bondAppendix"));
         assertNull(map(DraftBusinessRules.plan(obj("contractPeriodMonths",39)).get("derived")).get("bondAppendix"));
     }
     @Test void matchedDefinitionsRequireCurrentVersionTypeUnitAndOptionality() {
@@ -95,5 +161,11 @@ class DraftCatalogAlignmentTest {
     @Test void canonicalSummariesPreserveVersionedUnitsAndOptionLabelsWithoutSharingTheCatalogObjects() {
         Map<String,Object> duration=input("duration","number");duration.put("optional",true);map(duration.get("type")).put("unit","months");duration.put("catalogAlignment",alignment("contractPeriodMonths"));Map<String,Object> summary=map(fields(graph(duration)).get(0).get("baselineDefinition"));assertEquals("months",map(summary.get("type")).get("unit"));assertEquals(true,summary.get("optional"));
         Map<String,Object> baseline=DraftBusinessRules.fields().stream().filter(field->"subcontractArrangement".equals(field.get("key"))).findFirst().get(),choice=input("arrangement","choice");choice.put("options",baseline.get("options"));choice.put("catalogAlignment",alignment("subcontractArrangement"));summary=map(fields(graph(choice)).get(0).get("baselineDefinition"));assertEquals(baseline.get("options"),summary.get("options"));map(list(summary.get("options")).get(0)).put("value","mutated-copy");assertNotEquals("mutated-copy",map(list(baseline.get("options")).get(0)).get("value"));
+    }
+    @Test void sourceChecksKeepUnreviewedCatalogHistoryWithoutBecomingBusinessInputs() {
+        Map<String,Object> node=input("check","text");node.put("catalogAlignment",obj("status","unreviewed","confirmed",false));
+        assertFalse(DraftCatalogAlignment.reviewed(node));node.put("role",obj("kind","verification"));assertTrue(DraftCatalogAlignment.reviewed(node));
+        node.put("role",obj("kind","input"));node.put("definitionKind","source_seed");assertTrue(DraftCatalogAlignment.reviewed(node));
+        assertFalse((Boolean)map(node.get("catalogAlignment")).get("confirmed"));
     }
 }

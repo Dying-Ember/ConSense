@@ -103,6 +103,13 @@ public final class OerSourceMetadata {
         persist(document,parsed,digest,FixedRegistry.ROUTER);
     }
 
+    /** Temporary routing needs the parsed identity, not an additional native archive. */
+    public static void captureParsedIdentity(SourceDocument document, DocumentParser.ParsedDocument parsed) {
+        String digest=parsed==null?null:parsed.getSourceSha256();
+        if(digest==null){document.setSourceSha256(null);document.setOerIdentityJson(null);document.setNativePdfEvidenceJson(null);return;}
+        persist(document,parsed,digest,FixedRegistry.ROUTER,false);
+    }
+
     public static void capture(SourceDocument document, DocumentParser.ParsedDocument parsed,
                                byte[] originalBytes, OerSourceRouting router) {
         String digest = originalSha256(originalBytes);
@@ -143,13 +150,62 @@ public final class OerSourceMetadata {
         identity=retainTextContractConfirmation(document,identity);
         document.setSourceSha256(digest);
         document.setOerIdentityJson(JsonUtils.write(identity));
-        document.setNativePdfEvidenceJson(!retainNativeArchive || parsed == null || parsed.getNativePdfEvidence() == null ? null
-                : JsonUtils.write(parsed.getNativePdfEvidence()));
+        document.setNativePdfEvidenceJson(!retainNativeArchive||parsed==null||parsed.getNativePdfEvidence()==null?null:JsonUtils.write(templateArchive(document,parsed)));
         if (!SourceDocument.CATEGORY_STANDARD_TEMPLATE.equals(document.getCategory())
                 && !"UNKNOWN".equals(identity.getKind()) && !"EVALUATION_ANSWER".equals(identity.getKind()))
             document.setFileKey(identity.getKind());
         // reviewRole is the user's explicit input; the routed role is retained
         // separately and used only when there is no valid explicit role.
+    }
+
+    private static List<com.consense.document.PdfPageEvidence> templateArchive(SourceDocument document,DocumentParser.ParsedDocument parsed) {
+        if(!SourceDocument.CATEGORY_STANDARD_TEMPLATE.equals(document.getCategory())||document.getStructuredContentJson()==null)return parsed.getNativePdfEvidence();
+        java.util.Map<String,com.consense.document.DocumentBlock> blocks=new java.util.HashMap<>();
+        for(com.consense.document.DocumentBlock block:parsed.getBlocks())if(block.getId()==null||blocks.putIfAbsent(block.getId(),block)!=null)return parsed.getNativePdfEvidence();
+        java.util.Map<String,com.consense.document.PdfPageEvidence.PdfGlyph> glyphs=new java.util.HashMap<>();java.util.Set<String> ambiguous=new java.util.HashSet<>();
+        for(com.consense.document.DocumentBlock block:parsed.getBlocks())for(com.consense.document.PdfPageEvidence.PdfGlyph glyph:block.getPdfGlyphs())if(glyph!=null&&glyph.getId()!=null){
+            String id=block.getPageNo()+"|"+glyph.getId();com.consense.document.PdfPageEvidence.PdfGlyph old=glyphs.putIfAbsent(id,glyph);if(old!=null&&old!=glyph)ambiguous.add(id);
+        }
+        List<com.consense.document.PdfPageEvidence> pages=new ArrayList<>();
+        for(com.consense.document.PdfPageEvidence page:parsed.getNativePdfEvidence()) {
+            if(page==null){pages.add(null);continue;}
+            com.consense.document.PdfPageEvidence compact=new com.consense.document.PdfPageEvidence();org.springframework.beans.BeanUtils.copyProperties(page,compact);
+            List<String> ids=new ArrayList<>();boolean shared=true;
+            for(com.consense.document.DocumentBlock block:page.getNativeBlocks()) {
+                if(block==null||block.getId()==null||blocks.get(block.getId())!=block||!java.util.Objects.equals(block.getPageNo(),page.getPageNo())){shared=false;break;}
+                ids.add(block.getId());
+            }
+            if(shared&&!ids.isEmpty()){compact.setNativeBlocks(java.util.Collections.emptyList());compact.setNativeBlocksRetainedIn("structuredContent");compact.setNativeBlockIds(ids);}
+            List<String> glyphIds=new ArrayList<>();List<com.consense.document.PdfPageEvidence.PdfGlyph> residual=new ArrayList<>();java.util.Set<String> seen=new java.util.HashSet<>();boolean valid=true;int references=0;
+            for(com.consense.document.PdfPageEvidence.PdfGlyph glyph:page.getGlyphs()){
+                if(glyph==null||glyph.getId()==null||!seen.add(glyph.getId())){valid=false;break;}
+                glyphIds.add(glyph.getId());String id=page.getPageNo()+"|"+glyph.getId();
+                if(!ambiguous.contains(id)&&glyphs.get(id)==glyph)references++;else residual.add(glyph);
+            }
+            if(valid&&references>0){compact.setGlyphs(residual);compact.setGlyphsRetainedIn("structuredContentAndPage");compact.setGlyphIds(glyphIds);}
+            pages.add(compact);
+        }
+        return pages;
+    }
+
+    /** Rebuild saved page glyph order after the caller verifies the source binding. */
+    public static List<com.consense.document.PdfPageEvidence.PdfGlyph> templatePageGlyphs(com.consense.document.PdfPageEvidence page,List<com.consense.document.DocumentBlock> blocks) {
+        if(page.getGlyphsRetainedIn()==null)return page.getGlyphs();
+        if(!"structuredContentAndPage".equals(page.getGlyphsRetainedIn())||page.getGlyphIds()==null)throw new IllegalArgumentException("TEMPLATE_GLYPH_ARCHIVE_INVALID");
+        java.util.Map<String,com.consense.document.PdfPageEvidence.PdfGlyph> values=new java.util.HashMap<>();
+        for(com.consense.document.PdfPageEvidence.PdfGlyph glyph:page.getGlyphs())putGlyph(values,glyph);
+        java.util.Set<String> retained=new java.util.HashSet<>(values.keySet()),seen=new java.util.HashSet<>();
+        for(String id:page.getGlyphIds())if(id==null||!seen.add(id))throw new IllegalArgumentException("TEMPLATE_GLYPH_ARCHIVE_INVALID");
+        for(com.consense.document.DocumentBlock block:blocks)if(java.util.Objects.equals(block.getPageNo(),page.getPageNo()))for(com.consense.document.PdfPageEvidence.PdfGlyph glyph:block.getPdfGlyphs())if(glyph!=null&&seen.contains(glyph.getId())&&!retained.contains(glyph.getId()))putGlyph(values,glyph);
+        List<com.consense.document.PdfPageEvidence.PdfGlyph> result=new ArrayList<>();
+        for(String id:page.getGlyphIds()){if(!values.containsKey(id))throw new IllegalArgumentException("TEMPLATE_GLYPH_ARCHIVE_INVALID");result.add(values.get(id));}
+        for(com.consense.document.PdfPageEvidence.PdfGlyph glyph:page.getGlyphs())if(!seen.contains(glyph.getId()))throw new IllegalArgumentException("TEMPLATE_GLYPH_ARCHIVE_INVALID");
+        return result;
+    }
+
+    private static void putGlyph(java.util.Map<String,com.consense.document.PdfPageEvidence.PdfGlyph> values,com.consense.document.PdfPageEvidence.PdfGlyph glyph){
+        if(glyph==null||glyph.getId()==null)throw new IllegalArgumentException("TEMPLATE_GLYPH_ARCHIVE_INVALID");com.consense.document.PdfPageEvidence.PdfGlyph old=values.putIfAbsent(glyph.getId(),glyph);
+        if(old!=null&&!old.equals(glyph))throw new IllegalArgumentException("TEMPLATE_GLYPH_ARCHIVE_INVALID");
     }
 
     /** Explicit role plus verified textual identity grants module use, never family, edition or clause ownership. */

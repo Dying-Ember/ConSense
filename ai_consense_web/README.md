@@ -36,7 +36,7 @@ node scripts/test-vetting-view.mjs
 node scripts/test-advice-scope-view.mjs
 ```
 
-`tests/fixtures/template-reading.synthetic.docx` is authored synthetic test data. `tests/fixtures/drafting-step12-baseline.vue` is a byte-for-byte copy of `src/views/DraftingView.vue` at original source revision `aaa0e928`. It exists solely to reproduce the original first/second-step template scope check without importing old Git history; it is not a new business rule or a competition document. The scope script reads this relative fixture instead of running `git show` on an unavailable old commit.
+`tests/fixtures/template-reading.synthetic.docx` is authored synthetic test data. The drafting scope script checks the current workflow directly.
 
 ## Upstream integration checks (historical)
 

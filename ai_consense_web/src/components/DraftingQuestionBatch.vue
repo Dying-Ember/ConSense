@@ -2,7 +2,7 @@
 import { computed, reactive, ref, toRaw, watch } from 'vue'
 import { createReviewReducer } from '@/drafting/source-review/reducer.js'
 import { targetSpans } from '@/drafting/source-review-state'
-import { isSourceCheck } from '@/drafting/source-review/value-dependencies.js'
+import { isSourceCheck, pendingEditorial } from '@/drafting/source-review/value-dependencies.js'
 import type { ReviewObject, ReviewSource, ReviewState, ReviewVariable } from '@/drafting/source-review-types'
 import DraftingQuestionPicker from './DraftingQuestionPicker.vue'
 
@@ -17,8 +17,8 @@ function label(item?: ReviewVariable) {
   return props.locale === 'en' ? item.nameEn || item.nameZh : item.nameZh || item.nameEn
 }
 const items = computed(() => props.ids.flatMap(id => props.state.variables.find(item => item.id === id && item.status !== 'excluded') ?? []))
-const inputs = computed(() => props.state.variables.filter(item => item.status !== 'excluded' && !check(item)))
-const primaryOptions = computed(() => items.value.filter(item => !check(item) && item.role.kind === 'input' && ['boolean', 'choice'].includes(item.type.kind) && (!item.correction || item.correction.kind === 'rule' && Array.isArray(item.correction.branches))))
+const inputs = computed(() => props.state.variables.filter(item => item.status !== 'excluded' && !check(item) && !pendingEditorial(item)))
+const primaryOptions = computed(() => items.value.filter(item => !check(item) && !pendingEditorial(item) && item.role.kind === 'input' && ['boolean', 'choice'].includes(item.type.kind) && (!item.correction || item.correction.kind === 'rule' && Array.isArray(item.correction.branches))))
 const mode = ref('branches'), primaryId = ref(''), acknowledged = ref(false), branchAcknowledged = ref(false)
 const paths = ref<ReviewObject[]>([])
 const assignments = reactive<Record<string, ReviewObject>>({})
@@ -70,6 +70,7 @@ const mergeReason = computed(() => {
     MERGE_TARGET_REQUIRED: t('请选择本次勾选中要保留的变量。', 'Choose a retained variable from the selection.'),
     MERGE_TYPE_MISMATCH: t('取值格式不同，例如是／否与文字核对项，不能合并。', 'Value shapes differ, such as yes/no and a text check; these cannot be merged.'),
     MERGE_ROLE_MISMATCH: t('业务取值与来源核对的用途不同，不能合并。', 'A business value and a source check serve different purposes and cannot be merged.'),
+    MERGE_EDITORIAL_REVIEW_REQUIRED: t('请先确认待分类事项是否为业务变量，再进行合并。', 'Confirm whether the pending item is a business variable before merging.'),
     MERGE_PARENT_MISMATCH: t('所属资料／明细不同，需先核对归属。', 'The record/list memberships differ; review ownership first.'),
     MERGE_OPTIONAL_MISMATCH: t('必答与选填不同，不能静默改变回答要求。', 'Required and optional values cannot be silently combined.'),
     MERGE_OPTIONS_MISMATCH: t('可选取值不同。互斥处理请使用“同一变量的分支处理”。', 'Value options differ. Use branch handling for alternative treatments.'),

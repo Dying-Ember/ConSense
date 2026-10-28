@@ -10,6 +10,12 @@ public final class DraftCatalogAlignment {
     private DraftCatalogAlignment() { }
 
     public static Map<String,Object> catalog() { return DraftBusinessRules.catalog(); }
+    public static Map<String,Object> reference(String key) {
+        if(key==null||key.length()>160)throw invalid("GRAPH_CATALOG_KEY_INVALID");
+        Map<String,Object> context=DraftBaselineMatcher.requestedContext(Collections.singletonList(key));List<?> fields=list(context.get("fields"));
+        if(fields.size()!=1)throw invalid("GRAPH_CATALOG_KEY_INVALID: "+key);
+        Map<String,Object> field=map(fields.get(0));return obj("ruleVersion",DraftBusinessRules.RULE_VERSION,"baselineKey",key,"referenceKind","historical_catalog_reference_only","editableAuthority",false,"sourceContext",field.get("sourceContext"));
+    }
 
     static Map<String,Map<String,Object>> definitions() {
         Map<String,Map<String,Object>> result=new LinkedHashMap<>();
@@ -26,7 +32,8 @@ public final class DraftCatalogAlignment {
         try{validate(graph);}catch(BizException invalid){return result;}
         for(Map<String,Object> node:nodes(graph)) {
             Map<String,Object> alignment=map(node.get("catalogAlignment"));String key=text(alignment.get("baselineKey"));
-            if("excluded".equals(node.get("status"))||"verification".equals(map(node.get("role")).get("kind"))||"source_seed".equals(node.get("definitionKind"))||!"matched".equals(alignment.get("status"))||!Boolean.TRUE.equals(alignment.get("confirmed")))continue;
+            if(!businessCandidate(node)||!"matched".equals(alignment.get("status"))||!Boolean.TRUE.equals(alignment.get("confirmed")))continue;
+            if(hasUnverifiedSccSource(graph,node))continue;
             Map<String,Object> field=baseline.get(key);if(field==null)continue;
             int dot=key.lastIndexOf('.');Map<String,Object> type=obj("kind",baselineKind(field));if(field.containsKey("unit"))type.put("unit",field.get("unit"));
             Map<String,Object> definition=obj("baselineKey",key,"baselineVersion",DraftBusinessRules.RULE_VERSION,"parentKey",dot<0?"":key.substring(0,dot),"label",field.get("label"),"type",type,"optional",Boolean.TRUE.equals(field.get("optional")));
@@ -36,6 +43,11 @@ public final class DraftCatalogAlignment {
         // A column cannot acquire a confirmed definition through an unreviewed parent.
         boolean removed;do{removed=false;for(Map<String,Object> node:nodes(graph)){Map<String,Object> definition=result.get(text(node.get("id")));if(definition==null||text(definition.get("parentKey")).isEmpty())continue;Map<String,Object> parent=result.get(text(node.get("parentId")));if(parent==null||!Objects.equals(parent.get("baselineKey"),definition.get("parentKey"))){result.remove(text(node.get("id")));removed=true;}}}while(removed);
         return result;
+    }
+    static boolean hasUnverifiedSccSource(Map<String,Object> graph,Map<String,Object> node) {
+        Set<String> ids=new HashSet<>();for(Object id:list(node.get("docIds")))ids.add(text(id));for(String group:Arrays.asList("sourceAnchors","editTargets","evidence"))for(Object raw:list(node.get(group))){Map<String,Object> anchor=map(raw);ids.add(text(anchor.get("docId")));ids.add(text(anchor.get("sourceDocumentId")));ids.add(text(anchor.get("editionId")));}
+        for(Object raw:list(graph.get("sources"))){Map<String,Object> source=map(raw);if(!"SCC".equalsIgnoreCase(text(source.get("fileKey"))))continue;for(String key:Arrays.asList("id","docId","sourceDocumentId","editionId"))if(!text(source.get(key)).isEmpty()&&ids.contains(text(source.get(key)))&&(!"bound".equals(source.get("evidenceStatus"))||!DraftTemplateReadingSources.catalogueSourceVerified("SCC",text(source.get("sourceSha256")))))return true;}
+        return false;
     }
 
     public static void validate(Map<String,Object> graph) {
@@ -60,7 +72,7 @@ public final class DraftCatalogAlignment {
             if(!Arrays.asList("matched","new").contains(status)||blank(alignment.get("reason")))throw invalid("GRAPH_CATALOG_REVIEW_REASON_REQUIRED");
             if("excluded".equals(node.get("status")))continue;
             if(!"matched".equals(status))continue;
-            if(!Arrays.asList("input","decision","content").contains(text(map(node.get("role")).get("kind"))))throw invalid("GRAPH_CATALOG_INPUT_REQUIRED");
+            if(!businessCandidate(node))throw invalid("GRAPH_CATALOG_INPUT_REQUIRED");
             compatible(node,baseline.get(key));
             String parent=text(node.get("parentId")),scope=text(alignment.get("scope")).trim();
             int dot=key.lastIndexOf('.');
@@ -108,7 +120,12 @@ public final class DraftCatalogAlignment {
         Set<Object> result=new HashSet<>();for(Object raw:list(field.get("options")))result.add(map(raw).get("value"));return result;
     }
     public static boolean reviewed(Map<String,Object> node) {
-        return !node.containsKey("catalogAlignment")||Boolean.TRUE.equals(map(node.get("catalogAlignment")).get("confirmed"));
+        return "verification".equals(map(node.get("role")).get("kind"))||"source_seed".equals(node.get("definitionKind"))||Boolean.TRUE.equals(map(node.get("pdfReferenceAlignment")).get("confirmed"))||!node.containsKey("catalogAlignment")||Boolean.TRUE.equals(map(node.get("catalogAlignment")).get("confirmed"));
+    }
+    static boolean businessCandidate(Map<String,Object> node) {
+        if(node==null||"excluded".equals(node.get("status"))||"source_seed".equals(node.get("definitionKind"))||!Arrays.asList("input","decision","content").contains(text(map(node.get("role")).get("kind"))))return false;
+        Map<String,Object> review=map(node.get("editorialReview"));
+        return !(Boolean.TRUE.equals(review.get("confirmed"))&&"editorial".equals(review.get("kind")));
     }
     public static boolean standaloneManualInput(Map<String,Object> node) {
         Map<String,Object> origin=map(node.get("definitionOrigin")),correction=map(node.get("correction"));
@@ -118,6 +135,7 @@ public final class DraftCatalogAlignment {
     public static Map<String,Object> meaning(Map<String,Object> node) {
         Map<String,Object> result=new LinkedHashMap<>();
         for(String key:Arrays.asList("unit","definitionScope"))if(node.containsKey(key))result.put(key,node.get(key));
+        if(node.containsKey("pdfReferenceAlignment")){Map<String,Object> identity=new LinkedHashMap<>(),alignment=map(node.get("pdfReferenceAlignment"));for(String key:Arrays.asList("status","confirmed","sourceId","sourceSha256","inputRef","basis"))if(alignment.containsKey(key))identity.put(key,alignment.get(key));result.put("pdfReferenceAlignment",identity);}
         if("manual".equals(map(node.get("definitionOrigin")).get("kind")))result.put("optional",Boolean.TRUE.equals(node.get("optional")));
         if(node.containsKey("catalogAlignment")) {
             Map<String,Object> identity=new LinkedHashMap<>(),mapping=map(node.get("catalogAlignment"));

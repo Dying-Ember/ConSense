@@ -3,7 +3,10 @@ package com.consense.document;
 import com.consense.common.JsonUtils;
 import com.consense.common.Utf8;
 import com.fasterxml.jackson.core.JsonGenerator;
+import com.fasterxml.jackson.core.JsonParser;
+import com.fasterxml.jackson.core.JsonToken;
 import java.io.IOException;
+import java.io.Reader;
 import java.io.OutputStream;
 import java.io.OutputStreamWriter;
 import java.io.Writer;
@@ -236,7 +239,7 @@ public final class OerTemplateEvidence {
             for(DocumentBlock block:parsed.getBlocks()) {
                 ObjectNode member=object();String id=block.getId()==null?"parsed-block:"+digest(source+"|"+ordinal):block.getId();
                 member.put("id",id);member.put("memberOrderZeroBased",ordinal++);member.put("storyKind","physical_document");member.put("storyRootNodePath","physical_document");
-                JsonNode blockObservation=JsonUtils.mapper().valueToTree(block);member.set("blockObservation",blockObservation);member.put("offsetUnit","utf16_code_units_in_named_observed_channel");
+                JsonNode blockObservation=blocks.get(ordinal-1);member.set("blockObservation",blockObservation);member.put("offsetUnit","utf16_code_units_in_named_observed_channel");
                 ObjectNode text=member.putObject("textObservation");text.put("status","observed_existing_block_channels");
                 text.put("text",block.getEffectiveText());text.put("originalText",block.getOriginalText());text.put("deletedText",block.getDeletedText());text.put("strikeText",block.getStrikeText());
                 member.put("effectiveCandidate",!Arrays.asList("ocr_candidate","native_table_candidate","parser_page_group_candidate").contains(block.getSource()));
@@ -265,6 +268,10 @@ public final class OerTemplateEvidence {
         markerDispositions(fileKey,sourceMembers,notes,conditions,groups,markers,issues);
         resolveSourceReferenceCandidates(fileKey,sourceMembers,notes,conditions,groups);
         if(word){nativeSourceFields(fileKey,sourceMembers,notes,groups);markerSourceContexts(fileKey,sourceMembers,notes,conditions,groups,markers);}
+        if(!word)for(JsonNode member:members){
+            JsonNode block=member.path("blockObservation");
+            if(block.isObject()&&block.has("pdfGlyphs")){((ObjectNode)block).remove("pdfGlyphs");((ObjectNode)block).put("pdfGlyphsRetainedIn","structuredContent");}
+        }
         structure.put("scopeMeaning","Native physical membership and literal source candidates; legal applicability and editing adoption remain separate");
         binding.put("generationSha256",payloadSha(out));return out;
     }
@@ -303,6 +310,11 @@ public final class OerTemplateEvidence {
 
     /** Reject stale, foreign or modified evidence using only the actual persisted parse inputs. */
     public static JsonNode requireBound(String fileKey,String sourceSha,JsonNode blocks,JsonNode coverage,JsonNode evidence) {
+        verifyBound(fileKey,sourceSha,blocks,coverage,evidence);
+        return evidence.deepCopy();
+    }
+
+    public static void verifyBound(String fileKey,String sourceSha,JsonNode blocks,JsonNode coverage,JsonNode evidence) {
         key(fileKey);String source=sha(sourceSha);
         if(evidence==null||!SCHEMA.equals(evidence.path("schema").asText()))throw new IllegalArgumentException("TEMPLATE_EVIDENCE_SCHEMA_MISMATCH");
         JsonNode binding=evidence.path("sourceBinding");
@@ -310,8 +322,46 @@ public final class OerTemplateEvidence {
         if(!fileKey.equals(binding.path("fileKey").asText())||!source.equals(binding.path("sourceSha256").asText()))throw new IllegalArgumentException("TEMPLATE_EVIDENCE_SOURCE_MISMATCH");
         if(!inputSha(fileKey,source,blocks,coverage).equals(binding.path("inputSha256").asText()))throw new IllegalArgumentException("TEMPLATE_EVIDENCE_INPUT_CHANGED");
         if(!payloadSha(evidence).equals(binding.path("generationSha256").asText()))throw new IllegalArgumentException("TEMPLATE_EVIDENCE_PAYLOAD_CHANGED");
-        return evidence.deepCopy();
     }
+
+    /** Verify the complete saved inputs while retaining only the page-level reading projection. */
+    public static JsonNode compactBoundBlocks(String fileKey,String sourceSha,Reader input,JsonNode coverage,JsonNode evidence) {
+        key(fileKey);String source=sha(sourceSha);
+        if(evidence==null||!SCHEMA.equals(evidence.path("schema").asText()))throw new IllegalArgumentException("TEMPLATE_EVIDENCE_SCHEMA_MISMATCH");
+        JsonNode binding=evidence.path("sourceBinding");
+        if(!ANALYSIS_REVISION.equals(binding.path("analysisRevision").asText()))throw new IllegalArgumentException("TEMPLATE_EVIDENCE_REVISION_STALE");
+        if(!fileKey.equals(binding.path("fileKey").asText())||!source.equals(binding.path("sourceSha256").asText()))throw new IllegalArgumentException("TEMPLATE_EVIDENCE_SOURCE_MISMATCH");
+        try {
+            MessageDigest digest=MessageDigest.getInstance("SHA-256");
+            OutputStream discard=new OutputStream(){@Override public void write(int value){}@Override public void write(byte[] value,int offset,int length){}};
+            JsonNode compact;
+            try(Writer writer=new OutputStreamWriter(new DigestOutputStream(discard,digest),StandardCharsets.UTF_8.newEncoder().onMalformedInput(CodingErrorAction.REPLACE).onUnmappableCharacter(CodingErrorAction.REPLACE).replaceWith(new byte[]{(byte)'?'}));JsonGenerator json=JsonUtils.mapper().getFactory().createGenerator(writer);JsonParser parser=JsonUtils.mapper().getFactory().createParser(input)) {
+                json.writeStartObject();json.writeStringField("analysisRevision",ANALYSIS_REVISION);json.writeFieldName("blocks");
+                compact=streamBlocks(parser,json);
+                json.writeFieldName("coverage");writeCanonical(json,coverage!=null&&coverage.isObject()?coverage:object(),null,"templateEvidence");
+                json.writeStringField("fileKey",fileKey);json.writeStringField("schema",SCHEMA);json.writeStringField("sourceSha256",source);json.writeEndObject();
+            }
+            StringBuilder hex=new StringBuilder(64);for(byte b:digest.digest())hex.append(String.format(Locale.ROOT,"%02x",b&255));
+            if(!hex.toString().equals(binding.path("inputSha256").asText()))throw new IllegalArgumentException("TEMPLATE_EVIDENCE_INPUT_CHANGED");
+            if(!payloadSha(evidence).equals(binding.path("generationSha256").asText()))throw new IllegalArgumentException("TEMPLATE_EVIDENCE_PAYLOAD_CHANGED");
+            return compact;
+        }catch(IllegalArgumentException invalid){throw invalid;}catch(Exception invalid){throw new IllegalArgumentException("TEMPLATE_EVIDENCE_INPUT_INVALID",invalid);}
+    }
+
+    public static JsonNode compactBlocks(Reader input) {
+        try(JsonParser parser=JsonUtils.mapper().getFactory().createParser(input)){return streamBlocks(parser,null);}
+        catch(IOException invalid){throw new IllegalArgumentException("TEMPLATE_EVIDENCE_INPUT_INVALID",invalid);}
+    }
+
+    private static JsonNode streamBlocks(JsonParser parser,JsonGenerator json)throws IOException {
+        JsonToken first=parser.nextToken();
+        if(first!=JsonToken.START_ARRAY){JsonNode value=JsonUtils.mapper().readTree(parser);if(value==null)value=object();if(json!=null)writeCanonical(json,value,null,null);return compactBlock(value);}
+        ArrayNode result=array();if(json!=null)json.writeStartArray();
+        while(parser.nextToken()!=JsonToken.END_ARRAY){if(parser.currentToken()==null)throw new IOException("Incomplete block array");JsonNode value=JsonUtils.mapper().readTree(parser);if(json!=null)writeCanonical(json,value,null,null);result.add(compactBlock(value));}
+        if(json!=null)json.writeEndArray();if(parser.nextToken()!=null)throw new IOException("Unexpected block data");return result;
+    }
+
+    private static JsonNode compactBlock(JsonNode value){if(value.isObject())((ObjectNode)value).remove("pdfGlyphs");return value;}
 
 
     private static void bindSourceReviewedVisualMembers(List<Member> members){

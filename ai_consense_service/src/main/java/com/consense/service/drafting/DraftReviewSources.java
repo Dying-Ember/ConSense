@@ -11,6 +11,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.springframework.stereotype.Component;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.io.IOException;
 import java.nio.file.FileAlreadyExistsException;
@@ -29,17 +31,31 @@ import java.util.StringJoiner;
 public class DraftReviewSources {
     private final StorageService storage;
     private final Path root;
+    private final JdbcTemplate jdbc;
 
     public DraftReviewSources(StorageService storage, ConsenseProperties properties) {
+        this(storage,properties,null);
+    }
+
+    @Autowired
+    public DraftReviewSources(StorageService storage, ConsenseProperties properties,JdbcTemplate jdbc) {
         this.storage=storage;
+        this.jdbc=jdbc;
         root=Paths.get(properties.getStorageRoot()).toAbsolutePath().normalize();
     }
 
     public ArrayNode sources(List<SourceDocument> documents) {
+        return sources(documents,java.util.Collections.emptyMap());
+    }
+
+    ArrayNode sources(List<SourceDocument> documents,Map<Long,CheckedSource> checked) {
         ArrayNode result=array();
         for(SourceDocument source:documents) {
             if(!eligible(source))continue;
-            try { result.add(metadata(source,load(source))); }
+            try {
+                Loaded loaded=load(source);ObjectNode reused=checkedMetadata(source,loaded,checked.get(source.getId()));
+                result.add(reused==null?metadata(source,loaded):reused);
+            }
             catch(BizException unavailable) {
                 ObjectNode item=base(source);item.put("format","unsupported");item.put("canEdit",false);
                 item.put("evidenceStatus","unavailable");item.put("issue",unavailable.getMessage());result.add(item);
@@ -48,7 +64,42 @@ public class DraftReviewSources {
         return result;
     }
 
+    static final class CheckedSource {
+        final SourceDocument source;final ObjectNode archive;
+        CheckedSource(SourceDocument source,ObjectNode archive){this.source=source;this.archive=archive;}
+    }
+
+    private ObjectNode checkedMetadata(SourceDocument source,Loaded loaded,CheckedSource checked) {
+        if(checked==null||!com.consense.service.sources.SourceContentDigests.stamped(source)
+                ||!com.consense.service.sources.SourceContentDigests.stamped(checked.source)
+                ||!java.util.Objects.equals(source.getBusinessContentSha256(),checked.source.getBusinessContentSha256())
+                ||source.getStructuredContentJson()!=null||checked.source.getStructuredContentJson()!=null)return null;
+        SourceDocument previous=checked.source;
+        if(!java.util.Objects.equals(source.getId(),previous.getId())||!java.util.Objects.equals(source.getProjectId(),previous.getProjectId())
+                ||!java.util.Objects.equals(source.getCategory(),previous.getCategory())||!java.util.Objects.equals(source.getFileKey(),previous.getFileKey())
+                ||!java.util.Objects.equals(source.getFileName(),previous.getFileName())||!java.util.Objects.equals(source.getParseStatus(),previous.getParseStatus())
+                ||!java.util.Objects.equals(source.getStoragePath(),previous.getStoragePath())||!java.util.Objects.equals(source.getSourceSha256(),previous.getSourceSha256())
+                ||!java.util.Objects.equals(source.getTextContent(),previous.getTextContent())||!java.util.Objects.equals(source.getParseCoverageJson(),previous.getParseCoverageJson())
+                ||!loaded.sha.equals(checked.archive.path("sourceSha256").asText())||!loaded.format.equals(checked.archive.path("format").asText())
+                ||(loaded.index!=null)!=checked.archive.path("canEdit").asBoolean())return null;
+        ObjectNode result=checked.archive.deepCopy();result.remove("archiveKey");return result;
+    }
+
     public ObjectNode reading(SourceDocument source) {
+        return reading(source,false);
+    }
+
+    public ObjectNode readingCompact(SourceDocument source) {
+        return reading(source,true);
+    }
+
+    public JsonNode evidence(SourceDocument source) {
+        JsonNode evidence=boundEvidence(source,load(source));
+        if(evidence==null)throw new BizException(4012,"TEMPLATE_EVIDENCE_INVALID: The saved analysis is unavailable or changed.");
+        return evidence;
+    }
+
+    private ObjectNode reading(SourceDocument source,boolean compact) {
         Loaded loaded=load(source);ObjectNode result=metadata(source,loaded);
         ArrayNode paragraphs=result.putArray("paragraphs");
         if(loaded.index!=null)for(DocxTemplateEditor.Paragraph paragraph:loaded.index.getMainParagraphs()) {
@@ -57,10 +108,17 @@ public class DraftReviewSources {
                 .put("sourceSha256",loaded.sha).put("channel","editableText");
             value.putObject("sourcePosition").put("sourceSha256",loaded.sha).put("partName",paragraph.getPart()).put("nodePath",paragraph.getNativeNodePath());
         }
-        JsonNode storedBlocks=JsonUtils.parse(source.getStructuredContentJson());
-        if(storedBlocks.isArray())result.set("blocks",storedBlocks);
-        else if(storedBlocks.path("blocks").isArray())result.set("blocks",storedBlocks.path("blocks"));
-        else if(storedBlocks.path("data").isArray())result.set("blocks",storedBlocks.path("data"));
+        JsonNode storedBlocks=blocks(source,loaded);
+        JsonNode visible=storedBlocks.isArray()?storedBlocks:storedBlocks.path("blocks").isArray()?storedBlocks.path("blocks"):storedBlocks.path("data");
+        if(visible.isArray()&&compact&&"pdf".equals(loaded.format)) {
+            ArrayNode reduced=array();
+            for(JsonNode block:visible) {
+                if(!block.isObject()){reduced.add(block);continue;}
+                ObjectNode item=object();block.fields().forEachRemaining(field->{if(!"pdfGlyphs".equals(field.getKey()))item.set(field.getKey(),field.getValue());});reduced.add(item);
+            }
+            result.set("blocks",reduced);
+        }
+        else if(visible.isArray())result.set("blocks",visible);
         else {result.set("blocks",array());result.set("structuredContentObservation",storedBlocks);}
         result.put("text",source.getTextContent()==null?"":source.getTextContent());
         result.put("physicalWordPagesStatus","docx".equals(loaded.format)?"unknown_requires_rendition":"not_word");
@@ -106,6 +164,7 @@ public class DraftReviewSources {
         String sha=loaded.sha;JsonNode evidence=boundEvidence(source,loaded);
         if(evidence==null)return pending("missing",sha,"CURRENT_SOURCE_OBSERVATIONS_REQUIRED");
         if(!sha.equals(passage.path("sourceSha256").asText()))return pending("unsafe",sha,"SOURCE_HASH_MISMATCH");
+        if("pdf".equals(loaded.format)&&passage.path("sourceObservationId").asText().isEmpty())return bindPdfPageSelection(source,sha,evidence,passage);
         if(!String.valueOf(source.getId()).equals(passage.path("sourceDocumentId").asText()))return pending("unsafe",sha,"SOURCE_DOCUMENT_MISMATCH");
         JsonNode binding=evidence.path("sourceBinding");
         for(String[] key:new String[][]{{"analysisRevision","analysisRevision"},{"analysisInputSha256","inputSha256"},{"analysisSha256","generationSha256"}})if(!passage.path(key[0]).equals(binding.path(key[1])))return pending("unsafe",sha,"SOURCE_OBSERVATION_ANALYSIS_CHANGED");
@@ -146,6 +205,26 @@ public class DraftReviewSources {
         if(!passage.path("text").isTextual()||!passage.path("text").asText().equals(selected.toString()))return pending("unsafe",sha,"SOURCE_OBSERVATION_QUOTE_MISMATCH");
         ObjectNode result=object().put("status","bound").put("kind","named_saved_source_observation").put("sourceSha256",sha).put("sourceObservationId",observationId).put("editableAuthority",false);result.set("observedRanges",ranges.deepCopy());
         for(String key:Arrays.asList("analysisRevision","analysisInputSha256","analysisSha256"))result.set(key,passage.path(key).deepCopy());return result;
+    }
+
+    /** A unique exact passage in the current OER PDF page is evidence, not an editable target. */
+    private ObjectNode bindPdfPageSelection(SourceDocument source,String sha,JsonNode evidence,JsonNode passage) {
+        if(passage.hasNonNull("sourceDocumentId")&&!String.valueOf(source.getId()).equals(passage.path("sourceDocumentId").asText()))return pending("unsafe",sha,"SOURCE_DOCUMENT_MISMATCH");
+        int page=passage.path("page").asInt(-1);String quote=passage.path("text").asText();
+        if(page<1||page>evidence.path("structure").path("physicalPages").asInt()||quote.trim().isEmpty())return pending("missing",sha,"PDF_PAGE_SELECTION_REQUIRED");
+        ObjectNode match=null;for(JsonNode member:evidence.path("sourceMembers")){
+            JsonNode block=member.path("blockObservation"),context=block.path("readingContext");
+            if(block.path("pageNo").asInt(-1)!=page||!sha.equals(context.path("sourceSha256").asText())||!member.path("id").equals(block.path("id"))||block.path("source").asText().isEmpty()||context.hasNonNull("occurrenceId")&&!context.path("occurrenceId").equals(block.path("id")))continue;
+            JsonNode value=member.path("textObservation").path("text");String channel="text";
+            if(!value.isTextual()||!value.asText().contains(quote)){value=member.path("preNormalizedTextObservation").path("text");channel="preNormalizedTextObservation.text";}
+            if(!value.isTextual())continue;String text=value.asText();int start=text.indexOf(quote);if(start<0)continue;
+            if(text.indexOf(quote,start+1)>=0||match!=null)return pending("unsafe",sha,"PDF_PAGE_SELECTION_AMBIGUOUS");
+            int end=start+quote.length();for(int offset:new int[]{start,end})if(offset>0&&offset<text.length()&&Character.isHighSurrogate(text.charAt(offset-1))&&Character.isLowSurrogate(text.charAt(offset)))return pending("unsafe",sha,"INVALID_UTF16_BOUNDARY");
+            match=object().put("memberId",member.path("id").asText()).put("page",page).put("channel",channel).put("start",start).put("end",end);
+        }
+        if(match==null)return pending("missing",sha,"PDF_PAGE_SELECTION_NOT_FOUND_IN_ONE_BOUND_BLOCK");
+        JsonNode binding=evidence.path("sourceBinding");ObjectNode result=object().put("status","bound").put("kind","pdf_source_member_text").put("sourceSha256",sha).put("editableAuthority",false);
+        result.set("analysisRevision",binding.path("analysisRevision").deepCopy());result.set("analysisInputSha256",binding.path("inputSha256").deepCopy());result.set("analysisSha256",binding.path("generationSha256").deepCopy());result.putArray("observedRanges").add(match);return result;
     }
 
     static JsonNode observationRanges(JsonNode observation) {
@@ -279,6 +358,7 @@ public class DraftReviewSources {
             result.set("analysisSha256",saved.path("sourceBinding").path("generationSha256").deepCopy());
         }
         result.put("evidenceStatus",saved.isObject()?boundEvidence(source,loaded)!=null?"bound":"invalid":"missing");
+        result.put("catalogueSourceVerified","bound".equals(result.path("evidenceStatus").asText())&&DraftTemplateReadingSources.catalogueSourceVerified(family,loaded.sha));
         result.put("editableCoordinates","editableText_utf16_start_inclusive_end_exclusive");return result;
     }
 
@@ -287,17 +367,35 @@ public class DraftReviewSources {
         result.put("category",source.getCategory());result.put("fileKey",source.getFileKey());result.put("fileName",source.getFileName());result.put("parseStatus",source.getParseStatus());return result;
     }
 
-    private static JsonNode boundEvidence(SourceDocument source,Loaded loaded) {
+    private JsonNode boundEvidence(SourceDocument source,Loaded loaded) {
         if(loaded.evidenceChecked)return loaded.evidence;
         loaded.evidenceChecked=true;JsonNode coverage=coverage(source,loaded),evidence=coverage.path("templateEvidence");
         if(!evidence.isObject())return null;
         String fileKey=source.getFileKey();if(fileKey==null||fileKey.isEmpty())fileKey=evidence.path("sourceBinding").path("fileKey").asText();
-        try {loaded.evidence=OerTemplateEvidence.requireBound(fileKey,loaded.sha,JsonUtils.parse(source.getStructuredContentJson()),coverage,evidence);return loaded.evidence;}
+        try {
+            if(source.getStructuredContentJson()==null&&jdbc!=null){loaded.blocks=readCompact(source,loaded,fileKey,coverage,evidence);loaded.evidence=evidence.deepCopy();}
+            else loaded.evidence=OerTemplateEvidence.requireBound(fileKey,loaded.sha,blocks(source,loaded),coverage,evidence);
+            return loaded.evidence;
+        }
         catch(IllegalArgumentException invalid){return null;}
     }
 
     private static JsonNode coverage(SourceDocument source,Loaded loaded) {
         if(loaded.coverage==null)loaded.coverage=JsonUtils.parse(source.getParseCoverageJson());return loaded.coverage;
+    }
+
+    private JsonNode blocks(SourceDocument source,Loaded loaded) {
+        if(loaded.blocks==null)loaded.blocks=source.getStructuredContentJson()==null&&jdbc!=null?readCompact(source,loaded,null,null,null):JsonUtils.parse(source.getStructuredContentJson());return loaded.blocks;
+    }
+
+    private JsonNode readCompact(SourceDocument source,Loaded loaded,String fileKey,JsonNode coverage,JsonNode evidence) {
+        return jdbc.query("select structured_content_json,source_sha256 from source_document where id=? and project_id=?",rs->{
+            if(!rs.next()||!java.util.Objects.equals(source.getSourceSha256(),rs.getString(2)))throw new BizException(4012,"REVIEW_SOURCE_CHANGED");
+            try(java.io.Reader reader=rs.getCharacterStream(1)) {
+                if(reader==null){if(evidence!=null)throw new IllegalArgumentException("TEMPLATE_EVIDENCE_INPUT_MISSING");return object();}
+                return evidence==null?OerTemplateEvidence.compactBlocks(reader):OerTemplateEvidence.compactBoundBlocks(fileKey,loaded.sha,reader,coverage,evidence);
+            }catch(IOException invalid){throw new IllegalArgumentException("TEMPLATE_EVIDENCE_INPUT_INVALID",invalid);}
+        },source.getId(),source.getProjectId());
     }
 
     private static ObjectNode exactSpan(DocxTemplateEditor.TemplateIndex index,JsonNode entry,String sha,String parentSha,boolean insertion) {
@@ -325,7 +423,7 @@ public class DraftReviewSources {
     private static ArrayNode array(){return JsonUtils.mapper().createArrayNode();}
     private static final class Loaded {
         final byte[] bytes;final String sha,format;final DocxTemplateEditor.TemplateIndex index;final DocxTemplateEditor.PreparedTemplate prepared;
-        JsonNode coverage,evidence;boolean evidenceChecked;
+        JsonNode coverage,evidence,blocks;boolean evidenceChecked;
         Loaded(byte[] bytes,String sha,String format,DocxTemplateEditor.PreparedTemplate prepared){this.bytes=bytes;this.sha=sha;this.format=format;this.prepared=prepared;index=prepared==null?null:prepared.getIndex();}
     }
 }

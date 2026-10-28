@@ -12,7 +12,7 @@ const source = { id: '41', fileKey: 'NTT', docId: 'ntt', editionId: 'SYNTHETIC',
 const quote = 'Delete this clause if the contract does not include foundation works.'
 const node = { id: 'atomic-groundworks', nameZh: '地下基础施工范围确认', nameEn: 'Groundworks applicability', role: { kind: 'input' }, type: { kind: 'boolean' }, status: 'pending', parentId: null, options: [], docIds: [source.id], sourceAnchors: [{ docId: source.id, sourceSha256: source.sourceSha256, text: quote }], sourceUnitIds: [], relatedInputIds: [], relations: [], evidence: [], targets: [], correction: { kind: 'rule', branches: [{ id: 'self-route', mode: 'all', clauses: [{ inputId: 'atomic-groundworks', operator: 'no' }] }] }, editTargets: [{ docId: source.id, text: 'The foundation clause', action: 'check', branchId: 'self-route', needsRebind: true }], catalogAlignment: { status: 'unreviewed', confirmed: false, proposalStatus: 'matched', proposalMethod: 'post_atomic_semantic', proposedMatches: [{ baselineKey: 'foundationIncluded', baselineVersion: catalog.ruleVersion, reason: 'Both ask whether foundation works are included in this contract.', sourceQuote: quote, confidence: 0.91, compatible: true, issues: [] }] } }
 const state = variables => ({ variables, events: [], sourceReviews: {}, nextId: 1, blank: false, guidanceMode: 'recognized' })
-const loaded = loadVue(path.join(__dirname, '../src/components/DraftingVariableCatalog.vue'), { globals: { structuredClone } })
+const loaded = loadVue(path.join(__dirname, '../src/components/DraftingVariableCatalog.vue'), { boundaries: { '@/api': { draftingApi: {} } }, globals: { structuredClone } })
 const model = loaded.loadLocal(path.join(__dirname, '../src/drafting/variable-catalog.ts'))
 const fields = model.baselineVariables(catalog), failures = []
 let checks = 0
@@ -29,6 +29,20 @@ function mountCatalog(variable, tab = 'matched') {
   await check('semantic post-atomic proposals reach suggestions despite different labels', () => {
     assert.deepEqual(Array.from(model.suggestedBaselines(node, fields, state([node])), field => field.baselineKey), ['foundationIncluded'])
     assert.equal(node.catalogAlignment.confirmed, false); assert.equal(node.catalogAlignment.baselineKey, undefined)
+  })
+  await check('the variable picker excludes actions and unresolved editorial items without deleting graph nodes', async () => {
+    const cases = ['derived','fixed','system','verification'].map(role => ({ ...copy(node), role: { kind: role } }))
+    cases.push({ ...copy(node), definitionKind: 'source_seed' }, { ...copy(node), editorialSuggestion: { kind: 'editorial', confirmed: false } }, { ...copy(node), editorialReview: { kind: 'editorial', confirmed: true } })
+    for (const candidate of cases) {
+      assert.equal(model.businessVariable(candidate), false)
+      const h = mountCatalog(candidate); await settle()
+      assert.equal(h.get('data-picker-option', candidate.id), undefined, 'Nonbusiness items do not appear as selectable variable definitions')
+      assert.deepEqual(copy(h.state.variables[0]), h.original, 'Filtering never removes a node or its conditions and edit scopes')
+      h.app.unmount()
+    }
+    const restored = { ...copy(node), editorialSuggestion: { kind: 'editorial', confirmed: false }, editorialReview: { kind: 'business_value', confirmed: true } }
+    assert.equal(model.businessVariable(restored), true)
+    const h = mountCatalog(restored); await settle(); assert.ok(h.get('data-picker-option', restored.id)); h.app.unmount()
   })
   await check('proposal classifications keep unavailable, unmatched and ambiguous distinct', () => {
     for (const [proposalStatus, expected] of [['matched', 'matched'], ['ambiguous', 'ambiguous'], ['unmatched', 'new'], ['unavailable', 'unavailable']]) {

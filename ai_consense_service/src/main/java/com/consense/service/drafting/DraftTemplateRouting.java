@@ -49,7 +49,12 @@ final class DraftTemplateRouting {
         if(!DraftBlueprint.TEMPLATE_KEYS.contains(actualKey))throw new BizException(4012,"TEMPLATE_FAMILY_UNKNOWN: The source content does not identify NTT, SCT or SCC.");
         if(expectedKey!=null&&!expectedKey.equals(actualKey))throw new BizException(4012,"TEMPLATE_FAMILY_MISMATCH: Expected "+expectedKey+" but the source identifies "+actualKey+".");
         if(!upload.hash.equals(parsed.getSourceSha256()))throw new BizException(4012,"TEMPLATE_SOURCE_HASH_MISMATCH");
-        OerTemplateEvidence.requireBound(actualKey,upload.hash,JsonUtils.mapper().valueToTree(parsed.getBlocks()),JsonUtils.mapper().valueToTree(parsed.getCoverage()),evidence);
+        JsonNode observedBlocks=JsonUtils.mapper().valueToTree(parsed.getBlocks());
+        com.consense.document.ParseCoverage identityCoverage=new com.consense.document.ParseCoverage();
+        org.springframework.beans.BeanUtils.copyProperties(parsed.getCoverage(),identityCoverage);
+        identityCoverage.setTemplateEvidence(null);
+        JsonNode observedCoverage=JsonUtils.mapper().valueToTree(identityCoverage);
+        OerTemplateEvidence.verifyBound(actualKey,upload.hash,observedBlocks,observedCoverage,evidence);
         upload.fileKey=actualKey;upload.parsed=parsed;
     }
     static Upload primary(List<Upload> uploads) {

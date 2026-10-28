@@ -56,10 +56,10 @@ function identityValue(raw: unknown, field?: DraftField): unknown {
 }
 
 /** Readonly projection of the existing catalogue and plan; it does not decide clause actions. */
-export function buildBusinessGraph({ catalog, plan, values }: { catalog: DraftCatalog; plan: DraftPlan | null; values: Record<string, DraftValue> }): BusinessGraph {
+export function buildBusinessGraph({ catalog, plan, values, conditionValues = values }: { catalog: DraftCatalog; plan: DraftPlan | null; values: Record<string, DraftValue>; conditionValues?: Record<string, DraftValue> }): BusinessGraph {
   const inputs: BusinessGraphInput[] = catalog.groups.flatMap(group => group.fields.filter(field => !field.hidden).map(field => ({
     id: `input:${field.key}`, key: field.key, groupId: group.id, field,
-    value: values[field.key] ?? null, applicability: applicability(field.condition, values), condition: field.condition,
+    value: values[field.key] ?? null, applicability: applicability(field.condition, conditionValues), condition: field.condition,
     prerequisiteKeys: [...new Set((field.condition?.all ?? []).map(term => term.field))],
     subfields: (field.columnFields ?? []).map(column => ({ id: `subfield:${field.key}.${column.key}`, key: column.key, parentKey: field.key, field: column })),
     actionIds: [], potentialTargets: field.affects ?? []

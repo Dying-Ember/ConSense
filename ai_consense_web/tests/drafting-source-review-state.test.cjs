@@ -33,6 +33,8 @@ assert.deepEqual(Array.from(sparse.native.spans, span => [span.start, span.end])
 assert.throws(() => appendNativeSelection(anchor, anchor), /overlap/)
 assert.throws(() => appendNativeSelection(anchor, { ...anchor, sourceSha256: 'other-edition' }), /same source edition/)
 const variable = (id, docId) => ({ id, nameZh: id, nameEn: id, docIds: [docId], type: { kind: 'boolean' }, role: { kind: 'input' }, status: 'confirmed', options: [], sourceAnchors: [anchor], sourceUnitIds: [], editTargets: [], relatedInputIds: [], relations: [], targets: [], evidence: [] })
+const sourceCheck = { ...variable('check', '41'), role:{kind:'verification'}, catalogAlignment:{status:'matched',confirmed:false,baselineKey:'legacy'} }
+assert.equal(reviewProblem(sourceCheck,{variables:[sourceCheck]}),null,'A source check does not require business-variable alignment')
 const insertion = { ...anchor, native: {...anchor.native, start: 2, end: 2, expectedText: '', operation: 'insert'} }
 assert.throws(() => appendNativeSelection(insertion, anchor), /insertion anchor/)
 const multipleTarget = { ...sparse, action: 'replace' }
@@ -43,6 +45,7 @@ assert.match(reviewProblem({...needsPlacement, editTargets: [{...multipleTarget,
 assert.equal(reviewProblem({...needsPlacement, editTargets: [{...insertion, action: 'insert'}]}, {variables: []}), null)
 assert.match(reviewProblem({...needsPlacement, editTargets: [{...insertion, action: 'insert', native: {...insertion.native, operation: undefined}}]}, {variables: []}), /insertion anchor/)
 assert.match(reviewProblem({...needsPlacement, editTargets: [{...insertion, action: 'replace'}]}, {variables: []}), /only permits insertion/)
+assert.match(reviewProblem({...needsPlacement, editTargets: [{...anchor, action: 'check'}]}, {variables: []}), /treatment/)
 const state = { ...emptyReviewState(), variables: [variable('word-question', '41'), variable('pdf-question', '42')] }
 const reducer = createReviewReducer({ variables: state.variables, sources: [source, pdf] })
 assert.equal(reducer.reduce(state, { type: 'LINK', id: 'word-question', anchor: observation }), state, 'Canonical source IDs still isolate Word and PDF editions')

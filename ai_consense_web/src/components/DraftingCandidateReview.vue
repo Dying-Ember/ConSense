@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { draftingApi } from '@/api'
-import type { DraftCandidate, DraftField, DraftReviewCandidates, DraftVariable } from '@/api'
+import type { DraftCandidate, DraftCompositeBillSuggestion, DraftField, DraftReviewCandidates, DraftVariable } from '@/api'
 import graphView from '@/drafting/source-review/graph-business-view.js'
 import type { ReviewRevision } from '@/drafting/source-review-types'
 import { candidateReviewDrafts } from '@/drafting/source-review-state'
@@ -10,8 +10,8 @@ import DraftingValueDisplay from './DraftingValueDisplay.vue'
 import DraftingInputField from './DraftingInputField.vue'
 import { decode, encode } from '@/drafting/state'
 import { presentationValue } from '@/drafting/value-presentation'
-const props = defineProps<{ projectId: string; revisionId: string; locale: 'zh-Hans' | 'zh-Hant' | 'en'; reloadKey: number; unassignedOnly?: boolean; review?: ReviewRevision }>()
-const emit = defineEmits<{ locate: [sourceId: string, sourceSha256?: string | null]; question: [key: string, revisionId: string]; dirty: [value: boolean]; corrected: [] }>()
+const props = defineProps<{ projectId: string; revisionId: string; locale: 'zh-Hans' | 'zh-Hant' | 'en'; reloadKey: number; unassignedOnly?: boolean; allowAdoption?: boolean; review?: ReviewRevision }>()
+const emit = defineEmits<{ locate: [sourceId: string, sourceSha256?: string | null]; question: [key: string, revisionId: string]; dirty: [value: boolean]; corrected: []; adoptComposite: [key: string, suggestion: DraftCompositeBillSuggestion] }>()
 const t = (zh: string, en: string) => props.locale === 'en' ? en : zh
 const result = ref<DraftReviewCandidates>(), busy = ref(false), error = ref(''), editing = ref('')
 const reviewVariables = computed(() => [...(props.unassignedOnly ? [] : (result.value?.variables ?? []).filter(variable => variable.candidates?.length)), ...(result.value?.unassignedVariables ?? [])])
@@ -38,6 +38,7 @@ const impacts = computed(() => {
 const sourceName = (id: string) => sameReview.value?.graph.sources.find(source => String(source.id) === String(id))?.fileName ?? t('来源文件待核对', 'Source file needs review')
 const candidateSearch = ref('')
 const candidateRows = computed(() => reviewVariables.value.flatMap(variable => (variable.candidates ?? []).map((candidate, index) => ({ variable, candidate, index }))))
+const compositeRows = computed(() => props.unassignedOnly ? [] : (result.value?.variables ?? []).filter(variable => variable.compositeBillSuggestion && variable.candidates?.length))
 const visibleRows = computed(() => {
   const query = candidateSearch.value.trim().toLowerCase()
   return candidateRows.value.filter(({ variable, candidate }) => !query || [localized(variable.label, props.locale), candidate.fileName, candidate.sourceQuote].some(value => value?.toLowerCase().includes(query)))
@@ -117,11 +118,25 @@ onBeforeUnmount(() => { snapshot(); alive = false; generation++ })
     <p class="hint">{{ t('原文证据、候选值与变量归属可在此校正；保存调整不会采用项目事实。可在本步骤逐项明确采用；未核对的规则仍不执行。', 'Correct source quotations, candidate values and variable assignments here. Saving a correction does not adopt a project fact. Explicitly adopt each value in this step; unreviewed rules still do not execute.') }}</p>
     <p v-if="busy" role="status">{{ t('正在读取或保存候选…', 'Reading or saving candidates…') }}</p><p v-if="error" role="alert" class="candidate-error">{{ error }}</p>
     <p v-if="result?.stale" role="alert" class="candidate-error">{{ t('沟通原件已变化；保留的候选需重新识别，不能校正或采用为当前证据。', 'Correspondence sources changed. Re-extract before correcting or adopting these retained candidates.') }}</p><p v-if="!busy && !error && result && !reviewVariables.some(variable => variable.candidates?.length)" class="hint">{{ t('此模板草稿尚无沟通候选；确认图谱后可以人工填写变量值。', 'No correspondence candidates for this draft. You can enter variable values manually after confirming the graph.') }}</p>
+    <section v-for="variable in compositeRows" :key="variable.key" class="candidate-impact" data-composite-bill>
+      <h4>{{ localized(variable.label, locale) }} · {{ t('跨通信合并候选', 'Combined correspondence candidate') }}</h4>
+      <p>{{ t('合并结果尚未采用；各份原候选及其来源保留在下方。', 'This combined result is not adopted. Each original candidate and source is retained below.') }}</p>
+      <p v-if="variable.compositeBillSuggestion?.partial" class="candidate-error">{{ t('本次提取未全部完成，合并结果的完整性仍需人工核对。', 'Extraction was incomplete; review whether the combined list is complete.') }}</p>
+      <DraftingValueDisplay v-if="candidateFields.get(variable.key)" :field="candidateFields.get(variable.key)!" :value="variable.compositeBillSuggestion!.value" :locale="locale" />
+      <details><summary>{{ t('逐份核对合并来源', 'Review each contributing source') }} · {{ variable.compositeBillSuggestion!.memberIndexes.length }}</summary>
+        <article v-for="index in variable.compositeBillSuggestion!.memberIndexes" :key="index" data-composite-bill-source>
+          <strong>{{ variable.candidates![index]?.fileName }}</strong><DraftingValueDisplay v-if="variable.candidates![index]" :field="candidateField(variable, variable.candidates![index]!)" :value="variable.candidates![index]!.value" :locale="locale" /><blockquote>{{ variable.candidates![index]?.sourceQuote }}</blockquote>
+          <button class="btn" :disabled="busy || dirty || variable.candidates![index]?.sourceDocumentId == null" @click="emit('locate', String(variable.candidates![index]!.sourceDocumentId), variable.candidates![index]!.originalSha256)">{{ t('查看本份沟通原件', 'Locate this source document') }}</button>
+        </article>
+      </details>
+      <button class="btn primary" data-adopt-composite-bill :disabled="!allowAdoption || busy || dirty || !!result?.stale" @click="emit('adoptComposite', variable.key, variable.compositeBillSuggestion!)">{{ t('采用这份合并候选', 'Adopt this combined candidate') }}</button>
+      <p v-if="!allowAdoption" class="hint">{{ t('请先保存图谱和当前修改，再在对应版本采用。', 'Save the graph and edits before adopting on its working revision.') }}</p>
+    </section>
     <label v-if="candidateRows.length">{{ t('搜索变量、文件名或原文', 'Search variables, filenames or source quotations') }}<input v-model="candidateSearch" type="search" data-candidate-search :disabled="dirty" /></label>
     <p v-if="candidateRows.length" role="status" data-candidate-count>{{ t('显示候选', 'Showing candidates') }} {{ visibleRows.length }} / {{ candidateRows.length }}</p>
     <p v-if="candidateRows.length && !visibleRows.length">{{ t('没有匹配的候选，请更换关键词或清空搜索。', 'No matching candidates. Try another keyword or clear the search.') }}</p>
     <article v-for="{variable,candidate,index} in visibleRows" :key="variable.key+':'+index" class="candidate-row">
-      <h4>{{ localized(variable.label, locale) }}</h4><p v-if="unassigned(variable.key)" class="hint" data-unassigned-candidate>{{ t('原变量已合并、退出或定义已调整；候选和原文已保留，请核对取值与现在的变量是否对应。', 'The original variable was merged or retired, or its definition changed. The candidate and source are retained; check the value against the current variable before assigning it.') }}</p><strong>{{ candidate.fileName }}</strong><DraftingValueDisplay :field="candidateField(variable, candidate)" :value="candidate.value" :locale="locale" /><blockquote>{{ candidate.sourceQuote }}</blockquote><p class="hint">{{ candidate.reason }}</p>
+      <h4>{{ localized(variable.label, locale) }}</h4><p v-if="unassigned(variable.key)" class="hint" data-unassigned-candidate>{{ t('原变量已合并、退出或定义已调整；候选和原文已保留，请核对取值与现在的变量是否对应。', 'The original variable was merged or retired, or its definition changed. The candidate and source are retained; check the value against the current variable before assigning it.') }}</p><p v-if="candidate.completenessStatus === 'needs_review'" class="candidate-error" data-candidate-incomplete>{{ t('此片段的完整范围尚未核实，不能直接采用；请对照原件补齐后在变量中人工填写并保存。', 'The complete source scope is not verified. Complete it against the source and enter the value manually before saving.') }}</p><strong>{{ candidate.fileName }}</strong><DraftingValueDisplay :field="candidateField(variable, candidate)" :value="candidate.value" :locale="locale" /><blockquote>{{ candidate.sourceQuote }}</blockquote><p class="hint">{{ candidate.reason }}</p>
       <section v-if="!unassigned(variable.key) && review" class="candidate-impact" data-candidate-impact>
         <h5>{{ t('此候选值关联的修改影响（尚未执行）', 'Linked amendment impact (not executed)') }}</h5>
         <p v-if="!sameReview">{{ t('当前变量版本或来源已变化，暂不展示修改影响；请返回第二步核对。', 'The variable revision or source changed. Review step 2 before inspecting amendment impact.') }}</p>

@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import type { GraphLocationTarget, GraphNavigation } from '@/drafting/graph-navigation'
-import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, reactive, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, nextTick, onActivated, onBeforeUnmount, onDeactivated, reactive, ref, watch } from 'vue'
 import { ApiError, draftingApi } from '@/api'
 import { containTab, focusableControls } from '@/focus'
-import type { DraftCatalog, DraftDocument, DraftField, DraftGroup, DraftIdentityConfirmation, DraftPlan, DraftPlanAction, DraftTargetOverride, DraftUnresolved, DraftVariable, DraftVariablePatch, EvidenceItem, ExtractTrace, TemplateItem } from '@/api'
+import type { DraftCatalog, DraftCompositeBillSuggestion, DraftDocument, DraftField, DraftGroup, DraftIdentityConfirmation, DraftPlan, DraftPlanAction, DraftTargetOverride, DraftUnresolved, DraftVariable, DraftVariablePatch, EvidenceItem, ExtractTrace, TemplateItem } from '@/api'
 import { useAppStore } from '@/stores/app'
 import AppModal from '@/components/AppModal.vue'
 import DraftingSourceReview from '@/components/DraftingSourceReview.vue'
@@ -11,7 +11,7 @@ import DraftingCandidateReview from '@/components/DraftingCandidateReview.vue'
 import DraftingAutomationResults from '@/components/DraftingAutomationResults.vue'
 import { sourceReviewDrafts, candidateReviewDrafts } from '@/drafting/source-review-state'
 import type { ReviewHead, ReviewRevision } from '@/drafting/source-review-types'
-import type { DraftAutomationRun } from '@/drafting/automation-types'
+import type { DraftAutomationRun, RelationReviewRequest } from '@/drafting/automation-types'
 import DraftingInputField from '@/components/DraftingInputField.vue'
 import DraftingExtractionReport from '@/components/DraftingExtractionReport.vue'
 import DraftingBillDistribution from '@/components/DraftingBillDistribution.vue'
@@ -21,7 +21,7 @@ import DraftingValueDisplay from '@/components/DraftingValueDisplay.vue'
 import DraftingUnresolvedItems from '@/components/DraftingUnresolvedItems.vue'
 import DraftingBodyEditor from '@/components/DraftingBodyEditor.vue'
 import { bodyDirty, bodyPatch, createBodyDraft, setBodyDeletion, setBodyScopeDeletion } from '@/drafting/body-edit'
-import { actionForUnresolved, adoptionPatch, applicability, clone, decode, dirtyPatch, documentCapabilities, encode, mergeServerValues, projectDrafts, replaceTargetOverride, restoreDraftView, reversedSiteDates, validationIssue, type DraftValue, type DraftViewState } from '@/drafting/state'
+import { actionForUnresolved, adoptionPatch, applicability, clone, decode, dirtyPatch, documentCapabilities, encode, incompleteCandidateBlocksAdoption, mergeServerValues, projectDrafts, replaceTargetOverride, restoreDraftView, reversedSiteDates, trustedConditionValues, validationIssue, type DraftValue, type DraftViewState } from '@/drafting/state'
 import { adoptionPlanMatches, adoptionVariablesMatch, captureAdoptionRefresh, type AdoptionRefreshContext } from '@/drafting/adoption-refresh'
 import { draftWord, localized, type DraftWord } from '@/drafting/words'
 import { buildBusinessGraph } from '@/drafting/business-graph'
@@ -33,15 +33,22 @@ const l = (text: Parameters<typeof localized>[0]) => localized(text, store.local
 type Step = DraftViewState['step']
 
 
-const projectId = computed(() => store.activeProjectId)
+const routeActive = ref(true)
+const projectId = ref(store.activeProjectId)
+watch(() => store.activeProjectId, id => { if (routeActive.value) projectId.value = id }, { flush: 'sync' })
+const resumed = ref(false)
+let activatedOnce = false, resumePending = false
 const step = ref<Step>('inputs')
 const phrase = (zh: string, en: string, hant = zh) => store.locale === 'en' ? en : store.locale === 'zh-Hant' ? hant : zh
 const sourceReview = ref<InstanceType<typeof DraftingSourceReview>>()
 const reviewMounted = ref(false), reviewDirty = ref(false), candidateDirty = ref(false), draftRevisionId = ref(''), candidateReload = ref(0)
 const automation = ref<DraftAutomationRun | null>(null), automationError = ref(''), automationChecking = ref(false), automationResultPending = ref(false)
 const automationRevision = ref<ReviewRevision | null>(null)
+const automationDownload = ref<{ url: string; filename: string } | null>(null)
+function clearAutomationDownload() { if (automationDownload.value) URL.revokeObjectURL(automationDownload.value.url); automationDownload.value = null }
+watch(() => [projectId.value, automation.value?.id, automation.value?.status, automation.value?.updatedAt], clearAutomationDownload)
 const automationActive = computed(() => ['QUEUED', 'RUNNING'].includes(automation.value?.status ?? ''))
-const automationResumable = computed(() => automation.value?.status === 'INTERRUPTED' && !automation.value.resultRevisionId)
+const automationResumable = computed(() => automation.value?.canContinueSavedGroups === true || automation.value?.status === 'INTERRUPTED' && !automation.value.resultRevisionId)
 const automationPhase = computed(() => ({
   PREPARING_SOURCES: phrase('正在核对文件来源', 'Checking source files'),
   PLANNING: phrase('正在整理全部模板要求', 'Planning template requirements'),
@@ -49,7 +56,8 @@ const automationPhase = computed(() => ({
   LINKING_GRAPH: phrase('正在连接条件、依赖和修改位置', 'Linking conditions, dependencies and edit targets'),
   SAVING_GRAPH: phrase('正在保存变量图谱', 'Saving the variable graph'),
   EXTRACTING_CANDIDATES: phrase('正在从项目资料提取候选值', 'Extracting candidate values from project sources'),
-  READY_FOR_REVIEW: phrase('识别结果已可核对', 'Results are ready for review')
+  READY_FOR_REVIEW: phrase('识别结果已可核对', 'Results are ready for review'),
+  FIXED_BASELINE_READY: phrase('固定图谱候选已恢复，等待按组确认', 'Fixed graph candidates restored; group review required')
 }[automation.value?.phase ?? 'PREPARING_SOURCES']))
 const automationStatus = computed(() => ({ QUEUED: phrase('排队中', 'Queued'), RUNNING: phrase('执行中', 'Running'), COMPLETED: phrase('处理完成，等待人工核对', 'Finished; human review required'), PARTIAL: phrase('部分完成，已有结果可核对', 'Partially finished; available results can be reviewed'), FAILED: phrase('任务失败，已有结果保留', 'Task failed; available results are retained'), INTERRUPTED: phrase('任务已中断，可继续', 'Interrupted; can be resumed'), CANCELLED: phrase('任务已停止，已有结果保留', 'Stopped; available results are retained') }[automation.value?.status ?? 'QUEUED']))
 let automationTimer: ReturnType<typeof setTimeout> | undefined
@@ -128,10 +136,38 @@ async function cancelAutomation() {
     finally { if (current(id, token)) scheduleAutomationPoll(id, token) }
   })
 }
-function reviewSaved(revision: ReviewRevision) { candidateReviewRevision.value = revision; draftRevisionId.value = revision.id; if (revision.graph.graph.automaticDiscovery) automationRevision.value = revision; candidateReload.value++ }
+async function prepareAutomationDiagnostics() {
+  const run = automation.value
+  if (!run || run.projectId !== projectId.value || automationActive.value) return
+  await action(phrase('正在准备已保存的诊断记录', 'Preparing saved diagnostic records'), async (id, token) => {
+    clearAutomationDownload()
+    await draftingApi.automationDiagnostics(id, run.id, download => {
+      if (!current(id, token) || automation.value?.id !== run.id || automation.value.updatedAt !== run.updatedAt || automationActive.value) return false
+      automationDownload.value = download; return true
+    })
+  })
+}
+function reviewSaved(revision: ReviewRevision) { candidateReviewRevision.value = revision; draftRevisionId.value = revision.id; if (revision.graph.graph.automaticDiscovery || revision.graph.graph.relationProposals?.length) automationRevision.value = revision; candidateReload.value++ }
 async function reviewConfirmed() { await action(w('loading'), refresh); step.value = 'variables' }
+async function extractReviewedCandidates() {
+  const revision = candidateExtractionRevision.value
+  if (!revision || !candidateExtractionReady.value || automationActive.value || reviewDirty.value || candidateDirty.value || dirtyInputs.value || documentDirty.value) return
+  const selection = store.captureLlmSelection()
+  await action(phrase('正在按已确认的变量定义提取项目候选值', 'Extracting candidates for confirmed variable definitions'), async (id, token) => {
+    await draftingApi.reviewExtract(id, revision.id, selection)
+    if (!current(id, token)) return
+    await refresh(id, token)
+    if (!current(id, token)) return
+    candidateReload.value++; step.value = 'variables'
+  })
+}
 async function locateCandidate(sourceId: string, sourceSha256?: string | null) { if (candidateDirty.value) return; step.value = 'review'; const editor = await ensureReview(); await editor?.locateSource(sourceId, sourceSha256) }
 async function locateCandidateQuestion(key: string, revisionId: string) { if (candidateDirty.value || busy.value) return; step.value = 'review'; const editor = await ensureReview(); await editor?.locateQuestion(key, revisionId) }
+async function locateAutomationQuestion(key: string, revisionId: string) { if (reviewDirty.value || dirtyInputs.value || documentDirty.value || automationRevision.value?.id !== revisionId || automationRevision.value.sourceStale) return; await locateCandidateQuestion(key, revisionId) }
+async function reviewAutomationRelations(request: RelationReviewRequest) {
+  if(reviewDirty.value||candidateDirty.value||dirtyInputs.value||documentDirty.value||automationRevision.value?.id!==request.revisionId||automationRevision.value.sourceStale)return
+  await action(phrase('正在保存关系核对','Saving relationship review'),async()=>{const editor=await ensureReview();if(!editor)throw Error(phrase('核对草稿尚未就绪。','The review draft is not ready.'));await editor.reviewRelations(request)})
+}
 
 const catalog = ref<DraftCatalog>({ ruleVersion: '', groups: [] })
 const templates = ref<TemplateItem[]>([])
@@ -224,7 +260,10 @@ const allTemplates = computed(() => ['NTT', 'SCT', 'SCC'].every(key => templates
 const activeDocument = computed(() => documents.value.find(document => document.fileKey === activeFile.value))
 const documentDirty = computed(() => bodyDirty(activeDocument.value, bodyDraft.value))
 const graphMode = computed(() => !!catalog.value.graphRevisionId)
+const conditionValues = computed(() => graphMode.value ? trustedConditionValues(fields.value,values,variableMap.value,catalog.value.graphRevisionId!,dirty) : values)
 const pendingGraphReview = computed(() => !!draftRevisionId.value && draftRevisionId.value !== catalog.value.graphRevisionId && !(generationReview.value?.current && generationReview.value.current.id === catalog.value.graphRevisionId && generationReview.value.current.parentRevisionId === draftRevisionId.value))
+const candidateExtractionRevision = computed(() => pendingGraphReview.value ? candidateReviewRevision.value : generationWorkingRevision.value ?? candidateReviewRevision.value)
+const candidateExtractionReady = computed(() => !!candidateExtractionRevision.value && !candidateExtractionRevision.value.sourceStale && candidateExtractionRevision.value.definitionGraphReview?.valid === true)
 const dirtyInputs = computed(() => fields.value.some(dirty))
 const documentAccess = computed(() => documentCapabilities(activeDocument.value, documentDirty.value))
 const canExport = computed(() => documentAccess.value.exportable)
@@ -234,7 +273,7 @@ const durationAdopted = computed(() => durationKnown.value && (dirty(fields.valu
 const thresholdPresent = computed(() => values.periodAtLeast39Months !== null && values.periodAtLeast39Months !== undefined && values.periodAtLeast39Months !== '')
 const durationThreshold = computed(() => String(Number(values.contractPeriodMonths) >= 39))
 const durationConflict = computed(() => durationKnown.value && values.periodAtLeast39Months !== null && values.periodAtLeast39Months !== undefined && values.periodAtLeast39Months !== '' && String(values.periodAtLeast39Months) !== durationThreshold.value)
-const actionableFields = computed(() => fields.value.filter(field => !field.hidden && applicability(field.condition, values) !== 'no'))
+const actionableFields = computed(() => fields.value.filter(field => !field.hidden && applicability(field.condition, conditionValues.value) !== 'no'))
 const unresolvedInputCount = computed(() => actionableFields.value.filter(field => !field.optional && (graphMode.value && dirty(field) || !['adopted', 'manual'].includes(state(field)))).length)
 const adoptedCount = computed(() => actionableFields.value.filter(field => (!graphMode.value || !dirty(field)) && ['adopted', 'manual'].includes(state(field))).length)
 const currentUnresolved = computed<DraftUnresolved[]>(() => step.value === 'preview' ? activeDocument.value?.unresolved ?? [] : plan.value?.unresolved ?? [])
@@ -254,10 +293,15 @@ function changeReviewLayout(layout: 'list' | 'focus') { focusedGroupId.value = f
 function moveQuestion(offset: number) { const group = filteredGroups.value[focusedGroupIndex.value + offset]; if (group) chooseGroup(group.id) }
 
 function derivedInput(field: DraftField) { return field.key === 'periodAtLeast39Months' && durationAdopted.value && thresholdPresent.value && !durationConflict.value }
-function inputDisabled(field: DraftField) { return !!busy.value || automationActive.value || applicability(field.condition, values) === 'no' || derivedInput(field) }
+function inputDisabled(field: DraftField) { return !!busy.value || automationActive.value || applicability(field.condition, conditionValues.value) === 'no' || derivedInput(field) }
+function incompleteAdoption(field: DraftField, candidateIndex?: number) { return incompleteCandidateBlocksAdoption(dirty(field), candidateIndex, variableMap.value.get(field.key)?.candidates) }
+function canConfirmManualValue(field: DraftField) {
+  const variable = variableMap.value.get(field.key)
+  return !!variable?.graphRevisionId && !!variable.manuallyEdited && !!variable.reviewRequired && incompleteAdoption(field) && (encode(field, values[field.key]).trim() !== '' || !!intentionalEmpty[field.key])
+}
 function previewAdoptable(field: DraftField) {
   const variable = variableMap.value.get(field.key)
-  return !dirty(field) && encode(field, values[field.key]).trim() !== '' && validationIssue(field, values[field.key]) === null && !variable?.validationIssue && applicability(field.condition, values) !== 'no' && (state(field) === 'suggested' || !!variable?.reviewRequired)
+  return !dirty(field) && !incompleteAdoption(field) && encode(field, values[field.key]).trim() !== '' && validationIssue(field, values[field.key]) === null && !variable?.validationIssue && applicability(field.condition, conditionValues.value) !== 'no' && (state(field) === 'suggested' || !!variable?.reviewRequired)
 }
 function dirty(field: DraftField) { return encode(field, values[field.key]) !== (baseline[field.key] ?? '') || !!intentionalEmpty[field.key] !== !!emptyBaseline[field.key] }
 function toggleEmpty(field: DraftField, checked: boolean) { intentionalEmpty[field.key] = checked; if (checked) values[field.key] = ''; snapshotDraft(projectId.value) }
@@ -268,12 +312,13 @@ function inputSaveStatus(field: DraftField): DraftWord | undefined {
   return status === 'saved' ? 'savedInput' : undefined
 }
 function state(field: DraftField): DraftWord {
-  if (applicability(field.condition, values) === 'no') return 'inactive'
+  if (applicability(field.condition, conditionValues.value) === 'no') return 'inactive'
+  if (field.condition?.reviewRequired) return 'needs_review'
   const variable = variableMap.value.get(field.key)
   if (graphMode.value && field.kind === 'text' && intentionalEmpty[field.key] && !variable?.reviewRequired && !variable?.validationIssue) return dirty(field) || variable?.manuallyEdited ? 'manual' : 'adopted'
   const issue = validationIssue(field, values[field.key])
-  if (issue === 'missing') return variable?.adoptionState === 'conflict' && !dirty(field) ? 'conflict' : 'missing'
-  if (issue || variable?.reviewRequired || variable?.validationIssue || ['siteInspectionStartDate', 'siteInspectionEndDate'].includes(field.key) && reversedSiteDates(values) || ['contractPeriodMonths', 'periodAtLeast39Months'].includes(field.key) && durationConflict.value || applicability(field.condition, values) === 'unknown' && values[field.key] !== null && values[field.key] !== undefined && values[field.key] !== '') return 'needs_review'
+  if (issue === 'missing') return variable?.adoptionState === 'conflict' && !dirty(field) ? 'conflict' : variable?.candidates?.some(candidate => candidate.completenessStatus === 'needs_review') ? 'needs_review' : 'missing'
+  if (issue || variable?.reviewRequired || variable?.validationIssue || ['siteInspectionStartDate', 'siteInspectionEndDate'].includes(field.key) && reversedSiteDates(values) || ['contractPeriodMonths', 'periodAtLeast39Months'].includes(field.key) && durationConflict.value || applicability(field.condition, conditionValues.value) === 'unknown' && values[field.key] !== null && values[field.key] !== undefined && values[field.key] !== '') return 'needs_review'
   if (variable?.adoptionState === 'conflict' && !dirty(field)) return 'conflict'
   if (dirty(field)) return 'manual'
   if (variable?.manuallyEdited && values[field.key] !== null && values[field.key] !== undefined && values[field.key] !== '') return 'manual'
@@ -281,13 +326,13 @@ function state(field: DraftField): DraftWord {
   return values[field.key] !== null && values[field.key] !== undefined && values[field.key] !== '' ? 'suggested' : 'missing'
 }
 function groupState(group: DraftGroup): DraftWord {
-  const active = group.fields.filter(field => applicability(field.condition, values) !== 'no' && !field.optional)
+  const active = group.fields.filter(field => applicability(field.condition, conditionValues.value) !== 'no' && !field.optional)
   if (!active.length) return 'inactive'
   const states = active.map(state)
   for (const status of ['needs_review', 'conflict', 'missing', 'suggested'] as DraftWord[]) if (states.includes(status)) return status
   return states.includes('manual') ? 'manual' : 'adopted'
 }
-function visibleFields(group: DraftGroup) { return group.fields.filter(field => !field.hidden && applicability(field.condition, values) !== 'no') }
+function visibleFields(group: DraftGroup) { return group.fields.filter(field => !field.hidden && applicability(field.condition, conditionValues.value) !== 'no') }
 function relatedActions(group: DraftGroup) {
   const keys = new Set(group.fields.map(field => field.key))
   return plan.value?.actions.filter(action => (action.inputKeys ?? action.fieldKeys ?? []).some(key => keys.has(key))) ?? []
@@ -376,6 +421,22 @@ async function refresh(id: string, token: number) {
   draftRevisionId.value = review.draftRevisionId ?? ''
   if (step.value !== 'inputs') await updatePlan()
 }
+function resumeAutomation() {
+  if (!resumePending || !routeActive.value || busy.value || !projectId.value) return
+  const id = projectId.value, token = generation
+  resumePending = false
+  void loadAutomation(id, token, undefined, false).then(() => { if (routeActive.value && current(id, token) && automationActive.value) scheduleAutomationPoll(id, token) })
+}
+async function reloadResume() {
+  if (reviewDirty.value || candidateDirty.value || dirtyInputs.value || documentDirty.value || busy.value) return
+  await action(w('loading'), async (id, token) => {
+    await refresh(id, token)
+    if (!current(id, token)) return
+    if (reviewMounted.value) await sourceReview.value?.refresh(false)
+    if (!current(id, token)) return
+    candidateReload.value++; resumed.value = false
+  })
+}
 async function saveField(id: string, token: number, field: DraftField, patch: DraftVariablePatch) {
   const variable = variableMap.value.get(field.key)
   const bound = variable?.graphRevisionId ? { ...patch, graphRevisionId: variable.graphRevisionId, fieldDefinitionHash: variable.fieldDefinitionHash } : patch
@@ -454,7 +515,7 @@ async function reloadIdentityConfirmation() {
 async function persistDirty(id: string, token: number, subset = fields.value) { for (const field of subset) { if (!current(id, token)) return; if (dirty(field)) await saveField(id, token, field, { value: encode(field, values[field.key]), ...(intentionalEmpty[field.key] ? { explicitEmpty: true } : {}) }) } }
 async function saveGroup(group?: DraftGroup) { await action(w('saving'), async (id, token) => { await persistDirty(id, token, group?.fields); if (current(id, token)) await refresh(id, token) }) }
 async function saveInput(field: DraftField) {
-  if (!dirty(field) || applicability(field.condition, values) === 'no') return
+  if (!dirty(field) || applicability(field.condition, conditionValues.value) === 'no') return
   await action(w('saving'), async (id, token) => {
     const context = adoptionRefreshContext(field)
     inputSaveStates[field.key] = 'saving'
@@ -466,12 +527,30 @@ async function saveInput(field: DraftField) {
   })
 }
 async function adopt(field: DraftField, candidateIndex?: number) {
+  if (incompleteAdoption(field, candidateIndex)) return
   await action(w('saving'), async (id, token) => {
     const context = adoptionRefreshContext(field)
     const variable = variableMap.value.get(field.key)
     const patch = candidateIndex === undefined && intentionalEmpty[field.key] && dirty(field) ? { value: '', explicitEmpty: true } : adoptionPatch(encode(field, values[field.key]), baseline[field.key] ?? '', !!variable?.reviewRequired, candidateIndex, variable)
     await saveField(id, token, field, patch)
     if (current(id, token)) await refreshAdoptedValues(id, token, context)
+  })
+}
+async function confirmManualValue(field: DraftField) {
+  if (!canConfirmManualValue(field) || inputDisabled(field)) return
+  await action(w('saving'), async (id, token) => {
+    const context = adoptionRefreshContext(field)
+    await saveField(id, token, field, { value: encode(field, values[field.key]), ...(intentionalEmpty[field.key] ? { explicitEmpty: true } : {}) })
+    if (current(id, token)) await refreshAdoptedValues(id, token, context)
+  })
+}
+async function adoptCompositeBill(key: string, suggestion: DraftCompositeBillSuggestion) {
+  const field = fields.value.find(item => item.key === key), variable = variableMap.value.get(key)
+  if (!field || !variable || !catalog.value.graphRevisionId || variable.graphRevisionId !== catalog.value.graphRevisionId || reviewDirty.value || candidateDirty.value || dirtyInputs.value || documentDirty.value || automationActive.value) return
+  await action(phrase('正在采用合并候选', 'Adopting the combined candidate'), async (id, token) => {
+    const context = adoptionRefreshContext(field)
+    await saveField(id, token, field, { compositeBill: { runId: suggestion.runId, memberIndexes: suggestion.memberIndexes, mergeHash: suggestion.mergeHash, expectedValue: variable.value, expectedConfirmed: !!variable.confirmed, expectedManuallyEdited: !!variable.manuallyEdited, expectedReviewRequired: !!variable.reviewRequired } })
+    if (current(id, token)) { await refreshAdoptedValues(id, token, context); candidateReload.value++ }
   })
 }
 async function upload(event: Event, target: 'templates' | 'inputs', key?: string) {
@@ -550,7 +629,7 @@ function setImmersive(expanded: boolean) {
   nextTick(() => { if (expanded) documentWorkspace.value?.focus({ preventScroll: true }); else immersiveToggle.value?.focus({ preventScroll: true }) })
 }
 function workspaceKeydown(event: KeyboardEvent) {
-  if (graphOpen.value || !immersiveDocument.value || event.defaultPrevented) return
+  if (!routeActive.value || graphOpen.value || !immersiveDocument.value || event.defaultPrevented) return
   if (event.target instanceof Element && event.target.closest('.layout-check')) return
   if (targetId.value) {
     const dialog = targetModal.value?.$el.querySelector<HTMLElement>('[role="dialog"]')
@@ -614,7 +693,7 @@ function closeGraph(restoreFocus = true) {
 }
 function graphInput(key: string) {
   const field = readingFields.value.find(item => item.key === key)
-  if (!graphOpen.value || graphProject !== projectId.value || busy.value || documentDirty.value || !field || applicability(field.condition, values) === 'no') return
+  if (!graphOpen.value || graphProject !== projectId.value || busy.value || documentDirty.value || !field || applicability(field.condition, conditionValues.value) === 'no') return
   closeGraph(false)
   goInput(key)
 }
@@ -671,9 +750,9 @@ function chooseTemplate(fileKey: string) {
   if (busy.value || !['NTT', 'SCT', 'SCC'].includes(fileKey)) return
   document.getElementById(`template-upload-${fileKey}`)?.click()
 }
-function editReading(key: string) { const field = readingFields.value.find(item => item.key === key); if (field && !busy.value && applicability(field.condition, values) !== 'no') previewEditKey.value = key }
+function editReading(key: string) { const field = readingFields.value.find(item => item.key === key); if (field && !busy.value && applicability(field.condition, conditionValues.value) !== 'no') previewEditKey.value = key }
 async function saveReading() {
-  const field = previewEditField.value; if (!field || !dirty(field) || applicability(field.condition, values) === 'no') return
+  const field = previewEditField.value; if (!field || !dirty(field) || applicability(field.condition, conditionValues.value) === 'no') return
   await action(w('saving'), async (id, token) => {
     await persistDirty(id, token, [field]); if (!current(id, token)) return
     await refresh(id, token); if (current(id, token) && !error.value) previewEditKey.value = ''
@@ -732,6 +811,7 @@ watch(filteredGroups, groups => {
 })
 watch(values, () => { if (planTimer) clearTimeout(planTimer); planTimer = setTimeout(() => { if (!busy.value && step.value !== 'inputs') void updatePlan() }, 350) }, { deep: true })
 watch(projectId, (id, old) => {
+  resumePending = false; resumed.value = false
   if (old) snapshotDraft(old)
   closeGraph(false)
   graphNavigation.value = undefined
@@ -763,7 +843,24 @@ watch(activeFile, () => { tocRefreshNotice.value = ''; if (graphNavigation.value
 watch(activeDocument, (_document, previous) => { tocRefreshNotice.value = ''; if (!bodyDirty(previous, bodyDraft.value)) loadDocument(false) })
 watch(documentDirty, dirty => { if (dirty) tocRefreshNotice.value = '' })
 watch(step, () => { if (step.value === 'review') void ensureReview(); if (step.value !== 'inputs' && !busy.value && !plan.value) void updatePlan(); if (step.value !== 'preview') { immersiveDocument.value = false; graphNavigation.value = undefined } })
-onBeforeUnmount(() => { snapshotDraft(projectId.value); alive = false; generation++; planGeneration++; stopAutomationPolling(); if (planTimer) clearTimeout(planTimer); window.removeEventListener('beforeunload', beforeUnload); window.removeEventListener('keydown', workspaceKeydown) })
+watch(busy, value => {
+  if (value || !routeActive.value) return
+  if (resumePending) resumeAutomation()
+  if (step.value !== 'inputs' && !plan.value) void updatePlan()
+})
+onActivated(() => {
+  routeActive.value = true
+  if (!activatedOnce) { activatedOnce = true; return }
+  if (projectId.value !== store.activeProjectId) { projectId.value = store.activeProjectId; return }
+  if (projectId.value) { resumed.value = true; resumePending = true; resumeAutomation() }
+})
+onDeactivated(() => {
+  routeActive.value = false; resumePending = false
+  stopAutomationPolling(); automationChecking.value = false
+  if (planTimer) clearTimeout(planTimer)
+  immersiveDocument.value = false
+})
+onBeforeUnmount(() => { snapshotDraft(projectId.value); clearAutomationDownload(); alive = false; generation++; planGeneration++; stopAutomationPolling(); if (planTimer) clearTimeout(planTimer); window.removeEventListener('beforeunload', beforeUnload); window.removeEventListener('keydown', workspaceKeydown) })
 </script>
 
 <template>
@@ -771,6 +868,7 @@ onBeforeUnmount(() => { snapshotDraft(projectId.value); alive = false; generatio
     <header class="flow-head"><div><h2>{{ w('title') }}</h2><p>{{ w('subtitle') }}</p></div><div class="row"><button type="button" class="btn" data-open-business-graph="header" :disabled="!projectId || !!busy || documentDirty || candidateDirty || (!pendingGraphReview && !catalog.groups.length)" @click="openGraph">{{ w('businessGraph') }}</button><span v-if="pendingGraphReview" class="flow-count" data-pending-graph-count>{{ phrase('本次图谱待核对确认', 'Current graph awaiting review and confirmation') }}</span><span v-else class="flow-count">{{ adoptedCount }} / {{ actionableFields.length }} {{ w('adopted') }} · {{ unresolvedInputCount }} {{ w('pending') }}</span></div></header>
     <nav class="flow-steps"><button v-for="item in steps" :key="item.key" type="button" :class="{ active: step === item.key }" :aria-current="step === item.key ? 'step' : undefined" :disabled="!!busy || documentDirty || candidateDirty || (automationActive && !['inputs', 'review'].includes(item.key)) || (item.key === 'preview' && !allTemplates && !documents.some(document => document.generated))" @click="move(item.key)">{{ item.label }}</button></nav>
     <p v-if="!projectId" class="empty-state">{{ w('selectProject') }}</p><p v-if="busy && !immersiveDocument" class="flow-status" role="status">{{ busy }}</p><p v-if="error && !immersiveDocument" class="flow-error" role="alert">{{ error }}</p><p v-if="restored" class="review-note">{{ w('restoreNote') }}</p>
+    <div v-if="resumed" class="review-note" data-resume-status role="status"><p>{{ phrase('已恢复原页面与未保存修改；服务器上的其他修改不会自动读取。', 'The previous view and unsaved edits are restored; other server changes are not reloaded automatically.') }}</p><button class="btn" data-resume-reload :disabled="!!busy || reviewDirty || candidateDirty || dirtyInputs || documentDirty" @click="reloadResume">{{ phrase('重新读取服务器状态', 'Reload server state') }}</button><p v-if="reviewDirty||candidateDirty||dirtyInputs||documentDirty">{{ phrase('有未保存修改时不能重新读取，请先保存或取消修改。', 'Save or discard unsaved edits before reloading.') }}</p></div>
     <button v-if="error && projectId && !busy && !immersiveDocument" type="button" class="btn" data-drafting-retry-read @click="action(w('loading'), refresh)">{{ phrase('重新读取当前项目','Reload current project') }}</button>
     <div v-if="projectId && step === 'inputs'" class="source-stack">
       <section class="flow-card">
@@ -789,17 +887,19 @@ onBeforeUnmount(() => { snapshotDraft(projectId.value); alive = false; generatio
       </section>
       <section class="flow-card"><div class="card-head"><h3>{{ w('evidence') }}</h3><label class="btn" :class="{ disabled: !!busy || automationActive }">{{ w('uploadEvidence') }}<input type="file" accept=".doc,.docx,.pdf,.txt,.md,.eml,.msg" multiple :disabled="!!busy || automationActive" @change="upload($event, 'inputs')" /></label></div><p class="hint">{{ w('evidenceNote') }}</p><p v-if="!inputs.length" class="hint">{{ w('emptyEvidence') }}</p><div v-for="input in inputs" :key="input.id ?? input.code" class="evidence-row"><div class="card-head"><strong>{{ input.fileName || l(input.title) }}</strong><div class="row"><span>{{ input.status === 'PARSED' ? w('parsedStatus') : ['FAILED', 'PARSE_FAILED'].includes(input.status) ? w('failedStatus') : w('waitingStatus') }}</span><button v-if="input.id !== null && input.id !== undefined" class="btn text-link" :data-remove-input="input.id" :disabled="!!busy || automationActive" @click="removalItem = input">{{ w('removeCorrespondence') }}</button></div></div><small>{{ l(input.message) }} {{ input.pageCount || '' }}</small></div></section>
       <p v-if="automationError" class="flow-error" role="alert">{{ automationError }} <button class="btn" data-reload-automation :disabled="!!busy || automationChecking" @click="loadAutomation(projectId, generation)">{{ phrase('重新读取任务进度', 'Reload task progress') }}</button></p>
-      <p class="hint">{{ phrase('本步负责上传和识别文件。继续后，系统会自动识别全部模板变量、进行原子拆解、连接图谱，并从项目资料提取候选值。', 'This step uploads and identifies files. Continue to automatically identify template variables, decompose atomic capabilities, connect the graph and extract candidate values from project sources.') }}</p>
+      <p class="hint">{{ phrase('本步识别模板变量、进行原子拆解并构建待审图谱。核对并保存变量定义后，再单独从项目资料提取候选值。', 'This step identifies template variables, decomposes atomic capabilities and builds a graph for review. Review and save variable definitions before separately extracting project candidates.') }}</p>
       <footer class="flow-actions"><button class="btn" :disabled="!!busy || automationActive || !catalog.groups.length" @click="move('variables')">{{ w('manualEntry') }}</button><button class="btn primary" data-start-automation :disabled="!!busy || automationActive || automationChecking || !!automationError || reviewDirty || candidateDirty || dirtyInputs || documentDirty || !templates.some(template => ['ok', 'partial'].includes(template.tag))" @click="runAutomation()">{{ phrase('开始识别变量并构建图谱', 'Identify variables and build graph') }}</button><button v-if="automation" class="btn" @click="move('review')">{{ phrase('查看变量识别任务', 'View variable identification task') }}</button></footer>
     </div>
     <div v-if="projectId && reviewMounted" v-show="step === 'review'" class="source-stack" data-review-stage>
       <section class="flow-card automation-card" data-automation-panel>
         <h3>{{ phrase('自动识别变量、原子拆解与构建图谱', 'Automatic variable identification, atomic decomposition and graph construction') }}</h3>
-        <p class="hint">{{ phrase('系统连续处理全部模板要求并提取资料候选，无需逐批点击。结果先供核对，不会自动确认图谱或采用项目事实。', 'The system processes template requirements and source candidates continuously. You do not need to run individual batches. Results require review; graph confirmation and fact adoption remain explicit.') }}</p>
+        <p class="hint">{{ phrase('系统连续处理模板要求并保存待审图谱，不会自动提取或采用项目取值。', 'The system processes template requirements and saves a graph for review. It does not automatically extract or adopt project values.') }}</p>
         <div v-if="automation" role="status" aria-live="polite" data-automation-progress>
-          <strong>{{ automationActive ? automationPhase : automationStatus }}</strong>
+          <strong>{{ automationActive || automation.phase === 'FIXED_BASELINE_READY' ? automationPhase : automationStatus }}</strong>
           <p>{{ automation.message }}</p><p v-if="automation.currentFile">{{ automationActive ? phrase('当前文件：', 'Current file: ') : phrase('任务最后处理文件：', 'Last file handled by this task: ') }}{{ automation.currentFile }}</p>
-          <p>{{ automationActive ? phrase('处理进度：', 'Processing progress: ') : phrase('本次识别任务记录：', 'Identification task record: ') }}{{ automation.completedItems }} / {{ automation.totalItems }} · {{ phrase('要求：', 'Requirements: ') }}{{ automation.requirementsCount }} · {{ phrase('原子节点：', 'Atomic nodes: ') }}{{ automation.nodesCount }}</p>
+          <p v-if="automation.phase === 'FIXED_BASELINE_READY'" data-restored-fixed-graph>{{ phrase('本次恢复的定义候选：', 'Definition candidates restored: ') }}{{ automation.nodesCount }} · {{ phrase('恢复时待确认的根定义：', 'Root definitions awaiting review at restoration: ') }}{{ automation.unresolvedItems }}</p>
+          <p v-else>{{ automationActive ? phrase('处理进度：', 'Processing progress: ') : phrase('本次识别任务记录：', 'Identification task record: ') }}{{ automation.completedItems }} / {{ automation.totalItems }} · {{ phrase('要求：', 'Requirements: ') }}{{ automation.requirementsCount }} · {{ phrase('原子节点：', 'Atomic nodes: ') }}{{ automation.nodesCount }}</p>
+          <p v-if="automation.groupProgress" data-automation-groups>{{ phrase('分组处理：', 'Grouped processing: ') }}{{ automation.groupProgress.completed }} / {{ automation.groupProgress.total }} · {{ phrase('处理中：', 'In progress: ') }}{{ automation.groupProgress.inFlight }} · {{ phrase('最多同时处理：', 'Concurrent group limit: ') }}{{ automation.groupProgress.concurrency }}<br>{{ phrase('来源事项仍逐项登记覆盖；分组完成不代表已人工确认。', 'Source items retain individual coverage; a finished group is not a human confirmation.') }}</p>
           <p v-if="automation.failedItems || automation.unresolvedItems" class="condition-note">{{ phrase('失败事项：', 'Failed items: ') }}{{ automation.failedItems }} · {{ automationActive ? phrase('待处理或待人工核对：', 'Unresolved or requiring human review: ') : phrase('任务结束时留待核对的事项：', 'Items left for review when the task ended: ') }}{{ automation.unresolvedItems }}</p>
           <p v-if="!automationActive" class="hint" data-automation-historical>{{ phrase('以上是这次自动识别结束时的记录，不随之后的合并、修改或核对更新。当前变量及待核对数量以下方核对草稿为准。', 'These counts describe the completed identification task and do not change with later merges, edits or reviews. Use the review draft below for current variable and review counts.') }}</p>
         </div>
@@ -808,29 +908,38 @@ onBeforeUnmount(() => { snapshotDraft(projectId.value); alive = false; generatio
         <p v-if="automationResultPending" class="condition-note">{{ phrase('已有新的识别结果。请先保存或取消当前未保存修改，再读取结果。', 'New results are available. Save or cancel unsaved edits before loading the results.') }}</p>
         <div class="flow-actions">
           <button v-if="!automationActive && !automationResumable" class="btn primary" data-start-automation :disabled="!!busy || automationChecking || !!automationError || reviewDirty || candidateDirty || dirtyInputs || documentDirty || !templates.some(template => ['ok', 'partial'].includes(template.tag))" @click="runAutomation()">{{ automation ? phrase('按当前文件重新识别变量与图谱', 'Identify variables and graph from current files again') : phrase('开始识别变量并构建图谱', 'Identify variables and build graph') }}</button>
-          <button v-if="automationResumable" class="btn primary" data-resume-automation :disabled="!!busy || automationChecking || !!automationError || reviewDirty || candidateDirty || dirtyInputs || documentDirty" @click="runAutomation(true)">{{ phrase('继续未完成的变量识别', 'Resume unfinished variable identification') }}</button>
+          <button v-if="automationResumable" class="btn primary" data-resume-automation :disabled="!!busy || automationChecking || !!automationError || reviewDirty || candidateDirty || dirtyInputs || documentDirty" @click="runAutomation(true)">{{ automation?.resultRevisionId ? phrase('继续尚未派发的分组', 'Continue groups not yet dispatched') : phrase('继续未完成的变量识别', 'Resume unfinished variable identification') }}</button>
+          <p v-if="automation?.canContinueSavedGroups" class="hint" data-resume-groups-notice>{{ phrase('仅继续尚未派发的分组，或保存上次续跑已返回的结果；已有失败和未知调用不重发。保留已保存的处理节点调整。业务根定义或核心状态、来源及模型配置改变时不能续用旧计划，累计调用预算和原6小时时限不重置。', 'Continue only groups not yet dispatched, or save results returned before an interruption. Failed and unknown calls are not replayed. Saved treatment edits are retained. Changed business-root definitions or core states, sources, or model configuration prevent reuse; the original call budget and six-hour limit remain.') }}</p>
           <button v-if="automationActive" class="btn" data-cancel-automation :disabled="!!busy" @click="cancelAutomation">{{ phrase('停止任务并保留已有结果', 'Stop task and retain available results') }}</button>
+          <button v-if="automation && !automationActive" class="btn" data-prepare-automation-diagnostics :disabled="!!busy" @click="prepareAutomationDiagnostics">{{ phrase('准备本次运行诊断', 'Prepare diagnostics for this run') }}</button>
+          <a v-if="automationDownload" class="btn" data-download-automation-diagnostics :href="automationDownload.url" :download="automationDownload.filename">{{ phrase('下载诊断 JSON', 'Download diagnostic JSON') }}</a>
           <button v-if="automationError" class="btn" data-reload-automation :disabled="!!busy || automationChecking" @click="loadAutomation(projectId, generation, automation?.id)">{{ phrase('重新读取任务进度', 'Reload task progress') }}</button>
           <button v-if="automationResultPending" class="btn" data-load-automation-result :disabled="!!busy || reviewDirty || candidateDirty || dirtyInputs || documentDirty" @click="action(phrase('正在读取识别结果', 'Loading identification results'), refreshAutomationResult)">{{ phrase('读取已保存的识别结果', 'Load saved identification results') }}</button>
         </div>
       </section>
-      <fieldset class="automation-review" :disabled="!!busy || automationActive"><DraftingSourceReview ref="sourceReview" :project-id="projectId" :locale="store.locale" :active="step === 'review'" :locked="candidateDirty || automationActive" @dirty="reviewDirty = $event" @saved="reviewSaved" @confirmed="reviewConfirmed" @replace="move('inputs')" />
+      <fieldset class="automation-review" :disabled="!!busy || automationActive"><DraftingSourceReview ref="sourceReview" :project-id="projectId" :locale="store.locale" :active="routeActive && step === 'review'" :locked="candidateDirty || automationActive" @dirty="reviewDirty = $event" @saved="reviewSaved" @confirmed="reviewConfirmed" @replace="move('inputs')" />
       </fieldset>
-      <DraftingAutomationResults v-if="automationRevision && !automationActive" :revision="automationRevision" :locale="store.locale" @locate="locateCandidate" />
-      <footer class="flow-actions"><button class="btn" :disabled="!!busy" @click="move('inputs')">{{ phrase('返回文件识别', 'Back to file identification') }}</button><button class="btn" :disabled="!!busy || automationActive || reviewDirty || candidateDirty" @click="move('variables')">{{ phrase('查看候选值与采用方案', 'Review candidate values and adoption plan') }}</button></footer>
+      <DraftingAutomationResults v-if="automationRevision && !automationActive" :revision="automationRevision" :locale="store.locale" :disabled="!!busy || reviewDirty || candidateDirty || dirtyInputs || documentDirty" @locate="locateCandidate" @question="locateAutomationQuestion" @review-relations="reviewAutomationRelations" />
+      <footer class="flow-actions"><button class="btn" :disabled="!!busy" @click="move('inputs')">{{ phrase('返回文件识别', 'Back to file identification') }}</button><button class="btn primary" data-extract-reviewed-candidates :disabled="!!busy || automationActive || reviewDirty || candidateDirty || dirtyInputs || documentDirty || !candidateExtractionReady" @click="extractReviewedCandidates">{{ phrase('提取已确认变量的项目候选值', 'Extract candidates for confirmed variables') }}</button><button class="btn" :disabled="!!busy || automationActive || reviewDirty || candidateDirty" @click="move('variables')">{{ phrase('查看候选值与采用方案', 'Review candidate values and adoption plan') }}</button></footer>
+      <p v-if="candidateExtractionReady && candidateExtractionRevision?.definitionGraphReview?.confirmedFieldIds" class="hint" data-confirmed-extraction-count>{{ phrase('已确认变量','Confirmed variables') }}: {{ candidateExtractionRevision.definitionGraphReview.confirmedFieldIds.length }} · {{ phrase('仍待核变量','Variables awaiting review') }}: {{ candidateExtractionRevision.definitionGraphReview.pendingFieldIds?.length ?? '—' }}. {{ phrase('优先提取新增确认的变量；没有新增时将重新提取已确认部分。','Newly confirmed variables are extracted first; if none were added, the confirmed group is extracted again.') }}</p>
+      <p v-if="!candidateExtractionReady" class="condition-note" data-definition-graph-gate>{{ phrase('请先保存并确认当前可用的变量与关系图谱，再提取新的项目候选值。已有候选和人工值保留。','Save and confirm the usable variable and relationship graph before extracting new project candidates. Existing candidates and manual values are retained.') }}</p>
     </div>
     <p v-if="projectId && generationSourceBlocked" class="condition-note" data-generation-source-block role="status">{{ nonEditableSelectedSources.length ? phrase('所选版次只有 PDF 或不可编辑原件，仍可阅读和核对；生成 Word 需先上传同版可编辑 DOCX 并重新核对确认。不能借另一版 Word。', 'The selected edition has a PDF or non-editable original. Reading and review remain available; Word generation needs an editable DOCX of that edition and a newly confirmed review. Another Word edition cannot be substituted.') : phrase('当前确认版本或来源绑定已变化，请在来源核对步骤刷新并确认后再生成。', 'The confirmed revision or source binding changed. Refresh and confirm it in Source review before generation.') }} {{ nonEditableSelectedSources.map(source => source.fileName).join(' · ') }}</p>
     <section v-if="projectId && step === 'variables' && pendingGraphReview" class="flow-card input-stack" data-pending-graph-review>
       <h3>{{ phrase('本次识别的候选值', 'Candidate values from this identification') }}</h3>
       <p>{{ phrase('以下候选值对应第二步保存的图谱。请先核对重复变量、条件和修改位置，并确认这版模板，再采用变量值和生成修改方案。', 'These candidate values belong to the graph saved in step 2. Review duplicate variables, conditions and amendment locations, then confirm this template before adopting values and generating the plan.') }}</p>
       <button class="btn primary" :disabled="candidateDirty" @click="move('review')">{{ phrase('返回第二步核对并确认图谱', 'Review and confirm the graph in step 2') }}</button>
+      <button class="btn" data-extract-reviewed-candidates :disabled="!!busy || automationActive || reviewDirty || candidateDirty || dirtyInputs || documentDirty || !candidateExtractionReady" @click="extractReviewedCandidates">{{ phrase('提取已确认变量的项目候选值', 'Extract candidates for confirmed variables') }}</button>
+      <p v-if="!candidateExtractionReady" class="condition-note" data-definition-graph-gate>{{ phrase('请返回变量核对，确认当前可用图谱后再提取；已有候选仍可查看。','Return to variable review and confirm the usable graph before extracting. Existing candidates remain readable.') }}</p>
       <button v-if="trace" class="btn" data-pending-extraction-report @click="traceOpen = true">{{ w('trace') }}</button>
-      <DraftingCandidateReview :project-id="projectId" :revision-id="draftRevisionId" :review="candidateReviewRevision" :locale="store.locale" :reload-key="candidateReload" @dirty="candidateDirty = $event" @locate="locateCandidate" @question="locateCandidateQuestion" />
+      <DraftingCandidateReview :project-id="projectId" :revision-id="draftRevisionId" :review="candidateReviewRevision" :locale="store.locale" :reload-key="candidateReload" :allow-adoption="catalog.graphRevisionId === draftRevisionId && !busy && !reviewDirty && !dirtyInputs && !documentDirty && !automationActive" @dirty="candidateDirty = $event" @locate="locateCandidate" @question="locateCandidateQuestion" @adopt-composite="adoptCompositeBill" />
     </section>
     <div v-if="projectId && step === 'variables' && !pendingGraphReview" class="input-stack">
-      <DraftingCandidateReview v-if="catalog.graphRevisionId" :project-id="projectId" :revision-id="catalog.graphRevisionId" :locale="store.locale" :reload-key="candidateReload" :review="generationWorkingRevision ?? undefined" @dirty="candidateDirty = $event" @locate="locateCandidate" @question="locateCandidateQuestion" @corrected="action(w('loading'), refresh)" />
+      <DraftingCandidateReview v-if="catalog.graphRevisionId" :project-id="projectId" :revision-id="catalog.graphRevisionId" :locale="store.locale" :reload-key="candidateReload" :review="generationWorkingRevision ?? undefined" :allow-adoption="!busy && !reviewDirty && !dirtyInputs && !documentDirty && !automationActive" @dirty="candidateDirty = $event" @locate="locateCandidate" @question="locateCandidateQuestion" @corrected="action(w('loading'), refresh)" @adopt-composite="adoptCompositeBill" />
       <p v-if="generationWorkingRevision?.status === 'DRAFT'" class="condition-note" data-partial-draft-notice>{{ phrase('本次图谱仍在核对。可以保存并采用明确的变量值；只有已核对的修改才会执行。现在生成的未完成草稿会保留未决原文，并附标记及未处理清单。', 'This graph is under review. You can save and adopt known values; only reviewed changes will apply. Incomplete drafts retain unresolved source wording and include a notice and outstanding-items list.') }}</p>
-      <div class="input-intro"><p>{{ graphMode ? phrase('只有明确采用且无复核标记的事实进入修改方案。人工值请附理由并保存；模板确认不会代替事实采用。', 'Only explicitly adopted facts without review flags enter the plan. Supply a reason and save manual values. Template confirmation does not adopt facts.') : w('reviewIntro') }}</p><div class="row"><button class="btn" :disabled="!!busy" @click="openReading()">{{ w('templateReading') }}</button><button class="btn" :disabled="!!busy" @click="move('review')">{{ phrase('变量识别与图谱任务', 'Variable identification and graph task') }}</button><button v-if="trace" class="btn" @click="traceOpen = true">{{ w('trace') }}</button></div></div>
+      <div class="input-intro"><p>{{ graphMode ? phrase('只有明确采用且无复核标记的事实进入修改方案。人工值请附理由并保存；模板确认不会代替事实采用。', 'Only explicitly adopted facts without review flags enter the plan. Supply a reason and save manual values. Template confirmation does not adopt facts.') : w('reviewIntro') }}</p><div class="row"><button class="btn" :disabled="!!busy" @click="openReading()">{{ w('templateReading') }}</button><button v-if="graphMode" class="btn" data-extract-reviewed-candidates :disabled="!!busy || automationActive || reviewDirty || candidateDirty || dirtyInputs || documentDirty || !candidateExtractionReady" @click="extractReviewedCandidates">{{ phrase('提取已确认变量的项目候选值', 'Extract candidates for confirmed variables') }}</button><button class="btn" :disabled="!!busy" @click="move('review')">{{ phrase('变量识别与图谱任务', 'Variable identification and graph task') }}</button><button v-if="trace" class="btn" @click="traceOpen = true">{{ w('trace') }}</button></div></div>
+      <p v-if="graphMode && candidateExtractionReady && candidateExtractionRevision?.definitionGraphReview?.confirmedFieldIds" class="hint" data-confirmed-extraction-count>{{ phrase('已确认变量','Confirmed variables') }}: {{ candidateExtractionRevision.definitionGraphReview.confirmedFieldIds.length }} · {{ phrase('仍待核变量','Variables awaiting review') }}: {{ candidateExtractionRevision.definitionGraphReview.pendingFieldIds?.length ?? '—' }}. {{ phrase('优先提取新增确认的变量；没有新增时将重新提取已确认部分。','Newly confirmed variables are extracted first; if none were added, the confirmed group is extracted again.') }}</p>
+      <p v-if="graphMode && !candidateExtractionReady" class="condition-note" data-definition-graph-gate>{{ phrase('请先确认当前可用图谱，再提取新的候选；已有值仍保留。','Confirm the usable graph before extracting new candidates; existing values remain available.') }}</p>
       <div class="question-tools"><input v-model="search" :placeholder="w('search')" :aria-label="w('search')" /><select v-model="statusFilter" :aria-label="w('all')"><option value="all">{{ w('all') }}</option><option v-for="status in ['missing', 'suggested', 'adopted', 'manual', 'needs_review', 'conflict', 'inactive'] as DraftWord[]" :key="status" :value="status">{{ w(status) }}</option></select><button class="btn" @click="search = ''; statusFilter = 'all'">{{ w('clearFilters') }}</button></div>
       <div class="review-layout-switch" role="group" :aria-label="w('reviewLayout')"><button class="btn" :class="{ primary: reviewLayout === 'list' }" :aria-pressed="reviewLayout === 'list'" @click="changeReviewLayout('list')">{{ w('listLayout') }}</button><button class="btn" :class="{ primary: reviewLayout === 'focus' }" :aria-pressed="reviewLayout === 'focus'" @click="changeReviewLayout('focus')">{{ w('focusLayout') }}</button></div>
       <p v-if="!filteredGroups.length" class="empty-state">{{ w('noMatches') }}</p>
@@ -840,13 +949,14 @@ onBeforeUnmount(() => { snapshotDraft(projectId.value); alive = false; generatio
       <div v-if="reviewLayout === 'focus' && filteredGroups.length" class="question-navigation"><button class="btn" :disabled="focusedGroupIndex <= 0" @click="moveQuestion(-1)">{{ w('previousQuestion') }}</button><span aria-live="polite">{{ w('questionPosition') }} {{ focusedGroupIndex + 1 }} / {{ filteredGroups.length }}</span><button class="btn" :disabled="focusedGroupIndex >= filteredGroups.length - 1" @click="moveQuestion(1)">{{ w('nextQuestion') }}</button></div>
       <section v-for="group in displayedGroups" :id="`group-${group.id}`" :key="group.id" class="flow-card input-group" :data-group="group.id">
         <div class="card-head"><h3><span class="group-number">{{ groupNumber(group) }}</span>{{ l(group.label) }}</h3><span class="state" :class="groupState(group)">{{ w(groupState(group)) }}</span></div><p v-if="group.description" class="hint">{{ l(group.description) }}</p>
+        <details v-if="!graphMode && group.id === 'contractType' && variableMap.get('foundationIncluded')?.value" class="condition-note" data-legacy-foundation-answer><summary>{{ phrase('旧版基础工程回答（仅参考）','Earlier foundation answer (reference only)') }}</summary><p>{{ phrase('原答案已保留，不会自动用于 NTT 第 10 条。请核对完整联合合约条件。','The earlier answer is retained and is not applied to NTT clause 10. Review the complete combined-contract condition.') }} {{ variableMap.get('foundationIncluded')?.value }}</p><blockquote v-if="variableMap.get('foundationIncluded')?.source">{{ variableMap.get('foundationIncluded')?.source }}</blockquote><p v-if="variableMap.get('foundationIncluded')?.note">{{ variableMap.get('foundationIncluded')?.note }}</p></details>
         <div v-if="group.id === 'identity' && identityProposal" class="condition-note" data-identity-pending><p>{{ phrase('已采用的名称和编号与当前工作区不同。确认后将替换顶部项目身份，并使包内现有文稿失效；重新生成后采用新身份。', 'The adopted name and number differ from this workspace. Confirm to replace the topbar identity and invalidate existing package drafts, then regenerate them with the new identity.', '已採用名稱及編號與目前工作區不同。確認後將替換頂部項目身分，並使包內現有文稿失效；重新產生後採用新身分。') }}</p><button type="button" class="btn" data-review-project-identity :disabled="!!busy" @click="openIdentityConfirmation">{{ phrase('核对并应用项目身份', 'Review and apply project identity', '核對並套用項目身分') }}</button></div>
-        <article v-for="field in visibleFields(group)" :id="`field-${field.key}`" :key="field.key" class="variable" :class="{ 'source-selected': readingOpen && readingKey === field.key }" :data-variable="field.key"><div class="variable-head"><button class="btn text-link" :data-open-template="field.key" :disabled="!!busy" @click="openReading(field)">{{ w('locateTemplate') }}</button><span class="state" :class="state(field)">{{ dirty(field) ? w('unsaved') : w(state(field)) }}</span><button v-if="variableMap.get(field.key)?.reviewRequired" class="btn soft" :disabled="!!busy" @click="adopt(field)">{{ w('reviewed') }}</button><button v-else-if="state(field) === 'suggested'" class="btn soft" :disabled="!!busy" @click="adopt(field)">{{ w('adoptSuggested') }}</button></div><DraftingInputField :field="field" :value="values[field.key]" :values="values" :locale="store.locale" :row-identity-key="graphMode?'_itemId':'id'" :multiline-text="graphMode" :trace="trace" :disabled="inputDisabled(field)" @update="update(field, $event)"><template #actions><div class="field-save-actions"><button type="button" class="btn primary" :data-save-input="field.key" :disabled="!!busy || !dirty(field) || applicability(field.condition, values) === 'no'" @click="saveInput(field)">{{ w('saveInput') }}</button><span v-if="inputSaveStatus(field)" class="field-save-feedback" :class="{ failed: inputSaveStates[field.key] === 'failed' }" :data-input-save-status="field.key" role="status" aria-live="polite">{{ w(inputSaveStatus(field)!) }}</span></div></template></DraftingInputField><label v-if="graphMode && field.kind === 'text'" class="explicit-empty-choice"><input type="checkbox" :checked="!!intentionalEmpty[field.key]" :data-explicit-empty="field.key" :disabled="inputDisabled(field)" @change="toggleEmpty(field, ($event.target as HTMLInputElement).checked)">{{ phrase('明确留空（仍需理由并保存）', 'Intentionally blank (reason and save required)') }}</label><label v-if="variableMap.get(field.key)?.graphRevisionId && dirty(field)" class="manual-adoption-note">{{ phrase('人工采用理由', 'Reason for adopting a manual value') }}<textarea v-model="manualNotes[field.key]" :disabled="!!busy" :data-manual-note="field.key" rows="2" /></label><p v-if="derivedInput(field)" class="hint">{{ w('durationDerived') }}</p><p v-if="['contractPeriodMonths', 'periodAtLeast39Months'].includes(field.key) && durationConflict" class="condition-note">{{ w('durationConflict') }}</p><p v-if="applicability(field.condition, values) === 'unknown'" class="condition-note">{{ w('prerequisite') }}</p><p v-if="validationIssue(field, values[field.key]) && validationIssue(field, values[field.key]) !== 'missing'" class="condition-note">{{ w(validationIssue(field, values[field.key])!) }}</p><p v-if="['siteInspectionStartDate', 'siteInspectionEndDate'].includes(field.key) && reversedSiteDates(values)" class="condition-note">{{ w('reversedDates') }}</p><p v-if="variableMap.get(field.key)?.validationIssue" class="condition-note">{{ variableMap.get(field.key)?.validationIssue }}</p><details class="field-evidence"><summary>{{ w('sourceDetails') }}</summary><blockquote v-if="variableMap.get(field.key)?.source">{{ variableMap.get(field.key)?.source }}</blockquote><p v-else class="hint">{{ w('noSource') }}</p><p v-if="variableMap.get(field.key)?.note" class="hint raw-text">{{ variableMap.get(field.key)?.note }}</p><div v-for="(candidate, candidateIndex) in variableMap.get(field.key)?.candidates ?? []" :key="candidateIndex" class="candidate"><strong>{{ candidate.fileName || w('candidates') }}</strong><DraftingValueDisplay :field="field" :value="candidate.value" :locale="store.locale" /><blockquote>{{ candidate.sourceQuote }}</blockquote><p class="hint raw-text">{{ candidate.reason }}</p><button class="btn" :disabled="!!busy" @click="adopt(field, candidateIndex)">{{ w('adoptCandidate') }}</button></div><p v-for="target in field.affects ?? []" :key="`${target.document}-${target.clause}`" class="hint">{{ target.document }} {{ target.clause }} · {{ target.paragraphs }}</p></details></article>
+        <article v-for="field in visibleFields(group)" :id="`field-${field.key}`" :key="field.key" class="variable" :class="{ 'source-selected': readingOpen && readingKey === field.key }" :data-variable="field.key"><div class="variable-head"><button class="btn text-link" :data-open-template="field.key" :disabled="!!busy" @click="openReading(field)">{{ w('locateTemplate') }}</button><span class="state" :class="state(field)">{{ dirty(field) ? w('unsaved') : w(state(field)) }}</span><button v-if="variableMap.get(field.key)?.reviewRequired" class="btn soft" :disabled="!!busy || incompleteAdoption(field)" @click="adopt(field)">{{ w('reviewed') }}</button><button v-else-if="state(field) === 'suggested'" class="btn soft" :disabled="!!busy || incompleteAdoption(field)" @click="adopt(field)">{{ w('adoptSuggested') }}</button></div><div v-if="canConfirmManualValue(field)" class="condition-note" data-confirm-manual-value><p>{{ phrase('已保存的人工值需要重新核对；不完整候选保留供参考。填写理由后可确认当前人工值。', 'The saved manual value needs review; incomplete candidates remain available for reference. Give a reason to confirm the current manual value.') }}</p><button type="button" class="btn" :disabled="inputDisabled(field) || !manualNotes[field.key]?.trim()" @click="confirmManualValue(field)">{{ phrase('确认当前人工值', 'Confirm current manual value') }}</button></div><DraftingInputField :field="field" :value="values[field.key]" :values="conditionValues" :untrusted="graphMode && conditionValues[field.key] === null" :locale="store.locale" :row-identity-key="graphMode?'_itemId':'id'" :multiline-text="graphMode" :trace="trace" :disabled="inputDisabled(field)" @update="update(field, $event)"><template #actions><div class="field-save-actions"><button type="button" class="btn primary" :data-save-input="field.key" :disabled="!!busy || !dirty(field) || applicability(field.condition, conditionValues) === 'no'" @click="saveInput(field)">{{ w('saveInput') }}</button><span v-if="inputSaveStatus(field)" class="field-save-feedback" :class="{ failed: inputSaveStates[field.key] === 'failed' }" :data-input-save-status="field.key" role="status" aria-live="polite">{{ w(inputSaveStatus(field)!) }}</span></div></template></DraftingInputField><label v-if="graphMode && field.kind === 'text'" class="explicit-empty-choice"><input type="checkbox" :checked="!!intentionalEmpty[field.key]" :data-explicit-empty="field.key" :disabled="inputDisabled(field)" @change="toggleEmpty(field, ($event.target as HTMLInputElement).checked)">{{ phrase('明确留空（仍需理由并保存）', 'Intentionally blank (reason and save required)') }}</label><label v-if="variableMap.get(field.key)?.graphRevisionId && (dirty(field) || canConfirmManualValue(field))" class="manual-adoption-note">{{ phrase('人工采用理由', 'Reason for adopting a manual value') }}<textarea v-model="manualNotes[field.key]" :disabled="!!busy" :data-manual-note="field.key" rows="2" /></label><p v-if="derivedInput(field)" class="hint">{{ w('durationDerived') }}</p><p v-if="['contractPeriodMonths', 'periodAtLeast39Months'].includes(field.key) && durationConflict" class="condition-note">{{ w('durationConflict') }}</p><p v-if="field.condition?.reviewRequired" class="condition-note" data-applicability-review-required>{{ phrase('变量适用条件已失效，请返回图谱重新核对；现有答案保留。', 'The applicability condition needs review in the graph; the existing answer is retained.') }}</p><p v-else-if="applicability(field.condition, conditionValues) === 'unknown'" class="condition-note">{{ w('prerequisite') }}</p><p v-if="validationIssue(field, values[field.key]) && validationIssue(field, values[field.key]) !== 'missing'" class="condition-note">{{ w(validationIssue(field, values[field.key])!) }}</p><p v-if="['siteInspectionStartDate', 'siteInspectionEndDate'].includes(field.key) && reversedSiteDates(values)" class="condition-note">{{ w('reversedDates') }}</p><p v-if="variableMap.get(field.key)?.validationIssue" class="condition-note">{{ variableMap.get(field.key)?.validationIssue }}</p><details class="field-evidence"><summary>{{ w('sourceDetails') }}</summary><blockquote v-if="variableMap.get(field.key)?.source">{{ variableMap.get(field.key)?.source }}</blockquote><p v-else-if="variableMap.get(field.key)?.adoptedSourceCount" class="hint">{{ phrase('已采用多份沟通资料的合并结果，原来源已保留。', 'The adopted value combines correspondence sources; the original sources are retained.') }} · {{ variableMap.get(field.key)?.adoptedSourceCount }}</p><p v-else class="hint">{{ w('noSource') }}</p><p v-if="variableMap.get(field.key)?.note" class="hint raw-text">{{ variableMap.get(field.key)?.note }}</p><div v-for="(candidate, candidateIndex) in variableMap.get(field.key)?.candidates ?? []" :key="candidateIndex" class="candidate"><strong>{{ candidate.fileName || w('candidates') }}</strong><DraftingValueDisplay :field="field" :value="candidate.value" :locale="store.locale" /><blockquote>{{ candidate.sourceQuote }}</blockquote><p class="hint raw-text">{{ candidate.reason }}</p><p v-if="candidate.completenessStatus === 'needs_review'" class="condition-note" data-candidate-incomplete>{{ phrase('来源范围尚未核实完整；请对照原件补齐后在变量中人工填写并保存。', 'The source scope is not verified as complete; complete it against the source and enter it manually.') }}</p><button class="btn" :disabled="!!busy || incompleteAdoption(field, candidateIndex)" @click="adopt(field, candidateIndex)">{{ w('adoptCandidate') }}</button></div><p v-for="target in field.affects ?? []" :key="`${target.document}-${target.clause}`" class="hint">{{ target.document }} {{ target.clause }} · {{ target.paragraphs }}</p></details></article>
         <DraftingBillDistribution v-if="group.id === 'bills'" :values="values" :locale="store.locale" /><p v-if="visibleFields(group).length !== group.fields.length" class="hint">{{ w('hiddenFields') }}</p><details v-if="relatedActions(group).length" class="clause-details"><summary>{{ w('affected') }}</summary><div v-for="item in relatedActions(group)" :key="item.id" class="clause-action" :data-action-id="item.id"><div class="card-head"><strong>{{ item.document }} {{ item.clause }}</strong><span class="state">{{ w((item.action in { retain: 1, amend: 1, insert: 1, delete: 1, not_used: 1, pending: 1, not_adopted: 1 } ? item.action : 'pending') as DraftWord) }}</span></div><p class="hint">{{ item.paragraphs }}</p><p>{{ l(item.detail) }}</p><details v-if="item.scopeResults"><summary>{{ phrase('逐项明细的条件判断', 'Condition result for each list item') }}</summary><ol><li v-for="result in item.scopeResults" :key="result.itemId ?? result.rowIndex">{{ phrase('第', 'Item ') }} {{ result.rowIndex + 1 }} {{ result.itemId ? ' · '+result.itemId : '' }} · {{ result.matches === true ? phrase('满足条件', 'Matches') : result.matches === false ? phrase('不满足条件', 'Does not match') : phrase('仍不确定', 'Unknown') }}</li></ol></details><details v-if="item.sourceWarning" class="source-warning"><summary>{{ w('sourceWarning') }}</summary><p class="condition-note">{{ l(item.sourceWarning) }}</p></details><pre v-if="item.value">{{ item.value }}</pre><button class="btn text-link" :disabled="!!busy" @click="openReading(undefined, item)">{{ w('locateTemplate') }}</button><button class="btn text-link" :disabled="!!busy" @click="openTarget(item)">{{ w('exactEdit') }}</button></div></details><footer v-if="group.fields.some(dirty)" class="flow-actions"><button class="btn" :disabled="!!busy" @click="discard(group)">{{ w('discard') }}</button><button class="btn primary" :disabled="!!busy" @click="saveGroup(group)">{{ w('save') }}</button></footer>
       </section>
       </div></div>
       <footer class="flow-actions"><button class="btn" :disabled="!!busy" @click="move('inputs')">{{ w('backSources') }}</button><button class="btn" :disabled="!!busy || !dirtyInputs" @click="saveGroup()">{{ w('saveAll') }}</button><button class="btn primary" :disabled="!!busy || !allTemplates || generationSourceBlocked" @click="generate">{{ w('generate') }}</button></footer><p class="hint" data-generated-output-language>{{ w('englishOutput') }}</p><p class="hint">{{ w(graphMode ? 'reviewedGenerateNote' : 'generateNote') }}</p><p v-if="!allTemplates" class="condition-note">{{ w('missingTemplates') }}</p>
-      <details v-if="plan?.unresolved.length" class="flow-card"><summary>{{ w('unresolved') }} ({{ plan.unresolved.length }})</summary><DraftingUnresolvedItems :items="plan.unresolved" :fields="fields" :values="values" :actions="plan.actions" :locale="store.locale" @input="goInput" @target="openTarget" /></details>
+      <details v-if="plan?.unresolved.length" class="flow-card"><summary>{{ w('unresolved') }} ({{ plan.unresolved.length }})</summary><DraftingUnresolvedItems :items="plan.unresolved" :fields="fields" :values="conditionValues" :actions="plan.actions" :locale="store.locale" @input="goInput" @target="openTarget" /></details>
     </div>
     <section v-if="projectId && step === 'preview'" ref="documentWorkspace" class="flow-card preview-card" :class="{ 'preview-card--immersive': immersiveDocument }" data-document-workspace :role="immersiveDocument ? 'dialog' : undefined" :aria-modal="immersiveDocument ? true : undefined" :aria-label="w('documentWorkspace')" tabindex="-1">
       <div class="card-head">
@@ -865,7 +975,7 @@ onBeforeUnmount(() => { snapshotDraft(projectId.value); alive = false; generatio
       <p v-if="activeDocument?.stale || dirtyInputs" class="review-note" data-draft-stale-status role="status">{{ w('stale') }} <span v-if="activeDocument?.stale">{{ w('staleReadOnly') }}</span></p>
       <p v-if="immersiveDocument && busy" class="flow-status" role="status">{{ busy }}</p><p v-if="immersiveDocument && error" class="flow-error" role="alert">{{ error }}</p>
       <div class="document-surface">
-      <DraftingDocumentWorkspace :project-id="projectId" :file-key="activeFile" :document="activeDocument" :dirty="documentDirty" :editing="editingDocument" :locale="store.locale" :immersive="immersiveDocument" :fields="readingFields" :values="values" :variables="variables" :actions="plan?.actions ?? []" :field-states="readingStates" :dirty-keys="readingDirtyKeys" :trace="trace" :graph-navigation="graphNavigation" :disabled="!!busy" :stale-notice-presented="true" @input="goInput" @file="chooseBoundFile">
+      <DraftingDocumentWorkspace :project-id="projectId" :file-key="activeFile" :document="activeDocument" :dirty="documentDirty" :editing="editingDocument" :locale="store.locale" :immersive="immersiveDocument" :active="routeActive" :fields="readingFields" :values="values" :variables="variables" :actions="plan?.actions ?? []" :field-states="readingStates" :dirty-keys="readingDirtyKeys" :trace="trace" :graph-navigation="graphNavigation" :disabled="!!busy" :stale-notice-presented="true" @input="goInput" @file="chooseBoundFile">
         <DraftingBodyEditor v-if="activeDocument?.blocks" :blocks="activeDocument.blocks" :cleanup-scopes="activeDocument.bodyCleanupScopes" :draft="bodyDraft" :locale="store.locale" :readonly="!documentAccess.editable" :disabled="!!busy" :immersive="immersiveDocument" @text="editBody" @insert="insertBody" @remove="removeBody" @scope-remove="removeBodyScope" />
         <pre v-else class="raw-text">{{ documentText }}</pre>
       </DraftingDocumentWorkspace>
@@ -878,13 +988,13 @@ onBeforeUnmount(() => { snapshotDraft(projectId.value); alive = false; generatio
       <header class="card-head"><h3>{{ w('templateReading') }}</h3><button class="btn" @click="closeReading">{{ w('close') }}</button></header>
       <DraftingTemplatePreview :project-id="projectId" :file-key="readingFile" :source-available="readingSourceAvailable" :locale="store.locale" :fields="readingFields" :values="values" :variables="variables" :actions="plan?.actions ?? []" :selected-key="readingKey" :selected-action-id="readingActionId" :field-states="readingStates" :dirty-keys="readingDirtyKeys" :disabled="!!busy" @select="selectReading" @edit="editReading" @input="selectReading" @target="readingTarget" @locate="locateReadingTarget" @file="changeReadingFile" @upload="goTemplateUpload" />
     </aside>
-    <DraftingBusinessGraph v-if="graphOpen" :project-id="projectId" :catalog="catalog" :plan="plan" :values="values" :variables="variables" :field-states="readingStates" :dirty-keys="readingDirtyKeys" :locale="store.locale" :disabled="!!busy || documentDirty" @input="graphInput" @location="graphLocation" @close="closeGraph()" />
+    <DraftingBusinessGraph v-if="graphOpen" :project-id="projectId" :catalog="catalog" :plan="plan" :values="values" :condition-values="conditionValues" :variables="variables" :field-states="readingStates" :dirty-keys="readingDirtyKeys" :locale="store.locale" :disabled="!!busy || documentDirty" @input="graphInput" @location="graphLocation" @close="closeGraph()" />
     <AppModal :open="!!identityConfirmation" :title="phrase('是否替换当前项目身份？', 'Replace the current project identity?', '是否替換目前項目身分？')" @close="!busy && (identityConfirmation = undefined)">
       <template v-if="identityConfirmation"><p>{{ phrase('以下值已经采用。只有点击确认才会替换工作区名称与合约编号，并贯穿此项目包。', 'These values are already adopted. Confirm to replace this workspace name and contract number across the project package.', '以下值已經採用。只有按下確認才會替換工作區名稱與合約編號，並貫穿此項目包。') }}</p><table data-project-identity-comparison><thead><tr><th></th><th>{{ phrase('当前', 'Current', '目前') }}</th><th>{{ phrase('拟采用', 'Proposed', '擬採用') }}</th></tr></thead><tbody><tr><th>{{ phrase('项目名称', 'Project name', '項目名稱') }}</th><td>{{ identityConfirmation.currentName || '—' }}</td><td>{{ identityConfirmation.name }}</td></tr><tr><th>{{ phrase('合约编号', 'Contract number', '合約編號') }}</th><td>{{ identityConfirmation.request.expectedProjectIdentity.contractNo || '—' }}</td><td>{{ identityConfirmation.number }}</td></tr></tbody></table><p class="hint">{{ phrase('确认后现有文稿须重新生成。来源文件和候选证据仍保留。', 'Existing drafts must be regenerated after confirmation. Source files and candidate evidence remain available.', '確認後現有文稿須重新產生。來源文件與候選證據仍保留。') }}</p><p v-if="identityError" role="alert" data-identity-error>{{ identityError }}</p></template>
       <template #footer><button class="btn" :disabled="!!busy" data-cancel-project-identity @click="identityConfirmation = undefined">{{ phrase('暂不替换', 'Keep current identity', '暫不替換') }}</button><button v-if="identityError" class="btn" :disabled="!!busy" data-reload-project-identity @click="reloadIdentityConfirmation">{{ phrase('刷新并核对', 'Reload and review', '重新整理並核對') }}</button><button class="btn primary" :disabled="!!busy || !identityConfirmation" data-confirm-project-identity @click="confirmIdentity">{{ phrase('确认替换项目身份', 'Confirm project identity', '確認替換項目身分') }}</button></template>
     </AppModal>
     <AppModal :open="!!previewEditField" :title="w('editPreviewValue')" @close="previewEditKey = ''">
-      <template v-if="previewEditField"><span class="state">{{ dirty(previewEditField) ? w('unsavedValue') : w(state(previewEditField)) }}</span><p class="hint">{{ w('previewEditNote') }}</p><DraftingInputField :field="previewEditField" :value="values[previewEditField.key]" :values="values" :locale="store.locale" id-prefix="preview-edit" :row-identity-key="graphMode?'_itemId':'id'" :multiline-text="graphMode" :disabled="inputDisabled(previewEditField)" @update="update(previewEditField, $event)" /><p v-if="derivedInput(previewEditField)" class="hint">{{ w('durationDerived') }}</p><p v-if="error" class="flow-error" role="alert">{{ error }}</p><div class="flow-actions"><button class="btn" :disabled="!!busy" @click="previewEditKey = ''">{{ w('close') }}</button><button v-if="previewAdoptable(previewEditField)" class="btn" :disabled="!!busy" @click="adoptReading">{{ w('adoptSuggested') }}</button><button class="btn primary" :data-preview-save="previewEditField.key" :disabled="!!busy || !dirty(previewEditField) || applicability(previewEditField.condition, values) === 'no'" @click="saveReading">{{ w('save') }}</button></div></template>
+      <template v-if="previewEditField"><span class="state">{{ dirty(previewEditField) ? w('unsavedValue') : w(state(previewEditField)) }}</span><p class="hint">{{ w('previewEditNote') }}</p><p v-if="incompleteAdoption(previewEditField)" class="condition-note" data-preview-candidate-incomplete>{{ phrase('候选来源范围尚未核实完整；请对照原件补齐后手动保存。', 'The candidate scope is not verified as complete; complete it against the source and save manually.') }}</p><DraftingInputField :field="previewEditField" :value="values[previewEditField.key]" :values="conditionValues" :untrusted="graphMode && conditionValues[previewEditField.key] === null" :locale="store.locale" id-prefix="preview-edit" :row-identity-key="graphMode?'_itemId':'id'" :multiline-text="graphMode" :disabled="inputDisabled(previewEditField)" @update="update(previewEditField, $event)" /><p v-if="derivedInput(previewEditField)" class="hint">{{ w('durationDerived') }}</p><p v-if="error" class="flow-error" role="alert">{{ error }}</p><div class="flow-actions"><button class="btn" :disabled="!!busy" @click="previewEditKey = ''">{{ w('close') }}</button><button v-if="previewAdoptable(previewEditField)" class="btn" :disabled="!!busy" @click="adoptReading">{{ w('adoptSuggested') }}</button><button class="btn primary" :data-preview-save="previewEditField.key" :disabled="!!busy || !dirty(previewEditField) || applicability(previewEditField.condition, conditionValues) === 'no'" @click="saveReading">{{ w('save') }}</button></div></template>
     </AppModal>
     <AppModal :open="traceOpen" :title="w('trace')" wide @close="traceOpen = false"><DraftingExtractionReport :trace="trace" :project-id="projectId" :locale="store.locale" :open="traceOpen" /></AppModal>
     <AppModal :open="!!removalItem" :title="w('removeCorrespondence')" @close="removalItem = null">

@@ -5,10 +5,27 @@ import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.jdbc.datasource.init.ResourceDatabasePopulator;
+import org.flywaydb.core.Flyway;
 import static org.junit.jupiter.api.Assertions.*;
 
 /** Executes V23 exactly in H2 MySQL mode; does not claim production MySQL/Flyway acceptance. */
 class DraftTemplateGraphMigrationTest {
+    @Test void flywayResolvesExistingMigrationsAlongsideV30(){
+        String url="jdbc:h2:mem:baseline_flyway_"+UUID.randomUUID()+";MODE=MySQL;DATABASE_TO_LOWER=TRUE;OLD_INFORMATION_SCHEMA=TRUE;NON_KEYWORDS=VALUE";
+        org.flywaydb.core.api.MigrationInfo[] migrations=Flyway.configure().dataSource(url,"sa","").locations("classpath:db/migration").load().info().all();
+        assertEquals(1,java.util.Arrays.stream(migrations).filter(item->item.getVersion()!=null&&"28".equals(item.getVersion().getVersion())).count());
+        assertEquals(1,java.util.Arrays.stream(migrations).filter(item->item.getVersion()!=null&&"29".equals(item.getVersion().getVersion())).count());
+        assertEquals(1,java.util.Arrays.stream(migrations).filter(item->item.getVersion()!=null&&"30".equals(item.getVersion().getVersion())).count());
+    }
+    @Test void v30CreatesIndependentBaselineStorage()throws Exception{
+        try(Connection connection=DriverManager.getConnection("jdbc:h2:mem:baseline_migration_"+UUID.randomUUID()+";MODE=MySQL;DATABASE_TO_LOWER=TRUE","sa","");Statement sql=connection.createStatement()){
+            new ResourceDatabasePopulator(new ClassPathResource("db/migration/V30__draft_template_baseline.sql")).populate(connection);
+            sql.execute("INSERT INTO draft_template_baseline(id,edition_sha256,origin_project_id,origin_revision_id,field_ids_json,graph_json,graph_sha256,created_at) VALUES ('b','edition','old','revision','[]','{}','digest',CURRENT_TIMESTAMP)");
+            sql.execute("INSERT INTO draft_template_baseline_source(id,baseline_id,file_key,source_sha256) VALUES ('b:NTT','b','NTT','source-hash')");
+            assertThrows(SQLException.class,()->sql.execute("INSERT INTO draft_template_baseline_source(id,baseline_id,file_key,source_sha256) VALUES ('b:NTT2','b','NTT','other')"));
+            try(ResultSet row=sql.executeQuery("SELECT graph_json,graph_sha256 FROM draft_template_baseline WHERE id='b'")){assertTrue(row.next());assertEquals("{}",row.getString(1));assertEquals("digest",row.getString(2));}
+        }
+    }
     @Test void exactSqlPreservesExistingRowsAndEnforcesOneBindingPerProjectInput()throws Exception{
         try(Connection connection=DriverManager.getConnection("jdbc:h2:mem:review_migration_"+UUID.randomUUID()+";MODE=MySQL;DATABASE_TO_LOWER=TRUE","sa","");Statement sql=connection.createStatement()){
             sql.execute("CREATE TABLE source_document(id BIGINT PRIMARY KEY,file_name VARCHAR(512))");sql.execute("INSERT INTO source_document VALUES(1,'legacy-preserved.docx')");

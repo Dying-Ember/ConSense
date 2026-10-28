@@ -246,7 +246,8 @@ public class DraftingService {
         if(observation!=null||"sha_verified".equals(identity.getIdentityStatus()))result=documentParser.parseTemplate(expectedKey,upload.file.getOriginalFilename(),upload.bytes,observation,identity);
         else result=documentParser.parseTemplate(expectedKey,upload.file.getOriginalFilename(),upload.bytes);
         DraftTemplateRouting.bind(upload,result,expectedKey);
-        OerSourceMetadata.captureParsed(source,result);requireTemplateIdentity(source,expectedKey);
+        OerSourceMetadata.captureParsedIdentity(source,result);
+        requireTemplateIdentity(source,expectedKey);
     }
     private SourceDocument preflightTemplateIdentity(DraftTemplateRouting.Upload upload,String expectedKey) {
         if(upload.identitySource==null)upload.identitySource=knownTemplateSource(upload);
@@ -290,7 +291,9 @@ public class DraftingService {
             if(previous!=null){document.setId(previous.getId());document.setReviewRole(previous.getReviewRole());document.setDocumentScope(previous.getDocumentScope());}
             DocumentParser.ParsedDocument result=upload.parsed;
             document.setParseStatus(result.getParseStatus());document.setParseMessage(result.getMessage());document.setPageCount(result.getPageCount());document.setOcrUsed(result.isOcrUsed());
-            document.setTextContent(result.getText());document.setStructuredContentJson(JsonUtils.write(result.getBlocks()));document.setParseCoverageJson(JsonUtils.write(result.getCoverage()));
+            document.setTextContent(result.getText());
+            document.setStructuredContentJson(JsonUtils.write(result.getBlocks()));
+            document.setParseCoverageJson(JsonUtils.write(result.getCoverage()));
             com.consense.service.sources.OerSourceMetadata.captureParsed(document,result);
             SourceDocument saved=sourceDocumentRepository.save(document);
             if(previousHash==null||!previousHash.equals(DraftAdoption.sourceHash(document)))markTemplateReview(projectId,upload.fileKey);return saved;
@@ -557,6 +560,7 @@ public class DraftingService {
         }
     }
     public Map<String,Object> baselineCatalog(String projectId) {projectService.require(projectId);return DraftCatalogAlignment.catalog();}
+    public Map<String,Object> baselineReference(String projectId,String key) {projectService.require(projectId);return DraftCatalogAlignment.reference(key);}
 
     public Map<String,Object> catalog(String projectId) {
         projectService.require(projectId);if(!reviewedRules(projectId))return DraftBusinessRules.catalog();
@@ -628,6 +632,7 @@ public class DraftingService {
         Map<String,Object> values=DraftBusinessRules.asMap(result.get("effectiveValues"));if(effective==null)values.remove("contractTitle");else values.put("contractTitle",effective);
         for(String part:Arrays.asList("number","title"))if(!DraftBusinessRules.answered(DraftBusinessRules.asMap(effective).get(part)))unresolved(result).add(DraftBusinessRules.map("id","input-contractTitle-"+part,"kind","InputMissing","inputKeys",Collections.singletonList("contractTitle"),"message",LocalizedText.same("Complete the adopted project "+part+"; temporary project metadata is not a source fact.")));
         if(review)unresolved(result).add(DraftBusinessRules.map("id","review-contractTitle","kind","input_review","inputKeys",Collections.singletonList("contractTitle"),"message",LocalizedText.same("Project identity or its source changed. Review the adopted value.")));
+        if(Boolean.TRUE.equals(result.remove("fixedRuleBaselinePresent")))DraftExecutionBridge.prepare(templateGraphService.compilationGraph(result),result);
         result.put("snapshotId",snapshotId(projectId,patches));result.put("savedSnapshotId",snapshotId(projectId,null));result.put("preview",patches!=null);return result;
     }
     private void requireIdentitySources(String projectId,DraftVariable variable,List<Map<String,Object>> bindings) {
@@ -1137,6 +1142,9 @@ public class DraftingService {
         String snapshot=(String)prepared.get("snapshotId");
         Map<String,DraftArtifact> revisions=new LinkedHashMap<>();Map<String,String> contents=new LinkedHashMap<>();Map<String,DraftTocFinalizer.Result> finalized=new LinkedHashMap<>();
         Map<String,DocxTemplateEditor.DocxEditResult> compiled=new LinkedHashMap<>();Map<String,List<Map<String,Object>>> compiledBindings=new LinkedHashMap<>();
+        Map<String,Object> deliveryGraph=reviewedRules(projectId)?templateGraphService.compilationGraph(prepared):null;
+        boolean fixedBridge=deliveryGraph!=null&&DraftReviewGraph.state(deliveryGraph).containsKey("fixedRuleBaseline");
+        List<DraftExecutionBridge.PreparedDocument> bridgeDocuments=new ArrayList<>();
         // Compile/validate every package before any current document pointer changes.
         for(String key:DraftBlueprint.draftFileKeys()) {
             SourceDocument template=requireTemplate(projectId,key);
@@ -1151,13 +1159,18 @@ public class DraftingService {
             DocxTemplateEditor.NativeLayoutPlan nativeLayout=DraftNativeLayout.plan(sourceIndex,key,properties.getDrafting().getRendererKind());
             try {nativeLayout=DraftNativeIdentity.attach(sourceIndex,fresh.getCoverage().getNativeDocxSections(),key,prepared,properties.getDrafting().getRendererKind(),nativeLayout);}
             catch(IllegalArgumentException|IllegalStateException invalid){throw new BizException(4012,"NATIVE_STORY_PLAN_REVIEW_REQUIRED: "+invalid.getMessage());}
+            if(fixedBridge){try{bridgeDocuments.add(DraftExecutionBridge.prepareDocument(original,key,sourceIndex,deliveryGraph,prepared,DraftDocumentBindings.bookmarkNames(sourceBindings),nativeLayout));}catch(DocxTemplateEditor.EditException unsafe){throw new BizException(4012,unsafe.getCode()+": "+unsafe.getOperationId());}compiledBindings.put(key,sourceBindings);continue;}
             DocxTemplateEditor.DocxEditResult generated;
-            try {generated=reviewedRules(projectId)?templateGraphService.compile(original,key,prepared,DraftDocumentBindings.bookmarkNames(sourceBindings),nativeLayout):DraftFormattedRules.compile(original,key,prepared,DraftDocumentBindings.bookmarkNames(sourceBindings),nativeLayout);}
+            try {generated=deliveryGraph!=null?DraftReviewGraph.compile(original,key,deliveryGraph,prepared,DraftDocumentBindings.bookmarkNames(sourceBindings),nativeLayout,!DraftReviewGraph.list(prepared.get("unresolved")).isEmpty()):DraftFormattedRules.compile(original,key,prepared,DraftDocumentBindings.bookmarkNames(sourceBindings),nativeLayout);}
             catch(DocxTemplateEditor.EditException unsafe){throw new BizException(4012,unsafe.getCode()+": "+unsafe.getOperationId());}
             List<Map<String,Object>> bindings=DraftDocumentBindings.generated(sourceBindings,generated);
             compiled.put(key,generated);compiledBindings.put(key,bindings);
         }
-        Map<String,Object> deliveryGraph=reviewedRules(projectId)?templateGraphService.graph(projectId):null;
+        if(fixedBridge){
+            try{compiled.putAll(DraftExecutionBridge.compileAll(bridgeDocuments,deliveryGraph,prepared));}
+            catch(DocxTemplateEditor.EditException unsafe){throw new BizException(4012,unsafe.getCode()+": "+unsafe.getOperationId());}
+            compiledBindings.replaceAll((key,sourceBindings)->DraftDocumentBindings.generated(sourceBindings,compiled.get(key)));
+        }
         for(String key:DraftBlueprint.draftFileKeys()) {
             List<String> outstanding=deliveryGraph==null?Collections.emptyList():DraftIncompleteNotice.outstanding(deliveryGraph,prepared,key);
             DocxTemplateEditor.DocxEditResult generated=compiled.get(key);List<Map<String,Object>> bindings=compiledBindings.get(key);
@@ -1335,7 +1348,7 @@ public class DraftingService {
         if(!"application/vnd.openxmlformats-officedocument.wordprocessingml.document".equals(source.getContentType()))throw new BizException(4012,"EDITABLE_DOCX_REQUIRED: Native template bindings require DOCX.");
         DocxTemplateEditor.TemplateIndex sourceIndex=new DocxTemplateEditor().inspect(original);
         List<Map<String,Object>> rows=DraftDocumentBindings.source(fileKey,sourceIndex);
-        DraftDocumentBindings.associateTargets(fileKey,sourceIndex,reviewedRules(projectId)?templateGraphService.plan(projectId,null):DraftBusinessRules.plan(Collections.emptyMap()),rows);
+        DraftDocumentBindings.associateTargets(fileKey,sourceIndex,reviewedRules(projectId)?reviewedPlan(projectId,null):DraftBusinessRules.plan(Collections.emptyMap()),rows);
         DocxTemplateEditor.DocxEditResult workingResult=DraftDocumentBindings.sourceWorkingCopyResult(original,rows,DraftNativeLayout.plan(original,fileKey,properties.getDrafting().getRendererKind()));byte[] working=workingResult.getDocxBytes();
         String workingHash=DraftPdfConverter.sha256(working);
         DocumentBindingsVO result=DraftDocumentBindings.locate(DraftDocumentBindings.bundle(fileKey,"source",sourceHash,null,workingHash,DraftDocumentBindings.reconcile(rows,new DocxTemplateEditor().inspect(working),false)),currentPdfArtifact(workingHash));result.setNativeLayout(DraftNativeLayout.info(fileKey,properties.getDrafting().getRendererKind(),workingResult));return result;
@@ -1565,7 +1578,8 @@ public class DraftingService {
     public JsonNode templateEvidence(String projectId,String fileKey) {
         projectService.require(projectId);
         if(!TEMPLATE_KEYS.contains(fileKey))throw new BizException(4009,"Unknown template key: "+fileKey);
-        SourceDocument source=reviewedRules(projectId)?templateGraphService.selectedTemplate(projectId,fileKey):sourceDocumentRepository.findFirstByProjectIdAndFileKeyAndCategory(projectId,fileKey,SourceDocument.CATEGORY_STANDARD_TEMPLATE).orElseThrow(()->new BizException(4011,"SOURCE_NOT_UPLOADED: "+fileKey));
+        if(reviewedRules(projectId))return templateGraphService.selectedTemplateEvidence(projectId,fileKey);
+        SourceDocument source=sourceDocumentRepository.findFirstByProjectIdAndFileKeyAndCategory(projectId,fileKey,SourceDocument.CATEGORY_STANDARD_TEMPLATE).orElseThrow(()->new BizException(4011,"SOURCE_NOT_UPLOADED: "+fileKey));
         JsonNode coverage=JsonUtils.parse(source.getParseCoverageJson()),evidence=coverage.path("templateEvidence");
         if(evidence.isMissingNode()||evidence.isNull())throw new BizException(4012,"TEMPLATE_EVIDENCE_MISSING: This saved template has no analysis; re-upload its original source explicitly.");
         if(source.getStoragePath()==null)throw new BizException(4012,"TEMPLATE_SOURCE_MISSING: The original asset is unavailable.");

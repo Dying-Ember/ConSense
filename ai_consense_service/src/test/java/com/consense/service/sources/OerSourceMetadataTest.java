@@ -72,6 +72,44 @@ class OerSourceMetadataTest {
         assertEquals("reference_standard",chunk.getSourcePurpose()); assertEquals(textHash,chunk.getSourceHash());
     }
 
+    @Test void templateArchiveReferencesOnlyIdenticalSavedBlocksAndRetainsIndependentBlocks() {
+        SourceDocument d=document();d.setCategory(SourceDocument.CATEGORY_STANDARD_TEMPLATE);d.setFileKey("SCC");
+        DocumentParser.ParsedDocument p=parsed(SHA);d.setStructuredContentJson(JsonUtils.write(p.getBlocks()));
+        OerSourceMetadata.capture(d,p,BYTES,routing("standard_template","SCC","standard"));
+        PdfPageEvidence page=JsonUtils.readList(d.getNativePdfEvidenceJson(),PdfPageEvidence.class).get(0);
+        assertEquals("structuredContent",page.getNativeBlocksRetainedIn());assertEquals(java.util.Collections.singletonList("body:1"),page.getNativeBlockIds());assertTrue(page.getNativeBlocks().isEmpty());
+        com.fasterxml.jackson.databind.JsonNode stored=JsonUtils.parse(d.getStructuredContentJson());
+        assertEquals(JsonUtils.mapper().valueToTree(p.getNativePdfEvidence().get(0).getNativeBlocks().get(0)),stored.get(0));
+        DocumentBlock independent=new DocumentBlock();independent.setId("body:1");independent.setPageNo(1);independent.setText("Distinct native observation");
+        p.getNativePdfEvidence().get(0).setNativeBlocks(java.util.Collections.singletonList(independent));
+        OerSourceMetadata.capture(d,p,BYTES,routing("standard_template","SCC","standard"));
+        PdfPageEvidence retained=JsonUtils.readList(d.getNativePdfEvidenceJson(),PdfPageEvidence.class).get(0);
+        assertNull(retained.getNativeBlockIds());assertEquals("Distinct native observation",retained.getNativeBlocks().get(0).getText());
+    }
+
+    @Test void temporaryParsedIdentityMatchesFinalIdentityWithoutBuildingAnArchive() {
+        SourceDocument temporary=document(),saved=document();temporary.setCategory(SourceDocument.CATEGORY_STANDARD_TEMPLATE);saved.setCategory(SourceDocument.CATEGORY_STANDARD_TEMPLATE);
+        DocumentParser.ParsedDocument p=parsed(SHA);
+        OerSourceMetadata.captureParsedIdentity(temporary,p);OerSourceMetadata.captureParsed(saved,p);
+        assertEquals(saved.getSourceSha256(),temporary.getSourceSha256());assertEquals(saved.getOerIdentityJson(),temporary.getOerIdentityJson());
+        assertNull(temporary.getNativePdfEvidenceJson());assertNotNull(saved.getNativePdfEvidenceJson());
+    }
+
+    @Test void templateArchiveCanRestoreEveryPageGlyphInItsOriginalOrder() {
+        SourceDocument d=document();d.setCategory(SourceDocument.CATEGORY_STANDARD_TEMPLATE);d.setFileKey("SCC");
+        DocumentParser.ParsedDocument parsed=parsed(SHA);DocumentBlock block=parsed.getBlocks().get(0);PdfPageEvidence page=parsed.getNativePdfEvidence().get(0);
+        PdfPageEvidence.PdfGlyph shared=new PdfPageEvidence.PdfGlyph();shared.setId("shared");shared.setUnicode("A");
+        PdfPageEvidence.PdfGlyph retained=new PdfPageEvidence.PdfGlyph();retained.setId("independent");retained.setUnicode("B");
+        block.setPdfGlyphs(java.util.Collections.singletonList(shared));page.setGlyphs(java.util.Arrays.asList(retained,shared));
+        d.setStructuredContentJson(JsonUtils.write(parsed.getBlocks()));OerSourceMetadata.capture(d,parsed,BYTES,routing("standard_template","SCC","standard"));
+        PdfPageEvidence stored=JsonUtils.readList(d.getNativePdfEvidenceJson(),PdfPageEvidence.class).get(0);
+        List<DocumentBlock> blocks=JsonUtils.readList(d.getStructuredContentJson(),DocumentBlock.class);
+        assertEquals("structuredContentAndPage",stored.getGlyphsRetainedIn());assertEquals(1,stored.getGlyphs().size());
+        assertEquals(page.getGlyphs(),OerSourceMetadata.templatePageGlyphs(stored,blocks));
+        blocks.get(0).setPdfGlyphs(java.util.Collections.emptyList());
+        assertThrows(IllegalArgumentException.class,()->OerSourceMetadata.templatePageGlyphs(stored,blocks));
+    }
+
     @Test void exact_template_identity_excludes_renamed_review_upload_but_remains_available_to_drafting() {
         SourceDocument d=document();
         OerSourceMetadata.capture(d,parsed(SHA),BYTES,routing("standard_template","SCT","standard"));

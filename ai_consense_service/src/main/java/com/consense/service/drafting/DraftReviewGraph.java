@@ -42,11 +42,22 @@ public final class DraftReviewGraph {
         Map<String,Set<String>> dependencies=new LinkedHashMap<>(),valueDependencies=new LinkedHashMap<>();
         for(Map<String,Object> node:byId.values())if(active(node)) {
             String id=text(node.get("id")),parent=text(node.get("parentId")); Set<String> refs=new LinkedHashSet<>(),valueRefs=new LinkedHashSet<>();
+            validateFactProjection(graph,node,byId);
             Set<String> declared=new HashSet<>();for(Object doc:list(node.get("docIds")))declared.add(text(doc));
             for(String group:Arrays.asList("sourceAnchors","editTargets","evidence"))for(Object raw:list(node.get(group))){String doc=text(map(raw).get("docId"));if(!doc.isEmpty()&&!declared.contains(doc))throw invalid("GRAPH_SOURCE_OUTSIDE_DECLARED_DOCUMENTS: "+id);}
             if(!parent.isEmpty()) {
                 requireNode(byId,parent); if(!set("record","list").contains(kind(byId.get(parent))))throw invalid("GRAPH_PARENT_NOT_A_GROUP: "+id);
                 if(!"list".equals(kind(byId.get(parent))))valueRefs.add(parent);
+            }
+            if(node.containsKey("applicability")) {
+                Map<String,Object> applicability=map(node.get("applicability"));
+                if(!input(node)||!parent.isEmpty()||!"fixed_catalog".equals(applicability.get("kind"))||!"all".equals(applicability.get("mode"))||!(applicability.get("confirmed") instanceof Boolean)||!(applicability.get("reason") instanceof String)||text(applicability.get("reason")).trim().isEmpty()||!(applicability.get("clauses") instanceof List)||list(applicability.get("clauses")).isEmpty())throw invalid("GRAPH_APPLICABILITY_INVALID: "+id);
+                boolean bound=applicabilityBindingValid(graph,node,byId);
+                for(Object raw:list(applicability.get("clauses"))) {
+                    Map<String,Object> clause=map(raw);String ref=text(clause.get("inputId"));
+                    if(ref.isEmpty()||text(clause.get("baselineKey")).isEmpty()||text(clause.get("operator")).isEmpty())throw invalid("GRAPH_APPLICABILITY_CLAUSE_INVALID: "+id);
+                    if(bound&&byId.containsKey(ref)&&active(byId.get(ref))){if(sourceCheck(byId.get(ref)))throw invalid("GRAPH_SOURCE_CHECK_NOT_A_VALUE: "+ref);refs.add(ref);valueRefs.add(ref);}
+                }
             }
             Set<String> cases=new HashSet<>();
             boolean rebind=Boolean.TRUE.equals(map(node.get("correction")).get("needsRebind"));
@@ -102,6 +113,72 @@ public final class DraftReviewGraph {
                 for(Object raw:branches(node))if(map(raw).get("resultValue")!=null)typedValue(field,map(raw).get("resultValue"));
         }
     }
+    private static void validateFactProjection(Map<String,Object> graph,Map<String,Object> node,Map<String,Map<String,Object>> nodes) {
+        if(!node.containsKey("factProjectionReview"))return;
+        Map<String,Object> review=map(node.get("factProjectionReview")),original=map(review.get("original")),root=nodes.get(text(review.get("rootId")));
+        boolean unchanged=Objects.equals(node.get("correction"),review.get("convertedCorrection"));
+        Map<String,Object> resolution=map(review.get("previousRuleResolution"));
+        if(original.get("correction")!=null) {
+            if(!(original.get("targetBindings") instanceof List)||!set("pending","resolved").contains(text(resolution.get("status"))))throw invalid("GRAPH_FACT_PROJECTION_HISTORY_REQUIRED: "+node.get("id"));
+            Set<String> ids=new HashSet<>();for(Object raw:list(original.get("targetBindings"))){Map<String,Object> target=map(raw);String targetId=text(target.get("id"));if(targetId.isEmpty()||!ids.add(targetId))throw invalid("GRAPH_FACT_PROJECTION_HISTORY_INVALID: "+node.get("id"));}
+            if("resolved".equals(resolution.get("status"))) {
+                String decision=text(resolution.get("decision"));if(text(resolution.get("reason")).trim().isEmpty()||!set("replace","rebuilt").contains(decision))throw invalid("GRAPH_FACT_PROJECTION_HISTORY_REASON_REQUIRED: "+node.get("id"));
+                Set<String> prior=ruleInputs(map(original.get("correction")));prior.remove(text(node.get("id")));
+                if("replace".equals(decision)&&(!unchanged||!prior.isEmpty()||!"rule".equals(text(map(original.get("correction")).get("kind")))))throw invalid("GRAPH_FACT_PROJECTION_EXTRA_CONDITIONS_REQUIRE_REBUILD: "+node.get("id"));
+                if("rebuilt".equals(decision)){Set<String> current=ruleInputs(map(node.get("correction")));if(unchanged||!current.containsAll(prior)||!current.contains(text(review.get("rootId"))))throw invalid("GRAPH_FACT_PROJECTION_REBUILD_INCOMPLETE: "+node.get("id"));}
+            }
+        }
+        // A user-edited rule keeps its history and saves as unresolved rather than silently inheriting the shortcut.
+        if(!unchanged&&!("resolved".equals(resolution.get("status"))&&"rebuilt".equals(resolution.get("decision"))))return;
+        String id=text(node.get("id")),key=text(review.get("baselineKey")),selected=text(review.get("branchValue"));Object polarity=review.get("branchPolarity");
+        if(root==null||!active(root)||DraftCatalogAlignment.hasUnverifiedSccSource(graph,node)||DraftCatalogAlignment.hasUnverifiedSccSource(graph,root)||!"boolean".equals(kind(node))||!"derived".equals(role(node))||!"choice".equals(kind(root))||!input(root)||!Boolean.TRUE.equals(review.get("exhaustiveConfirmed"))||!(polarity instanceof Boolean)||!set("input","decision","content").contains(text(map(original.get("role")).get("kind"))))throw invalid("GRAPH_FACT_PROJECTION_INVALID: "+id);
+        Map<String,Object> rootAlignment=map(root.get("catalogAlignment"));if(!"matched".equals(rootAlignment.get("status"))||!Boolean.TRUE.equals(rootAlignment.get("confirmed"))||!key.equals(rootAlignment.get("baselineKey"))||!DraftBusinessRules.RULE_VERSION.equals(rootAlignment.get("baselineVersion")))throw invalid("GRAPH_FACT_PROJECTION_ROOT_INVALID: "+id);
+        String origin=text(review.get("origin"));
+        if("manual".equals(origin)) {
+            if(!(review.get("reason") instanceof String)||text(review.get("reason")).trim().isEmpty())throw invalid("GRAPH_FACT_PROJECTION_REASON_REQUIRED: "+id);
+        } else {
+            if(!origin.isEmpty()&&!"model".equals(origin))throw invalid("GRAPH_FACT_PROJECTION_ORIGIN_INVALID: "+id);
+            boolean suggested=false;for(Object raw:list(map(original.get("catalogAlignment")).get("proposedMatches"))){Map<String,Object> candidate=map(raw),projection=map(candidate.get("factProjection"));if(key.equals(candidate.get("baselineKey"))&&!"conflict".equals(candidate.get("semanticStatus"))&&selected.equals(projection.get("branchValue"))&&Objects.equals(polarity,projection.get("branchPolarity")))suggested=true;}
+            if(!suggested)throw invalid("GRAPH_FACT_PROJECTION_SUGGESTION_REQUIRED: "+id);
+        }
+        Set<String> options=new LinkedHashSet<>();for(Object raw:list(root.get("options")))options.add(text(map(raw).get("value")));
+        if(options.size()!=2||!options.contains(selected))throw invalid("GRAPH_FACT_PROJECTION_BRANCH_INVALID: "+id);
+        if(!unchanged)return;
+        if(branches(node).size()!=2)throw invalid("GRAPH_FACT_PROJECTION_BRANCH_INVALID: "+id);
+        Set<String> seen=new HashSet<>();for(Object raw:branches(node)){Map<String,Object> branch=map(raw);List<?> clauses=list(branch.get("clauses"));if(!"all".equals(branch.get("mode"))||clauses.size()!=1||!(branch.get("resultValue") instanceof Boolean))throw invalid("GRAPH_FACT_PROJECTION_BRANCH_INVALID: "+id);Map<String,Object> clause=map(clauses.get(0));String value=text(clause.get("value"));if(!text(root.get("id")).equals(clause.get("inputId"))||!"eq".equals(clause.get("operator"))||!options.contains(value)||!seen.add(value)||!Objects.equals(branch.get("resultValue"),selected.equals(value)?polarity:!((Boolean)polarity)))throw invalid("GRAPH_FACT_PROJECTION_BRANCH_INVALID: "+id);}
+    }
+    private static Set<String> ruleInputs(Map<String,Object> correction) {
+        Set<String> result=new LinkedHashSet<>();List<Object> cases=new ArrayList<>(list(correction.get("branches")));if(!list(correction.get("clauses")).isEmpty())cases.add(correction);
+        for(Object raw:cases){Map<String,Object> branch=map(raw);if(!text(branch.get("scopeId")).isEmpty())result.add(text(branch.get("scopeId")));for(Object value:list(branch.get("clauses"))){String id=text(map(value).get("inputId"));if(!id.isEmpty())result.add(id);}}
+        return result;
+    }
+    static boolean applicabilityBindingValid(Map<String,Object> graph,Map<String,Object> node,Map<String,Map<String,Object>> nodes) {
+        Map<String,Object> rule=map(node.get("applicability")),alignment=map(node.get("catalogAlignment"));
+        String target=text(rule.get("targetBaselineKey"));
+        if(!Boolean.TRUE.equals(rule.get("confirmed"))||!DraftBusinessRules.RULE_VERSION.equals(rule.get("ruleVersion"))||!"matched".equals(alignment.get("status"))||!Boolean.TRUE.equals(alignment.get("confirmed"))||!target.equals(alignment.get("baselineKey"))||!DraftBusinessRules.RULE_VERSION.equals(alignment.get("baselineVersion"))||DraftCatalogAlignment.hasUnverifiedSccSource(graph,node))return false;
+        List<?> expected=list(map(map(DraftCatalogAlignment.definitions().get(target)).get("condition")).get("all")),actual=list(rule.get("clauses"));
+        String fingerprint=applicabilityFingerprint(graph,node,actual,nodes);
+        if(expected.isEmpty()||expected.size()!=actual.size()||fingerprint==null||fingerprint.isEmpty()||!fingerprint.equals(rule.get("bindingFingerprint")))return false;
+        for(int i=0;i<expected.size();i++) {
+            Map<String,Object> spec=map(expected.get(i)),term=map(actual.get(i));String key=text(spec.get("field"));Map<String,Object> source=nodes.get(text(term.get("inputId"))),sourceAlignment=map(source==null?null:source.get("catalogAlignment"));
+            if(!key.equals(term.get("baselineKey"))||!Objects.equals(spec.get("operator"),term.get("operator"))||!Objects.equals(spec.get("value"),term.get("value"))||source==null||!active(source)||!input(source)||!text(source.get("parentId")).isEmpty()||!"matched".equals(sourceAlignment.get("status"))||!Boolean.TRUE.equals(sourceAlignment.get("confirmed"))||!key.equals(sourceAlignment.get("baselineKey"))||!DraftBusinessRules.RULE_VERSION.equals(sourceAlignment.get("baselineVersion"))||DraftCatalogAlignment.hasUnverifiedSccSource(graph,source))return false;
+        }
+        return true;
+    }
+    static String applicabilityFingerprint(Map<String,Object> graph,Map<String,Object> target,List<?> terms,Map<String,Map<String,Object>> nodes) {
+        Set<String> ids=new TreeSet<>();ids.add(text(target.get("id")));for(Object raw:terms)ids.add(text(map(raw).get("inputId")));
+        List<Object> identities=new ArrayList<>();Set<String> documents=new HashSet<>();
+        for(String id:ids){Map<String,Object> node=nodes.get(id);if(node==null)return "";Map<String,Object> identity=new LinkedHashMap<>();
+            for(String key:Arrays.asList("id","parentId","nameZh","nameEn","questionZh","questionEn","type","role","options","optional","definitionScope","semanticSourceQuote","docIds","sourceAnchors"))if(node.containsKey(key))identity.put(key,node.get(key));
+            if(!id.equals(text(target.get("id")))&&node.containsKey("applicability"))identity.put("applicability",node.get("applicability"));
+            Map<String,Object> alignment=map(node.get("catalogAlignment")),mapping=new LinkedHashMap<>();for(String key:Arrays.asList("status","baselineKey","baselineVersion","confirmed","scope"))if(alignment.containsKey(key))mapping.put(key,alignment.get(key));identity.put("catalogAlignment",mapping);
+            for(Object value:list(node.get("docIds")))documents.add(text(value));for(Object raw:list(node.get("sourceAnchors"))){Map<String,Object> anchor=map(raw);for(String key:Arrays.asList("docId","sourceDocumentId","editionId"))if(!text(anchor.get(key)).isEmpty())documents.add(text(anchor.get(key)));}identities.add(identity);
+        }
+        List<Map<String,Object>> sources=new ArrayList<>();for(Object raw:list(graph.get("sources"))){Map<String,Object> source=map(raw);boolean referenced=false;for(String key:Arrays.asList("id","docId","sourceDocumentId","editionId"))if(documents.contains(text(source.get(key))))referenced=true;if(!referenced)continue;
+            Map<String,Object> identity=new LinkedHashMap<>();for(String key:Arrays.asList("id","docId","sourceDocumentId","editionId","fileKey","format","sourceSha256","sourceHash","analysisRevision","analysisInputSha256","analysisSha256","evidenceStatus"))if(source.containsKey(key))identity.put(key,source.get(key));identity.put("selected",map(graph.get("selectedDocuments")).get(text(source.get("fileKey"))));sources.add(identity);
+        }
+        sources.sort(Comparator.comparing(JsonUtils::write));return DraftScopeObservationIntegrity.reference(obj("nodes",identities,"sources",sources));
+    }
     private static void validateEditions(Map<String,Object> graph,Map<String,Map<String,Object>> nodes,Map<String,Set<String>> dependencies) {
         Map<String,String> formats=new HashMap<>();
         for(Object raw:list(graph.get("sources"))){Map<String,Object> source=map(raw);if("SCC".equalsIgnoreCase(text(source.get("fileKey"))))for(String key:Arrays.asList("id","docId","editionId"))if(!text(source.get(key)).isEmpty())formats.put(text(source.get(key)),text(source.get("id")));}
@@ -153,30 +230,35 @@ public final class DraftReviewGraph {
     }
     public static List<Map<String,Object>> fields(Map<String,Object> graph) {
         List<Map<String,Object>> result=new ArrayList<>();Context context=new Context(graph,Collections.emptyMap());
-        for(Map<String,Object> node:context.nodes.values())if(active(node)&&context.selected(text(node.get("id")))&&text(node.get("parentId")).isEmpty()&&input(node))result.add(withChildren(node,context));
+        for(Map<String,Object> node:context.nodes.values())if(context.selected(text(node.get("id")))&&text(node.get("parentId")).isEmpty()&&DraftCatalogAlignment.businessCandidate(node))result.add(withChildren(node,context,true,true));
         return result;
     }
     private static Map<String,Object> withChildren(Map<String,Object> node,Context context) {
         return withChildren(node,context,true);
     }
     private static Map<String,Object> withChildren(Map<String,Object> node,Context context,boolean selectedOnly) {
+        return withChildren(node,context,selectedOnly,false);
+    }
+    private static Map<String,Object> withChildren(Map<String,Object> node,Context context,boolean selectedOnly,boolean businessOnly) {
         Map<String,Object> result=new LinkedHashMap<>(node);result.remove("baselineDefinition");List<Map<String,Object>> children=new ArrayList<>();
         Map<String,Object> definition=context.baselineDefinitions.get(text(node.get("id")));if(definition!=null){result.put("baselineDefinition",definition);Map<String,Object> label=map(definition.get("label"));result.put("nameZh",label.getOrDefault("zhHans",label.get("zhHant")));result.put("nameEn",label.get("en"));}
-        for(Map<String,Object> child:context.nodes.values())if(active(child)&&(!selectedOnly||context.selected(text(child.get("id"))))&&Objects.equals(node.get("id"),child.get("parentId")))children.add(withChildren(child,context,selectedOnly));
+        for(Map<String,Object> child:context.nodes.values())if(active(child)&&(!businessOnly||DraftCatalogAlignment.businessCandidate(child))&&(!selectedOnly||context.selected(text(child.get("id"))))&&Objects.equals(node.get("id"),child.get("parentId")))children.add(withChildren(child,context,selectedOnly,businessOnly));
         result.put("children",children);return result;
     }
     public static String fieldHash(Map<String,Object> field) {
         List<Object> children=new ArrayList<>();for(Object child:list(field.get("children")))children.add(fieldHash(map(child)));
         Map<String,Object> meaning=new LinkedHashMap<>();
         for(String key:Arrays.asList("id","type","role","options","parentId","questionZh","questionEn","fixedValue"))meaning.put(key,field.get(key));
+        if(field.containsKey("applicability"))meaning.put("applicability",field.get("applicability"));
         meaning.put("children",children);meaning.putAll(DraftCatalogAlignment.meaning(field));return DraftAdoption.hash(JsonUtils.write(meaning));
     }
     /** Business definitions travel to inference; original anchors and edit coordinates stay in the bound graph. */
     public static List<Map<String,Object>> extractionDefinitions(List<Map<String,Object>> fields) {
         List<Map<String,Object>> result=new ArrayList<>();
         for(Map<String,Object> field:fields) {
+            if(!DraftCatalogAlignment.businessCandidate(field))continue;
             Map<String,Object> definition=new LinkedHashMap<>();
-            for(String key:Arrays.asList("id","parentId","nameZh","nameEn","questionZh","questionEn","type","role","options","fixedValue","optional","correction","relatedInputIds","semanticSourceQuote","unit","definitionScope","baselineDefinition"))
+            for(String key:Arrays.asList("id","parentId","nameZh","nameEn","questionZh","questionEn","type","role","options","fixedValue","optional","correction","applicability","relatedInputIds","semanticSourceQuote","unit","definitionScope","baselineDefinition"))
                 if(field.containsKey(key))definition.put(key,field.get(key));
             if(field.containsKey("catalogAlignment")){Map<String,Object> alignment=new LinkedHashMap<>();for(String key:Arrays.asList("status","baselineKey","baselineVersion","confirmed","reason","scope"))if(map(field.get("catalogAlignment")).containsKey(key))alignment.put(key,map(field.get("catalogAlignment")).get(key));definition.put("catalogAlignment",alignment);}
             Map<String,Object> guidance=map(field.get("guidance"));
@@ -205,11 +287,20 @@ public final class DraftReviewGraph {
     }
     private static Map<String,Object> catalogField(Map<String,Object> node,Context context) {
         List<Map<String,Object>> children=new ArrayList<>(),options=new ArrayList<>(),affects=new ArrayList<>();
-        for(Object child:list(node.get("children")))if(input(map(child)))children.add(catalogField(map(child),context));
+        for(Object child:list(node.get("children")))if(DraftCatalogAlignment.businessCandidate(map(child)))children.add(catalogField(map(child),context));
         Map<String,Object> baseline=map(node.get("baselineDefinition")),baselineLabel=map(baseline.get("label"));
         for(Object raw:list(baseline.containsKey("options")?baseline.get("options"):node.get("options"))){Map<String,Object> option=map(raw),optionLabel=map(option.get("label"));options.add(obj("value",option.get("value"),"label",optionLabel.isEmpty()?label(text(option.get("labelZh")),text(option.get("labelEn"))):LocalizedText.of(text(optionLabel.get("zhHans")),text(optionLabel.get("zhHant")),text(optionLabel.get("en")))));}
         for(Object raw:list(node.get("editTargets"))){Map<String,Object> target=map(raw);String document=context.document(text(target.get("docId")));if(document!=null)affects.add(obj("document",document,"clause",target.getOrDefault("text",""),"source",target.get("text")));}
         Map<String,Object> result=obj("key",node.get("id"),"label",baselineLabel.isEmpty()?label(text(node.get("nameZh")),text(node.get("nameEn"))):LocalizedText.of(text(baselineLabel.get("zhHans")),text(baselineLabel.get("zhHant")),text(baselineLabel.get("en"))),"kind","record".equals(kind(node))?"object":kind(node),"optional",Boolean.TRUE.equals(node.get("optional")),"options",options,"columnFields",children,"affects",affects,"description",label(text(map(node.get("guidance")).get("zh")),text(map(node.get("guidance")).get("en"))));
+        if(node.containsKey("applicability")) {
+            if(applicabilityBindingValid(context.graph,node,context.nodes)) {
+                List<Object> terms=new ArrayList<>();for(Object raw:list(map(node.get("applicability")).get("clauses"))) {Map<String,Object> term=map(raw),mapped=obj("field",term.get("inputId"),"operator",term.get("operator"),"value",term.get("value"));
+                    String childKey="includesComponent".equals(term.get("operator"))?"designResponsibilities.component":"countGt".equals(term.get("operator"))?"oldValuableTrees.serial":"";
+                    if(!childKey.isEmpty()){String property="includesComponent".equals(term.get("operator"))?"componentKey":"identityKey";mapped.put(property,"");for(Map<String,Object> child:context.nodes.values())if(Objects.equals(child.get("parentId"),term.get("inputId"))&&childKey.equals(map(context.baselineDefinitions.get(text(child.get("id")))).get("baselineKey")))mapped.put(property,child.get("id"));}
+                    terms.add(mapped);
+                }result.put("condition",obj("all",terms));
+            } else {result.put("applicabilityReviewRequired",true);result.put("condition",obj("reviewRequired",true,"all",Collections.emptyList()));}
+        }
         Object unit=map(node.get("type")).get("unit");if(unit==null)unit=node.get("unit");if(unit!=null)result.put("unit",unit);
         for(String key:Arrays.asList("definitionScope","catalogAlignment","baselineDefinition"))if(node.containsKey(key))result.put(key,node.get(key));
         if("id".equals(text(node.get("id"))))result.put("hidden",false);
@@ -249,13 +340,32 @@ public final class DraftReviewGraph {
         return plan(graph,adopted,false);
     }
     public static Map<String,Object> plan(Map<String,Object> graph,Map<String,Object> adopted,boolean requireReviewedNodes) {
+        return plan(graph,adopted,Collections.emptyMap(),requireReviewedNodes);
+    }
+    public static Map<String,Object> plan(Map<String,Object> graph,Map<String,Object> adopted,Map<String,Object> historical,boolean requireReviewedNodes) {
         validate(graph);Context context=new Context(graph,adopted,requireReviewedNodes);Map<String,Object> effective=new LinkedHashMap<>(),derived=new LinkedHashMap<>(),derivedItems=new LinkedHashMap<>();
         if(requireReviewedNodes)for(Map<String,Object> node:context.nodes.values())if(active(node)&&context.selected(text(node.get("id")))&&!context.reviewed(node))context.issue(text(node.get("id")),"NodeReviewRequired","此问题或规则尚未核对确认，相关修改保留原文。 / This question or rule is not reviewed; related source text is preserved.");
-        for(Map<String,Object> field:fields(graph)) {
-            String id=text(field.get("id"));Object value=adopted.get(id);
-            if(!context.reviewed(field)){context.answers.remove(id);continue;}
-            if(value==null){if(!Boolean.TRUE.equals(field.get("optional")))context.issue(id,"InputMissing","请采用本项目答案；未知不等于否。 / Adopt a project answer; unknown is not No.");continue;}
-            try{Object normalized=validateValue(field,value);context.answers.put(id,normalized);effective.put(id,normalized);}catch(BizException bad){context.answers.remove(id);context.issue(id,"InputInvalid",bad.getMessage());}
+        List<Map<String,Object>> inputFields=fields(graph);Map<String,String> invalidInputs=new LinkedHashMap<>();
+        for(Map<String,Object> field:inputFields) {
+            String id=text(field.get("id"));Object value=adopted.get(id);if(!context.reviewed(field)||value==null)continue;
+            try{context.answers.put(id,validateValue(field,value));}catch(BizException bad){context.invalidAnswers.add(id);invalidInputs.put(id,bad.getMessage());}
+        }
+        Map<String,Object> applicabilityStates=new LinkedHashMap<>();
+        for(Map<String,Object> field:inputFields) {
+            String id=text(field.get("id"));if(!context.reviewed(field))continue;
+            Boolean applicable=context.applicability(field,new HashSet<>());if(field.containsKey("applicability"))applicabilityStates.put(id,applicable==null?"unknown":applicable?"yes":"no");
+            if(applicable==null){context.issue(id,"InputApplicabilityUnknown","变量适用条件尚未确定或需重新核对；已保存的答案保留。 / Input applicability is unresolved or requires review; saved answers are retained.");continue;}
+            if(!applicable)continue;
+            if(invalidInputs.containsKey(id)){context.issue(id,"InputInvalid",invalidInputs.get(id));continue;}
+            if(!context.answers.containsKey(id)){if(!Boolean.TRUE.equals(field.get("optional")))context.issue(id,"InputMissing","请采用本项目答案；未知不等于否。 / Adopt a project answer; unknown is not No.");continue;}
+            effective.put(id,context.answers.get(id));
+        }
+        for(Map<String,Object> node:context.nodes.values())if(active(node)&&"derived".equals(role(node))&&node.containsKey("factProjectionReview")) {
+            String id=text(node.get("id"));Map<String,Object> historicalEntry=map(historical.get(id));Boolean old=DraftBusinessRules.truth(historicalEntry.get("value"));if(old==null)continue;
+            Map<String,Object> projection=map(node.get("factProjectionReview")),resolution=map(projection.get("historicalAnswerResolution"));Object root=context.value(text(projection.get("rootId")),Collections.emptyMap(),new HashSet<>()),value=null;
+            if(root!=null&&!ruleNeedsReview(node)&&projection.get("branchPolarity") instanceof Boolean)value=Objects.equals(text(root),text(projection.get("branchValue")))?projection.get("branchPolarity"):!((Boolean)projection.get("branchPolarity"));
+            String evidenceFingerprint=text(historicalEntry.get("evidenceFingerprint"));boolean acknowledged=root!=null&&!evidenceFingerprint.isEmpty()&&evidenceFingerprint.equals(text(resolution.get("evidenceFingerprint")))&&Boolean.TRUE.equals(resolution.get("confirmed"))&&"use_derived".equals(resolution.get("decision"))&&!text(resolution.get("reason")).trim().isEmpty()&&Objects.equals(old,resolution.get("oldValue"))&&Objects.equals(root,resolution.get("rootValue"));
+            if(!acknowledged){context.projectionPending.add(id);boolean conflict=value!=null&&!Objects.equals(value,old);String kind=conflict?"HistoricalProjectionAnswerConflict":"HistoricalProjectionAnswerReview";context.issue(id,kind,conflict?"保留的旧答案与共同选择推导结果不一致，请复核；旧答案未删除。 / The preserved historical answer conflicts with the shared choice; review it.":"保留的旧答案未用于本次推导，请复核；旧答案未删除。 / The preserved historical answer is not used for this projection; review it.");for(Map<String,Object> issue:context.issues)if((kind+":"+id).equals(issue.get("id"))){issue.put("rootId",projection.get("rootId"));issue.put("rootValue",root);issue.put("oldValue",old);issue.put("derivedValue",value);issue.put("evidenceFingerprint",historicalEntry.get("evidenceFingerprint"));break;}}
         }
         for(Map<String,Object> node:context.nodes.values())if(active(node)&&context.selected(text(node.get("id")))) {
             String id=text(node.get("id"));
@@ -285,7 +395,11 @@ public final class DraftReviewGraph {
                     applies=scopeResults!=null&&scopeResults.isEmpty()?Boolean.FALSE:rows==null?null:context.condition(branch,rows,new HashSet<>());
                     if(rows==null&&!(scopeResults!=null&&scopeResults.isEmpty()))context.issue(targetId,"ItemPlacementRequired","逐项编辑需要唯一项目身份及该项的原件定位。 / Each-item edits need one unique item identity and its exact source placement.");
                 } else applies=branch==null?Boolean.TRUE:context.condition(branch,rows,new HashSet<>());
-                if(!context.reviewed(owner)||(!text(target.get("branchId")).isEmpty()&&branch==null)||ruleNeedsReview(owner)||Boolean.TRUE.equals(target.get("needsRebind")))applies=null;
+                boolean projectionBlocked=context.projectionBlocked(text(owner.get("id")),new HashSet<>());
+                boolean bondTarget="NTT".equals(document)&&text(target.get("text")).matches("(?is).*\\bG1a\\b.*"),legacyBond=bondTarget&&context.dependsOnBaseline(text(owner.get("id")),"foundationIncluded",new HashSet<>());
+                boolean incompleteBond=bondTarget&&context.dependsOnBaseline(text(owner.get("id")),"combinedContractWithFoundationWorks",new HashSet<>())&&!context.completeBondCondition(text(owner.get("id")),new HashSet<>());
+                if(legacyBond||incompleteBond){applies=null;context.issue(targetId,"LegacyBondConditionReview","NTT 10 需要完整的联合合约及39个月条件；请核对后重建规则，或人工确认准确目标改文。 / NTT 10 requires the complete combined-contract and 39-month conditions; review the rule or explicitly adopt the exact target amendment.");}
+                if(!context.reviewed(owner)||projectionBlocked||(!text(target.get("branchId")).isEmpty()&&branch==null)||ruleNeedsReview(owner)||Boolean.TRUE.equals(target.get("needsRebind")))applies=null;
                 String action=Boolean.FALSE.equals(applies)?"not_adopted":applies==null?"pending":actionKind(target.get("action"));Object replacement=null;
                 if("keep".equals(action))action="retain";
                 if("check".equals(action)){action="pending";context.issue(targetId,"ManualCheck","请核对原文与本次处理范围。 / Review the source and proposed scope.");}
@@ -298,12 +412,13 @@ public final class DraftReviewGraph {
                 if("delete".equals(action))replacement="";
                 if("pending".equals(action))context.issue(targetId,"ConditionUnknown","条件或同项作用范围仍未确定。 / The condition or item scope is unresolved.");
                 Map<String,Object> result=obj("id",targetId,"action",action,"document",document,"clause",target.getOrDefault("text",""),"sourceText",target.get("text"),"value",replacement,"fieldKeys",Collections.singletonList(owner.get("id")),"inputKeys",context.references(owner,branch),"detail",label(text(map(owner.get("guidance")).get("zh")),text(map(owner.get("guidance")).get("en"))),"nativeBinding",target.get("nativeBinding"),"target",target,"overrideable",true);
+                if(projectionBlocked){result.put("overrideable",false);result.put("historicalProjectionBlocked",true);}
                 if(each){result.put("scopeId",branch.get("scopeId"));result.put("scopeResults",scopeResults);result.put("itemId",target.get("itemId"));}
                 if(!set("retain","not_adopted","pending").contains(action)&&!"bound".equals(text(map(target.get("nativeBinding")).get("status")))){result.put("action","pending");context.issue(targetId,"SourceBindingRequired","修改位置未准确绑定到本版可编辑原件。 / Bind the exact range to this editable source edition.");}
                 actions.add(result);
             }
         }
-        return obj("ruleVersion",catalog(graph).get("ruleVersion"),"inputValues",adopted,"effectiveValues",effective,"derived",derived,"derivedItems",derivedItems,"actions",actions,"unresolved",context.issues);
+        return obj("ruleVersion",catalog(graph).get("ruleVersion"),"inputValues",adopted,"effectiveValues",effective,"applicabilityStates",applicabilityStates,"derived",derived,"derivedItems",derivedItems,"actions",actions,"unresolved",context.issues);
     }
     public static void deferConflictingActions(Map<String,Object> plan) {
         List<?> actions=list(plan.get("actions"));Set<Integer> conflicts=new LinkedHashSet<>();
@@ -326,8 +441,8 @@ public final class DraftReviewGraph {
         plan.put("unresolved",issues);
     }
     private static final class Context {
-        final Map<String,Object> graph;final Map<String,Map<String,Object>> nodes=new LinkedHashMap<>(),baselineDefinitions;final Map<String,Object> answers=new LinkedHashMap<>();final List<Map<String,Object>> issues=new ArrayList<>();final Set<String> issueIds=new HashSet<>();
-        final Map<String,Set<String>> dependencies=new HashMap<>();final Map<String,String> editions=new HashMap<>();final Map<String,Boolean> selection=new HashMap<>();final boolean requireReviewedNodes;
+        final Map<String,Object> graph;final Map<String,Map<String,Object>> nodes=new LinkedHashMap<>(),baselineDefinitions;final Map<String,Object> answers=new LinkedHashMap<>();final List<Map<String,Object>> issues=new ArrayList<>();final Set<String> issueIds=new HashSet<>(),projectionPending=new HashSet<>(),invalidAnswers=new HashSet<>();
+        final Map<String,Set<String>> dependencies=new HashMap<>();final Map<String,String> editions=new HashMap<>();final Map<String,Boolean> selection=new HashMap<>(),applicabilityCache=new HashMap<>();final boolean requireReviewedNodes;
         Context(Map<String,Object> graph,Map<String,Object> adopted){
             this(graph,adopted,false);
         }
@@ -335,9 +450,22 @@ public final class DraftReviewGraph {
             this.graph=graph;this.requireReviewedNodes=requireReviewedNodes;for(Map<String,Object> node:nodes(graph))nodes.put(text(node.get("id")),node);
             baselineDefinitions=DraftCatalogAlignment.confirmedDefinitions(graph);
             for(Object raw:list(graph.get("sources"))){Map<String,Object> source=map(raw);if("SCC".equalsIgnoreCase(text(source.get("fileKey"))))for(String key:Arrays.asList("id","docId","editionId"))if(!text(source.get(key)).isEmpty())editions.put(text(source.get(key)),text(source.get("id")));}
-            for(Map<String,Object> node:nodes.values()){Set<String> refs=new HashSet<>();for(Object raw:branches(node)){Map<String,Object> branch=map(raw);if(!text(branch.get("scopeId")).isEmpty())refs.add(text(branch.get("scopeId")));for(Object term:list(branch.get("clauses")))refs.add(text(map(term).get("inputId")));}for(Object raw:list(node.get("editTargets"))){Map<String,Object> target=map(raw);for(String key:Arrays.asList("valueSourceId","listId","itemKey"))if(!text(target.get(key)).isEmpty())refs.add(text(target.get(key)));}dependencies.put(text(node.get("id")),refs);}
+            for(Map<String,Object> node:nodes.values()){Set<String> refs=new HashSet<>();for(Object raw:branches(node)){Map<String,Object> branch=map(raw);if(!text(branch.get("scopeId")).isEmpty())refs.add(text(branch.get("scopeId")));for(Object term:list(branch.get("clauses")))refs.add(text(map(term).get("inputId")));}if(node.containsKey("applicability")&&applicabilityBindingValid(graph,node,nodes))for(Object raw:list(map(node.get("applicability")).get("clauses")))refs.add(text(map(raw).get("inputId")));for(Object raw:list(node.get("editTargets"))){Map<String,Object> target=map(raw);for(String key:Arrays.asList("valueSourceId","listId","itemKey"))if(!text(target.get(key)).isEmpty())refs.add(text(target.get(key)));}dependencies.put(text(node.get("id")),refs);}
         }
         boolean reviewed(Map<String,Object> node){return !requireReviewedNodes||"confirmed".equals(text(node.get("status")))&&DraftCatalogAlignment.reviewed(node);}
+        boolean projectionBlocked(String id,Set<String> visited){if(!visited.add(id))return false;if(projectionPending.contains(id))return true;for(String dependency:dependencies.getOrDefault(id,Collections.emptySet()))if(projectionBlocked(dependency,visited))return true;return false;}
+        boolean dependsOnBaseline(String id,String key,Set<String> visited){if(!visited.add(id))return false;Map<String,Object> node=nodes.get(id);if(key.equals(id)||key.equals(text(map(map(node).get("catalogAlignment")).get("baselineKey"))))return true;for(String dependency:dependencies.getOrDefault(id,Collections.emptySet()))if(dependsOnBaseline(dependency,key,visited))return true;return false;}
+        boolean completeBondCondition(String id,Set<String> visited){
+            if(!visited.add(id))return false;Map<String,Object> node=nodes.get(id);
+            for(Object raw:branches(map(node))){Map<String,Object> branch=map(raw);if(!"all".equals(text(branch.get("mode"))))continue;boolean combined=false,duration=false;
+                for(Object termRaw:list(branch.get("clauses"))){Map<String,Object> term=map(termRaw),source=nodes.get(text(term.get("inputId")));String sourceId=text(term.get("inputId")),key=text(map(map(source).get("catalogAlignment")).get("baselineKey")),operator=text(term.get("operator"));if(key.isEmpty())key=sourceId;
+                    if("combinedContractWithFoundationWorks".equals(key)&&("yes".equals(operator)||"eq".equals(operator)&&Boolean.TRUE.equals(DraftBusinessRules.truth(term.get("value")))))combined=true;
+                    if("periodAtLeast39Months".equals(key)&&("yes".equals(operator)||"eq".equals(operator)&&Boolean.TRUE.equals(DraftBusinessRules.truth(term.get("value")))))duration=true;
+                    if("contractPeriodMonths".equals(key)&&"ge".equals(operator)&&Objects.equals(DraftBusinessRules.number(term.get("value")),39d))duration=true;
+                }if(combined&&duration)return true;
+            }
+            for(String dependency:dependencies.getOrDefault(id,Collections.emptySet()))if(completeBondCondition(dependency,visited))return true;return false;
+        }
         boolean selected(String id){if(selection.containsKey(id))return selection.get(id);Set<String> found=new HashSet<>();collectReachableEditions(id,nodes,dependencies,editions,found,new HashSet<>());String selected=text(map(graph.get("selectedDocuments")).get("SCC"));selected=editions.getOrDefault(selected,selected);boolean result=found.isEmpty()||(found.size()==1&&found.contains(selected));selection.put(id,result);return result;}
         void issue(String id,String kind,String message){if(issueIds.add(kind+":"+id))issues.add(obj("id",kind+":"+id,"kind",kind,"inputKeys",Collections.singletonList(id),"message",label(message,message)));}
         String document(String sourceId) {
@@ -351,10 +479,36 @@ public final class DraftReviewGraph {
         }
         boolean knownSource(String id){for(Object raw:list(graph.get("sources"))){Map<String,Object> source=map(raw);for(String key:Arrays.asList("id","docId","editionId"))if(!id.isEmpty()&&id.equals(text(source.get(key))))return true;}return map(graph.get("selectedDocuments")).containsValue(id);}
         Map<String,Map<String,Object>> rowScope(String id,Map<String,Object> row){Map<String,Map<String,Object>> rows=new HashMap<>();rows.put(id,row);return rows;}
+        Boolean applicability(Map<String,Object> node,Set<String> visiting) {
+            if(!node.containsKey("applicability"))return true;
+            String id=text(node.get("id"));if(applicabilityCache.containsKey(id))return applicabilityCache.get(id);
+            Boolean result=computeApplicability(node,visiting);applicabilityCache.put(id,result);return result;
+        }
+        private Boolean computeApplicability(Map<String,Object> node,Set<String> visiting) {
+            if(!applicabilityBindingValid(graph,node,nodes))return null;
+            Map<String,Object> rule=map(node.get("applicability"));boolean unknown=false;
+            for(Object raw:list(rule.get("clauses"))) {
+                Map<String,Object> term=map(raw);String id=text(term.get("inputId")),key=text(term.get("baselineKey"));Map<String,Object> source=nodes.get(id);
+                if(source==null||!reviewed(source)||!selected(id)||invalidAnswers.contains(id)){unknown=true;continue;}
+                if(source.containsKey("applicability")&&!Boolean.TRUE.equals(applicability(source,visiting))){unknown=true;continue;}
+                Object actual=value(id,Collections.emptyMap(),visiting);
+                if(actual instanceof List) {
+                    List<Object> rows=new ArrayList<>();for(Object rowRaw:list(actual)){Map<String,Object> row=map(rowRaw),converted=new LinkedHashMap<>();for(Map.Entry<String,Object> item:row.entrySet()){String baseline=text(map(baselineDefinitions.get(item.getKey())).get("baselineKey"));if(baseline.startsWith(key+"."))converted.put(baseline.substring(key.length()+1),item.getValue());}rows.add(converted);}
+                    boolean incomplete=false;if("includesComponent".equals(term.get("operator")))for(Object row:rows)if(!DraftBusinessRules.answered(map(row).get("component")))incomplete=true;
+                    if(incomplete){unknown=true;continue;}
+                    actual=rows;
+                }
+                Map<String,Object> canonical=new LinkedHashMap<>();if(actual!=null)canonical.put(key,actual);
+                Boolean matches=DraftBusinessRules.condition(obj("all",Collections.singletonList(obj("field",key,"operator",term.get("operator"),"value",term.get("value")))),canonical);
+                if(Boolean.FALSE.equals(matches))return false;if(matches==null)unknown=true;
+            }
+            return unknown?null:true;
+        }
         Object value(String id,Map<String,Map<String,Object>> rows,Set<String> visiting) {
             if(!visiting.add(id)){issue(id,"GraphCycle","存在循环依赖。 / Cyclic dependency.");return null;}
             try {
-                Map<String,Object> node=nodes.get(id);if(node==null||sourceCheck(node)||!active(node)||!selected(id)||!reviewed(node))return null;
+                Map<String,Object> node=nodes.get(id);if(node==null||sourceCheck(node)||!active(node)||!selected(id)||!reviewed(node)||projectionPending.contains(id))return null;
+                if(input(node)&&!Boolean.TRUE.equals(applicability(node,visiting)))return null;
                 String parent=text(node.get("parentId"));
                 if(!parent.isEmpty()) {
                     Map<String,Object> row=rows.get(parent);
@@ -367,9 +521,15 @@ public final class DraftReviewGraph {
                 List<Map<String,Object>> matches=new ArrayList<>();boolean unknown=false;
                 for(Object raw:branches(node)){Map<String,Object> branch=map(raw);Boolean truth=condition(branch,rows,visiting);if(truth==null)unknown=true;else if(truth)matches.add(branch);}
                 if(matches.size()>1){issue(id,"BranchConflict","多个条件同时成立，请纠正规则。 / Multiple cases match; correct the rule.");return null;}
+                if(matches.isEmpty()&&!unknown&&compiledScopePredicate(node))return false;
                 if(matches.size()!=1||unknown){issue(id,"DerivedUnknown","派生答案尚不能唯一确定。 / The derived answer is not uniquely determined.");return null;}
                 if(matches.get(0).get("resultValue")==null){issue(id,"DerivedUnknown","派生规则尚未声明结果。 / The matching rule has no declared result.");return null;}return typedValue(withChildren(node,this),matches.get(0).get("resultValue"));
             } finally {visiting.remove(id);}
+        }
+        private boolean compiledScopePredicate(Map<String,Object> node){
+            if(!"scope_rules_compilation".equals(node.get("origin"))||text(node.get("compiledScopeRuleId")).isEmpty()||!"preserved_as_branch".equals(node.get("conditionDisposition"))||!"boolean".equals(kind(node)))return false;
+            List<?> rules=branches(node);if(rules.size()!=1)return false;Map<String,Object> branch=map(rules.get(0));
+            return text(branch.get("scopeId")).isEmpty()&&text(branch.get("scopeMode")).isEmpty()&&Boolean.TRUE.equals(DraftBusinessRules.truth(branch.get("resultValue")));
         }
         Map<String,Object> branch(Map<String,Object> owner,String id){if(id.isEmpty())return null;for(Object raw:branches(owner))if(id.equals(text(map(raw).get("id"))))return map(raw);return null;}
         Boolean condition(Map<String,Object> branch,Map<String,Map<String,Object>> rows,Set<String> visiting) {
@@ -422,7 +582,11 @@ public final class DraftReviewGraph {
         return compile(original,fileKey,graph,plan,bookmarks,layout,false);
     }
     public static DocxEditResult compile(byte[] original,String fileKey,Map<String,Object> graph,Map<String,Object> plan,Map<String,String> bookmarks,NativeLayoutPlan layout,boolean incompleteDraft) {
-        DocxTemplateEditor editor=new DocxTemplateEditor();TemplateIndex index=editor.inspect(original);List<Edit> edits=new ArrayList<>();
+        DocxTemplateEditor editor=new DocxTemplateEditor();TemplateIndex index=editor.inspect(original);
+        return editor.applyWithParagraphBookmarks(original,compileBatch(index,fileKey,plan,incompleteDraft),bookmarks,!bookmarks.isEmpty(),layout);
+    }
+    static SourceEditBatch compileBatch(TemplateIndex index,String fileKey,Map<String,Object> plan,boolean incompleteDraft) {
+        List<Edit> edits=new ArrayList<>();
         Map<String,List<int[]>> occupied=new HashMap<>();
         for(Object raw:list(plan.get("actions"))) {
             Map<String,Object> action=map(raw);if(!fileKey.equals(text(action.get("document"))))continue;
@@ -458,7 +622,7 @@ public final class DraftReviewGraph {
                 n++;
             }
         }
-        return editor.applyWithParagraphBookmarks(original,new SourceEditBatch(index.getSourceSha256(),edits),bookmarks,!bookmarks.isEmpty(),layout);
+        return new SourceEditBatch(index.getSourceSha256(),edits);
     }
     public static boolean hasReplacementPlacement(Map<String,Object> target){return replacementSpanIndex(target)>=0;}
     private static int replacementSpanIndex(Map<String,Object> target) {
@@ -474,7 +638,7 @@ public final class DraftReviewGraph {
     }
     private static int integer(Object value){if(!(value instanceof Number)||((Number)value).doubleValue()!=((Number)value).intValue())throw invalid("GRAPH_SPAN_INTEGER_REQUIRED");return ((Number)value).intValue();}
     private static void requireNode(Map<String,Map<String,Object>> nodes,String id){if(!nodes.containsKey(id)||!active(nodes.get(id)))throw invalid("GRAPH_REFERENCE_MISSING: "+id);}
-    public static boolean ruleNeedsReview(Map<String,Object> node){Map<String,Object> correction=map(node.get("correction")),split=node.get("splitReview")!=null?map(node.get("splitReview")):"split".equals(text(correction.get("kind")))?correction:null;return Boolean.TRUE.equals(correction.get("needsRebind"))||split!=null&&!set("all","any").contains(text(split.get("mode")));}
+    public static boolean ruleNeedsReview(Map<String,Object> node){Map<String,Object> correction=map(node.get("correction")),split=node.get("splitReview")!=null?map(node.get("splitReview")):"split".equals(text(correction.get("kind")))?correction:null,review=map(node.get("factProjectionReview")),previous=map(review.get("previousRuleResolution"));boolean hasPrevious=map(review.get("original")).get("correction")!=null,rebuilt="resolved".equals(previous.get("status"))&&"rebuilt".equals(previous.get("decision"));return Boolean.TRUE.equals(correction.get("needsRebind"))||hasPrevious&&!"resolved".equals(previous.get("status"))||node.containsKey("factProjectionReview")&&!Objects.equals(node.get("correction"),review.get("convertedCorrection"))&&!rebuilt||split!=null&&!set("all","any").contains(text(split.get("mode")));}
     private static void requireValueNode(Map<String,Map<String,Object>> nodes,String id,boolean needsRebind){if(!needsRebind)requireNode(nodes,id);if(nodes.containsKey(id)&&sourceCheck(nodes.get(id)))throw invalid("GRAPH_SOURCE_CHECK_NOT_A_VALUE: "+id);}
     private static boolean active(Map<String,Object> node){return !"excluded".equals(text(node.get("status")));}
     private static boolean sourceCheck(Map<String,Object> node){return "verification".equals(role(node))||"source_seed".equals(text(node.get("definitionKind")));}

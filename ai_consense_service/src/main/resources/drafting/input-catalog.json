@@ -56,6 +56,7 @@
       "fields": [
         {
           "key": "foundationIncluded",
+          "hidden": true,
           "label": {
             "en": "Foundation works included",
             "zhHans": "是否包含基础工程",
@@ -88,6 +89,26 @@
               "paragraphs": "P484/P486"
             }
           ]
+        },
+        {
+          "key": "combinedContractWithFoundationWorks",
+          "label": {
+            "en": "Tender is for combined contracts with foundation works",
+            "zhHans": "投标是否属于含基础工程的联合合约",
+            "zhHant": "投標是否屬於含基礎工程的聯合合約"
+          },
+          "description": {
+            "en": "Review the complete NTT 10 wording. An earlier foundation-only answer is retained but is not copied into this question.",
+            "zhHans": "请按 NTT 第 10 条完整原文核对。旧的基础工程回答仍保留，不会自动带入此问题。",
+            "zhHant": "請按 NTT 第 10 條完整原文核對。舊的基礎工程回答仍保留，不會自動帶入此問題。"
+          },
+          "kind": "boolean",
+          "optional": false,
+          "options": [
+            {"value": true, "label": {"en": "Yes", "zhHans": "是", "zhHant": "是"}},
+            {"value": false, "label": {"en": "No", "zhHans": "否", "zhHant": "否"}}
+          ],
+          "affects": [{"document": "NTT", "clause": "10", "paragraphs": "P484/P486"}]
         },
         {
           "key": "periodAtLeast39Months",

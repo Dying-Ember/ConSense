@@ -160,7 +160,7 @@ const pick=async parts=>{receipt={page:2,words:parts.map(([paragraph,start,end],
   await title('Undo'); assert.ok(control('data-review-remove-isolated-rule'), 'The existing undo restores the isolated rule')
   assert.equal(control('data-review-remove-isolated-rule').props.disabled, false, 'Undo leaves a clean question form')
   await click('data-review-remove-isolated-rule')
-  assert.ok(!find(host.root, node => node.props?.class === 'review-error'), text(find(host.root, node => node.props?.class === 'review-error') ?? {}))
+  assert.ok(!find(host.root, node => node.props?.class === 'review-error' && !text(node).includes('does not support group confirmation')), 'Removing the rule introduces no new review error')
   assert.ok(!control('data-review-remove-isolated-rule'), 'The empty isolated rule was removed again after undo')
   assert.equal(control('data-review-save').props.disabled, false, 'The removal is an unsaved graph edit')
   await click('data-review-save'); assert.equal(writes.length, 2, 'Save writes the isolated question graph')

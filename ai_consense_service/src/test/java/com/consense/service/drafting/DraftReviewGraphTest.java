@@ -10,6 +10,18 @@ import static org.junit.jupiter.api.Assertions.*;
 import static com.consense.service.drafting.DraftReviewGraph.*;
 
 class DraftReviewGraphTest {
+    @Test void legacyFoundationMappingCannotAloneChooseTheNttBondAlternative(){
+        Map<String,Object> input=node("legacy-foundation","boolean","input"),owner=node("bond-owner","text","verification");
+        input.put("catalogAlignment",obj("status","matched","confirmed",true,"baselineKey","foundationIncluded","baselineVersion",DraftBusinessRules.RULE_VERSION,"reason","Earlier definition"));
+        owner.put("correction",obj("branches",Collections.singletonList(branch("yes","all",clause("legacy-foundation","yes","")))));
+        owner.put("editTargets",Collections.singletonList(obj("id","bond","docId","ntt","text","Appendix *G1/*G1a","action","delete","branchId","yes","nativeBinding",obj("status","bound","spans",Collections.singletonList(obj("paragraphId","p1"))))));
+        Map<String,Object> graph=graph(input,owner);graph.put("sources",Collections.singletonList(obj("id","ntt","docId","ntt","fileKey","NTT")));
+        Map<String,Object> result=plan(graph,obj("legacy-foundation",true));assertEquals("pending",map(list(result.get("actions")).get(0)).get("action"));assertTrue(com.consense.common.JsonUtils.write(result.get("unresolved")).contains("LegacyBondConditionReview"));
+        map(input.get("catalogAlignment")).put("baselineKey","combinedContractWithFoundationWorks");assertEquals("pending",map(list(plan(graph,obj("legacy-foundation",true)).get("actions")).get(0)).get("action"));
+        Map<String,Object> duration=node("duration","boolean","input");duration.put("catalogAlignment",obj("status","matched","confirmed",true,"baselineKey","periodAtLeast39Months","baselineVersion",DraftBusinessRules.RULE_VERSION,"reason","Reviewed threshold"));
+        owner.put("correction",obj("branches",Collections.singletonList(branch("yes","all",clause("legacy-foundation","yes",""),clause("duration","yes","")))));graph=graph(input,duration,owner);graph.put("sources",Collections.singletonList(obj("id","ntt","docId","ntt","fileKey","NTT")));
+        assertEquals("delete",map(list(plan(graph,obj("legacy-foundation",true,"duration",true)).get("actions")).get(0)).get("action"));
+    }
     @Test void conflictReviewKeepsDocumentAndCoordinateSystemsSeparate(){
         Map<String,Object> first=obj("id","a","document","NTT","action","delete","nativeBinding",obj("spans",Collections.singletonList(obj("paragraphId","p1","channel","editableText","start",0,"end",2))));
         Map<String,Object> second=obj("id","b","document","SCT","action","retain","nativeBinding",obj("spans",Collections.singletonList(obj("paragraphId","p1","channel","catalogText","start",10,"end",12))));

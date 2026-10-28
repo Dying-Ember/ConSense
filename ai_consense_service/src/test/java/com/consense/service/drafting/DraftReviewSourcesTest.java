@@ -208,6 +208,19 @@ class DraftReviewSourcesTest {
         wrong=anchor.deepCopy();wrong.put("analysisSha256","old");assertEquals("SOURCE_OBSERVATION_ANALYSIS_CHANGED",sources.bindObservation(source,wrong).path("reason").asText());
     }
 
+    @Test void pdfPageWordSelectionBindsOnlyOneExactCurrentSourceBlock() throws Exception {
+        byte[] bytes="%PDF-1.4\npage selection fixture".getBytes(StandardCharsets.UTF_8);SourceDocument source=source(1,"SCC",bytes);
+        String sha=DraftTemplateRouting.sha(bytes),text="The technical proposals are delivered in two envelopes.";
+        DocumentBlock block=new DocumentBlock();block.setId("page-1-block-1");block.setPageNo(1);block.setSource("native_pdf");block.setText(text);block.setReadingContext(JsonUtils.mapper().createObjectNode().put("sourceSha256",sha).put("occurrenceId","page-1-block-1"));
+        ParseCoverage coverage=new ParseCoverage();coverage.setTotalPages(1);coverage.setParsedPages(1);coverage.setComplete(true);
+        DocumentParser.ParsedDocument parsed=new DocumentParser.ParsedDocument(text,Collections.emptyList(),1,false,null,Collections.singletonList(block),coverage,sha,Collections.emptyList());
+        coverage.setTemplateEvidence(OerTemplateEvidence.analyse("SCC",parsed));source.setStructuredContentJson(JsonUtils.write(parsed.getBlocks()));source.setParseCoverageJson(JsonUtils.write(coverage));
+        ObjectNode selection=JsonUtils.mapper().createObjectNode().put("sourceSha256",sha).put("page",1).put("text","technical proposals");ObjectNode result=sources.bindObservation(source,selection);
+        assertEquals("bound",result.path("status").asText(),result.toString());assertEquals("pdf_source_member_text",result.path("kind").asText());assertFalse(result.path("editableAuthority").asBoolean());assertEquals("page-1-block-1",result.path("observedRanges").path(0).path("memberId").asText());
+        ObjectNode wrong=selection.deepCopy();wrong.put("page",2);assertNotEquals("bound",sources.bindObservation(source,wrong).path("status").asText());wrong=selection.deepCopy();wrong.put("text","fabricated words");assertNotEquals("bound",sources.bindObservation(source,wrong).path("status").asText());wrong=selection.deepCopy();wrong.put("sourceSha256",zeros());assertNotEquals("bound",sources.bindObservation(source,wrong).path("status").asText());
+        block.setText("technical proposals and technical proposals");parsed=new DocumentParser.ParsedDocument(block.getText(),Collections.emptyList(),1,false,null,Collections.singletonList(block),coverage,sha,Collections.emptyList());coverage.setTemplateEvidence(OerTemplateEvidence.analyse("SCC",parsed));source.setStructuredContentJson(JsonUtils.write(parsed.getBlocks()));source.setParseCoverageJson(JsonUtils.write(coverage));assertEquals("PDF_PAGE_SELECTION_AMBIGUOUS",sources.bindObservation(source,selection).path("reason").asText());
+    }
+
     @Test void guidanceBlankParagraphRemainsEvidenceWithoutEditableAuthority() throws Exception {
         byte[] bytes=docx("[Guidance Notes:","","1. Project team to insert the contract number.]");
         SourceDocument source=source(1,"SCC",bytes);

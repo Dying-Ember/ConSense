@@ -30,7 +30,10 @@ window.addEventListener('consense:open-skills', () => {
     <AppSidebar v-model:collapsed="collapsed" />
     <div class="main">
       <AppTopbar />
-      <router-view />
+      <router-view v-slot="{ Component, route }">
+        <keep-alive><component :is="Component" v-if="route.name === 'drafting'" /></keep-alive>
+        <component :is="Component" v-if="route.name !== 'drafting'" />
+      </router-view>
     </div>
   </div>
 

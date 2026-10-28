@@ -3,12 +3,23 @@ const assert = require('node:assert/strict')
 const path = require('node:path')
 const { loadTypeScript } = require('./helpers/load-typescript.cjs')
 const runtime = loadTypeScript(path.join(__dirname, '../src/drafting/state.ts'), { globals: { console }, dependencies: { './field-kinds': './field-kinds.ts', './bill-identities': './bill-identities.ts' } })
-const { decode, encode, applicability, validationIssue, mergeServerValues, dirtyPatch, documentCapabilities, replaceTargetOverride, restoreDraftView, reversedSiteDates, actionForUnresolved, adoptionPatch } = runtime
+const { decode, encode, applicability, validationIssue, mergeServerValues, dirtyPatch, documentCapabilities, replaceTargetOverride, restoreDraftView, reversedSiteDates, actionForUnresolved, adoptionPatch, trustedConditionValues } = runtime
 const plain = value => JSON.parse(JSON.stringify(value))
+const { incompleteCandidateBlocksAdoption } = runtime
 const field = (key, kind = 'text', other = {}) => ({ key, kind, label: { en: key, zhHans: key, zhHant: key }, ...other })
 const condition = (key, value, operator = 'eq') => ({ all: [{ field: key, operator, value }] })
 let checks = 0
 function check(name, task) { task(); checks++; console.log(`PASS: ${name}`) }
+
+check('incomplete candidates block direct and suggested adoption, but permit complete candidates and manual corrections', () => {
+  const candidates = [{ value: 'partial', completenessStatus: 'needs_review' }, { value: 'complete', completenessStatus: 'complete' }]
+  assert.equal(incompleteCandidateBlocksAdoption(false, undefined, candidates), true)
+  assert.equal(incompleteCandidateBlocksAdoption(false, 0, candidates), true)
+  assert.equal(incompleteCandidateBlocksAdoption(true, 0, candidates), true)
+  assert.equal(incompleteCandidateBlocksAdoption(false, 1, candidates), false)
+  assert.equal(incompleteCandidateBlocksAdoption(true, undefined, candidates), false)
+  assert.equal(incompleteCandidateBlocksAdoption(false, undefined, []), false)
+})
 
 check('stale snapshots stay readable without offering server-rejected edit, PDF or export actions', () => {
   assert.deepEqual(plain(documentCapabilities({ generated: true, stale: true }, false)), { readable: true, editable: false, previewable: false, exportable: false })
@@ -41,6 +52,17 @@ check('NSC hides BSSSC follow-ups, while an unknown arrangement stays editable',
   assert.equal(applicability(condition('subcontractArrangement', 'BSSSC'), { subcontractArrangement: null }), 'unknown')
   assert.equal(applicability(condition('subcontractArrangement', 'BSSSC'), { subcontractArrangement: 'BSSSC' }), 'yes')
 })
+check('only adopted current graph answers can control another input', () => {
+  const fields=[field('yesno','boolean'),field('amount','number'),field('list','list'),field('suggested'),field('review'),field('invalid','number'),field('old'),field('dirty')]
+  const values={yesno:false,amount:0,list:[],suggested:'candidate',review:'old',invalid:-1,old:'old edition',dirty:'new draft',unknown:'unexpected'}
+  const variables=new Map(fields.map(f=>[f.key,{key:f.key,graphRevisionId:'R',confirmed:true}]))
+  variables.get('suggested').confirmed=false;variables.get('review').reviewRequired=true;variables.get('old').graphRevisionId='OLD'
+  const actual=trustedConditionValues(fields,values,variables,'R',f=>f.key==='dirty')
+  assert.equal(actual.yesno,false);assert.equal(actual.amount,0);assert.deepEqual(plain(actual.list),[])
+  for(const key of ['suggested','review','invalid','old','dirty','unknown'])assert.equal(actual[key],null,key+' is unknown for conditions')
+  assert.equal(values.review,'old','Historical review values remain visible and unchanged')
+  assert.equal(applicability(condition('review','old'),actual),'unknown')
+})
 check('known No decides an AND condition even when the second input is unknown', () => {
   const both = { all: [{ field: 'domesticBlocks', operator: 'eq', value: true }, { field: 'volumetricPrecastComponents', operator: 'eq', value: true }] }
   assert.equal(applicability(both, { domesticBlocks: 'false', volumetricPrecastComponents: null }), 'no')
@@ -52,6 +74,11 @@ check('component facts are not invalidated by unrelated optional blank columns',
   assert.equal(applicability(condition('designResponsibilities', 'footings', 'includesComponent'), { designResponsibilities: rows }), 'yes')
   assert.equal(applicability(condition('designResponsibilities', 'footings', 'includesComponent'), { designResponsibilities: [{ component: null }] }), 'unknown')
   assert.equal(applicability(condition('designResponsibilities', 'footings', 'includesComponent'), { designResponsibilities: [] }), 'no')
+  const dynamic = { all: [{ field: 'list-id', operator: 'includesComponent', value: 'footings', componentKey: 'component-id' }] }
+  assert.equal(applicability(dynamic, { 'list-id': [{ 'component-id': 'footings' }] }), 'yes')
+  assert.equal(applicability(dynamic, { 'list-id': [{ 'component-id': 'roof' }] }), 'no')
+  assert.equal(applicability({ all: [{ ...dynamic.all[0], componentKey: '' }] }, { 'list-id': [{ component: 'roof' }] }), 'unknown')
+  assert.equal(applicability({ reviewRequired: true, all: [] }, {}), 'unknown', 'A stale condition never becomes unconditional')
 })
 check('tree count uses complete unique serial identities, not arbitrary row length', () => {
   const c = condition('oldValuableTrees', 1, 'countGt')
@@ -59,6 +86,10 @@ check('tree count uses complete unique serial identities, not arbitrary row leng
   assert.equal(applicability(c, { oldValuableTrees: [{ serial: 'OVT-A' }, { serial: 'ovt-a' }] }), 'unknown')
   assert.equal(applicability(c, { oldValuableTrees: [{ serial: 'OVT-A' }, { serial: '' }] }), 'unknown')
   assert.equal(applicability(c, { oldValuableTrees: [] }), 'no')
+  const dynamic = { all: [{ field: 'trees-id', operator: 'countGt', value: 1, identityKey: 'serial-id' }] }
+  assert.equal(applicability(dynamic, { 'trees-id': [{ 'serial-id': 'A' }, { 'serial-id': 'B' }] }), 'yes')
+  assert.equal(applicability(dynamic, { 'trees-id': [{ 'serial-id': 'A' }, { 'serial-id': 'a' }] }), 'unknown')
+  assert.equal(applicability({ all: [{ ...dynamic.all[0], identityKey: '' }] }, { 'trees-id': [{ serial: 'A' }] }), 'unknown')
 })
 check('pricing-scheme unknown does not become the SOR or paper negative branch', () => {
   assert.equal(applicability(condition('pricingScheme', ['BQ', 'BQ_SOR'], 'in'), { pricingScheme: null }), 'unknown')

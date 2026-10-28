@@ -217,4 +217,17 @@ lateBooleanConflict.variables.push({ ...node('third', 'boolean'), options: [{ va
 const lateBooleanBefore = structuredClone(lateBooleanConflict)
 assert.equal(batchReducer.mergeMany(lateBooleanConflict, ['old', 'keep', 'third'], 'keep').state, lateBooleanConflict, 'A later ambiguous boolean aborts the whole batch, including the earlier equivalent pair')
 assert.deepEqual(lateBooleanConflict, lateBooleanBefore)
+for (const position of [0, 1]) {
+  const editorial = base(), candidate = editorial.variables[position]
+  candidate.editorialSuggestion = { kind: 'editorial', sourceQuote: 'Delete the guidance note.', reason: 'Editing instruction', confirmed: false }
+  const prior = structuredClone(editorial)
+  assert.equal(batchReducer.mergeProblem(editorial, 'old', 'keep').code, 'MERGE_EDITORIAL_REVIEW_REQUIRED')
+  assert.equal(reduce(editorial, action), editorial, 'An unresolved editorial classification cannot disappear into the surviving business variable')
+  assert.equal(batchReducer.mergeMany(editorial, ['old', 'keep'], 'keep').state, editorial)
+  assert.deepEqual(editorial, prior, 'A rejected merge preserves the candidate, source evidence and classification')
+  candidate.editorialReview = { kind: 'business_value', confirmed: true }
+  const reviewed = reduce(editorial, action)
+  assert.notEqual(reviewed, editorial, 'Explicit human business classification enables the existing compatible merge')
+  assert.equal(reviewed.variables[0].editorialSuggestion?.kind ?? reviewed.variables[1].editorialSuggestion?.kind, 'editorial', 'The original classification suggestion remains in the saved graph history')
+}
 console.log('PASS: existing single-merge guards and source history; explicit three-question batch; atomic rollback, accumulated-rule conflicts and invalid selections')

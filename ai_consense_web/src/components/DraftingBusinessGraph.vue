@@ -11,7 +11,7 @@ import { isObjectKind, isVisibleDetail } from '@/drafting/field-kinds'
 import { presentationValue, scalarValueLabel, valueSummary } from '@/drafting/value-presentation'
 import DraftingValueDisplay from './DraftingValueDisplay.vue'
 
-const props = defineProps<{ projectId: string; catalog: DraftCatalog; plan?: DraftPlan | null; values: Record<string, DraftValue>; variables: DraftVariable[]; fieldStates: Record<string, string>; dirtyKeys: string[]; locale: AppLocale; disabled?: boolean }>()
+const props = defineProps<{ projectId: string; catalog: DraftCatalog; plan?: DraftPlan | null; values: Record<string, DraftValue>; conditionValues?: Record<string, DraftValue>; variables: DraftVariable[]; fieldStates: Record<string, string>; dirtyKeys: string[]; locale: AppLocale; disabled?: boolean }>()
 const emit = defineEmits<{ input: [key: string]; location: [target: GraphLocationTarget]; close: [] }>()
 const selectedGroup = ref(props.catalog.groups[0]?.id ?? ''), selectedKey = ref(''), selectedActionId = ref('')
 const selectedSubfieldKey = ref('')
@@ -19,7 +19,7 @@ const query = ref(''), selectedFile = ref('')
 const dialog = ref<HTMLElement | null>(null), fullscreen = ref(false)
 // Plans do not carry project identity. A project switch must await a new receipt.
 const rejectedPlan = shallowRef<DraftPlan | null | undefined>()
-const graph = computed(() => buildBusinessGraph({ catalog: props.catalog, plan: props.plan === rejectedPlan.value ? null : props.plan ?? null, values: props.values }))
+const graph = computed(() => buildBusinessGraph({ catalog: props.catalog, plan: props.plan === rejectedPlan.value ? null : props.plan ?? null, values: props.values, conditionValues: props.conditionValues }))
 const l = (value: Parameters<typeof localized>[0]) => localized(value, props.locale)
 const t = (en: string, cn: string, hk = cn) => props.locale === 'en' ? en : props.locale === 'zh-Hant' ? hk : cn
 const selectedInput = computed(() => graph.value.inputs.find(input => input.key === selectedKey.value))
@@ -31,8 +31,8 @@ const visibleSubfields = (input: typeof graph.value.inputs[number]) => input.sub
 const structure = computed(() => selectedInput.value ? visibleSubfields(selectedInput.value) : [])
 const selectedSubfield = computed(() => structure.value.find(item => item.key === selectedSubfieldKey.value))
 const structuralCount = computed(() => graph.value.inputs.reduce((count, input) => count + visibleSubfields(input).length, 0))
-const compositeGroup = (groupId: string) => groupId === 'contractType' && ['foundationIncluded', 'periodAtLeast39Months'].every(key => graph.value.inputs.some(input => input.groupId === groupId && input.key === key))
-const inputKind = (input: typeof graph.value.inputs[number]) => compositeGroup(input.groupId) && ['foundationIncluded', 'periodAtLeast39Months'].includes(input.key) ? 'subvariable' : compositeGroup(input.groupId) && input.key === 'contractPeriodMonths' ? 'supporting-value' : 'variable'
+const compositeGroup = (groupId: string) => groupId === 'contractType' && ['combinedContractWithFoundationWorks', 'periodAtLeast39Months'].every(key => graph.value.inputs.some(input => input.groupId === groupId && input.key === key))
+const inputKind = (input: typeof graph.value.inputs[number]) => compositeGroup(input.groupId) && ['combinedContractWithFoundationWorks', 'periodAtLeast39Months'].includes(input.key) ? 'subvariable' : compositeGroup(input.groupId) && input.key === 'contractPeriodMonths' ? 'supporting-value' : 'variable'
 const inputKindLabel = (input: typeof graph.value.inputs[number]) => inputKind(input) === 'subvariable' ? t('Sub-variable', '子变量', '子變量') : inputKind(input) === 'supporting-value' ? t('Supporting value (optional)', '支持事实（可选）', '支持事實（可選）') : t('Variable', '变量', '變量')
 const subfieldKindLabel = (input: typeof graph.value.inputs[number]) => isObjectKind(input.field.kind) ? t('Sub-variable', '子变量', '子變量') : t('Item field', '条目字段', '項目欄位')
 const selectedSubfieldValues = computed(() => {
@@ -41,7 +41,9 @@ const selectedSubfieldValues = computed(() => {
   if (!current || typeof current !== 'object') return []
   return (Array.isArray(current) ? current : [current]).map((record, index) => {
     const row = record && typeof record === 'object' && !Array.isArray(record) ? record : {}
-    return { index: index + 1, value: row[selectedSubfield.value!.key] ?? null, applicability: applicability(selectedSubfield.value!.field.condition, row) }
+    const condition=selectedSubfield.value!.field.condition
+    const untrusted=props.conditionValues && props.conditionValues[selectedInput.value!.key] == null
+    return { index: index + 1, value: row[selectedSubfield.value!.key] ?? null, applicability: untrusted && condition?.all?.length ? 'unknown' : applicability(condition, { ...(props.conditionValues ?? props.values), ...row }) }
   })
 })
 function invalidStructuredValue(valueField: DraftField, raw: DraftValue | undefined): boolean {
