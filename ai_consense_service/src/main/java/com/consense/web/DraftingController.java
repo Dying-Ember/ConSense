@@ -15,6 +15,7 @@ import org.springframework.web.multipart.MultipartFile;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -42,13 +43,23 @@ public class DraftingController {
     }
 
     @GetMapping("/plan")
-    public ApiResponse<Map<String,Object>> plan(@PathVariable String projectId) {
-        return ApiResponse.ok(draftingService.plan(projectId, null));
+    public ApiResponse<Map<String,Object>> plan(@PathVariable String projectId,@RequestParam(name="view",required=false) String view) {
+        Map<String,Object> plan=draftingService.plan(projectId,null);
+        return ApiResponse.ok("browser".equals(view)?planResponse(plan):plan);
     }
 
     @PostMapping("/plan")
-    public ApiResponse<Map<String,Object>> previewPlan(@PathVariable String projectId, @RequestBody PlanPreview body) {
-        return ApiResponse.ok(draftingService.plan(projectId, body.getValues()));
+    public ApiResponse<Map<String,Object>> previewPlan(@PathVariable String projectId,@RequestBody PlanPreview body,@RequestParam(name="view",required=false) String view) {
+        Map<String,Object> plan=draftingService.plan(projectId,body.getValues());
+        return ApiResponse.ok("browser".equals(view)?planResponse(plan):plan);
+    }
+
+    private Map<String,Object> planResponse(Map<String,Object> plan) {
+        Map<String,Object> response=new LinkedHashMap<>(plan);
+        if(plan.get("actions") instanceof List){List<Object> actions=new ArrayList<>();for(Object raw:(List<?>)plan.get("actions")){
+            if(raw instanceof Map){Map<Object,Object> action=new LinkedHashMap<>((Map<?,?>)raw);action.remove("target");actions.add(action);}else actions.add(raw);
+        }response.put("actions",actions);}
+        return response;
     }
 
     @GetMapping("/templates")

@@ -130,8 +130,8 @@ export const draftingApi = {
   baselineCatalog: (projectId: string) => api.get<DraftCatalog>(`/drafting/${projectId}/baseline-catalog`),
   baselineReference: (projectId: string, key: string) => api.get<{ ruleVersion: string; baselineKey: string; referenceKind: string; editableAuthority: boolean; sourceContext: { document: string; paragraph: number; text: string; referenceFormat?: string; referenceSourceSha256?: string }[] }>(`/drafting/${projectId}/baseline-catalog/reference?key=${encodeURIComponent(key)}`, { reportError: false }),
   plan: (projectId: string, values?: Record<string, string>) => values
-    ? api.post<DraftPlan>(`/drafting/${projectId}/plan`, { values })
-    : api.get<DraftPlan>(`/drafting/${projectId}/plan`),
+    ? api.post<DraftPlan>(`/drafting/${projectId}/plan?view=browser`, { values })
+    : api.get<DraftPlan>(`/drafting/${projectId}/plan?view=browser`),
   templates: (projectId: string) => api.get<TemplateItem[]>(`/drafting/${projectId}/templates`),
   templatePreview: (projectId: string, fileKey: string, sourceSha256?: string) =>
     api.blob(`/drafting/${projectId}/templates/${fileKey}/preview.pdf${sourceSha256 ? `?sourceSha256=${encodeURIComponent(sourceSha256)}` : ''}`),
