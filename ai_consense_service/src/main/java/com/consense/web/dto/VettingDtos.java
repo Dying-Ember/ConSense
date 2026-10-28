@@ -473,7 +473,9 @@ public final class VettingDtos {
     /** Server-bound evidence request; historical assessments remain in their parent packet. */
     @Data @NoArgsConstructor
     public static class SemanticEvidenceNeedVO {
-        private String needId,query;
+        private String needId,query,processingStatus="pending",terminalReason;
+        private int supplementRound;
+        private List<String> originalQueries=new java.util.ArrayList<>();
         private List<String> checklistItemIds=new java.util.ArrayList<>(),affectedChunkIds=new java.util.ArrayList<>();
         private List<Integer> verifiedAssessmentIndexes=new java.util.ArrayList<>();
     }

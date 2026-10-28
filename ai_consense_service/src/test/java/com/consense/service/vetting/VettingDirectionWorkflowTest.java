@@ -16,6 +16,64 @@ import static org.mockito.Mockito.*;
 
 /** Ordinary authored software checks; no provider, original, index or business endpoint is used. */
 class VettingDirectionWorkflowTest {
+    @Test void actualDirectionLoopbackBindsFormattedLiteralToTheSealedGeneration()throws Exception{exerciseDispatchAdmission(false);}
+    @Test void changedRepairUserDoesNotReuseTheOriginalLiteralReceipt()throws Exception{exerciseDispatchAdmission(true);}
+    @Test void admissionReceiptsHaveAFiniteUnitCapWithoutTrimmingTheModelText()throws Exception{exerciseDispatchAdmission(false,130);}
+    private void exerciseDispatchAdmission(boolean repair)throws Exception{exerciseDispatchAdmission(repair,1);}
+    private void exerciseDispatchAdmission(boolean repair,int unitCount)throws Exception{
+        String literal="Authored payment clause: preserve the fee of \\u00a3 100 and the exact second line.\nNo hidden metadata belongs in model evidence.";
+        Chunk tender=ordered("admission-unit","1","admission-revision",7,literal);tender.setClauseId("PRE.B6.810(1)");
+        List<byte[]> generationBodies=new ArrayList<>();List<String> summaries=new ArrayList<>();
+        java.util.concurrent.atomic.AtomicInteger generations=new java.util.concurrent.atomic.AtomicInteger();
+        com.sun.net.httpserver.HttpServer server=com.sun.net.httpserver.HttpServer.create(new java.net.InetSocketAddress("127.0.0.1",0),0);
+        server.createContext("/v1/chat/completions",exchange->{
+            byte[] body=exchange.getRequestBody().readAllBytes();JsonNode request=JsonUtils.parse(new String(body,java.nio.charset.StandardCharsets.UTF_8));boolean preflight=request.path("max_tokens").asInt()==1;
+            if(!preflight){generationBodies.add(body);generations.incrementAndGet();}
+            String content=preflight?"{":repair&&generations.get()==1?"not JSON":"{\"records\":[]}";
+            String response="{\"object\":\"chat.completion\",\"model\":\"qwen3.8-27b\",\"choices\":[{\"index\":0,\"finish_reason\":\""+(preflight?"length":"stop")+"\",\"message\":{\"role\":\"assistant\",\"content\":"+JsonUtils.write(content)+"}}],\"usage\":{\"prompt_tokens\":100,\"completion_tokens\":1,\"total_tokens\":101}}";
+            byte[] bytes=response.getBytes(java.nio.charset.StandardCharsets.UTF_8);exchange.getResponseHeaders().set("Content-Type","application/json");exchange.sendResponseHeaders(200,bytes.length);exchange.getResponseBody().write(bytes);exchange.close();
+        });server.start();
+        ch.qos.logback.classic.Logger logger=(ch.qos.logback.classic.Logger)org.slf4j.LoggerFactory.getLogger(VettingReviewProbe.class);
+        ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> appender=new ch.qos.logback.core.read.ListAppender<>();appender.start();logger.addAppender(appender);
+        try{
+            ConsenseProperties props=new ConsenseProperties();props.getQwen().setEnabled(true);props.getQwen().setApiKey("AUTHORED_ADMISSION_CREDENTIAL");props.getQwen().setBaseUrl("http://127.0.0.1:"+server.getAddress().getPort());props.getQwen().setTimeoutMs(2000);
+            HttpSupport http=new HttpSupport();okhttp3.OkHttpClient original=(okhttp3.OkHttpClient)org.springframework.test.util.ReflectionTestUtils.getField(http,"shared");
+            org.springframework.test.util.ReflectionTestUtils.setField(http,"shared",original.newBuilder().proxy(java.net.Proxy.NO_PROXY).retryOnConnectionFailure(false).followRedirects(false).followSslRedirects(false).addInterceptor(chain->{
+                okhttp3.HttpUrl url=chain.request().url();if(!"http".equals(url.scheme())||!"127.0.0.1".equals(url.host())||url.port()!=server.getAddress().getPort()||!"/v1/chat/completions".equals(url.encodedPath())||url.query()!=null||!"POST".equals(chain.request().method()))throw new IllegalStateException("Authored admission transport blocked an unapproved destination before connection");return chain.proceed(chain.request());
+            }).build());
+            LlmClient local=mock(LlmClient.class);LlmProfiles profiles=new LlmProfiles(props,local,local,new QwenChatClient(props.getQwen(),http),local);
+            VettingSemanticReview review=new VettingSemanticReview(new AiGateway(local,profiles),props,mock(VettingRetrievalClient.class));review.setQwenUsagePreflight(new QwenChatUsagePreflight(props,mock(QwenGenerationLedger.class)));
+            OerBusinessEvidence oer=mock(OerBusinessEvidence.class);review.setOerBusinessEvidence(oer);
+            java.lang.reflect.Constructor<OerBusinessEvidence.Session> ctor=OerBusinessEvidence.Session.class.getDeclaredConstructor(String.class,String.class,List.class,List.class,Map.class,Map.class);ctor.setAccessible(true);
+            OerBusinessEvidence.Session session=ctor.newInstance("authored","vetting",Collections.singletonList(1L),Collections.emptyList(),new LinkedHashMap<>(),Collections.emptyMap());
+            List<Chunk> admitted=new ArrayList<>();admitted.add(tender);for(int i=1;i<unitCount;i++)admitted.add(ordered("admission-unit-"+i,"1","admission-revision",i+7,literal+" "+i));
+            props.getVetting().setSemanticContextChars(30000);List<Chunk> corpus=corpus(session,admitted);
+            when(oer.retrieveReviewText(eq(session),anyString(),nullable(String.class),any(),anyInt())).thenAnswer(call->((String)call.getArgument(1)).contains("payment interim certificates")?admitted:Collections.emptyList());
+            java.lang.reflect.Method run=VettingSemanticReview.class.getDeclaredMethod("reviewDirections",String.class,VettingSemanticReview.Result.class,List.class,List.class,String.class,List.class,Runnable.class,VettingReviewProbe.class);run.setAccessible(true);
+            LlmOperation chat=profiles.resolve("qwen");VettingLlmOperation operation=review.captureOperation(chat);
+            try(LlmProfiles.Scope profile=profiles.bind(chat);VettingSemanticReview.OperationScope bound=review.bindOperation(operation);QwenChatUsagePreflight.Operation.ActionScope action=operation.getQwen().openAction("AUTHORED admission",()->{})){
+                run.invoke(review,"authored",new VettingSemanticReview.Result(),corpus,corpus,"en",null,(Runnable)()->{},VettingReviewProbe.start(props,"authored-admission","authored"));
+            }
+            appender.list.stream().map(ch.qos.logback.classic.spi.ILoggingEvent::getFormattedMessage).filter(message->message.contains("stage=model_dispatch_ready")||message.contains("stage=model_unit_admission")).forEach(summaries::add);
+            assertEquals(repair?2:1,generationBodies.size(),"The actual caller must reach only the authored generation endpoint.");
+            assertEquals((repair?2:1)*(Math.min(unitCount,128)+1),summaries.size(),"Each actual generation needs one bounded wire receipt and at most128 unit receipts.");
+            for(int index=0;index<generationBodies.size();index++){
+                JsonNode request=JsonUtils.parse(new String(generationBodies.get(index),java.nio.charset.StandardCharsets.UTF_8));String user=request.path("messages").get(1).path("content").asText();String wire=VettingCorpus.hash(new String(generationBodies.get(index),java.nio.charset.StandardCharsets.UTF_8));
+                final int ordinal=index+1;List<String> attempt=summaries.stream().filter(message->message.contains("attemptOrdinal="+ordinal+",")||message.contains("attemptOrdinal="+ordinal+"}")).collect(java.util.stream.Collectors.toList());
+                assertEquals(Math.min(unitCount,128)+1,attempt.size());for(String message:attempt){assertTrue(message.contains("generationWireSha256="+wire));assertTrue(message.contains("emittedTextSha256="+VettingCorpus.hash(user)));assertTrue(message.length()<1800);assertFalse(message.contains(literal));assertFalse(message.contains(tender.getId()));assertFalse(message.contains(tender.getClauseId()));}
+                String wireReceipt=attempt.stream().filter(message->message.contains("stage=model_dispatch_ready")).findFirst().orElseThrow();
+                assertTrue(wireReceipt.contains("unitCount="+unitCount));assertTrue(wireReceipt.contains("receiptUnits="+Math.min(unitCount,128)));assertTrue(wireReceipt.contains("truncated="+(unitCount>128)));
+                assertFalse(user.contains(tender.getId()));assertFalse(user.contains(tender.getOriginalSourceSha256()));
+                if(unitCount>128)assertTrue(user.contains(literal+" 129"),"Receipt capping must not trim evidence sent to the model.");
+                String unit=attempt.stream().filter(message->message.contains("stage=model_unit_admission")).findFirst().orElseThrow();
+                assertTrue(unit.contains("canonicalChunkFingerprint="+VettingCorpus.hash(tender.getId())));assertTrue(unit.contains("clauseFingerprint="+VettingCorpus.hash(tender.getClauseId())));
+                assertTrue(unit.contains("originalSourceSha256="+tender.getOriginalSourceSha256()));assertTrue(unit.contains("literalTextSha256="+VettingCorpus.hash(literal)));
+                if(index==0){assertTrue(unit.contains("actualUserMember=true"));assertTrue(unit.contains("status=present"));assertTrue(user.contains(literal));}
+                else{assertTrue(unit.contains("actualUserMember=null"));assertTrue(unit.contains("status=unknown"));assertTrue(unit.contains("reason=repair_user_unmapped"));}
+            }
+        }finally{logger.detachAppender(appender);appender.stop();server.stop(0);}
+    }
+
     @Test @SuppressWarnings("unchecked") void mixedScopeInstructionsReachTheActualTextPacketAndKeepUnknownContractEvidencePending()throws Exception{
         AiGateway ai=mock(AiGateway.class);VettingRetrievalClient retrieval=mock(VettingRetrievalClient.class);
         VettingSemanticReview review=new VettingSemanticReview(ai,new ConsenseProperties(),retrieval);
@@ -321,8 +379,8 @@ class VettingDirectionWorkflowTest {
     @Test void namedStandardNeedRetrievesSelectedStandardAfterTheFirstReview()throws Exception{ exerciseTargetedFollowup(true,0); }
     @Test void actualPendingFactNamesPssAndSlAndRetainsItsChecklistLineage()throws Exception{exerciseTargetedFollowup(true,0,false,55,true);}
     @Test void slowInitialDirectionsAllowOneEarlyNeedAndRetainEveryInitialAssignment()throws Exception{exerciseTargetedFollowup(false,50);}
-    @Test void deadlineLeavesUnsubmittedDirectionsAndTheSecondQueuedNeedExplicitlyPending()throws Exception{exerciseTargetedFollowup(false,60,true,24);}
-    @Test void actualCallerDoesNotDiscardASecondDistinctNamedEvidenceNeed()throws Exception{exerciseTargetedFollowup(false,0,true);}
+    @Test void deadlineLeavesUnsubmittedDirectionsWhileBothNamedNeedsShareTheEarlierGroup()throws Exception{exerciseTargetedFollowup(false,60,true,24);}
+    @Test void actualCallerGroupsBothDistinctNamedNeedsWithoutDiscardingEitherQuery()throws Exception{exerciseTargetedFollowup(false,0,true);}
     @Test void defaultFiftyFiveMinuteScheduleAllowsDirectionsBeyondTheFormerDeadline()throws Exception{exerciseTargetedFollowup(false,60,false,55);}
     @Test void realisticTwentySevenNonemptyDirectionsCountRetrievalNamedLookupAndModelTime()throws Exception{exerciseTargetedFollowup(false,50,false,55,false,45,27,true);}
     @Test void realisticSlowerModelsRetainAllAssignmentsAndTheUnprocessedNeedAtTheDeadline()throws Exception{exerciseTargetedFollowup(false,50,false,55,false,80,27,true);}
@@ -432,12 +490,13 @@ class VettingDirectionWorkflowTest {
             progressScope.remove();return;
         }
         if(initialSeconds>=60&&runMinutes==24){
-            assertEquals(24,initial.get());assertEquals(3,generations.get());assertTrue(queries.contains(need));assertFalse(queries.contains(otherNeed));
+            assertEquals(24,initial.get());assertEquals(3,generations.get());assertTrue(queries.contains(need));assertTrue(queries.contains(otherNeed),"Both targets share the admitted assessment round");
             assertEquals(3,result.getTopicAudits().stream().filter(t->t.getError()!=null&&t.getError().contains("Run evidence/time budget")).count());
-            assertTrue(result.getWarnings().stream().anyMatch(w->w.contains("1 requested evidence follow-ups remain pending")));
+            assertEquals(1,result.getTopicAudits().get(0).getPacketAudits().get(0).getEvidenceNeeds().size());
+            assertEquals(Arrays.asList(need,otherNeed),result.getTopicAudits().get(0).getPacketAudits().get(0).getEvidenceNeeds().get(0).getOriginalQueries());
             progressScope.remove();return;
         }
-        assertEquals(multipleNeeds?4:3,generations.get());assertEquals(multipleNeeds?4:3,result.getActualGatewayCallCount());assertEquals(!standardNeed||pendingOnly,queries.contains(need));
+        assertEquals(3,generations.get());assertEquals(3,result.getActualGatewayCallCount());assertEquals(!standardNeed||pendingOnly,queries.contains(need));
         assertEquals(0,prematureStandardSearches.get(),"The first pass must review project text before searching standards");
         VettingReviewDirections.Direction longDirection=VettingReviewDirections.plan(new String[0]).stream().filter(d->"CHECKLIST-2".equals(d.id)).findFirst().orElseThrow();
         List<String> knownReferences=VettingSemanticReview.initialReferenceQueries(longDirection);
@@ -453,18 +512,18 @@ class VettingDirectionWorkflowTest {
         assertTrue(users.get(1).contains("Assigned review direction: CHECKLIST-2"),"Other directions receive their first review before requested follow-ups");
         assertFalse(users.get(1).contains("Specific earlier evidence need"));
         assertTrue(users.get(2).contains(need));assertTrue(users.get(2).contains(a.getContent()));assertTrue(users.get(2).contains(b.getContent()));
-        assertTrue(result.getTopicAudits().size()>2);assertEquals(multipleNeeds?3:2,result.getTopicAudits().get(0).getPacketAudits().size());
+        assertTrue(result.getTopicAudits().size()>2);assertEquals(2,result.getTopicAudits().get(0).getPacketAudits().size());
         com.consense.web.dto.VettingDtos.SemanticPacketVO first=result.getTopicAudits().get(0).getPacketAudits().get(0),child=result.getTopicAudits().get(0).getPacketAudits().get(1);
-        assertEquals(multipleNeeds?2:1,first.getEvidenceNeeds().size());assertEquals(first.getPacketId(),child.getParentPacketId());
+        assertEquals(1,first.getEvidenceNeeds().size());assertEquals(first.getPacketId(),child.getParentPacketId());
         assertEquals(first.getEvidenceNeeds().get(0).getNeedId(),child.getRequestedEvidenceNeedId());
         assertEquals(Collections.singletonList("APP-I-001"),first.getEvidenceNeeds().get(0).getChecklistItemIds());
         assertEquals(Collections.singletonList("a"),first.getEvidenceNeeds().get(0).getAffectedChunkIds());
         assertEquals(Collections.singletonList(0),first.getEvidenceNeeds().get(0).getVerifiedAssessmentIndexes(),"A precise checklist need must retain its enclosing assessment even when its comment is vague");
         assertEquals(Integer.valueOf(0),first.getChecklistAssessments().get(0).getVerifiedAssessmentIndex());
         if(multipleNeeds){
-            assertEquals(7+knownReferences.size(),queries.indexOf(otherNeed),"The second named need is searched after the next three initial directions");
-            assertEquals(first.getEvidenceNeeds().get(1).getNeedId(),result.getTopicAudits().get(0).getPacketAudits().get(2).getRequestedEvidenceNeedId());
-            assertEquals(Collections.singletonList(0),first.getEvidenceNeeds().get(1).getVerifiedAssessmentIndexes());
+            assertEquals(4+knownReferences.size(),queries.indexOf(otherNeed),"The second target is searched inside the same admitted assessment round");
+            assertEquals(Arrays.asList(need,otherNeed),first.getEvidenceNeeds().get(0).getOriginalQueries());
+            assertTrue(users.get(2).contains(otherNeed));
         }
         assertTrue(result.getWarnings().stream().anyMatch(w->w.contains("without a verified assessment remain pending")));
         assertTrue(result.getWarnings().stream().anyMatch(w->w.contains("treated as insufficient context")));
@@ -550,6 +609,13 @@ class VettingDirectionWorkflowTest {
         assertTrue(old.getPendingFacts().isEmpty());old.setPendingFacts(Collections.singletonList("Whether PSS sets the applicable Works scope"));
         com.consense.web.dto.VettingDtos.VerifiedAssessmentVO restored=JsonUtils.mapper().readValue(JsonUtils.write(old),com.consense.web.dto.VettingDtos.VerifiedAssessmentVO.class);
         assertEquals(old.getPendingFacts(),restored.getPendingFacts());
+    }
+    @Test void savedGroupedNeedRetainsQuestionsAndTerminalStateWhileLegacyNeedsRemainReadable()throws Exception{
+        com.consense.web.dto.VettingDtos.SemanticEvidenceNeedVO legacy=JsonUtils.mapper().readValue("{\"needId\":\"legacy\",\"query\":\"AUTHORED source request\",\"checklistItemIds\":[],\"affectedChunkIds\":[\"a\"],\"verifiedAssessmentIndexes\":[0]}",com.consense.web.dto.VettingDtos.SemanticEvidenceNeedVO.class);
+        assertTrue(legacy.getOriginalQueries().isEmpty());assertEquals("pending",legacy.getProcessingStatus());
+        legacy.setOriginalQueries(Arrays.asList("AUTHORED source request","AUTHORED related fact"));legacy.setSupplementRound(2);legacy.setProcessingStatus("unresolved");legacy.setTerminalReason("round_limit");
+        com.consense.web.dto.VettingDtos.SemanticEvidenceNeedVO restored=JsonUtils.mapper().readValue(JsonUtils.write(legacy),com.consense.web.dto.VettingDtos.SemanticEvidenceNeedVO.class);
+        assertEquals(legacy,restored);assertFalse(JsonUtils.write(restored).contains("rawResponse"));
     }
     @Test void broadGeneralChecklistQueryRetainsEveryKeySubjectWithoutImportingAnExampleAnswer(){
         VettingReviewDirections.Direction direction=VettingReviewDirections.plan(new String[0]).get(1);String query=direction.initialQuery();

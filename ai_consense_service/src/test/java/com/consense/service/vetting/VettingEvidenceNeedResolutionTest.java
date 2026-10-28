@@ -12,6 +12,40 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /** Authored saved assessments test lineage and aggregation, not model or source accuracy. */
 class VettingEvidenceNeedResolutionTest {
+    @Test void splitContinuationsRequireCompatibleFinalDispositionsBeforeSupersedingOneOriginalAssessment(){
+        for(boolean conflict:new boolean[]{false,true}){
+            SemanticPacketVO original=parent(),partial=child("need-1","insufficient_context","a","b");
+            partial.setCheckState("insufficient_evidence");partial.setVerifiedConsistentAssessments(0);partial.setVerifiedInsufficientContextAssessments(2);partial.setReturnedAssessments(2);
+            String firstGap="AUTHORED missing PRE2.1",secondGap="AUTHORED missing PRE2.2";
+            partial.getVerifiedAssessments().get(0).setComment(firstGap);partial.getVerifiedAssessments().get(0).setPendingFacts(Collections.singletonList(firstGap));
+            partial.getVerifiedAssessments().add(new VerifiedAssessmentVO("insufficient_context","AUTHORED second pending",secondGap,Arrays.asList(quote(partial,"a"),quote(partial,"b")),Collections.singletonList(secondGap)));
+            SemanticEvidenceNeedVO firstNeed=need("n1",Collections.emptyList(),Collections.singletonList("a"),0),secondNeed=need("n2",Collections.emptyList(),Collections.singletonList("a"),1);firstNeed.setQuery(firstGap);secondNeed.setQuery(secondGap);partial.getEvidenceNeeds().add(firstNeed);partial.getEvidenceNeeds().add(secondNeed);
+            SemanticPacketVO first=child("n1","consistent","a","b","c"),second=child("n2",conflict?"issue":"consistent","a","b","d");first.setPacketId("final-one");second.setPacketId("final-two");first.setParentPacketId(partial.getPacketId());second.setParentPacketId(partial.getPacketId());rebind(first);rebind(second);
+            VettingEvidenceNeedResolution.Result result=VettingEvidenceNeedResolution.resolve(Arrays.asList(original,partial,first,second));
+            assertTrue(result.resolvedNeed(partial.getPacketId(),"n1"));assertTrue(result.resolvedNeed(partial.getPacketId(),"n2"));
+            assertEquals(!conflict,result.supersedesVerified(original.getPacketId(),0),"Two valid but contradictory continuations cannot silently resolve one original judgment");
+        }
+    }
+    @Test void boundedProgressiveChainRequiresEveryEarlierQuotedAuthorityAndExactNeedLineage(){
+        for(String defect:Arrays.asList("valid","lost_prior_quote","changed_prior_authority","missing_prior_context","wrong_child_need","cycle","unbound_original_query","missing_continuation")){
+            SemanticPacketVO original=parent(),partial=child("need-1","insufficient_context","a","b"),finalPacket=child("next-need","consistent","a","b","c");
+            original.getEvidenceNeeds().get(0).setOriginalQueries(Collections.singletonList(original.getEvidenceNeeds().get(0).getQuery()));
+            partial.setCheckState("insufficient_evidence");partial.setVerifiedInsufficientContextAssessments(1);partial.setVerifiedConsistentAssessments(0);
+            String remaining="AUTHORED remaining PRE2.1 provision";partial.getVerifiedAssessments().get(0).setComment(remaining);partial.getVerifiedAssessments().get(0).setPendingFacts(Collections.singletonList(remaining));
+            SemanticEvidenceNeedVO next=need("next-need",Collections.emptyList(),Collections.singletonList("a"),0);next.setQuery(remaining);next.setOriginalQueries(Collections.singletonList(remaining));partial.getEvidenceNeeds().add(next);
+            finalPacket.setPacketId("final");finalPacket.setParentPacketId(partial.getPacketId());rebind(finalPacket);
+            if("lost_prior_quote".equals(defect))finalPacket.getVerifiedAssessments().get(0).getEvidence().remove(1);
+            if("changed_prior_authority".equals(defect))finalPacket.getVerifiedAssessments().get(0).getEvidence().get(1).setSourceHash(VettingCorpus.hash("CHANGED prior authority"));
+            if("missing_prior_context".equals(defect))finalPacket.getSubmittedChunkIds().remove("b");
+            if("wrong_child_need".equals(defect))finalPacket.setRequestedEvidenceNeedId("unrelated");
+            if("cycle".equals(defect))finalPacket.setParentPacketId(original.getPacketId());
+            if("unbound_original_query".equals(defect))original.getEvidenceNeeds().get(0).setOriginalQueries(Arrays.asList(original.getEvidenceNeeds().get(0).getQuery(),"FORGED unrelated target"));
+            if("missing_continuation".equals(defect))partial.getEvidenceNeeds().clear();
+            String before=JsonUtils.write(original.getVerifiedAssessments());
+            assertEquals("valid".equals(defect),VettingEvidenceNeedResolution.resolve(Arrays.asList(original,partial,finalPacket)).supersedesVerified(original.getPacketId(),0),defect);
+            assertEquals(before,JsonUtils.write(original.getVerifiedAssessments()),"Historical assessments remain unchanged");
+        }
+    }
     private final String policy=VettingCorpus.hash("AUTHORED policy");
     @Test void exactSupplementReplacesPendingEffectiveStateWithoutChangingHistory() {
         SemanticPacketVO parent=parent(),child=child("need-1","consistent","a","b");

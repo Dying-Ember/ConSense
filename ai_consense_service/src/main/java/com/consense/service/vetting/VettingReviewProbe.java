@@ -12,6 +12,8 @@ import lombok.extern.slf4j.Slf4j;
 /** Lightweight stage summaries; detailed artifacts remain explicitly opt-in. */
 @Slf4j
 final class VettingReviewProbe {
+    private static final Set<String> DIGEST_KEYS=Set.of("preparedInputSha256","generationWireSha256","sourceSnapshotSha256",
+            "originalSourceSha256","canonicalChunkFingerprint","clauseFingerprint","literalTextSha256","emittedTextSha256");
     static final class Failure extends IllegalStateException {
         Failure(String message, Throwable cause) { super(message,cause); }
     }
@@ -60,6 +62,10 @@ final class VettingReviewProbe {
                 if(++inspected>32||safe.size()>=24)break;
                 String key=entry.getKey();Object value=entry.getValue();
                 if(key==null||!key.matches("[a-zA-Z][a-zA-Z0-9]{0,47}"))continue;
+                if(DIGEST_KEYS.contains(key)){
+                    if(value instanceof String&&((String)value).matches("[a-f0-9]{64}"))safe.put(key,value);
+                    continue;
+                }
                 if(value==null||value instanceof Boolean||value instanceof Byte||value instanceof Short||value instanceof Integer||value instanceof Long)safe.put(key,value);
                 else if(value instanceof Double&&Double.isFinite((Double)value)||value instanceof Float&&Float.isFinite((Float)value))safe.put(key,value);
                 else if(value instanceof Enum<?>)safe.put(key,((Enum<?>)value).name().length()<=64?((Enum<?>)value).name():"unknown_code");

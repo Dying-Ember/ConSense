@@ -157,19 +157,25 @@ class VettingSemanticReviewTest {
         assertEquals(new HashSet<>(Arrays.asList("a","b")),result.getReviewedChunkIds());
         assertTrue(result.getWarnings().stream().anyMatch(w -> w.contains("引用目标或邻接限定未补齐")));
     }
-    @Test void malformedNullRecordOrEvidenceDoesNotClaimCompletedCoverageOrRetainEarlierCandidates() {
+    @Test void nullMalformedRecordsAreIsolatedWhileOnlyValidEvidenceCountsAsReviewed() {
         for(boolean nullEvidence:Arrays.asList(false,true)) {
             AiGateway ai=mock(AiGateway.class);when(ai.available()).thenReturn(true);when(ai.chatModel()).thenReturn("test");
-            ConsenseProperties props=new ConsenseProperties();props.getVetting().setSemanticTopics(1);
+            ConsenseProperties props=new ConsenseProperties();props.getVetting().setSemanticTopics(1);props.getVetting().setProjectReferenceComparisons(0);
             VettingRetrievalClient retrieval=mock(VettingRetrievalClient.class);
             Chunk a=chunk("a","one","The processing instruction shall be checked against the supplied reference.");
-            when(retrieval.retrieve(eq("p"),anyString(),eq("tender"),anyList())).thenReturn(Collections.singletonList(a));
+            Chunk b=chunk("b","two","This separate source remains unreviewed when its model record is malformed.");
+            when(retrieval.retrieve(eq("p"),anyString(),eq("tender"),anyList())).thenReturn(Arrays.asList(a,b));
             Record valid=record("risk",quote("a",a.getContent()));Record malformed=nullEvidence?record("risk",(Quote)null):null;
-            when(ai.completeStructuredJsonList(anyString(),anyString(),eq(Record.class),any(),anyList())).thenAnswer(call->VettingTokenFixture.records(call.getArgument(1),Collections.singletonList(a),Arrays.asList(valid,malformed)));
-            Result result=VettingTokenFixture.review(ai,props,retrieval).review("p",Collections.singletonList(a),"en",(n,s)->{});
-            assertTrue(result.getReviewedChunkIds().isEmpty());assertTrue(result.getCandidates().isEmpty());
-            assertEquals("failed",result.getTopicAudits().get(0).getStatus());assertEquals(0,result.getTopicAudits().get(0).getAcceptedFindings());
-            assertTrue(result.getWarnings().stream().anyMatch(w -> w.contains("未完成语义检查")));
+            when(ai.completeStructuredJsonList(anyString(),anyString(),eq(Record.class),any(),anyList())).thenAnswer(call->{String user=call.getArgument(1);assertTrue(user.contains(a.getContent()));assertTrue(user.contains(b.getContent()));return VettingTokenFixture.records(user,Arrays.asList(a,b),Arrays.asList(valid,malformed));});
+            Result result=VettingTokenFixture.review(ai,props,retrieval).review("p",Arrays.asList(a,b),"en",(n,s)->{});
+            assertEquals(Collections.singleton("a"),result.getReviewedChunkIds(),"Only accepted valid evidence can contribute coverage; submitted source b remains unreviewed.");
+            assertEquals(1,result.getCandidates().size());assertEquals("one",result.getCandidates().get(0).getEvidence().get(0).getDocumentId());assertEquals(a.getContent(),result.getCandidates().get(0).getEvidence().get(0).getQuote());
+            com.consense.web.dto.VettingDtos.SemanticTopicVO audit=result.getTopicAudits().get(0);
+            assertEquals(2,audit.getReturnedAssessments());assertEquals(1,audit.getAcceptedFindings());assertEquals(1,audit.getRejectedRecords());
+            assertEquals("completed_with_rejections",audit.getStatus());assertEquals("partial",audit.getAggregateReviewStatus());
+            assertNotEquals("checked_pass",audit.getCheckState(),"One valid issue plus a malformed record does not certify a whole-topic pass.");
+            assertTrue(audit.getPacketAudits().get(0).getAttempts().stream().anyMatch(attempt->attempt.getValidationReason()!=null&&attempt.getValidationReason().startsWith("BUSINESS_SHAPE_MISMATCH: ")));
+            assertTrue(result.getWarnings().stream().anyMatch(w->w.contains("remains pending")&&w.contains("other independently valid records continue")));
         }
     }
     @Test void successfulEmptyModelResponseRetainsSubmissionWithoutClaimingACompletedAssessment() {
@@ -202,21 +208,27 @@ class VettingSemanticReviewTest {
             assertEquals(new HashSet<>(Arrays.asList("a","b")),result.getReviewedChunkIds());
         }
     }
-    @Test void anyIncompleteNonemptyRecordRejectsTheWholeTopicAndPreservesNoPartialCoverage() {
+    @Test void eachIncompleteRecordIsRejectedWithoutDiscardingIndependentValidFindingsOrExpandingCoverage() {
         Random random=new Random(30177);
         for(int attempt=0;attempt<16;attempt++) {
             AiGateway ai=mock(AiGateway.class);when(ai.available()).thenReturn(true);when(ai.chatModel()).thenReturn("test");
-            ConsenseProperties props=new ConsenseProperties();props.getVetting().setSemanticTopics(1);
+            ConsenseProperties props=new ConsenseProperties();props.getVetting().setSemanticTopics(1);props.getVetting().setProjectReferenceComparisons(0);
             VettingRetrievalClient retrieval=mock(VettingRetrievalClient.class);
             Chunk a=chunk("a","one","The participant "+random.nextInt(99999)+" shall complete the source review.");
-            when(retrieval.retrieve(eq("p"),anyString(),eq("tender"),anyList())).thenReturn(Collections.singletonList(a));
-            Record valid=record("risk",quote("a",a.getContent())),malformed=record("risk",quote("a",a.getContent()));
+            Chunk b=chunk("b","two","The second source must not be counted from a rejected malformed assessment.");
+            when(retrieval.retrieve(eq("p"),anyString(),eq("tender"),anyList())).thenReturn(Arrays.asList(a,b));
+            Record valid=record("risk",quote("a",a.getContent())),malformed=record("risk",quote("b",b.getContent()));
             switch(attempt%4) {case 0: malformed.setTitle(" ");break;case 1: malformed.setComment(null);break;case 2: malformed.setEvidence(null);break;default: malformed.setEvidence(Collections.emptyList());}
             List<Record> records=new ArrayList<>(Arrays.asList(valid,malformed));if(random.nextBoolean())Collections.reverse(records);
-            when(ai.completeStructuredJsonList(anyString(),anyString(),eq(Record.class),any(),anyList())).thenAnswer(call->VettingTokenFixture.records(call.getArgument(1),Collections.singletonList(a),records));
-            Result result=VettingTokenFixture.review(ai,props,retrieval).review("p",Collections.singletonList(a),"en",(n,s)->{});
-            assertTrue(result.getCandidates().isEmpty());assertTrue(result.getReviewedChunkIds().isEmpty());
-            assertTrue(result.getWarnings().stream().anyMatch(w -> w.contains("schema invalid")));
+            when(ai.completeStructuredJsonList(anyString(),anyString(),eq(Record.class),any(),anyList())).thenAnswer(call->{String user=call.getArgument(1);assertTrue(user.contains(a.getContent()));assertTrue(user.contains(b.getContent()));return VettingTokenFixture.records(user,Arrays.asList(a,b),records);});
+            Result result=VettingTokenFixture.review(ai,props,retrieval).review("p",Arrays.asList(a,b),"en",(n,s)->{});
+            assertEquals(1,result.getCandidates().size());assertEquals("one",result.getCandidates().get(0).getEvidence().get(0).getDocumentId());assertEquals(a.getContent(),result.getCandidates().get(0).getEvidence().get(0).getQuote());
+            assertEquals(Collections.singleton("a"),result.getReviewedChunkIds(),"Rejected source b cannot gain coverage in either model record order.");
+            com.consense.web.dto.VettingDtos.SemanticTopicVO audit=result.getTopicAudits().get(0);
+            assertEquals(2,audit.getReturnedAssessments());assertEquals(1,audit.getAcceptedFindings());assertEquals(1,audit.getRejectedRecords());
+            assertEquals("completed_with_rejections",audit.getStatus());assertEquals("partial",audit.getAggregateReviewStatus());assertNotEquals("checked_pass",audit.getCheckState());
+            assertTrue(audit.getPacketAudits().get(0).getAttempts().stream().anyMatch(item->item.getValidationReason()!=null&&item.getValidationReason().startsWith("BUSINESS_SHAPE_MISMATCH: ")));
+            assertTrue(result.getWarnings().stream().anyMatch(w->w.contains("remains pending")&&w.contains("other independently valid records continue")));
         }
     }
     @Test void primaryEvidenceIsTheActualTenderDocumentEvenWhenTheModelListsAStandardFirst() {

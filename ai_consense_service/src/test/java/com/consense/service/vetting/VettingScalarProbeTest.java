@@ -4,13 +4,69 @@ import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 import com.consense.config.ConsenseProperties;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.slf4j.LoggerFactory;
 import static org.junit.jupiter.api.Assertions.*;
 
 class VettingScalarProbeTest {
+    @Test void finalAdmissionDigestsRemainVisibleWithFileArtifactsDisabled(@TempDir Path directory)throws Exception{
+        Logger logger=(Logger)LoggerFactory.getLogger(VettingReviewProbe.class);ListAppender<ILoggingEvent> trace=new ListAppender<>();trace.start();logger.addAppender(trace);
+        try{
+            ConsenseProperties props=new ConsenseProperties();assertTrue(props.getVetting().getProbeDirectory()==null||props.getVetting().getProbeDirectory().isEmpty());
+            VettingReviewProbe probe=VettingReviewProbe.start(props,"admission-fixture","project-fixture");assertFalse(probe.enabled());
+            Map<String,Object> values=new LinkedHashMap<>();
+            List<String> keys=List.of("preparedInputSha256","generationWireSha256","sourceSnapshotSha256","originalSourceSha256","canonicalChunkFingerprint","clauseFingerprint","literalTextSha256","emittedTextSha256");
+            for(String key:keys)values.put(key,VettingCorpus.hash("authored-"+key));
+            values.put("sourceOrder",17);values.put("actualUserMember",true);values.put("emittedOrdinal",2);
+            VettingReviewProbe.Call call=probe.call(5,null,"tender");call.summary("final_admission",values);
+            String row=trace.list.get(trace.list.size()-1).getFormattedMessage();
+            for(String key:keys)assertTrue(row.contains(key+"="+values.get(key)),key+" must remain observable without full artifacts");
+            assertTrue(row.contains("sourceOrder=17"));assertTrue(row.contains("actualUserMember=true"));assertTrue(row.contains("emittedOrdinal=2"));
+            Object body=new Object(){@Override public String toString(){throw new AssertionError("Body must not be serialized");}};
+            assertDoesNotThrow(()->{call.event("raw",body);call.text("raw",body,"PRIVATE_SOURCE_SENTINEL");probe.finish("completed");});
+            assertTrue(messages(trace).contains("fullArtifactProbe=false"));assertFalse(messages(trace).contains("PRIVATE_SOURCE_SENTINEL"));
+            try(java.util.stream.Stream<Path> files=Files.list(directory)){assertEquals(0,files.count(),"Disabled probes must not create an artifact in the fixture directory");}
+        }finally{logger.detachAppender(trace);trace.stop();}
+    }
+    @Test void digestSummaryRejectsMalformedHashesUnknownKeysAndNestedPayloads(){
+        Logger logger=(Logger)LoggerFactory.getLogger(VettingReviewProbe.class);ListAppender<ILoggingEvent> trace=new ListAppender<>();trace.start();logger.addAppender(trace);
+        try{
+            VettingReviewProbe.Call call=VettingReviewProbe.start(new ConsenseProperties(),"admission-fixture","project-fixture").call(5,null,"tender");
+            List<String> keys=List.of("preparedInputSha256","generationWireSha256","sourceSnapshotSha256","originalSourceSha256","canonicalChunkFingerprint","clauseFingerprint","literalTextSha256","emittedTextSha256");
+            for(String invalid:List.of("a".repeat(63),"a".repeat(65),"A".repeat(64),"g".repeat(64),"a".repeat(64)+"\nPRIVATE_SECRET_SENTINEL","PRIVATE_SECRET_SENTINEL")){
+                Map<String,Object> values=new LinkedHashMap<>();for(String key:keys)values.put(key,invalid);
+                call.summary("invalid_digest",values);String row=trace.list.get(trace.list.size()-1).getFormattedMessage();
+                for(String key:keys)assertFalse(row.contains(key+"="),key+" must reject a malformed digest");
+                assertFalse(row.contains("PRIVATE_SECRET_SENTINEL"));
+            }
+            for(Object invalid:Arrays.asList(null,17,true)){
+                Map<String,Object> values=new LinkedHashMap<>();for(String key:keys)values.put(key,invalid);
+                call.summary("invalid_digest",values);String row=trace.list.get(trace.list.size()-1).getFormattedMessage();
+                for(String key:keys)assertFalse(row.contains(key+"="),"Digest keys cannot fall through to ordinary scalar handling");
+            }
+            Object hostile=new Object(){@Override public String toString(){throw new AssertionError("Nested payload must not be serialized");}};
+            call.summary("invalid_digest",VettingReviewProbe.map("unknownHashKey","a".repeat(64),"PreparedInputSha256","a".repeat(64),"raw","a".repeat(64),"apiKey","PRIVATE_SECRET_SENTINEL","sourceSnapshotSha256",Map.of("body",hostile),"generationWireSha256",List.of(hostile)));
+            String row=trace.list.get(trace.list.size()-1).getFormattedMessage();
+            for(String rejected:List.of("unknownHashKey=","PreparedInputSha256=","raw=","apiKey=","sourceSnapshotSha256=","generationWireSha256=","PRIVATE_SECRET_SENTINEL"))assertFalse(row.contains(rejected));
+        }finally{logger.detachAppender(trace);trace.stop();}
+    }
+    @Test void digestSupportRetainsTheExistingFieldAndInspectionLimits(){
+        Logger logger=(Logger)LoggerFactory.getLogger(VettingReviewProbe.class);ListAppender<ILoggingEvent> trace=new ListAppender<>();trace.start();logger.addAppender(trace);
+        try{
+            VettingReviewProbe.Call call=VettingReviewProbe.start(new ConsenseProperties(),"admission-fixture","project-fixture").call(5,null,"tender");
+            Map<String,Object> fields=new LinkedHashMap<>();for(int i=0;i<23;i++)fields.put("count"+i,i);
+            fields.put("literalTextSha256","a".repeat(64));fields.put("emittedTextSha256","b".repeat(64));call.summary("field_limit",fields);
+            String row=trace.list.get(trace.list.size()-1).getFormattedMessage();assertTrue(row.contains("count22=22"));assertTrue(row.contains("literalTextSha256="));assertFalse(row.contains("emittedTextSha256="));
+            Map<String,Object> inspected=new LinkedHashMap<>();for(int i=0;i<32;i++)inspected.put("ignored"+i,"PRIVATE_BODY_SENTINEL");
+            inspected.put("literalTextSha256","a".repeat(64));call.summary("inspection_limit",inspected);
+            row=trace.list.get(trace.list.size()-1).getFormattedMessage();assertFalse(row.contains("literalTextSha256="));assertFalse(row.contains("PRIVATE_BODY_SENTINEL"));
+        }finally{logger.detachAppender(trace);trace.stop();}
+    }
     @Test void schemaSummaryKeepsOnlyBoundedTrustedPathsAndFixedCodes(){
         Logger logger=(Logger)LoggerFactory.getLogger(VettingReviewProbe.class);ListAppender<ILoggingEvent> trace=new ListAppender<>();trace.start();logger.addAppender(trace);
         try{

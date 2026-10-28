@@ -9,6 +9,8 @@ import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.Data;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 import java.io.IOException;
 import java.util.*;
@@ -17,6 +19,7 @@ import java.util.function.Consumer;
 /** Paid cap1 Chat generation policy. It is neither a native exact observer nor a no-generation counter. */
 @Component
 public final class QwenChatUsagePreflight {
+    private static final Logger log=LoggerFactory.getLogger(QwenChatUsagePreflight.class);
     public static final String VERSION="qwen-chat-usage-preflight-v1";
     public static final String KIND="provider_reported_usage_preflight";
     public static final String SCOPE="configured_qwen_chat_usage_preflight_not_exact_template_observation";
@@ -117,7 +120,7 @@ public final class QwenChatUsagePreflight {
             wire.setGenerationEntitySha256(hash(bytes.getGenerationJson()));wire.setPreflightEntitySha256(hash(bytes.getProbeJson()));
             ObjectNode common=strict(bytes.getGenerationJson());common.remove(Arrays.asList("max_tokens","stream"));wire.setCommonInputSha256(hash(JsonUtils.write(Arrays.asList(common,in.getSchema(),in.getSourceSnapshotSha256()))));
             wire.setConfiguredContextTokens(CONTEXT);wire.setOutputReserveTokens(OUTPUT);wire.setSafetyMarginTokens(MARGIN);VettingInputBudget.bindQwenWire(in,wire);
-            PreparedRequest request=new PreparedRequest(in,bytes);PreparedRequest prior=prepared.get(in.getSerializedInputSha256());
+            PreparedRequest request=new PreparedRequest(in,bytes,common.path("messages"));PreparedRequest prior=prepared.get(in.getSerializedInputSha256());
             if(prior!=null){if(!prior.inputJson.equals(request.inputJson))throw new IllegalArgumentException("Qwen prepared input changed");return prior;}
             prepared.put(in.getSerializedInputSha256(),request);return request;
         }
@@ -175,15 +178,15 @@ public final class QwenChatUsagePreflight {
         public VettingInputBudget.Result observe(PreparedRequest request,String phase,Runnable guard,Consumer<Runnable> cancel) {
             return VettingInputBudget.check(request.input,in->observe(in,phase,guard,cancel));
         }
-        public String generate(PreparedRequest request,VettingInputBudget.Result budget,String phase,Runnable guard,Consumer<String> delta,Consumer<Runnable> cancel) {return generate(request,budget,phase,guard,delta,cancel,null);}
-        private String generate(PreparedRequest request,VettingInputBudget.Result budget,String phase,Runnable guard,Consumer<String> delta,Consumer<Runnable> cancel,Consumer<JsonNode> metadata) {
+        public String generate(PreparedRequest request,VettingInputBudget.Result budget,String phase,Runnable guard,Consumer<String> delta,Consumer<Runnable> cancel) {return generate(request,budget,phase,guard,delta,cancel,null,0,null);}
+        private String generate(PreparedRequest request,VettingInputBudget.Result budget,String phase,Runnable guard,Consumer<String> delta,Consumer<Runnable> cancel,Consumer<JsonNode> metadata,int attemptOrdinal,Consumer<DispatchReady> ready) {
             bound(request.input);VettingInputBudget.Result checked=new VettingInputBudget.Result();checked.setSerializedInputSha256(request.input.getSerializedInputSha256());
             if(budget==null||!budget.isExtraDispatchPermitted()||!Objects.equals(budget.getSerializedInputSha256(),request.input.getSerializedInputSha256())||budget.getObservation()==null
                     ||!checkEstimate(request.input,budget.getObservation(),checked).isExtraDispatchPermitted())throw new IllegalArgumentException("Qwen bound usage-preflight acceptance required");
             ActionContext context=current(guard);QwenGenerationLedger.Reservation reservation=ledger.reserve(context.id,identity.getConfigurationSha256(),phase,request.input.getSerializedInputSha256(),true);boolean terminal=false;
             Map<String,Object> receipt=new LinkedHashMap<>();receipt.put("requestSha256",request.input.getQwenWire().getGenerationEntitySha256());
             try {
-                current(guard);ledger.dispatch(reservation);String text=client.generate(request.bytes,delta,cancel,safe->{
+                current(guard);ledger.dispatch(reservation);dispatchReady(request,attemptOrdinal,ready);String text=client.generate(request.bytes,delta,cancel,safe->{
                     if(safe.path("responseSha256").isTextual())receipt.put("responseSha256",safe.path("responseSha256").textValue());
                     for(String[] key:new String[][]{{"prompt_tokens","promptTokens"},{"completion_tokens","completionTokens"},{"total_tokens","totalTokens"}}){JsonNode value=safe.path("usage").get(key[0]);if(value!=null&&value.isIntegralNumber()&&value.canConvertToLong())receipt.put(key[1],value.longValue());}
                     if(metadata!=null)metadata.accept(safe);
@@ -193,10 +196,13 @@ public final class QwenChatUsagePreflight {
                 if(metadata!=null&&error instanceof com.consense.ai.HttpSupport.ModelRequestFailure)metadata.accept(JsonUtils.mapper().valueToTree(((com.consense.ai.HttpSupport.ModelRequestFailure)error).diagnostics()));throw error;}
         }
         public <T> List<T> complete(VettingInputBudget.Input in,VettingInputBudget.Result budget,String system,String user,JsonNode schema,Class<T> type,List<String> rawOut,Map<String,Long> timings,Consumer<JsonNode> metadata) {
+            return complete(in,budget,system,user,schema,type,rawOut,timings,metadata,0,null);
+        }
+        public <T> List<T> complete(VettingInputBudget.Input in,VettingInputBudget.Result budget,String system,String user,JsonNode schema,Class<T> type,List<String> rawOut,Map<String,Long> timings,Consumer<JsonNode> metadata,int attemptOrdinal,Consumer<DispatchReady> ready) {
             PreparedRequest request=bound(in);VettingInputBudget.Input regenerated=input(system,user,schema,in.getSourceSnapshotSha256());
             if(!request.inputJson.equals(JsonUtils.write(regenerated)))throw new IllegalArgumentException("Qwen final prompts differ from sealed input");
             LlmClient preparedClient=new LlmClient(){
-                public String chatStructured(List<ChatTurn> turns,JsonNode suppliedSchema){if(!JsonUtils.write(turns).equals(JsonUtils.write(in.getMessages()))||!schema.equals(suppliedSchema))throw new IllegalArgumentException("Qwen gateway envelope changed");return generate(request,budget,"answer",()->{},null,null,metadata);}
+                public String chatStructured(List<ChatTurn> turns,JsonNode suppliedSchema){if(!JsonUtils.write(turns).equals(JsonUtils.write(in.getMessages()))||!schema.equals(suppliedSchema))throw new IllegalArgumentException("Qwen gateway envelope changed");return generate(request,budget,"answer",()->{},null,null,metadata,attemptOrdinal,ready);}
                 public String chat(List<ChatTurn> turns){throw new UnsupportedOperationException();}
                 public List<float[]> embed(List<String> texts){throw new UnsupportedOperationException();}
                 public boolean available(){return true;}public String chatModel(){return identity.getModel();}public String embedModel(){return "";}
@@ -204,6 +210,14 @@ public final class QwenChatUsagePreflight {
             AiGateway gateway=new AiGateway(preparedClient);
             return recordsObjectWire()?gateway.completeStructuredJsonRecords(system,user,type,schema,rawOut,timings)
                     :gateway.completeStructuredJsonList(system,user,type,schema,rawOut,timings);
+        }
+        private void dispatchReady(PreparedRequest request,int attemptOrdinal,Consumer<DispatchReady> ready) {
+            if(ready==null)return;
+            try{
+                String input=request.input.getSerializedInputSha256(),source=request.input.getSourceSnapshotSha256(),wire=request.input.getQwenWire().getGenerationEntitySha256();
+                if(attemptOrdinal<=0||!sha(input)||!sha(source)||!sha(wire)){log.warn("qwen_dispatch_ready_diagnostic_unavailable");return;}
+                ready.accept(new DispatchReady(input,wire,source,attemptOrdinal,request.userSha256,request.userChars));
+            }catch(Throwable unavailable){try{log.warn("qwen_dispatch_ready_diagnostic_unavailable");}catch(Throwable ignored){/* Diagnostics cannot change generation. */}}
         }
         private final class ActionContext {
             final String id;final Runnable guard;
@@ -214,10 +228,25 @@ public final class QwenChatUsagePreflight {
         }
     }
     public static final class PreparedRequest {
-        private final VettingInputBudget.Input input;private final String inputJson;private final QwenChatClient.PreparedRequest bytes;
-        private PreparedRequest(VettingInputBudget.Input input,QwenChatClient.PreparedRequest bytes){this.input=VettingInputBudget.copy(input);this.inputJson=JsonUtils.write(input);this.bytes=bytes;}
+        private final VettingInputBudget.Input input;private final String inputJson,userSha256;private final int userChars;private final QwenChatClient.PreparedRequest bytes;
+        private PreparedRequest(VettingInputBudget.Input input,QwenChatClient.PreparedRequest bytes,JsonNode messages){
+            this.input=VettingInputBudget.copy(input);this.inputJson=JsonUtils.write(input);this.bytes=bytes;
+            String user=null;int users=0;for(JsonNode message:messages)if("user".equals(message.path("role").asText())){users++;if(message.path("content").isTextual())user=message.path("content").textValue();}
+            userSha256=users==1&&user!=null?hash(user):null;userChars=users==1&&user!=null?user.length():-1;
+        }
         public VettingInputBudget.Input getInput(){return VettingInputBudget.copy(input);}
         public String getGenerationJson(){return bytes.getGenerationJson();}public String getPreflightJson(){return bytes.getProbeJson();}
+    }
+    public static final class DispatchReady {
+        private final String preparedInputSha256,generationWireSha256,sourceSnapshotSha256,userSha256;
+        private final int attemptOrdinal,userChars;
+        private DispatchReady(String input,String wire,String source,int ordinal,String user,int chars){preparedInputSha256=input;generationWireSha256=wire;sourceSnapshotSha256=source;attemptOrdinal=ordinal;userSha256=user;userChars=chars;}
+        public String getPreparedInputSha256(){return preparedInputSha256;}
+        public String getGenerationWireSha256(){return generationWireSha256;}
+        public String getSourceSnapshotSha256(){return sourceSnapshotSha256;}
+        public int getAttemptOrdinal(){return attemptOrdinal;}
+        public String getUserSha256(){return userSha256;}
+        public int getUserChars(){return userChars;}
     }
     public static boolean isQwen(VettingInputBudget.Input in){return in!=null&&in.getQwenWire()!=null;}
     public static VettingInputBudget.Result checkEstimate(VettingInputBudget.Input in,VettingInputBudget.Observation o,VettingInputBudget.Result result) {

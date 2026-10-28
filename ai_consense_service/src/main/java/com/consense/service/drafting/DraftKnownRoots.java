@@ -1,6 +1,7 @@
 package com.consense.service.drafting;
 
 import com.consense.common.JsonUtils;
+import com.consense.common.BizException;
 import com.fasterxml.jackson.databind.JsonNode;
 import java.util.*;
 import static com.consense.service.drafting.DraftReviewGraph.*;
@@ -12,18 +13,19 @@ final class DraftKnownRoots {
 
     static Result build(Map<String,JsonNode> readings,List<Map<String,Object>> tasks,
                         Map<String,DraftCurrentTemplateAlignment.Index> indexes,Map<String,Object> baseGraph) {
-        Map<String,Map<String,Object>> definitions=DraftCatalogAlignment.definitions();Map<String,Proof> proofs=new TreeMap<>();Map<String,String> taskSources=new HashMap<>();Set<String> allowedSources=allowedSources(readings,baseGraph);
-        for(Map<String,Object> task:tasks){String source=text(task.get("sourceId"));JsonNode reading=readings.get(source);if(allowedSources.contains(source)&&reading!=null&&"bound".equals(reading.path("evidenceStatus").asText())&&reading.path("sourceSha256").asText().equals(text(task.get("sourceSha256"))))taskSources.put(text(task.get("taskId")),identity(source,task.get("sourceSha256")));}
+        Map<String,Map<String,Object>> definitions=DraftCatalogAlignment.definitions();Map<String,Proof> proofs=new TreeMap<>();Map<String,String> taskSources=new HashMap<>();Map<String,Set<String>> relatedProofs=new HashMap<>();Set<String> allowedSources=allowedSources(readings,baseGraph);
+        for(Map<String,Object> task:tasks){String source=text(task.get("sourceId"));JsonNode reading=readings.get(source);if(allowedSources.contains(source)&&reading!=null&&"bound".equals(reading.path("evidenceStatus").asText())&&reading.path("sourceSha256").asText().equals(text(task.get("sourceSha256")))&&("source-"+DraftAdoption.hash(text(task.get("sourceKey"))+"|"+reading.path("analysisRevision").asText()+"|"+reading.path("analysisInputSha256").asText()+"|"+reading.path("analysisSha256").asText()).substring(0,24)).equals(task.get("taskId")))taskSources.put(text(task.get("taskId")),identity(source,task.get("sourceSha256")));}
         for(Map<String,Object> task:tasks) {
-            if(!"guidance".equals(task.get("itemKind")))continue;String source=text(task.get("sourceId"));JsonNode reading=readings.get(source);if(reading==null||!allowedSources.contains(source))continue;
+            if(!"guidance".equals(task.get("itemKind"))||!taskSources.containsKey(text(task.get("taskId"))))continue;String source=text(task.get("sourceId"));JsonNode reading=readings.get(source);if(reading==null||!allowedSources.contains(source))continue;
             DraftCurrentTemplateAlignment.Index index=indexes.get(source);if(index==null)index=DraftCurrentTemplateAlignment.index(reading);
-            Map<String,Object> payload=DraftReviewDiscovery.sourceTaskPayload(reading,task),alignment=index.align(task,payload);
+            Map<String,Object> payload;try{payload=DraftReviewDiscovery.sourceTaskPayload(reading,task);}catch(BizException changed){continue;}Map<String,Object> alignment=index.align(task,payload);
             boolean definitionOnly="definition_reference_only".equals(alignment.get("definitionStatus"));
-            if((!definitionOnly&&!"exact_instruction_reference".equals(alignment.get("definitionStatus")))||!"current_instruction_reference".equals(alignment.get("referenceKind")))continue;
-            Set<String> actionKeys=new HashSet<>();for(Object raw:list(alignment.get("fixedActionReferences")))for(Object key:list(map(raw).get("inputKeys")))actionKeys.add(text(key));
             String quote=text(map(payload.get("instruction")).get("text"));if(quote.trim().isEmpty())continue;
             boolean registeredIncomplete=definitionOnly&&list(alignment.get("reasonCodes")).contains(DraftCurrentTemplateAlignment.REGISTERED_INCOMPLETE_NTT17_REFERENCE);
-            Map<String,Object> anchor=registeredIncomplete?DraftReviewDiscovery.registeredIncompleteInstructionAnchor(reading,task):DraftReviewDiscovery.sourceTaskAnchor(reading,task);if(anchor==null||anchor.isEmpty())continue;
+            Map<String,Object> anchor;try{anchor=registeredIncomplete?DraftReviewDiscovery.registeredIncompleteInstructionAnchor(reading,task):DraftReviewDiscovery.sourceTaskAnchor(reading,task);}catch(BizException changed){continue;}if(anchor==null||anchor.isEmpty())continue;
+            Set<String> supplied=new HashSet<>();for(Object raw:list(payload.get("relatedGuidanceNotes")))if(raw instanceof JsonNode){String observation=((JsonNode)raw).path("id").asText();if(!observation.isEmpty())supplied.add(identity(source,task.get("sourceSha256"))+"\n"+observation);}relatedProofs.put(text(task.get("taskId")),supplied);
+            if((!definitionOnly&&!"exact_instruction_reference".equals(alignment.get("definitionStatus")))||!"current_instruction_reference".equals(alignment.get("referenceKind")))continue;
+            Set<String> actionKeys=new HashSet<>();for(Object raw:list(alignment.get("fixedActionReferences")))for(Object key:list(map(raw).get("inputKeys")))actionKeys.add(text(key));
             for(Object raw:list(alignment.get("fixedRootKeys"))) {
                 String key=text(raw);Map<String,Object> field=definitions.get(key);
                 // An exact current note can establish its shared definition without granting an action or range.
@@ -46,7 +48,7 @@ final class DraftKnownRoots {
         for(Map.Entry<String,Map<String,Object>> entry:reuse.entrySet()){String key=entry.getKey();int dot=key.lastIndexOf('.');String parent=dot<0?"":text(ids.get(key.substring(0,dot)));if(!parent.equals(text(entry.getValue().get("parentId"))))blocked.add(key);}
         // An ambiguous existing prerequisite must not be replaced or silently omitted from an eligibility rule.
         Set<String> active=new TreeSet<>();for(Map.Entry<String,Set<String>> entry:closures.entrySet())if(Collections.disjoint(entry.getValue(),blocked))active.addAll(entry.getValue());
-        Map<String,Map<String,Object>> roots=new LinkedHashMap<>();Map<String,Set<String>> owners=new HashMap<>();Map<String,Map<String,String>> quotes=new HashMap<>();Map<String,Set<String>> dependencies=new HashMap<>(),rootSources=new HashMap<>();
+        Map<String,Map<String,Object>> roots=new LinkedHashMap<>();Map<String,Set<String>> owners=new HashMap<>();Map<String,Map<String,String>> quotes=new HashMap<>();Map<String,Set<String>> dependencies=new HashMap<>(),rootSources=new HashMap<>(),proofRoots=new HashMap<>();
         for(String key:active) {
             Proof proof=proofs.get(key);Map<String,Object> node=reuse.containsKey(key)?copy(reuse.get(key)):DraftFixedBaseline.candidate(baseGraph,key,definitions.get(key),ids);
             Set<String> sourceIds=new TreeSet<>(),taskIds=new TreeSet<>(),conditions=new TreeSet<>();Map<String,String> taskQuotes=new TreeMap<>();List<Object> references=new ArrayList<>();Map<String,Map<String,Object>> anchors=new TreeMap<>();
@@ -58,10 +60,13 @@ final class DraftKnownRoots {
                 if(!anchors.isEmpty()){node.put("semanticSourceQuote",anchors.values().iterator().next().get("text"));List<Object> passages=new ArrayList<>(),evidence=new ArrayList<>();for(Map<String,Object> anchor:anchors.values()){passages.add(copy(anchor));evidence.add(obj("docId",anchor.get("docId"),"quote",anchor.get("text"),"locationEn",proof==null?"Current guidance requiring this catalog prerequisite":"Current registered guidance","locationZh",proof==null?"当前指导所需的固定前提定义":"当前已登记指导原文"));}node.put("sourceAnchors",passages);node.put("evidence",evidence);}
             }
             String conditionStatus=conditions.size()==1&&conditions.contains("current_evidence_complete")?"current_evidence_complete":"unknown";
-            node.put("currentDefinitionReference",obj("kind","registered_current_instruction","definitionEvidence",proof==null?"catalog_prerequisite":"exact_current_instruction","baselineKey",key,"ruleVersion",DraftBusinessRules.RULE_VERSION,"taskIds",new ArrayList<>(taskIds),"taskQuotes",taskQuotes,"sourceReferences",references,"prerequisiteForTaskIds",new ArrayList<>(prerequisiteTasks),"conditionStatus",conditionStatus,"existing",reuse.containsKey(key),"confirmed",false,"editableAuthority",false));
-            String id=text(node.get("id"));roots.put(id,node);owners.put(id,taskIds);quotes.put(id,taskQuotes);Set<String> identities=new HashSet<>();for(Object raw:references){Map<String,Object> ref=map(raw);identities.add(identity(ref.get("sourceId"),ref.get("sourceSha256")));}rootSources.put(id,identities);Set<String> required=new TreeSet<>();closure(key,definitions,required);required.retainAll(active);Set<String> requiredIds=new TreeSet<>();for(String dependency:required)requiredIds.add(text(ids.get(dependency)));dependencies.put(id,requiredIds);
+            boolean reviewedExisting=reuse.containsKey(key)&&"confirmed".equals(node.get("status"))&&DraftCatalogAlignment.reviewed(node)&&Boolean.TRUE.equals(map(node.get("definitionReview")).get("confirmed"))&&key.equals(map(node.get("currentDefinitionReference")).get("baselineKey"));
+            // A new template may use an already reviewed fact without replacing its original proof or answer.
+            if(!reviewedExisting)node.put("currentDefinitionReference",obj("kind","registered_current_instruction","definitionEvidence",proof==null?"catalog_prerequisite":"exact_current_instruction","baselineKey",key,"ruleVersion",DraftBusinessRules.RULE_VERSION,"taskIds",new ArrayList<>(taskIds),"taskQuotes",taskQuotes,"sourceReferences",references,"prerequisiteForTaskIds",new ArrayList<>(prerequisiteTasks),"conditionStatus",conditionStatus,"existing",reuse.containsKey(key),"confirmed",false,"editableAuthority",false));
+            String id=text(node.get("id"));roots.put(id,node);owners.put(id,taskIds);quotes.put(id,taskQuotes);Set<String> identities=new HashSet<>();for(Object raw:references){Map<String,Object> ref=map(raw);String sourceIdentity=identity(ref.get("sourceId"),ref.get("sourceSha256"));identities.add(sourceIdentity);proofRoots.computeIfAbsent(sourceIdentity+"\n"+text(ref.get("sourceObservationId")),ignored->new HashSet<>()).add(id);}rootSources.put(id,identities);Set<String> required=new TreeSet<>();closure(key,definitions,required);required.retainAll(active);Set<String> requiredIds=new TreeSet<>();for(String dependency:required)requiredIds.add(text(ids.get(dependency)));dependencies.put(id,requiredIds);
         }
-        return new Result(roots,owners,quotes,dependencies,taskSources,rootSources,definitions.keySet());
+        Map<String,Set<String>> readers=new HashMap<>();for(Map.Entry<String,Set<String>> entry:relatedProofs.entrySet())for(String proof:entry.getValue())for(String root:proofRoots.getOrDefault(proof,Collections.emptySet()))if(!owners.get(root).contains(entry.getKey()))readers.computeIfAbsent(root,ignored->new HashSet<>()).add(entry.getKey());
+        return new Result(roots,owners,quotes,dependencies,taskSources,rootSources,definitions.keySet(),readers);
     }
 
     private static Set<String> allowedSources(Map<String,JsonNode> readings,Map<String,Object> baseGraph) {
@@ -77,9 +82,12 @@ final class DraftKnownRoots {
     }
 
     static final class Result {
-        private final Map<String,Map<String,Object>> roots;private final Map<String,Set<String>> owners,dependencies,rootSources;private final Map<String,Map<String,String>> quotes;private final Map<String,String> taskSources,wireIds=new LinkedHashMap<>();
+        private final Map<String,Map<String,Object>> roots;private final Map<String,Set<String>> owners,dependencies,rootSources,readers;private final Map<String,Map<String,String>> quotes;private final Map<String,String> taskSources,wireIds=new LinkedHashMap<>();
         Result(Map<String,Map<String,Object>> roots,Map<String,Set<String>> owners,Map<String,Map<String,String>> quotes,Map<String,Set<String>> dependencies,Map<String,String> taskSources,Map<String,Set<String>> rootSources,Set<String> definitionKeys){
-            this.roots=roots;this.owners=owners;this.quotes=quotes;this.dependencies=dependencies;this.taskSources=taskSources;this.rootSources=rootSources;
+            this(roots,owners,quotes,dependencies,taskSources,rootSources,definitionKeys,Collections.emptyMap());
+        }
+        private Result(Map<String,Map<String,Object>> roots,Map<String,Set<String>> owners,Map<String,Map<String,String>> quotes,Map<String,Set<String>> dependencies,Map<String,String> taskSources,Map<String,Set<String>> rootSources,Set<String> definitionKeys,Map<String,Set<String>> readers){
+            this.roots=roots;this.owners=owners;this.quotes=quotes;this.dependencies=dependencies;this.taskSources=taskSources;this.rootSources=rootSources;this.readers=readers;
             Set<String> seen=new HashSet<>();
             for(Map.Entry<String,Map<String,Object>> entry:roots.entrySet()){
                 String key=text(map(entry.getValue().get("currentDefinitionReference")).get("baselineKey"));
@@ -93,7 +101,7 @@ final class DraftKnownRoots {
         boolean has(String id){return roots.containsKey(id);}
         boolean accepts(Map<String,Object> node){Map<String,Object> expected=roots.get(text(node.get("id")));return expected!=null&&core(expected).equals(core(node));}
         Map<String,Map<String,Object>> forTasks(Collection<?> taskIds) {
-            Set<String> requested=new HashSet<>(),sources=new HashSet<>();for(Object task:taskIds){String id=text(task);requested.add(id);if(taskSources.containsKey(id))sources.add(taskSources.get(id));}Set<String> available=new HashSet<>();for(String id:roots.keySet())if(!Collections.disjoint(owners.get(id),requested)||!Collections.disjoint(rootSources.get(id),sources))available.addAll(dependencies.get(id));
+            Set<String> requested=new HashSet<>();for(Object task:taskIds)requested.add(text(task));Set<String> available=new HashSet<>();for(String id:roots.keySet())if(!Collections.disjoint(owners.get(id),requested)||!Collections.disjoint(readers.getOrDefault(id,Collections.emptySet()),requested))available.addAll(dependencies.get(id));
             Map<String,Map<String,Object>> result=new LinkedHashMap<>();for(String id:roots.keySet())if(available.contains(id)){Map<String,Object> node=copy(roots.get(id)),reference=map(node.get("currentDefinitionReference"));Set<String> allowed=new TreeSet<>(owners.get(id));allowed.retainAll(requested);Map<String,String> localQuotes=new TreeMap<>();for(String task:allowed)localQuotes.put(task,quotes.get(id).get(task));reference.put("taskIds",new ArrayList<>(allowed));reference.put("taskQuotes",localQuotes);result.put(wireIds.get(id),node);}return result;
         }
         List<Map<String,Object>> descriptor(){List<Map<String,Object>> result=new ArrayList<>();for(Map<String,Object> node:roots.values()){Map<String,Object> reference=map(node.get("currentDefinitionReference"));result.add(copy(obj("id",node.get("id"),"wireId",wireIds.get(text(node.get("id"))),"baselineKey",reference.get("baselineKey"),"definitionSha256",DraftAdoption.hash(JsonUtils.write(core(node))),"sourceReferences",reference.get("sourceReferences"),"taskIds",reference.get("taskIds"),"prerequisiteForTaskIds",reference.get("prerequisiteForTaskIds"),"existing",reference.get("existing"))));}return result;}

@@ -67,6 +67,14 @@ final class DraftDiscoveryGroups {
         for(Map.Entry<String,JsonNode> reading:readings.entrySet())indexes.put(reading.getKey(),DraftCurrentTemplateAlignment.index(reading.getValue()));return indexes;
     }
 
+    /** The scope-only prompt is safe only when every instruction's referenced business definitions are supplied. */
+    static boolean knownDefinitionsComplete(Map<String,Object> payload) {
+        Set<String> available=new HashSet<>();for(Object raw:list(payload.get("knownRoots"))){Map<String,Object> root=map(raw);available.add(text(root.get("baselineKey")));}
+        List<?> instructions=list(payload.get("instructions"));if(instructions.isEmpty())return false;
+        for(Object raw:instructions){Map<String,Object> alignment=map(map(raw).get("currentTemplateAlignment"));List<?> keys=list(alignment.get("fixedRootKeys"));if(keys.isEmpty()||!Arrays.asList("exact_instruction_reference","definition_reference_only").contains(alignment.get("definitionStatus")))return false;for(Object key:keys)if(!available.contains(text(key)))return false;}
+        return true;
+    }
+
     private static int score(Bucket bucket,Piece piece) {
         if(intersects(bucket.roots,piece.roots))return 100;
         if(intersects(bucket.routeRoots,piece.routeRoots))return 80;

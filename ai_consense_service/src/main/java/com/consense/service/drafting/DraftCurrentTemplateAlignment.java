@@ -56,9 +56,17 @@ final class DraftCurrentTemplateAlignment {
             if(!note.path("captureComplete").asBoolean(false)&&!registeredIncomplete){reasons.add("COMPLETE_CURRENT_GUIDANCE_REQUIRED");return result;}
             String normalized=normalize(note.path("text").asText());List<Reference> matched=new ArrayList<>();
             for(Reference reference:references)if(normalized.equals(reference.instruction))matched.add(reference);
-            if(matched.isEmpty()){reasons.add("NO_EXACT_REGISTERED_INSTRUCTION");return result;}
             if(!currentObservation(note,note.path("text").asText())) {
                 reasons.add("CURRENT_INSTRUCTION_MEMBERS_UNPROVEN");return result;
+            }
+            if(matched.isEmpty()) {
+                String business=businessDefinition(normalized,payload);
+                if(business.isEmpty()){reasons.add("NO_EXACT_REGISTERED_INSTRUCTION");return result;}
+                list(result.get("fixedRootKeys")).add(business);list(result.get("currentEvidenceRefs")).add(source+"|guidance|"+id);
+                result.put("definitionStatus","definition_reference_only");
+                result.put("fixedBusinessDefinitionReferences",Collections.singletonList(obj("baselineKey",business,"referenceKind","fixed_definition_reference","editableAuthority",false)));
+                reasons.add("REGISTERED_CURRENT_BUSINESS_DEFINITION");reasons.add("CURRENT_SCOPE_REVIEW_REQUIRED");reasons.add("REFERENCE_REQUIRES_MODEL_AND_HUMAN_REVIEW");
+                result.put("notice","The complete current instruction and its own relevant source context supply a business definition reference. Project answers are expected to be unknown. Current conditions and edit ranges remain unconfirmed.");return result;
             }
             List<Object> actions=list(result.get("fixedActionReferences")),roots=list(result.get("fixedRootKeys")),refs=list(result.get("currentEvidenceRefs"));
             refs.add(source+"|guidance|"+id);
@@ -112,6 +120,23 @@ final class DraftCurrentTemplateAlignment {
             result.put("notice","The same complete instruction supplies a definition reference only. Conditions and current scopes still require model and human review.");
             reasons.add("REFERENCE_REQUIRES_MODEL_AND_HUMAN_REVIEW");
             return result;
+        }
+
+        private String businessDefinition(String instruction,Map<String,Object> payload) {
+            if(!"SCT".equals(reading.path("fileKey").asText()))return "";
+            if(instruction.equals(standardInstruction(189,190)))return "billNos";
+            boolean electronic=false,paper=false;
+            for(Object raw:list(payload.get("scopeCandidates"))) {
+                JsonNode scope=JsonUtils.mapper().valueToTree(raw);String full=scope.path("text").asText();
+                if(!currentObservation(scope.path("observation"),full))continue;
+                String body=normalize(full);if(!body.contains("Bills of Quantities"))continue;
+                electronic|=body.contains("L10Pro");paper|=body.contains("issued in hard copy");
+            }
+            // A generic a/b selection needs both BQ alternatives in this task's own current context.
+            if((instruction.equals(standardInstruction(55))||instruction.equals(standardInstruction(476)))&&electronic&&paper)return "electronicTendering";
+            if(instruction.equals(standardInstruction(60,65,66))&&electronic)return "electronicTendering";
+            if((instruction.equals(standardInstruction(231,236))||instruction.equals(standardInstruction(518,523)))&&paper)return "electronicTendering";
+            return "";
         }
 
         /** A note or historical paragraph topic alone cannot identify an action's present edit object. */
@@ -176,6 +201,7 @@ final class DraftCurrentTemplateAlignment {
 
     // Layout whitespace alone may differ. Negation, numbers, object wording and punctuation remain significant.
     private static String normalize(String value) { return value.replaceAll("[\\s\\u00a0]+"," ").trim(); }
+    private static String standardInstruction(int... paragraphs){List<String> parts=new ArrayList<>();for(int paragraph:paragraphs){String value=DraftBusinessRules.standardParagraph("SCT",paragraph);if(value.isEmpty())return "";parts.add(value);}return normalize(String.join("\n",parts));}
     private static String normalizeTarget(String value){return normalize(value).replaceAll("\\) (?=\\p{L})",")");}
     @SuppressWarnings("unchecked") private static List<Object> list(Object value) { return value instanceof List?(List<Object>)value:Collections.emptyList(); }
 

@@ -35,6 +35,16 @@ final class FixedVettingReferences {
     }
 
     static FixedVettingReferences empty() { return new FixedVettingReferences(null, Collections.emptyList()); }
+    /** Carry only existing packet catalogs across a progressive round, without repeating retrieval. */
+    static FixedVettingReferences combine(FixedVettingReferences before,FixedVettingReferences added){
+        before.assertSelectionCurrent();added.assertSelectionCurrent();if(before.isEmpty())return added;if(added.isEmpty())return before;
+        if(before.client!=added.client||!Objects.equals(before.projectId,added.projectId)||!Objects.equals(before.selectionIdentity,added.selectionIdentity))throw new IllegalArgumentException("Fixed reference editions differ across progressive rounds");
+        // The constructor identity is retained through this existing client, while immutable view bytes are shared.
+        FixedVettingReferences result=new FixedVettingReferences(before.client,Collections.emptyList());result.projectId=before.projectId;result.selectionIdentity=before.selectionIdentity;
+        result.hits.putAll(before.hits);result.views.putAll(before.views);result.slIds.addAll(before.slIds);
+        for(String id:added.hits.keySet()){if(result.views.containsKey(id)&&(!Objects.equals(result.views.get(id),added.views.get(id))||!before.pointer(id).equals(added.pointer(id))))throw new IllegalArgumentException("Fixed reference view or source identity changed across progressive rounds");result.hits.putIfAbsent(id,added.hits.get(id));result.views.putIfAbsent(id,added.views.get(id));}
+        result.slIds.addAll(added.slIds);result.assertSelectionCurrent();return result;
+    }
     static FixedVettingReferences retrieve(FixedBaselineRetrievalClient client,String projectId,String topic,int limit) {
         return retrieve(client,projectId,Collections.singletonList(topic),limit);
     }

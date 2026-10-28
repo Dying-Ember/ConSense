@@ -1,5 +1,7 @@
 <!-- vetting-official-baseline-scope-repair-20261029 -->
-**Vetting 最新交接（2026-10-29）：** 赛方样例／清单、实际原文及既有报告的逐项对照已有有界基线，样例中有存疑、排除和无法核实的事项，不能直接作为模型答案或准确率。四条混合合同／定价清单的提示词范围说明和指定正文选择均已源码修复并通过组合软件测试；当前运行包尚未包含这些修复，模型遵循、完整审查和业务验收均未通过。对照口径见[范围检查点](testing/vetting-official-baseline-and-scope-repair-20261029.md)，正文选择及组合测试边界见[正文选择检查点](testing/vetting-clause-context-priority-repair-20261029.md)，原件与逐项证据保留本机；下方 Candidate22 是此前运行和导出检查点。
+**Vetting 运行检查点（2026-10-29 01:44 上海时间）：** 新 Java 包已启动，完整前端审查正在进行，实质结果尚未验收。运行身份、实际输入观测和未决事项见[同步检查点](testing/source-sync-checkpoint-20261028.md)及其所列本地回执；后续状态以更新的运行证据为准。
+
+**Vetting 最新交接（2026-10-29）：** 赛方样例／清单、实际原文及既有报告的逐项对照已有有界基线，样例中有存疑、排除和无法核实的事项，不能直接作为模型答案或准确率。四条混合合同／定价清单的提示词范围说明和指定正文选择均已源码修复并通过组合软件测试；该检查点记录时的运行包尚未包含这些修复，后续运行状态以实际运行记录为准。Drafting 与 Vetting 联合源码的 52 套件、662 项隔离软件回归通过，见[同步检查点](testing/source-sync-checkpoint-20261028.md)；模型遵循、完整审查和业务验收仍未通过。对照口径见[范围检查点](testing/vetting-official-baseline-and-scope-repair-20261029.md)，正文选择及组合测试边界见[正文选择检查点](testing/vetting-clause-context-priority-repair-20261029.md)，原件与逐项证据保留本机；下方 Candidate22 是此前运行和导出检查点。
 
 <!-- drafting-grouped-harness-current-20261028 -->
 **Drafting 当前入口（2026-10-28）：** 版次基线、分组、增量取证与人工审核的规则见[实施 spec](specs/drafting-harness-baseline-first-20261027.md)，最新实际验证及失败见[分组验证检查点](testing/drafting-grouped-harness-20261028.md)；源码同步与隔离测试的进行中状态见[同步检查点](testing/source-sync-checkpoint-20261028.md)。已记录的单 NTT 续跑覆盖来源事项不等于图谱已确认或语义正确；人工范围、条件与取值来源经保存和续跑保留，但 SCT、SCC、项目通信及三份 Word 的完整端到端验收仍未完成。后续实测以该检查点最新记录为准，旧运行记录按各自时间读取。OCR 替代调查仅为研究，未证明真实 GPU 性能或质量，不改变现有路由，见[比较](research/unlimited-ocr2-oer-comparison-20261027.md)及[显存评估](research/unlimited-ocr2-sl-16gb-assessment-20261027.md)。

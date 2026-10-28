@@ -465,8 +465,8 @@ public class VettingSemanticReview {
         List<VettingReviewDirections.Direction> directions=VettingReviewDirections.plan(TOPICS);
         long deadline=clock.getAsLong()+directionRunNanos(props.getVetting().getSemanticRunMinutes());
         result.setModel(selectedModel());result.setPlannedCallCount(directions.size());
-        int index=0;java.util.concurrent.atomic.AtomicInteger ordinal=new java.util.concurrent.atomic.AtomicInteger(),queuedNeeds=new java.util.concurrent.atomic.AtomicInteger(),processedNeeds=new java.util.concurrent.atomic.AtomicInteger();
-        Deque<java.util.function.IntConsumer> followups=new ArrayDeque<>();long initialElapsed=0;
+        int index=0;java.util.concurrent.atomic.AtomicInteger ordinal=new java.util.concurrent.atomic.AtomicInteger();
+        EvidenceRounds followups=new EvidenceRounds(projectId,result,corpus,lang,documents,queryGuard,probe,clock,deadline,directions.size(),ordinal);long initialElapsed=0;
         for(VettingReviewDirections.Direction direction:directions){
             SemanticTopicVO audit=new SemanticTopicVO();audit.setTopicIndex(++index);audit.setTopic(direction.id+": "+direction.title);
             audit.setReviewKind(direction.items.isEmpty()?"topic":"checklist_direction");audit.setReferenceIds(direction.itemIds());
@@ -527,51 +527,9 @@ public class VettingSemanticReview {
                 if(selection.getChunks().stream().noneMatch(c->"tender".equals(c.getRole()))){audit.setError("No affected tender passage fit this source-bound direction; review remains pending.");continue;}
                 audit.setSubmittedChunkIds(selection.getChunks().stream().map(Chunk::getId).collect(Collectors.toList()));audit.setSubmittedChars(selection.getContentChars());
                 SemanticPacketVO first=VettingPacketCoverage.packet(index,0,"assigned_direction",selection.getChunks(),Collections.emptyList());audit.getPacketAudits().add(first);
+                requireDirectionTime(clock,deadline);
                 executeDirectionPacket(direction,null,standardNote,result,audit,first,selection,lang,index,directions.size(),index-1,probe.call(ordinal.incrementAndGet(),audit.getTopic(),null),corpus,fixed,documents,guard);
-                for(EvidenceNeed requested:directionEvidenceNeeds(direction.itemIds(),first,selection.getChunks())){
-                    SemanticEvidenceNeedVO lineage=evidenceNeedLineage(first,requested);first.getEvidenceNeeds().add(lineage);
-                    queuedNeeds.incrementAndGet();directionProbe.summary("evidence_need_queue",VettingReviewProbe.map("status","queued","directionIndex",index,"queued",queuedNeeds.get(),"processed",processedNeeds.get(),"pending",queuedNeeds.get()-processedNeeds.get()));
-                    final int directionIndex=index;
-                    followups.add(completedDirections->{
-                    long supplementStarted=System.nanoTime();
-                    try{
-                    queryGuard.run();
-                    directionProgress(completedDirections,directions.size(),"Looking for additional evidence for "+direction.title+".");
-                    String need=requested.query;List<Chunk> prior=requested.affected;
-                    List<String> needQueries=VettingReviewDirections.searchQueries(need);List<List<Chunk>> extraHits=new ArrayList<>();
-                    boolean standardNeed=standardEvidenceRequested(need),projectNeed=projectEvidenceRequested(need);
-                    if(!standardNeed&&!projectNeed){standardNeed=true;projectNeed=true;}
-                    if(projectNeed)for(String query:needQueries){requireDirectionTime(clock,deadline);queryGuard.run();extraHits.add(retrieveDirectionText(OerBusinessEvidence.session(corpus),query,null,queryGuard,props.getVetting().getSemanticContextExpansionChars()));}
-                    List<Chunk> extra=interleaveDirectionHits(extraHits);
-                    requireDirectionTime(clock,deadline);
-                    FixedVettingReferences nextFixed=FixedVettingReferences.empty();
-                    if(standardNeed)try(VettingReviewProbe.Timer timing=directionProbe.measure("requested_fixed_counterpart_retrieval","Explicit requested references only; existing retrieval call unchanged")){
-                        nextFixed=FixedVettingReferences.retrieve(fixedBaseline,projectId,needQueries,props.getVetting().getTopK());
-                    }
-                    int expansionLimit=props.getVetting().getSemanticContextExpansionChars();
-                    List<Chunk> next=directionEvidenceOrder(extra,nextFixed.chunks(),nextFixed.chunks(),prior,expansionLimit);
-                    VettingContextBuilder.Selection followup=directionSelection(next,prior,expansionLimit);
-                    directionTextSummary(directionProbe,"supplement_selection",directionIndex,extra,next,nextFixed.chunks(),followup.getChunks(),needQueries.size(),expansionLimit,supplementStarted);
-                    String followupStandardNote=standardNeed?requestedStandardNote(need,standardsAvailable,nextFixed,followup.getChunks())
-                            :"Standard references were not requested in this round; standard-dependent checks remain pending.";
-                    if(standardNeed&&!followupStandardNote.isEmpty())result.getWarnings().add(direction.id+" requested evidence: "+followupStandardNote);
-                    Set<String> previousIds=selection.getChunks().stream().map(Chunk::getId).collect(Collectors.toSet());
-                    if(!prior.isEmpty()&&followup.getChunks().containsAll(prior)&&followup.getChunks().stream().anyMatch(c->!previousIds.contains(c.getId()))){
-                        requireDirectionTime(clock,deadline);
-                        result.setPlannedCallCount(result.getPlannedCallCount()+1);
-                        SemanticPacketVO supplement=VettingPacketCoverage.packet(directionIndex,audit.getPacketAudits().size(),"requested_direction_context",followup.getChunks(),Collections.emptyList());
-                        supplement.setParentPacketId(first.getPacketId());supplement.setRequestedEvidenceNeedId(lineage.getNeedId());audit.getPacketAudits().add(supplement);
-                        SemanticTopicVO call=new SemanticTopicVO();call.setStatus("not_submitted");
-                        executeDirectionPacket(direction,need,followupStandardNote,result,call,supplement,followup,lang,directionIndex,directions.size(),completedDirections,probe.call(ordinal.incrementAndGet(),audit.getTopic()+" / requested evidence",null),corpus,nextFixed,documents,queryGuard);
-                    }else result.getWarnings().add(direction.id+": the requested counterpart was not retrieved within the text budget; the affected assessment remains pending.");
-                    }catch(RuntimeException failure){
-                        if(failure instanceof ReviewGuardFailure)throw failure;
-                        queryGuard.run();
-                        audit.setError("Requested evidence remains pending: "+brief(failure));
-                        result.getWarnings().add(direction.id+": requested evidence processing remains incomplete: "+brief(failure));
-                    }finally{VettingPacketCoverage.finish(audit,null);processedNeeds.incrementAndGet();directionProbe.summary("evidence_need_queue",VettingReviewProbe.map("status","processed","directionIndex",directionIndex,"queued",queuedNeeds.get(),"processed",processedNeeds.get(),"pending",queuedNeeds.get()-processedNeeds.get()));}
-                    });
-                }
+                followups.enqueue(direction,index,audit,first,selection.getChunks(),1,Collections.emptySet());
             }catch(RuntimeException failure){
                 if(failure instanceof ReviewGuardFailure)throw failure;
                 guard.run();
@@ -581,18 +539,18 @@ public class VettingSemanticReview {
                 VettingPacketCoverage.finish(audit,null);
                 directionProgress(index,directions.size(),"Finished "+direction.title+"; unresolved items remain pending.");
                 initialElapsed+=Math.max(0,clock.getAsLong()-initialStarted);
-                if(index%3==0&&!followups.isEmpty()){
+                if(index%3==0&&!followups.pending.isEmpty()){
                     long remaining=deadline-clock.getAsLong();
-                    boolean firstRequestedRound=processedNeeds.get()==0&&remaining>Math.max(java.util.concurrent.TimeUnit.MINUTES.toNanos(1),2*(initialElapsed/index));
-                    if(firstRequestedRound||supplementFits(remaining,initialElapsed,index,directions.size()))followups.removeFirst().accept(index);
+                    if(supplementFits(remaining,initialElapsed,index,directions.size()))followups.runNext(index);
+                    else followups.scheduleSummary("deferred_time",index,remaining);
                 }
             }
         }
-        while(!followups.isEmpty()){
-            if(clock.getAsLong()>=deadline){result.getWarnings().add(followups.size()+" requested evidence follow-ups remain pending after the run time budget.");break;}
-            followups.removeFirst().accept(directions.size());
+        while(!followups.pending.isEmpty()){
+            if(clock.getAsLong()>=deadline){result.getWarnings().add(followups.pending.size()+" requested evidence follow-ups remain pending after the run time budget.");break;}
+            followups.runNext(directions.size());
         }
-        probe.call(0,null,null).summary("evidence_need_queue",VettingReviewProbe.map("status","terminal","queued",queuedNeeds.get(),"processed",processedNeeds.get(),"pending",queuedNeeds.get()-processedNeeds.get(),"deadlineReached",clock.getAsLong()>=deadline));
+        followups.finish();
         for(SemanticTopicVO audit:result.getTopicAudits()){
             Set<String> assessed=audit.getPacketAudits().stream().flatMap(p->p.getChecklistAssessments().stream()).map(ChecklistAssessmentVO::getItemId).collect(Collectors.toSet());
             List<String> pending=audit.getReferenceIds().stream().filter(id->!assessed.contains(id)).collect(Collectors.toList());
@@ -602,15 +560,124 @@ public class VettingSemanticReview {
         return result;
     }
     private static final class ReviewGuardFailure extends RuntimeException {ReviewGuardFailure(RuntimeException cause){super("Review source, identity or cancellation guard failed",cause);}}
+    /** Request-owned synchronous work: one slot per three initials, first rounds before second rounds. */
+    private final class EvidenceRounds {
+        final String project,lang;final Result result;final List<Chunk> corpus;final List<com.consense.domain.SourceDocument> documents;
+        final Runnable guard;final VettingReviewProbe probe;final java.util.function.LongSupplier clock;final long deadline;final int total;
+        final java.util.concurrent.atomic.AtomicInteger ordinal;final Deque<EvidenceRound> pending=new ArrayDeque<>();
+        int observed,queued,attempted,lastDirection;
+        EvidenceRounds(String project,Result result,List<Chunk> corpus,String lang,List<com.consense.domain.SourceDocument> documents,Runnable guard,VettingReviewProbe probe,java.util.function.LongSupplier clock,long deadline,int total,java.util.concurrent.atomic.AtomicInteger ordinal){
+            this.project=project;this.result=result;this.corpus=corpus;this.lang=lang;this.documents=documents;this.guard=guard;this.probe=probe;this.clock=clock;this.deadline=deadline;this.total=total;this.ordinal=ordinal;
+        }
+        void enqueue(VettingReviewDirections.Direction direction,int index,SemanticTopicVO audit,SemanticPacketVO parent,List<Chunk> selected,int round,Set<String> searched){
+            enqueue(direction,index,audit,parent,selected,round,searched,FixedVettingReferences.empty());
+        }
+        void enqueue(VettingReviewDirections.Direction direction,int index,SemanticTopicVO audit,SemanticPacketVO parent,List<Chunk> selected,int round,Set<String> searched,FixedVettingReferences fixed){
+            for(EvidenceNeed need:directionEvidenceNeeds(direction.itemIds(),parent,selected,true)){
+                SemanticEvidenceNeedVO line=evidenceNeedLineage(parent,need);line.setSupplementRound(round);parent.getEvidenceNeeds().add(line);observed++;
+                if(round>2){terminate(line,"round_limit");continue;}
+                List<Chunk> prior=round==1?need.affected:selected;
+                pending.add(new EvidenceRound(direction,index,audit,parent,need,line,new ArrayList<>(prior),round,new LinkedHashSet<>(searched),fixed));
+                queued++;
+                queueSummary("queued",index);
+            }
+        }
+        void runNext(int completed){
+            int round=pending.stream().mapToInt(work->work.round).min().orElseThrow();
+            int next=pending.stream().filter(work->work.round==round&&work.index>lastDirection).mapToInt(work->work.index).min()
+                .orElseGet(()->pending.stream().filter(work->work.round==round).mapToInt(work->work.index).min().orElseThrow());
+            EvidenceRound chosen=null;for(java.util.Iterator<EvidenceRound> iterator=pending.iterator();iterator.hasNext();){EvidenceRound work=iterator.next();if(work.round==round&&work.index==next){chosen=work;iterator.remove();break;}}
+            lastDirection=next;run(chosen,completed);
+        }
+        void run(EvidenceRound work,int completed){
+            VettingReviewProbe.Call trace=probe.call(work.index,null,null);long started=System.nanoTime();
+            try{
+                requireDirectionTime(clock,deadline);guard.run();work.line.setProcessingStatus("attempted");
+                List<String> queries=new ArrayList<>();Set<String> targets=new LinkedHashSet<>();
+                for(String original:work.need.originalQueries){String target=evidenceTarget(original);if(!work.searched.contains(target)&&targets.add(target))queries.addAll(VettingReviewDirections.searchQueries(original));}
+                if(queries.isEmpty()){terminate(work.line,"same_target_without_new_evidence");return;}
+                work.searched.addAll(targets);
+                String requested=String.join("\n",work.need.originalQueries);boolean standard=standardEvidenceRequested(requested),projectNeed=projectEvidenceRequested(requested);
+                if(!standard&&!projectNeed){standard=true;projectNeed=true;}
+                directionProgress(completed,total,"Looking for grouped additional evidence for "+work.direction.title+".");
+                List<List<Chunk>> hits=new ArrayList<>();if(projectNeed)for(String query:queries){requireDirectionTime(clock,deadline);guard.run();hits.add(retrieveDirectionText(OerBusinessEvidence.session(corpus),query,null,guard,props.getVetting().getSemanticContextExpansionChars()));}
+                List<Chunk> extra=interleaveDirectionHits(hits);requireDirectionTime(clock,deadline);
+                FixedVettingReferences fetched=FixedVettingReferences.empty();if(standard)try(VettingReviewProbe.Timer timing=trace.measure("requested_fixed_counterpart_retrieval","Distinct grouped targets only")){
+                    fetched=FixedVettingReferences.retrieve(fixedBaseline,project,queries,props.getVetting().getTopK());
+                }
+                FixedVettingReferences catalog=FixedVettingReferences.combine(work.fixed,fetched);
+                int limit=props.getVetting().getSemanticContextExpansionChars();List<Chunk> offered=directionEvidenceOrder(extra,fetched.chunks(),fetched.chunks(),work.prior,limit);
+                VettingContextBuilder.Selection selected=directionSelection(offered,work.prior,limit);
+                directionTextSummary(trace,"supplement_selection",work.index,extra,offered,fetched.chunks(),selected.getChunks(),queries.size(),limit,started);
+                Set<String> previous=new HashSet<>(work.parent.getSubmittedChunkIds());
+                if(work.prior.isEmpty()||!selected.getChunks().containsAll(work.prior)||selected.getChunks().stream().noneMatch(chunk->!previous.contains(chunk.getId()))){terminate(work.line,"no_new_evidence_within_text_budget");return;}
+                requireDirectionTime(clock,deadline);guard.run();result.setPlannedCallCount(result.getPlannedCallCount()+1);
+                SemanticPacketVO packet=VettingPacketCoverage.packet(work.index,work.audit.getPacketAudits().size(),"requested_direction_context",selected.getChunks(),Collections.emptyList());
+                packet.setParentPacketId(work.parent.getPacketId());packet.setRequestedEvidenceNeedId(work.line.getNeedId());work.audit.getPacketAudits().add(packet);
+                String note=standard?requestedStandardNote(requested,fixedBaseline!=null&&fixedBaseline.enabled(),catalog,selected.getChunks()):"Standard references were not requested in this round; standard-dependent checks remain pending.";
+                SemanticTopicVO call=new SemanticTopicVO();call.setStatus("not_submitted");
+                executeDirectionPacket(work.direction,questions(work),note,result,call,packet,selected,lang,work.index,total,completed,probe.call(ordinal.incrementAndGet(),work.audit.getTopic()+" / requested evidence",null),corpus,catalog,documents,guard);
+                if(!Arrays.asList("completed","completed_empty","completed_with_rejections").contains(packet.getStatus())){terminate(work.line,"model_or_evidence_failure");return;}
+                if(!directionEvidenceNeeds(work.direction.itemIds(),packet,selected.getChunks(),true).isEmpty()){
+                    work.line.setProcessingStatus("pending_child_round");enqueue(work.direction,work.index,work.audit,packet,selected.getChunks(),work.round+1,work.searched,catalog);
+                }else terminate(work.line,"no_verified_resolution");
+            }catch(RuntimeException failure){
+                terminate(work.line,clock.getAsLong()>=deadline?"run_time_budget":"evidence_processing_failure");
+                if(failure instanceof ReviewGuardFailure)throw failure;guard.run();work.audit.setError("Requested evidence remains pending: "+brief(failure));
+                result.getWarnings().add(work.direction.id+": requested evidence processing remains incomplete: "+brief(failure));
+            }finally{
+                attempted++;refresh(work.audit);VettingPacketCoverage.finish(work.audit,null);queueSummary("processed",work.index);
+            }
+        }
+        String questions(EvidenceRound work){
+            Set<String> questions=new LinkedHashSet<>();SemanticPacketVO current=work.parent;
+            for(int depth=0;depth<2&&current.getParentPacketId()!=null;depth++){
+                SemanticPacketVO ancestor=null;for(SemanticPacketVO packet:work.audit.getPacketAudits())if(Objects.equals(packet.getPacketId(),current.getParentPacketId()))ancestor=packet;
+                if(ancestor==null)break;for(SemanticEvidenceNeedVO line:ancestor.getEvidenceNeeds())if(Objects.equals(line.getNeedId(),current.getRequestedEvidenceNeedId()))questions.addAll(line.getOriginalQueries().isEmpty()?Collections.singletonList(line.getQuery()):line.getOriginalQueries());current=ancestor;
+            }
+            questions.addAll(work.need.originalQueries);return String.join("\n",questions);
+        }
+        void refresh(SemanticTopicVO audit){
+            VettingEvidenceNeedResolution.Result resolution=VettingEvidenceNeedResolution.resolve(audit.getPacketAudits());
+            for(SemanticPacketVO packet:audit.getPacketAudits())for(SemanticEvidenceNeedVO line:packet.getEvidenceNeeds())if(resolution.resolvedNeed(packet.getPacketId(),line.getNeedId())){line.setProcessingStatus("resolved");line.setTerminalReason(null);}
+        }
+        void finish(){
+            for(EvidenceRound work:pending)terminate(work.line,"run_time_budget");
+            for(SemanticTopicVO audit:result.getTopicAudits()){refresh(audit);for(SemanticPacketVO packet:audit.getPacketAudits())for(SemanticEvidenceNeedVO line:packet.getEvidenceNeeds())if(!"resolved".equals(line.getProcessingStatus())&&line.getTerminalReason()==null)terminate(line,"unresolved_child_round");VettingPacketCoverage.finish(audit,null);}
+            int unresolved=result.getTopicAudits().stream().mapToInt(audit->VettingEvidenceNeedResolution.resolve(audit.getPacketAudits()).unresolvedNeeds()).sum();
+            probe.call(0,null,null).summary("evidence_need_queue",VettingReviewProbe.map("status","terminal","queued",queued,"processed",attempted,"pending",pending.size(),"observedGroups",observed,"notAdmitted",observed-queued,"resolved",observed-unresolved,"unresolved",unresolved,"deadlineReached",clock.getAsLong()>=deadline));
+        }
+        void queueSummary(String status,int index){probe.call(index,null,null).summary("evidence_need_queue",VettingReviewProbe.map("status",status,"directionIndex",index,"queued",queued,"processed",attempted,"pending",pending.size()));}
+        void scheduleSummary(String status,int index,long remaining){probe.call(index,null,null).summary("evidence_schedule",VettingReviewProbe.map("status",status,"directionIndex",index,"pending",pending.size(),"remainingMs",Math.max(0,remaining/1_000_000)));}
+        void terminate(SemanticEvidenceNeedVO line,String reason){line.setProcessingStatus("unresolved");line.setTerminalReason(reason);}
+    }
+    private static final class EvidenceRound {
+        final VettingReviewDirections.Direction direction;final int index,round;final SemanticTopicVO audit;final SemanticPacketVO parent;
+        final EvidenceNeed need;final SemanticEvidenceNeedVO line;final List<Chunk> prior;final Set<String> searched;final FixedVettingReferences fixed;
+        EvidenceRound(VettingReviewDirections.Direction direction,int index,SemanticTopicVO audit,SemanticPacketVO parent,EvidenceNeed need,SemanticEvidenceNeedVO line,List<Chunk> prior,int round,Set<String> searched,FixedVettingReferences fixed){this.direction=direction;this.index=index;this.audit=audit;this.parent=parent;this.need=need;this.line=line;this.prior=prior;this.round=round;this.searched=searched;this.fixed=fixed;}
+    }
+    private static String evidenceTarget(String query){
+        Set<String> keys=new TreeSet<>();Set<Integer> editionLocators=new HashSet<>();
+        java.util.regex.Matcher edition=java.util.regex.Pattern.compile("(?i)\\bSL\\s*(\\d{4})(?!\\d)[^\\r\\n]{0,80}?\\bclauses?\\s*([0-9]+(?:\\.[A-Za-z0-9]+)*(?:\\([A-Za-z0-9]+\\))*)").matcher(query);
+        while(edition.find()){editionLocators.add(edition.start());keys.add("SL "+edition.group(1)+" CLAUSE "+edition.group(2).toUpperCase(Locale.ROOT));}
+        java.util.regex.Matcher target=java.util.regex.Pattern.compile("(?i)\\b(NTT|SCT|SCC|GCC|GCT|PRE|PSS|SL)\\s*(?:clauses?\\s*)?([0-9]+(?:\\.[A-Za-z0-9]+)*(?:\\([A-Za-z0-9]+\\))*)|\\bappendix\\s+([A-Za-z0-9]+(?:\\.[A-Za-z0-9]+)*)").matcher(query);
+        while(target.find()){
+            if("SL".equalsIgnoreCase(target.group(1))&&target.group(2).matches("\\d{4}")){if(!editionLocators.contains(target.start()))return query.trim().replaceAll("\\s+"," ");continue;}
+            keys.add(target.group(3)==null?target.group(1).toUpperCase(Locale.ROOT)+" "+target.group(2).toUpperCase(Locale.ROOT):"APPENDIX "+target.group(3).toUpperCase(Locale.ROOT));
+        }
+        return keys.isEmpty()?query.trim().replaceAll("\\s+"," "):String.join(";",keys);
+    }
     static final class EvidenceNeed {
         final String query;final List<Chunk> affected;
+        final List<String> originalQueries=new ArrayList<>();
         final List<String> itemIds=new ArrayList<>();final List<Integer> assessmentIndexes=new ArrayList<>();
-        EvidenceNeed(String query,List<Chunk> affected){this.query=query;this.affected=affected;}
+        EvidenceNeed(String query,List<Chunk> affected){this.query=query;this.affected=affected;originalQueries.add(query);}
     }
     static SemanticEvidenceNeedVO evidenceNeedLineage(SemanticPacketVO parent,EvidenceNeed need){
         SemanticEvidenceNeedVO line=new SemanticEvidenceNeedVO();line.setQuery(need.query);line.setChecklistItemIds(new ArrayList<>(need.itemIds));
+        line.setOriginalQueries(new ArrayList<>(need.originalQueries));
         line.setAffectedChunkIds(need.affected.stream().map(Chunk::getId).collect(Collectors.toList()));line.setVerifiedAssessmentIndexes(new ArrayList<>(need.assessmentIndexes));
-        line.setNeedId(VettingCorpus.hash(JsonUtils.write(Arrays.asList("direction-evidence-need-v1",parent.getPacketId(),need.query.trim().replaceAll("\\s+"," "),line.getChecklistItemIds(),line.getAffectedChunkIds(),line.getVerifiedAssessmentIndexes()))));return line;
+        line.setNeedId(VettingCorpus.hash(JsonUtils.write(Arrays.asList("direction-evidence-need-v1",parent.getPacketId(),need.originalQueries,line.getChecklistItemIds(),line.getAffectedChunkIds(),line.getVerifiedAssessmentIndexes()))));return line;
     }
     private static void requireDirectionTime(java.util.function.LongSupplier clock,long deadline){
         if(clock.getAsLong()>=deadline)throw new IllegalStateException("Run time budget reached; requested evidence remains pending.");
@@ -619,11 +686,13 @@ public class VettingSemanticReview {
     static boolean supplementFits(long remainingNanos,long initialNanos,int completed,int total){
         if(completed<=0||remainingNanos<=0)return false;
         long mean=initialNanos/completed;
-        long initialReserve=mean*Math.max(0,total-completed);
         long supplementReserve=Math.max(java.util.concurrent.TimeUnit.MINUTES.toNanos(1),mean*2);
-        return remainingNanos>initialReserve+supplementReserve;
+        return remainingNanos>supplementReserve;
     }
     static List<EvidenceNeed> directionEvidenceNeeds(List<String> assigned,SemanticPacketVO packet,List<Chunk> submitted){
+        return directionEvidenceNeeds(assigned,packet,submitted,false);
+    }
+    private static List<EvidenceNeed> directionEvidenceNeeds(List<String> assigned,SemanticPacketVO packet,List<Chunk> submitted,boolean grouped){
         Map<String,EvidenceNeed> needs=new LinkedHashMap<>();
         for(int index=0;index<packet.getVerifiedAssessments().size();index++){
             com.consense.web.dto.VettingDtos.VerifiedAssessmentVO item=packet.getVerifiedAssessments().get(index);
@@ -634,24 +703,26 @@ public class VettingSemanticReview {
             }
             if(tracked&&linked.isEmpty())continue;
             for(String fact:item.getPendingFacts())if(fact!=null&&specificEvidenceNeed("Confirm "+fact)){
-                if(linked.isEmpty())addEvidenceNeed(needs,fact,affectedTenderText(item.getEvidence(),null,submitted),null,index);
-                else for(ChecklistAssessmentVO row:linked)addEvidenceNeed(needs,fact,affectedTenderText(row.getEvidence(),row.getEvidenceChunkIds(),submitted),row.getItemId(),index);
+                if(linked.isEmpty())addEvidenceNeed(needs,fact,affectedTenderText(item.getEvidence(),null,submitted),null,index,grouped);
+                else for(ChecklistAssessmentVO row:linked)addEvidenceNeed(needs,fact,affectedTenderText(row.getEvidence(),row.getEvidenceChunkIds(),submitted),row.getItemId(),index,grouped);
             }
         }
         for(ChecklistAssessmentVO item:packet.getChecklistAssessments())if(assigned.contains(item.getItemId())&&"insufficient_evidence".equals(item.getStatus())&&specificEvidenceNeed(item.getReason()))
-            addEvidenceNeed(needs,item.getReason(),affectedTenderText(item.getEvidence(),item.getEvidenceChunkIds(),submitted),item.getItemId(),item.getVerifiedAssessmentIndex());
+            addEvidenceNeed(needs,item.getReason(),affectedTenderText(item.getEvidence(),item.getEvidenceChunkIds(),submitted),item.getItemId(),item.getVerifiedAssessmentIndex(),grouped);
         for(int index=0;index<packet.getVerifiedAssessments().size();index++){
             com.consense.web.dto.VettingDtos.VerifiedAssessmentVO item=packet.getVerifiedAssessments().get(index);
             if("insufficient_context".equals(item.getAssessment())&&specificEvidenceNeed(item.getComment()))
-                addEvidenceNeed(needs,item.getComment(),affectedTenderText(item.getEvidence(),null,submitted),null,index);
+                addEvidenceNeed(needs,item.getComment(),affectedTenderText(item.getEvidence(),null,submitted),null,index,grouped);
         }
         return new ArrayList<>(needs.values());
     }
-    private static void addEvidenceNeed(Map<String,EvidenceNeed> needs,String query,List<Chunk> affected,String itemId,Integer assessmentIndex){
+    private static void addEvidenceNeed(Map<String,EvidenceNeed> needs,String query,List<Chunk> affected,String itemId,Integer assessmentIndex,boolean grouped){
         if(affected.isEmpty())return;
-        String key=query.trim().replaceAll("\\s+"," ");EvidenceNeed existing=needs.get(key);
+        String key=grouped?JsonUtils.write(Arrays.asList(assessmentIndex==null?itemId:assessmentIndex,affected.stream()
+            .map(c->Arrays.asList(c.getDocumentId(),c.getSourceHash(),c.getOriginalSourceSha256())).distinct().sorted(Comparator.comparing(Object::toString)).collect(Collectors.toList()))):query.trim().replaceAll("\\s+"," ");EvidenceNeed existing=needs.get(key);
         if(existing==null){existing=new EvidenceNeed(query,new ArrayList<>(affected));needs.put(key,existing);}
         else for(Chunk chunk:affected)if(!existing.affected.contains(chunk))existing.affected.add(chunk);
+        if(existing.originalQueries.stream().noneMatch(value->value.trim().replaceAll("\\s+"," ").equals(query.trim().replaceAll("\\s+"," "))))existing.originalQueries.add(query);
         if(itemId!=null&&!existing.itemIds.contains(itemId))existing.itemIds.add(itemId);
         if(assessmentIndex!=null&&!existing.assessmentIndexes.contains(assessmentIndex))existing.assessmentIndexes.add(assessmentIndex);
     }
@@ -814,12 +885,15 @@ public class VettingSemanticReview {
         VettingReviewDirections.Direction direction=activeDirection.get();
         return VettingOutputSchema.forChunkIds(references.wireIds(),direction==null?null:direction.itemIds());
     }
-    private String textFirstPacket(String topic,VettingContextBuilder.Selection selection){
-        String text=textFirstUser(topic,selection);VettingReviewDirections.Direction direction=activeDirection.get();
+    private String textFirstPacket(String topic,VettingContextBuilder.Selection selection){return textFirstPacket(topic,selection,null);}
+    private String textFirstPacket(String topic,VettingContextBuilder.Selection selection,List<EmittedUnit> units){
+        String text=textFirstUser(topic,selection,units);VettingReviewDirections.Direction direction=activeDirection.get();
         if(direction==null)return text;
         String need=activeEvidenceNeed.get();
-        return direction.instructions()+"\n"+(activeStandardNote.get()==null?"":activeStandardNote.get())+"\nSelected passages with the same source identity are grouped and ordered when their source positions are known. Intervening text may be omitted; read related passages together without inferring clause ownership.\n"+(need==null?"":"\nSpecific earlier evidence need (this round includes the affected original text and newly selected related source text): "+need
-                +"\nDecide explicitly whether this exact need can now be answered. If uncertainty remains, preserve insufficient_context and the missing fact; do not infer resolution from retrieval alone.\n")+text;
+        String prefix=direction.instructions()+"\n"+(activeStandardNote.get()==null?"":activeStandardNote.get())+"\nSelected passages with the same source identity are grouped and ordered when their source positions are known. Intervening text may be omitted; read related passages together without inferring clause ownership.\n"+(need==null?"":"\nSpecific earlier evidence need (this round includes the affected original text and newly selected related source text): "+need
+                +"\nDecide explicitly whether this exact need can now be answered. If uncertainty remains, preserve insufficient_context and the missing fact; do not infer resolution from retrieval alone.\n");
+        if(units!=null)for(EmittedUnit unit:units){unit.start+=prefix.length();unit.end+=prefix.length();}
+        return prefix+text;
     }
     private static String firstPassWarning(FirstPass pass,int readableOrigins,int tenderOrigins){
         int referenceOrigins=readableOrigins-tenderOrigins,selectedReferences=pass.selectedOrigins-pass.subjects.size();
@@ -1048,7 +1122,7 @@ public class VettingSemanticReview {
             VettingCheckpointService.Session durable=checkpoint.get();boolean checkpointBegun=false,reused=false;
             int candidateStart=result.getCandidates().size(),warningStart=result.getWarnings().size();
             try {
-                String actualSystem,actualUser;
+                String actualSystem,actualUser;List<EmittedUnit> emittedUnits=new ArrayList<>();
                 Map<String,ObservedSourceClauseLocators.Bound> sourceLocators;
                 boolean deferredLocators=qwenEnabled()&&OerBusinessEvidence.isSemanticCorpus(suppliedCorpus);
                 Set<String> inspectedLocators=new HashSet<>();
@@ -1058,7 +1132,7 @@ public class VettingSemanticReview {
                     actualSystem = effectiveSystem(lang, projectReference);
                     Map<String,JsonNode> wordContexts=qwenEnabled()&&OerBusinessEvidence.isSemanticCorpus(suppliedCorpus)?Collections.emptyMap():selectedWordContexts(suppliedCorpus,submitted);
                     sourceLocators=deferredLocators?new LinkedHashMap<>():selectedSourceLocators(suppliedCorpus,submitted,wordContexts);
-                    actualUser = qwenEnabled()?textFirstPacket(topic,selection):user(topic, selection, referenceIds,fixedReferences,documents,wordContexts,sourceLocators);
+                    actualUser = qwenEnabled()?textFirstPacket(topic,selection,emittedUnits):user(topic, selection, referenceIds,fixedReferences,documents,wordContexts,sourceLocators);
                     actualSchema = packetSchema(references);
                 }
                 topicProbe.text("model_system", VettingReviewProbe.map("model", selectedModel(),
@@ -1157,20 +1231,22 @@ public class VettingSemanticReview {
                     attempt.setOrdinal(packet.getAttempts().size()+1);attempt.setInput(JsonUtils.parse(JsonUtils.write(dispatchInput)));attempt.setInputBudget(JsonUtils.parse(JsonUtils.write(dispatchBudget)));
                     packet.getAttempts().add(attempt);if(durable!=null)durable.reserveAttempt(packet);
                     int rawStart=rawResponses.size();Map<String,Long> gatewayPhaseWallNanos=new LinkedHashMap<>();boolean retry=false;String validationPurpose=evidenceRepair==null?"original":"evidence_patch";
+                    final String finalUser=dispatchUser,finalInputSha=dispatchInput.getSerializedInputSha256(),finalSourceSha=dispatchInput.getSourceSnapshotSha256();
+                    java.util.function.Consumer<com.consense.service.llm.QwenChatUsagePreflight.DispatchReady> dispatchReady=ready->modelAdmission(topicProbe,ready,attempt.getOrdinal(),finalInputSha,finalSourceSha,finalUser,actualUser,emittedUnits,submitted.size());
                     try (VettingReviewProbe.Timer timer=topicProbe.measure("ai_gateway_call","One complete gateway attempt; generation attempts are accounted independently")) {
                         progressStage(result,packet.getAttempts().size()>1?"Rechecking the model response.":"The model is reviewing the selected passages.");
                         packet.setActualGatewayCallStarted(true);result.setActualGatewayCallCount(result.getActualGatewayCallCount()+1);
                         if(evidenceRepair!=null) {
                             List<JsonNode> patches;
                             if(qwenPacket)patches=operation().getQwen().complete(dispatchInput,dispatchBudget,dispatchSystem,dispatchUser,dispatchSchema,JsonNode.class,rawResponses,gatewayPhaseWallNanos,
-                                    metadata->{attempt.setResponseMetadata(metadata.deepCopy());audit.setModelResponseMetadata(metadata.deepCopy());});
+                                    metadata->{attempt.setResponseMetadata(metadata.deepCopy());audit.setModelResponseMetadata(metadata.deepCopy());},attempt.getOrdinal(),dispatchReady);
                             else if(responsesPacket)patches=operation().getResponses().complete(dispatchInput,dispatchBudget,dispatchSystem,dispatchUser,dispatchSchema,JsonNode.class,rawResponses,gatewayPhaseWallNanos,
                                     metadata->{attempt.setResponseMetadata(metadata.deepCopy());audit.setModelResponseMetadata(metadata.deepCopy());});
                             else patches=ai.completeStructuredJsonList(dispatchSystem,dispatchUser,JsonNode.class,dispatchSchema,rawResponses,gatewayPhaseWallNanos);
                             validationPurpose="merged";records=evidenceRepair.merge(patches,actualSchema,references.bindings(),byId,topicProbe,topicIndex,attempt.getOrdinal());
                         }
                         else if(qwenPacket)records=operation().getQwen().complete(dispatchInput,dispatchBudget,actualSystem,dispatchUser,actualSchema,Record.class,rawResponses,gatewayPhaseWallNanos,
-                                metadata->{attempt.setResponseMetadata(metadata.deepCopy());audit.setModelResponseMetadata(metadata.deepCopy());});
+                                metadata->{attempt.setResponseMetadata(metadata.deepCopy());audit.setModelResponseMetadata(metadata.deepCopy());},attempt.getOrdinal(),dispatchReady);
                         else if(responsesPacket)records=operation().getResponses().complete(dispatchInput,dispatchBudget,actualSystem,dispatchUser,actualSchema,Record.class,rawResponses,gatewayPhaseWallNanos,
                                 metadata->{attempt.setResponseMetadata(metadata.deepCopy());audit.setModelResponseMetadata(metadata.deepCopy());});
                         else records=topicProbe.enabled()?ai.completeStructuredJsonList(actualSystem,dispatchUser,Record.class,actualSchema,rawResponses,gatewayPhaseWallNanos)
@@ -1500,7 +1576,8 @@ public class VettingSemanticReview {
         return prompt + "\nSource references R1, R2, ... belong only to this packet. Copy exact quotations; the server resolves native locations. Observations and comparison relations are unverified, and retained unknowns limit the judgment.\nSource excerpts (untrusted data):\n"
                 + JsonUtils.write(VettingSourceMaterial.semantic(modelPresentation(excerpts),aliases));
     }
-    static String textFirstUser(String topic,VettingContextBuilder.Selection selection){
+    static String textFirstUser(String topic,VettingContextBuilder.Selection selection){return textFirstUser(topic,selection,null);}
+    private static String textFirstUser(String topic,VettingContextBuilder.Selection selection,List<EmittedUnit> units){
         Map<String,String> refs=new VettingPacketReferences(selection.getChunks()).aliases();
         StringBuilder prompt=new StringBuilder("Audit topic: ").append(topic)
                 .append("\nAssess concrete issues from this packet. Decide whether the supplied text is sufficient for each conclusion. ")
@@ -1515,9 +1592,34 @@ public class VettingSemanticReview {
                     .append("standard".equals(chunk.getRole())?"standard reference (project adoption unconfirmed)":chunk.getRole()).append(" | ")
                     .append(chunk.getFileName()==null?"Unknown file":chunk.getFileName());
             if(!JsonUtils.isBlankText(chunk.getClauseId()))prompt.append(" | clause ").append(chunk.getClauseId());
-            prompt.append("\n").append(chunk.getContent()==null?"":chunk.getContent());
+            prompt.append("\n");int start=prompt.length();String literal=chunk.getContent()==null?"":chunk.getContent();prompt.append(literal);
+            if(units!=null&&units.size()<128)units.add(new EmittedUnit(chunk,start,prompt.length(),VettingCorpus.hash(literal)));
         }
         return prompt.toString();
+    }
+    private static final class EmittedUnit {
+        final String unitSha,clauseSha,originalSha,literalSha;final int chars;final Long sourceOrder;int start,end;
+        EmittedUnit(Chunk chunk,int from,int to,String literal){
+            unitSha=JsonUtils.isBlankText(chunk.getId())?null:VettingCorpus.hash(chunk.getId());clauseSha=JsonUtils.isBlankText(chunk.getClauseId())?null:VettingCorpus.hash(chunk.getClauseId());
+            originalSha=chunk.getOriginalSourceSha256();literalSha=literal;start=from;end=to;chars=to-from;
+            JsonNode order=chunk.getCanonicalEvidence()==null?null:chunk.getCanonicalEvidence().getSourceOrder();sourceOrder=order!=null&&order.isIntegralNumber()&&order.canConvertToLong()&&order.longValue()>=0?order.longValue():null;
+        }
+    }
+    private static void modelAdmission(VettingReviewProbe.Call probe,com.consense.service.llm.QwenChatUsagePreflight.DispatchReady ready,int ordinal,String inputSha,String sourceSha,String user,String original,List<EmittedUnit> units,int selectedUnits){
+        boolean bound=ready.getAttemptOrdinal()==ordinal&&Objects.equals(inputSha,ready.getPreparedInputSha256())&&Objects.equals(sourceSha,ready.getSourceSnapshotSha256())
+                &&Objects.equals(VettingCorpus.hash(user),ready.getUserSha256())&&user.length()==ready.getUserChars();
+        Map<String,Object> wire=VettingReviewProbe.map("attemptOrdinal",ordinal,"preparedInputSha256",ready.getPreparedInputSha256(),"generationWireSha256",ready.getGenerationWireSha256(),
+                "sourceSnapshotSha256",ready.getSourceSnapshotSha256(),"emittedTextSha256",ready.getUserSha256(),"userChars",ready.getUserChars(),"unitCount",selectedUnits,"receiptUnits",units.size(),"truncated",selectedUnits>units.size(),"status",bound?"ready":"unknown");
+        probe.summary("model_dispatch_ready",wire);
+        for(int index=0;index<units.size();index++){
+            EmittedUnit unit=units.get(index);boolean originalUser=Objects.equals(user,original);
+            boolean present=bound&&originalUser&&unit.chars>0&&unit.start>=0&&unit.end<=user.length()&&Objects.equals(unit.literalSha,VettingCorpus.hash(user.substring(unit.start,unit.end)));
+            Map<String,Object> receipt=new LinkedHashMap<>(wire);receipt.remove("unitCount");receipt.remove("receiptUnits");receipt.remove("truncated");receipt.remove("userChars");
+            receipt.put("canonicalChunkFingerprint",unit.unitSha);receipt.put("clauseFingerprint",unit.clauseSha);receipt.put("originalSourceSha256",unit.originalSha);receipt.put("literalTextSha256",unit.literalSha);
+            receipt.put("emittedOrdinal",index+1);receipt.put("sourceOrder",unit.sourceOrder);receipt.put("literalChars",unit.chars);receipt.put("startOffset",unit.start);receipt.put("endOffset",unit.end);
+            receipt.put("actualUserMember",present?Boolean.TRUE:null);receipt.put("status",present?"present":"unknown");receipt.put("reason",!bound?"sealed_user_binding_unknown":!originalUser?"repair_user_unmapped":present?"exact_body_member":"literal_mapping_unknown");
+            probe.summary("model_unit_admission",receipt);
+        }
     }
     /** Presentation only: preserve the exact selected records and each source's existing array slots. */
     static List<Map<String,Object>> modelPresentation(List<Map<String,Object>> excerpts) {

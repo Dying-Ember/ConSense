@@ -1,5 +1,29 @@
 # Drafting 分组、并发与前端反馈验证（2026-10-28）
 
+## 当前检查点：build28 软件门通过，SCT 前端新探针因重复业务定义再次早停（2026-10-29）
+
+build28 新任务 `b242fe17-4f3b-4559-a293-9ae285067212` 已通过内置浏览器实际运行至 23/88 来源事项、6/30 组并自动 PARTIAL，处理中 0，未继续派发剩余 24 组。停止原因为 `supplied_business_definition_duplicated` 和 `node_without_supported_requirement_mapping`；6 个已返回组各实际调用 1 次，无补证轮。原始诊断已通过页面“准备本次运行诊断→下载诊断 JSON”实际下载，封存 `.local/drafting-harness-main-20261028-v1/template-variation-probe/downloads/build28-sct-stopped-diagnostics.json`。结果 revision 为 `d2a4076c-2c20-47a4-8b6e-dff1f1475515`，createdAt/updatedAt 为 `2026-10-28T17:41:22.067485Z` / `2026-10-28T17:43:06.868753Z`；这是服务任务记录，不等于纯模型耗时。48 requirements、27 compiled nodes 不是正确率。Bill 原始回复已明确引用 `billNos`，但其具体范围仍为 check；BQ 条件及首停重复节点正在按原始输入/回复调查，尚不能声称整体质量提高。截图119—121保留运行、早停及下载；未上传通信、未采用项目值或生成 Word。
+
+build28 的最终定向软件门在全新 target 强制编译生产及 637 个测试源后，通过 32 套件、279 项，0 失败／错误／跳过，日志 `.local/source-sync-drafting-final-20261029-0138/full-targeted-regression.log`。首次编译泛型错误、272 项中的 10 个失败以及原基线复跑的 3 个旧 Mockito 入口失败均保留：新 fixture 补齐真实 guidance memberRanges，不放宽原生 guard；旧续跑 fixture 改为实际五参入口，预算、未知不重放及保存断言保持；同源只读引用改为显式当前 guidance/scope 关联，旧非空、只读、主 owner 权限及 foreign 隔离断言保留，新六例同时证明无关联、陈旧和伪造引用不获权。279 与此前定向门重叠，不相加，不代表全仓或业务通过。
+
+只读关联仍要求 reader 自身完整原生 guidance anchor，且其本次供应的 relatedGuidance 三元组与实际根证明一致，owners、taskQuotes 和 patch 权限不增加。非 guidance 的 marker/field reader 本轮没有新增支持；现有只比文字的引用 helper 不足以代替原生范围验证，未用它绕过 guard。独立只读审查未发现阻断性权限或 NTT 保留问题；所有 guidance 提前 anchor 扫描存在未测量的额外本地成本，尚未证明是实际瓶颈。
+
+build28 仅覆盖冻结 build27 的 7 个 Drafting 实现，最终 package 成功 28.341 秒，打包跳过测试；JAR SHA256 `1405DEF3817CC3932B5C142BF97F0229DE39FF25A5A8944A0D579BF77A84BBDC`。核验旧 Java24584/build27 身份后通过原 exec 中断，新 Java45820/18204、exec1493 启动；前端 frontend16/5185 及原 DB/uploads/home/temp/8GiB 堆保持，其他服务未操作。原 v23 页面在 `2026-10-28T17:41:08.131Z` 仅选 SCT24，实际点击新识别按钮；截图118只证明启动过渡，后续真实结果以119—121及新诊断为准。未续发 build27 的剩余 79 组。
+
+原 v23 项目通过内置浏览器取消 NTT23，仅选择 SCT24／SCC25，于 `2026-10-28T16:48:45.671Z` 启动 Qwen3.8 27B 新任务 `68913833-698a-4a6b-ad42-8c2573d3395d`。冻结 selected 为 24/25、protected 为 23/24/25，计划为 SCT 88 事项/32 组、SCC 144 事项/51 组，NTT 没有本轮任务。任务在 11/232 事项、4/83 组自动 PARTIAL 早停，剩余 79 组未派发，未点击继续。实际 5 次模型调用全部属于 SCT；第 4 个已结束组是派发前阻断的零调用回执，SCC 尚无实际模型调用。
+
+诊断 JSON 由前端实际下载并封存，SHA256 `95026E81994C563527F0449E409D2DBA6A53577F814F6259F12541A0EC4CF535`，本机路径 `.local/drafting-harness-main-20261028-v1/template-variation-probe/downloads/build27-selected-sct-scc-stopped-diagnostics.json`。四组回执及来源核对见同目录 `build27-selected-source-readonly-audit.json`。原始 5 个模型 reply 的 `nodes` 全部为 0；界面的 16 个原子节点来自 harness 编译 9+7 条 check，不能称为模型正确识别 16 个业务变量。26 requirements 同样不是正确率。
+
+本次三个修复接缝如下，软件门已过，真实模型及业务效果仍待验证：
+
+- 两处真实 Bill 任务拥有不同原件位置和 group ID，但短别名归一后 prompt 相同，公共 ledger phase `discover-group` 把第二组误判重发。Service 改为 `discover-<真实groupTaskId>`，同组 no-replay 和未知发送不重试仍保留。Auto 对未收到任何 raw reply 的异常只保存真实首因和未决覆盖，不再用空对象生成假的 `group_task_outcome_missing_or_invalid`。
+- Bill 将 scope 的 s1 当 member，DiscD 将 guidance 的 g1 当 scope；原拒绝正确，但空 items 无助于显式纠错。References 提供最多 4 条、每条最多 4 个本 owner 已收到的 `{kind,id短别名}` 选项，Auto 放入下一轮 supplement；不自动改参数、不增加来源权限或调用预算。完整 wire encode 路径只遍历具名来源字段，反馈标签不得二次转换。
+- SCT BQ／Bill 指令缺少相关固定定义，反而拿到同源无关根。新增当前原文核对的 definition-only 路由、Bill 轻量列定义及 owner/依赖闭包；有明确当前关联的 guidance 另授只读引用，不回到全源广播。generic a/b 只有本任务当前证据包含 L10Pro 和 hardcopy BQ 语境才给 BQ 根。旧 NTT 已确认根的证明和值保持，当前 SCT usage 只放请求副本。Auto 仅在本组所有业务定义齐备时采用 scope prompt，避免“任意 knownRoots 非空”锁入过窄路径。定义参考不授予历史编辑范围。
+
+实际前端回读保留了 NTT13 完整正文 Replace、BSSSC/NSC 分支及 nscAlternativeText，NTT10 完整 G1/G1a 目标与 all/any 条件，NTT17 标题及完整正文 keep/unused；截图 114—116。当前图谱界面为 28 业务变量、17 处理规则、20 核查、51 未确认；业务定义为 12 已确认、15 待核、1 未决关系。没有完整图谱导出，尚不能据此声称所有 NTT 字段、10 个排除记录及历史覆盖逐字段保持。未上传通信、未采用项目值、本轮三份 Word 尚未生成。
+
+build28 的软件门、独立审查及新前端探针均已实际执行；新探针再次早停，先调查上述重复定义和有效要求映射，不直接续发旧计划。确认 BQ/Bill 的业务身份、条件、各自范围及按需取证后再扩大。旧运行、失败、原始回复和图文记录保留，goal 继续 ACTIVE。以下部署前及更早状态均为历史记录。
+
 ## 当前检查点：build27/frontend16 已部署待真实增量验证；12项定义整组确认及刷新通过
 
 2026-10-29继续同一active目标，仍未完成三模板、通信取值及三份Word。本轮通过原v23页面实际完成保证金、铁路规则和重复事项的人工处理，随后暴露并修复新增模板导致的整组定义确认误报。最新图谱为12个业务变量全部定义确认、17项处理规则中2项已确认／15项待核、4项来源核查，故共19项未确认；本项目仍0项取值采用。不能把这些人工处理记作模型自动正确。

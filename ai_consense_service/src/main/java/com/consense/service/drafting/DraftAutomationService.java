@@ -291,9 +291,10 @@ public class DraftAutomationService {
     }
     private Map<String,Object> inferGroup(RunBinding binding,LlmOperation selected,DraftAutomaticDiscovery.Plan plan,GroupCall call){
         try(LlmProfiles.Scope ignored=profiles.bind(selected)){
-            return DraftAutomaticDiscovery.processGroup((system,user)->{if(call.dispatched.get()>=call.reserved)throw conflict("识别调用预算已达到上限；未完成事项保留待核对。");return complete(binding,"discover-group",system,user,call.dispatched::incrementAndGet);},plan,call.group,acceptanceProbeStopOnDefect);
+            return DraftAutomaticDiscovery.processGroup((system,user)->{if(call.dispatched.get()>=call.reserved)throw conflict("识别调用预算已达到上限；未完成事项保留待核对。");return complete(binding,groupGenerationPhase(text(call.group.get("taskId"))),system,user,call.dispatched::incrementAndGet);},plan,call.group,acceptanceProbeStopOnDefect,call.dispatched::get);
         }catch(RuntimeException failure){return missingReceipt(call.group,PublicErrorMessages.from(failure,"本组未完成，其他完整结果继续保留。"));}
     }
+    static String groupGenerationPhase(String groupTaskId){return "discover-"+groupTaskId;}
     private void persistGroupReceipt(String id,Map<String,Object> group,Map<String,Object> receipt,Map<String,DraftAutomationItem> saved,List<Map<String,Object>> receipts){
         Map<String,Map<String,Object>> children=new LinkedHashMap<>();for(Object raw:list(receipt.get("taskReceipts"))){Map<String,Object> child=map(raw);String taskId=text(child.get("taskId"));if(!list(group.get("taskIds")).contains(taskId)||children.put(taskId,new LinkedHashMap<>(child))!=null)throw conflict("分组回执来源身份不一致。");}
         Map<String,Object> groupReceipt=new LinkedHashMap<>(receipt);groupReceipt.remove("taskReceipts");List<Map<String,Object>> ordered=new ArrayList<>();

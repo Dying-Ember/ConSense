@@ -37,6 +37,7 @@ class DraftKnownRootPatchTest {
     @Test void sameSourceReadOnlyAliasCannotAdvertiseRulePatchPermission() {
         ObjectNode reading=source("one");String quote="Review this separate current scope without repeating its business question.";
         ObjectNode note=reading.withArray("guidanceNotes").addObject().put("id","read-only-note").put("text",quote).put("captureComplete",true);
+        note.putArray("guidanceNoteIds").add("one-note");
         note.putArray("orderedMemberIds").add("read-only-member");note.putArray("memberRanges").addObject().put("memberId","read-only-member").put("channel","text").put("start",0).put("end",quote.length());member(reading,"read-only-member",quote,"/current/read-only");
         DraftAutomaticDiscovery.Plan plan=DraftAutomaticDiscovery.plan(Collections.singletonList(reading));
         String reader=text(plan.tasks().stream().filter(task->"read-only-note".equals(task.get("sourceObservationId"))).findFirst().orElseThrow(AssertionError::new).get("taskId"));

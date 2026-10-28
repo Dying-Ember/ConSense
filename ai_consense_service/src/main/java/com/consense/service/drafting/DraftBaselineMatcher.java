@@ -39,6 +39,7 @@ final class DraftBaselineMatcher {
             String key=text(value);if(!definitions.containsKey(key)||!seen.add(key)||fields.size()>=8)continue;
             Map<String,Object> original=definitions.get(key),field=obj("key",key,"parentKey",parentKey(key));
             for(String property:Arrays.asList("label","description","kind","unit","optional","options","condition"))if(original.containsKey(property))field.put(property,original.get(property));
+            if(original.containsKey("columnFields"))field.put("columnFields",columnSchema(original));
             List<Object> excerpts=new ArrayList<>();Set<String> tokens=contextTokens(original);
             for(Object raw:list(original.get("affects"))) {
                 Map<String,Object> affect=map(raw);String document=text(affect.get("document")),range=text(affect.get("paragraphs"));
@@ -58,6 +59,9 @@ final class DraftBaselineMatcher {
             field.put("sourceContext",excerpts);fields.add(field);
         }
         return obj("ruleVersion",DraftBusinessRules.RULE_VERSION,"fields",fields);
+    }
+    private static List<Object> columnSchema(Map<String,Object> parent){
+        List<Object> columns=new ArrayList<>();for(Object raw:list(parent.get("columnFields"))){Map<String,Object> original=map(raw);if("id".equals(original.get("key"))||Boolean.TRUE.equals(original.get("hidden")))continue;Map<String,Object> column=new LinkedHashMap<>();for(String property:Arrays.asList("key","label","description","kind","unit","optional","options","condition"))if(original.containsKey(property))column.put(property,original.get(property));if(original.containsKey("columnFields"))column.put("columnFields",columnSchema(original));columns.add(column);}return columns;
     }
     private static Set<String> contextTokens(Map<String,Object> definition) {
         StringBuilder value=new StringBuilder(text(map(definition.get("label")).get("en")));
